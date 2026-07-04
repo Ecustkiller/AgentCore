@@ -1,5 +1,4 @@
-import { Button, IconButton } from "@/components/ui";
-import { Input } from "@/components/ui/input";
+import { Button, IconButton, SearchField } from "@/components/ui";
 import {
   Popover,
   PopoverContent,
@@ -8,6 +7,8 @@ import {
 import { useGroupedConversations } from "@/hooks/useConversations";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
+import type { FolderMeta } from "@/services/folders";
+import { useFoldersStore } from "@/stores/folders";
 import {
   Check,
   ChevronDown,
@@ -16,12 +17,9 @@ import {
   HardDrive,
   Loader2,
   MessageSquarePlus,
-  Search,
   X,
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
-import type { FolderMeta } from "@/services/folders";
-import { useFoldersStore } from "@/stores/folders";
 
 // 本地文件能力（web 缺 fsApi → false）
 const isDesktop = hasLocalFiles();
@@ -37,7 +35,7 @@ const SEARCH_RESULT_CAP = 12;
  */
 export function DraftWorkspacePicker() {
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, _setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
@@ -143,9 +141,7 @@ export function DraftWorkspacePicker() {
       error={error}
       showRecentLabel={!query.trim() && recentFolders.length > 0}
       noSearchHits={
-        !!query.trim() &&
-        listedFolders.length === 0 &&
-        folders.length > 0
+        !!query.trim() && listedFolders.length === 0 && folders.length > 0
       }
     />
   );
@@ -268,17 +264,13 @@ function PickerPanel({
           onClick={onPickNone}
         />
 
-        <div className="relative mx-2.5 mt-2 mb-1">
-          <Search
-            size={14}
-            className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
+        <div className="mx-2.5 mt-2 mb-1">
+          <SearchField
             value={query}
-            onChange={(e) => onQueryChange(e.target.value)}
-            placeholder="搜索项目…"
-            className="h-8 pl-8 text-xs"
-            aria-label="搜索项目"
+            onValueChange={onQueryChange}
+            placeholder="筛选项目…"
+            aria-label="筛选项目"
+            inputClassName="text-xs"
           />
         </div>
 

@@ -21,6 +21,7 @@ from agentcore.api.schemas import (
 from agentcore.api.sse import sse_response
 from agentcore.conversation.quota import QuotaLimits, enforce_quota
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
+from agentcore.conversation.scratch import resolve_conversation_local_binding
 from agentcore.conversation.service import dispatch_handoff
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import ConflictError, NotFoundError, ValidationError
@@ -40,7 +41,6 @@ from agentcore.storage import SnapshotNotFound
 from agentcore.workspace.handoff import snapshot_local
 from agentcore.workspace.handoff_apply import ApplySelection, apply_handoff
 from agentcore.workspace.handoff_diff import compute_handoff_diff
-from agentcore.conversation.scratch import resolve_conversation_local_binding
 from agentcore.workspace.locate import LocalBinding, build_workspace
 
 from ._helpers import _get_owned_conversation, _require_owned_conversation
@@ -232,7 +232,7 @@ async def get_handoff_job_diff(
     not owned or the job is unknown / from another source conversation; 409 while the
     job has not succeeded yet (no result to diff).
     """
-    conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
     job = await job_repo.get_by_id(job_id, user_id=user.user_id)
     if job is None or job.source_conversation_id != conversation_id:
         raise NotFoundError("交接任务不存在")

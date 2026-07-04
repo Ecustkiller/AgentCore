@@ -73,6 +73,13 @@ from .conversations import (
     UpdateFolderRequest,
 )
 from .devices import DeviceListResponse, DeviceRegistration, DeviceSummary
+from .feedback import (
+    AdminFeedbackSummary,
+    CreateFeedbackRequest,
+    FeedbackListResponse,
+    FeedbackSummary,
+    UpdateFeedbackStatusRequest,
+)
 from .files import RewriteRequest, RewriteResponse
 from .handoff import (
     ApplyHandoffRequest,
@@ -101,13 +108,14 @@ from .messages import (
     ResolveEscalationInteraction,
     ResolveInteractionRequest,
     ResumeTurnRequest,
-    SubmitRunRedirectRequest,
-    SubmitRunRedirectResponse,
+    RetryFailedRequest,
     RunsPayload,
     SendMessageRequest,
     SetMessageFeedbackRequest,
     StopTurnResponse,
     StoredAttachment,
+    SubmitRunRedirectRequest,
+    SubmitRunRedirectResponse,
     TurnRecoveryResponse,
     WorkspaceOpError,
     interaction_result_from_body,
@@ -284,6 +292,7 @@ __all__ = [
     "StoredAttachment",
     "SendMessageRequest",
     "RegenerateMessageRequest",
+    "RetryFailedRequest",
     "SetMessageFeedbackRequest",
     "ResolveApprovalInteraction",
     "WorkspaceOpError",
@@ -318,6 +327,12 @@ __all__ = [
     "DeviceRegistration",
     "DeviceSummary",
     "DeviceListResponse",
+    # feedback
+    "CreateFeedbackRequest",
+    "FeedbackSummary",
+    "FeedbackListResponse",
+    "UpdateFeedbackStatusRequest",
+    "AdminFeedbackSummary",
     # handoff
     "DispatchHandoffRequest",
     "HandoffJobSummary",

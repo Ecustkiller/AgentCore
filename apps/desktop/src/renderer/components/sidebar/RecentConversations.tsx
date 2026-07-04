@@ -1,11 +1,8 @@
 import { SurfaceRowButton } from "@/components/ui";
-import {
-  useArchivedConversations,
-  useConversations,
-} from "@/hooks/useConversations";
+import { useConversations } from "@/hooks/useConversations";
 import { useWorkspaceGroups } from "@/hooks/useWorkspaceGroups";
 import { type Conversation, useConversationStore } from "@/stores/conversation";
-import { Archive, ChevronRight, MessageSquare } from "lucide-react";
+import { ChevronRight, MessageSquare } from "lucide-react";
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ConversationItem } from "./ConversationItem";
@@ -74,35 +71,6 @@ export function RecentConversations() {
           <ConversationItem key={conv.id} conversation={conv} />
         ))}
       </div>
-    </div>
-  );
-}
-
-/**
- * Jump to `/conversations` with the「已归档」filter pre-selected. Shown above
- *「查看全部对话」when there is at least one archived chat.
- */
-export function ViewArchivedConversations() {
-  const archived = useArchivedConversations(true).data ?? [];
-  const navigate = useNavigate();
-  if (archived.length === 0) return null;
-  return (
-    <div className="px-2 pt-1">
-      <SurfaceRowButton
-        onClick={() =>
-          navigate("/conversations", { state: { focusArchived: true } })
-        }
-        className="justify-between text-sidebar-foreground/55 hover:text-sidebar-foreground"
-      >
-        <span className="flex min-w-0 items-center gap-2">
-          <Archive size={14} className="shrink-0" />
-          <span>已归档</span>
-          <span className="text-xs text-sidebar-foreground/40">
-            {archived.length}
-          </span>
-        </span>
-        <ChevronRight size={14} className="shrink-0" />
-      </SurfaceRowButton>
     </div>
   );
 }

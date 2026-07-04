@@ -146,8 +146,7 @@ async function copyDiagnostic(
   value: string,
   description?: string,
 ) {
-  if (await copyText(value))
-    notifySuccess(`已复制 ${label}`, { description });
+  if (await copyText(value)) notifySuccess(`已复制 ${label}`, { description });
 }
 
 /** 消息永久链接 (对话基础功能补齐): a hash anchor that reopens the conversation and

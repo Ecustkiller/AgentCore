@@ -1,4 +1,10 @@
-# Phase 2：文件夹绑定目录 — 共享工作区
+# 共享工作区 Phase 2（文件夹绑定目录）🗂️
+
+> **定位**：文件夹级可选共享工作区——绑定目录后该文件夹下全部对话读写同一 `folder:<folderId>` 空间。
+>
+> **治理**：本目录仅 `07-规划`；🗂️ = 讨论中、未承诺落地。决策通过、开始落地后迁入 [双模式工作区](/docs/02-架构/双模式工作区.md)，本条退役。
+>
+> **现状**：Phase 1「Folder 纯分组 + conv scratch」已落地，见 [双模式工作区 §六](/docs/02-架构/双模式工作区.md)。
 
 ## 1. 目标
 
@@ -179,7 +185,7 @@ class WorkspaceTarget:
 | `folders/permanent_delete.py` | 彻底删除绑定文件夹时，可选 purge 共享目录（需与产品确认） |
 | `memory/*` | **无需改路径逻辑**——project scope 仍看 `conv.folder_id`（D4）；与 scratch 路径已解耦 |
 | `scripts/migrate_folder_workspaces.py` | 见 §6 |
-| 测试 | 恢复/改写 `tests/integration/test_workspace_binding_api.py`（仍测 promote 的用例应删或改为共享文件夹 bind）；新增 `test_shared_workspace.py`：同 folder 两对话写同一文件、移出后回到 conv scratch |
+| 测试 | 恢复/改写 `tests/integration/test_workspace_binding_api.py`（仍测 promote 的用例应删或改为共享文件夹 bind）；新增 `test_shared_workspace.py`：同 folder 两对话写同一 file、移出后回到 conv scratch |
 
 ### 4.7 OpenAPI 链路
 
@@ -290,4 +296,4 @@ Phase 2 **不自动合并**；用户在文件中枢可见两个条目，自行�
 | Repo | `db/repositories/folders.py` `set_local_root_id` | 待挂路由 |
 | 前端遗留 | `fileWorkbench/storage.ts` `folderIdOf` | 已标注 legacy，待激活 |
 
-Phase 1 设计文档 §9 与 `folder-refactor-design.md` 迁移 §7.2 类型 A（多对话共享项目）为本 Phase 的直接前置。
+Phase 1 现状见 [`双模式工作区.md`](../02-架构/双模式工作区.md) §六；legacy 多对话共享 folder 迁移为本 Phase 直接前置。

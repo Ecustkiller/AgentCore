@@ -348,14 +348,14 @@ function DiagramLightbox({
         className="relative min-h-0 flex-1 cursor-grab touch-none select-none overflow-hidden active:cursor-grabbing"
       >
         <div
-          ref={contentRef}
           style={{
-            transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
-            transformOrigin: "0 0",
+            transform: `translate(${view.x}px, ${view.y}px)`,
           }}
-          className="absolute left-0 top-0 will-change-transform"
+          className="absolute left-0 top-0"
         >
-          {children}
+          <div ref={contentRef} style={{ zoom: view.scale }}>
+            {children}
+          </div>
         </div>
       </div>
     </div>,
@@ -377,7 +377,7 @@ function DiagramCard({
   renderZoom: () => ReactNode;
   children: ReactNode;
 }) {
-  const bodyRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLButtonElement>(null);
   const [copied, setCopied] = useState(false);
   const [zoomed, setZoomed] = useState(false);
 
@@ -416,12 +416,14 @@ function DiagramCard({
           </ToolbarButton>
         </div>
       </div>
-      <div
+      <button
+        type="button"
         ref={bodyRef}
-        className="flex justify-center overflow-auto p-3 [&_svg]:max-w-full"
+        className="flex w-full justify-center overflow-auto border-0 bg-transparent p-3 cursor-zoom-in"
+        onClick={() => setZoomed(true)}
       >
         {children}
-      </div>
+      </button>
       {zoomed && (
         <DiagramLightbox label={label} onClose={() => setZoomed(false)}>
           {renderZoom()}

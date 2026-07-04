@@ -1,8 +1,8 @@
 import { Button } from "@/components/ui";
 import { formatCompact, formatCost, formatUsd } from "@/lib/format";
 import {
-  MODEL_TIER_META,
   type AgentState,
+  MODEL_TIER_META,
   type RunNode,
   reasoningMeta,
 } from "@/stores/execution";

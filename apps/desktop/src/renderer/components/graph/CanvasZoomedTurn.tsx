@@ -30,12 +30,7 @@ import {
 } from "@/stores/execution";
 import { type EndpointKind, useSidePanelStore } from "@/stores/sidePanel";
 import type { CanvasFocusView } from "@/stores/ui";
-import {
-  ArrowLeft,
-  GitCompare,
-  MessagesSquare,
-  Network,
-} from "lucide-react";
+import { ArrowLeft, GitCompare, MessagesSquare, Network } from "lucide-react";
 import {
   type ReactNode,
   useCallback,
@@ -223,6 +218,7 @@ export function CanvasZoomedTurn({
   );
 
   const panelRestored = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset restore flag when scope changes
   useEffect(() => {
     panelRestored.current = false;
   }, [conversationId, turnId]);
@@ -276,10 +272,7 @@ export function CanvasZoomedTurn({
   useEffect(() => {
     if (!conversationId) return;
     const persistNow = () =>
-      persistCanvasZoomPanelPref(
-        conversationId,
-        captureCanvasZoomPanelPref(),
-      );
+      persistCanvasZoomPanelPref(conversationId, captureCanvasZoomPanelPref());
     const unsub = useSidePanelStore.subscribe(persistNow);
     return () => {
       unsub();

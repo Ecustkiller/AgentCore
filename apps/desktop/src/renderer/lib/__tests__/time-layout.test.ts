@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 import {
   TIMELINE_CAPTAIN_GAP,
   TIMELINE_PAD_LEFT,
-  concatBatchTimelines,
   computeTimeLayout,
+  concatBatchTimelines,
 } from "../time-layout";
 
 const metrics = (
@@ -58,11 +58,15 @@ describe("concatBatchTimelines", () => {
     const { timings, totalSpanMs } = concatBatchTimelines([
       metrics({
         wallMs: 1000,
-        timeline: [{ runId: "w1", startMs: 0, endMs: 900, outcome: "completed" }],
+        timeline: [
+          { runId: "w1", startMs: 0, endMs: 900, outcome: "completed" },
+        ],
       }),
       metrics({
         wallMs: 500,
-        timeline: [{ runId: "w2", startMs: 0, endMs: 400, outcome: "completed" }],
+        timeline: [
+          { runId: "w2", startMs: 0, endMs: 400, outcome: "completed" },
+        ],
       }),
     ]);
     expect(timings).toHaveLength(2);
@@ -121,11 +125,15 @@ describe("computeTimeLayout", () => {
     const execution = exec([
       metrics({
         wallMs: 1000,
-        timeline: [{ runId: "w1", startMs: 0, endMs: 800, outcome: "completed" }],
+        timeline: [
+          { runId: "w1", startMs: 0, endMs: 800, outcome: "completed" },
+        ],
       }),
       metrics({
         wallMs: 600,
-        timeline: [{ runId: "w2", startMs: 0, endMs: 500, outcome: "completed" }],
+        timeline: [
+          { runId: "w2", startMs: 0, endMs: 500, outcome: "completed" },
+        ],
       }),
     ]);
     const result = computeTimeLayout(execution, ["w1", "w2"], INPUT_ID, null);

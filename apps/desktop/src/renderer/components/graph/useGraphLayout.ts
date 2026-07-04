@@ -1,6 +1,6 @@
 /** ELK / time-axis layout state and structure-gated recompute for GraphView. */
 
-import { computeLayout } from "@/lib/elk-layout";
+import { type GroupLayout, computeLayout } from "@/lib/elk-layout";
 import {
   type ElkGraphLayout,
   isTimelineLayout,
@@ -11,7 +11,7 @@ import type { GraphEdge, GraphLayout } from "@/stores/graph";
 import type { NodeChange } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { INPUT_ID } from "./constants";
-import { buildGraphStructure } from "./helpers";
+import { type SubTeam, buildGraphStructure } from "./helpers";
 
 export function useGraphLayout(
   execution: Execution | null,
@@ -37,6 +37,7 @@ export function useGraphLayout(
   >([]);
   const [layoutReady, setLayoutReady] = useState(false);
   const [nodeHeights, setNodeHeights] = useState<Record<string, number>>({});
+  const [groups, setGroups] = useState<GroupLayout[]>([]);
 
   const setLayout = useCallback(
     (
@@ -79,12 +80,18 @@ export function useGraphLayout(
     return `${struct}::${batchKey}`;
   }, [execution, layoutKind]);
 
+  const subTeams = useMemo<SubTeam[]>(() => {
+    if (!structuralKey || !execution) return [];
+    return buildGraphStructure(execution.runs, INPUT_ID).subTeams;
+  }, [structuralKey, execution]);
+
   useEffect(() => {
     if (!structuralKey) {
       setLayout({}, []);
       setBbox(null);
       setNodeSizes({});
       setBatchDividers([]);
+      setGroups([]);
       setLayoutReady(false);
       return;
     }
@@ -92,7 +99,11 @@ export function useGraphLayout(
     const batches = projectedBatchesRef.current ?? [];
     const debate = runs.some((r) => r.stance != null);
     const captainId = runs.find((r) => r.kind === "captain")?.id ?? null;
-    const { nodeIds, rawEdges } = buildGraphStructure(runs, INPUT_ID);
+    const {
+      nodeIds,
+      rawEdges,
+      subTeams: layoutSubTeams,
+    } = buildGraphStructure(runs, INPUT_ID);
 
     if (isTimelineLayout(layoutKind)) {
       if (!execution) return;
@@ -110,21 +121,30 @@ export function useGraphLayout(
       setBbox({ width: result.width, height: result.height });
       setNodeSizes(result.sizes);
       setBatchDividers(result.batchDividers);
+      setGroups([]);
       setLayoutReady(true);
       return;
     }
 
     let cancelled = false;
     const elkLayout = layoutKind as ElkGraphLayout;
-    computeLayout(nodeIds, rawEdges, elkLayout, debate, {
-      source: INPUT_ID,
-      sink: captainId ?? undefined,
-    }).then((result) => {
+    computeLayout(
+      nodeIds,
+      rawEdges,
+      elkLayout,
+      debate,
+      {
+        source: INPUT_ID,
+        sink: captainId ?? undefined,
+      },
+      layoutSubTeams,
+    ).then((result) => {
       if (cancelled) return;
       setLayout(result.positions, rawEdges);
       setBbox({ width: result.width, height: result.height });
       setNodeSizes({});
       setBatchDividers([]);
+      setGroups(result.groups);
       setLayoutReady(true);
     });
     return () => {
@@ -141,5 +161,7 @@ export function useGraphLayout(
     nodeSizes,
     batchDividers,
     onNodesChange,
+    groups,
+    subTeams,
   };
 }

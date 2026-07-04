@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolEffect
 from agentcore.runtime.events import batch_metrics as batch_metrics_event
-from agentcore.runtime.events import run_progress
+from agentcore.runtime.events import run_progress, team_note_posted
+from agentcore.runtime.runs.redirect_queue import RunRedirectRequest, take_redirects
+from agentcore.runtime.runs.types import RunSpec
 from agentcore.tools.builtin.delegate.accumulate import (
     accumulate_usage,
     collect_citations,
@@ -19,8 +21,6 @@ from agentcore.tools.builtin.delegate.boundary import boundary_hook, checkpoint_
 from agentcore.tools.builtin.delegate.ceo_format import direct_result, format_for_ceo
 from agentcore.tools.builtin.delegate.nesting import absorb_children, make_lead_subteam
 from agentcore.tools.builtin.delegate.schema import DELEGATE_OUTPUT_LIMIT
-from agentcore.runtime.runs.redirect_queue import RunRedirectRequest, take_redirects
-from agentcore.runtime.runs.types import RunSpec
 from agentcore.tools.builtin.delegate.supervised import (
     SupervisedRun,
     format_boundary_for_ceo,
@@ -70,7 +70,30 @@ async def drive(
         note_wall = None
         tool._note_wall = None
     else:
+        prev_wall = tool._note_wall
         note_wall = NoteWall()
+        if prev_wall is not None and seed_completed is None:
+            inherited = note_wall.inherit(prev_wall.active_notes())
+            for note in inherited:
+                tool._sink.emit(
+                    team_note_posted(
+                        execution_id=execution_id,
+                        note_id=note.note_id,
+                        run_id=note.run_id,
+                        agent_id=note.agent_id,
+                        role=note.role,
+                        kind=note.kind,
+                        text=note.text,
+                        ts=note.ts,
+                        source="inherited",
+                    )
+                )
+            if inherited:
+                logger.info(
+                    "delegate.inherit_notes",
+                    count=len(inherited),
+                    execution_id=execution_id,
+                )
         tool._note_wall = note_wall
         if seed_notes and seed_completed is None:
             seed_note_wall(
@@ -150,7 +173,7 @@ async def drive(
                         model=original.model,
                         thinking=original.thinking,
                         reasoning_effort=original.reasoning_effort,
-                        expected_output=original.expected_output,
+                        deliverable=original.deliverable,
                         stance=original.stance,
                         group=original.group,
                         round=original.round,

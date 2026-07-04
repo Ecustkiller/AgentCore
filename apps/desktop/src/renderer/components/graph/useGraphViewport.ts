@@ -5,15 +5,17 @@ import type { ReactFlowInstance } from "@xyflow/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { prefersReducedMotion } from "./constants";
 
+export type GraphFitMode = "width" | "contain" | "view";
+
 interface UseGraphViewportOptions {
-  embedded: boolean;
+  fitMode: GraphFitMode;
   bbox: { width: number; height: number } | null;
   layoutReady: boolean;
   onMeasure?: (m: { height: number; overflowing: boolean }) => void;
 }
 
 export function useGraphViewport({
-  embedded,
+  fitMode,
   bbox,
   layoutReady,
   onMeasure,
@@ -21,6 +23,7 @@ export function useGraphViewport({
   const rfRef = useRef<ReactFlowInstance | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [colWidth, setColWidth] = useState(0);
+  const [colHeight, setColHeight] = useState(0);
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
   const [overflowing, setOverflowing] = useState(false);
   const viewportSettledRef = useRef(false);
@@ -52,20 +55,32 @@ export function useGraphViewport({
   }, []);
 
   useEffect(() => {
-    if (!embedded) return;
+    if (fitMode !== "width" && fitMode !== "contain") return;
     const el = containerRef.current;
     if (!el) return;
     setColWidth(el.clientWidth);
+    if (fitMode === "contain") setColHeight(el.clientHeight);
     const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width ?? 0;
+      const rect = entries[0]?.contentRect;
+      const w = rect?.width ?? 0;
       if (w > 0) setColWidth(w);
+      if (fitMode === "contain") {
+        const h = rect?.height ?? 0;
+        if (h > 0) setColHeight(h);
+      }
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [embedded]);
+  }, [fitMode]);
 
   useEffect(() => {
-    if (!embedded || !rfInstance || !bbox || colWidth <= 0 || !layoutReady) {
+    if (
+      fitMode !== "width" ||
+      !rfInstance ||
+      !bbox ||
+      colWidth <= 0 ||
+      !layoutReady
+    ) {
       return;
     }
     const fit = fitWidthBox(bbox.width, bbox.height, colWidth);
@@ -82,7 +97,31 @@ export function useGraphViewport({
     viewportSettledRef.current = true;
     setOverflowing(fit.overflowing);
     onMeasure?.({ height: fit.height, overflowing: fit.overflowing });
-  }, [embedded, rfInstance, bbox, colWidth, layoutReady, onMeasure]);
+  }, [fitMode, rfInstance, bbox, colWidth, layoutReady, onMeasure]);
+
+  useEffect(() => {
+    if (
+      fitMode !== "contain" ||
+      !rfInstance ||
+      !bbox ||
+      colWidth <= 0 ||
+      colHeight <= 0 ||
+      !layoutReady
+    ) {
+      return;
+    }
+    const zoom = Math.min(1, colWidth / bbox.width, colHeight / bbox.height);
+    const renderedW = bbox.width * zoom;
+    const renderedH = bbox.height * zoom;
+    const x = Math.max(0, (colWidth - renderedW) / 2);
+    const y = Math.max(0, (colHeight - renderedH) / 2);
+    const animate = viewportSettledRef.current && !prefersReducedMotion();
+    rfInstance.setViewport(
+      { x, y, zoom },
+      animate ? { duration: 200 } : undefined,
+    );
+    viewportSettledRef.current = true;
+  }, [fitMode, rfInstance, bbox, colWidth, colHeight, layoutReady]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -105,7 +144,7 @@ export function useGraphViewport({
   }, [fitView]);
 
   useEffect(() => {
-    if (embedded) return;
+    if (fitMode !== "view") return;
     const el = containerRef.current;
     if (!el) return;
     let lastWidth = Math.round(el.clientWidth);
@@ -128,7 +167,7 @@ export function useGraphViewport({
       clearTimeout(timer);
       ro.disconnect();
     };
-  }, [embedded, fitView]);
+  }, [fitMode, fitView]);
 
   return {
     containerRef,

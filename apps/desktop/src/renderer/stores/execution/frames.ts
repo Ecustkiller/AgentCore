@@ -199,7 +199,7 @@ export type RunFrame =
       ts: number | null;
       supersedes: string | null;
       supersedeMode: "update" | "void" | null;
-      source?: "ceo" | "worker";
+      source?: "ceo" | "worker" | "inherited";
     };
 
 /** Wall-clock time of a wire event (ms), used to label timeline frames. The

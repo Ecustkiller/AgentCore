@@ -7,6 +7,7 @@ import {
   KeyRound,
   Keyboard,
   type LucideIcon,
+  MessageSquarePlus,
   Palette,
   UserCog,
   Users,
@@ -52,6 +53,10 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: Palette, label: "外观", path: "/more/appearance" },
       { icon: Keyboard, label: "快捷键", path: "/more/shortcuts" },
     ],
+  },
+  {
+    label: "反馈",
+    items: [{ icon: MessageSquarePlus, label: "反馈", path: "/more/feedback" }],
   },
   {
     label: "关于",

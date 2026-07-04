@@ -137,6 +137,7 @@ const CONTEXT_CHANNEL_LABEL: Record<string, string> = {
   dependency: "前置结果",
   workspace: "工作区",
   task: "你的任务",
+  deliverable: "交付物规格",
   expected_output: "预期产出",
   requirements: "产出要求",
   steer: "中途指示",

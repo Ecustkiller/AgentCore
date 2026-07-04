@@ -60,21 +60,13 @@ async def test_create_and_list_folders(client, make_invite):
     assert [f["id"] for f in r.json()] == [folder["id"]]
 
 
-async def test_create_folder_with_local_binding(client, make_invite):
-    """F2 (文件中枢统一): 添加文件夹 = 建本地绑定项目 — a folder can be born already
-    bound to a desktop FS root (local mode) in one call, no create-then-bind."""
+async def test_create_folder_rejects_local_root_id(client, make_invite):
+    """Folder refactor: folders are pure grouping — local binding lives on conversation scratch."""
     code = await make_invite("INV-F12")
     await _register_and_login(client, code, "folderuser12")
 
     r = await client.post("/v1/folders", json={"name": "Local Proj", "local_root_id": _ROOT})
-    assert r.status_code == 201, r.text
-    folder = r.json()
-    assert folder["name"] == "Local Proj"
-    assert folder["local_root_id"] == _ROOT
-
-    # The binding is persisted, not merely echoed back on create.
-    listed = (await client.get("/v1/folders")).json()
-    assert listed[0]["local_root_id"] == _ROOT
+    assert r.status_code == 422, r.text
 
 
 async def test_grouped_reflects_membership(client, make_invite):
@@ -110,8 +102,8 @@ async def test_grouped_reflects_membership(client, make_invite):
     assert {c["id"] for c in body["ungrouped"]} == {grouped_conv, loose_conv}
 
 
-async def test_started_conversation_cannot_change_folder(client, make_invite, session_factory):
-    """A chat with messages has a pinned workspace, so filing it is refused (§九 ⑩)."""
+async def test_started_conversation_can_change_folder(client, make_invite, session_factory):
+    """Folder is pure sidebar grouping — moving never pins after messages land."""
     code = await make_invite("INV-F7")
     await _register_and_login(client, code, "folderuser7")
     folder_id = (await client.post("/v1/folders", json={"name": "Proj"})).json()["id"]
@@ -119,12 +111,12 @@ async def test_started_conversation_cannot_change_folder(client, make_invite, se
     await _seed_message(session_factory, conv)
 
     r = await client.patch(f"/v1/conversations/{conv}/folder", json={"folder_id": folder_id})
-    assert r.status_code == 409, r.text
+    assert r.status_code == 200, r.text
+    assert r.json()["folder_id"] == folder_id
 
-    # It stays exactly where it was — ungrouped, folder empty.
     body = (await client.get("/v1/conversations/grouped")).json()
-    assert [c["id"] for c in body["ungrouped"]] == [conv]
-    assert body["folders"][0]["conversations"] == []
+    assert [c["id"] for c in body["folders"][0]["conversations"]] == [conv]
+    assert body["ungrouped"] == []
 
 
 async def test_started_conversation_noop_move_allowed(client, make_invite, session_factory):
@@ -227,7 +219,7 @@ async def test_delete_folder_keeps_conversations(client, make_invite):
     assert [c["id"] for c in body["ungrouped"]] == [conv]
 
 
-async def test_permanent_delete_folder_removes_conversations(
+async def test_permanent_delete_folder_ungroups_conversations(
     client, make_invite, session_factory, monkeypatch
 ):
     # permanent_delete_folder uses async_session_factory directly (not the
@@ -239,7 +231,7 @@ async def test_permanent_delete_folder_removes_conversations(
     code = await make_invite("INV-F7")
     await _register_and_login(client, code, "folderuser7")
     folder_id = (await client.post("/v1/folders", json={"name": "Gone"})).json()["id"]
-    conv = await _new_conversation(client, "erase me")
+    conv = await _new_conversation(client, "keep me")
     await client.patch(f"/v1/conversations/{conv}/folder", json={"folder_id": folder_id})
 
     r = await client.delete(f"/v1/folders/{folder_id}/permanent")
@@ -247,8 +239,8 @@ async def test_permanent_delete_folder_removes_conversations(
 
     body = (await client.get("/v1/conversations/grouped")).json()
     assert body["folders"] == []
-    assert body["ungrouped"] == []
-    assert (await client.get(f"/v1/conversations/{conv}")).status_code == 404
+    assert [c["id"] for c in body["ungrouped"]] == [conv]
+    assert (await client.get(f"/v1/conversations/{conv}")).status_code == 200
 
 
 async def test_folder_isolation_between_users(client, make_invite, new_client):

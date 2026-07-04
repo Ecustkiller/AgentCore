@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui";
-import { type AgentState, type RunNode } from "@/stores/execution";
+import type { AgentState, RunNode } from "@/stores/execution";
 import { CornerDownRight } from "lucide-react";
 import { RunStatusDot } from "./shared";
 

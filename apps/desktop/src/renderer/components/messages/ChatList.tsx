@@ -1,7 +1,7 @@
-import { IconButton } from "@/components/ui";
+import { IconButton, SearchField } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useChats, useMessagingStore } from "@/stores/messaging";
-import { Search, SquarePen, X } from "lucide-react";
+import { SquarePen } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ChatListItem } from "./ChatListItem";
 import { chatDisplayName } from "./chatDisplay";
@@ -49,24 +49,12 @@ export function ChatList({ activeChatId, onSelect, onNewChat }: Props) {
 
       {chats.length > 0 && (
         <div className="px-3 pb-2">
-          <div className="flex h-8 items-center gap-2 rounded-lg bg-accent/50 px-2.5">
-            <Search size={14} className="shrink-0 text-muted-foreground/60" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜索会话"
-              className="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
-            />
-            {query && (
-              <IconButton
-                onClick={() => setQuery("")}
-                aria-label="清除搜索"
-                className="size-6 text-muted-foreground/60 hover:text-foreground"
-              >
-                <X size={13} />
-              </IconButton>
-            )}
-          </div>
+          <SearchField
+            value={query}
+            onValueChange={setQuery}
+            placeholder="筛选会话…"
+            aria-label="筛选会话"
+          />
         </div>
       )}
 

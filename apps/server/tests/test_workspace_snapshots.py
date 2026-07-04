@@ -64,15 +64,14 @@ async def test_restore_recovers_deleted_file(fs_storage):
     assert (root / "keep.txt").read_text(encoding="utf-8") == "v1"
 
 
-async def test_folder_conversations_share_snapshots(fs_storage):
-    """Two conversations in the same folder see the same snapshot history."""
-    root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
-    (root / "shared.txt").write_text("x", encoding="utf-8")
+async def test_conversation_snapshots_are_isolated_per_conv(fs_storage):
+    """Sibling conversations in the same folder have independent snapshot histories."""
+    root_c1 = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
+    (root_c1 / "shared.txt").write_text("x", encoding="utf-8")
     ref = await create_snapshot(user_id="u1", folder_id="f1", conversation_id="c1")
 
-    # A sibling conversation in the same folder resolves the same workspace.
-    listed = await list_snapshots(user_id="u1", folder_id="f1", conversation_id="c2")
-    assert ref.snapshot_id in {r.snapshot_id for r in listed}
+    listed_c2 = await list_snapshots(user_id="u1", folder_id="f1", conversation_id="c2")
+    assert ref.snapshot_id not in {r.snapshot_id for r in listed_c2}
 
 
 async def test_label_is_preserved(fs_storage):

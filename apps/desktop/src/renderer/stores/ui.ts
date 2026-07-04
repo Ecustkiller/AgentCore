@@ -142,6 +142,8 @@ function loadSidecarEnabled(): boolean {
 
 interface UIState {
   searchOpen: boolean;
+  /** Prefill for the next palette open; consumed on open. */
+  searchInitialQuery: string;
   theme: Theme;
   /** 大众/power 用量明细开关 (§7.1). When true, compact surfaces reveal raw
    * token / cache detail and run-detail「资源消耗」defaults to expanded. Money (¥)
@@ -187,7 +189,7 @@ interface UIState {
    * `localStorage: agentcore:sidecar-enabled`；设置开关只关心 {@link sidecarEnabled}。 */
   sidecarPreference: SidecarPreference;
 
-  openSearch: () => void;
+  openSearch: (initialQuery?: string) => void;
   closeSearch: () => void;
   toggleSearch: () => void;
   setTheme: (theme: UIState["theme"]) => void;
@@ -216,6 +218,7 @@ export type CanvasFocusView = "compare";
 
 export const useUIStore = create<UIState>((set) => ({
   searchOpen: false,
+  searchInitialQuery: "",
   theme: loadTheme(),
   usageDetail: loadUsageDetail(),
   diagnosticMode: loadDiagnosticMode(),
@@ -225,8 +228,9 @@ export const useUIStore = create<UIState>((set) => ({
   sidecarPreference: loadSidecarPreference(),
   sidecarEnabled: loadSidecarEnabled(),
 
-  openSearch: () => set({ searchOpen: true }),
-  closeSearch: () => set({ searchOpen: false }),
+  openSearch: (initialQuery = "") =>
+    set({ searchOpen: true, searchInitialQuery: initialQuery }),
+  closeSearch: () => set({ searchOpen: false, searchInitialQuery: "" }),
   toggleSearch: () => set((s) => ({ searchOpen: !s.searchOpen })),
   setTheme: (theme) => {
     persistTheme(theme);

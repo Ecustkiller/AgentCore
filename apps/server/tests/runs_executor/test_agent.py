@@ -250,6 +250,8 @@ async def test_failed_worker_run_final_fact_reseeds_from_journal():
     # the billed pre-crash usage — not only COMPLETED nodes. Drives the REAL executor under
     # a bound fact log so the recording site + the projector are exercised together.
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    # Isolate executor billing/journal from the wave scheduler's infra-retry loop.
+    plan.nodes[0].policy.max_retries = 0
     reg = ToolRegistry()
     reg.register(_GrantableTool("noop"))  # un-gated → the metered round runs before the boom
     executor = build_agent_executor(
@@ -362,7 +364,7 @@ async def test_contract_requirements_stated_in_first_prompt():
     )
     provider = _ContentProvider(["# 结论\n好的"])
     await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
-    assert "产出要求" in provider.user_messages[0]
+    assert "交付物规格" in provider.user_messages[0]
     assert "结论" in provider.user_messages[0]
 
 
@@ -388,6 +390,10 @@ async def test_contract_strict_hard_fails_after_retries():
         [{"role": "A", "task": "做A", "contract": {"min_length": 50, "strict": True}}],
         id_prefix="t",
     )
+    # Flat batches ignore task-level on_failure/max_retries — pin policy so a strict
+    # contract miss is not re-dispatched by the wave scheduler (only contract retries).
+    plan.nodes[0].policy.on_failure = "abort"
+    plan.nodes[0].policy.max_retries = 0
     sink = EventSink()
     provider = _ContentProvider(["短", "还是短"])
     res = await WaveScheduler().run(plan, _executor(plan, provider, sink))

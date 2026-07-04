@@ -1,0 +1,25 @@
+[
+  {
+    "id": "manual-reference",
+    "description": "参考手册 · 全文顶栏",
+    "path": "/toolbox/manual/reference"
+  },
+  {
+    "id": "manual-reference-workspace",
+    "description": "参考手册 · 工作区与文件（双模式）",
+    "path": "/toolbox/manual/reference",
+    "section": "workspace"
+  },
+  {
+    "id": "manual-reference-faq",
+    "description": "参考手册 · 常见问题（Git 边界表 + 反馈）",
+    "path": "/toolbox/manual/reference",
+    "section": "faq"
+  },
+  {
+    "id": "manual-reference-privacy",
+    "description": "参考手册 · 数据与隐私（反馈上下文说明）",
+    "path": "/toolbox/manual/reference",
+    "section": "privacy"
+  }
+]

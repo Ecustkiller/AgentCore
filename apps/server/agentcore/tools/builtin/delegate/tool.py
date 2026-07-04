@@ -238,11 +238,21 @@ class DelegateTool:
                 for n in plan.nodes[:_DELEGATE_LOG_AGENTS_CAP]
             ],
         )
+        # retry-failed: if a retry seed is set (from retry_failed_chat), use it
+        # so workers that already succeeded are skipped by the WaveScheduler.
+        from agentcore.runtime.retry import retry_seed as _retry_seed_var
+
+        _retry = _retry_seed_var.get(None)
+        # Only use the seed once (for the first delegate call); clear it so a
+        # second delegate in the same turn doesn't inherit stale seeds.
+        if _retry is not None:
+            _retry_seed_var.set(None)
+
         return await drive(
             self,
             plan,
             execution_id=execution_id,
-            seed_completed=None,
+            seed_completed=_retry,
             finalize=bool(arguments.get("finalize")),
             seed_notes=seed_notes,
             complexity_hint=complexity_hint,

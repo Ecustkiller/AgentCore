@@ -99,7 +99,8 @@ export function usePersistentDisclosure(
 ): readonly [boolean, (next: boolean | ((prev: boolean) => boolean)) => void] {
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const setKey = useDisclosureStore((s) => s.setKey);
-  const fullKey = key && conversationId ? `${conversationId}${SCOPE_SEP}${key}` : null;
+  const fullKey =
+    key && conversationId ? `${conversationId}${SCOPE_SEP}${key}` : null;
   const stored = useDisclosureStore((s) =>
     fullKey ? s.map[fullKey] : undefined,
   );
@@ -119,8 +120,7 @@ export function usePersistentDisclosure(
         return;
       }
       // 从最新落盘态取 prev，避免闭包读到旧值 + 让本回调 identity 稳定（不随 value 变）。
-      const prev =
-        useDisclosureStore.getState().map[fullKey] ?? defaultOpen;
+      const prev = useDisclosureStore.getState().map[fullKey] ?? defaultOpen;
       const resolved =
         typeof next === "function"
           ? (next as (p: boolean) => boolean)(prev)

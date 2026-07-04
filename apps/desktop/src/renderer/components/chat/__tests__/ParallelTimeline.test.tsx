@@ -12,7 +12,11 @@
 import type { BatchMetricsSnapshot, Execution } from "@/stores/execution";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { ParallelGantt, ParallelTimeline, hasParallelTimeline } from "../ParallelTimeline";
+import {
+  ParallelGantt,
+  ParallelTimeline,
+  hasParallelTimeline,
+} from "../ParallelTimeline";
 
 afterEach(cleanup);
 

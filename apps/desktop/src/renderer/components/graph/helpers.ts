@@ -72,6 +72,106 @@ export function deriveArtifacts(
   return out;
 }
 
+function isRevisionRun(r: GraphRunLike): boolean {
+  return (r.revision ?? 0) > 0;
+}
+
+function isSubRun(r: GraphRunLike, workerIds: Set<string>): boolean {
+  return (
+    !isRevisionRun(r) &&
+    !!r.parentRunId &&
+    r.parentRunId !== r.id &&
+    workerIds.has(r.parentRunId)
+  );
+}
+
+/** Kahn-style topological wave index per run (mirrors backend RunPlan.waves). */
+export function computeTopologicalRunWaves(
+  runs: GraphRunLike[],
+  captainId: string | null,
+): Map<string, number> {
+  const workerRuns = runs.filter((r) => r.id !== captainId);
+  if (workerRuns.length === 0) return new Map();
+
+  const workerIds = new Set(workerRuns.map((r) => r.id));
+  const runById = new Map(workerRuns.map((r) => [r.id, r]));
+
+  const unitOf = (runId: string): string => {
+    const r = runById.get(runId);
+    if (!r) return runId;
+    if (isSubRun(r, workerIds)) return r.parentRunId as string;
+    if (
+      isRevisionRun(r) &&
+      r.revisionOf &&
+      workerIds.has(r.revisionOf)
+    ) {
+      return unitOf(r.revisionOf);
+    }
+    return runId;
+  };
+
+  const unitMembers = new Map<string, Set<string>>();
+  for (const r of workerRuns) {
+    const unitId = unitOf(r.id);
+    const members = unitMembers.get(unitId) ?? new Set<string>();
+    members.add(r.id);
+    unitMembers.set(unitId, members);
+  }
+
+  const unitIds: string[] = [];
+  const seenUnits = new Set<string>();
+  for (const r of workerRuns) {
+    const unitId = unitOf(r.id);
+    if (seenUnits.has(unitId)) continue;
+    seenUnits.add(unitId);
+    unitIds.push(unitId);
+  }
+
+  const unitDeps = new Map<string, Set<string>>();
+  for (const unitId of unitIds) {
+    const deps = new Set<string>();
+    const members = unitMembers.get(unitId)!;
+    for (const memberId of members) {
+      const r = runById.get(memberId)!;
+      for (const depId of r.dependsOn) {
+        if (!workerIds.has(depId)) continue;
+        const depUnit = unitOf(depId);
+        if (depUnit === unitId) continue;
+        deps.add(depUnit);
+      }
+    }
+    unitDeps.set(unitId, deps);
+  }
+
+  const waveByUnit = new Map<string, number>();
+  const resolved = new Set<string>();
+  let waveIndex = 0;
+  let remaining = unitIds.filter((u) => !resolved.has(u));
+
+  while (remaining.length > 0) {
+    const wave = remaining.filter((u) => {
+      const deps = unitDeps.get(u) ?? new Set<string>();
+      return [...deps].every((d) => resolved.has(d));
+    });
+    if (wave.length === 0) {
+      for (const u of remaining) waveByUnit.set(u, waveIndex);
+      break;
+    }
+    for (const u of wave) {
+      waveByUnit.set(u, waveIndex);
+      resolved.add(u);
+    }
+    remaining = remaining.filter((u) => !resolved.has(u));
+    waveIndex++;
+  }
+
+  const waveByRun = new Map<string, number>();
+  for (const r of workerRuns) {
+    waveByRun.set(r.id, waveByUnit.get(unitOf(r.id)) ?? 0);
+  }
+  return waveByRun;
+}
+
 export function computeWaves(
   execution: Execution,
   positions: Record<string, { x: number; y: number }>,
@@ -81,30 +181,37 @@ export function computeWaves(
 ): WaveBand[] {
   if (layoutKind === "timeline") return [];
   const horizontal = layoutKind === "leftright";
-  const slots: { x: number; y: number }[] = [];
+  const waveByRun = computeTopologicalRunWaves(execution.runs, captainId);
+
+  const groups = new Map<number, string[]>();
   for (const r of execution.runs) {
     if (r.id === captainId) continue;
     const p = positions[r.id];
-    if (p) slots.push({ x: p.x, y: p.y });
+    if (!p) continue;
+    const wave = waveByRun.get(r.id);
+    if (wave === undefined) continue;
+    const arr = groups.get(wave);
+    if (arr) arr.push(r.id);
+    else groups.set(wave, [r.id]);
   }
-  if (slots.length === 0) return [];
-  const groups = new Map<number, { x: number; y: number }[]>();
-  for (const s of slots) {
-    const key = Math.round(horizontal ? s.x : s.y);
-    const arr = groups.get(key);
-    if (arr) arr.push(s);
-    else groups.set(key, [s]);
-  }
+
   const keys = [...groups.keys()].sort((a, b) => a - b);
   if (keys.length < 2) return [];
-  return keys.map((key, i) => {
-    const members = groups.get(key) as { x: number; y: number }[];
+
+  return keys.map((waveKey, i) => {
+    const runIds = groups.get(waveKey) as string[];
+    const members = runIds
+      .map((id) => positions[id])
+      .filter((p): p is { x: number; y: number } => p != null);
+    const count = runIds.length;
+    const label = `批次 ${i + 1}（${count} 节点）`;
+
     if (horizontal) {
       const x0 = Math.min(...members.map((m) => m.x));
       const x1 = Math.max(...members.map((m) => m.x + NODE_WIDTH));
       return {
         id: `wave-${i}`,
-        label: `依赖层 ${i + 1}`,
+        label,
         x: x0 - WAVE_PAD,
         y: -WAVE_PAD,
         w: x1 - x0 + WAVE_PAD * 2,
@@ -117,7 +224,7 @@ export function computeWaves(
     const y1 = Math.max(...members.map((m) => m.y + NODE_HEIGHT));
     return {
       id: `wave-${i}`,
-      label: `依赖层 ${i + 1}`,
+      label,
       x: -WAVE_PAD,
       y: y0 - WAVE_PAD,
       w: bbox.width + WAVE_PAD * 2,
@@ -138,11 +245,17 @@ export interface GraphRunLike {
   kind?: string;
 }
 
+export interface SubTeam {
+  parentId: string;
+  memberIds: string[];
+  groupId: string;
+}
+
 /** Build ELK node ids + graph edges from projected runs (plan + revisions). */
 export function buildGraphStructure(
   runs: GraphRunLike[],
   inputId: string,
-): { nodeIds: string[]; rawEdges: GraphEdge[] } {
+): { nodeIds: string[]; rawEdges: GraphEdge[]; subTeams: SubTeam[] } {
   const captainId = runs.find((r) => r.kind === "captain")?.id ?? null;
   const workerRuns = runs.filter((r) => r.id !== captainId);
   const workerIds = new Set(workerRuns.map((r) => r.id));
@@ -170,16 +283,28 @@ export function buildGraphStructure(
       kind: "dep" as const,
     })),
   );
+  const subTeamMap = new Map<string, string[]>();
   for (const r of workerRuns) {
     if (isSub(r)) {
+      const parentId = r.parentRunId as string;
+      const arr = subTeamMap.get(parentId) ?? [];
+      arr.push(r.id);
+      subTeamMap.set(parentId, arr);
       rawEdges.push({
-        id: `${r.parentRunId}=>${r.id}`,
-        source: r.parentRunId as string,
+        id: `${parentId}=>${r.id}`,
+        source: parentId,
         target: r.id,
         kind: "delegate",
       });
     }
   }
+  const subTeams: SubTeam[] = [...subTeamMap.entries()].map(
+    ([parentId, memberIds]) => ({
+      parentId,
+      memberIds,
+      groupId: `__group__${parentId}`,
+    }),
+  );
   // A revised worker's versions all point at the SAME original (revisionOf ==
   // 原始 run) — a star, the data model the debate room / 版本对比 card read (乙 热修
   // P4). But the graph must lay them out as a version CHAIN (原始 → v2 → v3 …): if
@@ -236,5 +361,5 @@ export function buildGraphStructure(
       }
     }
   }
-  return { nodeIds, rawEdges };
+  return { nodeIds, rawEdges, subTeams };
 }

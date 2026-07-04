@@ -22,7 +22,22 @@ export function AgentNode({ data }: NodeProps) {
   const flashing = useTerminalFlash(d.status);
   const flashColor =
     d.status === "failed" ? "var(--destructive)" : "var(--success)";
-  const Face = p.isTimeline ? AgentNodeTimelineFace : AgentNodeCardFace;
+
+  const face = p.isTimeline ? (
+    <AgentNodeTimelineFace
+      d={d}
+      p={p}
+      flashColor={flashColor}
+      flashing={flashing}
+    />
+  ) : (
+    <AgentNodeCardFace
+      d={d}
+      p={p}
+      flashColor={flashColor}
+      flashing={flashing}
+    />
+  );
 
   return (
     <>
@@ -33,16 +48,10 @@ export function AgentNode({ data }: NodeProps) {
       />
       <div
         className="animate-graph-node-enter"
-        style={{
-          animationDelay: `${p.enterDelay}ms`,
-          opacity: d.hoverDimmed ? 0.5 : 1,
-          transition: "opacity 150ms ease",
-        }}
+        style={{ animationDelay: `${p.enterDelay}ms` }}
       >
         <Tooltip>
-          <TooltipTrigger asChild>
-            <Face d={d} p={p} flashColor={flashColor} flashing={flashing} />
-          </TooltipTrigger>
+          <TooltipTrigger asChild>{face}</TooltipTrigger>
           <TooltipContent side="right" align="start" className="w-72">
             <AgentNodePeek d={d} p={p} />
           </TooltipContent>

@@ -28,6 +28,7 @@ from .chat import ChatRepository
 from .conversation_shares import ConversationShareRepository
 from .conversations import ConversationRepository
 from .devices import PushDeviceRepository
+from .feedback import FeedbackRepository
 from .folders import FolderRepository
 from .memory_updates import MemoryUpdateRepository
 from .messages import MessageRepository
@@ -55,6 +56,7 @@ __all__ = [
     "ConversationShareRepository",
     "CostEventRepository",
     "CredentialsRepository",
+    "FeedbackRepository",
     "FolderRepository",
     "HandoffJobRepository",
     "InviteRepository",

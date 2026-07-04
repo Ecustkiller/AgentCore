@@ -11,6 +11,7 @@ import {
 import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  BoundaryTable,
   Bullets,
   Callout,
   Faq,
@@ -33,8 +34,14 @@ export function ManualReference() {
     );
   }, [searchParams]);
 
+  const previewSection = searchParams.get("s") ?? "top";
+
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-10">
+    <div
+      className="mx-auto w-full max-w-3xl px-6 py-10"
+      data-preview-manual="manual-reference"
+      data-preview-section={previewSection}
+    >
       {/* 1. Chat */}
       <section className="mb-14">
         <SectionHeading icon={MessageSquare} index={1} title="对话" id="chat" />
@@ -86,8 +93,21 @@ export function ManualReference() {
             ]}
           />
           <Callout variant="tip">
-            完整清单在 <GoLink to="/toolbox">工具箱</GoLink>。
+            完整清单在 <GoLink to="/toolbox/tools">工具箱 · 能力图鉴</GoLink>
+            ——每个工具能做什么、谁可用，一目了然。
           </Callout>
+          <Bullets
+            items={[
+              {
+                title: "读代码与 Git 状态",
+                desc: "Agent 可读工作区文件、git status / diff / log，无需你逐次点头。",
+              },
+              {
+                title: "改文件与 Git 写入",
+                desc: "写文件、git add / commit / 切分支等会弹出审批——你可以「允许一次」或「本轮内都允许」。",
+              },
+            ]}
+          />
         </div>
       </section>
 
@@ -100,12 +120,27 @@ export function ManualReference() {
           id="workspace"
         />
         <div className="mt-4 space-y-4">
-          <Lead>团队做出来的东西，都落在工作区——你和 AI 共享的文件空间。</Lead>
+          <Lead>
+            团队做出来的东西，都落在工作区——你和 AI
+            共享的文件空间。没有云/本地开关，模式跟着「文件在哪」自动走。
+          </Lead>
           <Bullets
             items={[
               {
-                title: "工作区",
-                desc: "Agent 创建、修改的文件自动出现在这里。",
+                title: "绑本地文件夹",
+                desc: "在对话里「打开本地文件夹」，团队直接改你电脑上的真实项目——适合开发内环。",
+              },
+              {
+                title: "不绑 → 云端项目",
+                desc: "随手聊或纯云端对话，文件存在服务端；手机、网页也能看同一项目。",
+              },
+              {
+                title: "模式条",
+                desc: "对话页顶部的云/本地指示条告诉你当前在哪跑；可随时绑文件夹或切回云端。",
+              },
+              {
+                title: "首次产文件才建项目",
+                desc: "刚开的新对话还没有项目文件夹——团队第一次写出文件、你上传附件或绑本地夹时，才自动建一个。",
               },
               {
                 title: "文件工作台",
@@ -161,6 +196,36 @@ export function ManualReference() {
                   <>
                     <GoLink to="/more/usage">设置 · 用量</GoLink>{" "}
                     里看花费和额度。
+                  </>
+                ),
+              },
+              {
+                q: "怎么给产品提意见？",
+                a: (
+                  <>
+                    去 <GoLink to="/more/feedback">设置 · 反馈</GoLink>
+                    ，选分类、写标题和描述即可。我们会附带当前页面路由（方便定位你在哪），不含工作区里的文件内容。
+                  </>
+                ),
+              },
+              {
+                q: "Agent 对 Git / 代码能做什么？",
+                a: (
+                  <>
+                    <p>三类边界，和审批弹窗一致：</p>
+                    <BoundaryTable
+                      rows={[
+                        {
+                          can: "读文件；git status / diff / log",
+                          approve:
+                            "改文件；git add / commit / 建分支 / 切分支；跑代码",
+                          wont: "push（含 force push）；reset / rebase；在 main / master 上直接提交",
+                        },
+                      ]}
+                    />
+                    <p className="mt-2">
+                      推送远端请你在本地终端手动完成——团队只帮你改到可提交的状态。
+                    </p>
                   </>
                 ),
               },
@@ -252,6 +317,10 @@ export function ManualReference() {
               {
                 title: "记忆",
                 desc: "团队记住的偏好来自你的对话；想改写或清掉，直接说即可。",
+              },
+              {
+                title: "反馈附带的上下文",
+                desc: "提交反馈时会自动带上当前页面路由（如所在对话），便于复现问题；不含工作区文件内容。",
               },
             ]}
           />

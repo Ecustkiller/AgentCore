@@ -1,3 +1,4 @@
+import { PromptDocument } from "@/components/prompt/PromptDocument";
 import { cleanSourceTitle } from "@/lib/citations";
 import type {
   CodeExecDisplay,
@@ -220,9 +221,9 @@ function SkillConsultResult({
         </div>
       )}
       {result.trim() && (
-        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words px-3 py-2 text-xs leading-relaxed text-foreground/90">
-          {result}
-        </pre>
+        <div className="px-1 pb-1">
+          <PromptDocument text={result} maxHeightClass="max-h-72" />
+        </div>
       )}
     </div>
   );
@@ -249,9 +250,9 @@ function MemoryConsultResult({
         </span>
       </div>
       {result.trim() && (
-        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words px-3 py-2 text-xs leading-relaxed text-foreground/90">
-          {result}
-        </pre>
+        <div className="px-1 pb-1">
+          <PromptDocument text={result} maxHeightClass="max-h-72" />
+        </div>
       )}
     </div>
   );

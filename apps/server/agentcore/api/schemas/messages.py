@@ -99,6 +99,15 @@ class SendMessageRequest(BaseModel):
     debate_seed: DebateSeedInput | None = None
 
 
+class RetryFailedRequest(BaseModel):
+    """Body for ``POST .../messages/{message_id}/retry-failed``.
+
+    Retries only the failed worker nodes from the previous execution,
+    reusing completed results. Empty body — the server extracts
+    completed states from the previous turn's journal.
+    """
+
+
 class RegenerateMessageRequest(BaseModel):
     """Re-run a turn from an existing user message.
 

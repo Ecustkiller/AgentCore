@@ -60,7 +60,9 @@ class RunPhase(StrEnum):
 
 # A run that reached one of these is done; the scheduler advances past it and the
 # wave it sits in is complete once all its nodes are terminal.
-TERMINAL_PHASES = frozenset({RunPhase.COMPLETED, RunPhase.FAILED, RunPhase.SKIPPED})
+TERMINAL_PHASES = frozenset(
+    {RunPhase.COMPLETED, RunPhase.FAILED, RunPhase.SKIPPED, RunPhase.CANCELLED}
+)
 
 
 class RunOrigin(StrEnum):
@@ -75,12 +77,10 @@ class RunOrigin(StrEnum):
 
 
 @dataclass
-class RunContract:
-    """A node's delivery contract (阶段2: enforced by a contract gate).
+class Deliverable:
+    """一个 node 的完整交付物规格——描述性 + 约束性合一。"""
 
-    第一阶段声明位：执行器暂不强制校验，字段保留以便阶段2接入闸门时无需改形状。
-    """
-
+    name: str = ""
     output_format: str = "text"
     required_sections: list[str] = field(default_factory=list)
     output_schema: dict[str, Any] | None = None
@@ -95,6 +95,9 @@ class RunContract:
     # it landed). Off by default → prose deliverables are unaffected.
     requires_files: bool = False
     strict: bool = False
+
+
+RunContract = Deliverable
 
 
 @dataclass
@@ -112,9 +115,9 @@ class RunPolicy:
     #   skip    = cascade-skip every dependent (they never run);
     #   abort   = stop scheduling further waves;
     #   degrade = record failed, let dependents proceed (they see the gap).
-    on_failure: Literal["abort", "skip", "degrade", "retry"] = "degrade"
-    max_retries: int = 0
-    retry_delay_ms: int = 0
+    on_failure: Literal["abort", "skip", "degrade", "retry"] = "retry"
+    max_retries: int = 1
+    retry_delay_ms: int = 2000
     timeout_s: int | None = None
     # Fidelity of this node's output when it feeds a dependent node (pass_through
     # / summarize). The executor reads this to size the upstream context block.
@@ -123,7 +126,6 @@ class RunPolicy:
     concurrency_slot: str | None = None
     shared_roots: bool = False
     trust: str | None = None
-    contract: RunContract | None = None
     autosave_artifact: bool = False
     preflight: bool = True
     audit: bool = False
@@ -173,7 +175,7 @@ class RunSpec:
     model: str = ""
     thinking: bool | None = None
     reasoning_effort: str | None = None
-    expected_output: str = ""
+    deliverable: Deliverable | None = None
     # ── 辩论/审查 呈现标记（前端UX设计.md §四，display-only） ──
     # An opposing-batch's display tags: ``stance`` is this node's side (pro/con),
     # ``group`` pairs opposing nodes into one comparison, and ``round`` is its
@@ -247,7 +249,7 @@ class ContextBlock:
 
     ``channel`` buckets the block for the UI: ``request`` (团队级原始请求) / ``team_position``
     (DAG 拓扑：并行队友 + 产出去向) / ``dependency`` (上游产物注入) / ``workspace`` (工作区文件
-    清单) / ``task`` / ``expected_output`` / ``requirements`` / ``steer`` (用户中途操舵). A
+    清单) / ``task`` / ``deliverable`` / ``steer`` (用户中途操舵). A
     ``dependency`` block additionally records its provenance — the upstream ``source_role``
     / ``source_run_id`` that produced it, the ``fidelity`` the executor chose (``pointer``
     递指针 / ``summarize`` / ``pass_through``), whether it was ``truncated`` to fit budget,

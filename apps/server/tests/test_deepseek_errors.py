@@ -13,7 +13,6 @@ import pytest
 
 from agentcore.core.errors import (
     LLMAuthError,
-    LLMError,
     LLMInsufficientBalanceError,
     LLMUpstreamError,
 )

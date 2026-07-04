@@ -127,6 +127,7 @@ export function LoginPage() {
                 placeholder="显示名（可选）"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
+                autoComplete="name"
               />
               <input
                 className={inputClass}

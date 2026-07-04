@@ -1529,7 +1529,7 @@ def _multi_agent_team_notes_ceo_seed() -> list[SSEEvent]:
     brief = "受众：技术初学者；篇幅约 1500 字；风格科普向，避免公式堆砌。"
     brief_block = _ctx_block(
         "team_brief",
-        "团队共识（主 Agent 为本回合设定，全员遵循）",
+        "团队共识（主协调为本回合设定，全员遵循）",
         brief,
     )
     return [
@@ -1560,7 +1560,7 @@ def _multi_agent_team_notes_ceo_seed() -> list[SSEEvent]:
             note_id="n0",
             run_id="__ceo_seed__",
             agent_id="ceo",
-            role="主 Agent",
+            role="主协调",
             kind="decision",
             text="整体方向：科普向，不讲推导",
             ts=1_699_999_998.0,
@@ -1571,7 +1571,7 @@ def _multi_agent_team_notes_ceo_seed() -> list[SSEEvent]:
             note_id="n1",
             run_id="__ceo_seed__",
             agent_id="ceo",
-            role="主 Agent",
+            role="主协调",
             kind="heads_up",
             text="篇幅硬上限 1500 字",
             ts=1_699_999_999.0,

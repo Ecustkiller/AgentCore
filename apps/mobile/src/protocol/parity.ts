@@ -189,6 +189,14 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   ResumePrompt: { verdict: "ported", surface: "ResumeCard" },
   FileArtifactsCard: { verdict: "ported", surface: "FileArtifactsCard" },
   FollowupChips: { verdict: "ported", surface: "ChatPage · 下一步 chips" },
+  ConversationOutline: {
+    verdict: "simplified",
+    reason: "对话大纲/回合导航，手机暂不做（小屏以滚动代）",
+  },
+  FindBar: {
+    verdict: "simplified",
+    reason: "会话内查找，手机暂不做（无 Cmd+F 快捷键）",
+  },
   ReceivedContext: {
     verdict: "ported",
     surface: "AssistantView · 收到的上下文",
@@ -283,6 +291,10 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   "more/AccountSettings": {
     verdict: "ported",
     surface: "more/AccountSettings",
+  },
+  "more/FeedbackSettings": {
+    verdict: "simplified",
+    reason: "反馈设置页，手机暂不做",
   },
   "more/MemorySettings": {
     verdict: "ported",

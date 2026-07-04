@@ -8,6 +8,7 @@ import { LoginPage } from "@/pages/LoginPage";
 import { MemoryPage } from "@/pages/MemoryPage";
 import { MessagesPage } from "@/pages/MessagesPage";
 import { MorePage } from "@/pages/MorePage";
+import { PreviewPage } from "@/pages/PreviewPage";
 import { ServiceUnavailablePage } from "@/pages/ServiceUnavailablePage";
 import { WorkspaceFilesPage } from "@/pages/WorkspaceFilesPage";
 import { WorkspacesPage } from "@/pages/WorkspacesPage";
@@ -18,7 +19,7 @@ import { AccountSettings } from "@/pages/more/AccountSettings";
 import { ModelSettings } from "@/pages/more/ModelSettings";
 import { UsageSettings } from "@/pages/more/UsageSettings";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   return getTokens() ? <>{children}</> : <Navigate to="/login" replace />;
@@ -50,6 +51,24 @@ type GateState =
   | { phase: "unavailable"; reason: string };
 
 export function App() {
+  const location = useLocation();
+  const previewDev = import.meta.env.DEV && location.pathname === "/preview";
+
+  if (previewDev) {
+    return (
+      <>
+        <PushBridge />
+        <Routes>
+          <Route path="/preview" element={<PreviewPage />} />
+        </Routes>
+      </>
+    );
+  }
+
+  return <AppShell />;
+}
+
+function AppShell() {
   // Resolve auth before routing so RequireAuth's synchronous token check sees a
   // trustworthy state. An `unavailable` result drives a retry screen instead of a
   // login form / erroring chat page while the backend is down (mirrors desktop).

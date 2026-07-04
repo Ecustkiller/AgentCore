@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 
 CEO_SEED_RUN_ID = "__ceo_seed__"
 CEO_SEED_AGENT_ID = "ceo"
-CEO_SEED_ROLE = "主 Agent"
+CEO_SEED_ROLE = "主协调"
 MAX_SEED_NOTES = 8
 MAX_TEAM_BRIEF_CHARS = 1500
 

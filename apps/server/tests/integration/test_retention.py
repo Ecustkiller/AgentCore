@@ -5,10 +5,10 @@ uses ``async_session_factory`` directly (not the request-scoped ``get_db``), so 
 is repointed at the test schema here; ``data_dir`` + storage are redirected to a
 tmp dir so the purge only touches throwaway files.
 
-Pins the ownership rules: an aged soft-deleted folder loses its shared space; an
-aged ungrouped conversation loses its own space; an aged conversation that is
-still grouped loses only its records (the folder's space lives on); and a
-recently-deleted conversation is left untouched until its grace period ends.
+Folder 重构 To-Be: each conversation owns ``conv/<id>/`` scratch. An aged
+soft-deleted conversation loses its scratch + record; an aged soft-deleted folder
+loses only the folder row; a sibling conversation's scratch in the same folder
+survives.
 """
 
 from datetime import datetime, timedelta
@@ -37,7 +37,6 @@ def _seed_space(uid: str, folder_id: str | None, conv_id: str) -> None:
 async def test_retention_sweep_purges_aged_soft_deletes(
     session_factory, tmp_path: Path, monkeypatch
 ):
-    # Route the sweep's own sessions to the test schema; storage → tmp filesystem.
     monkeypatch.setattr(retention_mod, "async_session_factory", session_factory)
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     monkeypatch.setattr(settings, "storage_backend", "filesystem")
@@ -49,9 +48,6 @@ async def test_retention_sweep_purges_aged_soft_deletes(
     async with session_factory() as s:
         uid = (await UserRepository(s).create(username="ret", display_name="ret")).user_id
 
-    # Folder A: aged-deleted → space + record purged.
-    # Folder B: alive, holds an aged-deleted grouped conv → conv records purged,
-    #           B's shared space survives.
     async with session_factory() as s:
         folder_a = await FolderRepository(s).create(user_id=uid, name="A")
         folder_b = await FolderRepository(s).create(user_id=uid, name="B")
@@ -60,20 +56,20 @@ async def test_retention_sweep_purges_aged_soft_deletes(
     async with session_factory() as s:
         repo = ConversationRepository(s)
         grouped = await repo.create(user_id=uid, title="grouped")
-        await repo.set_folder(grouped.id, fb, user_id=uid)  # lives in folder B
+        await repo.set_folder(grouped.id, fb, user_id=uid)
+        grouped_alive = await repo.create(user_id=uid, title="grouped-alive")
+        await repo.set_folder(grouped_alive.id, fb, user_id=uid)
         ungrouped = await repo.create(user_id=uid, title="ungrouped")
         recent = await repo.create(user_id=uid, title="recent")
-    gid, ugid, rid = grouped.id, ungrouped.id, recent.id
+    gid, gaid, ugid, rid = grouped.id, grouped_alive.id, ungrouped.id, recent.id
 
-    # Seed files + a snapshot for each owned space.
-    _seed_space(uid, fa, "seed")  # folder A shared space
-    _seed_space(uid, fb, "seed")  # folder B shared space (must survive)
-    _seed_space(uid, None, ugid)  # ungrouped conv's own space
-    await create_snapshot(user_id=uid, folder_id=fa, conversation_id="seed")
-    await create_snapshot(user_id=uid, folder_id=fb, conversation_id="seed")
+    _seed_space(uid, fb, gid)
+    _seed_space(uid, fb, gaid)
+    _seed_space(uid, None, ugid)
+    await create_snapshot(user_id=uid, folder_id=fb, conversation_id=gid)
+    await create_snapshot(user_id=uid, folder_id=fb, conversation_id=gaid)
     await create_snapshot(user_id=uid, folder_id=None, conversation_id=ugid)
 
-    # Soft-delete A, the grouped conv, the ungrouped conv, and a recent conv.
     async with session_factory() as s:
         await FolderRepository(s).soft_delete(fa, user_id=uid)
         cr = ConversationRepository(s)
@@ -81,7 +77,6 @@ async def test_retention_sweep_purges_aged_soft_deletes(
         await cr.soft_delete(ugid, user_id=uid)
         await cr.soft_delete(rid, user_id=uid)
 
-    # Age everything except `recent` past the retention window.
     async with session_factory() as s:
         await s.execute(update(Folder).where(Folder.id == fa).values(deleted_at=aged))
         await s.execute(
@@ -92,21 +87,19 @@ async def test_retention_sweep_purges_aged_soft_deletes(
     result = await retention_mod.run_retention_sweep()
 
     assert result["folders"] == 1
-    assert result["conversations"] == 2  # grouped + ungrouped (recent is too new)
+    assert result["conversations"] == 2
 
     async with session_factory() as s:
         folders = (await s.execute(select(Folder.id))).scalars().all()
         convs = (await s.execute(select(Conversation.id))).scalars().all()
 
-    assert fa not in folders  # aged folder hard-deleted
-    assert fb in folders  # alive folder kept
-    assert gid not in convs and ugid not in convs  # aged convs hard-deleted
-    assert rid in convs  # recent soft-delete survives the sweep
+    assert fa not in folders
+    assert fb in folders
+    assert gid not in convs and ugid not in convs
+    assert rid in convs and gaid in convs
 
-    # Folder A's shared space is gone; folder B's survives; the ungrouped conv's
-    # own space is gone.
-    assert not workspace_root_path(user_id=uid, folder_id=fa, conversation_id="x").exists()
-    assert workspace_root_path(user_id=uid, folder_id=fb, conversation_id="x").exists()
+    assert not workspace_root_path(user_id=uid, folder_id=fb, conversation_id=gid).exists()
+    assert workspace_root_path(user_id=uid, folder_id=fb, conversation_id=gaid).exists()
     assert not workspace_root_path(user_id=uid, folder_id=None, conversation_id=ugid).exists()
 
     build_storage_provider.cache_clear()

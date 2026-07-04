@@ -1,11 +1,11 @@
 import { useActiveMessages, useConversationStore } from "@/stores/conversation";
 import type { Execution } from "@/stores/execution";
-import { useSidePanelStore, type EndpointKind } from "@/stores/sidePanel";
+import { type EndpointKind, useSidePanelStore } from "@/stores/sidePanel";
 import { useCallback, useMemo } from "react";
 import { INPUT_ID, isEndpointId } from "./constants";
 
 export interface GraphDrillHandoff {
-  embedded: boolean;
+  interactive: boolean;
   messageId: string | null;
   onNodeSelect?: (runId: string) => void;
   onEndpointSelect?: (
@@ -20,7 +20,7 @@ export interface GraphDrillHandoff {
 export function useGraphDrillIn(
   execution: Execution | null,
   {
-    embedded,
+    interactive,
     messageId,
     onNodeSelect,
     onEndpointSelect,
@@ -94,7 +94,7 @@ export function useGraphDrillIn(
           return;
         }
         focusMessage(taskMessage.id);
-        if (!embedded) onClose?.();
+        if (interactive) onClose?.();
         return;
       }
       if (captainRun && id === captainRun.id) {
@@ -104,7 +104,7 @@ export function useGraphDrillIn(
           return;
         }
         focusMessage(finalAnswer.id);
-        if (!embedded) onClose?.();
+        if (interactive) onClose?.();
         return;
       }
       if (isEndpointId(id)) return;
@@ -123,7 +123,7 @@ export function useGraphDrillIn(
       taskMessage,
       captainRun,
       focusMessage,
-      embedded,
+      interactive,
       onClose,
     ],
   );

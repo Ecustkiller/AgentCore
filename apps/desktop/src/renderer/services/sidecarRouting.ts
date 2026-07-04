@@ -1,7 +1,7 @@
 import { getConversations } from "@/hooks/useConversations";
+import { hasLocalEngine } from "@/lib/capabilities";
 import { queryClient } from "@/lib/queryClient";
 import { workspaceKeys } from "@/lib/queryKeys";
-import { hasLocalEngine } from "@/lib/capabilities";
 import type { WorkspaceInfo } from "@/services/workspaces";
 import { getRuntime } from "@/stores/conversation";
 import { useUIStore } from "@/stores/ui";
@@ -91,13 +91,11 @@ function scratchFromWorkspaceCache(
 async function resolveLocalTarget(
   conversationId: string,
 ): Promise<SidecarTarget | null> {
-  const conv =
-    getConversations().find((c) => c.id === conversationId) ?? null;
+  const conv = getConversations().find((c) => c.id === conversationId) ?? null;
   if (!conv) return null;
 
   const cached = scratchFromWorkspaceCache(conversationId);
-  const rootId =
-    cached?.rootId ?? conv.localContainerRootId ?? null;
+  const rootId = cached?.rootId ?? conv.localContainerRootId ?? null;
   const subpath = cached?.subpath ?? "";
   if (!rootId) return null;
 

@@ -25,12 +25,24 @@ _EXPECTED_NAMES = {
     "file_delete",
     "file_move",
     "grep",
+    "code_search",
+    "git",
+    "test_run",
     "code_execute",
 }
 
 # The CEO chat agent is a COORDINATOR: it directly holds only the read/retrieval
 # tools and delegates every production/mutation tool to a worker (协调者 CEO).
-_CEO_READONLY_NAMES = {"web_search", "read_url", "file_read", "file_list", "grep"}
+_CEO_READONLY_NAMES = {
+    "web_search",
+    "read_url",
+    "file_read",
+    "file_list",
+    "grep",
+    "code_search",
+    "git",
+    "test_run",
+}
 _DELEGATED_MUTATION_NAMES = {
     "file_write",
     "str_replace",

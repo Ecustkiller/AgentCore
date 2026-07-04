@@ -165,6 +165,13 @@ class ToolContext:
     # (引擎纯化, exactly like ``on_note`` / ``on_escalate``). ``None`` for call sites without a live
     # sink (tests / evals) — the tool simply skips the ping.
     on_phase: Callable[[str], None] | None = None
+    # 工具执行流式进度 (code_execute 前端展示优化): a narrow callback a long-running tool fires
+    # to push incremental output (``code_execute`` → phase ``"output"`` + ``{stream, chunk}``) so
+    # the waiting UI shows live stdout/stderr instead of a bare spinner. Called with ``(phase, data)``
+    # where ``data`` is an optional dict merged into the transport-only ``tool_use_progress`` payload
+    # by the executor (引擎纯化, twin of ``on_phase``). ``None`` for call sites without a live sink
+    # (tests / evals) — the tool simply skips the ping.
+    on_progress: Callable[[str, dict[str, Any] | None], None] | None = None
 
 
 @dataclass

@@ -75,7 +75,9 @@ export function hasParallelTimeline(execution: Execution): boolean {
 }
 
 /** One-line scheduling summary for the graph toolbar chip. */
-export function parallelTimelineMetricsSummary(execution: Execution): string | null {
+export function parallelTimelineMetricsSummary(
+  execution: Execution,
+): string | null {
   const batches = execution.batches.filter((b) => b.timeline.length > 0);
   if (batches.length === 0) return null;
   const peak = Math.max(...batches.map((b) => b.peakRunning));
@@ -217,7 +219,7 @@ function TimelineRow({
       </span>
       <div className="relative h-4 flex-1">
         <div
-          className={`absolute top-0 bottom-0 flex cursor-default items-center justify-end rounded-md px-1 transition-opacity ${
+          className={`absolute top-0 bottom-0 flex cursor-default items-center justify-end rounded-lg px-1 transition-opacity ${
             failed ? "ring-1 ring-destructive" : ""
           } ${highlighted ? "ring-2 ring-primary ring-offset-1 ring-offset-background" : ""}`}
           style={{
@@ -230,7 +232,9 @@ function TimelineRow({
             failed ? " · 失败" : ""
           }`}
         >
-          <span className="truncate text-xs font-medium text-white/95">{dur}</span>
+          <span className="truncate text-xs font-medium text-white/95">
+            {dur}
+          </span>
         </div>
       </div>
     </div>

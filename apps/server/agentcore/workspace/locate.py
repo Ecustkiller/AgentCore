@@ -27,8 +27,8 @@ from agentcore.config import settings
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.ports import ClientRequestBridge
+from agentcore.tools.sandbox import create_sandbox
 from agentcore.tools.sandbox.protocol import SandboxProvider
-from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.channel import WorkspaceChannel
 from agentcore.workspace.local import LocalWorkspace
 from agentcore.workspace.protocol import WorkspaceBackend
@@ -42,13 +42,12 @@ def _workspaces_base() -> Path:
 
 
 def _workspace_relpath(*, user_id: str, folder_id: str | None, conversation_id: str) -> str:
-    """The conversation's workspace path relative to the workspaces base (POSIX).
+    """The conversation scratch path relative to the workspaces base (POSIX).
 
-    Single source of the folder-vs-ungrouped branch, shared by the on-disk root
-    and the snapshot storage key so they can never drift apart.
+    Folder refactor (To-Be): every conversation owns ``conv/<id>/`` scratch;
+    ``folder_id`` is sidebar grouping only and does not affect storage layout.
     """
-    if folder_id:
-        return f"{user_id}/{folder_id}"
+    del folder_id
     return f"{user_id}/conv/{conversation_id}"
 
 
@@ -70,14 +69,11 @@ class WorkspaceId:
 
 
 def format_workspace_id(*, folder_id: str | None, conversation_id: str) -> str:
-    """The public workspace id for a conversation's resolved space.
+    """The public workspace id for a conversation's scratch space (``conv:<id>``).
 
-    Folder-filed conversations share their folder's id (``folder:<folder_id>``);
-    ungrouped ones get their own (``conv:<conversation_id>``) — mirroring the
-    directory fork so the id and the on-disk root never disagree.
+    ``folder_id`` is ignored — folders are pure sidebar grouping (Folder 重构 To-Be).
     """
-    if folder_id:
-        return f"folder{_WORKSPACE_ID_SEP}{folder_id}"
+    del folder_id
     return f"conv{_WORKSPACE_ID_SEP}{conversation_id}"
 
 
@@ -143,6 +139,16 @@ def workspace_storage_key(*, user_id: str, folder_id: str | None, conversation_i
     return f"{_WORKSPACES_SEGMENT}/{relpath}"
 
 
+def _default_server_sandbox() -> SandboxProvider:
+    """Cloud worker sandbox — gVisor when enabled, else subprocess."""
+    return create_sandbox(
+        location="server",
+        gvisor_enabled=settings.gvisor_enabled,
+        runsc_path=settings.gvisor_runsc_path,
+        runtime_root=settings.gvisor_runtime_root,
+    )
+
+
 def build_server_workspace(
     *,
     user_id: str,
@@ -154,7 +160,7 @@ def build_server_workspace(
     root = resolve_workspace_root(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
-    return ServerWorkspace(root=root, sandbox=sandbox or SubprocessSandbox())
+    return ServerWorkspace(root=root, sandbox=sandbox or _default_server_sandbox())
 
 
 # IM chat attachments live in their own top-level space, separate from the
@@ -180,7 +186,7 @@ def build_chat_workspace(
     """
     root = chat_workspace_root_path(chat_id)
     root.mkdir(parents=True, exist_ok=True)
-    return ServerWorkspace(root=root, sandbox=sandbox or SubprocessSandbox())
+    return ServerWorkspace(root=root, sandbox=sandbox or _default_server_sandbox())
 
 
 @dataclass(frozen=True)

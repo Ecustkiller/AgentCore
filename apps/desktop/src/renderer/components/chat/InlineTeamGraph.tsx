@@ -99,8 +99,7 @@ export function InlineTeamGraph({
     [],
   );
   const layoutKind = useGraphStore((s) => s.layoutKind);
-  const estLayout =
-    layoutKind === "timeline" ? "leftright" : layoutKind;
+  const estLayout = layoutKind === "timeline" ? "leftright" : layoutKind;
   const fallbackHeight = useMemo(() => {
     if (!execution) return 0;
     const est = estimateBbox(workerGraphShape(execution.runs), estLayout);
@@ -177,7 +176,12 @@ function GraphArea({
       className="w-full select-none border-t border-border transition-[height] duration-200 motion-reduce:transition-none"
       style={{ height }}
     >
-      <GraphView embedded onNodeSelect={onNodeSelect} onMeasure={onMeasure} />
+      <GraphView
+        interactive={false}
+        fitMode="width"
+        onNodeSelect={onNodeSelect}
+        onMeasure={onMeasure}
+      />
     </div>
   );
 }

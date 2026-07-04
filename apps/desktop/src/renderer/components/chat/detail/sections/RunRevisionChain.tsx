@@ -1,11 +1,6 @@
 import { charCount, outputOf } from "@/components/chat/compare/cells";
 import { Button } from "@/components/ui";
-import {
-  type AgentState,
-  type Execution,
-  type RevisionChain,
-  type RunNode,
-} from "@/stores/execution";
+import type { AgentState, Execution, RevisionChain } from "@/stores/execution";
 import { Columns2 } from "lucide-react";
 import { RunStatusDot, Section } from "./shared";
 

@@ -42,7 +42,8 @@ const COLLAPSE_LINES = 24;
  * the code text itself; the disclosure store adds the conversation scope. */
 function hashCode(s: string): string {
   let h = 5381;
-  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 33) + s.charCodeAt(i)) | 0;
+  for (let i = 0; i < s.length; i++)
+    h = (Math.imul(h, 33) + s.charCodeAt(i)) | 0;
   return (h >>> 0).toString(36);
 }
 
@@ -76,7 +77,10 @@ export function CodeBlock({
   // 「展开全部」+「自动换行」按代码内容指纹持久化——同一对话内同一段代码，跨切对话/刷新记住。
   const disclosureKey = `code:${hashCode(text)}`;
   const [copied, setCopied] = useState(false);
-  const [wrap, setWrap] = usePersistentDisclosure(`${disclosureKey}:wrap`, false);
+  const [wrap, setWrap] = usePersistentDisclosure(
+    `${disclosureKey}:wrap`,
+    false,
+  );
   const [expanded, setExpanded] = usePersistentDisclosure(
     `${disclosureKey}:exp`,
     false,

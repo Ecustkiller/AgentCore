@@ -7,10 +7,10 @@ rendering the executor uses for the retry prompt.
 
 from agentcore.runtime.runs.contract import (
     check_contract,
-    describe_contract,
+    describe_deliverable,
     format_feedback,
 )
-from agentcore.runtime.runs.types import RunContract
+from agentcore.runtime.runs.types import Deliverable, RunContract
 
 
 def test_empty_fails_baseline_without_contract():
@@ -111,9 +111,9 @@ def test_format_feedback_empty_when_ok():
     assert format_feedback(check_contract("ok 内容", None)) == ""
 
 
-def test_describe_contract_renders_rules():
-    desc = describe_contract(
-        RunContract(
+def test_describe_deliverable_renders_rules():
+    desc = describe_deliverable(
+        Deliverable(
             required_sections=["结论"], must_contain=["风险"], min_length=200, output_format="json"
         )
     )
@@ -123,8 +123,13 @@ def test_describe_contract_renders_rules():
     assert "JSON" in desc
 
 
-def test_describe_contract_none_is_empty():
-    assert describe_contract(None) == ""
+def test_describe_deliverable_none_is_empty():
+    assert describe_deliverable(None) == ""
+
+
+def test_describe_deliverable_renders_name():
+    desc = describe_deliverable(Deliverable(name="方向③-案例卡.html"))
+    assert desc == "交付物：方向③-案例卡.html"
 
 
 # --- requires_files: the deliverable-landed gate over files_written -------------
@@ -145,7 +150,7 @@ def test_requires_files_off_by_default_ignores_file_count():
     assert check_contract("纯文字分析", RunContract(min_length=2), files_written=0).ok
 
 
-def test_describe_contract_renders_requires_files():
-    desc = describe_contract(RunContract(requires_files=True))
+def test_describe_deliverable_renders_requires_files():
+    desc = describe_deliverable(Deliverable(requires_files=True))
     assert "file_write" in desc
     assert "工作区" in desc

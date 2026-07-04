@@ -22,6 +22,9 @@ dependencies = [
     "cryptography>=49.0.0",
     "pillow>=12.2.0",
     "markdown-it-py>=3.0",
+    "tree-sitter>=0.23",
+    "tree-sitter-python>=0.23",
+    "tree-sitter-typescript>=0.23",
 ]
 
 [project.optional-dependencies]
@@ -88,9 +91,17 @@ ignore = ["B008", "A002", "E402"]
 "probe_ask_user.py" = ["E501"]
 "agentcore/tools/builtin/delegate/ceo_format.py" = ["E501"]
 "agentcore/tools/builtin/delegate/schema.py" = ["E501"]
+"agentcore/tools/builtin/delegate/drive.py" = ["E501"]
+"agentcore/tools/builtin/delegate/tool.py" = ["E501"]
+"agentcore/tools/protocol.py" = ["E501"]
+"agentcore/tools/builtin/git_ops.py" = ["E501"]
+"agentcore/tools/builtin/revise.py" = ["E501"]
+"agentcore/sidecar/server_pkg/handlers.py" = ["E501"]
 "tests/**" = ["E501", "B017", "N818", "UP031"]
 "scripts/**" = ["E501"]
 "agentcore/runtime/skills.py" = ["E501"]
+"agentcore/runtime/events/disposition.py" = ["E501"]
+"agentcore/runtime/runs/executor_identities.py" = ["E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

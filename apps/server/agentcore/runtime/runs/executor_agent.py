@@ -62,7 +62,7 @@ from agentcore.runtime.runs.executor_shared import (
     _registry_without,
     _retry_message,
 )
-from agentcore.runtime.runs.notewall import NoteWall, format_notes_for_injection
+from agentcore.runtime.runs.notewall import NOTE_NUDGE_TEXT, NoteWall, format_notes_for_injection
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.scheduler import RunExecutor
 from agentcore.runtime.runs.serialize import (
@@ -286,7 +286,7 @@ def build_agent_executor(
             )
         )
         start = time.monotonic()
-        contract = spec.policy.contract
+        deliverable = spec.deliverable
         # Hoisted out of the try so a hard exception can still bill what this run
         # already spent (B-deep 失败计费): ``run_usage``/``run_rounds`` accumulate the
         # completed contract-retry attempts, ``inflight`` mirrors the in-flight pass's
@@ -498,7 +498,7 @@ def build_agent_executor(
                 completed,
                 system_prompt,
                 user_message,
-                contract,
+                deliverable,
                 identity=identity,
                 index_paths=index_paths,
                 blocks_sink=received_blocks,
@@ -515,13 +515,25 @@ def build_agent_executor(
             # frozen at its opening. new_for already excludes self-posted, caps the burst, and
             # advances this run's cursor (each note delivered at most once). Empty (solo / no
             # fresh notes) → [] → a no-op round, identical to today's behaviour.
+            _note_nudged: list[bool] = [False]
+
             def _pull_notes(_rid: str = spec.run_id) -> list[LLMMessage]:
                 if note_wall is None:  # 非协作批次 (collaboration=False): no wall → nothing to push
                     return []
+                injected: list[LLMMessage] = []
                 fresh = note_wall.new_for(_rid)
-                if not fresh:
-                    return []
-                return [LLMMessage(role="user", content=format_notes_for_injection(fresh))]
+                if fresh:
+                    injected.append(
+                        LLMMessage(role="user", content=format_notes_for_injection(fresh))
+                    )
+                if (
+                    not _note_nudged[0]
+                    and not note_wall.own_active(_rid)
+                    and len(note_wall.all_for(_rid)) >= 2
+                ):
+                    _note_nudged[0] = True
+                    injected.append(LLMMessage(role="user", content=NOTE_NUDGE_TEXT))
+                return injected
 
             attempts = 1 + min(DEFAULT_CONTRACT_RETRIES, MAX_CONTRACT_RETRIES)
             for attempt in range(attempts):
@@ -553,7 +565,7 @@ def build_agent_executor(
                 # was only pasted into the reply (never written) fails and reworks.
                 verdict = check_contract(
                     content,
-                    contract,
+                    deliverable,
                     files_written=len(files_touched_from_transcript(messages)),
                 )
                 if verdict.ok or attempt == attempts - 1:
@@ -591,7 +603,7 @@ def build_agent_executor(
             # prose. Carried on BOTH terminal states (a worker that failed its contract can still
             # have submitted a useful brief before failing).
             debrief = debrief_from_transcript(messages)
-            if not verdict.ok and _is_hard_failure(content, contract):
+            if not verdict.ok and _is_hard_failure(content, deliverable):
                 reason = "；".join(verdict.failures)
                 logger.info("contract.failed", run_id=spec.run_id, failures=verdict.failures)
                 # A contract miss still produced a deliverable + (often) a 交接简报: surface it so

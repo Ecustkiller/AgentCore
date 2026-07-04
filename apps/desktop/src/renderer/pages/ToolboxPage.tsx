@@ -37,7 +37,7 @@ interface ToolboxEntry {
   to?: string;
 }
 
-// 产品手册保留为顶部 hero（了解平台）：onboarding 旗舰入口，单独成块。
+/** 了解平台：产品手册入口，与能力项同视觉语言，靠首组位置区分。 */
 const MANUAL: ToolboxEntry = {
   id: "manual",
   title: "产品手册",
@@ -145,15 +145,25 @@ const CAPABILITIES: ToolboxEntry[] = [
   },
 ];
 
+const TOOLBOX_TILE_GRID =
+  "grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4";
+
 function ToolboxSectionHeader({
   label,
   meta,
+  className,
 }: {
   label: string;
   meta?: string;
+  className?: string;
 }) {
   return (
-    <div className="mb-4 flex items-baseline justify-between gap-3">
+    <div
+      className={cn(
+        "col-span-full flex items-baseline justify-between gap-3",
+        className,
+      )}
+    >
       <SectionLabel>{label}</SectionLabel>
       {meta ? (
         <span className="shrink-0 text-xs text-muted-foreground/60">
@@ -161,41 +171,6 @@ function ToolboxSectionHeader({
         </span>
       ) : null}
     </div>
-  );
-}
-
-function ToolboxFeaturedCard({ entry }: { entry: ToolboxEntry }) {
-  const navigate = useNavigate();
-  const { icon: Icon, title, description, to, color } = entry;
-  const colorVar = artifactColorVar(color);
-
-  return (
-    <Button
-      variant="ghost"
-      onClick={() => to && navigate(to)}
-      className="group h-auto w-full justify-start p-0 text-left font-normal"
-    >
-      <Card
-        variant="interactive"
-        className="flex w-full flex-col gap-4 p-5 shadow-sm transition-shadow group-hover:shadow-md"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <CatalogIconShell colorVar={colorVar} size="lg">
-            <Icon size={22} />
-          </CatalogIconShell>
-          <ChevronRight
-            size={16}
-            className="mt-1 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
-          />
-        </div>
-        <div className="min-w-0">
-          <h3 className="text-sm font-medium text-foreground">{title}</h3>
-          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-            {description}
-          </p>
-        </div>
-      </Card>
-    </Button>
   );
 }
 
@@ -214,7 +189,7 @@ function ToolboxTileCard({
   const inner = (
     <Card
       className={cn(
-        "flex h-full flex-col gap-3 p-4",
+        "flex h-full w-full min-w-0 flex-col gap-3 p-4",
         available && "shadow-sm transition-shadow group-hover:shadow-md",
       )}
       variant={available ? "interactive" : "default"}
@@ -251,7 +226,7 @@ function ToolboxTileCard({
     <Button
       variant="ghost"
       onClick={() => navigate(to)}
-      className="group h-auto w-full justify-start p-0 text-left font-normal"
+      className="group !flex h-full w-full min-w-0 flex-col items-stretch justify-start p-0 text-left font-normal"
     >
       {inner}
     </Button>
@@ -268,42 +243,36 @@ export function ToolboxPage() {
         </p>
       </header>
 
-      {/* 了解平台：产品手册（onboarding hero） */}
-      <section className="mt-8">
-        <ToolboxFeaturedCard entry={MANUAL} />
-      </section>
+      <div className={cn("mt-8", TOOLBOX_TILE_GRID)}>
+        <ToolboxSectionHeader label="了解平台" />
+        <ToolboxTileCard entry={MANUAL} />
 
-      <section className="mt-10">
         <ToolboxSectionHeader
+          className="mt-6"
           label="能力"
           meta={`${CAPABILITIES.filter((e) => e.to).length} 项可用`}
         />
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-          {CAPABILITIES.map((entry) => (
-            <ToolboxTileCard
-              key={entry.id}
-              entry={entry}
-              comingSoon={!entry.to}
-            />
-          ))}
-        </div>
-      </section>
+        {CAPABILITIES.map((entry) => (
+          <ToolboxTileCard
+            key={entry.id}
+            entry={entry}
+            comingSoon={!entry.to}
+          />
+        ))}
 
-      <section className="mt-10">
         <ToolboxSectionHeader
+          className="mt-6"
           label="创作工具"
           meta={`${CREATION_TOOLS.length} 项`}
         />
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          {CREATION_TOOLS.map((entry) => (
-            <ToolboxTileCard
-              key={entry.id}
-              entry={entry}
-              comingSoon={!entry.to}
-            />
-          ))}
-        </div>
-      </section>
+        {CREATION_TOOLS.map((entry) => (
+          <ToolboxTileCard
+            key={entry.id}
+            entry={entry}
+            comingSoon={!entry.to}
+          />
+        ))}
+      </div>
     </PageContainer>
   );
 }

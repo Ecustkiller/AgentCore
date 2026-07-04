@@ -6,7 +6,6 @@ import { Button } from "@/components/ui";
 import { applyTheme } from "@/lib/theme";
 import { useIsDark } from "@/lib/useIsDark";
 import { PREVIEW_FIXTURES } from "@/preview/fixtures";
-import { deleteRecording, useRecordings } from "@/preview/recordings";
 import {
   replayFixtureNow,
   replayFixturePrefix,
@@ -14,19 +13,9 @@ import {
 } from "@/preview/replay";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { useUIStore } from "@/stores/ui";
-import type { SSEEvent } from "@/types/events";
 import { MessageSquare, Moon, Network, Play, Radio, Sun } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-
-/** A preview entry: a local recording (captured from a real turn) or a committed
- *  conformance vector. Both replay through the identical path. */
-interface Scenario {
-  name: string;
-  description: string;
-  events: SSEEvent[];
-  kind: "recording" | "fixture";
-}
 
 const convIdFor = (name: string) => `preview-${name}`;
 
@@ -44,27 +33,7 @@ export function PreviewPage() {
   // harness (scripts/shoot.mjs) can deep-link each scenario deterministically and
   // humans can bookmark one. Fall back to the first fixture so the pane is never
   // empty.
-  // Local recordings (captured from real turns) sit above the committed
-  // conformance vectors; both replay through the same path. Recordings react to
-  // saves/deletes so a just-captured turn shows up here without a reload.
-  const recordings = useRecordings();
-  const scenarios = useMemo<Scenario[]>(
-    () => [
-      ...recordings.map((r) => ({
-        name: r.name,
-        description: r.description,
-        events: r.events,
-        kind: "recording" as const,
-      })),
-      ...PREVIEW_FIXTURES.map((f) => ({
-        name: f.name,
-        description: f.description,
-        events: f.events,
-        kind: "fixture" as const,
-      })),
-    ],
-    [recordings],
-  );
+  const scenarios = PREVIEW_FIXTURES;
 
   const requested = searchParams.get("s");
   const current =
@@ -152,13 +121,6 @@ export function PreviewPage() {
     if (view === "canvas") params.view = view;
     params.theme = next;
     setSearchParams(params, { replace: true });
-  };
-
-  const removeRecording = (name: string) => {
-    deleteRecording(name);
-    // If we just deleted the open one, drop `?s=` so selection falls back to the
-    // first remaining scenario instead of pointing at a gone entry.
-    if (selected === name) setSearchParams({}, { replace: true });
   };
 
   // Drag the scrubber → rewrite `?k=`. At/over the right end we drop `k` entirely
@@ -268,11 +230,9 @@ export function PreviewPage() {
       data-preview-frame={frame !== null ? String(frame) : "full"}
     >
       <ScenarioList
-        recordings={recordings}
         fixtures={PREVIEW_FIXTURES}
         selected={selected}
         onSelect={select}
-        onDeleteRecording={removeRecording}
       />
 
       <div className="relative flex min-w-0 flex-1 flex-col">

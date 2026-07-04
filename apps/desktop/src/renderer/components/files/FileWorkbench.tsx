@@ -14,7 +14,7 @@ import {
   tabKey,
 } from "@/components/files/fileWorkbench/storage";
 import { EmptyHint, InlineError } from "@/components/files/parts";
-import { IconButton as UiIconButton } from "@/components/ui";
+import { SearchField } from "@/components/ui";
 import { getFolders } from "@/hooks/useFolders";
 import type { FileSource } from "@/lib/fileSource";
 import { cn } from "@/lib/utils";
@@ -27,13 +27,7 @@ import {
 import { resolveWorkspaceSource } from "@/services/sources/workspaceSource";
 import type { WorkspaceInfo } from "@/services/workspaces";
 import { useQuery } from "@tanstack/react-query";
-import {
-  FolderOpen,
-  FileText,
-  Loader2,
-  Search,
-  X,
-} from "lucide-react";
+import { FileText, FolderOpen, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /** Synthetic workspace id every memory leaf's tab lives under — they belong to no real
@@ -291,34 +285,13 @@ export function FileWorkbench({
             so the search owns the row (its placeholder labels the panel) and 新建/添加本地 sit
             inline to its right (always present so the first workspace can be created). */}
         <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
-          <div className="relative min-w-0 flex-1">
-            <Search
-              size={14}
-              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
-            />
-            <input
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  setFilter("");
-                }
-              }}
-              placeholder="筛选对话工作区…"
-              aria-label="按名称筛选工作区"
-              className="h-8 w-full rounded-lg border border-border bg-background pl-7 pr-7 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-            />
-            {filter && (
-              <UiIconButton
-                onClick={() => setFilter("")}
-                aria-label="清除筛选"
-                className="absolute right-1.5 top-1/2 -translate-y-1/2"
-              >
-                <X size={13} />
-              </UiIconButton>
-            )}
-          </div>
+          <SearchField
+            value={filter}
+            onValueChange={setFilter}
+            placeholder="筛选工作区…"
+            aria-label="按名称筛选工作区"
+            className="min-w-0 flex-1"
+          />
         </div>
 
         {/* Pinned「AI 记忆」entry — private per-user data, not a workspace, so it sits above
@@ -463,7 +436,9 @@ export function FileWorkbench({
                         <MemoryProfileSplitEditor
                           source={src}
                           folderId={projFolderId}
-                          projectName={projName ?? t.name.replace(/·画像\.md$/, "")}
+                          projectName={
+                            projName ?? t.name.replace(/·画像\.md$/, "")
+                          }
                           onClose={() => closeTab(key)}
                         />
                       ) : (

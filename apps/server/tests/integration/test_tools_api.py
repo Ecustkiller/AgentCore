@@ -31,7 +31,7 @@ async def test_tools_lists_builtin_catalog(client, make_invite):
     assert r.status_code == 200, r.text
     body = r.json()
 
-    assert body["total"] == len(body["data"]) == 10
+    assert body["total"] == len(body["data"]) == 13
     names = {t["name"] for t in body["data"]}
     assert {"web_search", "file_write", "grep", "file_delete", "file_move"} <= names
     # The CEO-only orchestration primitive is never advertised in the catalog.

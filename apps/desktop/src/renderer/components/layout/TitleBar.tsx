@@ -1,12 +1,10 @@
-import { PreviewRecorderButton } from "@/components/layout/PreviewRecorderButton";
 import { WindowControls } from "@/components/layout/WindowControls";
 import { WindowFrameMenu } from "@/components/layout/WindowFrameMenu";
-import { Button, IconButton } from "@/components/ui";
+import { IconButton, TitleBarSearchTrigger } from "@/components/ui";
 import { isMac, macTitleBarInsetClass } from "@/lib/platform";
-import { chord } from "@/lib/shortcuts";
 import { useSidebarStore } from "@/stores/sidebar";
 import { useUIStore } from "@/stores/ui";
-import { PanelLeft, PanelLeftClose, Search } from "lucide-react";
+import { PanelLeft, PanelLeftClose } from "lucide-react";
 
 export function TitleBar() {
   const collapsed = useSidebarStore((s) => s.collapsed);
@@ -45,18 +43,8 @@ export function TitleBar() {
 
       {/* Search trigger + window controls (Win/Linux; macOS uses traffic lights) */}
       <div className="flex items-center [-webkit-app-region:no-drag]">
-        {/* Dev-only: record a real turn into the offline preview (#/preview). */}
-        {import.meta.env.DEV && <PreviewRecorderButton />}
         <WindowFrameMenu />
-        <Button
-          variant="neutral"
-          onClick={openSearch}
-          icon={<Search size={13} className="shrink-0" />}
-          className="mr-2 h-7 gap-2 border border-sidebar-border px-3 text-sm text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-        >
-          搜索…{" "}
-          <kbd className="text-xs text-sidebar-foreground/40">{chord("k")}</kbd>
-        </Button>
+        <TitleBarSearchTrigger onClick={() => openSearch()} />
 
         <WindowControls />
       </div>

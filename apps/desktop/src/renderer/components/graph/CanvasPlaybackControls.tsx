@@ -1,5 +1,9 @@
 import { Button, IconButton } from "@/components/ui";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   describeFrame,
   execRuntime,
@@ -90,14 +94,13 @@ export function CanvasPlaybackControls({
       ? "回放中…"
       : `回放 ${pos}/${total} · ${description}`;
 
-  const triggerIcon =
-    playing ? (
-      <Pause size={14} />
-    ) : isLive ? (
-      <Radio size={14} />
-    ) : (
-      <Play size={14} />
-    );
+  const triggerIcon = playing ? (
+    <Pause size={14} />
+  ) : isLive ? (
+    <Radio size={14} />
+  ) : (
+    <Play size={14} />
+  );
 
   const triggerTone =
     isLive && !playing
@@ -165,7 +168,9 @@ export function CanvasPlaybackControls({
             </Button>
           </div>
 
-          <p className="truncate text-xs text-muted-foreground">{description}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {description}
+          </p>
         </div>
       </PopoverContent>
     </Popover>

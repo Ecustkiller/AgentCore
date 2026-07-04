@@ -1,12 +1,12 @@
 import { statusPillSoft } from "@/components/ui/tone-presets";
 import type { ReviewConcernLevel } from "@/lib/reviewConcern";
-import {
-  type ModelTier,
-  type PlanRevisionKind,
-  type ReasoningEffort,
-  type RunCheckpoint,
-  type RunStatus,
-  type Stance,
+import type {
+  ModelTier,
+  PlanRevisionKind,
+  ReasoningEffort,
+  RunCheckpoint,
+  RunStatus,
+  Stance,
 } from "@/stores/execution";
 import { Check, Loader2, X } from "lucide-react";
 
@@ -44,8 +44,6 @@ export interface AgentNodeData {
   /** Review/QC output flagged by {@link detectReviewConcern} (中间可见性 phase-1). */
   reviewConcern?: ReviewConcernLevel | null;
   enterIndex?: number;
-  /** Dimmed when another node is hovered (GraphView edge highlight). */
-  hoverDimmed?: boolean;
   onActivate?: () => void;
   [key: string]: unknown;
 }
@@ -115,7 +113,10 @@ export function revisedBadge(kind: PlanRevisionKind): {
   return { label: "计划已调整", hint: "CEO 据中途发现调整了这一步的方向" };
 }
 
-export function checkpointBadge(c: RunCheckpoint): { label: string; cls: string } {
+export function checkpointBadge(c: RunCheckpoint): {
+  label: string;
+  cls: string;
+} {
   if (c.status === "pending") {
     return { label: "待放行", cls: statusPillSoft.primary };
   }

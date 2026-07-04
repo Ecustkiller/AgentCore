@@ -4,6 +4,7 @@ from agentcore.config import settings
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.builtin.amend_note import AmendNoteTool
 from agentcore.tools.builtin.code_execute import CodeExecuteTool
+from agentcore.tools.builtin.code_search import CodeSearchTool
 from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.builtin.file_ops import (
     FileDeleteTool,
@@ -13,10 +14,12 @@ from agentcore.tools.builtin.file_ops import (
     FileWriteTool,
     StrReplaceTool,
 )
+from agentcore.tools.builtin.git_ops import GitTool
 from agentcore.tools.builtin.grep import GrepTool
 from agentcore.tools.builtin.handoff import HandoffTool
 from agentcore.tools.builtin.post_note import PostNoteTool
 from agentcore.tools.builtin.read_notes import ReadNotesTool
+from agentcore.tools.builtin.test_run import TestRunTool
 from agentcore.tools.builtin.web.read_url import ReadUrlTool
 from agentcore.tools.builtin.web.search import WebSearchTool
 from agentcore.tools.registry import ToolRegistry
@@ -27,14 +30,14 @@ def code_execute_enabled_for(backend: WorkspaceBackend | None) -> bool:
     """Whether ``code_execute`` may appear in a runtime worker toolset.
 
     Local / sidecar execution stays on; cloud ``location=server`` defaults off unless
-    ``CODE_EXECUTE_CLOUD_ENABLED`` is set (subprocess in the API container is not a
-    real isolation boundary — 安全权限与治理 §5).
+    ``GVISOR_ENABLED`` or ``CODE_EXECUTE_CLOUD_ENABLED`` is set (plain subprocess in
+    the API container is not a real isolation boundary — 安全权限与治理 §5).
     """
     if backend is None:
         return True
     if backend.location == "local":
         return True
-    return settings.code_execute_cloud_enabled
+    return settings.gvisor_enabled or settings.code_execute_cloud_enabled
 
 
 def build_builtin_registry(*, include_code_execute: bool = True) -> ToolRegistry:
@@ -55,6 +58,9 @@ def build_builtin_registry(*, include_code_execute: bool = True) -> ToolRegistry
     registry.register(FileDeleteTool())
     registry.register(FileMoveTool())
     registry.register(GrepTool())
+    registry.register(CodeSearchTool())
+    registry.register(GitTool())
+    registry.register(TestRunTool())
     if include_code_execute:
         registry.register(CodeExecuteTool())
     return registry
@@ -98,7 +104,7 @@ def build_ceo_tool_registry() -> ToolRegistry:
     """The CEO chat agent's DIRECT toolset: read / retrieval only (协调者 CEO).
 
     The CEO is a coordinator — it *looks* (web_search, read_url, file_read,
-    file_list, grep) and answers simple requests directly, but it holds NONE of
+    file_list, grep, code_search) and answers simple requests directly, but it holds NONE of
     the production / mutation tools (file_write, str_replace, file_delete,
     file_move, code_execute). Any work that produces or changes an artifact is
     handed to a worker via ``delegate``; workers carry the FULL toolset
@@ -118,6 +124,15 @@ def build_ceo_tool_registry() -> ToolRegistry:
         if schema.approval is ToolApproval.NEVER:
             registry.register(full.get(schema.name))
     return registry
+
+
+def approval_class_tool_names() -> frozenset[str]:
+    """Tools covered by an ``APPROVE_ALWAYS_FILES`` turn grant.
+
+    The file-mutation class plus ``git`` write (``git`` schema stays ``NEVER`` so
+    CEO read-only subcommands stay in the filtered registry).
+    """
+    return file_mutation_tool_names() | frozenset({"git"})
 
 
 def file_mutation_tool_names() -> frozenset[str]:

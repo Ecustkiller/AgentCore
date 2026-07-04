@@ -1,8 +1,17 @@
-import type { GraphEdge } from "@/stores/graph";
 import type { ElkGraphLayout } from "@/lib/graph-layout-utils";
+import type { GraphEdge } from "@/stores/graph";
 import ELK from "elkjs/lib/elk.bundled";
 
 const elk = new ELK();
+
+interface ElkGraphNode {
+  id: string;
+  width?: number;
+  height?: number;
+  layoutOptions?: Record<string, string>;
+  children?: ElkGraphNode[];
+  edges?: Array<{ id: string; sources: string[]; targets: string[] }>;
+}
 
 const NODE_WIDTH = 210;
 const NODE_HEIGHT = 110;
@@ -48,6 +57,22 @@ export interface LayoutResult {
   positions: Record<string, { x: number; y: number }>;
   width: number;
   height: number;
+  groups: GroupLayout[];
+}
+
+export interface GroupLayout {
+  groupId: string;
+  parentId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface SubTeamInput {
+  parentId: string;
+  memberIds: string[];
+  groupId: string;
 }
 
 /**
@@ -82,30 +107,107 @@ export async function computeLayout(
   layout: ElkGraphLayout = "tree",
   preserveOrder = false,
   bookends: LayoutBookends = {},
+  subTeams: SubTeamInput[] = [],
 ): Promise<LayoutResult> {
-  if (nodeIds.length === 0) return { positions: {}, width: 0, height: 0 };
+  if (nodeIds.length === 0)
+    return { positions: {}, width: 0, height: 0, groups: [] };
 
-  const graph = {
-    id: "root",
-    layoutOptions: {
-      ...LAYOUT_OPTIONS[layout],
-      "elk.padding": "[top=24,left=24,bottom=24,right=24]",
-      // 辩论/审查 分列对置 (前端UX设计.md §四): bias ELK toward the caller's node
-      // order within a layer so a正→反 sorted batch bands by side (正方 above,
-      // 反方 below) instead of being freely reordered by crossing-minimization.
-      // Only requested for a debate; an unknown value is ignored by ELK, so the
-      // default (non-debate) layout is untouched.
-      ...(preserveOrder
-        ? { "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES" }
-        : {}),
-    },
-    children: nodeIds.map((id) => ({
+  const subTeamByParent = new Map(subTeams.map((st) => [st.parentId, st]));
+  const subTeamMemberSet = new Set<string>();
+  const subTeamParentSet = new Set<string>();
+  for (const st of subTeams) {
+    subTeamParentSet.add(st.parentId);
+    for (const m of st.memberIds) subTeamMemberSet.add(m);
+  }
+
+  const containsTeam = (st: SubTeamInput, id: string): boolean => {
+    if (id === st.parentId) return true;
+    for (const m of st.memberIds) {
+      if (id === m) return true;
+      const nested = subTeamByParent.get(m);
+      if (nested && containsTeam(nested, id)) return true;
+    }
+    return false;
+  };
+
+  const innermostTeamForEdge = (
+    source: string,
+    target: string,
+  ): SubTeamInput | null => {
+    const candidates = subTeams.filter(
+      (st) => containsTeam(st, source) && containsTeam(st, target),
+    );
+    if (candidates.length === 0) return null;
+    return candidates.reduce((best, st) => {
+      if (best === st) return best;
+      const stNestedInBest = best.memberIds.includes(st.parentId);
+      const bestNestedInSt = st.memberIds.includes(best.parentId);
+      if (stNestedInBest) return best;
+      if (bestNestedInSt) return st;
+      return best;
+    });
+  };
+
+  const edgesForGroup = (st: SubTeamInput): GraphEdge[] =>
+    edges.filter((e) => {
+      const team = innermostTeamForEdge(e.source, e.target);
+      return team?.groupId === st.groupId;
+    });
+
+  const buildGroupElkNode = (st: SubTeamInput): ElkGraphNode => {
+    const groupChildren: ElkGraphNode[] = [
+      { id: st.parentId, width: NODE_WIDTH, height: NODE_HEIGHT },
+    ];
+    for (const memberId of st.memberIds) {
+      const nested = subTeamByParent.get(memberId);
+      if (nested) {
+        groupChildren.push(buildGroupElkNode(nested));
+      } else {
+        groupChildren.push({
+          id: memberId,
+          width: NODE_WIDTH,
+          height: NODE_HEIGHT,
+        });
+      }
+    }
+    const groupEdges = edgesForGroup(st).map((e) => ({
+      id: e.id,
+      sources: [e.source],
+      targets: [e.target],
+    }));
+    return {
+      id: st.groupId,
+      layoutOptions: {
+        "elk.algorithm": "layered",
+        "elk.direction": layout === "leftright" ? "RIGHT" : "DOWN",
+        "elk.padding": "[top=32,left=12,bottom=12,right=12]",
+        "elk.spacing.nodeNode": "40",
+        "elk.layered.spacing.nodeNodeBetweenLayers": "40",
+      },
+      children: groupChildren,
+      edges: groupEdges,
+    };
+  };
+
+  const inAnyTeam = (id: string): boolean =>
+    subTeams.some((st) => containsTeam(st, id));
+
+  const internalEdges: GraphEdge[] = [];
+  const externalEdges: GraphEdge[] = [];
+  for (const e of edges) {
+    const team = innermostTeamForEdge(e.source, e.target);
+    if (team) internalEdges.push(e);
+    else externalEdges.push(e);
+  }
+  void internalEdges;
+
+  const topLevelChildren: ElkGraphNode[] = [];
+  for (const id of nodeIds) {
+    if (inAnyTeam(id)) continue;
+    topLevelChildren.push({
       id,
       width: NODE_WIDTH,
       height: NODE_HEIGHT,
-      // Pin the bookends to dedicated first / last layers so the 汇聚点 always
-      // sits past every worker — incl. a nested sub-team's leaf sub-workers that
-      // would otherwise tie its layer (see {@link LayoutBookends}).
       ...(id === bookends.source
         ? {
             layoutOptions: {
@@ -119,30 +221,82 @@ export async function computeLayout(
               },
             }
           : {}),
-    })),
-    edges: edges.map((e) => ({
-      id: e.id,
-      sources: [e.source],
-      targets: [e.target],
-    })),
+    });
+  }
+
+  const rootTeams = subTeams.filter(
+    (st) => !subTeams.some((other) => other.memberIds.includes(st.parentId)),
+  );
+  for (const st of rootTeams) {
+    topLevelChildren.push(buildGroupElkNode(st));
+  }
+
+  const elkEdges = externalEdges.map((e) => ({
+    id: e.id,
+    sources: [e.source],
+    targets: [e.target],
+  }));
+
+  const graph = {
+    id: "root",
+    layoutOptions: {
+      ...LAYOUT_OPTIONS[layout],
+      "elk.padding": "[top=24,left=24,bottom=24,right=24]",
+      "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+      ...(preserveOrder
+        ? { "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES" }
+        : {}),
+    },
+    children: topLevelChildren,
+    edges: elkEdges,
   };
 
   const laidOut = await elk.layout(graph);
 
   const positions: Record<string, { x: number; y: number }> = {};
-  for (const child of laidOut.children ?? []) {
-    positions[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
+  const groups: GroupLayout[] = [];
+
+  const extractPositions = (
+    children: Array<{
+      id?: string;
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+      children?: typeof children;
+    }>,
+    offsetX: number,
+    offsetY: number,
+  ): void => {
+    for (const child of children) {
+      const cx = offsetX + (child.x ?? 0);
+      const cy = offsetY + (child.y ?? 0);
+      const st = subTeams.find((s) => s.groupId === child.id);
+      if (st) {
+        groups.push({
+          groupId: st.groupId,
+          parentId: st.parentId,
+          x: cx,
+          y: cy,
+          width: child.width ?? 0,
+          height: child.height ?? 0,
+        });
+        extractPositions(child.children ?? [], cx, cy);
+      } else if (child.id) {
+        positions[child.id] = { x: cx, y: cy };
+      }
+    }
+  };
+
+  extractPositions(laidOut.children ?? [], 0, 0);
+
+  const subTeamNodeSet = new Set<string>();
+  for (const st of subTeams) {
+    subTeamNodeSet.add(st.parentId);
+    for (const m of st.memberIds) subTeamNodeSet.add(m);
   }
 
-  // 二叉分叉对称：ELK 在同层双子女（如 方案决策→产品设计/技术架构）上常把一侧贴
-  // 中轴、另一侧甩远；在子队下沉之前把两支刚体分支镜像到父节点交叉轴两侧等距。
-  balanceBinaryForks(positions, edges, layout);
-
-  // 子团队下沉后处理 (阶段2 嵌套委派): drop each delegated sub-team onto the cross
-  // axis *beside* its parent so the parent's solid 父→CEO 汇聚点 main edge is not
-  // occluded, stacking multiple same-wave parent blocks so their sub-teams never
-  // collide. Tree 布局按父相对汇聚点的左右选择 -X / +X 让位。See its doc.
-  dropSubTeamsBelowParent(positions, edges, layout);
+  balanceBinaryForks(positions, edges, layout, subTeamMemberSet);
 
   // 端点居中后处理：ELK 的 NETWORK_SIMPLEX 在子节点为偶数时，把独占一层的纯源/纯汇
   // 节点（用户输入 / CEO 汇聚点）的「中位数」当成一整段区间而非一点 → 它会贴到上/下边、
@@ -150,22 +304,15 @@ export async function computeLayout(
   // 不动层坐标）。放在下沉之后：多父下沉会把靠下的父下推，端点须按父的**最终**跨度居中。
   centerLoneEndpoints(positions, edges, layout);
 
-  // 修订对齐后处理：把每个续写/修订节点拉回其「源」所在的交叉轴车道，恢复「修订边笔直」不变
-  // 量（圆桌逐轮 / 热修版本链都读作「同一发言人·下一轮」一条车道）。放在所有位移之后：下沉
-  // 只搬了 delegate 子队、漏掉挂在子 worker 下游的修订节点（它们不在 delegate 子树里），于是
-  // 修订被留在源的**旧**车道上 → 第三波漂移。在此统一对齐，不管是谁移动了源都能复位。
   alignRevisionChains(positions, edges, layout);
 
-  // 碰撞解消：后处理（尤其 dropSubTeamsBelowParent）可能把 delegate 子队与同层 dep
-  // 节点推到交叉轴重叠的位置；多轮扫描推开，只动交叉轴、不动主轴层坐标。
-  resolveOverlaps(positions, layout);
+  resolveOverlaps(positions, layout, subTeams, containsTeam);
 
-  // 层内节点重排：barycenter heuristic 减少边交叉，改善 fan-out/fan-in 可读性。
-  minimizeCrossings(positions, edges, layout);
+  minimizeCrossings(positions, edges, layout, subTeamNodeSet);
 
-  // 交叉最小化只动普通 worker；修订链与碰撞间距在此恢复。
   alignRevisionChains(positions, edges, layout);
-  resolveOverlaps(positions, layout);
+  resolveOverlaps(positions, layout, subTeams, containsTeam);
+  alignRevisionChains(positions, edges, layout);
 
   // Post-processing can push nodes negative on the cross axis; shift the whole
   // graph so the bbox origin stays at ELK padding (keeps promo stills / fit-to-width sane).
@@ -199,7 +346,31 @@ export async function computeLayout(
   width = Math.max(width, maxX + PADDING);
   height = Math.max(height, maxY + PADDING);
 
-  return { positions, width, height };
+  const pad = 12;
+  const topPad = 32;
+  for (const g of groups) {
+    const st = subTeams.find((s) => s.groupId === g.groupId);
+    if (!st) continue;
+    const memberIds = [st.parentId, ...st.memberIds];
+    let minGX = Number.POSITIVE_INFINITY;
+    let minGY = Number.POSITIVE_INFINITY;
+    let maxGX = Number.NEGATIVE_INFINITY;
+    let maxGY = Number.NEGATIVE_INFINITY;
+    for (const id of memberIds) {
+      if (!positions[id]) continue;
+      minGX = Math.min(minGX, positions[id].x);
+      minGY = Math.min(minGY, positions[id].y);
+      maxGX = Math.max(maxGX, positions[id].x + NODE_WIDTH);
+      maxGY = Math.max(maxGY, positions[id].y + NODE_HEIGHT);
+    }
+    if (minGX === Number.POSITIVE_INFINITY) continue;
+    g.x = minGX - pad;
+    g.y = minGY - topPad;
+    g.width = maxGX - minGX + pad * 2;
+    g.height = maxGY - minGY + topPad + pad;
+  }
+
+  return { positions, width, height, groups };
 }
 
 /**
@@ -285,6 +456,7 @@ function balanceBinaryForks(
   positions: Record<string, { x: number; y: number }>,
   edges: GraphEdge[],
   layout: ElkGraphLayout,
+  subTeamMemberSet: Set<string> = new Set(),
 ): void {
   const horizontal = layout === "leftright";
   const crossSize = horizontal ? NODE_HEIGHT : NODE_WIDTH;
@@ -335,6 +507,7 @@ function balanceBinaryForks(
     if (children.length !== 2 || !positions[parent]) continue;
     const [left, right] = children;
     if (!positions[left] || !positions[right]) continue;
+    if (subTeamMemberSet.has(left) || subTeamMemberSet.has(right)) continue;
     if (Math.round(mainOf(left)) !== Math.round(mainOf(right))) continue;
 
     const parentCenter = crossCenterOf(parent);
@@ -359,170 +532,6 @@ function balanceBinaryForks(
 }
 
 /**
- * Drop each delegated sub-team (阶段2 嵌套委派) onto the cross axis *beside* its
- * parent worker, so the parent's solid 父→CEO 汇聚点 main edge stays clear.
- *
- * Why: a captain worker links its sub-workers by a lone dashed `delegate` edge
- * and also links the CEO 汇聚点 sink by a solid edge. ELK lays the sub-workers in
- * the layer *between* the parent and the (LAST_SEPARATE-pinned) sink, and the
- * sink is recentered onto the parent's row — so the straight 父→汇聚点 edge runs
- * right through a sub-worker that sits on the parent's row, reading as a false
- * `父 → 子任务 → 汇聚点` chain. ELK edge-priority tweaks don't dislodge it.
- *
- * Fix: shift each parent's whole delegate subtree along the cross axis until it
- * clears the parent's column on the **outward** side — tree 布局里父在汇聚点左侧
- * 则子队往 -X 挂，右侧则往 +X；leftright 仍一律往 +Y。The sub-team then reads as a
- * dashed branch hanging beside its parent and the main line is unobstructed.
- *
- * Multiple same-wave parents (后端组长 + 前端组长 both sub-delegating): dropping
- * each subtree below its *own* parent independently makes the two dropped bands
- * collide (an upper parent's team lands on the lower parent and its team). So the
- * top-level parents are processed in cross-axis (reading) order as stacked blocks
- * — each block is `parent row + its subtree` — tracking a running floor: a lower
- * parent (and hence its whole block) is pushed further down until it clears the
- * previous block. A single delegating parent has one block and never moves, so the
- * earlier flat/1-level/2-level cases are unchanged. Cross-axis only; the bbox grows
- * on the cross axis (handled by the caller) and the bookends recenter afterwards.
- *
- * 主干线门控：只对**确有非 delegate 主干出边**（父→汇聚点 / 父→其它 worker）的父下沉；父若只
- * 委派、无主干线（无 CEO 汇聚点的圆桌）则不动。子队下游的修订节点不在此函数职责内，由随后的
- * {@link alignRevisionChains} 统一拉回源车道。
- */
-function dropSubTeamsBelowParent(
-  positions: Record<string, { x: number; y: number }>,
-  edges: GraphEdge[],
-  layout: ElkGraphLayout,
-): void {
-  const horizontal = layout === "leftright";
-  const crossSize = horizontal ? NODE_HEIGHT : NODE_WIDTH;
-  const crossOf = (id: string) =>
-    horizontal ? positions[id].y : positions[id].x;
-  const moveCross = (id: string, delta: number) => {
-    if (horizontal) positions[id].y += delta;
-    else positions[id].x += delta;
-  };
-
-  // Delegate tree: parent → its direct sub-workers (only the dashed edges).
-  const childrenOf = new Map<string, string[]>();
-  const isSub = new Set<string>();
-  for (const e of edges) {
-    if (e.kind !== "delegate") continue;
-    if (!positions[e.source] || !positions[e.target]) continue;
-    const arr = childrenOf.get(e.source);
-    if (arr) arr.push(e.target);
-    else childrenOf.set(e.source, [e.target]);
-    isSub.add(e.target);
-  }
-  if (childrenOf.size === 0) return;
-
-  // Full delegate subtree (direct + nested) under a node, so a >1-level sub-team
-  // (rare, but kept robust) moves as one rigid block and stays attached.
-  const subtreeOf = (root: string): string[] => {
-    const out: string[] = [];
-    const stack = [...(childrenOf.get(root) ?? [])];
-    while (stack.length > 0) {
-      const n = stack.pop() as string;
-      out.push(n);
-      for (const c of childrenOf.get(n) ?? []) stack.push(c);
-    }
-    return out;
-  };
-
-  // 主干线门控：下沉的唯一目的是让「父→汇聚点」实线不被子队横穿。只有当父确有一条会被横穿
-  // 的**非 delegate 出边**（父→CEO 汇聚点 / 父→其它 worker）时才下沉；若父的出边全是 delegate
-  // （典型：无 CEO 汇聚点的圆桌——主持人只委派辩手、没有要保护的主干线），下沉只会把图摊开并把
-  // 修订节点甩出车道，故跳过，让 ELK 的自然居中（主持人居中于子队、修订与源齐平）直接成立。
-  const hasMainLine = new Set<string>();
-  for (const e of edges) {
-    if (e.kind === "delegate") continue;
-    if (positions[e.source]) hasMainLine.add(e.source);
-  }
-
-  // Top-level delegating parents (a parent that is not itself a sub-worker):
-  // dropping a root subtree carries its nested teams with it, so roots suffice.
-  const roots = [...childrenOf.keys()].filter(
-    (p) =>
-      !isSub.has(p) &&
-      (childrenOf.get(p)?.length ?? 0) > 0 &&
-      hasMainLine.has(p),
-  );
-  if (roots.length === 0) return;
-
-  /** Tree: -1 = hang subteam on the left (-X), +1 = right (+X). Leftright: +1 = down (+Y). */
-  const dropSignOf = (parent: string): number => {
-    if (horizontal) return 1;
-    const parentCenter = crossOf(parent) + crossSize / 2;
-    const mains = edges
-      .filter((e) => e.source === parent && e.kind !== "delegate")
-      .map((e) => e.target)
-      .filter((t) => positions[t]);
-    if (mains.length === 0) return 1;
-    const sink = mains.reduce((a, b) =>
-      positions[a].y > positions[b].y ? a : b,
-    );
-    const sinkCenter = crossOf(sink) + crossSize / 2;
-    return parentCenter <= sinkCenter ? -1 : 1;
-  };
-
-  const shiftSubtree = (
-    subtree: string[],
-    parent: string,
-    sign: number,
-  ): void => {
-    if (subtree.length === 0) return;
-    if (sign > 0) {
-      const parentBottom = crossOf(parent) + crossSize;
-      const bandTop = Math.min(...subtree.map(crossOf));
-      const subShift = parentBottom + NODE_SPACING - bandTop;
-      if (subShift > 0) for (const id of subtree) moveCross(id, subShift);
-    } else {
-      const parentTop = crossOf(parent);
-      const bandRight = Math.max(
-        ...subtree.map((id) => crossOf(id) + crossSize),
-      );
-      const subShift = bandRight + NODE_SPACING - parentTop;
-      if (subShift > 0) for (const id of subtree) moveCross(id, -subShift);
-    }
-  };
-
-  // Process +sign and -sign blocks separately so opposite-flank parents don't
-  // share a one-sided floor (pd left / arch right in tree).
-  for (const sign of [1, -1] as const) {
-    const signed = roots.filter((p) => dropSignOf(p) === sign);
-    if (signed.length === 0) continue;
-    signed.sort((a, b) =>
-      sign > 0 ? crossOf(a) - crossOf(b) : crossOf(b) - crossOf(a),
-    );
-
-    let floor = sign > 0 ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
-    for (const parent of signed) {
-      const subtree = subtreeOf(parent);
-      if (sign > 0) {
-        const parentShift = floor + NODE_SPACING - crossOf(parent);
-        if (parentShift > 0) moveCross(parent, parentShift);
-      } else {
-        const parentShift =
-          floor - NODE_SPACING - (crossOf(parent) + crossSize);
-        if (parentShift < 0) moveCross(parent, parentShift);
-      }
-      shiftSubtree(subtree, parent, sign);
-
-      const parentBottom = crossOf(parent) + crossSize;
-      let blockBottom = parentBottom;
-      for (const id of subtree) {
-        blockBottom = Math.max(blockBottom, crossOf(id) + crossSize);
-      }
-      if (sign > 0) {
-        floor = blockBottom;
-      } else {
-        const blockTop = Math.min(crossOf(parent), ...subtree.map(crossOf));
-        floor = blockTop;
-      }
-    }
-  }
-}
-
-/**
  * Push apart nodes whose AABBs overlap on both axes (same main-axis band + cross-axis
  * collision). Post-processing — especially {@link dropSubTeamsBelowParent} — can land
  * a dropped sub-team on the same layer as unrelated dep nodes without checking their
@@ -535,6 +544,8 @@ function dropSubTeamsBelowParent(
 function resolveOverlaps(
   positions: Record<string, { x: number; y: number }>,
   layout: ElkGraphLayout,
+  subTeams: SubTeamInput[] = [],
+  containsTeam: (st: SubTeamInput, id: string) => boolean = () => false,
 ): void {
   const ids = Object.keys(positions);
   if (ids.length < 2) return;
@@ -563,6 +574,9 @@ function resolveOverlaps(
     );
   };
 
+  const sameSubTeam = (a: string, b: string): boolean =>
+    subTeams.some((st) => containsTeam(st, a) && containsTeam(st, b));
+
   const maxRounds = ids.length * 2;
   for (let round = 0; round < maxRounds; round++) {
     let changed = false;
@@ -583,6 +597,7 @@ function resolveOverlaps(
       for (let i = 1; i < members.length; i++) {
         const prev = members[i - 1];
         const curr = members[i];
+        if (sameSubTeam(prev, curr)) continue;
         if (!boxesOverlap(prev, curr)) continue;
         const minCross = crossOf(prev) + crossSize + NODE_SPACING;
         if (crossOf(curr) < minCross) {
@@ -607,6 +622,7 @@ function minimizeCrossings(
   positions: Record<string, { x: number; y: number }>,
   edges: GraphEdge[],
   layout: ElkGraphLayout,
+  subTeamNodeSet: Set<string> = new Set(),
   iterations = 3,
 ): void {
   const ids = Object.keys(positions);
@@ -637,8 +653,8 @@ function minimizeCrossings(
     push(incoming, e.target, e.source);
   }
 
-  // Delegate sub-teams are positioned by dropSubTeamsBelowParent — leave them put.
-  const immovable = new Set<string>();
+  // Compound sub-teams are positioned by ELK inside their container — leave them put.
+  const immovable = new Set<string>(subTeamNodeSet);
   const delegateChildren = new Map<string, string[]>();
   for (const e of edges) {
     if (e.kind !== "delegate") continue;
@@ -683,8 +699,8 @@ function minimizeCrossings(
     const layerKeys = [...layers.keys()].sort((a, b) => a - b);
 
     for (const key of layerKeys) {
-      const members = layers.get(key)!;
-      if (members.length < 2) continue;
+      const members = layers.get(key);
+      if (!members || members.length < 2) continue;
       if (members.some((id) => immovable.has(id))) continue;
 
       const paired = members.map((id) => {
@@ -700,10 +716,11 @@ function minimizeCrossings(
         return { id, bc };
       });
 
-      paired.sort(
-        (a, b) => a.bc - b.bc || crossOf(a.id) - crossOf(b.id),
+      paired.sort((a, b) => a.bc - b.bc || crossOf(a.id) - crossOf(b.id));
+      redistributeLayer(
+        members,
+        paired.map((p) => p.id),
       );
-      redistributeLayer(members, paired.map((p) => p.id));
     }
   }
 }
@@ -777,7 +794,10 @@ export const EMBED_DEFAULT_COL_WIDTH = 718;
 // actually produces (within-layer node gap, between-layer gap, outer padding).
 // MUST stay in lockstep with LAYOUT_OPTIONS + elk.padding above.
 const NODE_SPACING = 40;
-const LAYER_SPACING: Record<ElkGraphLayout, number> = { tree: 64, leftright: 80 };
+const LAYER_SPACING: Record<ElkGraphLayout, number> = {
+  tree: 64,
+  leftright: 80,
+};
 const PADDING = 24;
 
 export interface GraphShape {
@@ -809,6 +829,30 @@ export function workerGraphShape(
   if (workers.length === 0) return { depth: 1, parallelism: 1 };
   const ids = new Set(workers.map((r) => r.id));
   const byId = new Map(workers.map((r) => [r.id, r]));
+
+  const subTeamRoots = new Set<string>();
+  const subTeamMembers = new Set<string>();
+  for (const w of workers) {
+    if (w.parentRunId && w.parentRunId !== w.id && ids.has(w.parentRunId)) {
+      subTeamMembers.add(w.id);
+      subTeamRoots.add(w.parentRunId);
+    }
+  }
+  const compoundUnit = (id: string): string => {
+    for (const root of subTeamRoots) {
+      if (id === root || subTeamMembers.has(id)) {
+        const isMemberOfRoot = (memberId: string): boolean => {
+          if (memberId === root) return true;
+          const r = byId.get(memberId);
+          if (!r?.parentRunId || r.parentRunId === memberId) return false;
+          if (r.parentRunId === root) return true;
+          return isMemberOfRoot(r.parentRunId);
+        };
+        if (isMemberOfRoot(id)) return `__group__${root}`;
+      }
+    }
+    return id;
+  };
   const depthCache = new Map<string, number>();
   const depthOf = (id: string, seen: Set<string>): number => {
     const cached = depthCache.get(id);
@@ -828,14 +872,21 @@ export function workerGraphShape(
     depthCache.set(id, d);
     return d;
   };
-  const layerCounts = new Map<number, number>();
+  const layerCounts = new Map<number, Set<string>>();
   let maxDepth = 1;
   for (const w of workers) {
     const d = depthOf(w.id, new Set());
     maxDepth = Math.max(maxDepth, d);
-    layerCounts.set(d, (layerCounts.get(d) ?? 0) + 1);
+    const unit = compoundUnit(w.id);
+    const set = layerCounts.get(d) ?? new Set<string>();
+    set.add(unit);
+    layerCounts.set(d, set);
   }
-  const parallelism = Math.max(1, ...layerCounts.values());
+  const parallelism = Math.max(
+    1,
+    ...[...layerCounts.values()].map((s) => s.size),
+  );
+
   return { depth: maxDepth + 2, parallelism };
 }
 

@@ -23,10 +23,106 @@ from agentcore.workspace.protocol import (
     NotUTF8,
     OutsideWorkspace,
     PathNotFound,
+    TreeEntry,
     WorkspaceError,
 )
 
 logger = get_logger(__name__)
+
+_DEFAULT_READ_LINES = 500
+
+
+def _truncate_content_lines(content: str, max_lines: int) -> str:
+    """Keep the first ``max_lines`` logical lines, preserving original line endings."""
+    if max_lines <= 0:
+        return ""
+    count = 0
+    i = 0
+    n = len(content)
+    while i < n and count < max_lines:
+        count += 1
+        j = content.find("\n", i)
+        if j == -1:
+            return content
+        i = j + 1
+    return content[:i]
+
+
+def _format_numbered_lines(lines: list[str], start_line: int) -> str:
+    return "\n".join(
+        f"{lineno:>6}|{text}"
+        for lineno, text in zip(
+            range(start_line, start_line + len(lines)), lines, strict=True
+        )
+    )
+
+
+class _TreeNode:
+    __slots__ = ("children", "is_dir", "name")
+
+    def __init__(self, name: str, is_dir: bool) -> None:
+        self.name = name
+        self.is_dir = is_dir
+        self.children: list[_TreeNode] = []
+
+
+def _render_file_tree(
+    entries: list[TreeEntry],
+    directory: str,
+    max_depth: int,
+    truncated: bool,
+    elided_count: int,
+) -> str:
+    """Render ``list_tree`` entries as an ASCII tree (``├──`` / ``└──`` / ``│``)."""
+    root_label = "./" if directory == "." else f"{directory.rstrip('/')}/"
+    lines: list[str] = [root_label]
+
+    if not entries:
+        return f"{root_label}\n（空目录）\n\n（{max_depth} 层深度，共 0 条目）"
+
+    dir_base = "" if directory == "." else directory.rstrip("/")
+    root_name = "." if directory == "." else directory.rstrip("/").split("/")[-1]
+    root = _TreeNode(root_name, True)
+
+    for entry in sorted(entries, key=lambda e: e.path.lower()):
+        parts = entry.path.split("/")
+        if dir_base:
+            base_parts = dir_base.split("/")
+            if parts[: len(base_parts)] != base_parts:
+                continue
+            parts = parts[len(base_parts) :]
+        if not parts:
+            continue
+
+        current = root
+        for i, part in enumerate(parts):
+            is_last = i == len(parts) - 1
+            child = next((c for c in current.children if c.name == part), None)
+            if child is None:
+                child = _TreeNode(part, entry.is_dir if is_last else True)
+                current.children.append(child)
+            elif is_last:
+                child.is_dir = entry.is_dir
+            current = child
+
+    def emit(children: list[_TreeNode], prefix: str) -> None:
+        ordered = sorted(children, key=lambda n: (not n.is_dir, n.name.lower()))
+        for i, child in enumerate(ordered):
+            is_last = i == len(ordered) - 1
+            branch = "└── " if is_last else "├── "
+            extension = "    " if is_last else "│   "
+            name = f"{child.name}/" if child.is_dir else child.name
+            lines.append(prefix + branch + name)
+            if child.children:
+                emit(child.children, prefix + extension)
+
+    emit(root.children, "")
+
+    footer = f"\n\n（{max_depth} 层深度，共 {len(entries)} 条目"
+    if truncated and elided_count:
+        footer += f"；另有 {elided_count} 个条目因深度/预算未展开"
+    footer += "）"
+    return "\n".join(lines) + footer
 
 
 def _error(error: str, start: float) -> ToolResult:
@@ -63,6 +159,17 @@ class FileReadTool:
                         "type": "string",
                         "description": "工作区内的相对文件路径",
                     },
+                    "offset": {
+                        "type": "integer",
+                        "description": "起始行号（1-based，含）。省略则从第 1 行开始。",
+                        "minimum": 1,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "最多读取行数。省略则读到文件末尾（上限 500 行）。",
+                        "minimum": 1,
+                        "maximum": 500,
+                    },
                 },
                 "required": ["path"],
             },
@@ -73,9 +180,26 @@ class FileReadTool:
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         start = time.monotonic()
         rel_path = arguments.get("path", "")
+        offset = arguments.get("offset")
+        limit = arguments.get("limit")
+        use_range = offset is not None or limit is not None
 
         try:
-            content = await context.backend.read(rel_path)
+            if use_range:
+                eff_offset = int(offset) if offset is not None else 1
+                eff_limit = int(limit) if limit is not None else _DEFAULT_READ_LINES
+                result = await context.backend.read_lines(
+                    rel_path, offset=eff_offset, limit=eff_limit
+                )
+            else:
+                content = await context.backend.read(rel_path)
+                content = _truncate_content_lines(content, _DEFAULT_READ_LINES)
+                return ToolResult(
+                    tool_call_id="",
+                    success=True,
+                    output=content,
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                )
         except OutsideWorkspace:
             return _error(f"路径 '{rel_path}' 超出了工作区范围", start)
         except PathNotFound:
@@ -85,10 +209,16 @@ class FileReadTool:
         except WorkspaceError as e:
             return _error(f"读取文件失败：{e}", start)
 
+        body = _format_numbered_lines(result.lines, result.start_line)
+        footer = (
+            f"\n\n（第 {result.start_line}–{result.end_line} 行，共 {result.total_lines} 行）"
+        )
+        output = body + footer if body else footer.lstrip()
+
         return ToolResult(
             tool_call_id="",
             success=True,
-            output=content,
+            output=output,
             duration_ms=int((time.monotonic() - start) * 1000),
         )
 
@@ -197,6 +327,18 @@ class FileListTool:
                         "description": "用于过滤结果的 glob 模式（如 '*.py'）",
                         "default": "*",
                     },
+                    "recursive": {
+                        "type": "boolean",
+                        "description": "递归列出子目录（树形）。默认 false（仅当前层）。",
+                        "default": False,
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "description": "递归最大深度（仅 recursive=true 时生效）。默认 3，上限 8。",
+                        "default": 3,
+                        "minimum": 1,
+                        "maximum": 8,
+                    },
                 },
                 "required": [],
             },
@@ -208,9 +350,17 @@ class FileListTool:
         start = time.monotonic()
         directory = arguments.get("directory", ".")
         pattern = arguments.get("pattern", "*")
+        recursive = bool(arguments.get("recursive", False))
+        max_depth = int(arguments.get("max_depth", 3))
+        max_depth = max(1, min(max_depth, 8))
 
         try:
-            entries = await context.backend.list(directory, pattern)
+            if recursive:
+                tree = await context.backend.list_tree(
+                    directory, pattern=pattern, max_depth=max_depth
+                )
+            else:
+                entries = await context.backend.list(directory, pattern)
         except OutsideWorkspace:
             return _error(f"路径 '{directory}' 超出了工作区范围", start)
         except NotADirectory:
@@ -218,8 +368,18 @@ class FileListTool:
         except WorkspaceError as e:
             return _error(f"列目录失败：{e}", start)
 
-        lines = [f"{'d ' if entry.is_dir else 'f '}{entry.path}" for entry in entries]
-        output = "\n".join(lines) if lines else "（空目录）"
+        if recursive:
+            output = _render_file_tree(
+                tree.entries,
+                directory,
+                max_depth,
+                tree.truncated,
+                tree.elided_count,
+            )
+        else:
+            lines = [f"{'d ' if entry.is_dir else 'f '}{entry.path}" for entry in entries]
+            output = "\n".join(lines) if lines else "（空目录）"
+
         return ToolResult(
             tool_call_id="",
             success=True,

@@ -166,7 +166,8 @@ export function FocusedTurnNode({ data }: NodeProps) {
             <ReactFlowProvider>
               <ExecutionScopeContext.Provider value={messageId}>
                 <GraphView
-                  embedded
+                  interactive={false}
+                  fitMode="contain"
                   onNodeSelect={onNodeSelect}
                   onEndpointSelect={onEndpointSelect}
                 />

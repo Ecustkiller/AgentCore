@@ -23,6 +23,7 @@ only validation + the post→ack mapping.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 from agentcore.core.logging import get_logger
@@ -32,6 +33,9 @@ from agentcore.runtime.runs.notewall import (
     NOTE_KIND_CLAIM,
     NOTE_KIND_DECISION,
     NOTE_KIND_HEADS_UP,
+    SYSTEM_AGENT_ID,
+    SYSTEM_ROLE,
+    SYSTEM_RUN_ID,
 )
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 
@@ -140,6 +144,23 @@ class PostNoteTool:
                 context.on_note(note)
             except Exception:  # noqa: BLE001 — liveliness only; never break the worker
                 logger.warning("worker.post_note.emit_failed", run_id=context.run_id)
+        conflict_desc = wall.detect_conflict(note)
+        if conflict_desc:
+            system_note = wall.post(
+                run_id=SYSTEM_RUN_ID,
+                agent_id=SYSTEM_AGENT_ID,
+                role=SYSTEM_ROLE,
+                kind=NOTE_KIND_HEADS_UP,
+                text=conflict_desc,
+            )
+            if system_note is not None and context.on_note is not None:
+                with contextlib.suppress(Exception):
+                    context.on_note(system_note)
+            logger.info(
+                "worker.post_note.conflict_detected",
+                run_id=context.run_id,
+                conflicting_note=note.seq,
+            )
         return ToolResult(
             tool_call_id="",
             success=True,

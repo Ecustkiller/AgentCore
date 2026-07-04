@@ -31,9 +31,11 @@ from agentcore.workspace._paths import (
     read_text_file,
     resolve_safe_path,
 )
+from agentcore.workspace.indexing.manager import IndexManager
 from agentcore.workspace.protocol import (
     AlreadyExists,
     AmbiguousMatch,
+    CodeSearchResult,
     DirEntry,
     GrepHit,
     GrepQuery,
@@ -44,7 +46,10 @@ from agentcore.workspace.protocol import (
     NotUTF8,
     OutsideWorkspace,
     PathNotFound,
+    ReadLinesResult,
     ReplaceOutcome,
+    TreeEntry,
+    TreeResult,
     WorkspaceIOError,
 )
 
@@ -109,6 +114,7 @@ class ServerWorkspace:
         # Flips True on the first mutating op so the service snapshots only
         # workspaces a turn actually changed (see WorkspaceBackend.dirty).
         self._dirty = False
+        self._index_manager: IndexManager | None = None
 
     @property
     def dirty(self) -> bool:
@@ -124,6 +130,11 @@ class ServerWorkspace:
         if resolved is None:
             raise OutsideWorkspace(rel)
         return resolved
+
+    def _get_index_manager(self) -> IndexManager:
+        if self._index_manager is None:
+            self._index_manager = IndexManager(str(self._root.resolve()))
+        return self._index_manager
 
     async def read(self, path: str) -> str:
         target = self._safe(path)
@@ -253,6 +264,87 @@ class ServerWorkspace:
             ]
         except OSError as e:
             raise WorkspaceIOError(str(e)) from e
+
+    async def read_lines(
+        self, path: str, *, offset: int = 1, limit: int | None = None
+    ) -> ReadLinesResult:
+        target = self._safe(path)
+        if not target.exists():
+            raise PathNotFound(path)
+        if not target.is_file():
+            raise NotAFile(path)
+        try:
+            content = target.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            raise WorkspaceIOError(str(e)) from e
+
+        lines = content.splitlines()
+        total = len(lines)
+        start_idx = max(0, offset - 1)
+        if start_idx >= total:
+            return ReadLinesResult(
+                lines=[],
+                start_line=offset,
+                end_line=offset - 1,
+                total_lines=total,
+            )
+
+        end_idx = total if limit is None else min(total, start_idx + limit)
+        selected = lines[start_idx:end_idx]
+        return ReadLinesResult(
+            lines=selected,
+            start_line=start_idx + 1,
+            end_line=end_idx,
+            total_lines=total,
+        )
+
+    async def list_tree(
+        self,
+        directory: str,
+        *,
+        pattern: str = "*",
+        max_depth: int = 3,
+        max_entries: int = 200,
+    ) -> TreeResult:
+        base = self._safe(directory)
+        if not base.is_dir():
+            raise NotADirectory(directory)
+
+        entries: list[TreeEntry] = []
+        truncated = False
+        elided_count = 0
+        name_filter = pattern or "*"
+
+        def walk(dir_path: Path, depth: int) -> None:
+            nonlocal truncated, elided_count
+            if depth > max_depth:
+                return
+            try:
+                children = sorted(dir_path.iterdir(), key=lambda p: p.name.lower())
+            except OSError as e:
+                raise WorkspaceIOError(str(e)) from e
+
+            for child in children:
+                if child.name in IGNORED_DIRS:
+                    continue
+
+                rel = _posix(os.path.relpath(child, self._root))
+                is_dir = child.is_dir() and not child.is_symlink()
+
+                if not is_dir and not fnmatch.fnmatch(child.name, name_filter):
+                    continue
+
+                if len(entries) >= max_entries:
+                    truncated = True
+                    elided_count += 1
+                    continue
+
+                entries.append(TreeEntry(path=rel, is_dir=is_dir, depth=depth))
+                if is_dir and depth < max_depth:
+                    walk(child, depth + 1)
+
+        walk(base, 1)
+        return TreeResult(entries=entries, truncated=truncated, elided_count=elided_count)
 
     async def index_files(
         self, cap: int | None = None, *, order: str = "path"
@@ -461,6 +553,26 @@ class ServerWorkspace:
                 result.truncated = True
                 stop = True
         return stop
+
+    async def code_search(
+        self,
+        query: str,
+        *,
+        language: str | None = None,
+        path_prefix: str = ".",
+        max_results: int = 10,
+    ) -> CodeSearchResult:
+        manager = self._get_index_manager()
+        return await manager.search(
+            query,
+            language=language,
+            path_prefix=path_prefix,
+            max_results=max_results,
+        )
+
+    async def ensure_code_index(self, *, force: bool = False) -> bool:
+        manager = self._get_index_manager()
+        return await manager.ensure_index(self, force=force)
 
     async def execute(self, req: ExecutionRequest) -> ExecutionResult:
         # Run code in the workspace root so relative file paths resolve against

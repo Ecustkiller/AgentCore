@@ -1,3 +1,8 @@
+import {
+  DEBATE_HUD_TAB_ID,
+  WORKSPACE_TAB_ID,
+  useSidePanelStore,
+} from "@/stores/sidePanel";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   applyCanvasZoomPanelPref,
@@ -6,11 +11,6 @@ import {
   loadCanvasZoomPanelPref,
   persistCanvasZoomPanelPref,
 } from "../canvasZoomPanel";
-import {
-  DEBATE_HUD_TAB_ID,
-  WORKSPACE_TAB_ID,
-  useSidePanelStore,
-} from "@/stores/sidePanel";
 
 describe("canvas zoom panel persistence", () => {
   const KEY = "agentcore:canvas-zoom-panel";
@@ -73,7 +73,10 @@ describe("canvas zoom panel persistence", () => {
   });
 
   it("drops unknown stored shapes", () => {
-    store[KEY] = JSON.stringify({ c1: { kind: "nope" }, c2: { kind: "closed" } });
+    store[KEY] = JSON.stringify({
+      c1: { kind: "nope" },
+      c2: { kind: "closed" },
+    });
     expect(loadCanvasZoomPanelPref("c1")).toBeNull();
     expect(loadCanvasZoomPanelPref("c2")).toEqual({ kind: "closed" });
   });

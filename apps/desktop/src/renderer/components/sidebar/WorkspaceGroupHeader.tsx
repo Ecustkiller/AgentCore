@@ -27,9 +27,7 @@ import { useConversationStore } from "@/stores/conversation";
 import {
   Archive,
   ChevronRight,
-  Cloud,
   FolderOpen,
-  HardDrive,
   MessageSquare,
   MoreHorizontal,
   Plus,
@@ -77,7 +75,10 @@ export function WorkspaceGroupHeader({
 
   const browseFiles = () => {
     const convId = convs[0]?.id;
-    navigate("/files", convId ? { state: { focusWsId: `conv:${convId}` } } : undefined);
+    navigate(
+      "/files",
+      convId ? { state: { focusWsId: `conv:${convId}` } } : undefined,
+    );
   };
 
   const newChatInProject = () => {

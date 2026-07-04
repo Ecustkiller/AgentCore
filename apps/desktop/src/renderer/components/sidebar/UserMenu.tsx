@@ -13,7 +13,8 @@ export function UserMenu() {
   const authUser = useAuthStore((s) => s.user);
   const navigate = useNavigate();
 
-  const displayName = authUser?.displayName || profile.displayName;
+  const displayName =
+    authUser?.displayName || authUser?.username || profile.displayName;
   const initials = displayName.charAt(0).toUpperCase();
 
   const goMore = () => navigate("/more");

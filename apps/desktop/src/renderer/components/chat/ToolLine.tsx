@@ -148,7 +148,7 @@ export function ToolLine({
     if (prevRunning.current && !running && autoExpandsOnDone && hasBody)
       setOpen(true);
     prevRunning.current = running;
-  }, [running, autoExpandsOnDone, hasBody]);
+  }, [running, autoExpandsOnDone, hasBody, setOpen]);
 
   // Waiting-state hint (联网搜索前端展示优化): coarse phase (正在检索 / 排队中 / 改用备用引擎)
   // plus a live elapsed timer, replacing the dead spinner. Empty at the very first instant

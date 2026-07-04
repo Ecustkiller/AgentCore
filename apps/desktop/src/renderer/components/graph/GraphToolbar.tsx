@@ -37,8 +37,7 @@ export function GraphToolbar({
       )}
       <div className="flex items-center gap-0.5 rounded-lg border border-border bg-card/90 p-1 shadow-sm backdrop-blur">
         {LAYOUT_OPTIONS.map((opt) => {
-          const disabled =
-            !!opt.requiresParallelTimeline && !timelineAvailable;
+          const disabled = !!opt.requiresParallelTimeline && !timelineAvailable;
           const tip =
             opt.kind === "timeline" && disabled
               ? "调度结束后可查看时间布局（需 ≥2 个队员）"

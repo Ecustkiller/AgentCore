@@ -8,18 +8,20 @@ import { StickyNote } from "lucide-react";
  * sibling doesn't duplicate it (success tone reads as「已认领」, distinct from decision's brand blue
  * and heads_up's caution amber). Mirrors the backend NoteWall labels (runtime/runs/notewall.py);
  * an unknown kind falls back to 提个醒 (the lower-commitment one, matching the backend coercion). */
+const NOTE_BADGE_GRAY = "bg-muted text-muted-foreground";
+
 const NOTE_KIND_META: Record<string, { label: string; className: string }> = {
-  decision: { label: "我定了", className: "bg-primary/10 text-primary" },
-  heads_up: { label: "提个醒", className: "bg-muted text-muted-foreground" },
-  claim: { label: "我领了", className: "bg-success/10 text-success" },
+  decision: { label: "约定", className: NOTE_BADGE_GRAY },
+  heads_up: { label: "提醒", className: NOTE_BADGE_GRAY },
+  claim: { label: "认领", className: NOTE_BADGE_GRAY },
 };
 
 /** 便签会过期 → supersession (§2.2): a note marked `superseded` (改写) / `voided` (作废) is shown
  * struck-through + dimmed with this badge, so a reader never mistakes a stale decision for current
  * truth. `active` notes carry no status badge. */
 const NOTE_STATUS_META: Record<string, { label: string; className: string }> = {
-  superseded: { label: "已更新", className: "bg-muted text-muted-foreground" },
-  voided: { label: "已作废", className: "bg-destructive/10 text-destructive" },
+  superseded: { label: "已更新", className: NOTE_BADGE_GRAY },
+  voided: { label: "已作废", className: NOTE_BADGE_GRAY },
 };
 
 /**
@@ -89,8 +91,17 @@ function NoteRow({ note }: { note: TeamNote }) {
             </span>
           )}
           {note.source === "ceo" && (
-            <span className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-xs font-medium text-primary">
-              主 Agent 播种
+            <span
+              className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${NOTE_BADGE_GRAY}`}
+            >
+              团队共识
+            </span>
+          )}
+          {note.source === "inherited" && (
+            <span
+              className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${NOTE_BADGE_GRAY}`}
+            >
+              上轮遗留
             </span>
           )}
         </div>

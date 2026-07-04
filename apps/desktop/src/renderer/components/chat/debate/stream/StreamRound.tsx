@@ -10,11 +10,7 @@ import {
 } from "../model";
 import { InterjectionBubble } from "./AskBubble";
 import { CrossExamBlock } from "./CrossExam";
-import {
-  ModeratorNote,
-  ModeratorPending,
-  ModeratorSpeech,
-} from "./Moderator";
+import { ModeratorNote, ModeratorPending, ModeratorSpeech } from "./Moderator";
 import { SpeechBubble } from "./SpeechBubble";
 
 /** 轮分割线（居中）：第 N 轮 + 焦点（与辩题同文则省）+ 进行中 pill。 */

@@ -88,6 +88,8 @@ class MoveConversationRequest(BaseModel):
 
 
 class CreateFolderRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
     name: str
     local_dir: str | None = None
 

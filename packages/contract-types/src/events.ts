@@ -503,7 +503,7 @@ export interface TeamNotePostedPayload {
    * corrected decision) or `void` (作废 — target becomes voided, this note is a retraction). */
   supersede_mode?: "update" | "void";
   /** `ceo` when seeded by the host before workers run; absent or `worker` for worker posts. */
-  source?: "ceo" | "worker";
+  source?: "ceo" | "worker" | "inherited";
 }
 
 /** Token counts in the ledger short-key form. `cache_hit + cache_miss === input`;

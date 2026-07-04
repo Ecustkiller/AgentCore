@@ -121,11 +121,13 @@ export function CommandPalette() {
   // is adopted (debounce keeps the request count low, so no abort needed).
   const seqRef = useRef(0);
 
-  // Each open is a fresh search: clear the query and reset the cursor. (Input
-  // focus is handled by the dialog's onOpenAutoFocus.)
+  // Each open adopts an optional prefilled query (e.g. FindBar → global search);
+  // otherwise starts empty. Input focus is handled by onOpenAutoFocus.
   useEffect(() => {
     if (!open) return;
-    setQuery("");
+    const initial = useUIStore.getState().searchInitialQuery;
+    setQuery(initial);
+    if (initial) useUIStore.setState({ searchInitialQuery: "" });
   }, [open]);
 
   // Resolve the query to grouped entity results: empty → recent conversations
@@ -309,7 +311,7 @@ export function CommandPalette() {
               ref={inputRef}
               value={query}
               onValueChange={setQuery}
-              placeholder="搜索对话、消息、文件夹，或运行命令…"
+              placeholder="搜索或运行命令…"
               className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
             />
             {loading && (

@@ -13,6 +13,18 @@ from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.sandbox.protocol import ExecutionRequest
 
 
+def _make_output_callback(context: ToolContext):
+    """Forward sandbox output chunks via ``on_progress`` when a live sink is wired."""
+    on_progress = context.on_progress
+    if not on_progress:
+        return None
+
+    def callback(stream: str, chunk: str) -> None:
+        on_progress("output", {"stream": stream, "chunk": chunk})
+
+    return callback
+
+
 class CodeExecuteTool:
     """Execute code in a sandboxed environment."""
 
@@ -74,6 +86,7 @@ class CodeExecuteTool:
             code=code,
             language=language,
             timeout_seconds=timeout,
+            on_output=_make_output_callback(context),
         )
 
         # 工具执行阶段进度 (联网前端展示优化): the sandbox run is the slow blocking leg —

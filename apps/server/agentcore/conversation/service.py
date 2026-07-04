@@ -46,13 +46,19 @@ from agentcore.conversation.turn_runner import (
 from agentcore.conversation.turn_runner import (
     suspension_callbacks as _suspension_callbacks,
 )
-from agentcore.conversation.turns import regenerate_chat, resume_chat, stream_chat
+from agentcore.conversation.turns import (
+    regenerate_chat,
+    resume_chat,
+    retry_failed_chat,
+    stream_chat,
+)
 
 __all__ = [
     "dispatch_handoff",
     "record_local_turn",
     "regenerate_chat",
     "resume_chat",
+    "retry_failed_chat",
     "run_handoff_job",
     "stream_chat",
     # Test / internal aliases kept on the facade for stable import paths.

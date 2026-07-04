@@ -8,7 +8,7 @@ from agentcore.runtime.runs.executor import (
     _build_messages,
     _context_block_payloads,
 )
-from agentcore.runtime.runs.types import ContextBlock, RunContract, RunPhase, RunSpec, RunState
+from agentcore.runtime.runs.types import ContextBlock, Deliverable, RunPhase, RunSpec, RunState
 from tests.runs_executor.conftest import _plan
 
 
@@ -81,21 +81,23 @@ def test_team_position_block_four_dag_shapes():
 
 
 async def test_context_blocks_channel_sequence_and_single_source():
-    # A solo worker (no team_position) with expected_output + contract + steer exercises
+    # A solo worker (no team_position) with deliverable + steer exercises
     # the optional channels and pins their order; the rendered opening user message must
     # be EXACTLY the same ContextBlock list joined (用户看到的 == LLM 吃到的, 双投影零漂移).
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
-    spec = replace(plan.by_id("t_1"), expected_output="一段结论", steer="按新方向调整")
-    contract = RunContract(required_sections=["结论"])
-    blocks = _build_context_blocks(plan, spec, {}, "原始请求", contract, [])
+    spec = replace(
+        plan.by_id("t_1"),
+        deliverable=Deliverable(name="一段结论", required_sections=["结论"]),
+        steer="按新方向调整",
+    )
+    blocks = _build_context_blocks(plan, spec, {}, "原始请求", None, [])
     assert [b.channel for b in blocks] == [
         "request",
         "task",
-        "expected_output",
-        "requirements",
+        "deliverable",
         "steer",
     ]
-    rendered = _build_messages(plan, spec, {}, "SYS", "原始请求", contract)[1].content
+    rendered = _build_messages(plan, spec, {}, "SYS", "原始请求")[1].content
     assert rendered == "\n\n".join(f"## {b.heading}\n{b.body}" for b in blocks)
     # steer rides last + highest priority, carried verbatim.
     assert blocks[-1].channel == "steer"

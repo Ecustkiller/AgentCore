@@ -1,19 +1,8 @@
 """Retention cleanup for soft-deleted workspaces (决策⑦: 与软删除对齐).
 
-Deleting a folder or conversation is a *soft* delete (a ``deleted_at`` stamp):
-the chat disappears from the UI but its workspace files stay on disk, fully
-recoverable. This module is the second half — a periodic background sweep that,
-once ``deleted_at`` is older than the retention period, *physically* removes the
-workspace directory, its snapshot history, and the DB records. The user's
-"empty recycle bin" path can call :func:`run_retention_sweep`'s helpers directly
-for an immediate purge.
-
-Ownership follows 决策⑦: files belong to the **project (folder)**. A deleted
-folder's conversations were already re-parented to ungrouped at soft-delete (and
-start fresh in their own conversation spaces), so a folder purge drops that
-folder's orphaned shared space; a deleted *ungrouped* conversation drops its own
-space; a deleted *grouped* conversation only loses its records (its files live on
-in the still-shared folder space).
+Folder 重构 To-Be: every conversation owns ``conv/<id>/`` scratch; folders are
+sidebar-only. Aged soft-deleted conversations lose their scratch + DB row; aged
+soft-deleted folders lose only the folder row (no independent space).
 """
 
 from __future__ import annotations
@@ -33,22 +22,13 @@ from agentcore.workspace.snapshots import purge_snapshots
 
 logger = get_logger(__name__)
 
-# `conversation_id` is ignored by the path helpers when a folder_id is given (a
-# folder's space is keyed by the folder), so a placeholder reads clearer than "".
+# Legacy name kept for migration scripts; folder rows no longer own disk space.
 _FOLDER_SCOPE = "(folder)"
 
 
 async def purge_folder_space(*, user_id: str, folder_id: str) -> None:
-    """Delete a folder's shared workspace directory + its snapshot history."""
-    key = workspace_storage_key(user_id=user_id, folder_id=folder_id, conversation_id=_FOLDER_SCOPE)
-    async with workspace_lock(key):
-        shutil.rmtree(
-            workspace_root_path(
-                user_id=user_id, folder_id=folder_id, conversation_id=_FOLDER_SCOPE
-            ),
-            ignore_errors=True,
-        )
-        await purge_snapshots(user_id=user_id, folder_id=folder_id, conversation_id=_FOLDER_SCOPE)
+    """No-op under To-Be — folders have no independent workspace directory."""
+    del user_id, folder_id
 
 
 async def _purge_conversation_space(*, user_id: str, conversation_id: str) -> None:
@@ -96,10 +76,7 @@ async def run_retention_sweep() -> dict[str, int]:
     purged_convs = 0
     for conv in conversations:
         try:
-            # A grouped conversation's files belong to the (shared) folder space;
-            # only an ungrouped one owns a space to delete.
-            if conv.folder_id is None:
-                await _purge_conversation_space(user_id=conv.user_id, conversation_id=conv.id)
+            await _purge_conversation_space(user_id=conv.user_id, conversation_id=conv.id)
         except Exception as e:
             logger.warning(
                 "retention.conversation_purge_failed",

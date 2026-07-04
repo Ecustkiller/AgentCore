@@ -1,7 +1,6 @@
-import { Button, IconButton, SurfaceRowButton } from "@/components/ui";
+import { IconButton, SearchTrigger, SurfaceRowButton } from "@/components/ui";
 import { isWebClient } from "@/lib/capabilities";
 import { startNewConversation } from "@/lib/newConversation";
-import { chord } from "@/lib/shortcuts";
 import { useUnreadTotal } from "@/stores/messaging";
 import { useSidebarStore } from "@/stores/sidebar";
 import { useUIStore } from "@/stores/ui";
@@ -12,14 +11,12 @@ import {
   MessageSquare,
   PanelLeft,
   PanelLeftClose,
-  Search,
   Wrench,
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   RecentConversations,
   ViewAllConversations,
-  ViewArchivedConversations,
 } from "./RecentConversations";
 import { UserMenu } from "./UserMenu";
 import { WorkspaceGroups } from "./WorkspaceGroups";
@@ -92,29 +89,10 @@ export function Sidebar() {
               </IconButton>
             </div>
 
-            {collapsed ? (
-              <div className="flex justify-center">
-                <IconButton
-                  tone="sidebar"
-                  onClick={openSearch}
-                  aria-label="搜索"
-                >
-                  <Search size={16} />
-                </IconButton>
-              </div>
-            ) : (
-              <Button
-                variant="neutral"
-                onClick={openSearch}
-                icon={<Search size={13} className="shrink-0" />}
-                className="w-full justify-start gap-2 border border-sidebar-border px-3 text-sm text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-              >
-                搜索…
-                <kbd className="ml-auto text-xs text-sidebar-foreground/40">
-                  {chord("k")}
-                </kbd>
-              </Button>
-            )}
+            <SearchTrigger
+              collapsed={collapsed}
+              onClick={() => openSearch()}
+            />
           </div>
           <div className="mx-3 mt-2 border-t border-sidebar-border" />
         </>
@@ -166,7 +144,6 @@ export function Sidebar() {
           <>
             <WorkspaceGroups />
             <RecentConversations />
-            <ViewArchivedConversations />
             <ViewAllConversations />
           </>
         )}

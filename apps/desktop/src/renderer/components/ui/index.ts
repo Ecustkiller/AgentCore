@@ -31,6 +31,16 @@ export {
 } from "./icon-button";
 export { FinishReasonChip } from "./finish-reason-chip";
 export { Input, Textarea } from "./input";
+export {
+  SearchField,
+  type SearchFieldProps,
+  type SearchFieldSize,
+  type SearchFieldVariant,
+} from "./search-field";
+export {
+  SearchTrigger,
+  TitleBarSearchTrigger,
+} from "./search-trigger";
 export { PatternCardHeader } from "./pattern-card-header";
 export { SectionLabel } from "./section-label";
 export {

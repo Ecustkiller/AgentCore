@@ -1,16 +1,19 @@
 import {
+  baseName,
+  toolDetail,
+  toolMeta,
+} from "@/components/chat/message-bubble/constants";
+import {
   type ToolResultData,
   ToolResultView,
   hasToolResultBody,
   toolResultPeek,
 } from "@/components/chat/toolResult/ToolResultView";
-import {
-  baseName,
-  toolDetail,
-  toolMeta,
-} from "@/components/chat/message-bubble/constants";
 import { Badge, Button } from "@/components/ui";
-import { usePersistentDisclosure, useStreamAwareDisclosure } from "@/stores/disclosure";
+import {
+  usePersistentDisclosure,
+  useStreamAwareDisclosure,
+} from "@/stores/disclosure";
 import { type ToolCallState, toolLabel } from "@/stores/execution";
 import { ChevronDown, ChevronRight, Wrench } from "lucide-react";
 
@@ -18,7 +21,10 @@ import { ChevronDown, ChevronRight, Wrench } from "lucide-react";
  * rich result (工具结果富渲染) — a search's cards, a code run's terminal, an edit's
  * diff — or the text result, via the shared {@link ToolResultView}. */
 function RunToolRow({ tc, keyBase }: { tc: ToolCallState; keyBase: string }) {
-  const [open, setOpen] = usePersistentDisclosure(`${keyBase}:tool:${tc.id}`, false);
+  const [open, setOpen] = usePersistentDisclosure(
+    `${keyBase}:tool:${tc.id}`,
+    false,
+  );
   const data: ToolResultData = {
     toolName: tc.toolName,
     args: tc.arguments,
@@ -124,7 +130,10 @@ export function ToolCallsSection({
       >
         <span className="flex w-full items-start gap-1.5">
           {expanded ? (
-            <ChevronDown size={14} className="mt-0.5 shrink-0 text-muted-foreground" />
+            <ChevronDown
+              size={14}
+              className="mt-0.5 shrink-0 text-muted-foreground"
+            />
           ) : (
             <ChevronRight
               size={14}

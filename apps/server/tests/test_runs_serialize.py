@@ -23,7 +23,7 @@ from agentcore.runtime.runs.serialize import (
     transcript_from_json,
     transcript_to_json,
 )
-from agentcore.runtime.runs.types import RunContract, RunKind, RunPhase, RunPolicy, RunState
+from agentcore.runtime.runs.types import Deliverable, RunKind, RunPhase, RunPolicy, RunState
 
 
 def _assistant_call(call_id: str, name: str, arguments: str) -> LLMMessage:
@@ -227,7 +227,7 @@ def test_transcript_round_trips_with_tool_calls_and_tool_results():
     assert restored[4].reasoning_content == "想了想"
 
 
-def test_spec_round_trips_with_nested_policy_and_contract():
+def test_spec_round_trips_with_nested_policy_and_deliverable():
     spec = RunSpec(
         run_id="del_abc_1",
         task="做A",
@@ -235,10 +235,8 @@ def test_spec_round_trips_with_nested_policy_and_contract():
         role="研究员",
         tools=["web_search", "read_url"],
         model_preference="strong",
-        policy=RunPolicy(
-            result_handling="summarize",
-            contract=RunContract(must_contain=["风险"], min_length=100, strict=True),
-        ),
+        deliverable=Deliverable(must_contain=["风险"], min_length=100, strict=True),
+        policy=RunPolicy(result_handling="summarize"),
     )
     restored = spec_from_json(spec_to_json(spec))
     assert restored.run_id == "del_abc_1"
@@ -246,19 +244,35 @@ def test_spec_round_trips_with_nested_policy_and_contract():
     assert restored.tools == ["web_search", "read_url"]
     # kind coerced back to the enum
     assert restored.kind is RunKind.AGENT
-    # nested policy is a real RunPolicy, and its contract a real RunContract — so
-    # continue_run's ``spec.policy.contract`` keeps working after a DB round-trip.
+    # nested policy is a real RunPolicy, and its deliverable a real Deliverable — so
+    # continue_run's ``spec.deliverable`` keeps working after a DB round-trip.
     assert isinstance(restored.policy, RunPolicy)
     assert restored.policy.result_handling == "summarize"
-    assert isinstance(restored.policy.contract, RunContract)
-    assert restored.policy.contract.must_contain == ["风险"]
-    assert restored.policy.contract.strict is True
+    assert isinstance(restored.deliverable, Deliverable)
+    assert restored.deliverable.must_contain == ["风险"]
+    assert restored.deliverable.strict is True
 
 
-def test_spec_without_contract_round_trips_to_none():
+def test_spec_without_deliverable_round_trips_to_none():
     spec = RunSpec(run_id="r1", task="t", policy=RunPolicy())
     restored = spec_from_json(spec_to_json(spec))
-    assert restored.policy.contract is None
+    assert restored.deliverable is None
+
+
+def test_spec_legacy_contract_on_policy_round_trips_to_deliverable():
+    raw = {
+        "run_id": "r1",
+        "task": "t",
+        "expected_output": "报告.md",
+        "policy": {
+            "contract": {"min_length": 50, "must_contain": ["结论"]},
+        },
+    }
+    restored = spec_from_json(raw)
+    assert restored.deliverable is not None
+    assert restored.deliverable.name == "报告.md"
+    assert restored.deliverable.min_length == 50
+    assert restored.deliverable.must_contain == ["结论"]
 
 
 def test_plan_json_round_trips_late_bound_placeholder_node():

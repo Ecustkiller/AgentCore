@@ -41,7 +41,9 @@ describe("disclosure store", () => {
 
     // Setting it back to the default (false) drops the key entirely — table stays converged.
     s.setKey("c1::m1:tool:a", false, false);
-    expect(useDisclosureStore.getState().map).not.toHaveProperty("c1::m1:tool:a");
+    expect(useDisclosureStore.getState().map).not.toHaveProperty(
+      "c1::m1:tool:a",
+    );
     expect(persisted()).not.toHaveProperty("c1::m1:tool:a");
   });
 

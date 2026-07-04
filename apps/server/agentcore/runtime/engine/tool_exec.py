@@ -7,9 +7,9 @@ from dataclasses import replace
 from typing import Any
 
 from agentcore.core.logging import get_logger
-from agentcore.core.types import ToolApproval, ToolEffect
+from agentcore.core.types import ToolEffect
 from agentcore.llm.protocol import LLMMessage, ToolCall
-from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate
+from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate, tool_call_requires_approval
 from agentcore.runtime.citations import annotate_tool_citations, merge_citations
 from agentcore.runtime.events import (
     EventSink,
@@ -82,7 +82,9 @@ async def execute_tools(
                 [],
             )
 
-        if approval_gate is not None and tool.schema.approval is ToolApproval.GRANTABLE:
+        if approval_gate is not None and tool_call_requires_approval(
+            name, tool.schema.approval, args
+        ):
             decision = await approval_gate.authorize(
                 tool_name=name, tool_call_id=tc.id, arguments=args
             )
@@ -107,7 +109,10 @@ async def execute_tools(
         def _emit_phase(phase: str) -> None:
             sink.emit(tool_use_progress(tc.id, name, phase, run_id=run_id))
 
-        ctx = replace(context, on_phase=_emit_phase)
+        def _emit_progress(phase: str, data: dict[str, Any] | None = None) -> None:
+            sink.emit(tool_use_progress(tc.id, name, phase, run_id=run_id, extra=data))
+
+        ctx = replace(context, on_phase=_emit_phase, on_progress=_emit_progress)
 
         started = time.monotonic()
         timeout = resolve_tool_timeout(tool.schema)

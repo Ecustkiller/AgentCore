@@ -32,8 +32,10 @@ degrade; skip → cascade-skip dependents; abort → drain in-flight then stop; 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 
 from agentcore.runtime.runs.concurrency import child_budget, current_budget, set_budget
 from agentcore.runtime.runs.plan import RunPlan
@@ -55,6 +57,27 @@ from agentcore.runtime.runs.types import (
 # and ride a freed slot. Kept in step with MAX_PARALLEL_DELEGATIONS (the tree-wide
 # budget) so neither alone re-bottlenecks a wide fan-out.
 DEFAULT_MAX_PARALLEL = 8
+
+
+def _merge_retry_billing(prior: RunState, current: RunState) -> RunState:
+    """Fold token/cost spend from earlier infra-retry attempts into the returned state.
+
+    B-deep 失败计费 survives scheduler retries: a node that metered spend on attempt 1
+    then fails again on attempt 2 must not drop attempt 1 from the final RunState the
+    ledger and UI read.
+    """
+    if not prior.usage:
+        return current
+    merged_usage = dict(current.usage)
+    for key, value in prior.usage.items():
+        merged_usage[key] = merged_usage.get(key, 0) + value
+    merged_cost = dict(current.cost)
+    for key, value in prior.cost.items():
+        if key == "currency":
+            merged_cost.setdefault(key, value)
+        else:
+            merged_cost[key] = merged_cost.get(key, 0) + int(value)
+    return replace(current, usage=merged_usage, cost=merged_cost)
 
 
 class WaveScheduler:
@@ -251,10 +274,8 @@ class WaveScheduler:
                         # User-initiated single cancel: absorb gracefully, don't propagate
                         if not task.done():
                             task.cancel()
-                        try:
+                        with contextlib.suppress(asyncio.CancelledError, Exception):
                             task.result()
-                        except (asyncio.CancelledError, Exception):
-                            pass
                         state = RunState(phase=RunPhase.CANCELLED)
                     elif task.cancelled():
                         raise asyncio.CancelledError  # external cancel, propagate
@@ -418,6 +439,8 @@ class WaveScheduler:
                         await asyncio.sleep(delay)
                 state = await executor(spec, completed)
                 state.attempt = attempt
+                if last is not None:
+                    state = _merge_retry_billing(last, state)
                 if state.phase is RunPhase.COMPLETED:
                     return state
                 last = state

@@ -262,7 +262,7 @@ export interface TeamNote {
   status: "active" | "superseded" | "voided";
   supersedes: string | null;
   /** `ceo` = host seed_notes; otherwise worker post_note. */
-  source?: "ceo" | "worker";
+  source?: "ceo" | "worker" | "inherited";
 }
 
 export interface RunNode {

@@ -292,6 +292,29 @@ _ASK_USER_MIDTASK = """\
 「采纳正方 / 采纳反方 / 都要 / 补充论证」这类具体选项让 ta 拍板。
 </ask_user_midtask>"""
 
+_VERIFY_AND_FIX = """\
+## 验证与修复工作流
+
+完成代码改动后，按以下步骤验证：
+
+1. 运行 test_run(scope="affected") 检查受影响的测试
+2. 如果全部通过 → 正常完成交付
+3. 如果有失败：
+   a. 阅读失败用例的错误信息
+   b. 用 file_read 查看失败测试和相关代码的上下文
+   c. 修复代码（注意：不要修改测试文件本身）
+   d. 再次运行 test_run 验证修复
+4. 最多重试 3 轮。如果 3 轮后仍有失败：
+   - 在交付摘要中如实列出未通过的测试和可能原因
+   - 标记为 degraded 完成（不阻塞交付）
+5. 如果测试命令本身报错（非断言失败，如环境问题）→ escalate
+
+关键纪律：
+- 禁止修改测试文件来让测试通过
+- 禁止删除或跳过失败的测试
+- 同一个错误连续出现 2 轮且修复方案相同 → 停止重试，如实报告
+"""
+
 _DELEGATE_CHECKPOINT = """\
 <delegate_checkpoint>
 委派途中的波间挂起（checkpoint_after）：当你在【同一次 delegate 的多步流水线（用 depends_on 串成的 DAG）】\
@@ -307,7 +330,7 @@ ask_user_midtask）。克制使用，别给每个步骤都设。
 </delegate_checkpoint>"""
 
 
-# --- The 6 system skills (single source of truth) -----------------------------
+# --- The system skills (single source of truth) -----------------------------
 # Catalog summaries (the always-on one-line triggers) per the design (§4.4): sharp
 # enough that the model knows WHEN to pull each, without spending the body on it.
 _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
@@ -360,6 +383,12 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
         ),
         body=_DELEGATE_CHECKPOINT,
         requires_tools=("ask_user",),
+    ),
+    SystemSkill(
+        name="verify_and_fix",
+        summary="完成代码改动后验证并修复测试失败（test_run → 读上下文 → 修代码 → 重试）",
+        body=_VERIFY_AND_FIX,
+        requires_tools=("test_run",),
     ),
 )
 

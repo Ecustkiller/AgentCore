@@ -7,10 +7,10 @@ import { useSidePanelStore } from "@/stores/sidePanel";
 import { CornerDownRight } from "lucide-react";
 import { CollapsibleSpeech } from "../CollapsibleSpeech";
 import { SideNamePill } from "../SideChip";
-import {
-  type DebateClashView,
-  type DebateRoundModel,
-  type DebateSideModel,
+import type {
+  DebateClashView,
+  DebateRoundModel,
+  DebateSideModel,
 } from "../model";
 import { StanceVote } from "./AskBubble";
 import { speechPlaceholder } from "./speechPlaceholder";

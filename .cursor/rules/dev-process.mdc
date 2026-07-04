@@ -55,4 +55,8 @@ alwaysApply: true
 3. **禁止排查 git 内部**：不推测 worktree 嵌套、路径大小写/分隔符、git 配置损坏、仓库结构异常。
 4. 只有用户**明确要求** git 操作时才跑 git 命令；仍遵守「非请勿 commit」。
 
+## 产品 AI 日志查询
+
+用户给出 32 位 hex ID / UUID → **先读 `conversation-logs.mdc`** 再动手。禁止在文件系统（含 `agent-transcripts/`）搜索这类 ID。
+
 文档治理规范见 `doc-governance.mdc`。
