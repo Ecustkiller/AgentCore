@@ -11,6 +11,7 @@ import {
   cfEnv,
   loadDeployEnv,
   run,
+  runWranglerPagesDeploy,
 } from "../../../deploy/scripts/load-deploy-env.mjs";
 
 const PROJECT = "agentcore-mobile";
@@ -18,7 +19,6 @@ const API_URL = "https://app.fashitianxia.xyz/api";
 
 loadDeployEnv();
 
-// Guard against shipping a frontend newer than the live backend (前后端版本漂移).
 await assertBackendContractSatisfied({ apiBaseUrl: API_URL });
 
 const deployEnv = {
@@ -40,21 +40,6 @@ run(
   { env: deployEnv },
 );
 
-run(
-  `wrangler pages deploy → ${PROJECT}`,
-  "npx",
-  [
-    "--yes",
-    "wrangler@4",
-    "pages",
-    "deploy",
-    join(REPO_ROOT, "apps/mobile/dist"),
-    "--project-name",
-    PROJECT,
-    "--branch",
-    "main",
-  ],
-  { env: deployEnv },
-);
+runWranglerPagesDeploy(PROJECT, join(REPO_ROOT, "apps/mobile/dist"));
 
 console.log("✓ Mobile deploy complete — verify https://m.fashitianxia.xyz/");
