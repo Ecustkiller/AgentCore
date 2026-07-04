@@ -3,22 +3,24 @@
 import asyncio
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.api.dependencies import (
     AuthUser,
     get_conversation_repo,
+    get_db,
 )
 from agentcore.api.schemas import (
     PausedTurnSummary,
     RegenerateMessageRequest,
     ResumeTurnRequest,
+    RetryFailedRequest,
     TurnRecoveryResponse,
 )
 from agentcore.api.sse import sse_response
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
-from agentcore.conversation.service import regenerate_chat, resume_chat
+from agentcore.conversation.service import regenerate_chat, resume_chat, retry_failed_chat
 from agentcore.core.errors import NotFoundError
-from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import ConversationRepository, CostEventRepository
 from agentcore.runtime.checkpoints import CheckpointResponse
 from agentcore.runtime.events import EventSink
@@ -62,6 +64,7 @@ async def regenerate_message(
     message_id: str,
     body: RegenerateMessageRequest,
     user: AuthUser,
+    session: AsyncSession = Depends(get_db),
 ):
     """Re-run a turn from an existing user message via SSE.
 
@@ -77,11 +80,10 @@ async def regenerate_message(
     """
     await enforce_user_message_rate_limit(user.user_id)
 
-    async with async_session_factory() as session:
-        conv_repo = ConversationRepository(session)
-        cost_repo = CostEventRepository(session)
-        await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-        credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
+    conv_repo = ConversationRepository(session)
+    cost_repo = CostEventRepository(session)
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
 
     sink = EventSink()
 
@@ -92,6 +94,43 @@ async def regenerate_message(
             user_id=user.user_id,
             sink=sink,
             edited_content=body.content,
+            llm_credentials=credentials,
+        )
+    )
+    turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
+
+    return sse_response(sink, detach_on_disconnect=True)
+
+
+@router.post("/{conversation_id}/messages/{message_id}/retry-failed")
+async def retry_failed_message(
+    conversation_id: str,
+    message_id: str,
+    _body: RetryFailedRequest,
+    user: AuthUser,
+    session: AsyncSession = Depends(get_db),
+):
+    """Retry only the failed worker nodes from a previous turn's execution.
+
+    Unlike regenerate (which re-runs everything), this extracts the completed
+    worker states from the previous turn's journal and seeds them into a new
+    pipeline run, so only failed nodes are re-executed.
+    """
+    await enforce_user_message_rate_limit(user.user_id)
+
+    conv_repo = ConversationRepository(session)
+    cost_repo = CostEventRepository(session)
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
+
+    sink = EventSink()
+
+    task = asyncio.create_task(
+        retry_failed_chat(
+            conversation_id=conversation_id,
+            message_id=message_id,
+            user_id=user.user_id,
+            sink=sink,
             llm_credentials=credentials,
         )
     )
@@ -137,6 +176,7 @@ async def resume_message(
     message_id: str,
     body: ResumeTurnRequest,
     user: AuthUser,
+    session: AsyncSession = Depends(get_db),
 ):
     """Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).
 
@@ -150,11 +190,10 @@ async def resume_message(
     """
     await enforce_user_message_rate_limit(user.user_id)
 
-    async with async_session_factory() as session:
-        conv_repo = ConversationRepository(session)
-        cost_repo = CostEventRepository(session)
-        await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-        credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
+    conv_repo = ConversationRepository(session)
+    cost_repo = CostEventRepository(session)
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
 
     suspension = await claim_paused_turn(message_id, conversation_id=conversation_id)
     if suspension is None:

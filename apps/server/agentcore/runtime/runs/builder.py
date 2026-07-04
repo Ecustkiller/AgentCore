@@ -29,7 +29,7 @@ from agentcore.runtime.runs.constants import (
     VALID_ON_FAILURE,
 )
 from agentcore.runtime.runs.plan import RunPlan, RunPlanError
-from agentcore.runtime.runs.types import RunContract, RunKind, RunOrigin, RunPolicy, RunSpec
+from agentcore.runtime.runs.types import Deliverable, RunKind, RunOrigin, RunPolicy, RunSpec
 
 _VALID_TIERS = frozenset({"fast", "strong"})
 _VALID_EFFORTS = frozenset({"high", "max"})
@@ -39,7 +39,7 @@ _VALID_EFFORTS = frozenset({"high", "max"})
 _VALID_STANCES = frozenset({"pro", "con"})
 _VALID_OUTPUT_FORMATS = frozenset({"text", "json"})
 _DEFAULT_TIMEOUT_MS = 120_000
-_DEFAULT_RETRY_DELAY_MS = 5_000
+_DEFAULT_RETRY_DELAY_MS = 2_000
 # Per-sibling excerpt caps in a fan-out awareness summary: a scope line (责任/任务)
 # plus a shorter deliverable note (预期产出), kept tight so a wide fan-out's
 # awareness block stays scannable and can't blow up a worker's context.
@@ -225,7 +225,6 @@ def _flat_plan(
                 run_id=run_id,
                 policy=RunPolicy(
                     result_handling=item.get("result_handling") or "pass_through",
-                    contract=_parse_contract(item),
                 ),
                 valid_tools=valid_tools,
                 parent_run_id=parent_run_id,
@@ -319,7 +318,7 @@ def _inline_spec(
         model=model_raw.strip() if isinstance(model_raw, str) else "",
         thinking=thinking_raw if isinstance(thinking_raw, bool) else None,
         reasoning_effort=effort_raw if effort_raw in _VALID_EFFORTS else None,
-        expected_output=item.get("expected_output", "") or "",
+        deliverable=_parse_deliverable(item),
         # 辩论/审查 呈现标记（display-only）：宽松解析，非法 stance 丢弃、group 取整后
         # 字符串、round 仅收正整数（bool 不算，否则 0）。执行器从不读它们，仅透传给
         # run_plan 供前端识别辩论 → 并排渲染 / 按轮次分层。
@@ -423,8 +422,8 @@ def _sibling_summary(group: list[RunSpec], me: RunSpec) -> str:
             continue
         scope = _excerpt(other.objective or other.task, _SIBLING_TASK_CHARS)
         line = f"- {other.role}：{scope}"
-        if other.expected_output:
-            line += f"（预期产出：{_excerpt(other.expected_output, _SIBLING_OUTPUT_CHARS)}）"
+        if other.deliverable and other.deliverable.name:
+            line += f"（预期产出：{_excerpt(other.deliverable.name, _SIBLING_OUTPUT_CHARS)}）"
         lines.append(line)
     return "\n".join(lines)
 
@@ -448,19 +447,39 @@ def _dag_policy(item: dict[str, Any]) -> RunPolicy:
         retry_delay_ms=item.get("retry_delay_ms", _DEFAULT_RETRY_DELAY_MS),
         timeout_s=max(1, timeout_ms // 1000) if timeout_ms else None,
         result_handling=item.get("result_handling") or "pass_through",
-        contract=_parse_contract(item),
     )
 
 
-def _parse_contract(item: dict[str, Any]) -> RunContract | None:
-    """Parse a task's optional ``contract`` block into a :class:`RunContract`.
+def _parse_deliverable(item: dict[str, Any]) -> Deliverable | None:
+    """Parse a task's deliverable, compatible with legacy ``expected_output`` / ``contract`` keys.
 
-    Returns None when no contract field is given or it declares no actual rule —
-    the executor still enforces the non-empty baseline regardless. Invalid knob
-    values are dropped (mirroring the lenient tier/effort handling)."""
-    raw = item.get("contract")
-    if not isinstance(raw, dict):
-        return None
+    Returns None when no name and no enforceable rule is declared — the executor still
+    enforces the non-empty baseline regardless. Invalid knob values are dropped (mirroring
+    the lenient tier/effort handling)."""
+    name = ""
+    expected = item.get("expected_output")
+    if isinstance(expected, str) and expected.strip():
+        name = expected.strip()
+
+    source: dict[str, Any] | None = None
+    raw_deliverable = item.get("deliverable")
+    if isinstance(raw_deliverable, dict):
+        source = raw_deliverable
+    elif isinstance(item.get("contract"), dict):
+        source = item.get("contract")
+
+    if source:
+        if isinstance(source.get("name"), str) and source["name"].strip():
+            name = source["name"].strip()
+        deliverable = _deliverable_from_dict(source, name=name)
+        return deliverable if _deliverable_has_content(deliverable) else None
+
+    if name:
+        return Deliverable(name=name)
+    return None
+
+
+def _deliverable_from_dict(raw: dict[str, Any], *, name: str = "") -> Deliverable:
     required_sections = _str_list(raw.get("required_sections"))
     must_contain = _str_list(raw.get("must_contain"))
     min_length = raw.get("min_length")
@@ -469,25 +488,32 @@ def _parse_contract(item: dict[str, Any]) -> RunContract | None:
     max_length = max_length if isinstance(max_length, int) and max_length > 0 else 0
     fmt = raw.get("output_format")
     output_format = fmt if fmt in _VALID_OUTPUT_FORMATS else "text"
-    requires_files = bool(raw.get("requires_files", False))
-    has_rule = (
-        required_sections
-        or must_contain
-        or min_length
-        or max_length
-        or output_format == "json"
-        or requires_files
-    )
-    if not has_rule:
-        return None
-    return RunContract(
+    output_schema = raw.get("output_schema")
+    if output_schema is not None and not isinstance(output_schema, dict):
+        output_schema = None
+    return Deliverable(
+        name=name,
         output_format=output_format,
         required_sections=required_sections,
+        output_schema=output_schema,
         must_contain=must_contain,
         min_length=min_length,
         max_length=max_length,
-        requires_files=requires_files,
+        requires_files=bool(raw.get("requires_files", False)),
         strict=bool(raw.get("strict", False)),
+    )
+
+
+def _deliverable_has_content(deliverable: Deliverable) -> bool:
+    return bool(
+        deliverable.name.strip()
+        or deliverable.required_sections
+        or deliverable.must_contain
+        or deliverable.min_length
+        or deliverable.max_length
+        or deliverable.output_format == "json"
+        or deliverable.requires_files
+        or deliverable.output_schema
     )
 
 

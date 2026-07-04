@@ -43,3 +43,11 @@ class WorkspaceSettings(BaseModel):
     # ``code_execute_cloud_enabled`` on without ALSO setting this, so the dangerous config
     # can never be reached by flipping a single flag (SEC-005).
     code_execute_cloud_unsafe_ack: bool = False
+
+    # Cloud (server-location) workers: use gVisor (runsc) for real isolation.
+    # When true, code_execute is enabled on cloud workers without the unsafe-ack gate.
+    gvisor_enabled: bool = False
+    # Path to the runsc binary (default: on PATH).
+    gvisor_runsc_path: str = "runsc"
+    # runsc runtime state directory (containers, sandboxes).
+    gvisor_runtime_root: str = "/tmp/agentcore-sandbox"

@@ -68,8 +68,8 @@ from agentcore.runtime.suspension import (
     turn_history,
 )
 from agentcore.tools.builtin import (
+    approval_class_tool_names,
     build_worker_registry,
-    file_mutation_tool_names,
     per_call_tool_names,
 )
 from agentcore.tools.builtin.board_ops import BoardOpsTool
@@ -283,7 +283,7 @@ async def run_chat_pipeline(
                 conversation_id=conversation_id,
                 registry=default_interaction_registry(),
                 timeout_seconds=settings.approval_timeout_seconds,
-                file_op_tools=file_mutation_tool_names(),
+                file_op_tools=approval_class_tool_names(),
                 per_call_tools=per_call_tool_names(),
             )
             if (settings.approval_gate_enabled and approvals_enabled)

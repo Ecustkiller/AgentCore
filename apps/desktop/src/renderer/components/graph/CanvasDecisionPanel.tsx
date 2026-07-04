@@ -239,10 +239,10 @@ export function CommandRegion({
     execution?.runs.filter((r) => r.status === "failed").length ?? 0;
   const recoveryNotice =
     execution?.status === "cancelled"
-      ? "本回合已停止。可重试，或调整指令后重发。"
+      ? "本回合已停止。可重试或忽略。"
       : failedCount > 0
-        ? `${failedCount} 个子任务失败。可重试，或调整指令后重发。`
-        : "本回合执行失败。可重试，或调整指令后重发。";
+        ? `${failedCount} 个子任务失败。可重试或忽略。`
+        : "本回合执行失败。可重试或忽略。";
 
   return (
     <section className="flex max-h-[55%] shrink-0 flex-col border-b border-border bg-card">
@@ -268,7 +268,7 @@ export function CommandRegion({
       {!collapsed && (
         <div className="min-h-0 flex-1 overflow-y-auto py-3">
           {/* 救火 (firefighting): a conversation-level transport error (send / resume /
-              regenerate drop) + the focused turn's whole-turn recovery row (重试 / 调整 /
+              regenerate drop) + the focused turn's whole-turn recovery row (重试 /
               忽略). RetryBanner is self-contained; RecoveryActions retries from the last
               user message but its 忽略 clears THIS turn's slot, so it runs under the
               focused turn's ExecutionScope. */}
@@ -280,7 +280,13 @@ export function CommandRegion({
                   <AlertTriangle size={13} className="mt-0.5 shrink-0" />
                   <span>{recoveryNotice}</span>
                 </div>
-                <RecoveryActions abandonLabel="忽略" />
+                <RecoveryActions
+                  abandonLabel="忽略"
+                  hasFailedRuns={
+                    execution?.status === "completed" &&
+                    execution.runs.some((r) => r.status === "failed")
+                  }
+                />
               </div>
             </ExecutionScopeContext.Provider>
           )}

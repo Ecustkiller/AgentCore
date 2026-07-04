@@ -443,7 +443,7 @@ def test_multi_agent_team_notes_ceo_seed_and_brief(projected):
     assert p["status"] == "completed"
     by_id = {n["noteId"]: n for n in p["teamNotes"]}
     assert by_id["n0"]["source"] == "ceo"
-    assert by_id["n0"]["role"] == "主 Agent"
+    assert by_id["n0"]["role"] == "主协调"
     assert by_id["n1"]["source"] == "ceo"
     assert by_id["n2"]["kind"] == "heads_up"
     assert "source" not in by_id["n2"] or by_id["n2"].get("source") != "ceo"

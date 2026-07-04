@@ -37,6 +37,7 @@ between a worker's awaited LLM rounds, so two calls can never interleave.
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, replace
 
@@ -46,6 +47,7 @@ from agentcore.core.types import new_id
 MAX_NOTE_CHARS = 200  # one line, hard length cap per note
 MAX_WALL_NOTES = 50  # whole-wall cap; oldest dropped when exceeded
 MAX_PUSH_PER_ROUND = 8  # most notes pushed into a sibling before one of its steps
+MAX_INHERITED_NOTES = 20  # cap on notes carried forward from a previous wave
 
 # The allowed note kinds. Anything else is coerced to ``heads_up`` — the lower-commitment
 # kind — so a malformed call never invents a category.
@@ -57,10 +59,14 @@ NOTE_KINDS: frozenset[str] = frozenset(
     {NOTE_KIND_DECISION, NOTE_KIND_HEADS_UP, NOTE_KIND_CLAIM}
 )
 
+SYSTEM_RUN_ID = "__system__"
+SYSTEM_AGENT_ID = "system"
+SYSTEM_ROLE = "系统"
+
 _KIND_LABEL = {
-    NOTE_KIND_DECISION: "我定了",
-    NOTE_KIND_HEADS_UP: "提个醒",
-    NOTE_KIND_CLAIM: "我领了",
+    NOTE_KIND_DECISION: "已确认",
+    NOTE_KIND_HEADS_UP: "提醒",
+    NOTE_KIND_CLAIM: "已认领",
 }
 
 # A note's lifecycle status (便签会过期 → supersession, §2.2). A fresh post is ACTIVE; its
@@ -109,6 +115,19 @@ class TeamNote:
     supersede_mode: str | None = None
 
 
+_IDENT_RE = re.compile(
+    r"/[a-z][a-z0-9_/]+"            # API paths like /auth/login
+    r"|\b[a-z]+_[a-z0-9_]+\b"       # snake_case identifiers
+    r"|\b[a-z]+[A-Z][a-zA-Z0-9]*\b"  # camelCase identifiers
+    r"|\b[A-Z][a-z]+[A-Z][a-zA-Z0-9]*\b"  # PascalCase identifiers
+)
+
+
+def _extract_identifiers(text: str) -> set[str]:
+    """Extract code-like identifiers and API paths from note text for conflict checking."""
+    return {m.group().lower() for m in _IDENT_RE.finditer(text)}
+
+
 def _clean_one_line(text: str) -> str:
     """Collapse a note to a single hard-capped line —便签短·一行·有硬长度上限."""
     collapsed = " ".join(text.split())
@@ -129,7 +148,7 @@ def _note_tag(note: TeamNote) -> str:
         return "已作废"
     if note.supersede_mode == SUPERSEDE_MODE_VOID:
         return "撤回"
-    label = _KIND_LABEL.get(note.kind, "提个醒")
+    label = _KIND_LABEL.get(note.kind, "提醒")
     if note.supersede_mode == SUPERSEDE_MODE_UPDATE:
         return f"{label}·更新"
     return label
@@ -197,9 +216,9 @@ def format_notes_for_synthesis(notes: list[TeamNote]) -> str:
     lines = [_render_note_line(n) for n in notes]
     return (
         "### 团队便签（队员过程中广播的【当前有效】决定 / 认领 / 提醒——合并对账时一并核对）\n"
-        "把下列便签和合好的成品对照，是【语义边界对账】的现成依据：〔我定了〕的接口 / "
+        "把下列便签和合好的成品对照，是【语义边界对账】的现成依据：〔已确认〕的接口 / "
         "字段 / 命名 / "
-        "格式，成品须跟到最新（被〔…·更新〕改过的以新值为准）；两条〔我领了〕认领同一块 = 重复、"
+        "格式，成品须跟到最新（被〔…·更新〕改过的以新值为准）；两条〔已认领〕认领同一块 = 重复、"
         "某该做的没人认领 = 缺口；成品与某条广播决定对不上 = 冲突。对不上就就地用 `revise` / "
         "`replan` 修，别在概览里糊过去。\n"
         + "\n".join(lines)
@@ -214,7 +233,7 @@ def format_own_notes_for_error(notes: list[TeamNote]) -> str:
     A worker never sees its own notes pushed / pulled, so this is where the amendable handles
     surface: ``amend`` lists them when a handle is wrong / missing, so the model can retry with
     the right one (改写 by giving new ``text``, 作废 by omitting it)."""
-    return "；".join(f"N{n.seq}〔{_KIND_LABEL.get(n.kind, '提个醒')}〕{n.text}" for n in notes)
+    return "；".join(f"N{n.seq}〔{_KIND_LABEL.get(n.kind, '提醒')}〕{n.text}" for n in notes)
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,6 +348,69 @@ class NoteWall:
             n for n in self._notes if n.run_id == run_id and n.status == NOTE_STATUS_ACTIVE
         ]
 
+    def inherit(self, notes: list[TeamNote]) -> list[TeamNote]:
+        """Carry forward active notes from a previous wave/batch into this wall.
+
+        Only ACTIVE notes are inherited; superseded / voided ones are dropped (the
+        amendment note, itself active, already carries the correction). Each inherited
+        note keeps its original provenance (run_id / agent_id / role / note_id) but gets
+        a NEW seq in this wall so new workers see it in ``new_for`` / ``all_for``.
+        Capped to the newest :data:`MAX_INHERITED_NOTES` (freshest decisions win).
+        Returns the list of notes actually added."""
+        active = [n for n in notes if n.status == NOTE_STATUS_ACTIVE]
+        capped = active[-MAX_INHERITED_NOTES:]
+        inherited: list[TeamNote] = []
+        for note in capped:
+            self._seq += 1
+            copied = TeamNote(
+                seq=self._seq,
+                note_id=note.note_id,
+                run_id=note.run_id,
+                agent_id=note.agent_id,
+                role=note.role,
+                kind=note.kind,
+                text=note.text,
+                ts=note.ts,
+                status=NOTE_STATUS_ACTIVE,
+            )
+            self._notes.append(copied)
+            inherited.append(copied)
+        if len(self._notes) > MAX_WALL_NOTES:
+            self._notes = self._notes[-MAX_WALL_NOTES:]
+        return inherited
+
+    def detect_conflict(self, note: TeamNote) -> str | None:
+        """Check if a newly-posted decision note may conflict with an existing one.
+
+        Only ``decision`` vs ``decision`` is checked (claims and heads-ups are informational).
+        Uses code-like identifier overlap (snake_case / camelCase / API paths) to find notes
+        about the SAME thing but with DIFFERENT content — a strong signal of a naming /
+        interface disagreement that should be reconciled before the CEO, not after.
+        Returns a conflict description string or ``None`` (no conflict detected)."""
+        if note.kind != NOTE_KIND_DECISION:
+            return None
+        new_ids = _extract_identifiers(note.text)
+        if not new_ids:
+            return None
+        for existing in self._notes:
+            if existing.kind != NOTE_KIND_DECISION:
+                continue
+            if existing.status != NOTE_STATUS_ACTIVE:
+                continue
+            if existing.run_id == note.run_id:
+                continue
+            if existing.note_id == note.note_id:
+                continue
+            existing_ids = _extract_identifiers(existing.text)
+            overlap = new_ids & existing_ids
+            if overlap and note.text.lower().strip() != existing.text.lower().strip():
+                shared = "、".join(sorted(overlap)[:3])
+                return (
+                    f"⚠️ 与 {existing.role or existing.agent_id} 的决定"
+                    f"（N{existing.seq}）可能冲突（共享标识: {shared}），请核实对齐"
+                )
+        return None
+
     def amend(
         self, *, run_id: str, agent_id: str, role: str, ref_seq: int, text: str
     ) -> AmendOutcome:
@@ -400,3 +482,10 @@ class NoteWall:
         if len(self._notes) > MAX_WALL_NOTES:
             self._notes = self._notes[-MAX_WALL_NOTES:]
         return AmendOutcome(note=note, target=flipped)
+
+
+NOTE_NUDGE_TEXT = (
+    "你的并行队友已在便签墙上贴了动态（如接口决定、认领等）。"
+    "如果你也做出了别人要依赖的决定、踩到值得分享的坑、或认领了某块活/文件，"
+    "别忘了用 post_note 贴一条让队友看到——这是团队不撞车的关键。"
+)

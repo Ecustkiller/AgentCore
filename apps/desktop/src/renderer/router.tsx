@@ -13,6 +13,7 @@ import { WhiteboardPage } from "@/pages/WhiteboardPage";
 import { AboutSettings } from "@/pages/more/AboutSettings";
 import { AccountSettings } from "@/pages/more/AccountSettings";
 import { AppearanceSettings } from "@/pages/more/AppearanceSettings";
+import { FeedbackSettings } from "@/pages/more/FeedbackSettings";
 import { MembersSettings } from "@/pages/more/MembersSettings";
 import { MemorySettings } from "@/pages/more/MemorySettings";
 import { ModelSettings } from "@/pages/more/ModelSettings";
@@ -80,6 +81,7 @@ export const router = createHashRouter([
           { path: "appearance", element: <AppearanceSettings /> },
           { path: "shortcuts", element: <ShortcutsSettings /> },
           { path: "members", element: <MembersSettings /> },
+          { path: "feedback", element: <FeedbackSettings /> },
           { path: "about", element: <AboutSettings /> },
         ],
       },

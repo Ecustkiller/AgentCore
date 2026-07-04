@@ -170,6 +170,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List All Feedback
+         * @description Admin: list all user feedback, optionally filtered.
+         */
+        get: operations["list_all_feedback_v1_admin_feedback_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/feedback/{feedback_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Feedback Status
+         * @description Admin: update a feedback item's status and optionally reply.
+         */
+        patch: operations["update_feedback_status_v1_admin_feedback__feedback_id__status_patch"];
+        trace?: never;
+    };
     "/v1/admin/observability/conversations/{conversation_id}": {
         parameters: {
             query?: never;
@@ -1168,6 +1208,10 @@ export interface paths {
          *     flooding account before any resource DB work), then ownership, then the
          *     BYOK/quota billing gate (BYOK mode requires the user's own key; platform mode
          *     enforces quota). The resolved BYOK credentials thread through the whole turn.
+         *
+         *     DB session scoped to preflight only — released before the SSE stream opens, so a
+         *     long-lived stream never holds a pooled connection (fixes GC-termination warnings
+         *     on abrupt teardown).
          */
         post: operations["send_message_v1_conversations__conversation_id__messages_post"];
         delete?: never;
@@ -1279,6 +1323,30 @@ export interface paths {
          *     — all BEFORE the claim, so a refused turn keeps its resumable frame.
          */
         post: operations["resume_message_v1_conversations__conversation_id__messages__message_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{conversation_id}/messages/{message_id}/retry-failed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Failed Message
+         * @description Retry only the failed worker nodes from a previous turn's execution.
+         *
+         *     Unlike regenerate (which re-runs everything), this extracts the completed
+         *     worker states from the previous turn's journal and seeds them into a new
+         *     pipeline run, so only failed nodes are re-executed.
+         */
+        post: operations["retry_failed_message_v1_conversations__conversation_id__messages__message_id__retry_failed_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1798,6 +1866,30 @@ export interface paths {
         get: operations["get_favicon_v1_favicon_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Feedback
+         * @description List the current user's feedback (newest-first).
+         */
+        get: operations["list_my_feedback_v1_feedback_get"];
+        put?: never;
+        /**
+         * Submit Feedback
+         * @description Submit a feedback entry (bug, feature request, etc.).
+         */
+        post: operations["submit_feedback_v1_feedback_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4116,6 +4208,20 @@ export interface components {
             /** Path */
             path: string;
         };
+        /** CreateFeedbackRequest */
+        CreateFeedbackRequest: {
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "bug" | "feature" | "improvement" | "other";
+            /** Description */
+            description: string;
+            /** Page Context */
+            page_context?: string | null;
+            /** Title */
+            title: string;
+        };
         /** CreateFolderRequest */
         CreateFolderRequest: {
             /** Local Dir */
@@ -4320,6 +4426,40 @@ export interface components {
         DispatchHandoffRequest: {
             /** Task */
             task: string;
+        };
+        /** FeedbackListResponse */
+        FeedbackListResponse: {
+            /** Data */
+            data: components["schemas"]["FeedbackSummary"][];
+            /** Total */
+            total: number;
+        };
+        /** FeedbackSummary */
+        FeedbackSummary: {
+            /** Admin Reply */
+            admin_reply: string | null;
+            /** Category */
+            category: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Description */
+            description: string;
+            /** Id */
+            id: string;
+            /** Page Context */
+            page_context: string | null;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /**
          * FolderGroup
@@ -5313,6 +5453,15 @@ export interface components {
             selected?: string[];
         };
         /**
+         * RetryFailedRequest
+         * @description Body for ``POST .../messages/{message_id}/retry-failed``.
+         *
+         *     Retries only the failed worker nodes from the previous execution,
+         *     reusing completed results. Empty body — the server extracts
+         *     completed states from the previous turn's journal.
+         */
+        RetryFailedRequest: Record<string, never>;
+        /**
          * RewriteRequest
          * @description 选区改写入参（无状态、无路径）：把选中文本按指令改写，前后文仅作语境只读。
          */
@@ -5929,6 +6078,16 @@ export interface components {
             /** Who Can Dm */
             who_can_dm?: ("anyone" | "contacts") | null;
         };
+        /** UpdateFeedbackStatusRequest */
+        UpdateFeedbackStatusRequest: {
+            /** Admin Reply */
+            admin_reply?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "acknowledged" | "resolved" | "closed";
+        };
         /** UpdateFolderRequest */
         UpdateFolderRequest: {
             /** Local Dir */
@@ -6466,6 +6625,83 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminTurnListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_all_feedback_v1_admin_feedback_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                category?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_feedback_status_v1_admin_feedback__feedback_id__status_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                feedback_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateFeedbackStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackSummary"];
                 };
             };
             /** @description Validation Error */
@@ -8499,6 +8735,46 @@ export interface operations {
             };
         };
     };
+    retry_failed_message_v1_conversations__conversation_id__messages__message_id__retry_failed_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+                message_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetryFailedRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_conversation_recovery_v1_conversations__conversation_id__recovery_get: {
         parameters: {
             query?: never;
@@ -9543,6 +9819,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_my_feedback_v1_feedback_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_feedback_v1_feedback_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateFeedbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackSummary"];
                 };
             };
             /** @description Validation Error */

@@ -4,8 +4,8 @@ import { Button } from "@/components/ui";
 import { formatCompact } from "@/lib/format";
 import { detectReviewConcern } from "@/lib/reviewConcern";
 import { submitRunRedirect } from "@/services/runRedirect";
-import { activeRuntime, useConversationStore } from "@/stores/conversation";
 import { useComposerDraftStore } from "@/stores/composer";
+import { activeRuntime, useConversationStore } from "@/stores/conversation";
 import {
   type RunNode,
   revisionChains,
@@ -73,6 +73,10 @@ export function RunDetailBody({
       false,
   );
 
+  const [redirectOpen, setRedirectOpen] = useState(false);
+  const [redirectFeedback, setRedirectFeedback] = useState("");
+  const [redirectSubmitting, setRedirectSubmitting] = useState(false);
+
   const run = execution?.runs.find((s) => s.id === runId);
   const agent = run
     ? execution?.agents.find((a) => a.id === run.agentId)
@@ -82,9 +86,6 @@ export function RunDetailBody({
 
   const output = agent.outputChunks.join("");
   const reasoning = agent.reasoningChunks.join("");
-  const [redirectOpen, setRedirectOpen] = useState(false);
-  const [redirectFeedback, setRedirectFeedback] = useState("");
-  const [redirectSubmitting, setRedirectSubmitting] = useState(false);
   const canRedirect =
     turnInteractive &&
     agent.status === "working" &&
@@ -139,7 +140,7 @@ export function RunDetailBody({
                   const concern = detectReviewConcern(output);
                   setRedirectFeedback(
                     concern != null
-                      ? `请按以下方向调整：`
+                      ? "请按以下方向调整："
                       : `请按以下方向调整「${agent.role}」的产出：`,
                   );
                   setRedirectOpen(true);
@@ -192,8 +193,7 @@ export function RunDetailBody({
                         feedback: redirectFeedback.trim(),
                       });
                       toast.success("已提交改方向请求", {
-                        description:
-                          "调度器将在下一步接管（当前为排队阶段）。",
+                        description: "调度器将在下一步接管（当前为排队阶段）。",
                       });
                       setRedirectOpen(false);
                     } catch {

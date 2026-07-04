@@ -4,7 +4,13 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useDebateTake } from "@/stores/debateUserTake";
 import type { Execution } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
-import { Check, ClipboardList, GitCompare, Info, TriangleAlert } from "lucide-react";
+import {
+  Check,
+  ClipboardList,
+  GitCompare,
+  Info,
+  TriangleAlert,
+} from "lucide-react";
 import type { Ref } from "react";
 import {
   BriefCard,
@@ -14,7 +20,6 @@ import {
   verdictHeadTint,
   verdictTopBorder,
 } from "../Brief";
-import { DebateContinue } from "../Continue";
 import { ModelBadge } from "../ModelBadge";
 import {
   type DebateModel,

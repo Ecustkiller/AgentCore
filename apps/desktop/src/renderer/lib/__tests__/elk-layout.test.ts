@@ -4,16 +4,50 @@ import {
 } from "@/components/graph/helpers";
 import type { GraphEdge } from "@/stores/graph";
 import { describe, expect, it } from "vitest";
+import type { SubTeamInput } from "../elk-layout";
 import { computeLayout } from "../elk-layout";
 
+/** Derive compound sub-teams from delegate edges (mirrors buildGraphStructure). */
+function subTeamsFromEdges(edges: GraphEdge[]): SubTeamInput[] {
+  const subTeamMap = new Map<string, string[]>();
+  for (const e of edges) {
+    if (e.kind !== "delegate") continue;
+    const arr = subTeamMap.get(e.source) ?? [];
+    arr.push(e.target);
+    subTeamMap.set(e.source, arr);
+  }
+  return [...subTeamMap.entries()].map(([parentId, memberIds]) => ({
+    parentId,
+    memberIds,
+    groupId: `__group__${parentId}`,
+  }));
+}
+
+async function layout(
+  ids: string[],
+  edges: GraphEdge[],
+  layoutKind: "tree" | "leftright" = "leftright",
+  preserveOrder = false,
+  bookends: { source?: string; sink?: string } = {},
+) {
+  return computeLayout(
+    ids,
+    edges,
+    layoutKind,
+    preserveOrder,
+    bookends,
+    subTeamsFromEdges(edges),
+  );
+}
+
 /**
- * 协作图布局后处理不变量（端点钉层 + 子团队下沉，见 elk-layout.ts / 前端UX设计 §五）。
+ * 协作图布局后处理不变量（端点钉层 + ELK compound 子队，见 elk-layout.ts / 前端UX设计 §五）。
  *
- * 用真实 `computeLayout`（含 ELK + layerConstraint + dropSubTeamsBelowParent +
- * centerLoneEndpoints）断言几何不变量，守住嵌套委派的三条铁律：
- *   1. 末层钉层——CEO 汇聚点恒在最右（最大主轴坐标），不与子 worker 同列。
- *   2. 主干线干净——任何「父→汇聚点」实线所在行不被子孙 worker 横穿。
- *   3. 多支子树不重叠——同波次多个父各自委派时，各「父+子队」整块堆叠互不压盖。
+ * 用真实 `computeLayout`（含 ELK + layerConstraint + compound 子队 +
+ * centerLoneEndpoints）断言几何不变量。含 delegate 的用例以 compound 容器为单元：
+ *   1. 末层钉层——CEO 汇聚点恒在最右（最大主轴坐标）。
+ *   2. 同 compound 内成员两两不重叠。
+ *   3. 多支子树（compound 或顶层节点）互不重叠。
  */
 // 镜像 elk-layout 内部常量（NODE_WIDTH 未导出，NODE_HEIGHT 已导出但此处一并固定）。
 const NW = 210;
@@ -46,29 +80,8 @@ const noneOverlap = (
   return hits;
 };
 
-const NODE_SPACING = 40;
-
-/** leftright 下同层（x 重叠）节点在 y 轴上是否违反最小间距。 */
-const crossSpacingViolations = (
-  pos: Record<string, { x: number; y: number }>,
-  ids: string[],
-): string[] => {
-  const hits: string[] = [];
-  for (let i = 0; i < ids.length; i++) {
-    for (let j = i + 1; j < ids.length; j++) {
-      const a = pos[ids[i]];
-      const b = pos[ids[j]];
-      const xOverlap = a.x < b.x + NW && a.x + NW > b.x;
-      if (!xOverlap) continue;
-      const yGap = Math.max(b.y - (a.y + NH), a.y - (b.y + NH));
-      if (yGap < NODE_SPACING) hits.push(`${ids[i]}×${ids[j]}`);
-    }
-  }
-  return hits;
-};
-
 describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
-  it("2 级嵌套：子树整块落在父主干线下方、主干线干净、汇聚点钉末层", async () => {
+  it("2 级嵌套：compound 子队不重叠、汇聚点钉末层", async () => {
     const ids = ["__input__", "mpm", "lead", "eng1", "eng2", "mcap"];
     const edges: GraphEdge[] = [
       e("__input__", "mpm"),
@@ -77,26 +90,24 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("lead", "eng2", "delegate"),
       e("mpm", "mcap"),
     ];
-    const { positions } = await computeLayout(ids, edges, "leftright", false, {
+    const { positions, groups } = await layout(ids, edges, "leftright", false, {
       source: "__input__",
       sink: "mcap",
     });
 
-    // 汇聚点钉在末层：x 最大。
     const maxX = Math.max(...ids.map((id) => positions[id].x));
     expect(positions.mcap.x).toBe(maxX);
-
-    // 主干线 mpm→mcap 行不被子孙横穿，且整条子树落在其下方。
-    const row = positions.mpm.y;
-    for (const id of ["lead", "eng1", "eng2"]) {
-      expect(Math.abs(positions[id].y - row)).toBeGreaterThanOrEqual(NH);
-      expect(positions[id].y).toBeGreaterThan(row);
-    }
-    // 子树自身不重叠。
+    expect(groups.length).toBeGreaterThanOrEqual(2);
     expect(noneOverlap(positions, ["lead", "eng1", "eng2"])).toEqual([]);
+    expect(
+      noneOverlap(
+        positions,
+        ids.filter((id) => !id.startsWith("__")),
+      ),
+    ).toEqual([]);
   });
 
-  it("同层双父各带子团队：两支子树各成一带、互不重叠、两条主干线都干净", async () => {
+  it("同层双父各带子团队：两支 compound 互不重叠、汇聚点钉末层", async () => {
     const ids = ["__input__", "be", "fe", "be1", "be2", "fe1", "fe2", "dcap"];
     const edges: GraphEdge[] = [
       e("__input__", "be"),
@@ -108,35 +119,16 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("be", "dcap"),
       e("fe", "dcap"),
     ];
-    const { positions } = await computeLayout(ids, edges, "leftright", false, {
+    const { positions, groups } = await layout(ids, edges, "leftright", false, {
       source: "__input__",
       sink: "dcap",
     });
 
-    // 所有 worker 盒两两不重叠（核心：两支子队不再交叠）。
+    expect(groups.length).toBe(2);
     expect(
       noneOverlap(positions, ["be", "fe", "be1", "be2", "fe1", "fe2"]),
     ).toEqual([]);
 
-    // 两支子树在交叉轴上成不相交的两带。
-    const band = (ids2: string[]) => {
-      const ys = ids2.map((id) => positions[id].y);
-      return [Math.min(...ys), Math.max(...ys) + NH] as const;
-    };
-    const [beTop, beBot] = band(["be1", "be2"]);
-    const [feTop, feBot] = band(["fe1", "fe2"]);
-    expect(beBot <= feTop || feBot <= beTop).toBe(true);
-
-    // 两条「父→汇聚点」主干线行都不被任一子节点横穿。
-    for (const parent of ["be", "fe"]) {
-      const row = positions[parent].y;
-      const onLine = ["be1", "be2", "fe1", "fe2"].filter(
-        (id) => Math.abs(positions[id].y - row) < NH,
-      );
-      expect(onLine).toEqual([]);
-    }
-
-    // 汇聚点仍钉末层。
     const maxX = Math.max(...ids.map((id) => positions[id].x));
     expect(positions.dcap.x).toBe(maxX);
   });
@@ -166,13 +158,12 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       ...w2.map((w) => e(w, "cap")),
     ];
     const workers = [...parents, ...subs, ...w2];
-    const { positions } = await computeLayout(ids, edges, "leftright", false, {
+    const { positions } = await layout(ids, edges, "leftright", false, {
       source: "__input__",
       sink: "cap",
     });
 
     expect(noneOverlap(positions, workers)).toEqual([]);
-    expect(crossSpacingViolations(positions, workers)).toEqual([]);
     const maxX = Math.max(...ids.map((id) => positions[id].x));
     expect(positions.cap.x).toBe(maxX);
   });
@@ -187,7 +178,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("w2", "cap"),
       e("w3", "cap"),
     ];
-    const { positions } = await computeLayout(ids, edges, "leftright", false, {
+    const { positions } = await layout(ids, edges, "leftright", false, {
       source: "__input__",
       sink: "cap",
     });
@@ -199,7 +190,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
     expect(noneOverlap(positions, ["w1", "w2", "w3"])).toEqual([]);
   });
 
-  it("3 父同波次各带子队：N 块整体堆叠、互不重叠、N 条主干线都干净", async () => {
+  it("3 父同波次各带子队：compound 互不重叠、汇聚点钉末层", async () => {
     const ids = [
       "__input__",
       "p1",
@@ -227,12 +218,12 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("p2", "cap"),
       e("p3", "cap"),
     ];
-    const { positions } = await computeLayout(ids, edges, "leftright", false, {
+    const { positions, groups } = await layout(ids, edges, "leftright", false, {
       source: "__input__",
       sink: "cap",
     });
 
-    // 3 支子队 + 3 个父两两不重叠。
+    expect(groups.length).toBe(3);
     expect(
       noneOverlap(positions, [
         "p1",
@@ -246,20 +237,11 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
         "c2",
       ]),
     ).toEqual([]);
-    // 每条「父→汇聚点」主干线行都不被任一子节点横穿。
-    const subs = ["a1", "a2", "b1", "b2", "c1", "c2"];
-    for (const parent of ["p1", "p2", "p3"]) {
-      const onLine = subs.filter(
-        (id) => Math.abs(positions[id].y - positions[parent].y) < NH,
-      );
-      expect(onLine).toEqual([]);
-    }
-    // 汇聚点钉末层。
     const maxX = Math.max(...ids.map((id) => positions[id].x));
     expect(positions.cap.x).toBe(maxX);
   });
 
-  it("树形(DOWN) + 委派：交叉轴=x 分支，子队整块让位、竖向主干线干净、汇聚点钉末层", async () => {
+  it("树形(DOWN) + 委派：compound 子队不重叠、汇聚点钉末层", async () => {
     const ids = ["__input__", "tpm", "teng1", "teng2", "tcap"];
     const edges: GraphEdge[] = [
       e("__input__", "tpm"),
@@ -267,28 +249,18 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("tpm", "teng2", "delegate"),
       e("tpm", "tcap"),
     ];
-    const { positions } = await computeLayout(ids, edges, "tree", false, {
+    const { positions, groups } = await layout(ids, edges, "tree", false, {
       source: "__input__",
       sink: "tcap",
     });
 
-    // 树形主轴=y（DOWN）：汇聚点钉末层 → y 最大。
+    expect(groups.length).toBe(1);
     const maxY = Math.max(...ids.map((id) => positions[id].y));
     expect(positions.tcap.y).toBe(maxY);
-    // 交叉轴=x：竖向主干线 tpm→tcap 所在列不被子队同列横穿（子队整块沿 x 让到旁侧）。
-    const col = positions.tpm.x;
-    const onCol = ["teng1", "teng2"].filter(
-      (id) => Math.abs(positions[id].x - col) < NW,
-    );
-    expect(onCol).toEqual([]);
-    // 子队互不重叠。
     expect(noneOverlap(positions, ["tpm", "teng1", "teng2"])).toEqual([]);
   });
 
-  // B 型回归：更深波次的普通 worker 可能与某父的子队**同层**（同一交叉轴主坐标）。
-  // 经实测，下沉的「单调下推」+ ELK「自顶向下打包」使普通节点恒落在子队带之上 → 不
-  // 重叠、不压主干线。此处钉死该安全行为（而非给不可复现的碰撞加兜底逻辑）。
-  it("B 型回归：深波次普通 worker 与子队同层仍不重叠、主干线干净", async () => {
+  it("B 型回归：深波次普通 worker 与 compound 子队不重叠", async () => {
     // input→p1⇢{s1,s2}→cap、input→p2⇢{t1,t2}→cap、input→m→n→cap（n 落到子队所在层）。
     const ids = [
       "__input__",
@@ -315,27 +287,16 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("m", "n"),
       e("n", "cap"),
     ];
-    const { positions } = await computeLayout(ids, edges, "leftright", false, {
+    const { positions } = await layout(ids, edges, "leftright", false, {
       source: "__input__",
       sink: "cap",
     });
 
-    // n 与部分子节点同列（主层坐标相同），但所有盒两两不重叠。
-    const sameLayerAsN = ["s1", "s2", "t1", "t2"].filter(
-      (id) => Math.abs(positions[id].x - positions.n.x) < 1,
-    );
-    expect(sameLayerAsN.length).toBeGreaterThan(0);
     expect(
       noneOverlap(positions, ["p1", "p2", "s1", "s2", "t1", "t2", "m", "n"]),
     ).toEqual([]);
-    // 两条父主干线行不被任一子节点或普通 worker n 横穿。
-    for (const parent of ["p1", "p2"]) {
-      const row = positions[parent].y;
-      const onLine = ["s1", "s2", "t1", "t2", "n"].filter(
-        (id) => Math.abs(positions[id].y - row) < NH,
-      );
-      expect(onLine).toEqual([]);
-    }
+    const maxX = Math.max(...ids.map((id) => positions[id].x));
+    expect(positions.cap.x).toBe(maxX);
   });
 
   // 圆桌逐轮（主持人 ⇢ 三视角 ⇢ 各自修订 v2）：修订节点必须与其源同一交叉轴车道（修订边笔直），
@@ -350,7 +311,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("s_b", "s_b2", "revision"),
       e("s_c", "s_c2", "revision"),
     ];
-    const { positions } = await computeLayout(ids, edges, "leftright", false, {
+    const { positions } = await layout(ids, edges, "leftright", false, {
       source: "__input__",
     });
 
@@ -370,7 +331,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
     expect(positions.mod.y).toBeCloseTo(mid, 0);
   });
 
-  it("圆桌逐轮·带汇聚点：下沉避让主干线后，三方修订仍各与源同车道、汇聚点钉末层", async () => {
+  it("圆桌逐轮·带汇聚点：修订与源同车道、汇聚点钉末层", async () => {
     const ids = [
       "__input__",
       "mod",
@@ -392,7 +353,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("s_c", "s_c2", "revision"),
       e("mod", "cap"),
     ];
-    const { positions } = await computeLayout(ids, edges, "leftright", false, {
+    const { positions } = await layout(ids, edges, "leftright", false, {
       source: "__input__",
       sink: "cap",
     });
@@ -408,11 +369,6 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
     // 汇聚点钉末层。
     const maxX = Math.max(...ids.map((id) => positions[id].x));
     expect(positions.cap.x).toBe(maxX);
-    // 主干线 mod 行不被任一子队 / 修订横穿（整块落其下方）。
-    const row = positions.mod.y;
-    for (const id of ["s_a", "s_b", "s_c", "s_a2", "s_b2", "s_c2"]) {
-      expect(positions[id].y).toBeGreaterThan(row);
-    }
     expect(
       noneOverlap(positions, ["s_a", "s_b", "s_c", "s_a2", "s_b2", "s_c2"]),
     ).toEqual([]);
@@ -420,7 +376,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
 });
 
 describe("computeLayout · 树形分叉对称", () => {
-  it("1→2 双父 + 各自子队：两支镜像等距、左支子队往 -X、右支往 +X", async () => {
+  it("1→2 双父 + 各自子队：两支镜像等距、汇聚点钉末层", async () => {
     const ids = [
       "__input__",
       "decide",
@@ -443,7 +399,7 @@ describe("computeLayout · 树形分叉对称", () => {
       e("pd", "cap"),
       e("arch", "cap"),
     ];
-    const { positions } = await computeLayout(ids, edges, "tree", false, {
+    const { positions, groups } = await layout(ids, edges, "tree", false, {
       source: "__input__",
       sink: "cap",
     });
@@ -454,24 +410,7 @@ describe("computeLayout · 树形分叉对称", () => {
     const archDist = cx("arch") - decideC;
     expect(pdDist).toBeCloseTo(archDist, 0);
     expect(pdDist).toBeGreaterThan(NW * 0.5);
-    expect(archDist).toBeGreaterThan(NW * 0.5);
-
-    // 左支子队在父左侧，右支子队在父右侧。
-    expect(cx("ix")).toBeLessThan(cx("pd"));
-    expect(cx("vd")).toBeLessThan(cx("pd"));
-    expect(cx("be")).toBeGreaterThan(cx("arch"));
-    expect(cx("dm")).toBeGreaterThan(cx("arch"));
-
-    // 竖列不被子队占。
-    const pdCol = positions.pd.x;
-    for (const id of ["ix", "vd"]) {
-      expect(Math.abs(positions[id].x - pdCol)).toBeGreaterThanOrEqual(NW);
-    }
-    const archCol = positions.arch.x;
-    for (const id of ["be", "dm"]) {
-      expect(Math.abs(positions[id].x - archCol)).toBeGreaterThanOrEqual(NW);
-    }
-
+    expect(groups.length).toBe(2);
     expect(
       noneOverlap(positions, ["pd", "arch", "ix", "vd", "be", "dm"]),
     ).toEqual([]);
@@ -543,7 +482,7 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
   });
 
   it("布局后 5 个版本全部落在各自图元、两两不重叠（不再折叠成 2 个）", async () => {
-    const { nodeIds, rawEdges } = buildGraphStructure(
+    const { nodeIds, rawEdges, subTeams } = buildGraphStructure(
       debateRuns(5),
       "__input__",
     );
@@ -553,6 +492,7 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
       "leftright",
       true,
       { source: "__input__" },
+      subTeams,
     );
     const proVersions = [
       "mod_r1_pro",

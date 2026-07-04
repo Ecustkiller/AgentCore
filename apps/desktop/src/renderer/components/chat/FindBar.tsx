@@ -1,5 +1,6 @@
 import { IconButton } from "@/components/ui";
 import { useActiveMessages, useConversationStore } from "@/stores/conversation";
+import { useUIStore } from "@/stores/ui";
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -23,6 +24,7 @@ export function FindBar({
 }) {
   const messages = useActiveMessages();
   const focusMessage = useConversationStore((s) => s.focusMessage);
+  const openSearch = useUIStore((s) => s.openSearch);
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -53,6 +55,9 @@ export function FindBar({
 
   if (!open) return null;
 
+  const trimmed = query.trim();
+  const empty = trimmed.length > 0 && matches.length === 0;
+
   const go = (delta: number) => {
     if (matches.length === 0) return;
     const next = (index + delta + matches.length) % matches.length;
@@ -76,44 +81,61 @@ export function FindBar({
     }
   };
 
-  const empty = query.trim().length > 0 && matches.length === 0;
+  const openGlobalSearch = () => {
+    const q = trimmed;
+    onClose();
+    openSearch(q);
+  };
 
   return (
-    <div className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-border bg-card px-2 py-1.5 shadow-md">
-      <input
-        ref={inputRef}
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={onKeyDown}
-        placeholder="在已加载消息中查找"
-        className="w-48 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-      />
-      <span
-        className={`w-12 shrink-0 text-right text-xs tabular-nums ${
-          empty ? "text-destructive" : "text-muted-foreground"
-        }`}
-      >
-        {matches.length ? `${index + 1}/${matches.length}` : "0/0"}
-      </span>
-      <IconButton
-        size="sm"
-        aria-label="上一个匹配"
-        disabled={matches.length === 0}
-        onClick={() => go(-1)}
-      >
-        <ChevronUp size={14} />
-      </IconButton>
-      <IconButton
-        size="sm"
-        aria-label="下一个匹配"
-        disabled={matches.length === 0}
-        onClick={() => go(1)}
-      >
-        <ChevronDown size={14} />
-      </IconButton>
-      <IconButton size="sm" aria-label="关闭查找" onClick={onClose}>
-        <X size={14} />
-      </IconButton>
+    <div className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 flex-col items-center gap-1">
+      <div className="flex items-center gap-1 rounded-lg border border-border bg-card px-2 py-1.5 shadow-md">
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder="在已加载消息中查找…"
+          aria-label="在已加载消息中查找"
+          className="min-w-[12rem] bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+        />
+        <span
+          className={`w-12 shrink-0 text-right text-xs tabular-nums ${
+            empty ? "text-destructive" : "text-muted-foreground"
+          }`}
+        >
+          {matches.length ? `${index + 1}/${matches.length}` : "0/0"}
+        </span>
+        <IconButton
+          size="sm"
+          aria-label="上一个匹配"
+          disabled={matches.length === 0}
+          onClick={() => go(-1)}
+        >
+          <ChevronUp size={14} />
+        </IconButton>
+        <IconButton
+          size="sm"
+          aria-label="下一个匹配"
+          disabled={matches.length === 0}
+          onClick={() => go(1)}
+        >
+          <ChevronDown size={14} />
+        </IconButton>
+        <IconButton size="sm" aria-label="关闭查找" onClick={onClose}>
+          <X size={14} />
+        </IconButton>
+      </div>
+      {empty && (
+        <button
+          type="button"
+          onClick={openGlobalSearch}
+          className="rounded-md bg-card px-2.5 py-1 text-xs text-muted-foreground shadow-sm ring-1 ring-border hover:text-foreground"
+        >
+          未在已加载消息中找到 ·{" "}
+          <span className="text-primary">在全对话中搜索</span>
+        </button>
+      )}
     </div>
   );
 }

@@ -226,9 +226,40 @@ export function Faq({ items }: { items: { q: string; a: ReactNode }[] }) {
       {items.map((f) => (
         <div key={f.q} className="p-4">
           <p className="text-sm font-medium text-foreground">{f.q}</p>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
             {f.a}
-          </p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 三列边界表——用于 Git / 代码能力等「会做 / 需批准 / 不会做」说明。 */
+export function BoundaryTable({
+  rows,
+}: {
+  rows: { can: string; approve: string; wont: string }[];
+}) {
+  return (
+    <div className="mt-2 overflow-hidden rounded-lg border border-border text-xs">
+      <div className="grid grid-cols-3 border-b border-border bg-muted/40 font-medium text-foreground">
+        <span className="px-3 py-2">会做</span>
+        <span className="border-l border-border px-3 py-2">需你批准</span>
+        <span className="border-l border-border px-3 py-2">不会做</span>
+      </div>
+      {rows.map((r) => (
+        <div
+          key={r.can}
+          className="grid grid-cols-3 border-b border-border last:border-b-0"
+        >
+          <span className="px-3 py-2 leading-relaxed">{r.can}</span>
+          <span className="border-l border-border px-3 py-2 leading-relaxed">
+            {r.approve}
+          </span>
+          <span className="border-l border-border px-3 py-2 leading-relaxed">
+            {r.wont}
+          </span>
         </div>
       ))}
     </div>
@@ -246,6 +277,11 @@ export function SettingsTable() {
     { label: "用量", desc: "查看花费与额度", to: "/more/usage" },
     { label: "外观", desc: "明暗主题与界面偏好", to: "/more/appearance" },
     { label: "快捷键", desc: "常用操作的键盘快捷键", to: "/more/shortcuts" },
+    {
+      label: "反馈",
+      desc: "提 Bug、功能建议或体验改进",
+      to: "/more/feedback",
+    },
     { label: "关于", desc: "版本与产品信息", to: "/more/about" },
   ];
   return (

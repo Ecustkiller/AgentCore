@@ -1,3 +1,4 @@
+import { PromptDocument } from "@/components/prompt/PromptDocument";
 import { Button } from "@/components/ui";
 import {
   Dialog,
@@ -23,6 +24,7 @@ const CONTEXT_CHANNEL_META: Record<string, { label: string; hint: string }> = {
   dependency: { label: "前置结果", hint: "上游队友交付的产物" },
   workspace: { label: "工作区", hint: "共享工作区可读文件" },
   task: { label: "你的任务", hint: "分派给本 Agent 的具体活" },
+  deliverable: { label: "交付物规格", hint: "期望交付的形态与硬约束" },
   expected_output: { label: "预期产出", hint: "期望交付的形态" },
   requirements: { label: "产出要求", hint: "必须满足的硬约束" },
   steer: { label: "中途指示", hint: "执行中追加的操舵" },
@@ -115,7 +117,9 @@ export function ReceivedContextSection({
               block={b}
               defaultOpen={powerMode}
               onNavigate={onNavigate}
-              sceneKey={keyBase ? `${keyBase}:ctxblk:${b.channel}-${i}` : undefined}
+              sceneKey={
+                keyBase ? `${keyBase}:ctxblk:${b.channel}-${i}` : undefined
+              }
             />
           ))}
         </div>
@@ -188,7 +192,10 @@ function ContextBlockCard({
   /** 持久化作用域键（`${keyBase}:ctxblk:${channel}-${i}`）；缺省退化为会话内存态。 */
   sceneKey?: string;
 }) {
-  const [open, setOpen] = usePersistentDisclosure(sceneKey ?? null, defaultOpen);
+  const [open, setOpen] = usePersistentDisclosure(
+    sceneKey ?? null,
+    defaultOpen,
+  );
   const meta = CONTEXT_CHANNEL_META[block.channel] ?? {
     label: block.channel,
     hint: "",
@@ -274,9 +281,7 @@ function ContextBlockCard({
                 )}
               </div>
             )}
-          <div className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded bg-background p-2 leading-relaxed text-foreground">
-            {block.body}
-          </div>
+          <PromptDocument text={block.body} maxHeightClass="max-h-72" />
           {block.files.length > 0 && (
             <div className="space-y-0.5">
               {block.files.map((f) => (

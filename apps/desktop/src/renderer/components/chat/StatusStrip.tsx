@@ -3,9 +3,9 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { resolveTurnCost } from "@/lib/cost";
 import { formatCost, formatDuration } from "@/lib/format";
 import {
-  lastUserMessage,
   lastUserMessageId,
   runRegenerate,
+  runRetryFailed,
 } from "@/services/turns";
 import {
   activeRuntime,
@@ -25,7 +25,6 @@ import { useUsageStore } from "@/stores/usage";
 import {
   AlertTriangle,
   Ban,
-  Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -33,13 +32,10 @@ import {
   Loader2,
   Maximize2,
   MessagesSquare,
-  Pencil,
   Play,
   RotateCw,
   Square,
-  X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
 
 /** Props every lifecycle strip shares: projection + strip controls. */
 export interface StatusStripProps {
@@ -199,9 +195,7 @@ function RunningStrip({
       </div>
       {runningRuns.length > 0 && onPeekRunning && (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <span>
-            {runningRuns.length} 人正在干活，节点上会实时显示输出预览
-          </span>
+          <span>{runningRuns.length} 人正在干活，节点上会实时显示输出预览</span>
           <Button
             variant="ghost"
             className="h-7 shrink-0 px-2 text-primary hover:bg-primary/10"
@@ -249,7 +243,7 @@ function CompletedStrip({
     .filter((r): r is string => Boolean(r));
   const failedRolesText =
     failedRoles.length > 0 ? `：${failedRoles.join("、")}` : "";
-  const failureNotice = `${failedRuns.length} 个子任务失败${failedRolesText}，可重试，或调整指令后重发。`;
+  const failureNotice = `${failedRuns.length} 个子任务失败${failedRolesText}，可重试或忽略。`;
   const showRecovery = stopped || failedRuns.length > 0;
 
   const turnCostTotal = useConversationStore((s) =>
@@ -302,7 +296,10 @@ function CompletedStrip({
               <span>{failureNotice}</span>
             </div>
           )}
-          <RecoveryActions abandonLabel="忽略" />
+          <RecoveryActions
+            abandonLabel="忽略"
+            hasFailedRuns={failedRuns.length > 0}
+          />
         </>
       )}
     </div>
@@ -364,7 +361,7 @@ function FailureStrip({
           <p className="text-foreground">执行过程中出现错误</p>
         )}
         <p className="mt-1 whitespace-pre-wrap break-words text-xs text-destructive">
-          {failedRun?.error ?? "未获取到具体错误信息，可重试或调整指令后继续。"}
+          {failedRun?.error ?? "未获取到具体错误信息，可重试或忽略。"}
         </p>
       </div>
 
@@ -374,119 +371,66 @@ function FailureStrip({
 }
 
 /**
- * Shared failure-recovery row: 重试 / 调整指令 / 放弃. Reused by failure and
- * partial-failure strips, and by the canvas 指挥台 ({@link CanvasDecisionPanel}).
+ * Shared failure-recovery row: 重试 / 放弃. Reused by failure and partial-failure
+ * strips, and by the canvas 指挥台 ({@link CanvasDecisionPanel}).
  */
 export function RecoveryActions({
   abandonLabel = "放弃",
+  hasFailedRuns = false,
 }: {
   abandonLabel?: string;
+  /** When true, show "重试失败项" (retry-failed) as the primary action;
+   *  otherwise fall back to "重试" (full regenerate). */
+  hasFailedRuns?: boolean;
 }) {
   const isGenerating = useActiveGenerating();
   const messageId = useExecutionScope();
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
-  const editRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => {
-    if (!editing) return;
-    const el = editRef.current;
-    if (el) {
-      el.focus();
-      el.selectionStart = el.selectionEnd = el.value.length;
-      el.style.height = "0";
-      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-    }
-  }, [editing]);
+  const onRetryFailed = () => {
+    const id = lastUserMessageId();
+    if (id) void runRetryFailed(id);
+  };
 
-  const onRetry = () => {
+  const onRegenerate = () => {
     const id = lastUserMessageId();
     if (id) void runRegenerate(id);
-  };
-
-  const onAdjust = () => {
-    const m = lastUserMessage();
-    if (!m) return;
-    setDraft(m.content);
-    setEditing(true);
-  };
-
-  const onAdjustSubmit = () => {
-    const m = lastUserMessage();
-    const text = draft.trim();
-    if (!m || !text) return;
-    setEditing(false);
-    useConversationStore.getState().updateMessage(m.id, { content: text });
-    void runRegenerate(m.id, text);
   };
 
   const onAbandon = () => {
     if (messageId) useExecutionStore.getState().clearExecution(messageId);
   };
 
-  if (editing) {
-    return (
-      <div className="mt-2 rounded-lg border border-border bg-card p-2">
-        <textarea
-          ref={editRef}
-          value={draft}
-          onChange={(e) => {
-            setDraft(e.target.value);
-            e.target.style.height = "0";
-            e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
-          }}
-          onKeyDown={(e) => {
-            if (e.nativeEvent.isComposing) return;
-            if (e.key === "Escape") {
-              e.preventDefault();
-              setEditing(false);
-            } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-              e.preventDefault();
-              onAdjustSubmit();
-            }
-          }}
-          className="w-full resize-none bg-transparent px-2 py-1 text-sm text-foreground focus:outline-none"
-          rows={1}
-        />
-        <div className="flex items-center justify-end gap-1.5 pt-1">
-          <Button
-            variant="neutral"
-            icon={<X size={13} />}
-            onClick={() => setEditing(false)}
-          >
-            取消
-          </Button>
-          <Button
-            variant="primary"
-            icon={<Check size={13} />}
-            disabled={!draft.trim()}
-            onClick={onAdjustSubmit}
-          >
-            调整后重发
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
-      <Button
-        variant="primary"
-        icon={<RotateCw size={13} />}
-        disabled={isGenerating}
-        onClick={onRetry}
-      >
-        重试
-      </Button>
-      <Button
-        variant="neutral"
-        icon={<Pencil size={13} />}
-        disabled={isGenerating}
-        onClick={onAdjust}
-      >
-        调整指令
-      </Button>
+      {hasFailedRuns ? (
+        <>
+          <Button
+            variant="primary"
+            icon={<RotateCw size={13} />}
+            disabled={isGenerating}
+            onClick={onRetryFailed}
+          >
+            重试失败项
+          </Button>
+          <Button
+            variant="neutral"
+            icon={<RotateCw size={13} />}
+            disabled={isGenerating}
+            onClick={onRegenerate}
+          >
+            全部重新生成
+          </Button>
+        </>
+      ) : (
+        <Button
+          variant="primary"
+          icon={<RotateCw size={13} />}
+          disabled={isGenerating}
+          onClick={onRegenerate}
+        >
+          重试
+        </Button>
+      )}
       <Button variant="neutral" icon={<Ban size={13} />} onClick={onAbandon}>
         {abandonLabel}
       </Button>

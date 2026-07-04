@@ -27,6 +27,7 @@ from .conversations import (
     Message,
 )
 from .devices import PushDeviceRow
+from .feedback import FeedbackRow
 from .model_modes import ModelMode
 from .runs import (
     HandoffJob,
@@ -47,6 +48,7 @@ __all__ = [
     "ConversationShare",
     "CostEvent",
     "Credentials",
+    "FeedbackRow",
     "Folder",
     "HandoffJob",
     "Invite",

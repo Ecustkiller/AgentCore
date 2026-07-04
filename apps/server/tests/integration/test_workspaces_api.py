@@ -1,15 +1,10 @@
 """Integration tests for the first-class workspace HTTP routes (文件中枢统一 Step 1).
 
 Auto-skips (via the shared ``client`` fixture) when no PostgreSQL is reachable.
-Covers: the auth gate; hub enumeration (文件夹即工作区: every folder is a workspace,
-local ones marked + carrying root_id; a 裸聊 owns none); the ws-id-addressed file
-CRUD / move / dirs / snapshot lifecycle on a folder workspace; the cloud-vs-local
-gate (local file/mutation ops 409, read-only snapshot list stays open); and IDOR /
-bad-id / conversation-id 404s (a conversation is not a workspace).
-
-``data_dir`` and the storage backend are redirected to a tmp dir so routes never
-touch the real ./data tree; the lru-cached storage factory is cleared around each
-test so the redirect takes effect.
+Covers: the auth gate; hub enumeration (Folder 重构 To-Be: ``conv:<id>`` scratch
+spaces with files or a local binding; folders are sidebar-only); ws-id-addressed
+file CRUD / move / dirs / snapshot lifecycle; the cloud-vs-local gate (local
+file/mutation ops 409); and IDOR / bad-id 404s.
 """
 
 import os
@@ -81,11 +76,11 @@ async def test_workspaces_requires_auth(client):
     assert (await client.get("/v1/workspaces/folder:x/files")).status_code == 401
 
 
-async def test_folder_workspace_file_crud_by_ws_id(client, make_invite, _fs_data_dir):
+async def test_conv_scratch_file_crud_by_ws_id(client, make_invite, _fs_data_dir):
     code = await make_invite("INV-WSX-1")
     await _register_and_login(client, code, "wsxuser1")
-    folder_id = await _new_folder(client, "Proj")
-    ws = f"folder:{folder_id}"
+    conv_id = await _new_conversation(client, "Proj")
+    ws = f"conv:{conv_id}"
 
     body = b"first-class\x00\x01"
     r = await client.put(f"/v1/workspaces/{ws}/files/docs/a.bin", content=body)
@@ -109,67 +104,65 @@ async def test_folder_workspace_file_crud_by_ws_id(client, make_invite, _fs_data
     assert (await client.delete(f"/v1/workspaces/{ws}/files/out/a.bin")).status_code == 200
 
 
-async def test_enumeration_lists_folders_only(client, make_invite, _fs_data_dir):
+async def test_enumeration_lists_conv_scratch_only(client, make_invite, _fs_data_dir):
     code = await make_invite("INV-WSX-ENUM")
     await _register_and_login(client, code, "wsxenum")
-    folder_id = await _new_folder(client, "Alpha")
+    await _new_folder(client, "Alpha")
     bare_conv = await _new_conversation(client, "bare")
 
     r = await client.get("/v1/workspaces")
     assert r.status_code == 200, r.text
     by_id = {w["ws_id"]: w for w in r.json()["data"]}
 
-    # 文件夹即工作区: the folder always lists (a project is a project, empty or not);
-    # a 裸聊 owns no workspace, so it never appears.
-    assert f"folder:{folder_id}" in by_id
-    assert by_id[f"folder:{folder_id}"]["location"] == "cloud"
+    # Empty scratch spaces are omitted; folders never appear as workspaces.
+    assert by_id == {}
     assert f"conv:{bare_conv}" not in by_id
+
+    await client.put(f"/v1/workspaces/conv:{bare_conv}/files/note.txt", content=b"x")
+    r = await client.get("/v1/workspaces")
+    by_id = {w["ws_id"]: w for w in r.json()["data"]}
+    assert f"conv:{bare_conv}" in by_id
+    assert by_id[f"conv:{bare_conv}"]["location"] == "cloud"
 
 
 async def test_enumeration_marks_local_binding(client, make_invite, _fs_data_dir):
     code = await make_invite("INV-WSX-LOCAL")
     await _register_and_login(client, code, "wsxlocal")
     conv_id = await _new_conversation(client, "bound")
-    # Binding a 裸聊 promotes it into a folder workspace bound to the desktop root.
     await client.put(f"/v1/conversations/{conv_id}/workspace/binding", json={"root_id": _ROOT})
 
     r = await client.get("/v1/workspaces")
     locals_ = [w for w in r.json()["data"] if w["location"] == "local"]
-    # The promote created exactly one (folder) workspace, marked local.
     assert len(locals_) == 1
-    assert locals_[0]["ws_id"].startswith("folder:")
+    assert locals_[0]["ws_id"] == f"conv:{conv_id}"
     assert locals_[0]["root_id"] == _ROOT
     assert locals_[0]["has_files"] is True
 
 
-async def test_enumeration_lists_local_bound_folder(client, make_invite, _fs_data_dir):
-    """A folder created with a local binding (F2: 加文件夹=建本地绑定项目) shows in the
-    hub as a local workspace carrying its root_id — browsed over IPC, not REST."""
+async def test_enumeration_lists_local_bound_conversation(client, make_invite, _fs_data_dir):
+    """A conversation bound to a desktop root shows in the hub as a local scratch workspace."""
     code = await make_invite("INV-WSX-F2")
     await _register_and_login(client, code, "wsxf2")
-    r = await client.post("/v1/folders", json={"name": "LocalProj", "local_root_id": _ROOT})
-    assert r.status_code == 201, r.text
-    folder_id = r.json()["id"]
+    conv_id = await _new_conversation(client, "LocalProj")
+    await client.put(f"/v1/conversations/{conv_id}/workspace/binding", json={"root_id": _ROOT})
 
     r = await client.get("/v1/workspaces")
     by_id = {w["ws_id"]: w for w in r.json()["data"]}
-    entry = by_id[f"folder:{folder_id}"]
+    entry = by_id[f"conv:{conv_id}"]
     assert entry["location"] == "local"
     assert entry["root_id"] == _ROOT
     assert entry["has_files"] is True
 
-    # Its files live on the desktop, so the server-side REST file list is refused (§五).
-    assert (await client.get(f"/v1/workspaces/folder:{folder_id}/files")).status_code == 409
+    assert (await client.get(f"/v1/workspaces/conv:{conv_id}/files")).status_code == 409
 
 
 async def test_local_workspace_rejects_server_side_ops(client, make_invite, _fs_data_dir):
-    """A local workspace's files live on the desktop — server-side file / mutation
-    ops are refused (409); read-only snapshot listing stays open (§五)."""
+    """A local scratch workspace's files live on the desktop — server-side ops are 409."""
     code = await make_invite("INV-WSX-409")
     await _register_and_login(client, code, "wsx409")
-    r = await client.post("/v1/folders", json={"name": "LocalProj", "local_root_id": _ROOT})
-    assert r.status_code == 201, r.text
-    ws = f"folder:{r.json()['id']}"
+    conv_id = await _new_conversation(client, "LocalProj")
+    await client.put(f"/v1/conversations/{conv_id}/workspace/binding", json={"root_id": _ROOT})
+    ws = f"conv:{conv_id}"
 
     assert (await client.get(f"/v1/workspaces/{ws}/files")).status_code == 409
     assert (await client.put(f"/v1/workspaces/{ws}/files/x.txt", content=b"x")).status_code == 409
@@ -179,15 +172,14 @@ async def test_local_workspace_rejects_server_side_ops(client, make_invite, _fs_
     ).status_code == 409
     assert (await client.post(f"/v1/workspaces/{ws}/snapshots", json={})).status_code == 409
     assert (await client.post(f"/v1/workspaces/{ws}/snapshots/x/restore")).status_code == 409
-    # Read-only snapshot listing is allowed (object-store backed, ws-keyed).
     assert (await client.get(f"/v1/workspaces/{ws}/snapshots")).status_code == 200
 
 
 async def test_snapshot_lifecycle_by_ws_id(client, make_invite, _fs_data_dir):
     code = await make_invite("INV-WSX-SNAP")
     await _register_and_login(client, code, "wsxsnap")
-    folder_id = await _new_folder(client, "Snaps")
-    ws = f"folder:{folder_id}"
+    conv_id = await _new_conversation(client, "Snaps")
+    ws = f"conv:{conv_id}"
 
     await client.put(f"/v1/workspaces/{ws}/files/doc.txt", content=b"v1")
     r = await client.post(f"/v1/workspaces/{ws}/snapshots", json={"label": "m1"})
@@ -219,8 +211,8 @@ async def test_clone_repo_by_ws_id(client, make_invite, _fs_data_dir, tmp_path, 
 
     code = await make_invite("INV-WSX-CLONE")
     await _register_and_login(client, code, "wsxclone")
-    folder_id = await _new_folder(client, "CloneProj")
-    ws = f"folder:{folder_id}"
+    conv_id = await _new_conversation(client, "CloneProj")
+    ws = f"conv:{conv_id}"
 
     r = await client.post(
         f"/v1/workspaces/{ws}/clone", json={"repo_url": src.as_uri(), "dest": "imp"}
@@ -235,19 +227,18 @@ async def test_bad_and_foreign_ws_ids_404(client, new_client, make_invite, _fs_d
     code = await make_invite("INV-WSX-IDOR")
     await _register_and_login(client, code, "wsxowner")
     folder_id = await _new_folder(client, "Mine")
-    conv_id = await _new_conversation(client, "filed")
+    conv_id = await _new_conversation(client, "scratch")
 
     assert (await client.get("/v1/workspaces/garbage/files")).status_code == 404
     assert (await client.get("/v1/workspaces/team:abc/files")).status_code == 404
     assert (await client.get(f"/v1/workspaces/folder:{conv_id}/files")).status_code == 404
-    # 文件夹即工作区: a conversation is never a workspace, so the conv-id form is 404.
-    assert (await client.get(f"/v1/workspaces/conv:{conv_id}/files")).status_code == 404
+    assert (await client.get(f"/v1/workspaces/folder:{folder_id}/files")).status_code == 404
+    assert (await client.get(f"/v1/workspaces/conv:{conv_id}/files")).status_code == 200
 
-    # A different user can't reach the owner's folder workspace (IDOR-safe 404).
     code_b = await make_invite("INV-WSX-IDOR-B")
     async with new_client() as other:
         await _register_and_login(other, code_b, "wsxintruder")
-        assert (await other.get(f"/v1/workspaces/folder:{folder_id}/files")).status_code == 404
+        assert (await other.get(f"/v1/workspaces/conv:{conv_id}/files")).status_code == 404
 
 
 async def test_file_index_lists_files_pruning_ignored(client, make_invite, _fs_data_dir):
@@ -256,8 +247,8 @@ async def test_file_index_lists_files_pruning_ignored(client, make_invite, _fs_d
     fsApi.listFiles that indexes local roots, so @ behaves the same either way."""
     code = await make_invite("INV-WSX-IDX")
     await _register_and_login(client, code, "wsxidx")
-    folder_id = await _new_folder(client, "Idx")
-    ws = f"folder:{folder_id}"
+    conv_id = await _new_conversation(client, "Idx")
+    ws = f"conv:{conv_id}"
 
     await client.put(f"/v1/workspaces/{ws}/files/src/app.ts", content=b"a")
     await client.put(f"/v1/workspaces/{ws}/files/README.md", content=b"r")
@@ -275,12 +266,10 @@ async def test_file_index_lists_files_pruning_ignored(client, make_invite, _fs_d
 
 
 async def test_file_index_local_workspace_rejected(client, make_invite, _fs_data_dir):
-    """Local workspaces are indexed on the desktop over IPC, so the server-side
-    file-index is refused with 409 like other cloud-only file ops (§五)."""
     code = await make_invite("INV-WSX-IDX-L")
     await _register_and_login(client, code, "wsxidxl")
-    r = await client.post("/v1/folders", json={"name": "LocalIdx", "local_root_id": _ROOT})
-    assert r.status_code == 201, r.text
+    conv_id = await _new_conversation(client, "LocalIdx")
+    await client.put(f"/v1/conversations/{conv_id}/workspace/binding", json={"root_id": _ROOT})
     assert (
-        await client.get(f"/v1/workspaces/folder:{r.json()['id']}/file-index")
+        await client.get(f"/v1/workspaces/conv:{conv_id}/file-index")
     ).status_code == 409

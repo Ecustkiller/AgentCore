@@ -1,4 +1,3 @@
-import { captureSSEEvent } from "@/preview/recorder";
 import { traceSSEEvent } from "@/services/sseTrace";
 import { traceTurnFirstSSE } from "@/services/turnTrace";
 import type { SSEEvent } from "@/types/events";
@@ -32,11 +31,6 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
   // 回合末把到达序与气泡 process[] 并排对账。no-op when disabled / in prod.
   traceTurnFirstSSE(ctx.conversationId, event.type);
   traceSSEEvent(event, ctx.conversationId);
-
-  // Dev preview recorder tap (no-op unless armed for this exact conversation):
-  // buffers a real turn so it can be saved as an offline preview recording. Armed
-  // only via the DEV-gated record button, so production never records.
-  captureSSEEvent(event, ctx.conversationId);
 
   for (const handler of HANDLERS) {
     if (handler(event, ctx)) return;

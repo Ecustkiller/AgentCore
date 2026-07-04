@@ -1,21 +1,19 @@
-import {
-  MODEL_TIER_META,
-  STANCE_META,
-  toolLabel,
-} from "@/stores/execution";
 import { statusPillSoft } from "@/components/ui/tone-presets";
 import { formatCompact, formatDuration } from "@/lib/format";
+import { MODEL_TIER_META, STANCE_META, toolLabel } from "@/stores/execution";
 import {
   type AgentNodeData,
   type AgentNodePresentation,
-  STATUS_STYLES,
   PRESENCE_STYLES,
+  STATUS_STYLES,
   checkpointBadge,
   revisedBadge,
   statusLabel,
 } from "./shared";
 
-export function buildAgentNodePresentation(d: AgentNodeData): AgentNodePresentation {
+export function buildAgentNodePresentation(
+  d: AgentNodeData,
+): AgentNodePresentation {
   const style = STATUS_STYLES[d.status] ?? STATUS_STYLES.pending;
   const presence = PRESENCE_STYLES[d.status] ?? PRESENCE_STYLES.pending;
   const artifacts = d.artifacts ?? [];

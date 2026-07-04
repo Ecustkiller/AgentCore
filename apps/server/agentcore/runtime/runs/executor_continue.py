@@ -191,7 +191,7 @@ async def _continue_run_scoped(
         # recall edits prose around files the first pass already wrote.
         verdict = check_contract(
             content,
-            spec.policy.contract,
+            spec.deliverable,
             files_written=len(files_touched_from_transcript(messages)),
         )
         # 执行级事件溯源 (§8.3): the revised FULL product (content + 思考) under the

@@ -152,7 +152,7 @@ AMEND_NOTE_TOOL_NAME = "amend_note"
 HANDOFF_TOOL_NAME = "handoff"
 
 # Default per-node failure strategy (see RunPolicy.on_failure).
-DEFAULT_ON_FAILURE = "degrade"
+DEFAULT_ON_FAILURE = "retry"
 
 # The accepted on_failure vocabulary the WaveScheduler enacts.
 VALID_ON_FAILURE = frozenset({"abort", "skip", "degrade", "retry"})

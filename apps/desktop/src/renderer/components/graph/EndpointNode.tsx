@@ -35,8 +35,6 @@ interface EndpointNodeData {
   /** Captain only: keyboard/mouse activation — jumps to the final answer.
    * Absent on the input node, which stays a passive label. */
   onActivate?: () => void;
-  /** Dimmed when another node is hovered (GraphView edge highlight). */
-  hoverDimmed?: boolean;
   /** Captain only: a11y verb for the activation. Defaults to 查看最终回答. */
   actionLabel?: string;
   [key: string]: unknown;
@@ -119,11 +117,7 @@ export function EndpointNode({ data }: NodeProps) {
           the card so it never collides with the card's `animate-pulse`. */}
       <div
         className="animate-graph-node-enter"
-        style={{
-          animationDelay: `${enterDelay}ms`,
-          opacity: d.hoverDimmed ? 0.5 : 1,
-          transition: "opacity 150ms ease",
-        }}
+        style={{ animationDelay: `${enterDelay}ms` }}
       >
         <div
           {...interactiveProps}

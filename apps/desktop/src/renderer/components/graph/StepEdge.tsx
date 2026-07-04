@@ -1,5 +1,5 @@
-import { formatCompact } from "@/lib/format";
 import { NODE_HEIGHT, NODE_WIDTH } from "@/lib/elk-layout";
+import { formatCompact } from "@/lib/format";
 import {
   BaseEdge,
   type Edge,
@@ -7,6 +7,8 @@ import {
   type EdgeProps,
   getSmoothStepPath,
 } from "@xyflow/react";
+import { useContext } from "react";
+import { GraphHoverContext } from "./GraphView";
 
 /**
  * Real information handoff carried on a dependency edge (前端UX设计.md §五 信息流边):
@@ -28,7 +30,6 @@ type StepEdgeData = Edge<{
   kind?: "dep" | "delegate" | "revision";
   handoff?: EdgeHandoff | null;
   handleDirection?: "horizontal" | "vertical";
-  hoveredNodeId?: string | null;
   sourcePortIndex?: number;
   sourcePortTotal?: number;
   targetPortIndex?: number;
@@ -132,7 +133,7 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
   // the dashed delegation grouping.
   const isRevision = data?.kind === "revision";
 
-  const hoveredNodeId = data?.hoveredNodeId ?? null;
+  const hoveredNodeId = useContext(GraphHoverContext);
   const isHoverRelated =
     hoveredNodeId != null &&
     (props.source === hoveredNodeId || props.target === hoveredNodeId);
@@ -185,7 +186,7 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
       {showLabel && handoff && (
         <EdgeLabelRenderer>
           <div
-            className="nodrag nopan pointer-events-auto absolute flex items-center gap-1 rounded-full border border-border bg-card px-1.5 py-0.5 text-xs shadow-sm"
+            className="nodrag nopan pointer-events-none absolute flex items-center gap-1 rounded-full border border-border bg-card px-1.5 py-0.5 text-xs shadow-sm"
             style={{
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
             }}

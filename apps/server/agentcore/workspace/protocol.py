@@ -83,6 +83,34 @@ class DirEntry:
 
 
 @dataclass(frozen=True)
+class ReadLinesResult:
+    """Bounded slice from ``read_lines`` — 1-based inclusive line range."""
+
+    lines: list[str]
+    start_line: int
+    end_line: int
+    total_lines: int
+
+
+@dataclass(frozen=True)
+class TreeEntry:
+    """One node from ``list_tree`` — workspace-relative path + depth."""
+
+    path: str
+    is_dir: bool
+    depth: int
+
+
+@dataclass
+class TreeResult:
+    """Bounded recursive directory listing from ``list_tree``."""
+
+    entries: list[TreeEntry]
+    truncated: bool
+    elided_count: int
+
+
+@dataclass(frozen=True)
 class ReplaceOutcome:
     """Result of ``replace``: how many spans changed, and where the first was."""
 
@@ -119,6 +147,28 @@ class GrepResult:
     file_counts: list[tuple[str, int]] = field(default_factory=list)
     total_matches: int = 0
     truncated: bool = False
+
+
+@dataclass(frozen=True)
+class CodeChunk:
+    """One searchable code block returned by ``code_search``."""
+
+    path: str
+    symbol: str | None
+    symbol_type: str | None
+    start_line: int
+    end_line: int
+    language: str
+    snippet: str
+
+
+@dataclass
+class CodeSearchResult:
+    """Bounded semantic-ish search over symbol-level code chunks."""
+
+    chunks: list[CodeChunk] = field(default_factory=list)
+    scores: list[float] = field(default_factory=list)
+    index_stale: bool = False
 
 
 class WorkspaceBackend(Protocol):
@@ -166,6 +216,33 @@ class WorkspaceBackend(Protocol):
         """List entries under ``directory`` matching glob ``pattern`` (capped).
 
         Raises ``OutsideWorkspace`` / ``NotADirectory`` / ``WorkspaceIOError``.
+        """
+        ...
+
+    async def read_lines(
+        self, path: str, *, offset: int = 1, limit: int | None = None
+    ) -> ReadLinesResult:
+        """Return a 1-based line slice of ``path`` (``limit`` caps rows returned).
+
+        Raises ``OutsideWorkspace`` / ``PathNotFound`` / ``NotAFile`` /
+        ``WorkspaceIOError``. When ``offset`` is past EOF, returns empty ``lines``
+        with the correct ``total_lines``.
+        """
+        ...
+
+    async def list_tree(
+        self,
+        directory: str,
+        *,
+        pattern: str = "*",
+        max_depth: int = 3,
+        max_entries: int = 200,
+    ) -> TreeResult:
+        """Recursively list ``directory`` as a depth-bounded tree (ignore-pruned).
+
+        ``pattern`` filters file names only (directories are always included so the
+        tree stays connected). Raises ``OutsideWorkspace`` / ``NotADirectory`` /
+        ``WorkspaceIOError``.
         """
         ...
 
@@ -229,6 +306,30 @@ class WorkspaceBackend(Protocol):
         single file (scanned alone, ``glob`` ignored — rg PATTERN FILE). Raises
         ``OutsideWorkspace`` / ``PathNotFound``. The regex is assumed already
         validated by the caller.
+        """
+        ...
+
+    async def code_search(
+        self,
+        query: str,
+        *,
+        language: str | None = None,
+        path_prefix: str = ".",
+        max_results: int = 10,
+    ) -> CodeSearchResult:
+        """BM25 search over symbol-level code chunks (tree-sitter indexed).
+
+        Read-only (never sets ``dirty``). Returns an empty result with
+        ``index_stale=True`` when the index is missing or incomplete — callers
+        should fall back to ``grep`` for exact matches.
+        """
+        ...
+
+    async def ensure_code_index(self, *, force: bool = False) -> bool:
+        """Build or refresh the code-search index (incremental, best-effort).
+
+        Returns whether any file was re-indexed. May be slow on first call for
+        large workspaces (capped file count). Read-only (never sets ``dirty``).
         """
         ...
 

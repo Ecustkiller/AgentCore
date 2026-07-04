@@ -19,6 +19,7 @@ from agentcore.db.repositories import (
     ConversationShareRepository,
     CostEventRepository,
     CredentialsRepository,
+    FeedbackRepository,
     FolderRepository,
     HandoffJobRepository,
     InviteRepository,
@@ -144,6 +145,10 @@ def get_push_device_repo(
     session: AsyncSession = Depends(get_db),
 ) -> PushDeviceRepository:
     return PushDeviceRepository(session)
+
+
+def get_feedback_repo(session: AsyncSession = Depends(get_db)) -> FeedbackRepository:
+    return FeedbackRepository(session)
 
 
 def get_messaging_service(

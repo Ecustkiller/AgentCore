@@ -1,10 +1,10 @@
-# 多 Agent 编排优化：参考 Cursor Multitask Mode
+# 多 Agent 编排优化：参考 Cursor Multitask Mode 🗂️
 
-> **状态**：🗂️ 提案（未定稿）
+> **定位**：参考 Cursor Multitask 的六个增量优化方向（轻量路由、Worker 三档自主度、抑制过度拆分等）。未定稿。
 >
-> **动机**：Cursor Multitask Mode 在「协调者路由效率」「Worker 自治」「抑制过度拆分」上有值得借鉴的设计理念。本文以 Cursor Multitask 为对照，梳理 AgentCore 当前多 Agent 编排的六个优化方向，每个给出现状分析、目标设计与实施路径。
+> **治理**：本目录仅 `07-规划`；🗂️ = 讨论中、未承诺落地。决策通过、开始落地后迁入 [编排器与 CEO 主 Agent](/docs/03-AI核心/编排器与CEO主Agent.md) 与 [Agent 协作模式](/docs/03-AI核心/Agent协作模式.md)，本条退役。
 >
-> **前提**：AgentCore 的「CEO 主 Agent + delegate DAG + WaveScheduler」核心架构不变；本文是在既有框架内的增量优化，不是重设计。
+> **前提**：「CEO 主 Agent + delegate DAG + WaveScheduler」核心架构不变；本文是既有框架内的增量优化，不是重设计。
 
 ---
 

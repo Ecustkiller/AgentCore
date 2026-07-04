@@ -30,11 +30,15 @@ from typing import Any
 from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
 from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp
 from agentcore.workspace.protocol import (
+    CodeSearchResult,
     DirEntry,
     GrepHit,
     GrepQuery,
     GrepResult,
+    ReadLinesResult,
     ReplaceOutcome,
+    TreeEntry,
+    TreeResult,
 )
 
 # Default extra transport budget (seconds) over a code execution's own timeout
@@ -139,6 +143,52 @@ class LocalWorkspace:
             for e in (value or [])
         ]
 
+    async def read_lines(
+        self, path: str, *, offset: int = 1, limit: int | None = None
+    ) -> ReadLinesResult:
+        value = await self._channel.request(
+            WorkspaceOp.READ_LINES,
+            {"path": self._in(path), "offset": offset, "limit": limit},
+        )
+        value = value or {}
+        return ReadLinesResult(
+            lines=[str(line) for line in value.get("lines", [])],
+            start_line=int(value.get("start_line", offset)),
+            end_line=int(value.get("end_line", offset - 1)),
+            total_lines=int(value.get("total_lines", 0)),
+        )
+
+    async def list_tree(
+        self,
+        directory: str,
+        *,
+        pattern: str = "*",
+        max_depth: int = 3,
+        max_entries: int = 200,
+    ) -> TreeResult:
+        value = await self._channel.request(
+            WorkspaceOp.LIST_TREE,
+            {
+                "directory": self._in(directory),
+                "pattern": pattern,
+                "max_depth": max_depth,
+                "max_entries": max_entries,
+            },
+        )
+        value = value or {}
+        return TreeResult(
+            entries=[
+                TreeEntry(
+                    path=self._out(str(e["path"])),
+                    is_dir=bool(e["is_dir"]),
+                    depth=int(e["depth"]),
+                )
+                for e in value.get("entries", [])
+            ],
+            truncated=bool(value.get("truncated", False)),
+            elided_count=int(value.get("elided_count", 0)),
+        )
+
     async def index_files(
         self, cap: int | None = None, *, order: str = "path"
     ) -> tuple[list[str], bool]:
@@ -179,6 +229,23 @@ class LocalWorkspace:
             count=int(value["count"]),
             first_line=None if first_line is None else int(first_line),
         )
+
+    async def code_search(
+        self,
+        query: str,
+        *,
+        language: str | None = None,
+        path_prefix: str = ".",
+        max_results: int = 10,
+    ) -> CodeSearchResult:
+        # Local-mode indexing runs on the desktop; until the channel wires it through,
+        # return an empty stale result so callers fall back to grep.
+        _ = (query, language, path_prefix, max_results)
+        return CodeSearchResult(chunks=[], scores=[], index_stale=True)
+
+    async def ensure_code_index(self, *, force: bool = False) -> bool:
+        _ = force
+        return False
 
     async def grep(self, query: GrepQuery) -> GrepResult:
         value = await self._channel.request(

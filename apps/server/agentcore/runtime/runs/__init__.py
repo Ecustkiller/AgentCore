@@ -35,6 +35,7 @@ from agentcore.runtime.runs.session import RunSession
 from agentcore.runtime.runs.types import (
     TERMINAL_PHASES,
     BatchMetrics,
+    Deliverable,
     RunContract,
     RunKind,
     RunOrigin,
@@ -66,6 +67,7 @@ __all__ = [
     "RunPhase",
     "RunOrigin",
     "RunPolicy",
+    "Deliverable",
     "RunContract",
     "RunSpec",
     "RunState",

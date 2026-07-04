@@ -34,7 +34,7 @@ async def test_capabilities_returns_full_catalog(client, make_invite):
 
     tools = {t["name"]: t for t in body["tools"]}
     # The complete repertoire — CEO orchestration the old /v1/tools never served…
-    for name in ("delegate", "revise", "consult_skill", "consult_memory", "ask_user"):
+    for name in ("delegate", "revise", "debate", "consult_skill", "consult_memory", "ask_user"):
         assert name in tools
         assert tools[name]["available_to"] == ["ceo"]
     # …worker-only mutation + escalate…
@@ -42,7 +42,9 @@ async def test_capabilities_returns_full_catalog(client, make_invite):
         assert name in tools
         assert tools[name]["available_to"] == ["worker"]
     # …and shared read/retrieval built-ins.
-    assert set(tools["web_search"]["available_to"]) == {"ceo", "worker"}
+    for name in ("web_search", "test_run"):
+        assert name in tools
+        assert set(tools[name]["available_to"]) == {"ceo", "worker"}
     # Each tool carries its call JSON Schema (用法教学).
     assert tools["web_search"]["parameters"]["type"] == "object"
 
@@ -55,6 +57,7 @@ async def test_capabilities_lists_system_skills_with_body(client, make_invite):
     skills = {s["name"]: s for s in body["skills"]}
     assert "team_orchestration_advanced" in skills
     assert "ask_user_kickoff" in skills
+    assert "verify_and_fix" in skills
     for skill in skills.values():
         assert skill["summary"]
         assert skill["body"]  # the full guidance, not just the catalog one-liner

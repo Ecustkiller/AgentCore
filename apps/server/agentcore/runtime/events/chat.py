@@ -49,6 +49,7 @@ def tool_use_progress(
     phase: str,
     *,
     run_id: str = "",
+    extra: dict[str, Any] | None = None,
 ) -> SSEEvent:
     """A running tool reported a coarse EXECUTION phase (工具执行阶段进度).
 
@@ -65,6 +66,8 @@ def tool_use_progress(
     }
     if run_id:
         payload["run_id"] = run_id
+    if extra:
+        payload.update(extra)
     return SSEEvent(type=EventType.TOOL_USE_PROGRESS, payload=payload)
 
 

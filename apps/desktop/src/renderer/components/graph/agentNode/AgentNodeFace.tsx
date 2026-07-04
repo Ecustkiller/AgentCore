@@ -1,8 +1,11 @@
-import { graphBadgeMutedPlain, graphBadgePrimary } from "@/components/ui/tone-presets";
+import {
+  graphBadgeMutedPlain,
+  graphBadgePrimary,
+} from "@/components/ui/tone-presets";
 import { agentColorVar, agentGlyph } from "@/lib/agentIdentity";
 import { formatCompact } from "@/lib/format";
 import { STANCE_META, toolLabel } from "@/stores/execution";
-import { AlertTriangle, ArrowUp, Clock, FileText, Pause, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowUp, Clock, FileText, Pause } from "lucide-react";
 import {
   type AgentNodeData,
   type AgentNodePresentation,
@@ -10,7 +13,7 @@ import {
   basename,
 } from "./shared";
 
-/** Dependency layout: full card with task line, artifact chips, footnote. */
+/** Dependency layout: full card with task line, artifact chips, duration in header. */
 export function AgentNodeCardFace({
   d,
   p,
@@ -27,6 +30,7 @@ export function AgentNodeCardFace({
   const isRunning = d.status === "running";
 
   return (
+    // biome-ignore lint/a11y/useSemanticElements: graph card hosts nested interactive chrome
     <div
       role="button"
       tabIndex={0}
@@ -49,7 +53,12 @@ export function AgentNodeCardFace({
           : "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60"
       }`}
     >
-      <AgentNodeHeader d={d} p={p} identityColor={identityColor} identityGlyph={identityGlyph} />
+      <AgentNodeHeader
+        d={d}
+        p={p}
+        identityColor={identityColor}
+        identityGlyph={identityGlyph}
+      />
       <AgentNodeActivity d={d} p={p} showIdleTask />
       {p.artifacts.length > 0 && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
@@ -70,7 +79,6 @@ export function AgentNodeCardFace({
           )}
         </div>
       )}
-      <AgentNodeFootnote d={d} p={p} />
     </div>
   );
 }
@@ -92,6 +100,7 @@ export function AgentNodeTimelineFace({
   const isRunning = d.status === "running";
 
   return (
+    // biome-ignore lint/a11y/useSemanticElements: graph card hosts nested interactive chrome
     <div
       role="button"
       tabIndex={0}
@@ -114,14 +123,18 @@ export function AgentNodeTimelineFace({
           : "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60"
       }`}
     >
-      <AgentNodeHeader d={d} p={p} identityColor={identityColor} identityGlyph={identityGlyph} />
+      <AgentNodeHeader
+        d={d}
+        p={p}
+        identityColor={identityColor}
+        identityGlyph={identityGlyph}
+      />
       <AgentNodeActivity d={d} p={p} showIdleTask={false} />
       {d.task && (
         <p className="mt-1 line-clamp-1 text-xs leading-snug text-muted-foreground/70">
           {d.task}
         </p>
       )}
-      <AgentNodeFootnote d={d} p={p} />
     </div>
   );
 }
@@ -138,7 +151,7 @@ function AgentNodeHeader({
   identityGlyph: string;
 }) {
   return (
-    <div className="flex items-center gap-2.5">
+    <div className="flex items-start gap-2.5">
       <div className="relative shrink-0">
         <div
           className="flex size-7 items-center justify-center rounded-full text-sm font-semibold"
@@ -157,7 +170,10 @@ function AgentNodeHeader({
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-foreground">{d.role}</p>
-        {(d.stance || p.checkpointFace || p.reviewConcernFace || (d.escalationPending ?? 0) > 0) && (
+        {(d.stance ||
+          p.checkpointFace ||
+          p.reviewConcernFace ||
+          (d.escalationPending ?? 0) > 0) && (
           <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
             {d.stance && (
               <span className={graphBadgeMutedPlain}>
@@ -192,6 +208,12 @@ function AgentNodeHeader({
           </p>
         )}
       </div>
+      {p.durationText && (
+        <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+          <Clock size={11} />
+          <span className="tabular-nums">{p.durationText}</span>
+        </span>
+      )}
     </div>
   );
 }
@@ -215,7 +237,9 @@ function AgentNodeActivity({
             {formatCompact(p.liveTool.chars)} 字
           </span>
         )}
-        <span className="ml-0.5 inline-block animate-pulse text-primary">▋</span>
+        <span className="ml-0.5 inline-block animate-pulse text-primary">
+          ▋
+        </span>
       </p>
     );
   }
@@ -223,7 +247,9 @@ function AgentNodeActivity({
     return (
       <p className="mt-2 line-clamp-2 text-xs leading-snug text-muted-foreground/80">
         {p.livePreview}
-        <span className="ml-0.5 inline-block animate-pulse text-primary">▋</span>
+        <span className="ml-0.5 inline-block animate-pulse text-primary">
+          ▋
+        </span>
       </p>
     );
   }
@@ -231,7 +257,9 @@ function AgentNodeActivity({
     return (
       <p className="mt-2 line-clamp-2 text-xs italic leading-snug text-muted-foreground/60">
         {p.liveThinking}
-        <span className="ml-0.5 inline-block animate-pulse text-primary">▋</span>
+        <span className="ml-0.5 inline-block animate-pulse text-primary">
+          ▋
+        </span>
       </p>
     );
   }
@@ -243,30 +271,4 @@ function AgentNodeActivity({
     );
   }
   return null;
-}
-
-function AgentNodeFootnote({
-  d,
-  p,
-}: {
-  d: AgentNodeData;
-  p: AgentNodePresentation;
-}) {
-  if (!p.durationText && d.toolCount <= 0) return null;
-  return (
-    <div className="mt-1.5 flex items-center gap-2.5 text-xs text-muted-foreground">
-      {p.durationText && (
-        <span className="flex items-center gap-1">
-          <Clock size={11} />
-          <span className="tabular-nums">{p.durationText}</span>
-        </span>
-      )}
-      {d.toolCount > 0 && (
-        <span className="flex items-center gap-1">
-          <Wrench size={11} />
-          <span className="tabular-nums">{d.toolCount}</span>
-        </span>
-      )}
-    </div>
-  );
 }

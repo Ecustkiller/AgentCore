@@ -1,5 +1,5 @@
 import { ConversationItem } from "@/components/sidebar/ConversationItem";
-import { Button, IconButton, SurfaceRowButton } from "@/components/ui";
+import { Button, IconButton, SearchField, SurfaceRowButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   useDeleteConversation,
@@ -18,11 +18,9 @@ import {
   CheckSquare,
   Folder as FolderIcon,
   FolderOpen,
-  HardDrive,
   Inbox,
   MessageSquare,
   Plus,
-  Search,
   Trash2,
   X,
 } from "lucide-react";
@@ -143,18 +141,14 @@ export function ConversationsPage() {
 
           <section className="flex min-h-0 flex-1 flex-col">
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <div className="relative min-w-[12rem] flex-1">
-                <Search
-                  size={16}
-                  className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 text-muted-foreground"
-                />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder={`在「${activeName}」中搜索…`}
-                  className="h-9 w-full rounded-lg border border-input bg-background pr-3 pl-9 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none"
-                />
-              </div>
+              <SearchField
+                size="md"
+                value={query}
+                onValueChange={setQuery}
+                placeholder={`在「${activeName}」中筛选…`}
+                aria-label={`在「${activeName}」中筛选对话`}
+                className="min-w-[12rem] flex-1"
+              />
               {!isArchivedView && (
                 <Button
                   variant={staleOnly ? "primary" : "neutral"}
@@ -435,9 +429,7 @@ function FolderFilterRow({
         <SimpleTooltip label="浏览文件">
           <IconButton
             aria-label="浏览此文件夹的文件"
-            onClick={() =>
-              navigate("/files", filesFocusState(firstConvId))
-            }
+            onClick={() => navigate("/files", filesFocusState(firstConvId))}
             className="size-6 shrink-0"
           >
             <FolderOpen size={13} />

@@ -413,14 +413,14 @@ def test_checkpoint_after_truthy_coerced():
     assert plan.nodes[1].checkpoint_after is False
 
 
-def test_dag_invalid_on_failure_falls_back_to_degrade():
+def test_dag_invalid_on_failure_falls_back_to_default():
     tasks = [
         {"id": "s1", "role": "A", "task": "a"},
         {"id": "s2", "role": "B", "task": "b", "depends_on": ["s1"], "on_failure": "explode"},
     ]
     plan, errs = build_run_plan(tasks, id_prefix="t")
     assert errs == []
-    assert plan.by_id("t_s2").policy.on_failure == "degrade"
+    assert plan.by_id("t_s2").policy.on_failure == "retry"
 
 
 def test_contract_parsed_onto_policy():
@@ -440,7 +440,7 @@ def test_contract_parsed_onto_policy():
         ],
         id_prefix="t",
     )
-    c = plan.nodes[0].policy.contract
+    c = plan.nodes[0].deliverable
     assert c is not None
     assert c.required_sections == ["结论"]
     assert c.must_contain == ["风险"]
@@ -449,9 +449,9 @@ def test_contract_parsed_onto_policy():
     assert c.strict is True
 
 
-def test_no_contract_leaves_policy_contract_none():
+def test_no_contract_leaves_deliverable_none():
     plan, _ = build_run_plan([{"role": "A", "task": "a"}], id_prefix="t")
-    assert plan.nodes[0].policy.contract is None
+    assert plan.nodes[0].deliverable is None
 
 
 def test_contract_block_with_no_rule_is_none():
@@ -459,7 +459,7 @@ def test_contract_block_with_no_rule_is_none():
     plan, _ = build_run_plan(
         [{"role": "A", "task": "a", "contract": {"strict": True}}], id_prefix="t"
     )
-    assert plan.nodes[0].policy.contract is None
+    assert plan.nodes[0].deliverable is None
 
 
 def test_requires_files_parsed_onto_contract():
@@ -468,7 +468,7 @@ def test_requires_files_parsed_onto_contract():
     plan, _ = build_run_plan(
         [{"role": "A", "task": "a", "contract": {"requires_files": True}}], id_prefix="t"
     )
-    c = plan.nodes[0].policy.contract
+    c = plan.nodes[0].deliverable
     assert c is not None
     assert c.requires_files is True
 
@@ -477,7 +477,7 @@ def test_requires_files_false_alone_is_no_rule():
     plan, _ = build_run_plan(
         [{"role": "A", "task": "a", "contract": {"requires_files": False}}], id_prefix="t"
     )
-    assert plan.nodes[0].policy.contract is None
+    assert plan.nodes[0].deliverable is None
 
 
 def test_dag_step_contract_parsed_independently():
@@ -487,8 +487,8 @@ def test_dag_step_contract_parsed_independently():
     ]
     plan, errs = build_run_plan(tasks, id_prefix="t")
     assert errs == []
-    assert plan.by_id("t_s1").policy.contract.min_length == 50
-    assert plan.by_id("t_s2").policy.contract is None
+    assert plan.by_id("t_s1").deliverable.min_length == 50
+    assert plan.by_id("t_s2").deliverable is None
 
 
 def test_contract_invalid_output_format_falls_back_to_text():
@@ -496,7 +496,7 @@ def test_contract_invalid_output_format_falls_back_to_text():
         [{"role": "A", "task": "a", "contract": {"output_format": "xml", "min_length": 10}}],
         id_prefix="t",
     )
-    assert plan.nodes[0].policy.contract.output_format == "text"
+    assert plan.nodes[0].deliverable.output_format == "text"
 
 
 # --- 阶段2 嵌套子任务: tree-position stamping + can_delegate opt-in -------------

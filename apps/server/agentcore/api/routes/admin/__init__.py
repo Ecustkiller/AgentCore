@@ -13,6 +13,7 @@ from fastapi import APIRouter
 from . import (
     audit_logs,
     conversations,
+    feedback,
     observability,
     overview,
     system,
@@ -31,5 +32,6 @@ router.include_router(system.router)
 router.include_router(audit_logs.router)
 router.include_router(conversations.router)
 router.include_router(observability.router)
+router.include_router(feedback.router)
 
 __all__ = ["router"]

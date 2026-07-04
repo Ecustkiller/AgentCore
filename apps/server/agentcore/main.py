@@ -17,6 +17,7 @@ from agentcore.api.routes import (
     conversations,
     devices,
     favicon,
+    feedback,
     files,
     folders,
     inference,
@@ -102,20 +103,25 @@ def _validate_production_security() -> None:
             "COOKIE_SAMESITE=none requires COOKIE_SECURE=true (browsers drop a "
             "SameSite=None cookie without Secure). Set COOKIE_SECURE=true."
         )
-    # code_execute on a cloud/server worker runs untrusted model/user code in a plain
-    # subprocess INSIDE the API container — no namespace/seccomp/rlimit/egress isolation,
-    # so it is effectively authenticated RCE with access to JWT_SECRET_KEY / ENCRYPTION_KEY
-    # and every user's encrypted keys. It is default-off, but a single
-    # CODE_EXECUTE_CLOUD_ENABLED flip would silently expose it; require a second,
-    # explicitly-named acknowledgement so the unsafe config can't be reached by accident
-    # (SEC-005). The real fix — a true sandbox (container/gVisor/nsjail) — is tracked
-    # separately; until then this is a deploy-time "I understand the risk" gate.
-    if settings.code_execute_cloud_enabled and not settings.code_execute_cloud_unsafe_ack:
+    # code_execute on a cloud/server worker runs untrusted model/user code. With
+    # GVISOR_ENABLED the runsc sandbox provides a real isolation boundary; without
+    # it, execution is a plain subprocess INSIDE the API container — no
+    # namespace/seccomp/rlimit/egress isolation, so it is effectively authenticated
+    # RCE with access to JWT_SECRET_KEY / ENCRYPTION_KEY and every user's encrypted
+    # keys. It is default-off, but a single CODE_EXECUTE_CLOUD_ENABLED flip would
+    # silently expose it; require a second, explicitly-named acknowledgement so the
+    # unsafe config can't be reached by accident (SEC-005).
+    if (
+        settings.code_execute_cloud_enabled
+        and not settings.gvisor_enabled
+        and not settings.code_execute_cloud_unsafe_ack
+    ):
         raise RuntimeError(
             "CODE_EXECUTE_CLOUD_ENABLED=true runs untrusted code in a plain subprocess "
             "inside the API container — NOT an isolation boundary (authenticated RCE with "
             "access to in-process secrets). Keep it off (recommended; local/sidecar "
-            "workers still run code), or — only behind a real sandbox — set "
+            "workers still run code), enable GVISOR_ENABLED=true for a real sandbox, "
+            "or — only without gVisor — set "
             "CODE_EXECUTE_CLOUD_UNSAFE_ACK=true to acknowledge the risk explicitly."
         )
 
@@ -124,6 +130,18 @@ def _validate_production_security() -> None:
 async def lifespan(app: FastAPI):
     setup_logging()
     _validate_production_security()
+    if settings.gvisor_enabled:
+        from agentcore.tools.sandbox.gvisor import GVisorSandbox
+
+        gvisor = GVisorSandbox(
+            runsc_path=settings.gvisor_runsc_path,
+            runtime_root=settings.gvisor_runtime_root,
+        )
+        if not await gvisor.health_check():
+            raise RuntimeError(
+                "GVISOR_ENABLED=true but runsc is not available — install gVisor "
+                "runsc or disable GVISOR_ENABLED."
+            )
     # Schema-drift notice: warn loudly (never block) if the live DB is behind the
     # migration head, so an unapplied migration surfaces at boot instead of as a
     # mid-session UndefinedColumnError on a core endpoint.
@@ -252,6 +270,7 @@ app.include_router(capabilities.router, prefix="/v1")
 app.include_router(conversations.router, prefix="/v1")
 app.include_router(devices.router, prefix="/v1")
 app.include_router(favicon.router, prefix="/v1")
+app.include_router(feedback.router, prefix="/v1")
 app.include_router(files.router, prefix="/v1")
 app.include_router(folders.router, prefix="/v1")
 app.include_router(inference.router, prefix="/v1")

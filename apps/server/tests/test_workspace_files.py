@@ -72,10 +72,10 @@ async def test_upload_traversal_is_blocked():
         )
 
 
-async def test_folder_conversations_share_files():
-    """Files uploaded via one conversation are visible to a folder sibling."""
+async def test_conversation_scratch_spaces_are_independent():
+    """Each conversation's scratch is keyed by its own id, not the folder."""
     await upload_file(
         user_id="u1", folder_id="f1", conversation_id="c1", path="shared.txt", data=b"v"
     )
-    got = await download_file(user_id="u1", folder_id="f1", conversation_id="c2", path="shared.txt")
-    assert got == b"v"
+    with pytest.raises(PathNotFound):
+        await download_file(user_id="u1", folder_id="f1", conversation_id="c2", path="shared.txt")

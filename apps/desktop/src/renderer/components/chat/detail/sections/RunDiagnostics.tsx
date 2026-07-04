@@ -1,9 +1,6 @@
 import { Button } from "@/components/ui";
-import {
-  type BatchMetricsSnapshot,
-  type RunNode,
-} from "@/stores/execution";
 import { usePersistentDisclosure } from "@/stores/disclosure";
+import type { BatchMetricsSnapshot, RunNode } from "@/stores/execution";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { DiagRow } from "./shared";
 

@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { AgentNode } from "./AgentNode";
 import { EndpointNode } from "./EndpointNode";
 import { StepEdge } from "./StepEdge";
+import { SubTeamGroupNode } from "./SubTeamGroupNode";
 
 export const INPUT_ID = "__input__";
 
@@ -15,6 +16,7 @@ export const nodeTypes = {
   agent: AgentNode,
   userInput: EndpointNode,
   captain: EndpointNode,
+  subTeamGroup: SubTeamGroupNode,
 };
 
 export const edgeTypes = { step: StepEdge };

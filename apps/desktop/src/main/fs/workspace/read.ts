@@ -106,6 +106,131 @@ export async function opList(
   return opOk(results.slice(0, WORKSPACE_LIST_MAX));
 }
 
+function splitLinesLikePython(text: string): string[] {
+  if (text === "") return [];
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = normalized.split("\n");
+  if (normalized.endsWith("\n") && lines.length > 0) {
+    lines.pop();
+  }
+  return lines;
+}
+
+export async function opReadLines(
+  root: StoredRoot,
+  relPath: string,
+  offset: number,
+  limit: number | null,
+): Promise<WorkspaceOpResult> {
+  const abs = resolveLexical(root, relPath);
+  if (!abs) return opErr("OutsideWorkspace", relPath);
+  let st: import("node:fs").Stats;
+  try {
+    st = await fs.stat(abs);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+      return opErr("PathNotFound", relPath);
+    }
+    return opErr("WorkspaceIOError", toReason(e));
+  }
+  if (!st.isFile()) return opErr("NotAFile", relPath);
+  if (st.size > WORKSPACE_READ_MAX)
+    return opErr("WorkspaceIOError", "文件过大，无法读取");
+  const real = await realInside(root, abs);
+  if (!real) return opErr("OutsideWorkspace", relPath);
+  try {
+    const buf = await fs.readFile(real);
+    if (buf.includes(0))
+      return opErr("WorkspaceIOError", "二进制文件，无法以文本读取");
+    const lines = splitLinesLikePython(buf.toString("utf-8"));
+    const total = lines.length;
+    const startIdx = Math.max(0, offset - 1);
+    if (startIdx >= total) {
+      return opOk({
+        lines: [],
+        start_line: offset,
+        end_line: offset - 1,
+        total_lines: total,
+      });
+    }
+    const endIdx =
+      limit == null ? total : Math.min(total, startIdx + Math.max(0, limit));
+    const selected = lines.slice(startIdx, endIdx);
+    return opOk({
+      lines: selected,
+      start_line: startIdx + 1,
+      end_line: endIdx,
+      total_lines: total,
+    });
+  } catch (e) {
+    return opErr("WorkspaceIOError", toReason(e));
+  }
+}
+
+export async function opListTree(
+  root: StoredRoot,
+  directory: string,
+  pattern: string,
+  maxDepth: number,
+  maxEntries: number,
+): Promise<WorkspaceOpResult> {
+  const baseAbs = resolveLexical(root, directory);
+  if (!baseAbs) return opErr("OutsideWorkspace", directory);
+  const baseReal = await realInside(root, baseAbs);
+  let baseStat: import("node:fs").Stats | undefined;
+  if (baseReal) {
+    try {
+      baseStat = await fs.stat(baseReal);
+    } catch {
+      baseStat = undefined;
+    }
+  }
+  if (!baseReal || !baseStat?.isDirectory()) {
+    return opErr("NotADirectory", directory);
+  }
+
+  const entries: { path: string; is_dir: boolean; depth: number }[] = [];
+  let truncated = false;
+  let elidedCount = 0;
+  const nameFilter = pattern || "*";
+  const matchName = (name: string, isDir: boolean) =>
+    isDir || globToRegExp(nameFilter).test(name);
+
+  const walk = async (absDir: string, depth: number): Promise<void> => {
+    if (depth > maxDepth) return;
+    const dirents = await fs.readdir(absDir, { withFileTypes: true });
+    dirents.sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+    );
+    for (const d of dirents) {
+      if (LIST_FILES_SKIP_DIRS.has(d.name)) continue;
+      const childAbs = join(absDir, d.name);
+      const isDir = d.isDirectory() && !d.isSymbolicLink();
+      if (!matchName(d.name, isDir)) continue;
+      if (entries.length >= maxEntries) {
+        truncated = true;
+        elidedCount += 1;
+        continue;
+      }
+      entries.push({
+        path: toPosix(relative(root.absPath, childAbs)),
+        is_dir: isDir,
+        depth,
+      });
+      if (isDir && depth < maxDepth) {
+        await walk(childAbs, depth + 1);
+      }
+    }
+  };
+
+  try {
+    await walk(baseReal, 1);
+  } catch (e) {
+    return opErr("WorkspaceIOError", toReason(e));
+  }
+  return opOk({ entries, truncated, elided_count: elidedCount });
+}
+
 // index_files：把绑定根（或其 `base` 子树）扁平索引成相对文件路径列表（忽略目录剪枝 + cap），
 // 返回 {paths, truncated}。服务端 LocalWorkspace.index_files 经此打通，使 @ 提及与 worker
 // 工作区清单在本地根上与云端 ServerWorkspace.index_files 行为一致。`order` 选排序

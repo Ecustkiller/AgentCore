@@ -1,9 +1,11 @@
+import { PromptDocument } from "@/components/prompt/PromptDocument";
 import { Button } from "@/components/ui";
 import { ChevronRight, ScrollText } from "lucide-react";
 import { useState } from "react";
 
-/** A collapsible verbatim prompt block (AI 工作准则). Collapsed by default — these are
- * long, and the page reads as a clean summary until the user opts to see the原文. */
+/** A collapsible prompt block (AI 工作准则). Collapsed by default — these are
+ * long, and the page reads as a clean summary until the user opts in. Expanded
+ * body uses {@link PromptDocument} (structured sections + 渲染/原文 toggle). */
 export function GuidelineBlock({
   title,
   subtitle,
@@ -37,11 +39,7 @@ export function GuidelineBlock({
           }`}
         />
       </Button>
-      {open && (
-        <pre className="mx-4 mb-4 max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/50 px-3 py-2 text-foreground/90 text-xs leading-relaxed">
-          {text}
-        </pre>
-      )}
+      {open && <PromptDocument text={text} className="mx-4 mb-4" />}
     </div>
   );
 }

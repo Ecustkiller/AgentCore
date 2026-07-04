@@ -1,9 +1,9 @@
 import { countPillMuted, statusPillInline } from "@/components/ui/tone-presets";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useDebateTake, useDebateUserTake } from "@/stores/debateUserTake";
 import type { DebateUserInterjection } from "@/types/events";
 import { Hand, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
-import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { DebateSideModel } from "../model";
 
 /** 用户追问气泡（右侧·第三方）的共用外形：用户头像 + 「你（追问）」+ 对象 pill + 原文 + 状态。

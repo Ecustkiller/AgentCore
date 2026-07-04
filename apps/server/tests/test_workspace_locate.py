@@ -1,8 +1,7 @@
-"""Tests for workspace path policy (conversation → directory).
+"""Tests for workspace path policy (conversation scratch → directory).
 
-Pins 决策③: a folder's conversations share one project space; ungrouped
-conversations each get their own. ``data_dir`` is redirected to ``tmp_path`` so
-nothing is created under the real ./data tree.
+Pins Folder 重构 To-Be: every conversation owns ``conv/<id>/`` scratch;
+``folder_id`` is sidebar grouping only. ``data_dir`` is redirected to ``tmp_path``.
 """
 
 from pathlib import Path
@@ -32,18 +31,18 @@ from agentcore.workspace.locate import (
 from agentcore.workspace.server import ServerWorkspace
 
 
-def test_folder_conversation_uses_folder_space(tmp_path: Path, monkeypatch):
+def test_foldered_conversation_uses_conv_scratch(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
-    assert root == tmp_path / "workspaces" / "u1" / "f1"
+    assert root == tmp_path / "workspaces" / "u1" / "conv" / "c1"
     assert root.is_dir()
 
 
-def test_conversations_in_same_folder_share_one_root(tmp_path: Path, monkeypatch):
+def test_conversations_in_same_folder_have_independent_roots(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     r1 = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
     r2 = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c2")
-    assert r1 == r2
+    assert r1 != r2
 
 
 def test_ungrouped_conversations_get_independent_roots(tmp_path: Path, monkeypatch):
@@ -60,7 +59,7 @@ def test_users_are_isolated_by_directory(tmp_path: Path, monkeypatch):
     a = resolve_workspace_root(user_id="alice", folder_id="f1", conversation_id="c1")
     b = resolve_workspace_root(user_id="bob", folder_id="f1", conversation_id="c1")
     assert a != b
-    assert a.parent.name == "alice"  # <workspaces>/<user_id>/<folder_id>
+    assert a.parent.parent.name == "alice"  # <workspaces>/<user_id>/conv/<id>
 
 
 def test_build_server_workspace_targets_resolved_root(tmp_path: Path, monkeypatch):
@@ -96,11 +95,7 @@ def test_build_local_workspace_wires_channel_to_bound_root():
 
 
 def test_build_local_workspace_defaults_to_shared_registry_and_timeout():
-    """Omitted deps fall back to the process registry + configured op timeout.
-
-    The shared registry is what the resolve endpoint settles, so a local turn must
-    use it (not a private one) or the desktop's POSTed result would never land.
-    """
+    """Omitted deps fall back to the process registry + configured op timeout."""
     ws = build_local_workspace(
         binding=LocalBinding(root_id="r1"),
         sink=EventSink(),
@@ -109,7 +104,7 @@ def test_build_local_workspace_defaults_to_shared_registry_and_timeout():
     chan = ws._channel  # noqa: SLF001 - test-only wiring inspection
     assert chan.registry is default_interaction_registry()
     assert chan.timeout_seconds == settings.workspace_op_timeout_seconds
-    assert ws.root_label == "workspace"  # binding's default label
+    assert ws.root_label == "workspace"
 
 
 def test_build_workspace_picks_local_when_bound():
@@ -137,11 +132,10 @@ def test_build_workspace_falls_back_to_cloud_when_unbound(tmp_path: Path, monkey
     assert ws.location == "server"
 
 
-# --- resolve_local_binding: 文件夹即工作区 (binding lives only on the folder) -----
+# --- resolve_local_binding (deprecated folder-level helper; kept for legacy callers) ---
 
 
 def test_resolve_ungrouped_is_always_cloud():
-    """A 裸聊 (no folder) has no workspace yet, so it can never be local."""
     assert resolve_local_binding(folder_id=None, folder_local_root_id=None) is None
 
 
@@ -155,16 +149,15 @@ def test_resolve_foldered_uses_folder_binding_with_label():
 
 
 def test_resolve_foldered_unbound_is_cloud():
-    """A filed conversation whose folder has no binding runs in the cloud."""
     assert resolve_local_binding(folder_id="f1", folder_local_root_id=None) is None
 
 
 # --- storage key (mirrors the on-disk layout for snapshots) ---
 
 
-def test_storage_key_folder_space():
+def test_storage_key_conv_scratch():
     key = workspace_storage_key(user_id="u1", folder_id="f1", conversation_id="c1")
-    assert key == "workspaces/u1/f1"
+    assert key == "workspaces/u1/conv/c1"
 
 
 def test_storage_key_ungrouped_space():
@@ -176,34 +169,25 @@ def test_storage_key_mirrors_on_disk_root(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
     key = workspace_storage_key(user_id="u1", folder_id="f1", conversation_id="c1")
-    # The key is exactly the workspace path relative to data_dir.
     assert root == Path(settings.data_dir) / key
 
 
-# --- public workspace id (the /v1/workspaces addressing token, 文件中枢统一 Step 1) ---
+# --- public workspace id (the /v1/workspaces addressing token) ---
 
 
-def test_format_workspace_id_folder_space():
-    assert format_workspace_id(folder_id="f1", conversation_id="c1") == "folder:f1"
-
-
-def test_format_workspace_id_ungrouped_space():
+def test_format_workspace_id_is_always_conv():
+    assert format_workspace_id(folder_id="f1", conversation_id="c1") == "conv:c1"
     assert format_workspace_id(folder_id=None, conversation_id="c1") == "conv:c1"
 
 
-def test_parse_workspace_id_round_trips_both_kinds():
-    assert parse_workspace_id("folder:f1") == WorkspaceId(kind="folder", ident="f1")
+def test_parse_workspace_id_round_trips_conv():
     assert parse_workspace_id("conv:c1") == WorkspaceId(kind="conv", ident="c1")
-    # format → parse round-trips to the originating ident.
-    for folder_id, conv_id in (("f9", "c9"), (None, "c9")):
-        parsed = parse_workspace_id(
-            format_workspace_id(folder_id=folder_id, conversation_id=conv_id)
-        )
-        assert parsed.ident == (folder_id or conv_id)
+    parsed = parse_workspace_id(format_workspace_id(folder_id="f9", conversation_id="c9"))
+    assert parsed.ident == "c9"
+    assert parsed.kind == "conv"
 
 
 def test_parse_workspace_id_accepts_uuid_idents():
-    """UUIDs (which contain '-') survive: the ':' separator never collides."""
     wid = "11111111-2222-3333-4444-555555555555"
     assert parse_workspace_id(f"folder:{wid}").ident == wid
 
@@ -216,7 +200,6 @@ def test_parse_workspace_id_rejects_malformed():
 
 def test_workspace_has_entries_false_when_missing(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    # Never resolved → no dir on disk → False, and crucially does not create it.
     assert not workspace_has_entries(user_id="u1", folder_id=None, conversation_id="c1")
     assert not (tmp_path / "workspaces" / "u1" / "conv" / "c1").exists()
 

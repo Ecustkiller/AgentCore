@@ -5,7 +5,7 @@ Two domain skills share the same registry + gating: ``legal_answer_brief`` (「�
 three guards apply to each:
 1. Opt-in gating — ABSENT from the default registry and PRESENT only with
    ``include_legal=True`` (so generic deployments never see legal content; the
-   platform system-skill set in test_skills.py stays exactly the 6).
+   platform system-skill set in test_skills.py stays exactly the 7).
 2. consult_skill resolves it (CEO can pull the full guidance) when registered, and
    the 能力目录 lists it when its required tools are wired.
 3. The body still teaches its mechanism — the orchestration (delegate + debate) and
@@ -22,7 +22,7 @@ from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
 # legal_answer_brief gates on delegate + debate (both wired on the CEO path).
-_FULL_TOOLS = {"delegate", "revise", "ask_user", "debate"}
+_FULL_TOOLS = {"delegate", "revise", "ask_user", "debate", "test_run"}
 
 
 def _ctx() -> ToolContext:
@@ -52,7 +52,7 @@ def test_legal_skill_present_when_opted_in():
 
 
 def test_legal_skill_layers_onto_the_platform_set():
-    # include_legal adds the legal pack ON TOP of the 6 system skills, same registry.
+    # include_legal adds the legal pack ON TOP of the 7 system skills, same registry.
     base = {s.name for s in build_system_skill_registry().list_all()}
     full = {s.name for s in build_system_skill_registry(include_legal=True).list_all()}
     assert full - base == {s.name for s in LEGAL_SKILLS}

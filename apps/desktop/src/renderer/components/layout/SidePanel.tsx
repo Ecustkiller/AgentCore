@@ -18,8 +18,8 @@ import {
   useExecutionStore,
 } from "@/stores/execution";
 import {
-  type DetailTab,
   DEBATE_HUD_TAB_ID,
+  type DetailTab,
   WORKSPACE_TAB_ID,
   useSidePanelStore,
 } from "@/stores/sidePanel";

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { useDebateRoomStore } from "../debateRoom";
 import { type ExecutionPlan, useExecutionStore } from "../execution";
 import {
-  type DetailTab,
   DEBATE_HUD_TAB_ID,
+  type DetailTab,
   SIDE_PANEL_MAX_TABS,
   SIDE_PANEL_MAX_WIDTH,
   SIDE_PANEL_MIN_WIDTH,
@@ -11,7 +12,6 @@ import {
   runDetailTabId,
   useSidePanelStore,
 } from "../sidePanel";
-import { useDebateRoomStore } from "../debateRoom";
 
 const panel = () => useSidePanelStore.getState();
 const exec = () => useExecutionStore.getState();

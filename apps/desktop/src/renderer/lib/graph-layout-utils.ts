@@ -6,9 +6,9 @@ export type ElkGraphLayout = Exclude<GraphLayout, "timeline">;
 /** Pick the layout algorithm GraphView should actually run. */
 export function resolveEffectiveGraphLayout(
   layoutKind: GraphLayout,
-  opts: { embedded?: boolean; parallelAvailable?: boolean },
+  opts: { interactive?: boolean; parallelAvailable?: boolean },
 ): GraphLayout {
-  if (opts.embedded && layoutKind === "timeline") return "leftright";
+  if (!opts.interactive && layoutKind === "timeline") return "leftright";
   if (layoutKind === "timeline" && !opts.parallelAvailable) return "leftright";
   return layoutKind;
 }

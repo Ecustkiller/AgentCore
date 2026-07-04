@@ -18,6 +18,7 @@ from enum import StrEnum
 from typing import Any
 
 from agentcore.core.logging import get_logger
+from agentcore.core.types import ToolApproval
 from agentcore.runtime.events import EventSink, approval_required, approval_resolved
 from agentcore.runtime.interaction import InteractionKind
 from agentcore.runtime.ports import ClientRequestBridge
@@ -27,6 +28,25 @@ logger = get_logger(__name__)
 # Argument values longer than this are truncated in the SSE preview so a big
 # file_write/code_execute body does not bloat the approval event.
 _PREVIEW_VALUE_MAX = 600
+
+
+def tool_call_requires_approval(
+    tool_name: str, approval: ToolApproval, arguments: dict[str, Any]
+) -> bool:
+    """Whether a tool call must pass ``ApprovalGate`` before execution.
+
+    GRANTABLE tools always do. ``git`` is ``NEVER`` at schema level (so the CEO
+    registry filter keeps read subcommands) but write subcommands are gated here
+    on workers — same posture as ``file_write``.
+    """
+    if approval is ToolApproval.GRANTABLE:
+        return True
+    if tool_name == "git":
+        from agentcore.tools.builtin.git_ops import git_write_subcommands
+
+        subcommand = str(arguments.get("subcommand", "")).strip().lower()
+        return subcommand in git_write_subcommands()
+    return False
 
 
 class ApprovalDecision(StrEnum):

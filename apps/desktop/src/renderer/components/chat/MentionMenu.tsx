@@ -1,7 +1,7 @@
-import { Button } from "@/components/ui";
+import { Button, SearchField } from "@/components/ui";
 import { hasLocalFiles } from "@/lib/capabilities";
 import type { IndexedEntry } from "@/lib/fileIndex";
-import { File, Folder, FolderPlus, MessageSquare, Search } from "lucide-react";
+import { File, Folder, FolderPlus, MessageSquare } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 interface Props {
@@ -49,15 +49,17 @@ export function MentionMenu({
   return (
     <div className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg">
       {showSearch && (
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <Search size={14} className="shrink-0 text-muted-foreground" />
-          <input
+        <div className="border-b border-border px-3 py-2">
+          <SearchField
             ref={searchInputRef}
+            variant="plain"
             value={query}
-            onChange={(e) => onQueryChange(e.target.value)}
+            onValueChange={onQueryChange}
             onKeyDown={onKeyDown}
-            placeholder="搜索文件或对话…"
-            className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+            placeholder="筛选文件或对话…"
+            aria-label="筛选文件或对话"
+            clearable={false}
+            escapeClears={false}
           />
         </div>
       )}

@@ -127,19 +127,8 @@ async def _resolve_owned_workspace(
             root_id=conv.local_root_id,
         )
 
-    if parsed.kind != "folder":
-        raise NotFoundError("工作区不存在")
-    folder = await folder_repo.get_by_id(parsed.ident, user_id=user_id)
-    if not folder:
-        raise NotFoundError("工作区不存在")
-    return _WsTarget(
-        ws_id=ws_id,
-        folder_id=folder.id,
-        conversation_id="",
-        name=folder.name,
-        location="local" if folder.local_root_id else "cloud",
-        root_id=folder.local_root_id,
-    )
+    # Phase 1 (Folder 重构): ``folder:<id>`` is reserved; only conv scratch is addressable.
+    raise NotFoundError("工作区不存在")
 
 
 def _require_cloud(target: _WsTarget) -> None:

@@ -9,6 +9,14 @@ Run from apps/server:
                                                              # (log-only: trace_id
                                                              # is not persisted)
 
+    # Offline mode (production export, no DB):
+    uv run python scripts/log_timeline.py --export-dir ../../logs/prod-export --recent
+    uv run python scripts/log_timeline.py --export-dir ../../logs/prod-export <conv_id>
+    uv run python scripts/log_timeline.py --export-dir ../../logs/prod-export --trace <trace_id>
+
+    # Custom event log file:
+    uv run python scripts/log_timeline.py --file ../../logs/prod-export/events.jsonl <conv_id>
+
 Message bodies live in Postgres (conversations / messages); the per-turn run trace
 (chat.turn_start/complete, delegate, tool, errors) lives in logs/dev.jsonl. This
 joins them by conversation_id, or follows a single interaction by trace_id.
@@ -103,12 +111,14 @@ async def fetch_messages(conn: Any, conv_id: str) -> list[dict]:
 _LOG_NOISE_KEYS = ("type", "timestamp", "event", "level", "logger", "request_id", "method", "path")
 
 
-def load_log_events(value: str, field: str = "conversation_id") -> list[dict]:
+def load_log_events(
+    value: str, field: str = "conversation_id", log_file: Path = LOG_FILE
+) -> list[dict]:
     """Load log lines whose ``field`` equals ``value`` (conversation_id or trace_id)."""
-    if not LOG_FILE.exists():
+    if not log_file.exists():
         return []
     events = []
-    with open(LOG_FILE, encoding="utf-8") as f:
+    with open(log_file, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -128,6 +138,93 @@ def load_log_events(value: str, field: str = "conversation_id") -> list[dict]:
                     }
                 )
     return events
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    rows: list[dict] = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return rows
+
+
+def _load_export_conversations(export_dir: Path) -> list[dict]:
+    """Load conversations from an export directory."""
+    return _read_jsonl(export_dir / "conversations.jsonl")
+
+
+def _find_in_export(export_dir: Path, conv_id: str) -> dict | None:
+    for conv in _load_export_conversations(export_dir):
+        if str(conv.get("id")) == conv_id:
+            return {
+                "id": str(conv["id"]),
+                "title": conv.get("title"),
+                "agent_id": conv.get("agent_id"),
+                "created_at": str(conv.get("created_at", "")),
+            }
+    return None
+
+
+def _load_export_messages(export_dir: Path, conv_id: str) -> list[dict]:
+    """Load messages for a conversation from an export directory."""
+    journal_counts: dict[str, int] = {}
+    for entry in _read_jsonl(export_dir / "turn_journal.jsonl"):
+        if str(entry.get("conversation_id")) != conv_id:
+            continue
+        turn_id = str(entry.get("turn_id", ""))
+        journal_counts[turn_id] = journal_counts.get(turn_id, 0) + 1
+
+    messages: list[dict] = []
+    for row in _read_jsonl(export_dir / "messages.jsonl"):
+        if str(row.get("conversation_id")) != conv_id:
+            continue
+        content = row.get("content") or ""
+        tool_calls = row.get("tool_calls")
+        msg_id = str(row.get("id", ""))
+        msg: dict[str, Any] = {
+            "type": "message",
+            "timestamp": str(row.get("created_at", "")),
+            "id": msg_id,
+            "role": row.get("role"),
+            "content_preview": content[:200],
+            "content_len": len(content),
+            "has_reasoning": bool(row.get("reasoning_content")),
+            "tool_calls_count": len(tool_calls) if tool_calls else 0,
+            "runs_count": journal_counts.get(msg_id, 0),
+            "finish_reason": row.get("finish_reason"),
+        }
+        if row.get("usage"):
+            msg["usage"] = row["usage"]
+        messages.append(msg)
+    messages.sort(key=lambda x: x.get("timestamp", ""))
+    return messages
+
+
+def _parse_cli_args(argv: list[str]) -> tuple[Path, Path | None, list[str]]:
+    log_file = LOG_FILE
+    export_dir: Path | None = None
+    positional: list[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--file" and i + 1 < len(argv):
+            log_file = Path(argv[i + 1])
+            i += 2
+        elif arg == "--export-dir" and i + 1 < len(argv):
+            export_dir = Path(argv[i + 1])
+            i += 2
+        else:
+            positional.append(arg)
+            i += 1
+    return log_file, export_dir, positional
 
 
 def _fmt_log_line(item: dict, indent: str = "  ", hide: tuple[str, ...] = ()) -> str:
@@ -268,7 +365,21 @@ def format_timeline(conv: dict, messages: list[dict], log_events: list[dict]) ->
     return "\n".join(lines)
 
 
-async def list_recent(n: int = 5) -> None:
+async def list_recent(n: int = 5, export_dir: Path | None = None) -> None:
+    if export_dir:
+        rows = sorted(
+            _load_export_conversations(export_dir),
+            key=lambda c: str(c.get("created_at", "")),
+            reverse=True,
+        )[:n]
+        print(f"\n  Recent {len(rows)} conversations:\n")
+        for r in rows:
+            print(
+                f"  {str(r.get('created_at', ''))[:19]}  {r.get('id')}  {r.get('title') or '(untitled)'}"
+            )
+        print()
+        return
+
     from sqlalchemy import text
 
     engine = _create_engine()
@@ -290,21 +401,34 @@ async def list_recent(n: int = 5) -> None:
 
 
 async def main() -> None:
-    args = sys.argv[1:]
+    log_file, export_dir, args = _parse_cli_args(sys.argv[1:])
+    if export_dir:
+        log_file = export_dir / "events.jsonl"
+
     if not args or args[0] in ("-h", "--help"):
         print(__doc__)
         return
     if args[0] == "--recent":
-        await list_recent(int(args[1]) if len(args) > 1 else 5)
+        await list_recent(int(args[1]) if len(args) > 1 else 5, export_dir=export_dir)
         return
     if args[0] == "--trace":
         if len(args) < 2:
             print("usage: log_timeline.py --trace <trace_id>")
             return
-        print(format_trace(args[1], load_log_events(args[1], field="trace_id")))
+        print(format_trace(args[1], load_log_events(args[1], field="trace_id", log_file=log_file)))
         return
 
     conv_id = args[0]
+    if export_dir:
+        conv = _find_in_export(export_dir, conv_id)
+        if not conv:
+            print(f"Conversation '{conv_id}' not found in export.")
+            return
+        messages = _load_export_messages(export_dir, conv_id)
+        log_events = load_log_events(conv_id, log_file=log_file)
+        print(format_timeline(conv, messages, log_events))
+        return
+
     engine = _create_engine()
     async with engine.connect() as conn:
         conv = await fetch_conversation(conn, conv_id)
@@ -313,7 +437,7 @@ async def main() -> None:
             await engine.dispose()
             return
         messages = await fetch_messages(conn, conv_id)
-    log_events = load_log_events(conv_id)
+    log_events = load_log_events(conv_id, log_file=log_file)
     print(format_timeline(conv, messages, log_events))
     await engine.dispose()
 

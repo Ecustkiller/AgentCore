@@ -1,5 +1,5 @@
 import { EscalationCard } from "@/components/chat/EscalationCard";
-import { type RunEscalation, type RunNode } from "@/stores/execution";
+import type { RunEscalation, RunNode } from "@/stores/execution";
 import { ArrowUp } from "lucide-react";
 import { Section } from "./shared";
 

@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agentcore.api.dependencies import (
     AuthUser,
     get_conversation_repo,
-    get_cost_event_repo,
     get_db,
     get_memory_update_repo,
     get_message_repo,
@@ -36,7 +35,6 @@ from agentcore.api.sse import sse_attach_response, sse_response
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.conversation.service import record_local_turn, stream_chat
 from agentcore.core.errors import NotFoundError
-from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import (
     ConversationRepository,
     CostEventRepository,
@@ -196,6 +194,7 @@ async def send_message(
     conversation_id: str,
     body: SendMessageRequest,
     user: AuthUser,
+    session: AsyncSession = Depends(get_db),
 ):
     """Send a user message and get a streaming AI response via SSE.
 
@@ -217,11 +216,10 @@ async def send_message(
     """
     await enforce_user_message_rate_limit(user.user_id)
 
-    async with async_session_factory() as session:
-        conv_repo = ConversationRepository(session)
-        cost_repo = CostEventRepository(session)
-        await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-        credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
+    conv_repo = ConversationRepository(session)
+    cost_repo = CostEventRepository(session)
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
 
     sink = EventSink()
 

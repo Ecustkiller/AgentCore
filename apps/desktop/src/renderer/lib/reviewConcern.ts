@@ -15,9 +15,7 @@ const DIRECTION_PATTERNS = [
 
 const SCORE_RE = /(\d{1,2})\s*\/\s*10/g;
 
-export function detectReviewConcern(
-  text: string,
-): ReviewConcernLevel | null {
+export function detectReviewConcern(text: string): ReviewConcernLevel | null {
   const trimmed = text.trim();
   if (trimmed.length < 12) return null;
 
@@ -25,9 +23,12 @@ export function detectReviewConcern(
     if (re.test(trimmed)) return "critical";
   }
 
-  let match: RegExpExecArray | null;
   SCORE_RE.lastIndex = 0;
-  while ((match = SCORE_RE.exec(trimmed)) !== null) {
+  for (
+    let match = SCORE_RE.exec(trimmed);
+    match !== null;
+    match = SCORE_RE.exec(trimmed)
+  ) {
     const score = Number.parseInt(match[1] ?? "", 10);
     if (Number.isFinite(score) && score <= 5) return "critical";
     if (Number.isFinite(score) && score <= 7) return "warning";

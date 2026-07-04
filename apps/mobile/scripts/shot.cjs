@@ -4,7 +4,7 @@
  *
  * Usage:
  *   pnpm -C apps/mobile shot <url> [outFile] [WIDTHxHEIGHT]
- *   node apps/mobile/scripts/shot.cjs http://localhost:5175/c/<id> out.png 390x844
+ *   node apps/mobile/scripts/shot.cjs http://localhost:5175/preview?s=single_agent_tool out.png 390x844
  *
  * Defaults: url=http://localhost:5175/, viewport="iPhone 13",
  *           out=apps/mobile/.shots/<timestamp>.png (dir is gitignored).

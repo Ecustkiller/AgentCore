@@ -1,7 +1,6 @@
 import { Markdown } from "@/components/chat/Markdown";
 import { Button } from "@/components/ui";
 import { statusAccentText } from "@/components/ui/tone-presets";
-import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import type { Execution } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
@@ -186,7 +185,9 @@ function CrossExamExchangeRow({
             <CollapsibleSpeech
               contentKey={answer}
               sceneKey={
-                answerKeyBase ? `${answerKeyBase}:ans:${cx.targetKey}` : undefined
+                answerKeyBase
+                  ? `${answerKeyBase}:ans:${cx.targetKey}`
+                  : undefined
               }
             >
               <Markdown content={answer} evidence />

@@ -1,11 +1,12 @@
 import { NODE_HEIGHT, NODE_WIDTH } from "@/lib/elk-layout";
-import { detectReviewConcern } from "@/lib/reviewConcern";
+import type { GroupLayout } from "@/lib/elk-layout";
 import { estimateTokens, formatCost, headText, tailText } from "@/lib/format";
+import { detectReviewConcern } from "@/lib/reviewConcern";
 import type { Execution, RunStatus } from "@/stores/execution";
 import type { GraphEdge } from "@/stores/graph";
 import type { Edge, Node } from "@xyflow/react";
 import { INPUT_ID } from "./constants";
-import { deriveArtifacts, resolveHandoff } from "./helpers";
+import { type SubTeam, deriveArtifacts, resolveHandoff } from "./helpers";
 
 export interface FlowGraphProjectionInput {
   execution: Execution;
@@ -22,26 +23,41 @@ export interface FlowGraphProjectionInput {
   finalAnswer: { id: string; content: string } | null;
   taskMessage: { id: string } | null;
   activateNode: (id: string) => void;
-  hoveredNodeId?: string | null;
-  edges?: GraphEdge[];
+  groups: GroupLayout[];
+  subTeams: SubTeam[];
 }
 
 export interface FlowEdgeProjectionInput extends FlowGraphProjectionInput {
   edges: GraphEdge[];
 }
 
-/** Direct neighbors of a hovered node (for edge/node highlight). */
-function hoverRelatedIds(
-  hoveredNodeId: string | null | undefined,
-  edges: GraphEdge[],
-): Set<string> | null {
-  if (!hoveredNodeId) return null;
-  const related = new Set([hoveredNodeId]);
-  for (const e of edges) {
-    if (e.source === hoveredNodeId) related.add(e.target);
-    if (e.target === hoveredNodeId) related.add(e.source);
-  }
-  return related;
+/** Find the innermost group containing a run (for nested delegate teams). */
+function innermostGroupForRun(
+  runId: string,
+  groups: GroupLayout[],
+  subTeams: SubTeam[],
+): GroupLayout | undefined {
+  const contains = (st: SubTeam, id: string): boolean => {
+    if (st.parentId === id || st.memberIds.includes(id)) return true;
+    for (const m of st.memberIds) {
+      const nested = subTeams.find((s) => s.parentId === m);
+      if (nested && contains(nested, id)) return true;
+    }
+    return false;
+  };
+  const candidates = groups.filter((g) => {
+    const st = subTeams.find((s) => s.groupId === g.groupId);
+    return st && contains(st, runId);
+  });
+  if (candidates.length === 0) return undefined;
+  return candidates.reduce((best, g) => {
+    const st = subTeams.find((s) => s.groupId === g.groupId);
+    const bestSt = subTeams.find((s) => s.groupId === best.groupId);
+    if (!st || !bestSt) return best;
+    if (bestSt.memberIds.includes(st.parentId)) return g;
+    if (st.memberIds.includes(bestSt.parentId)) return best;
+    return best;
+  });
 }
 
 /** Cross-axis center for port sorting (y for horizontal flow, x for vertical). */
@@ -145,8 +161,8 @@ export function projectFlowNodes({
   finalAnswer,
   taskMessage,
   activateNode,
-  hoveredNodeId,
-  edges: layoutEdges = [],
+  groups,
+  subTeams,
 }: FlowGraphProjectionInput): Node[] {
   const placed = (id: string) => {
     const slot = positions[id];
@@ -158,13 +174,69 @@ export function projectFlowNodes({
 
   const workerRuns = execution.runs.filter((r) => r.id !== captainRun?.id);
   const workerIdSet = new Set(workerRuns.map((r) => r.id));
-  const hoverRelated = hoverRelatedIds(hoveredNodeId, layoutEdges);
-  const hoverDimmed = (id: string) =>
-    hoverRelated != null && !hoverRelated.has(id);
   const nodes: Node[] = [];
 
+  const rootGroupIds = new Set(
+    groups
+      .filter((g) => {
+        const st = subTeams.find((s) => s.groupId === g.groupId);
+        return st && !subTeams.some((o) => o.memberIds.includes(st.parentId));
+      })
+      .map((g) => g.groupId),
+  );
+  const orderedGroups = [
+    ...groups.filter((g) => rootGroupIds.has(g.groupId)),
+    ...groups.filter((g) => !rootGroupIds.has(g.groupId)),
+  ];
+
+  for (const group of orderedGroups) {
+    const st = subTeams.find((s) => s.groupId === group.groupId);
+    if (!st) continue;
+    const parentRun = execution.runs.find((r) => r.id === st.parentId);
+    const parentAgent = parentRun
+      ? execution.agents.find((a) => a.id === parentRun.agentId)
+      : null;
+    const outerSt = subTeams.find((s) => s.memberIds.includes(st.parentId));
+    const outerGroup = outerSt
+      ? groups.find((g) => g.groupId === outerSt.groupId)
+      : undefined;
+    const absPos = { x: group.x, y: group.y };
+    const pos = outerGroup
+      ? { x: absPos.x - outerGroup.x, y: absPos.y - outerGroup.y }
+      : absPos;
+    nodes.push({
+      id: group.groupId,
+      type: "subTeamGroup",
+      position: pos,
+      style: { width: group.width, height: group.height },
+      ...(outerGroup && !timelineLayout
+        ? { parentId: outerGroup.groupId, extent: "parent" as const }
+        : {}),
+      data: {
+        parentRole: parentAgent?.role ?? st.parentId,
+        memberCount: st.memberIds.length + 1,
+        handleDirection,
+      },
+      zIndex: -1,
+    } as Node);
+  }
+
   for (const [i, run] of workerRuns.entries()) {
-    const pos = placed(run.id);
+    const group = innermostGroupForRun(run.id, groups, subTeams);
+
+    let pos: { x: number; y: number } | undefined;
+    if (group) {
+      const absPos = positions[run.id];
+      if (!absPos) continue;
+      pos = timelineLayout
+        ? placed(run.id)
+        : {
+            x: absPos.x - group.x,
+            y: absPos.y - group.y,
+          };
+    } else {
+      pos = placed(run.id);
+    }
     if (!pos) continue;
     const agent = execution.agents.find((a) => a.id === run.agentId);
     const output = agent ? agent.outputChunks.join("") : "";
@@ -183,6 +255,9 @@ export function projectFlowNodes({
       id: run.id,
       type: "agent",
       position: pos,
+      ...(group && !timelineLayout
+        ? { parentId: group.groupId, extent: "parent" as const }
+        : {}),
       ...(timelineLayout && size
         ? { style: { width: size.width, height: size.height } }
         : {}),
@@ -224,7 +299,6 @@ export function projectFlowNodes({
           .length,
         reviewConcern,
         enterIndex: i + 1,
-        hoverDimmed: hoverDimmed(run.id),
         onActivate: () => activateNode(run.id),
       },
     } as Node);
@@ -247,7 +321,6 @@ export function projectFlowNodes({
           label: execution.taskSummary,
           handleDirection,
           enterIndex: 0,
-          hoverDimmed: hoverDimmed(INPUT_ID),
           focused: !!taskMessage && litEndpointMessageId === taskMessage.id,
           onActivate: taskMessage ? () => activateNode(INPUT_ID) : undefined,
         },
@@ -276,7 +349,6 @@ export function projectFlowNodes({
             preview: finalAnswer ? headText(finalAnswer.content) : "",
             handleDirection,
             enterIndex: workerRuns.length + 1,
-            hoverDimmed: hoverDimmed(captainRun.id),
             focused: !!finalAnswer && litEndpointMessageId === finalAnswer.id,
             onActivate: finalAnswer
               ? () => activateNode(captainRun.id)
@@ -296,7 +368,6 @@ export function projectFlowEdges({
   execution,
   positions,
   handleDirection,
-  hoveredNodeId,
   captainRun,
   captainStatus,
 }: Pick<
@@ -305,7 +376,6 @@ export function projectFlowEdges({
   | "execution"
   | "positions"
   | "handleDirection"
-  | "hoveredNodeId"
   | "captainRun"
   | "captainStatus"
 >): Edge[] {
@@ -319,9 +389,7 @@ export function projectFlowEdges({
         : execution.runs.find((s) => s.id === e.target)?.status === "running";
     const kind = e.kind ?? "dep";
     const handoff =
-      kind === "dep"
-        ? resolveHandoff(execution, e.source, e.target)
-        : null;
+      kind === "dep" ? resolveHandoff(execution, e.source, e.target) : null;
     const port = ports.get(e.id);
     return {
       id: e.id,
@@ -334,7 +402,6 @@ export function projectFlowEdges({
         kind,
         handoff,
         handleDirection,
-        hoveredNodeId: hoveredNodeId ?? null,
         sourcePortIndex: port?.sourcePortIndex ?? 0,
         sourcePortTotal: port?.sourcePortTotal ?? 1,
         targetPortIndex: port?.targetPortIndex ?? 0,

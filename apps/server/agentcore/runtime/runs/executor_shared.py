@@ -17,7 +17,7 @@ from agentcore.runtime.events import (
     run_reasoning_delta,
     run_tool_progress,
 )
-from agentcore.runtime.runs.types import RunContract, RunPhase, RunState
+from agentcore.runtime.runs.types import Deliverable, RunPhase, RunState
 from agentcore.tools.protocol import Tool, ToolContext
 from agentcore.tools.registry import ToolRegistry
 
@@ -84,14 +84,14 @@ def _priced_failure(
     )
 
 
-def _is_hard_failure(content: str, contract: RunContract | None) -> bool:
+def _is_hard_failure(content: str, deliverable: Deliverable | None) -> bool:
     """Whether a contract miss should FAIL the run vs. soft-accept with a warning.
 
     An empty product is always hard (the non-empty baseline, 决策②); any other
-    shortfall is hard only when the contract is ``strict`` (默认软提醒, 决策③)."""
+    shortfall is hard only when the deliverable is ``strict`` (默认软提醒, 决策③)."""
     if not content.strip():
         return True
-    return contract is not None and contract.strict
+    return deliverable is not None and deliverable.strict
 
 
 async def _react_and_capture(

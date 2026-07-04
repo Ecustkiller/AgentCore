@@ -13,13 +13,13 @@ from agentcore.runtime.runs.constants import (
     WORKSPACE_MANIFEST_CHAR_BUDGET,
     WORKSPACE_MANIFEST_MAX_FILES,
 )
-from agentcore.runtime.runs.contract import describe_contract
+from agentcore.runtime.runs.contract import describe_deliverable
 from agentcore.runtime.runs.executor_identities import (
     _WORKER_IDENTITY,
 )
 from agentcore.runtime.runs.fidelity import allocate, pointer_body, truncate_head_tail
 from agentcore.runtime.runs.plan import RunPlan
-from agentcore.runtime.runs.types import ContextBlock, RunContract, RunSpec, RunState
+from agentcore.runtime.runs.types import ContextBlock, Deliverable, RunSpec, RunState
 
 logger = get_logger(__name__)
 
@@ -53,7 +53,7 @@ def _build_messages(
     completed: Mapping[str, RunState],
     system_prompt: str,
     user_message: str,
-    contract: RunContract | None = None,
+    deliverable: Deliverable | None = None,
     identity: str = _WORKER_IDENTITY,
     index_paths: list[str] | None = None,
     blocks_sink: list[ContextBlock] | None = None,
@@ -62,7 +62,7 @@ def _build_messages(
     """Assemble the worker's OPENING (system, user) messages from its inline role,
     the original request, its upstream dependency products, and its task.
 
-    ``contract`` (when present) is stated up front as hard requirements so the
+    ``deliverable`` (when present) is stated up front as hard requirements so the
     worker aims to meet it on the first pass. This builds only the opening turn; a
     contract retry no longer rebuilds from scratch — the executor CONTINUES on this
     same transcript by appending the shortfall (:func:`_retry_message`), so the
@@ -82,7 +82,7 @@ def _build_messages(
     system_content = "\n\n".join(p for p in sys_parts if p)
 
     blocks = _build_context_blocks(
-        plan, spec, completed, user_message, contract, index_paths or [], team_brief
+        plan, spec, completed, user_message, deliverable, index_paths or [], team_brief
     )
     if blocks_sink is not None:
         blocks_sink.extend(blocks)
@@ -98,7 +98,7 @@ def _build_context_blocks(
     spec: RunSpec,
     completed: Mapping[str, RunState],
     user_message: str,
-    contract: RunContract | None,
+    deliverable: Deliverable | None,
     index_paths: list[str],
     team_brief: str | None = None,
 ) -> list[ContextBlock]:
@@ -137,7 +137,7 @@ def _build_context_blocks(
         blocks.append(
             ContextBlock(
                 channel="team_brief",
-                heading="团队共识（主 Agent 为本回合设定，全员遵循）",
+                heading="团队共识（主协调为本回合设定，全员遵循）",
                 body=team_brief,
             )
         )
@@ -154,14 +154,10 @@ def _build_context_blocks(
             )
         )
     blocks.append(ContextBlock(channel="task", heading="你的任务", body=spec.task))
-    if spec.expected_output:
+    deliverable_text = describe_deliverable(deliverable or spec.deliverable)
+    if deliverable_text:
         blocks.append(
-            ContextBlock(channel="expected_output", heading="预期产出", body=spec.expected_output)
-        )
-    requirements = describe_contract(contract)
-    if requirements:
-        blocks.append(
-            ContextBlock(channel="requirements", heading="产出要求（必须满足）", body=requirements)
+            ContextBlock(channel="deliverable", heading="交付物规格", body=deliverable_text)
         )
     if spec.steer:
         # A mid-course user steer (plan_review adjust) injected after upstream work

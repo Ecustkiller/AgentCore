@@ -23,6 +23,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentcore.core.logging import get_logger
+from agentcore.runtime.context.project_profile import (
+    detect_project_profile,
+    render_project_profile,
+)
 
 if TYPE_CHECKING:
     from agentcore.workspace.protocol import WorkspaceBackend
@@ -58,34 +62,42 @@ async def _safe_index(backend: WorkspaceBackend) -> list[str]:
 async def build_workspace_overview(backend: WorkspaceBackend | None) -> str:
     """Build the CEO's ``<workspace_context>`` block, or ``""`` when nothing to show.
 
-    Returns ``""`` for a missing backend, an empty / unindexable workspace, or a
-    listing failure. Otherwise renders a capped, newest-first file list with an elision
-    line when more files remain than the caps allow.
+    Returns ``""`` for a missing backend, an empty / unindexable workspace with no
+    detectable project profile, or a listing failure. Otherwise renders a best-effort
+    project fingerprint (when detectable) plus a capped, newest-first file list with an
+    elision line when more files remain than the caps allow.
     """
     if backend is None:
         return ""
+
+    profile_text = render_project_profile(await detect_project_profile(backend))
     paths = await _safe_index(backend)
-    if not paths:
+    if not paths and not profile_text:
         return ""
 
-    lines: list[str] = []
-    used = 0
-    for path in paths:
-        line = f"- {path}"
-        if len(lines) >= OVERVIEW_MAX_FILES or used + len(line) + 1 > OVERVIEW_CHAR_BUDGET:
-            break
-        lines.append(line)
-        used += len(line) + 1
+    sections: list[str] = []
+    if profile_text:
+        sections.append(f"当前工作区项目概览：\n{profile_text}")
 
-    remaining = len(paths) - len(lines)
-    if remaining > 0:
-        lines.append(f"……另有 {remaining} 个文件未列出（用 file_list 看完整列表）")
+    if paths:
+        lines: list[str] = []
+        used = 0
+        for path in paths:
+            line = f"- {path}"
+            if len(lines) >= OVERVIEW_MAX_FILES or used + len(line) + 1 > OVERVIEW_CHAR_BUDGET:
+                break
+            lines.append(line)
+            used += len(line) + 1
 
-    body = "\n".join(lines)
-    return (
-        "<workspace_context>\n"
-        "当前对话工作区里已有以下文件（最近更新在前）；需要其内容时直接用 file_read / grep "
-        "查看即可，不必先 file_list：\n"
-        f"{body}\n"
-        "</workspace_context>"
-    )
+        remaining = len(paths) - len(lines)
+        if remaining > 0:
+            lines.append(f"……另有 {remaining} 个文件未列出（用 file_list 看完整列表）")
+
+        file_intro = (
+            "当前对话工作区里已有以下文件（最近更新在前）；需要其内容时直接用 file_read / grep "
+            "查看即可，不必先 file_list："
+        )
+        sections.append(f"{file_intro}\n" + "\n".join(lines))
+
+    body = "\n\n".join(sections)
+    return f"<workspace_context>\n{body}\n</workspace_context>"

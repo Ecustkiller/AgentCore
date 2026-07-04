@@ -27,11 +27,15 @@ from agentcore.db.repositories import (
     BoardRepository,
     ConversationRepository,
     MessageRepository,
+    TurnJournalRepository,
 )
 from agentcore.llm.byok import LLMCredentials
 from agentcore.runtime.checkpoints import CheckpointResponse
 from agentcore.runtime.events import EventSink, FinishReason, error_event, message_end, turn_saved
+from agentcore.runtime.journal import completed_from_journal
 from agentcore.runtime.pipeline import resume_chat_pipeline
+from agentcore.runtime.retry import retry_seed
+from agentcore.runtime.runs.types import RunPhase
 from agentcore.runtime.suspension import TurnSuspension
 from agentcore.workspace.attachments import persist_attachments, to_stored_metadata
 from agentcore.workspace.locate import workspace_storage_key
@@ -64,9 +68,7 @@ async def stream_chat(
                 sink.emit(message_end(FinishReason.ERROR))
                 return
             folder_id = conv.folder_id
-            title = conv.title
             instructions = conv.instructions
-            local_container_root_id = conv.local_container_root_id
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
             memory_enabled = await resolve_memory_enabled(session, user_id)
@@ -223,6 +225,131 @@ async def regenerate_chat(
             sink.close()
 
 
+async def _extract_completed_seed(
+    session,
+    msg_repo: MessageRepository,
+    conversation_id: str,
+    user_msg,
+) -> dict | None:
+    """Extract completed worker RunStates from the assistant turn's journal.
+
+    Returns a dict of run_id -> RunState for workers that completed successfully,
+    or None if no journal / no completed workers found.
+    """
+    assistant_msg = await msg_repo.get_assistant_after(
+        conversation_id, after_created_at=user_msg.created_at
+    )
+    if not assistant_msg:
+        return None
+
+    entries = await TurnJournalRepository(session).load_owned(assistant_msg.id, conversation_id)
+    if not entries:
+        return None
+
+    seed = {
+        run_id: state
+        for run_id, state in completed_from_journal(entries).items()
+        if state.phase == RunPhase.COMPLETED
+    }
+    return seed if seed else None
+
+
+async def retry_failed_chat(
+    *,
+    conversation_id: str,
+    message_id: str,
+    user_id: str,
+    sink: EventSink,
+    llm_credentials: LLMCredentials | None = None,
+) -> None:
+    """Retry only failed workers from a previous turn (重试失败项).
+
+    Like regenerate, but extracts completed worker RunStates from the previous
+    turn's journal and sets them on the retry_seed contextvar. When the CEO
+    re-delegates, DelegateTool reads the seed and passes it as seed_completed
+    to WaveScheduler, skipping already-succeeded workers.
+    """
+    try:
+        async with async_session_factory() as session:
+            conv_repo = ConversationRepository(session)
+            msg_repo = MessageRepository(session)
+
+            conv = await conv_repo.get_by_id_unscoped(conversation_id)
+            if not conv:
+                sink.emit(error_event(ErrorCode.NOT_FOUND, "Conversation not found"))
+                sink.emit(message_end(FinishReason.ERROR))
+                return
+
+            target = await msg_repo.get_by_id(message_id, conversation_id=conversation_id)
+            if not target or target.role != "user":
+                sink.emit(error_event(ErrorCode.INVALID, "Can only retry from a user message"))
+                sink.emit(message_end(FinishReason.ERROR))
+                return
+
+            seed = await _extract_completed_seed(session, msg_repo, conversation_id, target)
+
+            await msg_repo.delete_after(conversation_id, after_created_at=target.created_at)
+
+            user_message = target.content or ""
+            history = await load_chat_context(session, conversation_id, max_messages=40)
+            local_binding = await resolve_local_binding(session, conv)
+            profile_set = await resolve_profile_set(session, conv, user_id)
+            memory_enabled = await resolve_memory_enabled(session, user_id)
+            board = await BoardRepository(session).get_by_conversation_id(
+                conversation_id, user_id=user_id
+            )
+            board_id = board.id if board else None
+
+        backend = build_turn_backend(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            sink=sink,
+            local_binding=local_binding,
+        )
+
+        async with workspace_lock(
+            workspace_storage_key(
+                user_id=user_id,
+                folder_id=None,
+                conversation_id=conversation_id,
+            )
+        ):
+            token = retry_seed.set(seed)
+            try:
+                await run_and_persist(
+                    conversation_id=conversation_id,
+                    user_message=user_message,
+                    user_id=user_id,
+                    folder_id=conv.folder_id,
+                    sink=sink,
+                    history=history[:-1],
+                    attachments=None,
+                    backend=backend,
+                    generate_title=False,
+                    llm_credentials=llm_credentials,
+                    profile_set=profile_set,
+                    memory_enabled=memory_enabled,
+                    instructions=conv.instructions,
+                    board_id=board_id,
+                )
+            finally:
+                retry_seed.reset(token)
+
+    except Exception as e:
+        logger.error("chat.retry_failed_error", error=str(e), exc_info=True)
+        if not sink._closed:
+            code, message = error_fields_for(
+                e,
+                fallback_code=ErrorCode.STREAM_ERROR,
+                fallback_message="服务出错了，请稍后重试。",
+            )
+            sink.emit(error_event(code, message))
+            sink.emit(message_end(FinishReason.ERROR))
+    finally:
+        if not sink._closed:
+            sink.close()
+
+
 async def resume_chat(
     *,
     suspension: TurnSuspension,
@@ -241,8 +368,6 @@ async def resume_chat(
                 sink.emit(message_end(FinishReason.ERROR))
                 return
             folder_id = conv.folder_id
-            title = conv.title
-            local_container_root_id = conv.local_container_root_id
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
             history = await load_chat_context(session, conversation_id, max_messages=40)

@@ -5,8 +5,8 @@ shape mirrors the OpenAI / DeepSeek wire form (role / content / tool_calls /
 tool_call_id / reasoning_content) and round-trips back into :class:`LLMMessage`, so
 ``continue_run`` replays the exact context — including a worker's tool-call turns and
 tool results — after loading from disk. :class:`RunSpec` is ``asdict``-ed and rebuilt
-with its nested :class:`RunPolicy` / :class:`RunContract` (``continue_run`` reads
-``spec.policy.contract``), tolerating unknown / missing keys so a later schema tweak
+with its nested :class:`RunPolicy` / :class:`Deliverable` (``continue_run`` reads
+``spec.deliverable``), tolerating unknown / missing keys so a later schema tweak
 never breaks loading an older row.
 """
 
@@ -20,7 +20,7 @@ from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.session import RunSession
 from agentcore.runtime.runs.types import (
-    RunContract,
+    Deliverable,
     RunKind,
     RunOrigin,
     RunPhase,
@@ -252,21 +252,55 @@ def _filtered(cls: type, data: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def spec_to_json(spec: RunSpec) -> dict[str, Any]:
-    """RunSpec → JSON dict. ``asdict`` recurses into RunPolicy / RunContract; the
+    """RunSpec → JSON dict. ``asdict`` recurses into RunPolicy / Deliverable; the
     StrEnum ``kind`` serializes as its string value through JSONB."""
     return asdict(spec)
 
 
+def _merge_legacy_deliverable(
+    *,
+    deliverable_raw: dict[str, Any] | None,
+    expected_output: str,
+    contract_raw: dict[str, Any] | None,
+) -> Deliverable | None:
+    """Rebuild :class:`Deliverable` from current + legacy persisted shapes."""
+    name = (expected_output or "").strip()
+    source = deliverable_raw
+    if source is None and contract_raw:
+        source = contract_raw
+    if source:
+        if isinstance(source.get("name"), str) and source["name"].strip():
+            name = source["name"].strip()
+        fields = _filtered(Deliverable, source)
+        fields["name"] = name
+        deliverable = Deliverable(**fields)
+        return deliverable
+    if name:
+        return Deliverable(name=name)
+    return None
+
+
 def spec_from_json(data: dict[str, Any]) -> RunSpec:
-    """Rebuild a RunSpec (with nested RunPolicy / RunContract) from its JSON dict."""
+    """Rebuild a RunSpec (with nested RunPolicy / Deliverable) from its JSON dict."""
     data = dict(data or {})
     policy_raw = dict(data.pop("policy", None) or {})
     contract_raw = policy_raw.pop("contract", None)
     policy = RunPolicy(**_filtered(RunPolicy, policy_raw))
-    if contract_raw:
-        policy.contract = RunContract(**_filtered(RunContract, contract_raw))
+    expected_output = str(data.pop("expected_output", "") or "")
+    deliverable_raw = data.pop("deliverable", None)
+    if not isinstance(deliverable_raw, dict):
+        deliverable_raw = None
+    if not isinstance(contract_raw, dict):
+        contract_raw = None
+    deliverable = _merge_legacy_deliverable(
+        deliverable_raw=deliverable_raw,
+        expected_output=expected_output,
+        contract_raw=contract_raw,
+    )
     kwargs = _filtered(RunSpec, data)
     kwargs["policy"] = policy
+    if deliverable is not None:
+        kwargs["deliverable"] = deliverable
     kind = kwargs.get("kind")
     if isinstance(kind, str):
         kwargs["kind"] = RunKind(kind)

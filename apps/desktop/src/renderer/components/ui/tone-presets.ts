@@ -150,7 +150,8 @@ export const graphBadgeMutedPlain = `shrink-0 ${statusPillInline.muted}`;
 
 /** Model tier chip on graph node (纯分类，非状态 → 中性；强档用深字重体现层级，不用蓝)。 */
 export const modelTierBadge: Record<"strong" | "fast", string> = {
-  strong: "rounded-full px-1.5 py-0.5 text-xs font-medium bg-muted text-foreground",
+  strong:
+    "rounded-full px-1.5 py-0.5 text-xs font-medium bg-muted text-foreground",
   fast: statusPillSoft.muted,
 };
 

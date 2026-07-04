@@ -173,7 +173,7 @@ L2/L3 共享的 Tailwind 类组合 → `apps/desktop/src/renderer/components/ui/
 | **content** | `max-w-4xl mx-auto` | 896px | 详情、表单——居中线性阅读 |
 | **canvas** | `max-w-[1200px] mx-auto` | 1200px | 探索、列表、文件管理——网格/多列 |
 
-> **自有布局豁免**：对话页（见下）、文件页（分栏树）、**设置页**（左二级导航 + 内容分栏）、**真·全屏页**不走上表梯度。设置页内容是**左对齐**的 `max-w-3xl`（768px）阅读列（非居中 content 档）：左栏已是导航轴，内容左锚定贴分隔线读起来重心更稳，宽屏右侧留白是设置布局的常态。→ 见代码 `pages/MorePage.tsx`。真·全屏页（如 `工具箱 → 产品手册` `/toolbox/manual`）用 `fixed inset-0 z-50` 覆盖整窗（含应用 `TitleBar`），故页顶须**自绘窗口控件**（拖拽区 `[-webkit-app-region:drag]` + 最小化/最大化/关闭复用 `window.windowApi`，否则无边框窗口无法移动 / 关闭），内部自定义满宽布局（产品手册用左侧目录 + `max-w-3xl` 阅读列；图密集页可用 `max-w-[1400px]` 阅读容器 + 宽屏多列）并自带返回 / Esc 退出。→ 见代码 `pages/toolbox/ProductManual.tsx`。
+> **自有布局豁免**：对话页（见下）、文件页（分栏树）、**设置页**（左二级导航 + 内容分栏）、**真·全屏页**不走上表梯度。设置页内容是**左对齐**的 `max-w-3xl`（768px）阅读列（非居中 content 档）：左栏已是导航轴，内容左锚定贴分隔线读起来重心更稳，宽屏右侧留白是设置布局的常态。→ 见代码 `pages/MorePage.tsx`。真·全屏页（如 `工具箱 → 产品手册` `/toolbox/manual`）用 `fixed inset-0 z-50` 覆盖整窗（含应用 `TitleBar`），故页顶须**自绘窗口控件**（拖拽区 `[-webkit-app-region:drag]` + 最小化/最大化/关闭复用 `window.windowApi`，否则无边框窗口无法移动 / 关闭），内部自定义满宽布局（产品手册用左侧目录 + `max-w-3xl` 阅读列；图密集页可用 `max-w-[1400px]` 阅读容器 + 宽屏多列）并自带返回 / Esc 退出。→ 见代码 `pages/toolbox/manual/ManualShell.tsx`。
 
 ### 对话页特殊结构
 

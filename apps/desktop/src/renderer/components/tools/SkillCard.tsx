@@ -1,10 +1,12 @@
+import { PromptDocument } from "@/components/prompt/PromptDocument";
 import { Button, CatalogIconShell } from "@/components/ui";
 import { catalogCategoryColorVar } from "@/lib/catalogColors";
 import type { CapabilitySkill } from "@/services/capabilities";
 import { BookOpen, ChevronRight } from "lucide-react";
 import { useState } from "react";
 
-/** One Skill tile: catalog summary, click-to-expand the full guidance body verbatim. */
+/** One Skill tile: catalog summary, click-to-expand the full guidance body via
+ * {@link PromptDocument}. */
 export function SkillCard({ skill }: { skill: CapabilitySkill }) {
   const [open, setOpen] = useState(false);
   const skillColor = catalogCategoryColorVar("skill");
@@ -37,9 +39,11 @@ export function SkillCard({ skill }: { skill: CapabilitySkill }) {
         />
       </Button>
       {open && (
-        <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/50 px-3 py-2 text-foreground/90 text-xs leading-relaxed">
-          {skill.body}
-        </pre>
+        <PromptDocument
+          text={skill.body}
+          className="mt-2"
+          maxHeightClass="max-h-96"
+        />
       )}
     </div>
   );

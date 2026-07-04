@@ -3,9 +3,11 @@
 Pure JSONL reader (no DB / agentcore import needed). Run from apps/server:
 
     uv run python scripts/log_stats.py
+    uv run python scripts/log_stats.py --file ../../logs/prod-export/events.jsonl
 
-Reads the repo-root ``logs/dev.jsonl`` (set LOG_FILE=logs/dev.jsonl in .env so the
-server writes it). See .cursor/rules/conversation-logs.mdc.
+Reads the repo-root ``logs/dev.jsonl`` by default (set LOG_FILE=logs/dev.jsonl in
+.env so the server writes it). Use ``--file`` to analyze another JSONL log file.
+See .cursor/rules/conversation-logs.mdc.
 """
 
 import json
@@ -190,8 +192,18 @@ def _print_collaboration_quality(traces: dict[str, dict]) -> None:
 
 
 def main() -> None:
-    if not LOG_FILE.exists():
-        print(f"Log file not found: {LOG_FILE}")
+    log_file = LOG_FILE
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        if args[i] == "--file" and i + 1 < len(args):
+            log_file = Path(args[i + 1])
+            i += 2
+        else:
+            i += 1
+
+    if not log_file.exists():
+        print(f"Log file not found: {log_file}")
         print("Set LOG_FILE=logs/dev.jsonl in apps/server/.env and run a turn first.")
         sys.exit(1)
 
@@ -206,7 +218,7 @@ def main() -> None:
     total = 0
     bad_lines = 0
 
-    with open(LOG_FILE, encoding="utf-8") as f:
+    with open(log_file, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -237,7 +249,7 @@ def main() -> None:
 
     print(f"\n{'=' * 60}")
     print(f"  Log Stats  |  {total:,} events  |  {bad_lines} bad lines")
-    print(f"  File: {LOG_FILE}")
+    print(f"  File: {log_file}")
     print(f"{'=' * 60}\n")
 
     print("── Event Distribution (top 25) ──")

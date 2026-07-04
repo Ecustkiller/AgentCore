@@ -52,8 +52,8 @@ def setup_logging() -> None:
     # 代码锚定 (code anchoring): stamp every APP log line with the emitting function + line
     # so a reader — or Cursor AI optimising the product AI from logs/dev.jsonl — can jump
     # straight from an event to its source. `logger` already carries the module (add_logger_name),
-    # so func_name + lineno complete a `module.func:line` anchor (e.g. jump from a `delegate.started`
-    # line to the exact emit site instead of grepping the event string).
+    # so func_name + lineno complete a `module.func:line` anchor (e.g. jump from
+    # `delegate.started` to the exact emit site instead of grepping the event string).
     #
     # Deliberately NOT in `shared_processors` (which is also the foreign_pre_chain): uvicorn /
     # sqlalchemy records already carry their own stdlib callsite, and running this stack-walking

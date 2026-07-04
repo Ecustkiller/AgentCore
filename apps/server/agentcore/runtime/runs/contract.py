@@ -1,7 +1,7 @@
 """Contract gate: mechanical quality checks on a worker run's output (阶段2).
 
-A worker's product is accepted only if it satisfies its node's delivery contract
-(:class:`RunContract`). 阶段2 第一刀只做「机械校验」——看产出的*形*而非*质*：非空（系统
+A worker's product is accepted only if it satisfies its node's delivery spec
+(:class:`Deliverable`). 阶段2 第一刀只做「机械校验」——看产出的*形*而非*质*：非空（系统
 兜底，始终生效）、最短/最长长度、必含关键词、必备小标题、以及（声明
 ``output_format="json"`` 时）能否解析为 JSON。判「写得好不好」的语义裁判（额外一次 LLM
 调用）留作后续增强。
@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from agentcore.runtime.runs.types import RunContract
+from agentcore.runtime.runs.types import Deliverable
 
 
 @dataclass
@@ -29,12 +29,12 @@ class ContractVerdict:
 
 
 def check_contract(
-    content: str, contract: RunContract | None, *, files_written: int = 0
+    content: str, deliverable: Deliverable | None, *, files_written: int = 0
 ) -> ContractVerdict:
-    """Check ``content`` against ``contract``; return a verdict + human reasons.
+    """Check ``content`` against ``deliverable``; return a verdict + human reasons.
 
     The non-empty baseline always applies — an empty product is never acceptable,
-    even with no contract (系统兜底，对应决策②). When a contract is given, its
+    even with no deliverable (系统兜底，对应决策②). When a deliverable is given, its
     mechanical rules layer on top. Failure order is stable so feedback reads
     predictably.
 
@@ -47,29 +47,29 @@ def check_contract(
     text = content.strip()
     if not text:
         return ContractVerdict(ok=False, failures=["产出为空"])
-    if contract is None:
+    if deliverable is None:
         return ContractVerdict(ok=True)
 
     failures: list[str] = []
     length = len(text)
-    if contract.min_length and length < contract.min_length:
-        failures.append(f"产出 {length} 字，少于要求的 {contract.min_length} 字")
-    if contract.max_length and length > contract.max_length:
-        failures.append(f"产出 {length} 字，超过上限 {contract.max_length} 字")
-    if contract.must_contain:
+    if deliverable.min_length and length < deliverable.min_length:
+        failures.append(f"产出 {length} 字，少于要求的 {deliverable.min_length} 字")
+    if deliverable.max_length and length > deliverable.max_length:
+        failures.append(f"产出 {length} 字，超过上限 {deliverable.max_length} 字")
+    if deliverable.must_contain:
         # Case-insensitive, mirroring required_sections' casefold match — the keyword
         # is a content requirement, not a literal-byte check, so casing must not flip
         # the verdict. The failure message still shows the operator's original text.
         haystack = content.casefold()
-        for keyword in contract.must_contain:
+        for keyword in deliverable.must_contain:
             if keyword and keyword.casefold() not in haystack:
                 failures.append(f"缺少必须包含的内容：{keyword}")
-    for section in contract.required_sections:
+    for section in deliverable.required_sections:
         if section and not _has_section(content, section):
             failures.append(f"缺少必备章节：{section}")
-    if contract.output_format == "json" and not _is_json(content):
+    if deliverable.output_format == "json" and not _is_json(content):
         failures.append("产出不是可解析的 JSON")
-    if contract.requires_files and files_written <= 0:
+    if deliverable.requires_files and files_written <= 0:
         failures.append("未把产物写入工作区：交付物须用 file_write 落盘，而非粘在回复正文里")
     return ContractVerdict(ok=not failures, failures=failures)
 
@@ -91,22 +91,24 @@ def format_feedback(verdict: ContractVerdict) -> str:
     )
 
 
-def describe_contract(contract: RunContract | None) -> str:
-    """Render a contract as up-front requirements stated in the worker's prompt."""
-    if contract is None:
+def describe_deliverable(deliverable: Deliverable | None) -> str:
+    """Render a deliverable as up-front requirements stated in the worker's prompt."""
+    if deliverable is None:
         return ""
     lines: list[str] = []
-    if contract.required_sections:
-        lines.append("- 必须包含这些章节（用小标题）：" + "、".join(contract.required_sections))
-    if contract.must_contain:
-        lines.append("- 必须涉及：" + "、".join(contract.must_contain))
-    if contract.min_length:
-        lines.append(f"- 篇幅不少于 {contract.min_length} 字")
-    if contract.max_length:
-        lines.append(f"- 篇幅不超过 {contract.max_length} 字")
-    if contract.output_format == "json":
+    if deliverable.name:
+        lines.append(f"交付物：{deliverable.name}")
+    if deliverable.required_sections:
+        lines.append("- 必须包含这些章节（用小标题）：" + "、".join(deliverable.required_sections))
+    if deliverable.must_contain:
+        lines.append("- 必须涉及：" + "、".join(deliverable.must_contain))
+    if deliverable.min_length:
+        lines.append(f"- 篇幅不少于 {deliverable.min_length} 字")
+    if deliverable.max_length:
+        lines.append(f"- 篇幅不超过 {deliverable.max_length} 字")
+    if deliverable.output_format == "json":
         lines.append("- 产出必须是可解析的 JSON")
-    if contract.requires_files:
+    if deliverable.requires_files:
         lines.append(
             "- 必须调用 file_write 把产物写进工作区（成品是落盘文件，不能只贴在回复正文里）"
         )

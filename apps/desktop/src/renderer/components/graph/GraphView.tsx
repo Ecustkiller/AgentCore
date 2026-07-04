@@ -1,11 +1,8 @@
 import {
-  ContextMenu,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import {
   hasParallelTimeline,
   parallelTimelineMetricsSummary,
 } from "@/components/chat/ParallelTimeline";
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import {
   isTimelineLayout,
   resolveEffectiveGraphLayout,
@@ -16,11 +13,11 @@ import {
   useExecutionScope,
   useProjectedExecution,
 } from "@/stores/execution";
-import { useGraphStore } from "@/stores/graph";
-import { type EndpointKind } from "@/stores/sidePanel";
+import { type GraphEdge, useGraphStore } from "@/stores/graph";
+import type { EndpointKind } from "@/stores/sidePanel";
 import { useUsageStore } from "@/stores/usage";
 import { Background, type Node, ReactFlow } from "@xyflow/react";
-import { useCallback, useMemo, useState } from "react";
+import { createContext, useCallback, useMemo, useRef, useState } from "react";
 import { CanvasPlaybackControls } from "./CanvasPlaybackControls";
 import { CanvasZoomControls } from "./CanvasZoomControls";
 import { GraphContextMenu } from "./GraphContextMenu";
@@ -32,10 +29,27 @@ import { type WaveBand, computeWaves, deriveCaptainStatus } from "./helpers";
 import { projectFlowEdges, projectFlowNodes } from "./projectFlowGraph";
 import { useGraphDrillIn } from "./useGraphDrillIn";
 import { useGraphLayout } from "./useGraphLayout";
-import { useGraphViewport } from "./useGraphViewport";
+import { type GraphFitMode, useGraphViewport } from "./useGraphViewport";
+
+export const GraphHoverContext = createContext<string | null>(null);
+
+/** Direct neighbors of a hovered node (for edge/node highlight). */
+function hoverRelatedIds(
+  hoveredNodeId: string | null,
+  edges: GraphEdge[],
+): Set<string> | null {
+  if (!hoveredNodeId) return null;
+  const related = new Set([hoveredNodeId]);
+  for (const e of edges) {
+    if (e.source === hoveredNodeId) related.add(e.target);
+    if (e.target === hoveredNodeId) related.add(e.source);
+  }
+  return related;
+}
 
 interface GraphViewProps {
-  embedded?: boolean;
+  interactive?: boolean;
+  fitMode?: GraphFitMode;
   onNodeSelect?: (runId: string) => void;
   onEndpointSelect?: (
     contentMessageId: string,
@@ -48,7 +62,8 @@ interface GraphViewProps {
 }
 
 export function GraphView({
-  embedded = false,
+  interactive = true,
+  fitMode = "view",
   onNodeSelect,
   onEndpointSelect,
   onMeasure,
@@ -62,7 +77,7 @@ export function GraphView({
   const setLayoutKind = useGraphStore((s) => s.setLayoutKind);
   const parallelAvailable = !!execution && hasParallelTimeline(execution);
   const effectiveLayoutKind = resolveEffectiveGraphLayout(layoutKind, {
-    embedded,
+    interactive,
     parallelAvailable,
   });
   const timelineLayout = isTimelineLayout(effectiveLayoutKind);
@@ -75,9 +90,11 @@ export function GraphView({
     nodeSizes,
     batchDividers,
     onNodesChange,
+    groups,
+    subTeams,
   } = useGraphLayout(execution, effectiveLayoutKind);
   const { containerRef, rfRef, overflowing, fitView, centerNode, onInit } =
-    useGraphViewport({ embedded, bbox, layoutReady, onMeasure });
+    useGraphViewport({ fitMode, bbox, layoutReady, onMeasure });
   const handleDirection =
     effectiveLayoutKind === "leftright" || timelineLayout
       ? ("horizontal" as const)
@@ -93,7 +110,7 @@ export function GraphView({
     taskMessage,
     captainRun,
   } = useGraphDrillIn(execution, {
-    embedded,
+    interactive,
     messageId,
     onNodeSelect,
     onEndpointSelect,
@@ -123,12 +140,25 @@ export function GraphView({
     [],
   );
 
+  const hoverClearRef = useRef<number | null>(null);
+
   const onNodeMouseEnter = useCallback(
-    (_event: React.MouseEvent, node: Node) => setHoveredNodeId(node.id),
+    (_event: React.MouseEvent, node: Node) => {
+      if (hoverClearRef.current != null) {
+        cancelAnimationFrame(hoverClearRef.current);
+        hoverClearRef.current = null;
+      }
+      setHoveredNodeId(node.id);
+    },
     [],
   );
 
-  const onNodeMouseLeave = useCallback(() => setHoveredNodeId(null), []);
+  const onNodeMouseLeave = useCallback(() => {
+    hoverClearRef.current = requestAnimationFrame(() => {
+      setHoveredNodeId(null);
+      hoverClearRef.current = null;
+    });
+  }, []);
 
   const onPaneContextMenu = useCallback(
     (event: React.MouseEvent | MouseEvent) => {
@@ -164,8 +194,8 @@ export function GraphView({
             finalAnswer,
             taskMessage,
             activateNode,
-            hoveredNodeId,
-            edges,
+            groups,
+            subTeams,
           }
         : null,
     [
@@ -183,21 +213,29 @@ export function GraphView({
       finalAnswer,
       taskMessage,
       activateNode,
-      hoveredNodeId,
-      edges,
+      groups,
+      subTeams,
     ],
   );
 
-  const flowNodes = useMemo(
+  const baseFlowNodes = useMemo(
     () => (projectionBase ? projectFlowNodes(projectionBase) : []),
     [projectionBase],
   );
 
+  const flowNodes = useMemo(() => {
+    if (!hoveredNodeId) return baseFlowNodes;
+    const related = hoverRelatedIds(hoveredNodeId, edges);
+    return baseFlowNodes.map((n) =>
+      related && !related.has(n.id)
+        ? { ...n, className: "graph-hover-dimmed" }
+        : n,
+    );
+  }, [baseFlowNodes, hoveredNodeId, edges]);
+
   const flowEdges = useMemo(
     () =>
-      projectionBase
-        ? projectFlowEdges({ ...projectionBase, edges })
-        : [],
+      projectionBase ? projectFlowEdges({ ...projectionBase, edges }) : [],
     [projectionBase, edges],
   );
 
@@ -215,7 +253,7 @@ export function GraphView({
     [execution, positions, bbox, effectiveLayoutKind, captainRun],
   );
 
-  const interactionProps = embedded
+  const interactionProps = !interactive
     ? {
         zoomOnScroll: false,
         zoomOnPinch: false,
@@ -245,42 +283,44 @@ export function GraphView({
         <ContextMenuTrigger asChild>
           <div ref={containerRef} className="relative min-h-0 flex-1">
             {layoutReady && (
-              <ReactFlow
-                nodes={flowNodes}
-                edges={flowEdges}
-                nodeTypes={nodeTypes}
-                edgeTypes={edgeTypes}
-                onInit={onInit}
-                onNodesChange={onNodesChange}
-                onNodeClick={onNodeClick}
-                onNodeMouseEnter={onNodeMouseEnter}
-                onNodeMouseLeave={onNodeMouseLeave}
-                onNodeContextMenu={onNodeContextMenu}
-                onPaneContextMenu={onPaneContextMenu}
-                fitView={!embedded}
-                nodesDraggable={false}
-                nodesConnectable={false}
-                nodesFocusable={false}
-                elementsSelectable={false}
-                proOptions={{ hideAttribution: true }}
-                {...interactionProps}
-              >
-                <Background gap={20} size={1} />
-                <WaveLanes waves={waves} />
-                {timelineLayout && bbox && (
-                  <TimeBatchMarkers
-                    dividers={batchDividers}
-                    height={bbox.height}
-                  />
-                )}
-              </ReactFlow>
+              <GraphHoverContext.Provider value={hoveredNodeId}>
+                <ReactFlow
+                  nodes={flowNodes}
+                  edges={flowEdges}
+                  nodeTypes={nodeTypes}
+                  edgeTypes={edgeTypes}
+                  onInit={onInit}
+                  onNodesChange={onNodesChange}
+                  onNodeClick={onNodeClick}
+                  onNodeMouseEnter={onNodeMouseEnter}
+                  onNodeMouseLeave={onNodeMouseLeave}
+                  onNodeContextMenu={onNodeContextMenu}
+                  onPaneContextMenu={onPaneContextMenu}
+                  fitView={fitMode === "view"}
+                  nodesDraggable={false}
+                  nodesConnectable={false}
+                  nodesFocusable={false}
+                  elementsSelectable={false}
+                  proOptions={{ hideAttribution: true }}
+                  {...interactionProps}
+                >
+                  <Background gap={20} size={1} />
+                  <WaveLanes waves={waves} />
+                  {timelineLayout && bbox && (
+                    <TimeBatchMarkers
+                      dividers={batchDividers}
+                      height={bbox.height}
+                    />
+                  )}
+                </ReactFlow>
+              </GraphHoverContext.Provider>
             )}
 
-            {embedded && overflowing && (
+            {fitMode === "width" && overflowing && (
               <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-card to-transparent" />
             )}
 
-            {!embedded && (
+            {interactive && (
               <GraphToolbar
                 layoutKind={layoutKind}
                 onLayoutKindChange={setLayoutKind}
@@ -289,7 +329,7 @@ export function GraphView({
               />
             )}
 
-            {!embedded && (
+            {interactive && (
               <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-2">
                 {hasFrames && !timelineLayout && (
                   <CanvasPlaybackControls autoPlay={autoplay} />

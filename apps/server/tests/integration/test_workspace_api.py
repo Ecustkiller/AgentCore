@@ -259,12 +259,12 @@ async def test_clone_repo_into_workspace(client, make_invite, _fs_data_dir, tmp_
 
     r = await client.post(
         f"/v1/conversations/{conv_id}/workspace/clone",
-        json={"repo_url": src.as_uri(), "dest": "imported"},
+        json={"repo_url": src.as_uri(), "dest": "i"},
     )
     assert r.status_code == 200, r.text
-    assert r.json()["path"] == "imported"
+    assert r.json()["path"] == "i"
 
-    r = await client.get(f"/v1/conversations/{conv_id}/workspace/files/imported/README.md")
+    r = await client.get(f"/v1/conversations/{conv_id}/workspace/files/i/README.md")
     assert r.status_code == 200
     # Normalize EOL: git on Windows may apply autocrlf on checkout.
     assert r.content.replace(b"\r\n", b"\n") == b"hello clone\n"
@@ -272,7 +272,7 @@ async def test_clone_repo_into_workspace(client, make_invite, _fs_data_dir, tmp_
     # Cloning again into the same non-empty dest is refused (422).
     r = await client.post(
         f"/v1/conversations/{conv_id}/workspace/clone",
-        json={"repo_url": src.as_uri(), "dest": "imported"},
+        json={"repo_url": src.as_uri(), "dest": "i"},
     )
     assert r.status_code == 422, r.text
 

@@ -39,9 +39,10 @@ interface OffsetTiming {
 }
 
 /** Stitch multi-segment `batches[]` onto one continuous ms axis. */
-export function concatBatchTimelines(
-  batches: BatchMetricsSnapshot[],
-): { timings: OffsetTiming[]; totalSpanMs: number } {
+export function concatBatchTimelines(batches: BatchMetricsSnapshot[]): {
+  timings: OffsetTiming[];
+  totalSpanMs: number;
+} {
   let offset = 0;
   const timings: OffsetTiming[] = [];
   const nonEmpty = batches.filter((b) => b.timeline.length > 0);

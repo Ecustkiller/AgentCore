@@ -139,6 +139,10 @@ worker 全程 non-blocking、照常按假设把能做的做完；简报（`super
 
 → 见代码：`runtime/runs/notewall.py`（`NoteWall`：`post`/`amend`/`new_for`/`all_for`/`active_notes`）、`tools/builtin/post_note.py` / `read_notes.py` / `amend_note.py`、`runtime/engine/loop.py`（`on_round_begin`）、`runtime/runs/executor_agent.py`（`_pull_notes`）、`runtime/events/run.py`（`team_note_posted`）、三端 fold（oracle `conformance/projection.py` + 桌面 `stores/execution` + 手机 `protocol/fold.ts`）。
 
+**CEO 播种与跨波共识（✅）**：`delegate.seed_notes` 可在派活前写入 `NoteWall`（`run_id=__ceo_seed__`）；`team_brief` 回合态块让每个 worker 开局多一节「团队共识」；桌面 `TeamNote.source: ceo | worker`，CEO 播种显示「主 Agent 播种」。**协作质量三项（✅）**：队友已贴 ≥2 条但该 worker 未贴时一次性 **Note Nudge**；CEO 连续 `delegate` 时后一波 **继承**前波活跃便签（最多 20 条，UI「上一波遗留」）；`decision` 便签 **冲突检测**（标识符重叠且内容不同 → 系统 `heads_up`）。**仍缺（非 P0 阻塞）**：CEO prompt 尚未强制「先贴墙再派活」；跨波共识在便签不跨波时仍靠 task 复述。**⏳ Phase 3b**：CEO 声明「共识键值」→ runtime 自动展开为 `seed_notes` + 缩短各 `task`——→ 提案：见 [`07-规划/上下文注入统一性讨论.md`](../07-规划/上下文注入统一性讨论.md)。
+
+→ 见代码：`delegate/seed_notes.py`、`drive.py`、`executor_context.py`、`TeamNotesPanel.tsx`、`StatusStrip.tsx`（「团队便签 N」徽章）。
+
 ---
 
 ## 三、冲突解决 ✅ 已确定

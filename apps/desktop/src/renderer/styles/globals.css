@@ -159,6 +159,34 @@
   border-color: var(--border);
 }
 
+/* Tighter spacing for catalog / context prompt bodies (PromptDocument). */
+.markdown-body--compact {
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.markdown-body--compact p {
+  margin-bottom: 0.5rem;
+}
+.markdown-body--compact h1,
+.markdown-body--compact h2,
+.markdown-body--compact h3 {
+  margin-top: 0.5rem;
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+}
+.markdown-body--compact ul,
+.markdown-body--compact ol {
+  margin-bottom: 0.5rem;
+  padding-left: 1rem;
+}
+.markdown-body--compact li {
+  margin-bottom: 0.125rem;
+}
+.markdown-body--compact pre {
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+}
+
 /* Fenced code blocks: a bordered card with a header (filename / language +
  * wrap-toggle + copy) on top, an aligned line-number gutter beside the <pre>
  * body, and a collapse toggle for long blocks (rendered by CodeBlock.tsx). */
@@ -460,6 +488,17 @@
  * moves the viewport (not nodes), so this only ever fires on a layout recompute. */
 .react-flow__node {
   transition: transform 0.3s ease;
+}
+
+/* Graph hover dimming — driven by className on React Flow node wrapper,
+   zero re-render of node internals. */
+.react-flow__node.graph-hover-dimmed .animate-graph-node-enter {
+  opacity: 0.5;
+  transition: opacity 150ms ease;
+}
+
+.react-flow__node:not(.graph-hover-dimmed) .animate-graph-node-enter {
+  transition: opacity 150ms ease;
 }
 
 /* Honor reduced-motion: skip the entrance/flash/layout transforms. Unlayered, so

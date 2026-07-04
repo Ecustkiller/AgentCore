@@ -15,8 +15,8 @@ import type {
   NonBlockingAskDisplay,
   PlanReviewDisplay,
 } from "@/stores/conversation";
-import type { ExecutionJournal } from "@/stores/execution";
 import { useStreamAwareDisclosure } from "@/stores/disclosure";
+import type { ExecutionJournal } from "@/stores/execution";
 import type { Citation, ProcessStep } from "@/types/events";
 import { Fragment } from "react";
 import { ThinkingDots, ThinkingHeader } from "./Thinking";

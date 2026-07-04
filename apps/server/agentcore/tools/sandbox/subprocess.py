@@ -27,10 +27,15 @@ import signal
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from agentcore.core.errors import SandboxError, SandboxTimeoutError
-from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
+from agentcore.tools.sandbox.protocol import (
+    ExecutionRequest,
+    ExecutionResult,
+    SandboxCapabilities,
+)
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -113,8 +118,35 @@ async def _cleanup_tempdir(path: str) -> None:
     shutil.rmtree(path, ignore_errors=True)
 
 
+async def _read_stream(
+    stream: asyncio.StreamReader | None,
+    stream_name: str,
+    buffer: list[str],
+    on_output: Callable[[str, str], None] | None,
+) -> None:
+    """Read from a subprocess stream in chunks, optionally forwarding each chunk."""
+    if stream is None:
+        return
+    while True:
+        chunk = await stream.read(2048)
+        if not chunk:
+            break
+        text = chunk.decode("utf-8", errors="replace")
+        buffer.append(text)
+        if on_output:
+            on_output(stream_name, text)
+
+
 class SubprocessSandbox:
     """Restricted subprocess sandbox for MVP code execution."""
+
+    def capabilities(self) -> SandboxCapabilities:
+        return SandboxCapabilities(
+            isolation="subprocess",
+            supports_network=True,
+            max_memory_mb=512,
+            max_timeout_seconds=90,
+        )
 
     async def execute(self, request: ExecutionRequest) -> ExecutionResult:
         """Execute code in a temporary directory with timeout."""
@@ -155,8 +187,34 @@ class SubprocessSandbox:
                 stdin_bytes = request.stdin.encode() if request.stdin else None
 
                 try:
-                    stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                        process.communicate(input=stdin_bytes),
+
+                    async def _collect_output() -> tuple[str, str]:
+                        if stdin_bytes is not None and process.stdin is not None:
+                            process.stdin.write(stdin_bytes)
+                            await process.stdin.drain()
+                            process.stdin.close()
+
+                        stdout_buf: list[str] = []
+                        stderr_buf: list[str] = []
+                        await asyncio.gather(
+                            _read_stream(
+                                process.stdout,
+                                "stdout",
+                                stdout_buf,
+                                request.on_output,
+                            ),
+                            _read_stream(
+                                process.stderr,
+                                "stderr",
+                                stderr_buf,
+                                request.on_output,
+                            ),
+                        )
+                        await process.wait()
+                        return "".join(stdout_buf), "".join(stderr_buf)
+
+                    stdout_str, stderr_str = await asyncio.wait_for(
+                        _collect_output(),
                         timeout=request.timeout_seconds,
                     )
                 except TimeoutError:
@@ -177,8 +235,8 @@ class SubprocessSandbox:
 
                 return ExecutionResult(
                     success=process.returncode == 0,
-                    stdout=stdout_bytes.decode(errors="replace"),
-                    stderr=stderr_bytes.decode(errors="replace"),
+                    stdout=stdout_str,
+                    stderr=stderr_str,
                     exit_code=process.returncode or 0,
                     duration_ms=duration_ms,
                 )

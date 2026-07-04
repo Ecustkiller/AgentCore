@@ -1255,22 +1255,8 @@ button.link {
   padding: 1px 7px;
   font-size: 11px;
   border-radius: 999px;
-}
-
-.team-note-kind.kind-decision {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-}
-
-.team-note-kind.kind-headsup {
-  color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 18%, transparent);
-}
-
-/* claim 我领了: 认领一块活 / 文件 (success tone reads as「已认领」, distinct from decision / heads_up). */
-.team-note-kind.kind-claim {
-  color: var(--success);
-  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--muted);
+  background: var(--border);
 }
 
 .team-note-author {
@@ -1305,14 +1291,10 @@ button.link {
   border-radius: 999px;
 }
 
-.team-note-status.status-superseded {
-  color: var(--muted);
-  background: color-mix(in srgb, var(--muted) 14%, transparent);
-}
-
+.team-note-status.status-superseded,
 .team-note-status.status-voided {
-  color: var(--error);
-  background: color-mix(in srgb, var(--error) 14%, transparent);
+  color: var(--muted);
+  background: var(--border);
 }
 
 .debate {
@@ -2670,4 +2652,50 @@ dialog.viewer::backdrop {
 
 .mem-update-link:active {
   color: var(--fg);
+}
+
+/* --- Dev offline preview (/preview) --- */
+
+.preview-controls {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.preview-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.preview-select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 14px;
+}
+
+.preview-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.preview-scrub input[type="range"] {
+  width: 100%;
+}
+
+.preview-messages {
+  flex: 1;
+  overflow: auto;
+}
+
+.preview-pending {
+  margin-top: 12px;
+  font-size: 13px;
 }

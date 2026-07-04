@@ -9,6 +9,7 @@
     "dev:web": "vite --config vite.web.config.ts",
     "dev:webapp": "vite --config vite.webapp.config.ts",
     "shoot": "node scripts/shoot.mjs",
+    "shoot:manual": "node scripts/shoot-manual.mjs",
     "smoke:webapp": "node scripts/smoke-webapp.mjs",
     "smoke:webapp:ci": "node scripts/smoke-webapp.mjs --boot",
     "build": "electron-vite build",

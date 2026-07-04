@@ -36,9 +36,9 @@ const NOTE_STATUS_LABEL: Record<string, string> = {
 };
 
 const NOTE_KIND_LABEL: Record<string, string> = {
-  decision: "我定了",
-  heads_up: "提个醒",
-  claim: "我领了",
+  decision: "约定",
+  heads_up: "提醒",
+  claim: "认领",
 };
 
 const NOTE_KIND_CLASS: Record<string, string> = {
@@ -185,7 +185,7 @@ export function TeamView({
                       NOTE_KIND_CLASS[note.kind] ?? "kind-headsup"
                     }`}
                   >
-                    {NOTE_KIND_LABEL[note.kind] ?? "提个醒"}
+                    {NOTE_KIND_LABEL[note.kind] ?? "提醒"}
                   </span>
                   <span className="team-note-author">
                     {note.role || note.agentId}

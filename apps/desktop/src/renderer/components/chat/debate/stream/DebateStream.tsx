@@ -2,17 +2,13 @@ import { usePersistentDisclosure } from "@/stores/disclosure";
 import type { Execution } from "@/stores/execution";
 import { useRef, useState } from "react";
 import { DebateContinue } from "../Continue";
-import {
-  type DebateModel,
-  debateRoster,
-  toDebateModel,
-} from "../model";
+import { type DebateModel, debateRoster, toDebateModel } from "../model";
 import { ClosingSection } from "./ClosingSection";
 import { FinalVerdict } from "./FinalVerdict";
 import { FlowToolbar } from "./FlowToolbar";
 import { ModeratorNote } from "./Moderator";
-import { openingText } from "./openingText";
 import { StreamRound } from "./StreamRound";
+import { openingText } from "./openingText";
 
 /** 阅读列宽：`chat` 对齐对话页 768px；`canvas` 对齐画布放大态长文/对照档 1024px。 */
 export type DebateReadingWidth = "chat" | "canvas";

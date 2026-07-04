@@ -127,7 +127,9 @@ export function captureCanvasZoomPanelPref(): CanvasZoomPanelSurface {
 }
 
 /** Re-open the panel to a previously saved surface (detail tabs are recreated). */
-export function applyCanvasZoomPanelPref(surface: CanvasZoomPanelSurface): void {
+export function applyCanvasZoomPanelPref(
+  surface: CanvasZoomPanelSurface,
+): void {
   const store = useSidePanelStore.getState();
   switch (surface.kind) {
     case "closed":

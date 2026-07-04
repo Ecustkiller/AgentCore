@@ -204,7 +204,7 @@ BASE 100 → RUNTIME_CONTEXT 200 → MEMORY 300 → CEO_CORE 400
 
 > **决策：常驻源统一为 contributor 插件、顺序声明化。** 理由：① 新增常驻源只需声明一个 `order` 即落位，无需在某个拼接点插队、改动多处调用；② 渲染序与贡献次序解耦——各调用点本就按升序贡献，稳定排序复现原内联顺序、原 `\n` 拼接，**与统一前逐字节一致**（稳定前缀不变，DeepSeek 前缀缓存不破）；③ 稳定前缀（base + hints）在前、概览 / 附件置尾，护前缀缓存（概览 / 附件都空时与原 CEO 提示词逐字节一致）；④ `budget` 字段为「扳机 B」（预算 / 裁剪 / 降级）预留**唯一读取点**——今天不强制裁剪，按需才长（触发条件见 [上下文注入统一性讨论](/docs/07-规划/上下文注入统一性讨论.md) 扳机 B）。→ 见代码：`runtime/context/`（`contributor.py` 定义形状 + `assembler.py` 收集排序）。
 
-**Workspace Context（CEO）= 实时工作区概览** ✅：每回合从 live `WorkspaceBackend` 拉「最近更新在前」的文件清单（文件数 + 字符预算双重封顶）注入 `<workspace_context>`（即上表 `WORKSPACE_OVERVIEW` 档），永远新鲜、零索引依赖；正文靠 Agent 按需 `file_read`/`grep` 取（机制详见 §5.6）。worker 不走此块——它们已有更丰富的逐运行 manifest。→ 见代码：`runtime/context/workspace_overview.py`。
+**Workspace Context（CEO）= 实时工作区概览 + 项目画像** ✅：每回合 `build_workspace_overview(backend)` 先 best-effort 检测项目画像（`detect_project_profile`：语言/框架/包管理器/monorepo 工具/VCS 分支/常用命令/`AGENTS.md` 摘录；**只读清单文件、不执行命令**；画像 ≤600 字符；失败不阻塞），再拉「最近更新在前」的文件清单（文件数 + 字符预算双重封顶），一并注入 `<workspace_context>`（`WORKSPACE_OVERVIEW` 档）。**项目感知是上下文注入增强、不是新工具**；延续 agentic 检索路线，不上向量 RAG。worker 不走此块——它们已有更丰富的逐运行 manifest。→ 见代码：`runtime/context/workspace_overview.py`、`runtime/context/project_profile.py`。
 
 ⏳ **Marketplace Rules**：市场 Rules 绑定待能力域落地后接入装配链。
 
@@ -215,8 +215,8 @@ BASE 100 → RUNTIME_CONTEXT 200 → MEMORY 300 → CEO_CORE 400
 | 机制 | 范围 | 限制手段 |
 |---|---|---|
 | `rule` 注入（规则 + 记忆） | 仅关联文件夹的 **direct children** | `MAX_INSTRUCTION_DOCS` / `MAX_INSTRUCTION_CHARS` |
-| 工作区概览（`<workspace_context>`） | 关联文件夹文件清单（**整棵子树**，最近更新在前） | 文件数 + 字符预算双重封顶；只列路径、正文不进概览 |
-| Agentic 检索（`file_read` / `grep` / `file_list`） | **整棵子树**，无深度限制 | Agent 自取正文，单次工具输出截断 |
+| 工作区概览（`<workspace_context>`） | 项目画像 + 关联文件夹文件清单（**整棵子树**，最近更新在前） | 画像 ≤600 字符；文件数 + 字符预算双重封顶；只列路径与元数据、正文不进概览 |
+| Agentic 检索（`file_read` / `grep` / `file_list` / `git`） | **整棵子树**（`file_list` 递归树有 `max_depth`/条目上限） | Agent 自取正文；`file_read` 支持 `offset`/`limit` 行号范围；单次工具输出截断 |
 
 `rule` 不递归是因为规则按层级生效（子文件夹有自己的规则）；工作区不限深度是因为用户心智是"文件夹里的东西 AI 都能看到"——但**不预建向量索引**：概览给方位、Agent 用文件工具取正文（agentic 检索为主路）。
 

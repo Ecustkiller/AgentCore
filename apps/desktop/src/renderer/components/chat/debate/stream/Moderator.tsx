@@ -1,4 +1,4 @@
-import { debateSignalPill, statusAccentText } from "@/components/ui/tone-presets";
+import { debateSignalPill } from "@/components/ui/tone-presets";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { Gavel, Loader2, TriangleAlert } from "lucide-react";
 import {

@@ -14,7 +14,12 @@
 
 import { clientHeaders } from "@/lib/clientBuildInfo";
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+/** Dev default = same-origin `/api` (Vite proxy → backend). Prod/staging CI bakes an absolute
+ *  URL (`https://app…/api`). Explicit `VITE_API_URL` in `.env.local` overrides either path
+ *  (e.g. point dev at a remote staging API). */
+export const BASE_URL =
+  import.meta.env.VITE_API_URL ??
+  (import.meta.env.DEV ? "/api" : "http://localhost:8000");
 
 const ACCESS_KEY = "agentcore.mobile.access";
 const REFRESH_KEY = "agentcore.mobile.refresh";

@@ -5,7 +5,7 @@ import { ensureReady, getRoot } from "../roots";
 import { opArchive } from "./archive";
 import { opExecute } from "./exec";
 import { opGrep } from "./grep";
-import { opIndexFiles, opList, opRead } from "./read";
+import { opIndexFiles, opList, opListTree, opRead, opReadLines } from "./read";
 import { opErr } from "./result";
 import {
   opDelete,
@@ -63,6 +63,21 @@ export async function executeWorkspaceOp(
           root,
           String(args.directory ?? "."),
           String(args.pattern ?? "*"),
+        );
+      case "read_lines":
+        return await opReadLines(
+          root,
+          String(args.path ?? ""),
+          Number(args.offset ?? 1),
+          args.limit == null ? null : Number(args.limit),
+        );
+      case "list_tree":
+        return await opListTree(
+          root,
+          String(args.directory ?? "."),
+          String(args.pattern ?? "*"),
+          Number(args.max_depth ?? 3),
+          Number(args.max_entries ?? 200),
         );
       case "index_files":
         return await opIndexFiles(

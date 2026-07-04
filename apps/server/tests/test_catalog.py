@@ -17,7 +17,14 @@ from agentcore.tools.catalog import (
 )
 
 # What the CEO holds beyond the read-only built-ins (mirrors pipeline._assemble_ceo_toolset).
-_CEO_ORCHESTRATION = {"delegate", "revise", "consult_skill", "consult_memory", "ask_user"}
+_CEO_ORCHESTRATION = {
+    "delegate",
+    "revise",
+    "debate",
+    "consult_skill",
+    "consult_memory",
+    "ask_user",
+}
 # Mutation built-ins the coordinator must NOT hold (they belong to workers), plus the
 # worker-only collaboration channels (escalate upward + post_note/read_notes 便签墙).
 _WORKER_ONLY_BUILTINS = {
@@ -66,7 +73,16 @@ def test_ceo_orchestration_tools_are_present_and_ceo_only():
 def test_read_only_builtins_are_shared_with_ceo():
     entries = _by_name()
     # Read/retrieval built-ins the coordinator looks with.
-    for name in ("web_search", "read_url", "file_read", "file_list", "grep"):
+    for name in (
+        "web_search",
+        "read_url",
+        "file_read",
+        "file_list",
+        "grep",
+        "code_search",
+        "git",
+        "test_run",
+    ):
         assert name in entries
         assert set(entries[name].available_to) == {AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER}
 

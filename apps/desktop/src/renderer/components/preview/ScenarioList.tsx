@@ -5,24 +5,19 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Search,
-  Trash2,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-/** Minimal shape the list needs — both recordings and fixtures satisfy it. */
 interface Entry {
   name: string;
   description: string;
 }
 
 interface ScenarioListProps {
-  /** Local captures (above the fixtures), each with its own delete affordance. */
-  recordings: Entry[];
   /** Committed conformance vectors, grouped by AI-state family. */
   fixtures: Entry[];
   selected: string | null;
   onSelect: (name: string) => void;
-  onDeleteRecording: (name: string) => void;
 }
 
 // Fixture names are family-prefixed (`single_agent_*`, `multi_agent_*`, …). The
@@ -92,25 +87,22 @@ interface Group {
 
 /**
  * The preview's scenario navigator: a live filter box + family-grouped fixture
- * list (local recordings pinned on top), and a one-click collapse to hand the
- * full window width to the replayed surface — the canvas view especially. All UI
- * state here is ephemeral/human-only (search text, open groups, collapsed); the
- * canonical selection stays URL-driven in PreviewPage so the shoot harness and
- * deep links are unaffected.
+ * list, and a one-click collapse to hand the full window width to the replayed
+ * surface — the canvas view especially. All UI state here is ephemeral/human-only
+ * (search text, open groups, collapsed); the canonical selection stays URL-driven
+ * in PreviewPage so the shoot harness and deep links are unaffected.
  */
 export function ScenarioList({
-  recordings,
   fixtures,
   selected,
   onSelect,
-  onDeleteRecording,
 }: ScenarioListProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [query, setQuery] = useState("");
   const [toggled, setToggled] = useState<Set<string>>(new Set());
   const selectedRef = useRef<HTMLLIElement>(null);
 
-  const total = recordings.length + fixtures.length;
+  const total = fixtures.length;
 
   // Reveal the selected scenario on select / deep-link: open its family + (多 Agent)
   // sub-group if collapsed, then scroll it into view (it already reads selected via
@@ -158,7 +150,6 @@ export function ScenarioList({
     e.name.toLowerCase().includes(q) ||
     e.description.toLowerCase().includes(q);
 
-  const filteredRecordings = recordings.filter(matches);
   const filteredFixtures = fixtures.filter(matches);
 
   const groups: Group[] = [...FAMILIES, OTHER]
@@ -190,35 +181,21 @@ export function ScenarioList({
       return next;
     });
 
-  const itemButton = (e: Entry, deletable: boolean) => (
-    <>
-      <button
-        type="button"
-        onClick={() => onSelect(e.name)}
-        className={`w-full rounded-lg px-3 py-2 text-left ${
-          deletable ? "pr-9" : ""
-        } ${
-          selected === e.name
-            ? "bg-accent text-foreground"
-            : "text-muted-foreground hover:bg-accent hover:text-foreground"
-        }`}
-      >
-        <span className="block truncate text-sm font-medium">{e.name}</span>
-        <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-          {e.description}
-        </span>
-      </button>
-      {deletable && (
-        <button
-          type="button"
-          onClick={() => onDeleteRecording(e.name)}
-          aria-label={`删除录制 ${e.name}`}
-          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
-        >
-          <Trash2 size={14} />
-        </button>
-      )}
-    </>
+  const itemButton = (e: Entry) => (
+    <button
+      type="button"
+      onClick={() => onSelect(e.name)}
+      className={`w-full rounded-lg px-3 py-2 text-left ${
+        selected === e.name
+          ? "bg-accent text-foreground"
+          : "text-muted-foreground hover:bg-accent hover:text-foreground"
+      }`}
+    >
+      <span className="block truncate text-sm font-medium">{e.name}</span>
+      <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+        {e.description}
+      </span>
+    </button>
   );
 
   // Collapsible section header, reused for top families and the 多 Agent
@@ -251,7 +228,7 @@ export function ScenarioList({
     <ul className={`space-y-0.5 ${indented ? "pl-3" : ""}`}>
       {items.map((fx) => (
         <li key={fx.name} ref={fx.name === selected ? selectedRef : undefined}>
-          {itemButton(fx, false)}
+          {itemButton(fx)}
         </li>
       ))}
     </ul>
@@ -299,53 +276,34 @@ export function ScenarioList({
         {total === 0 ? (
           <p className="px-2 py-4 text-xs text-muted-foreground">
             未找到场景。请确认 packages/protocol-conformance/fixtures
-            存在，或用标题栏「录制」按钮录一个回合。
+            存在，并运行 `uv run python -m agentcore.conformance.export`
+            生成向量。
           </p>
-        ) : filteredRecordings.length === 0 && groups.length === 0 ? (
+        ) : groups.length === 0 ? (
           <p className="px-2 py-4 text-xs text-muted-foreground">
             无匹配场景「{query}」。
           </p>
         ) : (
-          <>
-            {filteredRecordings.length > 0 && (
-              <div className="mb-2">
-                <p className="px-3 py-1 text-xs font-medium text-muted-foreground">
-                  录制（本地）
-                </p>
-                <ul className="space-y-0.5">
-                  {filteredRecordings.map((r) => (
-                    <li
-                      key={r.name}
-                      className="relative"
-                      ref={r.name === selected ? selectedRef : undefined}
-                    >
-                      {itemButton(r, true)}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {groups.map((g) => (
-              <div key={g.id} className="mb-1">
-                {groupHeader(g.id, g.label, g.items.length, false)}
-                {isOpen(g.id) &&
-                  (g.subs
-                    ? g.subs.map((sub) => (
-                        <div key={sub.id}>
-                          {groupHeader(
-                            `${g.id}/${sub.id}`,
-                            sub.label,
-                            sub.items.length,
-                            true,
-                          )}
-                          {isOpen(`${g.id}/${sub.id}`) &&
-                            itemList(sub.items, true)}
-                        </div>
-                      ))
-                    : itemList(g.items, false))}
-              </div>
-            ))}
-          </>
+          groups.map((g) => (
+            <div key={g.id} className="mb-1">
+              {groupHeader(g.id, g.label, g.items.length, false)}
+              {isOpen(g.id) &&
+                (g.subs
+                  ? g.subs.map((sub) => (
+                      <div key={sub.id}>
+                        {groupHeader(
+                          `${g.id}/${sub.id}`,
+                          sub.label,
+                          sub.items.length,
+                          true,
+                        )}
+                        {isOpen(`${g.id}/${sub.id}`) &&
+                          itemList(sub.items, true)}
+                      </div>
+                    ))
+                  : itemList(g.items, false))}
+            </div>
+          ))
         )}
       </div>
     </aside>

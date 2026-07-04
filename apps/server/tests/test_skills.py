@@ -28,8 +28,9 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
-# debate / delegate / revise are wired on every path; ask_user is live-user only.
-_FULL_TOOLS = {"delegate", "revise", "ask_user", "debate"}
+# debate / delegate / revise are wired on every path; ask_user is live-user only;
+# test_run gates verify_and_fix.
+_FULL_TOOLS = {"delegate", "revise", "ask_user", "debate", "test_run"}
 _NO_LIVE_USER = {"delegate", "revise", "debate"}  # autonomous path: no ask_user
 
 
@@ -57,6 +58,7 @@ def test_registry_registers_the_system_skills():
         "ask_user_kickoff",
         "ask_user_midtask",
         "delegate_checkpoint",
+        "verify_and_fix",
     }
 
 
@@ -89,6 +91,7 @@ def test_available_hides_gated_skills_without_required_tools():
     assert "ask_user_kickoff" not in available
     assert "ask_user_midtask" not in available
     assert "delegate_checkpoint" not in available
+    assert "verify_and_fix" not in available
 
 
 def test_available_shows_gated_skills_when_tools_wired():
@@ -97,6 +100,7 @@ def test_available_shows_gated_skills_when_tools_wired():
     assert "ask_user_kickoff" in available
     assert "ask_user_midtask" in available
     assert "delegate_checkpoint" in available
+    assert "verify_and_fix" in available
 
 
 # --- directory rendering -----------------------------------------------------
@@ -118,6 +122,7 @@ def test_directory_omits_gated_skills_on_autonomous_path():
     assert "ask_user_kickoff" not in out
     assert "ask_user_midtask" not in out
     assert "delegate_checkpoint" not in out
+    assert "verify_and_fix" not in out
     # The non-gated advanced skills are still offered.
     assert "team_orchestration_advanced" in out
 
