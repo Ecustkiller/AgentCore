@@ -30,6 +30,7 @@ export interface FileArtifact {
  */
 const OP_BY_TOOL: Record<string, FileOp> = {
   file_write: "write",
+  file_append: "write",
   str_replace: "edit",
   file_delete: "delete",
   file_move: "move",

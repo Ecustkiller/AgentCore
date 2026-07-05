@@ -3918,13 +3918,16 @@ export interface components {
          *     prompt is served separately, see the message prompt endpoint).
          *
          *     ``shared_base`` is the base every agent (CEO + workers) shares (identity, output
-         *     style, tool-use, safety); ``ceo`` is the CEO coordinator's full chat system-prompt
-         *     template (shared base + CEO routing core + 能力目录 + citation guidance), composed by
-         *     the SAME ``compose_ceo_chat_prompt`` the live turn uses, so it never drifts.
+         *     style, tool-use, safety); ``ceo_addon`` is the CEO coordinator's layers on top of
+         *     that base (routing core + 能力目录 + citation guidance); ``ceo`` is the full chat
+         *     system-prompt template (shared base + ceo_addon), composed by the SAME
+         *     ``compose_ceo_chat_prompt`` the live turn uses, so it never drifts.
          */
         CapabilityGuidelines: {
             /** Ceo */
             ceo: string;
+            /** Ceo Addon */
+            ceo_addon: string;
             /** Shared Base */
             shared_base: string;
         };

@@ -23,7 +23,7 @@ def _avg(xs: list[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
 
 
-# ── 协作质量 (学·度量 闸门, docs/07-规划/远期规划.md §2.4) ──
+# ── 协作质量 (学·度量 闸门, docs/06-规划/远期规划.md §2.4) ──
 # Per-turn collaboration-quality signals, grouped by trace_id (= one user interaction,
 # logging.mdc) and labeled by MAST group (Multi-Agent System Failure Taxonomy: 规格 /
 # 错位 / 验证 / 终止). All four metrics are derived from events the runtime ALREADY logs

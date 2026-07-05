@@ -16,7 +16,6 @@ import {
   Download,
   Files,
   FlaskConical,
-  Gauge,
   Info,
   Keyboard,
   type LucideIcon,
@@ -67,7 +66,6 @@ export interface PaletteCommand {
 export interface CommandContext {
   navigate: NavigateFunction;
   theme: "light" | "dark" | "system";
-  usageDetail: boolean;
   diagnosticMode: boolean;
   sidebarCollapsed: boolean;
 }
@@ -80,8 +78,7 @@ export interface CommandContext {
  * passed `navigate`. Grouped by {@link CommandCategory} at render time.
  */
 export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
-  const { navigate, theme, usageDetail, diagnosticMode, sidebarCollapsed } =
-    ctx;
+  const { navigate, theme, diagnosticMode, sidebarCollapsed } = ctx;
   const go = (path: string) => () => navigate(path);
 
   const commands: PaletteCommand[] = [
@@ -114,17 +111,8 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       run: () => useSidebarStore.getState().toggleCollapsed(),
     },
     {
-      id: "toggle-usage-detail",
-      title: "用量明细（Power 模式）",
-      category: "操作",
-      icon: Gauge,
-      keywords: ["usage", "power", "token", "cost", "yongliang"],
-      hint: usageDetail ? "当前：开" : "当前：关",
-      run: () => useUIStore.getState().toggleUsageDetail(),
-    },
-    {
-      // 开发者 / 诊断模式 (前端UX设计.md §十): independent of 用量明细 — surfaces
-      // low-level run / trace ids for debugging, off by default.
+      // 开发者 / 诊断模式 (前端UX设计.md §十): surfaces low-level run / trace ids
+      // for debugging, off by default.
       id: "toggle-diagnostic-mode",
       title: "开发者 / 诊断模式",
       category: "操作",

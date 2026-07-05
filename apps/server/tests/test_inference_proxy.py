@@ -46,7 +46,7 @@ def test_inference_token_roundtrip():
 
 def test_inference_token_rejects_access_token():
     """An access token must NOT authorize the inference proxy (wrong type)."""
-    access = create_access_token("user-1")
+    access = create_access_token("user-1", audience="product")
     with pytest.raises(AuthenticationError):
         inference.decode_inference_token(access)
 
@@ -94,7 +94,7 @@ async def test_inference_user_rejects_missing_header():
 async def test_inference_user_rejects_access_token():
     with pytest.raises(AuthenticationError):
         await inference.inference_user(
-            authorization=f"Bearer {create_access_token('u1')}",
+            authorization=f"Bearer {create_access_token('u1', audience='product')}",
             user_repo=_FakeUserRepo(SimpleNamespace(user_id="u1", status="active")),
         )
 

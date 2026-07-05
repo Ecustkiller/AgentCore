@@ -8,6 +8,7 @@ import {
   type LucideIcon,
   MessageSquarePlus,
   Palette,
+  Shield,
   UserCog,
 } from "lucide-react";
 import { Outlet } from "react-router-dom";
@@ -41,6 +42,10 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: UserCog, label: "账户设置", path: "/more/account" },
       { icon: Gauge, label: "用量", path: "/more/usage" },
     ],
+  },
+  {
+    label: "消息",
+    items: [{ icon: Shield, label: "消息隐私", path: "/more/messages" }],
   },
   {
     label: "偏好",

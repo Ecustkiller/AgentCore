@@ -20,7 +20,7 @@ def csrf_enabled(monkeypatch):
 @pytest.mark.asyncio
 async def test_csrf_blocks_mutating_request_without_header(csrf_enabled):
     user_id = new_id()
-    token = create_access_token(user_id)
+    token = create_access_token(user_id, audience="product")
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -33,7 +33,7 @@ async def test_csrf_blocks_mutating_request_without_header(csrf_enabled):
 @pytest.mark.asyncio
 async def test_csrf_allows_mutating_request_with_valid_header(csrf_enabled):
     user_id = new_id()
-    token = create_access_token(user_id)
+    token = create_access_token(user_id, audience="product")
     csrf = sign_csrf_token(user_id)
 
     transport = ASGITransport(app=app)
@@ -54,7 +54,7 @@ async def test_csrf_rejects_token_minted_for_another_user(csrf_enabled):
     session's access cookie must fail (stateless binding, not just any valid sig)."""
     user_id = new_id()
     other_id = new_id()
-    token = create_access_token(user_id)
+    token = create_access_token(user_id, audience="product")
     foreign_csrf = sign_csrf_token(other_id)
 
     transport = ASGITransport(app=app)
@@ -75,7 +75,7 @@ async def test_csrf_enforced_when_cookie_present_despite_bearer_header(csrf_enab
     an Authorization header. The auth layer prefers the cookie, so a bogus bearer must
     not let a cross-site request skip CSRF (which would collapse protection onto CORS)."""
     user_id = new_id()
-    token = create_access_token(user_id)
+    token = create_access_token(user_id, audience="product")
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

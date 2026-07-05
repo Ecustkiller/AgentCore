@@ -1,4 +1,4 @@
-import { Button, IconButton } from "@/components/ui";
+import { Button, IconButton, SearchField } from "@/components/ui";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   type UserSearchResult,
@@ -7,7 +7,7 @@ import {
   startDm,
 } from "@/services/messaging";
 import { useMessagingStore } from "@/stores/messaging";
-import { Search, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { avatarInitial } from "./chatDisplay";
 
@@ -104,13 +104,16 @@ export function NewChatDialog({ open, onClose, onStarted }: Props) {
       >
         <DialogTitle className="sr-only">新建会话</DialogTitle>
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-          <Search size={16} className="shrink-0 text-muted-foreground" />
-          <input
+          <SearchField
             ref={inputRef}
+            variant="plain"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="按用户名或 ID 精确搜索…"
-            className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+            onValueChange={setQuery}
+            placeholder="查找联系人…"
+            aria-label="按用户名或 ID 查找联系人"
+            clearable={false}
+            escapeClears={false}
+            className="flex-1"
           />
           <IconButton
             onClick={onClose}
@@ -127,7 +130,7 @@ export function NewChatDialog({ open, onClose, onStarted }: Props) {
           )}
           {!error && loading && (
             <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-              搜索中…
+              查找中…
             </p>
           )}
           {!error && !loading && !query.trim() && (

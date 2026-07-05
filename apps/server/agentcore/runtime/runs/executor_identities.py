@@ -89,7 +89,7 @@ escalate 是「缺了它整件事会走偏、需要现在有人拍板」，交�
 # WriteCoordinator's hard file guard: announce a piece you're taking so siblings don't dup it),
 # PULL the whole wall on demand (read_notes), 改写/作废 a stale note you posted (amend_note,
 # §2.2 便签会过期), and — when what you need isn't there at all — flag the dependency gap
-# (escalate kind=dep). Framed 主动-but-no-chatter (07-规划 §五 全量铺开, 2026-06-30 — 人决策,
+# (escalate kind=dep). Framed 主动-but-no-chatter (06-规划 §五 全量铺开, 2026-06-30 — 人决策,
 # 先于 §2.5 度量闸门): workers ACTIVELY broadcast every real decision / heads-up / claim and PULL
 # (read_notes) when unsure; only 社交闲聊 is held back, so the wall stays signal not noise.
 _WORKER_TEAM_NOTE_POLICY = """\
@@ -134,6 +134,22 @@ _WORKER_TOOL_SAFETY_POLICY = """\
 （删除、整体覆盖、危险命令）要格外谨慎——尤其在本地模式下，它们作用于用户自己的机器。
 </tool_safety>"""
 
+# Shared problem-handling tiers for leaf + captain workers. Both identities embed
+# this via f-string so the guidance is stated once (leaf and captain only differ in
+# intro + captain's nested-delegation preamble).
+_WORKER_PROBLEM_HANDLING = """\
+碰到问题时按以下三档处理：
+- 小问题（路径拼写、import 缺失、格式报错、依赖安装）：自己修，不用上报。
+- 中等问题（测试挂了、需要多改一个文件、某个依赖的接口和预期不一致）：尝试修一轮；\
+修好了继续交付，修不好就用 escalate 上报原因和你尝试过的方案。
+- 大问题（方案根本走不通、需要改接口设计、任务范围明显超出你的职责、缺少关键信息\
+无法合理假设）：立即用 escalate 上报，不要自行决定方向。
+默认原则：信息不足时做出最合理的假设、简短说明，然后照常交付——不要为小事停下。\
+escalate 不会打断你——上报后仍按你当下最合理的假设把任务做完，主管会在你的产物之上纠偏。\
+升级时若这个岔路是干净的【二选一 / 多选一】（候选明确、只差有人拍板），就在 escalate 里附上\
+结构化 questions（把候选写进 options），让拍板者一键选定、不必读你的散文再手敲；没有明确候选的\
+开放问题则照常用一句话问、不必硬凑选项。"""
+
 # Prepended to every delegated worker's system prompt (right after the shared
 # base). A leaf worker runs in an isolated context with one scoped task, no chance
 # to ask follow-ups, and no `delegate` tool — stated explicitly so it makes a
@@ -142,17 +158,7 @@ _WORKER_TOOL_SAFETY_POLICY = """\
 # prose-vs-file so a file deliverable lands in the workspace, not in the chat.
 _WORKER_IDENTITY = f"""\
 你是团队中的一名专家 worker。你只负责一个划定好的任务，外加完成它所需的上下文；\
-你不能再向下委派。碰到问题时按以下三档处理：
-- 小问题（路径拼写、import 缺失、格式报错、依赖安装）：自己修，不用上报。
-- 中等问题（测试挂了、需要多改一个文件、某个依赖的接口和预期不一致）：尝试修一轮；\
-修好了继续交付，修不好就用 escalate 上报原因和你尝试过的方案。
-- 大问题（方案根本走不通、需要改接口设计、任务范围明显超出你的职责、缺少关键信息\
-无法合理假设）：立即用 escalate 上报，不要自行决定方向。
-默认原则：信息不足时做出最合理的假设、简短说明，然后照常交付——不要为小事停下。\
-escalate 不会打断你——上报后仍按你当下最合理的假设把任务做完，主管会在你的产物之上纠偏。
-升级时若这个岔路是干净的【二选一 / 多选一】（候选明确、只差有人拍板），就在 escalate 里附上\
-结构化 questions（把候选写进 options），让拍板者一键选定、不必读你的散文再手敲；没有明确候选的\
-开放问题则照常用一句话问、不必硬凑选项。
+你不能再向下委派。{_WORKER_PROBLEM_HANDLING}
 
 {_WORKER_TEAM_NOTE_POLICY}
 
@@ -174,15 +180,7 @@ _WORKER_CAPTAIN_IDENTITY = f"""\
 为委派而委派。你带的子队若声明了 bind_after_deps（依赖完成后再定稿）的步骤、或子队员用 \
 escalate kind=scope 报告了职责偏离，控制权会在波边界交回你（子队输出『计划已让出』）——\
 这时用 replan 据上游产出把待定稿步骤定稿 / 操舵尚未运行的步骤，续跑【同一张】子计划；确认\
-无需改动可直接续跑、确无需继续则 replan(stop=true) 收口。碰到问题时按以下三档处理：
-- 小问题（路径拼写、import 缺失、格式报错、依赖安装）：自己修，不用上报。
-- 中等问题（测试挂了、需要多改一个文件、某个依赖的接口和预期不一致）：尝试修一轮；\
-修好了继续交付，修不好就用 escalate 上报原因和你尝试过的方案。
-- 大问题（方案根本走不通、需要改接口设计、任务范围明显超出你的职责、缺少关键信息\
-无法合理假设）：立即用 escalate 上报，不要自行决定方向。
-默认原则：信息不足时做出最合理的假设、简短说明，然后照常交付——不要为小事停下。\
-escalate 不会打断你——上报后仍按你当下最合理的假设把任务做完，主管会在你的产物之上纠偏。\
-岔路若是干净的二选一 / 多选一，就在 escalate 里附结构化 questions（候选写进 options）让人一键拍板。
+无需改动可直接续跑、确无需继续则 replan(stop=true) 收口。{_WORKER_PROBLEM_HANDLING}
 
 {_WORKER_TEAM_NOTE_POLICY}
 

@@ -125,6 +125,7 @@ async def drive(
         escalation_timeout=tool._checkpoint_timeout_seconds,
         escalation_armed=checkpoint_active(tool),
         note_wall=note_wall,
+        collaboration=len(plan.nodes) > 1,
         team_brief=tool._team_brief,
     )
 
@@ -302,6 +303,41 @@ async def drive(
             tool_call_id="",
             success=True,
             output=format_boundary_for_ceo(tool, reason, plan, results, nodes),
+            output_limit=DELEGATE_OUTPUT_LIMIT,
+        )
+
+    # Partial failure: all nodes terminal but some FAILED / SKIPPED — stash the plan so the
+    # CEO can replan(add=...) replacement nodes on the SAME DAG (not a fresh delegate).
+    # Usage / ledger / citations fold on the resume or dispose path (same as boundary yield).
+    # Only failures from THIS drive segment count — nodes already FAILED/SKIPPED in
+    # ``seed_completed`` (a replan resume) must not re-trigger stash.
+    seeded_ids = set(seed_completed or ())
+    failed_nodes = [
+        n
+        for n in plan.nodes
+        if (st := results.get(n.run_id)) is not None
+        and st.phase in (RunPhase.FAILED, RunPhase.SKIPPED)
+        and n.run_id not in seeded_ids
+    ]
+    if failed_nodes and tool._supervised is None:
+        tool._supervised = SupervisedRun(
+            plan=plan,
+            completed=dict(results),
+            execution_id=execution_id,
+            finalize=finalize,
+            reason=BoundaryReason.SCOPE,
+            boundary_run_ids=[n.run_id for n in failed_nodes],
+        )
+        logger.info(
+            "delegate.partial_failure_stashed",
+            call=tool._calls,
+            failed=[n.run_id for n in failed_nodes],
+            completed=len(results),
+        )
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output=format_for_ceo(tool, plan, results),
             output_limit=DELEGATE_OUTPUT_LIMIT,
         )
 

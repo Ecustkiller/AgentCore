@@ -34,6 +34,7 @@ export async function resolveApproval(
  */
 export const FILE_OP_TOOLS: ReadonlySet<string> = new Set([
   "file_write",
+  "file_append",
   "str_replace",
   "file_delete",
   "file_move",

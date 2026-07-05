@@ -5,19 +5,7 @@ worker mutation, annotated with reach), the system Skills (summary + body), and 
 system-prompt template — the data the desktop 能力图鉴 renders.
 """
 
-import httpx
-
-_PW = "password123"
-
-
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
-    assert r.status_code == 200, r.text
+from tests.integration.conftest import register_and_login
 
 
 async def test_capabilities_requires_auth(client):
@@ -26,7 +14,7 @@ async def test_capabilities_requires_auth(client):
 
 async def test_capabilities_returns_full_catalog(client, make_invite):
     code = await make_invite("INV-CAP-1")
-    await _register_and_login(client, code, "capuser")
+    await register_and_login(client, code, "capuser")
 
     r = await client.get("/v1/capabilities")
     assert r.status_code == 200, r.text
@@ -51,13 +39,14 @@ async def test_capabilities_returns_full_catalog(client, make_invite):
 
 async def test_capabilities_lists_system_skills_with_body(client, make_invite):
     code = await make_invite("INV-CAP-2")
-    await _register_and_login(client, code, "skilluser")
+    await register_and_login(client, code, "skilluser")
 
     body = (await client.get("/v1/capabilities")).json()
     skills = {s["name"]: s for s in body["skills"]}
     assert "team_orchestration_advanced" in skills
     assert "ask_user_kickoff" in skills
     assert "verify_and_fix" in skills
+    assert "long_form_writing" in skills
     for skill in skills.values():
         assert skill["summary"]
         assert skill["body"]  # the full guidance, not just the catalog one-liner
@@ -65,13 +54,19 @@ async def test_capabilities_lists_system_skills_with_body(client, make_invite):
 
 async def test_capabilities_exposes_prompt_template(client, make_invite):
     code = await make_invite("INV-CAP-3")
-    await _register_and_login(client, code, "promptuser")
+    await register_and_login(client, code, "promptuser")
 
     guidelines = (await client.get("/v1/capabilities")).json()["guidelines"]
     assert guidelines["shared_base"]
     ceo = guidelines["ceo"]
+    addon = guidelines["ceo_addon"]
     # The CEO template carries the routing core + the always-on 能力目录.
     assert "CEO" in ceo
     assert "能力目录" in ceo
     # The shared base is a prefix of the CEO prompt (it layers hints onto the base).
     assert ceo.startswith(guidelines["shared_base"])
+    # ceo_addon is the catalog delta (no repeated shared-base sections).
+    assert addon
+    assert "CEO" in addon
+    assert addon == ceo[len(guidelines["shared_base"]) :].lstrip("\n")
+    assert ceo == guidelines["shared_base"] + ceo[len(guidelines["shared_base"]) :]

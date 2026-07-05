@@ -20,19 +20,7 @@ import uvicorn
 from agentcore.main import app
 from agentcore.runtime.events import EventSink, content_delta
 from agentcore.runtime.turn_runs import turn_runs
-
-_PW = "password123"
-
-
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> str:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
-    assert r.status_code == 200, r.text
-    return r.json()["id"]
+from tests.integration.conftest import register_and_login
 
 
 async def _new_conversation(client: httpx.AsyncClient, title: str) -> str:
@@ -116,7 +104,7 @@ async def test_attach_requires_auth(client):
 
 async def test_attach_204_when_no_run(client, make_invite):
     code = await make_invite("INV-ATT1")
-    await _register_and_login(client, code, "attachidle")
+    await register_and_login(client, code, "attachidle")
     conv = await _new_conversation(client, "idle")
 
     # No live run → 204, so the client falls back to the persisted transcript.
@@ -131,7 +119,7 @@ async def test_attach_204_when_no_run(client, make_invite):
 # cancel the attach generator for real — the production path.
 async def test_attach_replays_history_then_tails(live_client, make_invite):
     code = await make_invite("INV-ATT2")
-    await _register_and_login(live_client, code, "attachlive")
+    await register_and_login(live_client, code, "attachlive")
     conv = await _new_conversation(live_client, "live")
 
     # Stand-in detached run with some transcript already accumulated.
@@ -166,10 +154,10 @@ async def test_attach_replays_history_then_tails(live_client, make_invite):
 
 async def test_attach_rejects_non_owner(client, make_invite, new_client):
     code = await make_invite("INV-ATT3")
-    await _register_and_login(client, code, "attachowner")
+    await register_and_login(client, code, "attachowner")
     conv = await _new_conversation(client, "mine")
 
     code2 = await make_invite("INV-ATT4")
     async with new_client() as other:
-        await _register_and_login(other, code2, "attachintruder")
+        await register_and_login(other, code2, "attachintruder")
         assert (await other.get(f"/v1/conversations/{conv}/stream")).status_code == 404

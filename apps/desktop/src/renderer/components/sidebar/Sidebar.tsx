@@ -14,6 +14,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { ActivityBanner } from "./ActivityBanner";
 import {
   RecentConversations,
   ViewAllConversations,
@@ -136,6 +137,8 @@ export function Sidebar() {
 
       {/* Divider — nav vs conversation list */}
       <div className="mx-3 border-t border-sidebar-border" />
+
+      <ActivityBanner collapsed={collapsed} />
 
       {/* 工作区 (collapsible folder groups) + 快速对话 (裸聊 flat list); full list
           lives on /conversations (前端UX §一 方案B). */}

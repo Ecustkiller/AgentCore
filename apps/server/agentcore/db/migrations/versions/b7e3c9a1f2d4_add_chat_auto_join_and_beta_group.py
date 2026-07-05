@@ -1,6 +1,6 @@
 """add chats.auto_join + create the 内测全员群 and backfill existing users
 
-The 内测全员群 mechanism (docs/07-规划/全员反馈群落地设计.md): one system-owned
+The 内测全员群 mechanism (docs/06-规划/全员反馈群落地设计.md): one system-owned
 group every user belongs to. `chats.auto_join` marks chats new accounts are
 enrolled into at registration; this migration also creates the group row and
 backfills all existing active users (pinned, so it surfaces at the top).

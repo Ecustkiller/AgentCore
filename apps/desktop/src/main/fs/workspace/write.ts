@@ -96,6 +96,37 @@ export async function opWrite(
   return opOk([...content].length); // 码点数，与服务端 len(content) 对齐
 }
 
+export async function opAppend(
+  root: StoredRoot,
+  relPath: string,
+  content: string,
+): Promise<WorkspaceOpResult> {
+  const target = await resolveWritable(root, relPath);
+  if (!target) return opErr("OutsideWorkspace", relPath);
+  if (target === root.absPath) return opErr("WorkspaceIOError", "目标是目录");
+  try {
+    await fs.mkdir(dirname(target), { recursive: true });
+    let exists = false;
+    try {
+      const st = await fs.stat(target);
+      if (!st.isFile()) return opErr("NotAFile", relPath);
+      exists = true;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+        return opErr("WorkspaceIOError", toReason(e));
+      }
+    }
+    if (exists) {
+      await fs.appendFile(target, content, "utf-8");
+    } else {
+      await atomicWrite(target, Buffer.from(content, "utf-8"));
+    }
+  } catch (e) {
+    return opErr("WorkspaceIOError", toReason(e));
+  }
+  return opOk([...content].length);
+}
+
 export async function opWriteBytes(
   root: StoredRoot,
   relPath: string,

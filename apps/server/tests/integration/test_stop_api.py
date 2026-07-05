@@ -14,19 +14,7 @@ import pytest
 
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.turn_runs import turn_runs
-
-_PW = "password123"
-
-
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> str:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
-    assert r.status_code == 200, r.text
-    return r.json()["id"]
+from tests.integration.conftest import register_and_login
 
 
 async def _new_conversation(client: httpx.AsyncClient, title: str) -> str:
@@ -46,7 +34,7 @@ async def test_stop_requires_auth(client):
 
 async def test_stop_idempotent_and_cancels_tracked_run(client, make_invite):
     code = await make_invite("INV-STOP1")
-    await _register_and_login(client, code, "stopuser")
+    await register_and_login(client, code, "stopuser")
     conv = await _new_conversation(client, "stoppable")
 
     # Nothing running yet → idempotent false (a late click settles cleanly).
@@ -75,11 +63,11 @@ async def test_stop_idempotent_and_cancels_tracked_run(client, make_invite):
 
 async def test_stop_rejects_non_owner(client, make_invite, new_client):
     code = await make_invite("INV-STOP2")
-    await _register_and_login(client, code, "stopowner")
+    await register_and_login(client, code, "stopowner")
     conv = await _new_conversation(client, "mine")
 
     code2 = await make_invite("INV-STOP3")
     async with new_client() as other:
-        await _register_and_login(other, code2, "stopintruder")
+        await register_and_login(other, code2, "stopintruder")
         # Not owned → 404 (mirrors the handoff IDOR contract).
         assert (await other.post(f"/v1/conversations/{conv}/stop")).status_code == 404

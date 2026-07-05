@@ -88,9 +88,16 @@ skip_if:
 - **已停止**（`status=cancelled`）：同战绩形态，「已停止」标题，在跑节点冻结为 cancelled（不再转圈），救火行显示「已花 ¥」。
 - **失败**（整轮崩溃，`FailureStrip`）：高亮失败 Agent / run + `run_failed` 错误原因 + 救火行。
 
-救火行（`RecoveryActions`）由失败条、部分失败的已完成条、已停止条共用——重试（从最后一条用户消息整轮重新执行）/ 调整指令（内联编辑后重发）/ 放弃（清空该回合执行槽）。状态条尾部为一级图标按钮：执行中给「停止」、已完成/已停止给「回放」（切画布放大态自动播放时间轴），外加常驻的折叠 /「在画布打开」；不设 `[···]` 菜单——整轮重新执行统一交给消息级「重新生成」与救火行「重试」。内嵌图块在 `run_plan` 首次挂载时播放一次入场动画（`animate-task-card-enter`，遵循 `prefers-reduced-motion`，见 `styles/globals.css`）。
+救火行（`RecoveryActions`）由失败条、部分失败的已完成条、已停止条共用（✅ 已与 regenerate 分离）：
 
-→ **提案**：用户级「只重跑失败节点」与 regenerate 分离 → 见 [`07-规划/重试机制重设计.md`](/docs/07-规划/重试机制重设计.md)
+| 场景 | 主按钮 | 次按钮 | 忽略 |
+|---|---|---|---|
+| 部分失败（有 worker `failed`） | **重试失败项** → `runRetryFailed`（后端 `retry-failed`，复用已成功 worker） | **全部重新生成** → `runRegenerate` | 清空该回合执行槽 |
+| 整轮失败 / 已停止 | **重试** → `runRegenerate` | — | 同上 |
+
+状态条尾部为一级图标按钮：执行中给「停止」、已完成/已停止给「回放」（切画布放大态自动播放时间轴），外加常驻的折叠 /「在画布打开」；不设 `[···]` 菜单——整轮重新执行统一交给消息级「重新生成」与救火行。内嵌图块在 `run_plan` 首次挂载时播放一次入场动画（`animate-task-card-enter`，遵循 `prefers-reduced-motion`，见 `styles/globals.css`）。
+
+⏳ **余项**：`RecoveryActions` 的重试/regenerate 仍取 `lastUserMessageId()` 而非 `ExecutionScope`——画布聚焦历史失败回合点重试可能打到最新一轮；「忽略」仅 `clearExecution`、后端无感知。→ 见代码：`StatusStrip.tsx`、`services/turns/regenerate.ts`；后端契约见 [执行引擎 §retry-failed](/docs/03-AI核心/执行引擎架构设计.md)
 
 **出现时机规则**（核心决策）：
 
@@ -482,9 +489,19 @@ skip_if:
 
 ## 十四、全局搜索与命令面板（现状）
 
-`Ctrl/Cmd+K`：Tier 1 关键词搜索 + Tier 2 命令导航 ✅。空查询显最近对话+命令；有查询 300ms 防抖后端搜索；消息命中走 load-around。
+`Ctrl/Cmd+K`：Tier 1 关键词搜索 + Tier 2 命令导航 ✅。空查询显最近对话+命令；有查询 300ms 防抖后端搜索；消息命中走 load-around。入口为 TitleBar / Web 侧栏 **假输入框**（`SearchTrigger`，文案「搜索或运行命令…」），侧栏不放真输入框。
 
-技术契约 → [`前端技术与架构.md` §9.8](/docs/04-前端/前端技术与架构.md)。Tier 3 语义搜索 ⏳ → [`远期规划 §三`](/docs/07-规划/远期规划.md)。
+**搜索 / 筛选 / 查找 三层用词**（✅ 组件已收口）：
+
+| 词 | 场景 | 示例 |
+|---|---|---|
+| **搜索** | 仅全局 `Cmd+K` | 跨对话、消息、文件夹、命令 |
+| **筛选** | 当前列表/树客户端过滤 | `/conversations`、文件工作区、IM 会话列表、`@` 弹层 |
+| **查找** | 当前视图内定位 | `Cmd+F` 已加载消息；IM「查找联系人」 |
+
+会话内 `FindBar` 无命中时引导「在全对话中搜索」并预填关键词打开命令面板。
+
+技术契约 → [`前端技术与架构.md` §9.8](/docs/04-前端/前端技术与架构.md)。组件规格 → [`UI-Pattern索引.md`](/docs/04-前端/UI-Pattern索引.md)。Tier 3 语义搜索 ⏳ → [`远期规划 §三`](/docs/06-规划/远期规划.md)。
 
 ---
 

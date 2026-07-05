@@ -59,6 +59,7 @@ def test_registry_registers_the_system_skills():
         "ask_user_midtask",
         "delegate_checkpoint",
         "verify_and_fix",
+        "long_form_writing",
     }
 
 
@@ -203,7 +204,7 @@ def test_team_orchestration_skill_teaches_constraint_vs_solution_and_outline_ste
 
 
 def test_team_orchestration_skill_teaches_parallel_review_notewall():
-    # 便签 Phase 1 (07-规划 产品AI协作优化复盘 §10): parallel reviewers must broadcast
+    # 便签 Phase 1 (06-规划 产品AI协作优化复盘 §10): parallel reviewers must broadcast
     # direction-level issues via post_note before nitpicking in isolation.
     body = _body("team_orchestration_advanced")
     assert "post_note" in body and "heads_up" in body
@@ -211,7 +212,7 @@ def test_team_orchestration_skill_teaches_parallel_review_notewall():
 
 
 def test_team_orchestration_skill_teaches_review_contract_template():
-    # 07-规划 产品AI协作优化复盘 §3.2: CEO must preset contract on review workers so
+    # 06-规划 产品AI协作优化复盘 §3.2: CEO must preset contract on review workers so
     # outputs share problems/suggestions/score fields for mechanical merge + revise.
     body = _body("team_orchestration_advanced")
     assert "审查类任务的统一契约" in body
@@ -302,3 +303,21 @@ def test_delegate_checkpoint_skill_teaches_wave_boundary_pause():
     body = skill.body
     assert "checkpoint_after" in body
     assert "depends_on" in body  # only meaningful inside a multi-step DAG
+
+
+def test_verify_and_fix_skill_teaches_test_run_loop():
+    skill = build_system_skill_registry().get("verify_and_fix")
+    assert skill.requires_tools == ("test_run",)
+    body = skill.body
+    assert "test_run" in body
+    assert "str_replace" in body
+    assert "escalate" in body
+
+
+def test_long_form_writing_skill_teaches_segmented_append():
+    skill = build_system_skill_registry().get("long_form_writing")
+    assert skill.requires_tools == ("delegate",)
+    body = skill.body
+    assert "file_write" in body
+    assert "file_append" in body
+    assert "大纲" in body

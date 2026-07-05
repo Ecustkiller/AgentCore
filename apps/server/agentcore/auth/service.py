@@ -16,9 +16,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from agentcore.config import settings
 from agentcore.auth.client import ClientPlatform, is_product_platform, platform_to_audience
 from agentcore.auth.mfa import AdminMfaService
+from agentcore.config import settings
 from agentcore.core.errors import (
     AdminProductForbiddenError,
     AuthenticationError,
@@ -27,7 +27,6 @@ from agentcore.core.errors import (
 )
 from agentcore.core.types import new_id
 from agentcore.db.models import Invite, User
-from agentcore.security.tokens import TokenAudience
 from agentcore.db.repositories import (
     CredentialsRepository,
     InviteRepository,

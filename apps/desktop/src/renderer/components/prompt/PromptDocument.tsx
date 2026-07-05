@@ -1,17 +1,13 @@
 import { Markdown } from "@/components/chat/Markdown";
-import { Button } from "@/components/ui";
 import {
   hasTaggedSections,
   parsePromptDocument,
 } from "@/lib/parsePromptDocument";
 import { cn } from "@/lib/utils";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
-type ViewMode = "render" | "source";
-
-/** Structured prompt / skill body: tagged sections rendered as Markdown, with a
- * source toggle for verbatim copy. Shared by 工具箱能力图鉴, 收到的上下文, and
- * consult_skill result cards. */
+/** Structured prompt / skill body: tagged sections rendered as Markdown.
+ * Shared by 工具箱能力图鉴, 收到的上下文, and consult_skill result cards. */
 export function PromptDocument({
   text,
   className,
@@ -24,41 +20,12 @@ export function PromptDocument({
 }) {
   const sections = useMemo(() => parsePromptDocument(text), [text]);
   const structured = hasTaggedSections(sections);
-  const [mode, setMode] = useState<ViewMode>("render");
 
   if (!text.trim()) return null;
 
   return (
     <div className={cn("space-y-2", className)}>
-      <div className="flex items-center justify-end gap-1">
-        <Button
-          variant={mode === "render" ? "neutral" : "ghost"}
-          size="sm"
-          onClick={() => setMode("render")}
-          className={mode === "render" ? "border-border" : undefined}
-        >
-          渲染
-        </Button>
-        <Button
-          variant={mode === "source" ? "neutral" : "ghost"}
-          size="sm"
-          onClick={() => setMode("source")}
-          className={mode === "source" ? "border-border" : undefined}
-        >
-          原文
-        </Button>
-      </div>
-
-      {mode === "source" ? (
-        <pre
-          className={cn(
-            "overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/50 px-3 py-2 text-foreground/90 text-xs leading-relaxed",
-            maxHeightClass,
-          )}
-        >
-          {text}
-        </pre>
-      ) : structured ? (
+      {structured ? (
         <div
           className={cn(
             "space-y-3 overflow-auto rounded-lg bg-muted/50 px-3 py-2",

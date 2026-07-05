@@ -23,6 +23,7 @@ dev's default ``LOG_LEVEL=info`` surfaces them without also raising the global l
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
@@ -82,6 +83,7 @@ def log_llm_call(
     messages: list[LLMMessage] | None = None,
     content: str | None = None,
     reasoning: str | None = None,
+    tool_names: list[str] | None = None,
 ) -> None:
     """Emit one ``llm.call`` metrics line (+ optional bodies when enabled).
 
@@ -89,6 +91,9 @@ def log_llm_call(
     ``depth`` from contextvars, so calls attribute to their turn and worker.
     """
     u = usage or TokenUsage()
+    extra: dict[str, Any] = {}
+    if tool_names:
+        extra["tool_names"] = tool_names
     logger.info(
         "llm.call",
         scenario=scenario,
@@ -101,6 +106,7 @@ def log_llm_call(
         reasoning_tokens=u.reasoning_tokens,
         cache_hit_tokens=u.cache_hit_tokens,
         cache_miss_tokens=u.cache_miss_tokens,
+        **extra,
     )
 
     if not settings.log_llm_bodies:

@@ -440,6 +440,18 @@
   }
 }
 
+/* Chat message bubble entrance — fade + slide-up on mount (initial load + new turns). */
+@keyframes message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Collaboration-graph node entrance — plays once when a node first mounts
  * (run_plan declares the whole team up-front, so nodes cascade in via a per-node
  * animation-delay). Scale/opacity only, applied to an inner wrapper — never the
@@ -476,6 +488,7 @@
   --animate-dropdown-in: dropdown-in 0.15s ease-out;
   --animate-dropdown-out: dropdown-out 0.1s ease-in;
   --animate-task-card-enter: task-card-enter 0.3s ease-out;
+  --animate-message-enter: message-enter 0.25s ease-out;
   /* `both`: hold the `from` state during the stagger delay (else a delayed node
      flashes visible → hidden → fades in) and the `to` state after. */
   --animate-graph-node-enter: graph-node-enter 0.28s ease-out both;
@@ -505,6 +518,7 @@
  * it reliably overrides the layered Tailwind `animate-*` utilities. */
 @media (prefers-reduced-motion: reduce) {
   .animate-task-card-enter,
+  .animate-message-enter,
   .animate-graph-node-enter,
   .animate-graph-node-flash {
     animation: none;

@@ -5,7 +5,7 @@ import { useState } from "react";
 
 /** A collapsible prompt block (AI 工作准则). Collapsed by default — these are
  * long, and the page reads as a clean summary until the user opts in. Expanded
- * body uses {@link PromptDocument} (structured sections + 渲染/原文 toggle). */
+ * body uses {@link PromptDocument} (structured sections rendered as Markdown). */
 export function GuidelineBlock({
   title,
   subtitle,

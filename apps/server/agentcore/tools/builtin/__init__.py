@@ -7,6 +7,7 @@ from agentcore.tools.builtin.code_execute import CodeExecuteTool
 from agentcore.tools.builtin.code_search import CodeSearchTool
 from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.builtin.file_ops import (
+    FileAppendTool,
     FileDeleteTool,
     FileListTool,
     FileMoveTool,
@@ -53,6 +54,7 @@ def build_builtin_registry(*, include_code_execute: bool = True) -> ToolRegistry
     registry.register(ReadUrlTool())
     registry.register(FileReadTool())
     registry.register(FileWriteTool())
+    registry.register(FileAppendTool())
     registry.register(StrReplaceTool())
     registry.register(FileListTool())
     registry.register(FileDeleteTool())
@@ -105,7 +107,7 @@ def build_ceo_tool_registry() -> ToolRegistry:
 
     The CEO is a coordinator — it *looks* (web_search, read_url, file_read,
     file_list, grep, code_search) and answers simple requests directly, but it holds NONE of
-    the production / mutation tools (file_write, str_replace, file_delete,
+    the production / mutation tools (file_write, file_append, str_replace, file_delete,
     file_move, code_execute). Any work that produces or changes an artifact is
     handed to a worker via ``delegate``; workers carry the FULL toolset
     (``build_builtin_registry``).

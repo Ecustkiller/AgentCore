@@ -22,7 +22,6 @@ import { SettingsHeader } from "./SettingsHeader";
 export function ShortcutsSettings() {
   const navigate = useNavigate();
   const theme = useUIStore((s) => s.theme);
-  const usageDetail = useUIStore((s) => s.usageDetail);
   const diagnosticMode = useUIStore((s) => s.diagnosticMode);
   const sidebarCollapsed = useSidebarStore((s) => s.collapsed);
 
@@ -33,11 +32,10 @@ export function ShortcutsSettings() {
       buildPaletteCommands({
         navigate,
         theme,
-        usageDetail,
         diagnosticMode,
         sidebarCollapsed,
       }),
-    [navigate, theme, usageDetail, diagnosticMode, sidebarCollapsed],
+    [navigate, theme, diagnosticMode, sidebarCollapsed],
   );
 
   return (

@@ -233,8 +233,9 @@ class FileWriteTool:
             description=(
                 "把内容写入文件：会创建该文件（含所有上级目录），或【整体覆盖】"
                 "已有文件。用它来新建文件；若只想改已有文件的一部分，优先用 "
-                "str_replace（它只编辑匹配到的片段，而不是重写整个文件）。路径"
-                "必须是相对于工作区的相对路径。"
+                "str_replace（它只编辑匹配到的片段，而不是重写整个文件）。若要在"
+                "已有文件【末尾追加】内容（长文分段写作），用 file_append，不要"
+                "每次重写全文。路径必须是相对于工作区的相对路径。"
             ),
             parameters={
                 "type": "object",
@@ -302,6 +303,85 @@ class FileWriteTool:
             tool_call_id="",
             success=True,
             output=f"已写入 {written} 字节到 {rel_path}",
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
+
+
+class FileAppendTool:
+    """Append content to the end of a file within the workspace."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="file_append",
+            description=(
+                "在文件【末尾追加】内容：文件不存在则创建（含上级目录）；已存在则在"
+                "末尾拼接，不重写全文。适合长文分段写作（先出大纲，再逐节追加）。"
+                "若要【整体覆盖】或新建首段，用 file_write；若要改中间某段，用 "
+                "str_replace。路径必须是相对于工作区的相对路径。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "工作区内的相对文件路径",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "要追加到文件末尾的内容",
+                    },
+                },
+                "required": ["path", "content"],
+            },
+            category=ToolCategory.FILESYSTEM,
+            approval=ToolApproval.GRANTABLE,
+        )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        start = time.monotonic()
+        rel_path = arguments.get("path", "")
+        content = arguments.get("content", "")
+
+        if not rel_path:
+            return _error("path 不能为空：请提供工作区内的相对文件路径（如 report.md）", start)
+
+        coordinator = context.write_coordinator
+        if coordinator is not None:
+            owner = coordinator.claim(rel_path, context.run_id, context.write_ancestors)
+            if owner is not None:
+                logger.info(
+                    "file_append.collision",
+                    path=rel_path,
+                    run_id=context.run_id,
+                    owner=owner,
+                )
+                return _error(
+                    f"写入冲突：`{rel_path}` 正被同一批的另一个并行队友写入——同名文件并发写"
+                    f"会互相覆盖，已拦下。请换一个不同的文件名（给它加上你的角色或编号后缀，"
+                    f"如 `{_distinct_name_hint(rel_path)}`）后重写。",
+                    start,
+                )
+
+        try:
+            appended = await context.backend.append(rel_path, content)
+        except OutsideWorkspace:
+            if coordinator is not None:
+                coordinator.release(rel_path, context.run_id)
+            return _error(f"路径 '{rel_path}' 超出了工作区范围", start)
+        except NotAFile:
+            if coordinator is not None:
+                coordinator.release(rel_path, context.run_id)
+            return _error(f"不是文件：{rel_path}", start)
+        except WorkspaceError as e:
+            if coordinator is not None:
+                coordinator.release(rel_path, context.run_id)
+            return _error(f"追加文件失败：{e}", start)
+
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output=f"已追加 {appended} 字节到 {rel_path}",
             duration_ms=int((time.monotonic() - start) * 1000),
         )
 

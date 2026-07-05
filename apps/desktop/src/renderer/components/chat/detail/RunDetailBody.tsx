@@ -56,7 +56,6 @@ export function RunDetailBody({
 }) {
   const execution = useMessageExecution(messageId);
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
-  const usageDetail = useUIStore((s) => s.usageDetail);
   const diagnosticMode = useUIStore((s) => s.diagnosticMode);
   const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
   const requestCanvasFocus = useUIStore((s) => s.requestCanvasFocus);
@@ -257,8 +256,7 @@ export function RunDetailBody({
       {run.receivedContext.length > 0 && (
         <ReceivedContextSection
           blocks={run.receivedContext}
-          defaultExpanded={usageDetail}
-          powerMode={usageDetail}
+          defaultExpanded
           keyBase={`run:${runId}`}
           onNavigate={(rid) => {
             const target = execution.runs.find((r) => r.id === rid);
@@ -387,7 +385,7 @@ export function RunDetailBody({
           run={run}
           agent={agent}
           cnyPerUsd={cnyPerUsd}
-          defaultExpanded={usageDetail}
+          defaultExpanded
         />
       )}
 

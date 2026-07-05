@@ -239,6 +239,51 @@ def _fmt_log_line(item: dict, indent: str = "  ", hide: tuple[str, ...] = ()) ->
     return f"{indent}{ts}  {icon} {event}  {detail}"
 
 
+def _format_delegate_plan_dag(item: dict, indent: str = "      ") -> list[str]:
+    """ASCII DAG for delegate.started when plan + waves are present (new logs)."""
+    plan = item.get("plan")
+    waves = item.get("waves")
+    if not plan or not waves:
+        return []
+
+    id_to_role: dict[str, str] = {}
+    id_to_deps: dict[str, list[str]] = {}
+    for node in plan:
+        nid = node.get("id", "?")
+        id_to_role[nid] = node.get("role") or nid
+        id_to_deps[nid] = node.get("depends_on") or []
+
+    lines: list[str] = []
+    for wave_idx, wave in enumerate(waves):
+        if wave_idx == 0:
+            label = "Wave 0 (独立):"
+        elif wave_idx == 1:
+            label = "Wave 1 (依赖 Wave 0):"
+        else:
+            label = f"Wave {wave_idx}:"
+        lines.append(f"{indent}├── {label}")
+        for node_id in wave:
+            role = id_to_role.get(node_id, node_id)
+            deps = id_to_deps.get(node_id, [])
+            if deps:
+                dep_roles = ", ".join(id_to_role.get(d, d) for d in deps)
+                lines.append(f"{indent}│     {role} ({node_id}) ← {dep_roles}")
+            else:
+                lines.append(f"{indent}│     {role} ({node_id})")
+    return lines
+
+
+def _fmt_log_item(item: dict, indent: str = "  ", hide: tuple[str, ...] = ()) -> list[str]:
+    """One log event line, plus optional delegate plan DAG."""
+    dag_hide: tuple[str, ...] = ()
+    if item.get("event") == "delegate.started" and item.get("plan") and item.get("waves"):
+        dag_hide = ("plan", "waves")
+    lines = [_fmt_log_line(item, indent=indent, hide=(*hide, *dag_hide))]
+    if dag_hide:
+        lines.extend(_format_delegate_plan_dag(item, indent=indent + "    "))
+    return lines
+
+
 # react.* / tool.* events carry a delegated worker's identity (run_id/agent_id/
 # depth), bound in runtime/runs/executor.py. We nest them into a per-worker block
 # so one delegation's reasoning chain reads top-to-bottom instead of interleaving
@@ -308,7 +353,7 @@ def _fmt_worker_group(grp: dict) -> list[str]:
     child_indent = pad + "│  "
     lines = [f"{pad}┌─ worker {agent}  ({' · '.join(meta)})"]
     for ev in grp["events"]:
-        lines.append(_fmt_log_line(ev, indent=child_indent, hide=_WORKER_REDUNDANT_KEYS))
+        lines.extend(_fmt_log_item(ev, indent=child_indent, hide=_WORKER_REDUNDANT_KEYS))
     return lines
 
 
@@ -324,7 +369,7 @@ def format_trace(trace_id: str, log_events: list[dict]) -> str:
         if item["type"] == "worker_group":
             lines += _fmt_worker_group(item)
         else:
-            lines.append(_fmt_log_line(item))
+            lines.extend(_fmt_log_item(item))
     lines.append("")
     return "\n".join(lines)
 
@@ -360,7 +405,7 @@ def format_timeline(conv: dict, messages: list[dict], log_events: list[dict]) ->
                 line += f"  [{', '.join(extras)}]"
             lines.append(line)
         else:
-            lines.append(_fmt_log_line(item))
+            lines.extend(_fmt_log_item(item))
     lines.append("")
     return "\n".join(lines)
 

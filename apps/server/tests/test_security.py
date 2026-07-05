@@ -9,6 +9,7 @@ from agentcore.security import (
     KeyEncryptor,
     create_access_token,
     decode_access_token,
+    decode_access_token_claims,
     generate_refresh_token,
     hash_password,
     hash_refresh_token,
@@ -41,18 +42,21 @@ def test_hash_password_is_salted():
 
 
 def test_access_token_roundtrip():
-    token = create_access_token("user-123")
+    token = create_access_token("user-123", audience="product")
     assert decode_access_token(token) == "user-123"
+    assert decode_access_token_claims(token) == ("user-123", "product")
 
 
 def test_access_token_expired_is_rejected():
-    token = create_access_token("user-123", expires_delta=timedelta(seconds=-1))
+    token = create_access_token(
+        "user-123", audience="product", expires_delta=timedelta(seconds=-1)
+    )
     with pytest.raises(AuthenticationError):
         decode_access_token(token)
 
 
 def test_access_token_tampered_signature_is_rejected():
-    token = create_access_token("user-123")
+    token = create_access_token("user-123", audience="admin")
     header, payload, sig = token.split(".")
     flipped = ("B" if sig[0] != "B" else "C") + sig[1:]
     with pytest.raises(AuthenticationError):

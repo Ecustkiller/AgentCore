@@ -1,5 +1,5 @@
 import { WindowControls } from "@/components/layout/WindowControls";
-import { Button, SurfaceRowButton } from "@/components/ui";
+import { Button, SearchField, SurfaceRowButton } from "@/components/ui";
 import { isMac, macTitleBarInsetClass } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/ui";
@@ -26,7 +26,6 @@ import {
   PlayCircle,
   Rocket,
   Route,
-  Search,
   Settings,
   ShieldCheck,
   Target,
@@ -242,18 +241,12 @@ export function ManualShell() {
         {/* Left sidebar：常驻完整目录 + 搜索 */}
         <nav className="hidden w-[260px] shrink-0 flex-col overflow-hidden border-r border-border bg-muted/30 md:flex">
           <div className="shrink-0 p-3">
-            <div className="relative">
-              <Search
-                size={14}
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="搜索手册…"
-                className="h-8 w-full rounded-lg border border-input bg-background pl-8 pr-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-            </div>
+            <SearchField
+              value={query}
+              onValueChange={setQuery}
+              placeholder="筛选手册…"
+              aria-label="筛选手册目录"
+            />
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-6">

@@ -444,7 +444,7 @@ export interface RunEscalationPayload {
  * instead of free-typing; empty for a plain free-text ask. Run-scoped so the card attaches to this
  * worker's node. UNLIKE the (transport-only) non-blocking `run_escalation` banner, this is JOURNALED
  * — the prompt (incl. its structured questions) + resolution replay inline on reload, and the turn
- * never flips to `paused` (siblings keep running). 设计: docs/07-规划/阻塞式求决策设计.md §4.2/§4.5. */
+ * never flips to `paused` (siblings keep running). 设计: docs/06-规划/阻塞式求决策设计.md §4.2/§4.5. */
 export interface EscalationRequiredPayload {
   escalation_id: string;
   run_id: string;

@@ -42,6 +42,37 @@ from agentcore.security.keys import KeyEncryptor
 
 _TEST_MFA_SECRET = "JBSWY3DPEHPK3PXP"
 _MASTER_KEY = "ab" * 32
+TEST_PASSWORD = "password123"
+
+
+async def register_and_login(
+    client: httpx.AsyncClient,
+    invite_code: str,
+    username: str,
+    *,
+    platform: str = "desktop",
+    password: str = TEST_PASSWORD,
+) -> str:
+    """Register a product user and complete cookie login (product sessions have no MFA).
+
+    Returns the signed-in user's id from ``LoginResponse.user``.
+    """
+    r = await client.post(
+        "/v1/auth/register",
+        json={"username": username, "password": password, "invite_code": invite_code},
+    )
+    assert r.status_code == 201, r.text
+    r = await client.post(
+        "/v1/auth/login",
+        json={"username": username, "password": password},
+        headers={"X-Client-Platform": platform},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert not body.get("mfa_required"), body
+    user = body.get("user")
+    assert user is not None, body
+    return user["id"]
 
 
 async def login_admin(client: httpx.AsyncClient, username: str, password: str) -> None:

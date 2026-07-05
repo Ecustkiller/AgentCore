@@ -19,8 +19,7 @@ import pytest
 
 from agentcore.config import settings
 from agentcore.storage.factory import build_storage_provider
-
-_PW = "password123"
+from tests.integration.conftest import register_and_login
 
 
 def _init_source_repo(path: Path) -> None:
@@ -50,16 +49,6 @@ def _fs_data_dir(tmp_path: Path, monkeypatch):
         build_storage_provider.cache_clear()
 
 
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
-    assert r.status_code == 200, r.text
-
-
 async def _new_conversation(client: httpx.AsyncClient) -> str:
     r = await client.post("/v1/conversations", json={})
     assert r.status_code == 201, r.text
@@ -80,7 +69,7 @@ async def test_create_conversation_records_local_intent(client, make_invite, _fs
     binding, so the field is dropped).
     """
     code = await make_invite("INV-WS-INTENT")
-    await _register_and_login(client, code, "wsintent")
+    await register_and_login(client, code, "wsintent")
 
     r = await client.post("/v1/conversations", json={"local_container_root_id": "root-abc"})
     assert r.status_code == 201, r.text
@@ -104,7 +93,7 @@ async def test_create_conversation_records_local_intent(client, make_invite, _fs
 
 async def test_upload_list_download_roundtrip(client, make_invite, _fs_data_dir):
     code = await make_invite("INV-WS-1")
-    await _register_and_login(client, code, "wsuser1")
+    await register_and_login(client, code, "wsuser1")
     conv_id = await _new_conversation(client)
 
     body = b"hello-from-upload\x00\x01"  # includes non-text bytes
@@ -132,7 +121,7 @@ async def test_upload_list_download_roundtrip(client, make_invite, _fs_data_dir)
 
 async def test_delete_and_move_workspace_files(client, make_invite, _fs_data_dir):
     code = await make_invite("INV-WS-MV")
-    await _register_and_login(client, code, "wsmover")
+    await register_and_login(client, code, "wsmover")
     conv_id = await _new_conversation(client)
 
     await client.put(f"/v1/conversations/{conv_id}/workspace/files/a.txt", content=b"A")
@@ -173,7 +162,7 @@ async def test_delete_and_move_workspace_files(client, make_invite, _fs_data_dir
 
 async def test_create_workspace_dir(client, make_invite, _fs_data_dir):
     code = await make_invite("INV-WS-MKDIR")
-    await _register_and_login(client, code, "wsmkdir")
+    await register_and_login(client, code, "wsmkdir")
     conv_id = await _new_conversation(client)
 
     # Create a nested folder (parents are created).
@@ -203,7 +192,7 @@ async def test_create_workspace_dir(client, make_invite, _fs_data_dir):
 
 async def test_snapshot_create_list_restore_download(client, make_invite, _fs_data_dir):
     code = await make_invite("INV-WS-2")
-    await _register_and_login(client, code, "wsuser2")
+    await register_and_login(client, code, "wsuser2")
     conv_id = await _new_conversation(client)
 
     # Seed v1, snapshot it, then overwrite with v2.
@@ -254,7 +243,7 @@ async def test_clone_repo_into_workspace(client, make_invite, _fs_data_dir, tmp_
     monkeypatch.setattr(gitmod, "_validate_url", lambda url: None)
 
     code = await make_invite("INV-WS-CLONE")
-    await _register_and_login(client, code, "wscloner")
+    await register_and_login(client, code, "wscloner")
     conv_id = await _new_conversation(client)
 
     r = await client.post(
@@ -280,13 +269,13 @@ async def test_clone_repo_into_workspace(client, make_invite, _fs_data_dir, tmp_
 async def test_other_user_cannot_touch_workspace(client, new_client, make_invite, _fs_data_dir):
     """A conversation's workspace is scoped to its owner (IDOR-safe → 404)."""
     code_a = await make_invite("INV-WS-A")
-    await _register_and_login(client, code_a, "owner")
+    await register_and_login(client, code_a, "owner")
     conv_id = await _new_conversation(client)
     await client.put(f"/v1/conversations/{conv_id}/workspace/files/secret.txt", content=b"top")
 
     code_b = await make_invite("INV-WS-B")
     async with new_client() as other:
-        await _register_and_login(other, code_b, "intruder")
+        await register_and_login(other, code_b, "intruder")
         assert (await other.get(f"/v1/conversations/{conv_id}/workspace/files")).status_code == 404
         assert (
             await other.get(f"/v1/conversations/{conv_id}/workspace/files/secret.txt")

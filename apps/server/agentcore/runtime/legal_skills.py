@@ -8,7 +8,7 @@ the CEO's 能力目录 and pulled via ``consult_skill`` — but ONLY when the le
 is enabled (``settings.legal_vertical_enabled``), so generic deployments never see
 legal content in the catalog.
 
-Design (见 docs/07-规划/法律垂直场景设计.md §六): v0 builds NO new infra. The
+Design (见 docs/06-规划/法律垂直场景设计.md §六): v0 builds NO new infra. The
 「对方律师作战室」hero rides existing primitives — ``delegate`` (起草 / 核验 / 格式 worker)
 + ``debate(form=red_team, is_subject=...)`` (原告红队单向攻、我方回应修补) +
 ``checkpoint_after`` / ``ask_user`` (人审闸门) + web 检索 (法条接地). This Skill is the
@@ -20,6 +20,12 @@ registry; it graduates to a per-agent market Skill once that infra lands.
 from __future__ import annotations
 
 from agentcore.runtime.skills import SystemSkill
+
+# Shared anti-hallucination core for both legal skills (答辩状 + 案情研判).
+# Each skill appends its own domain-specific constraints after this.
+_LEGAL_ANTI_HALLUCINATION_CORE = """\
+- 未经检索核验，【不得】写出任何具体法条 / 司法解释条号与内容——宁可标「[待核验：拟引《X 法》第 Y 条]」交核验 worker，也不可凭记忆直接写定。
+- 每条法律引用须标注出处与法域（默认【中国大陆法】）；引用现行有效版本。"""
 
 _LEGAL_ANSWER_BRIEF = """\
 <legal_answer_brief>
@@ -69,8 +75,7 @@ _LEGAL_ANSWER_BRIEF = """\
 修订或不适用本案？抗辩事由构成要件齐不齐？是否漏了对原告有利、我方未回应的关键事实？时效抗辩起算点站得住吗？
 
 【五、反幻觉硬约束（真交付律师档位的底线，不可省）】
-- 未经检索核验，【不得】写出任何具体法条 / 司法解释条号与内容——宁可标「[待核验：拟引《X 法》第 Y 条]」交核验 worker，也不可凭记忆直接写定。
-- 每条法律引用须标注出处与法域（默认【中国大陆法】）；引用现行有效版本。
+""" + _LEGAL_ANTI_HALLUCINATION_CORE + """
 - 终稿附免责声明：「本文为 AI 辅助起草，须执业律师复核后使用，不构成法律意见。」
 - 涉及具体诉请、关键抗辩或不可逆提交前，必过【人审闸门】（见编排第 5 步）。
 </legal_answer_brief>"""
@@ -135,8 +140,7 @@ deadline）/ 判决预期 vs 和解锚 / 诉讼成本与周期预估（喂『打
 未证清，点明「谁该证、现在证没证到」。
 
 【五、反幻觉硬约束（真交付律师档位的底线，不可省）】
-- 未经检索核验，【不得】写出任何具体法条 / 司法解释条号与内容——宁可标「[待核验：拟引《X 法》第 Y 条]」交核验 worker，也不可凭记忆直接写定。
-- 每条法律引用须标注出处与法域（默认【中国大陆法】）；引用现行有效版本。
+""" + _LEGAL_ANTI_HALLUCINATION_CORE + """
 - 胜负研判一律定性为【倾向性研判，非判决结果预测】——它比引法条更容易被过度依赖，措辞须给出【成立条件与不确定性】，【绝不】写「必胜 / 必败 / 保证」这类断言。
 - 终稿附免责声明：「本文为 AI 辅助研判，须执业律师独立判断后使用，不构成法律意见，亦不构成对诉讼结果的承诺。」
 - 涉及接案与否、诉讼策略走向等关键决策或不可逆动作前，必过【人审闸门】（见编排第 4 步）。

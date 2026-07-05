@@ -43,46 +43,36 @@ function cacheRatePercent(usage: UsageBreakdown): number | null {
 /** Compact token / round / cost summary — right-aligned in the footer. */
 function MessageUsageSummary({
   usage,
-  usageDetail,
   rounds,
   costText,
 }: {
   usage: UsageBreakdown | undefined;
-  usageDetail: boolean;
   rounds: number | undefined;
   costText: string | null;
 }) {
   const parts = useMemo(() => {
     const out: string[] = [];
     if (usage) {
-      if (usageDetail) {
-        const rate = cacheRatePercent(usage);
-        const input =
-          rate != null && rate > 0
-            ? `↑${formatCompact(usage.input)}(缓${rate}%)`
-            : `↑${formatCompact(usage.input)}`;
-        const output =
-          usage.reasoning > 0
-            ? `↓${formatCompact(usage.output)}(思${formatCompact(usage.reasoning)})`
-            : `↓${formatCompact(usage.output)}`;
-        out.push(`${input} ${output}`);
-      } else {
-        out.push(
-          `↑${formatCompact(usage.input)} ↓${formatCompact(usage.output)}`,
-        );
-      }
+      const rate = cacheRatePercent(usage);
+      const input =
+        rate != null && rate > 0
+          ? `↑${formatCompact(usage.input)}(缓${rate}%)`
+          : `↑${formatCompact(usage.input)}`;
+      const output =
+        usage.reasoning > 0
+          ? `↓${formatCompact(usage.output)}(思${formatCompact(usage.reasoning)})`
+          : `↓${formatCompact(usage.output)}`;
+      out.push(`${input} ${output}`);
     }
     if (rounds != null && rounds > 1) out.push(`${rounds} 轮`);
     if (costText) out.push(costText);
     return out;
-  }, [usage, usageDetail, rounds, costText]);
+  }, [usage, rounds, costText]);
 
   if (parts.length === 0) return null;
 
   const tooltip = usage
-    ? usageDetail
-      ? `输入 ${formatCompact(usage.input)}（缓存命中 ${formatCompact(usage.cache_hit)} · 未命中 ${formatCompact(usage.cache_miss)}）· 输出 ${formatCompact(usage.output)}（思考 ${formatCompact(usage.reasoning)}）`
-      : "本回合 token 用量（输入 ↑ / 输出 ↓）"
+    ? `输入 ${formatCompact(usage.input)}（缓存命中 ${formatCompact(usage.cache_hit)} · 未命中 ${formatCompact(usage.cache_miss)}）· 输出 ${formatCompact(usage.output)}（思考 ${formatCompact(usage.reasoning)}）`
     : undefined;
 
   const text = parts.join(" · ");
@@ -367,7 +357,6 @@ export function AssistantMessageFooter({
   finishReason: string | undefined;
   onRegenerate: () => void;
 }) {
-  const usageDetail = useUIStore((s) => s.usageDetail);
   const { copied, onCopy } = useCopyAction(() => message.content);
 
   return (
@@ -394,7 +383,6 @@ export function AssistantMessageFooter({
       <div className="flex shrink-0 items-center gap-1.5">
         <MessageUsageSummary
           usage={message.usage}
-          usageDetail={usageDetail}
           rounds={message.rounds}
           costText={costText}
         />

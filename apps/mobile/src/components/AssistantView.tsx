@@ -193,6 +193,7 @@ const TOOL_LABEL: Record<string, string> = {
   code_execute: "执行代码",
   file_read: "读取文件",
   file_write: "写入文件",
+  file_append: "追加文件",
   file_list: "列出目录",
   str_replace: "编辑文件",
   file_delete: "删除文件",

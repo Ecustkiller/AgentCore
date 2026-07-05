@@ -25,8 +25,25 @@ from agentcore.runtime.prompt import (
     CHAT_CITATION_HINT,
     assemble_system_prompt,
     compose_ceo_chat_prompt,
+    derive_ceo_addon,
 )
-from agentcore.runtime.skills import build_system_skill_registry
+from agentcore.runtime.skills import _TEAM_ORCHESTRATION_ADVANCED, build_system_skill_registry
+
+
+def test_derive_ceo_addon_splits_shared_prefix_from_full_ceo_prompt():
+    base = assemble_system_prompt()
+    ceo = compose_ceo_chat_prompt(
+        base,
+        skill_registry=build_system_skill_registry(),
+        ceo_tool_names={"delegate", "consult_skill", "ask_user"},
+    )
+    addon = derive_ceo_addon(base, ceo)
+    assert addon
+    assert "<role>" in addon
+    assert "<output_style>" not in addon
+    assert ceo.startswith(base)
+    assert addon == ceo[len(base) :].lstrip("\n")
+    assert ceo == base + ceo[len(base) :]
 
 
 def test_output_style_block_present_in_base():
@@ -249,22 +266,25 @@ def test_core_states_coordinator_tool_boundary():
 def test_core_teaches_split_criterion_over_count():
     # 拆分判据 = 活儿的自然结构（子任务是否真正独立可并行 / 需不同专长），NOT 任务数量.
     # The criterion is BIDIRECTIONAL: both over-splitting and collapsing a naturally
-    # multi-part deliverable into one worker are deviations. The core must warn against
-    # under-teaming (the「组队太保守」regression), not only against over-splitting —
-    # so a refactor can't quietly revert to a single-direction「别拆碎」brake.
+    # multi-part deliverable into one worker are deviations. The always-on core keeps
+    # the forward spine; the reverse guards (don't over-split / don't under-team) moved
+    # to team_orchestration_advanced (P3) — so a refactor can't quietly revert to a
+    # single-direction「别拆碎」brake.
     hint = _CEO_CORE_HINT
     assert "独立" in hint and "并行" in hint and "专长" in hint
     assert "不是数量本身" in hint
-    assert "塌缩" in hint  # the reverse signal: don't collapse multi-part work into one
+    skill = _TEAM_ORCHESTRATION_ADVANCED
+    assert "能就不拆" in skill  # over-splitting guard
+    assert "你已确认需要多 worker" in skill  # under-teaming guard
 
 
-def test_core_teaches_same_layer_pipeline():
+def test_skill_teaches_same_layer_pipeline():
     # A multi-stage pipeline is a DAG within ONE delegate call (depends_on, same
-    # layer) — the high-frequency case stays in the core. The nesting axis
-    # (can_delegate) is advanced and moved to the team_orchestration_advanced skill.
-    hint = _CEO_CORE_HINT
-    assert "depends_on" in hint
-    assert "同一层" in hint
+    # layer) — moved to team_orchestration_advanced (P3). The nesting axis
+    # (can_delegate) lives in the same skill.
+    skill = _TEAM_ORCHESTRATION_ADVANCED
+    assert "depends_on" in skill
+    assert "同一层" in skill
 
 
 def test_core_teaches_delegating_parallel_research():
@@ -274,7 +294,7 @@ def test_core_teaches_delegating_parallel_research():
     # 「调研收归 CEO 串行」 regression seen in the law conversation). Its own retrieval
     # stays for direct answers / light orientation (探路), not the deliverable's legwork.
     hint = _CEO_CORE_HINT
-    assert "调研" in hint
+    assert "广度调查" in hint
     assert "探路" in hint
 
 
@@ -286,15 +306,15 @@ def test_core_reminds_pass_hidden_context_to_worker():
     assert "对话历史" in hint
 
 
-def test_core_teaches_constraint_vs_solution_boundary():
+def test_skill_teaches_constraint_vs_solution_boundary():
     # 认知分工边界（约束 vs 方案）: the CEO writes requirements/constraints into the
     # task, but leaves the deliverable's professional STRUCTURE (a paper's chapters /
     # argument, a codebase's architecture) to the expert worker — unless the user
-    # fixed it. Pins the fix for the「CEO 替专家把方案定死、worker 沦为填字员」regression
-    # (法律论文案例) so a refactor can't revert to a single-direction「写清约束」brake.
-    hint = _CEO_CORE_HINT
-    assert "专业方案" in hint
-    assert "填字员" in hint
+    # fixed it. Moved to team_orchestration_advanced (P3). Pins the fix for the
+    # 「CEO 替专家把方案定死、worker 沦为填字员」regression (法律论文案例).
+    skill = _TEAM_ORCHESTRATION_ADVANCED
+    assert "专业方案" in skill
+    assert "填字员" in skill
 
 
 def test_core_points_to_consult_skill_and_directory():

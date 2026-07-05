@@ -6,6 +6,7 @@ from agentcore.runtime.resolve.prompt import (
     CHAT_CITATION_HINT,
     assemble_system_prompt,
     compose_ceo_chat_prompt,
+    derive_ceo_addon,
     render_memory_topic_directory,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "_CEO_VISUALIZATION_HINT",
     "assemble_system_prompt",
     "compose_ceo_chat_prompt",
+    "derive_ceo_addon",
     "render_memory_topic_directory",
 ]

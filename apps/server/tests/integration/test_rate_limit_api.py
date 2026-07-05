@@ -13,25 +13,11 @@ re-enable it *after* registering/logging in, so only the message gate is exercis
 the auth POSTs are never throttled, and the autouse fixture restores the flag after.
 """
 
-import httpx
-
 from agentcore.config import settings
 from agentcore.core.types import new_id
 from agentcore.db.repositories import ConversationRepository
 from agentcore.middleware.rate_limit import message_rate_limiter
-
-_PW = "password123"
-
-
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> str:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
-    assert r.status_code == 200, r.text
-    return r.json()["id"]
+from tests.integration.conftest import register_and_login
 
 
 async def _make_conversation(session_factory, *, user_id: str) -> str:
@@ -50,7 +36,7 @@ def _saturate(user_id: str) -> None:
 
 async def test_send_message_blocked_when_rate_limited(client, make_invite, session_factory):
     code = await make_invite("INV-RATE")
-    user_id = await _register_and_login(client, code, "rateuser")
+    user_id = await register_and_login(client, code, "rateuser")
     conv_id = await _make_conversation(session_factory, user_id=user_id)
 
     # Re-enable rate limiting (the suite disables it globally) and saturate this
@@ -70,7 +56,7 @@ async def test_rate_limit_precedes_ownership_check(client, make_invite, session_
     # conversation it doesn't own still gets 429 (not 404), shedding load before
     # any resource-specific DB work.
     code = await make_invite("INV-RATE-OWN")
-    user_id = await _register_and_login(client, code, "rateowner")
+    user_id = await register_and_login(client, code, "rateowner")
 
     settings.rate_limit_enabled = True
     _saturate(user_id)

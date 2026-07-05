@@ -8,17 +8,7 @@ re-registration (a token belongs to exactly one user), and IDOR isolation.
 
 import httpx
 
-_PW = "password123"
-
-
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
-    assert r.status_code == 200, r.text
+from tests.integration.conftest import register_and_login
 
 
 async def _register_device(
@@ -39,7 +29,7 @@ async def test_devices_require_auth(client):
 
 async def test_register_and_list_device(client, make_invite):
     code = await make_invite("INV-DEV-1")
-    await _register_and_login(client, code, "deviceuser1")
+    await register_and_login(client, code, "deviceuser1")
 
     await _register_device(client, token="fcm-token-1", platform="android")
 
@@ -56,7 +46,7 @@ async def test_register_is_idempotent_upsert(client, make_invite):
     """Re-registering the same token (rotation / re-login) refreshes it in place,
     never duplicating — so a token is owned by exactly one row."""
     code = await make_invite("INV-DEV-2")
-    await _register_and_login(client, code, "deviceuser2")
+    await register_and_login(client, code, "deviceuser2")
 
     await _register_device(client, token="dup-token", platform="android")
     await _register_device(client, token="dup-token", platform="ios")
@@ -69,7 +59,7 @@ async def test_register_is_idempotent_upsert(client, make_invite):
 
 async def test_register_rejects_unknown_platform(client, make_invite):
     code = await make_invite("INV-DEV-3")
-    await _register_and_login(client, code, "deviceuser3")
+    await register_and_login(client, code, "deviceuser3")
 
     # ``platform`` is a closed set — a bad client can't seed an unroutable row.
     r = await client.post("/v1/devices", json={"token": "t", "platform": "blackberry"})
@@ -78,7 +68,7 @@ async def test_register_rejects_unknown_platform(client, make_invite):
 
 async def test_unregister_is_idempotent(client, make_invite):
     code = await make_invite("INV-DEV-4")
-    await _register_and_login(client, code, "deviceuser4")
+    await register_and_login(client, code, "deviceuser4")
     await _register_device(client, token="bye-token", platform="android")
 
     # First delete removes it.
@@ -96,13 +86,13 @@ async def test_token_moves_to_reregistering_user(client, make_invite, new_client
     another account REASSIGNS the token, so a stale owner can never receive the new
     user's pushes (db/repositories/devices.py upsert contract)."""
     code_a = await make_invite("INV-DEV-5A")
-    await _register_and_login(client, code_a, "deviceowner")
+    await register_and_login(client, code_a, "deviceowner")
     await _register_device(client, token="shared-device", platform="android")
     assert (await client.get("/v1/devices")).json()["total"] == 1
 
     code_b = await make_invite("INV-DEV-5B")
     async with new_client() as other:
-        await _register_and_login(other, code_b, "deviceclaimer")
+        await register_and_login(other, code_b, "deviceclaimer")
         await _register_device(other, token="shared-device", platform="ios")
         # The token now belongs to B.
         b_body = (await other.get("/v1/devices")).json()
@@ -115,12 +105,12 @@ async def test_token_moves_to_reregistering_user(client, make_invite, new_client
 
 async def test_device_isolation_between_users(client, make_invite, new_client):
     code_a = await make_invite("INV-DEV-6A")
-    await _register_and_login(client, code_a, "deviceowner2")
+    await register_and_login(client, code_a, "deviceowner2")
     await _register_device(client, token="owner-token", platform="android")
 
     code_b = await make_invite("INV-DEV-6B")
     async with new_client() as other:
-        await _register_and_login(other, code_b, "intruder2")
+        await register_and_login(other, code_b, "intruder2")
         # B sees only its own (empty) device list, never A's.
         assert (await other.get("/v1/devices")).json()["data"] == []
         # B cannot evict A's device — delete is owner-scoped (idempotent ok, no-op).

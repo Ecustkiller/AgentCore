@@ -31,7 +31,7 @@ export const MessageBubble = memo(function MessageBubble({
   return (
     <div
       ref={ref}
-      className={`scroll-mt-6 rounded-xl transition-shadow ${
+      className={`scroll-mt-6 rounded-xl transition-shadow animate-message-enter motion-reduce:animate-none ${
         flash ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
       }`}
     >

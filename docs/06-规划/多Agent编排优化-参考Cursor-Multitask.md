@@ -2,7 +2,7 @@
 
 > **定位**：参考 Cursor Multitask 的六个增量优化方向（轻量路由、Worker 三档自主度、抑制过度拆分等）。未定稿。
 >
-> **治理**：本目录仅 `07-规划`；🗂️ = 讨论中、未承诺落地。决策通过、开始落地后迁入 [编排器与 CEO 主 Agent](/docs/03-AI核心/编排器与CEO主Agent.md) 与 [Agent 协作模式](/docs/03-AI核心/Agent协作模式.md)，本条退役。
+> **治理**：本目录仅 `06-规划`；🗂️ = 讨论中、未承诺落地。决策通过、开始落地后迁入 [编排器与 CEO 主 Agent](/docs/03-AI核心/编排器与CEO主Agent.md) 与 [Agent 协作模式](/docs/03-AI核心/Agent协作模式.md)，本条退役。
 >
 > **前提**：「CEO 主 Agent + delegate DAG + WaveScheduler」核心架构不变；本文是既有框架内的增量优化，不是重设计。
 
@@ -56,15 +56,14 @@ CEO 的「自己做 vs 委派」决策完全靠 prompt 引导。已知问题：
 - **明确独立的顶层工作流** → 并行 worker
 - 判据写在系统逻辑里，不全靠模型遵守
 
-### 目标设计：三档路由策略
+### 目标设计：两档路由策略
 
 在 CEO 的思考循环中引入**结构化路由信号**（不靠额外 LLM 调用、也不只靠散文式提示），帮助 CEO 做出更高效的委派决策：
 
 | 档位 | 信号特征 | 推荐行为 | CEO 动作 |
 |---|---|---|---|
 | **直答** | 用户请求无产出物、无成规模调查、CEO 已有足够信息 | 直接流式回答 | 正常 ReAct |
-| **轻委派** | 有产出物但结构简单（单文件/单模块/单方向调查） | 单 worker，`finalize=true`，minimal spec | `delegate(tasks=[单任务])` |
-| **精编排** | 多方向/多依赖/需要 DAG 结构 | 完整 DAG 规划 | 完整 `delegate(tasks=[...])` |
+| **委派** | 有实质产出、需变更、广度调查、多角度对比 | 单 worker 则 `finalize=true`、minimal spec；多方向 / 多依赖 / DAG 则先 `consult_skill` 再完整规划 | `delegate(tasks=[...])` |
 
 **实现方式**：不是在 CEO 外加分类器（已被否决），而是在 CEO prompt 中将路由判据从散文升级为**结构化决策树 + 示例**，并在 `delegate` 工具的 schema 中增加 `complexity_hint`（`light`/`standard`/`complex`）让模型显式声明——引擎据此裁剪不必要的规划开销：
 
@@ -89,7 +88,7 @@ complexity_hint = "light" 时：
 | `tools/builtin/delegate/tool.py` | schema 加 `complexity_hint` 枚举字段 |
 | `tools/builtin/delegate/drive.py` | 据 `complexity_hint` 裁剪 playbook 匹配、便签墙初始化 |
 | `runtime/resolve/prompt.py` | CEO 路由判据从散文升级为决策树 |
-| `runtime/skills.py` | `team_orchestration_advanced` 补充轻委派指引 |
+| `runtime/skills.py` | `team_orchestration_advanced` 补充委派内单 worker vs DAG 指引 |
 
 ---
 
@@ -405,7 +404,7 @@ delegate 完成 → CEO 收尾续轮时：
 
 | 优化项 | 具体内容 | 预期收益 | 风险 |
 |---|---|---|---|
-| 优化一·Schema 层 | `complexity_hint` 字段 + 轻委派裁剪 | finalize 路径开销降 30%+ | 中（新字段，需测试） |
+| 优化一·Schema 层 | `complexity_hint` 字段 + 委派单 worker 路径裁剪 | finalize 路径开销降 30%+ | 中（新字段，需测试） |
 | 优化四·Phase 1 | finalize 单 worker 早释放 | CEO 等待时间降低 | 中（执行路径改动） |
 | 优化六 | 委派后工具降级 | 减少 CEO 重复调查 | 中（需验证不误伤合法收尾） |
 

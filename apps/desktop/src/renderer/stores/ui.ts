@@ -1,6 +1,5 @@
 import { create } from "zustand";
 
-const USAGE_DETAIL_KEY = "agentcore:usage-detail";
 const DIAGNOSTIC_MODE_KEY = "agentcore:diagnostic-mode";
 const THEME_KEY = "agentcore:theme";
 const SIDECAR_KEY = "agentcore:sidecar-enabled";
@@ -8,30 +7,8 @@ const CONVERSATION_VIEWS_KEY = "agentcore:conversation-views";
 
 type Theme = "light" | "dark" | "system";
 
-// localStorage is wrapped: it throws in private-mode / non-DOM (test) contexts.
-// A failed read falls back to 大众 (false); a failed write keeps the value in
-// memory for the session.
-function loadUsageDetail(): boolean {
-  try {
-    return localStorage.getItem(USAGE_DETAIL_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
-
-function persistUsageDetail(v: boolean): void {
-  try {
-    localStorage.setItem(USAGE_DETAIL_KEY, String(v));
-  } catch {
-    /* unavailable — session-only */
-  }
-}
-
-// 开发者 / 诊断模式 (前端UX设计.md §十): a SEPARATE gate from usageDetail.
-// usageDetail reveals 大众-facing 用量明细 (token / cache detail); diagnosticMode
-// surfaces dev-only low-level execution facts (run / trace ids) that are noise—or
-// confusing—for a normal user, so it gets its own toggle, off by default. Same
-// localStorage wrapper (private-mode / non-DOM test safe) as usageDetail.
+// 开发者 / 诊断模式 (前端UX设计.md §十): off by default. Same localStorage wrapper
+// (private-mode / non-DOM test safe).
 function loadDiagnosticMode(): boolean {
   try {
     return localStorage.getItem(DIAGNOSTIC_MODE_KEY) === "true";
@@ -49,8 +26,8 @@ function persistDiagnosticMode(v: boolean): void {
 }
 
 // 每对话的视图偏好（聊天 ⇄ 画布，前端UX设计.md §六）。只存「切到画布」的对话——聊天是
-// 默认、不落键，故这张表恒收敛在用户偏好画布的那批对话上（守原「不无限增长」约束）。同 usageDetail
-// 的 localStorage 包裹（私密模式 / 非 DOM 测试环境抛错时回退空表、退化为会话内存态）。
+// 默认、不落键，故这张表恒收敛在用户偏好画布的那批对话上（守原「不无限增长」约束）。
+// localStorage 包裹：私密模式 / 非 DOM 测试环境抛错时回退空表、退化为会话内存态。
 function loadConversationViews(): Record<string, "chat" | "canvas"> {
   try {
     const raw = localStorage.getItem(CONVERSATION_VIEWS_KEY);
@@ -145,15 +122,10 @@ interface UIState {
   /** Prefill for the next palette open; consumed on open. */
   searchInitialQuery: string;
   theme: Theme;
-  /** 大众/power 用量明细开关 (§7.1). When true, compact surfaces reveal raw
-   * token / cache detail and run-detail「资源消耗」defaults to expanded. Money (¥)
-   * is never gated by this — it stays visible in both modes (§7.1). Persisted to
-   * `localStorage: agentcore:usage-detail`. */
-  usageDetail: boolean;
   /** 开发者 / 诊断模式 (前端UX设计.md §十). When true, low-level execution
    * diagnostics (run / trace ids 等) surface in run detail + the bubble's trace-id
-   * action — dev-only noise kept off the 大众 path. Independent of `usageDetail`
-   * (用量明细 for power users). Persisted to `localStorage: agentcore:diagnostic-mode`. */
+   * action — dev-only noise kept off the 大众 path. Persisted to
+   * `localStorage: agentcore:diagnostic-mode`. */
   diagnosticMode: boolean;
   /** 每对话的视图模式（聊天 ⇄ 画布双视图，前端UX设计.md §六）。默认聊天（`"chat"`），
    * 用户可在对话顶栏切到画布（`"canvas"`）。画布已毕业（无实验开关），入口恒显示。
@@ -193,8 +165,6 @@ interface UIState {
   closeSearch: () => void;
   toggleSearch: () => void;
   setTheme: (theme: UIState["theme"]) => void;
-  setUsageDetail: (v: boolean) => void;
-  toggleUsageDetail: () => void;
   setDiagnosticMode: (v: boolean) => void;
   toggleDiagnosticMode: () => void;
   setConversationView: (
@@ -220,7 +190,6 @@ export const useUIStore = create<UIState>((set) => ({
   searchOpen: false,
   searchInitialQuery: "",
   theme: loadTheme(),
-  usageDetail: loadUsageDetail(),
   diagnosticMode: loadDiagnosticMode(),
   conversationViews: loadConversationViews(),
   pendingCanvasFocus: null,
@@ -236,16 +205,6 @@ export const useUIStore = create<UIState>((set) => ({
     persistTheme(theme);
     set({ theme });
   },
-  setUsageDetail: (usageDetail) => {
-    persistUsageDetail(usageDetail);
-    set({ usageDetail });
-  },
-  toggleUsageDetail: () =>
-    set((s) => {
-      const usageDetail = !s.usageDetail;
-      persistUsageDetail(usageDetail);
-      return { usageDetail };
-    }),
   setDiagnosticMode: (diagnosticMode) => {
     persistDiagnosticMode(diagnosticMode);
     set({ diagnosticMode });

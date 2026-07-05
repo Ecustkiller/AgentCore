@@ -2,7 +2,7 @@
 
 Every place that needs a cost calls :func:`calculate_cost` — there is no other
 price table and no per-site arithmetic. Prices are USD per 1M tokens: DeepSeek from
-``docs/06-参考/DeepSeek-V4-API参考.md`` §三 (authoritative); third-party vendors
+``docs/03-AI核心/DeepSeek-V4-API参考.md`` §三 (authoritative); third-party vendors
 (豆包/方舟) from the vendor's published CNY rate converted at ``CNY_PER_USD`` (see the
 table comments). Per-input-length tiers + FX-from-config are the Phase 2 定价表 item.
 
@@ -41,7 +41,7 @@ DOUBAO_SEED_TURBO = "doubao/doubao-seed-2-1-turbo-260628"
 # a logged warning until added — same posture as any unpriced model.
 QWEN_VL_MAX = "qwen-vl-max"
 
-# USD per 1M tokens. DeepSeek: docs/06-参考/DeepSeek-V4-API参考.md §三 (authoritative);
+# USD per 1M tokens. DeepSeek: docs/03-AI核心/DeepSeek-V4-API参考.md §三 (authoritative);
 # cache_hit is ~50× cheaper than cache_miss — splitting input by hit/miss is what keeps
 # the bill honest on multi-turn chats (DeepSeek prefix caching).
 _PRICING: dict[str, dict[str, Decimal]] = {

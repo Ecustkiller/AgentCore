@@ -9,7 +9,6 @@ selection. The LLM provider is stubbed so no real DeepSeek call is made, and the
 over-quota spend is seeded straight into the ledger.
 """
 
-import httpx
 import pytest
 
 from agentcore.config import settings
@@ -20,24 +19,13 @@ from agentcore.db.repositories import (
 )
 from agentcore.llm import LLMResponse
 from agentcore.llm.key_service import LlmKeyService
+from tests.integration.conftest import register_and_login
 
-_PW = "password123"
 _MASTER_KEY = "a" * 64
 _OVER_MONTHLY_NANO = 6_000_000_000  # above the default $5 monthly cap
 _REWRITE_PATH = "/v1/files/assist/rewrite"
 _VALID_BODY = {"selection": "今天天气不错", "instruction": "改得更正式"}
 _REWRITTEN = "改写后的文本"
-
-
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> str:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
-    assert r.status_code == 200, r.text
-    return r.json()["id"]
 
 
 async def _make_conversation(session_factory, *, user_id: str) -> str:
@@ -129,7 +117,7 @@ async def test_rewrite_requires_auth(client):
 
 async def test_rewrite_refused_without_byok_key(client, make_invite, byok):
     code = await make_invite("INV-RW-NOKEY")
-    await _register_and_login(client, code, "rwuser1")
+    await register_and_login(client, code, "rwuser1")
 
     r = await client.post(_REWRITE_PATH, json=_VALID_BODY)
     assert r.status_code == 402, r.text
@@ -140,7 +128,7 @@ async def test_rewrite_with_byok_key_returns_rewritten(
     client, make_invite, session_factory, byok, stub_provider
 ):
     code = await make_invite("INV-RW-KEY")
-    user_id = await _register_and_login(client, code, "rwuser2")
+    user_id = await register_and_login(client, code, "rwuser2")
     await _store_key(session_factory, user_id=user_id, api_key="sk-byok-rw-1234")
 
     r = await client.post(_REWRITE_PATH, json=_VALID_BODY)
@@ -155,7 +143,7 @@ async def test_rewrite_blocked_when_over_quota_platform(
     client, make_invite, session_factory, platform
 ):
     code = await make_invite("INV-RW-QUOTA")
-    user_id = await _register_and_login(client, code, "rwuser3")
+    user_id = await register_and_login(client, code, "rwuser3")
     conv_id = await _make_conversation(session_factory, user_id=user_id)
     await _seed_spend(
         session_factory, user_id=user_id, conversation_id=conv_id, total=_OVER_MONTHLY_NANO
@@ -170,7 +158,7 @@ async def test_rewrite_under_quota_platform_returns_rewritten(
     client, make_invite, platform, stub_provider
 ):
     code = await make_invite("INV-RW-OK")
-    await _register_and_login(client, code, "rwuser4")
+    await register_and_login(client, code, "rwuser4")
 
     r = await client.post(_REWRITE_PATH, json=_VALID_BODY)
     assert r.status_code == 200, r.text
@@ -182,7 +170,7 @@ async def test_rewrite_under_quota_platform_returns_rewritten(
 
 async def test_rewrite_rejects_empty_selection(client, make_invite, platform):
     code = await make_invite("INV-RW-EMPTY")
-    await _register_and_login(client, code, "rwuser5")
+    await register_and_login(client, code, "rwuser5")
 
     r = await client.post(_REWRITE_PATH, json={"selection": "", "instruction": "改"})
     assert r.status_code == 422, r.text

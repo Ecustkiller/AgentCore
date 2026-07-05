@@ -121,6 +121,13 @@ class LocalWorkspace:
         self._dirty = True
         return int(value)
 
+    async def append(self, path: str, content: str) -> int:
+        value = await self._channel.request(
+            WorkspaceOp.APPEND, {"path": self._in(path), "content": content}
+        )
+        self._dirty = True
+        return int(value)
+
     async def read_bytes(self, path: str) -> bytes:
         # The desktop returns base64 (JSON has no byte type); decode back to raw.
         value = await self._channel.request(WorkspaceOp.READ_BYTES, {"path": self._in(path)})

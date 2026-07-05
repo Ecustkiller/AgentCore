@@ -11,7 +11,6 @@ is made: the /test route's provider is monkeypatched, and "skips quota" is
 asserted against the preflight gate directly rather than by opening a stream.
 """
 
-import httpx
 import pytest
 
 from agentcore.api.routes.conversations import _preflight_turn_llm
@@ -24,21 +23,10 @@ from agentcore.db.repositories import (
     UserRepository,
 )
 from agentcore.llm.key_service import LlmKeyService
+from tests.integration.conftest import register_and_login
 
-_PW = "password123"
 _MASTER_KEY = "a" * 64
 _OVER_MONTHLY_NANO = 6_000_000_000  # above the default $5 monthly cap
-
-
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> str:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
-    assert r.status_code == 200, r.text
-    return r.json()["id"]
 
 
 async def _make_conversation(session_factory, *, user_id: str) -> str:
@@ -100,7 +88,7 @@ async def test_llm_key_routes_require_auth(client):
 
 async def test_get_status_unconfigured(client, make_invite, byok):
     code = await make_invite("INV-KEY-UNCONF")
-    await _register_and_login(client, code, "keyuser1")
+    await register_and_login(client, code, "keyuser1")
 
     body = (await client.get("/v1/users/me/llm-key")).json()
     assert body["configured"] is False
@@ -110,7 +98,7 @@ async def test_get_status_unconfigured(client, make_invite, byok):
 
 async def test_set_key_stores_and_masks(client, make_invite, byok):
     code = await make_invite("INV-KEY-SET")
-    await _register_and_login(client, code, "keyuser2")
+    await register_and_login(client, code, "keyuser2")
 
     r = await client.put("/v1/users/me/llm-key", json={"api_key": "sk-deepseek-abcd1234"})
     assert r.status_code == 200, r.text
@@ -129,7 +117,7 @@ async def test_set_key_refused_without_master_key(client, make_invite, monkeypat
     monkeypatch.setattr(settings, "billing_mode", "byok")
     monkeypatch.setattr(settings, "encryption_key", "")  # no master key → can't store
     code = await make_invite("INV-KEY-NOMASTER")
-    await _register_and_login(client, code, "keyuser3")
+    await register_and_login(client, code, "keyuser3")
 
     r = await client.put("/v1/users/me/llm-key", json={"api_key": "sk-x"})
     assert r.status_code == 503, r.text
@@ -138,7 +126,7 @@ async def test_set_key_refused_without_master_key(client, make_invite, monkeypat
 
 async def test_delete_key_clears_it(client, make_invite, byok):
     code = await make_invite("INV-KEY-DEL")
-    await _register_and_login(client, code, "keyuser4")
+    await register_and_login(client, code, "keyuser4")
     await client.put("/v1/users/me/llm-key", json={"api_key": "sk-to-delete-9999"})
 
     r = await client.delete("/v1/users/me/llm-key")
@@ -166,7 +154,7 @@ class _FakeProvider:
 
 async def test_test_key_active_on_probe_success(client, make_invite, byok, monkeypatch):
     code = await make_invite("INV-KEY-TESTOK")
-    await _register_and_login(client, code, "keyuser5")
+    await register_and_login(client, code, "keyuser5")
     await client.put("/v1/users/me/llm-key", json={"api_key": "sk-good-key-4242"})
     monkeypatch.setattr(
         "agentcore.llm.key_service.build_provider", lambda creds: _FakeProvider(fail=False)
@@ -182,7 +170,7 @@ async def test_test_key_active_on_probe_success(client, make_invite, byok, monke
 
 async def test_test_key_error_on_probe_failure(client, make_invite, byok, monkeypatch):
     code = await make_invite("INV-KEY-TESTERR")
-    await _register_and_login(client, code, "keyuser6")
+    await register_and_login(client, code, "keyuser6")
     await client.put("/v1/users/me/llm-key", json={"api_key": "sk-bad-key-0000"})
     monkeypatch.setattr(
         "agentcore.llm.key_service.build_provider", lambda creds: _FakeProvider(fail=True)
@@ -199,7 +187,7 @@ async def test_test_key_error_on_probe_failure(client, make_invite, byok, monkey
 
 async def test_test_key_without_key_returns_402(client, make_invite, byok):
     code = await make_invite("INV-KEY-TESTNONE")
-    await _register_and_login(client, code, "keyuser7")
+    await register_and_login(client, code, "keyuser7")
 
     r = await client.post("/v1/users/me/llm-key/test")
     assert r.status_code == 402, r.text
@@ -211,7 +199,7 @@ async def test_test_key_without_key_returns_402(client, make_invite, byok):
 
 async def test_send_message_refused_without_byok_key(client, make_invite, session_factory, byok):
     code = await make_invite("INV-KEY-PREFLIGHT")
-    user_id = await _register_and_login(client, code, "keyuser8")
+    user_id = await register_and_login(client, code, "keyuser8")
     conv_id = await _make_conversation(session_factory, user_id=user_id)
 
     r = await client.post(f"/v1/conversations/{conv_id}/messages", json={"content": "hi"})
@@ -225,7 +213,7 @@ async def test_preflight_byok_skips_quota_when_key_present(
     # BYOK turn runs on the user's own key, so the platform quota gate is dormant:
     # even over the platform cap, the keyed preflight returns credentials (no 429).
     code = await make_invite("INV-KEY-SKIPQ")
-    user_id = await _register_and_login(client, code, "keyuser9")
+    user_id = await register_and_login(client, code, "keyuser9")
     conv_id = await _make_conversation(session_factory, user_id=user_id)
     await _seed_spend(
         session_factory, user_id=user_id, conversation_id=conv_id, total=_OVER_MONTHLY_NANO
@@ -245,7 +233,7 @@ async def test_preflight_platform_enforces_quota(client, make_invite, session_fa
     # Same over-quota ledger, but platform billing → the quota gate fires.
     monkeypatch.setattr(settings, "billing_mode", "platform")
     code = await make_invite("INV-KEY-PLATQ")
-    user_id = await _register_and_login(client, code, "keyuser10")
+    user_id = await register_and_login(client, code, "keyuser10")
     conv_id = await _make_conversation(session_factory, user_id=user_id)
     await _seed_spend(
         session_factory, user_id=user_id, conversation_id=conv_id, total=_OVER_MONTHLY_NANO

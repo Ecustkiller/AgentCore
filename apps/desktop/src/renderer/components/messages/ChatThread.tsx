@@ -1,5 +1,6 @@
-import { IconButton } from "@/components/ui";
+import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { buildImThreadItems } from "@/lib/imMessageLayout";
 import { useStickToBottom } from "@/lib/useStickToBottom";
 import { useAuthStore } from "@/stores/auth";
 import {
@@ -12,6 +13,7 @@ import { ArrowDown, Info } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ChatBubble } from "./ChatBubble";
 import { ChatComposer } from "./ChatComposer";
+import { ChatDateDivider } from "./ChatDateDivider";
 import { GroupInfoDialog } from "./GroupInfoDialog";
 import { avatarInitial, chatDisplayName } from "./chatDisplay";
 
@@ -25,8 +27,16 @@ export function ChatThread({ chatId }: Props) {
   const messages = useActiveMessages();
   const members = useChatMembers(chatId);
   const loading = useMessagingStore((s) => s.loadingMessages[chatId] ?? false);
+  const loadingOlder = useMessagingStore(
+    (s) => s.loadingOlderMessages[chatId] ?? false,
+  );
+  const hasMoreOlder = useMessagingStore(
+    (s) => s.messagesMetaByChat[chatId]?.hasMoreOlder ?? false,
+  );
   const loadMembers = useMessagingStore((s) => s.loadMembers);
-  const myId = useAuthStore((s) => s.user?.id ?? null);
+  const loadOlderMessages = useMessagingStore((s) => s.loadOlderMessages);
+  const user = useAuthStore((s) => s.user);
+  const myId = user?.id ?? null;
 
   const isGroup = chat?.type === "group";
   const [infoOpen, setInfoOpen] = useState(false);
@@ -43,6 +53,11 @@ export function ChatThread({ chatId }: Props) {
     return map;
   }, [members]);
 
+  const threadItems = useMemo(
+    () => buildImThreadItems(messages),
+    [messages],
+  );
+
   const last = messages[messages.length - 1];
   const contentKey = last ? `${last.id}-${messages.length}` : "";
   const { scrollRef, atBottom, jumpToBottom } = useStickToBottom(
@@ -56,6 +71,18 @@ export function ChatThread({ chatId }: Props) {
   // viewer.state === pending means someone opened this dm with us and we have
   // not replied yet — a message request (replying accepts it, 消息IM.md §五).
   const isRequest = chat?.state === "pending";
+
+  async function handleLoadOlder() {
+    const el = scrollRef.current;
+    const prevHeight = el?.scrollHeight ?? 0;
+    const prevTop = el?.scrollTop ?? 0;
+    await loadOlderMessages(chatId);
+    requestAnimationFrame(() => {
+      const container = scrollRef.current;
+      if (!container) return;
+      container.scrollTop = container.scrollHeight - prevHeight + prevTop;
+    });
+  }
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -97,19 +124,51 @@ export function ChatThread({ chatId }: Props) {
         <div ref={scrollRef} className="h-full overflow-y-auto">
           {hasMessages ? (
             <div className="flex flex-col gap-2 px-4 py-4">
-              {messages.map((m) => {
-                const mine =
-                  m.sender_user_id != null && m.sender_user_id === myId;
+              {hasMoreOlder && (
+                <div className="flex justify-center pb-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={loadingOlder}
+                    onClick={() => void handleLoadOlder()}
+                    className="text-xs text-muted-foreground"
+                  >
+                    {loadingOlder ? "加载中…" : "加载更早消息"}
+                  </Button>
+                </div>
+              )}
+              {threadItems.map((item) => {
+                if (item.type === "date_divider") {
+                  return (
+                    <ChatDateDivider key={item.key} label={item.label} />
+                  );
+                }
+                const m = item.message;
+                const mine = !!myId && m.sender_user_id === myId;
+                const peerName = name || "成员";
                 const senderName =
                   isGroup && !mine && m.sender_user_id
                     ? (nameById.get(m.sender_user_id) ?? "成员")
                     : undefined;
+                const avatarName = mine
+                  ? user?.displayName || user?.username || "?"
+                  : isGroup
+                    ? (senderName ?? "成员")
+                    : peerName;
+                const senderAvatarUrl = mine
+                  ? (user?.avatarUrl ?? null)
+                  : !isGroup
+                    ? (chat?.avatar_url ?? null)
+                    : null;
                 return (
                   <ChatBubble
-                    key={m.id}
+                    key={item.key}
                     message={m}
                     mine={mine}
                     senderName={senderName}
+                    avatarName={avatarName}
+                    senderAvatarUrl={senderAvatarUrl}
+                    layout={item.layout}
                   />
                 );
               })}

@@ -11,18 +11,7 @@ offsets, and owner-scoping (a non-owner's data never appears — IDOR-safe).
 import httpx
 
 from agentcore.db.repositories import MessageRepository
-
-_PW = "password123"
-
-
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
-    assert r.status_code == 200, r.text
+from tests.integration.conftest import register_and_login
 
 
 async def _new_conversation(client: httpx.AsyncClient, title: str) -> str:
@@ -48,14 +37,14 @@ async def test_search_requires_auth(client):
 
 async def test_search_requires_query(client, make_invite):
     code = await make_invite("INV-SR-Q")
-    await _register_and_login(client, code, "searchuser_q")
+    await register_and_login(client, code, "searchuser_q")
     # ``q`` is required (min_length=1) — a logged-in caller with no query is a 422.
     assert (await client.get("/v1/search")).status_code == 422
 
 
 async def test_search_fans_out_over_all_entity_types(client, make_invite, session_factory):
     code = await make_invite("INV-SR-1")
-    await _register_and_login(client, code, "searchuser1")
+    await register_and_login(client, code, "searchuser1")
 
     conv = await _new_conversation(client, "Deploy checklist")
     await _seed_message(session_factory, conv, "remember to deploy on friday")
@@ -76,7 +65,7 @@ async def test_search_message_snippet_carries_highlight_offsets(
     client, make_invite, session_factory
 ):
     code = await make_invite("INV-SR-2")
-    await _register_and_login(client, code, "searchuser2")
+    await register_and_login(client, code, "searchuser2")
     conv = await _new_conversation(client, "ctx")
     await _seed_message(session_factory, conv, "the DEPLOYMENT pipeline needs review")
 
@@ -92,7 +81,7 @@ async def test_search_message_snippet_carries_highlight_offsets(
 
 async def test_search_types_filter_narrows_sections(client, make_invite, session_factory):
     code = await make_invite("INV-SR-3")
-    await _register_and_login(client, code, "searchuser3")
+    await register_and_login(client, code, "searchuser3")
     conv = await _new_conversation(client, "alpha conversation")
     await _seed_message(session_factory, conv, "alpha message body")
     await client.post("/v1/folders", json={"name": "alpha folder"})
@@ -105,7 +94,7 @@ async def test_search_types_filter_narrows_sections(client, make_invite, session
 
 async def test_search_omits_empty_sections(client, make_invite):
     code = await make_invite("INV-SR-4")
-    await _register_and_login(client, code, "searchuser4")
+    await register_and_login(client, code, "searchuser4")
     await _new_conversation(client, "nothing relevant here")
 
     body = (await client.get("/v1/search", params={"q": "zzz-no-such-term"})).json()
@@ -114,7 +103,7 @@ async def test_search_omits_empty_sections(client, make_invite):
 
 async def test_search_limit_caps_each_section(client, make_invite):
     code = await make_invite("INV-SR-5")
-    await _register_and_login(client, code, "searchuser5")
+    await register_and_login(client, code, "searchuser5")
     for i in range(3):
         await _new_conversation(client, f"capme {i}")
 
@@ -125,14 +114,14 @@ async def test_search_limit_caps_each_section(client, make_invite):
 async def test_search_is_owner_scoped(client, make_invite, new_client, session_factory):
     """A user's search never surfaces another user's conversations/messages/folders."""
     code_a = await make_invite("INV-SR-6A")
-    await _register_and_login(client, code_a, "searchowner")
+    await register_and_login(client, code_a, "searchowner")
     conv = await _new_conversation(client, "confidential roadmap")
     await _seed_message(session_factory, conv, "confidential launch date")
     await client.post("/v1/folders", json={"name": "confidential folder"})
 
     code_b = await make_invite("INV-SR-6B")
     async with new_client() as other:
-        await _register_and_login(other, code_b, "searchintruder")
+        await register_and_login(other, code_b, "searchintruder")
         # Intruder querying the owner's keyword gets nothing.
         body = (await other.get("/v1/search", params={"q": "confidential"})).json()
         assert body["sections"] == []

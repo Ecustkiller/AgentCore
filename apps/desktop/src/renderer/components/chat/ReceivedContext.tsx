@@ -50,23 +50,18 @@ const FIDELITY_META: Record<string, string> = {
  * 收到的上下文 (上下文传递可视化) — the structured context a run was actually fed at
  * assembly time (its `run_context` blocks), so the user sees exactly what the LLM read.
  * Worker 侧 (run detail): 原始请求 / 团队位置 / 上游产物 / 工作区 / 任务…; CEO 侧 (chat bubble):
- * 系统提示 / 对话历史 / 原始请求. Collapsible like the resource ledger; opens by default in
- * power mode (用量明细 on). Each block shows its channel origin; a dependency block also
- * surfaces its provenance (来源 / 保真度 / 是否截断).
- *
- * 决策②: the `system` block (the verbatim CEO system prompt) is HIDDEN unless power mode —
- * it's long boilerplate the casual reader doesn't want, but the 用量明细 user can reveal.
+ * 系统提示 / 对话历史 / 原始请求. Collapsible like the resource ledger; opens by default.
+ * Each block shows its channel origin; a dependency block also surfaces its provenance
+ * (来源 / 保真度 / 是否截断). The `system` block (verbatim CEO system prompt) is included.
  */
 export function ReceivedContextSection({
   blocks,
   defaultExpanded,
-  powerMode,
   onNavigate,
   keyBase,
 }: {
   blocks: ContextBlockWire[];
   defaultExpanded: boolean;
-  powerMode: boolean;
   /** 溯源可点击 (图↔上下文闭环): drill into the run a block came FROM — a dependency's upstream
    * author or a debate opponent's node. Given `source_run_id`; omit (CEO bubble) to keep
    * provenance read-only. The caller (run detail) guards that the target exists on this graph. */
@@ -79,10 +74,7 @@ export function ReceivedContextSection({
     keyBase ? `${keyBase}:ctx` : null,
     defaultExpanded,
   );
-  // 决策②: gate the system-prompt block behind power mode (it's verbatim boilerplate).
-  const visible = powerMode
-    ? blocks
-    : blocks.filter((b) => b.channel !== "system");
+  const visible = blocks;
   if (visible.length === 0) return null;
   return (
     <section className="mb-4 last:mb-0">
@@ -115,7 +107,7 @@ export function ReceivedContextSection({
             <ContextBlockCard
               key={`${b.channel}-${i}`}
               block={b}
-              defaultOpen={powerMode}
+              defaultOpen
               onNavigate={onNavigate}
               sceneKey={
                 keyBase ? `${keyBase}:ctxblk:${b.channel}-${i}` : undefined

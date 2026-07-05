@@ -135,6 +135,7 @@ async def stream_llm_round(
         messages=request.messages,
         content=content,
         reasoning=reasoning,
+        tool_names=[tc.function.name for tc in tool_calls] if tool_calls else None,
     )
 
     return content, reasoning, tool_calls, usage

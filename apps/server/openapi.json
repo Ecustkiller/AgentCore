@@ -1688,10 +1688,14 @@
         "type": "object"
       },
       "CapabilityGuidelines": {
-        "description": "The system-prompt TEMPLATE the agents follow (静态 蓝图; the per-turn verbatim\nprompt is served separately, see the message prompt endpoint).\n\n``shared_base`` is the base every agent (CEO + workers) shares (identity, output\nstyle, tool-use, safety); ``ceo`` is the CEO coordinator's full chat system-prompt\ntemplate (shared base + CEO routing core + 能力目录 + citation guidance), composed by\nthe SAME ``compose_ceo_chat_prompt`` the live turn uses, so it never drifts.",
+        "description": "The system-prompt TEMPLATE the agents follow (静态 蓝图; the per-turn verbatim\nprompt is served separately, see the message prompt endpoint).\n\n``shared_base`` is the base every agent (CEO + workers) shares (identity, output\nstyle, tool-use, safety); ``ceo_addon`` is the CEO coordinator's layers on top of\nthat base (routing core + 能力目录 + citation guidance); ``ceo`` is the full chat\nsystem-prompt template (shared base + ceo_addon), composed by the SAME\n``compose_ceo_chat_prompt`` the live turn uses, so it never drifts.",
         "properties": {
           "ceo": {
             "title": "Ceo",
+            "type": "string"
+          },
+          "ceo_addon": {
+            "title": "Ceo Addon",
             "type": "string"
           },
           "shared_base": {
@@ -1701,6 +1705,7 @@
         },
         "required": [
           "shared_base",
+          "ceo_addon",
           "ceo"
         ],
         "title": "CapabilityGuidelines",

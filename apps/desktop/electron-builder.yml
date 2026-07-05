@@ -56,7 +56,7 @@ nsis:
 
 mac:
   # dmg = 首装下载；zip = electron-updater 拉取（latest-mac.yml）。
-  # 内测未签名：首装需右键打开；自动更新安装可能再次遇 Gatekeeper（见 07-规划 Mac 部署设计）。
+  # 内测未签名：首装需右键打开；自动更新安装可能再次遇 Gatekeeper（见 06-规划 Mac 部署设计）。
   target:
     - dmg
     - zip

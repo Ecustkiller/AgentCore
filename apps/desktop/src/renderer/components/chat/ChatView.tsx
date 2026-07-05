@@ -25,6 +25,7 @@ import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
 import { ResumePrompt } from "./ResumePrompt";
 import { RetryBanner } from "./RetryBanner";
+import { StreamingIndicator } from "./StreamingIndicator";
 
 export function ChatView() {
   const messages = useActiveMessages();
@@ -165,6 +166,7 @@ export function ChatView() {
         <ApprovalPrompt />
         <RetryBanner />
         <FollowupChips followups={followups} />
+        <StreamingIndicator />
         <MessageInput />
       </div>
     </div>

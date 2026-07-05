@@ -11,18 +11,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 
 from agentcore.db.models import Message
-
-_PW = "password123"
-
-
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
-    assert r.status_code == 200, r.text
+from tests.integration.conftest import TEST_PASSWORD, register_and_login
 
 
 async def _new_conversation(client: httpx.AsyncClient, title: str) -> str:
@@ -48,7 +37,7 @@ async def _seed_messages(session_factory, conversation_id: str, turns) -> None:
 
 async def test_create_list_view_revoke(client, new_client, make_invite, session_factory):
     code = await make_invite("INV-SH-1")
-    await _register_and_login(client, code, "sh1")
+    await register_and_login(client, code, "sh1")
     conv_id = await _new_conversation(client, "分享测试")
     await _seed_messages(session_factory, conv_id, [("user", "问题甲"), ("assistant", "回答乙")])
 
@@ -83,7 +72,7 @@ async def test_create_list_view_revoke(client, new_client, make_invite, session_
 
 async def test_revoke_is_not_repeatable(client, make_invite, session_factory):
     code = await make_invite("INV-SH-2")
-    await _register_and_login(client, code, "sh2")
+    await register_and_login(client, code, "sh2")
     conv_id = await _new_conversation(client, "x")
     await _seed_messages(session_factory, conv_id, [("user", "q")])
     share = (await client.post(f"/v1/conversations/{conv_id}/shares")).json()
@@ -100,7 +89,7 @@ async def test_snapshot_is_frozen_against_later_messages(
     client, new_client, make_invite, session_factory
 ):
     code = await make_invite("INV-SH-3")
-    await _register_and_login(client, code, "sh3")
+    await register_and_login(client, code, "sh3")
     conv_id = await _new_conversation(client, "冻结")
     await _seed_messages(session_factory, conv_id, [("user", "最初的问题")])
     share = (await client.post(f"/v1/conversations/{conv_id}/shares")).json()
@@ -118,7 +107,7 @@ async def test_snapshot_is_frozen_against_later_messages(
 async def test_public_view_unknown_and_malformed_token_404(client, new_client, make_invite):
     # Need an initialized schema (client fixture) but no auth for the public page.
     code = await make_invite("INV-SH-4")
-    await _register_and_login(client, code, "sh4")
+    await register_and_login(client, code, "sh4")
     async with new_client() as anon:
         # Well-formed but unknown uuid.
         r = await anon.get("/shared/00000000-0000-0000-0000-000000000000")
@@ -130,7 +119,7 @@ async def test_public_view_unknown_and_malformed_token_404(client, new_client, m
 
 async def test_share_requires_auth_and_owner(client, new_client, make_invite, session_factory):
     code = await make_invite("INV-SH-5")
-    await _register_and_login(client, code, "owner5")
+    await register_and_login(client, code, "owner5")
     conv_id = await _new_conversation(client, "private")
     await _seed_messages(session_factory, conv_id, [("user", "secret")])
 
@@ -141,14 +130,14 @@ async def test_share_requires_auth_and_owner(client, new_client, make_invite, se
     # A different user can't create / list (404, IDOR-safe).
     code2 = await make_invite("INV-SH-5b")
     async with new_client() as other:
-        await _register_and_login(other, code2, "intruder5")
+        await register_and_login(other, code2, "intruder5")
         assert (await other.post(f"/v1/conversations/{conv_id}/shares")).status_code == 404
         assert (await other.get(f"/v1/conversations/{conv_id}/shares")).status_code == 404
 
 
 async def test_delete_conversation_revokes_shares(client, new_client, make_invite, session_factory):
     code = await make_invite("INV-SH-6")
-    await _register_and_login(client, code, "sh6")
+    await register_and_login(client, code, "sh6")
     conv_id = await _new_conversation(client, "to delete")
     await _seed_messages(session_factory, conv_id, [("user", "q")])
     share = (await client.post(f"/v1/conversations/{conv_id}/shares")).json()
@@ -160,12 +149,12 @@ async def test_delete_conversation_revokes_shares(client, new_client, make_invit
 
 async def test_delete_account_revokes_shares(client, new_client, make_invite, session_factory):
     code = await make_invite("INV-SH-7")
-    await _register_and_login(client, code, "sh7")
+    await register_and_login(client, code, "sh7")
     conv_id = await _new_conversation(client, "acct")
     await _seed_messages(session_factory, conv_id, [("user", "q")])
     share = (await client.post(f"/v1/conversations/{conv_id}/shares")).json()
 
-    r = await client.request("DELETE", "/v1/auth/me", json={"password": _PW})
+    r = await client.request("DELETE", "/v1/auth/me", json={"password": TEST_PASSWORD})
     assert r.status_code == 200, r.text
     async with new_client() as anon:
         assert (await anon.get(share["url"])).status_code == 404
@@ -173,7 +162,7 @@ async def test_delete_account_revokes_shares(client, new_client, make_invite, se
 
 async def test_public_view_escapes_xss(client, new_client, make_invite, session_factory):
     code = await make_invite("INV-SH-8")
-    await _register_and_login(client, code, "sh8")
+    await register_and_login(client, code, "sh8")
     conv_id = await _new_conversation(client, "xss")
     await _seed_messages(
         session_factory,
@@ -194,7 +183,7 @@ async def test_share_defaults_to_30_day_expiry(client, make_invite, session_fact
     from agentcore.db.models import ConversationShare
 
     code = await make_invite("INV-SHR-TTL")
-    await _register_and_login(client, code, "ttl-default")
+    await register_and_login(client, code, "ttl-default")
     conv_id = await _new_conversation(client, "ttl-default")
     share = (await client.post(f"/v1/conversations/{conv_id}/shares")).json()
     assert share["expires_at"] is not None
@@ -209,7 +198,7 @@ async def test_share_defaults_to_30_day_expiry(client, make_invite, session_fact
 
 async def test_share_never_expires_when_requested(client, make_invite):
     code = await make_invite("INV-SHR-NEVER")
-    await _register_and_login(client, code, "ttl-never")
+    await register_and_login(client, code, "ttl-never")
     conv_id = await _new_conversation(client, "ttl-never")
     share = (
         await client.post(
@@ -226,7 +215,7 @@ async def test_expired_share_returns_404(client, new_client, make_invite, sessio
     from agentcore.db.models import ConversationShare
 
     code = await make_invite("INV-SHR-EXP")
-    await _register_and_login(client, code, "ttl-expired")
+    await register_and_login(client, code, "ttl-expired")
     conv_id = await _new_conversation(client, "ttl-expired")
     share = (await client.post(f"/v1/conversations/{conv_id}/shares")).json()
 

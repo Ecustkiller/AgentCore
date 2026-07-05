@@ -12,9 +12,7 @@ import { MetricRow } from "./shared";
 
 /**
  * Per-run resource ledger (§7.3B power detail) — the single place a run's full
- * raw token + cost breakdown lives. Collapsed by default; opens by default when
- * the user has turned on 用量明细 (`usageDetail`). Money is never gated by that
- * toggle, so the ¥ total stays on the collapsed header. All-zero cost renders as
+ * raw token + cost breakdown lives. Defaults expanded. All-zero cost renders as
  * 「—」(§7.5), not「¥0.00」.
  */
 export function ResourceSection({
