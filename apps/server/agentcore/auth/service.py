@@ -17,13 +17,17 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from agentcore.config import settings
+from agentcore.auth.client import ClientPlatform, is_product_platform, platform_to_audience
+from agentcore.auth.mfa import AdminMfaService
 from agentcore.core.errors import (
+    AdminProductForbiddenError,
     AuthenticationError,
     NotFoundError,
     ValidationError,
 )
 from agentcore.core.types import new_id
 from agentcore.db.models import Invite, User
+from agentcore.security.tokens import TokenAudience
 from agentcore.db.repositories import (
     CredentialsRepository,
     InviteRepository,
@@ -32,6 +36,8 @@ from agentcore.db.repositories import (
 )
 from agentcore.security import (
     create_access_token,
+    create_mfa_pending_token,
+    decode_mfa_pending_token,
     generate_invite_code,
     generate_refresh_token,
     generate_temp_password,
@@ -39,6 +45,7 @@ from agentcore.security import (
     hash_refresh_token,
     verify_password,
 )
+from agentcore.security.tokens import TokenAudience
 
 _MIN_PASSWORD_LENGTH = 8
 _MAX_FAILED_ATTEMPTS = 5
@@ -72,6 +79,17 @@ class TokenPair:
     refresh_token: str
 
 
+@dataclass(frozen=True)
+class LoginResult:
+    """Outcome of a credential check — tokens may be deferred for MFA."""
+
+    user: User
+    tokens: TokenPair | None = None
+    mfa_required: bool = False
+    pending_token: str | None = None
+    mfa_setup_required: bool = False
+
+
 def _invite_is_valid(invite: Invite | None, now: datetime) -> bool:
     if invite is None or invite.used_at is not None or invite.revoked_at is not None:
         return False
@@ -86,11 +104,13 @@ class AuthService:
         credentials: CredentialsRepository,
         refresh_tokens: RefreshTokenRepository,
         invites: InviteRepository,
+        mfa: AdminMfaService | None = None,
     ) -> None:
         self._users = users
         self._credentials = credentials
         self._refresh_tokens = refresh_tokens
         self._invites = invites
+        self._mfa = mfa
 
     async def register(
         self,
@@ -121,7 +141,13 @@ class AuthService:
         await self._invites.mark_used(invite.id, used_by=user.user_id)
         return user
 
-    async def login(self, *, username: str, password: str) -> tuple[User, TokenPair]:
+    async def login(
+        self,
+        *,
+        username: str,
+        password: str,
+        platform: ClientPlatform = "desktop",
+    ) -> LoginResult:
         user = await self._users.get_by_username(username.strip())
         creds = await self._credentials.get_by_user_id(user.user_id) if user else None
         # Uniform failure: never reveal whether the username exists. Run one verify
@@ -142,7 +168,60 @@ class AuthService:
         if creds.failed_attempts or creds.locked_until is not None:
             await self._credentials.reset_failure_state(user.user_id)
 
-        tokens = await self._issue_tokens(user.user_id, family=new_id(), now=now)
+        if user.role == "admin" and is_product_platform(platform):
+            raise AdminProductForbiddenError()
+
+        if user.role != "admin" and platform == "admin":
+            raise AuthenticationError("用户名或密码错误")
+
+        audience = platform_to_audience(platform)
+
+        if user.role == "admin":
+            if self._mfa is not None and await self._mfa.is_enrolled(user.user_id):
+                pending = create_mfa_pending_token(user.user_id, audience=audience)
+                return LoginResult(
+                    user=user,
+                    mfa_required=True,
+                    pending_token=pending,
+                )
+            tokens = await self._issue_tokens(
+                user.user_id, family=new_id(), now=now, audience=audience
+            )
+            return LoginResult(user=user, tokens=tokens, mfa_setup_required=True)
+
+        tokens = await self._issue_tokens(
+            user.user_id, family=new_id(), now=now, audience=audience
+        )
+        return LoginResult(user=user, tokens=tokens)
+
+    async def complete_mfa_login(
+        self,
+        *,
+        pending_token: str,
+        code: str | None = None,
+        recovery_code: str | None = None,
+    ) -> tuple[User, TokenPair]:
+        if self._mfa is None:
+            raise AuthenticationError("MFA not configured")
+        user_id, audience = decode_mfa_pending_token(pending_token)
+        user = await self._users.get_by_id(user_id)
+        if user is None or user.status != "active" or user.role != "admin":
+            raise AuthenticationError("Invalid or expired MFA session")
+        verified = False
+        if code:
+            verified = await self._mfa.verify_code(user_id=user_id, code=code.strip())
+        elif recovery_code:
+            verified = await self._mfa.verify_recovery_code(
+                user_id=user_id, code=recovery_code.strip()
+            )
+        else:
+            raise ValidationError("请输入验证码或恢复码")
+        if not verified:
+            raise AuthenticationError("验证码无效或已过期")
+        now = datetime.now(UTC)
+        tokens = await self._issue_tokens(
+            user.user_id, family=new_id(), now=now, audience=audience
+        )
         return user, tokens
 
     async def refresh(self, *, refresh_token: str) -> TokenPair:
@@ -167,13 +246,23 @@ class AuthService:
             if now - record.rotated_at > _REFRESH_REUSE_GRACE:
                 await self._refresh_tokens.revoke_family(record.token_family)
                 raise AuthenticationError("Refresh token reuse detected")
-            return await self._issue_tokens(record.user_id, family=record.token_family, now=now)
+            return await self._issue_tokens(
+                record.user_id,
+                family=record.token_family,
+                now=now,
+                audience=record.client_aud,  # type: ignore[arg-type]
+            )
 
         if record.expires_at <= now:
             raise AuthenticationError("Refresh token expired")
 
         await self._refresh_tokens.mark_rotated(record.id)
-        return await self._issue_tokens(record.user_id, family=record.token_family, now=now)
+        return await self._issue_tokens(
+            record.user_id,
+            family=record.token_family,
+            now=now,
+            audience=record.client_aud,  # type: ignore[arg-type]
+        )
 
     async def logout(self, *, refresh_token: str) -> None:
         record = await self._refresh_tokens.get_by_hash(hash_refresh_token(refresh_token))
@@ -409,7 +498,14 @@ class AuthService:
 
     # --- internals ---
 
-    async def _issue_tokens(self, user_id: str, *, family: str, now: datetime) -> TokenPair:
+    async def _issue_tokens(
+        self,
+        user_id: str,
+        *,
+        family: str,
+        now: datetime,
+        audience: TokenAudience = "product",
+    ) -> TokenPair:
         raw, token_hash = generate_refresh_token()
         expires_at = now + timedelta(days=settings.jwt_refresh_token_expire_days)
         await self._refresh_tokens.create(
@@ -417,8 +513,12 @@ class AuthService:
             token_hash=token_hash,
             token_family=family,
             expires_at=expires_at,
+            client_aud=audience,
         )
-        return TokenPair(access_token=create_access_token(user_id), refresh_token=raw)
+        return TokenPair(
+            access_token=create_access_token(user_id, audience=audience),
+            refresh_token=raw,
+        )
 
     async def _register_failure(self, user_id: str, current_attempts: int, now: datetime) -> None:
         new_attempts = current_attempts + 1

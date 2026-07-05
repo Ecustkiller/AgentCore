@@ -31,12 +31,44 @@ from agentcore.config import settings
 from agentcore.db.base import Base
 from agentcore.db.base import engine as app_engine
 from agentcore.db.repositories import (
+    AdminMfaRepository,
     CredentialsRepository,
     InviteRepository,
     UserRepository,
 )
 from agentcore.main import app
 from agentcore.security import hash_password
+from agentcore.security.keys import KeyEncryptor
+
+_TEST_MFA_SECRET = "JBSWY3DPEHPK3PXP"
+_MASTER_KEY = "ab" * 32
+
+
+async def login_admin(client: httpx.AsyncClient, username: str, password: str) -> None:
+    """Complete admin login (password + TOTP) on the admin client platform."""
+    import pyotp
+
+    r = await client.post(
+        "/v1/auth/login",
+        json={"username": username, "password": password},
+        headers={"X-Client-Platform": "admin"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    if body.get("mfa_required"):
+        code = pyotp.TOTP(_TEST_MFA_SECRET).now()
+        r = await client.post(
+            "/v1/auth/login/mfa",
+            json={"pending_token": body["pending_token"], "code": code},
+        )
+        assert r.status_code == 200, r.text
+
+
+@pytest.fixture(autouse=True)
+def _test_encryption_key(monkeypatch) -> Iterator[None]:
+    """BYOK + admin MFA tests need a configured master key."""
+    monkeypatch.setattr(settings, "encryption_key", _MASTER_KEY)
+    yield
 
 
 # Cookie-session integration tests predate CSRF; keep them green unless marked @pytest.mark.csrf.
@@ -156,12 +188,21 @@ async def make_admin(session_factory) -> Callable:
     """Return an async helper that seeds an admin user (with credentials)."""
 
     async def _make(username: str = "admin", password: str = "adminpass123") -> tuple[str, str]:
+        enc = KeyEncryptor(_MASTER_KEY)
         async with session_factory() as session:
             user = await UserRepository(session).create(
                 username=username, display_name=username, role="admin"
             )
             await CredentialsRepository(session).create(
                 user_id=user.user_id, password_hash=hash_password(password)
+            )
+            await AdminMfaRepository(session).upsert_pending(
+                user_id=user.user_id,
+                totp_secret_enc=enc.encrypt(_TEST_MFA_SECRET.encode()),
+            )
+            await AdminMfaRepository(session).enable(
+                user.user_id,
+                recovery_codes_hash=[],
             )
         return username, password
 

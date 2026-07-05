@@ -25,19 +25,53 @@ export type AuthStatus =
 interface AuthState {
   status: AuthStatus;
   user: AuthUser | null;
+  /** Admin logged in but TOTP not enrolled yet — show MFA setup wizard. */
+  mfaSetupRequired: boolean;
+  /** Pending MFA challenge during the two-step login flow. */
+  pendingMfaToken: string | null;
   setLoading: () => void;
-  setAuthenticated: (user: AuthUser) => void;
+  setAuthenticated: (user: AuthUser, opts?: { mfaSetupRequired?: boolean }) => void;
   setUnauthenticated: () => void;
   setForbidden: (user: AuthUser) => void;
   setUnavailable: () => void;
+  setMfaSetupRequired: (required: boolean) => void;
+  setPendingMfaToken: (token: string | null) => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   status: "loading",
   user: null,
+  mfaSetupRequired: false,
+  pendingMfaToken: null,
   setLoading: () => set({ status: "loading" }),
-  setAuthenticated: (user) => set({ status: "authenticated", user }),
-  setUnauthenticated: () => set({ status: "unauthenticated", user: null }),
-  setForbidden: (user) => set({ status: "forbidden", user }),
-  setUnavailable: () => set({ status: "unavailable", user: null }),
+  setAuthenticated: (user, opts) =>
+    set({
+      status: "authenticated",
+      user,
+      mfaSetupRequired: opts?.mfaSetupRequired ?? false,
+      pendingMfaToken: null,
+    }),
+  setUnauthenticated: () =>
+    set({
+      status: "unauthenticated",
+      user: null,
+      mfaSetupRequired: false,
+      pendingMfaToken: null,
+    }),
+  setForbidden: (user) =>
+    set({
+      status: "forbidden",
+      user,
+      mfaSetupRequired: false,
+      pendingMfaToken: null,
+    }),
+  setUnavailable: () =>
+    set({
+      status: "unavailable",
+      user: null,
+      mfaSetupRequired: false,
+      pendingMfaToken: null,
+    }),
+  setMfaSetupRequired: (required) => set({ mfaSetupRequired: required }),
+  setPendingMfaToken: (token) => set({ pendingMfaToken: token }),
 }));

@@ -44,6 +44,9 @@ class ErrorCode(StrEnum):
     # ── Auth / quota / rate ──────────────────────────────────────────────
     AUTH_ERROR = "AUTH_ERROR"
     FORBIDDEN = "FORBIDDEN"
+    ADMIN_PRODUCT_FORBIDDEN = "ADMIN_PRODUCT_FORBIDDEN"
+    MFA_REQUIRED = "MFA_REQUIRED"
+    MFA_SETUP_REQUIRED = "MFA_SETUP_REQUIRED"
     RATE_LIMITED = "RATE_LIMITED"
     QUOTA_EXCEEDED = "QUOTA_EXCEEDED"
 

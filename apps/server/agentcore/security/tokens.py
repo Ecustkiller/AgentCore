@@ -1,6 +1,7 @@
 """JWT access and inference tokens (python-jose)."""
 
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from jose import JWTError, jwt
 
@@ -9,14 +10,24 @@ from agentcore.core.errors import AuthenticationError
 
 _JWT_ALGORITHM = "HS256"
 
+TokenAudience = Literal["product", "admin"]
+AccessTokenClaims = tuple[str, TokenAudience]
+MfaPendingClaims = tuple[str, TokenAudience]
 
-def create_access_token(user_id: str, *, expires_delta: timedelta | None = None) -> str:
+
+def create_access_token(
+    user_id: str,
+    *,
+    audience: TokenAudience,
+    expires_delta: timedelta | None = None,
+) -> str:
     """Mint a short-lived access JWT carrying ``user_id`` as the subject."""
     now = datetime.now(UTC)
     expire = now + (expires_delta or timedelta(minutes=settings.jwt_access_token_expire_minutes))
     claims = {
         "sub": user_id,
         "type": "access",
+        "session": audience,
         "iat": int(now.timestamp()),
         "exp": int(expire.timestamp()),
     }
@@ -29,6 +40,12 @@ def decode_access_token(token: str) -> str:
     Raises ``AuthenticationError`` for any invalid, tampered, expired, or
     wrong-type token so callers can translate it to a 401 uniformly.
     """
+    user_id, _aud = decode_access_token_claims(token)
+    return user_id
+
+
+def decode_access_token_claims(token: str) -> AccessTokenClaims:
+    """Return ``(user_id, audience)`` from a valid access token."""
     try:
         claims = jwt.decode(token, settings.jwt_secret_key, algorithms=[_JWT_ALGORITHM])
     except JWTError as exc:
@@ -39,7 +56,47 @@ def decode_access_token(token: str) -> str:
     sub = claims.get("sub")
     if not sub:
         raise AuthenticationError("Token missing subject")
-    return sub
+    aud = claims.get("session")
+    if aud not in ("product", "admin"):
+        raise AuthenticationError("Token missing session audience")
+    return sub, aud
+
+
+def create_mfa_pending_token(
+    user_id: str,
+    *,
+    audience: TokenAudience,
+    expires_delta: timedelta | None = None,
+) -> str:
+    """Short-lived token gating the second login factor (password already verified)."""
+    now = datetime.now(UTC)
+    expire = now + (expires_delta or timedelta(minutes=5))
+    claims = {
+        "sub": user_id,
+        "type": "mfa_pending",
+        "session": audience,
+        "iat": int(now.timestamp()),
+        "exp": int(expire.timestamp()),
+    }
+    return jwt.encode(claims, settings.jwt_secret_key, algorithm=_JWT_ALGORITHM)
+
+
+def decode_mfa_pending_token(token: str) -> MfaPendingClaims:
+    """Return ``(user_id, audience)`` from a valid MFA-pending token."""
+    try:
+        claims = jwt.decode(token, settings.jwt_secret_key, algorithms=[_JWT_ALGORITHM])
+    except JWTError as exc:
+        raise AuthenticationError("Invalid or expired MFA session") from exc
+
+    if claims.get("type") != "mfa_pending":
+        raise AuthenticationError("Wrong token type")
+    sub = claims.get("sub")
+    if not sub:
+        raise AuthenticationError("Token missing subject")
+    aud = claims.get("session")
+    if aud not in ("product", "admin"):
+        raise AuthenticationError("Token missing session audience")
+    return sub, aud
 
 
 def create_inference_token(user_id: str, *, expires_delta: timedelta | None = None) -> str:

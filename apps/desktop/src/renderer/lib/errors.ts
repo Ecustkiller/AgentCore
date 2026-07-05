@@ -165,6 +165,9 @@ function resolveMessage(f: ErrorFacts): string {
       "请先在「设置 · 模型配置」中填入你的 DeepSeek API Key，再发起对话。"
     );
   }
+  if (f.code === "ADMIN_PRODUCT_FORBIDDEN") {
+    return "此账号为管理员账号，请使用管理后台登录";
+  }
   // Most coded errors carry a user-facing zh message (validation / conflict /
   // invalid key / insufficient balance …) — prefer it verbatim (single-sourced).
   if (f.serverMessage) return f.serverMessage;

@@ -23,6 +23,8 @@ from agentcore.db.repositories import (
 )
 from agentcore.llm.pricing import NANO_PER_USD
 
+from tests.integration.conftest import login_admin
+
 _PW = "password123"
 
 
@@ -59,18 +61,18 @@ async def _seed_spend(session_factory, *, user_id: str, total: int, role: str = 
         )
 
 
-async def _login(client: httpx.AsyncClient, username: str, password: str) -> None:
-    r = await client.post("/v1/auth/login", json={"username": username, "password": password})
-    assert r.status_code == 200, r.text
-
-
 async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
     r = await client.post(
         "/v1/auth/register",
         json={"username": username, "password": _PW, "invite_code": invite_code},
     )
     assert r.status_code == 201, r.text
-    await _login(client, username, _PW)
+    r = await client.post(
+        "/v1/auth/login",
+        json={"username": username, "password": _PW},
+        headers={"X-Client-Platform": "desktop"},
+    )
+    assert r.status_code == 200, r.text
 
 
 async def _seed_user(
@@ -113,7 +115,7 @@ async def test_non_admin_cannot_access_admin_users(client, make_invite):
 
 async def test_admin_lists_roster_with_quota_fields(client, make_admin, session_factory):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     await _seed_user(session_factory, "alice")
     await _seed_user(session_factory, "bob")
 
@@ -131,7 +133,7 @@ async def test_admin_lists_roster_with_quota_fields(client, make_admin, session_
 
 async def test_admin_roster_filter_and_pagination(client, make_admin, session_factory):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     await _seed_user(session_factory, "alice")
     await _seed_user(session_factory, "alicia")
     await _seed_user(session_factory, "bob")
@@ -151,7 +153,7 @@ async def test_admin_roster_hides_deleted_by_default(client, make_admin, session
     roster (and its total) by default, surfaced only with ``include_deleted`` — and
     when surfaced they carry the ``deleted_at`` flag + anonymized username."""
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     await _seed_user(session_factory, "alice")
     gone = await _seed_user(session_factory, "zombie")
     await _soft_delete_user(session_factory, gone)
@@ -183,7 +185,7 @@ async def test_admin_roster_carries_cost_and_sorts_by_spend(client, make_admin, 
     orders by it; the response ships the FX rate for ¥ display. A never-spent account
     reads 0 (LEFT JOIN onto the ledger)."""
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     alice = await _seed_user(session_factory, "alice")
     bob = await _seed_user(session_factory, "bob")
     # alice outspends bob over two turns; the admin never spent (→ 0).
@@ -218,7 +220,7 @@ async def test_admin_roster_sorts_by_created_at_order(client, make_admin, sessio
     """``order`` flips the default ``created_at`` sort: desc is newest-first, asc is
     oldest-first. The admin is seeded first, so it leads asc and trails desc."""
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     await _seed_user(session_factory, "alice")
     await _seed_user(session_factory, "bob")
 
@@ -231,7 +233,7 @@ async def test_admin_roster_sorts_by_created_at_order(client, make_admin, sessio
 async def test_admin_roster_filters_by_role_and_status(client, make_admin, session_factory):
     """``role`` / ``status`` pin those dimensions, AND-combined with each other."""
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     await _seed_user(session_factory, "alice")  # user / active
     await _seed_user(session_factory, "carol", role="admin")
     await _seed_user(session_factory, "dave", status="disabled")  # user / disabled
@@ -261,7 +263,7 @@ async def test_admin_roster_rejects_invalid_filter_params(client, make_admin):
     """The enum-shaped query params are validated at the edge (422), never silently
     coerced to a wrong filter."""
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     for params in (
         {"role": "superuser"},
         {"status": "frozen"},
@@ -277,7 +279,7 @@ async def test_admin_roster_rejects_invalid_filter_params(client, make_admin):
 
 async def test_admin_changes_role(client, make_admin, session_factory):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     uid = await _seed_user(session_factory, "alice")
 
     r = await client.patch(f"/v1/admin/users/{uid}", json={"role": "admin"})
@@ -288,7 +290,7 @@ async def test_admin_changes_role(client, make_admin, session_factory):
 
 async def test_admin_disable_revokes_target_access(client, new_client, make_admin):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     code = (await client.post("/v1/auth/invites", json={})).json()["code"]
 
     async with new_client() as target:
@@ -308,7 +310,7 @@ async def test_admin_disable_revokes_target_access(client, new_client, make_admi
 
 async def test_admin_resets_user_password(client, new_client, make_admin):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     code = (await client.post("/v1/auth/invites", json={})).json()["code"]
 
     async with new_client() as target:
@@ -340,7 +342,7 @@ async def test_admin_resets_user_password(client, new_client, make_admin):
 
 async def test_reset_password_unknown_user_404(client, make_admin):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     assert (await client.post(f"/v1/admin/users/{uuid4()}/reset-password")).status_code == 404
 
 
@@ -359,7 +361,7 @@ _CUSTOM_PW = "custompass99"
 
 async def test_admin_sets_user_password(client, new_client, make_admin):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     code = (await client.post("/v1/auth/invites", json={})).json()["code"]
 
     async with new_client() as target:
@@ -391,7 +393,7 @@ async def test_admin_sets_user_password(client, new_client, make_admin):
 
 async def test_set_password_force_change_false(client, new_client, make_admin):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     code = (await client.post("/v1/auth/invites", json={})).json()["code"]
 
     async with new_client() as target:
@@ -417,7 +419,7 @@ async def test_set_password_force_change_false(client, new_client, make_admin):
 
 async def test_set_password_weak_rejected(client, new_client, make_admin):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     code = (await client.post("/v1/auth/invites", json={})).json()["code"]
 
     async with new_client() as target:
@@ -434,7 +436,7 @@ async def test_set_password_weak_rejected(client, new_client, make_admin):
 
 async def test_set_password_unknown_user_404(client, make_admin):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     assert (
         await client.post(
             f"/v1/admin/users/{uuid4()}/set-password",
@@ -463,7 +465,7 @@ async def test_admin_deletes_user_anonymizes_and_cascades(client, make_admin, se
     ``deleted_at``), drops it from the default roster + the system tallies, and
     cascades cross-domain cleanup (the user's conversations are soft-deleted)."""
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     uid = await _seed_user(session_factory, "alice")
     async with session_factory() as session:
         conv = await ConversationRepository(session).create(user_id=uid, title="留念")
@@ -489,7 +491,7 @@ async def test_admin_deletes_user_anonymizes_and_cascades(client, make_admin, se
 async def test_admin_cannot_delete_self(client, make_admin):
     """No self-lockout: an admin can't 注销 their own account (keeps ≥1 active admin)."""
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     me = (await client.get("/v1/auth/me")).json()["id"]
 
     assert (await client.delete(f"/v1/admin/users/{me}")).status_code == 422
@@ -500,7 +502,7 @@ async def test_admin_cannot_delete_self(client, make_admin):
 
 async def test_admin_delete_unknown_user_404(client, make_admin):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     assert (await client.delete(f"/v1/admin/users/{uuid4()}")).status_code == 404
 
 
@@ -516,7 +518,7 @@ async def test_delete_user_requires_admin(client, make_invite):
 
 async def test_admin_sets_then_clears_quota(client, make_admin, session_factory):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     uid = await _seed_user(session_factory, "alice")
 
     r = await client.patch(
@@ -547,7 +549,7 @@ async def test_admin_sets_then_clears_quota(client, make_admin, session_factory)
 
 async def test_admin_cannot_self_demote_or_self_disable(client, make_admin):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     me = (await client.get("/v1/auth/me")).json()["id"]
 
     assert (await client.patch(f"/v1/admin/users/{me}", json={"role": "user"})).status_code == 422
@@ -561,7 +563,7 @@ async def test_admin_cannot_self_demote_or_self_disable(client, make_admin):
 
 async def test_admin_update_unknown_user_404(client, make_admin):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     r = await client.patch(
         "/v1/admin/users/00000000-0000-0000-0000-000000000000",
         json={"role": "admin"},
@@ -571,7 +573,7 @@ async def test_admin_update_unknown_user_404(client, make_admin):
 
 async def test_admin_rejects_invalid_values(client, make_admin, session_factory):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     uid = await _seed_user(session_factory, "alice")
 
     assert (
@@ -602,7 +604,7 @@ async def test_non_admin_cannot_access_usage_or_system(client, make_invite):
 
 async def test_admin_usage_summary_aggregates_across_users(client, make_admin, session_factory):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     alice = await _seed_user(session_factory, "alice")
     bob = await _seed_user(session_factory, "bob")
 
@@ -642,7 +644,7 @@ async def test_admin_usage_summary_splits_month_by_role(client, make_admin, sess
     aggregated across *every* account and ordered spend-desc — the platform-wide
     counterpart of the per-user by-role payroll."""
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     alice = await _seed_user(session_factory, "alice")
     bob = await _seed_user(session_factory, "bob")
 
@@ -667,7 +669,7 @@ async def test_admin_usage_summary_splits_month_by_role(client, make_admin, sess
 
 async def test_admin_usage_summary_empty_is_zero(client, make_admin):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
 
     r = await client.get("/v1/admin/usage/summary")
     assert r.status_code == 200, r.text
@@ -685,7 +687,7 @@ async def test_admin_system_status_reports_config_health_and_counts(
     client, make_admin, session_factory
 ):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     await _seed_user(session_factory, "alice")
     await _seed_user(session_factory, "carol", role="admin")
     await _seed_user(session_factory, "dave", status="disabled")
@@ -714,7 +716,7 @@ async def test_admin_system_counts_exclude_deleted(client, make_admin, session_f
     """注销 accounts drop out of every system tally — they're anonymized tombstones,
     not part of the live population (so ``total`` no longer over-counts them)."""
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     await _seed_user(session_factory, "alice")
     gone = await _seed_user(session_factory, "zombie")
     await _soft_delete_user(session_factory, gone)
@@ -796,7 +798,7 @@ async def test_admin_observability_surfaces_collab_quality(client, make_admin, s
     """学·度量 §2.5: the health window surfaces 协作质量 — 首计划存活率 over delegated turns plus
     raw scope / revise / escalation sums — so the operator面 sees the same 方向盘 as offline."""
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     user = await _seed_user(session_factory, "collab")
 
     # 3 delegated turns: 2 ran the first plan clean (boundary_yields==0); 1 needed a mid-course
@@ -827,7 +829,7 @@ async def test_admin_observability_surfaces_collab_quality(client, make_admin, s
 
 async def test_admin_observability_summary_aggregates(client, make_admin, session_factory):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     alice = await _seed_user(session_factory, "alice")
     bob = await _seed_user(session_factory, "bob")
 
@@ -882,7 +884,7 @@ async def test_admin_observability_summary_aggregates(client, make_admin, sessio
 
 async def test_admin_observability_summary_empty_is_zero(client, make_admin):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
 
     r = await client.get("/v1/admin/observability/summary")
     assert r.status_code == 200, r.text
@@ -1010,7 +1012,7 @@ async def _seed_conversation_with_turn(
 
 async def test_admin_conversation_replay_merges_timeline(client, make_admin, session_factory):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     alice = await _seed_user(session_factory, "alice")
     conv_id, assistant_id = await _seed_conversation_with_turn(
         session_factory, user_id=alice, status="error", error="boom", cost_nano=4200
@@ -1074,7 +1076,7 @@ async def test_admin_conversation_replay_surfaces_textless_error_turn(
     row but no message to ride. The replay must still surface it (as a bare turn
     marker) so a 复盘 never hides the failure."""
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     alice = await _seed_user(session_factory, "alice")
     trace_id = uuid4().hex
     async with session_factory() as session:
@@ -1120,7 +1122,7 @@ async def test_admin_conversation_replay_surfaces_textless_error_turn(
 
 async def test_admin_conversation_replay_unknown_404(client, make_admin):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     r = await client.get(f"/v1/admin/observability/conversations/{new_id()}")
     assert r.status_code == 404
 
@@ -1141,7 +1143,7 @@ async def test_non_admin_cannot_access_user_detail(client, make_invite):
 
 async def test_admin_user_detail_unknown_404(client, make_admin):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     r = await client.get("/v1/admin/users/00000000-0000-0000-0000-000000000000/detail")
     assert r.status_code == 404
 
@@ -1151,7 +1153,7 @@ async def test_admin_user_detail_composes_account_view(client, make_admin, sessi
     trend/by-role) + recent conversations (with message counts) + recent turns —
     all scoped to that account (another user's spend/turns never leak in)."""
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     alice = await _seed_user(session_factory, "alice")
     bob = await _seed_user(session_factory, "bob")
 
@@ -1219,7 +1221,7 @@ async def test_non_admin_cannot_access_overview(client, make_invite):
 
 async def test_admin_overview_aggregates_today(client, make_admin, session_factory):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     alice = await _seed_user(session_factory, "alice")
     bob = await _seed_user(session_factory, "bob")
 
@@ -1269,7 +1271,7 @@ async def test_admin_overview_aggregates_today(client, make_admin, session_facto
 
 async def test_admin_overview_empty_is_zero(client, make_admin):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     r = await client.get("/v1/admin/overview")
     assert r.status_code == 200, r.text
     b = r.json()
@@ -1297,7 +1299,7 @@ async def test_non_admin_cannot_access_conversations(client, make_invite):
 
 async def test_admin_list_conversations_roster(client, make_admin, session_factory):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     alice = await _seed_user(session_factory, "alice")
     bob = await _seed_user(session_factory, "bob")
 
@@ -1326,7 +1328,7 @@ async def test_admin_list_conversations_roster(client, make_admin, session_facto
 
 async def test_admin_list_conversations_filters_has_errors(client, make_admin, session_factory):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     alice = await _seed_user(session_factory, "alice")
     ok_id, _ = await _seed_conversation_with_turn(session_factory, user_id=alice, status="ok")
     err_id, _ = await _seed_conversation_with_turn(
@@ -1342,7 +1344,7 @@ async def test_admin_list_conversations_filters_has_errors(client, make_admin, s
 
 async def test_admin_list_conversations_sort_by_cost(client, make_admin, session_factory):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     alice = await _seed_user(session_factory, "alice")
     cheap_id, _ = await _seed_conversation_with_turn(
         session_factory, user_id=alice, status="ok", cost_nano=1000
@@ -1362,7 +1364,7 @@ async def test_admin_list_conversations_sort_by_cost(client, make_admin, session
 
 async def test_admin_list_conversation_turns_feed(client, make_admin, session_factory):
     username, password = await make_admin()
-    await _login(client, username, password)
+    await login_admin(client, username, password)
     alice = await _seed_user(session_factory, "alice")
     conv_id, _ = await _seed_conversation_with_turn(
         session_factory, user_id=alice, status="error", error="boom"

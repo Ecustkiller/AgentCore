@@ -32,7 +32,6 @@ import {
   Share2,
   Sun,
   UserCog,
-  Users,
   Workflow,
   Wrench,
 } from "lucide-react";
@@ -312,14 +311,6 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       icon: Keyboard,
       keywords: ["settings", "shortcuts", "keys", "kuaijiejian"],
       run: go("/more/shortcuts"),
-    },
-    {
-      id: "nav-settings-members",
-      title: "设置 · 成员",
-      category: "前往",
-      icon: Users,
-      keywords: ["settings", "members", "team", "chengyuan"],
-      run: go("/more/members"),
     },
     {
       id: "nav-settings-about",

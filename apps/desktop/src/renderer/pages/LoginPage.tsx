@@ -9,6 +9,9 @@ type Mode = "login" | "register";
 /** Pull a human-readable message out of the API's `{error:{message}}` body. */
 function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError) {
+    if (err.code === "ADMIN_PRODUCT_FORBIDDEN") {
+      return "此账号为管理员账号，请使用管理后台登录";
+    }
     try {
       const parsed = JSON.parse(err.body);
       const msg = parsed?.error?.message ?? parsed?.detail;
@@ -144,7 +147,7 @@ export function LoginPage() {
             {busy ? "请稍候…" : mode === "login" ? "登录" : "注册并登录"}
           </Button>
 
-          {/* 自助找回密码依赖邮件，属后续阶段；内测期由管理员在「成员」里重置。 */}
+          {/* 自助找回密码依赖邮件，属后续阶段；内测期由管理员重置。 */}
           {mode === "login" && (
             <p className="pt-1 text-center text-xs text-muted-foreground">
               忘记密码？请联系管理员重置。

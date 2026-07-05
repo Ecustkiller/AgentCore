@@ -42,6 +42,9 @@ class AuthSettings(BaseModel):
     trusted_proxy_hops: int = 1
 
     csrf_enabled: bool = True
+
+    # TOTP issuer shown in authenticator apps (admin MFA).
+    mfa_issuer_name: str = "AgentCore Admin"
     # ``memory`` = process-local counters (dev / single worker). ``redis`` = shared
     # limiters + CSRF store for multi-worker production.
     rate_limit_backend: str = "memory"

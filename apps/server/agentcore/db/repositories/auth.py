@@ -143,6 +143,7 @@ class RefreshTokenRepository:
         token_hash: str,
         token_family: str,
         expires_at: datetime,
+        client_aud: str = "product",
     ) -> RefreshToken:
         token = RefreshToken(
             id=new_id(),
@@ -150,6 +151,7 @@ class RefreshTokenRepository:
             token_hash=token_hash,
             token_family=token_family,
             expires_at=expires_at,
+            client_aud=client_aud,
         )
         self._session.add(token)
         await self._session.commit()

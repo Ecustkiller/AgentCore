@@ -1,5 +1,4 @@
 import { SectionLabel, SurfaceNavLink } from "@/components/ui";
-import { useAuthStore } from "@/stores/auth";
 import {
   Brain,
   Gauge,
@@ -10,7 +9,6 @@ import {
   MessageSquarePlus,
   Palette,
   UserCog,
-  Users,
 } from "lucide-react";
 import { Outlet } from "react-router-dom";
 
@@ -18,8 +16,6 @@ interface NavItem {
   icon: LucideIcon;
   label: string;
   path: string;
-  /** Hidden unless the signed-in user is an admin (the page also guards). */
-  adminOnly?: boolean;
 }
 
 interface NavGroup {
@@ -44,7 +40,6 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { icon: UserCog, label: "账户设置", path: "/more/account" },
       { icon: Gauge, label: "用量", path: "/more/usage" },
-      { icon: Users, label: "成员", path: "/more/members", adminOnly: true },
     ],
   },
   {
@@ -65,27 +60,21 @@ const NAV_GROUPS: NavGroup[] = [
 ];
 
 export function MorePage() {
-  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
-
   return (
     <div className="flex h-full w-full">
       {/* Secondary navigation */}
       <nav className="flex w-[220px] shrink-0 flex-col overflow-y-auto border-r border-border bg-muted/30 py-4">
         <div className="space-y-4 px-2">
-          {NAV_GROUPS.map((group) => {
-            const items = group.items.filter((i) => !i.adminOnly || isAdmin);
-            if (items.length === 0) return null;
-            return (
-              <div key={group.label}>
-                <SectionLabel className="px-3 pb-1">{group.label}</SectionLabel>
-                <div className="space-y-0.5">
-                  {items.map((item) => (
-                    <NavRow key={item.path} item={item} />
-                  ))}
-                </div>
+          {NAV_GROUPS.map((group) => (
+            <div key={group.label}>
+              <SectionLabel className="px-3 pb-1">{group.label}</SectionLabel>
+              <div className="space-y-0.5">
+                {group.items.map((item) => (
+                  <NavRow key={item.path} item={item} />
+                ))}
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       </nav>
 

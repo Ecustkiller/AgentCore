@@ -109,6 +109,10 @@ class RefreshToken(Base):
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     token_hash: Mapped[str] = mapped_column(String(255))
     token_family: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
+    # Session audience bound at issuance (product vs admin); refresh inherits it.
+    client_aud: Mapped[str] = mapped_column(
+        String(20), default="product", server_default=text("'product'")
+    )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
