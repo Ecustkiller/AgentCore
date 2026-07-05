@@ -90,10 +90,7 @@ export function Sidebar() {
               </IconButton>
             </div>
 
-            <SearchTrigger
-              collapsed={collapsed}
-              onClick={() => openSearch()}
-            />
+            <SearchTrigger collapsed={collapsed} onClick={() => openSearch()} />
           </div>
           <div className="mx-3 mt-2 border-t border-sidebar-border" />
         </>

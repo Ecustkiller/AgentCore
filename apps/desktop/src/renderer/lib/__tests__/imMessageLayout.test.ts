@@ -1,11 +1,11 @@
 // @vitest-environment node
 
-import type { ChatMessageDetail } from "@/services/messaging";
 import {
   IM_CLUSTER_GAP_MS,
   buildImThreadItems,
   computeBubbleLayout,
 } from "@/lib/imMessageLayout";
+import type { ChatMessageDetail } from "@/services/messaging";
 import { describe, expect, it, vi } from "vitest";
 
 function msg(
@@ -126,9 +126,7 @@ describe("buildImThreadItems", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-05T12:00:00"));
 
-    const items = buildImThreadItems([
-      msg("1", "2026-07-05T10:00:00.000Z"),
-    ]);
+    const items = buildImThreadItems([msg("1", "2026-07-05T10:00:00.000Z")]);
     expect(items[0]).toMatchObject({
       type: "date_divider",
       label: "今天",

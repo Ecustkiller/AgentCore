@@ -1,3 +1,4 @@
+import { SearchField } from "@/components/ui";
 import {
   ChevronDown,
   ChevronRight,
@@ -6,7 +7,6 @@ import {
   PanelLeftOpen,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { SearchField } from "@/components/ui";
 
 interface Entry {
   name: string;

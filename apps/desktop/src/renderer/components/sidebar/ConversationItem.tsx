@@ -59,7 +59,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 const PREVIEW_DELAY_MS = 500;
@@ -172,21 +172,21 @@ export function ConversationItem({ conversation }: Props) {
     [conversation.lastMessagePreview, cachedMessages],
   );
 
-  const clearPreviewTimer = () => {
+  const clearPreviewTimer = useCallback(() => {
     if (previewTimerRef.current) {
       clearTimeout(previewTimerRef.current);
       previewTimerRef.current = undefined;
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (suppressPreview) {
       clearPreviewTimer();
       setPreviewVisible(false);
     }
-  }, [suppressPreview]);
+  }, [suppressPreview, clearPreviewTimer]);
 
-  useEffect(() => () => clearPreviewTimer(), []);
+  useEffect(() => () => clearPreviewTimer(), [clearPreviewTimer]);
 
   useEffect(() => {
     if (editing) {
@@ -408,165 +408,175 @@ export function ConversationItem({ conversation }: Props) {
                 if (!moreOpen) setConfirmingDelete(false);
               }}
             >
-          {/* biome-ignore lint/a11y/useSemanticElements: 行内另有 DropdownMenuTrigger 的真 <button>，此可点击区不可套 <button>。 */}
-          <div
-            role="button"
-            tabIndex={0}
-            className="flex min-w-0 flex-1 items-center gap-2 text-left"
-            onClick={openConversation}
-            onDoubleClick={(e) => {
-              e.preventDefault();
-              startEdit();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                openConversation();
-              }
-            }}
-          >
-            {status && (
-              <SimpleTooltip label={status === "running" ? "执行中" : "待审批"}>
-                <span
-                  aria-label={status === "running" ? "执行中" : "待审批"}
-                  className={`size-1.5 shrink-0 rounded-full ${
-                    status === "running"
-                      ? "animate-pulse bg-primary"
-                      : "bg-primary"
-                  }`}
+              {/* biome-ignore lint/a11y/useSemanticElements: 行内另有 DropdownMenuTrigger 的真 <button>，此可点击区不可套 <button>。 */}
+              <div
+                role="button"
+                tabIndex={0}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                onClick={openConversation}
+                onDoubleClick={(e) => {
+                  e.preventDefault();
+                  startEdit();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    openConversation();
+                  }
+                }}
+              >
+                {status && (
+                  <SimpleTooltip
+                    label={status === "running" ? "执行中" : "待审批"}
+                  >
+                    <span
+                      aria-label={status === "running" ? "执行中" : "待审批"}
+                      className={`size-1.5 shrink-0 rounded-full ${
+                        status === "running"
+                          ? "animate-pulse bg-primary"
+                          : "bg-primary"
+                      }`}
+                    />
+                  </SimpleTooltip>
+                )}
+                <span className="truncate">{conversation.title}</span>
+              </div>
+              {confirmingDelete ? (
+                <span className="flex shrink-0 items-center gap-0.5">
+                  <SimpleTooltip label={deleteConfirmLabel}>
+                    <IconButton
+                      tone="sidebar"
+                      aria-label={deleteConfirmLabel}
+                      className="size-6 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleDelete();
+                      }}
+                    >
+                      <Check size={13} />
+                    </IconButton>
+                  </SimpleTooltip>
+                  <SimpleTooltip label="取消">
+                    <IconButton
+                      tone="sidebar"
+                      aria-label="取消"
+                      className={rowActionClass}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConfirmingDelete(false);
+                      }}
+                    >
+                      <X size={13} />
+                    </IconButton>
+                  </SimpleTooltip>
+                </span>
+              ) : showRowActions ? (
+                <span className="flex shrink-0 items-center gap-0.5">
+                  <SimpleTooltip label="重命名">
+                    <IconButton
+                      tone="sidebar"
+                      aria-label="重命名"
+                      className={rowActionClass}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startEdit();
+                      }}
+                    >
+                      <Pencil size={13} />
+                    </IconButton>
+                  </SimpleTooltip>
+                  <SimpleTooltip label="归档">
+                    <IconButton
+                      tone="sidebar"
+                      aria-label="归档"
+                      className={rowActionClass}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleArchive();
+                      }}
+                    >
+                      <Archive size={13} />
+                    </IconButton>
+                  </SimpleTooltip>
+                  <DropdownMenu open={moreOpen} onOpenChange={setMoreOpen}>
+                    <DropdownMenuTrigger asChild>
+                      <IconButton
+                        tone="sidebar"
+                        aria-label="更多操作"
+                        title="更多"
+                        className={rowActionClass}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MoreHorizontal size={13} />
+                      </IconButton>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="end"
+                      className="min-w-52"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <DropdownMenuItem onSelect={() => togglePin()}>
+                        {conversation.pinned ? (
+                          <PinOff size={14} className="shrink-0" />
+                        ) : (
+                          <Pin size={14} className="shrink-0" />
+                        )}
+                        <span className="flex-1 truncate">
+                          {conversation.pinned ? "取消置顶" : "置顶"}
+                        </span>
+                      </DropdownMenuItem>
+                      {moveMenuSection}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={handleDuplicate}>
+                        <Copy size={14} className="shrink-0" />
+                        <span className="flex-1 truncate">克隆对话</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          useShareStore.getState().open(conversation.id)
+                        }
+                      >
+                        <Share2 size={14} className="shrink-0" />
+                        <span className="flex-1 truncate">分享…</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => void handleExport("md")}
+                      >
+                        <Download size={14} className="shrink-0" />
+                        <span className="flex-1 truncate">导出 Markdown</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => void handleExport("json")}
+                      >
+                        <FileJson size={14} className="shrink-0" />
+                        <span className="flex-1 truncate">导出 JSON</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        variant="danger"
+                        onSelect={requestPermanentDelete}
+                      >
+                        <Trash2 size={14} className="shrink-0" />
+                        <span className="flex-1 truncate">永久删除</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </span>
+              ) : conversation.pinned ? (
+                <Pin
+                  size={12}
+                  className="shrink-0 text-sidebar-foreground/40"
+                  aria-label="已置顶"
                 />
-              </SimpleTooltip>
-            )}
-            <span className="truncate">{conversation.title}</span>
-          </div>
-          {confirmingDelete ? (
-            <span className="flex shrink-0 items-center gap-0.5">
-              <SimpleTooltip label={deleteConfirmLabel}>
-                <IconButton
-                  tone="sidebar"
-                  aria-label={deleteConfirmLabel}
-                  className="size-6 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleDelete();
-                  }}
-                >
-                  <Check size={13} />
-                </IconButton>
-              </SimpleTooltip>
-              <SimpleTooltip label="取消">
-                <IconButton
-                  tone="sidebar"
-                  aria-label="取消"
-                  className={rowActionClass}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setConfirmingDelete(false);
-                  }}
-                >
-                  <X size={13} />
-                </IconButton>
-              </SimpleTooltip>
-            </span>
-          ) : showRowActions ? (
-            <span className="flex shrink-0 items-center gap-0.5">
-              <SimpleTooltip label="重命名">
-                <IconButton
-                  tone="sidebar"
-                  aria-label="重命名"
-                  className={rowActionClass}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    startEdit();
-                  }}
-                >
-                  <Pencil size={13} />
-                </IconButton>
-              </SimpleTooltip>
-              <SimpleTooltip label="归档">
-                <IconButton
-                  tone="sidebar"
-                  aria-label="归档"
-                  className={rowActionClass}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleArchive();
-                  }}
-                >
-                  <Archive size={13} />
-                </IconButton>
-              </SimpleTooltip>
-              <DropdownMenu open={moreOpen} onOpenChange={setMoreOpen}>
-                <DropdownMenuTrigger asChild>
-                  <IconButton
-                    tone="sidebar"
-                    aria-label="更多操作"
-                    title="更多"
-                    className={rowActionClass}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <MoreHorizontal size={13} />
-                  </IconButton>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="end"
-                  className="min-w-52"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <DropdownMenuItem onSelect={() => togglePin()}>
-                    {conversation.pinned ? (
-                      <PinOff size={14} className="shrink-0" />
-                    ) : (
-                      <Pin size={14} className="shrink-0" />
-                    )}
-                    <span className="flex-1 truncate">
-                      {conversation.pinned ? "取消置顶" : "置顶"}
-                    </span>
-                  </DropdownMenuItem>
-                  {moveMenuSection}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={handleDuplicate}>
-                    <Copy size={14} className="shrink-0" />
-                    <span className="flex-1 truncate">克隆对话</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onSelect={() =>
-                      useShareStore.getState().open(conversation.id)
-                    }
-                  >
-                    <Share2 size={14} className="shrink-0" />
-                    <span className="flex-1 truncate">分享…</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => void handleExport("md")}>
-                    <Download size={14} className="shrink-0" />
-                    <span className="flex-1 truncate">导出 Markdown</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => void handleExport("json")}>
-                    <FileJson size={14} className="shrink-0" />
-                    <span className="flex-1 truncate">导出 JSON</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant="danger"
-                    onSelect={requestPermanentDelete}
-                  >
-                    <Trash2 size={14} className="shrink-0" />
-                    <span className="flex-1 truncate">永久删除</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </span>
-          ) : conversation.pinned ? (
-            <Pin
-              size={12}
-              className="shrink-0 text-sidebar-foreground/40"
-              aria-label="已置顶"
-            />
-          ) : null}
+              ) : null}
             </SurfaceRow>
           </ContextMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent side="right" align="start" className="max-w-sm px-3 py-2">
+        <TooltipContent
+          side="right"
+          align="start"
+          className="max-w-sm px-3 py-2"
+        >
           <div className="flex flex-col gap-1.5">
             <p className="text-sm font-semibold">{conversation.title}</p>
             <p className="text-xs text-muted-foreground">

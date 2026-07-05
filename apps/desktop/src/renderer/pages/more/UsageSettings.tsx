@@ -68,11 +68,7 @@ export function UsageSettings() {
       {summary ? (
         <>
           {error && <RefreshErrorBanner message={error} onRetry={refresh} />}
-          <Dashboard
-            summary={summary}
-            cnyPerUsd={cnyPerUsd}
-            byok={byok}
-          />
+          <Dashboard summary={summary} cnyPerUsd={cnyPerUsd} byok={byok} />
         </>
       ) : error ? (
         <ErrorState message={error} onRetry={refresh} />

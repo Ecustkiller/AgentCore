@@ -23,7 +23,7 @@ import {
   PinOff,
   X,
 } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 // 本地文件能力（web 缺 fsApi → false）
 const isDesktop = hasLocalFiles();
@@ -355,6 +355,11 @@ function PickerPanel({
   onCreateKeyDown: (e: React.KeyboardEvent) => void;
   onCreateFromSearch: () => void;
 }) {
+  const createInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (creating) createInputRef.current?.focus();
+  }, [creating]);
+
   const idleHint = isDesktop
     ? "不选则先聊；需要写文件时在本机自动建项目"
     : "不选则先聊；需要时在云端建项目";
@@ -402,14 +407,17 @@ function PickerPanel({
         {creating ? (
           <div className="px-2.5 py-1.5">
             <div className="flex items-center gap-2">
-              <FolderPlus size={14} className="shrink-0 text-muted-foreground" />
+              <FolderPlus
+                size={14}
+                className="shrink-0 text-muted-foreground"
+              />
               <input
+                ref={createInputRef}
                 value={newName}
                 onChange={(e) => onNewNameChange(e.target.value)}
                 onKeyDown={onCreateKeyDown}
                 placeholder="项目名称"
                 className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-                autoFocus
               />
             </div>
             {isDesktop && (

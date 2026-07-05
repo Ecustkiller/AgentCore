@@ -1,7 +1,4 @@
-import {
-  useActiveGenerating,
-  useActiveMessages,
-} from "@/stores/conversation";
+import { useActiveGenerating, useActiveMessages } from "@/stores/conversation";
 import { useMessageExecution } from "@/stores/execution";
 
 export function StreamingIndicator() {

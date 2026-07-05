@@ -26,7 +26,10 @@ interface Props {
   layout: ImBubbleLayout;
 }
 
-function textBubbleRadius(mine: boolean, position: ImBubbleLayout["clusterPosition"]) {
+function textBubbleRadius(
+  mine: boolean,
+  position: ImBubbleLayout["clusterPosition"],
+) {
   if (position === "single") return "rounded-xl";
   if (mine) {
     if (position === "first") return "rounded-xl rounded-br-sm";
@@ -199,9 +202,7 @@ export function ChatBubble({
       } ${layout.tightTop ? "-mt-1" : ""}`}
     >
       <div
-        className={`flex items-start gap-2 ${
-          mine ? "flex-row-reverse" : ""
-        }`}
+        className={`flex items-start gap-2 ${mine ? "flex-row-reverse" : ""}`}
       >
         <div
           className={`mt-0.5 shrink-0 ${layout.showAvatar ? "" : "invisible"}`}
