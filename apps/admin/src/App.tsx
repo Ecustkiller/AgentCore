@@ -8,12 +8,13 @@ import { ConversationsPage } from "@/pages/ConversationsPage";
 import { ForcePasswordChangePage } from "@/pages/ForcePasswordChangePage";
 import { InvitesPage } from "@/pages/InvitesPage";
 import { LoginPage } from "@/pages/LoginPage";
+import { MfaSetupPage } from "@/pages/MfaSetupPage";
 import { OverviewPage } from "@/pages/OverviewPage";
 import { ReplayPage } from "@/pages/ReplayPage";
 import { SystemPage } from "@/pages/SystemPage";
 import { UsersPage } from "@/pages/UsersPage";
 import { NetworkError, setUnauthorizedHandler } from "@/services/api";
-import { fetchMe, logout } from "@/services/auth";
+import { fetchMe, logout, mfaStatus } from "@/services/auth";
 import { useAuthStore } from "@/stores/auth";
 import { ShieldAlert } from "lucide-react";
 import { useEffect } from "react";
@@ -30,8 +31,12 @@ async function bootstrap(): Promise<void> {
   setLoading();
   try {
     const user = await fetchMe();
-    if (user.role === "admin") setAuthenticated(user);
-    else setForbidden(user);
+    if (user.role !== "admin") {
+      setForbidden(user);
+      return;
+    }
+    const { enrolled } = await mfaStatus();
+    setAuthenticated(user, { mfaSetupRequired: !enrolled });
   } catch (err) {
     if (err instanceof NetworkError) setUnavailable();
     else setUnauthenticated();
@@ -43,6 +48,7 @@ export function App() {
   const passwordMustChange = useAuthStore(
     (s) => s.user?.passwordMustChange ?? false,
   );
+  const mfaSetupRequired = useAuthStore((s) => s.mfaSetupRequired);
 
   useEffect(() => {
     setUnauthorizedHandler(() => useAuthStore.getState().setUnauthenticated());
@@ -96,6 +102,10 @@ export function App() {
 
   if (passwordMustChange) {
     return <ForcePasswordChangePage />;
+  }
+
+  if (mfaSetupRequired) {
+    return <MfaSetupPage />;
   }
 
   return (

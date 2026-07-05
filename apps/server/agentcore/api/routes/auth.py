@@ -18,6 +18,7 @@ from agentcore.admin.audit import record_admin_audit
 from agentcore.api.account_cleanup import cleanup_account_resources
 from agentcore.api.dependencies import (
     ACCESS_TOKEN_COOKIE,
+    AdminSessionUser,
     AdminUser,
     AuthUser,
     get_asset_storage,
@@ -26,6 +27,7 @@ from agentcore.api.dependencies import (
     get_conversation_share_repo,
     get_credentials_repo,
     get_db,
+    get_admin_mfa_service,
     get_messaging_service,
     get_user_llm_key_repo,
 )
@@ -36,7 +38,13 @@ from agentcore.api.schemas import (
     DeleteAccountRequest,
     InviteListResponse,
     InviteResponse,
+    LoginMfaRequest,
     LoginRequest,
+    LoginResponse,
+    MfaConfirmRequest,
+    MfaConfirmResponse,
+    MfaSetupResponse,
+    MfaStatusResponse,
     RegisterRequest,
     StatusResponse,
     TokenRefreshRequest,
@@ -45,7 +53,10 @@ from agentcore.api.schemas import (
     UpdateProfileRequest,
     UserResponse,
 )
+from agentcore.auth.client import ClientPlatform, parse_client_platform
+from agentcore.auth.mfa import AdminMfaService
 from agentcore.auth import AuthService, TokenPair
+from agentcore.auth.service import LoginResult
 from agentcore.config import settings
 from agentcore.core.errors import AuthenticationError
 from agentcore.core.logging import get_logger
@@ -58,7 +69,7 @@ from agentcore.db.repositories import (
 )
 from agentcore.messaging import MessagingService
 from agentcore.middleware.csrf import clear_csrf_token, issue_csrf_token
-from agentcore.security.tokens import decode_access_token
+from agentcore.security.tokens import decode_access_token_claims
 from agentcore.storage.assets import AssetStorage
 
 logger = get_logger(__name__)
@@ -88,6 +99,21 @@ RefreshCookie = Annotated[str | None, Cookie(alias=REFRESH_TOKEN_COOKIE)]
 
 def _user_response(user: User, *, password_must_change: bool = False) -> UserResponse:
     return UserResponse.from_user(user, password_must_change=password_must_change)
+
+
+async def _login_response_for(
+    result,
+    creds_repo: CredentialsRepository,
+) -> LoginResponse:
+    user_resp = None
+    if result.user is not None and not result.mfa_required:
+        user_resp = await _user_response_for(result.user, creds_repo)
+    return LoginResponse(
+        user=user_resp,
+        mfa_required=result.mfa_required,
+        pending_token=result.pending_token,
+        mfa_setup_required=result.mfa_setup_required,
+    )
 
 
 async def _user_response_for(
@@ -174,16 +200,36 @@ async def register(
     return _user_response(user)
 
 
-@router.post("/login", response_model=UserResponse)
+@router.post("/login", response_model=LoginResponse)
 async def login(
     body: LoginRequest,
+    response: Response,
+    platform: Annotated[ClientPlatform, Depends(parse_client_platform)],
+    service: AuthService = Depends(get_auth_service),
+    creds_repo: CredentialsRepository = Depends(get_credentials_repo),
+):
+    result = await service.login(
+        username=body.username, password=body.password, platform=platform
+    )
+    if result.tokens is not None:
+        _set_auth_cookies(response, result.tokens, user_id=result.user.user_id)
+    return await _login_response_for(result, creds_repo)
+
+
+@router.post("/login/mfa", response_model=LoginResponse)
+async def login_mfa(
+    body: LoginMfaRequest,
     response: Response,
     service: AuthService = Depends(get_auth_service),
     creds_repo: CredentialsRepository = Depends(get_credentials_repo),
 ):
-    user, tokens = await service.login(username=body.username, password=body.password)
+    user, tokens = await service.complete_mfa_login(
+        pending_token=body.pending_token,
+        code=body.code,
+        recovery_code=body.recovery_code,
+    )
     _set_auth_cookies(response, tokens, user_id=user.user_id)
-    return await _user_response_for(user, creds_repo)
+    return await _login_response_for(LoginResult(user=user, tokens=tokens), creds_repo)
 
 
 @router.post("/refresh", response_model=StatusResponse)
@@ -200,7 +246,7 @@ async def refresh(
         # Token invalid/expired/reused: clear cookies so the client logs in again.
         _clear_auth_cookies(response)
         raise
-    user_id = decode_access_token(tokens.access_token)
+    user_id = decode_access_token_claims(tokens.access_token)[0]
     _set_auth_cookies(response, tokens, user_id=user_id)
     return StatusResponse()
 
@@ -215,7 +261,7 @@ async def logout(
     user_id: str | None = None
     if access_token:
         try:
-            user_id = decode_access_token(access_token)
+            user_id = decode_access_token_claims(access_token)[0]
         except AuthenticationError:
             user_id = None
     if refresh_token:
@@ -250,13 +296,23 @@ def _token_response(
 @router.post("/token", response_model=TokenResponse)
 async def token_login(
     body: LoginRequest,
+    platform: Annotated[ClientPlatform, Depends(parse_client_platform)],
     service: AuthService = Depends(get_auth_service),
+    creds_repo: CredentialsRepository = Depends(get_credentials_repo),
 ):
     """Bearer-token login: same credential check as cookie ``/login`` but returns the
     access + refresh tokens in the JSON body (plus the user — identity in one call)."""
-    user, tokens = await service.login(username=body.username, password=body.password)
-    must_change = await service.password_must_change(user_id=user.user_id)
-    return _token_response(tokens, user=user, password_must_change=must_change)
+    result = await service.login(
+        username=body.username, password=body.password, platform=platform
+    )
+    if result.mfa_required:
+        raise AuthenticationError("MFA required — complete /v1/auth/login/mfa first")
+    if result.tokens is None:
+        raise AuthenticationError("Login failed")
+    must_change = await service.password_must_change(user_id=result.user.user_id)
+    return _token_response(
+        result.tokens, user=result.user, password_must_change=must_change
+    )
 
 
 @router.post("/token/refresh", response_model=TokenResponse)
@@ -367,6 +423,44 @@ async def delete_account(
     )
     _clear_auth_cookies(response, user_id=user.user_id)
     return StatusResponse()
+
+
+# --- Admin MFA (TOTP) ---
+
+
+@router.get("/mfa/status", response_model=MfaStatusResponse)
+async def mfa_status(
+    user: AdminSessionUser,
+    mfa: AdminMfaService = Depends(get_admin_mfa_service),
+):
+    return MfaStatusResponse(enrolled=await mfa.is_enrolled(user.user_id))
+
+
+@router.post("/mfa/setup", response_model=MfaSetupResponse)
+async def mfa_setup(
+    user: AdminSessionUser,
+    mfa: AdminMfaService = Depends(get_admin_mfa_service),
+):
+    payload = await mfa.begin_setup(user_id=user.user_id, username=user.username)
+    return MfaSetupResponse(secret=payload.secret, otpauth_uri=payload.otpauth_uri)
+
+
+@router.post("/mfa/confirm", response_model=MfaConfirmResponse)
+async def mfa_confirm(
+    user: AdminSessionUser,
+    body: MfaConfirmRequest,
+    mfa: AdminMfaService = Depends(get_admin_mfa_service),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await mfa.confirm_setup(user_id=user.user_id, code=body.code)
+    await record_admin_audit(
+        db,
+        actor_id=user.user_id,
+        action="mfa.enroll",
+        target_type="user",
+        target_id=user.user_id,
+    )
+    return MfaConfirmResponse(recovery_codes=result.recovery_codes)
 
 
 @router.post("/invites", response_model=InviteResponse, status_code=201)

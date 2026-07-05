@@ -3,16 +3,23 @@
 from collections.abc import AsyncGenerator
 from typing import Annotated
 
-from fastapi import Cookie, Depends, Header
+from fastapi import Cookie, Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.admin import AdminService
 from agentcore.auth import AuthService
-from agentcore.core.errors import AuthenticationError, AuthorizationError
+from agentcore.auth.mfa import AdminMfaService
+from agentcore.core.errors import (
+    AdminProductForbiddenError,
+    AuthenticationError,
+    AuthorizationError,
+    MfaSetupRequiredError,
+)
 from agentcore.db.base import get_session
 from agentcore.db.models import User
 from agentcore.db.repositories import (
     AdminAuditRepository,
+    AdminMfaRepository,
     BoardRepository,
     ChatRepository,
     ConversationRepository,
@@ -37,11 +44,14 @@ from agentcore.db.repositories import (
 )
 from agentcore.messaging import MessagingService
 from agentcore.messaging.hub import HubChatEventPublisher, default_chat_hub
-from agentcore.security.tokens import decode_access_token
+from agentcore.security.tokens import decode_access_token_claims
 from agentcore.storage.assets import AssetStorage, build_asset_storage
 
 # Cookie name carrying the access JWT (set by the auth routes).
 ACCESS_TOKEN_COOKIE = "access_token"
+
+_AUTH_PREFIX = "/v1/auth"
+_ADMIN_PREFIX = "/v1/admin"
 
 
 def _bearer_token(authorization: str | None) -> str | None:
@@ -61,6 +71,30 @@ def _bearer_token(authorization: str | None) -> str | None:
     return token or None
 
 
+def _is_auth_path(path: str) -> bool:
+    return path.startswith(_AUTH_PREFIX)
+
+
+def _is_admin_path(path: str) -> bool:
+    return path.startswith(_ADMIN_PREFIX)
+
+
+def _enforce_audience_bounds(request: Request, user: User, aud: str) -> None:
+    """Block admin/product session crossover at the dependency layer."""
+    path = request.url.path
+
+    if _is_admin_path(path):
+        if aud != "admin":
+            raise AuthorizationError("请使用管理后台登录")
+        return
+
+    if _is_auth_path(path):
+        return
+
+    if user.role == "admin" or aud == "admin":
+        raise AdminProductForbiddenError()
+
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Yield an async database session."""
     async for session in get_session():
@@ -69,6 +103,16 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 def get_user_repo(session: AsyncSession = Depends(get_db)) -> UserRepository:
     return UserRepository(session)
+
+
+def get_admin_mfa_repo(session: AsyncSession = Depends(get_db)) -> AdminMfaRepository:
+    return AdminMfaRepository(session)
+
+
+def get_admin_mfa_service(
+    mfa_repo: AdminMfaRepository = Depends(get_admin_mfa_repo),
+) -> AdminMfaService:
+    return AdminMfaService(mfa_repo=mfa_repo)
 
 
 def get_admin_service(session: AsyncSession = Depends(get_db)) -> AdminService:
@@ -170,13 +214,17 @@ def get_messaging_service(
     )
 
 
-def get_auth_service(session: AsyncSession = Depends(get_db)) -> AuthService:
-    """Build AuthService with all four repos bound to one request session."""
+def get_auth_service(
+    session: AsyncSession = Depends(get_db),
+    mfa: AdminMfaService = Depends(get_admin_mfa_service),
+) -> AuthService:
+    """Build AuthService with all repos bound to one request session."""
     return AuthService(
         users=UserRepository(session),
         credentials=CredentialsRepository(session),
         refresh_tokens=RefreshTokenRepository(session),
         invites=InviteRepository(session),
+        mfa=mfa,
     )
 
 
@@ -187,6 +235,7 @@ def get_credentials_repo(
 
 
 async def get_current_user(
+    request: Request,
     access_token: Annotated[str | None, Cookie(alias=ACCESS_TOKEN_COOKIE)] = None,
     authorization: Annotated[str | None, Header()] = None,
     user_repo: UserRepository = Depends(get_user_repo),
@@ -196,14 +245,17 @@ async def get_current_user(
     token = access_token or _bearer_token(authorization)
     if not token:
         raise AuthenticationError("Not authenticated")
-    user_id = decode_access_token(token)
+    user_id, aud = decode_access_token_claims(token)
     user = await user_repo.get_by_id(user_id)
     if user is None or user.status != "active":
         raise AuthenticationError("User not found or inactive")
+    request.state.token_aud = aud
+    _enforce_audience_bounds(request, user, aud)
     return user
 
 
 async def get_optional_user(
+    request: Request,
     access_token: Annotated[str | None, Cookie(alias=ACCESS_TOKEN_COOKIE)] = None,
     authorization: Annotated[str | None, Header()] = None,
     user_repo: UserRepository = Depends(get_user_repo),
@@ -213,11 +265,16 @@ async def get_optional_user(
     if not token:
         return None
     try:
-        user_id = decode_access_token(token)
+        user_id, aud = decode_access_token_claims(token)
     except AuthenticationError:
         return None
     user = await user_repo.get_by_id(user_id)
     if user is None or user.status != "active":
+        return None
+    request.state.token_aud = aud
+    try:
+        _enforce_audience_bounds(request, user, aud)
+    except (AdminProductForbiddenError, AuthorizationError):
         return None
     return user
 
@@ -226,11 +283,27 @@ AuthUser = Annotated[User, Depends(get_current_user)]
 OptionalUser = Annotated[User | None, Depends(get_optional_user)]
 
 
-async def get_current_admin(user: AuthUser) -> User:
+async def get_current_admin(
+    user: AuthUser,
+    mfa_repo: AdminMfaRepository = Depends(get_admin_mfa_repo),
+) -> User:
     """Resolve the current user and require the admin role (403 otherwise)."""
+    if user.role != "admin":
+        raise AuthorizationError("Admin privileges required")
+    row = await mfa_repo.get_by_user_id(user.user_id)
+    if row is None or row.enabled_at is None:
+        raise MfaSetupRequiredError("请先完成双因素认证绑定")
+    return user
+
+
+AdminUser = Annotated[User, Depends(get_current_admin)]
+
+
+async def get_admin_session_user(user: AuthUser) -> User:
+    """Admin-role session without MFA enrollment (MFA setup routes only)."""
     if user.role != "admin":
         raise AuthorizationError("Admin privileges required")
     return user
 
 
-AdminUser = Annotated[User, Depends(get_current_admin)]
+AdminSessionUser = Annotated[User, Depends(get_admin_session_user)]

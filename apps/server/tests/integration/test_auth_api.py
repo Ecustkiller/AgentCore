@@ -16,19 +16,25 @@ from agentcore.config import settings
 _PW = "password123"
 
 
+from tests.integration.conftest import login_admin
+
+
 async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
     r = await client.post(
         "/v1/auth/register",
         json={"username": username, "password": _PW, "invite_code": invite_code},
     )
     assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
+    r = await client.post(
+        "/v1/auth/login",
+        json={"username": username, "password": _PW},
+        headers={"X-Client-Platform": "desktop"},
+    )
     assert r.status_code == 200, r.text
 
 
 async def _login_admin(client: httpx.AsyncClient, username: str, password: str) -> None:
-    r = await client.post("/v1/auth/login", json={"username": username, "password": password})
-    assert r.status_code == 200, r.text
+    await login_admin(client, username, password)
 
 
 async def test_protected_endpoints_require_auth(client):
@@ -402,9 +408,7 @@ async def test_invite_endpoints_require_auth(client):
 
 async def test_admin_issues_invite_and_new_user_registers_with_it(client, make_admin):
     username, password = await make_admin()
-    assert (
-        await client.post("/v1/auth/login", json={"username": username, "password": password})
-    ).status_code == 200
+    await _login_admin(client, username, password)
 
     r = await client.post("/v1/auth/invites", json={})
     assert r.status_code == 201, r.text
@@ -530,3 +534,21 @@ async def test_non_admin_cannot_revoke_invite(client, make_invite):
     code = await make_invite("INV-REVOKE-USER")
     await _register_and_login(client, code, "regular2")
     assert (await client.post(f"/v1/auth/invites/{uuid4()}/revoke")).status_code == 403
+
+
+async def test_admin_cannot_login_on_desktop(client, make_admin):
+    username, password = await make_admin()
+    r = await client.post(
+        "/v1/auth/login",
+        json={"username": username, "password": password},
+        headers={"X-Client-Platform": "desktop"},
+    )
+    assert r.status_code == 403
+    body = r.json()
+    assert body["error"]["code"] == "ADMIN_PRODUCT_FORBIDDEN"
+
+
+async def test_admin_mfa_login_flow(client, make_admin):
+    username, password = await make_admin()
+    await login_admin(client, username, password)
+    assert (await client.get("/v1/admin/overview")).status_code == 200

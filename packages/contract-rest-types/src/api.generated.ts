@@ -582,6 +582,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/login/mfa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Login Mfa */
+        post: operations["login_mfa_v1_auth_login_mfa_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/logout": {
         parameters: {
             query?: never;
@@ -629,6 +646,57 @@ export interface paths {
          *     is left untouched (distinguished via ``model_fields_set``).
          */
         patch: operations["update_me_v1_auth_me_patch"];
+        trace?: never;
+    };
+    "/v1/auth/mfa/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mfa Confirm */
+        post: operations["mfa_confirm_v1_auth_mfa_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/mfa/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mfa Setup */
+        post: operations["mfa_setup_v1_auth_mfa_setup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/mfa/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Mfa Status */
+        get: operations["mfa_status_v1_auth_mfa_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/auth/refresh": {
@@ -4695,12 +4763,40 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** LoginMfaRequest */
+        LoginMfaRequest: {
+            /** Code */
+            code?: string | null;
+            /** Pending Token */
+            pending_token: string;
+            /** Recovery Code */
+            recovery_code?: string | null;
+        };
         /** LoginRequest */
         LoginRequest: {
             /** Password */
             password: string;
             /** Username */
             username: string;
+        };
+        /**
+         * LoginResponse
+         * @description Cookie/bearer login outcome — MFA may defer token issuance.
+         */
+        LoginResponse: {
+            /**
+             * Mfa Required
+             * @default false
+             */
+            mfa_required: boolean;
+            /**
+             * Mfa Setup Required
+             * @default false
+             */
+            mfa_setup_required: boolean;
+            /** Pending Token */
+            pending_token?: string | null;
+            user?: components["schemas"]["UserResponse"] | null;
         };
         /**
          * MarkReadRequest
@@ -4973,6 +5069,28 @@ export interface components {
             memory_updates?: components["schemas"]["MemoryUpdateView"][];
             /** Total */
             total: number;
+        };
+        /** MfaConfirmRequest */
+        MfaConfirmRequest: {
+            /** Code */
+            code: string;
+        };
+        /** MfaConfirmResponse */
+        MfaConfirmResponse: {
+            /** Recovery Codes */
+            recovery_codes: string[];
+        };
+        /** MfaSetupResponse */
+        MfaSetupResponse: {
+            /** Otpauth Uri */
+            otpauth_uri: string;
+            /** Secret */
+            secret: string;
+        };
+        /** MfaStatusResponse */
+        MfaStatusResponse: {
+            /** Enrolled */
+            enrolled: boolean;
         };
         /**
          * ModelModeCatalog
@@ -7293,7 +7411,9 @@ export interface operations {
     login_v1_auth_login_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Client-Platform"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7309,7 +7429,40 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserResponse"];
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    login_mfa_v1_auth_login_mfa_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginMfaRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
                 };
             };
             /** @description Validation Error */
@@ -7462,6 +7615,109 @@ export interface operations {
             };
         };
     };
+    mfa_confirm_v1_auth_mfa_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MfaConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaConfirmResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mfa_setup_v1_auth_mfa_setup_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaSetupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mfa_status_v1_auth_mfa_status_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     refresh_v1_auth_refresh_post: {
         parameters: {
             query?: never;
@@ -7529,7 +7785,9 @@ export interface operations {
     token_login_v1_auth_token_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Client-Platform"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };

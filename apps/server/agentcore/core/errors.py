@@ -140,6 +140,29 @@ class AuthorizationError(AgentCoreError):
     status_code = 403
 
 
+class AdminProductForbiddenError(AuthorizationError):
+    """Admin accounts cannot authenticate on product clients (desktop / mobile)."""
+
+    code = ErrorCode.ADMIN_PRODUCT_FORBIDDEN
+
+    def __init__(self, message: str = "管理员账号请使用管理后台登录", **kwargs):
+        super().__init__(message, **kwargs)
+
+
+class MfaRequiredError(AgentCoreError):
+    """Password verified; TOTP step still pending."""
+
+    code = ErrorCode.MFA_REQUIRED
+    status_code = 401
+
+
+class MfaSetupRequiredError(AgentCoreError):
+    """Admin session exists but MFA enrollment is incomplete."""
+
+    code = ErrorCode.MFA_SETUP_REQUIRED
+    status_code = 428
+
+
 class NotFoundError(AgentCoreError):
     """Resource not found."""
 

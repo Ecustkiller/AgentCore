@@ -26,6 +26,38 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=256)
 
 
+class LoginMfaRequest(BaseModel):
+    pending_token: str = Field(..., min_length=1, max_length=2048)
+    code: str | None = Field(None, min_length=6, max_length=8)
+    recovery_code: str | None = Field(None, min_length=8, max_length=16)
+
+
+class LoginResponse(BaseModel):
+    """Cookie/bearer login outcome — MFA may defer token issuance."""
+
+    user: "UserResponse | None" = None
+    mfa_required: bool = False
+    pending_token: str | None = None
+    mfa_setup_required: bool = False
+
+
+class MfaSetupResponse(BaseModel):
+    secret: str
+    otpauth_uri: str
+
+
+class MfaConfirmRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=8)
+
+
+class MfaConfirmResponse(BaseModel):
+    recovery_codes: list[str]
+
+
+class MfaStatusResponse(BaseModel):
+    enrolled: bool
+
+
 class ChangePasswordRequest(BaseModel):
     """Self-service password change (修改密码): the current password proves intent,
     the new one is validated server-side (same ≥8 policy as registration)."""

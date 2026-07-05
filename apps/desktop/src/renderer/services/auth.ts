@@ -11,8 +11,9 @@ import { clearSidecarInference } from "@/services/inferenceToken";
 import type { AuthUser } from "@/stores/auth";
 import type { components } from "@/types/api.generated";
 
-/** Server user payload (`/auth/me|login|register`), generated from OpenAPI. */
+/** Server user payload (`/auth/me|register`), generated from OpenAPI. */
 type BackendUser = components["schemas"]["UserResponse"];
+type LoginResponse = components["schemas"]["LoginResponse"];
 
 /** Resolve the backend's relative avatar URL (`/v1/users/<id>/avatar?v=…`) against
  *  the API base so consumers can drop it straight into an `<img src>`. Leaves
@@ -43,9 +44,14 @@ export async function login(
   username: string,
   password: string,
 ): Promise<AuthUser> {
-  const user = toUser(
-    await api.post<BackendUser>("/v1/auth/login", { username, password }),
-  );
+  const body = await api.post<LoginResponse>("/v1/auth/login", {
+    username,
+    password,
+  });
+  if (!body.user) {
+    throw new Error("登录响应缺少用户信息");
+  }
+  const user = toUser(body.user);
   // Fresh session → drop any inference token cached for a previous user, so the
   // sidecar never mints under one user then bills another (token is user-scoped).
   clearSidecarInference();

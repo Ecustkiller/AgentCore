@@ -3,6 +3,10 @@ import type { AuthUser } from "@/stores/auth";
 import type { components } from "@/types/api.generated";
 
 type BackendUser = components["schemas"]["UserResponse"];
+type LoginResponse = components["schemas"]["LoginResponse"];
+type MfaStatusResponse = components["schemas"]["MfaStatusResponse"];
+type MfaSetupResponse = components["schemas"]["MfaSetupResponse"];
+type MfaConfirmResponse = components["schemas"]["MfaConfirmResponse"];
 
 function toUser(u: BackendUser): AuthUser {
   return {
@@ -15,6 +19,24 @@ function toUser(u: BackendUser): AuthUser {
   };
 }
 
+export type LoginOutcome =
+  | { kind: "success"; user: AuthUser }
+  | { kind: "mfa_required"; pendingToken: string }
+  | { kind: "mfa_setup_required"; user: AuthUser };
+
+function parseLoginResponse(res: LoginResponse): LoginOutcome {
+  if (res.mfa_required && res.pending_token) {
+    return { kind: "mfa_required", pendingToken: res.pending_token };
+  }
+  if (res.mfa_setup_required && res.user) {
+    return { kind: "mfa_setup_required", user: toUser(res.user) };
+  }
+  if (res.user) {
+    return { kind: "success", user: toUser(res.user) };
+  }
+  throw new Error("登录响应无效");
+}
+
 /** Resolve the current session from the access cookie (throws 401 if absent). */
 export async function fetchMe(): Promise<AuthUser> {
   return toUser(await api.get<BackendUser>("/v1/auth/me"));
@@ -23,10 +45,34 @@ export async function fetchMe(): Promise<AuthUser> {
 export async function login(
   username: string,
   password: string,
-): Promise<AuthUser> {
-  return toUser(
-    await api.post<BackendUser>("/v1/auth/login", { username, password }),
+): Promise<LoginOutcome> {
+  return parseLoginResponse(
+    await api.post<LoginResponse>("/v1/auth/login", { username, password }),
   );
+}
+
+export async function loginMfa(
+  pendingToken: string,
+  code: string,
+): Promise<LoginOutcome> {
+  return parseLoginResponse(
+    await api.post<LoginResponse>("/v1/auth/login/mfa", {
+      pending_token: pendingToken,
+      code,
+    }),
+  );
+}
+
+export async function mfaStatus(): Promise<MfaStatusResponse> {
+  return api.get<MfaStatusResponse>("/v1/auth/mfa/status");
+}
+
+export async function mfaSetup(): Promise<MfaSetupResponse> {
+  return api.post<MfaSetupResponse>("/v1/auth/mfa/setup");
+}
+
+export async function mfaConfirm(code: string): Promise<MfaConfirmResponse> {
+  return api.post<MfaConfirmResponse>("/v1/auth/mfa/confirm", { code });
 }
 
 export async function logout(): Promise<void> {

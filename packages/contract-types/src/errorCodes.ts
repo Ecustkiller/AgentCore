@@ -24,6 +24,9 @@ export const ERROR_CODES = [
   // auth / quota / rate
   "AUTH_ERROR",
   "FORBIDDEN",
+  "ADMIN_PRODUCT_FORBIDDEN",
+  "MFA_REQUIRED",
+  "MFA_SETUP_REQUIRED",
   "RATE_LIMITED",
   "QUOTA_EXCEEDED",
   // LLM provider (DeepSeek / BYOK)

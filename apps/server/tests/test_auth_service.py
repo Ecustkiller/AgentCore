@@ -17,6 +17,12 @@ from agentcore.security import decode_access_token, hash_refresh_token
 _PW = "password123"
 
 
+async def _do_login(svc: AuthService, **kwargs):
+    result = await svc.login(**kwargs)
+    assert result.tokens is not None, "expected tokens from login"
+    return result.user, result.tokens
+
+
 class FakeUsers:
     def __init__(self) -> None:
         self._by_id: dict = {}
@@ -110,7 +116,7 @@ class FakeRefreshTokens:
     def __init__(self) -> None:
         self.records: dict = {}
 
-    async def create(self, *, user_id, token_hash, token_family, expires_at):
+    async def create(self, *, user_id, token_hash, token_family, expires_at, client_aud="product"):
         rec = SimpleNamespace(
             id=new_id(),
             user_id=user_id,
@@ -119,6 +125,7 @@ class FakeRefreshTokens:
             expires_at=expires_at,
             revoked_at=None,
             rotated_at=None,
+            client_aud=client_aud,
         )
         self.records[rec.id] = rec
         return rec
@@ -263,7 +270,7 @@ async def test_login_success_issues_tokens():
     svc, _u, _c, tokens, invites = _make()
     await invites.create(code="C1")
     user = await svc.register(username="frank", password=_PW, invite_code="C1")
-    logged_user, pair = await svc.login(username="frank", password=_PW)
+    logged_user, pair = await _do_login(svc,username="frank", password=_PW)
     assert logged_user.user_id == user.user_id
     assert decode_access_token(pair.access_token) == user.user_id
     assert pair.refresh_token
@@ -327,7 +334,7 @@ async def test_login_resets_failures_on_success():
     user = await svc.register(username="ivan", password=_PW, invite_code="C1")
     with pytest.raises(AuthenticationError):
         await svc.login(username="ivan", password="wrong-pw")
-    await svc.login(username="ivan", password=_PW)
+    await _do_login(svc,username="ivan", password=_PW)
     cred = await creds.get_by_user_id(user.user_id)
     assert cred.failed_attempts == 0 and cred.locked_until is None
 
@@ -339,7 +346,7 @@ async def test_refresh_rotates_token():
     svc, _u, _c, tokens, invites = _make()
     await invites.create(code="C1")
     await svc.register(username="judy", password=_PW, invite_code="C1")
-    _, pair = await svc.login(username="judy", password=_PW)
+    _, pair = await _do_login(svc,username="judy", password=_PW)
     new_pair = await svc.refresh(refresh_token=pair.refresh_token)
     assert new_pair.refresh_token != pair.refresh_token
     assert len(tokens.records) == 2
@@ -351,7 +358,7 @@ async def test_refresh_reuse_beyond_grace_revokes_family():
     svc, _u, _c, tokens, invites = _make()
     await invites.create(code="C1")
     await svc.register(username="ken", password=_PW, invite_code="C1")
-    _, pair = await svc.login(username="ken", password=_PW)
+    _, pair = await _do_login(svc,username="ken", password=_PW)
     await svc.refresh(refresh_token=pair.refresh_token)  # rotate once
     # Age the rotation past the grace window so re-presenting the old token reads
     # as a genuine leak/replay (not benign concurrency) -> family revoked.
@@ -370,7 +377,7 @@ async def test_refresh_reuse_within_grace_is_benign():
     svc, _u, _c, tokens, invites = _make()
     await invites.create(code="C1")
     await svc.register(username="kim", password=_PW, invite_code="C1")
-    _, pair = await svc.login(username="kim", password=_PW)
+    _, pair = await _do_login(svc,username="kim", password=_PW)
     first = await svc.refresh(refresh_token=pair.refresh_token)  # rotate once
     second = await svc.refresh(refresh_token=pair.refresh_token)  # racing replay
     assert second.refresh_token and second.refresh_token != first.refresh_token
@@ -391,7 +398,7 @@ async def test_refresh_expired_token_raises():
     svc, _u, _c, tokens, invites = _make()
     await invites.create(code="C1")
     await svc.register(username="leo", password=_PW, invite_code="C1")
-    _, pair = await svc.login(username="leo", password=_PW)
+    _, pair = await _do_login(svc,username="leo", password=_PW)
     rec = await tokens.get_by_hash(hash_refresh_token(pair.refresh_token))
     rec.expires_at = datetime.now(UTC) - timedelta(seconds=1)
     with pytest.raises(AuthenticationError):
@@ -402,7 +409,7 @@ async def test_logout_revokes_family():
     svc, _u, _c, tokens, invites = _make()
     await invites.create(code="C1")
     await svc.register(username="mia", password=_PW, invite_code="C1")
-    _, pair = await svc.login(username="mia", password=_PW)
+    _, pair = await _do_login(svc,username="mia", password=_PW)
     await svc.logout(refresh_token=pair.refresh_token)
     assert all(r.revoked_at is not None for r in tokens.records.values())
     with pytest.raises(AuthenticationError):
@@ -490,7 +497,7 @@ async def test_admin_reset_password_rotates_secret_and_revokes_sessions():
     svc, _u, creds, tokens, invites = _make()
     await invites.create(code="C1")
     user = await svc.register(username="nora", password=_PW, invite_code="C1")
-    _, pair = await svc.login(username="nora", password=_PW)
+    _, pair = await _do_login(svc,username="nora", password=_PW)
 
     temp = await svc.admin_reset_password(user_id=user.user_id)
     assert len(temp) >= 8 and temp != _PW
@@ -500,7 +507,7 @@ async def test_admin_reset_password_rotates_secret_and_revokes_sessions():
     # old password no longer works; the freshly minted one does
     with pytest.raises(AuthenticationError):
         await svc.login(username="nora", password=_PW)
-    relogged, _ = await svc.login(username="nora", password=temp)
+    relogged, _ = await _do_login(svc,username="nora", password=temp)
     assert relogged.user_id == user.user_id
 
     # every pre-reset session is revoked (the old refresh token is dead)
@@ -520,7 +527,7 @@ async def test_admin_reset_password_clears_lockout():
     temp = await svc.admin_reset_password(user_id=user.user_id)
     cred = await creds.get_by_user_id(user.user_id)
     assert cred.locked_until is None and cred.failed_attempts == 0
-    relogged, _ = await svc.login(username="omar", password=temp)
+    relogged, _ = await _do_login(svc,username="omar", password=temp)
     assert relogged.user_id == user.user_id
 
 
@@ -537,7 +544,7 @@ async def test_admin_set_password_rotates_secret_and_revokes_sessions():
     svc, _u, creds, tokens, invites = _make()
     await invites.create(code="C2")
     user = await svc.register(username="setme", password=_PW, invite_code="C2")
-    _, pair = await svc.login(username="setme", password=_PW)
+    _, pair = await _do_login(svc,username="setme", password=_PW)
 
     custom = "custompass99"
     await svc.admin_set_password(user_id=user.user_id, new_password=custom)
@@ -546,7 +553,7 @@ async def test_admin_set_password_rotates_secret_and_revokes_sessions():
 
     with pytest.raises(AuthenticationError):
         await svc.login(username="setme", password=_PW)
-    relogged, _ = await svc.login(username="setme", password=custom)
+    relogged, _ = await _do_login(svc,username="setme", password=custom)
     assert relogged.user_id == user.user_id
 
     with pytest.raises(AuthenticationError):
@@ -586,7 +593,7 @@ async def test_change_password_rotates_secret_and_keeps_current_session():
     svc, _u, _c, _t, invites = _make()
     await invites.create(code="C1")
     user = await svc.register(username="pia", password=_PW, invite_code="C1")
-    _, old_pair = await svc.login(username="pia", password=_PW)
+    _, old_pair = await _do_login(svc,username="pia", password=_PW)
 
     new_pair = await svc.change_password(
         user_id=user.user_id, current_password=_PW, new_password="brand-new-pw"
@@ -595,7 +602,7 @@ async def test_change_password_rotates_secret_and_keeps_current_session():
     # old password dead, new one works
     with pytest.raises(AuthenticationError):
         await svc.login(username="pia", password=_PW)
-    relogged, _ = await svc.login(username="pia", password="brand-new-pw")
+    relogged, _ = await _do_login(svc,username="pia", password="brand-new-pw")
     assert relogged.user_id == user.user_id
 
     # the returned pair is a live session; the pre-change one was revoked
@@ -707,7 +714,7 @@ async def test_delete_account_soft_deletes_anonymizes_and_revokes():
     svc, users, _c, _t, invites = _make()
     await invites.create(code="C1")
     user = await svc.register(username="zoe", password=_PW, invite_code="C1")
-    _, pair = await svc.login(username="zoe", password=_PW)
+    _, pair = await _do_login(svc,username="zoe", password=_PW)
 
     await svc.delete_account(user_id=user.user_id, password=_PW)
 
