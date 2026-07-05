@@ -35,8 +35,8 @@ async function bootstrap(): Promise<void> {
       setForbidden(user);
       return;
     }
-    const { enrolled } = await mfaStatus();
-    setAuthenticated(user, { mfaSetupRequired: !enrolled });
+    const { enrolled, required } = await mfaStatus();
+    setAuthenticated(user, { mfaSetupRequired: required && !enrolled });
   } catch (err) {
     if (err instanceof NetworkError) setUnavailable();
     else setUnauthenticated();

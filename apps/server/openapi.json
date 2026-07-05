@@ -4240,6 +4240,11 @@
           "enrolled": {
             "title": "Enrolled",
             "type": "boolean"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
           }
         },
         "required": [

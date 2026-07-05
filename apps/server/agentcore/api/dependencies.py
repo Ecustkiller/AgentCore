@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agentcore.admin import AdminService
 from agentcore.auth import AuthService
 from agentcore.auth.mfa import AdminMfaService
+from agentcore.config import settings
 from agentcore.core.errors import (
     AdminProductForbiddenError,
     AuthenticationError,
@@ -290,9 +291,10 @@ async def get_current_admin(
     """Resolve the current user and require the admin role (403 otherwise)."""
     if user.role != "admin":
         raise AuthorizationError("Admin privileges required")
-    row = await mfa_repo.get_by_user_id(user.user_id)
-    if row is None or row.enabled_at is None:
-        raise MfaSetupRequiredError("请先完成双因素认证绑定")
+    if settings.admin_mfa_required:
+        row = await mfa_repo.get_by_user_id(user.user_id)
+        if row is None or row.enabled_at is None:
+            raise MfaSetupRequiredError("请先完成双因素认证绑定")
     return user
 
 
