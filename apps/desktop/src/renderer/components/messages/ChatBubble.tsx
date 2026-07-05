@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { formatMessageTime } from "@/lib/format";
+import { formatMessageTimeOfDay } from "@/lib/format";
+import type { ImBubbleLayout } from "@/lib/imMessageLayout";
 import {
   type ChatMessageDetail,
   type StoredAttachment,
@@ -10,6 +11,7 @@ import {
 } from "@/services/messaging";
 import { Download, FileText, Folder, ImageOff } from "lucide-react";
 import { useEffect, useState } from "react";
+import { avatarInitial, avatarSrc } from "./chatDisplay";
 
 interface Props {
   message: ChatMessageDetail;
@@ -17,6 +19,51 @@ interface Props {
   mine: boolean;
   /** Sender's display name, shown above the bubble in group threads (others only). */
   senderName?: string;
+  /** Fallback label for the avatar initial. */
+  avatarName?: string;
+  /** Profile image when available. */
+  senderAvatarUrl?: string | null;
+  layout: ImBubbleLayout;
+}
+
+function textBubbleRadius(mine: boolean, position: ImBubbleLayout["clusterPosition"]) {
+  if (position === "single") return "rounded-xl";
+  if (mine) {
+    if (position === "first") return "rounded-xl rounded-br-sm";
+    if (position === "middle") return "rounded-lg rounded-r-xl";
+    return "rounded-xl rounded-tr-sm";
+  }
+  if (position === "first") return "rounded-xl rounded-bl-sm";
+  if (position === "middle") return "rounded-lg rounded-l-xl";
+  return "rounded-xl rounded-tl-sm";
+}
+
+/** Circular avatar: image when a URL exists, else a themed initial. */
+function ChatAvatar({
+  name,
+  url,
+}: {
+  name: string;
+  url?: string | null;
+}) {
+  const src = avatarSrc(url);
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt=""
+        className="size-8 shrink-0 rounded-full object-cover"
+      />
+    );
+  }
+  return (
+    <span
+      className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary"
+      aria-hidden
+    >
+      {avatarInitial(name)}
+    </span>
+  );
 }
 
 /** A human-readable byte size for a file chip (e.g. "1.2 MB"). */
@@ -116,8 +163,15 @@ function ChatImageAttachment({
  * files render as download chips. `system_card` (official notices) renders as a
  * centered system pill.
  */
-export function ChatBubble({ message, mine, senderName }: Props) {
-  const time = formatMessageTime(message.created_at);
+export function ChatBubble({
+  message,
+  mine,
+  senderName,
+  avatarName,
+  senderAvatarUrl,
+  layout,
+}: Props) {
+  const time = formatMessageTimeOfDay(message.created_at);
 
   if (message.content_type === "system_card") {
     return (
@@ -136,104 +190,141 @@ export function ChatBubble({ message, mine, senderName }: Props) {
   const files = attachments.filter((a) => !images.includes(a));
   const hasText = Boolean(message.content);
 
+  const avatarLabel = avatarName ?? senderName ?? "?";
+
   return (
     <div
-      className={`group flex flex-col ${mine ? "items-end" : "items-start"}`}
+      className={`group flex max-w-[75%] flex-col ${
+        mine ? "ml-auto items-end" : "items-start"
+      } ${layout.tightTop ? "-mt-1" : ""}`}
     >
-      {!mine && senderName && (
-        <span className="mb-0.5 px-1 text-xs text-muted-foreground">
-          {senderName}
-        </span>
-      )}
-
       <div
-        className={`flex max-w-[75%] flex-col gap-1.5 ${mine ? "items-end" : "items-start"}`}
+        className={`flex items-start gap-2 ${
+          mine ? "flex-row-reverse" : ""
+        }`}
       >
-        {hasText && (
+        <div
+          className={`mt-0.5 shrink-0 ${layout.showAvatar ? "" : "invisible"}`}
+          aria-hidden={!layout.showAvatar}
+        >
+          <ChatAvatar name={avatarLabel} url={senderAvatarUrl} />
+        </div>
+
+        <div
+          className={`flex min-w-0 flex-col ${
+            mine ? "items-end" : "flex-1 items-start"
+          }`}
+        >
+          {!mine && layout.showSenderName && senderName && (
+            <span className="mb-0.5 px-1 text-xs text-muted-foreground">
+              {senderName}
+            </span>
+          )}
+
           <div
-            className={`whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-sm ${
-              mine
-                ? "bg-primary text-primary-foreground"
-                : "border border-border bg-card text-foreground"
+            className={`flex flex-col gap-1.5 ${
+              mine ? "items-end" : "items-start"
             }`}
           >
-            {message.content}
-          </div>
-        )}
+            {hasText && (
+              <div
+                className={`whitespace-pre-wrap break-words px-3 py-2 text-sm ${textBubbleRadius(
+                  mine,
+                  layout.clusterPosition,
+                )} ${
+                  mine
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border bg-card text-foreground"
+                }`}
+              >
+                {message.content}
+              </div>
+            )}
 
-        {images.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {images.map((a) => (
-              <ChatImageAttachment
-                key={a.workspace_path ?? a.path}
-                chatId={message.chat_id}
-                attachment={a}
-              />
-            ))}
-          </div>
-        )}
+            {images.length > 0 && (
+              <div
+                className={`flex flex-wrap gap-1.5 ${mine ? "justify-end" : ""}`}
+              >
+                {images.map((a) => (
+                  <ChatImageAttachment
+                    key={a.workspace_path ?? a.path}
+                    chatId={message.chat_id}
+                    attachment={a}
+                  />
+                ))}
+              </div>
+            )}
 
-        {files.map((a) => {
-          const downloadable = a.kind !== "dir" && Boolean(a.workspace_path);
-          return (
-            <Button
-              key={a.workspace_path ?? a.path}
-              variant="ghost"
-              disabled={!downloadable}
-              onClick={() =>
-                downloadable &&
-                a.workspace_path &&
-                void downloadChatAttachment(
-                  message.chat_id,
-                  a.workspace_path,
-                  a.name,
-                )
-              }
-              className={`h-auto w-full max-w-[260px] justify-start gap-2 rounded-xl border border-border bg-card px-3 py-2 text-left font-normal ${
-                downloadable ? "hover:bg-accent" : "opacity-70"
-              }`}
-            >
-              <span className="flex w-full items-center gap-2">
-                {a.kind === "dir" ? (
-                  <Folder
-                    size={16}
-                    className="shrink-0 text-muted-foreground"
-                  />
-                ) : (
-                  <FileText
-                    size={16}
-                    className="shrink-0 text-muted-foreground"
-                  />
-                )}
-                <span className="min-w-0 flex-1">
-                  <SimpleTooltip label={a.name}>
-                    <span className="block truncate text-sm text-foreground">
-                      {a.name}
-                      {a.kind === "dir" ? "/" : ""}
+            {files.map((a) => {
+              const downloadable =
+                a.kind !== "dir" && Boolean(a.workspace_path);
+              return (
+                <Button
+                  key={a.workspace_path ?? a.path}
+                  variant="ghost"
+                  disabled={!downloadable}
+                  onClick={() =>
+                    downloadable &&
+                    a.workspace_path &&
+                    void downloadChatAttachment(
+                      message.chat_id,
+                      a.workspace_path,
+                      a.name,
+                    )
+                  }
+                  className={`h-auto w-full max-w-[260px] gap-2 rounded-xl border border-border bg-card px-3 py-2 font-normal ${
+                    mine ? "justify-end text-right" : "justify-start text-left"
+                  } ${downloadable ? "hover:bg-accent" : "opacity-70"}`}
+                >
+                  <span className="flex w-full items-center gap-2">
+                    {a.kind === "dir" ? (
+                      <Folder
+                        size={16}
+                        className="shrink-0 text-muted-foreground"
+                      />
+                    ) : (
+                      <FileText
+                        size={16}
+                        className="shrink-0 text-muted-foreground"
+                      />
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <SimpleTooltip label={a.name}>
+                        <span className="block truncate text-sm text-foreground">
+                          {a.name}
+                          {a.kind === "dir" ? "/" : ""}
+                        </span>
+                      </SimpleTooltip>
+                      {a.size_bytes != null && (
+                        <span className="block text-xs text-muted-foreground">
+                          {formatBytes(a.size_bytes)}
+                        </span>
+                      )}
                     </span>
-                  </SimpleTooltip>
-                  {a.size_bytes != null && (
-                    <span className="block text-xs text-muted-foreground">
-                      {formatBytes(a.size_bytes)}
-                    </span>
-                  )}
-                </span>
-                {downloadable && (
-                  <Download
-                    size={14}
-                    className="shrink-0 text-muted-foreground"
-                  />
-                )}
-              </span>
-            </Button>
-          );
-        })}
+                    {downloadable && (
+                      <Download
+                        size={14}
+                        className="shrink-0 text-muted-foreground"
+                      />
+                    )}
+                  </span>
+                </Button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {time && (
-        <span className="mt-0.5 px-1 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
-          {time}
-        </span>
+        <SimpleTooltip label={new Date(message.created_at).toLocaleString()}>
+          <span
+            className={`cursor-default px-1 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 ${
+              mine ? "mr-10" : "ml-10"
+            }`}
+          >
+            {time}
+          </span>
+        </SimpleTooltip>
       )}
     </div>
   );

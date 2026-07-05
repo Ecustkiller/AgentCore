@@ -29,7 +29,7 @@ strict SUPERSET of non-blocking: 先等用户 T 秒，等不到就退回今天�
 suspend / SSE events / RunState recording) lives behind ``ToolContext.escalation`` so this
 tool stays off the event vocabulary (引擎纯化); the tool owns only the decision + the
 outcome→result mapping (:func:`escalate_tool_result`). 设计见
-docs/07-规划/阻塞式求决策设计.md; 对比见 docs/03-AI核心/Agent协作模式.md（升级通道）.
+docs/06-规划/阻塞式求决策设计.md; 对比见 docs/03-AI核心/Agent协作模式.md（升级通道）.
 """
 
 from __future__ import annotations

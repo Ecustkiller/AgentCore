@@ -9,7 +9,7 @@ import {
   ToolLine,
   ToolLineGroup,
 } from "@/components/chat/ToolLine";
-import { groupToolRuns } from "@/lib/processTimeline";
+import { groupToolRuns, type TimelineNode } from "@/lib/processTimeline";
 import type {
   CheckpointDisplay,
   NonBlockingAskDisplay,
@@ -18,8 +18,35 @@ import type {
 import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import type { ExecutionJournal } from "@/stores/execution";
 import type { Citation, ProcessStep } from "@/types/events";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { Fragment } from "react";
 import { ThinkingDots, ThinkingHeader } from "./Thinking";
+
+function isProcessNode(node: TimelineNode): boolean {
+  return (
+    node.kind === "reasoning" ||
+    node.kind === "tool" ||
+    node.kind === "tool-group"
+  );
+}
+
+function countProcessStats(nodes: TimelineNode[]) {
+  let reasoningCount = 0;
+  let toolCount = 0;
+  for (const node of nodes) {
+    if (node.kind === "reasoning") reasoningCount++;
+    else if (node.kind === "tool") toolCount++;
+    else if (node.kind === "tool-group") toolCount += node.tools.length;
+  }
+  return { reasoningCount, toolCount };
+}
+
+function formatProcessSummary(reasoningCount: number, toolCount: number): string {
+  const parts: string[] = [];
+  if (reasoningCount > 0) parts.push(`思考了 ${reasoningCount} 步`);
+  if (toolCount > 0) parts.push(`调用了 ${toolCount} 个工具`);
+  return parts.join(" · ");
+}
 
 function InlineReasoning({
   text,
@@ -139,71 +166,114 @@ export function ProcessTimeline({
   // persisted process predates the marker fall back to a bottom-stamped graph.
   const hasTeamMarker = process.some((s) => s.kind === "team");
 
+  const hasProcessSteps = nodes.some(isProcessNode);
+  const shouldCollapseProcess = !isStreaming && hasProcessSteps;
+  const [processExpanded, toggleProcess] = useStreamAwareDisclosure(
+    messageId ? `${messageId}:process` : null,
+    isStreaming,
+    { settledDefault: false },
+  );
+  const { reasoningCount, toolCount } = countProcessStats(nodes);
+  const processSummary = formatProcessSummary(reasoningCount, toolCount);
+
+  const renderNode = (node: TimelineNode, i: number) => {
+    const live = isStreaming && i === nodes.length - 1;
+    if (node.kind === "team") {
+      return messageId ? (
+        <Fragment key={`team-${node.execution_id}`}>
+          <InlineTeamGraph
+            messageId={messageId}
+            executionId={node.execution_id}
+            journal={journal}
+          />
+          <EscalationCards
+            messageId={messageId}
+            conversationId={conversationId}
+            interactive={isStreaming}
+          />
+        </Fragment>
+      ) : null;
+    }
+    if (node.kind === "checkpoint") {
+      const cp = checkpoints.find((c) => c.id === node.checkpoint_id);
+      return cp ? <CheckpointCard key={cp.id} checkpoint={cp} /> : null;
+    }
+    if (node.kind === "ask") {
+      const ask = nonBlockingAsks.find((a) => a.id === node.ask_id);
+      return ask ? <NonBlockingAskCard key={ask.id} ask={ask} /> : null;
+    }
+    if (node.kind === "plan_review") {
+      const pr = planReviews.find((p) => p.id === node.checkpoint_id);
+      return pr ? <PlanReviewCard key={pr.id} review={pr} /> : null;
+    }
+    if (node.kind === "tool-group") {
+      return (
+        <ToolLineGroup
+          // biome-ignore lint/suspicious/noArrayIndexKey: append-only timeline
+          key={i}
+          tools={node.tools}
+          isStreaming={live}
+          turnKey={messageId}
+          groupIndex={i}
+        />
+      );
+    }
+    const step: ProcessStep = node.kind === "tool" ? node.step : node;
+    return (
+      <ProcessRow
+        // biome-ignore lint/suspicious/noArrayIndexKey: append-only timeline
+        key={i}
+        step={step}
+        streaming={live}
+        citations={citations}
+        onCitationClick={onCitationClick}
+        turnKey={messageId}
+        rowIndex={i}
+      />
+    );
+  };
+
+
   return (
     <div className="space-y-2">
       {nodes.map((node, i) => {
-        const live = isStreaming && i === nodes.length - 1;
-        // Positional markers (统一团队时间线): resolve each marker to its card / graph at
-        // its chronological slot, looking the payload up from the turn's side channels.
-        if (node.kind === "team") {
-          // 统一团队时间线: the collaboration graph rides this slot — and the team's
-          // escalations (worker→CEO→你 求决策) ride right with it. They are
-          // execution-scoped moments that belong WITH the team, not stamped at the
-          // bubble bottom AFTER the final answer; the bottom stack keeps them only for
-          // un-anchored legacy turns (no `team` marker). EscalationCards self-hides
-          // when the turn raised none.
-          return messageId ? (
-            <Fragment key={`team-${node.execution_id}`}>
-              <InlineTeamGraph
-                messageId={messageId}
-                executionId={node.execution_id}
-                journal={journal}
-              />
-              <EscalationCards
-                messageId={messageId}
-                conversationId={conversationId}
-                interactive={isStreaming}
-              />
-            </Fragment>
-          ) : null;
+        if (shouldCollapseProcess) {
+          const isFirstProcess =
+            isProcessNode(node) &&
+            !nodes.slice(0, i).some(isProcessNode);
+
+          if (!processExpanded) {
+            if (isProcessNode(node)) {
+              if (!isFirstProcess) return null;
+              return (
+                <button
+                  key="process-summary"
+                  type="button"
+                  onClick={toggleProcess}
+                  className="inline-flex items-center gap-1 text-sm text-muted-foreground"
+                >
+                  <ChevronRight className="size-4 shrink-0" aria-hidden />
+                  {processSummary}
+                </button>
+              );
+            }
+          } else if (isFirstProcess) {
+            return (
+              <Fragment key={`process-expanded-${i}`}>
+                <button
+                  type="button"
+                  onClick={toggleProcess}
+                  className="inline-flex items-center gap-1 text-sm text-muted-foreground"
+                >
+                  <ChevronDown className="size-4 shrink-0" aria-hidden />
+                  {processSummary}
+                </button>
+                {renderNode(node, i)}
+              </Fragment>
+            );
+          }
         }
-        if (node.kind === "checkpoint") {
-          const cp = checkpoints.find((c) => c.id === node.checkpoint_id);
-          return cp ? <CheckpointCard key={cp.id} checkpoint={cp} /> : null;
-        }
-        if (node.kind === "ask") {
-          const ask = nonBlockingAsks.find((a) => a.id === node.ask_id);
-          return ask ? <NonBlockingAskCard key={ask.id} ask={ask} /> : null;
-        }
-        if (node.kind === "plan_review") {
-          const pr = planReviews.find((p) => p.id === node.checkpoint_id);
-          return pr ? <PlanReviewCard key={pr.id} review={pr} /> : null;
-        }
-        if (node.kind === "tool-group") {
-          return (
-            <ToolLineGroup
-              // biome-ignore lint/suspicious/noArrayIndexKey: append-only timeline
-              key={i}
-              tools={node.tools}
-              isStreaming={live}
-              turnKey={messageId}
-              groupIndex={i}
-            />
-          );
-        }
-        const step: ProcessStep = node.kind === "tool" ? node.step : node;
-        return (
-          <ProcessRow
-            // biome-ignore lint/suspicious/noArrayIndexKey: append-only timeline
-            key={i}
-            step={step}
-            streaming={live}
-            citations={citations}
-            onCitationClick={onCitationClick}
-            turnKey={messageId}
-            rowIndex={i}
-          />
-        );
+        return renderNode(node, i);
       })}
       {executionId && messageId && !hasTeamMarker && (
         <InlineTeamGraph

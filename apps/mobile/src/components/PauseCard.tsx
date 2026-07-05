@@ -22,6 +22,7 @@ import { type ReactNode, useState } from "react";
 /** Friendly zh labels for the GRANTABLE built-ins; falls back to the raw name. */
 const TOOL_LABELS: Record<string, string> = {
   file_write: "写入文件",
+  file_append: "追加文件",
   str_replace: "修改文件",
   file_delete: "删除文件",
   file_move: "移动文件",
@@ -34,6 +35,7 @@ const TOOL_LABELS: Record<string, string> = {
  *  whether to offer the class button. */
 const FILE_OP_TOOLS: ReadonlySet<string> = new Set([
   "file_write",
+  "file_append",
   "str_replace",
   "file_delete",
   "file_move",

@@ -121,6 +121,9 @@ class DeepSeekProvider:
             messages=request.messages,
             content=response.content,
             reasoning=response.reasoning_content,
+            tool_names=[tc.function.name for tc in response.tool_calls]
+            if response.tool_calls
+            else None,
         )
         return response
 

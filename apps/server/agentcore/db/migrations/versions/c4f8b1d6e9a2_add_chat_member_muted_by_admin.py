@@ -1,6 +1,6 @@
 """add chat_members.muted_by_admin (admin 禁言 for the 全员反馈群 Stage 3)
 
-Stage 3 审核治理 (docs/07-规划/全员反馈群落地设计.md): an admin can 禁言 a group
+Stage 3 审核治理 (docs/06-规划/全员反馈群落地设计.md): an admin can 禁言 a group
 member — they keep reading but their sends are refused (403). This is a *separate*
 flag from `chat_members.muted` (the member's own notification mute) so moderation
 and self-service never clobber each other.

@@ -14,6 +14,7 @@ import { AboutSettings } from "@/pages/more/AboutSettings";
 import { AccountSettings } from "@/pages/more/AccountSettings";
 import { AppearanceSettings } from "@/pages/more/AppearanceSettings";
 import { FeedbackSettings } from "@/pages/more/FeedbackSettings";
+import { ImPrivacySettings } from "@/pages/more/ImPrivacySettings";
 import { MemorySettings } from "@/pages/more/MemorySettings";
 import { ModelSettings } from "@/pages/more/ModelSettings";
 import { ShortcutsSettings } from "@/pages/more/ShortcutsSettings";
@@ -76,6 +77,7 @@ export const router = createHashRouter([
           { path: "model", element: <ModelSettings /> },
           { path: "memory", element: <MemorySettings /> },
           { path: "account", element: <AccountSettings /> },
+          { path: "messages", element: <ImPrivacySettings /> },
           { path: "usage", element: <UsageSettings /> },
           { path: "appearance", element: <AppearanceSettings /> },
           { path: "shortcuts", element: <ShortcutsSettings /> },

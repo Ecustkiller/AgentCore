@@ -18,9 +18,11 @@ DAG namespaces each declared id ``{prefix}_{raw}`` and rewrites every
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
+from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.runtime.runs.constants import (
     DEFAULT_ON_FAILURE,
@@ -45,6 +47,13 @@ _DEFAULT_RETRY_DELAY_MS = 2_000
 # awareness block stays scannable and can't blow up a worker's context.
 _SIBLING_TASK_CHARS = 150
 _SIBLING_OUTPUT_CHARS = 80
+_UPSTREAM_HINTS = re.compile(
+    r"上游|基于.*(?:产出|结果|输出)|见上游|前置|依赖.*(?:结果|产出)|"
+    r"读取.*(?:产出|结果)|upstream|based on|depends on",
+    re.IGNORECASE,
+)
+
+logger = get_logger(__name__)
 
 
 def build_run_plan(
@@ -63,7 +72,7 @@ def build_run_plan(
     intersected against — an unknown tool name is dropped silently, mirroring the
     old planner. Returns the plan plus a list of validation errors; a non-empty
     error list means the batch is rejected and the plan must not be run
-    (reject-on-error for a DAG, reject-when-none-valid for a flat batch).
+    (reject-on-error for both flat and DAG batches).
 
     ``parent_run_id`` / ``depth`` stamp every node with its place in the turn's Run
     tree (阶段2 嵌套子任务): the CEO's direct workers are ``depth=1`` parented to the
@@ -73,6 +82,10 @@ def build_run_plan(
     """
     if not tasks_raw:
         return RunPlan(), ["'tasks' array is required and cannot be empty"]
+    for item in tasks_raw:
+        deps = item.get("depends_on")
+        if deps is not None:
+            item["depends_on"] = [d for d in deps if d and isinstance(d, str) and d.strip()]
     prefix = id_prefix or f"del_{int(time.time() * 1000)}"
     if any(item.get("depends_on") for item in tasks_raw):
         plan, errors = _dag_plan(tasks_raw, valid_tools, prefix, max_tasks, parent_run_id, depth)
@@ -211,12 +224,22 @@ def _flat_plan(
     depth: int,
 ) -> tuple[RunPlan, list[str]]:
     """Single / parallel batch (no deps). Invalid items (missing role or task)
-    are skipped silently — the legacy flat behaviour — and only an all-invalid
-    batch is an error."""
+    or an over-cap batch reject the whole plan."""
+    if len(tasks_raw) > max_tasks:
+        return RunPlan(), [f"任务数 {len(tasks_raw)} 超过上限 {max_tasks}"]
+    errors: list[str] = []
+    for i, item in enumerate(tasks_raw):
+        role = item.get("role")
+        task = item.get("task")
+        if not (isinstance(role, str) and role.strip()) or not (
+            isinstance(task, str) and task.strip()
+        ):
+            errors.append(f"tasks[{i}]: 'role' 和 'task' 字段必填")
+    if errors:
+        return RunPlan(), errors
     plan = RunPlan()
     counter = counter_start
-    valid = [item for item in tasks_raw[:max_tasks] if item.get("task") and item.get("role")]
-    for item in valid:
+    for item in tasks_raw:
         counter += 1
         run_id = f"{prefix}_{counter}"
         plan.add(
@@ -231,8 +254,6 @@ def _flat_plan(
                 depth=depth,
             )
         )
-    if not plan.nodes:
-        return plan, ["No valid tasks: each task needs a non-empty 'role' and 'task'."]
     return plan, []
 
 
@@ -246,13 +267,25 @@ def _dag_plan(
 ) -> tuple[RunPlan, list[str]]:
     """DAG batch (has deps). Per-run validation collects errors; topology
     (cycle / unknown edge) is checked via ``RunPlan.waves``."""
-    plan = RunPlan(origin=RunOrigin.TEMPLATE)
+    if len(tasks_raw) > max_tasks:
+        return RunPlan(), [f"任务数 {len(tasks_raw)} 超过上限 {max_tasks}"]
     errors: list[str] = []
+    seen_ids: set[str] = set()
+    for i, item in enumerate(tasks_raw):
+        raw_id = str(item.get("id", "")).strip() or f"n{i}"
+        if raw_id in seen_ids:
+            errors.append(f"tasks[{i}]: 重复的 id '{raw_id}'")
+        seen_ids.add(raw_id)
+    if errors:
+        return RunPlan(), errors
+
+    plan = RunPlan(origin=RunOrigin.TEMPLATE)
+    errors = []
 
     def _nsid(raw: str) -> str:
         return f"{prefix}_{raw}"
 
-    for i, item in enumerate(tasks_raw[:max_tasks]):
+    for i, item in enumerate(tasks_raw):
         raw_id = item.get("id", f"run_{i}")
         role = item.get("role", "")
         task = item.get("task", "")
@@ -280,6 +313,14 @@ def _dag_plan(
         plan.waves()
     except RunPlanError as e:
         return plan, [str(e)]
+    for node in plan.nodes:
+        if not node.depends_on and node.task and _UPSTREAM_HINTS.search(node.task):
+            logger.warning(
+                "builder.suspect_missing_dep",
+                run_id=node.run_id,
+                role=node.role,
+                hint="task 提及上游产出但 depends_on 为空",
+            )
     return plan, []
 
 

@@ -73,6 +73,25 @@ async def test_write_escape_raises_outside_workspace(tmp_path: Path):
         await _ws(ws).write("../evil.txt", "x")
 
 
+async def test_append_creates_file_and_returns_count(tmp_path: Path):
+    written = await _ws(tmp_path).append("draft.md", "hello")
+    assert written == 5
+    assert (tmp_path / "draft.md").read_text(encoding="utf-8") == "hello"
+
+
+async def test_append_extends_existing_file(tmp_path: Path):
+    (tmp_path / "draft.md").write_text("hi", encoding="utf-8")
+    written = await _ws(tmp_path).append("draft.md", " there")
+    assert written == 6
+    assert (tmp_path / "draft.md").read_text(encoding="utf-8") == "hi there"
+
+
+async def test_append_on_directory_raises_not_a_file(tmp_path: Path):
+    (tmp_path / "pkg").mkdir()
+    with pytest.raises(NotAFile):
+        await _ws(tmp_path).append("pkg", "x")
+
+
 # --- list ---
 
 

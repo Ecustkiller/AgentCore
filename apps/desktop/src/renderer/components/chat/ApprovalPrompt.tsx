@@ -23,6 +23,7 @@ import { useState } from "react";
 
 const TOOL_LABELS: Record<string, string> = {
   file_write: "写入文件",
+  file_append: "追加文件",
   str_replace: "修改文件",
   file_delete: "删除文件",
   file_move: "移动文件",

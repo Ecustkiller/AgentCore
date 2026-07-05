@@ -26,6 +26,7 @@ export const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
   code_execute: { Icon: Terminal, label: "执行代码" },
   file_read: { Icon: FileText, label: "读取文件" },
   file_write: { Icon: FileText, label: "写入文件" },
+  file_append: { Icon: FileText, label: "追加文件" },
   file_list: { Icon: Folder, label: "列出目录" },
   str_replace: { Icon: Pencil, label: "编辑文件" },
   file_delete: { Icon: Trash2, label: "删除文件" },

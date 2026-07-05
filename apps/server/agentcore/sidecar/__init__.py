@@ -25,5 +25,5 @@ client. Packaging is handled too: a packaged
 desktop ships a standalone CPython + ``--target`` site-packages and spawns it when
 ``app.isPackaged`` (no system Python/venv/uv needed — see
 ``apps/desktop/scripts/bundle-sidecar.mjs``). Still deferred: the Journal and
-offline LLM. See ``docs/07-规划/远期规划.md §一``.
+offline LLM. See ``docs/06-规划/远期规划.md §一``.
 """

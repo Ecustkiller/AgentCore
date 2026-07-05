@@ -101,6 +101,7 @@ export type FsWriteResult =
 export type WorkspaceOpName =
   | "read"
   | "write"
+  | "append"
   | "read_bytes"
   | "write_bytes"
   | "list"

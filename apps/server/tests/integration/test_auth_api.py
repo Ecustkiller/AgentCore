@@ -9,32 +9,10 @@ detection, login lockout, and logout.
 from datetime import timedelta
 from uuid import uuid4
 
-import httpx
-
 from agentcore.config import settings
+from tests.integration.conftest import login_admin, register_and_login
 
 _PW = "password123"
-
-
-from tests.integration.conftest import login_admin
-
-
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post(
-        "/v1/auth/login",
-        json={"username": username, "password": _PW},
-        headers={"X-Client-Platform": "desktop"},
-    )
-    assert r.status_code == 200, r.text
-
-
-async def _login_admin(client: httpx.AsyncClient, username: str, password: str) -> None:
-    await login_admin(client, username, password)
 
 
 async def test_protected_endpoints_require_auth(client):
@@ -72,7 +50,7 @@ async def test_register_rejects_invalid_invite(client):
 
 async def test_conversation_crud_for_owner(client, make_invite):
     code = await make_invite("INV-2")
-    await _register_and_login(client, code, "carol")
+    await register_and_login(client, code, "carol")
 
     r = await client.post("/v1/conversations", json={"title": "hello"})
     assert r.status_code == 201
@@ -92,12 +70,12 @@ async def test_conversation_crud_for_owner(client, make_invite):
 
 async def test_idor_user_cannot_touch_others_conversation(client, new_client, make_invite):
     code1 = await make_invite("INV-A")
-    await _register_and_login(client, code1, "owner")
+    await register_and_login(client, code1, "owner")
     conv_id = (await client.post("/v1/conversations", json={"title": "secret"})).json()["id"]
 
     code2 = await make_invite("INV-B")
     async with new_client() as attacker:
-        await _register_and_login(attacker, code2, "attacker")
+        await register_and_login(attacker, code2, "attacker")
 
         assert (await attacker.get(f"/v1/conversations/{conv_id}")).status_code == 404
         assert (
@@ -116,7 +94,7 @@ async def test_idor_user_cannot_touch_others_conversation(client, new_client, ma
 
 async def test_refresh_rotates_cookie(client, make_invite):
     code = await make_invite("INV-3")
-    await _register_and_login(client, code, "dave")
+    await register_and_login(client, code, "dave")
 
     old_refresh = client.cookies.get("refresh_token")
     r = await client.post("/v1/auth/refresh")
@@ -134,7 +112,7 @@ async def test_refresh_reuse_detected_revokes_family(client, new_client, make_in
     # benign path is covered by tests/test_auth_service.py.
     monkeypatch.setattr("agentcore.auth.service._REFRESH_REUSE_GRACE", timedelta(0))
     code = await make_invite("INV-4")
-    await _register_and_login(client, code, "erin")
+    await register_and_login(client, code, "erin")
 
     r1 = client.cookies.get("refresh_token")
     assert (await client.post("/v1/auth/refresh")).status_code == 200
@@ -154,7 +132,7 @@ async def test_refresh_reuse_detected_revokes_family(client, new_client, make_in
 
 async def test_login_lockout_after_repeated_failures(client, make_invite):
     code = await make_invite("INV-5")
-    await _register_and_login(client, code, "frank")
+    await register_and_login(client, code, "frank")
 
     for _ in range(5):
         r = await client.post(
@@ -169,7 +147,7 @@ async def test_login_lockout_after_repeated_failures(client, make_invite):
 
 async def test_logout_clears_cookies(client, make_invite):
     code = await make_invite("INV-6")
-    await _register_and_login(client, code, "gina")
+    await register_and_login(client, code, "gina")
     assert (await client.get("/v1/auth/me")).status_code == 200
 
     assert (await client.post("/v1/auth/logout")).status_code == 200
@@ -205,7 +183,7 @@ async def test_refresh_cookie_path_carries_reverse_proxy_prefix(client, make_inv
 
 async def test_change_password_keeps_session_and_rotates_secret(client, make_invite):
     code = await make_invite("INV-CP-1")
-    await _register_and_login(client, code, "harry")
+    await register_and_login(client, code, "harry")
 
     r = await client.post(
         "/v1/auth/change-password",
@@ -228,7 +206,7 @@ async def test_change_password_keeps_session_and_rotates_secret(client, make_inv
 
 async def test_change_password_wrong_current_rejected(client, make_invite):
     code = await make_invite("INV-CP-2")
-    await _register_and_login(client, code, "iris")
+    await register_and_login(client, code, "iris")
     r = await client.post(
         "/v1/auth/change-password",
         json={"current_password": "wrong-pw", "new_password": "newpassword456"},
@@ -246,7 +224,7 @@ async def test_change_password_requires_auth(client):
 
 async def test_update_profile_changes_display_name_and_email(client, make_invite):
     code = await make_invite("INV-UP-1")
-    await _register_and_login(client, code, "jack")
+    await register_and_login(client, code, "jack")
 
     r = await client.patch(
         "/v1/auth/me",
@@ -263,14 +241,14 @@ async def test_update_profile_changes_display_name_and_email(client, make_invite
 
 async def test_update_profile_rejects_duplicate_email(client, new_client, make_invite):
     code1 = await make_invite("INV-UP-2")
-    await _register_and_login(client, code1, "kate")
+    await register_and_login(client, code1, "kate")
     assert (
         await client.patch("/v1/auth/me", json={"email": "shared@example.com"})
     ).status_code == 200
 
     code2 = await make_invite("INV-UP-3")
     async with new_client() as other:
-        await _register_and_login(other, code2, "liam")
+        await register_and_login(other, code2, "liam")
         r = await other.patch("/v1/auth/me", json={"email": "shared@example.com"})
         assert r.status_code == 422
 
@@ -281,7 +259,7 @@ async def test_update_profile_requires_auth(client):
 
 async def test_delete_account_anonymizes_and_frees_username(client, make_invite):
     code = await make_invite("INV-DEL-1")
-    await _register_and_login(client, code, "mona")
+    await register_and_login(client, code, "mona")
     # give the account data so the route's conversation cascade actually runs
     assert (await client.post("/v1/conversations", json={"title": "to be gone"})).status_code == 201
 
@@ -303,7 +281,7 @@ async def test_delete_account_anonymizes_and_frees_username(client, make_invite)
 
 async def test_delete_account_wrong_password_rejected(client, make_invite):
     code = await make_invite("INV-DEL-3")
-    await _register_and_login(client, code, "nate")
+    await register_and_login(client, code, "nate")
     r = await client.request("DELETE", "/v1/auth/me", json={"password": "wrong-pw"})
     assert r.status_code == 401
     # the account is untouched and still usable
@@ -408,7 +386,7 @@ async def test_invite_endpoints_require_auth(client):
 
 async def test_admin_issues_invite_and_new_user_registers_with_it(client, make_admin):
     username, password = await make_admin()
-    await _login_admin(client, username, password)
+    await login_admin(client, username, password)
 
     r = await client.post("/v1/auth/invites", json={})
     assert r.status_code == 201, r.text
@@ -428,7 +406,7 @@ async def test_admin_issues_invite_and_new_user_registers_with_it(client, make_a
 
 async def test_admin_batch_issues_invites(client, make_admin):
     username, password = await make_admin()
-    await _login_admin(client, username, password)
+    await login_admin(client, username, password)
 
     r = await client.post("/v1/auth/invites/batch", json={"count": 3})
     assert r.status_code == 201, r.text
@@ -444,14 +422,14 @@ async def test_admin_batch_issues_invites(client, make_admin):
 
 async def test_batch_invite_rejects_invalid_count(client, make_admin):
     username, password = await make_admin()
-    await _login_admin(client, username, password)
+    await login_admin(client, username, password)
     assert (await client.post("/v1/auth/invites/batch", json={"count": 0})).status_code == 422
     assert (await client.post("/v1/auth/invites/batch", json={"count": 101})).status_code == 422
 
 
 async def test_list_invites_paginated_and_filtered(client, make_admin):
     username, password = await make_admin()
-    await _login_admin(client, username, password)
+    await login_admin(client, username, password)
 
     await client.post("/v1/auth/invites/batch", json={"count": 5})
 
@@ -471,7 +449,7 @@ async def test_list_invites_paginated_and_filtered(client, make_admin):
 
 async def test_non_admin_cannot_access_invites(client, make_invite):
     code = await make_invite("INV-USER")
-    await _register_and_login(client, code, "regular")
+    await register_and_login(client, code, "regular")
     assert (await client.post("/v1/auth/invites", json={})).status_code == 403
     assert (await client.post("/v1/auth/invites/batch", json={"count": 2})).status_code == 403
     assert (await client.get("/v1/auth/invites")).status_code == 403
@@ -482,7 +460,7 @@ async def test_non_admin_cannot_access_invites(client, make_invite):
 
 async def test_admin_revokes_invite_blocks_registration(client, make_admin):
     username, password = await make_admin()
-    await _login_admin(client, username, password)
+    await login_admin(client, username, password)
 
     body = (await client.post("/v1/auth/invites", json={})).json()
     invite_id, code = body["id"], body["code"]
@@ -505,12 +483,12 @@ async def test_admin_revokes_invite_blocks_registration(client, make_admin):
 
 async def test_revoke_used_invite_rejected(client, new_client, make_admin):
     username, password = await make_admin()
-    await _login_admin(client, username, password)
+    await login_admin(client, username, password)
     body = (await client.post("/v1/auth/invites", json={})).json()
     invite_id, code = body["id"], body["code"]
 
     async with new_client() as newcomer:
-        await _register_and_login(newcomer, code, "consumer")
+        await register_and_login(newcomer, code, "consumer")
 
     # the code is consumed → revoke is refused (422)
     assert (await client.post(f"/v1/auth/invites/{invite_id}/revoke")).status_code == 422
@@ -518,7 +496,7 @@ async def test_revoke_used_invite_rejected(client, new_client, make_admin):
 
 async def test_revoke_invite_twice_rejected(client, make_admin):
     username, password = await make_admin()
-    await _login_admin(client, username, password)
+    await login_admin(client, username, password)
     invite_id = (await client.post("/v1/auth/invites", json={})).json()["id"]
     assert (await client.post(f"/v1/auth/invites/{invite_id}/revoke")).status_code == 200
     assert (await client.post(f"/v1/auth/invites/{invite_id}/revoke")).status_code == 422
@@ -526,13 +504,13 @@ async def test_revoke_invite_twice_rejected(client, make_admin):
 
 async def test_revoke_unknown_invite_404(client, make_admin):
     username, password = await make_admin()
-    await _login_admin(client, username, password)
+    await login_admin(client, username, password)
     assert (await client.post(f"/v1/auth/invites/{uuid4()}/revoke")).status_code == 404
 
 
 async def test_non_admin_cannot_revoke_invite(client, make_invite):
     code = await make_invite("INV-REVOKE-USER")
-    await _register_and_login(client, code, "regular2")
+    await register_and_login(client, code, "regular2")
     assert (await client.post(f"/v1/auth/invites/{uuid4()}/revoke")).status_code == 403
 
 

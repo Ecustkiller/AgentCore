@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { PromptDocument } from "@/components/prompt/PromptDocument";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 afterEach(cleanup);
@@ -18,14 +18,5 @@ describe("PromptDocument", () => {
     expect(screen.getByText("输出风格")).toBeTruthy();
     expect(screen.getByText("第一条")).toBeTruthy();
     expect(screen.getByText("第二条")).toBeTruthy();
-  });
-
-  it("switches to verbatim source on 原文", () => {
-    const raw = "<output_style>\n- item\n</output_style>";
-    render(<PromptDocument text={raw} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "原文" }));
-    const pre = document.querySelector("pre");
-    expect(pre?.textContent).toBe(raw);
   });
 });

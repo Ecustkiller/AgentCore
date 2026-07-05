@@ -104,7 +104,10 @@ suggestions（修改建议数组）、score（0–10 整数，该维度打分）
 产物、注入下游或供你汇总，不设 `requires_files`。
 - 依赖流水线：多阶段（设计 → 实现 → 审查）用【同一次 `delegate`】里的 `depends_on` 串成\
 依赖图——这些 worker 都在你下面【同一层】，上游产出自动注入下游；`depends_on` 只定先后、\
-不加层级。用 `result_handling`（`pass_through` 全文 / `summarize` 摘要，默认全文）控制上游\
+不加层级。DAG 模式下每个 task 必须显式声明 `depends_on`（即使为空列表 `[]`）。如果 task \
+描述中提到「上游」「基于…产出」，必须对应 `depends_on` 引用。补跑/重试时同样必须写明完整 \
+`depends_on`，不能依赖 `file_read` 代替依赖声明。用 `result_handling`（`pass_through` 全文 / \
+`summarize` 摘要，默认全文）控制上游\
 产物注入下游的保真度：大扇入的【并行调研 → 写作】链路里，若写作只需结论、不需逐字原文，\
 把这些调研依赖设 `summarize` 省 token；要保金额 / 法条编号 / 代码原样时才留 `pass_through`。\
 （注意：`result_handling` 只管【上游→下游】注入，不影响回到你手里的内容——后者由 task 措辞\
@@ -293,6 +296,7 @@ _ASK_USER_MIDTASK = """\
 </ask_user_midtask>"""
 
 _VERIFY_AND_FIX = """\
+<verify_and_fix>
 ## 验证与修复工作流
 
 完成代码改动后，按以下步骤验证：
@@ -302,7 +306,7 @@ _VERIFY_AND_FIX = """\
 3. 如果有失败：
    a. 阅读失败用例的错误信息
    b. 用 file_read 查看失败测试和相关代码的上下文
-   c. 修复代码（注意：不要修改测试文件本身）
+   c. 用 str_replace 修复代码（注意：不要修改测试文件本身）
    d. 再次运行 test_run 验证修复
 4. 最多重试 3 轮。如果 3 轮后仍有失败：
    - 在交付摘要中如实列出未通过的测试和可能原因
@@ -313,7 +317,27 @@ _VERIFY_AND_FIX = """\
 - 禁止修改测试文件来让测试通过
 - 禁止删除或跳过失败的测试
 - 同一个错误连续出现 2 轮且修复方案相同 → 停止重试，如实报告
-"""
+</verify_and_fix>"""
+
+_LONG_FORM_WRITING = """\
+<long_form_writing>
+## 长文分段写作
+
+用户要产出超长单文档（报告、论文、长 README、多章节手册）时，不要指望一次 \
+file_write 写完全文——分段落盘更稳、也更省上下文。
+
+推荐编排：
+1. 先与用户或自己确认大纲（章节标题 + 每节要点）；必要时 ask_user 拍板结构。
+2. delegate 给写手 worker：第一节用 file_write 创建文件并写入首段；后续各节用 \
+file_append 逐段追加到【同一文件】。
+3. 多 worker 并行写不同章节时，各用【不同文件名或子目录】，避免并发写同一路径。
+4. 收尾前 file_read 抽查首尾与目录衔接；需要改中间某段时用 str_replace，不要 \
+file_write 覆盖全文。
+
+纪律：
+- 追加前确认 path 一致；每节 content 自行带好段落分隔（如 leading `\\n\\n`）。
+- 单节仍过长时，再拆成多轮 file_append，不要硬塞万行单次调用。
+</long_form_writing>"""
 
 _DELEGATE_CHECKPOINT = """\
 <delegate_checkpoint>
@@ -389,6 +413,12 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
         summary="完成代码改动后验证并修复测试失败（test_run → 读上下文 → 修代码 → 重试）",
         body=_VERIFY_AND_FIX,
         requires_tools=("test_run",),
+    ),
+    SystemSkill(
+        name="long_form_writing",
+        summary="超长单文档分段落盘：大纲优先，首段 file_write、后续 file_append 追加",
+        body=_LONG_FORM_WRITING,
+        requires_tools=("delegate",),
     ),
 )
 

@@ -8,7 +8,12 @@ typed-failure → user-message mapping (the heavy I/O lives in the backend).
 
 from pathlib import Path
 
-from agentcore.tools.builtin.file_ops import FileDeleteTool, FileMoveTool, FileWriteTool
+from agentcore.tools.builtin.file_ops import (
+    FileAppendTool,
+    FileDeleteTool,
+    FileMoveTool,
+    FileWriteTool,
+)
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
@@ -60,6 +65,39 @@ async def test_write_rejects_path_outside_workspace(tmp_path: Path):
     assert result.success is False
     assert "超出了工作区范围" in result.error
     assert not (tmp_path / "escaped.md").exists()
+
+
+# --- file_append ---
+
+
+async def test_append_creates_file_when_missing(tmp_path: Path):
+    result = await FileAppendTool().execute(
+        {"path": "draft.md", "content": "# Intro"}, _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert (tmp_path / "draft.md").read_text(encoding="utf-8") == "# Intro"
+
+
+async def test_append_adds_to_existing_file(tmp_path: Path):
+    (tmp_path / "draft.md").write_text("# Intro", encoding="utf-8")
+    result = await FileAppendTool().execute(
+        {"path": "draft.md", "content": "\n\n## Section 2"}, _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert (tmp_path / "draft.md").read_text(encoding="utf-8") == "# Intro\n\n## Section 2"
+
+
+async def test_append_rejects_empty_path(tmp_path: Path):
+    result = await FileAppendTool().execute({"path": "", "content": "x"}, _ctx(tmp_path))
+    assert result.success is False
+    assert "path 不能为空" in result.error
+
+
+async def test_append_rejects_directory_target(tmp_path: Path):
+    (tmp_path / "pkg").mkdir()
+    result = await FileAppendTool().execute({"path": "pkg", "content": "x"}, _ctx(tmp_path))
+    assert result.success is False
+    assert "不是文件" in result.error
 
 
 # --- file_delete ---

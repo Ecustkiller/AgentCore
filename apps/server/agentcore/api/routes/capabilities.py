@@ -19,7 +19,11 @@ from agentcore.api.schemas import (
     CapabilityTool,
 )
 from agentcore.config import settings
-from agentcore.runtime.prompt import assemble_system_prompt, compose_ceo_chat_prompt
+from agentcore.runtime.prompt import (
+    assemble_system_prompt,
+    compose_ceo_chat_prompt,
+    derive_ceo_addon,
+)
 from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.tools.catalog import AVAILABLE_TO_CEO, build_capability_catalog
 
@@ -58,13 +62,15 @@ async def get_capabilities(_user: AuthUser) -> CapabilitiesResponse:
         entry.schema.name for entry in catalog if AVAILABLE_TO_CEO in entry.available_to
     }
     shared_base = assemble_system_prompt()
+    ceo = compose_ceo_chat_prompt(
+        shared_base,
+        skill_registry=skill_registry,
+        ceo_tool_names=ceo_tool_names,
+    )
     guidelines = CapabilityGuidelines(
         shared_base=shared_base,
-        ceo=compose_ceo_chat_prompt(
-            shared_base,
-            skill_registry=skill_registry,
-            ceo_tool_names=ceo_tool_names,
-        ),
+        ceo_addon=derive_ceo_addon(shared_base, ceo),
+        ceo=ceo,
     )
 
     return CapabilitiesResponse(tools=tools, skills=skills, guidelines=guidelines)

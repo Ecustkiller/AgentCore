@@ -12,19 +12,7 @@ import httpx
 
 from agentcore.core.types import new_id
 from agentcore.db.repositories import HandoffJobRepository
-
-_PW = "password123"
-
-
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> str:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
-    assert r.status_code == 200, r.text
-    return r.json()["id"]
+from tests.integration.conftest import register_and_login
 
 
 async def _new_conversation(client: httpx.AsyncClient, title: str) -> str:
@@ -52,7 +40,7 @@ async def test_handoff_requires_auth(client):
 
 async def test_dispatch_rejects_cloud_conversation(client, make_invite):
     code = await make_invite("INV-H1")
-    await _register_and_login(client, code, "hjuser1")
+    await register_and_login(client, code, "hjuser1")
     conv = await _new_conversation(client, "cloud")  # cloud by default (no binding)
 
     # Nothing local to hand off → 422 before any SSE starts.
@@ -65,7 +53,7 @@ async def test_dispatch_rejects_cloud_conversation(client, make_invite):
 
 async def test_jobs_list_empty_unknown_and_idor(client, make_invite, new_client):
     code = await make_invite("INV-H2")
-    await _register_and_login(client, code, "hjowner")
+    await register_and_login(client, code, "hjowner")
     conv = await _new_conversation(client, "mine")
 
     # A fresh conversation has no jobs.
@@ -79,7 +67,7 @@ async def test_jobs_list_empty_unknown_and_idor(client, make_invite, new_client)
     # IDOR: a non-owner cannot list another user's conversation jobs.
     code2 = await make_invite("INV-H3")
     async with new_client() as other:
-        await _register_and_login(other, code2, "hjintruder")
+        await register_and_login(other, code2, "hjintruder")
         assert (await other.get(f"/v1/conversations/{conv}/handoff/jobs")).status_code == 404
 
 
@@ -105,7 +93,7 @@ async def _seed_job(session_factory, *, user_id, source_conversation_id, succeed
 
 async def test_diff_unknown_job_is_404(client, make_invite):
     code = await make_invite("INV-H4")
-    await _register_and_login(client, code, "hjdiff404")
+    await register_and_login(client, code, "hjdiff404")
     conv = await _new_conversation(client, "mine")
 
     r = await client.get(f"/v1/conversations/{conv}/handoff/jobs/{new_id()}/diff")
@@ -114,7 +102,7 @@ async def test_diff_unknown_job_is_404(client, make_invite):
 
 async def test_diff_unfinished_job_is_409(client, make_invite, session_factory):
     code = await make_invite("INV-H5")
-    user_id = await _register_and_login(client, code, "hjdiff409")
+    user_id = await register_and_login(client, code, "hjdiff409")
     conv = await _new_conversation(client, "mine")
     job_id = await _seed_job(session_factory, user_id=user_id, source_conversation_id=conv)
 
@@ -125,20 +113,20 @@ async def test_diff_unfinished_job_is_409(client, make_invite, session_factory):
 
 async def test_diff_idor_is_404(client, make_invite, new_client, session_factory):
     code = await make_invite("INV-H6")
-    user_id = await _register_and_login(client, code, "hjdiffowner")
+    user_id = await register_and_login(client, code, "hjdiffowner")
     conv = await _new_conversation(client, "mine")
     job_id = await _seed_job(session_factory, user_id=user_id, source_conversation_id=conv)
 
     code2 = await make_invite("INV-H7")
     async with new_client() as other:
-        await _register_and_login(other, code2, "hjdiffintruder")
+        await register_and_login(other, code2, "hjdiffintruder")
         r = await other.get(f"/v1/conversations/{conv}/handoff/jobs/{job_id}/diff")
         assert r.status_code == 404, r.text
 
 
 async def test_apply_unknown_job_is_404(client, make_invite):
     code = await make_invite("INV-H8")
-    await _register_and_login(client, code, "hjapply404")
+    await register_and_login(client, code, "hjapply404")
     conv = await _new_conversation(client, "mine")
 
     r = await client.post(
@@ -150,7 +138,7 @@ async def test_apply_unknown_job_is_404(client, make_invite):
 
 async def test_apply_unfinished_job_is_409(client, make_invite, session_factory):
     code = await make_invite("INV-H9")
-    user_id = await _register_and_login(client, code, "hjapply409")
+    user_id = await register_and_login(client, code, "hjapply409")
     conv = await _new_conversation(client, "mine")
     job_id = await _seed_job(session_factory, user_id=user_id, source_conversation_id=conv)
 
@@ -163,7 +151,7 @@ async def test_apply_unfinished_job_is_409(client, make_invite, session_factory)
 
 async def test_apply_cloud_conversation_is_422(client, make_invite, session_factory):
     code = await make_invite("INV-H10")
-    user_id = await _register_and_login(client, code, "hjapply422")
+    user_id = await register_and_login(client, code, "hjapply422")
     conv = await _new_conversation(client, "cloud")  # no local binding
     # A *succeeded* job clears the status gate, so the local-mode gate is what trips:
     # there is nothing local to apply onto.

@@ -233,6 +233,14 @@ class DelegateTool:
             call=self._calls,
             parallel=sum(1 for n in plan.nodes if not n.depends_on),
             complexity_hint=complexity_hint,
+            plan=[
+                {"id": n.run_id, "role": n.role, "depends_on": n.depends_on}
+                for n in plan.nodes
+            ],
+            waves=[
+                [n.run_id for n in wave]
+                for wave in plan.waves()
+            ],
             agents=[
                 f"{n.role or n.agent_name or n.run_id}: {clip_preview(n.task, 80)}"
                 for n in plan.nodes[:_DELEGATE_LOG_AGENTS_CAP]
@@ -304,7 +312,7 @@ class DelegateTool:
         if sup is None:
             msg = (
                 "当前没有待续跑的受监督计划。replan 仅在 delegate 让出边界（输出『计划已"
-                "让出』）后可用；要发起新任务请用 delegate。"
+                "让出』）或部分队员失败/跳过后可用；要发起新任务请用 delegate。"
             )
             return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
 

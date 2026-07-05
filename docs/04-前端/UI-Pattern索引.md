@@ -32,6 +32,7 @@ skip_if:
 | `Card` | 面板/卡片容器（`rounded-xl`） |
 | `Badge` | 状态 chip、pill 计数 |
 | `Input` / `Textarea` | 表单、内联编辑 |
+| `SearchField` / `SearchTrigger` | 页内筛选输入框；全局 `Cmd+K` 假入口（见下节） |
 | `SectionLabel` | 分组小标题（工具箱、设置） |
 | `DecisionCard` | 裁决类卡片外壳（primary / warning / neutral） |
 | `SurfaceRow` / `SurfaceRowButton` | 列表行 chrome（file / sidebar variant） |
@@ -50,8 +51,28 @@ Radix overlay（dialog / popover / tooltip 等）仍在 `components/ui/`，与 p
 | **ToolLine** | 过程时间线工具行 / 组 | `ToolLine.tsx`（`ProcessTimeline` 消费） |
 | **FinishReasonChip** | 回合非正常收尾 chip | `finish-reason-chip.tsx` |
 | **PanelShell** | 右侧面板、指挥台 | `SidePanel.tsx`、`CanvasDecisionPanel.tsx` |
+| **SearchField** | 页内列表/树筛选、Popover 选项过滤 | `search-field.tsx`（`field` / `plain`） |
+| **SearchTrigger** | 全局搜索与命令面板入口 | `search-trigger.tsx` + `CommandPalette.tsx` |
 
 新交互卡片应优先复用 **DecisionCard + Button**，并确保聊天与画布双视图可共用（见 `CanvasDecisionPanel.tsx`）。
+
+## 搜索 / 筛选 / 查找（三层语义）
+
+产品内三种「找东西」动作**用词与组件固定**，避免同一屏混用「搜索」：
+
+| 层级 | 用户词 | 入口 | 组件 | 范围 |
+|---|---|---|---|---|
+| **全局发现** | 搜索 | `Ctrl/Cmd+K`；TitleBar / 侧栏 `SearchTrigger` | `SearchTrigger` → `CommandPalette` | 对话 / 消息 / 文件夹 + 命令 |
+| **页内缩小** | 筛选 | 当前列表或树上的输入框 | `SearchField` `variant="field"` | 仅当前视图已加载项（客户端子串） |
+| **就地定位** | 查找 | `Ctrl/Cmd+F`（`FindBar`） | 专用浮条（非 `SearchField`） | 仅当前会话**已加载**消息 |
+
+**Popover 内**（`@` 引用、草稿项目选择器等）用 `SearchField` `variant="plain"`（无外边框，宿主已有 shell）。
+
+**FindBar 无命中**时弱引导「在全对话中搜索」→ `openSearch(query)` 预填并打开命令面板（全历史消息走 Tier 1 + `load-around`）。
+
+**禁止**：侧栏放真搜索输入框（与全局入口重复）；页内 placeholder 写「搜索」（应写「筛选」）；`FindBar` 文案暗示能搜未加载历史。
+
+→ 产品决策与 IA 见 [`前端UX设计.md` §十四](/docs/04-前端/前端UX设计.md)；技术契约见 [`前端技术与架构.md` §9.8](/docs/04-前端/前端技术与架构.md)。
 
 ## Lint 门禁
 

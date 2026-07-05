@@ -34,6 +34,26 @@ import { create } from "zustand";
 
 const EMPTY_MESSAGES: ChatMessageDetail[] = [];
 const EMPTY_MEMBERS: ChatParticipant[] = [];
+const PAGE_SIZE = 50;
+
+/** Per-chat pagination cursor — tracks which page is the oldest loaded slice. */
+interface ChatMessagesMeta {
+  oldestPage: number;
+  total: number;
+  hasMoreOlder: boolean;
+}
+
+/** Dedupe by id + sort ascending by created_at — stable across overlapping pages. */
+function mergeMessages(
+  prev: ChatMessageDetail[],
+  incoming: ChatMessageDetail[],
+): ChatMessageDetail[] {
+  const byId = new Map(prev.map((m) => [m.id, m]));
+  for (const m of incoming) byId.set(m.id, m);
+  return [...byId.values()].sort((a, b) =>
+    a.created_at.localeCompare(b.created_at),
+  );
+}
 
 /** A human-readable list-row preview for a message (non-text shows a kind tag). */
 function previewOf(message: ChatMessageDetail): string {
@@ -79,7 +99,10 @@ interface MessagingState {
   loadingChats: boolean;
   /** Loaded message slices keyed by chat id (oldest first); absent until opened. */
   messagesByChat: Record<string, ChatMessageDetail[]>;
+  /** Pagination cursors for loaded slices (oldest page + whether earlier pages exist). */
+  messagesMetaByChat: Record<string, ChatMessagesMeta>;
   loadingMessages: Record<string, boolean>;
+  loadingOlderMessages: Record<string, boolean>;
   /** Group rosters keyed by chat id — resolves per-message sender names + the
    * member panel. Loaded lazily when a group thread opens. */
   membersByChat: Record<string, ChatParticipant[]>;
@@ -92,6 +115,8 @@ interface MessagingState {
   openChat: (chatId: string) => Promise<void>;
   setActiveChat: (chatId: string | null) => void;
   loadMessages: (chatId: string) => Promise<void>;
+  /** Fetch the next older page and prepend it (deduped, scroll position preserved by caller). */
+  loadOlderMessages: (chatId: string) => Promise<void>;
   /** Load (or refresh) a chat's member roster — used by group threads. */
   loadMembers: (chatId: string) => Promise<void>;
   /** Send a text and/or attachment message. Files are uploaded to the chat's
@@ -132,7 +157,9 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
   chatsLoaded: false,
   loadingChats: false,
   messagesByChat: {},
+  messagesMetaByChat: {},
   loadingMessages: {},
+  loadingOlderMessages: {},
   membersByChat: {},
   activeChatId: null,
   sendError: null,
@@ -162,14 +189,65 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
       loadingMessages: { ...s.loadingMessages, [chatId]: true },
     }));
     try {
-      const page = await listMessages(chatId, 1, 50);
+      // Land on the most recent page: page 1 yields the total, then fetch the last page.
+      const first = await listMessages(chatId, 1, PAGE_SIZE);
+      const total = first.total;
+      const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
+      const messages =
+        lastPage === 1
+          ? first.messages
+          : (await listMessages(chatId, lastPage, PAGE_SIZE)).messages;
       set((s) => ({
-        messagesByChat: { ...s.messagesByChat, [chatId]: page.messages },
+        messagesByChat: { ...s.messagesByChat, [chatId]: messages },
+        messagesMetaByChat: {
+          ...s.messagesMetaByChat,
+          [chatId]: {
+            oldestPage: lastPage,
+            total,
+            hasMoreOlder: lastPage > 1,
+          },
+        },
         loadingMessages: { ...s.loadingMessages, [chatId]: false },
       }));
     } catch {
       set((s) => ({
         loadingMessages: { ...s.loadingMessages, [chatId]: false },
+      }));
+    }
+  },
+
+  loadOlderMessages: async (chatId) => {
+    const meta = get().messagesMetaByChat[chatId];
+    if (!meta?.hasMoreOlder || get().loadingOlderMessages[chatId]) return;
+    const targetPage = meta.oldestPage - 1;
+    if (targetPage < 1) return;
+
+    set((s) => ({
+      loadingOlderMessages: { ...s.loadingOlderMessages, [chatId]: true },
+    }));
+    try {
+      const page = await listMessages(chatId, targetPage, PAGE_SIZE);
+      set((s) => ({
+        messagesByChat: {
+          ...s.messagesByChat,
+          [chatId]: mergeMessages(
+            s.messagesByChat[chatId] ?? [],
+            page.messages,
+          ),
+        },
+        messagesMetaByChat: {
+          ...s.messagesMetaByChat,
+          [chatId]: {
+            oldestPage: targetPage,
+            total: page.total,
+            hasMoreOlder: targetPage > 1,
+          },
+        },
+        loadingOlderMessages: { ...s.loadingOlderMessages, [chatId]: false },
+      }));
+    } catch {
+      set((s) => ({
+        loadingOlderMessages: { ...s.loadingOlderMessages, [chatId]: false },
       }));
     }
   },
@@ -340,11 +418,14 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
     set((s) => {
       const messagesByChat = { ...s.messagesByChat };
       delete messagesByChat[chatId];
+      const messagesMetaByChat = { ...s.messagesMetaByChat };
+      delete messagesMetaByChat[chatId];
       const membersByChat = { ...s.membersByChat };
       delete membersByChat[chatId];
       return {
         chats: s.chats.filter((c) => c.id !== chatId),
         messagesByChat,
+        messagesMetaByChat,
         membersByChat,
         activeChatId: s.activeChatId === chatId ? null : s.activeChatId,
       };

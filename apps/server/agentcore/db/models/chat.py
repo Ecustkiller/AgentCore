@@ -52,7 +52,7 @@ class Chat(Base):
     dm_key: Mapped[str | None] = mapped_column(String(73), unique=True, nullable=True)
     # When true, every user is auto-joined to this chat: new users at registration
     # and existing users via a one-time backfill (the 内测全员群 mechanism — see
-    # docs/07-规划/全员反馈群落地设计.md). Generalizes to an official broadcast
+    # docs/06-规划/全员反馈群落地设计.md). Generalizes to an official broadcast
     # channel later. dm/regular group chats stay false.
     auto_join: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     # Denormalized list-row preview, refreshed on each message.

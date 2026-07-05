@@ -18,18 +18,7 @@ import asyncio
 import httpx
 
 from agentcore.messaging.hub import default_chat_hub
-
-_PW = "password123"
-
-
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
-    assert r.status_code == 200, r.text
+from tests.integration.conftest import register_and_login
 
 
 async def _user_id(client: httpx.AsyncClient) -> str:
@@ -46,11 +35,11 @@ async def test_send_fans_out_to_recipient(client, new_client, make_invite):
     """Bob's HTTP send reaches Alice's live hub connection as a chat_message."""
     code_a = await make_invite("INV-RT-A")
     code_b = await make_invite("INV-RT-B")
-    await _register_and_login(client, code_a, "rt_alice")
+    await register_and_login(client, code_a, "rt_alice")
     alice_id = await _user_id(client)
 
     async with new_client() as bob:
-        await _register_and_login(bob, code_b, "rt_bob")
+        await register_and_login(bob, code_b, "rt_bob")
 
         r = await bob.post("/v1/messages/chats/dm", json={"user_id": alice_id})
         assert r.status_code == 201, r.text
@@ -83,11 +72,11 @@ async def test_sender_also_receives_for_multidevice(client, new_client, make_inv
     """The sender is in the fan-out too (multi-device echo)."""
     code_a = await make_invite("INV-RT-MA")
     code_b = await make_invite("INV-RT-MB")
-    await _register_and_login(client, code_a, "rt_alice_m")
+    await register_and_login(client, code_a, "rt_alice_m")
     alice_id = await _user_id(client)
 
     async with new_client() as bob:
-        await _register_and_login(bob, code_b, "rt_bob_m")
+        await register_and_login(bob, code_b, "rt_bob_m")
         bob_id = await _user_id(bob)
 
         r = await bob.post("/v1/messages/chats/dm", json={"user_id": alice_id})
@@ -114,12 +103,12 @@ async def test_non_member_not_in_fanout(client, new_client, make_invite):
     code_a = await make_invite("INV-RT-LA")
     code_b = await make_invite("INV-RT-LB")
     code_c = await make_invite("INV-RT-LC")
-    await _register_and_login(client, code_a, "rt_alice_l")
+    await register_and_login(client, code_a, "rt_alice_l")
     alice_id = await _user_id(client)
 
     async with new_client() as bob, new_client() as carol:
-        await _register_and_login(bob, code_b, "rt_bob_l")
-        await _register_and_login(carol, code_c, "rt_carol_l")
+        await register_and_login(bob, code_b, "rt_bob_l")
+        await register_and_login(carol, code_c, "rt_carol_l")
         carol_id = await _user_id(carol)
 
         r = await bob.post("/v1/messages/chats/dm", json={"user_id": alice_id})

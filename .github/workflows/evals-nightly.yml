@@ -123,7 +123,7 @@ jobs:
         continue-on-error: true
         run: uv run python -m agentcore.evals --compare --out eval-reports/comparison.json
 
-      # ---- 软门禁·挖坑探针（交付前核验「重层」立项的证据绊线，见 docs/07-规划/远期规划.md §2.5）：
+      # ---- 软门禁·挖坑探针（交付前核验「重层」立项的证据绊线，见 docs/06-规划/远期规划.md §2.5）：
       # 跑「便宜层 finish_guard 够不着」的两类——①算术/单一答案（确定性地面真值 ContentMatches）、
       # ②代码必须真跑（生成→沙箱跑隐藏边界用例）。开发期实测两类均近满分（缺口不在此），故为观测性
       # 软门禁；哪天通过率抬头，即「机械轻层不够、该上重层」的触发信号。

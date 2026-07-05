@@ -54,27 +54,54 @@ export function headText(text: string, max = 80): string {
   return `${flat.slice(0, max)}…`;
 }
 
-/**
- * 消息时间戳展示串（气泡 hover 揭示，§二）：今天显 "HH:MM"，昨天 "昨天 HH:MM"，
- * 同年 "M月D日 HH:MM"，跨年 "YYYY年M月D日 HH:MM"。非法输入返回空串。
- */
-export function formatMessageTime(iso: string): string {
+function sameCalendarDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+/** 消息时刻 "HH:MM"（线程内日期由分隔条承担）。非法输入返回空串。 */
+export function formatMessageTimeOfDay(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   const pad = (n: number) => String(n).padStart(2, "0");
-  const hhmm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/**
+ * IM 线程日期分隔条：今天 / 昨天 / M月D日 / YYYY年M月D日。非法输入返回空串。
+ */
+export function formatDateDivider(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
   const now = new Date();
-  const sameDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate();
-  if (sameDay(d, now)) return hhmm;
+  if (sameCalendarDay(d, now)) return "今天";
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
-  if (sameDay(d, yesterday)) return `昨天 ${hhmm}`;
+  if (sameCalendarDay(d, yesterday)) return "昨天";
   const md = `${d.getMonth() + 1}月${d.getDate()}日`;
-  if (d.getFullYear() === now.getFullYear()) return `${md} ${hhmm}`;
-  return `${d.getFullYear()}年${md} ${hhmm}`;
+  if (d.getFullYear() === now.getFullYear()) return md;
+  return `${d.getFullYear()}年${md}`;
+}
+
+/**
+ * 消息时间戳展示串（侧栏预览等无日期上下文处）：今天显 "HH:MM"，昨天 "昨天 HH:MM"，
+ * 同年 "M月D日 HH:MM"，跨年 "YYYY年M月D日 HH:MM"。非法输入返回空串。
+ */
+export function formatMessageTime(iso: string): string {
+  const tod = formatMessageTimeOfDay(iso);
+  if (!tod) return "";
+  const d = new Date(iso);
+  const now = new Date();
+  if (sameCalendarDay(d, now)) return tod;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (sameCalendarDay(d, yesterday)) return `昨天 ${tod}`;
+  const md = `${d.getMonth() + 1}月${d.getDate()}日`;
+  if (d.getFullYear() === now.getFullYear()) return `${md} ${tod}`;
+  return `${d.getFullYear()}年${md} ${tod}`;
 }
 
 /** 毫秒时长 → 人类可读："45s" / "2m34s" / "1h2m"（用于任务用时摘要）。 */

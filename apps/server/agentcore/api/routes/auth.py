@@ -21,13 +21,13 @@ from agentcore.api.dependencies import (
     AdminSessionUser,
     AdminUser,
     AuthUser,
+    get_admin_mfa_service,
     get_asset_storage,
     get_auth_service,
     get_conversation_repo,
     get_conversation_share_repo,
     get_credentials_repo,
     get_db,
-    get_admin_mfa_service,
     get_messaging_service,
     get_user_llm_key_repo,
 )
@@ -53,9 +53,9 @@ from agentcore.api.schemas import (
     UpdateProfileRequest,
     UserResponse,
 )
+from agentcore.auth import AuthService, TokenPair
 from agentcore.auth.client import ClientPlatform, parse_client_platform
 from agentcore.auth.mfa import AdminMfaService
-from agentcore.auth import AuthService, TokenPair
 from agentcore.auth.service import LoginResult
 from agentcore.config import settings
 from agentcore.core.errors import AuthenticationError

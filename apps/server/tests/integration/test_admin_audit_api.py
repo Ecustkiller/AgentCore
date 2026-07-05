@@ -1,7 +1,11 @@
 from uuid import uuid4
 
 from agentcore.db.repositories import UserRepository
-from tests.integration.test_admin_api import _login
+from tests.integration.conftest import login_admin
+from tests.integration.test_admin_api import (
+    _seed_conversation_with_turn,
+    _seed_user,
+)
 
 
 async def test_admin_audit_logs_record_and_list(client, make_admin, session_factory):
@@ -12,7 +16,7 @@ async def test_admin_audit_logs_record_and_list(client, make_admin, session_fact
         target = await users.create(username=f"audit_{uuid4().hex[:8]}", display_name="Audit Target")
         target_id = target.user_id
 
-    await _login(client, admin_name, admin_pw)
+    await login_admin(client, admin_name, admin_pw)
     r = await client.patch(f"/v1/admin/users/{target_id}", json={"role": "admin"})
     assert r.status_code == 200, r.text
 
@@ -35,14 +39,8 @@ async def test_admin_replay_view_records_audit(
     client, make_admin, session_factory,
 ):
     """Reading a conversation replay appends a conversation.replay audit row."""
-    from tests.integration.test_admin_api import (
-        _login,
-        _seed_conversation_with_turn,
-        _seed_user,
-    )
-
     admin_name, admin_pw = await make_admin()
-    await _login(client, admin_name, admin_pw)
+    await login_admin(client, admin_name, admin_pw)
     alice = await _seed_user(session_factory, "replay_audit_alice")
     conv_id, _ = await _seed_conversation_with_turn(session_factory, user_id=alice)
 

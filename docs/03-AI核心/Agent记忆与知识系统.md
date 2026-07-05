@@ -139,7 +139,7 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 - **跨 turn 历史**：只回放 user/assistant 文本——见 [`执行引擎架构设计.md` §三](/docs/03-AI核心/执行引擎架构设计.md) 历史重建原则。
 - **委派预算（参考）**：基底摘要 ~2500 字符、链合成上限 ~6000 字符；**深度 `depth ≤ 2`**（`MAX_DELEGATION_DEPTH`）；单次 `delegate` 最多 10 个子任务（`MAX_DELEGATION_TASKS`，超额丢弃）、树内并发上限 8（`MAX_PARALLEL_DELEGATIONS` / `DEFAULT_MAX_PARALLEL`，超额排队）。
 
-详述与预算表见 [`../07-规划/远期规划.md`](/docs/07-规划/远期规划.md)。
+详述与预算表见 [`../06-规划/远期规划.md`](/docs/06-规划/远期规划.md)。
 
 ---
 
@@ -187,7 +187,7 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 | `conditional` | 按 globs 匹配场景注入 | 计入 |
 | `on_demand` | `<rules>` 仅列名，Agent 经 consult 工具按需拉全文 | 不计入 |
 
-> **on_demand 现状**：今日唯一接线的 on_demand 消费者是**记忆主题**（`主题/*.md`，经 `consult_memory`，见 §1.4 / §二）。面向**用户手写规则**的通用 `consult_rule` 尚未实现——按「第 3 次真重复才抽象」留到出现第二类 on_demand 消费者时再建（扳机 A，见 [上下文注入统一性讨论](/docs/07-规划/上下文注入统一性讨论.md)）。
+> **on_demand 现状**：今日唯一接线的 on_demand 消费者是**记忆主题**（`主题/*.md`，经 `consult_memory`，见 §1.4 / §二）。面向**用户手写规则**的通用 `consult_rule` 尚未实现——按「第 3 次真重复才抽象」留到出现第二类 on_demand 消费者时再建（扳机 A，见 [上下文注入统一性讨论](/docs/06-规划/上下文注入统一性讨论.md)）。
 
 ### 5.5 上下文装配顺序
 
@@ -202,7 +202,7 @@ BASE 100 → RUNTIME_CONTEXT 200 → MEMORY 300 → CEO_CORE 400
 
 这是**一套**排序坐标系；并非每条路径都用满全部档位（worker 走 `BASE`/`RUNTIME_CONTEXT`/`MEMORY`/`ATTACHMENT`，CEO 聊天走 `BASE`/`CEO_CORE`/`SKILL_DIRECTORY`/`MEMORY_TOPICS`/`CITATION`，再叠 `WORKSPACE_OVERVIEW`/`ATTACHMENT`），但两路径对相对顺序的认知永远一致。`MEMORY_TOPICS`（记忆主题目录，CEO-only）紧挨 `SKILL_DIRECTORY`：二者同形——都是「列个目录、按名拉全文」的按需块（见 §二）。
 
-> **决策：常驻源统一为 contributor 插件、顺序声明化。** 理由：① 新增常驻源只需声明一个 `order` 即落位，无需在某个拼接点插队、改动多处调用；② 渲染序与贡献次序解耦——各调用点本就按升序贡献，稳定排序复现原内联顺序、原 `\n` 拼接，**与统一前逐字节一致**（稳定前缀不变，DeepSeek 前缀缓存不破）；③ 稳定前缀（base + hints）在前、概览 / 附件置尾，护前缀缓存（概览 / 附件都空时与原 CEO 提示词逐字节一致）；④ `budget` 字段为「扳机 B」（预算 / 裁剪 / 降级）预留**唯一读取点**——今天不强制裁剪，按需才长（触发条件见 [上下文注入统一性讨论](/docs/07-规划/上下文注入统一性讨论.md) 扳机 B）。→ 见代码：`runtime/context/`（`contributor.py` 定义形状 + `assembler.py` 收集排序）。
+> **决策：常驻源统一为 contributor 插件、顺序声明化。** 理由：① 新增常驻源只需声明一个 `order` 即落位，无需在某个拼接点插队、改动多处调用；② 渲染序与贡献次序解耦——各调用点本就按升序贡献，稳定排序复现原内联顺序、原 `\n` 拼接，**与统一前逐字节一致**（稳定前缀不变，DeepSeek 前缀缓存不破）；③ 稳定前缀（base + hints）在前、概览 / 附件置尾，护前缀缓存（概览 / 附件都空时与原 CEO 提示词逐字节一致）；④ `budget` 字段为「扳机 B」（预算 / 裁剪 / 降级）预留**唯一读取点**——今天不强制裁剪，按需才长（触发条件见 [上下文注入统一性讨论](/docs/06-规划/上下文注入统一性讨论.md) 扳机 B）。→ 见代码：`runtime/context/`（`contributor.py` 定义形状 + `assembler.py` 收集排序）。
 
 **Workspace Context（CEO）= 实时工作区概览 + 项目画像** ✅：每回合 `build_workspace_overview(backend)` 先 best-effort 检测项目画像（`detect_project_profile`：语言/框架/包管理器/monorepo 工具/VCS 分支/常用命令/`AGENTS.md` 摘录；**只读清单文件、不执行命令**；画像 ≤600 字符；失败不阻塞），再拉「最近更新在前」的文件清单（文件数 + 字符预算双重封顶），一并注入 `<workspace_context>`（`WORKSPACE_OVERVIEW` 档）。**项目感知是上下文注入增强、不是新工具**；延续 agentic 检索路线，不上向量 RAG。worker 不走此块——它们已有更丰富的逐运行 manifest。→ 见代码：`runtime/context/workspace_overview.py`、`runtime/context/project_profile.py`。
 
@@ -220,7 +220,9 @@ BASE 100 → RUNTIME_CONTEXT 200 → MEMORY 300 → CEO_CORE 400
 
 `rule` 不递归是因为规则按层级生效（子文件夹有自己的规则）；工作区不限深度是因为用户心智是"文件夹里的东西 AI 都能看到"——但**不预建向量索引**：概览给方位、Agent 用文件工具取正文（agentic 检索为主路）。
 
-> **决策：取消向量 RAG（pgvector / embedding）作为近期工作区检索方案，改用「实时概览 + agentic 检索」。** 理由：① 向量索引一改文件就失效，需 embedder + pgvector + 重建管线，与"文件随时变"的工作区天然不合；② 关键词 `grep` + Agent 自取，在工作区规模（数十～数百文件）下召回足够、永远新鲜、零新依赖；③ 语义检索**降为扳机后手**——待工作区涨到关键词 + agentic 明显召回不足时再引入（即 §七「项目知识库 / pgvector 语义检索」未来项，触发条件见 [上下文注入统一性讨论](/docs/07-规划/上下文注入统一性讨论.md) 扳机 A）。
+> **决策：取消向量 RAG（pgvector / embedding）作为近期工作区检索方案，改用「实时概览 + agentic 检索」。** 理由：① 向量索引一改文件就失效，需 embedder + pgvector + 重建管线，与"文件随时变"的工作区天然不合；② 关键词 `grep` + Agent 自取，在工作区规模（数十～数百文件）下召回足够、永远新鲜、零新依赖；③ 语义检索**降为扳机后手**——待工作区涨到关键词 + agentic 明显召回不足时再引入（即 §七「项目知识库 / pgvector 语义检索」未来项，触发条件见 [上下文注入统一性讨论](/docs/06-规划/上下文注入统一性讨论.md) 扳机 A）。
+
+⏳ **扳机后手·`code_search` 工具**（低优先级 backlog）：索引是工具后端、**不是** prompt 自动 RAG 层——与上条决策兼容。形态：tree-sitter 分块 + BM25 混合检索工具（2a 无嵌入先行；2b 再加本地静态嵌入 + RRF）；与 `grep` **并存**（grep 精确正则、`code_search` 意图入口），命中后仍用 `file_read` offset/limit 精读。索引存工作区旁 `.agentcore/index/`（gitignore）；sidecar 与云端各算各的。嵌入 + 调用图为可选后手。**否决**：纯向量 chunk 注入 prompt。→ 工具契约见 [工具与能力系统](/docs/03-AI核心/工具与能力系统.md)；前端 CommandPalette Tier 3 语义检索为另一层（见 [远期规划 §三](/docs/06-规划/远期规划.md)）。
 
 ---
 

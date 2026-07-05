@@ -60,6 +60,7 @@ class WorkspaceOp(StrEnum):
 
     READ = "read"
     WRITE = "write"
+    APPEND = "append"
     READ_BYTES = "read_bytes"
     WRITE_BYTES = "write_bytes"
     LIST = "list"

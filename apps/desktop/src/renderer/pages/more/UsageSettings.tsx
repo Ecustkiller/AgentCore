@@ -1,9 +1,7 @@
 import { Button, IconButton } from "@/components/ui";
-import { Switch } from "@/components/ui/Switch";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { agentColorVar } from "@/lib/agentIdentity";
 import { formatCompact, formatCost, formatUsd } from "@/lib/format";
-import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
 import { KeyRound, Loader2, RefreshCw } from "lucide-react";
 import { useEffect } from "react";
@@ -13,12 +11,9 @@ import { SettingsHeader } from "./SettingsHeader";
  * Account usage dashboard (§7.3D) — the manager's view of the team's spend.
  *
  * 大众面 leads with two semantic quota meters (本月额度 / 今日 tokens) so the user
- * reads「还剩多少」at a glance without big raw numbers. The page also hosts the one
- * global「用量明细 / Power 模式」switch (`usageDetail`, §7.1): turning it on reveals
- * the token / cost breakdown here AND defaults each run's「资源消耗」to expanded — a
- * single grain control instead of two. Money (¥) is never gated by it. All numbers
- * come from `GET /usage/summary` via the usage store; money formats off the single
- * server FX rate.
+ * reads「还剩多少」at a glance without big raw numbers. Token / cost breakdown and
+ * run-detail「资源消耗」default-expand are always on. All numbers come from
+ * `GET /usage/summary` via the usage store; money formats off the single server FX rate.
  */
 export function UsageSettings() {
   const summary = useUsageStore((s) => s.summary);
@@ -26,10 +21,6 @@ export function UsageSettings() {
   const error = useUsageStore((s) => s.error);
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
   const fetchSummary = useUsageStore((s) => s.fetchSummary);
-  // The grain switch lives here but is global (§7.1): it also drives run-detail's
-  // 资源消耗 default-expand, so it reads/writes the shared UI store, not local state.
-  const usageDetail = useUIStore((s) => s.usageDetail);
-  const setUsageDetail = useUIStore((s) => s.setUsageDetail);
 
   // Refresh on open: the bootstrap snapshot may be stale by the time the user
   // lands here. Best-effort (the store keeps the last value + a soft error).
@@ -73,8 +64,6 @@ export function UsageSettings() {
         }
       />
 
-      <PowerModeToggle enabled={usageDetail} onChange={setUsageDetail} />
-
       {/* 三态分离：已有数据（含刷新失败的软告警）/ 首屏失败 / 首屏加载中。 */}
       {summary ? (
         <>
@@ -82,7 +71,6 @@ export function UsageSettings() {
           <Dashboard
             summary={summary}
             cnyPerUsd={cnyPerUsd}
-            showDetail={usageDetail}
             byok={byok}
           />
         </>
@@ -142,67 +130,13 @@ function RefreshErrorBanner({
   );
 }
 
-/**
- * The single global「用量明细 / Power 模式」switch (§7.1). Off by default (大众);
- * on reveals technical breakdowns and defaults run-detail「资源消耗」to expanded.
- * 成本（¥）始终可见，不受它控制。
- */
-function PowerModeToggle({
-  enabled,
-  onChange,
-}: {
-  enabled: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <div className="mt-6 flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3">
-      <div className="min-w-0">
-        <p className="text-sm text-foreground">用量明细（Power 模式）</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          显示 token、缓存率等技术明细，并默认展开各 Agent
-          的资源消耗。成本（¥）始终可见。
-        </p>
-      </div>
-      <Switch
-        checked={enabled}
-        onCheckedChange={onChange}
-        label="用量明细（Power 模式）"
-      />
-    </div>
-  );
-}
-
-type Summary = NonNullable<
-  ReturnType<typeof useUsageStore.getState>["summary"]
->;
-
-/**
- * BYOK reframe of the quota block: the platform额度 is dormant (the turn runs on
- * the user's own DeepSeek key), so instead of meters we explain that spend below
- * is the user's own estimated DeepSeek cost and there is no platform cap.
- */
-function ByokNote() {
-  return (
-    <div className="flex items-start gap-2.5 rounded-xl border border-border bg-muted/30 px-4 py-3">
-      <KeyRound size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
-      <p className="text-xs text-muted-foreground">
-        当前为「自带 Key」模式：对话按你自己的 DeepSeek
-        额度计费，平台不设上限。下方花费为按官方价格估算的你的 DeepSeek
-        用量，可在「模型配置」中管理你的 Key。
-      </p>
-    </div>
-  );
-}
-
 function Dashboard({
   summary,
   cnyPerUsd,
-  showDetail,
   byok,
 }: {
   summary: Summary;
   cnyPerUsd: number;
-  showDetail: boolean;
   byok: boolean;
 }) {
   const { today, month, quota } = summary;
@@ -275,8 +209,29 @@ function Dashboard({
         <RolePayroll lines={summary.month_by_role} cnyPerUsd={cnyPerUsd} />
       )}
 
-      {/* 明细 default-collapses; the global 用量明细 switch above reveals it (§7.1). */}
-      {showDetail && <UsageDetail summary={summary} cnyPerUsd={cnyPerUsd} />}
+      <UsageDetail summary={summary} cnyPerUsd={cnyPerUsd} />
+    </div>
+  );
+}
+
+type Summary = NonNullable<
+  ReturnType<typeof useUsageStore.getState>["summary"]
+>;
+
+/**
+ * BYOK reframe of the quota block: the platform额度 is dormant (the turn runs on
+ * the user's own DeepSeek key), so instead of meters we explain that spend below
+ * is the user's own estimated DeepSeek cost and there is no platform cap.
+ */
+function ByokNote() {
+  return (
+    <div className="flex items-start gap-2.5 rounded-xl border border-border bg-muted/30 px-4 py-3">
+      <KeyRound size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
+      <p className="text-xs text-muted-foreground">
+        当前为「自带 Key」模式：对话按你自己的 DeepSeek
+        额度计费，平台不设上限。下方花费为按官方价格估算的你的 DeepSeek
+        用量，可在「模型配置」中管理你的 Key。
+      </p>
     </div>
   );
 }

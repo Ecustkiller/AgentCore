@@ -21,9 +21,9 @@ export function GuidelinesPage() {
               text={data.guidelines.shared_base}
             />
             <GuidelineBlock
-              title="CEO 完整提示词"
-              subtitle="协调者 CEO 的完整对话系统提示词：共享基座 + 路由核心 + 能力目录 + 引用规范。"
-              text={data.guidelines.ceo}
+              title="CEO 专属提示词"
+              subtitle="在全员共享准则之上，CEO 额外遵循的路由核心、能力目录与引用规范。"
+              text={data.guidelines.ceo_addon}
             />
           </section>
 

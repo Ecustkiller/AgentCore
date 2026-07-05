@@ -9,19 +9,9 @@ import httpx
 
 import agentcore.folders.permanent_delete as permanent_delete_mod
 from agentcore.db.repositories import MessageRepository
+from tests.integration.conftest import register_and_login
 
-_PW = "password123"
 _ROOT = "11111111-2222-3333-4444-555555555555"
-
-
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
-    assert r.status_code == 200, r.text
 
 
 async def _new_conversation(client: httpx.AsyncClient, title: str) -> str:
@@ -46,7 +36,7 @@ async def test_folders_require_auth(client):
 
 async def test_create_and_list_folders(client, make_invite):
     code = await make_invite("INV-F1")
-    await _register_and_login(client, code, "folderuser1")
+    await register_and_login(client, code, "folderuser1")
 
     r = await client.post("/v1/folders", json={"name": "Work", "local_dir": "/tmp/work"})
     assert r.status_code == 201, r.text
@@ -63,7 +53,7 @@ async def test_create_and_list_folders(client, make_invite):
 async def test_create_folder_rejects_local_root_id(client, make_invite):
     """Folder refactor: folders are pure grouping — local binding lives on conversation scratch."""
     code = await make_invite("INV-F12")
-    await _register_and_login(client, code, "folderuser12")
+    await register_and_login(client, code, "folderuser12")
 
     r = await client.post("/v1/folders", json={"name": "Local Proj", "local_root_id": _ROOT})
     assert r.status_code == 422, r.text
@@ -71,7 +61,7 @@ async def test_create_folder_rejects_local_root_id(client, make_invite):
 
 async def test_grouped_reflects_membership(client, make_invite):
     code = await make_invite("INV-F2")
-    await _register_and_login(client, code, "folderuser2")
+    await register_and_login(client, code, "folderuser2")
 
     folder_id = (await client.post("/v1/folders", json={"name": "Proj"})).json()["id"]
     grouped_conv = await _new_conversation(client, "in folder")
@@ -105,7 +95,7 @@ async def test_grouped_reflects_membership(client, make_invite):
 async def test_started_conversation_can_change_folder(client, make_invite, session_factory):
     """Folder is pure sidebar grouping — moving never pins after messages land."""
     code = await make_invite("INV-F7")
-    await _register_and_login(client, code, "folderuser7")
+    await register_and_login(client, code, "folderuser7")
     folder_id = (await client.post("/v1/folders", json={"name": "Proj"})).json()["id"]
     conv = await _new_conversation(client, "started")
     await _seed_message(session_factory, conv)
@@ -123,7 +113,7 @@ async def test_started_conversation_noop_move_allowed(client, make_invite, sessi
     """Re-sending the *current* membership never switches the workspace, so it is
     allowed even for a started chat (idempotent no-op)."""
     code = await make_invite("INV-F8")
-    await _register_and_login(client, code, "folderuser8")
+    await register_and_login(client, code, "folderuser8")
     conv = await _new_conversation(client, "started loose")
     await _seed_message(session_factory, conv)
 
@@ -134,7 +124,7 @@ async def test_started_conversation_noop_move_allowed(client, make_invite, sessi
 async def test_create_in_folder_files_at_creation(client, make_invite):
     """A "新建对话 from a folder" is born in that folder (no follow-up move)."""
     code = await make_invite("INV-F9")
-    await _register_and_login(client, code, "folderuser9")
+    await register_and_login(client, code, "folderuser9")
     folder_id = (await client.post("/v1/folders", json={"name": "Born"})).json()["id"]
 
     r = await client.post("/v1/conversations", json={"title": "in folder", "folder_id": folder_id})
@@ -148,7 +138,7 @@ async def test_create_in_folder_files_at_creation(client, make_invite):
 
 async def test_create_in_missing_folder_404(client, make_invite):
     code = await make_invite("INV-F10")
-    await _register_and_login(client, code, "folderuser10")
+    await register_and_login(client, code, "folderuser10")
     r = await client.post(
         "/v1/conversations",
         json={"title": "x", "folder_id": "00000000-0000-0000-0000-000000000000"},
@@ -158,7 +148,7 @@ async def test_create_in_missing_folder_404(client, make_invite):
 
 async def test_grouped_reports_message_count(client, make_invite, session_factory):
     code = await make_invite("INV-F11")
-    await _register_and_login(client, code, "folderuser11")
+    await register_and_login(client, code, "folderuser11")
     conv = await _new_conversation(client, "counts")
 
     body = (await client.get("/v1/conversations/grouped")).json()
@@ -173,7 +163,7 @@ async def test_grouped_reports_message_count(client, make_invite, session_factor
 
 async def test_move_to_missing_folder_404(client, make_invite):
     code = await make_invite("INV-F3")
-    await _register_and_login(client, code, "folderuser3")
+    await register_and_login(client, code, "folderuser3")
     conv = await _new_conversation(client, "c")
 
     r = await client.patch(
@@ -185,7 +175,7 @@ async def test_move_to_missing_folder_404(client, make_invite):
 
 async def test_update_folder_clears_local_dir(client, make_invite):
     code = await make_invite("INV-F4")
-    await _register_and_login(client, code, "folderuser4")
+    await register_and_login(client, code, "folderuser4")
     folder_id = (await client.post("/v1/folders", json={"name": "A", "local_dir": "/d"})).json()[
         "id"
     ]
@@ -205,7 +195,7 @@ async def test_update_folder_clears_local_dir(client, make_invite):
 
 async def test_delete_folder_keeps_conversations(client, make_invite):
     code = await make_invite("INV-F5")
-    await _register_and_login(client, code, "folderuser5")
+    await register_and_login(client, code, "folderuser5")
     folder_id = (await client.post("/v1/folders", json={"name": "Temp"})).json()["id"]
     conv = await _new_conversation(client, "keep me")
     await client.patch(f"/v1/conversations/{conv}/folder", json={"folder_id": folder_id})
@@ -229,7 +219,7 @@ async def test_permanent_delete_folder_ungroups_conversations(
     # the global engine's default schema and can't see the folder created here → 404.
     monkeypatch.setattr(permanent_delete_mod, "async_session_factory", session_factory)
     code = await make_invite("INV-F7")
-    await _register_and_login(client, code, "folderuser7")
+    await register_and_login(client, code, "folderuser7")
     folder_id = (await client.post("/v1/folders", json={"name": "Gone"})).json()["id"]
     conv = await _new_conversation(client, "keep me")
     await client.patch(f"/v1/conversations/{conv}/folder", json={"folder_id": folder_id})
@@ -245,12 +235,12 @@ async def test_permanent_delete_folder_ungroups_conversations(
 
 async def test_folder_isolation_between_users(client, make_invite, new_client):
     code1 = await make_invite("INV-F6A")
-    await _register_and_login(client, code1, "owneruser")
+    await register_and_login(client, code1, "owneruser")
     folder_id = (await client.post("/v1/folders", json={"name": "Mine"})).json()["id"]
 
     code2 = await make_invite("INV-F6B")
     async with new_client() as other:
-        await _register_and_login(other, code2, "intruder")
+        await register_and_login(other, code2, "intruder")
 
         # Intruder can't see, edit, or delete someone else's folder.
         assert (await other.get("/v1/folders")).json() == []

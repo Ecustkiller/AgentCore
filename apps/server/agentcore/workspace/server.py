@@ -157,6 +157,24 @@ class ServerWorkspace:
         self._dirty = True
         return len(content)
 
+    async def append(self, path: str, content: str) -> int:
+        target = self._safe(path)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                if not target.is_file():
+                    raise NotAFile(path)
+                with target.open("a", encoding="utf-8") as fh:
+                    fh.write(content)
+            else:
+                target.write_text(content, encoding="utf-8")
+        except NotAFile:
+            raise
+        except OSError as e:
+            raise WorkspaceIOError(str(e)) from e
+        self._dirty = True
+        return len(content)
+
     async def read_bytes(self, path: str) -> bytes:
         target = self._safe(path)
         if not target.exists():

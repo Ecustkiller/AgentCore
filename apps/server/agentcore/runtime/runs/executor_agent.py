@@ -50,6 +50,7 @@ from agentcore.runtime.runs.executor_context import (
 from agentcore.runtime.runs.executor_identities import (
     _WORKER_CAPTAIN_IDENTITY,
     _WORKER_IDENTITY,
+    _WORKER_TEAM_NOTE_POLICY,
     ESCALATION_CONCURRENCY_CAP,
     DelegateFactory,
     LeadSubteam,
@@ -422,6 +423,8 @@ def build_agent_executor(
                     "你不能再向下委派。",
                     "如果你发现任务可以并行拆分，可以调用 request_delegate 申请派人权。",
                 )
+            if not collaboration:
+                identity = identity.replace(_WORKER_TEAM_NOTE_POLICY, "").replace("\n\n\n", "\n\n")
             # 非协作批次 (collaboration=False, e.g. debate): strip the 团队便签 tools from the
             # offered registry so even an UNRESTRICTED worker (allowed_tools=None → "offer all
             # team tools") is never handed post/read/amend — "no collaboration" means no channel

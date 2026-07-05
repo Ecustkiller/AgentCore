@@ -15,7 +15,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { SimpleTooltip } from "@/components/ui/tooltip";
+import {
+  SimpleTooltip,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   useArchiveConversation,
   useDeleteConversation,
@@ -54,8 +59,63 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+
+const PREVIEW_DELAY_MS = 500;
+const PREVIEW_MAX_CHARS = 80;
+const EMPTY_MESSAGES: { role: "user" | "assistant"; content: string }[] = [];
+
+function timeAgo(date: string | Date): string {
+  const ms = Date.now() - new Date(date).getTime();
+  const min = Math.floor(ms / 60_000);
+  if (min < 1) return "刚刚";
+  if (min < 60) return `${min} 分钟前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} 小时前`;
+  const d = Math.floor(hr / 24);
+  return `${d} 天前`;
+}
+
+function truncatePreview(text: string, max = PREVIEW_MAX_CHARS): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= max) return normalized;
+  return `${normalized.slice(0, max)}…`;
+}
+
+function buildMessagePreview(
+  lastMessagePreview: string | null,
+  messages: { role: "user" | "assistant"; content: string }[],
+): string | null {
+  if (lastMessagePreview?.trim()) {
+    return truncatePreview(lastMessagePreview);
+  }
+  if (messages.length === 0) return null;
+
+  let lastUser: (typeof messages)[number] | null = null;
+  let lastAssistant: (typeof messages)[number] | null = null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (!msg.content.trim()) continue;
+    if (msg.role === "assistant" && !lastAssistant) lastAssistant = msg;
+    if (msg.role === "user" && !lastUser) lastUser = msg;
+    if (lastUser && lastAssistant) break;
+  }
+
+  const parts: string[] = [];
+  if (lastUser) {
+    parts.push(`你: ${truncatePreview(lastUser.content, 40)}`);
+  }
+  if (lastAssistant) {
+    parts.push(`AI: ${truncatePreview(lastAssistant.content, 40)}`);
+  }
+  if (parts.length > 0) return parts.join(" → ");
+
+  const last = messages[messages.length - 1];
+  if (!last.content.trim()) return null;
+  const roleLabel = last.role === "user" ? "你" : "AI";
+  return `${roleLabel}: ${truncatePreview(last.content)}`;
+}
 
 interface Props {
   conversation: Conversation;
@@ -63,13 +123,19 @@ interface Props {
 
 export function ConversationItem({ conversation }: Props) {
   const [hovered, setHovered] = useState(false);
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [draft, setDraft] = useState(conversation.title);
   const inputRef = useRef<HTMLInputElement>(null);
   const skipBlurRef = useRef(false);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const currentId = useConversationStore((s) => s.currentConversationId);
+  const cachedMessages = useConversationStore(
+    (s) => s.byId[conversation.id]?.messages ?? EMPTY_MESSAGES,
+  );
   const switchConversation = useConversationStore((s) => s.switchConversation);
   const dropConversationRuntime = useConversationStore(
     (s) => s.dropConversationRuntime,
@@ -99,6 +165,28 @@ export function ConversationItem({ conversation }: Props) {
     : isGenerating
       ? "running"
       : null;
+
+  const suppressPreview = moreOpen || confirmingDelete || contextMenuOpen;
+  const messagePreview = useMemo(
+    () => buildMessagePreview(conversation.lastMessagePreview, cachedMessages),
+    [conversation.lastMessagePreview, cachedMessages],
+  );
+
+  const clearPreviewTimer = () => {
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = undefined;
+    }
+  };
+
+  useEffect(() => {
+    if (suppressPreview) {
+      clearPreviewTimer();
+      setPreviewVisible(false);
+    }
+  }, [suppressPreview]);
+
+  useEffect(() => () => clearPreviewTimer(), []);
 
   useEffect(() => {
     if (editing) {
@@ -288,19 +376,38 @@ export function ConversationItem({ conversation }: Props) {
   return (
     <ContextMenu
       onOpenChange={(open) => {
+        setContextMenuOpen(open);
         if (open) setConfirmingDelete(false);
       }}
     >
-      <ContextMenuTrigger asChild>
-        <SurfaceRow
-          variant="sidebar"
-          active={isActive}
-          onMouseEnter={() => setHovered(true)}
-          onMouseLeave={() => {
-            setHovered(false);
-            if (!moreOpen) setConfirmingDelete(false);
-          }}
-        >
+      <Tooltip
+        open={previewVisible}
+        onOpenChange={(open) => {
+          if (!open) setPreviewVisible(false);
+        }}
+      >
+        <TooltipTrigger asChild>
+          <ContextMenuTrigger asChild>
+            <SurfaceRow
+              variant="sidebar"
+              active={isActive}
+              onMouseEnter={() => {
+                setHovered(true);
+                if (!suppressPreview) {
+                  clearPreviewTimer();
+                  previewTimerRef.current = setTimeout(
+                    () => setPreviewVisible(true),
+                    PREVIEW_DELAY_MS,
+                  );
+                }
+              }}
+              onMouseLeave={() => {
+                setHovered(false);
+                clearPreviewTimer();
+                setPreviewVisible(false);
+                if (!moreOpen) setConfirmingDelete(false);
+              }}
+            >
           {/* biome-ignore lint/a11y/useSemanticElements: 行内另有 DropdownMenuTrigger 的真 <button>，此可点击区不可套 <button>。 */}
           <div
             role="button"
@@ -456,8 +563,24 @@ export function ConversationItem({ conversation }: Props) {
               aria-label="已置顶"
             />
           ) : null}
-        </SurfaceRow>
-      </ContextMenuTrigger>
+            </SurfaceRow>
+          </ContextMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="right" align="start" className="max-w-sm px-3 py-2">
+          <div className="flex flex-col gap-1.5">
+            <p className="text-sm font-semibold">{conversation.title}</p>
+            <p className="text-xs text-muted-foreground">
+              最后更新: {timeAgo(conversation.updatedAt)}
+            </p>
+            {messagePreview && (
+              <>
+                <div className="border-t border-border" />
+                <p className="text-xs leading-relaxed">{messagePreview}</p>
+              </>
+            )}
+          </div>
+        </TooltipContent>
+      </Tooltip>
 
       <ContextMenuContent className="min-w-52">
         <ContextMenuItem onSelect={() => startEdit()}>

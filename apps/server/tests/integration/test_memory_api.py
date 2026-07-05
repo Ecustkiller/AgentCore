@@ -12,12 +12,10 @@ touches the real data dir.
 
 import uuid
 
-import httpx
 import pytest
 
 from agentcore.config import settings
-
-_PW = "password123"
+from tests.integration.conftest import register_and_login
 
 
 @pytest.fixture(autouse=True)
@@ -27,19 +25,9 @@ def _isolated_memory_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
 
 
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
-    assert r.status_code == 200, r.text
-
-
 async def test_per_file_roundtrip_and_cas(client, make_invite):
     code = await make_invite("INV-MEM-1")
-    await _register_and_login(client, code, "mem1")
+    await register_and_login(client, code, "mem1")
 
     # A brand-new user's 偏好 leaf is empty (with a stable empty-content CAS tag).
     r = await client.get("/v1/users/me/memory/files/preferences")
@@ -82,7 +70,7 @@ async def test_per_file_roundtrip_and_cas(client, make_invite):
 
 async def test_profile_project_scope_isolated_and_enumerated(client, make_invite):
     code = await make_invite("INV-MEM-2")
-    await _register_and_login(client, code, "mem2")
+    await register_and_login(client, code, "mem2")
 
     await client.put(
         "/v1/users/me/memory/files/profile",
@@ -107,7 +95,7 @@ async def test_profile_project_scope_isolated_and_enumerated(client, make_invite
 
 async def test_preferences_folder_id_is_ignored_and_stays_global(client, make_invite):
     code = await make_invite("INV-MEM-3")
-    await _register_and_login(client, code, "mem3")
+    await register_and_login(client, code, "mem3")
 
     # Writing preferences WITH a folder_id still lands on the GLOBAL 偏好 (invariant §1.4).
     await client.put(
@@ -121,7 +109,7 @@ async def test_preferences_folder_id_is_ignored_and_stays_global(client, make_in
 
 async def test_topics_list_read_write_clear_and_scope(client, make_invite):
     code = await make_invite("INV-MEM-4")
-    await _register_and_login(client, code, "mem4")
+    await register_and_login(client, code, "mem4")
 
     # A brand-new user has no topics, and an unknown topic reads empty (stable empty tag).
     assert (await client.get("/v1/users/me/memory/topics")).json()["topics"] == []
@@ -162,7 +150,7 @@ async def test_topics_list_read_write_clear_and_scope(client, make_invite):
 
 async def test_topic_cas_conflict_is_not_clobbered(client, make_invite):
     code = await make_invite("INV-MEM-5")
-    await _register_and_login(client, code, "mem5")
+    await register_and_login(client, code, "mem5")
 
     empty_version = (await client.get("/v1/users/me/memory/topics/笔记")).json()["version"]
     await client.put(
@@ -184,7 +172,7 @@ async def test_memory_updates_feed_lists_newest_first_across_conversations(
     from agentcore.db.repositories import MemoryUpdateRepository, UserRepository
 
     code = await make_invite("INV-MEM-6")
-    await _register_and_login(client, code, "mem6")
+    await register_and_login(client, code, "mem6")
 
     async with session_factory() as session:
         user = await UserRepository(session).get_by_username("mem6")
@@ -245,7 +233,7 @@ async def test_memory_updates_feed_isolated_per_user(
     from agentcore.db.repositories import MemoryUpdateRepository, UserRepository
 
     code = await make_invite("INV-MEM-7")
-    await _register_and_login(client, code, "mem7a")
+    await register_and_login(client, code, "mem7a")
     async with session_factory() as session:
         owner = await UserRepository(session).get_by_username("mem7a")
         assert owner is not None
@@ -259,7 +247,7 @@ async def test_memory_updates_feed_isolated_per_user(
     # A different user sees an empty feed — the row is scoped to its owner.
     async with new_client() as other:
         code2 = await make_invite("INV-MEM-8")
-        await _register_and_login(other, code2, "mem7b")
+        await register_and_login(other, code2, "mem7b")
         r = await other.get("/v1/users/me/memory/updates")
         assert r.status_code == 200, r.text
         assert r.json()["updates"] == []

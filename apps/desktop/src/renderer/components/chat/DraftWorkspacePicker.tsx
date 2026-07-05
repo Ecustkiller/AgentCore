@@ -5,6 +5,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useGroupedConversations } from "@/hooks/useConversations";
+import { useCreateFolder } from "@/hooks/useFolders";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
 import type { FolderMeta } from "@/services/folders";
@@ -14,9 +15,12 @@ import {
   ChevronDown,
   Cloud,
   FolderOpen,
+  FolderPlus,
   HardDrive,
   Loader2,
   MessageSquarePlus,
+  Pin,
+  PinOff,
   X,
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
@@ -35,9 +39,17 @@ const SEARCH_RESULT_CAP = 12;
  */
 export function DraftWorkspacePicker() {
   const [open, setOpen] = useState(false);
-  const [busy, _setBusy] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [pickedRoot, setPickedRoot] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+
+  const createFolder = useCreateFolder();
 
   const grouped = useGroupedConversations().data;
   const folders = useMemo(() => grouped?.folders ?? [], [grouped]);
@@ -45,8 +57,10 @@ export function DraftWorkspacePicker() {
 
   const pendingFolderId = useFoldersStore((s) => s.pendingNewChatFolderId);
   const pendingCloud = useFoldersStore((s) => s.pendingNewChatCloud);
+  const pinnedFolderIds = useFoldersStore((s) => s.pinnedFolderIds);
   const setFolder = useFoldersStore((s) => s.setPendingNewChatFolder);
   const setCloud = useFoldersStore((s) => s.setPendingNewChatCloud);
+  const togglePin = useFoldersStore((s) => s.togglePinFolder);
 
   const lastActivity = useMemo(() => {
     const map = new Map<string, number>();
@@ -58,27 +72,38 @@ export function DraftWorkspacePicker() {
     return map;
   }, [conversations]);
 
+  const pinnedFolders = useMemo(
+    () =>
+      pinnedFolderIds
+        .map((id) => folders.find((f) => f.id === id))
+        .filter(Boolean) as FolderMeta[],
+    [pinnedFolderIds, folders],
+  );
+
   const recentFolders = useMemo(
     () =>
       [...folders]
+        .filter((f) => !pinnedFolderIds.includes(f.id))
         .sort(
           (a, b) =>
             (lastActivity.get(b.id) ?? 0) - (lastActivity.get(a.id) ?? 0),
         )
         .slice(0, RECENT_WHEN_IDLE),
-    [folders, lastActivity],
+    [folders, lastActivity, pinnedFolderIds],
   );
 
-  const listedFolders = useMemo(() => {
+  const searchResults = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return recentFolders;
+    if (!q) return [];
     return [...folders]
       .filter((f) => f.name.toLowerCase().includes(q))
       .sort(
         (a, b) => (lastActivity.get(b.id) ?? 0) - (lastActivity.get(a.id) ?? 0),
       )
       .slice(0, SEARCH_RESULT_CAP);
-  }, [query, folders, recentFolders, lastActivity]);
+  }, [query, folders, lastActivity]);
+
+  const isSearching = !!query.trim();
 
   const selectedFolder = pendingFolderId
     ? (folders.find((f) => f.id === pendingFolderId) ?? null)
@@ -117,11 +142,52 @@ export function DraftWorkspacePicker() {
     setOpen(false);
   };
 
+  const resetCreateState = () => {
+    setCreating(false);
+    setNewName("");
+    setPickedRoot(null);
+  };
+
+  const handlePickLocalDir = async () => {
+    if (!window.fsApi) return;
+    const root = await window.fsApi.addRoot();
+    if (root) setPickedRoot(root);
+  };
+
+  const handleConfirmCreate = async () => {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    try {
+      setBusy(true);
+      setError(null);
+      const folder = await createFolder.mutateAsync({
+        name: trimmed,
+        localDir: pickedRoot?.name ?? null,
+      });
+      pickFolder(folder.id);
+      resetCreateState();
+    } catch {
+      setError("创建项目失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCreateKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && newName.trim()) {
+      e.preventDefault();
+      void handleConfirmCreate();
+    } else if (e.key === "Escape") {
+      resetCreateState();
+    }
+  };
+
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
     if (!next) {
       setQuery("");
       setError(null);
+      resetCreateState();
     }
   };
 
@@ -131,18 +197,37 @@ export function DraftWorkspacePicker() {
       onQueryChange={setQuery}
       noneSelected={!selectedFolder && !pendingCloud}
       onPickNone={pickNone}
-      listedFolders={listedFolders}
+      isSearching={isSearching}
+      pinnedFolders={pinnedFolders}
+      recentFolders={recentFolders}
+      searchResults={searchResults}
+      pinnedFolderIds={pinnedFolderIds}
       selectedFolderId={selectedFolder?.id ?? null}
       onPickFolder={pickFolder}
+      onTogglePin={togglePin}
       pendingCloud={pendingCloud}
       onPickCloud={pickCloud}
       onOpenLocalFolder={() => void openLocalFolder()}
       busy={busy}
       error={error}
-      showRecentLabel={!query.trim() && recentFolders.length > 0}
-      noSearchHits={
-        !!query.trim() && listedFolders.length === 0 && folders.length > 0
-      }
+      creating={creating}
+      newName={newName}
+      onNewNameChange={setNewName}
+      onStartCreate={() => {
+        setCreating(true);
+        setNewName("");
+        setPickedRoot(null);
+      }}
+      onConfirmCreate={() => void handleConfirmCreate()}
+      onCancelCreate={resetCreateState}
+      onPickLocalDir={() => void handlePickLocalDir()}
+      pickedRoot={pickedRoot}
+      onCreateKeyDown={handleCreateKeyDown}
+      onCreateFromSearch={() => {
+        setCreating(true);
+        setNewName(query.trim());
+        setPickedRoot(null);
+      }}
     />
   );
 
@@ -218,35 +303,75 @@ function PickerPanel({
   onQueryChange,
   noneSelected,
   onPickNone,
-  listedFolders,
+  isSearching,
+  pinnedFolders,
+  recentFolders,
+  searchResults,
+  pinnedFolderIds,
   selectedFolderId,
   onPickFolder,
+  onTogglePin,
   pendingCloud,
   onPickCloud,
   onOpenLocalFolder,
   busy,
   error,
-  showRecentLabel,
-  noSearchHits,
+  creating,
+  newName,
+  onNewNameChange,
+  onStartCreate,
+  onConfirmCreate,
+  onCancelCreate,
+  onPickLocalDir,
+  pickedRoot,
+  onCreateKeyDown,
+  onCreateFromSearch,
 }: {
   query: string;
   onQueryChange: (q: string) => void;
   noneSelected: boolean;
   onPickNone: () => void;
-  listedFolders: FolderMeta[];
+  isSearching: boolean;
+  pinnedFolders: FolderMeta[];
+  recentFolders: FolderMeta[];
+  searchResults: FolderMeta[];
+  pinnedFolderIds: string[];
   selectedFolderId: string | null;
   onPickFolder: (id: string) => void;
+  onTogglePin: (id: string) => void;
   pendingCloud: boolean;
   onPickCloud: () => void;
   onOpenLocalFolder: () => void;
   busy: boolean;
   error: string | null;
-  showRecentLabel: boolean;
-  noSearchHits: boolean;
+  creating: boolean;
+  newName: string;
+  onNewNameChange: (n: string) => void;
+  onStartCreate: () => void;
+  onConfirmCreate: () => void;
+  onCancelCreate: () => void;
+  onPickLocalDir: () => void;
+  pickedRoot: { id: string; name: string } | null;
+  onCreateKeyDown: (e: React.KeyboardEvent) => void;
+  onCreateFromSearch: () => void;
 }) {
   const idleHint = isDesktop
     ? "不选则先聊；需要写文件时在本机自动建项目"
     : "不选则先聊；需要时在云端建项目";
+
+  const noSearchHits = isSearching && searchResults.length === 0;
+
+  const renderFolderRow = (f: FolderMeta) => (
+    <PickerRow
+      key={f.id}
+      icon={<FolderOpen size={14} />}
+      label={f.name}
+      selected={selectedFolderId === f.id}
+      onClick={() => onPickFolder(f.id)}
+      isPinned={pinnedFolderIds.includes(f.id)}
+      onTogglePin={() => onTogglePin(f.id)}
+    />
+  );
 
   return (
     <>
@@ -274,26 +399,93 @@ function PickerPanel({
           />
         </div>
 
-        {showRecentLabel && (
-          <div className="px-2.5 pt-1 pb-1 text-xs text-muted-foreground">
-            最近项目
+        {creating ? (
+          <div className="px-2.5 py-1.5">
+            <div className="flex items-center gap-2">
+              <FolderPlus size={14} className="shrink-0 text-muted-foreground" />
+              <input
+                value={newName}
+                onChange={(e) => onNewNameChange(e.target.value)}
+                onKeyDown={onCreateKeyDown}
+                placeholder="项目名称"
+                className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                autoFocus
+              />
+            </div>
+            {isDesktop && (
+              <button
+                type="button"
+                onClick={onPickLocalDir}
+                className="mt-1.5 ml-5 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <FolderOpen size={12} />
+                {pickedRoot ? pickedRoot.name : "绑定本地文件夹（可选）"}
+              </button>
+            )}
+            <div className="mt-1.5 ml-5 flex gap-1.5">
+              <Button
+                variant="primary"
+                size="sm"
+                className="h-6 text-xs"
+                onClick={onConfirmCreate}
+                disabled={!newName.trim() || busy}
+              >
+                创建
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-xs"
+                onClick={onCancelCreate}
+              >
+                取消
+              </Button>
+            </div>
           </div>
+        ) : (
+          <PickerRow
+            icon={<FolderPlus size={14} />}
+            label="新建项目…"
+            onClick={onStartCreate}
+          />
         )}
 
-        {listedFolders.map((f) => (
-          <PickerRow
-            key={f.id}
-            icon={<FolderOpen size={14} />}
-            label={f.name}
-            selected={selectedFolderId === f.id}
-            onClick={() => onPickFolder(f.id)}
-          />
-        ))}
-
-        {noSearchHits && (
-          <p className="px-2.5 py-2 text-xs text-muted-foreground">
-            没有匹配的项目
-          </p>
+        {isSearching ? (
+          <>
+            {searchResults.map(renderFolderRow)}
+            {noSearchHits && (
+              <div className="px-2.5 py-2">
+                <p className="text-xs text-muted-foreground">没有匹配的项目</p>
+                <Button
+                  variant="ghost"
+                  className="mt-1 h-auto w-full justify-start gap-2 px-0 py-1 text-xs text-primary"
+                  onClick={onCreateFromSearch}
+                >
+                  <FolderPlus size={14} />
+                  创建「{query.trim()}」项目
+                </Button>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {pinnedFolders.length > 0 && (
+              <>
+                <div className="px-2.5 pt-1 pb-1 text-xs text-muted-foreground">
+                  固定
+                </div>
+                {pinnedFolders.map(renderFolderRow)}
+              </>
+            )}
+            {recentFolders.length > 0 && (
+              <>
+                <div className="px-2.5 pt-1 pb-1 text-xs text-muted-foreground">
+                  最近项目
+                </div>
+                {recentFolders.map(renderFolderRow)}
+              </>
+            )}
+          </>
         )}
 
         {isDesktop ? (
@@ -348,6 +540,8 @@ function PickerRow({
   selected,
   onClick,
   disabled,
+  isPinned,
+  onTogglePin,
 }: {
   icon: ReactNode;
   label: string;
@@ -355,26 +549,46 @@ function PickerRow({
   selected?: boolean;
   onClick: () => void;
   disabled?: boolean;
+  isPinned?: boolean;
+  onTogglePin?: () => void;
 }) {
   return (
-    <Button
-      variant="ghost"
-      onClick={onClick}
-      disabled={disabled}
-      className="h-auto w-full justify-start gap-2 rounded-lg px-2.5 py-1.5 text-left font-medium disabled:opacity-50"
+    // biome-ignore lint/a11y/useSemanticElements: pin toggle is a real <button> inside; outer must not be <button>.
+    <div
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      onClick={disabled ? undefined : onClick}
+      onKeyDown={(e) => {
+        if (!disabled && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      className={`group/row flex h-auto w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm font-medium hover:bg-accent ${disabled ? "pointer-events-none opacity-50" : ""}`}
     >
-      <span className="flex w-full items-center gap-2">
-        <span className="shrink-0 text-muted-foreground">{icon}</span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate">{label}</span>
-          {hint && (
-            <span className="block truncate text-xs font-normal text-muted-foreground">
-              {hint}
-            </span>
-          )}
-        </span>
-        {selected && <Check size={14} className="shrink-0 text-primary" />}
+      <span className="shrink-0 text-muted-foreground">{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{label}</span>
+        {hint && (
+          <span className="block truncate text-xs font-normal text-muted-foreground">
+            {hint}
+          </span>
+        )}
       </span>
-    </Button>
+      {onTogglePin && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onTogglePin();
+          }}
+          className="shrink-0 opacity-0 transition-opacity group-hover/row:opacity-100 text-muted-foreground hover:text-foreground"
+          title={isPinned ? "取消固定" : "固定"}
+        >
+          {isPinned ? <PinOff size={12} /> : <Pin size={12} />}
+        </button>
+      )}
+      {selected && <Check size={14} className="shrink-0 text-primary" />}
+    </div>
   );
 }

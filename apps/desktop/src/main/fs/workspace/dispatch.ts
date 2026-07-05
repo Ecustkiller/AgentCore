@@ -11,6 +11,7 @@ import {
   opDelete,
   opMkdir,
   opMove,
+  opAppend,
   opReadBytes,
   opReplace,
   opWrite,
@@ -48,6 +49,12 @@ export async function executeWorkspaceOp(
         return await opReadBytes(root, String(args.path ?? ""));
       case "write":
         return await opWrite(
+          root,
+          String(args.path ?? ""),
+          String(args.content ?? ""),
+        );
+      case "append":
+        return await opAppend(
           root,
           String(args.path ?? ""),
           String(args.content ?? ""),

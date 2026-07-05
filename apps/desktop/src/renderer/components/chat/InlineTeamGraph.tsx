@@ -50,7 +50,7 @@ export function InlineTeamGraph({
   executionId: string;
   journal?: ExecutionJournal;
 }) {
-  // null = 未手动切换，跟随按回合性质推导的默认（辩论收起 / 普通展开）；一旦用户切换即以其为准。
+  // null = 未手动切换，跟随按回合性质推导的默认（辩论收起 / 运行中展开 / 完成态收起）；一旦用户切换即以其为准。
   const [expandedOverride, setExpandedOverride] = useState<boolean | null>(
     null,
   );
@@ -116,9 +116,10 @@ export function InlineTeamGraph({
 
   const graphHeight = measured?.height ?? fallbackHeight;
   // 辩论回合默认收起协作图：辩论正文归画布「辩论室」、聊天占位精简为状态条 + 醒目「打开辩论室」CTA
-  // （前端UX设计.md §4.2）；普通团队回合默认展开。用户手动切换后以其选择为准（expandedOverride）。
+  // （前端UX设计.md §4.2）；运行中的普通团队回合默认展开，完成/失败/取消后默认收起。用户手动切换后以其选择为准（expandedOverride）。
   const isDebateTurn = isDebate(execution);
-  const expanded = expandedOverride ?? !isDebateTurn;
+  const expanded =
+    expandedOverride ?? (!isDebateTurn && execution.status === "running");
 
   return (
     <ExecutionScopeContext.Provider value={messageId}>

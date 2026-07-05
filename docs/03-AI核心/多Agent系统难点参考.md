@@ -5,7 +5,7 @@ related:
   - docs/03-AI核心/Agent协作模式.md
   - docs/03-AI核心/编排器与CEO主Agent.md
   - docs/03-AI核心/辩论编排设计.md
-  - docs/07-规划/远期规划.md
+  - docs/06-规划/远期规划.md
   - docs/05-平台与运维/管理员后台.md
 skip_if:
   - 只改 AgentCore 内部编排实现（读 03-AI 区对应文档）
@@ -197,7 +197,7 @@ skip_if:
 | CEO 委派、检查点 | [编排器与 CEO 主 Agent](/docs/03-AI核心/编排器与CEO主Agent.md) |
 | 辩论编排 | [辩论编排设计](/docs/03-AI核心/辩论编排设计.md) |
 | MAST 14 类失败标签常量 | [`evals/mast.py`](/apps/server/agentcore/evals/mast.py) |
-| 协作质量 · MAST 度量（在线看板 + 真数闸门） | [管理员后台 §四](/docs/05-平台与运维/管理员后台.md) + [远期规划 §2.4](/docs/07-规划/远期规划.md) |
+| 协作质量 · MAST 度量（在线看板 + 真数闸门） | [管理员后台 §四](/docs/05-平台与运维/管理员后台.md) + [远期规划 §2.4](/docs/06-规划/远期规划.md) |
 | 协作机制（便签墙 / lead / playbook / 验证两道） | [Agent 协作模式](/docs/03-AI核心/Agent协作模式.md) + [编排器与 CEO 主 Agent](/docs/03-AI核心/编排器与CEO主Agent.md) |
 
 ---

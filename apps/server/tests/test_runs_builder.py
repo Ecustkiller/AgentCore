@@ -6,8 +6,10 @@ summary, the tool allow-list filter, knob validation, and the reject-on-error /
 reject-when-none-valid contract.
 """
 
+import agentcore.runtime.runs.builder as builder_mod
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.types import RunKind
+from tests.conftest import LogSpy
 
 
 def test_single_task_one_node():
@@ -115,6 +117,44 @@ def test_dag_independent_chains_in_same_wave_are_not_siblings():
     # are siblings — consistent with a flat batch.
     assert "采购" in plan.by_id("t_s1").sibling_summary
     assert "研究员" in plan.by_id("t_u1").sibling_summary
+
+
+def test_dag_suspect_missing_dep_warns_when_task_mentions_upstream(monkeypatch):
+    spy = LogSpy()
+    monkeypatch.setattr(builder_mod, "logger", spy)
+    tasks = [
+        {"id": "r1", "role": "研究员", "task": "调研"},
+        {
+            "id": "w",
+            "role": "写手",
+            "task": "基于上游产出撰写成稿",
+        },
+        {"id": "x", "role": "其他", "task": "收尾", "depends_on": ["r1"]},
+    ]
+    plan, errs = build_run_plan(tasks, id_prefix="t")
+    assert errs == []
+    assert len(plan.nodes) == 3
+    kw = spy.get("builder.suspect_missing_dep")
+    assert kw["run_id"] == "t_w"
+    assert kw["role"] == "写手"
+    assert "depends_on" in kw["hint"]
+
+
+def test_dag_suspect_missing_dep_silent_when_dep_declared(monkeypatch):
+    spy = LogSpy()
+    monkeypatch.setattr(builder_mod, "logger", spy)
+    tasks = [
+        {"id": "r1", "role": "研究员", "task": "调研"},
+        {
+            "id": "w",
+            "role": "写手",
+            "task": "基于上游产出撰写成稿",
+            "depends_on": ["r1"],
+        },
+    ]
+    plan, errs = build_run_plan(tasks, id_prefix="t")
+    assert errs == []
+    assert not any(name == "builder.suspect_missing_dep" for name, _ in spy.events)
 
 
 def test_dag_linear_chain_has_no_siblings():
@@ -542,3 +582,46 @@ def test_can_delegate_opt_in_parsed_per_task():
     )
     assert plan.nodes[0].can_delegate is True
     assert plan.nodes[1].can_delegate is False
+
+
+def test_over_max_tasks_rejects_entire_batch():
+    tasks = [{"role": f"R{i}", "task": f"t{i}"} for i in range(11)]
+    plan, errs = build_run_plan(tasks, id_prefix="t")
+    assert errs
+    assert any("超过上限" in e for e in errs)
+    assert not plan.nodes
+
+
+def test_flat_invalid_task_rejects_entire_batch():
+    tasks = [
+        {"role": "A", "task": "a"},
+        {"role": "B"},  # missing task
+        {"role": "C", "task": "c"},
+    ]
+    plan, errs = build_run_plan(tasks, id_prefix="t")
+    assert errs
+    assert any("tasks[1]" in e and "role" in e and "task" in e for e in errs)
+    assert not plan.nodes
+
+
+def test_depends_on_empty_string_normalized_still_uses_dag():
+    tasks = [
+        {"id": "a", "role": "A", "task": "a"},
+        {"id": "b", "role": "B", "task": "b", "depends_on": ["", "a"]},
+    ]
+    plan, errs = build_run_plan(tasks, id_prefix="t")
+    assert errs == []
+    assert len(plan.nodes) == 2
+    b = plan.by_id("t_b")
+    assert b.depends_on == ["t_a"]
+
+
+def test_dag_duplicate_id_rejects_entire_batch():
+    tasks = [
+        {"id": "foo", "role": "A", "task": "a"},
+        {"id": "foo", "role": "B", "task": "b", "depends_on": ["foo"]},
+    ]
+    plan, errs = build_run_plan(tasks, id_prefix="t")
+    assert errs
+    assert any("重复" in e and "foo" in e for e in errs)
+    assert not plan.nodes

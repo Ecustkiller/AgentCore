@@ -5,7 +5,7 @@ import type { Execution, RunStatus } from "@/stores/execution";
 import type { GraphEdge, GraphLayout } from "@/stores/graph";
 import type { EdgeHandoff } from "./StepEdge";
 
-const PRODUCING_TOOLS = new Set(["file_write", "str_replace"]);
+const PRODUCING_TOOLS = new Set(["file_write", "file_append", "str_replace"]);
 const WAVE_PAD = 8;
 
 export interface WaveBand {

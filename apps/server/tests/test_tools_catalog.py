@@ -20,6 +20,7 @@ _EXPECTED_NAMES = {
     "read_url",
     "file_read",
     "file_write",
+    "file_append",
     "str_replace",
     "file_list",
     "file_delete",
@@ -45,6 +46,7 @@ _CEO_READONLY_NAMES = {
 }
 _DELEGATED_MUTATION_NAMES = {
     "file_write",
+    "file_append",
     "str_replace",
     "file_delete",
     "file_move",
@@ -86,6 +88,7 @@ def test_worker_registry_adds_worker_only_tools_without_leaking_them():
 def test_write_and_exec_tools_are_grantable():
     approvals = {s.name: s.approval for s in build_builtin_registry().list_all()}
     assert approvals["file_write"] is ToolApproval.GRANTABLE
+    assert approvals["file_append"] is ToolApproval.GRANTABLE
     assert approvals["str_replace"] is ToolApproval.GRANTABLE
     assert approvals["code_execute"] is ToolApproval.GRANTABLE
     # Destructive / mutating file ops require the same consent as writes.
@@ -101,7 +104,7 @@ def test_file_mutation_class_is_grantable_filesystem_without_code_execute():
     # file-edit tools but NOT code_execute (EXECUTION, higher-risk → its own gate).
     # Pinned so a future tool can't silently widen or narrow what one click grants.
     names = file_mutation_tool_names()
-    assert names == {"file_write", "str_replace", "file_delete", "file_move"}
+    assert names == {"file_write", "file_append", "str_replace", "file_delete", "file_move"}
     assert "code_execute" not in names
     # Exactly the delegated mutation set minus code_execute (stays in lockstep).
     assert names == _DELEGATED_MUTATION_NAMES - {"code_execute"}

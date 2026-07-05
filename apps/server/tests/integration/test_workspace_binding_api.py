@@ -8,18 +8,9 @@ the derived mode surfaced on reads, validation, and IDOR isolation.
 
 import httpx
 
-_PW = "password123"
+from tests.integration.conftest import register_and_login
+
 _ROOT = "11111111-2222-3333-4444-555555555555"
-
-
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
-    assert r.status_code == 200, r.text
 
 
 async def _new_conversation(client: httpx.AsyncClient, title: str) -> str:
@@ -39,7 +30,7 @@ async def test_binding_requires_auth(client):
 
 async def test_bind_conversation_scratch(client, make_invite):
     code = await make_invite("INV-B1")
-    await _register_and_login(client, code, "binduser1")
+    await register_and_login(client, code, "binduser1")
     conv = await _new_conversation(client, "solo")
 
     r = await client.get(f"/v1/conversations/{conv}/workspace/binding")
@@ -63,7 +54,7 @@ async def test_bind_conversation_scratch(client, make_invite):
 
 async def test_bind_foldered_siblings_are_independent(client, make_invite):
     code = await make_invite("INV-B2")
-    await _register_and_login(client, code, "binduser2")
+    await register_and_login(client, code, "binduser2")
     folder_id = (await client.post("/v1/folders", json={"name": "Proj"})).json()["id"]
     conv_a = await _new_conversation(client, "a")
     conv_b = await _new_conversation(client, "b")
@@ -89,7 +80,7 @@ async def test_bind_foldered_siblings_are_independent(client, make_invite):
 
 async def test_bind_rejects_empty_root_id(client, make_invite):
     code = await make_invite("INV-B3")
-    await _register_and_login(client, code, "binduser3")
+    await register_and_login(client, code, "binduser3")
     conv = await _new_conversation(client, "c")
     r = await client.put(f"/v1/conversations/{conv}/workspace/binding", json={"root_id": ""})
     assert r.status_code == 422, r.text
@@ -97,12 +88,12 @@ async def test_bind_rejects_empty_root_id(client, make_invite):
 
 async def test_binding_isolation_between_users(client, make_invite, new_client):
     code1 = await make_invite("INV-B4A")
-    await _register_and_login(client, code1, "bindowner")
+    await register_and_login(client, code1, "bindowner")
     conv = await _new_conversation(client, "mine")
 
     code2 = await make_invite("INV-B4B")
     async with new_client() as other:
-        await _register_and_login(other, code2, "bindintruder")
+        await register_and_login(other, code2, "bindintruder")
         assert (await other.get(f"/v1/conversations/{conv}/workspace/binding")).status_code == 404
         assert (
             await other.put(f"/v1/conversations/{conv}/workspace/binding", json={"root_id": _ROOT})

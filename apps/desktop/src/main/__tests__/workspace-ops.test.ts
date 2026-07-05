@@ -67,6 +67,15 @@ describe("executeWorkspaceOp (本地工作区写类 op，P2b)", () => {
     expect(await readFile(join(dir, "f.txt"), "utf-8")).toBe("fresh");
   });
 
+  it("append creates a file or extends an existing one", async () => {
+    const created = await run("append", { path: "d.md", content: "# A" });
+    expect(valOf(created)).toBe(3);
+    expect(await readFile(join(dir, "d.md"), "utf-8")).toBe("# A");
+    const extended = await run("append", { path: "d.md", content: "\n\n# B" });
+    expect(valOf(extended)).toBe(5);
+    expect(await readFile(join(dir, "d.md"), "utf-8")).toBe("# A\n\n# B");
+  });
+
   it("read_bytes round-trips raw bytes as base64 and reports PathNotFound", async () => {
     const raw = Buffer.from([0, 1, 2, 255]);
     await writeFile(join(dir, "blob"), raw);

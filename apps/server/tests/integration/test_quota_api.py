@@ -7,7 +7,6 @@ before any SSE stream / LLM call begins (成本配额与计费.md §一). The ov
 spend is seeded straight into the ledger so the test never makes a real LLM call.
 """
 
-import httpx
 import pytest
 
 from agentcore.config import settings
@@ -17,8 +16,7 @@ from agentcore.db.repositories import (
     CostEventRepository,
     UserRepository,
 )
-
-_PW = "password123"
+from tests.integration.conftest import register_and_login
 
 
 @pytest.fixture(autouse=True)
@@ -36,17 +34,6 @@ def _platform_billing():
 _OVER_MONTHLY_NANO = 6_000_000_000
 # Under the global $5 cap, but enough to trip a tightened per-user override.
 _UNDER_GLOBAL_NANO = 3_000_000_000
-
-
-async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> str:
-    r = await client.post(
-        "/v1/auth/register",
-        json={"username": username, "password": _PW, "invite_code": invite_code},
-    )
-    assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
-    assert r.status_code == 200, r.text
-    return r.json()["id"]
 
 
 def _run(run_id: str, *, total: int) -> dict:
@@ -85,7 +72,7 @@ async def _make_conversation(session_factory, *, user_id: str) -> str:
 
 async def test_send_message_blocked_when_over_monthly_quota(client, make_invite, session_factory):
     code = await make_invite("INV-QUOTA")
-    user_id = await _register_and_login(client, code, "quotauser")
+    user_id = await register_and_login(client, code, "quotauser")
     conv_id = await _make_conversation(session_factory, user_id=user_id)
     await _seed_spend(
         session_factory, user_id=user_id, conversation_id=conv_id, total=_OVER_MONTHLY_NANO
@@ -99,7 +86,7 @@ async def test_send_message_blocked_when_over_monthly_quota(client, make_invite,
 
 async def test_regenerate_blocked_when_over_monthly_quota(client, make_invite, session_factory):
     code = await make_invite("INV-QUOTA-REGEN")
-    user_id = await _register_and_login(client, code, "quotaregen")
+    user_id = await register_and_login(client, code, "quotaregen")
     conv_id = await _make_conversation(session_factory, user_id=user_id)
     await _seed_spend(
         session_factory, user_id=user_id, conversation_id=conv_id, total=_OVER_MONTHLY_NANO
@@ -118,7 +105,7 @@ async def test_per_user_override_tightens_cap(client, make_invite, session_facto
     # through — but the user's own $2 monthly override trips 429. Proves the turn
     # gate resolves limits via QuotaLimits.for_user (per-user), not just config.
     code = await make_invite("INV-QUOTA-OVR")
-    user_id = await _register_and_login(client, code, "quotaovr")
+    user_id = await register_and_login(client, code, "quotaovr")
     conv_id = await _make_conversation(session_factory, user_id=user_id)
     await _seed_spend(
         session_factory, user_id=user_id, conversation_id=conv_id, total=_UNDER_GLOBAL_NANO
@@ -136,7 +123,7 @@ async def test_ownership_check_precedes_quota(client, make_invite, session_facto
     # Ownership (404) is checked before quota (429): posting to a conversation the
     # user doesn't own returns 404 even when the user is over quota.
     code = await make_invite("INV-QUOTA-OWN")
-    user_id = await _register_and_login(client, code, "quotaowner")
+    user_id = await register_and_login(client, code, "quotaowner")
     owned = await _make_conversation(session_factory, user_id=user_id)
     await _seed_spend(
         session_factory, user_id=user_id, conversation_id=owned, total=_OVER_MONTHLY_NANO

@@ -2,7 +2,7 @@
 
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.events.types import EventType, SSEEvent
-from agentcore.runtime.runs import BoundaryReason
+from agentcore.runtime.runs import BoundaryReason, RunPhase
 from agentcore.tools.builtin.replan import ReplanTool
 from tests.delegate.conftest import (
     LATE_BIND_DAG,
@@ -382,3 +382,67 @@ async def test_scope_yield_rejournals_consumed_for_durable_seed():
         if esc.get("kind") == "scope" and esc.get("consumed")
     ]
     assert consumed, "the re-journaled run-final must carry the consumed scope escalation"
+
+
+async def test_partial_failure_stashes_plan_and_replan_add_resumes(monkeypatch):
+    """When some workers fail at terminal, stash the plan for replan(add=...) on the same DAG."""
+    from agentcore.runtime.runs.types import RunState
+
+    executed_roles: list[str] = []
+
+    async def _exec(spec, completed):  # noqa: ANN001
+        executed_roles.append(spec.role)
+        if spec.role == "B":
+            return RunState(phase=RunPhase.FAILED, error="boom", content="")
+        return RunState(phase=RunPhase.COMPLETED, content=f"{spec.role}_OUT")
+
+    monkeypatch.setattr("agentcore.runtime.runs.build_agent_executor", lambda **kw: _exec)
+    t = tool(Provider([]))
+    tasks = [
+        {"id": "a", "role": "A", "task": "task a"},
+        {"id": "b", "role": "B", "task": "task b"},
+    ]
+    first = await t.execute({"tasks": tasks}, ctx())
+
+    assert first.success is True
+    assert "failed" in first.output
+    assert "replan(add" in first.output
+    assert t._supervised is not None
+    assert t._supervised.reason is BoundaryReason.SCOPE
+    a_id = next(n.run_id for n in t._supervised.plan.nodes if n.role == "A")
+
+    result = await t.replan(
+        {
+            "add": [
+                {
+                    "role": "B_retry",
+                    "task": "retry task b",
+                    "depends_on": [a_id],
+                }
+            ]
+        }
+    )
+
+    assert result.success is True
+    assert t._supervised is None
+    assert "B_retry_OUT" in result.output
+    # B fails twice (default on_failure=retry infra retry) before B_retry succeeds.
+    assert executed_roles == ["A", "B", "B", "B_retry"]
+
+
+async def test_all_success_does_not_stash_supervised(monkeypatch):
+    """A fully successful batch must not leave a dangling supervised plan."""
+    from agentcore.runtime.runs.types import RunState
+
+    async def _exec(spec, completed):  # noqa: ANN001
+        return RunState(phase=RunPhase.COMPLETED, content="OK")
+
+    monkeypatch.setattr("agentcore.runtime.runs.build_agent_executor", lambda **kw: _exec)
+    t = tool(Provider([]))
+    result = await t.execute(
+        {"tasks": [{"id": "a", "role": "A", "task": "task a"}]}, ctx()
+    )
+
+    assert result.success is True
+    assert t._supervised is None
+    assert "replan(add" not in result.output

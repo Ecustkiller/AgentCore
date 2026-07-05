@@ -1,5 +1,12 @@
-import { formatCompact, formatCost, formatUsd } from "@/lib/format";
-import { describe, expect, it } from "vitest";
+import {
+  formatCompact,
+  formatCost,
+  formatDateDivider,
+  formatMessageTime,
+  formatMessageTimeOfDay,
+  formatUsd,
+} from "@/lib/format";
+import { describe, expect, it, vi } from "vitest";
 
 // 1 USD = 1e9 nano-USD (ledger canonical unit).
 const USD = 1_000_000_000;
@@ -51,5 +58,37 @@ describe("formatCompact", () => {
     expect(formatCompact(8200)).toBe("8.2k");
     expect(formatCompact(820_000)).toBe("820.0k");
     expect(formatCompact(2_000_000)).toBe("2.0M");
+  });
+});
+
+describe("formatMessageTimeOfDay", () => {
+  it("returns HH:MM for a valid ISO timestamp", () => {
+    expect(formatMessageTimeOfDay("2026-07-05T14:32:00")).toMatch(/14:32/);
+  });
+});
+
+describe("formatDateDivider", () => {
+  it("labels today, yesterday, same year, and cross-year", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T12:00:00"));
+
+    expect(formatDateDivider("2026-07-05T08:00:00")).toBe("今天");
+    expect(formatDateDivider("2026-07-04T08:00:00")).toBe("昨天");
+    expect(formatDateDivider("2026-03-15T08:00:00")).toBe("3月15日");
+    expect(formatDateDivider("2025-03-15T08:00:00")).toBe("2025年3月15日");
+
+    vi.useRealTimers();
+  });
+});
+
+describe("formatMessageTime", () => {
+  it("adds day context for list previews", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T12:00:00"));
+
+    expect(formatMessageTime("2026-07-05T08:30:00")).toMatch(/08:30/);
+    expect(formatMessageTime("2026-07-04T08:30:00")).toBe("昨天 08:30");
+
+    vi.useRealTimers();
   });
 });

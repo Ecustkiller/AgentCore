@@ -195,6 +195,13 @@ class WorkspaceBackend(Protocol):
         """
         ...
 
+    async def append(self, path: str, content: str) -> int:
+        """Append ``content`` to ``path`` (create with parents if missing); return chars appended.
+
+        Raises ``OutsideWorkspace`` / ``PathNotFound`` / ``NotAFile`` / ``WorkspaceIOError``.
+        """
+        ...
+
     async def read_bytes(self, path: str) -> bytes:
         """Return the raw bytes of ``path`` (binary-safe; for file download).
 
