@@ -8,10 +8,10 @@ import { opGrep } from "./grep";
 import { opIndexFiles, opList, opListTree, opRead, opReadLines } from "./read";
 import { opErr } from "./result";
 import {
+  opAppend,
   opDelete,
   opMkdir,
   opMove,
-  opAppend,
   opReadBytes,
   opReplace,
   opWrite,

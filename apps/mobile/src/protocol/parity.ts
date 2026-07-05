@@ -204,6 +204,10 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   TeamNotesPanel: { verdict: "ported", surface: "TeamView · 团队便签" },
   SourceCards: { verdict: "ported", surface: "AssistantView · 来源" },
   StatusStrip: { verdict: "ported", surface: "ChatPage · 状态 meta 行" },
+  StreamingIndicator: {
+    verdict: "ported",
+    surface: "ChatPage · 流式状态条",
+  },
   ParallelTimeline: {
     verdict: "ported",
     surface: "AssistantView · ProcessTimeline",
@@ -292,6 +296,10 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
     verdict: "ported",
     surface: "more/AccountSettings",
   },
+  "more/ImPrivacySettings": {
+    verdict: "ported",
+    surface: "MessagesPage · 消息隐私（IM 设置）",
+  },
   "more/FeedbackSettings": {
     verdict: "simplified",
     reason: "反馈设置页，手机暂不做",
@@ -338,10 +346,6 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   "more/AppearanceSettings": {
     verdict: "simplified",
     reason: "手机不提供外观/暗色切换（明确决策）",
-  },
-  "more/MembersSettings": {
-    verdict: "simplified",
-    reason: "成员管理保持不做（⑥）",
   },
 
   // —— 物理做不到（绑桌面画布 / 硬件）——

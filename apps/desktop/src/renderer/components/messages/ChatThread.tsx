@@ -53,10 +53,7 @@ export function ChatThread({ chatId }: Props) {
     return map;
   }, [members]);
 
-  const threadItems = useMemo(
-    () => buildImThreadItems(messages),
-    [messages],
-  );
+  const threadItems = useMemo(() => buildImThreadItems(messages), [messages]);
 
   const last = messages[messages.length - 1];
   const contentKey = last ? `${last.id}-${messages.length}` : "";
@@ -139,9 +136,7 @@ export function ChatThread({ chatId }: Props) {
               )}
               {threadItems.map((item) => {
                 if (item.type === "date_divider") {
-                  return (
-                    <ChatDateDivider key={item.key} label={item.label} />
-                  );
+                  return <ChatDateDivider key={item.key} label={item.label} />;
                 }
                 const m = item.message;
                 const mine = !!myId && m.sender_user_id === myId;

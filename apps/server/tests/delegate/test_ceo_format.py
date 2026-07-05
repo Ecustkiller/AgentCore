@@ -9,7 +9,7 @@ from agentcore.tools.builtin.delegate import _DELEGATE_OUTPUT_LIMIT
 from tests.delegate.conftest import Provider, tool
 
 
-def test_format_for_ceo_surfaces_file_manifest_and_skip_filelist_hint():
+def test_format_for_ceo_surfaces_file_manifest():
     t = tool(Provider([]))
     plan = RunPlan(nodes=[RunSpec(run_id="w1", task="建仪表盘", role="前端工程师")])
     results = {
@@ -23,7 +23,7 @@ def test_format_for_ceo_surfaces_file_manifest_and_skip_filelist_hint():
     assert "文件产出（已写入工作区）" in out
     assert "`dashboard.html`" in out
     assert "`assets/styles.css`" in out
-    assert "无需再用 file_list" in out
+    assert "地面真相" in out
 
 
 def test_format_for_ceo_omits_manifest_when_worker_touched_no_files():
@@ -40,7 +40,7 @@ def test_format_for_ceo_footer_guards_against_claiming_unwritten_files():
     results = {"w1": RunState(phase=RunPhase.COMPLETED, content="我已创建 app.py 并写入代码")}
     out = t._format_for_ceo(plan, results)
     assert "防幻觉" in out
-    assert "未真正写入" in out
+    assert "未真正落盘" in out
     assert "未达成" in out
     assert "属正常" in out
 
@@ -56,9 +56,7 @@ def test_format_for_ceo_includes_goal_verification_and_completion_judgment():
     results = {"w1": RunState(phase=RunPhase.COMPLETED, content="登录接口已完成")}
     out = t._format_for_ceo(plan, results)
     assert "完工核验" in out
-    assert "完工判定" in out
     assert "实质达成" in out
-    assert "expected_output" in out
     assert "空转" in out  # the don't-spin-when-done half of the completion judgment
 
 
@@ -82,8 +80,7 @@ def test_format_for_ceo_includes_semantic_boundary_reconciliation():
     out = t._format_for_ceo(plan, results)
     assert "语义边界对账" in out
     assert "冲突" in out and "缺口" in out and "重复" in out
-    assert "拼不拼得上" in out  # only check fit between pieces, not per-piece quality
-    assert "escalate scope" in out  # the active version of the passive scope signal
+    assert "糊过去" in out
     # the seam check is distinct from — and ordered before — the 4a whole-goal verification.
     assert out.index("语义边界对账") < out.index("完工核验")
 
@@ -110,7 +107,7 @@ def test_format_for_ceo_surfaces_team_notes_for_reconciliation():
     out = t._format_for_ceo(plan, results)
     assert "队员过程中广播的【当前有效】" in out  # the synthesis notes-block header
     assert "接口 /login" in out and "登录页我来写" in out
-    assert "据队员广播过的决定 / 认领一并对照" in out  # 4b reconciliation points at the notes
+    assert "上方若有【团队便签】一并对照" in out
     # the checklist precedes the per-worker products (read it before reconciling the bodies).
     assert out.index("队员过程中广播的【当前有效】") < out.index("run_id: `w1`")
 

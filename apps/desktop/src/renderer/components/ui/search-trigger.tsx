@@ -16,7 +16,11 @@ export function SearchTrigger({
   if (collapsed) {
     return (
       <div className={cn("flex justify-center", className)}>
-        <IconButton tone="sidebar" onClick={onClick} aria-label="搜索或运行命令">
+        <IconButton
+          tone="sidebar"
+          onClick={onClick}
+          aria-label="搜索或运行命令"
+        >
           <Search size={16} />
         </IconButton>
       </div>
@@ -34,7 +38,9 @@ export function SearchTrigger({
       )}
     >
       搜索或运行命令…
-      <kbd className="ml-auto text-xs text-sidebar-foreground/40">{chord("k")}</kbd>
+      <kbd className="ml-auto text-xs text-sidebar-foreground/40">
+        {chord("k")}
+      </kbd>
     </Button>
   );
 }

@@ -100,11 +100,7 @@ export function computeTopologicalRunWaves(
     const r = runById.get(runId);
     if (!r) return runId;
     if (isSubRun(r, workerIds)) return r.parentRunId as string;
-    if (
-      isRevisionRun(r) &&
-      r.revisionOf &&
-      workerIds.has(r.revisionOf)
-    ) {
+    if (isRevisionRun(r) && r.revisionOf && workerIds.has(r.revisionOf)) {
       return unitOf(r.revisionOf);
     }
     return runId;
@@ -130,9 +126,11 @@ export function computeTopologicalRunWaves(
   const unitDeps = new Map<string, Set<string>>();
   for (const unitId of unitIds) {
     const deps = new Set<string>();
-    const members = unitMembers.get(unitId)!;
+    const members = unitMembers.get(unitId);
+    if (!members) continue;
     for (const memberId of members) {
-      const r = runById.get(memberId)!;
+      const r = runById.get(memberId);
+      if (!r) continue;
       for (const depId of r.dependsOn) {
         if (!workerIds.has(depId)) continue;
         const depUnit = unitOf(depId);

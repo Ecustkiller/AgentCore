@@ -130,7 +130,7 @@ export function FindBar({
         <button
           type="button"
           onClick={openGlobalSearch}
-          className="rounded-md bg-card px-2.5 py-1 text-xs text-muted-foreground shadow-sm ring-1 ring-border hover:text-foreground"
+          className="rounded-lg bg-card px-2.5 py-1 text-xs text-muted-foreground shadow-sm ring-1 ring-border hover:text-foreground"
         >
           未在已加载消息中找到 ·{" "}
           <span className="text-primary">在全对话中搜索</span>

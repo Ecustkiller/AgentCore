@@ -60,10 +60,7 @@ describe("messaging store pagination", () => {
     await useMessagingStore.getState().loadMessages("c1");
 
     const state = useMessagingStore.getState();
-    expect(state.messagesByChat.c1?.map((m) => m.id)).toEqual([
-      "m101",
-      "m120",
-    ]);
+    expect(state.messagesByChat.c1?.map((m) => m.id)).toEqual(["m101", "m120"]);
     expect(state.messagesMetaByChat.c1).toEqual({
       oldestPage: 3,
       total: 120,

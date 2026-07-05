@@ -92,7 +92,9 @@ export const SearchField = forwardRef<HTMLInputElement, SearchFieldProps>(
 
     if (variant === "plain") {
       return (
-        <div className={cn("flex min-w-0 flex-1 items-center gap-2", className)}>
+        <div
+          className={cn("flex min-w-0 flex-1 items-center gap-2", className)}
+        >
           <Search
             size={iconSize}
             className="shrink-0 text-muted-foreground"

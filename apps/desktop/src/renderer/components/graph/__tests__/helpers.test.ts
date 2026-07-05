@@ -1,10 +1,10 @@
+import type { Execution } from "@/stores/execution";
 import { describe, expect, it } from "vitest";
 import {
   type GraphRunLike,
   computeTopologicalRunWaves,
   computeWaves,
 } from "../helpers";
-import type { Execution } from "@/stores/execution";
 
 function run(
   id: string,
@@ -102,10 +102,7 @@ describe("computeWaves", () => {
   });
 
   it("labels topological waves with node counts", () => {
-    const execution = minimalExecution([
-      run("a"),
-      run("b", ["a"]),
-    ]);
+    const execution = minimalExecution([run("a"), run("b", ["a"])]);
     const bands = computeWaves(
       execution,
       { a: { x: 0, y: 0 }, b: { x: 300, y: 0 } },

@@ -83,7 +83,8 @@ export function ImPrivacySettings() {
           <div className="min-w-0">
             <h2 className="text-sm font-medium text-foreground">可被搜索</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              关闭后，他人无法通过用户名或 ID 精确搜到你（已在群内的身份不受影响）。
+              关闭后，他人无法通过用户名或 ID
+              精确搜到你（已在群内的身份不受影响）。
             </p>
           </div>
           {settings === null ? (

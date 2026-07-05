@@ -9,7 +9,7 @@ import {
   ToolLine,
   ToolLineGroup,
 } from "@/components/chat/ToolLine";
-import { groupToolRuns, type TimelineNode } from "@/lib/processTimeline";
+import { type TimelineNode, groupToolRuns } from "@/lib/processTimeline";
 import type {
   CheckpointDisplay,
   NonBlockingAskDisplay,
@@ -41,7 +41,10 @@ function countProcessStats(nodes: TimelineNode[]) {
   return { reasoningCount, toolCount };
 }
 
-function formatProcessSummary(reasoningCount: number, toolCount: number): string {
+function formatProcessSummary(
+  reasoningCount: number,
+  toolCount: number,
+): string {
   const parts: string[] = [];
   if (reasoningCount > 0) parts.push(`思考了 ${reasoningCount} 步`);
   if (toolCount > 0) parts.push(`调用了 ${toolCount} 个工具`);
@@ -209,8 +212,7 @@ export function ProcessTimeline({
     if (node.kind === "tool-group") {
       return (
         <ToolLineGroup
-          // biome-ignore lint/suspicious/noArrayIndexKey: append-only timeline
-          key={i}
+          key={`tool-group-${messageId}-${i}`}
           tools={node.tools}
           isStreaming={live}
           turnKey={messageId}
@@ -221,8 +223,7 @@ export function ProcessTimeline({
     const step: ProcessStep = node.kind === "tool" ? node.step : node;
     return (
       <ProcessRow
-        // biome-ignore lint/suspicious/noArrayIndexKey: append-only timeline
-        key={i}
+        key={`process-${messageId}-${i}-${step.kind}`}
         step={step}
         streaming={live}
         citations={citations}
@@ -233,14 +234,12 @@ export function ProcessTimeline({
     );
   };
 
-
   return (
     <div className="space-y-2">
       {nodes.map((node, i) => {
         if (shouldCollapseProcess) {
           const isFirstProcess =
-            isProcessNode(node) &&
-            !nodes.slice(0, i).some(isProcessNode);
+            isProcessNode(node) && !nodes.slice(0, i).some(isProcessNode);
 
           if (!processExpanded) {
             if (isProcessNode(node)) {
@@ -259,7 +258,7 @@ export function ProcessTimeline({
             }
           } else if (isFirstProcess) {
             return (
-              <Fragment key={`process-expanded-${i}`}>
+              <Fragment key="process-expanded">
                 <button
                   type="button"
                   onClick={toggleProcess}

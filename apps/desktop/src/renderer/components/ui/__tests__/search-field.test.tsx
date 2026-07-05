@@ -21,11 +21,7 @@ describe("SearchField", () => {
   it("shows clear button for field variant when non-empty", () => {
     const onValueChange = vi.fn();
     render(
-      <SearchField
-        value="x"
-        onValueChange={onValueChange}
-        aria-label="筛选"
-      />,
+      <SearchField value="x" onValueChange={onValueChange} aria-label="筛选" />,
     );
     fireEvent.click(screen.getByLabelText("清除筛选"));
     expect(onValueChange).toHaveBeenCalledWith("");
