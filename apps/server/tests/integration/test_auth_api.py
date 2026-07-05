@@ -552,3 +552,31 @@ async def test_admin_mfa_login_flow(client, make_admin):
     username, password = await make_admin()
     await login_admin(client, username, password)
     assert (await client.get("/v1/admin/overview")).status_code == 200
+
+
+async def test_admin_password_only_when_mfa_disabled(client, make_admin, monkeypatch):
+    from agentcore.config import settings
+
+    monkeypatch.setattr(settings, "admin_mfa_required", False)
+    username, password = await make_admin()
+    r = await client.post(
+        "/v1/auth/login",
+        json={"username": username, "password": password},
+        headers={"X-Client-Platform": "admin"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["mfa_required"] is False
+    assert body["mfa_setup_required"] is False
+    assert (await client.get("/v1/admin/overview")).status_code == 200
+
+
+async def test_mfa_status_reports_required_flag(client, make_admin, monkeypatch):
+    from agentcore.config import settings
+
+    username, password = await make_admin()
+    await login_admin(client, username, password)
+    monkeypatch.setattr(settings, "admin_mfa_required", False)
+    r = await client.get("/v1/auth/mfa/status")
+    assert r.status_code == 200
+    assert r.json()["required"] is False

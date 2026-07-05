@@ -433,7 +433,10 @@ async def mfa_status(
     user: AdminSessionUser,
     mfa: AdminMfaService = Depends(get_admin_mfa_service),
 ):
-    return MfaStatusResponse(enrolled=await mfa.is_enrolled(user.user_id))
+    return MfaStatusResponse(
+        enrolled=await mfa.is_enrolled(user.user_id),
+        required=settings.admin_mfa_required,
+    )
 
 
 @router.post("/mfa/setup", response_model=MfaSetupResponse)

@@ -45,6 +45,8 @@ class AuthSettings(BaseModel):
 
     # TOTP issuer shown in authenticator apps (admin MFA).
     mfa_issuer_name: str = "AgentCore Admin"
+    # When false, admin login is password-only (session isolation still applies).
+    admin_mfa_required: bool = True
     # ``memory`` = process-local counters (dev / single worker). ``redis`` = shared
     # limiters + CSRF store for multi-worker production.
     rate_limit_backend: str = "memory"

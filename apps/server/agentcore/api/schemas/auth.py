@@ -56,6 +56,7 @@ class MfaConfirmResponse(BaseModel):
 
 class MfaStatusResponse(BaseModel):
     enrolled: bool
+    required: bool = True
 
 
 class ChangePasswordRequest(BaseModel):

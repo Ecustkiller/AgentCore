@@ -5091,6 +5091,11 @@ export interface components {
         MfaStatusResponse: {
             /** Enrolled */
             enrolled: boolean;
+            /**
+             * Required
+             * @default true
+             */
+            required: boolean;
         };
         /**
          * ModelModeCatalog

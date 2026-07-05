@@ -177,7 +177,11 @@ class AuthService:
         audience = platform_to_audience(platform)
 
         if user.role == "admin":
-            if self._mfa is not None and await self._mfa.is_enrolled(user.user_id):
+            if (
+                settings.admin_mfa_required
+                and self._mfa is not None
+                and await self._mfa.is_enrolled(user.user_id)
+            ):
                 pending = create_mfa_pending_token(user.user_id, audience=audience)
                 return LoginResult(
                     user=user,
@@ -187,7 +191,11 @@ class AuthService:
             tokens = await self._issue_tokens(
                 user.user_id, family=new_id(), now=now, audience=audience
             )
-            return LoginResult(user=user, tokens=tokens, mfa_setup_required=True)
+            return LoginResult(
+                user=user,
+                tokens=tokens,
+                mfa_setup_required=settings.admin_mfa_required,
+            )
 
         tokens = await self._issue_tokens(
             user.user_id, family=new_id(), now=now, audience=audience
