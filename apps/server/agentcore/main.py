@@ -28,6 +28,7 @@ from agentcore.api.routes import (
     realtime,
     search,
     sharing,
+    simulation,
     system,
     tools,
     usage,
@@ -43,6 +44,7 @@ from agentcore.memory.consolidation import consolidation_loop, shutdown_schedule
 from agentcore.middleware.csrf import CsrfMiddleware
 from agentcore.middleware.errors import JSONErrorMiddleware
 from agentcore.middleware.rate_limit import AuthRateLimitMiddleware
+from agentcore.runtime.audit_retention import audit_retention_loop
 from agentcore.runtime.session_retention import session_retention_loop
 from agentcore.runtime.suspension_retention import paused_turn_retention_loop
 from agentcore.security.keys import KeyEncryptor
@@ -176,6 +178,9 @@ async def lifespan(app: FastAPI):
     if settings.session_roster_persist_enabled:
         session_retention_task = asyncio.create_task(session_retention_loop())
 
+    audit_retention_task: asyncio.Task | None = None
+    audit_retention_task = asyncio.create_task(audit_retention_loop())
+
     # Paused-turn TTL sweep (结构化挂起 2b): prune paused_turns frames abandoned past
     # the 7-day window so durable suspensions stay bounded. The live resolve path drops
     # connected pauses; this only catches the disconnected, never-resumed remainder.
@@ -202,6 +207,10 @@ async def lifespan(app: FastAPI):
             session_retention_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await session_retention_task
+        if audit_retention_task is not None:
+            audit_retention_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await audit_retention_task
         if paused_turn_retention_task is not None:
             paused_turn_retention_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -280,6 +289,7 @@ app.include_router(messages.router, prefix="/v1")
 app.include_router(model_modes.router, prefix="/v1")
 app.include_router(realtime.router, prefix="/v1")
 app.include_router(search.router, prefix="/v1")
+app.include_router(simulation.router, prefix="/v1")
 # Conversation sharing (分享对话): owner-only manage under /v1, plus the public
 # read-only page at the root (/shared/{token}, no /v1, no auth).
 app.include_router(sharing.router, prefix="/v1")

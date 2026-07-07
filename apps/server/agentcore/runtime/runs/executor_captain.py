@@ -7,9 +7,9 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, replace
 
 from agentcore.core.logging import get_logger
-from agentcore.llm.config import ModelProfile
 from agentcore.llm.pricing import calculate_cost
-from agentcore.llm.protocol import LLMMessage, LLMProvider, TokenUsage
+from agentcore.llm.profiles import ModelProfile
+from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import (
@@ -45,8 +45,10 @@ def build_captain_executor(
     history: list[dict],
     user_message: str,
     profile: ModelProfile,
+    turn_model: str,
     citation_sink: list[dict],
     approval_gate: ApprovalGate | None = None,
+    supports_tools: bool | None = None,
 ) -> Callable[[RunSpec], Awaitable[RunState]]:
     """Build the executor for the turn's CAPTAIN root run — the CEO chat loop.
 
@@ -87,8 +89,10 @@ def build_captain_executor(
             sink=sink,
             tool_ctx=tool_ctx,
             profile=profile,
+            turn_model=turn_model,
             citation_sink=citation_sink,
             approval_gate=approval_gate,
+            supports_tools=supports_tools,
         )
 
     return execute
@@ -101,8 +105,10 @@ def build_captain_resumer(
     sink: EventSink,
     base_tool_context: ToolContext,
     profile: ModelProfile,
+    turn_model: str,
     citation_sink: list[dict],
     approval_gate: ApprovalGate | None = None,
+    supports_tools: bool | None = None,
 ) -> Callable[[RunSpec, list[LLMMessage]], Awaitable[RunState]]:
     """Build the captain executor for a RESUMED turn (结构化挂起 2b).
 
@@ -128,8 +134,10 @@ def build_captain_resumer(
             sink=sink,
             tool_ctx=tool_ctx,
             profile=profile,
+            turn_model=turn_model,
             citation_sink=citation_sink,
             approval_gate=approval_gate,
+            supports_tools=supports_tools,
         )
 
     return execute
@@ -145,8 +153,10 @@ async def _drive_captain_loop(
     sink: EventSink,
     tool_ctx: ToolContext,
     profile: ModelProfile,
+    turn_model: str,
     citation_sink: list[dict],
     approval_gate: ApprovalGate | None,
+    supports_tools: bool | None = None,
 ) -> RunState:
     """Run the CEO captain ReAct loop over ``messages`` and fold it into a RunState.
 
@@ -187,6 +197,7 @@ async def _drive_captain_loop(
             sink=sink,
             tool_context=tool_ctx,
             profile=profile,
+            turn_model=turn_model,
             # The captain's content/reasoning stream to the bubble (engine defaults);
             # its tool-call ARGUMENT assembly (the big delegate 任务书, composed before
             # run_plan exists) rides a bubble-scoped tool_progress so it isn't invisible.
@@ -205,10 +216,11 @@ async def _drive_captain_loop(
             # from message_final (unlike workers), so this stays conformance-neutral —
             # the live content_delta stream the folds/oracle read is untouched.
             deliverable_only=True,
+            supports_tools=supports_tools,
         )
         duration_ms = int((time.monotonic() - start) * 1000)
         usage_dict = usage.as_dict()
-        cost = asdict(calculate_cost(profile.model, usage))
+        cost = asdict(calculate_cost(turn_model, usage))
         # 执行级事件溯源 (§8.3): the captain's FULL reply (vs the run_completed
         # summary) so the turn's reply is reconstructable from the journal alone.
         record_turn_fact(
@@ -224,7 +236,7 @@ async def _drive_captain_loop(
                 output_summary="",
                 duration_ms=duration_ms,
                 role="captain",
-                model=profile.model,
+                model=turn_model,
                 usage=usage_dict,
                 cost=cost,
             )
@@ -233,7 +245,7 @@ async def _drive_captain_loop(
             phase=RunPhase.COMPLETED,
             content=content,
             reasoning=reasoning,
-            model=profile.model,
+            model=turn_model,
             duration_ms=duration_ms,
             rounds=rounds,
             usage=usage_dict,
@@ -248,7 +260,7 @@ async def _drive_captain_loop(
         sink.emit(run_failed(spec.run_id, agent_id, str(e)))
         return _priced_failure(
             str(e),
-            model=profile.model,
+            model=turn_model,
             usage=partial,
             rounds=0,
             duration_ms=duration_ms,

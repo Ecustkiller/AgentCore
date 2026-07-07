@@ -16,7 +16,8 @@ Reusable::
     uv run python -m scripts.eval_team_bench --samples 5
     uv run python -m scripts.eval_team_bench --case team_energy_compare
 
-Needs a real DeepSeek key (settings.deepseek_api_key / EVAL_DEEPSEEK_API_KEY) and a
+Needs a real LLM key (``PLATFORM_API_KEY`` in .env / ``settings.platform_api_key``, or
+``EVAL_DEEPSEEK_API_KEY``) and a
 healthy SearXNG (web_search).
 """
 

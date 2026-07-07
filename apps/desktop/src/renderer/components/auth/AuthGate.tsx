@@ -21,20 +21,29 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const status = useAuthStore((s) => s.status);
   const reason = useAuthStore((s) => s.reason);
 
-  const runBootstrap = useCallback(async () => {
-    useAuthStore.getState().setLoading();
-    const result = await bootstrapAuth();
-    const store = useAuthStore.getState();
-    switch (result.kind) {
-      case "authenticated":
-        store.setAuthenticated(result.user);
-        break;
-      case "unavailable":
-        store.setUnavailable(result.reason);
-        break;
-      case "unauthenticated":
-        store.setUnauthenticated();
-        break;
+  const runBootstrap = useCallback(async (opts?: { showLoading?: boolean }) => {
+    if (opts?.showLoading !== false) {
+      useAuthStore.getState().setLoading();
+    }
+    try {
+      const result = await bootstrapAuth();
+      const store = useAuthStore.getState();
+      switch (result.kind) {
+        case "authenticated":
+          store.setAuthenticated(result.user);
+          break;
+        case "unavailable":
+          store.setUnavailable(result.reason);
+          break;
+        case "unauthenticated":
+          store.setUnauthenticated();
+          break;
+      }
+    } catch (err) {
+      console.error("[auth] bootstrap failed", err);
+      useAuthStore.getState().setUnavailable(
+        "无法连接后端：请确认后端服务已启动后重试。",
+      );
     }
   }, []);
 
@@ -67,6 +76,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (status === "authenticated") void ensureDefaultContainerRoot();
   }, [status]);
+
+  // Dev: backend tasks often restart during parallel server edits; poll bootstrap
+  // so the app recovers when port 8000 comes back without a manual retry click.
+  useEffect(() => {
+    if (status !== "unavailable" || !import.meta.env.DEV) return;
+    const id = window.setInterval(
+      () => void runBootstrap({ showLoading: false }),
+      5000,
+    );
+    return () => window.clearInterval(id);
+  }, [status, runBootstrap]);
 
   // Offline web preview: render the app without ever gating on auth.
   if (typeof window !== "undefined" && window.__WEB_PREVIEW__) {

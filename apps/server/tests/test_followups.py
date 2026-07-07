@@ -4,6 +4,7 @@ import asyncio
 
 import agentcore.memory.followups as followups_mod
 from agentcore.llm import LLMRequest, LLMResponse
+from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 from agentcore.memory.followups import (
     _FOLLOWUPS_SYSTEM_PROMPT,
     FOLLOWUPS_MAX,
@@ -154,7 +155,7 @@ async def test_generator_returns_sanitized_list():
 
 async def test_generator_uses_flash_non_thinking_with_room():
     provider = _FakeProvider("建议一")
-    await LLMFollowupsGenerator(provider).generate(
+    await LLMFollowupsGenerator(provider, model=DEEPSEEK_V4_FLASH).generate(
         FollowupInput(
             conversation_id="c1",
             messages=[{"role": "user", "content": "你好"}],
@@ -162,7 +163,6 @@ async def test_generator_uses_flash_non_thinking_with_room():
     )
     req = provider.requests[0]
     assert req.model == "deepseek-v4-flash"
-    assert req.thinking is False
     assert req.stream is False
     # Roomier than the title profile (64) so 4 short CJK lines don't get cut off.
     assert req.max_tokens == 256

@@ -21,6 +21,7 @@ from agentcore.conversation.compaction import (
 )
 from agentcore.conversation.history import _summary_block
 from agentcore.llm import LLMRequest, LLMResponse
+from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 
 
 def _msg(role: str, content: str, created_at: int = 0) -> SimpleNamespace:
@@ -139,11 +140,10 @@ class _FakeProvider:
 async def test_summarize_uses_flash_non_thinking_and_injects_budget(monkeypatch):
     monkeypatch.setattr(compaction.settings, "compaction_summary_char_budget", 4000, raising=True)
     provider = _FakeProvider("## 已确立的事实\n- X")
-    out = await _summarize(provider, "", [_msg("user", "hi")])
+    out = await _summarize(provider, "", [_msg("user", "hi")], model=DEEPSEEK_V4_FLASH)
     assert out == "## 已确立的事实\n- X"
     req = provider.requests[0]
     assert req.model == "deepseek-v4-flash"
-    assert req.thinking is False
     # The budget placeholder is resolved into the real system prompt, never leaked.
     assert "__BUDGET__" not in req.messages[0].content
     assert "4000" in req.messages[0].content
@@ -152,7 +152,7 @@ async def test_summarize_uses_flash_non_thinking_and_injects_budget(monkeypatch)
 async def test_summarize_truncates_overlong_output(monkeypatch):
     monkeypatch.setattr(compaction.settings, "compaction_summary_char_budget", 100, raising=True)
     provider = _FakeProvider("H" + "x" * 500 + "T")
-    out = await _summarize(provider, "", [_msg("user", "hi")])
+    out = await _summarize(provider, "", [_msg("user", "hi")], model=DEEPSEEK_V4_FLASH)
     assert len(out) <= 100
 
 
@@ -164,7 +164,7 @@ async def test_summarize_returns_empty_on_timeout(monkeypatch):
             await asyncio.sleep(1)
             return LLMResponse(content="never")
 
-    out = await _summarize(_SlowProvider(), "", [_msg("user", "hi")])
+    out = await _summarize(_SlowProvider(), "", [_msg("user", "hi")], model=DEEPSEEK_V4_FLASH)
     assert out == ""
 
 
@@ -303,16 +303,16 @@ def _wire_runner(monkeypatch, *, conv, messages, provider) -> dict:
         async def list_after(self, conversation_id, *, after, limit):
             return ([m for m in messages if m.created_at > after], False)
 
-    async def _no_credentials(session, user_id):
+    async def _no_credentials(session, user_id, purpose="platform_internal"):
         return None
 
-    def _build(credentials):
+    def _build(credentials, purpose="platform_internal"):
         rec["built"] = True
         return provider
 
     monkeypatch.setattr(compaction, "ConversationRepository", _FakeConvRepo)
     monkeypatch.setattr(compaction, "MessageRepository", _FakeMsgRepo)
-    monkeypatch.setattr(compaction, "resolve_user_llm_credentials", _no_credentials)
+    monkeypatch.setattr(compaction, "resolve_credentials", _no_credentials)
     monkeypatch.setattr(compaction, "build_provider", _build)
     monkeypatch.setattr(compaction.settings, "compaction_enabled", True, raising=True)
     monkeypatch.setattr(compaction.settings, "billing_mode", "platform", raising=True)

@@ -8,7 +8,7 @@ revision graph events parented to the original run (版本链).
 
 from pathlib import Path
 
-from agentcore.llm.protocol import LLMChunk
+from agentcore.llm.provider.protocol import LLMChunk
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.runs import (
     RunPhase,

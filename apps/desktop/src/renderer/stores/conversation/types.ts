@@ -5,6 +5,7 @@ import type {
   AskQuestion,
   AskStyleOption,
   CheckpointDecision,
+  CheckpointIntent,
   Citation,
   ContextBlockWire,
   CostBreakdown,
@@ -21,6 +22,7 @@ export interface CheckpointDisplay {
   assumptions: AskAssumption[];
   questions: AskQuestion[];
   styleOptions: AskStyleOption[];
+  intent: CheckpointIntent;
   status: "pending" | "resolved";
   decision: CheckpointDecision | null;
   note: string;
@@ -120,7 +122,18 @@ export interface Message {
   checkpoints?: CheckpointDisplay[];
   nonBlockingAsks?: NonBlockingAskDisplay[];
   planReviews?: PlanReviewDisplay[];
-  error?: { code: string; message: string };
+  error?: {
+    code: string;
+    message: string;
+    context?: {
+      upstream_status?: number;
+      upstream_body_preview?: string | null;
+      retry_attempts?: number;
+      empty_diagnosis?: string;
+      sub2api_diagnosis?: string;
+      sub2api_account?: string;
+    };
+  };
   /** CEO→用户「下一步推荐」(下一步推荐): post-turn quick-reply suggestions, shown as
    * one-click chips under the latest assistant turn (fill the composer on click).
    * DERIVED-persisted (messages.followups column, twin of the title): live they ride
@@ -132,6 +145,8 @@ export interface Message {
    * column) so a reloaded bubble replays the rating; toggled via the footer thumbs. */
   feedback?: "up" | "down" | null;
   traceId?: string;
+  /** Preflight soft gate when the configured model may lack tool calling (turn_warning SSE). */
+  turnWarning?: string;
 }
 
 export interface ConversationRuntime {
@@ -150,4 +165,6 @@ export interface ConversationRuntime {
   hasMoreAfter: boolean;
   loadingOlder: boolean;
   loadingNewer: boolean;
+  /** turn_warning received before message_start — stamped onto the next assistant bubble. */
+  pendingTurnWarning: string | null;
 }

@@ -122,6 +122,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/audit/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Agent Audit Summary
+         * @description Platform-wide agent audit aggregates for the admin observability widget.
+         */
+        get: operations["agent_audit_summary_v1_admin_audit_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/conversations": {
         parameters: {
             query?: never;
@@ -538,6 +558,23 @@ export interface paths {
          * @description Mint multiple single-use invite codes (admin batch issuance).
          */
         post: operations["create_invites_batch_v1_auth_invites_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/invites/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Invite Stats */
+        get: operations["invite_stats_v1_auth_invites_stats_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -961,6 +998,26 @@ export interface paths {
         patch: operations["update_conversation_v1_conversations__conversation_id__patch"];
         trace?: never;
     };
+    "/v1/conversations/{conversation_id}/audit/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List File Audit
+         * @description File-attribution audit timeline for one workspace path (owner-scoped).
+         */
+        get: operations["list_file_audit_v1_conversations__conversation_id__audit_file_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/conversations/{conversation_id}/cost": {
         parameters: {
             query?: never;
@@ -1277,9 +1334,9 @@ export interface paths {
          *     BYOK/quota billing gate (BYOK mode requires the user's own key; platform mode
          *     enforces quota). The resolved BYOK credentials thread through the whole turn.
          *
-         *     DB session scoped to preflight only — released before the SSE stream opens, so a
-         *     long-lived stream never holds a pooled connection (fixes GC-termination warnings
-         *     on abrupt teardown).
+         *     Request-scoped DB session for preflight only — explicitly closed before the SSE
+         *     stream opens so a long-lived stream never holds a pooled connection (fixes
+         *     GC-termination warnings on abrupt teardown).
          */
         post: operations["send_message_v1_conversations__conversation_id__messages_post"];
         delete?: never;
@@ -1309,6 +1366,26 @@ export interface paths {
          *     message never rewrites real spend (不变量 #1).
          */
         delete: operations["delete_message_v1_conversations__conversation_id__messages__message_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{conversation_id}/messages/{message_id}/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Turn Audit
+         * @description Delegated-turn audit timeline for one assistant message (owner-scoped).
+         */
+        get: operations["list_turn_audit_v1_conversations__conversation_id__messages__message_id__audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2462,7 +2539,7 @@ export interface paths {
         };
         /**
          * List Model Modes
-         * @description Built-in presets + the user's custom modes + the user's resolved default ref.
+         * @description Empty catalog — quality modes are no longer supported.
          */
         get: operations["list_model_modes_v1_model_modes_get"];
         put?: never;
@@ -2483,8 +2560,7 @@ export interface paths {
         };
         /**
          * Model Mode Catalog
-         * @description The option space for building a custom mode: configurable team roles + the
-         *     operator-allowed models. 经济worker is shown read-only (locked to its base model).
+         * @description Empty option space — quality modes are no longer supported.
          */
         get: operations["model_mode_catalog_v1_model_modes_catalog_get"];
         put?: never;
@@ -2503,10 +2579,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /**
-         * Set Default Model Mode
-         * @description Set (or clear with null) the user's account-default 质量档.
-         */
+        /** Set Default Model Mode */
         put: operations["set_default_model_mode_v1_model_modes_default_put"];
         post?: never;
         delete?: never;
@@ -2574,6 +2647,193 @@ export interface paths {
          *     appears.
          */
         get: operations["search_v1_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/simulation/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Run */
+        post: operations["create_run_v1_simulation_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/simulation/runs/{run_id}/agents/{agent_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Agent */
+        patch: operations["patch_agent_v1_simulation_runs__run_id__agents__agent_id__patch"];
+        trace?: never;
+    };
+    "/v1/simulation/runs/{run_id}/inject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Inject Event */
+        post: operations["inject_event_v1_simulation_runs__run_id__inject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/simulation/runs/{run_id}/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run Manifest */
+        get: operations["get_run_manifest_v1_simulation_runs__run_id__manifest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/simulation/runs/{run_id}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run Metrics */
+        get: operations["get_run_metrics_v1_simulation_runs__run_id__metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/simulation/runs/{run_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause Run */
+        post: operations["pause_run_v1_simulation_runs__run_id__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/simulation/runs/{run_id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Replay Run */
+        get: operations["replay_run_v1_simulation_runs__run_id__replay_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/simulation/runs/{run_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume Run */
+        post: operations["resume_run_v1_simulation_runs__run_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/simulation/runs/{run_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stream Run */
+        get: operations["stream_run_v1_simulation_runs__run_id__stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/simulation/runs/{run_id}/tick": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Advance Tick */
+        post: operations["advance_tick_v1_simulation_runs__run_id__tick_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/simulation/runs/{run_id}/ticks/{tick_number}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Tick Frame */
+        get: operations["get_tick_frame_v1_simulation_runs__run_id__ticks__tick_number__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2674,20 +2934,40 @@ export interface paths {
         };
         /**
          * Get Llm Key
-         * @description Current BYOK key status (configured? last-4? last connectivity result?).
+         * @description Current BYOK LLM config status (configured? endpoint? last probe result?).
          */
         get: operations["get_llm_key_v1_users_me_llm_key_get"];
         /**
          * Set Llm Key
-         * @description Store or replace the user's DeepSeek key (encrypted at rest; status reset).
+         * @description Store or replace the user's LLM config (key encrypted at rest; status reset).
          */
         put: operations["set_llm_key_v1_users_me_llm_key_put"];
         post?: never;
         /**
          * Delete Llm Key
-         * @description Remove the user's stored key (BYOK turns then refuse until one is set again).
+         * @description Remove the user's stored config (BYOK turns then refuse until one is set again).
          */
         delete: operations["delete_llm_key_v1_users_me_llm_key_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/me/llm-key/billing-preference": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Billing Preference
+         * @description Switch between platform free quota and BYOK for the authenticated user.
+         */
+        put: operations["set_billing_preference_v1_users_me_llm_key_billing_preference_put"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2704,7 +2984,7 @@ export interface paths {
         put?: never;
         /**
          * Test Llm Key
-         * @description Probe DeepSeek with the stored key and persist 'active' / 'error'.
+         * @description Probe the configured endpoint and persist 'active' / 'error' + supports_tools.
          */
         post: operations["test_llm_key_v1_users_me_llm_key_test_post"];
         delete?: never;
@@ -3198,6 +3478,24 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AdminAgentAuditSummary
+         * @description Platform-wide agent audit aggregates for the admin dashboard widget.
+         */
+        AdminAgentAuditSummary: {
+            /** Approval Denied */
+            approval_denied: number;
+            /** Approval Timeouts */
+            approval_timeouts: number;
+            /** Audit Drops */
+            audit_drops: number;
+            /** Delegate Plans */
+            delegate_plans: number;
+            /** Events */
+            events: number;
+            /** Failures */
+            failures: number;
+        };
         /**
          * AdminAuditLogLine
          * @description One privileged operator action, newest-first in the audit feed.
@@ -3733,6 +4031,58 @@ export interface components {
             /** Username */
             username: string;
         };
+        /** AdvanceTickResponse */
+        AdvanceTickResponse: {
+            /** Run Id */
+            run_id: string;
+            snapshot: components["schemas"]["SimTickSnapshot"];
+        };
+        /** AgentAuditEventLine */
+        AgentAuditEventLine: {
+            /** Action */
+            action: string;
+            /** Actor Kind */
+            actor_kind: string;
+            /** Category */
+            category: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            };
+            /** Execution Id */
+            execution_id: string | null;
+            /** Id */
+            id: string;
+            /** Outcome */
+            outcome: string;
+            /** Parent Run Id */
+            parent_run_id: string | null;
+            /** Run Id */
+            run_id: string | null;
+            /** Seq */
+            seq: number;
+            /** Target Ref */
+            target_ref: string | null;
+            /** Target Type */
+            target_type: string | null;
+            /** Trace Id */
+            trace_id: string | null;
+            /** Turn Id */
+            turn_id: string;
+        };
+        /** AgentAuditListResponse */
+        AgentAuditListResponse: {
+            causal_graph?: components["schemas"]["AuditCausalGraph"] | null;
+            /** Data */
+            data: components["schemas"]["AgentAuditEventLine"][];
+            /** Total */
+            total: number;
+        };
         /**
          * AgentCostLine
          * @description One participant's row in the team payroll (one Run = one Agent).
@@ -3777,12 +4127,65 @@ export interface components {
          * @enum {string}
          */
         ApprovalDecision: "approve" | "approve_always" | "approve_always_files" | "deny";
+        /** AuditCausalEdge */
+        AuditCausalEdge: {
+            /** From */
+            from: string;
+            /** Kind */
+            kind: string;
+            /** To */
+            to: string;
+        };
+        /** AuditCausalGraph */
+        AuditCausalGraph: {
+            /** Edges */
+            edges: components["schemas"]["AuditCausalEdge"][];
+            /** Nodes */
+            nodes: components["schemas"]["AuditCausalNode"][];
+        };
+        /** AuditCausalNode */
+        AuditCausalNode: {
+            /** Parent Run Id */
+            parent_run_id?: string | null;
+            /** Role */
+            role?: string | null;
+            /** Run Id */
+            run_id: string;
+        };
         /** BatchCreateInviteRequest */
         BatchCreateInviteRequest: {
             /** Count */
             count: number;
             /** Expires In Days */
             expires_in_days?: number | null;
+        };
+        /** BigFive */
+        BigFive: {
+            /**
+             * Agreeableness
+             * @default 0.5
+             */
+            agreeableness: number;
+            /**
+             * Conscientiousness
+             * @default 0.5
+             */
+            conscientiousness: number;
+            /**
+             * Extraversion
+             * @default 0.5
+             */
+            extraversion: number;
+            /**
+             * Neuroticism
+             * @default 0.5
+             */
+            neuroticism: number;
+            /**
+             * Openness
+             * @default 0.5
+             */
+            openness: number;
         };
         /**
          * BindLocalWorkspaceRequest
@@ -4329,6 +4732,20 @@ export interface components {
              */
             expires_in_days: (7 | 30) | null;
         };
+        /** CreateSimulationRunRequest */
+        CreateSimulationRunRequest: {
+            manifest?: components["schemas"]["RunManifest"] | null;
+            /**
+             * Scenario
+             * @default town
+             */
+            scenario: string;
+            /**
+             * Seed
+             * @default 0
+             */
+            seed: number;
+        };
         /**
          * CreateSnapshotRequest
          * @description Take a manual snapshot of a conversation's workspace.
@@ -4714,6 +5131,31 @@ export interface components {
             /** Token */
             token: string;
         };
+        /** InjectSimulationEventRequest */
+        InjectSimulationEventRequest: {
+            /**
+             * Event Type
+             * @enum {string}
+             */
+            event_type: "price_surge" | "storm" | "festival" | "announcement" | "custom";
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+        };
+        /** InjectSimulationEventResponse */
+        InjectSimulationEventResponse: {
+            /** Event Id */
+            event_id: string;
+            /** Event Type */
+            event_type: string;
+            /** Queued For Tick */
+            queued_for_tick: number;
+            /** Run Id */
+            run_id: string;
+            /** Title */
+            title: string;
+        };
         /** InviteListResponse */
         InviteListResponse: {
             /** Data */
@@ -4736,6 +5178,8 @@ export interface components {
             created_at: string;
             /** Created By */
             created_by: string | null;
+            /** Created By Username */
+            created_by_username?: string | null;
             /** Expires At */
             expires_at: string | null;
             /** Id */
@@ -4751,20 +5195,64 @@ export interface components {
             used_at: string | null;
             /** Used By */
             used_by: string | null;
+            /** Used By Username */
+            used_by_username?: string | null;
+        };
+        /** InviteStatsResponse */
+        InviteStatsResponse: {
+            /** Active */
+            active: number;
+            /** Expired */
+            expired: number;
+            /** Revoked */
+            revoked: number;
+            /** Total */
+            total: number;
+            /** Used */
+            used: number;
         };
         /**
          * LlmKeyStatusResponse
-         * @description Settings view of a user's BYOK key — never the plaintext key.
+         * @description Settings view of a user's BYOK config — never the plaintext key.
          */
         LlmKeyStatusResponse: {
+            /** Base Url */
+            base_url?: string | null;
+            /**
+             * Billing Mode
+             * @description Effective billing mode for this user (platform free quota vs BYOK)
+             * @default byok
+             */
+            billing_mode: string;
+            /**
+             * Billing Preference
+             * @description User's stored billing preference
+             * @default byok
+             */
+            billing_preference: string;
             /** Configured */
             configured: boolean;
+            /** Default Model */
+            default_model?: string | null;
             /** Masked Key */
             masked_key?: string | null;
             /** Message */
             message?: string | null;
+            /**
+             * Platform Available
+             * @description Whether platform free quota can be selected on this deployment
+             * @default false
+             */
+            platform_available: boolean;
+            /**
+             * Platform Model
+             * @description Operator-configured model when billing_mode is platform
+             */
+            platform_model?: string | null;
             /** Status */
             status: string;
+            /** Supports Tools */
+            supports_tools?: boolean | null;
         };
         /** LoginMfaRequest */
         LoginMfaRequest: {
@@ -5180,6 +5668,23 @@ export interface components {
             /** Src */
             src: string;
         };
+        /** PatchSimulationAgentRequest */
+        PatchSimulationAgentRequest: {
+            /** Goal */
+            goal?: string | null;
+            /** Money */
+            money?: number | null;
+            /** Mood */
+            mood?: number | null;
+        };
+        /** PatchSimulationAgentResponse */
+        PatchSimulationAgentResponse: {
+            /** Agent Id */
+            agent_id: string;
+            /** Run Id */
+            run_id: string;
+            state: components["schemas"]["SimAgentState"];
+        };
         /**
          * PausedTurnSummary
          * @description A turn awaiting resume after a durable plan_review / ask_user pause (结构化挂起 2b).
@@ -5207,6 +5712,8 @@ export interface components {
              * @default
              */
             context: string;
+            /** Intent */
+            intent?: ("kickoff" | "decision") | null;
             kind: components["schemas"]["SuspensionKind"];
             /** Message Id */
             message_id: string;
@@ -5236,6 +5743,35 @@ export interface components {
              * @default
              */
             user_message: string;
+            /**
+             * User Message Id
+             * @default
+             */
+            user_message_id: string;
+        };
+        /**
+         * PendingApprovalSummary
+         * @description A GRANTABLE tool call still awaiting the user's decision (in-process gate).
+         *
+         *     Surfaced on conversation reopen via ``GET .../recovery`` so the client can
+         *     re-render approval cards after a refresh. Unlike plan_review / ask_user pauses,
+         *     approvals stay on the live turn's interaction bridge — they are NOT durably
+         *     paused turns — but the registry's ``list_pending`` is the authoritative
+         *     pending set while the backend run is still alive.
+         */
+        PendingApprovalSummary: {
+            /** Approval Id */
+            approval_id: string;
+            /** Arguments */
+            arguments?: {
+                [key: string]: unknown;
+            };
+            /** Conversation Id */
+            conversation_id: string;
+            /** Tool Call Id */
+            tool_call_id: string;
+            /** Tool Name */
+            tool_name: string;
         };
         /**
          * QuotaStatus
@@ -5279,6 +5815,8 @@ export interface components {
              * @default
              */
             content: string;
+            /** Finish Reason */
+            finish_reason?: string | null;
             /**
              * Input Tokens
              * @default 0
@@ -5649,6 +6187,41 @@ export interface components {
             message: string;
         };
         /**
+         * RunManifest
+         * @description Frozen experiment descriptor stored on ``simulation_run.config``.
+         */
+        RunManifest: {
+            /** Code Version */
+            code_version?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Manifest Version
+             * @default 1
+             */
+            manifest_version: string;
+            model_routing?: components["schemas"]["SimModelRoutingConfig"] | null;
+            /** Personas */
+            personas?: components["schemas"]["SimPersona"][];
+            /** Regions */
+            regions?: string[];
+            /**
+             * Scenario
+             * @default town
+             */
+            scenario: string;
+            /**
+             * Seed
+             * @default 0
+             */
+            seed: number;
+            /**
+             * Temperature
+             * @default 0.8
+             */
+            temperature: number;
+        };
+        /**
          * RunsPayload
          * @description Persisted turn replay payload for an assistant message.
          *
@@ -5762,6 +6335,19 @@ export interface components {
             /** Content */
             content: string;
             debate_seed?: components["schemas"]["DebateSeedInput"] | null;
+            /**
+             * Requires Tools
+             * @default false
+             */
+            requires_tools: boolean;
+        };
+        /**
+         * SetBillingPreferenceRequest
+         * @description Switch the user's billing mode (platform free quota vs BYOK).
+         */
+        SetBillingPreferenceRequest: {
+            /** Billing Preference */
+            billing_preference: string;
         };
         /**
          * SetDefaultModeRequest
@@ -5773,11 +6359,23 @@ export interface components {
         };
         /**
          * SetLlmKeyRequest
-         * @description Store the user's own DeepSeek API key (BYOK).
+         * @description Store the user's OpenAI-compatible LLM configuration (BYOK).
          */
         SetLlmKeyRequest: {
             /** Api Key */
             api_key: string;
+            /**
+             * Base Url
+             * @description OpenAI-compatible endpoint including version prefix
+             * @example http://localhost:9090/v1
+             */
+            base_url?: string | null;
+            /**
+             * Default Model
+             * @description Default model name for all turns
+             * @example deepseek-v4-flash
+             */
+            default_model?: string | null;
         };
         /**
          * SetMessageFeedbackRequest
@@ -5821,6 +6419,154 @@ export interface components {
             title: string;
             /** Url */
             url: string;
+        };
+        /**
+         * SimAgentState
+         * @description Per-agent snapshot on ``sim.agent_state`` and in tick snapshots.
+         */
+        SimAgentState: {
+            /**
+             * Activity
+             * @default
+             */
+            activity: string;
+            /** Agent Id */
+            agent_id: string;
+            /**
+             * Goal
+             * @default
+             */
+            goal: string;
+            /** Inventory */
+            inventory?: {
+                [key: string]: number;
+            };
+            /**
+             * Last Thought
+             * @default
+             */
+            last_thought: string;
+            /** Location */
+            location: string;
+            /**
+             * Money
+             * @default 100
+             */
+            money: number;
+            /**
+             * Mood
+             * @default 0
+             */
+            mood: number;
+            /** Name */
+            name: string;
+            position: components["schemas"]["Vec3"];
+            /** Relationships */
+            relationships?: {
+                [key: string]: number;
+            };
+            /** Role */
+            role: string;
+            /** Tick Memories */
+            tick_memories?: string[];
+        };
+        /**
+         * SimModelRoutingConfig
+         * @description Per-run model routing manifest; M2 uses the same model for all tiers.
+         */
+        SimModelRoutingConfig: {
+            /**
+             * Critical Model
+             * @description Reserved for key decisions; M2 aliases routine_model
+             */
+            critical_model: string;
+            /** Routine Model */
+            routine_model: string;
+        };
+        /**
+         * SimPersona
+         * @description Immutable role card for one SimAgent.
+         */
+        SimPersona: {
+            /** Agent Id */
+            agent_id: string;
+            big_five?: components["schemas"]["BigFive"];
+            /** Goal */
+            goal: string;
+            /** Goals Stack */
+            goals_stack?: string[];
+            /** Location */
+            location: string;
+            /** Name */
+            name: string;
+            /** Role */
+            role: string;
+            /** System Prompt */
+            system_prompt: string;
+        };
+        /** SimTickFrameResponse */
+        SimTickFrameResponse: {
+            /** Run Id */
+            run_id: string;
+            snapshot: components["schemas"]["SimTickSnapshot"];
+            /** Tick Number */
+            tick_number: number;
+        };
+        /**
+         * SimTickSnapshot
+         * @description Persisted world frame for a single tick.
+         */
+        SimTickSnapshot: {
+            /** Active Events */
+            active_events?: components["schemas"]["WorldEventWire"][];
+            /** Agents */
+            agents?: {
+                [key: string]: components["schemas"]["SimAgentState"];
+            };
+            /** Event Log */
+            event_log?: string[];
+            governance?: components["schemas"]["TownGovernanceState"];
+            /** Hour */
+            hour: number;
+            metrics?: components["schemas"]["TickMetrics"] | null;
+            modifiers?: components["schemas"]["WorldModifiersWire"];
+            /** Tick */
+            tick: number;
+        };
+        /** SimulationRunManifestResponse */
+        SimulationRunManifestResponse: {
+            manifest: components["schemas"]["RunManifest"];
+            /** Run Id */
+            run_id: string;
+        };
+        /** SimulationRunMetricsResponse */
+        SimulationRunMetricsResponse: {
+            /** Metrics */
+            metrics: components["schemas"]["TickMetrics"][];
+            /** Run Id */
+            run_id: string;
+        };
+        /** SimulationRunStatusResponse */
+        SimulationRunStatusResponse: {
+            /** Current Tick */
+            current_tick: number;
+            /** Run Id */
+            run_id: string;
+            /** Status */
+            status: string;
+        };
+        /** SimulationRunSummary */
+        SimulationRunSummary: {
+            /** Current Tick */
+            current_tick: number;
+            /** Id */
+            id: string;
+            /** Scenario */
+            scenario: string;
+            /** Seed */
+            seed: number;
+            /** Status */
+            status: string;
         };
         /** SnapshotListResponse */
         SnapshotListResponse: {
@@ -5949,6 +6695,40 @@ export interface components {
          */
         SuspensionKind: "plan_review" | "ask_user";
         /**
+         * TickMetrics
+         * @description Macro indicators for one simulation tick.
+         */
+        TickMetrics: {
+            /**
+             * Avg Mood
+             * @default 0
+             */
+            avg_mood: number;
+            /** Hour */
+            hour: number;
+            /** Population By Region */
+            population_by_region?: {
+                [key: string]: number;
+            };
+            /**
+             * Positive Relation Ratio
+             * @default 0
+             */
+            positive_relation_ratio: number;
+            /** Tick */
+            tick: number;
+            /**
+             * Trade Count
+             * @default 0
+             */
+            trade_count: number;
+            /**
+             * Trade Total Amount
+             * @default 0
+             */
+            trade_total_amount: number;
+        };
+        /**
          * TokenRefreshRequest
          * @description Rotate a bearer client's token pair (refresh token in the body, not a cookie).
          */
@@ -6026,6 +6806,30 @@ export interface components {
             data: components["schemas"]["ToolInfo"][];
             /** Total */
             total: number;
+        };
+        /** TownGovernanceState */
+        TownGovernanceState: {
+            /**
+             * Abstain Votes
+             * @default 0
+             */
+            abstain_votes: number;
+            /** Last Motion */
+            last_motion?: string | null;
+            /** Last Outcome */
+            last_outcome?: string | null;
+            /**
+             * No Votes
+             * @default 0
+             */
+            no_votes: number;
+            /** Policies */
+            policies?: string[];
+            /**
+             * Yes Votes
+             * @default 0
+             */
+            yes_votes: number;
         };
         /**
          * TurnCost
@@ -6150,6 +6954,10 @@ export interface components {
          *       C1 · slice 1b) — the client attaches (``GET .../stream``) to replay + tail it.
          *     - ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and
          *       lost their live stream (结构化挂起 2b) — each renders a resume card.
+         *     - ``pending_approvals``: GRANTABLE tool calls still blocked on the in-process
+         *       approval gate (the turn may also be ``live_running``) — each renders an approval
+         *       card. Unlike ``paused``, these are NOT durable pause frames; they exist only
+         *       while the backend run is alive.
          *
          *     A turn parked at a checkpoint is BOTH live (its run is parked on the interaction,
          *     holding the workspace lock until checkpoint_timeout) and paused (its frame is
@@ -6170,6 +6978,8 @@ export interface components {
             live_running: boolean;
             /** Paused */
             paused?: components["schemas"]["PausedTurnSummary"][];
+            /** Pending Approvals */
+            pending_approvals?: components["schemas"]["PendingApprovalSummary"][];
         };
         /**
          * UpdateBoardRequest
@@ -6368,6 +7178,31 @@ export interface components {
             type: string;
         };
         /**
+         * Vec3
+         * @description 3D position on the town ground plane (R3F / Three.js Y-up).
+         *
+         *     - ``x``: east (+) / west (-)
+         *     - ``y``: height above ground (NPCs typically 0)
+         *     - ``z``: south (+) / north (-)
+         */
+        Vec3: {
+            /**
+             * X
+             * @default 0
+             */
+            x: number;
+            /**
+             * Y
+             * @default 0
+             */
+            y: number;
+            /**
+             * Z
+             * @default 0
+             */
+            z: number;
+        };
+        /**
          * WorkspaceBindingResponse
          * @description A conversation's resolved workspace mode + where its binding lives.
          */
@@ -6534,6 +7369,64 @@ export interface components {
             /** Ok */
             ok: boolean;
         };
+        /**
+         * WorldEventWire
+         * @description One active world event in tick snapshots.
+         */
+        WorldEventWire: {
+            /** Description */
+            description: string;
+            /**
+             * Duration Ticks
+             * @default 1
+             */
+            duration_ticks: number;
+            /** Event Id */
+            event_id: string;
+            /** Event Type */
+            event_type: string;
+            /** Kind */
+            kind: string;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Source
+             * @default scheduler
+             */
+            source: string;
+            /** Tick Started */
+            tick_started: number;
+            /** Title */
+            title: string;
+        };
+        /**
+         * WorldModifiersWire
+         * @description World-level knobs affected by scheduled events.
+         */
+        WorldModifiersWire: {
+            /**
+             * Festival Active
+             * @default false
+             */
+            festival_active: boolean;
+            /**
+             * Market Price Multiplier
+             * @default 1
+             */
+            market_price_multiplier: number;
+            /**
+             * Square Attraction Boost
+             * @default 0
+             */
+            square_attraction_boost: number;
+            /**
+             * Storm Active
+             * @default false
+             */
+            storm_active: boolean;
+        };
     };
     responses: never;
     parameters: never;
@@ -6665,6 +7558,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminAuditLogListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    agent_audit_summary_v1_admin_audit_summary_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAgentAuditSummary"];
                 };
             };
             /** @description Validation Error */
@@ -7276,6 +8202,7 @@ export interface operations {
                 page?: number;
                 page_size?: number;
                 status?: ("active" | "used" | "expired" | "revoked") | null;
+                search?: string | null;
             };
             header?: {
                 authorization?: string | null;
@@ -7368,6 +8295,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InviteListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    invite_stats_v1_auth_invites_stats_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InviteStatsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8394,6 +9354,44 @@ export interface operations {
             };
         };
     };
+    list_file_audit_v1_conversations__conversation_id__audit_file_get: {
+        parameters: {
+            query: {
+                /** @description Workspace-relative file path */
+                path: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentAuditListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_conversation_cost_v1_conversations__conversation_id__cost_get: {
         parameters: {
             query?: never;
@@ -8868,6 +9866,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_turn_audit_v1_conversations__conversation_id__messages__message_id__audit_get: {
+        parameters: {
+            query?: {
+                /** @description Include runtime causal graph */
+                include_causal?: boolean;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+                message_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentAuditListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11463,6 +12500,406 @@ export interface operations {
             };
         };
     };
+    create_run_v1_simulation_runs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSimulationRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimulationRunSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_agent_v1_simulation_runs__run_id__agents__agent_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                run_id: string;
+                agent_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchSimulationAgentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PatchSimulationAgentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inject_event_v1_simulation_runs__run_id__inject_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InjectSimulationEventRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InjectSimulationEventResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_manifest_v1_simulation_runs__run_id__manifest_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimulationRunManifestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_metrics_v1_simulation_runs__run_id__metrics_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimulationRunMetricsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_run_v1_simulation_runs__run_id__pause_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimulationRunStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replay_run_v1_simulation_runs__run_id__replay_get: {
+        parameters: {
+            query: {
+                from: number;
+                to: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_run_v1_simulation_runs__run_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimulationRunStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_run_v1_simulation_runs__run_id__stream_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    advance_tick_v1_simulation_runs__run_id__tick_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdvanceTickResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_tick_frame_v1_simulation_runs__run_id__ticks__tick_number__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                run_id: string;
+                tick_number: number;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimTickFrameResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_tools_v1_tools_get: {
         parameters: {
             query?: never;
@@ -11685,6 +13122,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_billing_preference_v1_users_me_llm_key_billing_preference_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetBillingPreferenceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmKeyStatusResponse"];
                 };
             };
             /** @description Validation Error */

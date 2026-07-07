@@ -17,6 +17,7 @@ because the global-search tests import it directly.
 from ._base import _UNSET, _ilike_pattern
 from .admin_audit import AdminAuditRepository
 from .admin_mfa import AdminMfaRepository
+from .agent_audit import AgentAuditEventRepository
 from .auth import (
     CredentialsRepository,
     InviteRepository,
@@ -41,6 +42,7 @@ from .runs import (
     TurnJournalRepository,
     TurnMetricsRepository,
 )
+from .simulation import SimulationRepository
 from .users import (
     UserBlockRepository,
     UserDirectoryRepository,
@@ -51,6 +53,7 @@ __all__ = [
     "_UNSET",
     "_ilike_pattern",
     "AdminAuditRepository",
+    "AgentAuditEventRepository",
     "AdminMfaRepository",
     "BoardRepository",
     "ChatRepository",
@@ -69,6 +72,7 @@ __all__ = [
     "PushDeviceRepository",
     "RefreshTokenRepository",
     "RunSessionRepository",
+    "SimulationRepository",
     "TurnJournalRepository",
     "TurnMetricsRepository",
     "UserBlockRepository",

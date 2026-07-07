@@ -155,6 +155,9 @@ jobs:
           SHOOT_FRAMES: "3"
         run: pnpm --filter agentcore-desktop shoot
 
+      - name: Simulation town render smoke gate
+        run: pnpm --filter agentcore-desktop shoot:simulation
+
       - name: Upload preview shots on failure
         if: failure()
         uses: actions/upload-artifact@v4

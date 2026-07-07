@@ -2,7 +2,7 @@
 
 import agentcore.tools.builtin.delegate.tool as delegate_tool_mod
 from agentcore.core.types import ToolEffect
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.events import EventSink, EventType
 from tests.conftest import LogSpy
 from tests.delegate.conftest import Provider, ctx, tool
@@ -94,6 +94,72 @@ async def test_finalize_falls_back_to_synthesis_when_worker_fails():
         ctx(),
     )
     assert result.is_terminal is False
+
+
+def test_should_auto_light_delegate():
+    assert delegate_tool_mod._should_auto_light_delegate(
+        [{"role": "工程师", "task": "做A"}]
+    )
+    assert not delegate_tool_mod._should_auto_light_delegate(
+        [{"role": "A", "task": "a"}, {"role": "B", "task": "b"}]
+    )
+    assert not delegate_tool_mod._should_auto_light_delegate(
+        [{"role": "A", "task": "a", "depends_on": ["x"]}]
+    )
+    assert not delegate_tool_mod._should_auto_light_delegate(
+        [{"role": "A", "task": "a", "checkpoint_after": True}]
+    )
+    assert not delegate_tool_mod._should_auto_light_delegate(
+        [{"role": "A", "task": "a", "bind_after_deps": True}]
+    )
+
+
+async def test_single_worker_auto_infers_light_complexity_hint(monkeypatch):
+    spy = LogSpy()
+    monkeypatch.setattr(delegate_tool_mod, "logger", spy)
+    t = tool(Provider(["OUT"]))
+    await t.execute({"tasks": [{"role": "工程师", "task": "做A"}]}, ctx())
+    assert spy.get("delegate.started")["complexity_hint"] == "light"
+
+
+async def test_multi_worker_keeps_standard_complexity_hint(monkeypatch):
+    spy = LogSpy()
+    monkeypatch.setattr(delegate_tool_mod, "logger", spy)
+    t = tool(Provider(["AOUT", "BOUT"]))
+    await t.execute(
+        {"tasks": [{"role": "研究员", "task": "做A"}, {"role": "写手", "task": "做B"}]},
+        ctx(),
+    )
+    assert spy.get("delegate.started")["complexity_hint"] == "standard"
+
+
+async def test_explicit_standard_complexity_hint_not_overridden(monkeypatch):
+    spy = LogSpy()
+    monkeypatch.setattr(delegate_tool_mod, "logger", spy)
+    t = tool(Provider(["OUT"]))
+    await t.execute(
+        {
+            "tasks": [{"role": "工程师", "task": "做A"}],
+            "complexity_hint": "standard",
+        },
+        ctx(),
+    )
+    assert spy.get("delegate.started")["complexity_hint"] == "standard"
+
+
+async def test_single_worker_with_checkpoint_keeps_standard_complexity_hint(monkeypatch):
+    spy = LogSpy()
+    monkeypatch.setattr(delegate_tool_mod, "logger", spy)
+    t = tool(Provider(["OUT"]))
+    await t.execute(
+        {
+            "tasks": [
+                {"role": "工程师", "task": "做A", "checkpoint_after": True},
+            ],
+        },
+        ctx(),
+    )
+    assert spy.get("delegate.started")["complexity_hint"] == "standard"
 
 
 async def test_delegate_started_logs_who_what_and_first_wave_parallel(monkeypatch):

@@ -18,7 +18,10 @@ Covered:
 * **no cost ledger is ever written** (content-only 契约，防回归到重复计费)；
 * the user row is pinned to the client-minted id (idempotency anchor) while the assistant
   row keeps the pipeline id;
-* a retried write-back whose rows already landed is an idempotent no-op.
+* a retried write-back whose rows already landed is an idempotent no-op;
+* ``finish_reason=paused`` upserts an assistant snapshot without title / consolidation;
+* resume completion updates a paused snapshot in place;
+* a re-pause write-back with a fresh client user id reuses the paired user row.
 """
 
 from types import SimpleNamespace
@@ -27,6 +30,7 @@ import pytest
 
 from agentcore.conversation import local_turn as local_turn_mod
 from agentcore.conversation.service import record_local_turn
+from agentcore.runtime.events import FinishReason
 
 pytestmark = pytest.mark.anyio
 
@@ -53,6 +57,8 @@ def _patch_persistence(
     *,
     existing_title: str | None = None,
     existing_ids: set[str] | None = None,
+    existing_usage: dict[str, dict] | None = None,
+    paired_user_by_assistant: dict[str, str] | None = None,
 ):
     """Fake record_local_turn's DB collaborators, recording calls into ``events``.
 
@@ -62,6 +68,8 @@ def _patch_persistence(
     write surfaces as a ``("cost", …)`` event the content-only tests assert absent.
     """
     seeded = existing_ids or set()
+    usage_by_id = existing_usage or {}
+    paired_user_by_assistant: dict[str, str] = paired_user_by_assistant or {}
 
     class _FakeMsgRepo:
         def __init__(self, _session):
@@ -70,26 +78,43 @@ def _patch_persistence(
         async def create(self, **kw):
             role = kw.get("role")
             events.append(("msg", role, kw.get("conversation_id")))
-            # Separate entry so tests can assert the row was pinned to the client id
-            # (the idempotency anchor) without disturbing the ("msg", …) membership checks.
             events.append(("msg_id", role, kw.get("message_id")))
-            # The assistant row's trace_id (trace 链路): the write-back reuses the
-            # client-supplied id so the reply joins its reasoning logs (打通气泡↔日志).
             events.append(("trace", role, kw.get("trace_id")))
             return SimpleNamespace(id=f"{role}-id")
 
+        async def upsert_assistant(self, **kw):
+            events.append(("upsert", "assistant", kw.get("conversation_id")))
+            events.append(("msg_id", "assistant", kw.get("message_id")))
+            events.append(("trace", "assistant", kw.get("trace_id")))
+            events.append(("usage", "assistant", kw.get("metadata")))
+            return SimpleNamespace(id="assistant-id")
+
         async def get_by_id(self, message_id, *, conversation_id):
             if message_id in seeded:
-                return SimpleNamespace(id=message_id, conversation_id=conversation_id)
+                return SimpleNamespace(
+                    id=message_id,
+                    conversation_id=conversation_id,
+                    role="assistant" if message_id.startswith("m") else "user",
+                    usage=usage_by_id.get(message_id),
+                )
             return None
+
+        async def user_message_for_assistant(self, *, conversation_id, assistant_message_id):
+            paired_id = paired_user_by_assistant.get(assistant_message_id)
+            if not paired_id:
+                return None
+            return SimpleNamespace(
+                id=paired_id,
+                conversation_id=conversation_id,
+                role="user",
+                usage=None,
+            )
 
     class _FakeCostRepo:
         def __init__(self, _session):
             pass
 
         async def record_runs(self, **kw):
-            # A sidecar turn must NOT bill here (metered at the inference proxy). The spy
-            # records any call so the content-only契约 tests can assert it never fires.
             events.append(("cost", kw.get("message_id"), len(kw.get("runs") or [])))
             return len(kw.get("runs") or [])
 
@@ -106,13 +131,17 @@ def _patch_persistence(
     async def _fake_journal(_session, **kw):
         events.append(("journal", kw.get("message_id")))
 
+    consolidation_calls: list[str] = []
+
     monkeypatch.setattr(local_turn_mod, "async_session_factory", lambda: _FakeSessionCM())
     monkeypatch.setattr(local_turn_mod, "MessageRepository", _FakeMsgRepo)
     monkeypatch.setattr(local_turn_mod, "ConversationRepository", _FakeConvRepo)
     monkeypatch.setattr(local_turn_mod, "persist_turn_journal", _fake_journal)
-    monkeypatch.setattr(local_turn_mod, "schedule_consolidation", lambda _cid: None)
-    # Title generation: skip the LLM. A fake provider satisfies the build/close
-    # dance; _generate_title is stubbed to a fixed string.
+    monkeypatch.setattr(
+        local_turn_mod,
+        "schedule_consolidation",
+        lambda cid: consolidation_calls.append(cid),
+    )
     monkeypatch.setattr(
         local_turn_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=_noop_close)
     )
@@ -121,6 +150,7 @@ def _patch_persistence(
         return "本地回合标题"
 
     monkeypatch.setattr(local_turn_mod, "generate_title", _fake_title)
+    return consolidation_calls
 
 
 async def _noop_close():
@@ -147,16 +177,11 @@ async def test_record_local_turn_persists_messages_and_journal(monkeypatch):
         trace_id=_TRACE,
     )
 
-    # User + assistant rows persisted under the conversation.
     assert ("msg", "user", "c1") in events
-    assert ("msg", "assistant", "c1") in events
-    # The replay journal is recorded keyed by the assistant row id (§18.3 唯一事实源).
+    assert ("upsert", "assistant", "c1") in events
     assert ("journal", "assistant-id") in events
-    # Content-only: no cost ledger is written (metered at the inference proxy).
     assert not any(e[0] == "cost" for e in events)
-    # A title-less conversation gets one minted from this turn.
     assert ("title", "c1", "本地回合标题") in events
-    # The desktop reconciles its optimistic bubbles against these.
     assert result["user_message_id"] == "user-id"
     assert result["assistant_message_id"] == "assistant-id"
     assert result["title"] == "本地回合标题"
@@ -170,17 +195,15 @@ async def test_record_local_turn_empty_reply_skips_assistant_and_journal(monkeyp
         conversation_id="c1",
         user_id="u1",
         user_message="hi",
-        assistant_content="",  # tool-only / errored local turn
+        assistant_content="",
         user_message_id=_USER_MSG_ID,
         message_id="m2",
         trace_id=_TRACE,
     )
 
-    # The user turn still lands; the empty assistant reply does not, so no journal either.
     assert ("msg", "user", "c1") in events
-    assert not any(e[0] == "msg" and e[1] == "assistant" for e in events)
+    assert not any(e[0] == "upsert" for e in events)
     assert not any(e[0] == "journal" for e in events)
-    # An existing title is left untouched (idempotent-guarded).
     assert not any(e[0] == "title" for e in events)
     assert result["assistant_message_id"] is None
     assert result["title"] is None
@@ -190,9 +213,6 @@ async def test_record_local_turn_records_no_cost_ledger(monkeypatch):
     events: list = []
     _patch_persistence(monkeypatch, events, existing_title="已有标题")
 
-    # The content-only契约: a sidecar turn's spend is metered at the cloud inference proxy
-    # (Slice 4a), so the write-back must NEVER write a cost ledger row here — doing so
-    # would double-bill. Content (assistant row + journal) still persists.
     result = await record_local_turn(
         conversation_id="c1",
         user_id="u1",
@@ -206,15 +226,13 @@ async def test_record_local_turn_records_no_cost_ledger(monkeypatch):
         trace_id=_TRACE,
     )
 
-    assert ("msg", "assistant", "c1") in events
+    assert ("upsert", "assistant", "c1") in events
     assert ("journal", "assistant-id") in events
-    assert not any(e[0] == "cost" for e in events)  # never billed on the write-back
+    assert not any(e[0] == "cost" for e in events)
     assert result["assistant_message_id"] == "assistant-id"
 
 
 async def test_record_local_turn_pins_user_row_to_client_id(monkeypatch):
-    """The user row is created WITH the client-minted ``user_message_id`` (the idempotency
-    anchor) so a retry can detect the turn already landed (回写可靠性 §一.1)."""
     events: list = []
     _patch_persistence(monkeypatch, events, existing_title="已有标题")
 
@@ -228,15 +246,11 @@ async def test_record_local_turn_pins_user_row_to_client_id(monkeypatch):
         trace_id=_TRACE,
     )
 
-    # The user row was pinned to the client id; the assistant row keeps the pipeline id.
     assert ("msg_id", "user", "u-bubble-1") in events
     assert ("msg_id", "assistant", "m9") in events
 
 
 async def test_record_local_turn_reuses_client_trace_id(monkeypatch):
-    """trace 链路 (打通气泡↔日志): the desktop mints one ``trace_id`` per local turn and
-    stamps it on every cloud inference-proxy LLM call; the write-back must REUSE it (not
-    mint a fresh one) so the persisted reply joins those reasoning logs as one trace."""
     events: list = []
     _patch_persistence(monkeypatch, events, existing_title="已有标题")
 
@@ -250,20 +264,16 @@ async def test_record_local_turn_reuses_client_trace_id(monkeypatch):
         trace_id="0123456789abcdef0123456789abcdef",
     )
 
-    # The assistant row carries the client's trace_id verbatim (not a server-minted one).
     assert ("trace", "assistant", "0123456789abcdef0123456789abcdef") in events
 
 
 async def test_record_local_turn_retry_is_idempotent_noop(monkeypatch):
-    """A retried write-back whose user row already landed creates NOTHING — it returns the
-    persisted ids (+ current title) so the desktop reconciles against the same rows instead
-    of duplicating the turn (回写可靠性 §一.1)."""
     events: list = []
     _patch_persistence(
         monkeypatch,
         events,
         existing_title="已有标题",
-        existing_ids={"u-bubble-1", "m9"},  # user + assistant already persisted
+        existing_ids={"u-bubble-1", "m9"},
     )
 
     result = await record_local_turn(
@@ -276,12 +286,94 @@ async def test_record_local_turn_retry_is_idempotent_noop(monkeypatch):
         trace_id=_TRACE,
     )
 
-    # Nothing re-created: no message inserts, no 落账, no journal, no title mint.
     assert not any(e[0] == "msg" for e in events)
+    assert not any(e[0] == "upsert" for e in events)
     assert not any(e[0] == "cost" for e in events)
     assert not any(e[0] == "journal" for e in events)
     assert not any(e[0] == "title" for e in events)
-    # The persisted ids come back so the optimistic bubbles reconcile (not a new turn).
     assert result["user_message_id"] == "u-bubble-1"
     assert result["assistant_message_id"] == "m9"
     assert result["title"] == "已有标题"
+
+
+async def test_record_local_turn_paused_skips_title_and_consolidation(monkeypatch):
+    events: list = []
+    consolidation = _patch_persistence(monkeypatch, events, existing_title=None)
+
+    result = await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="partial",
+        user_message_id=_USER_MSG_ID,
+        message_id="m-pause",
+        trace_id=_TRACE,
+        finish_reason=FinishReason.PAUSED.value,
+    )
+
+    assert ("msg", "user", "c1") in events
+    assert ("upsert", "assistant", "c1") in events
+    assert ("usage", "assistant", {"paused": True, "input_tokens": 0, "output_tokens": 0,
+                                   "reasoning_tokens": 0, "cache_hit_tokens": 0,
+                                   "cache_miss_tokens": 0, "rounds": 0}) in events
+    assert not any(e[0] == "journal" for e in events)
+    assert not any(e[0] == "title" for e in events)
+    assert consolidation == []
+    assert result["title"] is None
+
+
+async def test_record_local_turn_resume_after_pause_updates_assistant(monkeypatch):
+    events: list = []
+    consolidation = _patch_persistence(
+        monkeypatch,
+        events,
+        existing_title=None,
+        existing_ids={_USER_MSG_ID, "m-pause"},
+        existing_usage={"m-pause": {"paused": True}},
+    )
+
+    result = await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="done",
+        runs={"events": [], "finish_reason": "end_turn"},
+        user_message_id=_USER_MSG_ID,
+        message_id="m-pause",
+        trace_id=_TRACE,
+        finish_reason=FinishReason.END_TURN.value,
+    )
+
+    assert not any(e[0] == "msg" for e in events)
+    assert ("upsert", "assistant", "c1") in events
+    assert ("journal", "assistant-id") in events
+    assert ("title", "c1", "本地回合标题") in events
+    assert consolidation == ["c1"]
+    assert result["assistant_message_id"] == "assistant-id"
+
+
+async def test_record_local_turn_repause_reuses_paired_user_row(monkeypatch):
+    events: list = []
+    _patch_persistence(
+        monkeypatch,
+        events,
+        existing_title=None,
+        existing_ids={"m-pause"},
+        existing_usage={"m-pause": {"paused": True}},
+        paired_user_by_assistant={"m-pause": _USER_MSG_ID},
+    )
+
+    result = await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="partial again",
+        user_message_id="fresh-client-user-id",
+        message_id="m-pause",
+        trace_id=_TRACE,
+        finish_reason=FinishReason.PAUSED.value,
+    )
+
+    assert not any(e[0] == "msg" for e in events)
+    assert ("upsert", "assistant", "c1") in events
+    assert result["user_message_id"] == _USER_MSG_ID

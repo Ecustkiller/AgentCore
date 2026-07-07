@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from agentcore.llm.config import apply_overrides
 from agentcore.runtime.events import run_context, run_plan
 
 if TYPE_CHECKING:
@@ -42,18 +41,13 @@ def captain_card(tool: DelegateTool) -> dict[str, Any]:
 
 
 def card(tool: DelegateTool, node) -> dict[str, Any]:
-    """Roster entry with the node's *effective* (post-clamp) thinking/effort."""
-    profile = apply_overrides(
-        tool._profile_set.agent(node.model_preference),
-        thinking=node.thinking,
-        reasoning_effort=node.reasoning_effort,
-    )
+    """Roster entry with the node's declared thinking/effort."""
     return {
         "id": node.agent_id,
         "role": node.role,
         "model_preference": node.model_preference,
-        "thinking": profile.thinking,
-        "reasoning_effort": profile.reasoning_effort,
+        "thinking": node.thinking,
+        "reasoning_effort": node.reasoning_effort,
     }
 
 

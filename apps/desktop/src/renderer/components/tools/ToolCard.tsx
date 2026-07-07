@@ -57,15 +57,28 @@ function ToolParams({ parameters }: { parameters: Record<string, unknown> }) {
 }
 
 /** One tool tile: name · reach · approval, description, click-to-expand parameters. */
-export function ToolCard({ tool }: { tool: CapabilityTool }) {
+export function ToolCard({
+  tool,
+  disabled,
+  disabledHint,
+}: {
+  tool: CapabilityTool;
+  disabled?: boolean;
+  disabledHint?: string;
+}) {
   const [open, setOpen] = useState(false);
   const Icon = CATEGORY_META[tool.category]?.icon ?? Wrench;
   const colorVar = catalogCategoryColorVar(tool.category);
   return (
-    <div className="flex flex-col rounded-xl border border-border bg-card p-4">
+    <div
+      className={`flex flex-col rounded-xl border border-border bg-card p-4 ${
+        disabled ? "opacity-50" : ""
+      }`}
+    >
       <Button
         variant="ghost"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => !disabled && setOpen((v) => !v)}
+        disabled={disabled}
         className="h-auto w-full justify-between gap-2 p-0 text-left font-normal"
       >
         <div className="flex min-w-0 items-center gap-2">
@@ -88,9 +101,13 @@ export function ToolCard({ tool }: { tool: CapabilityTool }) {
         </div>
       </Button>
       <p className="mt-2 text-muted-foreground text-xs">{tool.description}</p>
+      {disabled && disabledHint && (
+        <p className="mt-2 text-xs text-muted-foreground">{disabledHint}</p>
+      )}
       <Button
         variant="ghost"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => !disabled && setOpen((v) => !v)}
+        disabled={disabled}
         className="mt-2 h-auto self-start gap-1 px-0 py-0 text-muted-foreground hover:text-foreground"
         icon={
           <ChevronRight

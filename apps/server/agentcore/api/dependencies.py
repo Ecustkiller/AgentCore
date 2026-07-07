@@ -21,6 +21,7 @@ from agentcore.db.models import User
 from agentcore.db.repositories import (
     AdminAuditRepository,
     AdminMfaRepository,
+    AgentAuditEventRepository,
     BoardRepository,
     ChatRepository,
     ConversationRepository,
@@ -36,6 +37,7 @@ from agentcore.db.repositories import (
     ModelModeRepository,
     PushDeviceRepository,
     RefreshTokenRepository,
+    SimulationRepository,
     TurnJournalRepository,
     TurnMetricsRepository,
     UserBlockRepository,
@@ -154,12 +156,22 @@ def get_board_repo(session: AsyncSession = Depends(get_db)) -> BoardRepository:
     return BoardRepository(session)
 
 
+def get_simulation_repo(session: AsyncSession = Depends(get_db)) -> SimulationRepository:
+    return SimulationRepository(session)
+
+
 def get_model_mode_repo(session: AsyncSession = Depends(get_db)) -> ModelModeRepository:
     return ModelModeRepository(session)
 
 
 def get_message_repo(session: AsyncSession = Depends(get_db)) -> MessageRepository:
     return MessageRepository(session)
+
+
+def get_agent_audit_repo(
+    session: AsyncSession = Depends(get_db),
+) -> AgentAuditEventRepository:
+    return AgentAuditEventRepository(session)
 
 
 def get_memory_update_repo(session: AsyncSession = Depends(get_db)) -> MemoryUpdateRepository:

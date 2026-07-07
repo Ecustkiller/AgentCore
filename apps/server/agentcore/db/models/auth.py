@@ -43,10 +43,9 @@ class Credentials(Base):
 
 
 # --- User LLM keys (BYOK) ---
-# 用户自带 DeepSeek API Key（内测期唯一计费路径，见 config.billing_mode）。一人
-# 一行：endpoint / model 由服务端固定（DeepSeek-only），故此处只存「加密后的 key
-# + 连通状态」，不存 endpoint / model。明文永不落库——api_key_enc 是 AES-256-GCM
-# 密文（security.KeyEncryptor 加密，解析见 llm/byok.py）。
+# 用户自带 OpenAI 兼容端点配置（内测期唯一计费路径，见 config.billing_mode）。
+# 一人一行：api_key_enc（AES-256-GCM 密文）+ base_url + default_model + 连通状态。
+# 明文 key 永不落库（security.KeyEncryptor 加密，解析见 llm/byok.py）。
 
 
 class UserLlmKey(Base):
@@ -61,6 +60,16 @@ class UserLlmKey(Base):
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True)
     # AES-256-GCM ciphertext (nonce ‖ ct+tag); never the plaintext key.
     api_key_enc: Mapped[bytes] = mapped_column(LargeBinary)
+    # User-configured OpenAI-compatible endpoint (includes version prefix).
+    base_url: Mapped[str] = mapped_column(
+        String(500), server_default=text("'https://api.deepseek.com'")
+    )
+    # Default model name for all turns (e.g. gpt-4o, deepseek-v4-flash).
+    default_model: Mapped[str] = mapped_column(
+        String(200), server_default=text("'deepseek-v4-flash'")
+    )
+    # Probe hint: whether the endpoint returned tool_calls on a dummy-tool completion.
+    supports_tools: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Last connectivity-test outcome surfaced in 设置·模型配置 ('测试连接'):
     # 'unchecked' until tested, then 'active'/'error'. Reset to 'unchecked' on
     # every key change (a new key hasn't been verified yet).

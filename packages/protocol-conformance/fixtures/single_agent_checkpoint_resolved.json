@@ -33,7 +33,8 @@
         "context": "两条路线各有取舍。",
         "assumptions": [],
         "questions": [],
-        "style_options": []
+        "style_options": [],
+        "intent": "kickoff"
       },
       "timestamp": "2026-01-01T00:00:00.003Z"
     },
@@ -87,17 +88,13 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
-    "content": "开始前我确认一下方向：好，按 A 推进。 已完成初稿。",
+    "content": "好，按 A 推进。 已完成初稿。",
     "reasoning": "这个需求有歧义，先问清楚。",
     "captainContext": [],
     "process": [
       {
         "kind": "reasoning",
         "text": "这个需求有歧义，先问清楚。"
-      },
-      {
-        "kind": "content",
-        "text": "开始前我确认一下方向："
       },
       {
         "kind": "checkpoint",

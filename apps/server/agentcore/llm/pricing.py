@@ -18,9 +18,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
+from agentcore.config import settings
 from agentcore.core.logging import get_logger
-from agentcore.llm.config import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO
+from agentcore.llm.provider.protocol import TokenUsage
 
 logger = get_logger(__name__)
 
@@ -116,10 +117,26 @@ def _nano(tokens: int, price_per_million: Decimal) -> int:
 
 def pricing_for(model: str) -> dict[str, Decimal]:
     """The price card for a model, falling back to the default (Flash) tier."""
+    return pricing_for_model(model, billing_mode="platform")
+
+
+def pricing_for_model(
+    model: str, *, billing_mode: str | None = None
+) -> dict[str, Decimal] | None:
+    """Price card for ``model``, or ``None`` when billing skips cost (BYOK).
+
+    BYOK: the user pays their own provider — the platform ledger records token usage
+    with zero nano-USD. Platform mode keeps the existing vendor table.
+    """
+    if (billing_mode or settings.billing_mode) == "byok":
+        return None
     return _PRICING.get(model) or _PRICING[_DEFAULT_MODEL]
 
 
-def calculate_cost(model: str, usage: TokenUsage) -> Cost:
+_ZERO_COST = Cost(input=0, cached=0, output=0, total=0)
+
+
+def calculate_cost(model: str, usage: TokenUsage, *, billing_mode: str | None = None) -> Cost:
     """Convert a run's token usage into money — the only place this happens.
 
     Input is split by cache hit/miss (DeepSeek pre-splits the counts); output is
@@ -140,7 +157,12 @@ def calculate_cost(model: str, usage: TokenUsage) -> Cost:
       Pro run ~3×, so the degrade is logged (``cost.pricing_fallback``) instead of
       happening silently.
     """
-    p = pricing_for(model)
+    mode = billing_mode or settings.billing_mode
+    if mode == "byok":
+        return _ZERO_COST
+
+    p = pricing_for_model(model, billing_mode=mode)
+    assert p is not None  # platform branch always resolves a card
     if model not in _PRICING and (usage.input_tokens or usage.output_tokens):
         logger.warning(
             "cost.pricing_fallback",
@@ -162,13 +184,17 @@ def calculate_cost(model: str, usage: TokenUsage) -> Cost:
     )
 
 
-def cache_savings(model: str, usage: TokenUsage) -> int:
+def cache_savings(
+    model: str, usage: TokenUsage, *, billing_mode: str | None = None
+) -> int:
     """Nano-USD saved by prefix-cache hits this run vs. paying the miss price.
 
     ``cache_hit_tokens × (miss_price − hit_price)`` — powers the「前缀缓存替你省了
     ¥X」彩蛋 (§七E). Zero when nothing hit the cache.
     """
-    p = pricing_for(model)
+    p = pricing_for_model(model, billing_mode=billing_mode)
+    if p is None:
+        return 0
     full = _nano(usage.cache_hit_tokens, p["cache_miss"])
     paid = _nano(usage.cache_hit_tokens, p["cache_hit"])
     return max(full - paid, 0)

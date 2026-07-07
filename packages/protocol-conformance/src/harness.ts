@@ -26,7 +26,22 @@ export interface Fixture {
 
 const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
 
-/** Load every committed golden fixture (sorted by name for stable output). */
+/** True when a JSON file is a turn-fold conformance vector (events[] + ProjectedTurn golden).
+ * Skips auxiliary blobs (e.g. simulation-region-positions) and simulation fold vectors
+ * (simulation-m1-tick — tested by desktop simConformance.test.ts, not turn fold). */
+function isTurnFixture(raw: unknown): raw is Fixture {
+  if (typeof raw !== "object" || raw === null) return false;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.name !== "string" || !Array.isArray(o.events)) return false;
+  const projected = o.projected;
+  return (
+    typeof projected === "object" &&
+    projected !== null &&
+    "status" in (projected as Record<string, unknown>)
+  );
+}
+
+/** Load every committed turn-fold golden fixture (sorted by name for stable output). */
 export function loadFixtures(): Fixture[] {
   let files: string[];
   try {
@@ -38,7 +53,8 @@ export function loadFixtures(): Fixture[] {
   }
   return files
     .sort()
-    .map((f) => JSON.parse(readFileSync(join(FIXTURES_DIR, f), "utf8")) as Fixture);
+    .map((f) => JSON.parse(readFileSync(join(FIXTURES_DIR, f), "utf8")))
+    .filter(isTurnFixture);
 }
 
 /** Structured comparison: the list of leaf field paths where `actual` diverges from

@@ -143,83 +143,72 @@ skip_if:
 
 > ✅ **已落地**：辩论从「`stance`/`round` 展示标记 + CEO 手搓 DAG」升级为「**主持人（Moderator）驱动的逐轮交锋 → 决策简报 + 交锋叙事线双产物**」。完整编排（主持人循环 / 三形态 / 收敛 / 逐轮交互 / 补轮 / 站队会话内态）见 [`辩论编排设计.md`](/docs/03-AI核心/辩论编排设计.md) §六–§七；本节聚焦**前端呈现**。
 >
-> ✅ **前端重构已落地（2026-06 拍板 → 落地）**：交锋叙事前端从「直播=对话式 `LiveChat` + 复盘=擂台 `Arena`/时间线 `Narrative` + 终局=裁决 hero，按 `model.settled` 分相位切换」**收敛为一间「统一辩论室（IM 群聊）」**——live 与收场是同一条流的「未完成 / 已完成」，无 phase 切换、无独立复盘视图。主视图 `DebateStream`，擂台（`DebateArena`）降为放大态唯一可选透镜（论证地图 `ArgMap` 因「视图过多」一并退场）；旧 `LiveChat`/`Narrative`/`ConvergenceBand`/`UserTake`/`DebateCompare`/`ArgMap` 已退场。行为契约见 §4.1，组件去向见 §4.1b。
+> ✅ **前端重构已落地（2026-07-06）**：交锋叙事前端从「IM 群聊单流 `DebateStream`」**重建为「辩论室：赛事页」**——记分牌 + 阶段化剧本主列 + 终审舞台三层结构；live 与收场仍是同一条 `toDebateModel` 归一流、无 phase 切换。主视图 `DebateArena`（`DebateStream` 为兼容别名），右坞「辩论裁判台」已解散。行为契约见 §4.1，组件去向见 §4.1b。
 
-### 4.1 统一辩论室：IM 群聊（✅ 已落地）
+### 4.1 辩论室：赛事页（✅ 已落地）
 
-把整场辩论收敛成**单条群聊时间线**——直播与收场是同一条流的「未完成 / 已完成」（`DebateStream` 单组件 + `toDebateModel` 归一，沿用现成、不重挂）：把原本只服务直播的 IM 群聊范式**扩成全生命周期 + 全形态的唯一主视图**，其余降为可选透镜。
+把整场辩论呈现为**体育赛事直播页 + 法庭记录**——三层纵向结构，入口仍为画布放大态「辩论室」（状态条**「打开辩论室」CTA** → `CanvasZoomedTurn`）。
 
-**四条已确认决策（用户拍板）**：
+| 层 | 组件 | 职责 |
+|---|---|---|
+| **记分牌** | `arena/Scoreboard` | 页首记分牌（**随内容滚动**，不占 sticky 屏）：辩题 / 形态 / 轮次进度 / 章节锚点；正反 VS 阵营 + **模型徽章（全页仅此一处常驻）** + 累计比分 + momentum 微图；红队风险盘口 / 圆桌阵营平铺；**布局开关 `LayoutToggle`**（并排 / 单栏，仅正反）+ **站队控件** `StanceControl` |
+| **剧本主列** | `arena/Transcript` | 逐轮 `SectionHeader` → `SpeakerBlock`（立论/续辩/答问/结辩，身份色轨 + 阶段词，**无模型徽章**）→ `JudgeNote`（主持人小结 + 逐轮净分 chip）→ `CrossExamSection`（质询 Q→A）→ 直播末 `SteeringPanel`（掌舵三选一 + 追问） |
+| **终审舞台** | `arena/FinaleStage` | 强分隔进入舞台区：「主持人终审」头（**模型徽章** + 收场原因 + 裁决过程钻取）→ 倾向 `text-xl` + 置信 + 胜负手/争点 → `brief/` 简报体（含「双方一眼看」`SidePointsGrid`、圆桌光谱、风险清单等）→ 终盘比分条 → 站队软对照 → `DebateContinue` |
+
+**已确认决策（沿用）**：
 
 | 维度 | 决策 | 要点 |
 |---|---|---|
-| **布局** | 观察者群聊（单列）：辩手全靠左（身份色头像分阵营）、用户靠右（第三方追问）、主持人靠左（法槌中性色头像+发言，与辩手同列的第一类参与者） | 一套覆盖 正反/红队/圆桌；对抗感靠**阵营色 + 引用回复 + 置顶阵营条（= 这场「谁是哪个模型」地图：每方名 + 驱动模型徽章一次性呈现）**，不靠左右分栏（行业实践：群聊「他人一侧·你一侧」，versus 双栏仅 1:1 / 头对头比较成立，后者归「对比擂台」透镜） |
+| **布局** | 赛事页 `max-w-7xl`；正反两方默认**左右并排**（正方左 / 反方右）、记分牌「布局」开关可切 `max-w-3xl` 单栏；红队 / 圆桌恒单栏 | 对抗感靠**阵营色 + 身份色轨 + 记分牌 VS 对垒 + 引用回复**（`ReplyQuote`）；正反另提供**可选左右并排**（仅逐轮发言分栏，轮头 / 质询 / 裁判札记通栏），偏好持久化、长文可随时切单栏 |
+| **单流** | 直播与收场同一条流，轮次=章节锚 | 收场 = 主列跑完追加 `FinaleStage`，不是另一个视图 |
+| **结论** | 流末「主持人终审」= 唯一结论面 | 记分牌提供「终审 ↓」锚滚动至 `FinaleStage` |
+| **落点** | 画布放大态唯一内容主视图 | 辩论回合无平级 tab；协作图仍为头部浮层（`graphOverlay`，§6.5） |
+| **记分牌滚动** | 不 sticky | 长文阅读优先：记分牌随剧本滚走；章节 chips / 比分回顶可见，放大态顶栏仍保留任务摘要 |
 
-> **阵营色 = 辩论对立 token（决策·2026-07，2026-07-04 分层校正）**：正反 2 方**按语义 key 定死红蓝对垒**（`pro=蓝 --debate-side-pro` / `con=红 --debate-side-con`），专用 token 独立于 `--agent-N` 身份色板；**不再按名字 hash**（`agentColorVar`）。理由：① 名字 hash 会撞同色；② 二元对抗需比身份色更醒目的红蓝可读性，但不用 `primary`/`destructive` 状态色。多方（圆桌 / 红队 / subject）无对立轴 → 仍按名字 hash 各自分色。→ `debate/model.ts` `debateSideColorVar`（`DebateStream` / `Brief` / `DebateHud` 同源消费）。
-| **单流** | 直播与收场同一条流，轮次=分割线；删 phase 切换与独立复盘 | 收场 = 同一条流跑完，不是另一个视图 |
-| **结论** | 流末「主持人终审」= 唯一结论面（自然时序：议题→交锋→终审）；顶部仅留「结论 ↓」锚 | 结论是过程的终点、不前置剧透（守「辩论过程一等产物」）；「结论先行」由顶部锚 + 主聊天 CEO 综述气泡承担，零内容重复 |
-| **落点** | 画布放大态「辩论室」（群聊=新主视图），入口=状态条**醒目「打开辩论室」CTA** | 复用 `CanvasZoomedTurn` 视图切换器；辩论回合聊天占位精简（内嵌协作图默认收起、只留状态条 + CTA），正文保持干净 |
+> **阵营色 = 辩论对立 token（决策·2026-07）**：正反 2 方按语义 key 定死红蓝对垒（`pro=蓝` / `con=红`），专用 token 独立于 `--agent-N` 身份色板；多方（圆桌 / 红队 / subject）仍按名字 hash 分色。→ `debate/model.ts` `debateSideColorVar`（`Scoreboard` / `SpeakerBlock` / `brief/` 同源消费）。
 
-**行为契约（IM 流）**：
+**行为契约（赛事页）**：
 
-| 概念 | IM 呈现 |
+| 概念 | 呈现 |
 |---|---|
-| 辩手发言 | 成员气泡（身份色头像 · 名 pill，**模型徽章不在此逐轮重复**——收在右坞「辩论裁判台」的阵营名册，§4.1「六版 delta」）；直播流式「正在输入…」（`aria-live` 播报）+ 光标 → 收场定格 markdown 全文；**长发言折叠为「展开全文/收起」**（不内嵌滚动、短/中发言原样全展、流式↔收场无高度跳变） |
-| 轮次 | 居中分割线「第 N 轮 · 焦点」 |
-| 主持人小结 / 裁判 | 主持人发言气泡（靠左·法槌中性色头像 +「主持人」+ 本轮小结 + 一句「人话」轮状态 pill；与辩手同列的第一类参与者，中性色不抢辩手身份色）。**头像悬浮说明**「中立强模型·全程不参与对战·只做裁判」（已知则并入厂商名）；**驱动模型徽章不逐轮重复**（归头像悬浮 + 流末终审一次）；直播态本轮发言已毕、裁判未到时补「主持人正在小结…」占位 |
-| L3 交锋（`clashes`） | **引用回复**：反驳方气泡顶部「↩ 回 X：要点」+ 可选 move-type 标（反驳 / 让步 / 新论点）——比单列「交锋点」更信息化（看得到驳的是哪句） |
-| 用户追问 | 右侧消息 + 定向 chip；收场复盘标「✓ 已被某方承接」 |
-| 站队 | 气泡上投票 chip（**每方仅在其最新一轮气泡出一次**·去逐轮重复；各轮联动同一倾向态） |
-| 掌舵（继续 / 换角度 / 够了） | **右坞「辩论裁判台」内**的轮边界「行动条」`SteeringBar` + 追问 composer（直播态；§4.1「六版 delta」并入右侧面板，不再在群聊流末） |
-| 决策简报 / 裁决 | 流末「主持人终审」= 唯一结论面，呈现为**主持人收尾长发言气泡**（法槌头像同一主持人身份；气泡从逐轮灰底小结**升格**为 `bg-card` + **primary 顶缘 2px 色线** + **primary 染头区**，在一排灰底小结里一眼读出「这是收场裁决」）；染头区领出**裁决头条**（倾向 + 置信 chip + 争点，`VerdictHeadline`；圆桌无单一裁决 → 改由观点光谱「综合观察」承载）；其下 `BriefCard` 承次级区块（**气泡为唯一卡面·内部全展平**，靠标题+间距+分隔线/轻量左强调分层，去「卡片套卡片」）：价值之争分诊 warning / 建议 / 渐进披露依据 / 圆桌光谱 / 「裁决过程」钻取 / 终局站队软对照；顶部仅议题头 +「结论 ↓」锚 |
-| 续辩 | 收场底栏「换个角度再辩」= `debate_seed` 新回合 |
+| 辩手发言 | `SpeakerBlock`：左 3px 身份色轨 + 名字 + 阶段词 + 流式/异常态；正文全宽 `Markdown evidence` + `CollapsibleSpeech` 折叠；**无头像圈、无模型徽章** |
+| 轮次 | `SectionHeader`：轮号 + 焦点 + 章节锚 |
+| 主持人小结 | `JudgeNote`：法槌标 + 小结 + 收敛/交锋信号 + 逐轮净分 chip |
+| L3 交锋 | `ReplyQuote`：反驳方发言顶部「↩ 回 X：要点」 |
+| 质询 | `CrossExamSection`：Q→A 对（默认折叠，teaser 显未答数） |
+| 用户追问 | `UserInterjection`：右侧条 + 定向 chip；收场标「已承接」 |
+| 站队 | **记分牌** `StanceControl`（正反 VS 行旁）；会话内态、不持久化 |
+| 掌舵 | 直播末 `SteeringPanel`（三选一 + 追问 composer）；复盘 fallback 文案 |
+| 决策简报 / 裁决 | `FinaleStage` + `brief/BriefCard`：倾向头条 + 次级区块全展平 |
+| 续辩 | `DebateContinue`「换个角度再辩」 |
 
-**直播 → 收场 = 同一条流跑完**，相对直播仅几处 delta（非重挂）：顶栏 pill（进行中→已收场）+ 露出「结论 ↓」锚、流末追加「主持人终审」唯一结论面、追问标「已承接」、底栏（掌舵行动条+composer → 换角度再辩+复制简报）。结论不前置，故直播态无「待生成」占位卡。
+**约束**：纯前端渲染层重构，**不动协议 fold / conformance**——`toDebateModel` 读 `execution`、已归一 live+收场（守 [`protocol-conformance.mdc`](/.cursor/rules/protocol-conformance.mdc)）。
 
-**2026-07 一版减噪 delta（本次·针对用户反馈的「重复 / 乱」再收一轮）**：① **模型徽章去重**——从「每气泡每轮」收成顶部阵营条一次（「谁是哪个模型」地图），主持人模型归头像悬浮 + 流末终审各一次；② **站队投票**每方仅最新一轮气泡出一次；③ **长发言「展开全文/收起」**替代内嵌滚动（消除嵌套滚动条 + 流式↔收场高度跳变，`CollapsibleSpeech`）；④ **「这是什么」形态说明**从常驻长句（`debateFormBlurb`）收进表头 `ⓘ` 悬浮；⑤ **主持人头像悬浮**点明「中立强模型·不参与对战·只裁判」；⑥ **流末终审 + 简报全展平**（气泡为唯一卡面，见 §4.1「决策简报」行与 `Brief.tsx`）；⑦ **直播占位 + a11y + 去重**：补「主持人正在小结…」占位、流式指示 `aria-live`、追问气泡（收场复盘 / live 乐观）合并为共用 `AskBubble`。对比擂台透镜同步：交锋点展平 + 末尾补主持人终审页脚（见 §4.1b）。
-
-**2026-07 二版观感 delta（视觉打磨·与对垒色同批）**：① **房间头收卡**——形态 pill + 状态 + 阵营条 + 结论锚从浮空文字收进一张轻卡（`bg-card/60`），与群聊流拉开层次；② **正反 2 方阵营条呈 VS 对垒形**（`支持方·模型 VS 反对方·模型`，与对比透镜对垒横幅同语言；多方仍平铺 chips）；③ **气泡头栏淡染阵营色**（顶部向下 9% 渐隐，与顶边 2px 阵营色线呼应——阵营归属不再只靠小 pill）；④ **轮分割线加焦点强调**（轮号+焦点为主、线退后景）。→ `DebateStream.tsx`（`DebateStreamInner` 房间头 / `SpeechBubble` / `RoundDivider`）。
-
-**2026-07 三版观感 delta（流末「主持人终审」简报体打磨·本次）**：把**裁决头条**（倾向 + 置信 + 争点）从简报体内**抽到终审气泡顶部 `primary` 染头区**（`VerdictHeadline`），并让终审气泡从逐轮灰底小结**升格**为 `bg-card` + **primary 顶缘 2px 色线**——「最后的话」获得舞台、与辩手发言气泡的「身份色染头」同一语汇（辩手染各自阵营色、终审染 primary = 邀你拍板的落点，遵 color-tokens「行动 / 需要你 = primary」），在一排灰底逐轮小结里一眼读出「这是收场裁决」；`BriefCard` 只剩次级区块（价值之争分诊 / 建议 / 渐进披露依据 / 圆桌光谱）。群聊主视图 `FinalVerdict` 的染头区样式走单一源 `verdictHeadTint` / `verdictTopBorder`（当时对比擂台 `DebateVerdict` 亦共用，后随擂台并入群聊删除）。为何补这轮：二版把气泡外观磨过，但裁决头条仍平铺在简报体内、与「结论 = 最后的话」的分量不匹配（且抽头条后 `DebateBrief`/`RedTeamBrief` 曾一度无处渲染倾向/置信/争点，本轮把两壳接上补齐）。→ `debate/Brief.tsx`（`VerdictHeadline` / `verdictHeadTint` / `verdictTopBorder`）+ `debate/DebateStream.tsx`（`FinalVerdict`）。
-
-**2026-07 四版观感 delta（直播态「掌舵行动条」`SteeringBar` 打磨·本次）**：把轮边界掌舵条**归入主持人身份家族**——从一张浮空 `surfaceSubtle.primary` 卡改为**法槌头像 + primary 淡面气泡**（与逐轮小结 / 流末终审同一主持人头像，掌舵读作「主持人在轮边界把深浅交给你」而非一块孤立控件）；头行去掉冗余 `Gavel` 小图标（头像即身份），**裁判建议**（`steerJudgeHint`：收敛/焦灼）从挤在标题后的灰 pill 挪到**独立一行**、配 `Scale` 图标，`第 N 轮结束 · 请你掌舵` 标题独占一行更醒目；追问 composer / 追问对象 chips / 加角度 / 三选一按钮（继续辩·出结论，主按钮随 `converged` 切换 primary）均沿旧交互不变。为何补这轮：前三版把「主持人小结 / 终审」都收进了头像气泡语汇，唯独直播态掌舵条还是旧浮空卡、在群聊流里与主持人其他态割裂。**预览盲区**：`SteeringBar` 仅在 live streaming（`interactive`）态渲染，离线 `pnpm shoot` 回放恒为只读 fallback（「主持人曾请你掌舵…」），故本轮靠 typecheck/biome + 与已验证的 `ModeratorSpeech`/`FinalVerdict` 同构收敛，未出交互态截图。→ `debate/DebateStream.tsx`（`SteeringBar` / `SteeringSection`）。
-
-**2026-07 五版观感 delta（E 收口 · 会话内交互入口「轻触统一」·本次）**：会话内两处用户参与入口——**掌舵 `SteeringBar`**（轮边界：继续/出结论/追问）与**站队 `StanceVote`**（发言气泡：就地表态）——收敛到**同一套「参与」视觉语汇**：同一枚 `Hand` 举手标 + primary「需要你/参与」色调（遵 color-tokens）。① **掌舵头升格为明确的「轮到你了·参与」时刻**：标题前置 `Hand` 举手参与标（primary）+ 由 `font-medium` 升 `font-semibold`、文案 `请你掌舵`→`轮到你掌舵 · 第 N 轮结束`，让「该你拍板」从灰底逐轮小结里一眼跳出。② **站队保留在气泡不搬去轮边界**（IM 式情境 react——「读到某方发言就地表态」的即时性是其本质）：idle→hover 透出 primary（`hover:border-primary/40 hover:text-primary`，「可参与」邀请、与掌舵段 primary 淡面同调），点亮后转**本方身份色**（你已站定某方）。**为何不激进统一（不采纳「站队搬到轮边界」）**：站队搬去边界会把「随时表态」压成「仅主持人挂起时才可表态」或**每轮加一条常显参与条**（反增回合级密度，与刚做的 A/B/C 收密相抵）；追问回显气泡（`PendingAskBubble`/`InterjectionBubble`）本就是 IM「发出即右侧可见」，位置合理、不动。**预览盲区**同四版（`SteeringBar` 仅 live 态渲染，`pnpm shoot` 回放为只读 fallback；站队 idle 态截图已核，hover/掌舵头靠 typecheck/biome + 代码核对）。→ `debate/DebateStream.tsx`（`SteeringBar` 头 / `StanceVote` 空闲态）。
-
-**2026-07 六版结构 delta（辩论裁判台并入统一右侧面板·本次）**：把**裁决台**（一句话倾向/评定/综合）+ **记分板**（逐轮净分）+ **掌舵**（`SteeringBar` + 追问回显）+ **阵营名册**（谁是哪个模型）从群聊流本体（旧「房间头卡」/ 流末 / 流内掌舵段）整体迁入**统一右侧面板（§十）的常驻「辩论裁判台」区** `DebateHudRegion`——与 §6.2 指挥台 `CommandRegion` **同一钉法**（面板内容区顶部、可折叠、封顶自滚，其下接 run 详情 / 工作区 tab 体）。**群聊流本体只留「读法 + 结论」**：流内工具条（`FlowToolbar`：流式/并排全局开关〔正反 2 方〕+「结论 ↓」锚，收场出）、逐轮交锋、站队气泡（IM 情境 react，**留在气泡不搬走**）、流末「主持人终审」唯一结论面（完整裁决仍在此、不前置剧透）。**为何**：原「竞技场」三区（中群聊 + 右轨裁决/记分/掌舵）宽屏才成立，一旦从辩论室下钻某发言点的 run 详情（`showRunDetail`），右轨与右坞详情坞**抢同一块宽度**、把辩论挤回窄单列——根治办法是右侧只留**一处 dock**：裁判台钉区 + run 详情 tab **同屏共存**（HUD 封顶 `max-h-72%` + 区内滚动，tab 体留可用高度）。**桥**：回合焦点是画布概念，故 `CanvasZoomedTurn` 经 `stores/debateRoom.ts` 发布当前辩论室（`turnId`/`conversationId`/`interactive`）→ `useDebateHud` 据此从执行 store live 派生 execution+模型+净分+待掌舵边界（单一数据源、无快照拷贝）+ 自动浮出（进房揭示 dock 并展开；新掌舵边界重展开——与指挥台同款 `openPanel` 不切 tab）。掌舵所需 `conversationId`/`interactive` 不再透传 `DebateStream`。**预览已核**：`SHOOT_ZOOM=room SHOOT_SETTLE_MS=2000 pnpm shoot debate` 出图核对——单列群聊流 + 右坞裁判台钉区（阵营 VS + 倾向 + 记分条）同屏；掌舵 `SteeringBar` 仍仅 live 态渲染（预览盲区同四版）。→ `debate/DebateHud.tsx`（`useDebateHud` + `DebateHudRegion` + `SteeringBar`/`SteeringSection`/`RailScores`）、`debate/DebateStream.tsx`（瘦身为单列流 + `FlowToolbar`）、`stores/debateRoom.ts`（桥）、`layout/SidePanel.tsx`（顶部钉区）、`graph/CanvasZoomedTurn.tsx`（发布焦点辩论室）。
-
-**约束**：纯前端渲染层重构，**不动协议 fold / conformance**——`toDebateModel` 读 `execution`、已归一 live+收场，IM 流只是换一种读法（守 [`protocol-conformance.mdc`](/.cursor/rules/protocol-conformance.mdc)）。
+→ 见代码：`components/chat/debate/arena/`（`DebateArena` 壳 + `Scoreboard` / `Transcript` / `SpeakerBlock` / `JudgeNote` / `CrossExamSection` / `SteeringPanel` / `FinaleStage` / `ClosingBlocks` / `brief/`）+ `DebateStream.tsx`（`DebateArena` 兼容导出）+ `graph/CanvasZoomedTurn.tsx`。
 
 ### 4.1b 旧范式退场与组件去向（✅ 已完成）
 
-**旧范式（已退场）**：直播 `LiveChat` 群聊气泡、复盘 `Arena` 擂台左右对开（2方）/ `Narrative` 时间线（多方）、终局裁决 hero（`GavelCard`/`YourVerdictHero` 等）浮顶 + 可展开复盘，`DebateCompare.tsx` 按 `model.settled` 分相位。问题：多范式（直播 vs 复盘、2方 vs 多方）+ phase 切换 + 左右语义仅 2 方成立 → 用户反馈「乱」。已由 §4.1 统一辩论室替代。
+**旧范式（已退场）**：直播 `LiveChat` 群聊气泡、复盘 `Arena` 擂台左右对开（2方）/ `Narrative` 时间线（多方）、终局裁决 hero（`GavelCard`/`YourVerdictHero` 等）浮顶 + 可展开复盘，`DebateCompare.tsx` 按 `model.settled` 分相位；其后一度收敛为「统一辩论室（IM 群聊）」`DebateStream` + 右坞 `DebateHudRegion` 裁判台。问题：群聊隐喻表达不了阶段/比分/裁决、右坞与 run 详情抢宽。已由 §4.1 **赛事页 `arena/`** 替代。
 
-**组件去向**：~10 套范式 → **1 主视图（结论归位流末）+ 1 可选透镜**（✅ 已落地）。
+**组件去向**：~10 套范式 → **赛事页三层**（✅ 已落地）。下表为历史去向；**现行组件树** → `arena/DebateArena`（`Scoreboard` + `Transcript` + `FinaleStage` + `brief/`），旧 IM 群聊 / 裁判台组件已由 `arena/` 取代。
 
 | 现组件 | 去向 |
 |---|---|
-| `LiveChat` | ✅ 删 → 升为唯一主视图 `DebateStream`（全生命周期 + 全形态） |
-| `Arena`（擂台） | ✅ 改 → 擂台的「两方发言左右对垒」**并入群聊主视图的「并排」布局**（`DebateStream` 顶部全局开关 + 逐轮内联，见「2026-07 delta」）；旧独立 `Arena.tsx`/`DebateArena` 已删。曾中转为统一「对比」透镜的 `compare/DebateOverview` 擂台矩阵（对垒横幅 + 逐轮时间线头 + 交锋卡 + 末尾终审），2026-07 对比并入群聊后**辩论不再进此矩阵**，其代码（`DebateOverview` + `TurnCompare` 辩论分支 + `debateCells`）已一并删除 |
-| `Narrative` + `ConvergenceBand` | ✅ 删（并入主流；收敛信号入轮分割线 / 系统消息） |
-| `Brief`（`BriefCard`/`RoundtableSpectrum`） | ✅ 复用 → 嵌入流末「主持人终审」`FinalVerdict`（完整简报体 + 圆桌观点光谱） |
-| `GavelCard`/`YourVerdictHero`/`AIVerdictCollapsible` | ✅ 删 → 拍板功能整体移除（2026-06，§4.4）；AI 裁决简报归流末 `FinalVerdict`（旧置顶卡 `PinnedConclusion` 已撤，结论归位流末，§4.1「结论」行） |
-| `ArgMap` | ✅ 删（视图过多收口；攻防结构与「协作图」同为节点图、形式重叠，逐轮交锋已可在群聊引用回复 + 群聊内「并排」双栏读到） |
-| `DebateRoundDecisionCard` | ✅ 删 → 「轮边界行动条」`SteeringBar`（掌舵 = 输入态）；2026-07 六版起随裁决/记分并入**右坞辩论裁判台** `DebateHud`（§4.1「六版 delta」），不再在 `DebateStream` 流末 |
-| `StanceBar`/`UserTake` | ✅ 删 → 站队 = 气泡投票 `StanceVote`（会话内态）；拍板功能已移除（§4.4） |
-| `Interjections`（`RoundInterjections`） | ✅ 删 → 用户追问 = 群聊流内右侧消息（`InterjectionBubble`，`DebateStream` 内）；旧「对比擂台」透镜内的 `RoundInterjections` 随擂台退场、`Interjections.tsx` 已删 |
-| `Continue`（`DebateContinue`） | ✅ 保留 → 流末尾「换角度再辩」= 新回合 |
+| `LiveChat` | ✅ 删 → 曾升为 IM 主视图 `DebateStream`；2026-07-06 再由 `arena/DebateArena` 取代 |
+| `Arena`（擂台） | ✅ 删 → 旧擂台组件退场；左右并排后由 `Transcript` 逐轮发言分栏重做（可选布局，2026-07-07） |
+| `Narrative` + `ConvergenceBand` | ✅ 删（收敛信号入 `JudgeNote` / `SectionHeader`） |
+| `Brief`（`BriefCard`/`RoundtableSpectrum`） | ✅ 迁 → `arena/brief/`，嵌入 `FinaleStage` |
+| `GavelCard`/`YourVerdictHero`/`AIVerdictCollapsible` | ✅ 删 → 拍板功能整体移除（2026-06，§4.4） |
+| `ArgMap` | ✅ 删（视图过多收口） |
+| `DebateRoundDecisionCard` / `SteeringBar` / `DebateHud` / `DebateHudRegion` | ✅ 删 → 掌舵归 `arena/SteeringPanel`（主列流末）；记分/阵营/站队归 `arena/Scoreboard`；右坞裁判台解散 |
+| `StanceBar`/`UserTake`/`StanceVote` | ✅ 删 → 站队归记分牌 `StanceControl`（§4.4） |
+| `Interjections` | ✅ 删 → 追问归 `arena/UserInterjection` |
+| `Continue`（`DebateContinue`） | ✅ 保留 → `FinaleStage` 底栏「换角度再辩」 |
+| `FlowToolbar`（流式/并排） | ✅ 删 → 全局流式/并排开关废弃；并排后由记分牌「布局」开关（仅正反 · 可切单栏）重做（2026-07-07） |
 
-净效：主视图 `DebateStream`（单流·结论归位流末 `FinalVerdict`），**「对比」并入群聊、协作图降为浮层**（见下「2026-07 delta」）。放大态视图切换器**按回合性质分叉**：**辩论回合**只有 `[群聊]`——对比＝群聊内「并排」布局、协作图＝头部按钮唤出的浮层（浮层内为同一套 `GraphView`，含 §6.5 三种布局切换），均不再是平级 tab，故辩论回合基本无 tab 条；**非辩论回合**为 `[协作图]`（默认）+ `[对比]`（仅定向唤回修订版本链，§6.5）。
+净效：主视图 `DebateArena`（记分牌 + 剧本主列 + 终审舞台）；放大态辩论回合无平级 tab，协作图仍为头部浮层（`graphOverlay`，§6.5）。
 
-**2026-07 delta · 对比并入群聊 + 协作图降为浮层（本次·再收「视图过多」一轮）**：辩论回合原在放大态平级切 `[群聊][对比][协作图]`、来回切换成本高，现**收敛为「群聊」单一内容主视图**：① **对比 → 群聊内「并排」布局**（仅正反 2 方 head-to-head 成立）：顶部「流式 / 并排」**全局开关**（`globalParallel`）+ 每轮「并排看此轮 / 收起」**逐轮内联**（`roundParallel`，覆盖全局；切全局即清空逐轮覆盖）——并排只把「本轮两方发言」换成双栏对垒，小结 / 质询 / 站队 / 引用回复等群聊元素全保留（同一份群聊换个几何、非切视图）；聊天侧「改了 N 版」深链对正反 2 方改为进群聊并自动开全局并排（`initialParallel`）。② **协作图 → 头部「协作图」按钮唤出的浮层**（`graphOverlay`）：想看「这场怎么跑的 / 谁干了啥 / 花多少」时叠一层、关掉回群聊；回放辩论则自动叠上并播放帧回放。③ ~~并行时间线平级 tab / 浮层子视图 / 底栏甘特~~ → **并入协作图 toolbar 第三种布局「时间轴」**（§6.5「2026-07 再收口」）：同一 `GraphView`、同一套节点 drill-in，只在依赖布局（左右流 / 树形）与时间布局间切换，不再占底栏或单独 tab。故辩论回合不再出 `[对比]` / `[协作图]` 平级 tab（`showCompareTab = revisable && !debate`），放大态基本无 tab 条（群聊即全部）。**独立「对比」平级 tab + `TurnCompare` 现仅服务非辩论的定向唤回修订**（版本轨 `RevisionOverview`）。手机 `DebateView` 本就是单列只读镜像、无平级 tab，不受影响。→ 见代码 `debate/DebateStream.tsx`（`globalParallel`/`roundParallel`/`parallelFor`）+ `graph/CanvasZoomedTurn.tsx`（`graphOverlay` 浮层）+ `graph/GraphView.tsx`（布局 toolbar）。
-
-**2026-07 delta · 回合级渐进披露（再收一轮·把 P1–P4 堆进流里的二级信息默认折叠）**：质询 / 记分 / 结辩（P1–P4）各自往逐轮流加了新露出，「视图过多」在**回合级**重演。故把三处**二级明细默认折叠**（复用 `Brief.tsx` 的 `Disclosure` 折叠壳，不新造折叠原语）：① **质询块** `CrossExamBlock` 默认收起，卡头 teaser 显「N 组问答 · M 处未正面回答」把「谁回避」前置、展开看 Q→A，直播态（作答在流）首挂自动展开；② **逐轮记分**：先默认折叠（teaser 显净分），**其后 C 收口再删折叠壳、把各方净分 chip（身份色 + 罚分 ⚠、悬浮看三维明细）并入主持人小结末尾的信号 pill 同行**——每轮元信息 2 行→1 行、净分仍一眼可见；③ **终审「记分总览」** `Scoreboard` 默认收起，与其下已折叠的 `BriefCard` 依据一致。**保留常显**：收敛 / 交锋信号 pill（本轮一眼状态，现与逐轮净分同行）、各方发言正文、引用回复、站队——核心交锋 + 结论恒显、明细按需展开。终审面 `BriefCard` / `VerdictHeadline` 本就已渐进披露（裁决头条 + 需你拍板 + 建议常显、各方论点 / 事实分歧 / 待解折叠），本轮只补齐记分侧。→ 见代码 `debate/DebateStream.tsx`（`CrossExamBlock` / `Scoreboard` 折叠；逐轮记分并入 `ModeratorSpeech` 元信息行的 `ScoreChip`、与信号 pill 同行）+ `debate/Brief.tsx`（导出 `Disclosure` 复用）。
-
-**记一笔 · 「两套交锋 UI」经审后有意保留（D 收官 · A–F 审毕）**：本轮 A–F 收口盘点里的 D 项——发言气泡内**引用回复 `ReplyQuote`**（主持人事后抽的「辩手↔辩手」隐性交锋、就地贴在反驳处、被驳方身份色）与独立折叠卡**质询块 `CrossExamBlock`**（主持人当面「必答 Q→A」、法槌头像、显性）——经审**有意不合并**：二者语义正交（**横向·选手互驳** vs **纵向·主持人质询**），图标/文案/嵌套层级本就区分，用户读得出差别；硬合会揉坏语义、把 `ReplyQuote` 从「反驳那句」旁挪走丢失就地上下文，且「为减面数而合」触补丁绊线（为收口而收口）。故 D 不动码收官——辩论会话「视图/交互收口」A–F 至此审毕（A/B 渐进披露、C 记分并行、E 参与语汇统一、F 并行时间线已并入协作图时间轴布局，D 保留现状）。
-
-→ 见代码：`components/chat/debate/`（`model.ts`/`Brief.tsx`/`Continue.tsx` 复用；`DebateStream.tsx` 主视图；已删 `LiveChat`/`Narrative`/`ConvergenceBand`/`UserTake`/`DebateCompare`/`ArgMap`/`Arena`/`Interjections`）+ 「对比」透镜 `components/chat/compare/`（`TurnCompare` 壳 + `RevisionOverview` 版本轨 + `ComparePane` 共享精读 2-up/文本 diff + `cells.ts` 统一 pick 单元；已删 `DebateOverview` 辩论纵览〔擂台矩阵〕，见上 `Arena` 行）+ 放大态接线 `graph/CanvasZoomedTurn.tsx`（视图切换器 + 统一「对比」视图 + `initialView` 深链直达）+ 深链桥 `graph/useCanvasZoom.ts`（`openZoom`/`ConversationCanvas` 携 `view`）+ 概览节点 `graph/FocusedTurnNode.tsx`（脚抽屉 = 非辩论修订 peek，辩论无 peek、走放大态）+ 手机 `apps/mobile/src/components/DebateView.tsx`（精简镜像：逐轮小结标「主持人」小标记 + 结论改称「主持人终审」+ 收场原因 `STOP_LABEL` 对齐后端权威词表 `runtime/debate/types.py`；主持人化头像/发言为桌面态，手机保持只读精简）。
-
-**被替代**：① 旧「直播=对话式 + 复盘=擂台/时间线 + 终局裁决 hero，按 `model.settled` 分相位」——见上「旧范式」问题；改由统一 IM 单流承载。② 单流内的「置顶结论卡 `PinnedConclusion`（结论先行）+ 流末终审块」双结论面——**已撤**（2026-06）：顶部裁决卡在过程之前剧透结论、又与流末终审重复（顺序倒、内容冗）；改为**自然时序·结论归位流末唯一面**（对抗靠阵营色 / 引用回复，结论=流末「主持人终审」，结论先行由顶部「结论 ↓」锚 + 主聊天 CEO 综述承担）。
+→ 见代码：`components/chat/debate/arena/` + `DebateStream.tsx`（`DebateArena` 兼容导出）+ `graph/CanvasZoomedTurn.tsx` + 手机 `apps/mobile/src/components/DebateView.tsx`（精简镜像）。
 
 ### 4.2 团队图上的辩论标记（✅）
 
@@ -231,34 +220,34 @@ skip_if:
 | 节点 badge | 对立节点显「正方/反方」徽章（`primary` 令牌，与 6 态状态色解耦）——`AgentNode` |
 | 图分列对置 | 正/反节点按 `stance` 排序 + ELK `considerModelOrder`，分两带对置——`GraphView` / `lib/elk-layout.ts` |
 | 节点层级 | CEO（主气泡，不进图）→ 主持人（完成态节点）→ 辩手（挂主持人下），见 [`辩论编排设计.md §7.3`](/docs/03-AI核心/辩论编排设计.md) |
-| 辩论全程 | **不内联聊天**——辩论全程（逐轮发言 + 决策简报 + 交锋，§4.1）归画布放大态「统一辩论室（群聊）」主视图；**辩论回合聊天占位精简**（2026-07）：内嵌协作图**默认收起**（可手动展开）、入口换成**醒目「打开辩论室」CTA**（直达群聊主视图，比通用「在画布打开」更可发现）；live 与收场是同一条流的「未完成/已完成」、无跳跃——`DebateStream`（在 `CanvasZoomedTurn`，`debate/model.ts` 归一 live+收场） |
+| 辩论全程 | **不内联聊天**——辩论全程（逐轮发言 + 决策简报 + 交锋，§4.1）归画布放大态「辩论室：赛事页」主视图；**辩论回合聊天占位精简**：内嵌协作图**默认收起**、入口换成**醒目「打开辩论室」CTA**；live 与收场是同一条流、无跳跃——`DebateArena`（在 `CanvasZoomedTurn`，`debate/model.ts` 归一 live+收场） |
 
 ### 4.3 老板介入、追问与续辩（✅）
 
-辩论中途介入**复用** [`辩论编排设计.md §六`](/docs/03-AI核心/辩论编排设计.md) 的 opt-in 逐轮交互（进程内挂起 `DEBATE_ROUND` + 流内轮边界行动条 `SteeringBar`，§4.1b 已由旧 `DebateRoundDecisionCard` 归流至此）：
+辩论中途介入**复用** [`辩论编排设计.md §六`](/docs/03-AI核心/辩论编排设计.md) 的 opt-in 逐轮交互（进程内挂起 `DEBATE_ROUND` + 主列流末 `SteeringPanel`）：
 
 | 动作 | 前端落点 |
 |---|---|
-| 继续辩 / 按此角度继续 / 够了出结论 | 决策卡三选一 → `resolveInteraction` |
-| **追问**某方/全场 | 群聊轮边界行动条的【追问输入 + 定向 chip】与决策一并提交（`ask`/`ask_target`）；复盘在 `DebateStream` 流内右侧消息（`InterjectionBubble`；手机 `DebateView` 只读复盘）渲染「你的追问·是否被承接」。追问输入为**桌面端能力**（手机只读复盘） |
-| **续辩**（可逆叫停） | 收场卡 `DebateContinue`「换个角度再辩一轮」→ `debate_seed` 新回合（`Continue.tsx` / `seed.ts` / `sendDebateContinuation`） |
+| 继续辩 / 按此角度继续 / 够了出结论 | `SteeringPanel` 三选一 → `resolveInteraction` |
+| **追问**某方/全场 | `SteeringPanel` 的【追问输入 + 定向 chip】与决策一并提交（`ask`/`ask_target`）；复盘在 `UserInterjection`（手机 `DebateView` 只读复盘）渲染「你的追问·是否被承接」。追问输入为**桌面端能力**（手机只读复盘） |
+| **续辩**（可逆叫停） | `FinaleStage` 底栏 `DebateContinue`「换个角度再辩一轮」→ `debate_seed` 新回合（`Continue.tsx` / `seed.ts` / `sendDebateContinuation`） |
 
 逐轮决策卡 transport-only → 重载不复现（选择已体现在实际轮次 + `debate_result`）；追问 verbatim 进 `user_interjections` 可重载复盘。
 
-> ✅ 已落地（§4.1）：功能不变、前端落点已归流——三选一 + 追问 = 直播态「轮边界行动条 + composer」（`DebateStream` 内 `SteeringBar`）；复盘「你的追问·是否被承接」= 流内右侧消息原位（不再单列 `Interjections`）。
+> ✅ 已落地（§4.1）：三选一 + 追问 = 直播态 `arena/SteeringPanel`；复盘追问 = `arena/UserInterjection`。
 
 ### 4.4 站队（✅ · 会话内态）
 
-用户侧轻量标注，**绝不改 AI 裁决内容**（守中立：站队只对比）。store `debateUserTake.ts`（按 `turnId` 分桶）+ `DebateStream` 内的 `StanceVote`（落点见 §4.1）：
+用户侧轻量标注，**绝不改 AI 裁决内容**（守中立：站队只对比）。store `debateUserTake.ts`（按 `turnId` 分桶）+ 记分牌 `StanceControl`（落点见 §4.1）：
 
-- **站队** `StanceVote`（发言气泡上的投票 chip，直播+终局；**每方仅在其最新一轮气泡出一次**·去逐轮重复、各轮联动同一倾向态）：点「站这方」记倾向（身份色高亮、仅你可见·不影响 AI 裁决）；终局在流末「主持人终审」`FinalVerdict` 附「你 vs AI」软对照（`leaning` 文本含该方名→看似一致，只提示不下硬判）。站队是「读到发言就地表态」的 IM 式情境 react，**留在气泡不搬去轮边界**，但与掌舵 `SteeringBar` **共用一套「参与」视觉语汇**（`Hand` 举手标 + idle→hover primary 邀请，点亮转身份色；§4.1b「五版观感 delta · E 收口」）。
+- **站队** `StanceControl`（记分牌正反 VS 行旁）：点选某方记倾向（身份色高亮、仅你可见·不影响 AI 裁决）；终局在 `FinaleStage` 附「你 vs AI」软对照（`leaning` 文本含该方名→看似一致，只提示不下硬判）。
 - **会话内态、不持久化**：站队仅在当前打开的会话有效，重载 / 翻页即重置（轻量倾向标记，不值得专用持久化基建）。
 
 > **「用户拍板」(gavel) 已移除（2026-06）**：原置顶结论卡展开区的 `GavelActions`（对价值之争选一方上位 / 维持 AI 裁决，并落 `debate_user_takes` 表跨重载持久化）整体删除——纯客户端标注无人消费、与站队职责重叠、专用持久化基建与价值不相称（详见 [`辩论编排设计.md §6.7`](/docs/03-AI核心/辩论编排设计.md)）。要据结论推进，直接对 CEO 下指令或「换角度再辩」（§4.3）。
 
 ### 4.5 论证地图透镜（已移除）
 
-曾把辩论读成节点（各方 + 最强主张）+ 有向边（各轮 `clashes` 谁驳谁）的 `ArgMap` 次级透镜，**已随「视图过多」收口移除**（2026-06）：它最 niche，且与「协作图」同为节点图、形式重叠（用户易感「又一个图」）。攻防结构的逐轮交锋仍可在「群聊」的引用回复 + 群聊内「并排」布局（正反 2 方逐轮双栏对垒）读到。放大态辩论视图现为 **群聊（唯一内容主视图）+ 协作图浮层（头部按钮唤出）**，对比＝群聊内并排（非独立视图），见 §4.1b / §6.5。
+曾把辩论读成节点（各方 + 最强主张）+ 有向边（各轮 `clashes` 谁驳谁）的 `ArgMap` 次级透镜，**已随「视图过多」收口移除**（2026-06）。攻防结构的逐轮交锋仍可在赛事页 `ReplyQuote` + 记分牌 VS 对垒读到。放大态辩论视图现为 **赛事页（唯一内容主视图）+ 协作图浮层**（头部按钮唤出），见 §4.1b / §6.5。
 
 > **决策演进**：「主持人是 CEO 之下、辩手之上的一层、底层无 debate 专用执行路径」**仍成立**——只是这层落成 `debate` 工具内的确定性循环 + 图上完成态节点，而非一个 LLM 委派角色。旧「多轮 = CEO 手搓跨轮 DAG」**被替代**，见 [`辩论编排设计.md §八`](/docs/03-AI核心/辩论编排设计.md)。
 
@@ -309,7 +298,7 @@ skip_if:
 
 一个对话 = 一张可平移画布，每回合自上而下**跨回合视觉累积**成节点；「同一拨人」靠 `agentIdentity`（同角色稳定色 / 字，§五）延续，**团队仍每回合临时组、不做 worker 实体化**（真持久团队见 §6.4 否决）。
 
-**LOD「只有聚焦回合画完整 DAG」**（守 §八 ≤50 节点 / ≥60fps）：完成的团队回合塌成「回合摘要节点」（状态 / 任务摘要 / 身份头像 / 进度）、单 Agent 回合塌成竖排轻卡，**恰好一个聚焦回合**（默认最新、自动跟随新回合、点摘要可切换）就地展开完整 worker DAG；配小地图 / 相机。聚焦回合内嵌整套 `GraphView`（点 worker 走右坞 run 详情、点端点〔汇聚点读最终回答 / 用户端点重读提问〕开右坞「内容 tab」）+ 就地脚抽屉（仅承表头 chip 唤出的「版本对比」比对；辩论回合无 peek、全程走放大态「统一辩论室」），深读 / 放大走**画布放大态**（Route A · `CanvasZoomedTurn`，就地放大该回合、非独立 overlay；旧 `TeamGraphFullscreen` 全屏 overlay 已被其替代）。命令栏 `CanvasCommandBar` 常驻画布底栏（与放大态共用），且与聊天输入框**统一为同一 composer 核**（`TurnComposer`，2026-07）：附件 / @ 文件引用 / 停止生成 / 字数 / 回填通道两视图同款，草稿按对话存 store、聊天 ⇄ 画布切换不丢，正文并持久化 localStorage（重启不丢；附件仅会话内，防配额且盘上易过期）（`MessageInput` / `CanvasCommandBar` 只是两层皮）。**对话页（聊天视图）恒为传统聊天**——不再把单 Agent 回合渲染成节点卡，图相关体验收敛在画布（原「对话页卡片化」第一刀已撤，见 §6.4）。
+**LOD「只有聚焦回合画完整 DAG」**（守 §八 ≤50 节点 / ≥60fps）：完成的团队回合塌成「回合摘要节点」（状态 / 任务摘要 / 身份头像 / 进度）、单 Agent 回合塌成竖排轻卡，**恰好一个聚焦回合**（默认最新、自动跟随新回合、点摘要可切换）就地展开完整 worker DAG；配小地图 / 相机。聚焦回合内嵌整套 `GraphView`（点 worker 走右坞 run 详情、点端点〔汇聚点读最终回答 / 用户端点重读提问〕开右坞「内容 tab」）+ 就地脚抽屉（仅承表头 chip 唤出的「版本对比」比对；辩论回合无 peek、全程走放大态「辩论室」），深读 / 放大走**画布放大态**（Route A · `CanvasZoomedTurn`，就地放大该回合、非独立 overlay；旧 `TeamGraphFullscreen` 全屏 overlay 已被其替代）。命令栏 `CanvasCommandBar` 常驻画布底栏（与放大态共用），且与聊天输入框**统一为同一 composer 核**（`TurnComposer`，2026-07）：附件 / @ 文件引用 / 停止生成 / 字数 / 回填通道两视图同款，草稿按对话存 store、聊天 ⇄ 画布切换不丢，正文并持久化 localStorage（重启不丢；附件仅会话内，防配额且盘上易过期）（`MessageInput` / `CanvasCommandBar` 只是两层皮）。**对话页（聊天视图）恒为传统聊天**——不再把单 Agent 回合渲染成节点卡，图相关体验收敛在画布（原「对话页卡片化」第一刀已撤，见 §6.4）。
 
 ### 6.2 图上指挥：指挥台 `CommandRegion`（统一侧面板顶部常驻区）
 
@@ -327,7 +316,7 @@ skip_if:
 - **双视图而非「图即唯一界面」**：原方向「无模式切换、聊天 = 图的退化渲染、最终砍掉聊天列」**已撤**——强迫简单问答上画布是负体验，且整方案命悬「画布必须像聊天一样轻」的试金石。双视图（聊天默认 + 画布 opt-in）零门槛天然、风险降到「加一个视图 + 一个开关」、**聊天永不删**；「聊天 = 图的退化渲染」只保留在数据层。
 - **画布已毕业（撤实验开关）**：原 `canvasEnabled` 实验门为开发期守「画布像聊天一样轻」试金石而设；试金石已过（聊天默认零回归 + 画布 opt-in 顺滑），故撤门——入口恒显示、无需开启，免「藏命令面板后没人发现 + 永远 dogfood 不到」。每对话视图偏好随之由会话内存态**升为持久化**（`localStorage: agentcore:conversation-views`，只落画布 override、切回即删键 → 表恒收敛），刷新 / 重开对话记得上次停在画布还是聊天。
 - **内嵌 DAG = 嵌套 ReactFlow**：聚焦回合把整套 `GraphView` 包进外层画布的自定义节点，靠**独立 `ReactFlowProvider` 隔离 flow store**；内层 `embedded` 弃自身平移 / 缩放、外层画布独占平移 / 缩放 / 小地图。→ 复用既有图构建，不重写第二套图。
-- **聚焦节点固定高度**（`FOCUS_NODE_HEIGHT`）：脚抽屉（仅「版本对比」；读答案 / 重读提问已改走右坞「内容 tab」，辩论回合走放大态「统一辩论室」无 peek）与内嵌图**共享这块固定高度**（开抽屉图区缩、抽屉占下半承版本列 `DRAWER_H`、图区相应再缩），节点总高恒定 → 下方回合堆叠偏移不被挤动。**否决**抽屉撑高节点（触发动态高度 → 重算堆叠）。
+- **聚焦节点固定高度**（`FOCUS_NODE_HEIGHT`）：脚抽屉（仅「版本对比」；读答案 / 重读提问已改走右坞「内容 tab」，辩论回合走放大态「辩论室」无 peek）与内嵌图**共享这块固定高度**（开抽屉图区缩、抽屉占下半承版本列 `DRAWER_H`、图区相应再缩），节点总高恒定 → 下方回合堆叠偏移不被挤动。**否决**抽屉撑高节点（触发动态高度 → 重算堆叠）。
 - **面板停靠 ≠ 节点弹层**：可裁决 / 救火卡片体量大（表单 / 备注 / 多按钮），浮节点上会挤爆 LOD 视图；故收口到**统一侧面板顶部的指挥台区**、聚焦节点只留「待你拍板 / 待救火」提示牌指过去。
 - **指挥台并入侧面板顶部区，而非第二右坞 / 并列 tab**：并排双右坞吃 ~760px + 双边框双开关；做成侧面板里的**并列 tab** 又有三患——切 tab 互斥故看不到「指挥台 + run 详情」同屏、自动浮出会抢走你正看的 tab、还得给「指挥台 tab 钉到哪个回合」一个别扭答案。**顶部常驻区**（封顶 + 折叠）让两块同屏可见、自动浮出不抢 tab、两套定位逻辑（区跟随聚焦回合 / tab 按 message 钉）互不干扰。
 
@@ -343,7 +332,7 @@ skip_if:
 | 乙-2 · 真持久团队（worker 实体化） | 暂不做 | 「团队跨回合」真需求 = 连续性 / 团队懂我，已由记忆模块 + CEO 跨回合记忆 + 共享工作区覆盖；worker 实体化撞「无选择器 / 每回合自适应组队」赌注（[`执行引擎架构设计.md` §受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)），是定位级（养成系）改动 |
 | 跨对话 / 工作区 / 公司级空间画布 | 不在范围 | 本特性只管单对话内双视图（原『公司画布』上层提案已删除） |
 
-**✅ 收口**：图上指挥与比对卡片已全数上画布——`BackgroundTaskCard`（云端 / 后台任务卡片，非阻塞 · 跨对话的另一类）入指挥台（见 §6.2）；「版本对比」**已彻底移出聊天正文**（2026-07，与辩论「过程归画布、正文只留信号」对齐）（`compare/TurnCompare`，2026-07，§6.5）：正文不再内联版本对比大卡，改由状态条**「改了 N 版」信号 chip** 深链画布；画布两处落点——**放大态「对比」视图**（`CanvasZoomedTurn` 视图切换器，§6.5）承载完整对比（**仅非辩论定向唤回修订**：胶片轨 + 聚焦精读 + 按需 2-up + 相似修订自动文本 diff；辩论的对比已并入群聊「并排」、见 §4.1b「2026-07 delta」），**概览聚焦节点脚抽屉**（表头 chip 唤出·仅非辩论修订）作就地 peek，二者共用同一 `TurnCompare`、逐版本仍下钻右坞 run 详情。至此聊天正文只留信号（辩论 pill /「改了 N 版」chip）+ 入口 CTA，过程产物全归画布（**定向唤回**「修订 vN」本身仍 CEO 驱动、无用户触发入口，其结果另作 `AgentNode` 节点画在聚焦回合 DAG 上）。
+**✅ 收口**：图上指挥与比对卡片已全数上画布——`BackgroundTaskCard`（云端 / 后台任务卡片，非阻塞 · 跨对话的另一类）入指挥台（见 §6.2）；「版本对比」**已彻底移出聊天正文**（2026-07，与辩论「过程归画布、正文只留信号」对齐）（`compare/TurnCompare`，2026-07，§6.5）：正文不再内联版本对比大卡，改由状态条**「改了 N 版」信号 chip** 深链画布；画布两处落点——**放大态「对比」视图**（`CanvasZoomedTurn` 视图切换器，§6.5）承载完整对比（**仅非辩论定向唤回修订**：胶片轨 + 聚焦精读 + 按需 2-up + 相似修订自动文本 diff；辩论的两方对照由辩论室可选左右并排布局承担、见 §4.1），**概览聚焦节点脚抽屉**（表头 chip 唤出·仅非辩论修订）作就地 peek，二者共用同一 `TurnCompare`、逐版本仍下钻右坞 run 详情。至此聊天正文只留信号（辩论 pill /「改了 N 版」chip）+ 入口 CTA，过程产物全归画布（**定向唤回**「修订 vN」本身仍 CEO 驱动、无用户触发入口，其结果另作 `AgentNode` 节点画在聚焦回合 DAG 上）。
 
 → 见代码：`stores/ui.ts`（`conversationViews` 持久化、只落画布 override；`pendingCanvasFocus` 携可选深链 `view`＝`CanvasFocusView`）、`pages/ConversationPage.tsx`（视图切换 + 偏好读取）、`chat/StatusStrip.tsx`（团队回合入口：辩论「打开辩论室」CTA / 普通「在画布打开」+「改了 N 版」版本对比信号 chip）、`graph/ConversationCanvas.tsx`（持久累积 + LOD + 发布画布 active/聚焦回合 + 后台任务同步驱动）、`stores/commandPanel.ts`（画布→指挥台区桥：active/聚焦 + 折叠态）、`graph/CanvasDecisionPanel.tsx`（`useCommandRegion` 派生 + 自动浮出 + `CommandRegion` 折叠区，复用 §三 同款决策卡片）、`layout/SidePanel.tsx`（顶部承载指挥台区，§十）、`graph/TurnSummaryNode.tsx` / `graph/SimpleTurnNode.tsx` / `graph/FocusedTurnNode.tsx`（内嵌 `GraphView` + 端点开右坞内容 tab + 版本对比脚抽屉〔辩论走放大态辩论室〕 + 提示牌）、`graph/CanvasCommandBar.tsx`（常驻命令栏 + 后台云端派发）、`chat/compare/`（`TurnCompare` 壳 + `RevisionOverview` 胶片轨/聚焦精读 + `ComparePane` 回合级「跨方任意两段」对比 + 相似修订自动 `@codemirror/merge` diff + `cells.ts` 统一 pick 单元；嵌放大态「对比」视图 / 概览脚抽屉；聊天正文已不再内联）、`lib/agentIdentity.ts`（身份延续）。
 
@@ -351,14 +340,14 @@ skip_if:
 
 放大态（`CanvasZoomedTurn`）顶栏给一个**视图切换器**（≥2 个可用视图才出现），同一回合在多种渲染间切换，**按回合性质分叉**：
 
-- **辩论回合**：只有 **群聊**（统一辩论室 `DebateStream`，§4.1）作内容主视图；**对比＝群聊内「并排」布局**（正反 2 方·顶部全局开关 + 逐轮内联，§4.1b「2026-07 delta」）、**协作图＝头部按钮唤出的浮层**（`graphOverlay`；浮层内为与非辩论相同的 `GraphView` + 布局 toolbar，§下「时间轴布局」），均不再是平级 tab，故辩论回合放大态基本无 tab 条。
+- **辩论回合**：只有 **辩论室**（赛事页 `DebateArena`，§4.1）作内容主视图；**两方对照＝辩论室内可选「左右并排」布局**（仅正反 2 方 · 记分牌「布局」开关、默认并排可切单栏、逐轮发言分栏，§4.1）、**协作图＝头部按钮唤出的浮层**（`graphOverlay`；浮层内为与非辩论相同的 `GraphView` + 布局 toolbar，§下「时间轴布局」），均不再是平级 tab，故辩论回合放大态基本无 tab 条。
 - **非辩论回合**：**协作图**（依赖结构，默认）/ **对比**（统一对比透镜 `compare/TurnCompare`，**仅定向唤回修订** → 版本轨〔`RevisionOverview`，胶片轨 + 聚焦精读，下文〕；点任意两格进共享精读对比面〔`ComparePane`，2-up / 真·文本 diff〕；仅当本回合有修订链，§6.4——聊天正文已不再内联，改由状态条「改了 N 版」信号 chip **深链**首挂直达）。**不再有「并行时间线」平级 tab**——时间真相改由协作图 toolbar 切换（下）。
 
 默认：辩论落群聊、非辩论落协作图（**左右流**依赖布局）、聊天「回放」深链落协作图并自动帧回放；**对比恒为可选透镜、从不作默认**（可经信号 chip 深链首挂直达）；**时间轴布局恒为可选、从不作默认**（`hasParallelTimeline` 门控后才可点）。
 
 **协作图三种布局（用户偏好持久化 `stores/graph.ts`）**：放大态与非嵌入 `GraphView` 右上角 toolbar 切换——① **左右流**（默认，ELK 横向依赖 DAG）② **树形**（ELK 纵向）③ **时间轴**（`timeline`，仅 `hasParallelTimeline` 为真时可点；调度段跑完、`batch_metrics` 折到前端后才有完整坐标，执行中按钮 disabled）。时间轴模式下：**同一套 worker 节点与 drill-in**，X＝`NodeTiming` 墙钟偏移、Y＝每 run 一行、节点条宽∝占用时长；输入 / CEO 汇聚点钉在 worker 带左右；多调度段画竖向「批次 N」分隔（`TimeBatchMarkers`）。依赖布局背景的 `WaveLanes` 文案为 **「依赖层」**（ELK 深度，≠ 调度时间）；时间轴模式下隐藏泳道。**帧回放**（左下 HUD `CanvasPlaybackControls`）仅在左右流 / 树形下可用——时间轴展示的是终态调度结果，与逐步帧投影语义不一致故互斥。Toolbar 旁仍可挂 **`metricsSummary` chip**（峰值并发 · 总时长 · 串行化次数）。内嵌聊天列 `GraphView`（`embedded`）不展示布局 toolbar，且强制依赖布局（不用时间轴）。
 
-**版本对比版式 · 胶片轨 + 聚焦精读（多轮不崩）**：一条版本链可累积很多版本（定向唤回修订：一个 worker 被 CEO 多次续写），故 `hasRevisions` 为真——此版本轨 `RevisionOverview` 现**仅承载非辩论的定向唤回修订**（辩论回合含多轮辩论虽也被建模成「续写 revision」〔`revision N == 第 N 轮`，`stores/execution/debate.ts`〕，但其对比已并入群聊「并排」、不再进对比 tab，见 §4.1b「2026-07 delta」）。等分并排到多轮必崩（每列挤成几个字、还各自纵滚）。故每条链渲染为**版本轨**（`v1…vN` 缩略卡：状态点 + `原始/最新` + 字数 + 两行预览，多轮只让轨**横向滚动**、绝不挤压阅读区）+ 下方**聚焦 / 对比区**：默认 **2 版直接进「对比」**（经典并排）、**3+ 版聚焦最新版全宽精读**；**回合级「对比两版」开关**：开启后所有链只留轨，版本卡可**跨链勾选任意两版**（`A`/`B` 徽标带角色名，**可跨方/跨角色**——支持方 v3 × 反对方 v3、撰写员终稿 × 审阅员意见…），默认 **≥2 方＝两方各自最新互比、单链＝原始×最新**；下方**共享对比面板** 2-up 并排、两版全宽可读（不对比时保留每条链的轨+聚焦精读）。**真文本 diff（自动开）**：两段读起来像同一交付物的「编辑」时（`looksLikeEdit`：共同首尾够长 + 长度相当）自动开 `@codemirror/merge` **侧栏 diff**（未改处折叠、增删分色、跟随亮 / 暗），可一键切「渲染」；**跨角色内容本就不像编辑 → `looksLikeEdit` 判否、走 2-up**（不按内容类型一刀切——某链 v3 × v5 若确是延写微调也给 diff）。同一角色跨版本、跨方 / 跨角色**任意两段**都能比，共用此精读对比面 `ComparePane`。承载页 `CanvasZoomedTurn` 统一「对比」页用 `max-w-5xl`（比阅读列宽，给 2-up / diff 更多地方）。
+**版本对比版式 · 胶片轨 + 聚焦精读（多轮不崩）**：一条版本链可累积很多版本（定向唤回修订：一个 worker 被 CEO 多次续写），故 `hasRevisions` 为真——此版本轨 `RevisionOverview` 现**仅承载非辩论的定向唤回修订**（辩论回合含多轮辩论虽也被建模成「续写 revision」〔`revision N == 第 N 轮`，`stores/execution/debate.ts`〕，但其两方对照由辩论室可选左右并排布局承担、不进对比 tab，见 §4.1）。等分并排到多轮必崩（每列挤成几个字、还各自纵滚）。故每条链渲染为**版本轨**（`v1…vN` 缩略卡：状态点 + `原始/最新` + 字数 + 两行预览，多轮只让轨**横向滚动**、绝不挤压阅读区）+ 下方**聚焦 / 对比区**：默认 **2 版直接进「对比」**（经典并排）、**3+ 版聚焦最新版全宽精读**；**回合级「对比两版」开关**：开启后所有链只留轨，版本卡可**跨链勾选任意两版**（`A`/`B` 徽标带角色名，**可跨方/跨角色**——支持方 v3 × 反对方 v3、撰写员终稿 × 审阅员意见…），默认 **≥2 方＝两方各自最新互比、单链＝原始×最新**；下方**共享对比面板** 2-up 并排、两版全宽可读（不对比时保留每条链的轨+聚焦精读）。**真文本 diff（自动开）**：两段读起来像同一交付物的「编辑」时（`looksLikeEdit`：共同首尾够长 + 长度相当）自动开 `@codemirror/merge` **侧栏 diff**（未改处折叠、增删分色、跟随亮 / 暗），可一键切「渲染」；**跨角色内容本就不像编辑 → `looksLikeEdit` 判否、走 2-up**（不按内容类型一刀切——某链 v3 × v5 若确是延写微调也给 diff）。同一角色跨版本、跨方 / 跨角色**任意两段**都能比，共用此精读对比面 `ComparePane`。承载页 `CanvasZoomedTurn` 统一「对比」页用 `max-w-5xl`（比阅读列宽，给 2-up / diff 更多地方）。
 
 **为何要时间轴布局（多任务并行图）**：协作图画的是**依赖结构**不是**时间真相**——`WaveLanes` / `computeWaves` 按 ELK 布局深度分**依赖层**，同一层两节点可能被 `width` 上限错峰跑却被并排画；`RunNode` 只有 `durationMs`、无起止戳，前端拼不出「谁和谁真同时在跑」。时间轴布局把每个 worker run 按**相对调度器 wall start 的 ms 偏移**铺在横轴上，于是肉眼可见：**重叠＝真并发、条前空档＝并发上限 `width` 让就绪节点排队（串行化）、最长条＝关键路径**。
 
@@ -416,13 +405,13 @@ skip_if:
 >
 > - **固定首位「工作区」home tab**（永不关闭，**文件即主体**）：头栏模式 pill（点开 popover 承载云/本地切换·绑定/重连/备份到云）+ 🕘 快照（右侧 slide-over）图标浮层；文件树即面板主体（交接已下沉为对话时间线卡片、不占面板入口，见下）。
 > - **按需详情 tab**：点内嵌协作图 worker 节点把该 run 钉为 run 详情 tab；点端点（用户输入 / CEO 汇聚点）在画布钉为「内容 tab」读提问 / 最终回答（是气泡非 run）。可并存对比、上限 6（进度/协作图归内嵌图，面板不设独立 tab）。
-> - **顶部常驻钉区（画布模式）**：tab 栏下、tab 体上可有可折叠的常驻区——① **指挥台** `CommandRegion`（有待裁决 / 救火 / 后台云端任务时，§6.2）；② **辩论裁判台** `DebateHudRegion`（放大态聚焦某辩论室时，承裁决/记分/掌舵，§4.1「六版 delta」）——各自封顶（~55% / ~72% 内容高）+ 区内滚动、保 tab 体可用；聊天模式不出现（决策内联在消息流、辩论只在放大态）。
+> - **顶部常驻钉区（画布模式）**：tab 栏下、tab 体上可有可折叠的常驻区——**指挥台** `CommandRegion`（有待裁决 / 救火 / 后台云端任务时，§6.2）。~~辩论裁判台 `DebateHudRegion`~~ **已移除**（2026-07-06，记分/掌舵归赛事页主列，§4.1）——各自封顶 + 区内滚动、保 tab 体可用；聊天模式不出现（决策内联在消息流、辩论只在放大态）。
 > - **单一面板取代并排双右坞**（并排会挤爆聊天）：工作区即常驻首 tab、run 与它同栏并列，故面板永不出现空详情占位（**否决**「详情 / 工作区」段控互斥）；画布指挥台亦并入本面板**顶部常驻区**、不再另开右坞（§6.2）。工作区 body 首次激活懒挂载、之后 keep-alive 不卸载（文件不重拉）。
 > - **状态**：共享一份 `open` / `width`（280–560px，均持久化；快照为面板本地瞬态）；run tab 集为会话级、按 `messageId` 投影对应回合执行槽。
 > - **节点高亮一面一源**：派生自当前激活 tab——激活某 run tab→高亮其节点，激活「工作区」tab（不在 run tab 集）→无高亮；关 run tab 回退相邻 run tab、否则落回「工作区」tab（面板不因此关闭）。
 > - **打开入口**：点图节点→新开 run tab；右上「侧面板」开关（`PanelRight`，常驻、开启高亮）/ `Ctrl/Cmd+I`→显隐（记忆激活 tab、**冷启动落「工作区」tab**）；`Ctrl/Cmd+J`→直达「工作区」tab；`Ctrl/Cmd+B` 留给左侧栏折叠避免双触发。
 >
-> （→ 见代码 `stores/sidePanel.ts`（含 `openPanel` 不切 tab 揭示）、`components/layout/SidePanel.tsx`（顶部指挥台 / 辩论裁判台 钉区 + 下方 tab 体）、`stores/commandPanel.ts`（画布→指挥台区桥）、`stores/debateRoom.ts`（画布→辩论裁判台桥，§4.1「六版 delta」）、`components/graph/CanvasDecisionPanel.tsx`（`CommandRegion`，§6.2）、`components/chat/debate/DebateHud.tsx`（`DebateHudRegion`，§4.1）、`components/chat/detail/RunDetailBody.tsx`、`components/workspace/WorkspacePanel.tsx`（`WorkspaceMode`）、[`前端技术与架构.md` §9.2 / §9.4](/docs/04-前端/前端技术与架构.md)）本节为关键决策。
+> （→ 见代码 `stores/sidePanel.ts`（含 `openPanel` 不切 tab 揭示）、`components/layout/SidePanel.tsx`（顶部指挥台钉区 + 下方 tab 体）、`stores/commandPanel.ts`（画布→指挥台区桥）、`components/graph/CanvasDecisionPanel.tsx`（`CommandRegion`，§6.2）、`components/chat/detail/RunDetailBody.tsx`、`components/workspace/WorkspacePanel.tsx`（`WorkspaceMode`）、[`前端技术与架构.md` §9.2 / §9.4](/docs/04-前端/前端技术与架构.md)）本节为关键决策。
 
 > **交接 = 时间线卡片（交接「方案 B」）✅ 已落地**：「把活交给云端团队」不再是工作区面板里的居中宽模态，而是对话时间线里的「后台云端任务」卡。本地模式对话在 `MessageInput`（及画布命令栏 `CanvasCommandBar`）的「后台云端」开关下派发任务（`dispatchHandoffJob`），随即落一张卡（派发中 / 运行中 / 已完成 / 失败，按时间戳并入时间线、随对话重开重放）；完成后卡内「查看并应用」就地展开**内联简化评审**——默认全部接受（干净变更直接应用），只把真冲突逐个列出选「云端覆盖 / 保留本地」、可展开预览，应用回本地（写回前重读本地哈希、服务端按快照哈希权威复核冲突）。三段式后端契约（snapshot / 云作业 / diff 三方判定回写，`HandoffJob` 专表）不变，仅前端入口从侧栏孤岛下沉进对话。→ 见代码 `components/chat/BackgroundTaskCard.tsx`、`components/chat/BackgroundTaskReview.tsx`、`stores/backgroundTasks.ts`、`components/chat/MessageInput.tsx`、`components/graph/CanvasCommandBar.tsx`（画布同款开关）、`components/graph/CanvasDecisionPanel.tsx`（`CommandRegion` 承载卡片）。
 
@@ -481,9 +470,18 @@ skip_if:
 
 ---
 
-## 十三、质量档设置页（内测已退役）
+## 十三、模型配置（替代质量档）
 
-内测下线：质量档设置页、对话输入框 `ModeSelector`、前端词表/缓存整片删除。→ 见 [`编排器与CEO主Agent.md` §2.1](/docs/03-AI核心/编排器与CEO主Agent.md)。
+质量档 UI 已永久移除（`经济档`/`高质量档` 预设、设置页质量档、`ModeSelector`、相关词表/缓存）。用户改为在 **More → 模型配置** 配一个 OpenAI 兼容端点：
+
+- **三字段**：API Key、Base URL（含 `/v1` 前缀）、默认模型名
+- **测试连接**：probe 连通性 + `supports_tools` 能力标记（✅ 支持工具调用 / ⚠️ 仅对话）
+- **输入区**：`CurrentModelBadge` 只读展示当前模型，无切换入口
+- **工具门禁**：`supports_tools=false` 时委派/辩论入口灰显 + 引导换模型（soft gate——probe 失败不 hard block 聊天）
+
+全链路（聊天、委派、辩论）统一用该模型；场景差异（温度、回合预算等）由引擎内部画像处理，用户不可见。后端决策见 [`编排器与CEO主Agent.md` §2.1](/docs/03-AI核心/编排器与CEO主Agent.md)；BYOK 用量呈现见 [`前端成本呈现.md` §7.4](/docs/04-前端/前端成本呈现.md)。
+
+→ 见代码 `pages/more/ModelSettings.tsx`、`components/chat/message-input/CurrentModelBadge.tsx`、`components/llm/ToolsCapabilityBadge.tsx`。
 
 ---
 

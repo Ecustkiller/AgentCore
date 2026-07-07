@@ -6,7 +6,8 @@
   "description": "OpenAPI 生成的 REST 契约类型（desktop/admin 共享单一源）",
   "exports": {
     ".": "./src/index.ts",
-    "./api.generated": "./src/api.generated.ts"
+    "./api.generated": "./src/api.generated.ts",
+    "./audit": "./src/audit.ts"
   },
   "types": "./src/index.ts",
   "scripts": {

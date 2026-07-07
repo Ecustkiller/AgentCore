@@ -5,7 +5,7 @@ messages — and a RunSpec with nested RunPolicy / RunContract round-trip lossle
 so a session loaded from the DB replays the exact context for ``continue_run``.
 """
 
-from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.journal import completed_from_journal
 from agentcore.runtime.runs import RunPlan, RunSession, RunSpec
 from agentcore.runtime.runs.serialize import (
@@ -50,6 +50,14 @@ def test_files_touched_from_transcript_collects_produced_paths_in_order():
     ]
     # index.html deduped (write + edit), file_move records its destination, web_search dropped.
     assert files_touched_from_transcript(transcript) == ["index.html", "docs/b.txt"]
+
+
+def test_files_touched_from_transcript_collects_file_append():
+    transcript = [
+        _assistant_call("c1", "file_write", '{"path": "doc.md", "content": "# Title"}'),
+        _assistant_call("c2", "file_append", '{"path": "doc.md", "content": "\\n## Section"}'),
+    ]
+    assert files_touched_from_transcript(transcript) == ["doc.md"]
 
 
 def test_files_touched_from_transcript_skips_malformed_and_pathless():

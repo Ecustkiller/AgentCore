@@ -17,8 +17,7 @@ from pathlib import Path
 import pytest
 
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.llm.config import ModelProfile
-from agentcore.llm.protocol import LLMChunk, LLMMessage, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink, EventType, SSEEvent
@@ -28,6 +27,7 @@ from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+from tests.llm_helpers import make_profile_params
 
 pytestmark = pytest.mark.anyio
 
@@ -330,6 +330,31 @@ async def test_gate_truncates_large_argument_preview():
     assert preview.endswith("[truncated]")
 
 
+async def test_gate_code_execute_code_preview_allows_20k():
+    from agentcore.runtime.approvals import _PREVIEW_CODE_EXECUTE_CODE_MAX, _TRUNCATION_SUFFIX
+
+    reg = InteractionRegistry()
+    sink = EventSink()
+    gate = _gate(sink, reg)
+
+    code = "c" * (_PREVIEW_CODE_EXECUTE_CODE_MAX + 500)
+    purpose = "p" * 800
+    resolver = asyncio.create_task(_resolve_when_ready(reg, "id1", ApprovalDecision.DENY, "conv-1"))
+    await gate.authorize(
+        tool_name="code_execute",
+        tool_call_id="id1",
+        arguments={"code": code, "purpose": purpose},
+    )
+    await resolver
+
+    required = next(e for e in _drain(sink) if e.type is EventType.APPROVAL_REQUIRED)
+    args = required.payload["arguments"]
+    assert args["code"].endswith(_TRUNCATION_SUFFIX)
+    assert len(args["code"]) == _PREVIEW_CODE_EXECUTE_CODE_MAX + len(_TRUNCATION_SUFFIX)
+    assert args["purpose"].endswith(_TRUNCATION_SUFFIX)
+    assert len(args["purpose"]) < len(purpose)
+
+
 # --- react_loop integration ------------------------------------------------
 
 
@@ -416,8 +441,8 @@ def _context() -> ToolContext:
     )
 
 
-def _profile() -> ModelProfile:
-    return ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+def _profile():
+    return make_profile_params(max_rounds=20)
 
 
 async def test_engine_gates_grantable_tool_runs_on_approve():
@@ -440,6 +465,7 @@ async def test_engine_gates_grantable_tool_runs_on_approve():
         sink=sink,
         tool_context=_context(),
         profile=_profile(),
+        turn_model="m",
         approval_gate=gate,
     )
     await resolver
@@ -466,6 +492,7 @@ async def test_engine_gates_grantable_tool_skips_on_deny():
         sink=sink,
         tool_context=_context(),
         profile=_profile(),
+        turn_model="m",
         approval_gate=gate,
     )
     await resolver
@@ -493,6 +520,7 @@ async def test_engine_does_not_gate_non_grantable_tool():
         sink=sink,
         tool_context=_context(),
         profile=_profile(),
+        turn_model="m",
         approval_gate=gate,
     )
 

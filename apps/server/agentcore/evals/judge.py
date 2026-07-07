@@ -26,7 +26,7 @@ from agentcore.evals.types import (
     PairwiseVerdict,
     TurnOutcome,
 )
-from agentcore.llm.protocol import LLMMessage, LLMProvider, LLMRequest
+from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, LLMRequest
 
 # --- L1 结果评分主轴：绝对分裁判 ---------------------------------------------
 
@@ -95,7 +95,6 @@ class LLMJudge:
             model=self._model,
             temperature=0.0,
             stream=False,
-            thinking=True,
             scenario=self._scenario,
         )
         response = await self._provider.complete(request)
@@ -126,9 +125,9 @@ def _eval_provider_and_model(mode: str) -> tuple[LLMProvider, str]:
     """
     import os
 
+    from agentcore.evals.eval_modes import resolve_profile_set
     from agentcore.evals.harness import _EVAL_CEILING, _eval_credentials
     from agentcore.llm.factory import build_provider
-    from agentcore.llm.modes import resolve_profile_set
 
     provider = build_provider(_eval_credentials())
     model = os.environ.get("EVAL_JUDGE_MODEL", "").strip()
@@ -217,7 +216,6 @@ class LLMMilestoneJudge:
             model=self._model,
             temperature=0.0,
             stream=False,
-            thinking=True,
             scenario=self._scenario,
         )
         response = await self._provider.complete(request)
@@ -323,7 +321,6 @@ class LLMPairwiseJudge:
             model=self._model,
             temperature=0.0,
             stream=False,
-            thinking=True,
             scenario=self._scenario,
         )
         response = await self._provider.complete(request)

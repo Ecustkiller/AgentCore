@@ -195,6 +195,7 @@ export function handleExecutionEvent(
             verdict: p.verdict,
             sides: p.sides,
             clashes: p.clashes,
+            cross_exam: p.cross_exam,
           },
           mid,
         );

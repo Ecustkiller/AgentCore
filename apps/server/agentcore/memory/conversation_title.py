@@ -23,8 +23,8 @@ from typing import Protocol, TypedDict
 
 from agentcore.core.logging import get_logger
 from agentcore.llm import LLMMessage, LLMProvider
-from agentcore.llm.config import build_request, get_profile
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.profiles import build_request, get_profile
+from agentcore.llm.provider.protocol import TokenUsage
 
 logger = get_logger(__name__)
 
@@ -128,9 +128,14 @@ class LLMTitleGenerator:
     title; other network/parse errors propagate and are handled at the call site.
     """
 
-    def __init__(self, provider: LLMProvider, *, role: str = "title") -> None:
+    def __init__(
+        self, provider: LLMProvider, *, role: str = "title", model: str | None = None
+    ) -> None:
         self._provider = provider
         self._profile = get_profile(role)
+        from agentcore.config import settings
+
+        self._model = model or settings.platform_model
         # The most recent call's spend, surfaced for the cost ledger (Gap C). Stays
         # zero until a call actually completes (empty-messages short-circuit /
         # timeout / error never bill), so the caller bills iff total_tokens > 0.
@@ -147,6 +152,7 @@ class LLMTitleGenerator:
                 LLMMessage(role="user", content=_render_title_prompt(data)),
             ],
             stream=False,
+            model=self._model,
         )
         try:
             response = await asyncio.wait_for(
@@ -156,5 +162,5 @@ class LLMTitleGenerator:
             logger.warning("title.timeout", conversation_id=data.conversation_id)
             return ""
         self.last_usage = response.usage
-        self.last_model = response.model or self._profile.model
+        self.last_model = response.model or self._model or ""
         return _sanitize_title(response.content)

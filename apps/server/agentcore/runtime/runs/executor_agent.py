@@ -11,10 +11,10 @@ from typing import Any
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
-from agentcore.llm.config import apply_overrides
-from agentcore.llm.modes import ProfileSet, default_profile_set
 from agentcore.llm.pricing import calculate_cost
-from agentcore.llm.protocol import LLMMessage, LLMProvider, TokenUsage
+from agentcore.llm.profiles import TurnProfiles as ProfileSet
+from agentcore.llm.profiles import default_turn_profiles as default_profile_set
+from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import (
     EventSink,
@@ -310,17 +310,13 @@ def build_agent_executor(
         # worker (no opt-in / at the depth cap / no factory wired).
         lead_subteam: LeadSubteam | None = None
         try:
-            profile = apply_overrides(
-                profiles.agent(spec.model_preference),
-                thinking=spec.thinking,
-                reasoning_effort=spec.reasoning_effort,
+            pref = (
+                spec.model_preference.value
+                if hasattr(spec.model_preference, "value")
+                else str(spec.model_preference)
             )
-            # 真·多模型辩手：显式 model 覆写只换 profile 的模型名（保留该档的温度/预算等），
-            # 再经 llm（回合级 ProviderRouter）按 ``provider/model`` 前缀路由到对应厂商。空
-            # （所有普通 worker）= 用 tier 解析出的模型，行为逐字不变。
-            if spec.model:
-                profile = replace(profile, model=spec.model)
-            priced_model = profile.model
+            profile = profiles.agent(spec.model_preference)
+            priced_model = spec.model or profiles.model_for(f"agent.{pref}")
             tool_ctx = replace(
                 base_tool_context,
                 run_id=spec.run_id,
@@ -464,6 +460,17 @@ def build_agent_executor(
             if delegation_state is not None:
                 delegation_state.allowed_tools = allowed_tools
                 delegation_state.registry = worker_tools
+            from agentcore.runtime.audit.hooks import on_permission_effective
+
+            on_permission_effective(
+                execution_id=execution_id,
+                run_id=spec.run_id,
+                parent_run_id=spec.parent_run_id,
+                declared_tools=None if spec.tools is None else list(spec.tools),
+                effective_tools=None if allowed_tools is None else list(allowed_tools),
+                can_delegate=spec.can_delegate,
+                depth=spec.depth,
+            )
             # Produce → check contract → re-prompt with the specific shortfalls.
             # This content-quality retry is intentionally separate from the
             # scheduler's infra-failure retry (RunPolicy.on_failure): they answer
@@ -547,6 +554,7 @@ def build_agent_executor(
                     sink=sink,
                     tool_ctx=tool_ctx,
                     profile=profile,
+                    turn_model=priced_model,
                     allowed_tools=allowed_tools,
                     run_id=spec.run_id,
                     agent_id=agent_id,
@@ -570,6 +578,7 @@ def build_agent_executor(
                     content,
                     deliverable,
                     files_written=len(files_touched_from_transcript(messages)),
+                    debrief=debrief_from_transcript(messages),
                 )
                 if verdict.ok or attempt == attempts - 1:
                     break
@@ -587,7 +596,7 @@ def build_agent_executor(
             # without re-pricing. Cost is recorded even on FAILED so a stopped
             # run still shows what it已花费.
             usage = run_usage.as_dict()
-            cost = asdict(calculate_cost(profile.model, run_usage))
+            cost = asdict(calculate_cost(priced_model, run_usage))
             # Upward escalations this worker raised (escalate tool calls), harvested
             # once from the transcript and carried on BOTH terminal states — a worker
             # that flags a blocker then fails its contract should still surface that
@@ -621,7 +630,7 @@ def build_agent_executor(
                     escalations=escalations,
                     debrief=debrief,
                     citations=worker_citations,
-                    model=profile.model,
+                    model=priced_model,
                     duration_ms=duration_ms,
                     rounds=run_rounds,
                     usage=usage,
@@ -632,6 +641,7 @@ def build_agent_executor(
             # The worker's terminal RunState is journaled at the ``execute`` choke point
             # below (run_final_fact — covers COMPLETED *and* FAILED in one place), so resume
             # re-seeds it from facts not the旁路 frame (执行级事件溯源 Phase 2 ⑥).
+            touched = files_touched_from_transcript(messages)
             sink.emit(
                 run_completed(
                     spec.run_id,
@@ -644,10 +654,11 @@ def build_agent_executor(
                     # 阶段1 scheduled runs are all delegated workers → member row;
                     # the already-priced usage/cost light up the payroll live.
                     role="member",
-                    model=profile.model,
+                    model=priced_model,
                     usage=usage,
                     cost=cost,
                     debrief=debrief,
+                    output_files=touched or None,
                 )
             )
             return RunState(
@@ -658,10 +669,10 @@ def build_agent_executor(
                 escalations=escalations,
                 debrief=debrief,
                 citations=worker_citations,
-                model=profile.model,
+                model=priced_model,
                 duration_ms=duration_ms,
                 rounds=run_rounds,
-                files_touched=files_touched_from_transcript(messages),
+                files_touched=touched,
                 usage=usage,
                 cost=cost,
                 transcript=messages,

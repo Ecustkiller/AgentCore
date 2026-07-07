@@ -27,6 +27,8 @@ from agentcore.memory.user_memory import (
     MemoryExtractInput,
     MemoryExtractor,
     MemoryOp,
+    _empty_ops_reason,
+    _is_cold_start,
 )
 
 logger = get_logger(__name__)
@@ -170,20 +172,33 @@ async def maintain_user_memory(
                 m.path for m in await store.list(user_id, scope=project_id) if is_topic_path(m.path)
             }
             project_profile = await store.load(user_id, CORE_MEMORY_FILE, scope=project_id)
-        ops = await extractor.extract(
-            MemoryExtractInput(
-                user_id=user_id,
-                current_memory=await store.load(user_id, CORE_MEMORY_FILE),
-                current_preferences=await store.load(user_id, PREFERENCES_MEMORY_FILE),
-                project_id=project_id,
-                current_project_memory=project_profile,
-                messages=messages,
-                today=today,
-                topic_files=sorted(topic_slug(path) for path in global_topics),
-                project_topic_files=sorted(topic_slug(path) for path in project_topics),
-            )
+        current_memory = await store.load(user_id, CORE_MEMORY_FILE)
+        current_preferences = await store.load(user_id, PREFERENCES_MEMORY_FILE)
+        extract_input = MemoryExtractInput(
+            user_id=user_id,
+            current_memory=current_memory,
+            current_preferences=current_preferences,
+            project_id=project_id,
+            current_project_memory=project_profile,
+            messages=messages,
+            today=today,
+            topic_files=sorted(topic_slug(path) for path in global_topics),
+            project_topic_files=sorted(topic_slug(path) for path in project_topics),
         )
+        ops = await extractor.extract(extract_input)
         if not ops:
+            parse_result = getattr(extractor, "last_parse_result", None)
+            logger.info(
+                "memory.maintain_no_ops",
+                user_id=user_id,
+                memory_empty=_is_cold_start(extract_input),
+                message_count=len(messages),
+                parsed_ops=0,
+                raw_ops=parse_result.raw_ops_count if parse_result else None,
+                empty_ops_reason=(
+                    _empty_ops_reason(parse_result) if parse_result is not None else None
+                ),
+            )
             return False
         # Existing topics per scope for the cap. Only add the project key when there IS a
         # project — otherwise ``{None: ..., None: ...}`` would collapse and lose the global set.

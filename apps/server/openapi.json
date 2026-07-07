@@ -1,6 +1,45 @@
 {
   "components": {
     "schemas": {
+      "AdminAgentAuditSummary": {
+        "description": "Platform-wide agent audit aggregates for the admin dashboard widget.",
+        "properties": {
+          "approval_denied": {
+            "title": "Approval Denied",
+            "type": "integer"
+          },
+          "approval_timeouts": {
+            "title": "Approval Timeouts",
+            "type": "integer"
+          },
+          "audit_drops": {
+            "title": "Audit Drops",
+            "type": "integer"
+          },
+          "delegate_plans": {
+            "title": "Delegate Plans",
+            "type": "integer"
+          },
+          "events": {
+            "title": "Events",
+            "type": "integer"
+          },
+          "failures": {
+            "title": "Failures",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "events",
+          "failures",
+          "approval_timeouts",
+          "approval_denied",
+          "delegate_plans",
+          "audit_drops"
+        ],
+        "title": "AdminAgentAuditSummary",
+        "type": "object"
+      },
       "AdminAuditLogLine": {
         "description": "One privileged operator action, newest-first in the audit feed.",
         "properties": {
@@ -1269,6 +1308,180 @@
         "title": "AdminUserResponse",
         "type": "object"
       },
+      "AdvanceTickResponse": {
+        "properties": {
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/SimTickSnapshot"
+          }
+        },
+        "required": [
+          "run_id",
+          "snapshot"
+        ],
+        "title": "AdvanceTickResponse",
+        "type": "object"
+      },
+      "AgentAuditEventLine": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "actor_kind": {
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "execution_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "parent_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Run Id"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "target_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Ref"
+          },
+          "target_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Type"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "turn_id",
+          "trace_id",
+          "execution_id",
+          "run_id",
+          "parent_run_id",
+          "seq",
+          "category",
+          "action",
+          "actor_kind",
+          "target_type",
+          "target_ref",
+          "outcome",
+          "created_at"
+        ],
+        "title": "AgentAuditEventLine",
+        "type": "object"
+      },
+      "AgentAuditListResponse": {
+        "properties": {
+          "causal_graph": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditCausalGraph"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/AgentAuditEventLine"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total"
+        ],
+        "title": "AgentAuditListResponse",
+        "type": "object"
+      },
       "AgentCostLine": {
         "description": "One participant's row in the team payroll (one Run = one Agent).",
         "properties": {
@@ -1362,6 +1575,88 @@
         "title": "ApprovalDecision",
         "type": "string"
       },
+      "AuditCausalEdge": {
+        "properties": {
+          "from": {
+            "title": "From",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "to": {
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "from",
+          "to"
+        ],
+        "title": "AuditCausalEdge",
+        "type": "object"
+      },
+      "AuditCausalGraph": {
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/AuditCausalEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/AuditCausalNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "title": "AuditCausalGraph",
+        "type": "object"
+      },
+      "AuditCausalNode": {
+        "properties": {
+          "parent_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Run Id"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "AuditCausalNode",
+        "type": "object"
+      },
       "BatchCreateInviteRequest": {
         "properties": {
           "count": {
@@ -1388,6 +1683,47 @@
           "count"
         ],
         "title": "BatchCreateInviteRequest",
+        "type": "object"
+      },
+      "BigFive": {
+        "properties": {
+          "agreeableness": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Agreeableness",
+            "type": "number"
+          },
+          "conscientiousness": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Conscientiousness",
+            "type": "number"
+          },
+          "extraversion": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Extraversion",
+            "type": "number"
+          },
+          "neuroticism": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Neuroticism",
+            "type": "number"
+          },
+          "openness": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Openness",
+            "type": "number"
+          }
+        },
+        "title": "BigFive",
         "type": "object"
       },
       "BindLocalWorkspaceRequest": {
@@ -2644,6 +2980,32 @@
         "title": "CreateShareRequest",
         "type": "object"
       },
+      "CreateSimulationRunRequest": {
+        "properties": {
+          "manifest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunManifest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scenario": {
+            "default": "town",
+            "title": "Scenario",
+            "type": "string"
+          },
+          "seed": {
+            "default": 0,
+            "title": "Seed",
+            "type": "integer"
+          }
+        },
+        "title": "CreateSimulationRunRequest",
+        "type": "object"
+      },
       "CreateSnapshotRequest": {
         "description": "Take a manual snapshot of a conversation's workspace.\n\nA non-empty ``label`` marks a kept version (手动留版本) — a name the user\npins — vs. the automatic post-turn backups.",
         "properties": {
@@ -3412,6 +3774,64 @@
         "title": "InferenceTokenResponse",
         "type": "object"
       },
+      "InjectSimulationEventRequest": {
+        "properties": {
+          "event_type": {
+            "enum": [
+              "price_surge",
+              "storm",
+              "festival",
+              "announcement",
+              "custom"
+            ],
+            "title": "Event Type",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "event_type"
+        ],
+        "title": "InjectSimulationEventRequest",
+        "type": "object"
+      },
+      "InjectSimulationEventResponse": {
+        "properties": {
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "queued_for_tick": {
+            "title": "Queued For Tick",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "event_id",
+          "event_type",
+          "title",
+          "queued_for_tick"
+        ],
+        "title": "InjectSimulationEventResponse",
+        "type": "object"
+      },
       "InviteListResponse": {
         "properties": {
           "data": {
@@ -3477,6 +3897,17 @@
             ],
             "title": "Created By"
           },
+          "created_by_username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By Username"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -3537,6 +3968,17 @@
               }
             ],
             "title": "Used By"
+          },
+          "used_by_username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used By Username"
           }
         },
         "required": [
@@ -3552,12 +3994,79 @@
         "title": "InviteResponse",
         "type": "object"
       },
-      "LlmKeyStatusResponse": {
-        "description": "Settings view of a user's BYOK key — never the plaintext key.",
+      "InviteStatsResponse": {
         "properties": {
+          "active": {
+            "title": "Active",
+            "type": "integer"
+          },
+          "expired": {
+            "title": "Expired",
+            "type": "integer"
+          },
+          "revoked": {
+            "title": "Revoked",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "used": {
+            "title": "Used",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "active",
+          "used",
+          "expired",
+          "revoked"
+        ],
+        "title": "InviteStatsResponse",
+        "type": "object"
+      },
+      "LlmKeyStatusResponse": {
+        "description": "Settings view of a user's BYOK config — never the plaintext key.",
+        "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "billing_mode": {
+            "default": "byok",
+            "description": "Effective billing mode for this user (platform free quota vs BYOK)",
+            "title": "Billing Mode",
+            "type": "string"
+          },
+          "billing_preference": {
+            "default": "byok",
+            "description": "User's stored billing preference",
+            "title": "Billing Preference",
+            "type": "string"
+          },
           "configured": {
             "title": "Configured",
             "type": "boolean"
+          },
+          "default_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model"
           },
           "masked_key": {
             "anyOf": [
@@ -3581,9 +4090,38 @@
             ],
             "title": "Message"
           },
+          "platform_available": {
+            "default": false,
+            "description": "Whether platform free quota can be selected on this deployment",
+            "title": "Platform Available",
+            "type": "boolean"
+          },
+          "platform_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Operator-configured model when billing_mode is platform",
+            "title": "Platform Model"
+          },
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "supports_tools": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Tools"
           }
         },
         "required": [
@@ -4433,6 +4971,67 @@
         "title": "MoveFileRequest",
         "type": "object"
       },
+      "PatchSimulationAgentRequest": {
+        "properties": {
+          "goal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal"
+          },
+          "money": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Money"
+          },
+          "mood": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mood"
+          }
+        },
+        "title": "PatchSimulationAgentRequest",
+        "type": "object"
+      },
+      "PatchSimulationAgentResponse": {
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SimAgentState"
+          }
+        },
+        "required": [
+          "run_id",
+          "agent_id",
+          "state"
+        ],
+        "title": "PatchSimulationAgentResponse",
+        "type": "object"
+      },
       "PausedTurnSummary": {
         "description": "A turn awaiting resume after a durable plan_review / ask_user pause (结构化挂起 2b).\n\nSurfaced on conversation reopen so the client can re-render the right resume card\nby ``kind`` and offer continue / adjust / stop → the resume endpoint.\n``message_id`` is both the pause key and the id the resumed assistant message will\nreuse, so an optimistic bubble reconciles cleanly.\n\nplan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the\ngated downstream); ask_user carries the unified card payload ``question`` (the\nframing / opening line) + ``context`` + the optional opening content\n``assumptions`` / ``questions`` / ``style_options`` (empty for a compact mid-task\nfork). The unused set is empty for the other kind.",
         "properties": {
@@ -4452,6 +5051,21 @@
             "default": "",
             "title": "Context",
             "type": "string"
+          },
+          "intent": {
+            "anyOf": [
+              {
+                "enum": [
+                  "kickoff",
+                  "decision"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent"
           },
           "kind": {
             "$ref": "#/components/schemas/SuspensionKind"
@@ -4501,6 +5115,11 @@
             "default": "",
             "title": "User Message",
             "type": "string"
+          },
+          "user_message_id": {
+            "default": "",
+            "title": "User Message Id",
+            "type": "string"
           }
         },
         "required": [
@@ -4509,6 +5128,40 @@
           "checkpoint_id"
         ],
         "title": "PausedTurnSummary",
+        "type": "object"
+      },
+      "PendingApprovalSummary": {
+        "description": "A GRANTABLE tool call still awaiting the user's decision (in-process gate).\n\nSurfaced on conversation reopen via ``GET .../recovery`` so the client can\nre-render approval cards after a refresh. Unlike plan_review / ask_user pauses,\napprovals stay on the live turn's interaction bridge — they are NOT durably\npaused turns — but the registry's ``list_pending`` is the authoritative\npending set while the backend run is still alive.",
+        "properties": {
+          "approval_id": {
+            "title": "Approval Id",
+            "type": "string"
+          },
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "tool_call_id": {
+            "title": "Tool Call Id",
+            "type": "string"
+          },
+          "tool_name": {
+            "title": "Tool Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "approval_id",
+          "conversation_id",
+          "tool_call_id",
+          "tool_name"
+        ],
+        "title": "PendingApprovalSummary",
         "type": "object"
       },
       "QuotaStatus": {
@@ -4563,6 +5216,18 @@
             "maxLength": 500000,
             "title": "Content",
             "type": "string"
+          },
+          "finish_reason": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finish Reason"
           },
           "input_tokens": {
             "default": 0,
@@ -5251,6 +5916,80 @@
         "title": "RunError",
         "type": "object"
       },
+      "RunManifest": {
+        "description": "Frozen experiment descriptor stored on ``simulation_run.config``.",
+        "properties": {
+          "code_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code Version"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "manifest_version": {
+            "default": "1",
+            "title": "Manifest Version",
+            "type": "string"
+          },
+          "model_routing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SimModelRoutingConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "personas": {
+            "items": {
+              "$ref": "#/components/schemas/SimPersona"
+            },
+            "title": "Personas",
+            "type": "array"
+          },
+          "regions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Regions",
+            "type": "array"
+          },
+          "scenario": {
+            "default": "town",
+            "title": "Scenario",
+            "type": "string"
+          },
+          "seed": {
+            "default": 0,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "temperature": {
+            "default": 0.8,
+            "title": "Temperature",
+            "type": "number"
+          }
+        },
+        "title": "RunManifest",
+        "type": "object"
+      },
       "RunsPayload": {
         "description": "Persisted turn replay payload for an assistant message.\n\n``events`` is a multi-agent turn's ordered run/tool SSE events; the client\nreplays them through the same fold as the live stream to reproduce the team\ngraph exactly on reload (empty ``[]`` for a single-agent turn). ``process`` is\na single-agent turn's 思考+工具 timeline (ordered reasoning/tool steps) the\nclient replays into the inline process panel; ``null`` unless the turn used a\ntool. ``captain_context`` is the CEO captain's received context (上下文传递可视化\n通道①: ``system`` / ``history`` / ``request``), turn-level so it replays on the\nCEO bubble even for a pure-chat turn (where ``events`` is empty); ``null`` unless\nthe captain shipped context. ``error`` is a 报错回合's terminal error, replaying the\ninline error card on reload (``null`` for a clean turn). ``null`` whole payload on\nmessages with none of these.",
         "properties": {
@@ -5543,12 +6282,32 @@
                 "type": "null"
               }
             ]
+          },
+          "requires_tools": {
+            "default": false,
+            "title": "Requires Tools",
+            "type": "boolean"
           }
         },
         "required": [
           "content"
         ],
         "title": "SendMessageRequest",
+        "type": "object"
+      },
+      "SetBillingPreferenceRequest": {
+        "description": "Switch the user's billing mode (platform free quota vs BYOK).",
+        "properties": {
+          "billing_preference": {
+            "pattern": "^(platform|byok)$",
+            "title": "Billing Preference",
+            "type": "string"
+          }
+        },
+        "required": [
+          "billing_preference"
+        ],
+        "title": "SetBillingPreferenceRequest",
         "type": "object"
       },
       "SetDefaultModeRequest": {
@@ -5570,13 +6329,45 @@
         "type": "object"
       },
       "SetLlmKeyRequest": {
-        "description": "Store the user's own DeepSeek API key (BYOK).",
+        "description": "Store the user's OpenAI-compatible LLM configuration (BYOK).",
         "properties": {
           "api_key": {
             "maxLength": 400,
             "minLength": 1,
             "title": "Api Key",
             "type": "string"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "OpenAI-compatible endpoint including version prefix",
+            "examples": [
+              "http://localhost:9090/v1"
+            ],
+            "title": "Base Url"
+          },
+          "default_model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Default model name for all turns",
+            "examples": [
+              "deepseek-v4-flash"
+            ],
+            "title": "Default Model"
           }
         },
         "required": [
@@ -5668,6 +6459,326 @@
           "created_at"
         ],
         "title": "ShareSummary",
+        "type": "object"
+      },
+      "SimAgentState": {
+        "description": "Per-agent snapshot on ``sim.agent_state`` and in tick snapshots.",
+        "properties": {
+          "activity": {
+            "default": "",
+            "title": "Activity",
+            "type": "string"
+          },
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "goal": {
+            "default": "",
+            "title": "Goal",
+            "type": "string"
+          },
+          "inventory": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Inventory",
+            "type": "object"
+          },
+          "last_thought": {
+            "default": "",
+            "title": "Last Thought",
+            "type": "string"
+          },
+          "location": {
+            "title": "Location",
+            "type": "string"
+          },
+          "money": {
+            "default": 100.0,
+            "title": "Money",
+            "type": "number"
+          },
+          "mood": {
+            "default": 0.0,
+            "title": "Mood",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "position": {
+            "$ref": "#/components/schemas/Vec3"
+          },
+          "relationships": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Relationships",
+            "type": "object"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "tick_memories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tick Memories",
+            "type": "array"
+          }
+        },
+        "required": [
+          "agent_id",
+          "name",
+          "role",
+          "location",
+          "position"
+        ],
+        "title": "SimAgentState",
+        "type": "object"
+      },
+      "SimModelRoutingConfig": {
+        "description": "Per-run model routing manifest; M2 uses the same model for all tiers.",
+        "properties": {
+          "critical_model": {
+            "description": "Reserved for key decisions; M2 aliases routine_model",
+            "title": "Critical Model",
+            "type": "string"
+          },
+          "routine_model": {
+            "title": "Routine Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "routine_model",
+          "critical_model"
+        ],
+        "title": "SimModelRoutingConfig",
+        "type": "object"
+      },
+      "SimPersona": {
+        "description": "Immutable role card for one SimAgent.",
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "big_five": {
+            "$ref": "#/components/schemas/BigFive"
+          },
+          "goal": {
+            "title": "Goal",
+            "type": "string"
+          },
+          "goals_stack": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Goals Stack",
+            "type": "array"
+          },
+          "location": {
+            "title": "Location",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "system_prompt": {
+            "title": "System Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "name",
+          "role",
+          "location",
+          "goal",
+          "system_prompt"
+        ],
+        "title": "SimPersona",
+        "type": "object"
+      },
+      "SimTickFrameResponse": {
+        "properties": {
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/SimTickSnapshot"
+          },
+          "tick_number": {
+            "title": "Tick Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "tick_number",
+          "snapshot"
+        ],
+        "title": "SimTickFrameResponse",
+        "type": "object"
+      },
+      "SimTickSnapshot": {
+        "description": "Persisted world frame for a single tick.",
+        "properties": {
+          "active_events": {
+            "items": {
+              "$ref": "#/components/schemas/WorldEventWire"
+            },
+            "title": "Active Events",
+            "type": "array"
+          },
+          "agents": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SimAgentState"
+            },
+            "title": "Agents",
+            "type": "object"
+          },
+          "event_log": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Event Log",
+            "type": "array"
+          },
+          "governance": {
+            "$ref": "#/components/schemas/TownGovernanceState"
+          },
+          "hour": {
+            "title": "Hour",
+            "type": "integer"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TickMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "modifiers": {
+            "$ref": "#/components/schemas/WorldModifiersWire"
+          },
+          "tick": {
+            "title": "Tick",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tick",
+          "hour"
+        ],
+        "title": "SimTickSnapshot",
+        "type": "object"
+      },
+      "SimulationRunManifestResponse": {
+        "properties": {
+          "manifest": {
+            "$ref": "#/components/schemas/RunManifest"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "manifest"
+        ],
+        "title": "SimulationRunManifestResponse",
+        "type": "object"
+      },
+      "SimulationRunMetricsResponse": {
+        "properties": {
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/TickMetrics"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "metrics"
+        ],
+        "title": "SimulationRunMetricsResponse",
+        "type": "object"
+      },
+      "SimulationRunStatusResponse": {
+        "properties": {
+          "current_tick": {
+            "title": "Current Tick",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "current_tick"
+        ],
+        "title": "SimulationRunStatusResponse",
+        "type": "object"
+      },
+      "SimulationRunSummary": {
+        "properties": {
+          "current_tick": {
+            "title": "Current Tick",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "scenario": {
+            "title": "Scenario",
+            "type": "string"
+          },
+          "seed": {
+            "title": "Seed",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "scenario",
+          "seed",
+          "status",
+          "current_tick"
+        ],
+        "title": "SimulationRunSummary",
         "type": "object"
       },
       "SnapshotListResponse": {
@@ -5905,6 +7016,52 @@
         "title": "SuspensionKind",
         "type": "string"
       },
+      "TickMetrics": {
+        "description": "Macro indicators for one simulation tick.",
+        "properties": {
+          "avg_mood": {
+            "default": 0.0,
+            "title": "Avg Mood",
+            "type": "number"
+          },
+          "hour": {
+            "title": "Hour",
+            "type": "integer"
+          },
+          "population_by_region": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Population By Region",
+            "type": "object"
+          },
+          "positive_relation_ratio": {
+            "default": 0.0,
+            "title": "Positive Relation Ratio",
+            "type": "number"
+          },
+          "tick": {
+            "title": "Tick",
+            "type": "integer"
+          },
+          "trade_count": {
+            "default": 0,
+            "title": "Trade Count",
+            "type": "integer"
+          },
+          "trade_total_amount": {
+            "default": 0.0,
+            "title": "Trade Total Amount",
+            "type": "number"
+          }
+        },
+        "required": [
+          "tick",
+          "hour"
+        ],
+        "title": "TickMetrics",
+        "type": "object"
+      },
       "TokenRefreshRequest": {
         "description": "Rotate a bearer client's token pair (refresh token in the body, not a cookie).",
         "properties": {
@@ -6052,6 +7209,56 @@
           "total"
         ],
         "title": "ToolListResponse",
+        "type": "object"
+      },
+      "TownGovernanceState": {
+        "properties": {
+          "abstain_votes": {
+            "default": 0,
+            "title": "Abstain Votes",
+            "type": "integer"
+          },
+          "last_motion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Motion"
+          },
+          "last_outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Outcome"
+          },
+          "no_votes": {
+            "default": 0,
+            "title": "No Votes",
+            "type": "integer"
+          },
+          "policies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Policies",
+            "type": "array"
+          },
+          "yes_votes": {
+            "default": 0,
+            "title": "Yes Votes",
+            "type": "integer"
+          }
+        },
+        "title": "TownGovernanceState",
         "type": "object"
       },
       "TurnCost": {
@@ -6287,7 +7494,7 @@
         "type": "object"
       },
       "TurnRecoveryResponse": {
-        "description": "One-shot recovery snapshot for a conversation reopen (recovery 统一, 对称 §8.2).\n\nReopen needs to know, from ONE owner-gated point-in-time read, how to recover the\nconversation's latest turn:\n\n- ``live_running``: a detached in-flight run is still alive to 续看 (实时重连续看\n  C1 · slice 1b) — the client attaches (``GET .../stream``) to replay + tail it.\n- ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and\n  lost their live stream (结构化挂起 2b) — each renders a resume card.\n\nA turn parked at a checkpoint is BOTH live (its run is parked on the interaction,\nholding the workspace lock until checkpoint_timeout) and paused (its frame is\npersisted before the suspend ``await``), so these overlap. Returning them together\nlets the client pick ONE actionable surface: a durable paused frame is the\nauthoritative \"this turn is paused\" marker, so when ``paused`` is non-empty the\nresume card is the single surface and the client does NOT attach; it attaches only\nwhen ``live_running`` and ``paused`` is empty (a genuinely in-flight, non-paused\nturn). Folding both into one snapshot removes the former two-probe reopen\n(``GET /paused`` + the ``GET /stream`` attach) whose independent results raced into a\nduplicate 拍板 card.",
+        "description": "One-shot recovery snapshot for a conversation reopen (recovery 统一, 对称 §8.2).\n\nReopen needs to know, from ONE owner-gated point-in-time read, how to recover the\nconversation's latest turn:\n\n- ``live_running``: a detached in-flight run is still alive to 续看 (实时重连续看\n  C1 · slice 1b) — the client attaches (``GET .../stream``) to replay + tail it.\n- ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and\n  lost their live stream (结构化挂起 2b) — each renders a resume card.\n- ``pending_approvals``: GRANTABLE tool calls still blocked on the in-process\n  approval gate (the turn may also be ``live_running``) — each renders an approval\n  card. Unlike ``paused``, these are NOT durable pause frames; they exist only\n  while the backend run is alive.\n\nA turn parked at a checkpoint is BOTH live (its run is parked on the interaction,\nholding the workspace lock until checkpoint_timeout) and paused (its frame is\npersisted before the suspend ``await``), so these overlap. Returning them together\nlets the client pick ONE actionable surface: a durable paused frame is the\nauthoritative \"this turn is paused\" marker, so when ``paused`` is non-empty the\nresume card is the single surface and the client does NOT attach; it attaches only\nwhen ``live_running`` and ``paused`` is empty (a genuinely in-flight, non-paused\nturn). Folding both into one snapshot removes the former two-probe reopen\n(``GET /paused`` + the ``GET /stream`` attach) whose independent results raced into a\nduplicate 拍板 card.",
         "properties": {
           "live_running": {
             "default": false,
@@ -6299,6 +7506,13 @@
               "$ref": "#/components/schemas/PausedTurnSummary"
             },
             "title": "Paused",
+            "type": "array"
+          },
+          "pending_approvals": {
+            "items": {
+              "$ref": "#/components/schemas/PendingApprovalSummary"
+            },
+            "title": "Pending Approvals",
             "type": "array"
           }
         },
@@ -6860,6 +8074,28 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "Vec3": {
+        "description": "3D position on the town ground plane (R3F / Three.js Y-up).\n\n- ``x``: east (+) / west (-)\n- ``y``: height above ground (NPCs typically 0)\n- ``z``: south (+) / north (-)",
+        "properties": {
+          "x": {
+            "default": 0.0,
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "default": 0.0,
+            "title": "Y",
+            "type": "number"
+          },
+          "z": {
+            "default": 0.0,
+            "title": "Z",
+            "type": "number"
+          }
+        },
+        "title": "Vec3",
+        "type": "object"
+      },
       "WorkspaceBindingResponse": {
         "description": "A conversation's resolved workspace mode + where its binding lives.",
         "properties": {
@@ -7153,6 +8389,87 @@
         ],
         "title": "WorkspaceWriteResult",
         "type": "object"
+      },
+      "WorldEventWire": {
+        "description": "One active world event in tick snapshots.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "duration_ticks": {
+            "default": 1,
+            "title": "Duration Ticks",
+            "type": "integer"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "source": {
+            "default": "scheduler",
+            "title": "Source",
+            "type": "string"
+          },
+          "tick_started": {
+            "title": "Tick Started",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "kind",
+          "event_type",
+          "title",
+          "description",
+          "tick_started"
+        ],
+        "title": "WorldEventWire",
+        "type": "object"
+      },
+      "WorldModifiersWire": {
+        "description": "World-level knobs affected by scheduled events.",
+        "properties": {
+          "festival_active": {
+            "default": false,
+            "title": "Festival Active",
+            "type": "boolean"
+          },
+          "market_price_multiplier": {
+            "default": 1.0,
+            "title": "Market Price Multiplier",
+            "type": "number"
+          },
+          "square_attraction_boost": {
+            "default": 0.0,
+            "title": "Square Attraction Boost",
+            "type": "number"
+          },
+          "storm_active": {
+            "default": false,
+            "title": "Storm Active",
+            "type": "boolean"
+          }
+        },
+        "title": "WorldModifiersWire",
+        "type": "object"
       }
     }
   },
@@ -7399,6 +8716,73 @@
           }
         },
         "summary": "List Audit Logs",
+        "tags": [
+          "admin",
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/audit/summary": {
+      "get": {
+        "description": "Platform-wide agent audit aggregates for the admin observability widget.",
+        "operationId": "agent_audit_summary_v1_admin_audit_summary_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAgentAuditSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Agent Audit Summary",
         "tags": [
           "admin",
           "admin"
@@ -9059,6 +10443,23 @@
             }
           },
           {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -9270,6 +10671,71 @@
           }
         },
         "summary": "Create Invites Batch",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/invites/stats": {
+      "get": {
+        "operationId": "invite_stats_v1_auth_invites_stats_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteStatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Invite Stats",
         "tags": [
           "auth"
         ]
@@ -11230,6 +12696,93 @@
         ]
       }
     },
+    "/v1/conversations/{conversation_id}/audit/file": {
+      "get": {
+        "description": "File-attribution audit timeline for one workspace path (owner-scoped).",
+        "operationId": "list_file_audit_v1_conversations__conversation_id__audit_file_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace-relative file path",
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "description": "Workspace-relative file path",
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentAuditListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List File Audit",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/v1/conversations/{conversation_id}/cost": {
       "get": {
         "description": "A conversation's cumulative spend (对话累计 — the conversation-header chip).\n\n404 for a non-owner, consistent with the other conversation reads.",
@@ -12223,7 +13776,7 @@
         ]
       },
       "post": {
-        "description": "Send a user message and get a streaming AI response via SSE.\n\n执行与请求解耦 (C1 · slice 1a): the pipeline runs as a *detached* task tracked in\nthe ``TurnRunRegistry`` (keyed by conversation), and the SSE stream only attaches\nto it (``detach_on_disconnect=True``). A client disconnect therefore no longer\nkills the turn (案例 1: 7-min 断连即丢交付) — it finishes + persists in the\nbackground; an explicit 停止 routes through ``POST .../stop`` instead.\n\nGated before the stream starts (成本配额与计费.md §一) so a refused turn gets a\nclean error instead of a half-opened SSE: per-user rate limit first (sheds a\nflooding account before any resource DB work), then ownership, then the\nBYOK/quota billing gate (BYOK mode requires the user's own key; platform mode\nenforces quota). The resolved BYOK credentials thread through the whole turn.\n\nDB session scoped to preflight only — released before the SSE stream opens, so a\nlong-lived stream never holds a pooled connection (fixes GC-termination warnings\non abrupt teardown).",
+        "description": "Send a user message and get a streaming AI response via SSE.\n\n执行与请求解耦 (C1 · slice 1a): the pipeline runs as a *detached* task tracked in\nthe ``TurnRunRegistry`` (keyed by conversation), and the SSE stream only attaches\nto it (``detach_on_disconnect=True``). A client disconnect therefore no longer\nkills the turn (案例 1: 7-min 断连即丢交付) — it finishes + persists in the\nbackground; an explicit 停止 routes through ``POST .../stop`` instead.\n\nGated before the stream starts (成本配额与计费.md §一) so a refused turn gets a\nclean error instead of a half-opened SSE: per-user rate limit first (sheds a\nflooding account before any resource DB work), then ownership, then the\nBYOK/quota billing gate (BYOK mode requires the user's own key; platform mode\nenforces quota). The resolved BYOK credentials thread through the whole turn.\n\nRequest-scoped DB session for preflight only — explicitly closed before the SSE\nstream opens so a long-lived stream never holds a pooled connection (fixes\nGC-termination warnings on abrupt teardown).",
         "operationId": "send_message_v1_conversations__conversation_id__messages_post",
         "parameters": [
           {
@@ -12383,6 +13936,102 @@
           }
         },
         "summary": "Delete Message",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/messages/{message_id}/audit": {
+      "get": {
+        "description": "Delegated-turn audit timeline for one assistant message (owner-scoped).",
+        "operationId": "list_turn_audit_v1_conversations__conversation_id__messages__message_id__audit_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Include runtime causal graph",
+            "in": "query",
+            "name": "include_causal",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include runtime causal graph",
+              "title": "Include Causal",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentAuditListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Turn Audit",
         "tags": [
           "conversations"
         ]
@@ -17357,7 +19006,7 @@
     },
     "/v1/model-modes": {
       "get": {
-        "description": "Built-in presets + the user's custom modes + the user's resolved default ref.",
+        "description": "Empty catalog — quality modes are no longer supported.",
         "operationId": "list_model_modes_v1_model_modes_get",
         "parameters": [
           {
@@ -17496,7 +19145,7 @@
     },
     "/v1/model-modes/catalog": {
       "get": {
-        "description": "The option space for building a custom mode: configurable team roles + the\noperator-allowed models. 经济worker is shown read-only (locked to its base model).",
+        "description": "Empty option space — quality modes are no longer supported.",
         "operationId": "model_mode_catalog_v1_model_modes_catalog_get",
         "parameters": [
           {
@@ -17562,7 +19211,6 @@
     },
     "/v1/model-modes/default": {
       "put": {
-        "description": "Set (or clear with null) the user's account-default 质量档.",
         "operationId": "set_default_model_mode_v1_model_modes_default_put",
         "parameters": [
           {
@@ -17961,6 +19609,875 @@
         ]
       }
     },
+    "/v1/simulation/runs": {
+      "post": {
+        "operationId": "create_run_v1_simulation_runs_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSimulationRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationRunSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Run",
+        "tags": [
+          "simulation"
+        ]
+      }
+    },
+    "/v1/simulation/runs/{run_id}/agents/{agent_id}": {
+      "patch": {
+        "operationId": "patch_agent_v1_simulation_runs__run_id__agents__agent_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchSimulationAgentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatchSimulationAgentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Agent",
+        "tags": [
+          "simulation"
+        ]
+      }
+    },
+    "/v1/simulation/runs/{run_id}/inject": {
+      "post": {
+        "operationId": "inject_event_v1_simulation_runs__run_id__inject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InjectSimulationEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InjectSimulationEventResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inject Event",
+        "tags": [
+          "simulation"
+        ]
+      }
+    },
+    "/v1/simulation/runs/{run_id}/manifest": {
+      "get": {
+        "operationId": "get_run_manifest_v1_simulation_runs__run_id__manifest_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationRunManifestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run Manifest",
+        "tags": [
+          "simulation"
+        ]
+      }
+    },
+    "/v1/simulation/runs/{run_id}/metrics": {
+      "get": {
+        "operationId": "get_run_metrics_v1_simulation_runs__run_id__metrics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationRunMetricsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run Metrics",
+        "tags": [
+          "simulation"
+        ]
+      }
+    },
+    "/v1/simulation/runs/{run_id}/pause": {
+      "post": {
+        "operationId": "pause_run_v1_simulation_runs__run_id__pause_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationRunStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pause Run",
+        "tags": [
+          "simulation"
+        ]
+      }
+    },
+    "/v1/simulation/runs/{run_id}/replay": {
+      "get": {
+        "operationId": "replay_run_v1_simulation_runs__run_id__replay_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "From",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "To",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replay Run",
+        "tags": [
+          "simulation"
+        ]
+      }
+    },
+    "/v1/simulation/runs/{run_id}/resume": {
+      "post": {
+        "operationId": "resume_run_v1_simulation_runs__run_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationRunStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resume Run",
+        "tags": [
+          "simulation"
+        ]
+      }
+    },
+    "/v1/simulation/runs/{run_id}/stream": {
+      "get": {
+        "operationId": "stream_run_v1_simulation_runs__run_id__stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Run",
+        "tags": [
+          "simulation"
+        ]
+      }
+    },
+    "/v1/simulation/runs/{run_id}/tick": {
+      "post": {
+        "operationId": "advance_tick_v1_simulation_runs__run_id__tick_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdvanceTickResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Advance Tick",
+        "tags": [
+          "simulation"
+        ]
+      }
+    },
+    "/v1/simulation/runs/{run_id}/ticks/{tick_number}": {
+      "get": {
+        "operationId": "get_tick_frame_v1_simulation_runs__run_id__ticks__tick_number__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tick_number",
+            "required": true,
+            "schema": {
+              "title": "Tick Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimTickFrameResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Tick Frame",
+        "tags": [
+          "simulation"
+        ]
+      }
+    },
     "/v1/tools": {
       "get": {
         "description": "List the platform's built-in tools (name, description, category, approval).\n\nSerializes the same registry the chat pipeline equips workers with, minus the\nCEO-only ``delegate`` primitive. The catalog is static platform metadata (not\nuser-scoped); auth is required only to match the app's authenticated posture.",
@@ -18225,7 +20742,7 @@
     },
     "/v1/users/me/llm-key": {
       "delete": {
-        "description": "Remove the user's stored key (BYOK turns then refuse until one is set again).",
+        "description": "Remove the user's stored config (BYOK turns then refuse until one is set again).",
         "operationId": "delete_llm_key_v1_users_me_llm_key_delete",
         "parameters": [
           {
@@ -18289,7 +20806,7 @@
         ]
       },
       "get": {
-        "description": "Current BYOK key status (configured? last-4? last connectivity result?).",
+        "description": "Current BYOK LLM config status (configured? endpoint? last probe result?).",
         "operationId": "get_llm_key_v1_users_me_llm_key_get",
         "parameters": [
           {
@@ -18353,7 +20870,7 @@
         ]
       },
       "put": {
-        "description": "Store or replace the user's DeepSeek key (encrypted at rest; status reset).",
+        "description": "Store or replace the user's LLM config (key encrypted at rest; status reset).",
         "operationId": "set_llm_key_v1_users_me_llm_key_put",
         "parameters": [
           {
@@ -18427,9 +20944,85 @@
         ]
       }
     },
+    "/v1/users/me/llm-key/billing-preference": {
+      "put": {
+        "description": "Switch between platform free quota and BYOK for the authenticated user.",
+        "operationId": "set_billing_preference_v1_users_me_llm_key_billing_preference_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetBillingPreferenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmKeyStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Billing Preference",
+        "tags": [
+          "llm-key"
+        ]
+      }
+    },
     "/v1/users/me/llm-key/test": {
       "post": {
-        "description": "Probe DeepSeek with the stored key and persist 'active' / 'error'.",
+        "description": "Probe the configured endpoint and persist 'active' / 'error' + supports_tools.",
         "operationId": "test_llm_key_v1_users_me_llm_key_test_post",
         "parameters": [
           {

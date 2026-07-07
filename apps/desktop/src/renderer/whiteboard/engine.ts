@@ -24,6 +24,7 @@ import { History } from "./history";
 import { ImageCache, loadImageForImport } from "./images";
 import { type KeyCommands, handleKeyDown, handleKeyUp } from "./keymap";
 import { layoutGrid } from "./layout";
+import { layoutDagre } from "./layoutDagre";
 import { applyBoardOps } from "./ops";
 import { renderScene, selectionHandlesScreen } from "./render";
 import * as selOps from "./selectionOps";
@@ -32,6 +33,7 @@ import { type TextCommit, TextEditor } from "./textEditor";
 import {
   normalizeFreedraw,
   resizeBox,
+  rotationFromDrag,
   scaleElements,
   syncArrowBox,
 } from "./transform";
@@ -52,6 +54,8 @@ export interface EngineCallbacks {
   onViewportChange: (zoom: number) => void;
   /** Right-click on the canvas (screen px, relative to the canvas) — host opens a menu. */
   onContextMenu: (x: number, y: number) => void;
+  /** Double-click a crystallized `artifactCard` — host opens file preview or expands text. */
+  onArtifactActivate?: (el: SceneElement) => void;
 }
 
 type Pointer =
@@ -64,6 +68,13 @@ type Pointer =
   | { kind: "arrowdraw"; id: string; origin: [number, number] }
   | { kind: "resize"; id: string; handle: string; box: Box }
   | { kind: "scale"; handle: string; box: Box; base: SceneElement[] }
+  | {
+      kind: "rotate";
+      id: string;
+      center: [number, number];
+      startAngle: number;
+      startRotation: number;
+    }
   | { kind: "erase" };
 
 const HANDLE_HIT = 10;
@@ -238,6 +249,16 @@ export class WhiteboardEngine {
    * overlay beside it (进度贴源). Null when nothing is selected. */
   getSelectionBounds(): Box | null {
     return unionBox(this.elements.filter((e) => this.selected.has(e.id)));
+  }
+
+  /** Programmatically select a set of element ids (ignoring unknown ids). The app selects via
+   * pointer; this is the seam the offline preview (`#/preview/whiteboard`) uses to render a
+   * selected state (rotation handle / selection bar) without a synthetic gesture. */
+  selectIds(ids: string[]): void {
+    this.setSelection(
+      ids.filter((id) => this.elements.some((e) => e.id === id)),
+    );
+    this.scheduleRender();
   }
 
   /** Replace the transient AI-progress overlay layer (M3 进度贴源). These elements render on
@@ -553,11 +574,16 @@ export class WhiteboardEngine {
     this.cb.onSelectionChange(ids);
   }
 
-  private updateCursor(hoverEl?: boolean, hoverHandle?: boolean): void {
+  private updateCursor(
+    hoverEl?: boolean,
+    hoverHandle?: boolean,
+    rotate?: boolean,
+  ): void {
     let cursor = "default";
     if (this.tool === "hand" || this.spaceDown) cursor = "grab";
     else if (this.tool === "eraser") cursor = "cell";
     else if (this.tool !== "select") cursor = "crosshair";
+    else if (rotate) cursor = "grab";
     else if (hoverHandle) cursor = "nwse-resize";
     else if (hoverEl) cursor = "move";
     this.canvas.style.cursor = cursor;
@@ -612,6 +638,20 @@ export class WhiteboardEngine {
       this.dragDirty = false;
       if (this.selected.size === 1) {
         const only = this.elements.find((el) => this.selected.has(el.id));
+        if (only && handle === "rotate") {
+          const b = elementBox(only);
+          const cx = b.x + b.width / 2;
+          const cy = b.y + b.height / 2;
+          this.pointer = {
+            kind: "rotate",
+            id: only.id,
+            center: [cx, cy],
+            startAngle: Math.atan2(wy - cy, wx - cx),
+            startRotation: only.rotation ?? 0,
+          };
+          this.canvas.style.cursor = "grabbing";
+          return;
+        }
         if (only) {
           this.pointer = {
             kind: "resize",
@@ -673,7 +713,12 @@ export class WhiteboardEngine {
       if (this.tool === "select") {
         const [sx, sy] = this.toScreen(e);
         const [wx, wy] = this.toWorld(e);
-        this.updateCursor(!!this.topElementAt(wx, wy), !!this.handleAt(sx, sy));
+        const handle = this.handleAt(sx, sy);
+        this.updateCursor(
+          !!this.topElementAt(wx, wy),
+          !!handle && handle !== "rotate",
+          handle === "rotate",
+        );
       }
       return;
     }
@@ -767,6 +812,23 @@ export class WhiteboardEngine {
       }
       case "scale": {
         this.applyScale(p, wx, wy, e.shiftKey);
+        this.dragDirty = true;
+        this.scheduleRender();
+        break;
+      }
+      case "rotate": {
+        const el = this.elements.find((x) => x.id === p.id);
+        if (el) {
+          const [cx, cy] = p.center;
+          el.rotation = rotationFromDrag(
+            cx,
+            cy,
+            wx,
+            wy,
+            p.startAngle,
+            p.startRotation,
+          );
+        }
         this.dragDirty = true;
         this.scheduleRender();
         break;
@@ -1125,6 +1187,11 @@ export class WhiteboardEngine {
     this.commit(layoutGrid(this.elements, this.selected));
   }
 
+  layoutSelectedDagre(): void {
+    if (this.selected.size < 2) return;
+    this.commit(layoutDagre(this.elements, this.selected));
+  }
+
   groupSelected(): void {
     if (this.selected.size < 2) return;
     this.commit(
@@ -1288,6 +1355,10 @@ export class WhiteboardEngine {
   private onDoubleClick = (e: MouseEvent): void => {
     const [wx, wy] = this.toWorld(e);
     const hit = this.topElementAt(wx, wy);
+    if (hit?.type === "artifactCard") {
+      this.cb.onArtifactActivate?.(hit);
+      return;
+    }
     if (hit && hit.type !== "arrow" && hit.type !== "freedraw") {
       this.textEditor.begin(hit, [wx, wy]);
     } else if (!hit) {

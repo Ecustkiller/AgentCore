@@ -155,24 +155,34 @@ class DebateClash:
 
 
 @dataclass
+class CrossExamQa:
+    """质询环节的一条 Q↔A（质询回合 P1 最小单元）。
+
+    ``question`` verbatim 进 SSE payload；``answer`` 为从辩手作答中解析出的该条摘要（完整流仍随
+    ``answer_run_id`` 的 run 事件走）；``ok`` 标记该条是否正面回答（回避 / 未答 → 裁判扣 engagement）。
+    """
+
+    question: str
+    answer: str = ""
+    ok: bool = True
+
+
+@dataclass
 class CrossExamExchange:
-    """一轮【质询环节】的一问一答（质询回合，辩论编排设计.md §4-2.1）。
+    """一轮【质询环节】对某方的逐条交换组（质询回合，辩论编排设计.md §4-2.1）。
 
     质询环节由主持人代表交锋、向某方（``target``= :class:`DebateSide` 的 key）发出【必须正面回答】
-    的尖锐质询（``questions``，2–3 条、可含是/否逼答），被质询方在【自己的 transcript】上作答
-    （``answer`` 经 ``continue_run`` 产出、``answer_run_id`` 挂到执行图节点、``ok`` 标记是否成功答出）。
-    ``questioner`` 是提问方 side_key，空=主持人代表交锋（当前实现）——保留字段以便日后切到「辩手互相
-    质询」而不改契约。质询问答随本轮 :class:`RoundResult` 留痕（``questions`` verbatim 进 payload，
-    ``answer`` 全文随 answer_run_id 的 run 事件走、不塞 payload），并喂进裁判记分（回避 / 答非所问 →
-    扣 engagement）——这正是「让交锋当面发生、把回避与被戳穿变成可记分」的落点。
+    的尖锐质询（``exchanges``，通常 2–3 条、可含是/否逼答），被质询方在【自己的 transcript】上逐条
+    作答（``answer_run_id`` 挂到执行图节点、全文随 run 事件走）。``questioner`` 是提问方 side_key，
+    空=主持人代表交锋（当前实现）——保留字段以便日后切到「辩手互相质询」而不改契约。质询问答随本轮
+    :class:`RoundResult` 留痕并喂进裁判记分（回避 / 答非所问 → 扣 engagement）——这正是「让交锋当面
+    发生、把回避与被戳穿变成可记分」的落点。
     """
 
     target: str
-    questions: list[str] = field(default_factory=list)
-    answer: str = ""
+    exchanges: list[CrossExamQa] = field(default_factory=list)
     answer_run_id: str = ""
     questioner: str = ""
-    ok: bool = True
 
 
 @dataclass
@@ -378,15 +388,21 @@ class RoundResult:
                 {"ask": i.ask, "target_key": i.target_key, "answered": i.answered}
                 for i in self.user_interjections
             ],
-            # 质询环节（质询回合 P1）：问题 verbatim 进载荷（前端渲染 Q）、回答全文随 answer_run_id 的
-            # run 事件走（不塞载荷，与各方发言全文同策），恒带（无质询为空列表），载荷形状统一。
+            # 质询环节（质询回合 P1）：逐条 Q↔A verbatim 进载荷（answer 为解析摘要；完整流随
+            # answer_run_id 的 run 事件走，与各方发言全文同策），恒带（无质询为空列表），载荷形状统一。
             "cross_exam": [
                 {
                     "target": cx.target,
                     "questioner": cx.questioner,
-                    "questions": list(cx.questions),
+                    "exchanges": [
+                        {
+                            "question": ex.question,
+                            "answer": ex.answer,
+                            "ok": ex.ok,
+                        }
+                        for ex in cx.exchanges
+                    ],
                     "answer_run_id": cx.answer_run_id,
-                    "ok": cx.ok,
                 }
                 for cx in self.cross_exam
             ],

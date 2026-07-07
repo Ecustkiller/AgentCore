@@ -8,6 +8,7 @@ import {
 import { attachStream, resumeStream, streamMessage } from "@/api/stream";
 import {
   type PausedTurnSummary,
+  type PendingApprovalSummary,
   type TurnRecovery,
   getRecovery,
   stopConversation,
@@ -36,8 +37,12 @@ import type {
   CheckpointDecision,
   MessageEndPayload,
   SSEEvent,
+  TurnWarningPayload,
 } from "@agentcore/contract-types";
-import type { ProjectedTurn } from "@agentcore/protocol-conformance";
+import type {
+  PendingInteraction,
+  ProjectedTurn,
+} from "@agentcore/protocol-conformance";
 import { Folder, Menu, Sparkles, SquarePen } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -156,6 +161,18 @@ function useLazyMessageCost(messageId: string): {
   return { ref, total };
 }
 
+function recoveredApprovalPending(
+  a: PendingApprovalSummary,
+): Extract<PendingInteraction, { kind: "approval" }> {
+  return {
+    kind: "approval",
+    approvalId: a.approval_id,
+    toolCallId: a.tool_call_id,
+    toolName: a.tool_name,
+    arguments: (a.arguments ?? {}) as Record<string, unknown>,
+  };
+}
+
 /** One-line status derived from the projected turn — proves the fold drives the UI
  * (进度 / 工具 are read off ProjectedTurn, not re-parsed from events). A `paused` turn
  * returns null: its actionable surface owns the view instead — an `approval` pause shows the
@@ -171,6 +188,15 @@ function summarize(p: ProjectedTurn): string | null {
   if (tool && tool.kind === "tool" && tool.status === "running")
     return `正在调用 ${tool.tool_name}…`;
   if (p.status === "failed") return "出错了";
+  return null;
+}
+
+function extractTurnWarning(events: SSEEvent[]): string | null {
+  for (const e of events) {
+    if (e.type === "turn_warning") {
+      return (e.payload as TurnWarningPayload).message;
+    }
+  }
   return null;
 }
 
@@ -222,8 +248,13 @@ function AssistantBubble({
     !isMulti && p.process.length === 0 && !p.content && !p.reasoning;
   // 回合总账 — populated by message_end (null while streaming, so it appears on finish).
   const cost = formatCost(p.cost?.total);
+  const turnWarning = useMemo(
+    () => extractTurnWarning(turn.events),
+    [turn.events],
+  );
   return (
     <div className="bubble assistant">
+      {turnWarning && <div className="turn-warning">{turnWarning}</div>}
       {empty ? (
         <span className="muted">{live ? "…" : ""}</span>
       ) : (
@@ -351,6 +382,9 @@ export function ChatPage() {
   // Turns that paused at a checkpoint then lost their stream (durable resume frames),
   // surfaced as ResumeCards on reopen (结构化挂起 2b).
   const [paused, setPaused] = useState<PausedTurnSummary[]>([]);
+  const [recoveredApprovals, setRecoveredApprovals] = useState<
+    PendingApprovalSummary[]
+  >([]);
   // Older messages exist above the loaded window (drives 加载更早); `loadingOlder` blocks
   // re-entrancy while a page is in flight (历史上翻分页).
   const [hasMoreBefore, setHasMoreBefore] = useState(false);
@@ -414,6 +448,7 @@ export function ChatPage() {
     setError(null);
     setSending(false);
     setPaused([]);
+    setRecoveredApprovals([]);
     setHasMoreBefore(false);
     setMemoryUpdates([]);
     let cancelled = false;
@@ -422,10 +457,17 @@ export function ChatPage() {
     // 打开会话（失败 = 空快照，回合下次重开仍可恢复）。保留为 promise，让下方 attach 决策对齐同一
     // 份快照（与桌面端一致）。
     const recoveryLoaded = getRecovery(conversationId).catch(
-      (): TurnRecovery => ({ liveRunning: false, paused: [] }),
+      (): TurnRecovery => ({
+        liveRunning: false,
+        paused: [],
+        pendingApprovals: [],
+      }),
     );
     void recoveryLoaded.then((r) => {
-      if (!cancelled) setPaused(r.paused);
+      if (!cancelled) {
+        setPaused(r.paused);
+        setRecoveredApprovals(r.pendingApprovals);
+      }
     });
     getMessages(conversationId)
       .then(async ({ messages, hasMoreBefore: more, memoryUpdates }) => {
@@ -535,7 +577,10 @@ export function ChatPage() {
   const livePending = sending
     ? (liveProjection?.pendingInteraction ?? null)
     : null;
-  const pending = livePending?.kind === "approval" ? livePending : null;
+  const liveApproval = livePending?.kind === "approval" ? livePending : null;
+  const approvalCards = liveApproval
+    ? [liveApproval]
+    : recoveredApprovals.map(recoveredApprovalPending);
 
   // 下一步推荐 chips: the just-finished turn's followups, surfaced above the composer (tapping
   // fills the input — review/edit before send, mirroring desktop). Transport-only, read off the
@@ -895,12 +940,19 @@ export function ChatPage() {
         <MemoryUpdateCard updates={memoryUpdates} />
       </div>
 
-      {pending && conversationId && (
-        <PauseCard
-          key={pending.approvalId}
-          pending={pending}
-          conversationId={conversationId}
-        />
+      {approvalCards.map((pending) =>
+        conversationId ? (
+          <PauseCard
+            key={pending.approvalId}
+            pending={pending}
+            conversationId={conversationId}
+            onResolved={() =>
+              setRecoveredApprovals((prev) =>
+                prev.filter((a) => a.approval_id !== pending.approvalId),
+              )
+            }
+          />
+        ) : null,
       )}
 
       {/* Durable resume cards (a turn that paused then lost its stream). Hidden while a

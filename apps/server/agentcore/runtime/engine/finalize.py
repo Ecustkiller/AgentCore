@@ -3,9 +3,9 @@
 from collections.abc import Callable
 
 from agentcore.core.logging import get_logger
-from agentcore.llm.config import ModelProfile, build_request
-from agentcore.llm.deepseek import DeepSeekProvider
-from agentcore.llm.protocol import LLMMessage, TokenUsage
+from agentcore.llm.profiles import ModelProfile, build_request
+from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
+from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 from agentcore.runtime.facts import NoteFact, record_turn_fact
 
 from .constants import FINALIZE_INSTRUCTION
@@ -18,8 +18,9 @@ logger = get_logger(__name__)
 async def force_finalize(
     *,
     messages: list[LLMMessage],
-    llm: DeepSeekProvider,
+    llm: OpenAICompatibleProvider,
     profile: ModelProfile,
+    active_model: str,
     emit_content: Callable[[str], None],
     emit_reasoning: Callable[[str], None],
     final_content: str,
@@ -48,9 +49,11 @@ async def force_finalize(
             run_id=run_id,
         ).to_fact()
     )
-    request = build_request(profile, messages, tools=None, tool_choice="none")
+    request = build_request(
+        profile, messages, tools=None, tool_choice="none", model=active_model
+    )
     try:
-        content, reasoning, _tool_calls, usage = await stream_llm_round(
+        content, reasoning, _tool_calls, usage, _diag, _preview = await stream_llm_round(
             llm, request, emit_content, emit_reasoning
         )
     except Exception as e:

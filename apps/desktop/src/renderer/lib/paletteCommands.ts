@@ -11,7 +11,6 @@ import {
   BookOpen,
   Bug,
   Cloud,
-  Compass,
   Cpu,
   Download,
   Files,
@@ -235,14 +234,6 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       icon: Workflow,
       keywords: ["team", "mechanism", "graph", "tuandui"],
       run: go("/toolbox/manual/mechanism?s=panorama"),
-    },
-    {
-      id: "nav-explore",
-      title: "探索",
-      category: "前往",
-      icon: Compass,
-      keywords: ["explore", "tansuo"],
-      run: go("/explore"),
     },
     {
       id: "nav-settings",

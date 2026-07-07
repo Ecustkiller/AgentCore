@@ -16,6 +16,7 @@ export const EMPTY_RUNTIME: ConversationRuntime = {
   hasMoreAfter: false,
   loadingOlder: false,
   loadingNewer: false,
+  pendingTurnWarning: null,
 };
 
 export interface ConversationStateSlice {

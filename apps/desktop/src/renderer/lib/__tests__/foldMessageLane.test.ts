@@ -1,4 +1,5 @@
 import {
+  foldCheckpointMarker,
   foldContentDelta,
   foldContentReset,
   foldReasoningDelta,
@@ -98,5 +99,21 @@ describe("foldMessageLane", () => {
       run_id: "run_2",
     } satisfies ToolUseProgressPayload);
     expect(after).toBe(base);
+  });
+
+  it("foldCheckpointMarker absorbs trailing content into the card slot", () => {
+    const base = messageLaneFromMessage({
+      content: "帮你梳理一下起步方案：",
+      process: [
+        { kind: "reasoning", text: "想一下" },
+        { kind: "content", text: "帮你梳理一下起步方案：" },
+      ],
+    });
+    const next = foldCheckpointMarker(base, "cp_1");
+    expect(next.content).toBe("");
+    expect(next.process).toEqual([
+      { kind: "reasoning", text: "想一下" },
+      { kind: "checkpoint", checkpoint_id: "cp_1" },
+    ]);
   });
 });

@@ -16,9 +16,7 @@ from agentcore.api.dependencies import (
     get_conversation_share_repo,
     get_folder_repo,
     get_message_repo,
-    get_model_mode_repo,
 )
-from agentcore.api.routes.model_modes import validate_mode_ref
 from agentcore.api.schemas import (
     ConversationListResponse,
     ConversationSummary,
@@ -40,7 +38,6 @@ from agentcore.db.repositories import (
     ConversationShareRepository,
     FolderRepository,
     MessageRepository,
-    ModelModeRepository,
 )
 
 from ._helpers import _get_owned_conversation
@@ -66,7 +63,6 @@ async def create_conversation(
     user: AuthUser,
     repo: ConversationRepository = Depends(get_conversation_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
-    mode_repo: ModelModeRepository = Depends(get_model_mode_repo),
 ):
     # A non-null target folder must be one of the user's own live folders (else
     # 404), mirroring the move endpoint so a chat can never be born in someone
@@ -75,9 +71,7 @@ async def create_conversation(
         folder = await folder_repo.get_by_id(body.folder_id, user_id=user.user_id)
         if not folder:
             raise NotFoundError("文件夹不存在")
-    # An explicit initial 质量档 must be a known preset or one of the user's own
-    # custom modes (else 400); None inherits the default.
-    await validate_mode_ref(body.model_mode, user_id=user.user_id, repo=mode_repo)
+    # ``model_mode`` is accept-but-ignore (Phase 1c): persisted for old clients, not read at turn time.
     conv = await repo.create(
         user_id=user.user_id,
         title=body.title,
@@ -206,7 +200,6 @@ async def update_conversation(
     body: UpdateConversationRequest,
     user: AuthUser,
     repo: ConversationRepository = Depends(get_conversation_repo),
-    mode_repo: ModelModeRepository = Depends(get_model_mode_repo),
 ):
     # Patch only the fields the client sent: an omitted ``model_mode`` is left
     # untouched, while an explicit null clears it back to「inherit default」.
@@ -217,7 +210,6 @@ async def update_conversation(
     if "title" in fields and body.title is not None:
         conv = await repo.update_title(conversation_id, body.title, user_id=user.user_id)
     if "model_mode" in fields:
-        await validate_mode_ref(body.model_mode, user_id=user.user_id, repo=mode_repo)
         conv = await repo.set_model_mode(conversation_id, body.model_mode, user_id=user.user_id)
     # 对话级自定义指令: an explicit null / "" clears it back to「none」; the repo strips
     # and normalizes blank → NULL so a whitespace-only edit reads as cleared.

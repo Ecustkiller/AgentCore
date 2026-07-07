@@ -126,8 +126,8 @@ jobs:
         env:
           DEBUG: "false"
           BILLING_MODE: byok
-          # Optional custom endpoint. Kept out of DEEPSEEK_BASE_URL directly so an unset
-          # secret can't blank the correct default (https://api.deepseek.com).
+          # Optional BYOK probe endpoint (EVAL_DEEPSEEK_BASE_URL secret). Server reads
+          # PLATFORM_BASE_URL; this override shell var is legacy naming in this step only.
           DEEPSEEK_BASE_URL_OVERRIDE: ${{ secrets.EVAL_DEEPSEEK_BASE_URL }}
           COOKIE_SECURE: "false"
           COOKIE_SAMESITE: lax

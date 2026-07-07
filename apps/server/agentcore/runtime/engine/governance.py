@@ -8,8 +8,8 @@ from typing import Any
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.llm.config import ModelProfile
-from agentcore.llm.protocol import LLMMessage
+from agentcore.llm.profiles import ModelProfile
+from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.facts import NoteFact, record_turn_fact
 from agentcore.runtime.loop_controller import (
@@ -19,7 +19,7 @@ from agentcore.runtime.loop_controller import (
 )
 from agentcore.tools.registry import ToolRegistry
 
-from .directive import Continue, Finalize, LoopDirective, Return, SwitchModel
+from .directive import Continue, Finalize, LoopDirective, Return
 from .outcome import RoundOutcome
 
 logger = get_logger(__name__)
@@ -99,6 +99,14 @@ def apply_circuit_breaker(
     refresh = bool(breaker.disabled)
     if breaker.disabled:
         disabled_tools.update(breaker.disabled)
+        from agentcore.runtime.audit.hooks import on_tool_disabled
+
+        for tool_name in breaker.disabled:
+            on_tool_disabled(
+                tool_name=tool_name,
+                run_id=run_id,
+                failure_count=controller.tool_failure_count(tool_name),
+            )
     breaker_message = breaker.message()
     if breaker_message is not None:
         logger.info(
@@ -126,31 +134,7 @@ def decide_llm_failure(
     final_content: str,
     upstream_error: bool = False,
 ) -> LoopDirective:
-    """Pick the directive for a round whose LLM call hard-failed (non-raising path).
-
-    The provider already exhausted its own network retries (429/5xx backoff) before
-    the exception escaped, so retrying the SAME model is pointless. For upstream 5xx
-    errors, fallback is skipped entirely — different models on the same provider share
-    infra, so a 502 on Flash means Pro will likely 502 too. For other failures,
-    escalate to the profile's fallback model once — sharing the one-switch budget with
-    the empty-response ladder via the ``active_model`` gate. When no fallback is
-    available (or skipped), end the turn on an honest terminal reason: ``ERROR`` when
-    nothing was produced, ``DEGRADED`` when partial content already streamed.
-    """
-    fallback_model = profile.fallback_model
-    fallback_available = (
-        settings.engine_fallback_enabled
-        and fallback_model is not None
-        and fallback_model != (active_model or profile.model)
-        and not upstream_error
-    )
-    if fallback_available:
-        assert fallback_model is not None  # fallback_available ⇒ a model exists
-        logger.warning("engine.fallback_model_on_error", fallback_model=fallback_model)
-        return SwitchModel(model=fallback_model)
-    if upstream_error:
-        logger.warning("engine.upstream_error_no_fallback")
-
+    _ = (profile, active_model, upstream_error)
     reason = FinishReason.DEGRADED if final_content else FinishReason.ERROR
     logger.warning(
         "engine.llm_failed_terminal", reason=reason.value, has_content=bool(final_content)

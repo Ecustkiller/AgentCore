@@ -88,7 +88,10 @@ function scratchFromWorkspaceCache(
  * 从 conversation scratch 字段（经 workspace rail 缓存或 `localContainerRootId` 意向）解析，
  * 再核对该根**确在本机**（否则属 §八「路径不存在」降级，交回云链路处理）。
  */
-async function resolveLocalTarget(
+/** 解析会话的本地工作区目标（容器根 + scratch 子路径），与 sidecar 寻址同构。
+ * 供文件面板等读路径与 sidecar 写路径对齐——workspace list 未列出时仍可用
+ * `localContainerRootId` 回落到本机 IPC。 */
+export async function resolveConversationLocalTarget(
   conversationId: string,
 ): Promise<SidecarTarget | null> {
   const conv = getConversations().find((c) => c.id === conversationId) ?? null;
@@ -108,7 +111,7 @@ async function resolveLocalTarget(
  * 解析一个会话应在其上跑 sidecar 的目标（容器根 id + scratch 子路径）；不该走 sidecar 则 null。
  *
  * = 用户开了「本地引擎」开关（{@link isSidecarEnabled}）**且**该会话能用本地引擎
- * （{@link resolveLocalTarget}）。开关关 / 无本地绑定 / 根不在本机 → null（交回云链路）。
+ * （{@link resolveConversationLocalTarget}）。开关关 / 无本地绑定 / 根不在本机 → null（交回云链路）。
  *
  * 纯「绑定判定」，**不掺运行时健康**：本判定被新回合（`sendTurn`）、续跑（`runResume`）、列暂停
  * 帧（`loadPausedTurns`）三处复用，而「环境能否拉起」（探活 / 降级标记，见 sidecarHealth）对三者
@@ -120,7 +123,7 @@ export async function resolveSidecarRoot(
   conversationId: string,
 ): Promise<SidecarTarget | null> {
   if (!isSidecarEnabled()) return null;
-  return resolveLocalTarget(conversationId);
+  return resolveConversationLocalTarget(conversationId);
 }
 
 /**
@@ -132,7 +135,7 @@ export async function canConversationUseSidecar(
   conversationId: string,
 ): Promise<boolean> {
   if (!hasLocalEngine()) return false;
-  return (await resolveLocalTarget(conversationId)) !== null;
+  return (await resolveConversationLocalTarget(conversationId)) !== null;
 }
 
 /**

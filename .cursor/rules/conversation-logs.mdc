@@ -28,3 +28,10 @@ uv run python scripts/log_stats.py
 ```
 
 → 字段详解 / 调试技巧 / 生产同步：见 [对话日志分析指南](/docs/05-平台与运维/对话日志分析指南.md)
+
+## 查询策略
+
+- trace_id → 用 `--trace`，脚本会自动展示对话上下文
+- 需要完整对话历史 → 直接用 conversation_id（不带 `--trace`）
+- 排查"某次对话出了什么问题" → 优先用 conversation_id 查全貌
+- 排查"某个特定回合的细节" → 用 --trace 查单轮 + 自动上下文

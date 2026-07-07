@@ -10,7 +10,7 @@ from pathlib import Path
 
 import agentcore.tools.builtin.revise as revise_mod
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.llm.protocol import LLMChunk, LLMMessage, TokenUsage, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, TokenUsage, ToolCallDelta
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.runs import RunSession, RunSpec, build_agent_executor, build_run_plan
 from agentcore.runtime.runs.constants import DEFAULT_RECALL_LIMIT

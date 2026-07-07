@@ -1,9 +1,12 @@
 import { FilePreviewBody } from "@/components/files/FilePreviewBody";
 import { Centered, InlineError } from "@/components/files/parts";
+import { FileAuditSection } from "@/components/audit/FileAuditTrail";
 import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { useFileAudit } from "@/hooks/useFileAudit";
 import type { FilePreviewResult, FileSource } from "@/lib/fileSource";
 import { notifyActionError, notifyError } from "@/lib/toast";
+import { useConversationStore } from "@/stores/conversation";
 import {
   ChevronLeft,
   Download,
@@ -41,6 +44,8 @@ export function FilePreviewView({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const fileAuditState = useFileAudit(conversationId, path, !editing);
 
   const load = useCallback(async () => {
     setResult(null);
@@ -48,7 +53,14 @@ export function FilePreviewView({
     setEditing(false);
     try {
       setResult(await source.read(path));
-    } catch {
+    } catch (err) {
+      console.error(
+        `[FilePreview] source.read failed ${JSON.stringify({
+          path,
+          sourceId: source.id,
+          error: err instanceof Error ? err.message : String(err),
+        })}`,
+      );
       setError(true);
     }
   }, [source, path]);
@@ -242,7 +254,12 @@ export function FilePreviewView({
             />
           </Centered>
         ) : (
-          <FilePreviewBody result={result} name={name} />
+          <>
+            <FilePreviewBody result={result} name={name} />
+            {conversationId && (
+              <FileAuditSection state={fileAuditState} />
+            )}
+          </>
         )}
       </div>
     </div>

@@ -95,8 +95,19 @@ export function createLocalRootSource(
         .map((f) => f.relPath.slice(prefix.length));
     },
     async read(path): Promise<FilePreviewResult> {
-      const res = await window.fsApi.readFile(rootId, inPath(path));
-      if (!res.ok) throw new Error(res.reason);
+      const resolvedPath = inPath(path);
+      const res = await window.fsApi.readFile(rootId, resolvedPath);
+      if (!res.ok) {
+        console.error(
+          `[FilePreview] localRootSource.read failed ${JSON.stringify({
+            rootId,
+            path,
+            resolvedPath,
+            reason: res.reason,
+          })}`,
+        );
+        throw new Error(res.reason);
+      }
       return adaptPreview(res.data);
     },
     async readForEdit(path): Promise<FileEditDoc> {

@@ -1,9 +1,9 @@
-"""BYOK DeepSeek API key management (设置·模型配置).
+"""BYOK LLM configuration management (设置·模型配置).
 
-The user's single self-supplied DeepSeek key (config.billing_mode "byok"): view
-status (last-4 + last connectivity result), store / replace, clear, and
-connectivity-test it. Only AES-256-GCM ciphertext is stored, never the plaintext
-key (see llm/key_service.py). All routes are scoped to the authenticated user
+The user's OpenAI-compatible endpoint config (config.billing_mode "byok"): view
+status (last-4 + endpoint/model + last connectivity result), store / replace,
+clear, and connectivity-test it. Only AES-256-GCM ciphertext is stored for the
+API key (see llm/key_service.py). All routes are scoped to the authenticated user
 ("me"), so there is no cross-user access to guard.
 """
 
@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agentcore.api.dependencies import AuthUser, get_db
 from agentcore.api.schemas import (
     LlmKeyStatusResponse,
+    SetBillingPreferenceRequest,
     SetLlmKeyRequest,
     StatusResponse,
 )
@@ -31,6 +32,25 @@ def _to_response(status: LlmKeyStatus) -> LlmKeyStatusResponse:
         status=status.status,
         masked_key=status.masked_key,
         message=status.message,
+        base_url=status.base_url,
+        default_model=status.default_model,
+        supports_tools=status.supports_tools,
+        billing_mode=status.billing_mode,
+        billing_preference=status.billing_preference,
+        platform_available=status.platform_available,
+        platform_model=status.platform_model,
+    )
+
+
+@router.put("/billing-preference", response_model=LlmKeyStatusResponse)
+async def set_billing_preference(
+    body: SetBillingPreferenceRequest,
+    user: AuthUser,
+    service: LlmKeyService = Depends(get_llm_key_service),
+):
+    """Switch between platform free quota and BYOK for the authenticated user."""
+    return _to_response(
+        await service.set_billing_preference(user.user_id, body.billing_preference)
     )
 
 
@@ -39,7 +59,7 @@ async def get_llm_key(
     user: AuthUser,
     service: LlmKeyService = Depends(get_llm_key_service),
 ):
-    """Current BYOK key status (configured? last-4? last connectivity result?)."""
+    """Current BYOK LLM config status (configured? endpoint? last probe result?)."""
     return _to_response(await service.get_status(user.user_id))
 
 
@@ -49,8 +69,15 @@ async def set_llm_key(
     user: AuthUser,
     service: LlmKeyService = Depends(get_llm_key_service),
 ):
-    """Store or replace the user's DeepSeek key (encrypted at rest; status reset)."""
-    return _to_response(await service.set_key(user.user_id, body.api_key))
+    """Store or replace the user's LLM config (key encrypted at rest; status reset)."""
+    return _to_response(
+        await service.set_key(
+            user.user_id,
+            body.api_key,
+            base_url=body.base_url,
+            default_model=body.default_model,
+        )
+    )
 
 
 @router.delete("", response_model=StatusResponse)
@@ -58,7 +85,7 @@ async def delete_llm_key(
     user: AuthUser,
     service: LlmKeyService = Depends(get_llm_key_service),
 ):
-    """Remove the user's stored key (BYOK turns then refuse until one is set again)."""
+    """Remove the user's stored config (BYOK turns then refuse until one is set again)."""
     await service.clear_key(user.user_id)
     return StatusResponse()
 
@@ -68,5 +95,5 @@ async def test_llm_key(
     user: AuthUser,
     service: LlmKeyService = Depends(get_llm_key_service),
 ):
-    """Probe DeepSeek with the stored key and persist 'active' / 'error'."""
+    """Probe the configured endpoint and persist 'active' / 'error' + supports_tools."""
     return _to_response(await service.test_key(user.user_id))

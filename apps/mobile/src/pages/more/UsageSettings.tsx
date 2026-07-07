@@ -101,8 +101,8 @@ function Dashboard({ summary }: { summary: UsageSummary }) {
     <>
       {byok ? (
         <p className="section-note" style={{ marginBottom: 18 }}>
-          当前为「自带 Key」模式：对话按你自己的 DeepSeek
-          额度计费、平台不设上限。下方为按官方价格估算的你的用量与花费。
+          当前为「自带 Key」模式：平台不限额，下方以 token
+          用量为主（平台不代为计价）。
         </p>
       ) : (
         <Meter
@@ -118,29 +118,37 @@ function Dashboard({ summary }: { summary: UsageSummary }) {
       )}
 
       <div className="section">
-        <h2 className="section-title">本月成本</h2>
+        <h2 className="section-title">{byok ? "用量" : "本月成本"}</h2>
         <div className="section-card">
-          <div className="payroll-row" style={{ padding: 0 }}>
-            <span>本月</span>
-            <span className="payroll-cost">{cny(month.cost.total, rate)}</span>
-          </div>
+          {!byok && (
+            <>
+              <div className="payroll-row" style={{ padding: 0 }}>
+                <span>本月</span>
+                <span className="payroll-cost">
+                  {cny(month.cost.total, rate)}
+                </span>
+              </div>
+              <div
+                className="payroll-row"
+                style={{
+                  padding: 0,
+                  borderTop: "1px solid var(--border)",
+                  paddingTop: 12,
+                }}
+              >
+                <span>今日</span>
+                <span className="payroll-cost">
+                  {cny(today.cost.total, rate)}
+                </span>
+              </div>
+            </>
+          )}
           <div
             className="payroll-row"
             style={{
               padding: 0,
-              borderTop: "1px solid var(--border)",
-              paddingTop: 12,
-            }}
-          >
-            <span>今日</span>
-            <span className="payroll-cost">{cny(today.cost.total, rate)}</span>
-          </div>
-          <div
-            className="payroll-row"
-            style={{
-              padding: 0,
-              borderTop: "1px solid var(--border)",
-              paddingTop: 12,
+              borderTop: byok ? undefined : "1px solid var(--border)",
+              paddingTop: byok ? 0 : 12,
             }}
           >
             <span>今日 tokens</span>
@@ -149,10 +157,26 @@ function Dashboard({ summary }: { summary: UsageSummary }) {
               {compact(today.usage.output)}
             </span>
           </div>
+          {byok && (
+            <div
+              className="payroll-row"
+              style={{
+                padding: 0,
+                borderTop: "1px solid var(--border)",
+                paddingTop: 12,
+              }}
+            >
+              <span>本月 tokens</span>
+              <span className="payroll-cost">
+                输入 {compact(month.usage.input)} · 输出{" "}
+                {compact(month.usage.output)}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
-      {summary.month_by_role.length > 0 && (
+      {summary.month_by_role.length > 0 && !byok && (
         <div className="section">
           <h2 className="section-title">本月各角色花销</h2>
           <p className="section-note">

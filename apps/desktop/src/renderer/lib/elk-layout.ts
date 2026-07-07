@@ -24,25 +24,43 @@ const NODE_HEIGHT = 110;
  * symmetric. The ELK default (BRANDES_KOEPF) packs the lone node onto the topmost
  * branch instead — that is why the input endpoint used to sit above center.
  */
-// 间距偏紧：小队（如 1→3→1 的菱形）下层间距/堆叠距过大会让四角空旷、连线过长。
-// 收紧后包围盒变小，内嵌 fit-to-width 缩放更接近 1（节点反而更大、连线更短）。
-// 注意：下方「首屏估算」镜像常量必须与这里逐一对齐。
+/** 内嵌聊天气泡（fit-to-width）：偏紧，包围盒小、缩放更接近 1。 */
+export const NODE_SPACING_EMBED = 40;
+/** 全屏 / 画布放大态：同层 +8px，改善宽并行列可读性。 */
+export const NODE_SPACING_COMFORT = 48;
+
+export function nodeSpacingForFitMode(
+  fitMode: "width" | "contain" | "view",
+): number {
+  return fitMode === "width" ? NODE_SPACING_EMBED : NODE_SPACING_COMFORT;
+}
+
+// 子团队 compound 内仍用 EMBED：小队（如 1→3→1 菱形）层距过大四角空、连线长。
+// 注意：estimateBbox 的 nodeSpacing 参数须与 computeLayout 传入值对齐。
 const LAYOUT_OPTIONS: Record<ElkGraphLayout, Record<string, string>> = {
   tree: {
     "elk.algorithm": "layered",
     "elk.direction": "DOWN",
-    "elk.spacing.nodeNode": "40",
     "elk.layered.spacing.nodeNodeBetweenLayers": "64",
     "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
   },
   leftright: {
     "elk.algorithm": "layered",
     "elk.direction": "RIGHT",
-    "elk.spacing.nodeNode": "40",
     "elk.layered.spacing.nodeNodeBetweenLayers": "80",
     "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
   },
 };
+
+function elkRootOptions(
+  layout: ElkGraphLayout,
+  nodeSpacing: number,
+): Record<string, string> {
+  return {
+    ...LAYOUT_OPTIONS[layout],
+    "elk.spacing.nodeNode": String(nodeSpacing),
+  };
+}
 
 /**
  * Result of an ELK layout pass: node positions plus the graph's natural
@@ -108,6 +126,7 @@ export async function computeLayout(
   preserveOrder = false,
   bookends: LayoutBookends = {},
   subTeams: SubTeamInput[] = [],
+  nodeSpacing: number = NODE_SPACING_EMBED,
 ): Promise<LayoutResult> {
   if (nodeIds.length === 0)
     return { positions: {}, width: 0, height: 0, groups: [] };
@@ -181,7 +200,7 @@ export async function computeLayout(
         "elk.algorithm": "layered",
         "elk.direction": layout === "leftright" ? "RIGHT" : "DOWN",
         "elk.padding": "[top=32,left=12,bottom=12,right=12]",
-        "elk.spacing.nodeNode": "40",
+        "elk.spacing.nodeNode": String(NODE_SPACING_EMBED),
         "elk.layered.spacing.nodeNodeBetweenLayers": "40",
       },
       children: groupChildren,
@@ -240,7 +259,7 @@ export async function computeLayout(
   const graph = {
     id: "root",
     layoutOptions: {
-      ...LAYOUT_OPTIONS[layout],
+      ...elkRootOptions(layout, nodeSpacing),
       "elk.padding": "[top=24,left=24,bottom=24,right=24]",
       "elk.hierarchyHandling": "INCLUDE_CHILDREN",
       ...(preserveOrder
@@ -289,6 +308,7 @@ export async function computeLayout(
   };
 
   extractPositions(laidOut.children ?? [], 0, 0);
+  alignSubTeamMembers(positions, subTeams, layout, nodeSpacing);
 
   const subTeamNodeSet = new Set<string>();
   for (const st of subTeams) {
@@ -306,12 +326,24 @@ export async function computeLayout(
 
   alignRevisionChains(positions, edges, layout);
 
-  resolveOverlaps(positions, layout, subTeams, containsTeam);
+  resolveOverlaps(positions, layout, subTeams, containsTeam, nodeSpacing);
+  alignSubTeamMembers(positions, subTeams, layout, nodeSpacing);
 
-  minimizeCrossings(positions, edges, layout, subTeamNodeSet);
+  minimizeCrossings(
+    positions,
+    edges,
+    layout,
+    subTeamNodeSet,
+    3,
+    nodeSpacing,
+  );
 
   alignRevisionChains(positions, edges, layout);
-  resolveOverlaps(positions, layout, subTeams, containsTeam);
+  resolveOverlaps(positions, layout, subTeams, containsTeam, nodeSpacing);
+  alignSubTeamMembers(positions, subTeams, layout, nodeSpacing);
+  alignRevisionChains(positions, edges, layout);
+  resolveOverlaps(positions, layout, subTeams, containsTeam, nodeSpacing);
+  alignSubTeamMembers(positions, subTeams, layout, nodeSpacing);
   alignRevisionChains(positions, edges, layout);
 
   // Post-processing can push nodes negative on the cross axis; shift the whole
@@ -440,6 +472,30 @@ function centerLoneEndpoints(
   }
 }
 
+function alignSubTeamMembers(
+  positions: Record<string, { x: number; y: number }>,
+  subTeams: SubTeamInput[],
+  layout: ElkGraphLayout,
+  nodeSpacing: number,
+): void {
+  const horizontal = layout === "leftright";
+  for (const st of subTeams) {
+    const parent = positions[st.parentId];
+    if (!parent) continue;
+    for (let i = 0; i < st.memberIds.length; i++) {
+      const childId = st.memberIds[i];
+      if (!positions[childId]) continue;
+      if (horizontal) {
+        positions[childId].x = parent.x;
+        positions[childId].y = parent.y + (NODE_HEIGHT + nodeSpacing) * (i + 1);
+      } else {
+        positions[childId].y = parent.y;
+        positions[childId].x = parent.x + (NODE_WIDTH + nodeSpacing) * (i + 1);
+      }
+    }
+  }
+}
+
 /**
  * Mirror a parent's two same-layer `dep` children symmetrically around the parent's
  * cross-axis center — fixes ELK packing one fork flush to the spine and the other
@@ -536,7 +592,7 @@ function balanceBinaryForks(
  * collision). Post-processing — especially {@link dropSubTeamsBelowParent} — can land
  * a dropped sub-team on the same layer as unrelated dep nodes without checking their
  * cross-axis positions. Scans in cross-axis order within each main-axis band and
- * enforces at least {@link NODE_SPACING} between boxes; repeats until stable.
+ * enforces at least `nodeSpacing` between boxes; repeats until stable.
  *
  * Cross-axis only: main-axis (layer) coordinates are left untouched so ELK's layer
  * assignment and bookend pinning stay intact.
@@ -546,6 +602,7 @@ function resolveOverlaps(
   layout: ElkGraphLayout,
   subTeams: SubTeamInput[] = [],
   containsTeam: (st: SubTeamInput, id: string) => boolean = () => false,
+  nodeSpacing: number = NODE_SPACING_EMBED,
 ): void {
   const ids = Object.keys(positions);
   if (ids.length < 2) return;
@@ -569,13 +626,31 @@ function resolveOverlaps(
   const boxesOverlap = (a: string, b: string) => {
     if (!mainOverlap(a, b)) return false;
     return (
-      crossOf(a) + crossSize + NODE_SPACING > crossOf(b) &&
-      crossOf(b) + crossSize + NODE_SPACING > crossOf(a)
+      crossOf(a) + crossSize + nodeSpacing > crossOf(b) &&
+      crossOf(b) + crossSize + nodeSpacing > crossOf(a)
     );
   };
 
   const sameSubTeam = (a: string, b: string): boolean =>
     subTeams.some((st) => containsTeam(st, a) && containsTeam(st, b));
+
+  const subTeamNodeIds = (id: string): string[] | null => {
+    for (const st of subTeams) {
+      if (!containsTeam(st, id)) continue;
+      return [st.parentId, ...st.memberIds];
+    }
+    return null;
+  };
+
+  const moveCrossBy = (id: string, delta: number) => {
+    if (Math.abs(delta) < 0.01) return;
+    const team = subTeamNodeIds(id);
+    const targets = team ?? [id];
+    for (const tid of targets) {
+      if (!positions[tid]) continue;
+      setCross(tid, crossOf(tid) + delta);
+    }
+  };
 
   const maxRounds = ids.length * 2;
   for (let round = 0; round < maxRounds; round++) {
@@ -599,9 +674,25 @@ function resolveOverlaps(
         const curr = members[i];
         if (sameSubTeam(prev, curr)) continue;
         if (!boxesOverlap(prev, curr)) continue;
-        const minCross = crossOf(prev) + crossSize + NODE_SPACING;
+        const minCross = crossOf(prev) + crossSize + nodeSpacing;
         if (crossOf(curr) < minCross) {
-          setCross(curr, minCross);
+          moveCrossBy(curr, minCross - crossOf(curr));
+          changed = true;
+        }
+      }
+    }
+
+    // Catch boxes that overlap on main axis but sit in different rounded layers.
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const a = ids[i];
+        const b = ids[j];
+        if (sameSubTeam(a, b)) continue;
+        if (!boxesOverlap(a, b)) continue;
+        const [upper, lower] = crossOf(a) <= crossOf(b) ? [a, b] : [b, a];
+        const minCross = crossOf(upper) + crossSize + nodeSpacing;
+        if (crossOf(lower) < minCross) {
+          moveCrossBy(lower, minCross - crossOf(lower));
           changed = true;
         }
       }
@@ -614,7 +705,7 @@ function resolveOverlaps(
 /**
  * Reorder nodes within each main-axis layer using the barycenter heuristic to
  * reduce edge crossings. Runs after {@link resolveOverlaps} so spacing is sane,
- * then redistributes cross-axis coordinates with {@link NODE_SPACING}.
+ * then redistributes cross-axis coordinates with the same `nodeSpacing`.
  *
  * Cross-axis only — main-axis (layer) coordinates stay untouched.
  */
@@ -624,6 +715,7 @@ function minimizeCrossings(
   layout: ElkGraphLayout,
   subTeamNodeSet: Set<string> = new Set(),
   iterations = 3,
+  nodeSpacing: number = NODE_SPACING_EMBED,
 ): void {
   const ids = Object.keys(positions);
   if (ids.length < 2) return;
@@ -685,12 +777,12 @@ function minimizeCrossings(
   const redistributeLayer = (members: string[], sorted: string[]): void => {
     const n = sorted.length;
     if (n < 2) return;
-    const totalSpan = n * crossSize + (n - 1) * NODE_SPACING;
+    const totalSpan = n * crossSize + (n - 1) * nodeSpacing;
     const originalCenter =
       members.reduce((s, id) => s + crossCenterOf(id), 0) / n;
     const startCross = originalCenter - totalSpan / 2;
     for (let i = 0; i < n; i++) {
-      setCross(sorted[i], startCross + i * (crossSize + NODE_SPACING));
+      setCross(sorted[i], startCross + i * (crossSize + nodeSpacing));
     }
   };
 
@@ -790,10 +882,9 @@ export const EMBED_MAX_HEIGHT = 520;
 // tiny and self-corrects on the first measurement.
 export const EMBED_DEFAULT_COL_WIDTH = 718;
 
-// Spacing mirrored from LAYOUT_OPTIONS so the size estimate matches what ELK
+// Spacing mirrored from elkRootOptions so the size estimate matches what ELK
 // actually produces (within-layer node gap, between-layer gap, outer padding).
 // MUST stay in lockstep with LAYOUT_OPTIONS + elk.padding above.
-const NODE_SPACING = 40;
 const LAYER_SPACING: Record<ElkGraphLayout, number> = {
   tree: 64,
   leftright: 80,
@@ -899,10 +990,11 @@ export function workerGraphShape(
 export function estimateBbox(
   shape: GraphShape,
   layout: ElkGraphLayout,
+  nodeSpacing: number = NODE_SPACING_EMBED,
 ): { width: number; height: number } {
   const { depth, parallelism } = shape;
   const within = (n: number, size: number) =>
-    n * size + (n - 1) * NODE_SPACING + 2 * PADDING;
+    n * size + (n - 1) * nodeSpacing + 2 * PADDING;
   const across = (n: number, size: number) =>
     n * size + (n - 1) * LAYER_SPACING[layout] + 2 * PADDING;
   if (layout === "leftright") {

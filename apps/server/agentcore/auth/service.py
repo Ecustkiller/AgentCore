@@ -313,14 +313,19 @@ class AuthService:
         page: int = 1,
         page_size: int = 100,
         status: str | None = None,
+        search: str | None = None,
     ) -> tuple[Sequence[Invite], int]:
         offset = (page - 1) * page_size
         return await self._invites.list_page(
             offset=offset,
             limit=page_size,
             status=status,
+            search=search,
             now=datetime.now(UTC),
         )
+
+    async def invite_stats(self) -> dict[str, int]:
+        return await self._invites.count_by_status(now=datetime.now(UTC))
 
     async def revoke_invite(self, *, invite_id: str) -> Invite:
         """Retire an unused invite so it can no longer register an account (邀请码撤销).

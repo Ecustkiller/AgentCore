@@ -1,3 +1,4 @@
+import { debatePreviewSubtitle } from "@/components/chat/debate/debateEntryCopy";
 import { Badge, Button, IconButton as UiIconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { resolveTurnCost } from "@/lib/cost";
@@ -179,11 +180,17 @@ function RunningStrip({
         <Loader2 size={15} className="shrink-0 animate-spin text-primary" />
         <span className="flex flex-1 items-center truncate text-sm font-medium text-foreground">
           {isDebate(execution) && <DebateTag />}
-          <span className="truncate">{execution.taskSummary}</span>
+          <span className="truncate">
+            {isDebate(execution)
+              ? debatePreviewSubtitle(execution)
+              : execution.taskSummary}
+          </span>
         </span>
-        <span className="shrink-0 text-xs text-muted-foreground">
-          {completed}/{total}
-        </span>
+        {!isDebate(execution) && (
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {completed}/{total}
+          </span>
+        )}
         <StripControls
           execution={execution}
           expanded={expanded}
@@ -270,13 +277,19 @@ function CompletedStrip({
         <span className="flex-1 text-sm text-foreground">
           {!stopped && isDebate(execution) && <DebateTag />}
           <span className="font-medium">
-            {stopped ? "已停止" : isDebate(execution) ? "辩论完成" : "团队完成"}
+            {stopped
+              ? "已停止"
+              : isDebate(execution)
+                ? debatePreviewSubtitle(execution)
+                : "团队完成"}
           </span>
-          <span className="text-muted-foreground">
-            {` · ${execution.agents.length} 个 Agent · ${completed}/${total} 子任务${
-              duration ? ` · 用时 ${duration}` : ""
-            }${costSegment}`}
-          </span>
+          {!isDebate(execution) && (
+            <span className="text-muted-foreground">
+              {` · ${execution.agents.length} 个 Agent · ${completed}/${total} 子任务${
+                duration ? ` · 用时 ${duration}` : ""
+              }${costSegment}`}
+            </span>
+          )}
         </span>
         <StripControls
           execution={execution}

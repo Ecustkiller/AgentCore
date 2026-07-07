@@ -385,6 +385,16 @@ button.link {
   color: var(--muted);
 }
 
+.turn-warning {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: color-mix(in oklch, var(--muted) 12%, transparent);
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* 回合总账 — a low-prominence cost caption under a finished assistant bubble. */
 .cost {
   margin-top: 4px;

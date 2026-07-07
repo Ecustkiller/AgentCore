@@ -168,6 +168,8 @@ class InviteResponse(BaseModel):
     status: Literal["active", "used", "expired", "revoked"]
     created_by: str | None
     used_by: str | None
+    created_by_username: str | None = None
+    used_by_username: str | None = None
     created_at: datetime
     expires_at: datetime | None
     used_at: datetime | None
@@ -179,3 +181,11 @@ class InviteListResponse(BaseModel):
     total: int
     page: int | None = None
     page_size: int | None = None
+
+
+class InviteStatsResponse(BaseModel):
+    total: int
+    active: int
+    used: int
+    expired: int
+    revoked: int

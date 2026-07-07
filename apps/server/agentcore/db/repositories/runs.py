@@ -337,6 +337,29 @@ class TurnJournalRepository:
             )
         await self._session.commit()
 
+    async def append(
+        self,
+        *,
+        turn_id: str,
+        seq: int,
+        conversation_id: str,
+        trace_id: str | None,
+        entry: dict,
+    ) -> None:
+        """Append one journal fact at ``seq`` (emit-on-write path, one commit)."""
+        self._session.add(
+            TurnJournalRow(
+                turn_id=turn_id,
+                seq=seq,
+                kind=str(entry.get("kind") or ""),
+                payload=entry.get("payload") or {},
+                ts=entry.get("ts"),
+                conversation_id=conversation_id,
+                trace_id=trace_id,
+            )
+        )
+        await self._session.commit()
+
     async def load(self, turn_id: str) -> list[dict]:
         """One turn's facts as ordered ``{kind, payload, ts}`` entries (``[]`` if none)."""
         result = await self._session.execute(
@@ -425,6 +448,7 @@ class TurnMetricsRepository:
         scope_signals: int = 0,
         revises: int = 0,
         escalations: int = 0,
+        audit_drops: int = 0,
     ) -> None:
         """Append one telemetry row for a completed turn (one commit).
 
@@ -456,6 +480,7 @@ class TurnMetricsRepository:
                 scope_signals=scope_signals,
                 revises=revises,
                 escalations=escalations,
+                audit_drops=audit_drops,
             )
         )
         await self._session.commit()
@@ -664,6 +689,13 @@ class TurnMetricsRepository:
             .offset(offset)
         )
         return result.all(), total
+
+    async def aggregate_audit_drops_for_window(self, *, since: datetime) -> int:
+        """Sum of per-turn audit write degradations since a cutoff."""
+        stmt = select(func.coalesce(func.sum(TurnMetricsRow.audit_drops), 0)).where(
+            TurnMetricsRow.created_at >= since
+        )
+        return int((await self._session.execute(stmt)).scalar_one() or 0)
 
     async def count_distinct_users_for_window(self, *, since: datetime) -> int:
         """Distinct accounts that completed ≥1 turn since a cutoff (活跃用户).

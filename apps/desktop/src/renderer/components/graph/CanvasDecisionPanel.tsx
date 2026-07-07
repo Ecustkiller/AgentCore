@@ -189,11 +189,17 @@ export function useCommandRegion(): CommandRegionData {
       return;
     }
     if (actionable > prevActionable.current) {
-      useSidePanelStore.getState().openPanel();
-      setCollapsed(false);
+      const sp = useSidePanelStore.getState();
+      const contextId = conversationId ? `command:${conversationId}` : null;
+      if (contextId && sp.isAutoSurfaceDismissed(contextId)) {
+        sp.incrementPendingBadge();
+      } else {
+        sp.openPanel();
+        setCollapsed(false);
+      }
     }
     prevActionable.current = actionable;
-  }, [active, actionable, setCollapsed]);
+  }, [active, actionable, conversationId, setCollapsed]);
 
   // Re-arm on focus switch: another turn's decisions deserve a fresh, open look.
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed to focus change, not setter identity.

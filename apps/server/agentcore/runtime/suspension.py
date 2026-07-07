@@ -48,13 +48,15 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from agentcore.runtime.checkpoints import AskCheckpointIntent
+
 # NOTE: serialize helpers are imported lazily inside to_json / from_json so this
 # module stays import-light (stdlib only at import time). The captain executor —
 # itself imported during the ``runs`` package init — imports ``captain_transcript``
 # from here, so a top-level ``runs.serialize`` import could risk an init-order cycle.
 
 if TYPE_CHECKING:
-    from agentcore.llm.protocol import LLMMessage
+    from agentcore.llm.provider.protocol import LLMMessage
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.types import RunState
 
@@ -161,6 +163,10 @@ class TurnSuspension:
     # source when present; the display ``journal`` remains the degraded fallback (no log
     # bound) and the resume seed (re-derived from the loaded stream on claim).
     journal_entries: list[dict[str, Any]] = field(default_factory=list)
+    # Set when the best-effort ``turn_journal`` mirror failed at pause time. Resume
+    # checks this to surface a clear error instead of silently rebuilding an empty CEO
+    # window (the frame alone is not enough without the journal facts).
+    journal_degraded: bool = False
     trace_id: str | None = None
 
     def _base_json(self) -> dict[str, Any]:
@@ -182,6 +188,7 @@ class TurnSuspension:
             # window is rebuilt by ``window_from_journal`` from the turn_journal facts (§8.3)
             # + reloaded history, so the frame holds only resume CONTROL metadata. See the
             # module docstring + ``runtime/journal.py``.
+            "journal_degraded": self.journal_degraded,
             "trace_id": self.trace_id,
         }
 
@@ -210,6 +217,7 @@ class TurnSuspension:
             # in the frame (Phase 2 ⑤) — the CEO window is rebuilt from the turn_journal facts
             # on claim (``window_from_journal``), so they default empty here. The Sidecar's
             # local record carries journal_entries + history separately (it has no DB).
+            "journal_degraded": bool(data.get("journal_degraded")),
             "trace_id": data.get("trace_id"),
         }
 
@@ -283,6 +291,7 @@ class AskUserSuspension(TurnSuspension):
     assumptions: list[dict[str, Any]] = field(default_factory=list)
     questions: list[dict[str, Any]] = field(default_factory=list)
     style_options: list[dict[str, Any]] = field(default_factory=list)
+    intent: AskCheckpointIntent = "decision"
 
     def to_json(self) -> dict[str, Any]:
         data = self._base_json()
@@ -292,6 +301,7 @@ class AskUserSuspension(TurnSuspension):
             assumptions=list(self.assumptions),
             questions=list(self.questions),
             style_options=list(self.style_options),
+            intent=self.intent,
         )
         return data
 
@@ -315,6 +325,7 @@ def suspension_from_json(data: dict[str, Any]) -> TurnSuspension:
             assumptions=list(data.get("assumptions") or []),
             questions=list(data.get("questions") or []),
             style_options=list(data.get("style_options") or []),
+            intent=data.get("intent") or "decision",
         )
     # NOTE: NEITHER ``plan`` NOR ``completed`` is read from the frame (执行级事件溯源 Phase 2) —
     # both default empty and are re-projected from the journal on resume (``plan_from_journal``

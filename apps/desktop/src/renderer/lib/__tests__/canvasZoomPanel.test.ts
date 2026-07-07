@@ -1,8 +1,4 @@
-import {
-  DEBATE_HUD_TAB_ID,
-  WORKSPACE_TAB_ID,
-  useSidePanelStore,
-} from "@/stores/sidePanel";
+import { WORKSPACE_TAB_ID, useSidePanelStore } from "@/stores/sidePanel";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   applyCanvasZoomPanelPref,
@@ -119,13 +115,13 @@ describe("applyCanvasZoomPanelPref", () => {
     });
   });
 
-  it("restores closed and debate-hud surfaces", () => {
+  it("restores closed and workspace surfaces", () => {
     useSidePanelStore.setState({ open: true, activeTabId: WORKSPACE_TAB_ID });
     applyCanvasZoomPanelPref({ kind: "closed" });
     expect(useSidePanelStore.getState().open).toBe(false);
 
-    applyCanvasZoomPanelPref({ kind: "debate-hud" });
-    expect(useSidePanelStore.getState().activeTabId).toBe(DEBATE_HUD_TAB_ID);
+    applyCanvasZoomPanelPref({ kind: "workspace" });
+    expect(useSidePanelStore.getState().activeTabId).toBe(WORKSPACE_TAB_ID);
   });
 
   it("recreates a content tab on restore", () => {
@@ -144,14 +140,14 @@ describe("applyCanvasZoomPanelPref", () => {
 });
 
 describe("defaultCanvasZoomPanelPref", () => {
-  it("prefers debate hud or final answer over workspace", () => {
+  it("prefers workspace in debate room or final answer over closed", () => {
     expect(
       defaultCanvasZoomPanelPref({
         showRoom: true,
         scopeId: "m1",
         finalAnswerId: "a1",
       }),
-    ).toEqual({ kind: "debate-hud" });
+    ).toEqual({ kind: "workspace" });
     expect(
       defaultCanvasZoomPanelPref({
         showRoom: false,

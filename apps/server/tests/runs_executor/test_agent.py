@@ -6,7 +6,7 @@ RunState, injects an upstream product into a downstream node's prompt, and emits
 the ``run_*`` graph events.
 """
 
-from agentcore.llm.protocol import LLMChunk, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, ToolCallDelta
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.facts import FactKind, TurnFactLog, current_fact_log
 from agentcore.runtime.journal import completed_from_journal

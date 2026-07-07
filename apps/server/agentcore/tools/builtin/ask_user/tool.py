@@ -17,6 +17,7 @@ from agentcore.runtime.events import (
 )
 from agentcore.runtime.interaction import InteractionKind
 from agentcore.runtime.ports import ClientRequestBridge
+from agentcore.tools.builtin.ask_user.intent import resolve_ask_checkpoint_intent
 from agentcore.tools.builtin.ask_user.result import ask_user_tool_result
 from agentcore.tools.builtin.ask_user.schema import (
     normalize_assumptions,
@@ -249,6 +250,9 @@ class AskUserTool:
             return self._post_nonblocking(message, ctx_text, assumptions, questions, style_options)
 
         checkpoint_id = new_id()
+        from agentcore.runtime.suspension import captain_transcript
+
+        intent = resolve_ask_checkpoint_intent(captain_transcript.get())
         required = checkpoint_required(
             checkpoint_id=checkpoint_id,
             conversation_id=self.conversation_id,
@@ -257,6 +261,7 @@ class AskUserTool:
             assumptions=assumptions,
             questions=questions,
             style_options=style_options,
+            intent=intent,
         )
         # 结构化挂起 2b: durable backstop BEFORE the wait (best-effort). A cancel
         # (disconnect) / crash during the wait propagates past the drop below, leaving
@@ -272,6 +277,7 @@ class AskUserTool:
             questions=questions,
             style_options=style_options,
             required_event=required,
+            intent=intent,
         )
         # 挂起即收口 (②): once the durable frame is saved, END the turn in place instead of
         # parking on the in-memory interaction Future. We emit the card here (the wait path
@@ -301,6 +307,7 @@ class AskUserTool:
                     "assumptions": assumptions,
                     "questions": questions,
                     "style_options": style_options,
+                    "intent": intent,
                 },
                 timeout=self.timeout_seconds,
                 on_suspended=lambda: self.sink.emit(required),

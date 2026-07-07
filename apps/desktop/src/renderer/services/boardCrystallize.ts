@@ -38,7 +38,45 @@ const GAP_NODE_ART = 40;
 /** Vertical gap between worker rows. */
 const GAP_Y = 24;
 
-/** The CEO captain root is excluded — its product is the chat reply, not a board artifact. */
+/** Pick the primary workspace file path to surface on an artifact card — last written wins
+ * (typical final deliverable ordering in files_touched). */
+export function primaryOutputFile(files: readonly string[]): string | null {
+  const trimmed = files.map((p) => p.trim()).filter(Boolean);
+  return trimmed.length > 0 ? trimmed[trimmed.length - 1] : null;
+}
+
+function fileBaseName(path: string): string {
+  const slash = path.lastIndexOf("/");
+  return slash >= 0 ? path.slice(slash + 1) : path;
+}
+
+/** Map a completed worker run to artifact card fields (pure — unit-tested). */
+export function artifactFromRun(run: {
+  outputSummary?: string | null;
+  outputFiles?: readonly string[];
+}): {
+  kind: "text" | "file";
+  body: string;
+  titleSuffix: string;
+  ref?: string;
+} | null {
+  const summary = run.outputSummary?.trim() ?? "";
+  const ref = primaryOutputFile(run.outputFiles ?? []);
+  if (ref) {
+    const name = fileBaseName(ref);
+    return {
+      kind: "file",
+      body: summary || name,
+      titleSuffix: name,
+      ref,
+    };
+  }
+  if (summary) {
+    return { kind: "text", body: summary, titleSuffix: "产物" };
+  }
+  return null;
+}
+
 function isWorkerRun(run: RunNode): boolean {
   return run.kind !== "captain";
 }
@@ -91,8 +129,9 @@ export function buildCrystallizedElements(
     });
 
     // Only a completed worker yields a product card; a failed one leaves just its red node.
-    const summary = run.status === "completed" ? run.outputSummary?.trim() : "";
-    if (summary) {
+    const artifact =
+      run.status === "completed" ? artifactFromRun(run) : null;
+    if (artifact) {
       const artId = `crys-art-${run.id}`;
       const artY = y + (rowH - ART_H) / 2;
       out.push({
@@ -102,9 +141,10 @@ export function buildCrystallizedElements(
         y: artY,
         width: ART_W,
         height: ART_H,
-        title: `${role} · 产物`,
-        text: summary,
-        artifactKind: "text",
+        title: `${role} · ${artifact.titleSuffix}`,
+        text: artifact.body,
+        artifactKind: artifact.kind,
+        ref: artifact.ref,
         runId: run.id,
         runStatus: status,
         schemaVersion: SCENE_SCHEMA_VERSION,

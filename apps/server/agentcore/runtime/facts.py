@@ -66,6 +66,7 @@ turn end (and re-projected on read), exactly like the display journal today.
 
 from __future__ import annotations
 
+import asyncio
 from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
@@ -326,20 +327,40 @@ class FactRecorder(Protocol):
 class TurnFactLog:
     """In-memory, per-turn ordered fact accumulator (the default :class:`FactRecorder`).
 
-    Append-only in emission order (insertion order == the journal ``seq``). At turn
-    end the pipeline reads :meth:`entries` and persists them via the durable Journal
-    port, alongside the display journal — so Phase 1 changes WHAT facts exist, not HOW
-    or WHEN the journal is written.
+    Append-only in emission order (insertion order == the journal ``seq``). During a
+    turn each fact is also durably appended via :class:`~agentcore.runtime.journal.writer.TurnJournalWriter`
+    (emit-on-write); this log is the in-process read cache. At turn end only the
+    process / ``turn_end`` tail is appended separately.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, inherited_entries: list[dict] | None = None) -> None:
+        self._inherited: list[dict] = list(inherited_entries) if inherited_entries else []
         self._facts: list[Fact] = []
 
     def record_fact(self, fact: Fact) -> None:
         self._facts.append(fact)
 
+    def seed_from_entries(self, entries: list[dict[str, Any]]) -> None:
+        """Pre-load a persisted §8.3 journal stream into the segment (legacy/test helper).
+
+        Unlike ``inherited_entries``, seeded entries live in ``_facts`` and are re-written
+        by :class:`~agentcore.runtime.journal.writer.TurnJournalWriter` unless
+        ``initial_seq`` skips them. Prefer ``inherited_entries`` on resume.
+        """
+        for entry in entries:
+            kind = entry.get("kind")
+            if not kind:
+                continue
+            self.record_fact(
+                Fact(kind=kind, payload=entry.get("payload", {}), ts=entry.get("ts"))
+            )
+
     def entries(self) -> list[dict[str, Any]]:
-        """The accumulated facts as ordered ``{kind, payload, ts}`` journal entries."""
+        """The full journal stream: inherited prefix + segment facts."""
+        return [*self._inherited, *[f.entry() for f in self._facts]]
+
+    def segment_entries(self) -> list[dict[str, Any]]:
+        """Facts recorded in this segment only (excludes the inherited prefix)."""
         return [f.entry() for f in self._facts]
 
     def __len__(self) -> int:
@@ -359,16 +380,24 @@ class TurnFactLog:
 current_fact_log: ContextVar[TurnFactLog | None] = ContextVar("current_fact_log", default=None)
 
 
-def record_turn_fact(fact: Fact) -> None:
-    """Append ``fact`` to the turn's ambient :data:`current_fact_log` (no-op if unbound).
+def record_turn_fact(fact: Fact) -> asyncio.Future[None] | None:
+    """Append ``fact`` to the turn's ambient log and durable journal (no-op if unbound).
 
     The engine-facing convenience over the :class:`FactRecorder` port: callers build a
     typed fact (``RoundBoundaryFact(...).to_fact()``) and hand it here; whether a log is
-    bound is the turn's concern, not the call site's.
+    bound is the turn's concern, not the call site's. When a
+    :class:`~agentcore.runtime.journal.writer.TurnJournalWriter` is bound, schedules a
+    durable append and returns a Future the SSE consumer awaits before delivery.
     """
     log = current_fact_log.get()
     if log is not None:
         log.record_fact(fact)
+    from agentcore.runtime.journal.writer import current_journal_writer
+
+    writer = current_journal_writer.get()
+    if writer is not None:
+        return writer.schedule_append(fact.entry())
+    return None
 
 
 def snapshot_fact_log(

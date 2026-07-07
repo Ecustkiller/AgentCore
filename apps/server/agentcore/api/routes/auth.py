@@ -8,6 +8,7 @@ M2) whose origin can't rely on SameSite cookies — they send ``Authorization: B
 instead (认证与会话.md §十; resolution in api/dependencies.py).
 """
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
@@ -30,6 +31,7 @@ from agentcore.api.dependencies import (
     get_db,
     get_messaging_service,
     get_user_llm_key_repo,
+    get_user_repo,
 )
 from agentcore.api.schemas import (
     BatchCreateInviteRequest,
@@ -38,6 +40,7 @@ from agentcore.api.schemas import (
     DeleteAccountRequest,
     InviteListResponse,
     InviteResponse,
+    InviteStatsResponse,
     LoginMfaRequest,
     LoginRequest,
     LoginResponse,
@@ -66,6 +69,7 @@ from agentcore.db.repositories import (
     ConversationShareRepository,
     CredentialsRepository,
     UserLlmKeyRepository,
+    UserRepository,
 )
 from agentcore.messaging import MessagingService
 from agentcore.middleware.csrf import clear_csrf_token, issue_csrf_token
@@ -134,18 +138,43 @@ def _invite_status(invite: Invite, now: datetime) -> str:
     return "active"
 
 
-def _invite_response(invite: Invite, now: datetime) -> InviteResponse:
+def _invite_response(
+    invite: Invite,
+    now: datetime,
+    *,
+    users_by_id: dict[str, User] | None = None,
+) -> InviteResponse:
+    users_by_id = users_by_id or {}
+    created_user = users_by_id.get(invite.created_by) if invite.created_by else None
+    used_user = users_by_id.get(invite.used_by) if invite.used_by else None
     return InviteResponse(
         id=invite.id,
         code=invite.code,
         status=_invite_status(invite, now),
         created_by=invite.created_by,
         used_by=invite.used_by,
+        created_by_username=created_user.username if created_user else None,
+        used_by_username=used_user.username if used_user else None,
         created_at=invite.created_at,
         expires_at=invite.expires_at,
         used_at=invite.used_at,
         revoked_at=invite.revoked_at,
     )
+
+
+async def _invite_responses(
+    invites: Sequence[Invite],
+    now: datetime,
+    user_repo: UserRepository,
+) -> list[InviteResponse]:
+    user_ids = {
+        uid
+        for inv in invites
+        for uid in (inv.created_by, inv.used_by)
+        if uid is not None
+    }
+    users_by_id = await user_repo.get_by_ids(list(user_ids))
+    return [_invite_response(inv, now, users_by_id=users_by_id) for inv in invites]
 
 
 def _set_auth_cookies(response: Response, tokens: TokenPair, *, user_id: str) -> None:
@@ -471,6 +500,7 @@ async def create_invite(
     admin: AdminUser,
     body: CreateInviteRequest | None = None,
     service: AuthService = Depends(get_auth_service),
+    user_repo: UserRepository = Depends(get_user_repo),
     db: AsyncSession = Depends(get_db),
 ):
     invite = await service.create_invite(
@@ -485,7 +515,9 @@ async def create_invite(
         target_id=invite.id,
         detail={"expires_in_days": body.expires_in_days if body else None},
     )
-    return _invite_response(invite, datetime.now(UTC))
+    now = datetime.now(UTC)
+    users = await user_repo.get_by_ids([admin.user_id])
+    return _invite_response(invite, now, users_by_id=users)
 
 
 @router.post("/invites/batch", response_model=InviteListResponse, status_code=201)
@@ -493,6 +525,7 @@ async def create_invites_batch(
     admin: AdminUser,
     body: BatchCreateInviteRequest,
     service: AuthService = Depends(get_auth_service),
+    user_repo: UserRepository = Depends(get_user_repo),
     db: AsyncSession = Depends(get_db),
 ):
     """Mint multiple single-use invite codes (admin batch issuance)."""
@@ -509,10 +542,20 @@ async def create_invites_batch(
         detail={"count": body.count, "expires_in_days": body.expires_in_days},
     )
     now = datetime.now(UTC)
+    data = await _invite_responses(invites, now, user_repo)
     return InviteListResponse(
-        data=[_invite_response(i, now) for i in invites],
+        data=data,
         total=len(invites),
     )
+
+
+@router.get("/invites/stats", response_model=InviteStatsResponse)
+async def invite_stats(
+    admin: AdminUser,
+    service: AuthService = Depends(get_auth_service),
+):
+    counts = await service.invite_stats()
+    return InviteStatsResponse(**counts)
 
 
 @router.get("/invites", response_model=InviteListResponse)
@@ -521,16 +564,20 @@ async def list_invites(
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=100),
     status: Literal["active", "used", "expired", "revoked"] | None = Query(None),
+    search: str | None = Query(None, max_length=64),
     service: AuthService = Depends(get_auth_service),
+    user_repo: UserRepository = Depends(get_user_repo),
 ):
     now = datetime.now(UTC)
     invites, total = await service.list_invites(
         page=page,
         page_size=page_size,
         status=status,
+        search=search,
     )
+    data = await _invite_responses(invites, now, user_repo)
     return InviteListResponse(
-        data=[_invite_response(i, now) for i in invites],
+        data=data,
         total=total,
         page=page,
         page_size=page_size,
@@ -542,6 +589,7 @@ async def revoke_invite(
     invite_id: str,
     admin: AdminUser,
     service: AuthService = Depends(get_auth_service),
+    user_repo: UserRepository = Depends(get_user_repo),
     db: AsyncSession = Depends(get_db),
 ):
     """Retire an unused invite (邀请码撤销). 404 unknown id; 422 if already used/revoked.
@@ -554,4 +602,7 @@ async def revoke_invite(
         target_type="invite",
         target_id=invite_id,
     )
-    return _invite_response(invite, datetime.now(UTC))
+    now = datetime.now(UTC)
+    user_ids = [uid for uid in (invite.created_by, invite.used_by) if uid is not None]
+    users = await user_repo.get_by_ids(user_ids)
+    return _invite_response(invite, now, users_by_id=users)

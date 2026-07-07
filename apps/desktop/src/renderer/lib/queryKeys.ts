@@ -20,9 +20,7 @@ export const workspaceKeys = {
   list: ["workspaces", "list"] as const,
 };
 
-export const modelModeKeys = {
-  all: ["model-modes"] as const,
-  /** Built-in presets + the user's custom 质量档 + resolved default ref
-   * (`GET /v1/model-modes`), the option space the tier picker renders from. */
-  list: ["model-modes", "list"] as const,
+export const llmKeyKeys = {
+  all: ["llm-key"] as const,
+  status: ["llm-key", "status"] as const,
 };

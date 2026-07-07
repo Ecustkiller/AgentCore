@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from agentcore.runtime.runs.types import RunSpec
 
 if TYPE_CHECKING:
-    from agentcore.llm.protocol import LLMMessage
+    from agentcore.llm.provider.protocol import LLMMessage
 
 
 @dataclass

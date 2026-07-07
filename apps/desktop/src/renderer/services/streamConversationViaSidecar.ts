@@ -77,7 +77,8 @@ export interface ResumeViaSidecarOptions {
   selected?: string[];
   /** 挂起回合的原始用户消息（来自帧）——续跑完成后随回写落库。 */
   userMessage: string;
-  /** 注入的用户气泡 id（续跑前补回，见 `turns.runResume`）——回写据此对账。 */
+  /** 挂起时已落库的原始 user 气泡 id（初始发送时的 optimisticUserId）——回写据此对账，
+   *  续跑不再注入新气泡。 */
   userMessageId: string;
   signal?: AbortSignal;
 }

@@ -106,6 +106,46 @@ def test_store_round_trips_journal_entries_and_history(tmp_path):
     assert claimed.history == history
 
 
+def test_store_claimed_frame_excluded_from_list_pending(tmp_path):
+    """A claimed-but-not-confirmed frame lives as ``.claimed`` and is invisible to list."""
+    store = LocalPausedTurnStore(tmp_path / "paused")
+
+    async def drive() -> tuple[list[str], list[str]]:
+        await store.save(_suspension("m1", "c1"))
+        before = [s.message_id for s in await store.list_pending("c1")]
+        await store.claim("m1", conversation_id="c1")
+        during = [s.message_id for s in await store.list_pending("c1")]
+        return before, during
+
+    before, during = asyncio.run(drive())
+    assert before == ["m1"]
+    assert during == []
+
+
+def test_store_rollback_claim_restores_pending(tmp_path):
+    store = LocalPausedTurnStore(tmp_path / "paused")
+
+    async def drive() -> list[str]:
+        await store.save(_suspension("m1", "c1"))
+        await store.claim("m1", conversation_id="c1")
+        await store.rollback_claim("m1")
+        return [s.message_id for s in await store.list_pending("c1")]
+
+    assert asyncio.run(drive()) == ["m1"]
+
+
+def test_store_confirm_claim_drops_frame(tmp_path):
+    store = LocalPausedTurnStore(tmp_path / "paused")
+
+    async def drive() -> list[str]:
+        await store.save(_suspension("m1", "c1"))
+        await store.claim("m1", conversation_id="c1")
+        await store.confirm_claim("m1")
+        return [s.message_id for s in await store.list_pending("c1")]
+
+    assert asyncio.run(drive()) == []
+
+
 def test_store_claim_wrong_conversation_does_not_consume(tmp_path):
     """A claim scoped to the wrong conversation returns None AND leaves the frame
     intact — a stray / cross-conversation resume can't destroy a valid pause."""
@@ -312,6 +352,45 @@ def test_resume_claims_frame_and_drives_resume_pipeline(tmp_path, monkeypatch):
     # window_from_journal can splice it ahead of the folded rounds (Phase 2 ⑤).
     assert captured["history"] == history
     assert remaining == []  # the frame was claimed (one-shot), so nothing is left
+
+
+def test_resume_failure_rolls_back_frame_for_retry(tmp_path, monkeypatch):
+    """A resume crash after claim restores the frame so the desktop can retry."""
+    async def fake_resume(**kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("simulated resume crash")
+
+    monkeypatch.setattr("agentcore.sidecar.server.resume_chat_pipeline", fake_resume)
+
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+    store = LocalPausedTurnStore(tmp_path / "data" / "paused")
+
+    async def drive() -> tuple[list[Any], dict[str, Any]]:
+        await _initialize(server, tmp_path, data_dir=str(tmp_path / "data"))
+        await store.save(_suspension("m1", "c1"))
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 9,
+                    "method": "resume",
+                    "params": {
+                        "messageId": "m1",
+                        "conversationId": "c1",
+                        "decision": "adjust",
+                        "note": "retry me",
+                    },
+                }
+            )
+        )
+        await asyncio.gather(*list(server._turns.values()))
+        remaining = await store.list_pending("c1")
+        return remaining, _response(sent, 9)
+
+    remaining, err = asyncio.run(drive())
+    assert len(remaining) == 1
+    assert remaining[0].message_id == "m1"
+    assert err["error"]["code"] == protocol.RESUME_RETRYABLE
 
 
 def test_resume_missing_frame_reports_not_found(tmp_path):

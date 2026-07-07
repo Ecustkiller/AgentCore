@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from typing import Any
 
 from agentcore.runtime.runs.types import Deliverable
 
@@ -29,7 +30,11 @@ class ContractVerdict:
 
 
 def check_contract(
-    content: str, deliverable: Deliverable | None, *, files_written: int = 0
+    content: str,
+    deliverable: Deliverable | None,
+    *,
+    files_written: int = 0,
+    debrief: dict[str, Any] | None = None,
 ) -> ContractVerdict:
     """Check ``content`` against ``deliverable``; return a verdict + human reasons.
 
@@ -43,9 +48,15 @@ def check_contract(
     a file deliverable that was only pasted into the reply — never written to the
     workspace — fails and auto-reworks. Stays a pure function (the caller derives the
     count) so it remains trivially unit-testable.
+
+    Workers often finish with ``file_write`` + ``handoff`` and no streamed prose
+    (``deliverable_only`` rolls back narration before non-terminal tools). The
+    baseline therefore also accepts alternate product signals: workspace file writes
+    (``files_written > 0``) or a usable ``handoff`` debrief (``debrief`` from
+    ``debrief_from_transcript`` — summary / key_points / etc.).
     """
     text = content.strip()
-    if not text:
+    if not text and files_written <= 0 and debrief is None:
         return ContractVerdict(ok=False, failures=["产出为空"])
     if deliverable is None:
         return ContractVerdict(ok=True)

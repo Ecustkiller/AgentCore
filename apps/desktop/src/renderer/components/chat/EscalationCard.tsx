@@ -82,7 +82,7 @@ function PendingEscalation({
   const hasStructured = escalation.questions.length > 0;
   // composeAnswer flattens picks + note into one readable string (a worker reads it like the
   // CEO does); for a free-text escalate it is just the note. 提交 needs a non-empty answer.
-  const composed = ans.compose(false);
+  const composed = ans.compose("decision");
   const canSubmit = composed.trim().length > 0;
 
   const send = (decision: EscalationUserDecision) => {

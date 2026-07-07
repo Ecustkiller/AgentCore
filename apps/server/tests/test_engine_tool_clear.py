@@ -12,8 +12,7 @@ from pathlib import Path
 
 from agentcore.config import settings
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.llm.config import ModelProfile
-from agentcore.llm.protocol import LLMChunk, LLMMessage, ToolCall, ToolCallFunction
+from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.engine.tool_clear import cleared_placeholder, project_cleared_window
 from agentcore.runtime.events import EventSink
@@ -21,6 +20,7 @@ from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+from tests.llm_helpers import make_profile_params
 
 CLEARABLE = frozenset({"file_read", "grep", "web_search"})
 
@@ -193,7 +193,7 @@ async def _run_loop(provider: _CapturingProvider) -> None:
     registry = ToolRegistry()
     registry.register(_FakeReadTool())
     messages = _window(8)  # pre-seeded prior reads
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=4)
+    profile = make_profile_params(max_rounds=4)
     await react_loop(
         messages=messages,
         llm=provider,
@@ -201,6 +201,7 @@ async def _run_loop(provider: _CapturingProvider) -> None:
         sink=EventSink(),
         tool_context=_context(),
         profile=profile,
+        turn_model="m",
     )
 
 

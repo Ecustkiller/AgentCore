@@ -16,6 +16,7 @@ import { defineConfig } from "vite";
 // SameSite cookies (see apps/server/.env.example CORS note).
 export default defineConfig({
   root: resolve("src/renderer"),
+  publicDir: resolve("public"),
   // envDir defaults to `root`; without this, apps/desktop/.env.production is never
   // loaded and VITE_API_URL falls back to localhost:8000 → the deployed web client
   // can't reach the backend ("后端不可用"). Point it at the package root where the

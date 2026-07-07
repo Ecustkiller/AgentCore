@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING, Any
 from agentcore.core.logging import get_logger
 from agentcore.core.text import clip_preview
 from agentcore.core.types import ToolApproval, ToolCategory, new_id
-from agentcore.llm.deepseek import DeepSeekProvider
-from agentcore.llm.modes import ProfileSet, default_profile_set
+from agentcore.llm.profiles import TurnProfiles as ProfileSet
+from agentcore.llm.profiles import default_turn_profiles as default_profile_set
+from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.events import EventSink, plan_revised
 from agentcore.tools.builtin.delegate.drive import drive
@@ -39,6 +40,21 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+
+def _should_auto_light_delegate(tasks_raw: list[Any]) -> bool:
+    """True when a single dependency-free worker needs no multi-agent coordination."""
+    if len(tasks_raw) != 1:
+        return False
+    task = tasks_raw[0]
+    if not isinstance(task, dict):
+        return False
+    if task.get("depends_on"):
+        return False
+    if task.get("checkpoint_after") or task.get("bind_after_deps"):
+        return False
+    return True
+
+
 # Cap on how many nodes `delegate.started` lists by name/task — a big fan-out shouldn't
 # balloon one log line; `nodes` still carries the true total.
 _DELEGATE_LOG_AGENTS_CAP = 12
@@ -51,7 +67,7 @@ class DelegateTool:
     def __init__(
         self,
         *,
-        llm: DeepSeekProvider,
+        llm: OpenAICompatibleProvider,
         sink: EventSink,
         system_prompt: str,
         user_message: str,
@@ -184,6 +200,9 @@ class DelegateTool:
 
         valid_tools = {s.name for s in self._tools.list_all()}
         complexity_hint = arguments.get("complexity_hint", "standard")
+        if "complexity_hint" not in arguments and _should_auto_light_delegate(tasks_raw):
+            complexity_hint = "light"
+            logger.debug("delegate.complexity_hint_inferred", hint="light")
         # complexity_hint 联动 can_delegate 默认值
         for task in tasks_raw:
             if isinstance(task, dict) and "can_delegate" not in task:
@@ -223,6 +242,13 @@ class DelegateTool:
         record_plan_snapshot(plan)
 
         execution_id = self._base_tool_context.execution_id or new_id()
+        from agentcore.runtime.audit.hooks import on_delegate_plan
+
+        on_delegate_plan(
+            execution_id=execution_id,
+            plan=plan,
+            captain_run_id=self._captain_run_id,
+        )
         self._sink.emit(plan_event(self, execution_id, plan))
         # 决策可观测: who + what got delegated (the「派了谁、干什么」input basis), not just a
         # node count. `parallel` = first-wave width (nodes with no deps → run concurrently), so
@@ -248,13 +274,29 @@ class DelegateTool:
         )
         # retry-failed: if a retry seed is set (from retry_failed_chat), use it
         # so workers that already succeeded are skipped by the WaveScheduler.
+        from agentcore.runtime.retry import retry_failed_targets as _retry_failed_targets_var
         from agentcore.runtime.retry import retry_seed as _retry_seed_var
 
         _retry = _retry_seed_var.get(None)
+        _failed_targets = _retry_failed_targets_var.get(None)
         # Only use the seed once (for the first delegate call); clear it so a
         # second delegate in the same turn doesn't inherit stale seeds.
         if _retry is not None:
             _retry_seed_var.set(None)
+        if _failed_targets is not None:
+            _retry_failed_targets_var.set(None)
+            from agentcore.runtime.audit.hooks import on_run_retry
+
+            for target in _failed_targets:
+                run_id = str(target.get("run_id") or "")
+                if not run_id:
+                    continue
+                on_run_retry(
+                    run_id=run_id,
+                    attempt=1,
+                    source="retry_failed",
+                    error=target.get("error"),
+                )
 
         return await drive(
             self,
@@ -377,6 +419,15 @@ class DelegateTool:
             "replan.applied",
             binds=len(binds),
             steers=len(steers),
+            adds=len(added_nodes),
+            stop=stop,
+        )
+        from agentcore.runtime.audit.hooks import on_replan
+
+        on_replan(
+            execution_id=sup.execution_id,
+            binds=binds,
+            steers=steers,
             adds=len(added_nodes),
             stop=stop,
         )

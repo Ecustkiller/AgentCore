@@ -27,8 +27,7 @@ import json
 from pathlib import Path
 
 from agentcore.core.types import ToolCategory  # noqa: F401 — parity with engine-facts harness
-from agentcore.llm.config import ModelProfile
-from agentcore.llm.protocol import LLMChunk, LLMMessage, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink
@@ -48,6 +47,7 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+from tests.llm_helpers import make_profile_params
 
 
 class _ScriptedProvider:
@@ -184,7 +184,7 @@ async def test_pause_journal_projects_to_captain_transcript():
         LLMMessage(role="system", content=system_prompt),
         LLMMessage(role="user", content=user_message),
     ]
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=5)
+    profile = make_profile_params(max_rounds=5)
     log = TurnFactLog()
     log.record_fact(
         TurnStartedFact(
@@ -201,6 +201,7 @@ async def test_pause_journal_projects_to_captain_transcript():
             sink=sink,
             tool_context=_context(),
             profile=profile,
+            turn_model="m",
             run_id="cap",
             role="captain",
         )
@@ -296,7 +297,7 @@ async def test_pause_journal_after_completed_tool_round():
         LLMMessage(role="system", content=system_prompt),
         LLMMessage(role="user", content=user_message),
     ]
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=5)
+    profile = make_profile_params(max_rounds=5)
     log = TurnFactLog()
     log.record_fact(
         TurnStartedFact(
@@ -313,6 +314,7 @@ async def test_pause_journal_after_completed_tool_round():
             sink=sink,
             tool_context=_context(),
             profile=profile,
+            turn_model="m",
             run_id="cap",
             role="captain",
         )
@@ -423,7 +425,7 @@ async def test_plan_review_pause_journal_projects_to_captain_transcript():
         LLMMessage(role="system", content=system_prompt),
         LLMMessage(role="user", content=user_message),
     ]
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=5)
+    profile = make_profile_params(max_rounds=5)
     log = TurnFactLog()
     log.record_fact(
         TurnStartedFact(
@@ -443,6 +445,7 @@ async def test_plan_review_pause_journal_projects_to_captain_transcript():
             sink=sink,
             tool_context=_context(),
             profile=profile,
+            turn_model="m",
             run_id="cap",
             role="captain",
         )

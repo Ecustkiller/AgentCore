@@ -14,16 +14,15 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agentcore.config import settings
-from agentcore.conversation.quota import QuotaLimits, enforce_quota
-from agentcore.core.errors import BYOKKeyMissingError, LLMTimeoutError
+from agentcore.billing.gate import preflight_llm_credentials
+from agentcore.core.errors import LLMTimeoutError
 from agentcore.core.logging import get_logger
 from agentcore.db.models import User
 from agentcore.db.repositories import CostEventRepository
 from agentcore.llm import LLMMessage, LLMProvider
-from agentcore.llm.byok import LLMCredentials, resolve_user_llm_credentials
-from agentcore.llm.config import build_request, get_profile
 from agentcore.llm.factory import build_provider
+from agentcore.llm.profiles import build_request, get_profile
+from agentcore.llm.resolve import resolve_turn_model as resolve_user_model
 
 logger = get_logger(__name__)
 
@@ -68,7 +67,9 @@ def _render_prompt(data: RewriteInput) -> str:
     )
 
 
-async def rewrite_selection(provider: LLMProvider, data: RewriteInput) -> str:
+async def rewrite_selection(
+    provider: LLMProvider, data: RewriteInput, *, model: str | None = None
+) -> str:
     """调用 LLM 按指令改写选区，返回改写后的文本（原样，不做清洗）。
 
     不剥离代码围栏等「兜底清洗」：选区本身可能就是合法的代码块/图表，系统提示已要求模型
@@ -81,6 +82,7 @@ async def rewrite_selection(provider: LLMProvider, data: RewriteInput) -> str:
             LLMMessage(role="user", content=_render_prompt(data)),
         ],
         stream=False,
+        model=model,
     )
     try:
         response = await asyncio.wait_for(
@@ -96,21 +98,16 @@ async def _resolve_assist_credentials(
     session: AsyncSession,
     user: User,
     cost_repo: CostEventRepository,
-) -> LLMCredentials | None:
-    """一次性文件辅助调用的计费门禁，与回合 preflight 同决策。
-
-    BYOK 模式要求用户自己的 DeepSeek key（缺失 → 402 LLM_KEY_REQUIRED，前端引导去
-    设置·模型配置）；平台模式校验用量配额并退回全局 key（``None``）。
-    """
-    if settings.billing_mode == "byok":
-        credentials = await resolve_user_llm_credentials(session, user.user_id)
-        if credentials is None:
-            raise BYOKKeyMissingError(
-                "请先在「设置 · 模型配置」中填入你的 DeepSeek API Key，再使用 AI 改写。"
-            )
-        return credentials
-    await enforce_quota(cost_repo, user.user_id, limits=QuotaLimits.for_user(user))
-    return None
+):
+    """一次性文件辅助调用的计费门禁，与回合 preflight 同决策。"""
+    return await preflight_llm_credentials(
+        session=session,
+        user=user,
+        cost_repo=cost_repo,
+        byok_missing_message=(
+            "请先在「设置 · 模型配置」中填入你的 DeepSeek API Key，再使用 AI 改写。"
+        ),
+    )
 
 
 async def rewrite_selection_for_user(
@@ -129,4 +126,5 @@ async def rewrite_selection_for_user(
         session=session, user=user, cost_repo=cost_repo
     )
     provider = build_provider(credentials)
-    return await rewrite_selection(provider, data)
+    model = resolve_user_model(credentials)
+    return await rewrite_selection(provider, data, model=model)

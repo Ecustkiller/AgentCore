@@ -60,9 +60,12 @@ function primaryArg(args: Record<string, unknown>): string | null {
 export function PauseCard({
   pending,
   conversationId,
+  onResolved,
 }: {
   pending: Extract<PendingInteraction, { kind: "approval" }>;
   conversationId: string;
+  /** Invoked after a successful resolve (used when the card was rehydrated from recovery). */
+  onResolved?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -73,6 +76,7 @@ export function PauseCard({
     setErr(null);
     try {
       await resolveInteraction(conversationId, pending.approvalId, body);
+      onResolved?.();
       // Leave busy=true on success: the stream's approval_resolved event drops `pending`
       // and unmounts this card. A stale 404 is swallowed too — the turn has moved on.
     } catch (e) {

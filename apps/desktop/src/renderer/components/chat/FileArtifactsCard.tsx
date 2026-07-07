@@ -1,9 +1,12 @@
-import { Button } from "@/components/ui";
+import { Button, IconButton } from "@/components/ui";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   type StatusTone,
   statusAccentText,
   statusPillSoft,
 } from "@/components/ui/tone-presets";
+import { FileAuditTrail } from "@/components/audit/FileAuditTrail";
+import { useFileAudit } from "@/hooks/useFileAudit";
 import type { FileArtifact, FileOp } from "@/lib/fileArtifacts";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import {
@@ -13,6 +16,7 @@ import {
   ChevronUp,
   FilePlus,
   FolderOpen,
+  History,
   type LucideIcon,
   Pencil,
   Trash2,
@@ -65,11 +69,19 @@ const OP_META: Record<
 
 function FileRow({
   artifact,
+  conversationId,
   onOpen,
 }: {
   artifact: FileArtifact;
+  conversationId: string | null;
   onOpen: () => void;
 }) {
+  const [auditOpen, setAuditOpen] = useState(false);
+  const auditState = useFileAudit(
+    conversationId,
+    artifact.path,
+    auditOpen && artifact.op !== "delete",
+  );
   const meta = OP_META[artifact.op];
   const dir = artifact.path.slice(
     0,
@@ -107,28 +119,49 @@ function FileRow({
   }
   return (
     <li>
-      <Button
-        variant="ghost"
-        onClick={onOpen}
-        title={`在工作区预览 ${artifact.path}`}
-        className="h-auto w-full justify-start gap-2 rounded-none px-3 py-2 hover:bg-accent"
-      >
-        <span className="flex w-full items-center gap-2 text-left">
-          {body}
-          <ChevronRight
-            size={14}
-            className="shrink-0 text-muted-foreground/50"
-          />
-        </span>
-      </Button>
+      <div className="flex items-center">
+        <Button
+          variant="ghost"
+          onClick={onOpen}
+          title={`在工作区预览 ${artifact.path}`}
+          className="h-auto min-w-0 flex-1 justify-start gap-2 rounded-none px-3 py-2 hover:bg-accent"
+        >
+          <span className="flex w-full items-center gap-2 text-left">
+            {body}
+            <ChevronRight
+              size={14}
+              className="shrink-0 text-muted-foreground/50"
+            />
+          </span>
+        </Button>
+        {conversationId && (
+          <SimpleTooltip label="查看写入归因">
+            <IconButton
+              className="mr-2 shrink-0"
+              aria-label="查看写入归因"
+              aria-expanded={auditOpen}
+              onClick={() => setAuditOpen((v) => !v)}
+            >
+              <History size={14} />
+            </IconButton>
+          </SimpleTooltip>
+        )}
+      </div>
+      {auditOpen && conversationId && (
+        <div className="border-t border-border bg-muted/30 px-3 py-2">
+          <FileAuditTrail state={auditState} compact />
+        </div>
+      )}
     </li>
   );
 }
 
 export function FileArtifactsCard({
   artifacts,
+  conversationId = null,
 }: {
   artifacts: FileArtifact[];
+  conversationId?: string | null;
 }) {
   // 文件不多（≤4）默认展开一目了然；多了先收起，避免长清单淹没答复。
   const [expanded, setExpanded] = useState(artifacts.length <= 4);
@@ -167,6 +200,7 @@ export function FileArtifactsCard({
             <FileRow
               key={`${a.op}:${a.path}`}
               artifact={a}
+              conversationId={conversationId}
               onOpen={() => showFile(a.path, a.name)}
             />
           ))}

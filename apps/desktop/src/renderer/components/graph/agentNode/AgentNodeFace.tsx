@@ -5,7 +5,14 @@ import {
 import { agentColorVar, agentGlyph } from "@/lib/agentIdentity";
 import { formatCompact } from "@/lib/format";
 import { STANCE_META, toolLabel } from "@/stores/execution";
-import { AlertTriangle, ArrowUp, Clock, FileText, Pause } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowUp,
+  ClipboardList,
+  Clock,
+  FileText,
+  Pause,
+} from "lucide-react";
 import {
   type AgentNodeData,
   type AgentNodePresentation,
@@ -173,11 +180,21 @@ function AgentNodeHeader({
         {(d.stance ||
           p.checkpointFace ||
           p.reviewConcernFace ||
-          (d.escalationPending ?? 0) > 0) && (
+          (d.escalationPending ?? 0) > 0 ||
+          (d.auditEventCount ?? 0) > 0) && (
           <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
             {d.stance && (
               <span className={graphBadgeMutedPlain}>
                 {STANCE_META[d.stance].label}
+              </span>
+            )}
+            {(d.auditEventCount ?? 0) > 0 && (
+              <span
+                className={`flex shrink-0 items-center gap-1 ${graphBadgeMutedPlain}`}
+                title={`${d.auditEventCount} 条活动记录`}
+              >
+                <ClipboardList size={10} />
+                活动 {d.auditEventCount}
               </span>
             )}
             {p.reviewConcernFace && (

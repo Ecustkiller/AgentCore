@@ -1,14 +1,8 @@
+import { ToolsCapabilityBadge } from "@/components/llm/ToolsCapabilityBadge";
 import { Button, IconButton } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { useModelModes } from "@/hooks/useModelModes";
+import { llmKeyKeys } from "@/lib/queryKeys";
 import { hasLocalEngine } from "@/lib/capabilities";
 import { ApiError } from "@/services/api";
 import {
@@ -18,18 +12,11 @@ import {
   setLlmKey,
   testLlmKey,
 } from "@/services/llmKey";
-import {
-  modeLabel,
-  presetLabel,
-  setDefaultModelMode,
-} from "@/services/modelModes";
 import { clearSidecarHealth } from "@/services/sidecarHealth";
-import { useAuthStore } from "@/stores/auth";
 import { useUIStore } from "@/stores/ui";
+import { useQueryClient } from "@tanstack/react-query";
 import {
-  Check,
   CheckCircle2,
-  ChevronDown,
   ExternalLink,
   Eye,
   EyeOff,
@@ -37,30 +24,44 @@ import {
   ShieldCheck,
   XCircle,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+  type ByokProviderId,
+  DEFAULT_BYOK_PROVIDER_ID,
+  getByokProviderPreset,
+  isCustomByokProvider,
+  listByokProviderOptions,
+  resolveByokProviderFromConfig,
+} from "@/lib/byokProviderPresets";
+import { useEffect, useId, useState } from "react";
 import { SettingsHeader } from "./SettingsHeader";
 
+const INPUT_CLASS =
+  "h-8 w-full rounded-lg border border-input bg-background px-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring";
+
 /**
- * 模型配置 (/more/model) — BYOK: the user's own DeepSeek API key.
+ * 模型配置 (/more/model) — BYOK OpenAI-compatible endpoint.
  *
- * 内测期每条对话都跑在用户自己的 DeepSeek key 上（后端 config.billing_mode
- * "byok"）；没配 key 就不能发起对话（preflight 会拦下并引导到这里）。Key 以
- * AES-256-GCM 加密存储，服务端只回显后 4 位。这里可填写 / 更换 / 删除 key，并
- * 「测试连接」确认其可用（测试通过即代表真能跑）。
+ * 内测期用户侧仅暴露自带 Key；平台免费额度入口暂隐藏（后端路径保留）。
  */
 export function ModelSettings() {
   const [status, setStatus] = useState<LlmKeyStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const queryClient = useQueryClient();
+
+  const syncStatus = (next: LlmKeyStatus) => {
+    setStatus(next);
+    queryClient.setQueryData(llmKeyKeys.status, next);
+  };
 
   useEffect(() => {
     let alive = true;
     void getLlmKey()
       .then((s) => {
         if (!alive) return;
-        setStatus(s);
-        setEditing(!s.configured); // unconfigured → open the input straight away
+        syncStatus(s);
+        setEditing(!s.configured);
       })
       .catch(() => alive && setLoadError("加载失败，请重试"))
       .finally(() => alive && setLoading(false));
@@ -73,7 +74,7 @@ export function ModelSettings() {
     <div>
       <SettingsHeader
         title="模型配置"
-        description="填入你自己的 DeepSeek API Key，对话将使用你的额度运行。Key 经 AES 加密存储，仅回显后 4 位；未配置则无法发起对话。"
+        description="配置 OpenAI 兼容端点（API Key、Base URL、默认模型名）。Key 经 AES 加密存储，仅回显后 4 位；未配置则无法发起对话。"
       />
 
       {loading ? (
@@ -83,206 +84,50 @@ export function ModelSettings() {
         </div>
       ) : loadError ? (
         <p className="mt-6 text-sm text-destructive">{loadError}</p>
-      ) : (
+      ) : status ? (
         <div className="mt-6 space-y-4">
-          {status?.configured && !editing && (
+          {status.configured && !editing && (
             <ConfiguredCard
               status={status}
-              onChanged={setStatus}
+              onChanged={syncStatus}
               onReplace={() => setEditing(true)}
             />
           )}
           {editing && (
             <KeyForm
-              configured={!!status?.configured}
+              configured={!!status.configured}
+              initialBaseUrl={status.base_url ?? ""}
+              initialModel={status.default_model ?? ""}
               onSaved={(s) => {
-                setStatus(s);
+                syncStatus(s);
                 setEditing(false);
               }}
               onCancel={
-                status?.configured ? () => setEditing(false) : undefined
+                status.configured ? () => setEditing(false) : undefined
               }
             />
           )}
           <InfoNote />
         </div>
-      )}
+      ) : null}
 
-      <DefaultModelModeCard />
-
-      {/* 本地引擎是桌面专属（web 无 sidecar，恒走云端）——web 不挂此开关。 */}
       {hasLocalEngine() && <LocalEngineToggle />}
     </div>
   );
 }
 
-/**
- * 默认质量档 (账户级) — the model tier every NEW conversation starts on (质量档
- * 选择器 · 账户默认档). Per-conversation overrides live in the composer's picker;
- * this sets the fallback. `null` = 跟随系统默认 (the operator default). Optimistic:
- * the label flips at once and reverts if the PUT fails.
- */
-function DefaultModelModeCard() {
-  const { data: modes, isLoading } = useModelModes();
-  const current = useAuthStore((s) => s.user?.defaultModelMode ?? null);
-  const setStoreDefault = useAuthStore((s) => s.setDefaultModelMode);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const currentLabel =
-    current === null ? "跟随系统默认" : modeLabel(current, modes ?? null);
-
-  const choose = async (next: string | null) => {
-    if (next === current || saving) return;
-    setSaving(true);
-    setError(null);
-    const prev = current;
-    setStoreDefault(next);
-    try {
-      await setDefaultModelMode(next);
-    } catch (e) {
-      setStoreDefault(prev);
-      setError(apiErrorMessage(e, "保存失败，请重试"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const item = (
-    active: boolean,
-    label: string,
-    onSelect: () => void,
-    key: string,
-  ) => (
-    <DropdownMenuItem key={key} onSelect={onSelect}>
-      <span className="flex-1 truncate">{label}</span>
-      {active && <Check size={13} className="shrink-0" />}
-    </DropdownMenuItem>
-  );
-
-  return (
-    <div className="mt-4 rounded-xl border border-border bg-card px-4 py-3">
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-sm text-foreground">默认质量档</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            新对话默认使用的模型档位；单个对话可在输入框临时切换。「高质」更强更贵，「经济」更快更省。
-          </p>
-        </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              disabled={isLoading || saving}
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-transparent px-3 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
-            >
-              {saving && <Loader2 size={14} className="animate-spin" />}
-              {currentLabel}
-              <ChevronDown size={14} className="opacity-60" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-44">
-            {item(
-              current === null,
-              "跟随系统默认",
-              () => void choose(null),
-              "__sys__",
-            )}
-            {modes && modes.presets.length > 0 && <DropdownMenuSeparator />}
-            {modes?.presets.map((p) =>
-              item(
-                current === p.key,
-                presetLabel(p.key),
-                () => void choose(p.key),
-                `preset:${p.key}`,
-              ),
-            )}
-            {modes && modes.custom.length > 0 && <DropdownMenuSeparator />}
-            {modes?.custom.map((m) =>
-              item(
-                current === m.id,
-                m.name,
-                () => void choose(m.id),
-                `custom:${m.id}`,
-              ),
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-      {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
-    </div>
-  );
-}
-
-/**
- * 本地引擎（sidecar）开关（双模式工作区 §一.1）。开启后，绑定了本机本地文件夹的对话在用户
- * 电脑上直接运行（直连本地磁盘、文件/代码不再每 op 往返云端，更快），而非云端遥控桌面；裸聊与
- * 云端项目、带附件的回合仍走云。**默认开**、可关闭——启动失败会自动降级回云端（故默认开安全，
- * 见 `turns.sendTurn`）；但 sidecar 暂非真离线（推理仍经云端，断网不可用）（路由判定见
- * `services/sidecarRouting`）。
- */
-function LocalEngineToggle() {
-  const enabled = useUIStore((s) => s.sidecarEnabled);
-  const setEnabled = useUIStore((s) => s.setSidecarEnabled);
-  // 重新开启本地引擎时清掉本会话健康缓存：给上次因环境起不来被标坏、现已修好的根一次重新探活
-  // 的机会（见 sidecarHealth）。关闭时无需清（不会再走 sidecar）。
-  const onToggle = (v: boolean): void => {
-    setEnabled(v);
-    if (v) clearSidecarHealth();
-  };
-  return (
-    <div className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3">
-      <div className="min-w-0">
-        <p className="text-sm text-foreground">本地引擎</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          绑定本机本地文件夹的对话默认在你的电脑上运行（直连本地磁盘、更快），启动失败会自动切回
-          云端。裸聊与云端项目仍走云；AI
-          推理仍在云端，断网时不可用。关闭后全部走云端。
-        </p>
-      </div>
-      <Switch checked={enabled} onCheckedChange={onToggle} label="本地引擎" />
-    </div>
-  );
-}
-
-/** Pull the server's error message out of an ApiError body, else a fallback. */
 function apiErrorMessage(e: unknown, fallback: string): string {
   if (e instanceof ApiError) {
     try {
       const body = JSON.parse(e.body) as { error?: { message?: string } };
       if (body.error?.message) return body.error.message;
     } catch {
-      /* non-JSON body → fallback */
+      /* non-JSON body */
     }
   }
   return fallback;
 }
 
-/** External link to the DeepSeek platform; opens in the system browser
- *  (main process routes target=_blank through shell.openExternal). */
-function DeepSeekLink({
-  href,
-  label,
-  className = "",
-}: {
-  href: string;
-  label: string;
-  className?: string;
-}) {
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className={`inline-flex items-center gap-1 text-xs text-primary hover:underline ${className}`}
-    >
-      <ExternalLink size={14} />
-      {label}
-    </a>
-  );
-}
-
-/** A status dot + label for the key's last connectivity result. */
 function StatusBadge({ status }: { status: LlmKeyStatus }) {
   if (status.status === "active") {
     return (
@@ -303,7 +148,6 @@ function StatusBadge({ status }: { status: LlmKeyStatus }) {
   return <span className="text-xs text-muted-foreground">未测试</span>;
 }
 
-/** The configured-key view: masked key + status + 测试连接 / 更换 / 删除. */
 function ConfiguredCard({
   status,
   onChanged,
@@ -330,7 +174,7 @@ function ConfiguredCard({
   };
 
   const remove = async () => {
-    if (!window.confirm("删除已保存的 API Key？删除后将无法发起对话。")) return;
+    if (!window.confirm("删除已保存的模型配置？删除后将无法发起对话。")) return;
     setRemoving(true);
     setActionError(null);
     try {
@@ -339,6 +183,9 @@ function ConfiguredCard({
         configured: false,
         status: "unconfigured",
         masked_key: null,
+        billing_mode: status.billing_mode,
+        billing_preference: status.billing_preference,
+        platform_available: status.platform_available,
       });
     } catch (e) {
       setActionError(apiErrorMessage(e, "删除失败，请重试"));
@@ -349,16 +196,27 @@ function ConfiguredCard({
 
   return (
     <div className="rounded-xl border border-border bg-card px-4 py-3">
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 space-y-1">
           <p className="font-mono text-sm text-foreground">
             {status.masked_key ?? "已配置"}
           </p>
-          <div className="mt-1">
+          {status.base_url && (
+            <p className="truncate font-mono text-xs text-muted-foreground">
+              {status.base_url}
+            </p>
+          )}
+          {status.default_model && (
+            <p className="font-mono text-xs text-foreground">
+              模型 {status.default_model}
+            </p>
+          )}
+          <div className="flex flex-wrap items-center gap-3 pt-1">
             <StatusBadge status={status} />
+            <ToolsCapabilityBadge supportsTools={status.supports_tools} />
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
           <Button
             variant="neutral"
             size="md"
@@ -398,38 +256,69 @@ function ConfiguredCard({
       {actionError && (
         <p className="mt-3 text-xs text-destructive">{actionError}</p>
       )}
-      <div className="mt-3">
-        <DeepSeekLink
-          href="https://platform.deepseek.com/usage"
-          label="查看用量/余额"
-        />
-      </div>
     </div>
   );
 }
 
-/** The input form for entering / replacing the key. */
 function KeyForm({
   configured,
+  initialBaseUrl,
+  initialModel,
   onSaved,
   onCancel,
 }: {
   configured: boolean;
+  initialBaseUrl: string;
+  initialModel: string;
   onSaved: (s: LlmKeyStatus) => void;
   onCancel?: () => void;
 }) {
-  const [value, setValue] = useState("");
+  const modelListId = useId();
+  const [apiKey, setApiKey] = useState("");
+  const [providerId, setProviderId] = useState<ByokProviderId>(() =>
+    resolveByokProviderFromConfig(initialBaseUrl),
+  );
+  const [baseUrl, setBaseUrl] = useState(() => {
+    if (initialBaseUrl.trim()) return initialBaseUrl;
+    return getByokProviderPreset(DEFAULT_BYOK_PROVIDER_ID).baseUrl;
+  });
+  const [defaultModel, setDefaultModel] = useState(() => {
+    if (initialModel.trim()) return initialModel;
+    return getByokProviderPreset(DEFAULT_BYOK_PROVIDER_ID).defaultModel;
+  });
   const [reveal, setReveal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSave = value.trim().length > 0 && !saving;
+  const preset = !isCustomByokProvider(providerId)
+    ? getByokProviderPreset(providerId)
+    : null;
+  const modelSuggestions = preset?.models ?? [];
+  const keyHelpUrl =
+    preset?.keyHelpUrl ?? "https://platform.openai.com/api-keys";
+
+  const selectProvider = (next: ByokProviderId) => {
+    setProviderId(next);
+    if (!isCustomByokProvider(next)) {
+      const p = getByokProviderPreset(next);
+      setBaseUrl(p.baseUrl);
+      setDefaultModel(p.defaultModel);
+    }
+  };
+
+  const canSave = apiKey.trim().length > 0 && !saving;
 
   const save = async () => {
     setSaving(true);
     setError(null);
     try {
-      onSaved(await setLlmKey(value.trim()));
+      onSaved(
+        await setLlmKey({
+          api_key: apiKey.trim(),
+          base_url: baseUrl.trim() || null,
+          default_model: defaultModel.trim() || null,
+        }),
+      );
     } catch (e) {
       setError(apiErrorMessage(e, "保存失败，请重试"));
     } finally {
@@ -440,32 +329,95 @@ function KeyForm({
   return (
     <div className="rounded-xl border border-border bg-card p-4">
       <p className="text-sm font-medium text-foreground">
-        {configured ? "更换 API Key" : "填写 DeepSeek API Key"}
+        {configured ? "更换模型配置" : "填写模型配置"}
       </p>
-      <div className="mt-3 flex items-center gap-2">
-        <div className="relative flex-1">
+      <div className="mt-3 space-y-3">
+        <label className="block">
+          <span className="text-xs text-muted-foreground">厂商</span>
+          <select
+            value={providerId}
+            onChange={(e) => selectProvider(e.target.value as ByokProviderId)}
+            className={`mt-1 ${INPUT_CLASS} font-sans`}
+          >
+            {listByokProviderOptions().map((opt) => (
+              <option key={opt.id} value={opt.id}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          {!isCustomByokProvider(providerId) && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              选择后将预填 Base URL 与常见模型；可按你的 Key 权限修改。
+            </p>
+          )}
+        </label>
+        <label className="block">
+          <span className="text-xs text-muted-foreground">API Key</span>
+          <div className="relative mt-1">
+            <input
+              type={reveal ? "text" : "password"}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="sk-..."
+              autoComplete="off"
+              spellCheck={false}
+              className={`${INPUT_CLASS} pl-2 pr-9`}
+            />
+            <SimpleTooltip label={reveal ? "隐藏" : "显示"}>
+              <IconButton
+                onClick={() => setReveal((r) => !r)}
+                aria-label={reveal ? "隐藏" : "显示"}
+                className="absolute right-1 top-1/2 size-6 -translate-y-1/2"
+              >
+                {reveal ? <EyeOff size={14} /> : <Eye size={14} />}
+              </IconButton>
+            </SimpleTooltip>
+          </div>
+        </label>
+        <label className="block">
+          <span className="text-xs text-muted-foreground">Base URL</span>
           <input
-            type={reveal ? "text" : "password"}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder="sk-..."
+            type="text"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder={
+              isCustomByokProvider(providerId)
+                ? "https://your-endpoint.example/v1"
+                : preset?.baseUrl
+            }
             autoComplete="off"
             spellCheck={false}
-            className="h-8 w-full rounded-lg border border-input bg-background pl-2 pr-9 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            className={`mt-1 ${INPUT_CLASS}`}
           />
-          <SimpleTooltip label={reveal ? "隐藏" : "显示"}>
-            <IconButton
-              onClick={() => setReveal((r) => !r)}
-              aria-label={reveal ? "隐藏" : "显示"}
-              className="absolute right-1 top-1/2 size-6 -translate-y-1/2"
-            >
-              {reveal ? <EyeOff size={14} /> : <Eye size={14} />}
-            </IconButton>
-          </SimpleTooltip>
-        </div>
+        </label>
+        <label className="block">
+          <span className="text-xs text-muted-foreground">默认模型名</span>
+          <input
+            type="text"
+            value={defaultModel}
+            onChange={(e) => setDefaultModel(e.target.value)}
+            placeholder={
+              isCustomByokProvider(providerId)
+                ? "model-name"
+                : preset?.defaultModel
+            }
+            list={modelSuggestions.length > 0 ? modelListId : undefined}
+            autoComplete="off"
+            spellCheck={false}
+            className={`mt-1 ${INPUT_CLASS}`}
+          />
+          {modelSuggestions.length > 0 && (
+            <datalist id={modelListId}>
+              {modelSuggestions.map((model) => (
+                <option key={model} value={model} />
+              ))}
+            </datalist>
+          )}
+        </label>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
         <Button
           size="md"
-          className="shrink-0"
           disabled={!canSave}
           icon={
             saving ? <Loader2 size={14} className="animate-spin" /> : undefined
@@ -478,7 +430,6 @@ function KeyForm({
           <Button
             variant="neutral"
             size="md"
-            className="shrink-0"
             disabled={saving}
             onClick={onCancel}
           >
@@ -487,19 +438,46 @@ function KeyForm({
         )}
       </div>
       {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
-      <DeepSeekLink
-        href="https://platform.deepseek.com/api_keys"
-        label="前往 DeepSeek 开放平台创建 API Key"
-        className="mt-3"
-      />
+      <a
+        href={keyHelpUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-3 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+      >
+        <ExternalLink size={14} />
+        {isCustomByokProvider(providerId)
+          ? "前往厂商控制台创建 API Key"
+          : `前往 ${preset?.label ?? "厂商"} 创建 API Key`}
+      </a>
       <p className="mt-2 text-xs text-muted-foreground">
-        创建后复制粘贴到上方输入框；保存后建议点「测试连接」确认可用。
+        保存后建议点「测试连接」确认可用，并查看是否支持工具调用。
       </p>
     </div>
   );
 }
 
-/** BYOK reassurance: encrypted at rest, your own quota, key never re-shown. */
+function LocalEngineToggle() {
+  const enabled = useUIStore((s) => s.sidecarEnabled);
+  const setEnabled = useUIStore((s) => s.setSidecarEnabled);
+  const onToggle = (v: boolean): void => {
+    setEnabled(v);
+    if (v) clearSidecarHealth();
+  };
+  return (
+    <div className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3">
+      <div className="min-w-0">
+        <p className="text-sm text-foreground">本地引擎</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          绑定本机本地文件夹的对话默认在你的电脑上运行（直连本地磁盘、更快），启动失败会自动切回
+          云端。裸聊与云端项目仍走云；AI
+          推理仍在云端，断网时不可用。关闭后全部走云端。
+        </p>
+      </div>
+      <Switch checked={enabled} onCheckedChange={onToggle} label="本地引擎" />
+    </div>
+  );
+}
+
 function InfoNote() {
   return (
     <div className="flex items-start gap-2.5 rounded-xl border border-border bg-muted/30 px-4 py-3">
@@ -509,8 +487,8 @@ function InfoNote() {
       />
       <p className="text-xs text-muted-foreground">
         你的 Key 仅用于你自己的对话，经 AES-256-GCM 加密存储，服务端只显示后 4
-        位、不会回传完整内容。对话与后台任务（标题、记忆）都按你的 DeepSeek
-        额度计费。
+        位、不会回传完整内容。聊天、委派、辩论均使用此处配置的同一模型；平台只统计
+        token 用量、不代为计价。
       </p>
     </div>
   );

@@ -36,7 +36,7 @@ def _ceo() -> str:
 # --- PromptProfile.resolve + contextvar 生命周期 ---
 
 
-def test_profile_resolve_override_else_default() -> None:
+def test_resolve_override_else_default() -> None:
     p = PromptProfile("x", {FRAGMENT_BASE: "NEW"})
     assert p.resolve(FRAGMENT_BASE, "OLD") == "NEW"
     assert p.resolve(FRAGMENT_CEO_CORE, "OLD") == "OLD"

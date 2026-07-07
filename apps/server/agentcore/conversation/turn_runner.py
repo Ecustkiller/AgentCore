@@ -5,12 +5,16 @@ import time
 
 from agentcore.config import settings
 from agentcore.conversation.common import preview
-from agentcore.conversation.turn_persistence import persist_turn_result, salvage_incomplete_turn
+from agentcore.conversation.turn_persistence import (
+    create_assistant_placeholder,
+    persist_turn_result,
+    salvage_incomplete_turn,
+)
 from agentcore.core.log_context import log_context, new_trace_id
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
-from agentcore.llm.byok import LLMCredentials
-from agentcore.llm.modes import ProfileSet
+from agentcore.llm.profiles import TurnProfiles as ProfileSet
+from agentcore.llm.resolve import LLMCredentials
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.pipeline import run_chat_pipeline
 from agentcore.runtime.session_persistence import load_run_session, save_run_session
@@ -55,6 +59,7 @@ async def run_and_persist(
     instructions: str | None = None,
     board_id: str | None = None,
     debate_seed: dict | None = None,
+    llm_supports_tools: bool | None = None,
 ) -> None:
     """Run the pipeline, persist the assistant reply, then title + memory.
 
@@ -65,6 +70,7 @@ async def run_and_persist(
     session_saver, session_loader = session_callbacks(conversation_id)
     suspension_saver, suspension_deleter = suspension_callbacks()
 
+    message_id = new_id()
     turn_id = new_id()
     trace_id = new_trace_id()
     started = time.monotonic()
@@ -82,6 +88,16 @@ async def run_and_persist(
             history=len(history),
             attachments=len(attachments or []),
             location=backend.location,
+            message_id=message_id,
+        )
+        await create_assistant_placeholder(
+            conversation_id=conversation_id,
+            message_id=message_id,
+            trace_id=trace_id,
+        )
+        sink.bind_content_checkpoint(
+            conversation_id=conversation_id,
+            message_id=message_id,
         )
         try:
             result = await run_chat_pipeline(
@@ -103,9 +119,16 @@ async def run_and_persist(
                 suspension_saver=suspension_saver,
                 suspension_deleter=suspension_deleter,
                 debate_seed=debate_seed,
+                llm_supports_tools=llm_supports_tools,
+                message_id=message_id,
             )
         except asyncio.CancelledError:
-            salvage_incomplete_turn(sink=sink, conversation_id=conversation_id, trace_id=trace_id)
+            salvage_incomplete_turn(
+                sink=sink,
+                conversation_id=conversation_id,
+                trace_id=trace_id,
+                message_id=message_id,
+            )
             raise
         finish = result.get("finish_reason")
         cost_runs = result.get("cost_runs") or []

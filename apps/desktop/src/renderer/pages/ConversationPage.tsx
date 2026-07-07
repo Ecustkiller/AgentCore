@@ -146,6 +146,7 @@ export function ConversationPage() {
   }, []);
 
   const panelOpen = useSidePanelStore((s) => s.open);
+  const pendingBadge = useSidePanelStore((s) => s.pendingBadge);
   const togglePanel = useSidePanelStore((s) => s.togglePanel);
 
   // 聊天 ⇄ 画布双视图（前端UX设计.md §六）。默认聊天；用户在顶栏切到画布（按对话记忆、
@@ -212,11 +213,16 @@ export function ConversationPage() {
               onClick={togglePanel}
               aria-pressed={panelOpen}
               aria-label={panelOpen ? "隐藏侧面板" : "侧面板"}
-              className={`border border-border backdrop-blur ${
+              className={`relative border border-border backdrop-blur ${
                 panelOpen ? "bg-accent text-foreground" : "bg-card/80"
               }`}
             >
               <PanelRight size={16} />
+              {!panelOpen && pendingBadge > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-xs font-medium text-primary-foreground">
+                  {pendingBadge > 9 ? "9+" : pendingBadge}
+                </span>
+              )}
             </IconButton>
           </div>
         </SimpleTooltip>

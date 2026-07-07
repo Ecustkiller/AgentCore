@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from agentcore.api.schemas.usage import UsageBreakdown
 from agentcore.runtime.approvals import ApprovalDecision
-from agentcore.runtime.checkpoints import CheckpointDecision
+from agentcore.runtime.checkpoints import AskCheckpointIntent, CheckpointDecision
 from agentcore.runtime.suspension import SuspensionKind
 
 
@@ -97,6 +97,9 @@ class SendMessageRequest(BaseModel):
     # 结构化补轮·B (可逆叫停): a 续辩 turn started from a settled debate card carries the prior
     # debate's projected result so this turn's debate continues it. None for an ordinary turn.
     debate_seed: DebateSeedInput | None = None
+    # Soft gate: set when this turn is expected to call orchestration tools (delegate/debate).
+    # Triggers a preflight warning (not a block) when probe recorded supports_tools=false.
+    requires_tools: bool = False
 
 
 class RetryFailedRequest(BaseModel):
@@ -309,6 +312,23 @@ class ResumeTurnRequest(BaseModel):
     selected: list[str] = Field(default_factory=list, max_length=6)
 
 
+class PendingApprovalSummary(BaseModel):
+    """A GRANTABLE tool call still awaiting the user's decision (in-process gate).
+
+    Surfaced on conversation reopen via ``GET .../recovery`` so the client can
+    re-render approval cards after a refresh. Unlike plan_review / ask_user pauses,
+    approvals stay on the live turn's interaction bridge — they are NOT durably
+    paused turns — but the registry's ``list_pending`` is the authoritative
+    pending set while the backend run is still alive.
+    """
+
+    approval_id: str
+    conversation_id: str
+    tool_call_id: str
+    tool_name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
 class PausedTurnSummary(BaseModel):
     """A turn awaiting resume after a durable plan_review / ask_user pause (结构化挂起 2b).
 
@@ -328,6 +348,8 @@ class PausedTurnSummary(BaseModel):
     kind: SuspensionKind
     checkpoint_id: str
     user_message: str = ""
+    # Client-minted id of the user bubble (sidecar write-back pins the persisted row).
+    user_message_id: str = ""
     # plan_review
     steps: list[dict[str, Any]] = Field(default_factory=list)
     pending: list[dict[str, Any]] = Field(default_factory=list)
@@ -337,6 +359,7 @@ class PausedTurnSummary(BaseModel):
     assumptions: list[dict[str, Any]] = Field(default_factory=list)
     questions: list[dict[str, Any]] = Field(default_factory=list)
     style_options: list[dict[str, Any]] = Field(default_factory=list)
+    intent: AskCheckpointIntent | None = None
 
 
 class TurnRecoveryResponse(BaseModel):
@@ -349,6 +372,10 @@ class TurnRecoveryResponse(BaseModel):
       C1 · slice 1b) — the client attaches (``GET .../stream``) to replay + tail it.
     - ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and
       lost their live stream (结构化挂起 2b) — each renders a resume card.
+    - ``pending_approvals``: GRANTABLE tool calls still blocked on the in-process
+      approval gate (the turn may also be ``live_running``) — each renders an approval
+      card. Unlike ``paused``, these are NOT durable pause frames; they exist only
+      while the backend run is alive.
 
     A turn parked at a checkpoint is BOTH live (its run is parked on the interaction,
     holding the workspace lock until checkpoint_timeout) and paused (its frame is
@@ -364,6 +391,7 @@ class TurnRecoveryResponse(BaseModel):
 
     live_running: bool = False
     paused: list[PausedTurnSummary] = Field(default_factory=list)
+    pending_approvals: list[PendingApprovalSummary] = Field(default_factory=list)
 
 
 class Citation(BaseModel):
@@ -568,6 +596,9 @@ class RecordTurnRequest(BaseModel):
     # inference-proxy LLM call this turn made. Reusing it for the persisted reply joins
     # the reasoning logs + the bubble under ONE trace (打通气泡↔日志).
     trace_id: str = Field(..., min_length=32, max_length=32)
+    # Pipeline finish reason (``FinishReason`` value). ``paused`` / ``error`` skip title +
+    # memory consolidation and upsert the assistant snapshot in place (挂起即收口 ②).
+    finish_reason: str | None = Field(None, max_length=32)
 
 
 class RecordTurnResponse(BaseModel):

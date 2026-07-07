@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from agentcore.core.errors import ResumeJournalDegradedError
 from agentcore.core.logging import get_logger
-from agentcore.llm.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.engine import join_segments
 from agentcore.runtime.journal import window_from_journal
 from agentcore.runtime.suspension import TurnSuspension
@@ -46,6 +47,16 @@ def resumed_captain_window(
             frame_transcript_len=len(suspension.transcript),
         )
         return list(suspension.transcript)
+    if suspension.journal_degraded:
+        raise ResumeJournalDegradedError(
+            "无法恢复此挂起回合：执行日志保存失败，刷新后上下文已不完整。请停止当前回合并重新发送。",
+        )
+    if suspension.journal_entries:
+        raise RuntimeError(
+            "resume: cannot rebuild the CEO window — journal_entries exist "
+            f"(count={len(suspension.journal_entries)}) but missing turn_started anchor; "
+            f"message_id={suspension.message_id}"
+        )
     raise RuntimeError(
         "resume: cannot rebuild the CEO window — no journal_entries to fold and no "
         "in-memory transcript (the pause's turn_journal write was lost); "

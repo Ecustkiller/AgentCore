@@ -28,6 +28,7 @@ release/
 # pnpm shoot 截图（须在 out/ 外，避免 electron-builder 误打进安装包）
 apps/desktop/shoot-out/
 apps/desktop/shoot-out-manual/
+apps/desktop/shoot-out-whiteboard/
 # pnpm smoke:webapp 截图（同上：web 冒烟产物，不入仓 / 不打包）
 apps/desktop/smoke-out/
 # web 客户端构建产物（渲染层跑浏览器，形态 A）——由 deploy:web / deploy-web.yml 的
@@ -60,6 +61,9 @@ apps/desktop/build/*
 .env
 .env.local
 .env.*.local
+# Local dev API credentials (probe scripts only)
+config/codex-credentials.json
+apps/server/.pytest-result.txt
 # Real production secrets (created on the server from production.env.example)
 deploy/config/production.env
 

@@ -19,6 +19,27 @@ def test_empty_fails_baseline_without_contract():
     assert "空" in v.failures[0]
 
 
+def test_empty_passes_when_files_written():
+    v = check_contract("", None, files_written=1)
+    assert v.ok
+
+
+def test_empty_passes_when_handoff_debrief_present():
+    v = check_contract("", None, debrief={"summary": "已完成写入 index.html"})
+    assert v.ok
+
+
+def test_empty_passes_when_handoff_has_key_points_only():
+    v = check_contract("", None, debrief={"key_points": ["要点一"]})
+    assert v.ok
+
+
+def test_empty_still_fails_with_no_alternate_signals():
+    v = check_contract("", None, files_written=0, debrief=None)
+    assert not v.ok
+    assert "空" in v.failures[0]
+
+
 def test_non_empty_passes_without_contract():
     v = check_contract("有内容", None)
     assert v.ok

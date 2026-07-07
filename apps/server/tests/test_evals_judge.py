@@ -12,7 +12,7 @@ from agentcore.evals.judge import LLMJudge
 from agentcore.evals.report import baseline_regression, report_to_dict
 from agentcore.evals.runner import apply_checks, run_suite
 from agentcore.evals.types import CaseReport, EvalCase, EvalReport, TurnOutcome
-from agentcore.llm.protocol import LLMResponse
+from agentcore.llm.provider.protocol import LLMResponse
 
 # --- 假裁判 provider ---------------------------------------------------------
 

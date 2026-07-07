@@ -15,6 +15,10 @@ from agentcore.runtime.debate import (
     RoundResult,
     SideTurn,
 )
+from agentcore.runtime.debate.cross_exam_parse import (
+    build_cross_exam_exchanges,
+    parse_cross_exam_response,
+)
 from agentcore.runtime.events import batch_metrics as batch_metrics_event
 from agentcore.tools.builtin.debate.prompt import (
     closing_context_blocks,
@@ -319,7 +323,9 @@ def make_cross_exam_runner(
             if session is None or state is None:
                 exchanges.append(
                     CrossExamExchange(
-                        target=side_key, questions=qs, answer_run_id=cx_run_id, ok=False
+                        target=side_key,
+                        exchanges=build_cross_exam_exchanges(qs, "", overall_ok=False),
+                        answer_run_id=cx_run_id,
                     )
                 )
                 continue
@@ -330,19 +336,20 @@ def make_cross_exam_runner(
                 session.transcript = state.transcript
                 session.content = state.content
                 session.recall_count += 1
+                qa_pairs = parse_cross_exam_response(qs, state.content, overall_ok=True)
                 exchanges.append(
                     CrossExamExchange(
                         target=side_key,
-                        questions=qs,
-                        answer=state.content,
+                        exchanges=qa_pairs,
                         answer_run_id=cx_run_id,
-                        ok=True,
                     )
                 )
             else:
                 exchanges.append(
                     CrossExamExchange(
-                        target=side_key, questions=qs, answer_run_id=cx_run_id, ok=False
+                        target=side_key,
+                        exchanges=build_cross_exam_exchanges(qs, "", overall_ok=False),
+                        answer_run_id=cx_run_id,
                     )
                 )
         return exchanges

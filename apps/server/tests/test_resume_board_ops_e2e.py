@@ -25,9 +25,13 @@ import asyncio
 from pathlib import Path
 
 from agentcore.config import settings
-from agentcore.llm.config import ModelProfile
-from agentcore.llm.modes import ProfileSet
-from agentcore.llm.protocol import LLMChunk, LLMMessage, ToolCall, ToolCallDelta, ToolCallFunction
+from agentcore.llm.provider.protocol import (
+    LLMChunk,
+    LLMMessage,
+    ToolCall,
+    ToolCallDelta,
+    ToolCallFunction,
+)
 from agentcore.memory.store import FileMemoryStore
 from agentcore.runtime import pipeline
 from agentcore.runtime.checkpoints import CheckpointDecision
@@ -36,6 +40,7 @@ from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.suspension import AskUserSuspension
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+from tests.llm_helpers import make_turn_profiles
 
 USER_ID = "u1"
 CONV_ID = "c1"
@@ -91,14 +96,8 @@ def _patch_seams(monkeypatch, provider: _ScriptedProvider, store: FileMemoryStor
     monkeypatch.setattr(settings, "approval_gate_enabled", False)
 
 
-def _profiles() -> ProfileSet:
-    return ProfileSet(
-        profiles={
-            "chat": ModelProfile(
-                model="chat-model", thinking=False, reasoning_effort=None, max_rounds=20
-            )
-        }
-    )
+def _profiles():
+    return make_turn_profiles(model="chat-model")
 
 
 def _backend() -> ServerWorkspace:

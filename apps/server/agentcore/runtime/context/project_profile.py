@@ -142,7 +142,7 @@ async def detect_project_profile(backend: WorkspaceBackend) -> ProjectProfile:
 
 
 def render_project_profile(profile: ProjectProfile) -> str:
-    """Render profile as concise text for workspace_context injection. ≤600 chars."""
+    """Render profile as concise text for workspace_file_index injection. ≤600 chars."""
     if not profile.languages and not profile.vcs:
         return ""
 

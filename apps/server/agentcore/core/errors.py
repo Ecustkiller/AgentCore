@@ -243,16 +243,33 @@ class QuotaExceededError(AgentCoreError):
 class BYOKKeyMissingError(AgentCoreError):
     """No usable BYOK LLM key is configured, so a turn cannot start.
 
-    In BYOK billing mode (config.billing_mode) every turn runs on the user's own
-    DeepSeek key; with none configured the turn is refused *before* the SSE opens
-    (route preflight) so the client can route the user to 设置·模型配置 rather than
-    getting a half-opened stream. 402 Payment Required fits "you must supply your
-    own billing credentials to proceed", and the ``LLM_KEY_REQUIRED`` code lets the
+    In BYOK billing mode every user-facing turn runs on the user's own API key;
+    with none configured the turn is refused *before* the SSE opens (route preflight)
+    so the client can route the user to 设置·模型配置 rather than getting a
+    half-opened stream. 402 Payment Required fits "you must supply your own
+    billing credentials to proceed", and the ``LLM_KEY_REQUIRED`` code lets the
     client distinguish it from auth (401) / quota (429).
     """
 
     code = ErrorCode.LLM_KEY_REQUIRED
     status_code = 402
+
+
+class PlatformBillingUnavailableError(AgentCoreError):
+    """User chose platform free quota but the operator key is not configured."""
+
+    code = ErrorCode.PLATFORM_BILLING_UNAVAILABLE
+    status_code = 503
+
+
+class ResumeJournalDegradedError(AgentCoreError):
+    """A durable pause frame survived but its ``turn_journal`` mirror did not.
+
+    Resume cannot rebuild the CEO window from facts alone; the user must abandon the
+    paused turn and start fresh rather than continuing on a silently empty context.
+    """
+
+    code = ErrorCode.STREAM_ERROR
 
 
 class KeyStorageUnavailableError(AgentCoreError):
@@ -275,18 +292,14 @@ def error_fields_for(
     *,
     fallback_code: str,
     fallback_message: str,
-) -> tuple[str, str]:
-    """Decide the ``(code, message)`` an SSE ``error`` event should carry for an
-    exception: preserve an :class:`AgentCoreError`'s structured ``code`` + curated
-    user-facing (zh) ``message``, and only collapse to ``fallback_code`` /
-    ``fallback_message`` for an unrecognized crash.
-
-    The single classifier of "coded error vs. opaque crash", shared by the chat
-    pipeline, the conversation service, and the engine so none of them flattens an
-    ``AgentCoreError`` into a generic code (统一错误码：避免 pipeline 把多种错误压成
-    PIPELINE_ERROR — 前端据 code 给精确文案/动作). ``fallback_message`` also fills in
-    for a coded error whose own ``message`` is empty.
-    """
+) -> tuple[str, str, dict | None]:
+    """Decide the ``(code, message, context)`` an SSE ``error`` event should carry."""
     if isinstance(exc, AgentCoreError):
-        return exc.code, (exc.message or fallback_message)
-    return fallback_code, fallback_message
+        from agentcore.llm.errors import error_context_from
+
+        return (
+            exc.code,
+            (exc.message or fallback_message),
+            error_context_from(exc),
+        )
+    return fallback_code, fallback_message, None

@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.provider.protocol import TokenUsage
 
 
 @dataclass(frozen=True)

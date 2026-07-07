@@ -11,6 +11,7 @@ keeps working unchanged.
 from fastapi import APIRouter
 
 from . import (
+    agent_audit,
     audit_logs,
     conversations,
     feedback,
@@ -30,6 +31,7 @@ router.include_router(users.router)
 router.include_router(usage.router)
 router.include_router(system.router)
 router.include_router(audit_logs.router)
+router.include_router(agent_audit.router)
 router.include_router(conversations.router)
 router.include_router(observability.router)
 router.include_router(feedback.router)

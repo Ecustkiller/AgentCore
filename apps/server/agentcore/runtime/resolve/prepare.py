@@ -2,7 +2,7 @@
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
-from agentcore.llm.modes import ProfileSet
+from agentcore.llm.profiles import TurnProfiles as ProfileSet
 from agentcore.memory import default_memory_store
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.debate import DebateSeed
@@ -35,6 +35,24 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
+
+
+def _wire_worker_memory_tools(
+    worker_tools: ToolRegistry,
+    *,
+    memory_enabled: bool = True,
+    folder_id: str | None = None,
+) -> None:
+    """Register ``consult_memory`` on the delegated worker toolset when memory is on.
+
+    Same store + project scope as the CEO path (``folder_id`` ⇒ project-then-global
+    resolution). Off ⇒ not wired — the privacy off-ramp's tool half, mirroring
+    ``_assemble_ceo_toolset``.
+    """
+    if memory_enabled:
+        worker_tools.register(
+            ConsultMemoryTool(store=default_memory_store(), project_id=folder_id)
+        )
 
 
 def _assemble_ceo_toolset(

@@ -110,6 +110,8 @@ export interface ConversationState {
     followups: string[],
     conversationId?: string | null,
   ) => void;
+  recordTurnWarning: (warning: string, conversationId?: string | null) => void;
+  stampPendingTurnWarning: (conversationId?: string | null) => void;
   attachCostToLastMessage: (
     cost: CostBreakdown,
     conversationId?: string | null,
@@ -123,7 +125,16 @@ export interface ConversationState {
     conversationId?: string | null,
   ) => void;
   attachErrorToLastMessage: (
-    error: { code: string; message: string },
+    error: {
+      code: string;
+      message: string;
+      context?: {
+        upstream_status?: number;
+        upstream_body_preview?: string | null;
+        retry_attempts?: number;
+        empty_diagnosis?: string;
+      };
+    },
     conversationId?: string | null,
   ) => void;
   addCheckpoint: (
@@ -415,6 +426,30 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         return { messages };
       }),
 
+    recordTurnWarning: (warning, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        const last = messages[messages.length - 1];
+        if (last?.role === "assistant" && last.isStreaming) {
+          messages[messages.length - 1] = { ...last, turnWarning: warning };
+          return { messages, pendingTurnWarning: null };
+        }
+        return { pendingTurnWarning: warning };
+      }),
+
+    stampPendingTurnWarning: (conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const warning = rt.pendingTurnWarning;
+        if (!warning) return null;
+        const messages = [...rt.messages];
+        const last = messages[messages.length - 1];
+        if (!last || last.role !== "assistant") {
+          return { pendingTurnWarning: warning };
+        }
+        messages[messages.length - 1] = { ...last, turnWarning: warning };
+        return { messages, pendingTurnWarning: null };
+      }),
+
     attachErrorToLastMessage: (error, conversationId) =>
       patchConversation(conversationId, (rt) => {
         const messages = [...rt.messages];
@@ -472,6 +507,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         );
         messages[idx] = {
           ...msg,
+          content: lane.content,
           process: lane.process,
           checkpoints: [
             ...existing,
@@ -482,6 +518,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
               assumptions: payload.assumptions ?? [],
               questions: payload.questions ?? [],
               styleOptions: payload.style_options ?? [],
+              intent: payload.intent ?? "decision",
               status: "pending",
               decision: null,
               note: "",

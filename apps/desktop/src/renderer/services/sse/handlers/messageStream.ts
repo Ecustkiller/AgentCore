@@ -11,6 +11,7 @@ import type {
   ReasoningDeltaPayload,
   SSEEvent,
   ToolProgressPayload,
+  TurnWarningPayload,
 } from "@/types/events";
 import { resetCaptainContext } from "../captainContext";
 import {
@@ -37,14 +38,36 @@ export function handleMessageStreamEvent(
   const { conversationId } = ctx;
 
   switch (event.type) {
+    case "turn_warning": {
+      const payload = event.payload as TurnWarningPayload;
+      useConversationStore
+        .getState()
+        .recordTurnWarning(payload.message, conversationId);
+      return true;
+    }
     case "message_start": {
+      const payload = event.payload as MessageStartPayload;
+      // Resume replays message_start with the same server message_id as the pause snapshot
+      // (reloaded from DB by `id`, or stamped on a live bubble as `serverMessageId`) — drop
+      // those stale bubbles so ensureStreamingAssistant opens/reuses one streaming slot.
+      if (payload.message_id) {
+        const store = useConversationStore.getState();
+        for (const m of getRuntime(conversationId).messages) {
+          if (
+            m.id === payload.message_id ||
+            (m.serverMessageId === payload.message_id && !m.isStreaming)
+          ) {
+            store.removeMessage(m.id, conversationId);
+          }
+        }
+      }
       ensureStreamingAssistant(conversationId);
+      useConversationStore.getState().stampPendingTurnWarning(conversationId);
       useConversationStore.getState().setGenerating(true, conversationId);
       // trace_id 关联气泡↔日志: stamp the turn's log correlation id onto the bubble so a
       // dev「复制 trace id」link jumps straight to this turn's logs. Optional on the wire
       // (absent on untraced turns); idempotent on a reconnect replay (re-sent first).
       {
-        const payload = event.payload as MessageStartPayload;
         if (payload.trace_id)
           useConversationStore
             .getState()
@@ -151,7 +174,11 @@ export function handleMessageStreamEvent(
       const store = useConversationStore.getState();
       const payload = event.payload as ErrorPayload;
       store.attachErrorToLastMessage(
-        { code: payload.code, message: payload.message },
+        {
+          code: payload.code,
+          message: payload.message,
+          context: payload.context,
+        },
         conversationId,
       );
       store.finalizeLastMessage(conversationId);

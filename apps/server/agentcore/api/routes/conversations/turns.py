@@ -12,6 +12,7 @@ from agentcore.api.dependencies import (
 )
 from agentcore.api.schemas import (
     PausedTurnSummary,
+    PendingApprovalSummary,
     RegenerateMessageRequest,
     ResumeTurnRequest,
     RetryFailedRequest,
@@ -21,9 +22,10 @@ from agentcore.api.sse import sse_response
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.conversation.service import regenerate_chat, resume_chat, retry_failed_chat
 from agentcore.core.errors import NotFoundError
-from agentcore.db.repositories import ConversationRepository, CostEventRepository
+from agentcore.db.repositories import ConversationRepository
 from agentcore.runtime.checkpoints import CheckpointResponse
 from agentcore.runtime.events import EventSink
+from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
 from agentcore.runtime.suspension import TurnSuspension
 from agentcore.runtime.suspension_persistence import (
     claim_paused_turn,
@@ -31,7 +33,12 @@ from agentcore.runtime.suspension_persistence import (
 )
 from agentcore.runtime.turn_runs import turn_runs
 
-from ._helpers import _preflight_turn_llm, _require_owned_conversation
+from ._helpers import (
+    _preflight_owned_chat_turn,
+    _require_owned_conversation,
+    emit_preflight_warnings,
+    release_request_db_before_sse,
+)
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -55,7 +62,24 @@ def _paused_summary(f: TurnSuspension) -> PausedTurnSummary:
         assumptions=getattr(f, "assumptions", []),
         questions=getattr(f, "questions", []),
         style_options=getattr(f, "style_options", []),
+        intent=getattr(f, "intent", None),
     )
+
+
+def _pending_approval_summaries(conversation_id: str) -> list[PendingApprovalSummary]:
+    """In-process GRANTABLE tool gates still awaiting a user decision."""
+    registry = default_interaction_registry()
+    return [
+        PendingApprovalSummary(
+            approval_id=req.id,
+            conversation_id=req.conversation_id,
+            tool_call_id=str(req.payload.get("tool_call_id") or ""),
+            tool_name=str(req.payload.get("tool_name") or ""),
+            arguments=dict(req.payload.get("arguments") or {}),
+        )
+        for req in registry.list_pending(conversation_id)
+        if req.kind is InteractionKind.APPROVAL
+    ]
 
 
 @router.post("/{conversation_id}/messages/{message_id}/regenerate")
@@ -80,12 +104,11 @@ async def regenerate_message(
     """
     await enforce_user_message_rate_limit(user.user_id)
 
-    conv_repo = ConversationRepository(session)
-    cost_repo = CostEventRepository(session)
-    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
+    preflight = await _preflight_owned_chat_turn(conversation_id, user, session)
+    await release_request_db_before_sse(session)
 
     sink = EventSink()
+    emit_preflight_warnings(sink, preflight)
 
     task = asyncio.create_task(
         regenerate_chat(
@@ -94,7 +117,8 @@ async def regenerate_message(
             user_id=user.user_id,
             sink=sink,
             edited_content=body.content,
-            llm_credentials=credentials,
+            llm_credentials=preflight.credentials,
+            llm_supports_tools=preflight.supports_tools,
         )
     )
     turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
@@ -118,12 +142,13 @@ async def retry_failed_message(
     """
     await enforce_user_message_rate_limit(user.user_id)
 
-    conv_repo = ConversationRepository(session)
-    cost_repo = CostEventRepository(session)
-    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
+    preflight = await _preflight_owned_chat_turn(
+        conversation_id, user, session, needs_tools=True
+    )
+    await release_request_db_before_sse(session)
 
     sink = EventSink()
+    emit_preflight_warnings(sink, preflight)
 
     task = asyncio.create_task(
         retry_failed_chat(
@@ -131,7 +156,8 @@ async def retry_failed_message(
             message_id=message_id,
             user_id=user.user_id,
             sink=sink,
-            llm_credentials=credentials,
+            llm_credentials=preflight.credentials,
+            llm_supports_tools=preflight.supports_tools,
         )
     )
     turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
@@ -167,6 +193,7 @@ async def get_conversation_recovery(
     return TurnRecoveryResponse(
         live_running=live_running,
         paused=[_paused_summary(f) for f in frames],
+        pending_approvals=_pending_approval_summaries(conversation_id),
     )
 
 
@@ -190,10 +217,8 @@ async def resume_message(
     """
     await enforce_user_message_rate_limit(user.user_id)
 
-    conv_repo = ConversationRepository(session)
-    cost_repo = CostEventRepository(session)
-    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
+    preflight = await _preflight_owned_chat_turn(conversation_id, user, session)
+    await release_request_db_before_sse(session)
 
     suspension = await claim_paused_turn(message_id, conversation_id=conversation_id)
     if suspension is None:
@@ -209,6 +234,7 @@ async def resume_message(
     await turn_runs.stop_and_drain(conversation_id)
 
     sink = EventSink()
+    emit_preflight_warnings(sink, preflight)
     task = asyncio.create_task(
         resume_chat(
             suspension=suspension,
@@ -216,7 +242,8 @@ async def resume_message(
                 decision=body.decision, note=body.note, selected=body.selected
             ),
             sink=sink,
-            llm_credentials=credentials,
+            llm_credentials=preflight.credentials,
+            llm_supports_tools=preflight.supports_tools,
         )
     )
     # 执行与请求解耦 (C1 · slice 1a): track the resumed run so a disconnect lets it

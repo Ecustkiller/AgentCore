@@ -21,7 +21,6 @@ import {
   useActiveMessages,
   useConversationStore,
 } from "@/stores/conversation";
-import { useDebateRoomStore } from "@/stores/debateRoom";
 import {
   ExecutionScopeContext,
   hasRevisions,
@@ -104,9 +103,6 @@ export function CanvasZoomedTurn({
   const pendingInitialView = useRef<TurnView | null>(
     initialView === "compare" && !twoSideDebate ? "compare" : null,
   );
-  const initialParallelRef = useRef<boolean>(
-    initialView === "compare" && twoSideDebate,
-  );
   const [view, setView] = useState<TurnView>(() => {
     if (pendingInitialView.current) return pendingInitialView.current;
     const natural = naturalTurnView(debate);
@@ -126,7 +122,7 @@ export function CanvasZoomedTurn({
     if (debate) {
       tabs.push({
         id: "room",
-        label: "群聊",
+        label: "辩论室",
         icon: <MessagesSquare size={14} />,
       });
     } else {
@@ -302,17 +298,6 @@ export function CanvasZoomedTurn({
   }, [following, messages, generating, scopeId, onClose]);
 
   useEffect(() => {
-    if (showRoom && execution) {
-      useDebateRoomStore
-        .getState()
-        .setTarget({ turnId: scopeId, conversationId, interactive });
-    } else {
-      useDebateRoomStore.getState().setTarget(null);
-    }
-    return () => useDebateRoomStore.getState().setTarget(null);
-  }, [showRoom, execution, scopeId, conversationId, interactive]);
-
-  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       const sp = useSidePanelStore.getState();
@@ -390,8 +375,9 @@ export function CanvasZoomedTurn({
               <DebateStream
                 execution={execution}
                 messageId={scopeId}
-                initialParallel={initialParallelRef.current}
-                readingWidth="canvas"
+                conversationId={conversationId}
+                interactive={interactive}
+                onClose={onClose}
               />
             </div>
           ) : showCompare && execution ? (

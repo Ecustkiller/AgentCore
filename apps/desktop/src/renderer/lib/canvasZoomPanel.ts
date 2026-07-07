@@ -1,11 +1,7 @@
 /** 画布放大态 per-conversation 侧面板偏好（开/关 + 落在哪个 tab）。 */
 
 import type { EndpointKind } from "@/stores/sidePanel";
-import {
-  DEBATE_HUD_TAB_ID,
-  WORKSPACE_TAB_ID,
-  useSidePanelStore,
-} from "@/stores/sidePanel";
+import { WORKSPACE_TAB_ID, useSidePanelStore } from "@/stores/sidePanel";
 
 const STORAGE_KEY = "agentcore:canvas-zoom-panel";
 
@@ -13,7 +9,6 @@ const STORAGE_KEY = "agentcore:canvas-zoom-panel";
 export type CanvasZoomPanelSurface =
   | { kind: "closed" }
   | { kind: "workspace" }
-  | { kind: "debate-hud" }
   | { kind: "run"; messageId: string; runId: string; title: string }
   | {
       kind: "content";
@@ -46,7 +41,6 @@ function parseSurface(v: unknown): CanvasZoomPanelSurface | null {
   const kind = o.kind;
   if (kind === "closed") return { kind: "closed" };
   if (kind === "workspace") return { kind: "workspace" };
-  if (kind === "debate-hud") return { kind: "debate-hud" };
   if (
     kind === "run" &&
     typeof o.messageId === "string" &&
@@ -106,7 +100,6 @@ export function captureCanvasZoomPanelPref(): CanvasZoomPanelSurface {
   const s = useSidePanelStore.getState();
   if (!s.open) return { kind: "closed" };
   if (s.activeTabId === WORKSPACE_TAB_ID) return { kind: "workspace" };
-  if (s.activeTabId === DEBATE_HUD_TAB_ID) return { kind: "debate-hud" };
   const tab = s.tabs.find((t) => t.id === s.activeTabId);
   if (!tab) return { kind: "closed" };
   if (tab.kind === "run") {
@@ -138,9 +131,6 @@ export function applyCanvasZoomPanelPref(
     case "workspace":
       store.showWorkspace();
       break;
-    case "debate-hud":
-      store.showDebateHudTab();
-      break;
     case "run":
       store.showRunDetail(surface.messageId, surface.runId, surface.title);
       break;
@@ -161,7 +151,7 @@ export function defaultCanvasZoomPanelPref(opts: {
   scopeId: string;
   finalAnswerId: string | null;
 }): CanvasZoomPanelSurface {
-  if (opts.showRoom) return { kind: "debate-hud" };
+  if (opts.showRoom) return { kind: "workspace" };
   if (opts.finalAnswerId) {
     return {
       kind: "content",

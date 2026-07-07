@@ -3,10 +3,12 @@ import {
   parallelTimelineMetricsSummary,
 } from "@/components/chat/ParallelTimeline";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { useTurnAuditCounts } from "@/hooks/useTurnAuditCounts";
 import {
   isTimelineLayout,
   resolveEffectiveGraphLayout,
 } from "@/lib/graph-layout-utils";
+import { useConversationStore } from "@/stores/conversation";
 import {
   type RunStatus,
   useActiveExecField,
@@ -71,6 +73,8 @@ export function GraphView({
   autoplay = false,
 }: GraphViewProps = {}) {
   const messageId = useExecutionScope();
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const auditCounts = useTurnAuditCounts(conversationId, messageId);
   const execution = useProjectedExecution();
   const hasFrames = useActiveExecField((rt) => rt.frames.length > 0);
   const layoutKind = useGraphStore((s) => s.layoutKind);
@@ -92,7 +96,7 @@ export function GraphView({
     onNodesChange,
     groups,
     subTeams,
-  } = useGraphLayout(execution, effectiveLayoutKind);
+  } = useGraphLayout(execution, effectiveLayoutKind, fitMode);
   const { containerRef, rfRef, overflowing, fitView, centerNode, onInit } =
     useGraphViewport({ fitMode, bbox, layoutReady, onMeasure });
   const handleDirection =
@@ -196,6 +200,7 @@ export function GraphView({
             activateNode,
             groups,
             subTeams,
+            auditCounts,
           }
         : null,
     [
@@ -215,6 +220,7 @@ export function GraphView({
       activateNode,
       groups,
       subTeams,
+      auditCounts,
     ],
   );
 

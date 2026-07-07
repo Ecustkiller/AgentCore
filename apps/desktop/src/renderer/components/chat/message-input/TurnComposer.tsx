@@ -4,6 +4,8 @@ import { MentionMenu } from "@/components/chat/MentionMenu";
 import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useFolders } from "@/hooks/useFolders";
+import { useLlmKey } from "@/hooks/useLlmKey";
+import { TOOLS_GATE_HINT, isToolsGateBlocked } from "@/lib/llmToolsGate";
 import { useBackgroundTasksStore } from "@/stores/backgroundTasks";
 import { draftKeyFor, useComposerDraftStore } from "@/stores/composer";
 import {
@@ -23,16 +25,19 @@ import type { SetStateAction } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AttachmentChips } from "./AttachmentChips";
 import { ConversationInstructions } from "./ConversationInstructions";
-import { ModelModePicker } from "./ModelModePicker";
+import { CurrentModelBadge } from "./CurrentModelBadge";
+import { RecordingBar } from "./RecordingBar";
 import {
   ComposerConnectionNotice,
   ServerStatusIndicator,
 } from "./ServerStatusIndicator";
+import { VoiceButton } from "./VoiceButton";
 import type { PendingAttachment } from "./composerAttachments";
 import { useComposerDrop } from "./useComposerDrop";
 import { useComposerSend } from "./useComposerSend";
 import type { AttachmentProjectHint } from "./useMentionMenu";
 import { useMentionMenu } from "./useMentionMenu";
+import { useVoiceInput } from "./useVoiceInput";
 
 const EMPTY_ATTACHMENTS: PendingAttachment[] = [];
 
@@ -67,6 +72,8 @@ export function TurnComposer({
   onDispatch?: () => void;
 }) {
   const isGenerating = useActiveGenerating();
+  const { data: llmKey } = useLlmKey();
+  const toolsBlocked = isToolsGateBlocked(llmKey?.supports_tools);
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const draftKey = draftKeyFor(conversationId);
   const value = useComposerDraftStore((s) => s.drafts[draftKey]?.value ?? "");
@@ -123,6 +130,15 @@ export function TurnComposer({
   });
 
   const drop = useComposerDrop(isGenerating, attachments, setAttachments);
+
+  const voice = useVoiceInput({
+    onTranscript: useCallback(
+      (text: string) => {
+        setValue((prev) => prev + text);
+      },
+      [setValue],
+    ),
+  });
 
   const { handleSend } = useComposerSend({
     value,
@@ -250,6 +266,26 @@ export function TurnComposer({
   }, []);
 
   useEffect(() => {
+    if (voice.isRecording) mention.closeMenu();
+  }, [voice.isRecording, mention.closeMenu]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (
+        !(e.ctrlKey || e.metaKey) ||
+        !e.shiftKey ||
+        e.key.toLowerCase() !== "v"
+      )
+        return;
+      if (!voice.isSupported) return;
+      e.preventDefault();
+      voice.toggle();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [voice.isSupported, voice.toggle]);
+
+  useEffect(() => {
     return () => {
       // 回合 AbortController 挂在会话 slice 上，由 stop 按钮 / sendTurn 自己管理。
       // 勿在组件卸载时 abort：首条消息会从 `/` navigate 到 `/conversations/:id`，
@@ -261,6 +297,19 @@ export function TurnComposer({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing) return;
+
+    if (voice.isRecording) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        voice.cancel();
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        voice.stop();
+        return;
+      }
+    }
 
     if (mention.menuMode && mention.handleMenuNavKey(e)) return;
 
@@ -356,31 +405,41 @@ export function TurnComposer({
         </div>
       )}
 
-      <textarea
-        ref={textareaRef}
-        value={value}
-        onChange={handleChange}
-        onKeyDown={handleKeyDown}
-        onPaste={drop.handlePaste}
-        onSelect={(e) =>
-          mention.syncMention(
-            e.currentTarget.value,
-            e.currentTarget.selectionStart ?? 0,
-          )
-        }
-        placeholder={bg ? "描述要交给云端团队后台完成的任务…" : placeholder}
-        className="w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-        rows={1}
-      />
+      {voice.isRecording && (
+        <RecordingBar duration={voice.duration} onCancel={voice.cancel} />
+      )}
+
+      <div className="relative">
+        {voice.isRecording && voice.interimText && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 overflow-hidden px-4 pt-3 pb-1 text-sm whitespace-pre-wrap break-words"
+          >
+            <span className="invisible">{value}</span>
+            <span className="text-foreground/40">{voice.interimText}</span>
+          </div>
+        )}
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onPaste={drop.handlePaste}
+          onSelect={(e) =>
+            mention.syncMention(
+              e.currentTarget.value,
+              e.currentTarget.selectionStart ?? 0,
+            )
+          }
+          placeholder={bg ? "描述要交给云端团队后台完成的任务…" : placeholder}
+          className="w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+          rows={1}
+        />
+      </div>
       <div className="flex items-center justify-between px-4 pb-3">
         <div className="flex items-center gap-1">
           {!conversationId && <DraftWorkspacePicker />}
-          {conversationId && (
-            <ModelModePicker
-              conversationId={conversationId}
-              disabled={isGenerating}
-            />
-          )}
+          <CurrentModelBadge disabled={isGenerating} />
           {conversationId && (
             <ConversationInstructions
               conversationId={conversationId}
@@ -403,30 +462,37 @@ export function TurnComposer({
           {showBackground && (
             <SimpleTooltip
               label={
-                bg
-                  ? "已切到「后台云端」：发送会把任务交给云端团队后台跑"
-                  : "切到「后台云端」：把任务交给云端团队后台跑，结果回来再应用"
+                toolsBlocked
+                  ? TOOLS_GATE_HINT
+                  : bg
+                    ? "已切到「后台云端」：发送会把任务交给云端团队后台跑"
+                    : "切到「后台云端」：把任务交给云端团队后台跑，结果回来再应用"
               }
             >
               <IconButton
                 size="md"
-                onClick={() => setBackgroundMode((v) => !v)}
-                disabled={isGenerating}
+                onClick={() => !toolsBlocked && setBackgroundMode((v) => !v)}
+                disabled={isGenerating || toolsBlocked}
                 aria-label="切换后台云端任务"
                 aria-pressed={bg}
                 className={
                   bg
                     ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-                    : undefined
+                    : toolsBlocked
+                      ? "opacity-40"
+                      : undefined
                 }
               >
-                <Cloud size={16} />
+                <Cloud size={14} />
               </IconButton>
             </SimpleTooltip>
           )}
           <ServerStatusIndicator />
         </div>
         <div className="flex items-center gap-3">
+          {voice.isSupported && (
+            <VoiceButton state={voice.state} onClick={voice.toggle} />
+          )}
           {charCount > 0 && (
             <span className="text-xs text-muted-foreground">{charCount}字</span>
           )}

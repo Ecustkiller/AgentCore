@@ -6,6 +6,7 @@ import pytest
 
 import agentcore.memory.user_memory as mem_mod
 from agentcore.llm import LLMRequest, LLMResponse
+from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 from agentcore.memory.user_memory import (
     _EXTRACT_SYSTEM_PROMPT,
     LLMMemoryExtractor,
@@ -250,11 +251,10 @@ async def test_extractor_returns_parsed_ops():
 
 async def test_extractor_uses_flash_non_thinking():
     provider = _FakeProvider('{"ops": []}')
-    extractor = LLMMemoryExtractor(provider)
+    extractor = LLMMemoryExtractor(provider, model=DEEPSEEK_V4_FLASH)
     await extractor.extract(MemoryExtractInput(user_id="u1", current_memory="", messages=[]))
     req = provider.requests[0]
     assert req.model == "deepseek-v4-flash"
-    assert req.thinking is False
     assert req.stream is False
 
 

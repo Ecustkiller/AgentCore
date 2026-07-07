@@ -16,6 +16,7 @@ from agentcore.db.models import Message
 from agentcore.db.repositories import (
     ConversationRepository,
     MessageRepository,
+    PausedTurnRepository,
     TurnJournalRepository,
 )
 
@@ -72,6 +73,55 @@ async def test_delete_after_clears_only_truncated_turns_journal(session_factory)
         repo = TurnJournalRepository(s)
         assert await repo.load(keep) == _ENTRIES  # kept turn's journal survives
         assert await repo.load(drop) == []  # truncated turn's journal gone
+
+
+async def _seed_paused(s, *, cid: str, mid: str, uid: str | None = None) -> None:
+    await PausedTurnRepository(s).upsert(
+        message_id=mid,
+        conversation_id=cid,
+        user_id=uid or str(uuid4()),
+        frame={"kind": "plan_review", "message_id": mid},
+    )
+
+
+async def test_delete_by_id_clears_paused_turn(session_factory):
+    cid, mid = str(uuid4()), str(uuid4())
+    async with session_factory() as s:
+        await _seed_turn(s, cid=cid, mid=mid)
+        await _seed_paused(s, cid=cid, mid=mid)
+
+    async with session_factory() as s:
+        hit = await MessageRepository(s).delete_by_id(mid, conversation_id=cid)
+    assert hit is True
+
+    async with session_factory() as s:
+        assert await PausedTurnRepository(s).get(mid) is None
+
+
+async def test_delete_after_clears_only_truncated_paused_turns(session_factory):
+    cid = str(uuid4())
+    keep, drop = str(uuid4()), str(uuid4())
+    uid = str(uuid4())
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    async with session_factory() as s:
+        await _seed_turn(s, cid=cid, mid=keep)
+        await _seed_turn(s, cid=cid, mid=drop)
+        await _seed_paused(s, cid=cid, mid=keep, uid=uid)
+        await _seed_paused(s, cid=cid, mid=drop, uid=uid)
+        await s.execute(update(Message).where(Message.id == keep).values(created_at=t0))
+        await s.execute(
+            update(Message).where(Message.id == drop).values(created_at=t0 + timedelta(minutes=1))
+        )
+        await s.commit()
+
+    async with session_factory() as s:
+        removed = await MessageRepository(s).delete_after(cid, after_created_at=t0)
+    assert removed == 1
+
+    async with session_factory() as s:
+        repo = PausedTurnRepository(s)
+        assert await repo.get(keep) is not None
+        assert await repo.get(drop) is None
 
 
 async def test_delete_by_id_clears_journal_and_is_idor_safe(session_factory):

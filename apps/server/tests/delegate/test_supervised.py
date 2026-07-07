@@ -327,7 +327,7 @@ async def test_dispose_open_supervised_folds_completed_work_then_releases():
     # 受监督的波循环 P5「Edge」: the CEO yielded at a late-bind boundary but the turn ends
     # WITHOUT a replan. The yield path did NOT fold the已完成 upstream's spend; disposal must
     # (implicit stop) so it isn't stranded unbilled, then release the dangling plan.
-    from agentcore.llm.protocol import TokenUsage
+    from agentcore.llm.provider.protocol import TokenUsage
 
     provider = Provider(["AOUT", "BOUT"], usage=TokenUsage(input_tokens=100, output_tokens=20))
     t = tool(provider)

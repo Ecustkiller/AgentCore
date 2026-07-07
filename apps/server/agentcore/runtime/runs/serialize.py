@@ -16,7 +16,7 @@ import json
 from dataclasses import asdict, fields
 from typing import Any
 
-from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.session import RunSession
 from agentcore.runtime.runs.types import (
@@ -80,6 +80,7 @@ def message_from_dict(d: dict[str, Any]) -> LLMMessage:
 # not a full mutation audit (a deleted path is not a deliverable).
 _FILE_PRODUCT_ARG: dict[str, str] = {
     "file_write": "path",
+    "file_append": "path",
     "str_replace": "path",
     "file_move": "destination",
 }
@@ -88,8 +89,8 @@ _FILE_PRODUCT_ARG: dict[str, str] = {
 def files_touched_from_transcript(transcript: list[LLMMessage]) -> list[str]:
     """Best-effort list of workspace paths a worker created/modified, first-seen order.
 
-    Parsed from the transcript's file-tool calls (file_write / str_replace /
-    file_move). Intent-level: a call with malformed args is skipped, but a path is
+    Parsed from the transcript's file-tool calls (file_write / file_append /
+    str_replace / file_move). Intent-level: a call with malformed args is skipped, but a path is
     listed from the call itself (we do not cross-check the tool result) — so the CEO
     is told to re-verify only if the manifest looks empty or incomplete. A file
     written indirectly (e.g. by a code_execute script) is invisible here.

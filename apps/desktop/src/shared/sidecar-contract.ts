@@ -124,6 +124,8 @@ export interface SidecarPausedTurn {
   kind: "plan_review" | "ask_user";
   checkpoint_id: string;
   user_message: string;
+  /** Client-minted id of the user bubble (pinned on pause write-back). */
+  user_message_id?: string;
   /** plan_review：被复核的检查点步 / 被门控的下游步（ask_user 帧为空）。 */
   steps: Record<string, unknown>[];
   pending: Record<string, unknown>[];

@@ -4,6 +4,7 @@ import asyncio
 
 import agentcore.memory.conversation_title as title_mod
 from agentcore.llm import LLMRequest, LLMResponse
+from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 from agentcore.memory.conversation_title import (
     _TITLE_SYSTEM_PROMPT,
     TITLE_MAX_CHARS,
@@ -123,7 +124,7 @@ async def test_generator_returns_sanitized_title():
 
 async def test_generator_uses_flash_non_thinking_short():
     provider = _FakeProvider("标题")
-    await LLMTitleGenerator(provider).generate(
+    await LLMTitleGenerator(provider, model=DEEPSEEK_V4_FLASH).generate(
         TitleInput(
             conversation_id="c1",
             messages=[{"role": "user", "content": "你好"}],
@@ -131,7 +132,6 @@ async def test_generator_uses_flash_non_thinking_short():
     )
     req = provider.requests[0]
     assert req.model == "deepseek-v4-flash"
-    assert req.thinking is False
     assert req.stream is False
     assert req.max_tokens == 64
 

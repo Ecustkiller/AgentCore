@@ -24,7 +24,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    from agentcore.llm.protocol import LLMMessage
+    from agentcore.llm.provider.protocol import LLMMessage
     from agentcore.runtime.events import FinishReason
 
 

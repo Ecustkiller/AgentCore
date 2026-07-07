@@ -2,14 +2,14 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.core.text import clip_preview
 from agentcore.db.models import Conversation
-from agentcore.db.repositories import ModelModeRepository, UserRepository
-from agentcore.llm.deepseek import DeepSeekProvider
-from agentcore.llm.modes import ProfileSet
-from agentcore.llm.modes import resolve_profile_set as resolve_mode_profile_set
+from agentcore.db.repositories import UserRepository
+from agentcore.llm.credentials import LLMCredentials
+from agentcore.llm.profiles import TurnProfiles, default_turn_profiles
+from agentcore.llm.provider.protocol import LLMProvider
+from agentcore.llm.resolve import resolve_credentials, resolve_turn_model
 from agentcore.memory import (
     TITLE_MAX_CHARS,
     ChatMessage,
@@ -68,10 +68,11 @@ async def resolve_local_binding(session: AsyncSession, conv: Conversation) -> Lo
 
 async def generate_title(
     *,
-    provider: DeepSeekProvider,
+    provider: LLMProvider,
     conversation_id: str,
     user_message: str,
     assistant_reply: str,
+    model: str | None = None,
 ) -> str:
     """Best-effort one-line title via the fast model; falls back to truncation."""
     fallback = fallback_title(user_message)
@@ -83,7 +84,7 @@ async def generate_title(
         messages.append({"role": "assistant", "content": assistant_reply})
 
     try:
-        title = await LLMTitleGenerator(provider).generate(
+        title = await LLMTitleGenerator(provider, model=model).generate(
             TitleInput(conversation_id=conversation_id, messages=messages)
         )
         return title or fallback
@@ -94,10 +95,11 @@ async def generate_title(
 
 async def generate_followups(
     *,
-    provider: DeepSeekProvider,
+    provider: LLMProvider,
     conversation_id: str,
     user_message: str,
     assistant_reply: str,
+    model: str | None = None,
 ) -> list[str]:
     """Best-effort turn-level「下一步」suggestions; returns ``[]`` on any failure.
 
@@ -114,7 +116,7 @@ async def generate_followups(
     messages.append({"role": "assistant", "content": assistant_reply})
 
     try:
-        return await LLMFollowupsGenerator(provider).generate(
+        return await LLMFollowupsGenerator(provider, model=model).generate(
             FollowupInput(conversation_id=conversation_id, messages=messages)
         )
     except Exception as e:
@@ -122,20 +124,20 @@ async def generate_followups(
         return []
 
 
-async def resolve_profile_set(
-    session: AsyncSession, conv: Conversation, user_id: str
-) -> ProfileSet:
-    """Resolve this turn's 质量档 (llm/modes.py)."""
-    user = await UserRepository(session).get_by_id(user_id)
-    mode_ref = (
-        conv.model_mode
-        or (user.default_model_mode if user else None)
-        or settings.default_model_mode
-    )
-    custom_modes = await ModelModeRepository(session).assignments_by_user(user_id)
-    return resolve_mode_profile_set(
-        mode_ref, custom_modes=custom_modes, ceiling=settings.selectable_models
-    )
+async def resolve_turn_profiles(
+    session: AsyncSession,
+    conv: Conversation,
+    user_id: str,
+    credentials: LLMCredentials | None = None,
+) -> TurnProfiles:
+    """Resolve model + static profiles for this turn."""
+    if credentials is None:
+        credentials = await resolve_credentials(session, user_id, "user_facing")
+    return default_turn_profiles(model=resolve_turn_model(credentials))
+
+
+# Legacy name used by conversation service exports.
+resolve_profile_set = resolve_turn_profiles
 
 
 async def resolve_memory_enabled(session: AsyncSession, user_id: str) -> bool:

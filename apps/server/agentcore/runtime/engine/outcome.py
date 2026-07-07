@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from agentcore.llm.protocol import LLMMessage, TokenUsage, ToolCall
+from agentcore.llm.provider.protocol import LLMMessage, TokenUsage, ToolCall
 from agentcore.runtime.loop_controller import ToolAttempt
 
 
@@ -34,6 +34,9 @@ class RoundOutcome:
     llm_failed: bool = False
     error_code: str | None = None
     error_message: str | None = None
+    error_context: dict | None = None
+    empty_diagnosis: str | None = None
+    empty_raw_preview: str | None = None
 
     @property
     def has_tool_calls(self) -> bool:

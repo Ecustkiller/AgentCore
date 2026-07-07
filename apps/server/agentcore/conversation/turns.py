@@ -29,12 +29,12 @@ from agentcore.db.repositories import (
     MessageRepository,
     TurnJournalRepository,
 )
-from agentcore.llm.byok import LLMCredentials
+from agentcore.llm.resolve import LLMCredentials
 from agentcore.runtime.checkpoints import CheckpointResponse
 from agentcore.runtime.events import EventSink, FinishReason, error_event, message_end, turn_saved
 from agentcore.runtime.journal import completed_from_journal
 from agentcore.runtime.pipeline import resume_chat_pipeline
-from agentcore.runtime.retry import retry_seed
+from agentcore.runtime.retry import retry_failed_targets, retry_seed
 from agentcore.runtime.runs.types import RunPhase
 from agentcore.runtime.suspension import TurnSuspension
 from agentcore.workspace.attachments import persist_attachments, to_stored_metadata
@@ -53,6 +53,7 @@ async def stream_chat(
     attachments: list[dict] | None = None,
     llm_credentials: LLMCredentials | None = None,
     debate_seed: dict | None = None,
+    llm_supports_tools: bool | None = None,
 ) -> None:
     """Main entry: persist user message, run pipeline, persist assistant reply.
 
@@ -120,17 +121,18 @@ async def stream_chat(
                 instructions=instructions,
                 board_id=board_id,
                 debate_seed=debate_seed,
+                llm_supports_tools=llm_supports_tools,
             )
 
     except Exception as e:
         logger.error("chat.stream_error", error=str(e), exc_info=True)
         if not sink._closed:
-            code, message = error_fields_for(
+            code, message, err_ctx = error_fields_for(
                 e,
                 fallback_code=ErrorCode.STREAM_ERROR,
                 fallback_message="服务出错了，请稍后重试。",
             )
-            sink.emit(error_event(code, message))
+            sink.emit(error_event(code, message, context=err_ctx))
             sink.emit(message_end(FinishReason.ERROR))
     finally:
         if not sink._closed:
@@ -145,6 +147,7 @@ async def regenerate_chat(
     sink: EventSink,
     edited_content: str | None = None,
     llm_credentials: LLMCredentials | None = None,
+    llm_supports_tools: bool | None = None,
 ) -> None:
     """Re-run a turn from an existing user message (regenerate / edit-and-resend)."""
     try:
@@ -208,17 +211,18 @@ async def regenerate_chat(
                 memory_enabled=memory_enabled,
                 instructions=conv.instructions,
                 board_id=board_id,
+                llm_supports_tools=llm_supports_tools,
             )
 
     except Exception as e:
         logger.error("chat.regenerate_error", error=str(e), exc_info=True)
         if not sink._closed:
-            code, message = error_fields_for(
+            code, message, err_ctx = error_fields_for(
                 e,
                 fallback_code=ErrorCode.STREAM_ERROR,
                 fallback_message="服务出错了，请稍后重试。",
             )
-            sink.emit(error_event(code, message))
+            sink.emit(error_event(code, message, context=err_ctx))
             sink.emit(message_end(FinishReason.ERROR))
     finally:
         if not sink._closed:
@@ -230,28 +234,38 @@ async def _extract_completed_seed(
     msg_repo: MessageRepository,
     conversation_id: str,
     user_msg,
-) -> dict | None:
+) -> tuple[dict | None, list[dict[str, str | None]]]:
     """Extract completed worker RunStates from the assistant turn's journal.
 
-    Returns a dict of run_id -> RunState for workers that completed successfully,
-    or None if no journal / no completed workers found.
+    Returns ``(seed, failed_targets)`` where seed is run_id -> RunState for workers
+    that completed successfully, and failed_targets lists non-completed workers for
+    retry-failed audit (run_id + error summary).
     """
     assistant_msg = await msg_repo.get_assistant_after(
         conversation_id, after_created_at=user_msg.created_at
     )
     if not assistant_msg:
-        return None
+        return None, []
 
     entries = await TurnJournalRepository(session).load_owned(assistant_msg.id, conversation_id)
     if not entries:
-        return None
+        return None, []
 
+    all_states = completed_from_journal(entries)
     seed = {
         run_id: state
-        for run_id, state in completed_from_journal(entries).items()
+        for run_id, state in all_states.items()
         if state.phase == RunPhase.COMPLETED
     }
-    return seed if seed else None
+    failed_targets = [
+        {
+            "run_id": run_id,
+            "error": str(state.error)[:500] if state.error else None,
+        }
+        for run_id, state in all_states.items()
+        if state.phase != RunPhase.COMPLETED
+    ]
+    return (seed if seed else None), failed_targets
 
 
 async def retry_failed_chat(
@@ -261,6 +275,7 @@ async def retry_failed_chat(
     user_id: str,
     sink: EventSink,
     llm_credentials: LLMCredentials | None = None,
+    llm_supports_tools: bool | None = None,
 ) -> None:
     """Retry only failed workers from a previous turn (重试失败项).
 
@@ -286,7 +301,9 @@ async def retry_failed_chat(
                 sink.emit(message_end(FinishReason.ERROR))
                 return
 
-            seed = await _extract_completed_seed(session, msg_repo, conversation_id, target)
+            seed, failed_targets = await _extract_completed_seed(
+                session, msg_repo, conversation_id, target
+            )
 
             await msg_repo.delete_after(conversation_id, after_created_at=target.created_at)
 
@@ -315,6 +332,7 @@ async def retry_failed_chat(
             )
         ):
             token = retry_seed.set(seed)
+            targets_token = retry_failed_targets.set(failed_targets or None)
             try:
                 await run_and_persist(
                     conversation_id=conversation_id,
@@ -331,19 +349,21 @@ async def retry_failed_chat(
                     memory_enabled=memory_enabled,
                     instructions=conv.instructions,
                     board_id=board_id,
+                    llm_supports_tools=llm_supports_tools,
                 )
             finally:
                 retry_seed.reset(token)
+                retry_failed_targets.reset(targets_token)
 
     except Exception as e:
         logger.error("chat.retry_failed_error", error=str(e), exc_info=True)
         if not sink._closed:
-            code, message = error_fields_for(
+            code, message, err_ctx = error_fields_for(
                 e,
                 fallback_code=ErrorCode.STREAM_ERROR,
                 fallback_message="服务出错了，请稍后重试。",
             )
-            sink.emit(error_event(code, message))
+            sink.emit(error_event(code, message, context=err_ctx))
             sink.emit(message_end(FinishReason.ERROR))
     finally:
         if not sink._closed:
@@ -356,6 +376,7 @@ async def resume_chat(
     response: CheckpointResponse,
     sink: EventSink,
     llm_credentials: LLMCredentials | None = None,
+    llm_supports_tools: bool | None = None,
 ) -> None:
     """Continue a turn paused at a plan_review / ask_user checkpoint (结构化挂起 2b resume)."""
     conversation_id = suspension.conversation_id
@@ -410,6 +431,10 @@ async def resume_chat(
                     decision=response.decision.value,
                     seeded=len(getattr(suspension, "completed", {})),
                 )
+                sink.bind_content_checkpoint(
+                    conversation_id=conversation_id,
+                    message_id=suspension.message_id,
+                )
                 try:
                     result = await resume_chat_pipeline(
                         suspension=suspension,
@@ -426,6 +451,7 @@ async def resume_chat(
                         session_loader=session_loader,
                         suspension_saver=suspension_saver,
                         suspension_deleter=suspension_deleter,
+                        llm_supports_tools=llm_supports_tools,
                     )
                 except asyncio.CancelledError:
                     salvage_incomplete_turn(
@@ -473,12 +499,12 @@ async def resume_chat(
     except Exception as e:
         logger.error("chat.resume_error", error=str(e), exc_info=True)
         if not sink._closed:
-            code, message = error_fields_for(
+            code, message, err_ctx = error_fields_for(
                 e,
                 fallback_code=ErrorCode.STREAM_ERROR,
                 fallback_message="服务出错了，请稍后重试。",
             )
-            sink.emit(error_event(code, message))
+            sink.emit(error_event(code, message, context=err_ctx))
             sink.emit(message_end(FinishReason.ERROR))
     finally:
         if not sink._closed:

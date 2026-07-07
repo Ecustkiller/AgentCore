@@ -11,7 +11,7 @@ seed are all projections of ``turn_journal`` (+ reloaded history), rebuilt on cl
 tests assert they DON'T survive to_json.
 """
 
-from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.runs import RunPhase, RunPlan, RunSpec, RunState
 from agentcore.runtime.runs.serialize import (
     plan_from_json,
@@ -208,6 +208,7 @@ def test_ask_user_suspension_round_trips():
             }
         ],
         style_options=[{"id": "s0", "label": "深色科技"}],
+        intent="kickoff",
         journal=[{"type": "checkpoint_required", "payload": {}, "timestamp": "t"}],
         trace_id="trace456",
     )
@@ -226,6 +227,7 @@ def test_ask_user_suspension_round_trips():
     assert restored.questions[0]["options"] == [{"label": "A"}, {"label": "B"}]
     assert restored.questions[0]["multiple"] is True
     assert restored.style_options == [{"id": "s0", "label": "深色科技"}]
+    assert restored.intent == "kickoff"
     # transcript / history are NOT serialized (Phase 2 ⑤): resume echoes the call via the
     # serialized tool_call_id (asserted above) and rebuilds the window from turn_journal.
     assert "transcript" not in frame.to_json()

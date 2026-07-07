@@ -4,11 +4,13 @@ from collections.abc import Sequence
 from datetime import datetime
 
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.types import new_id
-from agentcore.db.models import Conversation, Message
+from agentcore.db.models import Conversation, Message, PausedTurnRow
 
+from ._audit_cascade import delete_audit_after, delete_audit_for_message
 from ._base import _ilike_pattern
 from ._journal_cascade import delete_journal_after, delete_journal_for_message
 
@@ -52,6 +54,88 @@ class MessageRepository:
         await self._session.commit()
         await self._session.refresh(msg)
         return msg
+
+    async def create_assistant_placeholder(
+        self,
+        *,
+        conversation_id: str,
+        message_id: str,
+        trace_id: str | None = None,
+    ) -> Message:
+        """Insert an empty assistant row at turn start (progressive persistence).
+
+        The pipeline's ``message_id`` / journal ``turn_id`` is pinned up front so a
+        mid-turn refresh can find this row before the turn finishes.
+        """
+        return await self.create(
+            conversation_id=conversation_id,
+            role="assistant",
+            content="",
+            metadata={"status": "running"},
+            message_id=message_id,
+            trace_id=trace_id,
+        )
+
+    async def upsert_assistant(
+        self,
+        *,
+        conversation_id: str,
+        message_id: str | None = None,
+        content: str,
+        reasoning_content: str | None = None,
+        metadata: dict | None = None,
+        citations: list | None = None,
+        trace_id: str | None = None,
+    ) -> Message:
+        """Insert or update an assistant row keyed by ``message_id``.
+
+        Used for pause snapshots (first write) and resume completion (update in place)
+        so the same pipeline ``message_id`` never hits a unique-constraint error.
+        """
+        mid = message_id or new_id()
+        values: dict = {
+            "id": mid,
+            "conversation_id": conversation_id,
+            "role": "assistant",
+            "content": content,
+            "reasoning_content": reasoning_content,
+            "usage": metadata,
+            "trace_id": trace_id,
+        }
+        if citations is not None:
+            values["citations"] = citations
+        update_set: dict = {
+            "content": content,
+            "reasoning_content": reasoning_content,
+            "usage": metadata,
+            "trace_id": trace_id,
+        }
+        if citations is not None:
+            update_set["citations"] = citations
+        await self._session.execute(
+            pg_insert(Message)
+            .values(**values)
+            .on_conflict_do_update(index_elements=["id"], set_=update_set)
+        )
+        await self._session.commit()
+        row = await self.get_by_id(mid, conversation_id=conversation_id)
+        assert row is not None
+        return row
+
+    async def update_assistant_content(
+        self,
+        *,
+        conversation_id: str,
+        message_id: str,
+        content: str,
+    ) -> None:
+        """Update only the assistant row's ``content`` (progressive checkpoint)."""
+        await self._session.execute(
+            update(Message)
+            .where(Message.id == message_id, Message.conversation_id == conversation_id)
+            .values(content=content)
+        )
+        await self._session.commit()
 
     async def set_followups(
         self, message_id: str, *, conversation_id: str, followups: list[str]
@@ -358,6 +442,30 @@ class MessageRepository:
         )
         return result.scalar_one_or_none()
 
+    async def user_message_for_assistant(
+        self, *, conversation_id: str, assistant_message_id: str
+    ) -> Message | None:
+        """The user row that opened the turn anchored by ``assistant_message_id``.
+
+        Resume / re-pause write-backs may carry a fresh client-minted ``user_message_id``;
+        the assistant ``message_id`` is stable, so look up the paired user row by timeline
+        order instead of trusting the retried id.
+        """
+        assistant = await self.get_by_id(assistant_message_id, conversation_id=conversation_id)
+        if assistant is None or assistant.role != "assistant":
+            return None
+        result = await self._session.execute(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.role == "user",
+                Message.created_at <= assistant.created_at,
+            )
+            .order_by(Message.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def get_by_id(self, message_id: str, *, conversation_id: str) -> Message | None:
         result = await self._session.execute(
             select(Message).where(
@@ -397,10 +505,25 @@ class MessageRepository:
         soft-delete column — replacing a turn means the old branch is gone
         (conversation branching is a separate, later feature). Each dropped
         message's ``turn_journal`` replay stream goes with it (§8.3 唯一事实源 — it
-        could never project without its message).
+        could never project without its message). Any matching ``paused_turns`` frame
+        is dropped too — otherwise resume would find a frame whose journal is gone.
         """
         await delete_journal_after(
             self._session, conversation_id, after_created_at=after_created_at
+        )
+        await delete_audit_after(
+            self._session, conversation_id, after_created_at=after_created_at
+        )
+        await self._session.execute(
+            delete(PausedTurnRow).where(
+                PausedTurnRow.conversation_id == conversation_id,
+                PausedTurnRow.message_id.in_(
+                    select(Message.id).where(
+                        Message.conversation_id == conversation_id,
+                        Message.created_at > after_created_at,
+                    )
+                ),
+            )
         )
         result = await self._session.execute(
             delete(Message).where(
@@ -419,10 +542,18 @@ class MessageRepository:
         IDOR-safe; the turn_journal delete is scoped the same way, so a cross-tenant
         id touches neither row). Messages have no soft-delete column, so this is a
         physical delete; its ``turn_journal`` replay stream is dropped with it (§8.3
-        唯一事实源), but the append-only ``cost_events`` ledger is intentionally left
+        唯一事实源), and any matching ``paused_turns`` frame is dropped too (otherwise
+        resume would find a frame whose journal is gone), but the append-only ``cost_events`` ledger is intentionally left
         intact (real spend is never rewritten — 不变量 #1). No-op (False) if absent.
         """
         await delete_journal_for_message(self._session, conversation_id, message_id)
+        await delete_audit_for_message(self._session, conversation_id, message_id)
+        await self._session.execute(
+            delete(PausedTurnRow).where(
+                PausedTurnRow.message_id == message_id,
+                PausedTurnRow.conversation_id == conversation_id,
+            )
+        )
         result = await self._session.execute(
             delete(Message).where(
                 Message.id == message_id,

@@ -4,11 +4,13 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
+from agentcore.core.error_codes import ErrorCode
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolEffect
-from agentcore.llm.config import ModelProfile, get_profile
-from agentcore.llm.deepseek import DeepSeekProvider
-from agentcore.llm.protocol import LLMMessage, TokenUsage
+from agentcore.llm.errors import empty_response_event_message
+from agentcore.llm.profiles import ModelProfile, get_profile
+from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
+from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import (
     EventSink,
@@ -21,6 +23,10 @@ from agentcore.runtime.events import (
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 
+from .ask_user_absorb import (
+    absorb_blocking_ask_user_content,
+    prepare_blocking_ask_user_tool_calls,
+)
 from .directive import Continue, Finalize, LoopDirective, Return, Rework, SwitchModel
 from .finalize import force_finalize
 from .governance import (
@@ -48,11 +54,12 @@ logger = get_logger(__name__)
 async def react_loop(
     *,
     messages: list[LLMMessage],
-    llm: DeepSeekProvider,
+    llm: OpenAICompatibleProvider,
     tools: ToolRegistry,
     sink: EventSink,
     tool_context: ToolContext,
     profile: ModelProfile | None = None,
+    turn_model: str | None = None,
     allowed_tool_names: list[str] | None = None,
     on_content: Callable[[str], None] | None = None,
     on_reasoning: Callable[[str], None] | None = None,
@@ -69,6 +76,7 @@ async def react_loop(
     run_id: str = "",
     role: str = "",
     deliverable_only: bool = False,
+    supports_tools: bool | None = None,
 ) -> tuple[str, str, TokenUsage, int]:
     """Run the ReAct loop.
 
@@ -149,8 +157,10 @@ async def react_loop(
       draft off the card, so 直播 == the rolled-back deliverable == 重载 (synthesized
       from ``message_final``) — the conformance invariant.
 
-    Terminal rounds (ask_user / handoff / suspend checkpoints) KEEP their pre-tool
-    text — that IS the deliverable at that boundary. Default ``False`` leaves the
+    Terminal rounds (handoff / suspend checkpoints other than blocking ``ask_user``)
+    KEEP their pre-tool text — that IS the deliverable at that boundary. Blocking
+    ``ask_user`` absorbs same-round prose into the card instead (see
+    ``ask_user_absorb``). Default ``False`` leaves the
     accumulation byte-identical to before (standalone loops / tests).
     """
     profile = profile or get_profile("chat")
@@ -174,9 +184,16 @@ async def react_loop(
     final_content = ""
     final_reasoning = ""
 
+    profile = profile or get_profile("chat")
+    base_model = turn_model
+    if base_model is None:
+        from agentcore.config import settings
+
+        base_model = settings.platform_model
+
     investigation_tools = classify_investigation_tools(tools, allowed_tool_names)
     controller = create_loop_controller(investigation_tools)
-    active_model: str | None = None
+    active_model: str | None = base_model
     finish_guard_reworks = 0
 
     for round_idx in range(profile.max_rounds):
@@ -222,6 +239,7 @@ async def react_loop(
                 llm_failed=True,
                 error_code=round_result.error_code,
                 error_message=round_result.error_message,
+                error_context=round_result.error_context,
             )
             directive: LoopDirective = decide_llm_failure(
                 profile=profile,
@@ -246,6 +264,8 @@ async def react_loop(
                 reasoning=round_result.reasoning,
                 usage=usage,
                 tool_calls=round_result.tool_calls,
+                empty_diagnosis=round_result.empty_diagnosis,
+                empty_raw_preview=round_result.empty_raw_preview,
             )
             controller.note_empty_round(outcome.is_empty)
 
@@ -259,18 +279,24 @@ async def react_loop(
                     annotate_citations=annotate_citations,
                     citation_sink=citation_sink,
                     finish_guard_reworks=finish_guard_reworks,
+                    tools_offered=tool_defs is not None,
+                    supports_tools=supports_tools,
                 )
             else:
+                tool_calls = prepare_blocking_ask_user_tool_calls(
+                    outcome.tool_calls,
+                    outcome.content or "",
+                )
                 messages.append(
                     LLMMessage(
                         role="assistant",
                         content=outcome.content or None,
-                        tool_calls=outcome.tool_calls,
+                        tool_calls=tool_calls,
                         reasoning_content=outcome.reasoning or None,
                     )
                 )
                 tool_results, terminal, attempts = await execute_tools(
-                    outcome.tool_calls,
+                    tool_calls,
                     tools,
                     tool_context,
                     sink,
@@ -290,6 +316,14 @@ async def react_loop(
                 )
 
                 if terminal is not None:
+                    if absorb_blocking_ask_user_content(
+                        messages=messages,
+                        tool_calls=tool_calls,
+                        attempts=attempts,
+                        terminal_effect=terminal.effect,
+                        emit_reset=emit_reset,
+                    ):
+                        final_content = content_before_round
                     usage_meta = terminal.metadata or {}
                     total_usage = total_usage + TokenUsage(
                         input_tokens=usage_meta.get("input_tokens", 0),
@@ -356,7 +390,26 @@ async def react_loop(
             case Return(finish_reason=fr, extra_content=extra):
                 if outcome.llm_failed:
                     sink.emit(
-                        error_event(outcome.error_code or "", outcome.error_message or "")
+                        error_event(
+                            outcome.error_code or "",
+                            outcome.error_message or "",
+                            context=outcome.error_context,
+                        )
+                    )
+                elif fr is FinishReason.DEGRADED:
+                    err_ctx: dict | None = None
+                    if outcome.empty_diagnosis or outcome.empty_raw_preview:
+                        err_ctx = {}
+                        if outcome.empty_diagnosis:
+                            err_ctx["empty_diagnosis"] = outcome.empty_diagnosis
+                        if outcome.empty_raw_preview:
+                            err_ctx["upstream_body_preview"] = outcome.empty_raw_preview
+                    sink.emit(
+                        error_event(
+                            ErrorCode.LLM_ERROR,
+                            empty_response_event_message(outcome.empty_diagnosis),
+                            context=err_ctx,
+                        )
                     )
                 if fr is not None and finish_override_sink is not None:
                     finish_override_sink.append(fr)
@@ -369,6 +422,7 @@ async def react_loop(
                     messages=messages,
                     llm=llm,
                     profile=profile,
+                    active_model=active_model or base_model,
                     emit_content=emit_content,
                     emit_reasoning=emit_reasoning,
                     final_content=final_content,
@@ -402,6 +456,7 @@ async def react_loop(
         messages=messages,
         llm=llm,
         profile=profile,
+        active_model=active_model or base_model,
         emit_content=emit_content,
         emit_reasoning=emit_reasoning,
         final_content=final_content,

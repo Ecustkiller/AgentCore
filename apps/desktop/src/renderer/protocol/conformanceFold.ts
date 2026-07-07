@@ -324,7 +324,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         break;
       }
       default:
-        // message_start / turn_saved / title_generated / followups_generated /
+        // message_start / turn_warning / turn_saved / title_generated / followups_generated /
         // board_op_required / board_read_required / tool_progress / tool_use_progress /
         // workspace_op_required / handoff_* — not part of the normalized
         // judge state (tool_use_progress is transport-only 工具执行阶段进度: live-stream phase,

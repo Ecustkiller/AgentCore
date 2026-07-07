@@ -10,17 +10,13 @@ per-PR 硬门禁的关键：用**脚本化假 provider** 零成本验证 harness
 
 import asyncio
 
-from agentcore.evals.harness import (
-    EvalHarness,
-    RecordingSink,
-    single_outcome,
-    team_outcome,
-)
+from agentcore.evals.harness import EvalHarness, single_outcome, team_outcome
+from agentcore.evals.recording_sink import RecordingSink
 from agentcore.evals.report import format_report, report_to_dict
 from agentcore.evals.runner import apply_checks, run_suite
 from agentcore.evals.types import EvalCase, TurnOutcome
-from agentcore.llm.config import ModelProfile
-from agentcore.llm.protocol import LLMChunk, TokenUsage
+from agentcore.llm.profiles import ProfileParams
+from agentcore.llm.provider.protocol import LLMChunk, TokenUsage
 from agentcore.runtime.events import (
     FinishReason,
     run_completed,
@@ -230,25 +226,25 @@ def test_team_outcome_delegated_derives_from_roster_not_runs():
 
 
 def test_single_outcome_derives_finish_and_cost():
-    profile = ModelProfile(
-        model="deepseek-v4-flash", thinking=False, reasoning_effort=None, max_rounds=10
-    )
+    profile = ProfileParams(temperature=0.7, max_rounds=10)
     sink = RecordingSink()
     usage = TokenUsage(cache_miss_tokens=1_000_000, output_tokens=0)
-    oc = single_outcome("hi", usage, 3, profile=profile, sink=sink, citations=[], latency_ms=7)
+    oc = single_outcome(
+        "hi", usage, 3, profile=profile, model="deepseek-v4-flash", sink=sink, citations=[], latency_ms=7
+    )
     assert oc.finish_reason == "end_turn"  # rounds(3) < max_rounds(10)
     assert oc.cost_usd > 0  # 1M cache_miss tokens @ flash 价 → 非零成本
 
-    capped = single_outcome("hi", usage, 10, profile=profile, sink=sink, citations=[], latency_ms=1)
+    capped = single_outcome(
+        "hi", usage, 10, profile=profile, model="deepseek-v4-flash", sink=sink, citations=[], latency_ms=1
+    )
     assert capped.finish_reason == "max_rounds"  # rounds 达上限
 
 
 def test_single_outcome_finish_override_wins_over_rounds():
     # When the engine hands back a non-default terminal reason, it must win over the
     # rounds-derivation (here rounds 3 < max 10 would otherwise read "end_turn").
-    profile = ModelProfile(
-        model="deepseek-v4-flash", thinking=False, reasoning_effort=None, max_rounds=10
-    )
+    profile = ProfileParams(temperature=0.7, max_rounds=10)
     sink = RecordingSink()
     usage = TokenUsage()
     degraded = single_outcome(
@@ -256,6 +252,7 @@ def test_single_outcome_finish_override_wins_over_rounds():
         usage,
         3,
         profile=profile,
+        model="deepseek-v4-flash",
         sink=sink,
         citations=[],
         latency_ms=1,
@@ -267,6 +264,7 @@ def test_single_outcome_finish_override_wins_over_rounds():
         usage,
         3,
         profile=profile,
+        model="deepseek-v4-flash",
         sink=sink,
         citations=[],
         latency_ms=1,

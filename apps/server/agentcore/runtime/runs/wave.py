@@ -437,6 +437,14 @@ class WaveScheduler:
                     delay = policy.retry_delay_ms / 1000 * (2 ** (attempt - 1))
                     if delay > 0:
                         await asyncio.sleep(delay)
+                    from agentcore.runtime.audit.hooks import on_run_retry
+
+                    on_run_retry(
+                        run_id=spec.run_id,
+                        attempt=attempt,
+                        source="on_failure",
+                        error=str(last.error) if last and last.error else None,
+                    )
                 state = await executor(spec, completed)
                 state.attempt = attempt
                 if last is not None:

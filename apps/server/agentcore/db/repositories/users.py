@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from agentcore.billing.preference import default_billing_preference
 from agentcore.core.types import new_id
 from agentcore.db.models import CostEvent, User, UserBlock, UserDirectorySettings
 
@@ -177,6 +178,7 @@ class UserRepository:
             email=email,
             role=role,
             status=status,
+            billing_preference=default_billing_preference(),
         )
         self._session.add(user)
         await self._session.commit()
@@ -220,6 +222,23 @@ class UserRepository:
             update(User).where(User.user_id == user_id).values(memory_enabled=enabled)
         )
         await self._session.commit()
+
+    async def set_billing_preference(self, user_id: str, billing_preference: str) -> User | None:
+        """Set per-user billing mode (platform free quota vs BYOK)."""
+        await self._session.execute(
+            update(User)
+            .where(User.user_id == user_id)
+            .values(billing_preference=billing_preference)
+        )
+        await self._session.commit()
+        return await self.get_by_id(user_id)
+
+    async def list_memory_enabled_user_ids(self) -> Sequence[str]:
+        """All user ids with the long-term memory master switch on (backfill scan)."""
+        result = await self._session.execute(
+            select(User.user_id).where(User.memory_enabled.is_(True))
+        )
+        return [row[0] for row in result.all()]
 
     async def set_quota(
         self,

@@ -6,10 +6,12 @@ import { handleExecutionEvent } from "./handlers/execution";
 import { handleInteractionEvent } from "./handlers/interaction";
 import { handleMessageStreamEvent } from "./handlers/messageStream";
 import { handleMetaEvent } from "./handlers/meta";
+import { handleSimulationEvent } from "./handlers/simulation";
 import { handleWorkspaceEvent } from "./handlers/workspace";
 import type { DispatchContext } from "./types";
 
 const HANDLERS = [
+  handleSimulationEvent,
   handleMessageStreamEvent,
   handleInteractionEvent,
   handleMetaEvent,

@@ -8,18 +8,19 @@ from agentcore.config.checkpoint import CheckpointSettings
 from agentcore.config.database import DatabaseSettings
 from agentcore.config.engine import EngineSettings
 from agentcore.config.features import FeatureSettings
-from agentcore.config.llm import LlmSettings
 from agentcore.config.paths import ENV_FILE
 from agentcore.config.persistence import PersistenceSettings
+from agentcore.config.platform import PlatformSettings
 from agentcore.config.quota import QuotaSettings
 from agentcore.config.search import SearchSettings
 from agentcore.config.server import ServerSettings
+from agentcore.config.simulation import SimulationSettings
 from agentcore.config.workspace import WorkspaceSettings
 
 
 class Settings(
     DatabaseSettings,
-    LlmSettings,
+    PlatformSettings,
     SearchSettings,
     AuthSettings,
     ApprovalSettings,
@@ -29,6 +30,7 @@ class Settings(
     PersistenceSettings,
     QuotaSettings,
     ServerSettings,
+    SimulationSettings,
     WorkspaceSettings,
     BaseSettings,
 ):

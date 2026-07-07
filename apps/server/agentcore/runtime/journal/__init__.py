@@ -27,6 +27,7 @@ from .fold import (
 )
 from .fold_cache import clear_runs_cache, runs_from_entries_cached
 from .persist import persist_turn_journal
+from .writer import TurnJournalWriter, current_journal_writer
 
 __all__ = [
     "KIND_TURN_END",
@@ -34,6 +35,8 @@ __all__ = [
     "completed_from_journal",
     "entries_from_runs",
     "journal_entries_from_display_runs",
+    "TurnJournalWriter",
+    "current_journal_writer",
     "persist_turn_journal",
     "plan_from_journal",
     "runs_from_entries",

@@ -357,7 +357,117 @@ def _fmt_worker_group(grp: dict) -> list[str]:
     return lines
 
 
-def format_trace(trace_id: str, log_events: list[dict]) -> str:
+_TURN_SPINE_EVENTS = frozenset({"chat.turn_start", "chat.turn_complete"})
+
+
+def load_conversation_spine_events(conversation_id: str, log_file: Path = LOG_FILE) -> list[dict]:
+    """Load chat.turn_start / chat.turn_complete events for a conversation."""
+    if not log_file.exists():
+        return []
+    events: list[dict] = []
+    with open(log_file, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if obj.get("conversation_id") != conversation_id:
+                continue
+            event = obj.get("event", "")
+            if event not in _TURN_SPINE_EVENTS:
+                continue
+            events.append(
+                {
+                    "timestamp": obj.get("timestamp", ""),
+                    "event": event,
+                    "trace_id": obj.get("trace_id", ""),
+                    "preview": obj.get("preview", ""),
+                    "delegated": obj.get("delegated"),
+                }
+            )
+    return events
+
+
+def _extract_conversation_id(log_events: list[dict]) -> str | None:
+    for item in log_events:
+        cid = item.get("conversation_id")
+        if cid:
+            return str(cid)
+    return None
+
+
+def _summarize_turn_preview(preview: str, max_len: int = 60) -> str:
+    text = (preview or "").replace("\n", " ").strip()
+    if not text:
+        return "(no preview)"
+    if len(text) > max_len:
+        return text[: max_len - 3] + "..."
+    return text
+
+
+def format_conversation_context(
+    conversation_id: str, spine_events: list[dict], current_trace_id: str
+) -> str:
+    """One-line-per-turn summary of a conversation, highlighting *current_trace_id*."""
+    by_trace: dict[str, dict[str, Any]] = {}
+    for ev in spine_events:
+        tid = ev.get("trace_id") or ""
+        if not tid:
+            continue
+        slot = by_trace.setdefault(tid, {"trace_id": tid})
+        if ev["event"] == "chat.turn_start":
+            slot["start"] = ev
+        elif ev["event"] == "chat.turn_complete":
+            slot["complete"] = ev
+
+    turns = sorted(
+        by_trace.values(),
+        key=lambda t: (t.get("start") or t.get("complete") or {}).get("timestamp", ""),
+    )
+    if not turns:
+        return ""
+
+    lines = [
+        "",
+        "─" * 70,
+        f"  对话上下文  (conversation_id: {conversation_id})",
+        f"  回合: {len(turns)}",
+        "─" * 70,
+    ]
+    for turn in turns:
+        tid = turn["trace_id"]
+        start = turn.get("start")
+        complete = turn.get("complete")
+        ts = ((start or complete) or {}).get("timestamp", "")[:19]
+        preview = _summarize_turn_preview((start or {}).get("preview", ""))
+        is_current = tid == current_trace_id
+        marker = ">>> " if is_current else "    "
+        current_tag = " [当前]" if is_current else ""
+
+        if complete:
+            status = "✓"
+            extras: list[str] = []
+            if complete.get("delegated"):
+                extras.append("委派")
+            status_suffix = f"  {' · '.join(extras)}" if extras else ""
+        elif start:
+            status = "⚠️ 未完成"
+            status_suffix = ""
+        else:
+            status = "?"
+            status_suffix = ""
+
+        lines.append(f"{marker}{ts}{current_tag}  \"{preview}\"  {status}{status_suffix}")
+        if is_current:
+            lines.append(f"    trace_id: {tid}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def format_trace(trace_id: str, log_events: list[dict], log_file: Path = LOG_FILE) -> str:
     lines = [
         "=" * 70,
         f"  Trace: {trace_id}",
@@ -371,7 +481,12 @@ def format_trace(trace_id: str, log_events: list[dict]) -> str:
         else:
             lines.extend(_fmt_log_item(item))
     lines.append("")
-    return "\n".join(lines)
+    output = "\n".join(lines)
+    conv_id = _extract_conversation_id(log_events)
+    if conv_id:
+        spine = load_conversation_spine_events(conv_id, log_file=log_file)
+        output += format_conversation_context(conv_id, spine, trace_id)
+    return output
 
 
 def format_timeline(conv: dict, messages: list[dict], log_events: list[dict]) -> str:
@@ -460,7 +575,7 @@ async def main() -> None:
         if len(args) < 2:
             print("usage: log_timeline.py --trace <trace_id>")
             return
-        print(format_trace(args[1], load_log_events(args[1], field="trace_id", log_file=log_file)))
+        print(format_trace(args[1], load_log_events(args[1], field="trace_id", log_file=log_file), log_file=log_file))
         return
 
     conv_id = args[0]

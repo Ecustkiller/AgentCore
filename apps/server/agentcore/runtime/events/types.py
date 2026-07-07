@@ -80,6 +80,18 @@ class EventType(StrEnum):
     DEBATE_ROUND = "debate_round"
     DEBATE_ROUND_DECISION_REQUIRED = "debate_round_decision_required"
     DEBATE_ROUND_DECISION_RESOLVED = "debate_round_decision_resolved"
+    # BYOK soft gate (开放主流AI模型接入 §4.5): preflight hint when probe says the
+    # user's model may lack tool calling. Transport-only — not journaled.
+    TURN_WARNING = "turn_warning"
+    # AI Town simulation (M1): tick lifecycle + agent snapshots. Persisted in sim_event,
+    # not turn_journal — EPHEMERAL disposition (see disposition.py).
+    SIM_TICK_STARTED = "sim.tick_started"
+    SIM_TICK_ENDED = "sim.tick_ended"
+    SIM_AGENT_ACTION = "sim.agent_action"
+    SIM_AGENT_STATE = "sim.agent_state"
+    SIM_INTERACTION = "sim.interaction"
+    SIM_WORLD_EVENT = "sim.world_event"
+    SIM_TICK_FRAME = "sim.tick_frame"
 
 
 class FinishReason(StrEnum):

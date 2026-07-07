@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import asdict
 
-from agentcore.llm.config import ModelProfile
 from agentcore.llm.pricing import calculate_cost
-from agentcore.llm.protocol import LLMMessage, LLMProvider, TokenUsage
+from agentcore.llm.profiles import ModelProfile
+from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import (
@@ -102,6 +102,7 @@ async def _react_and_capture(
     sink: EventSink,
     tool_ctx: ToolContext,
     profile: ModelProfile,
+    turn_model: str,
     allowed_tools: list[str] | None,
     run_id: str,
     agent_id: str,
@@ -136,6 +137,7 @@ async def _react_and_capture(
         sink=sink,
         tool_context=tool_ctx,
         profile=profile,
+        turn_model=turn_model,
         allowed_tool_names=allowed_tools,
         on_content=lambda d: sink.emit(run_output_delta(run_id, agent_id, d)),
         on_reasoning=lambda d: sink.emit(run_reasoning_delta(run_id, agent_id, d)),

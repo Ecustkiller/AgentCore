@@ -24,6 +24,7 @@ from agentcore.runtime.events.chat import (
     tool_use_progress,
     tool_use_start,
     turn_saved,
+    turn_warning,
 )
 from agentcore.runtime.events.interaction import (
     approval_required,
@@ -104,6 +105,7 @@ __all__ = [
     "title_generated",
     "followups_generated",
     "turn_saved",
+    "turn_warning",
     "run_plan",
     "plan_revised",
     "run_started",

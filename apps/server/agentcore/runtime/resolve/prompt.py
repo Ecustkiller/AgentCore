@@ -53,9 +53,17 @@ _DEFAULT_SYSTEM_PROMPT = """\
 
 用与用户相同的语言回复。
 
+<problem_solving>
+解决问题时主动从不同视角切入——跨行业类比、学术理论、工程实践、反面案例——充分调动你\
+作为大语言模型所学的广泛知识提出方案，而不是只给第一个想到的默认答案。需要做选择时，\
+简要说明各方案的取舍，让用户有据可选。
+
+深度与问题匹配：简单事实问题直接给答案；复杂决策或开放性问题展开分析、给出依据和权衡。
+</problem_solving>
+
 <output_style>
 语气自然、专业，直接给结论。不要用「好问题！」「当然！」「希望对你有帮助」这类\
-套话开场或结尾，不奉承、不过度道歉。
+套话开场或结尾，不奉承、不过度道歉；也不要把用户刚说过的话复述一遍再开始回答。
 
 格式服务于清晰：简单问题用简洁的散文回答；只有当内容确实多维度、结构能显著提升\
 可读性时，才用标题、列表或表格。不要为了显得详尽而过度加粗或滥用列表。
@@ -143,7 +151,11 @@ _CEO_VISUALIZATION_HINT = """
 点时用 ```vega-lite 写 Vega-Lite JSON spec（可设 "width":"container"）。数值不在手边先取\
 再画——小文件直接读、量大或需计算先跑代码聚合出精简值，别把海量原始数据塞进 spec。但保持\
 克制：一段最多一张、纯线性或一两句话能说清的别硬塞、图本身要能独立读懂；这些随手画进回复\
-即可，无需调用任何工具。
+即可，无需调用任何工具。mermaid 语法约束：subgraph 中文/非英文标签须用 \
+`subgraph id["标签"]`（如 `subgraph app["应用层"]`）；禁止 `&` 多节点连线（`A --> B & C`），\
+改为逐行 `A --> B` / `A --> C`；含 `+`、`/`、`(`、`)` 等特殊字符的节点标签用双引号包裹（如 \
+`A["LLM调用 + Tool Use"]`）；节点 ID 用英文/数字，不用 emoji 或中文作 ID；优先 \
+`flowchart TD/TB/LR/BT`，不用已废弃的 `graph` 关键字。
 </visualization>"""
 
 # Appended ONLY to the entry CEO chat agent's prompt (not to delegated workers,
@@ -202,14 +214,21 @@ worker 看不到你们的对话历史，只看到你写的 task 和原始用户�
 收尾时不要复述每个 worker 的完整产出——用户能在 UI 打开各 worker 全文，你只需以团队负责人\
 的口吻向用户（你的老板）汇报团队这次的成果：用自己的话把各队员的结果串成一段简短综述，\
 点明这是团队协作做出来的、并指向细节。动笔前先在思考里理清各结果如何相互印证 / 补充 / \
-冲突、你据此如何取舍整合（这段推理会作为「汇总过程」单独呈现给用户）。
+冲突、你据此如何取舍整合（这段推理会作为「汇总过程」单独呈现给用户）。委派后你只需据团队\
+产出写综述，不要用工具重复调查已委派的工作。
 
 task 只写【目标·约束·验收】，worker 的专业方案由 worker 自己定——不要在 task 里写逐步实施\
 步骤、贴代码模板或替 worker 把结构列全。你给的是需求与边界，不是施工图。
 
 `delegate` 还有一批进阶档位，另有辩论、定向修订、向用户发问等专门机制——完整「怎么做」都\
 不常驻，见下方的「能力目录」，要用时按其指引 `consult_skill(name)` 拉回再执行。
-</how_you_work>"""
+</how_you_work>
+
+<platform_knowledge>
+关于你所运行的平台（AgentCore / 马维斯）的架构、机制和能力，以上系统提示已完整描述。\
+工作区中的文件是用户或 worker 的产出物，不是平台文档。当用户提及「本产品」「这个平台」「你的架构」\
+时，应参考系统提示中的描述，而非去工作区搜索。
+</platform_knowledge>"""
 
 
 _MEMORY_RULES_TEMPLATE = """
@@ -300,6 +319,49 @@ def assemble_system_prompt(
         )
         .add("memory_rules", _format_memory_rules(memory_markdown), SectionOrder.MEMORY)
         .add("attachment_context", extra_context, SectionOrder.ATTACHMENT)
+        .render()
+    )
+
+
+def render_worker_memory_topic_directory(topics: Sequence[MemoryTopic]) -> str:
+    """Render the worker's simplified ``<记忆主题目录>`` block (names only).
+
+    Workers share the same on-demand TOPIC notes as the CEO but get a lighter catalog —
+    topic names without one-line summaries — to keep the delegated prefix smaller. Returns
+    "" when the user has no topic notes (caller gates on ``memory_enabled`` separately).
+    """
+    if not topics:
+        return ""
+    lines = [
+        "<记忆主题目录>",
+        "下列记忆主题可按需查阅（`consult_memory(name)` 拉取全文；核心记忆已常驻、无需查阅）：",
+    ]
+    lines.extend(f"- {t.name}" for t in topics)
+    lines.append("</记忆主题目录>")
+    return "\n".join(lines)
+
+
+def compose_worker_base_prompt(
+    shared_base: str,
+    *,
+    memory_topics: Sequence[MemoryTopic] = (),
+    memory_enabled: bool = True,
+    attachment_context: str | None = None,
+) -> str:
+    """Build the delegated worker's system prompt from the shared base.
+
+    Layers the worker-only simplified 记忆主题目录 when memory is on, then the per-turn
+    attachment block last (缓存友好). ``shared_base`` is the output of
+    ``assemble_system_prompt`` — identity, runtime context, instructions, core memory.
+    """
+    memory_block = (
+        render_worker_memory_topic_directory(memory_topics) if memory_enabled else ""
+    )
+    return (
+        ContextAssembler()
+        .add("shared_base", shared_base, SectionOrder.BASE)
+        .add("memory_topics", memory_block, SectionOrder.MEMORY_TOPICS)
+        .add("attachment_context", attachment_context, SectionOrder.ATTACHMENT)
         .render()
     )
 

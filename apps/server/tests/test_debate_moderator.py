@@ -9,7 +9,7 @@
 import asyncio
 import json
 
-from agentcore.llm.protocol import LLMResponse
+from agentcore.llm.provider.protocol import LLMResponse
 from agentcore.runtime.debate import (
     STOP_ALL_FAILED,
     STOP_CONVERGED,
@@ -18,6 +18,7 @@ from agentcore.runtime.debate import (
     STOP_USER_CONCLUDED,
     ClosingStatement,
     CrossExamExchange,
+    CrossExamQa,
     DebateBrief,
     DebateConfig,
     DebateForm,
@@ -137,10 +138,15 @@ class _RecordingCrossExam:
         return [
             CrossExamExchange(
                 target=key,
-                questions=list(qs),
-                answer="" if self.fail else f"对「{key}」质询的正面回答",
+                exchanges=[
+                    CrossExamQa(
+                        question=q,
+                        answer="" if self.fail else f"对「{key}」质询「{q}」的正面回答",
+                        ok=not self.fail,
+                    )
+                    for q in qs
+                ],
                 answer_run_id=f"{key}_cx_r{round_no}",
-                ok=not self.fail,
             )
             for key, qs in questions.items()
         ]
@@ -894,7 +900,9 @@ def test_cross_exam_beat_populates_round_and_feeds_judge():
     assert cx.calls[0]["questions"] == {"pro": ["逼问正方"], "con": ["逼问反方"]}
     got = result.rounds[0].cross_exam
     assert [e.target for e in got] == ["pro", "con"]
-    assert all(e.ok and e.answer for e in got)
+    assert all(
+        ex.ok and ex.answer for e in got for ex in e.exchanges
+    )
     # 裁判 prompt（「请一次性完成三件事」）看到质询问答块。
     assess = [u for (s, u) in llm.seen if "请一次性完成三件事" in u]
     assert assess and "本轮【质询环节】问答" in assess[0]
@@ -1106,7 +1114,7 @@ def test_brief_carries_cumulative_scores_and_parses_decisive():
 
 def test_round_payload_has_cross_exam_and_scores_without_polluting_verdict():
     """round payload 新增 cross_exam + scores（顶层，与 verdict 平级）：verdict 子 dict 键集不被
-    记分污染；质询回答全文不入 payload（走 answer_run_id 的 run 事件），只带 questions/run_id。"""
+    记分污染；质询逐条 exchanges 进 payload（answer 为解析摘要；完整流走 answer_run_id 的 run 事件）。"""
     judge = {
         **_CONVERGE,
         "scores": {
@@ -1134,8 +1142,9 @@ def test_round_payload_has_cross_exam_and_scores_without_polluting_verdict():
     assert set(payload["scores"]) == {"pro", "con"}
     assert payload["scores"]["pro"]["total"] == 9
     assert [c["target"] for c in payload["cross_exam"]] == ["pro", "con"]
-    assert "answer" not in payload["cross_exam"][0]  # 回答全文走 run 事件、不入 payload
+    assert "answer_run_id" in payload["cross_exam"][0]
     assert payload["cross_exam"][0]["answer_run_id"] == "pro_cx_r1"
-    assert payload["cross_exam"][0]["questions"] == ["q"]
+    assert payload["cross_exam"][0]["exchanges"][0]["question"] == "q"
+    assert "answer" in payload["cross_exam"][0]["exchanges"][0]
     # 与收场全量 payload 的该轮逐字一致（单一源，防漂移）——含新增字段。
     assert result.to_event_payload()["rounds"][0] == payload

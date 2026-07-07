@@ -24,7 +24,7 @@ from agentcore.evals.comparison import (
 from agentcore.evals.judge import LLMPairwiseJudge
 from agentcore.evals.seed_lint import lint_comparison_case, lint_comparison_suite
 from agentcore.evals.types import ComparisonCase, PairwiseVerdict, TurnOutcome
-from agentcore.llm.protocol import LLMResponse
+from agentcore.llm.provider.protocol import LLMResponse
 
 # --- 假 harness / 裁判 provider / 裁判 ----------------------------------------
 

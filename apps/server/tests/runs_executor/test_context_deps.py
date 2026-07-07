@@ -1,4 +1,4 @@
-from agentcore.llm.protocol import LLMChunk, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, ToolCallDelta
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.executor import _dep_context_blocks, build_agent_executor

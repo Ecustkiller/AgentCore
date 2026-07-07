@@ -24,6 +24,11 @@ def message_start(
     return SSEEvent(type=EventType.MESSAGE_START, payload=payload)
 
 
+def turn_warning(message: str) -> SSEEvent:
+    """Preflight soft gate — model may not support tool calling (BYOK probe hint)."""
+    return SSEEvent(type=EventType.TURN_WARNING, payload={"message": message})
+
+
 def content_delta(delta: str) -> SSEEvent:
     return SSEEvent(type=EventType.CONTENT_DELTA, payload={"delta": delta})
 
@@ -159,10 +164,13 @@ def message_end(
     )
 
 
-def error_event(code: str, message: str) -> SSEEvent:
+def error_event(code: str, message: str, *, context: dict | None = None) -> SSEEvent:
+    payload: dict = {"code": code, "message": message}
+    if context:
+        payload["context"] = context
     return SSEEvent(
         type=EventType.ERROR,
-        payload={"code": code, "message": message},
+        payload=payload,
     )
 
 

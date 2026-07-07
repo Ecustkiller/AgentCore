@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentcore.runtime.runs.constants import MAX_DELEGATION_TASKS
 from agentcore.runtime.runs.playbooks import PLAYBOOKS, available_playbooks
 
 # The CEO's synthesis reads the aggregated worker products as this tool's output;
@@ -30,9 +31,10 @@ DELEGATE_DESCRIPTION = (
     "把当前任务拆给一支由你（主 Agent）指挥的临时团队执行，并把各队员的产出返回给你。"
     "本工具非终结：产出回到你的循环，你据此写一段简短概览（不逐字复述，用户可在界面看"
     "各成员全文），必要时再次调用继续委派。\n"
-    "粒度由你定：传入一个 tasks 数组（每个元素一个内联角色，role + task 必填）。无依赖且"
-    "仅 1 个=单兵；无依赖多个=并行；任一任务声明 depends_on（引用其它任务的 id）=按依赖"
-    "图分波执行，上游产出自动注入下游。\n"
+    "粒度由你定：传入一个 tasks 数组（每个元素一个内联角色，role + task 必填）。"
+    f"单次最多 {MAX_DELEGATION_TASKS} 个节点，超出会被拒绝，请自行分批。\n"
+    "无依赖且仅 1 个=单兵；无依赖多个=并行；任一任务声明 depends_on（引用其它任务的 id）"
+    "=按依赖图分波执行，上游产出自动注入下游。\n"
     "若本次的活正好是几个高频形状之一（调研报告 / 接口＋页面＋测试 / 多选项对比），可改用 "
     "`playbook` 一键实例化整支团队、免手搓 tasks（与 tasks 二选一，槽位见 playbook / playbook_args 说明）。\n"
     "简单问答 / 闲聊 / 检索自己答；交付物（要产出或改动产物的活——写 / 改文件、删除 / 移动、"
@@ -46,7 +48,10 @@ DELEGATE_PARAMETERS = {
     "properties": {
         "tasks": {
             "type": "array",
-            "description": "要委派的子任务列表（每个是一个内联角色 worker）。",
+            "description": (
+                f"要委派的子任务列表（每个是一个内联角色 worker）。"
+                f"单次最多 {MAX_DELEGATION_TASKS} 个节点，超出请分批。"
+            ),
             "items": {
                 "type": "object",
                 "properties": {

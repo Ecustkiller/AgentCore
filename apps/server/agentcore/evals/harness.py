@@ -7,14 +7,14 @@
   ``cost_runs`` 算成本），强制 ``approvals_enabled=False`` 关掉 ask_user/plan_review 挂起，
   评测绝不空等超时。
 
-过程事实（工具调用、委派角色）由 :class:`RecordingSink`（在现有 ``EventSink`` 上挂钩）截获。
+过程事实（工具调用、委派角色）由 :class:`~agentcore.evals.recording_sink.RecordingSink`
+（在现有 ``EventSink`` 上挂钩）截获。
 真实 DeepSeek key 经 :func:`_eval_credentials` 从 eval 专用环境变量读（BYOK 下平台 key 为空，
 见 §十三）；单测注入脚本化假 provider（``EvalHarness(provider=...)``），零成本验证 harness 本身。
 """
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 import time
@@ -24,17 +24,18 @@ from agentcore.config import settings
 from agentcore.core.log_context import log_context, new_trace_id
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
+from agentcore.evals.eval_modes import KNOWN_MODELS, resolve_profile_set
 from agentcore.evals.prompt_profiles import resolve_prompt_profile
+from agentcore.evals.recording_sink import RecordingSink
 from agentcore.evals.types import EvalCase, EvalConfigError, TurnOutcome
-from agentcore.llm.byok import LLMCredentials
-from agentcore.llm.config import ModelProfile
 from agentcore.llm.factory import build_provider
-from agentcore.llm.modes import KNOWN_MODELS, resolve_profile_set
 from agentcore.llm.pricing import NANO_PER_USD, calculate_cost
-from agentcore.llm.protocol import LLMMessage, TokenUsage
+from agentcore.llm.profiles import ModelProfile
+from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
+from agentcore.llm.resolve import LLMCredentials
 from agentcore.runtime.costing import aggregate_cost
 from agentcore.runtime.engine import react_loop
-from agentcore.runtime.events import EventSink, EventType, FinishReason, SSEEvent
+from agentcore.runtime.events import FinishReason
 from agentcore.runtime.pipeline import run_chat_pipeline
 from agentcore.runtime.prompt_profile import use_profile
 from agentcore.tools.builtin import build_ceo_tool_registry, build_worker_registry
@@ -44,11 +45,9 @@ from agentcore.workspace.server import ServerWorkspace
 
 logger = get_logger(__name__)
 
-# Eval exercises the FULL model catalog (incl. Pro), decoupled from the *user*
-# ceiling (settings.selectable_models). 内测 (方案 A-中+) pulls Pro from users, but
-# eval must still resolve ``quality`` → Pro to compare Flash-vs-Pro CEO and run the
-# Pro judge — so the harness/judge clamp against this catalog ceiling, not the user
-# one. (Mirrors tests/test_modes.py ``_FULL_CEILING``.)
+# Eval exercises the FULL model catalog (incl. Pro), decoupled from user BYOK model
+# selection. Eval must still resolve ``quality`` → Pro to compare Flash-vs-Pro CEO and
+# run the Pro judge — see ``evals/eval_modes.py``.
 _EVAL_CEILING = frozenset(KNOWN_MODELS)
 
 # eval 运行的固定隔离身份：独立 user_id（避免读到真实用户的记忆/配额），workspace 由
@@ -60,15 +59,16 @@ _DEFAULT_FIXTURES_DIR = Path(__file__).parent / "fixtures"
 def _eval_credentials() -> LLMCredentials | None:
     """eval 的 DeepSeek 凭据：优先 eval 专用环境变量，缺省回落平台/全局 key（§十三）.
 
-    BYOK 内测下平台 ``deepseek_api_key`` 多为空 → 真跑必须自带 ``EVAL_DEEPSEEK_API_KEY``
+    BYOK 内测下平台 ``platform_api_key`` 多为空 → 真跑必须自带 ``EVAL_DEEPSEEK_API_KEY``
     （建议配低额度账号 + nightly 限次）。返回 ``None`` 时 :func:`build_provider` 退回
     ``settings`` 全局 key（本地开发便利）；单测走注入的假 provider，不读这里。
     """
     key = os.environ.get("EVAL_DEEPSEEK_API_KEY", "").strip()
     if not key:
         return None
-    base = os.environ.get("EVAL_DEEPSEEK_BASE_URL", "").strip() or settings.deepseek_base_url
-    return LLMCredentials(api_key=key, base_url=base)
+    base = os.environ.get("EVAL_DEEPSEEK_BASE_URL", "").strip() or settings.platform_base_url
+    model = os.environ.get("EVAL_DEEPSEEK_MODEL", "").strip() or settings.platform_model
+    return LLMCredentials(api_key=key, base_url=base, default_model=model)
 
 
 def _history_messages(history: list[dict]) -> list[LLMMessage]:
@@ -83,52 +83,13 @@ def _ms(t0: float) -> int:
     return int((time.monotonic() - t0) * 1000)
 
 
-class RecordingSink(EventSink):
-    """在现有 :class:`EventSink` 上挂钩，捕获过程事实供断言（其余照常入 journal/queue）.
-
-    - ``tool_calls``：从 ``tool_use_start`` 取 ``(name, args_json)``，按发生顺序；
-    - ``roster``：从 ``run_plan`` 的 ``agents[*].role`` 取委派计划期的**语义角色**（去重、保序）。
-      不取 ``run_completed.role``——那是成本台账类目（member/captain），非语义角色；也不取
-      ``run_started``（其载荷无 role）。
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.tool_calls: list[tuple[str, str]] = []
-        self.roster: list[str] = []
-
-    def emit(self, event: SSEEvent) -> None:
-        if event.type == EventType.TOOL_USE_START:
-            self._record_tool_call(event.payload)
-        elif event.type == EventType.RUN_PLAN:
-            self._record_roster(event.payload)
-        super().emit(event)
-
-    def _record_tool_call(self, payload: dict) -> None:
-        name = payload.get("tool_name", "")
-        args = payload.get("arguments")
-        if isinstance(args, str):
-            args_json = args
-        else:
-            try:
-                args_json = json.dumps(args or {}, ensure_ascii=False, sort_keys=True)
-            except (TypeError, ValueError):
-                args_json = "{}"
-        self.tool_calls.append((name, args_json))
-
-    def _record_roster(self, payload: dict) -> None:
-        for agent in payload.get("agents", []) or []:
-            role = (agent or {}).get("role")
-            if role and role not in self.roster:
-                self.roster.append(role)
-
-
 def single_outcome(
     content: str,
     usage: TokenUsage,
     rounds: int,
     *,
     profile: ModelProfile,
+    model: str,
     sink: RecordingSink,
     citations: list[dict],
     latency_ms: int,
@@ -147,7 +108,7 @@ def single_outcome(
         finish = finish_override.value
     else:
         finish = "end_turn" if rounds < profile.max_rounds else "max_rounds"
-    cost_nano = calculate_cost(profile.model, usage).total
+    cost_nano = calculate_cost(model, usage, billing_mode="platform").total
     return TurnOutcome(
         content=content or "",
         finish_reason=finish,
@@ -290,6 +251,7 @@ class EvalHarness:
             usage,
             rounds,
             profile=profile,
+            model=profiles.model,
             sink=sink,
             citations=citations,
             latency_ms=_ms(t0),

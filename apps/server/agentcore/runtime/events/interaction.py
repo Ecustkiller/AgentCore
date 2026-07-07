@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentcore.runtime.checkpoints import AskCheckpointIntent
 from agentcore.runtime.events.types import EventType, SSEEvent
 
 
@@ -47,19 +48,20 @@ def checkpoint_required(
     assumptions: list[dict[str, Any]] | None = None,
     questions: list[dict[str, Any]] | None = None,
     style_options: list[dict[str, Any]] | None = None,
+    intent: AskCheckpointIntent | None = None,
 ) -> SSEEvent:
-    return SSEEvent(
-        type=EventType.CHECKPOINT_REQUIRED,
-        payload={
-            "checkpoint_id": checkpoint_id,
-            "conversation_id": conversation_id,
-            "question": question,
-            "context": context,
-            "assumptions": assumptions or [],
-            "questions": questions or [],
-            "style_options": style_options or [],
-        },
-    )
+    payload: dict[str, Any] = {
+        "checkpoint_id": checkpoint_id,
+        "conversation_id": conversation_id,
+        "question": question,
+        "context": context,
+        "assumptions": assumptions or [],
+        "questions": questions or [],
+        "style_options": style_options or [],
+    }
+    if intent is not None:
+        payload["intent"] = intent
+    return SSEEvent(type=EventType.CHECKPOINT_REQUIRED, payload=payload)
 
 
 def question_posted(

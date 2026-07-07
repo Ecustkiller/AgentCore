@@ -17,6 +17,8 @@ from agentcore.runtime.facts import (
     ToolCallFact,
     TurnFactLog,
     TurnStartedFact,
+    current_fact_log,
+    snapshot_fact_log,
 )
 from agentcore.runtime.journal import entries_from_runs, runs_from_entries
 
@@ -162,6 +164,76 @@ def test_turn_fact_log_records_in_order():
     assert len(log) == 3
     assert bool(log) is True
     assert [e["kind"] for e in log.entries()] == ["turn_started", "round_boundary", "llm_call"]
+
+
+def test_turn_fact_log_inherited_entries_prefix():
+    inherited = [
+        {"kind": "turn_started", "payload": {"user_message": "hi"}, "ts": "t0"},
+        {"kind": "round_boundary", "payload": {"round_idx": 0}, "ts": None},
+    ]
+    log = TurnFactLog(inherited_entries=inherited)
+    assert not log  # segment empty — inherited does not count toward len/bool
+    log.record_fact(LlmCallFact("captain", 0, content="more").to_fact())
+    assert len(log) == 1
+    assert [e["kind"] for e in log.entries()] == [
+        "turn_started",
+        "round_boundary",
+        "llm_call",
+    ]
+    assert [e["kind"] for e in log.segment_entries()] == ["llm_call"]
+
+
+def test_snapshot_fact_log_includes_inherited_prefix():
+    from agentcore.runtime.facts import current_fact_log, snapshot_fact_log
+
+    inherited = [TurnStartedFact("sys", "hi", "chat").to_fact().entry()]
+    log = TurnFactLog(inherited_entries=inherited)
+    token = current_fact_log.set(log)
+    try:
+        log.record_fact(RoundBoundaryFact(0, "captain", "captain").to_fact())
+        entries = snapshot_fact_log(trailing=[{"kind": "checkpoint_required", "payload": {}}])
+        assert [e["kind"] for e in entries] == [
+            "turn_started",
+            "round_boundary",
+            "checkpoint_required",
+        ]
+    finally:
+        current_fact_log.reset(token)
+
+
+def test_turn_fact_log_seed_from_entries():
+    log = TurnFactLog()
+    log.seed_from_entries(
+        [
+            {"kind": "turn_started", "payload": {"user_message": "hi"}, "ts": "t0"},
+            {"kind": "round_boundary", "payload": {"round_idx": 0}, "ts": None},
+            {"type": "checkpoint_required", "payload": {"id": "cp"}},  # display — skipped
+        ]
+    )
+    log.record_fact(LlmCallFact("captain", 0, content="more").to_fact())
+    assert [e["kind"] for e in log.entries()] == [
+        "turn_started",
+        "round_boundary",
+        "llm_call",
+    ]
+
+
+def test_snapshot_fact_log_after_resume_seed_includes_turn_started():
+    """Resume seeds the ambient log so a downstream checkpoint sees the full stream."""
+    prior = [
+        TurnStartedFact("sys", "hi", "chat").to_fact().entry(),
+        RoundBoundaryFact(0, "r1", "captain").to_fact().entry(),
+    ]
+    log = TurnFactLog()
+    log.seed_from_entries(prior)
+    token = current_fact_log.set(log)
+    try:
+        log.record_fact(LlmCallFact("r1", 1, content="续跑").to_fact())
+        snap = snapshot_fact_log()
+    finally:
+        current_fact_log.reset(token)
+    assert snap[0]["kind"] == "turn_started"
+    assert [e["kind"] for e in snap] == ["turn_started", "round_boundary", "llm_call"]
 
 
 def test_turn_fact_log_is_a_fact_recorder():

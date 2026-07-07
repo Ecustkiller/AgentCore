@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import NamedTuple
 
 from agentcore.core.types import ToolEffect
-from agentcore.llm.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import EventSink, checkpoint_resolved, plan_review_resolved
 from agentcore.runtime.journal import completed_from_journal, plan_from_journal

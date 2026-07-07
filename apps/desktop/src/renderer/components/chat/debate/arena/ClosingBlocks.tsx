@@ -1,0 +1,97 @@
+import { Markdown } from "@/components/chat/Markdown";
+import { Button } from "@/components/ui";
+import type { Execution } from "@/stores/execution";
+import { useSidePanelStore } from "@/stores/sidePanel";
+import { TriangleAlert } from "lucide-react";
+import { CollapsibleSpeech } from "../CollapsibleSpeech";
+import type { DebateClosingView } from "../model";
+import { closingAnchorId } from "./anchors";
+import { StageDivider } from "./StageDivider";
+
+export function ClosingBlocks({
+  closings,
+  execution,
+  messageId,
+}: {
+  closings: DebateClosingView[];
+  execution: Execution;
+  messageId: string;
+}) {
+  return (
+    <div>
+      <StageDivider id={closingAnchorId()} label="结辩" />
+      <div className="space-y-4">
+        {closings.map((c) => (
+          <ClosingBlock
+            key={c.sideKey}
+            closing={c}
+            execution={execution}
+            messageId={messageId}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ClosingBlock({
+  closing,
+  execution,
+  messageId,
+}: {
+  closing: DebateClosingView;
+  execution: Execution;
+  messageId: string;
+}) {
+  const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
+  const run = closing.run;
+  const agent = run
+    ? execution.agents.find((a) => a.id === run.agentId)
+    : undefined;
+  const text = agent ? agent.outputChunks.join("") : "";
+
+  return (
+    <div
+      className="border-l-[3px] pl-3"
+      style={{ borderLeftColor: closing.colorVar }}
+    >
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+        <span className="font-medium" style={{ color: closing.colorVar }}>
+          {closing.name}
+        </span>
+        <span className="text-muted-foreground">· 结辩</span>
+        {!closing.ok && (
+          <span className="inline-flex items-center gap-0.5 text-destructive">
+            <TriangleAlert size={11} />
+            未产出
+          </span>
+        )}
+        {run && text && (
+          <Button
+            variant="ghost"
+            onClick={() =>
+              showRunDetail(messageId, run.id, `${closing.name} · 结辩`)
+            }
+            className="ml-auto h-auto px-0 py-0 text-xs text-primary hover:bg-transparent"
+          >
+            查看产出
+          </Button>
+        )}
+      </div>
+      <div className="mt-1 pb-4 text-sm text-foreground">
+        {text ? (
+          <CollapsibleSpeech
+            contentKey={text}
+            sceneKey={`${messageId}:aclosing:${closing.sideKey}`}
+          >
+            <Markdown content={text} evidence />
+          </CollapsibleSpeech>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {closing.ok ? "等待结辩…" : "未产出结辩。"}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}

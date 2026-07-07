@@ -8,7 +8,8 @@ Kept as a back-compat re-export so existing importers (``pipeline.__init__``,
 from agentcore.runtime.resolve.prepare import (
     _assemble_ceo_toolset,
     _build_attachment_context,
+    _wire_worker_memory_tools,
 )
 
-__all__ = ["_assemble_ceo_toolset", "_build_attachment_context"]
+__all__ = ["_assemble_ceo_toolset", "_build_attachment_context", "_wire_worker_memory_tools"]
 

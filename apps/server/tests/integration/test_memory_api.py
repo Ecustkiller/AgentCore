@@ -68,7 +68,7 @@ async def test_per_file_roundtrip_and_cas(client, make_invite):
     assert (await client.get("/v1/users/me/memory/files/preferences")).json()["content"] == ""
 
 
-async def test_profile_project_scope_isolated_and_enumerated(client, make_invite):
+async def test_project_scope_isolated_and_enumerated(client, make_invite):
     code = await make_invite("INV-MEM-2")
     await register_and_login(client, code, "mem2")
 

@@ -16,6 +16,7 @@ was a module-level name on the original module.
 from ._helpers import _new_uuid
 from .admin_audit import AdminAuditLog
 from .admin_mfa import AdminMfa
+from .agent_audit import AgentAuditEvent
 from .auth import Credentials, Invite, RefreshToken, UserLlmKey
 from .billing import CostEvent
 from .boards import Board
@@ -37,10 +38,12 @@ from .runs import (
     TurnJournalRow,
     TurnMetricsRow,
 )
+from .simulation import SimAgent, SimEvent, SimTick, SimulationRun
 from .users import User, UserBlock, UserDirectorySettings
 
 __all__ = [
     "AdminAuditLog",
+    "AgentAuditEvent",
     "AdminMfa",
     "Board",
     "Chat",
@@ -61,6 +64,10 @@ __all__ = [
     "PushDeviceRow",
     "RefreshToken",
     "RunSessionRow",
+    "SimAgent",
+    "SimEvent",
+    "SimTick",
+    "SimulationRun",
     "TurnJournalRow",
     "TurnMetricsRow",
     "User",

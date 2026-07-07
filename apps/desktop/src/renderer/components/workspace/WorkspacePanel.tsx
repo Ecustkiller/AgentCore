@@ -1,14 +1,11 @@
 import { EmptyHint, IconButton } from "@/components/files/parts";
 import { Button } from "@/components/ui";
+import { useConversationFileSource } from "@/hooks/useConversationFileSource";
 import { useConversationWorkspace } from "@/hooks/useWorkspaces";
 import { hasLocalFiles } from "@/lib/capabilities";
-import {
-  createWorkspaceSource,
-  resolveWorkspaceSource,
-} from "@/services/sources/workspaceSource";
 import { useConversationStore } from "@/stores/conversation";
 import { FolderOpen, History, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { FilesSection } from "./FilesSection";
 import { SnapshotsSection } from "./SnapshotsSection";
 import { WorkspaceModeBar } from "./WorkspaceModeBar";
@@ -35,12 +32,25 @@ export function WorkspaceMode() {
   // IPC、云端走 REST，故 Agent 在本地写的文件这里也能列出（修复「写在本地、读在云端」）。
   const ws = useConversationWorkspace(conversationId);
   const fsAvailable = hasLocalFiles();
-  const source = useMemo(() => {
-    if (ws) return resolveWorkspaceSource(ws, fsAvailable);
-    if (!conversationId) return null;
-    // Cloud scratch (or pre-first-write): conversation-keyed REST source.
-    return createWorkspaceSource(conversationId);
-  }, [ws, conversationId, fsAvailable]);
+  const source = useConversationFileSource(conversationId);
+
+  useEffect(() => {
+    const sourceKind: "local" | "cloud" | null =
+      source === null
+        ? null
+        : source.id.startsWith("local:")
+          ? "local"
+          : "cloud";
+    console.warn(
+      `[FilePreview] workspace source selection ${JSON.stringify({
+        wsExists: !!ws,
+        ...(ws ? { location: ws.location, rootId: ws.rootId } : {}),
+        fsAvailable,
+        sourceKind,
+        sourceId: source?.id ?? null,
+      })}`,
+    );
+  }, [ws, fsAvailable, source]);
 
   if (!conversationId) {
     return (

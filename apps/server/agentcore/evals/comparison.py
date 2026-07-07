@@ -479,9 +479,9 @@ def build_default_pairwise_judge(mode: str = "quality") -> LLMPairwiseJudge:
     """
     import os
 
+    from agentcore.evals.eval_modes import resolve_profile_set
     from agentcore.evals.harness import _EVAL_CEILING, _eval_credentials
     from agentcore.llm.factory import build_provider
-    from agentcore.llm.modes import resolve_profile_set
 
     provider = build_provider(_eval_credentials())
     model = os.environ.get("EVAL_JUDGE_MODEL", "").strip()

@@ -1,5 +1,7 @@
 import { Button, IconButton } from "@/components/ui";
+import { FilePreviewView } from "@/components/workspace/FilePreviewView";
 import { notifyError, notifyInfo } from "@/lib/toast";
+import { createWorkspaceSource } from "@/services/sources/workspaceSource";
 import {
   buildCrystallizedElements,
   crystallizedRunIds,
@@ -44,7 +46,7 @@ import {
   parseScene,
   serializeScene,
 } from "@/whiteboard";
-import { ArrowLeft, ArrowUp, Loader2, Sparkles, Square } from "lucide-react";
+import { ArrowLeft, ArrowUp, Loader2, Sparkles, Square, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -99,6 +101,15 @@ export function WhiteboardCanvasPage() {
   const [aiInput, setAiInput] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const aiAbortRef = useRef<AbortController | null>(null);
+  /** File artifact preview (WB-003): opened from a crystallized `artifactCard`. */
+  const [filePreview, setFilePreview] = useState<{
+    path: string;
+    name: string;
+  } | null>(null);
+  const [textExpand, setTextExpand] = useState<{
+    title: string;
+    body: string;
+  } | null>(null);
 
   // M3 进度贴源 (AI协作白板.md §十 Slice 2): the board's AI conversation id (resolved on the
   // first turn) drives the live run-tree subscription; the brief anchor is the launching
@@ -363,6 +374,34 @@ export function WhiteboardCanvasPage() {
     void runBoardTurn(iterateArtifactPrompt(api.getScene(), ids));
   }, [aiBusy, runBoardTurn]);
 
+  const fileSource = useMemo(
+    () => (boardConvId ? createWorkspaceSource(boardConvId, "白板工作区") : null),
+    [boardConvId],
+  );
+
+  const handleArtifactActivate = useCallback(
+    (el: SceneElement) => {
+      if (el.type !== "artifactCard") return;
+      if (el.artifactKind === "file" && el.ref) {
+        if (!boardConvId || !fileSource) {
+          notifyInfo("先发起一次团队任务后才有工作区文件可预览");
+          return;
+        }
+        const slash = el.ref.lastIndexOf("/");
+        setFilePreview({
+          path: el.ref,
+          name: slash >= 0 ? el.ref.slice(slash + 1) : el.ref,
+        });
+        return;
+      }
+      setTextExpand({
+        title: el.title ?? "产物",
+        body: el.text ?? "",
+      });
+    },
+    [boardConvId, fileSource],
+  );
+
   const stopBoardTurn = useCallback(() => {
     aiAbortRef.current?.abort();
   }, []);
@@ -449,6 +488,7 @@ export function WhiteboardCanvasPage() {
             onOrganizeSelection={organizeSelection}
             onImplementSelection={implementSelection}
             onIterateArtifact={iterateArtifact}
+            onArtifactActivate={handleArtifactActivate}
             aiBusy={aiBusy}
           />
         ) : (
@@ -509,6 +549,38 @@ export function WhiteboardCanvasPage() {
           </IconButton>
         )}
       </footer>
+
+      {filePreview && fileSource ? (
+        <div className="absolute inset-0 z-40 flex flex-col bg-background">
+          <FilePreviewView
+            source={fileSource}
+            path={filePreview.path}
+            name={filePreview.name}
+            onClose={() => setFilePreview(null)}
+          />
+        </div>
+      ) : null}
+
+      {textExpand ? (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-background/80 p-6 backdrop-blur-sm">
+          <div className="flex max-h-[min(80vh,640px)] w-full max-w-lg flex-col rounded-xl border border-border bg-card shadow-lg">
+            <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-3">
+              <h2 className="truncate text-sm font-semibold text-foreground">
+                {textExpand.title}
+              </h2>
+              <IconButton
+                aria-label="关闭"
+                onClick={() => setTextExpand(null)}
+              >
+                <X size={16} />
+              </IconButton>
+            </header>
+            <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-4 text-sm text-foreground">
+              {textExpand.body}
+            </pre>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

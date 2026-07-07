@@ -382,6 +382,7 @@ async def test_invite_endpoints_require_auth(client):
     assert (await client.post("/v1/auth/invites", json={})).status_code == 401
     assert (await client.post("/v1/auth/invites/batch", json={"count": 2})).status_code == 401
     assert (await client.get("/v1/auth/invites")).status_code == 401
+    assert (await client.get("/v1/auth/invites/stats")).status_code == 401
 
 
 async def test_admin_issues_invite_and_new_user_registers_with_it(client, make_admin):
@@ -447,12 +448,46 @@ async def test_list_invites_paginated_and_filtered(client, make_admin):
     assert all(row["status"] == "active" for row in active["data"])
 
 
+async def test_list_invites_search_by_code(client, make_admin, make_invite):
+    await make_invite("ALPHA-SEARCH-01")
+    await make_invite("ALPHA-SEARCH-02")
+    await make_invite("BETA-OTHER-03")
+    username, password = await make_admin()
+    await login_admin(client, username, password)
+
+    matched = (await client.get("/v1/auth/invites", params={"search": "ALPHA"})).json()
+    assert matched["total"] == 2
+    assert all("ALPHA" in row["code"] for row in matched["data"])
+
+    single = (await client.get("/v1/auth/invites", params={"search": "BETA"})).json()
+    assert single["total"] == 1
+    assert single["data"][0]["code"] == "BETA-OTHER-03"
+
+
+async def test_invite_stats_counts_by_status(client, make_admin, make_invite):
+    await make_invite("STATS-A")
+    await make_invite("STATS-B")
+    username, password = await make_admin()
+    await login_admin(client, username, password)
+
+    stats = (await client.get("/v1/auth/invites/stats")).json()
+    assert stats == {
+        "total": 2,
+        "active": 2,
+        "used": 0,
+        "expired": 0,
+        "revoked": 0,
+    }
+    assert (await client.get("/v1/auth/invites")).json()["total"] == stats["total"]
+
+
 async def test_non_admin_cannot_access_invites(client, make_invite):
     code = await make_invite("INV-USER")
     await register_and_login(client, code, "regular")
     assert (await client.post("/v1/auth/invites", json={})).status_code == 403
     assert (await client.post("/v1/auth/invites/batch", json={"count": 2})).status_code == 403
     assert (await client.get("/v1/auth/invites")).status_code == 403
+    assert (await client.get("/v1/auth/invites/stats")).status_code == 403
 
 
 # --- invite revocation (邀请码撤销) ---

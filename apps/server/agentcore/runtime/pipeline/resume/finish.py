@@ -5,11 +5,12 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from agentcore.core.logging import get_logger
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.citations import merge_citations, out_of_range_markers
 from agentcore.runtime.costing import aggregate_cost, captain_run_cost_from_state
 from agentcore.runtime.engine import join_segments
 from agentcore.runtime.events import EventSink, FinishReason, citations_event, message_end
+from agentcore.runtime.facts import current_fact_log
 from agentcore.runtime.pipeline.finalize import _journal_entries_for_turn
 from agentcore.tools.builtin.debate import DebateTool
 from agentcore.tools.builtin.delegate import DelegateTool
@@ -91,7 +92,7 @@ def finish_resume_turn(
             cost=turn_cost,
         )
     )
-    journal_entries = _journal_entries_for_turn(None, sink=sink, finish=finish)
+    journal_entries = _journal_entries_for_turn(current_fact_log.get(), sink=sink, finish=finish)
     return {
         "message_id": message_id,
         "content": final_content,
@@ -128,7 +129,7 @@ def finish_terminal_resume(
     """
     finish = FinishReason.END_TURN
     sink.emit(message_end(finish, rounds=0))
-    journal_entries = _journal_entries_for_turn(None, sink=sink, finish=finish)
+    journal_entries = _journal_entries_for_turn(current_fact_log.get(), sink=sink, finish=finish)
     return {
         "message_id": message_id,
         "content": join_segments(pre_pause_content, closing),

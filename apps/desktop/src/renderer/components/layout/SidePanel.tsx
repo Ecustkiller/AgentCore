@@ -1,8 +1,4 @@
 import { Markdown } from "@/components/chat/Markdown";
-import {
-  DebateHudRegion,
-  useDebateHud,
-} from "@/components/chat/debate/DebateHud";
 import { RunDetailBody } from "@/components/chat/detail/RunDetailBody";
 import {
   CommandRegion,
@@ -18,12 +14,11 @@ import {
   useExecutionStore,
 } from "@/stores/execution";
 import {
-  DEBATE_HUD_TAB_ID,
   type DetailTab,
   WORKSPACE_TAB_ID,
   useSidePanelStore,
 } from "@/stores/sidePanel";
-import { FolderOpen, Scale, Sparkles, UserRound, X } from "lucide-react";
+import { FolderOpen, Sparkles, UserRound, X } from "lucide-react";
 import {
   type PointerEvent as ReactPointerEvent,
   useEffect,
@@ -79,32 +74,16 @@ export function SidePanel() {
   // the panel even while it's closed (a brand-new decision opens it). Inert in chat
   // mode (the bridge store's `active` is false there).
   const command = useCommandRegion();
-  // 辩论裁判台 (前端UX设计.md §4.3): 裁决台 + 记分 + 掌舵 merged into this one dock as a second
-  // pinned region (no separate arena rail). Same call-before-early-return contract as 指挥台 so
-  // its auto-surface can reveal a closed dock when the boss zooms into a debate room. Inert
-  // (show=false) whenever no debate room is focused.
-  const hud = useDebateHud();
 
-  // A detail tab survives only while it belongs to the live conversation (see
-  // {@link isDetailTabLive}); rebuilt straight from `liveTabKey`, so it changes only when
-  // that set flips — a streaming turn no longer re-derives the tab strip every frame.
   const visibleTabs = useMemo(() => {
     const live = new Set(liveTabKey ? liveTabKey.split("\u0001") : []);
     return tabs.filter((t) => live.has(t.id));
   }, [tabs, liveTabKey]);
   const activeTab =
-    activeTabId === WORKSPACE_TAB_ID || activeTabId === DEBATE_HUD_TAB_ID
+    activeTabId === WORKSPACE_TAB_ID
       ? null
       : (visibleTabs.find((t) => t.id === activeTabId) ?? null);
   const workspaceActive = activeTabId === WORKSPACE_TAB_ID;
-  const debateHudActive = activeTabId === DEBATE_HUD_TAB_ID;
-
-  // Leaving the debate room while on the 裁判台 tab → fall back to 工作区.
-  useEffect(() => {
-    if (!hud.show && debateHudActive) {
-      setActiveTab(WORKSPACE_TAB_ID);
-    }
-  }, [hud.show, debateHudActive, setActiveTab]);
 
   // The content tab reads ONE message's text; subscribe to just that slice so a streaming
   // turn (a new `messages` array every tick) never re-renders this dock (收窄订阅).
@@ -155,13 +134,6 @@ export function SidePanel() {
             active={workspaceActive}
             onClick={() => setActiveTab(WORKSPACE_TAB_ID)}
           />
-          {hud.show && (
-            <DebateHudTab
-              active={debateHudActive}
-              pending={hud.pending}
-              onClick={() => setActiveTab(DEBATE_HUD_TAB_ID)}
-            />
-          )}
           {visibleTabs.map((tab) => (
             <RunTabChip
               key={tab.id}
@@ -179,8 +151,7 @@ export function SidePanel() {
         </SimpleTooltip>
       </div>
 
-      {/* Content area (§6.2 · §十): 指挥台仍钉在 tab 体上方（有待办时）；下方为当前 tab 满高内容
-          —— 工作区 / 裁判台 / run·内容详情 互斥切换。 */}
+      {/* Content area: 指挥台钉在 tab 体上方；下方为工作区 / run·内容详情。 */}
       <div className="flex min-h-0 flex-1 flex-col">
         {command.show && <CommandRegion {...command} />}
         <div className="relative min-h-0 flex-1">
@@ -189,11 +160,6 @@ export function SidePanel() {
               className={`absolute inset-0 ${workspaceActive ? "" : "hidden"}`}
             >
               <WorkspaceMode />
-            </div>
-          )}
-          {debateHudActive && hud.show && (
-            <div className="absolute inset-0 flex min-h-0 flex-col overflow-hidden">
-              <DebateHudRegion {...hud} expanded />
             </div>
           )}
           {activeTab?.kind === "run" && (
@@ -215,37 +181,6 @@ export function SidePanel() {
         </div>
       </div>
     </aside>
-  );
-}
-
-/** Fixed 「裁判台」 tab — visible only while a debate room is focused on canvas. */
-function DebateHudTab({
-  active,
-  pending,
-  onClick,
-}: {
-  active: boolean;
-  pending: number;
-  onClick: () => void;
-}) {
-  return (
-    <Button
-      variant="ghost"
-      onClick={onClick}
-      className={`shrink-0 gap-1.5 px-2.5 py-1 text-sm font-medium ${
-        active
-          ? "bg-accent text-foreground"
-          : "text-muted-foreground hover:bg-accent/50"
-      }`}
-      icon={<Scale size={14} />}
-    >
-      裁判台
-      {pending > 0 && (
-        <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-xs font-medium text-primary">
-          {pending}
-        </span>
-      )}
-    </Button>
   );
 }
 

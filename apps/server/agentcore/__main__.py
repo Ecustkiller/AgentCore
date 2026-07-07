@@ -36,6 +36,10 @@ def main() -> None:
         # test artifacts (.pytmp/.pytest_*) full of .py fixtures whose churn would
         # otherwise trigger endless reloads. (Ignored when reload is off.)
         reload_dirs=["agentcore"],
+        # Batch rapid saves (parallel agents touching agentcore/) into one reload so
+        # the reloader doesn't churn through shutdown/start cycles that can leave
+        # port 8000 empty while the terminal still looks "running".
+        reload_delay=0.5 if settings.debug else None,
         # In dev, reload must not block forever draining the long-lived SSE stream
         # ("Waiting for connections to close" → no new worker → API dead). Cap the
         # graceful wait so a save force-closes lingering streams and the worker

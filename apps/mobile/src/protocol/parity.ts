@@ -122,10 +122,15 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
 
   // —— 收尾 / 错误 ——
   error: { verdict: "ported", surface: "ChatPage · 错误条" },
+  message_start: {
+    verdict: "internal",
+    reason:
+      "服务端 message_id 开泡标记，fold no-op；手机流式 UI 不依赖此事件投影",
+  },
   message_end: { verdict: "ported", surface: "ChatPage · 收尾 + 回合总账" },
 
   // —— 纯管线 / 派生（非用户面）——
-  message_start: { verdict: "internal", reason: "回合开始标记，无 UI" },
+  turn_warning: { verdict: "ported", surface: "ChatPage · 预检警告条" },
   turn_saved: { verdict: "internal", reason: "落库标记，无 UI" },
   title_generated: {
     verdict: "internal",
@@ -169,6 +174,36 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     verdict: "impossible",
     reason: "同上 · 把云端改动合并回本地磁盘，手机无本地",
   },
+
+  // —— AI 小镇模拟（桌面 MVP，手机无模拟面）——
+  "sim.agent_action": {
+    verdict: "impossible",
+    reason: "AI 小镇模拟仅桌面 MVP，手机无模拟面 (fold no-op)",
+  },
+  "sim.agent_state": {
+    verdict: "impossible",
+    reason: "同上 · 居民状态同步",
+  },
+  "sim.interaction": {
+    verdict: "impossible",
+    reason: "同上 · 居民交互气泡/交易",
+  },
+  "sim.tick_started": {
+    verdict: "impossible",
+    reason: "同上 · 模拟 tick 开始",
+  },
+  "sim.tick_ended": {
+    verdict: "impossible",
+    reason: "同上 · 模拟 tick 结束",
+  },
+  "sim.tick_frame": {
+    verdict: "impossible",
+    reason: "同上 · 模拟 tick 帧快照",
+  },
+  "sim.world_event": {
+    verdict: "impossible",
+    reason: "同上 · 世界事件",
+  },
 };
 
 /** 锚 B · 桌面交互面（apps/desktop/src/renderer/components/chat 下每个 .tsx）→ 手机对等裁决。
@@ -207,6 +242,10 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   StreamingIndicator: {
     verdict: "ported",
     surface: "ChatPage · 流式状态条",
+  },
+  TurnWarningBanner: {
+    verdict: "ported",
+    surface: "ChatPage · 预检警告条",
   },
   ParallelTimeline: {
     verdict: "ported",
@@ -356,6 +395,14 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   WhiteboardCanvasPage: {
     verdict: "impossible",
     reason: "协作白板画布，手机无板",
+  },
+  WhiteboardPreviewPage: {
+    verdict: "internal",
+    reason: "桌面白板离线自检回放（#/preview/whiteboard 开发工具），非用户产品面",
+  },
+  "simulation/TownSimulationPage": {
+    verdict: "impossible",
+    reason: "AI 小镇模拟仅桌面 MVP，手机无模拟面",
   },
   "more/ShortcutsSettings": {
     verdict: "impossible",

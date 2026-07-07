@@ -9,3 +9,5 @@ class FeatureSettings(BaseModel):
     # 能力目录). Off by default so generic deployments never see legal content in the
     # catalog — the v0 stopgap until domain Skills move to per-agent market binding.
     legal_vertical_enabled: bool = False
+    # AI Town simulation (M1). When off, simulation REST routes return 404.
+    simulation_enabled: bool = True

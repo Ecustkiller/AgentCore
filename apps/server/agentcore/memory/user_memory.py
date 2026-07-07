@@ -16,13 +16,14 @@ import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from enum import StrEnum
 from typing import Protocol
 
 from agentcore.core.logging import get_logger
 from agentcore.llm import LLMMessage, LLMProvider
-from agentcore.llm.config import build_request, get_profile
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.profiles import build_request, get_profile
+from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.memory.conversation_title import ChatMessage
 from agentcore.memory.store import (
     CORE_MEMORY_FILE,
@@ -49,8 +50,12 @@ class MemoryAction(StrEnum):
 # - PREFERENCES (偏好.md): how to work WITH the user — soft, universal, GLOBAL-only.
 # - PROFILE (画像.md): facts ABOUT the user — can be GLOBAL or PROJECT-scoped.
 PREFERENCES_SECTIONS = ("沟通偏好", "工作习惯")
-PROFILE_SECTIONS = ("技术栈与工具", "关于用户的事实")
+PROFILE_SECTIONS = ("技术栈与工具", "关于用户的事实", "纠正记录", "项目约束")
 MEMORY_SECTIONS = PREFERENCES_SECTIONS + PROFILE_SECTIONS
+
+# Profile sections with fixed scope (beyond the default profile global/project routing).
+_GLOBAL_ONLY_PROFILE_SECTIONS = frozenset({"纠正记录"})
+_PROJECT_ONLY_PROFILE_SECTIONS = frozenset({"项目约束"})
 
 # The valid core file names (used to reject a stated ``file`` that is neither a core file
 # nor a topic path — defence in depth on top of section-driven routing).
@@ -160,7 +165,35 @@ _DEFAULT_PREAMBLE = "# 用户记忆\n> 本文件由 AI 自动维护，你可随�
 
 _SECTION_RE = re.compile(r"^##\s+(.+?)\s*$")
 _BULLET_RE = re.compile(r"^\s*[-*]\s+(.*)$")
+_BULLET_TS_RE = re.compile(r"<!-- ts:(\d{4}-\d{2}-\d{2}) -->\s*$")
 _H1_RE = re.compile(r"^#\s+\S")  # a top-level title (# …), distinct from ## sections
+
+
+def parse_bullet_timestamp(line: str) -> date | None:
+    """Extract the ``<!-- ts:YYYY-MM-DD -->`` suffix from a bullet line, if present."""
+    match = _BULLET_TS_RE.search(line.strip())
+    if match is None:
+        return None
+    try:
+        return date.fromisoformat(match.group(1))
+    except ValueError:
+        return None
+
+
+def strip_bullet_timestamp(line: str) -> str:
+    """Remove the trailing ``<!-- ts:YYYY-MM-DD -->`` marker from a bullet line."""
+    return _BULLET_TS_RE.sub("", line).rstrip()
+
+
+def _stamp_bullet(content: str, today: str) -> str:
+    """Append (or refresh) the invisible timestamp suffix on a bullet's text."""
+    text = strip_bullet_timestamp(content).strip()
+    return f"{text} <!-- ts:{today} -->"
+
+
+def _bullet_key(text: str) -> str:
+    """Normalize bullet text for dedup / matching, ignoring any timestamp suffix."""
+    return _normalize(strip_bullet_timestamp(text))
 
 
 def strip_memory_chrome(markdown: str) -> str:
@@ -212,7 +245,7 @@ def topic_summary_line(markdown: str) -> str:
         if not line.strip() or _SECTION_RE.match(line):
             continue
         bullet = _BULLET_RE.match(line)
-        text = (bullet.group(1) if bullet else line).strip()
+        text = strip_bullet_timestamp((bullet.group(1) if bullet else line).strip())
         if not text:
             continue
         if len(text) > _TOPIC_SUMMARY_MAX:
@@ -273,41 +306,42 @@ def _parse(markdown: str) -> _MemoryDoc:
     )
 
 
-def _add_bullet(section: _Section, content: str) -> None:
+def _add_bullet(section: _Section, content: str, *, today: str) -> None:
     """Append ``content`` under ``section`` unless it duplicates an existing bullet.
 
     合并/去重 safety net (deterministic backstop to the consolidation LLM): even if
     the model emits a slight reword as an ``add``, we never end up with two copies.
     Tiers: (1) normalized equality → skip; (2) containment — one bullet's normalized
     text fully contains the other's → keep only the more specific (longer) one,
-    replacing in place; otherwise append.
+    replacing in place; otherwise append. New or upgraded bullets get a ``today``
+    timestamp suffix.
     """
-    content = content.strip()
-    key = _normalize(content)
+    content = strip_bullet_timestamp(content).strip()
+    key = _bullet_key(content)
     if not key:
         return
     for i, bullet in enumerate(section.bullets):
-        bkey = _normalize(bullet)
+        bkey = _bullet_key(bullet)
         if bkey == key:
             return  # exact (normalized) duplicate
         if key in bkey or bkey in key:
             # Same fact at different specificity: keep the longer wording.
-            if len(content) > len(bullet):
-                section.bullets[i] = content
+            if len(content) > len(strip_bullet_timestamp(bullet)):
+                section.bullets[i] = _stamp_bullet(content, today)
             return
-    section.bullets.append(content)
+    section.bullets.append(_stamp_bullet(content, today))
 
 
 def _match_index(bullets: Sequence[str], match: str) -> int | None:
     """Find the bullet matching `match`: prefer normalized equality, then substring."""
-    key = _normalize(match)
+    key = _bullet_key(match)
     if not key:
         return None
     for i, bullet in enumerate(bullets):
-        if _normalize(bullet) == key:
+        if _bullet_key(bullet) == key:
             return i
     for i, bullet in enumerate(bullets):
-        if key in _normalize(bullet):
+        if key in _bullet_key(bullet):
             return i
     return None
 
@@ -338,9 +372,10 @@ class MarkdownMemoryApplier:
     (the default) keeps every bullet.
     """
 
-    def __init__(self, *, section_cap: int | None = None) -> None:
+    def __init__(self, *, section_cap: int | None = None, today: str | None = None) -> None:
         # Treat a non-positive cap as "no cap" so a misconfig can't wipe a section.
         self._section_cap = section_cap if (section_cap and section_cap > 0) else None
+        self._today = today or date.today().isoformat()
 
     def apply(self, markdown: str, ops: Sequence[MemoryOp]) -> str:
         doc = _parse(markdown)
@@ -354,8 +389,7 @@ class MarkdownMemoryApplier:
                     del section.bullets[:overflow]
         return _render(doc)
 
-    @staticmethod
-    def _apply_one(doc: _MemoryDoc, op: MemoryOp) -> None:
+    def _apply_one(self, doc: _MemoryDoc, op: MemoryOp) -> None:
         # Topic ops may omit the section → land under the default bucket so the
         # section/bullet machinery applies uniformly to core and topic notes.
         section_name = op.section or _TOPIC_DEFAULT_SECTION
@@ -363,7 +397,7 @@ class MarkdownMemoryApplier:
             if not op.content:
                 return
             section = doc.get_or_create(section_name)
-            _add_bullet(section, op.content)
+            _add_bullet(section, op.content, today=self._today)
         elif op.action == MemoryAction.REMOVE:
             if not op.match:
                 return
@@ -379,9 +413,9 @@ class MarkdownMemoryApplier:
             section = doc.get_or_create(section_name)
             idx = _match_index(section.bullets, op.match) if op.match else None
             if idx is not None:
-                section.bullets[idx] = op.content.strip()
+                section.bullets[idx] = _stamp_bullet(op.content, self._today)
             else:
-                _add_bullet(section, op.content)
+                _add_bullet(section, op.content, today=self._today)
 
 
 # --- Global core editor projection (偏好.md + 画像.md ↔ one editable document) ---
@@ -408,8 +442,8 @@ def merge_global_core(preferences_markdown: str, profile_markdown: str) -> str:
 def split_global_core(combined_markdown: str) -> dict[str, str]:
     """Inverse of ``merge_global_core``: route each section back to its core file.
 
-    沟通偏好/工作习惯 → 偏好.md; 技术栈与工具/关于用户的事实 (and any unrecognized section, so a
-    freeform user edit is never lost) → 画像.md. Returns a ``{file: markdown}`` map; a file
+    沟通偏好/工作习惯 → 偏好.md; 画像 sections (and any unrecognized section, so a freeform user
+    edit is never lost) → 画像.md. Returns a ``{file: markdown}`` map; a file
     with no sections maps to "" (the caller clears it). This is also the organic 偏好/画像
     migration: an old 画像.md still carrying preference sections splits the first time the
     editor saves over it.
@@ -440,8 +474,14 @@ Three kinds of notes (route each fact via the "file" field; route its scope via 
 - PREFERENCES note (file "偏好.md"): how to WORK WITH the user — communication style and
   work habits. FIXED sections — "section" MUST be exactly one of: 沟通偏好, 工作习惯.
   Preferences are universal, so they are ALWAYS global (scope is ignored for 偏好.md).
-- PROFILE note (file "画像.md"): durable FACTS ABOUT the user — tech stack and facts about
-  the user. FIXED sections — "section" MUST be exactly one of: 技术栈与工具, 关于用户的事实.
+- PROFILE note (file "画像.md"): durable FACTS ABOUT the user — tech stack, facts about
+  the user, corrections of past AI misunderstandings, and project hard constraints.
+  FIXED sections — "section" MUST be exactly one of: 技术栈与工具, 关于用户的事实,
+  纠正记录, 项目约束.
+  - 纠正记录: the user CORRECTED the AI's wrong understanding — each bullet records
+    "AI曾认为X，实际应为Y". ALWAYS global (scope "global"); corrections apply across projects.
+  - 项目约束: hard constraints the user declares for THIS project — "不能用X",
+    "必须兼容Y", "禁止Z". ALWAYS project scope when a project exists (scope "project").
 - TOPIC notes (file "主题/<slug>.md"): knowledge ABOUT A TOPIC OR PROJECT — what was tried
   and why it failed (经验教训), how to do something here (操作流程/部署流程), or durable
   topic/project facts. Use a short descriptive slug, e.g. "主题/部署流程.md". Add to an
@@ -463,9 +503,15 @@ Each op object:
    "content": "<bullet text>", "match": "<existing bullet to target>"}
 
 Rules:
-- "section" decides which core file: 沟通偏好/工作习惯 → 偏好.md; 技术栈与工具/关于用户的事实
-  → 画像.md. "section" is REQUIRED for core ops and MUST be one of those four; for a topic
-  file it is optional. "scope" defaults to "global" if omitted.
+- "section" decides which core file: 沟通偏好/工作习惯 → 偏好.md; 技术栈与工具/关于用户的事实/
+  纠正记录/项目约束 → 画像.md. "section" is REQUIRED for core ops and MUST be one of those
+  six; for a topic file it is optional. "scope" defaults to "global" if omitted.
+- 纠正记录识别：用户否定 AI 的理解、改正事实、推翻先前方案——如「不是 npm，是 pnpm」
+  「你理解错了，这里不需要认证」「之前说的方案改了，现在用 B」。写入 纠正记录，格式
+  「AI曾认为…，实际应为…」，scope 固定 global。
+- 项目约束识别：用户声明硬性限制——如「这个项目不能用 jQuery」「必须兼容 Python 3.9+」
+  「数据库只能用 PostgreSQL」「所有 API 必须走认证」。写入 项目约束，scope 固定 project
+  （仅当存在当前项目时；裸聊无项目则不写此 section）。
 - DEDUP: before adding, scan the relevant note (and BOTH scopes if a project exists). If a
   related bullet already exists, emit "update" (with "match" = the existing bullet's exact
   wording) instead of a near-duplicate "add". Never add something already covered.
@@ -478,9 +524,13 @@ Rules:
   existing time-bound bullet whose date has passed, either "update" it to past tense
   (e.g. "计划2026年7月去X" → "2026年7月去过X") if still worth remembering, or
   "remove" it if it was transient and no longer useful.
-- Record only durable, high-value knowledge. Ignore one-off task details and transient
-  context. Don't spawn a topic note for a passing mention — prefer adding to an existing
-  note, and create a new topic only when it will plausibly matter again.
+- 记忆价值分层（冷启动 vs 已有记忆）：
+  - 冷启动：当偏好.md 与 画像.md 均为空时，应主动从对话提取「合理的用户信号」
+    （语言偏好、技术栈、工具链、工作习惯等）。此时写入门槛降低——只要对话透露出
+    稳定倾向或事实信号，就应写入，不必等到「高价值」才记。
+  - 已有记忆：只记持久、高价值知识，忽略一次性任务细节和短暂上下文。不要为随口
+    一提就新建主题笔记——优先补充已有笔记，仅当话题会反复出现时才新建。
+  - 任务细节本身不写，但其中暴露的工具链/语言/工作习惯要提取写入。
 - PRIVACY: do not record sensitive personal data — government IDs, passwords/keys,
   precise home address, payment details, health, religion, sexual orientation,
   political affiliation — unless the user EXPLICITLY asks you to remember it.
@@ -490,12 +540,40 @@ Rules:
 - Write "content" as a short declarative bullet in the user's language, using soft
   wording (倾向 / 偏好) for preferences — observations, not hard rules. Write a project-scoped
   fact with project-relative wording (e.g. "本项目…") so its scope is clear in the prompt.
-- If nothing should change, output {"ops": []}.
+- 空 ops 仅当对话完全无用户特征信号时才合法；只要对话中有语言/工具/习惯/技术栈等
+  信号，就必须产出 add/update ops，不可默认输出空列表。
+- 冷启动示例（偏好与画像均为空，对话含用户信号 → 必须写入）：
+  对话：user: 我用 pnpm，请用中文回复
+  输出：{"ops": [{"action": "add", "section": "技术栈与工具", "content": "倾向使用 pnpm"},
+    {"action": "add", "section": "沟通偏好", "content": "倾向用中文交流"}]}
+- 冷启动示例（对话仅为一次性任务、无用户特征 → 空 ops 合法）：
+  对话：user: 帮我把这段 JSON 格式化一下
+  输出：{"ops": []}
+- 纠正记录示例（用户否定 AI 理解 → 写入 global 纠正记录）：
+  对话：assistant: 我用 npm install 安装依赖。user: 不是 npm，我说的是 pnpm
+  输出：{"ops": [{"action": "add", "section": "纠正记录", "scope": "global",
+    "content": "AI曾认为用 npm 安装依赖，实际应使用 pnpm"}]}
+- 纠正记录示例（用户推翻方案）：
+  对话：user: 你理解错了，这里不需要认证，之前说的方案改了，现在用 B 方案
+  输出：{"ops": [{"action": "add", "section": "纠正记录", "scope": "global",
+    "content": "AI曾认为此处需要认证并采用 A 方案，实际不需要认证且应使用 B 方案"}]}
+- 项目约束示例（用户声明硬性限制 → 写入 project 项目约束）：
+  对话：user: 这个项目不能用 jQuery，必须兼容 Python 3.9+，数据库只能用 PostgreSQL
+  输出：{"ops": [
+    {"action": "add", "section": "项目约束", "scope": "project", "content": "禁止使用 jQuery"},
+    {"action": "add", "section": "项目约束", "scope": "project", "content": "必须兼容 Python 3.9+"},
+    {"action": "add", "section": "项目约束", "scope": "project", "content": "数据库只能使用 PostgreSQL，不可更换"}
+  ]}
 """
 
 
 def _render_topics(slugs: Sequence[str]) -> str:
     return "\n".join(f"- 主题/{slug}.md" for slug in slugs) if slugs else "(none yet)"
+
+
+def _is_cold_start(data: MemoryExtractInput) -> bool:
+    """True when both global preferences and profile are empty (first-time consolidation)."""
+    return not data.current_preferences.strip() and not data.current_memory.strip()
 
 
 def _render_extract_prompt(data: MemoryExtractInput) -> str:
@@ -525,6 +603,14 @@ def _render_extract_prompt(data: MemoryExtractInput) -> str:
     else:
         sections.append(
             "# No current project — this is a bare chat; route everything to scope \"global\""
+        )
+    if _is_cold_start(data):
+        sections.append(
+            "# COLD START\n"
+            "偏好.md 与 画像.md 均为空——这是冷启动。请主动从下方对话中提取合理的用户信号"
+            "（语言偏好、技术栈、工具链、工作习惯等），降低写入门槛；只要对话中有此类"
+            "信号就必须产出 ops，不可默认输出空列表。任务细节本身不写，但其中暴露的"
+            "工具链/语言/习惯要提取。"
         )
     sections.append(f"# Recent conversation\n{convo}")
     return "\n\n".join(sections) + "\n\nProduce the consolidation ops JSON now."
@@ -618,9 +704,14 @@ def _coerce_op(item: object, project_id: str | None = None) -> MemoryOp | None:
         return None
     file = core_file_for_section(section)
     # Preferences are GLOBAL-only (decision §六.2): force scope=None regardless of the token.
-    scope = (
-        None if file == PREFERENCES_MEMORY_FILE else _resolve_scope(item.get("scope"), project_id)
-    )
+    if file == PREFERENCES_MEMORY_FILE or section in _GLOBAL_ONLY_PROFILE_SECTIONS:
+        scope = None
+    elif section in _PROJECT_ONLY_PROFILE_SECTIONS:
+        if not project_id:
+            return None
+        scope = project_id
+    else:
+        scope = _resolve_scope(item.get("scope"), project_id)
     return MemoryOp(
         action=action, section=section, content=content, match=match, file=file, scope=scope
     )
@@ -715,7 +806,25 @@ def _injection_style_marker(text: str) -> str | None:
     return None
 
 
-def parse_memory_ops(raw: str, project_id: str | None = None) -> list[MemoryOp]:
+@dataclass
+class MemoryParseResult:
+    """Parse output + observability for a single LLM extraction (empty-ops diagnosis)."""
+
+    ops: list[MemoryOp]
+    raw_ops_count: int = 0  # ops in the model JSON before coercion
+    coerced_ops_count: int = 0  # ops that passed coercion (before injection filter)
+    injection_dropped: int = 0  # ops dropped by the instruction-style guard
+    coercion_dropped: int = 0  # raw ops that failed coercion
+    parse_failed: bool = False  # response was not valid JSON with an ops array
+
+    @property
+    def parsed_ops_count(self) -> int:
+        return len(self.ops)
+
+
+def parse_memory_ops(
+    raw: str, project_id: str | None = None
+) -> list[MemoryOp]:
     """Parse an LLM response into validated MemoryOps. Returns [] on any failure.
 
     ``project_id`` resolves an op's "project" scope token to the conversation's manual
@@ -727,16 +836,29 @@ def parse_memory_ops(raw: str, project_id: str | None = None) -> list[MemoryOp]:
     LLM crystallization path runs through here; the user's own memory edits do not, so a
     principal's legitimate wording is never filtered.
     """
+    return parse_memory_ops_detailed(raw, project_id=project_id).ops
+
+
+def parse_memory_ops_detailed(
+    raw: str, project_id: str | None = None
+) -> MemoryParseResult:
+    """Like ``parse_memory_ops`` but also returns parse stats for observability."""
+    result = MemoryParseResult(ops=[])
     payload = _extract_json_object(raw)
     if payload is None or not isinstance(payload.get("ops"), list):
-        return []
-    ops: list[MemoryOp] = []
-    for item in payload["ops"]:
+        result.parse_failed = True
+        return result
+    raw_ops: list[object] = payload["ops"]
+    result.raw_ops_count = len(raw_ops)
+    for item in raw_ops:
         op = _coerce_op(item, project_id)
         if op is None:
+            result.coercion_dropped += 1
             continue
+        result.coerced_ops_count += 1
         marker = _injection_style_marker(op.content) if op.content else None
         if marker is not None:
+            result.injection_dropped += 1
             logger.warning(
                 "memory.injection_candidate_dropped",
                 marker=marker,
@@ -746,8 +868,21 @@ def parse_memory_ops(raw: str, project_id: str | None = None) -> list[MemoryOp]:
                 content_preview=op.content[:120] if op.content else "",
             )
             continue
-        ops.append(op)
-    return ops
+        result.ops.append(op)
+    return result
+
+
+def _empty_ops_reason(result: MemoryParseResult) -> str:
+    """Classify why extraction yielded no ops (for observability)."""
+    if result.parse_failed:
+        return "parse_failed"
+    if result.raw_ops_count == 0:
+        return "model_empty_ops"
+    if result.parsed_ops_count == 0 and result.injection_dropped > 0:
+        return "injection_filtered"
+    if result.parsed_ops_count == 0 and result.coercion_dropped > 0:
+        return "coercion_dropped"
+    return "unknown"
 
 
 # Extraction reads a conversation window and emits JSON ops — heavier than the
@@ -764,14 +899,20 @@ class LLMMemoryExtractor:
     logged), yields no ops (memory just isn't updated this round) instead of raising.
     """
 
-    def __init__(self, provider: LLMProvider, *, role: str = "memory") -> None:
+    def __init__(
+        self, provider: LLMProvider, *, role: str = "memory", model: str | None = None
+    ) -> None:
         self._provider = provider
         self._profile = get_profile(role)
+        from agentcore.config import settings
+
+        self._model = model or settings.platform_model
         # The most recent extract's spend, surfaced for the cost ledger (Gap C).
         # Stays zero until a call completes (timeout / error never bill), so the
         # offline pass bills the consolidation iff total_tokens > 0.
         self.last_usage: TokenUsage = TokenUsage()
         self.last_model: str = ""
+        self.last_parse_result: MemoryParseResult | None = None
 
     async def extract(self, data: MemoryExtractInput) -> list[MemoryOp]:
         request = build_request(
@@ -781,6 +922,7 @@ class LLMMemoryExtractor:
                 LLMMessage(role="user", content=_render_extract_prompt(data)),
             ],
             stream=False,
+            model=self._model,
         )
         try:
             response = await asyncio.wait_for(
@@ -788,7 +930,24 @@ class LLMMemoryExtractor:
             )
         except TimeoutError:
             logger.warning("memory.extract_timeout", user_id=data.user_id)
+            self.last_parse_result = None
             return []
         self.last_usage = response.usage
-        self.last_model = response.model or self._profile.model
-        return parse_memory_ops(response.content, project_id=data.project_id)
+        self.last_model = response.model or self._model or ""
+        raw = response.content or ""
+        result = parse_memory_ops_detailed(raw, project_id=data.project_id)
+        self.last_parse_result = result
+        memory_empty = _is_cold_start(data)
+        logger.info(
+            "memory.extract_result",
+            user_id=data.user_id,
+            raw_preview=raw[:200],
+            parsed_ops=result.parsed_ops_count,
+            raw_ops=result.raw_ops_count,
+            memory_empty=memory_empty,
+            message_count=len(data.messages),
+            empty_ops_reason=_empty_ops_reason(result) if result.parsed_ops_count == 0 else None,
+            coercion_dropped=result.coercion_dropped or None,
+            injection_dropped=result.injection_dropped or None,
+        )
+        return result.ops

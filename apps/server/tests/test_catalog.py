@@ -22,9 +22,10 @@ _CEO_ORCHESTRATION = {
     "revise",
     "debate",
     "consult_skill",
-    "consult_memory",
     "ask_user",
 }
+# consult_memory is wired for BOTH CEO and workers when memory is on.
+_SHARED_ORCHESTRATION = {"consult_memory"}
 # Mutation built-ins the coordinator must NOT hold (they belong to workers), plus the
 # worker-only collaboration channels (escalate upward + post_note/read_notes 便签墙).
 _WORKER_ONLY_BUILTINS = {
@@ -68,6 +69,15 @@ def test_ceo_orchestration_tools_are_present_and_ceo_only():
     for name in _CEO_ORCHESTRATION:
         assert name in entries, f"{name} missing from catalog"
         assert entries[name].available_to == (AVAILABLE_TO_CEO,)
+
+
+def test_consult_memory_is_shared_between_ceo_and_worker():
+    entries = _by_name()
+    assert "consult_memory" in entries
+    assert set(entries["consult_memory"].available_to) == {
+        AVAILABLE_TO_CEO,
+        AVAILABLE_TO_WORKER,
+    }
 
 
 def test_read_only_builtins_are_shared_with_ceo():

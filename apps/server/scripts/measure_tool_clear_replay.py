@@ -23,7 +23,7 @@ from agentcore.core.errors import LLMError
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories.runs import TurnJournalRepository
 from agentcore.llm.factory import build_provider
-from agentcore.llm.protocol import LLMMessage, LLMRequest
+from agentcore.llm.provider.protocol import LLMMessage, LLMRequest
 from agentcore.runtime.engine.tool_clear import project_cleared_window
 from agentcore.runtime.journal import window_from_journal
 

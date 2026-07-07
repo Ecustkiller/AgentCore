@@ -10,6 +10,7 @@ import { PreviewPage } from "@/pages/PreviewPage";
 import { ToolboxPage } from "@/pages/ToolboxPage";
 import { WhiteboardCanvasPage } from "@/pages/WhiteboardCanvasPage";
 import { WhiteboardPage } from "@/pages/WhiteboardPage";
+import { WhiteboardPreviewPage } from "@/pages/WhiteboardPreviewPage";
 import { AboutSettings } from "@/pages/more/AboutSettings";
 import { AccountSettings } from "@/pages/more/AccountSettings";
 import { AppearanceSettings } from "@/pages/more/AppearanceSettings";
@@ -19,6 +20,7 @@ import { MemorySettings } from "@/pages/more/MemorySettings";
 import { ModelSettings } from "@/pages/more/ModelSettings";
 import { ShortcutsSettings } from "@/pages/more/ShortcutsSettings";
 import { UsageSettings } from "@/pages/more/UsageSettings";
+import { TownSimulationPage } from "@/pages/simulation/TownSimulationPage";
 import { GuidelinesPage } from "@/pages/toolbox/GuidelinesPage";
 import { ToolsPage } from "@/pages/toolbox/ToolsPage";
 import {
@@ -68,6 +70,11 @@ export const router = createHashRouter([
       // committed conformance vectors through the real dispatch to eyeball every AI
       // state offline (no backend / LLM). See preview/replay.ts.
       { path: "preview", element: <PreviewPage /> },
+      // Companion offline preview for the self-built whiteboard canvas (a scene surface, not an
+      // SSE vector — see preview/whiteboardScenes.ts + scripts/shoot-whiteboard.mjs).
+      { path: "preview/whiteboard", element: <WhiteboardPreviewPage /> },
+      // Dev MVP — sidebar nav item is dev-only; route stays registered for deep links.
+      { path: "simulation/town", element: <TownSimulationPage /> },
       {
         path: "more",
         element: <MorePage />,

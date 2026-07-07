@@ -59,6 +59,48 @@ export class StreamError extends Error {
   }
 }
 
+/** Short diagnosis labels for degraded empty-response finishes (mirrors backend). */
+export const EMPTY_RESPONSE_CHIP_LABELS: Record<string, string> = {
+  oauth_expired: "模型无响应 · 可能需要刷新 Sub2API OAuth",
+  content_filtered: "内容被过滤",
+  model_unknown: "模型名未被上游识别",
+  silent_empty: "模型返回空内容",
+  format_mismatch: "上游响应格式异常",
+};
+
+/** Chip suffix for degraded finish when an empty-response diagnosis is available. */
+export function degradedFinishChipLabel(
+  diagnosis: string | undefined,
+  errorMessage: string | undefined,
+): string | undefined {
+  if (diagnosis && EMPTY_RESPONSE_CHIP_LABELS[diagnosis]) {
+    return EMPTY_RESPONSE_CHIP_LABELS[diagnosis];
+  }
+  if (errorMessage?.includes(" · ")) {
+    return errorMessage.split(" · ", 2)[1];
+  }
+  return undefined;
+}
+
+/** Assistant bubble error text; in dev, append upstream body preview when present. */
+export function formatAssistantErrorMessage(error: {
+  message: string;
+  context?: DescribedError["context"];
+}): string {
+  const { message, context } = error;
+  let text = message;
+  if (
+    context?.sub2api_diagnosis &&
+    !message.includes(context.sub2api_diagnosis)
+  ) {
+    text = `${message}\n诊断：${context.sub2api_diagnosis}`;
+  }
+  if (import.meta.env.DEV && context?.upstream_body_preview) {
+    return `${text} — ${context.upstream_body_preview}`;
+  }
+  return text;
+}
+
 /**
  * A one-click remedy that fixes the *cause* of an error by routing the user
  * somewhere (e.g. the model-config page to add a BYOK key), rather than retrying
@@ -75,15 +117,18 @@ export interface ErrorAction {
  * redirect to the login screen, so a banner/toast on top would be noise.
  */
 export interface DescribedError {
-  /** zh message safe to show the user. */
   message: string;
-  /** Optional remedy that fixes the cause by navigation, not by retry. */
   action: ErrorAction | null;
-  /** Whether offering an immediate retry makes sense (false for refusals that
-   * need a user action or a schedule, e.g. quota exhausted / missing key). */
   retriable: boolean;
-  /** Backend error code, when known. */
   code?: string;
+  context?: {
+    upstream_status?: number;
+    upstream_body_preview?: string | null;
+    retry_attempts?: number;
+    empty_diagnosis?: string;
+    sub2api_diagnosis?: string;
+    sub2api_account?: string;
+  };
 }
 
 /**
@@ -113,9 +158,8 @@ interface ErrorFacts {
   code?: string;
   serverMessage?: string;
   retryAfter?: number;
-  /** Transport failure: the server never answered (offline / DNS / reset). */
+  context?: DescribedError["context"];
   transport: boolean;
-  /** Auth failure: the UI stays silent because a redirect handles it. */
   auth: boolean;
 }
 
@@ -162,7 +206,7 @@ function resolveMessage(f: ErrorFacts): string {
   if (f.code === "LLM_KEY_REQUIRED") {
     return (
       f.serverMessage ??
-      "请先在「设置 · 模型配置」中填入你的 DeepSeek API Key，再发起对话。"
+      "请先在「设置 · 模型配置」中填入你的 API Key，再发起对话。"
     );
   }
   if (f.code === "ADMIN_PRODUCT_FORBIDDEN") {
@@ -170,7 +214,25 @@ function resolveMessage(f: ErrorFacts): string {
   }
   // Most coded errors carry a user-facing zh message (validation / conflict /
   // invalid key / insufficient balance …) — prefer it verbatim (single-sourced).
-  if (f.serverMessage) return f.serverMessage;
+  if (f.serverMessage) {
+    let message = f.serverMessage;
+    if (
+      f.context?.sub2api_diagnosis &&
+      !message.includes(f.context.sub2api_diagnosis)
+    ) {
+      message = `${message}\n诊断：${f.context.sub2api_diagnosis}`;
+    }
+    if (import.meta.env.DEV && f.context?.upstream_body_preview) {
+      return `${message} — ${f.context.upstream_body_preview}`;
+    }
+    return message;
+  }
+  if (import.meta.env.DEV && f.context?.upstream_status) {
+    const preview = f.context.upstream_body_preview
+      ? ` — ${f.context.upstream_body_preview}`
+      : "";
+    return `上游推理错误（HTTP ${f.context.upstream_status}${preview}）`;
+  }
   if (f.status && f.status >= 500)
     return `服务暂时不可用（${f.status}），请重试`;
   if (f.status) return `操作失败（${f.status}），请重试`;
@@ -209,6 +271,7 @@ export function describeError(err: unknown): DescribedError | null {
       (NON_RETRIABLE_ERROR_CODES as readonly string[]).includes(f.code)
     ),
     code: f.code,
+    context: f.context,
   };
 }
 

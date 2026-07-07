@@ -1,6 +1,6 @@
 /** ELK / time-axis layout state and structure-gated recompute for GraphView. */
 
-import { type GroupLayout, computeLayout } from "@/lib/elk-layout";
+import { type GroupLayout, computeLayout, nodeSpacingForFitMode } from "@/lib/elk-layout";
 import {
   type ElkGraphLayout,
   isTimelineLayout,
@@ -12,10 +12,12 @@ import type { NodeChange } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { INPUT_ID } from "./constants";
 import { type SubTeam, buildGraphStructure } from "./helpers";
+import type { GraphFitMode } from "./useGraphViewport";
 
 export function useGraphLayout(
   execution: Execution | null,
   layoutKind: GraphLayout,
+  fitMode: GraphFitMode = "view",
 ) {
   const projectedRunsRef = useRef(execution?.runs);
   projectedRunsRef.current = execution?.runs;
@@ -128,6 +130,7 @@ export function useGraphLayout(
 
     let cancelled = false;
     const elkLayout = layoutKind as ElkGraphLayout;
+    const nodeSpacing = nodeSpacingForFitMode(fitMode);
     computeLayout(
       nodeIds,
       rawEdges,
@@ -138,6 +141,7 @@ export function useGraphLayout(
         sink: captainId ?? undefined,
       },
       layoutSubTeams,
+      nodeSpacing,
     ).then((result) => {
       if (cancelled) return;
       setLayout(result.positions, rawEdges);
@@ -150,7 +154,7 @@ export function useGraphLayout(
     return () => {
       cancelled = true;
     };
-  }, [structuralKey, layoutKind, setLayout, execution]);
+  }, [structuralKey, layoutKind, fitMode, setLayout, execution]);
 
   return {
     positions,

@@ -7,10 +7,10 @@ from dataclasses import asdict, replace
 
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
-from agentcore.llm.config import apply_overrides
-from agentcore.llm.modes import ProfileSet, default_profile_set
 from agentcore.llm.pricing import calculate_cost
-from agentcore.llm.protocol import LLMProvider, TokenUsage
+from agentcore.llm.profiles import TurnProfiles as ProfileSet
+from agentcore.llm.profiles import default_turn_profiles as default_profile_set
+from agentcore.llm.provider.protocol import LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import (
     EventSink,
@@ -148,16 +148,13 @@ async def _continue_run_scoped(
     inflight: list[TokenUsage] = []
     priced_model: str | None = None
     try:
-        profile = apply_overrides(
-            profiles.agent(spec.model_preference),
-            thinking=spec.thinking,
-            reasoning_effort=spec.reasoning_effort,
+        pref = (
+            spec.model_preference.value
+            if hasattr(spec.model_preference, "value")
+            else str(spec.model_preference)
         )
-        # 真·多模型辩手：续写沿用首轮 spec 的显式 model 覆写（session.spec 已带），故同一辩手
-        # 跨轮恒走同一厂商模型。空 = 按 tier 解析（普通续写，行为不变）。见 _execute_node 同款。
-        if spec.model:
-            profile = replace(profile, model=spec.model)
-        priced_model = profile.model
+        profile = profiles.agent(spec.model_preference)
+        priced_model = spec.model or profiles.model_for(f"agent.{pref}")
         tool_ctx = replace(
             base_tool_context,
             run_id=revision_run_id,
@@ -176,6 +173,7 @@ async def _continue_run_scoped(
             sink=sink,
             tool_ctx=tool_ctx,
             profile=profile,
+            turn_model=priced_model,
             allowed_tools=spec.tools,
             run_id=revision_run_id,
             agent_id=agent_id,
@@ -185,7 +183,7 @@ async def _continue_run_scoped(
         )
         duration_ms = int((time.monotonic() - start) * 1000)
         usage = round_usage.as_dict()
-        cost = asdict(calculate_cost(profile.model, round_usage))
+        cost = asdict(calculate_cost(priced_model, round_usage))
         # files_written counts the whole continued transcript (original draft + this
         # revision), so a requires_files contract isn't spuriously flagged when the
         # recall edits prose around files the first pass already wrote.
@@ -193,6 +191,7 @@ async def _continue_run_scoped(
             content,
             spec.deliverable,
             files_written=len(files_touched_from_transcript(messages)),
+            debrief=debrief_from_transcript(messages),
         )
         # 执行级事件溯源 (§8.3): the revised FULL product (content + 思考) under the
         # revision run id, so the version chain's latest output AND thinking are
@@ -205,6 +204,7 @@ async def _continue_run_scoped(
         # 交接简报单一源: harvest the revised product's brief from its ``handoff`` tool call (best-
         # effort None), so its 结论 is the summary and the structured brief rides the run_completed.
         debrief = debrief_from_transcript(messages)
+        touched = files_touched_from_transcript(messages)
         sink.emit(
             run_completed(
                 revision_run_id,
@@ -212,10 +212,11 @@ async def _continue_run_scoped(
                 output_summary=(debrief or {}).get("summary", ""),
                 duration_ms=duration_ms,
                 role="member",
-                model=profile.model,
+                model=priced_model,
                 usage=usage,
                 cost=cost,
                 debrief=debrief,
+                output_files=touched or None,
             )
         )
         return RunState(
@@ -224,10 +225,10 @@ async def _continue_run_scoped(
             reasoning=reasoning,
             warnings=[] if verdict.ok else list(verdict.failures),
             citations=citations,
-            model=profile.model,
+            model=priced_model,
             duration_ms=duration_ms,
             rounds=round_rounds,
-            files_touched=files_touched_from_transcript(messages),
+            files_touched=touched,
             debrief=debrief,
             usage=usage,
             cost=cost,

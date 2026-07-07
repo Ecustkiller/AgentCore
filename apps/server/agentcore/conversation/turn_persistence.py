@@ -15,8 +15,9 @@ from agentcore.db.repositories import (
     MessageRepository,
     TurnMetricsRepository,
 )
-from agentcore.llm.byok import LLMCredentials
 from agentcore.llm.factory import build_provider
+from agentcore.llm.resolve import LLMCredentials, resolve_credentials
+from agentcore.llm.resolve import resolve_turn_model as resolve_user_model
 from agentcore.memory.consolidation import schedule_consolidation
 from agentcore.runtime.events import (
     EventSink,
@@ -32,8 +33,57 @@ logger = get_logger(__name__)
 
 _RUN_ERROR_MESSAGE_CAP = 2000
 
+# Progressive assistant-row lifecycle (stored in Message.usage alongside token fields).
+MESSAGE_STATUS_RUNNING = "running"
+MESSAGE_STATUS_COMPLETE = "complete"
+MESSAGE_STATUS_INCOMPLETE = "incomplete"
+MESSAGE_STATUS_FAILED = "failed"
+
 _PAUSE_REQUIRED_TYPES = ("checkpoint_required", "plan_review_required")
 _PAUSE_RESOLVED_TYPES = ("checkpoint_resolved", "plan_review_resolved")
+
+
+def _usage_metadata(
+    result: dict,
+    *,
+    status: str,
+    extra: dict | None = None,
+) -> dict:
+    meta = {
+        "status": status,
+        "input_tokens": result.get("input_tokens", 0),
+        "output_tokens": result.get("output_tokens", 0),
+        "reasoning_tokens": result.get("reasoning_tokens", 0),
+        "cache_hit_tokens": result.get("cache_hit_tokens", 0),
+        "cache_miss_tokens": result.get("cache_miss_tokens", 0),
+        "rounds": result.get("rounds", 0),
+    }
+    if extra:
+        meta.update(extra)
+    return meta
+
+
+async def create_assistant_placeholder(
+    *,
+    conversation_id: str,
+    message_id: str,
+    trace_id: str,
+) -> None:
+    """Create the running assistant row at turn start (progressive persistence)."""
+    try:
+        async with async_session_factory() as session:
+            await MessageRepository(session).create_assistant_placeholder(
+                conversation_id=conversation_id,
+                message_id=message_id,
+                trace_id=trace_id,
+            )
+    except Exception as e:
+        logger.warning(
+            "chat.assistant_placeholder_failed",
+            conversation_id=conversation_id,
+            message_id=message_id,
+            error=str(e),
+        )
 
 
 def has_open_durable_pause(journal: list[dict]) -> bool:
@@ -76,18 +126,40 @@ async def persist_turn_result(
 
     finish = result.get("finish_reason")
     finish_value = getattr(finish, "value", finish)
-    # 挂起即收口 (②): the turn parked at a durable checkpoint (FinishReason.PAUSED) — its
-    # ONLY record is the paused_turns frame the suspending tool persisted before the loop
-    # returned. Writing an assistant row / journal / cost / metrics here would create a
-    # phantom completed reply and double-count when ``POST .../resume`` later persists the
-    # finished turn under this SAME message_id. Nothing to persist until the turn actually
-    # ends on resume — mirrors today's blocking pause, where the loop never returned here.
     if finish_value == FinishReason.PAUSED.value:
+        # 挂起即收口 (②): write a best-effort assistant snapshot so a refresh replays the
+        # CEO text / reasoning / tool timeline (journal facts were appended on emit; the row
+        # is the projection anchor). Cost / metrics / title /
+        # followups wait until resume completes; resume updates this same message_id.
         logger.info(
             "chat.turn_paused",
             conversation_id=conversation_id,
             message_id=result.get("message_id"),
         )
+        message_id = result.get("message_id")
+        if message_id:
+            try:
+                async with async_session_factory() as session:
+                    await MessageRepository(session).upsert_assistant(
+                        conversation_id=conversation_id,
+                        message_id=message_id,
+                        content=assistant_reply,
+                        reasoning_content=assistant_reasoning,
+                        citations=assistant_citations,
+                        trace_id=trace_id,
+                        metadata=_usage_metadata(
+                            result,
+                            status=MESSAGE_STATUS_RUNNING,
+                            extra={"paused": True},
+                        ),
+                    )
+            except Exception as e:
+                logger.warning(
+                    "chat.pause_snapshot_failed",
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    error=str(e),
+                )
         return
     turn_error = result.get("error")
     run_error = (
@@ -109,36 +181,35 @@ async def persist_turn_result(
         else None
     )
     durable_entries = journal_entries if journal_entries is not None else synth_entries
+    message_id = result.get("message_id")
+    terminal_status = (
+        MESSAGE_STATUS_FAILED
+        if turn_error or finish_value == FinishReason.ERROR.value
+        else MESSAGE_STATUS_COMPLETE
+    )
 
     async with async_session_factory() as session:
         msg_repo = MessageRepository(session)
         conv_repo = ConversationRepository(session)
 
-        if assistant_reply or abnormal:
-            await msg_repo.create(
+        if message_id:
+            await msg_repo.upsert_assistant(
                 conversation_id=conversation_id,
-                role="assistant",
+                message_id=message_id,
                 content=assistant_reply,
                 reasoning_content=assistant_reasoning,
                 citations=assistant_citations,
-                message_id=result.get("message_id"),
                 trace_id=trace_id,
-                metadata={
-                    "input_tokens": result.get("input_tokens", 0),
-                    "output_tokens": result.get("output_tokens", 0),
-                    "reasoning_tokens": result.get("reasoning_tokens", 0),
-                    "cache_hit_tokens": result.get("cache_hit_tokens", 0),
-                    "cache_miss_tokens": result.get("cache_miss_tokens", 0),
-                    "rounds": result.get("rounds", 0),
-                },
+                metadata=_usage_metadata(result, status=terminal_status),
             )
-            await persist_turn_journal(
-                session,
-                message_id=result.get("message_id"),
-                conversation_id=conversation_id,
-                trace_id=trace_id,
-                entries=durable_entries,
-            )
+            if durable_entries is not None:
+                await persist_turn_journal(
+                    session,
+                    message_id=message_id,
+                    conversation_id=conversation_id,
+                    trace_id=trace_id,
+                    entries=durable_entries,
+                )
 
         if cost_runs:
             try:
@@ -185,6 +256,7 @@ async def persist_turn_result(
                 scope_signals=int(collab.get("scope_signals", 0) or 0),
                 revises=int(collab.get("revises", 0) or 0),
                 escalations=int(collab.get("escalations", 0) or 0),
+                audit_drops=int(result.get("audit_drops", 0) or 0),
             )
         except Exception as e:
             await session.rollback()
@@ -203,10 +275,12 @@ async def persist_turn_result(
     # turn has no「what next」to offer (and would distract from its real prompt).
     wants_followups = bool(assistant_reply.strip()) and not abnormal
 
-    # Both are post-turn World B「内部窄任务」on the same fast model — build one provider
-    # and run them in sequence so a title-less follow-up turn still gets one client.
+    # Both are post-turn World B「内部窄任务」— platform key when configured, else BYOK.
     if needs_title or wants_followups:
-        provider = build_provider(llm_credentials)
+        async with async_session_factory() as session:
+            bg_credentials = await resolve_credentials(session, user_id, "platform_internal")
+        model = resolve_user_model(bg_credentials)
+        provider = build_provider(bg_credentials, purpose="platform_internal")
         try:
             if needs_title:
                 title = await mint_title(
@@ -214,6 +288,7 @@ async def persist_turn_result(
                     conversation_id=conversation_id,
                     user_message=user_message,
                     assistant_reply=assistant_reply,
+                    model=model,
                 )
                 if title:
                     async with async_session_factory() as session:
@@ -227,6 +302,7 @@ async def persist_turn_result(
                     conversation_id=conversation_id,
                     user_message=user_message,
                     assistant_reply=assistant_reply,
+                    model=model,
                 )
                 message_id = result.get("message_id")
                 if followups and message_id:
@@ -294,22 +370,29 @@ async def persist_incomplete_turn(
     """
     streamed = (content or "").strip()
     body = f"{streamed}{_INCOMPLETE_SUFFIX}" if streamed else _INCOMPLETE_NOTE
+    if not message_id:
+        logger.warning(
+            "chat.incomplete_persist_skipped",
+            conversation_id=conversation_id,
+            reason="no_message_id",
+        )
+        return
     try:
         async with async_session_factory() as session:
-            msg = await MessageRepository(session).create(
+            await MessageRepository(session).upsert_assistant(
                 conversation_id=conversation_id,
-                role="assistant",
+                message_id=message_id,
                 content=body,
+                trace_id=trace_id,
                 metadata={
+                    "status": MESSAGE_STATUS_INCOMPLETE,
                     "incomplete": True,
                     "finish_reason": FinishReason.CANCELLED.value,
                 },
-                message_id=message_id,
-                trace_id=trace_id,
             )
             await persist_turn_journal(
                 session,
-                message_id=msg.id,
+                message_id=message_id,
                 conversation_id=conversation_id,
                 trace_id=trace_id,
                 entries=journal_entries_from_display_runs(
@@ -348,6 +431,8 @@ def salvage_incomplete_turn(
     (its paused frame is the record).
     """
     if not settings.incomplete_turn_persist_enabled:
+        return
+    if not message_id:
         return
     journal = sink.execution_journal()
     content = sink.streamed_content()

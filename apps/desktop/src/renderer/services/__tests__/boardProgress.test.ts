@@ -31,6 +31,7 @@ const run = (id: string, agentId: string, status: RunStatus): RunNode => ({
   status,
   dependsOn: [],
   outputSummary: null,
+  outputFiles: [],
   debrief: null,
   durationMs: null,
   error: null,
