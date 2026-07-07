@@ -26,8 +26,6 @@ from .fold import (
     window_from_journal,
 )
 from .fold_cache import clear_runs_cache, runs_from_entries_cached
-from .persist import persist_turn_journal
-from .writer import TurnJournalWriter, current_journal_writer
 
 __all__ = [
     "KIND_TURN_END",
@@ -43,3 +41,16 @@ __all__ = [
     "runs_from_entries_cached",
     "window_from_journal",
 ]
+
+
+def __getattr__(name: str):
+    """Lazy DB-backed journal helpers — keep sidecar import closure free of sqlalchemy."""
+    if name in ("TurnJournalWriter", "current_journal_writer"):
+        from .writer import TurnJournalWriter, current_journal_writer
+
+        return TurnJournalWriter if name == "TurnJournalWriter" else current_journal_writer
+    if name == "persist_turn_journal":
+        from .persist import persist_turn_journal
+
+        return persist_turn_journal
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
