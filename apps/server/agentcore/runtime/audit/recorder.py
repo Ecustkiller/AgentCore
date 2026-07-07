@@ -8,8 +8,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentcore.core.logging import get_logger
-from agentcore.db.base import async_session_factory
-from agentcore.db.repositories import AgentAuditEventRepository
 
 logger = get_logger(__name__)
 
@@ -93,6 +91,9 @@ class AuditRecorder:
         seq = self._next_seq
         self._next_seq += 1
         try:
+            from agentcore.db.base import async_session_factory
+            from agentcore.db.repositories import AgentAuditEventRepository
+
             async with async_session_factory() as db:
                 await AgentAuditEventRepository(db).append(
                     user_id=self.user_id,

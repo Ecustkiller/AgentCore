@@ -7,8 +7,6 @@ from contextvars import ContextVar
 from typing import Any
 
 from agentcore.core.logging import get_logger
-from agentcore.db.base import async_session_factory
-from agentcore.db.repositories import TurnJournalRepository
 
 logger = get_logger(__name__)
 
@@ -58,6 +56,9 @@ class TurnJournalWriter:
         seq = self._next_seq
         self._next_seq += 1
         try:
+            from agentcore.db.base import async_session_factory
+            from agentcore.db.repositories import TurnJournalRepository
+
             async with async_session_factory() as db:
                 await TurnJournalRepository(db).append(
                     turn_id=self.turn_id,
