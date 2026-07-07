@@ -1,10 +1,5 @@
 import { useGLTF } from "@react-three/drei";
-import {
-  createContext,
-  useContext,
-  useMemo,
-  type ReactNode,
-} from "react";
+import { type ReactNode, createContext, useContext, useMemo } from "react";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
 import { SIM_CHARACTER_GLB } from "./assetPaths";

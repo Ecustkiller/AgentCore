@@ -1,15 +1,15 @@
 import { describeError } from "@/lib/errors";
 import {
-  getSimulationMetrics,
   type SimTickMetrics,
+  getSimulationMetrics,
 } from "@/services/simulation/api";
 import {
   computeRegionStats,
   moodBand,
   moodBandClass,
 } from "@/simulation/regionStats";
-import { useSimulationView } from "@/simulation/viewState";
 import { useSimulationUiStore } from "@/simulation/store/simulationStore";
+import { useSimulationView } from "@/simulation/viewState";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
@@ -91,7 +91,10 @@ export function ObservationPanel() {
   const run = useSimulationUiStore((s) => s.run);
   const { viewTick, viewAgents } = useSimulationView();
 
-  const regionStats = useMemo(() => computeRegionStats(viewAgents), [viewAgents]);
+  const regionStats = useMemo(
+    () => computeRegionStats(viewAgents),
+    [viewAgents],
+  );
 
   const [metricsSeries, setMetricsSeries] = useState<SimTickMetrics[]>([]);
   const [metricsError, setMetricsError] = useState<string | null>(null);
@@ -167,13 +170,19 @@ export function ObservationPanel() {
                 data={chartData}
                 margin={{ top: 4, right: 8, left: -16, bottom: 0 }}
               >
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  className="stroke-border"
+                />
                 <XAxis
                   dataKey="tick"
                   tick={{ fontSize: 10 }}
                   className="fill-muted-foreground"
                 />
-                <YAxis tick={{ fontSize: 10 }} className="fill-muted-foreground" />
+                <YAxis
+                  tick={{ fontSize: 10 }}
+                  className="fill-muted-foreground"
+                />
                 <Tooltip
                   contentStyle={{
                     fontSize: 12,

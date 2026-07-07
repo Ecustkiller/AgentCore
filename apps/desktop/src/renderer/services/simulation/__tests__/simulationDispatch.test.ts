@@ -1,11 +1,11 @@
-import contract from "@agentcore/protocol-conformance/fixtures/simulation-region-positions.json";
-import { describe, expect, it, beforeEach } from "vitest";
 import { dispatchSimulationEvent } from "@/services/sse/handlers/simulation";
 import { REGION_POSITIONS } from "@/simulation/regionPositions";
 import {
   useSimulationNavStore,
   useSimulationUiStore,
 } from "@/simulation/store/simulationStore";
+import contract from "@agentcore/protocol-conformance/fixtures/simulation-region-positions.json";
+import { beforeEach, describe, expect, it } from "vitest";
 
 describe("region position contract", () => {
   it("matches protocol-conformance fixture", () => {

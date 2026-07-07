@@ -1,21 +1,19 @@
 import { Button } from "@/components/ui";
 import { statusPillSoft } from "@/components/ui/tone-presets";
+import type { FileAuditState } from "@/hooks/useFileAudit";
 import { formatMessageTimeOfDay } from "@/lib/format";
 import type { AgentAuditEvent } from "@/services/audit";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import type { AuditOutcome } from "@agentcore/contract-rest-types/audit";
 import { ChevronRight, History, Loader2 } from "lucide-react";
-import type { FileAuditState } from "@/hooks/useFileAudit";
 
-const OUTCOME_META: Record<
-  AuditOutcome,
-  { label: string; className: string }
-> = {
-  ok: { label: "ok", className: statusPillSoft.success },
-  denied: { label: "denied", className: statusPillSoft.warning },
-  failed: { label: "failed", className: statusPillSoft.destructive },
-  skipped: { label: "skipped", className: statusPillSoft.muted },
-};
+const OUTCOME_META: Record<AuditOutcome, { label: string; className: string }> =
+  {
+    ok: { label: "ok", className: statusPillSoft.success },
+    denied: { label: "denied", className: statusPillSoft.warning },
+    failed: { label: "failed", className: statusPillSoft.destructive },
+    skipped: { label: "skipped", className: statusPillSoft.muted },
+  };
 
 function FileAuditEventRow({ event }: { event: AgentAuditEvent }) {
   const showRunDetail = useSidePanelStore((s) => s.showRunDetail);

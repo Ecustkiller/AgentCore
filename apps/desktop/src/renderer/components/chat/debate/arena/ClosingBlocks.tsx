@@ -5,8 +5,8 @@ import { useSidePanelStore } from "@/stores/sidePanel";
 import { TriangleAlert } from "lucide-react";
 import { CollapsibleSpeech } from "../CollapsibleSpeech";
 import type { DebateClosingView } from "../model";
-import { closingAnchorId } from "./anchors";
 import { StageDivider } from "./StageDivider";
+import { closingAnchorId } from "./anchors";
 
 export function ClosingBlocks({
   closings,

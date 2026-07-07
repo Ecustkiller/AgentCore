@@ -182,9 +182,7 @@ function ArgumentSpeech({
             key={arg.id}
             argument={arg}
             open={expandedIdx === i}
-            onToggle={() =>
-              setExpandedIdx((prev) => (prev === i ? null : i))
-            }
+            onToggle={() => setExpandedIdx((prev) => (prev === i ? null : i))}
           />
         ))}
       </ul>
@@ -217,9 +215,15 @@ function ArgumentRow({
         className="flex w-full items-start gap-1.5 px-2 py-1.5 text-left text-xs hover:bg-muted/35"
       >
         {open ? (
-          <ChevronDown size={12} className="mt-0.5 shrink-0 text-muted-foreground" />
+          <ChevronDown
+            size={12}
+            className="mt-0.5 shrink-0 text-muted-foreground"
+          />
         ) : (
-          <ChevronRight size={12} className="mt-0.5 shrink-0 text-muted-foreground" />
+          <ChevronRight
+            size={12}
+            className="mt-0.5 shrink-0 text-muted-foreground"
+          />
         )}
         <span className="min-w-0 flex-1 text-sm leading-snug text-foreground">
           {argument.title}

@@ -1,11 +1,11 @@
+import { FileAuditTrail } from "@/components/audit/FileAuditTrail";
 import { Button, IconButton } from "@/components/ui";
-import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   type StatusTone,
   statusAccentText,
   statusPillSoft,
 } from "@/components/ui/tone-presets";
-import { FileAuditTrail } from "@/components/audit/FileAuditTrail";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useFileAudit } from "@/hooks/useFileAudit";
 import type { FileArtifact, FileOp } from "@/lib/fileArtifacts";
 import { useSidePanelStore } from "@/stores/sidePanel";

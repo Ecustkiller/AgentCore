@@ -172,7 +172,9 @@ export function ProcessTimeline({
   const hasProcessSteps = nodes.some(isProcessNode);
   const { reasoningCount, toolCount } = countProcessStats(nodes);
   const shouldCollapseProcess =
-    !isStreaming && hasProcessSteps && !(reasoningCount === 1 && toolCount === 0);
+    !isStreaming &&
+    hasProcessSteps &&
+    !(reasoningCount === 1 && toolCount === 0);
   const [processExpanded, toggleProcess] = useStreamAwareDisclosure(
     messageId ? `${messageId}:process` : null,
     isStreaming,

@@ -3,8 +3,10 @@ import { useCallback, useState } from "react";
 import { type DebateClashView, type DebateModel, isFlatRound } from "../model";
 import { CrossExamSection } from "./CrossExamSection";
 import { JudgeNote } from "./JudgeNote";
+import { RoundFocusCard } from "./RoundFocusCard";
 import { SectionHeader } from "./SectionHeader";
 import { SpeakerBlock, speechStageLabel } from "./SpeakerBlock";
+import { StageDivider } from "./StageDivider";
 import { SteeringPanel } from "./SteeringPanel";
 import { UserInterjection } from "./UserInterjection";
 import { roundAnchorId, speakerAnchorId } from "./anchors";
@@ -13,8 +15,6 @@ import {
   partitionProCon,
 } from "./debateLayoutPreference";
 import { openingText } from "./openingText";
-import { RoundFocusCard } from "./RoundFocusCard";
-import { StageDivider } from "./StageDivider";
 
 export function Transcript({
   model,

@@ -5,8 +5,8 @@ import {
   pauseSimulationRun,
   resumeSimulationRun,
 } from "@/services/simulation/api";
-import { updateSavedRun } from "@/simulation/runHistory";
 import { SimulationPlaybackControls } from "@/simulation/SimulationPlaybackControls";
+import { updateSavedRun } from "@/simulation/runHistory";
 import { formatSimClock } from "@/simulation/simTime";
 import { useSimulationUiStore } from "@/simulation/store/simulationStore";
 import { useState } from "react";

@@ -3,9 +3,9 @@ import { GuidelineBlock } from "@/components/tools/GuidelineBlock";
 import { SkillCard } from "@/components/tools/SkillCard";
 import { useLlmKey } from "@/hooks/useLlmKey";
 import {
-  isToolsGateBlocked,
-  TOOL_CALLING_TOOL_NAMES,
   TOOLS_GATE_HINT,
+  TOOL_CALLING_TOOL_NAMES,
+  isToolsGateBlocked,
 } from "@/lib/llmToolsGate";
 
 /** 工具箱「能力」组 → AI 提示词：AI 遵循的提示词全文。常驻部分是系统提示词模板（全员
@@ -55,8 +55,7 @@ export function GuidelinesPage() {
                     key={skill.name}
                     skill={skill}
                     disabled={
-                      toolsBlocked &&
-                      TOOL_CALLING_TOOL_NAMES.has(skill.name)
+                      toolsBlocked && TOOL_CALLING_TOOL_NAMES.has(skill.name)
                     }
                     disabledHint={TOOLS_GATE_HINT}
                   />

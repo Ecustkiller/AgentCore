@@ -1,7 +1,7 @@
-import type { SSEEvent } from "@agentcore/contract-types";
 import { BASE_URL, notifyUnauthorized, tryRefresh } from "@/services/api";
 import { dispatchSimulationEvent } from "@/services/sse/handlers/simulation";
 import { useSimulationUiStore } from "@/simulation/store/simulationStore";
+import type { SSEEvent } from "@agentcore/contract-types";
 
 let controller: AbortController | null = null;
 let activeRunId: string | null = null;

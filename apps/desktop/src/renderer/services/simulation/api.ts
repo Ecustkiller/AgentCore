@@ -1,13 +1,13 @@
-import type { SimAgentState } from "@agentcore/contract-types";
-import type { components } from "@agentcore/contract-rest-types";
 import { api } from "@/services/api";
 import {
-  runFromWire,
-  hourForTick,
   type AdvanceTickResponseWire,
   type CreateSimulationRunRequestWire,
   type SimulationRunView,
+  hourForTick,
+  runFromWire,
 } from "@/simulation/runModel";
+import type { components } from "@agentcore/contract-rest-types";
+import type { SimAgentState } from "@agentcore/contract-types";
 
 export async function createSimulationRun(
   body: Partial<CreateSimulationRunRequestWire> = {},

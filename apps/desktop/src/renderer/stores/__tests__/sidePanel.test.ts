@@ -170,7 +170,6 @@ describe("openPanel", () => {
   });
 });
 
-
 describe("showWorkspace", () => {
   it("reveals the panel on the 工作区 home tab", () => {
     panel().showWorkspace();

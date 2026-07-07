@@ -1,29 +1,17 @@
 import * as THREE from "three";
-import { Pathfinding } from "three-pathfinding";
+import { computeTownPath as computeGridPath } from "./townPathGrid";
 
-export const TOWN_NAV_ZONE = "town-m1";
+/** @deprecated Kept for TownCanvas memo signature — pathing uses townPathGrid. */
+export type TownPathfinding = { __brand: "town-path-grid" };
 
-/** Walkable ground — covers backend REGION_POSITIONS span (±36 x, ±24 z). */
-export function createTownNavMeshGeometry(): THREE.BufferGeometry {
-  const geo = new THREE.PlaneGeometry(80, 64, 4, 4);
-  geo.rotateX(-Math.PI / 2);
-  return geo;
-}
-
-export function createTownPathfinding(): Pathfinding {
-  const pathfinding = new Pathfinding();
-  const zone = Pathfinding.createZone(createTownNavMeshGeometry());
-  pathfinding.setZoneData(TOWN_NAV_ZONE, zone);
-  return pathfinding;
+export function createTownPathfinding(): TownPathfinding {
+  return { __brand: "town-path-grid" };
 }
 
 export function computeTownPath(
-  pathfinding: Pathfinding,
+  _pathfinding: TownPathfinding,
   from: THREE.Vector3,
   to: THREE.Vector3,
 ): THREE.Vector3[] {
-  const group = pathfinding.getGroup(TOWN_NAV_ZONE, from);
-  const raw = pathfinding.findPath(from, to, TOWN_NAV_ZONE, group);
-  if (!raw?.length) return [];
-  return raw.map((p) => new THREE.Vector3(p.x, p.y, p.z));
+  return computeGridPath(from, to);
 }

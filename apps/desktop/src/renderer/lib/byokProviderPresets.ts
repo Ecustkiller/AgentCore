@@ -68,7 +68,8 @@ export const BYOK_PROVIDER_PRESETS: readonly ByokProviderPreset[] = [
     baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
     defaultModel: "doubao-pro-32k",
     models: ["doubao-pro-32k", "doubao-lite-32k"],
-    keyHelpUrl: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+    keyHelpUrl:
+      "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
   },
   {
     id: "openrouter",

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import type { AgentState, Execution, RunNode } from "@/stores/execution";
+import { describe, expect, it } from "vitest";
 import { toDebateModel } from "../projection";
 
 function baseExecution(overrides: Partial<Execution> = {}): Execution {
@@ -167,7 +167,9 @@ describe("toDebateModel live cross-exam", () => {
             stop_reason: "converged",
             rationale: "r",
           },
-          sides: [{ key: "pro", name: "支持方", run_id: "mod_r1_pro", ok: true }],
+          sides: [
+            { key: "pro", name: "支持方", run_id: "mod_r1_pro", ok: true },
+          ],
           clashes: [],
           cross_exam: [
             {

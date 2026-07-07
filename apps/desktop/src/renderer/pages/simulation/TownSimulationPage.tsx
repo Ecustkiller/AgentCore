@@ -1,12 +1,11 @@
 import { IconButton } from "@/components/ui";
-import {
-  disconnectSimulationStream,
-} from "@/services/simulation/stream";
+import { disconnectSimulationStream } from "@/services/simulation/stream";
 import { SimulationRunManager } from "@/simulation/SimulationRunManager";
 import { SimulationSidePanel } from "@/simulation/SimulationSidePanel";
+import { TickControlBar } from "@/simulation/TickControlBar";
+import { isTownPreviewMode, seedTownPreview } from "@/simulation/previewSeed";
 import { formatSimClock } from "@/simulation/simTime";
 import { useSimulationUiStore } from "@/simulation/store/simulationStore";
-import { TickControlBar } from "@/simulation/TickControlBar";
 import { TownCanvas } from "@/simulation/town/TownCanvas";
 import {
   TOWN_AGENT_NAMES,
@@ -15,7 +14,6 @@ import {
 import { ArrowLeft, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { isTownPreviewMode, seedTownPreview } from "@/simulation/previewSeed";
 
 /**
  * M1 town simulation — fullscreen immersive 3D canvas with floating overlays.

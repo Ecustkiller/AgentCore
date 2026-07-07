@@ -1,8 +1,8 @@
-import {
-  injectSimulationEvent,
-  type InjectEventType,
-} from "@/services/simulation/api";
 import { notifyError, notifySuccess } from "@/lib/toast";
+import {
+  type InjectEventType,
+  injectSimulationEvent,
+} from "@/services/simulation/api";
 import { useSimulationUiStore } from "@/simulation/store/simulationStore";
 import {
   CloudRain,
@@ -87,7 +87,11 @@ export function GodModePanel() {
     let payload: Record<string, unknown> = {};
     try {
       const parsed: unknown = JSON.parse(customPayload);
-      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      if (
+        parsed !== null &&
+        typeof parsed === "object" &&
+        !Array.isArray(parsed)
+      ) {
         payload = parsed as Record<string, unknown>;
       } else {
         notifyError("payload 必须是 JSON 对象");
@@ -133,7 +137,9 @@ export function GodModePanel() {
         ) : null}
 
         <section className={disabled ? "pointer-events-none opacity-50" : ""}>
-          <h3 className="text-xs font-medium text-muted-foreground">预设事件</h3>
+          <h3 className="text-xs font-medium text-muted-foreground">
+            预设事件
+          </h3>
           <ul className="mt-2 space-y-2">
             {PRESET_EVENTS.map((preset) => {
               const Icon = preset.icon;
@@ -174,7 +180,9 @@ export function GodModePanel() {
         <section
           className={`mt-6 ${disabled ? "pointer-events-none opacity-50" : ""}`}
         >
-          <h3 className="text-xs font-medium text-muted-foreground">自定义事件</h3>
+          <h3 className="text-xs font-medium text-muted-foreground">
+            自定义事件
+          </h3>
           <div className="mt-2 space-y-3 rounded-xl border border-border bg-background p-3">
             <label className="block">
               <span className="text-xs text-muted-foreground">event_type</span>
@@ -187,7 +195,9 @@ export function GodModePanel() {
               />
             </label>
             <label className="block">
-              <span className="text-xs text-muted-foreground">payload (JSON)</span>
+              <span className="text-xs text-muted-foreground">
+                payload (JSON)
+              </span>
               <textarea
                 value={customPayload}
                 onChange={(e) => setCustomPayload(e.target.value)}

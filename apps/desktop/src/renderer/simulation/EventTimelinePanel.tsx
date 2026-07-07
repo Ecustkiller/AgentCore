@@ -1,17 +1,17 @@
-import type { InteractionResult } from "@agentcore/contract-types";
-import { useSimulationView } from "@/simulation/viewState";
-import { useSimulationUiStore } from "@/simulation/store/simulationStore";
 import {
-  voteGovernanceDetails,
-  tradeBriefLabel,
   type ActiveInteraction,
+  tradeBriefLabel,
+  voteGovernanceDetails,
 } from "@/simulation/interactionModel";
 import { SIM_EVENT_LABELS } from "@/simulation/simEventFormat";
+import { useSimulationUiStore } from "@/simulation/store/simulationStore";
 import {
   TOWN_AGENT_IDS,
   TOWN_AGENT_NAMES,
   type TownAgentId,
 } from "@/simulation/town/townRoster";
+import { useSimulationView } from "@/simulation/viewState";
+import type { InteractionResult } from "@agentcore/contract-types";
 import {
   ChevronDown,
   ChevronRight,
@@ -67,7 +67,10 @@ function InteractionEventDetails({
       return (
         <ul className="mt-1.5 space-y-1 border-t border-border/60 pt-1.5">
           {(interaction.transcript ?? []).map((line, index) => (
-            <li key={`${line.speaker_id}-${line.round}-${index}`} className="text-xs">
+            <li
+              key={`${line.speaker_id}-${line.round}-${index}`}
+              className="text-xs"
+            >
               <span className="font-medium text-foreground">
                 {line.speaker_name || agentLabel(line.speaker_id)}：
               </span>{" "}

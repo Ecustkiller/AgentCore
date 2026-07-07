@@ -1,16 +1,19 @@
 import { Button } from "@/components/ui";
 import { describeError } from "@/lib/errors";
-import { createSimulationRun, getTickSnapshot } from "@/services/simulation/api";
+import {
+  createSimulationRun,
+  getTickSnapshot,
+} from "@/services/simulation/api";
 import {
   connectSimulationStream,
   disconnectSimulationStream,
 } from "@/services/simulation/stream";
 import {
+  type SavedSimulationRun,
   listSavedRuns,
   rememberRun,
-  type SavedSimulationRun,
 } from "@/simulation/runHistory";
-import { runFromWire } from "@/simulation/runModel";
+import type { runFromWire } from "@/simulation/runModel";
 import { runStatusLabel, runStatusTone } from "@/simulation/runStatus";
 import {
   applyTickSnapshot,
@@ -34,7 +37,9 @@ export function SimulationRunManager({
     setSavedRuns(listSavedRuns());
   }, [run?.id]);
 
-  const activateRun = async (next: SavedSimulationRun | ReturnType<typeof runFromWire>) => {
+  const activateRun = async (
+    next: SavedSimulationRun | ReturnType<typeof runFromWire>,
+  ) => {
     const store = useSimulationUiStore.getState();
     disconnectSimulationStream();
     store.resetSession();
@@ -96,7 +101,10 @@ export function SimulationRunManager({
     return (
       <div className="flex flex-wrap items-center gap-3">
         <div className="text-xs text-muted-foreground">
-          Run <span className="font-mono text-foreground">{run.id.slice(0, 8)}…</span>
+          Run{" "}
+          <span className="font-mono text-foreground">
+            {run.id.slice(0, 8)}…
+          </span>
         </div>
         <div className={`text-xs font-medium ${toneClass}`}>
           {runStatusLabel(run.status)}
@@ -119,7 +127,9 @@ export function SimulationRunManager({
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-6 px-6 py-12">
       <div className="max-w-md text-center">
-        <h2 className="text-xl font-medium text-foreground">欢迎来到 AI 小镇</h2>
+        <h2 className="text-xl font-medium text-foreground">
+          欢迎来到 AI 小镇
+        </h2>
         <p className="mt-2 text-sm text-muted-foreground">
           创建新的小镇模拟，或从本机最近记录中加载已有 Run。
         </p>

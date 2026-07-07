@@ -4,9 +4,13 @@ import {
   useSimulationNavStore,
   useSimulationPositionsStore,
 } from "../store/simulationStore";
-import type { TownAgentId } from "./townRoster";
-import { TOWN_AGENT_HOME, TOWN_AGENT_IDS, TOWN_SPAWN_OFFSET } from "./townRoster";
 import { townRenderDebug } from "./townRenderDebug";
+import type { TownAgentId } from "./townRoster";
+import {
+  TOWN_AGENT_HOME,
+  TOWN_AGENT_IDS,
+  TOWN_SPAWN_OFFSET,
+} from "./townRoster";
 
 export type TownSpawnTable = Record<TownAgentId, Vec3>;
 

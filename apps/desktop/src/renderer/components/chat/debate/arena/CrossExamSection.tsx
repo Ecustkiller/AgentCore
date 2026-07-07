@@ -172,11 +172,20 @@ function CrossExamQaRow({
           className="flex w-full items-start gap-1.5 text-left text-xs hover:text-foreground"
         >
           {answerOpen ? (
-            <ChevronDown size={12} className="mt-0.5 shrink-0 text-muted-foreground" />
+            <ChevronDown
+              size={12}
+              className="mt-0.5 shrink-0 text-muted-foreground"
+            />
           ) : (
-            <ChevronRight size={12} className="mt-0.5 shrink-0 text-muted-foreground" />
+            <ChevronRight
+              size={12}
+              className="mt-0.5 shrink-0 text-muted-foreground"
+            />
           )}
-          <CornerDownRight size={11} className="mt-0.5 shrink-0 text-muted-foreground" />
+          <CornerDownRight
+            size={11}
+            className="mt-0.5 shrink-0 text-muted-foreground"
+          />
           <span className="text-muted-foreground">{targetName}</span>
           {!answerOpen && hasAnswer && (
             <span className="min-w-0 flex-1 truncate text-sm text-foreground">

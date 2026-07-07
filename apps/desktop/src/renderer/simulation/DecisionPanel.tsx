@@ -32,7 +32,9 @@ export function DecisionPanel({ embedded = false }: { embedded?: boolean }) {
         </article>
       ) : snapshot && Object.keys(snapshot.agents ?? {}).length > 0 ? (
         <article className="rounded-xl border border-border bg-background p-3">
-          <div className="text-xs text-muted-foreground">Tick {viewTick} · 快照</div>
+          <div className="text-xs text-muted-foreground">
+            Tick {viewTick} · 快照
+          </div>
           <ul className="mt-2 space-y-2">
             {Object.values(snapshot.agents ?? {}).map((agent) => (
               <li key={agent.agent_id} className="text-sm text-foreground">

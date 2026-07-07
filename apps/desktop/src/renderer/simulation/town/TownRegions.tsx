@@ -4,8 +4,8 @@ import { TownBuilding } from "./TownBuilding";
 import { TOWN_REGIONS } from "./regionLayout";
 import { TOWN_ROADS, TOWN_ZONE_GROUNDS } from "./townGround";
 import {
-  getTownGroundTextureForPatch,
   type GroundSurfaceKind,
+  getTownGroundTextureForPatch,
 } from "./townTextures";
 
 const BASE_GRASS_COLOR = "#7cb87c";

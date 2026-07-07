@@ -1,5 +1,4 @@
 import { CheckpointCard } from "@/components/chat/CheckpointCard";
-import { TurnWarningBanner } from "@/components/chat/TurnWarningBanner";
 import { EscalationCards } from "@/components/chat/EscalationCard";
 import { FileArtifactsCard } from "@/components/chat/FileArtifactsCard";
 import { InlineTeamGraph } from "@/components/chat/InlineTeamGraph";
@@ -7,6 +6,7 @@ import { Markdown } from "@/components/chat/Markdown";
 import { NonBlockingAskCard } from "@/components/chat/NonBlockingAskCard";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
 import { type CitationFlash, SourceCards } from "@/components/chat/SourceCards";
+import { TurnWarningBanner } from "@/components/chat/TurnWarningBanner";
 import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
 import { Button, IconButton } from "@/components/ui";
 import { FinishReasonChip } from "@/components/ui/finish-reason-chip";
@@ -67,7 +67,9 @@ function MultiAgentFileArtifacts({
       ),
     [process, execution],
   );
-  return <FileArtifactsCard artifacts={artifacts} conversationId={conversationId} />;
+  return (
+    <FileArtifactsCard artifacts={artifacts} conversationId={conversationId} />
+  );
 }
 
 /**

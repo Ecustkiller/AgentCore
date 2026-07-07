@@ -1,9 +1,11 @@
+import { getConversations } from "@/hooks/useConversations";
 import {
   type FileNode,
   type FilePreviewResult,
   type FileSource,
   baseName,
 } from "@/lib/fileSource";
+import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import {
   createWorkspaceDir,
   deleteWorkspaceFile,
@@ -34,8 +36,6 @@ import {
   wsUploadFile,
   wsWriteFileText,
 } from "@/services/workspaces";
-import { getConversations } from "@/hooks/useConversations";
-import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import { createLocalRootSource } from "./localRootSource";
 
 /** Map the server preview shape into the unified result (server has no image kind). */

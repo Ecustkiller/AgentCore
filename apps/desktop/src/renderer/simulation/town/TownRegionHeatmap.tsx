@@ -1,16 +1,16 @@
-import { useMemo } from "react";
-import {
-  computeRegionStats,
-  moodHeatmapStyle,
-} from "@/simulation/regionStats";
+import { computeRegionStats, moodHeatmapStyle } from "@/simulation/regionStats";
 import { useSimulationView } from "@/simulation/viewState";
-import { TOWN_ZONE_GROUNDS } from "./townGround";
+import { useMemo } from "react";
 import { TOWN_REGIONS } from "./regionLayout";
+import { TOWN_ZONE_GROUNDS } from "./townGround";
 
 /** Semi-transparent mood/density overlay on each zone ground patch. */
 export function TownRegionHeatmap() {
   const { viewAgents } = useSimulationView();
-  const regionStats = useMemo(() => computeRegionStats(viewAgents), [viewAgents]);
+  const regionStats = useMemo(
+    () => computeRegionStats(viewAgents),
+    [viewAgents],
+  );
 
   const overlayByRegion = useMemo(() => {
     const map = new Map<string, (typeof regionStats)[number]>();

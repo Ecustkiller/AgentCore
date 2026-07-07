@@ -633,17 +633,18 @@ export function selectionHandlesScreen(
     const rot = el.rotation ?? 0;
     const cx = sb.x + sb.width / 2;
     const cy = sb.y + sb.height / 2;
-    const mapped = rot === 0
-      ? hs
-      : hs.map((h) => {
-          const dx = h.x - cx;
-          const dy = h.y - cy;
-          return {
-            id: h.id,
-            x: cx + dx * Math.cos(rot) - dy * Math.sin(rot),
-            y: cy + dx * Math.sin(rot) + dy * Math.cos(rot),
-          };
-        });
+    const mapped =
+      rot === 0
+        ? hs
+        : hs.map((h) => {
+            const dx = h.x - cx;
+            const dy = h.y - cy;
+            return {
+              id: h.id,
+              x: cx + dx * Math.cos(rot) - dy * Math.sin(rot),
+              y: cy + dx * Math.sin(rot) + dy * Math.cos(rot),
+            };
+          });
     const ox = 0;
     const oy = -sb.height / 2 - ROTATE_HANDLE_OFFSET;
     const rhx = cx + ox * Math.cos(rot) - oy * Math.sin(rot);

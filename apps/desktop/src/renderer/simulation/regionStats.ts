@@ -1,6 +1,6 @@
 import { TOWN_LOCATION_IDS, type TownLocationId } from "./regionPositions";
-import { TOWN_REGIONS } from "./town/regionLayout";
 import type { SimAgentView } from "./store/simulationStore";
+import { TOWN_REGIONS } from "./town/regionLayout";
 
 export type RegionStat = {
   id: TownLocationId;

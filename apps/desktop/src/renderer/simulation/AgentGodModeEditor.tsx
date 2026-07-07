@@ -1,5 +1,5 @@
-import { patchSimulationAgent } from "@/services/simulation/api";
 import { notifyError, notifySuccess } from "@/lib/toast";
+import { patchSimulationAgent } from "@/services/simulation/api";
 import type { SimAgentView } from "@/simulation/store/simulationStore";
 import { useSimulationUiStore } from "@/simulation/store/simulationStore";
 import { Loader2 } from "lucide-react";
@@ -25,11 +25,7 @@ export function AgentGodModeEditor({ agent }: AgentGodModeEditorProps) {
   }, [agent.agentId, agent.mood, agent.goal, agent.money]);
 
   const dirty = useMemo(() => {
-    return (
-      mood !== agent.mood ||
-      goal !== agent.goal ||
-      money !== agent.money
-    );
+    return mood !== agent.mood || goal !== agent.goal || money !== agent.money;
   }, [agent.goal, agent.money, agent.mood, goal, money, mood]);
 
   async function handleApply() {

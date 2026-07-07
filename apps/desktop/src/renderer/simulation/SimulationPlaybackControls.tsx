@@ -1,5 +1,9 @@
 import { Button, IconButton } from "@/components/ui";
 import { describeError } from "@/lib/errors";
+import {
+  SimulationTimeline,
+  timelinePositionLabel,
+} from "@/simulation/SimulationTimeline";
 import { MIN_PLAYBACK_TICK, parseJumpTarget } from "@/simulation/jumpTarget";
 import {
   describeTickSnapshot,
@@ -9,20 +13,10 @@ import {
 } from "@/simulation/playback";
 import { hourForTick } from "@/simulation/runModel";
 import {
-  SimulationTimeline,
-  timelinePositionLabel,
-} from "@/simulation/SimulationTimeline";
-import {
-  useSimulationUiStore,
   type PlaybackSpeed,
+  useSimulationUiStore,
 } from "@/simulation/store/simulationStore";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Pause,
-  Play,
-  Radio,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, Pause, Play, Radio } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 const BASE_STEP_MS = 600;
@@ -57,7 +51,9 @@ export function SimulationJumpControls() {
   const onJump = () => {
     const target = parseJumpTarget(jumpInput, total);
     if (target === null) {
-      setSeekError(`请输入 ${MIN_PLAYBACK_TICK}–${total} 的 tick 或「第 N 天」`);
+      setSeekError(
+        `请输入 ${MIN_PLAYBACK_TICK}–${total} 的 tick 或「第 N 天」`,
+      );
       return;
     }
     setJumpInput("");
@@ -196,7 +192,9 @@ export function SimulationPlaybackControls({
   const onJump = () => {
     const target = parseJumpTarget(jumpInput, total);
     if (target === null) {
-      setSeekError(`请输入 ${MIN_PLAYBACK_TICK}–${total} 的 tick 或「第 N 天」`);
+      setSeekError(
+        `请输入 ${MIN_PLAYBACK_TICK}–${total} 的 tick 或「第 N 天」`,
+      );
       return;
     }
     setJumpInput("");
@@ -211,7 +209,13 @@ export function SimulationPlaybackControls({
     (pos >= 0 ? hourForTick(pos) : hourForTick(run.tick));
 
   return (
-    <div className={compact ? "flex min-w-0 items-center gap-1.5" : "flex min-w-0 flex-1 flex-col gap-1.5"}>
+    <div
+      className={
+        compact
+          ? "flex min-w-0 items-center gap-1.5"
+          : "flex min-w-0 flex-1 flex-col gap-1.5"
+      }
+    >
       <div className="flex min-w-0 items-center gap-2">
         <div className="flex shrink-0 items-center gap-0.5">
           <IconButton

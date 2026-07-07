@@ -245,9 +245,7 @@ function spawnTransport(config: SpawnConfig): Transport {
   });
   child.on("error", (err) => closeCb?.(err));
   child.on("close", (code) =>
-    closeCb?.(
-      code ? formatSidecarExitError(code, stderrBuf) : undefined,
-    ),
+    closeCb?.(code ? formatSidecarExitError(code, stderrBuf) : undefined),
   );
 
   return {

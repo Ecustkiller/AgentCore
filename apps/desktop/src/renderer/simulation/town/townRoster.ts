@@ -43,15 +43,16 @@ export const TOWN_AGENT_HOME: Record<TownAgentId, string> = {
 };
 
 /** Small XZ nudge so co-located NPCs don't stack (visual only). */
-export const TOWN_SPAWN_OFFSET: Record<TownAgentId, { x: number; z: number }> = {
-  lin: { x: 0, z: 0 },
-  chen: { x: -2, z: 1.5 },
-  zhao: { x: -2.5, z: 1.5 },
-  wang: { x: 2.5, z: -1.5 },
-  liu: { x: 0, z: 0 },
-  sun: { x: 0, z: 0 },
-  zhang: { x: 0, z: 0 },
-  xu: { x: 0, z: 0 },
-  wu: { x: 3, z: -2 },
-  yang: { x: 2.5, z: -1.5 },
-};
+export const TOWN_SPAWN_OFFSET: Record<TownAgentId, { x: number; z: number }> =
+  {
+    lin: { x: 0, z: 0 },
+    chen: { x: -2, z: 1.5 },
+    zhao: { x: -2.5, z: 1.5 },
+    wang: { x: 2.5, z: -1.5 },
+    liu: { x: 0, z: 0 },
+    sun: { x: 0, z: 0 },
+    zhang: { x: 0, z: 0 },
+    xu: { x: 0, z: 0 },
+    wu: { x: 3, z: -2 },
+    yang: { x: 2.5, z: -1.5 },
+  };

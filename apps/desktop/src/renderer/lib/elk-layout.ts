@@ -329,14 +329,7 @@ export async function computeLayout(
   resolveOverlaps(positions, layout, subTeams, containsTeam, nodeSpacing);
   alignSubTeamMembers(positions, subTeams, layout, nodeSpacing);
 
-  minimizeCrossings(
-    positions,
-    edges,
-    layout,
-    subTeamNodeSet,
-    3,
-    nodeSpacing,
-  );
+  minimizeCrossings(positions, edges, layout, subTeamNodeSet, 3, nodeSpacing);
 
   alignRevisionChains(positions, edges, layout);
   resolveOverlaps(positions, layout, subTeams, containsTeam, nodeSpacing);

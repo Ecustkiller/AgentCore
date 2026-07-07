@@ -41,7 +41,8 @@ export function argumentTitle(body: string): string {
   }
 
   const firstLine = trimmed.split("\n")[0] ?? "";
-  const firstSentence = firstLine.split(/[。；]/)[0]?.trim() || firstLine.trim();
+  const firstSentence =
+    firstLine.split(/[。；]/)[0]?.trim() || firstLine.trim();
   return summarizeText(firstSentence, ARGUMENT_TITLE_MAX);
 }
 
@@ -73,7 +74,10 @@ function splitBlocks(text: string): string[] {
     return lines.map((l) => l.trim()).filter(Boolean);
   }
 
-  const paragraphs = trimmed.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  const paragraphs = trimmed
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
   if (paragraphs.length > 1) return paragraphs;
 
   return [trimmed];
@@ -124,7 +128,6 @@ export function sidePositionSummary(
   const trimmed = output.trim();
   if (!trimmed) return "";
   const args = parseSpeechArguments(trimmed);
-  const raw =
-    args.length > 0 && args[0].title ? args[0].title : trimmed;
+  const raw = args.length > 0 && args[0].title ? args[0].title : trimmed;
   return summarizeText(raw, maxLen);
 }

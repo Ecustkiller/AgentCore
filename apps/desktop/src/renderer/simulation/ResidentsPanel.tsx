@@ -1,6 +1,6 @@
+import { AgentGodModeEditor } from "@/simulation/AgentGodModeEditor";
 import type { SimAgentView } from "@/simulation/store/simulationStore";
 import { useSimulationUiStore } from "@/simulation/store/simulationStore";
-import { AgentGodModeEditor } from "@/simulation/AgentGodModeEditor";
 import {
   TOWN_AGENT_IDS,
   TOWN_AGENT_NAMES,
@@ -105,11 +105,15 @@ function AgentDetail({ agent }: { agent: SimAgentView }) {
           </div>
           <div className="flex justify-between gap-2">
             <dt className="text-muted-foreground">位置</dt>
-            <dd className="text-right text-foreground">{agent.location || "—"}</dd>
+            <dd className="text-right text-foreground">
+              {agent.location || "—"}
+            </dd>
           </div>
           <div className="flex justify-between gap-2">
             <dt className="text-muted-foreground">活动</dt>
-            <dd className="text-right text-foreground">{agent.activity || "—"}</dd>
+            <dd className="text-right text-foreground">
+              {agent.activity || "—"}
+            </dd>
           </div>
         </dl>
         {agent.lastThought?.trim() ? (

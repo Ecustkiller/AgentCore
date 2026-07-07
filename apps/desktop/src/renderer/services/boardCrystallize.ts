@@ -129,8 +129,7 @@ export function buildCrystallizedElements(
     });
 
     // Only a completed worker yields a product card; a failed one leaves just its red node.
-    const artifact =
-      run.status === "completed" ? artifactFromRun(run) : null;
+    const artifact = run.status === "completed" ? artifactFromRun(run) : null;
     if (artifact) {
       const artId = `crys-art-${run.id}`;
       const artY = y + (rowH - ART_H) / 2;
