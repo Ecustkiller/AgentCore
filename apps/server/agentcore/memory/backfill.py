@@ -45,9 +45,7 @@ async def is_user_memory_empty(store: MemoryStore, user_id: str) -> bool:
         return False
     if await store.list(user_id):
         return False
-    if await store.project_scopes(user_id):
-        return False
-    return True
+    return not await store.project_scopes(user_id)
 
 
 async def backfill_empty_memory_watermarks(

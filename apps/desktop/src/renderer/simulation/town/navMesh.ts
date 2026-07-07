@@ -1,4 +1,4 @@
-import * as THREE from "three";
+import type * as THREE from "three";
 import { computeTownPath as computeGridPath } from "./townPathGrid";
 
 /** @deprecated Kept for TownCanvas memo signature — pathing uses townPathGrid. */

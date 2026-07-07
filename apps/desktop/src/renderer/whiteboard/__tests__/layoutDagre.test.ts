@@ -44,7 +44,8 @@ describe("layoutDagre", () => {
     const b = next.find((e) => e.id === "b");
     expect(a).toBeDefined();
     expect(b).toBeDefined();
-    expect(b!.x).toBeGreaterThan(a!.x);
+    if (!a || !b) throw new Error("layout nodes missing");
+    expect(b.x).toBeGreaterThan(a.x);
     expect(next.length).toBe(elements.length);
   });
 });

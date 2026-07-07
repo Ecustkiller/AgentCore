@@ -2,7 +2,6 @@ import type { Vec3 } from "@agentcore/contract-types";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useLayoutEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import type { TownPathfinding } from "./navMesh";
 import {
   type SimVec3Target,
   isReplayActive,
@@ -12,6 +11,7 @@ import {
 } from "../store/simulationStore";
 import { NpcAvatar } from "./NpcAvatar";
 import { targetsEqual } from "./agentSpawn";
+import type { TownPathfinding } from "./navMesh";
 import { computeTownPath } from "./navMesh";
 import { useTownCharacterAssets } from "./townCharacterAssets";
 import { LOD_FAR, LOD_NEAR, type LodLevel } from "./townLod";
@@ -62,7 +62,7 @@ export function TownNpc({
     lastTarget.current = target ? { ...target } : null;
     activePath.current = [];
     pathIndex.current = 0;
-  }, [agentId, spawnPosition.x, spawnPosition.y, spawnPosition.z]);
+  }, [agentId, spawnPosition]);
 
   const applyLod = (next: LodLevel) => {
     if (lodRef.current === next) return;
@@ -166,6 +166,7 @@ export function TownNpc({
   });
 
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: 3D NPC pick is pointer-driven; roster list provides keyboard path.
     <group
       ref={groupRef}
       position={[spawnPosition.x, spawnPosition.y, spawnPosition.z]}

@@ -22,7 +22,7 @@ export function AgentGodModeEditor({ agent }: AgentGodModeEditorProps) {
     setMood(agent.mood);
     setGoal(agent.goal);
     setMoney(agent.money);
-  }, [agent.agentId, agent.mood, agent.goal, agent.money]);
+  }, [agent]);
 
   const dirty = useMemo(() => {
     return mood !== agent.mood || goal !== agent.goal || money !== agent.money;

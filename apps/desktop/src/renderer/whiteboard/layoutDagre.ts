@@ -71,7 +71,6 @@ export function layoutDagre(
   for (const el of nodes) {
     const n = g.node(el.id);
     if (!n) continue;
-    const b = elementBox(el);
     target.set(el.id, {
       x: anchor.x + (n.x - n.width / 2) - minX,
       y: anchor.y + (n.y - n.height / 2) - minY,

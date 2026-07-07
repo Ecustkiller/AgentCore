@@ -194,7 +194,8 @@ export function formatSidecarExitError(
       .map((line) => line.trim())
       .filter(Boolean);
     for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i]!;
+      const line = lines[i];
+      if (!line) continue;
       if (/^(?:\w+Error|\w+Exception):\s*.+/.test(line)) {
         return new Error(`sidecar 启动失败：${line}`);
       }

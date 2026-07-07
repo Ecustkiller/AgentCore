@@ -35,6 +35,15 @@ describe("dispatchSimulationEvent", () => {
       tickCache: {},
       tickEvents: [],
       activeInteractions: {},
+      replayEventLog: [],
+      replayEventsRunId: null,
+      replayEventsLoadedUpTo: 0,
+      worldModifiers: {
+        market_price_multiplier: 1,
+        storm_active: false,
+        festival_active: false,
+        square_attraction_boost: 0,
+      },
     });
     useSimulationNavStore.setState({ targets: {} });
   });
@@ -133,5 +142,89 @@ describe("dispatchSimulationEvent", () => {
 
     const events = useSimulationUiStore.getState().tickEvents;
     expect(events[0]?.interaction?.kind).toBe("conversation");
+  });
+
+  it("applies inline snapshot from sim.tick_frame", () => {
+    dispatchSimulationEvent(
+      {
+        type: "sim.tick_frame",
+        timestamp: "2026-01-01T00:00:00.003Z",
+        payload: {
+          run_id: "run-1",
+          tick_number: 1,
+          snapshot: {
+            tick: 1,
+            hour: 9,
+            agents: {
+              lin: {
+                agent_id: "lin",
+                name: "林小梅",
+                role: "面包师",
+                location: "市场",
+                position: { x: 24, y: 0, z: 0 },
+                activity: "赶路",
+                mood: 0,
+                goal: "",
+                last_thought: "",
+              },
+            },
+            event_log: [],
+          },
+        },
+      },
+      { runId: "run-1" },
+    );
+
+    expect(useSimulationNavStore.getState().targets.lin).toEqual({
+      x: 24,
+      y: 0,
+      z: 0,
+    });
+    expect(
+      useSimulationUiStore.getState().tickCache[1]?.agents?.lin?.location,
+    ).toBe("市场");
+    expect(useSimulationUiStore.getState().tickEvents).toHaveLength(0);
+  });
+
+  it("updates world modifiers and timeline from sim.world_event", () => {
+    dispatchSimulationEvent(
+      {
+        type: "sim.world_event",
+        timestamp: "2026-01-01T00:00:00.004Z",
+        payload: {
+          run_id: "run-1",
+          tick: 3,
+          event: {
+            event_id: "wx-1",
+            kind: "daily",
+            event_type: "market_open",
+            title: "市场开市",
+            description: "商贩开始摆摊。",
+            tick_started: 3,
+            duration_ticks: 4,
+            source: "scheduler",
+          },
+          modifiers: {
+            market_price_multiplier: 1.2,
+            storm_active: false,
+            festival_active: false,
+            square_attraction_boost: 0,
+          },
+        },
+      },
+      { runId: "run-1" },
+    );
+
+    expect(useSimulationUiStore.getState().worldModifiers).toEqual({
+      market_price_multiplier: 1.2,
+      storm_active: false,
+      festival_active: false,
+      square_attraction_boost: 0,
+    });
+
+    const events = useSimulationUiStore.getState().tickEvents;
+    expect(events[0]?.type).toBe("sim.world_event");
+    expect(events[0]?.summary).toBe("市场开市");
+    expect(events[0]?.worldEvent?.event_type).toBe("market_open");
   });
 });

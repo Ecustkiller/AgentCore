@@ -1,6 +1,6 @@
 import type { GroundSurfaceKind } from "./townTextures";
 
-/** Ground paving, roads, and lawn patches — visual only, no nav impact. */
+/** Ground paving, roads, and lawn patches — walkability mask for townPathGrid. */
 
 export type GroundPatch = {
   position: readonly [number, number, number];

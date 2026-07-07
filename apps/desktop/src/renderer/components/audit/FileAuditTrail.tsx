@@ -46,9 +46,11 @@ function FileAuditEventRow({ event }: { event: AgentAuditEvent }) {
         <Button
           variant="ghost"
           className="h-6 shrink-0 px-1.5 text-primary hover:bg-primary/10"
-          onClick={() =>
-            showRunDetail(event.turn_id, event.run_id!, event.action)
-          }
+          onClick={() => {
+            const runId = event.run_id;
+            if (!runId) return;
+            showRunDetail(event.turn_id, runId, event.action);
+          }}
         >
           <span className="flex items-center gap-0.5">
             详情

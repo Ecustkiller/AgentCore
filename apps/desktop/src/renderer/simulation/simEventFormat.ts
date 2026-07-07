@@ -4,6 +4,7 @@ import type {
   SimInteractionPayload,
   SimTickEndedPayload,
   SimTickStartedPayload,
+  SimWorldEventPayload,
 } from "@agentcore/contract-types";
 
 export function formatSimEventSummary(
@@ -49,6 +50,13 @@ export function formatSimEventSummary(
         summary: `[${interaction.kind}] ${interaction.summary}`,
       };
     }
+    case "sim.world_event": {
+      const p = payload as SimWorldEventPayload;
+      const { event } = p;
+      const summary =
+        event.title.trim() || event.description.trim() || event.event_type;
+      return { summary };
+    }
     default:
       return { summary: type };
   }
@@ -60,4 +68,5 @@ export const SIM_EVENT_LABELS: Record<string, string> = {
   "sim.agent_action": "居民行动",
   "sim.agent_state": "居民状态",
   "sim.interaction": "居民交互",
+  "sim.world_event": "世界事件",
 };

@@ -12,7 +12,6 @@ export function StageDivider({
     <div
       id={id}
       className="my-3 flex h-9 scroll-mt-28 items-center gap-3"
-      role="separator"
       aria-label={label}
     >
       <span className="h-px flex-1 border-t border-dashed border-border" />

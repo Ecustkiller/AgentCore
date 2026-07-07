@@ -68,21 +68,32 @@ function evenCuts(total, frames) {
   return [...cuts].sort((a, b) => a - b);
 }
 
+/** Turn-fold vectors only — same contract as protocol-conformance harness isTurnFixture. */
+function isTurnFixture(raw) {
+  if (typeof raw !== "object" || raw === null) return false;
+  const projected = raw.projected;
+  return (
+    typeof raw.name === "string" &&
+    Array.isArray(raw.events) &&
+    typeof projected === "object" &&
+    projected !== null &&
+    "status" in projected
+  );
+}
+
 async function loadScenarios() {
   const files = (await readdir(fixturesDir))
     .filter((f) => f.endsWith(".json"))
     .sort();
   const scenarios = [];
   for (const file of files) {
-    const { name, description, events } = JSON.parse(
-      await readFile(resolve(fixturesDir, file), "utf8"),
-    );
-    if (name)
-      scenarios.push({
-        name,
-        description: description ?? "",
-        events: Array.isArray(events) ? events.length : 0,
-      });
+    const raw = JSON.parse(await readFile(resolve(fixturesDir, file), "utf8"));
+    if (!isTurnFixture(raw)) continue;
+    scenarios.push({
+      name: raw.name,
+      description: raw.description ?? "",
+      events: raw.events.length,
+    });
   }
   return scenarios;
 }
@@ -178,27 +189,49 @@ async function main() {
 
   let ok = 0;
   const failures = [];
+  /** Full Vite/React boot only when the scenario changes; frame scrubs reuse the page. */
+  let bootGeneration = 0;
+  let lastScenarioName = null;
+  const t0 = performance.now();
   for (const [i, shot] of shots.entries()) {
     const label = `[${i + 1}/${shots.length}] ${shot.file}`;
     pageErrors.length = 0;
     let failure = null;
+    const shotStarted = performance.now();
     try {
-      // A distinct search param forces a full reload per shot (hash-only changes
-      // don't reload), so every shot starts from a clean app boot.
+      const scenarioChanged = shot.name !== lastScenarioName;
+      if (scenarioChanged) {
+        bootGeneration += 1;
+        lastScenarioName = shot.name;
+      }
       const url = new URL("index.web.html", base);
-      url.searchParams.set("shoot", String(i));
+      url.searchParams.set("shoot", String(bootGeneration));
       const viewSuffix = VIEW === "canvas" ? "&view=canvas" : "";
       const zoomSuffix = ZOOM ? `&zoom=${encodeURIComponent(ZOOM)}` : "";
       url.hash =
         shot.k === null
           ? `/preview?s=${encodeURIComponent(shot.name)}${viewSuffix}${zoomSuffix}`
           : `/preview?s=${encodeURIComponent(shot.name)}&k=${shot.k}${viewSuffix}${zoomSuffix}`;
-      await page.goto(url.href, { waitUntil: "load", timeout: 30_000 });
+      try {
+        await page.goto(url.href, {
+          waitUntil: scenarioChanged ? "load" : "domcontentloaded",
+          timeout: 30_000,
+        });
+      } catch (err) {
+        // Fast frame scrubs can interrupt an in-flight navigation; one retry is enough.
+        if (!String(err?.message ?? err).includes("interrupted")) throw err;
+        await page.goto(url.href, {
+          waitUntil: scenarioChanged ? "load" : "domcontentloaded",
+          timeout: 30_000,
+        });
+      }
       const frameSel = shot.k === null ? "full" : String(shot.k);
       await page.waitForSelector(
         `[data-preview-scenario="${shot.name}"][data-preview-frame="${frameSel}"]`,
         { timeout: 15_000 },
       );
+      // Let any in-flight client-side navigation from the prior frame scrub settle.
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
       await page.evaluate(() => document.fonts?.ready).catch(() => {});
       // Let async renderers (elk team-graph layout, mermaid, katex) settle.
       await page.waitForTimeout(SETTLE_MS);
@@ -226,14 +259,16 @@ async function main() {
       console.error(`  \u2717 ${label} — ${failure}`);
     } else {
       ok += 1;
-      console.log(`  \u2713 ${label}`);
+      const ms = Math.round(performance.now() - shotStarted);
+      console.log(`  \u2713 ${label} (${ms}ms)`);
     }
   }
 
   await browser.close();
   await server.close();
 
-  console.log(`\nDone: ${ok}/${shots.length} → ${outDir}`);
+  const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+  console.log(`\nDone: ${ok}/${shots.length} in ${elapsed}s → ${outDir}`);
   if (failures.length) {
     console.error(`${failures.length} failed:`);
     for (const f of failures) console.error(`  - ${f.name}: ${f.error}`);

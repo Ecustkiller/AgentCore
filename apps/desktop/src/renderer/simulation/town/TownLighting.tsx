@@ -4,15 +4,24 @@ import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { dayNightPaletteForHour } from "../dayNight";
 import { simClockFromTick } from "../simTime";
-import { useSimulationUiStore } from "../store/simulationStore";
+import {
+  modifiersAtViewTick,
+  useSimulationUiStore,
+} from "../store/simulationStore";
+import { useSimulationView } from "../viewState";
+import { applyWorldModifierPalette } from "../worldModifierPalette";
 
 export function TownLighting() {
   const run = useSimulationUiStore((s) => s.run);
   const playhead = useSimulationUiStore((s) => s.playhead);
+  const { viewModifiers } = useSimulationView();
   const viewTick = playhead ?? run?.tick ?? 0;
   const hour = simClockFromTick(viewTick).hour;
 
-  const palette = useMemo(() => dayNightPaletteForHour(hour), [hour]);
+  const palette = useMemo(() => {
+    const base = dayNightPaletteForHour(hour);
+    return applyWorldModifierPalette(base, viewModifiers);
+  }, [hour, viewModifiers]);
 
   const ambientRef = useRef<THREE.AmbientLight>(null);
   const hemiRef = useRef<THREE.HemisphereLight>(null);
@@ -20,13 +29,18 @@ export function TownLighting() {
   const { scene } = useThree();
 
   useFrame(() => {
-    const next = dayNightPaletteForHour(
-      simClockFromTick(
-        useSimulationUiStore.getState().playhead ??
-          useSimulationUiStore.getState().run?.tick ??
-          0,
-      ).hour,
+    const state = useSimulationUiStore.getState();
+    const tick = state.playhead ?? state.run?.tick ?? 0;
+    const replayActive =
+      state.playbackMode === "replay" || state.playhead !== null;
+    const modifiers = modifiersAtViewTick(
+      state.worldModifiers,
+      state.tickCache,
+      tick,
+      replayActive,
     );
+    const base = dayNightPaletteForHour(simClockFromTick(tick).hour);
+    const next = applyWorldModifierPalette(base, modifiers);
 
     scene.background = new THREE.Color(next.background);
     if (scene.fog instanceof THREE.Fog) {
@@ -52,7 +66,14 @@ export function TownLighting() {
   return (
     <>
       <color attach="background" args={[palette.background]} />
-      <fog attach="fog" args={[palette.fog, 100, 220]} />
+      <fog
+        attach="fog"
+        args={[
+          palette.fog,
+          viewModifiers.storm_active ? 55 : 100,
+          viewModifiers.storm_active ? 140 : 220,
+        ]}
+      />
       <ambientLight
         ref={ambientRef}
         intensity={palette.ambientIntensity}

@@ -1,5 +1,6 @@
 import {
   agentsAtViewTick,
+  modifiersAtViewTick,
   tickEventsAtView,
   useSimulationUiStore,
 } from "@/simulation/store/simulationStore";
@@ -13,6 +14,8 @@ export function useSimulationView() {
   const agents = useSimulationUiStore((s) => s.agents);
   const tickCache = useSimulationUiStore((s) => s.tickCache);
   const tickEvents = useSimulationUiStore((s) => s.tickEvents);
+  const replayEventLog = useSimulationUiStore((s) => s.replayEventLog);
+  const worldModifiers = useSimulationUiStore((s) => s.worldModifiers);
 
   const viewTick = playhead ?? runTick ?? 0;
   const replayActive = playbackMode === "replay" || playhead !== null;
@@ -23,9 +26,15 @@ export function useSimulationView() {
   );
 
   const viewEvents = useMemo(
-    () => tickEventsAtView(tickEvents, viewTick, replayActive),
-    [tickEvents, viewTick, replayActive],
+    () => tickEventsAtView(tickEvents, replayEventLog, viewTick, replayActive),
+    [tickEvents, replayEventLog, viewTick, replayActive],
   );
 
-  return { viewTick, viewAgents, viewEvents, replayActive };
+  const viewModifiers = useMemo(
+    () =>
+      modifiersAtViewTick(worldModifiers, tickCache, viewTick, replayActive),
+    [worldModifiers, tickCache, viewTick, replayActive],
+  );
+
+  return { viewTick, viewAgents, viewEvents, viewModifiers, replayActive };
 }

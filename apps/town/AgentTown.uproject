@@ -1,0 +1,16 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.5",
+	"Category": "",
+	"Description": "AgentCore simulation observation client (AgentTown)",
+	"Modules": [
+		{
+			"Name": "AgentTown",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"TargetPlatforms": [
+		"Windows"
+	]
+}

@@ -214,6 +214,40 @@ describe("dispatchSimulationEvent replay gate", () => {
       z: 0,
     });
   });
+
+  it("ignores sim.tick_frame while replaying", () => {
+    dispatchSimulationEvent(
+      {
+        type: "sim.tick_frame",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        payload: {
+          run_id: "run-1",
+          tick_number: 2,
+          snapshot: {
+            tick: 2,
+            hour: 10,
+            agents: {
+              lin: {
+                agent_id: "lin",
+                name: "林小梅",
+                role: "面包师",
+                location: "广场",
+                position: { x: 99, y: 0, z: 99 },
+                activity: "",
+                mood: 0,
+                goal: "",
+                last_thought: "",
+              },
+            },
+            event_log: [],
+          },
+        },
+      },
+      { runId: "run-1" },
+    );
+    expect(useSimulationNavStore.getState().targets.lin).toBeUndefined();
+    expect(useSimulationUiStore.getState().tickCache[2]).toBeUndefined();
+  });
 });
 
 describe("seekToTick generation", () => {
@@ -261,7 +295,7 @@ describe("seekToTick generation", () => {
         tick: 2,
         agents: {
           lin: {
-            ...SAMPLE_SNAPSHOT.agents!.lin,
+            ...SAMPLE_SNAPSHOT.agents?.lin,
             location: "广场",
             position: { x: 0, y: 0, z: 0 },
           },

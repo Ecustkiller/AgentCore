@@ -32,16 +32,13 @@ describe("parseCrossExamResponse", () => {
 
   it("parses JSON inside markdown fence", () => {
     const qs = ["你这条有出处吗？"];
-    const raw =
-      "说明：以下是我的回答\n```json\n" +
-      JSON.stringify([
-        {
-          question_index: 1,
-          answer: "暂无统一出处【待核实·推断】",
-          directly_addressed: false,
-        },
-      ]) +
-      "\n```";
+    const raw = `说明：以下是我的回答\n\`\`\`json\n${JSON.stringify([
+      {
+        question_index: 1,
+        answer: "暂无统一出处【待核实·推断】",
+        directly_addressed: false,
+      },
+    ])}\n\`\`\``;
     const got = parseCrossExamResponse(qs, raw);
     expect(got).toHaveLength(1);
     expect(got[0].ok).toBe(false);
