@@ -10,15 +10,16 @@ from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import LLMUpstreamError, error_fields_for
 from agentcore.core.logging import get_logger
-from agentcore.llm.config import ModelProfile, build_request
-from agentcore.llm.deepseek import DeepSeekProvider
-from agentcore.llm.protocol import LLMMessage, TokenUsage
+from agentcore.llm.profiles import ModelProfile, build_request
+from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
+from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
+from agentcore.llm.tools_gate import TOOLS_UNAVAILABLE_RUNTIME_MESSAGE
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.facts import LlmCallFact, NoteFact, RoundBoundaryFact, record_turn_fact
 from agentcore.runtime.loop_controller import Intervention, LoopController
 from agentcore.runtime.verify import finish_guard, format_guard_steer
 
-from .directive import Continue, LoopDirective, Return, Rework, SwitchModel
+from .directive import Continue, LoopDirective, Return, Rework
 from .outcome import RoundOutcome
 from .segments import tool_calls_to_dicts
 from .stream import stream_llm_round
@@ -75,6 +76,8 @@ class LlmRoundOutput:
     reasoning: str
     tool_calls: list[Any]
     usage: TokenUsage | None
+    empty_diagnosis: str | None = None
+    empty_raw_preview: str | None = None
 
 
 @dataclass(frozen=True)
@@ -89,12 +92,13 @@ class LlmRoundFailure:
 
     error_code: str
     error_message: str
+    error_context: dict | None = None
     upstream_error: bool = False
 
 
 async def run_llm_round(
     *,
-    llm: DeepSeekProvider,
+    llm: OpenAICompatibleProvider,
     profile: ModelProfile,
     messages: list[LLMMessage],
     investigation_tools: frozenset[str],
@@ -117,8 +121,10 @@ async def run_llm_round(
         model=active_model,
     )
     try:
-        round_content, round_reasoning, round_tool_calls, usage = await stream_llm_round(
-            llm, request, emit_content, emit_reasoning, on_tool_progress
+        round_content, round_reasoning, round_tool_calls, usage, empty_diagnosis, empty_raw_preview = (
+            await stream_llm_round(
+                llm, request, emit_content, emit_reasoning, on_tool_progress
+            )
         )
     except Exception as e:
         logger.error(
@@ -129,7 +135,7 @@ async def run_llm_round(
         )
         if raise_on_error:
             raise
-        code, message = error_fields_for(
+        code, message, context = error_fields_for(
             e,
             fallback_code=ErrorCode.LLM_ERROR,
             fallback_message="出了点问题，请稍后重试。",
@@ -137,6 +143,7 @@ async def run_llm_round(
         return LlmRoundFailure(
             error_code=code,
             error_message=message,
+            error_context=context,
             upstream_error=isinstance(e, LLMUpstreamError),
         )
 
@@ -167,6 +174,8 @@ async def run_llm_round(
         reasoning=round_reasoning,
         tool_calls=round_tool_calls,
         usage=usage,
+        empty_diagnosis=empty_diagnosis,
+        empty_raw_preview=empty_raw_preview,
     )
 
 
@@ -180,6 +189,8 @@ def decide_no_tool_round(
     annotate_citations: bool,
     citation_sink: list[dict[str, Any]] | None,
     finish_guard_reworks: int,
+    tools_offered: bool = False,
+    supports_tools: bool | None = None,
 ) -> LoopDirective:
     """Pick the directive for a round with no tool calls.
 
@@ -199,19 +210,14 @@ def decide_no_tool_round(
             return Rework()
         return Return()
 
-    fallback_model = profile.fallback_model
-    fallback_available = (
-        settings.engine_fallback_enabled
-        and fallback_model is not None
-        and fallback_model != (active_model or profile.model)
-    )
-    action = controller.empty_response_action(fallback_available=fallback_available)
-    if action is Intervention.FALLBACK:
-        assert fallback_model is not None  # fallback_available ⇒ a model exists
-        logger.warning("engine.fallback_model", fallback_model=fallback_model)
-        return SwitchModel(model=fallback_model)
+    action = controller.empty_response_action(fallback_available=False)
     if action is Intervention.FINALIZE:
         logger.warning("engine.degraded")
+        if tools_offered and supports_tools is False and not outcome.content:
+            return Return(
+                finish_reason=FinishReason.ERROR,
+                extra_content=TOOLS_UNAVAILABLE_RUNTIME_MESSAGE,
+            )
         return Return(finish_reason=FinishReason.DEGRADED)
     return Continue()
 

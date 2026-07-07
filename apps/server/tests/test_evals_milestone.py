@@ -13,7 +13,7 @@ from agentcore.evals.report import report_to_dict
 from agentcore.evals.runner import run_suite
 from agentcore.evals.seed_lint import lint_case
 from agentcore.evals.types import EvalCase, TurnOutcome
-from agentcore.llm.protocol import LLMResponse
+from agentcore.llm.provider.protocol import LLMResponse
 
 # --- 假 milestone provider ---------------------------------------------------
 

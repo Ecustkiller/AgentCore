@@ -275,6 +275,9 @@ export interface RunNode {
   /** The worker's authored 结论 (`debrief.summary`) or "" — a scan line for the whiteboard
    * card, NOT a truncation; null until `run_completed`. */
   outputSummary: string | null;
+  /** Workspace file paths the worker wrote (`run_completed.output_files`); empty until
+   * completed. Drives whiteboard `file` artifact cards (WB-003). */
+  outputFiles: string[];
   /** 完工交接简报 (run_completed): the worker's authored wrap-up — 结论 / 关键要点 / 关键假设 /
    * 建议下一步, each present only when written — rendered structured in the run-detail 摘要.
    * null when the worker authored none (辩手 / trivial worker / the captain). */

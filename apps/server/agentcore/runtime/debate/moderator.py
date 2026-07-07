@@ -24,7 +24,7 @@ from dataclasses import replace
 from typing import Any
 
 from agentcore.core.logging import get_logger
-from agentcore.llm.protocol import LLMMessage, LLMProvider, LLMRequest, TokenUsage
+from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, LLMRequest, TokenUsage
 from agentcore.runtime.debate.types import (
     STOP_ALL_FAILED,
     STOP_CONVERGED,
@@ -266,9 +266,18 @@ def _cross_exam_block(config: DebateConfig, cross_exam: Sequence[CrossExamExchan
     blocks: list[str] = []
     for cx in cross_exam:
         name = names.get(cx.target, cx.target)
-        qs = "\n".join(f"  - {q}" for q in cx.questions)
-        answer = _clip(cx.answer) if cx.ok and cx.answer.strip() else "（未正面作答 / 作答失败）"
-        blocks.append(f"### 对「{name}」的质询\n{qs}\n【{name} 的回答】\n{answer}")
+        lines: list[str] = []
+        for ex in cx.exchanges:
+            ans = (
+                _clip(ex.answer)
+                if ex.ok and ex.answer.strip()
+                else "（未正面作答 / 作答失败）"
+            )
+            lines.append(f"  Q: {ex.question}\n  A: {ans}")
+        if not lines:
+            continue
+        qa = "\n".join(lines)
+        blocks.append(f"### 对「{name}」的质询\n{qa}")
     body = "\n\n".join(blocks)
     return (
         "本轮【质询环节】问答（各方是否【正面】回答质询直接影响 engagement 记分——回避 / 答非所问 / "
@@ -919,7 +928,6 @@ class Moderator:
             model=self._model,
             temperature=0.0,
             stream=False,
-            thinking=True,
             scenario=f"{self._scenario}.{step}",
         )
         response = await self._llm.complete(request)

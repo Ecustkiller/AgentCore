@@ -2,7 +2,7 @@
 optional ``llm.request`` / ``llm.response`` body capture.
 
 Why a shared helper: a finished LLM call has full metrics in exactly two places —
-``DeepSeekProvider.complete`` (one-shot: memory / title) and
+``OpenAICompatibleProvider.complete`` (one-shot: memory / title) and
 ``engine._stream_llm_round`` (streaming: chat / worker). Both call
 :func:`log_llm_call`, so every call — including any future caller — lands one
 uniform ``llm.call`` line, attributed by ``scenario`` / ``model`` and (via
@@ -27,7 +27,7 @@ from typing import Any
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
-from agentcore.llm.protocol import LLMMessage, TokenUsage
+from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 
 logger = get_logger("agentcore.llm.call")
 

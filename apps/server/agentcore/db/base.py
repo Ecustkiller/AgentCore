@@ -28,8 +28,9 @@ engine = create_async_engine(
     # SQL echo is governed by its own switch (NOT `debug`) so DEBUG app logs don't
     # drown the AI turn logs under every statement + parameters (see config.py).
     echo=settings.db_echo,
-    pool_size=10,
+    pool_size=20,
     max_overflow=20,
+    pool_timeout=30,
     # Pooled connections die out-of-band (PG idle timeout, NAT/firewall drop, laptop
     # sleep, DB restart): a stale checkout then raises asyncpg "connection is closed"
     # as a one-off 500. pre_ping validates liveness before each use and transparently

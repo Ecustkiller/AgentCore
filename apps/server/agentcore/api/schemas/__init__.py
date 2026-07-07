@@ -42,6 +42,7 @@ from .auth import (
     DeleteAccountRequest,
     InviteListResponse,
     InviteResponse,
+    InviteStatsResponse,
     LoginMfaRequest,
     LoginRequest,
     LoginResponse,
@@ -96,7 +97,7 @@ from .handoff import (
     HandoffJobListResponse,
     HandoffJobSummary,
 )
-from .llm_key import LlmKeyStatusResponse, SetLlmKeyRequest
+from .llm_key import LlmKeyStatusResponse, SetBillingPreferenceRequest, SetLlmKeyRequest
 from .messages import (
     Citation,
     MemoryUpdateItemView,
@@ -105,6 +106,7 @@ from .messages import (
     MessageDetail,
     MessageListResponse,
     PausedTurnSummary,
+    PendingApprovalSummary,
     RecordTurnRequest,
     RecordTurnResponse,
     RegenerateMessageRequest,
@@ -222,6 +224,7 @@ __all__ = [
     "BatchCreateInviteRequest",
     "InviteResponse",
     "InviteListResponse",
+    "InviteStatsResponse",
     # admin
     "AdminUserResponse",
     "AdminUserListItem",
@@ -279,6 +282,7 @@ __all__ = [
     "SetDefaultModeRequest",
     # llm key
     "SetLlmKeyRequest",
+    "SetBillingPreferenceRequest",
     "LlmKeyStatusResponse",
     # workspaces
     "BindLocalWorkspaceRequest",
@@ -317,6 +321,7 @@ __all__ = [
     "SubmitRunRedirectRequest",
     "SubmitRunRedirectResponse",
     "PausedTurnSummary",
+    "PendingApprovalSummary",
     "TurnRecoveryResponse",
     "Citation",
     "RunsPayload",

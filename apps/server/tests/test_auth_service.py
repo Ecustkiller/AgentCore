@@ -179,7 +179,7 @@ class FakeInvites:
     async def list_recent(self, *, limit=100):
         return list(self.records.values())[:limit]
 
-    async def list_page(self, *, offset, limit, status=None, now=None):
+    async def list_page(self, *, offset, limit, status=None, search=None, now=None):
         now = now or datetime.now(UTC)
         rows = list(self.records.values())
 
@@ -194,6 +194,14 @@ class FakeInvites:
 
         if status is not None:
             rows = [r for r in rows if _status(r) == status]
+        if search:
+            needle = search.strip().lower()
+            rows = [
+                r
+                for r in rows
+                if needle in (getattr(r, "code", "") or "").lower()
+                or needle in (getattr(r, "created_by", "") or "").lower()
+            ]
         rows.sort(key=lambda r: getattr(r, "created_at", ""), reverse=True)
         total = len(rows)
         return rows[offset : offset + limit], total

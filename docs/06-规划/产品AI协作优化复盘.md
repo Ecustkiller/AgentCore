@@ -220,6 +220,6 @@ Worker 侧三条：
 - **中间可见性（UI）**：→ 见 [`04-前端/前端UX设计.md`](../04-前端/前端UX设计.md) §三
 - **共享便签**：→ 见 [`03-AI核心/Agent协作模式.md`](../03-AI核心/Agent协作模式.md) §便签墙
 - **Run Redirect（跑一半改方向）**：→ 见 [`03-AI核心/多轮编排与队员热修.md`](../03-AI核心/多轮编排与队员热修.md) §十
-- **多 Agent 编排参考**：→ 见 [`06-规划/多Agent编排优化-参考Cursor-Multitask.md`](./多Agent编排优化-参考Cursor-Multitask.md)
+- **多 Agent 编排参考**：→ 已迁入 [`03-AI核心/编排器与CEO主Agent.md`](/docs/03-AI核心/编排器与CEO主Agent.md) 和 [`03-AI核心/Agent协作模式.md`](/docs/03-AI核心/Agent协作模式.md)
 - **法律垂直场景（验证场景）**：→ 见 [`06-规划/法律垂直场景设计.md`](./法律垂直场景设计.md)
 - **重试机制（用户级 retry-failed）**：→ 见 [`03-AI核心/执行引擎架构设计.md`](../03-AI核心/执行引擎架构设计.md) §retry-failed、[`04-前端/前端UX设计.md`](../04-前端/前端UX设计.md) §三

@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from agentcore.core.logging import get_logger
-from agentcore.llm.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.runs.constants import (
     DEP_CONTEXT_BUDGET,
     DEP_SUMMARY_CHARS,

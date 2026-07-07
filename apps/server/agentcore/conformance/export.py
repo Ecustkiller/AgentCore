@@ -3,8 +3,10 @@
 Run from the server app: ``python -m agentcore.conformance.export``. Writes one
 ``<name>.json`` per vector into ``packages/protocol-conformance/fixtures/`` as
 ``{name, description, events, projected}`` — the single source the frontend folds are
-asserted against (``pnpm conformance``). Re-run after changing a vector or the oracle
-(then the frontends turn red until aligned, per protocol-conformance.mdc).
+asserted against (``pnpm conformance``). Also writes
+``simulation-region-positions.json`` from ``locations.REGION_POSITIONS``. Re-run after
+changing a vector or the oracle (then the frontends turn red until aligned, per
+protocol-conformance.mdc).
 
 Timestamps are assigned deterministically (the projection ignores them) so the committed
 golden does not churn between runs.
@@ -19,6 +21,10 @@ from typing import Any
 from agentcore.conformance.projection import project_turn
 from agentcore.conformance.vectors import VECTORS
 from agentcore.runtime.events import SSEEvent
+
+_NON_VECTOR_FIXTURES = frozenset(
+    {"simulation-region-positions.json", "simulation-m1-tick.json"}
+)
 
 # apps/server/agentcore/conformance/export.py → repo root is parents[4].
 _FIXTURES_DIR = (
@@ -51,19 +57,37 @@ def build_fixtures() -> list[dict[str, Any]]:
     return fixtures
 
 
+def build_region_positions_fixture() -> dict[str, Any]:
+    """Town region anchors — single source is locations.REGION_POSITIONS."""
+    from agentcore.simulation.world.locations import REGION_POSITIONS
+
+    return {
+        "regions": {name: pos.model_dump() for name, pos in REGION_POSITIONS.items()},
+    }
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n",
+        encoding="utf-8",
+    )
+
+
 def main() -> None:
     fixtures = build_fixtures()
+    region_positions = build_region_positions_fixture()
     _FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
-    # Drop stale fixtures so a removed/renamed vector never leaves an orphan golden.
+    # Drop stale vector goldens; preserve non-vector contract fixtures (region positions).
     for stale in _FIXTURES_DIR.glob("*.json"):
+        if stale.name in _NON_VECTOR_FIXTURES:
+            continue
         stale.unlink()
     for fx in fixtures:
-        path = _FIXTURES_DIR / f"{fx['name']}.json"
-        path.write_text(
-            json.dumps(fx, ensure_ascii=False, indent=2, default=str) + "\n",
-            encoding="utf-8",
-        )
-    print(f"conformance: wrote {len(fixtures)} fixtures → {_FIXTURES_DIR}")
+        _write_json(_FIXTURES_DIR / f"{fx['name']}.json", fx)
+    _write_json(_FIXTURES_DIR / "simulation-region-positions.json", region_positions)
+    print(
+        f"conformance: wrote {len(fixtures)} vector fixtures + region positions → {_FIXTURES_DIR}"
+    )
 
 
 if __name__ == "__main__":

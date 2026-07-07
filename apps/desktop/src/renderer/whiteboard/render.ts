@@ -15,6 +15,8 @@ import type { SceneElement, Viewport } from "./types";
 const GRID = 24;
 const STROKE_W = 2;
 const HANDLE = 9;
+/** Screen-space offset of the rotation handle above a single selection box. */
+const ROTATE_HANDLE_OFFSET = 28;
 
 export interface RenderInput {
   ctx: CanvasRenderingContext2D;
@@ -629,20 +631,24 @@ export function selectionHandlesScreen(
     const sb = elementScreenBox(el, v, byId);
     const hs = handlePositions(sb);
     const rot = el.rotation ?? 0;
-    if (rot === 0) return hs;
     const cx = sb.x + sb.width / 2;
     const cy = sb.y + sb.height / 2;
-    const cos = Math.cos(rot);
-    const sin = Math.sin(rot);
-    return hs.map((h) => {
-      const dx = h.x - cx;
-      const dy = h.y - cy;
-      return {
-        id: h.id,
-        x: cx + dx * cos - dy * sin,
-        y: cy + dx * sin + dy * cos,
-      };
-    });
+    const mapped = rot === 0
+      ? hs
+      : hs.map((h) => {
+          const dx = h.x - cx;
+          const dy = h.y - cy;
+          return {
+            id: h.id,
+            x: cx + dx * Math.cos(rot) - dy * Math.sin(rot),
+            y: cy + dx * Math.sin(rot) + dy * Math.cos(rot),
+          };
+        });
+    const ox = 0;
+    const oy = -sb.height / 2 - ROTATE_HANDLE_OFFSET;
+    const rhx = cx + ox * Math.cos(rot) - oy * Math.sin(rot);
+    const rhy = cy + ox * Math.sin(rot) + oy * Math.cos(rot);
+    return [...mapped, { id: "rotate", x: rhx, y: rhy }];
   }
   return handlePositions(unionScreenBox(selected, v, byId));
 }
@@ -736,6 +742,23 @@ function drawSelection(
 
   ctx.fillStyle = palette.background;
   for (const h of selectionHandlesScreen(selected, viewport, byId)) {
+    if (h.id === "rotate") {
+      const el = selected.length === 1 ? selected[0] : null;
+      if (el) {
+        const sb = elementScreenBox(el, viewport, byId);
+        const cx = sb.x + sb.width / 2;
+        const cy = sb.y + sb.height / 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(h.x, h.y);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(h.x, h.y, HANDLE / 2 + 1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      continue;
+    }
     ctx.beginPath();
     ctx.rect(h.x - HANDLE / 2, h.y - HANDLE / 2, HANDLE, HANDLE);
     ctx.fill();

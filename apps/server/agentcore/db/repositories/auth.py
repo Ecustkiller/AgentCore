@@ -7,8 +7,11 @@ from datetime import UTC, datetime
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agentcore.config import settings
 from agentcore.core.types import new_id
 from agentcore.db.models import Credentials, Invite, RefreshToken, UserLlmKey
+from agentcore.db.repositories._base import _ilike_pattern
+from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 
 
 def _invite_status_clause(status: str, *, now: datetime):
@@ -92,8 +95,8 @@ class CredentialsRepository:
 
 
 class UserLlmKeyRepository:
-    """The user's single BYOK DeepSeek key (one row per user). Stores only the
-    AES-256-GCM ciphertext; encryption/decryption is the service layer's job.
+    """The user's single BYOK LLM config (one row per user). Stores the AES-256-GCM
+    ciphertext plus endpoint/model; encryption/decryption is the service layer's job.
     """
 
     def __init__(self, session: AsyncSession):
@@ -105,17 +108,39 @@ class UserLlmKeyRepository:
         )
         return result.scalar_one_or_none()
 
-    async def upsert(self, *, user_id: str, api_key_enc: bytes) -> UserLlmKey:
-        """Insert or replace the user's key, resetting status to 'unchecked' (a
-        freshly set key has not been connectivity-tested yet)."""
+    async def upsert(
+        self,
+        *,
+        user_id: str,
+        api_key_enc: bytes,
+        base_url: str | None = None,
+        default_model: str | None = None,
+    ) -> UserLlmKey:
+        """Insert or replace the user's config, resetting status to 'unchecked'.
+
+        A freshly set key has not been connectivity-tested yet; ``supports_tools``
+        is cleared until the next probe.
+        """
+        resolved_base_url = (base_url or settings.platform_base_url).strip().rstrip("/")
+        resolved_model = (default_model or DEEPSEEK_V4_FLASH).strip()
         row = await self.get_by_user_id(user_id)
         if row is not None:
             row.api_key_enc = api_key_enc
+            row.base_url = resolved_base_url
+            row.default_model = resolved_model
             row.status = "unchecked"
+            row.supports_tools = None
             await self._session.commit()
             await self._session.refresh(row)
             return row
-        row = UserLlmKey(user_id=user_id, api_key_enc=api_key_enc, status="unchecked")
+        row = UserLlmKey(
+            user_id=user_id,
+            api_key_enc=api_key_enc,
+            base_url=resolved_base_url,
+            default_model=resolved_model,
+            status="unchecked",
+            supports_tools=None,
+        )
         self._session.add(row)
         await self._session.commit()
         await self._session.refresh(row)
@@ -124,6 +149,14 @@ class UserLlmKeyRepository:
     async def update_status(self, user_id: str, status: str) -> None:
         await self._session.execute(
             update(UserLlmKey).where(UserLlmKey.user_id == user_id).values(status=status)
+        )
+        await self._session.commit()
+
+    async def update_supports_tools(self, user_id: str, supports_tools: bool | None) -> None:
+        await self._session.execute(
+            update(UserLlmKey)
+            .where(UserLlmKey.user_id == user_id)
+            .values(supports_tools=supports_tools)
         )
         await self._session.commit()
 
@@ -259,10 +292,14 @@ class InviteRepository:
         offset: int,
         limit: int,
         status: str | None = None,
+        search: str | None = None,
         now: datetime | None = None,
     ) -> tuple[Sequence[Invite], int]:
         now = now or datetime.now(UTC)
         filters = [_invite_status_clause(status, now=now)] if status is not None else []
+        q = (search or "").strip()
+        if q:
+            filters.append(Invite.code.ilike(_ilike_pattern(q)))
 
         total_result = await self._session.execute(
             select(func.count()).select_from(Invite).where(*filters)
@@ -277,6 +314,20 @@ class InviteRepository:
             .limit(limit)
         )
         return result.scalars().all(), total
+
+    async def count_by_status(self, *, now: datetime | None = None) -> dict[str, int]:
+        """Return mutually-exclusive status counts plus total (mirrors list filters)."""
+        now = now or datetime.now(UTC)
+        total = await self._session.scalar(select(func.count()).select_from(Invite))
+        counts: dict[str, int] = {"total": int(total or 0)}
+        for status in ("active", "used", "expired", "revoked"):
+            n = await self._session.scalar(
+                select(func.count())
+                .select_from(Invite)
+                .where(_invite_status_clause(status, now=now))
+            )
+            counts[status] = int(n or 0)
+        return counts
 
     async def mark_used(self, invite_id: str, *, used_by: str) -> None:
         await self._session.execute(

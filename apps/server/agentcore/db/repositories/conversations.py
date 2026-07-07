@@ -16,6 +16,7 @@ from agentcore.db.models import (
     User,
 )
 
+from ._audit_cascade import delete_audit_for_conversation
 from ._base import _ilike_pattern, _sum_int
 from ._journal_cascade import delete_journal_for_conversation
 
@@ -406,6 +407,7 @@ class ConversationRepository:
             delete(CostEvent).where(CostEvent.conversation_id == conversation_id)
         )
         await delete_journal_for_conversation(self._session, conversation_id)
+        await delete_audit_for_conversation(self._session, conversation_id)
         # Conversation-tail 记忆已更新 records (keyed by conversation_id, no message FK).
         await self._session.execute(
             delete(MemoryUpdateRow).where(MemoryUpdateRow.conversation_id == conversation_id)
@@ -426,6 +428,41 @@ class ConversationRepository:
             .values(memory_synced_at=synced_at)
         )
         await self._session.commit()
+
+    async def reset_memory_synced_at_for_user(self, user_id: str) -> int:
+        """Clear ``memory_synced_at`` on live chat conversations (memory backfill).
+
+        Only rows that currently hold a watermark are updated, so repeated runs are
+        idempotent. Returns the number of conversations reset.
+        """
+        result = await self._session.execute(
+            update(Conversation)
+            .where(
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_(None),
+                Conversation.mode == "chat",
+                Conversation.memory_synced_at.isnot(None),
+            )
+            .values(memory_synced_at=None)
+            .returning(Conversation.id)
+        )
+        count = len(result.all())
+        await self._session.commit()
+        return count
+
+    async def count_memory_watermarked_chat_conversations(self, user_id: str) -> int:
+        """Live chat conversations that would be reset by ``reset_memory_synced_at_for_user``."""
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(Conversation)
+            .where(
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_(None),
+                Conversation.mode == "chat",
+                Conversation.memory_synced_at.isnot(None),
+            )
+        )
+        return int(result.scalar_one())
 
     async def set_compaction(
         self,

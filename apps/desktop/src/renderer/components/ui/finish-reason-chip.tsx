@@ -36,14 +36,21 @@ export const FINISH_REASON_META: Record<
 /** Top-of-bubble chip for abnormal turn endings (前端UX设计.md §一B finishReasonChip). */
 export function FinishReasonChip({
   reason,
+  diagnosisLabel,
   className,
 }: {
   reason: string | undefined;
+  /** When degraded due to empty response, show diagnosis instead of the default label. */
+  diagnosisLabel?: string;
   className?: string;
 }) {
   const meta = reason ? FINISH_REASON_META[reason] : undefined;
   if (!meta) return null;
-  const { label, Icon, tone } = meta;
+  const { Icon, tone } = meta;
+  const label =
+    reason === "degraded" && diagnosisLabel
+      ? `降级完成 · ${diagnosisLabel}`
+      : meta.label;
   return (
     <Badge
       tone={tone === "warning" ? "warning" : "muted"}

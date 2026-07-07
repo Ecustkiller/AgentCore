@@ -54,6 +54,7 @@ const sidecarApi: SidecarApi = {
   },
   cancel: async () => {},
   respond: async () => {},
+  runRedirect: async () => {},
   resume: async () => {
     throw new Error("sidecar unavailable in web preview");
   },

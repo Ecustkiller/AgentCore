@@ -44,7 +44,7 @@ def test_error_code_value_equals_name():
 
 
 def test_error_fields_for_preserves_agentcore_code_and_message():
-    code, message = error_fields_for(
+    code, message, err_ctx = error_fields_for(
         LLMAuthError(),
         fallback_code=ErrorCode.PIPELINE_ERROR,
         fallback_message="fallback should be ignored",
@@ -54,7 +54,7 @@ def test_error_fields_for_preserves_agentcore_code_and_message():
 
 
 def test_error_fields_for_fills_empty_coded_message_from_fallback():
-    code, message = error_fields_for(
+    code, message, err_ctx = error_fields_for(
         AgentCoreError(""),  # coded (base INTERNAL_ERROR) but no message
         fallback_code=ErrorCode.STREAM_ERROR,
         fallback_message="服务出错了",
@@ -64,7 +64,7 @@ def test_error_fields_for_fills_empty_coded_message_from_fallback():
 
 
 def test_error_fields_for_collapses_unknown_exception_to_fallback():
-    code, message = error_fields_for(
+    code, message, err_ctx = error_fields_for(
         ValueError("raw technical boom"),
         fallback_code=ErrorCode.PIPELINE_ERROR,
         fallback_message="raw technical boom",

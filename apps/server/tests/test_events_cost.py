@@ -92,3 +92,17 @@ def test_run_completed_defaults_to_full_zeroed_shapes():
         "total": 0,
         "currency": "USD",
     }
+
+
+def test_run_completed_carries_output_files_when_present():
+    ev = run_completed(
+        "run-1",
+        "agent-1",
+        output_summary="报告就绪",
+        duration_ms=10,
+        output_files=["draft.md", "out/report.md"],
+    )
+    assert ev.payload["output_files"] == ["draft.md", "out/report.md"]
+    assert "output_files" not in run_completed(
+        "r", "a", output_summary="", duration_ms=1
+    ).payload

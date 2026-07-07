@@ -1,6 +1,1 @@
-export {
-  DebateStream,
-  type DebateReadingWidth,
-  AskBubble,
-  ModeratorAvatar,
-} from "./stream/DebateStream";
+export { DebateArena as DebateStream } from "./arena/DebateArena";

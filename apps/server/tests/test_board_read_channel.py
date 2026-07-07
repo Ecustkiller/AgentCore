@@ -20,7 +20,7 @@ import asyncio
 import pytest
 
 from agentcore.board.channel import BoardChannel, BoardReadError
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.costing import ROLE_VISION, RunCost
 from agentcore.runtime.events import EventSink, EventType, SSEEvent
 from agentcore.runtime.interaction import InteractionRegistry

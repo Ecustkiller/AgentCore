@@ -202,6 +202,7 @@ def run_completed(
     usage: dict[str, int] | None = None,
     cost: dict[str, Any] | None = None,
     debrief: dict[str, Any] | None = None,
+    output_files: list[str] | None = None,
 ) -> SSEEvent:
     payload: dict[str, Any] = {
         "run_id": run_id,
@@ -224,6 +225,10 @@ def run_completed(
     # fixtures stay byte-identical and the client folds default it to null.
     if debrief:
         payload["debrief"] = debrief
+    # Workspace file deliverables (files_touched at run finish) — lets clients like the
+    # whiteboard crystallize a `file` artifactCard instead of text-only outputSummary.
+    if output_files:
+        payload["output_files"] = list(output_files)
     return SSEEvent(type=EventType.RUN_COMPLETED, payload=payload)
 
 

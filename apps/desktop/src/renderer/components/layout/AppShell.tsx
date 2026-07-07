@@ -70,7 +70,8 @@ export function AppShell() {
   // Hide it (the TitleBar stays) to give every replayed AI state — the canvas
   // view especially — the full window width.
   const { pathname } = useLocation();
-  const hideSidebar = pathname === "/preview";
+  const hideSidebar =
+    pathname === "/preview" || pathname.startsWith("/simulation");
 
   // 生产 web 客户端不画桌面窗口顶栏（浏览器自带窗口 chrome）——品牌/折叠/搜索改由侧栏顶部
   // 承载（见 Sidebar）。桌面 Electron 外壳与离线预览 #/preview 仍保留顶栏。

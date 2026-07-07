@@ -14,7 +14,7 @@ pause is unrecoverable and resume fails LOUD rather than running on an empty win
 
 import pytest
 
-from agentcore.llm.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.facts import LlmCallFact, RoundBoundaryFact, TurnStartedFact
 from agentcore.runtime.journal import window_from_journal
 from agentcore.runtime.pipeline import _resumed_captain_window

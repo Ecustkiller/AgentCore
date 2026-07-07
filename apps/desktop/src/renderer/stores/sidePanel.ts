@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { useDebateRoomStore } from "./debateRoom";
+import { useCommandPanelStore } from "./commandPanel";
+import { useConversationStore } from "./conversation";
 
 /**
  * Unified conversation side panel (前端UX设计.md §十) — the chat's single
@@ -7,8 +8,6 @@ import { useDebateRoomStore } from "./debateRoom";
  *
  *  - a fixed, non-closable 「工作区」 home tab (the cloud↔local mode bar + the
  *    files body, with 快照 / 交接 as on-demand overlays), always first;
- *  - while a debate room is focused on canvas, a fixed 「裁判台」 tab (态势 / 记分 /
- *    掌舵) sits after 工作区 — not part of `tabs`, same as the home tab;
  *  - a closable detail tab per drill: a run-detail tab for each inline-graph
  *    worker node, or a content tab for an endpoint bubble (提问 / 最终回答) the
  *    canvas surfaces here (no chat column alongside, 前端UX设计.md §五/§六).
@@ -36,14 +35,9 @@ export const SIDE_PANEL_MAX_TABS = MAX_TABS;
 /** Reserved id of the fixed 「工作区」 home tab (always first, never closes). */
 export const WORKSPACE_TAB_ID = "workspace";
 
-/** Reserved id of the fixed 「裁判台」 tab (辩论室放大态时出现，承 DebateHud，不可关闭). */
-export const DEBATE_HUD_TAB_ID = "debate-hud";
-
-/** After the last closable detail tab closes: 裁判台 when a debate room is focused, else 工作区. */
+/** After the last closable detail tab closes → 工作区。 */
 function homeTabAfterDetailClose(): string {
-  return useDebateRoomStore.getState().target
-    ? DEBATE_HUD_TAB_ID
-    : WORKSPACE_TAB_ID;
+  return WORKSPACE_TAB_ID;
 }
 
 const clampWidth = (w: number): number =>
@@ -76,6 +70,17 @@ function persist(key: string, value: string): void {
     localStorage.setItem(key, value);
   } catch {
     /* unavailable — session-only */
+  }
+}
+
+/** Record dismiss for whichever auto-surface context is currently active. */
+function recordActiveContextDismiss(
+  get: () => Pick<SidePanelState, "dismissAutoSurface">,
+): void {
+  const commandActive = useCommandPanelStore.getState().active;
+  const conversationId = useConversationStore.getState().currentConversationId;
+  if (commandActive && conversationId) {
+    get().dismissAutoSurface(`command:${conversationId}`);
   }
 }
 
@@ -144,7 +149,7 @@ interface SidePanelState {
    * filtered at render against the live projection). The 工作区 home tab is implicit
    * and is NOT part of this array. */
   tabs: DetailTab[];
-  /** Active tab: `WORKSPACE_TAB_ID` / `DEBATE_HUD_TAB_ID` for fixed tabs, else a detail tab id.
+  /** Active tab: `WORKSPACE_TAB_ID` for the home tab, else a detail tab id.
    * Defaults to the workspace home so a manual open lands on the project files. */
   activeTabId: string;
   /**
@@ -153,16 +158,31 @@ interface SidePanelState {
    * clears it. `nonce` lets the same path re-fire (re-click). Session-only.
    */
   pendingFilePreview: { path: string; name: string; nonce: number } | null;
+  /**
+   * Session-level memory of contexts where the user explicitly closed the panel,
+   * blocking auto-surface until the panel is opened again or the context clears.
+   */
+  dismissedContexts: Set<string>;
+  /**
+   * Count of auto-surface events suppressed while the panel was dismissed — shown
+   * as a badge on the panel toggle when the dock is closed.
+   */
+  pendingBadge: number;
+
+  /** Record that auto-surface should not reopen the panel for this context. */
+  dismissAutoSurface: (contextId: string) => void;
+  isAutoSurfaceDismissed: (contextId: string) => boolean;
+  clearAutoSurfaceDismiss: (contextId: string) => void;
+  /** Bump the toggle badge when auto-surface is blocked by a dismiss. */
+  incrementPendingBadge: () => void;
 
   /** Open (or re-focus) a detail tab, deduped by id; reveals + activates it. */
   openTab: (tab: DetailTab, opts?: { activate?: boolean }) => void;
   /** Close a detail tab; falls back to a neighbour tab, else the 工作区 home.
    * Never closes the panel (the home tab is always there). */
   closeTab: (id: string) => void;
-  /** Activate a tab (`WORKSPACE_TAB_ID`, `DEBATE_HUD_TAB_ID`, or a detail tab id). */
+  /** Activate a tab (`WORKSPACE_TAB_ID` or a detail tab id). */
   setActiveTab: (id: string) => void;
-  /** Reveal the panel on the 裁判台 tab (辩论室 auto-surface / 掌舵边界). */
-  showDebateHudTab: () => void;
   /**
    * Pin a run (of a specific message's turn) and reveal it. The inline graph
    * highlights whatever run tab is active for that turn, so opening / switching
@@ -212,6 +232,30 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   // dangling tab id.
   activeTabId: WORKSPACE_TAB_ID,
   pendingFilePreview: null,
+  dismissedContexts: new Set(),
+  pendingBadge: 0,
+
+  dismissAutoSurface: (contextId) => {
+    set((s) => {
+      const dismissedContexts = new Set(s.dismissedContexts);
+      dismissedContexts.add(contextId);
+      return { dismissedContexts };
+    });
+  },
+
+  isAutoSurfaceDismissed: (contextId) => get().dismissedContexts.has(contextId),
+
+  clearAutoSurfaceDismiss: (contextId) => {
+    set((s) => {
+      if (!s.dismissedContexts.has(contextId)) return s;
+      const dismissedContexts = new Set(s.dismissedContexts);
+      dismissedContexts.delete(contextId);
+      return { dismissedContexts };
+    });
+  },
+
+  incrementPendingBadge: () =>
+    set((s) => ({ pendingBadge: s.pendingBadge + 1 })),
 
   openTab: (tab, opts) => {
     persist(OPEN_KEY, "true");
@@ -286,17 +330,12 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
 
   openPanel: () => {
     persist(OPEN_KEY, "true");
-    set({ open: true });
+    set({ open: true, pendingBadge: 0 });
   },
 
   showWorkspace: () => {
     persist(OPEN_KEY, "true");
-    set({ open: true, activeTabId: WORKSPACE_TAB_ID });
-  },
-
-  showDebateHudTab: () => {
-    persist(OPEN_KEY, "true");
-    set({ open: true, activeTabId: DEBATE_HUD_TAB_ID });
+    set({ open: true, activeTabId: WORKSPACE_TAB_ID, pendingBadge: 0 });
   },
 
   showFile: (path, name) => {
@@ -316,13 +355,15 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
 
   closePanel: () => {
     persist(OPEN_KEY, "false");
+    recordActiveContextDismiss(get);
     set({ open: false });
   },
 
   togglePanel: () => {
     const next = !get().open;
     persist(OPEN_KEY, String(next));
-    set({ open: next });
+    if (!next) recordActiveContextDismiss(get);
+    set({ open: next, pendingBadge: next ? 0 : get().pendingBadge });
   },
 
   setWidth: (width) => {

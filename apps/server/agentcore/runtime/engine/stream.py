@@ -7,9 +7,9 @@ from collections.abc import Callable
 from agentcore.config import settings
 from agentcore.core.errors import LLMTimeoutError
 from agentcore.core.logging import get_logger
-from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.observability import log_llm_call
-from agentcore.llm.protocol import LLMRequest, TokenUsage, ToolCall, ToolCallFunction
+from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
+from agentcore.llm.provider.protocol import LLMRequest, TokenUsage, ToolCall, ToolCallFunction
 
 from .constants import TOOL_PROGRESS_STEP
 
@@ -17,13 +17,13 @@ logger = get_logger(__name__)
 
 
 async def stream_llm_round(
-    llm: DeepSeekProvider,
+    llm: OpenAICompatibleProvider,
     request: LLMRequest,
     emit_content: Callable[[str], None],
     emit_reasoning: Callable[[str], None],
     on_tool_progress: Callable[[str, int], None] | None = None,
-) -> tuple[str, str, list[ToolCall] | None, TokenUsage | None]:
-    """Stream one LLM call. Returns (content, reasoning, tool_calls, usage)."""
+) -> tuple[str, str, list[ToolCall] | None, TokenUsage | None, str | None, str | None]:
+    """Stream one LLM call. Returns (content, reasoning, tool_calls, usage, diagnosis, raw_preview)."""
 
     content_parts: list[str] = []
     reasoning_parts: list[str] = []
@@ -32,6 +32,8 @@ async def stream_llm_round(
     tc_progress_at: dict[int, int] = {}
     usage: TokenUsage | None = None
     finish_reason: str | None = None
+    empty_diagnosis: str | None = None
+    empty_raw_preview: str | None = None
     start = time.monotonic()
 
     # 流式停滞闸 (卡死根因): consume the stream under a per-chunk IDLE ceiling. The
@@ -50,6 +52,11 @@ async def stream_llm_round(
             async for chunk in llm.stream(request):
                 if idle > 0:
                     cm.reschedule(loop.time() + idle)
+
+                if chunk.empty_diagnosis:
+                    empty_diagnosis = chunk.empty_diagnosis
+                if chunk.empty_raw_preview:
+                    empty_raw_preview = chunk.empty_raw_preview
 
                 if chunk.delta_content:
                     content_parts.append(chunk.delta_content)
@@ -138,4 +145,4 @@ async def stream_llm_round(
         tool_names=[tc.function.name for tc in tool_calls] if tool_calls else None,
     )
 
-    return content, reasoning, tool_calls, usage
+    return content, reasoning, tool_calls, usage, empty_diagnosis, empty_raw_preview

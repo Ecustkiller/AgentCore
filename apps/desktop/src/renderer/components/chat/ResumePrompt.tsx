@@ -162,7 +162,7 @@ function AskUserResumeCard({ turn }: { turn: PendingResume }) {
   return (
     <AskUserCard
       content={turn}
-      caption="已暂停 · CEO 在等你拍板"
+      intent={turn.intent}
       onSubmit={(decision, note) =>
         runResume(turn.messageId, decision, note, [])
       }

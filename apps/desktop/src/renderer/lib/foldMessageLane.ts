@@ -124,13 +124,27 @@ export function foldTeamMarker(
   return process === state.process ? state : { ...state, process };
 }
 
-/** Fold a `checkpoint_required` into the timeline as a positional `checkpoint` marker. */
+/** Fold a `checkpoint_required` into the timeline as a positional `checkpoint` marker.
+ * Also absorbs same-round CEO prose into the card (mirrors backend ``content_reset`` on
+ * a successful blocking ``ask_user``) so streamed text never duplicates the card. */
 export function foldCheckpointMarker(
   state: MessageLaneState,
   checkpointId: string,
 ): MessageLaneState {
-  const process = appendCheckpointStep(state.process, checkpointId);
-  return process === state.process ? state : { ...state, process };
+  const clearedProcess = dropTrailingContentSteps(state.process);
+  const process = appendCheckpointStep(clearedProcess, checkpointId);
+  if (
+    process === state.process &&
+    clearedProcess === state.process &&
+    !state.content
+  ) {
+    return state;
+  }
+  return {
+    ...state,
+    content: "",
+    process,
+  };
 }
 
 /** Fold a `question_posted` into the timeline as a positional `ask` marker. */

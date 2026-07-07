@@ -10,7 +10,7 @@ RoundRunner】——首轮 ``build_agent_executor`` + ``WaveScheduler`` 派并�
 import json
 from pathlib import Path
 
-from agentcore.llm.protocol import LLMChunk, LLMResponse, TokenUsage
+from agentcore.llm.provider.protocol import LLMChunk, LLMResponse, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.debate import (
     DebateConfig,
@@ -389,10 +389,8 @@ def _gate() -> ApprovalGate:
     )
 
 
-def test_side_model_parsed_and_injected_into_debater_task():
-    """真·多模型辩手契约：sides[].model 经 parse_sides → DebateSide.model → debater_task 的
-    task payload['model']（→ RunSpec.model → 执行器覆写 profile.model → 路由器按 provider/model
-    前缀分发到对应厂商）。留空的一方不带 model 键（回落 tier 默认模型，行为不变）。"""
+def test_side_model_parsed_but_not_injected_into_debater_task():
+    """MVP 统一用户 model：sides[].model 仍解析保留（Phase 3 多模型辩手），但不注入 task。"""
     sides, err = parse_sides(
         [
             {
@@ -410,7 +408,7 @@ def test_side_model_parsed_and_injected_into_debater_task():
     cfg = DebateConfig(motion="谁更聪明", form=DebateForm.DEBATE, sides=sides)
     t_a = debater_task(cfg, sides[0], 0, round_no=1, focus="智商")
     t_b = debater_task(cfg, sides[1], 1, round_no=1, focus="智商")
-    assert t_a["model"] == "doubao/doubao-seed-2-1-turbo-260628"
+    assert "model" not in t_a
     assert "model" not in t_b
 
 

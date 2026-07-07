@@ -5,10 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Resume reuses the普通本地回合 scaffolding; mock the heavy collaborators so the
 // resume link's observable contract is asserted in isolation: the `resume` RPC
-// params, event forwarding/filtering, write-back keyed on the *injected* user
-// bubble (a paused sidecar turn's user message was never cloud-persisted), and the
-// failure→StreamError("sidecar") / abort→AbortError mapping. The real conversation
-// store is used (seeded below) so the optimistic-id reconcile is faithful.
+// params, event forwarding/filtering, write-back keyed on the *original* user
+// bubble id (pinned on pause write-back), and the failure→StreamError("sidecar") /
+// abort→AbortError mapping. The real conversation store is used (seeded below) so
+// the optimistic-id reconcile is faithful.
 vi.mock("@/services/localTurns", () => ({ recordLocalTurn: vi.fn() }));
 vi.mock("@/services/streamConversation", () => ({
   dispatchSSEEvent: vi.fn(),
@@ -72,7 +72,7 @@ const baseRequest = {
   note: "",
   selected: [],
   userMessage: "原始问题",
-  userMessageId: "u-inj",
+  userMessageId: "u-orig",
 };
 
 let onEventCb: ((push: EventPush) => void) | null;
@@ -110,9 +110,8 @@ afterEach(() => {
   (globalThis as Record<string, unknown>).window = undefined;
 });
 
-/** Seed the user bubble runResume injects before resuming (the paused turn's
- *  original message, absent from the reopened transcript). */
-function seedInjectedUserBubble(
+/** Seed the user bubble that was pinned on pause write-back (same id end-to-end). */
+function seedOriginalUserBubble(
   conversationId: string,
   userMessageId: string,
   content: string,
@@ -131,12 +130,12 @@ function seedInjectedUserBubble(
 }
 
 describe("resumeConversationViaSidecar", () => {
-  it("drives the resume RPC, forwards only this conversation's events, and reconciles the injected bubble on write-back", async () => {
+  it("drives the resume RPC, forwards only this conversation's events, and reconciles the original user bubble on write-back", async () => {
     recordLocalTurnMock.mockResolvedValue({
       user_message_id: "real-uid",
       title: "续跑标题",
     } as unknown as RecordTurnResponse);
-    seedInjectedUserBubble("c1", "u-inj", "原始问题");
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
 
     const result = turnResult();
     // `resume` runs once the SUT reaches `await invoke()` — by then onEvent is
@@ -173,17 +172,16 @@ describe("resumeConversationViaSidecar", () => {
     // Foreign-conversation event filtered out; only c1's reached the dispatcher.
     expect(dispatchSSEEventMock).toHaveBeenCalledTimes(1);
 
-    // Write-back carries the *injected* user message + its optimistic id (a paused
-    // sidecar turn's user message is otherwise lost — never cloud-persisted).
+    // Write-back carries the original user message + its pinned id (pause write-back).
     expect(recordLocalTurnMock).toHaveBeenCalledWith(
       "c1",
       "原始问题",
-      "u-inj",
+      "u-orig",
       expect.any(String),
       result,
     );
 
-    // The injected bubble's optimistic id is swapped for the authoritative one.
+    // The original bubble's id is swapped for the authoritative one when unchanged.
     const userMsg = useConversationStore
       .getState()
       .byId.c1?.messages.find((m) => m.role === "user");

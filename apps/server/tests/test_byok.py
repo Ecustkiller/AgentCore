@@ -13,9 +13,9 @@ from agentcore.core.errors import (
     LLMInsufficientBalanceError,
     LLMTimeoutError,
 )
-from agentcore.llm.config import DEEPSEEK_V4_FLASH
-from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.key_service import _mask_key
+from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
+from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 
 # --- key masking ---
 
@@ -29,7 +29,7 @@ def test_mask_key_hides_short_key_entirely():
     assert _mask_key("abcd") == "••••"
 
 
-# --- connectivity probe (DeepSeekProvider.probe) ---
+# --- connectivity probe (OpenAICompatibleProvider.probe) ---
 
 
 class _Resp:
@@ -37,9 +37,9 @@ class _Resp:
         self.status_code = status_code
 
 
-def _provider(post_handler) -> DeepSeekProvider:
+def _provider(post_handler) -> OpenAICompatibleProvider:
     """A provider whose HTTP ``post`` is stubbed (no real network)."""
-    provider = DeepSeekProvider(api_key="k", base_url="http://example.invalid")
+    provider = OpenAICompatibleProvider(name="test", api_key="k", base_url="http://example.invalid/v1")
     provider._client.post = post_handler
     return provider
 
@@ -103,5 +103,37 @@ async def test_probe_raises_timeout_on_httpx_timeout():
     try:
         with pytest.raises(LLMTimeoutError):
             await provider.probe(model=DEEPSEEK_V4_FLASH)
+    finally:
+        await provider.close()
+
+
+# --- tool-calling probe (OpenAICompatibleProvider.probe_tools) ---
+
+
+class _ToolResp:
+    status_code = 200
+
+    def json(self) -> dict:
+        return {"choices": [{"message": {"tool_calls": [{"id": "1"}]}}]}
+
+
+async def test_probe_tools_true_when_tool_calls_present():
+    async def post(*a, **k):
+        return _ToolResp()
+
+    provider = _provider(post)
+    try:
+        assert await provider.probe_tools(model=DEEPSEEK_V4_FLASH) is True
+    finally:
+        await provider.close()
+
+
+async def test_probe_tools_false_on_auth_failure():
+    async def post(*a, **k):
+        return _Resp(401)
+
+    provider = _provider(post)
+    try:
+        assert await provider.probe_tools(model=DEEPSEEK_V4_FLASH) is False
     finally:
         await provider.close()

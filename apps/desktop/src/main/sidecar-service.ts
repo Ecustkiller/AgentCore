@@ -177,6 +177,35 @@ function resolveSpawnConfig(): SpawnConfig {
 }
 
 /** 真实传输：spawn 子进程，把 stdout 按行切分，stderr 透传到主进程控制台（dev 可见）。 */
+
+/** 从累积的 stderr 提取用户可见的失败原因（优先 Python ImportError / 末行异常）。 */
+export function formatSidecarExitError(
+  code: number | null,
+  stderr: string,
+): Error {
+  const trimmed = stderr.trim();
+  if (trimmed) {
+    const importErr = trimmed.match(/^ImportError:\s*(.+)$/m);
+    if (importErr) {
+      return new Error(`sidecar 启动失败：${importErr[1].trim()}`);
+    }
+    const lines = trimmed
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]!;
+      if (/^(?:\w+Error|\w+Exception):\s*.+/.test(line)) {
+        return new Error(`sidecar 启动失败：${line}`);
+      }
+    }
+  }
+  if (code) {
+    return new Error(`sidecar 进程退出（code ${code}）`);
+  }
+  return new Error("sidecar 进程已退出");
+}
+
 function spawnTransport(config: SpawnConfig): Transport {
   const child = spawn(config.cmd, config.args, {
     cwd: config.cwd,
@@ -195,6 +224,7 @@ function spawnTransport(config: SpawnConfig): Transport {
   let lineCb: ((line: string) => void) | null = null;
   let closeCb: ((err?: Error) => void) | null = null;
   let buffer = "";
+  let stderrBuf = "";
 
   child.stdout.on("data", (chunk: string) => {
     buffer += chunk;
@@ -208,13 +238,16 @@ function spawnTransport(config: SpawnConfig): Transport {
   });
   // sidecar 的日志（structlog）走 stderr——透传到主进程控制台，便于 dev 排查。
   child.stderr.on("data", (chunk: string) => {
+    stderrBuf += chunk;
     for (const l of chunk.split("\n")) {
       if (l.trim()) console.error(`[sidecar] ${l}`);
     }
   });
   child.on("error", (err) => closeCb?.(err));
   child.on("close", (code) =>
-    closeCb?.(code ? new Error(`sidecar 进程退出（code ${code}）`) : undefined),
+    closeCb?.(
+      code ? formatSidecarExitError(code, stderrBuf) : undefined,
+    ),
   );
 
   return {

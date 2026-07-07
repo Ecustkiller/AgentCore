@@ -40,7 +40,8 @@ class CodeExecuteTool:
                 "用法要点：① 优先用 language=python 或 javascript 直接运行内联代码，"
                 "少用 bash 外壳——bash 在部分主机（如 Windows）可能不可用。② 代码的"
                 "工作目录就是工作区根目录，访问工作区文件请用相对路径（如 fib.py），"
-                "不要假设 /workspace 之类的绝对路径。"
+                "不要假设 /workspace 之类的绝对路径。③ 抓取网页或调用公开 HTTP API "
+                "优先用 read_url / web_search 工具，不要在代码里发网络请求。"
             ),
             parameters={
                 "type": "object",
@@ -59,6 +60,13 @@ class CodeExecuteTool:
                         "type": "integer",
                         "description": "最长执行时间（秒）",
                         "default": 30,
+                    },
+                    "purpose": {
+                        "type": "string",
+                        "description": (
+                            "一句话中文说明这段代码要做什么；会展示给用户作为审批说明，"
+                            "执行时忽略"
+                        ),
                     },
                 },
                 "required": ["code"],

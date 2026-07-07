@@ -39,9 +39,10 @@ from agentcore.db.base import async_session_factory
 from agentcore.db.models import Message
 from agentcore.db.repositories import ConversationRepository, MessageRepository
 from agentcore.llm import LLMMessage
-from agentcore.llm.byok import resolve_user_llm_credentials
-from agentcore.llm.config import build_request, get_profile
 from agentcore.llm.factory import build_provider
+from agentcore.llm.profiles import build_request, get_profile
+from agentcore.llm.resolve import resolve_credentials
+from agentcore.llm.resolve import resolve_turn_model as resolve_user_model
 
 logger = get_logger(__name__)
 
@@ -114,7 +115,7 @@ def _truncate_head_tail(content: str, limit: int) -> str:
     return truncate_head_tail(content, limit, marker=_COMPACT_ELISION_MARKER)
 
 
-async def _summarize(provider, old_summary: str, messages: Sequence[Message]) -> str:
+async def _summarize(provider, old_summary: str, messages: Sequence[Message], *, model: str) -> str:
     """One flash, non-thinking call → the updated rolling summary ("" on failure)."""
     system = _COMPACT_SYSTEM_PROMPT.replace(
         "__BUDGET__", str(settings.compaction_summary_char_budget)
@@ -126,6 +127,7 @@ async def _summarize(provider, old_summary: str, messages: Sequence[Message]) ->
             LLMMessage(role="user", content=_render_fold(old_summary, messages)),
         ],
         stream=False,
+        model=model,
     )
     try:
         response = await asyncio.wait_for(
@@ -180,16 +182,17 @@ async def compact_conversation(
                 return False
             new_watermark = fold_msgs[-1].created_at
             old_summary = conv.compaction_summary or ""
-            credentials = await resolve_user_llm_credentials(session, conv.user_id)
+            credentials = await resolve_credentials(session, conv.user_id, "platform_internal")
 
         # BYOK with no usable key: skip WITHOUT advancing the watermark, so it retries
         # once a key is configured (platform mode keeps None = global key).
         if settings.billing_mode == "byok" and credentials is None:
             return False
 
-        provider = build_provider(credentials)
+        model = resolve_user_model(credentials)
+        provider = build_provider(credentials, purpose="platform_internal")
         try:
-            summary = await _summarize(provider, old_summary, fold_msgs)
+            summary = await _summarize(provider, old_summary, fold_msgs, model=model)
         finally:
             await provider.close()
 

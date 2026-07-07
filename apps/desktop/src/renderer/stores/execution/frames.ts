@@ -82,6 +82,7 @@ export type RunFrame =
       runId: string;
       agentId: string;
       outputSummary: string;
+      outputFiles?: string[];
       // 完工交接简报: the worker's structured wrap-up; absent when it authored none.
       debrief?: import("@/types/events").RunDebrief;
       durationMs: number;
@@ -284,6 +285,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         runId: p.run_id,
         agentId: p.agent_id,
         outputSummary: p.output_summary,
+        outputFiles: p.output_files ?? [],
         debrief: p.debrief,
         durationMs: p.duration_ms,
         role: p.role,

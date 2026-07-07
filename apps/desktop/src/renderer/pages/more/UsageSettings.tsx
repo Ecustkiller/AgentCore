@@ -39,7 +39,7 @@ export function UsageSettings() {
         title="用量"
         description={
           byok
-            ? "自带 Key 模式：对话按你的 DeepSeek 额度计费、平台不限额。下方为你的用量与花费，成本以人民币估算。"
+            ? "自带 Key 模式：平台不限额，下方以 token 用量为主（平台不代为计价）。"
             : "本月额度与今日用量。成本按团队角色拆分，以人民币展示。"
         }
         action={
@@ -164,7 +164,15 @@ function Dashboard({
   return (
     <div className="mt-6 space-y-5">
       {byok ? (
-        <ByokNote />
+        <>
+          <ByokNote />
+          <QuotaMeter
+            label="今日 tokens"
+            used={dayTokensUsed}
+            limit={dayTokenLimit}
+            caption={tokenCaption}
+          />
+        </>
       ) : (
         <>
           <QuotaMeter
@@ -195,17 +203,17 @@ function Dashboard({
 
       {/* 近 7 日成本趋势 (§7.3D) — ¥ over time, 大众-visible. Hidden when the whole
           window had no spend (a flat zero trend tells the user nothing). */}
-      {summary.recent_daily_cost.some((p) => p.cost_total > 0) && (
+      {summary.recent_daily_cost.some((p) => p.cost_total > 0) && !byok && (
         <CostTrend points={summary.recent_daily_cost} cnyPerUsd={cnyPerUsd} />
       )}
 
       {/* 本月各角色花销 (§7.3D, 团队工资单 by role) — ¥ is 大众-visible (§7.1),
           so this lands for everyone, not just Power. Empty until the month has spend. */}
-      {summary.month_by_role.length > 0 && (
+      {summary.month_by_role.length > 0 && !byok && (
         <RolePayroll lines={summary.month_by_role} cnyPerUsd={cnyPerUsd} />
       )}
 
-      <UsageDetail summary={summary} cnyPerUsd={cnyPerUsd} />
+      <UsageDetail summary={summary} cnyPerUsd={cnyPerUsd} byok={byok} />
     </div>
   );
 }
@@ -224,9 +232,8 @@ function ByokNote() {
     <div className="flex items-start gap-2.5 rounded-xl border border-border bg-muted/30 px-4 py-3">
       <KeyRound size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
       <p className="text-xs text-muted-foreground">
-        当前为「自带 Key」模式：对话按你自己的 DeepSeek
-        额度计费，平台不设上限。下方花费为按官方价格估算的你的 DeepSeek
-        用量，可在「模型配置」中管理你的 Key。
+        当前为「自带 Key」模式：对话走你配置的模型与端点，平台不设上限。下方以
+        token 用量为主；费用金额由你的服务商账单为准，此处不展示平台计价。
       </p>
     </div>
   );
@@ -420,9 +427,11 @@ function RolePayroll({
 function UsageDetail({
   summary,
   cnyPerUsd,
+  byok,
 }: {
   summary: Summary;
   cnyPerUsd: number;
+  byok: boolean;
 }) {
   const { today, month } = summary;
   const input = today.usage.input;
@@ -435,19 +444,28 @@ function UsageDetail({
       value: `输入 ${formatCompact(input)} · 输出 ${formatCompact(today.usage.output)}`,
     },
     { label: "今日缓存命中率", value: `${hitRate}%` },
-    {
-      label: "今日成本",
-      value: `${formatCost(today.cost.total, cnyPerUsd)}（${formatUsd(today.cost.total)}）`,
-    },
-    {
-      label: "本月成本",
-      value: `${formatCost(month.cost.total, cnyPerUsd)}（${formatUsd(month.cost.total)}）`,
-    },
-    {
-      label: "请求数",
-      value: `今日 ${today.requests} · 本月 ${month.requests}`,
-    },
   ];
+  if (!byok) {
+    rows.push(
+      {
+        label: "今日成本",
+        value: `${formatCost(today.cost.total, cnyPerUsd)}（${formatUsd(today.cost.total)}）`,
+      },
+      {
+        label: "本月成本",
+        value: `${formatCost(month.cost.total, cnyPerUsd)}（${formatUsd(month.cost.total)}）`,
+      },
+    );
+  } else {
+    rows.push({
+      label: "本月 tokens",
+      value: `输入 ${formatCompact(month.usage.input)} · 输出 ${formatCompact(month.usage.output)}`,
+    });
+  }
+  rows.push({
+    label: "请求数",
+    value: `今日 ${today.requests} · 本月 ${month.requests}`,
+  });
 
   return (
     <div className="rounded-xl border border-border bg-card">

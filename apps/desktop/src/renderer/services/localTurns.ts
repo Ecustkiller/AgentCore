@@ -54,6 +54,7 @@ export async function recordLocalTurn(
     cache_miss_tokens: result.usage.cacheMissTokens,
     rounds: result.rounds,
     trace_id: traceId,
+    finish_reason: result.finishReason,
   } satisfies components["schemas"]["RecordTurnRequest"];
 
   let lastError: unknown;

@@ -15,15 +15,15 @@ Three layers:
   tool message, no §8.3 tool_call fact) so ``window_from_journal`` folds back to a
   transcript ending at the assistant — the exact resume-window source the blocking
   pause produced.
-- the persist tail: PAUSED parks the turn (no assistant row / cost / metrics written —
-  the frame is the record until resume).
+- the persist tail: PAUSED writes a best-effort assistant snapshot (``paused: True``)
+  so a refresh replays text / journal; cost / metrics wait until resume completes.
 """
 
+import json
 from pathlib import Path
 
 from agentcore.core.types import ToolEffect
-from agentcore.llm.config import ModelProfile
-from agentcore.llm.protocol import LLMChunk, LLMMessage, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink, EventType, FinishReason, SSEEvent
@@ -35,6 +35,7 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+from tests.llm_helpers import make_profile_params
 
 
 class _ScriptedProvider:
@@ -221,7 +222,7 @@ async def test_loop_finalizes_ask_user_to_paused():
         LLMMessage(role="system", content=system_prompt),
         LLMMessage(role="user", content=user_message),
     ]
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=5)
+    profile = make_profile_params(max_rounds=5)
     log = TurnFactLog()
     log.record_fact(
         TurnStartedFact(
@@ -239,6 +240,7 @@ async def test_loop_finalizes_ask_user_to_paused():
             sink=sink,
             tool_context=_ctx(),
             profile=profile,
+            turn_model="m",
             finish_override_sink=finish_override,
             run_id="cap",
             role="captain",
@@ -272,24 +274,50 @@ async def test_loop_finalizes_ask_user_to_paused():
     runs = runs_from_entries(persisted)
     assert runs is not None
     assert any(e["type"] == "checkpoint_required" for e in runs["events"])
+    cp = next(e for e in runs["events"] if e["type"] == "checkpoint_required")
+    assert cp["payload"]["intent"] == "kickoff"
 
 
-# --- the persist tail: PAUSED parks the turn (writes nothing) -----------------------
+# --- the persist tail: PAUSED writes a snapshot assistant row -----------------------
 
 
-async def test_persist_tail_parks_on_paused(monkeypatch):
-    # A PAUSED result must return BEFORE any DB access: writing an assistant row / journal /
-    # cost / metrics here would create a phantom completed reply and double-count on resume.
+async def test_persist_tail_writes_pause_snapshot(monkeypatch):
+    # A PAUSED result writes a best-effort assistant snapshot (paused: True) so a refresh
+    # replays CEO text / journal projection. Journal / cost / metrics are NOT written here.
+    from types import SimpleNamespace
+
     from agentcore.conversation import turn_persistence
 
-    def _bomb(*_args, **_kwargs):
-        raise AssertionError("a paused turn must not touch the DB")
+    upserted: dict = {}
 
-    monkeypatch.setattr(turn_persistence, "async_session_factory", _bomb)
+    class FakeRepo:
+        def __init__(self, _session):
+            pass
 
-    # Returns cleanly (parks) without ever opening a session.
+        async def upsert_assistant(self, **kwargs):
+            upserted.update(kwargs)
+
+    class FakeSessionCM:
+        async def __aenter__(self):
+            return SimpleNamespace()
+
+        async def __aexit__(self, *_a):
+            return False
+
+    def _bomb_journal(*_args, **_kwargs):
+        raise AssertionError("paused turn must not re-write journal")
+
+    monkeypatch.setattr(turn_persistence, "MessageRepository", FakeRepo)
+    monkeypatch.setattr(turn_persistence, "async_session_factory", lambda: FakeSessionCM())
+    monkeypatch.setattr(turn_persistence, "persist_turn_journal", _bomb_journal)
+
     await turn_persistence.persist_turn_result(
-        result={"message_id": "m1", "finish_reason": FinishReason.PAUSED, "content": ""},
+        result={
+            "message_id": "m1",
+            "finish_reason": FinishReason.PAUSED,
+            "content": "帮你分析一下选项",
+            "reasoning_content": "先想清楚再提问",
+        },
         conversation_id="c1",
         user_id="u1",
         folder_id=None,
@@ -302,3 +330,99 @@ async def test_persist_tail_parks_on_paused(monkeypatch):
         turn_id="tn",
         duration_ms=1,
     )
+
+    assert upserted["message_id"] == "m1"
+    assert upserted["content"] == "帮你分析一下选项"
+    assert upserted["reasoning_content"] == "先想清楚再提问"
+    assert upserted["metadata"]["paused"] is True
+    assert upserted["metadata"]["status"] == turn_persistence.MESSAGE_STATUS_RUNNING
+    assert upserted["trace_id"] == "t"
+
+
+async def test_loop_absorbs_content_into_blocking_ask_user():
+    """Same-round prose + blocking ask_user: content folds into the card, not the bubble."""
+    system_prompt = "你是 CEO。"
+    user_message = "做个网站"
+    preamble = "帮你梳理一下起步方案："
+    captured: dict[str, object] = {}
+
+    async def saver(frame) -> None:  # noqa: ANN001
+        captured["transcript"] = list(frame.transcript)
+
+    async def deleter(_message_id: str) -> None:
+        return None
+
+    sink = EventSink()
+    ask_tool = AskUserTool(
+        sink=sink,
+        conversation_id="c1",
+        registry=_ExplodingBridge(),  # type: ignore[arg-type]
+        timeout_seconds=1.0,
+        captain_run_id="cap",
+        base_system_prompt=system_prompt,
+        user_message=user_message,
+        message_id="m1",
+        suspension_saver=saver,
+        suspension_deleter=deleter,
+    )
+    reg = ToolRegistry()
+    reg.register(ask_tool)
+
+    provider = _ScriptedProvider(
+        [
+            [
+                LLMChunk(delta_content=preamble),
+                LLMChunk(
+                    delta_tool_calls=[
+                        ToolCallDelta(
+                            index=0,
+                            id="call_ask",
+                            function_name="ask_user",
+                            arguments_delta='{"message": ""}',
+                        )
+                    ]
+                ),
+            ]
+        ]
+    )
+
+    messages = [
+        LLMMessage(role="system", content=system_prompt),
+        LLMMessage(role="user", content=user_message),
+    ]
+    profile = make_profile_params(max_rounds=5)
+    log = TurnFactLog()
+    log.record_fact(
+        TurnStartedFact(
+            system_prompt=system_prompt, user_message=user_message, model_profile="m"
+        ).to_fact()
+    )
+    finish_override: list[FinishReason] = []
+    fl_token = current_fact_log.set(log)
+    ct_token = captain_transcript.set(messages)
+    try:
+        content, _reasoning, _usage, _rounds = await react_loop(
+            messages=messages,
+            llm=provider,
+            tools=reg,
+            sink=sink,
+            tool_context=_ctx(),
+            profile=profile,
+            turn_model="m",
+            finish_override_sink=finish_override,
+            run_id="cap",
+            role="captain",
+        )
+    finally:
+        captain_transcript.reset(ct_token)
+        current_fact_log.reset(fl_token)
+
+    assert finish_override == [FinishReason.PAUSED]
+    assert content == ""
+    assert messages[-1].content is None
+    args = json.loads(messages[-1].tool_calls[0].function.arguments)
+    assert args["message"] == preamble
+    events = _drain(sink)
+    assert any(e.type is EventType.CONTENT_RESET for e in events)
+    llm_facts = [f for f in log.entries() if f["kind"] == FactKind.LLM_CALL.value]
+    assert llm_facts[-1]["payload"]["content"] == ""

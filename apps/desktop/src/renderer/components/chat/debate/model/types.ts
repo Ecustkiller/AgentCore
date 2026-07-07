@@ -48,8 +48,17 @@ export interface DebateClashView {
 }
 
 /**
- * 一条质询问答（质询回合 P1）已解析成可渲染的展示态：被质询方 `target` 的显示名 + 身份色 +
- * 主持人的必答问题清单 + 该方作答的辩手 run（{@link DebateSideModel.run} 同源，取作答全文）。
+ * 质询环节的一条 Q↔A 展示态（质询回合 P1）。
+ */
+export interface DebateCrossExamExchangeView {
+  question: string;
+  answer: string;
+  ok: boolean;
+}
+
+/**
+ * 质询环节对某一方的一组逐条交换（质询回合 P1）已解析成可渲染的展示态：被质询方 `target` 的显示名 +
+ * 身份色 + 逐条 Q↔A + 该方作答的辩手 run（{@link DebateSideModel.run} 同源，完整产出钻取用）。
  * 由 {@link resolveCrossExam} 把契约的 {@link DebateCrossExam}（语义 key + answer_run_id 引用）据
  * 本轮 `sides` 与执行图 runs 映射而成——让「主持人当面质询、某方回避/接招」在群聊里可见。
  */
@@ -58,12 +67,10 @@ export interface DebateCrossExamView {
   targetKey: string;
   targetName: string;
   targetColorVar: string;
-  questions: string[];
-  /** 该方作答的辩手 run（`answer_run_id` 解析）——作答全文在其 `agent.outputChunks`；未解析到（旧
-   *  产物 / 作答失败无 run）为 null。 */
+  exchanges: DebateCrossExamExchangeView[];
+  /** 该方作答的辩手 run（`answer_run_id` 解析）——完整作答在其 `agent.outputChunks`；未解析到（旧
+   *  产物 / 作答失败无 run）为 null。侧面板「查看完整产出」钻取用。 */
   answerRun: RunNode | null;
-  /** 是否成功答出（回避 / 失败 → false，前端标注「未正面回答」）。 */
-  ok: boolean;
 }
 
 /**

@@ -27,7 +27,7 @@ from agentcore.core.errors import (
 )
 from agentcore.core.logging import get_logger
 from agentcore.llm.observability import log_llm_call
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.vision.protocol import VisionReading
 
 logger = get_logger(__name__)

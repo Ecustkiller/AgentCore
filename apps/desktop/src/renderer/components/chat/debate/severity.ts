@@ -3,10 +3,10 @@ import type { DebateBriefInfo, DebateSideInfo } from "@/types/events";
 
 /**
  * 红队风险严重度三档 → 展示元数据（与后端 `risk_severities` 的 high/medium/low 同口径）——**单一源**：
- * 流末终审的完整「风险看板」（{@link import("./Brief").BriefCard} 内 RiskBoard）与裁判台的紧凑「风险
- * 盘口」（{@link import("./DebateHud").RiskGlance}）共用这一套档位语义 / 配色 / 排序，避免两处各写一套
- * 危度色而漂移。注意语义与 `confidencePill` 相反：风险 high=最坏=destructive(红)、low=最轻=muted(灰)，
- * 故另起一套而非复用置信色。`rank` 决定看板 / 盘口内由危到轻的排序。
+ * 流末终审「风险清单」（{@link import("./arena/brief").BriefCard} 内 RiskBoard）与记分牌紧凑「风险
+ * 盘口」（{@link import("./arena/Scoreboard").Scoreboard} 红队行）共用这一套档位语义 / 配色 / 排序，
+ * 避免两处各写一套危度色而漂移。注意语义与 `confidencePill` 相反：风险 high=最坏=destructive(红)、
+ * low=最轻=muted(灰)，故另起一套而非复用置信色。`rank` 决定看板 / 盘口内由危到轻的排序。
  */
 export const RISK_SEVERITY = {
   high: {
@@ -18,8 +18,8 @@ export const RISK_SEVERITY = {
   medium: {
     label: "中危",
     rank: 1,
-    pill: statusPillInline.destructive,
-    surface: "border-l-2 border-destructive/50 pl-2.5",
+    pill: statusPillInline.muted,
+    surface: "border-l-2 border-border pl-2.5",
   },
   low: {
     label: "低危",
@@ -55,7 +55,7 @@ export function rankOf(level: RiskLevel | null): number {
 /**
  * 从 roster + brief 建红队风险清单（每条 = 一名非被审方成员的最尖锐风险 = 其「最强论点」，按严重度分级）。
  * 被审方案方（`is_subject`）不入清单——其 `strongest_point` 是抗辩而非风险。无 `strongest_point` 的丢弃。
- * **单一源**：{@link import("./Brief").BriefCard} 风险看板与 {@link import("./DebateHud").RiskGlance}
+ * **单一源**：{@link import("./arena/brief").BriefCard} 风险看板与 {@link import("./arena/Scoreboard").Scoreboard}
  * 风险盘口共用此构建，保证两处「哪些算风险、按谁分级」完全一致。
  */
 export function buildRiskItems(

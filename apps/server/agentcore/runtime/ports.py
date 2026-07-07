@@ -25,7 +25,7 @@ The remaining §8.6 ports stay as their concrete implementations until 完全离
 (06-规划/远期规划 §一.1) needs them swappable — Protocol-izing them now, with
 no second implementation to satisfy, would be premature abstraction:
 
-- InferenceGateway → ``llm`` provider (``llm/factory.build_provider`` → DeepSeekProvider)
+- InferenceGateway → ``llm`` provider (``llm/factory.build_provider`` → OpenAICompatibleProvider)
 - ConversationStore → ``conversation/service.py`` (message persistence)
 - BillingSink → ``runtime/costing.py`` + cost-event repo
 - ArtifactStore → workspace snapshot store (``workspace/…``)

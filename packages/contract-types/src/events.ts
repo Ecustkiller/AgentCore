@@ -201,6 +201,8 @@ export interface AskStyleOption {
   label: string;
 }
 
+export type CheckpointIntent = "kickoff" | "decision";
+
 export interface CheckpointRequiredPayload {
   checkpoint_id: string;
   conversation_id: string;
@@ -209,6 +211,7 @@ export interface CheckpointRequiredPayload {
   assumptions: AskAssumption[];
   questions: AskQuestion[];
   style_options: AskStyleOption[];
+  intent?: CheckpointIntent;
 }
 
 export interface CheckpointResolvedPayload {
@@ -367,7 +370,8 @@ export interface ContextBlockWire {
     | "opponent"
     | "challenge"
     | "interjection"
-    | "revision";
+    | "revision"
+    | "cross_exam";
   heading: string;
   body: string;
   chars: number;
@@ -556,6 +560,9 @@ export interface RunCompletedPayload {
   /** 完工交接简报: the worker's structured wrap-up, present ONLY when it authored one
    * (absent for a 辩手 / trivial worker / the captain) so the client folds default it null. */
   debrief?: RunDebrief;
+  /** Workspace-relative paths the worker wrote during this run (`files_touched` at finish).
+   * Present only when non-empty — lets clients crystallize file artifact cards. */
+  output_files?: string[];
 }
 
 export interface RunFailedPayload {
@@ -672,19 +679,25 @@ export interface DebateUserInterjection {
   answered: boolean;
 }
 
-/** 质询环节的一问一答（质询回合 P1）：主持人代表交锋向某方（`target` = {@link DebateSideInfo.key}）
- * 发出【必须正面回答】的尖锐质询（`questions`，2–3 条、可含是/否逼答），被质询方在【自己的 transcript】
- * 上作答——问题 verbatim 进本字段（前端渲染 Q），回答【全文】随 `answer_run_id` 的辩手 run 事件走
- * （与各方发言全文同策，不塞载荷），前端据 `answer_run_id` 从执行图节点取回作答全文。`questioner` 空=
- * 主持人代表交锋（当前实现），`ok` 标记是否成功答出（回避 / 失败 → 裁判据此扣 engagement 记分）。
+/** 质询环节的一条 Q↔A（质询回合 P1）：主持人向某方发出的单条必答质询 + 该条作答 +
+ * 是否正面回答（回避 / 失败 → false）。 */
+export interface DebateCrossExamExchange {
+  question: string;
+  answer: string;
+  ok: boolean;
+}
+
+/** 质询环节对某一方的一组逐条交换（质询回合 P1）：主持人代表交锋向某方（`target` =
+ * {@link DebateSideInfo.key}）发出【必须正面回答】的尖锐质询，被质询方在【自己的 transcript】
+ * 上逐条作答——`exchanges` 承载逐条 Q↔A（问题 + 作答摘要 verbatim；完整作答流仍随
+ * `answer_run_id` 的辩手 run 事件走，供侧面板钻取）。`questioner` 空=主持人代表交锋（当前实现）。
  * 随 {@link DebateRoundInfo} 进 `debate_result`；仅【认真辩透 + 对抗形态】开启，非质询路径为空数组、
  * 可缺省（渐进式契约扩展，旧产物 / 快速对碰兼容）。 */
 export interface DebateCrossExam {
   target: string;
   questioner: string;
-  questions: string[];
+  exchanges: DebateCrossExamExchange[];
   answer_run_id: string;
-  ok: boolean;
 }
 
 /** 某方的【结辩陈词】（阶段化发言角色 P4 · 结辩收束）：辩已辩尽（收敛 / 用户 conclude / 达上限）后、
@@ -747,6 +760,9 @@ export interface DebateNarrativeRound {
   verdict: DebateVerdict | null;
   sides: DebateRoundSide[];
   clashes: DebateClash[];
+  /** 本轮质询环节的问答（质询回合 P1）：`debate_round` 收尾后写入；质询进行中可由前端据
+   * `_cx_` run + `run_context` 从执行图重建。非质询路径为空、可缺省（渐进式契约扩展）。 */
+  cross_exam?: DebateCrossExam[];
 }
 
 /** 决策简报（结论卡）：交锋焦点、各方最强论点、事实/价值分歧、倾向与置信、建议、待解问题。 */
@@ -862,11 +878,156 @@ export interface MessageEndPayload {
 export interface ErrorPayload {
   code: string;
   message: string;
+  context?: {
+    upstream_status?: number;
+    upstream_body_preview?: string | null;
+    retry_attempts?: number;
+    empty_diagnosis?: string;
+  };
 }
 
 export interface TitleGeneratedPayload {
   conversation_id: string;
   title: string;
+}
+
+/** BYOK soft gate (开放主流AI模型接入 §4.5): preflight hint when probe says the user's
+ * model may lack tool calling. Transport-only — not journaled. */
+export interface TurnWarningPayload {
+  message: string;
+}
+
+// ── AI Town simulation (M1) ───────────────────────────────────────────────────
+// Coordinate contract: Vec3 uses R3F/Three.js Y-up; x=east, z=south, y=height (NPC ≈ 0).
+// Region anchors are authoritative sync points; frontend NavMesh may nudge locally.
+
+export interface Vec3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface SimAgentState {
+  agent_id: string;
+  name: string;
+  role: string;
+  location: string;
+  position: Vec3;
+  activity: string;
+  mood: number;
+  goal: string;
+  last_thought: string;
+  relationships?: Record<string, number>;
+  tick_memories?: string[];
+  money?: number;
+  inventory?: Record<string, number>;
+}
+
+export interface SimAgentAction {
+  agent_id: string;
+  action:
+    | "move_to"
+    | "stay_here"
+    | "speak_to"
+    | "propose_trade"
+    | "propose_vote"
+    | "idle"
+    | "error";
+  thought: string;
+  tool_name?: string | null;
+  tool_args?: Record<string, unknown> | null;
+  success: boolean;
+  detail: string;
+}
+
+export interface SimTickStartedPayload {
+  run_id: string;
+  tick: number;
+  hour: number;
+}
+
+export interface SimTickEndedPayload {
+  run_id: string;
+  tick: number;
+  hour: number;
+  agent_count: number;
+}
+
+export interface SimTickFramePayload {
+  run_id: string;
+  tick_number: number;
+  snapshot: Record<string, unknown>;
+}
+
+export interface SimAgentStatePayload {
+  run_id: string;
+  tick: number;
+  state: SimAgentState;
+}
+
+export interface SimAgentActionPayload {
+  run_id: string;
+  tick: number;
+  action: SimAgentAction;
+}
+
+export interface InteractionTranscriptLine {
+  speaker_id: string;
+  speaker_name: string;
+  text: string;
+  round: number;
+}
+
+export interface InteractionStateChange {
+  mood_deltas?: Record<string, number>;
+  relation_deltas?: [string, string, number][];
+  money_transfers?: Record<string, unknown>[];
+  inventory_transfers?: Record<string, unknown>[];
+  governance?: Record<string, unknown>;
+}
+
+export interface InteractionResult {
+  request_id: string;
+  kind: "conversation" | "trade" | "vote";
+  status: "completed" | "rejected" | "failed" | "cancelled";
+  initiator_id: string;
+  target_id?: string | null;
+  summary: string;
+  transcript?: InteractionTranscriptLine[];
+  state_changes?: InteractionStateChange;
+  detail?: string;
+}
+
+export interface SimInteractionPayload {
+  run_id: string;
+  tick: number;
+  interaction: InteractionResult;
+}
+
+export interface WorldModifiersWire {
+  market_price_multiplier: number;
+  storm_active: boolean;
+  festival_active: boolean;
+  square_attraction_boost: number;
+}
+
+export interface WorldEventWire {
+  event_id: string;
+  kind: string;
+  event_type: string;
+  title: string;
+  description: string;
+  payload?: Record<string, unknown>;
+  tick_started: number;
+  duration_ticks: number;
+  source: string;
+}
+
+export interface SimWorldEventPayload {
+  run_id: string;
+  tick: number;
+  event: WorldEventWire;
+  modifiers: WorldModifiersWire;
 }
 
 /** CEO→用户「下一步推荐」(下一步推荐): 2-4 quick-reply suggestions for the just-finished
@@ -1017,6 +1178,14 @@ export type SSEPayloadMap = {
   message_end: MessageEndPayload;
   error: ErrorPayload;
   title_generated: TitleGeneratedPayload;
+  turn_warning: TurnWarningPayload;
+  "sim.tick_started": SimTickStartedPayload;
+  "sim.tick_ended": SimTickEndedPayload;
+  "sim.tick_frame": SimTickFramePayload;
+  "sim.agent_action": SimAgentActionPayload;
+  "sim.agent_state": SimAgentStatePayload;
+  "sim.interaction": SimInteractionPayload;
+  "sim.world_event": SimWorldEventPayload;
   followups_generated: FollowupsGeneratedPayload;
   turn_saved: TurnSavedPayload;
   citations: CitationsPayload;

@@ -19,7 +19,7 @@ from agentcore.evals.debate_converge import (
     run_debate_converge,
 )
 from agentcore.evals.types import EvalConfigError
-from agentcore.llm.protocol import LLMResponse
+from agentcore.llm.provider.protocol import LLMResponse
 from agentcore.runtime.debate.types import (
     STOP_FOCUS_CLARIFIED,
     DebateForm,

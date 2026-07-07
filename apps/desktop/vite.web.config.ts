@@ -9,6 +9,7 @@ import { defineConfig, searchForWorkspaceRoot } from "vite";
 // index.web.html, so open / navigate to `/index.web.html`.
 export default defineConfig({
   root: resolve("src/renderer"),
+  publicDir: resolve("public"),
   resolve: {
     alias: {
       "@": resolve("src/renderer"),

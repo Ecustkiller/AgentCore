@@ -1,12 +1,18 @@
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Button, Card } from "@/components/ui";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { useFolders } from "@/hooks/useFolders";
+import {
   type BoardSummary,
   createBoard,
   deleteBoard,
   listBoards,
 } from "@/services/boards";
-import { Loader2, Plus, Presentation, Trash2 } from "lucide-react";
+import { FolderOpen, Loader2, Plus, Presentation, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -24,9 +30,12 @@ function formatUpdated(iso: string): string {
 
 export function WhiteboardPage() {
   const navigate = useNavigate();
+  const folders = useFolders();
   const [boards, setBoards] = useState<BoardSummary[] | null>(null);
   const [error, setError] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [pickedFolderId, setPickedFolderId] = useState<string | null>(null);
   // 二次确认删除：首点亮「确认删除」、再点才删，避免误删（不用原生 confirm）。
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
@@ -46,13 +55,22 @@ export function WhiteboardPage() {
   const handleCreate = useCallback(async () => {
     setCreating(true);
     try {
-      const board = await createBoard();
+      const board = await createBoard({
+        folderId: pickedFolderId,
+      });
+      setCreateOpen(false);
+      setPickedFolderId(null);
       navigate(`/whiteboard/${board.id}`);
     } catch {
       setError(true);
       setCreating(false);
     }
-  }, [navigate]);
+  }, [navigate, pickedFolderId]);
+
+  const pickedFolderName =
+    pickedFolderId == null
+      ? "未归入项目"
+      : (folders.find((f) => f.id === pickedFolderId)?.name ?? "项目");
 
   const handleDelete = useCallback(async (id: string) => {
     try {
@@ -74,15 +92,58 @@ export function WhiteboardPage() {
             无限画布，人与 AI 团队同板协作
           </p>
         </div>
-        <Button
-          variant="primary"
-          size="md"
-          icon={<Plus size={16} />}
-          onClick={handleCreate}
-          disabled={creating}
-        >
-          新建白板
-        </Button>
+        <Popover open={createOpen} onOpenChange={setCreateOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="primary"
+              size="md"
+              icon={<Plus size={16} />}
+              disabled={creating}
+            >
+              新建白板
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-64 p-3">
+            <p className="text-xs text-muted-foreground">归入项目（可选）</p>
+            <button
+              type="button"
+              onClick={() => setPickedFolderId(null)}
+              className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-foreground hover:bg-accent"
+            >
+              {pickedFolderId == null ? (
+                <span className="size-1.5 rounded-full bg-primary" />
+              ) : (
+                <span className="size-1.5" />
+              )}
+              未归入项目
+            </button>
+            {folders.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setPickedFolderId(f.id)}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-foreground hover:bg-accent"
+              >
+                {pickedFolderId === f.id ? (
+                  <span className="size-1.5 rounded-full bg-primary" />
+                ) : (
+                  <span className="size-1.5" />
+                )}
+                <FolderOpen size={14} className="text-muted-foreground" />
+                <span className="truncate">{f.name}</span>
+              </button>
+            ))}
+            <Button
+              variant="primary"
+              size="sm"
+              className="mt-3 w-full"
+              disabled={creating}
+              onClick={() => void handleCreate()}
+            >
+              {creating ? "创建中…" : `创建（${pickedFolderName}）`}
+            </Button>
+          </PopoverContent>
+        </Popover>
       </header>
 
       {error ? (
@@ -107,7 +168,7 @@ export function WhiteboardPage() {
           <Button
             variant="primary"
             icon={<Plus size={16} />}
-            onClick={handleCreate}
+            onClick={() => setCreateOpen(true)}
             disabled={creating}
           >
             新建白板

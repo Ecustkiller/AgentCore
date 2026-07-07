@@ -14,7 +14,7 @@ from sqlalchemy import update
 from agentcore.config import settings
 from agentcore.db.models import RunSessionRow
 from agentcore.db.repositories import RunSessionRepository
-from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime import session_persistence as persist_mod
 from agentcore.runtime import session_retention as retention_mod
 from agentcore.runtime.runs import RunSession, RunSpec

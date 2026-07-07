@@ -23,7 +23,7 @@ from pathlib import Path
 from agentcore.config import settings
 from agentcore.core.errors import LLMError
 from agentcore.llm.factory import build_provider
-from agentcore.llm.protocol import LLMMessage, LLMRequest, ToolCall, ToolCallFunction
+from agentcore.llm.provider.protocol import LLMMessage, LLMRequest, ToolCall, ToolCallFunction
 from agentcore.runtime.engine.tool_clear import project_cleared_window
 
 REPO = Path(__file__).resolve().parents[3]

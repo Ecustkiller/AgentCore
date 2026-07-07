@@ -9,7 +9,7 @@
 import asyncio
 import json
 
-from agentcore.llm.protocol import LLMResponse
+from agentcore.llm.provider.protocol import LLMResponse
 from agentcore.runtime.debate import (
     DebateBrief,
     DebateConfig,
@@ -124,9 +124,12 @@ def test_round_feedback_reminds_evidence_markers():
 
 
 def test_cx_answer_feedback_uses_canonical_markers():
-    """质询作答 feedback 用规范标记（不再是含糊的『推断而非已核实』雏形措辞）。"""
+    """质询作答 feedback 要求结构化 JSON，并保留证据状态铁律标记。"""
     fb = cx_answer_feedback(_config(), _two_sides()[0], 1, "成本", ["你这条有出处吗？"])
     assert "【已核实" in fb and "【待核实" in fb
+    assert "JSON" in fb
+    assert "directly_addressed" in fb
+    assert "question_index" in fb
 
 
 # --- 主持人侧：质询盯待核实、裁判据标记记分/罚且诚实不罚 ---------------------

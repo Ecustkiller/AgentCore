@@ -5,62 +5,83 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 
-import httpx
 from fastapi import Depends, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.api.dependencies import get_cost_event_repo, get_db
 from agentcore.api.routes.inference.token import inference_user, router
+from agentcore.billing.gate import preflight_llm_credentials
+from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
-from agentcore.core.errors import BYOKKeyMissingError, QuotaExceededError
+from agentcore.core.errors import (
+    BYOKKeyMissingError,
+    LLMError,
+    QuotaExceededError,
+    error_fields_for,
+)
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
 from agentcore.db.models import User
 from agentcore.db.repositories import CostEventRepository
-from agentcore.llm.byok import (
+from agentcore.llm.credentials import (
     INFERENCE_CONVERSATION_HEADER,
     INFERENCE_TRACE_HEADER,
     LLMCredentials,
 )
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.factory import build_provider
+from agentcore.llm.provider.protocol import LLMMessage, LLMRequest, TokenUsage
+from agentcore.llm.resolve import ModelConfig, platform_llm_credentials
 
 logger = get_logger(__name__)
 
-_UPSTREAM_PATH = "/v1/chat/completions"
 _CONVERSATION_HEADER = INFERENCE_CONVERSATION_HEADER
 _TRACE_HEADER = INFERENCE_TRACE_HEADER
-_REQUEST_TIMEOUT = 120.0
+_UPSTREAM_RETRIED_HEADER = {"X-Upstream-Retried": str(3)}
+
+
+def _credentials_from_config(cfg: ModelConfig, *, conversation_id: str | None, trace_id: str | None) -> LLMCredentials:
+    extra: dict[str, str] = {}
+    if conversation_id:
+        extra[_CONVERSATION_HEADER] = conversation_id
+    if trace_id:
+        extra[_TRACE_HEADER] = trace_id
+    return LLMCredentials(
+        api_key=cfg.api_key,
+        base_url=cfg.base_url,
+        default_model=cfg.model,
+        extra_headers=extra or None,
+    )
 
 
 async def _resolve_inference_credentials(
     session: AsyncSession,
     cost_repo: CostEventRepository,
     user: User,
-) -> LLMCredentials:
-    from agentcore.api.routes import inference as inf
+) -> ModelConfig:
 
-    if inf.settings.billing_mode == "byok":
-        credentials = await inf.resolve_user_llm_credentials(session, user.user_id)
-        if credentials is None:
-            raise BYOKKeyMissingError(
-                "请先在「设置 · 模型配置」中填入你的 DeepSeek API Key，再发起对话。"
-            )
-        return credentials
-    await inf.enforce_quota(cost_repo, user.user_id, limits=inf.QuotaLimits.for_user(user))
-    return LLMCredentials(
-        api_key=inf.settings.deepseek_api_key, base_url=inf.settings.deepseek_base_url
+    credentials = await preflight_llm_credentials(
+        session=session,
+        user=user,
+        cost_repo=cost_repo,
+        byok_missing_message="请先在「设置 · 模型配置」中填入你的 API Key，再发起对话。",
     )
-
-
-def _usage_from_deepseek(usage: dict) -> TokenUsage:
-    details = usage.get("completion_tokens_details") or {}
-    return TokenUsage(
-        input_tokens=int(usage.get("prompt_tokens", 0) or 0),
-        output_tokens=int(usage.get("completion_tokens", 0) or 0),
-        reasoning_tokens=int(details.get("reasoning_tokens", 0) or 0),
-        cache_hit_tokens=int(usage.get("prompt_cache_hit_tokens", 0) or 0),
-        cache_miss_tokens=int(usage.get("prompt_cache_miss_tokens", 0) or 0),
+    if credentials is not None:
+        return ModelConfig(
+            model=credentials.default_model,
+            base_url=credentials.base_url,
+            api_key=credentials.api_key,
+            source="byok",
+            purpose="chat",
+        )
+    platform = platform_llm_credentials()
+    assert platform is not None  # preflight already verified platform availability
+    return ModelConfig(
+        model=settings.platform_model,
+        base_url=platform.base_url,
+        api_key=platform.api_key,
+        source="platform",
+        purpose="chat",
     )
 
 
@@ -96,6 +117,34 @@ async def _record_proxy_spend(
             )
 
 
+def _error_json(exc: Exception) -> JSONResponse:
+    code, message, context = error_fields_for(
+        exc,
+        fallback_code=ErrorCode.LLM_ERROR,
+        fallback_message="上游推理服务错误",
+    )
+    payload: dict = {"error": {"code": code, "message": message}}
+    if context:
+        payload["error"]["context"] = context
+    status = getattr(exc, "status_code", 502)
+    return JSONResponse(status_code=status, content=payload, headers=_UPSTREAM_RETRIED_HEADER)
+
+
+def _llm_request_from_payload(payload: dict, cfg: ModelConfig) -> LLMRequest:
+    messages = [
+        LLMMessage(role=m["role"], content=m.get("content")) for m in payload.get("messages", [])
+    ]
+    return LLMRequest(
+        messages=messages,
+        model=payload.get("model") or cfg.model,
+        temperature=float(payload.get("temperature", 0.7)),
+        max_tokens=payload.get("max_tokens"),
+        tools=payload.get("tools"),
+        tool_choice=payload.get("tool_choice", "auto"),
+        stream=bool(payload.get("stream")),
+    )
+
+
 @router.post("/inference/v1/chat/completions")
 async def inference_chat_completions(
     request: Request,
@@ -110,32 +159,27 @@ async def inference_chat_completions(
 
     with log_context(trace_id=trace_id, conversation_id=conversation_id, user_id=user.user_id):
         try:
-            credentials = await _resolve_inference_credentials(session, cost_repo, user)
+            cfg = await _resolve_inference_credentials(session, cost_repo, user)
         except (QuotaExceededError, BYOKKeyMissingError) as e:
             return JSONResponse(
                 status_code=402, content={"error": {"code": e.code, "message": e.message}}
             )
 
-        client = httpx.AsyncClient(
-            base_url=credentials.base_url.rstrip("/"),
-            headers={
-                "Authorization": f"Bearer {credentials.api_key}",
-                "Content-Type": "application/json",
-            },
-            timeout=httpx.Timeout(_REQUEST_TIMEOUT, connect=10.0),
-        )
+        creds = _credentials_from_config(cfg, conversation_id=conversation_id, trace_id=trace_id)
+        provider = build_provider(creds)
+        llm_request = _llm_request_from_payload(payload, cfg)
 
         if stream:
             return await _forward_stream(
-                client,
-                payload,
+                provider,
+                llm_request,
                 user_id=user.user_id,
                 conversation_id=conversation_id,
                 trace_id=trace_id,
             )
         return await _forward_unary(
-            client,
-            payload,
+            provider,
+            llm_request,
             user_id=user.user_id,
             conversation_id=conversation_id,
             trace_id=trace_id,
@@ -143,100 +187,136 @@ async def inference_chat_completions(
 
 
 async def _forward_unary(
-    client: httpx.AsyncClient,
-    payload: dict,
+    provider,
+    request: LLMRequest,
     *,
     user_id: str,
     conversation_id: str | None,
     trace_id: str | None = None,
 ) -> Response:
     try:
-        upstream = await client.post(_UPSTREAM_PATH, json=payload)
-        body, status = upstream.content, upstream.status_code
-    except httpx.HTTPError as e:
+        response = await provider.complete(request)
+    except Exception as e:
         logger.warning("inference.proxy_upstream_error", error=str(e))
+        if isinstance(e, LLMError):
+            return _error_json(e)
         return JSONResponse(
             status_code=502,
             content={"error": {"code": ErrorCode.LLM_ERROR, "message": "上游推理服务不可达"}},
+            headers=_UPSTREAM_RETRIED_HEADER,
         )
     finally:
-        await client.aclose()
+        await provider.close()
 
-    if status == 200:
-        try:
-            from agentcore.api.routes import inference as inf
-
-            data = json.loads(body)
-            await inf._record_proxy_spend(
-                user_id=user_id,
-                conversation_id=conversation_id,
-                model=data.get("model") or payload.get("model") or "",
-                usage=inf._usage_from_deepseek(data.get("usage") or {}),
-                trace_id=trace_id,
-            )
-        except Exception as e:
-            logger.warning("inference.proxy_unary_record_failed", error=str(e))
-    return Response(content=body, status_code=status, media_type="application/json")
+    tool_calls = None
+    if response.tool_calls:
+        tool_calls = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+            }
+            for tc in response.tool_calls
+        ]
+    message: dict = {"role": "assistant", "content": response.content}
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+    body = json.dumps(
+        {
+            "id": "chatcmpl-proxy",
+            "object": "chat.completion",
+            "model": response.model,
+            "choices": [{"index": 0, "message": message, "finish_reason": response.finish_reason}],
+            "usage": {
+                "prompt_tokens": response.usage.input_tokens,
+                "completion_tokens": response.usage.output_tokens,
+            },
+        }
+    ).encode()
+    await _record_proxy_spend(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        model=response.model,
+        usage=response.usage,
+        trace_id=trace_id,
+    )
+    return Response(content=body, status_code=200, media_type="application/json")
 
 
 async def _forward_stream(
-    client: httpx.AsyncClient,
-    payload: dict,
+    provider,
+    request: LLMRequest,
     *,
     user_id: str,
     conversation_id: str | None,
     trace_id: str | None = None,
 ) -> Response:
-    cm = client.stream("POST", _UPSTREAM_PATH, json=payload)
+    captured: dict = {}
+
+    async def _iter_sse():
+        async for chunk in provider.stream(request):
+            data: dict = {"choices": [{"index": 0, "delta": {}, "finish_reason": None}]}
+            delta = data["choices"][0]["delta"]
+            if chunk.delta_content:
+                delta["content"] = chunk.delta_content
+            if chunk.delta_reasoning:
+                delta["reasoning_content"] = chunk.delta_reasoning
+            if chunk.finish_reason:
+                data["choices"][0]["finish_reason"] = chunk.finish_reason
+            if chunk.usage:
+                captured["usage"] = chunk.usage
+                captured["model"] = request.model
+                data["usage"] = {
+                    "prompt_tokens": chunk.usage.input_tokens,
+                    "completion_tokens": chunk.usage.output_tokens,
+                }
+            yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    sse_gen = _iter_sse()
     try:
-        upstream = await cm.__aenter__()
-    except httpx.HTTPError as e:
-        await client.aclose()
-        logger.warning("inference.proxy_upstream_error", error=str(e))
+        first_line = await sse_gen.__anext__()
+    except StopAsyncIteration:
+        first_line = None
+    except Exception as e:
+        logger.warning("inference.proxy_stream_error", error=str(e))
+        await provider.close()
+        if isinstance(e, LLMError):
+            return _error_json(e)
         return JSONResponse(
             status_code=502,
             content={"error": {"code": ErrorCode.LLM_ERROR, "message": "上游推理服务不可达"}},
+            headers=_UPSTREAM_RETRIED_HEADER,
         )
-
-    if upstream.status_code != 200:
-        body = await upstream.aread()
-        await cm.__aexit__(None, None, None)
-        await client.aclose()
-        return Response(
-            content=body,
-            status_code=upstream.status_code,
-            media_type="application/json",
-        )
-
-    captured: dict = {}
 
     async def relay():
         try:
-            async for line in upstream.aiter_lines():
-                if line.startswith("data: "):
-                    chunk = line[6:].strip()
-                    if chunk and chunk != "[DONE]":
-                        try:
-                            obj = json.loads(chunk)
-                            if obj.get("usage"):
-                                captured["usage"] = obj["usage"]
-                                captured["model"] = obj.get("model")
-                        except json.JSONDecodeError:
-                            pass
-                yield f"{line}\n"
+            if first_line is not None:
+                yield first_line
+            async for line in sse_gen:
+                yield line
         finally:
-            await cm.__aexit__(None, None, None)
-            await client.aclose()
+            await provider.close()
             usage = captured.get("usage")
             if usage:
-                from agentcore.api.routes import inference as inf
-
-                await inf._record_proxy_spend(
+                await _record_proxy_spend(
                     user_id=user_id,
                     conversation_id=conversation_id,
-                    model=captured.get("model") or payload.get("model") or "",
-                    usage=inf._usage_from_deepseek(usage),
+                    model=captured.get("model") or request.model,
+                    usage=usage,
                     trace_id=trace_id,
                 )
 
     return StreamingResponse(relay(), media_type="text/event-stream")
+
+
+# Backward-compat test hooks
+def _usage_from_deepseek(usage: dict) -> TokenUsage:
+    details = usage.get("completion_tokens_details") or {}
+    return TokenUsage(
+        input_tokens=int(usage.get("prompt_tokens", 0) or 0),
+        output_tokens=int(usage.get("completion_tokens", 0) or 0),
+        reasoning_tokens=int(details.get("reasoning_tokens", 0) or 0),
+        cache_hit_tokens=int(usage.get("prompt_cache_hit_tokens", 0) or 0),
+        cache_miss_tokens=int(usage.get("prompt_cache_miss_tokens", 0) or 0),
+    )

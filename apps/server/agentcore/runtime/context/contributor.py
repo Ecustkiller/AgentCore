@@ -41,8 +41,9 @@ class SectionOrder(IntEnum):
     MEMORY = 300
     CEO_CORE = 400
     SKILL_DIRECTORY = 500
-    # The CEO-only 记忆主题目录 (consult_memory's catalog) sits beside the skill directory:
+    # The 记忆主题目录 (consult_memory's catalog) sits beside the skill directory:
     # both are "here is a catalog, pull the full text by name" blocks (记忆文件夹化 §六).
+    # CEO gets name+summary; workers get a simplified names-only variant.
     MEMORY_TOPICS = 550
     CITATION = 600
     CEO_VISUALIZATION = 700

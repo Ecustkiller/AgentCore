@@ -101,6 +101,18 @@ worker 全程 non-blocking、照常按假设把能做的做完；简报（`super
 
 → 见代码：`tools/builtin/escalate.py`、`runtime/interaction.py`（`ESCALATION`）、`runtime/runs/executor_agent.py`（`_escalation_channel`）
 
+### Worker 问题处理：三档自主度 ✅ 已落地
+
+Worker 遇到障碍时按三档策略自主处理，写入 worker system prompt：
+
+| 情况 | 行为 |
+|---|---|
+| 琐碎障碍（路径拼写、import 缺失、lint 报错） | 自行修复，不用回报 |
+| 执行层问题（测试挂了、需要多改一个文件） | 尝试修一轮；修不好则 `escalate` 回报 |
+| 方案层问题（方案不可行、需改接口契约） | 立即停下 `escalate`，不自行决策 |
+
+与 `escalate` 工具协同：三档自主度管「该不该上报」的分界，`kind`（`normal`/`scope`/`dep`）管「上报什么类型的问题」。→ 见代码：`runtime/runs/executor_identities.py`、`runtime/resolve/prompt.py`
+
 ### 波内共享上下文：便签墙（NoteWall）✅ 已落地
 
 **解决的痛**：同扇出的并行兄弟过去只看到「开局快照」（队友产物去重清单 + 兄弟感知块），波内**看不到彼此「进行中」的发现**——各自猜接口 / 字段、最后才发现对不上、返工。便签墙把「开局冻住的快照」升级为「**边干边更新的共享面**」，让「中间的互相影响」真正发生。
@@ -176,7 +188,7 @@ CEO 主 Agent、`delegate` 按需委派与 DAG 波次调度——→ 见 [`编�
 | 4 | **上下文最小传递** | ✅ worker 隔离上下文，不全量历史 |
 | 5 | **分层熔断** | ✅ 引擎 `LoopController`（⏳ Redis 熔断 fail-open 未实现） |
 | 6 | **幂等性执行** | ⏳ 写操作 idempotency key 未实现 |
-| 7 | **模型分级** | ✅ fast/strong + 质量档（内测休眠）→ 见编排器 §2.1 |
+| 7 | **模型分级** | ✅ fast/strong 执行参数档 + 用户统一 model（BYOK）→ 见编排器 §2.1 |
 
 ---
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
+from agentcore.runtime.checkpoints import AskCheckpointIntent
 from agentcore.tools.protocol import ToolContext
 
 if TYPE_CHECKING:
@@ -32,6 +33,7 @@ async def persist_suspension(
     questions: list[dict[str, Any]],
     style_options: list[dict[str, Any]],
     required_event: Any,
+    intent: AskCheckpointIntent,
 ) -> bool:
     """Capture + persist the durable suspension frame for this ask_user pause (2b).
 
@@ -100,6 +102,7 @@ async def persist_suspension(
         assumptions=assumptions,
         questions=questions,
         style_options=style_options,
+        intent=intent,
         journal=journal,
         journal_entries=journal_entries,
         trace_id=get_log_value("trace_id"),

@@ -1,7 +1,7 @@
 from dataclasses import replace
 
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.llm.protocol import LLMChunk, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, ToolCallDelta
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.executor import build_agent_executor

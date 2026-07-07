@@ -11,6 +11,10 @@ class PersistenceSettings(BaseModel):
     session_roster_sweep_interval_seconds: int = 6 * 3600
     session_roster_sweep_batch_limit: int = 200
 
+    audit_retention_days: int = 90
+    audit_retention_sweep_interval_seconds: int = 24 * 3600
+    audit_retention_sweep_batch_limit: int = 500
+
     memory_consolidation_enabled: bool = True
     memory_consolidation_idle_seconds: float = 90.0
     memory_consolidation_turn_cap: int = 8

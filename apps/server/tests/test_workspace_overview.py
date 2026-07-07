@@ -1,6 +1,6 @@
 """Tests for the CEO workspace overview (``runtime.context.workspace_overview``).
 
-Pins the ``<workspace_context>`` contract: best-effort (no backend / empty / failing /
+Pins the ``<workspace_file_index>`` contract: best-effort (no backend / empty / failing /
 index-less → "" so the caller omits the block), newest-first listing as the backend
 returns it, and bounded by BOTH a file count and a char budget with an elision line
 when more remain — so a large workspace can't bloat the CEO prompt. No DB / HTTP
@@ -47,8 +47,8 @@ async def test_backend_without_index_support_yields_empty():
 async def test_lists_files_in_backend_order_under_caps():
     paths = ["报告.md", "data/input.csv", "src/main.py"]
     out = await build_workspace_overview(_FakeBackend(paths))
-    assert out.startswith("<workspace_context>")
-    assert out.rstrip().endswith("</workspace_context>")
+    assert out.startswith("<workspace_file_index>")
+    assert out.rstrip().endswith("</workspace_file_index>")
     for p in paths:
         assert f"- {p}" in out
     # Order preserved (backend already sorted newest-first).

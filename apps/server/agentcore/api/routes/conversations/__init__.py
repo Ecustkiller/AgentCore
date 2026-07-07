@@ -15,6 +15,7 @@ directly from this module.
 from fastapi import APIRouter
 
 from . import (
+    audit,
     binding,
     crud,
     files,
@@ -25,7 +26,7 @@ from . import (
     snapshots,
     turns,
 )
-from ._helpers import _preflight_turn_llm
+from ._helpers import TurnPreflightResult, _preflight_turn_llm
 
 # Each domain sub-router carries the original ``prefix="/conversations",
 # tags=["conversations"]`` so this aggregate stays a plain concatenator.
@@ -35,6 +36,7 @@ router = APIRouter()
 # stays byte-identical (the spec is the single source for the generated TS types).
 router.include_router(crud.router)
 router.include_router(messages.router)
+router.include_router(audit.router)
 router.include_router(interactions.router)
 router.include_router(run_redirect.router)
 router.include_router(binding.router)
@@ -43,4 +45,4 @@ router.include_router(turns.router)
 router.include_router(snapshots.router)
 router.include_router(files.router)
 
-__all__ = ["router", "_preflight_turn_llm"]
+__all__ = ["router", "_preflight_turn_llm", "TurnPreflightResult"]

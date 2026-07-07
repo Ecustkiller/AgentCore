@@ -15,7 +15,7 @@ from sqlalchemy import update
 from agentcore.config import settings
 from agentcore.db.models import PausedTurnRow
 from agentcore.db.repositories import PausedTurnRepository, TurnJournalRepository
-from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime import suspension_persistence as persist_mod
 from agentcore.runtime import suspension_retention as retention_mod
 from agentcore.runtime.runs import RunPhase, RunPlan, RunSpec, RunState
@@ -59,6 +59,17 @@ def _frame(message_id: str, conversation_id: str, user_id: str) -> PlanReviewSus
         pending=[{"run_id": "del_a_2", "role": "写手"}],
         trace_id="trace1",
     )
+
+
+async def _seed_turn_journal(session_factory, frame: PlanReviewSuspension) -> None:
+    """Simulate append-on-emit: facts already in ``turn_journal`` before pause save."""
+    async with session_factory() as s:
+        await TurnJournalRepository(s).record(
+            turn_id=frame.message_id,
+            conversation_id=frame.conversation_id,
+            trace_id=frame.trace_id,
+            entries=frame.journal_entries,
+        )
 
 
 async def test_upsert_then_claim_round_trips(session_factory):
@@ -155,13 +166,14 @@ async def test_save_claim_bridge_round_trips(session_factory, monkeypatch):
     mid, cid, uid = str(uuid4()), str(uuid4()), str(uuid4())
     frame = _frame(mid, cid, uid)
 
+    await _seed_turn_journal(session_factory, frame)
     await persist_mod.save_paused_turn(frame)
 
     # Listed as pending before it is claimed.
     pending = await persist_mod.list_paused_turns(cid)
     assert [f.message_id for f in pending] == [mid]
 
-    # The frame carries no journal — it was mirrored into turn_journal at save.
+    # The frame carries no journal — it was appended on emit to turn_journal before save.
     async with session_factory() as s:
         entries = await TurnJournalRepository(s).load(mid)
     assert [e["kind"] for e in entries] == ["run_plan"]
@@ -245,9 +257,11 @@ async def test_retention_sweep_clears_orphan_turn_journal(session_factory, monke
     monkeypatch.setattr(settings, "paused_turn_retention_days", 7)
     mid, cid, uid = str(uuid4()), str(uuid4()), str(uuid4())
 
-    await persist_mod.save_paused_turn(_frame(mid, cid, uid))
+    frame = _frame(mid, cid, uid)
+    await _seed_turn_journal(session_factory, frame)
+    await persist_mod.save_paused_turn(frame)
     async with session_factory() as s:
-        assert await TurnJournalRepository(s).load(mid)  # journal landed at pause
+        assert await TurnJournalRepository(s).load(mid)  # journal landed before pause save
 
     # Age the frame past the window, then sweep.
     aged = datetime.now(UTC) - timedelta(days=10)

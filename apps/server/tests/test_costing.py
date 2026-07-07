@@ -9,9 +9,9 @@ state into a ledger row. Money is integer nano-USD throughout.
 
 from dataclasses import asdict
 
-from agentcore.llm.config import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO
 from agentcore.llm.pricing import QWEN_VL_MAX, calculate_cost
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO
+from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.costing import (
     ROLE_CAPTAIN,
     ROLE_MEMBER,

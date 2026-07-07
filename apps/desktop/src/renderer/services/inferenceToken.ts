@@ -8,8 +8,8 @@ import type { SidecarInference } from "@shared/sidecar-contract";
  * `POST /v1/inference/v1/chat/completions`，以一枚**作用域受限的短期令牌**（inference token）
  * 作 Bearer 鉴权。本模块负责拿这枚令牌并拼出 sidecar 需要的 `{baseUrl, apiKey}`：
  *
- * - `baseUrl` = `${BASE_URL}/v1/inference`：引擎 `DeepSeekProvider` 会在其后接 `/v1/chat/completions`，
- *   恰好命中代理路由（见服务端 `api/routes/inference.py`）。
+ * - `baseUrl` = `${BASE_URL}/v1/inference/v1`：`OpenAICompatibleProvider` 在其后拼 `/chat/completions`，
+ *   命中代理路由 `/v1/inference/v1/chat/completions`（见服务端 `api/routes/inference/proxy.py`）。
  * - `apiKey` = 令牌本身（非平台 key）。
  *
  * 令牌经 cookie 会话向 `POST /v1/inference/token` 兑换（与其余 API 同源鉴权）。令牌有 TTL
@@ -48,7 +48,7 @@ export async function resolveSidecarInference(): Promise<SidecarInference | null
     if (!cached || cached.expiresAtMs - RENEW_SKEW_MS <= Date.now()) {
       cached = await mint();
     }
-    return { baseUrl: `${BASE_URL}/v1/inference`, apiKey: cached.token };
+    return { baseUrl: `${BASE_URL}/v1/inference/v1`, apiKey: cached.token };
   } catch (err) {
     console.error("[sidecar] 取推理令牌失败", err);
     cached = null;

@@ -131,7 +131,9 @@ export function ConversationItem({ conversation }: Props) {
   const [draft, setDraft] = useState(conversation.title);
   const inputRef = useRef<HTMLInputElement>(null);
   const skipBlurRef = useRef(false);
-  const previewTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
   const currentId = useConversationStore((s) => s.currentConversationId);
   const cachedMessages = useConversationStore(
     (s) => s.byId[conversation.id]?.messages ?? EMPTY_MESSAGES,

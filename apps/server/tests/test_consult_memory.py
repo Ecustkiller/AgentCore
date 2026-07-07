@@ -20,9 +20,13 @@ from agentcore.memory.store import CORE_MEMORY_FILE, FileMemoryStore, topic_path
 from agentcore.runtime.prompt import (
     assemble_system_prompt,
     compose_ceo_chat_prompt,
+    compose_worker_base_prompt,
     render_memory_topic_directory,
+    render_worker_memory_topic_directory,
 )
+from agentcore.runtime.resolve.prepare import _wire_worker_memory_tools
 from agentcore.runtime.skills import build_system_skill_registry
+from agentcore.tools.builtin import build_worker_registry
 from agentcore.tools.builtin.consult_memory import ConsultMemoryTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -210,7 +214,7 @@ def _assemble_chat_tools(*, folder_id: str | None, memory_enabled: bool = True):
     passes the frame's ``folder_id`` (Agent记忆与知识系统 §二), so this pins that a
     non-None folder_id scopes consult_memory to that project rather than global-only.
     """
-    from agentcore.llm.modes import default_profile_set
+    from agentcore.llm.profiles import default_turn_profiles as default_profile_set
     from agentcore.runtime.events import EventSink
     from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset
     from agentcore.tools.registry import ToolRegistry
@@ -258,3 +262,49 @@ def test_assemble_omits_consult_memory_when_memory_off():
     # Master switch off ⇒ not wired at all (privacy off-ramp); folder_id is irrelevant.
     chat_tools = _assemble_chat_tools(folder_id="F1", memory_enabled=False)
     assert chat_tools.get_optional("consult_memory") is None
+
+
+# --- worker wiring + prompt --------------------------------------------------
+
+
+def test_worker_topic_directory_lists_names_only():
+    out = render_worker_memory_topic_directory(
+        [MemoryTopic("部署流程", "先 build 再 deploy"), MemoryTopic("项目背景", "")]
+    )
+    assert "<记忆主题目录>" in out and "</记忆主题目录>" in out
+    assert "consult_memory" in out
+    assert "- 部署流程" in out
+    assert "先 build 再 deploy" not in out  # worker catalog: names only
+
+
+def test_worker_prompt_lists_topic_directory_when_memory_on():
+    base = assemble_system_prompt()
+    with_memory = compose_worker_base_prompt(
+        base,
+        memory_topics=[MemoryTopic("部署流程", "先 build")],
+        memory_enabled=True,
+    )
+    assert "<记忆主题目录>" in with_memory
+    assert "- 部署流程" in with_memory
+    assert "先 build" not in with_memory  # summaries stay CEO-only
+
+    without_memory = compose_worker_base_prompt(
+        base,
+        memory_topics=[MemoryTopic("部署流程", "先 build")],
+        memory_enabled=False,
+    )
+    assert "<记忆主题目录>" not in without_memory
+
+
+def test_worker_registry_wires_consult_memory_when_memory_on():
+    worker_tools = build_worker_registry()
+    _wire_worker_memory_tools(worker_tools, memory_enabled=True, folder_id="F1")
+    cm = worker_tools.get_optional("consult_memory")
+    assert cm is not None
+    assert cm.project_id == "F1"
+
+
+def test_worker_registry_omits_consult_memory_when_memory_off():
+    worker_tools = build_worker_registry()
+    _wire_worker_memory_tools(worker_tools, memory_enabled=False, folder_id="F1")
+    assert worker_tools.get_optional("consult_memory") is None

@@ -1,4 +1,5 @@
 import { CostTrendBars, TurnTrendBars } from "@/components/charts";
+import { AuditSummaryWidget } from "@/components/AuditSummaryWidget";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -421,6 +422,8 @@ function HealthPanel({
         </h2>
         <TurnTrendBars data={data.recent_daily} />
       </section>
+
+      <AuditSummaryWidget reloadKey={reloadKey} />
 
       <ErrorsTable rows={data.recent_errors} onOpen={onOpenReplay} />
     </div>

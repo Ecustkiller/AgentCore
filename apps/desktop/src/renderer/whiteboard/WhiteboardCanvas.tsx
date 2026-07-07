@@ -77,6 +77,10 @@ interface SelStyle {
 export interface WhiteboardCanvasProps {
   initialElements: SceneElement[];
   initialViewport?: Viewport;
+  /** Preselect these element ids after the scene loads — the offline preview
+   * (`#/preview/whiteboard`) uses it to render a selected state (rotation handle / selection
+   * bar); the app never sets it (selection comes from pointer). */
+  initialSelectedIds?: string[];
   /** Fired on every committed element mutation (host debounces + autosaves). */
   onChange: (elements: SceneElement[], viewport: Viewport) => void;
   /** Host triggers「整理选区」from the floating selection bar. */
@@ -86,6 +90,8 @@ export interface WhiteboardCanvasProps {
   /** Host triggers「在产物上迭代」(M3 Slice 4 贴源迭代) — shown only when the selection holds a
    * crystallized `artifactCard`. */
   onIterateArtifact?: () => void;
+  /** Double-click a crystallized `artifactCard` — open file preview or expand text body. */
+  onArtifactActivate?: (el: SceneElement) => void;
   aiBusy?: boolean;
   className?: string;
 }
@@ -381,10 +387,12 @@ export const WhiteboardCanvas = forwardRef<
   {
     initialElements,
     initialViewport,
+    initialSelectedIds,
     onChange,
     onOrganizeSelection,
     onImplementSelection,
     onIterateArtifact,
+    onArtifactActivate,
     aiBusy = false,
     className,
   },
@@ -396,6 +404,8 @@ export const WhiteboardCanvas = forwardRef<
   const engineRef = useRef<WhiteboardEngine | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onArtifactActivateRef = useRef(onArtifactActivate);
+  onArtifactActivateRef.current = onArtifactActivate;
 
   const [tool, setTool] = useState<Tool>("select");
   const [zoom, setZoom] = useState(1);
@@ -403,6 +413,7 @@ export const WhiteboardCanvas = forwardRef<
   // M3 Slice 4 (贴源迭代): whether the selection includes a crystallized `artifactCard`, which
   // gates the「迭代」action in the floating bar.
   const [selHasArtifact, setSelHasArtifact] = useState(false);
+  const [selHasFrame, setSelHasFrame] = useState(false);
   const [selStyle, setSelStyle] = useState<SelStyle>({});
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [swatches, setSwatches] = useState<string[]>(() => readSwatches());
@@ -424,13 +435,16 @@ export const WhiteboardCanvas = forwardRef<
         setSelectionCount(ids.length);
         setSelStyle(engine.getSelectedStyle());
         setSelHasArtifact(engine.hasSelectedType("artifactCard"));
+        setSelHasFrame(engine.hasSelectedType("frame"));
       },
       onToolChange: (t) => setTool(t),
       onViewportChange: (z) => setZoom(z),
       onContextMenu: (x, y) => setMenu({ x, y }),
+      onArtifactActivate: (el) => onArtifactActivateRef.current?.(el),
     });
     engineRef.current = engine;
     engine.loadScene(initialElements, initialViewport);
+    if (initialSelectedIds?.length) engine.selectIds(initialSelectedIds);
 
     const ro = new ResizeObserver(() => {
       const rect = container.getBoundingClientRect();
@@ -808,10 +822,72 @@ export const WhiteboardCanvas = forwardRef<
               onClick={() => runMenu((e) => e.ungroupSelected())}
             />
             <div className="my-1 h-px bg-border" />
+            {onOrganizeSelection ? (
+              <MenuItem
+                label="整理选区"
+                disabled={selectionCount === 0 || aiBusy}
+                onClick={() => {
+                  setMenu(null);
+                  onOrganizeSelection();
+                }}
+              />
+            ) : null}
+            {onImplementSelection && (selectionCount > 0 || selHasFrame) ? (
+              <MenuItem
+                label="让团队实现"
+                disabled={selectionCount === 0 || aiBusy}
+                onClick={() => {
+                  setMenu(null);
+                  onImplementSelection();
+                }}
+              />
+            ) : null}
+            {selHasArtifact ? (
+              <>
+                <MenuItem
+                  label="复制产物正文"
+                  onClick={() =>
+                    runMenu((e) => {
+                      const arts = e
+                        .getScene()
+                        .filter(
+                          (el) =>
+                            el.type === "artifactCard" &&
+                            e.getSelectedIds().includes(el.id) &&
+                            el.text,
+                        );
+                      const text = arts.map((a) => a.text).join("\n\n");
+                      if (text) void navigator.clipboard.writeText(text);
+                    })
+                  }
+                />
+                <MenuItem
+                  label="展开产物全文"
+                  onClick={() =>
+                    runMenu((e) => {
+                      const art = e
+                        .getScene()
+                        .find(
+                          (el) =>
+                            el.type === "artifactCard" &&
+                            e.getSelectedIds().includes(el.id),
+                        );
+                      if (art) onArtifactActivateRef.current?.(art);
+                    })
+                  }
+                />
+              </>
+            ) : null}
+            <div className="my-1 h-px bg-border" />
             <MenuItem
               label="网格布局"
               disabled={selectionCount < 2}
               onClick={() => runMenu((e) => e.layoutSelectedGrid())}
+            />
+            <MenuItem
+              label="链路布局"
+              disabled={selectionCount < 2}
+              onClick={() => runMenu((e) => e.layoutSelectedDagre())}
             />
             <MenuItem
               label="导出选区 PNG"

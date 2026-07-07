@@ -11,14 +11,16 @@ from agentcore.core.errors import error_fields_for
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.llm.credentials import LLMCredentials
-from agentcore.llm.modes import ProfileSet, default_profile_set
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.profiles import TurnProfiles as ProfileSet
+from agentcore.llm.profiles import default_turn_profiles as default_profile_set
+from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.memory import (
     default_memory_store,
     load_injected_memory,
     load_memory_topics,
 )
 from agentcore.runtime.approvals import ApprovalGate
+from agentcore.runtime.audit.hooks import bind_recorder
 from agentcore.runtime.citations import merge_citations, out_of_range_markers
 from agentcore.runtime.context import (
     ContextAssembler,
@@ -42,11 +44,17 @@ from agentcore.runtime.facts import (
     record_turn_fact,
 )
 from agentcore.runtime.interaction import default_interaction_registry
+from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
 from agentcore.runtime.pipeline.finalize import _journal_entries_for_turn
-from agentcore.runtime.pipeline.prepare import _assemble_ceo_toolset, _build_attachment_context
+from agentcore.runtime.pipeline.prepare import (
+    _assemble_ceo_toolset,
+    _build_attachment_context,
+    _wire_worker_memory_tools,
+)
 from agentcore.runtime.prompt import (
     assemble_system_prompt,
     compose_ceo_chat_prompt,
+    compose_worker_base_prompt,
 )
 from agentcore.runtime.runs import (
     RunKind,
@@ -102,6 +110,8 @@ async def run_chat_pipeline(
     suspension_saver: SuspensionSaver | None = None,
     suspension_deleter: SuspensionDeleter | None = None,
     debate_seed: dict | None = None,
+    llm_supports_tools: bool | None = None,
+    message_id: str | None = None,
 ) -> dict:
     """Run the full chat pipeline for a single user message.
 
@@ -137,7 +147,7 @@ async def run_chat_pipeline(
     back to the global server key (platform mode).
     """
     profiles = profile_set or default_profile_set()
-    message_id = new_id()
+    message_id = message_id or new_id()
     # The CEO captain is the turn's root Run node (kind=captain): it owns the reply
     # voice and may delegate. Its run id parents every delegated member's ledger row
     # and labels the captain cost row; agent_id == run_id (阶段1 convention). When
@@ -152,6 +162,22 @@ async def run_chat_pipeline(
     # delegated worker's task, so the whole team writes to this log. Reset in finally.
     fact_log = TurnFactLog()
     fact_log_token = current_fact_log.set(fact_log)
+    # Append-on-emit: every fact is durably written before its SSE event is delivered.
+    from agentcore.core.log_context import get_log_value
+
+    journal_writer = TurnJournalWriter(
+        turn_id=message_id,
+        conversation_id=conversation_id,
+        trace_id=get_log_value("trace_id"),
+    )
+    journal_writer_token = current_journal_writer.set(journal_writer)
+    audit_recorder, audit_token = bind_recorder(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        turn_id=message_id,
+        trace_id=get_log_value("trace_id"),
+        captain_run_id=captain_run_id,
+    )
     # 执行级事件溯源 Phase 2 ⑤: publish this turn's history so a suspending face captures it
     # into the durable frame — the resume window splices it ahead of the journal-folded
     # rounds (the journal stores only history's LENGTH). Reset in finally.
@@ -195,14 +221,19 @@ async def run_chat_pipeline(
             memory_markdown=memory_markdown, instructions=instructions
         )
         attachment_context = _build_attachment_context(attachments)
-        # Workers hold no CEO hints, so their base is the clean base + the same
-        # attachment block appended at the end — byte-identical to the old single-call
-        # assembly (assemble joins with "\n"), so the delegated team still sees the
-        # user's files while the worker's own stable prefix (base) stays cacheable.
-        worker_base_prompt = (
-            f"{system_prompt}\n{attachment_context}" if attachment_context else system_prompt
+        # Workers hold no CEO hints; their base is the shared base + optional simplified
+        # 记忆主题目录 + the same attachment block at the end — byte-identical to the old
+        # single-call assembly when memory is off and no topics exist.
+        worker_base_prompt = compose_worker_base_prompt(
+            system_prompt,
+            memory_topics=memory_topics,
+            memory_enabled=memory_enabled,
+            attachment_context=attachment_context,
         )
         worker_tools = build_worker_registry(backend=backend)
+        _wire_worker_memory_tools(
+            worker_tools, memory_enabled=memory_enabled, folder_id=folder_id
+        )
         # System skills (提示词瘦身 P2): the advanced-mechanism guidance the CEO pulls
         # on demand via consult_skill. Built once per turn; backs the tool AND the
         # always-on 能力目录 rendered into the CEO prompt below. Legal vertical v0 layers
@@ -384,17 +415,13 @@ async def run_chat_pipeline(
         sink.emit(message_start(message_id, conversation_id=conversation_id))
 
         profile = profiles.get("chat")
+        turn_model = profiles.model_for("chat")
 
-        # 执行级事件溯源 (§8.3): the turn's HEAD fact — the verbatim CEO system prompt
-        # (dynamic: date / skills / attachments, so captured not re-rendered), the user
-        # message, the model profile, and how many prior messages were folded in. This
-        # is the window fold's anchor; recorded before the captain runs so it is the
-        # log's first fact (message_start is display-only, not journaled).
         record_turn_fact(
             TurnStartedFact(
                 system_prompt=chat_system_prompt,
                 user_message=user_message,
-                model_profile=profile.model,
+                model_profile=turn_model,
                 history_len=len(history),
             ).to_fact()
         )
@@ -429,8 +456,10 @@ async def run_chat_pipeline(
             history=history,
             user_message=user_message,
             profile=profile,
+            turn_model=turn_model,
             citation_sink=citations,
             approval_gate=approval_gate,
+            supports_tools=llm_supports_tools,
         )
         captain_state = await run_captain(captain_spec)
 
@@ -453,6 +482,7 @@ async def run_chat_pipeline(
                 # (§九.4 Gap ②): carry those vision rows so the spend isn't lost on error.
                 *(asdict(r) for r in vision_cost_sink),
             ]
+            await audit_recorder.flush()
             return {
                 "message_id": message_id,
                 "content": "",
@@ -460,6 +490,7 @@ async def run_chat_pipeline(
                 "error_code": ErrorCode.PIPELINE_ERROR,
                 "finish_reason": FinishReason.ERROR,
                 "cost_runs": cost_runs,
+                "audit_drops": audit_recorder.drops,
             }
 
         # 受监督的波循环 P5「Edge」: if the CEO yielded at a delegate boundary (晚绑定 / scope)
@@ -554,6 +585,7 @@ async def run_chat_pipeline(
 
         journal_entries = _journal_entries_for_turn(fact_log, sink=sink, finish=finish)
 
+        await audit_recorder.flush()
         return {
             "message_id": message_id,
             "content": final_content,
@@ -575,6 +607,7 @@ async def run_chat_pipeline(
                 **delegate_tool.collab,
                 "revises": len(revise_tool.run_ledger),
             },
+            "audit_drops": audit_recorder.drops,
         }
 
     except Exception as e:
@@ -582,10 +615,10 @@ async def run_chat_pipeline(
         # Preserve a structured AgentCoreError.code that escaped to the pipeline
         # boundary (e.g. LLM_KEY_INVALID) instead of flattening every crash to
         # PIPELINE_ERROR — the client only acts on specific codes (统一错误码).
-        code, message = error_fields_for(
+        code, message, err_ctx = error_fields_for(
             e, fallback_code=ErrorCode.PIPELINE_ERROR, fallback_message=str(e)
         )
-        sink.emit(error_event(code, message))
+        sink.emit(error_event(code, message, context=err_ctx))
         sink.emit(message_end(FinishReason.ERROR))
         # 异常也落库: a crash mid-turn must NOT discard already-finished work (a
         # completed debate / delegated workers). Carry the journal so persist_turn_result
@@ -598,6 +631,7 @@ async def run_chat_pipeline(
             )
         except Exception:  # noqa: BLE001 — salvage is best-effort; keep the real error
             crash_journal = None
+        await audit_recorder.flush()
         return {
             "message_id": message_id,
             "content": "",
@@ -605,9 +639,16 @@ async def run_chat_pipeline(
             "error_code": code,
             "finish_reason": FinishReason.ERROR,
             "journal_entries": crash_journal,
+            "audit_drops": audit_recorder.drops,
         }
     finally:
         current_fact_log.reset(fact_log_token)
+        current_journal_writer.reset(journal_writer_token)
+        from agentcore.runtime.audit.recorder import current_audit_recorder
+
+        with contextlib.suppress(Exception):
+            await audit_recorder.flush()
+        current_audit_recorder.reset(audit_token)
         turn_history.reset(history_token)
         # Do NOT close the sink here. The pipeline is a *producer* on a sink it did not
         # create; closing it would silently drop the post-turn tail (title_generated /

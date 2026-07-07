@@ -26,6 +26,7 @@ export function checkpointsFromEvents(events: SSEEvent[]): CheckpointDisplay[] {
         assumptions: p.assumptions ?? [],
         questions: p.questions ?? [],
         styleOptions: p.style_options ?? [],
+        intent: p.intent ?? "decision",
         status: "pending",
         decision: null,
         note: "",

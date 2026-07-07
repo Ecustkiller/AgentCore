@@ -31,7 +31,7 @@ assistant / system messages.
 
 import json
 
-from agentcore.llm.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage
 
 # Argument keys, in priority order, that identify WHICH read-only call was cleared, so
 # the pointer names the specific file / query / url and the model can re-issue it.

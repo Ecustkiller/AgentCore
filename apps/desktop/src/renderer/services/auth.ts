@@ -4,7 +4,9 @@ import {
   BASE_URL,
   NetworkError,
   api,
+  bootstrapRequest,
   clearCsrfToken,
+  fetchWithTimeout,
   tryRefresh,
 } from "@/services/api";
 import { clearSidecarInference } from "@/services/inferenceToken";
@@ -36,6 +38,11 @@ function toUser(u: BackendUser): AuthUser {
 }
 
 /** Resolve the current session from the access cookie (throws 401 if absent). */
+/** Resolve the current session during cold-start bootstrap (bounded wait). */
+async function bootstrapFetchMe(): Promise<AuthUser> {
+  return toUser(await bootstrapRequest<BackendUser>("/v1/auth/me"));
+}
+
 export async function fetchMe(): Promise<AuthUser> {
   return toUser(await api.get<BackendUser>("/v1/auth/me"));
 }
@@ -188,7 +195,9 @@ interface ReadinessResponse {
  */
 export async function diagnoseOutage(): Promise<string | null> {
   try {
-    const res = await fetch(`${BASE_URL}/readyz`, { credentials: "include" });
+    const res = await fetchWithTimeout(`${BASE_URL}/readyz`, {
+      credentials: "include",
+    });
     const ready = (await res.json()) as ReadinessResponse;
     if (res.ok && ready.database) return null;
     if (!ready.database) return "数据库不可用：请确认数据库已启动后重试。";
@@ -222,7 +231,16 @@ async function devAutoLogin(): Promise<DevLoginResult> {
   const password = import.meta.env.VITE_DEV_PASSWORD;
   if (!username || !password) return { kind: "skipped" };
   try {
-    return { kind: "ok", user: await login(username, password) };
+    const body = await bootstrapRequest<LoginResponse>("/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    if (!body.user) {
+      throw new Error("登录响应缺少用户信息");
+    }
+    const user = toUser(body.user);
+    clearSidecarInference();
+    return { kind: "ok", user };
   } catch (err) {
     if (isOutage(err)) {
       console.warn("[dev] auto-login skipped: backend unavailable", err);
@@ -270,7 +288,7 @@ function logBootstrap(
 export async function bootstrapAuth(): Promise<BootstrapResult> {
   // 1. Existing session via the access cookie.
   try {
-    const user = await fetchMe();
+    const user = await bootstrapFetchMe();
     logBootstrap("me_ok");
     return { kind: "authenticated", user };
   } catch (err) {
@@ -294,7 +312,7 @@ export async function bootstrapAuth(): Promise<BootstrapResult> {
   //    re-login (precisely the "have to log in every time I open the app" bug).
   try {
     if (await tryRefresh()) {
-      const user = await fetchMe();
+      const user = await bootstrapFetchMe();
       logBootstrap("refreshed");
       return { kind: "authenticated", user };
     }

@@ -24,9 +24,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentcore.config import settings
-from agentcore.llm.config import ModelProfile
-from agentcore.llm.modes import ProfileSet
-from agentcore.llm.protocol import LLMChunk, LLMMessage, ToolCall, ToolCallDelta, ToolCallFunction
+from agentcore.llm.provider.protocol import (
+    LLMChunk,
+    LLMMessage,
+    ToolCall,
+    ToolCallDelta,
+    ToolCallFunction,
+)
 from agentcore.memory.store import FileMemoryStore, topic_path
 from agentcore.runtime import pipeline
 from agentcore.runtime.checkpoints import CheckpointDecision
@@ -34,6 +38,7 @@ from agentcore.runtime.events import EventSink, EventType, FinishReason
 from agentcore.runtime.suspension import AskUserSuspension
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+from tests.llm_helpers import make_turn_profiles
 
 USER_ID = "u1"
 FOLDER_ID = "F1"
@@ -168,13 +173,7 @@ async def test_resume_consult_memory_hits_project_topic(monkeypatch, tmp_path):
         note="继续",
         sink=EventSink(),
         backend=_backend(),
-        profile_set=ProfileSet(
-            profiles={
-                "chat": ModelProfile(
-                    model="chat-model", thinking=False, reasoning_effort=None, max_rounds=20
-                )
-            }
-        ),
+        profile_set=make_turn_profiles(model="chat-model"),
     )
 
     assert result["finish_reason"] == FinishReason.END_TURN
@@ -206,13 +205,7 @@ async def test_resume_with_memory_off_cannot_reach_topic(monkeypatch, tmp_path):
         note="继续",
         sink=EventSink(),
         backend=_backend(),
-        profile_set=ProfileSet(
-            profiles={
-                "chat": ModelProfile(
-                    model="chat-model", thinking=False, reasoning_effort=None, max_rounds=20
-                )
-            }
-        ),
+        profile_set=make_turn_profiles(model="chat-model"),
     )
 
     assert result["finish_reason"] == FinishReason.END_TURN

@@ -1,21 +1,58 @@
-"""BYOK LLM key (用户自带 DeepSeek key, llm/key_service.py) schemas."""
+"""BYOK LLM configuration (用户自带 OpenAI 兼容端点, llm/key_service.py) schemas."""
 
 from pydantic import BaseModel, Field
 
+from agentcore.config import settings
+from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
+
+
+class SetBillingPreferenceRequest(BaseModel):
+    """Switch the user's billing mode (platform free quota vs BYOK)."""
+
+    billing_preference: str = Field(..., pattern="^(platform|byok)$")
+
 
 class SetLlmKeyRequest(BaseModel):
-    """Store the user's own DeepSeek API key (BYOK)."""
+    """Store the user's OpenAI-compatible LLM configuration (BYOK)."""
 
     api_key: str = Field(..., min_length=1, max_length=400)
+    base_url: str | None = Field(
+        default=None,
+        max_length=500,
+        description="OpenAI-compatible endpoint including version prefix",
+        examples=[settings.platform_base_url],
+    )
+    default_model: str | None = Field(
+        default=None,
+        max_length=200,
+        description="Default model name for all turns",
+        examples=[DEEPSEEK_V4_FLASH],
+    )
 
 
 class LlmKeyStatusResponse(BaseModel):
-    """Settings view of a user's BYOK key — never the plaintext key."""
+    """Settings view of a user's BYOK config — never the plaintext key."""
 
     configured: bool
-    # unconfigured | unchecked | active | error
     status: str
-    # Last 4 chars only (e.g. "••••cdef"), for recognition.
     masked_key: str | None = None
-    # Connectivity-test failure reason (POST .../test), surfaced when status="error".
     message: str | None = None
+    base_url: str | None = None
+    default_model: str | None = None
+    supports_tools: bool | None = None
+    billing_mode: str = Field(
+        default="byok",
+        description="Effective billing mode for this user (platform free quota vs BYOK)",
+    )
+    billing_preference: str = Field(
+        default="byok",
+        description="User's stored billing preference",
+    )
+    platform_available: bool = Field(
+        default=False,
+        description="Whether platform free quota can be selected on this deployment",
+    )
+    platform_model: str | None = Field(
+        default=None,
+        description="Operator-configured model when billing_mode is platform",
+    )

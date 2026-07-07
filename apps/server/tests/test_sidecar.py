@@ -19,12 +19,12 @@ from typing import Any
 
 import pytest
 
-from agentcore.llm.byok import (
+from agentcore.llm.credentials import (
     INFERENCE_CONVERSATION_HEADER,
     INFERENCE_TRACE_HEADER,
     LLMCredentials,
 )
-from agentcore.llm.protocol import LLMChunk, TokenUsage, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, TokenUsage, ToolCallDelta
 from agentcore.runtime.approvals import ApprovalDecision
 from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
 from agentcore.sidecar import protocol

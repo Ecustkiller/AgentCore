@@ -29,6 +29,10 @@ class User(Base):
     __table_args__ = (
         CheckConstraint("role in ('user', 'admin')", name="ck_users_role"),
         CheckConstraint("status in ('active', 'disabled')", name="ck_users_status"),
+        CheckConstraint(
+            "billing_preference in ('platform', 'byok')",
+            name="ck_users_billing_preference",
+        ),
     )
 
     user_id: Mapped[str] = mapped_column(
@@ -71,6 +75,12 @@ class User(Base):
     # them). Defaults True (memory on, matching the product default).
     memory_enabled: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default=text("true")
+    )
+    # Per-user billing mode: platform free quota vs BYOK. Defaults to the deployment
+    # ``billing_mode`` at account creation; users may switch in 设置·模型配置 when both
+    # modes are available on this deploy.
+    billing_preference: Mapped[str] = mapped_column(
+        String(20), default="byok", server_default=text("'byok'")
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")

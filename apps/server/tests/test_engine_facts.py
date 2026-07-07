@@ -13,8 +13,7 @@ executor / pipeline, not the bare loop, so they are out of scope here.
 from pathlib import Path
 
 from agentcore.core.types import ToolCategory
-from agentcore.llm.config import ModelProfile
-from agentcore.llm.protocol import LLMChunk, LLMMessage, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.facts import (
@@ -31,6 +30,7 @@ from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+from tests.llm_helpers import make_profile_params
 
 
 def _tool_chunk(name: str, args: str, *, call_id: str = "c1") -> LLMChunk:
@@ -126,7 +126,7 @@ async def _run(provider: _ScriptedProvider, tool: _StubTool, *, max_rounds: int 
     reg = ToolRegistry()
     reg.register(tool)
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=max_rounds)
+    profile = make_profile_params(max_rounds=max_rounds)
     log = TurnFactLog()
     token = current_fact_log.set(log)
     try:
@@ -137,6 +137,7 @@ async def _run(provider: _ScriptedProvider, tool: _StubTool, *, max_rounds: int 
             sink=EventSink(),
             tool_context=_context(),
             profile=profile,
+            turn_model="m",
             run_id="cap",
             role="captain",
         )
@@ -297,7 +298,7 @@ async def test_window_from_journal_reconstructs_live_transcript():
         LLMMessage(role="system", content=system_prompt),
         LLMMessage(role="user", content="go"),
     ]
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+    profile = make_profile_params(max_rounds=20)
     log = TurnFactLog()
     token = current_fact_log.set(log)
     try:
@@ -308,6 +309,7 @@ async def test_window_from_journal_reconstructs_live_transcript():
             sink=EventSink(),
             tool_context=_context(),
             profile=profile,
+            turn_model="m",
             run_id="cap",
             role="captain",
         )
@@ -343,7 +345,7 @@ async def test_tool_call_fact_captures_post_annotation_text_ceo_path():
         LLMMessage(role="system", content=system_prompt),
         LLMMessage(role="user", content="go"),
     ]
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+    profile = make_profile_params(max_rounds=20)
     log = TurnFactLog()
     citations: list[dict] = []
     token = current_fact_log.set(log)
@@ -355,6 +357,7 @@ async def test_tool_call_fact_captures_post_annotation_text_ceo_path():
             sink=EventSink(),
             tool_context=_context(),
             profile=profile,
+            turn_model="m",
             run_id="cap",
             role="captain",
             citation_sink=citations,
@@ -388,7 +391,7 @@ async def test_no_facts_recorded_when_no_log_bound():
     provider = _ScriptedProvider([[_content_chunk("hi")]])
     reg = ToolRegistry()
     reg.register(_StubTool())
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=5)
+    profile = make_profile_params(max_rounds=5)
 
     # Sanity: ensure nothing is bound, then run with no TurnFactLog set.
     assert current_fact_log.get() is None
@@ -399,6 +402,7 @@ async def test_no_facts_recorded_when_no_log_bound():
         sink=EventSink(),
         tool_context=_context(),
         profile=profile,
+        turn_model="m",
         run_id="cap",
         role="captain",
     )

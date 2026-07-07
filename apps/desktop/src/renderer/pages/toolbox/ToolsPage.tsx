@@ -3,9 +3,18 @@ import { ToolCard } from "@/components/tools/ToolCard";
 import { CATEGORY_META, CATEGORY_ORDER } from "@/components/tools/catalogMeta";
 import { CatalogIconShell } from "@/components/ui";
 import { catalogCategoryColorVar } from "@/lib/catalogColors";
+import { useLlmKey } from "@/hooks/useLlmKey";
+import {
+  isToolsGateBlocked,
+  TOOL_CALLING_TOOL_NAMES,
+  TOOLS_GATE_HINT,
+} from "@/lib/llmToolsGate";
 
 /** 工具箱「能力」组 → 工具：Agent 可调用的动作工具，按类分组，每个工具可展开调用参数。 */
 export function ToolsPage() {
+  const { data: llmKey } = useLlmKey();
+  const toolsBlocked = isToolsGateBlocked(llmKey?.supports_tools);
+
   return (
     <CapabilityPage
       title="工具"
@@ -44,7 +53,15 @@ export function ToolsPage() {
                   </h2>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {items.map((tool) => (
-                      <ToolCard key={tool.name} tool={tool} />
+                      <ToolCard
+                        key={tool.name}
+                        tool={tool}
+                        disabled={
+                          toolsBlocked &&
+                          TOOL_CALLING_TOOL_NAMES.has(tool.name)
+                        }
+                        disabledHint={TOOLS_GATE_HINT}
+                      />
                     ))}
                   </div>
                 </div>

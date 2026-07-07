@@ -50,7 +50,7 @@ const FIDELITY_META: Record<string, string> = {
  * 收到的上下文 (上下文传递可视化) — the structured context a run was actually fed at
  * assembly time (its `run_context` blocks), so the user sees exactly what the LLM read.
  * Worker 侧 (run detail): 原始请求 / 团队位置 / 上游产物 / 工作区 / 任务…; CEO 侧 (chat bubble):
- * 系统提示 / 对话历史 / 原始请求. Collapsible like the resource ledger; opens by default.
+ * 系统提示 / 对话历史 / 原始请求. Collapsible; worker 侧默认折叠（摘要可扫、全文按需展开）。
  * Each block shows its channel origin; a dependency block also surfaces its provenance
  * (来源 / 保真度 / 是否截断). The `system` block (verbatim CEO system prompt) is included.
  */
@@ -107,7 +107,7 @@ export function ReceivedContextSection({
             <ContextBlockCard
               key={`${b.channel}-${i}`}
               block={b}
-              defaultOpen
+              defaultOpen={false}
               onNavigate={onNavigate}
               sceneKey={
                 keyBase ? `${keyBase}:ctxblk:${b.channel}-${i}` : undefined
@@ -171,7 +171,7 @@ export function ReceivedContextDialog({
 /** One「收到的上下文」block: a click-to-expand card. Collapsed shows the channel origin +
  * a peek; expanded reveals the full body the LLM read (head+tail capped on the wire, flagged
  * when 截断). A dependency block adds a provenance line (来自 {role} · 保真度 · 截断) and the
- * artifact files it pointed at. Defaults open in power mode. */
+ * artifact files it pointed at. Worker 侧默认折叠；CEO 弹窗内亦默认折叠。 */
 function ContextBlockCard({
   block,
   defaultOpen,

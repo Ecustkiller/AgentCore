@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from agentcore.llm.protocol import ToolCall
+from agentcore.llm.provider.protocol import ToolCall
 
 
 def tool_calls_to_dicts(tool_calls: list[ToolCall] | None) -> list[dict[str, Any]]:

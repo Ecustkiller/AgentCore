@@ -30,7 +30,7 @@ from agentcore.conversation.service import stream_chat
 from agentcore.db import async_session_factory
 from agentcore.db.models import UserLlmKey
 from agentcore.db.repositories import ConversationRepository, UserRepository
-from agentcore.llm.byok import resolve_user_llm_credentials
+from agentcore.llm.resolve import resolve_user_llm_credentials
 from agentcore.runtime.events import EventSink, EventType
 
 # A deliverable-grade request with FOUR naturally-independent research angles, each

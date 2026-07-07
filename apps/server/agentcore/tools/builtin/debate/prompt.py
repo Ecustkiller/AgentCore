@@ -168,11 +168,10 @@ def debater_task(
         "group": f"debate:{config.form.value}",
         "round": round_no,
     }
-    # 真·多模型辩手：该方若指定了模型，透传给 RunSpec.model（→ 执行器覆写 profile.model →
-    # 路由器按 provider/model 前缀分发到对应厂商）。留空则不带此键，按 tier 解析默认模型。
-    # 后续轮 continue_run 复用首轮 session.spec（已带 model），故同一辩手跨轮恒走同一模型。
-    if side.model:
-        payload["model"] = side.model
+    # 真·多模型辩手（Phase 3）：side.model 仍解析入库，但 MVP 全链路统一用户 model，
+    # per-side override 在 debater_task 中忽略（开放主流AI模型接入 §4.7）。
+    # if side.model:
+    #     payload["model"] = side.model
     # stance 仅正反 2 方有意义（builder 只认 pro/con，display-only）。
     if config.form is DebateForm.DEBATE and len(config.sides) == 2:
         payload["stance"] = "pro" if idx == 0 else "con"
@@ -276,20 +275,30 @@ def cx_answer_feedback(
 ) -> str:
     """质询环节（质询回合 P1）喂给 continue_run 的 feedback：主持人代表交锋向本方发出的必答质询。
 
-    要求辩手【逐条正面作答】（先「是 / 否 / 部分成立」表态、再用证据或推理支撑）；涉及具体事实的前提
-    按【证据状态铁律】标注 `【已核实·出处】`/`【待核实·推断】`（举证责任 P3，全文口径见 :data:`EVIDENCE_RULE`）；
-    不得回避 / 答非所问 / 复述已说过的立论——回避会在裁判 engagement 记分被扣。辩手在自己的 transcript 上
-    作答，故答复进入本方跨轮记忆、下一轮立论可见。"""
-    lines = "\n".join(f"- {q}" for q in questions)
+    要求辩手输出**结构化 JSON 数组**（逐条对应、自评是否正面回应）；每条 ``answer`` 内仍可用自然语言
+    论证（先「是 / 否 / 部分成立」表态、再用证据或推理支撑）。涉及具体事实的前提按【证据状态铁律】标注
+    `【已核实·出处】`/`【待核实·推断】`（举证责任 P3，全文口径见 :data:`EVIDENCE_RULE`）；不得回避 /
+    答非所问 / 复述已说过的立论——``directly_addressed: false`` 或回避会在裁判 engagement 记分被扣。
+    辩手在自己的 transcript 上作答，故答复进入本方跨轮记忆、下一轮立论可见。"""
+    n = len(questions)
+    numbered = "\n".join(f"{i}. {q}" for i, q in enumerate(questions, start=1))
     return (
         f"## 第 {round_no} 轮 · 质询环节（本轮焦点：{focus}）\n"
         f"{role_directive(config, side)}\n\n"
-        "主持人代表交锋，向你发出以下【必须正面回答】的质询——请【逐条正面作答】：先用「是 / 否 / "
-        "部分成立」明确表态，再用具体证据或推理支撑；凡涉及具体事实的前提都按【证据状态铁律】标注"
-        "【已核实·出处】/【待核实·推断】，拿不出出处就诚实标【待核实·推断】、别含糊带过或硬拗成已核实。"
-        "不要回避、不要答非所问、不要重复你"
-        f"已说过的立论：\n{lines}\n\n"
-        "直接输出你对这些质询的正面回答（逐条对应、简洁有力）。"
+        "主持人代表交锋，向你发出以下【必须正面回答】的质询。请逐条作答，并**只输出一个 JSON 数组**"
+        f"（共 {n} 条，与下方编号一一对应；不要 markdown 代码块外的解释文字）：\n"
+        "[\n"
+        '  {"question_index": 1, "answer": "对该条的正面回答（可用自然语言论证）", '
+        '"directly_addressed": true},\n'
+        '  {"question_index": 2, "answer": "...", "directly_addressed": false}\n'
+        "]\n\n"
+        "字段说明：\n"
+        "- question_index：与下方质询编号一致（从 1 起）\n"
+        "- answer：对该条的正面回答——先用「是 / 否 / 部分成立」明确表态，再用具体证据或推理支撑；"
+        "凡涉及具体事实的前提都按【证据状态铁律】标注【已核实·出处】/【待核实·推断】，拿不出出处就诚实标"
+        "【待核实·推断】、别含糊带过或硬拗成已核实\n"
+        "- directly_addressed：你是否正面回应了该条（true/false；回避、答非所问、重复已说过的立论标 false）\n\n"
+        f"质询列表（共 {n} 条）：\n{numbered}"
     )
 
 

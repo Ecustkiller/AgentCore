@@ -148,6 +148,24 @@ describe("bootstrapAuth", () => {
       expect(result.reason).toContain("无法连接后端");
     }
   });
+
+  it("returns unavailable when bootstrap probes time out", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.reject(
+          new DOMException("The operation timed out.", "TimeoutError"),
+        ),
+      ),
+    );
+
+    const result = await bootstrapAuth();
+
+    expect(result.kind).toBe("unavailable");
+    if (result.kind === "unavailable") {
+      expect(result.reason).toContain("无法连接后端");
+    }
+  });
 });
 
 interface Captured {

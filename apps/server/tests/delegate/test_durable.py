@@ -3,7 +3,7 @@
 import asyncio
 
 from agentcore.core.types import ToolEffect
-from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry

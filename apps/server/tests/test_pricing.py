@@ -6,17 +6,26 @@ Flash tier instead of crashing. Prices are asserted against the authoritative
 table in docs/03-AI核心/DeepSeek-V4-API参考.md §三.
 """
 
+import pytest
 from structlog.testing import capture_logs
 
-from agentcore.llm.config import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO
+from agentcore.config import settings
 from agentcore.llm.pricing import (
     DOUBAO_SEED_TURBO,
     NANO_PER_USD,
     cache_savings,
     calculate_cost,
     nano_usd_to_cny,
+    pricing_for_model,
 )
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO
+from agentcore.llm.provider.protocol import TokenUsage
+
+
+@pytest.fixture(autouse=True)
+def _platform_billing(monkeypatch):
+    """Platform pricing table tests assume operator billing, not BYOK zero-cost."""
+    monkeypatch.setattr(settings, "billing_mode", "platform")
 
 
 def _usage(**kw: int) -> TokenUsage:
@@ -166,6 +175,20 @@ def test_unknown_model_zero_usage_is_silent():
 def test_zero_usage_is_zero_cost():
     cost = calculate_cost(DEEPSEEK_V4_FLASH, _usage())
     assert (cost.input, cost.cached, cost.output, cost.total) == (0, 0, 0, 0)
+
+
+def test_byok_billing_mode_zero_cost_tokens_still_passed():
+    usage = _usage(input_tokens=1_000_000, cache_miss_tokens=1_000_000, output_tokens=1_000_000)
+    byok = calculate_cost(DEEPSEEK_V4_PRO, usage, billing_mode="byok")
+    platform = calculate_cost(DEEPSEEK_V4_PRO, usage, billing_mode="platform")
+    assert byok.total == 0
+    assert (byok.input, byok.output) == (0, 0)
+    assert platform.total > 0
+
+
+def test_pricing_for_model_byok_returns_none():
+    assert pricing_for_model(DEEPSEEK_V4_FLASH, billing_mode="byok") is None
+    assert pricing_for_model(DEEPSEEK_V4_FLASH, billing_mode="platform") is not None
 
 
 def test_small_token_counts_round_half_up():

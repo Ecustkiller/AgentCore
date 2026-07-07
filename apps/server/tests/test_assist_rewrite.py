@@ -13,7 +13,7 @@ from agentcore.assist.rewrite import (
 )
 from agentcore.core.errors import LLMTimeoutError
 from agentcore.llm import LLMRequest, LLMResponse
-from agentcore.llm.config import get_profile
+from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, get_profile
 
 # --- _render_prompt (pure prompt assembly) ---
 
@@ -61,7 +61,7 @@ def test_file_rewrite_profile_stamps_scenario():
     # scenario 归因依赖 PROFILES 里确有 file.rewrite；否则 get_profile 会回退成 chat。
     profile = get_profile("file.rewrite")
     assert profile.name == "file.rewrite"
-    assert profile.thinking is False
+    assert profile.max_rounds == 1
 
 
 # --- rewrite_selection (async, fake provider) ---
@@ -88,10 +88,11 @@ async def test_rewrite_returns_content_verbatim():
 
 async def test_rewrite_uses_file_rewrite_profile():
     provider = _FakeProvider("改写后")
-    await rewrite_selection(provider, RewriteInput(selection="原文", instruction="改"))
+    await rewrite_selection(
+        provider, RewriteInput(selection="原文", instruction="改"), model=DEEPSEEK_V4_FLASH
+    )
     req = provider.requests[0]
     assert req.model == "deepseek-v4-flash"
-    assert req.thinking is False
     assert req.stream is False
     assert req.scenario == "file.rewrite"
 

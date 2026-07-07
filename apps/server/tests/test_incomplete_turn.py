@@ -94,7 +94,9 @@ def test_salvage_spawns_on_finished_work(monkeypatch, capture):
     spawned, persist_calls = capture
     monkeypatch.setattr(settings, "incomplete_turn_persist_enabled", True)
     journal = [_ev("run_plan"), _ev("run_completed")]
-    service._salvage_incomplete_turn(sink=_Sink(journal), conversation_id="conv", trace_id="trace")
+    service._salvage_incomplete_turn(
+        sink=_Sink(journal), conversation_id="conv", trace_id="trace", message_id="m1"
+    )
     assert len(spawned) == 1
     assert persist_calls[0]["conversation_id"] == "conv"
     assert persist_calls[0]["trace_id"] == "trace"
@@ -105,7 +107,7 @@ def test_salvage_skips_when_gate_off(monkeypatch, capture):
     spawned, _ = capture
     monkeypatch.setattr(settings, "incomplete_turn_persist_enabled", False)
     service._salvage_incomplete_turn(
-        sink=_Sink([_ev("run_plan")]), conversation_id="conv", trace_id="trace"
+        sink=_Sink([_ev("run_plan")]), conversation_id="conv", trace_id="trace", message_id="m1"
     )
     assert spawned == []
 
@@ -114,7 +116,9 @@ def test_salvage_skips_when_no_journal_and_no_content(monkeypatch, capture):
     spawned, _ = capture
     monkeypatch.setattr(settings, "incomplete_turn_persist_enabled", True)
     # Nothing streamed and no finished team work ⇒ nothing to keep.
-    service._salvage_incomplete_turn(sink=_Sink(None), conversation_id="conv", trace_id="trace")
+    service._salvage_incomplete_turn(
+        sink=_Sink(None), conversation_id="conv", trace_id="trace", message_id="m1"
+    )
     assert spawned == []
 
 
@@ -127,6 +131,7 @@ def test_salvage_spawns_on_streamed_content_without_journal(monkeypatch, capture
         sink=_Sink(None, content="已经写了一半的答案"),
         conversation_id="conv",
         trace_id="trace",
+        message_id="m1",
     )
     assert len(spawned) == 1
     assert persist_calls[0]["content"] == "已经写了一半的答案"
@@ -138,7 +143,9 @@ def test_salvage_defers_to_resume_on_durable_pause(monkeypatch, capture):
     monkeypatch.setattr(settings, "incomplete_turn_persist_enabled", True)
     monkeypatch.setattr(settings, "structured_suspension_persist_enabled", True)
     journal = [_ev("run_plan"), _ev("plan_review_required", "p1")]
-    service._salvage_incomplete_turn(sink=_Sink(journal), conversation_id="conv", trace_id="trace")
+    service._salvage_incomplete_turn(
+        sink=_Sink(journal), conversation_id="conv", trace_id="trace", message_id="m1"
+    )
     assert spawned == []  # a paused_turns frame owns this turn's continuation
 
 
@@ -148,7 +155,9 @@ def test_salvage_runs_on_pause_when_persistence_disabled(monkeypatch, capture):
     monkeypatch.setattr(settings, "structured_suspension_persist_enabled", False)
     # No durable frame exists (2a in-memory only) ⇒ salvage the finished work instead.
     journal = [_ev("run_plan"), _ev("plan_review_required", "p1")]
-    service._salvage_incomplete_turn(sink=_Sink(journal), conversation_id="conv", trace_id="trace")
+    service._salvage_incomplete_turn(
+        sink=_Sink(journal), conversation_id="conv", trace_id="trace", message_id="m1"
+    )
     assert len(spawned) == 1
 
 
@@ -156,16 +165,15 @@ def test_salvage_runs_on_pause_when_persistence_disabled(monkeypatch, capture):
 
 
 async def test_persist_incomplete_writes_cancelled_message(monkeypatch):
-    created: dict = {}
+    updated: dict = {}
     journaled: dict = {}
 
     class FakeRepo:
         def __init__(self, _session):
             pass
 
-        async def create(self, **kwargs):
-            created.update(kwargs)
-            return SimpleNamespace(id=kwargs.get("message_id") or "generated")
+        async def upsert_assistant(self, **kwargs):
+            updated.update(kwargs)
 
     class FakeSessionCM:
         async def __aenter__(self):
@@ -186,15 +194,13 @@ async def test_persist_incomplete_writes_cancelled_message(monkeypatch):
         journal=journal, content="", conversation_id="conv", trace_id="trace", message_id="m1"
     )
 
-    assert created["role"] == "assistant"
-    assert created["content"]  # a non-empty explanatory note
-    # The replay payload is no longer stored on the message — it goes to the唯一事实源
-    # turn_journal, keyed by the created assistant id (§18.3).
-    assert "runs" not in created
-    assert created["metadata"]["incomplete"] is True
-    assert created["metadata"]["finish_reason"] == FinishReason.CANCELLED.value
-    assert created["message_id"] == "m1"
-    assert created["trace_id"] == "trace"
+    assert updated["content"]  # a non-empty explanatory note
+    assert "runs" not in updated
+    assert updated["metadata"]["status"] == turn_persistence.MESSAGE_STATUS_INCOMPLETE
+    assert updated["metadata"]["incomplete"] is True
+    assert updated["metadata"]["finish_reason"] == FinishReason.CANCELLED.value
+    assert updated["message_id"] == "m1"
+    assert updated["trace_id"] == "trace"
     # The cancelled turn's finished team work is recorded to the journal.
     assert journaled["message_id"] == "m1"
     display_entries = [e for e in journaled["entries"] if e["kind"] != "turn_end"]
@@ -206,15 +212,14 @@ async def test_persist_incomplete_writes_cancelled_message(monkeypatch):
 async def test_persist_incomplete_keeps_streamed_reply(monkeypatch):
     """When the CEO had already streamed a reply, the salvaged message KEEPS that text
     (marked cut-off) instead of a bare「连接中断」note (断线别白干)."""
-    created: dict = {}
+    updated: dict = {}
 
     class FakeRepo:
         def __init__(self, _session):
             pass
 
-        async def create(self, **kwargs):
-            created.update(kwargs)
-            return SimpleNamespace(id=kwargs.get("message_id") or "generated")
+        async def upsert_assistant(self, **kwargs):
+            updated.update(kwargs)
 
     class FakeSessionCM:
         async def __aenter__(self):
@@ -237,9 +242,10 @@ async def test_persist_incomplete_keeps_streamed_reply(monkeypatch):
         trace_id="trace",
         message_id="m2",
     )
-    assert "这是我已经写了一半的分析" in created["content"]
-    assert created["metadata"]["incomplete"] is True
-    assert created["metadata"]["finish_reason"] == FinishReason.CANCELLED.value
+    assert "这是我已经写了一半的分析" in updated["content"]
+    assert updated["metadata"]["status"] == turn_persistence.MESSAGE_STATUS_INCOMPLETE
+    assert updated["metadata"]["incomplete"] is True
+    assert updated["metadata"]["finish_reason"] == FinishReason.CANCELLED.value
 
 
 async def test_persist_incomplete_swallows_db_errors(monkeypatch):

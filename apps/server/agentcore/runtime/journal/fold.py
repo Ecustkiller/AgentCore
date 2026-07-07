@@ -11,7 +11,7 @@ from agentcore.runtime.runs.types import RunKind
 from .entries import _PROCESS_PREFIX, KIND_TURN_END
 
 if TYPE_CHECKING:
-    from agentcore.llm.protocol import LLMMessage
+    from agentcore.llm.provider.protocol import LLMMessage
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.types import RunState
 
@@ -243,7 +243,7 @@ def window_from_journal(
     """
     if not entries:
         return None
-    from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+    from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 
     # Head anchor + (when unscoped) the captain run to fold: one pass for both.
     started: dict[str, Any] | None = None

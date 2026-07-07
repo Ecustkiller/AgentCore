@@ -16,7 +16,7 @@ reachable), same posture as the paused-turn repo integration tests.
 from uuid import uuid4
 
 from agentcore.db.repositories import TurnJournalRepository
-from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.facts import (
     LlmCallFact,
     NoteFact,

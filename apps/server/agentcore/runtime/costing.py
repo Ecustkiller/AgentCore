@@ -20,7 +20,7 @@ from typing import Any
 
 from agentcore.core.types import new_id
 from agentcore.llm.pricing import calculate_cost
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.citations import merge_citations
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 

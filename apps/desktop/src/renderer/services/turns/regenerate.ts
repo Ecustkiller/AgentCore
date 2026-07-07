@@ -151,7 +151,7 @@ export async function runResume(
   // Route durable resume the same way as a send: a conversation bound to a present
   // local root resumes on the sidecar engine (双模式工作区 §一.1); else the cloud.
   // Capture the pending frame BEFORE removing it — the sidecar path needs its
-  // original user message (never cloud-persisted for a paused sidecar turn).
+  // original user message text and the pinned user bubble id for write-back.
   const sidecarTarget = await resolveSidecarRoot(conversationId);
   const pending = usePausedTurnStore
     .getState()
@@ -189,31 +189,18 @@ export async function runResume(
   // resume card (the server claim is atomic, so a stale / second attempt 404s).
   usePausedTurnStore.getState().remove(messageId);
 
-  // A paused sidecar turn's user message was never written to the cloud (it paused
-  // before write-back), so it is absent from the reopened transcript. Inject it back
-  // (with a fresh id the completion write-back will pin) so the continuation reads
-  // naturally and reconciles cleanly. Cloud resume already has its user row loaded.
-  const userMessageId = sidecarResume ? crypto.randomUUID() : "";
-  if (sidecarResume && pending) {
-    store.addMessage(
-      {
-        id: userMessageId,
-        role: "user",
-        content: pending.userMessage,
-        createdAt: new Date().toISOString(),
-        executionId: null,
-        isStreaming: false,
-      },
-      conversationId,
-    );
-  }
-
   store.createAssistantMessage(conversationId);
 
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
   try {
     if (sidecarResume && pending && sidecarTarget) {
+      const userMessageId =
+        pending.userMessageId ||
+        [...getRuntime(conversationId).messages]
+          .reverse()
+          .find((m) => m.role === "user")?.id ||
+        "";
       await resumeConversationViaSidecar({
         conversationId,
         rootId: sidecarTarget.rootId,

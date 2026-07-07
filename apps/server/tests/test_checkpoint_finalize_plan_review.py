@@ -17,8 +17,7 @@ resume window source, byte-for-byte the blocking shape.
 import json
 from pathlib import Path
 
-from agentcore.llm.config import ModelProfile
-from agentcore.llm.protocol import LLMChunk, LLMMessage, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink, FinishReason
 from agentcore.runtime.facts import FactKind, TurnFactLog, TurnStartedFact, current_fact_log
@@ -30,6 +29,7 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+from tests.llm_helpers import make_profile_params
 
 
 class _ScriptedProvider:
@@ -126,7 +126,7 @@ async def test_loop_finalizes_plan_review_to_paused():
         LLMMessage(role="system", content=system_prompt),
         LLMMessage(role="user", content=user_message),
     ]
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=5)
+    profile = make_profile_params(max_rounds=5)
     log = TurnFactLog()
     log.record_fact(
         TurnStartedFact(
@@ -145,6 +145,7 @@ async def test_loop_finalizes_plan_review_to_paused():
             sink=sink,
             tool_context=_context(),
             profile=profile,
+            turn_model="m",
             finish_override_sink=finish_override,
             run_id="cap",
             role="captain",

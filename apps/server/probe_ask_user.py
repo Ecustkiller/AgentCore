@@ -35,7 +35,7 @@ from agentcore.conversation.service import stream_chat
 from agentcore.db.base import async_session_factory, engine
 from agentcore.db.models import Conversation, PausedTurnRow, RunSessionRow, UserLlmKey
 from agentcore.db.repositories import ConversationRepository
-from agentcore.llm.byok import resolve_user_llm_credentials
+from agentcore.llm.resolve import resolve_user_llm_credentials
 from agentcore.runtime.events import EventSink, EventType, SSEEvent
 
 INVESTIGATION = {"file_read", "file_list", "grep", "web_search", "read_url"}

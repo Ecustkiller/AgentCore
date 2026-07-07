@@ -52,9 +52,10 @@ class CatalogTool:
 # ask_user) — so the catalog reads
 # it off an uninitialised instance (:func:`_static_schema`). This keeps the tool class
 # the single source of each schema WITHOUT fabricating a turn's worth of runtime objects
-# just to read metadata. ``consult_skill`` (always wired), ``consult_memory`` (wired only
-# when the memory master switch is on) and ``ask_user`` (wired only on the live-user /
-# checkpoint path) are all advertised so the catalog shows the CEO's full repertoire.
+# just to read metadata. ``consult_skill`` (always wired), ``consult_memory`` (wired for
+# CEO and workers when the memory master switch is on) and ``ask_user`` (wired only on
+# the live-user / checkpoint path) are all advertised so the catalog shows the full
+# repertoire.
 _CEO_ORCHESTRATION_TOOLS: tuple[type, ...] = (
     DelegateTool,
     ReplanTool,
@@ -100,10 +101,13 @@ def build_capability_catalog() -> list[CatalogTool]:
         )
         catalog.append(CatalogTool(schema=schema, available_to=available))
     for tool_cls in _CEO_ORCHESTRATION_TOOLS:
+        available: tuple[str, ...] = (AVAILABLE_TO_CEO,)
+        if tool_cls is ConsultMemoryTool:
+            available = (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER)
         catalog.append(
             CatalogTool(
                 schema=_static_schema(tool_cls),
-                available_to=(AVAILABLE_TO_CEO,),
+                available_to=available,
             )
         )
     return catalog

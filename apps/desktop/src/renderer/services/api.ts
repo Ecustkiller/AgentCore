@@ -2,6 +2,32 @@ import { clientHeaders } from "@/lib/clientBuildInfo";
 
 export const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
+/** Bounded wait for auth-gate probes so a hung backend never strands the UI on "加载中…". */
+export const BOOTSTRAP_TIMEOUT_MS = 10_000;
+
+/**
+ * `fetch` with an abort deadline. Timeouts surface as {@link NetworkError} so
+ * bootstrap/outage paths treat a stuck server like any other transport failure.
+ */
+export async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  timeoutMs = BOOTSTRAP_TIMEOUT_MS,
+): Promise<Response> {
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === "TimeoutError") {
+      throw new NetworkError(cause);
+    }
+    if (cause instanceof NetworkError) throw cause;
+    throw new NetworkError(cause);
+  }
+}
+
 export class ApiError extends Error {
   /** Backend error code from the `{error:{code,message}}` contract (main.py's
    * global handler over the AgentCoreError hierarchy), when the body parses. Lets
@@ -121,7 +147,7 @@ export function tryRefresh(): Promise<boolean> {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
     try {
-      const res = await fetch(`${BASE_URL}/v1/auth/refresh`, {
+      const res = await fetchWithTimeout(`${BASE_URL}/v1/auth/refresh`, {
         method: "POST",
         credentials: "include",
       });
@@ -141,21 +167,26 @@ async function request<T>(
   path: string,
   options: RequestInit = {},
   retry = false,
+  timeoutMs?: number,
 ): Promise<T> {
   const url = `${BASE_URL}${path}`;
   const method = (options.method ?? "GET").toUpperCase();
+  const fetchInit: RequestInit = {
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...clientHeaders(),
+      ...csrfHeaders(method),
+      ...options.headers,
+    },
+    ...options,
+  };
   let response: Response;
   try {
-    response = await fetch(url, {
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        ...clientHeaders(),
-        ...csrfHeaders(method),
-        ...options.headers,
-      },
-      ...options,
-    });
+    response =
+      timeoutMs != null
+        ? await fetchWithTimeout(url, fetchInit, timeoutMs)
+        : await fetch(url, fetchInit);
   } catch (cause) {
     // fetch only rejects on transport failure (the server never answered), so
     // surface a typed NetworkError the bootstrap can treat as an outage.
@@ -187,6 +218,14 @@ async function request<T>(
   }
 
   throw new ApiError(response.status, await response.text(), response.headers);
+}
+
+/** Auth-gate bootstrap REST calls — same as {@link request} but bounded in time. */
+export function bootstrapRequest<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  return request<T>(path, options, false, BOOTSTRAP_TIMEOUT_MS);
 }
 
 export const api = {

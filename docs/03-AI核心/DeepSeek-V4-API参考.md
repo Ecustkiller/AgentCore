@@ -27,7 +27,7 @@ skip_if:
 | 温度坑 | **思考模式下 `temperature`/`top_p`/`presence_penalty`/`frequency_penalty` 一律被忽略**（不报错、静默无效） |
 | 工具调用坑 | 思考模式支持工具调用；但**发生工具调用的回合，`reasoning_content` 必须原样回传**，缺失则 API 返回 400 |
 | 上下文 | 实际 1M；建议收窄到 64K 控成本 |
-| API Key 来源 | **内测期默认 BYOK**：key 由用户自带、按 turn 解析注入（`llm/byok.py` → `factory.build_provider(credentials)`），非全局 `deepseek_api_key`。平台付费/全局 key 路径靠 `config.billing_mode` 休眠（默认 `byok`），详见 [`docs/05-平台与运维/成本配额与计费.md` §〇·五](../../docs/05-平台与运维/成本配额与计费.md) |
+| API Key 来源 | **内测期默认 BYOK**：key 由用户自带、按 turn 解析注入（`llm/byok.py` → `factory.build_provider(credentials)`），非全局 `platform_api_key`。平台付费/全局 key 路径靠 `config.billing_mode` 休眠（默认 `byok`），详见 [`docs/05-平台与运维/成本配额与计费.md` §〇·五](../../docs/05-平台与运维/成本配额与计费.md) |
 
 ### Provider 路由规则
 

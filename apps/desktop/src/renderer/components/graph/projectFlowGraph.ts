@@ -25,6 +25,7 @@ export interface FlowGraphProjectionInput {
   activateNode: (id: string) => void;
   groups: GroupLayout[];
   subTeams: SubTeam[];
+  auditCounts?: Record<string, number>;
 }
 
 export interface FlowEdgeProjectionInput extends FlowGraphProjectionInput {
@@ -163,6 +164,7 @@ export function projectFlowNodes({
   activateNode,
   groups,
   subTeams,
+  auditCounts,
 }: FlowGraphProjectionInput): Node[] {
   const placed = (id: string) => {
     const slot = positions[id];
@@ -298,6 +300,7 @@ export function projectFlowNodes({
         escalationRaised: run.escalations.filter((e) => e.status === "raised")
           .length,
         reviewConcern,
+        auditEventCount: auditCounts?.[run.id],
         enterIndex: i + 1,
         onActivate: () => activateNode(run.id),
       },

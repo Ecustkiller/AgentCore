@@ -346,6 +346,10 @@ class LoopController:
                 newly_warned.append(name)
         return CircuitBreak(warned=tuple(newly_warned), disabled=tuple(newly_disabled))
 
+    def tool_failure_count(self, tool_name: str) -> int:
+        """Cumulative failure count for one tool in this run (circuit breaker input)."""
+        return int(self._tool_failures.get(tool_name, 0))
+
     def note_round_productivity(
         self, *, had_tool_calls: bool, all_failed: bool, had_content: bool
     ) -> None:

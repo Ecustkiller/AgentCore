@@ -4,8 +4,9 @@ import type {
   AskAssumption,
   AskQuestion,
   AskStyleOption,
+  CheckpointIntent,
 } from "@/types/events";
-import { Check, ChevronRight, SlidersHorizontal } from "lucide-react";
+import { ChevronRight, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 
 /**
@@ -27,16 +28,6 @@ export interface AskUserContent {
   styleOptions: AskStyleOption[];
 }
 
-/** Whether the card leans「开场引导」(ready-to-go) vs「途中拍板」(careful fork):
- * an opening carries 起步计划 / 风格, or pre-fills every question with a default;
- * a mid-task fork carries a bare question with no defaults. (Both render 品牌蓝.) */
-export function isOpeningFlavored(c: AskUserContent): boolean {
-  if (c.assumptions.length > 0 || c.styleOptions.length > 0) return true;
-  return (
-    c.questions.length > 0 && c.questions.every((q) => q.default.length > 0)
-  );
-}
-
 export type AskTone =
   (typeof interactiveCheckpointTone)[keyof typeof interactiveCheckpointTone];
 
@@ -44,7 +35,7 @@ export type AskTone =
  * The answer-state engine for a structured ask: per-question picks (choice → option(s),
  * text → typed value), the per-question「其他」escape hatch, the chosen style, and a free
  * note. Seeds each question from its `default` so a 想省事 user can one-click submit an
- * opening as-is. `compose(opening)` flattens it all into ONE readable answer (答复模型 α —
+ * opening as-is. `compose(intent)` flattens it all into ONE readable answer (答复模型 α —
  * the only reader is the CEO / worker, an LLM). Shared so both cards manage answers
  * identically; each card decides what to do with `compose()` in its own footer.
  */
@@ -105,8 +96,16 @@ export function useAskAnswer(content: AskUserContent) {
         (otherOn[q.id] && (otherText[q.id] ?? "").trim().length > 0),
     ).length + (styleId ? 1 : 0);
 
-  const compose = (opening: boolean) =>
-    composeAnswer(content, answers, otherOn, otherText, styleId, note, opening);
+  const compose = (intent: CheckpointIntent) =>
+    composeAnswer(
+      content,
+      answers,
+      otherOn,
+      otherText,
+      styleId,
+      note,
+      intent === "kickoff",
+    );
 
   return {
     answers,
@@ -146,8 +145,8 @@ export function AskQuestionFields({
     <div className="space-y-2.5">
       {/* 起步计划：可折叠的只读信息块（默认收起；summary 预览各项名）。 */}
       {content.assumptions.length > 0 && (
-        <details className="group rounded-lg border-l-2 border-border bg-muted/30">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 [&::-webkit-details-marker]:hidden">
+        <details className="group rounded-lg bg-muted/20">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 [&::-webkit-details-marker]:hidden">
             <ChevronRight
               size={13}
               className="shrink-0 text-muted-foreground transition-transform group-open:rotate-90"
@@ -159,10 +158,10 @@ export function AskQuestionFields({
               {content.assumptions.map((a) => a.label).join(" · ")}
             </span>
           </summary>
-          <div className="space-y-1 px-3 pb-2 pl-8">
+          <div className="space-y-0.5 px-2.5 pb-2 pl-6">
             {content.assumptions.map((a) => (
-              <div key={a.id} className="flex gap-2 text-xs">
-                <span className="w-16 shrink-0 text-muted-foreground">
+              <div key={a.id} className="flex gap-1.5 text-xs">
+                <span className="w-14 shrink-0 text-muted-foreground">
                   {a.label}
                 </span>
                 <span className="min-w-0 flex-1 whitespace-pre-wrap text-foreground">
@@ -209,8 +208,10 @@ export function AskQuestionFields({
                   onClick={() =>
                     !disabled && answer.setStyleId(active ? null : s.id)
                   }
-                  className={`h-auto rounded-lg border px-2.5 py-1 font-normal disabled:opacity-40 ${
-                    active ? tone.optActive : tone.optIdle
+                  className={`h-auto rounded-full px-2.5 py-1 text-xs font-normal disabled:opacity-40 ${
+                    active
+                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                      : "bg-muted/40 text-foreground hover:bg-muted/60"
                   }`}
                 >
                   {s.label}
@@ -309,102 +310,73 @@ function QuestionField({
             className={`w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none disabled:opacity-40 ${tone.focus}`}
           />
         ) : (
-          <div
-            className={
-              question.options.length >= 3
-                ? "grid grid-cols-1 gap-1 sm:grid-cols-2"
-                : "space-y-1"
-            }
-          >
-            {question.options.map((opt) => {
-              const active = answer.includes(opt.label);
-              const isDefault =
-                !!question.default && opt.label === question.default;
-              return (
-                <Button
-                  key={opt.label}
-                  variant="ghost"
-                  disabled={disabled}
-                  onClick={() => onToggleChoice(opt.label)}
-                  className={`h-auto w-full justify-start gap-2 rounded-lg border px-2.5 py-1 text-left font-normal disabled:opacity-40 ${
-                    active ? tone.optActive : tone.optIdle
-                  }`}
-                >
-                  <span className="flex w-full items-start gap-2">
-                    <span
-                      className={`mt-0.5 flex size-4 shrink-0 items-center justify-center border-2 ${
-                        question.multiple ? "rounded-lg" : "rounded-full"
-                      } ${active ? tone.markActive : "border-border"}`}
+          <div className="space-y-1.5">
+            <div className="flex flex-wrap gap-1.5">
+              {question.options.map((opt) => {
+                const active = answer.includes(opt.label);
+                const isDefault =
+                  !!question.default && opt.label === question.default;
+                return (
+                  <div
+                    key={opt.label}
+                    className="inline-flex max-w-full flex-col"
+                  >
+                    <Button
+                      variant="ghost"
+                      disabled={disabled}
+                      onClick={() => onToggleChoice(opt.label)}
+                      className={`h-auto rounded-full px-2.5 py-1 text-xs font-normal disabled:opacity-40 ${
+                        active
+                          ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                          : "bg-muted/40 text-foreground hover:bg-muted/60"
+                      }`}
                     >
-                      {active &&
-                        (question.multiple ? (
-                          <Check size={11} strokeWidth={3} />
-                        ) : (
-                          <span className={`size-2 rounded-full ${tone.dot}`} />
-                        ))}
-                    </span>
-                    {/* label + 权衡说明(detail) + 推荐/默认徽标；detail 仅在选中时展开以控高。 */}
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-start gap-1.5">
-                        <span className="min-w-0 flex-1 whitespace-pre-wrap text-xs">
-                          {opt.label}
-                        </span>
-                        {opt.recommended && (
-                          <span
-                            className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-xs ${tone.badge}`}
-                          >
-                            推荐
-                          </span>
-                        )}
-                        {isDefault && (
-                          <span
-                            className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-xs ${
-                              active
-                                ? tone.badge
-                                : "bg-muted text-muted-foreground"
-                            }`}
-                          >
-                            默认
-                          </span>
-                        )}
-                      </span>
-                      {opt.detail && active && (
-                        <span className="mt-0.5 block whitespace-pre-wrap text-xs text-muted-foreground">
-                          {opt.detail}
+                      <span className="whitespace-pre-wrap">{opt.label}</span>
+                      {opt.recommended && (
+                        <span
+                          className={
+                            active
+                              ? "ml-1 text-primary-foreground/70"
+                              : "ml-1 text-muted-foreground"
+                          }
+                        >
+                          ·推荐
                         </span>
                       )}
-                    </span>
-                  </span>
-                </Button>
-              );
-            })}
-            {/* 「其他」逃生口：选项不合适时就地为这一题填自定义答案，而非塞进全局补充框。 */}
-            <Button
-              variant="ghost"
-              disabled={disabled}
-              onClick={onToggleOther}
-              className={`h-auto w-full justify-start gap-2 rounded-lg border px-2.5 py-1 text-left font-normal disabled:opacity-40 ${
-                question.options.length >= 3 ? "sm:col-span-2" : ""
-              } ${otherOn ? tone.optActive : tone.optIdle}`}
-            >
-              <span className="flex w-full items-start gap-2">
-                <span
-                  className={`mt-0.5 flex size-4 shrink-0 items-center justify-center border-2 ${
-                    question.multiple ? "rounded-lg" : "rounded-full"
-                  } ${otherOn ? tone.markActive : "border-border"}`}
-                >
-                  {otherOn &&
-                    (question.multiple ? (
-                      <Check size={11} strokeWidth={3} />
-                    ) : (
-                      <span className={`size-2 rounded-full ${tone.dot}`} />
-                    ))}
-                </span>
-                <span className="min-w-0 flex-1 whitespace-pre-wrap">
-                  其他…
-                </span>
-              </span>
-            </Button>
+                      {isDefault && (
+                        <span
+                          className={
+                            active
+                              ? "ml-1 text-primary-foreground/70"
+                              : "ml-1 text-muted-foreground"
+                          }
+                        >
+                          ·默认
+                        </span>
+                      )}
+                    </Button>
+                    {opt.detail && active && (
+                      <span className="mt-0.5 max-w-xs px-1 text-xs text-muted-foreground">
+                        {opt.detail}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+              {/* 「其他」逃生口：选项不合适时就地为这一题填自定义答案，而非塞进全局补充框。 */}
+              <Button
+                variant="ghost"
+                disabled={disabled}
+                onClick={onToggleOther}
+                className={`h-auto rounded-full px-2.5 py-1 text-xs font-normal disabled:opacity-40 ${
+                  otherOn
+                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                    : "border border-dashed border-border bg-transparent text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                }`}
+              >
+                其他…
+              </Button>
+            </div>
             {otherOn && (
               <input
                 type="text"
@@ -414,9 +386,7 @@ function QuestionField({
                 // biome-ignore lint/a11y/noAutofocus: 用户点开「其他」才渲染此框，聚焦到刚展开的字段是预期 UX（非页面加载时强夺焦点）。
                 autoFocus
                 placeholder="填写你的答案"
-                className={`w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none disabled:opacity-40 ${
-                  question.options.length >= 3 ? "sm:col-span-2" : ""
-                } ${tone.focus}`}
+                className={`w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none disabled:opacity-40 ${tone.focus}`}
               />
             )}
           </div>

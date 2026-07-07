@@ -26,8 +26,11 @@ from agentcore.runtime.ports import ClientRequestBridge
 logger = get_logger(__name__)
 
 # Argument values longer than this are truncated in the SSE preview so a big
-# file_write/code_execute body does not bloat the approval event.
+# file_write body does not bloat the approval event.
 _PREVIEW_VALUE_MAX = 600
+# code_execute's ``code`` is the review surface — users must see enough to approve.
+_PREVIEW_CODE_EXECUTE_CODE_MAX = 20_000
+_TRUNCATION_SUFFIX = "… [truncated]"
 
 
 def tool_call_requires_approval(
@@ -63,12 +66,22 @@ class ApprovalDecision(StrEnum):
     DENY = "deny"  # refuse; the model is told and may adapt
 
 
-def _preview_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+def _preview_value_max(tool_name: str, key: str) -> int:
+    if tool_name == "code_execute" and key == "code":
+        return _PREVIEW_CODE_EXECUTE_CODE_MAX
+    return _PREVIEW_VALUE_MAX
+
+
+def _preview_arguments(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Bound large string values so the approval SSE event stays small."""
     preview: dict[str, Any] = {}
     for key, value in arguments.items():
-        if isinstance(value, str) and len(value) > _PREVIEW_VALUE_MAX:
-            preview[key] = value[:_PREVIEW_VALUE_MAX] + "… [truncated]"
+        if isinstance(value, str):
+            limit = _preview_value_max(tool_name, key)
+            if len(value) > limit:
+                preview[key] = value[:limit] + _TRUNCATION_SUFFIX
+            else:
+                preview[key] = value
         else:
             preview[key] = value
     return preview
@@ -128,7 +141,7 @@ class ApprovalGate:
             return ApprovalDecision.APPROVE
 
         approval_id = tool_call_id
-        preview = _preview_arguments(arguments)
+        preview = _preview_arguments(tool_name, arguments)
         try:
             decision = await self.registry.suspend(
                 approval_id,
@@ -152,6 +165,9 @@ class ApprovalGate:
             )
         except TimeoutError:
             logger.info("approval.timeout", tool=tool_name, approval_id=approval_id)
+            from agentcore.runtime.audit.hooks import on_approval_timeout
+
+            on_approval_timeout(tool_name=tool_name, tool_call_id=tool_call_id)
             decision = ApprovalDecision.DENY
 
         if decision is ApprovalDecision.APPROVE_ALWAYS:
@@ -181,6 +197,14 @@ class ApprovalGate:
                 decision=decision,
             )
         )
+        from agentcore.runtime.audit.hooks import on_approval_resolved
+
+        on_approval_resolved(
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+            decision=decision.value,
+            arguments=preview,
+        )
         return decision
 
     def _sweep_pending_tools(self, tool_names: frozenset[str]) -> None:
@@ -201,11 +225,23 @@ class ApprovalGate:
         """
         if not tool_names:
             return
+        swept: list[dict[str, str]] = []
         for req in self.registry.list_pending(self.conversation_id):
             if req.kind is not InteractionKind.APPROVAL:
                 continue
             if req.payload.get("tool_name") not in tool_names:
                 continue
+            swept.append(
+                {
+                    "approval_id": req.id,
+                    "tool_call_id": str(req.payload.get("tool_call_id") or ""),
+                    "tool_name": str(req.payload.get("tool_name") or ""),
+                }
+            )
             self.registry.resolve(
                 req.id, ApprovalDecision.APPROVE, conversation_id=self.conversation_id
             )
+        if swept:
+            from agentcore.runtime.audit.hooks import on_approval_swept
+
+            on_approval_swept(tool_names=sorted(tool_names), swept=swept)

@@ -24,15 +24,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from agentcore.core.types import ToolCategory
-from agentcore.llm.config import ModelProfile
-from agentcore.llm.modes import ProfileSet
-from agentcore.llm.protocol import LLMChunk, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, ToolCallDelta
 from agentcore.runtime import pipeline
 from agentcore.runtime.events import EventSink, EventType, FinishReason, followups_generated
 from agentcore.tools.protocol import ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+from tests.llm_helpers import make_turn_profiles
 
 
 def _tool_chunk(name: str, args: str, *, call_id: str = "c") -> LLMChunk:
@@ -141,10 +140,6 @@ def _patch_pipeline(monkeypatch, provider: _ScriptedProvider, registry: ToolRegi
 async def _run_pipeline(monkeypatch, provider: _ScriptedProvider, registry: ToolRegistry):
     _patch_pipeline(monkeypatch, provider, registry)
     sink = EventSink()
-    profile = ModelProfile(model="chat-model", thinking=False, reasoning_effort=None, max_rounds=20)
-    # The stub tool never touches the backend, so the root is inert — a plain path
-    # (no tmp_path fixture) keeps this hermetic and dodges the Windows temp-symlink
-    # teardown crash in pytest's tmp_path cleanup.
     backend = ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox())
     result = await pipeline.run_chat_pipeline(
         conversation_id="conv-1",
@@ -154,7 +149,7 @@ async def _run_pipeline(monkeypatch, provider: _ScriptedProvider, registry: Tool
         user_id="user-1",
         backend=backend,
         approvals_enabled=False,  # no live client → skip the approval/checkpoint gate
-        profile_set=ProfileSet(profiles={"chat": profile}),
+        profile_set=make_turn_profiles(model="chat-model"),
     )
     # run_chat_pipeline no longer closes the sink (its owner does); this test is the
     # owner, so close it to drain the queue to the None sentinel and collect every event.
@@ -183,7 +178,6 @@ async def test_pipeline_leaves_sink_open_for_post_turn_tail(monkeypatch):
     _patch_pipeline(monkeypatch, provider, registry)
 
     sink = EventSink()
-    profile = ModelProfile(model="chat-model", thinking=False, reasoning_effort=None, max_rounds=20)
     backend = ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox())
     await pipeline.run_chat_pipeline(
         conversation_id="conv-1",
@@ -193,7 +187,7 @@ async def test_pipeline_leaves_sink_open_for_post_turn_tail(monkeypatch):
         user_id="user-1",
         backend=backend,
         approvals_enabled=False,
-        profile_set=ProfileSet(profiles={"chat": profile}),
+        profile_set=make_turn_profiles(model="chat-model"),
     )
 
     # The invariant: the pipeline returned but left the sink OPEN for the owner's tail.

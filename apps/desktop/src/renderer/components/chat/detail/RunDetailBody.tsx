@@ -33,6 +33,7 @@ import {
 } from "./sections/RunRevisionChain";
 import { ThinkingSection } from "./sections/RunThinking";
 import { ToolCallsSection } from "./sections/RunToolCalls";
+import { AuditSection } from "./sections/RunAudit";
 import { Section, StatusBadge } from "./sections/shared";
 
 export { SchedulingDiag } from "./sections/RunDiagnostics";
@@ -256,7 +257,7 @@ export function RunDetailBody({
       {run.receivedContext.length > 0 && (
         <ReceivedContextSection
           blocks={run.receivedContext}
-          defaultExpanded
+          defaultExpanded={false}
           keyBase={`run:${runId}`}
           onNavigate={(rid) => {
             const target = execution.runs.find((r) => r.id === rid);
@@ -396,6 +397,14 @@ export function RunDetailBody({
           traceId={traceId}
           batches={execution.batches}
           keyBase={`run:${runId}`}
+        />
+      )}
+
+      {conversationId != null && (
+        <AuditSection
+          conversationId={conversationId}
+          messageId={messageId}
+          runId={runId}
         />
       )}
     </div>

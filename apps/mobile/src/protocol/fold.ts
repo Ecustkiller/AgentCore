@@ -94,6 +94,14 @@ function pushTeamMarker(process: ProcessStep[], executionId: string): void {
   process.push({ kind: "team", execution_id: executionId });
 }
 
+/** Pop trailing `content` steps (交付前 blocking ask_user 吸收同轮 CEO 导语进卡，不重复进时间线).
+ * Mirrors desktop `dropTrailingContentSteps` + backend `EventSink._accumulate_process`. */
+function dropTrailingContentSteps(process: ProcessStep[]): void {
+  while (process.length > 0 && process[process.length - 1].kind === "content") {
+    process.pop();
+  }
+}
+
 /** Drop a `checkpoint` marker (blocking ask_user) at its chronological slot. */
 function pushCheckpointMarker(process: ProcessStep[], id: string): void {
   if (!id) return;
@@ -602,6 +610,10 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       }
       case "checkpoint_required": {
         const p = ev.payload as CheckpointRequiredPayload;
+        // Absorb same-round CEO prose into the checkpoint card (mirrors desktop
+        // foldCheckpointMarker): drop trailing content steps + clear content scalar.
+        dropTrailingContentSteps(process);
+        content = "";
         pushCheckpointMarker(process, p.checkpoint_id);
         pending = {
           kind: "checkpoint",
@@ -676,6 +688,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       // Not part of the normalized turn judge state (no-op) — but enumerated so the
       // assertNever below stays exhaustive against @agentcore/contract-types.
       case "message_start":
+      case "turn_warning":
       case "turn_saved":
       case "title_generated":
       // CEO→用户「下一步推荐」: post-turn quick-reply chips, filled into the composer on tap.
@@ -708,6 +721,14 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "handoff_snapshot_done":
       case "handoff_job_started":
       case "handoff_apply_done":
+      // AI 小镇模拟事件：桌面 MVP 专属，手机无模拟面 → fold no-op（与 conformance oracle 一致）。
+      case "sim.agent_action":
+      case "sim.agent_state":
+      case "sim.interaction":
+      case "sim.tick_started":
+      case "sim.tick_ended":
+      case "sim.tick_frame":
+      case "sim.world_event":
         break;
       default:
         assertNever(type);

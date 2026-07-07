@@ -7,7 +7,7 @@ a worker that finished with a plain no-tool answer simply carries no debrief (th
 alone).
 """
 
-from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.runs.serialize import debrief_from_transcript
 
 

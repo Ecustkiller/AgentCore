@@ -34,6 +34,8 @@ import {
   wsUploadFile,
   wsWriteFileText,
 } from "@/services/workspaces";
+import { getConversations } from "@/hooks/useConversations";
+import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import { createLocalRootSource } from "./localRootSource";
 
 /** Map the server preview shape into the unified result (server has no image kind). */
@@ -221,4 +223,25 @@ export function resolveWorkspaceSource(
     return createLocalRootSource(ws.rootId, ws.name, ws.subpath);
   }
   return createCloudWorkspaceSource(ws.wsId, ws.name);
+}
+
+/**
+ * When the workspace list has no `conv:<id>` row yet, fall back to the same
+ * local target resolution sidecar uses (`localContainerRootId` + workspace-cache
+ * subpath). Returns null when no on-machine local binding exists — callers then
+ * use the conversation-keyed cloud REST source.
+ */
+export async function resolveConversationLocalFileSource(
+  conversationId: string,
+): Promise<FileSource | null> {
+  const target = await resolveConversationLocalTarget(conversationId);
+  if (!target) return null;
+
+  const roots = await window.fsApi.listRoots();
+  const root = roots.find((r) => r.id === target.rootId);
+  if (!root) return null;
+
+  const conv = getConversations().find((c) => c.id === conversationId);
+  const label = conv?.title || root.name || "工作区";
+  return createLocalRootSource(target.rootId, label, target.subpath);
 }

@@ -70,7 +70,8 @@ def _app(limiter: FixedWindowRateLimiter) -> FastAPI:
     return app
 
 
-async def test_middleware_throttles_auth_posts():
+async def test_middleware_throttles_auth_posts(monkeypatch):
+    monkeypatch.setattr(settings, "rate_limit_enabled", True)
     limiter = FixedWindowRateLimiter(max_requests=2, window_seconds=60)
     transport = ASGITransport(app=_app(limiter))
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
@@ -189,7 +190,9 @@ async def test_enforce_passes_under_limit():
     await enforce_user_message_rate_limit("u", limiter=limiter, now=0)  # no raise
 
 
-async def test_enforce_raises_rate_limited_when_over():
+async def test_enforce_raises_rate_limited_when_over(monkeypatch):
+    monkeypatch.setattr(settings, "rate_limit_enabled", True)
+    monkeypatch.setattr(settings, "user_message_rate_limit_max", 20)
     limiter = SlidingWindowRateLimiter(max_requests=1, window_seconds=10)
     await enforce_user_message_rate_limit("u", limiter=limiter, now=0)
     with pytest.raises(RateLimitedError) as ei:

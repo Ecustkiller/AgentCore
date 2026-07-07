@@ -38,14 +38,14 @@ def _parse_payload_map_keys(text: str) -> set[str]:
         raise RuntimeError("SSEPayloadMap block not found in events.ts")
     keys: set[str] = set()
     for line in m.group(1).splitlines():
-        hit = re.match(r"\s*([a-z_][a-z0-9_]*)\s*:", line)
+        hit = re.match(r'\s*(?:"([^"]+)"|([a-z_][a-z0-9_]*))\s*:', line)
         if hit:
-            keys.add(hit.group(1))
+            keys.add(hit.group(1) or hit.group(2))
     return keys
 
 
 def _parse_generated_union(text: str) -> set[str]:
-    return set(re.findall(r'"([a-z_][a-z0-9_]*)"', text))
+    return set(re.findall(r'"([^"]+)"', text))
 
 
 def main() -> None:

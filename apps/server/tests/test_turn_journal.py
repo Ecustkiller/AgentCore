@@ -11,7 +11,7 @@ model, so resume reads it instead of the旁路 frame and the conformance golden 
 assert it ``==`` the live transcript.
 """
 
-from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.journal import (
     entries_from_runs,
     journal_entries_from_display_runs,

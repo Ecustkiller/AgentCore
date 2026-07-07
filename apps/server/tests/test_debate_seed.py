@@ -13,7 +13,7 @@
 import asyncio
 import json
 
-from agentcore.llm.protocol import LLMResponse
+from agentcore.llm.provider.protocol import LLMResponse
 from agentcore.runtime.debate import (
     DebateConfig,
     DebateForm,

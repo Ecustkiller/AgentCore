@@ -13,7 +13,7 @@ worker——只读模型这一步选了哪个工具，即路由决策本身。�
     uv run python scripts/probe_ask_gate.py --samples 2     # 每场景采样 2 次治非确定性
     uv run python scripts/probe_ask_gate.py --mode quality  # 用 Pro 档（更贵）
 
-凭据走 settings 全局 DeepSeek key（apps/server/.env）。仅 dev 探针，无任何旁路。
+凭据走 settings.platform_api_key（.env 填 ``PLATFORM_API_KEY``）。仅 dev 探针，无任何旁路。
 """
 
 from __future__ import annotations
@@ -26,10 +26,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agentcore.core.types import new_id
-from agentcore.llm.config import build_request
+from agentcore.evals.eval_modes import KNOWN_MODELS, resolve_profile_set
 from agentcore.llm.factory import build_provider
-from agentcore.llm.modes import KNOWN_MODELS, resolve_profile_set
-from agentcore.llm.protocol import LLMMessage, TokenUsage
+from agentcore.llm.profiles import build_request
+from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 from agentcore.runtime.engine.governance import resolve_openai_tool_defs
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.pipeline import _assemble_ceo_toolset

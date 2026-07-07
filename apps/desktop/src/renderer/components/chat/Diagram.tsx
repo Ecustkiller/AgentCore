@@ -1,5 +1,6 @@
 import { IconButton } from "@/components/ui";
 import { copyText } from "@/lib/clipboard";
+import { normalizeMermaidSource } from "@/lib/mermaidNormalize";
 import { useIsDark } from "@/lib/useIsDark";
 import {
   Check,
@@ -444,16 +445,24 @@ function MermaidDiagram({ code }: { code: string }) {
     (async () => {
       try {
         const mermaid = await getMermaid();
-        // strict securityLevel runs the SVG through DOMPurify — model output is
-        // untrusted, so this is the XSS guard for dangerouslySetInnerHTML below.
+        const normalized = normalizeMermaidSource(code);
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: "strict",
           theme: dark ? "dark" : "default",
           fontFamily: "inherit",
         });
+        // Pre-validate: parse() reliably throws on syntax errors without DOM
+        // side effects, whereas render() may return an error SVG silently.
+        await mermaid.parse(normalized);
         renderSeq += 1;
-        const { svg } = await mermaid.render(`acmmd-${renderSeq}`, code);
+        const id = `acmmd-${renderSeq}`;
+        const { svg } = await mermaid.render(id, normalized);
+        // Guard against mermaid returning an "error SVG" without throwing —
+        // detect its error marker class and treat as failure.
+        if (svg.includes("error-icon") || svg.includes("Syntax error")) {
+          throw new Error("图表语法无效");
+        }
         if (!cancelled) setSvg(svg);
       } catch (e) {
         if (!cancelled) {

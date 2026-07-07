@@ -3,7 +3,7 @@
 import json
 import re
 
-from agentcore.llm.protocol import LLMChunk, TokenUsage, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, TokenUsage, ToolCallDelta
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.runs.types import RunPhase, RunState
 from agentcore.tools.builtin.delegate.nesting import absorb_children, make_lead_subteam

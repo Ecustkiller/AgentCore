@@ -23,8 +23,9 @@ from typing import TYPE_CHECKING, Any
 from agentcore.core.logging import get_logger
 from agentcore.core.text import clip_preview
 from agentcore.core.types import ToolApproval, ToolCategory, new_id
-from agentcore.llm.deepseek import DeepSeekProvider
-from agentcore.llm.modes import ProfileSet, default_profile_set
+from agentcore.llm.profiles import TurnProfiles as ProfileSet
+from agentcore.llm.profiles import default_turn_profiles as default_profile_set
+from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.constants import DEFAULT_RECALL_LIMIT
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
@@ -73,7 +74,7 @@ class ReviseTool:
     def __init__(
         self,
         *,
-        llm: DeepSeekProvider,
+        llm: OpenAICompatibleProvider,
         sink: EventSink,
         session_store: SessionStore,
         tools: Any,

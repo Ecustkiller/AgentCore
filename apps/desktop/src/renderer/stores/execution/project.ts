@@ -71,6 +71,7 @@ function runFromPlan(plan: ExecutionPlan, id: string): RunNode | null {
     status: "pending",
     dependsOn: spec.dependsOn,
     outputSummary: null,
+    outputFiles: [],
     debrief: null,
     durationMs: null,
     error: null,
@@ -173,6 +174,7 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
             status: "pending",
             dependsOn: [],
             outputSummary: null,
+            outputFiles: [],
             debrief: null,
             durationMs: null,
             error: null,
@@ -258,6 +260,7 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
       if (run) {
         run.status = "completed";
         run.outputSummary = f.outputSummary;
+        run.outputFiles = f.outputFiles ?? [];
         run.debrief = f.debrief ?? null;
         run.durationMs = f.durationMs;
         // Light up this run's payroll row (§7.3B); absent on cost-less frames.

@@ -2,7 +2,9 @@
 
 Built with the REAL event builders (:mod:`agentcore.runtime.events`). Split by scenario
 under this package (``single_agent`` / ``gates`` / ``multi_agent`` / ``debate`` / ``legal``
-/ ``board``); aggregated here as ``VECTORS``. Export via ``python -m agentcore.conformance.export``.
+/ ``board`` / ``memory``); protocol vectors aggregate here as ``VECTORS``. Memory
+consolidation vectors live separately in ``MEMORY_VECTORS`` (extraction prompt regression,
+not protocol fold). Export protocol goldens via ``python -m agentcore.conformance.export``.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from .board import VECTORS as _BOARD
 from .debate import VECTORS as _DEBATE
 from .gates import VECTORS as _GATES
 from .legal import VECTORS as _LEGAL
+from .memory import MEMORY_VECTORS, MemoryConsolidationVector
 from .multi_agent import VECTORS as _MULTI_AGENT
 from .single_agent import VECTORS as _SINGLE_AGENT
 

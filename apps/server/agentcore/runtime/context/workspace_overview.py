@@ -1,13 +1,12 @@
-"""Workspace overview — the CEO's live ``<workspace_context>`` orientation block.
+"""Workspace overview — the CEO's live ``<workspace_file_index>`` orientation block.
 
-工作区上下文（取代「向量 RAG」的轻量方案）。Instead of a pre-built embedding index (which
+工作区文件索引（取代「向量 RAG」的轻量方案）。Instead of a pre-built embedding index (which
 goes stale the moment a file changes and needs an embedder + pgvector), this gives the
 entry CEO agent a compact, NEWEST-FIRST listing of the files already on disk in the
 conversation's workspace, regenerated fresh every turn from the live
-``WorkspaceBackend`` — so it is never stale and carries zero new infra. The agent reads
-the actual files on demand via the existing ``file_read`` / ``grep`` tools (agentic
-retrieval, the主路); this block just saves it a blind ``file_list`` round and tells it
-what is there to delegate around.
+``WorkspaceBackend`` — so it is never stale and carries zero new infra. The block is
+PATHS ONLY (no file bodies); the agent must call ``file_read`` / ``grep`` for content
+(agentic retrieval, the主路).
 
 Best-effort by contract: no backend, no indexing support, an empty workspace, or a
 listing failure all yield ``""`` (the caller omits the block) — workspace awareness is
@@ -60,7 +59,7 @@ async def _safe_index(backend: WorkspaceBackend) -> list[str]:
 
 
 async def build_workspace_overview(backend: WorkspaceBackend | None) -> str:
-    """Build the CEO's ``<workspace_context>`` block, or ``""`` when nothing to show.
+    """Build the CEO's ``<workspace_file_index>`` block, or ``""`` when nothing to show.
 
     Returns ``""`` for a missing backend, an empty / unindexable workspace with no
     detectable project profile, or a listing failure. Otherwise renders a best-effort
@@ -94,10 +93,10 @@ async def build_workspace_overview(backend: WorkspaceBackend | None) -> str:
             lines.append(f"……另有 {remaining} 个文件未列出（用 file_list 看完整列表）")
 
         file_intro = (
-            "当前对话工作区里已有以下文件（最近更新在前）；需要其内容时直接用 file_read / grep "
-            "查看即可，不必先 file_list："
+            "以下为本对话工作区中产生或上传的文件路径索引（最近更新在前）。"
+            "列表仅为路径，不含正文内容；需要了解某个文件的内容时，必须调用 file_read（或 grep）读取："
         )
         sections.append(f"{file_intro}\n" + "\n".join(lines))
 
     body = "\n\n".join(sections)
-    return f"<workspace_context>\n{body}\n</workspace_context>"
+    return f"<workspace_file_index>\n{body}\n</workspace_file_index>"

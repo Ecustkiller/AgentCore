@@ -44,8 +44,9 @@ from agentcore.db.repositories import (
     MessageRepository,
     UserRepository,
 )
-from agentcore.llm.byok import resolve_user_llm_credentials
 from agentcore.llm.factory import build_provider
+from agentcore.llm.resolve import resolve_credentials
+from agentcore.llm.resolve import resolve_turn_model as resolve_user_model
 from agentcore.memory.locks import user_memory_lock
 from agentcore.memory.maintenance import MemoryUpdateItem, maintain_user_memory
 from agentcore.memory.store import MemoryStore, default_memory_store
@@ -100,10 +101,9 @@ async def consolidate_conversation(
                     conversation_id,
                     max_messages=settings.memory_consolidation_window_messages,
                 )
-                # Offline pass runs on the conversation owner's own DeepSeek key
-                # (BYOK). None → platform key (platform mode); in the BYOK beta it
-                # means the user has no usable key — handled by the skip just below.
-                credentials = await resolve_user_llm_credentials(session, user_id)
+                # Offline pass runs on the platform key when configured, else the
+                # conversation owner's BYOK row (see byok.resolve_credentials).
+                credentials = await resolve_credentials(session, user_id, "platform_internal")
 
             # BYOK with no usable key: skip this pass WITHOUT advancing the watermark,
             # so it retries once a key is configured — rather than making a doomed LLM
@@ -116,12 +116,13 @@ async def consolidate_conversation(
             # conversation-tail card's「记了什么」. Stays empty when nothing changed.
             collected: list[MemoryUpdateItem] = []
             if window:
-                provider = build_provider(credentials)
+                model = resolve_user_model(credentials)
+                provider = build_provider(credentials, purpose="platform_internal")
                 try:
                     changed = await maintain_user_memory(
                         user_id=user_id,
                         messages=window,
-                        extractor=LLMMemoryExtractor(provider),
+                        extractor=LLMMemoryExtractor(provider, model=model),
                         store=store,
                         today=datetime.now(UTC).date().isoformat(),
                         section_cap=settings.memory_section_bullet_cap,

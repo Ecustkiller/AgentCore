@@ -19,14 +19,14 @@ import pytest
 
 from agentcore.config import settings
 from agentcore.core.types import ToolCategory, ToolEffect
-from agentcore.llm.config import ModelProfile
-from agentcore.llm.protocol import LLMChunk, LLMMessage, TokenUsage, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, TokenUsage, ToolCallDelta
 from agentcore.runtime.engine import react_loop, resolve_tool_timeout
 from agentcore.runtime.events import EventSink, EventType, FinishReason, SSEEvent
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+from tests.llm_helpers import make_profile_params
 
 
 def _tool_chunk(name: str, args: str, *, call_id: str = "c") -> LLMChunk:
@@ -148,7 +148,7 @@ async def _run(
     on_reset: Callable[[], None] | None = None,
 ):
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=max_rounds)
+    profile = make_profile_params(max_rounds=max_rounds)
     result = await react_loop(
         messages=messages,
         llm=provider,
@@ -156,6 +156,7 @@ async def _run(
         sink=EventSink(),
         tool_context=_context(),
         profile=profile,
+        turn_model="m",
         citation_sink=citation_sink,
         annotate_citations=annotate_citations,
         deliverable_only=deliverable_only,
@@ -504,7 +505,8 @@ async def test_captain_deliverable_only_keeps_timeline_no_reset():
         tools=_registry(_StubTool()),
         sink=sink,
         tool_context=_context(),
-        profile=ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20),
+        profile=make_profile_params(max_rounds=20),
+        turn_model="m",
         deliverable_only=True,
     )
     assert content == "最终结论：一二三。"
@@ -564,7 +566,7 @@ class _MeterThenBoom:
 
 async def test_usage_sink_holds_completed_round_usage_on_raise():
     sink_usage: list[TokenUsage] = []
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+    profile = make_profile_params(max_rounds=20)
     with pytest.raises(RuntimeError, match="provider down"):
         await react_loop(
             messages=[LLMMessage(role="user", content="go")],
@@ -573,6 +575,7 @@ async def test_usage_sink_holds_completed_round_usage_on_raise():
             sink=EventSink(),
             tool_context=_context(),
             profile=profile,
+            turn_model="m",
             raise_on_error=True,
             usage_sink=sink_usage,
         )
@@ -591,7 +594,7 @@ async def test_usage_sink_empty_when_first_round_raises():
             yield  # pragma: no cover
 
     sink_usage: list[TokenUsage] = []
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+    profile = make_profile_params(max_rounds=20)
     with pytest.raises(RuntimeError, match="down"):
         await react_loop(
             messages=[LLMMessage(role="user", content="go")],
@@ -600,6 +603,7 @@ async def test_usage_sink_empty_when_first_round_raises():
             sink=EventSink(),
             tool_context=_context(),
             profile=profile,
+            turn_model="m",
             raise_on_error=True,
             usage_sink=sink_usage,
         )
@@ -672,7 +676,7 @@ async def test_tool_timeout_aborts_and_loop_recovers():
     provider = _ScriptedProvider([[_tool_chunk("slow", "{}")], [_content_chunk("recovered")]])
     tool = _SlowTool(delay=5.0, timeout_seconds=0.05)
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+    profile = make_profile_params(max_rounds=20)
     content, _r, _u, _rounds = await react_loop(
         messages=messages,
         llm=provider,
@@ -680,6 +684,7 @@ async def test_tool_timeout_aborts_and_loop_recovers():
         sink=EventSink(),
         tool_context=_context(),
         profile=profile,
+        turn_model="m",
     )
 
     assert content == "recovered"
@@ -707,7 +712,14 @@ class _ModelRecordingProvider:
             yield chunk
 
 
-async def _run_loop(provider, profile, *, finish_override_sink=None, tool=None):  # noqa: ANN001
+async def _run_loop(  # noqa: ANN001
+    provider,
+    profile,
+    *,
+    finish_override_sink=None,
+    tool=None,
+    turn_model: str = "primary",
+):
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
     return await react_loop(
         messages=messages,
@@ -716,68 +728,48 @@ async def _run_loop(provider, profile, *, finish_override_sink=None, tool=None):
         sink=EventSink(),
         tool_context=_context(),
         profile=profile,
+        turn_model=turn_model,
         finish_override_sink=finish_override_sink,
     )
 
 
-async def test_empty_response_falls_back_to_stronger_model_and_recovers():
-    # Round 0 is empty (no content, no tool) → the engine retries round 1 on the
-    # profile's fallback model, which answers. The turn finishes clean (not degraded).
+async def test_empty_response_retries_same_model_and_recovers():
+    # Round 0 is empty (no content, no tool) → the engine retries round 1 on the same
+    # model, which answers. The turn finishes clean (not degraded).
     provider = _ModelRecordingProvider([[], [_content_chunk("recovered")]])
-    profile = ModelProfile(
-        model="primary",
-        fallback_model="fallback-pro",
-        thinking=False,
-        reasoning_effort=None,
-        max_rounds=20,
-    )
+    profile = make_profile_params(max_rounds=20)
     finish_override: list[FinishReason] = []
     content, _r, _u, _rounds = await _run_loop(
         provider, profile, finish_override_sink=finish_override
     )
 
     assert content == "recovered"
-    assert provider.models == ["primary", "fallback-pro"]  # escalated on the empty
+    assert provider.models == ["primary", "primary"]
     assert finish_override == []  # recovered → not degraded
 
 
-async def test_consecutive_empty_after_fallback_finishes_degraded():
-    # Round 0 empty → fallback; round 1 (on fallback) ALSO empty → the streak hits the
-    # threshold → degraded finish (no blank-but-clean end_turn).
+async def test_consecutive_empty_finishes_degraded():
+    # Two consecutive empty rounds hit the threshold → degraded finish (no blank end_turn).
     provider = _ModelRecordingProvider([[], []])
-    profile = ModelProfile(
-        model="primary",
-        fallback_model="fallback-pro",
-        thinking=False,
-        reasoning_effort=None,
-        max_rounds=20,
-    )
+    profile = make_profile_params(max_rounds=20)
     finish_override: list[FinishReason] = []
     content, _r, _u, _rounds = await _run_loop(
         provider, profile, finish_override_sink=finish_override
     )
 
     assert content == ""
-    assert provider.models == ["primary", "fallback-pro"]
-    # surfaced as FinishReason.DEGRADED by the caller
+    assert provider.models == ["primary", "primary"]
     assert finish_override == [FinishReason.DEGRADED]
 
 
-async def test_empty_response_degrades_without_fallback_model():
-    # No fallback model configured: two consecutive empties go straight to degraded,
-    # and the model is never switched.
+async def test_empty_response_degrades_without_model_switch():
+    # Same as consecutive empty: model is never switched; turn ends degraded.
     provider = _ModelRecordingProvider([[], []])
-    profile = ModelProfile(
-        model="primary",
-        fallback_model=None,
-        thinking=False,
-        reasoning_effort=None,
-        max_rounds=20,
-    )
+    profile = make_profile_params(max_rounds=20)
     finish_override: list[FinishReason] = []
     await _run_loop(provider, profile, finish_override_sink=finish_override)
 
-    assert provider.models == ["primary", "primary"]  # no escalation
+    assert provider.models == ["primary", "primary"]
     assert finish_override == [FinishReason.DEGRADED]
 
 
@@ -823,7 +815,7 @@ def _errors(sink: _RecordingSink) -> list[SSEEvent]:
     return [e for e in sink.emitted if e.type == EventType.ERROR]
 
 
-async def _run_with_sink(provider, profile, sink):  # noqa: ANN001
+async def _run_with_sink(provider, profile, sink, *, turn_model: str = "primary"):  # noqa: ANN001
     finish_override: list[FinishReason] = []
     content, _r, _u, rounds = await react_loop(
         messages=[LLMMessage(role="user", content="go")],
@@ -832,68 +824,48 @@ async def _run_with_sink(provider, profile, sink):  # noqa: ANN001
         sink=sink,
         tool_context=_context(),
         profile=profile,
+        turn_model=turn_model,
         finish_override_sink=finish_override,
     )
     return content, rounds, finish_override
 
 
-async def test_llm_failure_falls_back_to_model_and_recovers():
-    # Round 0's LLM call hard-fails → the engine escalates to the fallback model and
-    # round 1 answers. The turn finishes clean: no error is shown (the failure was
-    # absorbed by the retry) and no degraded/error finish is stamped.
+async def test_llm_failure_errors_without_model_escalation():
+    # Hard LLM failure ends the turn immediately — no profile-level model escalation.
     provider = _FailingProvider([[], [_content_chunk("recovered")]], fail_on={0})
-    profile = ModelProfile(
-        model="primary",
-        fallback_model="fallback-pro",
-        thinking=False,
-        reasoning_effort=None,
-        max_rounds=20,
-    )
-    sink = _RecordingSink()
-    content, _rounds, finish_override = await _run_with_sink(provider, profile, sink)
-
-    assert content == "recovered"
-    assert provider.models == ["primary", "fallback-pro"]  # escalated on the failure
-    assert finish_override == []  # recovered → clean finish
-    assert _errors(sink) == []  # the absorbed failure was never surfaced
-
-
-async def test_llm_failure_after_fallback_finishes_error():
-    # Round 0 fails on the primary → fallback; round 1 fails on the fallback too → the
-    # ladder is exhausted with no content → ERROR (surfaced now, stamped on the turn).
-    provider = _FailingProvider([], fail_on={0, 1})
-    profile = ModelProfile(
-        model="primary",
-        fallback_model="fallback-pro",
-        thinking=False,
-        reasoning_effort=None,
-        max_rounds=20,
-    )
+    profile = make_profile_params(max_rounds=20)
     sink = _RecordingSink()
     content, rounds, finish_override = await _run_with_sink(provider, profile, sink)
 
     assert content == ""
-    assert rounds == 2
-    assert provider.models == ["primary", "fallback-pro"]
+    assert rounds == 1
+    assert provider.models == ["primary"]
     assert finish_override == [FinishReason.ERROR]
-    assert len(_errors(sink)) == 1  # surfaced exactly once, at the end of the ladder
+    assert len(_errors(sink)) == 1
+
+
+async def test_llm_failure_after_first_round_errors():
+    # Same as a single hard failure: the ladder does not retry on another model.
+    provider = _FailingProvider([], fail_on={0, 1})
+    profile = make_profile_params(max_rounds=20)
+    sink = _RecordingSink()
+    content, rounds, finish_override = await _run_with_sink(provider, profile, sink)
+
+    assert content == ""
+    assert rounds == 1
+    assert provider.models == ["primary"]
+    assert finish_override == [FinishReason.ERROR]
+    assert len(_errors(sink)) == 1
 
 
 async def test_llm_failure_with_partial_content_degrades():
     # Round 0 streams partial content + a tool call (loop continues); round 1 hard-fails
-    # with no fallback configured → the turn keeps the partial answer and finishes
-    # DEGRADED (don't discard a partial answer as a blank error).
+    # → the turn keeps the partial answer and finishes DEGRADED.
     provider = _FailingProvider(
         [[_content_chunk("partial"), _tool_chunk("search", "{}")], []],
         fail_on={1},
     )
-    profile = ModelProfile(
-        model="primary",
-        fallback_model=None,
-        thinking=False,
-        reasoning_effort=None,
-        max_rounds=20,
-    )
+    profile = make_profile_params(max_rounds=20)
     sink = _RecordingSink()
     content, rounds, finish_override = await _run_with_sink(provider, profile, sink)
 
@@ -904,16 +876,9 @@ async def test_llm_failure_with_partial_content_degrades():
 
 
 async def test_llm_failure_without_fallback_errors_immediately():
-    # No fallback model: a first-round hard failure has nowhere to escalate, so it ends
-    # the turn on ERROR after a single attempt (no spurious model switch).
+    # A first-round hard failure ends the turn on ERROR after a single attempt.
     provider = _FailingProvider([], fail_on={0})
-    profile = ModelProfile(
-        model="primary",
-        fallback_model=None,
-        thinking=False,
-        reasoning_effort=None,
-        max_rounds=20,
-    )
+    profile = make_profile_params(max_rounds=20)
     sink = _RecordingSink()
     content, rounds, finish_override = await _run_with_sink(provider, profile, sink)
 
@@ -965,7 +930,7 @@ async def test_circuit_breaker_warns_then_disables_failing_tool():
         ]
     )
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+    profile = make_profile_params(max_rounds=20)
     await react_loop(
         messages=messages,
         llm=provider,
@@ -973,6 +938,7 @@ async def test_circuit_breaker_warns_then_disables_failing_tool():
         sink=EventSink(),
         tool_context=_context(),
         profile=profile,
+        turn_model="m",
     )
 
     steers = [m.content or "" for m in messages if m.role == "user"]
@@ -996,7 +962,7 @@ async def test_unproductive_rounds_early_stop_and_salvage_answer():
             [_content_chunk("salvaged answer")],  # the forced finalize round
         ]
     )
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+    profile = make_profile_params(max_rounds=20)
     finish_override: list[FinishReason] = []
     content, _r, _u, rounds = await _run_loop(
         provider, profile, finish_override_sink=finish_override, tool=flaky
@@ -1040,7 +1006,7 @@ async def test_productive_round_resets_unproductive_streak():
             [_content_chunk("final")],
         ]
     )
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+    profile = make_profile_params(max_rounds=20)
     finish_override: list[FinishReason] = []
     content, _r, _u, _rounds = await _run_loop(
         provider, profile, finish_override_sink=finish_override, tool=flaky
@@ -1074,7 +1040,7 @@ def _read_then_answer(reads: int) -> _ScriptedProvider:
 
 async def _run_with_registry(provider: _ScriptedProvider, reg: ToolRegistry):
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+    profile = make_profile_params(max_rounds=20)
     content, *_ = await react_loop(
         messages=messages,
         llm=provider,
@@ -1082,6 +1048,7 @@ async def _run_with_registry(provider: _ScriptedProvider, reg: ToolRegistry):
         sink=EventSink(),
         tool_context=_context(),
         profile=profile,
+        turn_model="m",
     )
     return content, messages
 

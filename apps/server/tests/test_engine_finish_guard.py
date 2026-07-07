@@ -15,14 +15,14 @@ fire on BOTH paths. On the CEO path the reset is ``content_reset``; a worker pas
 
 from pathlib import Path
 
-from agentcore.llm.config import ModelProfile
-from agentcore.llm.protocol import LLMChunk, LLMMessage
+from agentcore.llm.provider.protocol import LLMChunk, LLMMessage
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+from tests.llm_helpers import make_profile_params
 
 
 def _content_chunk(text: str) -> LLMChunk:
@@ -63,7 +63,7 @@ async def _run(
 ):
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
     sink = EventSink()
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=max_rounds)
+    profile = make_profile_params(max_rounds=max_rounds)
     result = await react_loop(
         messages=messages,
         llm=provider,
@@ -71,6 +71,7 @@ async def _run(
         sink=sink,
         tool_context=_context(),
         profile=profile,
+        turn_model="m",
         citation_sink=citation_sink,
         annotate_citations=annotate_citations,
         on_reset=on_reset,

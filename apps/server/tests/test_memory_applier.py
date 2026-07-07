@@ -1,14 +1,20 @@
 """Tests for the deterministic memory ops applier (MarkdownMemoryApplier)."""
 
+from datetime import date
+
 from agentcore.memory.store import CORE_MEMORY_FILE, PREFERENCES_MEMORY_FILE
 from agentcore.memory.user_memory import (
     MarkdownMemoryApplier,
     MemoryAction,
     MemoryOp,
     merge_global_core,
+    parse_bullet_timestamp,
     split_global_core,
+    strip_bullet_timestamp,
     strip_memory_chrome,
 )
+
+_FIXED_TODAY = "2026-07-06"
 
 SAMPLE = """\
 # 用户记忆
@@ -24,7 +30,7 @@ SAMPLE = """\
 
 
 def apply(markdown: str, *ops: MemoryOp) -> str:
-    return MarkdownMemoryApplier().apply(markdown, list(ops))
+    return MarkdownMemoryApplier(today=_FIXED_TODAY).apply(markdown, list(ops))
 
 
 def test_add_appends_bullet_under_section():
@@ -126,7 +132,7 @@ def test_remove_missing_section_is_noop():
 def test_adding_existing_bullet_is_idempotent():
     op = MemoryOp(MemoryAction.ADD, "沟通偏好", content="用简体中文回复")
     once = apply(SAMPLE, op)
-    twice = MarkdownMemoryApplier().apply(once, [op])
+    twice = MarkdownMemoryApplier(today=_FIXED_TODAY).apply(once, [op])
     assert once == twice  # adding an existing bullet changes nothing
 
 
@@ -189,7 +195,7 @@ def test_topic_op_with_free_section_is_kept():
 
 
 def test_section_cap_trims_to_most_recent():
-    applier = MarkdownMemoryApplier(section_cap=2)
+    applier = MarkdownMemoryApplier(section_cap=2, today=_FIXED_TODAY)
     # 沟通偏好 starts with 2 bullets; adding a 3rd overflows the cap of 2.
     out = applier.apply(SAMPLE, [MemoryOp(MemoryAction.ADD, "沟通偏好", content="多用例子说明")])
     assert "多用例子说明" in out  # newest kept
@@ -198,7 +204,7 @@ def test_section_cap_trims_to_most_recent():
 
 
 def test_section_cap_only_trims_overflowing_section():
-    applier = MarkdownMemoryApplier(section_cap=2)
+    applier = MarkdownMemoryApplier(section_cap=2, today=_FIXED_TODAY)
     out = applier.apply(
         SAMPLE, [MemoryOp(MemoryAction.ADD, "关于用户的事实", content="在做 AgentCore")]
     )
@@ -208,7 +214,7 @@ def test_section_cap_only_trims_overflowing_section():
 
 
 def test_non_positive_section_cap_means_no_cap():
-    applier = MarkdownMemoryApplier(section_cap=0)
+    applier = MarkdownMemoryApplier(section_cap=0, today=_FIXED_TODAY)
     out = applier.apply(
         SAMPLE,
         [
@@ -268,3 +274,62 @@ def test_split_migrates_legacy_profile_with_preference_sections():
     assert "用中文" in files[PREFERENCES_MEMORY_FILE]
     assert "在做 AgentCore" in files[CORE_MEMORY_FILE]
     assert "用中文" not in files[CORE_MEMORY_FILE]
+
+
+# --- bullet timestamp metadata (<!-- ts:YYYY-MM-DD -->) ---
+
+
+def test_add_stamps_new_bullet():
+    out = apply(
+        SAMPLE,
+        MemoryOp(MemoryAction.ADD, "技术栈与工具", content="偏好 pnpm 管理 Node 依赖"),
+    )
+    assert f"<!-- ts:{_FIXED_TODAY} -->" in out
+    assert f"- 偏好 pnpm 管理 Node 依赖 <!-- ts:{_FIXED_TODAY} -->" in out
+
+
+def test_update_refreshes_timestamp():
+    stamped_sample = apply(
+        SAMPLE,
+        MemoryOp(MemoryAction.UPDATE, "沟通偏好", match="用简体中文回复", content="用英文回复"),
+    )
+    assert f"- 用英文回复 <!-- ts:{_FIXED_TODAY} -->" in stamped_sample
+    # sibling without update keeps no timestamp
+    assert "- 先给结论，再给细节" in stamped_sample
+
+
+def test_legacy_bullet_without_timestamp_still_matches():
+    out = apply(
+        SAMPLE,
+        MemoryOp(MemoryAction.UPDATE, "沟通偏好", match="用简体中文回复", content="倾向中文"),
+    )
+    assert "- 倾向中文 <!-- ts:2026-07-06 -->" in out
+    assert "先给结论，再给细节" in out  # untouched legacy bullet, no timestamp
+
+
+def test_parse_bullet_timestamp_extracts_date():
+    line = "- 使用 pnpm <!-- ts:2026-07-06 -->"
+    assert parse_bullet_timestamp(line) == date.fromisoformat("2026-07-06")
+
+
+def test_parse_bullet_timestamp_returns_none_for_legacy():
+    assert parse_bullet_timestamp("- 后端 Python + FastAPI") is None
+    assert parse_bullet_timestamp("- bad <!-- ts:not-a-date -->") is None
+
+
+def test_strip_bullet_timestamp_removes_suffix():
+    line = "- 使用 pnpm <!-- ts:2026-07-06 -->"
+    assert strip_bullet_timestamp(line) == "- 使用 pnpm"
+
+
+def test_remove_matches_bullet_with_timestamp():
+    stamped = apply(
+        SAMPLE,
+        MemoryOp(MemoryAction.ADD, "技术栈与工具", content="前端 React"),
+    )
+    out = apply(
+        stamped,
+        MemoryOp(MemoryAction.REMOVE, "技术栈与工具", match="前端 React"),
+    )
+    assert "前端 React" not in out
+    assert "后端 Python + FastAPI" in out  # legacy bullet preserved

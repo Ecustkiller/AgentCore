@@ -1,0 +1,273 @@
+import { Markdown } from "@/components/chat/Markdown";
+import { Button } from "@/components/ui";
+import { statusAccentText } from "@/components/ui/tone-presets";
+import { usePersistentDisclosure } from "@/stores/disclosure";
+import type { Execution } from "@/stores/execution";
+import { useSidePanelStore } from "@/stores/sidePanel";
+import { ChevronDown, ChevronRight, CornerDownRight } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { CollapsibleSpeech } from "../CollapsibleSpeech";
+import type {
+  DebateClashView,
+  DebateRoundModel,
+  DebateSideModel,
+} from "../model";
+import { speakerAnchorId } from "./anchors";
+import {
+  type SpeechArgument,
+  parseSpeechArguments,
+} from "./parseSpeechArguments";
+import { speechPlaceholder } from "./speechPlaceholder";
+import { speechStageLabel } from "./stageLabel";
+
+export function SpeakerBlock({
+  side,
+  round,
+  execution,
+  messageId,
+  stage,
+  highlight,
+  onHighlightEnd,
+  clashes,
+  onClashClick,
+}: {
+  side: DebateSideModel;
+  round: DebateRoundModel;
+  execution: Execution;
+  messageId: string;
+  stage: string;
+  highlight?: boolean;
+  onHighlightEnd?: () => void;
+  clashes?: DebateClashView[];
+  onClashClick?: (clash: DebateClashView) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
+  const run = side.run;
+  const agent = run
+    ? execution.agents.find((a) => a.id === run.agentId)
+    : undefined;
+  const output = agent ? agent.outputChunks.join("") : "";
+  const streaming = run?.status === "running";
+
+  useEffect(() => {
+    if (!highlight || !ref.current) return;
+    ref.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    const t = window.setTimeout(() => onHighlightEnd?.(), 2000);
+    return () => window.clearTimeout(t);
+  }, [highlight, onHighlightEnd]);
+
+  const status = streaming ? (
+    <span
+      className={`inline-flex items-center gap-1 text-xs font-medium ${statusAccentText.primary}`}
+    >
+      <span className="size-1.5 animate-pulse rounded-full bg-current" />
+      正在输入…
+    </span>
+  ) : run?.status === "failed" ? (
+    <span className="text-xs text-destructive">发言失败</span>
+  ) : null;
+
+  const sceneKey = `${messageId}:arena:r${round.roundNo}:${side.sideKey || side.key}`;
+
+  return (
+    <div
+      ref={ref}
+      id={speakerAnchorId(round.roundNo, side.sideKey || side.key)}
+      className={`scroll-mt-28 border-l-[3px] pl-3 transition-colors ${
+        highlight ? "bg-accent/30" : ""
+      }`}
+      style={{ borderLeftColor: side.colorVar }}
+    >
+      {clashes?.map((c, i) => (
+        <button
+          key={`${c.toKey}-${i}`}
+          type="button"
+          onClick={() => onClashClick?.(c)}
+          className="mb-2 flex w-full items-start gap-1 rounded-lg bg-muted/40 px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted/70"
+        >
+          <CornerDownRight size={12} className="mt-0.5 shrink-0" />
+          <span>
+            <span className="font-medium text-foreground">回 {c.toName}</span>：
+            {c.point}
+          </span>
+        </button>
+      ))}
+      {run ? (
+        <Button
+          variant="ghost"
+          onClick={() => showRunDetail(messageId, run.id, side.name)}
+          className="h-auto w-full justify-start gap-2 rounded-none px-0 py-0 hover:bg-transparent"
+        >
+          <SpeakerMeta
+            name={side.name}
+            colorVar={side.colorVar}
+            stage={stage}
+            status={status}
+          />
+        </Button>
+      ) : (
+        <SpeakerMeta
+          name={side.name}
+          colorVar={side.colorVar}
+          stage={stage}
+          status={status}
+        />
+      )}
+      <div className="mt-1 pb-4 text-sm text-foreground">
+        {streaming ? (
+          <div className="whitespace-pre-wrap break-words">
+            {output}
+            <span
+              className="ml-0.5 inline-block h-[1em] w-px animate-pulse bg-primary align-text-bottom"
+              aria-hidden
+            />
+          </div>
+        ) : output ? (
+          <ArgumentSpeech output={output} sceneKey={sceneKey} />
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {speechPlaceholder(run)}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ArgumentSpeech({
+  output,
+  sceneKey,
+}: {
+  output: string;
+  sceneKey: string;
+}) {
+  const arguments_ = parseSpeechArguments(output);
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [showAll, setShowAll] = usePersistentDisclosure(
+    `${sceneKey}:all`,
+    false,
+  );
+
+  if (showAll) {
+    return (
+      <div>
+        <CollapsibleSpeech contentKey={output} sceneKey={`${sceneKey}:full`}>
+          <Markdown content={output} evidence />
+        </CollapsibleSpeech>
+        <button
+          type="button"
+          onClick={() => setShowAll(false)}
+          className="mt-1 text-xs font-medium text-primary hover:underline"
+        >
+          收起全文
+        </button>
+      </div>
+    );
+  }
+
+  if (arguments_.length === 0) {
+    return (
+      <CollapsibleSpeech contentKey={output} sceneKey={sceneKey}>
+        <Markdown content={output} evidence />
+      </CollapsibleSpeech>
+    );
+  }
+
+  return (
+    <div>
+      <ul className="space-y-0.5">
+        {arguments_.map((arg, i) => (
+          <ArgumentRow
+            key={arg.id}
+            argument={arg}
+            open={expandedIdx === i}
+            onToggle={() =>
+              setExpandedIdx((prev) => (prev === i ? null : i))
+            }
+          />
+        ))}
+      </ul>
+      <button
+        type="button"
+        onClick={() => setShowAll(true)}
+        className="mt-2 text-xs font-medium text-primary hover:underline"
+      >
+        展开全文
+      </button>
+    </div>
+  );
+}
+
+function ArgumentRow({
+  argument,
+  open,
+  onToggle,
+}: {
+  argument: SpeechArgument;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <li className="list-none rounded-lg bg-muted/15">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-start gap-1.5 px-2 py-1.5 text-left text-xs hover:bg-muted/35"
+      >
+        {open ? (
+          <ChevronDown size={12} className="mt-0.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight size={12} className="mt-0.5 shrink-0 text-muted-foreground" />
+        )}
+        <span className="min-w-0 flex-1 text-sm leading-snug text-foreground">
+          {argument.title}
+        </span>
+      </button>
+      <div
+        className="grid transition-[grid-template-rows,opacity] duration-200 ease-out"
+        style={{
+          gridTemplateRows: open ? "1fr" : "0fr",
+          opacity: open ? 1 : 0,
+        }}
+      >
+        <div className="overflow-hidden">
+          <div className="border-t border-border/40 px-2 pb-2 pt-1.5">
+            <Markdown content={argument.body} evidence />
+          </div>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function SpeakerMeta({
+  name,
+  colorVar,
+  stage,
+  status,
+}: {
+  name: string;
+  colorVar: string;
+  stage: string;
+  status: ReactNode;
+}) {
+  return (
+    <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+      <span className="font-medium text-foreground" style={{ color: colorVar }}>
+        {name}
+      </span>
+      <span className="text-muted-foreground">·</span>
+      <span className="text-muted-foreground">{stage}</span>
+      {status && (
+        <>
+          <span className="text-muted-foreground">·</span>
+          {status}
+        </>
+      )}
+    </div>
+  );
+}
+
+export { speechStageLabel };

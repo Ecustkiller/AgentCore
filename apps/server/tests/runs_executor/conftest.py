@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.llm.protocol import LLMChunk, TokenUsage, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, TokenUsage, ToolCallDelta
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.interaction import InteractionRegistry

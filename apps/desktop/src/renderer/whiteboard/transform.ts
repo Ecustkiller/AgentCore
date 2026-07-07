@@ -2,15 +2,28 @@
  * Pure geometry transforms for the whiteboard engine (AI协作白板.md §六 自研引擎架构).
  *
  * Stateless math lifted out of {@link WhiteboardEngine}: handle-drag resize (single element),
- * multi-select proportional scale, freedraw bbox normalization, and arrow bbox bookkeeping.
- * Same nature as the sibling pure modules (snap / layout / selectionOps) — the engine owns
- * the scene + history and only calls these; nothing here touches engine state.
+ * multi-select proportional scale, freedraw bbox normalization, arrow bbox bookkeeping, and
+ * rotation drag. Same nature as the sibling pure modules (snap / layout / selectionOps) —
+ * the engine owns the scene + history and only calls these; nothing here touches engine state.
  */
 
 import { cloneElements } from "./clone";
 import { smoothFreedraw } from "./freedrawSmooth";
 import { type Box, elementBox, isLinear } from "./geometry";
 import type { SceneElement } from "./types";
+
+/** Compute a new rotation (radians) from a drag starting at `startAngle` with base `startRotation`. */
+export function rotationFromDrag(
+  cx: number,
+  cy: number,
+  px: number,
+  py: number,
+  startAngle: number,
+  startRotation: number,
+): number {
+  const angle = Math.atan2(py - cy, px - cx);
+  return startRotation + (angle - startAngle);
+}
 
 /** Recompute an arrow's bbox (x/y/width/height) from its world points, so selection +
  * marquee work. Rendering uses the points/bindings directly; the box is bookkeeping. */

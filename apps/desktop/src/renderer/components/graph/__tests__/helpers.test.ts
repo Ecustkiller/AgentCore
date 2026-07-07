@@ -20,7 +20,11 @@ function minimalExecution(
 ): Execution {
   return {
     runs: [
-      { id: captainId, kind: "captain", dependsOn: [] } as Execution["runs"][0],
+      {
+        id: captainId,
+        kind: "captain",
+        dependsOn: [],
+      } as unknown as Execution["runs"][0],
       ...runs.map(
         (r) =>
           ({

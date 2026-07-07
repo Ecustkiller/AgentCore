@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useDebateRoomStore } from "../debateRoom";
+import { useCommandPanelStore } from "../commandPanel";
+import { useConversationStore } from "../conversation";
 import { type ExecutionPlan, useExecutionStore } from "../execution";
 import {
-  DEBATE_HUD_TAB_ID,
   type DetailTab,
   SIDE_PANEL_MAX_TABS,
   SIDE_PANEL_MAX_WIDTH,
@@ -44,9 +44,16 @@ beforeEach(() => {
     width: 400,
     tabs: [],
     activeTabId: WORKSPACE_TAB_ID,
+    dismissedContexts: new Set(),
+    pendingBadge: 0,
   });
   useExecutionStore.setState({ byId: {} });
-  useDebateRoomStore.setState({ target: null, collapsed: false });
+  useCommandPanelStore.setState({
+    active: false,
+    focusedMessageId: null,
+    collapsed: false,
+  });
+  useConversationStore.setState({ currentConversationId: null });
 });
 
 describe("setWidth", () => {
@@ -122,14 +129,10 @@ describe("closeTab", () => {
     expect(panel().activeTabId).toBe(WORKSPACE_TAB_ID);
   });
 
-  it("falls back to the 裁判台 tab when the last run tab is closed inside a debate room", () => {
-    useDebateRoomStore.setState({
-      target: { turnId: MID, conversationId: "conv-1", interactive: true },
-      collapsed: false,
-    });
+  it("falls back to the 工作区 home when the last run tab is closed inside a debate room", () => {
     panel().openTab(runDetail("run-1"));
     panel().closeTab(tabId("run-1"));
-    expect(panel().activeTabId).toBe(DEBATE_HUD_TAB_ID);
+    expect(panel().activeTabId).toBe(WORKSPACE_TAB_ID);
   });
 
   it("keeps the active tab when a different tab is closed", () => {
@@ -167,13 +170,6 @@ describe("openPanel", () => {
   });
 });
 
-describe("showDebateHudTab", () => {
-  it("reveals the panel on the 裁判台 tab", () => {
-    panel().showDebateHudTab();
-    expect(panel().open).toBe(true);
-    expect(panel().activeTabId).toBe(DEBATE_HUD_TAB_ID);
-  });
-});
 
 describe("showWorkspace", () => {
   it("reveals the panel on the 工作区 home tab", () => {
@@ -251,5 +247,53 @@ describe("closeContentTabs", () => {
     panel().closeContentTabs();
     expect(panel().tabs.map((t) => t.id)).toEqual([tabId("run-1")]);
     expect(panel().activeTabId).toBe(tabId("run-1"));
+  });
+});
+
+describe("auto-surface dismiss + pending badge", () => {
+  it("records command context on closePanel when canvas command region is active", () => {
+    useConversationStore.setState({ currentConversationId: "conv-1" });
+    useCommandPanelStore.setState({ active: true, focusedMessageId: MID });
+    panel().openPanel();
+    panel().closePanel();
+    expect(panel().isAutoSurfaceDismissed("command:conv-1")).toBe(true);
+  });
+
+  it("clearAutoSurfaceDismiss removes a context", () => {
+    panel().dismissAutoSurface("debate:msg-1");
+    expect(panel().isAutoSurfaceDismissed("debate:msg-1")).toBe(true);
+    panel().clearAutoSurfaceDismiss("debate:msg-1");
+    expect(panel().isAutoSurfaceDismissed("debate:msg-1")).toBe(false);
+  });
+
+  it("incrementPendingBadge accumulates while panel stays closed", () => {
+    panel().incrementPendingBadge();
+    panel().incrementPendingBadge();
+    expect(panel().pendingBadge).toBe(2);
+  });
+
+  it("clears pendingBadge when opening via showWorkspace / openPanel", () => {
+    panel().incrementPendingBadge();
+    panel().showWorkspace();
+    expect(panel().pendingBadge).toBe(0);
+
+    panel().incrementPendingBadge();
+    panel().openPanel();
+    expect(panel().pendingBadge).toBe(0);
+  });
+
+  it("clears pendingBadge when togglePanel opens the dock", () => {
+    panel().incrementPendingBadge();
+    panel().togglePanel();
+    expect(panel().open).toBe(true);
+    expect(panel().pendingBadge).toBe(0);
+  });
+
+  it("keeps pendingBadge when togglePanel closes the dock", () => {
+    panel().showWorkspace();
+    panel().incrementPendingBadge();
+    panel().togglePanel();
+    expect(panel().open).toBe(false);
+    expect(panel().pendingBadge).toBe(1);
   });
 });

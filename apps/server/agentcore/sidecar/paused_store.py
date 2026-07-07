@@ -63,6 +63,9 @@ class LocalPausedTurnStore:
     def _path(self, message_id: str) -> Path:
         return self._base / f"{message_id}.json"
 
+    def _claimed_path(self, message_id: str) -> Path:
+        return self._path(message_id).with_suffix(".json.claimed")
+
     # --- engine-facing closures (suspension_saver / suspension_deleter) --------
 
     async def save(self, suspension: TurnSuspension) -> None:
@@ -141,13 +144,15 @@ class LocalPausedTurnStore:
     async def claim(
         self, message_id: str, *, conversation_id: str | None = None
     ) -> TurnSuspension | None:
-        """Atomically read-and-delete a paused turn for resume; ``None`` if gone.
+        """Atomically claim a paused turn for resume; ``None`` if gone.
 
-        Renames the file aside FIRST (atomic ``os.replace``) so a second / racing
-        resume of the same turn loses the file and gets ``None`` — a turn is never
-        resumed twice. Pass ``conversation_id`` (the one the caller is scoped to) so a
-        frame is only claimed within its conversation. The journal-so-far is rehydrated
-        onto :attr:`TurnSuspension.journal` so the resume replays the pre-pause graph.
+        Renames ``<id>.json`` → ``<id>.json.claimed`` FIRST (atomic ``os.replace``) so a
+        second / racing resume of the same turn gets ``None`` — a turn is never resumed
+        twice. The ``.claimed`` file is kept until :meth:`confirm_claim` (resume succeeded)
+        or :meth:`rollback_claim` (resume failed and the frame must be retried). Pass
+        ``conversation_id`` (the one the caller is scoped to) so a frame is only claimed
+        within its conversation. The journal-so-far is rehydrated onto
+        :attr:`TurnSuspension.journal` so the resume replays the pre-pause graph.
         """
         if not _is_safe_message_id(message_id):
             return None
@@ -162,7 +167,7 @@ class LocalPausedTurnStore:
 
     def _claim_sync(self, message_id: str, conversation_id: str | None) -> dict[str, Any] | None:
         target = self._path(message_id)
-        claimed = target.with_suffix(".json.claimed")
+        claimed = self._claimed_path(message_id)
         try:
             os.replace(target, claimed)  # atomic; raises if already claimed/absent
         except FileNotFoundError:
@@ -182,9 +187,35 @@ class LocalPausedTurnStore:
             with contextlib.suppress(OSError):
                 os.replace(claimed, target)
             return None
-        with contextlib.suppress(FileNotFoundError):
-            claimed.unlink()
         return record
+
+    async def confirm_claim(self, message_id: str) -> None:
+        """Drop a successfully-resumed frame's ``.claimed`` file (best-effort)."""
+        if not _is_safe_message_id(message_id):
+            return
+        try:
+            await asyncio.to_thread(self._unlink_sync, self._claimed_path(message_id))
+        except Exception as e:  # noqa: BLE001 — cleanup must never break the turn
+            logger.warning(
+                "sidecar.paused_confirm_claim_failed", message_id=message_id, error=str(e)
+            )
+
+    async def rollback_claim(self, message_id: str) -> None:
+        """Restore a failed resume's frame: rename ``.claimed`` back to ``.json`` (best-effort)."""
+        if not _is_safe_message_id(message_id):
+            return
+        try:
+            await asyncio.to_thread(self._rollback_claim_sync, message_id)
+        except Exception as e:  # noqa: BLE001 — restore must never break the caller
+            logger.warning(
+                "sidecar.paused_rollback_claim_failed", message_id=message_id, error=str(e)
+            )
+
+    def _rollback_claim_sync(self, message_id: str) -> None:
+        claimed = self._claimed_path(message_id)
+        target = self._path(message_id)
+        with contextlib.suppress(FileNotFoundError):
+            os.replace(claimed, target)
 
     async def list_pending(self, conversation_id: str) -> list[TurnSuspension]:
         """A conversation's pending paused turns (oldest first), rebuilt as suspensions.
@@ -267,4 +298,5 @@ def paused_summary(suspension: TurnSuspension) -> dict[str, Any]:
         "assumptions": getattr(suspension, "assumptions", []),
         "questions": getattr(suspension, "questions", []),
         "style_options": getattr(suspension, "style_options", []),
+        "intent": getattr(suspension, "intent", None),
     }

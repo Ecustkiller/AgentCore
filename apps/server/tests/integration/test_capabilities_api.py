@@ -22,9 +22,12 @@ async def test_capabilities_returns_full_catalog(client, make_invite):
 
     tools = {t["name"]: t for t in body["tools"]}
     # The complete repertoire — CEO orchestration the old /v1/tools never served…
-    for name in ("delegate", "revise", "debate", "consult_skill", "consult_memory", "ask_user"):
+    for name in ("delegate", "revise", "debate", "consult_skill", "ask_user"):
         assert name in tools
         assert tools[name]["available_to"] == ["ceo"]
+    # consult_memory is wired for CEO and workers when memory is enabled (catalog.py).
+    assert "consult_memory" in tools
+    assert set(tools["consult_memory"]["available_to"]) == {"ceo", "worker"}
     # …worker-only mutation + escalate…
     for name in ("file_write", "code_execute", "escalate"):
         assert name in tools

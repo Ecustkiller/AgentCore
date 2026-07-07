@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 
 from agentcore.evals.calibration import cohens_kappa
 from agentcore.evals.types import EvalConfigError
-from agentcore.llm.protocol import LLMProvider
+from agentcore.llm.provider.protocol import LLMProvider
 from agentcore.runtime.debate.moderator import Moderator
 from agentcore.runtime.debate.types import (
     STOP_CONVERGED,
@@ -756,9 +756,9 @@ def _debate_provider_and_model(mode: str = "quality") -> tuple[LLMProvider, str]
     """
     import os
 
+    from agentcore.evals.eval_modes import resolve_profile_set
     from agentcore.evals.harness import _EVAL_CEILING, _eval_credentials
     from agentcore.llm.factory import build_provider
-    from agentcore.llm.modes import resolve_profile_set
 
     provider = build_provider(_eval_credentials())
     model = os.environ.get("EVAL_DEBATE_MODEL", "").strip()

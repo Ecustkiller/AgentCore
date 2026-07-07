@@ -1,12 +1,21 @@
 import { CapabilityPage } from "@/components/tools/CapabilityPage";
 import { GuidelineBlock } from "@/components/tools/GuidelineBlock";
 import { SkillCard } from "@/components/tools/SkillCard";
+import { useLlmKey } from "@/hooks/useLlmKey";
+import {
+  isToolsGateBlocked,
+  TOOL_CALLING_TOOL_NAMES,
+  TOOLS_GATE_HINT,
+} from "@/lib/llmToolsGate";
 
 /** 工具箱「能力」组 → AI 提示词：AI 遵循的提示词全文。常驻部分是系统提示词模板（全员
  * 共享准则 + CEO 完整提示词）；当前这批「技能」其实是几个内置工具的进阶用法（薄技能），
  * 不常驻、按需 consult 注入，故并入本页而非与工具并列——它们本质是 Prompt 注入、不是独立
  * 能力（决策见 UX §十二 / 术语表 三层模型）。 */
 export function GuidelinesPage() {
+  const { data: llmKey } = useLlmKey();
+  const toolsBlocked = isToolsGateBlocked(llmKey?.supports_tools);
+
   return (
     <CapabilityPage
       title="AI 提示词"
@@ -42,7 +51,15 @@ export function GuidelinesPage() {
               </p>
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 {data.skills.map((skill) => (
-                  <SkillCard key={skill.name} skill={skill} />
+                  <SkillCard
+                    key={skill.name}
+                    skill={skill}
+                    disabled={
+                      toolsBlocked &&
+                      TOOL_CALLING_TOOL_NAMES.has(skill.name)
+                    }
+                    disabledHint={TOOLS_GATE_HINT}
+                  />
                 ))}
               </div>
             </section>

@@ -19,6 +19,7 @@ from agentcore.api.dependencies import (
     AuthUser,
     get_conversation_repo,
     get_cost_event_repo,
+    get_user_repo,
 )
 from agentcore.api.schemas import (
     AgentCostLine,
@@ -30,10 +31,11 @@ from agentcore.api.schemas import (
     UsageSummary,
     UsageWindow,
 )
+from agentcore.billing.preference import resolve_effective_billing_mode
 from agentcore.config import settings
 from agentcore.core.errors import NotFoundError
 from agentcore.db.models import CostEvent
-from agentcore.db.repositories import ConversationRepository, CostEventRepository
+from agentcore.db.repositories import ConversationRepository, CostEventRepository, UserRepository
 from agentcore.llm.pricing import NANO_PER_USD
 
 router = APIRouter(tags=["usage"])
@@ -126,6 +128,7 @@ async def get_conversation_cost(
 async def get_usage_summary(
     user: AuthUser,
     repo: CostEventRepository = Depends(get_cost_event_repo),
+    user_repo: UserRepository = Depends(get_user_repo),
 ) -> UsageSummary:
     """Account dashboard: today's tokens/cost, the month's cost + per-role payroll,
     the recent daily-cost trend, and the quota.
@@ -154,6 +157,9 @@ async def get_usage_summary(
         iso = (trend_start + timedelta(days=i)).date().isoformat()
         recent_daily_cost.append(DailyCost(date=iso, cost_total=daily.get(iso, 0)))
 
+    account = await user_repo.get_by_id(user.user_id)
+    billing_mode = resolve_effective_billing_mode(account)
+
     return UsageSummary(
         today=UsageWindow(
             usage=usage_breakdown(today["usage"]),
@@ -180,5 +186,5 @@ async def get_usage_summary(
             daily_requests=settings.quota_daily_requests,
         ),
         cny_per_usd=settings.cny_per_usd,
-        billing_mode=settings.billing_mode,
+        billing_mode=billing_mode,
     )

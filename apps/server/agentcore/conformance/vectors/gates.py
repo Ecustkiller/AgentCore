@@ -144,6 +144,7 @@ def _single_agent_checkpoint() -> list[SSEEvent]:
             conversation_id=_CONV,
             question="先做 A 还是 B？",
             context="两条路线各有取舍。",
+            intent="kickoff",
         ),
     ]
 

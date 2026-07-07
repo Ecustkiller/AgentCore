@@ -159,21 +159,31 @@ def _multi_agent_debate() -> list[SSEEvent]:
                     {
                         "target": "pro",
                         "questioner": "",
-                        "questions": [
-                            "收益量化口径是否计入了尾部风险？请是/否直接回答。",
-                            "若熔断触发、灰度止损，已投入成本由谁承担？",
+                        "exchanges": [
+                            {
+                                "question": "收益量化口径是否计入了尾部风险？请是/否直接回答。",
+                                "answer": "量化口径未含尾部风险【待核实·推断】",
+                                "ok": True,
+                            },
+                            {
+                                "question": "若熔断触发、灰度止损，已投入成本由谁承担？",
+                                "answer": "成本由灰度预算池兜底、触发熔断即回滚【已核实·灰度预案v2】",
+                                "ok": True,
+                            },
                         ],
                         "answer_run_id": pro_cx,
-                        "ok": True,
                     },
                     {
                         "target": "con",
                         "questioner": "",
-                        "questions": [
-                            "你主张的风险敞口，有无可量化的历史故障率支撑？没有就直说。",
+                        "exchanges": [
+                            {
+                                "question": "你主张的风险敞口，有无可量化的历史故障率支撑？没有就直说。",
+                                "answer": "暂无统一口径的历史故障率【待核实·推断】；但同类系统的尾部事件可作参照【已核实·SRE年报】",
+                                "ok": True,
+                            },
                         ],
                         "answer_run_id": con_cx,
-                        "ok": True,
                     },
                 ],
                 # 记分裁判（P2）：本轮各方三维记分 + 罚分（每条 -1）+ 净分 total（后端算好、前端直用）。

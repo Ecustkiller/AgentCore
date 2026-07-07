@@ -104,11 +104,10 @@ class TurnExecutionMixin:
     ) -> None:
         """Rebuild + finish a durably-paused turn; stream events; reply when done.
 
-        The frame was already claimed (atomic) by ``_on_resume``; this just runs
-        ``resume_chat_pipeline`` (which re-wires the CEO toolset, replays the pre-pause
-        journal, settles the decision, and continues to the reply) and relays the final
-        result for cloud write-back — the SAME result shape as a fresh turn. The
-        message_id is the event-routing turn id.
+        The frame was already claimed (atomic rename to ``.claimed``) by ``_on_resume``;
+        this runs ``resume_chat_pipeline`` and, on success, :meth:`confirm_claim` drops
+        the ``.claimed`` file. On failure it :meth:`rollback_claim` restores the frame so
+        the desktop can retry. The message_id is the event-routing turn id.
         """
         assert self._root is not None  # guarded by _on_resume
         turn_id = suspension.message_id
@@ -150,6 +149,8 @@ class TurnExecutionMixin:
             await pump  # sink closed above → all events flushed
             await self._send(protocol.make_result(request_id, trim_result(turn_id, result)))
         except asyncio.CancelledError:
+            if self._paused_store is not None:
+                await self._paused_store.rollback_claim(turn_id)
             with contextlib.suppress(Exception):
                 await pump
             self._send_soon(
@@ -157,10 +158,21 @@ class TurnExecutionMixin:
             )
             raise
         except Exception as e:
+            if self._paused_store is not None:
+                await self._paused_store.rollback_claim(turn_id)
             with contextlib.suppress(Exception):
                 await pump
             logger.error("sidecar.resume_failed", turn_id=turn_id, error=str(e), exc_info=True)
-            await self._send(protocol.make_error(request_id, protocol.INTERNAL_ERROR, str(e)))
+            await self._send(
+                protocol.make_error(
+                    request_id,
+                    protocol.RESUME_RETRYABLE,
+                    str(e),
+                )
+            )
+        else:
+            if self._paused_store is not None:
+                await self._paused_store.confirm_claim(turn_id)
         finally:
             self._turns.pop(turn_id, None)
 

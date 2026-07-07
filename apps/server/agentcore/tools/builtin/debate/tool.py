@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory, new_id
-from agentcore.llm.modes import ProfileSet, default_profile_set
-from agentcore.llm.protocol import LLMProvider
+from agentcore.llm.profiles import TurnProfiles as ProfileSet
+from agentcore.llm.profiles import default_turn_profiles as default_profile_set
+from agentcore.llm.provider.protocol import LLMProvider
 from agentcore.runtime.debate import (
     DebateConfig,
     DebateSeed,
@@ -153,7 +154,9 @@ class DebateTool:
 
         execution_id = self._base_tool_context.execution_id or new_id()
         moderator_run_id = f"debate_{new_id()}"
-        moderator_model = self._profile_set.agent(config.model_preference).model
+        moderator_model = self._profile_set.model_for(
+            f"agent.{config.model_preference.value if hasattr(config.model_preference, 'value') else config.model_preference}"
+        )
 
         # 先声明主持人节点（CEO 之下、辩手之上的编排角色），辩手节点逐轮声明。
         self._sink.emit(moderator_plan_event(self, execution_id, moderator_run_id, config))

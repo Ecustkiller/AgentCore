@@ -1,29 +1,41 @@
+import type React from "react";
 import { ModelBadge } from "./ModelBadge";
 import { shouldShowModelBadge } from "./model";
 
 /**
- * 立场 / 视角名身份徽章：按身份色 `var(--agent-N)` 着色（14% 底，内联 var，遵 color-tokens
- * 身份色板约定——不进 Tailwind 类、不与状态色竞争）。简报的各方速览、叙事发言格、记分卡共用同
- * 一只 pill → live↔收场、结论↔过程，同一方恒同色同形，可顺色追踪一方的论点链。
+ * 立场 / 视角名身份徽章：中性灰底 + 身份色圆点（内联 var，遵 color-tokens 身份色板——不与状态色
+ * 竞争、不做大面积色块）。简报的各方速览、叙事发言格、记分卡共用同一只 pill → live↔收场、结论↔
+ * 过程，同一方恒同色同形，可顺色追踪一方的论点链。
  */
 export function SideNamePill({
   name,
   colorVar,
+  showDot = true,
 }: {
   name: string;
   colorVar: string;
+  /** 质询等已有上下文标识方时，可关色点减噪。 */
+  showDot?: boolean;
 }) {
   return (
-    <span
-      className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium"
-      style={{
-        color: colorVar,
-        backgroundColor: `color-mix(in oklch, ${colorVar} 14%, transparent)`,
-      }}
-    >
+    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
+      {showDot && (
+        <span
+          className="size-1.5 shrink-0 rounded-full"
+          style={{ backgroundColor: colorVar }}
+          aria-hidden
+        />
+      )}
       {name}
     </span>
   );
+}
+
+/** 辩手字母头像：中性底 + 身份色内描边环（替代整块染色头像）。 */
+export function sideAvatarStyle(colorVar: string): React.CSSProperties {
+  return {
+    boxShadow: `inset 0 0 0 2px color-mix(in oklch, ${colorVar} 35%, transparent)`,
+  };
 }
 
 /**

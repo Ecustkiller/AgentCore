@@ -4,6 +4,7 @@ import type {
   AskOption,
   AskQuestion,
   AskStyleOption,
+  CheckpointIntent,
   PlanReviewPending,
   PlanReviewStep,
 } from "@/types/events";
@@ -37,6 +38,8 @@ export interface PendingResume {
   kind: SuspensionKind;
   /** The original user request that started the paused turn (for context). */
   userMessage: string;
+  /** Client-minted id of the user bubble (pinned on pause write-back). */
+  userMessageId: string;
   /** plan_review: the just-completed checkpoint step(s) under review. */
   steps: PlanReviewStep[];
   /** plan_review: the downstream nodes gated behind the pause. */
@@ -51,6 +54,8 @@ export interface PendingResume {
   questions: AskQuestion[];
   /** ask_user: 风格预设 (视觉类产物才有). */
   styleOptions: AskStyleOption[];
+  /** ask_user: kickoff 开工提案 vs decision 途中拍板 — drives card copy. */
+  intent: CheckpointIntent;
 }
 
 /** `steps` / `pending` arrive as loose JSON dicts (backend ``list[dict]``); map
@@ -105,6 +110,9 @@ const toQuestions = (raw: PausedTurnSummary["questions"]): AskQuestion[] =>
     default: String(q.default ?? ""),
   }));
 
+const toIntent = (raw: unknown): CheckpointIntent =>
+  raw === "kickoff" ? "kickoff" : "decision";
+
 const toStyleOptions = (
   raw: PausedTurnSummary["style_options"],
 ): AskStyleOption[] =>
@@ -154,6 +162,7 @@ export const usePausedTurnStore = create<PausedTurnState>((set) => ({
           checkpointId: s.checkpoint_id,
           kind: s.kind,
           userMessage: s.user_message ?? "",
+          userMessageId: s.user_message_id ?? "",
           steps: toSteps(s.steps),
           pending: toPending(s.pending),
           question: s.question ?? "",
@@ -161,6 +170,7 @@ export const usePausedTurnStore = create<PausedTurnState>((set) => ({
           assumptions: toAssumptions(s.assumptions),
           questions: toQuestions(s.questions),
           styleOptions: toStyleOptions(s.style_options),
+          intent: toIntent((s as { intent?: unknown }).intent),
         })),
       ],
     })),

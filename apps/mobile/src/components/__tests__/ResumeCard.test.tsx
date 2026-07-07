@@ -24,6 +24,7 @@ function summary(over: Partial<PausedTurnSummary> = {}): PausedTurnSummary {
     checkpoint_id: "cp1",
     kind: "ask_user",
     user_message: "做 A 还是 B？",
+    user_message_id: "u1",
     question: "先做 A 还是 B?",
     context: "两条路线各有取舍。",
     ...over,

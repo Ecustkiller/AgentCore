@@ -36,6 +36,7 @@ export const ERROR_CODES = [
   "LLM_INSUFFICIENT_BALANCE",
   "LLM_KEY_INVALID",
   "LLM_KEY_REQUIRED",
+  "PLATFORM_BILLING_UNAVAILABLE",
   "KEY_STORAGE_UNAVAILABLE",
   // tools / sandbox
   "TOOL_ERROR",
@@ -70,6 +71,7 @@ export const NON_RETRIABLE_ERROR_CODES: readonly ErrorCode[] = [
   "LLM_KEY_INVALID",
   "LLM_INSUFFICIENT_BALANCE",
   "KEY_STORAGE_UNAVAILABLE",
+  "PLATFORM_BILLING_UNAVAILABLE",
 ];
 
 /** Type guard: whether `code` is a code the clients recognize (typed against the

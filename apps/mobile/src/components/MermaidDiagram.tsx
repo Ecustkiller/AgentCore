@@ -3,6 +3,7 @@
 // mermaid is heavy (~500KB), so it is dynamically imported only when a ```mermaid block
 // actually appears — it never lands in the main bundle (the "minimal deps / lazy mermaid"
 // decision). On a render error we fall back to the raw source as a code block.
+import { normalizeMermaidSource } from "@/lib/mermaidNormalize";
 import { useEffect, useRef, useState } from "react";
 
 // Initialize once, module-wide (re-init on every render would reset config + leak work).
@@ -30,8 +31,11 @@ export function MermaidDiagram({ chart }: { chart: string }) {
     let cancelled = false;
     setSvg(null);
     setFailed(false);
+    const normalized = normalizeMermaidSource(chart);
     getMermaid()
-      .then((m) => m.render(idRef.current, chart))
+      .then((m) =>
+        m.parse(normalized).then(() => m.render(idRef.current, normalized)),
+      )
       .then(({ svg }) => {
         if (!cancelled) setSvg(svg);
       })

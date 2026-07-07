@@ -546,6 +546,11 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
 
         elif etype == "checkpoint_required":
             cid = p.get("checkpoint_id", "")
+            # ask_user 正文吸收：same-round prose folds into the card — drop bubble text
+            # so a streamed lead-in never duplicates the checkpoint card on replay.
+            content = ""
+            while process and process[-1].get("kind") == "content":
+                process.pop()
             # 检查点时间线落点: positional marker so the card replays at its real spot
             # (card body folds separately, keyed by id). Mirrors EventSink.
             if cid and not has_marker("checkpoint", "checkpoint_id", cid):

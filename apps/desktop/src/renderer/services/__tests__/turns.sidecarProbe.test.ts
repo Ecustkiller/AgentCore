@@ -204,6 +204,7 @@ function pendingFrame(messageId: string, conversationId = "c1"): PendingResume {
     checkpointId: "ck1",
     kind: "plan_review",
     userMessage: "原始请求",
+    userMessageId: "u-orig",
     steps: [],
     pending: [],
     question: "",
@@ -211,6 +212,7 @@ function pendingFrame(messageId: string, conversationId = "c1"): PendingResume {
     assumptions: [],
     questions: [],
     styleOptions: [],
+    intent: "decision",
   };
 }
 
@@ -232,7 +234,11 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     await runResume("m1", "continue", "");
 
     expect(resumeViaSidecarMock).toHaveBeenCalledWith(
-      expect.objectContaining({ messageId: "m1", rootId: "r1" }),
+      expect.objectContaining({
+        messageId: "m1",
+        rootId: "r1",
+        userMessageId: "u-orig",
+      }),
     );
     expect(resumeConversationMock).not.toHaveBeenCalled();
     expect(usePausedTurnStore.getState().pending).toHaveLength(0); // 帧已认领

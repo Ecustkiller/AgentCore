@@ -37,17 +37,21 @@ from agentcore.conversation.service import record_local_turn, stream_chat
 from agentcore.core.errors import NotFoundError
 from agentcore.db.repositories import (
     ConversationRepository,
-    CostEventRepository,
     MemoryUpdateRepository,
     MessageRepository,
     TurnJournalRepository,
 )
-from agentcore.llm.byok import resolve_user_llm_credentials
+from agentcore.llm.resolve import resolve_user_llm_credentials
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.journal import runs_from_entries_cached
 from agentcore.runtime.turn_runs import turn_runs
 
-from ._helpers import _preflight_turn_llm, _require_owned_conversation
+from ._helpers import (
+    _preflight_owned_chat_turn,
+    _require_owned_conversation,
+    emit_preflight_warnings,
+    release_request_db_before_sse,
+)
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -210,18 +214,20 @@ async def send_message(
     BYOK/quota billing gate (BYOK mode requires the user's own key; platform mode
     enforces quota). The resolved BYOK credentials thread through the whole turn.
 
-    DB session scoped to preflight only — released before the SSE stream opens, so a
-    long-lived stream never holds a pooled connection (fixes GC-termination warnings
-    on abrupt teardown).
+    Request-scoped DB session for preflight only — explicitly closed before the SSE
+    stream opens so a long-lived stream never holds a pooled connection (fixes
+    GC-termination warnings on abrupt teardown).
     """
     await enforce_user_message_rate_limit(user.user_id)
 
-    conv_repo = ConversationRepository(session)
-    cost_repo = CostEventRepository(session)
-    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
+    needs_tools = body.requires_tools or body.debate_seed is not None
+    preflight = await _preflight_owned_chat_turn(
+        conversation_id, user, session, needs_tools=needs_tools
+    )
+    await release_request_db_before_sse(session)
 
     sink = EventSink()
+    emit_preflight_warnings(sink, preflight)
 
     task = asyncio.create_task(
         stream_chat(
@@ -230,8 +236,9 @@ async def send_message(
             user_id=user.user_id,
             sink=sink,
             attachments=[a.model_dump() for a in body.attachments],
-            llm_credentials=credentials,
+            llm_credentials=preflight.credentials,
             debate_seed=body.debate_seed.model_dump() if body.debate_seed else None,
+            llm_supports_tools=preflight.supports_tools,
         )
     )
     turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
@@ -331,6 +338,7 @@ async def record_local_turn_endpoint(
         cache_miss_tokens=body.cache_miss_tokens,
         rounds=body.rounds,
         trace_id=body.trace_id,
+        finish_reason=body.finish_reason,
         llm_credentials=credentials,
     )
     return RecordTurnResponse(**result)

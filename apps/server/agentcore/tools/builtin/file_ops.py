@@ -281,6 +281,13 @@ class FileWriteTool:
                     run_id=context.run_id,
                     owner=owner,
                 )
+                from agentcore.runtime.audit.hooks import on_write_conflict
+
+                on_write_conflict(
+                    path=rel_path,
+                    run_id=context.run_id,
+                    owner_run_id=owner,
+                )
                 return _error(
                     f"写入冲突：`{rel_path}` 正被同一批的另一个并行队友写入——同名文件并发写"
                     f"会互相覆盖，已拦下。请换一个不同的文件名（给它加上你的角色或编号后缀，"
@@ -355,6 +362,13 @@ class FileAppendTool:
                     path=rel_path,
                     run_id=context.run_id,
                     owner=owner,
+                )
+                from agentcore.runtime.audit.hooks import on_write_conflict
+
+                on_write_conflict(
+                    path=rel_path,
+                    run_id=context.run_id,
+                    owner_run_id=owner,
                 )
                 return _error(
                     f"写入冲突：`{rel_path}` 正被同一批的另一个并行队友写入——同名文件并发写"

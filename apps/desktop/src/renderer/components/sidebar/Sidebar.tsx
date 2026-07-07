@@ -5,7 +5,7 @@ import { useUnreadTotal } from "@/stores/messaging";
 import { useSidebarStore } from "@/stores/sidebar";
 import { useUIStore } from "@/stores/ui";
 import {
-  Compass,
+  Building2,
   Files,
   Mail,
   MessageSquare,
@@ -22,13 +22,19 @@ import {
 import { UserMenu } from "./UserMenu";
 import { WorkspaceGroups } from "./WorkspaceGroups";
 
-const NAV_ITEMS = [
+const BASE_NAV_ITEMS = [
   { icon: MessageSquare, label: "对话", route: "/" },
   { icon: Files, label: "文件", route: "/files" },
   { icon: Mail, label: "消息", route: "/messages" },
   { icon: Wrench, label: "工具箱", route: "/toolbox" },
-  { icon: Compass, label: "探索", route: "/explore" },
 ] as const;
+
+/** Dev-only MVP entries — stripped from production builds via static `import.meta.env.DEV`. */
+const DEV_NAV_ITEMS = import.meta.env.DEV
+  ? [{ icon: Building2, label: "AI 小镇", route: "/simulation/town" } as const]
+  : [];
+
+const NAV_ITEMS = [...BASE_NAV_ITEMS, ...DEV_NAV_ITEMS];
 
 export function Sidebar() {
   const collapsed = useSidebarStore((s) => s.collapsed);

@@ -14,7 +14,7 @@ import pytest
 
 from agentcore.config import settings
 from agentcore.core.errors import LLMTimeoutError
-from agentcore.llm.protocol import LLMChunk, LLMMessage, LLMRequest
+from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, LLMRequest
 from agentcore.runtime.engine.stream import stream_llm_round
 
 
@@ -64,7 +64,7 @@ async def test_healthy_trickle_completes(monkeypatch):
     monkeypatch.setattr(settings, "engine_llm_stream_idle_timeout_seconds", 0.2)
     seen: list[str] = []
     provider = _TrickleProvider(n=4, gap=0.02)  # each gap well under the 0.2s ceiling
-    content, reasoning, tool_calls, _usage = await stream_llm_round(
+    content, reasoning, tool_calls, _usage, _diag, _preview = await stream_llm_round(
         provider, _request(), seen.append, lambda _d: None
     )
     assert content == "0123"
@@ -78,7 +78,7 @@ async def test_gate_disabled_never_trips(monkeypatch):
     provider = _StallProvider([LLMChunk(delta_content="x")], stall=0.1)
     # Gate off (asyncio.timeout(None)) ⇒ the stall is tolerated; bound the test so a
     # regression that re-enables an idle abort here would surface as a raise, not a hang.
-    content, _r, _tc, _u = await asyncio.wait_for(
+    content, _r, _tc, _u, _diag, _preview = await asyncio.wait_for(
         stream_llm_round(provider, _request(), seen.append, lambda _d: None), timeout=2.0
     )
     assert content == "xlate"

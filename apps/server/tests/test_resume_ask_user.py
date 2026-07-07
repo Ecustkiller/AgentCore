@@ -14,7 +14,7 @@ plan_review machinery:
 """
 
 from agentcore.core.types import ToolEffect
-from agentcore.llm.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.pipeline import (

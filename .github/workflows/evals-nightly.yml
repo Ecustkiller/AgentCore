@@ -53,7 +53,7 @@ jobs:
     env:
       DATABASE_URL: postgresql+asyncpg://agentcore:agentcore@localhost:5432/agentcore
       TEST_DATABASE_URL: postgresql+asyncpg://agentcore:agentcore@localhost:5432/agentcore
-      # 真跑凭据（仓库 Secret）。EVAL_DEEPSEEK_BASE_URL 可选（默认走 settings 的 base url）。
+      # 真跑凭据（仓库 Secret）。EVAL_DEEPSEEK_BASE_URL 可选（缺省回落 settings.platform_base_url）。
       EVAL_DEEPSEEK_API_KEY: ${{ secrets.EVAL_DEEPSEEK_API_KEY }}
       EVAL_DEEPSEEK_BASE_URL: ${{ secrets.EVAL_DEEPSEEK_BASE_URL }}
       SUITE: ${{ github.event.inputs.suite || 'core' }}

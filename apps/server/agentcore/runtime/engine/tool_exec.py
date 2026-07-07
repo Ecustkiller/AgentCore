@@ -8,7 +8,7 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolEffect
-from agentcore.llm.protocol import LLMMessage, ToolCall
+from agentcore.llm.provider.protocol import LLMMessage, ToolCall
 from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate, tool_call_requires_approval
 from agentcore.runtime.citations import annotate_tool_citations, merge_citations
 from agentcore.runtime.events import (

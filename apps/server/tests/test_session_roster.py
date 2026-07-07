@@ -7,7 +7,7 @@ SessionRegistry 的 conversation 维度跨回合留存 + 空闲回收 + 会话�
 
 import time
 
-from agentcore.llm.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.runs import RunSession, RunSpec
 from agentcore.runtime.sessions import (
     SessionRegistry,

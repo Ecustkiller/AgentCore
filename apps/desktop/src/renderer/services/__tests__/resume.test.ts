@@ -88,6 +88,7 @@ describe("surfaceResumeFromLiveTurn", () => {
       question: "先做 A 还是 B?",
       context: "两条路线各有取舍。",
       userMessage: "做 A 还是 B？",
+      userMessageId: "u1",
     });
   });
 

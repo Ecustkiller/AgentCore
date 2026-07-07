@@ -325,10 +325,9 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
     }
     // 全员两两不重叠。
     expect(noneOverlap(positions, ids)).toEqual([]);
-    // 无主干线 → 不下沉：主持人居中于三子队（与首子、末子的 y 中点对齐）。
+    // parent 在上、子 worker 在下：主持人 y 应小于各子队。
     const subYs = ["s_a", "s_b", "s_c"].map((id) => positions[id].y);
-    const mid = (Math.min(...subYs) + Math.max(...subYs)) / 2;
-    expect(positions.mod.y).toBeCloseTo(mid, 0);
+    expect(positions.mod.y).toBeLessThan(Math.min(...subYs));
   });
 
   it("圆桌逐轮·带汇聚点：修订与源同车道、汇聚点钉末层", async () => {

@@ -30,8 +30,7 @@ import json
 from pathlib import Path
 
 from agentcore.config import settings
-from agentcore.llm.config import ModelProfile
-from agentcore.llm.protocol import LLMChunk, LLMMessage, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.memory.store import FileMemoryStore
 from agentcore.runtime import pipeline
 from agentcore.runtime.checkpoints import CheckpointDecision
@@ -52,6 +51,7 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+from tests.llm_helpers import make_profile_params
 
 
 class _ScriptedProvider:
@@ -204,7 +204,7 @@ async def _finalize_ask_user() -> tuple[AskUserSuspension, list[dict]]:
         ]
     )
     messages, log = _seed_loop(system_prompt, user_message)
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=5)
+    profile = make_profile_params(max_rounds=5)
     finish_override: list[FinishReason] = []
     fl_token = current_fact_log.set(log)
     ct_token = captain_transcript.set(messages)
@@ -216,6 +216,7 @@ async def _finalize_ask_user() -> tuple[AskUserSuspension, list[dict]]:
             sink=sink,
             tool_context=_ctx(),
             profile=profile,
+            turn_model="m",
             finish_override_sink=finish_override,
             run_id="cap",
             role="captain",
@@ -291,7 +292,7 @@ async def _finalize_plan_review() -> tuple[PlanReviewSuspension, list[dict]]:
         ]
     )
     messages, log = _seed_loop(system_prompt, user_message)
-    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=5)
+    profile = make_profile_params(max_rounds=5)
     finish_override: list[FinishReason] = []
     fl_token = current_fact_log.set(log)
     ct_token = captain_transcript.set(messages)
@@ -303,6 +304,7 @@ async def _finalize_plan_review() -> tuple[PlanReviewSuspension, list[dict]]:
             sink=sink,
             tool_context=_ctx(),
             profile=profile,
+            turn_model="m",
             finish_override_sink=finish_override,
             run_id="cap",
             role="captain",

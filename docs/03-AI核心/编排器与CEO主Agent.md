@@ -14,8 +14,6 @@ skip_if:
 >
 > → 见代码：`apps/server/agentcore/tools/builtin/delegate/`（已由单文件拆为包）、`tools/builtin/replan.py`
 
-🗂️ **编排增量优化提案**（轻量路由、Worker 三档自主度、抑制过度拆分）→ 见 [`06-规划/多Agent编排优化-参考Cursor-Multitask.md`](/docs/06-规划/多Agent编排优化-参考Cursor-Multitask.md)
-
 ---
 
 ## 核心定位：CEO 主 Agent 模型
@@ -53,7 +51,7 @@ CEO 是**管理者**（不是调查员）：它只直接持有「只读 / 检索
 
 > **委派判据：活的规模与结构，而非「产出是不是文件」也非「有没有工具」✅ 已落地**：轻量 / 单点的只读请求 CEO 直答；一旦是**有规模或多角度**的活——实质交付物，**或成规模的广度只读调查**——就 `delegate` 交团队，哪怕答复只是一段话。关键转变：判据看**活的形态**，不看**答复形态**；一个只读调查（「项目哪些功能没完善」「X 怎么实现」「对比这几个模块」）也是团队的活，CEO 自己逐个读既慢（串行）又把大量正文堆进回合内上下文。**运行期收敛护栏**：CEO「该委派却自己埋头只读」主要靠系统提示词从第 0 轮立框约束——曾在 `loop_controller` 试过「累计 N 次只读即注入软提醒」的代码侧软护栏，**A/B 实测被模型忽略且净负（成本↑、调用未降），已移除**；代码侧只保留对**失控暴走**的硬兜底（`loop_controller.convergence_action`：只读轮数越过高阈值才 `FINALIZE`，默认关）。配套防泄漏铁律：CEO 绝不为省委派把整份代码/文件贴进正文。→ 见代码：`runtime/resolve/prompt.py`、`runtime/skills.py`、`runtime/loop_controller.py`。
 
-> **团队形态判据：双向、广度调查归团队 ✅ 已落地**：上面的委派判据定「要不要委派」；这条定「委派后团队多大、调研谁来跑」。**① 判据双向**：拆几个看【活的自然结构】——过度拆碎与塌缩成一个都是偏差；落单 worker / 自己埋头查前先自检，拿不准先 `consult_skill(team_orchestration_advanced)`。**② 广度调查归团队（不限交付级，哪怕只回一段话）**：任何要横扫大量文件 / 来源、可拆多角度的只读调查，都把各角度作为**并行调研 worker** 一次 `delegate`，task 里点明「回报**精炼结论 + 证据指引**、不回贴整段正文」，再由 CEO 综述（需写成篇产物时用 `depends_on` 汇入下游写手）。CEO 的只读工具只用于**开工前轻量探路 + 收尾综述**，不替团队跑调查腿脚活。**注意**：`result_handling`（`pass_through`/`summarize`）只管**上游→下游**注入保真度，**不**影响回到 CEO 的内容——后者由 task 措辞决定。→ 见代码：`runtime/resolve/prompt.py`、`runtime/skills.py`、`runtime/engine/`。
+> **团队形态判据：默认不拆、双向、广度调查归团队 ✅ 已落地**：上面的委派判据定「要不要委派」；这条定「委派后团队多大、调研谁来跑」。**① 默认不拆**：CEO 采用「单 coherent worker 优先」——默认倾向一个 worker 端到端完成；仅当任务天然有独立并行工作流、需对抗性多视角、单 worker 无法持有必要工具、或规模超出单 worker 上下文时才拆分。每多拆一个 worker 即额外支付协调税（上下文传递 + 便签墙 + CEO 收尾 + 产物中转）。**② 判据双向**：拆几个看【活的自然结构】——过度拆碎与塌缩成一个都是偏差；落单 worker / 自己埋头查前先自检，拿不准先 `consult_skill(team_orchestration_advanced)`。**③ 广度调查归团队（不限交付级，哪怕只回一段话）**：任何要横扫大量文件 / 来源、可拆多角度的只读调查，都把各角度作为**并行调研 worker** 一次 `delegate`，task 里点明「回报**精炼结论 + 证据指引**、不回贴整段正文」，再由 CEO 综述（需写成篇产物时用 `depends_on` 汇入下游写手）。CEO 的只读工具只用于**开工前轻量探路 + 收尾综述**，不替团队跑调查腿脚活。**注意**：`result_handling`（`pass_through`/`summarize`）只管**上游→下游**注入保真度，**不**影响回到 CEO 的内容——后者由 task 措辞决定。→ 见代码：`runtime/resolve/prompt.py`、`runtime/skills.py`、`runtime/engine/`。
 
 > **认知分工判据：约束归 CEO、专业方案归专家 ✅ 已落地**：前两条定「要不要委派」「团队多大」；这条定**委派时 task 里该写什么、不该写什么**。**正确边界**：task 交【需求与约束】（目标、硬指标、关键前提、验收底线），交付物的【专业方案】（章节结构、模块划分、设计布局）默认归专家 worker，除非用户已明确指定结构。`contract`（`required_sections` 等）是**验收契约**而非结构蓝图。→ 见代码：`runtime/resolve/prompt.py`、`runtime/skills.py`、`tools/builtin/delegate/`。
 
@@ -62,6 +60,10 @@ CEO 是**管理者**（不是调查员）：它只直接持有「只读 / 检索
 > **结构跟着证据走：提纲作为可把关的流水线步骤 ✅ 已落地**：对需大量调研的成篇交付，用 `depends_on` + `checkpoint_after` 把「定结构」摆到调研之后——并行调研 worker → 写作 worker 先产出提纲（`checkpoint_after` 让用户改批）→ 据定稿提纲写全文。不新增 schema。→ 见代码：`runtime/skills.py`、`tools/builtin/delegate/`。
 
 > **轻量直出（finalize）✅ 已落地**：单 worker 且 `finalize=true` 时，worker 产出直接作为回合答复（`ToolEffect.HANDOFF`），省掉 CEO 合成轮；多 worker 或失败时回落 CEO 收尾。→ 见代码：`tools/builtin/delegate/`。
+
+> **`complexity_hint` 优化信号 ✅ 已落地**：`delegate` schema 含 `complexity_hint`（`light`/`standard`/`complex`），CEO 显式声明任务复杂度；引擎据此裁剪规划开销——`light` 时跳过 playbook 匹配、默认 finalize、不注入便签墙与兄弟感知块。**引擎自动推断**：单 worker 且无依赖时，若 CEO 未显式声明，引擎自动设为 `light`；缺省 `standard` 时行为不变。→ 见代码：`tools/builtin/delegate/`、`runtime/resolve/prompt.py`。
+
+> **委派后不重复调查 ✅ 已落地**：CEO 委派后，收尾续轮中不 redo 已委派的工作——系统提示强化「用团队产出写综述，不要重复调查」，而非硬禁只读工具（CEO 收尾仍须偶尔读 worker 产出验证）。→ 见代码：`runtime/resolve/prompt.py`。
 
 > **产出形态：文件落盘 vs 文字直出 ✅ 已落地**：worker 按交付【形态】判定写文件还是写正文；CEO 在 task 里点明落盘要求，`ask_user` 开工卡也说明最终交付是工作区实文件。→ 见代码：`runtime/runs/executor.py`、`runtime/resolve/prompt.py`、`runtime/skills.py`。
 
@@ -180,25 +182,26 @@ CEO 收尾从「写综述」升级为「**先对账拼图边、再核验原始�
 
 `delegate` 每个 task 的字段语义见文首代码指针。下表只记录设计理由。
 
-### 2.1 `model_preference` — 模型偏好
+### 2.1 `model_preference` — 执行参数档（非选模型）
 
-CEO 不指定具体模型，只表达能力需求，由运行时映射（fast/strong 两档抽象 → DeepSeek V4）：
+CEO 不指定具体模型，只表达能力需求（快/强），由运行时映射到**场景画像的执行参数**（温度、max_rounds 等）——**不换 model**：
 
-| 值 | 含义 | 运行时映射（基座 = 经济模型） |
+| 值 | 含义 | 运行时映射 |
 |---|---|---|
-| `fast` | 速度/成本优先，简单机械子任务 | DeepSeek V4 Flash（思考 high，小轮数预算） |
-| `strong` | 质量优先，复杂子任务 | Flash（**内测锁 Flash**：质量档机制可提至 Pro，但内测 Pro 已撤出用户 ceiling，见下） |
+| `fast` | 速度/成本优先，简单机械子任务 | `agent.fast` 画像（小轮数预算、低温度） |
+| `strong` | 质量优先，复杂子任务 | `agent.strong` 画像（大轮数预算） |
 
-> **现状**：两 worker 档基座均为 Flash；**内测 Pro 已撤出用户 ceiling**，质量档机制休眠待恢复。运行参数 → 见 `.cursor/rules/llm.mdc` / `llm/config.py`。
+设计理由：① 解耦委派与具体模型名，模型更新不改委派逻辑；② `fast`/`strong` 保留场景级执行差异，用户不可见。
 
-设计理由：① 解耦委派与具体模型，模型更新不改委派逻辑；② 用户可覆盖映射（即下文质量档）；③ 未来可做智能路由。
+**用户统一模型（BYOK）** — 全链路（CEO、worker、辩论辩手）共用用户在「设置·模型配置」配的一个 OpenAI 兼容端点：`api_key` + `base_url` + `default_model`（含 DeepSeek / 各家 / OpenRouter 等中转）。`resolve_user_model` + `apply_user_model` 把该 model 注入所有场景画像的 `model` 字段，**不再按角色或质量档 swap**；`ModelProfile` 仍按场景（`chat` / `agent.fast` / `agent.strong` / `memory` / `title` …）分化执行参数。
 
-**质量档（用户可选模型层）** — ⏳ **内测休眠**：机制已实现，但 Pro 撤出用户 ceiling、用户侧坍缩单 Flash 档——预设/ceiling/`resolve_profile_set`/DB 表保留，ceiling 加回 Pro 即零迁移恢复。
+- **被否决：质量档矩阵**（`经济档`/`高质量档`、CEO vs worker 分选 Flash/Pro）——多数用户只想「配一个能用的模型」；内测期 Pro 撤出 ceiling 后机制对用户已无价值。质量档解析链、`/v1/model-modes` API 已废弃；`conversation.model_mode` accept-but-ignore。
+- **MVP 约束**：`thinking` / `reasoning_effort` 默认不发（走各家默认行为）；⏳ per-provider 推理字段适配、原生 Claude/Gemini provider 见远期。
+- **`supports_tools` soft gate**：probe 测 tool calling，结果作 UI 提示 + preflight warning，**不做 hard 400**——中转兼容性参差不齐，probe 失败不等于端点真不支持；委派/辩论 preflight 返回 warning 后可继续，运行时 `tool_calls` 缺失则 graceful error 提示换模型。
+- **后台 one-shot**（memory / title / compaction）：**platform key 优先、BYOK 兜底**——有运营 platform 凭据时不消耗用户 token；仅 BYOK 时走用户 model 并降 temperature / max_tokens。`build_provider(purpose=user_facing|platform_internal)` 区分，不暴露给用户。
+- **Provider 路由保留、MVP 不暴露**：`ProviderRouter` 的 `provider/model` 前缀路由供 eval / ⏳ 辩论多模型辩手；MVP 辩论统一用户 model。
 
-- **角色**：CEO 本体（`chat`）/ 主力 worker（`agent.strong`）可配；**经济 worker（`agent.fast`）锁定 Flash**。
-- **预设**：`经济档` = 全程 Flash；`高质量档` = CEO + 主力 worker 升 Pro（内测对用户不可达）。
-- **解析优先级**：对话 → 用户默认 → 运营默认 → 系统默认；未知档回落经济，**绝不打断回合**。
-- **运行参数**（`PROFILES`、ceiling、钳制逻辑）→ 见 `.cursor/rules/llm.mdc` / `llm/config.py`；前端 UX 见 [`../04-前端/前端UX设计.md` §十三](/docs/04-前端/前端UX设计.md)。
+→ 见代码：`llm/user_model.py`、`llm/key_service.py`、`llm/factory.py`、`api/routes/llm_key.py`；前端见 [`../04-前端/前端UX设计.md` §十三](/docs/04-前端/前端UX设计.md)、[`../04-前端/前端成本呈现.md` §7.4](/docs/04-前端/前端成本呈现.md)。
 
 ### 2.2 `depends_on` — 依赖关系（并行/串行的唯一开关）
 
@@ -331,3 +334,29 @@ worker 默认是**叶子**：拿不到 `delegate`、不能再向下拆。当某�
 | Agent 实体化 | Phase 1 worker 为内联角色（`agent_id == run_id`）；Phase 2 收敛到 `agent_id` + `AgentResolver` + 委派白名单 |
 | 增量声明优化 | 批次预声明 + 跨波重排 + 晚绑定续跑均已落地（见 §一 `replan`）；剩更细粒度的增量重声明 |
 | 交互原语回归 | `ask_user` / `plan_review` / `checkpoint_after` 已落地（见 §四 / §五）；剩 preflight / 契约闸门 / 治理强制层（远期）⏳ |
+
+---
+
+## 未来优化方向
+
+> 来源：已退役的规划文档「多Agent编排优化-参考Cursor-Multitask」。以下为经评估后暂缓的优化方向，留作未来参考。
+
+### 暂缓项
+
+| 方向 | 内容 | 重新评估时机 |
+|---|---|---|
+| finalize 单 worker 早释放 | CEO 委派后提前释放 LLM 上下文，worker 完成后再唤回 CEO 写综述 | 需状态落盘续跑能力成熟后 |
+| 协调效率指标 | batch_metrics 中增加有效并行度、协调税率等观测指标 | 有真实用户流量后 |
+| can_delegate 两档 | 简化为 false/auto，worker 按需申请拆分权 | 真实数据证明 escalate→replan 路径不够时 |
+| AutonomyPolicy 可配置 | CEO 按任务设定 worker 自主度档位 | 真实反馈证明需要差异化控制时 |
+
+### 已否决方案
+
+| 方案 | 理由 |
+|---|---|
+| 替换 CEO 为纯路由器 | CEO 的精细规划能力是 AgentCore 核心壁垒（复杂任务的 DAG 编排 >> Cursor 的单 worker 路由） |
+| 前置分类器 LLM | 已否决（每条消息付编排税，见编排器 §聊天优先） |
+| Worker 直接通信 | 已否决（成本、不可观测，见协作模式 §二） |
+| 取消 CEO 收尾综述 | CEO 的「一个声音」是产品核心体验 |
+| `can_delegate=true`（CEO 预判 Worker 需要带队） | CEO 派活时信息不完整，判断常不准；确信要拆的场景应在 CEO 自己的 `delegate` 层面直接拆好，而非把规划子团队甩给 Worker |
+| 启动时给所有 worker 直接注入 `delegate` 工具 | 与 `auto` 按需申请相反：简单叶子任务不需要；非简单任务已有 `auto` 默认，Worker 需要时再申请即可，启动即注入徒增提示词噪音和「为拆分而拆分」风险 |

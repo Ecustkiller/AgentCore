@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
-from agentcore.llm.config import apply_overrides
+from agentcore.llm.profiles import agent_profile
 from agentcore.runtime.debate import DebateConfig
 from agentcore.runtime.events import run_completed, run_plan
 from agentcore.tools.builtin.debate.schema import FORM_LABELS
@@ -51,17 +51,13 @@ def moderator_plan_event(
 
 
 def side_card(tool: DebateTool, node) -> dict[str, Any]:
-    profile = apply_overrides(
-        tool._profile_set.agent(node.model_preference),
-        thinking=node.thinking,
-        reasoning_effort=node.reasoning_effort,
-    )
+    _ = agent_profile(node.model_preference)
     return {
         "id": node.agent_id,
         "role": node.role,
         "model_preference": node.model_preference,
-        "thinking": profile.thinking,
-        "reasoning_effort": profile.reasoning_effort,
+        "thinking": node.thinking,
+        "reasoning_effort": node.reasoning_effort,
     }
 
 

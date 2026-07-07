@@ -1,10 +1,12 @@
 import { api } from "@/services/api";
 import { resolveSidecarRoot } from "@/services/sidecarRouting";
+import { useApprovalStore } from "@/stores/approvals";
 import { getRuntime } from "@/stores/conversation";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import type { components } from "@/types/api.generated";
 
 type PausedTurnSummary = components["schemas"]["PausedTurnSummary"];
+type PendingApprovalSummary = components["schemas"]["PendingApprovalSummary"];
 type TurnRecoveryResponse = components["schemas"]["TurnRecoveryResponse"];
 
 /** A conversation's recovery snapshot on reopen — see {@link loadRecovery}. */
@@ -16,6 +18,23 @@ export interface ConversationRecovery {
   /** How many turns are durably paused awaiting resume (结构化挂起 2b). When > 0 the
    * resume card is the single actionable surface, so the caller must NOT also attach. */
   pausedCount: number;
+}
+
+function hydrateRecoveredApprovals(
+  conversationId: string,
+  summaries: PendingApprovalSummary[],
+): void {
+  const store = useApprovalStore.getState();
+  store.clear(conversationId);
+  for (const a of summaries) {
+    store.add({
+      approval_id: a.approval_id,
+      conversation_id: a.conversation_id ?? conversationId,
+      tool_call_id: a.tool_call_id,
+      tool_name: a.tool_name,
+      arguments: (a.arguments ?? {}) as Record<string, unknown>,
+    });
+  }
 }
 
 /**
@@ -46,8 +65,8 @@ export async function loadRecovery(
         conversationId,
       })) as unknown as PausedTurnSummary[];
       usePausedTurnStore.getState().setForConversation(conversationId, paused);
-      // A local turn runs in a per-turn sidecar process the desktop can't re-attach
-      // to after a reopen, so there is never a live cloud run to 续看 — only frames.
+      // Local sidecar runs keep no reattachable approval registry across reopen.
+      useApprovalStore.getState().clear(conversationId);
       return { liveRunning: false, pausedCount: paused.length };
     }
     const res = await api.get<TurnRecoveryResponse>(
@@ -55,6 +74,7 @@ export async function loadRecovery(
     );
     const paused = res.paused ?? [];
     usePausedTurnStore.getState().setForConversation(conversationId, paused);
+    hydrateRecoveredApprovals(conversationId, res.pending_approvals ?? []);
     return {
       liveRunning: Boolean(res.live_running),
       pausedCount: paused.length,
@@ -91,6 +111,8 @@ export function surfaceResumeFromLiveTurn(conversationId: string): void {
     // The user request that opened this turn — context shown on the resume card.
     userMessage:
       [...messages].reverse().find((m) => m.role === "user")?.content ?? "",
+    userMessageId:
+      [...messages].reverse().find((m) => m.role === "user")?.id ?? "",
   };
   const cp = turn.checkpoints?.find((c) => c.status === "pending");
   if (cp) {
@@ -105,6 +127,7 @@ export function surfaceResumeFromLiveTurn(conversationId: string): void {
       assumptions: cp.assumptions,
       questions: cp.questions,
       styleOptions: cp.styleOptions,
+      intent: cp.intent,
     });
     return;
   }
@@ -121,6 +144,7 @@ export function surfaceResumeFromLiveTurn(conversationId: string): void {
       assumptions: [],
       questions: [],
       styleOptions: [],
+      intent: "decision",
     });
   }
 }

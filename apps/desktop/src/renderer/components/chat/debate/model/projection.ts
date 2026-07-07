@@ -11,11 +11,13 @@ import type {
   DebateClash,
   DebateClosing,
   DebateCrossExam,
+  DebateNarrativeRound,
   DebateResultPayload,
   DebateRoundScore,
   DebateRoundSide,
 } from "@/types/events";
 import { debateSideColorVar } from "./labels";
+import { parseCrossExamResponse } from "./crossExamParse";
 import type {
   DebateClashView,
   DebateClosingView,
@@ -27,6 +29,116 @@ import type {
   DebateScoreView,
   DebateSideModel,
 } from "./types";
+
+/** 质询作答 run id 后缀：``{moderator}_r{round}_cx_{side_key}``（与 DebateTool 同策）。 */
+const CX_RUN_ID_RE = /_r(\d+)_cx_(.+)$/;
+
+function parseCrossExamRunId(
+  runId: string,
+): { roundNo: number; targetKey: string } | null {
+  const m = runId.match(CX_RUN_ID_RE);
+  if (!m) return null;
+  return { roundNo: Number(m[1]), targetKey: m[2] };
+}
+
+/** 从质询作答 run 的 ``run_context`` 块解析主持人发出的必答问题列表。 */
+function crossExamQuestionsFromRun(run: RunNode): string[] {
+  const block = run.receivedContext.find((b) => b.channel === "cross_exam");
+  if (!block?.body.trim()) return [];
+  return block.body
+    .split("\n")
+    .map((line) => line.replace(/^\s*-\s*/, "").trim())
+    .filter(Boolean);
+}
+
+/** 进行中：从执行图里的 ``_cx_`` 作答 run 重建本轮质询载荷（问题来自 run_context，作答来自
+ * outputChunks 经 {@link parseCrossExamResponse} 解析）。``debate_round.cross_exam`` 未到时
+ * 这是 live 质询区的唯一数据源——收场后改走结构化 ``exchanges[]``。 */
+function liveCrossExamPayload(
+  execution: Execution,
+  roundNo: number,
+): DebateCrossExam[] {
+  const out: DebateCrossExam[] = [];
+  for (const run of execution.runs) {
+    const parsed = parseCrossExamRunId(run.id);
+    if (!parsed || parsed.roundNo !== roundNo) continue;
+    const questions = crossExamQuestionsFromRun(run);
+    if (questions.length === 0) continue;
+    const blob = runOutputText(execution, run);
+    const ok = run.status !== "failed";
+    out.push({
+      target: parsed.targetKey,
+      questioner: "",
+      exchanges: parseCrossExamResponse(questions, blob, ok),
+      answer_run_id: run.id,
+    });
+  }
+  return out;
+}
+
+/** 为本轮质询解析 side 名录：优先 narr.sides，不足时从发言格 / 作答 run 补全。 */
+function roundSidesForCrossExam(
+  execution: Execution,
+  narr: DebateNarrativeRound | null,
+  sideModels: DebateSideModel[],
+): DebateRoundSide[] {
+  const byKey = new Map<string, DebateRoundSide>();
+  for (const s of narr?.sides ?? []) {
+    if (s.key) byKey.set(s.key, s);
+  }
+  for (const s of sideModels) {
+    if (!s.sideKey || byKey.has(s.sideKey)) continue;
+    byKey.set(s.sideKey, {
+      key: s.sideKey,
+      name: s.name,
+      run_id: s.run?.id ?? "",
+      ok: s.run?.status === "completed",
+    });
+  }
+  for (const run of execution.runs) {
+    const parsed = parseCrossExamRunId(run.id);
+    if (!parsed || byKey.has(parsed.targetKey)) continue;
+    const agent = execution.agents.find((a) => a.id === run.agentId);
+    byKey.set(parsed.targetKey, {
+      key: parsed.targetKey,
+      name: agent?.role ?? parsed.targetKey,
+      run_id: run.id,
+      ok: run.status === "completed",
+    });
+  }
+  return [...byKey.values()];
+}
+
+/** 进行中质询投影：``debate_round.cross_exam`` 权威优先；质询 beat 进行中则从 ``_cx_`` run 重建。 */
+function resolveLiveCrossExam(
+  execution: Execution,
+  roundNo: number,
+  narr: DebateNarrativeRound | null,
+  sideModels: DebateSideModel[],
+): DebateCrossExamView[] {
+  const sides = roundSidesForCrossExam(execution, narr, sideModels);
+  const payload =
+    narr?.cross_exam && narr.cross_exam.length > 0
+      ? narr.cross_exam
+      : liveCrossExamPayload(execution, roundNo);
+  return resolveCrossExam(payload, sides, execution);
+}
+
+/** 旧产物 cross_exam 仍带顶层 questions / ok 而无 exchanges（渐进式契约扩展）。
+ * TODO: 历史 turn 迁移完毕后可删，改只消费 exchanges[]。 */
+type LegacyDebateCrossExam = DebateCrossExam & {
+  questions?: string[];
+  ok?: boolean;
+};
+
+function runOutputText(
+  execution: Execution,
+  run: RunNode | null,
+): string {
+  if (!run) return "";
+  const agent = execution.agents.find((a) => a.id === run.agentId);
+  return agent ? agent.outputChunks.join("") : "";
+}
 
 /** 把一个回合的 {@link Execution} 归一成 {@link DebateModel}；非辩论 / 进行中尚无任何
  * 轮次 → null (不渲染)。收场以 `debate` 为权威；否则从 `debateRounds` + run 树重建。 */
@@ -165,9 +277,9 @@ function liveTwoSideRounds(
       inFlight: !narr?.verdict,
       clashes: resolveClashes(narr?.clashes, narr?.sides ?? []),
       sides,
-      // 进行中无 verbatim 追问 / 质询 / 记分（live 孪生均不带）；收场由 settledModel 接管。
+      // 进行中无 verbatim 追问 / 记分（live 孪生均不带）；质询由 resolveLiveCrossExam 重建。
       userInterjections: [],
-      crossExam: [],
+      crossExam: resolveLiveCrossExam(execution, roundNo, narr, sides),
       scores: [],
     });
   }
@@ -206,6 +318,9 @@ function liveMultiSideRounds(execution: Execution): DebateRoundModel[] {
     const keyByRunId = new Map(
       (narr?.sides ?? []).map((s) => [s.run_id, s.key]),
     );
+    const sideModels = runs.map((run) =>
+      multiSide(run, execution, keyByRunId.get(run.id) ?? ""),
+    );
     rounds.push({
       roundNo,
       focus: narr?.focus ?? "",
@@ -213,12 +328,10 @@ function liveMultiSideRounds(execution: Execution): DebateRoundModel[] {
       verdict: narr?.verdict ?? null,
       inFlight: !narr?.verdict,
       clashes: resolveClashes(narr?.clashes, narr?.sides ?? []),
-      sides: runs.map((run) =>
-        multiSide(run, execution, keyByRunId.get(run.id) ?? ""),
-      ),
-      // 进行中无 verbatim 追问 / 质询 / 记分（live 孪生均不带）；收场由 settledModel 接管。
+      sides: sideModels,
+      // 进行中无 verbatim 追问 / 记分（live 孪生均不带）；质询由 resolveLiveCrossExam 重建。
       userInterjections: [],
-      crossExam: [],
+      crossExam: resolveLiveCrossExam(execution, roundNo, narr, sideModels),
       scores: [],
     });
   }
@@ -272,8 +385,8 @@ function resolveClashes(
 }
 
 /** 把契约的 {@link DebateCrossExam}（语义 key + `answer_run_id` 引用）据本轮 `sides` 解析成可渲染的
- * {@link DebateCrossExamView}（被质询方名字 + 身份色 + 作答 run）。引用不到 side 的交换（防御性）丢弃；
- * `answer_run_id` 从执行图 runs 直取作答辩手节点（作答全文在其 agent.outputChunks，与发言格同源）。 */
+ * {@link DebateCrossExamView}（被质询方名字 + 身份色 + 逐条 Q↔A + 作答 run）。引用不到 side 的交换
+ * （防御性）丢弃。权威路径直接消费 ``exchanges[]``；仅旧产物 / 流式空 answer 才走 blob 解析。 */
 function resolveCrossExam(
   cross: readonly DebateCrossExam[] | undefined,
   sides: readonly DebateRoundSide[],
@@ -282,16 +395,41 @@ function resolveCrossExam(
   if (!cross || cross.length === 0) return [];
   const keyToName = new Map(sides.map((s) => [s.key, s.name]));
   const out: DebateCrossExamView[] = [];
-  for (const cx of cross) {
+  for (const raw of cross) {
+    const cx = raw as LegacyDebateCrossExam;
     const targetName = keyToName.get(cx.target);
     if (!targetName) continue;
+    const answerRun =
+      execution.runs.find((r) => r.id === cx.answer_run_id) ?? null;
+    const blob = runOutputText(execution, answerRun);
+    const streaming = answerRun?.status === "running";
+
+    let exchanges = cx.exchanges ?? [];
+    if (exchanges.length === 0 && cx.questions?.length) {
+      // 旧产物 fallback：仅有 questions[]、无 exchanges[]。
+      exchanges = parseCrossExamResponse(cx.questions, blob, cx.ok ?? false);
+    } else if (streaming && blob && exchanges.some((ex) => !ex.answer.trim())) {
+      // live 流式：契约已有问题列表但 answer 尚未落盘，从 run blob 补全。
+      const parsed = parseCrossExamResponse(
+        exchanges.map((e) => e.question),
+        blob,
+        true,
+      );
+      exchanges = exchanges.map((ex, i) =>
+        ex.answer.trim() ? ex : (parsed[i] ?? ex),
+      );
+    }
+
     out.push({
       targetKey: cx.target,
       targetName,
       targetColorVar: debateSideColorVar(cx.target, targetName),
-      questions: cx.questions ?? [],
-      answerRun: execution.runs.find((r) => r.id === cx.answer_run_id) ?? null,
-      ok: cx.ok,
+      exchanges: exchanges.map((ex) => ({
+        question: ex.question,
+        answer: ex.answer,
+        ok: ex.ok,
+      })),
+      answerRun,
     });
   }
   return out;

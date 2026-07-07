@@ -1,6 +1,8 @@
 import {
+  artifactFromRun,
   buildCrystallizedElements,
   crystallizedRunIds,
+  primaryOutputFile,
 } from "@/services/boardCrystallize";
 import type { OverlayAnchor } from "@/services/boardProgress";
 import type {
@@ -37,6 +39,7 @@ const run = (
   status,
   dependsOn: [],
   outputSummary: null,
+  outputFiles: [],
   debrief: null,
   durationMs: null,
   error: null,
@@ -124,6 +127,27 @@ describe("buildCrystallizedElements", () => {
     expect(src?.type).toBe("arrow");
     expect(src?.start?.id).toBe("crys-node-r1");
     expect(src?.points?.at(-1)?.[0]).toBe(anchor.x + anchor.width);
+  });
+
+  it("crystallizes a file artifact when outputFiles is present", () => {
+    const out = buildCrystallizedElements(
+      execution({
+        agents: [agent("ag1", "工程师")],
+        runs: [
+          run("r1", "ag1", "completed", {
+            outputSummary: "报告已写好",
+            outputFiles: ["draft.md", "out/report.md"],
+          }),
+        ],
+      }),
+      anchor,
+      new Set(),
+    );
+    const art = out.find((e) => e.id === "crys-art-r1");
+    expect(art?.artifactKind).toBe("file");
+    expect(art?.ref).toBe("out/report.md");
+    expect(art?.title).toContain("report.md");
+    expect(art?.text).toBe("报告已写好");
   });
 
   it("docks the team column to the right of the brief", () => {
@@ -236,5 +260,33 @@ describe("buildCrystallizedElements", () => {
     const ids = crystallizedRunIds(first);
     expect(ids.has("r1")).toBe(true);
     expect(buildCrystallizedElements(exec, anchor, ids)).toEqual([]);
+  });
+});
+
+describe("artifactFromRun / primaryOutputFile", () => {
+  it("prefers file over text when outputFiles is non-empty", () => {
+    expect(
+      artifactFromRun({
+        outputSummary: "摘要",
+        outputFiles: ["a.md", "b.md"],
+      }),
+    ).toEqual({
+      kind: "file",
+      body: "摘要",
+      titleSuffix: "b.md",
+      ref: "b.md",
+    });
+  });
+
+  it("falls back to text-only artifact", () => {
+    expect(artifactFromRun({ outputSummary: "纯文本" })).toEqual({
+      kind: "text",
+      body: "纯文本",
+      titleSuffix: "产物",
+    });
+  });
+
+  it("primaryOutputFile picks the last path", () => {
+    expect(primaryOutputFile(["x", "y/z.ts"])).toBe("y/z.ts");
   });
 });

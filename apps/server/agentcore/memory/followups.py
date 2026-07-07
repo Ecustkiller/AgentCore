@@ -24,8 +24,8 @@ from typing import Protocol
 
 from agentcore.core.logging import get_logger
 from agentcore.llm import LLMMessage, LLMProvider
-from agentcore.llm.config import build_request, get_profile
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.profiles import build_request, get_profile
+from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.memory.conversation_title import ChatMessage
 
 logger = get_logger(__name__)
@@ -148,11 +148,16 @@ class LLMFollowupsGenerator:
     are swallowed at the call site (`conversation/common.generate_followups`).
     """
 
-    def __init__(self, provider: LLMProvider, *, role: str = "followups") -> None:
+    def __init__(
+        self, provider: LLMProvider, *, role: str = "followups", model: str | None = None
+    ) -> None:
         # The「followups」profile: same fast/cheap/non-reasoning class as title, with
         # room for a few short lines instead of one (llm/config.py).
         self._provider = provider
         self._profile = get_profile(role)
+        from agentcore.config import settings
+
+        self._model = model or settings.platform_model
         # The most recent call's spend, surfaced for the cost ledger (parity with the
         # title generator). Stays zero until a call actually completes.
         self.last_usage: TokenUsage = TokenUsage()
@@ -168,6 +173,7 @@ class LLMFollowupsGenerator:
                 LLMMessage(role="user", content=_render_followups_prompt(data)),
             ],
             stream=False,
+            model=self._model,
         )
         try:
             response = await asyncio.wait_for(
@@ -177,5 +183,5 @@ class LLMFollowupsGenerator:
             logger.warning("followups.timeout", conversation_id=data.conversation_id)
             return []
         self.last_usage = response.usage
-        self.last_model = response.model or self._profile.model
+        self.last_model = response.model or self._model or ""
         return _sanitize_followups(response.content)

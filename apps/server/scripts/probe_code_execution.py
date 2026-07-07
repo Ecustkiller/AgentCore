@@ -11,7 +11,7 @@
   打印哨兵 = 通过；任一断言挂 = 交付了带 bug 的代码；
 - 每题跑 ``SAMPLES`` 次量化出错率，失败样本打印 stderr 尾部（具体哪条边界断言挂了 = 靶子）。
 
-用法：``uv run python scripts/probe_code_execution.py``（需 .env 里的 DEEPSEEK_API_KEY）。
+用法：``uv run python scripts/probe_code_execution.py``（需 ``EVAL_DEEPSEEK_API_KEY`` 或 .env 里的 ``PLATFORM_API_KEY``）。
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ import sys
 from pathlib import Path
 
 from agentcore.evals.harness import _eval_credentials
-from agentcore.llm.config import build_request, get_profile
 from agentcore.llm.factory import build_provider
-from agentcore.llm.protocol import LLMMessage
+from agentcore.llm.profiles import build_request, get_profile
+from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.tools.sandbox.protocol import ExecutionRequest
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 

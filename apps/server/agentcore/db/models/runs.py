@@ -291,6 +291,7 @@ class TurnMetricsRow(Base):
     scope_signals: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     revises: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     escalations: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    audit_drops: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

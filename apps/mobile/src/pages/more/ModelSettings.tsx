@@ -5,15 +5,18 @@ import {
   setLlmKey,
   testLlmKey,
 } from "@/api/model";
-// 模型配置 (/more/model) — BYOK DeepSeek API key (mirrors desktop ModelSettings).
-//
-// Without a key, turns can't run (backend billing_mode "byok"), so this is the most
-// load-bearing settings page on mobile. The key is AES-encrypted at rest; the server
-// only ever echoes the last 4 chars. The desktop's 本地引擎 toggle is omitted — sidecar
-// is a desktop-only capability (减法 boundary).
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "@/pages/more/more.css";
+
+const DEFAULT_BASE_URL = "https://api.openai.com/v1";
+const DEFAULT_MODEL = "gpt-4o";
+
+function capabilityLabel(supportsTools: boolean | null | undefined): string {
+  if (supportsTools === true) return "支持工具调用";
+  if (supportsTools === false) return "仅对话";
+  return "未测试能力";
+}
 
 export function ModelSettings() {
   const navigate = useNavigate();
@@ -28,7 +31,7 @@ export function ModelSettings() {
       .then((s) => {
         if (!alive) return;
         setStatus(s);
-        setEditing(!s.configured); // unconfigured → open the input straight away
+        setEditing(!s.configured);
       })
       .catch(() => alive && setLoadError("加载失败，请重试"))
       .finally(() => alive && setLoading(false));
@@ -53,7 +56,7 @@ export function ModelSettings() {
 
       <div className="settings-body">
         <p className="settings-desc">
-          填入你自己的 DeepSeek API Key，对话将使用你的额度运行。Key 经 AES
+          配置 OpenAI 兼容端点（API Key、Base URL、默认模型名）。Key 经 AES
           加密存储，仅回显后 4 位；未配置则无法发起对话。
         </p>
 
@@ -73,6 +76,8 @@ export function ModelSettings() {
             {editing && (
               <KeyForm
                 configured={!!status?.configured}
+                initialBaseUrl={status?.base_url ?? ""}
+                initialModel={status?.default_model ?? ""}
                 onSaved={(s) => {
                   setStatus(s);
                   setEditing(false);
@@ -139,6 +144,9 @@ function ConfiguredCard({
         status: "unconfigured",
         masked_key: null,
         message: null,
+        billing_mode: status.billing_mode,
+        billing_preference: status.billing_preference,
+        platform_available: status.platform_available,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "删除失败，请重试");
@@ -151,8 +159,21 @@ function ConfiguredCard({
     <div className="section-card">
       <div>
         <span className="masked-key">{status.masked_key ?? "已配置"}</span>
+        {status.base_url && (
+          <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+            {status.base_url}
+          </p>
+        )}
+        {status.default_model && (
+          <p style={{ marginTop: 4, fontSize: 12 }}>
+            模型 {status.default_model}
+          </p>
+        )}
         <div style={{ marginTop: 6 }}>
           <StatusBadge status={status} />
+          <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
+            {capabilityLabel(status.supports_tools)}
+          </span>
         </div>
       </div>
       <div className="btn-row">
@@ -182,39 +203,43 @@ function ConfiguredCard({
         </button>
       </div>
       {error && <p className="error">{error}</p>}
-      <a
-        className="ext-link"
-        href="https://platform.deepseek.com/usage"
-        target="_blank"
-        rel="noreferrer"
-      >
-        查看用量/余额 ↗
-      </a>
     </div>
   );
 }
 
 function KeyForm({
   configured,
+  initialBaseUrl,
+  initialModel,
   onSaved,
   onCancel,
 }: {
   configured: boolean;
+  initialBaseUrl: string;
+  initialModel: string;
   onSaved: (s: LlmKeyStatus) => void;
   onCancel?: () => void;
 }) {
-  const [value, setValue] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
+  const [defaultModel, setDefaultModel] = useState(initialModel);
   const [reveal, setReveal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSave = value.trim().length > 0 && !saving;
+  const canSave = apiKey.trim().length > 0 && !saving;
 
   async function save() {
     setSaving(true);
     setError(null);
     try {
-      onSaved(await setLlmKey(value.trim()));
+      onSaved(
+        await setLlmKey({
+          api_key: apiKey.trim(),
+          base_url: baseUrl.trim() || null,
+          default_model: defaultModel.trim() || null,
+        }),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "保存失败，请重试");
     } finally {
@@ -225,13 +250,17 @@ function KeyForm({
   return (
     <div className="section-card">
       <span className="section-title">
-        {configured ? "更换 API Key" : "填写 DeepSeek API Key"}
+        {configured ? "更换模型配置" : "填写模型配置"}
       </span>
+      <label className="field-label" htmlFor="llm-api-key">
+        API Key
+      </label>
       <div className="key-input-wrap">
         <input
+          id="llm-api-key"
           type={reveal ? "text" : "password"}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
           placeholder="sk-..."
           autoComplete="off"
           spellCheck={false}
@@ -244,6 +273,40 @@ function KeyForm({
           {reveal ? "隐藏" : "显示"}
         </button>
       </div>
+      <label
+        className="field-label"
+        htmlFor="llm-base-url"
+        style={{ marginTop: 12 }}
+      >
+        Base URL
+      </label>
+      <input
+        id="llm-base-url"
+        type="text"
+        value={baseUrl}
+        onChange={(e) => setBaseUrl(e.target.value)}
+        placeholder={DEFAULT_BASE_URL}
+        autoComplete="off"
+        spellCheck={false}
+        className="text-input"
+      />
+      <label
+        className="field-label"
+        htmlFor="llm-default-model"
+        style={{ marginTop: 12 }}
+      >
+        默认模型名
+      </label>
+      <input
+        id="llm-default-model"
+        type="text"
+        value={defaultModel}
+        onChange={(e) => setDefaultModel(e.target.value)}
+        placeholder={DEFAULT_MODEL}
+        autoComplete="off"
+        spellCheck={false}
+        className="text-input"
+      />
       <div className="field-actions">
         {onCancel && (
           <button
@@ -260,14 +323,6 @@ function KeyForm({
         </button>
       </div>
       {error && <p className="error">{error}</p>}
-      <a
-        className="ext-link"
-        href="https://platform.deepseek.com/api_keys"
-        target="_blank"
-        rel="noreferrer"
-      >
-        前往 DeepSeek 开放平台创建 API Key ↗
-      </a>
     </div>
   );
 }
@@ -276,8 +331,7 @@ function InfoNote() {
   return (
     <p className="section-note" style={{ marginTop: 16 }}>
       你的 Key 仅用于你自己的对话，经 AES-256-GCM 加密存储，服务端只显示后 4
-      位、不会回传完整内容。对话与后台任务（标题、记忆）都按你的 DeepSeek
-      额度计费。
+      位。全链路使用同一模型；平台只统计 token 用量。
     </p>
   );
 }

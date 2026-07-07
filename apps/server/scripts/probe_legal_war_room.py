@@ -15,8 +15,9 @@
     uv run python scripts/probe_legal_war_room.py both       # 薄 / 完整 A/B 对比
 
 凭据：走 ``EvalHarness`` 的 eval 凭据——优先 ``EVAL_DEEPSEEK_API_KEY``，否则回落 settings 全局
-``deepseek_api_key``（apps/server/.env）。BYOK 内测下平台 key 多为空，真跑前须在 .env 填一把可用
-的 ``DEEPSEEK_API_KEY``（或导出 ``EVAL_DEEPSEEK_API_KEY``）。无 key 时本脚本只做检测、不空调
+``platform_api_key``（apps/server/.env 填 ``PLATFORM_API_KEY``）。BYOK 内测下平台 key 多为空，
+真跑前须在 .env 填 ``PLATFORM_API_KEY``（或导出 ``EVAL_DEEPSEEK_API_KEY``）。无 key 时本脚本
+只做检测、不空调
 LLM，并打印启用指引。仅 dev 探针，无任何旁路。
 """
 
@@ -89,14 +90,14 @@ _WATCH = ("consult_skill", "delegate", "debate")
 def _has_credentials() -> bool:
     if os.environ.get("EVAL_DEEPSEEK_API_KEY", "").strip():
         return True
-    return bool((settings.deepseek_api_key or "").strip())
+    return bool((settings.platform_api_key or "").strip())
 
 
 def _print_no_credentials() -> None:
     print("=" * 92)
-    print("✗ 没有可用的 DeepSeek 凭据，无法真跑 LLM。M2 端到端验证需要一把可用 key。")
+    print("✗ 没有可用的 LLM 凭据，无法真跑。M2 端到端验证需要一把可用 key。")
     print("  二选一启用后重跑本脚本：")
-    print("   A) 在 apps/server/.env 填  DEEPSEEK_API_KEY=<你的key>")
+    print("   A) 在 apps/server/.env 填  PLATFORM_API_KEY=<你的key>")
     print("   B) 导出环境变量        EVAL_DEEPSEEK_API_KEY=<你的key>（建议低额度账号）")
     print("  （脚本已就绪：legal_vertical_enabled 会被打开、起诉状已内置，添 key 即可一键真跑。）")
     print("=" * 92)

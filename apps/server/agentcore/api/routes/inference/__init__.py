@@ -7,7 +7,7 @@ from agentcore.config import settings
 from agentcore.conversation.quota import QuotaLimits, enforce_quota
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import CostEventRepository
-from agentcore.llm.byok import resolve_user_llm_credentials
+from agentcore.llm.resolve import resolve_user_llm_credentials
 from agentcore.runtime.costing import ROLE_CAPTAIN, background_run_cost
 from agentcore.security.tokens import decode_inference_token
 

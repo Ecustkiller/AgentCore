@@ -6,8 +6,7 @@ export interface AuthUser {
   displayName: string;
   email: string | null;
   role: string;
-  /** The user's account-default 质量档 (D2); null = inherit the operator default.
-   * The settings page reads/writes this; the modes store carries the resolved one. */
+  /** Legacy account field from API; quality tiers are retired — ignored by the UI. */
   defaultModelMode: string | null;
   /** Ready-to-render avatar URL (头像), already absolute (services/auth resolves the
    * backend's relative path against the API base); null = no avatar, show the initial. */
@@ -36,10 +35,6 @@ interface AuthState {
   setAuthenticated: (user: AuthUser) => void;
   setUnauthenticated: () => void;
   setUnavailable: (reason: string) => void;
-  /** Update the signed-in user's account-default 质量档 after the settings page
-   * persists it, so every consumer (the tier picker's「跟随默认」label) reflects the
-   * new default without a full refetch. No-op when signed out. */
-  setDefaultModelMode: (mode: string | null) => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -53,6 +48,4 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ status: "unauthenticated", user: null, reason: null }),
   setUnavailable: (reason) =>
     set({ status: "unavailable", user: null, reason }),
-  setDefaultModelMode: (mode) =>
-    set((s) => (s.user ? { user: { ...s.user, defaultModelMode: mode } } : s)),
 }));

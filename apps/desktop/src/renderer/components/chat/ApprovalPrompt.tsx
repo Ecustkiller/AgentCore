@@ -1,4 +1,11 @@
-import { Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
+import { CodeBlock } from "@/components/chat/CodeBlock";
+import {
+  codeExecuteLanguage,
+  deriveCodeExecuteRiskTags,
+  fencedCodeMarkdown,
+  isPreviewTruncated,
+} from "@/components/chat/codeExecuteApproval";
+import { Badge, Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { notifyError } from "@/lib/toast";
 import {
@@ -19,7 +26,9 @@ import {
   ShieldAlert,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { type ComponentPropsWithoutRef, useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import rehypeHighlight from "rehype-highlight";
 
 const TOOL_LABELS: Record<string, string> = {
   file_write: "写入文件",
@@ -30,11 +39,22 @@ const TOOL_LABELS: Record<string, string> = {
   code_execute: "执行代码",
 };
 
+const HIGHLIGHT_PLUGINS: ComponentPropsWithoutRef<
+  typeof ReactMarkdown
+>["rehypePlugins"] = [[rehypeHighlight, { ignoreMissing: true }]];
+
 function toolLabel(name: string): string {
   return TOOL_LABELS[name] ?? name;
 }
 
-function primaryArg(args: Record<string, unknown>): string | null {
+function primaryArg(
+  toolName: string,
+  args: Record<string, unknown>,
+): string | null {
+  if (toolName === "code_execute") {
+    const purpose = args.purpose;
+    if (typeof purpose === "string" && purpose.trim()) return purpose.trim();
+  }
   for (const key of ["path", "file_path", "command", "code"]) {
     const value = args[key];
     if (typeof value === "string" && value.trim()) return value.trim();
@@ -61,10 +81,29 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
   const [expanded, setExpanded] = useState(false);
   const [clicked, setClicked] = useState<ApprovalDecision | null>(null);
 
-  const headline = primaryArg(approval.arguments);
+  const isCodeExecute = approval.toolName === "code_execute";
+  const headline = primaryArg(approval.toolName, approval.arguments);
   const argEntries = Object.entries(approval.arguments);
   const busy = approval.resolving;
   const isFileOp = isFileOpTool(approval.toolName);
+
+  const codeText =
+    isCodeExecute && typeof approval.arguments.code === "string"
+      ? approval.arguments.code
+      : null;
+  const riskTags = useMemo(
+    () => (codeText ? deriveCodeExecuteRiskTags(codeText) : []),
+    [codeText],
+  );
+  const codeTruncated = codeText != null && isPreviewTruncated(codeText);
+  const otherArgs = useMemo(() => {
+    if (!isCodeExecute) return approval.arguments;
+    return Object.fromEntries(
+      Object.entries(approval.arguments).filter(
+        ([key]) => key !== "code" && key !== "purpose",
+      ),
+    );
+  }, [approval.arguments, isCodeExecute]);
 
   const onDecide = (decision: ApprovalDecision) => {
     setClicked(decision);
@@ -94,10 +133,27 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
           </p>
           {headline && (
             <SimpleTooltip label={headline}>
-              <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+              <p
+                className={`mt-0.5 truncate text-xs text-muted-foreground ${
+                  isCodeExecute &&
+                  typeof approval.arguments.purpose === "string" &&
+                  approval.arguments.purpose.trim()
+                    ? ""
+                    : "font-mono"
+                }`}
+              >
                 {headline}
               </p>
             </SimpleTooltip>
+          )}
+          {isCodeExecute && riskTags.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {riskTags.map((tag) => (
+                <Badge key={tag} tone="muted" className="font-normal">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
           )}
           {argEntries.length > 0 && (
             <Button
@@ -115,7 +171,23 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
               {expanded ? "收起参数" : "查看参数"}
             </Button>
           )}
-          {expanded && argEntries.length > 0 && (
+          {expanded && isCodeExecute && codeText != null && (
+            <div className="mt-1 space-y-1">
+              {codeTruncated && (
+                <p className="text-xs text-muted-foreground">代码预览已截断</p>
+              )}
+              <ApprovalHighlightedCode
+                code={codeText}
+                language={codeExecuteLanguage(approval.arguments)}
+              />
+            </div>
+          )}
+          {expanded && isCodeExecute && Object.keys(otherArgs).length > 0 && (
+            <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-card/70 p-2 font-mono text-xs text-foreground">
+              {JSON.stringify(otherArgs, null, 2)}
+            </pre>
+          )}
+          {expanded && !isCodeExecute && argEntries.length > 0 && (
             <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-card/70 p-2 font-mono text-xs text-foreground">
               {JSON.stringify(approval.arguments, null, 2)}
             </pre>
@@ -162,5 +234,29 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
         </Button>
       </div>
     </DecisionCard>
+  );
+}
+
+function ApprovalHighlightedCode({
+  code,
+  language,
+}: {
+  code: string;
+  language: string;
+}) {
+  const markdown = useMemo(
+    () => fencedCodeMarkdown(code, language),
+    [code, language],
+  );
+  return (
+    <ReactMarkdown
+      rehypePlugins={HIGHLIGHT_PLUGINS}
+      components={{
+        pre: CodeBlock,
+        p: ({ children }) => <>{children}</>,
+      }}
+    >
+      {markdown}
+    </ReactMarkdown>
   );
 }

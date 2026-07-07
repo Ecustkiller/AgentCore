@@ -1,4 +1,5 @@
 import { CheckpointCard } from "@/components/chat/CheckpointCard";
+import { TurnWarningBanner } from "@/components/chat/TurnWarningBanner";
 import { EscalationCards } from "@/components/chat/EscalationCard";
 import { FileArtifactsCard } from "@/components/chat/FileArtifactsCard";
 import { InlineTeamGraph } from "@/components/chat/InlineTeamGraph";
@@ -11,7 +12,11 @@ import { Button, IconButton } from "@/components/ui";
 import { FinishReasonChip } from "@/components/ui/finish-reason-chip";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { referencedCitationNumbers } from "@/lib/citations";
-import { errorActionForCode } from "@/lib/errors";
+import {
+  degradedFinishChipLabel,
+  errorActionForCode,
+  formatAssistantErrorMessage,
+} from "@/lib/errors";
 import {
   fileArtifactsFromExecution,
   fileArtifactsFromProcess,
@@ -53,6 +58,7 @@ function MultiAgentFileArtifacts({
   process: ProcessStep[] | undefined;
 }) {
   const execution = useMessageExecution(messageId);
+  const conversationId = useConversationStore((s) => s.currentConversationId);
   const artifacts = useMemo(
     () =>
       mergeArtifacts(
@@ -61,7 +67,7 @@ function MultiAgentFileArtifacts({
       ),
     [process, execution],
   );
-  return <FileArtifactsCard artifacts={artifacts} />;
+  return <FileArtifactsCard artifacts={artifacts} conversationId={conversationId} />;
 }
 
 /**
@@ -145,6 +151,9 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const checkpoints = message.checkpoints ?? [];
   const nonBlockingAsks = message.nonBlockingAsks ?? [];
   const planReviews = message.planReviews ?? [];
+  const hideContentForCheckpoint = checkpoints.some(
+    (c) => c.status === "resolved",
+  );
   // 统一团队时间线: cards whose positional marker rides the inline timeline render there;
   // only un-anchored ones (no-process turns, or legacy rows whose process predates the
   // markers) still fall back to the bottom stack — never double-render.
@@ -246,7 +255,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       composingTool={
         message.executionId === null ? (message.composingTool ?? null) : null
       }
-      fallbackContent={message.content}
+      fallbackContent={hideContentForCheckpoint ? "" : message.content}
       executionId={message.executionId}
       messageId={message.id}
       journal={message.runs}
@@ -274,14 +283,14 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       {/* 长回答折叠 (对话基础功能补齐): while streaming, render full so the user watches
           it grow; once settled, cap a truly long answer to a fade + 展开全文 so it doesn't
           dominate the viewport (短/中答案原样全展). */}
-      {message.isStreaming ? (
+      {message.isStreaming && !hideContentForCheckpoint ? (
         <Markdown
           content={message.content}
           citations={citations}
           onCitationClick={onCitationClick}
           isStreaming={message.isStreaming}
         />
-      ) : (
+      ) : hideContentForCheckpoint ? null : (
         <CollapsibleSpeech
           contentKey={message.content}
           fadeToClass="from-background"
@@ -315,14 +324,23 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
 
   return (
     <div className="group min-w-0" onMouseEnter={onPeekCost}>
-      <FinishReasonChip reason={finishReason} />
+      <FinishReasonChip
+        reason={finishReason}
+        diagnosisLabel={degradedFinishChipLabel(
+          message.error?.context?.empty_diagnosis,
+          message.error?.message,
+        )}
+      />
+      {message.turnWarning && (
+        <TurnWarningBanner message={message.turnWarning} />
+      )}
       {turnBody}
       <ContinueTurnButton message={message} finishReason={finishReason} />
       {message.error && (
         <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
           <p className="min-w-0 flex-1 whitespace-pre-wrap break-words">
-            {message.error.message}
+            {formatAssistantErrorMessage(message.error)}
           </p>
           {errorAction && (
             <Button
@@ -346,7 +364,10 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       )}
       {message.executionId === null ? (
         singleAgentArtifacts.length > 0 && (
-          <FileArtifactsCard artifacts={singleAgentArtifacts} />
+          <FileArtifactsCard
+            artifacts={singleAgentArtifacts}
+            conversationId={conversationId}
+          />
         )
       ) : (
         <MultiAgentFileArtifacts

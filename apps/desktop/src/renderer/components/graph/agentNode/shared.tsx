@@ -41,6 +41,8 @@ export interface AgentNodeData {
   checkpoint?: RunCheckpoint | null;
   escalationPending?: number;
   escalationRaised?: number;
+  /** 该 run 的审计事件数（GraphView 角标；0 或未设则不渲染）。 */
+  auditEventCount?: number;
   /** Review/QC output flagged by {@link detectReviewConcern} (中间可见性 phase-1). */
   reviewConcern?: ReviewConcernLevel | null;
   enterIndex?: number;

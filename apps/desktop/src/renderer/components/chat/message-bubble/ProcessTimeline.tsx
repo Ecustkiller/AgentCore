@@ -170,13 +170,14 @@ export function ProcessTimeline({
   const hasTeamMarker = process.some((s) => s.kind === "team");
 
   const hasProcessSteps = nodes.some(isProcessNode);
-  const shouldCollapseProcess = !isStreaming && hasProcessSteps;
+  const { reasoningCount, toolCount } = countProcessStats(nodes);
+  const shouldCollapseProcess =
+    !isStreaming && hasProcessSteps && !(reasoningCount === 1 && toolCount === 0);
   const [processExpanded, toggleProcess] = useStreamAwareDisclosure(
     messageId ? `${messageId}:process` : null,
     isStreaming,
     { settledDefault: false },
   );
-  const { reasoningCount, toolCount } = countProcessStats(nodes);
   const processSummary = formatProcessSummary(reasoningCount, toolCount);
 
   const renderNode = (node: TimelineNode, i: number) => {

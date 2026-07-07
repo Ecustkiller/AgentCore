@@ -7,14 +7,27 @@ import { useState } from "react";
 
 /** One Skill tile: catalog summary, click-to-expand the full guidance body via
  * {@link PromptDocument}. */
-export function SkillCard({ skill }: { skill: CapabilitySkill }) {
+export function SkillCard({
+  skill,
+  disabled,
+  disabledHint,
+}: {
+  skill: CapabilitySkill;
+  disabled?: boolean;
+  disabledHint?: string;
+}) {
   const [open, setOpen] = useState(false);
   const skillColor = catalogCategoryColorVar("skill");
   return (
-    <div className="flex flex-col rounded-xl border border-border bg-card p-4">
+    <div
+      className={`flex flex-col rounded-xl border border-border bg-card p-4 ${
+        disabled ? "opacity-50" : ""
+      }`}
+    >
       <Button
         variant="ghost"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => !disabled && setOpen((v) => !v)}
+        disabled={disabled}
         className="h-auto w-full items-start gap-2 p-0 text-left font-normal"
       >
         <CatalogIconShell
@@ -38,6 +51,9 @@ export function SkillCard({ skill }: { skill: CapabilitySkill }) {
           }`}
         />
       </Button>
+      {disabled && disabledHint && (
+        <p className="mt-2 text-xs text-muted-foreground">{disabledHint}</p>
+      )}
       {open && (
         <PromptDocument
           text={skill.body}

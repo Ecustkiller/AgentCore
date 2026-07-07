@@ -43,6 +43,9 @@ NOT_INITIALIZED = -32002
 # A ``resume`` whose durable frame is gone (already resumed, or never persisted) —
 # the desktop drops the stale resume card, mirroring the cloud route's 404.
 PAUSED_TURN_NOT_FOUND = -32003
+# Resume failed after claim but the frame was rolled back — the desktop keeps the
+# resume card and may retry (non-destructive claim).
+RESUME_RETRYABLE = -32004
 
 
 class ProtocolError(ValueError):

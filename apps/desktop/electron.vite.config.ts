@@ -35,6 +35,9 @@ export default defineConfig(({ mode }) => {
     },
   },
   renderer: {
+    // electron-vite defaults root to src/renderer, so Vite's default publicDir would be
+    // src/renderer/public. Simulation GLBs live at apps/desktop/public/simulation/assets.
+    publicDir: resolve("public"),
     define: clientBuildDefine,
     // SECURITY (XSS-001 前端XSS·CSP): drop Vite's inline modulepreload polyfill. Electron's
     // bundled Chromium supports <link rel=modulepreload> natively, so the polyfill is dead

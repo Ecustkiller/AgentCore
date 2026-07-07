@@ -9,8 +9,8 @@ frames on reopen). Uses ``async_session_factory`` directly (not an injected requ
 session), matching the cost-ledger / session-roster persistence posture.
 
 The paused turn's journal-so-far rides the ``turn_journal`` table (唯一事实源, §8.3),
-NOT the frame: :func:`save_paused_turn` mirrors it there and :func:`claim_paused_turn`
-re-hydrates it, so the replay stream has a single home whether the turn is paused or
+NOT the frame: facts are appended on emit during the turn; :func:`claim_paused_turn`
+re-hydrates them, so the replay stream has a single home whether the turn is paused or
 completed.
 
 Saves are best-effort: a persistence failure logs and degrades to 2a in-memory
@@ -27,6 +27,7 @@ from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import PausedTurnRepository, TurnJournalRepository
 from agentcore.push import PushNotification, notify_user
 from agentcore.runtime.journal import runs_from_entries
+from agentcore.runtime.journal.writer import current_journal_writer
 from agentcore.runtime.suspension import (
     SuspensionKind,
     TurnSuspension,
@@ -42,10 +43,15 @@ async def save_paused_turn(suspension: TurnSuspension) -> None:
     Stamps the ambient turn ``trace_id`` (this runs inside the pipeline's trace
     scope) so the persisted pause links back to its originating turn's logs.
     Upsert: re-pausing the same turn (resume → pause again) overwrites in place.
-    The journal-so-far is NOT in the frame — it is mirrored into ``turn_journal``
-    (唯一事实源, §8.3) by :func:`_save_pause_journal`.
+    The journal-so-far is NOT in the frame — it was appended on emit to
+    ``turn_journal`` (唯一事实源, §8.3) during the turn.
     """
     trace_id = suspension.trace_id or get_log_value("trace_id") or None
+    writer = current_journal_writer.get()
+    if writer is not None:
+        await writer.flush()
+        if writer.degraded:
+            suspension.journal_degraded = True
     try:
         async with async_session_factory() as db:
             await PausedTurnRepository(db).upsert(
@@ -62,10 +68,6 @@ async def save_paused_turn(suspension: TurnSuspension) -> None:
             error=str(e),
         )
         return
-    # The frame is committed and alone makes the turn resumable; now mirror the
-    # journal-so-far as a SEPARATE best-effort write so its failure can never roll
-    # back the frame. A lost journal only costs the graph replay on reload.
-    await _save_pause_journal(suspension, trace_id)
     # A durable pause is the canonical 需要你 (attention) event: the turn is now BLOCKED
     # on the user and stays so until they act. Fan a native push out to their devices so
     # they learn even with the app backgrounded (SSE gone). Best-effort + default-off
@@ -99,38 +101,6 @@ async def _notify_pause(suspension: TurnSuspension) -> None:
             },
         ),
     )
-
-
-async def _save_pause_journal(suspension: TurnSuspension, trace_id: str | None) -> None:
-    """Record a paused turn's journal-so-far to ``turn_journal`` (唯一事实源, best-effort).
-
-    Keyed by the same ``message_id`` the resumed turn reuses, so the resume hydrates
-    it back (:func:`claim_paused_turn`) and the completed turn re-records it wholesale
-    (``record`` replaces). Re-pausing (resume → pause again) replaces the cumulative
-    stream. A failure logs and degrades — never breaks the pause.
-
-    Persists the §8.3 fact-log stream (:attr:`TurnSuspension.journal_entries` — the
-    suspending face's ``current_fact_log`` snapshot: execution facts interleaved with
-    forwarded display facts) so the paused journal is ``window_from_journal``-rebuildable
-    for resume.
-    """
-    entries = list(suspension.journal_entries)
-    if not entries:
-        return
-    try:
-        async with async_session_factory() as db:
-            await TurnJournalRepository(db).record(
-                turn_id=suspension.message_id,
-                conversation_id=suspension.conversation_id,
-                trace_id=trace_id,
-                entries=entries,
-            )
-    except Exception as e:  # noqa: BLE001 — journal persistence must never break the turn
-        logger.warning(
-            "suspension.journal_persist_failed",
-            message_id=suspension.message_id,
-            error=str(e),
-        )
 
 
 async def delete_paused_turn(message_id: str) -> None:
@@ -186,6 +156,11 @@ async def claim_paused_turn(
     suspension.journal_entries = list(entries or [])
     runs = runs_from_entries(entries)
     suspension.journal = list((runs or {}).get("events") or [])
+    if suspension.journal_degraded and not suspension.journal_entries:
+        logger.warning(
+            "suspension.claim_journal_degraded",
+            message_id=message_id,
+        )
     return suspension
 
 

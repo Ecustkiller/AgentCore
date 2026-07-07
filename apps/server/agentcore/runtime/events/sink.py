@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 
+from agentcore.core.logging import get_logger
 from agentcore.runtime.events.journal_config import (
     _HISTORY_COALESCE_RUN,
     _HISTORY_COALESCE_TURN,
@@ -23,12 +25,22 @@ from agentcore.runtime.facts import Fact, record_turn_fact
 # Shared with the conformance oracle (projection.py) so live + golden agree.
 ORCHESTRATION_TOOLS = frozenset({"delegate", "debate"})
 
+logger = get_logger(__name__)
+
 
 class EventSink:
     """Async queue bridging execution (producer) and SSE (consumer)."""
 
-    def __init__(self) -> None:
+    _checkpoint_interval: float = 10.0
+
+    def __init__(
+        self,
+        *,
+        conversation_id: str | None = None,
+        message_id: str | None = None,
+    ) -> None:
         self._queue: asyncio.Queue[SSEEvent | None] = asyncio.Queue()
+        self._persist_barriers: asyncio.Queue[asyncio.Future[None] | None] = asyncio.Queue()
         self._closed = False
         self._detached = False
         self._history: list[SSEEvent] = []
@@ -36,9 +48,98 @@ class EventSink:
         self._process: list[dict[str, Any]] = []
         self._has_run_plan = False
         self._has_tool = False
+        self._conversation_id = conversation_id
+        self._message_id = message_id
+        self._checkpoint_task: asyncio.Task[None] | None = None
+        self._checkpoint_inflight: asyncio.Task[None] | None = None
+        self._last_checkpointed_content: str | None = None
+        self._captain_run_id: str | None = None
+        if conversation_id and message_id:
+            self._try_start_checkpoint_loop()
+
+    def bind_content_checkpoint(
+        self,
+        *,
+        conversation_id: str,
+        message_id: str,
+    ) -> None:
+        """Wire progressive content persistence for this turn's assistant row."""
+        self._conversation_id = conversation_id
+        self._message_id = message_id
+        self._try_start_checkpoint_loop()
+
+    def _try_start_checkpoint_loop(self) -> None:
+        if self._checkpoint_task is not None or self._closed:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._checkpoint_task = loop.create_task(self._checkpoint_loop())
+
+    async def _checkpoint_loop(self) -> None:
+        try:
+            while not self._closed:
+                await asyncio.sleep(self._checkpoint_interval)
+                if self._closed:
+                    break
+                await self._do_checkpoint()
+        except asyncio.CancelledError:
+            pass
+
+    async def _do_checkpoint(self) -> None:
+        if not self._conversation_id or not self._message_id:
+            return
+        content = self.streamed_content()
+        if content == self._last_checkpointed_content:
+            return
+        try:
+            from agentcore.db.base import async_session_factory
+            from agentcore.db.repositories import MessageRepository
+
+            async with async_session_factory() as session:
+                await MessageRepository(session).update_assistant_content(
+                    conversation_id=self._conversation_id,
+                    message_id=self._message_id,
+                    content=content,
+                )
+            self._last_checkpointed_content = content
+        except Exception as e:
+            logger.warning(
+                "chat.content_checkpoint_failed",
+                conversation_id=self._conversation_id,
+                message_id=self._message_id,
+                error=str(e),
+            )
+
+    def checkpoint_now(self) -> None:
+        """Schedule an immediate best-effort content checkpoint (non-blocking)."""
+        if not self._conversation_id or not self._message_id or self._closed:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if self._checkpoint_inflight is not None and not self._checkpoint_inflight.done():
+            return
+        self._checkpoint_inflight = loop.create_task(self._do_checkpoint())
+
+    def _maybe_checkpoint_on_worker_terminal(self, event: SSEEvent) -> None:
+        t = event.type
+        if t == EventType.RUN_STARTED and event.payload.get("kind") == "captain":
+            self._captain_run_id = event.payload.get("run_id")
+            return
+        if t == EventType.RUN_COMPLETED:
+            if event.payload.get("role") != "captain":
+                self.checkpoint_now()
+        elif t == EventType.RUN_FAILED:
+            run_id = event.payload.get("run_id")
+            if run_id and run_id != self._captain_run_id:
+                self.checkpoint_now()
 
     def emit(self, event: SSEEvent) -> None:
         if not self._closed:
+            persist_future: asyncio.Future[None] | None = None
             if event.type in _JOURNAL_EVENT_TYPES:
                 self._journal.append(
                     {
@@ -47,7 +148,7 @@ class EventSink:
                         "timestamp": event.timestamp,
                     }
                 )
-                record_turn_fact(
+                persist_future = record_turn_fact(
                     Fact(
                         kind=event.type.value,
                         payload=event.payload,
@@ -56,8 +157,10 @@ class EventSink:
                 )
             self._accumulate_process(event)
             self._record_history(event)
+            self._maybe_checkpoint_on_worker_terminal(event)
             if not self._detached:
                 self._queue.put_nowait(event)
+                self._persist_barriers.put_nowait(persist_future)
 
     def _record_history(self, event: SSEEvent) -> None:
         t = event.type
@@ -104,11 +207,14 @@ class EventSink:
         while True:
             try:
                 self._queue.get_nowait()
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    self._persist_barriers.get_nowait()
             except asyncio.QueueEmpty:
                 break
         snapshot = list(self._history)
         if self._closed:
             self._queue.put_nowait(None)
+            self._persist_barriers.put_nowait(None)
         else:
             self._detached = False
         return snapshot
@@ -260,10 +366,20 @@ class EventSink:
     def close(self) -> None:
         if not self._closed:
             self._closed = True
+            if self._checkpoint_task is not None:
+                self._checkpoint_task.cancel()
+                self._checkpoint_task = None
             self._queue.put_nowait(None)
+            self._persist_barriers.put_nowait(None)
 
     async def get(self) -> SSEEvent | None:
-        return await self._queue.get()
+        event = await self._queue.get()
+        if event is None:
+            return None
+        barrier = await self._persist_barriers.get()
+        if barrier is not None:
+            await barrier
+        return event
 
     async def __aiter__(self):
         while True:

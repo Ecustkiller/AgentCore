@@ -13,8 +13,10 @@ from agentcore.core.errors import error_fields_for
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.llm.credentials import LLMCredentials
-from agentcore.llm.modes import ProfileSet, default_profile_set
+from agentcore.llm.profiles import TurnProfiles as ProfileSet
+from agentcore.llm.profiles import default_turn_profiles as default_profile_set
 from agentcore.runtime.approvals import ApprovalGate
+from agentcore.runtime.audit.hooks import bind_recorder
 from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.costing import RunCost, captain_run_cost_from_state
 from agentcore.runtime.events import (
@@ -25,14 +27,16 @@ from agentcore.runtime.events import (
     message_end,
     message_start,
 )
+from agentcore.runtime.facts import TurnFactLog, current_fact_log
 from agentcore.runtime.interaction import default_interaction_registry
+from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
 from agentcore.runtime.pipeline.resume.finish import finish_resume_turn, finish_terminal_resume
 from agentcore.runtime.pipeline.resume.settle import (
     append_resumed_tool_results,
     settle_resumed_suspension,
 )
 from agentcore.runtime.pipeline.resume.window import pre_pause_content, resumed_captain_window
-from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset
+from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset, _wire_worker_memory_tools
 from agentcore.runtime.runs import RunKind, RunPhase, RunSpec, build_captain_resumer
 from agentcore.runtime.sessions import SessionLoader, SessionSaver, default_session_registry
 from agentcore.runtime.skills import build_system_skill_registry
@@ -73,6 +77,7 @@ async def resume_chat_pipeline(
     session_loader: SessionLoader | None = None,
     suspension_saver: SuspensionSaver | None = None,
     suspension_deleter: SuspensionDeleter | None = None,
+    llm_supports_tools: bool | None = None,
 ) -> dict:
     """Continue a turn paused at a plan_review / ask_user checkpoint (结构化挂起 2b resume).
 
@@ -109,8 +114,32 @@ async def resume_chat_pipeline(
     # resume_plan runs) captures it into the fresh frame — symmetric with the live turn
     # (Phase 2 ⑤). Reset in finally.
     history_token = turn_history.set(history or [])
+    from agentcore.core.log_context import get_log_value
+
+    journal_writer = TurnJournalWriter(
+        turn_id=message_id,
+        conversation_id=conversation_id,
+        trace_id=suspension.trace_id or get_log_value("trace_id"),
+        initial_seq=len(suspension.journal_entries),
+    )
+    journal_writer_token = current_journal_writer.set(journal_writer)
+    audit_recorder, audit_token = bind_recorder(
+        user_id=suspension.user_id,
+        conversation_id=conversation_id,
+        turn_id=message_id,
+        trace_id=suspension.trace_id or get_log_value("trace_id"),
+        captain_run_id=captain_run_id,
+        delegated=bool(getattr(suspension, "plan", None) and getattr(suspension.plan, "nodes", None)),
+    )
+    fact_log = TurnFactLog(inherited_entries=list(suspension.journal_entries))
+    fact_log_token = current_fact_log.set(fact_log)
     try:
         worker_tools = build_worker_registry(backend=backend)
+        _wire_worker_memory_tools(
+            worker_tools,
+            memory_enabled=suspension.memory_enabled,
+            folder_id=suspension.folder_id,
+        )
         # Same system-skill registry as a fresh turn so the resumed CEO loop can
         # still consult_skill (提示词瘦身 P2), including the legal vertical skill when
         # enabled. The CEO prompt itself is replayed from the stored transcript
@@ -241,15 +270,19 @@ async def resume_chat_pipeline(
         if settled.terminal_text is not None:
             if settled.terminal_text:
                 sink.emit(content_delta(settled.terminal_text))
-            return finish_terminal_resume(
+            result = finish_terminal_resume(
                 message_id=message_id,
                 pre_pause_content=pre_pause,
                 closing=settled.terminal_text,
                 sink=sink,
             )
+            await audit_recorder.flush()
+            result["audit_drops"] = audit_recorder.drops
+            return result
 
         # Otherwise run the CEO loop to its reply (it may delegate / ask again).
         profile = profiles.get("chat")
+        turn_model = profiles.model_for("chat")
         citations: list[dict] = []
         captain_spec = RunSpec(
             run_id=captain_run_id,
@@ -267,8 +300,10 @@ async def resume_chat_pipeline(
             sink=sink,
             base_tool_context=base_tool_context,
             profile=profile,
+            turn_model=turn_model,
             citation_sink=citations,
             approval_gate=approval_gate,
+            supports_tools=llm_supports_tools,
         )
         captain_state = await run_captain(captain_spec, messages)
 
@@ -289,6 +324,7 @@ async def resume_chat_pipeline(
                 # died (§九.4 Gap ②): carry those vision rows so the spend isn't lost.
                 *(asdict(r) for r in vision_cost_sink),
             ]
+            await audit_recorder.flush()
             return {
                 "message_id": message_id,
                 "content": "",
@@ -296,9 +332,10 @@ async def resume_chat_pipeline(
                 "error_code": ErrorCode.PIPELINE_ERROR,
                 "finish_reason": FinishReason.ERROR,
                 "cost_runs": cost_runs,
+                "audit_drops": audit_recorder.drops,
             }
 
-        return finish_resume_turn(
+        result = finish_resume_turn(
             message_id=message_id,
             captain_run_id=captain_run_id,
             captain_state=captain_state,
@@ -311,24 +348,36 @@ async def resume_chat_pipeline(
             sink=sink,
             vision_cost_runs=vision_cost_sink,
         )
+        await audit_recorder.flush()
+        result["audit_drops"] = audit_recorder.drops
+        return result
 
     except Exception as e:
         logger.error("pipeline.resume_error", error=str(e), exc_info=True)
         # Preserve a structured AgentCoreError.code that escaped to the resume
         # boundary instead of flattening every crash to PIPELINE_ERROR (统一错误码).
-        code, message = error_fields_for(
+        code, message, err_ctx = error_fields_for(
             e, fallback_code=ErrorCode.PIPELINE_ERROR, fallback_message=str(e)
         )
-        sink.emit(error_event(code, message))
+        sink.emit(error_event(code, message, context=err_ctx))
         sink.emit(message_end(FinishReason.ERROR))
+        await audit_recorder.flush()
         return {
             "message_id": message_id,
             "content": "",
             "error": str(e),
             "error_code": code,
             "finish_reason": FinishReason.ERROR,
+            "audit_drops": audit_recorder.drops,
         }
     finally:
+        current_fact_log.reset(fact_log_token)
+        current_journal_writer.reset(journal_writer_token)
+        from agentcore.runtime.audit.recorder import current_audit_recorder
+
+        with contextlib.suppress(Exception):
+            await audit_recorder.flush()
+        current_audit_recorder.reset(audit_token)
         turn_history.reset(history_token)
         # Do NOT close the sink here (see run_chat_pipeline): its owner closes it, so the
         # resumed turn's persist_turn_result tail (title / followups) still reaches the client.

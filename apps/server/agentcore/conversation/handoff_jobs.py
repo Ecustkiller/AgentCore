@@ -13,7 +13,7 @@ from agentcore.db.repositories import (
     HandoffJobRepository,
     MessageRepository,
 )
-from agentcore.llm.byok import LLMCredentials, resolve_user_llm_credentials
+from agentcore.llm.resolve import LLMCredentials, resolve_user_llm_credentials
 from agentcore.runtime.events import EventSink, error_event, handoff_job_started
 from agentcore.runtime.journal import persist_turn_journal
 from agentcore.runtime.pipeline import run_chat_pipeline
