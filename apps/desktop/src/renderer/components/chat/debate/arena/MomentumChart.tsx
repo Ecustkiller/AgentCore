@@ -35,7 +35,7 @@ export function MomentumChart({
               return (
                 <span
                   key={key}
-                  className="w-1.5 rounded-sm"
+                  className="w-1.5 rounded-lg"
                   style={{
                     height: h,
                     backgroundColor: colorByKey[key],

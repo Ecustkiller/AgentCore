@@ -103,6 +103,12 @@ const KEYFRAMES: HourKeyframe[] = [
   },
 ];
 
+function keyframeAt(index: number): HourKeyframe {
+  const k = KEYFRAMES[index];
+  if (!k) throw new Error(`dayNight: missing keyframe at index ${index}`);
+  return k;
+}
+
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
@@ -124,12 +130,12 @@ function lerpVec3(
 /** Smooth palette for fractional hour (0–24 wraps). */
 export function dayNightPaletteForHour(hour: number): DayNightPalette {
   const h = ((hour % 24) + 24) % 24;
-  let from = KEYFRAMES[KEYFRAMES.length - 1]!;
-  let to = KEYFRAMES[0]!;
+  let from = keyframeAt(KEYFRAMES.length - 1);
+  let to = keyframeAt(0);
 
   for (let i = 0; i < KEYFRAMES.length; i++) {
-    const cur = KEYFRAMES[i]!;
-    const next = KEYFRAMES[(i + 1) % KEYFRAMES.length]!;
+    const cur = keyframeAt(i);
+    const next = keyframeAt((i + 1) % KEYFRAMES.length);
     if (h >= cur.hour && h < next.hour) {
       from = cur;
       to = next;
@@ -137,7 +143,7 @@ export function dayNightPaletteForHour(hour: number): DayNightPalette {
     }
     if (i === KEYFRAMES.length - 1 && h >= cur.hour) {
       from = cur;
-      to = KEYFRAMES[0]!;
+      to = keyframeAt(0);
       break;
     }
   }

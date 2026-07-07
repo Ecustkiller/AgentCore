@@ -59,10 +59,7 @@ def _macro_summary(metrics_series: list[dict]) -> dict[str, float]:
 
 
 def _report_variance(label: str, values: list[float]) -> float:
-    if len(values) < 2:
-        reported = 0.0
-    else:
-        reported = variance(values)
+    reported = 0.0 if len(values) < 2 else variance(values)
     logger.info("INT-04 variance %s: values=%s variance=%.6f", label, values, reported)
     return reported
 

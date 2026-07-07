@@ -202,7 +202,6 @@ export function SimulationPlaybackControls({
   };
 
   const onJumpDayOne = () => runSeek(MIN_PLAYBACK_TICK);
-  const onJumpLatest = () => void goLivePlayback(run.id, liveRunTail());
 
   const displayHour =
     cachedSnapshot?.hour ??

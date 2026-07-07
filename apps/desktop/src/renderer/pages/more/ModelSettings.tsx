@@ -32,7 +32,7 @@ import {
   ShieldCheck,
   XCircle,
 } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { SettingsHeader } from "./SettingsHeader";
 
 const INPUT_CLASS =
@@ -50,10 +50,13 @@ export function ModelSettings() {
   const [editing, setEditing] = useState(false);
   const queryClient = useQueryClient();
 
-  const syncStatus = (next: LlmKeyStatus) => {
-    setStatus(next);
-    queryClient.setQueryData(llmKeyKeys.status, next);
-  };
+  const syncStatus = useCallback(
+    (next: LlmKeyStatus) => {
+      setStatus(next);
+      queryClient.setQueryData(llmKeyKeys.status, next);
+    },
+    [queryClient],
+  );
 
   useEffect(() => {
     let alive = true;
@@ -68,7 +71,7 @@ export function ModelSettings() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [syncStatus]);
 
   return (
     <div>

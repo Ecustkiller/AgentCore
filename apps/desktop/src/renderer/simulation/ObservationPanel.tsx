@@ -10,6 +10,7 @@ import {
 } from "@/simulation/regionStats";
 import { useSimulationUiStore } from "@/simulation/store/simulationStore";
 import { useSimulationView } from "@/simulation/viewState";
+import { worldModifierChips } from "@/simulation/worldModifiers";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
@@ -89,7 +90,13 @@ function RegionCard({
 
 export function ObservationPanel() {
   const run = useSimulationUiStore((s) => s.run);
-  const { viewTick, viewAgents } = useSimulationView();
+  const { viewTick, viewAgents, viewModifiers, replayActive } =
+    useSimulationView();
+
+  const modifierChips = useMemo(
+    () => worldModifierChips(viewModifiers),
+    [viewModifiers],
+  );
 
   const regionStats = useMemo(
     () => computeRegionStats(viewAgents),
@@ -100,11 +107,10 @@ export function ObservationPanel() {
   const [metricsError, setMetricsError] = useState<string | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
 
-  const refreshMetrics = useCallback(async () => {
-    if (!run?.id) return;
+  const fetchMetrics = useCallback(async (runId: string) => {
     setMetricsLoading(true);
     try {
-      const res = await getSimulationMetrics(run.id);
+      const res = await getSimulationMetrics(runId);
       setMetricsSeries(res.metrics ?? []);
       setMetricsError(null);
     } catch (err) {
@@ -112,16 +118,20 @@ export function ObservationPanel() {
     } finally {
       setMetricsLoading(false);
     }
-  }, [run?.id]);
+  }, []);
 
+  // Refetch macro metrics when the live run tick advances (not only on mount).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run?.tick is an intentional refetch trigger
   useEffect(() => {
-    void refreshMetrics();
-  }, [refreshMetrics, run?.tick]);
+    if (!run?.id) return;
+    void fetchMetrics(run.id);
+  }, [run?.id, run?.tick, fetchMetrics]);
 
-  const chartData = useMemo(
-    () => seriesToChartRows(metricsSeries),
-    [metricsSeries],
-  );
+  const chartData = useMemo(() => {
+    const rows = seriesToChartRows(metricsSeries);
+    if (!replayActive) return rows;
+    return rows.filter((row) => row.tick <= viewTick);
+  }, [metricsSeries, replayActive, viewTick]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -130,6 +140,24 @@ export function ObservationPanel() {
         <p className="mt-0.5 text-xs text-muted-foreground">
           Tick {viewTick} · 7 个区域实时人口与情绪
         </p>
+        {modifierChips.length > 0 ? (
+          <ul className="mt-2 flex flex-wrap gap-1.5">
+            {modifierChips.map((chip) => (
+              <li
+                key={chip.id}
+                className={`rounded-full px-2 py-0.5 text-xs ${
+                  chip.tone === "warn"
+                    ? "bg-warning/15 text-warning-foreground"
+                    : chip.tone === "positive"
+                      ? "bg-success/15 text-success"
+                      : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {chip.label}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <div className="mt-3 grid grid-cols-2 gap-2">
           {regionStats.map((region) => (
             <RegionCard
@@ -149,7 +177,7 @@ export function ObservationPanel() {
           <button
             type="button"
             className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-            onClick={() => void refreshMetrics()}
+            onClick={() => run?.id && void fetchMetrics(run.id)}
             disabled={metricsLoading}
           >
             {metricsLoading ? "刷新中…" : "刷新"}

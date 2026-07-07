@@ -4,4 +4,5 @@
 // golden 向量是后端导出的 JSON（fixtures/*.json，单一源 = runtime/conformance），本包
 // 不含任何 app 业务实现——每端用自己的 fold 调 runConformance()。
 export * from "./projectedTurn";
+export * from "./fixtureKind";
 export * from "./harness";

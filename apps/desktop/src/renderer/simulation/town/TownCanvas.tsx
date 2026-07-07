@@ -14,6 +14,7 @@ import { TownLighting } from "./TownLighting";
 import { TownNpc } from "./TownNpc";
 import { TownRegionHeatmap } from "./TownRegionHeatmap";
 import { TownRegions } from "./TownRegions";
+import { TownWorldEffects } from "./TownWorldEffects";
 import { TrackingCamera } from "./TrackingCamera";
 import { buildTownSpawnTable, seedTownSpawnsIfNeeded } from "./agentSpawn";
 import { TOWN_GLB_URLS } from "./assetPaths";
@@ -47,6 +48,7 @@ function TownSceneContent() {
   return (
     <TownCharacterAssetsProvider>
       <TownLighting />
+      <TownWorldEffects />
       <PerspectiveCamera makeDefault position={[...TOWN_CAMERA_POS]} fov={44} />
       <OrbitControls
         ref={controlsRef}

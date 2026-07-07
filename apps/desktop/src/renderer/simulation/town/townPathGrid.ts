@@ -1,5 +1,7 @@
 import * as THREE from "three";
+import { REGION_POSITIONS } from "../regionPositions";
 import { TOWN_REGIONS } from "./regionLayout";
+import { TOWN_ROADS, TOWN_ZONE_GROUNDS } from "./townGround";
 
 /** World bounds — matches nav plane 80×64 centered at origin. */
 const MIN_X = -40;
@@ -13,35 +15,92 @@ const ROWS = Math.ceil((MAX_Z - MIN_Z) / CELL);
 
 type GridCell = { gx: number; gz: number };
 
+type GroundPatch = {
+  position: readonly [number, number, number];
+  size: readonly [number, number];
+};
+
 let obstacleGrid: boolean[][] | null = null;
 
+function forEachCellInRect(
+  x0: number,
+  x1: number,
+  z0: number,
+  z1: number,
+  fn: (gx: number, gz: number) => void,
+): void {
+  const g0x = Math.floor((x0 - MIN_X) / CELL);
+  const g1x = Math.ceil((x1 - MIN_X) / CELL);
+  const g0z = Math.floor((z0 - MIN_Z) / CELL);
+  const g1z = Math.ceil((z1 - MIN_Z) / CELL);
+  for (let gx = g0x; gx < g1x; gx += 1) {
+    for (let gz = g0z; gz < g1z; gz += 1) {
+      if (gx >= 0 && gx < COLS && gz >= 0 && gz < ROWS) {
+        fn(gx, gz);
+      }
+    }
+  }
+}
+
+function markWalkablePatch(blocked: boolean[][], patch: GroundPatch): void {
+  const [x, , z] = patch.position;
+  const [w, d] = patch.size;
+  forEachCellInRect(x - w / 2, x + w / 2, z - d / 2, z + d / 2, (gx, gz) => {
+    blocked[gx][gz] = false;
+  });
+}
+
+function markBlockedRect(
+  blocked: boolean[][],
+  x0: number,
+  x1: number,
+  z0: number,
+  z1: number,
+): void {
+  forEachCellInRect(x0, x1, z0, z1, (gx, gz) => {
+    blocked[gx][gz] = true;
+  });
+}
+
+/** Roads + zone lots walkable; building footprints block on top. */
 function buildObstacleGrid(): boolean[][] {
   if (obstacleGrid) return obstacleGrid;
 
   const blocked = Array.from({ length: COLS }, () =>
-    Array.from({ length: ROWS }, () => false),
+    Array.from({ length: ROWS }, () => true),
   );
 
-  const markRect = (x0: number, x1: number, z0: number, z1: number) => {
-    const g0x = Math.floor((x0 - MIN_X) / CELL);
-    const g1x = Math.ceil((x1 - MIN_X) / CELL);
-    const g0z = Math.floor((z0 - MIN_Z) / CELL);
-    const g1z = Math.ceil((z1 - MIN_Z) / CELL);
-    for (let gx = g0x; gx < g1x; gx += 1) {
-      for (let gz = g0z; gz < g1z; gz += 1) {
-        if (gx >= 0 && gx < COLS && gz >= 0 && gz < ROWS) {
-          blocked[gx][gz] = true;
-        }
-      }
-    }
-  };
+  for (const patch of TOWN_ROADS) {
+    markWalkablePatch(blocked, patch);
+  }
+  for (const patch of TOWN_ZONE_GROUNDS) {
+    markWalkablePatch(blocked, patch);
+  }
 
   for (const region of TOWN_REGIONS) {
     for (const model of region.models) {
       const [x, , z] = model.position;
       const half = 3.2 * (model.scale ?? 1);
-      markRect(x - half, x + half, z - half, z + half);
+      markBlockedRect(blocked, x - half, x + half, z - half, z + half);
     }
+  }
+
+  // Roads stay connected even when building meshes overlap the asphalt.
+  for (const patch of TOWN_ROADS) {
+    markWalkablePatch(blocked, patch);
+  }
+
+  // Backend / SSE authoritative anchors must remain reachable.
+  for (const anchor of Object.values(REGION_POSITIONS)) {
+    forEachCellInRect(
+      anchor.x - CELL,
+      anchor.x + CELL,
+      anchor.z - CELL,
+      anchor.z + CELL,
+      (gx, gz) => {
+        blocked[gx][gz] = false;
+      },
+    );
   }
 
   obstacleGrid = blocked;
@@ -51,6 +110,14 @@ function buildObstacleGrid(): boolean[][] {
 /** Test hook — rebuild grid after layout edits. */
 export function resetTownPathGridForTests(): void {
   obstacleGrid = null;
+}
+
+/** @internal Test helper — whether a world XZ point is on a walkable cell. */
+export function isTownWalkableAt(x: number, z: number): boolean {
+  const grid = buildObstacleGrid();
+  const cell = worldToGrid(x, z);
+  if (!cell) return false;
+  return isWalkable(grid, cell.gx, cell.gz);
 }
 
 function worldToGrid(x: number, z: number): GridCell | null {
@@ -72,10 +139,7 @@ function isWalkable(grid: boolean[][], gx: number, gz: number): boolean {
   return gx >= 0 && gx < COLS && gz >= 0 && gz < ROWS && !grid[gx][gz];
 }
 
-function nearestWalkable(
-  grid: boolean[][],
-  cell: GridCell,
-): GridCell | null {
+function nearestWalkable(grid: boolean[][], cell: GridCell): GridCell | null {
   if (isWalkable(grid, cell.gx, cell.gz)) return cell;
   const queue: GridCell[] = [cell];
   const seen = new Set<string>([`${cell.gx},${cell.gz}`]);
@@ -101,11 +165,7 @@ function nearestWalkable(
   return null;
 }
 
-function astar(
-  grid: boolean[][],
-  start: GridCell,
-  goal: GridCell,
-): GridCell[] {
+function astar(grid: boolean[][], start: GridCell, goal: GridCell): GridCell[] {
   if (start.gx === goal.gx && start.gz === goal.gz) return [start];
 
   const key = (c: GridCell) => `${c.gx},${c.gz}`;
@@ -136,7 +196,8 @@ function astar(
       const path: GridCell[] = [current];
       let k = currentKey;
       while (cameFrom.has(k)) {
-        const prev = cameFrom.get(k)!;
+        const prev = cameFrom.get(k);
+        if (!prev) break;
         path.unshift(prev);
         k = key(prev);
       }
@@ -168,8 +229,53 @@ function astar(
   return [];
 }
 
+function hasLineOfSight(
+  grid: boolean[][],
+  from: GridCell,
+  to: GridCell,
+): boolean {
+  let x0 = from.gx;
+  let z0 = from.gz;
+  const x1 = to.gx;
+  const z1 = to.gz;
+  const dx = Math.abs(x1 - x0);
+  const dz = Math.abs(z1 - z0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sz = z0 < z1 ? 1 : -1;
+  let err = dx - dz;
+
+  while (true) {
+    if (!isWalkable(grid, x0, z0)) return false;
+    if (x0 === x1 && z0 === z1) return true;
+    const e2 = err * 2;
+    if (e2 > -dz) {
+      err -= dz;
+      x0 += sx;
+    }
+    if (e2 < dx) {
+      err += dx;
+      z0 += sz;
+    }
+  }
+}
+
+function simplifyPathCells(grid: boolean[][], cells: GridCell[]): GridCell[] {
+  if (cells.length <= 2) return cells;
+
+  const simplified: GridCell[] = [cells[0]];
+  let anchor = 0;
+  for (let i = 2; i < cells.length; i++) {
+    if (!hasLineOfSight(grid, cells[anchor], cells[i])) {
+      simplified.push(cells[i - 1]);
+      anchor = i - 1;
+    }
+  }
+  simplified.push(cells[cells.length - 1]);
+  return simplified;
+}
+
 /**
- * Grid A* path that avoids building footprints from region layout.
+ * Grid A* on roads + zone lots (buildings blocked).
  * Returns empty when no route — caller should not straight-line through obstacles.
  */
 export function computeTownPath(
@@ -188,5 +294,6 @@ export function computeTownPath(
   const cells = astar(grid, start, goal);
   if (cells.length === 0) return [];
 
-  return cells.map((c) => gridToWorld(c.gx, c.gz));
+  const simplified = simplifyPathCells(grid, cells);
+  return simplified.map((c) => gridToWorld(c.gx, c.gz));
 }

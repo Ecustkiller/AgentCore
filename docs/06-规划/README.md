@@ -16,7 +16,7 @@
 | [真多模型辩论与视频](真多模型辩论与谁更聪明视频.md) | 跨模型辩手 + 内容 |
 | [聊天页面体验优化](聊天页面体验优化.md) | 聊天 UI 六个优化方向 |
 | [多 Agent 协作审计功能](多Agent协作审计功能.md) | Phase 1 ✅ 已落地（→ [安全权限与治理 §八](/docs/05-平台与运维/安全权限与治理.md)）；Phase 2–3 待定 |
-| [AgentTown 客户端规格](AgentTown客户端规格.md) | Unity 独立观测客户端（路线 B）；复用 Python 模拟后端，退役 Desktop R3F |
+| [AgentTown 客户端规格](AgentTown客户端规格.md) | Unreal Engine 5.5 独立观测客户端（路线 B）；复用 Python 模拟后端，退役 Desktop R3F |
 
 ## 已退役系列
 

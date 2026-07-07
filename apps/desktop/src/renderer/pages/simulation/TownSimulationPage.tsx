@@ -34,7 +34,7 @@ export function TownSimulationPage() {
 
   useEffect(() => {
     if (!isTownPreviewMode(location.search)) return;
-    seedTownPreview();
+    seedTownPreview(location.search);
   }, [location.search]);
 
   useEffect(() => {

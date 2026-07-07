@@ -125,9 +125,9 @@ describe("agent spawn consistency", () => {
   });
 
   it("agent home locations match defined regions", () => {
-    const regionIds = new Set(TOWN_REGIONS.map((r) => r.id));
     for (const id of TOWN_AGENT_IDS) {
-      expect(regionIds.has(TOWN_AGENT_HOME[id] as any)).toBe(true);
+      const home = TOWN_AGENT_HOME[id];
+      expect(TOWN_REGIONS.some((r) => r.id === home)).toBe(true);
     }
   });
 

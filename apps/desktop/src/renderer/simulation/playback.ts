@@ -2,6 +2,7 @@ import {
   type SimTickSnapshot,
   getTickSnapshot,
 } from "@/services/simulation/api";
+import { fetchReplayEvents } from "@/services/simulation/replayEvents";
 import { MIN_PLAYBACK_TICK } from "@/simulation/jumpTarget";
 import {
   applyTickSnapshot,
@@ -32,12 +33,34 @@ export async function ensureTickSnapshot(
   return frame.snapshot;
 }
 
+async function ensureReplayEvents(
+  runId: string,
+  toTick: number,
+): Promise<void> {
+  const store = useSimulationUiStore.getState();
+  if (
+    store.replayEventsRunId === runId &&
+    toTick <= store.replayEventsLoadedUpTo &&
+    store.replayEventLog.length > 0
+  ) {
+    return;
+  }
+  const tail = store.run?.tick ?? toTick;
+  const loadTo = Math.min(Math.max(toTick, store.replayEventsLoadedUpTo), tail);
+  if (loadTo < MIN_PLAYBACK_TICK) return;
+  const events = await fetchReplayEvents(runId, MIN_PLAYBACK_TICK, loadTo);
+  store.setReplayEventLog(runId, loadTo, events);
+}
+
 /** Scrub or step playback to a historical tick (replay mode). */
 export async function seekToTick(runId: string, tick: number): Promise<void> {
   const gen = nextSeekGeneration();
   const store = useSimulationUiStore.getState();
   store.enterReplay(tick);
-  const snapshot = await ensureTickSnapshot(runId, tick);
+  const [snapshot] = await Promise.all([
+    ensureTickSnapshot(runId, tick),
+    ensureReplayEvents(runId, tick).catch(() => {}),
+  ]);
   if (isSeekStale(gen)) return;
   if (useSimulationUiStore.getState().playhead !== tick) return;
   applyTickSnapshot(snapshot);
@@ -58,6 +81,7 @@ export async function goLivePlayback(
     applyTickSnapshot(snapshot);
     return;
   }
+  store.clearReplayEventLog();
   store.goLive();
 }
 

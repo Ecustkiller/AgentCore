@@ -161,16 +161,16 @@ WorldEngine 驱动 tick 推进
 
 直接采用 3D 低多边形（Low-Poly）风格，不经过 2D 过渡阶段。
 
-> **客户端实现路线（2026-07-08）**：观测层改为 **Unity 独立应用 AgentTown**（路线 B），不再在 Desktop 内嵌 R3F。详见 → [AgentTown 客户端规格](06-规划/AgentTown客户端规格.md)。
+> **客户端实现路线（2026-07-08）**：观测层改为 **Unreal Engine 5.5 独立应用 AgentTown**（路线 B），不再在 Desktop 内嵌 R3F。详见 → [AgentTown 客户端规格](06-规划/AgentTown客户端规格.md)。
 
 | 组件 | 选择 | 理由 |
 |------|------|------|
-| 观测客户端 | **Unity 2022.3 LTS**（`apps/town` AgentTown） | 独立应用；3D 工程成熟（NavMesh、Animator、Profiler）；路线 B 定案 → [AgentTown 客户端规格](06-规划/AgentTown客户端规格.md) |
-| 3D 场景 | Unity 内置渲染管线 + Kenney 资产 | Low-Poly；资产源 `packages/town-assets` |
-| NPC | NavMeshAgent + Animator | 单 GLB（Xbot）实例化区分居民 |
-| 状态管理 | C# `SimulationSession` 单例 | 禁止多 store 分裂；对齐 tick 快照权威 |
+| 观测客户端 | **Unreal Engine 5.5**（`apps/town` AgentTown） | 独立应用；画面为长期卖点；避免日后二次迁移；路线 B 定案 → [AgentTown 客户端规格](06-规划/AgentTown客户端规格.md) |
+| 3D 场景 | UE 默认渲染管线 + Kenney / Fab 免费资产 | Low-Poly；资产源 `packages/town-assets` |
+| NPC | Character + AIController + NavMesh | 单 FBX/GLB（Xbot）实例化区分居民 |
+| 状态管理 | C++ `SimulationSession` 单例 | 禁止多 store 分裂；对齐 tick 快照权威 |
 | Desktop 角色 | 启动器 + `session.json` | 不再内嵌 R3F；`?preview` 对照暂留 |
-| 场景资产 | Kenney + Quaternius | CC0 免费 low-poly 建筑/树木/道具 |
+| 场景资产 | Kenney + Quaternius + Fab 免费区 | CC0 免费 low-poly 建筑/树木/道具 |
 
 视觉风格：Low-Poly（低多边形）+ 柔和色调 + 日夜循环。参考 Monument Valley / Polybridge 审美。
 
@@ -193,7 +193,7 @@ WorldEngine 驱动 tick 推进
 | **Agent 运行时** | 角色人设（system persona）、分层记忆（情景/语义/程序性）、决策循环（感知→动机→行动）、内生动机（效用函数、目标栈、情绪标量） | 扩展现有 worker 运行时；动机层为新增 |
 | **交互协议** | Agent 间通信契约：自由对话、市场交易、投票、拍卖、辩论、结盟/背叛声明 | 首批可复用 `debate`；市场/投票为新原语 |
 | **观测与分析** | 全量实验记录、个体行为追踪、宏观指标聚合、涌现模式检测（聚类、突变点）、可视化 | 扩展 Turn Journal + 审计；新增指标管道 |
-| **3D 观测前端** | Low-Poly 世界渲染（Unity AgentTown）、居民 NPC 寻路与动画、鸟瞰相机 + 观测面板、SSE 驱动 + tick 快照回放 | 独立客户端 `apps/town`；`SimulationSession`；复用 REST/SSE 契约 |
+| **3D 观测前端** | Low-Poly 世界渲染（UE AgentTown）、居民 NPC 寻路与动画、鸟瞰相机 + 观测面板、SSE 驱动 + tick 快照回放 | 独立客户端 `apps/town`；`SimulationSession`；复用 REST/SSE 契约 |
 | **实验管理** | 场景 DSL/配置、参数网格、随机种子、分叉对比（A/B 世界）、可复现导出 | 新建；对接现有 conformance 向量思路 |
 
 ### 3.3 与任务型架构的关键差异

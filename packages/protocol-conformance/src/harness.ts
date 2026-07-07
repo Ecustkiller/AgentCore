@@ -11,35 +11,16 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SSEEvent } from "@agentcore/contract-types";
 import type { ProjectedTurn } from "./projectedTurn";
+import { isTurnFixture, type TurnFixtureWire } from "./fixtureKind";
 
 /** A frontend's protocol fold under test: events[] → normalized ProjectedTurn. */
 export type Fold = (events: SSEEvent[]) => ProjectedTurn;
 
 /** One committed conformance case: a real-shaped event sequence + the backend
  * oracle's expected projection. */
-export interface Fixture {
-  name: string;
-  description: string;
-  events: SSEEvent[];
-  projected: ProjectedTurn;
-}
+export type Fixture = TurnFixtureWire;
 
 const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
-
-/** True when a JSON file is a turn-fold conformance vector (events[] + ProjectedTurn golden).
- * Skips auxiliary blobs (e.g. simulation-region-positions) and simulation fold vectors
- * (simulation-m1-tick — tested by desktop simConformance.test.ts, not turn fold). */
-function isTurnFixture(raw: unknown): raw is Fixture {
-  if (typeof raw !== "object" || raw === null) return false;
-  const o = raw as Record<string, unknown>;
-  if (typeof o.name !== "string" || !Array.isArray(o.events)) return false;
-  const projected = o.projected;
-  return (
-    typeof projected === "object" &&
-    projected !== null &&
-    "status" in (projected as Record<string, unknown>)
-  );
-}
 
 /** Load every committed turn-fold golden fixture (sorted by name for stable output). */
 export function loadFixtures(): Fixture[] {

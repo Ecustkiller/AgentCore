@@ -7,8 +7,8 @@
 > **产能与预算**：7 周主线（~112 人天产能）+ 第 8 周缓冲；**committed 工作量 ~108 人天**，另有 ~13 人天降级池（第 8 周尽量清）
 > **优先级铁律**：① **先验证产品赌注**——「10 个 LLM 居民能跑出可看的涌现」（最便宜的方式、最早，SPIKE-06）；② 再跑通「1 Agent + 手动 tick + 3D 动起来」管道闭环；③ 最后扩到 8–12 居民与核心交互
 > **开发阶段声明**：项目当前**无任何真实运行数据**（无真实用户 / 对话 / eval 跑分 / 质量分）。本计划中一切「时延 / 成本 / 方差阈值」均为**假设**，须由 Spike 与合成样本实测校准，不得当既有事实引用。
-> **状态**：`draft`（**3D 前端路线变更** → 见 [AgentTown 客户端规格](AgentTown客户端规格.md)：Unity 独立应用替代 Desktop R3F；后端与本计划 BE/DB 任务仍有效）
-> **更新**：2026-07-08
+> **状态**：`draft`（**3D 前端路线变更** → 见 [AgentTown 客户端规格](AgentTown客户端规格.md)：**Unreal Engine 5.5** 独立应用替代 Desktop R3F；后端与本计划 BE/DB 任务仍有效）
+> **更新**：2026-07-08（UE 定案，原 Unity `UT-*` → `UE-*`）
 
 ---
 
@@ -29,7 +29,7 @@
 | 桌面前端 | `apps/desktop/` `router.tsx` `sse/dispatch.ts` | 🟡 | Hash 路由与 SSE 泵送可仿照；现有 handler 强绑 chat/execution，需新增 sim dispatch |
 | SSE 可观测 | `api/sse.py` + `runtime/events/` | 🔴 | 管道成熟，但新增 `sim.*` 是**契约级改动**：`EventType` 枚举 + `disposition.py` 门禁 + 代码生成脚本 + 前端 dispatch handler + conformance 向量，**五处齐动** |
 | 前后端类型对齐 | `packages/contract-types/`（**非** `shared-types`）+ `contract-rest-types/` | 🔴 | SSE 事件名由 Python `EventType` 生成、**payload 手写**；REST 走 OpenAPI 生成；**无 Pydantic↔TS 双向 codegen** |
-| 3D 渲染 | `apps/town/` Unity | 🔴 | **2026-07-08 定案**：观测层改 **AgentTown 独立 Unity 客户端**（→ [AgentTown 客户端规格](AgentTown客户端规格.md)）；Desktop R3F **冻结对照**，Phase 1 后删除。后端 BE/DB 不变 |
+| 3D 渲染 | `apps/town/` Unreal Engine 5.5 | 🔴 | **2026-07-08 定案**：观测层改 **AgentTown 独立 UE 客户端**（→ [AgentTown 客户端规格](AgentTown客户端规格.md)）；Desktop R3F **冻结对照**，Phase 1 后删除。后端 BE/DB 不变 |
 | **尚未存在** | `simulation/` 包 | — | 本计划核心新建项 |
 
 **明确绕过**：`runtime/runs/` 的 CEO/DAG 路径、`conversation/` Turn 生命周期——模拟 run 独立生命周期。核实结论：绕过**方向合理**（ReAct 内核不依赖 CEO，eval 已有直调先例），现实工作量在**自建 sim 编排层**（prompt 装配、世界状态、持久化、SSE 契约、3D 同步），而非找不到内核。注意绕过 Turn 后将失去自动持久化 / `message_start` / `ApprovalGate`（后者需 `conversation_id`），如需须自建。
@@ -87,32 +87,32 @@
 
 ## 2. 任务分解表
 
-> **前端路线（2026-07-08）**：原 `FE-*` / `SPIKE-01` / `SPIKE-05`（R3F）**不再新增**；等价工作见 **§2.1 `UT-*` Unity 任务**。Desktop 仅保留 **DT-01**（`session.json` + 启动 AgentTown）。R3F 现有实现冻结作对照，Unity Phase 1 验收后删除 `simulation/town/*`。
+> **前端路线（2026-07-08）**：原 `FE-*` / `SPIKE-01` / `SPIKE-05`（R3F）**不再新增**；等价工作见 **§2.1 `UE-*` Unreal 任务**。Desktop 仅保留 **DT-01**（`session.json` + 启动 AgentTown）。R3F 现有实现冻结作对照，UE Phase 1 验收后删除 `simulation/town/*`。
 
-### 2.1 Unity 客户端任务映射（AgentTown · 替代 FE-*）
+### 2.1 Unreal Engine 客户端任务映射（AgentTown · 替代 FE-*）
 
 | 原 ID | 新 ID | AgentTown Phase | 标题 | 说明 |
 |-------|-------|-----------------|------|------|
-| SPIKE-01 | UT-00 | 0 | Unity Spike | `apps/town` 空项目；Bearer 调 API；1 NPC + 坐标变换 Go/No-Go |
+| SPIKE-01 | UE-00 | 0 | UE Spike | `apps/town` 空项目；Bearer 调 API；1 NPC + 坐标变换 Go/No-Go |
 | SPIKE-05 | — | — | （废弃） | Zustand/R3F 帧率验证不再适用 |
-| FE-01 | UT-01 | 1 | 应用壳 + Session | 替代 Desktop 路由壳；`SimulationSession` 单状态机 |
-| FE-02 | UT-02 | 1 | 7 区域场景 | Kenney 低模；`packages/town-assets` |
-| FE-03 | UT-03 | 1 | 单 NPC NavMesh | Xbot 实例化 + NavMeshAgent |
-| FE-04 | UT-04 | 1 | REST + SSE 客户端 | 对齐 §6.6 事件表；Live 忽略 `tick_frame` |
-| FE-05 | UT-05 | 1 | Tick 控制 UI | 推 tick / pause / 时钟 |
-| FE-06 | UT-06 | 1 | 10 NPC + LOD | |
-| FE-07 | UT-07 | 2 | 日夜循环 | 光照/天空 |
-| FE-08 | UT-08 | 1 | 居民面板 | + `GET /manifest` roster |
-| FE-09 | UT-09 | 2 | 事件时间线 | |
-| FE-10 | UT-10 | 1 | Run 管理 | 本地历史；中期 **BE-UT-01** `GET /runs` |
-| FE-11 | UT-11 | 3 | 交互 3D 叠加 | 气泡/交易/投票 |
-| FE-12 | UT-12 | 3 | 上帝模式 UI | 对齐 M3 |
-| FE-13 | UT-13 | 2 | 跟踪相机 | |
-| FE-14 | UT-14 | 2 | 观测热力 + metrics | `GET /metrics` |
-| FE-16/17 | UT-15 | 1 | 回放/倍速/跳转 | 仅 `GET /ticks/{n}` |
-| FE-18/19 | UT-16 | 2–3 | 资产精修/性能 | 30 FPS 硬底线 |
+| FE-01 | UE-01 | 1 | 应用壳 + Session | GameMode + `SimulationSession` 单状态机 |
+| FE-02 | UE-02 | 1 | 7 区域场景 | Kenney 低模；`packages/town-assets` |
+| FE-03 | UE-03 | 1 | 单 NPC NavMesh | Xbot 实例化 + Character NavMesh |
+| FE-04 | UE-04 | 1 | REST + SSE 客户端 | 对齐 §6.6 事件表；Live 忽略 `tick_frame` |
+| FE-05 | UE-05 | 1 | Tick 控制 UI | 推 tick / pause / 时钟（UMG） |
+| FE-06 | UE-06 | 1 | 10 NPC + LOD | |
+| FE-07 | UE-07 | 2 | 日夜循环 | 光照/天空 |
+| FE-08 | UE-08 | 1 | 居民面板 | + `GET /manifest` roster |
+| FE-09 | UE-09 | 2 | 事件时间线 | |
+| FE-10 | UE-10 | 1 | Run 管理 | 本地历史；中期 **BE-UE-01** `GET /runs` |
+| FE-11 | UE-11 | 3 | 交互 3D 叠加 | 气泡/交易/投票 |
+| FE-12 | UE-12 | 3 | 上帝模式 UI | 对齐 M3 |
+| FE-13 | UE-13 | 2 | 跟踪相机 | |
+| FE-14 | UE-14 | 2 | 观测热力 + metrics | `GET /metrics` |
+| FE-16/17 | UE-15 | 1 | 回放/倍速/跳转 | 仅 `GET /ticks/{n}` |
+| FE-18/19 | UE-16 | 2–3 | 资产精修/性能 | 30 FPS 硬底线 |
 | — | DT-01 | 1 | Desktop 启动器 | 写 `session.json`；「打开小镇」spawn AgentTown |
-| — | BE-UT-01 | 2 | Run 列表 API | `GET /v1/simulation/runs`（可选中期） |
+| — | BE-UE-01 | 2 | Run 列表 API | `GET /v1/simulation/runs`（可选中期） |
 
 完整规格 → [AgentTown 客户端规格](AgentTown客户端规格.md)。
 
@@ -122,14 +122,14 @@
 |----|------|------|------|---------|------|--------|
 | SPIKE-06 | 后端 | **涌现行为冒烟（产品赌注）** | headless 跑 3–5 个 SimAgent × ~10 tick（真实 LLM），人读 transcript 判断是否退化（复读 / 同质化 / 目标漂移 / 无聊）。**这是整个 MVP 的产品假设验证**，非管道验证。产出：行为样本 + go/no-go 判断 + 人设/prompt 调整建议。 | SPIKE-03 | 1.5d | SPIKE-01 |
 | SPIKE-03 | 后端 | SimAgent 绕过 conversation 接入 ReAct | 验证不经过 `conversation/turns` 直接调 `react_loop`：构造 system persona + 工具集 + 轻量 EventSink，避免绑定 `current_journal_writer`。产出：接入样板代码。 | 无 | 1.5d | SPIKE-01, SPIKE-02 |
-| UT-00 | Unity | **Unity Spike（替代 SPIKE-01）** | `apps/town`：REST Bearer 调通 create/tick/GET snapshot；1 NPC；wire→Unity 坐标变换；Go/No-Go 到 `市场 (24,0,0)`。产出：可运行 exe + FPS 粗测。 | 无 | 2d | SPIKE-02, SPIKE-03 |
-| SPIKE-01 | ~~前端~~ | ~~R3F~~ **已废弃** | → **UT-00**；R3F 代码冻结对照，不继续投入 | — | — | — |
+| UE-00 | Unreal | **UE Spike（替代 SPIKE-01）** | `apps/town`：REST Bearer 调通 create/tick/GET snapshot；1 NPC；wire→UE 坐标变换；Go/No-Go 到 `市场 (24,0,0)`。产出：可运行 exe + FPS 粗测。 | 无 | 3d | SPIKE-02, SPIKE-03 |
+| SPIKE-01 | ~~前端~~ | ~~R3F~~ **已废弃** | → **UE-00**；R3F 代码冻结对照，不继续投入 | — | — | — |
 | SPIKE-02 | 后端 | 并发 tick + **真实 LLM 时延/成本探针** | ① mock LLM 下用 `asyncio.gather+Semaphore` 跑 10/12 Agent 并发，测单 tick 墙钟与并发上限；② **用真实 LLM 跑 3 Agent × 2 tick，实测单次决策时延与 token 成本**，校准 R1 假设。产出：推荐 `max_parallel`、tick 超时策略、真实成本/时延基线。 | 无 | 2d | SPIKE-01, SPIKE-03 |
-| SPIKE-05 | ~~前端~~ | ~~Zustand/R3F~~ **已废弃** | Unity 单 Session 替代；无工时 | — | — | — |
-| DT-01 | Desktop | session.json + 启动器 | 登录后写 `%APPDATA%/AgentCore/session.json`；`/simulation/town` 改「打开 AgentTown」 | UT-00 | 1d | UT-01 |
+| SPIKE-05 | ~~前端~~ | ~~Zustand/R3F~~ **已废弃** | UE 单 Session 替代；无工时 | — | — | — |
+| DT-01 | Desktop | session.json + 启动器 | 登录后写 `%APPDATA%/AgentCore/session.json`；`/simulation/town` 改「打开 AgentTown」 | UE-00 | 1d | UE-01 |
 | SPIKE-04 | 集成 | 模拟 SSE 事件协议草案 | 定义 `sim.tick_started/ended`、`sim.agent_action`、`sim.interaction` 等 payload schema，走 `contract-types` 机制（Python `EventType` 生成事件名 + **手写 payload**）。产出：事件名枚举草案 + 手写 TS/Pydantic payload 对齐验证。 | 无 | 1d | SPIKE-01, SPIKE-03 |
 
-**M0 小计**：约 **9 人天**（第 1 周并行；SPIKE-01/03/06 的产出直接喂入 M1，非纯叠加）
+**M0 小计**：约 **10 人天**（第 1 周并行；UE-00 +1d vs 原 Unity；SPIKE-01/03/06 的产出直接喂入 M1，非纯叠加）
 
 ### M1 — 最小闭环（第 1–2 周）
 
@@ -209,7 +209,7 @@
 | FE-16 | 前端 | 时间轴回放 | 底部时间轴滑块：拖动到任意 tick 回放世界状态；暂停/播放/单步；对接 replay API。**连续自动播放基础已前移 M2；本项为时间轴滑块/拖动等完善**。 | BE-28 | 3d | FE-14 |
 | FE-17 | 前端 | 时间控制 UX | 播放速度（1x/2x/4x）、暂停/恢复自动推进、跳转到指定 tick/天。 | FE-05, BE-28 | 1.5d | FE-16 |
 | INT-04 | 集成 | MVP 验收测试 | 自动化：10 居民 × 20 tick × 3 次同配置运行；**测量并报告**宏观指标方差（不设硬阈值门，见 R6）；产出验收报告。 | M3 核心, BE-27 | 2d | INT-05 |
-| INT-05 | 集成 | 端到端 Smoke + 文档指针 | 保留 `pnpm -C apps/desktop sim:smoke:e2e`（HTTP）；Unity 补 region/conformance 单测；落地指针迁入 `03-AI核心`。 | INT-04 | 1d | — |
+| INT-05 | 集成 | 端到端 Smoke + 文档指针 | 保留 `pnpm -C apps/desktop sim:smoke:e2e`（HTTP）；UE 补 region/conformance Automation；落地指针迁入 `03-AI核心`。 | INT-04 | 1d | — |
 
 **M4 核心小计**：约 **16.5 人天**
 
@@ -232,16 +232,16 @@
 
 | 里程碑 | 任务数 | 预估人天 | 日历周 |
 |--------|--------|---------|--------|
-| M0 Spike | 6 | 9 | 第 1 周（与 M1 重叠） |
+| M0 Spike | 6 | 10 | 第 1 周（与 M1 重叠） |
 | M1 最小闭环 | 16 | 33 | 1–2 |
 | M2 多 Agent | 13 | 27 | 3–4 |
 | M3 交互事件 | 11 | 22.5 | 5–6 |
 | M4 核心 | 8 | 16.5 | 7 |
-| **committed 小计** | **54** | **~108** | **7 周** |
+| **committed 小计** | **54** | **~109** | **7 周** |
 | M4 降级池 | 6 | 13 | 8（缓冲/可砍） |
 | **合计** | **60** | **~121** | **7–8 周** |
 
-> **口径说明**：2 人（前后端各 1）+ AI ≈ 16 人天/周；7 周产能 112 人天，committed ~108 人天（≈96% 负荷）。**第 1–2 周为全程最紧**：M0(9) + M1(33) ≈ 42 人天，超两周产能（32），靠 SPIKE 与 M1 重叠消化——若 SPIKE 门未过则 M1 顺延、动用第 8 周缓冲。**第 8 整周为真缓冲**（committed 已排满第 1–7 周，不占第 8 周），吸收超支 + 尽量清降级池。
+> **口径说明**：2 人（前后端各 1）+ AI ≈ 16 人天/周；7 周产能 112 人天，committed ~109 人天（含 UE Spike +1d）。**第 1–2 周为全程最紧**：M0(10) + M1(33) ≈ 43 人天，超两周产能（32），靠 SPIKE 与 M1 重叠消化——若 SPIKE 门未过则 M1 顺延、动用第 8 周缓冲。**第 8 整周为真缓冲**（吸收 UE 学习曲线与联调超支 + 尽量清降级池）。
 >
 > 原头部「48–56 人天」为单人口径笔误：121 人天工作量在单人 8 人天/周下约需 15 周，故实际须 2 人全程（团队 16 人天/周）才能压进 7–8 周。
 
@@ -256,7 +256,7 @@
 | 🔴 P0 | **SPIKE-06** | **产品赌注**：涌现不成立则整个 MVP 价值存疑，须最早验证 |
 | 🔴 P0 | **SPIKE-03** | 阻塞一切 SimAgent 决策逻辑（也是 SPIKE-06 前置） |
 | 🔴 P0 | **BE-04 → BE-05 → BE-07 → INT-01** | 最小闭环是后续所有工作的前提 |
-| 🔴 P0 | **UT-00 → UT-03** | 3D 动起来是产品可见性锚点（Unity，非 R3F） |
+| 🔴 P0 | **UE-00 → UE-03** | 3D 动起来是产品可见性锚点（UE，非 R3F） |
 | 🟠 P1 | **BE-08** | 多 Agent 并发是从 demo 到产品的分水岭 |
 | 🟠 P1 | **BE-15 → BE-16/17/18** | 3 种核心交互是 AI 小镇核心价值 |
 | 🟡 P2 | BE-22, BE-25, FE-16 | 事件/观测/回放影响体验完整度，但不阻塞核心循环 |
@@ -275,7 +275,7 @@
 | R0 | **涌现不成立**：10 个 LLM 居民行为退化（复读/同质化/无聊），"不好看" | MVP 产品价值存疑 | 中 | **SPIKE-06 最早验证**；人设差异化 + 动机层硬约束 + 反思锚定；no-go 则先打磨单场景剧本再扩量 | SPIKE-06 不过则暂停扩量、回炉人设/prompt（用第 8 周缓冲） |
 | R1 | **LLM 成本/时延**：10 Agent × 20 tick = 200+ 次推理，单 tick 可能超 60s | 无法交互式观看 | 高 | **SPIKE-02 用真实 LLM 打时延/成本基线**（不止 mock）；分层模型（需自建，非现成）+ 激活剪枝；非活跃 Agent 走规则行为；tick 超时降级 | M2 预留 BE-09/BE-13 各 1d 调参 |
 | R2 | **行为漂移**：长运行后 Agent 忘记人设 | 验收失败 | 中 | tick 边界世界状态权威化；情景记忆写关键事实（BE-12 新建层）；每 6 tick 反思锚定；MVP 阈值设宽松 | BE-12 + BE-24 |
-| R3 | **3D 性能**：10 NPC + 寻路 + SSE 导致卡顿 | 观测体验差 | 中 | UT-00 FPS 基线；UT-16 Unity Profiler；位置按 tick snapshot 更新 | UT-16 / 降级池 |
+| R3 | **3D 性能**：10 NPC + 寻路 + SSE 导致卡顿 | 观测体验差 | 中 | UE-00 FPS 基线；UE-16 Profiler；位置按 tick snapshot 更新 | UE-16 / 降级池 |
 | R4 | **接缝 bug**：后端位置与 3D 坐标系 / `sim.*` 事件契约不一致 | INT 联调反复 | 高 | M1 INT-01 即建坐标契约测试；`contract-types` 统一 `Vec3` + 事件 payload；conformance 向量棘轮 | 每里程碑 INT 各留 0.5d |
 | R5 | **绕过 conversation 踩坑**：工具集/审计/成本计量/持久化缺失 | 后端返工 | 中 | SPIKE-03 充分验证；避免绑定 turn contextvar；复用 `runtime/audit/hooks.py` 思路；不复用 `ask_user`/审批门 | SPIKE-03 不成功则 +3d 方案重设 |
 | R6 | **可复现性方法论**：带温度 LLM 天然高方差，且**开发期无真实数据可设阈值** | 验收标准不可证伪 | 高 | 验收改为「方差**可测量并如实报告**」；固定 seed + 记录 temperature/模型版本（Run Manifest）；"阈值确定"降级为 Phase 2 研究项。**另：宏观指标测不到卖点「好不好看」——「好看/有意思」的验收方式暂不定，待第一个可连播版本落地后再拍板（届时可选：组织观看 + 1–5 分评分 / 仅指标 / 其它）** | 不设硬阈值门，避免"调到能过" |
@@ -290,14 +290,14 @@
 |--------|----------|---------|---------|---------|------|
 | 🔴 必须 | SPIKE-06 | **10 个 LLM 居民能跑出可看的涌现吗？** | 3–5 Agent × 10 tick，人读 transcript 无明显退化、有可识别的目标驱动行为 | 收敛到"强剧本 + 少量自由度"，或调人设/prompt 再验 | 第 1 周末 |
 | 🔴 必须 | SPIKE-03 | 能否不经过 conversation 跑通 ReAct？ | 单 Agent mock 环境完成 1 轮感知→行动，EventSink 有输出 | 薄封装 `conversation/local_turn` 伪 Turn | 第 1 天 |
-| 🔴 必须 | UT-00 | Unity + NavMesh + Xbot 能否跑通？（**卖点命门**） | 1 NPC；snapshot 驱动到 `市场`；≥ 30 FPS 粗测 | 同左；跑不通则砍其它保 3D，不降级 2D | 第 1 天 |
-| ~~SPIKE-01~~ | — | 已废弃 → UT-00 | | | |
+| 🔴 必须 | UE-00 | UE + NavMesh + Xbot 能否跑通？（**卖点命门**） | 1 NPC；snapshot 驱动到 `市场`；≥ 30 FPS 粗测 | 同左；跑不通则砍其它保 3D，不降级 2D | 第 1–3 天 |
+| ~~SPIKE-01~~ | — | 已废弃 → UE-00 | | | |
 | 🟠 重要 | SPIKE-02 | 并发 tick 墙钟 + **真实 LLM 时延/成本**？ | mock 10 Agent < 10s；**真实 LLM 单决策时延/成本落在可交互区间** | 降并发 / 减活跃 Agent / 换更快模型档 | 第 1 周 |
-| ~~SPIKE-05~~ | — | 已废弃（Unity 单 Session） | | | |
+| ~~SPIKE-05~~ | — | 已废弃（UE 单 Session） | | | |
 | 🟡 建议 | SPIKE-04 | `sim.*` 事件契约前后端对齐？ | 事件名生成 + 手写 payload TS/Pydantic 一致 | 先用 JSON Schema 手工对齐 | 第 1 周 |
 
 **Spike 决策门**：
-- **UT-00** 或 SPIKE-03 在 3 天内未达成功标准 → **暂停 M1 功能开发**，先解决技术方案（最多额外 3 天）。
+- **UE-00** 或 SPIKE-03 在 **5 天内**未达成功标准 → **暂停 M1 功能开发**，先解决技术方案（最多额外 3 天）。
 - SPIKE-06 判 no-go → **暂停扩量（M2 居民数），先回炉人设/prompt/动机层**；管道开发（M1）可继续，但不投入 M3 交互直到涌现成立。
 
 ---
@@ -309,7 +309,7 @@
 | 角色 | 周 1–2 | 周 3–4 | 周 5–6 | 周 7 | 周 8 |
 |------|--------|--------|--------|------|------|
 | **后端** | SPIKE-02/03/06, DB, BE-01~07 | BE-08~14 | BE-15~18, 22~24 | BE-25/27/28, INT-04 | 降级池 BE-26/29 |
-| **Unity** | UT-00~05, DT-01 | UT-06~10, UT-15 | UT-11~13 | UT-14/07/16 | 降级池 UT-16 精修 |
+| **Unreal** | UE-00~05, DT-01 | UE-06~10, UE-15 | UE-11~13 | UE-14/07/16 | 降级池 UE-16 精修 |
 | **Desktop** | DT-01 | 启动器维护 | — | — | — |
 | **共同** | INT-01（第 2 周末） | INT-02 | INT-03 | INT-05 | 缓冲 / ST-02 / 收尾 |
 
@@ -334,9 +334,9 @@
 | AI 小镇 8–12 居民 | BE-10, FE-06 | ✅ |
 | 手动 tick + 预设事件 | BE-05, BE-22, FE-05 | ✅ |
 | 核心交互（对话/交易/投票） | BE-15~18, FE-11 | ✅ |
-| AgentTown 3D 观测客户端 | UT-01~10, UT-15 | ⏳ |
+| AgentTown 3D 观测客户端 | UE-01~10, UE-15 | ⏳ |
 | Desktop 启动器 + session.json | DT-01 | ⏳ |
-| SSE 实时流 + 回放 + 连续自动播放 | BE-06, BE-28, UT-04, UT-15 | ⏳ |
+| SSE 实时流 + 回放 + 连续自动播放 | BE-06, BE-28, UE-04, UE-15 | ⏳ |
 | 数据库四表 | DB-01, DB-02 | ✅ |
 | 20+ tick 可观测 | INT-04 | ✅ |
 | 3 次同配置方差**可复现测量** | BE-27（固定 seed/版本）+ INT-04（测量报告） | ✅ |

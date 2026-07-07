@@ -106,8 +106,11 @@ describe("toDebateModel live cross-exam", () => {
 
     const model = toDebateModel(execution);
     expect(model).not.toBeNull();
-    expect(model!.settled).toBe(false);
-    const round = model!.rounds[0];
+    if (!model) throw new Error("expected debate model");
+    expect(model.settled).toBe(false);
+    const round = model.rounds[0];
+    expect(round).toBeDefined();
+    if (!round) throw new Error("expected round");
     expect(round.crossExam).toHaveLength(1);
     expect(round.crossExam[0].targetKey).toBe("pro");
     expect(round.crossExam[0].exchanges).toHaveLength(2);
@@ -186,8 +189,8 @@ describe("toDebateModel live cross-exam", () => {
     });
 
     const model = toDebateModel(execution);
-    expect(model!.rounds[0].crossExam[0].exchanges[0].answer).toBe(
-      "后端解析的权威答案",
-    );
+    expect(model).not.toBeNull();
+    const answer = model?.rounds[0]?.crossExam[0]?.exchanges[0]?.answer;
+    expect(answer).toBe("后端解析的权威答案");
   });
 });

@@ -35,7 +35,7 @@ export function SimulationRunManager({
 
   useEffect(() => {
     setSavedRuns(listSavedRuns());
-  }, [run?.id]);
+  }, []);
 
   const activateRun = async (
     next: SavedSimulationRun | ReturnType<typeof runFromWire>,

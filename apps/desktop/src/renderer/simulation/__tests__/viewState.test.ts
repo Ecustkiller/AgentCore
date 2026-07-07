@@ -2,8 +2,10 @@ import {
   type SimAgentView,
   type SimStreamEvent,
   agentsAtViewTick,
+  modifiersAtViewTick,
   tickEventsAtView,
 } from "@/simulation/store/simulationStore";
+import { DEFAULT_WORLD_MODIFIERS } from "@/simulation/worldModifiers";
 import { describe, expect, it } from "vitest";
 
 describe("tickEventsAtView", () => {
@@ -14,14 +16,21 @@ describe("tickEventsAtView", () => {
   ];
 
   it("caps events at playhead during replay", () => {
-    expect(tickEventsAtView(events, 2, true)).toHaveLength(2);
-    expect(tickEventsAtView(events, 2, true).every((e) => e.tick <= 2)).toBe(
-      true,
-    );
+    expect(tickEventsAtView(events, events, 2, true)).toHaveLength(2);
+    expect(
+      tickEventsAtView(events, events, 2, true).every((e) => e.tick <= 2),
+    ).toBe(true);
+  });
+
+  it("prefers replay log over live stream when replaying", () => {
+    const replayOnly = [
+      { id: "r", tick: 1, type: "sim.tick_started", summary: "replay" },
+    ];
+    expect(tickEventsAtView(events, replayOnly, 5, true)).toEqual(replayOnly);
   });
 
   it("returns all events in live mode", () => {
-    expect(tickEventsAtView(events, 2, false)).toHaveLength(3);
+    expect(tickEventsAtView(events, [], 2, false)).toHaveLength(3);
   });
 });
 
@@ -77,5 +86,31 @@ describe("agentsAtViewTick", () => {
       true,
     );
     expect(result.lin.location).toBe("市场");
+  });
+});
+
+describe("modifiersAtViewTick", () => {
+  it("reads modifiers from tick cache during replay", () => {
+    const replayModifiers = {
+      market_price_multiplier: 2,
+      storm_active: true,
+      festival_active: false,
+      square_attraction_boost: 0,
+    };
+    const result = modifiersAtViewTick(
+      DEFAULT_WORLD_MODIFIERS,
+      {
+        2: {
+          tick: 2,
+          hour: 10,
+          modifiers: replayModifiers,
+          agents: {},
+          event_log: [],
+        },
+      },
+      2,
+      true,
+    );
+    expect(result).toEqual(replayModifiers);
   });
 });

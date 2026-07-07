@@ -50,9 +50,7 @@ def _should_auto_light_delegate(tasks_raw: list[Any]) -> bool:
         return False
     if task.get("depends_on"):
         return False
-    if task.get("checkpoint_after") or task.get("bind_after_deps"):
-        return False
-    return True
+    return not (task.get("checkpoint_after") or task.get("bind_after_deps"))
 
 
 # Cap on how many nodes `delegate.started` lists by name/task — a big fan-out shouldn't

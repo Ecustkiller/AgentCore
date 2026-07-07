@@ -11,12 +11,17 @@ import {
   type TownAgentId,
 } from "@/simulation/town/townRoster";
 import { useSimulationView } from "@/simulation/viewState";
-import type { InteractionResult } from "@agentcore/contract-types";
+import type {
+  InteractionResult,
+  WorldEventWire,
+} from "@agentcore/contract-types";
 import {
   ChevronDown,
   ChevronRight,
+  CloudRain,
   Coins,
   MessageCircle,
+  Sparkles,
   Vote,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -55,6 +60,29 @@ function InteractionKindIcon({
     default:
       return null;
   }
+}
+
+function WorldEventIcon({ eventType }: { eventType: string }) {
+  const className = "h-3.5 w-3.5 shrink-0";
+  if (eventType === "storm") {
+    return <CloudRain className={className} aria-hidden />;
+  }
+  if (eventType === "festival" || eventType === "crowding") {
+    return <Sparkles className={className} aria-hidden />;
+  }
+  return <Sparkles className={className} aria-hidden />;
+}
+
+function WorldEventDetails({ event }: { event: WorldEventWire }) {
+  return (
+    <div className="mt-1.5 space-y-1 border-t border-border/60 pt-1.5 text-xs text-muted-foreground">
+      {event.description ? <p>{event.description}</p> : null}
+      <p>
+        持续 {event.duration_ticks} tick · 自 tick {event.tick_started}
+      </p>
+      {event.source ? <p>来源：{event.source}</p> : null}
+    </div>
+  );
 }
 
 function InteractionEventDetails({
@@ -134,7 +162,7 @@ function InteractionEventDetails({
           ) : null}
           {(interaction.transcript ?? []).length > 0 ? (
             <ul className="mt-1 space-y-0.5">
-              {interaction.transcript!.map((line, index) => (
+              {(interaction.transcript ?? []).map((line, index) => (
                 <li key={`${line.speaker_id}-${index}`}>
                   {line.speaker_name}：{line.text}
                 </li>
@@ -259,9 +287,13 @@ export function EventTimelinePanel() {
                     <ul className="space-y-1 border-t border-border px-3 py-2">
                       {events.map((ev) => {
                         const interaction = ev.interaction;
+                        const worldEvent = ev.worldEvent;
                         const isInteraction = ev.type === "sim.interaction";
+                        const isWorldEvent = ev.type === "sim.world_event";
                         const eventExpanded = expandedEvents.has(ev.id);
-                        const canExpand = isInteraction && interaction;
+                        const canExpand =
+                          (isInteraction && interaction) ||
+                          (isWorldEvent && worldEvent);
 
                         return (
                           <li
@@ -271,6 +303,11 @@ export function EventTimelinePanel() {
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                               {interaction ? (
                                 <InteractionKindIcon kind={interaction.kind} />
+                              ) : null}
+                              {worldEvent ? (
+                                <WorldEventIcon
+                                  eventType={worldEvent.event_type}
+                                />
                               ) : null}
                               <span className="text-foreground">
                                 {isInteraction && interaction
@@ -299,9 +336,13 @@ export function EventTimelinePanel() {
                                   {eventExpanded ? "收起详情" : "展开详情"}
                                 </button>
                                 {eventExpanded ? (
-                                  <InteractionEventDetails
-                                    interaction={interaction}
-                                  />
+                                  interaction ? (
+                                    <InteractionEventDetails
+                                      interaction={interaction}
+                                    />
+                                  ) : worldEvent ? (
+                                    <WorldEventDetails event={worldEvent} />
+                                  ) : null
                                 ) : null}
                               </>
                             ) : null}

@@ -2,6 +2,8 @@ import type { SimTickSnapshot } from "@/services/simulation/api";
 import type {
   InteractionResult,
   SimAgentState,
+  WorldEventWire,
+  WorldModifiersWire,
 } from "@agentcore/contract-types";
 import { create } from "zustand";
 import type { ActiveInteraction } from "../interactionModel";
@@ -14,6 +16,7 @@ import {
 } from "../town/townPersonas";
 import type { TownAgentId } from "../town/townRoster";
 import { TOWN_AGENT_HOME } from "../town/townRoster";
+import { DEFAULT_WORLD_MODIFIERS } from "../worldModifiers";
 
 export type PlaybackMode = "live" | "replay";
 export type PlaybackSpeed = 0.5 | 1 | 2 | 4;
@@ -34,6 +37,8 @@ export type SimStreamEvent = {
   summary: string;
   timestamp?: string;
   interaction?: InteractionResult;
+  worldEvent?: WorldEventWire;
+  modifiers?: WorldModifiersWire;
 };
 
 export type SimAgentView = {
@@ -157,6 +162,12 @@ export const useSimulationUiStore = create<{
   playing: boolean;
   playbackSpeed: PlaybackSpeed;
   tickCache: Record<number, SimTickSnapshot>;
+  /** Events from GET /replay — authoritative during scrub. */
+  replayEventLog: SimStreamEvent[];
+  replayEventsRunId: string | null;
+  replayEventsLoadedUpTo: number;
+  worldModifiers: WorldModifiersWire;
+  setWorldModifiers: (modifiers: WorldModifiersWire) => void;
   setRun: (run: SimulationRunView | null) => void;
   patchRun: (patch: Partial<SimulationRunView>) => void;
   setStreamStatus: (status: StreamStatus, error?: string | null) => void;
@@ -181,6 +192,12 @@ export const useSimulationUiStore = create<{
   setPlaying: (on: boolean) => void;
   setPlaybackSpeed: (speed: PlaybackSpeed) => void;
   cacheTickSnapshot: (tick: number, snapshot: SimTickSnapshot) => void;
+  setReplayEventLog: (
+    runId: string,
+    loadedTo: number,
+    events: SimStreamEvent[],
+  ) => void;
+  clearReplayEventLog: () => void;
   resetPlayback: () => void;
   resetSession: () => void;
 }>()((set, get) => ({
@@ -202,6 +219,11 @@ export const useSimulationUiStore = create<{
   playing: false,
   playbackSpeed: 1,
   tickCache: {},
+  replayEventLog: [],
+  replayEventsRunId: null,
+  replayEventsLoadedUpTo: 0,
+  worldModifiers: { ...DEFAULT_WORLD_MODIFIERS },
+  setWorldModifiers: (worldModifiers) => set({ worldModifiers }),
   setRun: (run) => set({ run }),
   patchRun: (patch) =>
     set((s) => (s.run ? { run: { ...s.run, ...patch } } : s)),
@@ -290,6 +312,9 @@ export const useSimulationUiStore = create<{
       playhead: null,
       playbackMode: "live",
       playing: false,
+      replayEventLog: [],
+      replayEventsRunId: null,
+      replayEventsLoadedUpTo: 0,
     }),
   setPlaying: (playing) => set({ playing }),
   setPlaybackSpeed: (playbackSpeed) => set({ playbackSpeed }),
@@ -299,6 +324,18 @@ export const useSimulationUiStore = create<{
       tickCache: { ...s.tickCache, [tick]: snapshot },
     }));
   },
+  setReplayEventLog: (runId, loadedTo, events) =>
+    set({
+      replayEventLog: events,
+      replayEventsRunId: runId,
+      replayEventsLoadedUpTo: loadedTo,
+    }),
+  clearReplayEventLog: () =>
+    set({
+      replayEventLog: [],
+      replayEventsRunId: null,
+      replayEventsLoadedUpTo: 0,
+    }),
   resetPlayback: () =>
     set({
       playhead: null,
@@ -306,6 +343,10 @@ export const useSimulationUiStore = create<{
       playing: false,
       playbackSpeed: 1,
       tickCache: {},
+      replayEventLog: [],
+      replayEventsRunId: null,
+      replayEventsLoadedUpTo: 0,
+      worldModifiers: { ...DEFAULT_WORLD_MODIFIERS },
     }),
   resetSession: () =>
     set({
@@ -324,6 +365,10 @@ export const useSimulationUiStore = create<{
       playing: false,
       playbackSpeed: 1,
       tickCache: {},
+      replayEventLog: [],
+      replayEventsRunId: null,
+      replayEventsLoadedUpTo: 0,
+      worldModifiers: { ...DEFAULT_WORLD_MODIFIERS },
       agents: Object.fromEntries(
         Object.values(personaCards).map((c) => [c.agentId, cardToView(c)]),
       ),
@@ -358,12 +403,28 @@ export function agentsAtViewTick(
 
 /** Tick events visible at the current playhead (replay caps at viewTick). */
 export function tickEventsAtView(
-  tickEvents: SimStreamEvent[],
+  liveEvents: SimStreamEvent[],
+  replayEvents: SimStreamEvent[],
   viewTick: number,
   replayActive: boolean,
 ): SimStreamEvent[] {
-  if (!replayActive) return tickEvents;
-  return tickEvents.filter((ev) => ev.tick <= viewTick);
+  const source =
+    replayActive && replayEvents.length > 0 ? replayEvents : liveEvents;
+  if (!replayActive) return source;
+  return source.filter((ev) => ev.tick <= viewTick);
+}
+
+/** World modifiers at playhead — tick snapshot wins during replay. */
+export function modifiersAtViewTick(
+  liveModifiers: WorldModifiersWire,
+  tickCache: Record<number, SimTickSnapshot>,
+  viewTick: number,
+  replayActive: boolean,
+): WorldModifiersWire {
+  if (!replayActive || viewTick <= 0) return liveModifiers;
+  const snapshot = tickCache[viewTick];
+  if (snapshot?.modifiers) return snapshot.modifiers;
+  return liveModifiers;
 }
 
 /**
@@ -377,6 +438,9 @@ export function applyTickSnapshot(snapshot: SimTickSnapshot): void {
   const poseBatch: Record<string, SimAgentPose> = {};
 
   useSimulationUiStore.getState().hydrateAgentsFromSnapshot(snapshot);
+  if (snapshot.modifiers) {
+    useSimulationUiStore.getState().setWorldModifiers(snapshot.modifiers);
+  }
 
   for (const [agentId, state] of Object.entries(agents)) {
     const pos = state.position;

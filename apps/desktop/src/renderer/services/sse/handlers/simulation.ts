@@ -1,4 +1,5 @@
 import { getTickSnapshot } from "@/services/simulation/api";
+import type { SimTickSnapshot } from "@/services/simulation/api";
 import { activeInteractionFromResult } from "@/simulation/interactionModel";
 import { updateSavedRun } from "@/simulation/runHistory";
 import { formatSimEventSummary } from "@/simulation/simEventFormat";
@@ -16,7 +17,9 @@ import type {
   SimAgentStatePayload,
   SimInteractionPayload,
   SimTickEndedPayload,
+  SimTickFramePayload,
   SimTickStartedPayload,
+  SimWorldEventPayload,
 } from "@agentcore/contract-types";
 import type { DispatchContext } from "../types";
 
@@ -57,6 +60,14 @@ function recordSimStreamEvent(
     event.type === "sim.interaction"
       ? (event.payload as SimInteractionPayload).interaction
       : undefined;
+  const worldEvent =
+    event.type === "sim.world_event"
+      ? (event.payload as SimWorldEventPayload).event
+      : undefined;
+  const modifiers =
+    event.type === "sim.world_event"
+      ? (event.payload as SimWorldEventPayload).modifiers
+      : undefined;
   useSimulationUiStore.getState().pushTickEvent({
     id: nextSimStreamEventId(),
     tick,
@@ -65,6 +76,8 @@ function recordSimStreamEvent(
     summary,
     timestamp: event.timestamp,
     interaction,
+    worldEvent,
+    modifiers,
   });
 }
 
@@ -79,7 +92,7 @@ export function dispatchSimulationEvent(
   if (ui.run && ui.run.id !== ctx.runId) return;
 
   const live = !isReplayActive();
-  if (live) {
+  if (live && event.type !== "sim.tick_frame") {
     recordSimStreamEvent(event);
   }
 
@@ -107,6 +120,22 @@ export function dispatchSimulationEvent(
           })
           .catch(() => {});
       }
+      break;
+    }
+    case "sim.tick_frame": {
+      if (!live) break;
+      const p = event.payload as SimTickFramePayload;
+      const snapshot = normalizeTickSnapshot(p.tick_number, p.snapshot);
+      ui.cacheTickSnapshot(p.tick_number, snapshot);
+      applyTickSnapshot(snapshot);
+      ui.patchRun({ tick: snapshot.tick, hour: snapshot.hour });
+      if (ui.run) {
+        updateSavedRun(ui.run.id, {
+          tick: snapshot.tick,
+          hour: snapshot.hour,
+        });
+      }
+      ui.setTicking(false);
       break;
     }
     case "sim.agent_action": {
@@ -165,6 +194,12 @@ export function dispatchSimulationEvent(
       });
       break;
     }
+    case "sim.world_event": {
+      if (!live) break;
+      const p = event.payload as SimWorldEventPayload;
+      ui.setWorldModifiers(p.modifiers);
+      break;
+    }
     default:
       break;
   }
@@ -186,4 +221,17 @@ export function handleSimulationEvent(
     console.debug("[sim]", event.type, event.payload);
   }
   return true;
+}
+
+/** Coerce replay / SSE tick_frame payload into store snapshot shape. */
+export function normalizeTickSnapshot(
+  tickNumber: number,
+  raw: Record<string, unknown>,
+): SimTickSnapshot {
+  return {
+    tick: typeof raw.tick === "number" ? raw.tick : tickNumber,
+    hour: typeof raw.hour === "number" ? raw.hour : 0,
+    agents: (raw.agents as SimTickSnapshot["agents"]) ?? {},
+    event_log: Array.isArray(raw.event_log) ? (raw.event_log as string[]) : [],
+  };
 }
