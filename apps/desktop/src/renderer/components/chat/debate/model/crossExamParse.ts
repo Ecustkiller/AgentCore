@@ -142,7 +142,11 @@ function resolveQuestionIndex(value: unknown, position: number): number | null {
     const n = Math.trunc(value);
     return n >= 1 ? n - 1 : n;
   }
-  if (typeof value === "string" && value.trim().length > 0 && /^\d+$/.test(value.trim())) {
+  if (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    /^\d+$/.test(value.trim())
+  ) {
     const n = Number(value.trim());
     return n >= 1 ? n - 1 : n;
   }
@@ -155,7 +159,10 @@ function asAnswerText(value: unknown): string {
   return String(value).trim();
 }
 
-function resolveDirectlyAddressed(item: Record<string, unknown>, answer: string): boolean {
+function resolveDirectlyAddressed(
+  item: Record<string, unknown>,
+  answer: string,
+): boolean {
   for (const key of ["directly_addressed", "ok"] as const) {
     const val = item[key];
     if (typeof val === "boolean") return val;
@@ -170,7 +177,9 @@ function splitSections(text: string): string[] {
   for (let i = 0; i < matches.length; i++) {
     const start = (matches[i].index ?? 0) + matches[i][0].length;
     const end =
-      i + 1 < matches.length ? (matches[i + 1].index ?? text.length) : text.length;
+      i + 1 < matches.length
+        ? (matches[i + 1].index ?? text.length)
+        : text.length;
     const chunk = text.slice(start, end).trim();
     if (chunk) sections.push(chunk);
   }
@@ -183,7 +192,8 @@ function splitBySemicolon(text: string, n: number): string[] {
     .map((c) => c.trim())
     .filter(Boolean);
   if (chunks.length >= n) return chunks.slice(0, n);
-  if (chunks.length === 1 && n > 1) return [chunks[0], ...Array(n - 1).fill("")];
+  if (chunks.length === 1 && n > 1)
+    return [chunks[0], ...Array(n - 1).fill("")];
   return [...chunks, ...Array(Math.max(0, n - chunks.length)).fill("")];
 }
 

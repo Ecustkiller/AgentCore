@@ -18,6 +18,7 @@ import { useUsageStore } from "@/stores/usage";
 import { Pencil, RotateCcw, Square, Wrench } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { AuditSection } from "./sections/RunAudit";
 import { DebriefSection } from "./sections/RunDebrief";
 import { DiagnosticSection } from "./sections/RunDiagnostics";
 import { EscalationSection } from "./sections/RunEscalations";
@@ -33,7 +34,6 @@ import {
 } from "./sections/RunRevisionChain";
 import { ThinkingSection } from "./sections/RunThinking";
 import { ToolCallsSection } from "./sections/RunToolCalls";
-import { AuditSection } from "./sections/RunAudit";
 import { Section, StatusBadge } from "./sections/shared";
 
 export { SchedulingDiag } from "./sections/RunDiagnostics";

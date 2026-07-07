@@ -1,10 +1,9 @@
-import { useMemo } from "react";
 import {
   agentsAtViewTick,
-  isReplayActive,
   tickEventsAtView,
   useSimulationUiStore,
 } from "@/simulation/store/simulationStore";
+import { useMemo } from "react";
 
 /** Shared playhead-aware view for panels, heatmap, and timeline. */
 export function useSimulationView() {
@@ -16,8 +15,7 @@ export function useSimulationView() {
   const tickEvents = useSimulationUiStore((s) => s.tickEvents);
 
   const viewTick = playhead ?? runTick ?? 0;
-  const replayActive =
-    playbackMode === "replay" || playhead !== null;
+  const replayActive = playbackMode === "replay" || playhead !== null;
 
   const viewAgents = useMemo(
     () => agentsAtViewTick(viewTick, agents, tickCache, replayActive),

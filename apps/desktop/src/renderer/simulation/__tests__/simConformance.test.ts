@@ -1,12 +1,14 @@
-import fixture from "@agentcore/protocol-conformance/fixtures/simulation-m1-tick.json" with { type: "json" };
-import type { SSEEvent } from "@agentcore/contract-types";
-import { describe, expect, it, beforeEach, vi } from "vitest";
 import { getTickSnapshot } from "@/services/simulation/api";
 import { dispatchSimulationEvent } from "@/services/sse/handlers/simulation";
 import {
   useSimulationNavStore,
   useSimulationUiStore,
 } from "@/simulation/store/simulationStore";
+import type { SSEEvent } from "@agentcore/contract-types";
+import fixture from "@agentcore/protocol-conformance/fixtures/simulation-m1-tick.json" with {
+  type: "json",
+};
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/simulation/api", () => ({
   getTickSnapshot: vi.fn(),

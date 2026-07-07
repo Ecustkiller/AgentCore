@@ -1,7 +1,6 @@
-import { describe, expect, it, beforeEach, vi } from "vitest";
 import {
-  getTickSnapshot,
   type SimTickFrameResponse,
+  getTickSnapshot,
 } from "@/services/simulation/api";
 import { dispatchSimulationEvent } from "@/services/sse/handlers/simulation";
 import {
@@ -14,6 +13,7 @@ import {
   useSimulationPositionsStore,
   useSimulationUiStore,
 } from "@/simulation/store/simulationStore";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/simulation/api", () => ({
   getTickSnapshot: vi.fn(),

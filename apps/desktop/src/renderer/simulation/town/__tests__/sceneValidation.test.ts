@@ -1,10 +1,13 @@
-import { describe, expect, it } from "vitest";
-import { TOWN_ROADS, TOWN_ZONE_GROUNDS } from "@/simulation/town/townGround";
-import { TOWN_REGIONS, TOWN_VIEW_CENTER } from "@/simulation/town/regionLayout";
-import { REGION_POSITIONS, TOWN_LOCATION_IDS } from "@/simulation/regionPositions";
-import { KENNEY_BUILDINGS, TOWN_GLB_URLS } from "@/simulation/town/assetPaths";
-import { TOWN_AGENT_HOME, TOWN_AGENT_IDS } from "@/simulation/town/townRoster";
+import {
+  REGION_POSITIONS,
+  TOWN_LOCATION_IDS,
+} from "@/simulation/regionPositions";
 import { buildTownSpawnTable } from "@/simulation/town/agentSpawn";
+import { TOWN_GLB_URLS } from "@/simulation/town/assetPaths";
+import { TOWN_REGIONS, TOWN_VIEW_CENTER } from "@/simulation/town/regionLayout";
+import { TOWN_ROADS, TOWN_ZONE_GROUNDS } from "@/simulation/town/townGround";
+import { TOWN_AGENT_HOME, TOWN_AGENT_IDS } from "@/simulation/town/townRoster";
+import { describe, expect, it } from "vitest";
 
 const BASE_GRASS_Y = -0.01;
 

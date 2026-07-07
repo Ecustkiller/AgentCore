@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import { formatSimEventSummary } from "@/simulation/simEventFormat";
+import { describe, expect, it } from "vitest";
 
 describe("formatSimEventSummary", () => {
   it("formats tick lifecycle events", () => {

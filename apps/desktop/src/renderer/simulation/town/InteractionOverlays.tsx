@@ -1,20 +1,20 @@
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
-import { useMemo, useRef, type ReactNode } from "react";
-import * as THREE from "three";
+import { type ReactNode, useMemo, useRef } from "react";
+import type * as THREE from "three";
 import {
+  type ActiveInteraction,
   interactionSucceeded,
   lastLineForAgent,
   tradeBriefLabel,
   truncateInteractionText,
   voteGovernanceDetails,
-  type ActiveInteraction,
 } from "../interactionModel";
+import { locationCenter } from "../regionPositions";
 import {
   useSimulationPositionsStore,
   useSimulationUiStore,
 } from "../store/simulationStore";
-import { locationCenter } from "../regionPositions";
 
 const BUBBLE_Y = 2.65;
 const TRADE_Y = 2.4;
@@ -160,7 +160,9 @@ function ConversationSpeechBubble({ text }: { text: string }) {
   );
 }
 
-function ConversationOverlay({ interaction }: { interaction: ActiveInteraction }) {
+function ConversationOverlay({
+  interaction,
+}: { interaction: ActiveInteraction }) {
   const targetId = interaction.targetId;
   if (!targetId) return null;
 
@@ -208,9 +210,7 @@ function TradeOverlay({ interaction }: { interaction: ActiveInteraction }) {
         <span className="max-w-[8rem] text-center font-medium">
           {tradeBriefLabel(interaction)}
         </span>
-        <span className="text-xs opacity-90">
-          {ok ? "成交" : "未成交"}
-        </span>
+        <span className="text-xs opacity-90">{ok ? "成交" : "未成交"}</span>
       </div>
     </BetweenAgentsAnchor>
   );
@@ -264,7 +264,9 @@ function VoteOverlay({ interaction }: { interaction: ActiveInteraction }) {
   );
 }
 
-function InteractionOverlayItem({ interaction }: { interaction: ActiveInteraction }) {
+function InteractionOverlayItem({
+  interaction,
+}: { interaction: ActiveInteraction }) {
   switch (interaction.kind) {
     case "conversation":
       return <ConversationOverlay interaction={interaction} />;
@@ -285,7 +287,10 @@ export function InteractionOverlays() {
     <>
       <InteractionExpiryJanitor />
       {interactions.map((interaction) => (
-        <InteractionOverlayItem key={interaction.id} interaction={interaction} />
+        <InteractionOverlayItem
+          key={interaction.id}
+          interaction={interaction}
+        />
       ))}
     </>
   );

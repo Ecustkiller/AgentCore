@@ -5,8 +5,8 @@ import { GodModePanel } from "./GodModePanel";
 import { ObservationPanel } from "./ObservationPanel";
 import { ResidentsPanel } from "./ResidentsPanel";
 import { SimulationJumpControls } from "./SimulationPlaybackControls";
-import { useSimulationUiStore } from "./store/simulationStore";
 import { formatSimClock } from "./simTime";
+import { useSimulationUiStore } from "./store/simulationStore";
 
 type SideTab = "observe" | "decisions" | "events" | "residents" | "god";
 

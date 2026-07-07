@@ -3,7 +3,10 @@ import { Target } from "lucide-react";
 import type { DebateRoundModel } from "../model";
 import { sidePositionSummary } from "./parseSpeechArguments";
 
-function sideOutput(execution: Execution, side: DebateRoundModel["sides"][number]): string {
+function sideOutput(
+  execution: Execution,
+  side: DebateRoundModel["sides"][number],
+): string {
   const run = side.run;
   if (!run) return "";
   const agent = execution.agents.find((a) => a.id === run.agentId);

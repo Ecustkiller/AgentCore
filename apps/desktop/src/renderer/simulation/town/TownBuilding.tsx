@@ -1,6 +1,6 @@
 import { useGLTF, useTexture } from "@react-three/drei";
 import { useMemo } from "react";
-import * as THREE from "three";
+import type * as THREE from "three";
 import { colormapUrlForGlb, prepareTownMesh } from "./townGltfUtils";
 
 /** One prepared mesh tree per GLB URL — instances shallow-clone to share geometry. */

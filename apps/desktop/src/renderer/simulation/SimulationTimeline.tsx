@@ -18,9 +18,10 @@ export function SimulationTimeline({
 }: SimulationTimelineProps) {
   const span = Math.max(max - min, 1);
   const dayCount = Math.floor(max / TICKS_PER_SIM_DAY) + 1;
-  const dayMarkers = Array.from({ length: dayCount }, (_, i) => i * TICKS_PER_SIM_DAY).filter(
-    (t) => t >= min && t <= max,
-  );
+  const dayMarkers = Array.from(
+    { length: dayCount },
+    (_, i) => i * TICKS_PER_SIM_DAY,
+  ).filter((t) => t >= min && t <= max);
 
   return (
     <div className="relative min-w-0 flex-1 px-1">

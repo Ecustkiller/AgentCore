@@ -1,4 +1,3 @@
-import { describe, expect, it } from "vitest";
 import {
   activeInteractionFromResult,
   lastLineForAgent,
@@ -6,12 +5,15 @@ import {
   truncateInteractionText,
   voteGovernanceDetails,
 } from "@/simulation/interactionModel";
+import { describe, expect, it } from "vitest";
 
 describe("interactionModel", () => {
   it("truncates long interaction text", () => {
     expect(truncateInteractionText("短句")).toBe("短句");
     expect(truncateInteractionText("a".repeat(50), 48)).toHaveLength(48);
-    expect(truncateInteractionText("a".repeat(50), 48).endsWith("…")).toBe(true);
+    expect(truncateInteractionText("a".repeat(50), 48).endsWith("…")).toBe(
+      true,
+    );
   });
 
   it("finds last transcript line per agent", () => {

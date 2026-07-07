@@ -1,4 +1,7 @@
-import { getTickSnapshot, type SimTickSnapshot } from "@/services/simulation/api";
+import {
+  type SimTickSnapshot,
+  getTickSnapshot,
+} from "@/services/simulation/api";
 import { MIN_PLAYBACK_TICK } from "@/simulation/jumpTarget";
 import {
   applyTickSnapshot,

@@ -29,10 +29,8 @@ export const townRenderDebug = {
     log("asset", "asset:clone", data),
   spawnInit: (data: Record<string, unknown>) =>
     log("spawn", "spawn:init", data),
-  animBind: (data: Record<string, unknown>) =>
-    log("anim", "anim:bind", data),
-  lodChange: (data: Record<string, unknown>) =>
-    log("lod", "lod:change", data),
+  animBind: (data: Record<string, unknown>) => log("anim", "anim:bind", data),
+  lodChange: (data: Record<string, unknown>) => log("lod", "lod:change", data),
   warnBounds: (data: Record<string, unknown>) =>
     log("asset", "warn:bounds", data),
 };

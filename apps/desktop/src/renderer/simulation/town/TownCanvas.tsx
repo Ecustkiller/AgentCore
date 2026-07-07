@@ -12,24 +12,17 @@ import { useSimulationUiStore } from "../store/simulationStore";
 import { InteractionOverlays } from "./InteractionOverlays";
 import { TownLighting } from "./TownLighting";
 import { TownNpc } from "./TownNpc";
-import { TownRegions } from "./TownRegions";
 import { TownRegionHeatmap } from "./TownRegionHeatmap";
+import { TownRegions } from "./TownRegions";
 import { TrackingCamera } from "./TrackingCamera";
+import { buildTownSpawnTable, seedTownSpawnsIfNeeded } from "./agentSpawn";
 import { TOWN_GLB_URLS } from "./assetPaths";
-import {
-  buildTownSpawnTable,
-  seedTownSpawnsIfNeeded,
-} from "./agentSpawn";
 import { createTownPathfinding } from "./navMesh";
 import { TOWN_VIEW_CENTER } from "./regionLayout";
-import { TOWN_AGENT_IDS } from "./townRoster";
 import { TownCharacterAssetsProvider } from "./townCharacterAssets";
 import { townColormapUrls } from "./townGltfUtils";
-import {
-  computeLodLevel,
-  TOWN_CAMERA_POS,
-  type LodLevel,
-} from "./townLod";
+import { type LodLevel, TOWN_CAMERA_POS, computeLodLevel } from "./townLod";
+import { TOWN_AGENT_IDS } from "./townRoster";
 import type { TownAgentId } from "./townRoster";
 
 function TownSceneContent() {
@@ -93,7 +86,12 @@ function TownCanvasLoading() {
 export function TownCanvas() {
   return (
     <Suspense fallback={<TownCanvasLoading />}>
-      <Canvas shadows className="h-full w-full" dpr={[1, 1.5]} data-town-canvas="ready">
+      <Canvas
+        shadows
+        className="h-full w-full"
+        dpr={[1, 1.5]}
+        data-town-canvas="ready"
+      >
         <TownSceneContent />
       </Canvas>
     </Suspense>

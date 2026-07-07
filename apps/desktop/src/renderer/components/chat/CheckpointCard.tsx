@@ -12,10 +12,10 @@ import {
   CircleHelp,
   Clock,
   Loader2,
+  type LucideIcon,
   OctagonX,
   Pencil,
   Rocket,
-  type LucideIcon,
 } from "lucide-react";
 import { useState } from "react";
 import {
@@ -186,9 +186,7 @@ export function AskUserCard({
           answer={ans}
           tone={tone}
           disabled={busy}
-          placeholder={
-            intent === "kickoff" ? "有补充可以写在这里" : "补充说明"
-          }
+          placeholder={intent === "kickoff" ? "有补充可以写在这里" : "补充说明"}
         />
       </div>
 

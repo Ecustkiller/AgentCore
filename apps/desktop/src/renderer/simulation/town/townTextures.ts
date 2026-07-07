@@ -90,7 +90,12 @@ function drawAsphalt(ctx: CanvasRenderingContext2D, base: Rgb): void {
   for (let i = 0; i < speckleCount; i += 1) {
     const lift = 12 + Math.random() * 28;
     ctx.fillStyle = `rgba(${clampByte(br + lift)}, ${clampByte(bg + lift)}, ${clampByte(bb + lift)}, ${0.12 + Math.random() * 0.2})`;
-    ctx.fillRect(Math.random() * TEXTURE_SIZE, Math.random() * TEXTURE_SIZE, 1, 1);
+    ctx.fillRect(
+      Math.random() * TEXTURE_SIZE,
+      Math.random() * TEXTURE_SIZE,
+      1,
+      1,
+    );
   }
 
   ctx.strokeStyle = `rgba(${clampByte(br + 18)}, ${clampByte(bg + 18)}, ${clampByte(bb + 18)}, 0.08)`;
@@ -112,7 +117,12 @@ function drawGravel(ctx: CanvasRenderingContext2D, base: Rgb): void {
     const shift = (Math.random() - 0.5) * 30;
     const size = 0.8 + Math.random() * 1.6;
     ctx.fillStyle = `rgb(${clampByte(br + shift)}, ${clampByte(bg + shift)}, ${clampByte(bb + shift)})`;
-    ctx.fillRect(Math.random() * TEXTURE_SIZE, Math.random() * TEXTURE_SIZE, size, size);
+    ctx.fillRect(
+      Math.random() * TEXTURE_SIZE,
+      Math.random() * TEXTURE_SIZE,
+      size,
+      size,
+    );
   }
 }
 
@@ -168,7 +178,12 @@ function drawPatio(ctx: CanvasRenderingContext2D, base: Rgb): void {
   for (let i = 0; i < 120; i += 1) {
     const shift = (Math.random() - 0.5) * 14;
     ctx.fillStyle = `rgba(${clampByte(br + shift)}, ${clampByte(bg + shift)}, ${clampByte(bb + shift)}, 0.3)`;
-    ctx.fillRect(Math.random() * TEXTURE_SIZE, Math.random() * TEXTURE_SIZE, 1.2, 1.2);
+    ctx.fillRect(
+      Math.random() * TEXTURE_SIZE,
+      Math.random() * TEXTURE_SIZE,
+      1.2,
+      1.2,
+    );
   }
 }
 
@@ -213,7 +228,9 @@ function createProceduralTexture(
   const canvas = createCanvas();
   const ctx = canvas.getContext("2d");
   if (!ctx) {
-    throw new Error("Failed to create 2D canvas context for town ground texture");
+    throw new Error(
+      "Failed to create 2D canvas context for town ground texture",
+    );
   }
 
   SURFACE_DRAWERS[kind](ctx, parseHex(baseColor));
@@ -251,7 +268,10 @@ export function getTownGroundTextureForPatch(
 ): Texture {
   const source = getTownGroundTexture(kind, baseColor);
   const texture = source.clone();
-  texture.repeat.set(patchSize[0] / metersPerTile, patchSize[1] / metersPerTile);
+  texture.repeat.set(
+    patchSize[0] / metersPerTile,
+    patchSize[1] / metersPerTile,
+  );
   texture.needsUpdate = true;
   return texture;
 }

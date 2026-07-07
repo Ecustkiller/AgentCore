@@ -1,12 +1,7 @@
-import type {
-  SimAgentActionPayload,
-  SimAgentStatePayload,
-  SimInteractionPayload,
-  SimTickEndedPayload,
-  SimTickStartedPayload,
-  SSEEvent,
-} from "@agentcore/contract-types";
 import { getTickSnapshot } from "@/services/simulation/api";
+import { activeInteractionFromResult } from "@/simulation/interactionModel";
+import { updateSavedRun } from "@/simulation/runHistory";
+import { formatSimEventSummary } from "@/simulation/simEventFormat";
 import {
   applyTickSnapshot,
   isReplayActive,
@@ -15,9 +10,14 @@ import {
   useSimulationPositionsStore,
   useSimulationUiStore,
 } from "@/simulation/store/simulationStore";
-import { updateSavedRun } from "@/simulation/runHistory";
-import { activeInteractionFromResult } from "@/simulation/interactionModel";
-import { formatSimEventSummary } from "@/simulation/simEventFormat";
+import type {
+  SSEEvent,
+  SimAgentActionPayload,
+  SimAgentStatePayload,
+  SimInteractionPayload,
+  SimTickEndedPayload,
+  SimTickStartedPayload,
+} from "@agentcore/contract-types";
 import type { DispatchContext } from "../types";
 
 const SIM_PREFIX = "sim.";
@@ -51,7 +51,7 @@ function recordSimStreamEvent(
   const tick =
     typeof (event.payload as { tick?: number }).tick === "number"
       ? (event.payload as { tick: number }).tick
-      : useSimulationUiStore.getState().run?.tick ?? 0;
+      : (useSimulationUiStore.getState().run?.tick ?? 0);
   const { agentId, summary } = formatSimEventSummary(event.type, event.payload);
   const interaction =
     event.type === "sim.interaction"

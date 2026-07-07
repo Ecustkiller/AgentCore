@@ -16,8 +16,8 @@ import type {
   DebateRoundScore,
   DebateRoundSide,
 } from "@/types/events";
-import { debateSideColorVar } from "./labels";
 import { parseCrossExamResponse } from "./crossExamParse";
+import { debateSideColorVar } from "./labels";
 import type {
   DebateClashView,
   DebateClosingView,
@@ -131,10 +131,7 @@ type LegacyDebateCrossExam = DebateCrossExam & {
   ok?: boolean;
 };
 
-function runOutputText(
-  execution: Execution,
-  run: RunNode | null,
-): string {
+function runOutputText(execution: Execution, run: RunNode | null): string {
   if (!run) return "";
   const agent = execution.agents.find((a) => a.id === run.agentId);
   return agent ? agent.outputChunks.join("") : "";

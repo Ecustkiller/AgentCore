@@ -1,27 +1,22 @@
+import type { Vec3 } from "@agentcore/contract-types";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useLayoutEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import type { Vec3 } from "@agentcore/contract-types";
-import type { Pathfinding } from "three-pathfinding";
+import type { TownPathfinding } from "./navMesh";
 import {
-  isReplayActive,
   type SimVec3Target,
+  isReplayActive,
   useSimulationNavStore,
   useSimulationPositionsStore,
   useSimulationUiStore,
 } from "../store/simulationStore";
-import { targetsEqual } from "./agentSpawn";
-import type { TownAgentId } from "./townRoster";
-import { computeTownPath } from "./navMesh";
 import { NpcAvatar } from "./NpcAvatar";
+import { targetsEqual } from "./agentSpawn";
+import { computeTownPath } from "./navMesh";
 import { useTownCharacterAssets } from "./townCharacterAssets";
-import {
-  computeLodLevel,
-  LOD_FAR,
-  LOD_NEAR,
-  type LodLevel,
-} from "./townLod";
+import { LOD_FAR, LOD_NEAR, type LodLevel } from "./townLod";
 import { townRenderDebug } from "./townRenderDebug";
+import type { TownAgentId } from "./townRoster";
 
 const WALK_SPEED = 2.2;
 const ARRIVE_EPS = 0.12;
@@ -35,7 +30,7 @@ export function TownNpc({
   spawnPosition,
   initialLod,
 }: {
-  pathfinding: Pathfinding;
+  pathfinding: TownPathfinding;
   agentId?: TownAgentId;
   spawnPosition: Vec3;
   initialLod: LodLevel;
@@ -197,7 +192,7 @@ export function TownNpc({
         agentId={agentId}
         lod={lod}
         walking={walking}
-        animEnabled={lod !== "far"}
+        animEnabled={lod === "near"}
       />
     </group>
   );

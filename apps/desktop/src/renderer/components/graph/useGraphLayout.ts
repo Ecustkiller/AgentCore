@@ -1,6 +1,10 @@
 /** ELK / time-axis layout state and structure-gated recompute for GraphView. */
 
-import { type GroupLayout, computeLayout, nodeSpacingForFitMode } from "@/lib/elk-layout";
+import {
+  type GroupLayout,
+  computeLayout,
+  nodeSpacingForFitMode,
+} from "@/lib/elk-layout";
 import {
   type ElkGraphLayout,
   isTimelineLayout,

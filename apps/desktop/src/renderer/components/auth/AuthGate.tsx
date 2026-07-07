@@ -41,9 +41,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
       }
     } catch (err) {
       console.error("[auth] bootstrap failed", err);
-      useAuthStore.getState().setUnavailable(
-        "无法连接后端：请确认后端服务已启动后重试。",
-      );
+      useAuthStore
+        .getState()
+        .setUnavailable("无法连接后端：请确认后端服务已启动后重试。");
     }
   }, []);
 

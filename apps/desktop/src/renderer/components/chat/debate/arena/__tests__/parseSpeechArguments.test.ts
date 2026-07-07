@@ -73,9 +73,7 @@ describe("parseSpeechArguments", () => {
 
 describe("sidePositionSummary", () => {
   it("returns first argument title", () => {
-    expect(
-      sidePositionSummary("1. 收益显著\n2. 风险可控"),
-    ).toContain("收益");
+    expect(sidePositionSummary("1. 收益显著\n2. 风险可控")).toContain("收益");
   });
 
   it("summarizes plain text when no structure", () => {

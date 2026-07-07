@@ -1,6 +1,6 @@
+import { FileAuditSection } from "@/components/audit/FileAuditTrail";
 import { FilePreviewBody } from "@/components/files/FilePreviewBody";
 import { Centered, InlineError } from "@/components/files/parts";
-import { FileAuditSection } from "@/components/audit/FileAuditTrail";
 import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useFileAudit } from "@/hooks/useFileAudit";
@@ -256,9 +256,7 @@ export function FilePreviewView({
         ) : (
           <>
             <FilePreviewBody result={result} name={name} />
-            {conversationId && (
-              <FileAuditSection state={fileAuditState} />
-            )}
+            {conversationId && <FileAuditSection state={fileAuditState} />}
           </>
         )}
       </div>

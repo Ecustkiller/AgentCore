@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
 import {
   DEFAULT_BYOK_PROVIDER_ID,
   getByokProviderPreset,
   normalizeByokBaseUrl,
   resolveByokProviderFromConfig,
 } from "@/lib/byokProviderPresets";
+import { describe, expect, it } from "vitest";
 
 describe("normalizeByokBaseUrl", () => {
   it("lowercases and strips trailing slashes", () => {

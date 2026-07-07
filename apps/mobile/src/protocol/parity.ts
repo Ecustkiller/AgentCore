@@ -398,7 +398,8 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   },
   WhiteboardPreviewPage: {
     verdict: "internal",
-    reason: "桌面白板离线自检回放（#/preview/whiteboard 开发工具），非用户产品面",
+    reason:
+      "桌面白板离线自检回放（#/preview/whiteboard 开发工具），非用户产品面",
   },
   "simulation/TownSimulationPage": {
     verdict: "impossible",

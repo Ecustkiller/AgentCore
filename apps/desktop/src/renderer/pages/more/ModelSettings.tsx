@@ -2,8 +2,16 @@ import { ToolsCapabilityBadge } from "@/components/llm/ToolsCapabilityBadge";
 import { Button, IconButton } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { llmKeyKeys } from "@/lib/queryKeys";
+import {
+  type ByokProviderId,
+  DEFAULT_BYOK_PROVIDER_ID,
+  getByokProviderPreset,
+  isCustomByokProvider,
+  listByokProviderOptions,
+  resolveByokProviderFromConfig,
+} from "@/lib/byokProviderPresets";
 import { hasLocalEngine } from "@/lib/capabilities";
+import { llmKeyKeys } from "@/lib/queryKeys";
 import { ApiError } from "@/services/api";
 import {
   type LlmKeyStatus,
@@ -24,14 +32,6 @@ import {
   ShieldCheck,
   XCircle,
 } from "lucide-react";
-import {
-  type ByokProviderId,
-  DEFAULT_BYOK_PROVIDER_ID,
-  getByokProviderPreset,
-  isCustomByokProvider,
-  listByokProviderOptions,
-  resolveByokProviderFromConfig,
-} from "@/lib/byokProviderPresets";
 import { useEffect, useId, useState } from "react";
 import { SettingsHeader } from "./SettingsHeader";
 
@@ -102,9 +102,7 @@ export function ModelSettings() {
                 syncStatus(s);
                 setEditing(false);
               }}
-              onCancel={
-                status.configured ? () => setEditing(false) : undefined
-              }
+              onCancel={status.configured ? () => setEditing(false) : undefined}
             />
           )}
           <InfoNote />

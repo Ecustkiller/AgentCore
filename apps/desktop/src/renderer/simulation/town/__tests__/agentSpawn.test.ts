@@ -1,4 +1,3 @@
-import { describe, expect, it, beforeEach } from "vitest";
 import { dispatchSimulationEvent } from "@/services/sse/handlers/simulation";
 import {
   useSimulationNavStore,
@@ -8,6 +7,7 @@ import {
   seedAgentSpawnIfNeeded,
   spawnPositionForAgent,
 } from "@/simulation/town/agentSpawn";
+import { beforeEach, describe, expect, it } from "vitest";
 
 describe("agentSpawn", () => {
   beforeEach(() => {

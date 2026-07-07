@@ -1,7 +1,6 @@
 import { Button, IconButton } from "@/components/ui";
 import { FilePreviewView } from "@/components/workspace/FilePreviewView";
 import { notifyError, notifyInfo } from "@/lib/toast";
-import { createWorkspaceSource } from "@/services/sources/workspaceSource";
 import {
   buildCrystallizedElements,
   crystallizedRunIds,
@@ -31,6 +30,7 @@ import {
   renameBoard,
   saveBoardScene,
 } from "@/services/boards";
+import { createWorkspaceSource } from "@/services/sources/workspaceSource";
 import {
   lastAssistantMessageId,
   runtimeOf,
@@ -375,7 +375,8 @@ export function WhiteboardCanvasPage() {
   }, [aiBusy, runBoardTurn]);
 
   const fileSource = useMemo(
-    () => (boardConvId ? createWorkspaceSource(boardConvId, "白板工作区") : null),
+    () =>
+      boardConvId ? createWorkspaceSource(boardConvId, "白板工作区") : null,
     [boardConvId],
   );
 
@@ -568,10 +569,7 @@ export function WhiteboardCanvasPage() {
               <h2 className="truncate text-sm font-semibold text-foreground">
                 {textExpand.title}
               </h2>
-              <IconButton
-                aria-label="关闭"
-                onClick={() => setTextExpand(null)}
-              >
+              <IconButton aria-label="关闭" onClick={() => setTextExpand(null)}>
                 <X size={16} />
               </IconButton>
             </header>

@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
 import {
-  agentsAtViewTick,
-  tickEventsAtView,
   type SimAgentView,
   type SimStreamEvent,
+  agentsAtViewTick,
+  tickEventsAtView,
 } from "@/simulation/store/simulationStore";
+import { describe, expect, it } from "vitest";
 
 describe("tickEventsAtView", () => {
   const events: SimStreamEvent[] = [

@@ -1,12 +1,12 @@
 import { Button } from "@/components/ui";
 import { formatMessageTimeOfDay } from "@/lib/format";
 import { isWebPreview } from "@/lib/preview";
-import {
-  type AgentAuditEvent,
-  fetchTurnAudit,
-} from "@/services/audit";
+import { type AgentAuditEvent, fetchTurnAudit } from "@/services/audit";
 import { usePersistentDisclosure } from "@/stores/disclosure";
-import type { AuditCategory, AuditOutcome } from "@agentcore/contract-rest-types/audit";
+import type {
+  AuditCategory,
+  AuditOutcome,
+} from "@agentcore/contract-rest-types/audit";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -46,15 +46,16 @@ const CATEGORY_META: Record<
   permission: { label: "权限", icon: Lock, tone: "text-muted-foreground" },
 };
 
-const OUTCOME_META: Record<
-  AuditOutcome,
-  { label: string; className: string }
-> = {
-  ok: { label: "ok", className: "bg-success/10 text-success" },
-  denied: { label: "denied", className: "bg-warning/10 text-warning" },
-  failed: { label: "failed", className: "bg-destructive/10 text-destructive" },
-  skipped: { label: "skipped", className: "bg-muted text-muted-foreground" },
-};
+const OUTCOME_META: Record<AuditOutcome, { label: string; className: string }> =
+  {
+    ok: { label: "ok", className: "bg-success/10 text-success" },
+    denied: { label: "denied", className: "bg-warning/10 text-warning" },
+    failed: {
+      label: "failed",
+      className: "bg-destructive/10 text-destructive",
+    },
+    skipped: { label: "skipped", className: "bg-muted text-muted-foreground" },
+  };
 
 function detailPeek(detail: Record<string, unknown>): string | null {
   const keys = Object.keys(detail);
@@ -126,9 +127,15 @@ function AuditEventRow({
           </span>
           {hasDetail &&
             (open ? (
-              <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
+              <ChevronDown
+                size={12}
+                className="shrink-0 text-muted-foreground"
+              />
             ) : (
-              <ChevronRight size={12} className="shrink-0 text-muted-foreground" />
+              <ChevronRight
+                size={12}
+                className="shrink-0 text-muted-foreground"
+              />
             ))}
         </span>
       </Button>

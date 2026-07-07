@@ -103,6 +103,8 @@ export function tradeBriefLabel(interaction: ActiveInteraction): string {
   return truncateInteractionText(interaction.summary, 40);
 }
 
-export function interactionSucceeded(status: InteractionResult["status"]): boolean {
+export function interactionSucceeded(
+  status: InteractionResult["status"],
+): boolean {
   return status === "completed";
 }

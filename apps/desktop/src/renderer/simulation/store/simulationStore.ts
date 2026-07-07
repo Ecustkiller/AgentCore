@@ -1,14 +1,17 @@
-import type { InteractionResult, SimAgentState } from "@agentcore/contract-types";
 import type { SimTickSnapshot } from "@/services/simulation/api";
+import type {
+  InteractionResult,
+  SimAgentState,
+} from "@agentcore/contract-types";
 import { create } from "zustand";
+import type { ActiveInteraction } from "../interactionModel";
 import type { SimAgentPose } from "../pose";
 import type { SimulationRunView } from "../runModel";
 import {
-  seedAgentCards,
   type BigFiveTraits,
   type TownPersonaCard,
+  seedAgentCards,
 } from "../town/townPersonas";
-import type { ActiveInteraction } from "../interactionModel";
 import type { TownAgentId } from "../town/townRoster";
 import { TOWN_AGENT_HOME } from "../town/townRoster";
 
@@ -78,8 +81,9 @@ function mergeAgentState(
   card?: TownPersonaCard,
 ): SimAgentView {
   const base = existing ?? (card ? cardToView(card) : undefined);
-  const relRaw = (state as SimAgentState & { relationships?: Record<string, number> })
-    .relationships;
+  const relRaw = (
+    state as SimAgentState & { relationships?: Record<string, number> }
+  ).relationships;
   return {
     agentId: state.agent_id,
     name: state.name || base?.name || state.agent_id,
@@ -222,7 +226,9 @@ export const useSimulationUiStore = create<{
       for (const [id, item] of Object.entries(s.activeInteractions)) {
         if (item.expiresAt > now) next[id] = item;
       }
-      if (Object.keys(next).length === Object.keys(s.activeInteractions).length) {
+      if (
+        Object.keys(next).length === Object.keys(s.activeInteractions).length
+      ) {
         return s;
       }
       return { activeInteractions: next };
@@ -345,11 +351,7 @@ export function agentsAtViewTick(
   const next = { ...agents };
   for (const state of Object.values(snapshot.agents)) {
     const card = personaCards[state.agent_id as TownAgentId];
-    next[state.agent_id] = mergeAgentState(
-      next[state.agent_id],
-      state,
-      card,
-    );
+    next[state.agent_id] = mergeAgentState(next[state.agent_id], state, card);
   }
   return next;
 }

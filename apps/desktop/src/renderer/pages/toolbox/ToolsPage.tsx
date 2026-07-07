@@ -2,12 +2,12 @@ import { CapabilityPage } from "@/components/tools/CapabilityPage";
 import { ToolCard } from "@/components/tools/ToolCard";
 import { CATEGORY_META, CATEGORY_ORDER } from "@/components/tools/catalogMeta";
 import { CatalogIconShell } from "@/components/ui";
-import { catalogCategoryColorVar } from "@/lib/catalogColors";
 import { useLlmKey } from "@/hooks/useLlmKey";
+import { catalogCategoryColorVar } from "@/lib/catalogColors";
 import {
-  isToolsGateBlocked,
-  TOOL_CALLING_TOOL_NAMES,
   TOOLS_GATE_HINT,
+  TOOL_CALLING_TOOL_NAMES,
+  isToolsGateBlocked,
 } from "@/lib/llmToolsGate";
 
 /** 工具箱「能力」组 → 工具：Agent 可调用的动作工具，按类分组，每个工具可展开调用参数。 */
@@ -57,8 +57,7 @@ export function ToolsPage() {
                         key={tool.name}
                         tool={tool}
                         disabled={
-                          toolsBlocked &&
-                          TOOL_CALLING_TOOL_NAMES.has(tool.name)
+                          toolsBlocked && TOOL_CALLING_TOOL_NAMES.has(tool.name)
                         }
                         disabledHint={TOOLS_GATE_HINT}
                       />

@@ -1,30 +1,28 @@
-import { describe, expect, it } from "vitest";
-import * as THREE from "three";
 import {
   buildTownSpawnTable,
   spawnPositionForAgent,
 } from "@/simulation/town/agentSpawn";
 import {
-  characterHeightFromBounds,
   EXPECTED_CHARACTER_HEIGHT_M,
+  characterHeightFromBounds,
   measureObjectBounds,
 } from "@/simulation/town/townCharacterAssets";
 import {
-  computeLodLevel,
   LOD_FAR,
   LOD_NEAR,
   TOWN_CAMERA_POS,
+  computeLodLevel,
 } from "@/simulation/town/townLod";
 import { TOWN_AGENT_HOME, TOWN_AGENT_IDS } from "@/simulation/town/townRoster";
+import * as THREE from "three";
+import { describe, expect, it } from "vitest";
 
 describe("buildTownSpawnTable", () => {
   it("assigns a distinct position to every resident", () => {
     const table = buildTownSpawnTable();
     expect(Object.keys(table)).toHaveLength(TOWN_AGENT_IDS.length);
     for (const id of TOWN_AGENT_IDS) {
-      expect(table[id]).toEqual(
-        spawnPositionForAgent(id, TOWN_AGENT_HOME[id]),
-      );
+      expect(table[id]).toEqual(spawnPositionForAgent(id, TOWN_AGENT_HOME[id]));
     }
   });
 

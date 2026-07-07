@@ -38,7 +38,10 @@ export function layoutDagre(
 
   for (const el of nodes) {
     const b = elementBox(el);
-    g.setNode(el.id, { width: Math.max(b.width, 8), height: Math.max(b.height, 8) });
+    g.setNode(el.id, {
+      width: Math.max(b.width, 8),
+      height: Math.max(b.height, 8),
+    });
   }
 
   for (const el of elements) {

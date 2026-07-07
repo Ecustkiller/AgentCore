@@ -4,9 +4,9 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { CharacterTemplate } from "./townCharacterAssets";
 import type { LodLevel } from "./townLod";
+import { townRenderDebug } from "./townRenderDebug";
 import type { TownAgentId } from "./townRoster";
 import { TOWN_AGENT_NAMES } from "./townRoster";
-import { townRenderDebug } from "./townRenderDebug";
 
 type AnimState = "idle" | "walk";
 

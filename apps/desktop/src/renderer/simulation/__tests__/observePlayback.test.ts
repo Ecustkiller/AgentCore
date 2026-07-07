@@ -1,10 +1,7 @@
-import { describe, expect, it } from "vitest";
 import { parseJumpTarget } from "@/simulation/jumpTarget";
-import {
-  computeRegionStats,
-  moodBand,
-} from "@/simulation/regionStats";
+import { computeRegionStats, moodBand } from "@/simulation/regionStats";
 import type { SimAgentView } from "@/simulation/store/simulationStore";
+import { describe, expect, it } from "vitest";
 
 describe("parseJumpTarget", () => {
   it("parses plain tick numbers", () => {

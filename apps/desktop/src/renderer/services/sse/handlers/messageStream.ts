@@ -64,21 +64,16 @@ export function handleMessageStreamEvent(
       ensureStreamingAssistant(conversationId);
       useConversationStore.getState().stampPendingTurnWarning(conversationId);
       useConversationStore.getState().setGenerating(true, conversationId);
-      // trace_id 关联气泡↔日志: stamp the turn's log correlation id onto the bubble so a
-      // dev「复制 trace id」link jumps straight to this turn's logs. Optional on the wire
-      // (absent on untraced turns); idempotent on a reconnect replay (re-sent first).
-      {
-        if (payload.trace_id)
-          useConversationStore
-            .getState()
-            .setTraceIdOnLastMessage(payload.trace_id, conversationId);
-        // 挂起即收口 (②): keep the SERVER message_id (the live bubble's id is a client
-        // UUID) so a turn that ends paused in-session can surface its resume card under
-        // the resume KEY the durable frame was persisted under (else resume 404s).
+      if (payload.trace_id)
         useConversationStore
           .getState()
-          .setServerMessageIdOnLastMessage(payload.message_id, conversationId);
-      }
+          .setTraceIdOnLastMessage(payload.trace_id, conversationId);
+      // 挂起即收口 (②): keep the SERVER message_id (the live bubble's id is a client
+      // UUID) so a turn that ends paused in-session can surface its resume card under
+      // the resume KEY the durable frame was persisted under (else resume 404s).
+      useConversationStore
+        .getState()
+        .setServerMessageIdOnLastMessage(payload.message_id, conversationId);
       // Turn (re)start — clear the captain context accumulator so a reconnect replay
       // (which re-sends message_start first) rebuilds it idempotently (上下文传递可视化 通道①+⑤).
       resetCaptainContext(conversationId);
