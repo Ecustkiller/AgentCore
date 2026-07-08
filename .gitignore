@@ -38,6 +38,12 @@ apps/desktop/dist-web/
 apps/desktop/color-review/
 apps/desktop/shoot-fix/
 apps/desktop/shoot-room/
+apps/desktop/e2e-shots/
+apps/desktop/.lint-out.txt
+# UE AgentTown 截图自检产物（pnpm town:shoot）
+apps/town/shoot-out/
+# website 预览自检截图
+apps/website/.shots/
 # 内置 Python 运行时（sidecar 打包产物，由 apps/desktop/scripts/bundle-sidecar.mjs 生成）
 apps/desktop/resources/sidecar/
 # apps/desktop/build/ 是 electron-builder 的 buildResources（应用图标源），不是上面 Python
