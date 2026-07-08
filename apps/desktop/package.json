@@ -7,9 +7,11 @@
   "scripts": {
     "dev": "electron-vite dev",
     "dev:web": "vite --config vite.web.config.ts",
+    "dev:town": "vite --config vite.web.config.ts --open /index.web.html#/simulation/town?preview=1",
     "dev:webapp": "vite --config vite.webapp.config.ts",
     "shoot": "node scripts/shoot.mjs",
     "shoot:simulation": "node scripts/shoot-simulation-town-offline.mjs",
+    "shoot:simulation:live": "node scripts/shoot-simulation-town.mjs",
     "shoot:manual": "node scripts/shoot-manual.mjs",
     "shoot:whiteboard": "node scripts/shoot-whiteboard.mjs",
     "smoke:webapp": "node scripts/smoke-webapp.mjs",
