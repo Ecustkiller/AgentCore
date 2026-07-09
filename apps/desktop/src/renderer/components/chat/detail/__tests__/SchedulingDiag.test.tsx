@@ -11,7 +11,7 @@
 import type { BatchMetricsSnapshot } from "@/stores/execution";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { SchedulingDiag } from "../sections/RunDiagnostics";
+import { SchedulingDiag, CollabDiag } from "../sections/RunDiagnostics";
 
 afterEach(cleanup);
 
@@ -87,5 +87,56 @@ describe("SchedulingDiag (调度诊断块)", () => {
     expect(screen.getByText("调度 · 2 批")).toBeTruthy();
     expect(screen.getByText("批次 1")).toBeTruthy();
     expect(screen.getByText("批次 2")).toBeTruthy();
+  });
+});
+
+describe("CollabDiag (协作质量诊断块)", () => {
+  it("renders non-zero orchestration signals", () => {
+    render(
+      <CollabDiag
+        collab={{
+          boundary_yields: 1,
+          scope_signals: 2,
+          revises: 1,
+          escalations: 3,
+        }}
+      />,
+    );
+    expect(screen.getByText("协作质量")).toBeTruthy();
+    expect(screen.getByText("自我纠偏让出")).toBeTruthy();
+    expect(screen.getByText("漂移信号")).toBeTruthy();
+    expect(screen.getByText("定向唤回")).toBeTruthy();
+    expect(screen.getByText("队员上报")).toBeTruthy();
+  });
+
+  it("renders nothing when all signals are zero", () => {
+    const { container } = render(
+      <CollabDiag
+        collab={{
+          boundary_yields: 0,
+          scope_signals: 0,
+          revises: 0,
+          escalations: 0,
+        }}
+      />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("surfaces audit_drops when non-zero", () => {
+    render(
+      <CollabDiag
+        collab={{
+          boundary_yields: 0,
+          scope_signals: 0,
+          revises: 0,
+          escalations: 0,
+          audit_drops: 2,
+        }}
+      />,
+    );
+    expect(screen.getByText("协作质量")).toBeTruthy();
+    expect(screen.getByText("审计采集降级")).toBeTruthy();
+    expect(screen.getByText("2 次")).toBeTruthy();
   });
 });

@@ -23,10 +23,28 @@ MAX_PARALLEL_TOOLS = 5
 # the bubble ever feels jittery (raise) or laggy (lower).
 TOOL_PROGRESS_STEP = 64
 
-# Injected when convergence governance forces a tool-free answer (a stuck loop
-# trips a hard finalize, or the round budget is exhausted mid-tool-call).
+# Injected when convergence governance forces finalize (a stuck loop trips a hard
+# finalize, or the round budget is exhausted mid-tool-call).
 FINALIZE_INSTRUCTION = (
-    "[系统提示] 请停止使用任何工具，基于目前已掌握的全部信息，立即给出你最好的最终答案。"
+    "[系统提示] 请停止使用调查与执行类工具，基于目前已掌握的全部信息，立即给出你最好的最终答案。"
+    "若仍需委派或向用户确认，可调用 delegate / consult_skill / ask_user。"
+)
+
+# Coordination tools still offered during a forced-finalize round; investigation and
+# execution tools are withheld so the model cannot keep spinning reads/writes.
+FINALIZE_COORDINATION_TOOLS = frozenset({"delegate", "consult_skill", "ask_user"})
+
+# Investigation + execution tools blocked during finalize (by name, explicit list).
+FINALIZE_FORBIDDEN_TOOLS = frozenset(
+    {
+        "file_read",
+        "grep",
+        "web_search",
+        "read_url",
+        "file_write",
+        "str_replace",
+        "code_execute",
+    }
 )
 
 # Tool categories whose calls are NOT bounded by the engine timeout backstop (B1):

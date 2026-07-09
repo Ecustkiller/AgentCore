@@ -142,9 +142,8 @@ export function debateFormBlurb(form: DebateForm): string {
 }
 
 /**
- * 该方是否需要单独显示模型徽章 —— 当一方的**身份名已经包含厂商名**时（后端 roster 取名回退成
- * 模型名，如「原生DeepSeek」并排「DeepSeek」徽章 = 噪音），抑制徽章避免重复；身份名是语义立场
- * （「甜党」「支持方」）时才显，让「谁是哪个模型」这一维真正有信息量、不冗余（用户反馈的「乱」之一）。
+ * 该方是否需要单独显示模型徽章 —— 当一方的**身份名已经包含厂商名**时（如「原生DeepSeek」并排
+ * 「DeepSeek」徽章 = 噪音），抑制徽章避免重复。
  */
 export function shouldShowModelBadge(
   name: string,

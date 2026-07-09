@@ -25,9 +25,7 @@ def ask_user_tool_result(response: CheckpointResponse) -> ToolResult:
     """
     decision = response.decision
     if decision is CheckpointDecision.ADJUST:
-        # ask_user cards no longer expose a separate「调整」action — any legacy client
-        # that still sends ADJUST is treated as CONTINUE (the note carries the steer).
-        decision = CheckpointDecision.CONTINUE
+        raise ValueError("ask_user checkpoints do not accept ADJUST; use CONTINUE with note")
     picks = "、".join(response.selected)
     note = response.note.strip()
     if decision is CheckpointDecision.CONTINUE:

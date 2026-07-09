@@ -1065,6 +1065,23 @@ button.link {
   border-left-color: var(--error);
 }
 
+/* 深度检视入口 (RunDetail): the card summary is ONE tap target that opens the run detail. A flush,
+   transparent button reset so the peek looks identical to the old static card; the escalation
+   answer card renders as a sibling BELOW this button, so its controls are never hijacked. */
+.run-open {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
 .run-head {
   display: flex;
   align-items: center;
@@ -1305,6 +1322,285 @@ button.link {
 .team-note-status.status-voided {
   color: var(--muted);
   background: var(--border);
+}
+
+/* --- 深度检视单个队员 · RunDetail 详情面 (native <dialog> bottom sheet) ---
+   A tall bottom sheet pinned to one worker run: header (角色 + 状态 + 时长 + 关闭) over a scrollable
+   body of sections. Reuses the .tool* / .recv* / .run-escalation vocab inside; only the panel
+   shell + section chrome (.rd-*) are new. Dims via the UA ::backdrop like the other mobile dialogs. */
+dialog.run-detail {
+  position: fixed;
+  inset: auto 0 0;
+  width: 100%;
+  max-width: 100%;
+  max-height: 88vh;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 16px 16px 0 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+dialog.run-detail[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+dialog.run-detail::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.rd-head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rd-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rd-dur {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.rd-close {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font-size: 16px;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 999px;
+}
+
+.rd-close:active {
+  background: var(--border);
+}
+
+.rd-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 14px 16px calc(16px + env(safe-area-inset-bottom));
+}
+
+.rd-section-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.rd-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 轮次 / 修订链 track (chips; current is non-interactive + accented) */
+.rd-chain {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rd-chip {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.rd-chip-current {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: var(--accent);
+}
+
+/* 思考全文 (raw preformatted thought log) */
+.rd-reasoning {
+  max-height: 320px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rd-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 输出 / 交接简报 panels */
+.rd-output,
+.rd-debrief,
+.rd-metrics {
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.rd-debrief {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rd-part-label {
+  margin-bottom: 3px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.rd-points {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.rd-points li {
+  margin: 2px 0;
+}
+
+.rd-assume {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 资源用量 metrics */
+.rd-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rd-metric {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rd-metric-label {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.rd-metric-value {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--fg);
+  text-align: right;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rd-mono {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 12px;
+}
+
+/* 关系 refs (each row navigates the panel to that run) */
+.rd-refs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rd-refs-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.rd-ref {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 10px;
+  text-align: start;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.rd-ref:active {
+  background: var(--border);
+}
+
+.rd-ref-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  background: var(--muted);
+  border-radius: 999px;
+}
+
+.dot-run {
+  background: var(--accent);
+}
+
+.dot-ok {
+  background: var(--success);
+}
+
+.dot-err {
+  background: var(--error);
+}
+
+.rd-ref-name {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.rd-ref-task {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .debate {
@@ -1804,6 +2100,151 @@ button.link {
 
 .composer .attach-btn:disabled {
   opacity: 0.45;
+}
+
+/* --- 语音输入 (手机端语音 · 桌面交互形态对齐) --- */
+/* composer 行内麦克风按钮：中性方块，与附件「＋」同尺寸；录音态转 error 红 + 脉冲。 */
+.composer .voice-btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  padding: 0;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.composer .voice-btn:disabled {
+  opacity: 0.45;
+}
+
+.composer .voice-btn-recording {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  border-color: color-mix(in srgb, var(--error) 45%, var(--border));
+  animation: voice-pulse 1.4s ease-in-out infinite;
+}
+
+.voice-spin {
+  animation: voice-rotate 0.9s linear infinite;
+}
+
+/* 录音态提示条：贴 composer 上方 (与 followups / attach-tray 同侧)，error 红强调「正在录音」。 */
+.voice-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 16px 8px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--error) 30%, var(--border));
+  border-left: 3px solid var(--error);
+  border-radius: 12px;
+}
+
+.voice-bar-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.voice-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  background: var(--error);
+  border-radius: 999px;
+  animation: voice-pulse 1.4s ease-in-out infinite;
+}
+
+.voice-time {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--error);
+}
+
+.voice-wave {
+  display: flex;
+  flex-shrink: 0;
+  align-items: flex-end;
+  gap: 2px;
+  height: 16px;
+}
+
+.voice-wave-bar {
+  width: 3px;
+  height: 100%;
+  background: var(--error);
+  border-radius: 999px;
+  transform: scaleY(0.35);
+  transform-origin: bottom;
+  animation: voice-wave 1s ease-in-out infinite;
+}
+
+.voice-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.voice-cancel {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+}
+
+.voice-cancel:active {
+  background: var(--border);
+}
+
+.voice-interim {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@keyframes voice-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes voice-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes voice-wave {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
 }
 
 /* Staged-attachment tray above the composer (composer 附件), and the read-only context

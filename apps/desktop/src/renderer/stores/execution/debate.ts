@@ -193,10 +193,8 @@ export interface DebateLiveRound {
  * debates, so 圆桌/红队 showed nothing inline until 收场). Under the moderator +
  * continue_run redesign a debater's round 1 is a plan-declared node (group `debate:*`,
  * no stance) and every later round is a 续写 revision of it, so we walk each side's
- * revision chain and bucket by the revision's TRUE {@link RunNode.round} (乙 wire 携
- * round/stance · 单一轮次投影) — the SAME `round` field debateGroups reads, not the version
- * number (which drifts from the round once a side fails mid-debate). A legacy journal
- * whose revisions predate the wire round falls back to the version number. Each cell
+ * revision chain and bucket by the revision's {@link RunNode.round} (乙 wire 携
+ * round/stance · 单一轮次投影) — the SAME `round` field debateGroups reads.
  * renders via {@link RunNode}'s agent (the revision inherits the side's role + streams
  * its own output). Empty for 非辩论 / 2方正反 (handled by debateGroups) / 收场后.
  */
@@ -215,9 +213,8 @@ export function debateLiveRounds(execution: Execution): DebateLiveRound[] {
     list.push(run);
     revisionsByOriginal.set(run.revisionOf, list);
   }
-  // 单一轮次投影: a revision's round is its canonical `round`; only a legacy journal
-  // (no wire round) falls back to the version number.
-  const roundOf = (r: RunNode): number => r.round || r.revision;
+  // 单一轮次投影: round 只读 wire 字段（无 round 时为 0）。
+  const roundOf = (r: RunNode): number => r.round ?? 0;
   let maxRound = 1;
   for (const side of sides) {
     for (const rev of revisionsByOriginal.get(side.id) ?? []) {

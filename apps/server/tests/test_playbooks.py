@@ -37,11 +37,15 @@ def test_research_report_fans_out_one_researcher_per_angle_then_outline_then_wri
     assert all(rid in by_id for rid in research_ids)
     assert set(by_id["outline"]["depends_on"]) == set(research_ids)
     assert by_id["write"]["depends_on"] == ["outline"]
+    assert by_id["review"]["depends_on"] == ["write"]
+    assert by_id["review"]["role"] == "学术审校员"
     # checkpoint flag rides the 提纲 step (成纲后写作前过目); the write step requires file landing.
     assert by_id["outline"]["checkpoint_after"] is True
-    assert by_id["write"]["contract"]["requires_files"] is True
+    assert by_id["write"]["deliverable"]["requires_files"] is True
     # each angle is named into its researcher's task so the fan-out doesn't run blind/overlapping.
     assert "选型" in by_id["research_1"]["task"]
+    assert "read_notes" in by_id["research_1"]["task"]
+    assert "post_note" in by_id["research_1"]["task"]
 
 
 def test_research_report_without_angles_uses_single_researcher():
@@ -49,7 +53,14 @@ def test_research_report_without_angles_uses_single_researcher():
     assert errors == []
     by_id = _by_id(tasks)
     assert by_id["outline"]["depends_on"] == ["research_0"]
-    assert by_id["outline"]["checkpoint_after"] is False  # default: no checkpoint
+    assert by_id["outline"]["checkpoint_after"] is True  # default: checkpoint on outline
+    assert by_id["review"]["depends_on"] == ["write"]
+
+
+def test_research_report_checkpoint_can_be_disabled():
+    tasks, errors = expand_playbook("research_report", {"topic": "X", "checkpoint": False})
+    assert errors == []
+    assert _by_id(tasks)["outline"]["checkpoint_after"] is False
 
 
 def test_research_report_requires_topic():
@@ -153,7 +164,7 @@ def test_every_playbook_expansion_builds_a_valid_run_plan():
         "build_feature": {"feature": "F", "stack": "S"},
         "compare_options": {"question": "Q", "options": ["A", "B", "C"]},
     }
-    expected_nodes = {"research_report": 4, "build_feature": 3, "compare_options": 4}
+    expected_nodes = {"research_report": 5, "build_feature": 3, "compare_options": 4}
     for name, args in samples.items():
         tasks, errors = expand_playbook(name, args)
         assert errors == [], name

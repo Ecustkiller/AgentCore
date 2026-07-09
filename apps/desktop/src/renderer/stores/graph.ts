@@ -12,7 +12,7 @@ export interface GraphEdge {
   id: string;
   source: string;
   target: string;
-  kind?: "dep" | "delegate" | "revision";
+  kind?: "dep" | "delegate" | "revision" | "inject";
 }
 
 /**
@@ -26,6 +26,7 @@ export interface GraphEdge {
 export type GraphLayout = "tree" | "leftright" | "timeline";
 
 const LAYOUT_KEY = "agentcore:graph-layout";
+const INJECT_FLOW_KEY = "agentcore:graph-inject-flow";
 const LAYOUTS: GraphLayout[] = ["tree", "leftright", "timeline"];
 
 // localStorage is wrapped: it throws in private-mode / non-DOM (test) contexts.
@@ -48,6 +49,23 @@ function persistLayout(v: GraphLayout): void {
   }
 }
 
+function loadInjectFlow(): boolean {
+  try {
+    return localStorage.getItem(INJECT_FLOW_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function persistInjectFlow(v: boolean): void {
+  try {
+    if (v) localStorage.setItem(INJECT_FLOW_KEY, "1");
+    else localStorage.removeItem(INJECT_FLOW_KEY);
+  } catch {
+    /* unavailable — session-only */
+  }
+}
+
 // Per-graph layout (ELK positions + structural edges) is NOT global state: with
 // §9.3 every multi-agent message renders its own inline graph, so the layout is
 // view state owned locally by each {@link GraphView}. Only the *choice* of layout
@@ -57,13 +75,22 @@ interface GraphState {
   /** Active layout algorithm — a shared, persisted user preference. */
   layoutKind: GraphLayout;
   setLayoutKind: (kind: GraphLayout) => void;
+  /** Phase 2: always show audit-confirmed inject edges on the collaboration graph. */
+  showAuditInjectFlow: boolean;
+  setShowAuditInjectFlow: (on: boolean) => void;
 }
 
 export const useGraphStore = create<GraphState>((set) => ({
   layoutKind: loadLayout(),
+  showAuditInjectFlow: loadInjectFlow(),
 
   setLayoutKind: (layoutKind) => {
     persistLayout(layoutKind);
     set({ layoutKind });
+  },
+
+  setShowAuditInjectFlow: (showAuditInjectFlow) => {
+    persistInjectFlow(showAuditInjectFlow);
+    set({ showAuditInjectFlow });
   },
 }));

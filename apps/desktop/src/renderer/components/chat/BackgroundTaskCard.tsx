@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { BackgroundTaskReview } from "./BackgroundTaskReview";
+import { Markdown } from "./Markdown";
 
 export function BackgroundTaskCard({
   job,
@@ -38,9 +39,9 @@ export function BackgroundTaskCard({
         badge={<StatusBadge job={job} />}
         trailing={formatWhen(job.createdAt)}
       />
-      <p className="mt-1 whitespace-pre-wrap break-words text-sm text-foreground">
-        {job.task}
-      </p>
+      <div className="mt-1 break-words">
+        <Markdown content={job.task} />
+      </div>
       <Body job={job} rootId={rootId} />
     </Card>
   );

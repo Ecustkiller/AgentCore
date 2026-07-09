@@ -3,7 +3,7 @@
 // ProjectedTurn) so the mobile waiting UI shows 正在检索 / 排队中 / 改用备用引擎 instead of a
 // static 进行中 — and clears a tool's phase the moment it ends.
 
-import { extractToolPhases } from "@/protocol/fold";
+import { extractToolPhases, extractWorkerToolPhases } from "@/protocol/fold";
 import type { SSEEvent } from "@agentcore/contract-types";
 import { describe, expect, it } from "vitest";
 
@@ -78,6 +78,59 @@ describe("extractToolPhases", () => {
         tool_name: "web_search",
         result: "ok",
         status: "success",
+      }),
+    ]);
+    expect(phases.size).toBe(0);
+  });
+});
+
+describe("extractWorkerToolPhases", () => {
+  it("keeps the LATEST phase per worker run_id", () => {
+    const phases = extractWorkerToolPhases([
+      ev("tool_use_progress", {
+        tool_call_id: "c1",
+        tool_name: "web_search",
+        phase: "queued",
+        run_id: "run-2",
+      }),
+      ev("tool_use_progress", {
+        tool_call_id: "c1",
+        tool_name: "web_search",
+        phase: "querying",
+        run_id: "run-2",
+      }),
+    ]);
+    expect(phases.get("run-2")).toEqual({
+      phase: "querying",
+      toolName: "web_search",
+    });
+  });
+
+  it("ignores CEO-scoped progress (no run_id)", () => {
+    const phases = extractWorkerToolPhases([
+      ev("tool_use_progress", {
+        tool_call_id: "c1",
+        tool_name: "web_search",
+        phase: "querying",
+      }),
+    ]);
+    expect(phases.size).toBe(0);
+  });
+
+  it("clears a worker phase on tool_use_end with run_id", () => {
+    const phases = extractWorkerToolPhases([
+      ev("tool_use_progress", {
+        tool_call_id: "c1",
+        tool_name: "web_search",
+        phase: "fallback",
+        run_id: "run-9",
+      }),
+      ev("tool_use_end", {
+        tool_call_id: "c1",
+        tool_name: "web_search",
+        result: "ok",
+        status: "success",
+        run_id: "run-9",
       }),
     ]);
     expect(phases.size).toBe(0);

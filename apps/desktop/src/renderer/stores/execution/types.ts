@@ -112,10 +112,9 @@ export function toolLabel(name: string): string {
 }
 
 /**
- * Effective reasoning effort (提案 B). `null` = non-thinking; no worker tier is
- * non-thinking anymore (dev-stage: both tiers think at `high`), so this only
- * appears for background mechanical roles. Mirrors the backend `reasoning_effort`
- * after `apply_overrides`.
+ * Parsed reasoning effort from delegate tasks. `null` = non-thinking. Stored and
+ * projected but not sent to the LLM in MVP — display collapses high/max to one
+ * state so RunResources does not imply a knob that has no API effect.
  */
 export type ReasoningEffort = "high" | "max" | null;
 
@@ -123,7 +122,7 @@ export type ReasoningEffort = "high" | "max" | null;
  * graph badge and detail panel share. */
 export function reasoningMeta(
   thinking: boolean,
-  effort: ReasoningEffort,
+  _effort: ReasoningEffort,
 ): { short: string; label: string; description: string } {
   if (!thinking)
     return {
@@ -131,16 +130,10 @@ export function reasoningMeta(
       label: "非思考",
       description: "不走思考链，最快最省，面向简单/机械子任务。",
     };
-  if (effort === "max")
-    return {
-      short: "深度",
-      label: "深度思考 (max)",
-      description: "最强推理强度，面向极复杂、需要最高质量的子任务。",
-    };
   return {
     short: "思考",
-    label: "思考 (high)",
-    description: "标准思考强度，面向需要判断或对质量有要求的子任务。",
+    label: "思考",
+    description: "走思考链推理。",
   };
 }
 
@@ -175,6 +168,19 @@ export interface AgentState {
    * executing (tool_use_start) or the run ends. Drives the node/detail's live
    *「正在生成 {tool} · N 字」line so a long file write never looks frozen. */
   toolProgress: { toolName: string; chars: number } | null;
+  /** Coarse EXECUTION phase for this worker's currently-running tool (`tool_use_progress`
+   * with `run_id`). Transport-only — never folded from frames/journal; overlaid live from
+   * {@link ExecutionRuntime.workerToolPhases} keyed by {@link currentRunId}. Cleared when
+   * the tool ends. Drives the node/detail honest waiting line (排队中/正在检索/…). */
+  toolExecutionLive: { toolName: string; phase: string } | null;
+}
+
+/** Live-only worker tool EXECUTION phase keyed by `run_id` (transport-only sibling of CEO
+ * `setProcessToolPhase`). Never journaled; merged onto {@link AgentState.toolExecutionLive}
+ * at projection time. */
+export interface WorkerToolPhaseLive {
+  phase: string;
+  toolName: string;
 }
 
 /** A structured DAG checkpoint (plan_review, 结构化挂起 2a) that paused the scheduler

@@ -292,7 +292,7 @@ class WorkerResultAccumulator:
     def merge(self, other: WorkerResultAccumulator) -> None:
         """Fold another accumulator into this one (a nested sub-team's roll-up).
 
-        Used by ``delegate._absorb_children`` to roll a re-delegating worker's
+        Used by ``delegate.nesting.absorb_children`` to roll a re-delegating worker's
         sub-team usage + ledger + sources up into this captain's totals.
         """
         self.add_usage(other.usage)

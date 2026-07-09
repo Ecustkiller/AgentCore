@@ -18,9 +18,25 @@ import type { MessageAttachment } from "@/lib/attachments";
 // paused turn). An explicit 停止 is a separate JSON call (api/turn.ts).
 import type { CheckpointDecision, SSEEvent } from "@agentcore/contract-types";
 
+/** Raised when the SSE body goes silent too long (dead socket / proxy drop). */
+export class StreamNetworkError extends Error {
+  constructor() {
+    super("network");
+    this.name = "StreamNetworkError";
+  }
+}
+
+/** Max silence while the body is open. The backend heart-beats every ~15s during a
+ *  thinking turn, so a live connection always delivers bytes; total silence means the
+ *  socket is dead — cancel and surface a retriable error (mirrors desktop streamConversation). */
+const IDLE_TIMEOUT_MS = 60_000;
+
 /** Read an SSE response body to completion, delivering each parsed `data:` frame to
  *  `onEvent`. `event:` lines and `:` heartbeats are ignored (the data JSON already
- *  carries the type). Throws if the response has no readable body. */
+ *  carries the type). Throws if the response has no readable body.
+ *
+ *  Applies the idle stall watchdog: an *idle* timeout, never a total-duration cap — a
+ *  long turn that keeps streaming (or just heart-beating) is never cut off. */
 async function pumpSSE(
   response: Response,
   onEvent: (event: SSEEvent) => void,
@@ -30,8 +46,27 @@ async function pumpSSE(
 
   const decoder = new TextDecoder();
   let buffer = "";
+
+  const readChunk = (): ReturnType<typeof reader.read> =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        void reader.cancel().catch(() => {});
+        reject(new StreamNetworkError());
+      }, IDLE_TIMEOUT_MS);
+      reader.read().then(
+        (r) => {
+          clearTimeout(timer);
+          resolve(r);
+        },
+        (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      );
+    });
+
   while (true) {
-    const { done, value } = await reader.read();
+    const { done, value } = await readChunk();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     // SSE frames are separated by a blank line; keep the trailing partial in buffer.
@@ -175,3 +210,6 @@ export async function resumeStream(
   if (!response.ok) throw new Error(`继续失败 (${response.status})`);
   await pumpSSE(response, onEvent);
 }
+
+/** @internal Test hook — production `pumpSSE` with the idle stall watchdog. */
+export const pumpSSEForTests = pumpSSE;

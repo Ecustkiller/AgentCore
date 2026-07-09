@@ -23,7 +23,6 @@ from agentcore.workspace.locate import (
     build_workspace,
     format_workspace_id,
     parse_workspace_id,
-    resolve_local_binding,
     resolve_workspace_root,
     workspace_has_entries,
     workspace_storage_key,
@@ -130,26 +129,6 @@ def test_build_workspace_falls_back_to_cloud_when_unbound(tmp_path: Path, monkey
     )
     assert isinstance(ws, ServerWorkspace)
     assert ws.location == "server"
-
-
-# --- resolve_local_binding (deprecated folder-level helper; kept for legacy callers) ---
-
-
-def test_resolve_ungrouped_is_always_cloud():
-    assert resolve_local_binding(folder_id=None, folder_local_root_id=None) is None
-
-
-def test_resolve_foldered_uses_folder_binding_with_label():
-    binding = resolve_local_binding(
-        folder_id="f1",
-        folder_local_root_id="folder-root",
-        label="MyProject",
-    )
-    assert binding == LocalBinding(root_id="folder-root", root_label="MyProject")
-
-
-def test_resolve_foldered_unbound_is_cloud():
-    assert resolve_local_binding(folder_id="f1", folder_local_root_id=None) is None
 
 
 # --- storage key (mirrors the on-disk layout for snapshots) ---

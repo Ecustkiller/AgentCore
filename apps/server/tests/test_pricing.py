@@ -13,6 +13,9 @@ from agentcore.config import settings
 from agentcore.llm.pricing import (
     DOUBAO_SEED_TURBO,
     NANO_PER_USD,
+    PLATFORM_GPT_4O,
+    PLATFORM_GPT_5_4,
+    PLATFORM_GPT_5_5,
     cache_savings,
     calculate_cost,
     nano_usd_to_cny,
@@ -196,6 +199,16 @@ def test_small_token_counts_round_half_up():
     assert calculate_cost(DEEPSEEK_V4_FLASH, _usage(output_tokens=100)).output == 28_000
     # 1 token: 0.28 * 1000 = 280 nano (exact, no rounding needed here).
     assert calculate_cost(DEEPSEEK_V4_FLASH, _usage(output_tokens=1)).output == 280
+
+
+def test_platform_gpt_models_use_dedicated_cards_not_flash_fallback():
+    usage = _usage(input_tokens=1_000_000, output_tokens=1_000_000)
+    gpt4o = calculate_cost(PLATFORM_GPT_4O, usage)
+    gpt55 = calculate_cost(PLATFORM_GPT_5_5, usage)
+    flash = calculate_cost(DEEPSEEK_V4_FLASH, usage)
+    assert gpt4o.total != flash.total
+    assert gpt55.total > gpt4o.total
+    assert calculate_cost(PLATFORM_GPT_5_4, usage).total > gpt4o.total
 
 
 # --- cache_savings: the「省了多少」彩蛋 ---

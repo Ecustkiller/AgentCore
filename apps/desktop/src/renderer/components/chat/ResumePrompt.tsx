@@ -87,8 +87,17 @@ function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
 
   const send = (decision: PlanReviewUserDecision) => {
     if (busy) return;
+    console.warn(
+      `[Resume] PlanReviewResumeCard send decision=${decision} messageId=${turn.messageId} checkpointId=${turn.checkpointId}`,
+    );
     setSubmitting(decision);
-    void runResume(turn.messageId, decision, note.trim());
+    void runResume(turn.messageId, decision, note.trim()).catch((err) => {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[Resume] PlanReviewResumeCard send failed decision=${decision} messageId=${turn.messageId} checkpointId=${turn.checkpointId} err=${errMsg}`,
+      );
+      setSubmitting(null);
+    });
   };
 
   const spinnerOr = (

@@ -129,6 +129,40 @@ async def test_retry_then_succeeds():
     assert calls["n"] == 2
 
 
+async def test_deterministic_failure_skips_retry():
+    """确定性失败区分 (BL-6): a FAILED state flagged ``error_retryable=False`` (prompt 超长 /
+    鉴权 / 余额) is NOT re-run even under ``on_failure="retry"`` — re-running just re-fails."""
+    plan = RunPlan()
+    plan.add(_spec("a", on_failure="retry", max_retries=3))
+    calls = {"n": 0}
+
+    async def ex(_spec: RunSpec, _completed) -> RunState:
+        calls["n"] += 1
+        return RunState(phase=RunPhase.FAILED, error="prompt too long", error_retryable=False)
+
+    res = await WaveScheduler().run(plan, ex)
+    assert res["a"].phase is RunPhase.FAILED
+    assert res["a"].error_retryable is False
+    assert calls["n"] == 1  # ran once, no futile retries
+
+
+async def test_retryable_failure_still_exhausts_retries():
+    """A transient FAILED (default ``error_retryable=True``) still burns its retry budget —
+    proves the deterministic skip is narrowly scoped and doesn't change ordinary retry."""
+    plan = RunPlan()
+    plan.add(_spec("a", on_failure="retry", max_retries=2))
+    plan.nodes[0].policy.retry_delay_ms = 0  # keep the test fast
+    calls = {"n": 0}
+
+    async def ex(_spec: RunSpec, _completed) -> RunState:
+        calls["n"] += 1
+        return RunState(phase=RunPhase.FAILED, error="5xx transient")
+
+    res = await WaveScheduler().run(plan, ex)
+    assert res["a"].phase is RunPhase.FAILED
+    assert calls["n"] == 3  # 1 initial + 2 retries
+
+
 async def test_executor_exception_becomes_failed_state():
     plan = RunPlan()
     plan.add(_spec("a"))

@@ -17,8 +17,12 @@ export function handleMetaEvent(
 
   switch (event.type) {
     case "title_generated": {
+      const payload = event.payload as TitleGeneratedPayload & {
+        tag?: string;
+      };
       patchConversationCache(conversationId, {
-        title: (event.payload as TitleGeneratedPayload).title,
+        title: payload.title,
+        ...(payload.tag ? { tag: payload.tag } : {}),
       });
       return true;
     }

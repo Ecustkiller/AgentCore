@@ -65,16 +65,23 @@ def _clean_str_list(value: Any, *, cap: int) -> list[str]:
     return out
 
 
-def _research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
-    """N×并行调研 → 提纲（依赖调研，可选 checkpoint 让用户过目）→ 写作（依赖提纲）.
+_RESEARCHER_NOTE_GUIDANCE = (
+    "开始本子方向前先 read_notes 检查队友是否已覆盖；"
+    "发现重要结论或关键数据点时用 post_note(kind=decision) 或 post_note(kind=heads_up) "
+    "分享给团队，避免重复劳动。"
+)
 
-    The doc's own named example (调研→提纲→checkpoint→写作); mirrors the 进阶 skill「调研驱动的
+
+def _research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    """N×并行调研 → 提纲（依赖调研，默认 checkpoint 让用户过目）→ 写作 → 学术审校.
+
+    The doc's own named example (调研→提纲→checkpoint→写作→审校); mirrors the 进阶 skill「调研驱动的
     大型交付，让结构跟着证据走」as a one-call shape."""
     topic = _clean_str(args.get("topic"))
     if not topic:
         return [], ["research_report 需要 slot『topic』（要调研并成文的主题）"]
     angles = _clean_str_list(args.get("angles"), cap=MAX_PLAYBOOK_FANOUT)
-    checkpoint = bool(args.get("checkpoint"))
+    checkpoint = bool(args.get("checkpoint", True))
     audience = _clean_str(args.get("audience"))
     deliverable = _clean_str(args.get("deliverable")) or f"一篇关于【{topic}】的完整报告"
 
@@ -90,8 +97,9 @@ def _research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[s
                         f"围绕主题【{topic}】，专门调研这一个子方向：{angle}。"
                         "给出该子方向的关键事实 / 现状 / 证据，附来源（文件:行 或 链接）；"
                         "聚焦本子方向、回报精炼结论而非整段原文，别铺开到其它角度。"
+                        f"{_RESEARCHER_NOTE_GUIDANCE}"
                     ),
-                    "expected_output": f"【{angle}】方向的调研要点 + 来源",
+                    "deliverable": {"name": f"【{angle}】方向的调研要点 + 来源"},
                 }
             )
     else:
@@ -103,8 +111,9 @@ def _research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[s
                 "task": (
                     f"调研主题【{topic}】：覆盖关键事实 / 现状 / 主要观点与证据，附来源；"
                     "回报精炼结论 + 关键证据指引，别回贴整段原文。"
+                    f"{_RESEARCHER_NOTE_GUIDANCE}"
                 ),
-                "expected_output": f"【{topic}】的调研要点 + 来源",
+                "deliverable": {"name": f"【{topic}】的调研要点 + 来源"},
             }
         )
 
@@ -118,7 +127,7 @@ def _research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[s
                 "据证据定结构（别凭空先写死），确保覆盖各调研方向、无重复无缺口。"
             ),
             "depends_on": research_ids,
-            "expected_output": "一份结构化报告提纲（章节 + 每节要点）",
+            "deliverable": {"name": "一份结构化报告提纲（章节 + 每节要点）"},
             "checkpoint_after": checkpoint,
         }
     )
@@ -131,8 +140,19 @@ def _research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[s
                 "成篇文字交付写成 .md 并用 file_write 落盘工作区。"
             ),
             "depends_on": ["outline"],
-            "expected_output": deliverable,
-            "contract": {"requires_files": True},
+            "deliverable": {"name": deliverable, "requires_files": True},
+        }
+    )
+    tasks.append(
+        {
+            "id": "review",
+            "role": "学术审校员",
+            "task": (
+                f"对上游成稿做学术审校（{deliverable}）：核查学术准确性、逻辑完整性与引用规范；"
+                "指出具体问题并给出可操作的修改建议，不重写全文。"
+            ),
+            "depends_on": ["write"],
+            "deliverable": {"name": "审校报告 + 修改建议"},
         }
     )
     return tasks, []
@@ -161,8 +181,10 @@ def _build_feature(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str
                 "返回结构 / 错误形状）用 post_note(kind=decision) 广播到团队便签墙，再实现；"
                 "务必用 file_write 把代码写进工作区。"
             ),
-            "expected_output": "可用的后端接口 + 已广播的接口契约",
-            "contract": {"requires_files": True},
+            "deliverable": {
+                "name": "可用的后端接口 + 已广播的接口契约",
+                "requires_files": True,
+            },
         }
     ]
     if want_ui:
@@ -177,8 +199,10 @@ def _build_feature(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str
                     "务必用 file_write 把代码写进工作区。"
                 ),
                 "depends_on": ["api"],
-                "expected_output": "可用的前端页面，对接后端接口",
-                "contract": {"requires_files": True},
+                "deliverable": {
+                    "name": "可用的前端页面，对接后端接口",
+                    "requires_files": True,
+                },
             }
         )
     if want_test:
@@ -192,8 +216,10 @@ def _build_feature(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str
                     "务必用 file_write 把测试文件写进工作区。"
                 ),
                 "depends_on": ["api"],
-                "expected_output": "覆盖接口契约的测试",
-                "contract": {"requires_files": True},
+                "deliverable": {
+                    "name": "覆盖接口契约的测试",
+                    "requires_files": True,
+                },
             }
         )
     return tasks, []
@@ -228,7 +254,7 @@ def _compare_options(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[s
                     f"针对决策问题【{question}】，深入评估这一个选项：{opt}{crit_eval}。"
                     "给出它的优点 / 缺点 / 适用与不适用场景，只评这一个、保持客观。"
                 ),
-                "expected_output": f"对选项【{opt}】的评估",
+                "deliverable": {"name": f"对选项【{opt}】的评估"},
             }
         )
     tasks.append(
@@ -240,7 +266,7 @@ def _compare_options(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[s
                 "一张对比表 + 明确推荐及理由；若各选项各有适用场景，说清分别何时选谁。"
             ),
             "depends_on": eval_ids,
-            "expected_output": "对比表 + 推荐结论",
+            "deliverable": {"name": "对比表 + 推荐结论"},
         }
     )
     return tasks, []
@@ -249,10 +275,10 @@ def _compare_options(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[s
 PLAYBOOKS: dict[str, Playbook] = {
     "research_report": Playbook(
         name="research_report",
-        summary="调研→提纲→写作的报告流水线（N 路并行调研，汇拢成纲再成文）",
+        summary="调研→提纲→写作→审校的报告流水线（N 路并行调研，汇拢成纲再成文）",
         slots=(
             "topic(必填,主题) / angles(可选,调研子方向数组,各派一名调研员) / "
-            "checkpoint(可选,成纲后写作前暂停过目) / audience(可选,读者) / "
+            "checkpoint(可选,成纲后写作前暂停过目,默认 true) / audience(可选,读者) / "
             "deliverable(可选,产出形态)"
         ),
         build=_research_report,

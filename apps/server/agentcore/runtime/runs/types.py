@@ -209,10 +209,10 @@ class RunSpec:
     parent_run_id: str | None = None
     depth: int = 0
     # Whether this worker may itself delegate one nested level of sub-workers
-    # (阶段2 嵌套子任务). Default off — only a CEO task that explicitly opts in gets
-    # the delegate tool, and only while ``depth < MAX_DELEGATION_DEPTH`` (executor
-    # enforces the cap). depth-2 sub-workers never delegate regardless of this flag.
-    can_delegate: bool | str = False
+    # (阶段2 嵌套子任务). Default on — workers start with delegate+replan while
+    # ``depth < MAX_DELEGATION_DEPTH`` (executor enforces the cap). depth-2
+    # sub-workers never delegate regardless of this flag; explicit ``False`` opts out.
+    can_delegate: bool = True
     policy: RunPolicy = field(default_factory=RunPolicy)
     # Fan-out awareness: a concise list of the *other* nodes that fanned out from
     # the same point — those sharing this node's exact ``depends_on`` set, i.e. the
@@ -285,6 +285,14 @@ class RunState:
     phase: RunPhase = RunPhase.QUEUED
     attempt: int = 0
     wave: int = 0
+    # 确定性失败区分 (BL-6): whether this run's failure is worth an infra retry. A
+    # deterministic failure — a non-retryable upstream error (prompt 超长 / 400 客户端
+    # 拒绝 / 401 鉴权 / 402 余额, all ``AgentCoreError.retryable=False``) — sets this
+    # False so the WaveScheduler skips its ``on_failure="retry"`` re-run: re-running an
+    # identical over-long prompt just re-fails and burns tokens. True (the default) for a
+    # transient failure (5xx / timeout / rate-limit), for a contract-quality miss (worth a
+    # fresh attempt), and for any COMPLETED run — so ordinary retry behaviour is unchanged.
+    error_retryable: bool = True
     content: str = ""
     # The run's thinking text (the last attempt's, parallel to ``content``). Carried
     # so the CAPTAIN root run hands its reasoning to the pipeline for persistence AND

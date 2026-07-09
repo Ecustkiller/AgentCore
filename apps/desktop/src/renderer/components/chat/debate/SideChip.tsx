@@ -50,7 +50,7 @@ export function SideIdentity({
 }: {
   name: string;
   colorVar: string;
-  model: string | null | undefined;
+  model?: string | null;
 }) {
   return (
     <span className="inline-flex min-w-0 flex-wrap items-center gap-1.5">

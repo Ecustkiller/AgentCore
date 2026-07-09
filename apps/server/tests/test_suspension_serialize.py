@@ -11,6 +11,8 @@ seed are all projections of ``turn_journal`` (+ reloaded history), rebuilt on cl
 tests assert they DON'T survive to_json.
 """
 
+import pytest
+
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.runs import RunPhase, RunPlan, RunSpec, RunState
 from agentcore.runtime.runs.serialize import (
@@ -238,19 +240,9 @@ def test_ask_user_suspension_round_trips():
     assert restored.journal == []
 
 
-def test_suspension_from_json_tolerates_missing_keys():
-    # A frame written by a different build (or a partial write) must still load —
-    # absent kind defaults to plan_review, and every field falls back to a safe
-    # empty default rather than raising.
-    restored = suspension_from_json({"message_id": "m1"})
-    assert isinstance(restored, PlanReviewSuspension)
-    assert restored.message_id == "m1"
-    assert restored.folder_id is None  # absent → global-only resume (safe default)
-    assert restored.memory_enabled is True  # absent → memory on (legacy/always-on default)
-    assert restored.transcript == []
-    assert restored.plan.nodes == []
-    assert restored.completed == {}
-    assert restored.checkpoint_run_ids == set()
+def test_suspension_from_json_requires_kind():
+    with pytest.raises(ValueError, match="missing or unknown suspension kind"):
+        suspension_from_json({"message_id": "m1"})
 
 
 def test_find_tool_call_id_picks_trailing_matching_call():

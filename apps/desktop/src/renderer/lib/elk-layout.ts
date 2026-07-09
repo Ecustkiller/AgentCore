@@ -16,14 +16,6 @@ interface ElkGraphNode {
 const NODE_WIDTH = 210;
 const NODE_HEIGHT = 110;
 
-/**
- * Per-layout ELK options. Padding is shared and applied on top in computeLayout.
- *
- * NETWORK_SIMPLEX node placement centers a lone source/sink node on its branch
- * midline, so a 1→N fan-out (用户输入) and an N→1 fan-in (CEO 汇聚点) stay
- * symmetric. The ELK default (BRANDES_KOEPF) packs the lone node onto the topmost
- * branch instead — that is why the input endpoint used to sit above center.
- */
 /** 内嵌聊天气泡（fit-to-width）：偏紧，包围盒小、缩放更接近 1。 */
 export const NODE_SPACING_EMBED = 40;
 /** 全屏 / 画布放大态：同层 +8px，改善宽并行列可读性。 */
@@ -37,18 +29,32 @@ export function nodeSpacingForFitMode(
 
 // 子团队 compound 内仍用 EMBED：小队（如 1→3→1 菱形）层距过大四角空、连线长。
 // 注意：estimateBbox 的 nodeSpacing 参数须与 computeLayout 传入值对齐。
+/**
+ * Per-layout ELK options. Padding is shared and applied on top in computeLayout.
+ *
+ * BRANDES_KOEPF with `fixedAlignment: BALANCED` places each node at the average of
+ * four alignment runs, so a binary fork (方案决策 → 产品/技术) comes out symmetric
+ * around its parent — the thing NETWORK_SIMPLEX packs lopsided (one wing flush to
+ * the spine, the other flung wide). Paired with `considerModelOrder` (set on the
+ * root in computeLayout) for deterministic wing order, this lets ELK produce the
+ * layout directly instead of a pile of hand post-passes. BK's one weakness — it
+ * does NOT center a lone fan bookend (用户输入 / CEO 汇聚点) — is handled by
+ * {@link centerLoneEndpoints}, the single surviving cross-axis polish.
+ */
 const LAYOUT_OPTIONS: Record<ElkGraphLayout, Record<string, string>> = {
   tree: {
     "elk.algorithm": "layered",
     "elk.direction": "DOWN",
     "elk.layered.spacing.nodeNodeBetweenLayers": "64",
-    "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+    "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+    "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
   },
   leftright: {
     "elk.algorithm": "layered",
     "elk.direction": "RIGHT",
     "elk.layered.spacing.nodeNodeBetweenLayers": "80",
-    "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+    "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+    "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
   },
 };
 
@@ -123,7 +129,6 @@ export async function computeLayout(
   nodeIds: string[],
   edges: GraphEdge[],
   layout: ElkGraphLayout = "tree",
-  preserveOrder = false,
   bookends: LayoutBookends = {},
   subTeams: SubTeamInput[] = [],
   nodeSpacing: number = NODE_SPACING_EMBED,
@@ -132,22 +137,60 @@ export async function computeLayout(
     return { positions: {}, width: 0, height: 0, groups: [] };
 
   const subTeamByParent = new Map(subTeams.map((st) => [st.parentId, st]));
-  const subTeamMemberSet = new Set<string>();
-  const subTeamParentSet = new Set<string>();
-  for (const st of subTeams) {
-    subTeamParentSet.add(st.parentId);
-    for (const m of st.memberIds) subTeamMemberSet.add(m);
-  }
 
-  const containsTeam = (st: SubTeamInput, id: string): boolean => {
+  // Revision chains (原始 → v2 → v3…): a sub-team member's continuation rounds
+  // (辩论/圆桌逐轮). They must share the SAME compound as their source so the box
+  // wraps the whole debate matrix — otherwise ELK lays each revision out in a
+  // top-level layer OUTSIDE the box, drawing a long escape edge and a phantom gap
+  // instead of the tight 参与者×轮次 grid the compound gives.
+  const revisionSuccessors = new Map<string, string[]>();
+  const revisionSourceOf = new Map<string, string>();
+  for (const e of edges) {
+    if (e.kind !== "revision") continue;
+    const arr = revisionSuccessors.get(e.source);
+    if (arr) arr.push(e.target);
+    else revisionSuccessors.set(e.source, [e.target]);
+    revisionSourceOf.set(e.target, e.source);
+  }
+  const revisionRootOf = (id: string): string => {
+    let cur = id;
+    const seen = new Set<string>();
+    while (revisionSourceOf.has(cur) && !seen.has(cur)) {
+      seen.add(cur);
+      cur = revisionSourceOf.get(cur) as string;
+    }
+    return cur;
+  };
+  const revisionDescendantsOf = (id: string): string[] => {
+    const out: string[] = [];
+    const seen = new Set<string>([id]);
+    const stack = [id];
+    while (stack.length > 0) {
+      const n = stack.pop() as string;
+      for (const t of revisionSuccessors.get(n) ?? []) {
+        if (seen.has(t)) continue;
+        seen.add(t);
+        out.push(t);
+        stack.push(t);
+      }
+    }
+    return out;
+  };
+
+  const structurallyContainsTeam = (st: SubTeamInput, id: string): boolean => {
     if (id === st.parentId) return true;
     for (const m of st.memberIds) {
       if (id === m) return true;
       const nested = subTeamByParent.get(m);
-      if (nested && containsTeam(nested, id)) return true;
+      if (nested && structurallyContainsTeam(nested, id)) return true;
     }
     return false;
   };
+  // A revision belongs to whichever team owns its revision root, so its
+  // continuation edges stay internal to the compound and it never escapes the box.
+  const containsTeam = (st: SubTeamInput, id: string): boolean =>
+    structurallyContainsTeam(st, id) ||
+    structurallyContainsTeam(st, revisionRootOf(id));
 
   const innermostTeamForEdge = (
     source: string,
@@ -177,6 +220,9 @@ export async function computeLayout(
     const groupChildren: ElkGraphNode[] = [
       { id: st.parentId, width: NODE_WIDTH, height: NODE_HEIGHT },
     ];
+    for (const rev of revisionDescendantsOf(st.parentId)) {
+      groupChildren.push({ id: rev, width: NODE_WIDTH, height: NODE_HEIGHT });
+    }
     for (const memberId of st.memberIds) {
       const nested = subTeamByParent.get(memberId);
       if (nested) {
@@ -187,6 +233,15 @@ export async function computeLayout(
           width: NODE_WIDTH,
           height: NODE_HEIGHT,
         });
+        // A leaf member's continuation rounds live in the same compound; ELK sizes
+        // the box around them and internal revision edges lay them out in-column.
+        for (const rev of revisionDescendantsOf(memberId)) {
+          groupChildren.push({
+            id: rev,
+            width: NODE_WIDTH,
+            height: NODE_HEIGHT,
+          });
+        }
       }
     }
     const groupEdges = edgesForGroup(st).map((e) => ({
@@ -211,14 +266,11 @@ export async function computeLayout(
   const inAnyTeam = (id: string): boolean =>
     subTeams.some((st) => containsTeam(st, id));
 
-  const internalEdges: GraphEdge[] = [];
-  const externalEdges: GraphEdge[] = [];
-  for (const e of edges) {
-    const team = innermostTeamForEdge(e.source, e.target);
-    if (team) internalEdges.push(e);
-    else externalEdges.push(e);
-  }
-  void internalEdges;
+  // Edges fully inside a compound are emitted by buildGroupElkNode; only the
+  // cross-team edges belong on the ELK root.
+  const externalEdges = edges.filter(
+    (e) => !innermostTeamForEdge(e.source, e.target),
+  );
 
   const topLevelChildren: ElkGraphNode[] = [];
   for (const id of nodeIds) {
@@ -262,9 +314,10 @@ export async function computeLayout(
       ...elkRootOptions(layout, nodeSpacing),
       "elk.padding": "[top=24,left=24,bottom=24,right=24]",
       "elk.hierarchyHandling": "INCLUDE_CHILDREN",
-      ...(preserveOrder
-        ? { "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES" }
-        : {}),
+      // Order nodes within a layer by model (declaration) order: gives the debate
+      // 正/反 banding and the deterministic first-child-left / second-child-right
+      // wing order that BK's symmetric placement alone doesn't fix.
+      "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
     },
     children: topLevelChildren,
     edges: elkEdges,
@@ -308,36 +361,13 @@ export async function computeLayout(
   };
 
   extractPositions(laidOut.children ?? [], 0, 0);
-  alignSubTeamMembers(positions, subTeams, layout, nodeSpacing);
 
-  const subTeamNodeSet = new Set<string>();
-  for (const st of subTeams) {
-    subTeamNodeSet.add(st.parentId);
-    for (const m of st.memberIds) subTeamNodeSet.add(m);
-  }
-
-  balanceBinaryForks(positions, edges, layout, subTeamMemberSet);
-
-  // 端点居中后处理：ELK 的 NETWORK_SIMPLEX 在子节点为偶数时，把独占一层的纯源/纯汇
-  // 节点（用户输入 / CEO 汇聚点）的「中位数」当成一整段区间而非一点 → 它会贴到上/下边、
-  // 偏离正中，使其扇形边一长一短。这里把这类节点在交叉轴上拉到所连节点的正中（仅交叉轴、
-  // 不动层坐标）。放在下沉之后：多父下沉会把靠下的父下推，端点须按父的**最终**跨度居中。
+  // ELK (BK BALANCED + considerModelOrder + INCLUDE_CHILDREN compounds) lays out
+  // layers, minimizes crossings, keeps revision chains straight and boxes sub-teams
+  // directly — no hand alignment/overlap/crossing passes. The one thing BK can't do
+  // is center a lone fan bookend (用户输入 / CEO 汇聚点) on an even neighbor count, so
+  // this single cross-axis polish pulls those onto their neighbors' midline.
   centerLoneEndpoints(positions, edges, layout);
-
-  alignRevisionChains(positions, edges, layout);
-
-  resolveOverlaps(positions, layout, subTeams, containsTeam, nodeSpacing);
-  alignSubTeamMembers(positions, subTeams, layout, nodeSpacing);
-
-  minimizeCrossings(positions, edges, layout, subTeamNodeSet, 3, nodeSpacing);
-
-  alignRevisionChains(positions, edges, layout);
-  resolveOverlaps(positions, layout, subTeams, containsTeam, nodeSpacing);
-  alignSubTeamMembers(positions, subTeams, layout, nodeSpacing);
-  alignRevisionChains(positions, edges, layout);
-  resolveOverlaps(positions, layout, subTeams, containsTeam, nodeSpacing);
-  alignSubTeamMembers(positions, subTeams, layout, nodeSpacing);
-  alignRevisionChains(positions, edges, layout);
 
   // Post-processing can push nodes negative on the cross axis; shift the whole
   // graph so the bbox origin stays at ELK padding (keeps promo stills / fit-to-width sane).
@@ -376,7 +406,10 @@ export async function computeLayout(
   for (const g of groups) {
     const st = subTeams.find((s) => s.groupId === g.groupId);
     if (!st) continue;
-    const memberIds = [st.parentId, ...st.memberIds];
+    const teamNodes = new Set<string>([st.parentId, ...st.memberIds]);
+    for (const base of [st.parentId, ...st.memberIds])
+      for (const rev of revisionDescendantsOf(base)) teamNodes.add(rev);
+    const memberIds = [...teamNodes];
     let minGX = Number.POSITIVE_INFINITY;
     let minGY = Number.POSITIVE_INFINITY;
     let maxGX = Number.NEGATIVE_INFINITY;
@@ -400,10 +433,10 @@ export async function computeLayout(
 
 /**
  * Pull a lone fan bookend onto the cross-axis midpoint of the nodes it connects
- * to. ELK's NETWORK_SIMPLEX leaves a node that is the only one in its layer free
- * to sit anywhere in its neighbors' band when their count is even (the median is
- * a range, not a point), so a 1→2 / 2→1 端点 (用户输入 / CEO 汇聚点) can land
- * off-center and draw asymmetric fan edges.
+ * to. ELK's BRANDES_KOEPF leaves a node that is the only one in its layer free
+ * to sit anywhere in its neighbors' band when their count is even (the aligned
+ * position is a range, not a point), so a 1→2 / 2→1 端点 (用户输入 / CEO 汇聚点)
+ * can land off-center and draw asymmetric fan edges.
  *
  * Only **pure sources** (no incoming, fan-out root) and **pure sinks** (no
  * outgoing, fan-in 汇聚点) are recentered — a lone *middle* node (one in, one+
@@ -462,399 +495,6 @@ function centerLoneEndpoints(
     positions[id] = horizontal
       ? { x: positions[id].x, y: cross }
       : { x: cross, y: positions[id].y };
-  }
-}
-
-function alignSubTeamMembers(
-  positions: Record<string, { x: number; y: number }>,
-  subTeams: SubTeamInput[],
-  layout: ElkGraphLayout,
-  nodeSpacing: number,
-): void {
-  const horizontal = layout === "leftright";
-  for (const st of subTeams) {
-    const parent = positions[st.parentId];
-    if (!parent) continue;
-    for (let i = 0; i < st.memberIds.length; i++) {
-      const childId = st.memberIds[i];
-      if (!positions[childId]) continue;
-      if (horizontal) {
-        positions[childId].x = parent.x;
-        positions[childId].y = parent.y + (NODE_HEIGHT + nodeSpacing) * (i + 1);
-      } else {
-        positions[childId].y = parent.y;
-        positions[childId].x = parent.x + (NODE_WIDTH + nodeSpacing) * (i + 1);
-      }
-    }
-  }
-}
-
-/**
- * Mirror a parent's two same-layer `dep` children symmetrically around the parent's
- * cross-axis center — fixes ELK packing one fork flush to the spine and the other
- * flung wide (tree 方案决策→左产品/右技术 reads as a Y, not an L).
- *
- * Wing assignment follows **edge declaration order**: first `dep` child → left,
- * second → right (so `decide→pd` then `decide→arch` always reads 产品左/技术右).
- *
- * Only exactly-two-child forks; 1→N fans and debate 1→4 are left to ELK /
- * `preserveOrder`. Each child moves as a rigid branch (all descendants) so
- * delegate sub-teams stay attached. Cross-axis only; main-axis layers untouched.
- */
-function balanceBinaryForks(
-  positions: Record<string, { x: number; y: number }>,
-  edges: GraphEdge[],
-  layout: ElkGraphLayout,
-  subTeamMemberSet: Set<string> = new Set(),
-): void {
-  const horizontal = layout === "leftright";
-  const crossSize = horizontal ? NODE_HEIGHT : NODE_WIDTH;
-  const mainOf = (id: string) =>
-    horizontal ? positions[id].x : positions[id].y;
-  const crossCenterOf = (id: string) =>
-    (horizontal ? positions[id].y : positions[id].x) + crossSize / 2;
-  const moveCross = (id: string, delta: number) => {
-    if (horizontal) positions[id].y += delta;
-    else positions[id].x += delta;
-  };
-
-  const outgoingDep = new Map<string, string[]>();
-  for (const e of edges) {
-    if ((e.kind ?? "dep") !== "dep") continue;
-    if (!positions[e.source] || !positions[e.target]) continue;
-    const arr = outgoingDep.get(e.source);
-    if (arr) {
-      if (!arr.includes(e.target)) arr.push(e.target);
-    } else outgoingDep.set(e.source, [e.target]);
-  }
-
-  const branchOf = (root: string, forkParent: string): string[] => {
-    const inBranch = new Set([forkParent, root]);
-    const out = [root];
-    const stack = [root];
-    while (stack.length > 0) {
-      const n = stack.pop() as string;
-      for (const e of edges) {
-        if (e.source !== n) continue;
-        const t = e.target;
-        if (!positions[t] || inBranch.has(t)) continue;
-        // Fan-in merge (e.g. both parents → CEO 汇聚点): never absorb into one side.
-        const externalIn = edges.some(
-          (ei) =>
-            ei.target === t && ei.source !== n && !inBranch.has(ei.source),
-        );
-        if (externalIn) continue;
-        inBranch.add(t);
-        out.push(t);
-        stack.push(t);
-      }
-    }
-    return out;
-  };
-
-  for (const [parent, children] of outgoingDep) {
-    if (children.length !== 2 || !positions[parent]) continue;
-    const [left, right] = children;
-    if (!positions[left] || !positions[right]) continue;
-    if (subTeamMemberSet.has(left) || subTeamMemberSet.has(right)) continue;
-    if (Math.round(mainOf(left)) !== Math.round(mainOf(right))) continue;
-
-    const parentCenter = crossCenterOf(parent);
-    const leftCenter = crossCenterOf(left);
-    const rightCenter = crossCenterOf(right);
-    // First `dep` child → left wing, second → right wing (edge declaration order).
-    const spread = Math.max(
-      Math.abs(parentCenter - leftCenter),
-      Math.abs(parentCenter - rightCenter),
-    );
-    if (spread <= 1) continue;
-
-    const leftDelta = parentCenter - spread - leftCenter;
-    const rightDelta = parentCenter + spread - rightCenter;
-    if (Math.abs(leftDelta) > 0.01) {
-      for (const id of branchOf(left, parent)) moveCross(id, leftDelta);
-    }
-    if (Math.abs(rightDelta) > 0.01) {
-      for (const id of branchOf(right, parent)) moveCross(id, rightDelta);
-    }
-  }
-}
-
-/**
- * Push apart nodes whose AABBs overlap on both axes (same main-axis band + cross-axis
- * collision). Post-processing — especially {@link dropSubTeamsBelowParent} — can land
- * a dropped sub-team on the same layer as unrelated dep nodes without checking their
- * cross-axis positions. Scans in cross-axis order within each main-axis band and
- * enforces at least `nodeSpacing` between boxes; repeats until stable.
- *
- * Cross-axis only: main-axis (layer) coordinates are left untouched so ELK's layer
- * assignment and bookend pinning stay intact.
- */
-function resolveOverlaps(
-  positions: Record<string, { x: number; y: number }>,
-  layout: ElkGraphLayout,
-  subTeams: SubTeamInput[] = [],
-  containsTeam: (st: SubTeamInput, id: string) => boolean = () => false,
-  nodeSpacing: number = NODE_SPACING_EMBED,
-): void {
-  const ids = Object.keys(positions);
-  if (ids.length < 2) return;
-
-  const horizontal = layout === "leftright";
-  const crossSize = horizontal ? NODE_HEIGHT : NODE_WIDTH;
-  const mainSize = horizontal ? NODE_WIDTH : NODE_HEIGHT;
-
-  const mainOf = (id: string) =>
-    horizontal ? positions[id].x : positions[id].y;
-  const crossOf = (id: string) =>
-    horizontal ? positions[id].y : positions[id].x;
-  const setCross = (id: string, v: number) => {
-    if (horizontal) positions[id].y = v;
-    else positions[id].x = v;
-  };
-
-  const mainOverlap = (a: string, b: string) =>
-    mainOf(a) < mainOf(b) + mainSize && mainOf(a) + mainSize > mainOf(b);
-
-  const boxesOverlap = (a: string, b: string) => {
-    if (!mainOverlap(a, b)) return false;
-    return (
-      crossOf(a) + crossSize + nodeSpacing > crossOf(b) &&
-      crossOf(b) + crossSize + nodeSpacing > crossOf(a)
-    );
-  };
-
-  const sameSubTeam = (a: string, b: string): boolean =>
-    subTeams.some((st) => containsTeam(st, a) && containsTeam(st, b));
-
-  const subTeamNodeIds = (id: string): string[] | null => {
-    for (const st of subTeams) {
-      if (!containsTeam(st, id)) continue;
-      return [st.parentId, ...st.memberIds];
-    }
-    return null;
-  };
-
-  const moveCrossBy = (id: string, delta: number) => {
-    if (Math.abs(delta) < 0.01) return;
-    const team = subTeamNodeIds(id);
-    const targets = team ?? [id];
-    for (const tid of targets) {
-      if (!positions[tid]) continue;
-      setCross(tid, crossOf(tid) + delta);
-    }
-  };
-
-  const maxRounds = ids.length * 2;
-  for (let round = 0; round < maxRounds; round++) {
-    let changed = false;
-
-    // Group by rounded main-axis layer so we only compare nodes that could collide.
-    const byLayer = new Map<string, string[]>();
-    for (const id of ids) {
-      const key = String(Math.round(mainOf(id)));
-      const arr = byLayer.get(key);
-      if (arr) arr.push(id);
-      else byLayer.set(key, [id]);
-    }
-
-    for (const members of byLayer.values()) {
-      if (members.length < 2) continue;
-      members.sort((a, b) => crossOf(a) - crossOf(b));
-
-      for (let i = 1; i < members.length; i++) {
-        const prev = members[i - 1];
-        const curr = members[i];
-        if (sameSubTeam(prev, curr)) continue;
-        if (!boxesOverlap(prev, curr)) continue;
-        const minCross = crossOf(prev) + crossSize + nodeSpacing;
-        if (crossOf(curr) < minCross) {
-          moveCrossBy(curr, minCross - crossOf(curr));
-          changed = true;
-        }
-      }
-    }
-
-    // Catch boxes that overlap on main axis but sit in different rounded layers.
-    for (let i = 0; i < ids.length; i++) {
-      for (let j = i + 1; j < ids.length; j++) {
-        const a = ids[i];
-        const b = ids[j];
-        if (sameSubTeam(a, b)) continue;
-        if (!boxesOverlap(a, b)) continue;
-        const [upper, lower] = crossOf(a) <= crossOf(b) ? [a, b] : [b, a];
-        const minCross = crossOf(upper) + crossSize + nodeSpacing;
-        if (crossOf(lower) < minCross) {
-          moveCrossBy(lower, minCross - crossOf(lower));
-          changed = true;
-        }
-      }
-    }
-
-    if (!changed) break;
-  }
-}
-
-/**
- * Reorder nodes within each main-axis layer using the barycenter heuristic to
- * reduce edge crossings. Runs after {@link resolveOverlaps} so spacing is sane,
- * then redistributes cross-axis coordinates with the same `nodeSpacing`.
- *
- * Cross-axis only — main-axis (layer) coordinates stay untouched.
- */
-function minimizeCrossings(
-  positions: Record<string, { x: number; y: number }>,
-  edges: GraphEdge[],
-  layout: ElkGraphLayout,
-  subTeamNodeSet: Set<string> = new Set(),
-  iterations = 3,
-  nodeSpacing: number = NODE_SPACING_EMBED,
-): void {
-  const ids = Object.keys(positions);
-  if (ids.length < 2) return;
-
-  const horizontal = layout === "leftright";
-  const crossSize = horizontal ? NODE_HEIGHT : NODE_WIDTH;
-  const mainOf = (id: string) =>
-    horizontal ? positions[id].x : positions[id].y;
-  const crossOf = (id: string) =>
-    horizontal ? positions[id].y : positions[id].x;
-  const setCross = (id: string, v: number) => {
-    if (horizontal) positions[id].y = v;
-    else positions[id].x = v;
-  };
-  const crossCenterOf = (id: string) => crossOf(id) + crossSize / 2;
-
-  const push = (m: Map<string, string[]>, k: string, v: string) => {
-    const arr = m.get(k);
-    if (arr) arr.push(v);
-    else m.set(k, [v]);
-  };
-  const incoming = new Map<string, string[]>();
-  const outgoing = new Map<string, string[]>();
-  for (const e of edges) {
-    if (!positions[e.source] || !positions[e.target]) continue;
-    push(outgoing, e.source, e.target);
-    push(incoming, e.target, e.source);
-  }
-
-  // Compound sub-teams are positioned by ELK inside their container — leave them put.
-  const immovable = new Set<string>(subTeamNodeSet);
-  const delegateChildren = new Map<string, string[]>();
-  for (const e of edges) {
-    if (e.kind !== "delegate") continue;
-    push(delegateChildren, e.source, e.target);
-  }
-  for (const roots of delegateChildren.values()) {
-    const stack = [...roots];
-    while (stack.length > 0) {
-      const n = stack.pop() as string;
-      if (immovable.has(n)) continue;
-      immovable.add(n);
-      for (const c of delegateChildren.get(n) ?? []) stack.push(c);
-    }
-  }
-  for (const parent of delegateChildren.keys()) immovable.add(parent);
-
-  const layersOf = (): Map<number, string[]> => {
-    const layers = new Map<number, string[]>();
-    for (const id of ids) {
-      const key = Math.round(mainOf(id));
-      const arr = layers.get(key);
-      if (arr) arr.push(id);
-      else layers.set(key, [id]);
-    }
-    return layers;
-  };
-
-  const redistributeLayer = (members: string[], sorted: string[]): void => {
-    const n = sorted.length;
-    if (n < 2) return;
-    const totalSpan = n * crossSize + (n - 1) * nodeSpacing;
-    const originalCenter =
-      members.reduce((s, id) => s + crossCenterOf(id), 0) / n;
-    const startCross = originalCenter - totalSpan / 2;
-    for (let i = 0; i < n; i++) {
-      setCross(sorted[i], startCross + i * (crossSize + nodeSpacing));
-    }
-  };
-
-  for (let iter = 0; iter < iterations; iter++) {
-    const layers = layersOf();
-    const layerKeys = [...layers.keys()].sort((a, b) => a - b);
-
-    for (const key of layerKeys) {
-      const members = layers.get(key);
-      if (!members || members.length < 2) continue;
-      if (members.some((id) => immovable.has(id))) continue;
-
-      const paired = members.map((id) => {
-        const neighborIds = [
-          ...(incoming.get(id) ?? []),
-          ...(outgoing.get(id) ?? []),
-        ];
-        const valid = neighborIds.filter((n) => positions[n]);
-        const bc =
-          valid.length > 0
-            ? valid.reduce((s, n) => s + crossCenterOf(n), 0) / valid.length
-            : crossCenterOf(id);
-        return { id, bc };
-      });
-
-      paired.sort((a, b) => a.bc - b.bc || crossOf(a.id) - crossOf(b.id));
-      redistributeLayer(
-        members,
-        paired.map((p) => p.id),
-      );
-    }
-  }
-}
-
-/**
- * Snap each 修订/续写 revision node onto its source's cross-axis lane so the
- * `原始 → 修订 vN` edge stays straight — the invariant that makes a 圆桌逐轮 /
- * 热修版本链 read as「同一发言人·下一轮」in one lane.
- *
- * ELK already aligns a revision with its source (a revision edge is a normal edge
- * it keeps short), but {@link dropSubTeamsBelowParent} can move the SOURCE (a
- * delegated sub-worker) without its revisions — they hang off the sub-worker by a
- * `revision` edge, not the `delegate` subtree it moves — leaving the revision
- * stranded in the source's OLD lane（第三波漂移 bug）. Re-establishing the invariant
- * here, after every prior move, fixes it no matter what shifted the source.
- *
- * Cross-axis only (y for the left-right flow, x for the tree). A chain (v2→v3…)
- * is processed shallow-first so each link inherits its parent's already-settled
- * lane. Inert when there are no revision edges (the flat / nested-delegate cases).
- */
-function alignRevisionChains(
-  positions: Record<string, { x: number; y: number }>,
-  edges: GraphEdge[],
-  layout: ElkGraphLayout,
-): void {
-  const horizontal = layout === "leftright";
-  const sourceOf = new Map<string, string>();
-  for (const e of edges) {
-    if (e.kind !== "revision") continue;
-    if (!positions[e.source] || !positions[e.target]) continue;
-    sourceOf.set(e.target, e.source);
-  }
-  if (sourceOf.size === 0) return;
-
-  // Revision-chain depth from a non-revision origin, so v2 settles before v3
-  // reads it (a cycle guard keeps a malformed chain from looping forever).
-  const depthOf = (id: string, seen: Set<string>): number => {
-    const src = sourceOf.get(id);
-    if (src == null || seen.has(id)) return 0;
-    seen.add(id);
-    return 1 + depthOf(src, seen);
-  };
-  const targets = [...sourceOf.keys()].sort(
-    (a, b) => depthOf(a, new Set()) - depthOf(b, new Set()),
-  );
-  for (const target of targets) {
-    const src = sourceOf.get(target) as string;
-    if (horizontal) positions[target].y = positions[src].y;
-    else positions[target].x = positions[src].x;
   }
 }
 

@@ -29,6 +29,7 @@
     "@capacitor/core": "^8.4.0",
     "@capacitor/ios": "^8.4.0",
     "@capacitor/push-notifications": "^8.1.1",
+    "@capgo/capacitor-speech-recognition": "^8.1.9",
     "katex": "^0.17.0",
     "lucide-react": "^0.400.0",
     "mermaid": "^11.15.0",

@@ -12,6 +12,8 @@ from agentcore.runtime.audit.projector import (
     project_journal_entry,
     project_permission_effective,
     project_replan,
+    project_run_deterministic_failure,
+    project_run_redirect_ignored,
     project_run_retry,
     project_tool_disabled,
     project_write_conflict,
@@ -197,6 +199,44 @@ def on_run_retry(
             attempt=attempt,
             source=source,
             error=error,
+            execution_id=execution_id,
+        )
+    )
+
+
+def on_run_deterministic_failure(
+    *,
+    run_id: str,
+    error: str | None = None,
+    execution_id: str | None = None,
+) -> None:
+    recorder = current_audit_recorder.get()
+    if recorder is None or not recorder.delegated:
+        return
+    recorder.schedule(
+        project_run_deterministic_failure(
+            recorder,
+            run_id=run_id,
+            error=error,
+            execution_id=execution_id,
+        )
+    )
+
+
+def on_run_redirect_ignored(
+    *,
+    run_id: str,
+    feedback: str | None = None,
+    execution_id: str | None = None,
+) -> None:
+    recorder = current_audit_recorder.get()
+    if recorder is None or not recorder.delegated:
+        return
+    recorder.schedule(
+        project_run_redirect_ignored(
+            recorder,
+            run_id=run_id,
+            feedback=feedback,
             execution_id=execution_id,
         )
     )

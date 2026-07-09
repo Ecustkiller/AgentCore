@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from agentcore.simulation.agents.models import SimPersona
-from agentcore.simulation.scenarios.town.config import schedule_hint_for_persona
+from agentcore.simulation.scenarios.town.schedule import schedule_hint_for_persona
 from agentcore.simulation.world.state import WorldState
 
 _SLEEP_KEYWORDS = frozenset({"睡觉", "入睡", "就寝", "安眠"})

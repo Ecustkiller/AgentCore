@@ -39,17 +39,13 @@ async function main(): Promise<void> {
 
   for (const def of STILL_DEFS) {
     const ids = def.nodes.map((n) => n.id);
-    // Debate banding: preserveOrder bands 正方 above 反方 (same trigger as the
-    // manual's EmbeddedGraphCanvas — any node carrying a `stance`).
-    const debate = def.nodes.some(
-      (n) => (n.data as { stance?: string }).stance != null,
-    );
+    // Debate banding is now always on (considerModelOrder inside computeLayout),
+    // so a node carrying a `stance` bands 正方 above 反方 without a caller flag.
     const result = await computeLayout(
       ids,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       def.edges as any,
       def.layout,
-      debate,
       { source: INPUT_ID, sink: CAPTAIN_ID },
     );
 

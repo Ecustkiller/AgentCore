@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./api.generated": "./src/api.generated.ts",
-    "./audit": "./src/audit.ts"
+    "./audit": "./src/audit.ts",
+    "./llm-window": "./src/llm-window.ts"
   },
   "types": "./src/index.ts",
   "scripts": {

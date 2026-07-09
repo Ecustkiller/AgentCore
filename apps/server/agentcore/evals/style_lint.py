@@ -1,6 +1,6 @@
 """输出风格的确定性 linter（方向④：anti-slop 违规可度量，先可观测）.
 
-纯文本启发式、**零额外 LLM**：检测 [`runtime/prompt._DEFAULT_SYSTEM_PROMPT`](../runtime/prompt.py)
+纯文本启发式、**零额外 LLM**：检测 [`runtime/resolve/prompt._DEFAULT_SYSTEM_PROMPT`](../runtime/resolve/prompt.py)
 的 ``<output_style>`` 明令禁止的几类「AI 腔」——套话开场 / 客套收尾 / 未授权 emoji。与 LLM
 裁判（语义质量）正交：那判「答得好不好」，本模块判「有没有犯这几条**确定可判**的风格戒律」，
 故可零成本单测（见 ``tests/test_evals_style.py``）。

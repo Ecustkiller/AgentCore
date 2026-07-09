@@ -53,6 +53,7 @@ Radix overlay（dialog / popover / tooltip 等）仍在 `components/ui/`，与 p
 | **PanelShell** | 右侧面板、指挥台 | `SidePanel.tsx`、`CanvasDecisionPanel.tsx` |
 | **SearchField** | 页内列表/树筛选、Popover 选项过滤 | `search-field.tsx`（`field` / `plain`） |
 | **SearchTrigger** | 全局搜索与命令面板入口 | `search-trigger.tsx` + `CommandPalette.tsx` |
+| **ActivityBanner** | 侧栏全局协作感知横幅（跨对话执行/审批） | `sidebar/ActivityBanner.tsx`（`lib/teamActivity.ts` 派生，见 [`前端UX设计 §一`](前端UX设计.md)） |
 
 新交互卡片应优先复用 **DecisionCard + Button**，并确保聊天与画布双视图可共用（见 `CanvasDecisionPanel.tsx`）。
 
@@ -120,7 +121,7 @@ OKLCH 语义色单源：**`packages/design-tokens/`**
 | `tokens.css` | 桌面 `:root` + `.dark`（由 `globals.css` `@import`） |
 | `mobile-light.css` | 手机用途映射浅色（由 `styles.css` `@import`） |
 
-桌面 Tailwind 映射仍在 `apps/desktop/src/renderer/styles/globals.css` 的 `@theme inline`。需要新颜色 → 先加进 `packages/design-tokens/tokens.css`，再视需要映射 Tailwind 类。
+桌面 Tailwind 映射仍在 `apps/desktop/src/renderer/styles/globals.css` 的 `@theme inline`。需要新颜色 → 先加进 `packages/design-tokens/src/tokens.css`，再视需要映射 Tailwind 类。
 
 ### 语义 token
 
@@ -153,7 +154,7 @@ OKLCH 语义色单源：**`packages/design-tokens/`**
 除上表语义 token，`globals.css` 另有**分类用途**的裸 `--*` 变量（同一 OKLCH 亮度带，读作一个家族）——**仅供对应场景内联使用**（`var(--*)`），不进 `@theme inline`、不做 Tailwind 类：
 
 - **代码高亮** `--syntax-*`：代码块着色。
-- **角色身份** `--agent-1..8`：协作图队员头像的「身份色」，按角色名 hash 取一格（`lib/agentIdentity.ts`）。**身份 ≠ 状态**——身份只画在头像盘，运行状态仍走上表状态色。新增/调整 → 改 `packages/design-tokens/tokens.css`。
+- **角色身份** `--agent-1..8`：协作图队员头像的「身份色」，按角色名 hash 取一格（`lib/agentIdentity.ts`）。**身份 ≠ 状态**——身份只画在头像盘，运行状态仍走上表状态色。新增/调整 → 改 `packages/design-tokens/src/tokens.css`。
 - **产物 / 目录分类** `--artifact-*` `--catalog-*`：工具箱创作工具磁贴、能力图鉴分类图标（`lib/catalogColors.ts`）。**分类 ≠ 状态**——仅启动器/目录层扫视识别，不进 Tailwind 类、内联 `var(--*)` + `color-mix`。
 - **辩论阵营** `--debate-side-pro` `--debate-side-con`：正反 2 方固定红蓝对垒（`pro`=蓝 / `con`=红），仅 `debateSideColorVar` 在 `pro`/`con` key 时解析；多方仍走 `--agent-N` hash。**阵营 ≠ 状态**——彩度 0.11 介于 agent(0.07) 与 status(~0.18+) 之间，不用 `primary`/`destructive`。
 
@@ -161,7 +162,7 @@ OKLCH 语义色单源：**`packages/design-tokens/`**
 
 两端是同一产品。token 层唯一的**硬约束 = 跨端品牌不变量必须一致**：
 
-- **品牌色 hue 255**；状态色语义 hue 固定：成功 152 / 警告 65 / 错误 27 / 品牌蓝 255。精确 L/C 值以 **`packages/design-tokens/tokens.css`** 为准（桌面 `:root` + `.dark`；手机 `mobile-light.css` 仅浅色用途映射）。
+- **品牌色 hue 255**；状态色语义 hue 固定：成功 152 / 警告 65 / 错误 27 / 品牌蓝 255。精确 L/C 值以 **`packages/design-tokens/src/tokens.css`** 为准（桌面 `:root` + `.dark`；手机 `mobile-light.css` 仅浅色用途映射）。
 - 改品牌 / 状态色 → **只改 `packages/design-tokens/`**，桌面与手机通过 `@import` 自动同步。
 - **手机端暂不做暗色模式**（明确决策，非待办）：手机端是桌面减能力层的瘦客户端，浅色已满足当前需求，暗色为纯增量样式、需要再单独决策。故手机 `styles.css` 只维护 `:root` 一套浅色值、**不引入 `.dark` / `prefers-color-scheme` 分支**；桌面 `.dark` 不要求手机镜像。
 
@@ -177,7 +178,7 @@ OKLCH 语义色单源：**`packages/design-tokens/`**
 - **硬编码调色板与 hex**：`bg-blue-500`、`text-red-600`、`#3B82F6`、`bg-[#...]`。唯一彩色出口是上表 token。
 - **`hsl(var(--…))` 包裹**：token 已是 OKLCH，`hsl()` 会产出非法值。内联样式直接写 `var(--primary)`；类名优先用语义工具类（如 `accent-primary` 而非 `accent-[…]`）。
 - **拿 `accent` 当成功色**：`accent` 是中性 hover 表面。「已完成 / 成功」一律 `success`（曾误用为灰，已修正）。
-- **绕过 token 新建散色变量**：先评估能否复用，必须新增则进 `packages/design-tokens/tokens.css`。
+- **绕过 token 新建散色变量**：先评估能否复用，必须新增则进 `packages/design-tokens/src/tokens.css`。
 
 ### 组件 tone 预设
 

@@ -15,6 +15,7 @@ from agentcore.core.types import ToolApproval, ToolCategory, ToolEffect
 
 if TYPE_CHECKING:
     from agentcore.board.channel import BoardChannel
+    from agentcore.desktop.channel import DesktopClientChannel
     from agentcore.runtime.costing import RunCost
     from agentcore.runtime.runs.notewall import NoteWall, TeamNote
     from agentcore.vision.protocol import VisionReader
@@ -142,6 +143,10 @@ class ToolContext:
     # "not on a board" error instead of touching anything. The channel owns the mechanism
     # (suspend / emit / await the desktop); the tool owns only the op→result mapping (引擎纯化).
     board_channel: BoardChannel | None = None
+    # Desktop Client Tools: per-run channel for ``desktop_notify`` (OS notification).
+    # Set when ``backend.location == "local"`` so delegated workers can ping the user
+    # on the bound Electron app; ``None`` on cloud-only runs.
+    desktop_channel: DesktopClientChannel | None = None
     # AI 协作白板 (AI协作白板.md §九.4): the optional vision port ``board_read`` uses to turn a
     # rasterized hand-drawn / screenshot selection into text (DeepSeek V4 无多模态, so 读图 is a
     # separate model). Wired by ``build_vision_reader`` when ``VISION_API_KEY`` is set; ``None``

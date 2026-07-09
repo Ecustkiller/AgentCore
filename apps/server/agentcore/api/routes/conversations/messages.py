@@ -31,6 +31,7 @@ from agentcore.api.schemas import (
     StatusResponse,
     StopTurnResponse,
 )
+from agentcore.api.schemas.messages import TurnCollabMetrics
 from agentcore.api.sse import sse_attach_response, sse_response
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.conversation.service import record_local_turn, stream_chat
@@ -122,6 +123,9 @@ async def list_messages(
         rounds = (m.usage or {}).get("rounds")
         if rounds is not None:
             detail.rounds = rounds
+        collab = (m.usage or {}).get("collab")
+        if collab is not None:
+            detail.collab = TurnCollabMetrics.model_validate(collab)
         details.append(detail)
 
     # 记忆更新对话内可见 (§1.6): the conversation-tail「记忆已更新」cards. They sit AFTER

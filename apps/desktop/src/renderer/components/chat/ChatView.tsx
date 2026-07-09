@@ -18,7 +18,9 @@ import {
 import { ArrowDown, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ApprovalPrompt } from "./ApprovalPrompt";
+import { ClientToolsPrompt } from "./ClientToolsPrompt";
 import { ConversationOutline } from "./ConversationOutline";
+import { DelegationAuthorizationPrompt } from "./DelegationAuthorizationCard";
 import { FindBar } from "./FindBar";
 import { FollowupChips } from "./FollowupChips";
 import { MessageInput } from "./MessageInput";
@@ -137,7 +139,7 @@ export function ChatView() {
               )}
             </div>
           ) : (
-            <div className="flex h-full items-center justify-center">
+            <div className="flex h-full items-center justify-center py-10">
               <div className="text-center">
                 <p className="text-2xl font-medium text-foreground">
                   今天想解决什么问题？
@@ -163,9 +165,11 @@ export function ChatView() {
       {/* Bottom input area */}
       <div className="mx-auto w-full max-w-3xl">
         <ResumePrompt />
+        <DelegationAuthorizationPrompt />
         <ApprovalPrompt />
         <RetryBanner />
         <FollowupChips followups={followups} />
+        <ClientToolsPrompt />
         <StreamingIndicator />
         <MessageInput />
       </div>

@@ -212,3 +212,9 @@ export async function downloadSnapshot(
   );
   saveBlob(await res.blob(), `workspace-${snapshotId}.zip`);
 }
+
+/** Snapshot current cloud workspace files and download as a zip (产物导出). */
+export async function exportWorkspaceZip(conversationId: string): Promise<void> {
+  const snap = await createSnapshot(conversationId, "导出");
+  await downloadSnapshot(conversationId, snap.snapshotId);
+}

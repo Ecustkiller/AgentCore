@@ -18,7 +18,6 @@ import { TownWorldEffects } from "./TownWorldEffects";
 import { TrackingCamera } from "./TrackingCamera";
 import { buildTownSpawnTable, seedTownSpawnsIfNeeded } from "./agentSpawn";
 import { TOWN_GLB_URLS } from "./assetPaths";
-import { createTownPathfinding } from "./navMesh";
 import { TOWN_VIEW_CENTER } from "./regionLayout";
 import { TownCharacterAssetsProvider } from "./townCharacterAssets";
 import { townColormapUrls } from "./townGltfUtils";
@@ -27,7 +26,6 @@ import { TOWN_AGENT_IDS } from "./townRoster";
 import type { TownAgentId } from "./townRoster";
 
 function TownSceneContent() {
-  const pathfinding = useMemo(() => createTownPathfinding(), []);
   const spawnTable = useMemo(() => buildTownSpawnTable(), []);
   const initialLodByAgent = useMemo(() => {
     const map = {} as Record<TownAgentId, LodLevel>;
@@ -68,7 +66,6 @@ function TownSceneContent() {
           agentId={id}
           spawnPosition={spawnTable[id]}
           initialLod={initialLodByAgent[id]}
-          pathfinding={pathfinding}
         />
       ))}
       <InteractionOverlays />

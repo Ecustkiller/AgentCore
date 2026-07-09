@@ -1,20 +1,24 @@
 import { startNewConversation } from "@/lib/newConversation";
 import { chord } from "@/lib/shortcuts";
 import { notifyError } from "@/lib/toast";
+import { openCurrentConversationTerminal } from "@/services/terminalActions";
 import { exportConversation } from "@/services/conversations";
 import { useConversationStore } from "@/stores/conversation";
+import { useFoldersStore } from "@/stores/folders";
 import { useShareStore } from "@/stores/share";
 import { useSidebarStore } from "@/stores/sidebar";
 import { useUIStore } from "@/stores/ui";
 import {
   BarChart3,
   BookOpen,
+  Bookmark,
   Bug,
   Cloud,
   Cpu,
   Download,
   Files,
   FlaskConical,
+  FolderPlus,
   Info,
   Keyboard,
   type LucideIcon,
@@ -29,6 +33,7 @@ import {
   Settings,
   Share2,
   Sun,
+  Terminal,
   UserCog,
   Workflow,
   Wrench,
@@ -56,7 +61,9 @@ export interface PaletteCommand {
   shortcut?: string;
   /** Right-aligned plain hint, e.g. the current value of a toggle. */
   hint?: string;
-  /** Perform the action. The palette closes itself after this runs. */
+  /** When true the palette stays open after run (e.g. switch to bookmarks facet). */
+  keepOpen?: boolean;
+  /** Perform the action. The palette closes itself after this runs unless {@link keepOpen}. */
   run: () => void;
 }
 
@@ -67,6 +74,8 @@ export interface CommandContext {
   theme: "light" | "dark" | "system";
   diagnosticMode: boolean;
   sidebarCollapsed: boolean;
+  /** Switch the open palette to the bookmarks facet (消息收藏列表). */
+  openBookmarksInPalette: () => void;
 }
 
 /**
@@ -77,7 +86,13 @@ export interface CommandContext {
  * passed `navigate`. Grouped by {@link CommandCategory} at render time.
  */
 export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
-  const { navigate, theme, diagnosticMode, sidebarCollapsed } = ctx;
+  const {
+    navigate,
+    theme,
+    diagnosticMode,
+    sidebarCollapsed,
+    openBookmarksInPalette,
+  } = ctx;
   const go = (path: string) => () => navigate(path);
 
   const commands: PaletteCommand[] = [
@@ -90,6 +105,22 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       keywords: ["new", "chat", "compose", "xinjian", "duihua"],
       shortcut: chord("n"),
       run: () => startNewConversation(navigate),
+    },
+    {
+      id: "new-project",
+      title: "新建项目",
+      category: "操作",
+      icon: FolderPlus,
+      keywords: [
+        "new",
+        "project",
+        "folder",
+        "workspace",
+        "xinjian",
+        "xiangmu",
+        "gongzuoqu",
+      ],
+      run: () => useFoldersStore.getState().openCreateProject(),
     },
     {
       // 「云端随手聊」逃生口（决策 #11）：桌面默认本地后，纯云随手问答的显式入口。
@@ -159,6 +190,24 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
         useShareStore.getState().open(id);
       },
     },
+    {
+      id: "open-workspace-terminal",
+      title: "在终端打开工作区",
+      category: "操作",
+      icon: Terminal,
+      keywords: [
+        "terminal",
+        "shell",
+        "workspace",
+        "zhongduan",
+        "gongzuoqu",
+        "bash",
+      ],
+      shortcut: chord("`"),
+      run: () => {
+        void openCurrentConversationTerminal();
+      },
+    },
 
     // ---- 前往 (navigation) ----
     {
@@ -168,6 +217,15 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       icon: MessagesSquare,
       keywords: ["conversations", "all", "duihua"],
       run: go("/conversations"),
+    },
+    {
+      id: "nav-bookmarks",
+      title: "已收藏",
+      category: "前往",
+      icon: Bookmark,
+      keywords: ["bookmarks", "saved", "star", "shoucang", "yishoucang"],
+      keepOpen: true,
+      run: openBookmarksInPalette,
     },
     {
       id: "nav-files",

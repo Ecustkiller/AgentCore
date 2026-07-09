@@ -8,7 +8,7 @@ from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import ConversationRepository, MessageRepository
 from agentcore.llm.factory import build_provider
-from agentcore.llm.resolve import LLMCredentials
+from agentcore.llm.resolve import LLMCredentials, resolve_turn_model
 from agentcore.memory.consolidation import schedule_consolidation
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.journal import journal_entries_from_display_runs, persist_turn_journal
@@ -188,21 +188,29 @@ async def record_local_turn(
             needs_title = bool(conv and not conv.title)
 
         title: str | None = None
+        tag: str | None = None
         if needs_title:
             provider = build_provider(llm_credentials)
             try:
-                title = await generate_title(
+                minted = await generate_title(
                     provider=provider,
                     conversation_id=conversation_id,
                     user_message=user_message,
                     assistant_reply=assistant_content,
+                    # Title on the SAME model the provider was built for. Otherwise
+                    # generate_title falls back to settings.platform_model, so a BYOK
+                    # provider (e.g. DeepSeek) is handed a gpt-5.5 model name and the
+                    # upstream 400s ("supported models are deepseek-…, not gpt-5.5").
+                    model=resolve_turn_model(llm_credentials),
                 )
+                title = minted.title
+                tag = minted.tag
             finally:
                 await provider.close()
             if title:
                 async with async_session_factory() as session:
                     await ConversationRepository(session).update_title_unscoped(
-                        conversation_id, title
+                        conversation_id, title, tag=tag
                     )
 
         schedule_consolidation(conversation_id)

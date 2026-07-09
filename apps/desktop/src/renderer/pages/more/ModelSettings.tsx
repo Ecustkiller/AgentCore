@@ -17,6 +17,7 @@ import {
   type LlmKeyStatus,
   clearLlmKey,
   getLlmKey,
+  setBillingPreference,
   setLlmKey,
   testLlmKey,
 } from "@/services/llmKey";
@@ -89,6 +90,9 @@ export function ModelSettings() {
         <p className="mt-6 text-sm text-destructive">{loadError}</p>
       ) : status ? (
         <div className="mt-6 space-y-4">
+          {status.platform_available && (
+            <ModelSourceToggle status={status} onChanged={syncStatus} />
+          )}
           {status.configured && !editing && (
             <ConfiguredCard
               status={status}
@@ -149,6 +153,122 @@ function StatusBadge({ status }: { status: LlmKeyStatus }) {
   return <span className="text-xs text-muted-foreground">未测试</span>;
 }
 
+/**
+ * 模型来源切换（自带 Key / 平台模型）—— 暴露既有的 `billing-preference` 后端能力：
+ * platform ⇒ 用运营方平台模型（如 gpt-5.5）、byok ⇒ 用下方配置的自带 Key（如 deepseek-…）。
+ * 只在平台可用时出现（否则无「另一个」可切）。切换后 `onChanged` 刷新状态缓存，输入框徽标随之更新。
+ */
+function ModelSourceToggle({
+  status,
+  onChanged,
+}: {
+  status: LlmKeyStatus;
+  onChanged: (s: LlmKeyStatus) => void;
+}) {
+  const [switching, setSwitching] = useState<"platform" | "byok" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const current = status.billing_preference;
+
+  // 自带 Key 那侧的副标题：优先展示真实的自带模型名（byok_model，即便当前跑在平台、也能显示），
+  // 拿不到时退回按 base_url 认出的厂商名 / 「未配置」。平台那侧固定显示平台模型名。
+  const byokProviderId = status.base_url
+    ? resolveByokProviderFromConfig(status.base_url)
+    : null;
+  const byokProviderLabel =
+    byokProviderId === null
+      ? status.configured
+        ? "已配置"
+        : "未配置"
+      : isCustomByokProvider(byokProviderId)
+        ? "自定义"
+        : getByokProviderPreset(byokProviderId).label;
+  const byokLabel = status.byok_model?.trim() || byokProviderLabel;
+  const platformLabel = status.platform_model?.trim() || "平台模型";
+
+  const choose = async (pref: "platform" | "byok") => {
+    if (pref === current || switching) return;
+    setSwitching(pref);
+    setError(null);
+    try {
+      onChanged(await setBillingPreference(pref));
+    } catch (e) {
+      setError(apiErrorMessage(e, "切换失败，请重试"));
+    } finally {
+      setSwitching(null);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card px-4 py-3">
+      <p className="text-sm font-medium text-foreground">模型来源</p>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        选择对话使用哪个模型：自带 Key 用你下方配置的模型，平台模型用运营方提供的模型。切换即时生效，只影响之后的新回合。
+      </p>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <SourceOption
+          active={current === "byok"}
+          busy={switching === "byok"}
+          disabled={switching !== null}
+          title="自带 Key"
+          subtitle={byokLabel}
+          onClick={() => void choose("byok")}
+        />
+        <SourceOption
+          active={current === "platform"}
+          busy={switching === "platform"}
+          disabled={switching !== null}
+          title="平台模型"
+          subtitle={platformLabel}
+          onClick={() => void choose("platform")}
+        />
+      </div>
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+function SourceOption({
+  active,
+  busy,
+  disabled,
+  title,
+  subtitle,
+  onClick,
+}: {
+  active: boolean;
+  busy: boolean;
+  disabled: boolean;
+  title: string;
+  subtitle: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      aria-pressed={active}
+      className={`flex flex-col items-start gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors ${
+        active
+          ? "border-primary bg-primary/10"
+          : "border-input bg-background hover:bg-muted"
+      } ${disabled && !active ? "cursor-not-allowed opacity-50" : ""}`}
+    >
+      <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+        {busy ? (
+          <Loader2 size={12} className="animate-spin" />
+        ) : active ? (
+          <CheckCircle2 size={12} className="text-primary" />
+        ) : null}
+        {title}
+      </span>
+      <span className="w-full truncate font-mono text-xs text-muted-foreground">
+        {subtitle}
+      </span>
+    </button>
+  );
+}
+
 function ConfiguredCard({
   status,
   onChanged,
@@ -207,9 +327,9 @@ function ConfiguredCard({
               {status.base_url}
             </p>
           )}
-          {status.default_model && (
+          {status.byok_model && (
             <p className="font-mono text-xs text-foreground">
-              模型 {status.default_model}
+              模型 {status.byok_model}
             </p>
           )}
           <div className="flex flex-wrap items-center gap-3 pt-1">

@@ -197,7 +197,9 @@ def team_notes_block(tool: DelegateTool) -> str:
     return "\n" + format_notes_for_synthesis(notes)
 
 
-def format_for_ceo(tool: DelegateTool, plan: RunPlan, results: dict) -> str:
+def format_for_ceo(
+    tool: DelegateTool, plan: RunPlan, results: dict, *, call_idx: int | None = None
+) -> str:
     """Render the workers' products as the CEO's overview input."""
     lines = ["## 团队执行结果（据此写一段简短概览交给用户；完整详情用户自行查看）"]
     escalation = escalation_block(tool, plan, results)
@@ -249,7 +251,7 @@ def format_for_ceo(tool: DelegateTool, plan: RunPlan, results: dict) -> str:
     raw_chars = sum(len(s.content) for s in results.values() if s and s.content)
     logger.info(
         "delegate.synthesis",
-        call=tool._calls,
+        call=call_idx if call_idx is not None else tool._calls,
         workers=len(plan.nodes),
         pointers=sum(1 for p in products if p["fidelity"] == "pointer"),
         prose=sum(1 for p in products if p["fidelity"] == "pass_through"),

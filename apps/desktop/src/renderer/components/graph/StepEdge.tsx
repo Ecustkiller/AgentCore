@@ -27,8 +27,10 @@ export interface EdgeHandoff {
 
 type StepEdgeData = Edge<{
   animated: boolean;
-  kind?: "dep" | "delegate" | "revision";
+  kind?: "dep" | "delegate" | "revision" | "inject";
   handoff?: EdgeHandoff | null;
+  injectHighlight?: boolean;
+  injectDimmed?: boolean;
   handleDirection?: "horizontal" | "vertical";
   sourcePortIndex?: number;
   sourcePortTotal?: number;
@@ -128,10 +130,10 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
   // a sub-team reads as grouped under its parent, distinct from the solid DAG
   // dependency / bookend flow.
   const isDelegate = data?.kind === "delegate";
-  // A revision edge (original → its「修订 vN」续写, 乙 热修 P4) is dotted so a re-do
-  // reads as a version of the same node, distinct from both the solid DAG flow and
-  // the dashed delegation grouping.
   const isRevision = data?.kind === "revision";
+  const isInject = data?.kind === "inject";
+  const injectHighlight = data?.injectHighlight === true;
+  const injectDimmed = data?.injectDimmed === true;
 
   const hoveredNodeId = useContext(GraphHoverContext);
   const isHoverRelated =
@@ -142,12 +144,20 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
   let strokeOpacity: number;
   let strokeWidth: number;
   let strokeColor: string;
-  if (isAnimated) {
+  if (injectDimmed && !isHoverRelated) {
+    strokeOpacity = 0.08;
+    strokeWidth = 1.5;
+    strokeColor = "var(--muted-foreground)";
+  } else if (isAnimated) {
     strokeOpacity = 1;
     strokeWidth = 2;
     strokeColor = "var(--primary)";
+  } else if (injectHighlight) {
+    strokeOpacity = 1;
+    strokeWidth = 2.5;
+    strokeColor = "var(--primary)";
   } else if (!hoverActive) {
-    strokeOpacity = isDelegate || isRevision ? 0.3 : 0.4;
+    strokeOpacity = isDelegate || isRevision || isInject ? 0.35 : 0.4;
     strokeWidth = 1.5;
     strokeColor = "var(--muted-foreground)";
   } else if (isHoverRelated) {
@@ -160,6 +170,11 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
     strokeColor = "var(--muted-foreground)";
   }
 
+  let strokeDasharray: string | undefined;
+  if (isRevision) strokeDasharray = "2 4";
+  else if (isDelegate) strokeDasharray = "5 4";
+  else if (isInject) strokeDasharray = "6 4";
+
   return (
     <>
       <BaseEdge
@@ -169,7 +184,7 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
           stroke: strokeColor,
           strokeWidth,
           opacity: strokeOpacity,
-          strokeDasharray: isRevision ? "2 4" : isDelegate ? "5 4" : undefined,
+          strokeDasharray,
         }}
       />
       {isAnimated &&

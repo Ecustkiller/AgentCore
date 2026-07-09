@@ -183,9 +183,9 @@ def test_sibling_summary_task_excerpt_capped():
     assert b.sibling_summary.endswith("…")
 
 
-def test_sibling_summary_carries_objective_and_expected_output():
+def test_sibling_summary_carries_objective_and_deliverable_name():
     # Boundary-drawing enrichment: a peer's bullet shows its 责任(objective, preferred
-    # over the raw task) AND its 预期产出(expected_output), so parallel workers can see
+    # over the raw task) AND its 预期产出(deliverable.name), so parallel workers can see
     # who owns what and what each hands back — and not overlap / leave a seam.
     plan, errs = build_run_plan(
         [
@@ -193,13 +193,13 @@ def test_sibling_summary_carries_objective_and_expected_output():
                 "role": "后端",
                 "task": "实现下单接口的全部细节……",
                 "objective": "负责服务端 API",
-                "expected_output": "OpenAPI 契约 + 实现",
+                "deliverable": {"name": "OpenAPI 契约 + 实现"},
             },
             {
                 "role": "前端",
                 "task": "做下单页",
                 "objective": "负责下单页面",
-                "expected_output": "可交互页面",
+                "deliverable": {"name": "可交互页面"},
             },
         ],
         id_prefix="t",
@@ -215,7 +215,7 @@ def test_sibling_summary_carries_objective_and_expected_output():
 
 def test_sibling_summary_falls_back_to_task_without_objective():
     # No objective declared → the task instruction is the scope so a peer is never
-    # blank; no expected_output → no 产出 note appended.
+    # blank; no deliverable.name → no 产出 note appended.
     plan, errs = build_run_plan(
         [{"role": "A", "task": "做A"}, {"role": "B", "task": "做B"}], id_prefix="t"
     )
@@ -224,11 +224,11 @@ def test_sibling_summary_falls_back_to_task_without_objective():
     assert a.sibling_summary == "- B：做B"  # task as scope, no（预期产出：…）tail
 
 
-def test_sibling_summary_expected_output_excerpt_capped():
+def test_sibling_summary_deliverable_name_excerpt_capped():
     # The 预期产出 note has its own shorter cap, independent of the scope cap.
     plan, errs = build_run_plan(
         [
-            {"role": "A", "task": "a", "expected_output": "y" * 300},
+            {"role": "A", "task": "a", "deliverable": {"name": "y" * 300}},
             {"role": "B", "task": "b"},
         ],
         id_prefix="t",
@@ -463,13 +463,13 @@ def test_dag_invalid_on_failure_falls_back_to_default():
     assert plan.by_id("t_s2").policy.on_failure == "retry"
 
 
-def test_contract_parsed_onto_policy():
+def test_deliverable_parsed_onto_policy():
     plan, _ = build_run_plan(
         [
             {
                 "role": "A",
                 "task": "a",
-                "contract": {
+                "deliverable": {
                     "required_sections": ["结论", "  "],  # blank dropped
                     "must_contain": ["风险"],
                     "min_length": 100,
@@ -489,24 +489,24 @@ def test_contract_parsed_onto_policy():
     assert c.strict is True
 
 
-def test_no_contract_leaves_deliverable_none():
+def test_no_deliverable_leaves_deliverable_none():
     plan, _ = build_run_plan([{"role": "A", "task": "a"}], id_prefix="t")
     assert plan.nodes[0].deliverable is None
 
 
-def test_contract_block_with_no_rule_is_none():
+def test_deliverable_block_with_no_rule_is_none():
     # strict alone declares no enforceable rule → None (baseline still applies).
     plan, _ = build_run_plan(
-        [{"role": "A", "task": "a", "contract": {"strict": True}}], id_prefix="t"
+        [{"role": "A", "task": "a", "deliverable": {"strict": True}}], id_prefix="t"
     )
     assert plan.nodes[0].deliverable is None
 
 
-def test_requires_files_parsed_onto_contract():
-    # requires_files alone IS an enforceable rule (unlike strict alone), so a contract
+def test_requires_files_parsed_onto_deliverable():
+    # requires_files alone IS an enforceable rule (unlike strict alone), so a deliverable
     # is built and the deliverable-landed gate actually fires.
     plan, _ = build_run_plan(
-        [{"role": "A", "task": "a", "contract": {"requires_files": True}}], id_prefix="t"
+        [{"role": "A", "task": "a", "deliverable": {"requires_files": True}}], id_prefix="t"
     )
     c = plan.nodes[0].deliverable
     assert c is not None
@@ -515,14 +515,14 @@ def test_requires_files_parsed_onto_contract():
 
 def test_requires_files_false_alone_is_no_rule():
     plan, _ = build_run_plan(
-        [{"role": "A", "task": "a", "contract": {"requires_files": False}}], id_prefix="t"
+        [{"role": "A", "task": "a", "deliverable": {"requires_files": False}}], id_prefix="t"
     )
     assert plan.nodes[0].deliverable is None
 
 
-def test_dag_step_contract_parsed_independently():
+def test_dag_step_deliverable_parsed_independently():
     tasks = [
-        {"id": "s1", "role": "A", "task": "a", "contract": {"min_length": 50}},
+        {"id": "s1", "role": "A", "task": "a", "deliverable": {"min_length": 50}},
         {"id": "s2", "role": "B", "task": "b", "depends_on": ["s1"]},
     ]
     plan, errs = build_run_plan(tasks, id_prefix="t")
@@ -531,9 +531,9 @@ def test_dag_step_contract_parsed_independently():
     assert plan.by_id("t_s2").deliverable is None
 
 
-def test_contract_invalid_output_format_falls_back_to_text():
+def test_deliverable_invalid_output_format_falls_back_to_text():
     plan, _ = build_run_plan(
-        [{"role": "A", "task": "a", "contract": {"output_format": "xml", "min_length": 10}}],
+        [{"role": "A", "task": "a", "deliverable": {"output_format": "xml", "min_length": 10}}],
         id_prefix="t",
     )
     assert plan.nodes[0].deliverable.output_format == "text"
@@ -542,14 +542,14 @@ def test_contract_invalid_output_format_falls_back_to_text():
 # --- 阶段2 嵌套子任务: tree-position stamping + can_delegate opt-in -------------
 
 
-def test_defaults_top_level_depth_one_parent_none_no_delegate():
+def test_defaults_top_level_depth_one_parent_none_delegates_by_default():
     # The common caller (CEO delegate) makes depth-1 workers parented to the root;
-    # absent an explicit can_delegate they are leaf workers.
+    # absent an explicit can_delegate they may delegate one nested level.
     plan, _ = build_run_plan([{"role": "A", "task": "a"}], id_prefix="t")
     n = plan.nodes[0]
     assert n.depth == 1
     assert n.parent_run_id is None
-    assert n.can_delegate is False
+    assert n.can_delegate is True
 
 
 def test_stamps_parent_and_depth_on_flat_batch():
@@ -572,11 +572,11 @@ def test_stamps_parent_and_depth_on_dag_batch():
     assert all(n.parent_run_id == "cap" and n.depth == 2 for n in plan.nodes)
 
 
-def test_can_delegate_opt_in_parsed_per_task():
+def test_can_delegate_parsed_per_task_with_explicit_opt_out():
     plan, _ = build_run_plan(
         [
             {"role": "队长", "task": "a", "can_delegate": True},
-            {"role": "助手", "task": "b"},
+            {"role": "助手", "task": "b", "can_delegate": False},
         ],
         id_prefix="t",
     )
@@ -588,7 +588,24 @@ def test_over_max_tasks_rejects_entire_batch():
     tasks = [{"role": f"R{i}", "task": f"t{i}"} for i in range(11)]
     plan, errs = build_run_plan(tasks, id_prefix="t")
     assert errs
-    assert any("超过上限" in e for e in errs)
+    # 拒绝回执要给出可照做的分批指引（本次传上限个、其余下次 delegate 再传），而非只报一句超限
+    # ——否则 CEO 撞上限后得整轮重规划（trace 4d715ea0 的浪费来源）。
+    msg = errs[0]
+    assert "11" in msg and "超过" in msg
+    assert "delegate" in msg and "分" in msg
+    assert not plan.nodes
+
+
+def test_over_max_tasks_dag_batch_gives_dependency_aware_guidance():
+    # 有依赖批超限：不能按数量硬切，回执须给依赖感知的分批指引（提到 depends_on 跨批衔接）。
+    tasks = [
+        {"id": f"n{i}", "role": f"R{i}", "task": f"t{i}", "depends_on": ["n0"] if i else []}
+        for i in range(11)
+    ]
+    plan, errs = build_run_plan(tasks, id_prefix="t")
+    assert errs
+    msg = errs[0]
+    assert "超过" in msg and "depends_on" in msg
     assert not plan.nodes
 
 

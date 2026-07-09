@@ -1,8 +1,9 @@
 import { api } from "@/services/api";
 import { resolveSidecarRoot } from "@/services/sidecarRouting";
 import { useApprovalStore } from "@/stores/approvals";
+import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { getRuntime } from "@/stores/conversation";
-import { usePausedTurnStore } from "@/stores/pausedTurns";
+import { usePausedTurnStore, type ResumeOrigin } from "@/stores/pausedTurns";
 import type { components } from "@/types/api.generated";
 
 type PausedTurnSummary = components["schemas"]["PausedTurnSummary"];
@@ -64,16 +65,20 @@ export async function loadRecovery(
         rootId: sidecarTarget.rootId,
         conversationId,
       })) as unknown as PausedTurnSummary[];
-      usePausedTurnStore.getState().setForConversation(conversationId, paused);
+      usePausedTurnStore
+        .getState()
+        .setForConversation(conversationId, paused, "sidecar");
       // Local sidecar runs keep no reattachable approval registry across reopen.
-      useApprovalStore.getState().clear(conversationId);
+      clearInteractionPrompts(conversationId);
       return { liveRunning: false, pausedCount: paused.length };
     }
     const res = await api.get<TurnRecoveryResponse>(
       `/v1/conversations/${conversationId}/recovery`,
     );
     const paused = res.paused ?? [];
-    usePausedTurnStore.getState().setForConversation(conversationId, paused);
+    usePausedTurnStore
+      .getState()
+      .setForConversation(conversationId, paused, "server");
     hydrateRecoveredApprovals(conversationId, res.pending_approvals ?? []);
     return {
       liveRunning: Boolean(res.live_running),
@@ -98,21 +103,42 @@ export async function loadRecovery(
  * reproduces offline in #/preview (which replays the same vector through this very path).
  * Idempotent by messageId; a no-op if the finalized turn carries no pending checkpoint.
  */
-export function surfaceResumeFromLiveTurn(conversationId: string): void {
+/** True when `messageId` is a client bubble id with no stamped server message_id. */
+export function isClientOnlyResumeKey(
+  conversationId: string,
+  messageId: string,
+): boolean {
+  const assistant = getRuntime(conversationId).messages.find(
+    (m) => m.role === "assistant" && m.id === messageId,
+  );
+  return assistant !== undefined && !assistant.serverMessageId;
+}
+
+export function surfaceResumeFromLiveTurn(
+  conversationId: string,
+  origin: ResumeOrigin,
+): void {
   const messages = getRuntime(conversationId).messages;
   const turn = [...messages].reverse().find((m) => m.role === "assistant");
   if (!turn) return;
+  const serverMessageId = turn.serverMessageId;
+  if (!serverMessageId) {
+    console.warn(
+      `[Resume] Cannot surface resume card: serverMessageId not stamped turnId=${turn.id}`,
+    );
+    return;
+  }
   const base = {
     // The resume KEY is the SERVER message_id (stamped from message_start); the bubble's
-    // own `id` is a client UUID and would 404 the durable frame lookup. Fall back to it
-    // only defensively (a turn that somehow streamed without a message_start).
-    messageId: turn.serverMessageId ?? turn.id,
+    // own `id` is a client UUID and would 404 the durable frame lookup.
+    messageId: serverMessageId,
     conversationId,
     // The user request that opened this turn — context shown on the resume card.
     userMessage:
       [...messages].reverse().find((m) => m.role === "user")?.content ?? "",
     userMessageId:
       [...messages].reverse().find((m) => m.role === "user")?.id ?? "",
+    origin,
   };
   const cp = turn.checkpoints?.find((c) => c.status === "pending");
   if (cp) {

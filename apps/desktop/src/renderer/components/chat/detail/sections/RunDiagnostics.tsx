@@ -16,12 +16,14 @@ export function DiagnosticSection({
   executionId,
   traceId,
   batches,
+  collab,
   keyBase,
 }: {
   run: RunNode;
   executionId: string;
   traceId: string | null;
   batches: BatchMetricsSnapshot[];
+  collab?: import("@/types/events").TurnCollabMetrics | null;
   keyBase: string;
 }) {
   const [expanded, setExpanded] = usePersistentDisclosure(
@@ -66,6 +68,7 @@ export function DiagnosticSection({
           <DiagRow label="执行 ID" value={executionId} />
           <DiagRow label="Trace ID" value={traceId ?? "—"} />
           {batches.length > 0 && <SchedulingDiag batches={batches} />}
+          {collab != null && <CollabDiag collab={collab} />}
         </div>
       )}
     </section>
@@ -120,6 +123,42 @@ export function SchedulingDiag({
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+/** 协作质量 (深层诊断指标, §十五): turn-level orchestration signals from turn_metrics /
+ * message_end — boundary yields / scope drift / revises / escalations. Execution-level
+ * (not run-scoped); answers「这回合编排稳不稳 / 返工多不多」. */
+export function CollabDiag({
+  collab,
+}: { collab: import("@/types/events").TurnCollabMetrics }) {
+  const hasSignal =
+    collab.boundary_yields > 0 ||
+    collab.scope_signals > 0 ||
+    collab.revises > 0 ||
+    collab.escalations > 0 ||
+    (collab.audit_drops ?? 0) > 0;
+  if (!hasSignal) return null;
+
+  return (
+    <div className="mt-1 border-t border-border/60 pt-2">
+      <p className="mb-1 text-xs font-medium text-muted-foreground">协作质量</p>
+      {collab.boundary_yields > 0 && (
+        <DiagRow label="自我纠偏让出" value={`${collab.boundary_yields} 次`} />
+      )}
+      {collab.scope_signals > 0 && (
+        <DiagRow label="漂移信号" value={`${collab.scope_signals} 次`} />
+      )}
+      {collab.revises > 0 && (
+        <DiagRow label="定向唤回" value={`${collab.revises} 次`} />
+      )}
+      {collab.escalations > 0 && (
+        <DiagRow label="队员上报" value={`${collab.escalations} 次`} />
+      )}
+      {(collab.audit_drops ?? 0) > 0 && (
+        <DiagRow label="审计采集降级" value={`${collab.audit_drops} 次`} />
+      )}
     </div>
   );
 }

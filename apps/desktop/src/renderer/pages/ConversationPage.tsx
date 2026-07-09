@@ -6,6 +6,7 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { fetchMessageWindow, jumpToMessage } from "@/services/messages";
 import { loadRecovery } from "@/services/resume";
 import { attachOnOpen } from "@/services/turns";
+import { useBookmarkStore } from "@/stores/bookmarks";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { WORKSPACE_TAB_ID, useSidePanelStore } from "@/stores/sidePanel";
 import { useUIStore } from "@/stores/ui";
@@ -119,6 +120,14 @@ export function ConversationPage() {
     return () => {
       cancelled = true;
     };
+  }, [id]);
+
+  // 消息收藏 star state (方向 4): load which of this conversation's messages are
+  // bookmarked so their bubbles render a filled star. Best-effort + independent of
+  // the history load (a failed fetch just leaves stars empty).
+  useEffect(() => {
+    if (!id) return;
+    void useBookmarkStore.getState().hydrateForConversation(id);
   }, [id]);
 
   // Page-scoped shortcuts for the single side panel: Ctrl/Cmd+I shows / hides it

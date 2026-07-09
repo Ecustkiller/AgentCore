@@ -29,16 +29,28 @@ vi.mock("@/lib/toast", () => ({
   notifyWarning: vi.fn(),
   notifySuccess: vi.fn(),
 }));
+// Deterministically control whether a cloud-proxy token is mintable: null ⇒ the turn
+// falls back to the sidecar's local platform model (the divergence the badge/warning
+// exist for); an object ⇒ a normal account-model turn. (The real resolver would attempt
+// a live token mint, which has no server in the unit env.)
+vi.mock("@/services/inferenceToken", () => ({
+  resolveSidecarInference: vi.fn(),
+}));
 
+import { notifyWarning } from "@/lib/toast";
+import { resolveSidecarInference } from "@/services/inferenceToken";
 import { recordLocalTurn } from "@/services/localTurns";
 import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 import { dispatchSSEEvent } from "@/services/streamConversation";
 import { useConversationStore } from "@/stores/conversation";
+import { useTurnModelStore } from "@/stores/turnModel";
 import { resumeConversationViaSidecar } from "../streamConversationViaSidecar";
 
 const recordLocalTurnMock = vi.mocked(recordLocalTurn);
 const dispatchSSEEventMock = vi.mocked(dispatchSSEEvent);
 const takeRecentSidecarFailureMock = vi.mocked(takeRecentSidecarFailure);
+const resolveSidecarInferenceMock = vi.mocked(resolveSidecarInference);
+const notifyWarningMock = vi.mocked(notifyWarning);
 
 type RecordTurnResponse = components["schemas"]["RecordTurnResponse"];
 type EventPush = { conversationId: string; event: unknown };
@@ -81,9 +93,14 @@ let cancelMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   useConversationStore.setState({ currentConversationId: null, byId: {} });
+  useTurnModelStore.setState({ byConversation: {} });
   recordLocalTurnMock.mockReset();
   dispatchSSEEventMock.mockReset();
+  notifyWarningMock.mockReset();
   takeRecentSidecarFailureMock.mockReturnValue(null);
+  // Default: no token mintable → the fallback path (what most existing cases assert with
+  // `inference: undefined`). Cases that need a normal turn override this per-test.
+  resolveSidecarInferenceMock.mockResolvedValue(null);
 
   onEventCb = null;
   resumeMock = vi.fn();
@@ -186,6 +203,57 @@ describe("resumeConversationViaSidecar", () => {
       .getState()
       .byId.c1?.messages.find((m) => m.role === "user");
     expect(userMsg?.id).toBe("real-uid");
+  });
+
+  it("records the turn's real model and warns (naming it) when it fell back to the local platform model (no token)", async () => {
+    resolveSidecarInferenceMock.mockResolvedValue(null); // no token → platform fallback
+    recordLocalTurnMock.mockResolvedValue({
+      user_message_id: "real-uid",
+      title: "",
+    } as unknown as RecordTurnResponse);
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
+    // The sidecar reports the model it actually ran on — here the local platform model.
+    resumeMock.mockResolvedValue({ ...turnResult(), model: "gpt-5.5" });
+
+    await resumeConversationViaSidecar(baseRequest);
+
+    // The badge store now knows this conversation's last turn actually ran on gpt-5.5.
+    expect(useTurnModelStore.getState().byConversation.c1).toBe("gpt-5.5");
+    // Non-blocking heads-up was raised, naming the fallback model.
+    expect(notifyWarningMock).toHaveBeenCalledTimes(1);
+    expect(notifyWarningMock.mock.calls[0]?.[1]?.description).toContain(
+      "gpt-5.5",
+    );
+  });
+
+  it("records the account model and does NOT warn on a normal turn (token present)", async () => {
+    resolveSidecarInferenceMock.mockResolvedValue({
+      baseUrl: "https://x/v1/inference/v1",
+      apiKey: "tok",
+      model: "deepseek-v4-flash",
+    });
+    recordLocalTurnMock.mockResolvedValue({
+      user_message_id: "real-uid",
+      title: "",
+    } as unknown as RecordTurnResponse);
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
+    resumeMock.mockResolvedValue({
+      ...turnResult(),
+      model: "deepseek-v4-flash",
+    });
+
+    await resumeConversationViaSidecar(baseRequest);
+
+    // A token was present, so the resume carried it and no fallback warning was raised.
+    expect(resumeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inference: expect.objectContaining({ model: "deepseek-v4-flash" }),
+      }),
+    );
+    expect(useTurnModelStore.getState().byConversation.c1).toBe(
+      "deepseek-v4-flash",
+    );
+    expect(notifyWarningMock).not.toHaveBeenCalled();
   });
 
   it("maps a resume failure to a sidecar StreamError carrying the engine's reason", async () => {

@@ -1,4 +1,5 @@
 import { statusPillSoft } from "@/components/ui/tone-presets";
+import { toolPhaseText } from "@/components/chat/message-bubble/constants";
 import { formatCompact, formatDuration } from "@/lib/format";
 import { MODEL_TIER_META, STANCE_META, toolLabel } from "@/stores/execution";
 import {
@@ -8,7 +9,8 @@ import {
   STATUS_STYLES,
   checkpointBadge,
   revisedBadge,
-  statusLabel,
+  revisionVersionBadge,
+  statusFaceLabel,
 } from "./shared";
 
 export function buildAgentNodePresentation(
@@ -19,9 +21,14 @@ export function buildAgentNodePresentation(
   const artifacts = d.artifacts ?? [];
   const isRunning = d.status === "running";
   const liveTool = isRunning ? (d.toolProgress ?? null) : null;
-  const livePreview = isRunning && !liveTool ? d.outputPreview : "";
+  const liveToolExec =
+    isRunning && !liveTool ? (d.toolExecutionLive ?? null) : null;
+  const livePreview =
+    isRunning && !liveTool && !liveToolExec ? d.outputPreview : "";
   const liveThinking =
-    isRunning && !liveTool && !livePreview ? (d.reasoningPreview ?? "") : "";
+    isRunning && !liveTool && !liveToolExec && !livePreview
+      ? (d.reasoningPreview ?? "")
+      : "";
   const isTimeline = d.layoutMode === "timeline";
   const cardWidth = isTimeline ? (d.nodeWidth ?? 210) : 210;
   const enterDelay = Math.min((d.enterIndex ?? 0) * 35, 280);
@@ -36,16 +43,19 @@ export function buildAgentNodePresentation(
         ? `≈${formatCompact(d.tokenCount)}`
         : "—";
   const durationText = d.durationMs ? formatDuration(d.durationMs) : null;
+  const statusFace = statusFaceLabel(d.status, d.durationMs);
+  const revisionFace =
+    d.isRevision && d.revision ? revisionVersionBadge(d.revision) : null;
 
-  const ariaLabel = `${d.role}，${statusLabel(d.status)}，模型 ${modelText}${
-    d.reasoningEffort === "max" ? "（深度）" : ""
-  }，Token ${tokenText}${
+  const ariaLabel = `${d.role}，${statusFace.text.replace(/ · \d+s$/, "")}，模型 ${modelText}，Token ${tokenText}${
     d.costText ? `，成本 ${d.costText}` : ""
   }${durationText ? `，用时 ${durationText}` : ""}${
     d.toolCount > 0 ? `，工具 ${d.toolCount} 次` : ""
   }${artifacts.length > 0 ? `，产物 ${artifacts.length} 个` : ""}${
     d.revised ? `，${revisedBadge(d.revised).label}` : ""
-  }${d.checkpoint ? `，检查点${checkpointBadge(d.checkpoint).label}` : ""}${
+  }${revisionFace ? `，修订 ${revisionFace}` : ""}${
+    d.checkpoint ? `，检查点${checkpointBadge(d.checkpoint).label}` : ""
+  }${
     (d.escalationPending ?? 0) > 0
       ? `，${d.escalationPending} 项待你拍板`
       : (d.escalationRaised ?? 0) > 0
@@ -60,7 +70,12 @@ export function buildAgentNodePresentation(
           liveTool.chars > 0 ? ` · ${formatCompact(liveTool.chars)} 字` : ""
         }`,
       }
-    : livePreview
+    : liveToolExec
+      ? {
+          heading: toolPhaseText(liveToolExec.phase) ?? "处理中",
+          text: toolLabel(liveToolExec.toolName),
+        }
+      : livePreview
       ? { heading: "输出中", text: livePreview }
       : liveThinking
         ? { heading: "思考中", text: liveThinking, italic: true }
@@ -75,7 +90,6 @@ export function buildAgentNodePresentation(
   if (d.revised) peekTags.push(revisedBadge(d.revised).label);
   if (d.modelPreference)
     peekTags.push(MODEL_TIER_META[d.modelPreference].label);
-  if (d.reasoningEffort === "max") peekTags.push("深度");
   if (d.checkpoint) peekTags.push(checkpointBadge(d.checkpoint).label);
   if (d.reviewConcern === "critical") peekTags.push("方向风险");
   else if (d.reviewConcern === "warning") peekTags.push("待关注");
@@ -107,6 +121,7 @@ export function buildAgentNodePresentation(
     presence,
     artifacts,
     liveTool,
+    liveToolExec,
     livePreview,
     liveThinking,
     highlighted: d.focused,
@@ -121,5 +136,7 @@ export function buildAgentNodePresentation(
     peekTags,
     checkpointFace,
     reviewConcernFace,
+    statusFace,
+    revisionFace,
   };
 }

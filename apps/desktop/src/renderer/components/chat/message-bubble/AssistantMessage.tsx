@@ -157,8 +157,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     (c) => c.status === "resolved",
   );
   // 统一团队时间线: cards whose positional marker rides the inline timeline render there;
-  // only un-anchored ones (no-process turns, or legacy rows whose process predates the
-  // markers) still fall back to the bottom stack — never double-render.
+  // un-anchored ones (no inline process / markers) still fall back to the bottom stack.
   const procSteps = message.process ?? [];
   const markedCheckpoints = useMemo(
     () =>
@@ -184,9 +183,8 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     [procSteps],
   );
   // Escalations ride the team execution's inline slot (next to the graph, in
-  // ProcessTimeline) whenever the turn carries a `team` marker; only un-anchored
-  // legacy turns (graph re-folded at the bottom / no-process) fall back to the
-  // bottom stack here — never double-render.
+  // ProcessTimeline) whenever the turn carries a `team` marker; un-anchored cards
+  // (no inline process / markers) fall back to the bottom stack — never double-render.
   const hasTeamMarker = useMemo(
     () => procSteps.some((s) => s.kind === "team"),
     [procSteps],

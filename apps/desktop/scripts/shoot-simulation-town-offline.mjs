@@ -15,7 +15,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const desktopDir = resolve(here, "..");
 const outDir = resolve(desktopDir, "shoot-out");
 
-const SETTLE_MS = Number(process.env.SHOOT_SETTLE_MS ?? 5000);
+const SETTLE_MS = Number(process.env.SHOOT_SETTLE_MS ?? 2500);
+const WEBGL_FRAMES = Number(process.env.SHOOT_WEBGL_FRAMES ?? 16);
 const VIEWPORT = {
   width: Number(process.env.SHOOT_WIDTH ?? 1440),
   height: Number(process.env.SHOOT_HEIGHT ?? 900),
@@ -53,7 +54,21 @@ async function main() {
   await page.waitForSelector('[data-town-canvas="ready"] canvas', {
     timeout: 60_000,
   });
-  await page.waitForTimeout(SETTLE_MS);
+  // data-town-canvas="ready" means Suspense resolved (GLTFs loaded); wait for WebGL paints.
+  await page.evaluate((frameCount) => {
+    return new Promise((resolve) => {
+      let painted = 0;
+      const step = () => {
+        painted += 1;
+        if (painted >= frameCount) resolve();
+        else requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  }, WEBGL_FRAMES);
+  if (SETTLE_MS > 0) {
+    await page.waitForTimeout(SETTLE_MS);
+  }
 
   const shot = resolve(outDir, "simulation-town-preview.png");
   await page.screenshot({ path: shot });

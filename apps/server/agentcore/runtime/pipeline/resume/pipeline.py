@@ -7,6 +7,7 @@ from dataclasses import asdict
 
 import agentcore.runtime.pipeline as pipeline_pkg
 from agentcore.board.channel import BoardChannel
+from agentcore.desktop.channel import DesktopClientChannel
 from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import error_fields_for
@@ -14,7 +15,7 @@ from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
-from agentcore.llm.profiles import default_turn_profiles as default_profile_set
+from agentcore.llm.profiles import turn_profiles_for_turn
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.audit.hooks import bind_recorder
 from agentcore.runtime.checkpoints import CheckpointDecision
@@ -50,6 +51,7 @@ from agentcore.runtime.suspension import (
 from agentcore.tools.builtin import (
     approval_class_tool_names,
     build_worker_registry,
+    delegation_grantable_tool_names,
     per_call_tool_names,
 )
 from agentcore.tools.builtin.board_ops import BoardOpsTool
@@ -103,7 +105,7 @@ async def resume_chat_pipeline(
     for every ordinary chat — then ``board_ops`` is neither wired nor reachable, exactly as
     on the fresh-turn path.
     """
-    profiles = profile_set or default_profile_set()
+    profiles = turn_profiles_for_turn(profile_set, llm_credentials)
     message_id = suspension.message_id
     conversation_id = suspension.conversation_id
     captain_run_id = suspension.captain_run_id or new_id()
@@ -162,6 +164,16 @@ async def resume_chat_pipeline(
             if board_id
             else None
         )
+        desktop_channel = (
+            DesktopClientChannel(
+                sink=sink,
+                conversation_id=conversation_id,
+                registry=default_interaction_registry(),
+                timeout_seconds=settings.board_op_timeout_seconds,
+            )
+            if backend.location == "local"
+            else None
+        )
         # AI 协作白板 §九.4 Gap ②: the resumed turn's vision cost sink, shared by reference
         # across derived run contexts — symmetric with the fresh-turn path (run.py). A
         # board_read after the checkpoint bills its 读图 row here; folded into cost_runs below.
@@ -174,6 +186,7 @@ async def resume_chat_pipeline(
             user_id=suspension.user_id,
             conversation_id=conversation_id,
             board_channel=board_channel,
+            desktop_channel=desktop_channel,
             # §九.4: vision provider (QwenVL) — set VISION_API_KEY to enable; None ⇒
             # board_read returns a clean「读图能力未配置」error (「插上即用」).
             vision_reader=build_vision_reader(),
@@ -185,8 +198,10 @@ async def resume_chat_pipeline(
                 conversation_id=conversation_id,
                 registry=default_interaction_registry(),
                 timeout_seconds=settings.approval_timeout_seconds,
+                timeout_overrides=settings.approval_timeout_overrides,
                 file_op_tools=approval_class_tool_names(),
                 per_call_tools=per_call_tool_names(),
+                delegation_grantable_tools=delegation_grantable_tool_names(),
             )
             if settings.approval_gate_enabled
             else None
@@ -347,6 +362,7 @@ async def resume_chat_pipeline(
             citations=citations,
             sink=sink,
             vision_cost_runs=vision_cost_sink,
+            audit_drops=audit_recorder.drops,
         )
         await audit_recorder.flush()
         result["audit_drops"] = audit_recorder.drops
@@ -372,6 +388,11 @@ async def resume_chat_pipeline(
         }
     finally:
         current_fact_log.reset(fact_log_token)
+        # Drain the append-on-emit journal BEFORE dropping the writer: an abandoned in-flight
+        # write leaves a checked-out DB connection for the GC to terminate (asyncpg
+        # connection_lost noise). Best-effort — a drain failure must never break turn teardown.
+        with contextlib.suppress(Exception):
+            await journal_writer.flush()
         current_journal_writer.reset(journal_writer_token)
         from agentcore.runtime.audit.recorder import current_audit_recorder
 

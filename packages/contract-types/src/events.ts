@@ -166,6 +166,36 @@ export interface ApprovalResolvedPayload {
   decision: ApprovalDecision;
 }
 
+/** The user's settlement of a delegation-level authorization gate (委派级授权 MVP):
+ * grant medium-risk tools for the whole delegate batch, fall back to per-call approval,
+ * or deny the delegation. */
+export type DelegationAuthorizationDecision =
+  | "grant_delegation"
+  | "per_call"
+  | "deny";
+
+/** One worker row on the delegation authorization card (role + task preview). */
+export interface DelegationAuthorizationWorker {
+  role: string;
+  task: string;
+}
+
+/** A delegate batch paused awaiting the user's delegation-level tool authorization.
+ * Emitted once when the team starts; medium-risk tools in `tools` are the grant scope. */
+export interface DelegationAuthorizationRequiredPayload {
+  authorization_id: string;
+  conversation_id: string;
+  execution_id: string;
+  workers: DelegationAuthorizationWorker[];
+  tools: string[];
+}
+
+export interface DelegationAuthorizationResolvedPayload {
+  authorization_id: string;
+  execution_id: string;
+  decision: DelegationAuthorizationDecision;
+}
+
 /** The user's settlement of a checkpoint the CEO raised (ask_user). */
 export type CheckpointDecision = "continue" | "adjust" | "stop" | "timeout";
 
@@ -337,7 +367,7 @@ export interface RunStartedPayload {
  * the wire twin of the backend `ContextBlock`, and the structured single source behind
  * both the prompt and this event (用户看到的 == LLM 吃到的). `channel` buckets it for the
  * UI. Worker 侧: `request` (团队级原始请求) / `team_position` (DAG 拓扑) / `dependency` (上游
- * 产物注入) / `workspace` (工作区文件清单) / `task` / `expected_output` / `requirements` /
+ * 产物注入) / `workspace` (工作区文件清单) / `task` / `deliverable` / `team_brief` /
  * `steer`. CEO (captain) 侧 通道①: `system` (本回合系统提示，决策②默认隐藏) / `history` (本
  * 回合之前的往来) — these ride the turn-level `captainContext`, never a graph node. A
  * `dependency` block carries its provenance — the upstream `source_role` / `source_run_id`,
@@ -362,8 +392,8 @@ export interface ContextBlockWire {
     | "dependency"
     | "workspace"
     | "task"
-    | "expected_output"
-    | "requirements"
+    | "deliverable"
+    | "team_brief"
     | "steer"
     | "team_result"
     | "round_focus"
@@ -635,10 +665,8 @@ export interface DebateSideInfo {
   name: string;
   stance: string;
   is_subject: boolean;
-  /** 该方辩手的【模型覆写】（真·多模型辩论）：`provider/model`（如 `doubao/doubao-seed-2-1-turbo
-   *  -260628`）经 ProviderRouter 路由到对应厂商，无前缀=默认 DeepSeek，空=平台默认。前端据此标
-   *  「正方=豆包 / 反方=DeepSeek」徽章——「谁更聪明」对战的核心可读性。**新增字段**：早于本特性
-   *  journaled 的 debate_result 事件可能缺省，重载时按空处理（不显徽章）。 */
+  /** Phase 3 真·多模型辩手的 per-side 覆写（`provider/model`）。MVP 后端不 emit；旧产物可能
+   *  带此字段，前端【忽略】、改从辩手 run 的实际执行 model 展示。缺省按空处理。 */
   model?: string;
 }
 
@@ -851,6 +879,15 @@ export interface DebateRoundDecisionResolvedPayload {
   focus: string;
 }
 
+export interface TurnCollabMetrics {
+  boundary_yields: number;
+  scope_signals: number;
+  revises: number;
+  escalations: number;
+  /** 审计采集降级计数 (turn_metrics.audit_drops); 诊断模式 only. */
+  audit_drops?: number;
+}
+
 export interface MessageEndPayload {
   finish_reason:
     | "end_turn"
@@ -873,6 +910,9 @@ export interface MessageEndPayload {
   };
   cost?: CostBreakdown | null;
   rounds?: number;
+  /** 协作质量 (学·度量 §2.5): turn-level orchestration signals for 诊断模式. Omitted on
+   * single-agent turns and legacy streams. */
+  collab?: TurnCollabMetrics;
 }
 
 export interface ErrorPayload {
@@ -946,11 +986,27 @@ export interface SimTickStartedPayload {
   hour: number;
 }
 
+/** Macro indicators for one simulation tick (backend `TickMetrics`), carried on
+ * `sim.tick_ended` for the 观测面板 (mood / trade / relation dashboards).
+ * `population_by_region` maps a region name → head count. */
+export interface SimTickMetrics {
+  tick: number;
+  hour: number;
+  avg_mood: number;
+  trade_count: number;
+  trade_total_amount: number;
+  positive_relation_ratio: number;
+  population_by_region: Record<string, number>;
+}
+
 export interface SimTickEndedPayload {
   run_id: string;
   tick: number;
   hour: number;
   agent_count: number;
+  /** This tick's macro metrics snapshot. Nullable on the wire: the backend `model_dump`
+   * always includes the key, sending `null` when the tick produced no snapshot. */
+  metrics?: SimTickMetrics | null;
 }
 
 export interface SimTickFramePayload {
@@ -1109,6 +1165,15 @@ export interface BoardReadRequiredPayload {
   ids: string[];
 }
 
+/** Transport-only client-tool request: show an OS notification on the bound desktop
+ * (`desktop_notify` worker tool). NOT journaled. */
+export interface DesktopNotifyRequiredPayload {
+  request_id: string;
+  conversation_id: string;
+  title: string;
+  body?: string;
+}
+
 export interface HandoffSnapshotDonePayload {
   snapshot_id: string;
   conversation_id: string;
@@ -1149,6 +1214,8 @@ export type SSEPayloadMap = {
   tool_use_end: ToolUseEndPayload;
   approval_required: ApprovalRequiredPayload;
   approval_resolved: ApprovalResolvedPayload;
+  delegation_authorization_required: DelegationAuthorizationRequiredPayload;
+  delegation_authorization_resolved: DelegationAuthorizationResolvedPayload;
   checkpoint_required: CheckpointRequiredPayload;
   checkpoint_resolved: CheckpointResolvedPayload;
   question_posted: QuestionPostedPayload;
@@ -1192,6 +1259,7 @@ export type SSEPayloadMap = {
   workspace_op_required: WorkspaceOpRequiredPayload;
   board_op_required: BoardOpRequiredPayload;
   board_read_required: BoardReadRequiredPayload;
+  desktop_notify_required: DesktopNotifyRequiredPayload;
   handoff_snapshot_done: HandoffSnapshotDonePayload;
   handoff_job_started: HandoffJobStartedPayload;
   handoff_apply_done: HandoffApplyDonePayload;

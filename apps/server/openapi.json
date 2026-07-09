@@ -1,6 +1,79 @@
 {
   "components": {
     "schemas": {
+      "AcceptRunOutcomeRequest": {
+        "description": "User explicitly accepts a run's terminal outcome that could not be auto-recovered\n(跑一半改方向 Step 4 · 忽略路径收口).\n\nTwo triggers, both surfaced in the run detail from the audit trail: a\n``deterministic_failure`` (a non-retryable upstream failure — 重试徒劳) or a\n``redirect_ignored`` (a「立即改此人」steer that arrived too late to apply mid-run). Recording\nthe acceptance (后端记录) replaces the old frontend-only ``clearExecution`` so the\ndelegated-turn audit trail carries「用户主动接受此结果」. Idempotent per (turn, run).",
+        "properties": {
+          "execution_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Id"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reason": {
+            "enum": [
+              "deterministic_failure",
+              "redirect_ignored"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "reason"
+        ],
+        "title": "AcceptRunOutcomeRequest",
+        "type": "object"
+      },
+      "AcceptRunOutcomeResponse": {
+        "properties": {
+          "action": {
+            "default": "run.outcome_accepted",
+            "title": "Action",
+            "type": "string"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "recorded": {
+            "description": "True if newly recorded; False if already accepted (idempotent no-op).",
+            "title": "Recorded",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "recorded"
+        ],
+        "title": "AcceptRunOutcomeResponse",
+        "type": "object"
+      },
       "AdminAgentAuditSummary": {
         "description": "Platform-wide agent audit aggregates for the admin dashboard widget.",
         "properties": {
@@ -1027,17 +1100,6 @@
             "title": "Created At",
             "type": "string"
           },
-          "default_model_mode": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Model Mode"
-          },
           "deleted_at": {
             "anyOf": [
               {
@@ -1138,7 +1200,6 @@
           "quota_daily_tokens",
           "quota_monthly_cost_usd",
           "quota_daily_requests",
-          "default_model_mode",
           "created_at",
           "deleted_at",
           "cost_total"
@@ -1190,17 +1251,6 @@
             "title": "Created At",
             "type": "string"
           },
-          "default_model_mode": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Model Mode"
-          },
           "deleted_at": {
             "anyOf": [
               {
@@ -1301,7 +1351,6 @@
           "quota_daily_tokens",
           "quota_monthly_cost_usd",
           "quota_daily_requests",
-          "default_model_mode",
           "created_at",
           "deleted_at"
         ],
@@ -1994,6 +2043,102 @@
         "title": "BoardWriteResult",
         "type": "object"
       },
+      "BookmarkIdsResponse": {
+        "description": "The bookmarked message ids within one conversation (client star state).",
+        "properties": {
+          "message_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Message Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "message_ids"
+        ],
+        "title": "BookmarkIdsResponse",
+        "type": "object"
+      },
+      "BookmarkItem": {
+        "description": "One saved message in the「已收藏」view.\n\n``id`` = bookmark id; ``created_at`` = when it was bookmarked (the list sort\nkey). ``conversation_id`` / ``message_id`` are the jump target;\n``conversation_title`` + ``role`` + ``snippet`` give recognisable context.",
+        "properties": {
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "conversation_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Title"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet"
+          }
+        },
+        "required": [
+          "id",
+          "conversation_id",
+          "message_id",
+          "created_at"
+        ],
+        "title": "BookmarkItem",
+        "type": "object"
+      },
+      "BookmarkListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/BookmarkItem"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "BookmarkListResponse",
+        "type": "object"
+      },
       "CapabilitiesResponse": {
         "description": "The complete capability picture for the 能力图鉴 page (single fetch).",
         "properties": {
@@ -2072,7 +2217,7 @@
         "type": "object"
       },
       "CapabilityTool": {
-        "description": "A tool in the capability catalog: its public schema + who may call it.\n\nUnlike ``ToolInfo`` (the legacy worker-built-ins-only ``GET /tools``), this is the\nCOMPLETE catalog — it also carries the CEO-only orchestration primitives\n(``delegate`` / ``revise`` / ``consult_skill`` / ``ask_user``) and the worker-only\n``escalate``. ``available_to`` is a subset of ``[\"ceo\", \"worker\"]`` so the UI can\nshow which side of the team holds each tool.",
+        "description": "A tool in the capability catalog: its public schema + who may call it.\n\nThe COMPLETE catalog — CEO orchestration primitives (``delegate`` / ``revise`` /\n``consult_skill`` / ``ask_user``) and the worker-only ``escalate``.\n``available_to`` is a subset of ``[\"ceo\", \"worker\"]`` so the UI can show which\nside of the team holds each tool.",
         "properties": {
           "approval": {
             "$ref": "#/components/schemas/ToolApproval"
@@ -2642,17 +2787,6 @@
             "title": "Id",
             "type": "string"
           },
-          "instructions": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Instructions"
-          },
           "local_container_root_id": {
             "anyOf": [
               {
@@ -2669,21 +2803,22 @@
             "title": "Message Count",
             "type": "integer"
           },
-          "model_mode": {
+          "pinned": {
+            "default": false,
+            "title": "Pinned",
+            "type": "boolean"
+          },
+          "tag": {
             "anyOf": [
               {
+                "pattern": "^(code_review|research|writing|analysis)$",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Model Mode"
-          },
-          "pinned": {
-            "default": false,
-            "title": "Pinned",
-            "type": "boolean"
+            "title": "Tag"
           },
           "title": {
             "anyOf": [
@@ -2778,6 +2913,24 @@
         "title": "CreateBoardRequest",
         "type": "object"
       },
+      "CreateBookmarkRequest": {
+        "properties": {
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "message_id"
+        ],
+        "title": "CreateBookmarkRequest",
+        "type": "object"
+      },
       "CreateConversationRequest": {
         "properties": {
           "folder_id": {
@@ -2802,17 +2955,6 @@
               }
             ],
             "title": "Local Container Root Id"
-          },
-          "model_mode": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Mode"
           },
           "title": {
             "anyOf": [
@@ -2932,28 +3074,6 @@
           }
         },
         "title": "CreateInviteRequest",
-        "type": "object"
-      },
-      "CreateModelModeRequest": {
-        "properties": {
-          "assignments": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Assignments",
-            "type": "object"
-          },
-          "name": {
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "CreateModelModeRequest",
         "type": "object"
       },
       "CreateShareRequest": {
@@ -3157,6 +3277,16 @@
         },
         "title": "DebateSeedRoundInput",
         "type": "object"
+      },
+      "DelegationAuthorizationDecision": {
+        "description": "How the user settled a per-delegation authorization prompt.",
+        "enum": [
+          "grant_delegation",
+          "per_call",
+          "deny"
+        ],
+        "title": "DelegationAuthorizationDecision",
+        "type": "string"
       },
       "DeleteAccountRequest": {
         "description": "Self-service account deletion (注销账户): the password re-confirms a\ndestructive, irreversible action before the account is soft-deleted + anonymized.",
@@ -3756,11 +3886,15 @@
         "type": "object"
       },
       "InferenceTokenResponse": {
-        "description": "A freshly minted inference token + its lifetime.",
+        "description": "A freshly minted inference token + its lifetime + server-resolved upstream model.",
         "properties": {
           "expires_in_sec": {
             "title": "Expires In Sec",
             "type": "integer"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
           },
           "token": {
             "title": "Token",
@@ -3769,7 +3903,8 @@
         },
         "required": [
           "token",
-          "expires_in_sec"
+          "expires_in_sec",
+          "model"
         ],
         "title": "InferenceTokenResponse",
         "type": "object"
@@ -4053,6 +4188,18 @@
             "title": "Billing Preference",
             "type": "string"
           },
+          "byok_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The user's stored BYOK model, independent of billing mode. Unlike default_model (the *effective* model, which becomes the platform model while platform billing is active), this always echoes the saved key's own model. None when no key is configured.",
+            "title": "Byok Model"
+          },
           "configured": {
             "title": "Configured",
             "type": "boolean"
@@ -4129,6 +4276,113 @@
           "status"
         ],
         "title": "LlmKeyStatusResponse",
+        "type": "object"
+      },
+      "LlmWindowMessageLine": {
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "reasoning_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Content"
+          },
+          "role": {
+            "enum": [
+              "system",
+              "user",
+              "assistant",
+              "tool"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "tool_call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Call Id"
+          },
+          "tool_calls": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LlmWindowToolCall"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Calls"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "LlmWindowMessageLine",
+        "type": "object"
+      },
+      "LlmWindowToolCall": {
+        "properties": {
+          "function": {
+            "$ref": "#/components/schemas/LlmWindowToolCallFunction"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "function",
+            "default": "function",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "function"
+        ],
+        "title": "LlmWindowToolCall",
+        "type": "object"
+      },
+      "LlmWindowToolCallFunction": {
+        "properties": {
+          "arguments": {
+            "title": "Arguments",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "arguments"
+        ],
+        "title": "LlmWindowToolCallFunction",
         "type": "object"
       },
       "LoginMfaRequest": {
@@ -4580,6 +4834,16 @@
             "title": "Citations",
             "type": "array"
           },
+          "collab": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TurnCollabMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "content": {
             "anyOf": [
               {
@@ -4794,140 +5058,6 @@
           "enrolled"
         ],
         "title": "MfaStatusResponse",
-        "type": "object"
-      },
-      "ModelModeCatalog": {
-        "description": "The operator-bounded option space for building a custom mode: which team roles\nexist (and whether each is user-configurable) and which models may be picked.",
-        "properties": {
-          "models": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Models",
-            "type": "array"
-          },
-          "roles": {
-            "items": {
-              "$ref": "#/components/schemas/ModelRoleOption"
-            },
-            "title": "Roles",
-            "type": "array"
-          }
-        },
-        "required": [
-          "roles",
-          "models"
-        ],
-        "title": "ModelModeCatalog",
-        "type": "object"
-      },
-      "ModelModePreset": {
-        "description": "A built-in, read-only 质量档 (economy / quality).",
-        "properties": {
-          "assignments": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Assignments",
-            "type": "object"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          }
-        },
-        "required": [
-          "key",
-          "assignments"
-        ],
-        "title": "ModelModePreset",
-        "type": "object"
-      },
-      "ModelModeSummary": {
-        "description": "A user-defined custom 质量档.",
-        "properties": {
-          "assignments": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Assignments",
-            "type": "object"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "assignments"
-        ],
-        "title": "ModelModeSummary",
-        "type": "object"
-      },
-      "ModelModesResponse": {
-        "description": "Everything the picker needs: built-in presets + the user's custom modes + the\nuser's resolved default ref.",
-        "properties": {
-          "custom": {
-            "items": {
-              "$ref": "#/components/schemas/ModelModeSummary"
-            },
-            "title": "Custom",
-            "type": "array"
-          },
-          "default_mode": {
-            "title": "Default Mode",
-            "type": "string"
-          },
-          "presets": {
-            "items": {
-              "$ref": "#/components/schemas/ModelModePreset"
-            },
-            "title": "Presets",
-            "type": "array"
-          }
-        },
-        "required": [
-          "presets",
-          "custom",
-          "default_mode"
-        ],
-        "title": "ModelModesResponse",
-        "type": "object"
-      },
-      "ModelRoleOption": {
-        "description": "A team role the user may configure in a custom mode (catalog).",
-        "properties": {
-          "configurable": {
-            "title": "Configurable",
-            "type": "boolean"
-          },
-          "locked_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Locked Model"
-          },
-          "role": {
-            "title": "Role",
-            "type": "string"
-          }
-        },
-        "required": [
-          "role",
-          "configurable"
-        ],
-        "title": "ModelRoleOption",
         "type": "object"
       },
       "MoveConversationRequest": {
@@ -5767,6 +5897,25 @@
         "title": "ResolveDebateRoundInteraction",
         "type": "object"
       },
+      "ResolveDelegationAuthorizationInteraction": {
+        "description": "Settle a paused per-delegation authorization (``delegation_authorization``).\n\nRaised before workers start so the user can grant medium-risk tools for the\nwhole delegation in one click. ``grant_delegation`` whitelists code_execute +\nfile-mutation tools for this delegation; ``per_call`` keeps per-call approval;\n``deny`` refuses to start workers.",
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/DelegationAuthorizationDecision"
+          },
+          "kind": {
+            "const": "delegation_authorization",
+            "default": "delegation_authorization",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ResolveDelegationAuthorizationInteraction",
+        "type": "object"
+      },
       "ResolveEscalationInteraction": {
         "description": "Settle a worker's blocking escalate (``escalation`` interaction, 阻塞式求决策 §4.5).\n\nRaised when a delegated worker hit a「只有用户能定、且猜错就作废」fork and suspended\nitself to ask the user directly. The user either answers (``answer`` — fed back into the\nworker's loop, overriding its暂定假设) or chooses 按假设继续 (``use_assumption`` true —\nthe worker falls back to its stated assumption, the same disposition as a timeout). A\nlate resolve (the wait already timed out / was answered) falls through the route as 404,\nso the desktop renders it as「已关闭」rather than an error.",
         "properties": {
@@ -5914,6 +6063,33 @@
           "message"
         ],
         "title": "RunError",
+        "type": "object"
+      },
+      "RunLlmWindowResponse": {
+        "description": "One run's folded LLM input window for a turn (diagnostic replay).",
+        "properties": {
+          "available": {
+            "description": "False when the journal lacks execution facts to fold a window.",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/LlmWindowMessageLine"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "available"
+        ],
+        "title": "RunLlmWindowResponse",
         "type": "object"
       },
       "RunManifest": {
@@ -6118,6 +6294,17 @@
             ],
             "title": "Snippet"
           },
+          "tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag"
+          },
           "title": {
             "anyOf": [
               {
@@ -6308,24 +6495,6 @@
           "billing_preference"
         ],
         "title": "SetBillingPreferenceRequest",
-        "type": "object"
-      },
-      "SetDefaultModeRequest": {
-        "description": "Set (or clear with null) the user's default 质量档.",
-        "properties": {
-          "mode": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mode"
-          }
-        },
-        "title": "SetDefaultModeRequest",
         "type": "object"
       },
       "SetLlmKeyRequest": {
@@ -6541,10 +6710,10 @@
         "type": "object"
       },
       "SimModelRoutingConfig": {
-        "description": "Per-run model routing manifest; M2 uses the same model for all tiers.",
+        "description": "Per-run model routing manifest: a model id per decision tier.",
         "properties": {
           "critical_model": {
-            "description": "Reserved for key decisions; M2 aliases routine_model",
+            "description": "Model for pivotal decisions (interactions, reflection); upgraded from routine when a known mapping exists, else aliases routine.",
             "title": "Critical Model",
             "type": "string"
           },
@@ -6881,7 +7050,7 @@
         "type": "object"
       },
       "StoredAttachment": {
-        "description": "Persisted attachment display metadata (no extracted text).\n\n``workspace_path`` is set when the attachment was written into the durable\nproject space (附件驻留): a workspace-relative path under ``attachments/`` that\nthe file-download API can serve. ``None`` for directory listings (nothing is\nwritten to disk) and for legacy rows created before residency.",
+        "description": "Persisted attachment display metadata (no extracted text).\n\n``workspace_path`` is set when the attachment was written into the durable\nproject space (附件驻留): a workspace-relative path under ``attachments/`` that\nthe file-download API can serve. ``None`` for directory / conversation chips\n(nothing is written as a workspace file).",
         "properties": {
           "conversation_id": {
             "anyOf": [
@@ -7157,60 +7326,6 @@
         "title": "ToolCategory",
         "type": "string"
       },
-      "ToolInfo": {
-        "description": "A built-in tool's public catalog entry (read-only).\n\n``approval`` is the tool's governance level (``never`` / ``grantable`` /\n``always``); ``parameters`` is the JSON Schema the model fills to call it.",
-        "properties": {
-          "approval": {
-            "$ref": "#/components/schemas/ToolApproval"
-          },
-          "category": {
-            "$ref": "#/components/schemas/ToolCategory"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "parameters": {
-            "additionalProperties": true,
-            "title": "Parameters",
-            "type": "object"
-          }
-        },
-        "required": [
-          "name",
-          "description",
-          "category",
-          "approval",
-          "parameters"
-        ],
-        "title": "ToolInfo",
-        "type": "object"
-      },
-      "ToolListResponse": {
-        "properties": {
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/ToolInfo"
-            },
-            "title": "Data",
-            "type": "array"
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "data",
-          "total"
-        ],
-        "title": "ToolListResponse",
-        "type": "object"
-      },
       "TownGovernanceState": {
         "properties": {
           "abstain_votes": {
@@ -7259,6 +7374,38 @@
           }
         },
         "title": "TownGovernanceState",
+        "type": "object"
+      },
+      "TurnCollabMetrics": {
+        "description": "Per-turn orchestration signals (学·度量 §2.5) — the user-facing slice of turn_metrics.\n\nPersisted in the assistant row's ``usage`` JSON column (nested under ``collab``) and\nreplayed on reload; live, they ride ``message_end``. Orchestration counts surface in\nthe assistant footer for all users; ``audit_drops`` is 诊断模式-only (采集降级).",
+        "properties": {
+          "audit_drops": {
+            "default": 0,
+            "title": "Audit Drops",
+            "type": "integer"
+          },
+          "boundary_yields": {
+            "default": 0,
+            "title": "Boundary Yields",
+            "type": "integer"
+          },
+          "escalations": {
+            "default": 0,
+            "title": "Escalations",
+            "type": "integer"
+          },
+          "revises": {
+            "default": 0,
+            "title": "Revises",
+            "type": "integer"
+          },
+          "scope_signals": {
+            "default": 0,
+            "title": "Scope Signals",
+            "type": "integer"
+          }
+        },
+        "title": "TurnCollabMetrics",
         "type": "object"
       },
       "TurnCost": {
@@ -7561,29 +7708,6 @@
             ],
             "title": "Archived"
           },
-          "instructions": {
-            "anyOf": [
-              {
-                "maxLength": 4000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Instructions"
-          },
-          "model_mode": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Mode"
-          },
           "pinned": {
             "anyOf": [
               {
@@ -7728,39 +7852,6 @@
           }
         },
         "title": "UpdateMembershipRequest",
-        "type": "object"
-      },
-      "UpdateModelModeRequest": {
-        "properties": {
-          "assignments": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Assignments"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "maxLength": 100,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          }
-        },
-        "title": "UpdateModelModeRequest",
         "type": "object"
       },
       "UpdateProfileRequest": {
@@ -7933,17 +8024,6 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
-          },
-          "default_model_mode": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Model Mode"
           },
           "display_name": {
             "title": "Display Name",
@@ -12163,6 +12243,298 @@
         ]
       }
     },
+    "/v1/bookmarks": {
+      "get": {
+        "description": "The user's「已收藏」list, newest-first (跨设备 — server-stored).\n\nBookmarks whose message/conversation was removed or whose conversation was\nsoft-deleted are filtered out by the repository join, so every item is\njump-able.",
+        "operationId": "list_bookmarks_v1_bookmarks_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookmarkListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Bookmarks",
+        "tags": [
+          "bookmarks"
+        ]
+      },
+      "post": {
+        "description": "Bookmark a message (idempotent — re-adding returns the existing row).\n\n404 when the user doesn't own the conversation or the message isn't in it, so a\nbookmark can never point at another account's content.",
+        "operationId": "create_bookmark_v1_bookmarks_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBookmarkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookmarkItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Bookmark",
+        "tags": [
+          "bookmarks"
+        ]
+      }
+    },
+    "/v1/bookmarks/ids": {
+      "get": {
+        "description": "The bookmarked message ids within one conversation (client star state).\n\nOwner-scopes the conversation first (404 for a non-owner) so ids never leak.",
+        "operationId": "list_bookmark_ids_v1_bookmarks_ids_get",
+        "parameters": [
+          {
+            "description": "限定某对话，返回其中已收藏的消息 id",
+            "in": "query",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "description": "限定某对话，返回其中已收藏的消息 id",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookmarkIdsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Bookmark Ids",
+        "tags": [
+          "bookmarks"
+        ]
+      }
+    },
+    "/v1/bookmarks/{message_id}": {
+      "delete": {
+        "description": "Un-bookmark a message (idempotent — a no-match is still 200).",
+        "operationId": "remove_bookmark_v1_bookmarks__message_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Bookmark",
+        "tags": [
+          "bookmarks"
+        ]
+      }
+    },
     "/v1/capabilities": {
       "get": {
         "description": "The complete capability picture: tools (with CEO/worker reach), system Skills,\nand the CEO system-prompt template — the data behind 工具箱 → 能力图鉴.",
@@ -12860,7 +13232,7 @@
     },
     "/v1/conversations/{conversation_id}/duplicate": {
       "post": {
-        "description": "Clone a conversation into a brand-new one carrying a copy of its transcript (克隆对话).\n\nOwner-scoped (404 for a non-owner / missing source). The copy inherits the source's\nfolder (so it stays in the same project/workspace), 质量档 (``model_mode``) and\nlocal-first intent, with a「… 副本」title, then bulk-copies the source's messages via\n``MessageRepository.copy_all`` (content-level fields only — see that method for what is\nintentionally not carried over, e.g. the team-graph replay journal). Returns the new\nconversation summary with its (copied) message count so the sidebar can insert it.",
+        "description": "Clone a conversation into a brand-new one carrying a copy of its transcript (克隆对话).\n\nOwner-scoped (404 for a non-owner / missing source). The copy inherits the source's\nfolder (so it stays in the same project/workspace) and local-first intent, with a\n「… 副本」title, then bulk-copies the source's messages via\n``MessageRepository.copy_all`` (content-level fields only — see that method for what is\nintentionally not carried over, e.g. the team-graph replay journal). Returns the new\nconversation summary with its (copied) message count so the sidebar can insert it.",
         "operationId": "duplicate_conversation_v1_conversations__conversation_id__duplicate_post",
         "parameters": [
           {
@@ -13439,7 +13811,7 @@
     },
     "/v1/conversations/{conversation_id}/interactions/{interaction_id}": {
       "post": {
-        "description": "Settle any paused interaction over the unified bridge (§8.2).\n\nOne endpoint for every client-resolvable suspend kind, discriminated on\n``body.kind``:\n\n- ``approval`` — authorize / deny a paused GRANTABLE tool call (the gate\n  auto-denies anything left unanswered);\n- ``client_tool`` — a bound desktop's result envelope for a local-workspace op;\n- ``escalation`` — a worker's blocking escalate (answer / 按假设继续);\n- ``debate_round`` — an interactive debate round boundary (continue / conclude).\n\n``ask_user`` / ``plan_review`` are NOT settled here anymore: 挂起即收口 (②, Phase 3)\nretired their live in-process resolve — a CEO checkpoint now finalizes the turn\n(``SUSPEND → PAUSED``) and is continued via the single cold ``POST .../resume`` path\ninstead, so their resolve schemas are gone from ``ResolveInteractionRequest``.\n\nThe pending interaction (awaiting in the live ``send_message`` SSE turn) resumes\nwith its kind-specific result. 404 if it is unknown, already settled, timed out,\nbelongs to another conversation, or its kind does not match — a stale resolve\nfalls through as \"not found\".",
+        "description": "Settle any paused interaction over the unified bridge (§8.2).\n\nOne endpoint for every client-resolvable suspend kind, discriminated on\n``body.kind``:\n\n- ``approval`` — authorize / deny a paused GRANTABLE tool call (the gate\n  auto-denies anything left unanswered);\n- ``delegation_authorization`` — grant / per-call / deny before workers start;\n- ``client_tool`` — a bound desktop's result envelope for a local-workspace op;\n- ``escalation`` — a worker's blocking escalate (answer / 按假设继续);\n- ``debate_round`` — an interactive debate round boundary (continue / conclude).\n\n``ask_user`` / ``plan_review`` are NOT settled here anymore: 挂起即收口 (②, Phase 3)\nretired their live in-process resolve — a CEO checkpoint now finalizes the turn\n(``SUSPEND → PAUSED``) and is continued via the single cold ``POST .../resume`` path\ninstead, so their resolve schemas are gone from ``ResolveInteractionRequest``.\n\nThe pending interaction (awaiting in the live ``send_message`` SSE turn) resumes\nwith its kind-specific result. 404 if it is unknown, already settled, timed out,\nbelongs to another conversation, or its kind does not match — a stale resolve\nfalls through as \"not found\".",
         "operationId": "resolve_interaction_v1_conversations__conversation_id__interactions__interaction_id__post",
         "parameters": [
           {
@@ -13502,6 +13874,7 @@
                     "approval": "#/components/schemas/ResolveApprovalInteraction",
                     "client_tool": "#/components/schemas/ResolveClientToolInteraction",
                     "debate_round": "#/components/schemas/ResolveDebateRoundInteraction",
+                    "delegation_authorization": "#/components/schemas/ResolveDelegationAuthorizationInteraction",
                     "escalation": "#/components/schemas/ResolveEscalationInteraction"
                   },
                   "propertyName": "kind"
@@ -13509,6 +13882,9 @@
                 "oneOf": [
                   {
                     "$ref": "#/components/schemas/ResolveApprovalInteraction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ResolveDelegationAuthorizationInteraction"
                   },
                   {
                     "$ref": "#/components/schemas/ResolveClientToolInteraction"
@@ -13936,6 +14312,100 @@
           }
         },
         "summary": "Delete Message",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/messages/{message_id}/accept-outcome": {
+      "post": {
+        "description": "Record the user's explicit accept of a run's terminal outcome (跑一半改方向 Step 4).\n\nCloses the loop for two audit-surfaced dead ends in a delegated turn: a\n``deterministic_failure`` (retry徒劳) or a ``redirect_ignored`` (a「立即改此人」steer that could\nnot apply mid-run). Replaces the old frontend-only ``clearExecution`` with a durable\n「用户主动接受此结果」row on the SAME append-only audit trail the run detail already reads — no\nnew table, no new SSE event. Owner-scoped (对话归属校验防 IDOR) and idempotent per (turn, run):\na second accept for the same run is a no-op (``recorded=false``).",
+        "operationId": "accept_run_outcome_v1_conversations__conversation_id__messages__message_id__accept_outcome_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptRunOutcomeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptRunOutcomeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Accept Run Outcome",
         "tags": [
           "conversations"
         ]
@@ -14402,6 +14872,99 @@
           }
         },
         "summary": "Retry Failed Message",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/messages/{message_id}/runs/{run_id}/llm-window": {
+      "get": {
+        "description": "Fold one run's LLM input window from turn_journal (owner-scoped, diagnostic).",
+        "operationId": "get_run_llm_window_v1_conversations__conversation_id__messages__message_id__runs__run_id__llm_window_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunLlmWindowResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run Llm Window",
         "tags": [
           "conversations"
         ]
@@ -19004,442 +19567,6 @@
         ]
       }
     },
-    "/v1/model-modes": {
-      "get": {
-        "description": "Empty catalog — quality modes are no longer supported.",
-        "operationId": "list_model_modes_v1_model_modes_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelModesResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Model Modes",
-        "tags": [
-          "model-modes"
-        ]
-      },
-      "post": {
-        "operationId": "create_model_mode_v1_model_modes_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateModelModeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelModeSummary"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Model Mode",
-        "tags": [
-          "model-modes"
-        ]
-      }
-    },
-    "/v1/model-modes/catalog": {
-      "get": {
-        "description": "Empty option space — quality modes are no longer supported.",
-        "operationId": "model_mode_catalog_v1_model_modes_catalog_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelModeCatalog"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Model Mode Catalog",
-        "tags": [
-          "model-modes"
-        ]
-      }
-    },
-    "/v1/model-modes/default": {
-      "put": {
-        "operationId": "set_default_model_mode_v1_model_modes_default_put",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetDefaultModeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Set Default Model Mode",
-        "tags": [
-          "model-modes"
-        ]
-      }
-    },
-    "/v1/model-modes/{mode_id}": {
-      "delete": {
-        "operationId": "delete_model_mode_v1_model_modes__mode_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "mode_id",
-            "required": true,
-            "schema": {
-              "title": "Mode Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Model Mode",
-        "tags": [
-          "model-modes"
-        ]
-      },
-      "patch": {
-        "operationId": "update_model_mode_v1_model_modes__mode_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "mode_id",
-            "required": true,
-            "schema": {
-              "title": "Mode Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateModelModeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelModeSummary"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update Model Mode",
-        "tags": [
-          "model-modes"
-        ]
-      }
-    },
     "/v1/realtime": {
       "get": {
         "description": "Open this user's realtime firehose (server→client SSE).\n\nSubscribes the connection to the in-process hub; a new message in any chat the\nuser belongs to arrives as a ``chat_message`` event. Heartbeat comments keep\nthe stream warm, and the subscription is released when the client disconnects.",
@@ -19506,7 +19633,7 @@
     },
     "/v1/search": {
       "get": {
-        "description": "Keyword search across the user's conversations, messages and folders.\n\n``limit`` caps each section independently; ``types`` (CSV of\n``conversation,message,folder``) narrows which sections are searched. Empty\nsections are omitted. Every result is owner-scoped — a non-owner's data never\nappears.",
+        "description": "Keyword search across the user's conversations, messages and folders.\n\n``limit`` caps each section independently; ``types`` (CSV of\n``conversation,message,folder``) narrows which sections are searched. Empty\nsections are omitted. Every result is owner-scoped — a non-owner's data never\nappears.\n\nTwo optional facets refine the results (搜索结果过滤, built on Tier 1):\n``updated_after`` keeps only recently-active hits (时间过滤); ``folder_id``\nscopes to one folder/工作区 — it filters the conversation and message sections\nand drops the folder section entirely (searching *within* a workspace and\nsearching *for* a folder are mutually exclusive intents).\n``tag`` keeps only hits whose owning conversation carries that auto-tag.",
         "operationId": "search_v1_search_get",
         "parameters": [
           {
@@ -19546,6 +19673,61 @@
                 }
               ],
               "title": "Types"
+            }
+          },
+          {
+            "description": "仅返回此时刻之后有更新的结果（时间过滤，ISO 8601）",
+            "in": "query",
+            "name": "updated_after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "仅返回此时刻之后有更新的结果（时间过滤，ISO 8601）",
+              "title": "Updated After"
+            }
+          },
+          {
+            "description": "限定在某文件夹/工作区内检索（仅作用于对话与消息，工作区过滤）",
+            "in": "query",
+            "name": "folder_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "限定在某文件夹/工作区内检索（仅作用于对话与消息，工作区过滤）",
+              "title": "Folder Id"
+            }
+          },
+          {
+            "description": "按对话自动标签筛选（code_review/research/writing/analysis，仅对话与消息）",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按对话自动标签筛选（code_review/research/writing/analysis，仅对话与消息）",
+              "title": "Tag"
             }
           },
           {
@@ -20475,72 +20657,6 @@
         "summary": "Get Tick Frame",
         "tags": [
           "simulation"
-        ]
-      }
-    },
-    "/v1/tools": {
-      "get": {
-        "description": "List the platform's built-in tools (name, description, category, approval).\n\nSerializes the same registry the chat pipeline equips workers with, minus the\nCEO-only ``delegate`` primitive. The catalog is static platform metadata (not\nuser-scoped); auth is required only to match the app's authenticated posture.",
-        "operationId": "list_tools_v1_tools_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Tools",
-        "tags": [
-          "tools"
         ]
       }
     },

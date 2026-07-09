@@ -917,6 +917,79 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bookmarks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Bookmarks
+         * @description The user's「已收藏」list, newest-first (跨设备 — server-stored).
+         *
+         *     Bookmarks whose message/conversation was removed or whose conversation was
+         *     soft-deleted are filtered out by the repository join, so every item is
+         *     jump-able.
+         */
+        get: operations["list_bookmarks_v1_bookmarks_get"];
+        put?: never;
+        /**
+         * Create Bookmark
+         * @description Bookmark a message (idempotent — re-adding returns the existing row).
+         *
+         *     404 when the user doesn't own the conversation or the message isn't in it, so a
+         *     bookmark can never point at another account's content.
+         */
+        post: operations["create_bookmark_v1_bookmarks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bookmarks/ids": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Bookmark Ids
+         * @description The bookmarked message ids within one conversation (client star state).
+         *
+         *     Owner-scopes the conversation first (404 for a non-owner) so ids never leak.
+         */
+        get: operations["list_bookmark_ids_v1_bookmarks_ids_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bookmarks/{message_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Bookmark
+         * @description Un-bookmark a message (idempotent — a no-match is still 200).
+         */
+        delete: operations["remove_bookmark_v1_bookmarks__message_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/capabilities": {
         parameters: {
             query?: never;
@@ -1054,8 +1127,8 @@ export interface paths {
          * @description Clone a conversation into a brand-new one carrying a copy of its transcript (克隆对话).
          *
          *     Owner-scoped (404 for a non-owner / missing source). The copy inherits the source's
-         *     folder (so it stays in the same project/workspace), 质量档 (``model_mode``) and
-         *     local-first intent, with a「… 副本」title, then bulk-copies the source's messages via
+         *     folder (so it stays in the same project/workspace) and local-first intent, with a
+         *     「… 副本」title, then bulk-copies the source's messages via
          *     ``MessageRepository.copy_all`` (content-level fields only — see that method for what is
          *     intentionally not carried over, e.g. the team-graph replay journal). Returns the new
          *     conversation summary with its (copied) message count so the sidebar can insert it.
@@ -1239,6 +1312,7 @@ export interface paths {
          *
          *     - ``approval`` — authorize / deny a paused GRANTABLE tool call (the gate
          *       auto-denies anything left unanswered);
+         *     - ``delegation_authorization`` — grant / per-call / deny before workers start;
          *     - ``client_tool`` — a bound desktop's result envelope for a local-workspace op;
          *     - ``escalation`` — a worker's blocking escalate (answer / 按假设继续);
          *     - ``debate_round`` — an interactive debate round boundary (continue / conclude).
@@ -1371,6 +1445,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/conversations/{conversation_id}/messages/{message_id}/accept-outcome": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept Run Outcome
+         * @description Record the user's explicit accept of a run's terminal outcome (跑一半改方向 Step 4).
+         *
+         *     Closes the loop for two audit-surfaced dead ends in a delegated turn: a
+         *     ``deterministic_failure`` (retry徒劳) or a ``redirect_ignored`` (a「立即改此人」steer that could
+         *     not apply mid-run). Replaces the old frontend-only ``clearExecution`` with a durable
+         *     「用户主动接受此结果」row on the SAME append-only audit trail the run detail already reads — no
+         *     new table, no new SSE event. Owner-scoped (对话归属校验防 IDOR) and idempotent per (turn, run):
+         *     a second accept for the same run is a no-op (``recorded=false``).
+         */
+        post: operations["accept_run_outcome_v1_conversations__conversation_id__messages__message_id__accept_outcome_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/conversations/{conversation_id}/messages/{message_id}/audit": {
         parameters: {
             query?: never;
@@ -1492,6 +1593,26 @@ export interface paths {
          *     pipeline run, so only failed nodes are re-executed.
          */
         post: operations["retry_failed_message_v1_conversations__conversation_id__messages__message_id__retry_failed_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{conversation_id}/messages/{message_id}/runs/{run_id}/llm-window": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Llm Window
+         * @description Fold one run's LLM input window from turn_journal (owner-scoped, diagnostic).
+         */
+        get: operations["get_run_llm_window_v1_conversations__conversation_id__messages__message_id__runs__run_id__llm_window_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2530,82 +2651,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/model-modes": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Model Modes
-         * @description Empty catalog — quality modes are no longer supported.
-         */
-        get: operations["list_model_modes_v1_model_modes_get"];
-        put?: never;
-        /** Create Model Mode */
-        post: operations["create_model_mode_v1_model_modes_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/model-modes/catalog": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Model Mode Catalog
-         * @description Empty option space — quality modes are no longer supported.
-         */
-        get: operations["model_mode_catalog_v1_model_modes_catalog_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/model-modes/default": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Set Default Model Mode */
-        put: operations["set_default_model_mode_v1_model_modes_default_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/model-modes/{mode_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Delete Model Mode */
-        delete: operations["delete_model_mode_v1_model_modes__mode_id__delete"];
-        options?: never;
-        head?: never;
-        /** Update Model Mode */
-        patch: operations["update_model_mode_v1_model_modes__mode_id__patch"];
-        trace?: never;
-    };
     "/v1/realtime": {
         parameters: {
             query?: never;
@@ -2645,6 +2690,13 @@ export interface paths {
          *     ``conversation,message,folder``) narrows which sections are searched. Empty
          *     sections are omitted. Every result is owner-scoped — a non-owner's data never
          *     appears.
+         *
+         *     Two optional facets refine the results (搜索结果过滤, built on Tier 1):
+         *     ``updated_after`` keeps only recently-active hits (时间过滤); ``folder_id``
+         *     scopes to one folder/工作区 — it filters the conversation and message sections
+         *     and drops the folder section entirely (searching *within* a workspace and
+         *     searching *for* a folder are mutually exclusive intents).
+         *     ``tag`` keeps only hits whose owning conversation carries that auto-tag.
          */
         get: operations["search_v1_search_get"];
         put?: never;
@@ -2834,30 +2886,6 @@ export interface paths {
         };
         /** Get Tick Frame */
         get: operations["get_tick_frame_v1_simulation_runs__run_id__ticks__tick_number__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tools": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Tools
-         * @description List the platform's built-in tools (name, description, category, approval).
-         *
-         *     Serializes the same registry the chat pipeline equips workers with, minus the
-         *     CEO-only ``delegate`` primitive. The catalog is static platform metadata (not
-         *     user-scoped); auth is required only to match the app's authenticated posture.
-         */
-        get: operations["list_tools_v1_tools_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3479,6 +3507,48 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AcceptRunOutcomeRequest
+         * @description User explicitly accepts a run's terminal outcome that could not be auto-recovered
+         *     (跑一半改方向 Step 4 · 忽略路径收口).
+         *
+         *     Two triggers, both surfaced in the run detail from the audit trail: a
+         *     ``deterministic_failure`` (a non-retryable upstream failure — 重试徒劳) or a
+         *     ``redirect_ignored`` (a「立即改此人」steer that arrived too late to apply mid-run). Recording
+         *     the acceptance (后端记录) replaces the old frontend-only ``clearExecution`` so the
+         *     delegated-turn audit trail carries「用户主动接受此结果」. Idempotent per (turn, run).
+         */
+        AcceptRunOutcomeRequest: {
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Note */
+            note?: string | null;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "deterministic_failure" | "redirect_ignored";
+            /** Run Id */
+            run_id: string;
+        };
+        /** AcceptRunOutcomeResponse */
+        AcceptRunOutcomeResponse: {
+            /**
+             * Action
+             * @default run.outcome_accepted
+             */
+            action: string;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Recorded
+             * @description True if newly recorded; False if already accepted (idempotent no-op).
+             */
+            recorded: boolean;
+        };
+        /**
          * AdminAgentAuditSummary
          * @description Platform-wide agent audit aggregates for the admin dashboard widget.
          */
@@ -3941,8 +4011,6 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** Default Model Mode */
-            default_model_mode: string | null;
             /** Deleted At */
             deleted_at: string | null;
             /** Display Name */
@@ -4000,8 +4068,6 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** Default Model Mode */
-            default_model_mode: string | null;
             /** Deleted At */
             deleted_at: string | null;
             /** Display Name */
@@ -4305,6 +4371,46 @@ export interface components {
             version: number;
         };
         /**
+         * BookmarkIdsResponse
+         * @description The bookmarked message ids within one conversation (client star state).
+         */
+        BookmarkIdsResponse: {
+            /** Message Ids */
+            message_ids: string[];
+        };
+        /**
+         * BookmarkItem
+         * @description One saved message in the「已收藏」view.
+         *
+         *     ``id`` = bookmark id; ``created_at`` = when it was bookmarked (the list sort
+         *     key). ``conversation_id`` / ``message_id`` are the jump target;
+         *     ``conversation_title`` + ``role`` + ``snippet`` give recognisable context.
+         */
+        BookmarkItem: {
+            /** Conversation Id */
+            conversation_id: string;
+            /** Conversation Title */
+            conversation_title?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Message Id */
+            message_id: string;
+            /** Role */
+            role?: string | null;
+            /** Snippet */
+            snippet?: string | null;
+        };
+        /** BookmarkListResponse */
+        BookmarkListResponse: {
+            /** Data */
+            data: components["schemas"]["BookmarkItem"][];
+        };
+        /**
          * CapabilitiesResponse
          * @description The complete capability picture for the 能力图鉴 page (single fetch).
          */
@@ -4351,11 +4457,10 @@ export interface components {
          * CapabilityTool
          * @description A tool in the capability catalog: its public schema + who may call it.
          *
-         *     Unlike ``ToolInfo`` (the legacy worker-built-ins-only ``GET /tools``), this is the
-         *     COMPLETE catalog — it also carries the CEO-only orchestration primitives
-         *     (``delegate`` / ``revise`` / ``consult_skill`` / ``ask_user``) and the worker-only
-         *     ``escalate``. ``available_to`` is a subset of ``["ceo", "worker"]`` so the UI can
-         *     show which side of the team holds each tool.
+         *     The COMPLETE catalog — CEO orchestration primitives (``delegate`` / ``revise`` /
+         *     ``consult_skill`` / ``ask_user``) and the worker-only ``escalate``.
+         *     ``available_to`` is a subset of ``["ceo", "worker"]`` so the UI can show which
+         *     side of the team holds each tool.
          */
         CapabilityTool: {
             approval: components["schemas"]["ToolApproval"];
@@ -4611,8 +4716,6 @@ export interface components {
             folder_id?: string | null;
             /** Id */
             id: string;
-            /** Instructions */
-            instructions?: string | null;
             /** Local Container Root Id */
             local_container_root_id?: string | null;
             /**
@@ -4620,13 +4723,13 @@ export interface components {
              * @default 0
              */
             message_count: number;
-            /** Model Mode */
-            model_mode?: string | null;
             /**
              * Pinned
              * @default false
              */
             pinned: boolean;
+            /** Tag */
+            tag?: string | null;
             /** Title */
             title: string | null;
             /**
@@ -4663,14 +4766,19 @@ export interface components {
             /** Title */
             title?: string | null;
         };
+        /** CreateBookmarkRequest */
+        CreateBookmarkRequest: {
+            /** Conversation Id */
+            conversation_id: string;
+            /** Message Id */
+            message_id: string;
+        };
         /** CreateConversationRequest */
         CreateConversationRequest: {
             /** Folder Id */
             folder_id?: string | null;
             /** Local Container Root Id */
             local_container_root_id?: string | null;
-            /** Model Mode */
-            model_mode?: string | null;
             /** Title */
             title?: string | null;
         };
@@ -4707,15 +4815,6 @@ export interface components {
         CreateInviteRequest: {
             /** Expires In Days */
             expires_in_days?: number | null;
-        };
-        /** CreateModelModeRequest */
-        CreateModelModeRequest: {
-            /** Assignments */
-            assignments?: {
-                [key: string]: string;
-            };
-            /** Name */
-            name: string;
         };
         /**
          * CreateShareRequest
@@ -4841,6 +4940,12 @@ export interface components {
              */
             summary: string;
         };
+        /**
+         * DelegationAuthorizationDecision
+         * @description How the user settled a per-delegation authorization prompt.
+         * @enum {string}
+         */
+        DelegationAuthorizationDecision: "grant_delegation" | "per_call" | "deny";
         /**
          * DeleteAccountRequest
          * @description Self-service account deletion (注销账户): the password re-confirms a
@@ -5123,11 +5228,13 @@ export interface components {
         };
         /**
          * InferenceTokenResponse
-         * @description A freshly minted inference token + its lifetime.
+         * @description A freshly minted inference token + its lifetime + server-resolved upstream model.
          */
         InferenceTokenResponse: {
             /** Expires In Sec */
             expires_in_sec: number;
+            /** Model */
+            model: string;
             /** Token */
             token: string;
         };
@@ -5230,6 +5337,11 @@ export interface components {
              * @default byok
              */
             billing_preference: string;
+            /**
+             * Byok Model
+             * @description The user's stored BYOK model, independent of billing mode. Unlike default_model (the *effective* model, which becomes the platform model while platform billing is active), this always echoes the saved key's own model. None when no key is configured.
+             */
+            byok_model?: string | null;
             /** Configured */
             configured: boolean;
             /** Default Model */
@@ -5253,6 +5365,41 @@ export interface components {
             status: string;
             /** Supports Tools */
             supports_tools?: boolean | null;
+        };
+        /** LlmWindowMessageLine */
+        LlmWindowMessageLine: {
+            /** Content */
+            content?: string | null;
+            /** Reasoning Content */
+            reasoning_content?: string | null;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "system" | "user" | "assistant" | "tool";
+            /** Tool Call Id */
+            tool_call_id?: string | null;
+            /** Tool Calls */
+            tool_calls?: components["schemas"]["LlmWindowToolCall"][] | null;
+        };
+        /** LlmWindowToolCall */
+        LlmWindowToolCall: {
+            function: components["schemas"]["LlmWindowToolCallFunction"];
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @default function
+             * @constant
+             */
+            type: "function";
+        };
+        /** LlmWindowToolCallFunction */
+        LlmWindowToolCallFunction: {
+            /** Arguments */
+            arguments: string;
+            /** Name */
+            name: string;
         };
         /** LoginMfaRequest */
         LoginMfaRequest: {
@@ -5501,6 +5648,7 @@ export interface components {
             attachments?: components["schemas"]["StoredAttachment"][];
             /** Citations */
             citations?: components["schemas"]["Citation"][];
+            collab?: components["schemas"]["TurnCollabMetrics"] | null;
             /** Content */
             content: string | null;
             /** Conversation Id */
@@ -5587,68 +5735,6 @@ export interface components {
              * @default true
              */
             required: boolean;
-        };
-        /**
-         * ModelModeCatalog
-         * @description The operator-bounded option space for building a custom mode: which team roles
-         *     exist (and whether each is user-configurable) and which models may be picked.
-         */
-        ModelModeCatalog: {
-            /** Models */
-            models: string[];
-            /** Roles */
-            roles: components["schemas"]["ModelRoleOption"][];
-        };
-        /**
-         * ModelModePreset
-         * @description A built-in, read-only 质量档 (economy / quality).
-         */
-        ModelModePreset: {
-            /** Assignments */
-            assignments: {
-                [key: string]: string;
-            };
-            /** Key */
-            key: string;
-        };
-        /**
-         * ModelModeSummary
-         * @description A user-defined custom 质量档.
-         */
-        ModelModeSummary: {
-            /** Assignments */
-            assignments: {
-                [key: string]: string;
-            };
-            /** Id */
-            id: string;
-            /** Name */
-            name: string;
-        };
-        /**
-         * ModelModesResponse
-         * @description Everything the picker needs: built-in presets + the user's custom modes + the
-         *     user's resolved default ref.
-         */
-        ModelModesResponse: {
-            /** Custom */
-            custom: components["schemas"]["ModelModeSummary"][];
-            /** Default Mode */
-            default_mode: string;
-            /** Presets */
-            presets: components["schemas"]["ModelModePreset"][];
-        };
-        /**
-         * ModelRoleOption
-         * @description A team role the user may configure in a custom mode (catalog).
-         */
-        ModelRoleOption: {
-            /** Configurable */
-            configurable: boolean;
-            /** Locked Model */
-            locked_model?: string | null;
-            /** Role */
-            role: string;
         };
         /**
          * MoveConversationRequest
@@ -6065,6 +6151,23 @@ export interface components {
             kind: "debate_round";
         };
         /**
+         * ResolveDelegationAuthorizationInteraction
+         * @description Settle a paused per-delegation authorization (``delegation_authorization``).
+         *
+         *     Raised before workers start so the user can grant medium-risk tools for the
+         *     whole delegation in one click. ``grant_delegation`` whitelists code_execute +
+         *     file-mutation tools for this delegation; ``per_call`` keeps per-call approval;
+         *     ``deny`` refuses to start workers.
+         */
+        ResolveDelegationAuthorizationInteraction: {
+            decision: components["schemas"]["DelegationAuthorizationDecision"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "delegation_authorization";
+        };
+        /**
          * ResolveEscalationInteraction
          * @description Settle a worker's blocking escalate (``escalation`` interaction, 阻塞式求决策 §4.5).
          *
@@ -6187,6 +6290,21 @@ export interface components {
             message: string;
         };
         /**
+         * RunLlmWindowResponse
+         * @description One run's folded LLM input window for a turn (diagnostic replay).
+         */
+        RunLlmWindowResponse: {
+            /**
+             * Available
+             * @description False when the journal lacks execution facts to fold a window.
+             */
+            available: boolean;
+            /** Messages */
+            messages?: components["schemas"]["LlmWindowMessageLine"][];
+            /** Run Id */
+            run_id: string;
+        };
+        /**
          * RunManifest
          * @description Frozen experiment descriptor stored on ``simulation_run.config``.
          */
@@ -6278,6 +6396,8 @@ export interface components {
             role?: string | null;
             /** Snippet */
             snippet?: string | null;
+            /** Tag */
+            tag?: string | null;
             /** Title */
             title?: string | null;
             /** Updated At */
@@ -6348,14 +6468,6 @@ export interface components {
         SetBillingPreferenceRequest: {
             /** Billing Preference */
             billing_preference: string;
-        };
-        /**
-         * SetDefaultModeRequest
-         * @description Set (or clear with null) the user's default 质量档.
-         */
-        SetDefaultModeRequest: {
-            /** Mode */
-            mode?: string | null;
         };
         /**
          * SetLlmKeyRequest
@@ -6472,12 +6584,12 @@ export interface components {
         };
         /**
          * SimModelRoutingConfig
-         * @description Per-run model routing manifest; M2 uses the same model for all tiers.
+         * @description Per-run model routing manifest: a model id per decision tier.
          */
         SimModelRoutingConfig: {
             /**
              * Critical Model
-             * @description Reserved for key decisions; M2 aliases routine_model
+             * @description Model for pivotal decisions (interactions, reflection); upgraded from routine when a known mapping exists, else aliases routine.
              */
             critical_model: string;
             /** Routine Model */
@@ -6627,8 +6739,8 @@ export interface components {
          *
          *     ``workspace_path`` is set when the attachment was written into the durable
          *     project space (附件驻留): a workspace-relative path under ``attachments/`` that
-         *     the file-download API can serve. ``None`` for directory listings (nothing is
-         *     written to disk) and for legacy rows created before residency.
+         *     the file-download API can serve. ``None`` for directory / conversation chips
+         *     (nothing is written as a workspace file).
          */
         StoredAttachment: {
             /** Conversation Id */
@@ -6781,32 +6893,6 @@ export interface components {
          * @enum {string}
          */
         ToolCategory: "filesystem" | "search" | "execution" | "research" | "orchestration" | "interaction" | "skill";
-        /**
-         * ToolInfo
-         * @description A built-in tool's public catalog entry (read-only).
-         *
-         *     ``approval`` is the tool's governance level (``never`` / ``grantable`` /
-         *     ``always``); ``parameters`` is the JSON Schema the model fills to call it.
-         */
-        ToolInfo: {
-            approval: components["schemas"]["ToolApproval"];
-            category: components["schemas"]["ToolCategory"];
-            /** Description */
-            description: string;
-            /** Name */
-            name: string;
-            /** Parameters */
-            parameters: {
-                [key: string]: unknown;
-            };
-        };
-        /** ToolListResponse */
-        ToolListResponse: {
-            /** Data */
-            data: components["schemas"]["ToolInfo"][];
-            /** Total */
-            total: number;
-        };
         /** TownGovernanceState */
         TownGovernanceState: {
             /**
@@ -6830,6 +6916,41 @@ export interface components {
              * @default 0
              */
             yes_votes: number;
+        };
+        /**
+         * TurnCollabMetrics
+         * @description Per-turn orchestration signals (学·度量 §2.5) — the user-facing slice of turn_metrics.
+         *
+         *     Persisted in the assistant row's ``usage`` JSON column (nested under ``collab``) and
+         *     replayed on reload; live, they ride ``message_end``. Orchestration counts surface in
+         *     the assistant footer for all users; ``audit_drops`` is 诊断模式-only (采集降级).
+         */
+        TurnCollabMetrics: {
+            /**
+             * Audit Drops
+             * @default 0
+             */
+            audit_drops: number;
+            /**
+             * Boundary Yields
+             * @default 0
+             */
+            boundary_yields: number;
+            /**
+             * Escalations
+             * @default 0
+             */
+            escalations: number;
+            /**
+             * Revises
+             * @default 0
+             */
+            revises: number;
+            /**
+             * Scope Signals
+             * @default 0
+             */
+            scope_signals: number;
         };
         /**
          * TurnCost
@@ -6998,10 +7119,6 @@ export interface components {
         UpdateConversationRequest: {
             /** Archived */
             archived?: boolean | null;
-            /** Instructions */
-            instructions?: string | null;
-            /** Model Mode */
-            model_mode?: string | null;
             /** Pinned */
             pinned?: boolean | null;
             /** Title */
@@ -7040,15 +7157,6 @@ export interface components {
             muted?: boolean | null;
             /** Pinned */
             pinned?: boolean | null;
-        };
-        /** UpdateModelModeRequest */
-        UpdateModelModeRequest: {
-            /** Assignments */
-            assignments?: {
-                [key: string]: string;
-            } | null;
-            /** Name */
-            name?: string | null;
         };
         /**
          * UpdateProfileRequest
@@ -7127,8 +7235,6 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** Default Model Mode */
-            default_model_mode?: string | null;
             /** Display Name */
             display_name: string;
             /** Email */
@@ -9104,6 +9210,147 @@ export interface operations {
             };
         };
     };
+    list_bookmarks_v1_bookmarks_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookmarkListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_bookmark_v1_bookmarks_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateBookmarkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookmarkItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_bookmark_ids_v1_bookmarks_ids_get: {
+        parameters: {
+            query: {
+                /** @description 限定某对话，返回其中已收藏的消息 id */
+                conversation_id: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookmarkIdsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_bookmark_v1_bookmarks__message_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                message_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_capabilities_v1_capabilities_get: {
         parameters: {
             query?: never;
@@ -9701,7 +9948,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ResolveApprovalInteraction"] | components["schemas"]["ResolveClientToolInteraction"] | components["schemas"]["ResolveEscalationInteraction"] | components["schemas"]["ResolveDebateRoundInteraction"];
+                "application/json": components["schemas"]["ResolveApprovalInteraction"] | components["schemas"]["ResolveDelegationAuthorizationInteraction"] | components["schemas"]["ResolveClientToolInteraction"] | components["schemas"]["ResolveEscalationInteraction"] | components["schemas"]["ResolveDebateRoundInteraction"];
             };
         };
         responses: {
@@ -9866,6 +10113,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_run_outcome_v1_conversations__conversation_id__messages__message_id__accept_outcome_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+                message_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptRunOutcomeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcceptRunOutcomeResponse"];
                 };
             };
             /** @description Validation Error */
@@ -10065,6 +10352,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_llm_window_v1_conversations__conversation_id__messages__message_id__runs__run_id__llm_window_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+                message_id: string;
+                run_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunLlmWindowResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12216,220 +12540,6 @@ export interface operations {
             };
         };
     };
-    list_model_modes_v1_model_modes_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelModesResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_model_mode_v1_model_modes_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateModelModeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelModeSummary"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    model_mode_catalog_v1_model_modes_catalog_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelModeCatalog"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    set_default_model_mode_v1_model_modes_default_put: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetDefaultModeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StatusResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_model_mode_v1_model_modes__mode_id__delete: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                mode_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StatusResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_model_mode_v1_model_modes__mode_id__patch: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                mode_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateModelModeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelModeSummary"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     realtime_firehose_v1_realtime_get: {
         parameters: {
             query?: never;
@@ -12469,6 +12579,12 @@ export interface operations {
                 q: string;
                 limit?: number;
                 types?: string | null;
+                /** @description 仅返回此时刻之后有更新的结果（时间过滤，ISO 8601） */
+                updated_after?: string | null;
+                /** @description 限定在某文件夹/工作区内检索（仅作用于对话与消息，工作区过滤） */
+                folder_id?: string | null;
+                /** @description 按对话自动标签筛选（code_review/research/writing/analysis，仅对话与消息） */
+                tag?: string | null;
             };
             header?: {
                 authorization?: string | null;
@@ -12887,39 +13003,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SimTickFrameResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_tools_v1_tools_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ToolListResponse"];
                 };
             };
             /** @description Validation Error */

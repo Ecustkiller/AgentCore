@@ -13,7 +13,7 @@ Two modes, one primitive — the worker picks via ``blocking`` (the dual of the 
 (``ToolEffect.CONTINUE``) and tells the worker to PROCEED on its best assumption — it is
 NOT a stop. The escalation is harvested from the worker's transcript
 (``runs.serialize.escalations_from_transcript``) into ``RunState.escalations`` and surfaced
-PROMINENTLY in the CEO-facing aggregate (``DelegateTool._format_for_ceo``), where the CEO
+PROMINENTLY in the CEO-facing aggregate (``ceo_format.format_for_ceo``), where the CEO
 resolves it at synthesis with its OWN levers: ``ask_user`` (if the user must decide),
 ``revise`` (recall the author with the answer), or a fresh ``delegate``. A wrong assumption
 is corrected at synthesis, not propagated silently down the chain.

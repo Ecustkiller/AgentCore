@@ -8,7 +8,7 @@ from typing import Any
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.llm.profiles import ModelProfile
+from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.facts import NoteFact, record_turn_fact
@@ -19,6 +19,7 @@ from agentcore.runtime.loop_controller import (
 )
 from agentcore.tools.registry import ToolRegistry
 
+from .constants import FINALIZE_COORDINATION_TOOLS, FINALIZE_FORBIDDEN_TOOLS
 from .directive import Continue, Finalize, LoopDirective, Return
 from .outcome import RoundOutcome
 
@@ -58,6 +59,7 @@ def create_loop_controller(investigation_tools: frozenset[str]) -> LoopControlle
         reflection_start_round=settings.engine_reflection_start_round,
         reflection_interval=settings.engine_reflection_interval,
         convergence_finalize_rounds=settings.engine_convergence_finalize_rounds,
+        convergence_spin_rounds=settings.engine_convergence_spin_rounds,
         investigation_tools=investigation_tools,
     )
 
@@ -76,6 +78,28 @@ def resolve_openai_tool_defs(
     if not candidates:
         return None
     return tools.get_openai_definitions(candidates) or None
+
+
+def resolve_finalize_coordination_tools(
+    tools: ToolRegistry,
+    allowed_tool_names: list[str] | None,
+    disabled_tools: set[str],
+) -> list[dict[str, Any]] | None:
+    """OpenAI tool defs for a forced-finalize round: coordination tools only."""
+    if allowed_tool_names is None:
+        candidates = tools.names if tools.count > 0 else []
+    else:
+        candidates = list(allowed_tool_names)
+    coordination = [
+        name
+        for name in candidates
+        if name in FINALIZE_COORDINATION_TOOLS
+        and name not in disabled_tools
+        and name not in FINALIZE_FORBIDDEN_TOOLS
+    ]
+    if not coordination:
+        return None
+    return tools.get_openai_definitions(coordination) or None
 
 
 @dataclass(frozen=True)
@@ -127,14 +151,7 @@ def apply_circuit_breaker(
     return CircuitBreakerOutcome(message=breaker_message, refresh_tool_defs=refresh)
 
 
-def decide_llm_failure(
-    *,
-    profile: ModelProfile,
-    active_model: str | None,
-    final_content: str,
-    upstream_error: bool = False,
-) -> LoopDirective:
-    _ = (profile, active_model, upstream_error)
+def decide_llm_failure(*, final_content: str) -> LoopDirective:
     reason = FinishReason.DEGRADED if final_content else FinishReason.ERROR
     logger.warning(
         "engine.llm_failed_terminal", reason=reason.value, has_content=bool(final_content)

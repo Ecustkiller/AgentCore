@@ -34,6 +34,8 @@ _EXPECTED_NAMES = {
 
 # The CEO chat agent is a COORDINATOR: it directly holds only the read/retrieval
 # tools and delegates every production/mutation tool to a worker (协调者 CEO).
+# test_run is NOT here — it is a code-execution tool (GRANTABLE), so it is worker-only
+# like code_execute (it runs arbitrary project code through the same sandbox chain).
 _CEO_READONLY_NAMES = {
     "web_search",
     "read_url",
@@ -42,7 +44,6 @@ _CEO_READONLY_NAMES = {
     "grep",
     "code_search",
     "git",
-    "test_run",
 }
 _DELEGATED_MUTATION_NAMES = {
     "file_write",
@@ -91,6 +92,9 @@ def test_write_and_exec_tools_are_grantable():
     assert approvals["file_append"] is ToolApproval.GRANTABLE
     assert approvals["str_replace"] is ToolApproval.GRANTABLE
     assert approvals["code_execute"] is ToolApproval.GRANTABLE
+    # test_run runs project code through the same sandbox chain as code_execute, so it
+    # carries the same execution-class consent — never NEVER (the P0 it slipped through).
+    assert approvals["test_run"] is ToolApproval.GRANTABLE
     # Destructive / mutating file ops require the same consent as writes.
     assert approvals["file_delete"] is ToolApproval.GRANTABLE
     assert approvals["file_move"] is ToolApproval.GRANTABLE
@@ -172,7 +176,11 @@ def test_every_tool_exposes_catalog_fields():
         assert isinstance(schema.parameters, dict)
 
 
-def test_worker_registry_omits_code_execute_on_cloud_server():
+def test_worker_registry_omits_execution_class_on_cloud_server():
+    # 生产安全: the WHOLE code-execution class (code_execute + test_run) is withheld from
+    # a cloud server worker with no real sandbox — both run untrusted code through the
+    # same subprocess chain inside the API container (SEC-005). Pinning test_run here
+    # closes the P0 where it was registered unconditionally and ran as cloud RCE.
     from pathlib import Path
 
     from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -181,10 +189,11 @@ def test_worker_registry_omits_code_execute_on_cloud_server():
     backend = ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox(), location="server")
     names = {s.name for s in build_worker_registry(backend=backend).list_all()}
     assert "code_execute" not in names
+    assert "test_run" not in names
     assert "escalate" in names
 
 
-def test_worker_registry_keeps_code_execute_on_local_server_workspace():
+def test_worker_registry_keeps_execution_class_on_local_server_workspace():
     from pathlib import Path
 
     from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -193,3 +202,4 @@ def test_worker_registry_keeps_code_execute_on_local_server_workspace():
     backend = ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox(), location="local")
     names = {s.name for s in build_worker_registry(backend=backend).list_all()}
     assert "code_execute" in names
+    assert "test_run" in names

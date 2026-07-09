@@ -22,19 +22,27 @@ from agentcore.core.net import (
 from agentcore.core.net import (
     ip_is_safe as _ip_is_safe,
 )
+from agentcore.core.net import (
+    is_fake_ip_proxy_signature as _is_fake_ip_proxy_signature,
+)
+from agentcore.core.net import (
+    private_ip_block as _private_ip_block,
+)
 from agentcore.runtime.citations import annotate_tool_citations, merge_citations
 from agentcore.tools.builtin.web import _net
 from agentcore.tools.builtin.web import read_url as read_url_mod
 from agentcore.tools.builtin.web import search as search_mod
 from agentcore.tools.builtin.web import search_backend as search_backend_mod
 from agentcore.tools.builtin.web import search_cache as search_cache_mod
-from agentcore.tools.builtin.web._net import (
+from agentcore.core.net import (
     EgressError,
-    circuit_remaining,
     describe_net_error,
+    site_of,
+)
+from agentcore.tools.builtin.web._net import (
+    circuit_remaining,
     note_failure,
     note_success,
-    site_of,
 )
 from agentcore.tools.builtin.web.read_url import (
     ReadUrlTool,
@@ -178,6 +186,69 @@ async def test_classify_url_literal_private_ip():
 
 async def test_classify_url_public_literal_ip_ok():
     assert await _classify_url("https://1.1.1.1/") is None
+
+
+def test_is_fake_ip_proxy_signature_detects_clash_placeholder():
+    assert _is_fake_ip_proxy_signature("198.18.0.21") is True
+    assert _is_fake_ip_proxy_signature("198.19.255.255") is True
+    assert _is_fake_ip_proxy_signature("127.0.0.1") is False
+    assert _is_fake_ip_proxy_signature("not-an-ip") is False
+
+
+def test_private_ip_block_appends_fake_proxy_hint():
+    assert _private_ip_block("127.0.0.1") is _URLBlock.PRIVATE_IP
+    assert _private_ip_block("198.18.0.21") is _URLBlock.PRIVATE_IP_FAKE_PROXY
+    assert _private_ip_block("10.0.0.1", "198.18.0.5") is _URLBlock.PRIVATE_IP_FAKE_PROXY
+
+
+async def test_classify_url_fake_ip_proxy_signature(monkeypatch):
+    async def _fake_dns(_host, _port=None):
+        return ["198.18.0.21"]
+
+    from agentcore.config import settings
+    import agentcore.core.net as net
+
+    monkeypatch.setattr(settings, "read_url_allow_fake_ip_proxy", False)
+    monkeypatch.setattr(net, "_getaddrinfo", _fake_dns)
+    block = await _classify_url("https://www.example.com/")
+    assert block is _URLBlock.PRIVATE_IP_FAKE_PROXY
+    assert "fake-IP" in block.value
+    assert "probe_egress.py" in block.value
+
+
+async def test_classify_url_allows_fake_ip_when_configured(monkeypatch):
+    async def _fake_dns(_host, _port=None):
+        return ["198.18.0.21"]
+
+    from agentcore.config import settings
+    import agentcore.core.net as net
+
+    monkeypatch.setattr(settings, "read_url_allow_fake_ip_proxy", True)
+    monkeypatch.setattr(net, "_getaddrinfo", _fake_dns)
+    assert await _classify_url("https://arxiv.org/abs/1") is None
+
+
+async def test_ip_is_safe_allows_fake_ip_when_configured(monkeypatch):
+    from agentcore.config import settings
+
+    monkeypatch.setattr(settings, "read_url_allow_fake_ip_proxy", True)
+    assert _ip_is_safe("198.18.0.21") is True
+    assert _ip_is_safe("127.0.0.1") is False
+
+
+async def test_read_url_fake_ip_proxy_shows_environment_hint(monkeypatch):
+    async def _fake_classify(_url):
+        return _URLBlock.PRIVATE_IP_FAKE_PROXY
+
+    from agentcore.config import settings
+
+    monkeypatch.setattr(settings, "read_url_allow_fake_ip_proxy", False)
+    monkeypatch.setattr(read_url_mod, "_classify_url", _fake_classify)
+    result = await ReadUrlTool().execute({"url": "https://www.example.com/"}, _ctx())
+    assert result.success is False
+    assert "fake-IP" in result.error
+    assert "probe_egress.py" in result.error
+    assert result.metadata.get("policy_failure") is True
 
 
 # --- read_url: HTML extraction ---
@@ -388,6 +459,7 @@ async def test_read_url_rejects_private_without_network():
     result = await ReadUrlTool().execute({"url": "http://127.0.0.1:9999/"}, _ctx())
     assert result.success is False
     assert result.error == _URLBlock.PRIVATE_IP.value
+    assert result.metadata.get("policy_failure") is True
 
 
 async def test_read_url_requires_url():

@@ -2,10 +2,10 @@
 status: reference
 code: ""
 related:
-  - .cursor/rules/llm.mdc
+  - docs/05-平台与运维/平台LLM接入.md
   - docs/03-AI核心/执行引擎架构设计.md
 skip_if:
-  - 只改 AgentCore 内部行为（读 llm.mdc / 03-AI）
+  - 只改 AgentCore 内部行为（读 平台LLM接入 / 03-AI）
 ---
 
 # DeepSeek V4 API 开发参考
@@ -16,7 +16,7 @@ skip_if:
 
 ### DeepSeek V4 配置事实（权威，AI 易错点）
 
-默认 Provider 是 DeepSeek V4。以下是**外部 API 约束**（代码里看不出来），改模型/LLM 配置前以此为准：
+DeepSeek V4 是 BYOK 常用目标之一（平台内测档实际经 Codex proxy，见 [平台LLM接入.md](../05-平台与运维/平台LLM接入.md)）。以下是 DeepSeek 的**外部 API 约束**（代码里看不出来），用 DeepSeek 时以此为准：
 
 | 项 | 正确值 / 约束 |
 |---|---|
@@ -27,7 +27,7 @@ skip_if:
 | 温度坑 | **思考模式下 `temperature`/`top_p`/`presence_penalty`/`frequency_penalty` 一律被忽略**（不报错、静默无效） |
 | 工具调用坑 | 思考模式支持工具调用；但**发生工具调用的回合，`reasoning_content` 必须原样回传**，缺失则 API 返回 400 |
 | 上下文 | 实际 1M；建议收窄到 64K 控成本 |
-| API Key 来源 | **内测期默认 BYOK**：key 由用户自带、按 turn 解析注入（`llm/byok.py` → `factory.build_provider(credentials)`），非全局 `platform_api_key`。平台付费/全局 key 路径靠 `config.billing_mode` 休眠（默认 `byok`），详见 [`docs/05-平台与运维/成本配额与计费.md` §〇·五](../../docs/05-平台与运维/成本配额与计费.md) |
+| API Key 来源 | **内测期默认 BYOK**：key 由用户自带、按 turn 解析注入（`llm/resolve.py` `resolve_user_llm_credentials` → `factory.build_provider(credentials)`），非全局 `platform_api_key`。平台付费/全局 key 路径靠 `config.billing_mode` 休眠（默认 `byok`），详见 [`docs/05-平台与运维/成本配额与计费.md` §〇·五](../../docs/05-平台与运维/成本配额与计费.md) |
 
 ### Provider 路由规则
 
@@ -43,7 +43,7 @@ skip_if:
 | worker 两档（`fast`/`strong`）、单聊 | 思考 on，`high`；`max` 由 per-agent 覆盖按需解锁 |
 | 标题 / 记忆维护（后台机械任务） | **非思考**（提速省钱） |
 
-> 开发期统一为「`high`/`max` 两档有效思考强度」，不再有非思考的 worker 档；`fast` 与 `strong` 同为 `high`，靠回合预算（4 vs 28）+ `max` 解锁区分。非思考只保留给标题/记忆这类后台机械任务。
+> 开发期统一为「`high`/`max` 两档有效思考强度」，不再有非思考的 worker 档；`fast` 与 `strong` 同为 `high`，靠回合预算（8 vs 28）+ `max` 解锁区分。非思考只保留给标题/记忆这类后台机械任务。
 
 per-agent 可在版本配置里声明 `thinking`（bool）/ `reasoning_effort`（`high`/`max`）覆盖角色默认（只升不降）。
 
@@ -53,7 +53,7 @@ worker 档位经一轮收敛（2026-06-14），保留关键否决理由：
 
 - **删 `standard`，收敛为 `fast`/`strong` 两档**：二选一对 CEO `delegate` 更可靠，且对齐 DeepSeek 模型分层意图。
 - **单聊不吃 worker 档，固定独立 `chat` 档**：单聊最高频、体验需稳定可预期；将来 `strong` 翻 Pro 不连累单聊。
-- **撤销「`fast` 非思考」，`fast` 同为思考 `high`**：开发期统一 `high`/`max` 两档有效强度，`fast` 靠小回合预算（4 轮）区分「更快更省」。
+- **撤销「`fast` 非思考」，`fast` 同为思考 `high`**：开发期统一 `high`/`max` 两档有效强度，`fast` 靠小回合预算（8 轮）区分「更快更省」。
 - **强档 effort 锁 `high`，`max` 仅由 per-agent 覆盖按需解锁且只升不降**：`max` 需 384K+ 窗口且更贵，不当默认；只升不降防乱关思考 / 乱降档。
 
 ---
@@ -224,7 +224,7 @@ messages.append({
 
 4. **并发限制**：Flash 2,500 并发 / Pro 500 并发。Multi-Agent 场景下注意 Pro 的并发上限。
 
-5. **不支持 tool_choice**：V4 不支持 `tool_choice` 参数（强制使用某个工具），模型自主决定是否调用工具。
+5. **不支持强制 tool_choice**：V4 不支持用 `tool_choice` 参数强制模型必须调用某个工具，由模型自主决定是否调用。（我方代码只发 `auto`＝放行 / `none`＝禁用工具，均正常生效；从不发 `required`，故不受此限。）
 
 6. **不支持 developer role**：不支持 OpenAI 的 `developer` role，只支持 `system`、`user`、`assistant`、`tool`。
 

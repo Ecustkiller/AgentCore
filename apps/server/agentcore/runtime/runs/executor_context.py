@@ -506,7 +506,3 @@ def _workspace_manifest(
     if truncated and lines:
         lines.append("……（工作区还有更多文件，需要可用 `file_list` 查看）")
     return "\n".join(lines)
-
-
-# Re-export for tests via executor facade
-_CONTEXT_BLOCK_BODY_CAP = DEP_CONTEXT_BUDGET

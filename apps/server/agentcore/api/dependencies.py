@@ -23,6 +23,7 @@ from agentcore.db.repositories import (
     AdminMfaRepository,
     AgentAuditEventRepository,
     BoardRepository,
+    BookmarkRepository,
     ChatRepository,
     ConversationRepository,
     ConversationShareRepository,
@@ -34,7 +35,6 @@ from agentcore.db.repositories import (
     InviteRepository,
     MemoryUpdateRepository,
     MessageRepository,
-    ModelModeRepository,
     PushDeviceRepository,
     RefreshTokenRepository,
     SimulationRepository,
@@ -131,6 +131,10 @@ def get_conversation_repo(session: AsyncSession = Depends(get_db)) -> Conversati
     return ConversationRepository(session)
 
 
+def get_bookmark_repo(session: AsyncSession = Depends(get_db)) -> BookmarkRepository:
+    return BookmarkRepository(session)
+
+
 def get_conversation_share_repo(
     session: AsyncSession = Depends(get_db),
 ) -> ConversationShareRepository:
@@ -158,10 +162,6 @@ def get_board_repo(session: AsyncSession = Depends(get_db)) -> BoardRepository:
 
 def get_simulation_repo(session: AsyncSession = Depends(get_db)) -> SimulationRepository:
     return SimulationRepository(session)
-
-
-def get_model_mode_repo(session: AsyncSession = Depends(get_db)) -> ModelModeRepository:
-    return ModelModeRepository(session)
 
 
 def get_message_repo(session: AsyncSession = Depends(get_db)) -> MessageRepository:

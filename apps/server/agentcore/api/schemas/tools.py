@@ -7,33 +7,13 @@ from pydantic import BaseModel
 from agentcore.core.types import ToolApproval, ToolCategory
 
 
-class ToolInfo(BaseModel):
-    """A built-in tool's public catalog entry (read-only).
-
-    ``approval`` is the tool's governance level (``never`` / ``grantable`` /
-    ``always``); ``parameters`` is the JSON Schema the model fills to call it.
-    """
-
-    name: str
-    description: str
-    category: ToolCategory
-    approval: ToolApproval
-    parameters: dict[str, Any]
-
-
-class ToolListResponse(BaseModel):
-    data: list[ToolInfo]
-    total: int
-
-
 class CapabilityTool(BaseModel):
     """A tool in the capability catalog: its public schema + who may call it.
 
-    Unlike ``ToolInfo`` (the legacy worker-built-ins-only ``GET /tools``), this is the
-    COMPLETE catalog — it also carries the CEO-only orchestration primitives
-    (``delegate`` / ``revise`` / ``consult_skill`` / ``ask_user``) and the worker-only
-    ``escalate``. ``available_to`` is a subset of ``["ceo", "worker"]`` so the UI can
-    show which side of the team holds each tool.
+    The COMPLETE catalog — CEO orchestration primitives (``delegate`` / ``revise`` /
+    ``consult_skill`` / ``ask_user``) and the worker-only ``escalate``.
+    ``available_to`` is a subset of ``["ceo", "worker"]`` so the UI can show which
+    side of the team holds each tool.
     """
 
     name: str

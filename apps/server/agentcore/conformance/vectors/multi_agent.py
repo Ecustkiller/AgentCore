@@ -164,6 +164,72 @@ def _multi_agent_worker_failed_debrief() -> list[SSEEvent]:
     ]
 
 
+def _multi_agent_run_redirect_ignored() -> list[SSEEvent]:
+    """多 Agent · 跑一半改方向 · 忽略路径 (run_redirect Step 4): a user「立即改此人」steer on a
+    parallel worker could NOT be applied mid-run — r1 had already reached a terminal (确定性失败)
+    state, so the WaveScheduler never cancelled + cold-re-ran it. The ignore AND the user's later
+    accept are recorded OUT-OF-BAND (audit 行 ``run.redirect_ignored`` / ``run.outcome_accepted`` +
+    the accept-outcome REST endpoint) — NEVER on the SSE stream, so there is NO new event and NO
+    ``run_cancelled``. This vector pins that a not-applied redirect leaves the wire projection clean:
+    r1 folds as failed, its parallel sibling r2 completes untouched, the turn ends normally
+    (progress 1/2 — failed run not counted), and NO phantom cold-re-run node or stuck-running node
+    leaks in. (The Step 3B *applied* cold re-run is a separate wire concern, not this path.)"""
+    agents = [
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "撰写员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "撰写", "depends_on": []},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排两位并行推进。"),
+        tool_use_start("dc1", "delegate", {"tasks": [{"role": "研究员"}, {"role": "撰写员"}]}),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="并行调研 + 撰写",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        run_started("r2", "w2"),
+        run_output_delta("r1", "w1", "开始调研，但提示过长"),
+        run_output_delta("r2", "w2", "开始撰写"),
+        # r1 hits a deterministic (non-retryable) failure; the user's mid-flight redirect on r1
+        # arrives too late to steer a run that is already terminal — nothing lands on the wire.
+        run_failed("r1", "w1", "上游 400：提示过长（确定性失败，重试无益）"),
+        run_progress(0, 2),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="完成撰写",
+            duration_ms=1200,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_progress(1, 2),
+        tool_use_end("dc1", "delegate", success=True, output="团队完成（含 1 项失败）。"),
+        content_delta(" 撰写已完成；调研步骤失败，可在其详情里接受此结果。"),
+        message_end(FinishReason.END_TURN, input_tokens=2000, output_tokens=400, cost=_COST),
+    ]
+
+
 def _multi_agent_worker_tool() -> list[SSEEvent]:
     """多 Agent：worker 工具调用。worker 的 ``tool_use_start/end`` 与 CEO 的同形地走顶层流，
     但**携 ``run_id``**——三端 process fold 据此把它**排除出 CEO 气泡时间线**（统一团队时间线
@@ -1670,6 +1736,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_worker_failed_debrief": (
         "多 Agent：worker 未过契约（run_failed）但调 handoff 交了交接简报——失败节点也 surface debrief",
         _multi_agent_worker_failed_debrief,
+    ),
+    "multi_agent_run_redirect_ignored": (
+        "多 Agent·跑一半改方向·忽略路径：改方向来不及应用（r1 确定性失败），忽略+接受走审计/REST 带外，wire 投影保持干净（r1 failed、并行 r2 completed、1/2、无幻影重跑节点）",
+        _multi_agent_run_redirect_ignored,
     ),
     "multi_agent_worker_tool": ("多 Agent：worker 工具调用 + run_tool_progress 实时态", _multi_agent_worker_tool),
     "multi_agent_worker_output_reset": (

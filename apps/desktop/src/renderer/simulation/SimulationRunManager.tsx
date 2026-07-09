@@ -1,3 +1,4 @@
+import { OpenInAgentTownButton } from "@/simulation/OpenInAgentTownButton";
 import { Button } from "@/components/ui";
 import { describeError } from "@/lib/errors";
 import {
@@ -110,6 +111,7 @@ export function SimulationRunManager({
           {runStatusLabel(run.status)}
         </div>
         <div className="text-xs text-muted-foreground">SSE {streamStatus}</div>
+        <OpenInAgentTownButton runId={run.id} />
         <Button
           variant="ghost"
           size="sm"
@@ -143,6 +145,8 @@ export function SimulationRunManager({
       >
         {creating ? "创建中…" : "新建小镇"}
       </Button>
+
+      <OpenInAgentTownButton variant="neutral" />
 
       {actionError ? (
         <p className="text-sm text-destructive">{actionError}</p>

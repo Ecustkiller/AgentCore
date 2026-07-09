@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentcore.runtime.events.journal_config import cap_process_result
 from agentcore.runtime.events.sink import ORCHESTRATION_TOOLS
 
 # message_end.finish_reason → terminal TurnStatus (parity with desktop statusFromFinish,
@@ -216,7 +217,7 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             if p.get("run_id") or p.get("tool_name") in ORCHESTRATION_TOOLS:
                 continue
             call_id = p.get("tool_call_id", "")
-            result = p.get("result")
+            result = cap_process_result(p.get("result"))
             display = p.get("display")
             for step in reversed(process):
                 if step.get("kind") == "tool" and step.get("id") == call_id:
@@ -292,14 +293,10 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                         "kind": kind,
                         "revisionOf": parent,
                         "revision": revision,
-                        # 乙 wire 携 round/stance (单一轮次投影): a debate 续写 keeps its
-                        # debater identity (stance/group) + its TRUE round, so every view
-                        # derives 第几轮/哪一方 from ONE projected field. New journals carry
-                        # them on the wire; a legacy journal falls back to inheriting the
-                        # original's stance/group + revision-as-round.
-                        "stance": p.get("stance") or original.get("stance"),
-                        "group": p.get("group") or original.get("group"),
-                        "round": p.get("round") or revision,
+                        # 乙 wire 携 round/stance (单一轮次投影): debate 续写从 wire 读取身份与轮次。
+                        "stance": p.get("stance"),
+                        "group": p.get("group"),
+                        "round": p.get("round") or 0,
                     }
                     runs.append(run)
             if run is not None:
@@ -544,6 +541,25 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 pending = None
                 status = "running"
 
+        elif etype == "delegation_authorization_required":
+            pending = {
+                "kind": "delegation_authorization",
+                "authorizationId": p.get("authorization_id", ""),
+                "executionId": p.get("execution_id", ""),
+                "workers": p.get("workers") or [],
+                "grantableTools": p.get("grantable_tools") or [],
+            }
+            status = "paused"
+
+        elif etype == "delegation_authorization_resolved":
+            if (
+                pending
+                and pending.get("kind") == "delegation_authorization"
+                and pending.get("authorizationId") == p.get("authorization_id")
+            ):
+                pending = None
+                status = "running"
+
         elif etype == "checkpoint_required":
             cid = p.get("checkpoint_id", "")
             # ask_user 正文吸收：same-round prose folds into the card — drop bubble text
@@ -620,7 +636,7 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
 
         else:
             # message_start / turn_saved / title_generated / followups_generated /
-            # board_op_required / board_read_required / tool_progress / workspace_op_required /
+            # board_op_required / board_read_required / desktop_notify_required / tool_progress / workspace_op_required /
             # handoff_* — not part of the normalized turn judge state (no-op). Mirrored by the
             # frontend folds' assertNever switch so the set stays in lockstep.
             pass

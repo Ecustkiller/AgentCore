@@ -111,6 +111,87 @@ async def test_search_limit_caps_each_section(client, make_invite):
     assert len(_sections(body)["conversation"]) == 2
 
 
+async def test_search_folder_id_scopes_to_workspace(client, make_invite, session_factory):
+    """``folder_id`` (工作区过滤) keeps only in-folder conversation/message hits and
+    drops the folder section (searching *inside* a workspace, not *for* a folder)."""
+    code = await make_invite("INV-SR-7")
+    await register_and_login(client, code, "searchuser7")
+
+    folder = (await client.post("/v1/folders", json={"name": "scoped ws"})).json()["id"]
+    inside = (
+        await client.post(
+            "/v1/conversations", json={"title": "scoped alpha", "folder_id": folder}
+        )
+    ).json()["id"]
+    await _seed_message(session_factory, inside, "scoped alpha body")
+    outside = await _new_conversation(client, "scoped alpha outside")
+    await _seed_message(session_factory, outside, "scoped alpha body outside")
+
+    body = (
+        await client.get("/v1/search", params={"q": "scoped alpha", "folder_id": folder})
+    ).json()
+    sections = _sections(body)
+    # Folder section is dropped under a workspace scope.
+    assert "folder" not in sections
+    # Only the in-folder conversation + its message survive the scope.
+    assert {i["id"] for i in sections.get("conversation", [])} == {inside}
+    assert {i["conversation_id"] for i in sections.get("message", [])} == {inside}
+
+
+async def test_search_updated_after_filters_by_time(client, make_invite):
+    """``updated_after`` (时间过滤) bounds results to recent activity."""
+    code = await make_invite("INV-SR-8")
+    await register_and_login(client, code, "searchuser8")
+    await _new_conversation(client, "timed alpha")
+
+    # A far-future bound excludes the just-created row entirely.
+    future = (
+        await client.get(
+            "/v1/search",
+            params={"q": "timed alpha", "updated_after": "2999-01-01T00:00:00Z"},
+        )
+    ).json()
+    assert future["sections"] == []
+
+    # A far-past bound keeps it.
+    past = (
+        await client.get(
+            "/v1/search",
+            params={"q": "timed alpha", "updated_after": "2000-01-01T00:00:00Z"},
+        )
+    ).json()
+    assert "conversation" in _sections(past)
+
+
+async def test_search_tag_filters_conversations_and_messages(
+    client, make_invite, session_factory
+):
+    """``tag`` (标签过滤) keeps only hits in the tagged conversation."""
+    from agentcore.db.repositories import ConversationRepository
+
+    code = await make_invite("INV-SR-9")
+    await register_and_login(client, code, "searchuser9")
+
+    tagged = await _new_conversation(client, "tagged alpha")
+    untagged = await _new_conversation(client, "tagged alpha other")
+    async with session_factory() as session:
+        await ConversationRepository(session).update_title_unscoped(
+            tagged, "tagged alpha", tag="research"
+        )
+        await ConversationRepository(session).update_title_unscoped(
+            untagged, "tagged alpha other"
+        )
+    await _seed_message(session_factory, tagged, "tagged alpha body")
+    await _seed_message(session_factory, untagged, "tagged alpha body")
+
+    body = (
+        await client.get("/v1/search", params={"q": "tagged alpha", "tag": "research"})
+    ).json()
+    sections = _sections(body)
+    assert {i["id"] for i in sections.get("conversation", [])} == {tagged}
+    assert {i["conversation_id"] for i in sections.get("message", [])} == {tagged}
+
+
 async def test_search_is_owner_scoped(client, make_invite, new_client, session_factory):
     """A user's search never surfaces another user's conversations/messages/folders."""
     code_a = await make_invite("INV-SR-6A")

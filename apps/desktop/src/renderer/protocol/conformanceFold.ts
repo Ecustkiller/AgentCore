@@ -27,6 +27,7 @@ import {
   foldToolUseEnd,
   foldToolUseStart,
 } from "@/lib/foldMessageLane";
+import { assertNever } from "@/lib/assertNever";
 import {
   type ExecutionPlan,
   type ExecutionStatus,
@@ -323,13 +324,37 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         status = FINISH_TO_STATUS[p.finish_reason] ?? "completed";
         break;
       }
-      default:
-        // message_start / turn_warning / turn_saved / title_generated / followups_generated /
-        // board_op_required / board_read_required / tool_progress / tool_use_progress /
-        // workspace_op_required / handoff_* — not part of the normalized
-        // judge state (tool_use_progress is transport-only 工具执行阶段进度: live-stream phase,
-        // never journaled, so it never rides a vector and carries no ProjectedTurn state).
+      // Not part of the normalized judge state (no-op) — enumerated so assertNever
+      // stays exhaustive against @agentcore/contract-types (protocol-conformance §支柱2).
+      case "message_start":
+      case "turn_warning":
+      case "turn_saved":
+      case "title_generated":
+      case "followups_generated":
+      case "board_op_required":
+      case "board_read_required":
+      case "desktop_notify_required":
+      case "tool_progress":
+      case "tool_use_progress":
+      case "batch_metrics":
+      case "debate_round_decision_required":
+      case "debate_round_decision_resolved":
+      case "delegation_authorization_required":
+      case "delegation_authorization_resolved":
+      case "workspace_op_required":
+      case "handoff_snapshot_done":
+      case "handoff_job_started":
+      case "handoff_apply_done":
+      case "sim.agent_action":
+      case "sim.agent_state":
+      case "sim.interaction":
+      case "sim.tick_started":
+      case "sim.tick_ended":
+      case "sim.tick_frame":
+      case "sim.world_event":
         break;
+      default:
+        assertNever(ev.type);
     }
   }
 

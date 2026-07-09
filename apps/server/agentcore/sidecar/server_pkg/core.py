@@ -135,24 +135,33 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
             return None, None
         return store.save, store.delete
 
-    def _creds_for(self, conversation_id: str, trace_id: str = "") -> LLMCredentials | None:
-        """Session creds + this turn's conversation/trace headers for the cloud inference
-        proxy (Slice 4a), so spend attributes to the right conversation and every proxied
-        LLM call joins this turn's trace (the write-back reuses the same id → ONE trace
-        end-to-end, 打通气泡↔日志).
+    def _creds_for(
+        self, conversation_id: str, trace_id: str = "", message_id: str = ""
+    ) -> LLMCredentials | None:
+        """Session creds + this turn's conversation/trace/message headers for the cloud
+        inference proxy (Slice 4a), so spend attributes to the right conversation,
+        every proxied LLM call joins this turn's trace (the write-back reuses the same
+        id → ONE trace end-to-end, 打通气泡↔日志), and in-turn proxy rows carry the
+        assistant ``message_id`` for daily-request quota (distinct from off-turn background
+        rows that intentionally leave message_id NULL).
 
         Per-turn (one sidecar serves many conversations), so the session creds get a
         fresh per-turn copy. None creds (dev platform-fallback, no proxy) stay None.
-        ``trace_id`` empty (untraced caller) ⇒ the header is omitted, not blank.
+        ``trace_id`` / ``message_id`` empty (untraced caller) ⇒ the header is omitted,
+        not blank.
         """
         if self._creds is None:
             return None
+        from agentcore.llm.credentials import INFERENCE_MESSAGE_HEADER
+
         extra = {
             **(self._creds.extra_headers or {}),
             INFERENCE_CONVERSATION_HEADER: conversation_id,
         }
         if trace_id:
             extra[INFERENCE_TRACE_HEADER] = trace_id
+        if message_id:
+            extra[INFERENCE_MESSAGE_HEADER] = message_id
         return replace(self._creds, extra_headers=extra)
 
     async def _send(self, message: dict[str, Any]) -> None:

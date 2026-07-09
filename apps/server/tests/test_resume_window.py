@@ -1,6 +1,6 @@
 """Resume cutover: the CEO window is rebuilt from the journal, NOT the frame transcript.
 
-Guards :func:`agentcore.runtime.pipeline._resumed_captain_window` — the consumer side of
+Guards :func:`agentcore.runtime.pipeline.resumed_captain_window` — the consumer side of
 the conformance golden (执行级事件溯源 §18.3 Phase 2 ④). The golden proves the
 projection ``window_from_journal(journal-at-pause) == frame.transcript``; this proves
 resume actually READS the projection: it folds ``suspension.journal_entries`` (+ reloaded
@@ -17,7 +17,7 @@ import pytest
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.facts import LlmCallFact, RoundBoundaryFact, TurnStartedFact
 from agentcore.runtime.journal import window_from_journal
-from agentcore.runtime.pipeline import _resumed_captain_window
+from agentcore.runtime.pipeline.resume import resumed_captain_window
 from agentcore.runtime.suspension import AskUserSuspension
 
 _STALE = [LLMMessage(role="user", content="STALE-FRAME-MUST-NOT-BE-USED")]
@@ -70,7 +70,7 @@ def test_resumed_window_folds_journal_and_splices_history_not_frame():
     history = [{"role": "assistant", "content": "早前摘要"}]
     susp = _suspension(_delegate_pause_journal())
 
-    window = _resumed_captain_window(susp, history)
+    window = resumed_captain_window(susp, history)
 
     expected = window_from_journal(
         susp.journal_entries,
@@ -91,7 +91,7 @@ def test_resumed_window_without_history_has_no_prefix():
     # falsy history must not crash or inject an empty message.
     susp = _suspension(_delegate_pause_journal())
 
-    window = _resumed_captain_window(susp, history=[])
+    window = resumed_captain_window(susp, history=[])
 
     assert [m.role for m in window] == ["system", "user", "assistant"]
     assert window != susp.transcript
@@ -103,7 +103,7 @@ def test_resumed_window_falls_back_to_inmemory_transcript_when_journal_absent():
     # claimed cross-process frame has no transcript — see the fail-loud case below.)
     susp = _suspension([])
 
-    window = _resumed_captain_window(susp, history=[{"role": "user", "content": "x"}])
+    window = resumed_captain_window(susp, history=[{"role": "user", "content": "x"}])
 
     assert window == susp.transcript
     assert window == _STALE
@@ -117,4 +117,4 @@ def test_resumed_window_raises_when_journal_and_transcript_both_absent():
     susp.transcript = []  # a claimed frame deserializes to empty
 
     with pytest.raises(RuntimeError, match="cannot rebuild the CEO window"):
-        _resumed_captain_window(susp, history=[{"role": "user", "content": "x"}])
+        resumed_captain_window(susp, history=[{"role": "user", "content": "x"}])

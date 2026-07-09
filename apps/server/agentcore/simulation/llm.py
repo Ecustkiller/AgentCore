@@ -26,19 +26,56 @@ class SimModelTier(StrEnum):
     CRITICAL = "critical"
 
 
+class SimDecisionKind(StrEnum):
+    """What an LLM call serves this tick — the input to the routing strategy (WS-D)."""
+
+    ROUTINE_TICK = "routine_tick"  # per-agent movement / stay / idle
+    INTERACTION = "interaction"  # trade / vote / conversation protocol resolution
+    REFLECTION = "reflection"  # low-frequency self-reflection & goal update
+
+
+# Known "upgrade" pairs: a fast routine model → a stronger model for critical decisions.
+# When the resolved base model is not a known upgradable id (BYOK / proxy), critical safely
+# aliases the base so we never emit an invalid model name.
+SIM_ROUTINE_MODEL = "deepseek-chat"
+SIM_CRITICAL_MODEL = "deepseek-reasoner"
+_CRITICAL_UPGRADES: dict[str, str] = {SIM_ROUTINE_MODEL: SIM_CRITICAL_MODEL}
+
+# The routing strategy: which decisions warrant the critical tier, and why (explainable).
+_CRITICAL_DECISIONS: frozenset[SimDecisionKind] = frozenset(
+    {SimDecisionKind.INTERACTION, SimDecisionKind.REFLECTION}
+)
+_DECISION_RATIONALE: dict[SimDecisionKind, str] = {
+    SimDecisionKind.ROUTINE_TICK: "日常移动/停留：高频、低风险，用快速模型即可",
+    SimDecisionKind.INTERACTION: "交易/投票/对话：多方博弈且改变世界状态，值得更强模型",
+    SimDecisionKind.REFLECTION: "低频反思与目标调整：影响长期行为走向，值得更强模型",
+}
+
+
+def tier_for_decision(kind: SimDecisionKind) -> SimModelTier:
+    """Map a decision kind to its model tier (the core routing policy)."""
+    return SimModelTier.CRITICAL if kind in _CRITICAL_DECISIONS else SimModelTier.ROUTINE
+
+
 class SimModelRoutingConfig(BaseModel):
-    """Per-run model routing manifest; M2 uses the same model for all tiers."""
+    """Per-run model routing manifest: a model id per decision tier."""
 
     routine_model: str
-    critical_model: str = Field(description="Reserved for key decisions; M2 aliases routine_model")
+    critical_model: str = Field(
+        description="Model for pivotal decisions (interactions, reflection); "
+        "upgraded from routine when a known mapping exists, else aliases routine."
+    )
 
 
 def default_routing_config(base_model: str) -> SimModelRoutingConfig:
-    return SimModelRoutingConfig(routine_model=base_model, critical_model=base_model)
+    """Routine tier uses the resolved base model; critical tier upgrades to a stronger
+    model when a known mapping exists (e.g. deepseek-chat → deepseek-reasoner)."""
+    critical = _CRITICAL_UPGRADES.get(base_model, base_model)
+    return SimModelRoutingConfig(routine_model=base_model, critical_model=critical)
 
 
 class SimModelRouter:
-    """Resolve which model to use for a given decision tier."""
+    """Resolve which model to use for a given decision tier or decision kind."""
 
     def __init__(self, config: SimModelRoutingConfig):
         self._config = config
@@ -60,6 +97,16 @@ class SimModelRouter:
         if tier == SimModelTier.CRITICAL:
             return self._config.critical_model
         return self._config.routine_model
+
+    def model_for_decision(self, kind: SimDecisionKind) -> str:
+        """Resolve the model for a decision kind via the routing policy."""
+        return self.resolve(tier_for_decision(kind))
+
+    def explain_decision(self, kind: SimDecisionKind) -> str:
+        """Human-readable justification for the tier chosen for ``kind``."""
+        tier = tier_for_decision(kind)
+        model = self.resolve(tier)
+        return f"{kind.value}→{tier.value}（{model}）：{_DECISION_RATIONALE[kind]}"
 
     def to_manifest(self) -> dict:
         return {"model_routing": self._config.model_dump()}

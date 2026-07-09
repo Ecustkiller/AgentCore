@@ -38,6 +38,7 @@ export function FileBrowser({
   source,
   leading,
   trailing,
+  emptyTreeHint,
 }: {
   /** 已解析的文件源；为 null 时（本地源在本机不可用）保留工具栏（含选择器）但树/操作淡出、正文兜空态。 */
   source: FileSource | null;
@@ -45,6 +46,8 @@ export function FileBrowser({
   leading?: ReactNode;
   /** 工具栏最右槽（如快照 / 交接入口），常驻、不随预览消失。 */
   trailing?: ReactNode;
+  /** 文件树为空时的提示文案（对话工作区专用）。 */
+  emptyTreeHint?: string;
 }) {
   const [preview, setPreview] = useState<{ path: string; name: string } | null>(
     null,
@@ -165,6 +168,7 @@ export function FileBrowser({
             ref={treeRef}
             source={source}
             hideToolbar
+            emptyText={emptyTreeHint}
             onChromeState={setChrome}
             onOpenFile={(path, name) => setPreview({ path, name })}
           />

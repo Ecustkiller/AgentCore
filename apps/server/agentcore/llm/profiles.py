@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agentcore.llm.credentials import LLMCredentials
 
 from agentcore.core.types import ModelTier
 from agentcore.llm.provider.protocol import LLMMessage, LLMRequest
 
-# Legacy model id constants (eval / pricing / migration defaults).
+# Platform model id constants (eval / pricing / migration defaults).
 PLATFORM_MODEL_FLASH = "deepseek-v4-flash"
 PLATFORM_MODEL_PRO = "deepseek-v4-pro"
 DEEPSEEK_V4_FLASH = PLATFORM_MODEL_FLASH
@@ -92,7 +96,21 @@ def default_turn_profiles(*, model: str | None = None) -> TurnProfiles:
     return TurnProfiles(model=model or settings.platform_model)
 
 
-# Backward-compat alias during migration.
-ModelProfile = ProfileParams
-ProfileSet = TurnProfiles
-default_profile_set = default_turn_profiles
+def turn_profiles_for_turn(
+    profile_set: TurnProfiles | None = None,
+    llm_credentials: LLMCredentials | None = None,
+) -> TurnProfiles:
+    """Resolve turn profiles for a pipeline/sidecar run.
+
+    BYOK and inference-proxy turns must not inherit ``settings.platform_model`` when
+    the caller did not supply an explicit profile set — the upstream model comes from
+    the user's credentials (direct BYOK) or from the proxy's server-side resolution.
+    """
+    if profile_set is not None:
+        return profile_set
+    if llm_credentials is not None:
+        from agentcore.llm.resolve import resolve_turn_model
+
+        return default_turn_profiles(model=resolve_turn_model(llm_credentials))
+    return default_turn_profiles()
+

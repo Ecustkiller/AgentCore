@@ -66,6 +66,12 @@ from .boards import (
     CreateBoardRequest,
     UpdateBoardRequest,
 )
+from .bookmarks import (
+    BookmarkIdsResponse,
+    BookmarkItem,
+    BookmarkListResponse,
+    CreateBookmarkRequest,
+)
 from .common import StatusResponse
 from .conversations import (
     ConversationListResponse,
@@ -99,6 +105,8 @@ from .handoff import (
 )
 from .llm_key import LlmKeyStatusResponse, SetBillingPreferenceRequest, SetLlmKeyRequest
 from .messages import (
+    AcceptRunOutcomeRequest,
+    AcceptRunOutcomeResponse,
     Citation,
     MemoryUpdateItemView,
     MemoryUpdateView,
@@ -111,6 +119,7 @@ from .messages import (
     RecordTurnResponse,
     RegenerateMessageRequest,
     ResolveApprovalInteraction,
+    ResolveDelegationAuthorizationInteraction,
     ResolveClientToolInteraction,
     ResolveDebateRoundInteraction,
     ResolveEscalationInteraction,
@@ -150,16 +159,6 @@ from .messaging import (
     UserSearchResponse,
     UserSearchResult,
 )
-from .model_modes import (
-    CreateModelModeRequest,
-    ModelModeCatalog,
-    ModelModePreset,
-    ModelModesResponse,
-    ModelModeSummary,
-    ModelRoleOption,
-    SetDefaultModeRequest,
-    UpdateModelModeRequest,
-)
 from .search import SearchItem, SearchResponse, SearchSection
 from .sharing import CreateShareRequest, ShareListResponse, ShareSummary
 from .tools import (
@@ -167,8 +166,6 @@ from .tools import (
     CapabilityGuidelines,
     CapabilitySkill,
     CapabilityTool,
-    ToolInfo,
-    ToolListResponse,
 )
 from .usage import (
     AgentCostLine,
@@ -271,15 +268,11 @@ __all__ = [
     "BoardSceneWriteRequest",
     "BoardWriteResult",
     "BoardConversationResponse",
-    # model modes
-    "ModelModeSummary",
-    "CreateModelModeRequest",
-    "UpdateModelModeRequest",
-    "ModelModePreset",
-    "ModelModesResponse",
-    "ModelRoleOption",
-    "ModelModeCatalog",
-    "SetDefaultModeRequest",
+    # bookmarks (消息收藏)
+    "CreateBookmarkRequest",
+    "BookmarkItem",
+    "BookmarkListResponse",
+    "BookmarkIdsResponse",
     # llm key
     "SetLlmKeyRequest",
     "SetBillingPreferenceRequest",
@@ -320,6 +313,8 @@ __all__ = [
     "ResumeTurnRequest",
     "SubmitRunRedirectRequest",
     "SubmitRunRedirectResponse",
+    "AcceptRunOutcomeRequest",
+    "AcceptRunOutcomeResponse",
     "PausedTurnSummary",
     "PendingApprovalSummary",
     "TurnRecoveryResponse",
@@ -359,8 +354,6 @@ __all__ = [
     "HandoffApplySelection",
     "ApplyHandoffRequest",
     # tools + capabilities
-    "ToolInfo",
-    "ToolListResponse",
     "CapabilityTool",
     "CapabilitySkill",
     "CapabilityGuidelines",

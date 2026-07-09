@@ -1,4 +1,8 @@
 import {
+  AGENTTOWN_CHANNELS,
+  type AgentTownApi,
+} from "@shared/agenttown-contract";
+import {
   FS_CHANNELS,
   type FsApi,
   type FsChangedEvent,
@@ -11,6 +15,14 @@ import {
   type SidecarStatusPush,
 } from "@shared/sidecar-contract";
 import {
+  NOTIFICATION_CHANNELS,
+  type NotificationApi,
+} from "@shared/notification-contract";
+import {
+  TERMINAL_CHANNELS,
+  type TerminalApi,
+} from "@shared/terminal-contract";
+import {
   UPDATER_CHANNELS,
   type UpdaterApi,
   type UpdaterStatus,
@@ -21,6 +33,13 @@ import {
   type WindowFramePreset,
 } from "@shared/window-contract";
 import { contextBridge, ipcRenderer } from "electron";
+
+const agentTownApi: AgentTownApi = {
+  writeSession: (input) =>
+    ipcRenderer.invoke(AGENTTOWN_CHANNELS.writeSession, input),
+  clearSession: () => ipcRenderer.invoke(AGENTTOWN_CHANNELS.clearSession),
+  launch: (opts) => ipcRenderer.invoke(AGENTTOWN_CHANNELS.launch, opts),
+};
 
 const fsApi: FsApi = {
   addRoot: () => ipcRenderer.invoke(FS_CHANNELS.addRoot),
@@ -103,6 +122,24 @@ const logApi: LogApi = {
   write: (entry) => ipcRenderer.send(LOG_CHANNELS.write, entry),
 };
 
+const terminalApi: TerminalApi = {
+  runBash: (command) =>
+    ipcRenderer.invoke(TERMINAL_CHANNELS.runBash, command),
+  openShellAtRoot: (rootId, subpath) =>
+    ipcRenderer.invoke(TERMINAL_CHANNELS.openShellAtRoot, rootId, subpath),
+};
+
+const notificationApi: NotificationApi = {
+  show: (input) => ipcRenderer.invoke(NOTIFICATION_CHANNELS.show, input),
+  onClicked: (cb) => {
+    const listener = (_e: unknown, payload: { conversationId?: string }) =>
+      cb(payload);
+    ipcRenderer.on(NOTIFICATION_CHANNELS.clicked, listener);
+    return () =>
+      ipcRenderer.removeListener(NOTIFICATION_CHANNELS.clicked, listener);
+  },
+};
+
 const windowApi: WindowApi = {
   minimize: () => ipcRenderer.send(WINDOW_CHANNELS.minimize),
   maximize: () => ipcRenderer.send(WINDOW_CHANNELS.maximize),
@@ -114,15 +151,20 @@ const windowApi: WindowApi = {
 
 if (process.contextIsolated) {
   try {
+    contextBridge.exposeInMainWorld("agentTownApi", agentTownApi);
     contextBridge.exposeInMainWorld("fsApi", fsApi);
     contextBridge.exposeInMainWorld("sidecarApi", sidecarApi);
     contextBridge.exposeInMainWorld("updaterApi", updaterApi);
     contextBridge.exposeInMainWorld("logApi", logApi);
+    contextBridge.exposeInMainWorld("terminalApi", terminalApi);
+    contextBridge.exposeInMainWorld("notificationApi", notificationApi);
     contextBridge.exposeInMainWorld("windowApi", windowApi);
   } catch (error) {
     console.error(error);
   }
 } else {
+  // @ts-ignore - 非隔离环境下直接挂载
+  window.agentTownApi = agentTownApi;
   // @ts-ignore - 非隔离环境下直接挂载
   window.fsApi = fsApi;
   // @ts-ignore - 非隔离环境下直接挂载
@@ -131,6 +173,10 @@ if (process.contextIsolated) {
   window.updaterApi = updaterApi;
   // @ts-ignore - 非隔离环境下直接挂载
   window.logApi = logApi;
+  // @ts-ignore - 非隔离环境下直接挂载
+  window.terminalApi = terminalApi;
+  // @ts-ignore - 非隔离环境下直接挂载
+  window.notificationApi = notificationApi;
   // @ts-ignore - 非隔离环境下直接挂载
   window.windowApi = windowApi;
 }

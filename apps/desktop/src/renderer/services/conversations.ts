@@ -28,10 +28,9 @@ function toConversation(c: BackendConversation): Conversation {
     lastMessagePreview: null,
     folderId: c.folder_id ?? null,
     localContainerRootId: c.local_container_root_id ?? null,
-    modelMode: c.model_mode ?? null,
-    instructions: c.instructions ?? null,
     pinned: c.pinned ?? false,
     archived: c.archived ?? false,
+    tag: c.tag ?? null,
   };
 }
 
@@ -97,31 +96,8 @@ export async function renameConversation(
   await api.patch(`/v1/conversations/${id}`, { title });
 }
 
-/** Set this conversation's 质量档 override (质量档选择器), or clear it with `null` to
- * fall back to the account/system default. `mode` is a preset key (`economy` /
- * `quality`) or a custom-mode id; the backend validates the ref (400 if unknown). */
-export async function setConversationModelMode(
-  id: string,
-  mode: string | null,
-): Promise<void> {
-  await api.patch(`/v1/conversations/${id}`, { model_mode: mode });
-}
-
-/** Set this conversation's custom instructions (对话级自定义指令), or clear them with
- * `null`/"". Injected into the conversation's system prompt so every subsequent turn
- * (and its delegated team) follows the directive. Returns the updated row. */
-export async function setConversationInstructions(
-  id: string,
-  instructions: string | null,
-): Promise<Conversation> {
-  const res = await api.patch<BackendConversation>(`/v1/conversations/${id}`, {
-    instructions,
-  });
-  return toConversation(res);
-}
-
 /** Clone a conversation into a brand-new one carrying a copy of its transcript
- * (克隆对话). Returns the new (server-shaped) row — same folder/质量档 as the source,
+ * (克隆对话). Returns the new (server-shaped) row — same folder as the source,
  * titled「… 副本」— so the caller can insert it into the sidebar and open it. */
 export async function duplicateConversation(id: string): Promise<Conversation> {
   const res = await api.post<BackendConversation>(

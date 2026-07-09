@@ -165,7 +165,8 @@ async def _run(
     return result, messages
 
 
-async def test_repeated_call_nudges_then_finalizes():
+async def test_repeated_call_nudges_then_finalizes(monkeypatch):
+    monkeypatch.setattr(settings, "engine_convergence_spin_rounds", 0)
     same = _tool_chunk("search", '{"q": "x"}')
     # 3 identical calls → NUDGE; window clears; 3 more → FINALIZE → tool-free answer.
     provider = _ScriptedProvider(
@@ -182,7 +183,9 @@ async def test_repeated_call_nudges_then_finalizes():
     assert len(nudges) == 1
     # and the forced-finalize instruction was injected once
     finalize = [
-        m for m in messages if m.role == "user" and m.content and "停止使用任何工具" in m.content
+        m
+        for m in messages
+        if m.role == "user" and m.content and "停止使用调查与执行类工具" in m.content
     ]
     assert len(finalize) == 1
 
@@ -693,11 +696,11 @@ async def test_tool_timeout_aborts_and_loop_recovers():
     assert "中止" in (tool_msg.content or "")  # the model saw an honest timeout error
 
 
-# --- B2: empty-response degraded + fallback model -----------------------------
+# --- B2: empty-response degraded (same-model retry) -----------------------------
 
 
 class _ModelRecordingProvider:
-    """Scripted provider that also records each request's model (to assert fallback)."""
+    """Scripted provider that also records each request's model."""
 
     def __init__(self, rounds: list[list[LLMChunk]]) -> None:
         self._rounds = rounds
@@ -773,12 +776,11 @@ async def test_empty_response_degrades_without_model_switch():
     assert finish_override == [FinishReason.DEGRADED]
 
 
-# --- Phase 2: engine-level fallback ladder on a hard LLM failure ---------------
+# --- B2: LLM hard failure (no model escalation) -------------------------------
 
 
 class _RecordingSink(EventSink):
-    """EventSink that also keeps every emitted event, so a test can assert whether
-    the engine surfaced an SSE ``error`` (it must NOT when a fallback retry recovers)."""
+    """EventSink that also keeps every emitted event for assertions."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -875,7 +877,7 @@ async def test_llm_failure_with_partial_content_degrades():
     assert len(_errors(sink)) == 1
 
 
-async def test_llm_failure_without_fallback_errors_immediately():
+async def test_llm_failure_errors_immediately():
     # A first-round hard failure ends the turn on ERROR after a single attempt.
     provider = _FailingProvider([], fail_on={0})
     profile = make_profile_params(max_rounds=20)
@@ -1055,7 +1057,9 @@ async def _run_with_registry(provider: _ScriptedProvider, reg: ToolRegistry):
 
 def _finalizes(messages: list[LLMMessage]) -> list[LLMMessage]:
     return [
-        m for m in messages if m.role == "user" and m.content and "停止使用任何工具" in m.content
+        m
+        for m in messages
+        if m.role == "user" and m.content and "停止使用调查与执行类工具" in m.content
     ]
 
 

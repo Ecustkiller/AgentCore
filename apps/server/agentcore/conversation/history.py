@@ -5,6 +5,8 @@ Only user/assistant text messages are replayed — tool I/O is not included
 to avoid burning tokens on cross-turn accumulated tool output.
 """
 
+from datetime import datetime
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.config import settings
@@ -92,3 +94,46 @@ async def load_chat_context(
         return history
 
     return await load_recent_history(session, conversation_id, max_messages=max_messages)
+
+
+async def load_history_for_turn(
+    session: AsyncSession,
+    conversation_id: str,
+    *,
+    before_user_created_at: datetime,
+    history_len: int,
+) -> list[dict]:
+    """Reconstruct the prior-turn history spliced into a turn's LLM window head.
+
+    Mirrors ``load_chat_context(...)[:-1]`` at send time: the journal stores only
+    ``history_len``; the caller supplies the tail of messages strictly older than the
+    triggering user message. When compaction was active before that user message, the
+    synthetic summary block counts toward ``history_len``.
+    """
+    if history_len <= 0:
+        return []
+
+    msg_repo = MessageRepository(session)
+    rows, _ = await msg_repo.list_before(
+        conversation_id,
+        before=before_user_created_at,
+        limit=max(history_len * 2, 40),
+    )
+
+    items: list[dict] = []
+    conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
+    if (
+        conv is not None
+        and conv.compaction_summary
+        and conv.compacted_through
+        and conv.compacted_through < before_user_created_at
+    ):
+        items.append(_summary_block(conv.compaction_summary))
+
+    for msg in rows:
+        if msg.role in ("user", "assistant") and msg.content:
+            items.append({"role": msg.role, "content": msg.content})
+
+    if len(items) > history_len:
+        return items[-history_len:]
+    return items

@@ -13,12 +13,78 @@ from agentcore.runtime.runs.playbooks import PLAYBOOKS, available_playbooks
 # a last-resort net (the old behaviour: a blunt head-chop that dropped late workers).
 DELEGATE_OUTPUT_LIMIT = 16000
 
+# Shared task-level deliverable shape (delegate tasks + replan binds/add).
+TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "description": (
+        "可选：该 worker 的交付物规格——描述性（name）与验收底线（required_sections / "
+        "must_contain / 篇幅 / 格式 / requires_files / strict）合一。name 描述期望产出形态；"
+        "其余字段声明产出必须满足的硬性兜底（非事前结构蓝图）。不达标会带着具体差距自动返工一次；"
+        "返工后仍不达标时，默认仅附质检提醒（软），strict=true 则判该 worker 失败（硬退）。"
+    ),
+    "properties": {
+        "name": {
+            "type": "string",
+            "description": "期望产出的形态 / 要点。",
+        },
+        "required_sections": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "验收底线：产出必须覆盖的少数关键部分（按小标题校验是否在场），"
+                "如『结论』『风险』。用于兜底「别漏掉关键内容」，不是用来替专家"
+                "规定完整章节骨架——交付物的结构由 worker 设计。"
+            ),
+        },
+        "must_contain": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "验收底线：产出必须出现的关键词 / 内容（字面校验）；只兜关键点，"
+                "不是用来规定结构。"
+            ),
+        },
+        "min_length": {
+            "type": "integer",
+            "description": "产出最少字数，低于则判未达标。",
+        },
+        "max_length": {
+            "type": "integer",
+            "description": "产出最多字数，超过则判未达标。",
+        },
+        "output_format": {
+            "type": "string",
+            "enum": ["text", "json"],
+            "description": "要求的产出格式；json 会校验能否解析。",
+        },
+        "output_schema": {
+            "type": "object",
+            "description": "output_format=json 时可选的 JSON Schema。",
+        },
+        "requires_files": {
+            "type": "boolean",
+            "description": (
+                "产出是落盘文件（可运行代码 / 网页 / 应用、脚本、配置、"
+                "数据文件等用户要打开 / 运行 / 保存的东西）时设 true：未调用"
+                " file_write 把产物写进工作区即判未达标、自动返工，杜绝把整份"
+                "文件内容粘在回复正文、工作区却空着。纯文字交付（分析 / 说明 /"
+                " 问答）不要设。"
+            ),
+        },
+        "strict": {
+            "type": "boolean",
+            "description": (
+                "决定返工后仍不达标时的处置（返工一次与本字段无关、"
+                "总会先发生）：true=判该 worker 失败（硬退）；"
+                "false=仍接受产出、仅附质检提醒（软，默认）。"
+            ),
+        },
+    },
+}
+
 # Per-step product excerpt cap in a plan_review card (结构化挂起 2a): enough for the
 # user to recognise what just finished without shipping the whole product over SSE.
 PLAN_REVIEW_SUMMARY_CHARS = 280
-
-# Backward-compat alias for tests that imported the private name.
-_DELEGATE_OUTPUT_LIMIT = DELEGATE_OUTPUT_LIMIT
 
 # Tool-doc layer (提示词瘦身 §三去重)：only the delegate MECHANICS live here — what the
 # tool does, how the tasks array maps to single/parallel/DAG, and that it is
@@ -39,7 +105,7 @@ DELEGATE_DESCRIPTION = (
     "`playbook` 一键实例化整支团队、免手搓 tasks（与 tasks 二选一，槽位见 playbook / playbook_args 说明）。\n"
     "简单问答 / 闲聊 / 检索自己答；交付物（要产出或改动产物的活——写 / 改文件、删除 / 移动、"
     "运行代码，这些工具只 worker 持有）才用本工具，哪怕只派一个。其余进阶档位（finalize / "
-    "can_delegate / contract / 模型档位 / 流水线等）见对应参数说明与 "
+    "can_delegate / deliverable / 模型档位 / 流水线等）见对应参数说明与 "
     "consult_skill(team_orchestration_advanced)。"
 )
 
@@ -84,12 +150,12 @@ DELEGATE_PARAMETERS = {
                     "reasoning_effort": {
                         "type": "string",
                         "enum": ["high", "max"],
-                        "description": "可选：极复杂子任务可设 max 解锁更深推理。",
+                        "description": (
+                            "可选（MVP 未下发）：解析并存储，当前不进 LLM 请求体；"
+                            "high/max 暂不区分效果，保留供后续 per-provider 适配。"
+                        ),
                     },
-                    "expected_output": {
-                        "type": "string",
-                        "description": "可选：期望产出的形态/要点。",
-                    },
+                    "deliverable": TASK_DELIVERABLE_SCHEMA,
                     "stance": {
                         "type": "string",
                         "enum": ["pro", "con"],
@@ -131,15 +197,10 @@ DELEGATE_PARAMETERS = {
                         "description": "可选：该产出注入下游时是原样还是摘要，默认原样。",
                     },
                     "can_delegate": {
-                        "oneOf": [
-                            {"type": "boolean"},
-                            {"type": "string", "enum": ["auto"]},
-                        ],
+                        "type": "boolean",
                         "description": (
-                            "可选：控制该 worker 是否能再向下委派子团队。false（默认，简单任务）= 不能；"
-                            "\"auto\" = worker 自行判断，需要时调用 request_delegate 申请；"
-                            "true = 启动即获得 delegate 权限（过渡兼容，建议改用 auto）。"
-                            "当 complexity_hint=\"standard\" 且未显式设置时，默认为 \"auto\"。"
+                            "可选：控制该 worker 是否能再向下委派子团队。true（默认）= 启动即获得 "
+                            "delegate + replan（depth 达上限时自动禁用）；false = 显式禁止委派。"
                         ),
                     },
                     "checkpoint_after": {
@@ -163,66 +224,6 @@ DELEGATE_PARAMETERS = {
                             "定稿再续跑同一计划。克制使用——只在『此刻写死下游 spec 很可能跑偏』"
                             "时设；上游已定、下游 spec 现在就能写清的步骤不要设（徒增一次回合）。"
                         ),
-                    },
-                    "contract": {
-                        "type": "object",
-                        "description": (
-                            "可选：对该 worker 产出的【验收底线】（事后机械校验，非事前结构蓝图）——"
-                            "声明产出必须满足的硬性兜底（必含要点 / 篇幅 / 格式 / 落盘），确保不漏关键"
-                            "项，不是用来替专家规定交付物的完整结构。不达标会带着具体差距自动返工一次；"
-                            "返工后仍不达标时，默认仅附质检提醒（软），strict=true 则判该 worker 失败"
-                            "（硬退）。"
-                        ),
-                        "properties": {
-                            "required_sections": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": (
-                                    "验收底线：产出必须覆盖的少数关键部分（按小标题校验是否在场），"
-                                    "如『结论』『风险』。用于兜底「别漏掉关键内容」，不是用来替专家"
-                                    "规定完整章节骨架——交付物的结构由 worker 设计。"
-                                ),
-                            },
-                            "must_contain": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": (
-                                    "验收底线：产出必须出现的关键词 / 内容（字面校验）；只兜关键点，"
-                                    "不是用来规定结构。"
-                                ),
-                            },
-                            "min_length": {
-                                "type": "integer",
-                                "description": "产出最少字数，低于则判未达标。",
-                            },
-                            "max_length": {
-                                "type": "integer",
-                                "description": "产出最多字数，超过则判未达标。",
-                            },
-                            "output_format": {
-                                "type": "string",
-                                "enum": ["text", "json"],
-                                "description": "要求的产出格式；json 会校验能否解析。",
-                            },
-                            "requires_files": {
-                                "type": "boolean",
-                                "description": (
-                                    "产出是落盘文件（可运行代码 / 网页 / 应用、脚本、配置、"
-                                    "数据文件等用户要打开 / 运行 / 保存的东西）时设 true：未调用"
-                                    " file_write 把产物写进工作区即判未达标、自动返工，杜绝把整份"
-                                    "文件内容粘在回复正文、工作区却空着。纯文字交付（分析 / 说明 /"
-                                    " 问答）不要设。"
-                                ),
-                            },
-                            "strict": {
-                                "type": "boolean",
-                                "description": (
-                                    "决定返工后仍不达标时的处置（返工一次与本字段无关、"
-                                    "总会先发生）：true=判该 worker 失败（硬退）；"
-                                    "false=仍接受产出、仅附质检提醒（软，默认）。"
-                                ),
-                            },
-                        },
                     },
                 },
                 "required": ["role", "task"],
@@ -293,6 +294,32 @@ DELEGATE_PARAMETERS = {
                 "简单任务，引擎跳过不必要的协调设施），standard = 标准委派。引擎据此裁剪：light "
                 "时跳过 playbook 匹配、不初始化便签墙、默认 finalize=true 行为。"
             ),
+        },
+        "completion_criteria": {
+            "description": (
+                "可选：本次委派的完成条件（引擎在全部 worker 结束后机械校验，未满足则"
+                "阻止你直接收尾）。显式传入时默认 files_written（至少一名 worker 落盘文件）。"
+                "代码型任务建议设 code_verified（需 code_execute / test_run 成功）。"
+                "若省略且 task 含运行/打开/安装类验收语义，引擎自动推断 code_verified。"
+                "custom 可附结构化描述，当前仅作提示。"
+            ),
+            "oneOf": [
+                {
+                    "type": "string",
+                    "enum": ["files_written", "code_verified"],
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string", "enum": ["custom"]},
+                        "description": {
+                            "type": "string",
+                            "description": "自定义完成条件的文字描述。",
+                        },
+                    },
+                    "required": ["type"],
+                },
+            ],
         },
     },
 }

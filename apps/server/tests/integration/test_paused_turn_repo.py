@@ -18,12 +18,47 @@ from agentcore.db.repositories import PausedTurnRepository, TurnJournalRepositor
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime import suspension_persistence as persist_mod
 from agentcore.runtime import suspension_retention as retention_mod
+from agentcore.runtime.facts import LlmCallFact, RoundBoundaryFact, TurnStartedFact
+from agentcore.runtime.journal import window_from_journal
+from agentcore.runtime.pipeline.resume.window import resumed_captain_window
 from agentcore.runtime.runs import RunPhase, RunPlan, RunSpec, RunState
 from agentcore.runtime.suspension import PlanReviewSuspension, suspension_from_json
 
 
+def _pause_journal_entries() -> list[dict]:
+    """A plan_review pause snapshot the suspending face captures (window-rebuildable)."""
+    return [
+        TurnStartedFact(
+            system_prompt="base sys", user_message="原始请求", model_profile="chat"
+        )
+        .to_fact()
+        .entry(),
+        RoundBoundaryFact(round_idx=0, run_id="cap1", role="captain").to_fact().entry(),
+        LlmCallFact(
+            run_id="cap1",
+            round_idx=0,
+            tool_calls=[
+                {
+                    "id": "call_del",
+                    "type": "function",
+                    "function": {"name": "delegate", "arguments": "{}"},
+                }
+            ],
+            finish_reason="tool_calls",
+        )
+        .to_fact()
+        .entry(),
+        {
+            "kind": "plan_review_required",
+            "payload": {"checkpoint_id": "ck1", "steps": [], "pending": []},
+            "ts": None,
+        },
+    ]
+
+
 def _frame(message_id: str, conversation_id: str, user_id: str) -> PlanReviewSuspension:
     journal = [{"type": "run_plan", "payload": {}, "timestamp": "t"}]
+    journal_entries = _pause_journal_entries()
     return PlanReviewSuspension(
         message_id=message_id,
         conversation_id=conversation_id,
@@ -54,7 +89,7 @@ def _frame(message_id: str, conversation_id: str, user_id: str) -> PlanReviewSus
         ),
         completed={"del_a_1": RunState(phase=RunPhase.COMPLETED, content="S1OUT")},
         journal=journal,
-        journal_entries=[{"kind": "run_plan", "payload": {}, "ts": "t"}],
+        journal_entries=journal_entries,
         steps=[{"run_id": "del_a_1", "role": "研究员", "summary": "…"}],
         pending=[{"run_id": "del_a_2", "role": "写手"}],
         trace_id="trace1",
@@ -166,17 +201,21 @@ async def test_save_claim_bridge_round_trips(session_factory, monkeypatch):
     mid, cid, uid = str(uuid4()), str(uuid4()), str(uuid4())
     frame = _frame(mid, cid, uid)
 
-    await _seed_turn_journal(session_factory, frame)
     await persist_mod.save_paused_turn(frame)
 
     # Listed as pending before it is claimed.
     pending = await persist_mod.list_paused_turns(cid)
     assert [f.message_id for f in pending] == [mid]
 
-    # The frame carries no journal — it was appended on emit to turn_journal before save.
+    # journal_entries ride on save_paused_turn's turn_journal snapshot (唯一事实源).
     async with session_factory() as s:
         entries = await TurnJournalRepository(s).load(mid)
-    assert [e["kind"] for e in entries] == ["run_plan"]
+    assert [e["kind"] for e in entries] == [
+        "turn_started",
+        "round_boundary",
+        "llm_call",
+        "plan_review_required",
+    ]
 
     claimed = await persist_mod.claim_paused_turn(mid, conversation_id=cid)
     assert claimed is not None
@@ -192,12 +231,42 @@ async def test_save_claim_bridge_round_trips(session_factory, monkeypatch):
     # The journal-so-far is re-hydrated from turn_journal (唯一事实源, not the frame): the
     # display ``journal`` (resume seed) AND the raw ``journal_entries`` (the window source
     # _resumed_captain_window folds) both come back, so resume replays the pre-pause graph.
-    assert claimed.journal == [{"type": "run_plan", "payload": {}, "timestamp": "t"}]
-    assert [e["kind"] for e in claimed.journal_entries] == ["run_plan"]
+    assert any(e.get("type") == "plan_review_required" for e in claimed.journal)
+    assert [e["kind"] for e in claimed.journal_entries] == [
+        "turn_started",
+        "round_boundary",
+        "llm_call",
+        "plan_review_required",
+    ]
 
     # Claimed → no longer pending, and a re-claim misses (atomic once).
     assert await persist_mod.list_paused_turns(cid) == []
     assert await persist_mod.claim_paused_turn(mid, conversation_id=cid) is None
+
+
+async def test_save_paused_turn_persists_journal_snapshot_without_prior_db_rows(
+    session_factory, monkeypatch
+):
+    """Regression: pause save must snapshot journal_entries even when append-on-emit missed."""
+    monkeypatch.setattr(persist_mod, "async_session_factory", session_factory)
+    mid, cid, uid = str(uuid4()), str(uuid4()), str(uuid4())
+    frame = _frame(mid, cid, uid)
+
+    # No _seed_turn_journal — simulates append-on-emit never landing before pause.
+    await persist_mod.save_paused_turn(frame)
+
+    async with session_factory() as s:
+        entries = await TurnJournalRepository(s).load(mid)
+    assert entries
+    assert entries[0]["kind"] == "turn_started"
+    assert window_from_journal(entries) is not None
+
+    claimed = await persist_mod.claim_paused_turn(mid, conversation_id=cid)
+    assert claimed is not None
+    assert claimed.transcript == []
+    window = resumed_captain_window(claimed, history=[])
+    assert window is not None
+    assert window[-1].tool_calls[0].function.name == "delegate"
 
 
 async def test_delete_bridge_drops_frame(session_factory, monkeypatch):

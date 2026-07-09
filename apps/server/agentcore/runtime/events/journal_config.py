@@ -22,6 +22,16 @@ _JOURNAL_SURFACE_TYPES = frozenset(
 
 _PROCESS_RESULT_CAP = 8000
 
+
+def cap_process_result(result: object) -> object:
+    """Cap a tool result string for process projection / history replay.
+
+    Shared by ``EventSink._accumulate_process`` and the conformance oracle so live,
+    reload, and golden agree on oversized tool outputs."""
+    if isinstance(result, str) and len(result) > _PROCESS_RESULT_CAP:
+        return result[:_PROCESS_RESULT_CAP] + "…"
+    return result
+
 _HISTORY_SKIP_TYPES = frozenset(
     {
         EventType.TOOL_PROGRESS,

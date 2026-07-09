@@ -100,6 +100,27 @@ async def test_append_rejects_directory_target(tmp_path: Path):
     assert "不是文件" in result.error
 
 
+async def test_append_receipt_echoes_merged_tail(tmp_path: Path):
+    # append 只写增量、模型上下文没有合并后的全文；回执必须回显「文件当前末尾」，让 worker 当轮
+    # 确认「追加落对没」，免掉那一轮纯回读自检（trace 4d715ea0 里 8 个 append worker 的空转来源）。
+    (tmp_path / "draft.md").write_text("# Intro", encoding="utf-8")
+    result = await FileAppendTool().execute(
+        {"path": "draft.md", "content": "\n\n## Section 2"}, _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert "## Section 2" in result.output  # 合并后的新末尾被回显
+    assert "无需再读回确认" in result.output
+
+
+async def test_write_receipt_notes_persisted(tmp_path: Path):
+    # file_write 内容即模型本次提交的全文，无需回显；回执点明「已落盘、无需回读」以抑制自检回读。
+    result = await FileWriteTool().execute(
+        {"path": "report.md", "content": "# Hi"}, _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert "无需再读回确认" in result.output
+
+
 # --- file_delete ---
 
 

@@ -1,26 +1,32 @@
 import {
+  graphBadgeMuted,
   graphBadgeMutedPlain,
   graphBadgePrimary,
 } from "@/components/ui/tone-presets";
 import { agentColorVar, agentGlyph } from "@/lib/agentIdentity";
 import { formatCompact } from "@/lib/format";
 import { STANCE_META, toolLabel } from "@/stores/execution";
+import { toolPhaseText } from "@/components/chat/message-bubble/constants";
 import {
   AlertTriangle,
   ArrowUp,
+  ChevronDown,
+  ChevronRight,
   ClipboardList,
-  Clock,
   FileText,
   Pause,
+  PencilLine,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import {
   type AgentNodeData,
   type AgentNodePresentation,
   FACE_ARTIFACT_CAP,
   basename,
+  statusFaceLabel,
 } from "./shared";
 
-/** Dependency layout: full card with task line, artifact chips, duration in header. */
+/** Dependency layout: full card with task line, artifact chips, status line. */
 export function AgentNodeCardFace({
   d,
   p,
@@ -60,12 +66,22 @@ export function AgentNodeCardFace({
           : "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60"
       }`}
     >
+      {p.revisionFace && (
+        <span
+          className={`absolute -right-1.5 -top-1.5 z-10 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-medium shadow-sm ring-2 ring-card ${graphBadgeMuted}`}
+          title={`热修修订 ${p.revisionFace}`}
+        >
+          <PencilLine size={10} className="shrink-0" />
+          {p.revisionFace}
+        </span>
+      )}
       <AgentNodeHeader
         d={d}
         p={p}
         identityColor={identityColor}
         identityGlyph={identityGlyph}
       />
+      <AgentNodeStatusLine d={d} p={p} />
       <AgentNodeActivity d={d} p={p} showIdleTask />
       {p.artifacts.length > 0 && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
@@ -85,6 +101,28 @@ export function AgentNodeCardFace({
             </span>
           )}
         </div>
+      )}
+      {(d.foldedChildCount ?? 0) > 0 && (
+        <button
+          type="button"
+          className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg border border-border/60 bg-muted/30 px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+          onClick={(e) => {
+            e.stopPropagation();
+            d.onToggleUnitExpand?.();
+          }}
+        >
+          {d.unitExpanded ? (
+            <>
+              <ChevronDown size={12} />
+              收起子队
+            </>
+          ) : (
+            <>
+              <ChevronRight size={12} />
+              展开子队（{d.foldedChildCount}）
+            </>
+          )}
+        </button>
       )}
     </div>
   );
@@ -130,12 +168,22 @@ export function AgentNodeTimelineFace({
           : "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60"
       }`}
     >
+      {p.revisionFace && (
+        <span
+          className={`absolute -right-1.5 -top-1.5 z-10 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-medium shadow-sm ring-2 ring-card ${graphBadgeMuted}`}
+          title={`热修修订 ${p.revisionFace}`}
+        >
+          <PencilLine size={10} className="shrink-0" />
+          {p.revisionFace}
+        </span>
+      )}
       <AgentNodeHeader
         d={d}
         p={p}
         identityColor={identityColor}
         identityGlyph={identityGlyph}
       />
+      <AgentNodeStatusLine d={d} p={p} />
       <AgentNodeActivity d={d} p={p} showIdleTask={false} />
       {d.task && (
         <p className="mt-1 line-clamp-1 text-xs leading-snug text-muted-foreground/70">
@@ -225,13 +273,40 @@ function AgentNodeHeader({
           </p>
         )}
       </div>
-      {p.durationText && (
-        <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-          <Clock size={11} />
-          <span className="tabular-nums">{p.durationText}</span>
-        </span>
-      )}
     </div>
+  );
+}
+
+function useRunningElapsed(running: boolean): number {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!running) {
+      setElapsed(0);
+      return;
+    }
+    const start = Date.now();
+    const id = setInterval(
+      () => setElapsed(Math.floor((Date.now() - start) / 1000)),
+      1000,
+    );
+    return () => clearInterval(id);
+  }, [running]);
+  return elapsed;
+}
+
+function AgentNodeStatusLine({
+  d,
+  p,
+}: {
+  d: AgentNodeData;
+  p: AgentNodePresentation;
+}) {
+  const elapsed = useRunningElapsed(p.statusFace.tickElapsed);
+  const face = statusFaceLabel(d.status, d.durationMs, elapsed);
+  return (
+    <p className={`mt-1 text-xs tabular-nums leading-snug ${face.cls}`}>
+      {face.text}
+    </p>
   );
 }
 
@@ -254,6 +329,17 @@ function AgentNodeActivity({
             {formatCompact(p.liveTool.chars)} 字
           </span>
         )}
+        <span className="ml-0.5 inline-block animate-pulse text-primary">
+          ▋
+        </span>
+      </p>
+    );
+  }
+  if (p.liveToolExec) {
+    const phaseLabel = toolPhaseText(p.liveToolExec.phase) ?? "处理中";
+    return (
+      <p className="mt-2 line-clamp-2 text-xs leading-snug text-primary/90">
+        {phaseLabel} · {toolLabel(p.liveToolExec.toolName)}
         <span className="ml-0.5 inline-block animate-pulse text-primary">
           ▋
         </span>

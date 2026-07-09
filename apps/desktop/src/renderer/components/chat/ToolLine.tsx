@@ -105,9 +105,21 @@ function ToolStatusIcon({
     return (
       <span className="mt-1.5 size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
     );
+  // The verdict icon mounts fresh on the running→done edge, so a one-shot pop
+  // marks the state change (设计 §3); reduced-motion skips it.
   if (status === "error")
-    return <X size={14} className="mt-0.5 shrink-0 text-destructive" />;
-  return <Check size={14} className="mt-0.5 shrink-0 text-success" />;
+    return (
+      <X
+        size={14}
+        className="mt-0.5 shrink-0 animate-status-pop text-destructive motion-reduce:animate-none"
+      />
+    );
+  return (
+    <Check
+      size={14}
+      className="mt-0.5 shrink-0 animate-status-pop text-success motion-reduce:animate-none"
+    />
+  );
 }
 
 /** Single tool invocation row in the process timeline. */

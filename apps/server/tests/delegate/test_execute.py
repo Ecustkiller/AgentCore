@@ -86,7 +86,7 @@ async def test_finalize_falls_back_to_synthesis_when_worker_fails():
                 {
                     "role": "A",
                     "task": "a",
-                    "contract": {"min_length": 100, "strict": True},
+                    "deliverable": {"min_length": 100, "strict": True},
                 }
             ],
             "finalize": True,
@@ -381,11 +381,11 @@ def test_schema_exposes_playbook_params_and_relaxes_required():
 
 def test_strict_description_separates_rework_from_disposition():
     t = tool(Provider([]))
-    contract_props = t.schema.parameters["properties"]["tasks"]["items"]["properties"]["contract"]
-    strict_desc = contract_props["properties"]["strict"]["description"]
+    deliverable_props = t.schema.parameters["properties"]["tasks"]["items"]["properties"]["deliverable"]
+    strict_desc = deliverable_props["properties"]["strict"]["description"]
     assert "硬退" in strict_desc
     assert "软" in strict_desc
     assert "必须返工" not in strict_desc
-    contract_desc = contract_props["description"]
-    assert "自动返工一次" in contract_desc
-    assert "硬退" in contract_desc
+    deliverable_desc = deliverable_props["description"]
+    assert "自动返工一次" in deliverable_desc
+    assert "硬退" in deliverable_desc

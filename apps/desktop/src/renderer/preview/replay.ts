@@ -43,7 +43,7 @@ export function replayFixtureNow(
 ): void {
   seedSlice(conversationId, userPrompt);
   for (const event of events) {
-    dispatchSSEEvent(event, { conversationId });
+    dispatchSSEEvent(event, { conversationId, source: "server" });
   }
   // content_delta is rAF-buffered and a paused fixture never emits message_end, so
   // flush to land the final text on the bubble synchronously.
@@ -65,7 +65,7 @@ export function replayFixturePrefix(
   seedSlice(conversationId, userPrompt);
   const n = Math.max(0, Math.min(count, events.length));
   for (let i = 0; i < n; i++) {
-    dispatchSSEEvent(events[i], { conversationId });
+    dispatchSSEEvent(events[i], { conversationId, source: "server" });
   }
   // content_delta is rAF-buffered; flush so a paused mid-stream frame lands its
   // partial text synchronously before the harness screenshots.
@@ -92,7 +92,7 @@ export function replayFixtureStreamed(
       flushPendingContent(conversationId);
       return;
     }
-    dispatchSSEEvent(events[i++], { conversationId });
+    dispatchSSEEvent(events[i++], { conversationId, source: "server" });
     timer = setTimeout(tick, stepMs);
   };
   tick();

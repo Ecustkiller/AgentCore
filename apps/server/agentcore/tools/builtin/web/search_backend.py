@@ -28,12 +28,14 @@ import httpx
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
-from agentcore.tools.builtin.web._net import (
+from agentcore.core.net import (
     SEARCH_TIMEOUT,
     WEB_CONNECT_TIMEOUT,
     EgressError,
-    circuit_remaining,
     describe_net_error,
+)
+from agentcore.tools.builtin.web._net import (
+    circuit_remaining,
     note_failure,
     note_success,
 )

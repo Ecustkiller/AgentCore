@@ -4,11 +4,11 @@ A turn cancelled mid-flight (client disconnect / user stop / pending approval) u
 to discard workers that had ALREADY finished. The salvage path persists that finished
 work as one "incomplete" assistant message instead. These cover:
 
-- ``_has_open_durable_pause`` — which journals count as a live resume frame (so salvage
+- ``has_open_durable_pause`` — which journals count as a live resume frame (so salvage
   defers to ``POST .../resume`` rather than double-handling the turn);
-- ``_salvage_incomplete_turn`` — the spawn decision (gate / empty journal / durable
+- ``salvage_incomplete_turn`` — the spawn decision (gate / empty journal / durable
   pause deferral vs. fire);
-- ``_persist_incomplete_turn`` — the persisted message shape (cancelled flag, journal,
+- ``persist_incomplete_turn`` — the persisted message shape (cancelled flag, journal,
   no ledger).
 """
 
@@ -18,7 +18,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentcore.config import settings
-from agentcore.conversation import service, turn_persistence
+from agentcore.conversation import turn_persistence
+from agentcore.conversation.turn_persistence import (
+    has_open_durable_pause,
+    persist_incomplete_turn,
+    salvage_incomplete_turn,
+)
 from agentcore.runtime.events import FinishReason
 
 
@@ -45,27 +50,27 @@ class _Sink:
 
 
 def test_open_pause_false_on_empty_journal():
-    assert service._has_open_durable_pause([]) is False
+    assert has_open_durable_pause([]) is False
 
 
 def test_open_pause_true_on_unresolved_checkpoint():
-    assert service._has_open_durable_pause([_ev("checkpoint_required", "c1")]) is True
+    assert has_open_durable_pause([_ev("checkpoint_required", "c1")]) is True
 
 
 def test_open_pause_true_on_unresolved_plan_review():
-    assert service._has_open_durable_pause([_ev("plan_review_required", "p1")]) is True
+    assert has_open_durable_pause([_ev("plan_review_required", "p1")]) is True
 
 
 def test_open_pause_false_when_resolved():
     journal = [_ev("checkpoint_required", "c1"), _ev("checkpoint_resolved", "c1")]
-    assert service._has_open_durable_pause(journal) is False
+    assert has_open_durable_pause(journal) is False
 
 
 def test_open_pause_false_for_delegation_only():
     # A team graph with no journaled checkpoint (e.g. an approval pause — approvals are
     # transport-only, never journaled) is NOT a durable pause: salvage should cover it.
     journal = [_ev("run_plan"), _ev("run_started"), _ev("run_completed")]
-    assert service._has_open_durable_pause(journal) is False
+    assert has_open_durable_pause(journal) is False
 
 
 # --- _salvage_incomplete_turn (spawn decision) ---
@@ -94,7 +99,7 @@ def test_salvage_spawns_on_finished_work(monkeypatch, capture):
     spawned, persist_calls = capture
     monkeypatch.setattr(settings, "incomplete_turn_persist_enabled", True)
     journal = [_ev("run_plan"), _ev("run_completed")]
-    service._salvage_incomplete_turn(
+    salvage_incomplete_turn(
         sink=_Sink(journal), conversation_id="conv", trace_id="trace", message_id="m1"
     )
     assert len(spawned) == 1
@@ -106,7 +111,7 @@ def test_salvage_spawns_on_finished_work(monkeypatch, capture):
 def test_salvage_skips_when_gate_off(monkeypatch, capture):
     spawned, _ = capture
     monkeypatch.setattr(settings, "incomplete_turn_persist_enabled", False)
-    service._salvage_incomplete_turn(
+    salvage_incomplete_turn(
         sink=_Sink([_ev("run_plan")]), conversation_id="conv", trace_id="trace", message_id="m1"
     )
     assert spawned == []
@@ -116,7 +121,7 @@ def test_salvage_skips_when_no_journal_and_no_content(monkeypatch, capture):
     spawned, _ = capture
     monkeypatch.setattr(settings, "incomplete_turn_persist_enabled", True)
     # Nothing streamed and no finished team work ⇒ nothing to keep.
-    service._salvage_incomplete_turn(
+    salvage_incomplete_turn(
         sink=_Sink(None), conversation_id="conv", trace_id="trace", message_id="m1"
     )
     assert spawned == []
@@ -127,7 +132,7 @@ def test_salvage_spawns_on_streamed_content_without_journal(monkeypatch, capture
     # mid-stream must still be kept — the CEO's streamed text is carried through.
     spawned, persist_calls = capture
     monkeypatch.setattr(settings, "incomplete_turn_persist_enabled", True)
-    service._salvage_incomplete_turn(
+    salvage_incomplete_turn(
         sink=_Sink(None, content="已经写了一半的答案"),
         conversation_id="conv",
         trace_id="trace",
@@ -143,7 +148,7 @@ def test_salvage_defers_to_resume_on_durable_pause(monkeypatch, capture):
     monkeypatch.setattr(settings, "incomplete_turn_persist_enabled", True)
     monkeypatch.setattr(settings, "structured_suspension_persist_enabled", True)
     journal = [_ev("run_plan"), _ev("plan_review_required", "p1")]
-    service._salvage_incomplete_turn(
+    salvage_incomplete_turn(
         sink=_Sink(journal), conversation_id="conv", trace_id="trace", message_id="m1"
     )
     assert spawned == []  # a paused_turns frame owns this turn's continuation
@@ -155,7 +160,7 @@ def test_salvage_runs_on_pause_when_persistence_disabled(monkeypatch, capture):
     monkeypatch.setattr(settings, "structured_suspension_persist_enabled", False)
     # No durable frame exists (2a in-memory only) ⇒ salvage the finished work instead.
     journal = [_ev("run_plan"), _ev("plan_review_required", "p1")]
-    service._salvage_incomplete_turn(
+    salvage_incomplete_turn(
         sink=_Sink(journal), conversation_id="conv", trace_id="trace", message_id="m1"
     )
     assert len(spawned) == 1
@@ -190,7 +195,7 @@ async def test_persist_incomplete_writes_cancelled_message(monkeypatch):
     monkeypatch.setattr(turn_persistence, "persist_turn_journal", fake_journal)
 
     journal = [_ev("run_plan"), _ev("run_completed")]
-    await service._persist_incomplete_turn(
+    await persist_incomplete_turn(
         journal=journal, content="", conversation_id="conv", trace_id="trace", message_id="m1"
     )
 
@@ -235,7 +240,7 @@ async def test_persist_incomplete_keeps_streamed_reply(monkeypatch):
     monkeypatch.setattr(turn_persistence, "async_session_factory", lambda: FakeSessionCM())
     monkeypatch.setattr(turn_persistence, "persist_turn_journal", fake_journal)
 
-    await service._persist_incomplete_turn(
+    await persist_incomplete_turn(
         journal=[],
         content="这是我已经写了一半的分析",
         conversation_id="conv",
@@ -258,7 +263,7 @@ async def test_persist_incomplete_swallows_db_errors(monkeypatch):
 
     monkeypatch.setattr(turn_persistence, "async_session_factory", lambda: BoomCM())
     # Best-effort (文档铁律): a persistence failure must never escape this task.
-    await service._persist_incomplete_turn(
+    await persist_incomplete_turn(
         journal=[_ev("run_plan")],
         content="",
         conversation_id="conv",

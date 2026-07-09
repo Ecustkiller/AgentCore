@@ -17,7 +17,7 @@ from pathlib import Path
 from agentcore.core.types import ToolCategory
 from agentcore.memory import MemoryTopic
 from agentcore.memory.store import CORE_MEMORY_FILE, FileMemoryStore, topic_path
-from agentcore.runtime.prompt import (
+from agentcore.runtime.resolve.prompt import (
     assemble_system_prompt,
     compose_ceo_chat_prompt,
     compose_worker_base_prompt,

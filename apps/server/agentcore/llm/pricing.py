@@ -42,6 +42,14 @@ DOUBAO_SEED_TURBO = "doubao/doubao-seed-2-1-turbo-260628"
 # a logged warning until added — same posture as any unpriced model.
 QWEN_VL_MAX = "qwen-vl-max"
 
+# Platform upstream models (OpenAI / codex proxy). Codex has no public per-token invoice —
+# prices below are conservative internal estimates for ledger/quota, NOT upstream invoice rates.
+# gpt-4o: OpenAI API list price (2025-04) as the platform reference tier.
+PLATFORM_GPT_4O = "gpt-4o"
+# gpt-5.4 / gpt-5.5: ChatGPT Codex backend models (平台LLM接入.md §五); no vendor price card.
+PLATFORM_GPT_5_4 = "gpt-5.4"
+PLATFORM_GPT_5_5 = "gpt-5.5"
+
 # USD per 1M tokens. DeepSeek: docs/03-AI核心/DeepSeek-V4-API参考.md §三 (authoritative);
 # cache_hit is ~50× cheaper than cache_miss — splitting input by hit/miss is what keeps
 # the bill honest on multi-turn chats (DeepSeek prefix caching).
@@ -79,6 +87,28 @@ _PRICING: dict[str, dict[str, Decimal]] = {
         "cache_hit": Decimal("0.16"),
         "cache_miss": Decimal("0.80"),
         "output": Decimal("3.20"),
+    },
+    # Platform upstream — OpenAI gpt-4o (config/platform.py default platform_model).
+    # Source: OpenAI API pricing (input $2.50/1M, cached input $1.25/1M, output $10/1M).
+    # platform 内部估算，非上游发票价（Codex 代理无公开按 token 价目时同理）。
+    PLATFORM_GPT_4O: {
+        "cache_hit": Decimal("1.25"),
+        "cache_miss": Decimal("2.50"),
+        "output": Decimal("10.00"),
+    },
+    # Platform upstream — ChatGPT Codex gpt-5.4 (K-12 codex 可用模型之一).
+    # platform 内部估算，非上游发票价：按 gpt-4o 约 3× 保守高估 input/output，防配额低估。
+    PLATFORM_GPT_5_4: {
+        "cache_hit": Decimal("3.75"),
+        "cache_miss": Decimal("7.50"),
+        "output": Decimal("30.00"),
+    },
+    # Platform upstream — ChatGPT Codex gpt-5.5 (codex 档 PLATFORM_MODEL 常用值).
+    # platform 内部估算，非上游发票价：略高于 5.4，仍保守（真实发票不可见）。
+    PLATFORM_GPT_5_5: {
+        "cache_hit": Decimal("5.00"),
+        "cache_miss": Decimal("10.00"),
+        "output": Decimal("40.00"),
     },
 }
 

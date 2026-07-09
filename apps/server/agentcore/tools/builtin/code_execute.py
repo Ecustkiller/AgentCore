@@ -8,6 +8,7 @@ root, so executed code sees the same files the file tools do.
 import time
 from typing import Any
 
+from agentcore.core.errors import SandboxError
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.sandbox.protocol import ExecutionRequest
@@ -102,7 +103,18 @@ class CodeExecuteTool:
         # unscoped call sites (tests / evals).
         if context.on_phase:
             context.on_phase("executing")
-        result = await context.backend.execute(request)
+        try:
+            result = await context.backend.execute(request)
+        except SandboxError as e:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            msg = e.message or str(e)
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output=msg,
+                error=msg,
+                duration_ms=duration_ms,
+            )
         duration_ms = int((time.monotonic() - start) * 1000)
 
         output_parts = []

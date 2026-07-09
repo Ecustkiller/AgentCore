@@ -13,7 +13,7 @@ from agentcore.runtime.events.journal_config import (
     _HISTORY_SKIP_TYPES,
     _JOURNAL_EVENT_TYPES,
     _JOURNAL_SURFACE_TYPES,
-    _PROCESS_RESULT_CAP,
+    cap_process_result,
 )
 from agentcore.runtime.events.types import EventType, SSEEvent
 from agentcore.runtime.facts import Fact, record_turn_fact
@@ -193,9 +193,7 @@ class EventSink:
             return
         if t == EventType.TOOL_USE_END:
             payload = dict(event.payload)
-            result = payload.get("result")
-            if isinstance(result, str) and len(result) > _PROCESS_RESULT_CAP:
-                payload["result"] = result[:_PROCESS_RESULT_CAP] + "…"
+            payload["result"] = cap_process_result(payload.get("result"))
             self._history.append(SSEEvent(type=t, payload=payload, timestamp=event.timestamp))
             return
         self._history.append(SSEEvent(type=t, payload=event.payload, timestamp=event.timestamp))
@@ -278,9 +276,7 @@ class EventSink:
             if payload.get("run_id") or payload.get("tool_name") in ORCHESTRATION_TOOLS:
                 return
             call_id = payload.get("tool_call_id", "")
-            result = payload.get("result")
-            if isinstance(result, str) and len(result) > _PROCESS_RESULT_CAP:
-                result = result[:_PROCESS_RESULT_CAP] + "…"
+            result = cap_process_result(payload.get("result"))
             display = payload.get("display")
             for step in reversed(self._process):
                 if step.get("kind") == "tool" and step.get("id") == call_id:

@@ -1,10 +1,10 @@
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.builder import build_run_plan
-from agentcore.runtime.runs.executor import (
+from agentcore.runtime.runs.executor import build_agent_executor
+from agentcore.runtime.runs.executor_context import (
     _build_messages,
     _safe_index_files,
     _workspace_manifest,
-    build_agent_executor,
 )
 from agentcore.runtime.runs.types import RunSpec
 from agentcore.runtime.runs.wave import WaveScheduler

@@ -8,6 +8,7 @@ from typing import Any
 
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
+from agentcore.llm.resolve import resolve_turn_model
 from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.suspension import TurnSuspension
@@ -31,13 +32,8 @@ class TurnExecutionMixin:
         # None）。引擎据此让本场 debate 续上一场（焦点正交、首轮辩手读到上一场摘要）。
         raw_seed = params.get("debateSeed")
         debate_seed = raw_seed if isinstance(raw_seed, dict) else None
-        # 对话级自定义指令 (per-conversation custom instructions): the cloud reads it off
-        # the conversation row; the Sidecar has no DB, so the desktop feeds it in the turn
-        # params (缺省 = 无自定义指令). Injected into the system prompt by run_chat_pipeline.
-        raw_instructions = params.get("instructions")
-        instructions = raw_instructions if isinstance(raw_instructions, str) else None
 
-        turn_creds = self._creds_for(conversation_id, trace_id)
+        turn_creds = self._creds_for(conversation_id, trace_id, turn_id)
 
         sink = EventSink()
         backend = self._make_backend()
@@ -68,7 +64,6 @@ class TurnExecutionMixin:
                         suspension_saver=saver,
                         suspension_deleter=deleter,
                         debate_seed=debate_seed,
-                        instructions=instructions,
                     )
             finally:
                 # The pipeline no longer closes the sink (its owner does); the sidecar owns
@@ -76,7 +71,14 @@ class TurnExecutionMixin:
                 # await the None sentinel forever.
                 sink.close()
             await pump  # sink closed above → all events flushed
-            await self._send(protocol.make_result(request_id, trim_result(turn_id, result)))
+            # Surface the model this turn actually ran on: creds present ⇒ the
+            # cloud-proxy/account model; None (dev fallback) ⇒ settings.platform_model.
+            await self._send(
+                protocol.make_result(
+                    request_id,
+                    trim_result(turn_id, result, model=resolve_turn_model(turn_creds)),
+                )
+            )
         except asyncio.CancelledError:
             with contextlib.suppress(Exception):
                 await pump
@@ -111,6 +113,8 @@ class TurnExecutionMixin:
         """
         assert self._root is not None  # guarded by _on_resume
         turn_id = suspension.message_id
+        # Resolved once so the pipeline runs on it AND the reply surfaces the same model.
+        resume_creds = self._creds_for(suspension.conversation_id, trace_id, turn_id)
         sink = EventSink()
         backend = self._make_backend()
         saver, deleter = self._suspension_hooks()
@@ -137,7 +141,7 @@ class TurnExecutionMixin:
                         # local frame record (rehydrated onto the suspension at claim) — the resume
                         # splices it ahead of the journal-folded rounds (Phase 2 ⑤).
                         history=suspension.history,
-                        llm_credentials=self._creds_for(suspension.conversation_id, trace_id),
+                        llm_credentials=resume_creds,
                         suspension_saver=saver,
                         suspension_deleter=deleter,
                     )
@@ -147,7 +151,14 @@ class TurnExecutionMixin:
                 # await the None sentinel forever.
                 sink.close()
             await pump  # sink closed above → all events flushed
-            await self._send(protocol.make_result(request_id, trim_result(turn_id, result)))
+            # Same model signal as a start turn (see _run_turn): the resumed reply reports
+            # the model it actually ran on so the badge stays honest across a resume.
+            await self._send(
+                protocol.make_result(
+                    request_id,
+                    trim_result(turn_id, result, model=resolve_turn_model(resume_creds)),
+                )
+            )
         except asyncio.CancelledError:
             if self._paused_store is not None:
                 await self._paused_store.rollback_claim(turn_id)

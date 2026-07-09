@@ -1,11 +1,19 @@
 ---
-description: AI 开发工作流——角色分工、决策权限、设计纪律、编辑安全
+description: AI 开发工作流——新会话冷启动地图、角色分工、决策权限、设计纪律、编辑安全
 alwaysApply: true
 ---
 
 # 开发工作流
 
 项目采用「AI 全程开发、人做决策」模式。多 Agent 并行开发（不同模块可同时推进）。
+
+## 新会话冷启动
+
+AgentCore = 面向大众的 Multi-Agent AI 工作台，核心差异是**真正的 Agent 团队协作**（非「单 Agent + 子任务派发」）。Monorepo：`apps/server`（FastAPI · runtime 执行引擎 · LLM 网关）+ `apps/desktop`（Electron+React）+ `apps/mobile` + `apps/admin` + `packages/`（跨端契约）。
+
+- **定位任务 / 找文档** → 先读 `docs/索引.md` 的「任务路由」表（按「我要改 X」直跳该读的文档），别盲 grep 摸索。
+- **跑通项目** → `docs/02-架构/本地开发.md`。
+- **易漏读的按需 rules**：接缝 / 漂移排查 → `seam-audit.mdc`；桌面前端自检渲染 → `frontend-preview.mdc`；沉淀可复用经验 → `memory.mdc`。
 
 ## 角色与决策权限
 

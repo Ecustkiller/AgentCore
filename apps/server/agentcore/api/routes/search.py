@@ -9,6 +9,8 @@ implementation is ILIKE rather than ``to_tsvector`` on purpose: stock PostgreSQL
 does not segment Chinese, so FTS would under-recall this product's content (§6.3).
 """
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, Query
 
 from agentcore.api.dependencies import (
@@ -23,6 +25,7 @@ from agentcore.db.repositories import (
     FolderRepository,
     MessageRepository,
 )
+from agentcore.memory.conversation_tag import parse_conversation_tag
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -75,6 +78,16 @@ async def search(
     q: str = Query(..., min_length=1, max_length=100),
     limit: int = Query(8, ge=1, le=20),
     types: str | None = Query(None),
+    updated_after: datetime | None = Query(
+        None, description="仅返回此时刻之后有更新的结果（时间过滤，ISO 8601）"
+    ),
+    folder_id: str | None = Query(
+        None, description="限定在某文件夹/工作区内检索（仅作用于对话与消息，工作区过滤）"
+    ),
+    tag: str | None = Query(
+        None,
+        description="按对话自动标签筛选（code_review/research/writing/analysis，仅对话与消息）",
+    ),
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     msg_repo: MessageRepository = Depends(get_message_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
@@ -85,24 +98,52 @@ async def search(
     ``conversation,message,folder``) narrows which sections are searched. Empty
     sections are omitted. Every result is owner-scoped — a non-owner's data never
     appears.
+
+    Two optional facets refine the results (搜索结果过滤, built on Tier 1):
+    ``updated_after`` keeps only recently-active hits (时间过滤); ``folder_id``
+    scopes to one folder/工作区 — it filters the conversation and message sections
+    and drops the folder section entirely (searching *within* a workspace and
+    searching *for* a folder are mutually exclusive intents).
+    ``tag`` keeps only hits whose owning conversation carries that auto-tag.
     """
     wanted = _parse_types(types)
+    tag_filter = parse_conversation_tag(tag)
     sections: list[SearchSection] = []
 
     if "conversation" in wanted:
-        convs = await conv_repo.search(user.user_id, q, limit=limit)
+        convs = await conv_repo.search(
+            user.user_id,
+            q,
+            limit=limit,
+            updated_after=updated_after,
+            folder_id=folder_id,
+            tag=tag_filter,
+        )
         if convs:
             sections.append(
                 SearchSection(
                     type="conversation",
                     items=[
-                        SearchItem(id=c.id, title=c.title, updated_at=c.updated_at) for c in convs
+                        SearchItem(
+                            id=c.id,
+                            title=c.title,
+                            updated_at=c.updated_at,
+                            tag=c.tag,
+                        )
+                        for c in convs
                     ],
                 )
             )
 
     if "message" in wanted:
-        hits = await msg_repo.search(user.user_id, q, limit=limit)
+        hits = await msg_repo.search(
+            user.user_id,
+            q,
+            limit=limit,
+            updated_after=updated_after,
+            folder_id=folder_id,
+            tag=tag_filter,
+        )
         if hits:
             items: list[SearchItem] = []
             for msg, conv_title in hits:
@@ -121,8 +162,12 @@ async def search(
                 )
             sections.append(SearchSection(type="message", items=items))
 
-    if "folder" in wanted:
-        folders = await folder_repo.search(user.user_id, q, limit=limit)
+    # A workspace scope (folder_id) is a "search inside this folder" intent, which
+    # is orthogonal to listing folders — so skip the folder section when scoped.
+    if "folder" in wanted and folder_id is None:
+        folders = await folder_repo.search(
+            user.user_id, q, limit=limit, updated_after=updated_after
+        )
         if folders:
             sections.append(
                 SearchSection(

@@ -6,8 +6,8 @@ public class AgentTownTarget : TargetRules
 	public AgentTownTarget(TargetInfo Target) : base(Target)
 	{
 		Type = TargetType.Game;
-		DefaultBuildSettings = BuildSettingsVersion.V5;
-		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_5;
+		DefaultBuildSettings = BuildSettingsVersion.Latest;
+		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_8;
 		ExtraModuleNames.Add("AgentTown");
 	}
 }

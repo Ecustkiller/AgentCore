@@ -34,10 +34,6 @@ class SectionOrder(IntEnum):
 
     BASE = 100
     RUNTIME_CONTEXT = 200
-    # Per-conversation custom instructions (对话级自定义指令): the user's EXPLICIT
-    # directive for this thread. Sits above soft long-term MEMORY on purpose — an
-    # explicit per-conversation instruction outranks auto-maintained preferences.
-    INSTRUCTIONS = 250
     MEMORY = 300
     CEO_CORE = 400
     SKILL_DIRECTORY = 500

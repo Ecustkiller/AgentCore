@@ -44,3 +44,35 @@ export function hasWindowControls(): boolean {
 export function hasAutoUpdater(): boolean {
   return !isWebRuntime();
 }
+
+/** AgentTown 独立客户端启动器（写 session.json + spawn）——仅 Electron 外壳。 */
+export function hasAgentTownLauncher(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    !!window.agentTownApi &&
+    !isWebRuntime()
+  );
+}
+
+/** 聊天 bash 代码块「在终端运行」——仅 Electron 外壳。 */
+export function hasTerminalRun(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    !!window.terminalApi &&
+    !isWebRuntime()
+  );
+}
+
+/** 本地工作区「在终端打开」——需 terminalApi + 本地文件能力。 */
+export function hasWorkspaceShell(): boolean {
+  return hasLocalFiles() && !!window.terminalApi?.openShellAtRoot;
+}
+
+/** OS 原生通知（Electron Notification API）；web 无。 */
+export function hasNativeNotification(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    !!window.notificationApi &&
+    !isWebRuntime()
+  );
+}

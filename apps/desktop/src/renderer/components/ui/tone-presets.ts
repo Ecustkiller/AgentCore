@@ -2,50 +2,40 @@
  * Shared Tailwind class presets for semantic tones (color-tokens.mdc).
  * Full literal strings so Tailwind v4 keeps them in the build.
  *
- * 极简中性配色：warning(琥珀) 已退役为状态色 —— 行动/需要你 = primary(蓝)，
- * 失败/危险 = destructive(红)，纯分类/被动 = muted(灰)。故 status* 的 `warning`
- * 槽位在此映射为灰；decision shell 的 `warning` 槽位已无消费者（卡片改用 primary）。
+ * 极简中性配色：行动/需要你 = primary(蓝)，失败/危险 = destructive(红)，
+ * 纯分类/被动 = muted(灰)。不再保留已退役的 warning 语义槽位。
  */
 
-/** Brand / caution shells for decision & checkpoint cards. */
-export type BrandTone = "primary" | "warning";
+/** Brand shells for decision & checkpoint cards. */
+export type BrandTone = "primary";
 
 /** Execution / outcome chips and resolved records. */
-export type StatusTone =
-  | "primary"
-  | "success"
-  | "warning"
-  | "destructive"
-  | "muted";
+export type StatusTone = "primary" | "success" | "destructive" | "muted";
 
-export type DecisionShellTone = BrandTone | "neutral";
+export type DecisionShellTone = "primary" | "neutral";
 
 /** Subtle card border + tinted background. */
 export const surfaceSubtle: Record<BrandTone, string> = {
   primary: "border-primary/30 bg-primary/5",
-  // 极简中性：warning 槽位已退役，保留键以兼容类型，但映射为中性灰（绝不再出琥珀）。
-  warning: "border-border bg-muted/40",
 };
 
 /** CTA footer bar on decision cards. */
 export const decisionCtaBar: Record<BrandTone, string> = {
   primary: "border-primary/15 bg-primary/10",
-  warning: "border-border bg-muted/30",
 };
 
 export const decisionShell: Record<DecisionShellTone, string> = {
-  ...surfaceSubtle,
+  primary: surfaceSubtle.primary,
   neutral: "border-border bg-muted/40",
 };
 
 export const decisionCtaBarAll: Record<DecisionShellTone, string> = {
-  ...decisionCtaBar,
+  primary: decisionCtaBar.primary,
   neutral: "border-border bg-muted/30",
 };
 
 export const decisionAccentText: Record<DecisionShellTone, string> = {
   primary: "text-primary",
-  warning: "text-muted-foreground",
   neutral: "text-muted-foreground",
 };
 
@@ -53,7 +43,6 @@ export const decisionAccentText: Record<DecisionShellTone, string> = {
 export const statusAccentText: Record<StatusTone, string> = {
   primary: "text-primary",
   success: "text-success",
-  warning: "text-muted-foreground",
   destructive: "text-destructive",
   muted: "text-muted-foreground",
 };
@@ -62,7 +51,6 @@ export const statusAccentText: Record<StatusTone, string> = {
 export const statusPillSoft: Record<StatusTone, string> = {
   primary: "bg-primary/10 text-primary",
   success: "bg-success/10 text-success",
-  warning: "bg-muted text-muted-foreground",
   destructive: "bg-destructive/10 text-destructive",
   muted: "bg-muted text-muted-foreground",
 };
@@ -71,7 +59,6 @@ export const statusPillSoft: Record<StatusTone, string> = {
 export const statusPillInline: Record<StatusTone, string> = {
   primary: `rounded-full px-1.5 py-0.5 text-xs font-medium ${statusPillSoft.primary}`,
   success: `rounded-full px-1.5 py-0.5 text-xs font-medium ${statusPillSoft.success}`,
-  warning: `rounded-full px-1.5 py-0.5 text-xs font-medium ${statusPillSoft.warning}`,
   destructive: `rounded-full px-1.5 py-0.5 text-xs ${statusPillSoft.destructive}`,
   muted: `rounded-full px-1.5 py-0.5 text-xs ${statusPillSoft.muted}`,
 };
@@ -79,7 +66,7 @@ export const statusPillInline: Record<StatusTone, string> = {
 /** Confidence classification (debate brief) — not run status. */
 export const confidencePill: Record<"high" | "medium" | "low", string> = {
   high: statusPillSoft.success,
-  medium: statusPillSoft.warning,
+  medium: statusPillSoft.muted,
   low: statusPillSoft.muted,
 };
 
@@ -169,32 +156,17 @@ export const runStatusDot = {
 export const statusChip: Record<StatusTone, string> = {
   primary: "border-primary/30 bg-primary/10 text-primary",
   success: "border-success/30 bg-success/10 text-success",
-  warning: "border-border bg-muted text-muted-foreground",
   destructive: "border-destructive/30 bg-destructive/10 text-destructive",
   muted: "border-border bg-muted text-muted-foreground",
 };
 
 /**
  * Interactive ask_user checkpoint shell.
- * - `primary`：全蓝（审批 / 队员升级等仍用）。
+ * - `primary`：全蓝（审批 / 队员升级等）。
  * - `neutral`：灰壳灰选项（AskUserCard 开工提案 / 拍板）——行动信号只留在 Footer 主 CTA。
- * `warning` 键保留以兼容类型，映射同 primary。
  */
 export const interactiveCheckpointTone = {
   primary: {
-    wrap: surfaceSubtle.primary,
-    accent: "text-primary",
-    badge: "bg-primary/10 text-primary",
-    optActive: "border-primary bg-primary/10 text-foreground",
-    optIdle:
-      "border-border bg-card text-muted-foreground hover:border-primary/40 hover:bg-accent hover:text-foreground",
-    markActive: "border-primary bg-primary text-primary-foreground",
-    dot: "bg-primary-foreground",
-    focus: "focus:border-primary/60",
-    ctaBar: decisionCtaBar.primary,
-    cta: "bg-primary text-primary-foreground hover:bg-primary/90",
-  },
-  warning: {
     wrap: surfaceSubtle.primary,
     accent: "text-primary",
     badge: "bg-primary/10 text-primary",

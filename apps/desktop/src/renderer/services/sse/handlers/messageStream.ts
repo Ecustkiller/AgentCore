@@ -1,6 +1,6 @@
 import { surfaceResumeFromLiveTurn } from "@/services/resume";
 import { traceTurnEnd } from "@/services/sseTrace";
-import { useApprovalStore } from "@/stores/approvals";
+import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { execRuntime, useExecutionStore } from "@/stores/execution";
 import type {
@@ -136,11 +136,12 @@ export function handleMessageStreamEvent(
             : undefined,
           rounds: payload.rounds,
           finishReason: payload.finish_reason,
+          collab: payload.collab,
         },
         conversationId,
       );
       conv.finalizeLastMessage(conversationId);
-      useApprovalStore.getState().clear(conversationId);
+      clearInteractionPrompts(conversationId);
       // 挂起即收口 (②): a turn can END at a durable checkpoint — message_end carries
       // finish_reason=paused. The turn is NOT done: its frame was persisted and its
       // in-process resolve Future was never parked, so keep the graph paused (not
@@ -159,7 +160,7 @@ export function handleMessageStreamEvent(
       }
       conv.releaseBackgroundSlice(conversationId);
       finalizeTurnTrace(conversationId);
-      if (paused) surfaceResumeFromLiveTurn(conversationId);
+      if (paused) surfaceResumeFromLiveTurn(conversationId, ctx.source);
       return true;
     }
     case "error": {
@@ -177,7 +178,7 @@ export function handleMessageStreamEvent(
         conversationId,
       );
       store.finalizeLastMessage(conversationId);
-      useApprovalStore.getState().clear(conversationId);
+      clearInteractionPrompts(conversationId);
       const mid = execMessageId(conversationId);
       if (mid && execRuntime(useExecutionStore.getState(), mid).plan) {
         useExecutionStore.getState().setStatus("failed", mid);

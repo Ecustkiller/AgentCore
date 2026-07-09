@@ -5,7 +5,9 @@ import { PREVIEW_FIXTURES } from "@/preview/fixtures";
 import {
   extractAsks,
   extractPendingEscalations,
+  extractRunToolCalls,
   extractToolPhases,
+  extractWorkerToolPhases,
   fold,
 } from "@/protocol/fold";
 import type { SSEEvent } from "@agentcore/contract-types";
@@ -44,10 +46,15 @@ export function PreviewPage() {
   const projected = useMemo(() => fold(events), [events]);
   const asks = useMemo(() => extractAsks(events), [events]);
   const toolPhases = useMemo(() => extractToolPhases(events), [events]);
+  const workerToolPhases = useMemo(
+    () => extractWorkerToolPhases(events),
+    [events],
+  );
   const pendingEscalations = useMemo(
     () => extractPendingEscalations(events),
     [events],
   );
+  const runToolCalls = useMemo(() => extractRunToolCalls(events), [events]);
   const artifacts = useMemo(() => fileArtifactsFromEvents(events), [events]);
 
   const isMulti = projected.runs.length > 0;
@@ -60,6 +67,8 @@ export function PreviewPage() {
         conversationId: null,
         pendingEscalations,
         escalationsInteractive: false,
+        runToolCalls,
+        workerToolPhases,
       }
     : undefined;
 

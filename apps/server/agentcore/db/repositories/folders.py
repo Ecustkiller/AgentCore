@@ -74,21 +74,30 @@ class FolderRepository:
         )
         return result.scalars().all()
 
-    async def search(self, user_id: str, query: str, *, limit: int) -> Sequence[Folder]:
+    async def search(
+        self,
+        user_id: str,
+        query: str,
+        *,
+        limit: int,
+        updated_after: datetime | None = None,
+    ) -> Sequence[Folder]:
         """Owner-scoped folder-name substring search (全局搜索 Tier 1).
 
         ILIKE over ``name``, most-recently-updated first, capped at ``limit``;
-        soft-deleted folders are excluded.
+        soft-deleted folders are excluded. ``updated_after`` applies the 时间过滤
+        facet (recently-touched folders only); folders carry no folder membership,
+        so the workspace facet is handled by the route dropping this section.
         """
+        stmt = select(Folder).where(
+            Folder.user_id == user_id,
+            Folder.deleted_at.is_(None),
+            Folder.name.ilike(_ilike_pattern(query)),
+        )
+        if updated_after is not None:
+            stmt = stmt.where(Folder.updated_at >= updated_after)
         result = await self._session.execute(
-            select(Folder)
-            .where(
-                Folder.user_id == user_id,
-                Folder.deleted_at.is_(None),
-                Folder.name.ilike(_ilike_pattern(query)),
-            )
-            .order_by(Folder.updated_at.desc())
-            .limit(limit)
+            stmt.order_by(Folder.updated_at.desc()).limit(limit)
         )
         return result.scalars().all()
 

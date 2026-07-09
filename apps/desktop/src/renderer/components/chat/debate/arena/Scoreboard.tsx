@@ -246,11 +246,15 @@ function ScoreboardRow2({
     const conRoster = conSide
       ? roster.find((r) => r.sideKey === conSide.key)
       : roster[1];
+    const proKey = proSide?.key ?? proRoster?.sideKey ?? a.sideKey;
+    const conKey = conSide?.key ?? conRoster?.sideKey ?? b.sideKey;
+    const proModel = sideRunModel(model, proKey);
+    const conModel = sideRunModel(model, conKey);
     return (
       <div className="flex flex-wrap items-center justify-between gap-3">
         <VersusSide
           name={proRoster?.name ?? a.name}
-          model={proSide?.model}
+          model={proModel}
           colorVar={debateSideColorVar(
             proRoster?.sideKey ?? a.sideKey,
             proRoster?.name ?? a.name,
@@ -262,7 +266,7 @@ function ScoreboardRow2({
         </span>
         <VersusSide
           name={conRoster?.name ?? b.name}
-          model={conSide?.model}
+          model={conModel}
           colorVar={debateSideColorVar(
             conRoster?.sideKey ?? b.sideKey,
             conRoster?.name ?? b.name,
@@ -275,6 +279,15 @@ function ScoreboardRow2({
   }
 
   return null;
+}
+
+/** 从各轮发言格取某方的实际执行 model（run.model），忽略 roster 声称的 per-side model。 */
+function sideRunModel(model: DebateModel, sideKey: string): string | undefined {
+  for (const round of model.rounds) {
+    const side = round.sides.find((s) => s.sideKey === sideKey);
+    if (side?.model) return side.model;
+  }
+  return undefined;
 }
 
 function VersusSide({

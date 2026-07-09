@@ -114,21 +114,17 @@ def _multi_agent_debate() -> list[SSEEvent]:
         "opening": "这场要定的是该不该上方案 A，先从最要害的成本与收益切入。",
         "narrative_first": False,
         "sides": [
-            # 真·多模型辩论：各方携显式 model（pro=豆包前缀路由 / con=无前缀默认 DeepSeek），
-            # 锚定「正方=豆包 vs 反方=DeepSeek」展示链的跨端对齐（model 随 sides verbatim 折入）。
             {
                 "key": "pro",
                 "name": "支持方",
                 "stance": "支持采用方案 A",
                 "is_subject": False,
-                "model": "doubao/doubao-seed-2-1-turbo-260628",
             },
             {
                 "key": "con",
                 "name": "反对方",
                 "stance": "反对采用方案 A",
                 "is_subject": False,
-                "model": "deepseek-v4-pro",
             },
         ],
         "rounds": [
@@ -612,14 +608,12 @@ def _multi_agent_debate_followup() -> list[SSEEvent]:
                 "name": "支持方",
                 "stance": "支持采用方案 A",
                 "is_subject": False,
-                "model": "doubao/doubao-seed-2-1-turbo-260628",
             },
             {
                 "key": "con",
                 "name": "反对方",
                 "stance": "反对采用方案 A",
                 "is_subject": False,
-                "model": "deepseek-v4-pro",
             },
         ],
         "rounds": [round1_payload, round2_payload, round3_payload],

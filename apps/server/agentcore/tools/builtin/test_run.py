@@ -7,6 +7,7 @@ import shlex
 import time
 from typing import Any, Literal
 
+from agentcore.core.errors import SandboxError
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.runtime.context.project_profile import ProjectProfile, detect_project_profile
 from agentcore.tools.builtin.test_parsers import (
@@ -324,7 +325,17 @@ class TestRunTool:
             ),
             parameters=TEST_RUN_PARAMETERS,
             category=ToolCategory.EXECUTION,
-            approval=ToolApproval.NEVER,
+            # test_run runs the project's test command through the SAME sandbox chain as
+            # code_execute (context.backend.execute) — a test suite executes arbitrary
+            # project code (conftest, fixtures, plugins), so its execution power is
+            # equivalent. It therefore belongs to the same code-execution class and must
+            # carry the SAME governance: GRANTABLE ∩ EXECUTION makes the approval gate and
+            # per_call_tool_names() cover it automatically (per-call consent, never
+            # turn-whitelisted), the CEO NEVER-filter keeps it worker-only, and the cloud
+            # availability gate (code_execution_enabled_for) withholds it where the sandbox
+            # isn't a real isolation boundary — closing the P0 where a NEVER test_run ran
+            # ungated (local: user's real machine; cloud default: subprocess RCE).
+            approval=ToolApproval.GRANTABLE,
             timeout_seconds=_DEFAULT_TIMEOUT,
         )
 
@@ -391,7 +402,18 @@ class TestRunTool:
         if context.on_phase:
             context.on_phase("executing")
 
-        exec_result = await context.backend.execute(request)
+        try:
+            exec_result = await context.backend.execute(request)
+        except SandboxError as e:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            msg = e.message or str(e)
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output=msg,
+                error=msg,
+                duration_ms=duration_ms,
+            )
         duration_ms = int((time.monotonic() - start) * 1000)
         duration_s = duration_ms / 1000.0
 

@@ -49,11 +49,9 @@ class DebateSide:
     （正方 / 红队A / 经济学视角），``stance`` 是喂给辩手的立场定位（拼进它的角色补充）。
     ``is_subject`` 标记红队形态里那个「被审方案方」（单向攻击的承受方），其余形态恒 False。
 
-    ``model`` 是该方辩手的【显式模型覆写】（真·多模型辩手）：空=用平台默认（DeepSeek）；
-    形如 ``doubao/doubao-seed-2-1-turbo-260628`` 的 ``provider/model`` 则经回合级
-    ProviderRouter 路由到对应厂商——这让一场辩论的各方真正由不同模型驱动（如「豆包 vs
-    DeepSeek 谁更聪明」），而非同一模型扮演多角。透传链：side.model → debater_task →
-    RunSpec.model → 执行器覆写 profile.model → 路由器按前缀分发。
+    ``model`` 是该方辩手的【显式模型覆写】（Phase 3 · 真·多模型辩手）：``schema.parse_sides``
+    仍解析入库，但 MVP 全链路统一用户 model，``debater_task`` 不注入、``to_event_payload``
+    不对外发此字段——各方实际跑同一 turn model；见 ``辩论编排设计.md`` §7.5。
     """
 
     key: str
@@ -524,9 +522,6 @@ class DebateResult:
                     "name": s.name,
                     "stance": s.stance,
                     "is_subject": s.is_subject,
-                    # 真·多模型辩论：该方辩手的模型覆写（`provider/model` 或空=平台默认），让前端
-                    # 标注「正方=豆包 / 反方=DeepSeek」——「谁更聪明」对战的核心可读性。
-                    "model": s.model,
                 }
                 for s in self.config.sides
             ],

@@ -19,7 +19,11 @@ from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.engine import react_loop
 from agentcore.simulation.agents.memory import format_tick_memories_for_perception
-from agentcore.simulation.agents.models import SimPersona
+from agentcore.simulation.agents.models import (
+    MotivationAssessment,
+    MotivationSignals,
+    SimPersona,
+)
 from agentcore.simulation.agents.tools import (
     MoveToTool,
     ProposeTradeTool,
@@ -28,7 +32,7 @@ from agentcore.simulation.agents.tools import (
     StayHereTool,
     build_sim_tool_registry,
 )
-from agentcore.simulation.scenarios.town.config import schedule_hint_for_persona
+from agentcore.simulation.scenarios.town.schedule import schedule_hint_for_persona
 from agentcore.simulation.types import SimAgentAction
 from agentcore.simulation.world.state import WorldState
 from agentcore.tools.protocol import ToolContext
@@ -192,14 +196,27 @@ async def run_agent_tick(
         backend=backend,
         user_id="simulation",
     )
+    agent_now = world.agents[persona.agent_id]
     perception = world.perceive(persona.agent_id)
     slot = schedule_hint_for_persona(persona, world.hour)
     perception = f"{perception}\n日程参考（可偏离）：{slot.location} · {slot.activity}"
-    memory_block = format_tick_memories_for_perception(
-        world.agents[persona.agent_id].tick_memories
-    )
+    memory_block = format_tick_memories_for_perception(agent_now.tick_memories)
     if memory_block:
         perception = f"{perception}\n{memory_block}"
+    motivation = MotivationAssessment.evaluate(
+        persona,
+        MotivationSignals(
+            hour=world.hour,
+            mood=agent_now.mood,
+            money=agent_now.money,
+            others_present=len(world.agents_at(agent_now.location, exclude=persona.agent_id)),
+            at_home=agent_now.location == "住宅区",
+            market_price_multiplier=world.modifiers.market_price_multiplier,
+            storm_active=world.modifiers.storm_active,
+            festival_active=world.modifiers.festival_active,
+        ),
+    )
+    perception = f"{perception}\n{motivation.hint_line()}"
     messages = _build_messages(persona, perception, text_mode=text_mode)
     model = turn_model or settings.platform_model
     t0 = time.monotonic()

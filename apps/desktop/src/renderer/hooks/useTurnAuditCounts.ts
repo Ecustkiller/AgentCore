@@ -1,6 +1,6 @@
-import { isWebPreview } from "@/lib/preview";
-import { fetchTurnAudit, groupAuditCountsByRun } from "@/services/audit";
-import { useEffect, useState } from "react";
+import { useTurnAudit } from "@/hooks/useTurnAudit";
+import { groupAuditCountsByRun } from "@/services/audit";
+import { useMemo } from "react";
 
 /**
  * 单回合审计按 run_id 计数，供 GraphView 节点角标。
@@ -10,25 +10,9 @@ export function useTurnAuditCounts(
   conversationId: string | null,
   messageId: string | null,
 ): Record<string, number> {
-  const [counts, setCounts] = useState<Record<string, number>>({});
-
-  useEffect(() => {
-    if (isWebPreview() || !conversationId || !messageId) {
-      setCounts({});
-      return;
-    }
-    let cancelled = false;
-    void fetchTurnAudit(conversationId, messageId)
-      .then((res) => {
-        if (!cancelled) setCounts(groupAuditCountsByRun(res.data));
-      })
-      .catch(() => {
-        if (!cancelled) setCounts({});
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [conversationId, messageId]);
-
-  return counts;
+  const { data } = useTurnAudit(conversationId, messageId);
+  return useMemo(
+    () => (data ? groupAuditCountsByRun(data.data) : {}),
+    [data],
+  );
 }

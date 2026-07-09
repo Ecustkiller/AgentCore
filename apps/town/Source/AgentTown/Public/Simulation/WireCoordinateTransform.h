@@ -23,7 +23,10 @@ struct AGENTTOWN_API FWireVec3
 class AGENTTOWN_API FWireCoordinateTransform
 {
 public:
-	/** ue = (wire.x, -wire.z, wire.y) */
+	/** 1 wire unit = 1 meter = 100 UE centimeters (positions only; NPC capsule/speed stay human-scale). */
+	static constexpr double WorldScale = 100.0;
+
+	/** ue = (wire.x, -wire.z, wire.y) * WorldScale */
 	static FVector ToUnreal(const FWireVec3& Wire);
 	static FVector ToUnreal(double WireX, double WireY, double WireZ);
 };

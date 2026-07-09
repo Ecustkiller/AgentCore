@@ -14,14 +14,25 @@ import {
   type EscalationUserDecision,
   decideEscalation,
 } from "@/api/interaction";
+import { Markdown } from "@/components/Markdown";
+import { Modal } from "@/components/Modal";
+import {
+  CONTEXT_CHANNEL_LABEL,
+  toolDetail,
+  toolLabel,
+  toolPhaseText,
+} from "@/components/assistantLabels";
+import type { RunToolCall } from "@/protocol/fold";
+import type { ContextBlockWire } from "@agentcore/contract-types";
 import type {
   ProjectedAgent,
   ProjectedRun,
   ProjectedTeamNote,
+  RunDebrief,
   RunEscalation,
   RunStatus,
 } from "@agentcore/protocol-conformance";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 
 type CheckpointDecision = NonNullable<ProjectedRun["checkpoint"]>["decision"];
 
@@ -99,6 +110,8 @@ export function TeamView({
   conversationId = null,
   pendingEscalations,
   escalationsInteractive = false,
+  runToolCalls,
+  workerToolPhases,
 }: {
   agents: ProjectedAgent[];
   runs: ProjectedRun[];
@@ -113,9 +126,22 @@ export function TeamView({
   pendingEscalations?: Map<string, string>;
   /** Live turn → the pending escalation is answerable over the open stream (else read-only). */
   escalationsInteractive?: boolean;
+  /** 队员工具明细 (RunDetail · 工具调用): runId → the worker's tool calls (transport-only sibling
+   *  extractRunToolCalls). Fed to the run-detail panel; absent → the panel shows no tool section. */
+  runToolCalls?: Map<string, RunToolCall[]>;
+  /** Worker `tool_use_progress` (run_id): runId → live EXECUTION phase + tool name (transport-only
+   *  sibling {@link import("@/protocol/fold").extractWorkerToolPhases}). */
+  workerToolPhases?: Map<string, { phase: string; toolName: string }>;
 }) {
+  // 深度检视单个队员 (RunDetail): tapping a RunCard opens a detail panel pinned to this run. The
+  // panel navigates to another run (修订链切换 / 关系跳转) by swapping the selected id — the run
+  // list is the same ProjectedTurn slice whether live or replayed.
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const workers = runs.filter((r) => r.kind !== "captain");
   if (workers.length === 0) return null;
+  const selectedRun = selectedRunId
+    ? (runs.find((r) => r.id === selectedRunId) ?? null)
+    : null;
 
   const isDebate = workers.some((r) => r.stance);
   const pct =
@@ -160,6 +186,8 @@ export function TeamView({
                 ? pendingEscalations?.get(run.id)
                 : undefined
             }
+            workerToolPhase={workerToolPhases?.get(run.id)}
+            onOpen={() => setSelectedRunId(run.id)}
           />
         ))}
       </div>
@@ -208,6 +236,64 @@ export function TeamView({
           })}
         </div>
       )}
+      {/* 深度检视单个队员 (RunDetail): the detail panel for the tapped run — a native <dialog>
+          bottom sheet. Navigating (修订链切换 / 关系跳转) swaps `selectedRunId` so the SAME open
+          dialog re-renders in place (no remount flash); unmounting (→ null) closes it. */}
+      {selectedRun && (
+        <RunDetailPanel
+          run={selectedRun}
+          agents={agents}
+          runs={runs}
+          toolCalls={runToolCalls?.get(selectedRun.id) ?? []}
+          onSelect={setSelectedRunId}
+          onClose={() => setSelectedRunId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** The status / role pills on a run (stance / 修订 vN / 计划已调整 / 子任务 / checkpoint / 上报),
+ *  shared by the {@link RunCard} peek and the {@link RunDetailPanel} header so the two read the
+ *  same. `isChild` (a delegated sub-task) is passed in — the card knows it from graph depth, the
+ *  panel from the run's parent. Renders nothing when the run has no pill. */
+function RunPills({ run, isChild }: { run: ProjectedRun; isChild: boolean }) {
+  const hasPill =
+    run.stance ||
+    run.revision >= 2 ||
+    run.revised ||
+    isChild ||
+    run.checkpoint ||
+    run.escalations.length > 0;
+  if (!hasPill) return null;
+  return (
+    <div className="run-tags">
+      {run.stance && (
+        <span className="run-pill">
+          {run.stance === "pro" ? "正方" : "反方"}
+        </span>
+      )}
+      {run.revision >= 2 && (
+        <span className="run-pill">修订 v{run.revision}</span>
+      )}
+      {/* 「计划已调整」轻痕迹 (设计 §7.2): the CEO autonomously re-bound (bind) / re-steered
+          (steer) this node mid-flight — a non-interrupting cue mirroring the desktop node badge. */}
+      {run.revised && <span className="run-pill">计划已调整</span>}
+      {isChild && <span className="run-pill">子任务</span>}
+      {run.checkpoint && (
+        <span className="run-pill pill-warn">
+          {run.checkpoint.status === "pending"
+            ? "待放行"
+            : checkpointLabel(run.checkpoint.decision)}
+        </span>
+      )}
+      {/* 升级实时可见: a worker flagged a blocker for the CEO — a 待裁决 cue mirroring the desktop
+          node ⚠️ badge; the full ask renders below / in the panel. */}
+      {run.escalations.length > 0 && (
+        <span className="run-pill pill-warn">
+          上报{run.escalations.length > 1 ? ` ${run.escalations.length}` : ""}
+        </span>
+      )}
     </div>
   );
 }
@@ -218,6 +304,8 @@ function RunCard({
   depth,
   conversationId,
   pendingEscalationId,
+  workerToolPhase,
+  onOpen,
 }: {
   run: ProjectedRun;
   agent: ProjectedAgent | undefined;
@@ -225,16 +313,22 @@ function RunCard({
   conversationId: string | null;
   /** The run's pending blocking escalation id (set only on a live turn) → answer card. */
   pendingEscalationId: string | undefined;
+  /** Live worker tool EXECUTION phase (transport-only `tool_use_progress` with run_id). */
+  workerToolPhase?: { phase: string; toolName: string };
+  /** 深度检视 (RunDetail): tap the card summary to open this run's detail panel. */
+  onOpen: () => void;
 }) {
   const st = RUN_STATUS[run.status];
   const name = run.role ?? agent?.role ?? run.agentId;
-  // Running: the worker's streaming tail (tool call > output last line). Settled: its
-  // one-line summary. Both come off the same fold whether live or replayed.
+  // Running: the worker's streaming tail (tool composing > tool executing > output last line).
+  // Settled: its one-line summary. Both come off the same fold whether live or replayed.
   const preview =
     run.status === "running"
       ? agent?.toolProgress
-        ? `调用 ${agent.toolProgress.toolName}…`
-        : lastLine(agent?.output)
+        ? `生成 ${toolLabel(agent.toolProgress.toolName)}…`
+        : workerToolPhase
+          ? `${toolPhaseText(workerToolPhase.phase) ?? "处理中"} · ${toolLabel(workerToolPhase.toolName)}`
+          : lastLine(agent?.output)
       : run.outputSummary;
 
   return (
@@ -242,48 +336,22 @@ function RunCard({
       className={`run run-${st.tone}`}
       style={depth > 0 ? { marginInlineStart: depth * 12 } : undefined}
     >
-      <div className="run-head">
-        <span className="run-name">{name}</span>
-        <span className={`run-badge badge-${st.tone}`}>{st.label}</span>
-      </div>
-      {(run.stance ||
-        run.revision >= 2 ||
-        run.revised ||
-        depth > 0 ||
-        run.checkpoint ||
-        run.escalations.length > 0) && (
-        <div className="run-tags">
-          {run.stance && (
-            <span className="run-pill">
-              {run.stance === "pro" ? "正方" : "反方"}
-            </span>
-          )}
-          {run.revision >= 2 && (
-            <span className="run-pill">修订 v{run.revision}</span>
-          )}
-          {/* 「计划已调整」轻痕迹 (设计 §7.2): the CEO autonomously re-bound (bind) /
-              re-steered (steer) this node mid-flight — a non-interrupting cue mirroring
-              the desktop node badge. */}
-          {run.revised && <span className="run-pill">计划已调整</span>}
-          {depth > 0 && <span className="run-pill">子任务</span>}
-          {run.checkpoint && (
-            <span className="run-pill pill-warn">
-              {run.checkpoint.status === "pending"
-                ? "待放行"
-                : checkpointLabel(run.checkpoint.decision)}
-            </span>
-          )}
-          {/* 升级实时可见: a worker flagged a blocker for the CEO — a 待裁决 cue mirroring
-              the desktop node ⚠️ badge; the full ask renders below. */}
-          {run.escalations.length > 0 && (
-            <span className="run-pill pill-warn">
-              上报
-              {run.escalations.length > 1 ? ` ${run.escalations.length}` : ""}
-            </span>
-          )}
+      {/* 深度检视入口: the whole card summary is ONE tap target opening the run detail. The
+          escalation answer card (textarea / 提交 / 按假设继续) is a SIBLING below, OUTSIDE this
+          button, so its interactions are never hijacked by the open-detail tap (架构约束①). */}
+      <button type="button" className="run-open" onClick={onOpen}>
+        <div className="run-head">
+          <span className="run-name">{name}</span>
+          <span className={`run-badge badge-${st.tone}`}>{st.label}</span>
         </div>
-      )}
-      {run.task && <div className="run-task">{run.task}</div>}
+        <RunPills run={run} isChild={depth > 0} />
+        {run.task && <div className="run-task">{run.task}</div>}
+        {preview && <div className="run-preview">{preview}</div>}
+        {run.error && <div className="run-error">{run.error}</div>}
+        {run.status === "completed" && run.durationMs != null && (
+          <div className="run-foot">{formatDuration(run.durationMs)}</div>
+        )}
+      </button>
       {/* 升级实时可见 / 阻塞式求决策: the worker's 向上求决策 — its self-contained 问题 + the
           假设 it proceeds on. A blocking escalate awaiting the user on a LIVE turn becomes an
           actionable answer card (待你拍板); every other state (非阻塞上报 / 已答复 / 已超时 /
@@ -313,11 +381,6 @@ function RunCard({
           </div>
         );
       })}
-      {preview && <div className="run-preview">{preview}</div>}
-      {run.error && <div className="run-error">{run.error}</div>}
-      {run.status === "completed" && run.durationMs != null && (
-        <div className="run-foot">{formatDuration(run.durationMs)}</div>
-      )}
     </div>
   );
 }
@@ -390,5 +453,533 @@ function EscalationAnswer({
       {busy && <span className="run-escalation-busy">处理中…</span>}
       {err && <span className="run-error">{err}</span>}
     </div>
+  );
+}
+
+// —— 深度检视单个队员 · RunDetail (对齐桌面 RunDetail 抽屉的信息，手机原生重表达) ——
+
+const MODEL_TIER_LABEL: Record<ProjectedAgent["modelPreference"], string> = {
+  fast: "快速",
+  strong: "强模型",
+};
+
+/** 思考档位 → 中文 label (mirrors desktop reasoningMeta): off / 开启. */
+function reasoningLabel(
+  thinking: boolean,
+  _effort: ProjectedAgent["reasoningEffort"],
+): string {
+  if (!thinking) return "关闭";
+  return "开启";
+}
+
+/** Compact token count (1.2k / 3.4M) — the run-detail 资源 is a power detail, kept scannable. */
+function formatCompact(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+/** Integer nano-USD (1 USD = 1e9) → money caption; all-zero renders「—」(§7.5), never「$0.00」. */
+function formatCostUsd(nanoUsd: number): string {
+  const usd = nanoUsd / 1e9;
+  if (usd <= 0) return "—";
+  if (usd < 0.0001) return "<$0.0001";
+  return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
+}
+
+interface RevisionVersion {
+  version: number;
+  run: ProjectedRun;
+}
+
+/** 修订/轮次链 (同链版本从 runs 数组聚合): the version chain containing `runId`, or null when the
+ *  run is a lone version (no chain to show). A revision points at the ORIGINAL (star model), so the
+ *  chain is [v1 原始, …续写 by ascending version]; a debate reads 第 N 轮 off `round`, a 热修 vN off
+ *  `revision`. Mirrors the desktop `revisionChains` projection (built here from the run slice). */
+function revisionChainFor(
+  runs: ProjectedRun[],
+  runId: string,
+): RevisionVersion[] | null {
+  const run = runs.find((r) => r.id === runId);
+  if (!run) return null;
+  const originalId = run.revisionOf ?? run.id;
+  const original = runs.find((r) => r.id === originalId);
+  if (!original) return null;
+  const revisions = runs
+    .filter((r) => r.revisionOf === originalId)
+    .sort((a, b) => a.revision - b.revision);
+  if (revisions.length === 0) return null;
+  return [
+    { version: 1, run: original },
+    ...revisions.map((r) => ({ version: r.revision, run: r })),
+  ];
+}
+
+/**
+ * 深度检视单个队员 (RunDetail): a mobile-native bottom-sheet reduction of the desktop RunDetail
+ * drawer, pinned to one worker run. Sections mirror the desktop order (头部 → 任务/本轮焦点 →
+ * 轮次/修订链 → 升级 → 收到的上下文 → 思考 → 工具明细 → 输出/交接简报 → 资源 → 关系); 诊断/审计
+ * are intentionally omitted (power-user desktop surfaces). Reads only the fold's ProjectedTurn
+ * fields + the transport-only {@link RunToolCall} side channel — no desktop import, no new fold.
+ * Navigates to another run (修订链切换 / 关系跳转) via `onSelect`, which re-pins the panel.
+ */
+function RunDetailPanel({
+  run,
+  agents,
+  runs,
+  toolCalls,
+  onSelect,
+  onClose,
+}: {
+  run: ProjectedRun;
+  agents: ProjectedAgent[];
+  runs: ProjectedRun[];
+  toolCalls: RunToolCall[];
+  onSelect: (runId: string) => void;
+  onClose: () => void;
+}) {
+  const agent = agents.find((a) => a.id === run.agentId);
+  const st = RUN_STATUS[run.status];
+  const name = run.role ?? agent?.role ?? run.agentId;
+  const reasoning = agent?.reasoning ?? "";
+  const output = agent?.output ?? "";
+  const isChild = run.parentRunId != null && run.revisionOf == null;
+
+  // 本轮焦点: a 续写 run (辩论逐轮 / 定向唤回) was fed round-scoped context — show its 本轮焦点 in
+  // place of the (inherited) task, mirroring the desktop RunDetail.
+  const roundFocus =
+    run.revisionOf != null
+      ? run.receivedContext.find((b) => b.channel === "round_focus")?.body
+      : undefined;
+
+  // 收到的上下文: the worker-side blocks it was fed. Hide the verbatim 系统提示 (决策②: mobile has
+  // no full-prompt reveal) — a worker's blocks are task / deliverable / dependency context anyway.
+  const contextBlocks = run.receivedContext.filter(
+    (b) => b.channel !== "system",
+  );
+
+  const chain = revisionChainFor(runs, run.id);
+  const isDebateChain = chain?.some((v) => v.run.stance != null) ?? false;
+
+  // 关系: 依赖 (upstream) / 后续 (downstream) / 上级 (delegate parent) / 子任务 (children).
+  const upstream = run.dependsOn
+    .map((id) => runs.find((r) => r.id === id))
+    .filter((r): r is ProjectedRun => r != null);
+  const downstream = runs.filter((r) => r.dependsOn.includes(run.id));
+  const parent =
+    run.parentRunId != null && run.revisionOf == null
+      ? (runs.find((r) => r.id === run.parentRunId) ?? null)
+      : null;
+  const children = runs.filter(
+    (r) => r.parentRunId === run.id && r.revisionOf == null,
+  );
+  const roleOf = (r: ProjectedRun): string =>
+    r.role ?? agents.find((a) => a.id === r.agentId)?.role ?? r.agentId;
+
+  const hasResources = !!(run.usage || run.cost || run.model);
+  const hasRelations =
+    upstream.length > 0 ||
+    downstream.length > 0 ||
+    parent != null ||
+    children.length > 0;
+
+  return (
+    <Modal
+      className="run-detail"
+      onClose={onClose}
+      label={`${name} · 队员详情`}
+    >
+      <header className="rd-head">
+        <span className="rd-title">{name}</span>
+        <span className={`run-badge badge-${st.tone}`}>{st.label}</span>
+        {run.durationMs != null && (
+          <span className="rd-dur">{formatDuration(run.durationMs)}</span>
+        )}
+        <button
+          type="button"
+          className="rd-close"
+          onClick={onClose}
+          aria-label="关闭"
+        >
+          ✕
+        </button>
+      </header>
+      <div className="rd-body">
+        <RunPills run={run} isChild={isChild} />
+
+        <RunSection title={roundFocus != null ? "本轮焦点" : "任务"}>
+          <Markdown content={roundFocus ?? run.task} evidence />
+        </RunSection>
+
+        {chain && (
+          <RunSection title={isDebateChain ? "轮次" : "版本"}>
+            <div className="rd-chain">
+              {chain.map(({ version, run: v }) => {
+                const current = v.id === run.id;
+                const label = isDebateChain
+                  ? `第 ${v.round || version} 轮`
+                  : `v${version}`;
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    className={`rd-chip${current ? " rd-chip-current" : ""}`}
+                    disabled={current}
+                    onClick={() => onSelect(v.id)}
+                  >
+                    {label}
+                    {current ? " · 当前" : ""}
+                  </button>
+                );
+              })}
+            </div>
+          </RunSection>
+        )}
+
+        {run.escalations.length > 0 && (
+          <RunSection title={`向上升级 (${run.escalations.length})`}>
+            <div className="rd-stack">
+              {run.escalations.map((esc, i) => {
+                const detail = escalationDetail(esc);
+                return (
+                  <div
+                    // biome-ignore lint/suspicious/noArrayIndexKey: per-run escalations are append-only with stable order
+                    key={i}
+                    className="run-escalation"
+                  >
+                    <span className="run-escalation-q">
+                      ↑ {esc.question}
+                      {esc.blocking ? " · 阻断性" : ""}
+                    </span>
+                    {detail && (
+                      <span className="run-escalation-a">{detail}</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </RunSection>
+        )}
+
+        {contextBlocks.length > 0 && (
+          <RunSection title={`收到的上下文 · ${contextBlocks.length} 段`}>
+            <div className="recv-list">
+              {contextBlocks.map((b, i) => (
+                <ContextBlockRow key={`${b.channel}-${i}`} block={b} />
+              ))}
+            </div>
+          </RunSection>
+        )}
+
+        {reasoning && (
+          <RunSection title="思考">
+            <pre className="rd-reasoning">{reasoning}</pre>
+          </RunSection>
+        )}
+
+        {run.error && (
+          <RunSection title="错误">
+            <p className="run-error">{run.error}</p>
+          </RunSection>
+        )}
+
+        {toolCalls.length > 0 && (
+          <RunSection title={`工具明细 (${toolCalls.length})`}>
+            <div className="rd-tools">
+              {toolCalls.map((c) => (
+                <RunToolRow key={c.id} call={c} />
+              ))}
+            </div>
+          </RunSection>
+        )}
+
+        {output && (
+          <RunSection title="输出">
+            <div className="rd-output">
+              <Markdown content={output} evidence />
+            </div>
+          </RunSection>
+        )}
+
+        {run.debrief ? (
+          <DebriefBlock debrief={run.debrief} />
+        ) : run.outputSummary ? (
+          <RunSection title="结论">
+            <Markdown content={run.outputSummary} evidence />
+          </RunSection>
+        ) : null}
+
+        {hasResources && <ResourceBlock run={run} agent={agent} />}
+
+        {hasRelations && (
+          <RunSection title="关系">
+            <div className="rd-stack">
+              {upstream.length > 0 && (
+                <RunRefGroup
+                  label="依赖"
+                  runs={upstream}
+                  roleOf={roleOf}
+                  onSelect={onSelect}
+                />
+              )}
+              {downstream.length > 0 && (
+                <RunRefGroup
+                  label="后续"
+                  runs={downstream}
+                  roleOf={roleOf}
+                  onSelect={onSelect}
+                />
+              )}
+              {parent && (
+                <RunRefGroup
+                  label="上级"
+                  runs={[parent]}
+                  roleOf={roleOf}
+                  onSelect={onSelect}
+                />
+              )}
+              {children.length > 0 && (
+                <RunRefGroup
+                  label={`子任务 (${children.length})`}
+                  runs={children}
+                  roleOf={roleOf}
+                  onSelect={onSelect}
+                />
+              )}
+            </div>
+          </RunSection>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/** A titled run-detail section (label + body), the mobile mirror of the desktop detail `Section`. */
+function RunSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rd-section">
+      <h4 className="rd-section-title">{title}</h4>
+      {children}
+    </section>
+  );
+}
+
+/** One label→value row in the 资源 metrics block. */
+function MetricRow({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rd-metric">
+      <span className="rd-metric-label">{label}</span>
+      <span className={`rd-metric-value${mono ? " rd-mono" : ""}`}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/** A labelled list of related runs (依赖 / 后续 / 上级 / 子任务) — each row navigates the panel to
+ *  that run (关系跳转), reusing the same status tone dot as the cards. */
+function RunRefGroup({
+  label,
+  runs,
+  roleOf,
+  onSelect,
+}: {
+  label: string;
+  runs: ProjectedRun[];
+  roleOf: (r: ProjectedRun) => string;
+  onSelect: (runId: string) => void;
+}) {
+  return (
+    <div className="rd-refs">
+      <div className="rd-refs-label">{label}</div>
+      {runs.map((r) => {
+        const st = RUN_STATUS[r.status];
+        return (
+          <button
+            key={r.id}
+            type="button"
+            className="rd-ref"
+            onClick={() => onSelect(r.id)}
+          >
+            <span className={`rd-ref-dot dot-${st.tone}`} />
+            <span className="rd-ref-name">{roleOf(r)}</span>
+            {r.task && <span className="rd-ref-task">{r.task}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** One worker tool call (RunDetail · 工具明细) — reuses the CEO-side ToolStep visual language
+ *  (.tool*): 中文名 + 参数 detail + status, click to expand the raw args / result pre block. The
+ *  rich 6-类 tool rendering (desktop) is intentionally NOT ported (架构决策③). */
+function RunToolRow({ call }: { call: RunToolCall }) {
+  const [open, setOpen] = useState(false);
+  const args = Object.keys(call.arguments).length > 0 ? call.arguments : null;
+  const detail = toolDetail(call.arguments);
+  const status =
+    call.status === "running"
+      ? "进行中"
+      : call.status === "error"
+        ? "失败"
+        : "完成";
+  const hasBody = !!args || (call.result != null && call.result !== "");
+  return (
+    <div className={`tool tool-${call.status}`}>
+      <button
+        type="button"
+        className="tool-head"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="tool-name">
+          {toolLabel(call.toolName)}
+          {detail && <span className="tool-detail">{detail}</span>}
+        </span>
+        <span className="tool-status">{status}</span>
+      </button>
+      {open && hasBody && (
+        <div className="tool-body">
+          {args && (
+            <pre className="tool-pre">{JSON.stringify(args, null, 2)}</pre>
+          )}
+          {call.result != null && call.result !== "" && (
+            <pre className="tool-pre">{call.result}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One 收到的上下文 block (RunDetail) — reuses the CEO-side ReceivedContext visual language
+ *  (.recv*): channel origin + heading, then the body the worker read + any files / 已截断 mark. */
+function ContextBlockRow({ block }: { block: ContextBlockWire }) {
+  return (
+    <div className="recv-item">
+      <div className="recv-head">
+        <span className="recv-channel">
+          {CONTEXT_CHANNEL_LABEL[block.channel] ?? block.channel}
+        </span>
+        {block.heading && <span className="recv-heading">{block.heading}</span>}
+      </div>
+      {block.body && <pre className="recv-body">{block.body}</pre>}
+      {block.files.length > 0 && (
+        <div className="recv-files">
+          {block.files.map((f) => (
+            <span key={f} className="recv-file">
+              {f}
+            </span>
+          ))}
+        </div>
+      )}
+      {block.truncated && (
+        <div className="recv-trunc">已截断（完整内容已传给 AI）</div>
+      )}
+    </div>
+  );
+}
+
+/** 完工交接简报 (run_completed.debrief) — the worker's OWN structured wrap-up (结论 / 关键要点 /
+ *  关键假设 / 建议下一步); renders only the sections it authored. */
+function DebriefBlock({ debrief }: { debrief: RunDebrief }) {
+  const { summary, key_points, assumptions, next_steps } = debrief;
+  return (
+    <RunSection title="交接简报">
+      <div className="rd-debrief">
+        {summary && (
+          <div className="rd-debrief-part">
+            <div className="rd-part-label">结论</div>
+            <Markdown content={summary} evidence />
+          </div>
+        )}
+        {key_points && key_points.length > 0 && (
+          <div className="rd-debrief-part">
+            <div className="rd-part-label">关键要点</div>
+            <ul className="rd-points">
+              {key_points.map((pt, i) => (
+                <li key={`${i}:${pt}`}>{pt}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {assumptions && (
+          <div className="rd-debrief-part">
+            <div className="rd-part-label">关键假设</div>
+            <p className="rd-assume">{assumptions}</p>
+          </div>
+        )}
+        {next_steps && (
+          <div className="rd-debrief-part">
+            <div className="rd-part-label">建议下一步</div>
+            <Markdown content={next_steps} evidence />
+          </div>
+        )}
+      </div>
+    </RunSection>
+  );
+}
+
+/** 资源用量 (RunDetail) — 档位 / 思考 (from the agent) + 模型 / 成本 / token (from the run's
+ *  run_completed usage+cost). All-zero cost shows「—」. */
+function ResourceBlock({
+  run,
+  agent,
+}: {
+  run: ProjectedRun;
+  agent: ProjectedAgent | undefined;
+}) {
+  const { usage, cost, model } = run;
+  const cacheRate =
+    usage && usage.input > 0
+      ? Math.round((usage.cache_hit / usage.input) * 100)
+      : 0;
+  return (
+    <RunSection title="资源">
+      <div className="rd-metrics">
+        {agent && (
+          <MetricRow
+            label="档位"
+            value={MODEL_TIER_LABEL[agent.modelPreference]}
+          />
+        )}
+        {agent && (
+          <MetricRow
+            label="思考"
+            value={reasoningLabel(agent.thinking, agent.reasoningEffort)}
+          />
+        )}
+        {model && <MetricRow label="模型" value={model} mono />}
+        {cost && <MetricRow label="成本" value={formatCostUsd(cost.total)} />}
+        {usage && (
+          <>
+            <MetricRow label="输入 token" value={formatCompact(usage.input)} />
+            <MetricRow
+              label="缓存命中"
+              value={`${formatCompact(usage.cache_hit)} · ${cacheRate}%`}
+            />
+            <MetricRow label="输出 token" value={formatCompact(usage.output)} />
+            <MetricRow
+              label="推理 token"
+              value={formatCompact(usage.reasoning)}
+            />
+          </>
+        )}
+      </div>
+    </RunSection>
   );
 }

@@ -58,6 +58,9 @@ def _usage_metadata(
         "cache_miss_tokens": result.get("cache_miss_tokens", 0),
         "rounds": result.get("rounds", 0),
     }
+    collab = result.get("collab")
+    if collab:
+        meta["collab"] = collab
     if extra:
         meta.update(extra)
     return meta
@@ -283,19 +286,25 @@ async def persist_turn_result(
         provider = build_provider(bg_credentials, purpose="platform_internal")
         try:
             if needs_title:
-                title = await mint_title(
+                minted = await mint_title(
                     provider=provider,
                     conversation_id=conversation_id,
                     user_message=user_message,
                     assistant_reply=assistant_reply,
                     model=model,
                 )
-                if title:
+                if minted.title:
                     async with async_session_factory() as session:
                         await ConversationRepository(session).update_title_unscoped(
-                            conversation_id, title
+                            conversation_id, minted.title, tag=minted.tag
                         )
-                    sink.emit(title_generated(title, conversation_id=conversation_id))
+                    sink.emit(
+                        title_generated(
+                            minted.title,
+                            conversation_id=conversation_id,
+                            tag=minted.tag,
+                        )
+                    )
             if wants_followups:
                 followups = await mint_followups(
                     provider=provider,

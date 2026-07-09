@@ -155,7 +155,6 @@ function RiskBoard({ risks }: { risks: RiskItem[] }) {
                 <SideIdentity
                   name={r.side.name}
                   colorVar={debateSideColorVar(r.side.key, r.side.name)}
-                  model={r.side.model}
                 />
                 {meta && <span className={meta.pill}>{meta.label}</span>}
               </div>
@@ -445,7 +444,6 @@ function SidePointsGrid({
                 <SideIdentity
                   name={s.name}
                   colorVar={colorVar}
-                  model={s.model}
                 />
                 {score !== undefined && (
                   <span className="inline-flex shrink-0 items-center rounded-full bg-muted px-1.5 py-0.5 text-xs font-semibold tabular-nums text-foreground">

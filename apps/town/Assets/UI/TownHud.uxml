@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements" editor-extension-mode="False">
+    <Style src="TownHud.uss" />
+    <!--
+      AgentTown Phase 1 observer panel (§11). Element names are the binding contract read by
+      TownHudController via rootVisualElement.Q<T>(name). Scope: run management, tick control,
+      playback, residents list + status/SSE. P2/P3 panels (decisions/events/tracking/heatmap/god)
+      are intentionally absent.
+    -->
+    <ui:VisualElement name="town-hud" class="town-hud" picking-mode="Ignore">
+        <ui:VisualElement name="control-panel" class="panel control-panel">
+            <ui:Label name="status-label" class="status" text="AgentTown — 就绪" />
+            <ui:VisualElement class="row status-row">
+                <ui:Label name="tick-label" class="tick" text="Tick — / —" />
+                <ui:Label name="stream-label" class="stream" text="SSE: idle" />
+            </ui:VisualElement>
+
+            <ui:Label class="section-title" text="Run 管理" />
+            <ui:VisualElement class="row">
+                <ui:Button name="create-run-button" class="btn primary grow" text="新建 Run" />
+            </ui:VisualElement>
+            <ui:VisualElement class="row">
+                <ui:TextField name="run-id-field" class="run-field grow" label="Run ID" />
+                <ui:Button name="resume-run-button" class="btn" text="恢复" />
+            </ui:VisualElement>
+
+            <ui:Label class="section-title" text="Tick 控制" />
+            <ui:VisualElement class="row">
+                <ui:Button name="advance-button" class="btn grow" text="推进 Tick" />
+                <ui:Button name="pause-button" class="btn" text="暂停" />
+                <ui:Button name="resume-tick-button" class="btn" text="继续" />
+            </ui:VisualElement>
+
+            <ui:Label class="section-title" text="回放" />
+            <ui:VisualElement class="row">
+                <ui:Button name="prev-button" class="btn icon" text="◀" />
+                <ui:Button name="play-button" class="btn icon" text="▶" />
+                <ui:Button name="next-button" class="btn icon" text="▶▶" />
+                <ui:Button name="live-button" class="btn" text="Live" />
+            </ui:VisualElement>
+            <ui:VisualElement class="row speed-row">
+                <ui:Button name="speed-05" class="btn speed" text="0.5x" />
+                <ui:Button name="speed-1" class="btn speed" text="1x" />
+                <ui:Button name="speed-2" class="btn speed" text="2x" />
+                <ui:Button name="speed-4" class="btn speed" text="4x" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+        <ui:VisualElement name="residents-panel" class="panel residents-panel">
+            <ui:Label class="section-title" text="居民" />
+            <ui:ScrollView name="residents-list" class="residents-list" />
+            <ui:VisualElement name="resident-detail" class="resident-detail">
+                <ui:Label class="detail-hint" text="选择一位居民查看人设与状态。" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

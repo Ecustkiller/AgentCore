@@ -11,6 +11,7 @@ from pydantic import Field, TypeAdapter, ValidationError
 from agentcore.api.schemas.messages import ResolveInteractionRequest, interaction_result_from_body
 from agentcore.core.logging import get_logger
 from agentcore.llm.credentials import LLMCredentials
+from agentcore.llm.profiles import PLATFORM_MODEL_FLASH
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.sidecar import protocol
 from agentcore.sidecar.paused_store import LocalPausedTurnStore
@@ -84,18 +85,25 @@ class HandlerMixin:
     def _parse_inference(raw: Any) -> LLMCredentials | None:
         """Build the per-turn cloud-proxy credentials from ``initialize`` params.
 
-        ``inference = {baseUrl, apiKey}`` points the engine's ``build_provider`` at
+        ``inference = {baseUrl, apiKey, model?}`` points the engine's ``build_provider`` at
         the cloud inference proxy (so the platform key never lands on the user's
-        machine). ``None`` / missing falls back to the sidecar's own server config
+        machine). ``model`` is server-resolved at token mint and echoed here so the
+        local engine logs / profiles match the proxy's upstream model.
+        ``None`` / missing falls back to the sidecar's own server config
         (a dev convenience — never the production posture).
         """
         if not isinstance(raw, dict):
             return None
         base_url = str(raw.get("baseUrl") or "").strip()
         api_key = str(raw.get("apiKey") or "").strip()
+        model = str(raw.get("model") or "").strip()
         if not base_url or not api_key:
             return None
-        return LLMCredentials(api_key=api_key, base_url=base_url)
+        return LLMCredentials(
+            api_key=api_key,
+            base_url=base_url,
+            default_model=model or PLATFORM_MODEL_FLASH,
+        )
 
     def _refresh_creds(self, params: dict[str, Any]) -> None:
         """Refresh session creds from a per-turn ``inference`` block when present.

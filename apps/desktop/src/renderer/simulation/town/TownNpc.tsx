@@ -11,8 +11,7 @@ import {
 } from "../store/simulationStore";
 import { NpcAvatar } from "./NpcAvatar";
 import { targetsEqual } from "./agentSpawn";
-import type { TownPathfinding } from "./navMesh";
-import { computeTownPath } from "./navMesh";
+import { computeTownPath } from "./townPathGrid";
 import { useTownCharacterAssets } from "./townCharacterAssets";
 import { LOD_FAR, LOD_NEAR, type LodLevel } from "./townLod";
 import { townRenderDebug } from "./townRenderDebug";
@@ -25,12 +24,10 @@ const ARRIVE_EPS = 0.12;
 export const M1_DEFAULT_AGENT_ID: TownAgentId = "lin";
 
 export function TownNpc({
-  pathfinding,
   agentId = M1_DEFAULT_AGENT_ID,
   spawnPosition,
   initialLod,
 }: {
-  pathfinding: TownPathfinding;
   agentId?: TownAgentId;
   spawnPosition: Vec3;
   initialLod: LodLevel;
@@ -111,7 +108,6 @@ export function TownNpc({
 
     if (activePath.current.length === 0 && distToTarget > ARRIVE_EPS) {
       activePath.current = computeTownPath(
-        pathfinding,
         group.position.clone(),
         targetVec,
       );

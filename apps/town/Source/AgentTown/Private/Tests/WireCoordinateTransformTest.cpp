@@ -1,4 +1,5 @@
 #include "Misc/AutomationTest.h"
+#include "Simulation/SimTypes.h"
 #include "Simulation/SimulationSession.h"
 #include "Simulation/WireCoordinateTransform.h"
 #include "Misc/FileHelper.h"
@@ -27,15 +28,15 @@ static bool LoadRegionFixture(TSharedPtr<FJsonObject>& OutRoot)
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FWireCoordinateMarketTest,
-	"AgentTown.Simulation.WireCoordinate.MarketMapsTo24_0_0",
+	"AgentTown.Simulation.WireCoordinate.MarketMapsTo2400_0_0",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWireCoordinateMarketTest::RunTest(const FString& Parameters)
 {
 	const FVector Ue = FWireCoordinateTransform::ToUnreal(24.0, 0.0, 0.0);
-	TestEqual(TEXT("Market X"), Ue.X, 24.0f);
-	TestEqual(TEXT("Market Y"), Ue.Y, 0.0f);
-	TestEqual(TEXT("Market Z"), Ue.Z, 0.0f);
+	TestEqual(TEXT("Market X"), Ue.X, 2400.0);
+	TestEqual(TEXT("Market Y"), Ue.Y, 0.0);
+	TestEqual(TEXT("Market Z"), Ue.Z, 0.0);
 	return true;
 }
 
@@ -96,11 +97,23 @@ bool FSimulationSessionApplySnapshotTest::RunTest(const FString& Parameters)
 	FSimulationSession& Session = FSimulationSession::Get();
 	Session.Reset();
 
-	TMap<FString, FWireVec3> Agents;
-	Agents.Add(TEXT("agent-1"), FWireVec3(24.0, 0.0, 0.0));
+	FSimTickSnapshot Snapshot;
+	Snapshot.Tick = 1;
+	Snapshot.Hour = 9;
+	FSimAgentState Agent;
+	Agent.AgentId = TEXT("agent-1");
+	Agent.Position = FWireVec3(24.0, 0.0, 0.0);
+	Snapshot.Agents.Add(Agent.AgentId, Agent);
 
-	Session.ApplySnapshot(Agents);
-	// Smoke: ApplySnapshot runs without throw; full agent map accessors come in UE-01.
+	Session.ApplySnapshot(Snapshot);
+
+	const TMap<FString, FVector>& Positions = Session.GetAgentUnrealPositions();
+	const FVector* UePos = Positions.Find(TEXT("agent-1"));
+	TestNotNull(TEXT("agent-1 position"), UePos);
+	if (UePos)
+	{
+		TestEqual(TEXT("agent-1 X"), UePos->X, 2400.0);
+	}
 	return true;
 }
 

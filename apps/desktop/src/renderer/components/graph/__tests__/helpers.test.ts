@@ -2,8 +2,11 @@ import type { Execution } from "@/stores/execution";
 import { describe, expect, it } from "vitest";
 import {
   type GraphRunLike,
+  buildGraphStructure,
+  computeGraphFold,
   computeTopologicalRunWaves,
   computeWaves,
+  debateModeratorId,
 } from "../helpers";
 
 function run(
@@ -117,5 +120,71 @@ describe("computeWaves", () => {
     expect(bands).toHaveLength(2);
     expect(bands[0]?.label).toBe("批次 1（1 节点）");
     expect(bands[1]?.label).toBe("批次 2（1 节点）");
+  });
+});
+
+describe("computeGraphFold · debate compound", () => {
+  const side = (
+    prefix: string,
+    stance: "pro" | "con",
+    rounds: number,
+  ): GraphRunLike[] => {
+    const original: GraphRunLike = {
+      id: `mod_r1_${prefix}`,
+      dependsOn: [],
+      parentRunId: "mod",
+      revision: 0,
+      revisionOf: null,
+      stance,
+      group: "debate:debate",
+    };
+    const revs: GraphRunLike[] = [];
+    for (let r = 2; r <= rounds; r++) {
+      revs.push({
+        id: `mod_r${r}_${prefix}`,
+        dependsOn: [],
+        parentRunId: original.id,
+        revision: r,
+        revisionOf: original.id,
+        stance,
+        group: "debate:debate",
+      });
+    }
+    return [original, ...revs];
+  };
+
+  const debateRuns = (rounds: number): GraphRunLike[] => [
+    { id: "mod", dependsOn: [], parentRunId: null, kind: "agent" },
+    ...side("pro", "pro", rounds),
+    ...side("con", "con", rounds),
+  ];
+
+  it("folds all debater runs under the moderator unit", () => {
+    const runs = debateRuns(4);
+    expect(debateModeratorId(runs, null)).toBe("mod");
+    const fold = computeGraphFold(runs, null);
+    expect(fold.debateUnits.has("mod")).toBe(true);
+    expect(fold.folded.size).toBe(8);
+    expect(fold.unitOf.get("mod_r1_pro")).toBe("mod");
+    expect(fold.unitOf.get("mod_r4_con")).toBe("mod");
+  });
+
+  it("collapsed graph exposes only the moderator as a top-level worker node", () => {
+    const { nodeIds } = buildGraphStructure(debateRuns(4), "__input__");
+    const workers = nodeIds.filter(
+      (id) => id !== "__input__" && id !== "captain",
+    );
+    expect(workers).toEqual(["mod"]);
+  });
+
+  it("expanded graph includes all debater versions for drill-in layout", () => {
+    const expanded = new Set(["mod"]);
+    const { nodeIds } = buildGraphStructure(
+      debateRuns(4),
+      "__input__",
+      expanded,
+    );
+    expect(nodeIds).toContain("mod_r1_pro");
+    expect(nodeIds).toContain("mod_r4_con");
   });
 });

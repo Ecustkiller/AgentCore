@@ -25,6 +25,7 @@ __all__ = [
     "resolve_credentials",
     "resolve_model_config",
     "resolve_turn_model",
+    "resolve_user_chat_model",
     "resolve_user_llm_credentials",
 ]
 
@@ -162,3 +163,14 @@ def resolve_turn_model(credentials: LLMCredentials | None) -> str:
     if credentials is not None:
         return credentials.default_model
     return settings.platform_model
+
+
+async def resolve_user_chat_model(session: AsyncSession, user_id: str) -> str:
+    """Chat model for a user-facing turn — matches inference proxy upstream resolution."""
+    cfg = await resolve_model_config(session, user_id, "chat")
+    if cfg is not None:
+        return cfg.model
+    platform = platform_llm_credentials()
+    if platform is not None:
+        return settings.platform_model
+    return PLATFORM_MODEL_FLASH

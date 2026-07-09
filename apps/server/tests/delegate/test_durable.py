@@ -150,7 +150,7 @@ async def test_durable_capture_skipped_without_transcript():
 async def test_durable_resume_drives_tail_from_journal_not_frame():
     from agentcore.runtime.facts import TurnFactLog, current_fact_log
     from agentcore.runtime.journal import completed_from_journal, plan_from_journal
-    from agentcore.runtime.pipeline import _settle_resumed_suspension
+    from agentcore.runtime.pipeline.resume import settle_resumed_suspension
     from agentcore.runtime.suspension import (
         PlanReviewSuspension,
         captain_transcript,
@@ -208,7 +208,7 @@ async def test_durable_resume_drives_tail_from_journal_not_frame():
     )
     resume_provider = Provider(["S2OUT"])
     resume_tool = tool(resume_provider, resume_sink)
-    settled = await _settle_resumed_suspension(
+    settled = await settle_resumed_suspension(
         restored,
         decision=CheckpointDecision.CONTINUE,
         note="",

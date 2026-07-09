@@ -4,20 +4,12 @@
  * 回合流式期间，`Markdown` 每收到一批 delta 就重渲染一次；若每次都把累积的全文重新解析，
  * 整轮是 O(n²)。这里把内容切成**一串顶层块**（{@link splitMarkdownBlocks}）：每个已写完的块
  * 各自记忆化、只解析一次并永久冻结，仅最后的「在写尾块」随每批 delta 重解析——整轮降到 O(总量)。
- * {@link splitStreamingMarkdown} 是其上「冻结前缀 + 尾块」两分视图的薄封装（向后兼容）。
  *
  * 安全性：只在**栅栏代码块之外**、且**下一非空行不是列表/引用/缩进续行**的空行处切分，因此
  * 每一块各自都是「独立合法的 Markdown」——冻结块的渲染结果与它在整篇文档里时完全一致，松散
  * 列表 / 多行引用 / 代码块都不会被从中劈开。调用方对**收尾后的最终内容仍按整篇渲染一次**，
  * 故本切分保守漏掉的跨块引用（如 `[ref]` 链接定义）会在终态被正确解析。
  */
-export interface StreamingSplit {
-  /** 已写完、可冻结的前缀（含其后的空行）；无完整块时为空串。 */
-  stable: string;
-  /** 仍在写的尾块（最后一个块边界之后的全部内容）。 */
-  tail: string;
-}
-
 /** 续行：列表项 / 有序列表项 / 引用 / 缩进（≥2 空格或 Tab）。绝不在这类行之前切分，
  *  以免把松散列表、多行引用、缩进代码从中劈开。 */
 const CONTINUATION = /^(?:\s*(?:[-*+]|\d+[.)])\s|>|\s{2,}\S|\t)/;
@@ -87,17 +79,4 @@ export function splitMarkdownBlocks(content: string): string[] {
   }
   blocks.push(content.slice(prev));
   return blocks;
-}
-
-/**
- * 把流式内容切成 `{ stable, tail }`，恒满足 `stable + tail === content`：`tail` 是最后一块
- * （在写尾块），`stable` 是其前所有已写完块。{@link splitMarkdownBlocks} 的两分视图封装。
- *
- * 仅供流式期调用；收尾后整篇渲染，无需切分。
- */
-export function splitStreamingMarkdown(content: string): StreamingSplit {
-  const blocks = splitMarkdownBlocks(content);
-  if (blocks.length <= 1) return { stable: "", tail: content };
-  const tail = blocks[blocks.length - 1];
-  return { stable: blocks.slice(0, -1).join(""), tail };
 }

@@ -25,6 +25,10 @@ MAX_DELEGATION_TASKS = 10
 # latency / fan-out) on top of the tree-wide width budget (MAX_PARALLEL_DELEGATIONS).
 MAX_DELEGATION_DEPTH = 2
 
+# Per worker-captain cap on sub-workers spawned across all nested delegate calls
+# in one turn (depth-1 leads only; CEO uses MAX_DELEGATION_TASKS instead).
+MAX_WORKER_SUBDELEGATIONS = 4
+
 # Hard ceiling on per-node retries regardless of what a task declares.
 MAX_RUN_RETRIES = 3
 
@@ -87,7 +91,7 @@ DEP_POINTER_SUMMARY_CHARS = 600
 DEP_POINTER_MAX_FILES = 20
 
 # CEO 综述输入瘦身: the prose pool shared across a batch's pass_through workers when
-# their products are rendered into the CEO's synthesis input (delegate._format_for_ceo).
+# their products are rendered into the CEO's synthesis input (ceo_format.format_for_ceo).
 # Same fidelity discipline as a worker's dep-injection budget, but applied at the OTHER
 # fan-in (all workers → the CEO's overview pass) instead of (a worker's deps → it). The
 # motive is correctness, not only cost: an unbounded aggregate would hit the single
@@ -113,9 +117,6 @@ CEO_SYNTHESIS_BUDGET = 10000
 # budget spends on what's most likely relevant, not whatever sorts alphabetically first.
 WORKSPACE_MANIFEST_MAX_FILES = 40
 WORKSPACE_MANIFEST_CHAR_BUDGET = 1800
-
-# Canonical name of the worker-only「申请派人权」tool (auto can_delegate mode).
-REQUEST_DELEGATE_TOOL_NAME = "request_delegate"
 
 # Canonical name of the worker-only「向上升级」tool (worker → CEO clarification
 # channel). One source of truth shared by three sites that must agree without coupling

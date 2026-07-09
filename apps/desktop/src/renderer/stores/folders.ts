@@ -22,10 +22,14 @@ interface FoldersUiState {
   pendingNewChatCloud: boolean;
   /** User-pinned folders shown at the top of workspace pickers. */
   pinnedFolderIds: string[];
+  /** Canonical「新建项目」dialog (command palette, etc.). */
+  createProjectOpen: boolean;
 
   setPendingRename: (id: string | null) => void;
   setPendingNewChatFolder: (id: string | null) => void;
   setPendingNewChatCloud: (cloud: boolean) => void;
+  openCreateProject: () => void;
+  closeCreateProject: () => void;
   togglePinFolder: (id: string) => void;
 }
 
@@ -36,9 +40,12 @@ export const useFoldersStore = create<FoldersUiState>()(
       pendingNewChatFolderId: null,
       pendingNewChatCloud: false,
       pinnedFolderIds: [],
+      createProjectOpen: false,
       setPendingRename: (id) => set({ pendingRenameId: id }),
       setPendingNewChatFolder: (id) => set({ pendingNewChatFolderId: id }),
       setPendingNewChatCloud: (cloud) => set({ pendingNewChatCloud: cloud }),
+      openCreateProject: () => set({ createProjectOpen: true }),
+      closeCreateProject: () => set({ createProjectOpen: false }),
       togglePinFolder: (id) =>
         set((s) => ({
           pinnedFolderIds: s.pinnedFolderIds.includes(id)

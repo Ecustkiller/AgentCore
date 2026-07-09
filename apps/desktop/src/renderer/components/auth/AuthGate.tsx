@@ -2,9 +2,14 @@ import { LoginPage } from "@/pages/LoginPage";
 import { ServiceUnavailablePage } from "@/pages/ServiceUnavailablePage";
 import {
   setServiceUnavailableHandler,
+  setSessionRenewedHandler,
   setUnauthorizedHandler,
 } from "@/services/api";
 import { bootstrapAuth, diagnoseOutage } from "@/services/auth";
+import {
+  clearAgentTownSession,
+  persistAgentTownSession,
+} from "@/services/agentTownSession";
 import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
 import { useAuthStore } from "@/stores/auth";
 import { type ReactNode, useCallback, useEffect } from "react";
@@ -31,11 +36,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
       switch (result.kind) {
         case "authenticated":
           store.setAuthenticated(result.user);
+          void persistAgentTownSession();
           break;
         case "unavailable":
           store.setUnavailable(result.reason);
           break;
         case "unauthenticated":
+          void clearAgentTownSession();
           store.setUnauthenticated();
           break;
       }
@@ -51,7 +58,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
     // Offline web preview (pnpm dev:web / scripts/shoot.mjs) has no backend; skip
     // auth bootstrap entirely so #/preview renders fully offline.
     if (typeof window !== "undefined" && window.__WEB_PREVIEW__) return;
-    setUnauthorizedHandler(() => useAuthStore.getState().setUnauthenticated());
+    setUnauthorizedHandler(() => {
+      void clearAgentTownSession();
+      useAuthStore.getState().setUnauthenticated();
+    });
+    setSessionRenewedHandler(() => void persistAgentTownSession());
     // Mid-session outage: a non-auth call hit a 5xx/network error. Confirm with
     // /readyz before taking over the screen so a one-off endpoint 500 on a
     // healthy backend doesn't blank the app.
@@ -66,6 +77,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     void runBootstrap();
     return () => {
       setUnauthorizedHandler(null);
+      setSessionRenewedHandler(null);
       setServiceUnavailableHandler(null);
     };
   }, [runBootstrap]);

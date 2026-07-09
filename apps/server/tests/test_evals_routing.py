@@ -181,7 +181,7 @@ def test_non_routing_category_unaffected_by_label_rule() -> None:
 
 def test_seeded_routing_suite_loads_and_lints_clean() -> None:
     cases = load_cases(suite="routing")
-    assert len(cases) >= 5
+    assert len(cases) >= 6
     assert all(c.category == "routing" and c.path == "team" for c in cases)
     # 每条恰好一个路由标签（与聚合器单一标签源契约一致）。
     for c in cases:

@@ -48,6 +48,28 @@ const liveFolds = new WeakMap<
   { count: number; state: FoldState }
 >();
 
+/** Merge transport-only worker `tool_use_progress` (keyed by run_id) onto agents. */
+function overlayWorkerToolPhases(
+  exec: Execution,
+  rt: ExecutionRuntime,
+): Execution {
+  const phases = rt.workerToolPhases;
+  if (Object.keys(phases).length === 0) return exec;
+  let changed = false;
+  const agents = exec.agents.map((a) => {
+    const rid = a.currentRunId;
+    if (!rid) return a;
+    const live = phases[rid];
+    if (!live) return a;
+    changed = true;
+    return {
+      ...a,
+      toolExecutionLive: { toolName: live.toolName, phase: live.phase },
+    };
+  });
+  return changed ? { ...exec, agents } : exec;
+}
+
 /**
  * Project a runtime snapshot to its {@link Execution} (WeakMap-cached per `rt`, so one
  * finalize per snapshot shared across all consumers of that turn-frame). The shared
@@ -59,10 +81,14 @@ const liveFolds = new WeakMap<
 export function projectRuntime(rt: ExecutionRuntime): Execution | null {
   if (!rt.plan) return null;
   const cached = projectionCache.get(rt);
-  if (cached) return cached;
-  const exec = computeProjection(rt, rt.plan);
-  projectionCache.set(rt, exec);
-  return exec;
+  const base =
+    cached ??
+    (() => {
+      const exec = computeProjection(rt, rt.plan);
+      projectionCache.set(rt, exec);
+      return exec;
+    })();
+  return overlayWorkerToolPhases(base, rt);
 }
 
 function computeProjection(

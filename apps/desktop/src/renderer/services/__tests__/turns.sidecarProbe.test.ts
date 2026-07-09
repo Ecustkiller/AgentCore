@@ -212,7 +212,8 @@ function pendingFrame(messageId: string, conversationId = "c1"): PendingResume {
     assumptions: [],
     questions: [],
     styleOptions: [],
-    intent: "decision",
+    intent: "kickoff",
+    origin: "sidecar",
   };
 }
 
@@ -271,6 +272,20 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     expect(resumeConversationMock).toHaveBeenCalledTimes(1);
     expect(resumeViaSidecarMock).not.toHaveBeenCalled();
     expect(usePausedTurnStore.getState().pending).toHaveLength(0); // 云端续跑照常认领
+  });
+
+  it("云端暂停帧（origin=server）即使绑了本地根也走云 resume", async () => {
+    resolveSidecarRootMock.mockResolvedValue(TARGET);
+    usePausedTurnStore.setState({
+      pending: [{ ...pendingFrame("m1"), origin: "server" }],
+    });
+
+    await runResume("m1", "continue", "");
+
+    expect(probeSidecarMock).not.toHaveBeenCalled();
+    expect(resumeConversationMock).toHaveBeenCalledTimes(1);
+    expect(resumeViaSidecarMock).not.toHaveBeenCalled();
+    expect(usePausedTurnStore.getState().pending).toHaveLength(0);
   });
 
   it("探活失败横幅的「重试」清缓存强制重探（非死按钮）", async () => {

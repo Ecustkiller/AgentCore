@@ -12,9 +12,6 @@ class CreateConversationRequest(BaseModel):
     # (which would race the workspace-lock guard once the first turn lands — see
     # 双模式工作区 §九 ⑩). None = ungrouped.
     folder_id: str | None = None
-    # Initial 质量档 (llm/modes.py): a preset name or custom mode id; None = inherit
-    # the user's default → operator default.
-    model_mode: str | None = None
     # Desktop's default local container root (工作区对称化 D1a), captured at creation so
     # locality is decided once. When set (and the chat is born ungrouped), its first
     # file write — Agent turn OR panel op — lazily promotes it into a *local* workspace
@@ -27,6 +24,8 @@ class CreateConversationRequest(BaseModel):
 class ConversationSummary(BaseModel):
     id: str
     title: str | None
+    # Auto-classified on first-turn title minting (对话自动标签); null = unclassified.
+    tag: str | None = Field(None, pattern="^(code_review|research|writing|analysis)$")
     updated_at: datetime
     created_at: datetime
     # Number of messages; 0 for a brand-new, unsent chat. The sidebar uses this to
@@ -44,12 +43,6 @@ class ConversationSummary(BaseModel):
     # rather than the cloud REST source which would mis-write a local folder server-side.
     # None ⇒ cloud intent; moot once foldered (the folder's own binding governs).
     local_container_root_id: str | None = None
-    # Selected 质量档 (llm/modes.py); None = inherit user default → operator default.
-    model_mode: str | None = None
-    # Per-conversation custom instructions (对话级自定义指令); None/"" = none. Injected
-    # into this conversation's system prompt so every turn (and the delegated team)
-    # follows it. Echoed on reads so the client can populate the editor.
-    instructions: str | None = None
     # Sidebar housekeeping (对话基础功能补齐). ``pinned`` floats the row to the top
     # (置顶对话); ``archived`` marks it as hidden from the live list (归档对话) — the
     # grouped/live endpoints already exclude archived rows, so this is True only on
@@ -69,12 +62,6 @@ class ConversationListResponse(BaseModel):
 
 class UpdateConversationRequest(BaseModel):
     title: str | None = None
-    # Selected 质量档 (llm/modes.py); explicit null clears back to「inherit default」.
-    # Optional: omit to leave unchanged (the route reads ``model_fields_set``).
-    model_mode: str | None = None
-    # Per-conversation custom instructions (对话级自定义指令). Optional — omit to leave
-    # unchanged (the route reads ``model_fields_set``); an explicit null or "" clears it.
-    instructions: str | None = Field(None, max_length=4000)
     # Sidebar housekeeping toggles (对话基础功能补齐). Optional — omit to leave
     # unchanged (the route reads ``model_fields_set``); never null (no tri-state).
     pinned: bool | None = None

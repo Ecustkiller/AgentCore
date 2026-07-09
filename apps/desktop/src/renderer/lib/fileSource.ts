@@ -151,6 +151,13 @@ export interface FileSource {
   revealInOsFileManager?(path: string): Promise<void>;
   /** 用系统默认程序打开该文件（PDF/Office/压缩包等 in-app 打不开的类型）。失败抛异常。 */
   openWithOsDefaultApp?(path: string): Promise<void>;
+  /**
+   * 在绑定工作区的目录打开交互式终端（仅本地源；经 `terminalApi.openShellAtRoot`）。
+   * `""` / `"."` = 工作区根。
+   */
+  openShellAtPath?(path: string): Promise<void>;
+  /** @deprecated Prefer {@link openShellAtPath} with `"."`. */
+  openWorkspaceShell?(): Promise<void>;
   /** 把该路径的绝对路径写入系统剪贴板（写入在主进程完成）。失败抛异常。 */
   copyOsPath?(path: string): Promise<void>;
 }

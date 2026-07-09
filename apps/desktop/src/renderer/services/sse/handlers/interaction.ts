@@ -1,4 +1,5 @@
 import { useApprovalStore } from "@/stores/approvals";
+import { useDelegationAuthStore } from "@/stores/delegationAuth";
 import { useConversationStore } from "@/stores/conversation";
 import { frameFromEvent, useExecutionStore } from "@/stores/execution";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
@@ -7,6 +8,8 @@ import type {
   ApprovalResolvedPayload,
   CheckpointRequiredPayload,
   CheckpointResolvedPayload,
+  DelegationAuthorizationRequiredPayload,
+  DelegationAuthorizationResolvedPayload,
   PlanReviewRequiredPayload,
   PlanReviewResolvedPayload,
   QuestionPostedPayload,
@@ -32,6 +35,30 @@ export function handleInteractionEvent(
       useApprovalStore
         .getState()
         .remove((event.payload as ApprovalResolvedPayload).approval_id);
+      return true;
+    }
+    case "delegation_authorization_required": {
+      useDelegationAuthStore
+        .getState()
+        .add(event.payload as DelegationAuthorizationRequiredPayload);
+      return true;
+    }
+    case "delegation_authorization_resolved": {
+      const p = event.payload as DelegationAuthorizationResolvedPayload;
+      const store = useDelegationAuthStore.getState();
+      if (p.decision === "grant_delegation") {
+        const pending = store.pending.find(
+          (item) => item.authorizationId === p.authorization_id,
+        );
+        if (pending) {
+          store.recordGrant({
+            conversationId: pending.conversationId,
+            executionId: p.execution_id,
+            tools: pending.tools,
+          });
+        }
+      }
+      store.resolve(p.authorization_id);
       return true;
     }
     case "checkpoint_required": {
@@ -94,6 +121,9 @@ export function handleInteractionEvent(
     }
     case "plan_review_resolved": {
       const p = event.payload as PlanReviewResolvedPayload;
+      console.warn(
+        `[Resume] plan_review_resolved conversationId=${conversationId} checkpointId=${p.checkpoint_id} decision=${p.decision}`,
+      );
       useConversationStore
         .getState()
         .settlePlanReview(

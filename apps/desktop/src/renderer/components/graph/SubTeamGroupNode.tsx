@@ -4,17 +4,22 @@ interface SubTeamGroupData {
   parentRole: string;
   memberCount: number;
   handleDirection: "horizontal" | "vertical";
+  variant?: "debate";
   [key: string]: unknown;
 }
 
 export function SubTeamGroupNode({ data }: NodeProps) {
   const d = data as SubTeamGroupData;
   const horizontal = d.handleDirection === "horizontal";
+  const label =
+    d.variant === "debate"
+      ? `辩论 · ${d.memberCount} 辩手 run`
+      : `${d.parentRole} 子队 · ${d.memberCount} 人`;
 
   return (
     <div className="h-full w-full rounded-xl border border-dashed border-muted-foreground/25 bg-muted/5">
       <div className="px-2.5 py-1 text-xs font-medium text-muted-foreground/60">
-        {d.parentRole} 子队 · {d.memberCount} 人
+        {label}
       </div>
       <Handle
         type="target"

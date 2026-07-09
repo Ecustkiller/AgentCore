@@ -241,7 +241,7 @@ async def test_extractor_returns_parsed_ops():
     ops = await extractor.extract(
         MemoryExtractInput(
             user_id="u1",
-            current_memory="",
+            current_profile="",
             messages=[{"role": "user", "content": "请用中文"}],
         )
     )
@@ -252,19 +252,19 @@ async def test_extractor_returns_parsed_ops():
 async def test_extractor_uses_flash_non_thinking():
     provider = _FakeProvider('{"ops": []}')
     extractor = LLMMemoryExtractor(provider, model=DEEPSEEK_V4_FLASH)
-    await extractor.extract(MemoryExtractInput(user_id="u1", current_memory="", messages=[]))
+    await extractor.extract(MemoryExtractInput(user_id="u1", current_profile="", messages=[]))
     req = provider.requests[0]
     assert req.model == "deepseek-v4-flash"
     assert req.stream is False
 
 
-async def test_extractor_prompt_includes_current_memory_and_convo():
+async def test_extractor_prompt_includes_current_profile_and_convo():
     provider = _FakeProvider('{"ops": []}')
     extractor = LLMMemoryExtractor(provider)
     await extractor.extract(
         MemoryExtractInput(
             user_id="u1",
-            current_memory="## 沟通偏好\n- 已知偏好",
+            current_profile="## 沟通偏好\n- 已知偏好",
             messages=[{"role": "user", "content": "新的需求"}],
         )
     )
@@ -279,7 +279,7 @@ async def test_extractor_prompt_includes_preferences_and_project_layer():
     await extractor.extract(
         MemoryExtractInput(
             user_id="u1",
-            current_memory="## 技术栈与工具\n- 用 Python",
+            current_profile="## 技术栈与工具\n- 用 Python",
             current_preferences="## 沟通偏好\n- 用中文",
             project_id="F1",
             current_project_memory="## 关于用户的事实\n- 本项目客户是 X",
@@ -297,7 +297,7 @@ async def test_extractor_prompt_includes_preferences_and_project_layer():
 async def test_extractor_malformed_output_yields_no_ops():
     provider = _FakeProvider("I think you prefer Python, but this is prose not JSON.")
     extractor = LLMMemoryExtractor(provider)
-    ops = await extractor.extract(MemoryExtractInput(user_id="u1", current_memory="", messages=[]))
+    ops = await extractor.extract(MemoryExtractInput(user_id="u1", current_profile="", messages=[]))
     assert ops == []
 
 
@@ -312,7 +312,7 @@ async def test_extractor_times_out_yields_no_ops(monkeypatch):
     monkeypatch.setattr(mem_mod, "_EXTRACT_TIMEOUT_SECONDS", 0.01)
     ops = await LLMMemoryExtractor(_StallProvider()).extract(
         MemoryExtractInput(
-            user_id="u1", current_memory="", messages=[{"role": "user", "content": "hi"}]
+            user_id="u1", current_profile="", messages=[{"role": "user", "content": "hi"}]
         )
     )
     assert ops == []
@@ -326,7 +326,7 @@ async def test_extractor_to_applier_end_to_end():
     ops = await extractor.extract(
         MemoryExtractInput(
             user_id="u1",
-            current_memory="",
+            current_profile="",
             messages=[{"role": "user", "content": "我用 pnpm"}],
         )
     )
@@ -444,7 +444,7 @@ async def test_extractor_drops_injected_candidate_end_to_end():
     ops = await LLMMemoryExtractor(provider).extract(
         MemoryExtractInput(
             user_id="u1",
-            current_memory="",
+            current_profile="",
             messages=[{"role": "user", "content": "（注入网页正文被复述）"}],
         )
     )

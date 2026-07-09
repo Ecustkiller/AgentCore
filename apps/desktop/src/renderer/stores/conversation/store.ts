@@ -15,6 +15,8 @@ import {
 } from "@/lib/foldMessageLane";
 import { stopConversation } from "@/services/stopTurn";
 import { useApprovalStore } from "@/stores/approvals";
+import { useDelegationAuthStore } from "@/stores/delegationAuth";
+import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { execRuntime, useExecutionStore } from "@/stores/execution";
 import type {
   CheckpointDecision,
@@ -121,6 +123,7 @@ export interface ConversationState {
       usage?: UsageBreakdown;
       rounds?: number;
       finishReason?: string;
+      collab?: import("@/types/events").TurnCollabMetrics;
     },
     conversationId?: string | null,
   ) => void;
@@ -482,6 +485,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
             ...(meta.finishReason !== undefined
               ? { finishReason: meta.finishReason }
               : {}),
+            ...(meta.collab !== undefined ? { collab: meta.collab } : {}),
           };
         }
         return { messages };
@@ -780,6 +784,9 @@ export const useConversationStore = create<ConversationState>((set, get) => {
           !!prev?.isGenerating ||
           useApprovalStore
             .getState()
+            .pending.some((p) => p.conversationId === prevKey) ||
+          useDelegationAuthStore
+            .getState()
             .pending.some((p) => p.conversationId === prevKey);
         if (!prevBusy) delete byId[prevKey];
         if (!byId[nextKey]) byId[nextKey] = { ...EMPTY_RUNTIME };
@@ -797,6 +804,9 @@ export const useConversationStore = create<ConversationState>((set, get) => {
           slice.isGenerating ||
           useApprovalStore
             .getState()
+            .pending.some((p) => p.conversationId === conversationId) ||
+          useDelegationAuthStore
+            .getState()
             .pending.some((p) => p.conversationId === conversationId);
         if (busy) return {};
         const byId = { ...state.byId };
@@ -813,9 +823,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       if (conversationId) void stopConversation(conversationId);
       patchActive(() => ({ abort: null }));
       get().finalizeLastMessage();
-      useApprovalStore
-        .getState()
-        .clear(get().currentConversationId ?? DRAFT_KEY);
+      clearInteractionPrompts(get().currentConversationId ?? DRAFT_KEY);
       const mid = lastAssistantMessageId(activeRuntime(get()).messages);
       if (mid) {
         const exec = useExecutionStore.getState();

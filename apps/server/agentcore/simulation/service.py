@@ -28,10 +28,10 @@ from agentcore.simulation.interaction import (
     SimInteractionPayload,
 )
 from agentcore.simulation.llm import (
+    SimDecisionKind,
     SimLlmNotConfigured,
     SimModelRouter,
     SimModelRoutingConfig,
-    SimModelTier,
     build_sim_provider,
     default_routing_config,
     resolve_text_mode,
@@ -195,8 +195,9 @@ class SimulationService:
             merged.update(router.to_manifest())
             await self._repo.update_run_config(run_id, merged)
         text_mode = resolve_text_mode(llm_cfg.base_url, override=self._text_mode)
-        turn_model = router.resolve(SimModelTier.ROUTINE)
-        interaction_model = router.resolve(SimModelTier.CRITICAL)
+        turn_model = router.model_for_decision(SimDecisionKind.ROUTINE_TICK)
+        interaction_model = router.model_for_decision(SimDecisionKind.INTERACTION)
+        reflection_model = router.model_for_decision(SimDecisionKind.REFLECTION)
 
         self._tick_db_lock = asyncio.Lock()
         metrics: TickMetrics | None = None
@@ -266,7 +267,7 @@ class SimulationService:
                     if p.agent_id in world.agents
                 ],
                 llm=llm,
-                model=turn_model,
+                model=reflection_model,
             )
             metrics = MetricsAggregator().aggregate(
                 world, tick_interactions=interaction_results

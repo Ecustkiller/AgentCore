@@ -34,6 +34,7 @@ def _to_response(status: LlmKeyStatus) -> LlmKeyStatusResponse:
         message=status.message,
         base_url=status.base_url,
         default_model=status.default_model,
+        byok_model=status.byok_model,
         supports_tools=status.supports_tools,
         billing_mode=status.billing_mode,
         billing_preference=status.billing_preference,

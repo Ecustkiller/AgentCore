@@ -13,7 +13,7 @@ import {
   flushPendingFrames,
 } from "@/services/sse/dispatch";
 import { traceTurnMilestone } from "@/services/turnTrace";
-import { useApprovalStore } from "@/stores/approvals";
+import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { getRuntime } from "@/stores/conversation";
 import type { SSEEvent } from "@/types/events";
 
@@ -129,7 +129,7 @@ async function pumpSSE(
       if (!line.startsWith("data: ")) continue;
       try {
         const event = JSON.parse(line.slice(6)) as SSEEvent;
-        dispatchSSEEvent(event, { conversationId });
+        dispatchSSEEvent(event, { conversationId, source: "server" });
       } catch {
         /* malformed event — skip */
       }
@@ -196,7 +196,7 @@ async function runMessageStream(
   conversationId: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  useApprovalStore.getState().clear(conversationId);
+  clearInteractionPrompts(conversationId);
 
   const doFetch = (signal: AbortSignal) =>
     fetch(`${BASE_URL}${path}`, {

@@ -1,12 +1,20 @@
+import { toDebateModel } from "@/components/chat/debate/model";
 import { NODE_HEIGHT, NODE_WIDTH } from "@/lib/elk-layout";
 import type { GroupLayout } from "@/lib/elk-layout";
 import { estimateTokens, formatCost, headText, tailText } from "@/lib/format";
 import { detectReviewConcern } from "@/lib/reviewConcern";
+import type { InjectGraphOverlay } from "@/lib/causalInject";
 import type { Execution, RunStatus } from "@/stores/execution";
 import type { GraphEdge } from "@/stores/graph";
 import type { Edge, Node } from "@xyflow/react";
 import { INPUT_ID } from "./constants";
-import { type SubTeam, deriveArtifacts, resolveHandoff } from "./helpers";
+import {
+  type GraphFoldInfo,
+  type SubTeam,
+  computeGraphFold,
+  deriveArtifacts,
+  resolveHandoff,
+} from "./helpers";
 
 export interface FlowGraphProjectionInput {
   execution: Execution;
@@ -26,10 +34,14 @@ export interface FlowGraphProjectionInput {
   groups: GroupLayout[];
   subTeams: SubTeam[];
   auditCounts?: Record<string, number>;
+  foldInfo?: GraphFoldInfo;
+  expandedUnits?: ReadonlySet<string>;
+  onToggleUnitExpand?: (unitId: string) => void;
 }
 
 export interface FlowEdgeProjectionInput extends FlowGraphProjectionInput {
   edges: GraphEdge[];
+  injectOverlay?: InjectGraphOverlay | null;
 }
 
 /** Find the innermost group containing a run (for nested delegate teams). */
@@ -165,6 +177,9 @@ export function projectFlowNodes({
   groups,
   subTeams,
   auditCounts,
+  foldInfo: foldInfoIn,
+  expandedUnits = new Set(),
+  onToggleUnitExpand,
 }: FlowGraphProjectionInput): Node[] {
   const placed = (id: string) => {
     const slot = positions[id];
@@ -176,7 +191,28 @@ export function projectFlowNodes({
 
   const workerRuns = execution.runs.filter((r) => r.id !== captainRun?.id);
   const workerIdSet = new Set(workerRuns.map((r) => r.id));
+  const captainId = captainRun?.id ?? null;
+  const foldInfo =
+    foldInfoIn ?? computeGraphFold(execution.runs, captainId);
+  const debateModel = toDebateModel(execution);
   const nodes: Node[] = [];
+
+  // A revision (辩论/圆桌 续写轮) is laid out inside its source's sub-team compound
+  // (see elk-layout.ts), so it must render under the SAME group node — resolve it
+  // to its revision root and look the group up by that, else it falls back to a
+  // top-level node and escapes the box (the phantom column the user reported).
+  const runById = new Map(execution.runs.map((r) => [r.id, r]));
+  const layoutOwnerOf = (runId: string): string => {
+    let cur = runId;
+    const seen = new Set<string>();
+    while (!seen.has(cur)) {
+      seen.add(cur);
+      const r = runById.get(cur);
+      if (!r?.revisionOf || r.revisionOf === cur) break;
+      cur = r.revisionOf;
+    }
+    return cur;
+  };
 
   const rootGroupIds = new Set(
     groups
@@ -218,13 +254,58 @@ export function projectFlowNodes({
         parentRole: parentAgent?.role ?? st.parentId,
         memberCount: st.memberIds.length + 1,
         handleDirection,
+        ...(foldInfo.debateUnits.has(st.parentId)
+          ? { variant: "debate" as const }
+          : {}),
       },
       zIndex: -1,
     } as Node);
   }
 
   for (const [i, run] of workerRuns.entries()) {
-    const group = innermostGroupForRun(run.id, groups, subTeams);
+    const unit = foldInfo.unitOf.get(run.id) ?? run.id;
+    const isFoldedChild = foldInfo.folded.has(run.id);
+    if (isFoldedChild && !expandedUnits.has(unit)) continue;
+
+    const isDebateUnit =
+      foldInfo.debateUnits.has(run.id) && unit === run.id;
+    if (isDebateUnit && !expandedUnits.has(run.id)) {
+      const pos = placed(run.id);
+      if (!pos) continue;
+      const childCount = foldInfo.descendants.get(run.id)?.length ?? 0;
+      const roundCount =
+        debateModel?.rounds.length ??
+        Math.max(
+          0,
+          ...workerRuns
+            .filter((r) => foldInfo.unitOf.get(r.id) === run.id)
+            .map((r) => r.round),
+        );
+      const focused = litRunId === run.id;
+      nodes.push({
+        id: run.id,
+        type: "debateCompound",
+        position: pos,
+        data: {
+          runId: run.id,
+          motion: debateModel?.motion ?? null,
+          roundCount,
+          stopReason: debateModel?.stopReason ?? null,
+          durationMs: run.durationMs,
+          status: run.status,
+          childCount,
+          expanded: false,
+          focused,
+          handleDirection,
+          enterIndex: i + 1,
+          onActivate: () => activateNode(run.id),
+          onToggleExpand: () => onToggleUnitExpand?.(run.id),
+        },
+      } as Node);
+      continue;
+    }
+
+    const group = innermostGroupForRun(layoutOwnerOf(run.id), groups, subTeams);
 
     let pos: { x: number; y: number } | undefined;
     if (group) {
@@ -244,7 +325,12 @@ export function projectFlowNodes({
     const output = agent ? agent.outputChunks.join("") : "";
     const reasoning = agent ? agent.reasoningChunks.join("") : "";
     const reviewConcern =
-      output.length >= 12 ? detectReviewConcern(output) : null;
+      output.length >= 12
+        ? detectReviewConcern(output, {
+            role: agent?.role ?? run.role,
+            runId: run.id,
+          })
+        : null;
     const focused = litRunId === run.id;
     const isRevision = run.revision > 0;
     const isSubtask =
@@ -252,6 +338,7 @@ export function projectFlowNodes({
       !!run.parentRunId &&
       run.parentRunId !== run.id &&
       workerIdSet.has(run.parentRunId);
+    const foldedChildCount = foldInfo.descendants.get(run.id)?.length ?? 0;
     const size = nodeSizes[run.id];
     nodes.push({
       id: run.id,
@@ -275,6 +362,7 @@ export function projectFlowNodes({
         outputPreview: tailText(output),
         reasoningPreview: tailText(reasoning),
         toolProgress: agent?.toolProgress ?? null,
+        toolExecutionLive: agent?.toolExecutionLive ?? null,
         tokenCount: estimateTokens(output),
         toolCount: agent?.toolCalls.length ?? 0,
         artifacts: agent ? deriveArtifacts(agent.toolCalls) : [],
@@ -301,6 +389,12 @@ export function projectFlowNodes({
           .length,
         reviewConcern,
         auditEventCount: auditCounts?.[run.id],
+        foldedChildCount:
+          foldedChildCount > 0 && !foldInfo.debateUnits.has(run.id)
+            ? foldedChildCount
+            : undefined,
+        unitExpanded: expandedUnits.has(run.id),
+        onToggleUnitExpand: () => onToggleUnitExpand?.(run.id),
         enterIndex: i + 1,
         onActivate: () => activateNode(run.id),
       },
@@ -368,6 +462,7 @@ export function projectFlowNodes({
 /** Pure projection: layout edges + execution status → React Flow edges. */
 export function projectFlowEdges({
   edges,
+  injectOverlay,
   execution,
   positions,
   handleDirection,
@@ -376,16 +471,19 @@ export function projectFlowEdges({
 }: Pick<
   FlowEdgeProjectionInput,
   | "edges"
+  | "injectOverlay"
   | "execution"
   | "positions"
   | "handleDirection"
   | "captainRun"
   | "captainStatus"
 >): Edge[] {
+  const gapEdges = injectOverlay?.activeGapEdges ?? [];
+  const allEdges = gapEdges.length > 0 ? [...edges, ...gapEdges] : edges;
   const horizontal = handleDirection === "horizontal";
-  const ports = computeEdgePorts(edges, positions, horizontal);
+  const ports = computeEdgePorts(allEdges, positions, horizontal);
 
-  return edges.map((e) => {
+  return allEdges.map((e) => {
     const animated =
       e.target === captainRun?.id
         ? captainStatus === "running"
@@ -394,6 +492,12 @@ export function projectFlowEdges({
     const handoff =
       kind === "dep" ? resolveHandoff(execution, e.source, e.target) : null;
     const port = ports.get(e.id);
+    const injectHighlight =
+      kind === "inject" ||
+      (injectOverlay?.highlightEdgeIds.has(e.id) ?? false);
+    const injectDimmed =
+      (injectOverlay?.dimUnrelatedEdges ?? false) &&
+      !(injectOverlay?.focusedEdgeIds.has(e.id) ?? false);
     return {
       id: e.id,
       source: e.source,
@@ -404,6 +508,8 @@ export function projectFlowEdges({
         animated,
         kind,
         handoff,
+        injectHighlight,
+        injectDimmed,
         handleDirection,
         sourcePortIndex: port?.sourcePortIndex ?? 0,
         sourcePortTotal: port?.sourcePortTotal ?? 1,

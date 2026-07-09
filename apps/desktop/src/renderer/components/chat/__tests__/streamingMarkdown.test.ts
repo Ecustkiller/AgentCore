@@ -1,13 +1,22 @@
 import { describe, expect, it } from "vitest";
-import {
-  splitMarkdownBlocks,
-  splitStreamingMarkdown,
-} from "../streamingMarkdown";
+import { splitMarkdownBlocks } from "../streamingMarkdown";
+
+/** 测试用：冻结前缀 + 尾块两分视图（生产只导出 {@link splitMarkdownBlocks}）。 */
+function splitStreamingMarkdown(content: string): {
+  stable: string;
+  tail: string;
+} {
+  const blocks = splitMarkdownBlocks(content);
+  if (blocks.length <= 1) return { stable: "", tail: content };
+  const tail = blocks[blocks.length - 1];
+  return { stable: blocks.slice(0, -1).join(""), tail };
+}
 
 /** 不变量：切分必须无损（stable + tail 等于原文）。 */
-function expectLossless(
-  content: string,
-): ReturnType<typeof splitStreamingMarkdown> {
+function expectLossless(content: string): {
+  stable: string;
+  tail: string;
+} {
   const split = splitStreamingMarkdown(content);
   expect(split.stable + split.tail).toBe(content);
   return split;

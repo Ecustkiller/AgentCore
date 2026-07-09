@@ -16,6 +16,7 @@ import {
   isDebate,
   planFromRunPlan,
   projectExecution,
+  projectRuntime,
   reasoningMeta,
   revisionChains,
   useExecutionStore,
@@ -67,6 +68,7 @@ function revised(
   parentRunId: string,
   revision: number,
   t = 1,
+  round?: number,
 ): Extract<RunFrame, { kind: "run_started" }> {
   return {
     t,
@@ -76,6 +78,7 @@ function revised(
     parentRunId,
     runKind: "agent",
     revision,
+    ...(round != null ? { round } : {}),
   };
 }
 
@@ -1347,10 +1350,12 @@ describe("ingestPlan (multi-batch delegate merge)", () => {
   });
 });
 describe("agent reasoning effort (effective knobs)", () => {
-  it("reasoningMeta labels the three effective states", () => {
+  it("reasoningMeta collapses thinking on/off (high/max not distinguished in MVP)", () => {
     expect(reasoningMeta(false, null).short).toBe("非思考");
     expect(reasoningMeta(true, "high").short).toBe("思考");
-    expect(reasoningMeta(true, "max").short).toBe("深度");
+    expect(reasoningMeta(true, "max").short).toBe("思考");
+    expect(reasoningMeta(true, "high").label).toBe("思考");
+    expect(reasoningMeta(true, "max").label).toBe("思考");
   });
 
   it("projectExecution defaults effective knobs from the tier", () => {
@@ -1620,7 +1625,7 @@ describe("辩论/审查 display tags (前端UX设计.md §四)", () => {
     // 第 2 轮续写：两方已续、一方未续 ⇒ 第 2 轮只含续到的两方（诚实留空，不假装）。
     const r2 = projectExecution(
       roundtablePlan,
-      [revised("d_r2_1", "d_r1_1", 2), revised("d_r2_2", "d_r1_2", 2)],
+      [revised("d_r2_1", "d_r1_1", 2, 1, 2), revised("d_r2_2", "d_r1_2", 2, 1, 2)],
       "running",
     );
     const live2 = debateLiveRounds(r2);
@@ -1979,22 +1984,6 @@ describe("乙 wire 携 round/stance (单一轮次投影)", () => {
     expect(groups[0].rounds[1].con.map((r) => r.id)).toEqual(["con2"]);
     expect(groups[0].rounds[2].pro.map((r) => r.id)).toEqual(["pro3"]);
   });
-
-  it("legacy revision frame (no wire fields) inherits stance/group + round=version", () => {
-    const frames: RunFrame[] = [
-      started("a-pro", "pro1"),
-      // No stance/group/round on the wire (a pre-乙 journal) — the fold inherits the
-      // original's stance/group and falls back to the version number for the round.
-      revised("pro2", "pro1", 2, 3),
-    ];
-    const exec = projectExecution(debatePlan2, frames, "running");
-    expect(exec.runs.find((r) => r.id === "pro2")).toMatchObject({
-      stance: "pro",
-      group: "debate:debate",
-      round: 2,
-      revision: 2,
-    });
-  });
 });
 
 // 交互式逐轮辩论决策 (opt-in, 辩论编排设计.md §逐轮交互): the Moderator suspends at a round
@@ -2127,5 +2116,58 @@ describe("交互式逐轮辩论决策 (foldDebateDecision, §逐轮交互)", () 
   it("recordDebateDecision is a no-op without an active plan", () => {
     store().recordDebateDecision(required("d-1", 1, false), MID);
     expect(rt().debateDecisions).toEqual([]);
+  });
+
+  it("overlays worker tool_use_progress onto the matching agent by run_id", () => {
+    store().startExecution(plan, MID);
+    store().recordFrame(started("agent-1", "run-1"), MID);
+    store().setWorkerToolPhase(
+      {
+        tool_call_id: "tc-1",
+        tool_name: "web_search",
+        phase: "queued",
+        run_id: "run-1",
+      },
+      MID,
+    );
+    const agent = projectRuntime(rt())?.agents.find((a) => a.id === "agent-1");
+    expect(agent?.toolExecutionLive).toEqual({
+      toolName: "web_search",
+      phase: "queued",
+    });
+
+    store().setWorkerToolPhase(
+      {
+        tool_call_id: "tc-1",
+        tool_name: "web_search",
+        phase: "querying",
+        run_id: "run-1",
+      },
+      MID,
+    );
+    const updated = projectRuntime(rt())?.agents.find(
+      (a) => a.id === "agent-1",
+    );
+    expect(updated?.toolExecutionLive?.phase).toBe("querying");
+
+    store().clearWorkerToolPhase("run-1", MID);
+    const cleared = projectRuntime(rt())?.agents.find(
+      (a) => a.id === "agent-1",
+    );
+    expect(cleared?.toolExecutionLive).toBeNull();
+  });
+
+  it("ignores worker tool phase without run_id", () => {
+    store().startExecution(plan, MID);
+    store().recordFrame(started("agent-1", "run-1"), MID);
+    store().setWorkerToolPhase(
+      {
+        tool_call_id: "tc-ceo",
+        tool_name: "web_search",
+        phase: "querying",
+      },
+      MID,
+    );
+    expect(rt().workerToolPhases).toEqual({});
   });
 });

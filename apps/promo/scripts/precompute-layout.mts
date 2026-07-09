@@ -25,9 +25,9 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.resolve(__dirname, "../src/data/layout.ts");
 
-// Left-right layered flow (product default, widescreen) + preserveOrder so the
-// debate 正/反 band (激进方案 above, 稳健方案 below); bookends pin input first /
-// captain last.
+// Left-right layered flow (product default, widescreen); considerModelOrder (always
+// on in computeLayout) bands the debate 正/反 (激进方案 above, 稳健方案 below);
+// bookends pin input first / captain last.
 const LAYOUT = "leftright" as const;
 
 async function main(): Promise<void> {
@@ -35,7 +35,6 @@ async function main(): Promise<void> {
     DEMO_NODE_IDS,
     DEMO_LAYOUT_EDGES,
     LAYOUT,
-    true,
     { source: INPUT_ID, sink: CAPTAIN_ID },
   );
 

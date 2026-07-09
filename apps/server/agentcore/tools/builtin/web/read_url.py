@@ -12,23 +12,26 @@ import httpx
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
-from agentcore.core.net import classify_url as _classify_url
-from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.tools.builtin.web._net import (
+from agentcore.core.net import (
     EgressError,
+    PinnedAddressError,
     PinnedIPTransport,
-    circuit_remaining,
+    classify_url as _classify_url,
     describe_net_error,
-    note_failure,
-    note_success,
     site_of,
     web_timeout,
+)
+from agentcore.tools.builtin.web._net import (
+    circuit_remaining,
+    note_failure,
+    note_success,
 )
 from agentcore.tools.builtin.web.source_domains import default_source_domain_registry
 from agentcore.tools.builtin.web.url_cache import (
     UrlCacheEntry,
     default_url_cache_registry,
 )
+from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 
 logger = get_logger(__name__)
@@ -42,6 +45,10 @@ _SNIPPET_MAX = 200  # citation preview length — a sentence or two, not the who
 # legitimate article URLs rarely carry a 64+ char opaque query. The query-length AND
 # novel-domain conjunction keeps the common search→deep-read and plain-URL reads quiet.
 _SUSPICIOUS_QUERY_LEN = 64
+# Policy/environment blocks (SSRF, egress breaker) are honest failures but must not
+# trip the run-scoped tool circuit breaker — the tool itself is fine; the URL or
+# network posture is what rejected the fetch.
+_POLICY_FAILURE = "policy_failure"
 
 
 def _query_len(url: str) -> int:
@@ -92,8 +99,13 @@ async def _safe_request(
             raise ValueError("URL blocked: private/internal network")
         try:
             resp = await client.send(request)
-        except (httpx.TimeoutException, httpx.NetworkError):
+        except httpx.TimeoutException:
             note_failure(host)
+            raise
+        except httpx.NetworkError as e:
+            # SSRF pin blocks are policy, not transport — must not open the per-host breaker.
+            if not isinstance(e, PinnedAddressError):
+                note_failure(host)
             raise
         nxt = resp.next_request
         if resp.is_redirect and nxt is not None:
@@ -285,6 +297,7 @@ class ReadUrlTool:
                 output="",
                 error=block.value,
                 duration_ms=int((time.monotonic() - start) * 1000),
+                metadata={_POLICY_FAILURE: True},
             )
 
         try:
@@ -364,10 +377,13 @@ class ReadUrlTool:
         try:
             # PinnedIPTransport: connect to the IP we validated, closing the DNS-rebinding
             # TOCTOU between the per-hop classify_url check and httpx's own resolution.
+            # verify=False: tolerate broken cert chains on gov/court/academic mirrors
+            # (same posture as the favicon proxy). SSRF pinning still bounds which hosts
+            # we reach; only TLS trust is relaxed.
             async with httpx.AsyncClient(
                 timeout=web_timeout(),
                 follow_redirects=False,
-                transport=PinnedIPTransport(),
+                transport=PinnedIPTransport(verify=False),
             ) as client:
                 resp = await _safe_request(client, "GET", url, headers=headers)
                 resp.raise_for_status()
@@ -392,12 +408,14 @@ class ReadUrlTool:
                     "改用你已有的 web_search 摘要继续作答，不要对该来源反复重读、"
                     "也不要为此再补一轮搜索"
                 )
+            policy = isinstance(e, (EgressError, PinnedAddressError))
             return ToolResult(
                 tool_call_id="",
                 success=False,
                 output="",
                 error=f"网页读取失败：{reason}{hint}",
                 duration_ms=int((time.monotonic() - start) * 1000),
+                metadata={_POLICY_FAILURE: True} if policy else {},
             )
 
         # 工具执行阶段进度: fetched — now parse/extract the main text (可感知的第二段，长页面

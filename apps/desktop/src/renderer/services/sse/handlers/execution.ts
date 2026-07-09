@@ -139,9 +139,17 @@ export function handleExecutionEvent(
     case "tool_use_end": {
       recordFrameNow(event, conversationId);
       flushPendingContent(conversationId);
+      const endPayload = event.payload as ToolUseEndPayload;
+      if (endPayload.run_id) {
+        const mid = execMessageId(conversationId);
+        if (mid)
+          useExecutionStore
+            .getState()
+            .clearWorkerToolPhase(endPayload.run_id, mid);
+      }
       useConversationStore
         .getState()
-        .endProcessTool(event.payload as ToolUseEndPayload, conversationId);
+        .endProcessTool(endPayload, conversationId);
       return true;
     }
     // 工具执行阶段进度 (联网搜索前端展示优化): a running tool reported a coarse EXECUTION phase
@@ -149,12 +157,18 @@ export function handleExecutionEvent(
     // no frame is recorded (a reloaded turn's tools are already resolved); it only stamps the live
     // running tool step's phase for the waiting UI.
     case "tool_use_progress": {
-      useConversationStore
-        .getState()
-        .setProcessToolPhase(
-          event.payload as ToolUseProgressPayload,
-          conversationId,
-        );
+      const progressPayload = event.payload as ToolUseProgressPayload;
+      if (progressPayload.run_id) {
+        const mid = execMessageId(conversationId);
+        if (mid)
+          useExecutionStore
+            .getState()
+            .setWorkerToolPhase(progressPayload, mid);
+      } else {
+        useConversationStore
+          .getState()
+          .setProcessToolPhase(progressPayload, conversationId);
+      }
       return true;
     }
     case "debate_result": {

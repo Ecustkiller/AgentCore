@@ -32,6 +32,7 @@ def finish_resume_turn(
     citations: list[dict],
     sink: EventSink,
     vision_cost_runs: list | None = None,
+    audit_drops: int = 0,
 ) -> dict:
     """Bill + close a resumed turn whose CEO loop ran (plan_review / ask_user continue).
 
@@ -80,6 +81,11 @@ def finish_resume_turn(
         )
     if citations:
         sink.emit(citations_event(citations))
+    collab = {
+        **delegate_tool.collab,
+        "revises": len(revise_tool.run_ledger),
+        "audit_drops": audit_drops,
+    }
     sink.emit(
         message_end(
             finish,
@@ -90,6 +96,7 @@ def finish_resume_turn(
             cache_miss_tokens=turn_usage.cache_miss_tokens,
             rounds=rounds,
             cost=turn_cost,
+            collab=collab,
         )
     )
     journal_entries = _journal_entries_for_turn(current_fact_log.get(), sink=sink, finish=finish)
@@ -108,10 +115,7 @@ def finish_resume_turn(
         "cost_runs": cost_runs,
         "journal_entries": journal_entries,
         # 协作质量 (学·度量 §2.5): same turn-level signals as the fresh-turn path.
-        "collab": {
-            **delegate_tool.collab,
-            "revises": len(revise_tool.run_ledger),
-        },
+        "collab": collab,
     }
 
 

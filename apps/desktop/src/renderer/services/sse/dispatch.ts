@@ -1,7 +1,9 @@
+import { assertNever } from "@/lib/assertNever";
 import { traceSSEEvent } from "@/services/sseTrace";
 import { traceTurnFirstSSE } from "@/services/turnTrace";
 import type { SSEEvent } from "@/types/events";
 import { handleBoardEvent } from "./handlers/board";
+import { handleDesktopEvent } from "./handlers/desktop";
 import { handleExecutionEvent } from "./handlers/execution";
 import { handleInteractionEvent } from "./handlers/interaction";
 import { handleMessageStreamEvent } from "./handlers/messageStream";
@@ -17,6 +19,7 @@ const HANDLERS = [
   handleMetaEvent,
   handleWorkspaceEvent,
   handleBoardEvent,
+  handleDesktopEvent,
   handleExecutionEvent,
 ] as const;
 
@@ -37,6 +40,9 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
   for (const handler of HANDLERS) {
     if (handler(event, ctx)) return;
   }
+  // Runtime exhaustiveness tripwire — compile-time coverage for fold lives in
+  // conformanceFold's discriminated switch; both must be updated for new SSE types.
+  assertNever(event as never);
 }
 
 export type { DispatchContext } from "./types";

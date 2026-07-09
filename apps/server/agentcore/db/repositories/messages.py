@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.types import new_id
-from agentcore.db.models import Conversation, Message, PausedTurnRow
+from agentcore.db.models import Conversation, Message, MessageBookmark, PausedTurnRow
 
 from ._audit_cascade import delete_audit_after, delete_audit_for_message
 from ._base import _ilike_pattern
@@ -238,7 +238,14 @@ class MessageRepository:
         return {row[0]: row[1] for row in result.all()}
 
     async def search(
-        self, user_id: str, query: str, *, limit: int
+        self,
+        user_id: str,
+        query: str,
+        *,
+        limit: int,
+        updated_after: datetime | None = None,
+        folder_id: str | None = None,
+        tag: str | None = None,
     ) -> Sequence[tuple[Message, str]]:
         """Owner-scoped message-content substring search (全局搜索 Tier 1).
 
@@ -248,8 +255,13 @@ class MessageRepository:
         newest-first, capped at ``limit``. Returns ``(message, conversation_title)``
         pairs so the route can render the owning conversation as list-row context
         without an N+1.
+
+        The optional facets (搜索结果过滤) filter the same set server-side:
+        ``updated_after`` bounds a hit's ``created_at`` (时间过滤 — the message's own
+        time, which the route surfaces as its ``updated_at``); ``folder_id`` keeps
+        only hits whose owning conversation is filed in that folder/工作区.
         """
-        result = await self._session.execute(
+        stmt = (
             select(Message, Conversation.title)
             .join(Conversation, Conversation.id == Message.conversation_id)
             .where(
@@ -259,8 +271,15 @@ class MessageRepository:
                 Message.content.is_not(None),
                 Message.content.ilike(_ilike_pattern(query)),
             )
-            .order_by(Message.created_at.desc())
-            .limit(limit)
+        )
+        if updated_after is not None:
+            stmt = stmt.where(Message.created_at >= updated_after)
+        if folder_id is not None:
+            stmt = stmt.where(Conversation.folder_id == folder_id)
+        if tag is not None:
+            stmt = stmt.where(Conversation.tag == tag)
+        result = await self._session.execute(
+            stmt.order_by(Message.created_at.desc()).limit(limit)
         )
         return [(row[0], row[1]) for row in result.all()]
 
@@ -514,15 +533,22 @@ class MessageRepository:
         await delete_audit_after(
             self._session, conversation_id, after_created_at=after_created_at
         )
+        dropped_ids = select(Message.id).where(
+            Message.conversation_id == conversation_id,
+            Message.created_at > after_created_at,
+        )
         await self._session.execute(
             delete(PausedTurnRow).where(
                 PausedTurnRow.conversation_id == conversation_id,
-                PausedTurnRow.message_id.in_(
-                    select(Message.id).where(
-                        Message.conversation_id == conversation_id,
-                        Message.created_at > after_created_at,
-                    )
-                ),
+                PausedTurnRow.message_id.in_(dropped_ids),
+            )
+        )
+        # 消息收藏 pointers to any superseded message go with it (a regenerate drops
+        # the old branch — its bookmarks would otherwise dangle).
+        await self._session.execute(
+            delete(MessageBookmark).where(
+                MessageBookmark.conversation_id == conversation_id,
+                MessageBookmark.message_id.in_(dropped_ids),
             )
         )
         result = await self._session.execute(
@@ -552,6 +578,13 @@ class MessageRepository:
             delete(PausedTurnRow).where(
                 PausedTurnRow.message_id == message_id,
                 PausedTurnRow.conversation_id == conversation_id,
+            )
+        )
+        # Drop any 消息收藏 pointer to this message (else it would dangle).
+        await self._session.execute(
+            delete(MessageBookmark).where(
+                MessageBookmark.message_id == message_id,
+                MessageBookmark.conversation_id == conversation_id,
             )
         )
         result = await self._session.execute(

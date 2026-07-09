@@ -1,8 +1,11 @@
 /// <reference types="vite/client" />
 
+import type { AgentTownApi } from "@shared/agenttown-contract";
 import type { FsApi } from "@shared/ipc-contract";
 import type { LogApi } from "@shared/log-contract";
+import type { NotificationApi } from "@shared/notification-contract";
 import type { SidecarApi } from "@shared/sidecar-contract";
+import type { TerminalApi } from "@shared/terminal-contract";
 import type { UpdaterApi } from "@shared/updater-contract";
 import type { WindowApi } from "@shared/window-contract";
 
@@ -15,12 +18,17 @@ declare global {
   }
 
   interface Window {
+    agentTownApi?: AgentTownApi;
     fsApi: FsApi;
     sidecarApi: SidecarApi;
     /** Electron preload 注入；纯浏览器 / 单测环境可能缺失。 */
     updaterApi?: UpdaterApi;
     /** 结构化产品日志（落主进程 desktop.jsonl）；纯浏览器 / 单测环境可能缺失。 */
     logApi?: LogApi;
+    /** bash 代码块「在终端运行」；纯浏览器 / 单测环境可能缺失。 */
+    terminalApi?: TerminalApi;
+    /** OS 原生通知（窗口失焦时跨对话提醒）；纯浏览器 / 单测环境可能缺失。 */
+    notificationApi?: NotificationApi;
     windowApi: WindowApi;
     /** 由浏览器入口（生产 web 客户端 main.webapp.tsx / 离线预览 main.web.tsx → browserStubs）
      *  设置，标记「浏览器运行时、无原生 fs/sidecar/updater/window 能力」。能力代理

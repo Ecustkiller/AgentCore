@@ -86,4 +86,12 @@ describe("fetchTurnAudit", () => {
       "/v1/conversations/conv-1/messages/msg-1/audit",
     );
   });
+
+  it("requests causal graph when includeCausal is true", async () => {
+    vi.mocked(api.get).mockResolvedValueOnce({ data: [], total: 0 });
+    await fetchTurnAudit("conv-1", "msg-1", { includeCausal: true });
+    expect(api.get).toHaveBeenCalledWith(
+      "/v1/conversations/conv-1/messages/msg-1/audit?include_causal=true",
+    );
+  });
 });

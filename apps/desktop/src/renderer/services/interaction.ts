@@ -1,5 +1,6 @@
 import { api } from "@/services/api";
 import { getActiveSidecarTarget } from "@/services/sidecarRouting";
+import type { ResolveDelegationAuthorizationBody } from "@/services/delegationAuth";
 import type { components } from "@/types/api.generated";
 
 type Schemas = components["schemas"];
@@ -18,7 +19,8 @@ export type ResolveInteractionBody =
   | Schemas["ResolveApprovalInteraction"]
   | Schemas["ResolveClientToolInteraction"]
   | Schemas["ResolveEscalationInteraction"]
-  | Schemas["ResolveDebateRoundInteraction"];
+  | Schemas["ResolveDebateRoundInteraction"]
+  | ResolveDelegationAuthorizationBody;
 
 /**
  * Settle a paused interaction's answer over whichever transport is running this turn.

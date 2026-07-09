@@ -120,7 +120,14 @@ export function Sidebar() {
             >
               <item.icon size={18} className="shrink-0" />
               {!collapsed && (
-                <span className="flex-1 text-left">{item.label}</span>
+                <span className="flex flex-1 flex-col text-left">
+                  <span>{item.label}</span>
+                  {item.route === "/simulation/town" ? (
+                    <span className="text-xs font-normal text-muted-foreground">
+                      内嵌 3D 预览；推荐 AgentTown
+                    </span>
+                  ) : null}
+                </span>
               )}
               {showBadge &&
                 (collapsed ? (

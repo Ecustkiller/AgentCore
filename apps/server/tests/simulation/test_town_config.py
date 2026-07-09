@@ -65,3 +65,20 @@ async def test_world_engine_reads_schedule():
 def test_town_config_bundle():
     assert TOWN_CONFIG.personas == TOWN_PERSONAS
     assert TOWN_CONFIG.regions == TOWN_REGIONS
+
+
+def test_personas_are_differentiated():
+    neutral = {
+        "openness": 0.5,
+        "conscientiousness": 0.5,
+        "extraversion": 0.5,
+        "agreeableness": 0.5,
+        "neuroticism": 0.5,
+    }
+    # No resident is left on the neutral placeholder Big Five profile.
+    assert all(p.big_five.model_dump() != neutral for p in TOWN_PERSONAS)
+    # Extraversion genuinely spreads across residents (introverts vs extraverts).
+    extraversions = {round(p.big_five.extraversion, 3) for p in TOWN_PERSONAS}
+    assert len(extraversions) >= 4
+    # Every resident carries a layered goal stack, not a single flat goal.
+    assert all(len(p.goals_stack) >= 2 for p in TOWN_PERSONAS)

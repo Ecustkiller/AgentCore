@@ -10,7 +10,7 @@ import { ChevronRight } from "lucide-react";
  *
  * A row with a `target` is a button that deep-links to that exact memory leaf (the caller
  * decides HOW to open it — navigate to /files from the conversation, or open a tab directly
- * inside the editor); without one (legacy rows) it is plain text.
+ * inside the editor); rows without a resolvable `target` render as plain text.
  */
 
 const ACTION_META: Record<
@@ -65,8 +65,7 @@ export function MemoryUpdateItemRow({
     </>
   );
 
-  // With a target the whole row is a deep-link to that leaf; without one (legacy rows)
-  // it's plain, with the host offering the generic editor entry instead.
+  // Rows with a `target` deep-link to that leaf; others stay plain (no resolvable path).
   if (item.target) {
     return (
       <li>

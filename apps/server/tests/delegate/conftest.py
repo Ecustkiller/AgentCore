@@ -6,10 +6,11 @@ import json
 from pathlib import Path
 
 from agentcore.llm.provider.protocol import LLMChunk, TokenUsage, ToolCallDelta
-from agentcore.runtime.approvals import ApprovalGate
+from agentcore.runtime.approvals import ApprovalGate, DelegationAuthorizationDecision
 from agentcore.runtime.events import EventSink
-from agentcore.runtime.interaction import InteractionRegistry
+from agentcore.runtime.interaction import InteractionKind, InteractionRegistry
 from agentcore.runtime.runs.types import RunPhase, RunState
+from agentcore.tools.builtin import delegation_grantable_tool_names
 from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.protocol import ToolContext
@@ -215,7 +216,26 @@ def gate() -> ApprovalGate:
         conversation_id="c",
         registry=InteractionRegistry(),
         timeout_seconds=1.0,
+        delegation_grantable_tools=delegation_grantable_tool_names(),
     )
+
+
+async def auto_resolve_delegation(
+    registry: InteractionRegistry,
+    conversation_id: str,
+    *,
+    decision: DelegationAuthorizationDecision = DelegationAuthorizationDecision.PER_CALL,
+) -> None:
+    """Resolve a pending delegation authorization as soon as it appears."""
+    import asyncio
+
+    for _ in range(2000):
+        for req in registry.list_pending(conversation_id):
+            if req.kind is InteractionKind.DELEGATION_AUTHORIZATION:
+                registry.resolve(req.id, decision, conversation_id=conversation_id)
+                return
+        await asyncio.sleep(0)
+    raise AssertionError("delegation authorization never became pending")
 
 
 def tool_with_gate(ctx: ToolContext, approval_gate: ApprovalGate) -> DelegateTool:

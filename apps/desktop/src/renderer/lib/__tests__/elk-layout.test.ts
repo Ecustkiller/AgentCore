@@ -5,7 +5,7 @@ import {
 import type { GraphEdge } from "@/stores/graph";
 import { describe, expect, it } from "vitest";
 import type { SubTeamInput } from "../elk-layout";
-import { computeLayout } from "../elk-layout";
+import { NODE_SPACING_EMBED, computeLayout } from "../elk-layout";
 
 /** Derive compound sub-teams from delegate edges (mirrors buildGraphStructure). */
 function subTeamsFromEdges(edges: GraphEdge[]): SubTeamInput[] {
@@ -27,14 +27,12 @@ async function layout(
   ids: string[],
   edges: GraphEdge[],
   layoutKind: "tree" | "leftright" = "leftright",
-  preserveOrder = false,
   bookends: { source?: string; sink?: string } = {},
 ) {
   return computeLayout(
     ids,
     edges,
     layoutKind,
-    preserveOrder,
     bookends,
     subTeamsFromEdges(edges),
   );
@@ -90,7 +88,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("lead", "eng2", "delegate"),
       e("mpm", "mcap"),
     ];
-    const { positions, groups } = await layout(ids, edges, "leftright", false, {
+    const { positions, groups } = await layout(ids, edges, "leftright", {
       source: "__input__",
       sink: "mcap",
     });
@@ -119,7 +117,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("be", "dcap"),
       e("fe", "dcap"),
     ];
-    const { positions, groups } = await layout(ids, edges, "leftright", false, {
+    const { positions, groups } = await layout(ids, edges, "leftright", {
       source: "__input__",
       sink: "dcap",
     });
@@ -135,7 +133,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
 
   it("大扇出 1→8→7→1 DAG + delegate 子队：同层节点无重叠", async () => {
     // 模拟 3 波复杂协作：wave1 四父各带 2 子队（8 subs），wave2 七普通 worker，
-    // 子队下沉后可能与同层 dep 节点交叉轴碰撞 — resolveOverlaps 须推开。
+    // 子队 compound 与同层 dep 节点混排——断言 ELK 直接把它们排开、无重叠。
     const parents = ["p0", "p1", "p2", "p3"];
     const subs = Array.from({ length: 8 }, (_, i) => `sub_${i}`);
     const w2 = Array.from({ length: 7 }, (_, i) => `w2_${i}`);
@@ -158,7 +156,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       ...w2.map((w) => e(w, "cap")),
     ];
     const workers = [...parents, ...subs, ...w2];
-    const { positions } = await layout(ids, edges, "leftright", false, {
+    const { positions } = await layout(ids, edges, "leftright", {
       source: "__input__",
       sink: "cap",
     });
@@ -168,7 +166,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
     expect(positions.cap.x).toBe(maxX);
   });
 
-  it("扁平并行（无委派）：下沉为 no-op，端点钉首/末层", async () => {
+  it("扁平并行（无委派）：端点钉首/末层、并行列无重叠", async () => {
     const ids = ["__input__", "w1", "w2", "w3", "cap"];
     const edges: GraphEdge[] = [
       e("__input__", "w1"),
@@ -178,7 +176,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("w2", "cap"),
       e("w3", "cap"),
     ];
-    const { positions } = await layout(ids, edges, "leftright", false, {
+    const { positions } = await layout(ids, edges, "leftright", {
       source: "__input__",
       sink: "cap",
     });
@@ -218,7 +216,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("p2", "cap"),
       e("p3", "cap"),
     ];
-    const { positions, groups } = await layout(ids, edges, "leftright", false, {
+    const { positions, groups } = await layout(ids, edges, "leftright", {
       source: "__input__",
       sink: "cap",
     });
@@ -249,7 +247,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("tpm", "teng2", "delegate"),
       e("tpm", "tcap"),
     ];
-    const { positions, groups } = await layout(ids, edges, "tree", false, {
+    const { positions, groups } = await layout(ids, edges, "tree", {
       source: "__input__",
       sink: "tcap",
     });
@@ -287,7 +285,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("m", "n"),
       e("n", "cap"),
     ];
-    const { positions } = await layout(ids, edges, "leftright", false, {
+    const { positions } = await layout(ids, edges, "leftright", {
       source: "__input__",
       sink: "cap",
     });
@@ -300,8 +298,8 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
   });
 
   // 圆桌逐轮（主持人 ⇢ 三视角 ⇢ 各自修订 v2）：修订节点必须与其源同一交叉轴车道（修订边笔直），
-  // 守住「第三波漂移」回归——下沉只搬 delegate 子队、漏掉挂其下的修订，曾把第三波留在源旧车道。
-  it("圆桌逐轮·无汇聚点：不下沉、三方修订各与源同车道、互不重叠", async () => {
+  // 守住「第三波漂移」回归——修订须与源同处一个 compound，否则曾被 ELK 甩到框外的独立车道。
+  it("圆桌逐轮·无汇聚点：三方修订各与源同车道、互不重叠", async () => {
     const ids = ["mod", "s_a", "s_b", "s_c", "s_a2", "s_b2", "s_c2"];
     const edges: GraphEdge[] = [
       e("mod", "s_a", "delegate"),
@@ -311,7 +309,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("s_b", "s_b2", "revision"),
       e("s_c", "s_c2", "revision"),
     ];
-    const { positions } = await layout(ids, edges, "leftright", false, {
+    const { positions } = await layout(ids, edges, "leftright", {
       source: "__input__",
     });
 
@@ -325,9 +323,10 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
     }
     // 全员两两不重叠。
     expect(noneOverlap(positions, ids)).toEqual([]);
-    // parent 在上、子 worker 在下：主持人 y 应小于各子队。
-    const subYs = ["s_a", "s_b", "s_c"].map((id) => positions[id].y);
-    expect(positions.mod.y).toBeLessThan(Math.min(...subYs));
+    // 主持人领先圆桌（主轴更靠前）：leftright 下 mod.x 小于三视角。交叉轴上 ELK(BK)
+    // 把 mod 居中于扇面而非钉顶——等效可读布局，故只守「源领先目标」这一真不变量。
+    const subXs = ["s_a", "s_b", "s_c"].map((id) => positions[id].x);
+    expect(positions.mod.x).toBeLessThan(Math.min(...subXs));
   });
 
   it("圆桌逐轮·带汇聚点：修订与源同车道、汇聚点钉末层", async () => {
@@ -352,12 +351,12 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("s_c", "s_c2", "revision"),
       e("mod", "cap"),
     ];
-    const { positions } = await layout(ids, edges, "leftright", false, {
+    const { positions } = await layout(ids, edges, "leftright", {
       source: "__input__",
       sink: "cap",
     });
 
-    // 修订与源同车道（下沉搬了源、修订必须跟上）。
+    // 修订与源同车道（compound 内修订边把 vN 排在源同一行）。
     for (const [src, rev] of [
       ["s_a", "s_a2"],
       ["s_b", "s_b2"],
@@ -371,6 +370,46 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
     expect(
       noneOverlap(positions, ["s_a", "s_b", "s_c", "s_a2", "s_b2", "s_c2"]),
     ).toEqual([]);
+  });
+
+  // 修订轮必须落在子队 box 内、且紧贴源列成 grid（参与者=行, 轮次=列）——回归用户报的
+  // 双 bug：修订逃逸到框外 + 成员回列后修订留在 ELK 旧坐标造成的 phantom gap。
+  it("圆桌逐轮：子队框包住所有修订轮、轮次紧贴源列（无逃逸 + 无 phantom gap）", async () => {
+    const ids = ["mod", "s_a", "s_b", "s_c", "s_a2", "s_b2", "s_c2"];
+    const edges: GraphEdge[] = [
+      e("mod", "s_a", "delegate"),
+      e("mod", "s_b", "delegate"),
+      e("mod", "s_c", "delegate"),
+      e("s_a", "s_a2", "revision"),
+      e("s_b", "s_b2", "revision"),
+      e("s_c", "s_c2", "revision"),
+    ];
+    const { positions, groups } = await layout(ids, edges, "leftright", {
+      source: "__input__",
+    });
+
+    // 子队框（__group__mod）包住每一个修订轮（含边距，不逃逸到框外）。
+    const g = groups.find((gr) => gr.parentId === "mod");
+    expect(g).toBeDefined();
+    if (!g) return;
+    const within = (id: string): boolean =>
+      positions[id].x >= g.x - 0.01 &&
+      positions[id].x + NW <= g.x + g.width + 0.01 &&
+      positions[id].y >= g.y - 0.01 &&
+      positions[id].y + NH <= g.y + g.height + 0.01;
+    for (const id of ids) expect(within(id)).toBe(true);
+
+    // 每个修订紧贴其源右侧一列（= NW + spacing）——phantom gap 会让这个间距翻倍。
+    for (const [src, rev] of [
+      ["s_a", "s_a2"],
+      ["s_b", "s_b2"],
+      ["s_c", "s_c2"],
+    ]) {
+      expect(positions[rev].x - positions[src].x).toBeCloseTo(
+        NW + NODE_SPACING_EMBED,
+        3,
+      );
+    }
   });
 });
 
@@ -398,7 +437,7 @@ describe("computeLayout · 树形分叉对称", () => {
       e("pd", "cap"),
       e("arch", "cap"),
     ];
-    const { positions, groups } = await layout(ids, edges, "tree", false, {
+    const { positions, groups } = await layout(ids, edges, "tree", {
       source: "__input__",
       sink: "cap",
     });
@@ -458,7 +497,11 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
   ];
 
   it("星型 revisionOf 被铺成链式修订边（原始→v2→v3→…），不是从原始发散的星", () => {
-    const { rawEdges } = buildGraphStructure(debateRuns(5), "__input__");
+    const { rawEdges } = buildGraphStructure(
+      debateRuns(5),
+      "__input__",
+      new Set(["mod"]),
+    );
     const revEdges = rawEdges
       .filter((e) => e.kind === "revision")
       .map((e) => `${e.source}->${e.target}`)
@@ -481,15 +524,16 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
   });
 
   it("布局后 5 个版本全部落在各自图元、两两不重叠（不再折叠成 2 个）", async () => {
+    const expanded = new Set(["mod"]);
     const { nodeIds, rawEdges, subTeams } = buildGraphStructure(
       debateRuns(5),
       "__input__",
+      expanded,
     );
     const { positions } = await computeLayout(
       nodeIds,
       rawEdges,
       "leftright",
-      true,
       { source: "__input__" },
       subTeams,
     );

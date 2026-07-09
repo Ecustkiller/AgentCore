@@ -2,3 +2,4 @@
 export type { components, operations, paths } from "./api.generated";
 export type * from "./api.generated";
 export type * from "./audit";
+export type * from "./llm-window";

@@ -25,6 +25,7 @@ from .auth import (
     UserLlmKeyRepository,
 )
 from .billing import CostEventRepository
+from .bookmarks import BookmarkRepository
 from .boards import BoardRepository
 from .chat import ChatRepository
 from .conversation_shares import ConversationShareRepository
@@ -34,7 +35,6 @@ from .feedback import FeedbackRepository
 from .folders import FolderRepository
 from .memory_updates import MemoryUpdateRepository
 from .messages import MessageRepository
-from .model_modes import ModelModeRepository
 from .runs import (
     HandoffJobRepository,
     PausedTurnRepository,
@@ -55,6 +55,7 @@ __all__ = [
     "AdminAuditRepository",
     "AgentAuditEventRepository",
     "AdminMfaRepository",
+    "BookmarkRepository",
     "BoardRepository",
     "ChatRepository",
     "ConversationRepository",
@@ -67,7 +68,6 @@ __all__ = [
     "InviteRepository",
     "MemoryUpdateRepository",
     "MessageRepository",
-    "ModelModeRepository",
     "PausedTurnRepository",
     "PushDeviceRepository",
     "RefreshTokenRepository",

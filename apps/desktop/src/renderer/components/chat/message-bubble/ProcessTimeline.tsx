@@ -165,8 +165,8 @@ export function ProcessTimeline({
     last.status !== "running";
 
   const nodes = groupToolRuns(process);
-  // The team graph normally rides its inline `team` marker; only legacy turns whose
-  // persisted process predates the marker fall back to a bottom-stamped graph.
+  // The team graph normally rides its inline `team` marker; turns without one fall back
+  // to a bottom-stamped graph.
   const hasTeamMarker = process.some((s) => s.kind === "team");
 
   const hasProcessSteps = nodes.some(isProcessNode);

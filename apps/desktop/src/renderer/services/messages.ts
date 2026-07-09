@@ -86,6 +86,14 @@ export interface BackendMessage {
    * Replayed onto `message.rounds`; the bubble surfaces「N 轮」only when > 1. null for
    * user / pre-feature rows. */
   rounds?: number | null;
+  /** 协作质量 (学·度量 §2.5): orchestration signals for 诊断模式; nested in usage column. */
+  collab?: {
+    boundary_yields: number;
+    scope_signals: number;
+    revises: number;
+    escalations: number;
+    audit_drops?: number;
+  } | null;
   created_at: string;
 }
 
@@ -144,19 +152,13 @@ export function toMessage(m: BackendMessage): Message {
   // plan_review events are journaled like ask_user checkpoints, so a reloaded turn
   // replays its structured DAG pauses inline too (结构化挂起 2a).
   const planReviews = planReviewsFromEvents(events);
-  // 思考·正文·工具 inline timeline (前端UX设计.md §一B): prefer the persisted ordered
-  // steps — now for single-agent AND multi-agent turns (统一团队时间线: the team graph
-  // slots at the CEO's `delegate` step inside the timeline). A multi-agent turn WITHOUT
-  // persisted process (legacy rows from before it was persisted) keeps the standalone
-  // team-graph layout (undefined → no inline timeline). A tool-less single-agent turn
-  // synthesizes one reasoning step from reasoning_content so its timeline still replays.
+  // steps — now for single-agent AND multi-agent turns (统一团队时间线). Single-agent
+  // tool-less turns synthesize one reasoning step from reasoning_content.
   const process: ProcessStep[] | undefined =
     m.runs?.process ??
-    (executionId
-      ? undefined
-      : m.reasoning_content
-        ? [{ kind: "reasoning", text: m.reasoning_content }]
-        : undefined);
+    (!executionId && m.reasoning_content
+      ? [{ kind: "reasoning", text: m.reasoning_content }]
+      : undefined);
   return {
     id: m.id,
     role: m.role === "assistant" ? "assistant" : "user",
@@ -189,6 +191,7 @@ export function toMessage(m: BackendMessage): Message {
     // 「N 轮」caption. Both undefined for user / no-spend turns → no meta row (live parity).
     usage: m.usage ?? undefined,
     rounds: m.rounds ?? undefined,
+    collab: m.collab ?? undefined,
     // 下一步推荐 chips (DERIVED 持久化): replay the last turn's persisted chips on reload,
     // mirroring the live `attachFollowupsToLastMessage` stamp (twin of the title). Empty []
     // server-side → undefined; ChatView only surfaces them on the latest finished turn.

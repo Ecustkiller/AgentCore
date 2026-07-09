@@ -1,5 +1,5 @@
 import { TurnCompare } from "@/components/chat/compare/TurnCompare";
-import { DebateStream } from "@/components/chat/debate/DebateStream";
+import { DebateArena } from "@/components/chat/debate/arena/DebateArena";
 import { toDebateModel } from "@/components/chat/debate/model";
 import { Button } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
@@ -372,7 +372,7 @@ export function CanvasZoomedTurn({
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
           {showRoom && execution ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              <DebateStream
+              <DebateArena
                 execution={execution}
                 messageId={scopeId}
                 conversationId={conversationId}

@@ -118,6 +118,9 @@ async def test_single_unique_replacement(tmp_path: Path):
     assert result.success is True
     assert result.metadata["replacements"] == 1
     assert "约第 2 行" in result.output
+    # 回执回显改动落点上下文（所改即所见），让 worker 当轮确认替换落对没、免掉回读自检那一轮。
+    assert "return a + b" in result.output
+    assert "改动落点" in result.output
     assert f.read_text(encoding="utf-8") == "def add(a, b):\n    return a + b\n"
 
 

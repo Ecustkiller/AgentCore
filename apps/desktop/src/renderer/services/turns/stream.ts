@@ -23,7 +23,7 @@ import {
 } from "@/services/streamConversation";
 import { streamConversationViaSidecar } from "@/services/streamConversationViaSidecar";
 import { traceTurnEnd, traceTurnMilestone } from "@/services/turnTrace";
-import { useApprovalStore } from "@/stores/approvals";
+import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import {
   getActiveRuntime,
   getRuntime,
@@ -142,10 +142,6 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
           history: buildSidecarHistory(conversationId, optimisticUserId),
           optimisticUserId,
           debateSeed,
-          // 对话级自定义指令：sidecar 无库，从会话缓存喂入，与云链路（服务端从会话行注入）对齐。
-          instructions:
-            getConversations().find((c) => c.id === conversationId)
-              ?.instructions ?? null,
           signal: ac.signal,
         });
       } catch (sidecarErr) {
@@ -216,7 +212,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
     }
     // A failed turn never delivers `approval_resolved`; drop this conversation's
     // paused prompt (other conversations keep theirs).
-    useApprovalStore.getState().clear(conversationId);
+    clearInteractionPrompts(conversationId);
     // If the turn never persisted (no `turn_saved` reconciled the optimistic
     // id), the server order never changed — undo the optimistic bump.
     const notPersisted = getRuntime(conversationId).messages.some(

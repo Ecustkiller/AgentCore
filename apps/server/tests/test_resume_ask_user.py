@@ -4,23 +4,25 @@ Pins the pure pieces the ask_user ``POST .../resume`` path adds on top of the
 plan_review machinery:
 
 - :func:`ask_user_tool_result` is the SINGLE source of truth shared by the live tool
-  and resume — continue/adjust feed the CEO loop a ``CONTINUE`` result, stop returns
+  and resume — continue feeds the CEO loop a ``CONTINUE`` result, stop returns
   a terminal ``INTERACT`` whose closing note ends the turn in-band, timeout hands
-  control back to the CEO.
+  control back to the CEO. ``ADJUST`` is rejected (plan_review only).
 - :func:`_settle_resumed_suspension` applies the user's decision to a paused frame by
   kind: for ask_user it emits the journaled ``checkpoint_resolved``, drops off-menu
   picks (same guard as the live tool), and reports a ``terminal_text`` ONLY for stop
   (so resume finishes without another CEO round).
 """
 
+import pytest
+
 from agentcore.core.types import ToolEffect
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import EventSink, EventType
-from agentcore.runtime.pipeline import (
-    _finish_terminal_resume,
-    _pre_pause_content,
-    _settle_resumed_suspension,
+from agentcore.runtime.pipeline.resume import (
+    finish_terminal_resume,
+    pre_pause_content,
+    settle_resumed_suspension,
 )
 from agentcore.runtime.suspension import AskUserSuspension
 from agentcore.tools.builtin.ask_user import ask_user_tool_result
@@ -84,12 +86,11 @@ def test_result_stop_defaults_closing_when_no_note():
     assert res.final_text  # a non-empty default closing, so the bubble is never blank
 
 
-def test_result_adjust_treated_as_continue():
-    res = ask_user_tool_result(
-        CheckpointResponse(decision=CheckpointDecision.ADJUST, note="走稳一点", selected=["A"])
-    )
-    assert res.effect is ToolEffect.CONTINUE
-    assert "走稳一点" in res.output
+def test_result_adjust_rejected():
+    with pytest.raises(ValueError, match="ADJUST"):
+        ask_user_tool_result(
+            CheckpointResponse(decision=CheckpointDecision.ADJUST, note="走稳一点", selected=["A"])
+        )
 
 
 def test_result_timeout_hands_back_to_ceo():
@@ -115,7 +116,7 @@ def _sink_with_seeded_checkpoint() -> EventSink:
 
 async def test_settle_ask_user_stop_yields_terminal_text():
     sink = _sink_with_seeded_checkpoint()
-    settled = await _settle_resumed_suspension(
+    settled = await settle_resumed_suspension(
         _ask_frame(),
         decision=CheckpointDecision.STOP,
         note="收工",
@@ -134,7 +135,7 @@ async def test_settle_ask_user_stop_yields_terminal_text():
 
 async def test_settle_ask_user_continue_feeds_loop_without_terminal():
     sink = EventSink()
-    settled = await _settle_resumed_suspension(
+    settled = await settle_resumed_suspension(
         _ask_frame(),
         decision=CheckpointDecision.CONTINUE,
         note="",
@@ -152,7 +153,7 @@ async def test_settle_ask_user_drops_off_menu_picks():
     # A resolve can't inject arbitrary strings into the CEO context — only offered
     # options survive (same guard as the live AskUserTool).
     sink = _sink_with_seeded_checkpoint()
-    settled = await _settle_resumed_suspension(
+    settled = await settle_resumed_suspension(
         _ask_frame(options=["A", "B"]),
         decision=CheckpointDecision.CONTINUE,
         note="",
@@ -183,7 +184,7 @@ def test_pre_pause_content_joins_this_turn_assistant_rounds():
         LLMMessage(role="assistant", content="先看一下需求"),
         LLMMessage(role="assistant", content="我来发问"),
     ]
-    assert _pre_pause_content(transcript) == "先看一下需求\n\n我来发问"
+    assert pre_pause_content(transcript) == "先看一下需求\n\n我来发问"
 
 
 def test_pre_pause_content_excludes_prior_turns():
@@ -195,7 +196,7 @@ def test_pre_pause_content_excludes_prior_turns():
         LLMMessage(role="user", content="这一轮"),
         LLMMessage(role="assistant", content="这一轮开场"),
     ]
-    assert _pre_pause_content(transcript) == "这一轮开场"
+    assert pre_pause_content(transcript) == "这一轮开场"
 
 
 def test_pre_pause_content_empty_when_no_preamble():
@@ -205,14 +206,14 @@ def test_pre_pause_content_empty_when_no_preamble():
         LLMMessage(role="user", content="问"),
         LLMMessage(role="assistant", content=""),
     ]
-    assert _pre_pause_content(transcript) == ""
+    assert pre_pause_content(transcript) == ""
 
 
 def test_finish_terminal_resume_prepends_pre_pause_to_closing():
     # ask_user STOP after the CEO already wrote an overview: the persisted reply is the
     # overview + closing note as separate paragraphs (parity with live), not the closing
     # note alone — the pre-pause text must not be dropped on a fresh-process resume.
-    result = _finish_terminal_resume(
+    result = finish_terminal_resume(
         message_id="m1",
         pre_pause_content="阶段成果如上。",
         closing="先到这。",
@@ -222,7 +223,7 @@ def test_finish_terminal_resume_prepends_pre_pause_to_closing():
 
 
 def test_finish_terminal_resume_keeps_closing_only_without_pre_pause():
-    result = _finish_terminal_resume(
+    result = finish_terminal_resume(
         message_id="m1", pre_pause_content="", closing="先到这。", sink=EventSink()
     )
     assert result["content"] == "先到这。"

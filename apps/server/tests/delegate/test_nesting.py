@@ -6,8 +6,10 @@ import re
 from agentcore.llm.provider.protocol import LLMChunk, TokenUsage, ToolCallDelta
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.runs.types import RunPhase, RunState
+from agentcore.tools.builtin.delegate.accumulate import collect_citations
 from agentcore.tools.builtin.delegate.nesting import absorb_children, make_lead_subteam
 from agentcore.tools.builtin.delegate.tool import DelegateTool
+from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.builtin.replan import ReplanTool
 from tests.delegate.conftest import (
@@ -66,6 +68,26 @@ async def test_nested_delegation_runs_subteam_links_tree_and_rolls_up():
     assert len(cap_rows) == 1
     assert cap_rows[0].run_id == cap_id
     assert len(sub_rows) == 2
+
+
+async def test_finalize_stopped_absorbs_nested_children_usage():
+    """F2 regression: replan(stop)/dispose paths call finalize_stopped — nested lead
+    sub-team spend on the child's _acc must fold into the parent, same as drive.py."""
+    parent = tool(Provider([]))
+    subteam = make_lead_subteam(parent, "cap1", 1)
+    child = subteam.tools[0]
+    child._acc.add_usage(
+        {"input": 100, "output": 20, "reasoning": 0, "cache_hit": 0, "cache_miss": 0}
+    )
+    assert parent.usage.get("input", 0) == 0
+
+    from agentcore.runtime.runs.plan import RunPlan
+    from agentcore.tools.builtin.delegate.supervised import finalize_stopped
+
+    await finalize_stopped(parent, RunPlan(nodes=[]), {})
+    assert parent.usage.get("input") == 100
+    assert parent.usage.get("output") == 20
+    assert parent._children == []
 
 
 async def test_depth_two_subworker_cannot_delegate_further():
@@ -349,7 +371,7 @@ def test_collect_citations_folds_completed_workers_deduped_excludes_failed():
             citations=[{"url": "https://secret.com", "title": "S"}],
         ),
     }
-    t._collect_citations(results)
+    collect_citations(t, results)
     assert [c["url"] for c in t.citations] == ["https://a.com", "https://b.com"]
 
 
@@ -379,3 +401,40 @@ async def test_delegate_result_carries_this_calls_new_citations(monkeypatch):
     assert [c["url"] for c in (r2.citations or [])] == ["https://b.com"]
     # accumulator still holds the full deduped set for the turn-close backstop merge
     assert [c["url"] for c in t.citations] == ["https://a.com", "https://b.com"]
+
+
+async def test_worker_captain_rejects_sub_fanout_over_cap():
+    t = DelegateTool(
+        llm=Provider([]),
+        sink=EventSink(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        history=[],
+        tools=ToolRegistry(),
+        base_tool_context=ctx(),
+        captain_run_id="cap_1",
+        depth=1,
+    )
+    tasks = [{"role": f"子{i}", "task": f"任务{i}"} for i in range(5)]
+    result = await t.execute({"tasks": tasks}, ctx())
+    assert result.success is False
+    assert "子团队扇出已达上限" in (result.output or "")
+    assert "4" in (result.output or "")
+
+
+async def test_worker_captain_rejects_cumulative_sub_fanout():
+    t = DelegateTool(
+        llm=Provider([]),
+        sink=EventSink(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        history=[],
+        tools=ToolRegistry(),
+        base_tool_context=ctx(),
+        captain_run_id="cap_1",
+        depth=1,
+    )
+    t._sub_workers_spawned = 4
+    result = await t.execute({"tasks": [{"role": "子5", "task": "收尾"}]}, ctx())
+    assert result.success is False
+    assert "子团队扇出已达上限" in (result.output or "")

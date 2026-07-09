@@ -4,11 +4,13 @@ import { GLOBAL_SHORTCUTS } from "@/lib/shortcuts";
 import { useApplyTheme } from "@/lib/theme";
 import { startRealtime, stopRealtime } from "@/services/realtime";
 import { startServerHealthMonitor } from "@/services/serverHealth";
+import { startTeamActivityNotifications, startNativeNotificationRouting } from "@/services/teamActivityNotifications";
 import { startUpdates } from "@/stores/updates";
 import { useUsageStore } from "@/stores/usage";
 import { useEffect, useRef } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { ShareConversationDialog } from "../conversation/ShareConversationDialog";
+import { CreateProjectDialog } from "../folders/CreateProjectDialog";
 import { Sidebar } from "../sidebar/Sidebar";
 import { CommandPalette } from "./CommandPalette";
 import { TitleBar } from "./TitleBar";
@@ -56,6 +58,18 @@ export function AppShell() {
   // status and toasts when an update is ready (前端技术与架构.md §7.6).
   useEffect(() => startUpdates(), []);
 
+  // 跨对话完成通知 (前端UX设计.md §一 全局协作感知): ambient, read-only subscription so a team
+  // finishing / failing / needing approval in a conversation the user isn't viewing
+  // surfaces a toast with a one-click jump. Lives at the shell so it spans every route.
+  useEffect(() => {
+    const stopActivity = startTeamActivityNotifications();
+    const stopNativeRouting = startNativeNotificationRouting();
+    return () => {
+      stopActivity();
+      stopNativeRouting();
+    };
+  }, []);
+
   // Global keyboard shortcuts (§二) — dispatched off the single-source table in
   // lib/shortcuts.ts (also rendered by the 快捷键 settings page, so behavior and
   // the documented chord never drift). Modifier chords don't insert text, so
@@ -102,6 +116,7 @@ export function AppShell() {
 
       <CommandPalette />
       <ShareConversationDialog />
+      <CreateProjectDialog />
     </div>
   );
 }

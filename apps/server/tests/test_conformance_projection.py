@@ -456,3 +456,52 @@ def test_multi_agent_team_notes_ceo_seed_and_brief(projected):
     ]
     assert len(brief_blocks) == 2
     assert "初学者" in brief_blocks[0]["body"]
+
+
+def test_process_tool_result_cap_matches_sink():
+    """>8KB tool results: sink process timeline and oracle projection must agree.
+
+    Journal stores the full wire payload; reload folds through ``project_turn``. Live
+    runtime caps in ``EventSink._accumulate_process`` — the oracle must apply the same
+    ``cap_process_result`` so golden/reload/live stay aligned."""
+    from agentcore.conformance.projection import project_turn
+    from agentcore.runtime.events import EventSink, tool_use_end, tool_use_start
+    from agentcore.runtime.events.journal_config import _PROCESS_RESULT_CAP, cap_process_result
+
+    big = "x" * (_PROCESS_RESULT_CAP + 500)
+    expected = cap_process_result(big)
+    assert isinstance(expected, str)
+    assert len(expected) == _PROCESS_RESULT_CAP + 1  # cap + ellipsis
+
+    sink = EventSink()
+    sink.emit(tool_use_start("tc_big", "read_url", {"url": "https://example.com"}))
+    sink.emit(tool_use_end("tc_big", "read_url", success=True, output=big))
+
+    sink_tool = next(s for s in (sink.process_timeline() or []) if s.get("kind") == "tool")
+    assert sink_tool["result"] == expected
+
+    # Uncapped wire events (as journaled / reloaded) — oracle must cap on fold.
+    events = [
+        {
+            "type": "tool_use_start",
+            "payload": {
+                "tool_call_id": "tc_big",
+                "tool_name": "read_url",
+                "arguments": {"url": "https://example.com"},
+            },
+            "timestamp": "2026-01-01T00:00:00.000Z",
+        },
+        {
+            "type": "tool_use_end",
+            "payload": {
+                "tool_call_id": "tc_big",
+                "tool_name": "read_url",
+                "status": "success",
+                "result": big,
+            },
+            "timestamp": "2026-01-01T00:00:00.001Z",
+        },
+    ]
+    oracle_tool = next(s for s in project_turn(events)["process"] if s.get("kind") == "tool")
+    assert oracle_tool["result"] == expected
+    assert oracle_tool["result"] == sink_tool["result"]

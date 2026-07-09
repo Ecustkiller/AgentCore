@@ -3,11 +3,6 @@ export function conversationIdOf(wsId: string): string | null {
   return wsId.startsWith("conv:") ? wsId.slice("conv:".length) : null;
 }
 
-/** @deprecated Legacy `folder:<id>` workspaces — retained for memory-leaf lookups. */
-export function folderIdOf(wsId: string): string | null {
-  return wsId.startsWith("folder:") ? wsId.slice("folder:".length) : null;
-}
-
 const RAIL_KEY = "agentcore:files-rail-width";
 const RAIL_MIN = 200;
 const RAIL_MAX = 600;

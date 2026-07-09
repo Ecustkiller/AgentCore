@@ -3,7 +3,9 @@ import {
   parallelTimelineMetricsSummary,
 } from "@/components/chat/ParallelTimeline";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
-import { useTurnAuditCounts } from "@/hooks/useTurnAuditCounts";
+import { useTurnAudit } from "@/hooks/useTurnAudit";
+import { groupAuditCountsByRun } from "@/services/audit";
+import { buildInjectGraphOverlay } from "@/lib/causalInject";
 import {
   isTimelineLayout,
   resolveEffectiveGraphLayout,
@@ -74,8 +76,18 @@ export function GraphView({
 }: GraphViewProps = {}) {
   const messageId = useExecutionScope();
   const conversationId = useConversationStore((s) => s.currentConversationId);
-  const auditCounts = useTurnAuditCounts(conversationId, messageId);
   const execution = useProjectedExecution();
+  const isMultiAgent = execution?.planType === "multi_agent";
+  const { data: turnAudit } = useTurnAudit(
+    isMultiAgent ? conversationId : null,
+    isMultiAgent ? messageId : null,
+  );
+  const auditCounts = useMemo(
+    () => (turnAudit ? groupAuditCountsByRun(turnAudit.data) : {}),
+    [turnAudit],
+  );
+  const showAuditInjectFlow = useGraphStore((s) => s.showAuditInjectFlow);
+  const setShowAuditInjectFlow = useGraphStore((s) => s.setShowAuditInjectFlow);
   const hasFrames = useActiveExecField((rt) => rt.frames.length > 0);
   const layoutKind = useGraphStore((s) => s.layoutKind);
   const setLayoutKind = useGraphStore((s) => s.setLayoutKind);
@@ -85,6 +97,15 @@ export function GraphView({
     parallelAvailable,
   });
   const timelineLayout = isTimelineLayout(effectiveLayoutKind);
+  const [expandedUnits, setExpandedUnits] = useState<Set<string>>(() => new Set());
+  const onToggleUnitExpand = useCallback((unitId: string) => {
+    setExpandedUnits((prev) => {
+      const next = new Set(prev);
+      if (next.has(unitId)) next.delete(unitId);
+      else next.add(unitId);
+      return next;
+    });
+  }, []);
   const {
     positions,
     edges,
@@ -96,7 +117,8 @@ export function GraphView({
     onNodesChange,
     groups,
     subTeams,
-  } = useGraphLayout(execution, effectiveLayoutKind, fitMode);
+    foldInfo,
+  } = useGraphLayout(execution, effectiveLayoutKind, fitMode, expandedUnits);
   const { containerRef, rfRef, overflowing, fitView, centerNode, onInit } =
     useGraphViewport({ fitMode, bbox, layoutReady, onMeasure });
   const handleDirection =
@@ -180,6 +202,31 @@ export function GraphView({
     [execution, captainRun],
   );
 
+  const injectOverlay = useMemo(
+    () =>
+      isMultiAgent
+        ? buildInjectGraphOverlay(turnAudit?.causal_graph, edges, {
+            focusRunId: litRunId,
+            showAllInject: showAuditInjectFlow,
+          })
+        : null,
+    [
+      isMultiAgent,
+      turnAudit?.causal_graph,
+      edges,
+      litRunId,
+      showAuditInjectFlow,
+    ],
+  );
+
+  const injectFlowAvailable = useMemo(
+    () =>
+      isMultiAgent &&
+      (turnAudit?.causal_graph?.edges?.some((e) => e.kind === "inject") ??
+        false),
+    [isMultiAgent, turnAudit?.causal_graph],
+  );
+
   const projectionBase = useMemo(
     () =>
       execution
@@ -201,6 +248,9 @@ export function GraphView({
             groups,
             subTeams,
             auditCounts,
+            foldInfo: foldInfo ?? undefined,
+            expandedUnits,
+            onToggleUnitExpand,
           }
         : null,
     [
@@ -221,6 +271,9 @@ export function GraphView({
       groups,
       subTeams,
       auditCounts,
+      foldInfo,
+      expandedUnits,
+      onToggleUnitExpand,
     ],
   );
 
@@ -230,19 +283,27 @@ export function GraphView({
   );
 
   const flowNodes = useMemo(() => {
-    if (!hoveredNodeId) return baseFlowNodes;
-    const related = hoverRelatedIds(hoveredNodeId, edges);
-    return baseFlowNodes.map((n) =>
-      related && !related.has(n.id)
-        ? { ...n, className: "graph-hover-dimmed" }
-        : n,
-    );
-  }, [baseFlowNodes, hoveredNodeId, edges]);
+    const injectRelated = injectOverlay?.dimUnrelatedEdges
+      ? injectOverlay.relatedNodeIds
+      : null;
+    const hoverRelated = hoveredNodeId
+      ? hoverRelatedIds(hoveredNodeId, edges)
+      : null;
+    if (!injectRelated && !hoverRelated) return baseFlowNodes;
+    return baseFlowNodes.map((n) => {
+      const keepBright =
+        (!injectRelated || injectRelated.has(n.id)) &&
+        (!hoverRelated || hoverRelated.has(n.id));
+      return keepBright ? n : { ...n, className: "graph-hover-dimmed" };
+    });
+  }, [baseFlowNodes, hoveredNodeId, edges, injectOverlay]);
 
   const flowEdges = useMemo(
     () =>
-      projectionBase ? projectFlowEdges({ ...projectionBase, edges }) : [],
-    [projectionBase, edges],
+      projectionBase
+        ? projectFlowEdges({ ...projectionBase, edges, injectOverlay })
+        : [],
+    [projectionBase, edges, injectOverlay],
   );
 
   const waves = useMemo<WaveBand[]>(
@@ -332,8 +393,21 @@ export function GraphView({
                 onLayoutKindChange={setLayoutKind}
                 metricsSummary={metricsSummary}
                 timelineAvailable={parallelAvailable}
+                injectFlowAvailable={injectFlowAvailable}
+                showAuditInjectFlow={showAuditInjectFlow}
+                onShowAuditInjectFlowChange={setShowAuditInjectFlow}
               />
             )}
+
+            {interactive &&
+              injectOverlay &&
+              (showAuditInjectFlow || injectOverlay.gapEdges.length > 0) && (
+                <div className="pointer-events-none absolute bottom-3 right-3 z-10 rounded-lg border border-border bg-card/90 px-2.5 py-1.5 text-xs text-muted-foreground shadow-sm backdrop-blur">
+                  <span className="text-foreground">──</span> 计划依赖
+                  <span className="mx-2 text-muted-foreground/50">·</span>
+                  <span className="text-primary">⇢</span> 数据注入（审计）
+                </div>
+              )}
 
             {interactive && (
               <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-2">

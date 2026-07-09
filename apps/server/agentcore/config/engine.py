@@ -7,7 +7,6 @@ class EngineSettings(BaseModel):
     tool_default_timeout_seconds: float = 60.0
     tool_execution_timeout_seconds: float = 90.0
 
-    engine_fallback_enabled: bool = True
     engine_empty_response_threshold: int = 2
 
     engine_tool_failure_warn: int = 2
@@ -15,7 +14,11 @@ class EngineSettings(BaseModel):
     engine_unproductive_threshold: int = 3
     engine_reflection_start_round: int = 3
     engine_reflection_interval: int = 3
-    engine_convergence_finalize_rounds: int = 12
+    # Absolute investigation-round ceiling (safety net). Progress-aware spinning detection
+    # normally triggers earlier; this is the hard backstop.
+    engine_convergence_finalize_rounds: int = 30
+    # Consecutive investigation-only rounds re-reading the same targets before finalize.
+    engine_convergence_spin_rounds: int = 3
     engine_finish_guard_max_reworks: int = 2
 
     engine_tool_clear_keep_recent: int = 4

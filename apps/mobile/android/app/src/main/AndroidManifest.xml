@@ -38,4 +38,7 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 语音输入 (@capgo/capacitor-speech-recognition 原生识别)。iOS 待补：原生工程尚未生成
+         (无 Info.plist)，接入 iOS 时需加 NSSpeechRecognitionUsageDescription + NSMicrophoneUsageDescription。 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 </manifest>

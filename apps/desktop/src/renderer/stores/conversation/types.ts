@@ -55,12 +55,10 @@ export interface Conversation {
   lastMessagePreview: string | null;
   folderId?: string | null;
   localContainerRootId?: string | null;
-  modelMode?: string | null;
-  /** Per-conversation custom instructions (对话级自定义指令); null/"" = none. Injected
-   * into this conversation's system prompt so every turn follows it. */
-  instructions?: string | null;
   pinned?: boolean;
   archived?: boolean;
+  /** Auto-classified on first-turn title minting; null = unclassified. */
+  tag?: string | null;
 }
 
 export interface MessageAttachmentMeta {
@@ -117,6 +115,10 @@ export interface Message {
   usage?: UsageBreakdown;
   rounds?: number;
   finishReason?: string;
+  /** 协作质量 (学·度量 §2.5): turn-level orchestration signals. Live via
+   * message_end; reload via messages API (nested in usage column). Orchestration
+   * counts also surface in the assistant footer; audit_drops is diagnostic-only. */
+  collab?: import("@/types/events").TurnCollabMetrics;
   runs?: ExecutionJournal;
   captainContext?: ContextBlockWire[];
   checkpoints?: CheckpointDisplay[];

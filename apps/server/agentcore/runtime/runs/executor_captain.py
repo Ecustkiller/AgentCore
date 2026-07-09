@@ -8,7 +8,7 @@ from dataclasses import asdict, replace
 
 from agentcore.core.logging import get_logger
 from agentcore.llm.pricing import calculate_cost
-from agentcore.llm.profiles import ModelProfile
+from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.engine import react_loop
@@ -44,7 +44,7 @@ def build_captain_executor(
     chat_system_prompt: str,
     history: list[dict],
     user_message: str,
-    profile: ModelProfile,
+    profile: ProfileParams,
     turn_model: str,
     citation_sink: list[dict],
     approval_gate: ApprovalGate | None = None,
@@ -104,7 +104,7 @@ def build_captain_resumer(
     tools: ToolRegistry,
     sink: EventSink,
     base_tool_context: ToolContext,
-    profile: ModelProfile,
+    profile: ProfileParams,
     turn_model: str,
     citation_sink: list[dict],
     approval_gate: ApprovalGate | None = None,
@@ -152,7 +152,7 @@ async def _drive_captain_loop(
     tools: ToolRegistry,
     sink: EventSink,
     tool_ctx: ToolContext,
-    profile: ModelProfile,
+    profile: ProfileParams,
     turn_model: str,
     citation_sink: list[dict],
     approval_gate: ApprovalGate | None,

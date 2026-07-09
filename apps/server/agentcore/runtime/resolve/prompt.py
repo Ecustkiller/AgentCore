@@ -154,7 +154,9 @@ _CEO_VISUALIZATION_HINT = """
 即可，无需调用任何工具。mermaid 语法约束：subgraph 中文/非英文标签须用 \
 `subgraph id["标签"]`（如 `subgraph app["应用层"]`）；禁止 `&` 多节点连线（`A --> B & C`），\
 改为逐行 `A --> B` / `A --> C`；含 `+`、`/`、`(`、`)` 等特殊字符的节点标签用双引号包裹（如 \
-`A["LLM调用 + Tool Use"]`）；节点 ID 用英文/数字，不用 emoji 或中文作 ID；优先 \
+`A["LLM调用 + Tool Use"]`）；图表结构里的标点一律半角 ASCII——消息分隔 `:`、边标签 \
+`|`、定界引号 `"`、逗号、空格等禁用全角 `：｜，` 或弯引号 “”（仅引号内的标签文本可保留全角），\
+否则解析失败；节点 ID 用英文/数字，不用 emoji 或中文作 ID；优先 \
 `flowchart TD/TB/LR/BT`，不用已废弃的 `graph` 关键字。
 </visualization>"""
 
@@ -197,8 +199,20 @@ _CEO_CORE_HINT = """
 分析推理类的简短回应——首字即时，零编排开销。
 【委派】有实质产出、需变更、广度调查、多角度对比——凡需 worker 动手的活，用 `delegate`。\
 单 worker 端到端能完成的，设 `finalize=true` 直出，产出是文件的在 task 里点明用 file_write 落盘；\
+代码型任务委派时建议声明 `completion_criteria=code_verified`，引擎会在 worker 结束后校验是否\
+成功运行过 code_execute。\
 多方向并行、多依赖流水线、需要不同专长或多视角对比 / 辩论，\
 先 `consult_skill(team_orchestration_advanced)` 再规划团队形态。
+
+【执行 / 运行 / 打开】用户要安装依赖、跑测试、启动应用、打开刚写的软件——一律【委派】给 worker\
+（`completion_criteria=code_verified` 或 task 里写清「进程启动成功 / 测试通过」），由 worker 用\
+`code_execute` / `test_run` 在工作区里跑通；你绝不口头拒绝说「我没法运行终端」或把命令块甩给用户\
+自己跑。若工作区尚不可执行（未绑定本机文件夹 / 本地引擎未就绪），用 `ask_user` 引导用户绑定本地\
+文件夹或开启本地引擎，再委派修复与验收——不要假装已完成。
+
+【回忆 / 核实产出】用户问「刚才做了什么」「产出在哪」「你知道交付物吗」——先用 `file_list` / \
+`file_read` 核实工作区现状再回答；禁止 tools=0 凭记忆断言路径或完成度。若工作区空而历史有委派，\
+如实告知可能的路径断裂并提议重新委派或让用户确认绑定。
 
 默认倾向：能【直答】就直答；委派时，单 worker 能胜任就别搞 DAG。\
 判据是活的自然结构（子任务是否真正独立可并行、是否需要不同专长），不是数量本身——\
@@ -240,26 +254,6 @@ _MEMORY_RULES_TEMPLATE = """
 </rules>"""
 
 
-_CONVERSATION_INSTRUCTIONS_TEMPLATE = """
-<对话级指令>
-以下是用户为「本次对话」设定的自定义指令，优先级高于长期记忆偏好。请在本对话的每一回合
-都遵循；仅当与用户在具体消息里的显式指令直接冲突时，才以那条更具体的显式指令为准。
-
-{instructions}
-</对话级指令>"""
-
-
-def _format_conversation_instructions(instructions: str | None) -> str | None:
-    """Wrap a conversation's custom instructions into a high-priority block, or None.
-
-    Trimmed and dropped when blank so an empty / whitespace-only setting contributes
-    nothing (no dangling section, prefix stays byte-identical for the cache).
-    """
-    if not instructions or not instructions.strip():
-        return None
-    return _CONVERSATION_INSTRUCTIONS_TEMPLATE.format(instructions=instructions.strip())
-
-
 def _format_memory_rules(memory_markdown: str | None) -> str | None:
     """Wrap the user's memory into a <rules> block, or None if empty.
 
@@ -279,7 +273,6 @@ def _format_memory_rules(memory_markdown: str | None) -> str | None:
 def assemble_system_prompt(
     *,
     memory_markdown: str | None = None,
-    instructions: str | None = None,
     extra_context: str | None = None,
 ) -> str:
     """Build the system prompt for a conversation.
@@ -288,10 +281,6 @@ def assemble_system_prompt(
     when present it is injected as a soft-priority <rules> block. This base prompt
     is shared by the CEO chat agent and the delegated workers (runs/executor.py),
     so memory reaches every agent.
-
-    `instructions` is the conversation's own custom directive (对话级自定义指令); when
-    present it is injected as a high-priority <对话级指令> block ABOVE memory. Stable per
-    conversation, so it keeps the cacheable prefix intact across the thread's turns.
 
     Sections are stitched by :class:`ContextAssembler` (上下文注入统一): base →
     runtime context → memory <rules> → attachment context, joined with "\n". Empty
@@ -312,11 +301,6 @@ def assemble_system_prompt(
         ContextAssembler()
         .add("base", resolve(FRAGMENT_BASE, _DEFAULT_SYSTEM_PROMPT), SectionOrder.BASE)
         .add("runtime_context", runtime_context, SectionOrder.RUNTIME_CONTEXT)
-        .add(
-            "conversation_instructions",
-            _format_conversation_instructions(instructions),
-            SectionOrder.INSTRUCTIONS,
-        )
         .add("memory_rules", _format_memory_rules(memory_markdown), SectionOrder.MEMORY)
         .add("attachment_context", extra_context, SectionOrder.ATTACHMENT)
         .render()
@@ -351,8 +335,8 @@ def compose_worker_base_prompt(
     """Build the delegated worker's system prompt from the shared base.
 
     Layers the worker-only simplified 记忆主题目录 when memory is on, then the per-turn
-    attachment block last (缓存友好). ``shared_base`` is the output of
-    ``assemble_system_prompt`` — identity, runtime context, instructions, core memory.
+    attachment block last (缓存友好).     ``shared_base`` is the output of
+    ``assemble_system_prompt`` — identity, runtime context, core memory.
     """
     memory_block = (
         render_worker_memory_topic_directory(memory_topics) if memory_enabled else ""

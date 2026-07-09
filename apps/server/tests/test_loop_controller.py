@@ -163,34 +163,14 @@ def test_nudge_clears_window_so_one_stale_repeat_does_not_finalize():
 # --- B2: empty-response degraded ladder ---
 
 
-def test_empty_response_first_empty_falls_back_then_finalizes():
-    # The default ladder: 1st empty → FALLBACK (retry on the stronger model), and a
+def test_empty_response_continues_then_finalizes():
+    # The default ladder: 1st empty retries on the same model (CONTINUE), and a
     # 2nd consecutive empty → FINALIZE (the turn ends degraded, not blank).
     c = LoopController(empty_threshold=2)
     c.note_empty_round(True)
-    assert c.empty_response_action(fallback_available=True) is Intervention.FALLBACK
+    assert c.empty_response_action() is Intervention.CONTINUE
     c.note_empty_round(True)
-    # fallback already spent → the streak hits threshold → finalize
-    assert c.empty_response_action(fallback_available=False) is Intervention.FINALIZE
-
-
-def test_empty_response_without_fallback_continues_then_finalizes():
-    # No fallback model: the 1st empty just retries as-is (CONTINUE), the 2nd finalizes.
-    c = LoopController(empty_threshold=2)
-    c.note_empty_round(True)
-    assert c.empty_response_action(fallback_available=False) is Intervention.CONTINUE
-    c.note_empty_round(True)
-    assert c.empty_response_action(fallback_available=False) is Intervention.FINALIZE
-
-
-def test_empty_response_fallback_used_at_most_once():
-    # The fallback latch: once escalated, a later empty does not FALLBACK again.
-    c = LoopController(empty_threshold=3)
-    c.note_empty_round(True)
-    assert c.empty_response_action(fallback_available=True) is Intervention.FALLBACK
-    c.note_empty_round(True)
-    # still below threshold (3) but fallback is spent → CONTINUE, not FALLBACK
-    assert c.empty_response_action(fallback_available=True) is Intervention.CONTINUE
+    assert c.empty_response_action() is Intervention.FINALIZE
 
 
 def test_empty_streak_resets_on_nonempty_round():
@@ -200,7 +180,7 @@ def test_empty_streak_resets_on_nonempty_round():
     c.note_empty_round(True)
     c.note_empty_round(False)  # recovered
     c.note_empty_round(True)  # streak restarts at 1
-    assert c.empty_response_action(fallback_available=False) is Intervention.CONTINUE
+    assert c.empty_response_action() is Intervention.CONTINUE
 
 
 # --- B2: tool failure circuit breaker ---
@@ -242,6 +222,13 @@ def test_circuit_breaker_counts_failures_per_tool_and_ignores_success():
     c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
     c.record([_ok("a", "t"), _ok("b", "t")])  # successes never count
     c.record([_fail("c", "u")])  # a different tool's single failure
+    assert not c.tool_circuit_breaker()
+
+
+def test_circuit_breaker_ignores_policy_failures():
+    c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+    policy = ToolAttempt("a", "read_url", success=False, policy_failure=True)
+    c.record([policy, policy, policy])
     assert not c.tool_circuit_breaker()
 
 
@@ -416,6 +403,45 @@ def test_safety_net_round_clock_survives_nudge_window_clear():
     c.record([_ok("a", "web_search"), _ok("a", "web_search"), _ok("a", "web_search")])
     assert c.decide(c.detect()) is Intervention.NUDGE  # clears the window
     assert c.investigation_rounds == 1  # survived the clear
-    c.record([_ok("b", "read_url")])  # 2nd round
+    c.record([_ok("b", "read_url")])  # 2nd round, different target
     assert c.investigation_rounds == 2
     assert c.convergence_action() is Intervention.CONTINUE  # still ≪ 6
+
+
+def test_spinning_same_target_triggers_finalize_before_absolute_cap():
+    c = LoopController(
+        convergence_finalize_rounds=30,
+        convergence_spin_rounds=3,
+        investigation_tools=frozenset({"file_read"}),
+    )
+    fp = "same"
+    for _ in range(3):
+        c.record([ToolAttempt(fingerprint=fp, tool_name="file_read", success=True)])
+        assert c.convergence_action() is Intervention.CONTINUE
+    c.record([ToolAttempt(fingerprint=fp, tool_name="file_read", success=True)])
+    assert c.convergence_action() is Intervention.FINALIZE
+
+
+def test_different_investigation_targets_do_not_spin():
+    c = LoopController(
+        convergence_finalize_rounds=30,
+        convergence_spin_rounds=3,
+        investigation_tools=frozenset({"file_read"}),
+    )
+    for i in range(10):
+        c.record([ToolAttempt(fingerprint=f"f{i}", tool_name="file_read", success=True)])
+        assert c.convergence_action() is Intervention.CONTINUE
+
+
+def test_progress_tool_resets_spin_streak():
+    c = LoopController(
+        convergence_finalize_rounds=30,
+        convergence_spin_rounds=2,
+        investigation_tools=frozenset({"file_read"}),
+    )
+    c.record([ToolAttempt(fingerprint="same", tool_name="file_read", success=True)])
+    c.record([ToolAttempt(fingerprint="same", tool_name="file_read", success=True)])
+    assert c.same_target_investigation_streak == 1
+    c.record([ToolAttempt(fingerprint="d1", tool_name="delegate", success=True)])
+    assert c.same_target_investigation_streak == 0
+    assert c.convergence_action() is Intervention.CONTINUE

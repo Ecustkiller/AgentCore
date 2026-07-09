@@ -82,21 +82,6 @@ async def test_store_delete_removes_file(tmp_path):
     await store.delete("u1", CORE_MEMORY_FILE)
 
 
-async def test_store_migrates_legacy_flat_file(tmp_path):
-    # Seed an old flat <user>.md (pre-folder layout) and access via the new API.
-    body = "## 沟通偏好\n- 用中文\n"
-    (tmp_path / "u1.md").write_text(body, encoding="utf-8")
-    store = FileMemoryStore(tmp_path)
-    # First access migrates the bytes into the per-user folder's core file …
-    assert await store.load("u1", CORE_MEMORY_FILE) == body
-    assert (tmp_path / "u1" / CORE_MEMORY_FILE).is_file()
-    assert not (tmp_path / "u1.md").exists()
-    # … same bytes → same CAS tag, so an in-flight editor baseline still matches.
-    assert await store.list("u1") == [
-        MemoryFileMeta(path=CORE_MEMORY_FILE, version=memory_version(body))
-    ]
-
-
 # --- maintain_user_memory (extractor + applier + store) ---
 
 
@@ -135,12 +120,12 @@ async def test_maintain_writes_when_ops_present(tmp_path):
     assert "- 偏好 pnpm" in saved
 
 
-async def test_maintain_passes_current_memory_to_extractor(tmp_path):
+async def test_maintain_passes_current_profile_to_extractor(tmp_path):
     store = FileMemoryStore(tmp_path)
     await store.save("u1", CORE_MEMORY_FILE, "## 沟通偏好\n- 已有偏好\n")
     extractor = _FakeExtractor([])
     await maintain_user_memory(user_id="u1", messages=_turn(), extractor=extractor, store=store)
-    assert "已有偏好" in extractor.inputs[0].current_memory
+    assert "已有偏好" in extractor.inputs[0].current_profile
 
 
 async def test_maintain_skips_write_when_no_ops(tmp_path):

@@ -26,17 +26,26 @@ from agentcore.db.models import User
 from agentcore.db.repositories import CostEventRepository
 from agentcore.llm.credentials import (
     INFERENCE_CONVERSATION_HEADER,
+    INFERENCE_MESSAGE_HEADER,
     INFERENCE_TRACE_HEADER,
     LLMCredentials,
 )
 from agentcore.llm.factory import build_provider
-from agentcore.llm.provider.protocol import LLMMessage, LLMRequest, TokenUsage
+from agentcore.llm.provider.protocol import (
+    LLMMessage,
+    LLMRequest,
+    TokenUsage,
+    ToolCall,
+    ToolCallDelta,
+    ToolCallFunction,
+)
 from agentcore.llm.resolve import ModelConfig, platform_llm_credentials
 
 logger = get_logger(__name__)
 
 _CONVERSATION_HEADER = INFERENCE_CONVERSATION_HEADER
 _TRACE_HEADER = INFERENCE_TRACE_HEADER
+_MESSAGE_HEADER = INFERENCE_MESSAGE_HEADER
 _UPSTREAM_RETRIED_HEADER = {"X-Upstream-Retried": str(3)}
 
 
@@ -92,6 +101,7 @@ async def _record_proxy_spend(
     model: str,
     usage: TokenUsage,
     trace_id: str | None = None,
+    message_id: str | None = None,
 ) -> None:
     from agentcore.api.routes import inference as inf
 
@@ -105,7 +115,7 @@ async def _record_proxy_spend(
                 await inf.CostEventRepository(session).record_runs(
                     user_id=user_id,
                     conversation_id=conversation_id,
-                    message_id=None,
+                    message_id=message_id,
                     runs=[asdict(run)],
                 )
         except Exception as e:
@@ -130,13 +140,48 @@ def _error_json(exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=status, content=payload, headers=_UPSTREAM_RETRIED_HEADER)
 
 
+def _tool_calls_from_payload(raw: list[dict] | None) -> list[ToolCall] | None:
+    """Rebuild ``ToolCall``s from an inbound OpenAI ``tool_calls`` array.
+
+    The faithful inverse of the provider's ``_build_payload`` serialization: an
+    assistant turn that issued tool calls must reach the upstream unchanged, or
+    DeepSeek rejects the next tool round (the thinking-mode tool contract 400s
+    when the assistant/tool shape is incomplete). Missing pieces default to
+    empty strings — never dropped."""
+    if not raw:
+        return None
+    return [
+        ToolCall(
+            id=tc.get("id", ""),
+            function=ToolCallFunction(
+                name=(tc.get("function") or {}).get("name", ""),
+                arguments=(tc.get("function") or {}).get("arguments", ""),
+            ),
+        )
+        for tc in raw
+    ]
+
+
 def _llm_request_from_payload(payload: dict, cfg: ModelConfig) -> LLMRequest:
+    # Faithful dict→LLMMessage: keep the FULL assistant/tool field set the sidecar
+    # sent (tool_calls / tool_call_id / reasoning_content), not just role+content.
+    # reasoning_content is preserved verbatim (including "") — the provider's
+    # _build_payload re-applies DeepSeek's thinking-mode echo rule on the way out.
     messages = [
-        LLMMessage(role=m["role"], content=m.get("content")) for m in payload.get("messages", [])
+        LLMMessage(
+            role=m["role"],
+            content=m.get("content"),
+            tool_calls=_tool_calls_from_payload(m.get("tool_calls")),
+            tool_call_id=m.get("tool_call_id"),
+            reasoning_content=m.get("reasoning_content"),
+        )
+        for m in payload.get("messages", [])
     ]
     return LLMRequest(
         messages=messages,
-        model=payload.get("model") or cfg.model,
+        # Server-resolved model is authoritative: the sidecar may still send
+        # settings.platform_model (e.g. gpt-5.5) while BYOK routes to DeepSeek.
+        model=cfg.model,
         temperature=float(payload.get("temperature", 0.7)),
         max_tokens=payload.get("max_tokens"),
         tools=payload.get("tools"),
@@ -156,6 +201,7 @@ async def inference_chat_completions(
     stream = bool(payload.get("stream"))
     conversation_id = request.headers.get(_CONVERSATION_HEADER) or None
     trace_id = request.headers.get(_TRACE_HEADER) or None
+    message_id = request.headers.get(_MESSAGE_HEADER) or None
 
     with log_context(trace_id=trace_id, conversation_id=conversation_id, user_id=user.user_id):
         try:
@@ -176,6 +222,7 @@ async def inference_chat_completions(
                 user_id=user.user_id,
                 conversation_id=conversation_id,
                 trace_id=trace_id,
+                message_id=message_id,
             )
         return await _forward_unary(
             provider,
@@ -183,6 +230,7 @@ async def inference_chat_completions(
             user_id=user.user_id,
             conversation_id=conversation_id,
             trace_id=trace_id,
+            message_id=message_id,
         )
 
 
@@ -193,6 +241,7 @@ async def _forward_unary(
     user_id: str,
     conversation_id: str | None,
     trace_id: str | None = None,
+    message_id: str | None = None,
 ) -> Response:
     try:
         response = await provider.complete(request)
@@ -219,6 +268,10 @@ async def _forward_unary(
             for tc in response.tool_calls
         ]
     message: dict = {"role": "assistant", "content": response.content}
+    # Pass the model's reasoning back so a tool-calling turn the sidecar echoes on
+    # the next round carries it (DeepSeek thinking-mode 400s without it).
+    if response.reasoning_content is not None:
+        message["reasoning_content"] = response.reasoning_content
     if tool_calls:
         message["tool_calls"] = tool_calls
     body = json.dumps(
@@ -239,8 +292,35 @@ async def _forward_unary(
         model=response.model,
         usage=response.usage,
         trace_id=trace_id,
+        message_id=message_id,
     )
     return Response(content=body, status_code=200, media_type="application/json")
+
+
+def _tool_call_deltas_to_wire(deltas: list[ToolCallDelta]) -> list[dict]:
+    """Project streamed tool-call deltas back to the OpenAI ``delta.tool_calls``
+    shape the sidecar's stream parser accumulates (index/id/function.name/
+    function.arguments). Without this relay a proxied tool call never reaches the
+    sidecar, so the whole delegate/debate loop can't even start.
+
+    The first delta for a call carries its id + function name; continuation
+    deltas carry only an index + an ``arguments`` fragment. Absent pieces are
+    omitted (not sent as ``null``) to mirror real upstream streaming and satisfy
+    the accumulator's ``if delta.id`` / ``if function_name`` guards."""
+    wire: list[dict] = []
+    for tc in deltas:
+        entry: dict = {"index": tc.index, "type": "function"}
+        if tc.id is not None:
+            entry["id"] = tc.id
+        function: dict = {}
+        if tc.function_name is not None:
+            function["name"] = tc.function_name
+        if tc.arguments_delta is not None:
+            function["arguments"] = tc.arguments_delta
+        if function:
+            entry["function"] = function
+        wire.append(entry)
+    return wire
 
 
 async def _forward_stream(
@@ -250,6 +330,7 @@ async def _forward_stream(
     user_id: str,
     conversation_id: str | None,
     trace_id: str | None = None,
+    message_id: str | None = None,
 ) -> Response:
     captured: dict = {}
 
@@ -261,6 +342,8 @@ async def _forward_stream(
                 delta["content"] = chunk.delta_content
             if chunk.delta_reasoning:
                 delta["reasoning_content"] = chunk.delta_reasoning
+            if chunk.delta_tool_calls:
+                delta["tool_calls"] = _tool_call_deltas_to_wire(chunk.delta_tool_calls)
             if chunk.finish_reason:
                 data["choices"][0]["finish_reason"] = chunk.finish_reason
             if chunk.usage:
@@ -305,13 +388,14 @@ async def _forward_stream(
                     model=captured.get("model") or request.model,
                     usage=usage,
                     trace_id=trace_id,
+                    message_id=message_id,
                 )
 
     return StreamingResponse(relay(), media_type="text/event-stream")
 
 
-# Backward-compat test hooks
-def _usage_from_deepseek(usage: dict) -> TokenUsage:
+def usage_from_deepseek(usage: dict) -> TokenUsage:
+    """Map a DeepSeek/OpenAI-style usage dict to ``TokenUsage``."""
     details = usage.get("completion_tokens_details") or {}
     return TokenUsage(
         input_tokens=int(usage.get("prompt_tokens", 0) or 0),

@@ -211,5 +211,20 @@ export function createLocalRootSource(
       const res = await window.fsApi.copyPath(rootId, inPath(path));
       if (!res.ok) throw new Error(res.reason);
     },
+    async openShellAtPath(path) {
+      const api = window.terminalApi;
+      if (!api?.openShellAtRoot) {
+        throw new Error("终端不可用（非桌面环境）");
+      }
+      const normalized =
+        path === "" || path === "." ? "." : path.replace(/^\/+|\/+$/g, "");
+      const containerSub =
+        normalized === "." ? (base || ".") : inPath(normalized);
+      const result = await api.openShellAtRoot(rootId, containerSub);
+      if (!result.ok) throw new Error(result.reason);
+    },
+    openWorkspaceShell() {
+      return this.openShellAtPath(".");
+    },
   };
 }

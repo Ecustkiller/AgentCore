@@ -349,14 +349,10 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
               kind: p.kind,
               revisionOf: p.parent_run_id,
               revision,
-              // 乙 wire 携 round/stance (单一轮次投影): a debate 续写 keeps its debater
-              // identity (stance/group) + TRUE round so every fold reads 第几轮/哪一方 from
-              // one field. Legacy journals fall back to the original's stance/group +
-              // revision-as-round. Mirrors the desktop fold + backend oracle (conformance
-              // pins them equal).
-              stance: p.stance ?? original.stance,
-              group: p.group ?? original.group,
-              round: p.round || revision,
+              // 乙 wire 携 round/stance (单一轮次投影): debate 续写从 wire 读取。
+              stance: p.stance ?? null,
+              group: p.group ?? null,
+              round: p.round ?? 0,
             };
             runs.push(run);
           }
@@ -701,6 +697,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       // no-op (mobile has no board surface). Mirrors the desktop conformanceFold no-op group.
       case "board_op_required":
       case "board_read_required":
+      case "desktop_notify_required":
       case "tool_progress":
       // 工具执行阶段进度 (联网搜索前端展示优化): a running tool's coarse phase (web_search →
       // querying / queued / fallback). Transport-only liveliness — NEVER journaled and excluded
@@ -717,6 +714,8 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       // （与桌面 oracle 一致）。手机端无逐轮决策 UI → 折为 no-op，仅在此登记以保穷尽。
       case "debate_round_decision_required":
       case "debate_round_decision_resolved":
+      case "delegation_authorization_required":
+      case "delegation_authorization_resolved":
       case "workspace_op_required":
       case "handoff_snapshot_done":
       case "handoff_job_started":
@@ -810,6 +809,30 @@ export function extractToolPhases(events: SSEEvent[]): Map<string, ToolPhase> {
   return phases;
 }
 
+/** Worker-scoped `tool_use_progress` (run_id present): the LATEST coarse EXECUTION phase per
+ * still-running worker run, keyed by `run_id`. Transport-only sibling of {@link extractToolPhases}
+ * — kept OUT of {@link ProjectedTurn} so the golden stays phase-less. Cleared on the matching
+ * worker `tool_use_end`. */
+export function extractWorkerToolPhases(
+  events: SSEEvent[],
+): Map<string, { phase: ToolPhase; toolName: string }> {
+  const phases = new Map<string, { phase: ToolPhase; toolName: string }>();
+  for (const ev of events) {
+    if (ev.type === "tool_use_progress") {
+      const p = ev.payload as ToolUseProgressPayload;
+      if (!p.run_id) continue;
+      phases.set(p.run_id, {
+        phase: p.phase as ToolPhase,
+        toolName: p.tool_name,
+      });
+    } else if (ev.type === "tool_use_end") {
+      const p = ev.payload as ToolUseEndPayload;
+      if (p.run_id) phases.delete(p.run_id);
+    }
+  }
+  return phases;
+}
+
 /** 非阻塞提问 (ask_user blocking=false) 的卡片内容：question + 可选 选项/默认/风格。 The
  *  conformance fold only drops a positional `ask` MARKER (`{kind:"ask", ask_id}`) in the
  *  timeline — the question text/options are transport-only and excluded from the golden
@@ -878,4 +901,66 @@ export function extractPendingEscalations(
     }
   }
   return pending;
+}
+
+/** One tool call a delegated worker made, for its run-detail 工具明细 (RunDetail). Mirrors the
+ *  process timeline's `tool` step shape (中文名 + args/result peek) minus the live-only `phase`
+ *  — a settled/replayed run's tools are all resolved, and a running one just shows「进行中」. */
+export interface RunToolCall {
+  id: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+  result: string | null;
+  status: "running" | "success" | "error";
+}
+
+/**
+ * 队员工具明细 (RunDetail · 工具调用): the run-scoped tool calls each delegated worker made, pulled
+ * straight off a turn's raw SSE events — a transport-only sibling of {@link fold} (twin of {@link
+ * extractPendingEscalations} / {@link extractAsks}), keyed by `run_id`, calls in fire order.
+ *
+ * The conformance {@link ProjectedTurn} folds a WORKER's run-scoped tool calls to NOTHING: they
+ * belong to the worker's node, not the CEO's inline timeline (统一团队时间线 = the CEO's OWN steps),
+ * and the golden carries no per-run tool IO — so the fold {@link fold} skips a `run_id`-tagged
+ * `tool_use_*` (leaving only the coarse {@link ProjectedAgent.toolProgress}). The run-detail panel
+ * reads the full call list from HERE instead, exactly like the asks / escalations side channels.
+ *
+ * A `tool_use_start` opens a `running` call (null result) appended to its run; the matching
+ * `tool_use_end` folds in its `result`/`status`. Orchestration tools (delegate/debate) are skipped
+ * — they are the team STRUCTURE (rendered as sub-tasks / the graph), not a worker tool, mirroring
+ * the fold's ORCHESTRATION_TOOLS skip. Both LIVE turns and MULTI-agent history (`runs.events`)
+ * carry these events, so the panel works live AND on replay; a single-agent turn yields an empty
+ * map (its calls are the captain's own, run_id-less).
+ */
+export function extractRunToolCalls(
+  events: SSEEvent[],
+): Map<string, RunToolCall[]> {
+  const byRun = new Map<string, RunToolCall[]>();
+  const byCallId = new Map<string, RunToolCall>();
+  for (const ev of events) {
+    if (ev.type === "tool_use_start") {
+      const p = ev.payload as ToolUseStartPayload;
+      if (!p.run_id || ORCHESTRATION_TOOLS.has(p.tool_name)) continue;
+      const call: RunToolCall = {
+        id: p.tool_call_id,
+        toolName: p.tool_name,
+        arguments: p.arguments ?? {},
+        result: null,
+        status: "running",
+      };
+      const list = byRun.get(p.run_id);
+      if (list) list.push(call);
+      else byRun.set(p.run_id, [call]);
+      byCallId.set(p.tool_call_id, call);
+    } else if (ev.type === "tool_use_end") {
+      const p = ev.payload as ToolUseEndPayload;
+      if (!p.run_id || ORCHESTRATION_TOOLS.has(p.tool_name)) continue;
+      const call = byCallId.get(p.tool_call_id);
+      if (call) {
+        call.result = p.result;
+        call.status = p.status;
+      }
+    }
+  }
+  return byRun;
 }

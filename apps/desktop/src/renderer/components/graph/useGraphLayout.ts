@@ -22,6 +22,7 @@ export function useGraphLayout(
   execution: Execution | null,
   layoutKind: GraphLayout,
   fitMode: GraphFitMode = "view",
+  expandedUnits: ReadonlySet<string> = new Set(),
 ) {
   const projectedRunsRef = useRef(execution?.runs);
   projectedRunsRef.current = execution?.runs;
@@ -77,19 +78,26 @@ export function useGraphLayout(
     const struct = execution.runs
       .map((s) => `${s.id}:${s.dependsOn.join(",")}:${s.parentRunId ?? ""}`)
       .join("|");
-    if (!isTimelineLayout(layoutKind)) return struct;
+    const expandKey = [...expandedUnits].sort().join(",");
+    if (!isTimelineLayout(layoutKind)) return `${struct}::${expandKey}`;
     const batchKey = execution.batches
       .map((b) =>
         b.timeline.map((t) => `${t.runId}:${t.startMs}-${t.endMs}`).join(","),
       )
       .join("|");
-    return `${struct}::${batchKey}`;
-  }, [execution, layoutKind]);
+    return `${struct}::${batchKey}::${expandKey}`;
+  }, [execution, layoutKind, expandedUnits]);
 
   const subTeams = useMemo<SubTeam[]>(() => {
     if (!structuralKey || !execution) return [];
-    return buildGraphStructure(execution.runs, INPUT_ID).subTeams;
-  }, [structuralKey, execution]);
+    return buildGraphStructure(execution.runs, INPUT_ID, expandedUnits).subTeams;
+  }, [structuralKey, execution, expandedUnits]);
+
+  const foldInfo = useMemo(() => {
+    if (!execution) return null;
+    return buildGraphStructure(execution.runs, INPUT_ID, expandedUnits)
+      .foldInfo;
+  }, [execution, expandedUnits]);
 
   useEffect(() => {
     if (!structuralKey) {
@@ -103,13 +111,12 @@ export function useGraphLayout(
     }
     const runs = projectedRunsRef.current ?? [];
     const batches = projectedBatchesRef.current ?? [];
-    const debate = runs.some((r) => r.stance != null);
     const captainId = runs.find((r) => r.kind === "captain")?.id ?? null;
     const {
       nodeIds,
       rawEdges,
       subTeams: layoutSubTeams,
-    } = buildGraphStructure(runs, INPUT_ID);
+    } = buildGraphStructure(runs, INPUT_ID, expandedUnits);
 
     if (isTimelineLayout(layoutKind)) {
       if (!execution) return;
@@ -139,7 +146,6 @@ export function useGraphLayout(
       nodeIds,
       rawEdges,
       elkLayout,
-      debate,
       {
         source: INPUT_ID,
         sink: captainId ?? undefined,
@@ -158,7 +164,7 @@ export function useGraphLayout(
     return () => {
       cancelled = true;
     };
-  }, [structuralKey, layoutKind, fitMode, setLayout, execution]);
+  }, [structuralKey, layoutKind, fitMode, setLayout, execution, expandedUnits]);
 
   return {
     positions,
@@ -171,5 +177,6 @@ export function useGraphLayout(
     onNodesChange,
     groups,
     subTeams,
+    foldInfo,
   };
 }

@@ -8,6 +8,7 @@ from agentcore.llm.provider.protocol import LLMChunk, TokenUsage, ToolCallDelta
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.interaction import InteractionRegistry
+from agentcore.llm.profiles import PLATFORM_MODEL_FLASH, TurnProfiles
 from agentcore.runtime.runs.executor import build_agent_executor
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
@@ -62,16 +63,28 @@ def _ctx() -> ToolContext:
     )
 
 
-def _executor(plan, provider: _ContentProvider, sink: EventSink):
+def _executor(plan, provider, sink: EventSink, *, profile_set: TurnProfiles | None = None):
     return build_agent_executor(
         plan=plan,
         llm=provider,
         tools=ToolRegistry(),
         sink=sink,
         base_tool_context=_ctx(),
+        profile_set=profile_set,
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+    )
+
+
+def _flash_profiles() -> TurnProfiles:
+    """Pin worker pricing to DeepSeek Flash so cost assertions stay stable."""
+    return TurnProfiles(
+        model=PLATFORM_MODEL_FLASH,
+        model_overrides={
+            "agent.fast": PLATFORM_MODEL_FLASH,
+            "agent.strong": PLATFORM_MODEL_FLASH,
+        },
     )
 
 

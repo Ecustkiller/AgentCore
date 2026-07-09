@@ -9,7 +9,19 @@
     "./fixtureKind": "./src/fixtureKind.ts",
     "./projectedTurn": "./src/projectedTurn.ts",
     "./fixtures/simulation-region-positions.json": "./fixtures/simulation-region-positions.json",
-    "./fixtures/simulation-m1-tick.json": "./fixtures/simulation-m1-tick.json"
+    "./fixtures/simulation-m1-tick.json": "./fixtures/simulation-m1-tick.json",
+    "./fixtures/simulation/multi-agent-tick.json": "./fixtures/simulation/multi-agent-tick.json",
+    "./fixtures/simulation/interaction-conversation.json": "./fixtures/simulation/interaction-conversation.json",
+    "./fixtures/simulation/world-event.json": "./fixtures/simulation/world-event.json",
+    "./fixtures/simulation/tick-frame-snapshot.json": "./fixtures/simulation/tick-frame-snapshot.json",
+    "./fixtures/simulation/rest-run-summary.json": "./fixtures/simulation/rest-run-summary.json",
+    "./fixtures/simulation/rest-advance-tick.json": "./fixtures/simulation/rest-advance-tick.json",
+    "./fixtures/simulation/rest-tick-frame.json": "./fixtures/simulation/rest-tick-frame.json",
+    "./fixtures/simulation/rest-run-status.json": "./fixtures/simulation/rest-run-status.json",
+    "./fixtures/simulation/rest-metrics.json": "./fixtures/simulation/rest-metrics.json",
+    "./fixtures/simulation/rest-manifest.json": "./fixtures/simulation/rest-manifest.json",
+    "./fixtures/simulation/rest-inject.json": "./fixtures/simulation/rest-inject.json",
+    "./fixtures/simulation/rest-patch-agent.json": "./fixtures/simulation/rest-patch-agent.json"
   },
   "types": "./src/index.ts",
   "dependencies": {

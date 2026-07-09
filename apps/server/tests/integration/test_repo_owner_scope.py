@@ -1,8 +1,8 @@
 """Repository owner-scope guards (SEC-002).
 
-User-facing data access on the per-user aggregates (conversation / board / folder /
-model_mode) makes ``user_id`` a *required* argument so multi-tenant isolation is the
-structural default, not a caller convention. Cross-owner access is allowed only through
+User-facing data access on the per-user aggregates (conversation / board / folder)
+makes ``user_id`` a *required* argument so multi-tenant isolation is the structural
+default, not a caller convention. Cross-owner access is allowed only through
 explicitly-named ``*_unscoped`` methods (trusted internal / admin callers).
 
 Two guards:
@@ -21,7 +21,6 @@ from agentcore.db.repositories import (
     BoardRepository,
     ConversationRepository,
     FolderRepository,
-    ModelModeRepository,
     UserRepository,
 )
 
@@ -31,8 +30,8 @@ _REPO_DIR = Path(__file__).resolve().parents[2] / "agentcore" / "db" / "reposito
 _CONTRACT: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     "conversations.py": (
         "ConversationRepository",
-        ("get_by_id", "update_title", "soft_delete", "set_model_mode",
-         "set_instructions", "set_pinned", "set_archived", "set_folder"),
+        ("get_by_id", "update_title", "soft_delete",
+         "set_pinned", "set_archived", "set_folder"),
         ("get_by_id_unscoped", "update_title_unscoped"),
     ),
     "boards.py": (
@@ -45,11 +44,6 @@ _CONTRACT: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
         "FolderRepository",
         ("get_by_id", "update", "set_local_root_id", "soft_delete"),
         ("get_by_id_unscoped",),
-    ),
-    "model_modes.py": (
-        "ModelModeRepository",
-        ("get_by_id", "update", "soft_delete"),
-        (),
     ),
 }
 
@@ -106,7 +100,7 @@ def test_unscoped_methods_are_explicit() -> None:
 async def test_get_by_id_is_owner_scoped(session_factory) -> None:
     """A non-owner is treated as absent; the owner sees the row; unscoped bypasses.
 
-    Pins the actual SEC-002 behaviour across all four per-user aggregates (the AST guards
+    Pins the actual SEC-002 behaviour across the per-user aggregates (the AST guards
     above only lock the signature shape).
     """
     async with session_factory() as s:
@@ -117,25 +111,21 @@ async def test_get_by_id_is_owner_scoped(session_factory) -> None:
         conv = await ConversationRepository(s).create(user_id=a, title="a's chat")
         folder = await FolderRepository(s).create(user_id=a, name="a's folder")
         board = await BoardRepository(s).create(user_id=a, title="a's board")
-        mode = await ModelModeRepository(s).create(user_id=a, name="a's mode", assignments={})
 
     async with session_factory() as s:
         conv_repo = ConversationRepository(s)
         folder_repo = FolderRepository(s)
         board_repo = BoardRepository(s)
-        mode_repo = ModelModeRepository(s)
 
         # The owner sees their own rows.
         assert await conv_repo.get_by_id(conv.id, user_id=a) is not None
         assert await folder_repo.get_by_id(folder.id, user_id=a) is not None
         assert await board_repo.get_by_id(board.id, user_id=a) is not None
-        assert await mode_repo.get_by_id(mode.id, user_id=a) is not None
 
         # A different user is treated as absent (route → 404, no existence leak).
         assert await conv_repo.get_by_id(conv.id, user_id=b) is None
         assert await folder_repo.get_by_id(folder.id, user_id=b) is None
         assert await board_repo.get_by_id(board.id, user_id=b) is None
-        assert await mode_repo.get_by_id(mode.id, user_id=b) is None
 
         # Trusted internal callers can still cross owners via the explicit hatch.
         assert await conv_repo.get_by_id_unscoped(conv.id) is not None

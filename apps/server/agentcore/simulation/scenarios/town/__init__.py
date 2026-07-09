@@ -15,7 +15,6 @@ from agentcore.simulation.scenarios.town.config import (
     persona_by_id,
     schedule_for_hour,
     schedule_hint_for_persona,
-    seed_m1_world,
     seed_town_world,
 )
 
@@ -34,6 +33,5 @@ __all__ = [
     "persona_by_id",
     "schedule_for_hour",
     "schedule_hint_for_persona",
-    "seed_m1_world",
     "seed_town_world",
 ]

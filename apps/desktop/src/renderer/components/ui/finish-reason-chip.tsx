@@ -9,7 +9,7 @@ import {
 
 export const FINISH_REASON_META: Record<
   string,
-  { label: string; Icon: LucideIcon; tone: "muted" | "warning" }
+  { label: string; Icon: LucideIcon; tone: "muted" }
 > = {
   cancelled: {
     label: "已中断 · 已保存完成的部分",
@@ -46,14 +46,14 @@ export function FinishReasonChip({
 }) {
   const meta = reason ? FINISH_REASON_META[reason] : undefined;
   if (!meta) return null;
-  const { Icon, tone } = meta;
+  const { Icon } = meta;
   const label =
     reason === "degraded" && diagnosisLabel
       ? `降级完成 · ${diagnosisLabel}`
       : meta.label;
   return (
     <Badge
-      tone={tone === "warning" ? "warning" : "muted"}
+      tone="muted"
       pill
       className={`mb-1.5 inline-flex items-center gap-1.5 px-2 py-0.5 font-normal ${className ?? ""}`}
     >

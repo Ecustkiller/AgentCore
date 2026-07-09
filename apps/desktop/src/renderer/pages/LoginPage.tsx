@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui";
 import { ApiError } from "@/services/api";
+import { persistAgentTownSession } from "@/services/agentTownSession";
 import { login, register } from "@/services/auth";
 import { useAuthStore } from "@/stores/auth";
 import { useState } from "react";
@@ -63,6 +64,7 @@ export function LoginPage() {
       }
       const user = await login(username.trim(), password);
       setAuthenticated(user);
+      void persistAgentTownSession();
     } catch (err) {
       setError(
         errorMessage(

@@ -1,4 +1,7 @@
-// INT-05: AI Town end-to-end smoke — create run → 3 ticks → SSE + tick readback.
+// INT-05: AI Town end-to-end smoke — exercises the full simulation REST + SSE contract
+// as a live regression guard (ST-02): create → manifest → inject → patch → pause/resume →
+// N ticks → SSE tail → tick readback → metrics → replay. Each response is shape-checked
+// against the frozen contract (the committed sim.* conformance vectors are the golden shapes).
 //
 // Requires:
 //   - Backend on SMOKE_API (default http://localhost:8000) with SIMULATION_ENABLED=true
@@ -38,8 +41,14 @@ const summary = {
   authed: false,
   runCreated: false,
   sseConnected: false,
+  manifestOk: false,
+  pauseResumeOk: false,
+  injectOk: false,
+  patchOk: false,
   ticksAdvanced: 0,
   tickReadbackOk: false,
+  metricsOk: false,
+  replayOk: false,
   sseEventTypes: [],
   errors: [],
   ok: false,
@@ -192,6 +201,127 @@ async function readTick(runId, tickNumber) {
   return res.json();
 }
 
+/** Assert `obj` carries every key in `fields` (shape guard against the frozen contract). */
+function requireFields(obj, fields, label) {
+  if (!obj || typeof obj !== "object") fail(`${label}: not an object`);
+  for (const field of fields) {
+    if (!(field in obj)) fail(`${label}: missing field '${field}'`);
+  }
+}
+
+async function getManifest(runId) {
+  const res = await apiFetch(
+    `/v1/simulation/runs/${encodeURIComponent(runId)}/manifest`,
+  );
+  if (!res.ok) fail(`get manifest failed (${res.status}): ${await res.text()}`);
+  const body = await res.json();
+  requireFields(body, ["run_id", "manifest"], "manifest");
+  requireFields(
+    body.manifest,
+    ["manifest_version", "scenario", "seed", "personas", "regions"],
+    "manifest.manifest",
+  );
+  summary.manifestOk = true;
+}
+
+async function pauseResume(runId) {
+  const pause = await apiFetch(
+    `/v1/simulation/runs/${encodeURIComponent(runId)}/pause`,
+    { method: "POST", body: {} },
+  );
+  if (!pause.ok) fail(`pause failed (${pause.status}): ${await pause.text()}`);
+  const paused = await pause.json();
+  requireFields(paused, ["run_id", "status", "current_tick"], "pause");
+  if (paused.status !== "paused") fail(`expected status paused, got ${paused.status}`);
+
+  const resume = await apiFetch(
+    `/v1/simulation/runs/${encodeURIComponent(runId)}/resume`,
+    { method: "POST", body: {} },
+  );
+  if (!resume.ok) fail(`resume failed (${resume.status}): ${await resume.text()}`);
+  const resumed = await resume.json();
+  requireFields(resumed, ["run_id", "status", "current_tick"], "resume");
+  summary.pauseResumeOk = true;
+}
+
+async function injectEvent(runId) {
+  const res = await apiFetch(
+    `/v1/simulation/runs/${encodeURIComponent(runId)}/inject`,
+    {
+      method: "POST",
+      body: { event_type: "announcement", payload: { title: "冒烟通告" } },
+    },
+  );
+  if (res.status !== 202) fail(`inject failed (${res.status}): ${await res.text()}`);
+  const body = await res.json();
+  requireFields(
+    body,
+    ["run_id", "event_id", "event_type", "title", "queued_for_tick"],
+    "inject",
+  );
+  summary.injectOk = true;
+}
+
+async function patchAgent(runId, agentId) {
+  const res = await apiFetch(
+    `/v1/simulation/runs/${encodeURIComponent(runId)}/agents/${encodeURIComponent(agentId)}`,
+    { method: "PATCH", body: { goal: "冒烟：今天多烤两炉面包" } },
+  );
+  if (!res.ok) fail(`patch agent failed (${res.status}): ${await res.text()}`);
+  const body = await res.json();
+  requireFields(body, ["run_id", "agent_id", "state"], "patch");
+  requireFields(body.state, ["agent_id", "name", "location", "position"], "patch.state");
+  summary.patchOk = true;
+}
+
+async function getMetrics(runId, expectedLen) {
+  const res = await apiFetch(
+    `/v1/simulation/runs/${encodeURIComponent(runId)}/metrics`,
+  );
+  if (!res.ok) fail(`get metrics failed (${res.status}): ${await res.text()}`);
+  const body = await res.json();
+  requireFields(body, ["run_id", "metrics"], "metrics");
+  if (!Array.isArray(body.metrics)) fail("metrics.metrics is not an array");
+  if (body.metrics.length !== expectedLen) {
+    fail(`expected ${expectedLen} metric rows, got ${body.metrics.length}`);
+  }
+  if (body.metrics.length > 0) {
+    requireFields(
+      body.metrics[0],
+      ["tick", "hour", "avg_mood", "trade_count", "population_by_region"],
+      "metrics[0]",
+    );
+  }
+  summary.metricsOk = true;
+}
+
+async function replayRange(runId, fromTick, toTick) {
+  const res = await fetch(
+    `${API}/v1/simulation/runs/${encodeURIComponent(runId)}/replay?from=${fromTick}&to=${toTick}`,
+    { method: "GET", headers: authHeaders("GET", { Accept: "text/event-stream" }) },
+  );
+  if (!res.ok || !res.body) fail(`replay failed (${res.status})`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const seen = [];
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    buffer = parseSseFrames(buffer, (event) => {
+      if (event?.type) seen.push(event.type);
+    });
+  }
+  if (!seen.some((t) => t.startsWith("sim."))) {
+    fail("replay produced no sim.* events");
+  }
+  if (!seen.includes("sim.tick_frame")) {
+    fail("replay missing trailing sim.tick_frame snapshot");
+  }
+  summary.replayOk = true;
+}
+
 async function main() {
   await rm(outDir, { recursive: true, force: true });
   await mkdir(outDir, { recursive: true });
@@ -202,6 +332,12 @@ async function main() {
   await login();
   const run = await createRun();
   const runId = run.id;
+
+  // REST contract guards that need no LLM — run in both mock and live modes.
+  await getManifest(runId);
+  await injectEvent(runId);
+  await patchAgent(runId, "lin");
+  await pauseResume(runId);
 
   const seenTypes = new Set();
   const sseAbort = new AbortController();
@@ -231,21 +367,33 @@ async function main() {
       fail("tick readback missing snapshot for tick 1");
     }
     summary.tickReadbackOk = true;
+
+    await getMetrics(runId, TICK_COUNT);
+    await replayRange(runId, 1, TICK_COUNT);
   }
 
   sseAbort.abort();
   await ssePromise.catch(() => {});
   summary.sseEventTypes = [...seenTypes].sort();
 
+  const restOk =
+    summary.manifestOk &&
+    summary.pauseResumeOk &&
+    summary.injectOk &&
+    summary.patchOk;
+
   if (MOCK_ONLY) {
-    summary.ok = summary.runCreated && summary.sseConnected;
+    summary.ok = summary.runCreated && summary.sseConnected && restOk;
   } else {
     const sawSimEvent = summary.sseEventTypes.some((t) => t.startsWith("sim."));
     summary.ok =
       summary.ticksAdvanced === TICK_COUNT &&
       summary.tickReadbackOk &&
       summary.sseConnected &&
-      sawSimEvent;
+      sawSimEvent &&
+      restOk &&
+      summary.metricsOk &&
+      summary.replayOk;
     if (!sawSimEvent) {
       summary.errors.push("no sim.* SSE events observed");
     }

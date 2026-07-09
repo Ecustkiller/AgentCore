@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildCrossExamExchanges,
-  parseCrossExamResponse,
-} from "../crossExamParse";
+import { parseCrossExamResponse } from "../crossExamParse";
 
 describe("parseCrossExamResponse", () => {
   it("parses structured JSON array by question_index", () => {
@@ -45,28 +42,12 @@ describe("parseCrossExamResponse", () => {
     expect(got[0].answer).toContain("出处");
   });
 
-  it("falls back to heuristic blob split when JSON absent", () => {
+  it("returns empty answers when blob is not JSON", () => {
     const qs = ["收益是否计入尾部风险？"];
     const ans = "作答：否，口径未含尾部【待核实·推断】。";
     const got = parseCrossExamResponse(qs, ans);
     expect(got).toHaveLength(1);
-    expect(got[0].answer).toContain("尾部");
-    expect(got[0].ok).toBe(true);
-  });
-});
-
-describe("buildCrossExamExchanges (deprecated fallback)", () => {
-  it("splits multi-question blob by semicolon", () => {
-    const qs = [
-      "收益量化口径是否计入了尾部风险？请是/否直接回答。",
-      "若熔断触发、灰度止损，已投入成本由谁承担？",
-    ];
-    const ans =
-      "量化口径未含尾部风险【待核实·推断】；" +
-      "成本由灰度预算池兜底、触发熔断即回滚【已核实·灰度预案v2】";
-    const got = buildCrossExamExchanges(qs, ans);
-    expect(got).toHaveLength(2);
-    expect(got[0].answer).toContain("尾部");
-    expect(got[1].answer).toContain("灰度");
+    expect(got[0].answer).toBe("");
+    expect(got[0].ok).toBe(false);
   });
 });

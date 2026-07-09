@@ -1,0 +1,228 @@
+/* AgentTown Phase 1 observer panel styles (§11). Dark translucent overlay cards in the top
+   corners; the root ignores picking so only the panels capture pointer input over the 3D view. */
+
+.town-hud {
+    flex-grow: 1;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.panel {
+    background-color: rgba(18, 20, 26, 0.86);
+    border-radius: 12px;
+    padding: 14px;
+    margin: 18px;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.control-panel {
+    width: 300px;
+}
+
+.residents-panel {
+    width: 300px;
+    max-height: 88%;
+}
+
+.status {
+    color: rgb(233, 236, 244);
+    font-size: 13px;
+    white-space: normal;
+    margin-bottom: 6px;
+}
+
+.status-row {
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.tick {
+    color: rgb(180, 200, 240);
+    font-size: 12px;
+}
+
+.stream {
+    color: rgb(150, 156, 170);
+    font-size: 12px;
+    -unity-text-align: middle-right;
+}
+
+.section-title {
+    color: rgb(150, 156, 170);
+    font-size: 11px;
+    -unity-font-style: bold;
+    margin-top: 10px;
+    margin-bottom: 4px;
+}
+
+.row {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.speed-row {
+    justify-content: space-between;
+}
+
+.grow {
+    flex-grow: 1;
+}
+
+.btn {
+    background-color: rgba(58, 64, 82, 0.95);
+    color: rgb(233, 236, 244);
+    border-radius: 8px;
+    border-width: 0;
+    padding-left: 10px;
+    padding-right: 10px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    margin-left: 2px;
+    margin-right: 2px;
+    font-size: 12px;
+    transition-duration: 0.1s;
+}
+
+.btn:hover {
+    background-color: rgba(78, 86, 108, 1);
+}
+
+.btn:disabled {
+    opacity: 0.4;
+}
+
+.btn.primary {
+    background-color: rgb(46, 106, 210);
+}
+
+.btn.primary:hover {
+    background-color: rgb(64, 124, 228);
+}
+
+.btn.icon {
+    min-width: 40px;
+    -unity-text-align: middle-center;
+}
+
+.btn.speed {
+    flex-grow: 1;
+    -unity-text-align: middle-center;
+}
+
+.btn.speed.active {
+    background-color: rgb(38, 90, 166);
+}
+
+.run-field {
+    margin-right: 4px;
+}
+
+.residents-list {
+    flex-grow: 1;
+    min-height: 160px;
+    max-height: 300px;
+}
+
+.resident-row {
+    flex-direction: column;
+    background-color: rgba(38, 42, 54, 0.6);
+    border-radius: 8px;
+    padding: 6px 8px;
+    margin-bottom: 4px;
+}
+
+.resident-row:hover {
+    background-color: rgba(58, 64, 82, 0.8);
+}
+
+.resident-row.selected {
+    background-color: rgba(46, 106, 210, 0.35);
+    border-width: 1px;
+    border-color: rgba(90, 150, 240, 0.6);
+}
+
+.resident-name {
+    color: rgb(233, 236, 244);
+    font-size: 13px;
+}
+
+.resident-meta {
+    color: rgb(150, 156, 170);
+    font-size: 11px;
+}
+
+.resident-detail {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top-width: 1px;
+    border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+.detail-hint {
+    color: rgb(150, 156, 170);
+    font-size: 12px;
+    white-space: normal;
+}
+
+.detail-title {
+    color: rgb(233, 236, 244);
+    font-size: 14px;
+    -unity-font-style: bold;
+}
+
+.detail-sub {
+    color: rgb(150, 156, 170);
+    font-size: 11px;
+    margin-bottom: 4px;
+}
+
+.detail-bio {
+    color: rgb(206, 212, 224);
+    font-size: 12px;
+    white-space: normal;
+    margin-bottom: 6px;
+}
+
+.detail-line {
+    flex-direction: row;
+    justify-content: space-between;
+    margin-bottom: 2px;
+}
+
+.detail-key {
+    color: rgb(150, 156, 170);
+    font-size: 12px;
+}
+
+.detail-value {
+    color: rgb(224, 228, 238);
+    font-size: 12px;
+}
+
+.trait-row {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 3px;
+}
+
+.trait-label {
+    color: rgb(150, 156, 170);
+    font-size: 11px;
+    width: 52px;
+}
+
+.trait-track {
+    flex-grow: 1;
+    height: 6px;
+    background-color: rgba(255, 255, 255, 0.12);
+    border-radius: 3px;
+}
+
+.trait-fill {
+    height: 6px;
+    background-color: rgb(90, 150, 240);
+    border-radius: 3px;
+}

@@ -70,7 +70,7 @@ def _memory_cold_start_extraction() -> MemoryConsolidationVector:
     return MemoryConsolidationVector(
         input=MemoryExtractInput(
             user_id=_USER,
-            current_memory="",
+            current_profile="",
             current_preferences="",
             messages=[
                 {"role": "user", "content": "我用 pnpm 管理前端项目，请用中文回复。"},
@@ -91,7 +91,7 @@ def _memory_ephemeral_task_no_write() -> MemoryConsolidationVector:
     return MemoryConsolidationVector(
         input=MemoryExtractInput(
             user_id=_USER,
-            current_memory=(
+            current_profile=(
                 "## 技术栈与工具\n"
                 "- 倾向使用 pnpm 管理前端项目\n"
                 "- 团队后端使用 PostgreSQL"

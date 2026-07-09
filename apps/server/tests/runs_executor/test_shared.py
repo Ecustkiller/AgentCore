@@ -1,4 +1,4 @@
-from agentcore.runtime.runs.executor import _is_hard_failure
+from agentcore.runtime.runs.executor_shared import _is_hard_failure
 from agentcore.runtime.runs.types import Deliverable
 
 

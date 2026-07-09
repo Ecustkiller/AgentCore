@@ -30,7 +30,7 @@ from agentcore.evals.recording_sink import RecordingSink
 from agentcore.evals.types import EvalCase, EvalConfigError, TurnOutcome
 from agentcore.llm.factory import build_provider
 from agentcore.llm.pricing import NANO_PER_USD, calculate_cost
-from agentcore.llm.profiles import ModelProfile
+from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 from agentcore.llm.resolve import LLMCredentials
 from agentcore.runtime.costing import aggregate_cost
@@ -88,7 +88,7 @@ def single_outcome(
     usage: TokenUsage,
     rounds: int,
     *,
-    profile: ModelProfile,
+    profile: ProfileParams,
     model: str,
     sink: RecordingSink,
     citations: list[dict],
