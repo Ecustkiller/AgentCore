@@ -308,7 +308,11 @@ class LoopController:
             self._investigation_rounds += 1
             if not (round_tool_names & PROGRESS_TOOLS):
                 current = frozenset(inv_fps)
-                if current and self._prev_investigation_fps and current <= self._prev_investigation_fps:
+                if (
+                    current
+                    and self._prev_investigation_fps
+                    and current <= self._prev_investigation_fps
+                ):
                     self._same_target_investigation_streak += 1
                 else:
                     self._same_target_investigation_streak = 0

@@ -49,7 +49,7 @@ def test_format_for_ceo_footer_guards_against_claiming_unwritten_files():
 def test_format_for_ceo_includes_goal_verification_and_completion_judgment():
     # 合·验证 4a (docs/03-AI核心/编排器与CEO主Agent.md §收尾即验收 第二道): the synthesis wrap-up tells the CEO
     # to verify the assembled result against the user's original request + each task's
-    # expected_output and give an explicit done/not-done judgment (fill genuine gaps via
+    # deliverable and give an explicit done/not-done judgment (fill genuine gaps via
     # delegate/replan/revise, don't fake done, don't spin) — a layer distinct from per-piece
     # contract and the file 防幻觉 guard.
     t = tool(Provider([]))

@@ -1,8 +1,8 @@
 import { surfaceResumeFromLiveTurn } from "@/services/resume";
 import { traceTurnEnd } from "@/services/sseTrace";
-import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { execRuntime, useExecutionStore } from "@/stores/execution";
+import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import type {
   ContentDeltaPayload,
   ErrorPayload,

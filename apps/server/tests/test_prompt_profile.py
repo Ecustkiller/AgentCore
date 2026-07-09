@@ -7,10 +7,6 @@
 
 from __future__ import annotations
 
-from agentcore.runtime.resolve.prompt import (
-    assemble_system_prompt,
-    compose_ceo_chat_prompt,
-)
 from agentcore.runtime.prompt_profile import (
     FRAGMENT_BASE,
     FRAGMENT_CEO_CORE,
@@ -21,6 +17,10 @@ from agentcore.runtime.prompt_profile import (
     active_profile,
     resolve,
     use_profile,
+)
+from agentcore.runtime.resolve.prompt import (
+    assemble_system_prompt,
+    compose_ceo_chat_prompt,
 )
 from agentcore.runtime.skills import build_system_skill_registry
 

@@ -1,6 +1,6 @@
 import { useApprovalStore } from "@/stores/approvals";
-import { useDelegationAuthStore } from "@/stores/delegationAuth";
 import { useConversationStore } from "@/stores/conversation";
+import { useDelegationAuthStore } from "@/stores/delegationAuth";
 import { frameFromEvent, useExecutionStore } from "@/stores/execution";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import type {

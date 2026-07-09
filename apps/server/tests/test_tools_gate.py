@@ -1,6 +1,5 @@
 """Unit tests for tool-calling soft gate + runtime graceful message."""
 
-from agentcore.llm.profiles import get_profile
 from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.llm.tools_gate import (
     TOOLS_SOFT_GATE_WARNING,
@@ -31,8 +30,6 @@ def test_tools_unavailable_message_when_tools_offered_and_empty():
         outcome,
         final_content="",
         controller=controller,
-        profile=get_profile("chat"),
-        active_model=None,
         annotate_citations=False,
         citation_sink=None,
         finish_guard_reworks=0,
@@ -59,8 +56,6 @@ def test_tools_unavailable_not_used_when_model_produced_text():
         outcome,
         final_content="hello",
         controller=controller,
-        profile=get_profile("chat"),
-        active_model=None,
         annotate_citations=False,
         citation_sink=None,
         finish_guard_reworks=0,

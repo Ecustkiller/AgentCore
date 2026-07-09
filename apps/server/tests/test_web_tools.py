@@ -14,6 +14,11 @@ import httpx
 import pytest
 
 from agentcore.core.net import (
+    EgressError,
+    describe_net_error,
+    site_of,
+)
+from agentcore.core.net import (
     URLBlock as _URLBlock,
 )
 from agentcore.core.net import (
@@ -34,11 +39,6 @@ from agentcore.tools.builtin.web import read_url as read_url_mod
 from agentcore.tools.builtin.web import search as search_mod
 from agentcore.tools.builtin.web import search_backend as search_backend_mod
 from agentcore.tools.builtin.web import search_cache as search_cache_mod
-from agentcore.core.net import (
-    EgressError,
-    describe_net_error,
-    site_of,
-)
 from agentcore.tools.builtin.web._net import (
     circuit_remaining,
     note_failure,
@@ -205,8 +205,8 @@ async def test_classify_url_fake_ip_proxy_signature(monkeypatch):
     async def _fake_dns(_host, _port=None):
         return ["198.18.0.21"]
 
-    from agentcore.config import settings
     import agentcore.core.net as net
+    from agentcore.config import settings
 
     monkeypatch.setattr(settings, "read_url_allow_fake_ip_proxy", False)
     monkeypatch.setattr(net, "_getaddrinfo", _fake_dns)
@@ -220,8 +220,8 @@ async def test_classify_url_allows_fake_ip_when_configured(monkeypatch):
     async def _fake_dns(_host, _port=None):
         return ["198.18.0.21"]
 
-    from agentcore.config import settings
     import agentcore.core.net as net
+    from agentcore.config import settings
 
     monkeypatch.setattr(settings, "read_url_allow_fake_ip_proxy", True)
     monkeypatch.setattr(net, "_getaddrinfo", _fake_dns)

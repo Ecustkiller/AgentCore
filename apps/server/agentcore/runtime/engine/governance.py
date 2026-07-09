@@ -8,7 +8,6 @@ from typing import Any
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.facts import NoteFact, record_turn_fact

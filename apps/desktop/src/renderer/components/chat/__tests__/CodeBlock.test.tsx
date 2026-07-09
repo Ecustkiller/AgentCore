@@ -27,7 +27,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  delete window.terminalApi;
+  window.terminalApi = undefined;
 });
 
 describe("CodeBlock bash run action", () => {

@@ -9,19 +9,16 @@ import {
 } from "@shared/ipc-contract";
 import { LOG_CHANNELS, type LogApi } from "@shared/log-contract";
 import {
+  NOTIFICATION_CHANNELS,
+  type NotificationApi,
+} from "@shared/notification-contract";
+import {
   SIDECAR_CHANNELS,
   type SidecarApi,
   type SidecarEventPush,
   type SidecarStatusPush,
 } from "@shared/sidecar-contract";
-import {
-  NOTIFICATION_CHANNELS,
-  type NotificationApi,
-} from "@shared/notification-contract";
-import {
-  TERMINAL_CHANNELS,
-  type TerminalApi,
-} from "@shared/terminal-contract";
+import { TERMINAL_CHANNELS, type TerminalApi } from "@shared/terminal-contract";
 import {
   UPDATER_CHANNELS,
   type UpdaterApi,
@@ -123,8 +120,7 @@ const logApi: LogApi = {
 };
 
 const terminalApi: TerminalApi = {
-  runBash: (command) =>
-    ipcRenderer.invoke(TERMINAL_CHANNELS.runBash, command),
+  runBash: (command) => ipcRenderer.invoke(TERMINAL_CHANNELS.runBash, command),
   openShellAtRoot: (rootId, subpath) =>
     ipcRenderer.invoke(TERMINAL_CHANNELS.openShellAtRoot, rootId, subpath),
 };

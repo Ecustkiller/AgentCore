@@ -161,9 +161,7 @@ export function handleExecutionEvent(
       if (progressPayload.run_id) {
         const mid = execMessageId(conversationId);
         if (mid)
-          useExecutionStore
-            .getState()
-            .setWorkerToolPhase(progressPayload, mid);
+          useExecutionStore.getState().setWorkerToolPhase(progressPayload, mid);
       } else {
         useConversationStore
           .getState()
@@ -191,6 +189,7 @@ export function handleExecutionEvent(
             verdict: null,
             sides: [],
             clashes: [],
+            cross_exam: [],
           },
           mid,
         );
@@ -209,7 +208,7 @@ export function handleExecutionEvent(
             verdict: p.verdict,
             sides: p.sides,
             clashes: p.clashes,
-            cross_exam: p.cross_exam,
+            cross_exam: p.cross_exam ?? [],
           },
           mid,
         );

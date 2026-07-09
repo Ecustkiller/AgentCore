@@ -90,7 +90,8 @@ export function useGraphLayout(
 
   const subTeams = useMemo<SubTeam[]>(() => {
     if (!structuralKey || !execution) return [];
-    return buildGraphStructure(execution.runs, INPUT_ID, expandedUnits).subTeams;
+    return buildGraphStructure(execution.runs, INPUT_ID, expandedUnits)
+      .subTeams;
   }, [structuralKey, execution, expandedUnits]);
 
   const foldInfo = useMemo(() => {

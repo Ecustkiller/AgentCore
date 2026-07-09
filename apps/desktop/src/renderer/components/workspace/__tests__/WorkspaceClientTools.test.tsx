@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 
+import { TooltipProvider } from "@/components/ui/tooltip";
+import type { FileSource } from "@/lib/fileSource";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { WorkspaceClientTools } from "../WorkspaceClientTools";
-import type { FileSource } from "@/lib/fileSource";
 
 function renderTools(source: FileSource | null) {
   return render(
@@ -55,6 +55,6 @@ describe("WorkspaceClientTools", () => {
     fireEvent.click(screen.getByRole("button", { name: "打开文件夹" }));
     fireEvent.click(screen.getByRole("button", { name: "在终端打开" }));
     expect(reveal).toHaveBeenCalledWith("");
-    expect(openShell).toHaveBeenCalled();
+    expect(openShell).toHaveBeenCalledWith(".");
   });
 });

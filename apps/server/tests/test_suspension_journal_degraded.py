@@ -40,17 +40,16 @@ async def test_save_paused_turn_records_journal_snapshot() -> None:
         factory.return_value.__aenter__.return_value = session
         with patch(
             "agentcore.runtime.suspension_persistence.PausedTurnRepository"
-        ) as repo_cls:
+        ) as repo_cls, patch(
+            "agentcore.runtime.suspension_persistence.TurnJournalRepository"
+        ) as journal_cls:
+            repo_cls.return_value.upsert = AsyncMock()
+            journal_cls.return_value.record = AsyncMock()
             with patch(
-                "agentcore.runtime.suspension_persistence.TurnJournalRepository"
-            ) as journal_cls:
-                repo_cls.return_value.upsert = AsyncMock()
-                journal_cls.return_value.record = AsyncMock()
-                with patch(
-                    "agentcore.runtime.suspension_persistence._notify_pause",
-                    AsyncMock(),
-                ):
-                    await save_paused_turn(suspension)
+                "agentcore.runtime.suspension_persistence._notify_pause",
+                AsyncMock(),
+            ):
+                await save_paused_turn(suspension)
     journal_cls.return_value.record.assert_awaited_once_with(
         turn_id="msg-1",
         conversation_id="conv-1",

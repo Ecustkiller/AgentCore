@@ -37,7 +37,7 @@ export type RiskItem = {
 };
 
 /** 把后端风险严重度（已归一为 high/medium/low）映射成档位；容忍中文「高/中/低」与同义词，识别不到
- * （如旧产物无此字段）返回 null = 未评级（看板 / 盘口降级为中性卡，不杜撰档位）。 */
+ *  返回 null = 未评级（看板 / 盘口降级为中性卡，不杜撰档位）。 */
 export function riskLevelOf(raw: string | undefined): RiskLevel | null {
   if (!raw) return null;
   const s = raw.trim().toLowerCase();

@@ -14,6 +14,7 @@
 // @agentcore/protocol-conformance package now that desktop has joined the workspace —
 // one judge type for both ends; the committed golden JSON is the real contract checked.
 
+import { assertNever } from "@/lib/assertNever";
 import {
   type MessageLaneState,
   foldAskMarker,
@@ -27,7 +28,6 @@ import {
   foldToolUseEnd,
   foldToolUseStart,
 } from "@/lib/foldMessageLane";
-import { assertNever } from "@/lib/assertNever";
 import {
   type ExecutionPlan,
   type ExecutionStatus,
@@ -227,6 +227,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
           verdict: null,
           sides: [],
           clashes: [],
+          cross_exam: [],
         });
         break;
       }
@@ -239,6 +240,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
           verdict: p.verdict,
           sides: p.sides,
           clashes: p.clashes,
+          cross_exam: p.cross_exam ?? [],
         });
         break;
       }

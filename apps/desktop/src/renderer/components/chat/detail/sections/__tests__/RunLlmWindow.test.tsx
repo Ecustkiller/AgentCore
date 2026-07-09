@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
+import { LlmWindowSection } from "@/components/chat/detail/sections/RunLlmWindow";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { LlmWindowSection } from "@/components/chat/detail/sections/RunLlmWindow";
 
 describe("LlmWindowSection", () => {
   it("renders folded messages when expanded", () => {

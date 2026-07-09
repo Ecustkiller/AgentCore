@@ -4,12 +4,12 @@ import {
 } from "@/components/chat/ParallelTimeline";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { useTurnAudit } from "@/hooks/useTurnAudit";
-import { groupAuditCountsByRun } from "@/services/audit";
 import { buildInjectGraphOverlay } from "@/lib/causalInject";
 import {
   isTimelineLayout,
   resolveEffectiveGraphLayout,
 } from "@/lib/graph-layout-utils";
+import { groupAuditCountsByRun } from "@/services/audit";
 import { useConversationStore } from "@/stores/conversation";
 import {
   type RunStatus,
@@ -97,7 +97,9 @@ export function GraphView({
     parallelAvailable,
   });
   const timelineLayout = isTimelineLayout(effectiveLayoutKind);
-  const [expandedUnits, setExpandedUnits] = useState<Set<string>>(() => new Set());
+  const [expandedUnits, setExpandedUnits] = useState<Set<string>>(
+    () => new Set(),
+  );
   const onToggleUnitExpand = useCallback((unitId: string) => {
     setExpandedUnits((prev) => {
       const next = new Set(prev);

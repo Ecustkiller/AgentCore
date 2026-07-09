@@ -536,6 +536,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           verdict: null,
           sides: [],
           clashes: [],
+          cross_exam: [],
         });
         break;
       }
@@ -548,6 +549,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           verdict: p.verdict,
           sides: p.sides,
           clashes: p.clashes,
+          cross_exam: p.cross_exam ?? [],
         });
         break;
       }

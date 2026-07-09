@@ -16,11 +16,14 @@ from agentcore.core.net import (
     EgressError,
     PinnedAddressError,
     PinnedIPTransport,
-    classify_url as _classify_url,
     describe_net_error,
     site_of,
     web_timeout,
 )
+from agentcore.core.net import (
+    classify_url as _classify_url,
+)
+from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.builtin.web._net import (
     circuit_remaining,
     note_failure,
@@ -31,7 +34,6 @@ from agentcore.tools.builtin.web.url_cache import (
     UrlCacheEntry,
     default_url_cache_registry,
 )
-from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 
 logger = get_logger(__name__)

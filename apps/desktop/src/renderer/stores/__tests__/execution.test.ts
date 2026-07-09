@@ -1625,7 +1625,10 @@ describe("辩论/审查 display tags (前端UX设计.md §四)", () => {
     // 第 2 轮续写：两方已续、一方未续 ⇒ 第 2 轮只含续到的两方（诚实留空，不假装）。
     const r2 = projectExecution(
       roundtablePlan,
-      [revised("d_r2_1", "d_r1_1", 2, 1, 2), revised("d_r2_2", "d_r1_2", 2, 1, 2)],
+      [
+        revised("d_r2_1", "d_r1_1", 2, 1, 2),
+        revised("d_r2_2", "d_r1_2", 2, 1, 2),
+      ],
       "running",
     );
     const live2 = debateLiveRounds(r2);

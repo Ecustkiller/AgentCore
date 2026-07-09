@@ -5,10 +5,11 @@ import {
   streamErrorAction,
 } from "@/lib/errors";
 import type { PlanReviewUserDecision } from "@/services/planReview";
+import { isClientOnlyResumeKey } from "@/services/resume";
 import { clearSidecarHealth, probeSidecar } from "@/services/sidecarHealth";
 import {
-  resolveSidecarRoot,
   type SidecarTarget,
+  resolveSidecarRoot,
 } from "@/services/sidecarRouting";
 import {
   regenerateConversation,
@@ -16,13 +17,12 @@ import {
   retryFailedConversation,
 } from "@/services/streamConversation";
 import { resumeConversationViaSidecar } from "@/services/streamConversationViaSidecar";
-import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
+import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
-import { isAbort, isTransportDrop } from "./helpers";
-import { isClientOnlyResumeKey } from "@/services/resume";
-import { rejoinLiveTurn } from "./recovery";
 import type { PendingResume } from "@/stores/pausedTurns";
+import { isAbort, isTransportDrop } from "./helpers";
+import { rejoinLiveTurn } from "./recovery";
 
 /** Whether a durable resume should route to the local sidecar engine. */
 function shouldResumeViaSidecar(

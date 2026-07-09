@@ -231,7 +231,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
       patchExec(messageId, (cur) => ({
         workerToolPhases: {
           ...cur.workerToolPhases,
-          [payload.run_id!]: {
+          [payload.run_id as string]: {
             phase: payload.phase,
             toolName: payload.tool_name,
           },

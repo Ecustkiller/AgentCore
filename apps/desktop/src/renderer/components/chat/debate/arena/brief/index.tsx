@@ -441,10 +441,7 @@ function SidePointsGrid({
           return (
             <div key={s.key} className="border-l-2 border-border pl-2.5">
               <div className="flex items-center justify-between gap-1.5">
-                <SideIdentity
-                  name={s.name}
-                  colorVar={colorVar}
-                />
+                <SideIdentity name={s.name} colorVar={colorVar} />
                 {score !== undefined && (
                   <span className="inline-flex shrink-0 items-center rounded-full bg-muted px-1.5 py-0.5 text-xs font-semibold tabular-nums text-foreground">
                     净 {score}

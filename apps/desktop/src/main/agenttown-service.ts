@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { access } from "node:fs/promises";
-import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
 import { constants } from "node:fs";
+import { access } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   AGENTTOWN_CHANNELS,
@@ -80,8 +80,7 @@ export async function resolveAgentTownExe(): Promise<string | null> {
   const envPath = process.env.AGENTTOWN_PATH?.trim();
   if (envPath) {
     candidates.push(
-      envPath.toLowerCase().endsWith(".exe") ||
-        envPath.endsWith("AgentTown")
+      envPath.toLowerCase().endsWith(".exe") || envPath.endsWith("AgentTown")
         ? envPath
         : join(envPath, exeName),
     );
@@ -283,16 +282,10 @@ export function registerAgentTownIpc(): void {
 
   ipcMain.handle(AGENTTOWN_CHANNELS.launch, async (_e, payload) => {
     const runId =
-      payload != null &&
-      isRecord(payload) &&
-      typeof payload.runId === "string"
+      payload != null && isRecord(payload) && typeof payload.runId === "string"
         ? payload.runId
         : undefined;
-    if (
-      payload != null &&
-      !isRecord(payload) &&
-      payload !== undefined
-    ) {
+    if (payload != null && !isRecord(payload) && payload !== undefined) {
       return {
         ok: false,
         reason: "invalid_args",

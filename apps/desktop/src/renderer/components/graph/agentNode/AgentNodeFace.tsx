@@ -1,3 +1,4 @@
+import { toolPhaseText } from "@/components/chat/message-bubble/constants";
 import {
   graphBadgeMuted,
   graphBadgeMutedPlain,
@@ -6,7 +7,6 @@ import {
 import { agentColorVar, agentGlyph } from "@/lib/agentIdentity";
 import { formatCompact } from "@/lib/format";
 import { STANCE_META, toolLabel } from "@/stores/execution";
-import { toolPhaseText } from "@/components/chat/message-bubble/constants";
 import {
   AlertTriangle,
   ArrowUp,

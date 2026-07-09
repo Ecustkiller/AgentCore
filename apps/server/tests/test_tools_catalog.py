@@ -72,7 +72,7 @@ def test_registry_excludes_ceo_only_delegate():
 # 变·worker 的「拉」); `handoff` is the terminal 完工交接简报 submission (结论 / 关键要点 /
 # 关键假设 / 建议下一步, read off the call args — never parsed out of prose). All stay
 # where they belong instead of leaking platform-wide.
-_WORKER_ONLY_NAMES = {"escalate", "post_note", "read_notes", "amend_note", "handoff"}
+_WORKER_ONLY_NAMES = {"escalate", "post_note", "read_notes", "amend_note", "handoff", "desktop_notify"}
 
 
 def test_worker_registry_adds_worker_only_tools_without_leaking_them():

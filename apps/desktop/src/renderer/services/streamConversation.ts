@@ -13,8 +13,8 @@ import {
   flushPendingFrames,
 } from "@/services/sse/dispatch";
 import { traceTurnMilestone } from "@/services/turnTrace";
-import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { getRuntime } from "@/stores/conversation";
+import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import type { SSEEvent } from "@/types/events";
 
 /** Max wait for response headers (connect + server accept). Distinct from {@link pumpSSE}'s

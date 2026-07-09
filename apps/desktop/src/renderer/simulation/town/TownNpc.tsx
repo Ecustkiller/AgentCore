@@ -11,9 +11,9 @@ import {
 } from "../store/simulationStore";
 import { NpcAvatar } from "./NpcAvatar";
 import { targetsEqual } from "./agentSpawn";
-import { computeTownPath } from "./townPathGrid";
 import { useTownCharacterAssets } from "./townCharacterAssets";
 import { LOD_FAR, LOD_NEAR, type LodLevel } from "./townLod";
+import { computeTownPath } from "./townPathGrid";
 import { townRenderDebug } from "./townRenderDebug";
 import type { TownAgentId } from "./townRoster";
 
@@ -107,10 +107,7 @@ export function TownNpc({
     const distToTarget = group.position.distanceTo(targetVec);
 
     if (activePath.current.length === 0 && distToTarget > ARRIVE_EPS) {
-      activePath.current = computeTownPath(
-        group.position.clone(),
-        targetVec,
-      );
+      activePath.current = computeTownPath(group.position.clone(), targetVec);
       pathIndex.current = 0;
     }
 

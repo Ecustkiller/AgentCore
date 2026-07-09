@@ -1,8 +1,8 @@
 import { Button } from "@/components/ui";
 import { useConversationFileSource } from "@/hooks/useConversationFileSource";
+import { hasTerminalRun } from "@/lib/capabilities";
 import { deriveClientToolsHint } from "@/lib/clientToolHints";
 import { detectProjectRunCommands } from "@/lib/detectRunCommands";
-import { hasTerminalRun } from "@/lib/capabilities";
 import { runTerminalBash } from "@/lib/terminalFeedback";
 import { notifyActionError } from "@/lib/toast";
 import { openFileSourceShell } from "@/services/terminalActions";
@@ -39,7 +39,8 @@ export function ClientToolsPrompt() {
 
   const { data: projectRuns = [] } = useQuery({
     queryKey: ["project-run-commands", source?.id],
-    queryFn: () => detectProjectRunCommands(source!),
+    queryFn: () =>
+      detectProjectRunCommands(source as NonNullable<typeof source>),
     enabled: !!hint && !!source,
     staleTime: 60_000,
   });
@@ -52,7 +53,7 @@ export function ClientToolsPrompt() {
     hint.bashCommand && hasTerminalRun() ? hint.bashCommand : null;
   const runCommands = bashCommand
     ? [bashCommand]
-    : projectRuns.filter((c) => hasTerminalRun());
+    : projectRuns.filter((_c) => hasTerminalRun());
   if (!canReveal && !canShell && runCommands.length === 0) return null;
 
   const openFolder = async () => {

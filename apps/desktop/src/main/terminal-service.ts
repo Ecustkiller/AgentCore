@@ -10,8 +10,8 @@ import {
   type TerminalRunResult,
 } from "@shared/terminal-contract";
 import { BrowserWindow, dialog, ipcMain } from "electron";
-import { resolveLexical } from "./fs/pathGuard";
 import { getStoredRoot } from "./fs-service";
+import { resolveLexical } from "./fs/pathGuard";
 
 const PREVIEW_CAP = 2000;
 
@@ -113,12 +113,12 @@ function spawnWinShellAtDirectory(absDir: string): ReturnType<typeof spawn> {
 export function spawnInUserTerminal(command: string): Promise<void> {
   const trimmed = command.trim();
   return new Promise((resolve, reject) => {
-    let child;
+    let child: ChildProcess;
     if (process.platform === "win32") {
       child = spawnWinRunCommand(trimmed);
     } else if (process.platform === "darwin") {
       const script = [
-        "tell application \"Terminal\"",
+        'tell application "Terminal"',
         "activate",
         `do script ${JSON.stringify(trimmed)}`,
         "end tell",
@@ -161,9 +161,7 @@ export function spawnShellAtDirectory(absDir: string): Promise<void> {
     return spawnInUserTerminal(`cd ${JSON.stringify(dir)} && clear`);
   }
   const shell = process.env.SHELL || "/bin/bash";
-  return spawnInUserTerminal(
-    `cd ${JSON.stringify(dir)} && exec ${shell} -i`,
-  );
+  return spawnInUserTerminal(`cd ${JSON.stringify(dir)} && exec ${shell} -i`);
 }
 
 export async function openShellAtWorkspace(
@@ -203,7 +201,11 @@ async function handleOpenShellAtRoot(
     return { ok: false, reason: "无效的本地根" };
   }
   const sub =
-    typeof subpath === "string" ? subpath : subpath == null ? "" : String(subpath);
+    typeof subpath === "string"
+      ? subpath
+      : subpath == null
+        ? ""
+        : String(subpath);
   return openShellAtWorkspace(rootId.trim(), sub);
 }
 

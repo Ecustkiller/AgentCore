@@ -4,7 +4,10 @@ import { GLOBAL_SHORTCUTS } from "@/lib/shortcuts";
 import { useApplyTheme } from "@/lib/theme";
 import { startRealtime, stopRealtime } from "@/services/realtime";
 import { startServerHealthMonitor } from "@/services/serverHealth";
-import { startTeamActivityNotifications, startNativeNotificationRouting } from "@/services/teamActivityNotifications";
+import {
+  startNativeNotificationRouting,
+  startTeamActivityNotifications,
+} from "@/services/teamActivityNotifications";
 import { startUpdates } from "@/stores/updates";
 import { useUsageStore } from "@/stores/usage";
 import { useEffect, useRef } from "react";

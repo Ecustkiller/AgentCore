@@ -474,9 +474,11 @@ async def react_loop(
                             cache_hit_tokens=usage_meta.get("cache_hit_tokens", 0),
                             cache_miss_tokens=usage_meta.get("cache_miss_tokens", 0),
                         )
-                        if terminal.effect is ToolEffect.SUSPEND:
-                            if finish_override_sink is not None:
-                                finish_override_sink.append(FinishReason.PAUSED)
+                        if (
+                            terminal.effect is ToolEffect.SUSPEND
+                            and finish_override_sink is not None
+                        ):
+                            finish_override_sink.append(FinishReason.PAUSED)
                         return (
                             join_segments(final_content, terminal.final_text or ""),
                             final_reasoning,

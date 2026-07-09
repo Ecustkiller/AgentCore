@@ -382,7 +382,9 @@ class OpenAICompatibleProvider:
         await asyncio.sleep(wait)
         return backoff * _BACKOFF_MULTIPLIER
 
-    async def _finalize_upstream_error(self, err: LLMUpstreamError, attempt: int) -> LLMUpstreamError:
+    async def _finalize_upstream_error(
+        self, err: LLMUpstreamError, attempt: int
+    ) -> LLMUpstreamError:
         final = upstream_error(
             err.message,
             status=err.details.get("upstream_status", 500),
@@ -525,7 +527,11 @@ class OpenAICompatibleProvider:
                 )
             except httpx.HTTPError as e:
                 last_error = self._network_error_to_llm(e)
-                if not last_error.retryable or not self._can_retry_attempt(attempt) or lines_yielded > 0:
+                if (
+                    not last_error.retryable
+                    or not self._can_retry_attempt(attempt)
+                    or lines_yielded > 0
+                ):
                     if lines_yielded > 0:
                         logger.warning(
                             "llm.stream_partial_disconnect",

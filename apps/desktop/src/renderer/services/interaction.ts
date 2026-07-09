@@ -1,6 +1,6 @@
 import { api } from "@/services/api";
-import { getActiveSidecarTarget } from "@/services/sidecarRouting";
 import type { ResolveDelegationAuthorizationBody } from "@/services/delegationAuth";
+import { getActiveSidecarTarget } from "@/services/sidecarRouting";
 import type { components } from "@/types/api.generated";
 
 type Schemas = components["schemas"];

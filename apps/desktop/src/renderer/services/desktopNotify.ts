@@ -33,11 +33,15 @@ async function runDesktopNotify(
   payload: DesktopNotifyRequiredPayload,
   conversationId: string,
 ): Promise<ClientToolResult> {
-  const api = typeof window !== "undefined" ? window.notificationApi : undefined;
+  const api =
+    typeof window !== "undefined" ? window.notificationApi : undefined;
   if (!api?.show) {
     return {
       ok: false,
-      error: { kind: "DesktopNotifyError", detail: "非桌面环境，无法显示系统通知" },
+      error: {
+        kind: "DesktopNotifyError",
+        detail: "非桌面环境，无法显示系统通知",
+      },
     };
   }
   try {

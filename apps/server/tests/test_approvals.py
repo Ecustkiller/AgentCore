@@ -29,7 +29,11 @@ from agentcore.runtime.approvals import (
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink, EventType, SSEEvent
 from agentcore.runtime.interaction import InteractionKind, InteractionRegistry
-from agentcore.tools.builtin import build_builtin_registry, delegation_grantable_tool_names, per_call_tool_names
+from agentcore.tools.builtin import (
+    build_builtin_registry,
+    delegation_grantable_tool_names,
+    per_call_tool_names,
+)
 from agentcore.tools.builtin.test_run import TestRunTool
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
@@ -646,7 +650,7 @@ async def test_delegation_authorization_emits_event_pair():
         EventType.DELEGATION_AUTHORIZATION_RESOLVED,
     ]
     assert events[0].payload["workers"][0]["role"] == "研究员"
-    assert "code_execute" in events[0].payload["grantable_tools"]
+    assert "code_execute" in events[0].payload["tools"]
     assert "exec-1" in gate._delegation_grants  # noqa: SLF001
 
 

@@ -76,7 +76,7 @@ function isRevisionRun(r: GraphRunLike): boolean {
   return (r.revision ?? 0) > 0;
 }
 
-function isSubRun(r: GraphRunLike, workerIds: Set<string>): boolean {
+function _isSubRun(r: GraphRunLike, workerIds: Set<string>): boolean {
   return (
     !isRevisionRun(r) &&
     !!r.parentRunId &&
@@ -97,8 +97,7 @@ export function computeTopologicalRunWaves(
   const runById = new Map(workerRuns.map((r) => [r.id, r]));
   const foldInfo = computeGraphFold(runs, captainId);
 
-  const unitOf = (runId: string): string =>
-    foldInfo.unitOf.get(runId) ?? runId;
+  const unitOf = (runId: string): string => foldInfo.unitOf.get(runId) ?? runId;
 
   const unitMembers = new Map<string, Set<string>>();
   for (const r of workerRuns) {
@@ -368,7 +367,7 @@ export function computeGraphFold(
 
   const descendants = new Map<string, string[]>();
   for (const r of workers) {
-    const unit = unitOf.get(r.id)!;
+    const unit = unitOf.get(r.id) ?? r.id;
     if (unit === r.id) continue;
     const arr = descendants.get(unit) ?? [];
     arr.push(r.id);
@@ -421,7 +420,7 @@ export function buildGraphStructure(
 
   const isLayoutVisible = (runId: string): boolean => {
     if (!folded.has(runId)) return true;
-    const unit = unitOf.get(runId)!;
+    const unit = unitOf.get(runId) ?? runId;
     return expandedUnits.has(unit);
   };
 
@@ -457,7 +456,8 @@ export function buildGraphStructure(
 
   for (const run of workerRuns) {
     for (const depId of run.dependsOn) {
-      const collapsed = folded.has(run.id) && !expandedUnits.has(unitOf.get(run.id)!);
+      const collapsed =
+        folded.has(run.id) && !expandedUnits.has(unitOf.get(run.id) ?? run.id);
       addEdge(
         {
           id: `${depId}->${run.id}`,
@@ -534,13 +534,13 @@ export function buildGraphStructure(
   if (topWorkers.length > 0 && captainId) {
     const dependedOn = new Set<string>();
     for (const r of topWorkers) {
-      const unit = unitOf.get(r.id)!;
+      const unit = unitOf.get(r.id) ?? r.id;
       for (const dep of r.dependsOn) dependedOn.add(unitOf.get(dep) ?? dep);
       dependedOn.add(unit);
     }
     nodeIds.push(inputId, captainId);
     for (const r of topWorkers) {
-      const unit = unitOf.get(r.id)!;
+      const unit = unitOf.get(r.id) ?? r.id;
       if (r.dependsOn.length === 0) {
         addEdge({
           id: `${inputId}->${unit}`,

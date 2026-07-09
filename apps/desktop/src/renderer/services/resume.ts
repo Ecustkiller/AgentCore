@@ -1,9 +1,9 @@
 import { api } from "@/services/api";
 import { resolveSidecarRoot } from "@/services/sidecarRouting";
 import { useApprovalStore } from "@/stores/approvals";
-import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { getRuntime } from "@/stores/conversation";
-import { usePausedTurnStore, type ResumeOrigin } from "@/stores/pausedTurns";
+import { clearInteractionPrompts } from "@/stores/interactionPrompts";
+import { type ResumeOrigin, usePausedTurnStore } from "@/stores/pausedTurns";
 import type { components } from "@/types/api.generated";
 
 type PausedTurnSummary = components["schemas"]["PausedTurnSummary"];

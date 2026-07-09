@@ -88,6 +88,10 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     EventType.WORKSPACE_OP_REQUIRED: (Disposition.EPHEMERAL, "客户端工具请求（请求/响应交换，非回合内容）"),
     EventType.BOARD_OP_REQUIRED: (Disposition.EPHEMERAL, "白板客户端工具请求（请求/响应交换，非回合内容）"),
     EventType.BOARD_READ_REQUIRED: (Disposition.EPHEMERAL, "白板栅格化读取客户端工具请求（非回合内容）"),
+    EventType.DESKTOP_NOTIFY_REQUIRED: (
+        Disposition.EPHEMERAL,
+        "桌面系统通知客户端工具请求（非回合内容）",
+    ),
     EventType.HANDOFF_SNAPSHOT_DONE: (Disposition.EPHEMERAL, "接管快照控制帧——传输态"),
     EventType.HANDOFF_JOB_STARTED: (Disposition.EPHEMERAL, "接管任务启动控制帧——传输态"),
     EventType.HANDOFF_APPLY_DONE: (Disposition.EPHEMERAL, "接管应用完成控制帧——传输态"),

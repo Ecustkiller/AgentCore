@@ -7,12 +7,12 @@ from dataclasses import asdict
 
 import agentcore.runtime.pipeline as pipeline_pkg
 from agentcore.board.channel import BoardChannel
-from agentcore.desktop.channel import DesktopClientChannel
 from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import error_fields_for
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
+from agentcore.desktop.channel import DesktopClientChannel
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
 from agentcore.llm.profiles import turn_profiles_for_turn

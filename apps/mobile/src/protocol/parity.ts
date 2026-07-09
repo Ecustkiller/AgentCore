@@ -127,6 +127,14 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   // —— 阻塞交互（统一 PauseCard / ResumeCard）——
   approval_required: { verdict: "ported", surface: "PauseCard" },
   approval_resolved: { verdict: "ported", surface: "PauseCard" },
+  delegation_authorization_required: {
+    verdict: "ported",
+    surface: "PauseCard",
+  },
+  delegation_authorization_resolved: {
+    verdict: "ported",
+    surface: "PauseCard",
+  },
   checkpoint_required: { verdict: "ported", surface: "PauseCard / ResumeCard" },
   checkpoint_resolved: { verdict: "ported", surface: "PauseCard" },
   plan_review_required: { verdict: "ported", surface: "PauseCard" },

@@ -19,7 +19,8 @@ describe("pumpSSE idle watchdog", () => {
     });
     const onEvent = vi.fn();
     const pump = pumpSSEForTests(new Response(stream), onEvent);
-    const expectReject = expect(pump).rejects.toBeInstanceOf(StreamNetworkError);
+    const expectReject =
+      expect(pump).rejects.toBeInstanceOf(StreamNetworkError);
     await vi.advanceTimersByTimeAsync(60_001);
     await expectReject;
     expect(onEvent).not.toHaveBeenCalled();

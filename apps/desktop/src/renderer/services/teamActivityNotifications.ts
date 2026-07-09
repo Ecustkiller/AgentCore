@@ -1,11 +1,11 @@
 import { getConversations } from "@/hooks/useConversations";
+import { showNativeNotification } from "@/lib/nativeNotification";
 import {
   conversationIdFromHash,
   isTransientRoute,
   runtimeHasError,
 } from "@/lib/teamActivity";
 import { notifyInfo } from "@/lib/toast";
-import { showNativeNotification } from "@/lib/nativeNotification";
 import { useApprovalStore } from "@/stores/approvals";
 import { DRAFT_KEY, useConversationStore } from "@/stores/conversation";
 

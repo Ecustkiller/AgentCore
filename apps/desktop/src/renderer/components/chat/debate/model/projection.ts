@@ -117,7 +117,7 @@ function resolveLiveCrossExam(
 ): DebateCrossExamView[] {
   const sides = roundSidesForCrossExam(execution, narr, sideModels);
   const payload =
-    narr?.cross_exam && narr.cross_exam.length > 0
+    narr && narr.cross_exam.length > 0
       ? narr.cross_exam
       : liveCrossExamPayload(execution, roundNo);
   return resolveCrossExam(payload, sides, execution);
@@ -151,10 +151,7 @@ function settledModel(
     verdict: round.verdict,
     inFlight: false,
     clashes: resolveClashes(round.clashes, round.sides),
-    // 收场权威：本轮承接的用户追问（verbatim 复盘）。缺省（旧产物 / 非交互）→ 空。
-    userInterjections: round.user_interjections ?? [],
-    // 质询回合（P1）/ 记分裁判（P2）：收场权威，据本轮 sides 解析名字/色、据 answer_run_id 解析
-    // 作答 run。缺省（快速对碰 / 旧产物）→ 空，前端不渲染质询区 / 比分。
+    userInterjections: round.user_interjections,
     crossExam: resolveCrossExam(round.cross_exam, round.sides, execution),
     scores: resolveScores(round.scores, round.sides),
     sides: round.sides.map((side): DebateSideModel => {
@@ -182,9 +179,8 @@ function settledModel(
     rounds,
     brief: debate.brief,
     sides: debate.sides,
-    // 结辩收束（P4）：收场权威，据 run_id 从执行图解析各方结辩 run。缺省（快速对碰 / 圆桌 / 旧产物）→ 空。
     closings: resolveClosings(debate.closings, execution),
-    opening: debate.opening ?? null,
+    opening: debate.opening || null,
     settled: true,
   };
 }

@@ -14,9 +14,7 @@ export function hasExecutionIntent(text: string): boolean {
 
 export function hasLocalClientTools(source: FileSource | null): boolean {
   return (
-    !!source &&
-    (!!source.revealInOsFileManager ||
-      !!source.openShellAtPath)
+    !!source && (!!source.revealInOsFileManager || !!source.openShellAtPath)
   );
 }
 

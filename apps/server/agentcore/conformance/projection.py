@@ -293,7 +293,7 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                         "kind": kind,
                         "revisionOf": parent,
                         "revision": revision,
-                        # 乙 wire 携 round/stance (单一轮次投影): debate 续写从 wire 读取身份与轮次。
+                        # 乙 wire 携 round/stance：debate 续写从 wire 读身份与轮次。
                         "stance": p.get("stance"),
                         "group": p.get("group"),
                         "round": p.get("round") or 0,
@@ -461,7 +461,7 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
 
         elif etype == "debate_round_started":
             # 一轮开场（发言前）：先给焦点，verdict=None 表示该轮进行中（仅定焦点未裁判，
-            # clashes 恒空——交锋边由裁判步产出）。
+            # clashes 恒空——交锋边由裁判步产出；cross_exam 恒空——质询 beat 尚未开始）。
             upsert_round(
                 {
                     "round_no": p.get("round_no", 0),
@@ -470,11 +470,12 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     "verdict": None,
                     "sides": [],
                     "clashes": [],
+                    "cross_exam": [],
                 }
             )
 
         elif etype == "debate_round":
-            # 一轮收尾（裁判+小结后）：焦点/小结/裁判/各方→辩手 run_id 映射/L3 交锋边。
+            # 一轮收尾（裁判+小结后）：焦点/小结/裁判/各方→辩手 run_id 映射/L3 交锋边/质询问答。
             upsert_round(
                 {
                     "round_no": p.get("round_no", 0),
@@ -483,6 +484,7 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     "verdict": p.get("verdict"),
                     "sides": list(p.get("sides") or []),
                     "clashes": list(p.get("clashes") or []),
+                    "cross_exam": list(p.get("cross_exam") or []),
                 }
             )
 
@@ -636,7 +638,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
 
         else:
             # message_start / turn_saved / title_generated / followups_generated /
-            # board_op_required / board_read_required / desktop_notify_required / tool_progress / workspace_op_required /
+            # board_op_required / board_read_required / desktop_notify_required /
+            # tool_progress / workspace_op_required /
             # handoff_* — not part of the normalized turn judge state (no-op). Mirrored by the
             # frontend folds' assertNever switch so the set stays in lockstep.
             pass

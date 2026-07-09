@@ -219,7 +219,7 @@ export function createLocalRootSource(
       const normalized =
         path === "" || path === "." ? "." : path.replace(/^\/+|\/+$/g, "");
       const containerSub =
-        normalized === "." ? (base || ".") : inPath(normalized);
+        normalized === "." ? base || "." : inPath(normalized);
       const result = await api.openShellAtRoot(rootId, containerSub);
       if (!result.ok) throw new Error(result.reason);
     },

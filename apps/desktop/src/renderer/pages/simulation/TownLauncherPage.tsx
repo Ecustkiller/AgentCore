@@ -33,8 +33,8 @@ export function TownLauncherPage() {
             打开 AgentTown
           </h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            Desktop 负责登录与启动；3D 观测、tick 推进与决策面板在
-            AgentTown 客户端中完成。凭据已同步至 session.json。
+            Desktop 负责登录与启动；3D 观测、tick 推进与决策面板在 AgentTown
+            客户端中完成。凭据已同步至 session.json。
           </p>
         </div>
 

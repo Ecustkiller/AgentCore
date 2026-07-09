@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  detectReviewConcern,
-  isReviewLikeWorker,
-} from "../reviewConcern";
+import { detectReviewConcern, isReviewLikeWorker } from "../reviewConcern";
 
 const reviewer = { role: "学术审校员", runId: "review" };
 const researcher = { role: "研究员", runId: "research" };
@@ -17,9 +14,9 @@ describe("isReviewLikeWorker", () => {
 
 describe("detectReviewConcern", () => {
   it("flags low numeric scores for review workers", () => {
-    expect(
-      detectReviewConcern("语言体验 7/10，有几处可优化", reviewer),
-    ).toBe("warning");
+    expect(detectReviewConcern("语言体验 7/10，有几处可优化", reviewer)).toBe(
+      "warning",
+    );
     expect(detectReviewConcern("综合评分 4/10，问题较多", reviewer)).toBe(
       "critical",
     );
@@ -42,7 +39,9 @@ describe("detectReviewConcern", () => {
     expect(
       detectReviewConcern("从整体方向把握市场趋势，结论如下。", researcher),
     ).toBeNull();
-    expect(detectReviewConcern("综合评分 4/10，问题较多", researcher)).toBeNull();
+    expect(
+      detectReviewConcern("综合评分 4/10，问题较多", researcher),
+    ).toBeNull();
   });
 
   it("ignores date-like N/10 without grading context", () => {

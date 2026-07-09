@@ -32,6 +32,7 @@ import {
   type SidecarStartTurnRequest,
   type SidecarStatusPush,
   type SidecarTurnResult,
+  buildSidecarResumeRpcParams,
 } from "@shared/sidecar-contract";
 import { BrowserWindow, type WebContents, app, ipcMain } from "electron";
 import { getStoredRoot } from "./fs-service";
@@ -566,17 +567,10 @@ export class SidecarManager {
 
     this.turns.set(req.messageId, { wc, conversationId: req.conversationId });
     try {
-      const result = await entry.client.request("resume", {
-        messageId: req.messageId,
-        conversationId: req.conversationId,
-        traceId: req.traceId,
-        decision: req.decision,
-        note: req.note,
-        selected: req.selected ?? [],
-        // Re-send the current cloud-proxy token (see startTurn): a day-old paused turn
-        // resumes with a fresh token rather than the stale initialize-time one.
-        ...(inference ? { inference } : {}),
-      });
+      const result = await entry.client.request(
+        "resume",
+        buildSidecarResumeRpcParams(req, inference),
+      );
       return result as SidecarTurnResult;
     } finally {
       this.turns.delete(req.messageId);

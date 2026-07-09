@@ -19,9 +19,7 @@ def parse_decision(raw: Any) -> CheckpointDecision:
         return CheckpointDecision.CONTINUE
 
 
-def trim_result(
-    turn_id: str, result: dict[str, Any], *, model: str | None = None
-) -> dict[str, Any]:
+def trim_result(turn_id: str, result: dict[str, Any], *, model: str) -> dict[str, Any]:
     """Project ``run_chat_pipeline``'s result into the JSON-safe startTurn response.
 
     The live events already carried the streaming detail; the response needs the
@@ -35,7 +33,6 @@ def trim_result(
     turn's creds — the cloud-proxy/account model when a token was present, else the local
     ``settings.platform_model`` on the dev fallback). Surfaced so the desktop badge shows
     the honest per-turn model and can warn when a fallback diverged from the account model.
-    Optional / backward-compatible: an older desktop simply ignores an unknown field.
     """
     finish = result.get("finish_reason")
     finish_str = finish.value if hasattr(finish, "value") else (str(finish) if finish else "error")

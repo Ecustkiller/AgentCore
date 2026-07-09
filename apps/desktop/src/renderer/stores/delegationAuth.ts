@@ -39,83 +39,85 @@ interface DelegationAuthState {
   isToolGranted: (conversationId: string, toolName: string) => boolean;
 }
 
-export const useDelegationAuthStore = create<DelegationAuthState>((set, get) => ({
-  pending: [],
-  grants: [],
+export const useDelegationAuthStore = create<DelegationAuthState>(
+  (set, get) => ({
+    pending: [],
+    grants: [],
 
-  add: (payload) =>
-    set((state) => {
-      if (
-        state.pending.some(
-          (p) =>
-            p.authorizationId === payload.authorization_id ||
-            p.executionId === payload.execution_id,
-        )
-      ) {
-        return {};
-      }
-      return {
-        pending: [
-          ...state.pending,
-          {
-            authorizationId: payload.authorization_id,
-            conversationId: payload.conversation_id,
-            executionId: payload.execution_id,
-            workers: payload.workers,
-            tools: payload.tools,
-            resolving: false,
-          },
-        ],
-      };
-    }),
+    add: (payload) =>
+      set((state) => {
+        if (
+          state.pending.some(
+            (p) =>
+              p.authorizationId === payload.authorization_id ||
+              p.executionId === payload.execution_id,
+          )
+        ) {
+          return {};
+        }
+        return {
+          pending: [
+            ...state.pending,
+            {
+              authorizationId: payload.authorization_id,
+              conversationId: payload.conversation_id,
+              executionId: payload.execution_id,
+              workers: payload.workers,
+              tools: payload.tools,
+              resolving: false,
+            },
+          ],
+        };
+      }),
 
-  resolve: (authorizationId) =>
-    set((state) => ({
-      pending: state.pending.filter(
-        (p) => p.authorizationId !== authorizationId,
-      ),
-    })),
-
-  recordGrant: (grant) =>
-    set((state) => ({
-      grants: [
-        ...state.grants.filter(
-          (g) =>
-            !(
-              g.conversationId === grant.conversationId &&
-              g.executionId === grant.executionId
-            ),
+    resolve: (authorizationId) =>
+      set((state) => ({
+        pending: state.pending.filter(
+          (p) => p.authorizationId !== authorizationId,
         ),
-        grant,
-      ],
-    })),
+      })),
 
-  setResolving: (authorizationId, resolving) =>
-    set((state) => ({
-      pending: state.pending.map((p) =>
-        p.authorizationId === authorizationId ? { ...p, resolving } : p,
+    recordGrant: (grant) =>
+      set((state) => ({
+        grants: [
+          ...state.grants.filter(
+            (g) =>
+              !(
+                g.conversationId === grant.conversationId &&
+                g.executionId === grant.executionId
+              ),
+          ),
+          grant,
+        ],
+      })),
+
+    setResolving: (authorizationId, resolving) =>
+      set((state) => ({
+        pending: state.pending.map((p) =>
+          p.authorizationId === authorizationId ? { ...p, resolving } : p,
+        ),
+      })),
+
+    clear: (conversationId) =>
+      set((state) =>
+        conversationId === undefined
+          ? { pending: [], grants: [] }
+          : {
+              pending: state.pending.filter(
+                (p) => p.conversationId !== conversationId,
+              ),
+              grants: state.grants.filter(
+                (g) => g.conversationId !== conversationId,
+              ),
+            },
       ),
-    })),
 
-  clear: (conversationId) =>
-    set((state) =>
-      conversationId === undefined
-        ? { pending: [], grants: [] }
-        : {
-            pending: state.pending.filter(
-              (p) => p.conversationId !== conversationId,
-            ),
-            grants: state.grants.filter(
-              (g) => g.conversationId !== conversationId,
-            ),
-          },
-    ),
-
-  isToolGranted: (conversationId, toolName) =>
-    get().grants.some(
-      (g) =>
-        g.conversationId === conversationId && g.tools.includes(toolName),
-    ),
-}));
+    isToolGranted: (conversationId, toolName) =>
+      get().grants.some(
+        (g) =>
+          g.conversationId === conversationId && g.tools.includes(toolName),
+      ),
+  }),
+);
 
 export type { DelegationAuthorizationDecision };

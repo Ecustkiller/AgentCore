@@ -62,6 +62,7 @@ function turnResult(): SidecarTurnResult {
     content: "续答完成",
     reasoningContent: null,
     finishReason: "stop",
+    model: "deepseek-v4-flash",
     rounds: 1,
     usage: {
       inputTokens: 10,

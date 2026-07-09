@@ -513,7 +513,7 @@ class DebateResult:
             "form": self.config.form.value,
             "motion": self.config.motion,
             "stop_reason": self.stop_reason,
-            # 主持人开场白（可选、渐进式契约）：前端顶部「会说话的主持人」气泡；空则回落模板开场白。
+            # 主持人开场白：前端顶部「会说话的主持人」气泡；空则回落模板开场白。
             "opening": self.opening,
             "narrative_first": self.narrative_first,
             "sides": [

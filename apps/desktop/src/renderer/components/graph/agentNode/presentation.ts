@@ -1,5 +1,5 @@
-import { statusPillSoft } from "@/components/ui/tone-presets";
 import { toolPhaseText } from "@/components/chat/message-bubble/constants";
+import { statusPillSoft } from "@/components/ui/tone-presets";
 import { formatCompact, formatDuration } from "@/lib/format";
 import { MODEL_TIER_META, STANCE_META, toolLabel } from "@/stores/execution";
 import {
@@ -76,12 +76,12 @@ export function buildAgentNodePresentation(
           text: toolLabel(liveToolExec.toolName),
         }
       : livePreview
-      ? { heading: "输出中", text: livePreview }
-      : liveThinking
-        ? { heading: "思考中", text: liveThinking, italic: true }
-        : d.outputPreview
-          ? { heading: "产出预览", text: d.outputPreview }
-          : null;
+        ? { heading: "输出中", text: livePreview }
+        : liveThinking
+          ? { heading: "思考中", text: liveThinking, italic: true }
+          : d.outputPreview
+            ? { heading: "产出预览", text: d.outputPreview }
+            : null;
 
   const peekTags: string[] = [];
   if (d.stance) peekTags.push(STANCE_META[d.stance].label);

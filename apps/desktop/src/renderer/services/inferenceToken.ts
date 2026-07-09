@@ -30,7 +30,11 @@ let cached: { token: string; expiresAtMs: number; model: string } | null = null;
 // 提前续铸的安全余量：在真正过期前 1 分钟就重铸，规避时钟偏移与「铸好到用上」之间的 TTL 损耗。
 const RENEW_SKEW_MS = 60_000;
 
-async function mint(): Promise<{ token: string; expiresAtMs: number; model: string }> {
+async function mint(): Promise<{
+  token: string;
+  expiresAtMs: number;
+  model: string;
+}> {
   const res = await api.post<InferenceTokenResponse>("/v1/inference/token");
   return {
     token: res.token,

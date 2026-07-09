@@ -1,6 +1,6 @@
 import { Button, IconButton } from "@/components/ui";
-import { copyText } from "@/lib/clipboard";
 import { hasTerminalRun } from "@/lib/capabilities";
+import { copyText } from "@/lib/clipboard";
 import { runTerminalBash } from "@/lib/terminalFeedback";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import {

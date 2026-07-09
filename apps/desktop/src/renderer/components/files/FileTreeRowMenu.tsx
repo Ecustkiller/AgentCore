@@ -51,7 +51,8 @@ export function FileTreeRowMenu({
   const canOpenShell = !!source.openShellAtPath;
   const canOpenExternal = !node.isDir && !!source.openWithOsDefaultApp;
   const canCopyPath = !!source.copyOsPath;
-  const hasOsGroup = canReveal || canOpenShell || canOpenExternal || canCopyPath;
+  const hasOsGroup =
+    canReveal || canOpenShell || canOpenExternal || canCopyPath;
   // 复制走可选 copy（本地源有、云端源无）；剪切走必备 move（全源可用）；粘贴仅文件夹行 +
   // 剪贴板非空时出现（粘贴进该文件夹）。
   const canCopy = !!source.copy;

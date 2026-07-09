@@ -10,9 +10,7 @@ export const TERMINAL_CHANNELS = {
   openShellAtRoot: "terminal:openShellAtRoot",
 } as const;
 
-export type TerminalRunResult =
-  | { ok: true }
-  | { ok: false; reason: string };
+export type TerminalRunResult = { ok: true } | { ok: false; reason: string };
 
 /** 暴露在 `window.terminalApi` 上的 renderer 端 API 面。 */
 export interface TerminalApi {

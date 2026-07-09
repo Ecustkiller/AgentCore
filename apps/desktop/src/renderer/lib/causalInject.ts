@@ -1,9 +1,9 @@
+import type { AgentState, RunNode } from "@/stores/execution";
+import type { GraphEdge } from "@/stores/graph";
 import type {
   AuditCausalGraph,
   AuditCausalNode,
 } from "@agentcore/contract-rest-types/audit";
-import type { AgentState, RunNode } from "@/stores/execution";
-import type { GraphEdge } from "@/stores/graph";
 
 export interface InjectEdgeView {
   from: string;

@@ -1,5 +1,5 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { DesktopNotifyRequiredPayload } from "@/types/events";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const resolveInteraction = vi.fn().mockResolvedValue(undefined);
 

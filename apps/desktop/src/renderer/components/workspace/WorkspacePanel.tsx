@@ -95,23 +95,26 @@ export function WorkspaceMode() {
             <>
               <WorkspaceClientTools source={source} />
               {source?.caps.snapshots ? (
-              <>
-                <IconButton
-                  title="导出 ZIP"
-                  disabled={exporting}
-                  onClick={() => void handleExportZip()}
-                >
-                  {exporting ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <Download size={14} />
-                  )}
-                </IconButton>
-                <IconButton title="快照" onClick={() => setSnapshotsOpen(true)}>
-                  <History size={14} />
-                </IconButton>
-              </>
-            ) : null}
+                <>
+                  <IconButton
+                    title="导出 ZIP"
+                    disabled={exporting}
+                    onClick={() => void handleExportZip()}
+                  >
+                    {exporting ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Download size={14} />
+                    )}
+                  </IconButton>
+                  <IconButton
+                    title="快照"
+                    onClick={() => setSnapshotsOpen(true)}
+                  >
+                    <History size={14} />
+                  </IconButton>
+                </>
+              ) : null}
             </>
           }
         />
