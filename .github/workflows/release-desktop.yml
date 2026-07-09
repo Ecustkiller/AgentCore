@@ -95,6 +95,8 @@ jobs:
       - name: Build & publish to release repo (draft)
         env:
           GH_TOKEN: ${{ secrets.RELEASE_GH_TOKEN }}
+          # electron-vite + large renderer OOMs on default Node heap (macos-latest)
+          NODE_OPTIONS: --max-old-space-size=8192
         run: |
           pnpm build
           pnpm exec electron-builder --mac --arm64 --publish always
