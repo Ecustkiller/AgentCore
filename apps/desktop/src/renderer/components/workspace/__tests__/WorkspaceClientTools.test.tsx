@@ -49,7 +49,7 @@ describe("WorkspaceClientTools", () => {
         label: "本地",
         caps: { watch: true, transfer: false, edit: true, snapshots: false },
         revealInOsFileManager: reveal,
-        openWorkspaceShell: openShell,
+        openShellAtPath: openShell,
       }),
     );
     fireEvent.click(screen.getByRole("button", { name: "打开文件夹" }));

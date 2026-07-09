@@ -15,7 +15,7 @@ export function WorkspaceClientTools({ source }: { source: FileSource | null }) 
   if (!source) return null;
 
   const canReveal = !!source.revealInOsFileManager;
-  const canShell = !!source.openShellAtPath || !!source.openWorkspaceShell;
+  const canShell = !!source.openShellAtPath;
   if (!canReveal && !canShell) return null;
 
   const openFolder = async () => {

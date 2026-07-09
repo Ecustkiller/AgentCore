@@ -22,7 +22,7 @@ function mockLocalSource(): FileSource {
     move: vi.fn(),
     delete: vi.fn(),
     revealInOsFileManager: vi.fn(),
-    openWorkspaceShell: vi.fn(),
+    openShellAtPath: vi.fn(),
   };
 }
 
