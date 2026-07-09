@@ -13,8 +13,8 @@ import {
   flushPendingContent,
   flushPendingFrames,
 } from "@/services/streamConversation";
-import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
+import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { useTurnModelStore } from "@/stores/turnModel";
 import type { SSEEvent } from "@/types/events";
 import type {
@@ -408,11 +408,10 @@ function applyReconcile(
  *
  * 取不到云推理令牌（如后端重启中 → inference-token 兑换失败）时，sidecar 会静默用本机 `.env`
  * 平台模型跑完这一回合，而非用户配置的账号模型。回合本身成功了（故非错误横幅、不重跑），只是
- * 用了「另一个模型」——这条 heads-up 点破它，并尽量报出真跑的模型名（`result.model` 即回退时
- * 解析出的平台模型；老 sidecar 无此字段时退回通用文案）。
+ * 用了「另一个模型」——这条 heads-up 点破它，并报出真跑的模型名（`result.model`）。
  */
-function warnPlatformModelFallback(model: string | null | undefined): void {
-  const named = model?.trim();
+function warnPlatformModelFallback(model: string): void {
+  const named = model.trim();
   notifyWarning("本回合用了本机平台模型", {
     description: named
       ? `未取到云端推理令牌，这轮用本机 ${named} 跑完，而非你配置的账号模型。`

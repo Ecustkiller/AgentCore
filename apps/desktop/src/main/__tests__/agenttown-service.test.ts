@@ -103,7 +103,7 @@ describe("agenttown session file", () => {
 describe("resolveAgentTownExe", () => {
   beforeEach(() => {
     rmSync(h.exeDir, { recursive: true, force: true });
-    delete process.env.AGENTTOWN_PATH;
+    process.env.AGENTTOWN_PATH = undefined;
     h.isPackaged = false;
   });
   afterAll(() => rmSync(h.exeDir, { recursive: true, force: true }));

@@ -11,8 +11,5 @@ export function useTurnAuditCounts(
   messageId: string | null,
 ): Record<string, number> {
   const { data } = useTurnAudit(conversationId, messageId);
-  return useMemo(
-    () => (data ? groupAuditCountsByRun(data.data) : {}),
-    [data],
-  );
+  return useMemo(() => (data ? groupAuditCountsByRun(data.data) : {}), [data]);
 }

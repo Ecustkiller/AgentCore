@@ -4,7 +4,11 @@ export type CanvasTurnView = "room" | "graph" | "compare";
 
 const STORAGE_KEY = "agentcore:canvas-turn-views";
 
-const VALID: ReadonlySet<CanvasTurnView> = new Set(["room", "graph", "compare"]);
+const VALID: ReadonlySet<CanvasTurnView> = new Set([
+  "room",
+  "graph",
+  "compare",
+]);
 
 function entryKey(conversationId: string, turnId: string): string {
   return `${conversationId}:${turnId}`;

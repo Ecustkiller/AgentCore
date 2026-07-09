@@ -1,15 +1,15 @@
 import { LoginPage } from "@/pages/LoginPage";
 import { ServiceUnavailablePage } from "@/pages/ServiceUnavailablePage";
 import {
+  clearAgentTownSession,
+  persistAgentTownSession,
+} from "@/services/agentTownSession";
+import {
   setServiceUnavailableHandler,
   setSessionRenewedHandler,
   setUnauthorizedHandler,
 } from "@/services/api";
 import { bootstrapAuth, diagnoseOutage } from "@/services/auth";
-import {
-  clearAgentTownSession,
-  persistAgentTownSession,
-} from "@/services/agentTownSession";
 import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
 import { useAuthStore } from "@/stores/auth";
 import { type ReactNode, useCallback, useEffect } from "react";

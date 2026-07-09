@@ -12,9 +12,9 @@ from agentcore.core.errors import LLMError, LLMUpstreamError
 from agentcore.llm.errors import is_non_retryable_client_status, is_retryable_upstream_status
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 from agentcore.llm.provider.openai_compatible import (
-    OpenAICompatibleProvider,
     _INITIAL_BACKOFF,
     _MAX_RETRIES,
+    OpenAICompatibleProvider,
 )
 from agentcore.llm.provider.protocol import LLMMessage, LLMRequest
 

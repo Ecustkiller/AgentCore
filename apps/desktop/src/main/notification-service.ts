@@ -13,7 +13,9 @@ import { BrowserWindow, Notification, ipcMain } from "electron";
 
 function focusMainWindow(): BrowserWindow | null {
   const win =
-    BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null;
+    BrowserWindow.getFocusedWindow() ??
+    BrowserWindow.getAllWindows()[0] ??
+    null;
   if (!win) return null;
   if (win.isMinimized()) win.restore();
   win.focus();

@@ -14,8 +14,8 @@ import {
   supportsTurnGrant,
 } from "@/services/approvals";
 import { type PendingApproval, useApprovalStore } from "@/stores/approvals";
-import { useDelegationAuthStore } from "@/stores/delegationAuth";
 import { useConversationStore } from "@/stores/conversation";
+import { useDelegationAuthStore } from "@/stores/delegationAuth";
 import type { ApprovalDecision } from "@/types/events";
 import {
   Check,

@@ -60,7 +60,8 @@ def _format_numbered_lines(lines: list[str], start_line: int) -> str:
 # 写类工具「回显结果」：worker 写 / 追加 / 替换后，常会为「确认写对没」再花一整轮 read 回读自检
 # （trace 4d715ea0 实测：8 个 append worker 全是 读→追加→回读→handoff，那一轮回读零信息增量）。
 # 行业实践是让写类工具直接把「改动后的结果」回显进回执（Aider / Cursor / Claude Code 均回 diff /
-# 结果片段），使验证在同一轮内完成、免掉那一轮回读。回显有界（行数 + 字符双上限），大文件不炸 token。
+# 结果片段），使验证在同一轮内完成、免掉那一轮回读。
+# 回显有界（行数 + 字符双上限），大文件不炸 token。
 _APPEND_ECHO_LINES = 12
 _APPEND_ECHO_CHARS = 600
 _EDIT_ECHO_CONTEXT = 3

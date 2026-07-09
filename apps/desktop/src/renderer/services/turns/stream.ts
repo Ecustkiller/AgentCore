@@ -23,12 +23,12 @@ import {
 } from "@/services/streamConversation";
 import { streamConversationViaSidecar } from "@/services/streamConversationViaSidecar";
 import { traceTurnEnd, traceTurnMilestone } from "@/services/turnTrace";
-import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import {
   getActiveRuntime,
   getRuntime,
   useConversationStore,
 } from "@/stores/conversation";
+import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { isAbort, isTransportDrop } from "./helpers";
 import { rejoinLiveTurn } from "./recovery";
 import { runRegenerate } from "./regenerate";

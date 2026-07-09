@@ -200,7 +200,7 @@ export const useUIStore = create<UIState>((set) => ({
   sidecarPreference: loadSidecarPreference(),
   sidecarEnabled: loadSidecarEnabled(),
 
-  openSearch: (initialQuery = "", opts) =>
+  openSearch: (initialQuery, opts) =>
     set({
       searchOpen: true,
       searchInitialQuery: initialQuery,

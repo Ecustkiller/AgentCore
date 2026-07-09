@@ -1,5 +1,6 @@
 import { IconButton } from "@/components/ui";
 import { hasAgentTownLauncher } from "@/lib/capabilities";
+import { TownLauncherPage } from "@/pages/simulation/TownLauncherPage";
 import { disconnectSimulationStream } from "@/services/simulation/stream";
 import { SimulationRunManager } from "@/simulation/SimulationRunManager";
 import { SimulationSidePanel } from "@/simulation/SimulationSidePanel";
@@ -12,7 +13,6 @@ import {
   TOWN_AGENT_NAMES,
   type TownAgentId,
 } from "@/simulation/town/townRoster";
-import { TownLauncherPage } from "@/pages/simulation/TownLauncherPage";
 import { ArrowLeft, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
@@ -33,7 +33,9 @@ export function TownSimulationPage() {
 }
 
 /** Frozen R3F reference — offline preview / shoot only. */
-function TownR3FPreviewPage({ location }: { location: ReturnType<typeof useLocation> }) {
+function TownR3FPreviewPage({
+  location,
+}: { location: ReturnType<typeof useLocation> }) {
   const run = useSimulationUiStore((s) => s.run);
   const trackedAgentId = useSimulationUiStore((s) => s.trackedAgentId);
   const agents = useSimulationUiStore((s) => s.agents);

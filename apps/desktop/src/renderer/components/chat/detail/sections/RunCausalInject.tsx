@@ -1,11 +1,11 @@
 import { Button } from "@/components/ui";
 import {
+  type InjectInEdgeView,
   filterInjectInEdges,
   injectEdgeLabel,
-  type InjectInEdgeView,
 } from "@/lib/causalInject";
-import type { AgentState, RunNode } from "@/stores/execution";
 import { usePersistentDisclosure } from "@/stores/disclosure";
+import type { AgentState, RunNode } from "@/stores/execution";
 import type { AuditCausalGraph } from "@agentcore/contract-rest-types/audit";
 import { ArrowRight, ChevronDown, ChevronRight } from "lucide-react";
 import { RunStatusDot } from "./shared";

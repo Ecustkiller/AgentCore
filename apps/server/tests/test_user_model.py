@@ -28,7 +28,7 @@ def test_default_turn_profiles_carries_model():
 
 @pytest.mark.anyio
 async def test_resolve_user_chat_model_uses_model_config(monkeypatch):
-    from agentcore.llm.resolve import ModelConfig, resolve_model_config
+    from agentcore.llm.resolve import ModelConfig
 
     async def _fake_resolve(_session, _user_id, _purpose):
         return ModelConfig(

@@ -17,6 +17,7 @@ from pathlib import Path
 from agentcore.core.types import ToolCategory
 from agentcore.memory import MemoryTopic
 from agentcore.memory.store import CORE_MEMORY_FILE, FileMemoryStore, topic_path
+from agentcore.runtime.resolve.prepare import _wire_worker_memory_tools
 from agentcore.runtime.resolve.prompt import (
     assemble_system_prompt,
     compose_ceo_chat_prompt,
@@ -24,7 +25,6 @@ from agentcore.runtime.resolve.prompt import (
     render_memory_topic_directory,
     render_worker_memory_topic_directory,
 )
-from agentcore.runtime.resolve.prepare import _wire_worker_memory_tools
 from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.tools.builtin import build_worker_registry
 from agentcore.tools.builtin.consult_memory import ConsultMemoryTool

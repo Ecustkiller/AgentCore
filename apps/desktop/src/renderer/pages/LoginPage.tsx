@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui";
-import { ApiError } from "@/services/api";
 import { persistAgentTownSession } from "@/services/agentTownSession";
+import { ApiError } from "@/services/api";
 import { login, register } from "@/services/auth";
 import { useAuthStore } from "@/stores/auth";
 import { useState } from "react";

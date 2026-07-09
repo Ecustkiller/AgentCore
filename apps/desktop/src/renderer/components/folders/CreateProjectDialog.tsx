@@ -116,7 +116,11 @@ function CreateProjectDialogBody({ onClose }: { onClose: () => void }) {
       </div>
 
       <DialogFooter>
-        <Button variant="ghost" onClick={onClose} disabled={createFolder.isPending}>
+        <Button
+          variant="ghost"
+          onClick={onClose}
+          disabled={createFolder.isPending}
+        >
           取消
         </Button>
         <Button

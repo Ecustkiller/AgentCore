@@ -6,7 +6,6 @@ const notificationHandlers: Record<string, () => void> = {};
 vi.mock("electron", () => ({
   Notification: class {
     static isSupported = () => true;
-    constructor(_opts: { title: string; body: string }) {}
     on(event: string, cb: () => void) {
       notificationHandlers[event] = cb;
     }
@@ -28,7 +27,8 @@ import { showOsNotification } from "../notification-service";
 
 beforeEach(() => {
   showMock.mockClear();
-  for (const k of Object.keys(notificationHandlers)) delete notificationHandlers[k];
+  for (const k of Object.keys(notificationHandlers))
+    delete notificationHandlers[k];
 });
 
 describe("showOsNotification", () => {

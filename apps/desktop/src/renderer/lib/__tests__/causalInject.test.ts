@@ -4,9 +4,9 @@ import {
   injectEdgeLabel,
   resolveRunRole,
 } from "@/lib/causalInject";
-import type { AuditCausalGraph } from "@agentcore/contract-rest-types/audit";
 import type { AgentState, RunNode } from "@/stores/execution";
 import type { GraphEdge } from "@/stores/graph";
+import type { AuditCausalGraph } from "@agentcore/contract-rest-types/audit";
 import { describe, expect, it } from "vitest";
 
 const runs = [
@@ -122,10 +122,10 @@ describe("buildInjectGraphOverlay", () => {
       focusRunId: "r2",
     });
     expect(overlay).not.toBeNull();
-    expect(overlay!.highlightEdgeIds.has("r1->r2")).toBe(true);
-    expect(overlay!.focusedEdgeIds.has("r1->r2")).toBe(true);
-    expect(overlay!.activeGapEdges).toEqual([]);
-    expect(overlay!.dimUnrelatedEdges).toBe(true);
+    expect(overlay?.highlightEdgeIds.has("r1->r2")).toBe(true);
+    expect(overlay?.focusedEdgeIds.has("r1->r2")).toBe(true);
+    expect(overlay?.activeGapEdges).toEqual([]);
+    expect(overlay?.dimUnrelatedEdges).toBe(true);
   });
 
   it("adds gap edge when inject has no dep", () => {
@@ -136,17 +136,17 @@ describe("buildInjectGraphOverlay", () => {
     const overlay = buildInjectGraphOverlay(gapGraph, depEdges, {
       focusRunId: "r3",
     });
-    expect(overlay!.activeGapEdges).toEqual([
+    expect(overlay?.activeGapEdges).toEqual([
       { id: "inject:r1->r3", source: "r1", target: "r3", kind: "inject" },
     ]);
-    expect(overlay!.focusedEdgeIds.has("inject:r1->r3")).toBe(true);
+    expect(overlay?.focusedEdgeIds.has("inject:r1->r3")).toBe(true);
   });
 
   it("shows all inject paths when toggle on", () => {
     const overlay = buildInjectGraphOverlay(graph, depEdges, {
       showAllInject: true,
     });
-    expect(overlay!.dimUnrelatedEdges).toBe(false);
-    expect(overlay!.focusedEdgeIds.has("r1->r2")).toBe(true);
+    expect(overlay?.dimUnrelatedEdges).toBe(false);
+    expect(overlay?.focusedEdgeIds.has("r1->r2")).toBe(true);
   });
 });

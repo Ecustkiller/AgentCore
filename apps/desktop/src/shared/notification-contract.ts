@@ -23,7 +23,5 @@ export type NotificationShowResult =
 
 export interface NotificationApi {
   show: (input: NotificationShowInput) => Promise<NotificationShowResult>;
-  onClicked: (
-    cb: (payload: { conversationId?: string }) => void,
-  ) => () => void;
+  onClicked: (cb: (payload: { conversationId?: string }) => void) => () => void;
 }

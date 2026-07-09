@@ -90,13 +90,10 @@ export interface SidecarTurnResult {
   content: string;
   reasoningContent: string | null;
   finishReason: string;
-  /** The chat model this turn ACTUALLY ran on, as resolved inside the sidecar
-   *  (`resolve_turn_model`): the cloud-proxy/account model when an inference token was
-   *  present, else the local `settings.platform_model` on the dev fallback. The renderer
-   *  surfaces it on the model badge so it honestly reflects the per-turn model (and warns
-   *  when a fallback diverged). Optional / backward-compatible: absent from an older
-   *  sidecar, in which case the badge falls back to the account-config label. */
-  model?: string | null;
+  /** The chat model this turn ACTUALLY ran on (`resolve_turn_model` inside the sidecar): the
+   *  cloud-proxy/account model when an inference token was present, else the local platform
+   *  model on the dev fallback. The renderer surfaces it on the model badge. */
+  model: string;
   rounds: number;
   /** 全量 token 快照（引擎记账的五项）——原样回写落 `Message.usage`，使 sidecar 回合重载后
    *  的 meta 行与云回合一致（云 `persist_turn_result` 落同样键）。成本不随行（云代理权威计费）。 */
@@ -160,6 +157,35 @@ export interface SidecarResumeRequest {
   selected?: string[];
   /** 云代理凭据（同 `startTurn`）——续跑要跑 LLM；重启后续跑会新拉起引擎，故须随带。 */
   inference?: SidecarInference;
+}
+
+/**
+ * Build the Python JSON-RPC ``resume`` params from a renderer IPC request.
+ *
+ * ``rootId`` / ``subpath`` are main-process routing only — they never cross stdio.
+ * ``selected`` is always sent (empty array when absent) so Python never has to guess.
+ */
+export function buildSidecarResumeRpcParams(
+  req: Pick<
+    SidecarResumeRequest,
+    | "messageId"
+    | "conversationId"
+    | "traceId"
+    | "decision"
+    | "note"
+    | "selected"
+  >,
+  inference?: SidecarInference,
+): Record<string, unknown> {
+  return {
+    messageId: req.messageId,
+    conversationId: req.conversationId,
+    traceId: req.traceId,
+    decision: req.decision,
+    note: req.note,
+    selected: req.selected ?? [],
+    ...(inference ? { inference } : {}),
+  };
 }
 
 /** 列出某会话在本机待续跑的持久挂起帧（重开会话时调，主进程直接读盘）。 */

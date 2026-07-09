@@ -1,6 +1,6 @@
 """Diagnostic LLM window projection schemas (§8.3 window_from_journal wire shape)."""
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 

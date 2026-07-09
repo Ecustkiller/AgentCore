@@ -11,7 +11,9 @@ import { FolderOpen, Terminal } from "lucide-react";
  *
  * Agent 经 `workspace_op` / `code_execute` 的执行链与此正交；这里是用户一键入口。
  */
-export function WorkspaceClientTools({ source }: { source: FileSource | null }) {
+export function WorkspaceClientTools({
+  source,
+}: { source: FileSource | null }) {
   if (!source) return null;
 
   const canReveal = !!source.revealInOsFileManager;

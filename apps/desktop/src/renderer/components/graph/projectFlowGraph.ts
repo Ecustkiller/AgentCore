@@ -1,9 +1,9 @@
 import { toDebateModel } from "@/components/chat/debate/model";
+import type { InjectGraphOverlay } from "@/lib/causalInject";
 import { NODE_HEIGHT, NODE_WIDTH } from "@/lib/elk-layout";
 import type { GroupLayout } from "@/lib/elk-layout";
 import { estimateTokens, formatCost, headText, tailText } from "@/lib/format";
 import { detectReviewConcern } from "@/lib/reviewConcern";
-import type { InjectGraphOverlay } from "@/lib/causalInject";
 import type { Execution, RunStatus } from "@/stores/execution";
 import type { GraphEdge } from "@/stores/graph";
 import type { Edge, Node } from "@xyflow/react";
@@ -192,8 +192,7 @@ export function projectFlowNodes({
   const workerRuns = execution.runs.filter((r) => r.id !== captainRun?.id);
   const workerIdSet = new Set(workerRuns.map((r) => r.id));
   const captainId = captainRun?.id ?? null;
-  const foldInfo =
-    foldInfoIn ?? computeGraphFold(execution.runs, captainId);
+  const foldInfo = foldInfoIn ?? computeGraphFold(execution.runs, captainId);
   const debateModel = toDebateModel(execution);
   const nodes: Node[] = [];
 
@@ -267,8 +266,7 @@ export function projectFlowNodes({
     const isFoldedChild = foldInfo.folded.has(run.id);
     if (isFoldedChild && !expandedUnits.has(unit)) continue;
 
-    const isDebateUnit =
-      foldInfo.debateUnits.has(run.id) && unit === run.id;
+    const isDebateUnit = foldInfo.debateUnits.has(run.id) && unit === run.id;
     if (isDebateUnit && !expandedUnits.has(run.id)) {
       const pos = placed(run.id);
       if (!pos) continue;
@@ -493,8 +491,7 @@ export function projectFlowEdges({
       kind === "dep" ? resolveHandoff(execution, e.source, e.target) : null;
     const port = ports.get(e.id);
     const injectHighlight =
-      kind === "inject" ||
-      (injectOverlay?.highlightEdgeIds.has(e.id) ?? false);
+      kind === "inject" || (injectOverlay?.highlightEdgeIds.has(e.id) ?? false);
     const injectDimmed =
       (injectOverlay?.dimUnrelatedEdges ?? false) &&
       !(injectOverlay?.focusedEdgeIds.has(e.id) ?? false);

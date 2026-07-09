@@ -102,6 +102,7 @@ describe("toDebateModel live cross-exam", () => {
           verdict: null,
           sides: [],
           clashes: [],
+          cross_exam: [],
         },
       ],
     });

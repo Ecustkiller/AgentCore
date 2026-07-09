@@ -1,9 +1,9 @@
-import { notifyActionError } from "@/lib/toast";
+import { Button } from "@/components/ui";
 import { hasAgentTownLauncher } from "@/lib/capabilities";
+import { notifyActionError } from "@/lib/toast";
 import { persistAgentTownSession } from "@/services/agentTownSession";
 import { ExternalLink } from "lucide-react";
 import { useState } from "react";
-import { Button } from "@/components/ui";
 
 export function OpenInAgentTownButton({
   runId,
@@ -22,7 +22,7 @@ export function OpenInAgentTownButton({
     setLaunching(true);
     try {
       await persistAgentTownSession();
-      const result = await window.agentTownApi!.launch(
+      const result = await window.agentTownApi?.launch(
         runId ? { runId } : undefined,
       );
       if (!result.ok) {

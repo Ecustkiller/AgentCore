@@ -34,7 +34,7 @@ const SEARCH_RESULT_CAP = 12;
  * 传给首发建会话；首发后锁定，改由 `WorkspaceModeBar` 承担。
  */
 const breadcrumbTriggerClass =
-  "inline-flex h-auto min-w-0 items-center gap-1 rounded-md px-1 py-0.5 font-medium text-muted-foreground hover:bg-accent hover:text-foreground";
+  "inline-flex h-auto min-w-0 items-center gap-1 rounded-lg px-1 py-0.5 font-medium text-muted-foreground hover:bg-accent hover:text-foreground";
 
 export function DraftWorkspacePicker({
   variant = "toolbar",

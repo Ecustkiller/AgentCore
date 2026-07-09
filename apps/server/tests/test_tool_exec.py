@@ -7,7 +7,7 @@ import pytest
 
 from agentcore.core.errors import SandboxError
 from agentcore.core.types import ToolCategory, ToolEffect
-from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
+from agentcore.llm.provider.protocol import ToolCall, ToolCallFunction
 from agentcore.runtime.engine.tool_exec import execute_tools
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.tools.builtin.code_execute import CodeExecuteTool

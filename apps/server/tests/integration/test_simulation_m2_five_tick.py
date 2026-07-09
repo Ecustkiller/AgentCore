@@ -95,8 +95,8 @@ async def test_m2_five_tick_full_pipeline(client, make_invite):
         assert captured_perceptions, "expected perception capture on tick 5 for chen"
         perception_t5 = captured_perceptions[0]
         assert "【你的近期记忆】" in perception_t5
-        assert "在 tick 1，" in perception_t5
-        assert "在 tick 4，" in perception_t5
+        assert "在 tick 1–4，" in perception_t5
+        assert "连续4次" in perception_t5
 
         # Memory persisted on agent state after tick 5.
         chen_t5 = snapshots[4]["agents"]["chen"]

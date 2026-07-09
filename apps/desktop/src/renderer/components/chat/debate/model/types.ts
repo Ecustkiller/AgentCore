@@ -100,8 +100,7 @@ export interface DebateClosingView {
   sideKey: string;
   name: string;
   colorVar: string;
-  /** 结辩辩手 run（`run_id` 解析）——陈词全文在其 `agent.outputChunks`；未解析到（旧产物 / 失败无 run）
-   *  为 null。 */
+  /** 结辩辩手 run（`run_id` 解析）——陈词全文在其 `agent.outputChunks`；未解析到（失败无 run）为 null。 */
   run: RunNode | null;
   /** 是否成功产出结辩（失败 / 无 session → false，前端标「未产出结辩」）。 */
   ok: boolean;
@@ -128,7 +127,7 @@ export interface DebateRoundModel {
    *  进行中恒空——live 孪生刻意不携带（与 `userInterjections` 同策），质询在收场复盘可见。 */
   crossExam: DebateCrossExamView[];
   /** 本轮记分裁判的各方得分（记分裁判 P2）。收场以权威 `debate_result.rounds[*].scores` 为准；
-   *  进行中恒空（live 孪生不携带）。空=未开启记分（快速对碰 / 旧产物），前端不渲染比分。 */
+   *  进行中恒空（live 孪生不携带）。空=未开启记分（快速对碰），前端不渲染比分。 */
   scores: DebateScoreView[];
 }
 
@@ -146,11 +145,11 @@ export interface DebateModel {
   brief: DebateBriefInfo | null;
   sides: DebateSideInfo[] | null;
   /** 各方结辩陈词（阶段化发言角色 P4 · 结辩收束）：收场以权威 `debate_result.closings` 为准、据 run_id
-   *  解析陈词 run；进行中恒空（结辩是收场后一次性 beat，live 无孪生）。空=未开启结辩（快速对碰 / 圆桌 /
-   *  旧产物），前端不渲染结辩区。 */
+   *  解析陈词 run；进行中恒空（结辩是收场后一次性 beat，live 无孪生）。空=未开启结辩（快速对碰 / 圆桌），
+   *  前端不渲染结辩区。 */
   closings: DebateClosingView[];
-  /** 主持人开场白（收场权威产出）：顶部「会说话的主持人」气泡。空/缺省（进行中、旧产物、未产出）→
-   *  由 {@link DebateArena} 回落到 motion+首轮焦点拼出的模板开场白，故这里 null 不代表不渲染开场。 */
+  /** 主持人开场白（收场权威产出）：顶部「会说话的主持人」气泡。空（进行中、未产出）时由
+   *  {@link DebateArena} 回落到 motion+首轮焦点拼出的模板开场白。 */
   opening: string | null;
   settled: boolean;
 }

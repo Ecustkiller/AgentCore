@@ -1,10 +1,10 @@
+import { getConversations } from "@/hooks/useConversations";
 import { hasLocalFiles } from "@/lib/capabilities";
 import type { FileSource } from "@/lib/fileSource";
 import { parentDir } from "@/lib/fileSource";
-import { notifyActionError, notifyError } from "@/lib/toast";
 import { queryClient } from "@/lib/queryClient";
 import { workspaceKeys } from "@/lib/queryKeys";
-import { getConversations } from "@/hooks/useConversations";
+import { notifyActionError, notifyError } from "@/lib/toast";
 import {
   createWorkspaceSource,
   resolveConversationLocalFileSource,
@@ -18,7 +18,9 @@ export async function resolveConversationFileSource(
   conversationId: string,
 ): Promise<FileSource | null> {
   const fsAvailable = hasLocalFiles();
-  const workspaces = queryClient.getQueryData<WorkspaceInfo[]>(workspaceKeys.list);
+  const workspaces = queryClient.getQueryData<WorkspaceInfo[]>(
+    workspaceKeys.list,
+  );
   const ws =
     workspaces?.find((w) => w.wsId === `conv:${conversationId}`) ?? null;
   if (ws) return resolveWorkspaceSource(ws, fsAvailable);

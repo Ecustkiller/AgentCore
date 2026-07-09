@@ -202,7 +202,8 @@ function ModelSourceToggle({
     <div className="rounded-xl border border-border bg-card px-4 py-3">
       <p className="text-sm font-medium text-foreground">模型来源</p>
       <p className="mt-0.5 text-xs text-muted-foreground">
-        选择对话使用哪个模型：自带 Key 用你下方配置的模型，平台模型用运营方提供的模型。切换即时生效，只影响之后的新回合。
+        选择对话使用哪个模型：自带 Key
+        用你下方配置的模型，平台模型用运营方提供的模型。切换即时生效，只影响之后的新回合。
       </p>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <SourceOption

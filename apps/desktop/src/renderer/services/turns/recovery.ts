@@ -1,8 +1,8 @@
 import { describeStreamError, streamErrorAction } from "@/lib/errors";
 import { loadLatestWindow } from "@/services/messages";
 import { attachConversation } from "@/services/streamConversation";
-import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
+import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import {
   RECONNECT_BANNER,
   isAbort,

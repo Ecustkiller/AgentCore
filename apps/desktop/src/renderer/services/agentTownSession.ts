@@ -1,5 +1,5 @@
-import { BASE_URL } from "@/services/api";
 import { hasAgentTownLauncher } from "@/lib/capabilities";
+import { BASE_URL } from "@/services/api";
 
 export { hasAgentTownLauncher };
 
@@ -10,7 +10,7 @@ export { hasAgentTownLauncher };
 export async function persistAgentTownSession(): Promise<void> {
   if (!hasAgentTownLauncher()) return;
   try {
-    await window.agentTownApi!.writeSession({ api_base: BASE_URL });
+    await window.agentTownApi?.writeSession({ api_base: BASE_URL });
   } catch (err) {
     console.warn("[agenttown] persist session failed", err);
   }
@@ -20,7 +20,7 @@ export async function persistAgentTownSession(): Promise<void> {
 export async function clearAgentTownSession(): Promise<void> {
   if (!hasAgentTownLauncher()) return;
   try {
-    await window.agentTownApi!.clearSession();
+    await window.agentTownApi?.clearSession();
   } catch (err) {
     console.warn("[agenttown] clear session failed", err);
   }

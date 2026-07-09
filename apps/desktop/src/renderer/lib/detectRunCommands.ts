@@ -21,8 +21,10 @@ function detectJsRunCommands(content: string, pm: string): string[] {
 }
 
 function jsPackageManager(content: string): string {
-  if (content.includes('"packageManager"') && content.includes("pnpm")) return "pnpm";
-  if (content.includes('"packageManager"') && content.includes("yarn")) return "yarn";
+  if (content.includes('"packageManager"') && content.includes("pnpm"))
+    return "pnpm";
+  if (content.includes('"packageManager"') && content.includes("yarn"))
+    return "yarn";
   return "npm";
 }
 
@@ -54,10 +56,12 @@ export async function detectProjectRunCommands(
   }
 
   const pyproject = await readTextFile(source, "pyproject.toml");
-  if (pyproject && pyproject.includes("[project]")) {
+  if (pyproject?.includes("[project]")) {
     const hasUv = pyproject.includes("[tool.uv]") || pyproject.includes("uv");
     const pm = hasUv ? "uv" : "pip";
-    const match = pyproject.match(/\[project\.scripts\]\s*([\s\S]*?)(?:\n\[|$)/);
+    const match = pyproject.match(
+      /\[project\.scripts\]\s*([\s\S]*?)(?:\n\[|$)/,
+    );
     if (match) {
       const first = match[1]?.match(/^\s*([^\s=]+)\s*=/m);
       if (first?.[1]) commands.push(`${pm} run ${first[1]}`);

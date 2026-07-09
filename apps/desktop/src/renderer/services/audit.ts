@@ -29,8 +29,7 @@ export async function fetchTurnAudit(
   messageId: string,
   options?: FetchTurnAuditOptions,
 ): Promise<AgentAuditListResponse> {
-  const query =
-    options?.includeCausal === true ? "?include_causal=true" : "";
+  const query = options?.includeCausal === true ? "?include_causal=true" : "";
   return api.get<AgentAuditListResponse>(
     `/v1/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/audit${query}`,
   );

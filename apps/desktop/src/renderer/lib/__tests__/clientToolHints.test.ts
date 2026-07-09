@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it } from "vitest";
 import {
   deriveClientToolsHint,
   extractLastBashBlock,
@@ -8,6 +7,7 @@ import {
 } from "@/lib/clientToolHints";
 import type { FileSource } from "@/lib/fileSource";
 import type { Message } from "@/stores/conversation/types";
+import { describe, expect, it } from "vitest";
 import { vi } from "vitest";
 
 function mockLocalSource(): FileSource {
@@ -81,9 +81,9 @@ describe("clientToolHints", () => {
         content: "好的",
       },
     ];
-    expect(
-      deriveClientToolsHint(messages, mockLocalSource(), false),
-    ).toEqual({ bashCommand: null });
+    expect(deriveClientToolsHint(messages, mockLocalSource(), false)).toEqual({
+      bashCommand: null,
+    });
   });
 
   it("returns null for cloud source without client tool methods", () => {
@@ -101,6 +101,8 @@ describe("clientToolHints", () => {
         content: "完成",
       },
     ];
-    expect(deriveClientToolsHint(messages, mockCloudSource(), false)).toBeNull();
+    expect(
+      deriveClientToolsHint(messages, mockCloudSource(), false),
+    ).toBeNull();
   });
 });

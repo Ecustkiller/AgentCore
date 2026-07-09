@@ -6,7 +6,12 @@ import {
 import { formatDuration } from "@/lib/format";
 import type { RunStatus } from "@/stores/execution";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
-import { ChevronDown, ChevronRight, Loader2, MessagesSquare } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  MessagesSquare,
+} from "lucide-react";
 import { statusFaceLabel } from "./agentNode/shared";
 import { useTerminalFlash } from "./useTerminalFlash";
 

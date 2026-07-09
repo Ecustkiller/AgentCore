@@ -665,9 +665,6 @@ export interface DebateSideInfo {
   name: string;
   stance: string;
   is_subject: boolean;
-  /** Phase 3 真·多模型辩手的 per-side 覆写（`provider/model`）。MVP 后端不 emit；旧产物可能
-   *  带此字段，前端【忽略】、改从辩手 run 的实际执行 model 展示。缺省按空处理。 */
-  model?: string;
 }
 
 /** 叙事线某一轮里某一方的执行指针：`run_id` 关联执行图的辩手节点（取发言全文 L3）。 */
@@ -719,8 +716,7 @@ export interface DebateCrossExamExchange {
  * {@link DebateSideInfo.key}）发出【必须正面回答】的尖锐质询，被质询方在【自己的 transcript】
  * 上逐条作答——`exchanges` 承载逐条 Q↔A（问题 + 作答摘要 verbatim；完整作答流仍随
  * `answer_run_id` 的辩手 run 事件走，供侧面板钻取）。`questioner` 空=主持人代表交锋（当前实现）。
- * 随 {@link DebateRoundInfo} 进 `debate_result`；仅【认真辩透 + 对抗形态】开启，非质询路径为空数组、
- * 可缺省（渐进式契约扩展，旧产物 / 快速对碰兼容）。 */
+ * 随 {@link DebateRoundInfo} 进 `debate_result`；仅【认真辩透 + 对抗形态】开启，非质询路径为空数组。 */
 export interface DebateCrossExam {
   target: string;
   questioner: string;
@@ -733,7 +729,7 @@ export interface DebateCrossExam {
  * 身份，陈词【全文】随 `run_id` 的辩手 run 事件走（与各方发言 / 质询作答同策，不塞载荷），前端据 `run_id`
  * 从执行图节点取回全文。`ok` 标记是否成功产出（失败 / 无 session → false，前端标「未产出结辩」）。这一层
  * 是辩手自己的胜负手收束，与裁判中立的 {@link DebateBriefInfo.decisive} 正交并存（真人辩论：结辩 + 裁决
- * 并存）。仅【认真辩透 + 对抗形态】开启；快速对碰 / 圆桌 / 旧产物为空数组、可缺省（渐进式契约扩展）。 */
+ * 并存）。仅【认真辩透 + 对抗形态】开启；快速对碰 / 圆桌路径为空数组。 */
 export interface DebateClosing {
   key: string;
   name: string;
@@ -746,7 +742,7 @@ export interface DebateClosing {
  * `penalties` 记本轮谬误与未支撑主张（每条一句话，如「循环论证：拿未生效判决当论据」），每条计 -1；
  * `note` 一句话记分理由；`total` 净得分（三维和减罚分，可为负，后端预算好、前端直用不重算）。逐轮记分
  * 累计驱动收场 {@link DebateBriefInfo.leaning}/`decisive`，让倾向与实际交锋对齐。随 {@link DebateRoundInfo}
- * 进 `debate_result`；未开启记分（快速对碰 / 坏 JSON 容错）为空对象、可缺省（渐进式契约扩展）。 */
+ * 进 `debate_result`；未开启记分（快速对碰）为空对象。 */
 export interface DebateRoundScore {
   argument: number;
   engagement: number;
@@ -765,15 +761,14 @@ export interface DebateRoundInfo {
   verdict: DebateVerdict;
   sides: DebateRoundSide[];
   clashes: DebateClash[];
-  /** 驱动本轮的用户追问（交互式逐轮，opt-in；非交互 / 无追问为空数组）。可缺省（旧产物兼容，
-   * 与 {@link DebateBriefInfo.risk_severities} 同样的渐进式契约扩展）。 */
-  user_interjections?: DebateUserInterjection[];
+  /** 驱动本轮的用户追问（交互式逐轮，opt-in；非交互 / 无追问为空数组）。 */
+  user_interjections: DebateUserInterjection[];
   /** 本轮质询环节的问答（质询回合 P1）：主持人代表交锋的定向必答质询 + 各方作答指针。非质询路径
-   * （快速对碰 / 圆桌 / 旧产物）为空数组、可缺省（渐进式契约扩展）。见 {@link DebateCrossExam}。 */
-  cross_exam?: DebateCrossExam[];
+   * （快速对碰 / 圆桌）为空数组。见 {@link DebateCrossExam}。 */
+  cross_exam: DebateCrossExam[];
   /** 本轮记分裁判的各方得分（`key` = {@link DebateSideInfo.key} → 三维 + 罚分 + 净分，记分裁判 P2）。
-   * 未开启记分（快速对碰 / 旧产物）为空对象、可缺省（渐进式契约扩展）。见 {@link DebateRoundScore}。 */
-  scores?: Record<string, DebateRoundScore>;
+   * 未开启记分（快速对碰）为空对象。见 {@link DebateRoundScore}。 */
+  scores: Record<string, DebateRoundScore>;
 }
 
 /** 进行中实时叠加的一轮叙事态（debate_round_started / debate_round 折叠累积，进 ProjectedTurn
@@ -789,8 +784,8 @@ export interface DebateNarrativeRound {
   sides: DebateRoundSide[];
   clashes: DebateClash[];
   /** 本轮质询环节的问答（质询回合 P1）：`debate_round` 收尾后写入；质询进行中可由前端据
-   * `_cx_` run + `run_context` 从执行图重建。非质询路径为空、可缺省（渐进式契约扩展）。 */
-  cross_exam?: DebateCrossExam[];
+   * `_cx_` run + `run_context` 从执行图重建。非质询路径为空数组。 */
+  cross_exam: DebateCrossExam[];
 }
 
 /** 决策简报（结论卡）：交锋焦点、各方最强论点、事实/价值分歧、倾向与置信、建议、待解问题。 */
@@ -798,14 +793,13 @@ export interface DebateBriefInfo {
   crux: string;
   strongest_points: Record<string, string>;
   /** 红队专用：红队成员 `key` → 风险严重度 `high|medium|low`，驱动「风险看板」按严重度分级 +
-   * 总览计数。非红队形态恒为空对象；被审方案方（`is_subject`）不评级。可缺省（旧产物兼容）。 */
-  risk_severities?: Record<string, string>;
+   * 总览计数。非红队形态恒为空对象；被审方案方（`is_subject`）不评级。 */
+  risk_severities: Record<string, string>;
   factual_disputes: string[];
   value_disputes: string[];
   /** 胜负手（记分裁判 P2）：一句话点名【谁的哪个论点被驳倒 / 被证伪 / 无据】，据逐轮记分累计推导
-   * ——让 `leaning` 由实际交锋记分驱动、可追溯，而非收场拍脑袋。空=未开启记分；可缺省（渐进式
-   * 契约扩展，旧产物 / 快速对碰兼容）。圆桌无单一胜负手恒空。 */
-  decisive?: string;
+   * ——让 `leaning` 由实际交锋记分驱动、可追溯，而非收场拍脑袋。空=未开启记分；圆桌无单一胜负手恒空。 */
+  decisive: string;
   leaning: string;
   confidence: string;
   recommendation: string;
@@ -820,17 +814,16 @@ export interface DebateResultPayload {
   motion: string;
   /** 收场原因（converged / focus_clarified / red_team_exhausted / max_rounds / all_failed）。 */
   stop_reason: string;
-  /** 主持人开场白（第 1 轮主持人顺带产出的一句定调）：前端顶部「会说话的主持人」气泡渲染。可选、
-   *  渐进式契约扩展（旧产物 / 未产出时缺省）——空 / 缺省时前端回落到由 motion+焦点拼出的模板开场白。 */
-  opening?: string;
+  /** 主持人开场白（第 1 轮主持人顺带产出的一句定调）：前端顶部「会说话的主持人」气泡渲染。空时
+   *  前端回落到由 motion+焦点拼出的模板开场白。 */
+  opening: string;
   /** 呈现顺序提示：true=叙事线优先（如 roundtable 探讨），false=简报优先（如 debate 决策）。 */
   narrative_first: boolean;
   sides: DebateSideInfo[];
   rounds: DebateRoundInfo[];
   /** 各方结辩陈词（阶段化发言角色 P4 · 结辩收束）：辩已辩尽后各方的收尾 advocacy，全文随 `run_id` 走
-   *  执行事件（不塞载荷）。非结辩路径（快速对碰 / 圆桌 / 旧产物）为空数组、可缺省（渐进式契约扩展）。
-   *  见 {@link DebateClosing}。 */
-  closings?: DebateClosing[];
+   *  执行事件（不塞载荷）。非结辩路径（快速对碰 / 圆桌）为空数组。见 {@link DebateClosing}。 */
+  closings: DebateClosing[];
   brief: DebateBriefInfo;
 }
 

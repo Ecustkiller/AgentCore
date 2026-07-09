@@ -16,8 +16,8 @@ import {
 import { stopConversation } from "@/services/stopTurn";
 import { useApprovalStore } from "@/stores/approvals";
 import { useDelegationAuthStore } from "@/stores/delegationAuth";
-import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { execRuntime, useExecutionStore } from "@/stores/execution";
+import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import type {
   CheckpointDecision,
   CheckpointRequiredPayload,

@@ -1,9 +1,9 @@
 import { ApiError } from "@/services/api";
 import { resolveInteraction } from "@/services/interaction";
 import {
+  type DelegationAuthorizationDecision,
   type PendingDelegationAuthorization,
   useDelegationAuthStore,
-  type DelegationAuthorizationDecision,
 } from "@/stores/delegationAuth";
 
 export type ResolveDelegationAuthorizationBody = {

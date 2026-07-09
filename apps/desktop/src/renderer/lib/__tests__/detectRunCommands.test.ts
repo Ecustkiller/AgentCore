@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from "vitest";
 import { detectProjectRunCommands } from "@/lib/detectRunCommands";
 import type { FileSource } from "@/lib/fileSource";
+import { describe, expect, it, vi } from "vitest";
 
 function mockSource(readImpl: FileSource["read"]): FileSource {
   return {

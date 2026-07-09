@@ -9,9 +9,9 @@ from agentcore.runtime.runs.types import RunPhase, RunState
 from agentcore.tools.builtin.delegate.accumulate import collect_citations
 from agentcore.tools.builtin.delegate.nesting import absorb_children, make_lead_subteam
 from agentcore.tools.builtin.delegate.tool import DelegateTool
-from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.builtin.replan import ReplanTool
+from agentcore.tools.registry import ToolRegistry
 from tests.delegate.conftest import (
     LATE_BIND_DAG,
     NestingProvider,

@@ -13,7 +13,7 @@ asserted against the preflight gate directly rather than by opening a stream.
 
 import pytest
 
-from agentcore.api.routes.conversations._helpers import TurnPreflightResult, _preflight_turn_llm
+from agentcore.api.routes.conversations._helpers import _preflight_turn_llm
 from agentcore.config import settings
 from agentcore.core.errors import LLMError, QuotaExceededError
 from agentcore.core.types import new_id

@@ -2,7 +2,7 @@ import { Button } from "@/components/ui";
 import { useTurnAudit } from "@/hooks/useTurnAudit";
 import { formatMessageTimeOfDay } from "@/lib/format";
 import { isWebPreview } from "@/lib/preview";
-import { type AgentAuditEvent } from "@/services/audit";
+import type { AgentAuditEvent } from "@/services/audit";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import type {
   AuditCategory,
@@ -167,8 +167,7 @@ export function AuditSection({
     preview ? null : conversationId,
     preview ? null : messageId,
   );
-  const events =
-    data?.data.filter((ev) => ev.run_id === runId) ?? null;
+  const events = data?.data.filter((ev) => ev.run_id === runId) ?? null;
 
   if (preview) {
     return (

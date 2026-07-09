@@ -9,7 +9,6 @@ The EventSink decouples execution from delivery (backpressure-safe).
 from __future__ import annotations
 
 from agentcore.runtime.events.board import board_op_required, board_read_required
-from agentcore.runtime.events.desktop import desktop_notify_required
 from agentcore.runtime.events.chat import (
     citations_event,
     content_delta,
@@ -27,6 +26,7 @@ from agentcore.runtime.events.chat import (
     turn_saved,
     turn_warning,
 )
+from agentcore.runtime.events.desktop import desktop_notify_required
 from agentcore.runtime.events.interaction import (
     approval_required,
     approval_resolved,

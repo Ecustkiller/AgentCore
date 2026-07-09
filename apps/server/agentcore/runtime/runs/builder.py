@@ -403,9 +403,7 @@ def _inline_spec(
 
 def _parse_can_delegate(raw: Any) -> bool:
     """Normalise a task's ``can_delegate`` knob → ``False`` or ``True`` (default on)."""
-    if raw is False:
-        return False
-    return True
+    return raw is not False
 
 
 def _tools(declared: Any, valid_tools: set[str] | None) -> list[str] | None:

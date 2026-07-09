@@ -1,12 +1,12 @@
 import { Badge, Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
 import { notifyError } from "@/lib/toast";
 import { decideDelegationAuthorization } from "@/services/delegationAuth";
+import { useConversationStore } from "@/stores/conversation";
 import {
+  type DelegationAuthorizationDecision,
   type PendingDelegationAuthorization,
   useDelegationAuthStore,
-  type DelegationAuthorizationDecision,
 } from "@/stores/delegationAuth";
-import { useConversationStore } from "@/stores/conversation";
 import { CheckCheck, ListChecks, Loader2, ShieldAlert, X } from "lucide-react";
 import { useState } from "react";
 
@@ -48,9 +48,8 @@ function DelegationAuthorizationCard({
 }: {
   authorization: PendingDelegationAuthorization;
 }) {
-  const [clicked, setClicked] = useState<DelegationAuthorizationDecision | null>(
-    null,
-  );
+  const [clicked, setClicked] =
+    useState<DelegationAuthorizationDecision | null>(null);
   const busy = authorization.resolving;
 
   const onDecide = (decision: DelegationAuthorizationDecision) => {

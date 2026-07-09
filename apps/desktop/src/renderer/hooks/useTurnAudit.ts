@@ -1,8 +1,5 @@
 import { isWebPreview } from "@/lib/preview";
-import {
-  fetchTurnAudit,
-  type AgentAuditListResponse,
-} from "@/services/audit";
+import { type AgentAuditListResponse, fetchTurnAudit } from "@/services/audit";
 import { useEffect, useSyncExternalStore } from "react";
 
 type TurnAuditEntry = {
@@ -22,12 +19,12 @@ function cacheKey(conversationId: string, messageId: string): string {
 }
 
 function notify(key: string): void {
-  listeners.get(key)?.forEach((listener) => listener());
+  for (const listener of listeners.get(key) ?? []) listener();
 }
 
 function subscribe(key: string, onStoreChange: () => void): () => void {
   if (!listeners.has(key)) listeners.set(key, new Set());
-  listeners.get(key)!.add(onStoreChange);
+  listeners.get(key)?.add(onStoreChange);
   return () => {
     listeners.get(key)?.delete(onStoreChange);
   };

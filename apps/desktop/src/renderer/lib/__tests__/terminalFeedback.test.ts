@@ -8,8 +8,8 @@ vi.mock("@/lib/toast", () => ({
   notifyActionError: vi.fn(),
 }));
 
-import { notifyError, notifyInfo } from "@/lib/toast";
 import { handleTerminalResult, runTerminalBash } from "@/lib/terminalFeedback";
+import { notifyError, notifyInfo } from "@/lib/toast";
 
 const notifyErrorMock = vi.mocked(notifyError);
 const notifyInfoMock = vi.mocked(notifyInfo);
@@ -45,6 +45,6 @@ describe("runTerminalBash", () => {
     await runTerminalBash("pnpm test");
     expect(window.terminalApi.runBash).toHaveBeenCalledWith("pnpm test");
     expect(notifyInfoMock).toHaveBeenCalledWith("已取消在终端运行");
-    delete window.terminalApi;
+    window.terminalApi = undefined;
   });
 });

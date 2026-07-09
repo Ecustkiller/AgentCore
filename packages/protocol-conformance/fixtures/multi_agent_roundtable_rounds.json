@@ -886,7 +886,8 @@
             "to_key": "b",
             "point": "强问责会抬高合规成本，产业落地承受不起一刀切立法。"
           }
-        ]
+        ],
+        "cross_exam": []
       },
       {
         "round_no": 2,
@@ -894,7 +895,8 @@
         "summary": "",
         "verdict": null,
         "sides": [],
-        "clashes": []
+        "clashes": [],
+        "cross_exam": []
       }
     ],
     "teamNotes": []

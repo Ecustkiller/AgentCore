@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal, Literal
+from typing import Literal
 
 from agentcore.core.logging import get_logger
 from agentcore.llm.profiles import ProfileParams, build_request

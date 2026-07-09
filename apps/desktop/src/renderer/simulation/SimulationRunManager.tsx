@@ -1,4 +1,3 @@
-import { OpenInAgentTownButton } from "@/simulation/OpenInAgentTownButton";
 import { Button } from "@/components/ui";
 import { describeError } from "@/lib/errors";
 import {
@@ -9,6 +8,7 @@ import {
   connectSimulationStream,
   disconnectSimulationStream,
 } from "@/services/simulation/stream";
+import { OpenInAgentTownButton } from "@/simulation/OpenInAgentTownButton";
 import {
   type SavedSimulationRun,
   listSavedRuns,

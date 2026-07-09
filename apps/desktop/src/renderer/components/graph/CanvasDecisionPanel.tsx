@@ -1,7 +1,7 @@
 import { ApprovalPrompt } from "@/components/chat/ApprovalPrompt";
-import { DelegationAuthorizationPrompt } from "@/components/chat/DelegationAuthorizationCard";
 import { BackgroundTaskCard } from "@/components/chat/BackgroundTaskCard";
 import { CheckpointCard } from "@/components/chat/CheckpointCard";
+import { DelegationAuthorizationPrompt } from "@/components/chat/DelegationAuthorizationCard";
 import { EscalationCards } from "@/components/chat/EscalationCard";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
 import { ResumePrompt } from "@/components/chat/ResumePrompt";

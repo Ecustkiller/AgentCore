@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { FileSource } from "@/lib/fileSource";
-import { EMPTY_RUNTIME } from "@/stores/conversation/runtime";
 import { useConversationStore } from "@/stores/conversation";
+import { EMPTY_RUNTIME } from "@/stores/conversation/runtime";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClientToolsPrompt } from "../ClientToolsPrompt";
 
 vi.mock("@/hooks/useConversationFileSource", () => ({
@@ -78,12 +84,7 @@ beforeEach(() => {
             ...baseMsg,
             id: "a1",
             role: "assistant",
-            content: [
-              "执行：",
-              "```bash",
-              "pnpm dev",
-              "```",
-            ].join("\n"),
+            content: ["执行：", "```bash", "pnpm dev", "```"].join("\n"),
           },
         ],
       },
@@ -93,7 +94,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  delete window.terminalApi;
+  window.terminalApi = undefined;
   useSourceMock.mockReset();
 });
 

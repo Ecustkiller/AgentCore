@@ -7,7 +7,6 @@ from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.runtime.engine.constants import FINALIZE_COORDINATION_TOOLS
 from agentcore.runtime.engine.finalize import force_finalize, run_finalize_round
 from agentcore.runtime.engine.governance import resolve_finalize_coordination_tools
-from agentcore.runtime.events import EventSink
 from agentcore.tools.protocol import ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from tests.llm_helpers import make_profile_params

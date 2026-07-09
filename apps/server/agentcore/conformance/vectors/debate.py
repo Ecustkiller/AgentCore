@@ -39,12 +39,12 @@ def _multi_agent_debate() -> list[SSEEvent]:
     多出一个 ``_r1_cx_{key}`` 质询作答 run——faithful：作答是 continue_run，run_started 携 revision=2 +
     原辩手 stance/group/round）；``scores`` = 裁判本轮给各方的三维记分 + 罚分 + 净分；``brief.decisive``
     = 据逐轮记分推导的胜负手。三者均为附加字段（settledModel 据 answer_run_id 取回作答、据 scores/
-    decisive 渲染比分与胜负手），旧产物缺省即空、零破坏。
+    decisive 渲染比分与胜负手），载荷恒带空集合/空对象。
 
     亦承载【结辩收束 P4】端到端契约：收场 ``closings`` = 辩已辩尽后各方的结辩陈词（身份 verbatim 进载荷、
     陈词全文随 ``run_id`` 的 continue_run 事件走，故各方在质询后再多一个 ``_closing_{key}`` 结辩 run——
     faithful：结辩是 continue_run，run_started 携 revision=3 + 原辩手 stance/group/round）；settledModel 据
-    ``closings[*].run_id`` 取回陈词全文渲染「结辩陈词」区。附加字段、旧产物缺省即空、零破坏。"""
+    ``closings[*].run_id`` 取回陈词全文渲染「结辩陈词」区。载荷恒带空集合/空对象。"""
     cap, mod = "captain1", "debate_mod1"
     pro_run, con_run = f"{mod}_r1_pro", f"{mod}_r1_con"
     pro_cx, con_cx = f"{mod}_r1_cx_pro", f"{mod}_r1_cx_con"

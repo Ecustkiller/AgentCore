@@ -1,8 +1,8 @@
 import { startNewConversation } from "@/lib/newConversation";
 import { chord } from "@/lib/shortcuts";
 import { notifyError } from "@/lib/toast";
-import { openCurrentConversationTerminal } from "@/services/terminalActions";
 import { exportConversation } from "@/services/conversations";
+import { openCurrentConversationTerminal } from "@/services/terminalActions";
 import { useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
 import { useShareStore } from "@/stores/share";

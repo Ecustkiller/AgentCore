@@ -47,7 +47,10 @@ function normalizePunctuation(line: string): string {
       inQuote = false;
       quoteChar = "";
       out += ch;
-    } else if (!inQuote && Object.prototype.hasOwnProperty.call(FULLWIDTH_PUNCT, ch)) {
+    } else if (
+      !inQuote &&
+      Object.prototype.hasOwnProperty.call(FULLWIDTH_PUNCT, ch)
+    ) {
       out += FULLWIDTH_PUNCT[ch];
     } else {
       out += ch;

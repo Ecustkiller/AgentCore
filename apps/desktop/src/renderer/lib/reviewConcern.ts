@@ -19,7 +19,10 @@ const DIRECTION_PATTERNS = [
 ];
 
 /** Playbook task id `review` or role names like 「学术审校员」. */
-export function isReviewLikeWorker(role: string, runId?: string | null): boolean {
+export function isReviewLikeWorker(
+  role: string,
+  runId?: string | null,
+): boolean {
   if (runId === "review") return true;
   return REVIEW_ROLE_RE.test(role.trim());
 }

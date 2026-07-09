@@ -4,11 +4,11 @@ import tempfile
 from pathlib import Path
 
 from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.llm.profiles import PLATFORM_MODEL_FLASH, TurnProfiles
 from agentcore.llm.provider.protocol import LLMChunk, TokenUsage, ToolCallDelta
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.interaction import InteractionRegistry
-from agentcore.llm.profiles import PLATFORM_MODEL_FLASH, TurnProfiles
 from agentcore.runtime.runs.executor import build_agent_executor
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState

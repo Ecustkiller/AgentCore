@@ -1,5 +1,5 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fetchRunLlmWindow } from "@/services/llmWindow";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/api", () => ({
   api: { get: vi.fn() },
