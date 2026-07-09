@@ -92,11 +92,33 @@ jobs:
       - name: Bundle sidecar Python runtime
         run: pnpm bundle:sidecar
 
-      - name: Build & publish to release repo (draft)
+      # 不走 electron-builder --publish：已转正的 release 与 releaseType=draft 冲突会整批跳过
+      # （见 electron-builder#2393）。改为本地出包 + gh release upload，draft/已发布均可补传。
+      - name: Build macOS arm64 package
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_GH_TOKEN }}
           # electron-vite + large renderer OOMs on default Node heap (macos-latest)
           NODE_OPTIONS: --max-old-space-size=8192
         run: |
           pnpm build
-          pnpm exec electron-builder --mac --arm64 --publish always
+          pnpm exec electron-builder --mac --arm64 --publish never
+
+      - name: Upload mac assets to AgentCore-releases
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GH_TOKEN }}
+        run: |
+          ver="$(node -p "require('./package.json').version")"
+          tag="v${ver}"
+          repo="Lawofall/AgentCore-releases"
+          dir="release/${ver}"
+          test -f "${dir}/AgentCore-${ver}-mac-arm64.dmg"
+          test -f "${dir}/AgentCore-${ver}-mac-arm64.zip"
+          test -f "${dir}/latest-mac.yml"
+          gh release upload "$tag" \
+            "${dir}/AgentCore-${ver}-mac-arm64.dmg" \
+            "${dir}/AgentCore-${ver}-mac-arm64.dmg.blockmap" \
+            "${dir}/AgentCore-${ver}-mac-arm64.zip" \
+            "${dir}/AgentCore-${ver}-mac-arm64.zip.blockmap" \
+            "${dir}/latest-mac.yml" \
+            --repo "$repo" --clobber
+          echo "uploaded mac assets to ${repo} ${tag}"
+          gh release view "$tag" --repo "$repo"
