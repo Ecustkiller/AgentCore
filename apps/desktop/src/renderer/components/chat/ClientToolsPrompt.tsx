@@ -47,7 +47,7 @@ export function ClientToolsPrompt() {
   if (!hint || !source) return null;
 
   const canReveal = !!source.revealInOsFileManager;
-  const canShell = !!source.openShellAtPath || !!source.openWorkspaceShell;
+  const canShell = !!source.openShellAtPath;
   const bashCommand =
     hint.bashCommand && hasTerminalRun() ? hint.bashCommand : null;
   const runCommands = bashCommand

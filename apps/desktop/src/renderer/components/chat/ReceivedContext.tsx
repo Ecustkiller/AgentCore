@@ -25,8 +25,7 @@ const CONTEXT_CHANNEL_META: Record<string, { label: string; hint: string }> = {
   workspace: { label: "工作区", hint: "共享工作区可读文件" },
   task: { label: "你的任务", hint: "分派给本 Agent 的具体活" },
   deliverable: { label: "交付物规格", hint: "期望交付的形态与硬约束" },
-  expected_output: { label: "预期产出", hint: "期望交付的形态" },
-  requirements: { label: "产出要求", hint: "必须满足的硬约束" },
+  team_brief: { label: "团队共识", hint: "本回合主协调为全员设定的共识" },
   steer: { label: "中途指示", hint: "执行中追加的操舵" },
   team_result: { label: "队员回传", hint: "委派的队员交回 CEO 的产物" },
   // 辩论续写通道 (continue_run 逐轮): what a 第 N 轮 debater was fed this round.

@@ -223,8 +223,5 @@ export function createLocalRootSource(
       const result = await api.openShellAtRoot(rootId, containerSub);
       if (!result.ok) throw new Error(result.reason);
     },
-    openWorkspaceShell() {
-      return this.openShellAtPath(".");
-    },
   };
 }
