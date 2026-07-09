@@ -4,7 +4,7 @@ One aggregate endpoint over the platform's agent capabilities — every tool (CE
 worker, annotated with who may call it), the system Skills (catalog summary + full
 body), and the system-prompt template the CEO follows. Every field is derived from the
 SAME sources the runtime wires (``tools.catalog`` / ``runtime.skills`` /
-``runtime.prompt.compose_ceo_chat_prompt``), so what the user sees never drifts from what
+``runtime.resolve.prompt.compose_ceo_chat_prompt``), so what the user sees never drifts from what
 the agents are actually given. Auth matches the app's authenticated posture; the catalog
 is static platform metadata (not user-scoped).
 """
@@ -19,7 +19,7 @@ from agentcore.api.schemas import (
     CapabilityTool,
 )
 from agentcore.config import settings
-from agentcore.runtime.prompt import (
+from agentcore.runtime.resolve.prompt import (
     assemble_system_prompt,
     compose_ceo_chat_prompt,
     derive_ceo_addon,

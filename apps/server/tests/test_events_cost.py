@@ -50,6 +50,23 @@ def test_message_end_cost_defaults_to_none_on_error_path():
     assert ev.payload["usage"]["cache_hit_tokens"] == 0
 
 
+def test_message_end_exposes_collab_metrics():
+    collab = {
+        "boundary_yields": 1,
+        "scope_signals": 2,
+        "revises": 1,
+        "escalations": 3,
+        "audit_drops": 2,
+    }
+    ev = message_end(FinishReason.END_TURN, collab=collab)
+    assert ev.payload["collab"] == collab
+
+
+def test_message_end_omits_collab_when_none():
+    ev = message_end(FinishReason.END_TURN)
+    assert "collab" not in ev.payload
+
+
 def test_run_completed_carries_role_model_usage_cost():
     usage = {"input": 100, "output": 50, "reasoning": 10, "cache_hit": 60, "cache_miss": 40}
     cost = {"input": 999, "cached": 111, "output": 222, "total": 1221, "currency": "USD"}

@@ -28,6 +28,42 @@ def approval_required(
     )
 
 
+def delegation_authorization_required(
+    *,
+    authorization_id: str,
+    conversation_id: str,
+    execution_id: str,
+    workers: list[dict[str, str]],
+    tools: list[str],
+) -> SSEEvent:
+    return SSEEvent(
+        type=EventType.DELEGATION_AUTHORIZATION_REQUIRED,
+        payload={
+            "authorization_id": authorization_id,
+            "conversation_id": conversation_id,
+            "execution_id": execution_id,
+            "workers": workers,
+            "tools": tools,
+        },
+    )
+
+
+def delegation_authorization_resolved(
+    *,
+    authorization_id: str,
+    execution_id: str,
+    decision: str,
+) -> SSEEvent:
+    return SSEEvent(
+        type=EventType.DELEGATION_AUTHORIZATION_RESOLVED,
+        payload={
+            "authorization_id": authorization_id,
+            "execution_id": execution_id,
+            "decision": decision,
+        },
+    )
+
+
 def approval_resolved(*, approval_id: str, tool_call_id: str, decision: str) -> SSEEvent:
     return SSEEvent(
         type=EventType.APPROVAL_RESOLVED,

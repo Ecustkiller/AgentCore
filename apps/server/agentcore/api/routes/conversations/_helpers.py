@@ -1,9 +1,7 @@
 """Shared helpers for the conversation route modules.
 
 Kept in one private module so the domain route modules (crud / messages / handoff
-/ …) can share the owner-scoping guards and the pre-turn billing gate. The package
-``__init__`` re-exports ``_preflight_turn_llm`` so the historical import path
-``from agentcore.api.routes.conversations import _preflight_turn_llm`` keeps working.
+/ …) can share the owner-scoping guards and the pre-turn billing gate.
 """
 
 from dataclasses import dataclass, field

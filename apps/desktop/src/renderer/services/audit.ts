@@ -19,13 +19,20 @@ export function groupAuditCountsByRun(
   return counts;
 }
 
+export type FetchTurnAuditOptions = {
+  includeCausal?: boolean;
+};
+
 /** 查询单回合审计事件（owner-scoped）；按 run_id 过滤在调用方客户端完成。 */
 export async function fetchTurnAudit(
   conversationId: string,
   messageId: string,
+  options?: FetchTurnAuditOptions,
 ): Promise<AgentAuditListResponse> {
+  const query =
+    options?.includeCausal === true ? "?include_causal=true" : "";
   return api.get<AgentAuditListResponse>(
-    `/v1/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/audit`,
+    `/v1/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/audit${query}`,
   );
 }
 

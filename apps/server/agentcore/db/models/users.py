@@ -63,10 +63,6 @@ class User(Base):
     quota_daily_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     quota_monthly_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     quota_daily_requests: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Per-user default 质量档 (llm/modes.py): a preset name ("economy"/"quality") or
-    # a custom ModelMode id. NULL = inherit the operator default
-    # (settings.default_model_mode → economy). A conversation may override it.
-    default_model_mode: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Long-term AI memory master switch (Agent记忆与知识系统 §一). When False the
     # user's `ai_maintained` memory is neither injected into prompts nor grown by the
     # offline consolidation pass — the privacy off-ramp ("AI 记忆" 设置页总开关). The

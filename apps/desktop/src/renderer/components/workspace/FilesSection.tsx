@@ -14,10 +14,19 @@ export function FilesSection({
   source,
   leading,
   trailing,
+  emptyTreeHint,
 }: {
   source: FileSource | null;
   leading?: ReactNode;
   trailing?: ReactNode;
+  emptyTreeHint?: string;
 }) {
-  return <FileBrowser source={source} leading={leading} trailing={trailing} />;
+  return (
+    <FileBrowser
+      source={source}
+      leading={leading}
+      trailing={trailing}
+      emptyTreeHint={emptyTreeHint}
+    />
+  );
 }

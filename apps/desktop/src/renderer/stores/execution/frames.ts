@@ -49,10 +49,7 @@ export type RunFrame =
       // 续写 version (乙 热修 P4): 0 for an ordinary run, >=2 for a revision (then
       // parentRunId is the original run it revises).
       revision: number;
-      // 乙 wire 携 round/stance (单一轮次投影): a debate 续写 (辩手后续轮) carries its
-      // debater identity + TRUE round so the fold projects 第几轮/哪一方 from one source.
-      // Undefined on an ordinary run / hot-fix revision (the fold falls back to the
-      // original's stance/group + revision-as-round).
+      // 乙 wire 携 round/stance (单一轮次投影): undefined on ordinary / hot-fix revisions.
       stance?: Stance;
       group?: string;
       round?: number;

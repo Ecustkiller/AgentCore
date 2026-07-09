@@ -6,6 +6,57 @@
 const ARROW_RE =
   /(-->|---|==>|-\.->|--o|--x|o--o|o--x|x--o|x--x|<-->|<-->|o---o)(?:\|[^|]*\|)?/;
 
+/**
+ * Full-width / CJK punctuation → ASCII equivalents that Mermaid's parser needs
+ * in structural positions (sequence message separators, edge-label pipes, etc.).
+ * Full-width parens are intentionally excluded: unquoted labels like `A[步骤（1）]`
+ * render fine as literal text, whereas rewriting them to ASCII `(` would trigger
+ * node-shape syntax and BREAK an otherwise-valid diagram.
+ */
+const FULLWIDTH_PUNCT: Record<string, string> = {
+  "\uFF1A": ":", // ：
+  "\uFF1B": ";", // ；
+  "\uFF0C": ",", // ，
+  "\uFF5C": "|", // ｜
+  "\u3000": " ", // full-width space
+};
+
+/**
+ * Repair "typographic" Unicode punctuation that models emit where Mermaid only
+ * accepts ASCII. Curly/smart quotes are converted unconditionally because models
+ * use them as the ASCII label delimiter. Other full-width punctuation is fixed
+ * ONLY outside ASCII-quoted strings, so real label display text such as
+ * `A["用户：管理员"]` keeps its characters while a structural separator like the
+ * sequence message `用户->>前端：点击按钮` gets repaired.
+ */
+function normalizePunctuation(line: string): string {
+  const dequoted = line
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'");
+
+  let out = "";
+  let inQuote = false;
+  let quoteChar = "";
+
+  for (const ch of dequoted) {
+    if ((ch === '"' || ch === "'") && !inQuote) {
+      inQuote = true;
+      quoteChar = ch;
+      out += ch;
+    } else if (ch === quoteChar && inQuote) {
+      inQuote = false;
+      quoteChar = "";
+      out += ch;
+    } else if (!inQuote && Object.prototype.hasOwnProperty.call(FULLWIDTH_PUNCT, ch)) {
+      out += FULLWIDTH_PUNCT[ch];
+    } else {
+      out += ch;
+    }
+  }
+
+  return out;
+}
+
 /** Split on `&` outside of quoted strings. */
 function splitByAmpersand(segment: string): string[] {
   const parts: string[] = [];
@@ -89,7 +140,8 @@ export function normalizeMermaidSource(code: string): string {
       continue;
     }
 
-    const fixedSubgraph = fixSubgraphLine(line, sgCounter);
+    const normalized = normalizePunctuation(line);
+    const fixedSubgraph = fixSubgraphLine(normalized, sgCounter);
     const expanded = expandAmpersandEdges(fixedSubgraph);
     if (Array.isArray(expanded)) {
       out.push(...expanded);

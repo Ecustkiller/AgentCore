@@ -8,7 +8,7 @@ from agentcore.core.error_codes import ErrorCode
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolEffect
 from agentcore.llm.errors import empty_response_event_message
-from agentcore.llm.profiles import ModelProfile, get_profile
+from agentcore.llm.profiles import ProfileParams, get_profile
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
@@ -27,7 +27,7 @@ from .ask_user_absorb import (
     absorb_blocking_ask_user_content,
     prepare_blocking_ask_user_tool_calls,
 )
-from .directive import Continue, Finalize, LoopDirective, Return, Rework, SwitchModel
+from .directive import Continue, Finalize, LoopDirective, Return, Rework
 from .finalize import force_finalize
 from .governance import (
     apply_circuit_breaker,
@@ -58,7 +58,7 @@ async def react_loop(
     tools: ToolRegistry,
     sink: EventSink,
     tool_context: ToolContext,
-    profile: ModelProfile | None = None,
+    profile: ProfileParams | None = None,
     turn_model: str | None = None,
     allowed_tool_names: list[str] | None = None,
     on_content: Callable[[str], None] | None = None,
@@ -129,7 +129,7 @@ async def react_loop(
     mirroring the ``usage_sink`` idiom: it carries a single :class:`FinishReason`
     the caller should stamp on the turn instead of the rounds-derived default
     (``end_turn`` / ``max_rounds``). The loop sets it to ``DEGRADED`` when the model
-    keeps returning empty responses even after the fallback retry, or ``UNPRODUCTIVE``
+    keeps returning empty responses past the threshold, or ``UNPRODUCTIVE``
     when it early-stops a run of all-tools-failed-no-content rounds (B2). Cleared on
     entry; left empty on a normal finish (one channel, since a run takes at most one
     such terminal path).
@@ -189,6 +189,10 @@ async def react_loop(
     if base_model is None:
         from agentcore.config import settings
 
+        logger.warning(
+            "react_loop.missing_turn_model",
+            fallback=settings.platform_model,
+        )
         base_model = settings.platform_model
 
     investigation_tools = classify_investigation_tools(tools, allowed_tool_names)
@@ -229,9 +233,7 @@ async def react_loop(
 
         if isinstance(round_result, LlmRoundFailure):
             # Hard LLM failure (non-raising path): the provider already exhausted its
-            # network retries. Walk the engine-level fallback ladder — escalate to the
-            # fallback model once, else end on ERROR/DEGRADED (error surfaced below, in
-            # the Return arm, so a recovered fallback retry shows the user nothing).
+            # network retries. End on ERROR/DEGRADED (error surfaced in the Return arm).
             outcome = RoundOutcome(
                 content="",
                 reasoning="",
@@ -241,12 +243,7 @@ async def react_loop(
                 error_message=round_result.error_message,
                 error_context=round_result.error_context,
             )
-            directive: LoopDirective = decide_llm_failure(
-                profile=profile,
-                active_model=active_model,
-                final_content=final_content,
-                upstream_error=round_result.upstream_error,
-            )
+            directive: LoopDirective = decide_llm_failure(final_content=final_content)
         else:
             usage = round_result.usage
             if usage:
@@ -274,8 +271,6 @@ async def react_loop(
                     outcome,
                     final_content=final_content,
                     controller=controller,
-                    profile=profile,
-                    active_model=active_model,
                     annotate_citations=annotate_citations,
                     citation_sink=citation_sink,
                     finish_guard_reworks=finish_guard_reworks,
@@ -397,13 +392,14 @@ async def react_loop(
                         )
                     )
                 elif fr is FinishReason.DEGRADED:
-                    err_ctx: dict | None = None
-                    if outcome.empty_diagnosis or outcome.empty_raw_preview:
-                        err_ctx = {}
-                        if outcome.empty_diagnosis:
-                            err_ctx["empty_diagnosis"] = outcome.empty_diagnosis
-                        if outcome.empty_raw_preview:
-                            err_ctx["upstream_body_preview"] = outcome.empty_raw_preview
+                    # Only the diagnosis label rides the user-facing error. The raw
+                    # SSE tail stays in the backend log (llm.empty_response) for
+                    # diagnosis — it's noise in the bubble and leaked to the dev UI.
+                    err_ctx = (
+                        {"empty_diagnosis": outcome.empty_diagnosis}
+                        if outcome.empty_diagnosis
+                        else None
+                    )
                     sink.emit(
                         error_event(
                             ErrorCode.LLM_ERROR,
@@ -418,11 +414,20 @@ async def react_loop(
             case Finalize(reason=reason, finish_reason=fr):
                 if fr is not None and finish_override_sink is not None:
                     finish_override_sink.append(fr)
-                return await force_finalize(
+                (
+                    final_content,
+                    final_reasoning,
+                    total_usage,
+                    rounds,
+                    coordination,
+                ) = await force_finalize(
                     messages=messages,
                     llm=llm,
                     profile=profile,
                     active_model=active_model or base_model,
+                    tools=tools,
+                    allowed_tool_names=allowed_tool_names,
+                    disabled_tools=disabled_tools,
                     emit_content=emit_content,
                     emit_reasoning=emit_reasoning,
                     final_content=final_content,
@@ -432,9 +437,82 @@ async def react_loop(
                     reason=reason,
                     run_id=run_id,
                 )
-            case SwitchModel(model=model):
-                active_model = model
-                continue
+                if coordination is not None and coordination.kind == "coordination_tools":
+                    if coordination.content:
+                        final_content = join_segments(final_content, coordination.content)
+                    if coordination.reasoning:
+                        final_reasoning += coordination.reasoning
+                    tool_calls = prepare_blocking_ask_user_tool_calls(
+                        coordination.tool_calls or [],
+                        coordination.content or "",
+                    )
+                    messages.append(
+                        LLMMessage(
+                            role="assistant",
+                            content=coordination.content or None,
+                            tool_calls=tool_calls,
+                            reasoning_content=coordination.reasoning or None,
+                        )
+                    )
+                    tool_results, terminal, attempts = await execute_tools(
+                        tool_calls,
+                        tools,
+                        tool_context,
+                        sink,
+                        approval_gate=approval_gate,
+                        citation_sink=citation_sink,
+                        annotate_citations=annotate_citations,
+                        run_id=run_id,
+                    )
+                    messages.extend(tool_results)
+                    if terminal is not None:
+                        usage_meta = terminal.metadata or {}
+                        total_usage = total_usage + TokenUsage(
+                            input_tokens=usage_meta.get("input_tokens", 0),
+                            output_tokens=usage_meta.get("output_tokens", 0),
+                            reasoning_tokens=usage_meta.get("reasoning_tokens", 0),
+                            cache_hit_tokens=usage_meta.get("cache_hit_tokens", 0),
+                            cache_miss_tokens=usage_meta.get("cache_miss_tokens", 0),
+                        )
+                        if terminal.effect is ToolEffect.SUSPEND:
+                            if finish_override_sink is not None:
+                                finish_override_sink.append(FinishReason.PAUSED)
+                        return (
+                            join_segments(final_content, terminal.final_text or ""),
+                            final_reasoning,
+                            total_usage,
+                            rounds,
+                        )
+                    controller.record(attempts)
+                    if any(a.tool_name == "delegate" for a in attempts if a.tool_name):
+                        controller.mark_post_delegate()
+                    tool_defs = _resolve_tool_defs()
+                    breaker = apply_circuit_breaker(
+                        controller,
+                        messages=messages,
+                        run_id=run_id,
+                        round_idx=round_idx,
+                        disabled_tools=disabled_tools,
+                    )
+                    if breaker.refresh_tool_defs:
+                        tool_defs = _resolve_tool_defs()
+                    _ = govern_after_tools(
+                        outcome=RoundOutcome(
+                            content=coordination.content,
+                            reasoning=coordination.reasoning,
+                            usage=coordination.usage,
+                            tool_calls=coordination.tool_calls,
+                            tool_results=tool_results,
+                            attempts=attempts,
+                        ),
+                        controller=controller,
+                        messages=messages,
+                        round_idx=round_idx,
+                        run_id=run_id,
+                        breaker_message=breaker.message,
+                    )
+                    continue
+                return final_content, final_reasoning, total_usage, rounds
             case Rework():
                 final_content, finish_guard_reworks = apply_finish_guard_rework(
                     messages=messages,
@@ -452,11 +530,14 @@ async def react_loop(
                 continue
 
     logger.warning("engine.max_rounds_exhausted", rounds=profile.max_rounds)
-    return await force_finalize(
+    final_content, final_reasoning, total_usage, rounds, _coordination = await force_finalize(
         messages=messages,
         llm=llm,
         profile=profile,
         active_model=active_model or base_model,
+        tools=tools,
+        allowed_tool_names=allowed_tool_names,
+        disabled_tools=disabled_tools,
         emit_content=emit_content,
         emit_reasoning=emit_reasoning,
         final_content=final_content,
@@ -466,3 +547,4 @@ async def react_loop(
         reason="max_rounds",
         run_id=run_id,
     )
+    return final_content, final_reasoning, total_usage, rounds

@@ -17,9 +17,8 @@ What lives here (stateless):
   non-http(s), reserved hostnames, and any host that resolves to a
   private/loopback/link-local/reserved address (blocks cloud-metadata SSRF).
 
-The *stateful* per-host egress circuit breaker stays in
-``tools/builtin/web/_net`` (it is agent-runtime egress state, not generic infra)
-and re-exports the names above for backward compatibility.
+The *stateful* per-host egress circuit breaker lives in
+``tools/builtin/web/_net`` (agent-runtime egress state, not generic infra).
 """
 
 from __future__ import annotations
@@ -136,6 +135,8 @@ def describe_net_error(e: BaseException) -> str:
 # so both apply identical private-network protection with no drift.
 
 _BLOCKED_HOSTNAMES = {"localhost", "0.0.0.0", "metadata.google.internal"}
+# Clash/Mihomo 默认 fake-ip-range = 198.18.0.1/16；198.18.0.0/15 为 RFC 2544 保留段。
+_FAKE_IP_NET = ipaddress.ip_network("198.18.0.0/15")
 
 
 class URLBlock(Enum):
@@ -152,10 +153,48 @@ class URLBlock(Enum):
         "请确认链接拼写正确且可公网访问；若反复出现，可能是当前环境出网受限。"
     )
     PRIVATE_IP = "[ERROR] 链接解析到私有/保留地址，已按 SSRF 防护拦截"
+    PRIVATE_IP_FAKE_PROXY = (
+        "[ERROR] 链接解析到私有/保留地址，已按 SSRF 防护拦截。"
+        "疑似本机代理 fake-IP 模式（DNS 将域名应答为 198.18.x.x 占位 IP，Clash/Mihomo 默认行为）；"
+        "SSRF 拦截正确、非链接问题。处置：代理 DNS 改 redir-host 或关 fake-ip，"
+        "再跑 apps/server 下 `uv run python scripts/probe_egress.py` 复验。"
+    )
+
+
+PRIVATE_IP_BLOCKS = frozenset({URLBlock.PRIVATE_IP, URLBlock.PRIVATE_IP_FAKE_PROXY})
+
+
+def is_fake_ip_proxy_signature(ip: str) -> bool:
+    """True when ``ip`` is in the Clash/Mihomo fake-IP placeholder range (198.18/15)."""
+    try:
+        return ipaddress.ip_address(ip) in _FAKE_IP_NET
+    except ValueError:
+        return False
+
+
+def private_ip_block(*ips: str) -> URLBlock:
+    """Pick the SSRF private-IP refusal; append fake-IP proxy hint when the signature matches."""
+    if any(is_fake_ip_proxy_signature(ip) for ip in ips):
+        return URLBlock.PRIVATE_IP_FAKE_PROXY
+    return URLBlock.PRIVATE_IP
+
+
+def _fake_ip_proxy_allowed() -> bool:
+    """Whether Clash/Mihomo fake-IP placeholders (198.18/15) may be dialed."""
+    from agentcore.config import settings
+
+    return bool(settings.read_url_allow_fake_ip_proxy)
 
 
 def ip_is_safe(ip: str) -> bool:
-    """True only for globally-routable addresses (blocks private/metadata)."""
+    """True only for globally-routable addresses (blocks private/metadata).
+
+    When ``read_url_allow_fake_ip_proxy`` is on, 198.18.0.0/15 placeholders from
+    fake-IP DNS are treated as connectable — the local proxy routes them to the
+    real destination. True private/loopback/link-local addresses stay blocked.
+    """
+    if is_fake_ip_proxy_signature(ip) and _fake_ip_proxy_allowed():
+        return True
     try:
         addr = ipaddress.ip_address(ip)
     except ValueError:
@@ -204,7 +243,7 @@ async def classify_url(url: str) -> URLBlock | None:
 
         try:
             ipaddress.ip_address(hostname)
-            return None if ip_is_safe(hostname) else URLBlock.PRIVATE_IP
+            return None if ip_is_safe(hostname) else private_ip_block(hostname)
         except ValueError:
             pass  # 不是字面 IP，下面走 DNS 解析
 
@@ -215,7 +254,7 @@ async def classify_url(url: str) -> URLBlock | None:
         if not addrs:
             return URLBlock.DNS_FAIL
         if not all(ip_is_safe(a) for a in addrs):
-            return URLBlock.PRIVATE_IP
+            return private_ip_block(*addrs)
         return None
     except Exception:
         return URLBlock.DNS_FAIL
@@ -264,7 +303,7 @@ async def _resolve_pinned_ip(host: str, port: int, *, request: httpx.Request) ->
     if not addrs:
         raise PinnedAddressError(URLBlock.DNS_FAIL.value, request=request)
     if not all(ip_is_safe(a) for a in addrs):
-        raise PinnedAddressError(URLBlock.PRIVATE_IP.value, request=request)
+        raise PinnedAddressError(private_ip_block(*addrs).value, request=request)
     return addrs[0]
 
 
@@ -301,7 +340,7 @@ class PinnedIPTransport(httpx.AsyncBaseTransport):
         if literal is not None:
             # No DNS step to race; just enforce the same private/reserved policy.
             if not ip_is_safe(literal):
-                raise PinnedAddressError(URLBlock.PRIVATE_IP.value, request=request)
+                raise PinnedAddressError(private_ip_block(literal).value, request=request)
             return await self._inner.handle_async_request(request)
 
         port = request.url.port or (443 if request.url.scheme == "https" else 80)
@@ -329,11 +368,14 @@ __all__ = [
     "EgressError",
     "PinnedAddressError",
     "PinnedIPTransport",
+    "PRIVATE_IP_BLOCKS",
     "URLBlock",
     "classify_url",
     "describe_net_error",
     "ip_is_safe",
+    "is_fake_ip_proxy_signature",
     "is_safe_url",
+    "private_ip_block",
     "site_of",
     "web_timeout",
 ]

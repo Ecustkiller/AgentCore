@@ -40,7 +40,7 @@ from agentcore.runtime.runs.types import RunKind
 
 logger = get_logger(__name__)
 
-# The single LLM provider today (llm.mdc). Surfaced as the OTel ``gen_ai.system``
+# The single LLM provider today (see 平台LLM接入). Surfaced as the OTel ``gen_ai.system``
 # attribute so an OTLP exporter needs no extra lookup; a second provider (远期规划
 # §2.2) would set this per-run from the model when that lands.
 _GEN_AI_SYSTEM = "deepseek"

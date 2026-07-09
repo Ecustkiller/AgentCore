@@ -169,7 +169,7 @@ def debater_task(
         "round": round_no,
     }
     # 真·多模型辩手（Phase 3）：side.model 仍解析入库，但 MVP 全链路统一用户 model，
-    # per-side override 在 debater_task 中忽略（开放主流AI模型接入 §4.7）。
+    # per-side override 在 debater_task 中忽略（见 辩论编排设计.md §7.5）。
     # if side.model:
     #     payload["model"] = side.model
     # stance 仅正反 2 方有意义（builder 只认 pro/con，display-only）。

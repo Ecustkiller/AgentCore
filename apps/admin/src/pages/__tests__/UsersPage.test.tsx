@@ -70,7 +70,6 @@ function userItem(
     role: "user",
     status: "active",
     deleted_at: null,
-    default_model_mode: null,
     is_unlimited: false,
     quota_daily_tokens: null,
     quota_daily_requests: null,

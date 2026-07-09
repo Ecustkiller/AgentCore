@@ -121,6 +121,8 @@ interface UIState {
   searchOpen: boolean;
   /** Prefill for the next palette open; consumed on open. */
   searchInitialQuery: string;
+  /** Open directly in the bookmarks facet (命令面板「已收藏」); consumed on open. */
+  searchInitialBookmarks: boolean;
   theme: Theme;
   /** 开发者 / 诊断模式 (前端UX设计.md §十). When true, low-level execution
    * diagnostics (run / trace ids 等) surface in run detail + the bubble's trace-id
@@ -161,7 +163,7 @@ interface UIState {
    * `localStorage: agentcore:sidecar-enabled`；设置开关只关心 {@link sidecarEnabled}。 */
   sidecarPreference: SidecarPreference;
 
-  openSearch: (initialQuery?: string) => void;
+  openSearch: (initialQuery?: string, opts?: { bookmarks?: boolean }) => void;
   closeSearch: () => void;
   toggleSearch: () => void;
   setTheme: (theme: UIState["theme"]) => void;
@@ -189,6 +191,7 @@ export type CanvasFocusView = "compare";
 export const useUIStore = create<UIState>((set) => ({
   searchOpen: false,
   searchInitialQuery: "",
+  searchInitialBookmarks: false,
   theme: loadTheme(),
   diagnosticMode: loadDiagnosticMode(),
   conversationViews: loadConversationViews(),
@@ -197,9 +200,18 @@ export const useUIStore = create<UIState>((set) => ({
   sidecarPreference: loadSidecarPreference(),
   sidecarEnabled: loadSidecarEnabled(),
 
-  openSearch: (initialQuery = "") =>
-    set({ searchOpen: true, searchInitialQuery: initialQuery }),
-  closeSearch: () => set({ searchOpen: false, searchInitialQuery: "" }),
+  openSearch: (initialQuery = "", opts) =>
+    set({
+      searchOpen: true,
+      searchInitialQuery: initialQuery,
+      searchInitialBookmarks: opts?.bookmarks ?? false,
+    }),
+  closeSearch: () =>
+    set({
+      searchOpen: false,
+      searchInitialQuery: "",
+      searchInitialBookmarks: false,
+    }),
   toggleSearch: () => set((s) => ({ searchOpen: !s.searchOpen })),
   setTheme: (theme) => {
     persistTheme(theme);

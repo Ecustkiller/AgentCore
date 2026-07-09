@@ -226,7 +226,16 @@ def _flat_plan(
     """Single / parallel batch (no deps). Invalid items (missing role or task)
     or an over-cap batch reject the whole plan."""
     if len(tasks_raw) > max_tasks:
-        return RunPlan(), [f"任务数 {len(tasks_raw)} 超过上限 {max_tasks}"]
+        # 拒绝整批时把「怎么分」算好回给 CEO：无依赖批纯按数量装箱，指明本次传前 max_tasks
+        # 个、其余下次 delegate 再传，让重来那一轮照做即可、不必重想编排（见 trace 4d715ea0：
+        # CEO 首轮派 18 撞上限后要整轮重规划才拆两批）。
+        overflow = len(tasks_raw) - max_tasks
+        batches = (len(tasks_raw) + max_tasks - 1) // max_tasks
+        return RunPlan(), [
+            f"任务数 {len(tasks_raw)} 超过单次委派上限 {max_tasks}。这些任务互相独立，"
+            f"分 {batches} 次 delegate 调用完成：本次只传前 {max_tasks} 个，"
+            f"其余 {overflow} 个在下一次 delegate 调用里传。"
+        ]
     errors: list[str] = []
     for i, item in enumerate(tasks_raw):
         role = item.get("role")
@@ -268,7 +277,14 @@ def _dag_plan(
     """DAG batch (has deps). Per-run validation collects errors; topology
     (cycle / unknown edge) is checked via ``RunPlan.waves``."""
     if len(tasks_raw) > max_tasks:
-        return RunPlan(), [f"任务数 {len(tasks_raw)} 超过上限 {max_tasks}"]
+        # 有依赖批不能按数量硬切（会拆断依赖链），给依赖感知的分批指引：独立子团队拆到不同次
+        # 调用、有依赖的留同一次或用 depends_on 跨批衔接，让 CEO 重来那轮一次到位。
+        return RunPlan(), [
+            f"任务数 {len(tasks_raw)} 超过单次委派上限 {max_tasks}。分多次 delegate 调用："
+            f"把互相独立的子团队（彼此无 depends_on）拆到不同次调用、每次 ≤{max_tasks}；"
+            f"有依赖的任务留在同一次调用内，或让后一次调用用 depends_on 衔接前一批已产出的节点。"
+            f"本次只传 ≤{max_tasks} 个。"
+        ]
     errors: list[str] = []
     seen_ids: set[str] = set()
     for i, item in enumerate(tasks_raw):
@@ -385,15 +401,11 @@ def _inline_spec(
     )
 
 
-def _parse_can_delegate(raw: Any) -> bool | str:
-    """Normalise a task's ``can_delegate`` knob → ``False``, ``True``, or ``"auto"``."""
-    if raw == "auto":
-        return "auto"
-    if raw is True:
-        return True
+def _parse_can_delegate(raw: Any) -> bool:
+    """Normalise a task's ``can_delegate`` knob → ``False`` or ``True`` (default on)."""
     if raw is False:
         return False
-    return False
+    return True
 
 
 def _tools(declared: Any, valid_tools: set[str] | None) -> list[str] | None:
@@ -448,11 +460,11 @@ def _sibling_summary(group: list[RunSpec], me: RunSpec) -> str:
     """Fan-out awareness body for ``me``: one bullet per *other* node in its
     fan-out group, carrying enough for a peer to draw its own boundary —
 
-      ``- {role}：{scope}（预期产出：{expected_output}）``
+      ``- {role}：{scope}（预期产出：{deliverable.name}）``
 
     ``scope`` is the sibling's ``objective`` (its declared 责任/负责的部分) when the
     CEO set one, else the ``task`` instruction (always present) so a peer is never
-    blank; ``expected_output`` (its declared 产出) is appended only when given. This
+    blank; ``deliverable.name`` (its declared 产出) is appended only when given. This
     enriches the bare role+task list so parallel peers see *who owns what* and *what
     each will hand back* — and can avoid both overlapping the same ground and leaving
     a seam uncovered. Excerpts are capped (:func:`_excerpt`). Assumes
@@ -492,32 +504,19 @@ def _dag_policy(item: dict[str, Any]) -> RunPolicy:
 
 
 def _parse_deliverable(item: dict[str, Any]) -> Deliverable | None:
-    """Parse a task's deliverable, compatible with legacy ``expected_output`` / ``contract`` keys.
+    """Parse a task's ``deliverable`` object into a :class:`Deliverable`.
 
     Returns None when no name and no enforceable rule is declared — the executor still
     enforces the non-empty baseline regardless. Invalid knob values are dropped (mirroring
     the lenient tier/effort handling)."""
+    raw = item.get("deliverable")
+    if not isinstance(raw, dict):
+        return None
     name = ""
-    expected = item.get("expected_output")
-    if isinstance(expected, str) and expected.strip():
-        name = expected.strip()
-
-    source: dict[str, Any] | None = None
-    raw_deliverable = item.get("deliverable")
-    if isinstance(raw_deliverable, dict):
-        source = raw_deliverable
-    elif isinstance(item.get("contract"), dict):
-        source = item.get("contract")
-
-    if source:
-        if isinstance(source.get("name"), str) and source["name"].strip():
-            name = source["name"].strip()
-        deliverable = _deliverable_from_dict(source, name=name)
-        return deliverable if _deliverable_has_content(deliverable) else None
-
-    if name:
-        return Deliverable(name=name)
-    return None
+    if isinstance(raw.get("name"), str) and raw["name"].strip():
+        name = raw["name"].strip()
+    deliverable = _deliverable_from_dict(raw, name=name)
+    return deliverable if _deliverable_has_content(deliverable) else None
 
 
 def _deliverable_from_dict(raw: dict[str, Any], *, name: str = "") -> Deliverable:

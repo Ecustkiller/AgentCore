@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
+import tomllib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentcore.workspace.protocol import WorkspaceBackend
+
+_PROFILE_MAX_COMMANDS = 5
 
 
 @dataclass(frozen=True)
@@ -19,7 +23,57 @@ class ProjectProfile:
     branch: str | None = None
     test_commands: list[str] = field(default_factory=list)
     build_commands: list[str] = field(default_factory=list)
+    run_commands: list[str] = field(default_factory=list)
     agents_md_excerpt: str | None = None
+
+
+def _js_package_manager(content: str) -> str:
+    if '"packageManager"' in content and "pnpm" in content:
+        return "pnpm"
+    if '"packageManager"' in content and "yarn" in content:
+        return "yarn"
+    return "npm"
+
+
+def _format_js_run_command(pm: str, script: str) -> str:
+    if pm == "yarn":
+        return f"yarn {script}"
+    return f"{pm} run {script}"
+
+
+def _detect_js_run_commands(content: str, pm: str) -> list[str]:
+    try:
+        data = json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    scripts = data.get("scripts")
+    if not isinstance(scripts, dict):
+        return []
+    commands: list[str] = []
+    for name in ("start", "dev"):
+        if name in scripts:
+            commands.append(_format_js_run_command(pm, name))
+    return commands
+
+
+def _parse_toml(content: str) -> dict:
+    try:
+        return tomllib.loads(content)
+    except TypeError:
+        return tomllib.loads(content.encode())
+
+
+def _detect_python_run_command(content: str, package_managers: list[str]) -> str | None:
+    try:
+        data = _parse_toml(content)
+    except tomllib.TOMLDecodeError:
+        return None
+    scripts = data.get("project", {}).get("scripts")
+    if not isinstance(scripts, dict) or not scripts:
+        return None
+    first_name = next(iter(scripts))
+    pm = "uv" if "uv" in package_managers else "pip"
+    return f"{pm} run {first_name}"
 
 
 async def detect_project_profile(backend: WorkspaceBackend) -> ProjectProfile:
@@ -32,6 +86,7 @@ async def detect_project_profile(backend: WorkspaceBackend) -> ProjectProfile:
     branch: str | None = None
     test_commands: list[str] = []
     build_commands: list[str] = []
+    run_commands: list[str] = []
     agents_md_excerpt: str | None = None
 
     try:
@@ -50,6 +105,9 @@ async def detect_project_profile(backend: WorkspaceBackend) -> ProjectProfile:
                 package_managers.append("pip")
             if "pytest" in content:
                 test_commands.append("pytest")
+            py_run = _detect_python_run_command(content, package_managers)
+            if py_run:
+                run_commands.append(py_run)
     except Exception:
         pass
 
@@ -69,22 +127,13 @@ async def detect_project_profile(backend: WorkspaceBackend) -> ProjectProfile:
                     languages.append("typescript")
                 else:
                     languages.append("javascript")
-            if '"react"' in content:
-                frameworks.append("react")
-            if '"next"' in content:
-                frameworks.append("next.js")
-            if '"vue"' in content:
-                frameworks.append("vue")
-            if '"packageManager"' in content and "pnpm" in content:
-                package_managers.append("pnpm")
-            elif '"packageManager"' in content and "yarn" in content:
-                package_managers.append("yarn")
-            else:
-                package_managers.append("npm")
+            pm = _js_package_manager(content)
+            package_managers.append(pm)
             if '"test"' in content:
                 test_commands.append("npm test")
             if '"build"' in content:
                 build_commands.append("npm run build")
+            run_commands.extend(_detect_js_run_commands(content, pm))
     except Exception:
         pass
 
@@ -137,6 +186,7 @@ async def detect_project_profile(backend: WorkspaceBackend) -> ProjectProfile:
         branch=branch,
         test_commands=test_commands,
         build_commands=build_commands,
+        run_commands=run_commands,
         agents_md_excerpt=agents_md_excerpt,
     )
 
@@ -167,9 +217,10 @@ def render_project_profile(profile: ProjectProfile) -> str:
             vcs_str += f"（分支 {profile.branch}）"
         parts.append(f"版本控制：{vcs_str}")
 
-    commands = profile.test_commands + profile.build_commands
+    commands = profile.test_commands + profile.build_commands + profile.run_commands
     if commands:
-        parts.append(f"常用命令：{' · '.join(commands)}")
+        shown = commands[:_PROFILE_MAX_COMMANDS]
+        parts.append(f"常用命令：{' · '.join(shown)}")
 
     result = "\n".join(f"- {p}" for p in parts)
 

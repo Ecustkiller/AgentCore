@@ -2,6 +2,7 @@ import type {
   DebateNarrativeRound,
   DebateResultPayload,
   RunPlanPayload,
+  ToolUseProgressPayload,
 } from "@/types/events";
 import { create } from "zustand";
 import {
@@ -42,6 +43,9 @@ export interface ExecutionRuntime {
    * 此，{@link projectExecution} 透传到 {@link Execution.debateDecisions}。`[]` = 非交互辩论 /
    * 无决策事件（含重载，事件 transport-only 不进 journal）。 */
   debateDecisions: DebateRoundDecision[];
+  /** Worker-scoped `tool_use_progress` (run_id present), keyed by run id. Transport-only —
+   * merged onto agents at projection time; never journaled or replayed. */
+  workerToolPhases: Record<string, { phase: string; toolName: string }>;
 }
 
 /**
@@ -86,6 +90,14 @@ interface ExecutionState {
     update: DebateDecisionUpdate,
     messageId: string,
   ) => void;
+  /** Stamp a delegated worker's running-tool EXECUTION phase (`tool_use_progress` with
+   * `run_id`). Transport-only — not a frame. */
+  setWorkerToolPhase: (
+    payload: ToolUseProgressPayload,
+    messageId: string,
+  ) => void;
+  /** Clear a worker's live EXECUTION phase when its tool finishes (`tool_use_end`). */
+  clearWorkerToolPhase: (runId: string, messageId: string) => void;
   setStatus: (status: ExecutionStatus, messageId: string) => void;
   setPlayhead: (index: number | null, messageId: string) => void;
   goLive: (messageId: string) => void;
@@ -107,6 +119,7 @@ const EMPTY_EXEC: ExecutionRuntime = {
   debate: null,
   debateRounds: [],
   debateDecisions: [],
+  workerToolPhases: {},
 };
 
 /** Map a persisted turn's `finish_reason` to the terminal execution status the
@@ -159,6 +172,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         debate: null,
         debateRounds: [],
         debateDecisions: [],
+        workerToolPhases: {},
       })),
 
     ingestPlan: (plan, messageId) => {
@@ -212,6 +226,26 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
           : null,
       ),
 
+    setWorkerToolPhase: (payload, messageId) => {
+      if (!payload.run_id) return;
+      patchExec(messageId, (cur) => ({
+        workerToolPhases: {
+          ...cur.workerToolPhases,
+          [payload.run_id!]: {
+            phase: payload.phase,
+            toolName: payload.tool_name,
+          },
+        },
+      }));
+    },
+
+    clearWorkerToolPhase: (runId, messageId) =>
+      patchExec(messageId, (cur) => {
+        if (!cur.workerToolPhases[runId]) return null;
+        const { [runId]: _, ...rest } = cur.workerToolPhases;
+        return { workerToolPhases: rest };
+      }),
+
     setStatus: (status, messageId) => patchExec(messageId, () => ({ status })),
 
     setPlayhead: (index, messageId) =>
@@ -253,6 +287,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               debateRounds: [],
               // 交互式逐轮决策卡同为 transport-only：重载恒空（决策已体现在收场叙事 / 轮次）。
               debateDecisions: [],
+              workerToolPhases: {},
             },
           },
         };

@@ -57,6 +57,27 @@ def _format_numbered_lines(lines: list[str], start_line: int) -> str:
     )
 
 
+# 写类工具「回显结果」：worker 写 / 追加 / 替换后，常会为「确认写对没」再花一整轮 read 回读自检
+# （trace 4d715ea0 实测：8 个 append worker 全是 读→追加→回读→handoff，那一轮回读零信息增量）。
+# 行业实践是让写类工具直接把「改动后的结果」回显进回执（Aider / Cursor / Claude Code 均回 diff /
+# 结果片段），使验证在同一轮内完成、免掉那一轮回读。回显有界（行数 + 字符双上限），大文件不炸 token。
+_APPEND_ECHO_LINES = 12
+_APPEND_ECHO_CHARS = 600
+_EDIT_ECHO_CONTEXT = 3
+_EDIT_ECHO_MAX_LINES = 24
+
+
+def _tail_preview(content: str, *, max_lines: int, max_chars: int) -> str:
+    """Last ``max_lines`` lines of ``content``, capped at ``max_chars`` (kept from the tail)."""
+    lines = content.splitlines()
+    tail = "\n".join(lines[-max_lines:])
+    elided = len(lines) > max_lines
+    if len(tail) > max_chars:
+        tail = tail[-max_chars:]
+        elided = True
+    return ("…\n" if elided else "") + tail
+
+
 class _TreeNode:
     __slots__ = ("children", "is_dir", "name")
 
@@ -309,7 +330,12 @@ class FileWriteTool:
         return ToolResult(
             tool_call_id="",
             success=True,
-            output=f"已写入 {written} 字节到 {rel_path}",
+            # file_write 是整体写入，内容就是你本次提交的全文 → 无需回显（模型已持有），只在回执里
+            # 点明「已落盘、无需回读」即可（见本模块顶部说明）。
+            output=(
+                f"已写入 {written} 字节到 {rel_path}"
+                "（内容即你本次提交的全文，已落盘，无需再读回确认）"
+            ),
             duration_ms=int((time.monotonic() - start) * 1000),
         )
 
@@ -395,7 +421,16 @@ class FileAppendTool:
         return ToolResult(
             tool_call_id="",
             success=True,
-            output=f"已追加 {appended} 字节到 {rel_path}",
+            # 回显合并后的文件末尾：append 只写增量、模型上下文里没有合并后的全文，故把「文件当前
+            # 末尾」当场给它，免得它为「看看追加落对没」再花一轮 read 回读（见本模块顶部说明）。
+            output=(
+                f"已追加 {appended} 字节到 {rel_path}（已落盘，无需再读回确认）。文件当前末尾：\n"
+                + _tail_preview(
+                    await context.backend.read(rel_path),
+                    max_lines=_APPEND_ECHO_LINES,
+                    max_chars=_APPEND_ECHO_CHARS,
+                )
+            ),
             duration_ms=int((time.monotonic() - start) * 1000),
         )
 
@@ -563,10 +598,25 @@ class StrReplaceTool:
             return _error(f"写入文件失败：{e}", start)
 
         loc = "" if outcome.first_line is None else f"（约第 {outcome.first_line} 行）"
+        # 回显改动落点的上下文（所改即所见），免得 worker 为「确认替换落对没」再花一轮 read 回读
+        # （见本模块顶部说明）。有界：落点前后各 _EDIT_ECHO_CONTEXT 行 + 新增行数，封顶 MAX_LINES。
+        echo = ""
+        if outcome.first_line is not None:
+            region = await context.backend.read_lines(
+                rel_path,
+                offset=max(1, outcome.first_line - _EDIT_ECHO_CONTEXT),
+                limit=min(
+                    _EDIT_ECHO_CONTEXT * 2 + 1 + new_string.count("\n"),
+                    _EDIT_ECHO_MAX_LINES,
+                ),
+            )
+            echo = "。改动落点（已落盘，无需再读回确认）：\n" + _format_numbered_lines(
+                region.lines, region.start_line
+            )
         return ToolResult(
             tool_call_id="",
             success=True,
-            output=f"已在 {rel_path} 替换 {outcome.count} 处{loc}",
+            output=f"已在 {rel_path} 替换 {outcome.count} 处{loc}{echo}",
             duration_ms=int((time.monotonic() - start) * 1000),
             metadata={"replacements": outcome.count},
         )

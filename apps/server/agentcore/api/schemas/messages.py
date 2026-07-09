@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from agentcore.api.schemas.usage import UsageBreakdown
-from agentcore.runtime.approvals import ApprovalDecision
+from agentcore.runtime.approvals import ApprovalDecision, DelegationAuthorizationDecision
 from agentcore.runtime.checkpoints import AskCheckpointIntent, CheckpointDecision
 from agentcore.runtime.suspension import SuspensionKind
 
@@ -37,8 +37,8 @@ class StoredAttachment(BaseModel):
 
     ``workspace_path`` is set when the attachment was written into the durable
     project space (附件驻留): a workspace-relative path under ``attachments/`` that
-    the file-download API can serve. ``None`` for directory listings (nothing is
-    written to disk) and for legacy rows created before residency.
+    the file-download API can serve. ``None`` for directory / conversation chips
+    (nothing is written as a workspace file).
     """
 
     name: str
@@ -50,11 +50,11 @@ class StoredAttachment(BaseModel):
     # stored chip can label it and (later) jump back to that conversation.
     conversation_id: str | None = None
     # Byte size of the stored file, surfaced for IM file chips (Stage 4 富消息).
-    # None for directory listings and legacy rows created before sizing.
+    # None for directory / conversation chips (no single stored blob).
     size_bytes: int | None = None
     # Workspace-relative path to a generated WebP thumbnail for an image
     # attachment (Stage 4 富消息); the bubble inlines this instead of the full
-    # original. None for non-images / small images / files / legacy rows.
+    # original. None when no thumbnail was generated.
     thumb_path: str | None = None
 
 
@@ -167,6 +167,19 @@ class WorkspaceOpError(BaseModel):
     count: int | None = None
 
 
+class ResolveDelegationAuthorizationInteraction(BaseModel):
+    """Settle a paused per-delegation authorization (``delegation_authorization``).
+
+    Raised before workers start so the user can grant medium-risk tools for the
+    whole delegation in one click. ``grant_delegation`` whitelists code_execute +
+    file-mutation tools for this delegation; ``per_call`` keeps per-call approval;
+    ``deny`` refuses to start workers.
+    """
+
+    kind: Literal["delegation_authorization"] = "delegation_authorization"
+    decision: DelegationAuthorizationDecision
+
+
 class ResolveClientToolInteraction(BaseModel):
     """Deliver a bound desktop's result for a paused local-workspace op (``client_tool``).
 
@@ -230,6 +243,7 @@ class ResolveDebateRoundInteraction(BaseModel):
 # Discriminated union body for the unified resolve endpoint.
 ResolveInteractionRequest = (
     ResolveApprovalInteraction
+    | ResolveDelegationAuthorizationInteraction
     | ResolveClientToolInteraction
     | ResolveEscalationInteraction
     | ResolveDebateRoundInteraction
@@ -253,6 +267,8 @@ def interaction_result_from_body(body: ResolveInteractionRequest) -> Any:
     identically — one construction point, no drift between cloud and local.
     """
     if isinstance(body, ResolveApprovalInteraction):
+        return body.decision
+    if isinstance(body, ResolveDelegationAuthorizationInteraction):
         return body.decision
     if isinstance(body, ResolveClientToolInteraction):
         return {
@@ -291,6 +307,32 @@ class SubmitRunRedirectRequest(BaseModel):
 class SubmitRunRedirectResponse(BaseModel):
     ok: bool = True
     queued: int = Field(..., description="Pending redirect count for this execution after enqueue.")
+
+
+class AcceptRunOutcomeRequest(BaseModel):
+    """User explicitly accepts a run's terminal outcome that could not be auto-recovered
+    (跑一半改方向 Step 4 · 忽略路径收口).
+
+    Two triggers, both surfaced in the run detail from the audit trail: a
+    ``deterministic_failure`` (a non-retryable upstream failure — 重试徒劳) or a
+    ``redirect_ignored`` (a「立即改此人」steer that arrived too late to apply mid-run). Recording
+    the acceptance (后端记录) replaces the old frontend-only ``clearExecution`` so the
+    delegated-turn audit trail carries「用户主动接受此结果」. Idempotent per (turn, run).
+    """
+
+    run_id: str = Field(..., min_length=1, max_length=128)
+    reason: Literal["deterministic_failure", "redirect_ignored"]
+    execution_id: str | None = Field(default=None, max_length=128)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class AcceptRunOutcomeResponse(BaseModel):
+    ok: bool = True
+    recorded: bool = Field(
+        ...,
+        description="True if newly recorded; False if already accepted (idempotent no-op).",
+    )
+    action: str = "run.outcome_accepted"
 
 
 class ResumeTurnRequest(BaseModel):
@@ -440,6 +482,21 @@ class RunsPayload(BaseModel):
     error: RunError | None = None
 
 
+class TurnCollabMetrics(BaseModel):
+    """Per-turn orchestration signals (学·度量 §2.5) — the user-facing slice of turn_metrics.
+
+    Persisted in the assistant row's ``usage`` JSON column (nested under ``collab``) and
+    replayed on reload; live, they ride ``message_end``. Orchestration counts surface in
+    the assistant footer for all users; ``audit_drops`` is 诊断模式-only (采集降级).
+    """
+
+    boundary_yields: int = 0
+    scope_signals: int = 0
+    revises: int = 0
+    escalations: int = 0
+    audit_drops: int = 0
+
+
 class MessageDetail(BaseModel):
     id: str
     conversation_id: str
@@ -468,6 +525,9 @@ class MessageDetail(BaseModel):
     # errored / empty turn that spent no tokens — parity with the live bubble's omission).
     usage: UsageBreakdown | None = None
     rounds: int | None = None
+    # 协作质量 (学·度量 §2.5, 诊断模式): orchestration signals nested in the usage column;
+    # projected on read like ``rounds``. null for single-agent / pre-feature rows.
+    collab: TurnCollabMetrics | None = None
     # 回复反馈 (点赞/点踩, 对话基础功能补齐): the user's satisfaction signal on this assistant
     # reply — "up" | "down" | null(未评价). Auto-populated from the ORM attribute via
     # from_attributes so a reloaded bubble replays the user's rating. null for user rows.

@@ -43,7 +43,20 @@ async def _seed_audit_rows(session_factory, *, user_id: str, conversation_id: st
                 "payload": {
                     "run_id": plan.nodes[1].run_id,
                     "execution_id": "exec-p2",
-                    "source_run_ids": [plan.nodes[0].run_id],
+                    "agent_id": plan.nodes[1].agent_id,
+                    "blocks": [
+                        {
+                            "channel": "dependency",
+                            "heading": "前置结果",
+                            "body": "upstream output",
+                            "chars": 15,
+                            "truncated": False,
+                            "source_role": "研究员",
+                            "source_run_id": plan.nodes[0].run_id,
+                            "fidelity": "pass_through",
+                            "files": [],
+                        }
+                    ],
                 },
             }
         )

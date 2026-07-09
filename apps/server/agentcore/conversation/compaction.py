@@ -19,7 +19,7 @@ Design (mirrors the offline memory consolidation pattern):
   across several passes until it catches up.
 - **Cache** — the summary is computed ONCE and persisted, then reused verbatim across
   turns. Recomputing it every turn would rewrite the prompt prefix and bust DeepSeek's
-  exact-prefix cache (runtime/prompt.py) — the one thing this must never do.
+  exact-prefix cache (runtime/resolve/prompt.py) — the one thing this must never do.
 
 Robust by construction: a per-user BYOK key is resolved like consolidation, the pass
 is gated so a trivial fold never spends an LLM call, and ANY failure (LLM down,

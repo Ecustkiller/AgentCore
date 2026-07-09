@@ -1,4 +1,5 @@
 import { IconButton } from "@/components/ui";
+import { hasAgentTownLauncher } from "@/lib/capabilities";
 import { disconnectSimulationStream } from "@/services/simulation/stream";
 import { SimulationRunManager } from "@/simulation/SimulationRunManager";
 import { SimulationSidePanel } from "@/simulation/SimulationSidePanel";
@@ -11,15 +12,28 @@ import {
   TOWN_AGENT_NAMES,
   type TownAgentId,
 } from "@/simulation/town/townRoster";
+import { TownLauncherPage } from "@/pages/simulation/TownLauncherPage";
 import { ArrowLeft, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 /**
- * M1 town simulation — fullscreen immersive 3D canvas with floating overlays.
+ * M1 town simulation — AgentTown launcher (DT-01) or frozen R3F preview (?preview=1).
  */
 export function TownSimulationPage() {
   const location = useLocation();
+  const previewMode = isTownPreviewMode(location.search);
+  const launcherMode = hasAgentTownLauncher() && !previewMode;
+
+  if (launcherMode) {
+    return <TownLauncherPage />;
+  }
+
+  return <TownR3FPreviewPage location={location} />;
+}
+
+/** Frozen R3F reference — offline preview / shoot only. */
+function TownR3FPreviewPage({ location }: { location: ReturnType<typeof useLocation> }) {
   const run = useSimulationUiStore((s) => s.run);
   const trackedAgentId = useSimulationUiStore((s) => s.trackedAgentId);
   const agents = useSimulationUiStore((s) => s.agents);

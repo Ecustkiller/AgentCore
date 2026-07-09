@@ -58,6 +58,7 @@ function agentFromPlan(plan: ExecutionPlan, id: string): AgentState | null {
     reasoningChunks: [],
     toolCalls: [],
     toolProgress: null,
+    toolExecutionLive: null,
   };
 }
 
@@ -166,6 +167,7 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
             reasoningChunks: [],
             toolCalls: [],
             toolProgress: null,
+            toolExecutionLive: null,
           });
           run = {
             id: f.runId,
@@ -184,13 +186,10 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
             model: null,
             usage: null,
             cost: null,
-            // 乙 wire 携 round/stance (单一轮次投影): a debate 续写 keeps its debater
-            // identity (stance/group) + its TRUE round, so debateGroups / debateLiveRounds
-            // bucket 第几轮/哪一方 off ONE field. New journals carry them on the frame; a
-            // legacy journal falls back to the original's stance/group + revision-as-round.
-            stance: f.stance ?? original.stance,
-            group: f.group ?? original.group,
-            round: f.round || f.revision,
+            // 乙 wire 携 round/stance (单一轮次投影): debate 续写从 frame wire 读取。
+            stance: f.stance ?? null,
+            group: f.group ?? null,
+            round: f.round ?? 0,
             revisionOf: f.parentRunId,
             revision: f.revision,
             revised: null,

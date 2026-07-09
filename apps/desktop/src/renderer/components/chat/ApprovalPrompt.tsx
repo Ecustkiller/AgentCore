@@ -14,6 +14,7 @@ import {
   supportsTurnGrant,
 } from "@/services/approvals";
 import { type PendingApproval, useApprovalStore } from "@/stores/approvals";
+import { useDelegationAuthStore } from "@/stores/delegationAuth";
 import { useConversationStore } from "@/stores/conversation";
 import type { ApprovalDecision } from "@/types/events";
 import {
@@ -37,6 +38,7 @@ const TOOL_LABELS: Record<string, string> = {
   file_delete: "删除文件",
   file_move: "移动文件",
   code_execute: "执行代码",
+  desktop_notify: "系统通知",
 };
 
 const HIGHLIGHT_PLUGINS: ComponentPropsWithoutRef<
@@ -55,7 +57,7 @@ function primaryArg(
     const purpose = args.purpose;
     if (typeof purpose === "string" && purpose.trim()) return purpose.trim();
   }
-  for (const key of ["path", "file_path", "command", "code"]) {
+  for (const key of ["path", "file_path", "command", "code", "title", "body"]) {
     const value = args[key];
     if (typeof value === "string" && value.trim()) return value.trim();
   }
@@ -65,7 +67,13 @@ function primaryArg(
 export function ApprovalPrompt() {
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const pending = useApprovalStore((s) => s.pending);
-  const visible = pending.filter((p) => p.conversationId === conversationId);
+  const isToolGranted = useDelegationAuthStore((s) => s.isToolGranted);
+  const visible = pending.filter(
+    (p) =>
+      conversationId != null &&
+      p.conversationId === conversationId &&
+      !isToolGranted(conversationId, p.toolName),
+  );
   if (visible.length === 0) return null;
 
   return (

@@ -130,8 +130,7 @@ export function ReceivedContextSection({
  * 决策② retired here: the verbatim 系统提示 (channel `system`) block is shown to EVERYONE in
  * this dialog (no 用量明细 gating). Being on-demand removes the「信息过载」concern, and the
  * prompt was already user-openable — so this also folds the old standalone「提示词」button in
- * (its content == the `system` block). Renders nothing when the turn carried no context
- * (legacy turns with empty `captainContext`).
+ * (its content == the `system` block). Renders nothing when the turn carried no context.
  */
 /** Controlled dialog — trigger lives in {@link AssistantMessageFooter}「更多」菜单。 */
 export function ReceivedContextDialog({

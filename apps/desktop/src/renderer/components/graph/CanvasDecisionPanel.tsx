@@ -1,4 +1,5 @@
 import { ApprovalPrompt } from "@/components/chat/ApprovalPrompt";
+import { DelegationAuthorizationPrompt } from "@/components/chat/DelegationAuthorizationCard";
 import { BackgroundTaskCard } from "@/components/chat/BackgroundTaskCard";
 import { CheckpointCard } from "@/components/chat/CheckpointCard";
 import { EscalationCards } from "@/components/chat/EscalationCard";
@@ -70,7 +71,7 @@ import { useEffect, useMemo, useRef } from "react";
  * wait); counting a terminal turn's inline pending would double-count it against that resume.
  *
  * `includeDebate=false` excludes debate round boundaries — the 指挥台 passes this because debate
- * 掌舵 now lives canvas-native in the 群聊 room ({@link import("../chat/debate/DebateStream").DebateStream}
+ * 掌舵 now lives canvas-native in the 群聊 room ({@link import("../chat/debate/arena/DebateArena").DebateArena}
  * 的 SteeringBar), NOT in the dock; counting it there would pop an empty panel for a decision the
  * room already owns (群聊为唯一掌舵处, 前端UX设计.md §4.3). */
 export function countPendingDecisions(
@@ -299,6 +300,7 @@ export function CommandRegion({
           {/* Conversation-level decisions (self-contained: own store + active
               conversation). They bring their own mx-4 mb-2 gutter, so the turn-level
               cards below match with px-4 and the mb-2 supplies the inter-group gap. */}
+          <DelegationAuthorizationPrompt />
           <ApprovalPrompt />
           <ResumePrompt />
           {/* Turn-level: scoped to the focused turn's message + execution. */}

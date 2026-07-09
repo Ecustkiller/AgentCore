@@ -75,7 +75,7 @@ class SkillRegistry:
 
 
 # --- System Skill bodies (the HOW guidance, moved out of the always-on prompt) ---
-# Each was a CEO hint in runtime/prompt.py (P1); P2 externalises them so they ride
+# Each was a CEO hint in runtime/resolve/prompt.py (P1); P2 externalises them so they ride
 # the context only when the CEO consults them. Wording preserved so behavior is
 # unchanged — only the delivery (always-on → on-demand) differs.
 
@@ -88,18 +88,18 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 按需用好 `delegate` 的进阶档位（不必都填）：
 
 - 模型档位：范围清晰的简单子任务用 `model_preference="fast"` 省成本与时延；需深度推理\
-或更高质量的用 `strong`（默认）。极复杂子任务可再设 `reasoning_effort="max"` 解锁更深推理。
-- 质量契约：对产出有硬性要求（须含某些小标题 / 关键词、限定格式或字数）时用 `contract` \
+或更高质量的用 `strong`（默认）。`reasoning_effort`（high/max）当前 MVP 仅解析存储、不下发 LLM，\
+勿依赖其调节推理强度。
+- 质量契约：对产出有硬性要求（须含某些小标题 / 关键词、限定格式或字数）时用 `deliverable` \
 声明——未达标会带着具体差距自动返工一次；返工后仍不达标默认仅附质检提醒（软），\
-`contract.strict=true` 则判该 worker 失败（硬退）。用 `expected_output` 描述想要的产出形态。
-- 审查类任务的统一契约（派【审查 / 质检 / 评审】worker 时【必设 contract】）：无论并行扇出\
-还是 `depends_on` 链下游，每个审查官 task 都必须带 `contract` 锁定统一输出格式——否则各审查官\
+`deliverable.strict=true` 则判该 worker 失败（硬退）。`deliverable.name` 描述想要的产出形态。
+- 审查类任务的统一契约（派【审查 / 质检 / 评审】worker 时【必设 deliverable】）：无论并行扇出\
+还是 `depends_on` 链下游，每个审查官 task 都必须带 `deliverable` 锁定统一输出格式——否则各审查官\
 各说各的、打分维度各异，你收工时无法自动合并，`revise` 也无法字段级操作。推荐 JSON 模板\
-（多路并行时各审查官 contract 完全一致，只换 role 与审查侧重；在 task 里写明该官负责的维度\
+（多路并行时各审查官 deliverable 完全一致，只换 role 与审查侧重；在 task 里写明该官负责的维度\
 与打分锚点）：\
-`contract: { "output_format": "json" }`，\
-`expected_output: "JSON 对象，必含三顶层字段：problems（问题数组，每项含 severity/description/evidence）、\
-suggestions（修改建议数组）、score（0–10 整数，该维度打分）。只输出 JSON，不要附带说明文字。"`\
+`deliverable: { "output_format": "json", "name": "JSON 对象，必含三顶层字段：problems（问题数组，每项含 severity/description/evidence）、\
+suggestions（修改建议数组）、score（0–10 整数，该维度打分）。只输出 JSON，不要附带说明文字。" }`\
 纯文字备选：`required_sections: ["问题", "建议", "评分"]`（优先 JSON，便于机械合并）。审查是中间\
 产物、注入下游或供你汇总，不设 `requires_files`。
 - 依赖流水线：多阶段（设计 → 实现 → 审查）用【同一次 `delegate`】里的 `depends_on` 串成\
@@ -112,24 +112,32 @@ suggestions（修改建议数组）、score（0–10 整数，该维度打分）
 把这些调研依赖设 `summarize` 省 token；要保金额 / 法条编号 / 代码原样时才留 `pass_through`。\
 （注意：`result_handling` 只管【上游→下游】注入，不影响回到你手里的内容——后者由 task 措辞\
 决定，见下「广度调查」。）
-- 嵌套委派（lead 下放）：当某个区【又大又半独立、自身还有内部结构】（典型：前端 / 后端 / 数据，\
-每块自己都是多步的活）时，给它开 `can_delegate=true`、只交一个成果级目标，让这名 lead 上手后自己\
-拆自己那摊、边干边据证据调（它在自己子队上同样能 replan / 收口，和你在顶层一样）——这正治「开局\
-就得一次把整张计划猜死」。判据是【这个区够不够大、够不够自成一摊】、不是流水线长度；最多再嵌套\
-一层、其子成员不能继续委派。几个扁平的并行小活（如查三个不相干话题）别加 lead，那是纯开销。
+- 嵌套委派（lead 下放）：Worker 默认自带一层委派能力——你按【大模块】拆即可（典型：前端 / 后端 / \
+数据各交一个 worker），具体再细分由 lead 上手后自己判断，不必逐个决定是否开委派。若你【已经清楚】\
+细粒度拆法，直接在这一层拆细往往更高效（少一层 lead 整合往返），但不是硬性要求——不确定细拆时\
+交成果级目标让 lead 边干边据证据调也行（它在自己子队上同样能 replan / 收口，和你在顶层一样）。\
+判据是【这个区够不够大、够不够自成一摊】、不是流水线长度；最多再嵌套一层（单个 lead 最多带 \
+4 个 sub-worker）、其子成员不能继续委派。几个扁平的并行小活（如查三个不相干话题）直接一次 \
+`delegate` 扇出即可，别为它再套一层 lead——那是纯开销。
 - 轻量直出：当只派【一个】worker、且这次委派就是整件事的最终交付时，设 `finalize=true`：\
 该 worker 成功后其产出直接作为你的回复呈现，省掉一轮收尾。只在确定看到结果后无需再做\
 别的事时才用；只要可能要据结果继续委派、或一次派了多个 worker，就别设。
 - 交付物落盘：当产出是用户要【打开 / 运行 / 编辑 / 保存 / 复用】的实质交付物——可运行代码 / \
 网页 / 应用、脚本、配置，以及成篇的报告 / 分析稿 / 方案 / 文档（成篇文字交付写成 .md）——\
-给该 task 设 `contract.requires_files=true`：worker 未调用 file_write 落盘即判未达标、自动\
+给该 task 设 `deliverable.requires_files=true`：worker 未调用 file_write 落盘即判未达标、自动\
 返工，从结构上杜绝把整份内容粘在回复正文、工作区却空着。再在 task 里点明「产出物是文件，\
-请用文件工具写进工作区」、必要时用 `expected_output` 写清期望文件，双保险。只有【中间产物】\
+请用文件工具写进工作区」、必要时用 `deliverable.name` 写清期望文件，双保险。只有【中间产物】\
 （要注入下游 worker、并非最终交付）才留作文字、不设此契约。
+- 完成验收（`completion_criteria`）：用户要【安装 / 运行 / 打开软件、联调集成、跑通测试】才算交付的\
+任务——设 `completion_criteria=code_verified`，引擎校验 worker 是否用 `code_execute` / `test_run`\
+在工作区实际跑通；纯写文件 / 成篇文档 / 报告、只需阅读编辑不必启动进程的——`files_written`（常配合 \
+`deliverable.requires_files` 确保落盘）。别混用：能跑才算完的活别只验「写了文件」。
+- 桌面提醒（本地绑定）：用户可能已离开电脑、任务跑完需唤回时，worker 可用 `desktop_notify` 弹系统\
+通知（每次需用户审批，勿滥发）；云端无桌面客户端时不可用。
 - 约束 vs 方案（写 task 的根本分寸）：task 里交【需求与约束】——目标、硬指标、关键前提、\
 验收底线；交付物的【专业方案】——章节结构与论证脉络、代码的模块划分与架构、页面布局——留给\
 专家 worker 设计，那是你雇它的核心价值，除非用户已明确指定结构。别在 task 里替它把骨架列全，\
-也别拿 `contract.required_sections` 当结构蓝图——它只兜「必须覆盖的少数验收要点」，不是替专家\
+也别拿 `deliverable.required_sections` 当结构蓝图——它只兜「必须覆盖的少数验收要点」，不是替专家\
 规定完整章节。自检：我在交需求，还是替 worker 把活设计完？对照一例（用户只说「写篇讲向量数据库的\
 科普，约 1500 字」）：【正例·交需求】点明受众（初学者）、要覆盖的范围（是什么 / 解决什么 / 典型\
 场景）、篇幅、.md 落盘，分几节、如何展开留给 worker；【反例·替它设计完】把「第一节定义、第二节\
@@ -141,7 +149,7 @@ suggestions（修改建议数组）、score（0–10 整数，该维度打分）
 对比维度），【一次 `delegate`】并行派出调研 worker（它们同持检索工具）；在每个 task 里点明「回报\
 【精炼结论 + 关键证据指引（文件:行 / 链接）】，不要回贴整段文件正文」——回到你手里的便是 N 份短\
 摘要而非 N 份原文，你据此综述成给用户的答复。这类纯调查通常【无交付物、不必落盘】，别给它们设\
-`contract.requires_files`；它和下一条「调研驱动的大型交付」的差别只在末端有没有成篇产物。
+`deliverable.requires_files`；它和下一条「调研驱动的大型交付」的差别只在末端有没有成篇产物。
 - 调研驱动的大型交付，让结构跟着证据走：对需大量调研的成篇交付（论文 / 研究报告 / 方案），别在\
 调研回来前就把结构定死。把「定结构」做成证据驱动、可被用户把关的显式一步——并行调研 worker →\
 （写作 worker 先据调研产出【提纲】，给该提纲步骤设 `checkpoint_after=true` 让用户改 / 批）→ 同一\
@@ -165,7 +173,7 @@ playbook_args 参数说明。
 写入便签墙，首波并行 worker 开局即见）与 `team_brief`（回合级「团队共识」块注入每个 worker 开局上下文，\
 跨多波 `delegate` 仍沿用直至覆盖）——brief 写总述、seed 钉关键决定，减少在各 task 里重复粘贴同一段背景。\
 当你一次派出【多路并行审查 / 质检 / 多角度审同一份上游产物】时：\
-① 每个审查 task 必设统一 `contract`（见上「审查类任务的统一契约」）；② 各 task 写清共享验收\
+① 每个审查 task 必设统一 `deliverable`（见上「审查类任务的统一契约」）；② 各 task 写清共享验收\
 维度（受众 / 风格 / 方向底线），但不必给每个审查官复制粘贴同一大段背景——横向重大信号靠便签\
 补齐；③ 在各 task 里明确要求：谁先发现【整体方向错了 / 致命问题 / 继续抠细节已无意义】，必须\
 【立刻】`post_note`（kind=heads_up）广播一行警示，【再】写详细意见，免得并行队友还在无关细节上\
@@ -410,7 +418,13 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
         name="verify_and_fix",
         summary="完成代码改动后验证并修复测试失败（test_run → 读上下文 → 修代码 → 重试）",
         body=_VERIFY_AND_FIX,
-        requires_tools=("test_run",),
+        # Gated on ``delegate``, not ``test_run``: this skill guides the DELEGATED dev
+        # loop (a worker runs test_run + str_replace), and test_run is now a worker-only
+        # code-execution tool (GRANTABLE), so it never appears in the CEO's tool set.
+        # Since consult_skill is CEO-only, gating on the worker-only test_run would make
+        # the skill un-advertisable (dead). ``delegate`` is the CEO's real precondition —
+        # it can act on this guidance by delegating — mirroring long_form_writing.
+        requires_tools=("delegate",),
     ),
     SystemSkill(
         name="long_form_writing",

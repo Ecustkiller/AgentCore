@@ -28,12 +28,13 @@ async def test_capabilities_returns_full_catalog(client, make_invite):
     # consult_memory is wired for CEO and workers when memory is enabled (catalog.py).
     assert "consult_memory" in tools
     assert set(tools["consult_memory"]["available_to"]) == {"ceo", "worker"}
-    # …worker-only mutation + escalate…
-    for name in ("file_write", "code_execute", "escalate"):
+    # …worker-only mutation + execution + escalate (test_run runs project code through
+    # the same sandbox chain as code_execute, so it is worker-only, not a CEO read tool)…
+    for name in ("file_write", "code_execute", "test_run", "escalate"):
         assert name in tools
         assert tools[name]["available_to"] == ["worker"]
     # …and shared read/retrieval built-ins.
-    for name in ("web_search", "test_run"):
+    for name in ("web_search",):
         assert name in tools
         assert set(tools[name]["available_to"]) == {"ceo", "worker"}
     # Each tool carries its call JSON Schema (用法教学).

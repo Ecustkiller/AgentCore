@@ -13,8 +13,9 @@ import {
   flushPendingContent,
   flushPendingFrames,
 } from "@/services/streamConversation";
-import { useApprovalStore } from "@/stores/approvals";
+import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
+import { useTurnModelStore } from "@/stores/turnModel";
 import type { SSEEvent } from "@/types/events";
 import type {
   SidecarDebateSeed,
@@ -58,9 +59,6 @@ export interface StreamViaSidecarOptions {
   /** 续辩种子（结构化补轮·B）：非空 = 本回合 debate 续上一场（焦点正交、首轮辩手读到上一场
    *  摘要）。普通回合缺省，逐字回退全新辩论。 */
   debateSeed?: SidecarDebateSeed;
-  /** 对话级自定义指令（对话级自定义指令）：非空 = 本回合系统提示注入该指令（云模式由服务端注入，
-   *  sidecar 无库故由此喂入）。缺省 = 无。 */
-  instructions?: string | null;
   signal?: AbortSignal;
 }
 
@@ -129,7 +127,6 @@ export async function streamConversationViaSidecar({
   history,
   optimisticUserId,
   debateSeed,
-  instructions,
   signal,
 }: StreamViaSidecarOptions): Promise<SidecarTurnResult> {
   const turnId = newTurnId();
@@ -144,6 +141,8 @@ export async function streamConversationViaSidecar({
     subpath,
     turnId,
     signal,
+    // 无令牌 = 本回合会落到 sidecar 的本机平台模型回退（非账号模型）——据此在回合跑完后提示。
+    usedFallback: inference === undefined,
     failMessage: "本地引擎未能完成回合，请重试",
     invoke: () =>
       window.sidecarApi.startTurn({
@@ -156,8 +155,6 @@ export async function streamConversationViaSidecar({
         history,
         inference,
         debateSeed,
-        // 对话级自定义指令：空串归一为 undefined（契约里「无」= 缺省），非空才透传。
-        instructions: instructions?.trim() || undefined,
       }),
     writeBack: (result) =>
       persistAndReconcile(
@@ -190,38 +187,55 @@ export async function resumeConversationViaSidecar({
   userMessageId,
   signal,
 }: ResumeViaSidecarOptions): Promise<SidecarTurnResult> {
+  console.warn(
+    `[Resume] resumeConversationViaSidecar start conversationId=${conversationId} messageId=${messageId} decision=${decision} rootId=${rootId} subpath=${subpath}`,
+  );
   // 续跑同样要跑 LLM（重启后会新拉起引擎），故随带当前云推理凭据（同 startTurn）。
   const inference = (await resolveSidecarInference()) ?? undefined;
   // 本次续跑的 trace_id（同 startTurn）：贯穿续跑的推理调用 + 回写落库。
   const traceId = newTraceId();
-  return runSidecarTurn({
-    conversationId,
-    rootId,
-    subpath,
-    turnId: messageId,
-    signal,
-    failMessage: "本地引擎未能完成续跑，请重试",
-    invoke: () =>
-      window.sidecarApi.resume({
-        rootId,
-        subpath,
-        conversationId,
-        messageId,
-        traceId,
-        decision,
-        note,
-        selected,
-        inference,
-      }),
-    writeBack: (result) =>
-      persistAndReconcile(
-        conversationId,
-        userMessage,
-        userMessageId,
-        traceId,
-        result,
-      ),
-  });
+  try {
+    const result = await runSidecarTurn({
+      conversationId,
+      rootId,
+      subpath,
+      turnId: messageId,
+      signal,
+      // 同 startTurn：无令牌 = 续跑落到本机平台模型回退，回合跑完后提示。
+      usedFallback: inference === undefined,
+      failMessage: "本地引擎未能完成续跑，请重试",
+      invoke: () =>
+        window.sidecarApi.resume({
+          rootId,
+          subpath,
+          conversationId,
+          messageId,
+          traceId,
+          decision,
+          note,
+          selected,
+          inference,
+        }),
+      writeBack: (result) =>
+        persistAndReconcile(
+          conversationId,
+          userMessage,
+          userMessageId,
+          traceId,
+          result,
+        ),
+    });
+    console.warn(
+      `[Resume] resumeConversationViaSidecar completed conversationId=${conversationId} messageId=${messageId} decision=${decision}`,
+    );
+    return result;
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[Resume] resumeConversationViaSidecar failed conversationId=${conversationId} messageId=${messageId} decision=${decision} err=${errMsg}`,
+    );
+    throw err;
+  }
 }
 
 interface RunSidecarTurnOptions {
@@ -232,6 +246,9 @@ interface RunSidecarTurnOptions {
   /** 事件路由 + cancel 的寻址键：新回合用 turnId，续跑用 message_id。 */
   turnId: string;
   signal?: AbortSignal;
+  /** 本回合是否取不到云推理令牌（→ sidecar 落本机平台模型回退）：据此在回合成功跑完后弹一条
+   *  非阻断提示，告知这轮用了本机平台模型而非账号模型。 */
+  usedFallback: boolean;
   /** 兜底错误文案（onStatus / RPC 真因都取不到时）。 */
   failMessage: string;
   /** 实际的 RPC 调用（startTurn / resume），Promise 在回合结束时携最终结果 resolve。 */
@@ -252,12 +269,13 @@ async function runSidecarTurn({
   subpath,
   turnId,
   signal,
+  usedFallback,
   failMessage,
   invoke,
   writeBack,
 }: RunSidecarTurnOptions): Promise<SidecarTurnResult> {
   // 回合从干净的审批门开始（与云链路一致）。
-  useApprovalStore.getState().clear(conversationId);
+  clearInteractionPrompts(conversationId);
 
   // 登记「本会话此刻是 sidecar 回合」（连同 root+subpath），使本回合内挂起的审批 / 交互结算
   // （统一入口 `resolveInteraction`）改走 `window.sidecarApi.respond` 回这条 stdio 链路（寻址到
@@ -272,7 +290,10 @@ async function runSidecarTurn({
   const unsubscribe = window.sidecarApi.onEvent((push) => {
     if (push.conversationId !== conversationId) return;
     sawAnyEvent = true;
-    dispatchSSEEvent(push.event as SSEEvent, { conversationId });
+    dispatchSSEEvent(push.event as SSEEvent, {
+      conversationId,
+      source: "sidecar",
+    });
   });
 
   const onAbort = (): void => {
@@ -285,6 +306,13 @@ async function runSidecarTurn({
 
   try {
     const result = await invoke();
+    // 记下本回合真正跑的模型（引擎侧 resolve_turn_model），供输入框徽章如实展示；纯云会话
+    // 无此信号、徽章回退账号配置。回退回合（无令牌）额外弹一条非阻断提示，点破「用了本机平台
+    // 模型而非账号模型」——两个信号同源（result.model 即回退时的平台模型），避免再查一次配置。
+    useTurnModelStore.getState().setLastModel(conversationId, result.model);
+    if (usedFallback) {
+      warnPlatformModelFallback(result.model);
+    }
     // 回合已在本机跑完——回写云端落库 + 计费，再对账乐观气泡（best-effort）。
     await writeBack(result);
     return result;
@@ -373,6 +401,23 @@ function applyReconcile(
   if (saved.title) {
     patchConversationCache(conversationId, { title: saved.title });
   }
+}
+
+/**
+ * 本机平台模型回退的可见提示（非阻断）。
+ *
+ * 取不到云推理令牌（如后端重启中 → inference-token 兑换失败）时，sidecar 会静默用本机 `.env`
+ * 平台模型跑完这一回合，而非用户配置的账号模型。回合本身成功了（故非错误横幅、不重跑），只是
+ * 用了「另一个模型」——这条 heads-up 点破它，并尽量报出真跑的模型名（`result.model` 即回退时
+ * 解析出的平台模型；老 sidecar 无此字段时退回通用文案）。
+ */
+function warnPlatformModelFallback(model: string | null | undefined): void {
+  const named = model?.trim();
+  notifyWarning("本回合用了本机平台模型", {
+    description: named
+      ? `未取到云端推理令牌，这轮用本机 ${named} 跑完，而非你配置的账号模型。`
+      : "未取到云端推理令牌，这轮用本机平台模型跑完，而非你配置的账号模型。",
+  });
 }
 
 /**

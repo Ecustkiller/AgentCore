@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 
 from agentcore.llm.pricing import calculate_cost
-from agentcore.llm.profiles import ModelProfile
+from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.engine import react_loop
@@ -60,6 +60,7 @@ def _priced_failure(
     usage: TokenUsage,
     rounds: int,
     duration_ms: int,
+    retryable: bool = True,
 ) -> RunState:
     """A FAILED RunState that still carries the tokens the run spent before it died.
 
@@ -71,11 +72,17 @@ def _priced_failure(
     are left empty when nothing was spent (run failed before any LLM call, or before
     the model tier resolved), so the per-run accumulator's ``if state.usage`` guard
     still skips a never-metered failure — no spurious zero rows.
+
+    ``retryable`` (确定性失败区分, BL-6) rides onto the state so the WaveScheduler can
+    skip its infra retry for a deterministic upstream failure (prompt 超长 / 鉴权 / 余额)
+    that would just re-fail identically. Defaults True (transient / unknown crash → retry
+    as before).
     """
     has_usage = bool(usage.input_tokens or usage.output_tokens)
     return RunState(
         phase=RunPhase.FAILED,
         error=error,
+        error_retryable=retryable,
         model=model or "",
         duration_ms=duration_ms,
         rounds=rounds,
@@ -101,7 +108,7 @@ async def _react_and_capture(
     tools: ToolRegistry,
     sink: EventSink,
     tool_ctx: ToolContext,
-    profile: ModelProfile,
+    profile: ProfileParams,
     turn_model: str,
     allowed_tools: list[str] | None,
     run_id: str,

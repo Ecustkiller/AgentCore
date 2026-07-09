@@ -107,9 +107,6 @@ export const MAC_INSTALL_STEPS = [
   "使用邀请码注册并登录；设置 → 关于 可检查更新（更新安装后可能需再次右键打开）。",
 ];
 
-/** @deprecated Use WIN_INSTALL_STEPS / MAC_INSTALL_STEPS */
-export const INSTALL_STEPS = WIN_INSTALL_STEPS;
-
 export const DOWNLOAD_PAGE_PATH = "/download" as const;
 
 /** 手机端 web SPA（Cloudflare Pages · deploy-mobile-web.yml） */

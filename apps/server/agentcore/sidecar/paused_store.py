@@ -59,12 +59,43 @@ class LocalPausedTurnStore:
         # ``base`` is the desktop-provided sidecar data dir (e.g.
         # ``<userData>/sidecar/paused``); created lazily on first save.
         self._base = base
+        recovered = self.recover_stale_claims()
+        if recovered:
+            logger.info("sidecar.paused_stale_claims_recovered", count=recovered)
 
     def _path(self, message_id: str) -> Path:
         return self._base / f"{message_id}.json"
 
     def _claimed_path(self, message_id: str) -> Path:
         return self._path(message_id).with_suffix(".json.claimed")
+
+    def recover_stale_claims(self) -> int:
+        """Rollback orphan ``.claimed`` files left by a crashed mid-resume.
+
+        A claim renames ``<id>.json`` → ``<id>.json.claimed``; if the sidecar dies
+        before ``confirm_claim`` / ``rollback_claim``, the frame is invisible to
+        ``list_pending`` and ``claim``. On startup, restore each orphan back to
+        ``.json`` so the user can retry resume.
+        """
+        if not self._base.is_dir():
+            return 0
+        recovered = 0
+        for claimed in self._base.glob("*.json.claimed"):
+            target = claimed.with_name(claimed.name.removesuffix(".claimed"))
+            try:
+                os.replace(claimed, target)
+                recovered += 1
+                logger.info(
+                    "sidecar.paused_stale_claim_recovered",
+                    message_id=target.stem,
+                )
+            except OSError as e:
+                logger.warning(
+                    "sidecar.paused_stale_claim_recover_failed",
+                    path=str(claimed),
+                    error=str(e),
+                )
+        return recovered
 
     # --- engine-facing closures (suspension_saver / suspension_deleter) --------
 
@@ -107,9 +138,10 @@ class LocalPausedTurnStore:
         try:
             await asyncio.to_thread(self._write_sync, suspension.message_id, record)
         except Exception as e:  # noqa: BLE001 — persistence must never break the turn
-            logger.warning(
+            logger.error(
                 "sidecar.paused_save_failed",
                 message_id=suspension.message_id,
+                conversation_id=suspension.conversation_id,
                 error=str(e),
             )
 

@@ -1,4 +1,5 @@
 import { logEvent } from "@/lib/log";
+import { clearAgentTownSession } from "@/services/agentTownSession";
 import {
   ApiError,
   BASE_URL,
@@ -32,7 +33,6 @@ function toUser(u: BackendUser): AuthUser {
     displayName: u.display_name,
     email: u.email,
     role: u.role,
-    defaultModelMode: u.default_model_mode ?? null,
     avatarUrl: avatarSrc(u.avatar_url),
   };
 }
@@ -89,6 +89,7 @@ export async function logout(): Promise<void> {
   await api.post("/v1/auth/logout");
   clearCsrfToken();
   clearSidecarInference(); // session ended → next login re-mints
+  void clearAgentTownSession();
 }
 
 /**

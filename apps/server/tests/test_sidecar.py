@@ -19,8 +19,10 @@ from typing import Any
 
 import pytest
 
+from agentcore.config import settings
 from agentcore.llm.credentials import (
     INFERENCE_CONVERSATION_HEADER,
+    INFERENCE_MESSAGE_HEADER,
     INFERENCE_TRACE_HEADER,
     LLMCredentials,
 )
@@ -240,6 +242,10 @@ def test_sidecar_runs_a_turn_on_the_local_dir(tmp_path, monkeypatch):
     assert done["result"]["content"] == "已列出本地文件。"
     assert done["result"]["finishReason"] == "end_turn"
     assert done["result"]["turnId"] == "t1"
+    # No inference at initialize ⇒ the turn ran on the dev platform-model fallback, and the
+    # result honestly reports it (resolve_turn_model over None creds). The desktop badge
+    # reads this to show the model the turn ACTUALLY ran on, not just the account config.
+    assert done["result"]["model"] == settings.platform_model
 
 
 # --- respond (审批 / 交互结算回 sidecar) -------------------------------------
@@ -415,9 +421,80 @@ def test_creds_for_stamps_conversation_and_trace_headers():
     assert untraced.extra_headers[INFERENCE_CONVERSATION_HEADER] == "conv-1"
     assert INFERENCE_TRACE_HEADER not in untraced.extra_headers
 
+    with_message = server._creds_for("conv-1", "trace-1", "msg-42")
+    assert with_message.extra_headers[INFERENCE_MESSAGE_HEADER] == "msg-42"
+
 
 def test_creds_for_none_when_no_session_creds():
     """No session creds (dev platform-fallback, no proxy) ⇒ no per-turn creds to stamp."""
     server = SidecarServer(_recorder()[1])
     assert server._creds is None
     assert server._creds_for("conv-1", "trace-1") is None
+
+
+def test_parse_inference_carries_server_resolved_model():
+    creds = SidecarServer._parse_inference(
+        {
+            "baseUrl": "http://localhost:8000/v1/inference/v1",
+            "apiKey": "tok",
+            "model": "deepseek-v4-flash",
+        }
+    )
+    assert creds is not None
+    assert creds.default_model == "deepseek-v4-flash"
+    assert creds.base_url.endswith("/v1/inference/v1")
+
+
+def test_start_turn_result_reports_cloud_proxy_model(tmp_path, monkeypatch):
+    """With inference creds (cloud proxy present), the turn result reports the
+    server-resolved account model (resolve_turn_model over the creds), NOT the platform
+    fallback — this is the signal the desktop badge shows so it reflects the model the
+    turn ACTUALLY ran on. Pairs with the no-inference fallback assertion above."""
+
+    async def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
+        # The turn must run on the cloud-proxy creds, not the dev platform fallback.
+        assert kwargs["llm_credentials"] is not None
+        kwargs["sink"].close()  # let the pump drain so the turn finishes
+        return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}
+
+    monkeypatch.setattr("agentcore.sidecar.server.run_chat_pipeline", fake_pipeline)
+
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+
+    async def drive() -> None:
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "userId": "u",
+                        "workspaceRoot": str(tmp_path),
+                        "approvalsEnabled": False,
+                        "inference": {
+                            "baseUrl": "http://localhost:8000/v1/inference/v1",
+                            "apiKey": "tok",
+                            "model": "deepseek-v4-flash",
+                        },
+                    },
+                }
+            )
+        )
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "startTurn",
+                    "params": {"turnId": "t1", "conversationId": "c1", "userMessage": "hi"},
+                }
+            )
+        )
+        await asyncio.gather(*list(server._turns.values()))
+
+    asyncio.run(drive())
+
+    done = _response(sent, 2)
+    assert done["result"]["model"] == "deepseek-v4-flash"

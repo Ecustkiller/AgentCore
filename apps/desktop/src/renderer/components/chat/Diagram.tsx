@@ -452,17 +452,18 @@ function MermaidDiagram({ code }: { code: string }) {
           theme: dark ? "dark" : "default",
           fontFamily: "inherit",
         });
-        // Pre-validate: parse() reliably throws on syntax errors without DOM
-        // side effects, whereas render() may return an error SVG silently.
+        // parse() is a cheap, side-effect-free syntax gate; render() then throws
+        // on any render-time failure — both land in the catch below and degrade
+        // to source. We deliberately do NOT sniff the returned SVG for
+        // "error-icon" / "Syntax error": mermaid v11 inlines its theme CSS
+        // (which contains an `.error-icon{…}` rule) into EVERY diagram's <style>,
+        // so that substring is present in 100% of *valid* diagrams — the check
+        // rejected every healthy chart. mermaid's real error path throws from
+        // render(); it does not silently return an error SVG through this API.
         await mermaid.parse(normalized);
         renderSeq += 1;
         const id = `acmmd-${renderSeq}`;
         const { svg } = await mermaid.render(id, normalized);
-        // Guard against mermaid returning an "error SVG" without throwing —
-        // detect its error marker class and treat as failure.
-        if (svg.includes("error-icon") || svg.includes("Syntax error")) {
-          throw new Error("图表语法无效");
-        }
         if (!cancelled) setSvg(svg);
       } catch (e) {
         if (!cancelled) {

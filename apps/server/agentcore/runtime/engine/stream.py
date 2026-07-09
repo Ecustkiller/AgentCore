@@ -44,7 +44,7 @@ async def stream_llm_round(
     # disables the gate (``asyncio.timeout(None)`` = no ceiling). On a stall the
     # ``async for`` cancellation unwinds llm.stream's ``async with client.stream(...)``,
     # closing the httpx connection; we re-raise as an LLM timeout so run_llm_round's
-    # failure ladder (fallback model → clean DEGRADED/ERROR end) takes over.
+    # failure path (DEGRADED/ERROR end) takes over.
     idle = settings.engine_llm_stream_idle_timeout_seconds
     loop = asyncio.get_running_loop()
     try:

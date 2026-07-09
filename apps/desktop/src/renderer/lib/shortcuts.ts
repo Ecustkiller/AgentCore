@@ -1,5 +1,6 @@
 import { startNewConversation } from "@/lib/newConversation";
 import { isMac } from "@/lib/platform";
+import { openCurrentConversationTerminal } from "@/services/terminalActions";
 import { useSidebarStore } from "@/stores/sidebar";
 import { useUIStore } from "@/stores/ui";
 import type { NavigateFunction } from "react-router-dom";
@@ -53,6 +54,14 @@ export const GLOBAL_SHORTCUTS: GlobalShortcut[] = [
     label: "收起 / 展开侧栏",
     keys: ["b", "\\"],
     run: () => useSidebarStore.getState().toggleCollapsed(),
+  },
+  {
+    id: "open-workspace-terminal",
+    label: "在终端打开工作区",
+    keys: ["`"],
+    run: () => {
+      void openCurrentConversationTerminal();
+    },
   },
 ];
 

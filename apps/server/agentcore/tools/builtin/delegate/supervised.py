@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
+from agentcore.runtime.runs.builder import _parse_deliverable
 from agentcore.tools.builtin.delegate.schema import DELEGATE_OUTPUT_LIMIT, PLAN_REVIEW_SUMMARY_CHARS
 from agentcore.tools.protocol import ToolResult
 
@@ -98,9 +99,11 @@ def apply_replan(
         objective = b.get("objective")
         if isinstance(objective, str) and objective.strip():
             fields["objective"] = objective.strip()
-        expected = b.get("expected_output")
-        if isinstance(expected, str) and expected.strip():
-            fields["expected_output"] = expected.strip()
+        raw_deliverable = b.get("deliverable")
+        if isinstance(raw_deliverable, dict):
+            parsed = _parse_deliverable({"deliverable": raw_deliverable})
+            if parsed is not None:
+                fields["deliverable"] = parsed
         mp = b.get("model_preference")
         if mp in ("fast", "strong"):
             fields["model_preference"] = mp
@@ -157,6 +160,7 @@ async def finalize_stopped(
         register_sessions,
     )
     from agentcore.tools.builtin.delegate.ceo_format import format_for_ceo
+    from agentcore.tools.builtin.delegate.nesting import absorb_children
 
     results: dict[str, RunState] = dict(seed_completed)
     for node in plan.nodes:
@@ -168,6 +172,7 @@ async def finalize_stopped(
     if tool._session_saver is not None:
         for session in registered:
             await tool._session_saver(session)
+    absorb_children(tool)
     return ToolResult(
         tool_call_id="",
         success=True,

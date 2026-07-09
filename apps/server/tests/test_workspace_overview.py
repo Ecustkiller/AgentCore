@@ -1,7 +1,8 @@
 """Tests for the CEO workspace overview (``runtime.context.workspace_overview``).
 
-Pins the ``<workspace_file_index>`` contract: best-effort (no backend / empty / failing /
-index-less → "" so the caller omits the block), newest-first listing as the backend
+Pins the ``<workspace_file_index>`` contract: best-effort (no backend / failing /
+index-less → "" so the caller omits the block), empty workspace → guidance hint,
+newest-first listing as the backend returns it, and bounded by BOTH a file count
 returns it, and bounded by BOTH a file count and a char budget with an elision line
 when more remain — so a large workspace can't bloat the CEO prompt. No DB / HTTP
 (asyncio_mode=auto).
@@ -32,8 +33,11 @@ async def test_none_backend_yields_empty():
     assert await build_workspace_overview(None) == ""
 
 
-async def test_empty_workspace_yields_empty():
-    assert await build_workspace_overview(_FakeBackend([])) == ""
+async def test_empty_workspace_yields_guidance_hint():
+    out = await build_workspace_overview(_FakeBackend([]))
+    assert out.startswith("<workspace_file_index>")
+    assert "工作区当前为空" in out
+    assert "file_list" in out
 
 
 async def test_listing_failure_degrades_to_empty():

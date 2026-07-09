@@ -29,6 +29,27 @@ def task_preview_and_hash(task: str) -> tuple[str, str]:
     return preview, hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _context_inject_source_run_ids(payload: dict[str, Any]) -> list[str]:
+    """Upstream run ids from ``run_context`` dependency blocks."""
+    ids: list[str] = []
+    blocks = payload.get("blocks")
+    if isinstance(blocks, list):
+        for block in blocks:
+            if not isinstance(block, dict) or block.get("channel") != "dependency":
+                continue
+            source = block.get("source_run_id")
+            if source:
+                ids.append(str(source))
+    seen: set[str] = set()
+    out: list[str] = []
+    for run_id in ids:
+        if run_id in seen:
+            continue
+        seen.add(run_id)
+        out.append(run_id)
+    return out
+
+
 def _workspace_rel_path(path: str | None) -> str | None:
     if not path:
         return None
@@ -129,6 +150,7 @@ def project_journal_entry(recorder: AuditRecorder, entry: dict[str, Any]) -> Aud
 
     if kind == "run_context":
         execution_id = str(payload.get("execution_id") or "") or None
+        source_run_ids = _context_inject_source_run_ids(payload)
         return AuditDraft(
             category="comm",
             action="context.inject",
@@ -137,7 +159,7 @@ def project_journal_entry(recorder: AuditRecorder, entry: dict[str, Any]) -> Aud
             execution_id=execution_id,
             run_id=str(payload.get("run_id") or "") or None,
             detail={
-                "source_run_ids": payload.get("source_run_ids") or [],
+                "source_run_ids": source_run_ids,
                 "handling": payload.get("handling"),
                 "size_bytes": payload.get("size_bytes"),
                 "truncated": payload.get("truncated"),
@@ -313,6 +335,59 @@ def project_run_retry(
         action="run.retry",
         actor_kind=_actor_kind(recorder, run_id),
         outcome="ok",
+        execution_id=execution_id,
+        run_id=run_id,
+        detail=detail,
+    )
+
+
+def project_run_deterministic_failure(
+    recorder: AuditRecorder,
+    *,
+    run_id: str,
+    error: str | None = None,
+    execution_id: str | None = None,
+) -> AuditDraft:
+    """确定性失败区分 (BL-6): a FAILED run the scheduler classified as non-retryable
+    (prompt 超长 / 鉴权 / 余额) was ACCEPTED as final rather than auto-retried. Recorded
+    (后端补记) so the delegated-turn audit trail carries the「未盲目重试确定性失败」decision
+    — category ``state`` (a handling record, NOT a second ``failure`` row, so the failure
+    tally isn't double-counted)."""
+    detail: dict[str, Any] = {"reason": "deterministic"}
+    if error:
+        detail["error"] = error[:500]
+    return AuditDraft(
+        category="state",
+        action="run.deterministic_failure",
+        actor_kind=_actor_kind(recorder, run_id),
+        outcome="skipped",
+        execution_id=execution_id,
+        run_id=run_id,
+        detail=detail,
+    )
+
+
+def project_run_redirect_ignored(
+    recorder: AuditRecorder,
+    *,
+    run_id: str,
+    feedback: str | None = None,
+    execution_id: str | None = None,
+) -> AuditDraft:
+    """跑一半改方向 · 忽略路径 (run_redirect Step 4): a user redirect (立即改此人) could NOT be
+    applied mid-run — the targeted worker had already reached a terminal state, or the redirect
+    arrived after its delegate batch ended, so the WaveScheduler never cancelled + cold-re-ran it.
+    Recorded (后端记录) so the run detail can surface「改方向未生效」and offer an explicit accept,
+    instead of the steer silently vanishing. category ``state`` / outcome ``skipped`` (a handling
+    record, not a failure) — the wire projection is untouched (no new SSE event)."""
+    detail: dict[str, Any] = {"reason": "not_applied"}
+    if feedback:
+        detail["feedback"] = feedback[:200]
+    return AuditDraft(
+        category="state",
+        action="run.redirect_ignored",
+        actor_kind=_actor_kind(recorder, run_id),
+        outcome="skipped",
         execution_id=execution_id,
         run_id=run_id,
         detail=detail,

@@ -3,11 +3,14 @@ import { Button } from "@/components/ui";
 import { useConversationFileSource } from "@/hooks/useConversationFileSource";
 import { useConversationWorkspace } from "@/hooks/useWorkspaces";
 import { hasLocalFiles } from "@/lib/capabilities";
+import { notifyActionError } from "@/lib/toast";
+import { exportWorkspaceZip } from "@/services/workspace";
 import { useConversationStore } from "@/stores/conversation";
-import { FolderOpen, History, X } from "lucide-react";
+import { Download, FolderOpen, History, Loader2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { FilesSection } from "./FilesSection";
 import { SnapshotsSection } from "./SnapshotsSection";
+import { WorkspaceClientTools } from "./WorkspaceClientTools";
 import { WorkspaceModeBar } from "./WorkspaceModeBar";
 
 /**
@@ -27,6 +30,7 @@ import { WorkspaceModeBar } from "./WorkspaceModeBar";
 export function WorkspaceMode() {
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   // 与文件中枢同一份数据 + 同一个解析器：对话→其工作区(WorkspaceInfo)→FileSource。本地走桌面
   // IPC、云端走 REST，故 Agent 在本地写的文件这里也能列出（修复「写在本地、读在云端」）。
@@ -63,6 +67,21 @@ export function WorkspaceMode() {
     );
   }
 
+  const handleExportZip = async () => {
+    if (!conversationId || exporting) return;
+    setExporting(true);
+    try {
+      await exportWorkspaceZip(conversationId);
+    } catch (e) {
+      notifyActionError("导出工作区失败", e);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const emptyTreeHint =
+    "工作区暂无文件。若本会话曾委派团队产出，请确认已绑定本地文件夹，或从云端导出 ZIP。";
+
   return (
     <div className="relative flex h-full flex-col">
       {/* 单行面板头：云端选择器（leading）+ 文件操作 + 快照（trailing）合到 FilesSection
@@ -70,15 +89,30 @@ export function WorkspaceMode() {
       <div className="min-h-0 flex-1">
         <FilesSection
           source={source}
+          emptyTreeHint={emptyTreeHint}
           leading={<WorkspaceModeBar conversationId={conversationId} />}
           trailing={
-            // 快照（备份/版本/恢复）是云端能力；本地源 caps.snapshots=false（本地的「备份到云」
-            // 在 WorkspaceModeBar 里），按 caps 门控，本地模式不挂这个入口。
-            source?.caps.snapshots ? (
-              <IconButton title="快照" onClick={() => setSnapshotsOpen(true)}>
-                <History size={14} />
-              </IconButton>
-            ) : undefined
+            <>
+              <WorkspaceClientTools source={source} />
+              {source?.caps.snapshots ? (
+              <>
+                <IconButton
+                  title="导出 ZIP"
+                  disabled={exporting}
+                  onClick={() => void handleExportZip()}
+                >
+                  {exporting ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Download size={14} />
+                  )}
+                </IconButton>
+                <IconButton title="快照" onClick={() => setSnapshotsOpen(true)}>
+                  <History size={14} />
+                </IconButton>
+              </>
+            ) : null}
+            </>
           }
         />
       </div>

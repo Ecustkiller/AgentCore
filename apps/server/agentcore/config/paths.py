@@ -10,6 +10,3 @@ PROJECT_ROOT = _resolved_parents[4] if len(_resolved_parents) > 4 else _resolved
 
 # The backend's dotenv lives beside the package at apps/server/.env.
 ENV_FILE = _resolved_parents[2] / ".env"
-
-# Backward-compatible alias (logging.py imports _PROJECT_ROOT).
-_PROJECT_ROOT = PROJECT_ROOT

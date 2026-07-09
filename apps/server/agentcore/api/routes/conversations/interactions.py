@@ -32,6 +32,7 @@ async def resolve_interaction(
 
     - ``approval`` — authorize / deny a paused GRANTABLE tool call (the gate
       auto-denies anything left unanswered);
+    - ``delegation_authorization`` — grant / per-call / deny before workers start;
     - ``client_tool`` — a bound desktop's result envelope for a local-workspace op;
     - ``escalation`` — a worker's blocking escalate (answer / 按假设继续);
     - ``debate_round`` — an interactive debate round boundary (continue / conclude).

@@ -62,10 +62,6 @@ export function EmbeddedGraphCanvas({
     });
   }, []);
 
-  const debate = nodes.some(
-    (n) => n.type === "agent" && (n.data as { stance?: string }).stance != null,
-  );
-
   // 实测内嵌画布宽度（= 阅读列宽），fit-to-width 据此缩放。
   useEffect(() => {
     const el = containerRef.current;
@@ -79,7 +75,7 @@ export function EmbeddedGraphCanvas({
     return () => ro.disconnect();
   }, []);
 
-  // 真实 ELK 布局（含收紧间距）；辩论场景传 preserveOrder 让正反分带，并把端点（用户
+  // 真实 ELK 布局（含收紧间距）；considerModelOrder 让辩论正反分带，并把端点（用户
   // 输入 / CEO 汇聚点）钉到首 / 末层，复刻 GraphView 的端点约束。布局只依赖形态，不依赖
   // statuses，故 hero 逐波改状态时不会重排。
   useEffect(() => {
@@ -88,7 +84,6 @@ export function EmbeddedGraphCanvas({
       nodes.map((n) => n.id),
       edges,
       layoutKind,
-      debate,
       {
         source: nodes.find((n) => n.type === "userInput")?.id,
         sink: nodes.find((n) => n.type === "captain")?.id,
@@ -99,7 +94,7 @@ export function EmbeddedGraphCanvas({
     return () => {
       cancelled = true;
     };
-  }, [nodes, edges, layoutKind, debate]);
+  }, [nodes, edges, layoutKind]);
 
   const fit =
     layout && colWidth > 0

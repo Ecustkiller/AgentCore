@@ -258,46 +258,20 @@ def spec_to_json(spec: RunSpec) -> dict[str, Any]:
     return asdict(spec)
 
 
-def _merge_legacy_deliverable(
-    *,
-    deliverable_raw: dict[str, Any] | None,
-    expected_output: str,
-    contract_raw: dict[str, Any] | None,
-) -> Deliverable | None:
-    """Rebuild :class:`Deliverable` from current + legacy persisted shapes."""
-    name = (expected_output or "").strip()
-    source = deliverable_raw
-    if source is None and contract_raw:
-        source = contract_raw
-    if source:
-        if isinstance(source.get("name"), str) and source["name"].strip():
-            name = source["name"].strip()
-        fields = _filtered(Deliverable, source)
-        fields["name"] = name
-        deliverable = Deliverable(**fields)
-        return deliverable
-    if name:
-        return Deliverable(name=name)
-    return None
-
-
 def spec_from_json(data: dict[str, Any]) -> RunSpec:
     """Rebuild a RunSpec (with nested RunPolicy / Deliverable) from its JSON dict."""
     data = dict(data or {})
     policy_raw = dict(data.pop("policy", None) or {})
-    contract_raw = policy_raw.pop("contract", None)
+    policy_raw.pop("contract", None)  # retired persisted shape
     policy = RunPolicy(**_filtered(RunPolicy, policy_raw))
-    expected_output = str(data.pop("expected_output", "") or "")
+    data.pop("expected_output", None)  # retired top-level persisted shape
     deliverable_raw = data.pop("deliverable", None)
-    if not isinstance(deliverable_raw, dict):
-        deliverable_raw = None
-    if not isinstance(contract_raw, dict):
-        contract_raw = None
-    deliverable = _merge_legacy_deliverable(
-        deliverable_raw=deliverable_raw,
-        expected_output=expected_output,
-        contract_raw=contract_raw,
-    )
+    deliverable: Deliverable | None = None
+    if isinstance(deliverable_raw, dict):
+        fields = _filtered(Deliverable, deliverable_raw)
+        name = fields.get("name", "")
+        fields["name"] = name.strip() if isinstance(name, str) else ""
+        deliverable = Deliverable(**fields)
     kwargs = _filtered(RunSpec, data)
     kwargs["policy"] = policy
     if deliverable is not None:
@@ -324,6 +298,11 @@ def state_to_json(state: RunState) -> dict[str, Any]:
         "content": state.content,
         "reasoning": state.reasoning,
         "error": state.error,
+        # 确定性失败区分 (BL-6): persist the retryable verdict so a resume / retry-failed
+        # rebuild + the audit trail keep the「这次失败是确定性的」signal (default True keeps
+        # older frames unchanged). Omitted from the shape for COMPLETED nodes is fine — the
+        # deserializer defaults it True.
+        "error_retryable": state.error_retryable,
         "warnings": list(state.warnings),
         "escalations": [dict(e) for e in state.escalations],
         "citations": list(state.citations),
@@ -347,6 +326,7 @@ def state_from_json(data: dict[str, Any]) -> RunState:
         content=data.get("content", "") or "",
         reasoning=data.get("reasoning", "") or "",
         error=data.get("error", "") or "",
+        error_retryable=bool(data.get("error_retryable", True)),
         warnings=list(data.get("warnings") or []),
         escalations=[dict(e) for e in (data.get("escalations") or []) if isinstance(e, dict)],
         citations=list(data.get("citations") or []),

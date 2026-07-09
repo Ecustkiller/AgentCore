@@ -32,7 +32,7 @@ AgentCore 以多 Agent 协作为默认范式，而非将其视为单 Agent 之�
 |------|------|
 | **组合优于堆叠** | 新业务能力优先拆分为可组合的专职 Agent，而非在单个 Agent 的 system_prompt 中堆叠功能 |
 | **单 Agent 是退化特例** | 一个独立 Agent 等价于「只有 Captain、没有成员的 Team」，运行时代码路径统一 |
-| **委派是一等公民** | CEO 恒有 `delegate`；worker 由 `can_delegate` 显式授予，默认叶子（`MAX_DELEGATION_DEPTH=2`） |
+| **委派是一等公民** | CEO 恒有 `delegate`；`depth < MAX_DELEGATION_DEPTH` 的 worker 默认亦获 `delegate`+`replan`（启动即有委派能力，`can_delegate` 可设 false 禁止）；depth=2 sub-worker 仍为叶子；单 lead 最多 `MAX_WORKER_SUBDELEGATIONS`（4）个 sub-worker |
 | **编排可组合** | Pipeline / Fan-out / Adaptive 三种编排模式可嵌套（Team 成员可以是另一个 Team 的 Captain） |
 
 ### 统一执行路径
@@ -151,7 +151,7 @@ Worker 遇到障碍时按三档策略自主处理，写入 worker system prompt�
 
 → 见代码：`runtime/runs/notewall.py`（`NoteWall`：`post`/`amend`/`new_for`/`all_for`/`active_notes`）、`tools/builtin/post_note.py` / `read_notes.py` / `amend_note.py`、`runtime/engine/loop.py`（`on_round_begin`）、`runtime/runs/executor_agent.py`（`_pull_notes`）、`runtime/events/run.py`（`team_note_posted`）、三端 fold（oracle `conformance/projection.py` + 桌面 `stores/execution` + 手机 `protocol/fold.ts`）。
 
-**CEO 播种与跨波共识（✅）**：`delegate.seed_notes` 可在派活前写入 `NoteWall`（`run_id=__ceo_seed__`）；`team_brief` 回合态块让每个 worker 开局多一节「团队共识」；桌面 `TeamNote.source: ceo | worker`，CEO 播种显示「主 Agent 播种」。**协作质量三项（✅）**：队友已贴 ≥2 条但该 worker 未贴时一次性 **Note Nudge**；CEO 连续 `delegate` 时后一波 **继承**前波活跃便签（最多 20 条，UI「上一波遗留」）；`decision` 便签 **冲突检测**（标识符重叠且内容不同 → 系统 `heads_up`）。**仍缺（非 P0 阻塞）**：CEO prompt 尚未强制「先贴墙再派活」；跨波共识在便签不跨波时仍靠 task 复述。**⏳ Phase 3b**：CEO 声明「共识键值」→ runtime 自动展开为 `seed_notes` + 缩短各 `task`——→ 提案：见 [`06-规划/上下文注入统一性讨论.md`](../06-规划/上下文注入统一性讨论.md)。
+**CEO 播种与跨波共识（✅）**：`delegate.seed_notes` 可在派活前写入 `NoteWall`（`run_id=__ceo_seed__`）；`team_brief` 回合态块让每个 worker 开局多一节「团队共识」；桌面 `TeamNote.source: ceo | worker`，CEO 播种显示「主 Agent 播种」。**协作质量三项（✅）**：队友已贴 ≥2 条但该 worker 未贴时一次性 **Note Nudge**；CEO 连续 `delegate` 时后一波 **继承**前波活跃便签（最多 20 条，UI「上一波遗留」）；`decision` 便签 **冲突检测**（标识符重叠且内容不同 → 系统 `heads_up`）。**仍缺（非 P0 阻塞）**：CEO prompt 尚未强制「先贴墙再派活」；跨波共识在便签不跨波时仍靠 task 复述。**⏳ Phase 3b**：CEO 声明「共识键值」→ runtime 自动展开为 `seed_notes` + 缩短各 `task`——→ 相关：见 [`上下文工程.md`](/docs/03-AI核心/上下文工程.md)。
 
 → 见代码：`delegate/seed_notes.py`、`drive.py`、`executor_context.py`、`TeamNotesPanel.tsx`、`StatusStrip.tsx`（「团队便签 N」徽章）。
 

@@ -195,27 +195,7 @@ class FileMemoryStore:
             target = target / self._safe_segment(part)
         return target
 
-    def _legacy_path(self, user_id: str) -> Path:
-        return self._base / f"{self._safe_segment(user_id)}.md"
-
-    def _migrate_if_needed(self, user_id: str) -> None:
-        user_dir = self._user_dir(user_id)
-        if user_dir.exists():
-            return  # already folder-shaped (fast path / idempotent)
-        legacy = self._legacy_path(user_id)
-        if not legacy.exists():
-            return  # brand-new user; nothing to migrate
-        try:
-            content = legacy.read_text(encoding="utf-8")
-            user_dir.mkdir(parents=True, exist_ok=True)
-            (user_dir / CORE_MEMORY_FILE).write_text(content, encoding="utf-8")
-            legacy.unlink(missing_ok=True)
-            logger.info("memory.migrated_to_folder", user_id=user_id)
-        except OSError as e:
-            logger.warning("memory.migrate_failed", user_id=user_id, error=str(e))
-
     async def list(self, user_id: str, scope: MemoryScope = None) -> list[MemoryFileMeta]:
-        self._migrate_if_needed(user_id)
         scope_dir = self._scope_dir(user_id, scope)
         if not scope_dir.exists():
             return []
@@ -236,7 +216,6 @@ class FileMemoryStore:
         return metas
 
     async def load(self, user_id: str, path: str, scope: MemoryScope = None) -> str:
-        self._migrate_if_needed(user_id)
         target = self._path(user_id, path, scope)
         try:
             return target.read_text(encoding="utf-8") if target.exists() else ""
@@ -245,7 +224,6 @@ class FileMemoryStore:
             return ""
 
     async def save(self, user_id: str, path: str, markdown: str, scope: MemoryScope = None) -> None:
-        self._migrate_if_needed(user_id)
         target = self._path(user_id, path, scope)
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -254,7 +232,6 @@ class FileMemoryStore:
             logger.warning("memory.save_failed", user_id=user_id, error=str(e))
 
     async def delete(self, user_id: str, path: str, scope: MemoryScope = None) -> None:
-        self._migrate_if_needed(user_id)
         target = self._path(user_id, path, scope)
         try:
             target.unlink(missing_ok=True)
@@ -270,7 +247,6 @@ class FileMemoryStore:
         is a server UUID, so ``_safe_segment`` is a no-op and the dir name IS the id.
         Degrades to [] on any I/O error (memory never breaks the page).
         """
-        self._migrate_if_needed(user_id)
         container = self._user_dir(user_id) / _PROJECT_CONTAINER
         if not container.exists():
             return []

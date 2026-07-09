@@ -1,7 +1,8 @@
 import { Button } from "@/components/ui";
+import { useTurnAudit } from "@/hooks/useTurnAudit";
 import { formatMessageTimeOfDay } from "@/lib/format";
 import { isWebPreview } from "@/lib/preview";
-import { type AgentAuditEvent, fetchTurnAudit } from "@/services/audit";
+import { type AgentAuditEvent } from "@/services/audit";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import type {
   AuditCategory,
@@ -18,7 +19,6 @@ import {
   Radio,
   Wrench,
 } from "lucide-react";
-import { useEffect, useState } from "react";
 import { Section } from "./shared";
 
 const CATEGORY_META: Record<
@@ -161,41 +161,14 @@ export function AuditSection({
   messageId: string;
   runId: string;
 }) {
-  const [events, setEvents] = useState<AgentAuditEvent[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const keyBase = `run:${runId}`;
   const preview = isWebPreview();
-
-  useEffect(() => {
-    if (preview) {
-      setEvents([]);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    void fetchTurnAudit(conversationId, messageId)
-      .then((res) => {
-        if (!cancelled) {
-          setEvents(res.data.filter((ev) => ev.run_id === runId));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setEvents([]);
-          setError("加载失败");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [conversationId, messageId, runId, preview]);
+  const { data, loading, error } = useTurnAudit(
+    preview ? null : conversationId,
+    preview ? null : messageId,
+  );
+  const events =
+    data?.data.filter((ev) => ev.run_id === runId) ?? null;
 
   if (preview) {
     return (

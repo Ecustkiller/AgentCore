@@ -119,9 +119,8 @@ class MemoryExtractInput:
     """
 
     user_id: str
-    # Full markdown of the GLOBAL PROFILE core file (画像.md) — "" if none yet. Named
-    # ``current_memory`` for back-compat (it was the single core file pre-split).
-    current_memory: str = ""
+    # Full markdown of the GLOBAL PROFILE core file (画像.md) — "" if none yet.
+    current_profile: str = ""
     messages: Sequence[ChatMessage] = ()  # the recent conversation window to consolidate
     # Full markdown of the GLOBAL PREFERENCES core file (偏好.md) — how to work with the user.
     current_preferences: str = ""
@@ -573,14 +572,14 @@ def _render_topics(slugs: Sequence[str]) -> str:
 
 def _is_cold_start(data: MemoryExtractInput) -> bool:
     """True when both global preferences and profile are empty (first-time consolidation)."""
-    return not data.current_preferences.strip() and not data.current_memory.strip()
+    return not data.current_preferences.strip() and not data.current_profile.strip()
 
 
 def _render_extract_prompt(data: MemoryExtractInput) -> str:
     convo = "\n".join(f"{m['role']}: {m['content']}" for m in data.messages)
     today = data.today.strip() or "(unknown)"
     preferences = data.current_preferences.strip() or "(empty)"
-    profile = data.current_memory.strip() or "(empty)"
+    profile = data.current_profile.strip() or "(empty)"
     sections = [
         f"# Today's date\n{today}",
         f"# GLOBAL preferences note (偏好.md)\n{preferences}",

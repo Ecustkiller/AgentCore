@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from agentcore.tools.builtin.delegate.schema import (
-    _DELEGATE_OUTPUT_LIMIT,
     DELEGATE_OUTPUT_LIMIT,
 )
 from agentcore.tools.builtin.delegate.tool import DelegateTool
@@ -14,5 +13,4 @@ from agentcore.tools.builtin.delegate.tool import DelegateTool
 __all__ = [
     "DELEGATE_OUTPUT_LIMIT",
     "DelegateTool",
-    "_DELEGATE_OUTPUT_LIMIT",
 ]

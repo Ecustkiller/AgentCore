@@ -69,7 +69,6 @@ async def stream_chat(
                 sink.emit(message_end(FinishReason.ERROR))
                 return
             folder_id = conv.folder_id
-            instructions = conv.instructions
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
             memory_enabled = await resolve_memory_enabled(session, user_id)
@@ -118,7 +117,6 @@ async def stream_chat(
                 llm_credentials=llm_credentials,
                 profile_set=profile_set,
                 memory_enabled=memory_enabled,
-                instructions=instructions,
                 board_id=board_id,
                 debate_seed=debate_seed,
                 llm_supports_tools=llm_supports_tools,
@@ -209,7 +207,6 @@ async def regenerate_chat(
                 llm_credentials=llm_credentials,
                 profile_set=profile_set,
                 memory_enabled=memory_enabled,
-                instructions=conv.instructions,
                 board_id=board_id,
                 llm_supports_tools=llm_supports_tools,
             )
@@ -347,7 +344,6 @@ async def retry_failed_chat(
                     llm_credentials=llm_credentials,
                     profile_set=profile_set,
                     memory_enabled=memory_enabled,
-                    instructions=conv.instructions,
                     board_id=board_id,
                     llm_supports_tools=llm_supports_tools,
                 )

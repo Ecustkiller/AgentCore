@@ -13,6 +13,7 @@ from agentcore.api.routes import (
     admin,
     auth,
     boards,
+    bookmarks,
     capabilities,
     conversations,
     devices,
@@ -24,13 +25,11 @@ from agentcore.api.routes import (
     llm_key,
     memory,
     messages,
-    model_modes,
     realtime,
     search,
     sharing,
     simulation,
     system,
-    tools,
     usage,
     users,
     workspaces,
@@ -105,14 +104,17 @@ def _validate_production_security() -> None:
             "COOKIE_SAMESITE=none requires COOKIE_SECURE=true (browsers drop a "
             "SameSite=None cookie without Secure). Set COOKIE_SECURE=true."
         )
-    # code_execute on a cloud/server worker runs untrusted model/user code. With
-    # GVISOR_ENABLED the runsc sandbox provides a real isolation boundary; without
-    # it, execution is a plain subprocess INSIDE the API container — no
-    # namespace/seccomp/rlimit/egress isolation, so it is effectively authenticated
-    # RCE with access to JWT_SECRET_KEY / ENCRYPTION_KEY and every user's encrypted
-    # keys. It is default-off, but a single CODE_EXECUTE_CLOUD_ENABLED flip would
-    # silently expose it; require a second, explicitly-named acknowledgement so the
-    # unsafe config can't be reached by accident (SEC-005).
+    # The code-execution tool class (code_execute AND test_run — a test suite runs
+    # arbitrary project code through the SAME sandbox chain) on a cloud/server worker
+    # runs untrusted model/user code. With GVISOR_ENABLED the runsc sandbox provides a
+    # real isolation boundary; without it, execution is a plain subprocess INSIDE the
+    # API container — no namespace/seccomp/rlimit/egress isolation, so it is effectively
+    # authenticated RCE with access to JWT_SECRET_KEY / ENCRYPTION_KEY and every user's
+    # encrypted keys. The whole class is default-off on cloud and gated by the SAME
+    # config here (both withheld from the worker registry via code_execution_enabled_for),
+    # but a single CODE_EXECUTE_CLOUD_ENABLED flip would silently expose it; require a
+    # second, explicitly-named acknowledgement so the unsafe config can't be reached by
+    # accident (SEC-005).
     if (
         settings.code_execute_cloud_enabled
         and not settings.gvisor_enabled
@@ -275,6 +277,7 @@ app.include_router(system.router)
 app.include_router(admin.router, prefix="/v1")
 app.include_router(auth.router, prefix="/v1")
 app.include_router(boards.router, prefix="/v1")
+app.include_router(bookmarks.router, prefix="/v1")
 app.include_router(capabilities.router, prefix="/v1")
 app.include_router(conversations.router, prefix="/v1")
 app.include_router(devices.router, prefix="/v1")
@@ -286,7 +289,6 @@ app.include_router(inference.router, prefix="/v1")
 app.include_router(llm_key.router, prefix="/v1")
 app.include_router(memory.router, prefix="/v1")
 app.include_router(messages.router, prefix="/v1")
-app.include_router(model_modes.router, prefix="/v1")
 app.include_router(realtime.router, prefix="/v1")
 app.include_router(search.router, prefix="/v1")
 app.include_router(simulation.router, prefix="/v1")
@@ -294,7 +296,6 @@ app.include_router(simulation.router, prefix="/v1")
 # read-only page at the root (/shared/{token}, no /v1, no auth).
 app.include_router(sharing.router, prefix="/v1")
 app.include_router(sharing.public_router)
-app.include_router(tools.router, prefix="/v1")
 app.include_router(usage.router, prefix="/v1")
 app.include_router(users.router, prefix="/v1")
 app.include_router(workspaces.router, prefix="/v1")

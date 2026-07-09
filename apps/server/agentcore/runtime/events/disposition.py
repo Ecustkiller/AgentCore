@@ -96,6 +96,14 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
         "进程内 HITL 审批门（InteractionRegistry，超时=拒）——结果经 tool_use_* 落库，提示本身瞬态",
     ),
     EventType.APPROVAL_RESOLVED: (Disposition.EPHEMERAL, "审批门裁决——瞬态门的关闭，结果体现在后续工具事件"),
+    EventType.DELEGATION_AUTHORIZATION_REQUIRED: (
+        Disposition.EPHEMERAL,
+        "委派级授权挂起（InteractionRegistry，超时=拒）——结果体现在后续工具事件",
+    ),
+    EventType.DELEGATION_AUTHORIZATION_RESOLVED: (
+        Disposition.EPHEMERAL,
+        "委派级授权裁决——瞬态门的关闭，结果体现在后续工具事件",
+    ),
     EventType.DEBATE_ROUND_STARTED: (
         Disposition.EPHEMERAL,
         "辩论轮次开场——实时叙事覆盖层；各方发言经 debater 的 RUN_* 事实持久化",

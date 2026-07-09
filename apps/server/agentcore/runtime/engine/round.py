@@ -10,7 +10,7 @@ from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import LLMUpstreamError, error_fields_for
 from agentcore.core.logging import get_logger
-from agentcore.llm.profiles import ModelProfile, build_request
+from agentcore.llm.profiles import ProfileParams, build_request
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 from agentcore.llm.tools_gate import TOOLS_UNAVAILABLE_RUNTIME_MESSAGE
@@ -85,9 +85,9 @@ class LlmRoundFailure:
     """LLM call failed on the non-raising path.
 
     Carries the ``(error_code, error_message)`` an SSE ``error`` event would show,
-    but does NOT emit it: the loop defers surfacing the error until the engine-level
-    fallback ladder is exhausted, so a successful fallback-model retry shows the user
-    no error. The ``raise_on_error`` (worker) path re-raises instead of returning this.
+    but does NOT emit it: the loop defers surfacing the error until
+    ``decide_llm_failure`` returns a terminal directive. The ``raise_on_error``
+    (worker) path re-raises instead of returning this.
     """
 
     error_code: str
@@ -99,7 +99,7 @@ class LlmRoundFailure:
 async def run_llm_round(
     *,
     llm: OpenAICompatibleProvider,
-    profile: ModelProfile,
+    profile: ProfileParams,
     messages: list[LLMMessage],
     investigation_tools: frozenset[str],
     tool_defs: list[dict[str, Any]] | None,
@@ -184,8 +184,6 @@ def decide_no_tool_round(
     *,
     final_content: str,
     controller: LoopController,
-    profile: ModelProfile,
-    active_model: str | None,
     annotate_citations: bool,
     citation_sink: list[dict[str, Any]] | None,
     finish_guard_reworks: int,
@@ -196,9 +194,8 @@ def decide_no_tool_round(
 
     A round that produced text either finishes cleanly (``Return``) or, if
     finish_guard rejects it and reworks remain, is reworked (``Rework``). An empty
-    round walks the convergence controller's degraded ladder: switch to the
-    fallback model (``SwitchModel``), finish degraded (``Return`` + DEGRADED), or
-    retry once more (``Continue``).
+    round walks the convergence controller's degraded ladder: finish degraded
+    (``Return`` + DEGRADED) or retry on the same model (``Continue``).
     """
     if outcome.content:
         reworks = finish_guard(
@@ -210,7 +207,7 @@ def decide_no_tool_round(
             return Rework()
         return Return()
 
-    action = controller.empty_response_action(fallback_available=False)
+    action = controller.empty_response_action()
     if action is Intervention.FINALIZE:
         logger.warning("engine.degraded")
         if tools_offered and supports_tools is False and not outcome.content:

@@ -12,6 +12,7 @@ from agentcore.db.models import (
     CostEvent,
     MemoryUpdateRow,
     Message,
+    MessageBookmark,
     TurnMetricsRow,
     User,
 )
@@ -32,7 +33,6 @@ class ConversationRepository:
         title: str | None = None,
         folder_id: str | None = None,
         mode: str = "chat",
-        model_mode: str | None = None,
         local_container_root_id: str | None = None,
     ) -> Conversation:
         # Omit title when not provided so the DB server_default ('') applies.
@@ -55,8 +55,6 @@ class ConversationRepository:
             conv.folder_id = folder_id
         if mode != "chat":
             conv.mode = mode
-        if model_mode is not None:
-            conv.model_mode = model_mode
         # Desktop local-first lazy-promotion hint (工作区对称化 D1a): the container root
         # under which a 裸聊's first file write mints a *local* workspace. NULL = cloud
         # intent. Captured once here at creation so every promotion path (turn / panel)
@@ -233,23 +231,41 @@ class ConversationRepository:
         )
         return result.all(), total
 
-    async def search(self, user_id: str, query: str, *, limit: int) -> Sequence[Conversation]:
+    async def search(
+        self,
+        user_id: str,
+        query: str,
+        *,
+        limit: int,
+        updated_after: datetime | None = None,
+        folder_id: str | None = None,
+        tag: str | None = None,
+    ) -> Sequence[Conversation]:
         """Owner-scoped title substring search (全局搜索 Tier 1).
 
         ILIKE over ``title``, newest-activity first, capped at ``limit``. Excludes
         soft-deleted and hidden handoff-host conversations — the same visibility as
         the sidebar list, so a hit is always something the user can actually open.
+
+        The optional facets (搜索结果过滤) narrow the same result set server-side so
+        the cap is spent on matching rows rather than filtered-away ones:
+        ``updated_after`` keeps only recently-active chats (时间过滤), ``folder_id``
+        scopes to one folder/工作区.
         """
+        stmt = select(Conversation).where(
+            Conversation.user_id == user_id,
+            Conversation.deleted_at.is_(None),
+            Conversation.mode != "handoff",
+            Conversation.title.ilike(_ilike_pattern(query)),
+        )
+        if updated_after is not None:
+            stmt = stmt.where(Conversation.updated_at >= updated_after)
+        if folder_id is not None:
+            stmt = stmt.where(Conversation.folder_id == folder_id)
+        if tag is not None:
+            stmt = stmt.where(Conversation.tag == tag)
         result = await self._session.execute(
-            select(Conversation)
-            .where(
-                Conversation.user_id == user_id,
-                Conversation.deleted_at.is_(None),
-                Conversation.mode != "handoff",
-                Conversation.title.ilike(_ilike_pattern(query)),
-            )
-            .order_by(Conversation.updated_at.desc())
-            .limit(limit)
+            stmt.order_by(Conversation.updated_at.desc()).limit(limit)
         )
         return result.scalars().all()
 
@@ -260,44 +276,25 @@ class ConversationRepository:
         conv = await self.get_by_id(conversation_id, user_id=user_id)
         return await self._write_title(conv, title)
 
-    async def update_title_unscoped(self, conversation_id: str, title: str) -> Conversation | None:
+    async def update_title_unscoped(
+        self, conversation_id: str, title: str, *, tag: str | None = None
+    ) -> Conversation | None:
         """Title write for trusted internal callers — post-turn auto-title minting — that
         hold an already-authorized ``conversation_id`` but no user (SEC-002)."""
         conv = await self.get_by_id_unscoped(conversation_id)
-        return await self._write_title(conv, title)
+        return await self._write_title(conv, title, tag=tag)
 
-    async def _write_title(self, conv: Conversation | None, title: str) -> Conversation | None:
+    async def _write_title(
+        self,
+        conv: Conversation | None,
+        title: str,
+        *,
+        tag: str | None = None,
+    ) -> Conversation | None:
         if conv:
             conv.title = title
-            await self._session.commit()
-            await self._session.refresh(conv)
-        return conv
-
-    async def set_model_mode(
-        self, conversation_id: str, mode: str | None, *, user_id: str
-    ) -> Conversation | None:
-        """Set (or clear, with ``None``) a conversation's 质量档 override (llm/modes.py).
-
-        ``None`` falls back to the user's default → operator default. The value is an
-        opaque mode ref (preset name or custom ModelMode id); an unknown ref resolves
-        safely to default at turn time, so this only persists the selection.
-        """
-        conv = await self.get_by_id(conversation_id, user_id=user_id)
-        if conv:
-            conv.model_mode = mode
-            await self._session.commit()
-            await self._session.refresh(conv)
-        return conv
-
-    async def set_instructions(
-        self, conversation_id: str, instructions: str | None, *, user_id: str
-    ) -> Conversation | None:
-        """Set (or clear, with ``None``/"") a conversation's custom instructions
-        (对话级自定义指令). Owner-scoped (``user_id`` mandatory, SEC-002). A blank
-        string is normalized to NULL so「no instructions」has one representation."""
-        conv = await self.get_by_id(conversation_id, user_id=user_id)
-        if conv:
-            conv.instructions = (instructions or "").strip() or None
+            if tag is not None:
+                conv.tag = tag
             await self._session.commit()
             await self._session.refresh(conv)
         return conv
@@ -402,6 +399,13 @@ class ConversationRepository:
         """
         await self._session.execute(
             delete(Message).where(Message.conversation_id == conversation_id)
+        )
+        # 消息收藏 pointers into this conversation (app-level cascade; no message left
+        # for them to reference after the bulk delete above).
+        await self._session.execute(
+            delete(MessageBookmark).where(
+                MessageBookmark.conversation_id == conversation_id
+            )
         )
         await self._session.execute(
             delete(CostEvent).where(CostEvent.conversation_id == conversation_id)

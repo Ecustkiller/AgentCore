@@ -38,7 +38,6 @@ from agentcore.runtime.runs.constants import (
     MAX_DELEGATION_DEPTH,
     POST_NOTE_TOOL_NAME,
     READ_NOTES_TOOL_NAME,
-    REQUEST_DELEGATE_TOOL_NAME,
 )
 from agentcore.runtime.runs.contract import ContractVerdict, check_contract, format_feedback
 from agentcore.runtime.runs.executor_context import (
@@ -73,7 +72,6 @@ from agentcore.runtime.runs.serialize import (
     run_final_fact,
 )
 from agentcore.runtime.runs.types import ContextBlock, RunPhase, RunSpec, RunState
-from agentcore.tools.builtin.request_delegate import RequestDelegateTool, WorkerDelegationState
 from agentcore.tools.protocol import EscalationChannel, EscalationOutcome, ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.write_claims import WriteCoordinator
@@ -368,15 +366,12 @@ def build_agent_executor(
                     )
                 ),
             )
-            # 阶段2 嵌套子任务: hand this worker delegation tools per its can_delegate mode —
-            # True = delegate+replan at start (过渡兼容); "auto" = request_delegate only until
-            # the worker applies mid-run; False = leaf (no delegation tools).
+            # 阶段2 嵌套子任务: hand this worker delegation tools when opted in.
             worker_tools = tools
             # spec.tools is None for an unrestricted worker → react_loop offers all
             # team tools (the fail-safe default); a non-empty list restricts to those.
             allowed_tools = spec.tools
             identity = _WORKER_IDENTITY
-            delegation_state: WorkerDelegationState | None = None
             if (
                 delegate_factory is not None
                 and spec.can_delegate is True
@@ -395,30 +390,6 @@ def build_agent_executor(
                     None if spec.tools is None else [*spec.tools, *lead_subteam.tool_names]
                 )
                 identity = _WORKER_CAPTAIN_IDENTITY
-            elif (
-                delegate_factory is not None
-                and spec.can_delegate == "auto"
-                and spec.depth < MAX_DELEGATION_DEPTH
-            ):
-                delegation_state = WorkerDelegationState(
-                    registry=tools,
-                    allowed_tools=allowed_tools,
-                    current_round=[0],
-                )
-                request_tool = RequestDelegateTool(
-                    depth=spec.depth,
-                    max_rounds=profile.max_rounds,
-                    delegate_factory=delegate_factory,
-                    state=delegation_state,
-                )
-                worker_tools = _registry_with(tools, request_tool)
-                delegation_state.registry = worker_tools
-                if allowed_tools is not None and REQUEST_DELEGATE_TOOL_NAME not in allowed_tools:
-                    allowed_tools = [*allowed_tools, REQUEST_DELEGATE_TOOL_NAME]
-                identity = _WORKER_IDENTITY.replace(
-                    "你不能再向下委派。",
-                    "如果你发现任务可以并行拆分，可以调用 request_delegate 申请派人权。",
-                )
             if not collaboration:
                 identity = identity.replace(_WORKER_TEAM_NOTE_POLICY, "").replace("\n\n\n", "\n\n")
             # 非协作批次 (collaboration=False, e.g. debate): strip the 团队便签 tools from the
@@ -457,9 +428,6 @@ def build_agent_executor(
                 # a dead decision.
                 if allowed_tools is not None and AMEND_NOTE_TOOL_NAME not in allowed_tools:
                     allowed_tools = [*allowed_tools, AMEND_NOTE_TOOL_NAME]
-            if delegation_state is not None:
-                delegation_state.allowed_tools = allowed_tools
-                delegation_state.registry = worker_tools
             from agentcore.runtime.audit.hooks import on_permission_effective
 
             on_permission_effective(
@@ -562,10 +530,7 @@ def build_agent_executor(
                     approval_gate=approval_gate,
                     usage_sink=inflight,
                     on_round_begin=_pull_notes,
-                    round_sink=delegation_state.current_round if delegation_state else None,
                 )
-                if delegation_state is not None and delegation_state.lead_subteam is not None:
-                    lead_subteam = delegation_state.lead_subteam
                 run_usage = run_usage + round_usage
                 run_rounds += round_rounds
                 # This pass's usage is now folded into run_usage via its return value;
@@ -685,7 +650,19 @@ def build_agent_executor(
             # ``inflight`` (B-deep 失败计费).
             if inflight:
                 run_usage = run_usage + inflight[0]
-            logger.error("run.failed", run_id=spec.run_id, error=str(e), exc_info=True)
+            # 确定性失败区分 (BL-6): a non-retryable upstream error (prompt 超长 / 400 /
+            # 鉴权 / 余额 — AgentCoreError.retryable=False) will re-fail identically, so
+            # carry that verdict onto the state and let the scheduler skip its infra retry.
+            # A plain crash / unknown exception has no ``retryable`` attr → defaults True
+            # (retry as before), so only KNOWN-deterministic failures opt out.
+            retryable = bool(getattr(e, "retryable", True))
+            logger.error(
+                "run.failed",
+                run_id=spec.run_id,
+                error=str(e),
+                retryable=retryable,
+                exc_info=True,
+            )
             sink.emit(run_failed(spec.run_id, agent_id, str(e)))
             return _priced_failure(
                 str(e),
@@ -693,6 +670,7 @@ def build_agent_executor(
                 usage=run_usage,
                 rounds=run_rounds,
                 duration_ms=duration_ms,
+                retryable=retryable,
             )
         finally:
             # 堵漏账: if this lead opened a sub-plan at a 波边界 but its react loop ended

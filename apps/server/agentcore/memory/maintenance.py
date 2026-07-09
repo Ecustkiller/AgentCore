@@ -172,11 +172,11 @@ async def maintain_user_memory(
                 m.path for m in await store.list(user_id, scope=project_id) if is_topic_path(m.path)
             }
             project_profile = await store.load(user_id, CORE_MEMORY_FILE, scope=project_id)
-        current_memory = await store.load(user_id, CORE_MEMORY_FILE)
+        current_profile = await store.load(user_id, CORE_MEMORY_FILE)
         current_preferences = await store.load(user_id, PREFERENCES_MEMORY_FILE)
         extract_input = MemoryExtractInput(
             user_id=user_id,
-            current_memory=current_memory,
+            current_profile=current_profile,
             current_preferences=current_preferences,
             project_id=project_id,
             current_project_memory=project_profile,

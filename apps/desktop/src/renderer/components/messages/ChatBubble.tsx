@@ -88,7 +88,7 @@ function formatBytes(bytes: number | null | undefined): string {
  * raw bytes, so a bare <img src> URL wouldn't carry auth) and shown via an
  * object URL that is revoked on unmount. The preview loads the server-generated
  * WebP thumbnail (`thumb_path`) when present — the bandwidth win — and falls
- * back to the original for small images / legacy rows. Clicking always saves the
+ * back to the original when no thumbnail was generated. Clicking always saves the
  * full-resolution original. A small error tile shows if the fetch fails (e.g.
  * the file was removed).
  */

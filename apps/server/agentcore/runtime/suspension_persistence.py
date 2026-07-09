@@ -9,9 +9,11 @@ frames on reopen). Uses ``async_session_factory`` directly (not an injected requ
 session), matching the cost-ledger / session-roster persistence posture.
 
 The paused turn's journal-so-far rides the ``turn_journal`` table (唯一事实源, §8.3),
-NOT the frame: facts are appended on emit during the turn; :func:`claim_paused_turn`
-re-hydrates them, so the replay stream has a single home whether the turn is paused or
-completed.
+NOT the frame. Facts are normally appended on emit during the turn; at pause time
+:func:`save_paused_turn` also snapshots the suspending face's ``journal_entries`` (the
+authoritative fact-log stream, incl. the trailing ``*_required`` card) into
+``turn_journal`` so a cold resume can rebuild the CEO window even when the append-on-emit
+writer lagged or degraded. :func:`claim_paused_turn` re-hydrates from that table.
 
 Saves are best-effort: a persistence failure logs and degrades to 2a in-memory
 behaviour (the live resolve still works; only the durable backstop is lost) rather
@@ -43,8 +45,8 @@ async def save_paused_turn(suspension: TurnSuspension) -> None:
     Stamps the ambient turn ``trace_id`` (this runs inside the pipeline's trace
     scope) so the persisted pause links back to its originating turn's logs.
     Upsert: re-pausing the same turn (resume → pause again) overwrites in place.
-    The journal-so-far is NOT in the frame — it was appended on emit to
-    ``turn_journal`` (唯一事实源, §8.3) during the turn.
+    The journal-so-far is NOT in the frame — it is written to ``turn_journal`` here
+    (唯一事实源, §8.3) from the suspending face's ``journal_entries`` snapshot.
     """
     trace_id = suspension.trace_id or get_log_value("trace_id") or None
     writer = current_journal_writer.get()
@@ -52,8 +54,16 @@ async def save_paused_turn(suspension: TurnSuspension) -> None:
         await writer.flush()
         if writer.degraded:
             suspension.journal_degraded = True
+    journal_entries = list(suspension.journal_entries or [])
     try:
         async with async_session_factory() as db:
+            if journal_entries:
+                await TurnJournalRepository(db).record(
+                    turn_id=suspension.message_id,
+                    conversation_id=suspension.conversation_id,
+                    trace_id=trace_id,
+                    entries=journal_entries,
+                )
             await PausedTurnRepository(db).upsert(
                 message_id=suspension.message_id,
                 conversation_id=suspension.conversation_id,

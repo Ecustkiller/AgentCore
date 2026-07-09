@@ -28,9 +28,9 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
-# debate / delegate / revise are wired on every path; ask_user is live-user only;
-# test_run gates verify_and_fix.
-_FULL_TOOLS = {"delegate", "revise", "ask_user", "debate", "test_run"}
+# debate / delegate / revise are wired on every path; ask_user is live-user only.
+# verify_and_fix / long_form_writing / team_orchestration_advanced ride delegate.
+_FULL_TOOLS = {"delegate", "revise", "ask_user", "debate"}
 _NO_LIVE_USER = {"delegate", "revise", "debate"}  # autonomous path: no ask_user
 
 
@@ -83,16 +83,17 @@ def test_registry_rejects_duplicate_name():
 def test_available_hides_gated_skills_without_required_tools():
     # The ask_user_* skills (and delegate_checkpoint, which pauses for user review)
     # need the ask_user tool. On the autonomous (no live user) path it is not wired,
-    # so those skills drop out of the catalog.
+    # so those skills drop out of the catalog. verify_and_fix rides delegate (the
+    # delegated dev loop), so it stays available on the autonomous path.
     reg = build_system_skill_registry()
     available = {s.name for s in reg.available(_NO_LIVE_USER)}
     assert "team_orchestration_advanced" in available
     assert "debate_and_review" in available
     assert "revising_a_product" in available
+    assert "verify_and_fix" in available
     assert "ask_user_kickoff" not in available
     assert "ask_user_midtask" not in available
     assert "delegate_checkpoint" not in available
-    assert "verify_and_fix" not in available
 
 
 def test_available_shows_gated_skills_when_tools_wired():
@@ -123,9 +124,9 @@ def test_directory_omits_gated_skills_on_autonomous_path():
     assert "ask_user_kickoff" not in out
     assert "ask_user_midtask" not in out
     assert "delegate_checkpoint" not in out
-    assert "verify_and_fix" not in out
-    # The non-gated advanced skills are still offered.
+    # The delegate-gated + non-gated advanced skills are still offered.
     assert "team_orchestration_advanced" in out
+    assert "verify_and_fix" in out
 
 
 def test_directory_empty_when_nothing_available():
@@ -182,11 +183,10 @@ def test_team_orchestration_skill_teaches_delegate_knobs():
     # shaping, finalize, the DAG-vs-nesting distinction.
     body = _body("team_orchestration_advanced")
     assert "fast" in body and "strong" in body
-    assert "contract" in body
-    assert "expected_output" in body
+    assert "deliverable" in body
     assert "finalize" in body
     assert "depends_on" in body and "同一层" in body
-    assert "can_delegate" in body
+    assert "嵌套委派" in body and "大模块" in body
 
 
 def test_team_orchestration_skill_teaches_constraint_vs_solution_and_outline_step():
@@ -218,7 +218,7 @@ def test_team_orchestration_skill_teaches_review_contract_template():
     assert "审查类任务的统一契约" in body
     assert "output_format" in body and "json" in body
     assert "problems" in body and "suggestions" in body and "score" in body
-    assert "expected_output" in body
+    assert "deliverable" in body
     assert "required_sections" in body  # markdown fallback
 
 
@@ -307,7 +307,10 @@ def test_delegate_checkpoint_skill_teaches_wave_boundary_pause():
 
 def test_verify_and_fix_skill_teaches_test_run_loop():
     skill = build_system_skill_registry().get("verify_and_fix")
-    assert skill.requires_tools == ("test_run",)
+    # Gated on delegate (the delegated dev loop), not test_run — test_run is now a
+    # worker-only execution tool and consult_skill is CEO-only, so gating on it would
+    # make the skill un-advertisable. The body still teaches the test_run → fix loop.
+    assert skill.requires_tools == ("delegate",)
     body = skill.body
     assert "test_run" in body
     assert "str_replace" in body

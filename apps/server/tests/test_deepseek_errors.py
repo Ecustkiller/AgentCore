@@ -5,12 +5,13 @@ import pytest
 
 from agentcore.core.errors import (
     LLMAuthError,
+    LLMError,
     LLMInsufficientBalanceError,
     LLMUpstreamError,
 )
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
-from agentcore.llm.provider.protocol import LLMMessage, LLMRequest
+from agentcore.llm.provider.protocol import LLMMessage, LLMRequest, ToolCall, ToolCallFunction
 
 
 async def _mock_provider(handler) -> OpenAICompatibleProvider:
@@ -73,6 +74,70 @@ async def test_complete_maps_500_with_context():
         assert "boom" in (ei.value.details.get("upstream_body_preview") or "")
     finally:
         await provider.close()
+
+
+async def test_complete_maps_400_to_llm_error_with_upstream_body():
+    body = (
+        b'{"error":{"message":"The `reasoning_content` in the thinking mode '
+        b'must be passed back to the API."}}'
+    )
+    provider = await _mock_provider(lambda request: httpx.Response(400, content=body))
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.complete(_req())
+        assert ei.value.retryable is False
+        assert "reasoning_content" in ei.value.message
+        assert ei.value.details.get("upstream_status") == 400
+        assert "reasoning_content" in (ei.value.details.get("upstream_body_preview") or "")
+    finally:
+        await provider.close()
+
+
+async def test_stream_maps_400_to_llm_error():
+    body = b'{"error":{"message":"bad request"}}'
+    provider = await _mock_provider(lambda request: httpx.Response(400, content=body))
+    try:
+        with pytest.raises(LLMError) as ei:
+            async for _ in provider.stream(_req()):
+                pass
+        assert "bad request" in ei.value.message
+    finally:
+        await provider.close()
+
+
+def test_build_payload_echoes_reasoning_content_for_tool_turns():
+    provider = OpenAICompatibleProvider(name="test", api_key="k", base_url="http://x/v1")
+    req = LLMRequest(
+        messages=[
+            LLMMessage(role="user", content="go"),
+            LLMMessage(
+                role="assistant",
+                content="",
+                reasoning_content="chain",
+                tool_calls=[
+                    ToolCall(
+                        id="tc1",
+                        function=ToolCallFunction(name="search", arguments="{}"),
+                    )
+                ],
+            ),
+            LLMMessage(
+                role="assistant",
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        id="tc2",
+                        function=ToolCallFunction(name="read", arguments="{}"),
+                    )
+                ],
+            ),
+        ],
+        model=DEEPSEEK_V4_FLASH,
+    )
+    payload = provider._build_payload(req, stream=True)
+    assistant_msgs = [m for m in payload["messages"] if m["role"] == "assistant"]
+    assert assistant_msgs[0]["reasoning_content"] == "chain"
+    assert assistant_msgs[1]["reasoning_content"] == ""
 
 
 def test_balance_and_auth_errors_are_not_retryable():

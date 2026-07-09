@@ -222,7 +222,7 @@ def window_from_journal(
       turns) spliced between them exactly as the executor builds it.
     - each ``llm_call`` of the target run that carried ``tool_calls`` → the ``assistant``
       message (``content`` / ``reasoning_content`` echoed verbatim — DeepSeek thinking
-      mode 400s without the reasoning on a tool-call turn, llm.mdc §4.3 — plus the
+      mode 400s without the reasoning on a tool-call turn, see DeepSeek-V4-API参考 — plus the
       ``tool_calls``), followed by one ``tool`` message per **completed** call (result
       matched by ``tool_call_id`` from the execution ``tool_call`` fact — the FULL
       post-annotation text the round carried, 边界① cleared). A call with no ``tool_call``

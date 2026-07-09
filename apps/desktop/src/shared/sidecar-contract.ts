@@ -20,6 +20,8 @@ import type { components } from "@agentcore/contract-rest-types";
 export interface SidecarInference {
   baseUrl: string;
   apiKey: string;
+  /** 服务端在铸 inference token 时解析的上游模型名（与推理代理一致）。 */
+  model: string;
 }
 
 /** 续辩种子（结构化补轮·B / 可逆叫停）：前端从收场卡发起续辩时把上一场 debate_result 投影成
@@ -56,11 +58,6 @@ export interface SidecarStartTurnRequest {
    *  已谈、首轮辩手读到上一场摘要）。普通回合缺省。主进程原样透传给 Python sidecar 的
    *  `startTurn.debateSeed`，引擎经 `params.get("debateSeed")` 喂 `run_chat_pipeline`。 */
   debateSeed?: SidecarDebateSeed;
-  /** 对话级自定义指令（per-conversation custom instructions）：云模式由服务端从会话行取并注入
-   *  系统提示；sidecar 无库，故由 renderer 从会话缓存喂入。主进程原样透传给 Python sidecar 的
-   *  `startTurn.instructions`，引擎经 `params.get("instructions")` 喂 `run_chat_pipeline`。
-   *  缺省 / 空 = 无自定义指令。 */
-  instructions?: string;
 }
 
 /** 一条历史消息（与引擎 `run_chat_pipeline` 的 history 形状对齐）。 */
@@ -93,6 +90,13 @@ export interface SidecarTurnResult {
   content: string;
   reasoningContent: string | null;
   finishReason: string;
+  /** The chat model this turn ACTUALLY ran on, as resolved inside the sidecar
+   *  (`resolve_turn_model`): the cloud-proxy/account model when an inference token was
+   *  present, else the local `settings.platform_model` on the dev fallback. The renderer
+   *  surfaces it on the model badge so it honestly reflects the per-turn model (and warns
+   *  when a fallback diverged). Optional / backward-compatible: absent from an older
+   *  sidecar, in which case the badge falls back to the account-config label. */
+  model?: string | null;
   rounds: number;
   /** 全量 token 快照（引擎记账的五项）——原样回写落 `Message.usage`，使 sidecar 回合重载后
    *  的 meta 行与云回合一致（云 `persist_turn_result` 落同样键）。成本不随行（云代理权威计费）。 */

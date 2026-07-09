@@ -39,6 +39,15 @@ class LlmKeyStatusResponse(BaseModel):
     message: str | None = None
     base_url: str | None = None
     default_model: str | None = None
+    byok_model: str | None = Field(
+        default=None,
+        description=(
+            "The user's stored BYOK model, independent of billing mode. Unlike "
+            "default_model (the *effective* model, which becomes the platform model "
+            "while platform billing is active), this always echoes the saved key's "
+            "own model. None when no key is configured."
+        ),
+    )
     supports_tools: bool | None = None
     billing_mode: str = Field(
         default="byok",

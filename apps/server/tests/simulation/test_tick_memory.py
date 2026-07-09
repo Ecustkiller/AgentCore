@@ -16,7 +16,7 @@ from agentcore.simulation.agents.memory import (
     summarize_agent_tick,
 )
 from agentcore.simulation.agents.tick_runner import AgentTickOutcome, run_agent_tick
-from agentcore.simulation.scenarios.town.config import LIN_PERSONA, seed_m1_world
+from agentcore.simulation.scenarios.town.config import LIN_PERSONA, seed_town_world
 from agentcore.simulation.types import SimAgentAction, SimAgentState, Vec3
 from agentcore.simulation.world.engine import WorldEngine
 from agentcore.simulation.world.state import WorldAgent
@@ -29,6 +29,37 @@ def test_append_tick_memory_trims_to_window():
     assert len(agent.tick_memories) == MAX_TICK_MEMORIES
     assert agent.tick_memories[0] == "mem-3"
     assert agent.tick_memories[-1] == f"mem-{MAX_TICK_MEMORIES + 2}"
+
+
+def test_append_protects_high_salience_reflection_from_routine_flood():
+    agent = WorldAgent(agent_id="a", name="A", role="r")
+    append_tick_memory(agent, "反思 tick12：我要更用心经营面包店")
+    for i in range(MAX_TICK_MEMORIES + 5):
+        append_tick_memory(agent, f"在 tick {i}，你留在广场做闲逛，遇到了无特别事件")
+    assert len(agent.tick_memories) == MAX_TICK_MEMORIES
+    # The salient reflection survives even though it is the oldest entry.
+    assert any(m.startswith("反思") for m in agent.tick_memories)
+
+
+def test_format_compresses_consecutive_identical_actions():
+    memories = [
+        "在 tick 1，你留在面包店做烘焙，遇到了无特别事件",
+        "在 tick 2，你留在面包店做烘焙，遇到了无特别事件",
+        "在 tick 3，你留在面包店做烘焙，遇到了无特别事件",
+        "在 tick 4，你前往了市场，遇到了无特别事件",
+    ]
+    block = format_tick_memories_for_perception(memories)
+    assert "在 tick 1–3，你留在面包店做烘焙，遇到了无特别事件（连续3次）" in block
+    assert "在 tick 4，你前往了市场，遇到了无特别事件" in block
+
+
+def test_format_keeps_distinct_actions_uncompressed():
+    memories = [
+        "在 tick 1，你前往了市场，遇到了无特别事件",
+        "在 tick 2，你留在市场做买卖，遇到了无特别事件",
+    ]
+    block = format_tick_memories_for_perception(memories)
+    assert "连续" not in block
 
 
 def test_format_tick_memories_for_perception_empty():
@@ -62,7 +93,7 @@ def test_summarize_agent_tick_fixed_format():
 
 
 def test_apply_tick_memories_writes_per_agent():
-    world = seed_m1_world()
+    world = seed_town_world()
     world.tick = 1
     outcome = AgentTickOutcome(
         action=SimAgentAction(
@@ -97,7 +128,7 @@ def test_state_roundtrip_preserves_tick_memories():
 
 @pytest.mark.asyncio
 async def test_run_agent_tick_injects_memories_into_prompt():
-    world = seed_m1_world()
+    world = seed_town_world()
     world.agents["lin"].tick_memories = [
         "在 tick 1，你前往了市场，遇到了无特别事件"
     ]

@@ -50,6 +50,7 @@ function mkAgent(id: string, role: string): AgentState {
     reasoningChunks: [],
     toolCalls: [],
     toolProgress: null,
+    toolExecutionLive: null,
   };
 }
 

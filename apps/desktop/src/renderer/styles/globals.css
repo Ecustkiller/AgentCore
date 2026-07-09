@@ -484,6 +484,20 @@
   }
 }
 
+/* Terminal status pop — a brief scale + fade when a tool row's status icon swaps
+ * from the running pulse to its ✓/✗ verdict (设计 §3 状态转换过渡). Scale/opacity
+ * only, on the freshly-mounted icon, so it plays once on the running→done edge. */
+@keyframes status-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 @keyframes voice-wave {
   0%,
   100% {
@@ -508,6 +522,7 @@
      flashes visible → hidden → fades in) and the `to` state after. */
   --animate-graph-node-enter: graph-node-enter 0.28s ease-out both;
   --animate-graph-node-flash: graph-node-flash 0.6s ease-out;
+  --animate-status-pop: status-pop 0.2s ease-out;
 }
 
 /* Smooth node repositioning when the user switches graph layout. ReactFlow sets
@@ -535,7 +550,8 @@
   .animate-task-card-enter,
   .animate-message-enter,
   .animate-graph-node-enter,
-  .animate-graph-node-flash {
+  .animate-graph-node-flash,
+  .animate-status-pop {
     animation: none;
   }
   .voice-wave-bar {

@@ -30,6 +30,8 @@ class SearchItem(BaseModel):
     match_start: int | None = None
     match_end: int | None = None
     updated_at: datetime | None = None
+    # Present on conversation hits; the owning conversation's auto-tag (null = none).
+    tag: str | None = None
 
 
 class SearchSection(BaseModel):

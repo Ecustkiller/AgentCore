@@ -8,6 +8,7 @@ from agentcore.llm.profiles import PLATFORM_MODEL_FLASH
 
 INFERENCE_CONVERSATION_HEADER = "X-AgentCore-Conversation"
 INFERENCE_TRACE_HEADER = "X-AgentCore-Trace"
+INFERENCE_MESSAGE_HEADER = "X-AgentCore-Message"
 
 
 @dataclass(frozen=True)

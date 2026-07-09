@@ -5,6 +5,7 @@ import {
 } from "@/components/ui/context-menu";
 import type { FileNode, FileSource } from "@/lib/fileSource";
 import { notifyActionError, notifySuccess } from "@/lib/toast";
+import { openShellAtWorkspacePath } from "@/services/terminalActions";
 import {
   ClipboardPaste,
   Copy,
@@ -16,6 +17,7 @@ import {
   FolderSearch,
   Pencil,
   Scissors,
+  Terminal,
   Trash2,
 } from "lucide-react";
 import type { FileTreeRowProps } from "./FileTreeRow";
@@ -46,9 +48,10 @@ export function FileTreeRowMenu({
   // 系统集成项只在源实现了对应方法时出现（本地源有、云端源无）——靠「方法是否存在」门控，
   // 组件内不按源 if 分支。「用默认程序打开」仅给文件（对目录而言就是再次定位，与 reveal 重复）。
   const canReveal = !!source.revealInOsFileManager;
+  const canOpenShell = !!source.openShellAtPath || !!source.openWorkspaceShell;
   const canOpenExternal = !node.isDir && !!source.openWithOsDefaultApp;
   const canCopyPath = !!source.copyOsPath;
-  const hasOsGroup = canReveal || canOpenExternal || canCopyPath;
+  const hasOsGroup = canReveal || canOpenShell || canOpenExternal || canCopyPath;
   // 复制走可选 copy（本地源有、云端源无）；剪切走必备 move（全源可用）；粘贴仅文件夹行 +
   // 剪贴板非空时出现（粘贴进该文件夹）。
   const canCopy = !!source.copy;
@@ -59,6 +62,9 @@ export function FileTreeRowMenu({
     } catch (e) {
       notifyActionError("无法在资源管理器中显示", e);
     }
+  };
+  const openShell = async () => {
+    await openShellAtWorkspacePath(source, node.path, node.isDir);
   };
   const openExternal = async () => {
     try {
@@ -121,6 +127,12 @@ export function FileTreeRowMenu({
             <ContextMenuItem onSelect={() => void reveal()}>
               <FolderSearch size={14} className="shrink-0" />
               <span className="flex-1 truncate">在资源管理器中显示</span>
+            </ContextMenuItem>
+          )}
+          {canOpenShell && (
+            <ContextMenuItem onSelect={() => void openShell()}>
+              <Terminal size={14} className="shrink-0" />
+              <span className="flex-1 truncate">在终端打开</span>
             </ContextMenuItem>
           )}
           {canCopyPath && (

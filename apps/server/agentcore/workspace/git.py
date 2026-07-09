@@ -29,7 +29,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from agentcore.config import settings
-from agentcore.core.net import URLBlock, classify_url
+from agentcore.core.net import PRIVATE_IP_BLOCKS, URLBlock, classify_url
 from agentcore.workspace._paths import resolve_safe_path
 from agentcore.workspace.locate import resolve_workspace_root
 
@@ -63,7 +63,7 @@ async def _reject_ssrf(repo_url: str) -> None:
     rather than a misleading SSRF refusal.
     """
     block = await classify_url(repo_url)
-    if block in (URLBlock.BLOCKED_HOST, URLBlock.PRIVATE_IP):
+    if block in (URLBlock.BLOCKED_HOST, *PRIVATE_IP_BLOCKS):
         raise ValueError("仓库地址被拒：不可指向本地 / 内网 / 保留地址")
 
 

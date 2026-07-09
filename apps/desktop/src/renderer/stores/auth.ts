@@ -6,8 +6,6 @@ export interface AuthUser {
   displayName: string;
   email: string | null;
   role: string;
-  /** Legacy account field from API; quality tiers are retired — ignored by the UI. */
-  defaultModelMode: string | null;
   /** Ready-to-render avatar URL (头像), already absolute (services/auth resolves the
    * backend's relative path against the API base); null = no avatar, show the initial. */
   avatarUrl: string | null;

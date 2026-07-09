@@ -20,17 +20,21 @@ import { FileArtifactsCard } from "@/components/FileArtifactsCard";
 import { MemoryUpdateCard } from "@/components/MemoryUpdateCard";
 import { PauseCard } from "@/components/PauseCard";
 import { ResumeCard } from "@/components/ResumeCard";
+import { VoiceButton, VoiceRecordingBar } from "@/components/VoiceInput";
 import { type MessageAttachment, readTextAttachment } from "@/lib/attachments";
 import {
   fileArtifactsFromEvents,
   fileArtifactsFromProcess,
   mergeArtifacts,
 } from "@/lib/fileArtifacts";
+import { useVoiceInput } from "@/lib/useVoiceInput";
 import {
   extractAsks,
   extractFollowups,
   extractPendingEscalations,
+  extractRunToolCalls,
   extractToolPhases,
+  extractWorkerToolPhases,
   fold,
 } from "@/protocol/fold";
 import type {
@@ -44,7 +48,14 @@ import type {
   ProjectedTurn,
 } from "@agentcore/protocol-conformance";
 import { Folder, Menu, Sparkles, SquarePen } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 // One-shot handoff from a draft send (at `/`) to the freshly-created conversation's first
@@ -225,10 +236,20 @@ function AssistantBubble({
     () => extractToolPhases(turn.events),
     [turn.events],
   );
+  const workerToolPhases = useMemo(
+    () => extractWorkerToolPhases(turn.events),
+    [turn.events],
+  );
   // 阻塞式求决策「待你拍板」: runId→pending escalation_id (旁路读原始事件)，喂给团队视图把待答
   // 的 worker 升级渲染成可交互答复卡；仅实时回合 (live) 可答。
   const pendingEscalations = useMemo(
     () => extractPendingEscalations(turn.events),
+    [turn.events],
+  );
+  // 队员工具明细 (RunDetail): runId→worker 工具调用 (旁路读原始事件，不入 ProjectedTurn)，喂给
+  // 团队视图的队员详情面；实时与回放同一条接线（history 走 HistoryAssistant 里的同一提取器）。
+  const runToolCalls = useMemo(
+    () => extractRunToolCalls(turn.events),
     [turn.events],
   );
   const meta = summarize(p);
@@ -242,6 +263,8 @@ function AssistantBubble({
         conversationId,
         pendingEscalations,
         escalationsInteractive: live,
+        runToolCalls,
+        workerToolPhases,
       }
     : undefined;
   const empty =
@@ -310,6 +333,9 @@ function HistoryAssistant({
             runs: p.runs,
             progress: p.progress,
             teamNotes: p.teamNotes,
+            // 队员工具明细 (RunDetail): re-folded from the journaled multi-agent runs.events —
+            // the same transport-only extractor the live turn uses (there is no second path).
+            runToolCalls: extractRunToolCalls(events),
           }
         : undefined;
     return { team, debate: p.debate };
@@ -398,6 +424,15 @@ export function ChatPage() {
   const prependAnchorRef = useRef<number | null>(null);
   // The controller for the stream currently held open (send / reattach). 停止 aborts it.
   const abortRef = useRef<AbortController | null>(null);
+
+  // 语音输入 (桌面对齐)：转写文本追加到现有草稿 (不覆盖)，完成后聚焦输入框供编辑再发。
+  // web 浏览器走 Web Speech API、原生壳走 capgo 插件，两者都不可用则 isSupported=false (按钮隐藏)。
+  const voice = useVoiceInput({
+    onTranscript: useCallback((text: string) => {
+      setInput((prev) => (prev.trim() ? `${prev} ${text}` : text));
+      requestAnimationFrame(() => composerInputRef.current?.focus());
+    }, []),
+  });
 
   // Append an event to the live (last) turn — lazily opening a userText-less turn when
   // none exists yet (a reattach on reopen, whose user bubble is already in history).
@@ -1030,6 +1065,23 @@ export function ChatPage() {
         </div>
       )}
 
+      {voice.error && (
+        <div className="error bar">
+          <span>{voice.error}</span>
+          <button type="button" className="link" onClick={voice.dismissError}>
+            知道了
+          </button>
+        </div>
+      )}
+
+      {voice.isRecording && (
+        <VoiceRecordingBar
+          duration={voice.duration}
+          interimText={voice.interimText}
+          onCancel={voice.cancel}
+        />
+      )}
+
       <div className="composer">
         <input
           ref={attachInputRef}
@@ -1057,6 +1109,13 @@ export function ChatPage() {
             if (e.key === "Enter") void onSubmit();
           }}
         />
+        {voice.isSupported && (
+          <VoiceButton
+            state={voice.state}
+            disabled={history === null || sending}
+            onClick={voice.toggle}
+          />
+        )}
         {sending ? (
           <button type="button" className="stop" onClick={stop}>
             停止

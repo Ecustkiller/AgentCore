@@ -19,7 +19,9 @@ def parse_decision(raw: Any) -> CheckpointDecision:
         return CheckpointDecision.CONTINUE
 
 
-def trim_result(turn_id: str, result: dict[str, Any]) -> dict[str, Any]:
+def trim_result(
+    turn_id: str, result: dict[str, Any], *, model: str | None = None
+) -> dict[str, Any]:
     """Project ``run_chat_pipeline``'s result into the JSON-safe startTurn response.
 
     The live events already carried the streaming detail; the response needs the
@@ -28,6 +30,12 @@ def trim_result(turn_id: str, result: dict[str, Any]) -> dict[str, Any]:
     the replay ``runs`` payload (team graph / 思考·工具 timeline). Spend is NOT relayed —
     it's metered authoritatively at the cloud inference proxy (Slice 4a), not from the
     client. ``finish_reason`` is a ``FinishReason`` enum, coerced to its string value here.
+
+    ``model`` is the chat model this turn ACTUALLY ran on (``resolve_turn_model`` over the
+    turn's creds — the cloud-proxy/account model when a token was present, else the local
+    ``settings.platform_model`` on the dev fallback). Surfaced so the desktop badge shows
+    the honest per-turn model and can warn when a fallback diverged from the account model.
+    Optional / backward-compatible: an older desktop simply ignores an unknown field.
     """
     finish = result.get("finish_reason")
     finish_str = finish.value if hasattr(finish, "value") else (str(finish) if finish else "error")
@@ -39,6 +47,7 @@ def trim_result(turn_id: str, result: dict[str, Any]) -> dict[str, Any]:
         "content": result.get("content", "") or "",
         "reasoningContent": result.get("reasoning_content"),
         "finishReason": finish_str,
+        "model": model,
         "rounds": int(result.get("rounds", 0) or 0),
         # Full usage snapshot (all five token metrics the engine accounts), forwarded to
         # ``POST .../local-turns`` so a reloaded sidecar turn's ``Message.usage`` matches a

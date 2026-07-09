@@ -92,6 +92,22 @@ def test_state_json_debrief_defaults_none():
     assert restored.debrief is None
 
 
+def test_state_json_round_trips_error_retryable():
+    # 确定性失败区分 (BL-6): a deterministic failure's non-retryable verdict must survive the
+    # seed / journal round-trip so a resume / retry-failed rebuild + the audit trail keep it.
+    state = RunState(phase=RunPhase.FAILED, error="prompt too long", error_retryable=False)
+    restored = state_from_json(state_to_json(state))
+    assert restored.error_retryable is False
+
+
+def test_state_json_error_retryable_defaults_true():
+    # A COMPLETED state (and any older frame missing the key) defaults to retryable=True,
+    # so ordinary retry behaviour is unchanged for pre-BL-6 rows.
+    restored = state_from_json(state_to_json(RunState(phase=RunPhase.COMPLETED, content="x")))
+    assert restored.error_retryable is True
+    assert state_from_json({"phase": "failed", "error": "x"}).error_retryable is True
+
+
 def test_escalations_from_transcript_collects_in_call_order():
     transcript = [
         LLMMessage(role="user", content="做事"),
@@ -267,7 +283,8 @@ def test_spec_without_deliverable_round_trips_to_none():
     assert restored.deliverable is None
 
 
-def test_spec_legacy_contract_on_policy_round_trips_to_deliverable():
+def test_spec_legacy_persisted_shapes_are_ignored():
+    # Legacy persisted shapes (expected_output / policy.contract) are dropped on load.
     raw = {
         "run_id": "r1",
         "task": "t",
@@ -277,10 +294,7 @@ def test_spec_legacy_contract_on_policy_round_trips_to_deliverable():
         },
     }
     restored = spec_from_json(raw)
-    assert restored.deliverable is not None
-    assert restored.deliverable.name == "报告.md"
-    assert restored.deliverable.min_length == 50
-    assert restored.deliverable.must_contain == ["结论"]
+    assert restored.deliverable is None
 
 
 def test_plan_json_round_trips_late_bound_placeholder_node():

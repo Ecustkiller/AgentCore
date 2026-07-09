@@ -146,6 +146,34 @@ def test_store_confirm_claim_drops_frame(tmp_path):
     assert asyncio.run(drive()) == []
 
 
+def test_store_recovers_stale_claims_on_init(tmp_path):
+    """A sidecar crash mid-resume leaves ``.claimed`` orphans; startup rolls them back."""
+    paused_dir = tmp_path / "paused"
+    paused_dir.mkdir()
+    record = {
+        "message_id": "m1",
+        "conversation_id": "c1",
+        "frame": _suspension("m1", "c1").to_json(),
+        "journal": [],
+        "journal_entries": [],
+        "history": [],
+        "summary": {},
+        "created_at": 0.0,
+    }
+    claimed = paused_dir / "m1.json.claimed"
+    claimed.write_text(json.dumps(record), encoding="utf-8")
+
+    store = LocalPausedTurnStore(paused_dir)
+
+    assert (paused_dir / "m1.json").is_file()
+    assert not claimed.exists()
+
+    async def drive() -> list[str]:
+        return [s.message_id for s in await store.list_pending("c1")]
+
+    assert asyncio.run(drive()) == ["m1"]
+
+
 def test_store_claim_wrong_conversation_does_not_consume(tmp_path):
     """A claim scoped to the wrong conversation returns None AND leaves the frame
     intact — a stray / cross-conversation resume can't destroy a valid pause."""

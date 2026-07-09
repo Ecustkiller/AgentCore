@@ -5,6 +5,7 @@ from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.builtin.amend_note import AmendNoteTool
 from agentcore.tools.builtin.code_execute import CodeExecuteTool
 from agentcore.tools.builtin.code_search import CodeSearchTool
+from agentcore.tools.builtin.desktop_notify import DesktopNotifyTool
 from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.builtin.file_ops import (
     FileAppendTool,
@@ -27,12 +28,16 @@ from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.protocol import WorkspaceBackend
 
 
-def code_execute_enabled_for(backend: WorkspaceBackend | None) -> bool:
-    """Whether ``code_execute`` may appear in a runtime worker toolset.
+def code_execution_enabled_for(backend: WorkspaceBackend | None) -> bool:
+    """Whether the code-execution tool class may appear in a runtime worker toolset.
 
-    Local / sidecar execution stays on; cloud ``location=server`` defaults off unless
-    ``GVISOR_ENABLED`` or ``CODE_EXECUTE_CLOUD_ENABLED`` is set (plain subprocess in
-    the API container is not a real isolation boundary — 安全权限与治理 §5).
+    Governs the WHOLE class that runs code through the sandbox chain — ``code_execute``
+    AND ``test_run`` (a test suite executes arbitrary project code, so it is
+    execution-equivalent). Local / sidecar execution stays on; cloud ``location=server``
+    defaults off unless ``GVISOR_ENABLED`` or ``CODE_EXECUTE_CLOUD_ENABLED`` is set (a
+    plain subprocess in the API container is not a real isolation boundary — 安全权限与
+    治理 §5). Keeping both tools behind ONE predicate (not a per-tool special-case) is
+    what makes the production-security posture cover the class consistently.
     """
     if backend is None:
         return True
@@ -41,13 +46,20 @@ def code_execute_enabled_for(backend: WorkspaceBackend | None) -> bool:
     return settings.gvisor_enabled or settings.code_execute_cloud_enabled
 
 
-def build_builtin_registry(*, include_code_execute: bool = True) -> ToolRegistry:
+def build_builtin_registry(*, include_execution_tools: bool = True) -> ToolRegistry:
     """Register the platform's built-in tools (single source of truth).
 
     Both the chat pipeline (worker toolset) and the read-only ``GET /tools``
     catalog build from this. The CEO-only ``delegate`` orchestration primitive is
     intentionally excluded — it is wired separately in ``runtime.pipeline`` and is
     not a general-purpose capability a worker (or the catalog) should advertise.
+
+    ``include_execution_tools`` gates the code-execution class as a unit
+    (``test_run`` + ``code_execute``): the worker registry withholds BOTH on a backend
+    that can't run code safely (see ``code_execution_enabled_for``), so a new
+    execution-class tool is governed the same way without another call-site edit. The
+    default (True) keeps them present for the class-defining derivations
+    (``per_call_tool_names`` / ``build_ceo_tool_registry``) and the ``GET /tools`` catalog.
     """
     registry = ToolRegistry()
     registry.register(WebSearchTool())
@@ -62,8 +74,8 @@ def build_builtin_registry(*, include_code_execute: bool = True) -> ToolRegistry
     registry.register(GrepTool())
     registry.register(CodeSearchTool())
     registry.register(GitTool())
-    registry.register(TestRunTool())
-    if include_code_execute:
+    if include_execution_tools:
+        registry.register(TestRunTool())
         registry.register(CodeExecuteTool())
     return registry
 
@@ -81,7 +93,7 @@ def build_worker_registry(*, backend: WorkspaceBackend | None = None) -> ToolReg
     to the CEO).
     """
     registry = build_builtin_registry(
-        include_code_execute=code_execute_enabled_for(backend),
+        include_execution_tools=code_execution_enabled_for(backend),
     )
     registry.register(EscalateTool())
     # post_note (the 便签墙 broadcast channel, §2.2 通) rides the same worker-only path as
@@ -99,6 +111,7 @@ def build_worker_registry(*, backend: WorkspaceBackend | None = None) -> ToolReg
     # read off the call args (never parsed out of prose) so the deliverable「输出」never
     # doubles it.
     registry.register(HandoffTool())
+    registry.register(DesktopNotifyTool())
     return registry
 
 
@@ -155,15 +168,32 @@ def file_mutation_tool_names() -> frozenset[str]:
     )
 
 
+def delegation_grantable_tool_names() -> frozenset[str]:
+    """Tools covered by a per-delegation grant (委派级授权).
+
+    The medium-risk class: ``code_execute`` plus the file-mutation tools
+    (``file_write`` / ``str_replace`` / ``file_delete`` / ``file_move`` /
+    ``file_append``). After the user chooses ``grant_delegation`` at delegate
+    start, these tools skip per-call approval for the rest of THAT delegation
+    (keyed by ``execution_id``). ``test_run`` and ``git`` are intentionally
+    excluded — execution-class ``test_run`` keeps per-call posture; ``git`` keeps
+    its existing write-subcommand gate.
+    """
+    return file_mutation_tool_names() | frozenset({"code_execute"})
+
+
 def per_call_tool_names() -> frozenset[str]:
     """The GRANTABLE tools that must be confirmed PER CALL — never whitelisted for the
-    rest of the turn by a「本轮内都允许」(APPROVE_ALWAYS) grant (today: ``code_execute``).
+    rest of the turn by a「本轮内都允许」(APPROVE_ALWAYS) grant (the code-execution class:
+    ``code_execute`` + ``test_run``).
 
     Derived from the single builtin registry as ``GRANTABLE ∩ EXECUTION`` (the same
-    single-source posture as ``file_mutation_tool_names``): ``code_execute`` is the
-    highest-risk side effect, so a turn-wide grant on it is refused and each call is
-    confirmed individually — closing the「授权一次 → 本回合后续被注入内容驱动的执行免再问」
-    缺口 (PI-004 / 安全权限与治理 §三 边界2). ``ApprovalGate`` consumes this.
+    single-source posture as ``file_mutation_tool_names``): these run code through the
+    sandbox chain — the highest-risk side effect — so a turn-wide grant is refused and
+    each call is confirmed individually, closing the「授权一次 → 本回合后续被注入内容驱动的
+    执行免再问」缺口 (PI-004 / 安全权限与治理 §三 边界2). Because it is a class predicate,
+    ``test_run`` joins automatically once its schema is EXECUTION + GRANTABLE — no
+    hardcoded tool name. ``ApprovalGate`` consumes this.
     """
     full = build_builtin_registry()
     return frozenset(

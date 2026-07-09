@@ -16,4 +16,31 @@ Build/
 
 # OS
 .DS_Store
-Thumbs.db
+Content/Town/SourceAssets/
+logs/
+
+# ---- Unity (apps/town Unity 6 client; coexists with UE until Phase 1 parity) ----
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]serSettings/
+[Mm]emoryCaptures/
+[Rr]ecordings/
+
+# Unity auto-generated solution / project files
+*.csproj
+*.unityproj
+*.sln.DotSettings.user
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.unitypackage
+*.app
+
+# Unity crash reports
+sysinfo.txt
+crashlytics-build.properties

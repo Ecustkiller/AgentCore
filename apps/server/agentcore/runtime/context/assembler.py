@@ -1,7 +1,7 @@
 """ContextAssembler — the single seam that stitches system-prompt fragments.
 
 上下文注入统一 Step 1（装配主干）+ Step 2（常驻源插件化）. Before Step 1 the system prompt
-was built by ad-hoc string concatenation scattered across ``runtime.prompt``. Step 1
+was built by ad-hoc string concatenation scattered across ``runtime.resolve.prompt``. Step 1
 collected those fragments into one assembler; Step 2 made each fragment a uniform
 :class:`PromptContributor` plugin carrying its own ``order`` (and a reserved ``budget``),
 so:
@@ -16,7 +16,7 @@ Behavior-preserving today: with the ``SectionOrder`` values the call sites pass,
 sorted render reproduces the prior inline order exactly, joined with ``"\\n"`` —
 byte-identical to the old assembly. That byte-identity is load-bearing: the CEO/worker
 system prefix must stay stable within a day or DeepSeek's exact-prefix cache is busted for
-the whole hint stack that follows (see ``runtime.prompt`` and ``pipeline.run``).
+the whole hint stack that follows (see ``runtime.resolve.prompt`` and ``pipeline.run``).
 """
 
 from __future__ import annotations

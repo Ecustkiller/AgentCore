@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolEffect
+from agentcore.runtime.approvals import DelegationAuthorizationDecision
 from agentcore.runtime.events import batch_metrics as batch_metrics_event
 from agentcore.runtime.events import run_progress, team_note_posted
 from agentcore.runtime.runs.redirect_queue import RunRedirectRequest, take_redirects
@@ -44,10 +45,16 @@ async def drive(
     finalize: bool,
     seed_notes: list[dict[str, str]] | None = None,
     complexity_hint: str = "standard",
+    call_idx: int | None = None,
+    completion_criteria: Any = None,
 ) -> ToolResult:
     """Run ``plan`` through the WaveScheduler and fold workers' products into a CEO ToolResult."""
     tool._pending_boundary = None
     tool._pending_pause = False
+    # 本批次定格的委派序号（见 DelegateTool.execute）：同回合并发委派共享 tool._calls，完成侧
+    # 日志必须用调用时定格的值而非活动计数器。resume / checkpoint 重跑时只有单个委派在飞，回退
+    # 到活动计数器即可。
+    call_idx = call_idx if call_idx is not None else tool._calls
     from agentcore.runtime.costing import usage_metadata
     from agentcore.runtime.runs import (
         DEFAULT_MAX_PARALLEL,
@@ -209,20 +216,72 @@ async def drive(
             else None
         )
     batch_metrics: list[BatchMetrics] = []
-    results = await WaveScheduler(tool._max_parallel or DEFAULT_MAX_PARALLEL).run(
-        plan,
-        executor,
-        seed_completed=seed_completed,
-        cancel_run_ids=_cancel_run_ids,
-        on_progress=_progress,
-        on_boundary=on_boundary,
-        metrics_sink=batch_metrics,
-    )
+    delegation_started = False
+    if worker_gate is not None and seed_completed is None:
+        workers = [
+            {
+                "role": node.role or node.agent_name,
+                "task_preview": node.task or node.objective,
+            }
+            for node in plan.nodes
+        ]
+        auth_decision = await worker_gate.request_delegation_authorization(
+            execution_id=execution_id,
+            workers=workers,
+        )
+        if auth_decision is DelegationAuthorizationDecision.DENY:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error="用户未授权本次委派，团队未启动。",
+            )
+        delegation_started = True
+
+    try:
+        results = await WaveScheduler(tool._max_parallel or DEFAULT_MAX_PARALLEL).run(
+            plan,
+            executor,
+            seed_completed=seed_completed,
+            cancel_run_ids=_cancel_run_ids,
+            on_progress=_progress,
+            on_boundary=on_boundary,
+            metrics_sink=batch_metrics,
+        )
+    finally:
+        if delegation_started and worker_gate is not None:
+            worker_gate.revoke_delegation(execution_id)
+
+    # 跑一半改方向 · 忽略路径 (run_redirect Step 4): a redirect whose target was already terminal
+    # when drained never became CANCELLED (so ``_progress`` never cold-re-ran it, leaving it in
+    # ``_redirect_feedback``); one that arrived after the last cancel poll is still queued. Both
+    # can no longer apply — record each once (per run) so the run detail can surface「改方向未生效」
+    # and offer an explicit accept, instead of the steer silently vanishing. Audit-only (no new
+    # SSE event), so the wire projection is untouched.
+    ignored_redirects: dict[str, RunRedirectRequest] = dict(_redirect_feedback)
+    for redir in take_redirects(execution_id):
+        ignored_redirects.setdefault(redir.run_id, redir)
+    if ignored_redirects:
+        from agentcore.runtime.audit.hooks import on_run_redirect_ignored
+
+        for run_id, redir in ignored_redirects.items():
+            logger.info(
+                "delegate.run_redirect_ignored",
+                execution_id=execution_id,
+                run_id=run_id,
+                feedback_preview=redir.feedback[:120],
+            )
+            on_run_redirect_ignored(
+                run_id=run_id,
+                feedback=redir.feedback,
+                execution_id=execution_id,
+            )
+
     if batch_metrics:
         m = batch_metrics[0]
         logger.info(
             "delegate.completed",
-            call=tool._calls,
+            call=call_idx,
             hint=complexity_hint,
             nodes=m.nodes,
             width=m.width,
@@ -261,7 +320,7 @@ async def drive(
     # on the cold resume drive — matching the disconnect→resume path this collapses onto.
     if tool._pending_pause:
         tool._pending_pause = False
-        logger.info("delegate.paused", call=tool._calls, completed=len(results))
+        logger.info("delegate.paused", call=call_idx, completed=len(results))
         return ToolResult(tool_call_id="", success=True, output="", effect=ToolEffect.SUSPEND)
 
     if tool._pending_boundary is not None:
@@ -294,7 +353,7 @@ async def drive(
         tool._acc.collab["boundary_yields"] += 1
         logger.info(
             "delegate.yielded",
-            call=tool._calls,
+            call=call_idx,
             reason=reason.value,
             boundary=[n.run_id for n in nodes],
             completed=len(results),
@@ -330,18 +389,18 @@ async def drive(
         )
         logger.info(
             "delegate.partial_failure_stashed",
-            call=tool._calls,
+            call=call_idx,
             failed=[n.run_id for n in failed_nodes],
             completed=len(results),
         )
         return ToolResult(
             tool_call_id="",
             success=True,
-            output=format_for_ceo(tool, plan, results),
+            output=format_for_ceo(tool, plan, results, call_idx=call_idx),
             output_limit=DELEGATE_OUTPUT_LIMIT,
         )
 
-    # §十一 来源卡接入 (方案①, 法律垂直场景设计.md): snapshot the turn-accumulated sources
+    # §十一 来源卡接入 (方案①, 远期规划.md §4.5): snapshot the turn-accumulated sources
     # BEFORE folding this call's workers in, so the slice below is exactly THIS delegate call's
     # NEW (deduped) web sources — including any nested sub-team absorbed just after. Carrying
     # them on the ToolResult lets the CEO-path execute_tools number them into the turn's source
@@ -360,12 +419,38 @@ async def drive(
     absorb_children(tool)
     new_citations = tool._acc.citations[citations_before:]
 
+    from agentcore.tools.builtin.delegate.completion import (
+        check_delegate_completion,
+        format_completion_gap_message,
+        resolve_completion_criteria,
+    )
+
+    criteria = resolve_completion_criteria(completion_criteria, plan)
+    if criteria is not None:
+        criteria_ok, gaps = check_delegate_completion(criteria, results)
+        if not criteria_ok:
+            gap_msg = format_completion_gap_message(gaps)
+            logger.info(
+                "delegate.completion_criteria_unmet",
+                criteria=criteria.kind,
+                gaps=gaps,
+                execution_id=execution_id,
+            )
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output=gap_msg,
+                output_limit=DELEGATE_OUTPUT_LIMIT,
+                metadata=usage_metadata(call_usage),
+                citations=new_citations or None,
+            )
+
     if finalize and len(plan.nodes) == 1:
         only = results.get(plan.nodes[0].run_id)
         if only and only.phase is RunPhase.COMPLETED and only.content.strip():
             return direct_result(tool, only)
 
-    output = format_for_ceo(tool, plan, results)
+    output = format_for_ceo(tool, plan, results, call_idx=call_idx)
     return ToolResult(
         tool_call_id="",
         success=True,

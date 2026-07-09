@@ -24,9 +24,8 @@ export interface DebateSideModel {
   stance: Stance | null;
   /** 身份色 `var(--agent-N)` (按 name hash，live↔收场恒定)；内联使用，遵 color-tokens。 */
   colorVar: string;
-  /** 该方辩手的模型覆写 (真·多模型辩论，`provider/model` 或空)：收场由 roster (`debate.sides`)
-   *  按 sideKey 映射补回，进行中 roster 未到 → 空 (不显模型徽章)。{@link modelVendorLabel} 映射成
-   *  友好厂商名供发言格标「豆包 / DeepSeek」。 */
+  /** 该方辩手 run 的【实际执行 model】（`run.model`）；MVP 各方同 turn model。{@link modelVendorLabel}
+   *  映射成友好厂商名供发言格标；空则不显徽章。 */
   model: string;
   run: RunNode | null;
 }
@@ -151,7 +150,7 @@ export interface DebateModel {
    *  旧产物），前端不渲染结辩区。 */
   closings: DebateClosingView[];
   /** 主持人开场白（收场权威产出）：顶部「会说话的主持人」气泡。空/缺省（进行中、旧产物、未产出）→
-   *  由 {@link DebateStream} 回落到 motion+首轮焦点拼出的模板开场白，故这里 null 不代表不渲染开场。 */
+   *  由 {@link DebateArena} 回落到 motion+首轮焦点拼出的模板开场白，故这里 null 不代表不渲染开场。 */
   opening: string | null;
   settled: boolean;
 }

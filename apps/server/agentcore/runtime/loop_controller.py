@@ -51,6 +51,8 @@ DEFAULT_UNPRODUCTIVE_THRESHOLD = 3
 # event-driven NUDGE, which only fires once a mechanical loop is detected.
 DEFAULT_REFLECTION_START_ROUND = 3
 DEFAULT_REFLECTION_INTERVAL = 3
+# Progress tools that reset investigation spinning (stage advance / delivery).
+PROGRESS_TOOLS = frozenset({"delegate", "file_write", "ask_user"})
 
 
 def progress_review_prompt(round_number: int) -> str:
@@ -82,9 +84,6 @@ class Intervention(StrEnum):
     CONTINUE = "continue"
     NUDGE = "nudge"
     FINALIZE = "finalize"
-    # B2 degraded handling: the model returned an empty response — retry the round
-    # once on the profile's fallback model before treating it as terminal.
-    FALLBACK = "fallback"
 
 
 @dataclass(frozen=True)
@@ -94,6 +93,9 @@ class ToolAttempt:
     fingerprint: str
     tool_name: str
     success: bool
+    # Policy/environment blocks (SSRF, egress breaker) are honest tool failures for the
+    # model but must not trip the run-scoped circuit breaker — the tool is fine.
+    policy_failure: bool = False
 
 
 @dataclass(frozen=True)
@@ -203,6 +205,7 @@ class LoopController:
         reflection_start_round: int = DEFAULT_REFLECTION_START_ROUND,
         reflection_interval: int = DEFAULT_REFLECTION_INTERVAL,
         convergence_finalize_rounds: int = 0,
+        convergence_spin_rounds: int = DEFAULT_THRESHOLD,
         investigation_tools: frozenset[str] = frozenset(),
     ) -> None:
         self._window = window
@@ -222,16 +225,15 @@ class LoopController:
         # and can't guillotine a worker after a single fan-out. Both feed the finalize log.
         self._investigation_calls = 0
         self._investigation_rounds = 0
-        # Over-investigation safety net (收敛治理, 保险丝): a pure runaway backstop. The soft
-        # nudge that once lived here was empirically ignored AND net-negative in A/B (cost ↑,
-        # no call reduction), so convergence discipline moved into the system prompt (frame
-        # from round 0) + the read_url failure guidance; this only FINALIZEs a true runaway
-        # that keeps investigating past ``finalize_rounds``. ``finalize_rounds <= 0`` disables.
+        # Over-investigation safety net (收敛治理, 保险丝): absolute round ceiling plus
+        # progress-aware spinning on repeated same-target reads. ``finalize_rounds <= 0``
+        # disables the absolute cap; ``spin_rounds <= 0`` disables spinning detection.
         self._convergence_finalize_rounds = max(0, convergence_finalize_rounds)
-        # B2 empty-response sub-policy: a separate consecutive-empty-round counter
-        # (NOT the tool-attempt window) and a one-shot "已用过 fallback" latch.
+        self._convergence_spin_rounds = max(0, convergence_spin_rounds)
+        self._prev_investigation_fps: frozenset[str] = frozenset()
+        self._same_target_investigation_streak = 0
+        # B2 empty-response sub-policy: a separate consecutive-empty-round counter.
         self._consecutive_empty = 0
-        self._fell_back = False
         # B2 tool circuit breaker: cumulative per-tool failure counts (run-scoped,
         # never cleared by the nudge window reset) + one-shot latches so each tool
         # fires its warn / disable transition at most once.
@@ -283,9 +285,15 @@ class LoopController:
         clears), since "this tool keeps failing" is a whole-run signal.
         """
         round_investigated = False
+        round_tool_names = {attempt.tool_name for attempt in attempts}
+        if round_tool_names & PROGRESS_TOOLS:
+            self._same_target_investigation_streak = 0
+            self._prev_investigation_fps = frozenset()
+
+        inv_fps: set[str] = set()
         for attempt in attempts:
             self._recent.append(attempt)
-            if not attempt.success:
+            if not attempt.success and not attempt.policy_failure:
                 self._tool_failures[attempt.tool_name] += 1
             # Over-investigation bookkeeping (收敛治理): tally read-only investigation
             # breadth. Counts every call (incl. failures) — a wide scan is breadth
@@ -293,10 +301,18 @@ class LoopController:
             if attempt.tool_name in self._investigation_tools:
                 self._investigation_calls += 1
                 round_investigated = True
+                inv_fps.add(attempt.fingerprint)
         # Rounds, not raw calls, drive the safety net: a parallel batch of N reads in one
         # round bumps this once, so fanning out can't guillotine the worker.
         if round_investigated:
             self._investigation_rounds += 1
+            if not (round_tool_names & PROGRESS_TOOLS):
+                current = frozenset(inv_fps)
+                if current and self._prev_investigation_fps and current <= self._prev_investigation_fps:
+                    self._same_target_investigation_streak += 1
+                else:
+                    self._same_target_investigation_streak = 0
+                self._prev_investigation_fps = current
 
     def note_empty_round(self, is_empty: bool) -> None:
         """Track consecutive empty-response rounds (B2).
@@ -307,20 +323,15 @@ class LoopController:
         """
         self._consecutive_empty = self._consecutive_empty + 1 if is_empty else 0
 
-    def empty_response_action(self, *, fallback_available: bool) -> Intervention:
+    def empty_response_action(self) -> Intervention:
         """Decide what to do after an empty round (B2 degraded ladder).
 
         ``FINALIZE`` once the consecutive-empty streak hits the threshold (the turn
-        ends as degraded rather than blank); else ``FALLBACK`` for the first empty
-        when a fallback model is available and unused (retry the round on it); else
-        ``CONTINUE`` (retry the round as-is). The fallback latch ensures we escalate
-        the model at most once per run.
+        ends as degraded rather than blank); else ``CONTINUE`` (retry the round on the
+        same model).
         """
         if self._consecutive_empty >= self._empty_threshold:
             return Intervention.FINALIZE
-        if fallback_available and not self._fell_back:
-            self._fell_back = True
-            return Intervention.FALLBACK
         return Intervention.CONTINUE
 
     def tool_circuit_breaker(self) -> CircuitBreak:
@@ -391,21 +402,28 @@ class LoopController:
         return self._investigation_rounds
 
     def convergence_action(self) -> Intervention:
-        """Over-investigation safety net: ``FINALIZE`` a true runaway, else ``CONTINUE``.
+        """Over-investigation finalize: progress-aware spinning, then absolute cap.
 
-        Keyed on investigation *rounds* (:attr:`investigation_rounds`) so a parallel
-        batch counts once. Returns ``FINALIZE`` only once the run keeps investigating past
-        ``finalize_rounds`` — a deliberately HIGH bar (a pure runaway backstop, e.g. the
-        17-round pathology), not a routine convergence tool: the soft nudge that once lived
-        here was empirically ignored and net-negative, so convergence discipline now lives
-        in the system prompt + the read_url failure guidance. Dormant (``CONTINUE``) when
-        ``finalize_rounds <= 0``.
+        Spinning = consecutive investigation-only rounds re-reading the same targets
+        (same tool+args fingerprints, or a subset of the prior round). Reading new
+        files each round does not trip spinning. The absolute ``finalize_rounds`` cap
+        is a hard backstop for true runaways. Either disabled when its threshold <= 0.
         """
+        if (
+            self._convergence_spin_rounds > 0
+            and self._same_target_investigation_streak >= self._convergence_spin_rounds
+        ):
+            return Intervention.FINALIZE
         if self._convergence_finalize_rounds <= 0:
             return Intervention.CONTINUE
         if self._investigation_rounds >= self._convergence_finalize_rounds:
             return Intervention.FINALIZE
         return Intervention.CONTINUE
+
+    @property
+    def same_target_investigation_streak(self) -> int:
+        """Consecutive investigation-only rounds re-reading the same targets."""
+        return self._same_target_investigation_streak
 
     def detect(self) -> StuckSignal | None:
         """Return the strongest stuck signal in the window, or ``None``.

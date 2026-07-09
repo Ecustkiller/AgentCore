@@ -45,6 +45,7 @@ class LlmKeyStatus:
     message: str | None = None
     base_url: str | None = None
     default_model: str | None = None
+    byok_model: str | None = None
     supports_tools: bool | None = None
     billing_mode: str = "byok"
     billing_preference: str = "byok"
@@ -152,6 +153,7 @@ class LlmKeyService:
             default_model=self._effective_default_model(
                 billing_mode=billing_mode, row_default=base.default_model
             ),
+            byok_model=base.default_model,
             supports_tools=base.supports_tools,
             billing_mode=billing_mode,
             billing_preference=billing_preference,

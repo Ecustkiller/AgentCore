@@ -61,7 +61,7 @@ CEO 是**管理者**（不是调查员）：它只直接持有「只读 / 检索
 
 > **轻量直出（finalize）✅ 已落地**：单 worker 且 `finalize=true` 时，worker 产出直接作为回合答复（`ToolEffect.HANDOFF`），省掉 CEO 合成轮；多 worker 或失败时回落 CEO 收尾。→ 见代码：`tools/builtin/delegate/`。
 
-> **`complexity_hint` 优化信号 ✅ 已落地**：`delegate` schema 含 `complexity_hint`（`light`/`standard`/`complex`），CEO 显式声明任务复杂度；引擎据此裁剪规划开销——`light` 时跳过 playbook 匹配、默认 finalize、不注入便签墙与兄弟感知块。**引擎自动推断**：单 worker 且无依赖时，若 CEO 未显式声明，引擎自动设为 `light`；缺省 `standard` 时行为不变。→ 见代码：`tools/builtin/delegate/`、`runtime/resolve/prompt.py`。
+> **`complexity_hint` 优化信号 ✅ 已落地**：`delegate` schema 含 `complexity_hint`（`light`/`standard` 两档），CEO 显式声明任务复杂度；引擎据此裁剪规划开销——`light` 时跳过 playbook 匹配、默认 finalize、不注入便签墙与兄弟感知块。**引擎自动推断**：单 worker 且无依赖时，若 CEO 未显式声明，引擎自动设为 `light`；缺省 `standard` 时行为不变。→ 见代码：`tools/builtin/delegate/`、`runtime/resolve/prompt.py`。
 
 > **委派后不重复调查 ✅ 已落地**：CEO 委派后，收尾续轮中不 redo 已委派的工作——系统提示强化「用团队产出写综述，不要重复调查」，而非硬禁只读工具（CEO 收尾仍须偶尔读 worker 产出验证）。→ 见代码：`runtime/resolve/prompt.py`。
 
@@ -188,20 +188,20 @@ CEO 不指定具体模型，只表达能力需求（快/强），由运行时映
 
 | 值 | 含义 | 运行时映射 |
 |---|---|---|
-| `fast` | 速度/成本优先，简单机械子任务 | `agent.fast` 画像（小轮数预算、低温度） |
+| `fast` | 速度/成本优先，简单机械子任务 | `agent.fast` 画像（小轮数预算，温度与 `strong` 相同） |
 | `strong` | 质量优先，复杂子任务 | `agent.strong` 画像（大轮数预算） |
 
 设计理由：① 解耦委派与具体模型名，模型更新不改委派逻辑；② `fast`/`strong` 保留场景级执行差异，用户不可见。
 
-**用户统一模型（BYOK）** — 全链路（CEO、worker、辩论辩手）共用用户在「设置·模型配置」配的一个 OpenAI 兼容端点：`api_key` + `base_url` + `default_model`（含 DeepSeek / 各家 / OpenRouter 等中转）。`resolve_user_model` + `apply_user_model` 把该 model 注入所有场景画像的 `model` 字段，**不再按角色或质量档 swap**；`ModelProfile` 仍按场景（`chat` / `agent.fast` / `agent.strong` / `memory` / `title` …）分化执行参数。
+**用户统一模型（BYOK）** — 全链路（CEO、worker、辩论辩手）共用用户在「设置·模型配置」配的一个 OpenAI 兼容端点：`api_key` + `base_url` + `default_model`（含 DeepSeek / 各家 / OpenRouter 等中转）。经 `resolve_turn_model` / `resolve_user_chat_model`（`llm/resolve.py`）解析出该 turn 的 model，由 `TurnProfiles.model` 单点持有，**不再按角色或质量档 swap**；场景 profile（`ProfileParams`）只按场景（`chat` / `agent.fast` / `agent.strong` / `memory` / `title` …）分化执行参数（温度/轮数），**不含模型名**，`build_request(model=…)` 显式传入。
 
-- **被否决：质量档矩阵**（`经济档`/`高质量档`、CEO vs worker 分选 Flash/Pro）——多数用户只想「配一个能用的模型」；内测期 Pro 撤出 ceiling 后机制对用户已无价值。质量档解析链、`/v1/model-modes` API 已废弃；`conversation.model_mode` accept-but-ignore。
+- **被否决：质量档矩阵**（`经济档`/`高质量档`、CEO vs worker 分选 Flash/Pro）——多数用户只想「配一个能用的模型」；内测期 Pro 撤出 ceiling 后机制对用户已无价值。质量档解析链、`/v1/model-modes` API、`conversation.model_mode` 与 `users.default_model_mode` 列**均已永久移除**（迁移 drop 表 + 两列）。
 - **MVP 约束**：`thinking` / `reasoning_effort` 默认不发（走各家默认行为）；⏳ per-provider 推理字段适配、原生 Claude/Gemini provider 见远期。
 - **`supports_tools` soft gate**：probe 测 tool calling，结果作 UI 提示 + preflight warning，**不做 hard 400**——中转兼容性参差不齐，probe 失败不等于端点真不支持；委派/辩论 preflight 返回 warning 后可继续，运行时 `tool_calls` 缺失则 graceful error 提示换模型。
 - **后台 one-shot**（memory / title / compaction）：**platform key 优先、BYOK 兜底**——有运营 platform 凭据时不消耗用户 token；仅 BYOK 时走用户 model 并降 temperature / max_tokens。`build_provider(purpose=user_facing|platform_internal)` 区分，不暴露给用户。
 - **Provider 路由保留、MVP 不暴露**：`ProviderRouter` 的 `provider/model` 前缀路由供 eval / ⏳ 辩论多模型辩手；MVP 辩论统一用户 model。
 
-→ 见代码：`llm/user_model.py`、`llm/key_service.py`、`llm/factory.py`、`api/routes/llm_key.py`；前端见 [`../04-前端/前端UX设计.md` §十三](/docs/04-前端/前端UX设计.md)、[`../04-前端/前端成本呈现.md` §7.4](/docs/04-前端/前端成本呈现.md)。
+→ 见代码：`llm/resolve.py`、`llm/key_service.py`、`llm/factory.py`、`api/routes/llm_key.py`；前端见 [`../04-前端/前端UX设计.md` §十三](/docs/04-前端/前端UX设计.md)、[`../04-前端/前端成本呈现.md` §7.4](/docs/04-前端/前端成本呈现.md)。
 
 ### 2.2 `depends_on` — 依赖关系（并行/串行的唯一开关）
 
@@ -234,16 +234,17 @@ CEO 不指定具体模型，只表达能力需求（快/强），由运行时映
 
 > **并行写隔离：软提示 + 硬守卫 ✅**：同扇出并行兄弟共享工作区、不受文件夹锁约束（任务内小队不锁），而 `file_write` 是覆盖语义——两兄弟写同名路径会互相覆盖。**第一线软提示**：兄弟感知块加一句「各自用不同文件 / 子目录」。**兜底硬守卫**：每批一个 `WriteCoordinator` 记录在飞认领 `path -> run_id`，撞上**同批并行兄弟**已认领的路径则报错引导改名（如 `report-1.md`）——撞名从「丢数据」变成「响错」。**只挡并发兄弟**：下游覆盖 ancestor 产物、CEO 后续批次覆盖前批（不同 coordinator）都不受影响。选冲突守卫而非子目录命名空间：不动共享工作区路径模型、血量最小。→ 见代码：`workspace/write_claims.py`（`WriteCoordinator`）、`runtime/runs/executor.py`、`tools/builtin/file_ops.py`（`FileWriteTool` 守卫）。
 
-### 2.4 `can_delegate` — 嵌套委派开关（一层）✅ 已落地
+### 2.4 `can_delegate` — 嵌套委派（一层）✅ 已落地
 
-worker 默认是**叶子**：拿不到 `delegate`、不能再向下拆。当某子任务复杂到需要它自己带一支小队时，CEO 给该 task 标 `can_delegate=true`，该 worker 才获得一个绑定到**自身为 captain** 的 `delegate`，可再委派一层子团队，看到子成员产出后自行整合。
+`depth < MAX_DELEGATION_DEPTH` 的 worker **默认获** `delegate` + `replan`（`can_delegate` 缺省 `true`）：启动即拥有绑定到**自身为 captain** 的一层子队拆分权，看到子成员产出后自行整合。CEO **不必逐个开启**——明确只需单步完成的叶子任务可设 `can_delegate=false` 显式禁止。
 
-- **硬深度上限 `depth ≤ 2`**（`MAX_DELEGATION_DEPTH`）：CEO（深度 0）→ worker（深度 1）→ sub-worker（深度 2）。深度 2 的 sub-worker **永不获** `delegate`，即使被标 `can_delegate`——执行器在「发不发工具」这唯一一处卡死，树不可能再深（CEO → worker → sub-worker 封顶）。
-- **默认关、显式开**：杜绝「为委派而委派」的失控嵌套，只有 CEO 判断确需二次拆分才开。
+- **硬深度上限 `depth ≤ 2`**（`MAX_DELEGATION_DEPTH`）：CEO（深度 0）→ worker（深度 1）→ sub-worker（深度 2）。depth=2 的 sub-worker **永不获** `delegate`，无论 `can_delegate` 取值——执行器在「发不发工具」这唯一一处卡死，树不可能再深。
+- **单 lead 扇出上限 `MAX_WORKER_SUBDELEGATIONS = 4`**：depth-1 worker captain 在一回合内累计最多派出 4 个 sub-worker（跨多次 `delegate` 计数）；CEO 顶层仍受 `MAX_DELEGATION_TASKS`（10）约束。
+- **`"auto"` 遗留**：显式 `can_delegate="auto"` 时启动为叶子，经 `request_delegate` 获批后再获 `delegate`（新任务勿用；`request_delegate` 的 70% 轮次预算原硬闸已改为 warning）。
 - **账目按树回滚**：嵌套子队的 token 用量与每-run 成本行（`parent_run_id` 指向其上层 worker）逐层上卷到 CEO 顶层 `delegate`，整棵树的花销最终汇入回合总账，不双算、不漏算。
 - **并发不爆**：树级并发预算（`MAX_PARALLEL_DELEGATIONS`，ContextVar「分而不乘」）在嵌套 fan-out 下仍封顶，深度 × 扇出不相乘。
 
-> 设计理由：真正的「Agent 团队」需要 captain 能再带队，但无界递归会让成本 / 延迟 / 并发指数爆炸。一层上限是「表达力 vs 可控」的平衡点——既覆盖「复杂子任务自带小队」，又把爆炸面钉死在单层。被否决：不设上限的自由递归（成本不可预期）、worker 一律可委派（绝大多数子任务并不需要，徒增开销）。
+> 设计理由：真正的「Agent 团队」需要 captain 能再带队，但无界递归会让成本 / 延迟 / 并发指数爆炸。一层深度上限 + 单 lead 扇出上限是「表达力 vs 可控」的平衡点。**决策演进**：曾默认叶子 + CEO 显式开 / `"auto"` 按需申请——CEO 开局预判谁该带队常不准，涌现式大区块又需要 lead 边干边拆。现改为**启动即默认授予** `delegate`+`replan`（`can_delegate` 缺省 true）+ depth 硬顶 + 单 lead 最多 4 sub-worker + Worker prompt 自律。仍否决：不设上限的自由递归（成本不可预期）。
 
 > **受监督循环对任何 captain 一致（lead 自主 replan 子树）✅ 已落地（B·统一式）**：`can_delegate` 让 lead 能「扇出子队 + 整合」，但**曾只给根 CEO 接线受监督波循环**——`replan` 是绑定到根 `delegate` 的薄包装，lead 拿到 `child_delegate` 却**没配套 `replan`**。后果不是「少个功能」而是**一条可达的断头路**：lead 一旦建出含 `bind_after_deps` 或子 worker `escalate kind=scope`（带未跑下游）的子流水线，子计划会 YIELD 出「请 replan」简报而 lead **接不住 → 死路**，且 YIELD 在 `accumulate_usage` 前 return、已完成子队**漏账**。修复（**给 lead 配 `replan` + 收尾折账**）让受监督循环对**根 CEO 与子 lead 一致**——去掉「只有根能 replan」这个特例（**被否决·A 约束式**：禁 depth≥1 用子计划边界，反而新增「禁 bind/scope」特例、且把涌现式拆解对 lead 关死）。
 > - **分层修正（铸厂）**：`runs/` 不可 import 具体 `tools/`，故工厂产一个不透明的 `LeadSubteam` bundle（`delegate` + 绑到该 child 的 `replan` + `dispose` 闭包），由 `tools/builtin/delegate/nesting.py::make_lead_subteam` 在 tools 层铸造，`runs/` 只持 `Tool` 句柄与闭包——去特例同时不破分层。
@@ -251,7 +252,7 @@ worker 默认是**叶子**：拿不到 `delegate`、不能再向下拆。当某�
 > - **成本不变量逐 captain 守**：lead 的 replan 同遵「回合数 = 真实决策点数、不是波数」；树级并发预算（`MAX_PARALLEL_DELEGATIONS`，ContextVar「分而不乘」）子任务自动继承。**观测不串层**：子层与父层共用同一 `execution_id`，三端 fold 走「同 id → 合并、按 `parent_run_id` 挂树」而非 reset。
 > - **何时用 lead**：活里有几个**大、半独立、自身还有内部结构**的区（前端 / 后端 / 数据）；只是几个扁平并行小活则加 lead 是纯开销。深度仍卡 `depth ≤ 2`。
 > - **铺开姿态（2026-06-30）**：`_CEO_CORE_HINT` + `team_orchestration_advanced` 已把「碰到大而半独立的区就开 lead、交成果级目标」设为默认（先于 §度量数据、纯提示词可回退）。
-> - → 见代码：`tools/builtin/delegate/nesting.py`（`make_lead_subteam`）、`runtime/runs/executor_identities.py`（`LeadSubteam`）、`runtime/runs/executor_agent.py`（opt-in 注册 + `finally` dispose）、`tools/builtin/delegate/tool.py`（`dispose_open_supervised`）；执行语义见 [`执行引擎架构设计.md` §一·受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)。
+> - → 见代码：`tools/builtin/delegate/nesting.py`（`make_lead_subteam`）、`runtime/runs/executor_identities.py`（`LeadSubteam`）、`runtime/runs/executor_agent.py`（depth 门控注册 + `finally` dispose）、`tools/builtin/delegate/tool.py`（`dispose_open_supervised`）；执行语义见 [`执行引擎架构设计.md` §一·受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)。
 
 ### 2.5 `tools` — worker 工具白名单（可选收窄，**缺省 = 全量**）✅
 
@@ -347,7 +348,6 @@ worker 默认是**叶子**：拿不到 `delegate`、不能再向下拆。当某�
 |---|---|---|
 | finalize 单 worker 早释放 | CEO 委派后提前释放 LLM 上下文，worker 完成后再唤回 CEO 写综述 | 需状态落盘续跑能力成熟后 |
 | 协调效率指标 | batch_metrics 中增加有效并行度、协调税率等观测指标 | 有真实用户流量后 |
-| can_delegate 两档 | 简化为 false/auto，worker 按需申请拆分权 | 真实数据证明 escalate→replan 路径不够时 |
 | AutonomyPolicy 可配置 | CEO 按任务设定 worker 自主度档位 | 真实反馈证明需要差异化控制时 |
 
 ### 已否决方案
@@ -358,5 +358,3 @@ worker 默认是**叶子**：拿不到 `delegate`、不能再向下拆。当某�
 | 前置分类器 LLM | 已否决（每条消息付编排税，见编排器 §聊天优先） |
 | Worker 直接通信 | 已否决（成本、不可观测，见协作模式 §二） |
 | 取消 CEO 收尾综述 | CEO 的「一个声音」是产品核心体验 |
-| `can_delegate=true`（CEO 预判 Worker 需要带队） | CEO 派活时信息不完整，判断常不准；确信要拆的场景应在 CEO 自己的 `delegate` 层面直接拆好，而非把规划子团队甩给 Worker |
-| 启动时给所有 worker 直接注入 `delegate` 工具 | 与 `auto` 按需申请相反：简单叶子任务不需要；非简单任务已有 `auto` 默认，Worker 需要时再申请即可，启动即注入徒增提示词噪音和「为拆分而拆分」风险 |

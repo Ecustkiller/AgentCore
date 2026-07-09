@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./projections";
 export {
+  DRAFT_KEY,
   selectLastAssistantCostTotal,
   lastAssistantMessageId,
   runtimeOf,

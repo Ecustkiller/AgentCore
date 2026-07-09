@@ -7,13 +7,13 @@ alwaysApply: true
 
 ## 模型约束
 
-子代理（Task tool）**必须**指定 `model: "composer-2.5"`。无例外。
+子代理（Task tool）**必须**指定 `model: "composer-2.5"`（Composer 2.5）。无例外。
 
 ## 核心理念
 
 **主 Agent 做决策，子代理自主实施。**
 
-| 主 Agent (高级模型) | 子代理 (composer-2.5) |
+| 主 Agent (高级模型) | 子代理 (Composer 2.5) |
 |---|---|
 | 理解需求、做方案决策 | 自行读代码、定位文件、实施改动 |
 | 给出目标和约束 | 自主探索实现路径 |

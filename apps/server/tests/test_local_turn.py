@@ -125,7 +125,7 @@ def _patch_persistence(
         async def get_by_id_unscoped(self, _conversation_id):
             return SimpleNamespace(title=existing_title)
 
-        async def update_title_unscoped(self, conversation_id, title):
+        async def update_title_unscoped(self, conversation_id, title, *, tag=None):
             events.append(("title", conversation_id, title))
 
     async def _fake_journal(_session, **kw):
@@ -146,8 +146,10 @@ def _patch_persistence(
         local_turn_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=_noop_close)
     )
 
+    from agentcore.memory.conversation_title import TitleResult
+
     async def _fake_title(**_kw):
-        return "本地回合标题"
+        return TitleResult(title="本地回合标题", tag="research")
 
     monkeypatch.setattr(local_turn_mod, "generate_title", _fake_title)
     return consolidation_calls

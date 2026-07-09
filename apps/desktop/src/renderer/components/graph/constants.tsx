@@ -4,6 +4,7 @@ import type { GraphLayout } from "@/stores/graph";
 import { ListTree, MoveHorizontal, Timer } from "lucide-react";
 import type { ReactNode } from "react";
 import { AgentNode } from "./AgentNode";
+import { DebateCompoundNode } from "./DebateCompoundNode";
 import { EndpointNode } from "./EndpointNode";
 import { StepEdge } from "./StepEdge";
 import { SubTeamGroupNode } from "./SubTeamGroupNode";
@@ -14,6 +15,7 @@ export const isEndpointId = (id: string): boolean => id === INPUT_ID;
 
 export const nodeTypes = {
   agent: AgentNode,
+  debateCompound: DebateCompoundNode,
   userInput: EndpointNode,
   captain: EndpointNode,
   subTeamGroup: SubTeamGroupNode,

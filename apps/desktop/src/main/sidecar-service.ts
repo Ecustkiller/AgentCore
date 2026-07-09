@@ -516,8 +516,6 @@ export class SidecarManager {
         history: req.history ?? [],
         // 续辩种子（结构化补轮·B）：原样透传给引擎（None=普通回合）。引擎宽容解析，故无需主进程校验。
         ...(req.debateSeed ? { debateSeed: req.debateSeed } : {}),
-        // 对话级自定义指令：原样透传（缺省 = 无）。引擎经 params.get("instructions") 注入系统提示。
-        ...(req.instructions ? { instructions: req.instructions } : {}),
         // Re-send the current cloud-proxy token every turn: the sidecar is long-lived
         // but the token rotates (12h TTL), so the engine adopts the fresh one per turn
         // (initialize-time creds would otherwise 401 after expiry).

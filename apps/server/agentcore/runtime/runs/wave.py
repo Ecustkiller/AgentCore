@@ -454,6 +454,19 @@ class WaveScheduler:
                 last = state
                 if policy.on_failure != "retry":
                     break
+                # 确定性失败区分 (BL-6): a FAILED run flagged non-retryable (prompt 超长 /
+                # 鉴权 / 余额 — an AgentCoreError.retryable=False threaded onto the state)
+                # will re-fail identically, so stop burning ``max_retries`` + tokens on a
+                # known-futile re-run. Record it (后端补记) so the deterministic acceptance
+                # is visible in the delegated-turn audit trail instead of silent.
+                if state.phase is RunPhase.FAILED and not state.error_retryable:
+                    from agentcore.runtime.audit.hooks import on_run_deterministic_failure
+
+                    on_run_deterministic_failure(
+                        run_id=spec.run_id,
+                        error=str(state.error) if state.error else None,
+                    )
+                    break
         except asyncio.CancelledError:
             raise
         except BaseException as exc:  # noqa: BLE001 — an executor crash becomes FAILED

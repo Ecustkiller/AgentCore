@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from agentcore.core.errors import AgentCoreError, LLMUpstreamError
+from agentcore.core.errors import AgentCoreError, LLMError, LLMUpstreamError
 
 _BODY_PREVIEW_MAX = 500
 
@@ -68,7 +68,12 @@ def diagnose_empty_response(
         except json.JSONDecodeError:
             if "<" in text and ">" in text:
                 return EmptyResponseDiagnosis.OAUTH_EXPIRED
-            return EmptyResponseDiagnosis.FORMAT_MISMATCH
+            # A non-JSON ``text`` here is the streaming SSE tail (several ``data:``
+            # lines), NOT a real format error — the genuine "couldn't parse any
+            # chunk" case is signalled up front by the explicit ``format_mismatch``
+            # flag. Fall through to SILENT_EMPTY so a clean tool_calls/stop finish
+            # with empty deltas reads as "模型返回空内容" instead of the misleading
+            # "上游响应格式异常".
     return EmptyResponseDiagnosis.SILENT_EMPTY
 
 
@@ -115,6 +120,52 @@ def body_preview(raw: bytes | str | None) -> str | None:
     return text
 
 
+def _extract_upstream_message(preview: str | None) -> str | None:
+    if not preview:
+        return None
+    try:
+        data = json.loads(preview)
+    except json.JSONDecodeError:
+        return preview if len(preview) <= 200 else preview[:200] + "…"
+    if not isinstance(data, dict):
+        return None
+    err = data.get("error")
+    if isinstance(err, dict):
+        msg = err.get("message")
+        if msg:
+            return str(msg)
+    if isinstance(err, str):
+        return err
+    msg = data.get("message")
+    return str(msg) if msg else None
+
+
+def client_error_message(
+    provider_name: str, status_code: int, body: bytes | str | None
+) -> str:
+    extracted = _extract_upstream_message(body_preview(body))
+    if extracted:
+        return f"{provider_name} {extracted}"
+    if status_code == 400:
+        return f"{provider_name} 请求格式被拒绝（400），请检查模型与参数配置"
+    if status_code == 404:
+        return f"{provider_name} 接口地址不可达（404），请检查 base_url 配置"
+    return f"{provider_name} 请求被拒绝（{status_code}），请稍后再试"
+
+
+def upstream_client_error(
+    message: str,
+    *,
+    status: int,
+    body: bytes | str | None = None,
+) -> LLMError:
+    return LLMError(
+        message,
+        upstream_status=status,
+        upstream_body_preview=body_preview(body),
+    )
+
+
 def upstream_error(
     message: str,
     *,
@@ -133,6 +184,16 @@ def upstream_error(
         upstream_body_preview=ctx.upstream_body_preview,
         retry_attempts=ctx.retry_attempts,
     )
+
+
+def is_retryable_upstream_status(status: int) -> bool:
+    """5xx upstream failures are transient; 4xx client errors are not."""
+    return status >= 500
+
+
+def is_non_retryable_client_status(status: int) -> bool:
+    """Explicit client/auth/balance failures — never retry."""
+    return status in (400, 401, 402, 403)
 
 
 def error_context_from(exc: BaseException) -> dict[str, int | str | None] | None:

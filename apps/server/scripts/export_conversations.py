@@ -57,7 +57,7 @@ def _create_engine():
 
 
 _CONVERSATIONS_SQL = """
-SELECT id, user_id, title, agent_id, mode, model_mode, folder_id,
+SELECT id, user_id, title, agent_id, mode, folder_id,
        pinned, archived, created_at
 FROM conversations
 WHERE deleted_at IS NULL AND created_at >= :cutoff
@@ -118,7 +118,6 @@ async def export_conversations(days: int, output_dir: Path) -> None:
             "title",
             "agent_id",
             "mode",
-            "model_mode",
             "folder_id",
             "pinned",
             "archived",

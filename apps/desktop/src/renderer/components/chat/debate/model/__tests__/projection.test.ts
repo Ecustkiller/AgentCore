@@ -81,6 +81,7 @@ describe("toDebateModel live cross-exam", () => {
           reasoningChunks: [],
           currentRunId: null,
           toolProgress: null,
+          toolExecutionLive: null,
         } as unknown as AgentState,
         {
           id: "mod_r1_cx_pro",
@@ -90,6 +91,7 @@ describe("toDebateModel live cross-exam", () => {
           reasoningChunks: [],
           currentRunId: "mod_r1_cx_pro",
           toolProgress: null,
+          toolExecutionLive: null,
         } as unknown as AgentState,
       ],
       debateRounds: [
@@ -156,6 +158,7 @@ describe("toDebateModel live cross-exam", () => {
           reasoningChunks: [],
           currentRunId: null,
           toolProgress: null,
+          toolExecutionLive: null,
         } as unknown as AgentState,
       ],
       debateRounds: [

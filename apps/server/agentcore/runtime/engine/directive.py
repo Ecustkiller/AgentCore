@@ -4,8 +4,8 @@ Governance returns exactly one of these per round; the loop is a thin ``match``
 executor over them. This replaces the prior ad-hoc control flow — a stringly-typed
 ``NoToolRoundAction.kind``, a ``terminal`` sentinel, a ``LoopExit | None``, and the
 ``Intervention`` enum leaking into the loop — so every way a round can end / continue
-is ONE typed, exhaustive vocabulary. Phase 2's engine-level fallback ladder then
-becomes new variants + handlers, not another out-param threaded through the loop.
+is ONE typed, exhaustive vocabulary — new terminal paths become new variants +
+handlers, not another out-param threaded through the loop.
 """
 
 from __future__ import annotations
@@ -18,13 +18,6 @@ from agentcore.runtime.events import FinishReason
 @dataclass(frozen=True)
 class Continue:
     """Advance to the next round (any steer for this round was already injected)."""
-
-
-@dataclass(frozen=True)
-class SwitchModel:
-    """Re-run THIS round on a different model (B2 empty → fallback escalation)."""
-
-    model: str
 
 
 @dataclass(frozen=True)
@@ -57,4 +50,4 @@ class Return:
     extra_content: str = ""
 
 
-LoopDirective = Continue | SwitchModel | Rework | Finalize | Return
+LoopDirective = Continue | Rework | Finalize | Return

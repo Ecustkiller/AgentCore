@@ -23,6 +23,7 @@ from agentcore.memory.conversation_title import (
     LLMTitleGenerator,
     TitleGenerator,
     TitleInput,
+    TitleResult,
 )
 from agentcore.memory.followups import (
     FOLLOWUPS_MAX,
@@ -67,6 +68,7 @@ from agentcore.memory.user_memory import (
 __all__ = [
     "ChatMessage",
     "TitleInput",
+    "TitleResult",
     "TitleGenerator",
     "LLMTitleGenerator",
     "TITLE_MAX_CHARS",

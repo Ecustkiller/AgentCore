@@ -250,7 +250,9 @@ function ResolvedCheckpoint({ checkpoint }: { checkpoint: CheckpointDisplay }) {
   const DecisionIcon = RESOLVED_DECISION_ICON[decision];
 
   return (
-    <div className={`mt-2 rounded-xl border p-3 ${tone.wrap}`}>
+    <div
+      className={`mt-2 animate-task-card-enter rounded-xl border p-3 motion-reduce:animate-none ${tone.wrap}`}
+    >
       <div className="flex items-start gap-2">
         <span
           className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full ${tone.badge}`}

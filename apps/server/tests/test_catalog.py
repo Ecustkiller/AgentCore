@@ -8,7 +8,7 @@ endpoint silently serving half-built metadata. Also pins the CEO/worker reach an
 and the single-source prompt composer's 能力目录 gating.
 """
 
-from agentcore.runtime.prompt import assemble_system_prompt, compose_ceo_chat_prompt
+from agentcore.runtime.resolve.prompt import assemble_system_prompt, compose_ceo_chat_prompt
 from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.tools.catalog import (
     AVAILABLE_TO_CEO,
@@ -26,14 +26,17 @@ _CEO_ORCHESTRATION = {
 }
 # consult_memory is wired for BOTH CEO and workers when memory is on.
 _SHARED_ORCHESTRATION = {"consult_memory"}
-# Mutation built-ins the coordinator must NOT hold (they belong to workers), plus the
-# worker-only collaboration channels (escalate upward + post_note/read_notes 便签墙).
+# Mutation / execution built-ins the coordinator must NOT hold (they belong to workers),
+# plus the worker-only collaboration channels (escalate upward + post_note/read_notes
+# 便签墙). test_run is here too: it runs project code through the same sandbox chain as
+# code_execute, so it is a worker-only execution tool (not a CEO read tool).
 _WORKER_ONLY_BUILTINS = {
     "file_write",
     "str_replace",
     "file_delete",
     "file_move",
     "code_execute",
+    "test_run",
     "escalate",
     "post_note",
     "read_notes",
@@ -91,7 +94,6 @@ def test_read_only_builtins_are_shared_with_ceo():
         "grep",
         "code_search",
         "git",
-        "test_run",
     ):
         assert name in entries
         assert set(entries[name].available_to) == {AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER}

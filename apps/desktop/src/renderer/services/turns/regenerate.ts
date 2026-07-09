@@ -6,18 +6,32 @@ import {
 } from "@/lib/errors";
 import type { PlanReviewUserDecision } from "@/services/planReview";
 import { clearSidecarHealth, probeSidecar } from "@/services/sidecarHealth";
-import { resolveSidecarRoot } from "@/services/sidecarRouting";
+import {
+  resolveSidecarRoot,
+  type SidecarTarget,
+} from "@/services/sidecarRouting";
 import {
   regenerateConversation,
   resumeConversation,
   retryFailedConversation,
 } from "@/services/streamConversation";
 import { resumeConversationViaSidecar } from "@/services/streamConversationViaSidecar";
-import { useApprovalStore } from "@/stores/approvals";
+import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { isAbort, isTransportDrop } from "./helpers";
+import { isClientOnlyResumeKey } from "@/services/resume";
 import { rejoinLiveTurn } from "./recovery";
+import type { PendingResume } from "@/stores/pausedTurns";
+
+/** Whether a durable resume should route to the local sidecar engine. */
+function shouldResumeViaSidecar(
+  pending: PendingResume | undefined,
+  sidecarTarget: SidecarTarget | null,
+): boolean {
+  if (!pending || !sidecarTarget) return false;
+  return pending.origin === "sidecar";
+}
 
 /**
  * Re-run a turn from an existing (persisted) user message.
@@ -64,7 +78,7 @@ export async function runRegenerate(
     }
     // A failed turn never delivers `approval_resolved`; drop this conversation's
     // paused prompt (other conversations keep theirs).
-    useApprovalStore.getState().clear(conversationId);
+    clearInteractionPrompts(conversationId);
     const msg = describeStreamError(err);
     if (msg) {
       const retry = isRetriableStreamError(err)
@@ -109,7 +123,7 @@ export async function runRetryFailed(userMessageId: string): Promise<void> {
     if (getRuntime(conversationId).isGenerating) {
       s.finalizeLastMessage(conversationId);
     }
-    useApprovalStore.getState().clear(conversationId);
+    clearInteractionPrompts(conversationId);
     const msg = describeStreamError(err);
     if (msg) {
       const retry = isRetriableStreamError(err)
@@ -143,7 +157,16 @@ export async function runResume(
 ): Promise<void> {
   const store = useConversationStore.getState();
   const conversationId = store.currentConversationId;
-  if (!conversationId || getRuntime(conversationId).isGenerating) return;
+  if (!conversationId || getRuntime(conversationId).isGenerating) {
+    console.warn(
+      `[Resume] runResume early return messageId=${messageId} decision=${decision} conversationId=${conversationId ?? "null"} isGenerating=${conversationId ? getRuntime(conversationId).isGenerating : "n/a"}`,
+    );
+    return;
+  }
+
+  console.warn(
+    `[Resume] runResume start messageId=${messageId} decision=${decision} conversationId=${conversationId}`,
+  );
 
   store.clearError(conversationId);
   bumpConversationCache(conversationId);
@@ -156,7 +179,11 @@ export async function runResume(
   const pending = usePausedTurnStore
     .getState()
     .pending.find((p) => p.messageId === messageId);
-  const sidecarResume = sidecarTarget !== null && pending !== undefined;
+  const sidecarResume = shouldResumeViaSidecar(pending, sidecarTarget);
+
+  console.warn(
+    `[Resume] runResume routing messageId=${messageId} decision=${decision} conversationId=${conversationId} sidecarResume=${sidecarResume} sidecarRootId=${sidecarTarget?.rootId ?? "null"} pendingFound=${pending !== undefined} origin=${pending?.origin ?? "none"}`,
+  );
 
   // A paused sidecar frame lives ONLY on this machine and can only be continued by
   // the local engine — the cloud has no such frame, so (unlike a fresh send) resume
@@ -167,6 +194,9 @@ export async function runResume(
   if (sidecarResume && sidecarTarget) {
     const probe = await probeSidecar(sidecarTarget);
     if (!probe.healthy) {
+      console.warn(
+        `[Resume] runResume sidecar probe failed messageId=${messageId} decision=${decision} conversationId=${conversationId} detail=${probe.detail ?? "null"}`,
+      );
       store.setError(
         probe.detail
           ? `${probe.detail}，本地引擎暂不可用，无法继续这次暂停的回合，请稍后重试`
@@ -185,9 +215,18 @@ export async function runResume(
     }
   }
 
-  // Probe passed (or a cloud resume) → claim the frame: optimistically drop the
-  // resume card (the server claim is atomic, so a stale / second attempt 404s).
-  usePausedTurnStore.getState().remove(messageId);
+  if (isClientOnlyResumeKey(conversationId, messageId)) {
+    console.warn(
+      `[Resume] runResume rejected: client-only resume key messageId=${messageId} decision=${decision} conversationId=${conversationId}`,
+    );
+    store.setError(
+      "续跑键无效（缺少服务端消息 ID），请关闭并重新打开会话后重试",
+      () => void runResume(messageId, decision, note, selected),
+      conversationId,
+      null,
+    );
+    return;
+  }
 
   store.createAssistantMessage(conversationId);
 
@@ -201,6 +240,9 @@ export async function runResume(
           .reverse()
           .find((m) => m.role === "user")?.id ||
         "";
+      console.warn(
+        `[Resume] runResume calling sidecar resume messageId=${messageId} decision=${decision} conversationId=${conversationId} userMessageId=${userMessageId}`,
+      );
       await resumeConversationViaSidecar({
         conversationId,
         rootId: sidecarTarget.rootId,
@@ -213,7 +255,14 @@ export async function runResume(
         userMessageId,
         signal: ac.signal,
       });
+      console.warn(
+        `[Resume] runResume sidecar resume completed messageId=${messageId} decision=${decision} conversationId=${conversationId}`,
+      );
+      usePausedTurnStore.getState().remove(messageId);
     } else {
+      console.warn(
+        `[Resume] runResume calling cloud resume messageId=${messageId} decision=${decision} conversationId=${conversationId}`,
+      );
       await resumeConversation({
         conversationId,
         messageId,
@@ -222,19 +271,37 @@ export async function runResume(
         selected,
         signal: ac.signal,
       });
+      console.warn(
+        `[Resume] runResume cloud resume completed messageId=${messageId} decision=${decision} conversationId=${conversationId}`,
+      );
+      usePausedTurnStore.getState().remove(messageId);
     }
   } catch (err) {
-    if (isAbort(err)) return;
+    if (isAbort(err)) {
+      console.warn(
+        `[Resume] runResume aborted messageId=${messageId} decision=${decision} conversationId=${conversationId}`,
+      );
+      return;
+    }
     // A mid-stream drop no longer means the turn died (1a: it runs detached) —
     // rejoin it live (1b) rather than re-resuming, which would double-run it.
-    if (isTransportDrop(err) && (await rejoinLiveTurn(conversationId))) return;
+    if (isTransportDrop(err) && (await rejoinLiveTurn(conversationId))) {
+      console.warn(
+        `[Resume] runResume transport drop, rejoined live messageId=${messageId} decision=${decision} conversationId=${conversationId}`,
+      );
+      return;
+    }
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[Resume] runResume failed messageId=${messageId} decision=${decision} conversationId=${conversationId} err=${errMsg}`,
+    );
     const s = useConversationStore.getState();
     if (getRuntime(conversationId).isGenerating) {
       s.finalizeLastMessage(conversationId);
     }
     // A failed turn never delivers `approval_resolved`; drop this conversation's
     // paused prompt (other conversations keep theirs).
-    useApprovalStore.getState().clear(conversationId);
+    clearInteractionPrompts(conversationId);
     const msg = describeStreamError(err);
     if (msg) {
       const retry = isRetriableStreamError(err)

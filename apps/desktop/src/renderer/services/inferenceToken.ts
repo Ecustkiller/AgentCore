@@ -11,6 +11,7 @@ import type { SidecarInference } from "@shared/sidecar-contract";
  * - `baseUrl` = `${BASE_URL}/v1/inference/v1`：`OpenAICompatibleProvider` 在其后拼 `/chat/completions`，
  *   命中代理路由 `/v1/inference/v1/chat/completions`（见服务端 `api/routes/inference/proxy.py`）。
  * - `apiKey` = 令牌本身（非平台 key）。
+ * - `model` = 服务端按用户计费/BYOK 解析的 chat 模型名（与推理代理上游一致）。
  *
  * 令牌经 cookie 会话向 `POST /v1/inference/token` 兑换（与其余 API 同源鉴权）。令牌有 TTL
  * （服务端 `inference_token_expire_minutes`，默认 12h），故这里**缓存到临近过期再续铸**——
@@ -20,19 +21,21 @@ import type { SidecarInference } from "@shared/sidecar-contract";
 interface InferenceTokenResponse {
   token: string;
   expires_in_sec: number;
+  model: string;
 }
 
 /** 已缓存的令牌与其绝对过期时刻（ms）。null = 尚未铸过 / 已失效。 */
-let cached: { token: string; expiresAtMs: number } | null = null;
+let cached: { token: string; expiresAtMs: number; model: string } | null = null;
 
 // 提前续铸的安全余量：在真正过期前 1 分钟就重铸，规避时钟偏移与「铸好到用上」之间的 TTL 损耗。
 const RENEW_SKEW_MS = 60_000;
 
-async function mint(): Promise<{ token: string; expiresAtMs: number }> {
+async function mint(): Promise<{ token: string; expiresAtMs: number; model: string }> {
   const res = await api.post<InferenceTokenResponse>("/v1/inference/token");
   return {
     token: res.token,
     expiresAtMs: Date.now() + res.expires_in_sec * 1000,
+    model: res.model,
   };
 }
 
@@ -48,7 +51,11 @@ export async function resolveSidecarInference(): Promise<SidecarInference | null
     if (!cached || cached.expiresAtMs - RENEW_SKEW_MS <= Date.now()) {
       cached = await mint();
     }
-    return { baseUrl: `${BASE_URL}/v1/inference/v1`, apiKey: cached.token };
+    return {
+      baseUrl: `${BASE_URL}/v1/inference/v1`,
+      apiKey: cached.token,
+      model: cached.model,
+    };
   } catch (err) {
     console.error("[sidecar] 取推理令牌失败", err);
     cached = null;

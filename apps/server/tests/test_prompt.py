@@ -19,7 +19,7 @@ Pins two things:
 
 import re
 
-from agentcore.runtime.prompt import (
+from agentcore.runtime.resolve.prompt import (
     _CEO_CORE_HINT,
     _CEO_VISUALIZATION_HINT,
     CHAT_CITATION_HINT,
@@ -177,41 +177,6 @@ def test_output_style_survives_memory_and_context_layers():
     assert "<attached_files>" in out
 
 
-def test_conversation_instructions_injected_above_memory():
-    # 对话级自定义指令: a per-conversation directive rides the shared prefix as a
-    # <对话级指令> block ABOVE the soft long-term memory <rules> (an explicit
-    # instruction outranks auto-maintained preferences). Pin the block, its verbatim
-    # text, AND the order so a refactor can't silently drop it or demote it below memory.
-    out = assemble_system_prompt(
-        memory_markdown="- 用户偏好简洁回复",
-        instructions="始终用中文回答，先给结论再列依据",
-    )
-    assert "<对话级指令>" in out and "</对话级指令>" in out
-    assert "始终用中文回答，先给结论再列依据" in out
-    assert out.index("<对话级指令>") < out.index("<rules>")
-
-
-def test_conversation_instructions_absent_when_blank():
-    # Empty / whitespace-only instructions contribute nothing — the prefix stays
-    # byte-identical to no-instructions so the DeepSeek exact-prefix cache holds.
-    base = assemble_system_prompt()
-    assert "<对话级指令>" not in base
-    assert assemble_system_prompt(instructions="   ") == base
-
-
-def test_conversation_instructions_reach_composed_ceo_prompt():
-    # The block lives in the shared base (assemble_system_prompt), so it reaches BOTH
-    # the bare worker base and the composed CEO prompt — the whole team obeys the
-    # conversation's directive.
-    base = assemble_system_prompt(instructions="用苏格拉底式提问引导我")
-    ceo = compose_ceo_chat_prompt(
-        base,
-        skill_registry=build_system_skill_registry(),
-        ceo_tool_names={"delegate", "consult_skill"},
-    )
-    assert "用苏格拉底式提问引导我" in ceo
-
-
 def test_style_precedes_ceo_only_core_when_composed():
     # The CEO prompt is base + core hint (see pipeline.run_chat_pipeline). The
     # shared style must come from the base, independent of the CEO-only core.
@@ -315,6 +280,16 @@ def test_skill_teaches_constraint_vs_solution_boundary():
     skill = _TEAM_ORCHESTRATION_ADVANCED
     assert "专业方案" in skill
     assert "填字员" in skill
+
+
+def test_core_teaches_execution_and_recall_routing():
+    # MiniClaw 复盘：「打开软件」须委派验收；「刚才产出」须先核实工作区。
+    hint = _CEO_CORE_HINT
+    assert "【执行 / 运行 / 打开】" in hint
+    assert "completion_criteria=code_verified" in hint
+    assert "【回忆 / 核实产出】" in hint
+    assert "file_list" in hint
+    assert "口头拒绝" in hint
 
 
 def test_core_points_to_consult_skill_and_directory():

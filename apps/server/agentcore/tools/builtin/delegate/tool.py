@@ -119,6 +119,8 @@ class DelegateTool:
         self._memory_enabled = memory_enabled
         self._children: list[DelegateTool] = []
         self._calls = 0
+        # Cumulative sub-workers spawned by this captain (worker leads only).
+        self._sub_workers_spawned = 0
         from agentcore.runtime.costing import WorkerResultAccumulator
 
         self._acc = WorkerResultAccumulator()
@@ -201,14 +203,31 @@ class DelegateTool:
         if "complexity_hint" not in arguments and _should_auto_light_delegate(tasks_raw):
             complexity_hint = "light"
             logger.debug("delegate.complexity_hint_inferred", hint="light")
-        # complexity_hint 联动 can_delegate 默认值
+        # 未显式设置时默认授予委派能力（depth 上限由 executor 执行）
         for task in tasks_raw:
             if isinstance(task, dict) and "can_delegate" not in task:
-                if complexity_hint == "light":
-                    task["can_delegate"] = False
-                else:
-                    task["can_delegate"] = "auto"
+                task["can_delegate"] = True
+        if self._depth >= 1:
+            from agentcore.runtime.runs.constants import MAX_WORKER_SUBDELEGATIONS
+
+            new_nodes = len(tasks_raw)
+            if self._sub_workers_spawned + new_nodes > MAX_WORKER_SUBDELEGATIONS:
+                msg = (
+                    f"子团队扇出已达上限（已派出 {self._sub_workers_spawned} 个 sub-worker，"
+                    f"本次 {new_nodes} 个，上限 {MAX_WORKER_SUBDELEGATIONS}）——请合并任务或分批。"
+                )
+                logger.info(
+                    "delegate.sub_fanout_rejected",
+                    spawned=self._sub_workers_spawned,
+                    requested=new_nodes,
+                    cap=MAX_WORKER_SUBDELEGATIONS,
+                )
+                return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
         self._calls += 1
+        # 冻结本次委派调用的序号：同回合并发的多个 delegate 调用共享 self._calls，若在完成侧
+        # 惰性读取会把每个批次的 completed / synthesis 日志都错记到「最后自增到的序号」。这里
+        # 立刻定格，透传给 drive → format_for_ceo 用于完成侧日志。
+        call_idx = self._calls
         prefix = f"del_{new_id()}"
         plan, errors = build_run_plan(
             tasks_raw,
@@ -221,6 +240,8 @@ class DelegateTool:
             msg = "委派任务无效：" + "；".join(errors)
             logger.info("delegate.rejected", errors=errors)
             return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+        if self._depth >= 1:
+            self._sub_workers_spawned += len(plan.nodes)
 
         from agentcore.tools.builtin.delegate.seed_notes import (
             parse_seed_notes,
@@ -254,7 +275,7 @@ class DelegateTool:
         logger.info(
             "delegate.started",
             nodes=len(plan.nodes),
-            call=self._calls,
+            call=call_idx,
             parallel=sum(1 for n in plan.nodes if not n.depends_on),
             complexity_hint=complexity_hint,
             plan=[
@@ -304,6 +325,8 @@ class DelegateTool:
             finalize=bool(arguments.get("finalize")),
             seed_notes=seed_notes,
             complexity_hint=complexity_hint,
+            call_idx=call_idx,
+            completion_criteria=arguments.get("completion_criteria"),
         )
 
     async def _drive(
@@ -463,152 +486,3 @@ class DelegateTool:
             pending=sum(1 for n in sup.plan.nodes if n.run_id not in sup.completed),
         )
         return await finalize_stopped(self, sup.plan, sup.completed)
-
-    # --- Backward-compat thin wrappers for tests that call private methods ---
-
-    def _apply_replan(self, plan, completed, binds, steers):
-        return apply_replan(self, plan, completed, binds, steers)
-
-    async def _finalize_stopped(self, plan, seed_completed):
-        return await finalize_stopped(self, plan, seed_completed)
-
-    def _format_boundary_for_ceo(self, reason, plan, results, nodes):
-        from agentcore.tools.builtin.delegate.supervised import format_boundary_for_ceo
-
-        return format_boundary_for_ceo(self, reason, plan, results, nodes)
-
-    def _format_bind_boundary(self, plan, results, nodes):
-        from agentcore.tools.builtin.delegate.supervised import format_bind_boundary
-
-        return format_bind_boundary(plan, results, nodes)
-
-    def _format_scope_boundary(self, plan, results, nodes):
-        from agentcore.tools.builtin.delegate.supervised import format_scope_boundary
-
-        return format_scope_boundary(plan, results, nodes)
-
-    def _direct_result(self, state):
-        from agentcore.tools.builtin.delegate.ceo_format import direct_result
-
-        return direct_result(self, state)
-
-    def _make_child(self, captain_run_id: str, captain_depth: int):
-        from agentcore.tools.builtin.delegate.nesting import make_child
-
-        return make_child(self, captain_run_id, captain_depth)
-
-    def _absorb_children(self) -> None:
-        from agentcore.tools.builtin.delegate.nesting import absorb_children
-
-        absorb_children(self)
-
-    def _checkpoint_active(self) -> bool:
-        from agentcore.tools.builtin.delegate.boundary import checkpoint_active
-
-        return checkpoint_active(self)
-
-    def _boundary_hook(self, plan):
-        from agentcore.tools.builtin.delegate.boundary import boundary_hook
-
-        return boundary_hook(self, plan)
-
-    def _can_persist_suspension(self) -> bool:
-        from agentcore.tools.builtin.delegate.suspension import can_persist_suspension
-
-        return can_persist_suspension(self)
-
-    async def _persist_suspension(
-        self, checkpoint_id, plan, completed, steps, pending, required_event
-    ):
-        from agentcore.tools.builtin.delegate.suspension import persist_suspension
-
-        await persist_suspension(
-            self, checkpoint_id, plan, completed, steps, pending, required_event
-        )
-
-    async def _drop_suspension(self) -> None:
-        from agentcore.tools.builtin.delegate.suspension import drop_suspension
-
-        await drop_suspension(self)
-
-    @staticmethod
-    def _record_plan_snapshot(plan):
-        record_plan_snapshot(plan)
-
-    @staticmethod
-    def _apply_steer(plan, completed, checkpoint_ids, note):
-        apply_steer(plan, completed, checkpoint_ids, note)
-
-    @staticmethod
-    def _downstream_of(plan, roots):
-        from agentcore.tools.builtin.delegate.steer import downstream_of
-
-        return downstream_of(plan, roots)
-
-    def _review_step(self, node, completed):
-        from agentcore.tools.builtin.delegate.boundary import review_step
-
-        return review_step(node, completed)
-
-    def _pending_preview(self, plan, completed):
-        from agentcore.tools.builtin.delegate.boundary import pending_preview
-
-        return pending_preview(plan, completed)
-
-    def _accumulate_usage(self, results):
-        from agentcore.tools.builtin.delegate.accumulate import accumulate_usage
-
-        return accumulate_usage(self, results)
-
-    def _collect_ledger(self, plan, results):
-        from agentcore.tools.builtin.delegate.accumulate import collect_ledger
-
-        collect_ledger(self, plan, results)
-
-    def _collect_citations(self, results):
-        from agentcore.tools.builtin.delegate.accumulate import collect_citations
-
-        collect_citations(self, results)
-
-    def _register_sessions(self, plan, results):
-        from agentcore.tools.builtin.delegate.accumulate import register_sessions
-
-        return register_sessions(self, plan, results)
-
-    def _escalation_block(self, plan, results):
-        from agentcore.tools.builtin.delegate.ceo_format import escalation_block
-
-        return escalation_block(self, plan, results)
-
-    def _format_for_ceo(self, plan, results):
-        from agentcore.tools.builtin.delegate.ceo_format import format_for_ceo
-
-        return format_for_ceo(self, plan, results)
-
-    def _worker_products(self, plan, results):
-        from agentcore.tools.builtin.delegate.ceo_format import worker_products
-
-        return worker_products(self, plan, results)
-
-    def _emit_captain_readback(self, products):
-        from agentcore.tools.builtin.delegate.plan_events import emit_captain_readback
-
-        emit_captain_readback(self, products)
-
-    def _run_payload(self, node):
-        from agentcore.tools.builtin.delegate.plan_events import run_payload
-
-        return run_payload(node)
-
-    def _plan_event(self, execution_id: str, plan):
-        return plan_event(self, execution_id, plan)
-
-    def _captain_card(self):
-        from agentcore.tools.builtin.delegate.plan_events import captain_card
-
-        return captain_card(self)
-
-    def _card(self, node):
-        from agentcore.tools.builtin.delegate.plan_events import card
-
-        return card(self, node)

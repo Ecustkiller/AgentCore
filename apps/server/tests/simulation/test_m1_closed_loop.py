@@ -9,7 +9,7 @@ import pytest
 from agentcore.evals.spikes.sim.mock_provider import ScriptedProvider, content_chunk
 from agentcore.runtime.events import EventType
 from agentcore.simulation.agents.tick_runner import run_agent_tick
-from agentcore.simulation.scenarios.town.config import LIN_PERSONA, seed_m1_world
+from agentcore.simulation.scenarios.town.config import LIN_PERSONA, seed_town_world
 from agentcore.simulation.types import SimTickSnapshot
 from agentcore.simulation.world.engine import WorldEngine
 
@@ -29,7 +29,7 @@ def _text_json_provider(destination: str = "市场") -> ScriptedProvider:
 
 @pytest.mark.asyncio
 async def test_single_agent_tick_text_json_moves_agent():
-    world = seed_m1_world()
+    world = seed_town_world()
     engine = WorldEngine(world=world)
     await engine.advance()
     outcome = await run_agent_tick(
@@ -47,12 +47,12 @@ async def test_single_agent_tick_text_json_moves_agent():
 
 @pytest.mark.asyncio
 async def test_world_engine_snapshot_roundtrip():
-    world = seed_m1_world()
+    world = seed_town_world()
     engine = WorldEngine(world=world)
     snap = await engine.advance()
     assert snap.tick == 1
     assert snap.hour == 9
-    world2 = seed_m1_world()
+    world2 = seed_town_world()
     world2.load_snapshot(snap)
     assert world2.tick == 1
     assert "lin" in world2.agents

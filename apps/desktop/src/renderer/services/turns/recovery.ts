@@ -1,7 +1,7 @@
 import { describeStreamError, streamErrorAction } from "@/lib/errors";
 import { loadLatestWindow } from "@/services/messages";
 import { attachConversation } from "@/services/streamConversation";
-import { useApprovalStore } from "@/stores/approvals";
+import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import {
   RECONNECT_BANNER,
@@ -57,7 +57,7 @@ export async function rejoinLiveTurn(conversationId: string): Promise<boolean> {
     if (getRuntime(conversationId).isGenerating) {
       s.finalizeLastMessage(conversationId);
     }
-    useApprovalStore.getState().clear(conversationId);
+    clearInteractionPrompts(conversationId);
     // A reconnect drop → manual「重连」(never resend); an auth failure stays silent
     // (the api layer already redirected to login).
     const msg = isTransportDrop(err)

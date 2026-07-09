@@ -1,29 +1,94 @@
-"""Per-agent tick memory — sliding window of one-line summaries (BE-12)."""
+"""Per-agent tick memory — sliding window of one-line summaries (BE-12).
+
+Anti-drift (WS-D): over long runs a naive "keep last N" window lets routine repetition
+crowd out salient memories (reflections, interactions) and lets the agent's self-narrative
+drift by re-reading near-identical lines every tick. Two guards address this without changing
+the wire shape (``tick_memories`` stays ``list[str]``):
+
+1. Salience-aware retention on trim — evict the lowest-salience *oldest* line, never the
+   newest, so reflections/interactions survive a wall of routine ticks. Degrades to plain
+   FIFO when every entry is equally routine.
+2. Render-time compression — collapse consecutive identical actions into one ranged line
+   for the prompt only, so the model is not reinforced by repetition. Storage is untouched.
+"""
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
 from agentcore.simulation.agents.models import SimPersona
-from agentcore.simulation.scenarios.town.config import schedule_hint_for_persona
+from agentcore.simulation.scenarios.town.schedule import schedule_hint_for_persona
 from agentcore.simulation.types import SimAgentAction
 from agentcore.simulation.world.state import WorldAgent, WorldState
 
 MAX_TICK_MEMORIES = 10
 
+# Salience tiers: higher survives longer under retention pressure.
+_HIGH_SALIENCE_MARKERS = ("反思",)
+_MID_SALIENCE_MARKERS = ("交谈", "→", "提议", "投票", "成交", "议题")
+
+_TICK_LINE_RE = re.compile(r"^在 tick (\d+)，(.+)$")
+
+
+def _salience(line: str) -> int:
+    if any(marker in line for marker in _HIGH_SALIENCE_MARKERS):
+        return 2
+    if any(marker in line for marker in _MID_SALIENCE_MARKERS):
+        return 1
+    return 0
+
 
 def append_tick_memory(agent: WorldAgent, summary: str) -> None:
-    """Append a summary and trim to the sliding window."""
-    agent.tick_memories.append(summary)
-    if len(agent.tick_memories) > MAX_TICK_MEMORIES:
-        agent.tick_memories = agent.tick_memories[-MAX_TICK_MEMORIES:]
+    """Append a summary; when over the window evict the lowest-salience oldest entry.
+
+    The newest entry is always retained. Ties are broken oldest-first, so an all-routine
+    history behaves exactly like the previous ``[-N:]`` window.
+    """
+    memories = agent.tick_memories
+    memories.append(summary)
+    if len(memories) <= MAX_TICK_MEMORIES:
+        return
+    evictable = range(len(memories) - 1)  # protect the just-appended newest entry
+    victim = min(evictable, key=lambda i: (_salience(memories[i]), i))
+    del memories[victim]
+
+
+def _compress_consecutive(memories: Sequence[str]) -> list[str]:
+    """Collapse consecutive same-action tick lines into one ranged line (prompt only)."""
+    out: list[str] = []
+    index = 0
+    total = len(memories)
+    while index < total:
+        match = _TICK_LINE_RE.match(memories[index])
+        if match is None:
+            out.append(memories[index])
+            index += 1
+            continue
+        body = match.group(2)
+        start_tick = match.group(1)
+        end_tick = start_tick
+        run = index + 1
+        while run < total:
+            next_match = _TICK_LINE_RE.match(memories[run])
+            if next_match is None or next_match.group(2) != body:
+                break
+            end_tick = next_match.group(1)
+            run += 1
+        streak = run - index
+        if streak == 1:
+            out.append(memories[index])
+        else:
+            out.append(f"在 tick {start_tick}–{end_tick}，{body}（连续{streak}次）")
+        index = run
+    return out
 
 
 def format_tick_memories_for_perception(memories: Sequence[str]) -> str:
-    """Render stored summaries for injection into agent perception."""
+    """Render stored summaries for injection into agent perception (compressed)."""
     if not memories:
         return ""
-    lines = "\n".join(f"- {m}" for m in memories)
+    lines = "\n".join(f"- {m}" for m in _compress_consecutive(memories))
     return f"【你的近期记忆】\n{lines}"
 
 

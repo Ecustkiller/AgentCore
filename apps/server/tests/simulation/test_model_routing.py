@@ -1,19 +1,28 @@
-"""BE-13: model routing tests."""
+"""BE-13 / WS-D: model routing tier + decision-kind strategy tests."""
 
 from __future__ import annotations
 
 from agentcore.simulation.llm import (
+    SimDecisionKind,
     SimModelRouter,
     SimModelTier,
     default_routing_config,
+    tier_for_decision,
 )
 
 
-def test_router_m2_uses_same_model_for_all_tiers():
+def test_router_upgrades_critical_for_known_base():
     cfg = default_routing_config("deepseek-chat")
     router = SimModelRouter(cfg)
     assert router.resolve(SimModelTier.ROUTINE) == "deepseek-chat"
-    assert router.resolve(SimModelTier.CRITICAL) == "deepseek-chat"
+    assert router.resolve(SimModelTier.CRITICAL) == "deepseek-reasoner"
+
+
+def test_router_aliases_critical_for_unknown_base():
+    cfg = default_routing_config("some-proxy-model")
+    router = SimModelRouter(cfg)
+    assert router.resolve(SimModelTier.ROUTINE) == "some-proxy-model"
+    assert router.resolve(SimModelTier.CRITICAL) == "some-proxy-model"
 
 
 def test_router_from_run_manifest():
@@ -26,3 +35,23 @@ def test_router_from_run_manifest():
 def test_router_falls_back_when_manifest_missing():
     router = SimModelRouter.from_run_config({}, fallback="default-model")
     assert router.resolve() == "default-model"
+
+
+def test_decision_kind_tiering_strategy():
+    assert tier_for_decision(SimDecisionKind.ROUTINE_TICK) == SimModelTier.ROUTINE
+    assert tier_for_decision(SimDecisionKind.INTERACTION) == SimModelTier.CRITICAL
+    assert tier_for_decision(SimDecisionKind.REFLECTION) == SimModelTier.CRITICAL
+
+
+def test_model_for_decision_routes_via_strategy():
+    router = SimModelRouter(default_routing_config("deepseek-chat"))
+    assert router.model_for_decision(SimDecisionKind.ROUTINE_TICK) == "deepseek-chat"
+    assert router.model_for_decision(SimDecisionKind.INTERACTION) == "deepseek-reasoner"
+    assert router.model_for_decision(SimDecisionKind.REFLECTION) == "deepseek-reasoner"
+
+
+def test_explain_decision_is_human_readable():
+    router = SimModelRouter(default_routing_config("deepseek-chat"))
+    text = router.explain_decision(SimDecisionKind.INTERACTION)
+    assert "critical" in text
+    assert "deepseek-reasoner" in text

@@ -5,8 +5,8 @@ import time
 from typing import Any
 
 from agentcore.core.logging import get_logger
+from agentcore.core.net import describe_net_error, site_of
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.tools.builtin.web._net import describe_net_error, site_of
 from agentcore.tools.builtin.web.search_backend import SearchResult, get_search_backend
 from agentcore.tools.builtin.web.search_cache import (
     SearchCacheEntry,

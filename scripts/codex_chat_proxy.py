@@ -54,10 +54,63 @@ def load_credentials(path: Path | None = None) -> dict[str, str]:
     raise FileNotFoundError(f"No credential file found in {paths}")
 
 
+def _content_to_text(content: Any) -> str:
+    """Flatten a chat message ``content`` (str or block list) to plain text."""
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    return "" if content is None else str(content)
+
+
 def messages_to_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Translate chat/completions messages into Codex ``responses`` input items.
+
+    Plain user/assistant turns become ``message`` items. A tool round is replayed
+    the way the responses API expects: the assistant's ``tool_calls`` become
+    ``function_call`` items and each ``role="tool"`` result becomes a
+    ``function_call_output`` item, paired by ``call_id``. Without this a follow-up
+    round would drop the call + result and the model would stall (the empty-response
+    root cause).
+    """
     items: list[dict[str, Any]] = []
     for msg in messages:
         role = msg.get("role", "user")
+        if role == "tool":
+            items.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": msg.get("tool_call_id", ""),
+                    "output": _content_to_text(msg.get("content", "")),
+                }
+            )
+            continue
+        tool_calls = msg.get("tool_calls") if role == "assistant" else None
+        if tool_calls:
+            text = _content_to_text(msg.get("content", ""))
+            if text:
+                items.append(
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "input_text", "text": text}],
+                    }
+                )
+            for tc in tool_calls:
+                fn = tc.get("function") or {}
+                items.append(
+                    {
+                        "type": "function_call",
+                        "call_id": tc.get("id", ""),
+                        "name": fn.get("name", ""),
+                        "arguments": fn.get("arguments") or "",
+                    }
+                )
+            continue
         content = msg.get("content", "")
         if isinstance(content, list):
             parts: list[dict[str, str]] = []
@@ -78,6 +131,29 @@ def messages_to_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 }
             )
     return items
+
+
+def convert_tools(chat_tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Chat/completions tool defs -> responses tool defs.
+
+    Chat nests the schema under ``function``; the responses API wants ``name`` /
+    ``description`` / ``parameters`` flattened onto the tool object.
+    """
+    converted: list[dict[str, Any]] = []
+    for tool in chat_tools:
+        fn = tool.get("function") if isinstance(tool, dict) else None
+        if tool.get("type") == "function" and isinstance(fn, dict):
+            entry: dict[str, Any] = {
+                "type": "function",
+                "name": fn.get("name", ""),
+                "parameters": fn.get("parameters") or {"type": "object", "properties": {}},
+            }
+            if fn.get("description"):
+                entry["description"] = fn["description"]
+            converted.append(entry)
+        else:
+            converted.append(tool)
+    return converted
 
 
 def build_responses_body(chat_body: dict[str, Any]) -> dict[str, Any]:
@@ -117,7 +193,10 @@ def build_responses_body(chat_body: dict[str, Any]) -> dict[str, Any]:
     else:
         body["instructions"] = DEFAULT_INSTRUCTIONS
     if chat_body.get("tools"):
-        body["tools"] = chat_body["tools"]
+        body["tools"] = convert_tools(chat_body["tools"])
+        tool_choice = chat_body.get("tool_choice")
+        if isinstance(tool_choice, str) and tool_choice in ("auto", "none", "required"):
+            body["tool_choice"] = tool_choice
     return body
 
 
@@ -156,6 +235,22 @@ def extract_reasoning_from_response_obj(obj: dict[str, Any]) -> str:
                 if part.get("type") in ("summary_text", "text"):
                     chunks.append(part.get("text", ""))
     return "".join(chunks)
+
+
+def extract_tool_calls_from_response_obj(obj: dict[str, Any]) -> list[dict[str, str]]:
+    """Pull completed ``function_call`` items out of a finished response object."""
+    output = obj.get("output") or []
+    calls: list[dict[str, str]] = []
+    for item in output:
+        if item.get("type") == "function_call":
+            calls.append(
+                {
+                    "call_id": item.get("call_id", ""),
+                    "name": item.get("name", ""),
+                    "arguments": item.get("arguments", "") or "",
+                }
+            )
+    return calls
 
 
 def open_upstream(body: dict[str, Any], creds: dict[str, str]):
@@ -229,14 +324,21 @@ def iter_sse_from_response(resp) -> Iterator[dict[str, Any]]:
 def translate_upstream(events: Iterator[dict[str, Any]]) -> Iterator[dict[str, Any]]:
     """Translate Codex responses events into normalized chat-delta items.
 
-    Yields ``{"delta": {"content": ...}}`` and
-    ``{"delta": {"reasoning_content": ...}}`` as they stream, then a trailing
-    ``{"final": {...}}`` carrying usage plus a content/reasoning fallback pulled
-    from the completed response object (used only when nothing streamed — some
-    turns arrive as a single final object).
+    Yields ``{"delta": {...}}`` items as they stream — ``content`` /
+    ``reasoning_content`` text, and ``tool_calls`` when the model issues a function
+    call (``response.output_item.added`` opens the call, then
+    ``response.function_call_arguments.delta`` streams its JSON arguments). A trailing
+    ``{"final": {...}}`` carries usage plus content / reasoning / tool-call fallbacks
+    pulled from the completed response object (used only when nothing of that kind
+    streamed — some turns arrive as a single final object), and ``had_tool_calls`` so
+    the caller can stamp ``finish_reason``.
     """
     saw_content = False
     saw_reasoning = False
+    saw_tool_call = False
+    # Codex keys argument deltas by item_id; map it to the chat tool_call index
+    # (output_index) so parallel calls stay separated.
+    index_by_item: dict[str, int] = {}
     for ev in events:
         data = ev["data"]
         etype = data.get("type") or ev.get("event") or ""
@@ -250,9 +352,35 @@ def translate_upstream(events: Iterator[dict[str, Any]]) -> Iterator[dict[str, A
             if isinstance(delta, str) and delta:
                 saw_reasoning = True
                 yield {"delta": {"reasoning_content": delta}}
+        elif etype == "response.output_item.added":
+            item = data.get("item") or {}
+            if item.get("type") == "function_call":
+                idx = data.get("output_index", 0)
+                item_id = item.get("id", "")
+                if item_id:
+                    index_by_item[item_id] = idx
+                saw_tool_call = True
+                yield {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": idx,
+                                "id": item.get("call_id", ""),
+                                "type": "function",
+                                "function": {"name": item.get("name", ""), "arguments": ""},
+                            }
+                        ]
+                    }
+                }
+        elif etype == "response.function_call_arguments.delta":
+            delta = data.get("delta", "")
+            if isinstance(delta, str) and delta:
+                idx = index_by_item.get(data.get("item_id", ""), data.get("output_index", 0))
+                yield {"delta": {"tool_calls": [{"index": idx, "function": {"arguments": delta}}]}}
         elif etype in ("response.completed", "response.done"):
             resp_obj = data.get("response")
             resp_obj = resp_obj if isinstance(resp_obj, dict) else {}
+            final_calls = [] if saw_tool_call else extract_tool_calls_from_response_obj(resp_obj)
             yield {
                 "final": {
                     "usage": resp_obj.get("usage") or {},
@@ -260,8 +388,23 @@ def translate_upstream(events: Iterator[dict[str, Any]]) -> Iterator[dict[str, A
                     "reasoning": ""
                     if saw_reasoning
                     else extract_reasoning_from_response_obj(resp_obj),
+                    "tool_calls": final_calls,
+                    "had_tool_calls": saw_tool_call or bool(final_calls),
                 }
             }
+
+
+def _merge_tool_call_delta(acc: dict[int, dict[str, Any]], tc: dict[str, Any]) -> None:
+    """Fold one streaming tool_call delta into an index-keyed accumulator."""
+    idx = tc.get("index", 0)
+    slot = acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+    if tc.get("id"):
+        slot["id"] = tc["id"]
+    fn = tc.get("function") or {}
+    if fn.get("name"):
+        slot["name"] = fn["name"]
+    if fn.get("arguments"):
+        slot["arguments"] += fn["arguments"]
 
 
 def to_chat_completion(
@@ -269,15 +412,20 @@ def to_chat_completion(
     reasoning: str,
     model: str,
     usage: dict[str, Any] | None,
+    tool_calls: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
     usage = usage or {}
     prompt_tokens = usage.get("input_tokens", 0)
     completion_tokens = usage.get("output_tokens", 0)
-    message: dict[str, Any] = {"role": "assistant", "content": text}
+    # OpenAI sends content=null on a pure tool-call turn; our engine reads
+    # ``content or ""`` so null is safe and keeps the empty-response guard honest.
+    message: dict[str, Any] = {"role": "assistant", "content": text or None}
     if reasoning:
         message["reasoning_content"] = reasoning
+    if tool_calls:
+        message["tool_calls"] = tool_calls
     return {
         "id": completion_id,
         "object": "chat.completion",
@@ -287,7 +435,7 @@ def to_chat_completion(
             {
                 "index": 0,
                 "message": message,
-                "finish_reason": "stop",
+                "finish_reason": "tool_calls" if tool_calls else "stop",
             }
         ],
         "usage": {
@@ -364,11 +512,14 @@ def make_handler(creds: dict[str, str]):
             model = chat_body.get("model", "unknown")
             completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
             usage: dict[str, Any] = {}
+            had_tool_calls = False
             self._sse()
             self._write_sse(to_chat_chunk(completion_id, model, delta={"role": "assistant"}))
             try:
                 for item in translate_upstream(iter_sse_from_response(resp)):
                     if "delta" in item:
+                        if item["delta"].get("tool_calls"):
+                            had_tool_calls = True
                         self._write_sse(to_chat_chunk(completion_id, model, delta=item["delta"]))
                         continue
                     final = item["final"]
@@ -385,12 +536,40 @@ def make_handler(creds: dict[str, str]):
                         self._write_sse(
                             to_chat_chunk(completion_id, model, delta={"content": final["content"]})
                         )
+                    for i, tc in enumerate(final.get("tool_calls") or []):
+                        had_tool_calls = True
+                        self._write_sse(
+                            to_chat_chunk(
+                                completion_id,
+                                model,
+                                delta={
+                                    "tool_calls": [
+                                        {
+                                            "index": i,
+                                            "id": tc["call_id"],
+                                            "type": "function",
+                                            "function": {
+                                                "name": tc["name"],
+                                                "arguments": tc["arguments"],
+                                            },
+                                        }
+                                    ]
+                                },
+                            )
+                        )
+                    if final.get("had_tool_calls"):
+                        had_tool_calls = True
             except Exception as exc:
                 # Best-effort: upstream stalled/dropped mid-stream. Close the SSE
                 # cleanly so the client finalizes what it already received.
                 sys.stderr.write(f"stream interrupted: {exc}\n")
             self._write_sse(
-                to_chat_chunk(completion_id, model, finish_reason="stop", usage=usage)
+                to_chat_chunk(
+                    completion_id,
+                    model,
+                    finish_reason="tool_calls" if had_tool_calls else "stop",
+                    usage=usage,
+                )
             )
             self._write_sse("data: [DONE]\n\n")
 
@@ -425,6 +604,7 @@ def make_handler(creds: dict[str, str]):
                 content_parts: list[str] = []
                 reasoning_parts: list[str] = []
                 usage: dict[str, Any] = {}
+                tool_acc: dict[int, dict[str, Any]] = {}
                 for item in translate_upstream(iter_sse_from_response(resp)):
                     if "delta" in item:
                         delta = item["delta"]
@@ -432,6 +612,8 @@ def make_handler(creds: dict[str, str]):
                             content_parts.append(delta["content"])
                         if delta.get("reasoning_content"):
                             reasoning_parts.append(delta["reasoning_content"])
+                        for tc in delta.get("tool_calls") or []:
+                            _merge_tool_call_delta(tool_acc, tc)
                         continue
                     final = item["final"]
                     usage = final["usage"]
@@ -439,11 +621,29 @@ def make_handler(creds: dict[str, str]):
                         content_parts.append(final["content"])
                     if final["reasoning"]:
                         reasoning_parts.append(final["reasoning"])
+                    for i, tc in enumerate(final.get("tool_calls") or []):
+                        _merge_tool_call_delta(
+                            tool_acc,
+                            {
+                                "index": i,
+                                "id": tc["call_id"],
+                                "function": {"name": tc["name"], "arguments": tc["arguments"]},
+                            },
+                        )
+                assembled = [
+                    {
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {"name": tc["name"], "arguments": tc["arguments"]},
+                    }
+                    for _, tc in sorted(tool_acc.items())
+                ]
                 out = to_chat_completion(
                     "".join(content_parts),
                     "".join(reasoning_parts),
                     chat_body.get("model", "unknown"),
                     usage,
+                    assembled or None,
                 )
                 self._json(200, out)
             except ValueError as e:

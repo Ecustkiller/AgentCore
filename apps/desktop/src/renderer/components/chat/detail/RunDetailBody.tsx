@@ -1,6 +1,10 @@
 import { Markdown } from "@/components/chat/Markdown";
 import { ReceivedContextSection } from "@/components/chat/ReceivedContext";
+import { toolPhaseText } from "@/components/chat/message-bubble/constants";
 import { Button } from "@/components/ui";
+import { useRunLlmWindow } from "@/hooks/useRunLlmWindow";
+import { useTurnAudit } from "@/hooks/useTurnAudit";
+import { filterInjectInEdges } from "@/lib/causalInject";
 import { formatCompact } from "@/lib/format";
 import { detectReviewConcern } from "@/lib/reviewConcern";
 import { submitRunRedirect } from "@/services/runRedirect";
@@ -19,9 +23,12 @@ import { Pencil, RotateCcw, Square, Wrench } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AuditSection } from "./sections/RunAudit";
+import { RunCausalInjectBlock } from "./sections/RunCausalInject";
 import { DebriefSection } from "./sections/RunDebrief";
 import { DiagnosticSection } from "./sections/RunDiagnostics";
 import { EscalationSection } from "./sections/RunEscalations";
+import { LlmWindowSection } from "./sections/RunLlmWindow";
+import { RunOutcomeAcceptSection } from "./sections/RunOutcomeAccept";
 import {
   RunRefGroup,
   SubtaskTree,
@@ -36,7 +43,7 @@ import { ThinkingSection } from "./sections/RunThinking";
 import { ToolCallsSection } from "./sections/RunToolCalls";
 import { Section, StatusBadge } from "./sections/shared";
 
-export { SchedulingDiag } from "./sections/RunDiagnostics";
+export { SchedulingDiag, CollabDiag } from "./sections/RunDiagnostics";
 
 /**
  * Single-run detail content (task / status / model+reasoning / tools / output /
@@ -67,6 +74,10 @@ export function RunDetailBody({
       activeRuntime(s).messages.find((m) => m.id === messageId)?.traceId ??
       null,
   );
+  const turnCollab = useConversationStore(
+    (s) =>
+      activeRuntime(s).messages.find((m) => m.id === messageId)?.collab ?? null,
+  );
   const turnInteractive = useConversationStore(
     (s) =>
       activeRuntime(s).messages.find((m) => m.id === messageId)?.isStreaming ??
@@ -81,6 +92,17 @@ export function RunDetailBody({
   const agent = run
     ? execution?.agents.find((a) => a.id === run.agentId)
     : null;
+  const isMultiAgent = execution?.planType === "multi_agent";
+  const turnAudit = useTurnAudit(
+    isMultiAgent && conversationId != null ? conversationId : null,
+    isMultiAgent ? messageId : null,
+  );
+  const llmWindow = useRunLlmWindow(
+    conversationId,
+    messageId,
+    runId,
+    diagnosticMode,
+  );
 
   if (!execution || !run || !agent) return null;
 
@@ -102,6 +124,9 @@ export function RunDetailBody({
       ? (execution.runs.find((r) => r.id === run.parentRunId) ?? null)
       : null;
   const childCount = countDescendants(execution.runs, run.id);
+  const hasInjectIn =
+    isMultiAgent &&
+    filterInjectInEdges(turnAudit.data?.causal_graph, run.id).length > 0;
   const chain =
     revisionChains(execution).find((c) =>
       c.versions.some((v) => v.run.id === run.id),
@@ -278,6 +303,16 @@ export function RunDetailBody({
         />
       )}
 
+      {diagnosticMode && conversationId != null && (
+        <LlmWindowSection
+          messages={llmWindow.data?.messages ?? []}
+          available={llmWindow.data?.available ?? false}
+          loading={llmWindow.loading}
+          error={llmWindow.error}
+          keyBase={`run:${runId}`}
+        />
+      )}
+
       {run.error && (
         <Section title="错误">
           <p className="whitespace-pre-wrap break-words text-xs text-destructive">
@@ -285,6 +320,20 @@ export function RunDetailBody({
           </p>
         </Section>
       )}
+
+      {/* 跑一半改方向 · 忽略路径收口 (Step 4): a terminal run whose「改方向」steer couldn't apply or
+          whose failure is non-retryable — surface it + let the user record an explicit accept.
+          Gated to terminal runs so an in-flight run never triggers the audit read. */}
+      {conversationId != null &&
+        run.status !== "pending" &&
+        run.status !== "ready" &&
+        run.status !== "running" && (
+          <RunOutcomeAcceptSection
+            conversationId={conversationId}
+            messageId={messageId}
+            runId={runId}
+          />
+        )}
 
       {agent.toolProgress && agent.status === "working" && (
         <Section title="正在生成">
@@ -297,6 +346,20 @@ export function RunDetailBody({
               {agent.toolProgress.chars > 0
                 ? `${formatCompact(agent.toolProgress.chars)} 字`
                 : "…"}
+            </span>
+            <span className="inline-block animate-pulse text-primary">▋</span>
+          </div>
+        </Section>
+      )}
+
+      {agent.toolExecutionLive && agent.status === "working" && (
+        <Section
+          title={toolPhaseText(agent.toolExecutionLive.phase) ?? "处理中"}
+        >
+          <div className="flex items-center gap-2 rounded-lg bg-primary/5 px-2.5 py-1.5 text-xs">
+            <Wrench size={12} className="shrink-0 text-primary" />
+            <span className="flex-1 truncate text-foreground">
+              {toolLabel(agent.toolExecutionLive.toolName)}
             </span>
             <span className="inline-block animate-pulse text-primary">▋</span>
           </div>
@@ -336,7 +399,8 @@ export function RunDetailBody({
       {(upstream.length > 0 ||
         downstream.length > 0 ||
         parent ||
-        childCount > 0) && (
+        childCount > 0 ||
+        hasInjectIn) && (
         <Section title="关系">
           <div className="space-y-3">
             {upstream.length > 0 && (
@@ -377,6 +441,16 @@ export function RunDetailBody({
                 />
               </div>
             )}
+            {hasInjectIn && (
+              <RunCausalInjectBlock
+                runId={run.id}
+                graph={turnAudit.data?.causal_graph}
+                runs={execution.runs}
+                agents={execution.agents}
+                onSelect={(rid, role) => showRunDetail(messageId, rid, role)}
+                sceneKey={`run:${runId}:causal-inject`}
+              />
+            )}
           </div>
         </Section>
       )}
@@ -396,6 +470,7 @@ export function RunDetailBody({
           executionId={execution.id}
           traceId={traceId}
           batches={execution.batches}
+          collab={turnCollab}
           keyBase={`run:${runId}`}
         />
       )}

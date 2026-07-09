@@ -114,7 +114,6 @@ def _admin_user_response(user: User) -> AdminUserResponse:
         quota_daily_tokens=user.quota_daily_tokens,
         quota_monthly_cost_usd=user.quota_monthly_cost_usd,
         quota_daily_requests=user.quota_daily_requests,
-        default_model_mode=user.default_model_mode,
         created_at=user.created_at,
         deleted_at=user.deleted_at,
     )

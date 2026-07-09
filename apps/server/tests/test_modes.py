@@ -4,6 +4,21 @@ from agentcore.core.types import ModelTier
 from agentcore.llm.profiles import PROFILES, TurnProfiles, default_turn_profiles, get_profile
 
 
+def test_turn_profiles_for_turn_uses_credentials_model():
+    from agentcore.llm.credentials import LLMCredentials
+    from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, turn_profiles_for_turn
+
+    profiles = turn_profiles_for_turn(
+        None,
+        LLMCredentials(
+            api_key="sk",
+            base_url="https://api.deepseek.com",
+            default_model=DEEPSEEK_V4_FLASH,
+        ),
+    )
+    assert profiles.model_for("chat") == DEEPSEEK_V4_FLASH
+
+
 def test_default_turn_profiles_uses_platform_model(monkeypatch):
     monkeypatch.setattr("agentcore.config.settings.platform_model", "gpt-5")
     ps = default_turn_profiles()

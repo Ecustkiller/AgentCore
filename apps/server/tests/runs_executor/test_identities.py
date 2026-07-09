@@ -114,17 +114,36 @@ async def test_captain_worker_gets_captain_identity_and_delegate_tool():
     executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())
     await executor(plan.by_id("d1"), {})
     # The opted-in, above-cap worker is told it may lead one nested sub-team.
-    assert "再向下委派一层子团队" in provider.system_messages[0]
+    assert "启动即拥有再向下委派一层子团队" in provider.system_messages[0]
 
 
-async def test_leaf_worker_keeps_no_nesting_identity():
+async def test_default_worker_gets_captain_identity_and_delegate_tool():
     provider = _ContentProvider(["X"])
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
-    # A factory is available, but the leaf worker did not opt in → leaf identity.
+    # Default can_delegate → captain identity + delegate tools at depth 1.
+    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())
+    await executor(plan.by_id("t_1"), {})
+    sys = provider.system_messages[0]
+    assert "启动即拥有再向下委派一层子团队" in sys
+    assert "不要为委派而委派" in sys
+    assert "3+" in sys and "独立子系统" in sys
+    assert "深入实现" in sys
+    assert "4 个 sub-worker" in sys
+
+
+async def test_depth_two_subworker_keeps_leaf_identity():
+    provider = _ContentProvider(["X"])
+    plan, _ = build_run_plan(
+        [{"role": "A", "task": "做A"}],
+        id_prefix="t",
+        parent_run_id="cap",
+        depth=2,
+    )
+    # At depth cap: delegate tools withheld even with default can_delegate=True.
     executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())
     await executor(plan.by_id("t_1"), {})
     assert "不能再向下委派" in provider.system_messages[0]
-    assert "再向下委派一层子团队" not in provider.system_messages[0]
+    assert "启动即拥有再向下委派一层子团队" not in provider.system_messages[0]
 
 
 async def test_worker_identities_carry_tool_safety_caution():
@@ -135,7 +154,10 @@ async def test_worker_identities_carry_tool_safety_caution():
     # refactor can't drop the mutation caution from the agents that can actually act
     # (the absence-from-base/CEO side is pinned in tests/test_prompt.py).
     leaf_provider = _ContentProvider(["X"])
-    leaf_plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    leaf_plan, _ = build_run_plan(
+        [{"role": "A", "task": "做A", "can_delegate": False}],
+        id_prefix="t",
+    )
     leaf_exec = _nesting_executor(leaf_plan, leaf_provider, lambda rid, d: _stub_subteam())
     await leaf_exec(leaf_plan.by_id("t_1"), {})
     leaf_sys = leaf_provider.system_messages[0]
@@ -148,7 +170,7 @@ async def test_worker_identities_carry_tool_safety_caution():
     captain_exec = _nesting_executor(captain_plan, captain_provider, lambda rid, d: _stub_subteam())
     await captain_exec(captain_plan.by_id("d1"), {})
     captain_sys = captain_provider.system_messages[0]
-    assert "再向下委派一层子团队" in captain_sys  # captain identity in play
+    assert "启动即拥有再向下委派一层子团队" in captain_sys  # captain identity in play
     assert "<tool_safety>" in captain_sys
 
 

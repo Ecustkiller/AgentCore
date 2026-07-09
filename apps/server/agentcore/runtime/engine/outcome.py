@@ -20,8 +20,7 @@ class RoundOutcome:
     terminal tool's final text (a tool that already produced the turn's answer);
     ``llm_failed`` marks a round whose LLM call errored on the non-raising path,
     carrying the ``error_code`` / ``error_message`` the loop surfaces as an SSE
-    ``error`` ONLY if the engine-level fallback ladder is exhausted — deferred so a
-    successful fallback retry shows the user no error.
+    ``error`` ONLY when the loop surfaces it via a terminal ``Return`` directive.
     """
 
     content: str

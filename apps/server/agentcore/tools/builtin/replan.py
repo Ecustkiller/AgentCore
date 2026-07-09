@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.tools.builtin.delegate.schema import TASK_DELIVERABLE_SCHEMA
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 
 if TYPE_CHECKING:
@@ -87,10 +88,7 @@ _REPLAN_PARAMETERS = {
                         "type": "string",
                         "description": "可选：该角色的职责 / 目标，用于设定其系统提示。",
                     },
-                    "expected_output": {
-                        "type": "string",
-                        "description": "可选：期望产出的形态 / 要点。",
-                    },
+                    "deliverable": TASK_DELIVERABLE_SCHEMA,
                     "model_preference": {
                         "type": "string",
                         "enum": ["fast", "strong"],
@@ -165,10 +163,7 @@ _REPLAN_PARAMETERS = {
                         "type": "string",
                         "description": "可选：该角色的职责 / 目标，用于设定其系统提示。",
                     },
-                    "expected_output": {
-                        "type": "string",
-                        "description": "可选：期望产出的形态 / 要点。",
-                    },
+                    "deliverable": TASK_DELIVERABLE_SCHEMA,
                     "model_preference": {
                         "type": "string",
                         "enum": ["fast", "strong"],

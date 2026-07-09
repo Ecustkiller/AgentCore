@@ -26,6 +26,40 @@ def _ask_user_suspension() -> AskUserSuspension:
 
 
 @pytest.mark.asyncio
+async def test_save_paused_turn_records_journal_snapshot() -> None:
+    """Pause save must write journal_entries to turn_journal, not only flush the writer."""
+    suspension = _ask_user_suspension()
+    suspension.journal_entries = [
+        {"kind": "turn_started", "payload": {"user_message": "hello"}, "ts": None},
+        {"kind": "checkpoint_required", "payload": {"checkpoint_id": "cp-1"}, "ts": None},
+    ]
+    with patch(
+        "agentcore.runtime.suspension_persistence.async_session_factory"
+    ) as factory:
+        session = AsyncMock()
+        factory.return_value.__aenter__.return_value = session
+        with patch(
+            "agentcore.runtime.suspension_persistence.PausedTurnRepository"
+        ) as repo_cls:
+            with patch(
+                "agentcore.runtime.suspension_persistence.TurnJournalRepository"
+            ) as journal_cls:
+                repo_cls.return_value.upsert = AsyncMock()
+                journal_cls.return_value.record = AsyncMock()
+                with patch(
+                    "agentcore.runtime.suspension_persistence._notify_pause",
+                    AsyncMock(),
+                ):
+                    await save_paused_turn(suspension)
+    journal_cls.return_value.record.assert_awaited_once_with(
+        turn_id="msg-1",
+        conversation_id="conv-1",
+        trace_id=None,
+        entries=suspension.journal_entries,
+    )
+
+
+@pytest.mark.asyncio
 async def test_save_paused_turn_marks_degraded_when_writer_failed() -> None:
     suspension = _ask_user_suspension()
     writer = TurnJournalWriter(

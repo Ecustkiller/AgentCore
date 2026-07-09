@@ -8,9 +8,12 @@ import { net, BrowserWindow, app, ipcMain, protocol, shell } from "electron";
 // （dev 与 Linux 主要靠它；打包后 Windows exe / macOS 包图标另由 electron-builder 从
 // build/icon.png 派生）。
 import icon from "../../resources/icon.png?asset";
+import { registerAgentTownIpc } from "./agenttown-service";
 import { registerFsIpc } from "./fs-service";
 import { registerLogIpc } from "./log-service";
+import { registerNotificationIpc } from "./notification-service";
 import { registerSidecarIpc } from "./sidecar-service";
+import { registerTerminalIpc } from "./terminal-service";
 import { initUpdater } from "./updater";
 import { registerWindowFrameIpc } from "./window-frame";
 import { loadWindowState, manageWindowState } from "./window-state";
@@ -225,10 +228,17 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  // Windows 通知中心需要 AppUserModelId，否则 toast 静默失败。
+  if (process.platform === "win32") {
+    app.setAppUserModelId("com.agentcore.desktop");
+  }
   registerAppProtocol();
   registerLogIpc();
   registerFsIpc();
   registerSidecarIpc();
+  registerTerminalIpc();
+  registerAgentTownIpc();
+  registerNotificationIpc();
   const mainWindow = createWindow();
   // 自动更新随首个窗口创建后初始化一次（IPC 句柄全局唯一，不在 createWindow 内调用，
   // 以免 macOS 上 activate 重建窗口时重复注册）。

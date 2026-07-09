@@ -1,4 +1,5 @@
 import { statusPillSoft } from "@/components/ui/tone-presets";
+import { formatDuration } from "@/lib/format";
 import type { ReviewConcernLevel } from "@/lib/reviewConcern";
 import type {
   ModelTier,
@@ -22,6 +23,8 @@ export interface AgentNodeData {
   outputPreview: string;
   reasoningPreview?: string;
   toolProgress?: { toolName: string; chars: number } | null;
+  /** Worker tool EXECUTION phase (transport-only `tool_use_progress` with run_id). */
+  toolExecutionLive?: { toolName: string; phase: string } | null;
   tokenCount: number;
   toolCount: number;
   artifacts?: string[];
@@ -45,6 +48,10 @@ export interface AgentNodeData {
   auditEventCount?: number;
   /** Review/QC output flagged by {@link detectReviewConcern} (中间可见性 phase-1). */
   reviewConcern?: ReviewConcernLevel | null;
+  /** Folded child runs under this unit root (delegation drill-in). */
+  foldedChildCount?: number;
+  unitExpanded?: boolean;
+  onToggleUnitExpand?: () => void;
   enterIndex?: number;
   onActivate?: () => void;
   [key: string]: unknown;
@@ -105,6 +112,66 @@ export function statusLabel(status: RunStatus): string {
   return labels[status] ?? status;
 }
 
+/** Face status line for parallel wave visibility (排队 / 执行 / 完成用时 / 失败). */
+export function statusFaceLabel(
+  status: RunStatus,
+  durationMs: number | null | undefined,
+  elapsedSec?: number,
+): { text: string; cls: string; tickElapsed: boolean } {
+  switch (status) {
+    case "pending":
+    case "ready":
+      return {
+        text: "排队中",
+        cls: "text-muted-foreground",
+        tickElapsed: false,
+      };
+    case "running": {
+      const suffix =
+        elapsedSec !== undefined && elapsedSec >= 1 ? ` · ${elapsedSec}s` : "";
+      return {
+        text: `执行中${suffix}`,
+        cls: "text-primary/90",
+        tickElapsed: true,
+      };
+    }
+    case "completed": {
+      const dur = durationMs ? formatDuration(durationMs) : null;
+      return {
+        text: dur ? `已完成 · ${dur}` : "已完成",
+        cls: "text-muted-foreground",
+        tickElapsed: false,
+      };
+    }
+    case "failed":
+      return {
+        text: "失败",
+        cls: "text-destructive",
+        tickElapsed: false,
+      };
+    case "cancelled":
+      return {
+        text: "已停止",
+        cls: "text-muted-foreground",
+        tickElapsed: false,
+      };
+    default:
+      return {
+        text: statusLabel(status),
+        cls: "text-muted-foreground",
+        tickElapsed: false,
+      };
+  }
+}
+
+/** 热修修订角标文案（v2 / v3…）；original 为 v1、不在节点上挂角标。 */
+export function revisionVersionBadge(
+  revision: number | undefined,
+): string | null {
+  if (!revision || revision <= 1) return null;
+  return `v${revision}`;
+}
+
 export function revisedBadge(kind: PlanRevisionKind): {
   label: string;
   hint: string;
@@ -136,6 +203,7 @@ export interface AgentNodePresentation {
   presence: { cls: string; icon: React.ReactNode | null };
   artifacts: string[];
   liveTool: { toolName: string; chars: number } | null;
+  liveToolExec: { toolName: string; phase: string } | null;
   livePreview: string;
   liveThinking: string;
   highlighted: boolean;
@@ -150,4 +218,6 @@ export interface AgentNodePresentation {
   peekTags: string[];
   checkpointFace: { label: string; cls: string } | null;
   reviewConcernFace: { label: string; cls: string } | null;
+  statusFace: { text: string; cls: string; tickElapsed: boolean };
+  revisionFace: string | null;
 }

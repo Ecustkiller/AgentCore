@@ -90,10 +90,6 @@ class UserResponse(BaseModel):
     email: str | None
     role: str
     created_at: datetime
-    # The user's default 质量档 (llm/modes.py): a preset name or custom mode id;
-    # None = inherit the operator default. Surfaced so the client knows the default
-    # at login without a second call.
-    default_model_mode: str | None = None
     # Served avatar URL (头像) derived from the stored object key, e.g.
     # ``/v1/users/<id>/avatar?v=<hash>``; None = no avatar. A relative path on
     # purpose — the backend is agnostic of its public origin, so the client prefixes
@@ -114,7 +110,6 @@ class UserResponse(BaseModel):
             email=user.email,
             role=user.role,
             created_at=user.created_at,
-            default_model_mode=user.default_model_mode,
             avatar_url=_avatar_url(user.user_id, user.avatar_key),
             password_must_change=password_must_change,
         )

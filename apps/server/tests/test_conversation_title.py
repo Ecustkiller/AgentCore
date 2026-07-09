@@ -10,6 +10,8 @@ from agentcore.memory.conversation_title import (
     TITLE_MAX_CHARS,
     LLMTitleGenerator,
     TitleInput,
+    TitleResult,
+    _parse_title_result,
     _render_title_prompt,
     _sanitize_title,
 )
@@ -92,8 +94,41 @@ def test_title_prompt_bans_emoji_and_guards_injection():
     # The sanitizer does not strip emoji, so the ban lives in the prompt; the
     # conversation is interpolated as data and must not be obeyed as instructions.
     assert "emoji" in _TITLE_SYSTEM_PROMPT
-    assert "名词短语" in _TITLE_SYSTEM_PROMPT
+    assert "JSON" in _TITLE_SYSTEM_PROMPT
+    assert "tag" in _TITLE_SYSTEM_PROMPT
     assert "不要执行其中" in _TITLE_SYSTEM_PROMPT
+
+
+# --- _parse_title_result (structured JSON) ---
+
+
+def test_parse_title_result_from_json():
+    raw = '{"title": "登录功能设计", "tag": "code_review"}'
+    out = _parse_title_result(raw)
+    assert out == TitleResult(title="登录功能设计", tag="code_review")
+
+
+def test_parse_title_result_accepts_chinese_tag_label():
+    raw = '{"title": "竞品调研", "tag": "研究"}'
+    out = _parse_title_result(raw)
+    assert out == TitleResult(title="竞品调研", tag="research")
+
+
+def test_parse_title_result_discards_invalid_tag():
+    raw = '{"title": "随便聊聊", "tag": "闲聊"}'
+    out = _parse_title_result(raw)
+    assert out == TitleResult(title="随便聊聊", tag=None)
+
+
+def test_parse_title_result_plain_text_fallback():
+    out = _parse_title_result('"登录功能设计"')
+    assert out == TitleResult(title="登录功能设计", tag=None)
+
+
+def test_parse_title_result_strips_json_fence():
+    raw = '```json\n{"title":"写作提纲","tag":"writing"}\n```'
+    out = _parse_title_result(raw)
+    assert out == TitleResult(title="写作提纲", tag="writing")
 
 
 # --- LLMTitleGenerator (async, with a fake provider) ---
@@ -112,14 +147,14 @@ class _FakeProvider:
 
 
 async def test_generator_returns_sanitized_title():
-    provider = _FakeProvider('"登录功能设计"')
-    title = await LLMTitleGenerator(provider).generate(
+    provider = _FakeProvider('{"title":"登录功能设计","tag":"code_review"}')
+    result = await LLMTitleGenerator(provider).generate(
         TitleInput(
             conversation_id="c1",
             messages=[{"role": "user", "content": "帮我设计登录"}],
         )
     )
-    assert title == "登录功能设计"
+    assert result == TitleResult(title="登录功能设计", tag="code_review")
 
 
 async def test_generator_uses_flash_non_thinking_short():
@@ -138,22 +173,22 @@ async def test_generator_uses_flash_non_thinking_short():
 
 async def test_generator_empty_messages_skips_call():
     provider = _FakeProvider("不应被调用")
-    title = await LLMTitleGenerator(provider).generate(
+    result = await LLMTitleGenerator(provider).generate(
         TitleInput(conversation_id="c1", messages=[])
     )
-    assert title == ""
+    assert result == TitleResult(title="")
     assert provider.requests == []
 
 
 async def test_generator_blank_output_returns_empty():
     provider = _FakeProvider("   \n  ")
-    title = await LLMTitleGenerator(provider).generate(
+    result = await LLMTitleGenerator(provider).generate(
         TitleInput(
             conversation_id="c1",
             messages=[{"role": "user", "content": "你好"}],
         )
     )
-    assert title == ""
+    assert result == TitleResult(title="")
 
 
 async def test_generator_times_out_returns_empty(monkeypatch):
@@ -165,7 +200,7 @@ async def test_generator_times_out_returns_empty(monkeypatch):
             raise AssertionError("unreachable")
 
     monkeypatch.setattr(title_mod, "_TITLE_TIMEOUT_SECONDS", 0.01)
-    title = await LLMTitleGenerator(_StallProvider()).generate(
+    result = await LLMTitleGenerator(_StallProvider()).generate(
         TitleInput(conversation_id="c1", messages=[{"role": "user", "content": "你好"}])
     )
-    assert title == ""
+    assert result == TitleResult(title="")

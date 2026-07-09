@@ -16,15 +16,11 @@ PASS/FAIL 汇总。见 .cursor/rules/conversation-logs.mdc、docs/02-架构/本�
 """
 
 import asyncio
-import ipaddress
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-# Clash/Mihomo 默认 fake-ip-range = 198.18.0.1/16；198.18.0.0/15 为 RFC 2544 保留段。
-_FAKE_IP_NET = ipaddress.ip_network("198.18.0.0/15")
 
 DEFAULT_TARGETS = [
     "https://www.gov.cn/",
@@ -36,21 +32,11 @@ DEFAULT_TARGETS = [
 
 def _ip_tag(ip: str) -> str:
     """人读标签：public / FAKE-IP / reserved-or-private。"""
-    try:
-        addr = ipaddress.ip_address(ip)
-    except ValueError:
-        return "unparseable"
-    if addr in _FAKE_IP_NET:
+    from agentcore.core.net import ip_is_safe, is_fake_ip_proxy_signature
+
+    if is_fake_ip_proxy_signature(ip):
         return "FAKE-IP(198.18/15)"
-    # 与 core.net.ip_is_safe 同口径的"不安全"归类。
-    if (
-        addr.is_private
-        or addr.is_loopback
-        or addr.is_link_local
-        or addr.is_reserved
-        or addr.is_multicast
-        or addr.is_unspecified
-    ):
+    if not ip_is_safe(ip):
         return "reserved/private"
     return "public"
 
@@ -119,15 +105,20 @@ async def main() -> None:
 
     any_fake = any(r["fake_ip"] for r in rows)
     ok_reads = sum(1 for r in rows if r.get("ok"))
+    blocked_fake = any_fake and any(r["verdict"] == "PRIVATE_IP_FAKE_PROXY" for r in rows)
     print("\n" + "=" * 78)
     print("汇总")
     print("=" * 78)
     print(f"  fake-IP 检出: {'YES' if any_fake else 'NO'}")
     print(f"  read_url 成功: {ok_reads}/{len(rows)}")
-    if any_fake:
+    if blocked_fake:
         print(
-            "  => FAIL：本机代理仍在 fake-IP 模式（域名被应答成 198.18.x.x 占位 IP）。\n"
-            "     处置：代理关 fake-ip / 改 redir-host，或让后端绕过代理直连可信解析器，再重跑。"
+            "  => FAIL：本机代理仍在 fake-IP 模式且 READ_URL_ALLOW_FAKE_IP_PROXY=false。\n"
+            "     处置：设 READ_URL_ALLOW_FAKE_IP_PROXY=true（默认已开），或代理关 fake-ip / 改 redir-host。"
+        )
+    elif any_fake and ok_reads == len(rows):
+        print(
+            "  => PASS（fake-IP + allow 模式）：占位 DNS 经本地代理路由，read_url 端到端可读。"
         )
     elif ok_reads == len(rows):
         print("  => PASS：DNS 落真实公网 IP、SSRF 放行、read_url 端到端可读。取证层健康。")

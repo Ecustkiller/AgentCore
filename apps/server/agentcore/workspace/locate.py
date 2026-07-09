@@ -246,58 +246,6 @@ def build_local_workspace(
     )
 
 
-def resolve_local_binding(
-    *,
-    folder_id: str | None,
-    folder_local_root_id: str | None,
-    folder_local_subpath: str | None = None,
-    label: str | None = None,
-) -> LocalBinding | None:
-    """Resolve a conversation's local-mode binding from its folder's root id.
-
-    .. deprecated::
-        Folder refactor removed folder-level bindings. Use
-        :func:`agentcore.conversation.scratch.resolve_conversation_local_binding`
-        with the conversation row's ``local_root_id`` / ``local_subpath`` instead.
-
-    The 双模式工作区 §七 rule, in one place: **文件夹 = 工作区**, so a binding lives
-    only on the folder. A conversation **in a folder** is local iff that folder is
-    bound; a **folderless (裸聊)** conversation has no workspace yet, so it is always
-    cloud. The governing scope being unbound (``None``) means cloud. Pure (takes the
-    already-fetched ids) so it stays DB-free and unit-testable; callers fetch the
-    folder row and pass its ``local_root_id`` (+ ``local_subpath`` for a workspace
-    that lives in a sub-directory of a shared container root, 工作区对称化 D1a).
-    """
-    root_id = folder_local_root_id if folder_id is not None else None
-    if not root_id:
-        return None
-    return LocalBinding(
-        root_id=root_id,
-        root_label=label or "workspace",
-        subpath=folder_local_subpath or "",
-    )
-
-
-def default_workspace_name(title: str | None, *, fallback_text: str | None = None) -> str:
-    """Name for an auto-created workspace when a 裸聊 first produces files (B 懒建).
-
-    .. deprecated::
-        Promotion was removed in the Folder refactor. Retained for legacy callers only.
-
-    Uses the conversation's title so the new folder reads as "this chat's project".
-    The title is generated async (post-turn), so at promote time (mid-turn, on the
-    first file write) it is usually still ``None`` — hence ``fallback_text`` (the
-    first user message), which makes a freshly-promoted workspace read meaningfully
-    instead of "未命名工作区". For a **local** workspace this name also seeds the
-    on-disk directory (工作区对称化 D1a), so a good name here matters more than for
-    cloud. Final fallback when nothing is available.
-    """
-    name = " ".join((title or "").split())
-    if not name:
-        name = " ".join((fallback_text or "").split())
-    return name[:200] if name else "未命名工作区"
-
-
 def build_workspace(
     *,
     user_id: str,

@@ -3,9 +3,9 @@
 Two layers share one discipline so a teammate's product is sized the same way
 wherever it is re-shown:
 
-- ``executor._dep_context_blocks`` — an upstream product → a downstream worker's
+- ``executor_context._dep_context_blocks`` — an upstream product → a downstream worker's
   prompt (上下文传递, 通道③).
-- ``delegate._format_for_ceo`` — every worker's product → the CEO's synthesis input
+- ``ceo_format.format_for_ceo`` — every worker's product → the CEO's synthesis input
   (CEO 综述输入瘦身). Without this a wide fan-out of long products would balloon the
   CEO's overview pass and hit the ``ToolResult`` truncation net, whose middle-elision of
   a multi-worker aggregate would drop whole workers — better to size + shape it here than

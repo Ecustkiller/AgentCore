@@ -31,6 +31,7 @@ import {
   useUnarchiveConversation,
 } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
+import { conversationTagLabel } from "@/lib/conversationTag";
 import { notifyError, notifyInfo } from "@/lib/toast";
 import {
   type ExportFormat,
@@ -173,6 +174,7 @@ export function ConversationItem({ conversation }: Props) {
     () => buildMessagePreview(conversation.lastMessagePreview, cachedMessages),
     [conversation.lastMessagePreview, cachedMessages],
   );
+  const tagLabel = conversationTagLabel(conversation.tag);
 
   const clearPreviewTimer = useCallback(() => {
     if (previewTimerRef.current) {
@@ -441,7 +443,14 @@ export function ConversationItem({ conversation }: Props) {
                     />
                   </SimpleTooltip>
                 )}
-                <span className="truncate">{conversation.title}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {conversation.title}
+                </span>
+                {tagLabel && (
+                  <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs leading-none text-muted-foreground">
+                    {tagLabel}
+                  </span>
+                )}
               </div>
               {confirmingDelete ? (
                 <span className="flex shrink-0 items-center gap-0.5">

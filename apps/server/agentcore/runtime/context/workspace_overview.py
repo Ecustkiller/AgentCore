@@ -39,23 +39,20 @@ OVERVIEW_MAX_FILES = 40
 OVERVIEW_CHAR_BUDGET = 1800
 
 
-async def _safe_index(backend: WorkspaceBackend) -> list[str]:
-    """Newest-first workspace file paths; best-effort (``[]`` on any failure).
+async def _safe_index(backend: WorkspaceBackend) -> list[str] | None:
+    """Newest-first workspace file paths; ``None`` if indexing unavailable/failed.
 
-    Newest-first (``index_files(order="recent")``) so a big tree spends the budget on
-    the most-recently-touched files (uploads / latest outputs), not whatever sorts
-    alphabetically first. Duck-typed + guarded so a backend without ``index_files``
-    (or a dropped desktop in local mode) degrades to "" rather than failing the turn.
+    ``[]`` means the index ran successfully but the workspace has no files.
     """
     index = getattr(backend, "index_files", None)
     if index is None:
-        return []
+        return None
     try:
         paths, _truncated = await index(order="recent")
         return list(paths)
     except Exception as e:  # noqa: BLE001 — overview is best-effort, never fail a turn
         logger.debug("workspace.overview_index_failed", error=str(e))
-        return []
+        return None
 
 
 async def build_workspace_overview(backend: WorkspaceBackend | None) -> str:
@@ -71,8 +68,17 @@ async def build_workspace_overview(backend: WorkspaceBackend | None) -> str:
 
     profile_text = render_project_profile(await detect_project_profile(backend))
     paths = await _safe_index(backend)
-    if not paths and not profile_text:
-        return ""
+    if paths is None:
+        if not profile_text:
+            return ""
+    elif not paths and not profile_text:
+        return (
+            "<workspace_file_index>\n"
+            "工作区当前为空（无文件路径可列）。若对话历史显示曾委派产出，仍须先 "
+            "file_list 核实；若确认为空，向用户说明可能是云端/本地工作区未对齐，"
+            "并引导绑定本地文件夹或检查侧栏工作区。\n"
+            "</workspace_file_index>"
+        )
 
     sections: list[str] = []
     if profile_text:

@@ -9,7 +9,7 @@ import pytest
 from agentcore.evals.spikes.sim.mock_provider import ScriptedProvider, content_chunk
 from agentcore.simulation.agents.tick_runner import AgentTickOutcome
 from agentcore.simulation.interaction.bus import InteractionBus, InteractionTickContext
-from agentcore.simulation.scenarios.town.config import LIN_PERSONA, ZHAO_PERSONA, seed_m1_world
+from agentcore.simulation.scenarios.town.config import LIN_PERSONA, ZHAO_PERSONA, seed_town_world
 from agentcore.simulation.types import SimAgentAction
 
 
@@ -20,7 +20,7 @@ def _accept_json(**fields: object) -> ScriptedProvider:
 
 @pytest.mark.asyncio
 async def test_bus_conversation_from_speak_to_outcome():
-    world = seed_m1_world()
+    world = seed_town_world()
     world.agents["zhao"].location = world.agents["lin"].location
     bus = InteractionBus()
     outcome = AgentTickOutcome(

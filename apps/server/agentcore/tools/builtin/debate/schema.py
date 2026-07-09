@@ -103,10 +103,9 @@ DEBATE_PARAMETERS = {
                     "model": {
                         "type": "string",
                         "description": (
-                            "（可选）指定该方辩手使用的模型，实现【真·多模型辩论】——让各方真正由不同模型驱动"
-                            "（如对比「哪个模型更聪明」）。用 `provider/model` 前缀路由到不同厂商，"
-                            "如 `doubao/doubao-seed-2-1-turbo-260628`（火山方舟）。"
-                            "留空=用平台默认模型。仅在用户明确想让各方由不同模型出战时设置；普通辩论留空即可。"
+                            "（可选·MVP 未启用）Phase 3 真·多模型辩手的 per-side 覆写预留字段。"
+                            "当前 MVP 全链路统一用户 model，此值解析入库但【不注入辩手执行】——"
+                            "设了也不会让各方跑不同模型。普通辩论请留空；勿为「谁更聪明」对战而填。"
                         ),
                     },
                 },
@@ -165,8 +164,7 @@ def parse_sides(raw: Any) -> tuple[list[DebateSide], str]:
         if key in seen:
             return [], f"sides 的 key 重复：`{key}`（每个参与方需唯一 key）。"
         seen.add(key)
-        # model（可选）：真·多模型辩手的显式覆写，宽松解析（仅收非空字符串），经 debater_task →
-        # RunSpec.model → 执行器 → 路由器按 provider/model 前缀分发。留空=平台默认。
+        # model（可选）：Phase 3 真·多模型辩手预留，宽松解析（仅收非空字符串）；MVP 不注入执行。
         model = str(item.get("model") or "").strip()
         sides.append(
             DebateSide(

@@ -65,11 +65,10 @@ function liveCrossExamPayload(
     const questions = crossExamQuestionsFromRun(run);
     if (questions.length === 0) continue;
     const blob = runOutputText(execution, run);
-    const ok = run.status !== "failed";
     out.push({
       target: parsed.targetKey,
       questioner: "",
-      exchanges: parseCrossExamResponse(questions, blob, ok),
+      exchanges: parseCrossExamResponse(questions, blob),
       answer_run_id: run.id,
     });
   }
@@ -124,13 +123,6 @@ function resolveLiveCrossExam(
   return resolveCrossExam(payload, sides, execution);
 }
 
-/** 旧产物 cross_exam 仍带顶层 questions / ok 而无 exchanges（渐进式契约扩展）。
- * TODO: 历史 turn 迁移完毕后可删，改只消费 exchanges[]。 */
-type LegacyDebateCrossExam = DebateCrossExam & {
-  questions?: string[];
-  ok?: boolean;
-};
-
 function runOutputText(execution: Execution, run: RunNode | null): string {
   if (!run) return "";
   const agent = execution.agents.find((a) => a.id === run.agentId);
@@ -151,11 +143,7 @@ function settledModel(
   execution: Execution,
   debate: DebateResultPayload,
 ): DebateModel {
-  // roster (debate.sides) 是模型覆写的权威源：按语义 key 映射，让每轮发言格按 sideKey 补回模型
-  // (真·多模型辩论的「谁是哪个模型」)。进行中无 roster → 该路不经此、模型留空。
-  const modelBySideKey = new Map(
-    debate.sides.map((s) => [s.key, s.model ?? ""]),
-  );
+  // roster (debate.sides) 仅身份/立场；辩手 model 从 run 节点取（MVP 统一 turn model，§7.5）。
   const rounds: DebateRoundModel[] = debate.rounds.map((round) => ({
     roundNo: round.round_no,
     focus: round.focus,
@@ -180,7 +168,7 @@ function settledModel(
         name: side.name,
         stance: run?.stance ?? null,
         colorVar: debateSideColorVar(side.key, side.name),
-        model: modelBySideKey.get(side.key) ?? "",
+        model: run?.model ?? "",
         run,
       };
     }),
@@ -292,8 +280,7 @@ function twoSide(run: RunNode, stance: Stance): DebateSideModel {
     name,
     stance,
     colorVar: debateSideColorVar(stance, name),
-    // 进行中无 roster（模型覆写权威源），故留空；收场由 settledModel 按 sideKey 补回。
-    model: "",
+    model: run.model ?? "",
     run,
   };
 }
@@ -348,8 +335,7 @@ function multiSide(
     name: role,
     stance: null,
     colorVar: debateSideColorVar(sideKey, role),
-    // 进行中无 roster；收场由 settledModel 按 sideKey 补回模型。
-    model: "",
+    model: run.model ?? "",
     run,
   };
 }
@@ -383,7 +369,7 @@ function resolveClashes(
 
 /** 把契约的 {@link DebateCrossExam}（语义 key + `answer_run_id` 引用）据本轮 `sides` 解析成可渲染的
  * {@link DebateCrossExamView}（被质询方名字 + 身份色 + 逐条 Q↔A + 作答 run）。引用不到 side 的交换
- * （防御性）丢弃。权威路径直接消费 ``exchanges[]``；仅旧产物 / 流式空 answer 才走 blob 解析。 */
+ * （防御性）丢弃。权威路径直接消费 ``exchanges[]``；live 流式在 answer 未落盘时从 run blob 补全 JSON 作答。 */
 function resolveCrossExam(
   cross: readonly DebateCrossExam[] | undefined,
   sides: readonly DebateRoundSide[],
@@ -392,8 +378,7 @@ function resolveCrossExam(
   if (!cross || cross.length === 0) return [];
   const keyToName = new Map(sides.map((s) => [s.key, s.name]));
   const out: DebateCrossExamView[] = [];
-  for (const raw of cross) {
-    const cx = raw as LegacyDebateCrossExam;
+  for (const cx of cross) {
     const targetName = keyToName.get(cx.target);
     if (!targetName) continue;
     const answerRun =
@@ -402,15 +387,11 @@ function resolveCrossExam(
     const streaming = answerRun?.status === "running";
 
     let exchanges = cx.exchanges ?? [];
-    if (exchanges.length === 0 && cx.questions?.length) {
-      // 旧产物 fallback：仅有 questions[]、无 exchanges[]。
-      exchanges = parseCrossExamResponse(cx.questions, blob, cx.ok ?? false);
-    } else if (streaming && blob && exchanges.some((ex) => !ex.answer.trim())) {
+    if (streaming && blob && exchanges.some((ex) => !ex.answer.trim())) {
       // live 流式：契约已有问题列表但 answer 尚未落盘，从 run blob 补全。
       const parsed = parseCrossExamResponse(
         exchanges.map((e) => e.question),
         blob,
-        true,
       );
       exchanges = exchanges.map((ex, i) =>
         ex.answer.trim() ? ex : (parsed[i] ?? ex),

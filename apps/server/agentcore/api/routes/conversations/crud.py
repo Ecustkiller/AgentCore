@@ -71,12 +71,10 @@ async def create_conversation(
         folder = await folder_repo.get_by_id(body.folder_id, user_id=user.user_id)
         if not folder:
             raise NotFoundError("文件夹不存在")
-    # ``model_mode`` is accept-but-ignore (Phase 1c): persisted for old clients, not read at turn time.
     conv = await repo.create(
         user_id=user.user_id,
         title=body.title,
         folder_id=body.folder_id,
-        model_mode=body.model_mode,
         # Desktop's local-first lazy-promote intent (工作区对称化 D1a), stored so every
         # promotion path (turn / panel) later agrees on locality. Moot once foldered —
         # a foldered chat inherits its folder's binding — so only record it for a 裸聊.
@@ -95,8 +93,8 @@ async def duplicate_conversation(
     """Clone a conversation into a brand-new one carrying a copy of its transcript (克隆对话).
 
     Owner-scoped (404 for a non-owner / missing source). The copy inherits the source's
-    folder (so it stays in the same project/workspace), 质量档 (``model_mode``) and
-    local-first intent, with a「… 副本」title, then bulk-copies the source's messages via
+    folder (so it stays in the same project/workspace) and local-first intent, with a
+    「… 副本」title, then bulk-copies the source's messages via
     ``MessageRepository.copy_all`` (content-level fields only — see that method for what is
     intentionally not carried over, e.g. the team-graph replay journal). Returns the new
     conversation summary with its (copied) message count so the sidebar can insert it.
@@ -110,7 +108,6 @@ async def duplicate_conversation(
         user_id=user.user_id,
         title=title,
         folder_id=src.folder_id,
-        model_mode=src.model_mode,
         local_container_root_id=src.local_container_root_id,
     )
     count = await msg_repo.copy_all(conversation_id, new_conv.id)
@@ -201,22 +198,13 @@ async def update_conversation(
     user: AuthUser,
     repo: ConversationRepository = Depends(get_conversation_repo),
 ):
-    # Patch only the fields the client sent: an omitted ``model_mode`` is left
-    # untouched, while an explicit null clears it back to「inherit default」.
+    # Patch only the fields the client sent: an omitted field is left untouched.
     fields = body.model_fields_set
     conv = await repo.get_by_id(conversation_id, user_id=user.user_id)
     if not conv:
         raise NotFoundError("对话不存在")
     if "title" in fields and body.title is not None:
         conv = await repo.update_title(conversation_id, body.title, user_id=user.user_id)
-    if "model_mode" in fields:
-        conv = await repo.set_model_mode(conversation_id, body.model_mode, user_id=user.user_id)
-    # 对话级自定义指令: an explicit null / "" clears it back to「none」; the repo strips
-    # and normalizes blank → NULL so a whitespace-only edit reads as cleared.
-    if "instructions" in fields:
-        conv = await repo.set_instructions(
-            conversation_id, body.instructions, user_id=user.user_id
-        )
     # Sidebar housekeeping toggles (对话基础功能补齐): pin floats the row to the top,
     # archive hides it from the live list (both reversible, no tri-state → a null is
     # ignored as「unchanged」).

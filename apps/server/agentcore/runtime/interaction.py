@@ -51,6 +51,10 @@ class InteractionKind(StrEnum):
     # debate's in-memory state lives in the awaiting coroutine. A timeout / unarmed turn falls
     # back to the judge's auto-convergence. (设计: docs/03-AI核心/辩论编排设计.md §逐轮交互)
     DEBATE_ROUND = "debate_round"
+    # 委派级授权 (delegation grant): the CEO's delegate call suspends before workers
+    # start so the user can grant medium-risk tools for the whole delegation in one
+    # click → result: DelegationAuthorizationDecision (grant_delegation / per_call / deny).
+    DELEGATION_AUTHORIZATION = "delegation_authorization"
 
 
 @dataclass

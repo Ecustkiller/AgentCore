@@ -12,17 +12,25 @@ Covers three layers:
 """
 
 import asyncio
+import time
 from pathlib import Path
 
 import pytest
 
+from agentcore.config.approval import ApprovalSettings
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
-from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate
+from agentcore.runtime.approvals import (
+    ApprovalDecision,
+    ApprovalGate,
+    DelegationAuthorizationDecision,
+    tool_call_requires_approval,
+)
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink, EventType, SSEEvent
 from agentcore.runtime.interaction import InteractionKind, InteractionRegistry
-from agentcore.tools.builtin import per_call_tool_names
+from agentcore.tools.builtin import build_builtin_registry, delegation_grantable_tool_names, per_call_tool_names
+from agentcore.tools.builtin.test_run import TestRunTool
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -68,12 +76,16 @@ def _gate(
     *,
     conversation_id: str = "conv-1",
     timeout_seconds: float = 5.0,
+    timeout_overrides: dict[str, float] | None = None,
+    delegation_grantable_tools: frozenset[str] | None = None,
 ) -> ApprovalGate:
     return ApprovalGate(
         sink=sink,
         conversation_id=conversation_id,
         registry=registry,
         timeout_seconds=timeout_seconds,
+        timeout_overrides=timeout_overrides or {},
+        delegation_grantable_tools=delegation_grantable_tools or delegation_grantable_tool_names(),
     )
 
 
@@ -143,6 +155,48 @@ async def test_gate_authorize_times_out_to_deny():
     assert decision is ApprovalDecision.DENY
     resolved = [e for e in _drain(sink) if e.type is EventType.APPROVAL_RESOLVED]
     assert resolved and resolved[0].payload["decision"] == ApprovalDecision.DENY
+
+
+async def test_gate_per_tool_timeout_override():
+    """A tool in timeout_overrides waits longer than the gate default."""
+    reg = InteractionRegistry()
+    sink = EventSink()
+    gate = _gate(
+        sink,
+        reg,
+        timeout_seconds=0.05,
+        timeout_overrides={"file_write": 0.35},
+    )
+
+    started = time.monotonic()
+    pending = asyncio.create_task(
+        gate.authorize(tool_name="file_write", tool_call_id="fw-1", arguments={"path": "a.md"})
+    )
+    await asyncio.sleep(0.12)
+    assert not pending.done()
+
+    resolver = asyncio.create_task(
+        _resolve_when_ready(reg, "fw-1", ApprovalDecision.APPROVE, "conv-1")
+    )
+    decision = await pending
+    await resolver
+    elapsed = time.monotonic() - started
+
+    assert decision is ApprovalDecision.APPROVE
+    assert elapsed >= 0.1
+
+    # Other tools still use the short default.
+    t0 = time.monotonic()
+    deny = await gate.authorize(tool_name="code_execute", tool_call_id="ce-1", arguments={})
+    assert deny is ApprovalDecision.DENY
+    assert time.monotonic() - t0 < 0.2
+
+
+def test_approval_settings_file_write_default_timeout():
+    settings = ApprovalSettings()
+    assert settings.approval_timeout_seconds == 300.0
+    assert settings.approval_timeout_for("file_write") == 900.0
+    assert settings.approval_timeout_for("code_execute") == 300.0
 
 
 async def test_gate_approve_always_skips_second_prompt():
@@ -306,12 +360,36 @@ async def test_per_call_tool_does_not_affect_other_tools_turn_grant():
     assert _drain(sink) == []
 
 
-def test_per_call_tool_names_is_code_execute():
-    """The single-source helper marks code_execute (GRANTABLE ∩ EXECUTION) per-call, and
-    NOT the file-mutation tools (which keep the turn / class grant)."""
+def test_per_call_tool_names_is_the_code_execution_class():
+    """The single-source helper marks the whole code-execution class (GRANTABLE ∩
+    EXECUTION = code_execute + test_run) per-call, and NOT the file-mutation tools
+    (which keep the turn / class grant). test_run joins purely by its schema, no
+    hardcoded name."""
     names = per_call_tool_names()
     assert "code_execute" in names
+    assert "test_run" in names
     assert "file_write" not in names and "str_replace" not in names
+
+
+def test_test_run_is_governed_by_the_approval_gate():
+    """P0 invariant: test_run runs project code through the SAME sandbox chain as
+    code_execute, so it must pass the approval gate — it must NOT be NEVER (which slipped
+    the gate entirely). Pinned at the class level: its schema is GRANTABLE, so the same
+    ``tool_call_requires_approval`` path that gates code_execute gates it, and it lands in
+    the per-call class. This is the governance test the tool previously lacked."""
+    schema = TestRunTool().schema
+    assert schema.approval is ToolApproval.GRANTABLE
+    assert schema.category is ToolCategory.EXECUTION
+    # The gate (tool_exec.py consults this) now returns True for test_run, exactly as it
+    # does for code_execute — no per-tool branch, just the shared GRANTABLE path.
+    assert tool_call_requires_approval("test_run", schema.approval, {}) is True
+    assert (
+        tool_call_requires_approval("code_execute", schema.approval, {}) is True
+    )  # same path
+    # And it is confirmed per call (never turn-whitelisted), like code_execute.
+    assert "test_run" in per_call_tool_names()
+    # The registered instance carries the same governed schema (single source).
+    assert build_builtin_registry().get("test_run").schema.approval is ToolApproval.GRANTABLE
 
 
 async def test_gate_truncates_large_argument_preview():
@@ -527,3 +605,89 @@ async def test_engine_does_not_gate_non_grantable_tool():
     assert content == "done"
     assert tool.calls == 1
     assert not any(e.type is EventType.APPROVAL_REQUIRED for e in _drain(sink))
+
+
+async def _resolve_delegation_when_ready(
+    registry: InteractionRegistry,
+    authorization_id: str,
+    decision: DelegationAuthorizationDecision,
+    conversation_id: str,
+) -> None:
+    for _ in range(2000):
+        if registry.resolve(authorization_id, decision, conversation_id=conversation_id):
+            return
+        await asyncio.sleep(0)
+    raise AssertionError(f"delegation authorization {authorization_id!r} never became pending")
+
+
+async def test_delegation_authorization_emits_event_pair():
+    reg = InteractionRegistry()
+    sink = EventSink()
+    gate = _gate(sink, reg)
+
+    resolver = asyncio.create_task(
+        _resolve_delegation_when_ready(
+            reg,
+            "delegation-exec-1",
+            DelegationAuthorizationDecision.GRANT_DELEGATION,
+            "conv-1",
+        )
+    )
+    decision = await gate.request_delegation_authorization(
+        execution_id="exec-1",
+        workers=[{"role": "研究员", "task_preview": "调研竞品"}],
+    )
+    await resolver
+
+    assert decision is DelegationAuthorizationDecision.GRANT_DELEGATION
+    events = _drain(sink)
+    assert [e.type for e in events] == [
+        EventType.DELEGATION_AUTHORIZATION_REQUIRED,
+        EventType.DELEGATION_AUTHORIZATION_RESOLVED,
+    ]
+    assert events[0].payload["workers"][0]["role"] == "研究员"
+    assert "code_execute" in events[0].payload["grantable_tools"]
+    assert "exec-1" in gate._delegation_grants  # noqa: SLF001
+
+
+async def test_delegation_grant_skips_code_execute_approval():
+    reg = InteractionRegistry()
+    sink = EventSink()
+    gate = _gate(sink, reg)
+    from agentcore.runtime.approvals import DelegationGrant
+
+    gate._delegation_grants["exec-1"] = DelegationGrant(execution_id="exec-1")  # noqa: SLF001
+
+    decision = await gate.authorize(
+        tool_name="code_execute",
+        tool_call_id="ce-1",
+        arguments={"code": "print(1)"},
+        execution_id="exec-1",
+    )
+    assert decision is ApprovalDecision.APPROVE
+    assert _drain(sink) == []
+
+
+async def test_delegation_grant_revoked_restores_per_call():
+    reg = InteractionRegistry()
+    sink = EventSink()
+    gate = _gate(sink, reg, timeout_seconds=0.01)
+    from agentcore.runtime.approvals import DelegationGrant
+
+    gate._delegation_grants["exec-1"] = DelegationGrant(execution_id="exec-1")  # noqa: SLF001
+    gate.revoke_delegation("exec-1")
+
+    decision = await gate.authorize(
+        tool_name="code_execute",
+        tool_call_id="ce-1",
+        arguments={},
+        execution_id="exec-1",
+    )
+    assert decision is ApprovalDecision.DENY
+
+
+def test_delegation_grantable_tool_names_includes_code_execute_and_file_ops():
+    names = delegation_grantable_tool_names()
+    assert "code_execute" in names
+    assert "file_write" in names
+    assert "test_run" not in names

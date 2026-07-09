@@ -198,19 +198,6 @@ class UserRepository:
         )
         await self._session.commit()
 
-    async def set_default_model_mode(self, user_id: str, mode: str | None) -> None:
-        """Set (or clear, with ``None``) a user's default 质量档 (llm/modes.py).
-
-        ``None`` clears it back to「inherit the operator default」. The value is an
-        opaque mode ref (preset name or custom ModelMode id); validity is enforced
-        softly at resolve time (an unknown ref falls back to default), so this only
-        persists the selection.
-        """
-        await self._session.execute(
-            update(User).where(User.user_id == user_id).values(default_model_mode=mode)
-        )
-        await self._session.commit()
-
     async def set_memory_enabled(self, user_id: str, enabled: bool) -> None:
         """Flip the long-term AI memory master switch (Agent记忆与知识系统 §一).
 

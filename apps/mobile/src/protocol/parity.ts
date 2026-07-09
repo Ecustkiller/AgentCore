@@ -46,27 +46,48 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     surface: "fold · finish_guard 回炉清正文",
   },
   reasoning_delta: { verdict: "ported", surface: "AssistantView · 思考块" },
-  tool_use_start: { verdict: "ported", surface: "AssistantView · 工具步" },
-  tool_use_end: { verdict: "ported", surface: "AssistantView · 工具步" },
+  tool_use_start: {
+    verdict: "ported",
+    surface:
+      "AssistantView · 工具步 (CEO 自身调用) + RunDetail · 队员工具明细 (run_id 侧，extractRunToolCalls)",
+  },
+  tool_use_end: {
+    verdict: "ported",
+    surface:
+      "AssistantView · 工具步 (CEO 自身调用) + RunDetail · 队员工具明细 (run_id 侧，extractRunToolCalls)",
+  },
   tool_use_progress: {
     verdict: "ported",
     surface:
-      "AssistantView · 工具步执行阶段 (正在检索/排队中/改用备用引擎，extractToolPhases)",
+      "AssistantView · 工具步执行阶段 (CEO, extractToolPhases) + TeamView · 队员节点 (worker run_id, extractWorkerToolPhases)",
   },
   citations: { verdict: "ported", surface: "AssistantView · 来源" },
 
   // —— 多 Agent 团队 ——
   run_plan: { verdict: "ported", surface: "TeamView" },
   run_started: { verdict: "ported", surface: "TeamView" },
-  run_context: { verdict: "ported", surface: "AssistantView · 收到的上下文" },
-  run_output_delta: { verdict: "ported", surface: "TeamView · 队员输出预览" },
+  run_context: {
+    verdict: "ported",
+    surface:
+      "AssistantView · 收到的上下文 (CEO 侧 captainContext) + RunDetail · 队员收到的上下文 (worker 侧 receivedContext)",
+  },
+  run_output_delta: {
+    verdict: "ported",
+    surface: "TeamView · 队员输出预览 + RunDetail · 输出全文",
+  },
   run_output_reset: {
     verdict: "ported",
     surface: "fold · worker finish_guard 回炉",
   },
-  run_reasoning_delta: { verdict: "ported", surface: "TeamView · 队员思考" },
+  run_reasoning_delta: {
+    verdict: "ported",
+    surface: "RunDetail · 队员思考全文",
+  },
   run_tool_progress: { verdict: "ported", surface: "TeamView · 队员工具进度" },
-  run_completed: { verdict: "ported", surface: "TeamView" },
+  run_completed: {
+    verdict: "ported",
+    surface: "TeamView + RunDetail (交接简报 / 资源用量 / 时长 / 关系)",
+  },
   run_failed: { verdict: "ported", surface: "TeamView" },
   run_progress: {
     verdict: "internal",
@@ -155,6 +176,10 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   board_read_required: {
     verdict: "impossible",
     reason: "同上 · 读板为桌面画布面",
+  },
+  desktop_notify_required: {
+    verdict: "impossible",
+    reason: "桌面 OS 通知为 Electron Client Tool，手机无此通道 (fold no-op)",
   },
 
   // —— 草稿工作区（本地文件夹）/ 本地↔云交接（物理做不到）——
@@ -255,7 +280,8 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   // —— 有意精简 ——
   InlineTeamGraph: {
     verdict: "simplified",
-    reason: "手机用竖排 TeamView 代 React-Flow 画布（小屏合理）",
+    reason:
+      "手机用竖排 TeamView 代 React-Flow 画布；点队员卡下钻 RunDetail 详情面（对齐桌面抽屉信息，小屏合理）",
   },
   MentionMenu: {
     verdict: "simplified",
@@ -287,6 +313,14 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     verdict: "impossible",
     reason: "指派本地工作区，手机无本地",
   },
+  ClientToolsPrompt: {
+    verdict: "impossible",
+    reason: "本地工作区快捷操作（打开文件夹/终端/跑 bash），手机无本地侧",
+  },
+  DelegationAuthorizationCard: {
+    verdict: "impossible",
+    reason: "本地委派工具授权卡，手机无本地引擎侧",
+  },
 
   // —— infra / 渲染叶子（非交互-对等面）——
   ChatView: { verdict: "internal", reason: "对话容器" },
@@ -303,9 +337,9 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   Diagram: { verdict: "internal", reason: "mermaid 渲染叶" },
   Favicon: { verdict: "internal", reason: "站点图标叶" },
   EvidenceBadge: {
-    verdict: "internal",
-    reason:
-      "辩论发言举证标记渲染叶（remarkEvidence 把【已核实/待核实】渲成徽章）；非交互面，手机 markdown 叶自渲、标记信息随发言全文透传",
+    verdict: "ported",
+    surface:
+      "RunDetail · 输出（辩手发言全文）—— 手机独立 remarkEvidence 把【已核实·出处】/【待核实·推断】渲成 EvidenceBadge 徽章（同挂结论/本轮焦点/交接简报等 run 正文 Markdown）",
   },
 };
 
@@ -404,6 +438,10 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   "simulation/TownSimulationPage": {
     verdict: "impossible",
     reason: "AI 小镇模拟仅桌面 MVP，手机无模拟面",
+  },
+  "simulation/TownLauncherPage": {
+    verdict: "impossible",
+    reason: "AI 小镇 AgentTown 独立客户端启动页，桌面专属，手机无模拟面",
   },
   "more/ShortcutsSettings": {
     verdict: "impossible",

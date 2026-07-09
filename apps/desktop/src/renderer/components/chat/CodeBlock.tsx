@@ -1,5 +1,7 @@
 import { Button, IconButton } from "@/components/ui";
 import { copyText } from "@/lib/clipboard";
+import { hasTerminalRun } from "@/lib/capabilities";
+import { runTerminalBash } from "@/lib/terminalFeedback";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import {
   Check,
@@ -7,6 +9,7 @@ import {
   ChevronUp,
   Copy,
   FileCode2,
+  Terminal,
   WrapText,
 } from "lucide-react";
 import {
@@ -99,6 +102,12 @@ export function CodeBlock({
     }
   };
 
+  const runnable = hasTerminalRun() && (lang === "bash" || lang === "sh");
+
+  const onRunInTerminal = () => {
+    void runTerminalBash(text);
+  };
+
   return (
     <div className="code-block">
       <div className="code-block-header">
@@ -131,6 +140,17 @@ export function CodeBlock({
           >
             {copied ? "已复制" : "复制"}
           </Button>
+          {runnable && (
+            <Button
+              variant="ghost"
+              onClick={onRunInTerminal}
+              className="code-block-action h-auto gap-1 px-0 py-0 hover:bg-transparent"
+              aria-label="在终端运行"
+              icon={<Terminal size={13} />}
+            >
+              在终端运行
+            </Button>
+          )}
         </span>
       </div>
       <div

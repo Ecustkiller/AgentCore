@@ -16,8 +16,9 @@ def resolve_conversation_local_binding(
 ) -> LocalBinding | None:
     """Resolve a conversation's scratch local binding from its own columns.
 
-    Replaces the old folder-level ``resolve_local_binding`` for the new model
-    where each conversation owns its binding directly.
+    ``local_root_id`` is an explicit bind; callers may also pass
+    ``local_container_root_id`` (desktop local-first intent) via
+    ``conversation.common.resolve_local_binding``.
     """
     if not local_root_id:
         return None

@@ -1,6 +1,7 @@
 import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { GraphLayout } from "@/stores/graph";
+import { GitBranch } from "lucide-react";
 import { LAYOUT_OPTIONS } from "./constants";
 
 interface GraphToolbarProps {
@@ -10,6 +11,10 @@ interface GraphToolbarProps {
   metricsSummary?: string | null;
   /** Whether this turn has enough timing data for timeline layout. */
   timelineAvailable?: boolean;
+  /** Multi-agent turn with audit inject paths available. */
+  injectFlowAvailable?: boolean;
+  showAuditInjectFlow?: boolean;
+  onShowAuditInjectFlowChange?: (on: boolean) => void;
 }
 
 /**
@@ -22,6 +27,9 @@ export function GraphToolbar({
   onLayoutKindChange,
   metricsSummary,
   timelineAvailable = false,
+  injectFlowAvailable = false,
+  showAuditInjectFlow = false,
+  onShowAuditInjectFlowChange,
 }: GraphToolbarProps) {
   return (
     <div
@@ -36,6 +44,26 @@ export function GraphToolbar({
         </SimpleTooltip>
       )}
       <div className="flex items-center gap-0.5 rounded-lg border border-border bg-card/90 p-1 shadow-sm backdrop-blur">
+        {injectFlowAvailable && onShowAuditInjectFlowChange && (
+          <SimpleTooltip label="始终显示审计数据流（默认仅在打开 run 详情时高亮）">
+            <span className="inline-flex">
+              <IconButton
+                onClick={() =>
+                  onShowAuditInjectFlowChange(!showAuditInjectFlow)
+                }
+                aria-label="显示审计数据流"
+                aria-pressed={showAuditInjectFlow}
+                className={
+                  showAuditInjectFlow
+                    ? "bg-accent text-foreground hover:bg-accent hover:text-foreground"
+                    : undefined
+                }
+              >
+                <GitBranch size={14} />
+              </IconButton>
+            </span>
+          </SimpleTooltip>
+        )}
         {LAYOUT_OPTIONS.map((opt) => {
           const disabled = !!opt.requiresParallelTimeline && !timelineAvailable;
           const tip =

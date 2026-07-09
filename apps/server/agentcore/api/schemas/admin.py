@@ -39,7 +39,6 @@ class AdminUserResponse(BaseModel):
     quota_daily_tokens: int | None
     quota_monthly_cost_usd: float | None
     quota_daily_requests: int | None
-    default_model_mode: str | None
     created_at: datetime
     # NULL for a live account; a timestamp marks a 注销 (self-service deleted +
     # anonymized) account. The roster hides these by default and renders them as

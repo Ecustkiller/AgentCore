@@ -19,6 +19,7 @@ from tests.runs_executor.conftest import (
     _ContentProvider,
     _ctx,
     _executor,
+    _flash_profiles,
     _FileWriteTool,
     _gate,
     _GrantableTool,
@@ -44,10 +45,13 @@ async def test_parallel_workers_complete_with_usage():
 
 
 async def test_worker_usage_split_and_cost_priced():
-    # Worker model resolves to deepseek-v4-flash (strong tier, dev-stage).
+    # Worker strong tier → DeepSeek V4 Flash (pinned via profile_set; platform default may differ).
     # cache_miss 1M @ $0.14 + output 1M @ $0.28 = $0.42; cache_hit 1M @ $0.0028.
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
-    res = await WaveScheduler().run(plan, _executor(plan, _UsageProvider(), EventSink()))
+    res = await WaveScheduler().run(
+        plan,
+        _executor(plan, _UsageProvider(), EventSink(), profile_set=_flash_profiles()),
+    )
     state = res["t_1"]
     assert state.phase is RunPhase.COMPLETED
     # The cache split survives into RunState.usage (not collapsed to one input).
@@ -219,6 +223,59 @@ async def test_executor_failure_emits_run_failed_and_state():
     assert EventType.RUN_FAILED in types
 
 
+async def test_deterministic_llm_error_marks_state_not_retryable():
+    # 确定性失败区分 (BL-6): a worker whose LLM raises a non-retryable upstream error
+    # (LLMError.retryable=False — prompt 超长 / 400 / 鉴权 / 余额) surfaces a FAILED state
+    # flagged error_retryable=False, so the scheduler can skip a futile infra retry.
+    from agentcore.core.errors import LLMError
+
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+
+    class _PromptTooLong:
+        async def stream(self, request):  # noqa: ANN001
+            raise LLMError("上下文超长（400）")
+            yield  # pragma: no cover - makes this an async generator
+
+    executor = build_agent_executor(
+        plan=plan,
+        llm=_PromptTooLong(),
+        tools=ToolRegistry(),
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+    )
+    res = await WaveScheduler().run(plan, executor)
+    assert res["t_1"].phase is RunPhase.FAILED
+    assert res["t_1"].error_retryable is False
+
+
+async def test_unknown_crash_stays_retryable():
+    # A plain crash carries no ``retryable`` attr → defaults True, so only KNOWN-
+    # deterministic upstream failures opt out of retry (ordinary crashes retry as before).
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+
+    class _Boom:
+        async def stream(self, request):  # noqa: ANN001
+            raise RuntimeError("provider down")
+            yield  # pragma: no cover
+
+    executor = build_agent_executor(
+        plan=plan,
+        llm=_Boom(),
+        tools=ToolRegistry(),
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+    )
+    res = await WaveScheduler().run(plan, executor)
+    assert res["t_1"].phase is RunPhase.FAILED
+    assert res["t_1"].error_retryable is True
+
+
 async def test_worker_hard_failure_bills_completed_rounds():
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
     reg = ToolRegistry()
@@ -310,7 +367,7 @@ async def test_worker_failure_before_any_usage_has_no_ledger_row():
 async def test_contract_retry_then_pass():
     # min_length contract: first output too short → re-prompt → second passes.
     plan, _ = build_run_plan(
-        [{"role": "A", "task": "做A", "contract": {"min_length": 8}}], id_prefix="t"
+        [{"role": "A", "task": "做A", "deliverable": {"min_length": 8}}], id_prefix="t"
     )
     provider = _ContentProvider(["短", "这是一段足够长的合格产出"])
     res = await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
@@ -327,7 +384,7 @@ async def test_contract_retry_continues_on_same_transcript_seeing_old_draft():
     # CONTINUES on the same transcript, so the worker sees its own prior draft
     # (assistant turn) with the shortfall appended as the last user turn (修隐患).
     plan, _ = build_run_plan(
-        [{"role": "A", "task": "做A", "contract": {"must_contain": ["风险"]}}], id_prefix="t"
+        [{"role": "A", "task": "做A", "deliverable": {"must_contain": ["风险"]}}], id_prefix="t"
     )
     provider = _ContentProvider(["没有那个词", "已包含风险二字"])
     await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
@@ -360,7 +417,7 @@ async def test_completed_run_captures_full_transcript():
 
 async def test_contract_requirements_stated_in_first_prompt():
     plan, _ = build_run_plan(
-        [{"role": "A", "task": "做A", "contract": {"required_sections": ["结论"]}}], id_prefix="t"
+        [{"role": "A", "task": "做A", "deliverable": {"required_sections": ["结论"]}}], id_prefix="t"
     )
     provider = _ContentProvider(["# 结论\n好的"])
     await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
@@ -387,7 +444,7 @@ async def test_worker_system_prompt_grants_structure_ownership():
 
 async def test_contract_strict_hard_fails_after_retries():
     plan, _ = build_run_plan(
-        [{"role": "A", "task": "做A", "contract": {"min_length": 50, "strict": True}}],
+        [{"role": "A", "task": "做A", "deliverable": {"min_length": 50, "strict": True}}],
         id_prefix="t",
     )
     # Flat batches ignore task-level on_failure/max_retries — pin policy so a strict
@@ -407,7 +464,7 @@ async def test_contract_strict_hard_fails_after_retries():
 
 async def test_contract_soft_accepts_with_warning():
     plan, _ = build_run_plan(
-        [{"role": "A", "task": "做A", "contract": {"min_length": 50}}], id_prefix="t"
+        [{"role": "A", "task": "做A", "deliverable": {"min_length": 50}}], id_prefix="t"
     )
     provider = _ContentProvider(["短", "还是短"])
     res = await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
@@ -426,7 +483,7 @@ async def test_no_contract_passes_first_try_without_extra_call():
 
 async def test_requires_files_reworks_when_not_written_then_passes_on_write():
     plan, _ = build_run_plan(
-        [{"role": "前端", "task": "建页面", "contract": {"requires_files": True}}],
+        [{"role": "前端", "task": "建页面", "deliverable": {"requires_files": True}}],
         id_prefix="t",
     )
     reg = ToolRegistry()
@@ -473,7 +530,7 @@ async def test_requires_files_soft_accepts_with_warning_when_never_written():
     # Non-strict: after the one rework the worker still never writes → accepted
     # (product isn't empty) but carries the shortfall as a warning, not a hard fail.
     plan, _ = build_run_plan(
-        [{"role": "前端", "task": "建页面", "contract": {"requires_files": True}}],
+        [{"role": "前端", "task": "建页面", "deliverable": {"requires_files": True}}],
         id_prefix="t",
     )
     provider = _ContentProvider(["只有文字一", "只有文字二"])
@@ -491,7 +548,7 @@ async def test_requires_files_strict_hard_fails_when_never_written():
             {
                 "role": "前端",
                 "task": "建页面",
-                "contract": {"requires_files": True, "strict": True},
+                "deliverable": {"requires_files": True, "strict": True},
             }
         ],
         id_prefix="t",

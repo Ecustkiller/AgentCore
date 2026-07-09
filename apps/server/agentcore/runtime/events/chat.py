@@ -146,22 +146,23 @@ def message_end(
     cache_miss_tokens: int = 0,
     rounds: int = 0,
     cost: dict[str, Any] | None = None,
+    collab: dict[str, int] | None = None,
 ) -> SSEEvent:
-    return SSEEvent(
-        type=EventType.MESSAGE_END,
-        payload={
-            "finish_reason": finish_reason,
-            "usage": {
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "reasoning_tokens": reasoning_tokens,
-                "cache_hit_tokens": cache_hit_tokens,
-                "cache_miss_tokens": cache_miss_tokens,
-            },
-            "cost": cost,
-            "rounds": rounds,
+    payload: dict[str, Any] = {
+        "finish_reason": finish_reason,
+        "usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "reasoning_tokens": reasoning_tokens,
+            "cache_hit_tokens": cache_hit_tokens,
+            "cache_miss_tokens": cache_miss_tokens,
         },
-    )
+        "cost": cost,
+        "rounds": rounds,
+    }
+    if collab is not None:
+        payload["collab"] = collab
+    return SSEEvent(type=EventType.MESSAGE_END, payload=payload)
 
 
 def error_event(code: str, message: str, *, context: dict | None = None) -> SSEEvent:
@@ -174,10 +175,13 @@ def error_event(code: str, message: str, *, context: dict | None = None) -> SSEE
     )
 
 
-def title_generated(title: str, *, conversation_id: str) -> SSEEvent:
+def title_generated(title: str, *, conversation_id: str, tag: str | None = None) -> SSEEvent:
+    payload: dict[str, str] = {"conversation_id": conversation_id, "title": title}
+    if tag:
+        payload["tag"] = tag
     return SSEEvent(
         type=EventType.TITLE_GENERATED,
-        payload={"conversation_id": conversation_id, "title": title},
+        payload=payload,
     )
 
 

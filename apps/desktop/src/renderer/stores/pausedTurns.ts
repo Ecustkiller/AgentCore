@@ -13,6 +13,9 @@ import { create } from "zustand";
 type PausedTurnSummary = components["schemas"]["PausedTurnSummary"];
 type SuspensionKind = components["schemas"]["SuspensionKind"];
 
+/** Where the durable paused frame lives — drives resume routing in {@link runResume}. */
+export type ResumeOrigin = "sidecar" | "server";
+
 /**
  * A turn that paused at a plan_review / ask_user checkpoint, was DURABLY persisted,
  * then lost its live SSE — client disconnect / server restart (结构化挂起 2b). On
@@ -56,6 +59,8 @@ export interface PendingResume {
   styleOptions: AskStyleOption[];
   /** ask_user: kickoff 开工提案 vs decision 途中拍板 — drives card copy. */
   intent: CheckpointIntent;
+  /** Where the durable frame lives — drives {@link runResume} sidecar vs server routing. */
+  origin: ResumeOrigin;
 }
 
 /** `steps` / `pending` arrive as loose JSON dicts (backend ``list[dict]``); map
@@ -85,12 +90,10 @@ const toAssumptions = (
     value: String(a.value ?? ""),
   }));
 
-/** Options rehydrate as either rich `{label, detail?, recommended?}` objects or — from a
- * frame persisted before options carried trade-offs — bare strings; normalize both. */
+/** Options rehydrate as `{label, detail?, recommended?}` objects from the backend. */
 const toOptions = (raw: unknown): AskOption[] =>
   Array.isArray(raw)
     ? raw.map((o) => {
-        if (typeof o === "string") return { label: o };
         const obj = (o ?? {}) as Record<string, unknown>;
         return {
           label: String(obj.label ?? ""),
@@ -128,6 +131,7 @@ interface PausedTurnState {
   setForConversation: (
     conversationId: string,
     summaries: PausedTurnSummary[],
+    origin: ResumeOrigin,
   ) => void;
   /** 挂起即收口 (②): add/replace ONE turn's resume entry the moment its LIVE stream ENDS
    * at a checkpoint (message_end finish_reason=paused). Built from the *_required payload
@@ -152,7 +156,7 @@ interface PausedTurnState {
 export const usePausedTurnStore = create<PausedTurnState>((set) => ({
   pending: [],
 
-  setForConversation: (conversationId, summaries) =>
+  setForConversation: (conversationId, summaries, origin) =>
     set((state) => ({
       pending: [
         ...state.pending.filter((p) => p.conversationId !== conversationId),
@@ -171,6 +175,7 @@ export const usePausedTurnStore = create<PausedTurnState>((set) => ({
           questions: toQuestions(s.questions),
           styleOptions: toStyleOptions(s.style_options),
           intent: toIntent((s as { intent?: unknown }).intent),
+          origin,
         })),
       ],
     })),

@@ -1,5 +1,7 @@
+import { EvidenceBadge } from "@/components/EvidenceBadge";
 import { MermaidDiagram } from "@/components/MermaidDiagram";
 import { remarkCitations } from "@/components/remarkCitations";
+import { remarkEvidence } from "@/components/remarkEvidence";
 // Assistant-message Markdown for the mobile client (前端技术与架构 §七 · 富渲染).
 //
 // Full stack now (matches desktop coverage, minimal-deps variant): react-markdown +
@@ -24,25 +26,33 @@ const rehypePlugins = [rehypeKatex, rehypeHighlight];
 
 /** Render Markdown text. `muted` reads a notch quieter (a turn's reasoning) than the
  *  answer body. `citations`, when present, turns inline `[n]` markers into chips that
- *  link to the matching source. */
+ *  link to the matching source. `evidence` (debate speech only, 举证责任) turns inline
+ *  `【已核实·出处】` / `【待核实·推断】` markers into {@link EvidenceBadge} chips; off
+ *  everywhere else so the marker convention never leaks into ordinary markdown. */
 export const Markdown = memo(function Markdown({
   content,
   muted = false,
   citations,
+  evidence = false,
 }: {
   content: string;
   muted?: boolean;
   citations?: Citation[];
+  evidence?: boolean;
 }) {
+  const citationCount = citations?.length ?? 0;
   const remarkPlugins = useMemo(() => {
-    const base = [remarkGfm, remarkMath];
-    return citations && citations.length > 0
-      ? [...base, remarkCitations(citations.length)]
-      : base;
-  }, [citations]);
+    if (citationCount <= 0 && !evidence) return [remarkGfm, remarkMath];
+    return [
+      remarkGfm,
+      remarkMath,
+      ...(citationCount > 0 ? [remarkCitations(citationCount)] : []),
+      ...(evidence ? [remarkEvidence()] : []),
+    ];
+  }, [citationCount, evidence]);
 
-  const components = useMemo<Components>(
-    () => ({
+  const components = useMemo<Components>(() => {
+    const base: Components = {
       a({ href, children, ...props }) {
         if (href?.startsWith("cite:")) {
           const n = Number(href.slice(5));
@@ -95,9 +105,15 @@ export const Markdown = memo(function Markdown({
           </code>
         );
       },
-    }),
-    [citations],
-  );
+    };
+    // 举证徽章（举证责任）：remarkEvidence 产出的自定义 `evidencemark` 映射到 EvidenceBadge。走
+    // data.hProperties 而非 cite: 链接 url——后者会被 react-markdown 的 urlTransform 清空。仅辩论
+    // 发言 opt-in（evidence=true），不扰其余 markdown。
+    if (evidence) {
+      (base as Record<string, unknown>).evidencemark = EvidenceBadge;
+    }
+    return base;
+  }, [citations, evidence]);
 
   return (
     <div className={`md${muted ? " md-muted" : ""}`}>

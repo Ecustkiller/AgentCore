@@ -24,7 +24,7 @@ from typing import cast
 
 import structlog
 
-from agentcore.config import _PROJECT_ROOT, settings
+from agentcore.config import PROJECT_ROOT, settings
 
 
 def setup_logging() -> None:
@@ -107,7 +107,7 @@ def setup_logging() -> None:
     if settings.log_file:
         log_path = Path(settings.log_file)
         if not log_path.is_absolute():
-            log_path = _PROJECT_ROOT / log_path
+            log_path = PROJECT_ROOT / log_path
         log_path.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(log_path, encoding="utf-8")
         file_handler.setFormatter(_formatter(structlog.processors.JSONRenderer()))

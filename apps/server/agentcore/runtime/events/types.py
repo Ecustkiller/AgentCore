@@ -36,6 +36,10 @@ class EventType(StrEnum):
     CITATIONS = "citations"
     APPROVAL_REQUIRED = "approval_required"
     APPROVAL_RESOLVED = "approval_resolved"
+    # 委派级授权: suspend before workers start — user grants medium-risk tools for
+    # the whole delegation (grant_delegation) or keeps per-call approval (per_call).
+    DELEGATION_AUTHORIZATION_REQUIRED = "delegation_authorization_required"
+    DELEGATION_AUTHORIZATION_RESOLVED = "delegation_authorization_resolved"
     CHECKPOINT_REQUIRED = "checkpoint_required"
     CHECKPOINT_RESOLVED = "checkpoint_resolved"
     QUESTION_POSTED = "question_posted"
@@ -53,6 +57,9 @@ class EventType(StrEnum):
     # back so the vision reader can read it. Like BOARD_OP_REQUIRED it is NOT journaled (a
     # request/response exchange, not turn content), so it stays out of the journal sets.
     BOARD_READ_REQUIRED = "board_read_required"
+    # Desktop Client Tools: transport-only client-tool request — the server asks the
+    # bound Electron app to show an OS notification and report back. NOT journaled.
+    DESKTOP_NOTIFY_REQUIRED = "desktop_notify_required"
     HANDOFF_SNAPSHOT_DONE = "handoff_snapshot_done"
     HANDOFF_JOB_STARTED = "handoff_job_started"
     HANDOFF_APPLY_DONE = "handoff_apply_done"

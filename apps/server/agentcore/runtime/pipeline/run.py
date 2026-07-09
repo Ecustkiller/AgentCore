@@ -5,6 +5,7 @@ from dataclasses import asdict
 
 import agentcore.runtime.pipeline as pipeline_pkg
 from agentcore.board.channel import BoardChannel
+from agentcore.desktop.channel import DesktopClientChannel
 from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import error_fields_for
@@ -12,7 +13,7 @@ from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
-from agentcore.llm.profiles import default_turn_profiles as default_profile_set
+from agentcore.llm.profiles import turn_profiles_for_turn
 from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.memory import (
     default_memory_store,
@@ -46,12 +47,12 @@ from agentcore.runtime.facts import (
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
 from agentcore.runtime.pipeline.finalize import _journal_entries_for_turn
-from agentcore.runtime.pipeline.prepare import (
+from agentcore.runtime.resolve.prepare import (
     _assemble_ceo_toolset,
     _build_attachment_context,
     _wire_worker_memory_tools,
 )
-from agentcore.runtime.prompt import (
+from agentcore.runtime.resolve.prompt import (
     assemble_system_prompt,
     compose_ceo_chat_prompt,
     compose_worker_base_prompt,
@@ -78,6 +79,7 @@ from agentcore.runtime.suspension import (
 from agentcore.tools.builtin import (
     approval_class_tool_names,
     build_worker_registry,
+    delegation_grantable_tool_names,
     per_call_tool_names,
 )
 from agentcore.tools.builtin.board_ops import BoardOpsTool
@@ -102,7 +104,6 @@ async def run_chat_pipeline(
     attachments: list[dict] | None = None,
     approvals_enabled: bool = True,
     memory_enabled: bool = True,
-    instructions: str | None = None,
     profile_set: ProfileSet | None = None,
     llm_credentials: LLMCredentials | None = None,
     session_saver: SessionSaver | None = None,
@@ -136,23 +137,23 @@ async def run_chat_pipeline(
     apply structured ops to the user's open whiteboard canvas. ``None`` for every ordinary
     chat — then ``board_ops`` is neither wired nor reachable.
 
-    ``profile_set`` carries the turn's resolved 质量档 (经济/高质量/custom): which
-    model each scenario (chat/agent.strong/...) runs this turn, resolved by the
-    caller from the conversation/user/operator default (llm/modes.py). ``None``
-    (e.g. the autonomous handoff job) falls back to the economy base set.
+    ``profile_set`` is the turn's per-scenario model set — which model each scenario
+    (chat / agent.strong / ...) runs this turn — resolved by the caller from the user's
+    configured model. ``None`` (e.g. the autonomous handoff job) falls back to the
+    default profile set.
 
     ``llm_credentials`` are the turn's resolved BYOK key + endpoint (config.
     billing_mode); the caller resolves them once (route preflight) and threads them
     here so the whole turn runs on the user's own DeepSeek quota. ``None`` falls
     back to the global server key (platform mode).
     """
-    profiles = profile_set or default_profile_set()
+    profiles = turn_profiles_for_turn(profile_set, llm_credentials)
     message_id = message_id or new_id()
     # The CEO captain is the turn's root Run node (kind=captain): it owns the reply
     # voice and may delegate. Its run id parents every delegated member's ledger row
     # and labels the captain cost row; agent_id == run_id (阶段1 convention). When
     # the CEO delegates, this id is declared as the graph's CAPTAIN 汇聚点 the
-    # workers hang under (see DelegateTool._plan_event).
+    # workers hang under (see delegate.plan_events.plan_event).
     captain_run_id = new_id()
 
     # 执行级事件溯源 (§8.3): the turn's single ordered fact log. Bound to the ambient
@@ -213,13 +214,7 @@ async def run_chat_pipeline(
         # workers. The (per-turn, variable) attachment block is appended LAST below —
         # after the stable CEO hint stack — so a turn carrying attached files does not
         # bust DeepSeek's prefix cache for the hints (缓存友好: 易变内容置于稳定前缀之后).
-        # 对话级自定义指令 (per-conversation custom instructions): injected here into the
-        # shared, cacheable prefix so BOTH the CEO and the reused worker base carry it —
-        # the whole team obeys this thread's directive. Stable per conversation ⇒ no
-        # per-turn cache bust.
-        system_prompt = assemble_system_prompt(
-            memory_markdown=memory_markdown, instructions=instructions
-        )
+        system_prompt = assemble_system_prompt(memory_markdown=memory_markdown)
         attachment_context = _build_attachment_context(attachments)
         # Workers hold no CEO hints; their base is the shared base + optional simplified
         # 记忆主题目录 + the same attachment block at the end — byte-identical to the old
@@ -260,6 +255,16 @@ async def run_chat_pipeline(
             if board_id
             else None
         )
+        desktop_channel = (
+            DesktopClientChannel(
+                sink=sink,
+                conversation_id=conversation_id,
+                registry=default_interaction_registry(),
+                timeout_seconds=settings.board_op_timeout_seconds,
+            )
+            if backend.location == "local"
+            else None
+        )
 
         # AI 协作白板 §九.4 Gap ②: the turn-level vision cost sink. ``board_read`` appends a
         # priced ``role=vision`` ledger row here per 读图 sub-call. Shared by REFERENCE across
@@ -279,6 +284,7 @@ async def run_chat_pipeline(
             user_id=user_id,
             conversation_id=conversation_id,
             board_channel=board_channel,
+            desktop_channel=desktop_channel,
             # §九.4: vision provider (QwenVL) — set VISION_API_KEY to enable; None ⇒
             # board_read returns a clean「读图能力未配置」error (「插上即用」).
             vision_reader=build_vision_reader(),
@@ -297,9 +303,11 @@ async def run_chat_pipeline(
         # delegate. ``delegate`` is NON-terminal: workers' products return to the
         # CEO's own ReAct loop, which writes a short user-facing overview in its own
         # voice (D3 / 决策①: per-worker detail is shown separately in the UI).
-        # Workers get the FULL ``worker_tools`` (no nested delegate tool), so a
-        # worker can do the actual writing/editing/running but can never recursively
-        # delegate another team.
+        # Workers get the full production ``worker_tools`` plus, by default,
+        # ``delegate``+``replan`` when ``depth < MAX_DELEGATION_DEPTH`` (worker
+        # captains may nest one sub-team; ``can_delegate=false`` opts out;
+        # depth-2 sub-workers are leaves; per-captain fan-out capped at
+        # ``MAX_WORKER_SUBDELEGATIONS``).
         # Approval gate (one per turn so an "allow for the rest of this turn" grant
         # is scoped to this message and does not leak across turns). It is wired into
         # the CEO's loop, but with the coordinator boundary the CEO holds no
@@ -314,8 +322,10 @@ async def run_chat_pipeline(
                 conversation_id=conversation_id,
                 registry=default_interaction_registry(),
                 timeout_seconds=settings.approval_timeout_seconds,
+                timeout_overrides=settings.approval_timeout_overrides,
                 file_op_tools=approval_class_tool_names(),
                 per_call_tools=per_call_tool_names(),
+                delegation_grantable_tools=delegation_grantable_tool_names(),
             )
             if (settings.approval_gate_enabled and approvals_enabled)
             else None
@@ -570,6 +580,11 @@ async def run_chat_pipeline(
         if citations:
             sink.emit(citations_event(citations))
 
+        collab = {
+            **delegate_tool.collab,
+            "revises": len(revise_tool.run_ledger),
+            "audit_drops": audit_recorder.drops,
+        }
         sink.emit(
             message_end(
                 finish,
@@ -580,6 +595,7 @@ async def run_chat_pipeline(
                 cache_miss_tokens=turn_usage.cache_miss_tokens,
                 rounds=rounds,
                 cost=turn_cost,
+                collab=collab,
             )
         )
 
@@ -601,12 +617,9 @@ async def run_chat_pipeline(
             "cost_runs": cost_runs,
             "journal_entries": journal_entries,
             # 协作质量 (学·度量 §2.5): turn-level orchestration signals for turn_metrics +
-            # chat.turn_complete — boundary_yields / scope_signals / escalations off the
-            # delegate accumulator, plus the revise count (定向唤回 次数 = 返工 的另一半).
-            "collab": {
-                **delegate_tool.collab,
-                "revises": len(revise_tool.run_ledger),
-            },
+            # chat.turn_complete / message_end — boundary_yields / scope_signals /
+            # escalations off the delegate accumulator, plus the revise count (定向唤回).
+            "collab": collab,
             "audit_drops": audit_recorder.drops,
         }
 
@@ -643,6 +656,11 @@ async def run_chat_pipeline(
         }
     finally:
         current_fact_log.reset(fact_log_token)
+        # Drain the append-on-emit journal BEFORE dropping the writer: an abandoned in-flight
+        # write leaves a checked-out DB connection for the GC to terminate (asyncpg
+        # connection_lost noise). Best-effort — a drain failure must never break turn teardown.
+        with contextlib.suppress(Exception):
+            await journal_writer.flush()
         current_journal_writer.reset(journal_writer_token)
         from agentcore.runtime.audit.recorder import current_audit_recorder
 

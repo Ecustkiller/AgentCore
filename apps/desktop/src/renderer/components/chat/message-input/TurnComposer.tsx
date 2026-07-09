@@ -24,7 +24,6 @@ import {
 import type { SetStateAction } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AttachmentChips } from "./AttachmentChips";
-import { ConversationInstructions } from "./ConversationInstructions";
 import { CurrentModelBadge } from "./CurrentModelBadge";
 import { RecordingBar } from "./RecordingBar";
 import {
@@ -437,15 +436,9 @@ export function TurnComposer({
         />
       </div>
       <div className="flex items-center justify-between px-4 pb-3">
-        <div className="flex items-center gap-1">
-          {!conversationId && <DraftWorkspacePicker />}
+        <div className="flex min-w-0 flex-1 items-center gap-1">
           <CurrentModelBadge disabled={isGenerating} />
-          {conversationId && (
-            <ConversationInstructions
-              conversationId={conversationId}
-              disabled={isGenerating}
-            />
-          )}
+          {!conversationId && <DraftWorkspacePicker />}
           <IconButton
             size="md"
             onClick={mention.openBrowse}

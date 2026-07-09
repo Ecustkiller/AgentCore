@@ -17,6 +17,7 @@ from agentcore.memory import (
     LLMFollowupsGenerator,
     LLMTitleGenerator,
     TitleInput,
+    TitleResult,
 )
 from agentcore.workspace.locate import LocalBinding
 
@@ -56,11 +57,17 @@ def preview(text: str, *, limit: int = LOG_PREVIEW_CHARS) -> str:
 
 
 async def resolve_local_binding(session: AsyncSession, conv: Conversation) -> LocalBinding | None:
-    """Resolve a turn's local-mode binding from the conversation's own columns."""
+    """Resolve a turn's local-mode binding from the conversation's own columns.
+
+    ``local_root_id`` is an explicit bind; ``local_container_root_id`` is the
+    desktop's local-first intent at conversation creation. Cloud SSE turns must
+    honor both so sidecar-written files stay visible when the turn falls back
+    from sidecar to cloud (``local-turns`` persists messages only, not files).
+    """
     from agentcore.conversation.scratch import resolve_conversation_local_binding
 
     return resolve_conversation_local_binding(
-        local_root_id=conv.local_root_id,
+        local_root_id=conv.local_root_id or conv.local_container_root_id,
         local_subpath=conv.local_subpath,
         label="workspace",
     )
@@ -73,24 +80,25 @@ async def generate_title(
     user_message: str,
     assistant_reply: str,
     model: str | None = None,
-) -> str:
-    """Best-effort one-line title via the fast model; falls back to truncation."""
+) -> TitleResult:
+    """Best-effort title + tag via the fast model; title falls back to truncation."""
     fallback = fallback_title(user_message)
     if not user_message.strip():
-        return fallback
+        return TitleResult(title=fallback)
 
     messages: list[ChatMessage] = [{"role": "user", "content": user_message}]
     if assistant_reply.strip():
         messages.append({"role": "assistant", "content": assistant_reply})
 
     try:
-        title = await LLMTitleGenerator(provider, model=model).generate(
+        result = await LLMTitleGenerator(provider, model=model).generate(
             TitleInput(conversation_id=conversation_id, messages=messages)
         )
-        return title or fallback
+        title = result.title or fallback
+        return TitleResult(title=title, tag=result.tag)
     except Exception as e:
         logger.warning("chat.title_failed", conversation_id=conversation_id, error=str(e))
-        return fallback
+        return TitleResult(title=fallback)
 
 
 async def generate_followups(

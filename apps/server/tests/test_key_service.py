@@ -79,6 +79,9 @@ async def test_get_status_platform_mode_ignores_stored_byok_model(service, monke
     assert status.configured is True
     assert status.default_model == "gpt-5"
     assert status.billing_mode == "platform"
+    # default_model 是「生效模型」(平台激活→gpt-5)；byok_model 与之分离，始终如实
+    # 回显用户保存的自带模型，供设置页卡片展示，避免平台侧误显示成 gpt-5。
+    assert status.byok_model == DEEPSEEK_V4_FLASH
 
 
 @pytest.mark.asyncio
@@ -96,6 +99,7 @@ async def test_get_status_byok_mode_uses_stored_model(service, monkeypatch):
         status = await service.get_status("u1")
 
     assert status.default_model == "glm-4"
+    assert status.byok_model == "glm-4"
 
 
 class _FakeProbeProvider:

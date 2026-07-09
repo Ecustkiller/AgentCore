@@ -2,7 +2,12 @@ import { DebateView, LiveDebateNarrative } from "@/components/DebateView";
 import { Markdown } from "@/components/Markdown";
 import { NonBlockingAskCard } from "@/components/NonBlockingAskCard";
 import { TeamView } from "@/components/TeamView";
-import type { NonBlockingAsk } from "@/protocol/fold";
+import {
+  CONTEXT_CHANNEL_LABEL,
+  toolDetail,
+  toolLabel,
+} from "@/components/assistantLabels";
+import type { NonBlockingAsk, RunToolCall } from "@/protocol/fold";
 // Rich assistant rendering shared by live turns and history replay (前端技术与架构 §七 ·
 // 富渲染 + 多 Agent 团队视图). One {@link AssistantContent} consumes the same fields whether
 // they come from the live fold (ProjectedTurn) or a persisted message (MessageDetail).
@@ -48,6 +53,13 @@ export interface TeamProjection {
   pendingEscalations?: Map<string, string>;
   /** Live turn → the pending escalation is answerable over the open stream. */
   escalationsInteractive?: boolean;
+  /** 队员工具明细 (RunDetail · 工具调用): runId → the worker's tool calls, from the transport-only
+   *  sibling {@link import("@/protocol/fold").extractRunToolCalls} (the fold drops run-scoped tool
+   *  IO, so the run-detail panel reads it from here). Absent → the panel shows no tool section. */
+  runToolCalls?: Map<string, RunToolCall[]>;
+  /** Worker `tool_use_progress` (run_id): runId → live EXECUTION phase (transport-only sibling
+   *  {@link import("@/protocol/fold").extractWorkerToolPhases}). */
+  workerToolPhases?: Map<string, { phase: string; toolName: string }>;
 }
 
 export function AssistantContent({
@@ -127,23 +139,6 @@ export function AssistantContent({
   );
 }
 
-/** Context channel → 中文 label (上下文传递可视化). Mirrors the desktop CONTEXT_CHANNEL_META
- *  labels so the two ends read the same (各端全新建; labels are chrome, not shared logic). */
-const CONTEXT_CHANNEL_LABEL: Record<string, string> = {
-  system: "系统提示",
-  history: "对话历史",
-  request: "原始请求",
-  team_position: "团队位置",
-  dependency: "前置结果",
-  workspace: "工作区",
-  task: "你的任务",
-  deliverable: "交付物规格",
-  expected_output: "预期产出",
-  requirements: "产出要求",
-  steer: "中途指示",
-  team_result: "队员回传",
-};
-
 /** 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): the structured context the CEO captain was
  *  fed this turn (系统提示 / 对话历史 / 原始请求), shown turn-level on its bubble. Collapsible
  *  like 思考 (secondary to the answer). 决策②: the `system` block (verbatim 系统提示) is hidden
@@ -183,29 +178,6 @@ function ReceivedContext({ blocks }: { blocks: ContextBlockWire[] }) {
   );
 }
 
-/** 中文工具名 — mirrors the desktop `TOOL_META` labels so the two ends read the same
- *  (各端全新建 per cross-platform-frontend; labels are chrome, not shared logic). An
- *  unknown tool falls back to its raw backend name so a newly added tool still renders. */
-const TOOL_LABEL: Record<string, string> = {
-  web_search: "搜索网页",
-  read_url: "读取网页",
-  grep: "检索代码",
-  code_execute: "执行代码",
-  file_read: "读取文件",
-  file_write: "写入文件",
-  file_append: "追加文件",
-  file_list: "列出目录",
-  str_replace: "编辑文件",
-  file_delete: "删除文件",
-  file_move: "移动文件",
-  delegate: "委派任务",
-  ask_user: "向你确认",
-  consult_skill: "查阅能力",
-  revise: "修订产物",
-  escalate: "上报问题",
-};
-const toolLabel = (name: string): string => TOOL_LABEL[name] ?? name;
-
 /** 工具执行阶段进度 → 等待态文案 (联网前端展示优化): a running tool's coarse phase (from a
  *  transport-only `tool_use_progress` event, read live via extractToolPhases) as user-facing
  *  text — so a waiting slow tool reads「正在检索 / 正在抓取网页 / 正在执行」rather than a bare
@@ -241,29 +213,6 @@ function useRunningElapsed(running: boolean): number {
     return () => clearInterval(id);
   }, [running]);
   return elapsed;
-}
-
-/** The most descriptive string arg to show beside a tool (its query / url / path / …);
- *  empty when the call carries no representative string arg. Mirrors desktop. */
-const TOOL_DETAIL_KEYS = [
-  "query",
-  "url",
-  "pattern",
-  "path",
-  "command",
-  "code",
-  "q",
-  "text",
-];
-function toolDetail(args: Record<string, unknown>): string {
-  for (const k of TOOL_DETAIL_KEYS) {
-    const v = args[k];
-    if (typeof v === "string" && v.trim()) return v.trim();
-  }
-  for (const v of Object.values(args)) {
-    if (typeof v === "string" && v.trim()) return v.trim();
-  }
-  return "";
 }
 
 /** Last path segment of a detail (a file 名 from a path / url); the whole string when it

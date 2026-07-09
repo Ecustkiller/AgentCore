@@ -307,17 +307,15 @@ class AskUserSuspension(TurnSuspension):
 
 
 def suspension_from_json(data: dict[str, Any]) -> TurnSuspension:
-    """Rebuild the right :class:`TurnSuspension` subclass from a stored frame dict.
-
-    Dispatches on the ``kind`` discriminator; an absent / unknown kind defaults to
-    ``plan_review`` (the only kind that existed before the union, so a legacy frame
-    still loads). Tolerates missing keys — every field falls back to a safe default.
-    """
+    """Rebuild the right :class:`TurnSuspension` subclass from a stored frame dict."""
     from agentcore.runtime.runs.serialize import plan_from_json
 
     data = dict(data or {})
+    kind_raw = data.get("kind")
+    if kind_raw not in {SuspensionKind.PLAN_REVIEW.value, SuspensionKind.ASK_USER.value}:
+        raise ValueError(f"missing or unknown suspension kind: {kind_raw!r}")
     base = TurnSuspension._base_kwargs(data)
-    if data.get("kind") == SuspensionKind.ASK_USER.value:
+    if kind_raw == SuspensionKind.ASK_USER.value:
         return AskUserSuspension(
             **base,
             question=data.get("question", "") or "",

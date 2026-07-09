@@ -75,7 +75,7 @@ describe("surfaceResumeFromLiveTurn", () => {
     seedTurn("m-server-1");
     conv().addCheckpoint(cpPayload(), CID);
 
-    surfaceResumeFromLiveTurn(CID);
+    surfaceResumeFromLiveTurn(CID, "server");
 
     const entries = paused().pending;
     expect(entries).toHaveLength(1);
@@ -96,7 +96,7 @@ describe("surfaceResumeFromLiveTurn", () => {
     seedTurn("m-server-2");
     conv().addPlanReview(prPayload(), CID);
 
-    surfaceResumeFromLiveTurn(CID);
+    surfaceResumeFromLiveTurn(CID, "server");
 
     const entries = paused().pending;
     expect(entries).toHaveLength(1);
@@ -111,21 +111,21 @@ describe("surfaceResumeFromLiveTurn", () => {
     expect(entries[0].pending).toEqual([{ run_id: "r2", role: "执行" }]);
   });
 
-  it("falls back to the client bubble id only when no server id was stamped", () => {
+  it("does not surface when no server id was stamped", () => {
     seedTurn(); // a turn that somehow streamed without a message_start
     conv().addCheckpoint(cpPayload(), CID);
 
-    surfaceResumeFromLiveTurn(CID);
+    surfaceResumeFromLiveTurn(CID, "server");
 
-    expect(paused().pending[0].messageId).toBe("client-uuid");
+    expect(paused().pending).toHaveLength(0);
   });
 
   it("is idempotent by messageId — a second call does not stack a duplicate", () => {
     seedTurn("m-server-1");
     conv().addCheckpoint(cpPayload(), CID);
 
-    surfaceResumeFromLiveTurn(CID);
-    surfaceResumeFromLiveTurn(CID);
+    surfaceResumeFromLiveTurn(CID, "server");
+    surfaceResumeFromLiveTurn(CID, "server");
 
     expect(paused().pending).toHaveLength(1);
   });
@@ -133,7 +133,7 @@ describe("surfaceResumeFromLiveTurn", () => {
   it("is a no-op when the finalized turn carries no pending checkpoint", () => {
     seedTurn("m-server-1"); // no addCheckpoint / addPlanReview
 
-    surfaceResumeFromLiveTurn(CID);
+    surfaceResumeFromLiveTurn(CID, "server");
 
     expect(paused().pending).toHaveLength(0);
   });
@@ -141,8 +141,26 @@ describe("surfaceResumeFromLiveTurn", () => {
   it("does nothing when the conversation has no assistant turn", () => {
     conv().switchConversation(CID); // empty slice
 
-    surfaceResumeFromLiveTurn(CID);
+    surfaceResumeFromLiveTurn(CID, "server");
 
     expect(paused().pending).toHaveLength(0);
+  });
+
+  it("tags origin=sidecar when caller passes sidecar", () => {
+    seedTurn("m-server-1");
+    conv().addCheckpoint(cpPayload(), CID);
+
+    surfaceResumeFromLiveTurn(CID, "sidecar");
+
+    expect(paused().pending[0]?.origin).toBe("sidecar");
+  });
+
+  it("tags origin=server when caller passes server", () => {
+    seedTurn("m-server-1");
+    conv().addCheckpoint(cpPayload(), CID);
+
+    surfaceResumeFromLiveTurn(CID, "server");
+
+    expect(paused().pending[0]?.origin).toBe("server");
   });
 });

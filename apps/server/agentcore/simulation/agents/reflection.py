@@ -6,15 +6,38 @@ from collections.abc import Sequence
 
 from agentcore.llm.provider.protocol import LLMProvider
 from agentcore.simulation.agents.memory import append_tick_memory
-from agentcore.simulation.agents.models import SimPersona
+from agentcore.simulation.agents.models import (
+    MotivationAssessment,
+    MotivationSignals,
+    SimPersona,
+)
 from agentcore.simulation.interaction.llm_helpers import sim_complete_json
 from agentcore.simulation.world.state import WorldAgent
 
 REFLECTION_INTERVAL_TICKS = 12
 
+# Goal anti-drift guard bounds: reject degenerate/near-duplicate rewrites, cap runaway length.
+_MIN_GOAL_LEN = 4
+_MAX_GOAL_LEN = 60
+
 
 def should_reflect(tick: int, *, interval: int = REFLECTION_INTERVAL_TICKS) -> bool:
     return tick > 0 and tick % interval == 0
+
+
+def anchor_goal(persona: SimPersona, current_goal: str, proposed: str | None) -> str | None:
+    """Accept a reflected goal only if it is a meaningful, non-trivial change.
+
+    Anti-drift: a reflection that returns an empty, too-short, or unchanged goal must not
+    overwrite the agent's standing goal (which would erode the persona over many ticks).
+    Returns the accepted goal (length-capped) or ``None`` to keep the current one.
+    """
+    text = (proposed or "").strip()
+    if len(text) < _MIN_GOAL_LEN:
+        return None
+    if text == (current_goal or "").strip():
+        return None
+    return text[:_MAX_GOAL_LEN]
 
 
 async def reflect_agent(
@@ -30,16 +53,24 @@ async def reflect_agent(
     Returns ``(memory_summary, new_goal_or_none)``.
     """
     memories = "\n".join(f"- {m}" for m in agent.tick_memories[-6:]) or "（尚无记忆）"
+    motivation = MotivationAssessment.evaluate(
+        persona,
+        MotivationSignals(hour=(8 + tick) % 24, mood=agent.mood, money=agent.money),
+    )
+    core_goals = "；".join(persona.effective_goals()) or persona.goal
     system = (
         f"{persona.system_prompt}\n"
-        "请对近期行为做低频反思。只输出 JSON："
+        "请对近期行为做低频反思。目标微调必须与你的身份和长期目标一致，只在确有必要时"
+        "小幅调整，不要凭空换成无关目标。只输出 JSON："
         '{"summary": "一两句总结近期行为与感受", '
         '"goal_adjustment": "可选的新目标（若无需调整则空字符串）", '
         '"priority_note": "可选的目标优先级说明"}'
     )
     user = (
         f"当前 tick {tick}，你在 {agent.location}，心情 {agent.mood:+.1f}。\n"
+        f"你的长期目标：{core_goals}\n"
         f"当前目标：{agent.goal}\n"
+        f"内在驱动：主导「{motivation.dominant_drive}」（{'；'.join(motivation.rationale[:2])}）\n"
         f"近期记忆：\n{memories}\n"
         "请反思并决定是否微调目标。"
     )
@@ -51,7 +82,7 @@ async def reflect_agent(
         return f"反思 tick{tick}：{summary}", None
 
     summary = str(payload.get("summary", "")).strip() or "本周期行为平稳。"
-    goal_adj = str(payload.get("goal_adjustment", "")).strip() or None
+    goal_adj = anchor_goal(persona, agent.goal, payload.get("goal_adjustment"))
     priority = str(payload.get("priority_note", "")).strip()
     memory_line = f"反思 tick{tick}：{summary}"
     if priority:

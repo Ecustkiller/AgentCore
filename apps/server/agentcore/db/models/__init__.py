@@ -4,8 +4,8 @@ This ORM is the single source of truth for the AgentCore schema; structure is
 applied via Alembic migrations (``alembic check`` must report zero drift).
 
 This package was split out of a single ``models.py`` along the same domain seams as
-``db/repositories`` (auth / billing / chat / conversations / devices / model_modes /
-runs / users). Importing the package imports every model module, so all tables
+``db/repositories`` (auth / billing / chat / conversations / devices / runs /
+users). Importing the package imports every model module, so all tables
 register on ``Base.metadata`` exactly as before (Alembic's ``env.py`` and
 ``Base.metadata.create_all`` see the full set). This ``__init__`` re-exports the full
 class surface so the historical import path — ``from agentcore.db.models import X`` —
@@ -27,10 +27,10 @@ from .conversations import (
     Folder,
     MemoryUpdateRow,
     Message,
+    MessageBookmark,
 )
 from .devices import PushDeviceRow
 from .feedback import FeedbackRow
-from .model_modes import ModelMode
 from .runs import (
     HandoffJob,
     PausedTurnRow,
@@ -59,7 +59,7 @@ __all__ = [
     "Invite",
     "MemoryUpdateRow",
     "Message",
-    "ModelMode",
+    "MessageBookmark",
     "PausedTurnRow",
     "PushDeviceRow",
     "RefreshToken",

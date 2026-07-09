@@ -17,11 +17,22 @@ public class AgentTown : ModuleRules
 				"JsonUtilities",
 				"AIModule",
 				"NavigationSystem",
+				"Navmesh",
+				"GameplayTasks",
+				"Slate",
+				"SlateCore",
+				"InputCore",
+				"RenderCore",
 			});
 
 		if (Target.bBuildDeveloperTools)
 		{
 			PrivateDependencyModuleNames.Add("AutomationController");
+		}
+
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.Add("UnrealEd");
 		}
 	}
 }

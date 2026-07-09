@@ -18,7 +18,14 @@ from agentcore.core.errors import (
     LLMUpstreamError,
 )
 from agentcore.core.logging import get_logger
-from agentcore.llm.errors import body_preview, diagnose_empty_response, upstream_error
+from agentcore.llm.errors import (
+    body_preview,
+    client_error_message,
+    diagnose_empty_response,
+    is_non_retryable_client_status,
+    upstream_client_error,
+    upstream_error,
+)
 from agentcore.llm.observability import log_llm_call
 from agentcore.llm.provider.protocol import (
     LLMChunk,
@@ -34,9 +41,11 @@ from agentcore.llm.sub2api_probe import probe_sub2api_diagnosis_result
 logger = get_logger(__name__)
 
 _MAX_RETRIES = 3
-_INITIAL_BACKOFF = 1.0
+_INITIAL_BACKOFF = 2.0
 _BACKOFF_MULTIPLIER = 2.0
-_REQUEST_TIMEOUT = 120.0
+# Unary completions can run 150s+ for long-form writing; streaming read timeout is
+# per-chunk idle, so a generous ceiling avoids false positives on slow generations.
+_REQUEST_TIMEOUT = 300.0
 
 
 def _usage_from(usage_data: dict) -> TokenUsage:
@@ -244,6 +253,12 @@ class OpenAICompatibleProvider:
                 ]
             if msg.tool_call_id:
                 m["tool_call_id"] = msg.tool_call_id
+            if msg.reasoning_content is not None:
+                m["reasoning_content"] = msg.reasoning_content
+            elif msg.role == "assistant" and msg.tool_calls:
+                # DeepSeek V4 thinking mode: assistant tool-call turns must echo
+                # reasoning_content (empty string when the model omitted it).
+                m["reasoning_content"] = ""
             messages.append(m)
 
         payload: dict = {
@@ -317,6 +332,64 @@ class OpenAICompatibleProvider:
             if headers.get("x-upstream-retried"):
                 err.retryable = False
             raise err
+        if is_non_retryable_client_status(status_code) or 400 <= status_code < 500:
+            logger.warning(
+                "llm.client_error",
+                provider=self._name,
+                status_code=status_code,
+                body_preview=body_preview(body),
+            )
+            raise upstream_client_error(
+                client_error_message(self._name, status_code, body),
+                status=status_code,
+                body=body,
+            )
+
+    def _network_error_to_llm(self, exc: httpx.HTTPError) -> LLMError:
+        """Map transient transport failures to retryable LLM errors."""
+        if isinstance(exc, httpx.TimeoutException):
+            return LLMTimeoutError(f"连接 {self._name} 超时，请检查网络后重试")
+        detail = str(exc).strip() or type(exc).__name__
+        return upstream_error(
+            f"{self._name} 连接中断，请稍后再试",
+            status=502,
+            body=detail.encode(),
+        )
+
+    def _can_retry_attempt(self, attempt: int) -> bool:
+        return attempt < _MAX_RETRIES - 1
+
+    async def _sleep_before_retry(
+        self,
+        *,
+        attempt: int,
+        backoff: float,
+        stream: bool,
+        reason: str,
+        partial_sse_lines: int = 0,
+    ) -> float:
+        wait = backoff
+        logger.info(
+            "llm.call_retried",
+            provider=self._name,
+            attempt=attempt + 1,
+            max_attempts=_MAX_RETRIES,
+            wait_sec=wait,
+            stream=stream,
+            reason=reason,
+            partial_sse_lines=partial_sse_lines or None,
+        )
+        await asyncio.sleep(wait)
+        return backoff * _BACKOFF_MULTIPLIER
+
+    async def _finalize_upstream_error(self, err: LLMUpstreamError, attempt: int) -> LLMUpstreamError:
+        final = upstream_error(
+            err.message,
+            status=err.details.get("upstream_status", 500),
+            body=err.details.get("upstream_body_preview"),
+            retry_attempts=attempt + 1,
+        )
+        raise await self._attach_sub2api_diagnosis(final) from err
 
     async def _request_with_retry(self, payload: dict) -> dict:
         last_error: Exception | None = None
@@ -324,53 +397,70 @@ class OpenAICompatibleProvider:
         for attempt in range(_MAX_RETRIES):
             try:
                 response = await self._client.post("/chat/completions", json=payload)
-                body = response.content if response.status_code >= 500 else None
+                body = response.content if response.status_code >= 400 else None
                 self._raise_for_status(
                     response.status_code, backoff, response.headers, body=body, attempt=attempt
                 )
-                response.raise_for_status()
                 return response.json()
             except LLMUpstreamError as e:
                 last_error = e
-                if not e.retryable or attempt == _MAX_RETRIES - 1:
-                    final = upstream_error(
-                        e.message,
-                        status=e.details.get("upstream_status", 500),
-                        body=e.details.get("upstream_body_preview"),
-                        retry_attempts=attempt + 1,
-                    )
-                    raise await self._attach_sub2api_diagnosis(final) from e
-                wait = backoff
-                logger.warning("llm.retry", provider=self._name, attempt=attempt + 1, wait=wait)
-                await asyncio.sleep(wait)
-                backoff *= _BACKOFF_MULTIPLIER
+                if not e.retryable or not self._can_retry_attempt(attempt):
+                    await self._finalize_upstream_error(e, attempt)
+                backoff = await self._sleep_before_retry(
+                    attempt=attempt,
+                    backoff=backoff,
+                    stream=False,
+                    reason=f"upstream_{e.details.get('upstream_status', 500)}",
+                )
             except (LLMRateLimitError, LLMError) as e:
                 last_error = e
-                if not e.retryable or attempt == _MAX_RETRIES - 1:
+                if not e.retryable or not self._can_retry_attempt(attempt):
                     raise
                 retry_after = e.retry_after if isinstance(e, LLMRateLimitError) else None
                 wait = retry_after or backoff
-                logger.warning("llm.retry", provider=self._name, attempt=attempt + 1, wait=wait)
+                logger.info(
+                    "llm.call_retried",
+                    provider=self._name,
+                    attempt=attempt + 1,
+                    max_attempts=_MAX_RETRIES,
+                    wait_sec=wait,
+                    stream=False,
+                    reason=type(e).__name__,
+                )
                 await asyncio.sleep(wait)
                 backoff *= _BACKOFF_MULTIPLIER
             except httpx.TimeoutException as e:
                 last_error = LLMTimeoutError(f"连接 {self._name} 超时，请检查网络后重试")
-                if attempt == _MAX_RETRIES - 1:
+                if not self._can_retry_attempt(attempt):
                     raise last_error from e
-                logger.warning("llm.timeout_retry", provider=self._name, attempt=attempt + 1)
-                await asyncio.sleep(backoff)
-                backoff *= _BACKOFF_MULTIPLIER
+                backoff = await self._sleep_before_retry(
+                    attempt=attempt,
+                    backoff=backoff,
+                    stream=False,
+                    reason="timeout",
+                )
+            except httpx.HTTPError as e:
+                last_error = self._network_error_to_llm(e)
+                if not last_error.retryable or not self._can_retry_attempt(attempt):
+                    raise last_error from e
+                backoff = await self._sleep_before_retry(
+                    attempt=attempt,
+                    backoff=backoff,
+                    stream=False,
+                    reason=type(e).__name__,
+                )
         raise last_error or LLMError(f"{self._name} 多次重试后仍失败，请稍后重试")
 
     async def _stream_with_retry(self, payload: dict) -> AsyncIterator[str]:
         last_error: Exception | None = None
         backoff = _INITIAL_BACKOFF
         for attempt in range(_MAX_RETRIES):
+            lines_yielded = 0
             try:
                 async with self._client.stream(
                     "POST", "/chat/completions", json=payload
                 ) as response:
-                    body = await response.aread() if response.status_code >= 500 else None
+                    body = await response.aread() if response.status_code >= 400 else None
                     self._raise_for_status(
                         response.status_code,
                         backoff,
@@ -378,46 +468,79 @@ class OpenAICompatibleProvider:
                         body=body,
                         attempt=attempt,
                     )
-                    response.raise_for_status()
                     async for line in response.aiter_lines():
+                        lines_yielded += 1
                         yield line
                     return
             except LLMUpstreamError as e:
                 last_error = e
-                if not e.retryable or attempt == _MAX_RETRIES - 1:
-                    final = upstream_error(
-                        e.message,
-                        status=e.details.get("upstream_status", 500),
-                        body=e.details.get("upstream_body_preview"),
-                        retry_attempts=attempt + 1,
-                    )
-                    raise await self._attach_sub2api_diagnosis(final) from e
-                wait = backoff
-                logger.warning(
-                    "llm.stream_retry", provider=self._name, attempt=attempt + 1, wait=wait
+                if not e.retryable or not self._can_retry_attempt(attempt) or lines_yielded > 0:
+                    if lines_yielded > 0:
+                        logger.warning(
+                            "llm.stream_partial_disconnect",
+                            provider=self._name,
+                            partial_sse_lines=lines_yielded,
+                            reason=f"upstream_{e.details.get('upstream_status', 500)}",
+                        )
+                    await self._finalize_upstream_error(e, attempt)
+                backoff = await self._sleep_before_retry(
+                    attempt=attempt,
+                    backoff=backoff,
+                    stream=True,
+                    reason=f"upstream_{e.details.get('upstream_status', 500)}",
                 )
-                await asyncio.sleep(wait)
-                backoff *= _BACKOFF_MULTIPLIER
             except (LLMRateLimitError, LLMError) as e:
                 last_error = e
-                if not e.retryable or attempt == _MAX_RETRIES - 1:
+                if not e.retryable or not self._can_retry_attempt(attempt) or lines_yielded > 0:
                     raise
                 retry_after = e.retry_after if isinstance(e, LLMRateLimitError) else None
                 wait = retry_after or backoff
-                logger.warning(
-                    "llm.stream_retry", provider=self._name, attempt=attempt + 1, wait=wait
+                logger.info(
+                    "llm.call_retried",
+                    provider=self._name,
+                    attempt=attempt + 1,
+                    max_attempts=_MAX_RETRIES,
+                    wait_sec=wait,
+                    stream=True,
+                    reason=type(e).__name__,
                 )
                 await asyncio.sleep(wait)
                 backoff *= _BACKOFF_MULTIPLIER
             except httpx.TimeoutException as e:
                 last_error = LLMTimeoutError(f"连接 {self._name} 超时，请检查网络后重试")
-                if attempt == _MAX_RETRIES - 1:
+                if not self._can_retry_attempt(attempt) or lines_yielded > 0:
+                    if lines_yielded > 0:
+                        logger.warning(
+                            "llm.stream_partial_disconnect",
+                            provider=self._name,
+                            partial_sse_lines=lines_yielded,
+                            reason="timeout",
+                        )
                     raise last_error from e
-                logger.warning(
-                    "llm.stream_timeout_retry", provider=self._name, attempt=attempt + 1
+                backoff = await self._sleep_before_retry(
+                    attempt=attempt,
+                    backoff=backoff,
+                    stream=True,
+                    reason="timeout",
                 )
-                await asyncio.sleep(backoff)
-                backoff *= _BACKOFF_MULTIPLIER
+            except httpx.HTTPError as e:
+                last_error = self._network_error_to_llm(e)
+                if not last_error.retryable or not self._can_retry_attempt(attempt) or lines_yielded > 0:
+                    if lines_yielded > 0:
+                        logger.warning(
+                            "llm.stream_partial_disconnect",
+                            provider=self._name,
+                            partial_sse_lines=lines_yielded,
+                            reason=type(e).__name__,
+                        )
+                    raise last_error from e
+                backoff = await self._sleep_before_retry(
+                    attempt=attempt,
+                    backoff=backoff,
+                    stream=True,
+                    reason=type(e).__name__,
+                    partial_sse_lines=lines_yielded,
+                )
         raise last_error or LLMError(f"{self._name} 多次重试后仍失败，请稍后重试")
 
     async def probe(self, *, model: str) -> None:

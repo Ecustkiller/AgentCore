@@ -10,7 +10,7 @@ import { ChevronRight, History, Loader2 } from "lucide-react";
 const OUTCOME_META: Record<AuditOutcome, { label: string; className: string }> =
   {
     ok: { label: "ok", className: statusPillSoft.success },
-    denied: { label: "denied", className: statusPillSoft.warning },
+    denied: { label: "denied", className: statusPillSoft.muted },
     failed: { label: "failed", className: statusPillSoft.destructive },
     skipped: { label: "skipped", className: statusPillSoft.muted },
   };

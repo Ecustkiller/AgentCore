@@ -21,7 +21,7 @@ from agentcore.api.routes.inference.proxy import (  # noqa: E402
     _forward_unary,
     _record_proxy_spend,
     _resolve_inference_credentials,
-    _usage_from_deepseek,
+    usage_from_deepseek,
 )
 from agentcore.api.routes.inference.token import inference_user  # noqa: E402
 
@@ -38,7 +38,7 @@ __all__ = [
     "background_run_cost",
     "inference_user",
     "_resolve_inference_credentials",
-    "_usage_from_deepseek",
+    "usage_from_deepseek",
     "_record_proxy_spend",
     "_forward_unary",
     "_forward_stream",

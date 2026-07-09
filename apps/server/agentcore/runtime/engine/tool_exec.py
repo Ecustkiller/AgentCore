@@ -86,7 +86,10 @@ async def execute_tools(
             name, tool.schema.approval, args
         ):
             decision = await approval_gate.authorize(
-                tool_name=name, tool_call_id=tc.id, arguments=args
+                tool_name=name,
+                tool_call_id=tc.id,
+                arguments=args,
+                execution_id=context.execution_id,
             )
             if decision is ApprovalDecision.DENY:
                 denial = (
@@ -140,6 +143,29 @@ async def execute_tools(
                 ToolAttempt(fingerprint, name, success=False),
                 [],
             )
+        except Exception as e:
+            # Per-tool exception firewall (audit/05 P2-1): a crash in one parallel call
+            # must not cancel its siblings via asyncio.gather. Convert to a failed tool
+            # result so the loop can adapt; SUSPEND terminals are unaffected (they return
+            # normally, never raise).
+            duration_ms = int((time.monotonic() - started) * 1000)
+            error_msg = (
+                f"工具 '{name}' 执行时发生内部错误：{e}。"
+                "请调整方案或换一种方式，不要原样重试。"
+            )
+            sink.emit(tool_use_end(tc.id, name, success=False, output=error_msg, run_id=run_id))
+            logger.exception(
+                "tool.execute_end",
+                tool=name,
+                status="crash",
+                duration_ms=duration_ms,
+            )
+            return (
+                LLMMessage(role="tool", content=error_msg, tool_call_id=tc.id),
+                None,
+                ToolAttempt(fingerprint, name, success=False),
+                [],
+            )
         result.tool_call_id = tc.id
 
         if result.success:
@@ -176,10 +202,11 @@ async def execute_tools(
 
         citations = result.citations if (result.success and result.citations) else []
         message = LLMMessage(role="tool", content=output, tool_call_id=tc.id)
+        policy_failure = bool(result.metadata.get("policy_failure"))
         return (
             message,
             (result if result.is_terminal else None),
-            ToolAttempt(fingerprint, name, success=result.success),
+            ToolAttempt(fingerprint, name, success=result.success, policy_failure=policy_failure),
             citations,
         )
 

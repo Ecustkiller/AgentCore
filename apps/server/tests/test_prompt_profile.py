@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from agentcore.runtime.prompt import (
+from agentcore.runtime.resolve.prompt import (
     assemble_system_prompt,
     compose_ceo_chat_prompt,
 )

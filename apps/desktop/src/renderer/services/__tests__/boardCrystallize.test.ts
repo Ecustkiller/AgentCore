@@ -25,6 +25,7 @@ const agent = (id: string, role: string): AgentState => ({
   reasoningChunks: [],
   toolCalls: [],
   toolProgress: null,
+  toolExecutionLive: null,
 });
 
 const run = (

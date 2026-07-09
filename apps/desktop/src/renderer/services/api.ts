@@ -125,6 +125,13 @@ export function setServiceUnavailableHandler(
   onServiceUnavailable = handler;
 }
 
+/** Invoked after a successful silent token refresh (for AgentTown session sync). */
+let onSessionRenewed: (() => void) | null = null;
+
+export function setSessionRenewedHandler(handler: (() => void) | null): void {
+  onSessionRenewed = handler;
+}
+
 const isAuthPath = (path: string): boolean => path.startsWith("/v1/auth/");
 
 // A single in-flight refresh shared by every 401'd caller. The refresh token
@@ -152,6 +159,7 @@ export function tryRefresh(): Promise<boolean> {
         credentials: "include",
       });
       captureCsrf(res);
+      if (res.ok) onSessionRenewed?.();
       return res.ok;
     } catch {
       return false;

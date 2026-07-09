@@ -11,15 +11,18 @@ import {
 import { FINISH_REASON_META } from "@/components/ui/finish-reason-chip";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { copyText } from "@/lib/clipboard";
+import { formatCollabSummary } from "@/lib/collabSummary";
 import { formatCompact } from "@/lib/format";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import { setMessageFeedback } from "@/services/messages";
 import type { UsageBreakdown } from "@/services/usage";
+import { useBookmarkStore } from "@/stores/bookmarks";
 import type { Message } from "@/stores/conversation";
 import { useConversationStore } from "@/stores/conversation";
 import { useUIStore } from "@/stores/ui";
 import type { ContextBlockWire } from "@/types/events";
 import {
+  Bookmark,
   Check,
   Copy,
   Fingerprint,
@@ -343,6 +346,32 @@ function FeedbackButtons({ message }: { message: Message }) {
   );
 }
 
+/** 消息收藏 (方向 4): star an assistant reply → 侧栏「已收藏」. Cross-device (server-
+ * stored); optimistic via the bookmark store, filled when saved. */
+function BookmarkButton({ message }: { message: Message }) {
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const bookmarked = useBookmarkStore((s) => s.ids.has(message.id));
+  const toggle = useBookmarkStore((s) => s.toggle);
+  return (
+    <SimpleTooltip label={bookmarked ? "取消收藏" : "收藏"}>
+      <IconButton
+        size="sm"
+        aria-label={bookmarked ? "取消收藏" : "收藏"}
+        aria-pressed={bookmarked}
+        className={bookmarked ? "text-primary" : undefined}
+        onClick={() => {
+          if (conversationId) void toggle(conversationId, message.id);
+        }}
+      >
+        <Bookmark
+          size={14}
+          className={bookmarked ? "fill-current" : undefined}
+        />
+      </IconButton>
+    </SimpleTooltip>
+  );
+}
+
 /** Assistant bubble footer — actions left, usage summary + time right, low-freq in「更多」. */
 export function AssistantMessageFooter({
   message,
@@ -358,6 +387,10 @@ export function AssistantMessageFooter({
   onRegenerate: () => void;
 }) {
   const { copied, onCopy } = useCopyAction(() => message.content);
+  const collabSummary = useMemo(
+    () => formatCollabSummary(message.collab),
+    [message.collab],
+  );
 
   return (
     <div className="mt-1 flex items-center justify-between gap-2 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
@@ -368,6 +401,7 @@ export function AssistantMessageFooter({
           </IconButton>
         </SimpleTooltip>
         <FeedbackButtons message={message} />
+        <BookmarkButton message={message} />
         <SimpleTooltip label="重新生成">
           <IconButton size="sm" aria-label="重新生成" onClick={onRegenerate}>
             <RefreshCw size={14} />
@@ -381,6 +415,11 @@ export function AssistantMessageFooter({
         />
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
+        {collabSummary && (
+          <span className="text-xs text-muted-foreground/70">
+            {collabSummary}
+          </span>
+        )}
         <MessageUsageSummary
           usage={message.usage}
           rounds={message.rounds}

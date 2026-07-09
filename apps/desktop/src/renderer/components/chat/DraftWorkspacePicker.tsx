@@ -5,7 +5,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useGroupedConversations } from "@/hooks/useConversations";
-import { useCreateFolder } from "@/hooks/useFolders";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
 import type { FolderMeta } from "@/services/folders";
@@ -15,15 +14,12 @@ import {
   ChevronDown,
   Cloud,
   FolderOpen,
-  FolderPlus,
   HardDrive,
-  Loader2,
-  MessageSquarePlus,
   Pin,
   PinOff,
   X,
 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 
 // 本地文件能力（web 缺 fsApi → false）
 const isDesktop = hasLocalFiles();
@@ -33,23 +29,22 @@ const SEARCH_RESULT_CAP = 12;
 /**
  * 草稿期「对话归属」选择器（双模式工作区 §六 / 前端UX §九）。
  *
- * B3+：默认不选 = 输入框只露轻量「归入项目…」；选了才显示确认 chip。不选 ≡ 旧「自动」
- * （桌面 local-first 懒建），但不再用 Sparkles「自动」占主视觉。落点经 `pendingNewChat*`
+ * B3+：存储（本地默认 / 仅云端）与归入项目（可选）分两区展示；只选已有项目，创建走命令面板
+ * 「新建项目」。默认不选时工具栏只露「归入项目…」、不挂 chip（零门槛）。落点经 `pendingNewChat*`
  * 传给首发建会话；首发后锁定，改由 `WorkspaceModeBar` 承担。
  */
-export function DraftWorkspacePicker() {
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [pickedRoot, setPickedRoot] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
+const breadcrumbTriggerClass =
+  "inline-flex h-auto min-w-0 items-center gap-1 rounded-md px-1 py-0.5 font-medium text-muted-foreground hover:bg-accent hover:text-foreground";
 
-  const createFolder = useCreateFolder();
+export function DraftWorkspacePicker({
+  variant = "toolbar",
+}: {
+  /** `toolbar` = 新对话草稿区按钮样式；`breadcrumb` = 输入区上下文行内联样式（§十五）。 */
+  variant?: "toolbar" | "breadcrumb";
+}) {
+  const isBreadcrumb = variant === "breadcrumb";
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
 
   const grouped = useGroupedConversations().data;
   const folders = useMemo(() => grouped?.folders ?? [], [grouped]);
@@ -111,11 +106,9 @@ export function DraftWorkspacePicker() {
 
   const hasSelection = !!selectedFolder || pendingCloud;
 
-  const pickNone = () => {
-    setFolder(null);
+  const pickLocal = () => {
     setCloud(false);
     if (isDesktop) void ensureDefaultContainerRoot();
-    setOpen(false);
   };
 
   const pickFolder = (id: string) => {
@@ -127,76 +120,33 @@ export function DraftWorkspacePicker() {
   const pickCloud = () => {
     setFolder(null);
     setCloud(true);
-    setOpen(false);
+  };
+
+  const clearFolder = () => {
+    setFolder(null);
   };
 
   const clearSelection = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    pickNone();
-  };
-
-  const openLocalFolder = () => {
-    // Local-first default: no folder grouping; first send sets local_container_root_id.
-    pickNone();
-    setOpen(false);
-  };
-
-  const resetCreateState = () => {
-    setCreating(false);
-    setNewName("");
-    setPickedRoot(null);
-  };
-
-  const handlePickLocalDir = async () => {
-    if (!window.fsApi) return;
-    const root = await window.fsApi.addRoot();
-    if (root) setPickedRoot(root);
-  };
-
-  const handleConfirmCreate = async () => {
-    const trimmed = newName.trim();
-    if (!trimmed) return;
-    try {
-      setBusy(true);
-      setError(null);
-      const folder = await createFolder.mutateAsync({
-        name: trimmed,
-        localDir: pickedRoot?.name ?? null,
-      });
-      pickFolder(folder.id);
-      resetCreateState();
-    } catch {
-      setError("创建项目失败");
-    } finally {
-      setBusy(false);
+    if (selectedFolder) {
+      clearFolder();
+      return;
     }
-  };
-
-  const handleCreateKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && newName.trim()) {
-      e.preventDefault();
-      void handleConfirmCreate();
-    } else if (e.key === "Escape") {
-      resetCreateState();
+    if (pendingCloud) {
+      pickLocal();
     }
   };
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
-    if (!next) {
-      setQuery("");
-      setError(null);
-      resetCreateState();
-    }
+    if (!next) setQuery("");
   };
 
   const panel = (
     <PickerPanel
       query={query}
       onQueryChange={setQuery}
-      noneSelected={!selectedFolder && !pendingCloud}
-      onPickNone={pickNone}
       isSearching={isSearching}
       pinnedFolders={pinnedFolders}
       recentFolders={recentFolders}
@@ -204,30 +154,11 @@ export function DraftWorkspacePicker() {
       pinnedFolderIds={pinnedFolderIds}
       selectedFolderId={selectedFolder?.id ?? null}
       onPickFolder={pickFolder}
+      onClearFolder={clearFolder}
       onTogglePin={togglePin}
       pendingCloud={pendingCloud}
+      onPickLocal={pickLocal}
       onPickCloud={pickCloud}
-      onOpenLocalFolder={() => void openLocalFolder()}
-      busy={busy}
-      error={error}
-      creating={creating}
-      newName={newName}
-      onNewNameChange={setNewName}
-      onStartCreate={() => {
-        setCreating(true);
-        setNewName("");
-        setPickedRoot(null);
-      }}
-      onConfirmCreate={() => void handleConfirmCreate()}
-      onCancelCreate={resetCreateState}
-      onPickLocalDir={() => void handlePickLocalDir()}
-      pickedRoot={pickedRoot}
-      onCreateKeyDown={handleCreateKeyDown}
-      onCreateFromSearch={() => {
-        setCreating(true);
-        setNewName(query.trim());
-        setPickedRoot(null);
-      }}
     />
   );
 
@@ -235,13 +166,24 @@ export function DraftWorkspacePicker() {
     return (
       <Popover open={open} onOpenChange={handleOpenChange}>
         <PopoverTrigger asChild>
-          <Button
-            variant="ghost"
-            aria-label="归入项目"
-            className="h-8 px-2 text-xs font-medium text-muted-foreground"
-          >
-            归入项目…
-          </Button>
+          {isBreadcrumb ? (
+            <button
+              type="button"
+              aria-label="归入项目"
+              className={breadcrumbTriggerClass}
+            >
+              <FolderOpen size={14} className="shrink-0" />
+              <span>归入项目…</span>
+            </button>
+          ) : (
+            <Button
+              variant="ghost"
+              aria-label="归入项目"
+              className="h-8 px-2 text-xs font-medium text-muted-foreground"
+            >
+              归入项目…
+            </Button>
+          )}
         </PopoverTrigger>
         <PopoverContent align="start" className="w-72 p-0">
           {panel}
@@ -258,33 +200,56 @@ export function DraftWorkspacePicker() {
 
   const chipLabel = selectedFolder ? selectedFolder.name : "云端";
   const chipTitle = selectedFolder
-    ? `归入：${selectedFolder.name}`
+    ? `归入：${selectedFolder.name}（本地存储）`
     : "仅云端存储";
+  const clearAriaLabel = selectedFolder ? "清除归入" : "改回本地默认";
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
-      <div className="flex max-w-[200px] items-center gap-0.5">
+      <div
+        className={
+          isBreadcrumb
+            ? "flex min-w-0 max-w-full items-center gap-0.5"
+            : "flex max-w-[200px] items-center gap-0.5"
+        }
+      >
         <PopoverTrigger asChild>
-          <Button
-            variant="ghost"
-            aria-label="更改对话归属"
-            title={chipTitle}
-            className="h-auto min-w-0 flex-1 justify-start gap-1.5 px-2 py-1 font-medium text-muted-foreground"
-          >
-            <span className="flex min-w-0 items-center gap-1.5">
+          {isBreadcrumb ? (
+            <button
+              type="button"
+              aria-label="更改对话归属"
+              title={chipTitle}
+              className={`${breadcrumbTriggerClass} min-w-0 flex-1`}
+            >
               {chipIcon}
               <span className="min-w-0 truncate">{chipLabel}</span>
               <ChevronDown
                 size={12}
                 className="shrink-0 text-muted-foreground"
               />
-            </span>
-          </Button>
+            </button>
+          ) : (
+            <Button
+              variant="ghost"
+              aria-label="更改对话归属"
+              title={chipTitle}
+              className="h-auto min-w-0 flex-1 justify-start gap-1.5 px-2 py-1 font-medium text-muted-foreground"
+            >
+              <span className="flex min-w-0 items-center gap-1.5">
+                {chipIcon}
+                <span className="min-w-0 truncate">{chipLabel}</span>
+                <ChevronDown
+                  size={12}
+                  className="shrink-0 text-muted-foreground"
+                />
+              </span>
+            </Button>
+          )}
         </PopoverTrigger>
         <IconButton
           size="md"
-          aria-label="清除归入"
-          title="清除归入"
+          aria-label={clearAriaLabel}
+          title={clearAriaLabel}
           onClick={clearSelection}
           className="shrink-0 text-muted-foreground"
         >
@@ -298,11 +263,24 @@ export function DraftWorkspacePicker() {
   );
 }
 
+function SectionLabel({
+  label,
+  action,
+}: {
+  label: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 px-2.5 pt-2 pb-1">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      {action}
+    </div>
+  );
+}
+
 function PickerPanel({
   query,
   onQueryChange,
-  noneSelected,
-  onPickNone,
   isSearching,
   pinnedFolders,
   recentFolders,
@@ -310,27 +288,14 @@ function PickerPanel({
   pinnedFolderIds,
   selectedFolderId,
   onPickFolder,
+  onClearFolder,
   onTogglePin,
   pendingCloud,
+  onPickLocal,
   onPickCloud,
-  onOpenLocalFolder,
-  busy,
-  error,
-  creating,
-  newName,
-  onNewNameChange,
-  onStartCreate,
-  onConfirmCreate,
-  onCancelCreate,
-  onPickLocalDir,
-  pickedRoot,
-  onCreateKeyDown,
-  onCreateFromSearch,
 }: {
   query: string;
   onQueryChange: (q: string) => void;
-  noneSelected: boolean;
-  onPickNone: () => void;
   isSearching: boolean;
   pinnedFolders: FolderMeta[];
   recentFolders: FolderMeta[];
@@ -338,33 +303,19 @@ function PickerPanel({
   pinnedFolderIds: string[];
   selectedFolderId: string | null;
   onPickFolder: (id: string) => void;
+  onClearFolder: () => void;
   onTogglePin: (id: string) => void;
   pendingCloud: boolean;
+  onPickLocal: () => void;
   onPickCloud: () => void;
-  onOpenLocalFolder: () => void;
-  busy: boolean;
-  error: string | null;
-  creating: boolean;
-  newName: string;
-  onNewNameChange: (n: string) => void;
-  onStartCreate: () => void;
-  onConfirmCreate: () => void;
-  onCancelCreate: () => void;
-  onPickLocalDir: () => void;
-  pickedRoot: { id: string; name: string } | null;
-  onCreateKeyDown: (e: React.KeyboardEvent) => void;
-  onCreateFromSearch: () => void;
 }) {
-  const createInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (creating) createInputRef.current?.focus();
-  }, [creating]);
-
   const idleHint = isDesktop
-    ? "不选则先聊；需要写文件时在本机自动建项目"
-    : "不选则先聊；需要时在云端建项目";
+    ? "默认本地存储，可随时归入项目"
+    : "默认云端存储，可随时归入项目";
 
   const noSearchHits = isSearching && searchResults.length === 0;
+  const noFoldersListed =
+    !isSearching && pinnedFolders.length === 0 && recentFolders.length === 0;
 
   const renderFolderRow = (f: FolderMeta) => (
     <PickerRow
@@ -386,15 +337,43 @@ function PickerPanel({
       </div>
 
       <div className="max-h-[360px] overflow-y-auto p-1.5">
-        <PickerRow
-          icon={<MessageSquarePlus size={14} />}
-          label="不归入项目"
-          hint="先聊到再说"
-          selected={noneSelected}
-          onClick={onPickNone}
+        {isDesktop && (
+          <>
+            <SectionLabel label="存储位置" />
+            <PickerRow
+              icon={<HardDrive size={14} />}
+              label="本地（默认）"
+              hint="需要写文件时在本机容器根下建对话空间"
+              selected={!pendingCloud}
+              onClick={onPickLocal}
+            />
+            <PickerRow
+              icon={<Cloud size={14} />}
+              label="仅云端（随手聊）"
+              hint="文件只存云端，不创建本地项目"
+              selected={pendingCloud}
+              onClick={onPickCloud}
+            />
+          </>
+        )}
+
+        <div className="my-1 border-t border-border" />
+        <SectionLabel
+          label="归入项目（可选）"
+          action={
+            selectedFolderId ? (
+              <button
+                type="button"
+                onClick={onClearFolder}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                清除
+              </button>
+            ) : null
+          }
         />
 
-        <div className="mx-2.5 mt-2 mb-1">
+        <div className="mx-2.5 mb-1">
           <SearchField
             value={query}
             onValueChange={onQueryChange}
@@ -404,75 +383,13 @@ function PickerPanel({
           />
         </div>
 
-        {creating ? (
-          <div className="px-2.5 py-1.5">
-            <div className="flex items-center gap-2">
-              <FolderPlus
-                size={14}
-                className="shrink-0 text-muted-foreground"
-              />
-              <input
-                ref={createInputRef}
-                value={newName}
-                onChange={(e) => onNewNameChange(e.target.value)}
-                onKeyDown={onCreateKeyDown}
-                placeholder="项目名称"
-                className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-            </div>
-            {isDesktop && (
-              <button
-                type="button"
-                onClick={onPickLocalDir}
-                className="mt-1.5 ml-5 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-              >
-                <FolderOpen size={12} />
-                {pickedRoot ? pickedRoot.name : "绑定本地文件夹（可选）"}
-              </button>
-            )}
-            <div className="mt-1.5 ml-5 flex gap-1.5">
-              <Button
-                variant="primary"
-                size="sm"
-                className="h-6 text-xs"
-                onClick={onConfirmCreate}
-                disabled={!newName.trim() || busy}
-              >
-                创建
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 text-xs"
-                onClick={onCancelCreate}
-              >
-                取消
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <PickerRow
-            icon={<FolderPlus size={14} />}
-            label="新建项目…"
-            onClick={onStartCreate}
-          />
-        )}
-
         {isSearching ? (
           <>
             {searchResults.map(renderFolderRow)}
             {noSearchHits && (
-              <div className="px-2.5 py-2">
-                <p className="text-xs text-muted-foreground">没有匹配的项目</p>
-                <Button
-                  variant="ghost"
-                  className="mt-1 h-auto w-full justify-start gap-2 px-0 py-1 text-xs text-primary"
-                  onClick={onCreateFromSearch}
-                >
-                  <FolderPlus size={14} />
-                  创建「{query.trim()}」项目
-                </Button>
-              </div>
+              <p className="px-2.5 py-2 text-xs text-muted-foreground">
+                没有匹配的项目
+              </p>
             )}
           </>
         ) : (
@@ -493,48 +410,12 @@ function PickerPanel({
                 {recentFolders.map(renderFolderRow)}
               </>
             )}
+            {noFoldersListed && (
+              <p className="px-2.5 py-2 text-xs text-muted-foreground">
+                还没有项目——可在命令面板「新建项目」
+              </p>
+            )}
           </>
-        )}
-
-        {isDesktop ? (
-          <>
-            <div className="my-1 border-t border-border" />
-            <PickerRow
-              icon={<HardDrive size={14} />}
-              label="默认本地"
-              hint="桌面端首发后在本机容器根下建对话空间"
-              onClick={onOpenLocalFolder}
-              disabled={busy}
-            />
-            <PickerRow
-              icon={<Cloud size={14} />}
-              label="仅云端（随手聊）"
-              hint="文件只存云端，不创建本地项目"
-              selected={pendingCloud}
-              onClick={onPickCloud}
-            />
-          </>
-        ) : (
-          <>
-            <div className="my-1 border-t border-border" />
-            <PickerRow
-              icon={<Cloud size={14} />}
-              label="仅云端（随手聊）"
-              hint="文件只存云端"
-              selected={pendingCloud}
-              onClick={onPickCloud}
-            />
-          </>
-        )}
-
-        {busy && (
-          <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground">
-            <Loader2 size={14} className="animate-spin" />
-            处理中…
-          </div>
-        )}
-        {error && (
-          <p className="px-2.5 py-1.5 text-xs text-destructive">{error}</p>
         )}
       </div>
     </>

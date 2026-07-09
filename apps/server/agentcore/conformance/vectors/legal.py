@@ -29,7 +29,7 @@ from ._common import _CONV, _COST, _USAGE
 
 
 def _multi_agent_legal_war_room() -> list[SSEEvent]:
-    """多 Agent：法律「答辩状作战室」端到端（hero · 法律垂直场景设计.md §6.3 M3 补盲 fixture）。
+    """多 Agent：法律「答辩状作战室」端到端（hero · 远期规划.md §4.5 法律垂直，M3 玻璃箱 fixture）。
     复用现有事件类型**组合**出法律 hero 的玻璃箱全流程——给它一个常驻离线预览场景 + CI 渲染冒烟门，
     **不新增事件类型 → fold 不碰**（守协议边界）。流程与 M2 实测形态一致：① CEO
     `consult_skill(legal_answer_brief)` 翻作战室打法；② `delegate` 起草律师出 `答辩状初稿.md`
@@ -817,7 +817,7 @@ def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
 
 
 def _multi_agent_legal_case_analysis() -> list[SSEEvent]:
-    """多 Agent：法律「三方视角案情研判」端到端【收场】(法律垂直场景设计.md §6bis 第二支 skill)。
+    """多 Agent：法律「三方视角案情研判」端到端【收场】(远期规划.md §4.5 法律垂直，第二支 skill)。
     与作战室同纪律——复用现有事件类型**组合**出三方研判玻璃箱全流程，**不新增事件类型 → fold
     不碰**。流程按 skill 编排（接案评估场景，载体=买卖合同货款纠纷）：① CEO
     `consult_skill(legal_case_analysis)` 翻三方研判打法；② `debate(form="debate")` 让**原告 / 被告

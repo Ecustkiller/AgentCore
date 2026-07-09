@@ -95,16 +95,10 @@ export function computeTopologicalRunWaves(
 
   const workerIds = new Set(workerRuns.map((r) => r.id));
   const runById = new Map(workerRuns.map((r) => [r.id, r]));
+  const foldInfo = computeGraphFold(runs, captainId);
 
-  const unitOf = (runId: string): string => {
-    const r = runById.get(runId);
-    if (!r) return runId;
-    if (isSubRun(r, workerIds)) return r.parentRunId as string;
-    if (isRevisionRun(r) && r.revisionOf && workerIds.has(r.revisionOf)) {
-      return unitOf(r.revisionOf);
-    }
-    return runId;
-  };
+  const unitOf = (runId: string): string =>
+    foldInfo.unitOf.get(runId) ?? runId;
 
   const unitMembers = new Map<string, Set<string>>();
   for (const r of workerRuns) {
@@ -240,7 +234,160 @@ export interface GraphRunLike {
   revision?: number;
   revisionOf?: string | null;
   stance?: string | null;
+  group?: string | null;
   kind?: string;
+}
+
+const DEBATE_GROUP_PREFIX = "debate:";
+
+/** Display-only signal that a run is a debate participant (辩手 / 续轮 revision). */
+export function isDebateParticipantRun(r: GraphRunLike): boolean {
+  return (
+    r.stance != null || (r.group?.startsWith(DEBATE_GROUP_PREFIX) ?? false)
+  );
+}
+
+function revisionRootId(
+  runId: string,
+  runById: Map<string, GraphRunLike>,
+  workerIds: Set<string>,
+): string {
+  let cur = runId;
+  const seen = new Set<string>();
+  while (!seen.has(cur)) {
+    seen.add(cur);
+    const r = runById.get(cur);
+    if (!r?.revisionOf || !workerIds.has(r.revisionOf)) break;
+    cur = r.revisionOf;
+  }
+  return cur;
+}
+
+/** Moderator run id inferred from debate participant parent chain. */
+export function debateModeratorId(
+  runs: GraphRunLike[],
+  captainId: string | null,
+): string | null {
+  const workers = runs.filter((r) => r.id !== captainId);
+  const workerIds = new Set(workers.map((r) => r.id));
+  const runById = new Map(workers.map((r) => [r.id, r]));
+  for (const r of workers) {
+    if (!isDebateParticipantRun(r)) continue;
+    const root = revisionRootId(r.id, runById, workerIds);
+    const rootRun = runById.get(root);
+    const parentId = rootRun?.parentRunId;
+    if (parentId && workerIds.has(parentId)) return parentId;
+  }
+  return null;
+}
+
+function belongsToDebateUnit(
+  r: GraphRunLike,
+  moderatorId: string,
+  runById: Map<string, GraphRunLike>,
+  workerIds: Set<string>,
+): boolean {
+  if (r.id === moderatorId) return false;
+  if (isDebateParticipantRun(r)) return true;
+  if ((r.revision ?? 0) > 0 && r.revisionOf && workerIds.has(r.revisionOf)) {
+    const root = runById.get(revisionRootId(r.id, runById, workerIds));
+    return root != null && isDebateParticipantRun(root);
+  }
+  return false;
+}
+
+/** Run-level fold: which runs collapse under a parent unit on the collaboration graph. */
+export interface GraphFoldInfo {
+  /** Run ids hidden from the top-level graph (children of a layout unit). */
+  folded: Set<string>;
+  /** Every worker run id → its visible layout-unit root id. */
+  unitOf: Map<string, string>;
+  /** Unit roots that render as a debate compound card (not a plain agent node). */
+  debateUnits: Set<string>;
+  /** Layout unit id → all folded descendant run ids (for drill-in / subTeams). */
+  descendants: Map<string, string[]>;
+}
+
+export function computeGraphFold(
+  runs: GraphRunLike[],
+  captainId: string | null,
+): GraphFoldInfo {
+  const workers = runs.filter((r) => r.id !== captainId);
+  const workerIds = new Set(workers.map((r) => r.id));
+  const runById = new Map(workers.map((r) => [r.id, r]));
+  const modId = debateModeratorId(runs, captainId);
+  const debateUnits = modId ? new Set([modId]) : new Set<string>();
+  const unitOf = new Map<string, string>();
+
+  const resolveUnit = (runId: string): string => {
+    const cached = unitOf.get(runId);
+    if (cached) return cached;
+
+    const r = runById.get(runId);
+    if (!r) {
+      unitOf.set(runId, runId);
+      return runId;
+    }
+
+    if (modId && belongsToDebateUnit(r, modId, runById, workerIds)) {
+      unitOf.set(runId, modId);
+      return modId;
+    }
+
+    if ((r.revision ?? 0) > 0 && r.revisionOf && workerIds.has(r.revisionOf)) {
+      if (modId && belongsToDebateUnit(r, modId, runById, workerIds)) {
+        unitOf.set(runId, modId);
+        return modId;
+      }
+      // Non-debate revisions stay individually visible (revision chain on the graph).
+      unitOf.set(runId, runId);
+      return runId;
+    }
+
+    if (
+      !((r.revision ?? 0) > 0) &&
+      r.parentRunId &&
+      r.parentRunId !== r.id &&
+      workerIds.has(r.parentRunId)
+    ) {
+      const u = resolveUnit(r.parentRunId);
+      unitOf.set(runId, u);
+      return u;
+    }
+
+    unitOf.set(runId, runId);
+    return runId;
+  };
+
+  for (const r of workers) resolveUnit(r.id);
+
+  const folded = new Set<string>();
+  for (const r of workers) {
+    if (unitOf.get(r.id) !== r.id) folded.add(r.id);
+  }
+
+  const descendants = new Map<string, string[]>();
+  for (const r of workers) {
+    const unit = unitOf.get(r.id)!;
+    if (unit === r.id) continue;
+    const arr = descendants.get(unit) ?? [];
+    arr.push(r.id);
+    descendants.set(unit, arr);
+  }
+
+  return { folded, unitOf, debateUnits, descendants };
+}
+
+/** Lift an edge endpoint to its layout unit (dedupe after lifting). */
+function liftEdgeEndpoints(
+  source: string,
+  target: string,
+  unitOf: Map<string, string>,
+): { source: string; target: string } | null {
+  const src = unitOf.get(source) ?? source;
+  const tgt = unitOf.get(target) ?? target;
+  if (src === tgt) return null;
+  return { source: src, target: tgt };
 }
 
 export interface SubTeam {
@@ -253,18 +400,33 @@ export interface SubTeam {
 export function buildGraphStructure(
   runs: GraphRunLike[],
   inputId: string,
-): { nodeIds: string[]; rawEdges: GraphEdge[]; subTeams: SubTeam[] } {
+  expandedUnits: ReadonlySet<string> = new Set(),
+): {
+  nodeIds: string[];
+  rawEdges: GraphEdge[];
+  subTeams: SubTeam[];
+  foldInfo: GraphFoldInfo;
+} {
   const captainId = runs.find((r) => r.kind === "captain")?.id ?? null;
   const workerRuns = runs.filter((r) => r.id !== captainId);
   const workerIds = new Set(workerRuns.map((r) => r.id));
+  const foldInfo = computeGraphFold(runs, captainId);
+  const { folded, unitOf, descendants } = foldInfo;
   const isRevision = (r: GraphRunLike): boolean => (r.revision ?? 0) > 0;
   const isSub = (r: GraphRunLike): boolean =>
     !isRevision(r) &&
     !!r.parentRunId &&
     r.parentRunId !== r.id &&
     workerIds.has(r.parentRunId);
-  const topWorkers = workerRuns.filter((r) => !isSub(r) && !isRevision(r));
-  const nodeIds = workerRuns.map((s) => s.id);
+
+  const isLayoutVisible = (runId: string): boolean => {
+    if (!folded.has(runId)) return true;
+    const unit = unitOf.get(runId)!;
+    return expandedUnits.has(unit);
+  };
+
+  const layoutWorkers = workerRuns.filter((r) => isLayoutVisible(r.id));
+  const nodeIds = layoutWorkers.map((s) => s.id);
   const debate = workerRuns.some((r) => r.stance != null);
   if (debate) {
     const rank = (id: string) => {
@@ -273,29 +435,67 @@ export function buildGraphStructure(
     };
     nodeIds.sort((a, b) => rank(a) - rank(b));
   }
-  const rawEdges: GraphEdge[] = workerRuns.flatMap((run) =>
-    run.dependsOn.map((depId) => ({
-      id: `${depId}->${run.id}`,
-      source: depId,
-      target: run.id,
-      kind: "dep" as const,
-    })),
-  );
-  const subTeamMap = new Map<string, string[]>();
-  for (const r of workerRuns) {
-    if (isSub(r)) {
-      const parentId = r.parentRunId as string;
-      const arr = subTeamMap.get(parentId) ?? [];
-      arr.push(r.id);
-      subTeamMap.set(parentId, arr);
-      rawEdges.push({
-        id: `${parentId}=>${r.id}`,
-        source: parentId,
-        target: r.id,
-        kind: "delegate",
-      });
+
+  const edgeKey = (e: Pick<GraphEdge, "source" | "target" | "kind">) =>
+    `${e.kind ?? "dep"}:${e.source}->${e.target}`;
+  const edgeSet = new Map<string, GraphEdge>();
+
+  const addEdge = (e: GraphEdge, lift = false) => {
+    const src = lift ? (unitOf.get(e.source) ?? e.source) : e.source;
+    const tgt = lift ? (unitOf.get(e.target) ?? e.target) : e.target;
+    if (src === tgt) return;
+    if (!isLayoutVisible(src) && folded.has(src)) return;
+    if (!isLayoutVisible(tgt) && folded.has(tgt)) return;
+    const lifted = lift ? liftEdgeEndpoints(e.source, e.target, unitOf) : null;
+    const finalSrc = lifted?.source ?? src;
+    const finalTgt = lifted?.target ?? tgt;
+    if (finalSrc === finalTgt) return;
+    const key = edgeKey({ ...e, source: finalSrc, target: finalTgt });
+    if (edgeSet.has(key)) return;
+    edgeSet.set(key, { ...e, id: e.id, source: finalSrc, target: finalTgt });
+  };
+
+  for (const run of workerRuns) {
+    for (const depId of run.dependsOn) {
+      const collapsed = folded.has(run.id) && !expandedUnits.has(unitOf.get(run.id)!);
+      addEdge(
+        {
+          id: `${depId}->${run.id}`,
+          source: depId,
+          target: run.id,
+          kind: "dep",
+        },
+        collapsed,
+      );
     }
   }
+
+  const subTeamMap = new Map<string, string[]>();
+  for (const r of layoutWorkers) {
+    if (!isSub(r)) continue;
+    const parentId = r.parentRunId as string;
+    if (!isLayoutVisible(parentId)) continue;
+    const arr = subTeamMap.get(parentId) ?? [];
+    arr.push(r.id);
+    subTeamMap.set(parentId, arr);
+    addEdge({
+      id: `${parentId}=>${r.id}`,
+      source: parentId,
+      target: r.id,
+      kind: "delegate",
+    });
+  }
+
+  // Debate drill-in: when the moderator unit is expanded, one flat sub-team holds all
+  // debate descendants (辩手 + 续轮 revisions) so ELK lays the full 参与者×轮次 grid.
+  const modId = debateModeratorId(runs, captainId);
+  if (modId && expandedUnits.has(modId)) {
+    const members = (descendants.get(modId) ?? []).filter((id) => id !== modId);
+    if (members.length > 0) {
+      subTeamMap.set(modId, members);
+    }
+  }
+
   const subTeams: SubTeam[] = [...subTeamMap.entries()].map(
     ([parentId, memberIds]) => ({
       parentId,
@@ -303,17 +503,9 @@ export function buildGraphStructure(
       groupId: `__group__${parentId}`,
     }),
   );
-  // A revised worker's versions all point at the SAME original (revisionOf ==
-  // 原始 run) — a star, the data model the debate room / 版本对比 card read (乙 热修
-  // P4). But the graph must lay them out as a version CHAIN (原始 → v2 → v3 …): if
-  // we drew one edge per revision straight off the original, ELK would place every
-  // revision in the original's single successor slot AND alignRevisionChains would
-  // snap them all onto its one lane — v2…vN stack at identical coordinates, so only
-  // the latest stays visible (a 5-轮辩论 collapsed to「原始 + 修订 vN」= 2 版本). Group
-  // each original's revisions, order by version, and link consecutive ones so each
-  // gets its own layer/lane. Display-only: revisionOf is untouched.
+
   const revisionsByOriginal = new Map<string, GraphRunLike[]>();
-  for (const r of workerRuns) {
+  for (const r of layoutWorkers) {
     if (isRevision(r) && r.revisionOf && workerIds.has(r.revisionOf)) {
       const list = revisionsByOriginal.get(r.revisionOf) ?? [];
       list.push(r);
@@ -326,7 +518,7 @@ export function buildGraphStructure(
       .sort((a, b) => (a.revision ?? 0) - (b.revision ?? 0));
     let prev = originalId;
     for (const rev of ordered) {
-      rawEdges.push({
+      addEdge({
         id: `${prev}~>${rev.id}`,
         source: prev,
         target: rev.id,
@@ -335,29 +527,43 @@ export function buildGraphStructure(
       prev = rev.id;
     }
   }
+
+  const topWorkers = workerRuns.filter(
+    (r) => unitOf.get(r.id) === r.id && !folded.has(r.id),
+  );
   if (topWorkers.length > 0 && captainId) {
     const dependedOn = new Set<string>();
-    for (const r of topWorkers)
-      for (const dep of r.dependsOn) dependedOn.add(dep);
+    for (const r of topWorkers) {
+      const unit = unitOf.get(r.id)!;
+      for (const dep of r.dependsOn) dependedOn.add(unitOf.get(dep) ?? dep);
+      dependedOn.add(unit);
+    }
     nodeIds.push(inputId, captainId);
     for (const r of topWorkers) {
+      const unit = unitOf.get(r.id)!;
       if (r.dependsOn.length === 0) {
-        rawEdges.push({
-          id: `${inputId}->${r.id}`,
+        addEdge({
+          id: `${inputId}->${unit}`,
           source: inputId,
-          target: r.id,
+          target: unit,
           kind: "dep",
         });
       }
-      if (!dependedOn.has(r.id)) {
-        rawEdges.push({
-          id: `${r.id}->${captainId}`,
-          source: r.id,
+      if (!dependedOn.has(unit)) {
+        addEdge({
+          id: `${unit}->${captainId}`,
+          source: unit,
           target: captainId,
           kind: "dep",
         });
       }
     }
   }
-  return { nodeIds, rawEdges, subTeams };
+
+  return {
+    nodeIds,
+    rawEdges: [...edgeSet.values()],
+    subTeams,
+    foldInfo,
+  };
 }

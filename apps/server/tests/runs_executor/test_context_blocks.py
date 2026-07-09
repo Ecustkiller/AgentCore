@@ -1,7 +1,8 @@
 from dataclasses import replace
 
 from agentcore.runtime.runs.builder import build_run_plan
-from agentcore.runtime.runs.executor import (
+from agentcore.runtime.runs.executor import build_agent_executor
+from agentcore.runtime.runs.executor_context import (
     _CONTEXT_BLOCK_BODY_CAP,
     _build_captain_context_blocks,
     _build_context_blocks,

@@ -37,26 +37,6 @@ const CONFIDENCE_LABEL: Record<string, string> = {
   low: "低",
 };
 
-/** model id（`provider/model` 或无前缀）→ 友好厂商名（真·多模型辩论的「谁是哪个模型」展示）。
- *  手机端自带一份（cross-platform：各端全新建、不共享业务逻辑）。空 → null（不显模型标）。 */
-function modelVendorLabel(model: string | undefined): string | null {
-  const m = (model ?? "").trim();
-  if (!m) return null;
-  const byPrefix: Record<string, string> = {
-    doubao: "豆包",
-    kimi: "Kimi",
-    zhipu: "智谱",
-    deepseek: "DeepSeek",
-  };
-  const prefix = m.includes("/") ? m.slice(0, m.indexOf("/")) : "";
-  if (prefix) return byPrefix[prefix] ?? prefix;
-  if (/^deepseek/i.test(m)) return "DeepSeek";
-  if (/^doubao/i.test(m)) return "豆包";
-  if (/^glm/i.test(m)) return "智谱";
-  if (/^kimi/i.test(m)) return "Kimi";
-  return m;
-}
-
 export function DebateView({ debate }: { debate: DebateResultPayload }) {
   const brief = <Brief debate={debate} />;
   const narrative = <Narrative debate={debate} />;
@@ -97,20 +77,16 @@ function Brief({ debate }: { debate: DebateResultPayload }) {
       </div>
       <Field label="关键争点">{b.crux}</Field>
       <div className="debate-points">
-        {debate.sides.map((s) => {
-          const vendor = modelVendorLabel(s.model);
-          return (
-            <div key={s.key} className="debate-point">
-              <span className="debate-point-head">
-                <span className="debate-point-name">{s.name}</span>
-                {vendor && <span className="debate-point-model">{vendor}</span>}
-              </span>
-              <span className="debate-point-text">
-                {b.strongest_points[s.key] ?? "—"}
-              </span>
-            </div>
-          );
-        })}
+        {debate.sides.map((s) => (
+          <div key={s.key} className="debate-point">
+            <span className="debate-point-head">
+              <span className="debate-point-name">{s.name}</span>
+            </span>
+            <span className="debate-point-text">
+              {b.strongest_points[s.key] ?? "—"}
+            </span>
+          </div>
+        ))}
       </div>
       {b.factual_disputes.length > 0 && (
         <ListField label="事实分歧" items={b.factual_disputes} />
