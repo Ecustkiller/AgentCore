@@ -29,11 +29,23 @@ import { execFileSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
+  readlinkSync,
   readdirSync,
+  realpathSync,
   rmSync,
+  symlinkSync,
+  unlinkSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import {
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** 内置 CPython 版本（对齐 dev server `.venv`；改这里即整体换版）。 */
@@ -52,6 +64,103 @@ function bundledPythonExe() {
   return isWin
     ? join(pythonDir, "python.exe")
     : join(pythonDir, "bin", "python3");
+}
+
+/**
+ * unix：修复 `python/bin/` 里指向包外绝对路径的 symlink。
+ *
+ * `cpSync(..., { dereference: true })` 在部分 Node/平台组合下仍会保留指向 uv 缓存
+ * （如 `/Users/runner/.local/share/uv/python/...`）的绝对 link。用户机上该路径不存在，
+ * 主进程 spawn `python3` 必挂。策略：凡 link 目标落在 `pythonDir` 之外，改为指向同目录
+ * 真实 `pythonX.Y`（优先与 PYTHON_VERSION 对齐）的相对 symlink。
+ */
+function fixUnixPythonBinLinks() {
+  if (isWin) return;
+  const binDir = join(pythonDir, "bin");
+  if (!existsSync(binDir)) return;
+
+  const versionedName = `python${PYTHON_VERSION}`;
+  const versionedPath = join(binDir, versionedName);
+  if (!existsSync(versionedPath)) {
+    throw new Error(
+      `unix 内置发行版缺少真实解释器 ${versionedPath}，无法修复 bin/ symlink`,
+    );
+  }
+
+  const pythonDirReal = realpathSync(pythonDir);
+  for (const name of readdirSync(binDir)) {
+    const linkPath = join(binDir, name);
+    let st;
+    try {
+      st = lstatSync(linkPath);
+    } catch {
+      continue;
+    }
+    if (!st.isSymbolicLink()) continue;
+
+    let target;
+    try {
+      target = readlinkSync(linkPath);
+    } catch {
+      continue;
+    }
+    const resolved = isAbsolute(target)
+      ? resolve(target)
+      : resolve(binDir, target);
+
+    // 目标已在包内 → 保留（可再规范成相对 link，但非必须）
+    let inside = false;
+    try {
+      inside = isPathInside(pythonDirReal, realpathSync(resolved));
+    } catch {
+      // 断链或目标不存在 → 视为包外，强制重写
+      inside = false;
+    }
+    if (inside) continue;
+
+    console.log(
+      `修复包外 symlink: ${name} -> ${target}  =>  相对 ${versionedName}`,
+    );
+    unlinkSync(linkPath);
+    symlinkSync(versionedName, linkPath);
+  }
+}
+
+/** `candidate` 是否严格落在 `root` 目录树之下（不含 root 自身）。 */
+function isPathInside(root, candidate) {
+  const rel = relative(root, candidate);
+  return (
+    rel !== "" &&
+    rel !== ".." &&
+    !rel.startsWith(`..${sep}`) &&
+    !isAbsolute(rel)
+  );
+}
+
+/**
+ * 硬门禁：`bundledExe` 经 realpath 后必须落在 `pythonDir` 树内。
+ * 否则说明仍残留指向 CI/构建机绝对路径的 symlink，构建必须失败。
+ */
+function assertBundledPythonInsideTree(bundledExe) {
+  const pythonDirReal = realpathSync(pythonDir);
+  let exeReal;
+  try {
+    exeReal = realpathSync(bundledExe);
+  } catch (err) {
+    throw new Error(
+      `内置解释器无法解析（疑似断链 symlink）: ${bundledExe}\n` +
+        `  ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!isPathInside(pythonDirReal, exeReal)) {
+    throw new Error(
+      `内置解释器 realpath 落在 pythonDir 之外（禁止打进安装包）:\n` +
+        `  exe:      ${bundledExe}\n` +
+        `  realpath: ${exeReal}\n` +
+        `  pythonDir:${pythonDirReal}\n` +
+        `  （常见原因：bin/python3 仍是指向 /Users/runner/... 的绝对 symlink）`,
+    );
+  }
 }
 
 function run(cmd, args, opts = {}) {
@@ -86,9 +195,12 @@ function main() {
   const distRoot = isWin ? dirname(exe) : dirname(dirname(exe));
 
   // 4. 拷贝整份发行版（含 stdlib / DLL；python-build-standalone 设计上可重定位）。
-  //    dereference：解开 unix 下的 python3 → python3.x 等符号链接，拷成真实文件。
+  //    dereference：尽量解开 unix 下的 python3 → python3.x 等符号链接。
+  //    实测 Mac CI 上仍可能留下指向 uv 缓存绝对路径的 symlink（如
+  //    /Users/runner/.local/share/uv/python/...）——用户机上必断，故拷贝后强制修复并门禁。
   console.log(`拷贝 Python 运行时:\n  ${distRoot}\n  -> ${pythonDir}`);
   cpSync(distRoot, pythonDir, { recursive: true, dereference: true });
+  fixUnixPythonBinLinks();
 
   const bundledExe = bundledPythonExe();
   if (!existsSync(bundledExe)) {
@@ -97,6 +209,7 @@ function main() {
         `（发行版布局与预期不符，请核对 uv python find 的输出: ${exe}）`,
     );
   }
+  assertBundledPythonInsideTree(bundledExe);
 
   // 5. 装**运行时子集**（而非整个 server）到旁路 site-packages（--target）。分两条命令：
   //    a) 先装 sidecar 依赖组（含其传递依赖）；b) 再 --no-deps 装 agentcore 包本体。

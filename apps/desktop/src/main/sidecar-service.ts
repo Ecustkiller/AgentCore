@@ -129,8 +129,10 @@ interface SpawnConfig {
  * 覆写**始终最高优先**（即便已打包），便于对一个打包后的应用临时指向自定义解释器联调。
  * 服务端目录默认取 `AGENTCORE_SERVER_DIR`，否则按 app 路径推 `../server`（dev 下 appPath =
  * apps/desktop）。
+ *
+ * @internal 导出供单测；生产路径经 SidecarManager → spawnFn。
  */
-function resolveSpawnConfig(): SpawnConfig {
+export function resolveSpawnConfig(): SpawnConfig {
   const serverDir =
     process.env.AGENTCORE_SERVER_DIR ?? join(app.getAppPath(), "..", "server");
 
@@ -145,10 +147,16 @@ function resolveSpawnConfig(): SpawnConfig {
   // 打包态：内置 Python 运行时（方案 B）。
   if (app.isPackaged) {
     const base = join(process.resourcesPath, "sidecar");
+    // unix：优先版本化二进制（与 bundle-sidecar.mjs 的 PYTHON_VERSION=3.13 对齐），
+    // 避免依赖可能仍是坏绝对 symlink 的 python3（历史包曾指向 CI 的 uv 缓存路径）。
     const python =
       process.platform === "win32"
         ? join(base, "python", "python.exe")
-        : join(base, "python", "bin", "python3");
+        : (() => {
+            const versioned = join(base, "python", "bin", "python3.13");
+            if (existsSync(versioned)) return versioned;
+            return join(base, "python", "bin", "python3");
+          })();
     return {
       cmd: python,
       args: ["-m", "agentcore.sidecar"],
