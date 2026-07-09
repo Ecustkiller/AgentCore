@@ -35,15 +35,10 @@ export async function openFileSourceShell(
   path = ".",
 ): Promise<void> {
   try {
-    if (source.openShellAtPath) {
-      await source.openShellAtPath(path);
-      return;
+    if (!source.openShellAtPath) {
+      throw new Error("此工作区不支持在终端打开");
     }
-    if (path === "." && source.openWorkspaceShell) {
-      await source.openWorkspaceShell();
-      return;
-    }
-    throw new Error("此工作区不支持在终端打开");
+    await source.openShellAtPath(path);
   } catch (e) {
     notifyActionError("无法打开终端", e);
   }
@@ -67,7 +62,7 @@ export async function openCurrentConversationTerminal(): Promise<void> {
     return;
   }
   const source = await resolveConversationFileSource(id);
-  if (!source?.openShellAtPath && !source?.openWorkspaceShell) {
+  if (!source?.openShellAtPath) {
     notifyError("当前对话未绑定本地工作区");
     return;
   }

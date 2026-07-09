@@ -16,7 +16,6 @@ export function hasLocalClientTools(source: FileSource | null): boolean {
   return (
     !!source &&
     (!!source.revealInOsFileManager ||
-      !!source.openWorkspaceShell ||
       !!source.openShellAtPath)
   );
 }

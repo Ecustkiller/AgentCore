@@ -262,9 +262,7 @@ def spec_from_json(data: dict[str, Any]) -> RunSpec:
     """Rebuild a RunSpec (with nested RunPolicy / Deliverable) from its JSON dict."""
     data = dict(data or {})
     policy_raw = dict(data.pop("policy", None) or {})
-    policy_raw.pop("contract", None)  # retired persisted shape
     policy = RunPolicy(**_filtered(RunPolicy, policy_raw))
-    data.pop("expected_output", None)  # retired top-level persisted shape
     deliverable_raw = data.pop("deliverable", None)
     deliverable: Deliverable | None = None
     if isinstance(deliverable_raw, dict):

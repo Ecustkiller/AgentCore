@@ -283,17 +283,15 @@ def test_spec_without_deliverable_round_trips_to_none():
     assert restored.deliverable is None
 
 
-def test_spec_legacy_persisted_shapes_are_ignored():
-    # Legacy persisted shapes (expected_output / policy.contract) are dropped on load.
+def test_spec_unknown_persisted_keys_are_ignored():
     raw = {
         "run_id": "r1",
         "task": "t",
-        "expected_output": "报告.md",
-        "policy": {
-            "contract": {"min_length": 50, "must_contain": ["结论"]},
-        },
+        "policy": {},
+        "obsolete_field": "ignored",
     }
     restored = spec_from_json(raw)
+    assert restored.run_id == "r1"
     assert restored.deliverable is None
 
 
