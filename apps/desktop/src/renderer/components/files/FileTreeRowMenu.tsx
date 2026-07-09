@@ -48,7 +48,7 @@ export function FileTreeRowMenu({
   // 系统集成项只在源实现了对应方法时出现（本地源有、云端源无）——靠「方法是否存在」门控，
   // 组件内不按源 if 分支。「用默认程序打开」仅给文件（对目录而言就是再次定位，与 reveal 重复）。
   const canReveal = !!source.revealInOsFileManager;
-  const canOpenShell = !!source.openShellAtPath || !!source.openWorkspaceShell;
+  const canOpenShell = !!source.openShellAtPath;
   const canOpenExternal = !node.isDir && !!source.openWithOsDefaultApp;
   const canCopyPath = !!source.copyOsPath;
   const hasOsGroup = canReveal || canOpenShell || canOpenExternal || canCopyPath;
