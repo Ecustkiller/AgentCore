@@ -58,11 +58,18 @@ export function EscalationSection({
  * working under its assumption, so this is read-only — the CEO resolves it at synthesis.
  * A「阻断性」flag marks one where a wrong guess would void the product. */
 function RaisedEscalationRow({ esc }: { esc: RunEscalation }) {
+  const kindLabel =
+    esc.kind === "scope" ? "职责偏离" : esc.kind === "dep" ? "缺输入" : null;
   return (
     <div className="rounded-lg border border-border bg-muted/40 px-2.5 py-2 text-xs">
       <div className="flex items-center gap-1.5 font-medium text-muted-foreground">
         <ArrowUp size={12} className="shrink-0" />
         <span>向上求决策</span>
+        {kindLabel && (
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-muted-foreground">
+            {kindLabel}
+          </span>
+        )}
         {esc.blocking && (
           <span className="rounded-full bg-destructive/15 px-1.5 py-0.5 text-destructive">
             阻断性

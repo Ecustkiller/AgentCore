@@ -24,6 +24,8 @@ from agentcore.runtime.events import (
     run_completed,
     run_plan,
     run_started,
+    team_preview_required,
+    team_preview_resolved,
     tool_use_end,
     tool_use_start,
 )
@@ -202,12 +204,110 @@ def _single_agent_non_blocking_ask() -> list[SSEEvent]:
     ]
 
 
+def _team_preview_finalized() -> list[SSEEvent]:
+    """团队预审薄预览【收口即终止】：多 Agent 首委派在 run_plan 后、首波前挂起，以
+    ``message_end(finish_reason=paused)`` 收口。``pendingInteraction`` = team_preview，
+    时间线落 ``team_preview`` 标记；与 plan_review 波间闸门分离。"""
+    agents = [
+        {
+            "id": "w1",
+            "role": "调研",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "撰写",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研方案", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "写初稿", "depends_on": ["r1"]},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排团队。"),
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {"tasks": [{"role": "调研"}, {"role": "撰写"}], "coordinate": False},
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="构建 X",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        team_preview_required(
+            checkpoint_id="tp1",
+            conversation_id=_CONV,
+            workers=[
+                {
+                    "run_id": "r1",
+                    "role": "调研",
+                    "task": "调研方案",
+                    "depends_on": [],
+                    "debate": False,
+                },
+                {
+                    "run_id": "r2",
+                    "role": "撰写",
+                    "task": "写初稿",
+                    "depends_on": ["r1"],
+                    "debate": False,
+                },
+            ],
+        ),
+        message_end(FinishReason.PAUSED, input_tokens=1200, output_tokens=80, cost=_COST),
+    ]
+
+
+def _team_preview_resolved_continue() -> list[SSEEvent]:
+    """团队预审放行后首波开跑到 end_turn。"""
+    return [
+        *_team_preview_finalized()[:-1],
+        team_preview_resolved(checkpoint_id="tp1", decision="continue"),
+        run_started("r1", "w1"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="调研完成",
+            duration_ms=900,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started("r2", "w2"),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="初稿完成",
+            duration_ms=1100,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        tool_use_end("dc1", "delegate", success=True, output="团队完成"),
+        content_delta("团队已交付。"),
+        message_end(FinishReason.END_TURN, input_tokens=3000, output_tokens=400, cost=_COST),
+    ]
+
+
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "approval_paused": ("审批：approval_required 暂停（无 message_end）", _approval_paused),
     "approval_resolved_continue": ("审批：通过后继续到 end_turn", _approval_resolved_continue),
     "plan_review_paused": ("结构化挂起：plan_review_required 暂停", _plan_review_paused),
     "plan_review_resolved_continue": ("结构化挂起：放行后跑完下游", _plan_review_resolved_continue),
     "plan_review_finalized": ("结构化挂起：计划复核收口即终止（②，plan_review_required→message_end(paused)，单一冷路 resume）", _plan_review_finalized),
+    "team_preview_finalized": ("团队预审：首波前挂起收口（finish_reason=paused）", _team_preview_finalized),
+    "team_preview_resolved_continue": ("团队预审：开做后跑完首波", _team_preview_resolved_continue),
     "single_agent_checkpoint": ("单聊：检查点 ask_user(blocking) 在时间线原位落 checkpoint 标记 + 暂停", _single_agent_checkpoint),
     "single_agent_checkpoint_finalized": ("单聊：检查点收口即终止（②，checkpoint_required→message_end(paused)，单一冷路 resume）", _single_agent_checkpoint_finalized),
     "single_agent_checkpoint_resolved": ("单聊：检查点 ask_user(blocking) 经 resume 续跑（checkpoint_resolved 清挂起→跑到 end_turn）", _single_agent_checkpoint_resolved),

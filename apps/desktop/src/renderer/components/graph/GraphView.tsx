@@ -5,10 +5,7 @@ import {
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { useTurnAudit } from "@/hooks/useTurnAudit";
 import { buildInjectGraphOverlay } from "@/lib/causalInject";
-import {
-  isTimelineLayout,
-  resolveEffectiveGraphLayout,
-} from "@/lib/graph-layout-utils";
+import { resolveEffectiveGraphLayout } from "@/lib/graph-layout-utils";
 import { groupAuditCountsByRun } from "@/services/audit";
 import { useConversationStore } from "@/stores/conversation";
 import {
@@ -17,39 +14,30 @@ import {
   useExecutionScope,
   useProjectedExecution,
 } from "@/stores/execution";
-import { type GraphEdge, useGraphStore } from "@/stores/graph";
+import { useGraphStore } from "@/stores/graph";
 import type { EndpointKind } from "@/stores/sidePanel";
 import { useUsageStore } from "@/stores/usage";
-import { Background, type Node, ReactFlow } from "@xyflow/react";
-import { createContext, useCallback, useMemo, useRef, useState } from "react";
+import { Background, ReactFlow, type Node } from "@xyflow/react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { CanvasPlaybackControls } from "./CanvasPlaybackControls";
 import { CanvasZoomControls } from "./CanvasZoomControls";
 import { GraphContextMenu } from "./GraphContextMenu";
 import { GraphToolbar } from "./GraphToolbar";
-import { TimeBatchMarkers } from "./TimeBatchMarkers";
 import { WaveLanes } from "./WaveLanes";
 import { edgeTypes, nodeTypes } from "./constants";
+import {
+  GraphHoverContext,
+  computeKeepBrightIds,
+  hoverRelatedIds,
+} from "./graphHover";
 import { type WaveBand, computeWaves, deriveCaptainStatus } from "./helpers";
 import { projectFlowEdges, projectFlowNodes } from "./projectFlowGraph";
 import { useGraphDrillIn } from "./useGraphDrillIn";
 import { useGraphLayout } from "./useGraphLayout";
 import { type GraphFitMode, useGraphViewport } from "./useGraphViewport";
 
-export const GraphHoverContext = createContext<string | null>(null);
-
-/** Direct neighbors of a hovered node (for edge/node highlight). */
-function hoverRelatedIds(
-  hoveredNodeId: string | null,
-  edges: GraphEdge[],
-): Set<string> | null {
-  if (!hoveredNodeId) return null;
-  const related = new Set([hoveredNodeId]);
-  for (const e of edges) {
-    if (e.source === hoveredNodeId) related.add(e.target);
-    if (e.target === hoveredNodeId) related.add(e.source);
-  }
-  return related;
-}
+export type { GraphHoverState } from "./graphHover";
+export { GraphHoverContext };
 
 interface GraphViewProps {
   interactive?: boolean;
@@ -92,11 +80,7 @@ export function GraphView({
   const layoutKind = useGraphStore((s) => s.layoutKind);
   const setLayoutKind = useGraphStore((s) => s.setLayoutKind);
   const parallelAvailable = !!execution && hasParallelTimeline(execution);
-  const effectiveLayoutKind = resolveEffectiveGraphLayout(layoutKind, {
-    interactive,
-    parallelAvailable,
-  });
-  const timelineLayout = isTimelineLayout(effectiveLayoutKind);
+  const effectiveLayoutKind = resolveEffectiveGraphLayout(layoutKind);
   const [expandedUnits, setExpandedUnits] = useState<Set<string>>(
     () => new Set(),
   );
@@ -115,7 +99,6 @@ export function GraphView({
     layoutReady,
     nodeHeights,
     nodeSizes,
-    batchDividers,
     onNodesChange,
     groups,
     subTeams,
@@ -124,7 +107,7 @@ export function GraphView({
   const { containerRef, rfRef, overflowing, fitView, centerNode, onInit } =
     useGraphViewport({ fitMode, bbox, layoutReady, onMeasure });
   const handleDirection =
-    effectiveLayoutKind === "leftright" || timelineLayout
+    effectiveLayoutKind === "leftright"
       ? ("horizontal" as const)
       : ("vertical" as const);
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
@@ -237,7 +220,6 @@ export function GraphView({
             positions,
             nodeHeights,
             nodeSizes,
-            timelineLayout,
             handleDirection,
             cnyPerUsd,
             litRunId,
@@ -260,7 +242,6 @@ export function GraphView({
       positions,
       nodeHeights,
       nodeSizes,
-      timelineLayout,
       handleDirection,
       cnyPerUsd,
       litRunId,
@@ -279,26 +260,23 @@ export function GraphView({
     ],
   );
 
-  const baseFlowNodes = useMemo(
+  const flowNodes = useMemo(
     () => (projectionBase ? projectFlowNodes(projectionBase) : []),
     [projectionBase],
   );
 
-  const flowNodes = useMemo(() => {
+  const hoverState = useMemo(() => {
     const injectRelated = injectOverlay?.dimUnrelatedEdges
       ? injectOverlay.relatedNodeIds
       : null;
     const hoverRelated = hoveredNodeId
       ? hoverRelatedIds(hoveredNodeId, edges)
       : null;
-    if (!injectRelated && !hoverRelated) return baseFlowNodes;
-    return baseFlowNodes.map((n) => {
-      const keepBright =
-        (!injectRelated || injectRelated.has(n.id)) &&
-        (!hoverRelated || hoverRelated.has(n.id));
-      return keepBright ? n : { ...n, className: "graph-hover-dimmed" };
-    });
-  }, [baseFlowNodes, hoveredNodeId, edges, injectOverlay]);
+    return {
+      hoveredNodeId,
+      keepBrightIds: computeKeepBrightIds(hoverRelated, injectRelated),
+    };
+  }, [hoveredNodeId, edges, injectOverlay]);
 
   const flowEdges = useMemo(
     () =>
@@ -352,7 +330,7 @@ export function GraphView({
         <ContextMenuTrigger asChild>
           <div ref={containerRef} className="relative min-h-0 flex-1">
             {layoutReady && (
-              <GraphHoverContext.Provider value={hoveredNodeId}>
+              <GraphHoverContext.Provider value={hoverState}>
                 <ReactFlow
                   nodes={flowNodes}
                   edges={flowEdges}
@@ -375,12 +353,6 @@ export function GraphView({
                 >
                   <Background gap={20} size={1} />
                   <WaveLanes waves={waves} />
-                  {timelineLayout && bbox && (
-                    <TimeBatchMarkers
-                      dividers={batchDividers}
-                      height={bbox.height}
-                    />
-                  )}
                 </ReactFlow>
               </GraphHoverContext.Provider>
             )}
@@ -394,7 +366,6 @@ export function GraphView({
                 layoutKind={layoutKind}
                 onLayoutKindChange={setLayoutKind}
                 metricsSummary={metricsSummary}
-                timelineAvailable={parallelAvailable}
                 injectFlowAvailable={injectFlowAvailable}
                 showAuditInjectFlow={showAuditInjectFlow}
                 onShowAuditInjectFlowChange={setShowAuditInjectFlow}
@@ -413,7 +384,7 @@ export function GraphView({
 
             {interactive && (
               <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-2">
-                {hasFrames && !timelineLayout && (
+                {hasFrames && (
                   <CanvasPlaybackControls autoPlay={autoplay} />
                 )}
                 <CanvasZoomControls

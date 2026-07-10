@@ -525,23 +525,16 @@
   --animate-status-pop: status-pop 0.2s ease-out;
 }
 
-/* Smooth node repositioning when the user switches graph layout. ReactFlow sets
- * each node's position via inline transform; transitioning it morphs nodes to
- * their new spots instead of teleporting. Nodes aren't draggable here and pan
- * moves the viewport (not nodes), so this only ever fires on a layout recompute. */
-.react-flow__node {
+/* Layout morph only while a layout-kind switch is in flight. Always-on
+ * `transition: transform` amplified hover/measurement jitter on the canvas. */
+.react-flow__node.graph-layout-morphing {
   transition: transform 0.3s ease;
 }
 
-/* Graph hover dimming — driven by className on React Flow node wrapper,
-   zero re-render of node internals. */
-.react-flow__node.graph-hover-dimmed .animate-graph-node-enter {
-  opacity: 0.5;
-  transition: opacity 150ms ease;
-}
-
-.react-flow__node:not(.graph-hover-dimmed) .animate-graph-node-enter {
-  transition: opacity 150ms ease;
+/* Keyboard focus ring on the RF node wrapper (arrow-key navigation). */
+.react-flow__node.graph-keyboard-focus .animate-graph-node-enter > * {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 /* Honor reduced-motion: skip the entrance/flash/layout transforms. Unlayered, so
@@ -558,7 +551,7 @@
     animation: none;
     height: 8px;
   }
-  .react-flow__node {
+  .react-flow__node.graph-layout-morphing {
     transition: none;
   }
 }

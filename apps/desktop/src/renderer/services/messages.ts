@@ -5,6 +5,7 @@ import {
   checkpointsFromEvents,
   nonBlockingAsksFromEvents,
   planReviewsFromEvents,
+  teamPreviewsFromEvents,
   useConversationStore,
 } from "@/stores/conversation";
 import type { components } from "@/types/api.generated";
@@ -152,6 +153,7 @@ export function toMessage(m: BackendMessage): Message {
   // plan_review events are journaled like ask_user checkpoints, so a reloaded turn
   // replays its structured DAG pauses inline too (结构化挂起 2a).
   const planReviews = planReviewsFromEvents(events);
+  const teamPreviews = teamPreviewsFromEvents(events);
   // steps — now for single-agent AND multi-agent turns (统一团队时间线). Single-agent
   // tool-less turns synthesize one reasoning step from reasoning_content.
   const process: ProcessStep[] | undefined =
@@ -202,6 +204,7 @@ export function toMessage(m: BackendMessage): Message {
     checkpoints: checkpoints.length ? checkpoints : undefined,
     nonBlockingAsks: nonBlockingAsks.length ? nonBlockingAsks : undefined,
     planReviews: planReviews.length ? planReviews : undefined,
+    teamPreviews: teamPreviews.length ? teamPreviews : undefined,
     // 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): turn-level, so it replays independently
     // of the team graph — present on pure-chat reloads (empty `events`) too.
     captainContext: m.runs?.captain_context?.length

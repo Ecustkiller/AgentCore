@@ -16,10 +16,7 @@ import { type ResolvedCell, revisionCells } from "./cells";
  * 精读**（点任意两格 → 同一个 {@link ComparePane}：读作编辑给真·文本 diff、否则 2-up 渲染）。二者共享
  * 格子外壳、pick-two 选择、对比面。
  *
- * 挂载于画布放大态的「对比」页（{@link import("../../graph/CanvasZoomedTurn").CanvasZoomedTurn}）与聚焦
- * 节点脚抽屉（{@link import("../../graph/FocusedTurnNode").FocusedTurnNode}）——两处**均仅服务非辩论
- * 修订**：辩论回合的对比已并入群聊「并排」布局（§4.1b「2026-07 delta」），不再进此透镜。纯投影：读
- * 同一份 {@link Execution}，live / 回放渲染一致。
+ * 挂载于全屏回合详情页的「对比」视图（{@link import("../../../pages/TurnDetailPage").TurnDetailPage}）——仅服务非辩论修订：辩论回合的对比已并入群聊「并排」布局（§4.1b「2026-07 delta」），不再进此透镜。纯投影：读同一份 {@link Execution}，live / 回放渲染一致。
  */
 export function TurnCompare({
   execution,

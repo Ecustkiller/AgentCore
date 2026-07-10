@@ -124,6 +124,21 @@ CEO 在自己的 ReAct 循环里调用单一的 `delegate` 工具把一批子任
 >
 > **被否决：SYNTHESIS 合稿节点**（在 plan 末尾挂一个独立合稿 Agent）。合稿仍是「循环外一趟」，正是 CEO 模型想溶解的形态；`react_loop` 现成支持「工具返回后继续循环」，无需独立节点。
 
+#### 协调模式（默认开）✅ 已落地
+
+多 worker 且根 CEO（`depth==0`）、非 `finalize` 时，`delegate` **默认**立即返回「团队已启动」，`WaveScheduler` 后台跑；CEO 继续 ReAct，消费团队事件（完成 / 便签 / 升级 / 超时 / 全部完成）并用 `update_synthesis` 渐进合成。传 `coordinate=false` 显式退出到经典阻塞；单 worker、`finalize`、嵌套 lead（`depth>0`）**仍走阻塞语义**。
+
+| 约束 | 决策 |
+|---|---|
+| 启用门 | ≥2 worker + 根 only + 非 finalize；显式 `coordinate=false` 退出 |
+| 合成通道 | 草稿走 `team_synthesis_preview`（`in_progress`）；终稿仍 `content_delta` |
+| 挂起 | 协调中 `ask_user` 软挂起即收口；状态入 journal，续跑重建（不保活后台调度器） |
+| Phase 3 | 超时只通知不自动取消；非阻塞 escalate / 便签冲突进事件队列；SCOPE 边界 PROCEED 由 CEO 仲裁；**阻塞 escalate 改 CEO 仲裁**（`resolve_escalation`；偏好/授权/费用类先 ask_user 再 resolve） |
+
+**决策（为何 CEO 自协调）**：通用协调走 **CEO ReAct + 事件队列**，不引入独立协调 / 合成 Agent（延续上文否决 SYNTHESIS），也不复用辩论 Moderator 的确定性循环——CEO 已持完整用户意图与元权限（`replan` / `cancel` / `ask_user`），独立协调者只会多一层意图损失；Moderator 继续专管辩论。成本纪律见 [执行引擎 §协调模式例外](/docs/03-AI核心/执行引擎架构设计.md)。
+
+→ 见代码：`runtime/coordination/`。
+
 > **文件产出清单（收敛免回工作区核对）✅**：`delegate` 汇总附各 worker「文件产出」行，CEO 据此收尾、不必再 `file_list` 回工作区核对。→ 见代码：`runtime/runs/executor.py`、`tools/builtin/delegate/`。
 >
 > **同一清单兼作防幻觉凭据（footer 守卫）✅**：清单为空时 CEO 不得报「已创建/已完成」，应 `revise` 唤回或重派。→ 见代码：`tools/builtin/delegate/`。
@@ -321,7 +336,13 @@ CEO 不指定具体模型，只表达能力需求（快/强），由运行时映
 
 **产品触发**：CEO 在关键岔路调 `ask_user`（运行时自决）；DAG 计划在 step 标 `checkpoint_after` 时由调度器波间挂起 `plan_review`。**边界**：`ask_user` = CEO 工具效应；`checkpoint_after` = 计划期声明的结构挂起——语义、2b 续跑、事件契约见 [`执行引擎架构设计.md` §检查点决策语义 / §暂停与恢复](/docs/03-AI核心/执行引擎架构设计.md)。
 
-**团队预审 preflight（⏳ Phase 2）**：执行前团队预览 gate 仍待 preflight 审计回归，与结构化波间挂起是不同议题。
+**团队预审薄预览（✅ 已落地）**：首次顶层 `delegate` 在 `run_plan` 已发出、**首波尚未启动**时，若计划满足「≥2 worker **或** 含辩论标记（`stance`/`round`）」则挂起 `team_preview`（新 Interaction kind，事件对 `team_preview_required` / `team_preview_resolved`）。卡片展示角色 / 任务摘要 / 依赖 / 是否辩论；动作与 `plan_review` 同构——**开做 / 调整（备注注入全部未跑下游）/ 停止**。续跑复用既有 durable Interaction / `POST …/resume` 管线。
+
+**跳过（完成态降噪）**：单 worker + `finalize` 直出；同 CEO 回合内已有阻塞 `ask_user` 且用户已提交确认（journal 含 `checkpoint_resolved`）时跳过，避免双卡。非阻塞 ask 或未 ask → 仍预审。嵌套 `depth>0` / `light` / 续跑（`seed_completed`）不挂。
+
+**与近邻边界**：`team_preview` = 开干前否决权（首波前）；`plan_review` = 波间结构化挂起（`checkpoint_after` 后）；`ask_user` = CEO 主动拍板。三者 kind / 事件 / 卡片分离，勿混用。
+
+**§7.2 Preflight Audit（⏳ 远期）**：有界审计环 / 可编辑改 DAG / Agent 实体化绑定 / 设置项 opt-out **本批不做**——见 [`Agent协作模式.md` §7.2](/docs/03-AI核心/Agent协作模式.md)。
 
 ---
 
@@ -334,7 +355,7 @@ CEO 不指定具体模型，只表达能力需求（快/强），由运行时映
 | system prompt 内容调试 | 结构（身份+边界）/ 委派判据已落地于提示词管理者职责段（见 §核心定位 / §协调者工具边界、`resolve/prompt.py`）；剩内容调试——worker 角色模板、各系统 Skill 正文实测校准。〔注〕运行期 `delegation_nudge` 软护栏**未落地**——曾试，A/B 实测被无视且净负已移除（见 `loop_controller.py` 过度调查保险丝注释），委派改靠结构性边界决策 + 上述提示词护栏治理，与 [`执行引擎架构设计.md`（§被否决·运行期软护栏）](/docs/03-AI核心/执行引擎架构设计.md) 一致 |
 | Agent 实体化 | Phase 1 worker 为内联角色（`agent_id == run_id`）；Phase 2 收敛到 `agent_id` + `AgentResolver` + 委派白名单 |
 | 增量声明优化 | 批次预声明 + 跨波重排 + 晚绑定续跑均已落地（见 §一 `replan`）；剩更细粒度的增量重声明 |
-| 交互原语回归 | `ask_user` / `plan_review` / `checkpoint_after` 已落地（见 §四 / §五）；剩 preflight / 契约闸门 / 治理强制层（远期）⏳ |
+| 交互原语回归 | `ask_user` / `plan_review` / `checkpoint_after` / 团队预审薄预览 `team_preview` 已落地（见 §四 / §五）；剩 §7.2 完整 Preflight Audit / 契约闸门 / 治理强制层（远期）⏳ |
 
 ---
 

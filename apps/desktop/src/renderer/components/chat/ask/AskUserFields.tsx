@@ -208,10 +208,8 @@ export function AskQuestionFields({
                   onClick={() =>
                     !disabled && answer.setStyleId(active ? null : s.id)
                   }
-                  className={`h-auto rounded-full px-2.5 py-1 text-xs font-normal disabled:opacity-40 ${
-                    active
-                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                      : "bg-muted/40 text-foreground hover:bg-muted/60"
+                  className={`h-auto rounded-full border px-2.5 py-1 text-xs font-normal disabled:opacity-40 ${
+                    active ? tone.optActive : tone.optIdle
                   }`}
                 >
                   {s.label}
@@ -311,52 +309,35 @@ function QuestionField({
           />
         ) : (
           <div className="space-y-1.5">
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-col gap-1.5">
               {question.options.map((opt) => {
                 const active = answer.includes(opt.label);
                 const isDefault =
                   !!question.default && opt.label === question.default;
                 return (
-                  <div
-                    key={opt.label}
-                    className="inline-flex max-w-full flex-col"
-                  >
+                  <div key={opt.label} className="flex w-full flex-col">
                     <Button
                       variant="ghost"
                       disabled={disabled}
                       onClick={() => onToggleChoice(opt.label)}
-                      className={`h-auto rounded-full px-2.5 py-1 text-xs font-normal disabled:opacity-40 ${
-                        active
-                          ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                          : "bg-muted/40 text-foreground hover:bg-muted/60"
+                      className={`h-auto w-full justify-start rounded-lg border px-2.5 py-1.5 text-left text-xs font-normal disabled:opacity-40 ${
+                        active ? tone.optActive : tone.optIdle
                       }`}
                     >
                       <span className="whitespace-pre-wrap">{opt.label}</span>
                       {opt.recommended && (
-                        <span
-                          className={
-                            active
-                              ? "ml-1 text-primary-foreground/70"
-                              : "ml-1 text-muted-foreground"
-                          }
-                        >
+                        <span className="ml-1 shrink-0 text-muted-foreground">
                           ·推荐
                         </span>
                       )}
                       {isDefault && (
-                        <span
-                          className={
-                            active
-                              ? "ml-1 text-primary-foreground/70"
-                              : "ml-1 text-muted-foreground"
-                          }
-                        >
+                        <span className="ml-1 shrink-0 text-muted-foreground">
                           ·默认
                         </span>
                       )}
                     </Button>
-                    {opt.detail && active && (
-                      <span className="mt-0.5 max-w-xs px-1 text-xs text-muted-foreground">
+                    {opt.detail && (
+                      <span className="mt-0.5 px-2.5 text-xs text-muted-foreground">
                         {opt.detail}
                       </span>
                     )}
@@ -368,10 +349,10 @@ function QuestionField({
                 variant="ghost"
                 disabled={disabled}
                 onClick={onToggleOther}
-                className={`h-auto rounded-full px-2.5 py-1 text-xs font-normal disabled:opacity-40 ${
+                className={`h-auto w-full justify-start rounded-lg border border-dashed px-2.5 py-1.5 text-left text-xs font-normal disabled:opacity-40 ${
                   otherOn
-                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                    : "border border-dashed border-border bg-transparent text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                    ? tone.optActive
+                    : "border-border bg-transparent text-muted-foreground hover:bg-muted/40 hover:text-foreground"
                 }`}
               >
                 其他…

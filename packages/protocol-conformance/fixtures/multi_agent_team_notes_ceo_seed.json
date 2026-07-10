@@ -31,6 +31,7 @@
               "role": "事实审查"
             }
           ],
+          "coordinate": false,
           "seed_notes": [
             {
               "kind": "decision",
@@ -451,6 +452,7 @@
         "revisionOf": null,
         "revision": 0,
         "revised": null,
+        "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [
           {
@@ -534,6 +536,7 @@
         "revisionOf": null,
         "revision": 0,
         "revised": null,
+        "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [
           {

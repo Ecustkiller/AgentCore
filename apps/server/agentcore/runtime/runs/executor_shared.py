@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict
+from typing import Any
 
 from agentcore.llm.pricing import calculate_cost
 from agentcore.llm.profiles import ProfileParams
@@ -118,6 +119,9 @@ async def _react_and_capture(
     usage_sink: list[TokenUsage] | None = None,
     on_round_begin: Callable[[], list[LLMMessage]] | None = None,
     round_sink: list[int] | None = None,
+    streamed_content: list[str] | None = None,
+    gate_escalation_sink: list[dict] | None = None,
+    split_context: dict[str, Any] | None = None,
 ) -> tuple[str, str, TokenUsage, int]:
     """Run one ReAct pass over ``messages`` (mutated in place — the loop appends
     each assistant tool-call turn + tool results), then append the final assistant
@@ -136,7 +140,17 @@ async def _react_and_capture(
 
     ``usage_sink`` is forwarded to the loop so that when this pass raises (workers
     run with ``raise_on_error=True``), the caller can still read the tokens spent on
-    the rounds that completed before the failure (B-deep 失败计费)."""
+    the rounds that completed before the failure (B-deep 失败计费).
+
+    ``streamed_content`` (run_redirect 热续写): when given, each ``run_output_delta``
+    chunk is also appended here so a mid-flight cancel can salvage the draft the
+    user already saw even before the final assistant turn is appended to ``messages``.
+    """
+    def _on_content(delta: str) -> None:
+        sink.emit(run_output_delta(run_id, agent_id, delta))
+        if streamed_content is not None:
+            streamed_content.append(delta)
+
     content, reasoning, usage, rounds = await react_loop(
         messages=messages,
         llm=llm,
@@ -146,7 +160,7 @@ async def _react_and_capture(
         profile=profile,
         turn_model=turn_model,
         allowed_tool_names=allowed_tools,
-        on_content=lambda d: sink.emit(run_output_delta(run_id, agent_id, d)),
+        on_content=_on_content,
         on_reasoning=lambda d: sink.emit(run_reasoning_delta(run_id, agent_id, d)),
         on_tool_progress=lambda tool, chars: sink.emit(
             run_tool_progress(run_id, agent_id, tool, chars)
@@ -168,6 +182,8 @@ async def _react_and_capture(
         # deliverable channel, react_loop also emits run_output_reset (via on_reset above)
         # so 直播==重载 — keeping the conformance invariant while cleaning the product.
         deliverable_only=True,
+        gate_escalation_sink=gate_escalation_sink,
+        split_context=split_context,
     )
     messages.append(LLMMessage(role="assistant", content=content))
     return content, reasoning, usage, rounds

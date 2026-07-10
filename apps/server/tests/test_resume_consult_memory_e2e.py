@@ -132,8 +132,12 @@ def _ask_frame(*, memory_enabled: bool) -> AskUserSuspension:
         ],
         question="确认要继续吗？",
     )
-    # Seed the surface checkpoint so settle's journaled checkpoint_resolved has its pair.
-    susp.journal = [{"type": EventType.CHECKPOINT_REQUIRED.value, "payload": {}, "timestamp": "t"}]
+    # Seed the surface checkpoint via journal_entries (唯一权威载体; the display seed derives —
+    # P0-B Phase 3) so settle's journaled checkpoint_resolved has its pair. No turn_started
+    # anchor ⇒ resumed_captain_window still folds back the in-memory transcript.
+    susp.journal_entries = [
+        {"kind": EventType.CHECKPOINT_REQUIRED.value, "payload": {}, "ts": "t"}
+    ]
     return susp
 
 

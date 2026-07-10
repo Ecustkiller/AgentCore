@@ -1,25 +1,10 @@
-# Unreal Engine generated / local
-Binaries/
-DerivedDataCache/
-Intermediate/
-Saved/
-Build/
-.vs/
-*.VC.db
-*.opensdf
-*.opendb
-*.sdf
-*.sln
-*.suo
-*.xcodeproj
-*.xcworkspace
+# UE 已退役（Source/ · .uproject · Config/ · Content/ 已删）
 
 # OS
 .DS_Store
-Content/Town/SourceAssets/
 logs/
 
-# ---- Unity (apps/town Unity 6 client; coexists with UE until Phase 1 parity) ----
+# ---- Unity (apps/town Unity 6 client) ----
 [Ll]ibrary/
 [Tt]emp/
 [Oo]bj/

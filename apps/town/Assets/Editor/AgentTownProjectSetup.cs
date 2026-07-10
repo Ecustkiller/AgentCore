@@ -51,6 +51,16 @@ namespace AgentTown.Editor
             CreateOrUpdateTownScene(uxml, panelSettings, uss);
             SetBuildScenes();
 
+            // Refresh + scan TownAssets → Resources/Town/TownMeshCatalog (empty = primitive fallback).
+            try
+            {
+                TownAssetImporter.ImportFromBatch();
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[AgentTown] Import Town Assets skipped: {ex.Message}");
+            }
+
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
             Debug.Log("[AgentTown] Project setup complete — open Assets/Scenes/Town.unity and press Play.");

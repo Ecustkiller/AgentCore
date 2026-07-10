@@ -7,6 +7,7 @@ import {
   Loader2,
   Pause,
   Sparkles,
+  StickyNote,
   XCircle,
 } from "lucide-react";
 
@@ -40,6 +41,8 @@ export interface TurnSummaryData {
    * / 部分失败). Drives a destructive「待救火」chip; shown only when no decision pends
    * (an actionable decision outranks a recoverable failure). */
   recoverable: boolean;
+  /** Turn-level note wall count (`Execution.teamNotes`); 0 → no chip. */
+  noteCount: number;
   [key: string]: unknown;
 }
 
@@ -146,6 +149,15 @@ export function TurnSummaryNode({ data }: NodeProps) {
             {d.agentCount} 个 Agent · {d.completed}/{d.total}
           </span>
         </div>
+
+        {d.noteCount > 0 && (
+          <div className="mt-2 flex items-center">
+            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              <StickyNote size={11} className="shrink-0" />
+              便签 {d.noteCount}
+            </span>
+          </div>
+        )}
 
         {running && (
           <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-muted">

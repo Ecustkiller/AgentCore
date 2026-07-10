@@ -39,9 +39,13 @@ class InteractionKind(StrEnum):
     # DAG structured checkpoint (结构化挂起 2a): the WaveScheduler paused after a
     # ``checkpoint_after`` step → result: CheckpointResponse (continue / stop).
     PLAN_REVIEW = "plan_review"
-    # 阻塞式求决策 (escalate blocking=true): a delegated worker hit a「只有用户能定、且猜错
-    # 就作废」fork and suspended itself to ask the user directly (the CEO is parked at its
-    # ``delegate`` mid-wave, so it can't mediate) → result: ``{answer | use_assumption}``.
+    # 团队预审薄预览: first ``delegate`` wave paused BEFORE workers start → result:
+    # CheckpointResponse (continue / adjust / stop). Durable like plan_review; distinct
+    # kind so it never collides with 波间 plan_review.
+    TEAM_PREVIEW = "team_preview"
+    # 阻塞式求决策 (escalate blocking=true): a delegated worker hit a「猜错就作废」fork and
+    # suspended. Classic path asks the user directly; coordination-active path awaits CEO
+    # ``resolve_escalation`` (awaiting=ceo, not user-answerable) → result: ``{answer | use_assumption}``.
     # Unlike the halting gates above, this does NOT pause the turn — siblings keep running
     # and a timeout degrades to the worker's stated assumption (设计: 06-规划/阻塞式求决策设计).
     ESCALATION = "escalation"

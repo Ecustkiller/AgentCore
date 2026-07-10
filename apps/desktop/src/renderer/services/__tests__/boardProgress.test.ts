@@ -48,6 +48,7 @@ const run = (id: string, agentId: string, status: RunStatus): RunNode => ({
   revisionOf: null,
   revision: 0,
   revised: null,
+  replacesRunId: null,
   checkpoint: null,
   receivedContext: [],
   escalations: [],

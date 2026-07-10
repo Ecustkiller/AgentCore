@@ -4,6 +4,8 @@ export {
   DRAFT_KEY,
   selectLastAssistantCostTotal,
   lastAssistantMessageId,
+  assistantProjectionId,
+  lastAssistantProjectionId,
   runtimeOf,
   activeRuntime,
 } from "./runtime";

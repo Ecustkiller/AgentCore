@@ -261,3 +261,57 @@ def test_content_only_turn_persists_no_process():
     sink.emit(reasoning_delta("just thinking"))
     sink.emit(content_delta("just an answer"))
     assert sink.process_timeline() is None
+
+
+async def test_emit_updates_in_memory_journal_when_writer_sealed(monkeypatch) -> None:
+    """Post-pause emit must still update EventSink display journal; sealed writer no-ops DB."""
+    from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
+    from agentcore.runtime.events import team_preview_required
+
+    written: list[int] = []
+
+    class Repo:
+        def __init__(self, session: object) -> None:
+            pass
+
+        async def append(self, *, turn_id, seq, conversation_id, trace_id, entry) -> None:
+            written.append(seq)
+
+    class _Sess:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr("agentcore.db.base.async_session_factory", lambda: _Sess())
+    monkeypatch.setattr("agentcore.db.repositories.TurnJournalRepository", Repo)
+    monkeypatch.setattr(
+        "agentcore.runtime.audit.hooks.on_journal_fact_appended", lambda entry: None
+    )
+
+    writer = TurnJournalWriter(turn_id="m1", conversation_id="c1", trace_id="t1")
+    token = current_journal_writer.set(writer)
+    try:
+        sink = EventSink()
+        sink.emit(_plan())
+        await writer.flush()
+        assert written == [0]
+
+        await writer.seal()
+        required = team_preview_required(
+            checkpoint_id="cp1",
+            conversation_id="c1",
+            workers=[{"id": "w1", "role": "研究员", "task": "调研"}],
+        )
+        sink.emit(required)
+        await writer.flush()
+
+        # In-memory display journal still got the card; durable writer did not append.
+        journal = sink.execution_journal()
+        assert journal is not None
+        assert journal[-1]["type"] == EventType.TEAM_PREVIEW_REQUIRED.value
+        assert written == [0]
+        assert writer.schedule_append({"kind": "x"}) is None
+    finally:
+        current_journal_writer.reset(token)

@@ -7,7 +7,6 @@ import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
 import { ResumePrompt } from "@/components/chat/ResumePrompt";
 import { RetryBanner } from "@/components/chat/RetryBanner";
 import { RecoveryActions } from "@/components/chat/StatusStrip";
-import { IconButton } from "@/components/ui";
 import { useApprovalStore } from "@/stores/approvals";
 import {
   useBackgroundTasks,
@@ -16,6 +15,7 @@ import {
 import { useCommandPanelStore } from "@/stores/commandPanel";
 import {
   type Message,
+  assistantProjectionId,
   useActiveError,
   useActiveMessages,
   useConversationStore,
@@ -27,7 +27,7 @@ import {
 } from "@/stores/execution";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { useSidePanelStore } from "@/stores/sidePanel";
-import { AlertTriangle, ChevronDown, ChevronUp, Gavel } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 
 /**
@@ -36,13 +36,13 @@ import { useEffect, useMemo, useRef } from "react";
  * approval / 待恢复续跑 resume + 救火 (conversation / turn level). On the canvas they
  * belong where they happen, but the actionable cards are sizable, so rather than
  * floating popovers over nodes — and rather than a SECOND right-hand dock競 the
- * unified side panel for width — the 指挥台 is now a collapsible region pinned to the
- * TOP of that one side panel ({@link CommandRegion}, §十). It renders the SAME cards
- * the chat surfaces do ({@link CheckpointCard} / {@link PlanReviewCard} /
- * {@link EscalationCards} / {@link ApprovalPrompt} / {@link ResumePrompt} /
- * {@link RetryBanner} / {@link RecoveryActions} / {@link BackgroundTaskCard}), reused
- * verbatim, so a decision read / made / 救火 / 应用 here is identical to one in chat and
- * folds through the very same service + SSE (no second data path — 设计 §二 单一数据源).
+ * unified side panel for width — the 指挥台 is a fixed second tab in that one side
+ * panel (after 「工作区」, §十). It renders the SAME cards the chat surfaces do
+ * ({@link CheckpointCard} / {@link PlanReviewCard} / {@link EscalationCards} /
+ * {@link ApprovalPrompt} / {@link ResumePrompt} / {@link RetryBanner} /
+ * {@link RecoveryActions} / {@link BackgroundTaskCard}), reused verbatim, so a
+ * decision read / made / 救火 / 应用 here is identical to one in chat and folds
+ * through the very same service + SSE (no second data path — 设计 §二 单一数据源).
  *
  * Why every scope lives here: in canvas mode `ChatView` + `InlineTeamGraph` +
  * `MessageList` are unmounted, so their conversation-level approval / resume /
@@ -111,13 +111,13 @@ export function isTurnRecoverable(
   );
 }
 
-/** Everything {@link CommandRegion} renders, derived live by {@link useCommandRegion}. */
+/** Everything the 指挥台 tab renders / badges, derived live by {@link useCommandRegion}. */
 export interface CommandRegionData {
-  /** Whether the region has anything actionable to show (canvas mode + ≥1 item). */
+  /**
+   * Canvas mode is on — the fixed 指挥台 tab should appear in the strip (even with
+   * nothing actionable yet; empty body is fine until a decision arrives).
+   */
   show: boolean;
-  /** Folded to the header strip (badge still visible). */
-  collapsed: boolean;
-  setCollapsed: (collapsed: boolean) => void;
   /** Focused turn (turn-level cards + 救火 scope); absent for a no-team-turn focus. */
   message?: Message;
   /** Focused turn's projected execution — gates / describes the 救火行. */
@@ -125,30 +125,37 @@ export interface CommandRegionData {
   conversationId: string | null;
   /** Focused turn is live & non-terminal — its cards are actionable vs passive records. */
   interactive: boolean;
-  /** Pending DECISION count for the badge (turn-level + conversation-level approval/resume). */
+  /** Pending DECISION count for the tab badge (turn-level + conversation-level approval/resume). */
   pending: number;
+  /**
+   * Tab-strip badge: decisions + 救火 + 后台任务 — anything that auto-surfaced the dock
+   * but did not steal focus onto this tab.
+   */
+  badge: number;
 }
 
 /**
- * Drive the 指挥台 region from stores. Turn focus is a canvas concept, so the host
+ * Drive the 指挥台 tab from stores. Turn focus is a canvas concept, so the host
  * {@link import("./ConversationCanvas")} publishes `active` + the focused message id
  * via {@link useCommandPanelStore}; everything else (the focused turn's message +
  * projected execution, the conversation-level approval / resume / 救火 / 后台云端任务
  * signals) is derived LIVE here — no snapshot copy, single data source. Owns the
  * auto-surface: a brand-new actionable item opens the dock (without switching the
- * active tab, so a run-detail the user is reading stays put) and re-expands the
- * region; switching focus re-expands too, so a fresh decision is never left folded.
+ * active tab, so a run/workspace the user is reading stays put) and updates the
+ * 指挥台 tab badge.
  */
 export function useCommandRegion(): CommandRegionData {
   const active = useCommandPanelStore((s) => s.active);
   const focusedMessageId = useCommandPanelStore((s) => s.focusedMessageId);
-  const collapsed = useCommandPanelStore((s) => s.collapsed);
-  const setCollapsed = useCommandPanelStore((s) => s.setCollapsed);
 
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const messages = useActiveMessages();
   const message = useMemo(
-    () => messages.find((m) => m.id === focusedMessageId),
+    () =>
+      messages.find(
+        (m) =>
+          m.id === focusedMessageId || m.serverMessageId === focusedMessageId,
+      ),
     [messages, focusedMessageId],
   );
   const execution = useMessageExecution(focusedMessageId);
@@ -169,15 +176,16 @@ export function useCommandRegion(): CommandRegionData {
   const pending = turnDecisions + approvalCount + resumeCount;
   const firefighting = !!convError || isTurnRecoverable(execution);
   // 后台云端任务 是 非阻塞的「另一类」: it keeps the region present but never inflates the
-  // 待你拍板 badge (`pending`); only `actionable` (presence) counts it.
-  const actionable = pending + (firefighting ? 1 : 0) + backgroundCount;
-  const show = active && actionable > 0;
+  // 待你拍板 badge (`pending`); the tab-strip badge (`badge`) includes it so the user
+  // can still discover background work without being yanked onto 指挥台.
+  const badge = pending + (firefighting ? 1 : 0) + backgroundCount;
+  const show = active;
 
-  // Auto-surface (子决策 3): a brand-new actionable item opens the dock + re-expands
-  // the region — but never switches the active tab (子决策 A), so a run-detail the user
-  // is reading stays put and the region just hangs above it. Baseline on canvas mount
-  // (first active tick) without opening — re-entering canvas must not treat existing
-  // pending work as "new" just because chat mode zeroed the ref on the way out.
+  // Auto-surface: a brand-new actionable item opens the dock — but never switches the
+  // active tab, so a run/workspace the user is reading stays put; only the 指挥台 tab
+  // badge updates. Baseline on canvas mount (first active tick) without opening —
+  // re-entering canvas must not treat existing pending work as "new" just because chat
+  // mode zeroed the ref on the way out.
   const prevActionable = useRef<number | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: conversationId is an intentional re-run key — reset the baseline when switching conversations.
   useEffect(() => {
@@ -186,58 +194,47 @@ export function useCommandRegion(): CommandRegionData {
   useEffect(() => {
     if (!active) return;
     if (prevActionable.current === null) {
-      prevActionable.current = actionable;
+      prevActionable.current = badge;
       return;
     }
-    if (actionable > prevActionable.current) {
+    if (badge > prevActionable.current) {
       const sp = useSidePanelStore.getState();
       const contextId = conversationId ? `command:${conversationId}` : null;
       if (contextId && sp.isAutoSurfaceDismissed(contextId)) {
         sp.incrementPendingBadge();
       } else {
         sp.openPanel();
-        setCollapsed(false);
       }
     }
-    prevActionable.current = actionable;
-  }, [active, actionable, conversationId, setCollapsed]);
-
-  // Re-arm on focus switch: another turn's decisions deserve a fresh, open look.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed to focus change, not setter identity.
-  useEffect(() => {
-    setCollapsed(false);
-  }, [focusedMessageId]);
+    prevActionable.current = badge;
+  }, [active, badge, conversationId]);
 
   return {
     show,
-    collapsed,
-    setCollapsed,
     message,
     execution,
     conversationId,
     interactive: message?.isStreaming ?? false,
     pending,
+    badge,
   };
 }
 
 /**
- * The 指挥台 region pinned to the TOP of the unified side panel (前端UX设计.md §6.2 ·
- * §十): a collapsible header strip + the boss's pending-decision / 救火 / 后台云端任务
- * cards. Capped to ~55% of the panel's content height with its own scroll (子决策 P1)
- * so the tab body below always keeps usable space; collapse folds it to just the
- * header (the「待你拍板」badge stays visible). Closing the whole dock is the side
- * panel's job (its X / Ctrl+I) — the region only collapses, never closes. Props come
- * from {@link useCommandRegion}; render only when its `show` is true.
+ * 指挥台 tab body (前端UX设计.md §6.2 · §十): the boss's pending-decision / 救火 /
+ * 后台云端任务 cards. Lives in its own tab so deep-reading a run and 拍板 stay on
+ * different screens — the user switches tabs deliberately. Props come from
+ * {@link useCommandRegion}.
  */
-export function CommandRegion({
-  collapsed,
-  setCollapsed,
+export function CommandPanelBody({
   message,
   execution,
   conversationId,
   interactive,
-  pending,
-}: CommandRegionData) {
+}: Pick<
+  CommandRegionData,
+  "message" | "execution" | "conversationId" | "interactive"
+>) {
   const checkpoints = message?.checkpoints ?? [];
   const planReviews = message?.planReviews ?? [];
 
@@ -252,81 +249,60 @@ export function CommandRegion({
         : "本回合执行失败。可重试或忽略。";
 
   return (
-    <section className="flex max-h-[55%] shrink-0 flex-col border-b border-border bg-card">
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-3 pr-1">
-        <Gavel size={15} className="shrink-0 text-primary" />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-          指挥台
-          {pending > 0 && (
-            <span className="ml-1.5 rounded-full bg-primary/15 px-1.5 py-0.5 text-xs font-medium text-primary">
-              {pending}
-            </span>
-          )}
-        </span>
-        <IconButton
-          onClick={() => setCollapsed(!collapsed)}
-          aria-label={collapsed ? "展开指挥台" : "折叠指挥台"}
-          aria-expanded={!collapsed}
-          title={collapsed ? "展开指挥台" : "折叠指挥台"}
+    <div className="h-full overflow-y-auto py-3">
+      {/* 救火 (firefighting): a conversation-level transport error (send / resume /
+          regenerate drop) + the focused turn's whole-turn recovery row (重试 /
+          忽略). RetryBanner is self-contained; RecoveryActions retries from the last
+          user message but its 忽略 clears THIS turn's slot, so it runs under the
+          focused turn's ExecutionScope. */}
+      <RetryBanner />
+      {recoverable && message && (
+        <ExecutionScopeContext.Provider
+          value={assistantProjectionId(message)}
         >
-          {collapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
-        </IconButton>
-      </div>
-      {!collapsed && (
-        <div className="min-h-0 flex-1 overflow-y-auto py-3">
-          {/* 救火 (firefighting): a conversation-level transport error (send / resume /
-              regenerate drop) + the focused turn's whole-turn recovery row (重试 /
-              忽略). RetryBanner is self-contained; RecoveryActions retries from the last
-              user message but its 忽略 clears THIS turn's slot, so it runs under the
-              focused turn's ExecutionScope. */}
-          <RetryBanner />
-          {recoverable && message && (
-            <ExecutionScopeContext.Provider value={message.id}>
-              <div className="mx-4 mb-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2">
-                <div className="flex items-start gap-2 text-xs text-destructive">
-                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-                  <span>{recoveryNotice}</span>
-                </div>
-                <RecoveryActions
-                  abandonLabel="忽略"
-                  hasFailedRuns={
-                    execution?.status === "completed" &&
-                    execution.runs.some((r) => r.status === "failed")
-                  }
-                />
-              </div>
-            </ExecutionScopeContext.Provider>
-          )}
-          {/* Conversation-level decisions (self-contained: own store + active
-              conversation). They bring their own mx-4 mb-2 gutter, so the turn-level
-              cards below match with px-4 and the mb-2 supplies the inter-group gap. */}
-          <DelegationAuthorizationPrompt />
-          <ApprovalPrompt />
-          <ResumePrompt />
-          {/* Turn-level: scoped to the focused turn's message + execution. */}
-          <div className="space-y-2 px-4">
-            {checkpoints.map((cp) => (
-              <CheckpointCard key={cp.id} checkpoint={cp} />
-            ))}
-            {planReviews.map((pr) => (
-              <PlanReviewCard key={pr.id} review={pr} />
-            ))}
-            {message && (
-              <EscalationCards
-                messageId={message.id}
-                conversationId={conversationId}
-                interactive={interactive}
-              />
-            )}
-            {/* 辩论逐轮掌舵不在此渲染：它是 canvas 原生的，归 群聊 room 的 SteeringBar
-                （前端UX设计.md §4.3「群聊为唯一掌舵处」）。dock 只复活聊天面在画布态被卸载的卡。 */}
+          <div className="mx-4 mb-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2">
+            <div className="flex items-start gap-2 text-xs text-destructive">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              <span>{recoveryNotice}</span>
+            </div>
+            <RecoveryActions
+              abandonLabel="忽略"
+              hasFailedRuns={
+                execution?.status === "completed" &&
+                execution.runs.some((r) => r.status === "failed")
+              }
+            />
           </div>
-          {/* 后台云端任务 (handoff jobs, 非阻塞 · 跨对话的另一类): last, below every
-              blocking decision. */}
-          <CanvasBackgroundTasks conversationId={conversationId} />
-        </div>
+        </ExecutionScopeContext.Provider>
       )}
-    </section>
+      {/* Conversation-level decisions (self-contained: own store + active
+          conversation). They bring their own mx-4 mb-2 gutter, so the turn-level
+          cards below match with px-4 and the mb-2 supplies the inter-group gap. */}
+      <DelegationAuthorizationPrompt />
+      <ApprovalPrompt />
+      <ResumePrompt />
+      {/* Turn-level: scoped to the focused turn's message + execution. */}
+      <div className="space-y-2 px-4">
+        {checkpoints.map((cp) => (
+          <CheckpointCard key={cp.id} checkpoint={cp} />
+        ))}
+        {planReviews.map((pr) => (
+          <PlanReviewCard key={pr.id} review={pr} />
+        ))}
+        {message && (
+          <EscalationCards
+            messageId={assistantProjectionId(message)}
+            conversationId={conversationId}
+            interactive={interactive}
+          />
+        )}
+        {/* 辩论逐轮掌舵不在此渲染：它是 canvas 原生的，归 群聊 room 的 SteeringBar
+            （前端UX设计.md §4.3「群聊为唯一掌舵处」）。dock 只复活聊天面在画布态被卸载的卡。 */}
+      </div>
+      {/* 后台云端任务 (handoff jobs, 非阻塞 · 跨对话的另一类): last, below every
+          blocking decision. */}
+      <CanvasBackgroundTasks conversationId={conversationId} />
+    </div>
   );
 }
 

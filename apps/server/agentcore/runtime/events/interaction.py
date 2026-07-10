@@ -167,6 +167,34 @@ def plan_review_resolved(*, checkpoint_id: str, decision: str, note: str = "") -
     )
 
 
+def team_preview_required(
+    *,
+    checkpoint_id: str,
+    conversation_id: str,
+    workers: list[dict[str, Any]],
+) -> SSEEvent:
+    """首波启动前的团队薄预览 gate（角色 / 任务摘要 / 依赖 / 是否辩论）。"""
+    return SSEEvent(
+        type=EventType.TEAM_PREVIEW_REQUIRED,
+        payload={
+            "checkpoint_id": checkpoint_id,
+            "conversation_id": conversation_id,
+            "workers": workers,
+        },
+    )
+
+
+def team_preview_resolved(*, checkpoint_id: str, decision: str, note: str = "") -> SSEEvent:
+    return SSEEvent(
+        type=EventType.TEAM_PREVIEW_RESOLVED,
+        payload={
+            "checkpoint_id": checkpoint_id,
+            "decision": decision,
+            "note": note,
+        },
+    )
+
+
 def escalation_required(
     run_id: str,
     agent_id: str,
@@ -175,11 +203,16 @@ def escalation_required(
     question: str,
     assumption: str,
     questions: list[dict[str, Any]] | None = None,
+    kind: str = "normal",
+    awaiting: str = "user",
 ) -> SSEEvent:
     """``question`` is the worker's headline ask; ``questions`` is the optional
     structured-fork list (同 ask_user 的 questions) the card renders as choice/text so
     the user one-taps a decision instead of free-typing. Journaled, so the structured
-    prompt replays inline on reload."""
+    prompt replays inline on reload. ``kind`` is the escalate taxonomy
+    (normal / scope / dep), orthogonal to blocking. ``awaiting`` is ``user`` (经典可答卡)
+    or ``ceo`` (协调模式等主管仲裁，初始不作为用户可答卡)."""
+    who = awaiting if awaiting in ("user", "ceo") else "user"
     return SSEEvent(
         type=EventType.ESCALATION_REQUIRED,
         payload={
@@ -189,6 +222,8 @@ def escalation_required(
             "question": question,
             "assumption": assumption,
             "questions": questions or [],
+            "kind": kind if kind in ("normal", "scope", "dep") else "normal",
+            "awaiting": who,
         },
     )
 
@@ -200,16 +235,23 @@ def escalation_resolved(
     escalation_id: str,
     status: str,
     answer: str,
+    arbitrated_by: str | None = None,
+    via_user: bool | None = None,
 ) -> SSEEvent:
+    payload: dict[str, Any] = {
+        "escalation_id": escalation_id,
+        "run_id": run_id,
+        "agent_id": agent_id,
+        "status": status,
+        "answer": answer,
+    }
+    if arbitrated_by in ("user", "ceo"):
+        payload["arbitrated_by"] = arbitrated_by
+    if via_user is not None and arbitrated_by == "ceo":
+        payload["via_user"] = bool(via_user)
     return SSEEvent(
         type=EventType.ESCALATION_RESOLVED,
-        payload={
-            "escalation_id": escalation_id,
-            "run_id": run_id,
-            "agent_id": agent_id,
-            "status": status,
-            "answer": answer,
-        },
+        payload=payload,
     )
 
 

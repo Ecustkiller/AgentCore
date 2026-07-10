@@ -8,6 +8,7 @@ import {
   PRESENCE_STYLES,
   STATUS_STYLES,
   checkpointBadge,
+  escalationKindLabel,
   revisedBadge,
   revisionVersionBadge,
   statusFaceLabel,
@@ -29,8 +30,7 @@ export function buildAgentNodePresentation(
     isRunning && !liveTool && !liveToolExec && !livePreview
       ? (d.reasoningPreview ?? "")
       : "";
-  const isTimeline = d.layoutMode === "timeline";
-  const cardWidth = isTimeline ? (d.nodeWidth ?? 210) : 210;
+  const cardWidth = 210;
   const enterDelay = Math.min((d.enterIndex ?? 0) * 35, 280);
 
   const modelText =
@@ -51,15 +51,15 @@ export function buildAgentNodePresentation(
     d.costText ? `，成本 ${d.costText}` : ""
   }${durationText ? `，用时 ${durationText}` : ""}${
     d.toolCount > 0 ? `，工具 ${d.toolCount} 次` : ""
-  }${artifacts.length > 0 ? `，产物 ${artifacts.length} 个` : ""}${
+  }${artifacts.length > 0 ? `，产物 ${artifacts.length} 个` : ""  }${
     d.revised ? `，${revisedBadge(d.revised).label}` : ""
-  }${revisionFace ? `，修订 ${revisionFace}` : ""}${
+  }${d.replacesRunId ? "，接手" : ""}${revisionFace ? `，修订 ${revisionFace}` : ""}${
     d.checkpoint ? `，检查点${checkpointBadge(d.checkpoint).label}` : ""
   }${
     (d.escalationPending ?? 0) > 0
-      ? `，${d.escalationPending} 项待你拍板`
+      ? `，${d.escalationPending} 项待你拍板${d.escalationKind && d.escalationKind !== "normal" ? `（${escalationKindLabel(d.escalationKind)}）` : ""}`
       : (d.escalationRaised ?? 0) > 0
-        ? `，上报 ${d.escalationRaised} 条`
+        ? `，上报 ${d.escalationRaised} 条${d.escalationKind && d.escalationKind !== "normal" ? `（${escalationKindLabel(d.escalationKind)}）` : ""}`
         : ""
   }`;
 
@@ -88,18 +88,28 @@ export function buildAgentNodePresentation(
   if (d.isSubtask) peekTags.push("子任务");
   if (d.isRevision) peekTags.push(`修订 v${d.revision ?? 2}`);
   if (d.revised) peekTags.push(revisedBadge(d.revised).label);
+  if (d.replacesRunId) peekTags.push("接手");
+  if (d.didRework) peekTags.push("已按交付规范重写");
   if (d.modelPreference)
     peekTags.push(MODEL_TIER_META[d.modelPreference].label);
   if (d.checkpoint) peekTags.push(checkpointBadge(d.checkpoint).label);
   if (d.reviewConcern === "critical") peekTags.push("方向风险");
   else if (d.reviewConcern === "warning") peekTags.push("待关注");
   if ((d.escalationPending ?? 0) > 0) {
+    const kindTag =
+      d.escalationKind && d.escalationKind !== "normal"
+        ? escalationKindLabel(d.escalationKind)
+        : null;
     peekTags.push(
-      `待你拍板${(d.escalationPending ?? 0) > 1 ? ` ${d.escalationPending}` : ""}`,
+      `待你拍板${(d.escalationPending ?? 0) > 1 ? ` ${d.escalationPending}` : ""}${kindTag ? ` · ${kindTag}` : ""}`,
     );
   } else if ((d.escalationRaised ?? 0) > 0) {
+    const kindTag =
+      d.escalationKind && d.escalationKind !== "normal"
+        ? escalationKindLabel(d.escalationKind)
+        : null;
     peekTags.push(
-      `上报${(d.escalationRaised ?? 0) > 1 ? ` ${d.escalationRaised}` : ""}`,
+      `上报${(d.escalationRaised ?? 0) > 1 ? ` ${d.escalationRaised}` : ""}${kindTag ? ` · ${kindTag}` : ""}`,
     );
   }
 
@@ -125,7 +135,6 @@ export function buildAgentNodePresentation(
     livePreview,
     liveThinking,
     highlighted: d.focused,
-    isTimeline,
     cardWidth,
     enterDelay,
     modelText,
@@ -138,5 +147,6 @@ export function buildAgentNodePresentation(
     reviewConcernFace,
     statusFace,
     revisionFace,
+    handoffFace: d.replacesRunId ? "接手" : null,
   };
 }

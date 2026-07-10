@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useArchiveConversation } from "@/hooks/useConversations";
 import { useDeleteFolder, usePermanentDeleteFolder } from "@/hooks/useFolders";
+import { deriveGroupWorkspaceIsLocal } from "@/lib/conversationWorkspaceMode";
 import { startNewConversation } from "@/lib/newConversation";
 import { notifyError, notifyInfo } from "@/lib/toast";
 import type { FolderMeta } from "@/services/folders";
@@ -33,8 +34,9 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { GroupWorkspaceModeIcon } from "./ConversationWorkspaceModeIcon";
 
 interface Props {
   folder: FolderMeta;
@@ -68,6 +70,10 @@ export function WorkspaceGroupHeader({
   );
 
   const liveConvCount = convs.length;
+  const groupIsLocal = useMemo(
+    () => deriveGroupWorkspaceIsLocal(folder, convs),
+    [folder, convs],
+  );
 
   const viewAllConversations = () => {
     navigate("/conversations", { state: { focusFolderId: folder.id } });
@@ -222,10 +228,7 @@ export function WorkspaceGroupHeader({
                 }
               }}
             >
-              <FolderOpen
-                size={14}
-                className="shrink-0 text-sidebar-foreground/40"
-              />
+              <GroupWorkspaceModeIcon isLocal={groupIsLocal} />
               <span className="min-w-0 flex-1 truncate">{folder.name}</span>
             </div>
             <span
@@ -276,7 +279,7 @@ export function WorkspaceGroupHeader({
         onOpenChange={setDeleteOpen}
         name={folder.name}
         liveConvCount={liveConvCount}
-        isLocal={false}
+        isLocal={groupIsLocal}
         onConfirm={() => void confirmDeleteProject()}
         onPermanentConfirm={confirmPermanentDelete}
       />

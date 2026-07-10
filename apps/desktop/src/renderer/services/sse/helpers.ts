@@ -1,6 +1,6 @@
-import { getRuntime, lastAssistantMessageId } from "@/stores/conversation";
+import { getRuntime, lastAssistantProjectionId } from "@/stores/conversation";
 
-/** Resolve the assistant message id for the live turn's execution slot (§9.3). */
+/** Resolve the live turn's execution slot key (§9.3): `serverMessageId ?? id`. */
 export function execMessageId(conversationId: string): string | null {
-  return lastAssistantMessageId(getRuntime(conversationId).messages);
+  return lastAssistantProjectionId(getRuntime(conversationId).messages);
 }

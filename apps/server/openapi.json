@@ -2,7 +2,7 @@
   "components": {
     "schemas": {
       "AcceptRunOutcomeRequest": {
-        "description": "User explicitly accepts a run's terminal outcome that could not be auto-recovered\n(跑一半改方向 Step 4 · 忽略路径收口).\n\nTwo triggers, both surfaced in the run detail from the audit trail: a\n``deterministic_failure`` (a non-retryable upstream failure — 重试徒劳) or a\n``redirect_ignored`` (a「立即改此人」steer that arrived too late to apply mid-run). Recording\nthe acceptance (后端记录) replaces the old frontend-only ``clearExecution`` so the\ndelegated-turn audit trail carries「用户主动接受此结果」. Idempotent per (turn, run).",
+        "description": "User explicitly accepts a run's terminal outcome that could not be auto-recovered\n(跑一半改方向 Step 4 · 忽略路径收口).\n\nTriggers surfaced from the audit trail / status strip: a ``deterministic_failure``\n(non-retryable upstream failure — 重试徒劳), a ``redirect_ignored`` (「立即改此人」steer\nthat arrived too late), or ``recovery_ignored`` (status-strip「忽略」救火 abandon).\nRecording the acceptance (后端记录) replaces the old frontend-only ``clearExecution`` so\nthe delegated-turn audit trail carries「用户主动接受此结果」. Idempotent per (turn, run).",
         "properties": {
           "execution_id": {
             "anyOf": [
@@ -31,7 +31,8 @@
           "reason": {
             "enum": [
               "deterministic_failure",
-              "redirect_ignored"
+              "redirect_ignored",
+              "recovery_ignored"
             ],
             "title": "Reason",
             "type": "string"
@@ -3117,6 +3118,11 @@
             "title": "Scenario",
             "type": "string"
           },
+          "scripted": {
+            "default": false,
+            "title": "Scripted",
+            "type": "boolean"
+          },
           "seed": {
             "default": 0,
             "title": "Seed",
@@ -5163,7 +5169,7 @@
         "type": "object"
       },
       "PausedTurnSummary": {
-        "description": "A turn awaiting resume after a durable plan_review / ask_user pause (结构化挂起 2b).\n\nSurfaced on conversation reopen so the client can re-render the right resume card\nby ``kind`` and offer continue / adjust / stop → the resume endpoint.\n``message_id`` is both the pause key and the id the resumed assistant message will\nreuse, so an optimistic bubble reconciles cleanly.\n\nplan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the\ngated downstream); ask_user carries the unified card payload ``question`` (the\nframing / opening line) + ``context`` + the optional opening content\n``assumptions`` / ``questions`` / ``style_options`` (empty for a compact mid-task\nfork). The unused set is empty for the other kind.",
+        "description": "A turn awaiting resume after a durable plan_review / ask_user pause (结构化挂起 2b).\n\nSurfaced on conversation reopen so the client can re-render the right resume card\nby ``kind`` and offer continue / adjust / stop → the resume endpoint.\n``message_id`` is both the pause key and the id the resumed assistant message will\nreuse, so an optimistic bubble reconciles cleanly.\n\nplan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the\ngated downstream); team_preview carries ``workers`` (upcoming roles / tasks /\ndeps); ask_user carries the unified card payload ``question`` (the\nframing / opening line) + ``context`` + the optional opening content\n``assumptions`` / ``questions`` / ``style_options`` (empty for a compact mid-task\nfork). The unused set is empty for the other kinds.",
         "properties": {
           "assumptions": {
             "items": {
@@ -5250,6 +5256,14 @@
             "default": "",
             "title": "User Message Id",
             "type": "string"
+          },
+          "workers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Workers",
+            "type": "array"
           }
         },
         "required": [
@@ -6144,6 +6158,11 @@
             "default": "town",
             "title": "Scenario",
             "type": "string"
+          },
+          "scripted": {
+            "default": false,
+            "title": "Scripted",
+            "type": "boolean"
           },
           "seed": {
             "default": 0,
@@ -7170,10 +7189,11 @@
         "type": "object"
       },
       "SuspensionKind": {
-        "description": "Which suspend point a durable frame captured (the JSON discriminator).\n\nValues match the corresponding :class:`~agentcore.runtime.interaction.InteractionKind`\nso the persisted ``kind`` reads the same across the live bridge and the frame.\nOnly these two suspend points are persisted (approval / client_tool stay\nin-memory — see 设计 §4.7).",
+        "description": "Which suspend point a durable frame captured (the JSON discriminator).\n\nValues are derived from the matching :class:`~agentcore.runtime.interaction.InteractionKind`\nmembers in :data:`DURABLE_INTERACTION_KINDS` so the persisted ``kind`` reads the\nsame across the live bridge and the frame — no string hand-copy.",
         "enum": [
           "plan_review",
-          "ask_user"
+          "ask_user",
+          "team_preview"
         ],
         "title": "SuspensionKind",
         "type": "string"
@@ -8148,7 +8168,7 @@
         "type": "object"
       },
       "Vec3": {
-        "description": "3D position on the town ground plane (R3F / Three.js Y-up).\n\n- ``x``: east (+) / west (-)\n- ``y``: height above ground (NPCs typically 0)\n- ``z``: south (+) / north (-)",
+        "description": "3D position on the town ground plane (Y-up wire coordinates).\n\n- ``x``: east (+) / west (-)\n- ``y``: height above ground (NPCs typically 0)\n- ``z``: south (+) / north (-)",
         "properties": {
           "x": {
             "default": 0.0,

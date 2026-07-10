@@ -14,6 +14,7 @@ import {
   planReviewsFromEvents,
   useConversationStore,
 } from "../conversation";
+import { execRuntime, useExecutionStore } from "../execution";
 
 const store = () => useConversationStore.getState();
 /** Active conversation's runtime slice — runtime state is now keyed by id. */
@@ -317,6 +318,43 @@ describe("conversation store", () => {
 
       expect(rt().messages[0].isStreaming).toBe(false);
       expect(rt().isGenerating).toBe(false);
+    });
+  });
+
+  describe("resumePausedAssistant / projection key", () => {
+    it("reuses the paused bubble without creating a second assistant", () => {
+      const clientId = store().createAssistantMessage();
+      store().setServerMessageIdOnLastMessage("srv-1");
+      store().finalizeLastMessage();
+      expect(rt().messages).toHaveLength(1);
+      expect(rt().messages[0].isStreaming).toBe(false);
+
+      const found = store().resumePausedAssistant("srv-1");
+      expect(found).toBe(clientId);
+      expect(rt().messages).toHaveLength(1);
+      expect(rt().messages[0].id).toBe(clientId);
+      expect(rt().messages[0].serverMessageId).toBe("srv-1");
+      expect(rt().messages[0].isStreaming).toBe(true);
+      expect(rt().isGenerating).toBe(true);
+    });
+
+    it("aligns execution slot client→server on first stamp", () => {
+      const clientId = store().createAssistantMessage();
+      useExecutionStore.getState().startExecution(
+        {
+          id: "exec-1",
+          planType: "multi_agent",
+          taskSummary: "t",
+          agents: [{ id: "a1", role: "r", modelPreference: "fast" }],
+          runs: [{ id: "r1", agentId: "a1", task: "t", dependsOn: [] }],
+        },
+        clientId,
+      );
+      store().setServerMessageIdOnLastMessage("srv-align");
+      expect(execRuntime(useExecutionStore.getState(), clientId).plan).toBeNull();
+      expect(
+        execRuntime(useExecutionStore.getState(), "srv-align").plan?.id,
+      ).toBe("exec-1");
     });
   });
 

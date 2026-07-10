@@ -309,6 +309,7 @@ def state_to_json(state: RunState) -> dict[str, Any]:
         "rounds": state.rounds,
         "files_touched": list(state.files_touched),
         "debrief": dict(state.debrief) if state.debrief else None,
+        "intake": dict(state.intake) if state.intake else None,
         "usage": dict(state.usage),
         "cost": dict(state.cost),
     }
@@ -333,6 +334,7 @@ def state_from_json(data: dict[str, Any]) -> RunState:
         rounds=int(data.get("rounds", 0) or 0),
         files_touched=list(data.get("files_touched") or []),
         debrief=data.get("debrief") if isinstance(data.get("debrief"), dict) else None,
+        intake=data.get("intake") if isinstance(data.get("intake"), dict) else None,
         usage=dict(data.get("usage") or {}),
         cost=dict(data.get("cost") or {}),
     )
@@ -419,6 +421,7 @@ def session_to_row(session: RunSession) -> dict[str, Any]:
         "transcript": transcript_to_json(session.transcript),
         "content": session.content,
         "recall_count": session.recall_count,
+        # partial is in-memory only (redirect salvage); durable rows are completed sessions.
     }
 
 
@@ -430,4 +433,5 @@ def session_from_row(row: Any) -> RunSession:
         transcript=transcript_from_json(row.transcript),
         content=row.content or "",
         recall_count=row.recall_count or 0,
+        partial=False,
     )

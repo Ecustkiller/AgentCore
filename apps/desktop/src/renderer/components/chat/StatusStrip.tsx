@@ -3,6 +3,7 @@ import { Badge, Button, IconButton as UiIconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { resolveTurnCost } from "@/lib/cost";
 import { formatCost, formatDuration } from "@/lib/format";
+import { acceptRunOutcome } from "@/services/runRedirect";
 import {
   lastUserMessageId,
   runRegenerate,
@@ -10,6 +11,7 @@ import {
 } from "@/services/turns";
 import {
   activeRuntime,
+  getActiveRuntime,
   selectLastAssistantCostTotal,
   useActiveGenerating,
   useConversationStore,
@@ -50,6 +52,8 @@ export interface StatusStripProps {
   /** 定向唤回「修订 vN」的回合：聊天正文不再内联版本对比大卡，改由状态条「改了 N 版」信号 chip
    *  深链画布放大态统一「对比」视图（前端UX设计.md §4.2/§6.4）。无修订 / 未提供则不出 chip。 */
   onOpenRevisions?: () => void;
+  /** 协作质量轻信号（message_end.collab）；有非零才显。 */
+  collabSummary?: string | null;
 }
 
 /**
@@ -102,6 +106,7 @@ function StripControls({
   onMaximize,
   onReplay,
   onOpenRevisions,
+  collabSummary,
 }: StatusStripProps) {
   const isRunning = execution.status === "running";
   const canReplay =
@@ -147,6 +152,13 @@ function StripControls({
           </Button>
         </SimpleTooltip>
       )}
+      {collabSummary && (
+        <SimpleTooltip label="本回合协作质量信号（明细见诊断）">
+          <span className="ml-0.5 max-w-[14rem] truncate text-xs text-muted-foreground">
+            {collabSummary}
+          </span>
+        </SimpleTooltip>
+      )}
       {/* 入口：辩论回合给醒目「打开辩论室」CTA（更可发现、直达群聊主视图），其余给通用「在画布打开」；
           二者同去处（放大态 Route A），辩论默认落群聊、回放走同一去处 + 自动播放。 */}
       <Button
@@ -169,6 +181,7 @@ function RunningStrip({
   onReplay,
   onOpenRevisions,
   onPeekRunning,
+  collabSummary,
 }: StatusStripProps) {
   const { completed, total } = execution.progress;
   const runningRuns = execution.runs.filter((r) => r.status === "running");
@@ -198,6 +211,7 @@ function RunningStrip({
           onMaximize={onMaximize}
           onReplay={onReplay}
           onOpenRevisions={onOpenRevisions}
+          collabSummary={collabSummary}
         />
       </div>
       {runningRuns.length > 0 && onPeekRunning && (
@@ -220,12 +234,62 @@ function RunningStrip({
           <span>队员广播的决定 / 提醒，见下方便签墙</span>
         </div>
       )}
+      <TeamSynthesisPreviewLine />
       <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-muted">
         <div
           className="h-full rounded-full bg-primary transition-all duration-300"
           style={{ width: total > 0 ? `${(completed / total) * 100}%` : "0%" }}
         />
       </div>
+    </div>
+  );
+}
+
+/** CEO 协调模式：多 worker 进展 / 合成草稿预览（transport-only，运行中可见）。 */
+function TeamSynthesisPreviewLine() {
+  const preview = useActiveExecField((rt) => rt.teamSynthesisPreview);
+  if (!preview) return null;
+  const blurbs = preview.workers.filter(
+    (w) => w.status !== "pending" && w.summary,
+  );
+  // update_synthesis 路径：workers=[]、text=草稿正文；确定性进度路径：text≈headline+blurbs。
+  // 有 worker 摘要时用列表；否则把 text 当草稿正文渲染（避免只见 headline、不见草稿）。
+  const draftBody =
+    blurbs.length === 0 &&
+    preview.text.trim() &&
+    preview.text.trim() !== preview.headline.trim()
+      ? preview.text.trim()
+      : null;
+  return (
+    <div
+      className="mt-2 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground"
+      data-testid="team-synthesis-preview"
+    >
+      <div className="flex items-center gap-2">
+        <Badge tone="primary" pill className="font-medium">
+          {preview.in_progress ? "进展中" : "团队进展"}
+        </Badge>
+        <span className="truncate font-medium text-foreground">
+          {preview.headline}
+        </span>
+      </div>
+      {blurbs.length > 0 && (
+        <ul className="mt-1.5 space-y-0.5 pl-0.5">
+          {blurbs.map((w) => (
+            <li key={w.run_id} className="truncate">
+              · {w.role}：{w.summary}
+            </li>
+          ))}
+        </ul>
+      )}
+      {draftBody && (
+        <p
+          className="mt-1.5 whitespace-pre-wrap text-foreground/80"
+          data-testid="team-synthesis-draft"
+        >
+          {draftBody}
+        </p>
+      )}
     </div>
   );
 }
@@ -238,6 +302,7 @@ function CompletedStrip({
   onMaximize,
   onReplay,
   onOpenRevisions,
+  collabSummary,
 }: StatusStripProps & { stopped?: boolean }) {
   const frames = useActiveExecField((rt) => rt.frames);
   const { completed, total } = execution.progress;
@@ -298,6 +363,7 @@ function CompletedStrip({
           onMaximize={onMaximize}
           onReplay={onReplay}
           onOpenRevisions={onOpenRevisions}
+          collabSummary={collabSummary}
         />
       </div>
 
@@ -326,6 +392,7 @@ function FailureStrip({
   onMaximize,
   onReplay,
   onOpenRevisions,
+  collabSummary,
 }: StatusStripProps) {
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
 
@@ -357,6 +424,7 @@ function FailureStrip({
           onMaximize={onMaximize}
           onReplay={onReplay}
           onOpenRevisions={onOpenRevisions}
+          collabSummary={collabSummary}
         />
       </div>
 
@@ -383,6 +451,23 @@ function FailureStrip({
   );
 }
 
+/** Resolve the user message that opened the focused assistant turn (救火绑聚焦回合). */
+function userMessageIdForAssistant(
+  assistantMessageId: string | null,
+): string | null {
+  if (!assistantMessageId) return lastUserMessageId();
+  const msgs = getActiveRuntime().messages;
+  const idx = msgs.findIndex(
+    (m) =>
+      m.id === assistantMessageId || m.serverMessageId === assistantMessageId,
+  );
+  if (idx <= 0) return lastUserMessageId();
+  for (let i = idx - 1; i >= 0; i--) {
+    if (msgs[i].role === "user") return msgs[i].id;
+  }
+  return lastUserMessageId();
+}
+
 /**
  * Shared failure-recovery row: 重试 / 放弃. Reused by failure and partial-failure
  * strips, and by the canvas 指挥台 ({@link CanvasDecisionPanel}).
@@ -398,19 +483,32 @@ export function RecoveryActions({
 }) {
   const isGenerating = useActiveGenerating();
   const messageId = useExecutionScope();
+  const conversationId = useConversationStore((s) => s.currentConversationId);
 
   const onRetryFailed = () => {
-    const id = lastUserMessageId();
+    const id = userMessageIdForAssistant(messageId);
     if (id) void runRetryFailed(id);
   };
 
   const onRegenerate = () => {
-    const id = lastUserMessageId();
+    const id = userMessageIdForAssistant(messageId);
     if (id) void runRegenerate(id);
   };
 
   const onAbandon = () => {
-    if (messageId) useExecutionStore.getState().clearExecution(messageId);
+    if (!messageId) return;
+    // 忽略可审计：best-effort 记一条 recovery_ignored（turn 级），再清本地投影。
+    if (conversationId) {
+      void acceptRunOutcome(conversationId, {
+        messageId,
+        runId: messageId,
+        reason: "recovery_ignored",
+        note: "用户在救火行选择忽略",
+      }).catch(() => {
+        /* local clear still proceeds */
+      });
+    }
+    useExecutionStore.getState().clearExecution(messageId);
   };
 
   return (

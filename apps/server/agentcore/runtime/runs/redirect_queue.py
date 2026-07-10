@@ -1,9 +1,13 @@
-"""Turn-scoped queue for user-initiated worker redirects (中间可见性 Phase 2a).
+"""Turn-scoped queue for user-initiated worker redirects (跑一半改方向).
 
 While ``delegate`` is driving, the CEO coroutine is blocked — user mid-flight steer
 must arrive on a separate channel. This module holds pending ``(execution_id, run_id,
-feedback)`` requests until the WaveScheduler / drive loop drains them (Step 2:
-cancel + cold re-run). Step 1: enqueue + log only.
+feedback)`` requests until the WaveScheduler / drive loop drains them.
+
+Drive semantics (热优先 · 冷诚实回落):
+- cancel the target worker (``task.cancel("redirect")``) + salvage partial transcript
+- if salvage clears the hot gate → ``continue_run`` on the same author (revision chain)
+- else → cold ``{run_id}_redir`` with ``replaces_run_id`` + ``steer`` (接手, not parallel)
 """
 
 from __future__ import annotations
@@ -43,9 +47,9 @@ def enqueue_redirect(
 
 def take_redirects(execution_id: str) -> list[RunRedirectRequest]:
     """Drain and return all pending redirects for ``execution_id`` (FIFO)."""
-    return _pending.pop(execution_id, [])
+    return _pending.pop(execution_id.strip(), [])
 
 
 def peek_redirect_count(execution_id: str) -> int:
-    """Pending redirect count (tests / diagnostics)."""
-    return len(_pending.get(execution_id, []))
+    """How many redirects are queued for ``execution_id`` (does not drain)."""
+    return len(_pending.get(execution_id.strip(), []))

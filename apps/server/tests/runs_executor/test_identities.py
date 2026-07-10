@@ -287,20 +287,22 @@ async def test_escalate_tool_rejects_empty_question_and_acks_otherwise():
 
 async def test_escalate_invokes_on_escalate_callback_with_triple():
     # 升级实时可见: the tool hands the executor-provided live channel its (question,
-    # assumption, blocking) triple. An empty question is rejected BEFORE any emit.
+    # assumption, blocking, kind) quadruple. An empty question is rejected BEFORE any emit.
     tool = EscalateTool()
-    seen: list[tuple[str, str, bool]] = []
-    ctx = replace(_ctx(), on_escalate=lambda q, a, b: seen.append((q, a, b)))
+    seen: list[tuple[str, str, bool, str]] = []
+    ctx = replace(
+        _ctx(), on_escalate=lambda q, a, b, k="normal": seen.append((q, a, b, k))
+    )
     await tool.execute({"question": "  "}, ctx)
     assert seen == []  # rejected first, nothing surfaced
     await tool.execute({"question": "Q?", "assumption": "暂定 A", "blocking": True}, ctx)
-    assert seen == [("Q?", "暂定 A", True)]
+    assert seen == [("Q?", "暂定 A", True, "normal")]
 
 
 async def test_escalate_callback_failure_is_non_fatal():
     # The durable path (transcript → RunState.escalations) is unconditional, so a live-emit
     # hiccup must never sink the escalation or the worker — the tool still ACKs CONTINUE.
-    def _boom(_q: str, _a: str, _b: bool) -> None:
+    def _boom(_q: str, _a: str, _b: bool, _k: str = "normal") -> None:
         raise RuntimeError("sink closed")
 
     ctx = replace(_ctx(), on_escalate=_boom)

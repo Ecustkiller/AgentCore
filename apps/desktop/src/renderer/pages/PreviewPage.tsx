@@ -57,7 +57,7 @@ export function PreviewPage() {
   // Render surface (`#/preview?s=…&view=canvas`): chat (default) replays into
   // `ChatView`; canvas mounts the real canvas layout (`ConversationCanvas` +
   // `SidePanel`) so the canvas-only chrome — the team graph and the 指挥台
-  // `CommandRegion` pinned atop the side panel (前端UX设计.md §6.2) — is eyeball-able
+  // fixed tab in the side panel (前端UX设计.md §6.2) — is eyeball-able
   // and shoot-gated too, not just the chat surface. URL-driven so the harness can
   // deep-link it and a human can bookmark it.
   const view = searchParams.get("view") === "canvas" ? "canvas" : "chat";
@@ -189,9 +189,8 @@ export function PreviewPage() {
     };
   }, []);
 
-  // After replay lands, honor `?zoom=` by focusing the team turn into the canvas 放大态
-  // (the `pendingCanvasFocus` bridge `useCanvasZoom` consumes). Runs after the replay
-  // effect above so the turn exists; the short delay lets the canvas lay the node out.
+  // After replay lands, honor `?zoom=` — production uses turn-detail route;
+  // preview still calls the UI-store stub until preview is rewired.
   // biome-ignore lint/correctness/useExhaustiveDependencies: frame is an intentional re-run key — re-focus after each replay frame lands.
   useEffect(() => {
     if (view !== "canvas" || !zoom || !selected) return;
@@ -364,8 +363,7 @@ export function PreviewPage() {
         {view === "canvas" ? (
           // Mirror ConversationPage's canvas layout: the canvas takes the main
           // column and the unified SidePanel docks on the right (where the 指挥台
-          // CommandRegion auto-surfaces atop the tabs). Same flat row, so the region
-          // caps + self-scrolls exactly as it does in the app.
+          // is a fixed second tab; auto-surface = openPanel + badge, no tab steal).
           <div className="relative flex min-h-0 flex-1">
             <ConversationCanvas />
             <SidePanel />

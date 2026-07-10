@@ -45,6 +45,9 @@ class EventType(StrEnum):
     QUESTION_POSTED = "question_posted"
     PLAN_REVIEW_REQUIRED = "plan_review_required"
     PLAN_REVIEW_RESOLVED = "plan_review_resolved"
+    # 团队预审薄预览: first-wave gate before workers start (≠ 波间 plan_review).
+    TEAM_PREVIEW_REQUIRED = "team_preview_required"
+    TEAM_PREVIEW_RESOLVED = "team_preview_resolved"
     PLAN_REVISED = "plan_revised"
     WORKSPACE_OP_REQUIRED = "workspace_op_required"
     # AI 协作白板 (AI协作白板.md §六 M2): a transport-only client-tool request — the
@@ -71,10 +74,27 @@ class EventType(StrEnum):
     RUN_REASONING_DELTA = "run_reasoning_delta"
     RUN_COMPLETED = "run_completed"
     RUN_FAILED = "run_failed"
+    # 跑一半改方向 / 整轮停止：单 run 被中断（与 run_failed 正交）。
+    # reason=redirect → 用户「立即改此人」；reason=stop → 整轮 abort。
+    RUN_CANCELLED = "run_cancelled"
     RUN_PROGRESS = "run_progress"
     RUN_TOOL_PROGRESS = "run_tool_progress"
     BATCH_METRICS = "batch_metrics"
     RUN_ESCALATION = "run_escalation"
+    # Worker 内部路由 Phase 1：Intake 轻量计划头（复杂度 / 策略 / token 预算）。
+    # 挂在 run 上、与 run_context 同属「开跑前元信息」；DURABLE 以便 reload 重现诊断。
+    RUN_INTAKE = "run_intake"
+    # Worker 内部路由 Phase 1：Escalation Gate 方案层判定（确定性后置检查，正交于
+    # 模型主动 escalate → run_escalation）。DERIVED：耐久记录仍走 ESCALATION_REQUIRED
+    # / RunState.escalations；本事件是实时诊断信号。
+    RUN_ESCALATION_GATE = "run_escalation_gate"
+    # Worker 内部路由 Phase 2：顺序分裂——压力触发后的评估结果（是否分裂 / 子任务列表）。
+    # DURABLE：reload 可重放「为何分裂」诊断；Sub-Worker 明细另见 started/completed。
+    RUN_SPLIT_ASSESSED = "run_split_assessed"
+    # Worker 内部路由 Phase 2：单个 Sub-Worker 启动（顺序分裂链中的一环）。
+    RUN_SUBWORKER_STARTED = "run_subworker_started"
+    # Worker 内部路由 Phase 2：单个 Sub-Worker 完成（结果摘要折叠进父 journal）。
+    RUN_SUBWORKER_COMPLETED = "run_subworker_completed"
     ESCALATION_REQUIRED = "escalation_required"
     ESCALATION_RESOLVED = "escalation_resolved"
     # 团队便签墙 (§2.2 通): a worker pinned a short note (我定了 X / 提个醒 Y) to the batch
@@ -82,6 +102,11 @@ class EventType(StrEnum):
     # RUN_PLAN, a surface type), so the team-notes panel replays on reload; folded onto the
     # ProjectedTurn so both ends render it (conformance-visible, unlike transport-only board ops).
     TEAM_NOTE_POSTED = "team_note_posted"
+    # CEO 协调模式 Phase 1：多 worker 委派期间的确定性团队进展摘要（模板拼接，不调 LLM）。
+    # Transport-only（EPHEMERAL）——验证「渐进可见性」产品信号；不进 journal / ProjectedTurn，
+    # 避免污染终稿气泡。Phase 2 若升级为 CEO update_synthesis 草稿通道再另定契约。
+    # → 见 docs/03-AI核心/编排器与CEO主Agent.md §协调模式（合成通道）
+    TEAM_SYNTHESIS_PREVIEW = "team_synthesis_preview"
     DEBATE_RESULT = "debate_result"
     DEBATE_ROUND_STARTED = "debate_round_started"
     DEBATE_ROUND = "debate_round"

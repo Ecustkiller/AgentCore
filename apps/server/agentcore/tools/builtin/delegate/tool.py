@@ -327,6 +327,13 @@ class DelegateTool:
             complexity_hint=complexity_hint,
             call_idx=call_idx,
             completion_criteria=arguments.get("completion_criteria"),
+            # Omit → True（默认协调）；显式 false → 经典阻塞。勿用 bool(get())，
+            # 否则缺省会落成 False，与 schema default 不一致。
+            coordinate=(
+                bool(arguments["coordinate"])
+                if "coordinate" in arguments
+                else True
+            ),
         )
 
     async def _drive(
@@ -364,8 +371,25 @@ class DelegateTool:
 
         if decision is CheckpointDecision.ADJUST and note.strip():
             apply_steer(plan, seed_completed, checkpoint_run_ids, note.strip())
+        # Resume never re-runs the original execute() path, so re-emit run_plan here:
+        # the frontend drops the pause bubble on message_start and must re-bind the DAG
+        # under the new streaming assistant before worker frames arrive.
+        self._sink.emit(plan_event(self, execution_id, plan))
+        logger.info(
+            "delegate.resume_plan",
+            execution_id=execution_id,
+            decision=decision.value,
+            nodes=len(plan.nodes),
+        )
+        # coordinate=False 恒真且正确，非漏配：plan_review/team_preview 挂起帧只可能出自
+        # 经典（非协调）路径——协调 gate（should_enter_coordination）在 preview/波边界
+        # checkpoint 之前就臂起后台协调并 return（drive.py），协调态下波边界暂停只化作
+        # BOUNDARY_YIELD 协调事件（host.py）、绝不生成 TurnSuspension。故被 resume 的
+        # plan_review/team_preview 帧按定义即经典 run，续跑保持经典。协调 run 仅经 ask_user
+        # 挂起，其 resume 在 settle.py 重建 CoordinationSession。
         return await drive(
-            self, plan, execution_id=execution_id, seed_completed=seed_completed, finalize=False
+            self, plan, execution_id=execution_id, seed_completed=seed_completed, finalize=False,
+            coordinate=False,
         )
 
     async def replan(self, arguments: dict[str, Any]) -> ToolResult:
@@ -460,6 +484,7 @@ class DelegateTool:
             execution_id=sup.execution_id,
             seed_completed=sup.completed,
             finalize=sup.finalize,
+            coordinate=False,
         )
 
     async def dispose_open_supervised(self) -> ToolResult | None:

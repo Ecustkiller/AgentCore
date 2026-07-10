@@ -36,7 +36,7 @@ def _plan_revised(sink: _CapturingSink) -> list[SSEEvent]:
 async def test_late_bind_yields_brief_then_replan_resumes_to_terminal():
     provider = Provider(["AOUT", "BOUT"])
     t = tool(provider)
-    first = await t.execute({"tasks": LATE_BIND_DAG}, ctx())
+    first = await t.execute({"tasks": LATE_BIND_DAG, "coordinate": False}, ctx())
 
     assert first.success is True
     assert first.is_terminal is False
@@ -77,7 +77,7 @@ async def test_replan_binds_and_steers_pending_downstream():
         {"id": "b", "role": "待定", "task": "占位", "depends_on": ["a"], "bind_after_deps": True},
         {"id": "c", "role": "整合", "task": "整合下游", "depends_on": ["b"]},
     ]
-    await t.execute({"tasks": tasks}, ctx())
+    await t.execute({"tasks": tasks, "coordinate": False}, ctx())
     sup = t._supervised
     bind_id = sup.boundary_run_ids[0]
     c_id = next(n.run_id for n in sup.plan.nodes if n.role == "整合")
@@ -103,7 +103,7 @@ async def test_replan_binds_and_steers_pending_downstream():
 async def test_replan_stop_wraps_up_partial_without_running_tail():
     provider = Provider(["AOUT", "BOUT"])
     t = tool(provider)
-    await t.execute({"tasks": LATE_BIND_DAG}, ctx())
+    await t.execute({"tasks": LATE_BIND_DAG, "coordinate": False}, ctx())
 
     result = await t.replan({"stop": True})
 
@@ -123,7 +123,7 @@ async def test_replan_without_supervised_run_errors():
 
 async def test_replan_requires_binds_or_stop():
     t = tool(Provider(["AOUT"]))
-    await t.execute({"tasks": LATE_BIND_DAG}, ctx())
+    await t.execute({"tasks": LATE_BIND_DAG, "coordinate": False}, ctx())
     result = await t.replan({})
     assert result.success is False
     assert t._supervised is not None
@@ -131,7 +131,7 @@ async def test_replan_requires_binds_or_stop():
 
 async def test_replan_rejects_unknown_bind_and_keeps_run_open():
     t = tool(Provider(["AOUT", "BOUT"]))
-    await t.execute({"tasks": LATE_BIND_DAG}, ctx())
+    await t.execute({"tasks": LATE_BIND_DAG, "coordinate": False}, ctx())
     result = await t.replan({"binds": [{"run_id": "nope", "role": "写手", "task": "写报告"}]})
     assert result.success is False
     assert "不在当前计划" in result.output
@@ -146,7 +146,8 @@ async def test_plain_dag_runs_straight_through_without_yielding():
             "tasks": [
                 {"id": "a", "role": "研究员", "task": "调研"},
                 {"id": "b", "role": "写手", "task": "撰写", "depends_on": ["a"]},
-            ]
+            ],
+            "coordinate": False,
         },
         ctx(),
     )
@@ -158,7 +159,7 @@ async def test_plain_dag_runs_straight_through_without_yielding():
 async def test_scope_escalation_yields_brief_then_replan_steers_resumes():
     provider = ScopeProvider()
     t = scope_tool(provider)
-    first = await t.execute({"tasks": SCOPE_DAG}, ctx())
+    first = await t.execute({"tasks": SCOPE_DAG, "coordinate": False}, ctx())
 
     assert first.success is True
     assert first.is_terminal is False
@@ -201,7 +202,7 @@ async def test_dep_escalation_yields_brief_then_replan_add_resumes():
     # adds the missing step and the plan resumes on the same DAG.
     provider = DepProvider()
     t = scope_tool(provider)
-    first = await t.execute({"tasks": SCOPE_DAG}, ctx())
+    first = await t.execute({"tasks": SCOPE_DAG, "coordinate": False}, ctx())
 
     assert first.success is True
     assert first.is_terminal is False
@@ -231,7 +232,7 @@ async def test_dep_escalation_yields_brief_then_replan_add_resumes():
 async def test_scope_replan_bare_resume_runs_tail_unchanged():
     provider = ScopeProvider()
     t = scope_tool(provider)
-    await t.execute({"tasks": SCOPE_DAG}, ctx())
+    await t.execute({"tasks": SCOPE_DAG, "coordinate": False}, ctx())
     assert t._supervised is not None
 
     result = await t.replan({})
@@ -253,7 +254,7 @@ async def test_replan_bind_and_steer_emits_plan_revised_trace():
         {"id": "b", "role": "待定", "task": "占位", "depends_on": ["a"], "bind_after_deps": True},
         {"id": "c", "role": "整合", "task": "整合下游", "depends_on": ["b"]},
     ]
-    await t.execute({"tasks": tasks}, ctx())
+    await t.execute({"tasks": tasks, "coordinate": False}, ctx())
     sup = t._supervised
     bind_id = sup.boundary_run_ids[0]
     c_id = next(n.run_id for n in sup.plan.nodes if n.role == "整合")
@@ -279,7 +280,7 @@ async def test_replan_node_both_bound_and_steered_reports_bind():
     # (bind wins) — one entry, kind=bind, never a duplicate or a steer.
     sink = _CapturingSink()
     t = tool(Provider(["AOUT", "BOUT"]), sink=sink)
-    await t.execute({"tasks": LATE_BIND_DAG}, ctx())
+    await t.execute({"tasks": LATE_BIND_DAG, "coordinate": False}, ctx())
     sup = t._supervised
     bind_id = sup.boundary_run_ids[0]
 
@@ -302,7 +303,7 @@ async def test_scope_bare_resume_emits_no_plan_revised():
     sink = _CapturingSink()
     t = scope_tool(ScopeProvider())
     t._sink = sink  # scope_tool builds its own sink; swap in the capturing one
-    await t.execute({"tasks": SCOPE_DAG}, ctx())
+    await t.execute({"tasks": SCOPE_DAG, "coordinate": False}, ctx())
     assert t._supervised is not None
 
     result = await t.replan({})
@@ -315,7 +316,7 @@ async def test_replan_stop_emits_no_plan_revised():
     # stop=true收口 (no binds/steers) is not a plan adjustment — no「计划已调整」trace.
     sink = _CapturingSink()
     t = tool(Provider(["AOUT", "BOUT"]), sink=sink)
-    await t.execute({"tasks": LATE_BIND_DAG}, ctx())
+    await t.execute({"tasks": LATE_BIND_DAG, "coordinate": False}, ctx())
 
     result = await t.replan({"stop": True})
 
@@ -331,7 +332,7 @@ async def test_dispose_open_supervised_folds_completed_work_then_releases():
 
     provider = Provider(["AOUT", "BOUT"], usage=TokenUsage(input_tokens=100, output_tokens=20))
     t = tool(provider)
-    first = await t.execute({"tasks": LATE_BIND_DAG}, ctx())
+    first = await t.execute({"tasks": LATE_BIND_DAG, "coordinate": False}, ctx())
     assert first.is_terminal is False
     assert t._supervised is not None
     assert t.usage.get("input", 0) == 0  # yield path left the upstream's tokens un-folded
@@ -363,7 +364,7 @@ async def test_scope_yield_rejournals_consumed_for_durable_seed():
     token = current_fact_log.set(log)
     try:
         t = scope_tool(ScopeProvider())
-        await t.execute({"tasks": SCOPE_DAG}, ctx())
+        await t.execute({"tasks": SCOPE_DAG, "coordinate": False}, ctx())
     finally:
         current_fact_log.reset(token)
 
@@ -402,7 +403,7 @@ async def test_partial_failure_stashes_plan_and_replan_add_resumes(monkeypatch):
         {"id": "a", "role": "A", "task": "task a"},
         {"id": "b", "role": "B", "task": "task b"},
     ]
-    first = await t.execute({"tasks": tasks}, ctx())
+    first = await t.execute({"tasks": tasks, "coordinate": False}, ctx())
 
     assert first.success is True
     assert "failed" in first.output

@@ -8,7 +8,7 @@ layer that makes that pause **durable**: a frozen frame carrying everything
 
 Two suspend points are persisted, sharing one frame via a ``kind`` discriminated
 union (base :class:`TurnSuspension` + :class:`PlanReviewSuspension` /
-:class:`AskUserSuspension`):
+:class:`AskUserSuspension` / :class:`TeamPreviewSuspension`):
 
 - **plan_review** — the ``WaveScheduler`` paused at a wave boundary after a
   ``checkpoint_after`` step (inside ``delegate``). Resume re-drives the remaining
@@ -17,6 +17,11 @@ union (base :class:`TurnSuspension` + :class:`PlanReviewSuspension` /
   ``pending`` (display re-render): the ``plan`` (with minted run_ids) and the
   finished-worker ``completed`` seed are BOTH re-projected from the journal on resume
   (``plan_from_journal`` / ``completed_from_journal``), not serialized — 执行级事件溯源 Phase 2.
+- **team_preview** — the first ``delegate`` wave paused BEFORE any worker starts
+  (thin team preview). Resume uses the same ``delegate.resume_plan`` substrate as
+  plan_review (continue / adjust-steer / stop-skip), with an empty ``completed`` seed
+  and empty ``checkpoint_run_ids`` so an adjust steers every not-yet-run node. Carries
+  the ``workers`` card rows (role / task / depends_on / debate).
 - **ask_user** — the CEO paused mid-loop on its ``ask_user`` checkpoint (the one
   asking primitive — opening 引导 or mid-task fork). Resume maps the user's answer
   to the ``ask_user`` tool result and continues the CEO loop (no plan tail). Carries
@@ -30,9 +35,11 @@ the ``base_system_prompt`` + ``user_message`` (to re-wire the CEO toolset), and 
 ``checkpoint_id`` (so resume re-emits the resolution).
 
 The journal-so-far is NOT in the frame: it is the §8.3 ``turn_journal`` (唯一事实源),
-written at pause and re-hydrated onto :attr:`TurnSuspension.journal` when the resume
-claims the frame (see ``runtime/suspension_persistence.py``). The frame thus carries
-only the resume *control* state, not a second copy of the replay stream.
+written at pause and re-hydrated onto :attr:`TurnSuspension.journal_entries` when the
+resume claims the frame (see ``runtime/suspension_persistence.py``). The display
+:attr:`TurnSuspension.journal` (the resume seed) is a DERIVED projection of those
+entries — a property, never stored (P0-B Phase 3). The frame thus carries only the
+resume *control* state, not a second copy of the replay stream.
 
 The frame is captured by the suspending face (the ``delegate`` checkpoint hook /
 ``AskUserTool``) — both read the live CEO transcript off :data:`captain_transcript`,
@@ -42,18 +49,20 @@ published by the captain executor — and persisted by
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentcore.runtime.checkpoints import AskCheckpointIntent
+from agentcore.runtime.interaction import InteractionKind
 
-# NOTE: serialize helpers are imported lazily inside to_json / from_json so this
-# module stays import-light (stdlib only at import time). The captain executor —
-# itself imported during the ``runs`` package init — imports ``captain_transcript``
-# from here, so a top-level ``runs.serialize`` import could risk an init-order cycle.
+# NOTE: serialize helpers are imported lazily inside from_json codecs so this
+# module stays import-light (stdlib + interaction at import time). The captain
+# executor — itself imported during the ``runs`` package init — imports
+# ``captain_transcript`` from here, so a top-level ``runs.serialize`` import
+# could risk an init-order cycle.
 
 if TYPE_CHECKING:
     from agentcore.llm.provider.protocol import LLMMessage
@@ -84,16 +93,30 @@ captain_transcript: ContextVar[list[LLMMessage] | None] = ContextVar(
 turn_history: ContextVar[list[dict[str, Any]] | None] = ContextVar("turn_history", default=None)
 
 
+# InteractionKind members that persist to ``paused_turns`` (设计 §4.7). Single source
+# for the durable set — :class:`SuspensionKind` values are taken from these members
+# (not hand-copied strings). Approval / client_tool / escalation / debate_round /
+# delegation_authorization stay in-memory only.
+DURABLE_INTERACTION_KINDS: frozenset[InteractionKind] = frozenset(
+    {
+        InteractionKind.PLAN_REVIEW,
+        InteractionKind.ASK_USER,
+        InteractionKind.TEAM_PREVIEW,
+    }
+)
+
+
 class SuspensionKind(StrEnum):
     """Which suspend point a durable frame captured (the JSON discriminator).
 
-    Values match the corresponding :class:`~agentcore.runtime.interaction.InteractionKind`
-    so the persisted ``kind`` reads the same across the live bridge and the frame.
-    Only these two suspend points are persisted (approval / client_tool stay
-    in-memory — see 设计 §4.7)."""
+    Values are derived from the matching :class:`~agentcore.runtime.interaction.InteractionKind`
+    members in :data:`DURABLE_INTERACTION_KINDS` so the persisted ``kind`` reads the
+    same across the live bridge and the frame — no string hand-copy.
+    """
 
-    PLAN_REVIEW = "plan_review"
-    ASK_USER = "ask_user"
+    PLAN_REVIEW = InteractionKind.PLAN_REVIEW.value
+    ASK_USER = InteractionKind.ASK_USER.value
+    TEAM_PREVIEW = InteractionKind.TEAM_PREVIEW.value
 
 
 @dataclass(kw_only=True)
@@ -148,26 +171,37 @@ class TurnSuspension:
     # persists it in its local frame record (set here from the ``turn_history`` contextvar at
     # capture). NOT serialized into the cloud ``paused_turns.frame``.
     history: list[dict[str, Any]] = field(default_factory=list)
-    # The team-graph journal up to and including the pause's ``*_required`` event. A
-    # transient in-memory carrier ONLY: it is persisted to the ``turn_journal`` table
-    # (唯一事实源, §8.3) — NOT into ``paused_turns.frame`` — and re-hydrated here when
-    # the resume claims the frame, so the resumed turn replays the whole graph.
-    journal: list[dict[str, Any]] = field(default_factory=list)
-    # The same pause point as the §8.3 fact-log stream: the turn's single ordered log
-    # (execution facts — turn_started / round_boundary / llm_call — interleaved with the
-    # forwarded display facts) up to and including the suspending ``*_required`` event.
-    # Like :attr:`journal` a transient carrier ONLY (NOT serialized into the frame): the
-    # suspending face captures it from the ambient ``current_fact_log`` so the pause
-    # persists the EXECUTION-level stream (``window_from_journal``-rebuildable), and
-    # :func:`claim_paused_turn` re-hydrates it. Supersedes :attr:`journal` as the persist
-    # source when present; the display ``journal`` remains the degraded fallback (no log
-    # bound) and the resume seed (re-derived from the loaded stream on claim).
+    # The §8.3 fact-log stream: the turn's single ordered log (execution facts —
+    # turn_started / round_boundary / llm_call — interleaved with the forwarded display
+    # facts) up to and including the suspending ``*_required`` event. THE 唯一权威载体 for
+    # the replay stream (P0-B Phase 3): a transient in-memory carrier (NOT serialized into
+    # ``paused_turns.frame``) that the suspending face captures from the ambient
+    # ``current_fact_log`` (``window_from_journal``-rebuildable) and both hydration paths
+    # re-hydrate — the cloud from ``turn_journal`` (:func:`claim_paused_turn`), the Sidecar
+    # from its local frame record. The display :attr:`journal` (resume seed) is DERIVED from
+    # this (a property), never stored independently, so cloud + sidecar seed identically.
     journal_entries: list[dict[str, Any]] = field(default_factory=list)
     # Set when the best-effort ``turn_journal`` mirror failed at pause time. Resume
     # checks this to surface a clear error instead of silently rebuilding an empty CEO
     # window (the frame alone is not enough without the journal facts).
     journal_degraded: bool = False
     trace_id: str | None = None
+
+    @property
+    def journal(self) -> list[dict[str, Any]]:
+        """DISPLAY replay events for the resume seed — a DERIVED projection of
+        :attr:`journal_entries` (P0-B Phase 3: single fact source).
+
+        Was a stored field that could drift from the fact stream (the Sidecar kept a
+        surface-gate-truncated live copy; the cloud already derived). Now both hydration
+        paths read this projection, so the cloud and Sidecar resume seeds are byte-for-byte
+        identical. ``runs_from_entries`` is imported lazily to keep this module import-light
+        (see the module docstring).
+        """
+        from agentcore.runtime.journal import runs_from_entries
+
+        runs = runs_from_entries(self.journal_entries)
+        return list((runs or {}).get("events") or [])
 
     def _base_json(self) -> dict[str, Any]:
         """The shared fields (incl. the ``kind`` discriminator) for ``paused_turns.frame``."""
@@ -183,18 +217,23 @@ class TurnSuspension:
             "user_message": self.user_message,
             "folder_id": self.folder_id,
             "memory_enabled": self.memory_enabled,
-            # NOTE: ``transcript`` / ``history`` / ``journal`` / ``journal_entries`` are
-            # deliberately NOT serialized into the frame (执行级事件溯源 Phase 2 ⑤): the CEO
-            # window is rebuilt by ``window_from_journal`` from the turn_journal facts (§8.3)
-            # + reloaded history, so the frame holds only resume CONTROL metadata. See the
-            # module docstring + ``runtime/journal.py``.
+            # NOTE: ``transcript`` / ``history`` / ``journal_entries`` are deliberately NOT
+            # serialized into the frame (执行级事件溯源 Phase 2 ⑤): the CEO window is rebuilt by
+            # ``window_from_journal`` from the turn_journal facts (§8.3) + reloaded history, so
+            # the frame holds only resume CONTROL metadata. The display ``journal`` is a derived
+            # property (never stored). See the module docstring + ``runtime/journal.py``.
             "journal_degraded": self.journal_degraded,
             "trace_id": self.trace_id,
         }
 
     def to_json(self) -> dict[str, Any]:
-        """Flatten to the JSON dict stored in ``paused_turns.frame`` (subclasses extend)."""
-        return self._base_json()
+        """Flatten to the JSON dict stored in ``paused_turns.frame``.
+
+        Kind-specific extras come from :data:`SUSPENSION_KIND_CODECS` (single
+        registration site — not duplicated per subclass).
+        """
+        codec = SUSPENSION_KIND_CODECS[self.kind]
+        return {**self._base_json(), **codec.frame_extras(self)}
 
     @staticmethod
     def _base_kwargs(data: dict[str, Any]) -> dict[str, Any]:
@@ -213,10 +252,11 @@ class TurnSuspension:
             # Legacy frames (pre-field) lack the key → default True so a resume never silently
             # strips memory that the original turn had on.
             "memory_enabled": data.get("memory_enabled", True),
-            # NOTE: ``transcript`` / ``history`` / ``journal`` / ``journal_entries`` are NOT
-            # in the frame (Phase 2 ⑤) — the CEO window is rebuilt from the turn_journal facts
-            # on claim (``window_from_journal``), so they default empty here. The Sidecar's
-            # local record carries journal_entries + history separately (it has no DB).
+            # NOTE: ``transcript`` / ``history`` / ``journal_entries`` are NOT in the frame
+            # (Phase 2 ⑤) — the CEO window is rebuilt from the turn_journal facts on claim
+            # (``window_from_journal``), so they default empty here; the display ``journal`` is a
+            # derived property (never stored). The Sidecar's local record carries journal_entries
+            # + history separately (it has no DB).
             "journal_degraded": bool(data.get("journal_degraded")),
             "trace_id": data.get("trace_id"),
         }
@@ -256,19 +296,28 @@ class PlanReviewSuspension(TurnSuspension):
         scopes to (its not-yet-run transitive dependents)."""
         return {s["run_id"] for s in self.steps if "run_id" in s}
 
-    def to_json(self) -> dict[str, Any]:
-        data = self._base_json()
-        # NOTE: NEITHER ``plan`` NOR ``completed`` is serialized (执行级事件溯源 Phase 2): the
-        # delegate journals a ``plan_snapshot`` fact + a run-final fact per worker, so resume
-        # rebuilds both from the journal (``plan_from_journal`` / ``completed_from_journal``,
-        # gated by the conformance golden). Both stay in-memory carriers (the delegate captures
-        # them live for that golden) but off the frame — only the reviewed ``steps`` / gated
-        # ``pending`` (display re-render on reopen) ride along.
-        data.update(
-            steps=list(self.steps),
-            pending=list(self.pending),
-        )
-        return data
+
+@dataclass(kw_only=True)
+class TeamPreviewSuspension(TurnSuspension):
+    """A turn frozen at a ``team_preview`` gate — first-wave preview before workers start.
+
+    Same resume substrate as :class:`PlanReviewSuspension` (``delegate.resume_plan``), but
+    the card shows upcoming workers rather than completed checkpoint steps. ``plan`` /
+    ``completed`` are in-memory carriers only (journal rebuild on claim); ``workers`` rides
+    the frame for resume-card re-render.
+    """
+
+    kind: ClassVar[SuspensionKind] = SuspensionKind.TEAM_PREVIEW
+
+    plan: RunPlan
+    completed: dict[str, RunState] = field(default_factory=dict)
+    # Upcoming workers the user is confirming ({run_id, role, task, depends_on, debate}).
+    workers: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def checkpoint_run_ids(self) -> set[str]:
+        """Empty roots → ``apply_steer`` targets every not-yet-run node (all workers)."""
+        return set()
 
 
 @dataclass(kw_only=True)
@@ -293,48 +342,172 @@ class AskUserSuspension(TurnSuspension):
     style_options: list[dict[str, Any]] = field(default_factory=list)
     intent: AskCheckpointIntent = "decision"
 
-    def to_json(self) -> dict[str, Any]:
-        data = self._base_json()
-        data.update(
-            question=self.question,
-            context=self.context,
-            assumptions=list(self.assumptions),
-            questions=list(self.questions),
-            style_options=list(self.style_options),
-            intent=self.intent,
-        )
-        return data
+
+# ---------------------------------------------------------------------------
+# Per-kind codec registry (S2) — single site for frame extras + wire summary.
+# Adding a durable kind: extend DURABLE_INTERACTION_KINDS + SuspensionKind, add
+# a subclass, register one SuspensionKindCodec here. Cloud + sidecar summaries
+# and suspension_from_json all read this table (no getattr duck typing).
+# ---------------------------------------------------------------------------
+
+# Shared empty slots for the resume-card wire shape (unused keys stay empty for
+# the other kinds — mirrors historical cloud/sidecar paused_summary posture).
+_EMPTY_SUMMARY_EXTRAS: dict[str, Any] = {
+    "steps": [],
+    "pending": [],
+    "workers": [],
+    "question": "",
+    "context": "",
+    "assumptions": [],
+    "questions": [],
+    "style_options": [],
+    "intent": None,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class SuspensionKindCodec:
+    """One durable kind's frame serialization + summary projection."""
+
+    kind: SuspensionKind
+    cls: type[TurnSuspension]
+    frame_extras: Callable[[TurnSuspension], dict[str, Any]]
+    from_extras: Callable[[dict[str, Any]], dict[str, Any]]
+    summary_extras: Callable[[TurnSuspension], dict[str, Any]]
+
+
+def _plan_review_frame_extras(s: TurnSuspension) -> dict[str, Any]:
+    assert isinstance(s, PlanReviewSuspension)
+    # NOTE: NEITHER ``plan`` NOR ``completed`` is serialized (执行级事件溯源 Phase 2).
+    return {"steps": list(s.steps), "pending": list(s.pending)}
+
+
+def _plan_review_from_extras(data: dict[str, Any]) -> dict[str, Any]:
+    from agentcore.runtime.runs.serialize import plan_from_json
+
+    # Empty RunPlan placeholder (field required); resume fold replaces from journal.
+    return {
+        "plan": plan_from_json({}),
+        "steps": list(data.get("steps") or []),
+        "pending": list(data.get("pending") or []),
+    }
+
+
+def _plan_review_summary_extras(s: TurnSuspension) -> dict[str, Any]:
+    assert isinstance(s, PlanReviewSuspension)
+    return {**_EMPTY_SUMMARY_EXTRAS, "steps": list(s.steps), "pending": list(s.pending)}
+
+
+def _team_preview_frame_extras(s: TurnSuspension) -> dict[str, Any]:
+    assert isinstance(s, TeamPreviewSuspension)
+    return {"workers": list(s.workers)}
+
+
+def _team_preview_from_extras(data: dict[str, Any]) -> dict[str, Any]:
+    from agentcore.runtime.runs.serialize import plan_from_json
+
+    return {
+        "plan": plan_from_json({}),
+        "workers": list(data.get("workers") or []),
+    }
+
+
+def _team_preview_summary_extras(s: TurnSuspension) -> dict[str, Any]:
+    assert isinstance(s, TeamPreviewSuspension)
+    return {**_EMPTY_SUMMARY_EXTRAS, "workers": list(s.workers)}
+
+
+def _ask_user_frame_extras(s: TurnSuspension) -> dict[str, Any]:
+    assert isinstance(s, AskUserSuspension)
+    return {
+        "question": s.question,
+        "context": s.context,
+        "assumptions": list(s.assumptions),
+        "questions": list(s.questions),
+        "style_options": list(s.style_options),
+        "intent": s.intent,
+    }
+
+
+def _ask_user_from_extras(data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "question": data.get("question", "") or "",
+        "context": data.get("context", "") or "",
+        "assumptions": list(data.get("assumptions") or []),
+        "questions": list(data.get("questions") or []),
+        "style_options": list(data.get("style_options") or []),
+        "intent": data.get("intent") or "decision",
+    }
+
+
+def _ask_user_summary_extras(s: TurnSuspension) -> dict[str, Any]:
+    assert isinstance(s, AskUserSuspension)
+    return {
+        **_EMPTY_SUMMARY_EXTRAS,
+        "question": s.question,
+        "context": s.context,
+        "assumptions": list(s.assumptions),
+        "questions": list(s.questions),
+        "style_options": list(s.style_options),
+        "intent": s.intent,
+    }
+
+
+SUSPENSION_KIND_CODECS: Mapping[SuspensionKind, SuspensionKindCodec] = {
+    SuspensionKind.PLAN_REVIEW: SuspensionKindCodec(
+        kind=SuspensionKind.PLAN_REVIEW,
+        cls=PlanReviewSuspension,
+        frame_extras=_plan_review_frame_extras,
+        from_extras=_plan_review_from_extras,
+        summary_extras=_plan_review_summary_extras,
+    ),
+    SuspensionKind.ASK_USER: SuspensionKindCodec(
+        kind=SuspensionKind.ASK_USER,
+        cls=AskUserSuspension,
+        frame_extras=_ask_user_frame_extras,
+        from_extras=_ask_user_from_extras,
+        summary_extras=_ask_user_summary_extras,
+    ),
+    SuspensionKind.TEAM_PREVIEW: SuspensionKindCodec(
+        kind=SuspensionKind.TEAM_PREVIEW,
+        cls=TeamPreviewSuspension,
+        frame_extras=_team_preview_frame_extras,
+        from_extras=_team_preview_from_extras,
+        summary_extras=_team_preview_summary_extras,
+    ),
+}
+
+
+def suspension_summary_fields(suspension: TurnSuspension) -> dict[str, Any]:
+    """Kind-specific resume-card fields (shared wire shape for cloud + sidecar).
+
+    Returns the same keys for every kind; unused slots are empty defaults.
+    Callers add the shared id/kind/context envelope.
+    """
+    return SUSPENSION_KIND_CODECS[suspension.kind].summary_extras(suspension)
+
+
+def suspension_paused_summary(suspension: TurnSuspension) -> dict[str, Any]:
+    """Full paused-turn wire summary dict (sidecar shape; cloud wraps into the schema)."""
+    return {
+        "message_id": suspension.message_id,
+        "kind": suspension.kind.value,
+        "checkpoint_id": suspension.checkpoint_id,
+        "user_message": suspension.user_message,
+        **suspension_summary_fields(suspension),
+    }
 
 
 def suspension_from_json(data: dict[str, Any]) -> TurnSuspension:
     """Rebuild the right :class:`TurnSuspension` subclass from a stored frame dict."""
-    from agentcore.runtime.runs.serialize import plan_from_json
-
     data = dict(data or {})
     kind_raw = data.get("kind")
-    if kind_raw not in {SuspensionKind.PLAN_REVIEW.value, SuspensionKind.ASK_USER.value}:
-        raise ValueError(f"missing or unknown suspension kind: {kind_raw!r}")
-    base = TurnSuspension._base_kwargs(data)
-    if kind_raw == SuspensionKind.ASK_USER.value:
-        return AskUserSuspension(
-            **base,
-            question=data.get("question", "") or "",
-            context=data.get("context", "") or "",
-            assumptions=list(data.get("assumptions") or []),
-            questions=list(data.get("questions") or []),
-            style_options=list(data.get("style_options") or []),
-            intent=data.get("intent") or "decision",
-        )
-    # NOTE: NEITHER ``plan`` NOR ``completed`` is read from the frame (执行级事件溯源 Phase 2) —
-    # both default empty and are re-projected from the journal on resume (``plan_from_journal``
-    # / ``completed_from_journal``). ``plan_from_json({})`` yields an empty RunPlan placeholder
-    # (the field is required); the resume fold replaces it with the journaled DAG.
-    return PlanReviewSuspension(
-        **base,
-        plan=plan_from_json({}),
-        steps=list(data.get("steps") or []),
-        pending=list(data.get("pending") or []),
-    )
+    try:
+        kind = SuspensionKind(kind_raw)
+    except ValueError:
+        raise ValueError(f"missing or unknown suspension kind: {kind_raw!r}") from None
+    codec = SUSPENSION_KIND_CODECS[kind]
+    return codec.cls(**TurnSuspension._base_kwargs(data), **codec.from_extras(data))
 
 
 # Persistence closures threaded from the pipeline into the suspending faces (so the

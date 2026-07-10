@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 
 class Vec3(BaseModel):
-    """3D position on the town ground plane (R3F / Three.js Y-up).
+    """3D position on the town ground plane (Y-up wire coordinates).
 
     - ``x``: east (+) / west (-)
     - ``y``: height above ground (NPCs typically 0)

@@ -39,6 +39,9 @@ class PatchSimulationAgentResponse(BaseModel):
 class CreateSimulationRunRequest(BaseModel):
     scenario: str = "town"
     seed: int = 0
+    # Demo/dev: schedule-based ticks without DeepSeek. Also set via
+    # SIMULATION_SCRIPTED or manifest.scripted; missing DeepSeek auto-falls back.
+    scripted: bool = False
     manifest: RunManifest | None = None
 
 

@@ -11,6 +11,7 @@ import {
   useUnarchiveConversation,
 } from "@/hooks/useConversations";
 import { startNewConversation } from "@/lib/newConversation";
+import { deriveGroupWorkspaceIsLocal } from "@/lib/conversationWorkspaceMode";
 import { notifyError } from "@/lib/toast";
 import type { FolderMeta } from "@/services/folders";
 import { type Conversation, useConversationStore } from "@/stores/conversation";
@@ -29,7 +30,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ALL_KEY,
@@ -68,6 +69,15 @@ export function ConversationsPage() {
     isArchivedView,
   } = useConversationList(selected, folderIds);
   const bulk = useConversationBulkSelect(list, selected, isArchivedView);
+
+  const folderGroupIsLocal = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const folder of folders) {
+      const convs = conversations.filter((c) => c.folderId === folder.id);
+      map.set(folder.id, deriveGroupWorkspaceIsLocal(folder, convs));
+    }
+    return map;
+  }, [folders, conversations]);
 
   const activeName = activeFilterName(selected, folders);
   const isFolderFilter = isRealFolderFilter(selected, folderIds);
@@ -274,7 +284,14 @@ export function ConversationsPage() {
                       {isArchivedView ? (
                         <ArchivedConversationRow conversation={c} />
                       ) : (
-                        <ConversationItem conversation={c} />
+                        <ConversationItem
+                          conversation={c}
+                          groupIsLocal={
+                            c.folderId
+                              ? folderGroupIsLocal.get(c.folderId)
+                              : undefined
+                          }
+                        />
                       )}
                     </SelectableRow>
                   ))}

@@ -85,7 +85,7 @@ class UserLlmKey(Base):
 
 
 # --- Invites ---
-# Invite-code gated registration (D6).
+# Legacy invite table (registration no longer consumes codes; admin API deprecated).
 
 
 class Invite(Base):
@@ -99,9 +99,8 @@ class Invite(Base):
     used_by: Mapped[str | None] = mapped_column(PG_UUID(as_uuid=False), index=True, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Admin revocation (邀请码撤销): set when an admin kills an unused code so it can
-    # no longer register an account. Distinct from expiry (time-based) and use
-    # (consumed) — a revoked code was deliberately retired before either happened.
+    # Admin revocation (邀请码撤销): retires an unused code. Registration no longer
+    # consumes invites; revoke remains for admin bookkeeping of legacy codes.
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")

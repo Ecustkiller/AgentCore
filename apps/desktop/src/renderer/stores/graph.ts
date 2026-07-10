@@ -1,4 +1,9 @@
 import { create } from "zustand";
+import {
+  type StateStorage,
+  createJSONStorage,
+  persist,
+} from "zustand/middleware";
 
 /** Structural edge. Visual state (animated) is derived live.
  *
@@ -7,12 +12,12 @@ import { create } from "zustand";
  * (dashed) so a sub-team reads as grouped under the parent rather than as another
  * top-level branch; `revision` is an original worker → its「修订 vN」续写 child
  * (乙 热修 P4), drawn distinctly (dotted) so a re-do reads as a version of the same
- * node, not a new branch. */
+ * node, not a new branch; `handoff` is 回落换人「接替」(replaces_run_id → new worker). */
 export interface GraphEdge {
   id: string;
   source: string;
   target: string;
-  kind?: "dep" | "delegate" | "revision" | "inject";
+  kind?: "dep" | "delegate" | "revision" | "inject" | "handoff";
 }
 
 /**
@@ -20,14 +25,35 @@ export interface GraphEdge {
  * toolbar). `leftright` is the default left-to-right layered flow — it suits the
  * widescreen displays the desktop targets and keeps the inline↔full-screen
  * direction consistent (no 90° flip on maximize); `tree` is the same layered
- * algorithm rotated top-down; `timeline` maps worker runs on a real time axis
- * when `batch_metrics` timing exists (≥2 dispatched workers).
+ * algorithm rotated top-down. (Former `timeline` layout was removed; stale
+ * localStorage values fall back to `leftright`.)
  */
-export type GraphLayout = "tree" | "leftright" | "timeline";
+export type GraphLayout = "tree" | "leftright";
+
+/** Max team turns expanded as TurnGroupNode compounds on the conversation spine. */
+export const MAX_EXPANDED_TURNS = 3;
 
 const LAYOUT_KEY = "agentcore:graph-layout";
 const INJECT_FLOW_KEY = "agentcore:graph-inject-flow";
-const LAYOUTS: GraphLayout[] = ["tree", "leftright", "timeline"];
+const LAYOUTS: GraphLayout[] = ["tree", "leftright"];
+
+export interface ConversationFoldState {
+  /** Parent run ids whose subtrees are folded away (+N badge). */
+  collapsedSubtrees: string[];
+  /** Parents already seeded into collapsedSubtrees (so expand sticks). */
+  seenSubtreeParents: string[];
+  /** Expanded team-turn ids on the spine, oldest→newest (LRU eviction). */
+  expandedTurns: string[];
+  /** Whether default expandedTurns have been seeded for this conversation. */
+  turnsSeeded: boolean;
+}
+
+const EMPTY_FOLD: ConversationFoldState = {
+  collapsedSubtrees: [],
+  seenSubtreeParents: [],
+  expandedTurns: [],
+  turnsSeeded: false,
+};
 
 // localStorage is wrapped: it throws in private-mode / non-DOM (test) contexts.
 function loadLayout(): GraphLayout {
@@ -66,11 +92,45 @@ function persistInjectFlow(v: boolean): void {
   }
 }
 
+const safeStorage = createJSONStorage<unknown>(() => {
+  try {
+    if (typeof localStorage !== "undefined") return localStorage;
+  } catch {
+    /* access denied — fall through */
+  }
+  const noop: StateStorage = {
+    getItem: () => null,
+    setItem: () => undefined,
+    removeItem: () => undefined,
+  };
+  return noop;
+});
+
+function foldOf(
+  byConversation: Record<string, ConversationFoldState>,
+  conversationId: string | null | undefined,
+): ConversationFoldState {
+  if (!conversationId) return EMPTY_FOLD;
+  return byConversation[conversationId] ?? EMPTY_FOLD;
+}
+
+function patchFold(
+  byConversation: Record<string, ConversationFoldState>,
+  conversationId: string,
+  patch: Partial<ConversationFoldState>,
+): Record<string, ConversationFoldState> {
+  const prev = byConversation[conversationId] ?? EMPTY_FOLD;
+  return {
+    ...byConversation,
+    [conversationId]: { ...prev, ...patch },
+  };
+}
+
 // Per-graph layout (ELK positions + structural edges) is NOT global state: with
 // §9.3 every multi-agent message renders its own inline graph, so the layout is
 // view state owned locally by each {@link GraphView}. Only the *choice* of layout
 // algorithm is global — it is a user preference that applies to every graph and
-// persists across sessions.
+// persists across sessions. Fold / expand prefs are per-conversation.
 interface GraphState {
   /** Active layout algorithm — a shared, persisted user preference. */
   layoutKind: GraphLayout;
@@ -78,19 +138,174 @@ interface GraphState {
   /** Phase 2: always show audit-confirmed inject edges on the collaboration graph. */
   showAuditInjectFlow: boolean;
   setShowAuditInjectFlow: (on: boolean) => void;
+
+  /** Per-conversation fold / expand prefs (persisted). */
+  foldByConversation: Record<string, ConversationFoldState>;
+
+  toggleSubtreeCollapsed: (conversationId: string, parentId: string) => void;
+  setSubtreeCollapsed: (
+    conversationId: string,
+    parentId: string,
+    collapsed: boolean,
+  ) => void;
+  /** Seed newly discovered foldable parents as collapsed (default). */
+  ensureSubtreeDefaults: (
+    conversationId: string,
+    parentIds: string[],
+  ) => void;
+
+  expandTurn: (conversationId: string, turnId: string) => void;
+  collapseTurn: (conversationId: string, turnId: string) => void;
+  /** First-open: expand completed team turns (cap MAX_EXPANDED_TURNS, newest first). */
+  ensureDefaultExpandedTurns: (
+    conversationId: string,
+    teamTurnIdsNewestFirst: string[],
+  ) => void;
 }
 
-export const useGraphStore = create<GraphState>((set) => ({
-  layoutKind: loadLayout(),
-  showAuditInjectFlow: loadInjectFlow(),
+export const useGraphStore = create<GraphState>()(
+  persist(
+    (set, get) => ({
+      layoutKind: loadLayout(),
+      showAuditInjectFlow: loadInjectFlow(),
+      foldByConversation: {},
 
-  setLayoutKind: (layoutKind) => {
-    persistLayout(layoutKind);
-    set({ layoutKind });
-  },
+      setLayoutKind: (layoutKind) => {
+        persistLayout(layoutKind);
+        set({ layoutKind });
+      },
 
-  setShowAuditInjectFlow: (showAuditInjectFlow) => {
-    persistInjectFlow(showAuditInjectFlow);
-    set({ showAuditInjectFlow });
-  },
-}));
+      setShowAuditInjectFlow: (showAuditInjectFlow) => {
+        persistInjectFlow(showAuditInjectFlow);
+        set({ showAuditInjectFlow });
+      },
+
+      toggleSubtreeCollapsed: (conversationId, parentId) => {
+        const prev = foldOf(get().foldByConversation, conversationId);
+        const has = prev.collapsedSubtrees.includes(parentId);
+        const collapsedSubtrees = has
+          ? prev.collapsedSubtrees.filter((id) => id !== parentId)
+          : [...prev.collapsedSubtrees, parentId];
+        set({
+          foldByConversation: patchFold(get().foldByConversation, conversationId, {
+            collapsedSubtrees,
+          }),
+        });
+      },
+
+      setSubtreeCollapsed: (conversationId, parentId, collapsed) => {
+        const prev = foldOf(get().foldByConversation, conversationId);
+        const has = prev.collapsedSubtrees.includes(parentId);
+        if (collapsed === has) return;
+        const collapsedSubtrees = collapsed
+          ? [...prev.collapsedSubtrees, parentId]
+          : prev.collapsedSubtrees.filter((id) => id !== parentId);
+        set({
+          foldByConversation: patchFold(get().foldByConversation, conversationId, {
+            collapsedSubtrees,
+          }),
+        });
+      },
+
+      ensureSubtreeDefaults: (conversationId, parentIds) => {
+        if (parentIds.length === 0) return;
+        const prev = foldOf(get().foldByConversation, conversationId);
+        const seen = new Set(prev.seenSubtreeParents);
+        const fresh = parentIds.filter((id) => !seen.has(id));
+        if (fresh.length === 0) return;
+        set({
+          foldByConversation: patchFold(get().foldByConversation, conversationId, {
+            collapsedSubtrees: [...prev.collapsedSubtrees, ...fresh],
+            seenSubtreeParents: [...prev.seenSubtreeParents, ...fresh],
+          }),
+        });
+      },
+
+      expandTurn: (conversationId, turnId) => {
+        const prev = foldOf(get().foldByConversation, conversationId);
+        const without = prev.expandedTurns.filter((id) => id !== turnId);
+        const expandedTurns = [...without, turnId];
+        while (expandedTurns.length > MAX_EXPANDED_TURNS) {
+          expandedTurns.shift();
+        }
+        set({
+          foldByConversation: patchFold(get().foldByConversation, conversationId, {
+            expandedTurns,
+          }),
+        });
+      },
+
+      collapseTurn: (conversationId, turnId) => {
+        const prev = foldOf(get().foldByConversation, conversationId);
+        if (!prev.expandedTurns.includes(turnId)) return;
+        set({
+          foldByConversation: patchFold(get().foldByConversation, conversationId, {
+            expandedTurns: prev.expandedTurns.filter((id) => id !== turnId),
+          }),
+        });
+      },
+
+      ensureDefaultExpandedTurns: (conversationId, teamTurnIdsNewestFirst) => {
+        const prev = foldOf(get().foldByConversation, conversationId);
+        if (prev.turnsSeeded) return;
+        if (teamTurnIdsNewestFirst.length === 0) return;
+        const expandedTurns = teamTurnIdsNewestFirst
+          .slice(0, MAX_EXPANDED_TURNS)
+          .reverse(); // oldest→newest among the kept window
+        set({
+          foldByConversation: patchFold(get().foldByConversation, conversationId, {
+            expandedTurns,
+            turnsSeeded: true,
+          }),
+        });
+      },
+    }),
+    {
+      name: "agentcore.graph-fold",
+      storage: safeStorage,
+      version: 1,
+      migrate: (persisted) => {
+        // Drop legacy collapsedNodes (single-node compact leaf) from v0.
+        const raw = persisted as {
+          foldByConversation?: Record<string, Record<string, unknown>>;
+        };
+        if (!raw?.foldByConversation) return persisted as typeof raw;
+        const foldByConversation: Record<string, ConversationFoldState> = {};
+        for (const [id, fold] of Object.entries(raw.foldByConversation)) {
+          const {
+            collapsedNodes: _drop,
+            collapsedSubtrees,
+            seenSubtreeParents,
+            expandedTurns,
+            turnsSeeded,
+          } = fold as Partial<ConversationFoldState> & {
+            collapsedNodes?: string[];
+          };
+          foldByConversation[id] = {
+            collapsedSubtrees: collapsedSubtrees ?? [],
+            seenSubtreeParents: seenSubtreeParents ?? [],
+            expandedTurns: expandedTurns ?? [],
+            turnsSeeded: turnsSeeded ?? false,
+          };
+        }
+        return { ...raw, foldByConversation };
+      },
+      partialize: (s) => ({
+        foldByConversation: s.foldByConversation,
+      }),
+    },
+  ),
+);
+
+/** Read fold state for a conversation (stable empty when missing). */
+export function selectConversationFold(
+  conversationId: string | null | undefined,
+): ConversationFoldState {
+  return foldOf(useGraphStore.getState().foldByConversation, conversationId);
+}
+
+export function useConversationFold(
+  conversationId: string | null | undefined,
+): ConversationFoldState {
+  return useGraphStore((s) => foldOf(s.foldByConversation, conversationId));
+}

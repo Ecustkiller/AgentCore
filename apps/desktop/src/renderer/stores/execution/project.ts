@@ -88,6 +88,7 @@ function runFromPlan(plan: ExecutionPlan, id: string): RunNode | null {
     revisionOf: null,
     revision: 0,
     revised: null,
+    replacesRunId: spec.replacesRunId ?? null,
     checkpoint: null,
     receivedContext: [],
     escalations: [],
@@ -193,6 +194,7 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
             revisionOf: f.parentRunId,
             revision: f.revision,
             revised: null,
+            replacesRunId: null,
             checkpoint: null,
             receivedContext: [],
             escalations: [],
@@ -209,6 +211,8 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
         // can read them from the projected run (inert in 阶段1).
         run.parentRunId = f.parentRunId;
         run.kind = f.runKind;
+        // 冷回落接手: mid-flight `_redir` carries replaces_run_id on the wire.
+        if (f.replacesRunId) run.replacesRunId = f.replacesRunId;
       }
       const agent = s.agentIndex.get(f.agentId);
       if (agent) {
@@ -238,7 +242,10 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
       // 重写。清这个 agent 已累积的产出（重写版从干净态重累积），reasoning 是真实过程、保留
       // ——镜像后端 oracle 与 mobile fold（conformance pins them equal）。
       const agent = s.agentIndex.get(f.agentId);
-      if (agent) agent.outputChunks = [];
+      if (agent) {
+        agent.outputChunks = [];
+        agent.didRework = true;
+      }
       break;
     }
     case "run_reasoning_delta": {
@@ -326,6 +333,19 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
       }
       break;
     }
+    case "run_cancelled": {
+      // 跑一半改方向 / 整轮停止: interrupt mid-flight (orthogonal to run_failed).
+      // Clear currentRunId + toolProgress so the node leaves its live「正在生成」line.
+      const run = s.runIndex.get(f.runId);
+      if (run) run.status = "cancelled";
+      const agent = s.agentIndex.get(f.agentId);
+      if (agent) {
+        agent.status = "cancelled";
+        agent.currentRunId = null;
+        agent.toolProgress = null;
+      }
+      break;
+    }
     case "run_progress": {
       // Progress is derived from run states below so it stays correct and
       // cumulative across multiple delegate batches (the per-batch wire
@@ -382,35 +402,32 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
           blocking: f.blocking,
           status: "raised",
           answer: null,
+          kind: f.escalationKind,
           // 非阻塞 banner 无应答卡，故无结构化选项。
           questions: [],
         });
       break;
     }
     case "escalation_required": {
-      // 阻塞式求决策: a worker SUSPENDED on a blocking escalate, awaiting the user — append
-      // a `pending` card to its run (the turn does NOT pause; siblings keep running). Twin
-      // of the run_escalation banner but journaled, so it replays on reload.
+      // 阻塞式求决策: a worker SUSPENDED on a blocking escalate — append a `pending` card.
+      // awaiting=ceo → 等主管仲裁（不可答）；缺省 → 经典可答卡。
       const run = s.runIndex.get(f.runId);
       if (run)
         run.escalations.push({
-          // The interaction id the live card resolves against (carried by the journaled
-          // escalation_required, so it survives a reload too).
           id: f.escalationId,
           question: f.question,
           assumption: f.assumption,
           blocking: true,
           status: "pending",
           answer: null,
-          // 结构化升级: choice/text 选项随挂起卡渲染（同 ask_user）；free-text 升级为 []。
+          kind: f.escalationKind,
           questions: f.questions ?? [],
+          ...(f.awaiting === "ceo" ? { awaiting: "ceo" as const } : {}),
         });
       break;
     }
     case "escalation_resolved": {
-      // 阻塞式求决策 settlement: flip this run's pending escalation to resolved/timeout (a
-      // worker is sequential ⇒ at most one pending per run, 设计 §4.7). `resolved` carries
-      // the answer; `timeout` (含按假设继续) falls back to the assumption (answer stays null).
+      // 阻塞式求决策 settlement: flip this run's pending escalation to resolved/timeout.
       const run = s.runIndex.get(f.runId);
       const esc = run?.escalations.find((e) => e.status === "pending");
       if (esc) {
@@ -420,6 +437,10 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
         } else {
           esc.status = "timeout";
           esc.answer = null;
+        }
+        if (f.arbitrated_by === "ceo") {
+          esc.arbitrated_by = "ceo";
+          if (f.via_user != null) esc.via_user = f.via_user;
         }
       }
       break;
@@ -582,6 +603,10 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
       return `${role(frame.agentId)} 完成`;
     case "run_failed":
       return `${role(frame.agentId)} 失败`;
+    case "run_cancelled":
+      return frame.reason === "redirect"
+        ? `${role(frame.agentId)} 已改方向`
+        : `${role(frame.agentId)} 已停止`;
     case "run_progress":
       return `进度 ${frame.completed}/${frame.total}`;
     case "batch_metrics":
@@ -612,9 +637,9 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
         (r) => r.revisionKind === "steer",
       ).length;
       const parts: string[] = [];
-      if (bound) parts.push(`定稿 ${bound}`);
-      if (steered) parts.push(`操舵 ${steered}`);
-      return `计划已调整 · ${parts.join(" · ")}`;
+      if (bound) parts.push(`职责已定稿 ${bound}`);
+      if (steered) parts.push(`方向已校准 ${steered}`);
+      return parts.length > 0 ? parts.join(" · ") : "计划已调整";
     }
     case "team_note_posted":
       return `${frame.role || role(frame.agentId)} 贴便签`;

@@ -768,3 +768,48 @@ async def test_worker_collects_web_citations_onto_runstate():
     assert state.citations == cites
     # the worker's own answer text is clean (un-numbered — annotation is CEO-only)
     assert state.content == "FINAL"
+
+
+async def test_whole_turn_stop_emits_run_cancelled_reason_stop():
+    """整轮 stop: cancel the wave → each in-flight worker emits run_cancelled(reason=stop)."""
+    import asyncio
+    import contextlib
+
+    from agentcore.llm.provider.protocol import LLMChunk
+
+    class _HangProvider:
+        async def stream(self, request):  # noqa: ANN001
+            yield LLMChunk(delta_content="半成品")
+            await asyncio.sleep(10)
+            yield LLMChunk(delta_content="…")
+
+    plan, _ = build_run_plan(
+        [
+            {"role": "A", "task": "做A"},
+            {"role": "B", "task": "做B"},
+        ],
+        id_prefix="t",
+    )
+    sink = EventSink()
+    wave_task = asyncio.create_task(
+        WaveScheduler().run(plan, _executor(plan, _HangProvider(), sink))
+    )
+    # Wait until both workers have started (and ideally streamed a delta).
+    for _ in range(100):
+        started = [
+            e for e in sink._history if e.type is EventType.RUN_STARTED
+        ]
+        if len(started) >= 2:
+            break
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.05)
+    wave_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await wave_task
+
+    cancelled = [
+        e for e in sink._history if e.type is EventType.RUN_CANCELLED
+    ]
+    assert len(cancelled) == 2
+    assert {e.payload.get("reason") for e in cancelled} == {"stop"}
+    assert {e.payload.get("run_id") for e in cancelled} == {"t_1", "t_2"}

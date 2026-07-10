@@ -931,3 +931,38 @@ async def test_cancel_metrics_counts_cancelled():
     assert m.cancelled == 1
     assert m.completed == 1
     assert m.failed == 0
+
+
+async def test_external_stop_cancels_inflight_with_stop_reason():
+    """整轮 stop: wave outer cancel uses cancel(\"stop\") so children see reason=stop.
+
+    Pins the dual-cancel contract: redirect cancel keeps msg=\"redirect\"; whole-turn
+    abort (cancel the wave task) drains in-flight workers with msg=\"stop\".
+    """
+    import contextlib
+
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b"))
+    cancel_msgs: list[tuple[str, str | None]] = []
+    started = asyncio.Event()
+
+    async def slow_ex(spec: RunSpec, _completed) -> RunState:
+        started.set()
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError as e:
+            msg = str(e.args[0]) if e.args else None
+            cancel_msgs.append((spec.run_id, msg))
+            raise
+        return RunState(phase=RunPhase.COMPLETED, content=spec.run_id)
+
+    wave_task = asyncio.create_task(WaveScheduler().run(plan, slow_ex))
+    await started.wait()
+    await asyncio.sleep(0.02)  # both workers in flight
+    wave_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await wave_task
+
+    assert sorted(rid for rid, _ in cancel_msgs) == ["a", "b"]
+    assert {msg for _, msg in cancel_msgs} == {"stop"}

@@ -9,9 +9,14 @@ from tests.delegate.conftest import Provider, ctx, tool
 
 
 async def test_parallel_delegate_returns_products_non_terminal():
+    """经典阻塞路径：coordinate=false 时多 worker 等全队完成再返回产物。"""
     t = tool(Provider(["AOUT", "BOUT"]))
     result = await t.execute(
-        {"tasks": [{"role": "研究员", "task": "做A"}, {"role": "写手", "task": "做B"}]}, ctx()
+        {
+            "tasks": [{"role": "研究员", "task": "做A"}, {"role": "写手", "task": "做B"}],
+            "coordinate": False,
+        },
+        ctx(),
     )
     assert result.success is True
     assert result.is_terminal is False
@@ -34,7 +39,7 @@ async def test_dag_delegate_completes_with_both_products():
         {"id": "s2", "role": "写手", "task": "撰写", "depends_on": ["s1"]},
     ]
     t = tool(Provider(["UPSTREAM", "FINAL"]))
-    result = await t.execute({"tasks": tasks}, ctx())
+    result = await t.execute({"tasks": tasks, "coordinate": False}, ctx())
     assert result.success is True
     assert result.is_terminal is False
     assert "UPSTREAM" in result.output

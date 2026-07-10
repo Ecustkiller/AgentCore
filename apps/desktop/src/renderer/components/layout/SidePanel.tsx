@@ -1,7 +1,7 @@
 import { Markdown } from "@/components/chat/Markdown";
 import { RunDetailBody } from "@/components/chat/detail/RunDetailBody";
 import {
-  CommandRegion,
+  CommandPanelBody,
   useCommandRegion,
 } from "@/components/graph/CanvasDecisionPanel";
 import { Button, IconButton } from "@/components/ui";
@@ -15,10 +15,18 @@ import {
 } from "@/stores/execution";
 import {
   type DetailTab,
+  COMMAND_TAB_ID,
   WORKSPACE_TAB_ID,
   useSidePanelStore,
 } from "@/stores/sidePanel";
-import { FolderOpen, Sparkles, UserRound, X } from "lucide-react";
+import {
+  FolderOpen,
+  Gavel,
+  MessageSquare,
+  Sparkles,
+  UserRound,
+  X,
+} from "lucide-react";
 import {
   type PointerEvent as ReactPointerEvent,
   useEffect,
@@ -27,16 +35,16 @@ import {
 } from "react";
 
 /**
- * A detail tab is live only while its message still holds an execution: any tab needs a
- * loaded plan; a run tab additionally needs its run to still exist in the PROJECTED
- * execution (§9.3 — 修订 vN revisions are born from frames, not `plan.runs`, so validate
- * against projected runs, not raw plan). Pure read used both to gate re-render and to
- * compute the visible set.
+ * Live-check for detail tabs. Run / content tabs need a loaded execution plan (and a
+ * run tab additionally needs its run in the PROJECTED execution — §9.3). Simple-turn
+ * Q&A tabs have no plan; they stay live while the conversation still holds the answer
+ * message (validated at render via message content, not execution).
  */
 function isDetailTabLive(
   byId: Record<string, ExecutionRuntime>,
   tab: DetailTab,
 ): boolean {
+  if (tab.kind === "simple-turn") return true;
   const rt = byId[tab.messageId];
   if (!rt?.plan) return false;
   if (tab.kind !== "run") return true;
@@ -46,9 +54,10 @@ function isDetailTabLive(
 /**
  * The conversation's single right-docked surface (前端UX设计.md §十), modelled
  * as one flat tab strip: a fixed 「工作区」 home tab (files / snapshots /
- * handoff) followed by a closable run-detail tab per drilled-into graph node.
- * The workspace body is lazily mounted and then kept alive (hidden, not
- * unmounted) so its files aren't re-fetched when toggling between it and a run.
+ * handoff), then in canvas mode a fixed 「指挥台」 tab (boss decisions), followed
+ * by closable run/content detail tabs. The workspace body is lazily mounted and
+ * then kept alive (hidden, not unmounted) so its files aren't re-fetched when
+ * toggling between it and a run.
  */
 export function SidePanel() {
   const open = useSidePanelStore((s) => s.open);
@@ -69,10 +78,9 @@ export function SidePanel() {
       .map((t) => t.id)
       .join("\u0001"),
   );
-  // 图上指挥 (前端UX设计.md §6.2): the 指挥台 region pinned to the top of this one dock.
-  // Called before the `open` early-return below so its auto-surface effect can reveal
-  // the panel even while it's closed (a brand-new decision opens it). Inert in chat
-  // mode (the bridge store's `active` is false there).
+  // 图上指挥 (前端UX设计.md §6.2): fixed 指挥台 tab + auto-surface (openPanel + badge,
+  // never steals active tab). Hook runs before the `open` early-return so its effect
+  // can reveal the panel even while closed. Inert in chat mode (`active` is false).
   const command = useCommandRegion();
 
   const visibleTabs = useMemo(() => {
@@ -80,16 +88,30 @@ export function SidePanel() {
     return tabs.filter((t) => live.has(t.id));
   }, [tabs, liveTabKey]);
   const activeTab =
-    activeTabId === WORKSPACE_TAB_ID
+    activeTabId === WORKSPACE_TAB_ID || activeTabId === COMMAND_TAB_ID
       ? null
       : (visibleTabs.find((t) => t.id === activeTabId) ?? null);
   const workspaceActive = activeTabId === WORKSPACE_TAB_ID;
+  const commandActive = command.show && activeTabId === COMMAND_TAB_ID;
 
-  // The content tab reads ONE message's text; subscribe to just that slice so a streaming
+  // Leaving canvas while on 指挥台: fall back to 工作区 (the tab disappears).
+  useEffect(() => {
+    if (!command.show && activeTabId === COMMAND_TAB_ID) {
+      setActiveTab(WORKSPACE_TAB_ID);
+    }
+  }, [command.show, activeTabId, setActiveTab]);
+
+  // Content / simple-turn tabs read message text via narrow slices so a streaming
   // turn (a new `messages` array every tick) never re-renders this dock (收窄订阅).
   const contentMessageId =
     activeTab?.kind === "content" ? activeTab.contentMessageId : null;
   const contentTabText = useActiveMessageContent(contentMessageId);
+  const simplePromptId =
+    activeTab?.kind === "simple-turn" ? activeTab.promptMessageId : null;
+  const simpleAnswerId =
+    activeTab?.kind === "simple-turn" ? activeTab.answerMessageId : null;
+  const simplePromptText = useActiveMessageContent(simplePromptId);
+  const simpleAnswerText = useActiveMessageContent(simpleAnswerId);
 
   // Pay for the workspace body's first fetch only once it's actually shown; keep
   // it mounted afterwards so switching back is instant and state survives.
@@ -134,6 +156,13 @@ export function SidePanel() {
             active={workspaceActive}
             onClick={() => setActiveTab(WORKSPACE_TAB_ID)}
           />
+          {command.show && (
+            <CommandTab
+              active={commandActive}
+              badge={command.badge}
+              onClick={() => setActiveTab(COMMAND_TAB_ID)}
+            />
+          )}
           {visibleTabs.map((tab) => (
             <RunTabChip
               key={tab.id}
@@ -151,34 +180,61 @@ export function SidePanel() {
         </SimpleTooltip>
       </div>
 
-      {/* Content area: 指挥台钉在 tab 体上方；下方为工作区 / run·内容详情。 */}
-      <div className="flex min-h-0 flex-1 flex-col">
-        {command.show && <CommandRegion {...command} />}
-        <div className="relative min-h-0 flex-1">
-          {wsMounted && (
-            <div
-              className={`absolute inset-0 ${workspaceActive ? "" : "hidden"}`}
-            >
-              <WorkspaceMode />
-            </div>
-          )}
-          {activeTab?.kind === "run" && (
-            <div className="absolute inset-0 overflow-y-auto">
-              <RunDetailBody
-                key={activeTab.id}
-                messageId={activeTab.messageId}
-                runId={activeTab.runId}
+      {/* Content area: 工作区 / 指挥台 / run·内容详情 — one active body at a time. */}
+      <div className="relative min-h-0 flex-1">
+        {wsMounted && (
+          <div
+            className={`absolute inset-0 ${workspaceActive ? "" : "hidden"}`}
+          >
+            <WorkspaceMode />
+          </div>
+        )}
+        {command.show && (
+          <div
+            className={`absolute inset-0 ${commandActive ? "" : "hidden"}`}
+          >
+            <CommandPanelBody
+              message={command.message}
+              execution={command.execution}
+              conversationId={command.conversationId}
+              interactive={command.interactive}
+            />
+          </div>
+        )}
+        {activeTab?.kind === "run" && (
+          <div className="absolute inset-0 overflow-y-auto">
+            <RunDetailBody
+              key={activeTab.id}
+              messageId={activeTab.messageId}
+              runId={activeTab.runId}
+            />
+          </div>
+        )}
+        {activeTab?.kind === "content" && (
+          // An endpoint bubble (提问 / 最终回答) surfaced from the canvas — the
+          // deliverable read as plain Markdown, no run-detail chrome.
+          <div className="absolute inset-0 overflow-y-auto p-4">
+            <Markdown content={contentTabText} />
+          </div>
+        )}
+        {activeTab?.kind === "simple-turn" && (
+          // Canvas SimpleTurn light card: full Q&A (prompt + answer), no execution.
+          <div className="absolute inset-0 overflow-y-auto p-4">
+            <section className="space-y-2">
+              <h3 className="text-xs font-medium text-muted-foreground">提问</h3>
+              <Markdown content={simplePromptText || "（无提问）"} />
+            </section>
+            <section className="mt-6 space-y-2 border-t border-border pt-6">
+              <h3 className="text-xs font-medium text-muted-foreground">回答</h3>
+              <Markdown
+                content={
+                  simpleAnswerText ||
+                  (simpleAnswerId ? "（生成中…）" : "（无回答）")
+                }
               />
-            </div>
-          )}
-          {activeTab?.kind === "content" && (
-            // An endpoint bubble (提问 / 最终回答) surfaced from the canvas — the
-            // deliverable read as plain Markdown, no run-detail chrome.
-            <div className="absolute inset-0 overflow-y-auto p-4">
-              <Markdown content={contentTabText} />
-            </div>
-          )}
-        </div>
+            </section>
+          </div>
+        )}
       </div>
     </aside>
   );
@@ -208,6 +264,38 @@ function WorkspaceTab({
   );
 }
 
+/** Fixed 指挥台 tab (canvas mode only): always second, never closes; badge when
+ * there is actionable work the user hasn't switched over to see. */
+function CommandTab({
+  active,
+  badge,
+  onClick,
+}: {
+  active: boolean;
+  badge: number;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      variant="ghost"
+      onClick={onClick}
+      className={`relative shrink-0 gap-1.5 px-2.5 py-1 text-sm font-medium ${
+        active
+          ? "bg-accent text-foreground"
+          : "text-muted-foreground hover:bg-accent/50"
+      }`}
+      icon={<Gavel size={14} />}
+    >
+      指挥台
+      {!active && badge > 0 && (
+        <span className="ml-0.5 rounded-full bg-primary/15 px-1.5 py-0.5 text-xs font-medium text-primary">
+          {badge > 9 ? "9+" : badge}
+        </span>
+      )}
+    </Button>
+  );
+}
+
 /** A closable detail tab chip (a run's agent role, or an endpoint's 提问 /
  * 最终回答, + a close affordance). Shared by both detail-tab kinds; a content tab
  * carries an icon (matching its graph endpoint node) so it reads apart from the
@@ -224,6 +312,7 @@ export function RunTabChip({
   onClose: () => void;
 }) {
   // Content tabs mirror the graph bookends: 你的任务 (UserRound) / CEO 汇总 (Sparkles).
+  // Simple-turn Q&A uses MessageSquare (same cue as the light card).
   const icon =
     tab.kind === "content" ? (
       tab.endpoint === "prompt" ? (
@@ -231,6 +320,8 @@ export function RunTabChip({
       ) : (
         <Sparkles size={14} className="shrink-0" />
       )
+    ) : tab.kind === "simple-turn" ? (
+      <MessageSquare size={14} className="shrink-0" />
     ) : null;
   return (
     <div

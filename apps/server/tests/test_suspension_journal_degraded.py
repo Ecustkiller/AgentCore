@@ -89,6 +89,71 @@ async def test_save_paused_turn_marks_degraded_when_writer_failed() -> None:
     frame = repo_cls.return_value.upsert.await_args.kwargs["frame"]
     assert frame["journal_degraded"] is True
     assert frame["kind"] == SuspensionKind.ASK_USER.value
+    assert writer.sealed is True
+
+
+@pytest.mark.asyncio
+async def test_save_paused_turn_seals_writer_after_persist() -> None:
+    """Successful pause save seals the append-on-emit writer (hard boundary)."""
+    suspension = _ask_user_suspension()
+    suspension.journal_entries = [
+        {"kind": "checkpoint_required", "payload": {"checkpoint_id": "cp-1"}, "ts": None},
+    ]
+    writer = TurnJournalWriter(
+        turn_id="msg-1",
+        conversation_id="conv-1",
+        trace_id="trace-1",
+        initial_seq=3,
+    )
+    token = current_journal_writer.set(writer)
+    try:
+        with patch(
+            "agentcore.runtime.suspension_persistence.async_session_factory"
+        ) as factory:
+            session = AsyncMock()
+            factory.return_value.__aenter__.return_value = session
+            with patch(
+                "agentcore.runtime.suspension_persistence.PausedTurnRepository"
+            ) as repo_cls, patch(
+                "agentcore.runtime.suspension_persistence.TurnJournalRepository"
+            ) as journal_cls:
+                repo_cls.return_value.upsert = AsyncMock()
+                journal_cls.return_value.record = AsyncMock()
+                with patch(
+                    "agentcore.runtime.suspension_persistence._notify_pause",
+                    AsyncMock(),
+                ):
+                    await save_paused_turn(suspension)
+        assert writer.sealed is True
+        assert writer.next_seq == 3
+        assert writer.schedule_append({"kind": "post_pause"}) is None
+    finally:
+        current_journal_writer.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_save_paused_turn_does_not_seal_on_persist_failure() -> None:
+    """A failed persist must leave the writer open (degrades to in-memory pause)."""
+    suspension = _ask_user_suspension()
+    writer = TurnJournalWriter(
+        turn_id="msg-1",
+        conversation_id="conv-1",
+        trace_id="trace-1",
+    )
+    token = current_journal_writer.set(writer)
+    try:
+        with patch(
+            "agentcore.runtime.suspension_persistence.async_session_factory"
+        ) as factory:
+            factory.return_value.__aenter__.side_effect = RuntimeError("db down")
+            with patch(
+                "agentcore.runtime.suspension_persistence._notify_pause",
+                AsyncMock(),
+            ):
+                await save_paused_turn(suspension)
+        assert writer.sealed is False
+    finally:
+        current_journal_writer.reset(token)
 
 
 def test_resumed_captain_window_raises_on_journal_degraded() -> None:

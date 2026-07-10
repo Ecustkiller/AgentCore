@@ -17,14 +17,15 @@ namespace AgentTown.Tests
         private static readonly string[] ExpectedRegions =
         {
             "广场", "市场", "餐厅", "面包店", "公园", "住宅区", "镇政厅",
+            "图书馆", "工坊", "码头",
         };
 
         [Test]
-        public void Market_MapsTo_24_0_0()
+        public void Market_MapsTo_36_0_0()
         {
-            Vector3 unity = WireCoordinateTransform.ToUnity(new WireVec3(24.0, 0.0, 0.0));
+            Vector3 unity = WireCoordinateTransform.ToUnity(new WireVec3(36.0, 0.0, 0.0));
 
-            Assert.AreEqual(24f, unity.x, 1e-4f, "market X");
+            Assert.AreEqual(36f, unity.x, 1e-4f, "market X");
             Assert.AreEqual(0f, unity.y, 1e-4f, "market Y");
             Assert.AreEqual(0f, unity.z, 1e-4f, "market Z");
         }

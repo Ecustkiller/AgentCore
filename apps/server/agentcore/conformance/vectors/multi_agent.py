@@ -17,6 +17,7 @@ from agentcore.runtime.events import (
     message_end,
     message_start,
     plan_revised,
+    run_cancelled,
     run_completed,
     run_context,
     run_failed,
@@ -28,6 +29,7 @@ from agentcore.runtime.events import (
     run_started,
     run_tool_progress,
     team_note_posted,
+    team_synthesis_preview,
     tool_use_end,
     tool_use_start,
 )
@@ -62,7 +64,12 @@ def _multi_agent_delegate() -> list[SSEEvent]:
         # The CEO's `delegate` tool call: in production it emits a top-level
         # tool_use_start (before run_plan) and resolves after the team finishes — this
         # `delegate` step is where the client slots the inline team graph (统一团队时间线).
-        tool_use_start("dc1", "delegate", {"tasks": [{"role": "研究员"}, {"role": "撰写员"}]}),
+        # 专测阻塞 wire（runs 树 / 进度 / 总账）：显式 coordinate=false，保经典阻塞 golden。
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {"tasks": [{"role": "研究员"}, {"role": "撰写员"}], "coordinate": False},
+        ),
         run_plan(
             execution_id="exec1",
             plan_type="multi_agent",
@@ -197,7 +204,11 @@ def _multi_agent_run_redirect_ignored() -> list[SSEEvent]:
     return [
         message_start("m1", conversation_id=_CONV),
         content_delta("我来安排两位并行推进。"),
-        tool_use_start("dc1", "delegate", {"tasks": [{"role": "研究员"}, {"role": "撰写员"}]}),
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {"tasks": [{"role": "研究员"}, {"role": "撰写员"}], "coordinate": False},
+        ),
         run_plan(
             execution_id="exec1",
             plan_type="multi_agent",
@@ -227,6 +238,238 @@ def _multi_agent_run_redirect_ignored() -> list[SSEEvent]:
         tool_use_end("dc1", "delegate", success=True, output="团队完成（含 1 项失败）。"),
         content_delta(" 撰写已完成；调研步骤失败，可在其详情里接受此结果。"),
         message_end(FinishReason.END_TURN, input_tokens=2000, output_tokens=400, cost=_COST),
+    ]
+
+
+def _multi_agent_run_stop_cancels_workers() -> list[SSEEvent]:
+    """多 Agent · 整轮 stop：user「停止整轮」aborts the turn while workers are in flight.
+
+    Each running worker emits ``run_cancelled(reason=stop)`` (not redirect). No hot
+    ``continue_run`` revision and no cold ``_redir`` handoff — whole-turn abort has no
+    per-worker follow-up. Pins: r1+r2 cancelled with reason=stop, no ``_rev*`` / ``_redir``
+    nodes, turn ends ``cancelled``."""
+    agents = [
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "撰写员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "撰写", "depends_on": []},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排两位并行推进。"),
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {"tasks": [{"role": "研究员"}, {"role": "撰写员"}], "coordinate": False},
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="并行调研 + 撰写",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        run_started("r2", "w2"),
+        run_output_delta("r1", "w1", "调研进行中……"),
+        run_output_delta("r2", "w2", "撰写进行中……"),
+        # Whole-turn abort: every in-flight worker gets reason=stop (not redirect).
+        run_cancelled("r1", "w1", reason="stop"),
+        run_cancelled("r2", "w2", reason="stop"),
+        tool_use_end("dc1", "delegate", success=False, output="已停止。"),
+        message_end(FinishReason.CANCELLED, input_tokens=800, output_tokens=100, cost=_COST),
+    ]
+
+
+def _multi_agent_run_redirect_hot() -> list[SSEEvent]:
+    """多 Agent · 跑一半改方向 · 热续写 (run_redirect Step 3A): user「立即改此人」on a worker
+    that already streamed partial output → cancel (reason=redirect) + salvage → hot
+    ``continue_run`` revision chain (``r1_rev1``, revision=2, parent_run_id=r1). No cold
+    ``_redir`` handoff node. Sibling r2 completes untouched. Pins: r1 cancelled, r1_rev1
+    completed as revision child, r2 completed, no ``_redir`` node."""
+    agents = [
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "撰写员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "撰写", "depends_on": []},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排两位并行推进。"),
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {"tasks": [{"role": "研究员"}, {"role": "撰写员"}], "coordinate": False},
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="并行调研 + 撰写",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        run_started("r2", "w2"),
+        # Partial draft already on the wire → salvageable → hot continue_run path.
+        run_output_delta("r1", "w1", "初稿：竞品定价区间偏高，建议……"),
+        run_cancelled("r1", "w1", reason="redirect"),
+        # Hot revision child (not in plan) — synthesized from run_started like multi_agent_revision.
+        run_started("r1_rev1", "r1_rev1", parent_run_id="r1", revision=2),
+        run_context(
+            "r1_rev1",
+            "r1_rev1",
+            [
+                _ctx_block(
+                    "revision",
+                    "本次改方向（用户立即改此人）",
+                    "别写定价区间，改成只比功能差异。",
+                )
+            ],
+        ),
+        run_output_delta("r1_rev1", "r1_rev1", "修订稿：按功能差异横评 A/B/C……"),
+        run_completed(
+            "r1_rev1",
+            "r1_rev1",
+            output_summary="按新方向完成调研",
+            duration_ms=800,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="完成撰写",
+            duration_ms=1200,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_progress(2, 3),
+        tool_use_end("dc1", "delegate", success=True, output="团队完成 2 项任务（含 1 次热改方向）。"),
+        content_delta(" 团队已完成；调研按你的新方向热续写过。"),
+        message_end(FinishReason.END_TURN, input_tokens=2400, output_tokens=500, cost=_COST),
+    ]
+
+
+def _multi_agent_run_redirect_cold_fallback() -> list[SSEEvent]:
+    """多 Agent · 跑一半改方向 · 冷诚实回落 (run_redirect Step 3B): empty/almost-empty worker
+    → cancel (reason=redirect) → cold ``{run_id}_redir`` handoff with ``replaces_run_id``.
+    No meaningful ``run_output_delta`` before cancel (not salvageable → cold). ``r1_redir`` is
+    declared in the initial plan with ``replaces_run_id=r1`` (plan_events shape) so projection
+    has the node before ``run_started`` (non-revision starts do not synthesize). Pins: r1
+    cancelled, r1_redir completed with replacesRunId=r1, r2 completed."""
+    agents = [
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "撰写员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "r1_redir",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "撰写", "depends_on": []},
+        # Cold handoff node (production: plan.add mid-flight). Declared up-front so the
+        # oracle has the run before run_started; replaces_run_id marks「接手」.
+        {
+            "id": "r1_redir",
+            "agent_id": "r1_redir",
+            "task": "调研",
+            "depends_on": [],
+            "replaces_run_id": "r1",
+        },
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排两位并行推进。"),
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {"tasks": [{"role": "研究员"}, {"role": "撰写员"}], "coordinate": False},
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="并行调研 + 撰写",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        run_started("r2", "w2"),
+        # No meaningful output before cancel → empty transcript → cold _redir fallback.
+        run_cancelled("r1", "w1", reason="redirect"),
+        run_started("r1_redir", "r1_redir", replaces_run_id="r1"),
+        run_output_delta("r1_redir", "r1_redir", "接手稿：按新方向重做调研……"),
+        run_completed(
+            "r1_redir",
+            "r1_redir",
+            output_summary="接手完成调研",
+            duration_ms=900,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="完成撰写",
+            duration_ms=1200,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_progress(2, 3),
+        tool_use_end("dc1", "delegate", success=True, output="团队完成 2 项任务（含 1 次冷接手）。"),
+        content_delta(" 团队已完成；调研由接手节点按新方向重跑。"),
+        message_end(FinishReason.END_TURN, input_tokens=2200, output_tokens=450, cost=_COST),
     ]
 
 
@@ -710,7 +953,8 @@ def _blocking_escalate_team() -> tuple[list[dict], list[dict]]:
     return agents, plan_runs
 
 def _multi_agent_blocking_escalate() -> list[SSEEvent]:
-    """多 Agent：阻塞式求决策 (escalate blocking=true) — 答复路径。r1 撞到「只有用户能定、且猜错
+    """多 Agent：阻塞式求决策 (escalate blocking=true) — 答复路径。经典阻塞路径
+    （coordinate=false / 用户直挂；本向量无 tool_use，wire 从 run_plan 起）。r1 撞到「只有用户能定、且猜错
     就作废」的关键岔路，调 escalate(blocking=true) 原地挂起 → 执行器 emit ``escalation_required``
     （run 级，``escalation_id`` 键给 resolve 端点），三端 fold + oracle 把它折成 r1 的一条 pending
     升级（``status="pending"``）。关键：阻塞升级【不】把回合翻 paused——兄弟仍可跑（区别于 approval/
@@ -885,6 +1129,130 @@ def _multi_agent_blocking_escalate_multi() -> list[SSEEvent]:
             "w2",
             output_summary="完成建议",
             duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        content_delta(" 团队已完成。"),
+        message_end(FinishReason.END_TURN, input_tokens=4200, output_tokens=820, cost=_COST),
+    ]
+
+def _multi_agent_ceo_arbitrate_escalate() -> list[SSEEvent]:
+    """多 Agent·协调模式 D1：worker 阻塞 escalate → CEO resolve_escalation 直裁。
+
+    ``escalation_required(awaiting=ceo)`` 初始不可答；``escalation_resolved(arbitrated_by=ceo,
+    via_user=false)`` 后 worker 恢复。回合不 paused。
+    """
+    agents, plan_runs = _blocking_escalate_team()
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排协调团队。"),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="选型并给建议",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        escalation_required(
+            "r1",
+            "w1",
+            escalation_id="esc1",
+            question=_ESC_Q,
+            assumption=_ESC_A,
+            awaiting="ceo",
+        ),
+        escalation_resolved(
+            "r1",
+            "w1",
+            escalation_id="esc1",
+            status="resolved",
+            answer="用 Postgres。",
+            arbitrated_by="ceo",
+            via_user=False,
+        ),
+        run_output_delta("r1", "w1", "已按主管裁决确认 Postgres，完成选型调研"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="完成选型调研（CEO 已仲裁 Postgres）",
+            duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started("r2", "w2"),
+        run_output_delta("r2", "w2", "基于选型给出建议"),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="完成建议",
+            duration_ms=1200,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        content_delta(" 团队已完成。"),
+        message_end(FinishReason.END_TURN, input_tokens=4200, output_tokens=820, cost=_COST),
+    ]
+
+def _multi_agent_ceo_arbitrate_escalate_via_user() -> list[SSEEvent]:
+    """多 Agent·协调模式 D1：CEO 经 ask_user 转交用户后再 resolve_escalation（via_user=true）。
+
+    事件序列只钉裁决可见性（arbitrated_by=ceo + via_user）；ask_user 卡本身是回合级 gate，
+    不在本向量展开。
+    """
+    agents, plan_runs = _blocking_escalate_team()
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排协调团队。"),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="选型并给建议",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        escalation_required(
+            "r1",
+            "w1",
+            escalation_id="esc1",
+            question=_ESC_Q,
+            assumption=_ESC_A,
+            awaiting="ceo",
+        ),
+        escalation_resolved(
+            "r1",
+            "w1",
+            escalation_id="esc1",
+            status="resolved",
+            answer="用 Postgres（用户确认）。",
+            arbitrated_by="ceo",
+            via_user=True,
+        ),
+        run_output_delta("r1", "w1", "已按经用户确认的主管裁决完成选型调研"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="完成选型调研（CEO 经用户仲裁）",
+            duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started("r2", "w2"),
+        run_output_delta("r2", "w2", "基于选型给出建议"),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="完成建议",
+            duration_ms=1200,
             role="member",
             model="deepseek-v4-flash",
             usage=_USAGE,
@@ -1300,6 +1668,7 @@ def _multi_agent_lead_subplan_scope_steer() -> list[SSEEvent]:
             question="真正要做的是 X 而非初始子计划的 Y，下游写法应随之调整。",
             assumption="暂按 X 推进",
             blocking=False,
+            kind="scope",
         ),
         run_output_delta("sa", "sa", "已按 X 完成子调研"),
         run_completed(
@@ -1377,7 +1746,11 @@ def _multi_agent_team_notes() -> list[SSEEvent]:
     return [
         message_start("m1", conversation_id=_CONV),
         content_delta("我来安排团队并行推进。"),
-        tool_use_start("dc1", "delegate", {"tasks": [{"role": "研究员"}, {"role": "撰写员"}]}),
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {"tasks": [{"role": "研究员"}, {"role": "撰写员"}], "coordinate": False},
+        ),
         run_plan(
             execution_id="exec1",
             plan_type="multi_agent",
@@ -1480,7 +1853,11 @@ def _multi_agent_team_notes_amended() -> list[SSEEvent]:
     return [
         message_start("m1", conversation_id=_CONV),
         content_delta("我来安排团队并行推进。"),
-        tool_use_start("dc1", "delegate", {"tasks": [{"role": "研究员"}, {"role": "撰写员"}]}),
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {"tasks": [{"role": "研究员"}, {"role": "撰写员"}], "coordinate": False},
+        ),
         run_plan(
             execution_id="exec1",
             plan_type="multi_agent",
@@ -1606,6 +1983,7 @@ def _multi_agent_team_notes_ceo_seed() -> list[SSEEvent]:
             "delegate",
             {
                 "tasks": [{"role": "方向审查"}, {"role": "事实审查"}],
+                "coordinate": False,
                 "seed_notes": [
                     {"kind": "decision", "text": "整体方向：科普向，不讲推导"},
                     {"kind": "heads_up", "text": "篇幅硬上限 1500 字"},
@@ -1719,8 +2097,142 @@ def _multi_agent_team_notes_ceo_seed() -> list[SSEEvent]:
     ]
 
 
+def _multi_agent_coordinate() -> list[SSEEvent]:
+    """多 Agent·CEO 协调模式：≥2 worker 并行 + 波内便签 + 合成草稿预览 + 收束。
+
+    Wire 形状对齐 coordinate=true 路径的可见事件（非阻塞 delegate 立即返回后 CEO 继续
+    ReAct）：并行两队员、中途 team_note_posted、update_synthesis 推送的
+    team_synthesis_preview（transport-only，三端 fold no-op）、完成后 CEO 终稿。
+    验 fold 对协调路径 journaled 事件的投影与阻塞路径一致，且 preview 不污染
+    ProjectedTurn。"""
+    agents = [
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "撰写员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研接口", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "撰写文档", "depends_on": []},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排团队并行推进，并在波内协调。"),
+        # 默认协调路径（省略 coordinate 等价于 true）；显式 true 钉本向量意图。
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {
+                "tasks": [{"role": "研究员"}, {"role": "撰写员"}],
+                "coordinate": True,
+            },
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="协调模式：并行调研 + 撰写",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        tool_use_end(
+            "dc1",
+            "delegate",
+            success=True,
+            output="【团队已启动·协调模式】已派出 2 名队员（研究员、撰写员）。",
+        ),
+        run_started("r1", "w1"),
+        run_started("r2", "w2"),
+        team_note_posted(
+            execution_id="exec1",
+            note_id="n1",
+            run_id="r1",
+            agent_id="w1",
+            role="研究员",
+            kind="decision",
+            text="接口定了：GET /items 返回 {items:[], next_cursor}",
+            ts=1_700_000_000.0,
+        ),
+        # CEO update_synthesis → team_synthesis_preview（草稿正文在 text；workers 可空）。
+        # Transport-only：三端 fold no-op，不进 ProjectedTurn；桌面 StatusStrip 消费。
+        team_synthesis_preview(
+            execution_id="exec1",
+            completed=0,
+            total=2,
+            headline="合成草稿更新 · 已完成 0/2",
+            text="两边刚起步；接口方向按研究员便签对齐。",
+            workers=[],
+            in_progress=True,
+        ),
+        run_output_delta("r1", "w1", "调研结论"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="完成调研",
+            duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_progress(1, 2),
+        # 确定性进度预览（drive._progress）：有 worker 摘要行。
+        team_synthesis_preview(
+            execution_id="exec1",
+            completed=1,
+            total=2,
+            headline="已完成 1/2：✅ 研究员 ⏳ 撰写员",
+            text="已完成 1/2：✅ 研究员 ⏳ 撰写员\n· 研究员：完成调研",
+            workers=[
+                {
+                    "run_id": "r1",
+                    "role": "研究员",
+                    "status": "completed",
+                    "summary": "完成调研",
+                },
+                {
+                    "run_id": "r2",
+                    "role": "撰写员",
+                    "status": "pending",
+                    "summary": "",
+                },
+            ],
+            in_progress=True,
+        ),
+        run_output_delta("r2", "w2", "成稿"),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="完成撰写",
+            duration_ms=1100,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_progress(2, 2),
+        # all_completed 后 CEO 用 content_delta 写终稿（不再走 update_synthesis）。
+        content_delta(" 团队已完成：接口与文档对齐，按方案 A 定稿。"),
+        message_end(FinishReason.END_TURN, input_tokens=4300, output_tokens=900, cost=_COST),
+    ]
+
+
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_delegate": ("多 Agent：委派 2 队员，runs 树 + 进度 + 总账", _multi_agent_delegate),
+    "multi_agent_coordinate": (
+        "多 Agent·CEO 协调模式：≥2 worker 并行 + 波内便签 + team_synthesis_preview 草稿 + 合成收束"
+        "（preview transport-only / fold no-op）",
+        _multi_agent_coordinate,
+    ),
     "multi_agent_team_notes": (
         "多 Agent·通·便签墙：并行队员贴 decision/heads_up/claim 便签，折到 teamNotes（按序去重，与图节点正交）",
         _multi_agent_team_notes,
@@ -1740,6 +2252,18 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_run_redirect_ignored": (
         "多 Agent·跑一半改方向·忽略路径：改方向来不及应用（r1 确定性失败），忽略+接受走审计/REST 带外，wire 投影保持干净（r1 failed、并行 r2 completed、1/2、无幻影重跑节点）",
         _multi_agent_run_redirect_ignored,
+    ),
+    "multi_agent_run_stop_cancels_workers": (
+        "多 Agent·整轮 stop：in-flight worker 均 run_cancelled(reason=stop)，无热/冷 follow-up 节点，回合 cancelled",
+        _multi_agent_run_stop_cancels_workers,
+    ),
+    "multi_agent_run_redirect_hot": (
+        "多 Agent·跑一半改方向·热续写：已有 partial 产出 → cancel(reason=redirect) + continue_run 修订子节点（r1 cancelled、r1_rev1 completed、r2 completed、无 _redir）",
+        _multi_agent_run_redirect_hot,
+    ),
+    "multi_agent_run_redirect_cold_fallback": (
+        "多 Agent·跑一半改方向·冷诚实回落：空产出 → cancel(reason=redirect) + _redir 接手（r1 cancelled、r1_redir completed+replacesRunId=r1、r2 completed）",
+        _multi_agent_run_redirect_cold_fallback,
     ),
     "multi_agent_worker_tool": ("多 Agent：worker 工具调用 + run_tool_progress 实时态", _multi_agent_worker_tool),
     "multi_agent_worker_output_reset": (
@@ -1766,6 +2290,14 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_blocking_escalate_timeout": ("多 Agent：阻塞式求决策 超时降级（escalation_resolved status=timeout，按假设续跑）", _multi_agent_blocking_escalate_timeout),
     "multi_agent_blocking_escalate_pending": ("多 Agent：阻塞式求决策 进行中（escalation_required 后挂起，回合仍 running、非 paused）", _multi_agent_blocking_escalate_pending),
     "multi_agent_blocking_escalate_multi": ("多 Agent：阻塞式求决策 同一 worker 串行多次升级（多升级 escalations[]，逐条结算）", _multi_agent_blocking_escalate_multi),
+    "multi_agent_ceo_arbitrate_escalate": (
+        "多 Agent·协调：CEO 仲裁阻塞 escalate（awaiting=ceo → resolve 直裁，arbitrated_by=ceo）",
+        _multi_agent_ceo_arbitrate_escalate,
+    ),
+    "multi_agent_ceo_arbitrate_escalate_via_user": (
+        "多 Agent·协调：CEO 经用户转交后再 resolve（arbitrated_by=ceo, via_user=true）",
+        _multi_agent_ceo_arbitrate_escalate_via_user,
+    ),
     "multi_agent_received_context": ("多 Agent：收到的上下文（run_context 三通道 + 依赖块溯源/保真度）", _multi_agent_received_context),
     "multi_agent_captain_context": ("多 Agent：CEO 收到的上下文路由回合级（captain 节点 receivedContext 恒空）+ worker 折到节点", _multi_agent_captain_context),
 }

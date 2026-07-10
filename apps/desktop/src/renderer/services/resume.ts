@@ -148,6 +148,7 @@ export function surfaceResumeFromLiveTurn(
       kind: "ask_user",
       steps: [],
       pending: [],
+      workers: [],
       question: cp.question,
       context: cp.context,
       assumptions: cp.assumptions,
@@ -165,6 +166,25 @@ export function surfaceResumeFromLiveTurn(
       kind: "plan_review",
       steps: pr.steps,
       pending: pr.pending,
+      workers: [],
+      question: "",
+      context: "",
+      assumptions: [],
+      questions: [],
+      styleOptions: [],
+      intent: "decision",
+    });
+    return;
+  }
+  const tp = turn.teamPreviews?.find((c) => c.status === "pending");
+  if (tp) {
+    usePausedTurnStore.getState().addLiveResume({
+      ...base,
+      checkpointId: tp.id,
+      kind: "team_preview",
+      steps: [],
+      pending: [],
+      workers: tp.workers,
       question: "",
       context: "",
       assumptions: [],

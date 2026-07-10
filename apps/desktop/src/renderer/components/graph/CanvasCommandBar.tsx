@@ -9,11 +9,11 @@ import { TurnComposer } from "@/components/chat/message-input/TurnComposer";
  *
  * Host-specific bits: the boss-facing placeholder, the 自动跟随 waiting hint, and
  * `onDispatch` — the host (对话级画布 overview {@link import("./ConversationCanvas")}
- * or its 放大态 {@link import("./CanvasZoomedTurn")}) follows the new round in place
- * when a foreground turn is dispatched.
+ * or full-screen turn detail {@link import("../../pages/TurnDetailPage").TurnDetailPage})
+ * follows the new round in place when a foreground turn is dispatched.
  *
  * 后台云端 toggle (`allowBackground`): offered ONLY where the resulting 后台云端任务
- * card is afterward visible (the overview's 指挥台 feed), NOT the single-turn 放大态.
+ * card is afterward visible (the overview's 指挥台 feed), NOT the single-turn detail page.
  */
 export function CanvasCommandBar({
   onDispatch,

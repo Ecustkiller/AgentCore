@@ -24,7 +24,6 @@ from agentcore.api.schemas.simulation import (
 from agentcore.api.sse import _format_sse, sse_attach_response
 from agentcore.core.errors import NotFoundError, ValidationError
 from agentcore.db.repositories import SimulationRepository
-from agentcore.simulation.llm import SimLlmNotConfigured
 from agentcore.simulation.service import SimulationService, simulation_enabled
 from agentcore.simulation.stream_registry import default_sim_stream_registry
 
@@ -51,6 +50,7 @@ async def create_run(
         user_id=user.user_id,
         scenario=body.scenario,
         seed=body.seed,
+        scripted=body.scripted,
         manifest=body.manifest,
     )
     return SimulationRunSummary.model_validate(run)
@@ -68,8 +68,6 @@ async def advance_tick(
         snapshot = await service.advance_tick(run_id, user_id=user.user_id)
     except KeyError:
         raise NotFoundError("模拟 run 不存在") from None
-    except SimLlmNotConfigured as e:
-        raise ValidationError(str(e)) from None
     except ValidationError as e:
         raise ValidationError(str(e)) from None
     return AdvanceTickResponse(run_id=run_id, snapshot=snapshot)

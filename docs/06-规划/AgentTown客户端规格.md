@@ -1,10 +1,11 @@
-# AgentTown 客户端规格（Unity 6 LTS 独立应用 · 路线 B）
+﻿# AgentTown 客户端规格（Unity 6 LTS 独立应用 · 路线 B）
 
-> **状态**：**Unity 客户端为新目标（规格 / 待移植）——尚未落地**。本文以 Unity 6 LTS + URP + C# 定义目标客户端；现有 `apps/town` 的 **Unreal Engine 5.8 Phase 0 + Phase 1 代码降级为「将退役的参照实现」**（比照 Desktop R3F 冻结→删除先例），Unity 达 Phase 1 parity 后删除。**不得**把 Unity 客户端当作已落地。落地结论后续按 doc-governance 迁入 `docs/01`–`05`。
-> **决策（2026-07-08）**：AI 小镇观测客户端由 **Unreal Engine 5.8 改为 Unity 6 LTS + URP + C#**（Low-Poly 低模）；产品名保持 **AgentTown**，路径仍为 `apps/town/`。**决定性理由**：中期已确认要做 **Web 传播版**，而 UE **无原生 Web 导出**，**Unity 原生 WebGL2**。迁移低风险依据：`apps/town` 现有实现**无任何 `.uasset`**（7 区域场景全部运行时代码生成），且客户端逻辑已有**两份参照实现**（Desktop R3F TypeScript + 现有 UE C++），Unity C# 属「照蓝图翻译」。详见 §15「从 UE 迁移」。
+> **状态（2026-07-10）**：**Unity Phase 0/1 + Offline Demo + 观测层**已进仓；HUD 为**顶栏/底栏/左右轨**（顶栏 **fps-label** 色带 ≥30/20/&lt;20）。建筑距离 LOD + `pnpm town:serve:webgl`（`?demo=1`）。`town:verify` EditMode 绿。CORS/WebGL Step A ✅；WebGL C2 live ✅；Desktop `#/simulation/town` **仅启动器** ✅；**UE + Desktop R3F 已删**。scripted 可演示。
+> **收口决策（2026-07-09）**：删栈以 **scripted + WebGL C2 live + FPS 顶栏**为准；**真 LLM 涌现验证另线**（不挡删栈 / §14 收口）。
+> **决策（2026-07-08）**：观测客户端为 **Unity 6 LTS + URP + C#**（Low-Poly）；产品名 **AgentTown**，路径 `apps/town/`。决定性理由：中期 **Web 传播版**需原生 WebGL2。详见 §15。
 > **不变量**：**后端 `simulation/`、REST/SSE 契约、Postgres 四表、`packages/protocol-conformance` fixtures 全部复用、零改动**（非路线 C 全栈分叉）。
-> **开发口径**：单人开发者 + 全程 AI 辅助。
-> **背景**：[AI 小镇 MVP 开发计划](AI小镇MVP开发计划.md) 原 R3F FE 路线接缝 bug 成本高；产品方定案画面为长期卖点，且需 Web 传播版触达非安装用户。
+> **开发口径**：单人开发者 + 全程 AI 辅助。日常入口：`pnpm town:open` / `pnpm town:verify`；见 `apps/town/README.md`。
+> **背景**：[AI 小镇 MVP 开发计划](AI小镇MVP开发计划.md)；画面为长期卖点，且需 Web 传播版。
 > **关联**：坐标契约 → `packages/protocol-conformance/fixtures/simulation-region-positions.json`；类型 → `packages/contract-types`、`apps/server/agentcore/simulation/types.py`
 
 ---
@@ -78,41 +79,45 @@ flowchart TB
 
 ## 3. 仓库布局
 
-**目标 Unity 布局**（`apps/town` 由 UE 工程原地替换为 Unity 工程；退役前两者不并存超过 Phase 1）：
+**当前布局**（Unity-only；**UE 与 Desktop R3F 已删**）：
 
 ```
 AgentCore/
 ├── apps/
 │   ├── server/                      # 不动
-│   ├── desktop/                     # 保留：启动器 + session.json 写入；R3F 退役
-│   └── town/                        # Unity 6 LTS + URP（替换现有 UE 工程）
+│   ├── desktop/                     # session.json + 启动器 IPC（✅）；`#/simulation/town` 仅 Launcher
+│   └── town/                        # Unity 6 LTS + URP（唯一 3D 客户端）
 │       ├── Assets/
-│       │   ├── Scripts/             # C# SimulationSession、REST、SSE、坐标
-│       │   ├── Scenes/             # Town.unity（空场景 + 运行时建镇）
-│       │   ├── Prefabs/            # NPC / 建筑预制体
-│       │   ├── UI/                  # UI Toolkit UXML/USS
-│       │   └── StreamingAssets/Fixtures/   # fixture 同步副本（region/m1-tick）
-│       ├── Packages/manifest.json   # URP、AI Navigation、Newtonsoft.Json 等 UPM 依赖
-│       └── ProjectSettings/
+│       │   ├── Scripts/             # Simulation / Town / UI（C#）
+│       │   ├── Scenes/Town.unity
+│       │   ├── UI/                  # UI Toolkit UXML/USS + PanelSettings（顶栏含 fps-label）
+│       │   ├── Settings/            # URP Asset
+│       │   ├── Plugins/WebGL/       # AgentTownSse.jslib
+│       │   ├── StreamingAssets/     # Fixtures + town-personas.json
+│       │   ├── Editor/              # ProjectSetup / BatchVerify
+│       │   └── Tests/EditMode/
+│       ├── Packages/manifest.json   # URP、AI Navigation、Newtonsoft.Json、Test Framework
+│       ├── ProjectSettings/         # 6000.0.78f1
+│       └── scripts/                 # open-unity / verify-unity / build-unity / spike-webgl
 ├── packages/
-│   ├── town-assets/                 # 3D 资产单一源（自 desktop/public 迁出或构建同步）
+│   ├── town-assets/                 # 3D 资产单一源（⏳ 尚未迁入；源仍在 desktop/public）
 │   ├── contract-types/
 │   └── protocol-conformance/fixtures/
 │       ├── simulation-region-positions.json
-│       └── simulation-m1-tick.json    # conformance 基线
+│       └── simulation-m1-tick.json
 ```
 
-**无 `.uasset` / 无 `Content/`**：场景与建筑全部**运行时代码生成**（照译 R3F `regionLayout.ts` + UE spawner），资产以 FBX/glTF 从 `packages/town-assets` 导入 `Assets/`。
+场景与区域锚点**运行时代码生成**；真资产（Kenney/Xbot）导入后替换 primitive。日常文档：`apps/town/README.md`、`EDITOR-WIRING.md`。
 
 **Desktop 保留（路线 B）**
 
-| 组件 | 职责 |
-|------|------|
-| `session.json` 写入 | 用户登录后持久化 API 地址与 token（§8） |
-| `/simulation/town` | Deprecated → 说明页 +「打开 AgentTown」按钮 |
-| R3F `simulation/town/*` | Unity Phase 1 parity 后删除；`?preview=1` 暂留至 Unity 离线模式就绪 |
+| 组件 | 状态 | 职责 |
+|------|:----:|------|
+| `session.json` 写入 | ✅ | `main/agenttown-service.ts`；登录后持久化 API + token（§8） |
+| 「打开 AgentTown」按钮 / spawn | ✅ | `OpenInAgentTownButton`；需本机 `AgentTown.exe` |
+| `/simulation/town` 路由 | ✅ | **仅** `TownLauncherPage`（无内嵌 3D / 无 `?preview`） |
 
-**双参照实现定位**：Desktop R3F（TypeScript）与现有 UE C++ **均冻结为对照实现**，不再新增功能；新需求只进 Unity。UE 工程在 Unity 达 Phase 1 parity 后删除（§15）。
+新需求只进 Unity。
 
 ---
 
@@ -198,7 +203,7 @@ AgentCore/
 
 **推导**：wire 与 Unity 同为 Y-up，故「上」轴（`y`）直传；两者手性不同（wire 右手、Unity 左手），须**恰翻一个轴**以避免镜像——按 glTF/Three.js→Unity 标准约定**翻 `z`**（wire 的 `+z`=南 → Unity `+z`=前=北）。R3F 参照（`regionPositions.ts`）在 Three.js（Y-up 右手）中直接使用 wire `(x,y,z)`，Unity 仅比其多一次 `z` 取反即得同一视觉布局。NPC 尺寸/速度本以米计，随 `S=1` 天然对齐，无额外缩放。
 
-**验收 oracle**：`市场` wire `(24,0,0)` → Unity 世界坐标 **`(24, 0, 0)`**。须加 **Unity Test Framework（EditMode，NUnit）单测**读 `simulation-region-positions.json`（`Assets/StreamingAssets/Fixtures/` 同步副本），逐区域断言变换结果**误差 < 0.5m**。
+**验收 oracle**：`市场` wire `(36,0,0)` → Unity 世界坐标 **`(36, 0, 0)`**。须加 **Unity Test Framework（EditMode，NUnit）单测**读 `simulation-region-positions.json`（`Assets/StreamingAssets/Fixtures/` 同步副本），逐区域断言变换结果**误差 < 0.5m**。
 
 > `contract-types` 注释改为「Wire 世界坐标（客户端自行映射至引擎坐标系）」。
 
@@ -206,7 +211,7 @@ AgentCore/
 
 单一源：`simulation-region-positions.json` → Unity `Assets/StreamingAssets/Fixtures/`（构建或 Editor 脚本同步自 protocol-conformance）。
 
-7 区域：`广场`、`市场`、`餐厅`、`面包店`、`公园`、`住宅区`、`镇政厅`。
+10 区域：`广场`、`市场`、`餐厅`、`面包店`、`公园`、`住宅区`、`镇政厅`、`图书馆`、`工坊`、`码头`。世界草地约 **120×96 m**；默认鸟瞰相机约高度 28（可滚轮缩放；HUD「鸟瞰」回全景）。
 
 ### 6.4 居民人设（已定案）
 
@@ -249,10 +254,20 @@ AgentCore/
 | Bootstrap（MonoBehaviour）| 配置、认证、`SimulationSession` 装配 |
 | TownScene | 空场景 + **运行时代码生成**地形、Kenney 建筑、区域锚点；`NavMeshSurface` 运行时烘焙 |
 | NpcLayer | NPC 预制体 + `NavMeshAgent` + `Animator`；`agent_id` 与后端一致 |
-| CameraRig | 鸟瞰 + 跟踪（Phase 2） |
-| UiLayer | UI Toolkit（`UIDocument`）面板 |
+| CameraRig | 鸟瞰 + 跟踪 |
+| UiLayer | UI Toolkit（`UIDocument`）观测 chrome |
 
-**UI 选型（定案）**：**UI Toolkit（UXML/USS + `UIDocument`）**——观测面板数据密集（居民列表、事件时间线、指标图表、Tab），UI Toolkit 的 retained-mode + flexbox/USS 与团队 Web/DOM 经验同构、迭代快，为首选。**例外**：Phase 3 世界内气泡/头顶标签走 **uGUI world-space Canvas**（Unity 6 中 UI Toolkit world-space 仍为实验特性）。
+**UI 选型（定案）**：**UI Toolkit（UXML/USS + `UIDocument`）**——观测面板数据密集，retained-mode + flexbox/USS 与 Web/DOM 经验同构。**例外**：世界内气泡 / 头顶名牌走 **uGUI world-space Canvas**（Unity 6 中 UI Toolkit world-space 仍为实验特性）。
+
+**观测 chrome 布局（2026-07-09 · 行业观测台惯例）**——`Assets/UI/TownHud.uxml` + `TownHudController`；中央留给 3D，勿再把决策/事件浮在画面正中：
+
+| 区域 | 内容 |
+|------|------|
+| **顶栏** | 状态 / 时钟 / Tick / SSE · 宏观 metrics chips · 世界修饰符 · 鸟瞰 |
+| **底栏** | 推进/暂停/继续 · 回放 ◀▶ Live · **时间轴滑块** · 倍速 |
+| **左侧轨** | 运行（离线 Demo / 新建 / 恢复 / 最近 Run）· 上帝模式 4 预设 |
+| **右侧轨** | **居民 / 决策 / 事件** 三 Tab（检验区；默认居民） |
+| **中央** | 3D 小镇（picking 穿透，仅 chrome 吃指针） |
 
 **NPC 渲染（定案）**：单骨骼 FBX/glTF（`Xbot`）**共享骨骼动画 + 预制体实例化**，`MaterialPropertyBlock` 标色区分居民（对齐现 Desktop，非每人独立 Mixamo 文件）。
 
@@ -342,7 +357,7 @@ AgentCore/
 | `TownLighting` / `dayNight` | P2 | 日夜光照 |
 | `InteractionOverlays` | P3 | 对齐 MVP M3 |
 | `GodModePanel` | P3 | inject / patch |
-| `?preview=1` | 暂留 R3F | Unity 离线模式就绪后废弃 |
+| `?preview=1` / Desktop R3F | ✅ 已删 | 观测仅在 AgentTown |
 
 ---
 
@@ -361,79 +376,87 @@ AgentCore/
 
 ### Phase 0 — Spike（~1–2 周）
 
-- [ ] **[迁移第一步] Unity WebGL + SSE 连通性 spike**：WebGL 构建（非仅编辑器）打通 create / tick / GET snapshot + SSE live 流；解决浏览器 CORS（服务端 `Access-Control-Allow-Origin`）+ SSE 流式（`DownloadHandlerScript` 分块读 或 `.jslib` `EventSource` 桥接）。详见 §15
-- [ ] `apps/town` Unity 6 + Bearer 调通 create / tick / GET ticks/1（桌面构建）
-- [ ] 坐标变换（`市场 (24,0,0)` → `(24,0,0)`，误差 < 0.5m）+ 1 NPC 到 `市场`
-- [ ] Desktop 并行：`session.json` 写入（最小实现）
-- [ ] **Go/No-Go**：**WebGL SSE 连通** + REST + 坐标 + ≥30 FPS；未过则回评估工期，不硬扛
+- [x] `apps/town` Unity 6 + Bearer REST 客户端（create / tick / GET ticks）— 代码 ✅；打包 E2E ⏳
+- [x] 坐标变换（`市场 (36,0,0)` → `(36,0,0)`）+ EditMode 单测 + 占位 NPC / NavMesh
+- [x] WebGL SSE **源码桥**（`AgentTownSse.jslib` + `WebGlSseTransport`）
+- [x] Desktop：`session.json` 写入（`agenttown-service.ts`）
+- [x] **CORS + 浏览器 SSE 路径**（`pnpm town:spike:webgl` Step A；`.env` 含 `:8080`）
+- [x] WebGL **构建产物**（`Builds/WebGL/`）
+- [x] **Go/No-Go**：CORS+SSE Step A 绿；WebGL 可构建；jslib 页内冒烟见 `pnpm town:spike:webgl`（C2）
 
 ### Phase 1 — 可观看 MVP（~2–3 周）
 
-- [ ] 7 区域 + 10 NPC + Session 完整
-- [ ] SSE live + GET 回放 + manifest
-- [ ] Run 管理、Tick、居民列表
-- [ ] **达 Phase 1 parity → 删除 UE 参照实现 + R3F `town/*`**；Desktop 改启动器
+- [x] 10 区域运行时建镇 + Session 单状态机 + 多 NPC
+- [x] SSE live + GET 回放/倍速 + manifest 居民列表（HUD）
+- [x] Tick 控制 UI（Create / Advance / Replay）
+- [x] Kenney + Xbot 资产管线（`town:sync-assets` + Import；无资产回退占位）；FE-18：Quaternius 源已进（精选 10 栋）+ 区域绑定（Quaternius 优先 / Kenney fallback）；公园自然物：Kenney Nature Kit 精选 10 GLB + nature 池；主干道路：Kenney City Kit (Roads) 精选 8 GLB + road 池（无资产回退色块）+ LOD/剔除守 10 NPC ≥ 30 FPS
+- [x] 本地 Run 历史（§9，最近 12 条）
+- [x] Windows `AgentTown.exe` + WebGL 构建；`pnpm town:build` / `town:verify`（29/29）
+- [x] Desktop 路由仅启动器（`#/simulation/town` → `TownLauncherPage`；失败路径提示；开发期找 `Builds/Windows/AgentTown.exe`）
+- [x] Offline Demo（`--demo` / 左侧轨「离线 Demo」；含交互/metrics/modifiers）
+- [x] **删栈收口**：UE + Desktop R3F 已删；门禁 = scripted + WebGL C2 live（`sim.tick_*`）+ 顶栏 FPS 可目测
+- [ ] 真 LLM 连推 5+ tick（需 DeepSeek；**另线**，不挡删栈）
+- [x] 30 FPS 可观测固化（顶栏 fps-label 色带 + `FpsSampler` EditMode；Profiler 深度采样另跟）
 
 ### Phase 2 — 体验对齐（~2 周）
 
-- [ ] 决策/事件/跟踪/热力/日夜/metrics
-- [ ] Token 文件联调
+- [x] 决策/事件（右侧 Tab；顶栏 metrics / 修饰符）
+- [x] 跟踪相机
+- [x] 日夜光照
+- [x] 热力 / metrics（区域 mood·密度热力 + 顶栏 metrics；Offline / scripted 可演示）
+- [x] 观测 chrome 重排（顶栏状态 · 底栏时间轴 · 左右轨；中央留给 3D）
+- [ ] Token 文件联调（401 refresh）
 
 ### Phase 3 — 产品化
 
-- [ ] 上帝模式 + 交互 3D 叠加（M3）
+- [x] 上帝模式 + 交互 3D 叠加（左侧轨 4 预设；Offline / scripted 可演示对话·交易·投票叠加）
 - [ ] Unity CI、Windows 安装包、**WebGL 传播版发布**
 - [ ] macOS 构建
 - [ ] `sim.*` conformance 扩展
 
 ---
 
+
 ## 14. 验收标准（Phase 1）
 
-1. 独立启动 AgentTown（token 文件或 CLI）
-2. 创建 run → `GET /manifest` → 10 居民 roster 正确
-3. 手动 5 tick；位置与 region fixture 一致（§6.2 变换后误差 < 0.5m）
-4. 20 tick 回放 seek / 倍速，无 SSE 污染
-5. 10 NPC ≥ 30 FPS（Windows）
-6. **（迁移护栏）** WebGL 构建能收到 SSE live tick（Phase 0 连通性 spike 结论在 Phase 1 保持绿）
+**删栈收口（已定）**：以 **scripted + WebGL C2 live（见 `sim.tick_*`）+ 顶栏 FPS 可目测**为准；**真 LLM 涌现验证另线**，不列入删栈门禁。
+
+| # | 项 | 状态 |
+|---|----|:----:|
+| 1 | 独立启动 AgentTown（token 文件或 CLI） | ✅ |
+| 2 | 创建 run → `GET /manifest` → 10 居民 roster | ✅ |
+| 3 | 手动 / scripted 5 tick；位置与 region fixture 一致 | ✅ scripted |
+| 4 | 回放 seek / 倍速，无 SSE 污染 | ✅ |
+| 5 | 顶栏 `fps-label` 可目测（≥30 绿 / 20–29 黄 / &lt;20 红）；`FpsSampler` 门禁；Profiler 深度另跟 | ✅ 可观测 / Profiler 另跟 |
+| 6 | WebGL 构建 SSE live tick（C2 / `pnpm town:spike:webgl`） | ✅ |
+| 7 | 删除 UE + Desktop R3F | ✅ |
+| — | 真 LLM 连推 5+ tick | 另线（需 DeepSeek） |
 
 ---
 
-## 15. 从 UE 迁移
+## 15. 从 UE / R3F 迁移（已完成退役）
 
-> **背景**：2026-07-08 由 Unreal Engine 5.8 改回 **Unity 6 LTS + URP + C#**。**决定性理由**：中期已确认要做 **Web 传播版**，而 UE **无原生 Web 导出**、**Unity 原生 WebGL2**。**低风险依据**：`apps/town` 现有实现**无任何 `.uasset`**（7 区域场景全部运行时代码生成），且客户端逻辑已有**两份参照实现**（Desktop R3F TypeScript + 现有 UE C++），Unity C# 属「照蓝图翻译」。
+> **背景**：2026-07-08 选定 **Unity 6 LTS + URP + C#**（决定性理由：Web 传播版需原生 WebGL2）。**2026-07-09**：Unity Phase 0/1 进仓后，按收口决策**已删除** UE（`Source/` / `.uproject` / `Config/` / `Content/` / `town:ue:*`）与 Desktop R3F（`simulation/town/**`、内嵌 3D 页、`town:preview` / `shoot:simulation`）。历史以 git 为准，不设归档目录。
 
-### 15.1 可复用清单（零改动 / 直接照译）
+### 15.1 仍复用（零改动）
 
-| 类别 | 复用物 | 复用方式 |
-|------|--------|----------|
-| 后端 | `simulation/` 包、REST/SSE 契约、Postgres 四表 | **完全不动** |
-| Fixtures | `simulation-region-positions.json`、`simulation-m1-tick.json` | 直接复用（同步至 `Assets/StreamingAssets/Fixtures/`） |
-| 类型契约 | `packages/contract-types` / OpenAPI | 手写 C# DTO 对齐（同 UE 手写路径） |
-| **双参照实现** | Desktop R3F（TS）+ 现有 UE C++ | 逐段照译到 C#：R3F 给「wire 直用映射 + 建镇布局」蓝图，UE 给「坐标/Session 状态机/SSE 事件处理」蓝图 |
-| 资产 | `packages/town-assets`（Kenney/Quaternius CC0 FBX/glTF） | Unity 直接导入 `Assets/` |
-| 人设 | `town-personas.json`（自 `townPersonas.ts` 导出） | 直接复用 |
+| 类别 | 复用物 |
+|------|--------|
+| 后端 | `simulation/`、REST/SSE、Postgres 四表 |
+| Fixtures | `simulation-region-positions.json`、`simulation-m1-tick.json` → `Assets/StreamingAssets/Fixtures/` |
+| 类型契约 | `packages/contract-types` / OpenAPI → 手写 C# DTO |
+| 资产 | `packages/town-assets`（Kenney/Quaternius）→ Unity `Assets/` |
+| 人设 | `town-personas.json` |
 
-### 15.2 移植顺序
+### 15.2 移植进度
 
-1. **[迁移第一步 · 命门] Unity WebGL + SSE 连通性 spike**——早验风险，先于一切功能移植。在 **WebGL 构建**（非仅 Editor：Editor 走 .NET 网络栈、WebGL 走浏览器，二者不等价）中打通 create / tick / GET snapshot + **SSE live 流**。需解决：
-   - **浏览器 CORS**：服务端对 Web 源发 `Access-Control-Allow-Origin`（`simulation/*` 与 inference 代理路由）。
-   - **SSE 流式**：`UnityWebRequest` 默认 handler 不做增量流；用 `DownloadHandlerScript` 分块读，或 `.jslib` 包 `EventSource`/`fetch`+`ReadableStream` 桥接回 C#。
-   - **Go/No-Go**：WebGL 构建能收到实时 tick 事件。**UE 无此路径，故 Unity 必须最早证明能做到**——不过则迁移价值存疑，回评估。
-2. **坐标变换** `WireCoordinateTransform`（C#）+ EditMode 单测（市场 `(24,0,0)`→`(24,0,0)`，误差 < 0.5m）——照译 UE，改 Z-up→Y-up（§6.2）。
-3. **SimulationSession 单状态机**（C#）+ REST/SSE 客户端——照译 UE C++（字段/模式规则/事件表见 §4、§6.6）。
-4. **运行时建镇**（7 区域代码生成）+ `NavMeshSurface` 运行时烘焙——照译 R3F `regionLayout.ts` + UE spawner。
-5. **NPC**：`NavMeshAgent` + `Animator` + 预制体实例化标色。
-6. **UI Toolkit 观测面板**：Tick 控制、居民列表、事件流（Phase 1 范围，见 §11）。
-7. **Phase 1 parity** → 达 §14 验收全过。
+1–6. CORS / 坐标 / Session / 建镇 / NPC / UI Toolkit → ✅  
+7. WebGL C2 live + 删 UE/R3F → ✅  
+余项：真 LLM 另线；Profiler 深度采样（顶栏 FPS 色带已可观测）。
 
-### 15.3 UE 退役时机
+### 15.3 引擎无关契约（仍不变）
 
-Unity 达 **Phase 1 parity（§14 验收全过）** 后，删除 `apps/town` 下 UE 工程（`Source/`、`*.uproject`、UE 专属 `Config/`），比照 **R3F 冻结→删除先例**。退役前 UE 代码冻结为参照、不再新增功能；新需求只进 Unity。R3F `simulation/town/*` 同步在 Unity Phase 1 后删除（§3）。历史与理由以本节 + git 为准，不设归档目录。
-
-### 15.4 迁移中保持不变的引擎无关契约
-
-以下由 §4–§6、§14 定义，**迁移只换渲染 / UI / 坐标实现，契约本身不动**：`SimulationSession` 单状态机字段与模式规则、Live/Replay 语义、SSE 事件处理表（含忽略 `tick_frame`）、REST API 映射、坐标契约语义（wire 侧不变，仅换引擎侧公式）、fixtures、分阶段交付节奏、验收标准。**若移植中发现须改上述任一契约或与后端不一致 → 立即停下回报，不自行改契约。**
+`SimulationSession` 状态机、Live/Replay、SSE 事件表、REST、wire 坐标语义、fixtures。**若须改契约 → 停下回报，不自行改。**
 
 ---
 
@@ -445,14 +468,14 @@ Unity 达 **Phase 1 parity（§14 验收全过）** 后，删除 `apps/town` 下
 | 2 | 坐标：wire → Unity `(x, y, -z)` 单点变换（Y-up 左手系，`S=1` 米）；市场 `(24,0,0)`→`(24,0,0)` |
 | 3 | Roster：`GET /manifest` 权威；bio 本地 JSON 兜底 |
 | 4 | Run 历史：本地缓存 + 中期 `GET /runs` |
-| 5 | 主入口 AgentTown；Desktop 启动器副入口 |
-| 6 | R3F **与 UE 均冻结对照**；Unity 达 Phase 1 parity 后删除二者 3D 代码 |
+| 5 | 主入口 AgentTown；Desktop 仅启动器副入口（无内嵌 3D） |
+| 6 | **UE + Desktop R3F 已删**；删栈门禁 = scripted + WebGL C2 live + FPS 顶栏；真 LLM 另线 |
 | 7 | 资产 `packages/town-assets`（CC0 Kenney/Quaternius + 免费包） |
 | 8 | **Unity 6 LTS + URP**；Windows 先行、**WebGL 中期**、macOS 后 |
 | 9 | Replay 仅 GET 逐帧；Live 忽略 `tick_frame` |
-| 10 | MVP FE 任务映射为 **UT-***（Unity Town；见 MVP 计划 §2.1，编号与 `UE-*` 1:1） |
+| 10 | MVP FE 任务映射为 **UT-***（Unity Town；见 MVP 计划 §2.1） |
 | 11 | UI 选型 UI Toolkit（世界内气泡例外走 uGUI world-space）；JSON 用 Newtonsoft |
-| 12 | **2026-07-08**：由 **UE 5.8 改回 Unity 6 LTS**；决定性理由 = 中期做 Web 传播版、UE 无原生 Web 导出而 Unity 原生 WebGL2；`apps/town` 无 `.uasset`（全运行时生成）迁移风险低；UE Phase 1 代码降为将退役参照实现（§15） |
+| 12 | **2026-07-08**：选定 Unity（WebGL2）；**2026-07-09**：UE/R3F 退役完成（§15） |
 
 ---
 

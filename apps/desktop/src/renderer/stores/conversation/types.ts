@@ -47,6 +47,22 @@ export interface PlanReviewDisplay {
   note: string;
 }
 
+export interface TeamPreviewWorkerDisplay {
+  run_id: string;
+  role: string;
+  task: string;
+  depends_on: string[];
+  debate: boolean;
+}
+
+export interface TeamPreviewDisplay {
+  id: string;
+  workers: TeamPreviewWorkerDisplay[];
+  status: "pending" | "resolved";
+  decision: CheckpointDecision | null;
+  note: string;
+}
+
 export interface Conversation {
   id: string;
   title: string;
@@ -124,6 +140,7 @@ export interface Message {
   checkpoints?: CheckpointDisplay[];
   nonBlockingAsks?: NonBlockingAskDisplay[];
   planReviews?: PlanReviewDisplay[];
+  teamPreviews?: TeamPreviewDisplay[];
   error?: {
     code: string;
     message: string;

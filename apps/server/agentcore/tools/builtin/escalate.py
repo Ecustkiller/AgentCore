@@ -18,18 +18,20 @@ resolves it at synthesis with its OWN levers: ``ask_user`` (if the user must dec
 ``revise`` (recall the author with the answer), or a fresh ``delegate``. A wrong assumption
 is corrected at synthesis, not propagated silently down the chain.
 
-BLOCKING (阻塞式求决策, ``blocking`` true): for a「只有用户能定、且猜错你的产物基本作废」fork,
-the worker SUSPENDS in place and asks the user DIRECTLY — because the CEO is parked at its
-``delegate`` mid-wave and can't mediate (硬约束: 波内没有在跑的 CEO). It parks on the same
-interaction bridge as ``ask_user`` (``InteractionKind.ESCALATION``); the answer flows back
-into its ReAct loop and it resumes. This needs a live interactive user (the ``ask_user``
-gate) — un-armed turns (autonomous / handoff) and a full concurrency cap degrade it to the
-non-blocking path, and a timeout falls back to the stated ``assumption``. So blocking is a
-strict SUPERSET of non-blocking: 先等用户 T 秒，等不到就退回今天的行为。The mechanism (cap /
-suspend / SSE events / RunState recording) lives behind ``ToolContext.escalation`` so this
-tool stays off the event vocabulary (引擎纯化); the tool owns only the decision + the
-outcome→result mapping (:func:`escalate_tool_result`). 设计见
-docs/06-规划/阻塞式求决策设计.md; 对比见 docs/03-AI核心/Agent协作模式.md（升级通道）.
+BLOCKING (阻塞式求决策, ``blocking`` true): for a「猜错你的产物基本作废」fork, the worker
+SUSPENDS in place. Who mediates depends on mode:
+
+- **经典路径**（无活跃协调 session）：波内没有在跑的 CEO，故直挂用户（同 ``ask_user`` 交互桥，
+  ``InteractionKind.ESCALATION``）。
+- **协调模式**（根 CEO 协调 session 活跃，≥2 worker 默认）：CEO 波内存活，阻塞升级改由 CEO 仲裁——worker
+  挂起等 ``resolve_escalation``；初始不发用户可答卡。偏好/授权/费用类由 CEO 先 ``ask_user``
+  再 resolve（单一兑现路径）。超时仍回落 ``assumption``，绝不永久卡住。
+
+Un-armed turns (autonomous / handoff) and a full concurrency cap degrade to the
+non-blocking path. The mechanism (cap / suspend / SSE events / RunState recording) lives
+behind ``ToolContext.escalation`` so this tool stays off the event vocabulary (引擎纯化);
+the tool owns only the decision + the outcome→result mapping (:func:`escalate_tool_result`).
+设计见 docs/06-规划/阻塞式求决策设计.md / CEO协调模式；对比见 docs/03-AI核心/Agent协作模式.md。
 """
 
 from __future__ import annotations
@@ -64,8 +66,8 @@ class EscalateTool:
                 "走偏的关键信息】【只有上级/用户能定的关键岔路】或【发现真正该做的与初始计划"
                 "不符】时才用——能自行合理假设的小事不要升级。\n"
                 "blocking 维度：默认 false【非阻塞】——上报后你立刻按假设继续、主管收尾时纠偏；"
-                "true【阻塞·求决策】——仅当岔路【只有用户能定、且猜错你的产物基本作废】时用：你"
-                "原地挂起、把问题直送用户、拿到答复再继续（须写明 assumption）。\n"
+                "true【阻塞·求决策】——仅当岔路【猜错你的产物基本作废】时用：你原地挂起、拿到"
+                "答复再继续（须写明 assumption）。协调模式下由主管仲裁；经典路径直送用户。\n"
                 "kind 维度（正交）：默认 normal=普通待决问题；scope=【职责偏离】——你发现真正"
                 "该做的与初始计划/子任务设定不符（如上游产出显示真问题是 X 不是 Y）；dep=【卡在"
                 "缺输入】——你缺一个【还不存在】的输入 / 依赖才能继续（没人产出过、计划也没安排；"
@@ -91,7 +93,7 @@ class EscalateTool:
                         "type": "string",
                         "description": (
                             "在拿到答复前你暂时采用的假设（你正/将据此继续）。blocking=true 时"
-                            "【必填】：等不到用户答复时按它继续（超时回落）；blocking=false 时"
+                            "【必填】：等不到答复时按它继续（超时回落）；blocking=false 时"
                             "强烈建议——写明它，主管才能判断你的产物是否需要据真实答案返工。"
                         ),
                     },
@@ -99,9 +101,9 @@ class EscalateTool:
                         "type": "boolean",
                         "description": (
                             "可选，默认 false。false=【非阻塞】：上报后你立刻按假设把活做完、"
-                            "主管收尾纠偏。true=【阻塞·求决策】：仅当这个岔路【只有用户能定、且"
-                            "猜错你的产物基本作废】时用——你会原地挂起等用户答复再继续（须写明 "
-                            "assumption；等不到/无活跃用户则自动按假设继续，绝不会把你永久卡住）。"
+                            "主管收尾纠偏。true=【阻塞·求决策】：仅当这个岔路【猜错你的产物基本"
+                            "作废】时用——你会原地挂起等裁决再继续（须写明 assumption；"
+                            "等不到/无活跃用户则自动按假设继续，绝不会把你永久卡住）。"
                         ),
                     },
                     "kind": {
@@ -124,11 +126,11 @@ class EscalateTool:
                     "questions": {
                         "type": "array",
                         "description": (
-                            "可选，仅 blocking=true 时有意义：把这个【只有用户能定】"
-                            "的岔路拆成结构化选项，让用户一键拍板、不必读你的散文再手敲。"
+                            "可选，仅 blocking=true 时有意义：把这个【关键岔路】"
+                            "拆成结构化选项，便于一键拍板、不必读散文再手敲。"
                             "岔路是干净的 A/B 或多选时强烈建议给（结构同 ask_user 的 "
                             "questions，最多 5 个）；纯开放问题（无明确候选）则省略，"
-                            "用户直接文本作答。"
+                            "文本作答。"
                         ),
                         "items": {
                             "type": "object",
@@ -153,20 +155,20 @@ class EscalateTool:
                                             "label": {
                                                 "type": "string",
                                                 "description": (
-                                                    "选项文字（即用户选它时回传的答案）。"
+                                                    "选项文字（即选它时回传的答案）。"
                                                 ),
                                             },
                                             "detail": {
                                                 "type": "string",
                                                 "description": (
                                                     "可选：这一项的一行权衡 / 代价，"
-                                                    "帮用户看懂取舍。"
+                                                    "帮看懂取舍。"
                                                 ),
                                             },
                                             "recommended": {
                                                 "type": "boolean",
                                                 "description": (
-                                                    "可选：标记你倾向的那一项（至多一个，仅高亮"
+                                                    "可选：标记倾向的那一项（至多一个，仅高亮"
                                                     "不预选；要预选用 default）。"
                                                 ),
                                             },
@@ -181,7 +183,7 @@ class EscalateTool:
                                 "default": {
                                     "type": "string",
                                     "description": (
-                                        "可选：你的暂定倾向（choice 时应是 options 中某项 label）。"
+                                        "可选：暂定倾向（choice 时应是 options 中某项 label）。"
                                     ),
                                 },
                             },
@@ -222,8 +224,8 @@ class EscalateTool:
                 success=False,
                 output="",
                 error=(
-                    "escalate(blocking=true) 必须写明 assumption：等不到用户答复时你将按它继续"
-                    "（超时回落）。若你本就能自行假设、不需用户拍板，请改用 blocking=false。"
+                    "escalate(blocking=true) 必须写明 assumption：等不到答复时你将按它继续"
+                    "（超时回落）。若你本就能自行假设、不需拍板，请改用 blocking=false。"
                 ),
             )
         logger.info(
@@ -237,30 +239,62 @@ class EscalateTool:
             question=clip_preview(question, 200),
             assumption=clip_preview(assumption, 160),
         )
-        # 阻塞·求决策: suspend for the user when the turn is armed (a live interactive
-        # client). The channel owns cap / suspend / SSE / RunState recording; we only map
-        # its outcome. A ``degraded`` outcome (concurrency cap full) or an unarmed turn (no
-        # channel) falls through to the non-blocking path below — so blocking is a strict
-        # superset of non-blocking, never a regression (设计 §4.4).
-        # 结构化升级（复用 ask_user 的问题规整）：把岔路拆成 choice/text 选项随挂起卡下发，
-        # 让用户一键拍板。仅阻塞挂起路径用到（非阻塞无卡可答）。Local import 避免经 ask_user
-        # 包 __init__ 触发 runtime 依赖环。
+        # 阻塞·求决策: suspend when the turn is armed (a live interactive client).
+        # Classic path → user; coordination-active → CEO arbitration (D1). The channel owns
+        # cap / suspend / SSE / RunState recording; we only map its outcome. A ``degraded``
+        # outcome (concurrency cap full) or an unarmed turn (no channel) falls through to the
+        # non-blocking path below — so blocking is a strict superset of non-blocking, never a
+        # regression (设计 §4.4).
+        # 结构化升级（复用 ask_user 的问题规整）：把岔路拆成 choice/text 选项随挂起卡下发。
+        # Local import 避免经 ask_user 包 __init__ 触发 runtime 依赖环。
         from agentcore.tools.builtin.ask_user.schema import normalize_questions
 
         channel = context.escalation
         if blocking and channel is not None and channel.armed:
             questions = normalize_questions(arguments.get("questions"))
-            outcome = await channel.request(question, assumption, questions)
+            awaiting = "user"
+            try:
+                from agentcore.runtime.coordination.session import active_coordination
+
+                coord = active_coordination(context.execution_id)
+                if coord is not None and coord.active:
+                    awaiting = "ceo"
+            except Exception:  # noqa: BLE001
+                awaiting = "user"
+            outcome = await channel.request(question, assumption, questions, kind, awaiting)
             if outcome.status != "degraded":
-                return escalate_tool_result(outcome.status, outcome.answer, assumption)
+                return escalate_tool_result(
+                    outcome.status,
+                    outcome.answer,
+                    assumption,
+                    arbitrated_by=awaiting,
+                )
         # 非阻塞 (default) / degraded / unarmed: surface the escalation live (best-effort,
         # non-fatal — the durable transcript → RunState.escalations path is unconditional)
         # and steer the worker to deliver under its assumption; the CEO纠偏 at synthesis.
         if context.on_escalate is not None:
             try:
-                context.on_escalate(question, assumption, blocking)
+                context.on_escalate(question, assumption, blocking, kind)
             except Exception:  # noqa: BLE001 — liveliness only; never break the worker
                 logger.warning("worker.escalate.emit_failed", run_id=context.run_id)
+        # CEO 协调模式 Phase 3: route into the living CEO's event queue (not wave-boundary
+        # YIELD). Best-effort — never break the worker if the bridge is unavailable.
+        # (Blocking+CEO path already posted inside the channel; this covers non-blocking.)
+        try:
+            from agentcore.runtime.coordination.bridge import post_escalation_to_coordination
+
+            post_escalation_to_coordination(
+                run_id=context.run_id,
+                role=context.agent_role or "",
+                kind=kind,
+                question=question,
+                assumption=assumption,
+                blocking=blocking,
+                source="escalate",
+                execution_id=context.execution_id,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("worker.escalate.coordination_route_failed", run_id=context.run_id)
         if kind == "scope":
             note = (
                 "已记录你的职责偏离信号，主管会在波边界据此校准尚未运行的下游步骤。"
@@ -285,15 +319,21 @@ class EscalateTool:
         return ToolResult(tool_call_id="", success=True, output=note)
 
 
-def escalate_tool_result(status: str, answer: str | None, assumption: str) -> ToolResult:
+def escalate_tool_result(
+    status: str,
+    answer: str | None,
+    assumption: str,
+    *,
+    arbitrated_by: str = "user",
+) -> ToolResult:
     """Map a blocking escalate's outcome to the CONTINUE result the worker loop consumes.
 
     The single source of truth for the live suspend path (and any future durable resume),
     the worker-side dual of :func:`~agentcore.tools.builtin.ask_user.ask_user_tool_result`:
 
-    - ``"resolved"`` → feed the user's ``answer`` back into the worker's loop, told to
+    - ``"resolved"`` → feed the ``answer`` back into the worker's loop, told to
       prefer it over its暂定假设 and回改 any work already done under the assumption;
-    - ``"timeout"`` (no answer within the window, or the user chose 按假设继续) → steer the
+    - ``"timeout"`` (no answer within the window, or 按假设继续) → steer the
       worker to proceed on its stated ``assumption`` — exactly today's non-blocking behaviour.
 
     Never terminal: an escalation RESUMES the worker, it never ends the turn (停回合 is the
@@ -301,17 +341,24 @@ def escalate_tool_result(status: str, answer: str | None, assumption: str) -> To
     """
     if status == "resolved":
         ans = (answer or "").strip()
-        output = (
-            f"用户就你的升级问题答复：\n{ans}\n"
-            "请据此继续；与你的暂定假设冲突处以用户答复为准，并回改已按假设做出的部分。"
-        )
+        if arbitrated_by == "ceo":
+            output = (
+                f"主管就你的升级问题裁决：\n{ans}\n"
+                "请据此继续；与你的暂定假设冲突处以裁决为准，并回改已按假设做出的部分。"
+            )
+        else:
+            output = (
+                f"用户就你的升级问题答复：\n{ans}\n"
+                "请据此继续；与你的暂定假设冲突处以用户答复为准，并回改已按假设做出的部分。"
+            )
         return ToolResult(tool_call_id="", success=True, output=output)
     # timeout (含「按假设继续」): fall back to the stated assumption — today's behaviour.
+    who = "主管" if arbitrated_by == "ceo" else "用户"
     return ToolResult(
         tool_call_id="",
         success=True,
         output=(
-            "未在时限内得到用户答复（或用户选择按你的假设继续）。"
+            f"未在时限内得到{who}答复（或选择按你的假设继续）。"
             f"请按你写明的假设把任务继续做完：{assumption}。"
         ),
     )

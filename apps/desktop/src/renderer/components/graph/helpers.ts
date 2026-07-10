@@ -170,7 +170,6 @@ export function computeWaves(
   layoutKind: GraphLayout,
   captainId: string | null,
 ): WaveBand[] {
-  if (layoutKind === "timeline") return [];
   const horizontal = layoutKind === "leftright";
   const waveByRun = computeTopologicalRunWaves(execution.runs, captainId);
 
@@ -232,6 +231,7 @@ export interface GraphRunLike {
   parentRunId?: string | null;
   revision?: number;
   revisionOf?: string | null;
+  replacesRunId?: string | null;
   stance?: string | null;
   group?: string | null;
   kind?: string;
@@ -301,7 +301,7 @@ export interface GraphFoldInfo {
   folded: Set<string>;
   /** Every worker run id → its visible layout-unit root id. */
   unitOf: Map<string, string>;
-  /** Unit roots that render as a debate compound card (not a plain agent node). */
+  /** Debate moderator unit roots — always layout-expanded (参与者×轮次 grid). */
   debateUnits: Set<string>;
   /** Layout unit id → all folded descendant run ids (for drill-in / subTeams). */
   descendants: Map<string, string[]>;
@@ -410,7 +410,7 @@ export function buildGraphStructure(
   const workerRuns = runs.filter((r) => r.id !== captainId);
   const workerIds = new Set(workerRuns.map((r) => r.id));
   const foldInfo = computeGraphFold(runs, captainId);
-  const { folded, unitOf, descendants } = foldInfo;
+  const { folded, unitOf, descendants, debateUnits } = foldInfo;
   const isRevision = (r: GraphRunLike): boolean => (r.revision ?? 0) > 0;
   const isSub = (r: GraphRunLike): boolean =>
     !isRevision(r) &&
@@ -418,10 +418,14 @@ export function buildGraphStructure(
     r.parentRunId !== r.id &&
     workerIds.has(r.parentRunId);
 
+  /** Debate units are always expanded; other units follow user toggle. */
+  const isUnitExpanded = (unit: string): boolean =>
+    debateUnits.has(unit) || expandedUnits.has(unit);
+
   const isLayoutVisible = (runId: string): boolean => {
     if (!folded.has(runId)) return true;
     const unit = unitOf.get(runId) ?? runId;
-    return expandedUnits.has(unit);
+    return isUnitExpanded(unit);
   };
 
   const layoutWorkers = workerRuns.filter((r) => isLayoutVisible(r.id));
@@ -457,7 +461,8 @@ export function buildGraphStructure(
   for (const run of workerRuns) {
     for (const depId of run.dependsOn) {
       const collapsed =
-        folded.has(run.id) && !expandedUnits.has(unitOf.get(run.id) ?? run.id);
+        folded.has(run.id) &&
+        !isUnitExpanded(unitOf.get(run.id) ?? run.id);
       addEdge(
         {
           id: `${depId}->${run.id}`,
@@ -486,10 +491,10 @@ export function buildGraphStructure(
     });
   }
 
-  // Debate drill-in: when the moderator unit is expanded, one flat sub-team holds all
-  // debate descendants (辩手 + 续轮 revisions) so ELK lays the full 参与者×轮次 grid.
+  // Debate units are always expanded: one flat sub-team holds all debate descendants
+  // (辩手 + 续轮 revisions) so ELK lays the full 参与者×轮次 grid.
   const modId = debateModeratorId(runs, captainId);
-  if (modId && expandedUnits.has(modId)) {
+  if (modId) {
     const members = (descendants.get(modId) ?? []).filter((id) => id !== modId);
     if (members.length > 0) {
       subTeamMap.set(modId, members);
@@ -528,15 +533,27 @@ export function buildGraphStructure(
     }
   }
 
+  // 回落换人：replaces_run_id → new worker「接替」边（与 revision 链正交）。
+  for (const r of layoutWorkers) {
+    const from = r.replacesRunId;
+    if (!from || !workerIds.has(from) || !isLayoutVisible(r.id)) continue;
+    addEdge({
+      id: `${from}=>handoff=>${r.id}`,
+      source: from,
+      target: r.id,
+      kind: "handoff",
+    });
+  }
+
   const topWorkers = workerRuns.filter(
     (r) => unitOf.get(r.id) === r.id && !folded.has(r.id),
   );
   if (topWorkers.length > 0 && captainId) {
+    // Units that another top-level worker depends on (i.e. have a downstream
+    // peer). Leaves = not in this set → bookend edge into the CEO sink.
     const dependedOn = new Set<string>();
     for (const r of topWorkers) {
-      const unit = unitOf.get(r.id) ?? r.id;
       for (const dep of r.dependsOn) dependedOn.add(unitOf.get(dep) ?? dep);
-      dependedOn.add(unit);
     }
     nodeIds.push(inputId, captainId);
     for (const r of topWorkers) {

@@ -26,7 +26,7 @@ from agentcore.db.repositories import ConversationRepository
 from agentcore.runtime.checkpoints import CheckpointResponse
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
-from agentcore.runtime.suspension import TurnSuspension
+from agentcore.runtime.suspension import TurnSuspension, suspension_summary_fields
 from agentcore.runtime.suspension_persistence import (
     claim_paused_turn,
     list_paused_turns,
@@ -45,24 +45,15 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 def _paused_summary(f: TurnSuspension) -> PausedTurnSummary:
     """Project one persisted suspension frame to its wire summary (shared by the
-    paused-list + recovery endpoints). ``getattr`` defaults absorb the kind asymmetry:
-    plan_review carries ``steps`` / ``pending``, ask_user the unified card payload, and
-    each frame leaves the other kind's fields empty."""
+    paused-list + recovery endpoints). Kind-specific slots come from the shared
+    :func:`~agentcore.runtime.suspension.suspension_summary_fields` codec registry
+    (same source as the sidecar ``paused_summary``)."""
     return PausedTurnSummary(
         message_id=f.message_id,
         kind=f.kind,
         checkpoint_id=f.checkpoint_id,
         user_message=f.user_message,
-        # plan_review fields (empty on an ask_user frame) ...
-        steps=getattr(f, "steps", []),
-        pending=getattr(f, "pending", []),
-        # ... and ask_user fields (empty on a plan_review frame).
-        question=getattr(f, "question", ""),
-        context=getattr(f, "context", ""),
-        assumptions=getattr(f, "assumptions", []),
-        questions=getattr(f, "questions", []),
-        style_options=getattr(f, "style_options", []),
-        intent=getattr(f, "intent", None),
+        **suspension_summary_fields(f),
     )
 
 

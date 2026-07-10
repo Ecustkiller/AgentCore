@@ -47,33 +47,32 @@ export function handleMessageStreamEvent(
     }
     case "message_start": {
       const payload = event.payload as MessageStartPayload;
-      // Resume replays message_start with the same server message_id as the pause snapshot
-      // (reloaded from DB by `id`, or stamped on a live bubble as `serverMessageId`) — drop
-      // those stale bubbles so ensureStreamingAssistant opens/reuses one streaming slot.
-      if (payload.message_id) {
-        const store = useConversationStore.getState();
-        for (const m of getRuntime(conversationId).messages) {
-          if (
-            m.id === payload.message_id ||
-            (m.serverMessageId === payload.message_id && !m.isStreaming)
-          ) {
-            store.removeMessage(m.id, conversationId);
-          }
+      // Resume = same-turn continuation: if an assistant already matches the
+      // server message_id, reuse it (idempotent). Never delete+create.
+      const store = useConversationStore.getState();
+      const existing = payload.message_id
+        ? getRuntime(conversationId).messages.find(
+            (m) =>
+              m.role === "assistant" &&
+              (m.id === payload.message_id ||
+                m.serverMessageId === payload.message_id),
+          )
+        : undefined;
+      if (existing) {
+        if (!existing.isStreaming) {
+          store.resumePausedAssistant(payload.message_id, conversationId);
+        } else {
+          store.setGenerating(true, conversationId);
         }
+      } else {
+        ensureStreamingAssistant(conversationId);
+        store.setGenerating(true, conversationId);
       }
-      ensureStreamingAssistant(conversationId);
-      useConversationStore.getState().stampPendingTurnWarning(conversationId);
-      useConversationStore.getState().setGenerating(true, conversationId);
+      store.stampPendingTurnWarning(conversationId);
       if (payload.trace_id)
-        useConversationStore
-          .getState()
-          .setTraceIdOnLastMessage(payload.trace_id, conversationId);
-      // 挂起即收口 (②): keep the SERVER message_id (the live bubble's id is a client
-      // UUID) so a turn that ends paused in-session can surface its resume card under
-      // the resume KEY the durable frame was persisted under (else resume 404s).
-      useConversationStore
-        .getState()
-        .setServerMessageIdOnLastMessage(payload.message_id, conversationId);
+        store.setTraceIdOnLastMessage(payload.trace_id, conversationId);
+      // Stamp server turn id (and one-time align execution client→server).
+      store.setServerMessageIdOnLastMessage(payload.message_id, conversationId);
       // Turn (re)start — clear the captain context accumulator so a reconnect replay
       // (which re-sends message_start first) rebuilds it idempotently (上下文传递可视化 通道①+⑤).
       resetCaptainContext(conversationId);

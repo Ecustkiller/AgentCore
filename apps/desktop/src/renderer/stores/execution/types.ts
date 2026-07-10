@@ -116,7 +116,7 @@ export function toolLabel(name: string): string {
  * projected but not sent to the LLM in MVP — display collapses high/max to one
  * state so RunResources does not imply a knob that has no API effect.
  */
-export type ReasoningEffort = "high" | "max" | null;
+export type ReasoningEffort = "high" | "max" | "low" | null;
 
 /** Display label for the effective reasoning state — the single source the
  * graph badge and detail panel share. */
@@ -173,6 +173,8 @@ export interface AgentState {
    * {@link ExecutionRuntime.workerToolPhases} keyed by {@link currentRunId}. Cleared when
    * the tool ends. Drives the node/detail honest waiting line (排队中/正在检索/…). */
   toolExecutionLive: { toolName: string; phase: string } | null;
+  /** 交付前核验回炉：本 worker 曾发过 `run_output_reset`（节点轻 chip）。 */
+  didRework?: boolean;
 }
 
 /** Live-only worker tool EXECUTION phase keyed by `run_id` (transport-only sibling of CEO
@@ -205,6 +207,8 @@ export interface RunCheckpoint {
  * worker fell back to its `assumption`). A blocking escalation folds `escalation_required`→
  * `pending`, then its `escalation_resolved`→`resolved`/`timeout`. `answer` is the user's reply
  * when resolved, `null` otherwise. Mirrors the conformance `RunEscalation` (golden-pinned). */
+export type EscalationKind = "normal" | "scope" | "dep";
+
 export interface RunEscalation {
   /** 阻塞式求决策: the `escalation_id` (interaction id) of a BLOCKING escalation — the key the
    * `EscalationCard` POSTs the user's answer to (`POST …/interactions/{id}`). Set from
@@ -217,12 +221,20 @@ export interface RunEscalation {
   blocking: boolean;
   status: "raised" | "pending" | "resolved" | "timeout";
   answer: string | null;
+  /** escalate kind（普通 / 缺输入 / 职责偏离）；旧流缺字段按 `normal`。 */
+  kind: EscalationKind;
   /** 结构化升级: the worker's optional structured forks (同 ask_user 的 questions) the
    * `EscalationCard` renders as choice/text so the user one-taps a decision. Folded from a
    * BLOCKING `escalation_required`; `[]` for a free-text ask or a non-blocking `raised` banner.
    * Desktop-local — like {@link RunEscalation.id} it is NOT in the conformance ProjectedTurn
-   * (conformanceFold maps only the 5 golden fields), so it never widens the cross-end contract. */
+   * (conformanceFold maps only the golden fields), so it never widens the cross-end contract. */
   questions: AskQuestion[];
+  /** 谁在仲裁：user=经典可答卡；ceo=协调模式等主管（初始不可答）。 */
+  awaiting?: "user" | "ceo";
+  /** 裁决方：user=用户直答；ceo=主管仲裁。 */
+  arbitrated_by?: "user" | "ceo";
+  /** 仅 arbitrated_by=ceo：是否经 ask_user 转交用户。 */
+  via_user?: boolean;
 }
 
 /** 交互式逐轮辩论决策卡 (opt-in, 辩论编排设计.md §逐轮交互): one round boundary the user is (was)
@@ -328,9 +340,11 @@ export interface RunNode {
   /**「计划已调整」轻痕迹 (设计 §7.2): set by a `plan_revised` frame to "bind" (a late-bound
    * placeholder finalised from upstream evidence) or "steer" (a not-yet-run node re-steered
    * after a 队员 scope deviation) when the CEO autonomously adjusted this paused node
-   * mid-flight; null otherwise. Drives the node's non-interrupting「计划已调整」badge — the
-   * 自我纠偏 stays visible without ever pausing the run. bind wins over steer on one node. */
+   * mid-flight; null otherwise. Drives the node's non-interrupting「职责已定稿」/「方向已校准」
+   * badge — the 自我纠偏 stays visible without ever pausing the run. bind wins over steer. */
   revised: PlanRevisionKind | null;
+  /** 回落换人：接手的原 run id；null = 普通委派。 */
+  replacesRunId: string | null;
   /** A `checkpoint_after` pause that fired *after* this run (plan_review, 结构化挂起
    * 2a); null for a run that never gated. Surfaced as a node pause badge so the
    * graph shows where the scheduler stopped for the user. */
@@ -346,12 +360,13 @@ export interface RunNode {
   escalations: RunEscalation[];
 }
 
-/** 多任务并行图 (并行时间线): one dispatched node's occupancy window, folded (snake→camel) from a
+/** 多任务并行调度 (batch_metrics): one dispatched node's occupancy window, folded (snake→camel) from a
  * `batch_metrics` frame's `timeline`. `startMs`/`endMs` are offsets from the scheduler wall start
- * (same t0 as {@link BatchMetricsSnapshot.wallMs}) — the 并行时间线 lays nodes on it so overlap =
- * real concurrency, a gap before a bar = the `width` cap serialized it, the longest bar = the
- * critical path. `runId` ties back to a {@link RunNode} for role/label/color. `outcome` is the
- * terminal status (`completed`/`failed`). Dispatched nodes only (cascade-skipped omitted). */
+ * (same t0 as {@link BatchMetricsSnapshot.wallMs}) — overlap = real concurrency, a gap before a
+ * window = the `width` cap serialized it, the longest window = the critical path. Consumed by
+ * SchedulingDiag / toolbar metrics chip (graph timeline layout removed). `runId` ties back to a
+ * {@link RunNode} for role/label/color. `outcome` is the terminal status (`completed`/`failed`).
+ * Dispatched nodes only (cascade-skipped omitted). */
 export interface NodeTiming {
   runId: string;
   startMs: number;
@@ -364,9 +379,9 @@ export interface NodeTiming {
  * ⇒ the `width` 并发上限 throttled ready nodes. The boundary tallies count 受监督波循环 yields
  * fired this segment (bind 晚绑定 / scope 漂移返工 / checkpoint 用户复核); the escalate tallies
  * are raw (`scopeEscalations ⊆ escalations`). `timeline` carries each dispatched node's occupancy
- * window (多任务并行图, §6.5). A delegate turn accrues one per scheduler segment (a checkpoint /
- * scope yield + resume appends another). The aggregates show only in 诊断模式 (run detail); the
- * `timeline` drives the graph 时间轴 layout (canvas 放大态 · GraphView toolbar). */
+ * window. A delegate turn accrues one per scheduler segment (a checkpoint / scope yield + resume
+ * appends another). Aggregates + timeline show in 诊断模式 (run detail SchedulingDiag); toolbar
+ * may surface a one-line metrics chip from the same data. */
 export interface BatchMetricsSnapshot {
   nodes: number;
   width: number;
@@ -453,6 +468,8 @@ export interface ExecutionPlan {
     stance?: Stance;
     group?: string;
     round?: number;
+    /** 回落换人：接手的原 worker run_id。 */
+    replacesRunId?: string | null;
   }[];
 }
 

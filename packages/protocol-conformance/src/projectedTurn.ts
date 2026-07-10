@@ -58,7 +58,7 @@ export type RunStatus =
   | "cancelled";
 
 export type ModelTier = "fast" | "strong";
-export type ReasoningEffort = "high" | "max" | null;
+export type ReasoningEffort = "high" | "max" | "low" | null;
 
 /** A web source consulted for the assistant message (citations event). */
 export interface ProjectedCitation {
@@ -102,12 +102,22 @@ export interface ProjectedRunCheckpoint {
  * `raised`; a blocking one folds `escalation_required`→`pending`, then its `escalation_resolved`
  * →`resolved`/`timeout`. Drives the card's render states + the node's ⚠️ badge. `answer` is the
  * user's reply when `status === "resolved"`, `null` otherwise. */
+export type EscalationKind = "normal" | "scope" | "dep";
+
 export interface RunEscalation {
   question: string;
   assumption: string;
   blocking: boolean;
   status: "raised" | "pending" | "resolved" | "timeout";
   answer: string | null;
+  /** escalate kind；旧向量缺字段时按 `normal`。 */
+  kind?: EscalationKind;
+  /** 谁在仲裁：user=经典可答卡；ceo=协调模式等主管。旧向量缺字段按 user。 */
+  awaiting?: "user" | "ceo";
+  /** 裁决方：user=用户直答；ceo=主管仲裁。旧向量缺字段按 user。 */
+  arbitrated_by?: "user" | "ceo";
+  /** 仅 arbitrated_by=ceo：是否经 ask_user 转交用户。 */
+  via_user?: boolean;
 }
 
 /** One node in the team graph (mirrors desktop RunNode — stores/execution.ts). The
@@ -142,6 +152,8 @@ export interface ProjectedRun {
    * after a scope deviation) when the CEO autonomously adjusted this paused node mid-flight;
    * null otherwise. Drives the node's non-interrupting trace label; bind wins over steer. */
   revised: PlanRevisionKind | null;
+  /** 回落换人：接手的原 run id；null = 普通委派。 */
+  replacesRunId: string | null;
   checkpoint: ProjectedRunCheckpoint | null;
   /** 收到的上下文 (上下文传递可视化): the structured context blocks this run was fed at
    * assembly time (from its `run_context` event), carried VERBATIM (wire-shaped
@@ -200,6 +212,11 @@ export type PendingInteraction =
       kind: "plan_review";
       checkpointId: string;
       runIds: string[];
+    }
+  | {
+      kind: "team_preview";
+      checkpointId: string;
+      workerIds: string[];
     };
 
 export interface ProjectedTurn {

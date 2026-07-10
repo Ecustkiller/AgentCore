@@ -37,6 +37,7 @@ from agentcore.runtime.pipeline import resume_chat_pipeline
 from agentcore.runtime.retry import retry_failed_targets, retry_seed
 from agentcore.runtime.runs.types import RunPhase
 from agentcore.runtime.suspension import TurnSuspension
+from agentcore.runtime.suspension_persistence import restore_paused_turn
 from agentcore.workspace.attachments import persist_attachments, to_stored_metadata
 from agentcore.workspace.locate import workspace_storage_key
 from agentcore.workspace.locks import workspace_lock
@@ -374,9 +375,17 @@ async def resume_chat(
     llm_credentials: LLMCredentials | None = None,
     llm_supports_tools: bool | None = None,
 ) -> None:
-    """Continue a turn paused at a plan_review / ask_user checkpoint (结构化挂起 2b resume)."""
+    """Continue a turn paused at a plan_review / ask_user checkpoint (结构化挂起 2b resume).
+
+    The route already claimed (DELETE) the ``paused_turns`` row. On resume failure /
+    cancel the frame is re-upserted so the user can retry — sidecar ``rollback_claim``
+    parity for the cloud path. Success and a fresh re-pause (new frame already saved)
+    leave the claim deleted.
+    """
     conversation_id = suspension.conversation_id
     user_id = suspension.user_id
+    # Default: restore the claimed frame. Cleared only on success / re-pause.
+    restore_frame = True
     try:
         async with async_session_factory() as session:
             conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
@@ -458,12 +467,13 @@ async def resume_chat(
                     )
                     raise
                 finish = result.get("finish_reason")
+                finish_value = getattr(finish, "value", finish)
                 cost_runs = result.get("cost_runs") or []
                 duration_ms = int((time.monotonic() - started) * 1000)
                 workers = max(len(cost_runs) - 1, 0)
                 logger.info(
                     "chat.resume_complete",
-                    finish_reason=getattr(finish, "value", finish),
+                    finish_reason=finish_value,
                     rounds=result.get("rounds", 0),
                     reply_chars=len(result.get("content") or ""),
                     reply_preview=preview(result.get("content") or ""),
@@ -472,6 +482,12 @@ async def resume_chat(
                     duration_ms=duration_ms,
                     error=result.get("error"),
                 )
+                # Decide restore BEFORE persist: a successful / re-paused pipeline must
+                # not re-upsert the old frame even if the post-turn persist raises.
+                if finish_value == FinishReason.PAUSED.value or (
+                    not result.get("error") and finish_value != FinishReason.ERROR.value
+                ):
+                    restore_frame = False
 
                 # Persist INSIDE the trace scope (same as run_and_persist) so the
                 # resumed turn's tail (cost.recorded / obs.turn_spans / metrics)
@@ -503,5 +519,7 @@ async def resume_chat(
             sink.emit(error_event(code, message, context=err_ctx))
             sink.emit(message_end(FinishReason.ERROR))
     finally:
+        if restore_frame:
+            await restore_paused_turn(suspension)
         if not sink._closed:
             sink.close()

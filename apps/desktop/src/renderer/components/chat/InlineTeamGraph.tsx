@@ -7,6 +7,7 @@ import {
   fitWidthBox,
   workerGraphShape,
 } from "@/lib/elk-layout";
+import { formatCollabSummary } from "@/lib/collabSummary";
 import { useConversationStore } from "@/stores/conversation";
 import {
   type Execution,
@@ -18,8 +19,9 @@ import {
 } from "@/stores/execution";
 import { useGraphStore } from "@/stores/graph";
 import { useSidePanelStore } from "@/stores/sidePanel";
-import { useUIStore } from "@/stores/ui";
+import { turnDetailPath } from "@/stores/ui";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 /** Re-export for canvas 指挥台 and other consumers. */
 export { RecoveryActions } from "@/components/chat/StatusStrip";
@@ -38,8 +40,8 @@ export { RecoveryActions } from "@/components/chat/StatusStrip";
  * (historical) multi-agent turns render identically — the live turn streams into
  * the slot, a reloaded turn hydrates it from the persisted journal (`runs`), and
  * both project through the same fold. Node clicks drill into the passive
- * right-side panel; 「在画布打开」/「回放」switch to the canvas zoomed into this turn
- * (放大态, Route A) — there is no separate full-screen overlay.
+ * right-side panel; 「在画布打开」/「回放」navigate to the turn's full-screen
+ * detail page (`#/conversations/:id/turn/:turnId`).
  */
 export function InlineTeamGraph({
   messageId,
@@ -54,33 +56,41 @@ export function InlineTeamGraph({
   const [expandedOverride, setExpandedOverride] = useState<boolean | null>(
     null,
   );
-  const setConversationView = useUIStore((s) => s.setConversationView);
-  const requestCanvasFocus = useUIStore((s) => s.requestCanvasFocus);
+  const navigate = useNavigate();
   const conversationId = useConversationStore((s) => s.currentConversationId);
-  // 「在画布打开」/「回放」统一通向画布的放大态（Route A，再无独立全屏）：把目标回合（+ 是否
-  // 自动回放）塞进 UI store 后切到画布视图，画布挂载即放大该回合。会话 id 在首发即赋值，故协作图
-  // 出现时一定已有 id；defensively 无 id 则不切。
+  // 「在画布打开」/「回放」→ 全屏回合详情页（协作图 / 辩论室 / 对比）。
   const openInCanvas = useCallback(
     (autoplay: boolean) => {
       if (!conversationId) return;
-      requestCanvasFocus(messageId, autoplay);
-      setConversationView(conversationId, "canvas");
+      navigate(
+        turnDetailPath(conversationId, messageId, undefined, undefined, {
+          autoplay,
+        }),
+      );
     },
-    [conversationId, messageId, requestCanvasFocus, setConversationView],
+    [conversationId, messageId, navigate],
   );
-  // 「改了 N 版」信号 → 深链画布放大态的统一「对比」视图直达（聊天正文已不再内联此卡，
-  // 前端UX设计.md §4.2/§6.4：过程产物归画布、正文只留信号）。
+  // 「改了 N 版」信号 → 深链全屏页的「对比」视图。
   const openRevisionsInCanvas = useCallback(() => {
     if (!conversationId) return;
-    requestCanvasFocus(messageId, false, "compare");
-    setConversationView(conversationId, "canvas");
-  }, [conversationId, messageId, requestCanvasFocus, setConversationView]);
+    navigate(turnDetailPath(conversationId, messageId, "compare"));
+  }, [conversationId, messageId, navigate]);
   const hydrateFromJournal = useExecutionStore((s) => s.hydrateFromJournal);
   useEffect(() => {
     if (journal) hydrateFromJournal(messageId, journal);
   }, [journal, messageId, hydrateFromJournal]);
 
   const execution = useMessageExecution(messageId);
+  const message = useConversationStore((s) => {
+    const key = s.currentConversationId ?? "";
+    return s.byId[key]?.messages.find(
+      (m) => m.id === messageId || m.serverMessageId === messageId,
+    );
+  });
+  const collabSummary = useMemo(
+    () => formatCollabSummary(message?.collab),
+    [message?.collab],
+  );
   const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
   const onPeekRunning = useCallback(() => {
     if (!execution) return;
@@ -99,12 +109,11 @@ export function InlineTeamGraph({
     [],
   );
   const layoutKind = useGraphStore((s) => s.layoutKind);
-  const estLayout = layoutKind === "timeline" ? "leftright" : layoutKind;
   const fallbackHeight = useMemo(() => {
     if (!execution) return 0;
-    const est = estimateBbox(workerGraphShape(execution.runs), estLayout);
+    const est = estimateBbox(workerGraphShape(execution.runs), layoutKind);
     return fitWidthBox(est.width, est.height, EMBED_DEFAULT_COL_WIDTH).height;
-  }, [execution, estLayout]);
+  }, [execution, layoutKind]);
 
   if (
     !execution ||
@@ -135,6 +144,7 @@ export function InlineTeamGraph({
           onReplay={() => openInCanvas(true)}
           onOpenRevisions={openRevisionsInCanvas}
           onPeekRunning={onPeekRunning}
+          collabSummary={collabSummary}
         />
         {expanded && (
           <GraphArea

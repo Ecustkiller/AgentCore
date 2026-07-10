@@ -33,11 +33,24 @@ namespace AgentTown.Simulation
 
         // ---- P0 ----
 
-        /// <summary>POST <c>/runs</c> — create a run (§5 P0).</summary>
+        /// <summary>
+        /// POST <c>/runs</c> — create a run (§5 P0).
+        /// Default <paramref name="scripted"/> is true so Unity「新建 Run」stays on the
+        /// deterministic demo path (no DeepSeek bill). Set false only when explicitly
+        /// validating the live LLM path.
+        /// </summary>
         public Task<SimulationRunSummary> CreateRunAsync(
-            string scenario = "town", int? seed = null, CancellationToken ct = default)
+            string scenario = "town",
+            int? seed = null,
+            bool scripted = true,
+            CancellationToken ct = default)
         {
-            var body = new JObject { ["scenario"] = scenario ?? "town" };
+            var body = new JObject
+            {
+                ["scenario"] = scenario ?? "town",
+                // Demo-safe default. True LLM: pass scripted: false (or flip SIMULATION_SCRIPTED).
+                ["scripted"] = scripted,
+            };
             if (seed.HasValue)
             {
                 body["seed"] = seed.Value;
@@ -77,6 +90,37 @@ namespace AgentTown.Simulation
         public Task<SimulationRunStatusResponse> ResumeRunAsync(string runId, CancellationToken ct = default)
         {
             return SendJsonAsync<SimulationRunStatusResponse>("POST", RunPath(runId, "/resume"), "{}", ct);
+        }
+
+        /// <summary>GET <c>/runs/{id}/metrics</c> — tick metrics series.</summary>
+        public Task<SimulationRunMetricsResponse> GetMetricsAsync(string runId, CancellationToken ct = default)
+        {
+            return SendJsonAsync<SimulationRunMetricsResponse>("GET", RunPath(runId, "/metrics"), null, ct);
+        }
+
+        /// <summary>POST <c>/runs/{id}/inject</c> — God Mode world event (§5).</summary>
+        public Task<InjectSimulationEventResponse> InjectEventAsync(
+            string runId, string eventType, string payloadJson = "{}", CancellationToken ct = default)
+        {
+            JObject payloadObj;
+            try
+            {
+                payloadObj = string.IsNullOrWhiteSpace(payloadJson)
+                    ? new JObject()
+                    : JObject.Parse(payloadJson);
+            }
+            catch (Exception)
+            {
+                payloadObj = new JObject();
+            }
+
+            var body = new JObject
+            {
+                ["event_type"] = eventType ?? "custom",
+                ["payload"] = payloadObj,
+            };
+            return SendJsonAsync<InjectSimulationEventResponse>(
+                "POST", RunPath(runId, "/inject"), body.ToString(), ct);
         }
 
         // ---- internals ----

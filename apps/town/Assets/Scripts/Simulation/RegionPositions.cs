@@ -1,22 +1,24 @@
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
+using AgentTown.Town;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 namespace AgentTown.Simulation
 {
     /// <summary>
-    /// Loads <c>simulation-region-positions.json</c> — the single source for the 7 town
+    /// Loads <c>simulation-region-positions.json</c> — the single source for the 10 town
     /// region anchors (§6.3). Values are wire-space; convert with
     /// <see cref="WireCoordinateTransform.ToUnity(WireVec3)"/> at render time.
     ///
-    /// <para>The file-based loader targets the Editor / desktop standalone build (direct
-    /// filesystem access). WebGL cannot read StreamingAssets as files — a UnityWebRequest
-    /// loader is required there (see the Editor-wiring checklist).</para>
+    /// <para>Prefer <see cref="LoadAsync"/> on all targets (WebGL cannot use <see cref="File"/>).
+    /// <see cref="LoadFromFile"/> remains for EditMode / desktop convenience.</para>
     /// </summary>
     public static class RegionPositions
     {
         public const string FixtureFileName = "simulation-region-positions.json";
+        public const string FixtureRelativePath = "Fixtures/" + FixtureFileName;
 
         public static string DefaultFixturePath =>
             Path.Combine(Application.streamingAssetsPath, "Fixtures", FixtureFileName);
@@ -61,7 +63,22 @@ namespace AgentTown.Simulation
             return result;
         }
 
-        /// <summary>Load + parse from disk (defaults to the StreamingAssets copy).</summary>
+        /// <summary>
+        /// StreamingAssets-safe load (WebGL + desktop). Empty map on failure.
+        /// </summary>
+        public static async Task<Dictionary<string, WireVec3>> LoadAsync()
+        {
+            string json = await StreamingAssetsText.LoadAsync(FixtureRelativePath);
+            Dictionary<string, WireVec3> anchors = Parse(json);
+            if (anchors.Count == 0)
+            {
+                Debug.LogWarning("[AgentTown] Region fixture empty or missing via StreamingAssets");
+            }
+
+            return anchors;
+        }
+
+        /// <summary>Load + parse from disk (Editor / desktop). Prefer <see cref="LoadAsync"/> on WebGL.</summary>
         public static Dictionary<string, WireVec3> LoadFromFile(string path = null)
         {
             var target = string.IsNullOrEmpty(path) ? DefaultFixturePath : path;

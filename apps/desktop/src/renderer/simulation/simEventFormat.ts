@@ -61,12 +61,3 @@ export function formatSimEventSummary(
       return { summary: type };
   }
 }
-
-export const SIM_EVENT_LABELS: Record<string, string> = {
-  "sim.tick_started": "Tick 开始",
-  "sim.tick_ended": "Tick 结束",
-  "sim.agent_action": "居民行动",
-  "sim.agent_state": "居民状态",
-  "sim.interaction": "居民交互",
-  "sim.world_event": "世界事件",
-};

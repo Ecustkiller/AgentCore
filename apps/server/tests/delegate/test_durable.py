@@ -34,8 +34,14 @@ async def _resolve_when_pending(registry, conversation_id, decision, note=""):
     raise AssertionError("no pending plan_review appeared")
 
 
-async def test_durable_pause_persists_frame_on_finalize():
+async def test_durable_pause_persists_frame_on_finalize(monkeypatch):
     from agentcore.runtime.suspension import TurnSuspension, captain_transcript
+
+    # Skip team_preview so this fixture reaches plan_review (wave-boundary durable pause).
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.delegate.preview.should_preview",
+        lambda *a, **k: False,
+    )
 
     registry = InteractionRegistry()
     sink = EventSink()
@@ -65,7 +71,7 @@ async def test_durable_pause_persists_frame_on_finalize():
     token = captain_transcript.set(transcript)
     try:
         # ②: the durable checkpoint finalizes in place (SUSPEND) — no live resolve, no drop.
-        result = await t.execute({"tasks": CKPT_DAG}, ctx())
+        result = await t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx())
     finally:
         captain_transcript.reset(token)
 
@@ -121,7 +127,7 @@ async def test_durable_pause_captures_resume_scope():
     ]
     token = captain_transcript.set(transcript)
     try:
-        await t.execute({"tasks": CKPT_DAG}, ctx())  # ②: finalizes in place
+        await t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx())  # ②: finalizes in place
     finally:
         captain_transcript.reset(token)
 
@@ -141,13 +147,13 @@ async def test_durable_capture_skipped_without_transcript():
         pass
 
     t = tool_durable(Provider(["S1OUT", "S2OUT"]), EventSink(), registry, _save, _drop)
-    exec_task = asyncio.create_task(t.execute({"tasks": CKPT_DAG}, ctx()))
+    exec_task = asyncio.create_task(t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx()))
     await _resolve_when_pending(registry, "conv1", CheckpointDecision.CONTINUE)
     await exec_task
     assert saved == []
 
 
-async def test_durable_resume_drives_tail_from_journal_not_frame():
+async def test_durable_resume_drives_tail_from_journal_not_frame(monkeypatch):
     from agentcore.runtime.facts import TurnFactLog, current_fact_log
     from agentcore.runtime.journal import completed_from_journal, plan_from_journal
     from agentcore.runtime.pipeline.resume import settle_resumed_suspension
@@ -155,6 +161,11 @@ async def test_durable_resume_drives_tail_from_journal_not_frame():
         PlanReviewSuspension,
         captain_transcript,
         suspension_from_json,
+    )
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.delegate.preview.should_preview",
+        lambda *a, **k: False,
     )
 
     registry = InteractionRegistry()
@@ -184,7 +195,7 @@ async def test_durable_resume_drives_tail_from_journal_not_frame():
     log_token = current_fact_log.set(log)
     ct_token = captain_transcript.set(transcript)
     try:
-        await pause_tool.execute({"tasks": CKPT_DAG}, ctx())  # ②: finalizes in place
+        await pause_tool.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx())  # ②: finalizes in place
     finally:
         captain_transcript.reset(ct_token)
         current_fact_log.reset(log_token)
@@ -222,11 +233,64 @@ async def test_durable_resume_drives_tail_from_journal_not_frame():
     assert resume_provider.calls == 1
 
 
+async def test_settle_resume_reuses_journal_execution_id():
+    """Resume settle recovers the pause execution_id from journal run_plan.
+
+    The pipeline mints a fresh base_tool_context.execution_id on resume; re-emitting
+    run_plan under that new id would make the frontend ingestPlan startExecution and
+    wipe remounted plan_review frames. Prefer the id already in the pause journal.
+    """
+    from agentcore.runtime.pipeline.resume import settle_resumed_suspension
+    from agentcore.runtime.suspension import PlanReviewSuspension
+
+    plan = resume_plan()
+    seed = {plan.nodes[0].run_id: RunState(phase=RunPhase.COMPLETED, content="S1OUT")}
+    frame = PlanReviewSuspension(
+        message_id="m1",
+        conversation_id="conv1",
+        user_id="u1",
+        captain_run_id="CEO",
+        checkpoint_id="ck1",
+        tool_call_id="call_del",
+        base_system_prompt="SYS",
+        user_message="req",
+        plan=plan,
+        completed=seed,
+        steps=[{"run_id": plan.nodes[0].run_id, "role": "研究员", "summary": "S1OUT"}],
+        pending=[{"run_id": plan.nodes[1].run_id, "role": "写手"}],
+        journal=[
+            {
+                "type": EventType.RUN_PLAN.value,
+                "payload": {"execution_id": "e_pause"},
+                "timestamp": "t0",
+            },
+        ],
+        journal_entries=[
+            {"kind": EventType.RUN_PLAN.value, "payload": {"execution_id": "e_pause"}, "ts": "t0"},
+        ],
+    )
+    resume_sink = EventSink()
+    resume_tool = tool(Provider(["S2OUT"]), resume_sink)
+    await settle_resumed_suspension(
+        frame,
+        decision=CheckpointDecision.CONTINUE,
+        note="",
+        selected=[],
+        sink=resume_sink,
+        delegate_tool=resume_tool,
+        execution_id="e_fresh_mint",
+    )
+    run_plans = [e for e in resume_sink._history if e.type is EventType.RUN_PLAN]
+    assert len(run_plans) == 1
+    assert run_plans[0].payload["execution_id"] == "e_pause"
+
+
 async def test_resume_plan_continue_runs_only_the_tail():
     plan = resume_plan()
     seed = {plan.nodes[0].run_id: RunState(phase=RunPhase.COMPLETED, content="S1OUT")}
     provider = Provider(["S2OUT"])
-    t = tool(provider)
+    sink = EventSink()
+    t = tool(provider, sink)
     result = await t.resume_plan(
         plan,
         seed,
@@ -238,6 +302,9 @@ async def test_resume_plan_continue_runs_only_the_tail():
     assert "S1OUT" in result.output
     assert "S2OUT" in result.output
     assert provider.calls == 1
+    run_plans = [e for e in sink._history if e.type is EventType.RUN_PLAN]
+    assert len(run_plans) == 1
+    assert run_plans[0].payload["execution_id"] == "e"
 
 
 async def test_resume_plan_stop_skips_the_tail():

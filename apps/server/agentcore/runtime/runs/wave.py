@@ -33,8 +33,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import replace
 
 from agentcore.runtime.runs.concurrency import child_budget, current_budget, set_budget
@@ -52,6 +53,9 @@ from agentcore.runtime.runs.types import (
     RunSpec,
     RunState,
 )
+
+# Host progress hook: sync (legacy tests) or async (drive hot-continue).
+OnProgress = Callable[[Mapping[str, RunState]], None | Awaitable[None]]
 
 # The most nodes this scheduler runs at once. Ready nodes beyond this stay pending
 # and ride a freed slot. Kept in step with MAX_PARALLEL_DELEGATIONS (the tree-wide
@@ -95,7 +99,7 @@ class WaveScheduler:
         seed_completed: Mapping[str, RunState] | None = None,
         should_stop: Callable[[], bool] | None = None,
         cancel_run_ids: Callable[[], frozenset[str]] | None = None,
-        on_progress: Callable[[Mapping[str, RunState]], None] | None = None,
+        on_progress: OnProgress | None = None,
         on_boundary: OnBoundary | None = None,
         metrics_sink: list[BatchMetrics] | None = None,
     ) -> dict[str, RunState]:
@@ -258,7 +262,9 @@ class WaveScheduler:
                     for target_id in cancel_run_ids():
                         for task, rid in list(running.items()):
                             if rid == target_id and rid not in cancelled_by_redirect:
-                                task.cancel()
+                                # msg="redirect" so executor_agent salvages + returns CANCELLED
+                                # instead of re-raising (整轮 stop uses bare cancel).
+                                task.cancel("redirect")
                                 cancelled_by_redirect.add(rid)
 
                 done, _ = await asyncio.wait(
@@ -271,12 +277,18 @@ class WaveScheduler:
                 for task in done:
                     run_id = running.pop(task)
                     if run_id in cancelled_by_redirect:
-                        # User-initiated single cancel: absorb gracefully, don't propagate
+                        # User-initiated single cancel: absorb gracefully, don't propagate.
+                        # Prefer the executor's salvaged CANCELLED RunState (partial transcript);
+                        # fall back to empty CANCELLED if the task raised / never returned.
                         if not task.done():
-                            task.cancel()
+                            task.cancel("redirect")
+                        state: RunState | None = None
                         with contextlib.suppress(asyncio.CancelledError, Exception):
-                            task.result()
-                        state = RunState(phase=RunPhase.CANCELLED)
+                            result = task.result()
+                            if isinstance(result, RunState):
+                                state = result
+                        if state is None:
+                            state = RunState(phase=RunPhase.CANCELLED)
                     elif task.cancelled():
                         raise asyncio.CancelledError  # external cancel, propagate
                     else:
@@ -295,7 +307,9 @@ class WaveScheduler:
                             )
                         )
                     if on_progress is not None:
-                        on_progress(completed)
+                        maybe = on_progress(completed)
+                        if inspect.isawaitable(maybe):
+                            await maybe
                     if state.phase is RunPhase.FAILED:
                         spec = plan.by_id(run_id)
                         on_failure = spec.policy.on_failure if spec else "degrade"
@@ -356,12 +370,16 @@ class WaveScheduler:
                             stopped = True
         except BaseException:
             # External cancel (user stop via task.cancel) or an unexpected crash:
-            # cancel every in-flight child and let it unwind (subprocess kill, salvage)
-            # before propagating, so no worker task is left orphaned.
+            # cancel every in-flight child and let it unwind (subprocess kill,
+            # run_cancelled(reason=stop)) before propagating, so no worker is orphaned
+            # and journal/SSE always see the stop cancel. ``cancel("stop")`` matches
+            # executor_agent's dual-reason contract (redirect vs stop); ``shield`` is
+            # required because this except often runs under an already-cancelled wave
+            # task — a bare await would be interrupted before children emit.
             for task in running:
-                task.cancel()
+                task.cancel("stop")
             if running:
-                await asyncio.gather(*running, return_exceptions=True)
+                await asyncio.shield(asyncio.gather(*running, return_exceptions=True))
             raise
 
         # Materialise cascade-skipped nodes (never ran) as SKIPPED.
@@ -450,6 +468,9 @@ class WaveScheduler:
                 if last is not None:
                     state = _merge_retry_billing(last, state)
                 if state.phase is RunPhase.COMPLETED:
+                    return state
+                # Redirect salvage returns CANCELLED — never infra-retry a user cancel.
+                if state.phase is RunPhase.CANCELLED:
                     return state
                 last = state
                 if policy.on_failure != "retry":

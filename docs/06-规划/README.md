@@ -12,12 +12,14 @@
 | [产品 AI 协作优化复盘](产品AI协作优化复盘.md) | 元讨论锚点 |
 | [多 AI 模拟愿景](multi-ai-simulation-vision.md) | 🗂️ 战略蓝图：任务型 → 通用多 AI 模拟平台（第二增长曲线） |
 | [AI 小镇 MVP 开发计划](AI小镇MVP开发计划.md) | 多 AI 模拟 Phase 1 MVP 落地计划（对齐愿景 Phase 1） |
-| [AgentTown 客户端规格](AgentTown客户端规格.md) | Unity 6 LTS + URP + C# 独立观测客户端；复用 Python 模拟后端；退役 Desktop R3F / UE 参照实现 |
+| [AgentTown 客户端规格](AgentTown客户端规格.md) | Unity 6 LTS + URP + C# 独立观测客户端（Phase 0/1 + 观测层；**UE/R3F 已删**；删栈门禁 = scripted + WebGL C2 + FPS 顶栏；真 LLM 另线） |
+| [AI 恋综场景提案](AI恋综场景提案.md) | 🗂️ 传播钩子定案：观众向甜虐恋综（6 人·7 期·竞猜+每季 1 公投）；小镇为更大世界，不抢首发心智 |
 
 ## 已退役系列
 
 | 文档 | 退役结论去向 |
 |---|---|
+| **CEO 协调模式设计提案**（2026-07-10） | 全 Phase 落地：≥2 worker 默认事件驱动协调（非阻塞 / 渐进合成）+ D1 阻塞 escalate→CEO 仲裁 + D2 翻默认（`coordinate=false` 退出）。as-built → [编排器 §协调模式](/docs/03-AI核心/编排器与CEO主Agent.md)、[执行引擎 §协调事件注入 / §协调模式例外](/docs/03-AI核心/执行引擎架构设计.md)、[协作模式 §escalate 协调例外](/docs/03-AI核心/Agent协作模式.md)；审计决策（CEO 自协调不复用 Moderator / 成本纪律重定义 / 根 CEO only / 挂起即收口入 journal / 复用 `team_synthesis_preview`）散见上述现状段。正文见 git 历史。 |
 | **真·多模型辩论与「谁更聪明」视频**（2026-07-08） | 真·多模型辩手 as-built（`sides[].model` 跨厂商路由）+ 辩手设计否决 → [辩论编排设计 §7.5 / §八](/docs/03-AI核心/辩论编排设计.md)；运行配方（方舟接入 / model 串 / BYOK key / 真跑配方）→ [平台LLM接入](/docs/05-平台与运维/平台LLM接入.md)；LLM provider 否决 + Phase 2（定价 / 选模型 / 计费）→ [远期 §2.2](远期规划.md)；「谁更聪明」视频 + 竖屏否 + 3+方圆桌 / 锦标赛 → [远期 §4.3](远期规划.md)。正文不保留，见 git 历史。 |
 | **法律垂直场景设计**（2026-07-08） | 首个行业垂直「法律」：hero 对方律师作战室（`legal_answer_brief`）+ 第二支三方视角案情研判（`legal_case_analysis`）M1–M3 已落地（opt-in `legal_vertical_enabled`，代码 `runtime/legal_skills.py` / `conformance/vectors/legal.py` / `tests/test_legal_skills.py`）；来源卡台账方案① 机制现状 → [核心接口定义](/docs/02-架构/核心接口定义.md)、系统 Skill opt-in 垂直包 → [工具与能力系统 §二](/docs/03-AI核心/工具与能力系统.md)；open backlog（库接入本地检索 Tool + 方案② / 第二 skill M2 真跑 / 待议）→ [远期规划 §4.5](远期规划.md)。行业调研正文 + M1–M3 as-built 见 git 历史。 |
 | **辩论室赛事页重设计**（2026-07-06） | 赛事页三层（记分牌 + 剧本主列 + 终审舞台）→ [前端 UX §四](/docs/04-前端/前端UX设计.md)；前端落点段 → [辩论编排设计 §四之二/§六](/docs/03-AI核心/辩论编排设计.md)。右坞裁判台解散；并排对照后改为可选布局（仅正反 · 默认并排可切单栏，2026-07-07）。 |

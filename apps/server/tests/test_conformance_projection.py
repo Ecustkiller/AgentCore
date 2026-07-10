@@ -158,6 +158,28 @@ def test_plan_review_finalized_stays_paused(projected):
     assert p["runs"] == parked["runs"]
 
 
+def test_team_preview_finalized(projected):
+    p = projected["team_preview_finalized"]
+    assert p["status"] == "paused"
+    assert p["finishReason"] == "paused"
+    assert p["pendingInteraction"] == {
+        "kind": "team_preview",
+        "checkpointId": "tp1",
+        "workerIds": ["r1", "r2"],
+    }
+    assert any(
+        s.get("kind") == "team_preview" and s.get("checkpoint_id") == "tp1"
+        for s in p["process"]
+    )
+
+
+def test_team_preview_resolved_continue(projected):
+    p = projected["team_preview_resolved_continue"]
+    assert p["status"] == "completed"
+    assert p["pendingInteraction"] is None
+    assert p["progress"]["completed"] == 2
+
+
 def test_single_agent_citations(projected):
     p = projected["single_agent_citations"]
     assert p["status"] == "completed"
@@ -317,6 +339,7 @@ def test_multi_agent_lead_subplan_scope_steer_nests_and_traces(projected):
             "blocking": False,
             "status": "raised",
             "answer": None,
+            "kind": "scope",
         }
     ]
     assert p["progress"] == {"completed": 3, "total": 3}
@@ -337,6 +360,7 @@ def test_multi_agent_escalation_nonblocking_banner(projected):
             "blocking": True,
             "status": "raised",
             "answer": None,
+            "kind": "normal",
         }
     ]
     assert r2["escalations"] == []
@@ -356,6 +380,7 @@ def test_multi_agent_blocking_escalate_resolved(projected):
             "blocking": True,
             "status": "resolved",
             "answer": "用 Postgres。",
+            "kind": "normal",
         }
     ]
 
@@ -399,6 +424,30 @@ def test_multi_agent_blocking_escalate_multi_settles_each(projected):
         ("resolved", "用 Postgres。"),
         ("timeout", None),
     ]
+
+
+def test_multi_agent_ceo_arbitrate_escalate_direct(projected):
+    p = projected["multi_agent_ceo_arbitrate_escalate"]
+    assert p["status"] == "completed"
+    assert p["pendingInteraction"] is None
+    r1 = next(r for r in p["runs"] if r["id"] == "r1")
+    assert len(r1["escalations"]) == 1
+    esc = r1["escalations"][0]
+    assert esc["status"] == "resolved"
+    assert esc["awaiting"] == "ceo"
+    assert esc["arbitrated_by"] == "ceo"
+    assert esc["via_user"] is False
+    assert esc["answer"] == "用 Postgres。"
+
+
+def test_multi_agent_ceo_arbitrate_escalate_via_user(projected):
+    p = projected["multi_agent_ceo_arbitrate_escalate_via_user"]
+    r1 = next(r for r in p["runs"] if r["id"] == "r1")
+    esc = r1["escalations"][0]
+    assert esc["status"] == "resolved"
+    assert esc["arbitrated_by"] == "ceo"
+    assert esc["via_user"] is True
+    assert "用户确认" in esc["answer"]
 
 
 def test_multi_agent_team_notes_kinds(projected):

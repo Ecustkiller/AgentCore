@@ -45,13 +45,3 @@ export function rememberRun(
   };
   writeAll([entry, ...existing]);
 }
-
-export function updateSavedRun(
-  runId: string,
-  patch: Partial<SimulationRunView>,
-): void {
-  const next = readAll().map((r) =>
-    r.id === runId ? { ...r, ...patch, savedAt: r.savedAt } : r,
-  );
-  writeAll(next);
-}

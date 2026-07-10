@@ -11,7 +11,7 @@
       "name": "林小梅",
       "role": "面包师",
       "location": "面包店",
-      "position": { "x": 24, "y": 0, "z": -12 },
+      "position": { "x": 36, "y": 0, "z": -22 },
       "activity": "备料",
       "mood": 0.3,
       "goal": "今天多烤两炉招牌面包",

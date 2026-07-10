@@ -163,7 +163,7 @@ export const statusChip: Record<StatusTone, string> = {
 /**
  * Interactive ask_user checkpoint shell.
  * - `primary`：全蓝（审批 / 队员升级等）。
- * - `neutral`：灰壳灰选项（AskUserCard 开工提案 / 拍板）——行动信号只留在 Footer 主 CTA。
+ * - `neutral`：灰壳灰选项（AskUserCard 途中拍板；kickoff V2 选项用 primary 选中态）——行动信号在 Footer 主 CTA。
  */
 export const interactiveCheckpointTone = {
   primary: {

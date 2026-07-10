@@ -18,8 +18,11 @@ from agentcore.runtime.events import (
     content_delta,
     content_reset,
     error_event,
+    escalation_raised,
     reasoning_delta,
+    run_escalation_gate,
 )
+from agentcore.runtime.routing import evaluate_after_tools, signals_as_dicts, total_tool_failures
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 
@@ -77,6 +80,8 @@ async def react_loop(
     role: str = "",
     deliverable_only: bool = False,
     supports_tools: bool | None = None,
+    gate_escalation_sink: list[dict[str, Any]] | None = None,
+    split_context: dict[str, Any] | None = None,
 ) -> tuple[str, str, TokenUsage, int]:
     """Run the ReAct loop.
 
@@ -162,6 +167,16 @@ async def react_loop(
     ``ask_user`` absorbs same-round prose into the card instead (see
     ``ask_user_absorb``). Default ``False`` leaves the
     accumulation byte-identical to before (standalone loops / tests).
+
+    ``gate_escalation_sink`` (Worker routing Phase 1): when provided, each tool round
+    runs the Escalation Gate after ``execute_tools``; scheme-layer signals are appended
+    here and emitted as ``run_escalation_gate``. CEO / solo leave it ``None`` (gate inert).
+
+    ``split_context`` (Worker routing Phase 2 · Sequential Split): when provided with
+    ``can_split=True`` (parent Worker), each non-terminal tool round — after the
+    Escalation Gate and ``controller.record`` — checks runtime pressure and may spawn
+    sequential Sub-Workers. Sub-Workers pass ``can_split=False`` (depth hard limit).
+    ``None`` leaves splitting inert (CEO / solo / tests).
     """
     profile = profile or get_profile("chat")
     if usage_sink is not None:
@@ -215,6 +230,15 @@ async def react_loop(
         # semantics (引擎纯化), mirroring on_content / on_reasoning.
         if round_idx and on_round_begin is not None:
             messages.extend(on_round_begin())
+
+        # CEO 协调模式 Phase 2: only the captain consumes team events (workers share
+        # the ContextVar but must not block on the coordination queue).
+        if role == "captain":
+            from agentcore.runtime.coordination.wait import await_coordination_injection
+
+            coord_msgs = await await_coordination_injection(messages)
+            if coord_msgs:
+                messages.extend(coord_msgs)
 
         round_result = await run_llm_round(
             llm=llm,
@@ -301,6 +325,15 @@ async def react_loop(
                     run_id=run_id,
                 )
                 messages.extend(tool_results)
+                if gate_escalation_sink is not None and role == "worker":
+                    _apply_escalation_gate(
+                        attempts=attempts,
+                        tool_results=tool_results,
+                        sink=sink,
+                        run_id=run_id,
+                        agent_id=tool_context.agent_id,
+                        gate_escalation_sink=gate_escalation_sink,
+                    )
                 outcome = replace(
                     outcome,
                     tool_results=tool_results,
@@ -362,6 +395,34 @@ async def react_loop(
                     # Mark post-delegate mode if delegate was called
                     if any(a.tool_name == "delegate" for a in outcome.attempts if a.tool_name):
                         controller.mark_post_delegate()
+                    # Worker routing Phase 2 · Sequential Split: after Escalation Gate +
+                    # failure tallies, check pressure and maybe run Sub-Workers.
+                    if (
+                        split_context is not None
+                        and role == "worker"
+                        and split_context.get("can_split", True)
+                        and not split_context.get("already_split")
+                    ):
+                        await _maybe_apply_sequential_split(
+                            split_context=split_context,
+                            messages=messages,
+                            controller=controller,
+                            current_step_count=round_idx + 1,
+                            token_consumed=total_usage.total_tokens,
+                            content_preview=final_content or (outcome.content or ""),
+                            attempts=outcome.attempts,
+                            llm=llm,
+                            tools=tools,
+                            sink=sink,
+                            tool_context=tool_context,
+                            turn_model=active_model or base_model,
+                            allowed_tool_names=allowed_tool_names,
+                            profile=profile,
+                            approval_gate=approval_gate,
+                            on_content=on_content,
+                            on_reasoning=on_reasoning,
+                            run_id=run_id,
+                        )
                     tool_defs = _resolve_tool_defs()
                     breaker = apply_circuit_breaker(
                         controller,
@@ -465,6 +526,15 @@ async def react_loop(
                         run_id=run_id,
                     )
                     messages.extend(tool_results)
+                    if gate_escalation_sink is not None and role == "worker":
+                        _apply_escalation_gate(
+                            attempts=attempts,
+                            tool_results=tool_results,
+                            sink=sink,
+                            run_id=run_id,
+                            agent_id=tool_context.agent_id,
+                            gate_escalation_sink=gate_escalation_sink,
+                        )
                     if terminal is not None:
                         usage_meta = terminal.metadata or {}
                         total_usage = total_usage + TokenUsage(
@@ -488,6 +558,32 @@ async def react_loop(
                     controller.record(attempts)
                     if any(a.tool_name == "delegate" for a in attempts if a.tool_name):
                         controller.mark_post_delegate()
+                    if (
+                        split_context is not None
+                        and role == "worker"
+                        and split_context.get("can_split", True)
+                        and not split_context.get("already_split")
+                    ):
+                        await _maybe_apply_sequential_split(
+                            split_context=split_context,
+                            messages=messages,
+                            controller=controller,
+                            current_step_count=round_idx + 1,
+                            token_consumed=total_usage.total_tokens,
+                            content_preview=final_content or (coordination.content or ""),
+                            attempts=attempts,
+                            llm=llm,
+                            tools=tools,
+                            sink=sink,
+                            tool_context=tool_context,
+                            turn_model=active_model or base_model,
+                            allowed_tool_names=allowed_tool_names,
+                            profile=profile,
+                            approval_gate=approval_gate,
+                            on_content=on_content,
+                            on_reasoning=on_reasoning,
+                            run_id=run_id,
+                        )
                     tool_defs = _resolve_tool_defs()
                     breaker = apply_circuit_breaker(
                         controller,
@@ -550,3 +646,106 @@ async def react_loop(
         run_id=run_id,
     )
     return final_content, final_reasoning, total_usage, rounds
+
+
+def _apply_escalation_gate(
+    *,
+    attempts: list[Any],
+    tool_results: list[LLMMessage],
+    sink: EventSink,
+    run_id: str,
+    agent_id: str,
+    gate_escalation_sink: list[dict[str, Any]],
+) -> None:
+    """Run Escalation Gate after a tool round; emit + accumulate scheme-layer signals."""
+    from agentcore.runtime.loop_controller import ToolAttempt
+
+    typed_attempts = [a for a in attempts if isinstance(a, ToolAttempt)]
+    outputs = [(m.content or "") for m in tool_results]
+    verdict = evaluate_after_tools(
+        attempts=typed_attempts,
+        tool_outputs=outputs,
+        run_id=run_id,
+    )
+    if not verdict.should_escalate:
+        return
+    payloads = signals_as_dicts(verdict.signals)
+    gate_escalation_sink.extend(payloads)
+    sink.emit(
+        run_escalation_gate(
+            run_id,
+            agent_id,
+            layer=verdict.layer.value,
+            action=verdict.action,
+            signals=payloads,
+        )
+    )
+    # Also surface via the existing live escalate banner so the team UI lights up
+    # without a separate Gate card (Phase 1).
+    for payload in payloads:
+        sink.emit(
+            escalation_raised(
+                run_id,
+                agent_id,
+                question=str(payload.get("question", "")),
+                assumption=str(payload.get("assumption", "")),
+                blocking=False,
+                kind=str(payload.get("kind", "normal")),
+            )
+        )
+
+
+async def _maybe_apply_sequential_split(
+    *,
+    split_context: dict[str, Any],
+    messages: list[LLMMessage],
+    controller: Any,
+    current_step_count: int,
+    token_consumed: int,
+    content_preview: str,
+    attempts: list[Any],
+    llm: OpenAICompatibleProvider,
+    tools: ToolRegistry,
+    sink: EventSink,
+    tool_context: ToolContext,
+    turn_model: str,
+    allowed_tool_names: list[str] | None,
+    profile: ProfileParams,
+    approval_gate: ApprovalGate | None,
+    on_content: Callable[[str], None] | None,
+    on_reasoning: Callable[[str], None] | None,
+    run_id: str,
+) -> None:
+    """After Escalation Gate + record: maybe sequential-split into Sub-Workers."""
+    from agentcore.runtime.loop_controller import ToolAttempt
+    from agentcore.runtime.routing import apply_sequential_split_after_tools
+
+    typed = [a for a in attempts if isinstance(a, ToolAttempt)]
+    tool_names = [a.tool_name for a in typed if a.tool_name]
+    failure_count = total_tool_failures(getattr(controller, "_tool_failures", {}))
+    # Ensure split_context carries run identity for events.
+    split_context.setdefault("run_id", run_id)
+    split_context.setdefault("agent_id", tool_context.agent_id)
+    split_context.setdefault("max_steps", profile.max_rounds)
+
+    fold, _results = await apply_sequential_split_after_tools(
+        split_context=split_context,
+        current_step_count=current_step_count,
+        token_consumed=token_consumed,
+        tool_failure_count=failure_count,
+        tool_names=tool_names,
+        content_preview=content_preview,
+        llm=llm,
+        tools=tools,
+        sink=sink,
+        tool_context=tool_context,
+        turn_model=turn_model,
+        allowed_tool_names=allowed_tool_names,
+        profile=profile,
+        approval_gate=approval_gate,
+        on_content=on_content,
+        on_reasoning=on_reasoning,
+    )
+    if fold:
+        messages.append(LLMMessage(role="user", content=fold))
+

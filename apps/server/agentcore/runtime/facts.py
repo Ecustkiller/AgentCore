@@ -74,7 +74,7 @@ from typing import Any, ClassVar, Protocol, runtime_checkable
 
 
 class FactKind(StrEnum):
-    """The seven execution-level fact kinds this module produces (§8.3).
+    """Execution-level fact kinds this module produces (§8.3).
 
     These are NEW kinds (no rename of the existing display entries, which keep their
     SSE event-type kind — zero migration). The umbrella ``run_event`` / ``interaction``
@@ -84,7 +84,8 @@ class FactKind(StrEnum):
     sink's ``tool_use_start`` / ``tool_use_end`` pair, which keep their SSE kind.
     ``PLAN_SNAPSHOT`` (the delegate's full DAG, the resume seed for ``frame.plan``) uses
     a value DISTINCT from the display ``run_plan`` event so the display projection's
-    surface gate is unaffected.
+    surface gate is unaffected. ``COORDINATION_SNAPSHOT`` carries CEO 协调模式 Phase 2
+    draft / budget for ask_user resume.
     """
 
     TURN_STARTED = "turn_started"
@@ -94,6 +95,8 @@ class FactKind(StrEnum):
     NOTE = "note"
     MESSAGE_FINAL = "message_final"
     PLAN_SNAPSHOT = "plan_snapshot"
+    # CEO 协调模式 Phase 2: draft / completed / budget for ask_user resume.
+    COORDINATION_SNAPSHOT = "coordination_snapshot"
 
 
 # The execution-only kinds the DISPLAY projection (runs_from_entries) must skip: they

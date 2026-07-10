@@ -57,6 +57,12 @@ async def resolve_interaction(
     pending = registry.get(interaction_id)
     if pending is None or pending.conversation_id != conversation_id or pending.kind != body.kind:
         raise NotFoundError("交互请求不存在或已处理")
+    # D1: CEO-arbitrated blocking escalate is not user-answerable — only resolve_escalation.
+    if (
+        pending.kind.value == "escalation"
+        and (pending.payload or {}).get("awaiting") == "ceo"
+    ):
+        raise NotFoundError("该升级正由主管仲裁，请等待")
     if not registry.resolve(interaction_id, result, conversation_id=conversation_id):
         raise NotFoundError("交互请求不存在或已处理")
     return StatusResponse()

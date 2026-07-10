@@ -26,8 +26,10 @@ def test_town_has_ten_residents():
 
 
 def test_region_map_matches_m1_contract():
-    assert len(TOWN_REGIONS) == 7
+    assert len(TOWN_REGIONS) == 10
     assert TOWN_REGION_POSITIONS == REGION_POSITIONS
+    for name in ("图书馆", "工坊", "码头"):
+        assert name in TOWN_REGIONS
 
 
 def test_hourly_schedule_covers_24_hours():
@@ -42,6 +44,28 @@ def test_role_schedule_override():
     slot = schedule_hint_for_persona(TOWN_PERSONAS[0], hour=7)
     assert slot.location == "面包店"
     assert "面" in slot.activity or "炉" in slot.activity
+
+
+def test_new_district_peak_hours_have_multiple_residents():
+    """图书馆 / 工坊 / 码头 peaks are multi-resident, not solo landmarks."""
+    by_id = {p.agent_id: p for p in TOWN_PERSONAS}
+
+    def at(hour: int, location: str) -> set[str]:
+        return {
+            agent_id
+            for agent_id, persona in by_id.items()
+            if schedule_hint_for_persona(persona, hour).location == location
+        }
+
+    library_peak = at(13, "图书馆")
+    workshop_peak = at(14, "工坊")
+    dock_peak = at(17, "码头")
+
+    assert "zhang" in library_peak
+    assert len(library_peak) >= 3
+    assert "wu" in workshop_peak
+    assert len(workshop_peak) >= 3
+    assert len(dock_peak) >= 4
 
 
 def test_seed_town_world_has_all_agents():

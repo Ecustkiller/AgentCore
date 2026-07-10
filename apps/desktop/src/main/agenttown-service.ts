@@ -72,8 +72,11 @@ function agentTownExeName(): string {
   return "AgentTown";
 }
 
-/** §10 路径发现：AGENTTOWN_PATH → 同目录 → Program Files/AgentCore/AgentTown/ */
-export async function resolveAgentTownExe(): Promise<string | null> {
+/**
+ * §10 路径发现：AGENTTOWN_PATH → 同目录（打包）→ 仓库 Builds（开发）→
+ * Program Files/AgentCore/AgentTown/
+ */
+export function agentTownCandidatePaths(): string[] {
   const exeName = agentTownExeName();
   const candidates: string[] = [];
 
@@ -88,6 +91,11 @@ export async function resolveAgentTownExe(): Promise<string | null> {
 
   if (app.isPackaged) {
     candidates.push(join(dirname(process.execPath), exeName));
+  } else {
+    // Dev: apps/desktop → ../town/Builds/Windows/AgentTown.exe
+    candidates.push(
+      join(app.getAppPath(), "..", "town", "Builds", "Windows", exeName),
+    );
   }
 
   const programFiles =
@@ -97,7 +105,11 @@ export async function resolveAgentTownExe(): Promise<string | null> {
     candidates.push(join(programFiles, "AgentCore", "AgentTown", exeName));
   }
 
-  for (const candidate of candidates) {
+  return candidates;
+}
+
+export async function resolveAgentTownExe(): Promise<string | null> {
+  for (const candidate of agentTownCandidatePaths()) {
     if (await pathExists(candidate)) return candidate;
   }
   return null;
@@ -166,13 +178,18 @@ export async function clearSessionFile(): Promise<void> {
 export async function launchAgentTown(opts?: {
   runId?: string;
 }): Promise<AgentTownLaunchResult> {
+  const candidates = agentTownCandidatePaths();
   const exePath = await resolveAgentTownExe();
   if (!exePath) {
+    const listed = candidates.map((p) => `  · ${p}`).join("\n");
+    const hint = app.isPackaged
+      ? "请安装 AgentTown 独立客户端，或设置 AGENTTOWN_PATH 指向可执行文件。"
+      : "开发期请先在仓库根目录执行 pnpm town:build，生成 apps/town/Builds/Windows/AgentTown.exe；或设置 AGENTTOWN_PATH。";
     return {
       ok: false,
       reason: "not_found",
-      message:
-        "未找到 AgentTown。请安装 AgentTown 独立客户端，或设置 AGENTTOWN_PATH 环境变量。",
+      candidates,
+      message: `未找到 AgentTown。\n${hint}\n已检查路径：\n${listed}`,
     };
   }
 

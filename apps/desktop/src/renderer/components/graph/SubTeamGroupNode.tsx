@@ -1,4 +1,5 @@
 import { Handle, type NodeProps, Position } from "@xyflow/react";
+import { graphNodeDimClass, useGraphNodeDimmed } from "./graphHover";
 
 interface SubTeamGroupData {
   parentRole: string;
@@ -11,13 +12,16 @@ interface SubTeamGroupData {
 export function SubTeamGroupNode({ data }: NodeProps) {
   const d = data as SubTeamGroupData;
   const horizontal = d.handleDirection === "horizontal";
+  const dimmed = useGraphNodeDimmed();
   const label =
     d.variant === "debate"
       ? `辩论 · ${d.memberCount} 辩手 run`
       : `${d.parentRole} 子队 · ${d.memberCount} 人`;
 
   return (
-    <div className="h-full w-full rounded-xl border border-dashed border-muted-foreground/25 bg-muted/5">
+    <div
+      className={`h-full w-full rounded-xl border border-dashed border-muted-foreground/25 bg-muted/5 ${graphNodeDimClass(dimmed)}`}
+    >
       <div className="px-2.5 py-1 text-xs font-medium text-muted-foreground/60">
         {label}
       </div>

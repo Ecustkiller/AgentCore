@@ -171,6 +171,11 @@ async def test_suspend_terminal_unchanged(registry: tuple[ToolRegistry, _OkTool]
     assert messages == []
     assert len(attempts) == 1
     assert attempts[0].success is True
+    # SUSPEND skips durable tool_use_end (挂起即收口) — live UI has *_required already.
+    ends = [e for e in sink._history if e.type == EventType.TOOL_USE_END]  # noqa: SLF001
+    assert ends == []
+    starts = [e for e in sink._history if e.type == EventType.TOOL_USE_START]  # noqa: SLF001
+    assert len(starts) == 1
 
 
 async def test_code_execute_maps_sandbox_error_to_failed_result():

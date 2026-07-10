@@ -225,7 +225,14 @@ def project_journal_entry(recorder: AuditRecorder, entry: dict[str, Any]) -> Aud
             detail={"status": status, "answer": str(payload.get("answer") or "")[:200]},
         )
 
-    if kind in {"checkpoint_required", "plan_review_required"}:
+    if kind in {"checkpoint_required", "plan_review_required", "team_preview_required"}:
+        checkpoint_kind = (
+            "plan_review"
+            if kind == "plan_review_required"
+            else "team_preview"
+            if kind == "team_preview_required"
+            else "ask_user"
+        )
         return AuditDraft(
             category="state",
             action="checkpoint.paused",
@@ -234,13 +241,20 @@ def project_journal_entry(recorder: AuditRecorder, entry: dict[str, Any]) -> Aud
             target_type="interaction",
             target_ref=str(payload.get("checkpoint_id") or "") or None,
             detail={
-                "checkpoint_kind": "plan_review" if kind == "plan_review_required" else "ask_user",
+                "checkpoint_kind": checkpoint_kind,
                 "question": str(payload.get("question") or payload.get("summary") or "")[:200],
             },
         )
 
-    if kind in {"checkpoint_resolved", "plan_review_resolved"}:
+    if kind in {"checkpoint_resolved", "plan_review_resolved", "team_preview_resolved"}:
         decision = str(payload.get("decision") or "continue")
+        checkpoint_kind = (
+            "plan_review"
+            if kind == "plan_review_resolved"
+            else "team_preview"
+            if kind == "team_preview_resolved"
+            else "ask_user"
+        )
         return AuditDraft(
             category="state",
             action="checkpoint.resumed",
@@ -249,7 +263,7 @@ def project_journal_entry(recorder: AuditRecorder, entry: dict[str, Any]) -> Aud
             target_type="interaction",
             target_ref=str(payload.get("checkpoint_id") or "") or None,
             detail={
-                "checkpoint_kind": "plan_review" if kind == "plan_review_resolved" else "ask_user",
+                "checkpoint_kind": checkpoint_kind,
                 "decision": decision,
                 "note": str(payload.get("note") or "")[:200],
             },

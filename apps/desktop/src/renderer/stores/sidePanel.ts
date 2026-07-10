@@ -8,9 +8,11 @@ import { useConversationStore } from "./conversation";
  *
  *  - a fixed, non-closable 「工作区」 home tab (the cloud↔local mode bar + the
  *    files body, with 快照 / 交接 as on-demand overlays), always first;
+ *  - in canvas mode only: a fixed, non-closable 「指挥台」 tab (boss decisions /
+ *    救火 / 后台云端任务), always second — not a closable run/content detail;
  *  - a closable detail tab per drill: a run-detail tab for each inline-graph
- *    worker node, or a content tab for an endpoint bubble (提问 / 最终回答) the
- *    canvas surfaces here (no chat column alongside, 前端UX设计.md §五/§六).
+ *    worker node, a content tab for an endpoint bubble (提问 / 最终回答), or a
+ *    simple-turn Q&A tab for a canvas SimpleTurn light card (前端UX设计.md §五/§六).
  *
  * There is no separate "detail mode" — the detail tabs ARE the detail, so the panel
  * never shows an empty detail placeholder. `open` / `width` are persisted; the detail
@@ -34,6 +36,9 @@ export const SIDE_PANEL_MAX_TABS = MAX_TABS;
 
 /** Reserved id of the fixed 「工作区」 home tab (always first, never closes). */
 export const WORKSPACE_TAB_ID = "workspace";
+
+/** Reserved id of the fixed 「指挥台」 tab (canvas mode only; always second, never closes). */
+export const COMMAND_TAB_ID = "command";
 
 /** After the last closable detail tab closes → 工作区。 */
 function homeTabAfterDetailClose(): string {
@@ -129,8 +134,29 @@ export interface ContentDetailTab {
   endpoint: EndpointKind;
 }
 
-/** A side-panel detail tab: a worker run, or an endpoint chat bubble. */
-export type DetailTab = RunDetailTab | ContentDetailTab;
+/**
+ * A simple-turn Q&A tab — the whole CEO-only exchange (user prompt + assistant
+ * answer) from a canvas `SimpleTurn` light card. Pure dialogue has no execution
+ * plan, so it must not ride `content` (whose live check requires a plan) or
+ * `run` (前端UX设计.md §6.1 / §十).
+ */
+export interface SimpleTurnDetailTab {
+  /** Discriminator: full Q&A for a no-execution turn. */
+  kind: "simple-turn";
+  /** Dedup identity: `simple-turn:<messageId>`. */
+  id: string;
+  /** Label shown in the tab strip (对话). */
+  title: string;
+  /** The turn key (assistant projection id) this Q&A belongs to. */
+  messageId: string;
+  /** The user message bubble rendered under 「提问」. */
+  promptMessageId: string;
+  /** The assistant message bubble rendered under 「回答」. */
+  answerMessageId: string;
+}
+
+/** A side-panel detail tab: a worker run, an endpoint bubble, or a simple-turn Q&A. */
+export type DetailTab = RunDetailTab | ContentDetailTab | SimpleTurnDetailTab;
 
 export const runDetailTabId = (messageId: string, runId: string): string =>
   `run-detail:${messageId}:${runId}`;
@@ -140,17 +166,21 @@ export const contentDetailTabId = (
   contentMessageId: string,
 ): string => `content-detail:${messageId}:${contentMessageId}`;
 
+export const simpleTurnDetailTabId = (messageId: string): string =>
+  `simple-turn:${messageId}`;
+
 interface SidePanelState {
   /** Panel visibility (persisted). */
   open: boolean;
   /** Docked width in px, clamped to [280, 560] (persisted). */
   width: number;
-  /** Open detail tabs (run or content), left→right (session-level; stale tabs are
-   * filtered at render against the live projection). The 工作区 home tab is implicit
+  /** Open detail tabs (run / content / simple-turn), left→right (session-level;
+   * stale run/content tabs are filtered at render against the live projection;
+   * simple-turn tabs stay live without a plan). The 工作区 home tab is implicit
    * and is NOT part of this array. */
   tabs: DetailTab[];
-  /** Active tab: `WORKSPACE_TAB_ID` for the home tab, else a detail tab id.
-   * Defaults to the workspace home so a manual open lands on the project files. */
+  /** Active tab: `WORKSPACE_TAB_ID` / `COMMAND_TAB_ID` for fixed tabs, else a detail
+   * tab id. Defaults to the workspace home so a manual open lands on the project files. */
   activeTabId: string;
   /**
    * A file the chat asked to preview (clicking a 产出文件 card row): the workspace
@@ -181,7 +211,7 @@ interface SidePanelState {
   /** Close a detail tab; falls back to a neighbour tab, else the 工作区 home.
    * Never closes the panel (the home tab is always there). */
   closeTab: (id: string) => void;
-  /** Activate a tab (`WORKSPACE_TAB_ID` or a detail tab id). */
+  /** Activate a tab (`WORKSPACE_TAB_ID` / `COMMAND_TAB_ID` or a detail tab id). */
   setActiveTab: (id: string) => void;
   /**
    * Pin a run (of a specific message's turn) and reveal it. The inline graph
@@ -201,15 +231,26 @@ interface SidePanelState {
     endpoint: EndpointKind,
   ) => void;
   /**
-   * Drop every content tab (endpoint bubbles), keeping run tabs. The canvas calls
-   * this when leaving its reading context (放大态 exit / canvas→chat) so a surfaced
-   * 提问 / 最终回答 never lingers beside the chat bubble that already shows it.
+   * Pin a simple-turn Q&A (user prompt + assistant answer) and reveal it. Used by
+   * canvas `SimpleTurn` light cards — no execution, so not a run/content tab.
+   */
+  showSimpleTurnDetail: (
+    messageId: string,
+    promptMessageId: string,
+    answerMessageId: string,
+    title?: string,
+  ) => void;
+  /**
+   * Drop every reading-context tab (endpoint content + simple-turn Q&A), keeping
+   * run tabs. The canvas calls this when leaving its reading context (放大态 exit /
+   * canvas→chat) so a surfaced 提问 / 最终回答 / 对话 never lingers beside the chat
+   * bubble that already shows it.
    */
   closeContentTabs: () => void;
   /**
-   * Reveal the panel WITHOUT touching the active tab — used by the 指挥台 region's
+   * Reveal the panel WITHOUT touching the active tab — used by the 指挥台 tab's
    * auto-surface (前端UX设计.md §6.2) so a newly-arrived decision opens the dock while
-   * a run-detail tab the user is reading stays put (the region hangs above it).
+   * a run/workspace tab the user is reading stays put (only the 指挥台 tab badge updates).
    */
   openPanel: () => void;
   /** Reveal the panel on the 工作区 home tab (the chat toggle / Ctrl+J). */
@@ -314,9 +355,27 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     });
   },
 
+  showSimpleTurnDetail: (
+    messageId,
+    promptMessageId,
+    answerMessageId,
+    title,
+  ) => {
+    get().openTab({
+      kind: "simple-turn",
+      id: simpleTurnDetailTabId(messageId),
+      title: title ?? "对话",
+      messageId,
+      promptMessageId,
+      answerMessageId,
+    });
+  },
+
   closeContentTabs: () => {
     set((s) => {
-      const tabs = s.tabs.filter((t) => t.kind !== "content");
+      const tabs = s.tabs.filter(
+        (t) => t.kind !== "content" && t.kind !== "simple-turn",
+      );
       if (tabs.length === s.tabs.length) return s;
       // If the dropped tab was active, fall back to a surviving detail tab (e.g. a
       // run drilled in the canvas, kept per §十) else the 工作区 home.

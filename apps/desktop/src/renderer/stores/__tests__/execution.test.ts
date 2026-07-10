@@ -209,6 +209,67 @@ describe("projectExecution (fold)", () => {
     expect(exec.runs.find((s) => s.id === "run-2")?.error).toBeNull();
   });
 
+  it("marks run and agent cancelled on run_cancelled", () => {
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      {
+        t: 2,
+        kind: "run_tool_progress",
+        agentId: "agent-1",
+        toolName: "file_write",
+        chars: 40,
+      },
+      {
+        t: 3,
+        kind: "run_cancelled",
+        runId: "run-1",
+        agentId: "agent-1",
+        reason: "redirect",
+      },
+    ];
+    const exec = projectExecution(plan, frames, "running");
+    const run = exec.runs.find((s) => s.id === "run-1");
+    expect(run?.status).toBe("cancelled");
+    const agent = exec.agents.find((a) => a.id === "agent-1");
+    expect(agent?.status).toBe("cancelled");
+    expect(agent?.toolProgress).toBeNull();
+  });
+
+  it("folds replacesRunId from run_started onto the node", () => {
+    const frames: RunFrame[] = [
+      {
+        t: 1,
+        kind: "run_started",
+        agentId: "agent-1",
+        runId: "run-1-redir",
+        parentRunId: null,
+        runKind: "agent",
+        revision: 0,
+        replacesRunId: "run-1",
+      },
+    ];
+    // Plan must declare the redir node for ensureRun to materialize it.
+    const handoffPlan = {
+      ...plan,
+      runs: [
+        ...plan.runs,
+        {
+          id: "run-1-redir",
+          agentId: "agent-1",
+          task: "调研（接手）",
+          dependsOn: [],
+          parentRunId: null,
+          kind: "agent" as const,
+          replacesRunId: null,
+        },
+      ],
+    };
+    const exec = projectExecution(handoffPlan, frames, "running");
+    expect(exec.runs.find((s) => s.id === "run-1-redir")?.replacesRunId).toBe(
+      "run-1",
+    );
+  });
+
   it("freezes in-flight nodes as cancelled when the run is stopped", () => {
     const frames: RunFrame[] = [
       started("agent-1", "run-1"),
@@ -502,6 +563,7 @@ describe("projectExecution (fold)", () => {
         question: "用 Postgres 还是 MySQL?",
         assumption: "暂用 Postgres",
         blocking: true,
+        escalationKind: "normal",
       },
       {
         t: 3,
@@ -525,6 +587,7 @@ describe("projectExecution (fold)", () => {
         blocking: true,
         status: "raised",
         answer: null,
+        kind: "normal",
         questions: [],
       },
     ]);
@@ -552,6 +615,7 @@ describe("projectExecution (fold)", () => {
       question: "Q?",
       assumption: "A",
       blocking: false,
+      escalationKind: "normal",
     });
   });
 
@@ -569,6 +633,7 @@ describe("projectExecution (fold)", () => {
         agentId: "agent-1",
         question: "用哪个数据库？",
         assumption: "暂用 Postgres",
+        escalationKind: "normal",
       },
     ];
     // Pending: a blocking escalation with its resolve id, status pending, no answer yet.
@@ -584,6 +649,7 @@ describe("projectExecution (fold)", () => {
         blocking: true,
         status: "pending",
         answer: null,
+        kind: "normal",
         questions: [],
       },
     ]);
@@ -606,6 +672,7 @@ describe("projectExecution (fold)", () => {
       blocking: true,
       status: "resolved",
       answer: "用 Postgres。",
+      kind: "normal",
       questions: [],
     });
   });
@@ -623,6 +690,7 @@ describe("projectExecution (fold)", () => {
         agentId: "agent-1",
         question: "选型需要你拍板",
         assumption: "暂用 Postgres",
+        escalationKind: "normal",
         questions: [
           {
             id: "q0",
@@ -671,6 +739,7 @@ describe("projectExecution (fold)", () => {
         agentId: "agent-1",
         question: "Q?",
         assumption: "暂用 A",
+        escalationKind: "normal",
       },
       {
         t: 3,
@@ -700,6 +769,7 @@ describe("projectExecution (fold)", () => {
         agentId: "agent-1",
         question: "Q?",
         assumption: "A",
+        escalationKind: "normal",
       },
     ];
     const exec = projectExecution(plan, frames, "running");
@@ -723,6 +793,7 @@ describe("projectExecution (fold)", () => {
         agentId: "agent-1",
         question: "Q1?",
         assumption: "A1",
+        escalationKind: "normal",
       },
       {
         t: 3,
@@ -740,6 +811,7 @@ describe("projectExecution (fold)", () => {
         agentId: "agent-1",
         question: "Q2?",
         assumption: "A2",
+        escalationKind: "dep",
       },
       {
         t: 5,
@@ -764,6 +836,7 @@ describe("projectExecution (fold)", () => {
         blocking: true,
         status: "resolved",
         answer: "答1",
+        kind: "normal",
         questions: [],
       },
       {
@@ -773,6 +846,7 @@ describe("projectExecution (fold)", () => {
         blocking: true,
         status: "timeout",
         answer: null,
+        kind: "dep",
         questions: [],
       },
     ]);
@@ -1132,6 +1206,15 @@ describe("execution store", () => {
     // Clearing one leaves the other intact.
     store().clearExecution("msg-2");
     expect(execRuntime(store(), MID).plan?.id).toBe("exec-1");
+  });
+
+  it("alignTurnKey moves plan from client bubble id to server turn id", () => {
+    store().startExecution(plan, MID);
+    store().recordFrame(started("agent-1", "run-1"), MID);
+    store().alignTurnKey(MID, "msg-server");
+    expect(execRuntime(store(), MID).plan).toBeNull();
+    expect(execRuntime(store(), "msg-server").plan?.id).toBe("exec-1");
+    expect(execRuntime(store(), "msg-server").frames).toHaveLength(1);
   });
 });
 
@@ -2172,5 +2255,55 @@ describe("交互式逐轮辩论决策 (foldDebateDecision, §逐轮交互)", () 
       MID,
     );
     expect(rt().workerToolPhases).toEqual({});
+  });
+});
+
+describe("team_synthesis_preview (CEO 协调模式 Phase 1)", () => {
+  it("stores the latest preview on the runtime (transport-only)", () => {
+    store().startExecution(plan, MID);
+    expect(rt().teamSynthesisPreview).toBeNull();
+    store().setTeamSynthesisPreview(
+      {
+        execution_id: "exec-1",
+        completed: 1,
+        total: 2,
+        headline: "已完成 1/2：✅ React 研究员 ⏳ Vue 研究员",
+        text: "已完成 1/2：✅ React 研究员 ⏳ Vue 研究员\n· React 研究员：ok",
+        workers: [
+          {
+            run_id: "run-1",
+            role: "React 研究员",
+            status: "completed",
+            summary: "ok",
+          },
+          {
+            run_id: "run-2",
+            role: "Vue 研究员",
+            status: "pending",
+            summary: "",
+          },
+        ],
+        in_progress: true,
+      },
+      MID,
+    );
+    expect(rt().teamSynthesisPreview?.completed).toBe(1);
+    expect(rt().teamSynthesisPreview?.headline).toContain("✅ React 研究员");
+  });
+
+  it("ignores preview when no plan is active", () => {
+    store().setTeamSynthesisPreview(
+      {
+        execution_id: "x",
+        completed: 0,
+        total: 2,
+        headline: "x",
+        text: "x",
+        workers: [],
+        in_progress: true,
+      },
+      MID,
+    );
+    expect(rt().teamSynthesisPreview).toBeNull();
   });
 });

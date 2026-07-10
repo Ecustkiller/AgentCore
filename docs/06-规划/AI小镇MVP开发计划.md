@@ -8,8 +8,15 @@
 > **优先级铁律**：① **先验证产品赌注**——「10 个 LLM 居民能跑出可看的涌现」（最便宜的方式、最早，SPIKE-06）；② 再跑通「1 Agent + 手动 tick + 3D 动起来」管道闭环；③ 最后扩到 8–12 居民与核心交互
 > **开发阶段声明**：项目当前**无任何真实运行数据**（无真实用户 / 对话 / eval 跑分 / 质量分）。本计划中一切「时延 / 成本 / 方差阈值」均为**假设**，须由 Spike 与合成样本实测校准，不得当既有事实引用。
 > **状态**：`draft`（**3D 前端路线：Unity 6 LTS + URP + C# 独立应用**替代 Desktop R3F → 见 [AgentTown 客户端规格](AgentTown客户端规格.md)；后端与本计划 BE/DB 任务仍有效）
-> **更新**：2026-07-08（**改用 Unity 6**，原 UE `UE-*` 回改 `UT-*`；理由：中期 Web 传播版决定性 + 单人 AI 迭代快 + 无 `.uasset` 切换成本，见 §2.1）
-> **实施进度（2026-07-08 · 后端已领先、前端待移植）**：**后端 `simulation/` 包 M1–M4 主线已落地并带测试**（世界引擎、并发 tick、对话/交易/投票、事件、反思、指标、回放、上帝模式、四表落库，REST 已挂 `/v1`）。**前端观测客户端尚未落地**：UE `apps/town` Phase 0/1 代码已建，但随引擎改选将**退役作参照**（比照 R3F 冻结→删除先例，不再投入）；**Unity 6 客户端待移植**（勿据现有 UE 代码判定 Unity 已就绪）。Desktop 启动器 DT-01（引擎无关）随之调整。§8 交付清单：后端项 ✅，前端（Unity）项 ⏳ 待移植。
+> **更新**：2026-07-09（Phase 1 删栈收口：UE + Desktop R3F 已删）
+> **收口决策**：删栈以 **scripted + WebGL C2 live + FPS 顶栏**为准；**真 LLM 涌现验证另线**。
+> **实施进度（2026-07-09）**：
+> - **后端** `simulation/` M1–M4 主线 ✅；**scripted tick** ✅（每 3 tick 对话/交易、每 6 tick world_event；`SIMULATION_SCRIPTED` / create `{"scripted":true}` / 无 DeepSeek 自动降级；5 tick E2E 已绿）
+> - **Unity 客户端** Phase 0/1 + Offline Demo + 观测层 ✅（HUD 顶栏含 **fps-label**；`town:verify` 29/29）。WebGL C2 live（`sim.tick_*`）✅。**另线**：真 LLM 连推；30 FPS Profiler 固化
+> - **CORS / WebGL**：spike Step A ✅；WebGL 可构建 ✅；C2 页内 SSE live ✅
+> - **UE / Desktop R3F**：✅ **已删**（不再双栈）
+> - **DT-01**：`#/simulation/town` **仅启动器** ✅；session.json + spawn ✅；无内嵌 3D / `?preview`
+> - chrome 细节 → [AgentTown 规格 §7](AgentTown客户端规格.md)；§8 交付清单见下表
 
 ---
 
@@ -30,7 +37,7 @@
 | 桌面前端 | `apps/desktop/` `router.tsx` `sse/dispatch.ts` | 🟡 | Hash 路由与 SSE 泵送可仿照；现有 handler 强绑 chat/execution，需新增 sim dispatch |
 | SSE 可观测 | `api/sse.py` + `runtime/events/` | 🔴 | 管道成熟，但新增 `sim.*` 是**契约级改动**：`EventType` 枚举 + `disposition.py` 门禁 + 代码生成脚本 + 前端 dispatch handler + conformance 向量，**五处齐动** |
 | 前后端类型对齐 | `packages/contract-types/`（**非** `shared-types`）+ `contract-rest-types/` | 🔴 | SSE 事件名由 Python `EventType` 生成、**payload 手写**；REST 走 OpenAPI 生成；**无 Pydantic↔TS 双向 codegen** |
-| 3D 渲染 | `apps/town/` Unity 6 LTS + URP | 🔴 | **2026-07-08 定案**：观测层为 **AgentTown 独立 Unity 客户端**（→ [AgentTown 客户端规格](AgentTown客户端规格.md)）；Desktop R3F 与 UE 原型**均冻结退役**，Unity 落地后删除。后端 BE/DB 不变 |
+| 3D 渲染 | `apps/town/` Unity 6 LTS + URP | 🔴 | **AgentTown 独立 Unity 客户端**（→ [AgentTown 客户端规格](AgentTown客户端规格.md)）；**UE + Desktop R3F 已删**。后端 BE/DB 不变 |
 | **尚未存在** | `simulation/` 包 | — | 本计划核心新建项 |
 
 **明确绕过**：`runtime/runs/` 的 CEO/DAG 路径、`conversation/` Turn 生命周期——模拟 run 独立生命周期。核实结论：绕过**方向合理**（ReAct 内核不依赖 CEO，eval 已有直调先例），现实工作量在**自建 sim 编排层**（prompt 装配、世界状态、持久化、SSE 契约、3D 同步），而非找不到内核。注意绕过 Turn 后将失去自动持久化 / `message_start` / `ApprovalGate`（后者需 `conversation_id`），如需须自建。
@@ -88,7 +95,7 @@
 
 ## 2. 任务分解表
 
-> **前端路线（2026-07-08 · 改用 Unity）**：原 `FE-*` / `SPIKE-01` / `SPIKE-05`（R3F）**不再新增**；等价工作见 **§2.1 `UT-*` Unity 任务**。Desktop 仅保留 **DT-01**（`session.json` + 启动 AgentTown）。R3F 与 UE 原型均冻结作对照，Unity 客户端落地验收后删除退役代码（`simulation/town/*` 与 UE 原型）。
+> **前端路线（2026-07-08 · Unity；2026-07-09 删栈收口）**：原 `FE-*` / `SPIKE-01` / `SPIKE-05`（R3F）**已废弃并删除**；等价工作见 **§2.1 `UT-*`**。Desktop 仅 **DT-01**（`session.json` + 启动 AgentTown，无内嵌 3D）。删栈门禁 = scripted + WebGL C2 live + FPS 顶栏；真 LLM 另线。
 >
 > **为何改用 Unity（反转原「Unity→UE」决策）**：① **中期 Web 传播版已确认为目标**，UE 无原生 Web 导出、Unity 原生 WebGL2 → **决定性理由**；② 单人 + AI 下 C# 迭代快；③ 无 `.uasset` 二进制资产切换成本。产品名与目标路径不变（AgentTown / `apps/town`）。
 
@@ -99,7 +106,7 @@
 | SPIKE-01 | UT-00 | 0 | Unity Spike | `apps/town` 空项目；Bearer 调 API；1 NPC + 坐标变换 Go/No-Go |
 | SPIKE-05 | — | — | （废弃） | Zustand/R3F 帧率验证不再适用 |
 | FE-01 | UT-01 | 1 | 应用壳 + Session | 场景 Bootstrap + `SimulationSession` 单状态机 |
-| FE-02 | UT-02 | 1 | 7 区域场景 | Kenney 低模；`packages/town-assets` |
+| FE-02 | UT-02 | 1 | 10 区域场景 | Kenney 低模；`packages/town-assets` |
 | FE-03 | UT-03 | 1 | 单 NPC NavMesh | Xbot 实例化 + Unity NavMesh 寻路 |
 | FE-04 | UT-04 | 1 | REST + SSE 客户端 | 对齐 §6.6 事件表；Live 忽略 `tick_frame` |
 | FE-05 | UT-05 | 1 | Tick 控制 UI | 推 tick / pause / 时钟（Unity UI） |
@@ -149,7 +156,7 @@
 | BE-07 | 后端 | Simulation REST API | 新增 `api/routes/simulation/`：`POST /runs`（创建）、`POST /runs/{id}/tick`（推进一步）、`GET /runs/{id}/stream`（SSE）。复用 `api/sse.py` 包装。 | BE-05, BE-06 | 2d | FE-04 |
 | ST-01 | 集成 | 模拟协议落地到 contract-types | 将 SPIKE-04 草案合入 `packages/contract-types/`：事件名进 Python `EventType`（生成 TS），**手写** `SimTickEvent`/`SimAgentState` payload 双端对齐。（**非** `shared-types`，无自动 codegen） | SPIKE-04, BE-06 | 1d | FE-04 |
 | FE-01 | 前端(Unity) | 应用壳 + Session（→ UT-01） | 场景 Bootstrap + `SimulationSession` 单状态机；Desktop 不再内嵌 3D 页（观测在 AgentTown）。细节见 §2.1 / [AgentTown 规格](AgentTown客户端规格.md)。 | 无 | 1.5d | BE-01, DB-01 |
-| FE-02 | 前端(Unity) | 7 区域场景（→ UT-02，基础美术必做） | 广场/市场/餐厅/工作场所×2/住宅/镇政厅/公园 7 区域；**Kenney 现成低模作「基础一档美术」（必做，非占位块）**，`packages/town-assets`。 | FE-01, UT-00 | 3d | BE-02 |
+| FE-02 | 前端(Unity) | 10 区域场景（→ UT-02，基础美术必做） | 广场/市场/餐厅/面包店/公园/住宅区/镇政厅/图书馆/工坊/码头；**Kenney 现成低模作「基础一档美术」（必做，非占位块）**，`packages/town-assets`。世界约 120×96 m。 | FE-01, UT-00 | 3d | BE-02 |
 | FE-03 | 前端(Unity) | 单 NPC NavMesh（→ UT-03） | 1 个 Xbot 角色 + Unity NavMesh 寻路，`idle`/`walk` 切换；位置由 tick snapshot 驱动。 | FE-02, UT-00 | 3d | BE-05 |
 | FE-04 | 前端(Unity) | REST + SSE 客户端（→ UT-04） | `SimulationSession` 连接 SSE、解析 `sim.*` 更新 agent 位置/状态/事件流（对齐 [AgentTown 规格](AgentTown客户端规格.md) 事件表）。 | ST-01, UT-00 | 2d | BE-07 |
 | FE-05 | 前端(Unity) | Tick 控制 UI（→ UT-05） | Unity UI 工具栏：「推进 1 tick」「当前 tick / 时刻」显示；调用 `POST .../tick` API。 | FE-04, BE-07 | 1d | FE-03 |
@@ -224,7 +231,7 @@
 | FE-19 | 前端 | 3D 性能优化（进一步） | **30 FPS 为硬底线（必守）**——FPS < 30 则本项**上提为 committed**（实例化渲染、视锥剔除、阴影降级；目标 10 NPC ≥ 30 FPS 中端 GPU）；≥ 30 时进一步优化才可后移 | 2d |
 | BE-26 | 后端 | 每日报告生成 | 体验增强，非验收硬需（每 24 tick LLM 生成日报） | 2d |
 | FE-15 | 前端 | 每日报告视图 | 依赖 BE-26（右侧「日报」Tab + 导出 Markdown） | 2d |
-| FE-18 | 前端 | 3D 资产**高质量精修** | **基础一档美术为必做**（已并入 FE-02，用 Kenney 现成低模，占位方块不作为交付形态）；此处仅指进一步高质量替换（Kenney+Quaternius 精修）可后移 | 3d |
+| FE-18 | 前端 | 3D 资产**高质量精修** | **基础一档美术为必做**（已并入 FE-02）；本项推进中：Quaternius 10 栋 + 区域绑定 + Kenney Nature Kit 精选自然物（公园/路边）+ Kenney City Kit (Roads) 精选主干 mesh（无资产回退色块）+ LOD/剔除守 10 NPC ≥ 30 FPS | 3d |
 | ST-02 | 集成 | 模拟 Conformance 向量 | 协议回归护栏，MVP 后补亦可 | 2d |
 
 **M4 降级池小计**：约 **13 人天**（进度紧张可砍；性能两项在指标未达标时上提为 committed）
@@ -322,20 +329,26 @@
 
 ## 8. MVP 交付清单
 
-| 愿景文档交付物 | 对应任务 | 状态目标 |
-|---------------|---------|---------|
+| 愿景文档交付物 | 对应任务 | 状态 |
+|---------------|---------|:----:|
 | `simulation/` 包骨架 | BE-01 | ✅ |
 | World Engine MVP | BE-02, BE-08, BE-09 | ✅ |
 | SimAgent 运行时 | BE-03, BE-04, BE-12, BE-13 | ✅ |
-| AI 小镇 8–12 居民 | BE-10, FE-06 | ✅ |
-| 手动 tick + 预设事件 | BE-05, BE-22, FE-05 | ✅ |
-| 核心交互（对话/交易/投票） | BE-15~18, FE-11 | ✅ |
-| AgentTown 3D 观测客户端 | UT-01~10, UT-15 | ⏳ |
-| Desktop 启动器 + session.json | DT-01 | ⏳ |
-| SSE 实时流 + 回放 + 连续自动播放 | BE-06, BE-28, UT-04, UT-15 | ⏳ |
+| AI 小镇 8–12 居民（后端配置） | BE-10 | ✅ |
+| 多 NPC 渲染（Unity） | UT-06 / FE-06 | ✅ 代码（真资产管线 + 无资产回退） |
+| 手动 tick + 预设事件（后端） | BE-05, BE-22 | ✅（含 scripted tick 路径） |
+| Tick 控制 UI（Unity） | UT-05 / FE-05 | ✅（含 Offline Demo） |
+| 核心交互（后端对话/交易/投票） | BE-15~18 | ✅ |
+| 交互 3D 叠加（Unity） | UT-11 / FE-11 | ✅（Offline / scripted 可演示） |
+| 观测热力 + metrics（Unity） | UT-14 / FE-14 | ✅（HUD metrics + 区域热力；Offline 可演示） |
+| 上帝模式 UI（Unity） | UT-12 / FE-12 | ✅（4 预设 inject；Live Run） |
+| AgentTown 3D 观测客户端 | UT-01~10, UT-15 | ✅ Phase 0/1 + 观测层；UE/R3F 已删；§14 除真 LLM / FPS Profiler 外收口 |
+| Desktop 启动器 + session.json | DT-01 | ✅ 启动器优先 + 失败提示；开发期找 Builds exe |
+| SSE + 回放（后端） | BE-06, BE-28 | ✅ |
+| SSE + 回放（Unity） | UT-04, UT-15 | ✅ 代码；WebGL 构建内 SSE live 冒烟 ⏳ |
 | 数据库四表 | DB-01, DB-02 | ✅ |
-| 20+ tick 可观测 | INT-04 | ✅ |
-| 3 次同配置方差**可复现测量** | BE-27（固定 seed/版本）+ INT-04（测量报告） | ✅ |
+| 20+ tick 可观测（后端验收） | INT-04 | ✅ |
+| 3 次同配置方差**可复现测量** | BE-27 + INT-04 | ✅ |
 
 ---
 

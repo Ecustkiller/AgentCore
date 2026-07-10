@@ -5,6 +5,7 @@ import { InlineTeamGraph } from "@/components/chat/InlineTeamGraph";
 import { Markdown } from "@/components/chat/Markdown";
 import { NonBlockingAskCard } from "@/components/chat/NonBlockingAskCard";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
+import { TeamPreviewCard } from "@/components/chat/TeamPreviewCard";
 import { type CitationFlash, SourceCards } from "@/components/chat/SourceCards";
 import { TurnWarningBanner } from "@/components/chat/TurnWarningBanner";
 import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
@@ -27,6 +28,7 @@ import { notifyError } from "@/lib/toast";
 import { continueTurn, runRegenerate } from "@/services/turns";
 import {
   type Message,
+  assistantProjectionId,
   getActiveRuntime,
   useActiveGenerating,
   useConversationStore,
@@ -153,6 +155,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const checkpoints = message.checkpoints ?? [];
   const nonBlockingAsks = message.nonBlockingAsks ?? [];
   const planReviews = message.planReviews ?? [];
+  const teamPreviews = message.teamPreviews ?? [];
   const hideContentForCheckpoint = checkpoints.some(
     (c) => c.status === "resolved",
   );
@@ -182,6 +185,15 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       ),
     [procSteps],
   );
+  const markedPreviews = useMemo(
+    () =>
+      new Set(
+        procSteps.flatMap((s) =>
+          s.kind === "team_preview" ? [s.checkpoint_id] : [],
+        ),
+      ),
+    [procSteps],
+  );
   // Escalations ride the team execution's inline slot (next to the graph, in
   // ProcessTimeline) whenever the turn carries a `team` marker; un-anchored cards
   // (no inline process / markers) fall back to the bottom stack — never double-render.
@@ -194,6 +206,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   );
   const bottomAsks = nonBlockingAsks.filter((a) => !markedAsks.has(a.id));
   const bottomReviews = planReviews.filter((p) => !markedReviews.has(p.id));
+  const bottomPreviews = teamPreviews.filter((p) => !markedPreviews.has(p.id));
   const singleAgentArtifacts = useMemo(
     () =>
       message.executionId === null
@@ -243,6 +256,9 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     if (userId) void runRegenerate(userId);
   };
 
+  // Execution / graph slot key = server turn id when stamped (pause/resume share it).
+  const projectionId = assistantProjectionId(message);
+
   // 回合正文（时间线或答案）：对话页恒为传统聊天平铺（单 Agent 回合不再退化成 CEO 节点卡——
   // 那条「图主界面化」第一刀已撤，图相关体验只在画布；多 Agent 回合仍在答案上方内嵌
   // 团队协作图）。回合级附件（收到的上下文 / 错误卡 / 产物 / 引用 / 检查点 / 操作行）随后平铺。
@@ -257,12 +273,13 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       }
       fallbackContent={hideContentForCheckpoint ? "" : message.content}
       executionId={message.executionId}
-      messageId={message.id}
+      messageId={projectionId}
       journal={message.runs}
       conversationId={conversationId}
       checkpoints={checkpoints}
       nonBlockingAsks={nonBlockingAsks}
       planReviews={planReviews}
+      teamPreviews={teamPreviews}
     />
   ) : (
     <>
@@ -275,7 +292,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       )}
       {message.executionId && (
         <InlineTeamGraph
-          messageId={message.id}
+          messageId={projectionId}
           executionId={message.executionId}
           journal={message.runs}
         />
@@ -371,7 +388,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         )
       ) : (
         <MultiAgentFileArtifacts
-          messageId={message.id}
+          messageId={projectionId}
           process={message.process}
         />
       )}
@@ -391,9 +408,12 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       {bottomReviews.map((pr) => (
         <PlanReviewCard key={pr.id} review={pr} />
       ))}
+      {bottomPreviews.map((tp) => (
+        <TeamPreviewCard key={tp.id} preview={tp} />
+      ))}
       {message.executionId && !hasTeamMarker && (
         <EscalationCards
-          messageId={message.id}
+          messageId={projectionId}
           conversationId={conversationId}
           interactive={message.isStreaming}
         />

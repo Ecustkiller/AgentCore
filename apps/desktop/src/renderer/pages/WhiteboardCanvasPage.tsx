@@ -32,7 +32,7 @@ import {
 } from "@/services/boards";
 import { createWorkspaceSource } from "@/services/sources/workspaceSource";
 import {
-  lastAssistantMessageId,
+  lastAssistantProjectionId,
   runtimeOf,
   useConversationStore,
 } from "@/stores/conversation";
@@ -51,14 +51,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 /** Subscribe to a board conversation's live team run tree (M3 进度贴源). The execution store is
- * keyed by assistant message id, so resolve the board conversation's latest assistant message
- * (the in-flight / last turn) reactively, then project its run tree — re-folds on every frame
- * and re-targets when a new turn appends a new assistant message. Null until a turn delegates a
- * team (a solo CEO turn declares no run plan, so there is nothing to show). */
+ * keyed by projection id (`serverMessageId ?? id`), so resolve the board conversation's latest
+ * assistant turn reactively, then project its run tree — re-folds on every frame and re-targets
+ * when a new turn appends a new assistant message. Null until a turn delegates a team (a solo
+ * CEO turn declares no run plan, so there is nothing to show). */
 function useBoardExecution(conversationId: string | null): Execution | null {
   const messageId = useConversationStore((s) =>
     conversationId
-      ? lastAssistantMessageId(runtimeOf(s, conversationId).messages)
+      ? lastAssistantProjectionId(runtimeOf(s, conversationId).messages)
       : null,
   );
   return useMessageExecution(messageId);

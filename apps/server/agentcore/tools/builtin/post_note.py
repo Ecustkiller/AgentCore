@@ -161,6 +161,20 @@ class PostNoteTool:
                 run_id=context.run_id,
                 conflicting_note=note.seq,
             )
+        # CEO 协调模式 Phase 3: surface notes (+ conflicts as escalation) to the CEO queue.
+        try:
+            from agentcore.runtime.coordination.bridge import post_note_to_coordination
+
+            post_note_to_coordination(
+                run_id=context.run_id,
+                role=context.agent_role or "",
+                kind=kind,
+                text=note.text,
+                conflict=conflict_desc,
+                execution_id=context.execution_id,
+            )
+        except Exception:  # noqa: BLE001 — liveliness only
+            logger.warning("worker.post_note.coordination_route_failed", run_id=context.run_id)
         return ToolResult(
             tool_call_id="",
             success=True,

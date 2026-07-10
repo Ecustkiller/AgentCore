@@ -74,6 +74,7 @@ function makeRun(p: Partial<ProjectedRun> & { id: string }): ProjectedRun {
     revisionOf: null,
     revision: 0,
     revised: null,
+    replacesRunId: null,
     checkpoint: null,
     receivedContext: [],
     escalations: [],

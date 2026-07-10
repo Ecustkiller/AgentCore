@@ -118,11 +118,43 @@ async def resume_chat_pipeline(
     history_token = turn_history.set(history or [])
     from agentcore.core.log_context import get_log_value
 
+    # Seed past both the pause snapshot AND any live append-on-emit rows that outran
+    # the sidecar (tool_use_end / message_final / … after pause) — else UniqueViolation.
+    journal_base = len(suspension.journal_entries)
+    db_max_seq: int | None = None
+    initial_seq = journal_base
+    try:
+        from agentcore.db.base import async_session_factory
+        from agentcore.db.repositories import TurnJournalRepository
+
+        async with async_session_factory() as db:
+            db_max_seq = await TurnJournalRepository(db).max_seq(message_id)
+        if db_max_seq is not None:
+            initial_seq = max(journal_base, db_max_seq + 1)
+    except Exception as e:  # noqa: BLE001 — best-effort; never block resume on journal probe
+        logger.warning(
+            "pipeline.resume_initial_seq_fallback",
+            message_id=message_id,
+            journal_entries_count=journal_base,
+            error=str(e),
+        )
+        initial_seq = journal_base
+
+    logger.info(
+        "pipeline.resume_start",
+        message_id=message_id,
+        conversation_id=conversation_id,
+        decision=decision.value,
+        journal_entries_count=journal_base,
+        initial_seq=initial_seq,
+        db_max_seq=db_max_seq,
+    )
+
     journal_writer = TurnJournalWriter(
         turn_id=message_id,
         conversation_id=conversation_id,
         trace_id=suspension.trace_id or get_log_value("trace_id"),
-        initial_seq=len(suspension.journal_entries),
+        initial_seq=initial_seq,
     )
     journal_writer_token = current_journal_writer.set(journal_writer)
     audit_recorder, audit_token = bind_recorder(
@@ -135,6 +167,8 @@ async def resume_chat_pipeline(
     )
     fact_log = TurnFactLog(inherited_entries=list(suspension.journal_entries))
     fact_log_token = current_fact_log.set(fact_log)
+    execution_id_token = None
+    bound_execution_id: str | None = None
     try:
         worker_tools = build_worker_registry(backend=backend)
         _wire_worker_memory_tools(
@@ -192,6 +226,10 @@ async def resume_chat_pipeline(
             vision_reader=build_vision_reader(),
             cost_sink=vision_cost_sink,
         )
+        from agentcore.runtime.coordination.session import current_execution_id
+
+        bound_execution_id = base_tool_context.execution_id
+        execution_id_token = current_execution_id.set(bound_execution_id)
         approval_gate = (
             ApprovalGate(
                 sink=sink,
@@ -267,6 +305,12 @@ async def resume_chat_pipeline(
                 sink=sink,
                 delegate_tool=delegate_tool,
                 execution_id=base_tool_context.execution_id,
+            )
+            logger.info(
+                "pipeline.resume_settled",
+                checkpoint_id=suspension.checkpoint_id,
+                decision=decision.value,
+                kind=suspension.kind.value,
             )
         finally:
             captain_transcript.reset(token)
@@ -400,6 +444,18 @@ async def resume_chat_pipeline(
             await audit_recorder.flush()
         current_audit_recorder.reset(audit_token)
         turn_history.reset(history_token)
+        if execution_id_token is not None:
+            from agentcore.runtime.coordination.session import (
+                clear_active_coordination,
+                current_execution_id,
+            )
+
+            # Settle may realign to the pause-turn id; clear that registry key.
+            eid = current_execution_id.get() or bound_execution_id
+            if eid:
+                with contextlib.suppress(Exception):
+                    clear_active_coordination(eid)
+            current_execution_id.reset(execution_id_token)
         # Do NOT close the sink here (see run_chat_pipeline): its owner closes it, so the
         # resumed turn's persist_turn_result tail (title / followups) still reaches the client.
         with contextlib.suppress(Exception):

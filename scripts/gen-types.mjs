@@ -4,6 +4,7 @@
  *
  *   1. OpenAPI → packages/contract-rest-types/src/api.generated.ts
  *   2. EventType enum → packages/contract-types/src/eventTypes.generated.ts
+ *   3. SSE payload models → packages/contract-types/src/events.generated.ts
  *
  * CI runs this then `git diff --exit-code` to block silent drift.
  */
@@ -24,6 +25,9 @@ run("uv", ["run", "python", "scripts/dump_openapi.py"], { cwd: SERVER });
 
 console.log("gen:types — dump SSE event type union …");
 run("uv", ["run", "python", "scripts/dump_sse_event_types.py"], { cwd: SERVER });
+
+console.log("gen:types — dump SSE payload types …");
+run("uv", ["run", "python", "scripts/dump_sse_payload_types.py"], { cwd: SERVER });
 
 console.log("gen:types — openapi-typescript …");
 run("pnpm", ["-C", join(ROOT, "packages", "contract-rest-types"), "gen"]);

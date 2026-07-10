@@ -83,6 +83,7 @@ function mkRun(
     revisionOf: null,
     revision: 0,
     revised: null,
+    replacesRunId: null,
     checkpoint: null,
     receivedContext: [],
     escalations: [],

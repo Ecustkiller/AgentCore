@@ -39,8 +39,8 @@ MESSAGE_STATUS_COMPLETE = "complete"
 MESSAGE_STATUS_INCOMPLETE = "incomplete"
 MESSAGE_STATUS_FAILED = "failed"
 
-_PAUSE_REQUIRED_TYPES = ("checkpoint_required", "plan_review_required")
-_PAUSE_RESOLVED_TYPES = ("checkpoint_resolved", "plan_review_resolved")
+_PAUSE_REQUIRED_TYPES = ("checkpoint_required", "plan_review_required", "team_preview_required")
+_PAUSE_RESOLVED_TYPES = ("checkpoint_resolved", "plan_review_resolved", "team_preview_resolved")
 
 
 def _usage_metadata(

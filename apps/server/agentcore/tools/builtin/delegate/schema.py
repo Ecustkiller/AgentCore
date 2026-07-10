@@ -203,6 +203,14 @@ DELEGATE_PARAMETERS = {
                             "delegate + replan（depth 达上限时自动禁用）；false = 显式禁止委派。"
                         ),
                     },
+                    "replaces_run_id": {
+                        "type": "string",
+                        "description": (
+                            "可选：回落换人标记。当 revise 未命中 / 超改次上限、改用本工具重派新人时，"
+                            "填被接手的原 worker 的 run_id——前端在图上标「接手」角标与「接替」边；"
+                            "执行不受影响。普通委派不要设。"
+                        ),
+                    },
                     "checkpoint_after": {
                         "type": "boolean",
                         "description": (
@@ -237,6 +245,17 @@ DELEGATE_PARAMETERS = {
                 "该 worker 成功后，其产出会直接作为你的最终答复呈现给用户，你不必再写"
                 "概览。只要你可能在看到结果后还要继续委派 / 补充，或本次派了多个 worker，"
                 "就不要设——默认会把结果交回你来收尾；worker 失败时也会自动回落到由你收尾。"
+            ),
+        },
+        "coordinate": {
+            "type": "boolean",
+            "default": True,
+            "description": (
+                "可选，默认 true（省略即协调）。当本次派【≥2 个】worker 且为根 CEO、"
+                "非 finalize 时：delegate 立即返回『团队已启动』，你进入协调模式，消费"
+                "团队事件并用 update_synthesis / cancel_worker / resolve_escalation 边看边调；"
+                "全部完成后做最终合成。传 false 显式退出到经典阻塞等待（等全队完成再返回）。"
+                "单 worker、finalize、嵌套 lead 无论本参数如何都不进协调。"
             ),
         },
         "playbook": {

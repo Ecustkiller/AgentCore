@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from agentcore.config import settings
 from agentcore.core.errors import ValidationError
+from agentcore.core.logging import get_logger
 from agentcore.db.repositories.simulation import SimulationRepository
 from agentcore.runtime.events import EventSink, EventType, SSEEvent
 from agentcore.simulation.agents.activation import (
@@ -18,9 +19,15 @@ from agentcore.simulation.agents.activation import (
 from agentcore.simulation.agents.memory import apply_tick_memories
 from agentcore.simulation.agents.models import SimPersona
 from agentcore.simulation.agents.reflection import apply_reflections
+from agentcore.simulation.agents.scripted import (
+    drain_scripted_pending,
+    run_scripted_demo_pulse,
+    run_scripted_ticks,
+)
 from agentcore.simulation.agents.social import apply_social_updates
 from agentcore.simulation.agents.tick_batch import TickBatchOptions, run_agent_ticks_batch
 from agentcore.simulation.agents.tick_runner import AgentTickOutcome
+from agentcore.simulation.cost_guards import ensure_under_max_ticks, slice_personas_for_run
 from agentcore.simulation.experiment.manifest import RunManifest, build_run_manifest
 from agentcore.simulation.interaction import (
     InteractionBus,
@@ -43,6 +50,8 @@ from agentcore.simulation.stream_registry import (
     SimulationStreamRegistry,
     default_sim_stream_registry,
 )
+
+logger = get_logger(__name__)
 from agentcore.simulation.types import (
     SimAgentActionPayload,
     SimAgentStatePayload,
@@ -84,11 +93,20 @@ class SimulationService:
         user_id: str,
         scenario: str = "town",
         seed: int = 0,
+        scripted: bool = False,
         manifest: RunManifest | None = None,
     ):
         if manifest is not None:
             scenario = manifest.scenario
             seed = manifest.seed
+
+        # Opt-in scripted: body.scripted | SIMULATION_SCRIPTED | manifest.scripted.
+        # Missing DeepSeek at advance_tick still auto-falls back (see _resolve_tick_mode).
+        want_scripted = (
+            scripted
+            or settings.simulation_scripted
+            or (manifest is not None and manifest.scripted)
+        )
 
         routing: SimModelRoutingConfig | None = None
         config: dict = {}
@@ -104,22 +122,47 @@ class SimulationService:
             if manifest is not None and manifest.model_routing is not None:
                 routing = manifest.model_routing
                 config = {"model_routing": routing.model_dump()}
+            elif want_scripted:
+                logger.info(
+                    "simulation.create_scripted",
+                    reason="no_deepseek_opt_in",
+                    user_id=user_id,
+                )
 
         if manifest is not None:
-            run_manifest = manifest.model_copy(update={"created_at": datetime.now(UTC)})
+            run_manifest = manifest.model_copy(
+                update={
+                    "created_at": datetime.now(UTC),
+                    "scripted": want_scripted or manifest.scripted,
+                }
+            )
         else:
             run_manifest = build_run_manifest(
                 scenario=scenario,
                 seed=seed,
                 model_routing=routing,
+                scripted=want_scripted,
                 created_at=datetime.now(UTC),
             )
+        personas = slice_personas_for_run(
+            tuple(run_manifest.personas) or TOWN_PERSONAS,
+            max_agents=settings.max_agents,
+        )
+        if list(run_manifest.personas) != list(personas):
+            logger.info(
+                "simulation.persona_slice",
+                requested=len(run_manifest.personas) or len(TOWN_PERSONAS),
+                kept=len(personas),
+                max_agents=settings.max_agents,
+            )
+            run_manifest = run_manifest.model_copy(update={"personas": list(personas)})
         config["manifest"] = run_manifest.model_dump(mode="json")
+        if run_manifest.scripted:
+            config["scripted"] = True
 
         run = await self._repo.create_run(
             user_id=user_id, scenario=scenario, seed=seed, config=config
         )
-        personas = tuple(run_manifest.personas) or TOWN_PERSONAS
         world = seed_town_world(personas)
         for persona in personas:
             agent = world.agents[persona.agent_id]
@@ -153,6 +196,7 @@ class SimulationService:
             raise KeyError("run not found")
         if run.status == "paused":
             raise ValidationError("模拟已暂停，请先恢复后再推进 tick")
+        ensure_under_max_ticks(run.current_tick, max_ticks=settings.max_ticks)
         sink = await self._streams.get_or_create(run_id)
         world = await self._load_world(run_id, run.current_tick)
         engine = WorldEngine(world=world, seed=run.seed)
@@ -185,19 +229,7 @@ class SimulationService:
 
         agent_rows = await self._repo.list_agents(run_id)
         personas = [SimPersona.model_validate(row.persona) for row in agent_rows]
-        try:
-            llm, llm_cfg = await build_sim_provider(self._repo._session, user_id)
-        except SimLlmNotConfigured:
-            raise
-        router = SimModelRouter.from_run_config(run.config, fallback=llm_cfg.model)
-        if not (run.config or {}).get("model_routing"):
-            merged = dict(run.config or {})
-            merged.update(router.to_manifest())
-            await self._repo.update_run_config(run_id, merged)
-        text_mode = resolve_text_mode(llm_cfg.base_url, override=self._text_mode)
-        turn_model = router.model_for_decision(SimDecisionKind.ROUTINE_TICK)
-        interaction_model = router.model_for_decision(SimDecisionKind.INTERACTION)
-        reflection_model = router.model_for_decision(SimDecisionKind.REFLECTION)
+        use_scripted, llm, llm_cfg = await self._resolve_tick_mode(run, user_id=user_id)
 
         self._tick_db_lock = asyncio.Lock()
         metrics: TickMetrics | None = None
@@ -217,58 +249,113 @@ class SimulationService:
                 state = world.agents[persona.agent_id].to_state()
                 await self._emit_agent_state(sink, run_id, tick, state)
 
-            if activation.activated:
-                batch = await run_agent_ticks_batch(
-                    world=world,
-                    personas=activation.activated,
-                    llm=llm,
-                    run_id=run_id,
-                    text_mode=text_mode,
-                    turn_model=turn_model,
-                    options=TickBatchOptions(
-                        max_parallel=settings.max_parallel_agents,
-                        timeout_seconds=settings.agent_tick_timeout_seconds,
-                    ),
-                    on_agent_done=_on_agent_done,
+            if use_scripted:
+                if activation.activated:
+                    outcomes = await run_scripted_ticks(
+                        world=world, personas=list(activation.activated)
+                    )
+                    for persona, outcome in zip(
+                        activation.activated, outcomes, strict=True
+                    ):
+                        await _on_agent_done(persona, outcome)
+                interaction_bus.collect_from_outcomes(world, outcomes)
+                # Scripted path has no LLM protocols — emit deterministic demo
+                # pulses (conversation/trade/vote + occasional preset world_event),
+                # then drain announcement-queued votes so injects are not dropped.
+                demo_interactions, demo_world_events = await run_scripted_demo_pulse(world)
+                interaction_results = list(demo_interactions)
+                if demo_world_events:
+                    event_scheduler.apply_events(
+                        world, demo_world_events, interaction_bus=interaction_bus
+                    )
+                    for world_event in demo_world_events:
+                        await self._emit_world_event(
+                            sink, run_id, tick, world_event, world.modifiers
+                        )
+                drained = await drain_scripted_pending(world, interaction_bus)
+                interaction_results.extend(drained)
+                for result in interaction_results:
+                    await self._emit_interaction(sink, run_id, tick, result)
+                    state_ids = {result.initiator_id}
+                    if result.target_id:
+                        state_ids.add(result.target_id)
+                    for agent_id in state_ids:
+                        agent = world.agents.get(agent_id)
+                        if agent is not None:
+                            await self._emit_agent_state(
+                                sink, run_id, tick, agent.to_state()
+                            )
+                apply_social_updates(world, outcomes)
+                apply_tick_memories(world, outcomes, activation.skipped)
+            else:
+                assert llm is not None and llm_cfg is not None
+                router = SimModelRouter.from_run_config(
+                    run.config, fallback=llm_cfg.model
                 )
-                outcomes = list(batch.outcomes)
+                if not (run.config or {}).get("model_routing"):
+                    merged = dict(run.config or {})
+                    merged.update(router.to_manifest())
+                    await self._repo.update_run_config(run_id, merged)
+                text_mode = resolve_text_mode(llm_cfg.base_url, override=self._text_mode)
+                turn_model = router.model_for_decision(SimDecisionKind.ROUTINE_TICK)
+                interaction_model = router.model_for_decision(SimDecisionKind.INTERACTION)
+                reflection_model = router.model_for_decision(SimDecisionKind.REFLECTION)
 
-            interaction_bus.collect_from_outcomes(world, outcomes)
+                if activation.activated:
+                    batch = await run_agent_ticks_batch(
+                        world=world,
+                        personas=activation.activated,
+                        llm=llm,
+                        run_id=run_id,
+                        text_mode=text_mode,
+                        turn_model=turn_model,
+                        options=TickBatchOptions(
+                            max_parallel=settings.max_parallel_agents,
+                            timeout_seconds=settings.agent_tick_timeout_seconds,
+                        ),
+                        on_agent_done=_on_agent_done,
+                    )
+                    outcomes = list(batch.outcomes)
 
-            async def _on_interaction_done(result) -> None:
-                await self._emit_interaction(sink, run_id, tick, result)
-                state_ids = {result.initiator_id}
-                if result.target_id:
-                    state_ids.add(result.target_id)
-                for agent_id in state_ids:
-                    agent = world.agents.get(agent_id)
-                    if agent is not None:
-                        await self._emit_agent_state(sink, run_id, tick, agent.to_state())
+                interaction_bus.collect_from_outcomes(world, outcomes)
 
-            interaction_results = await interaction_bus.process_tick(
-                InteractionTickContext(
-                    world=world,
-                    personas=personas,
-                    llm=llm,
-                    model=interaction_model,
-                    run_id=run_id,
+                async def _on_interaction_done(result) -> None:
+                    await self._emit_interaction(sink, run_id, tick, result)
+                    state_ids = {result.initiator_id}
+                    if result.target_id:
+                        state_ids.add(result.target_id)
+                    for agent_id in state_ids:
+                        agent = world.agents.get(agent_id)
+                        if agent is not None:
+                            await self._emit_agent_state(
+                                sink, run_id, tick, agent.to_state()
+                            )
+
+                interaction_results = await interaction_bus.process_tick(
+                    InteractionTickContext(
+                        world=world,
+                        personas=personas,
+                        llm=llm,
+                        model=interaction_model,
+                        run_id=run_id,
+                        tick=tick,
+                        on_result=_on_interaction_done,
+                    )
+                )
+
+                apply_social_updates(world, outcomes)
+                apply_tick_memories(world, outcomes, activation.skipped)
+                await apply_reflections(
                     tick=tick,
-                    on_result=_on_interaction_done,
+                    agents=[
+                        (p, world.agents[p.agent_id])
+                        for p in personas
+                        if p.agent_id in world.agents
+                    ],
+                    llm=llm,
+                    model=reflection_model,
                 )
-            )
 
-            apply_social_updates(world, outcomes)
-            apply_tick_memories(world, outcomes, activation.skipped)
-            await apply_reflections(
-                tick=tick,
-                agents=[
-                    (p, world.agents[p.agent_id])
-                    for p in personas
-                    if p.agent_id in world.agents
-                ],
-                llm=llm,
-                model=reflection_model,
-            )
             metrics = MetricsAggregator().aggregate(
                 world, tick_interactions=interaction_results
             )
@@ -283,6 +370,45 @@ class SimulationService:
             sink, run_id, tick, hour, len(personas), metrics=metrics
         )
         return final
+
+    async def _resolve_tick_mode(
+        self, run, *, user_id: str
+    ) -> tuple[bool, object | None, object | None]:
+        """Decide LLM vs scripted for this tick.
+
+        Scripted when DeepSeek cannot be resolved **or** the run/env opts in
+        (``SIMULATION_SCRIPTED`` / create body ``scripted`` / ``manifest.scripted``).
+        Default production path (no opt-in + DeepSeek available) still uses LLM.
+        """
+        opt_in = self._scripted_opt_in(run.config)
+        try:
+            llm, llm_cfg = await build_sim_provider(self._repo._session, user_id)
+        except SimLlmNotConfigured:
+            logger.warning(
+                "simulation.scripted_fallback",
+                run_id=getattr(run, "id", None),
+                reason="no_deepseek",
+                opt_in=opt_in,
+            )
+            return True, None, None
+        if opt_in:
+            logger.info(
+                "simulation.scripted_opt_in",
+                run_id=getattr(run, "id", None),
+                reason="explicit",
+            )
+            return True, None, None
+        return False, llm, llm_cfg
+
+    @staticmethod
+    def _scripted_opt_in(run_config: dict | None) -> bool:
+        if settings.simulation_scripted:
+            return True
+        cfg = run_config or {}
+        if cfg.get("scripted"):
+            return True
+        manifest = cfg.get("manifest") or {}
+        return bool(manifest.get("scripted"))
 
     async def _load_world(self, run_id: str, current_tick: int):
         last_tick = await self._repo.get_tick(run_id, current_tick) if current_tick else None

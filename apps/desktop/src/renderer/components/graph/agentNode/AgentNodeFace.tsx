@@ -26,7 +26,7 @@ import {
   statusFaceLabel,
 } from "./shared";
 
-/** Dependency layout: full card with task line, artifact chips, status line. */
+/** Full card with task line, artifact chips, status line. */
 export function AgentNodeCardFace({
   d,
   p,
@@ -73,6 +73,14 @@ export function AgentNodeCardFace({
         >
           <PencilLine size={10} className="shrink-0" />
           {p.revisionFace}
+        </span>
+      )}
+      {p.handoffFace && !p.revisionFace && (
+        <span
+          className={`absolute -right-1.5 -top-1.5 z-10 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-medium shadow-sm ring-2 ring-card ${graphBadgeMuted}`}
+          title="已由新队员接手"
+        >
+          {p.handoffFace}
         </span>
       )}
       <AgentNodeHeader
@@ -123,72 +131,6 @@ export function AgentNodeCardFace({
             </>
           )}
         </button>
-      )}
-    </div>
-  );
-}
-
-/** Timeline layout: compact bar on the real time axis; task one-liner, no artifact chips. */
-export function AgentNodeTimelineFace({
-  d,
-  p,
-  flashColor,
-  flashing,
-}: {
-  d: AgentNodeData;
-  p: AgentNodePresentation;
-  flashColor: string;
-  flashing: boolean;
-}) {
-  const identityColor = agentColorVar(d.role);
-  const identityGlyph = agentGlyph(d.role);
-  const isRunning = d.status === "running";
-
-  return (
-    // biome-ignore lint/a11y/useSemanticElements: graph card hosts nested interactive chrome
-    <div
-      role="button"
-      tabIndex={0}
-      aria-label={p.ariaLabel}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          d.onActivate?.();
-        }
-      }}
-      style={
-        {
-          "--graph-flash-color": flashColor,
-          width: p.cardWidth,
-        } as React.CSSProperties
-      }
-      className={`relative flex h-full min-w-0 cursor-pointer flex-col justify-center rounded-xl border px-3 py-2 text-left shadow-sm outline-none ring-2 ${p.style.bg} ${p.style.ring} ${isRunning ? "animate-pulse" : ""} ${flashing ? "animate-graph-node-flash" : ""} ${
-        p.highlighted
-          ? "outline outline-2 outline-offset-2 outline-primary"
-          : "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60"
-      }`}
-    >
-      {p.revisionFace && (
-        <span
-          className={`absolute -right-1.5 -top-1.5 z-10 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-medium shadow-sm ring-2 ring-card ${graphBadgeMuted}`}
-          title={`热修修订 ${p.revisionFace}`}
-        >
-          <PencilLine size={10} className="shrink-0" />
-          {p.revisionFace}
-        </span>
-      )}
-      <AgentNodeHeader
-        d={d}
-        p={p}
-        identityColor={identityColor}
-        identityGlyph={identityGlyph}
-      />
-      <AgentNodeStatusLine d={d} p={p} />
-      <AgentNodeActivity d={d} p={p} showIdleTask={false} />
-      {d.task && (
-        <p className="mt-1 line-clamp-1 text-xs leading-snug text-muted-foreground/70">
-          {d.task}
-        </p>
       )}
     </div>
   );
@@ -265,11 +207,23 @@ function AgentNodeHeader({
               <span className={graphBadgePrimary}>
                 <ArrowUp size={10} />
                 待你拍板
+                {d.escalationKind && d.escalationKind !== "normal"
+                  ? ` · ${d.escalationKind === "scope" ? "职责偏离" : "缺输入"}`
+                  : ""}
                 {(d.escalationPending ?? 0) > 1
                   ? ` ${d.escalationPending}`
                   : ""}
               </span>
             )}
+            {(d.escalationPending ?? 0) === 0 &&
+              (d.escalationRaised ?? 0) > 0 &&
+              d.escalationKind &&
+              d.escalationKind !== "normal" && (
+                <span className={graphBadgeMutedPlain}>
+                  <ArrowUp size={10} />
+                  {d.escalationKind === "scope" ? "职责偏离" : "缺输入"}
+                </span>
+              )}
           </p>
         )}
       </div>

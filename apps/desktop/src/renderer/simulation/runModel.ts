@@ -2,8 +2,6 @@ import type { components } from "@agentcore/contract-rest-types";
 
 export type SimulationRunSummaryWire =
   components["schemas"]["SimulationRunSummary"];
-export type AdvanceTickResponseWire =
-  components["schemas"]["AdvanceTickResponse"];
 export type CreateSimulationRunRequestWire =
   components["schemas"]["CreateSimulationRunRequest"];
 

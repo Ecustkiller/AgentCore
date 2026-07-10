@@ -5,10 +5,11 @@ import {
   type Edge,
   EdgeLabelRenderer,
   type EdgeProps,
+  getBezierPath,
   getSmoothStepPath,
 } from "@xyflow/react";
 import { useContext } from "react";
-import { GraphHoverContext } from "./GraphView";
+import { GraphHoverContext } from "./graphHover";
 
 /**
  * Real information handoff carried on a dependency edge (前端UX设计.md §五 信息流边):
@@ -27,11 +28,12 @@ export interface EdgeHandoff {
 
 type StepEdgeData = Edge<{
   animated: boolean;
-  kind?: "dep" | "delegate" | "revision" | "inject";
+  kind?: "dep" | "delegate" | "revision" | "inject" | "handoff";
   handoff?: EdgeHandoff | null;
   injectHighlight?: boolean;
   injectDimmed?: boolean;
   handleDirection?: "horizontal" | "vertical";
+  pathType?: "smoothstep" | "bezier";
   sourcePortIndex?: number;
   sourcePortTotal?: number;
   targetPortIndex?: number;
@@ -102,19 +104,26 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
   const adjTargetX = horizontal ? targetX : targetX + tgtOffset;
   const adjTargetY = horizontal ? targetY + tgtOffset : targetY;
 
-  // Orthogonal rounded-elbow path (mind-map / org-chart look): a horizontal stub
-  // out of the node, a rounded turn, the vertical run, then a rounded turn back
-  // into the target — far tidier than bezier when many branches fan in/out of a
-  // left-right layout. Particles still ride this path unchanged.
-  const [edgePath, labelX, labelY] = getSmoothStepPath({
-    sourceX: adjSourceX,
-    sourceY: adjSourceY,
-    targetX: adjTargetX,
-    targetY: adjTargetY,
-    sourcePosition,
-    targetPosition,
-    borderRadius: 10,
-  });
+  // Tree layout uses organic bezier; leftright keeps orthogonal smoothstep.
+  const useBezier = data?.pathType === "bezier";
+  const [edgePath, labelX, labelY] = useBezier
+    ? getBezierPath({
+        sourceX: adjSourceX,
+        sourceY: adjSourceY,
+        targetX: adjTargetX,
+        targetY: adjTargetY,
+        sourcePosition,
+        targetPosition,
+      })
+    : getSmoothStepPath({
+        sourceX: adjSourceX,
+        sourceY: adjSourceY,
+        targetX: adjTargetX,
+        targetY: adjTargetY,
+        sourcePosition,
+        targetPosition,
+        borderRadius: 10,
+      });
 
   const isAnimated = data?.animated ?? false;
   // 信息流边 (1A): surface a small label only on a LOSSY handoff — a summarized /
@@ -131,14 +140,17 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
   // dependency / bookend flow.
   const isDelegate = data?.kind === "delegate";
   const isRevision = data?.kind === "revision";
+  const isHandoff = data?.kind === "handoff";
   const isInject = data?.kind === "inject";
   const injectHighlight = data?.injectHighlight === true;
   const injectDimmed = data?.injectDimmed === true;
 
-  const hoveredNodeId = useContext(GraphHoverContext);
+  const { hoveredNodeId, keepBrightIds } = useContext(GraphHoverContext);
+  // Bright when both ends sit on the hover path (full upstream/downstream set).
   const isHoverRelated =
-    hoveredNodeId != null &&
-    (props.source === hoveredNodeId || props.target === hoveredNodeId);
+    keepBrightIds != null &&
+    keepBrightIds.has(props.source) &&
+    keepBrightIds.has(props.target);
   const hoverActive = hoveredNodeId != null;
 
   let strokeOpacity: number;
@@ -157,7 +169,7 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
     strokeWidth = 2.5;
     strokeColor = "var(--primary)";
   } else if (!hoverActive) {
-    strokeOpacity = isDelegate || isRevision || isInject ? 0.35 : 0.4;
+    strokeOpacity = isDelegate || isRevision || isHandoff || isInject ? 0.35 : 0.4;
     strokeWidth = 1.5;
     strokeColor = "var(--muted-foreground)";
   } else if (isHoverRelated) {
@@ -172,6 +184,7 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
 
   let strokeDasharray: string | undefined;
   if (isRevision) strokeDasharray = "2 4";
+  else if (isHandoff) strokeDasharray = "3 3";
   else if (isDelegate) strokeDasharray = "5 4";
   else if (isInject) strokeDasharray = "6 4";
 
@@ -198,6 +211,19 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
             />
           </circle>
         ))}
+      {isHandoff && (
+        <EdgeLabelRenderer>
+          <div
+            className="nodrag nopan pointer-events-none absolute flex items-center gap-1 rounded-full border border-border bg-card px-1.5 py-0.5 text-xs text-muted-foreground shadow-sm"
+            style={{
+              transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+            }}
+            title="已由新队员接手"
+          >
+            接替
+          </div>
+        </EdgeLabelRenderer>
+      )}
       {showLabel && handoff && (
         <EdgeLabelRenderer>
           <div

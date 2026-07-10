@@ -21,15 +21,18 @@ from agentcore.runtime.events import (
     escalation_raised,
     escalation_required,
     escalation_resolved,
+    run_cancelled,
     run_completed,
     run_context,
     run_failed,
+    run_intake,
     run_started,
     team_note_posted,
 )
 from agentcore.runtime.facts import record_turn_fact
 from agentcore.runtime.interaction import InteractionKind
 from agentcore.runtime.ports import ClientRequestBridge
+from agentcore.runtime.routing import assess_intake
 from agentcore.runtime.runs.constants import (
     AMEND_NOTE_TOOL_NAME,
     DEFAULT_CONTRACT_RETRIES,
@@ -65,6 +68,7 @@ from agentcore.runtime.runs.executor_shared import (
 from agentcore.runtime.runs.notewall import NOTE_NUDGE_TEXT, NoteWall, format_notes_for_injection
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.scheduler import RunExecutor
+from agentcore.runtime.runs.salvage import cancelled_state_from_salvage, try_salvage_session
 from agentcore.runtime.runs.serialize import (
     debrief_from_transcript,
     escalations_from_transcript,
@@ -209,11 +213,44 @@ def build_agent_executor(
             return None
 
         async def _request(
-            question: str, assumption: str, questions: list[dict[str, Any]]
+            question: str,
+            assumption: str,
+            questions: list[dict[str, Any]],
+            kind: str = "normal",
+            awaiting: str = "user",
         ) -> EscalationOutcome:
             # Cap: count this conversation's already-parked blocking escalates. The check
             # and the suspend's create() run with no await between them (single loop), so
             # the count can't race (设计 §4.7). Over cap ⇒ degrade (proceed on assumption).
+            who = awaiting if awaiting in ("user", "ceo") else "user"
+            awaiting_ceo = who == "ceo"
+
+            # D1: after ask_user soft-stop cancelled a parked worker, CEO may have
+            # stashed a resolve_escalation answer — pick it up without re-suspending.
+            if awaiting_ceo:
+                from agentcore.runtime.coordination.session import active_coordination
+
+                session = active_coordination(base_tool_context.execution_id)
+                if session is not None:
+                    stashed = session.take_stashed_resolution(run_id)
+                    if stashed is not None:
+                        answer = str(stashed.get("answer") or "").strip()
+                        via_user = bool(stashed.get("via_user"))
+                        esc_id = str(stashed.get("escalation_id") or new_id())
+                        resolutions[question] = {"status": "resolved", "answer": answer}
+                        sink.emit(
+                            escalation_resolved(
+                                run_id,
+                                agent_id,
+                                escalation_id=esc_id,
+                                status="resolved",
+                                answer=answer,
+                                arbitrated_by="ceo",
+                                via_user=via_user,
+                            )
+                        )
+                        return EscalationOutcome(status="resolved", answer=answer)
+
             parked = sum(
                 1
                 for r in bridge.list_pending(conversation_id)
@@ -223,6 +260,37 @@ def build_agent_executor(
                 logger.info("worker.escalate.cap_degraded", run_id=run_id, parked=parked)
                 return EscalationOutcome(status="degraded")
             escalation_id = new_id()
+            esc_kind = kind if kind in ("normal", "scope", "dep") else "normal"
+
+            if awaiting_ceo:
+                from agentcore.runtime.coordination.bridge import (
+                    post_escalation_to_coordination,
+                )
+                from agentcore.runtime.coordination.session import active_coordination
+
+                session = active_coordination(base_tool_context.execution_id)
+                if session is not None and session.active:
+                    session.register_arbitration(
+                        run_id,
+                        escalation_id=escalation_id,
+                        conversation_id=conversation_id,
+                        question=question,
+                        assumption=assumption,
+                        kind=esc_kind,
+                    )
+                    post_escalation_to_coordination(
+                        run_id=run_id,
+                        role="",
+                        kind=esc_kind,
+                        question=question,
+                        assumption=assumption,
+                        blocking=True,
+                        source="blocking_arbitrate",
+                        execution_id=base_tool_context.execution_id,
+                        escalation_id=escalation_id,
+                    )
+
+            via_user = False
             try:
                 result = await bridge.suspend(
                     escalation_id,
@@ -235,6 +303,8 @@ def build_agent_executor(
                         "question": question,
                         "assumption": assumption,
                         "questions": questions,
+                        "kind": esc_kind,
+                        "awaiting": who,
                     },
                     timeout=escalation_timeout,
                     on_suspended=lambda: sink.emit(
@@ -245,11 +315,17 @@ def build_agent_executor(
                             question=question,
                             assumption=assumption,
                             questions=questions,
+                            kind=esc_kind,
+                            awaiting=who,
                         )
                     ),
                 )
             except TimeoutError:
                 status, answer = "timeout", ""
+            except asyncio.CancelledError:
+                # ask_user soft-stop cancels the drive — keep journaled pending_arbitrations
+                # so resume + resolve_escalation can stash/settle for a re-armed worker.
+                raise
             else:
                 # The resolve body is {answer} or {use_assumption}; 按假设继续 == an early
                 # timeout (same disposition, the worker falls back to its assumption).
@@ -257,8 +333,15 @@ def build_agent_executor(
                     status, answer = "timeout", ""
                 elif isinstance(result, dict):
                     status, answer = "resolved", str(result.get("answer") or "").strip()
+                    via_user = bool(result.get("via_user"))
                 else:
                     status, answer = "resolved", str(result or "").strip()
+            if awaiting_ceo:
+                from agentcore.runtime.coordination.session import active_coordination
+
+                session = active_coordination(base_tool_context.execution_id)
+                if session is not None:
+                    session.clear_arbitration(run_id)
             resolutions[question] = {"status": status, "answer": answer}
             sink.emit(
                 escalation_resolved(
@@ -267,6 +350,8 @@ def build_agent_executor(
                     escalation_id=escalation_id,
                     status=status,
                     answer=answer,
+                    arbitrated_by="ceo" if awaiting_ceo else "user",
+                    via_user=via_user if awaiting_ceo else None,
                 )
             )
             return EscalationOutcome(status=status, answer=answer if status == "resolved" else None)
@@ -282,6 +367,7 @@ def build_agent_executor(
                 agent_id,
                 parent_run_id=spec.parent_run_id,
                 kind=spec.kind,
+                replaces_run_id=spec.replaces_run_id,
             )
         )
         start = time.monotonic()
@@ -296,12 +382,22 @@ def build_agent_executor(
         run_rounds = 0
         inflight: list[TokenUsage] = []
         priced_model: str | None = None
+        # Hoisted so a mid-flight CancelledError can salvage partial transcript (run_redirect 热续写).
+        messages: list[LLMMessage] = []
+        # Live draft chunks (run_output_delta) — may exist before the final assistant
+        # turn is appended to ``messages``; folded into salvage on redirect cancel.
+        streamed_content: list[str] = []
         # 阻塞式求决策: this worker's blocking-escalate resolutions, keyed by question, so the
         # transcript harvest below can fold the user's answer / timeout disposition into
         # ``RunState.escalations`` for CEO synthesis — driven by the structured channel below,
         # NOT by re-parsing the tool result prose (防补丁绊线, 设计 §4.7). A worker is
         # sequential, so escalates land here in call order, one at a time.
         resolutions: dict[str, dict[str, Any]] = {}
+        # Escalation Gate (routing Phase 1): scheme-layer signals collected during react
+        # rounds, merged into RunState.escalations alongside transcript-harvested escalate
+        # tool calls.
+        gate_escalations: list[dict[str, Any]] = []
+        intake_payload: dict[str, Any] | None = None
         # 受监督子计划 B: a lead's nested-delegation handle (delegate + replan + dispose),
         # hoisted so the finally can fold a sub-plan the lead yielded-but-never-resumed back
         # into the ledger before the parent absorbs this child (堵漏账). Stays None for a leaf
@@ -326,7 +422,7 @@ def build_agent_executor(
                 # run's SSE stream. The executor owns event shape (引擎纯化) — escalate just
                 # hands it the (question, assumption, blocking) triple. run_id/agent_id are
                 # bound here so the team UI attributes the escalation to the right node.
-                on_escalate=lambda question, assumption, blocking, _rid=spec.run_id, _aid=agent_id: (  # noqa: E501
+                on_escalate=lambda question, assumption, blocking, kind="normal", _rid=spec.run_id, _aid=agent_id: (  # noqa: E501
                     sink.emit(
                         escalation_raised(
                             _rid,
@@ -334,6 +430,7 @@ def build_agent_executor(
                             question=question,
                             assumption=assumption,
                             blocking=blocking,
+                            kind=kind,
                         )
                     )
                 ),
@@ -470,7 +567,7 @@ def build_agent_executor(
             # received_blocks captures the SAME ContextBlocks the opening was rendered
             # from (单一源), so the run_context event ships exactly what the LLM was fed.
             received_blocks: list[ContextBlock] = []
-            messages = _build_messages(
+            messages[:] = _build_messages(
                 plan,
                 spec,
                 completed,
@@ -486,6 +583,36 @@ def build_agent_executor(
             # LLM react loop) so the frontend's run detail lights up its「收到的上下文」as
             # soon as the worker starts thinking. Bodies capped + journaled (see run_context).
             sink.emit(run_context(spec.run_id, agent_id, _context_block_payloads(received_blocks)))
+
+            # Worker 内部路由 Phase 1 · Intake：轻量计划头（复杂度 / 策略 / token 预算）。
+            # 挂在执行上下文（RunState.intake），经 run_intake 事件发射；不产出逐步计划。
+            intake_result = assess_intake(
+                task=spec.task,
+                role=spec.role,
+                objective=spec.objective,
+                tools=spec.tools,
+            )
+            intake_payload = intake_result.to_event_payload()
+            sink.emit(
+                run_intake(
+                    spec.run_id,
+                    agent_id,
+                    complexity=intake_result.complexity.value,
+                    strategy=intake_result.strategy.value,
+                    token_budget=intake_result.token_budget,
+                    rationale=intake_result.rationale,
+                    signals=intake_result.signals,
+                )
+            )
+            # Phase 2 · Sequential Split：父 Worker 可分裂；预算来自 Intake + profile。
+            split_context: dict[str, Any] = {
+                "can_split": True,
+                "token_budget": intake_result.token_budget,
+                "max_steps": profile.max_rounds,
+                "task": spec.task,
+                "run_id": spec.run_id,
+                "agent_id": agent_id,
+            }
 
             # 团队便签墙 推增量 (§2.2 通): pull the notes siblings posted since this worker last
             # looked and hand them to react_loop as one user message before each of its NEXT
@@ -515,6 +642,7 @@ def build_agent_executor(
 
             attempts = 1 + min(DEFAULT_CONTRACT_RETRIES, MAX_CONTRACT_RETRIES)
             for attempt in range(attempts):
+                streamed_content.clear()
                 content, reasoning, round_usage, round_rounds = await _react_and_capture(
                     messages,
                     llm=llm,
@@ -530,6 +658,9 @@ def build_agent_executor(
                     approval_gate=approval_gate,
                     usage_sink=inflight,
                     on_round_begin=_pull_notes,
+                    streamed_content=streamed_content,
+                    gate_escalation_sink=gate_escalations,
+                    split_context=split_context,
                 )
                 run_usage = run_usage + round_usage
                 run_rounds += round_rounds
@@ -574,6 +705,13 @@ def build_agent_executor(
                 if settled is not None:
                     esc["status"] = settled["status"]
                     esc["answer"] = settled["answer"]
+            # Merge Escalation Gate scheme-layer signals (dedupe by question).
+            seen_questions = {e.get("question", "") for e in escalations}
+            for gate_esc in gate_escalations:
+                q = gate_esc.get("question", "")
+                if q and q not in seen_questions:
+                    escalations.append(gate_esc)
+                    seen_questions.add(q)
             # 完工交接简报: harvest the worker's structured brief from its ``handoff`` tool call
             # (best-effort; None when it finished without one) so downstream dep injection / CEO
             # synthesis read the author's own 结论 + 建议下一步 instead of re-deriving them from
@@ -602,6 +740,7 @@ def build_agent_executor(
                     cost=cost,
                     transcript=messages,
                     received_context=received_blocks,
+                    intake=intake_payload,
                 )
             # The worker's terminal RunState is journaled at the ``execute`` choke point
             # below (run_final_fact — covers COMPLETED *and* FAILED in one place), so resume
@@ -642,7 +781,36 @@ def build_agent_executor(
                 cost=cost,
                 transcript=messages,
                 received_context=received_blocks,
+                intake=intake_payload,
             )
+        except asyncio.CancelledError as e:
+            # Dual cancel semantics: redirect = salvage + return CANCELLED (wave absorbs);
+            # stop (整轮) = emit run_cancelled then re-raise so the turn abort propagates.
+            cancel_reason = (
+                "redirect"
+                if e.args and str(e.args[0]) == "redirect"
+                else "stop"
+            )
+            sink.emit(
+                run_cancelled(spec.run_id, agent_id, reason=cancel_reason)
+            )
+            if cancel_reason == "redirect":
+                # Fold live streamed draft into messages when the ReAct pass was cut
+                # before the final assistant turn was appended (用户已看见的一半产出).
+                draft = "".join(streamed_content).strip()
+                salvage_msgs = list(messages)
+                if draft and not any(m.role in ("assistant", "tool") for m in salvage_msgs):
+                    salvage_msgs.append(LLMMessage(role="assistant", content=draft))
+                session = try_salvage_session(spec=spec, messages=salvage_msgs)
+                logger.info(
+                    "run.redirect_cancelled",
+                    run_id=spec.run_id,
+                    salvage=session is not None,
+                    transcript_len=len(session.transcript) if session else 0,
+                    streamed_chars=len(draft),
+                )
+                return cancelled_state_from_salvage(session, error="redirected")
+            raise
         except Exception as e:  # noqa: BLE001 — surface any run failure to UI/state
             duration_ms = int((time.monotonic() - start) * 1000)
             # Bill the rounds that completed before the failure: finished attempts are

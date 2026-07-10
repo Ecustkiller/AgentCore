@@ -29,6 +29,7 @@ release/
 apps/desktop/shoot-out/
 apps/desktop/shoot-out-manual/
 apps/desktop/shoot-out-whiteboard/
+apps/desktop/shoot-out-ask-commence/
 # pnpm smoke:webapp 截图（同上：web 冒烟产物，不入仓 / 不打包）
 apps/desktop/smoke-out/
 # web 客户端构建产物（渲染层跑浏览器，形态 A）——由 deploy:web / deploy-web.yml 的
@@ -40,8 +41,16 @@ apps/desktop/shoot-fix/
 apps/desktop/shoot-room/
 apps/desktop/e2e-shots/
 apps/desktop/.lint-out.txt
-# UE AgentTown 截图自检产物（pnpm town:shoot）
+# UE AgentTown 截图自检产物（pnpm town:ue:shoot）
 apps/town/shoot-out/
+# Unity AgentTown player builds（Windows / WebGL）
+apps/town/Builds/
+# AgentTown 3D 资产（CC0，vendored）：源 mesh/纹理 + Import 生成的 prefab/catalog 连 .meta 入库，
+# clone / CI 即得即用，无需本地 sync 或 Editor 手动 Import。来源见 Assets/TownAssets 内 README/License。
+# packages/town-assets：除 README 外均为大二进制（sync 产物）
+packages/town-assets/**
+!packages/town-assets/README.md
+!packages/town-assets/.gitkeep
 # website 预览自检截图
 apps/website/.shots/
 # 内置 Python 运行时（sidecar 打包产物，由 apps/desktop/scripts/bundle-sidecar.mjs 生成）

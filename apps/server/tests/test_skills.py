@@ -185,6 +185,7 @@ def test_team_orchestration_skill_teaches_delegate_knobs():
     assert "fast" in body and "strong" in body
     assert "deliverable" in body
     assert "finalize" in body
+    assert "coordinate" in body and "coordinate=false" in body
     assert "depends_on" in body and "同一层" in body
     assert "嵌套委派" in body and "大模块" in body
 

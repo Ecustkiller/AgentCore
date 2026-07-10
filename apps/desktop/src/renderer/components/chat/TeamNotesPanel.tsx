@@ -1,6 +1,7 @@
 import { agentColorVar, agentGlyph } from "@/lib/agentIdentity";
 import type { TeamNote } from "@/stores/execution";
-import { StickyNote } from "lucide-react";
+import { ChevronDown, ChevronRight, StickyNote } from "lucide-react";
+import { useState } from "react";
 
 /** 团队便签墙 (§2.2 通) note kind → 中文 label + tone. `decision` (我定了) is a choice others must
  * depend on (an interface / field name / format / naming); `heads_up` (提个醒) is a pitfall /
@@ -24,6 +25,17 @@ const NOTE_STATUS_META: Record<string, { label: string; className: string }> = {
   voided: { label: "已作废", className: NOTE_BADGE_GRAY },
 };
 
+export interface TeamNotesPanelProps {
+  notes: TeamNote[];
+  /**
+   * Canvas compact wall: tighter padding, optional collapse. Chat keeps the
+   * always-open section (default).
+   */
+  compact?: boolean;
+  /** When set, the wall is a toggle; omit for chat's always-visible list. */
+  defaultExpanded?: boolean;
+}
+
 /**
  * 团队便签墙 (§2.2 通) — the in-chat「团队便签」panel: the one-line decisions / heads-ups workers
  * broadcast to their CONCURRENT siblings via `post_note` WHILE they worked (`team_note_posted` →
@@ -32,36 +44,125 @@ const NOTE_STATUS_META: Record<string, { label: string; className: string }> = {
  * fact shown in ONE place, not a conversation. Each note is fire-and-forget (贴事实·不要求回应),
  * shown with its author (谁贴的) and kind (我定了 / 提个醒), in post order. Renders nothing for a
  * turn that posted no notes (the common case), so it is pure addition over today's behaviour.
+ *
+ * Canvas reuses the same rows / labels (`compact` + `defaultExpanded`) under the focused turn DAG;
+ * collapsed summaries only show a「便签 N」chip (see TurnSummaryNode).
  */
-export function TeamNotesPanel({ notes }: { notes: TeamNote[] }) {
+export function TeamNotesPanel({
+  notes,
+  compact = false,
+  defaultExpanded,
+}: TeamNotesPanelProps) {
+  const collapsible = defaultExpanded !== undefined;
+  const [expanded, setExpanded] = useState(defaultExpanded ?? true);
+
   if (notes.length === 0) return null;
+
+  if (!collapsible) {
+    return (
+      <section
+        className={
+          compact
+            ? "border-t border-border px-2.5 py-2"
+            : "border-t border-border px-3 py-2.5"
+        }
+      >
+        <NotesHeader count={notes.length} compact={compact} />
+        <NotesList notes={notes} compact={compact} />
+      </section>
+    );
+  }
+
   return (
-    <section className="border-t border-border px-3 py-2.5">
-      <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+    <section
+      className={
+        compact
+          ? "border-t border-border px-2.5 py-1.5"
+          : "border-t border-border px-3 py-2"
+      }
+    >
+      <button
+        type="button"
+        className="flex w-full items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+        onClick={(e) => {
+          e.stopPropagation();
+          setExpanded((v) => !v);
+        }}
+        aria-expanded={expanded}
+      >
+        {expanded ? (
+          <ChevronDown size={14} className="shrink-0" />
+        ) : (
+          <ChevronRight size={14} className="shrink-0" />
+        )}
         <StickyNote size={14} className="shrink-0" />
-        <span className="flex-1">团队便签</span>
+        <span className="flex-1 text-left">团队便签</span>
         <span className="tabular-nums">{notes.length}</span>
-      </div>
-      <ul className="space-y-1.5">
-        {notes.map((note) => (
-          <NoteRow key={note.noteId} note={note} />
-        ))}
-      </ul>
+      </button>
+      {expanded && <NotesList notes={notes} compact={compact} className="mt-1.5" />}
     </section>
+  );
+}
+
+function NotesHeader({
+  count,
+  compact,
+}: {
+  count: number;
+  compact: boolean;
+}) {
+  return (
+    <div
+      className={`mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground ${
+        compact ? "mb-1.5" : ""
+      }`}
+    >
+      <StickyNote size={14} className="shrink-0" />
+      <span className="flex-1">团队便签</span>
+      <span className="tabular-nums">{count}</span>
+    </div>
+  );
+}
+
+function NotesList({
+  notes,
+  compact,
+  className = "",
+}: {
+  notes: TeamNote[];
+  compact: boolean;
+  className?: string;
+}) {
+  return (
+    <ul
+      className={`space-y-1.5 ${compact ? "max-h-36 space-y-1 overflow-y-auto" : ""} ${className}`}
+    >
+      {notes.map((note) => (
+        <NoteRow key={note.noteId} note={note} compact={compact} />
+      ))}
+    </ul>
   );
 }
 
 /** One sticky note: the author's identity disc + role, a kind badge (我定了 / 提个醒), and the
  *  one-line broadcast text. Identity color is derived from the role (角色身份, agentIdentity) so a
  *  note reads as「同一拨人」with its graph node. */
-function NoteRow({ note }: { note: TeamNote }) {
+function NoteRow({
+  note,
+  compact,
+}: {
+  note: TeamNote;
+  compact: boolean;
+}) {
   const kind = NOTE_KIND_META[note.kind] ?? NOTE_KIND_META.heads_up;
   const author = note.role || note.agentId;
   const status = NOTE_STATUS_META[note.status];
   const stale = status != null;
   return (
     <li
-      className={`flex items-start gap-2 rounded-lg bg-muted px-2.5 py-2 ${stale ? "opacity-60" : ""}`}
+      className={`flex items-start gap-2 rounded-lg bg-muted ${
+        compact ? "px-2 py-1.5" : "px-2.5 py-2"
+      } ${stale ? "opacity-60" : ""}`}
     >
       <span
         className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-xs font-semibold"
@@ -106,7 +207,9 @@ function NoteRow({ note }: { note: TeamNote }) {
           )}
         </div>
         <p
-          className={`whitespace-pre-wrap break-words text-sm leading-snug text-foreground ${stale ? "line-through" : ""}`}
+          className={`whitespace-pre-wrap break-words leading-snug text-foreground ${
+            compact ? "text-xs" : "text-sm"
+          } ${stale ? "line-through" : ""}`}
         >
           {note.text}
         </p>

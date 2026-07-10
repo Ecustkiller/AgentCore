@@ -2,56 +2,132 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements" editor-extension-mode="False">
     <Style src="TownHud.uss" />
     <!--
-      AgentTown Phase 1 observer panel (§11). Element names are the binding contract read by
-      TownHudController via rootVisualElement.Q<T>(name). Scope: run management, tick control,
-      playback, residents list + status/SSE. P2/P3 panels (decisions/events/tracking/heatmap/god)
-      are intentionally absent.
+      Observer chrome (industry layout):
+        top bar  — status / clock / metrics / modifiers (read-only glance)
+        bottom   — transport + timeline (primary watch controls)
+        left     — run / god tools (secondary)
+        right    — residents + activity feed (inspect)
+      Element names remain the TownHudController binding contract.
     -->
     <ui:VisualElement name="town-hud" class="town-hud" picking-mode="Ignore">
-        <ui:VisualElement name="control-panel" class="panel control-panel">
-            <ui:Label name="status-label" class="status" text="AgentTown — 就绪" />
-            <ui:VisualElement class="row status-row">
-                <ui:Label name="tick-label" class="tick" text="Tick — / —" />
-                <ui:Label name="stream-label" class="stream" text="SSE: idle" />
+
+        <!-- ===== TOP STATUS BAR ===== -->
+        <ui:VisualElement name="top-bar" class="chrome top-bar">
+            <ui:VisualElement class="top-left">
+                <ui:VisualElement class="mode-row">
+                    <ui:Label name="mode-badge" class="mode-badge" text="就绪" />
+                    <ui:Label name="status-label" class="status" text="AgentTown — 就绪" />
+                </ui:VisualElement>
+                <ui:Label name="story-beat-label" class="story-beat" text="" />
+                <ui:VisualElement class="top-meta-row">
+                    <ui:Label name="clock-label" class="clock" text="第 — 天 · —:00" />
+                    <ui:Label name="tick-label" class="tick" text="Tick —" />
+                    <ui:Label name="fps-label" class="fps" text="— FPS" />
+                    <ui:Label name="stream-label" class="stream" text="SSE: idle" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+            <ui:VisualElement name="metrics-row" class="metrics-row">
+                <ui:Label name="metric-mood" class="metric-chip" text="情绪 —" />
+                <ui:Label name="metric-trade" class="metric-chip" text="交易 —" />
+                <ui:Label name="metric-relation" class="metric-chip" text="关系 —" />
+                <ui:Label name="metric-pop" class="metric-chip" text="人口 —" />
+            </ui:VisualElement>
+            <ui:VisualElement name="modifier-chips" class="modifier-chips" />
+            <ui:Button name="birdseye-button" class="btn ghost" text="鸟瞰 Esc" />
+        </ui:VisualElement>
+
+        <!-- ===== MIDDLE: side rails + clear 3D stage ===== -->
+        <ui:VisualElement name="stage" class="stage" picking-mode="Ignore">
+            <ui:VisualElement name="control-panel" class="panel left-rail">
+                <ui:ScrollView name="control-scroll" class="control-scroll">
+                    <ui:Label class="section-title" text="运行" />
+                    <ui:VisualElement class="row">
+                        <ui:Button name="demo-button" class="btn accent grow" text="离线 Demo" />
+                        <ui:Button name="create-run-button" class="btn primary grow" text="新建" />
+                    </ui:VisualElement>
+                    <ui:Label class="section-subtitle" text="剧本包" />
+                    <ui:DropdownField name="pack-dropdown" class="pack-dropdown" />
+                    <ui:VisualElement class="row">
+                        <ui:TextField name="run-id-field" class="run-field grow" label="" />
+                        <ui:Button name="resume-run-button" class="btn" text="恢复" />
+                    </ui:VisualElement>
+                    <ui:Label class="section-subtitle" text="最近" />
+                    <ui:ScrollView name="run-history-list" class="run-history-list" />
+
+                    <ui:Label class="section-title" text="上帝模式" />
+                    <ui:Label name="god-hint" class="god-hint" text="" />
+                    <ui:VisualElement class="row god-row">
+                        <ui:Button name="inject-price" class="btn god grow" text="物价" />
+                        <ui:Button name="inject-storm" class="btn god grow" text="风暴" />
+                    </ui:VisualElement>
+                    <ui:VisualElement class="row god-row">
+                        <ui:Button name="inject-festival" class="btn god grow" text="节庆" />
+                        <ui:Button name="inject-announce" class="btn god grow" text="公告" />
+                    </ui:VisualElement>
+                </ui:ScrollView>
             </ui:VisualElement>
 
-            <ui:Label class="section-title" text="Run 管理" />
-            <ui:VisualElement class="row">
-                <ui:Button name="create-run-button" class="btn primary grow" text="新建 Run" />
-            </ui:VisualElement>
-            <ui:VisualElement class="row">
-                <ui:TextField name="run-id-field" class="run-field grow" label="Run ID" />
-                <ui:Button name="resume-run-button" class="btn" text="恢复" />
-            </ui:VisualElement>
+            <ui:VisualElement name="stage-center" class="stage-center" picking-mode="Ignore" />
 
-            <ui:Label class="section-title" text="Tick 控制" />
-            <ui:VisualElement class="row">
-                <ui:Button name="advance-button" class="btn grow" text="推进 Tick" />
-                <ui:Button name="pause-button" class="btn" text="暂停" />
-                <ui:Button name="resume-tick-button" class="btn" text="继续" />
-            </ui:VisualElement>
+            <ui:VisualElement name="residents-panel" class="panel right-rail">
+                <ui:VisualElement class="tab-row">
+                    <ui:Button name="tab-residents" class="tab active" text="居民" />
+                    <ui:Button name="tab-decisions" class="tab" text="决策" />
+                    <ui:Button name="tab-events" class="tab" text="事件" />
+                </ui:VisualElement>
 
-            <ui:Label class="section-title" text="回放" />
-            <ui:VisualElement class="row">
-                <ui:Button name="prev-button" class="btn icon" text="◀" />
-                <ui:Button name="play-button" class="btn icon" text="▶" />
-                <ui:Button name="next-button" class="btn icon" text="▶▶" />
-                <ui:Button name="live-button" class="btn" text="Live" />
-            </ui:VisualElement>
-            <ui:VisualElement class="row speed-row">
-                <ui:Button name="speed-05" class="btn speed" text="0.5x" />
-                <ui:Button name="speed-1" class="btn speed" text="1x" />
-                <ui:Button name="speed-2" class="btn speed" text="2x" />
-                <ui:Button name="speed-4" class="btn speed" text="4x" />
+                <ui:VisualElement name="tab-pane-residents" class="tab-pane">
+                    <ui:ScrollView name="residents-list" class="residents-list" />
+                    <ui:VisualElement name="resident-detail" class="resident-detail">
+                        <ui:Label class="detail-hint" text="选择居民查看人设与状态" />
+                    </ui:VisualElement>
+                </ui:VisualElement>
+
+                <ui:VisualElement name="tab-pane-decisions" class="tab-pane hidden">
+                    <ui:ScrollView name="decisions-list" class="observe-list" />
+                </ui:VisualElement>
+
+                <ui:VisualElement name="tab-pane-events" class="tab-pane hidden">
+                    <ui:ScrollView name="events-list" class="observe-list" />
+                </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>
 
-        <ui:VisualElement name="residents-panel" class="panel residents-panel">
-            <ui:Label class="section-title" text="居民" />
-            <ui:ScrollView name="residents-list" class="residents-list" />
-            <ui:VisualElement name="resident-detail" class="resident-detail">
-                <ui:Label class="detail-hint" text="选择一位居民查看人设与状态。" />
+        <!-- ===== BOTTOM TRANSPORT / TIMELINE ===== -->
+        <ui:VisualElement name="bottom-bar" class="chrome bottom-bar">
+            <ui:VisualElement class="transport-left">
+                <ui:Button name="advance-button" class="btn primary" text="推进" />
+                <ui:Button name="pause-button" class="btn" text="暂停" />
+                <ui:Button name="resume-tick-button" class="btn" text="继续" />
             </ui:VisualElement>
+            <ui:VisualElement class="transport-center">
+                <ui:Button name="prev-button" class="btn icon" text="◀" />
+                <ui:Button name="play-button" class="btn icon play-main" text="▶" />
+                <ui:Button name="next-button" class="btn icon" text="▶▶" />
+                <ui:Button name="next-story-button" class="btn" text="下一故事" />
+                <ui:Button name="live-button" class="btn" text="Live" />
+                <ui:SliderInt name="seek-slider" class="seek-slider grow" low-value="1" high-value="1" value="1" />
+                <ui:Label name="timeline-story-label" class="timeline-story" text="" />
+            </ui:VisualElement>
+            <ui:VisualElement class="transport-right speed-row">
+                <ui:Button name="speed-05" class="btn speed" text="0.5×" />
+                <ui:Button name="speed-1" class="btn speed" text="1×" />
+                <ui:Button name="speed-2" class="btn speed" text="2×" />
+                <ui:Button name="speed-4" class="btn speed" text="4×" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+        <!-- Pack intro card (Offline start / pack switch). -->
+        <ui:VisualElement name="pack-intro-card" class="pack-intro-card hidden">
+            <ui:Label name="pack-intro-title" class="pack-intro-title" text="" />
+            <ui:Label name="pack-intro-synopsis" class="pack-intro-synopsis" text="" />
+            <ui:VisualElement name="pack-intro-cast" class="pack-intro-cast" />
+            <ui:Button name="pack-intro-dismiss" class="btn accent pack-intro-dismiss" text="开始观看" />
+        </ui:VisualElement>
+
+        <!-- Boot / bake overlay (hidden after Offline demo or Live resume). -->
+        <ui:VisualElement name="boot-overlay" class="boot-overlay">
+            <ui:Label name="boot-status-label" class="boot-status" text="正在加载小镇…" />
         </ui:VisualElement>
     </ui:VisualElement>
 </ui:UXML>

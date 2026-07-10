@@ -5,7 +5,11 @@ import {
   type EscalationUserDecision,
   decideEscalation,
 } from "@/services/escalation";
-import { type RunEscalation, useMessageExecution } from "@/stores/execution";
+import {
+  type RunEscalation,
+  useMessageExecution,
+} from "@/stores/execution";
+import { escalationKindLabel } from "@/components/graph/agentNode/shared";
 import {
   ArrowRight,
   Check,
@@ -21,6 +25,11 @@ import {
   type AskUserContent,
   useAskAnswer,
 } from "./ask/AskUserFields";
+
+function escalationKindTag(kind: RunEscalation["kind"] | undefined): string | null {
+  if (!kind || kind === "normal") return null;
+  return escalationKindLabel(kind);
+}
 
 export function EscalationCard({
   escalation,
@@ -41,6 +50,10 @@ export function EscalationCard({
   }
   if (escalation.status === "resolved" || escalation.status === "timeout") {
     return <ResolvedEscalation escalation={escalation} role={role} />;
+  }
+  // D1: CEO arbitration pending — visible but not user-answerable.
+  if (escalation.status === "pending" && escalation.awaiting === "ceo") {
+    return <AwaitingCeoEscalation escalation={escalation} role={role} />;
   }
   if (!interactive) {
     return <DormantEscalation escalation={escalation} role={role} />;
@@ -101,7 +114,12 @@ function PendingEscalation({
           <HelpCircle size={16} />
         </DecisionCardIcon>
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium text-primary">{role} · 请你拍板</p>
+          <p className="text-xs font-medium text-primary">
+            {role} · 请你拍板
+            {escalationKindTag(escalation.kind)
+              ? ` · ${escalationKindTag(escalation.kind)}`
+              : ""}
+          </p>
           <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
             {escalation.question}
           </p>
@@ -165,6 +183,38 @@ function PendingEscalation({
   );
 }
 
+function AwaitingCeoEscalation({
+  escalation,
+  role,
+}: {
+  escalation: RunEscalation;
+  role: string;
+}) {
+  return (
+    <DecisionCard tone="neutral">
+      <div className="flex items-start gap-2">
+        <DecisionCardIcon tone="neutral">
+          <Loader2 size={16} className="animate-spin" />
+        </DecisionCardIcon>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium text-muted-foreground">
+            {role} · 等待主管仲裁
+            {escalationKindTag(escalation.kind)
+              ? ` · ${escalationKindTag(escalation.kind)}`
+              : ""}
+          </p>
+          <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
+            {escalation.question}
+          </p>
+          <p className="mt-2 rounded-lg bg-card/60 px-2.5 py-1.5 text-xs text-muted-foreground">
+            未裁则按此继续：{escalation.assumption}
+          </p>
+        </div>
+      </div>
+    </DecisionCard>
+  );
+}
+
 function DormantEscalation({
   escalation,
   role,
@@ -214,6 +264,9 @@ function RaisedEscalation({
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-muted-foreground">
             {role} · 边干边上报（无需你拍板）
+            {escalationKindTag(escalation.kind)
+              ? ` · ${escalationKindTag(escalation.kind)}`
+              : ""}
           </p>
           <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
             {escalation.question}
@@ -235,6 +288,16 @@ function ResolvedEscalation({
   role: string;
 }) {
   const isTimeout = escalation.status === "timeout";
+  const byCeo = escalation.arbitrated_by === "ceo";
+  const viaUser = byCeo && escalation.via_user === true;
+  let headline: string;
+  if (isTimeout) {
+    headline = byCeo ? "主管未裁 · 已按假设继续" : "已按假设继续";
+  } else if (byCeo) {
+    headline = viaUser ? "CEO 已仲裁（经用户）" : "CEO 已仲裁";
+  } else {
+    headline = "已答复";
+  }
   return (
     <DecisionCard tone="neutral" className="bg-card/60">
       <div className="flex items-start gap-2">
@@ -243,7 +306,7 @@ function ResolvedEscalation({
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-muted-foreground">
-            {role} · {isTimeout ? "已按假设继续" : "已答复"}
+            {role} · {headline}
           </p>
           <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
             {escalation.question}

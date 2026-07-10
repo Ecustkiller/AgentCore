@@ -4,14 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from agentcore.core.logging import get_logger
 from agentcore.runtime.checkpoints import AskCheckpointIntent
+from agentcore.runtime.suspension_capture import SuspensionCapture, persist_suspension_capture
 from agentcore.tools.protocol import ToolContext
 
 if TYPE_CHECKING:
     from agentcore.tools.builtin.ask_user.tool import AskUserTool
-
-logger = get_logger(__name__)
 
 
 def can_persist_suspension(tool: AskUserTool) -> bool:
@@ -50,65 +48,38 @@ async def persist_suspension(
     """
     if not can_persist_suspension(tool):
         return False
-    from agentcore.core.log_context import get_log_value
-    from agentcore.runtime.suspension import (
-        AskUserSuspension,
-        captain_transcript,
-        find_tool_call_id,
-        turn_history,
-    )
+    from agentcore.runtime.suspension import AskUserSuspension, find_tool_call_id
 
-    transcript = captain_transcript.get()
-    if not transcript:
-        logger.info("suspension.no_transcript", checkpoint_id=checkpoint_id)
-        return False
-    from agentcore.runtime.facts import snapshot_fact_log
+    def build_frame(capture: SuspensionCapture) -> AskUserSuspension:
+        return AskUserSuspension(
+            message_id=tool.message_id or "",
+            conversation_id=tool.conversation_id,
+            user_id=context.user_id,
+            captain_run_id=tool.captain_run_id or "",
+            checkpoint_id=checkpoint_id,
+            tool_call_id=find_tool_call_id(capture.transcript, "ask_user"),
+            base_system_prompt=tool.base_system_prompt,
+            user_message=tool.user_message,
+            folder_id=tool.folder_id,
+            memory_enabled=tool.memory_enabled,
+            transcript=capture.transcript,
+            history=capture.history,
+            question=message,
+            context=ctx_text,
+            assumptions=assumptions,
+            questions=questions,
+            style_options=style_options,
+            intent=intent,
+            journal_entries=capture.journal_entries,
+            trace_id=capture.trace_id,
+        )
 
-    journal = list(tool.sink.execution_journal() or [])
-    journal.append(
-        {
-            "type": required_event.type.value,
-            "payload": required_event.payload,
-            "timestamp": required_event.timestamp,
-        }
-    )
-    # The §8.3 fact-log stream at this same instant — the persist source (the
-    # display ``journal`` above is the degraded fallback). The suspending card is
-    # emitted only AFTER this save, so fold it in so the persisted stream carries it.
-    journal_entries = snapshot_fact_log(
-        trailing=[
-            {
-                "kind": required_event.type.value,
-                "payload": required_event.payload,
-                "ts": required_event.timestamp,
-            }
-        ]
-    )
-    frame = AskUserSuspension(
-        message_id=tool.message_id or "",
-        conversation_id=tool.conversation_id,
-        user_id=context.user_id,
-        captain_run_id=tool.captain_run_id or "",
+    return await persist_suspension_capture(
         checkpoint_id=checkpoint_id,
-        tool_call_id=find_tool_call_id(transcript, "ask_user"),
-        base_system_prompt=tool.base_system_prompt,
-        user_message=tool.user_message,
-        folder_id=tool.folder_id,
-        memory_enabled=tool.memory_enabled,
-        transcript=list(transcript),
-        history=list(turn_history.get() or []),
-        question=message,
-        context=ctx_text,
-        assumptions=assumptions,
-        questions=questions,
-        style_options=style_options,
-        intent=intent,
-        journal=journal,
-        journal_entries=journal_entries,
-        trace_id=get_log_value("trace_id"),
+        required_event=required_event,
+        build_frame=build_frame,
+        saver=tool.suspension_saver,  # type: ignore[arg-type]
     )
-    await tool.suspension_saver(frame)  # type: ignore[misc]
-    return True
 
 
 async def drop_suspension(tool: AskUserTool) -> None:

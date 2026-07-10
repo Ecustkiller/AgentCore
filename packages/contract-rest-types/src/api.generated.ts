@@ -3511,11 +3511,11 @@ export interface components {
          * @description User explicitly accepts a run's terminal outcome that could not be auto-recovered
          *     (跑一半改方向 Step 4 · 忽略路径收口).
          *
-         *     Two triggers, both surfaced in the run detail from the audit trail: a
-         *     ``deterministic_failure`` (a non-retryable upstream failure — 重试徒劳) or a
-         *     ``redirect_ignored`` (a「立即改此人」steer that arrived too late to apply mid-run). Recording
-         *     the acceptance (后端记录) replaces the old frontend-only ``clearExecution`` so the
-         *     delegated-turn audit trail carries「用户主动接受此结果」. Idempotent per (turn, run).
+         *     Triggers surfaced from the audit trail / status strip: a ``deterministic_failure``
+         *     (non-retryable upstream failure — 重试徒劳), a ``redirect_ignored`` (「立即改此人」steer
+         *     that arrived too late), or ``recovery_ignored`` (status-strip「忽略」救火 abandon).
+         *     Recording the acceptance (后端记录) replaces the old frontend-only ``clearExecution`` so
+         *     the delegated-turn audit trail carries「用户主动接受此结果」. Idempotent per (turn, run).
          */
         AcceptRunOutcomeRequest: {
             /** Execution Id */
@@ -3526,7 +3526,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "deterministic_failure" | "redirect_ignored";
+            reason: "deterministic_failure" | "redirect_ignored" | "recovery_ignored";
             /** Run Id */
             run_id: string;
         };
@@ -4840,6 +4840,11 @@ export interface components {
              */
             scenario: string;
             /**
+             * Scripted
+             * @default false
+             */
+            scripted: boolean;
+            /**
              * Seed
              * @default 0
              */
@@ -5781,10 +5786,11 @@ export interface components {
          *     reuse, so an optimistic bubble reconciles cleanly.
          *
          *     plan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the
-         *     gated downstream); ask_user carries the unified card payload ``question`` (the
+         *     gated downstream); team_preview carries ``workers`` (upcoming roles / tasks /
+         *     deps); ask_user carries the unified card payload ``question`` (the
          *     framing / opening line) + ``context`` + the optional opening content
          *     ``assumptions`` / ``questions`` / ``style_options`` (empty for a compact mid-task
-         *     fork). The unused set is empty for the other kind.
+         *     fork). The unused set is empty for the other kinds.
          */
         PausedTurnSummary: {
             /** Assumptions */
@@ -5834,6 +5840,10 @@ export interface components {
              * @default
              */
             user_message_id: string;
+            /** Workers */
+            workers?: {
+                [key: string]: unknown;
+            }[];
         };
         /**
          * PendingApprovalSummary
@@ -6327,6 +6337,11 @@ export interface components {
              */
             scenario: string;
             /**
+             * Scripted
+             * @default false
+             */
+            scripted: boolean;
+            /**
              * Seed
              * @default 0
              */
@@ -6797,13 +6812,12 @@ export interface components {
          * SuspensionKind
          * @description Which suspend point a durable frame captured (the JSON discriminator).
          *
-         *     Values match the corresponding :class:`~agentcore.runtime.interaction.InteractionKind`
-         *     so the persisted ``kind`` reads the same across the live bridge and the frame.
-         *     Only these two suspend points are persisted (approval / client_tool stay
-         *     in-memory — see 设计 §4.7).
+         *     Values are derived from the matching :class:`~agentcore.runtime.interaction.InteractionKind`
+         *     members in :data:`DURABLE_INTERACTION_KINDS` so the persisted ``kind`` reads the
+         *     same across the live bridge and the frame — no string hand-copy.
          * @enum {string}
          */
-        SuspensionKind: "plan_review" | "ask_user";
+        SuspensionKind: "plan_review" | "ask_user" | "team_preview";
         /**
          * TickMetrics
          * @description Macro indicators for one simulation tick.
@@ -7283,7 +7297,7 @@ export interface components {
         };
         /**
          * Vec3
-         * @description 3D position on the town ground plane (R3F / Three.js Y-up).
+         * @description 3D position on the town ground plane (Y-up wire coordinates).
          *
          *     - ``x``: east (+) / west (-)
          *     - ``y``: height above ground (NPCs typically 0)

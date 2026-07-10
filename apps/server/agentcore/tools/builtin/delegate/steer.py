@@ -17,8 +17,17 @@ def record_plan_snapshot(plan: RunPlan) -> None:
 
 
 def apply_steer(plan: RunPlan, completed: dict, checkpoint_ids: set[str], note: str) -> None:
-    """Inject a plan_review ``adjust`` note onto checkpoint nodes' transitive dependents."""
-    targets = downstream_of(plan, checkpoint_ids)
+    """Inject a plan_review / team_preview ``adjust`` note onto not-yet-run targets.
+
+    With non-empty ``checkpoint_ids`` (plan_review), targets are the transitive
+    dependents of those checkpoint nodes. With empty roots (team_preview — no worker
+    has run yet), every not-yet-completed node is steered.
+    """
+    targets = (
+        downstream_of(plan, checkpoint_ids)
+        if checkpoint_ids
+        else {n.run_id for n in plan.nodes if n.run_id not in completed}
+    )
     block = f"- {note}"
     for node in plan.nodes:
         if node.run_id in completed or node.run_id not in targets:

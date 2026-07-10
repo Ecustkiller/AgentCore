@@ -25,6 +25,9 @@ class RunManifest(BaseModel):
     regions: list[str] = Field(default_factory=lambda: list(TOWN_CONFIG.regions))
     model_routing: SimModelRoutingConfig | None = None
     temperature: float = SIM_TICK_TEMPERATURE
+    # Demo/dev: force schedule-based ticks (no LLM). Also auto-enabled when
+    # DeepSeek is missing at advance time — see SimulationService._resolve_scripted.
+    scripted: bool = False
     created_at: datetime | None = None
     code_version: str | None = None
 
@@ -51,6 +54,7 @@ def build_run_manifest(
     personas: tuple[SimPersona, ...] | None = None,
     regions: tuple[str, ...] | None = None,
     temperature: float = SIM_TICK_TEMPERATURE,
+    scripted: bool = False,
     created_at: datetime | None = None,
     code_version: str | None = None,
 ) -> RunManifest:
@@ -61,6 +65,7 @@ def build_run_manifest(
         regions=list(regions or TOWN_CONFIG.regions),
         model_routing=model_routing,
         temperature=temperature,
+        scripted=scripted,
         created_at=created_at,
         code_version=code_version if code_version is not None else resolve_code_version(),
     )

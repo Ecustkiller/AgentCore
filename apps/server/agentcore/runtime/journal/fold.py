@@ -415,3 +415,40 @@ def plan_from_journal(entries: list[dict[str, Any]] | None) -> RunPlan | None:
         if (entry.get("kind") or "") == FactKind.PLAN_SNAPSHOT.value:
             latest = entry.get("payload") or {}
     return plan_from_json(latest) if latest is not None else None
+
+
+def execution_id_from_journal(
+    journal_entries: list[dict[str, Any]] | None = None,
+    display_journal: list[dict[str, Any]] | None = None,
+) -> str | None:
+    """Recover the pause-turn ``execution_id`` from a ``run_plan`` journal entry (resume).
+
+    Resume settles mint a fresh pipeline ``execution_id``; re-emitting ``run_plan`` under
+    that new id makes the frontend ``ingestPlan`` treat it as a different plan and reset
+    frames (wiping plan_review graph history). Prefer the id already on the pause journal.
+
+    Accepts both streams the suspension carries:
+    - display ``journal`` entries: ``{"type": "run_plan", "payload": {...}}``
+    - fact ``journal_entries``: ``{"kind": "run_plan", "payload": {...}}`` (forwarded
+      display facts keep the SSE kind string)
+
+    Last non-empty ``payload.execution_id`` wins (same last-write posture as
+    ``plan_from_journal``). Facts are preferred over the display journal when both yield
+    an id (facts are the persist source on claim).
+    """
+    run_plan = EventType.RUN_PLAN.value
+
+    def _scan(entries: list[dict[str, Any]] | None) -> str | None:
+        if not entries:
+            return None
+        found: str | None = None
+        for entry in entries:
+            label = entry.get("kind") or entry.get("type") or ""
+            if label != run_plan:
+                continue
+            eid = (entry.get("payload") or {}).get("execution_id")
+            if isinstance(eid, str) and eid:
+                found = eid
+        return found
+
+    return _scan(journal_entries) or _scan(display_journal)

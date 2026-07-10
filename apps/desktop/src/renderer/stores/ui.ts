@@ -134,24 +134,6 @@ interface UIState {
    * **持久化**到 `localStorage: agentcore:conversation-views`，但只落「切到画布」的对话（切回聊天
    * 即删键）→ 表恒收敛、不无限增长；未表态 / 草稿（无 id）恒为聊天。 */
   conversationViews: Record<string, "chat" | "canvas">;
-  /** 聊天侧「在画布打开 / 回放」→ 画布「放大某回合」的一次性请求（前端UX设计.md §六）。
-   * 聊天里的内嵌图按钮把目标回合（+ 是否自动回放）塞进这里并切到画布视图；`ConversationCanvas`
-   * 挂载后消费并立即清空（用完即清，避免下次进画布误触发放大）。null = 无待处理请求。
-   * `view` 可选——聊天侧信号（如「改了 N 版」→「对比」）借此**深链**到放大态对应视图直达，缺省走
-   * 该回合的自然默认视图（辩论=群聊、其余=协作图）。 */
-  pendingCanvasFocus: {
-    turnId: string;
-    autoplay: boolean;
-    view?: CanvasFocusView;
-    /** 深链「对比」时预选的 A/B 版本对（run.id）——如从侧面板版本链点 vN 直达 vN-1×vN diff。
-     * 仅 view==="compare" 有意义；缺省则对比视图用该回合自然默认对。 */
-    comparePair?: [string, string];
-  } | null;
-  /** 画布「放大态」桥（前端UX设计.md §六）：`ConversationCanvas` 进入某回合放大态时置 true，
-   * 退出 / 卸载时复位 false。`ConversationPage` 据此在放大态隐藏对话级浮动开关（聊天/画布、
-   * 侧面板）——它们与放大态自带的顶栏（返回、图工具栏）同处两角且同层，不隐藏会盖住「返回」。
-   * 仅会话内存态、不持久化。 */
-  canvasZoomed: boolean;
   /** 本地引擎（sidecar）**有效**开关（双模式工作区 §一.1）：= `resolveSidecarEnabled(偏好)`，
    * 消费方（路由）只读这个 boolean。开启后，绑定本机本地文件夹的对话由用户机器上的
    * `python -m agentcore.sidecar` 跑（直连本地盘），而非云端引擎遥控桌面；裸聊 / 云端文件夹 /
@@ -173,20 +155,42 @@ interface UIState {
     conversationId: string,
     mode: "chat" | "canvas",
   ) => void;
+  /**
+   * @deprecated Preview-only stub. Production zoom is `#/conversations/:id/turn/:turnId`
+   * via {@link turnDetailPath}. Kept so PreviewPage's `?zoom=` path still compiles until
+   * preview is wired to the turn-detail route.
+   */
   requestCanvasFocus: (
     turnId: string,
     autoplay: boolean,
-    view?: CanvasFocusView,
+    view?: TurnDetailView,
     comparePair?: [string, string],
   ) => void;
-  clearCanvasFocus: () => void;
-  setCanvasZoomed: (v: boolean) => void;
   setSidecarEnabled: (v: boolean) => void;
 }
 
-/** 放大态可被聊天侧信号**深链**到的初始视图（画布放大态 `CanvasZoomedTurn` 的视图子集）。
- * 目前仅「对比」由聊天状态条「改了 N 版」信号直达；辩论走该回合自然默认（群聊），无需深链。 */
-export type CanvasFocusView = "compare";
+/** Full-screen turn detail view (`#/conversations/:id/turn/:turnId?view=`). */
+export type TurnDetailView = "graph" | "debate" | "compare";
+
+/** Build the hash-route path for a turn's full-screen detail page. */
+export function turnDetailPath(
+  conversationId: string,
+  turnId: string,
+  view?: TurnDetailView,
+  comparePair?: [string, string],
+  opts?: { autoplay?: boolean },
+): string {
+  const path = `/conversations/${conversationId}/turn/${turnId}`;
+  const params = new URLSearchParams();
+  if (view) params.set("view", view);
+  if (comparePair) {
+    params.set("a", comparePair[0]);
+    params.set("b", comparePair[1]);
+  }
+  if (opts?.autoplay) params.set("autoplay", "1");
+  const qs = params.toString();
+  return qs ? `${path}?${qs}` : path;
+}
 
 export const useUIStore = create<UIState>((set) => ({
   searchOpen: false,
@@ -195,8 +199,6 @@ export const useUIStore = create<UIState>((set) => ({
   theme: loadTheme(),
   diagnosticMode: loadDiagnosticMode(),
   conversationViews: loadConversationViews(),
-  pendingCanvasFocus: null,
-  canvasZoomed: false,
   sidecarPreference: loadSidecarPreference(),
   sidecarEnabled: loadSidecarEnabled(),
 
@@ -237,10 +239,8 @@ export const useUIStore = create<UIState>((set) => ({
       persistConversationViews(conversationViews);
       return { conversationViews };
     }),
-  requestCanvasFocus: (turnId, autoplay, view, comparePair) =>
-    set({ pendingCanvasFocus: { turnId, autoplay, view, comparePair } }),
-  clearCanvasFocus: () => set({ pendingCanvasFocus: null }),
-  setCanvasZoomed: (canvasZoomed) => set({ canvasZoomed }),
+  // Preview-only no-op (see UIState.requestCanvasFocus).
+  requestCanvasFocus: () => undefined,
   setSidecarEnabled: (sidecarEnabled) => {
     const sidecarPreference: SidecarPreference = sidecarEnabled ? "on" : "off";
     persistSidecarPreference(sidecarPreference);

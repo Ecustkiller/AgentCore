@@ -397,8 +397,17 @@ def _inline_spec(
         parent_run_id=parent_run_id,
         depth=depth,
         can_delegate=_parse_can_delegate(item.get("can_delegate")),
+        replaces_run_id=_parse_replaces_run_id(item.get("replaces_run_id")),
         policy=policy,
     )
+
+
+def _parse_replaces_run_id(raw: Any) -> str | None:
+    """Normalise optional ``replaces_run_id`` (回落换人) → stripped id or None."""
+    if not isinstance(raw, str):
+        return None
+    cleaned = raw.strip()
+    return cleaned or None
 
 
 def _parse_can_delegate(raw: Any) -> bool:

@@ -183,6 +183,10 @@ async def run_chat_pipeline(
     # into the durable frame — the resume window splices it ahead of the journal-folded
     # rounds (the journal stores only history's LENGTH). Reset in finally.
     history_token = turn_history.set(history)
+    # CEO 协调模式: turn-level execution_id for registry lookup (captain wait path).
+    # Bound after base_tool_context is minted (inside try); reset in finally.
+    execution_id_token = None
+    bound_execution_id: str | None = None
 
     try:
         # --- Phase 1: Prepare ---
@@ -290,6 +294,10 @@ async def run_chat_pipeline(
             vision_reader=build_vision_reader(),
             cost_sink=vision_cost_sink,
         )
+        from agentcore.runtime.coordination.session import current_execution_id
+
+        bound_execution_id = base_tool_context.execution_id
+        execution_id_token = current_execution_id.set(bound_execution_id)
 
         # --- Phase 2: Assemble the CEO chat agent's toolset (coordinator) ---
         # The CEO owns the conversation and replies directly, but it is a
@@ -668,6 +676,16 @@ async def run_chat_pipeline(
             await audit_recorder.flush()
         current_audit_recorder.reset(audit_token)
         turn_history.reset(history_token)
+        if execution_id_token is not None:
+            from agentcore.runtime.coordination.session import (
+                clear_active_coordination,
+                current_execution_id,
+            )
+
+            if bound_execution_id:
+                with contextlib.suppress(Exception):
+                    clear_active_coordination(bound_execution_id)
+            current_execution_id.reset(execution_id_token)
         # Do NOT close the sink here. The pipeline is a *producer* on a sink it did not
         # create; closing it would silently drop the post-turn tail (title_generated /
         # followups_generated), which persist_turn_result emits AFTER this returns —

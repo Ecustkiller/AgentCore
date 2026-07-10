@@ -37,7 +37,6 @@ from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink, FinishReason
 from agentcore.runtime.facts import TurnFactLog, TurnStartedFact, current_fact_log
-from agentcore.runtime.journal import runs_from_entries
 from agentcore.runtime.suspension import (
     AskUserSuspension,
     PlanReviewSuspension,
@@ -133,11 +132,9 @@ def _cold_claim(frame: TurnSuspension, journal_entries: list[dict]) -> TurnSuspe
     strongest proof the finalize frame is self-sufficient."""
     restored = suspension_from_json(frame.to_json())
     assert not restored.transcript, "the cold-claimed frame must carry no in-memory transcript"
-    # claim_paused_turn re-hydrates BOTH the raw fact stream (window rebuild source) and the
-    # display-event seed off the turn_journal rows.
+    # claim_paused_turn re-hydrates the raw fact stream (唯一权威载体) off the turn_journal rows;
+    # the display-event resume seed (``.journal``) is a DERIVED property of it (P0-B Phase 3).
     restored.journal_entries = list(journal_entries)
-    runs = runs_from_entries(journal_entries)
-    restored.journal = list((runs or {}).get("events") or [])
     return restored
 
 
@@ -229,10 +226,15 @@ async def _finalize_ask_user() -> tuple[AskUserSuspension, list[dict]]:
     return captured["frame"], captured["journal_entries"]
 
 
-async def _finalize_plan_review() -> tuple[PlanReviewSuspension, list[dict]]:
+async def _finalize_plan_review(monkeypatch) -> tuple[PlanReviewSuspension, list[dict]]:
     """Drive the REAL captain loop to the plan_review finalize pause (flag ON): a delegate
     whose plan checkpoints after ``s1`` (``s2`` gated downstream). Return the captured frame
     + persisted journal. Producer must end on PAUSED with the bridge never parked."""
+    # Skip team_preview so this fixture reaches plan_review (wave-boundary durable pause).
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.delegate.preview.should_preview",
+        lambda *a, **k: False,
+    )
     system_prompt = "你是 CEO。"
     user_message = "调研并撰写"
     captured: dict = {}
@@ -283,7 +285,9 @@ async def _finalize_plan_review() -> tuple[PlanReviewSuspension, list[dict]]:
                             index=0,
                             id="call_del",
                             function_name="delegate",
-                            arguments_delta=json.dumps({"tasks": dag}),
+                            arguments_delta=json.dumps(
+                                {"tasks": dag, "coordinate": False}
+                            ),
                         )
                     ]
                 )
@@ -352,7 +356,7 @@ async def test_finalized_ask_user_frame_resumes_to_completion(monkeypatch, tmp_p
 
 async def test_finalized_plan_review_frame_resumes_to_completion(monkeypatch, tmp_path):
     # ② producer: a real plan_review pause (s1 done, s2 gated) finalized to PAUSED.
-    frame, journal_entries = await _finalize_plan_review()
+    frame, journal_entries = await _finalize_plan_review(monkeypatch)
     restored = _cold_claim(frame, journal_entries)
     assert isinstance(restored, PlanReviewSuspension)
     # The cold-claimed frame dropped the plan + completed blobs — the resume MUST rebuild

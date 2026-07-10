@@ -1,9 +1,8 @@
 """Generate ``packages/contract-types/src/eventTypes.generated.ts`` from EventType.
 
 The Python ``EventType`` enum is the wire-contract single source for SSE event
-names. Payload shapes stay hand-maintained in ``events.ts`` (too rich to codegen
-today); this script only pins the discriminant union so backend additions cannot
-silently drift from the shared TS package.
+names. Payload shapes are generated from ``runtime/events/payloads/`` wire models
+via ``scripts/dump_sse_payload_types.py``.
 
 Run as part of ``pnpm gen:types`` (or standalone after changing EventType)::
 

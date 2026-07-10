@@ -4,15 +4,32 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
+from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolEffect
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
-from agentcore.runtime.events import EventSink, checkpoint_resolved, plan_review_resolved
-from agentcore.runtime.journal import completed_from_journal, plan_from_journal
-from agentcore.runtime.suspension import AskUserSuspension, PlanReviewSuspension, TurnSuspension
+from agentcore.runtime.events import (
+    EventSink,
+    checkpoint_resolved,
+    plan_review_resolved,
+    team_preview_resolved,
+)
+from agentcore.runtime.journal import (
+    completed_from_journal,
+    execution_id_from_journal,
+    plan_from_journal,
+)
+from agentcore.runtime.suspension import (
+    AskUserSuspension,
+    PlanReviewSuspension,
+    TeamPreviewSuspension,
+    TurnSuspension,
+)
 from agentcore.tools.builtin.ask_user import ask_user_tool_result
 from agentcore.tools.builtin.ask_user.schema import option_label
 from agentcore.tools.builtin.delegate import DelegateTool
+
+logger = get_logger(__name__)
 
 
 def append_resumed_tool_results(
@@ -77,6 +94,9 @@ async def settle_resumed_suspension(
     remaining tail (continue / adjust-steer / stop-skip) and returns the workers'
     product — always fed back to the CEO loop (which writes the overview).
 
+    team_preview: same resume substrate as plan_review, but the pause was BEFORE any
+    worker started (empty completed seed; adjust steers every not-yet-run node).
+
     ask_user: emit the resolution, then map the answer to the ``ask_user`` tool
     result via the shared :func:`ask_user_tool_result`. A ``stop`` yields a terminal
     result whose closing note ends the turn directly (no CEO round); the picks are
@@ -100,6 +120,48 @@ async def settle_resumed_suspension(
                 selected=response.selected,
             )
         )
+        # CEO 协调模式 Phase 2: rebuild coordination session from journal so the
+        # resumed CEO loop can keep consuming team events / update_synthesis.
+        from agentcore.runtime.coordination.journal import coordination_from_journal
+        from agentcore.runtime.coordination.session import (
+            CoordinationSession,
+            current_execution_id,
+            set_active_coordination,
+        )
+
+        snap = coordination_from_journal(suspension.journal_entries)
+        if snap is not None and snap.active:
+            session = CoordinationSession.from_snapshot(snap)
+            plan = plan_from_journal(suspension.journal_entries)
+            seed = completed_from_journal(suspension.journal_entries) or {}
+            for rid in seed:
+                session.mark_worker_completed(rid)
+            unfinished = plan is not None and any(n.run_id not in seed for n in plan.nodes)
+            # Align tool context + turn ContextVar to the pause-turn execution_id so
+            # registry lookups (tools / captain wait) hit the restored session.
+            if snap.execution_id:
+                current_execution_id.set(snap.execution_id)
+                base_ctx = getattr(delegate_tool, "_base_tool_context", None)
+                if base_ctx is not None:
+                    base_ctx.execution_id = snap.execution_id
+            if unfinished and plan is not None:
+                from agentcore.runtime.coordination.host import try_start_coordination
+
+                try_start_coordination(
+                    delegate_tool,
+                    plan,
+                    execution_id=snap.execution_id,
+                    seed_completed=seed,
+                    finalize=False,
+                    seed_notes=None,
+                    complexity_hint="standard",
+                    call_idx=0,
+                    completion_criteria=None,
+                    coordinate=True,
+                    session=session,
+                )
+            else:
+                set_active_coordination(session)
         result = ask_user_tool_result(response)
         terminal = result.final_text if result.effect is ToolEffect.INTERACT else None
         return SettledSuspension(result.output, terminal)
@@ -111,6 +173,11 @@ async def settle_resumed_suspension(
                 decision=decision.value,
                 note=note,
             )
+        )
+        logger.info(
+            "plan_review.resolved",
+            checkpoint_id=suspension.checkpoint_id,
+            decision=decision.value,
         )
         # Re-seed finished workers from the §8.3 journal run-final facts (执行级事件溯源
         # Phase 2 ⑥ — `completed_from_journal` == the dropped `frame.completed`, gated by
@@ -125,6 +192,12 @@ async def settle_resumed_suspension(
         # fallback posture as the seed: the in-memory `plan` carrier covers a same-process
         # resume (tests) whose journal was not bound; a claimed frame always carries the fact.
         plan = plan_from_journal(suspension.journal_entries) or suspension.plan
+        # Keep the pause-turn execution_id so resume's run_plan remount merges into the
+        # remounted graph instead of startExecution-resetting frames (plan_review history).
+        execution_id = (
+            execution_id_from_journal(suspension.journal_entries, suspension.journal)
+            or execution_id
+        )
         delegate_result = await delegate_tool.resume_plan(
             plan,
             seed_completed,
@@ -135,4 +208,32 @@ async def settle_resumed_suspension(
         )
         return SettledSuspension(delegate_result.output, None)
 
+    if isinstance(suspension, TeamPreviewSuspension):
+        sink.emit(
+            team_preview_resolved(
+                checkpoint_id=suspension.checkpoint_id,
+                decision=decision.value,
+                note=note,
+            )
+        )
+        logger.info(
+            "team_preview.resolved",
+            checkpoint_id=suspension.checkpoint_id,
+            decision=decision.value,
+        )
+        seed_completed = completed_from_journal(suspension.journal_entries) or suspension.completed
+        plan = plan_from_journal(suspension.journal_entries) or suspension.plan
+        execution_id = (
+            execution_id_from_journal(suspension.journal_entries, suspension.journal)
+            or execution_id
+        )
+        delegate_result = await delegate_tool.resume_plan(
+            plan,
+            seed_completed,
+            decision=decision,
+            note=note,
+            checkpoint_run_ids=suspension.checkpoint_run_ids,
+            execution_id=execution_id,
+        )
+        return SettledSuspension(delegate_result.output, None)
     raise ValueError(f"unknown suspension kind: {suspension.kind!r}")

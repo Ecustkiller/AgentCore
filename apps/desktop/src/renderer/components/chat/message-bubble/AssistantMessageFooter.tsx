@@ -19,7 +19,7 @@ import type { UsageBreakdown } from "@/services/usage";
 import { useBookmarkStore } from "@/stores/bookmarks";
 import type { Message } from "@/stores/conversation";
 import { useConversationStore } from "@/stores/conversation";
-import { useUIStore } from "@/stores/ui";
+import { turnDetailPath, useUIStore } from "@/stores/ui";
 import type { ContextBlockWire } from "@/types/events";
 import {
   Bookmark,
@@ -35,6 +35,7 @@ import {
   ThumbsUp,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { DeleteMessageAction, MessageTime } from "./MessageActions";
 import { useCopyAction } from "./useCopyAction";
 
@@ -163,8 +164,7 @@ function MessageMoreMenu({
   const [contextOpen, setContextOpen] = useState(false);
   const diagnosticMode = useUIStore((s) => s.diagnosticMode);
   const conversationId = useConversationStore((s) => s.currentConversationId);
-  const setConversationView = useUIStore((s) => s.setConversationView);
-  const requestCanvasFocus = useUIStore((s) => s.requestCanvasFocus);
+  const navigate = useNavigate();
 
   const showTrace =
     (import.meta.env.DEV || diagnosticMode) && !!message.traceId;
@@ -184,8 +184,7 @@ function MessageMoreMenu({
 
   const openInCanvas = () => {
     if (!conversationId || !message.executionId) return;
-    requestCanvasFocus(message.id, false);
-    setConversationView(conversationId, "canvas");
+    navigate(turnDetailPath(conversationId, message.id));
   };
 
   if (!hasMenu) return null;

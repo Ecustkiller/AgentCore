@@ -113,6 +113,9 @@ class WorldState:
     active_events: list[WorldEvent] = field(default_factory=list)
     modifiers: WorldModifiers = field(default_factory=WorldModifiers)
     governance: TownGovernance = field(default_factory=TownGovernance)
+    # Scripted demo story pack (price_surge | festival | town_hall). Not part of REST create
+    # schema — set in-memory / tests only. Default keeps 涨价风波 arc.
+    demo_pack: str = "price_surge"
     _mutation_lock: asyncio.Lock | None = field(default=None, repr=False, compare=False)
     interaction_bus: InteractionBus | None = field(default=None, repr=False, compare=False)
     def mutation_lock(self) -> asyncio.Lock:

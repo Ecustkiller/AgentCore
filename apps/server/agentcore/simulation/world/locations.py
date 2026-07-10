@@ -4,28 +4,46 @@ from __future__ import annotations
 
 from agentcore.simulation.vec3 import Vec3
 
-LOCATIONS: tuple[str, ...] = ("广场", "市场", "餐厅", "面包店", "公园", "住宅区", "镇政厅")
+LOCATIONS: tuple[str, ...] = (
+    "广场",
+    "市场",
+    "餐厅",
+    "面包店",
+    "公园",
+    "住宅区",
+    "镇政厅",
+    "图书馆",
+    "工坊",
+    "码头",
+)
 
 LOCATION_NEIGHBORS: dict[str, list[str]] = {
-    "广场": ["市场", "公园", "镇政厅"],
-    "市场": ["广场", "面包店", "餐厅"],
-    "餐厅": ["市场", "住宅区"],
-    "面包店": ["市场", "住宅区"],
-    "公园": ["广场", "住宅区"],
-    "住宅区": ["餐厅", "面包店", "公园"],
-    "镇政厅": ["广场"],
+    "广场": ["市场", "公园", "镇政厅", "图书馆"],
+    "市场": ["广场", "面包店", "餐厅", "工坊"],
+    "餐厅": ["市场", "住宅区", "码头"],
+    "面包店": ["市场", "住宅区", "工坊"],
+    "公园": ["广场", "住宅区", "码头", "图书馆"],
+    "住宅区": ["餐厅", "面包店", "公园", "码头"],
+    "镇政厅": ["广场", "图书馆"],
+    "图书馆": ["广场", "公园", "镇政厅"],
+    "工坊": ["市场", "面包店"],
+    "码头": ["公园", "住宅区", "餐厅"],
 }
 
 # Region centers on the XZ ground plane (Y-up). Frontend NavMesh may nudge NPCs locally;
 # these anchors are the authoritative sync points for SSE + tick snapshots.
+# World grass footprint ≈ 120×96 m; anchors are spread so zones do not crowd old gaps.
 REGION_POSITIONS: dict[str, Vec3] = {
     "广场": Vec3(x=0, y=0, z=0),
-    "市场": Vec3(x=24, y=0, z=0),
-    "餐厅": Vec3(x=36, y=0, z=12),
-    "面包店": Vec3(x=24, y=0, z=-12),
-    "公园": Vec3(x=-18, y=0, z=6),
-    "住宅区": Vec3(x=12, y=0, z=24),
-    "镇政厅": Vec3(x=-12, y=0, z=-10),
+    "市场": Vec3(x=36, y=0, z=0),
+    "餐厅": Vec3(x=52, y=0, z=20),
+    "面包店": Vec3(x=36, y=0, z=-22),
+    "公园": Vec3(x=-32, y=0, z=12),
+    "住宅区": Vec3(x=18, y=0, z=38),
+    "镇政厅": Vec3(x=-22, y=0, z=-20),
+    "图书馆": Vec3(x=-40, y=0, z=-8),
+    "工坊": Vec3(x=48, y=0, z=-36),
+    "码头": Vec3(x=-8, y=0, z=40),
 }
 
 

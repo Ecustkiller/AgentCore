@@ -74,6 +74,19 @@ class EventScheduler:
         self._recompute_modifiers(world)
         return before
 
+    def apply_events(
+        self,
+        world: WorldState,
+        events: list[WorldEvent],
+        *,
+        interaction_bus: InteractionBus | None = None,
+    ) -> list[WorldEvent]:
+        """Apply already-built events (e.g. scripted demo pulses) mid-tick."""
+        for event in events:
+            event.tick_started = world.tick
+            self._apply_effects(world, event, interaction_bus=interaction_bus)
+        return events
+
     def _daily_events(self, tick: int, hour: int) -> list[WorldEvent]:
         spec = DAILY_EVENTS.get(hour)
         if spec is None:

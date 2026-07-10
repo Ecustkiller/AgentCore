@@ -143,11 +143,10 @@ export async function runRetryFailed(userMessageId: string): Promise<void> {
  * lost its live stream (disconnect / restart). The user's decision (continue /
  * adjust / stop) — plus any ask_user option `selected` — is POSTed to the resume
  * endpoint, which claims the frame and drives the rest of the turn on a fresh SSE.
- * No new user message — the paused turn's user bubble is already persisted; we just
- * open a fresh assistant bubble for the reply (so this turn's run/tool frames have a
- * message to attach to) and stream into it. The resume card is dropped optimistically
- * (the server claim is atomic, so a stale / second attempt simply 404s); a transport
- * failure raises the usual retry banner.
+ * No new user message — resume reuses the paused assistant bubble (same turn id /
+ * projection key). The resume card is dropped optimistically (the server claim is
+ * atomic, so a stale / second attempt simply 404s); a transport failure raises the
+ * usual retry banner.
  */
 export async function runResume(
   messageId: string,
@@ -228,7 +227,16 @@ export async function runResume(
     return;
   }
 
-  store.createAssistantMessage(conversationId);
+  // Same-turn continuation: flip the paused assistant back to streaming.
+  // Reload race: bubble may be missing → fall back to a fresh streaming slot.
+  const resumed = store.resumePausedAssistant(messageId, conversationId);
+  if (!resumed) {
+    console.warn(
+      `[Resume] paused assistant not found messageId=${messageId} conversationId=${conversationId}; creating fallback bubble`,
+    );
+    store.createAssistantMessage(conversationId);
+    store.setServerMessageIdOnLastMessage(messageId, conversationId);
+  }
 
   const ac = new AbortController();
   store.setAbort(ac, conversationId);

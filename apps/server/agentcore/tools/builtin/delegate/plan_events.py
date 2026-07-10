@@ -26,6 +26,8 @@ def run_payload(node) -> dict[str, Any]:
         payload["group"] = node.group
     if node.round:
         payload["round"] = node.round
+    if node.replaces_run_id:
+        payload["replaces_run_id"] = node.replaces_run_id
     return payload
 
 

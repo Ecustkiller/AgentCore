@@ -1,6 +1,7 @@
 import { ConversationRoute } from "@/components/chat/ConversationRoute";
 import { AppShell } from "@/components/layout/AppShell";
 import { RouteError } from "@/components/layout/RouteError";
+import { AskCommencePreviewPage } from "@/pages/AskCommencePreviewPage";
 import { ConversationsPage } from "@/pages/ConversationsPage";
 import { ExplorePage } from "@/pages/ExplorePage";
 import { FilesPage } from "@/pages/FilesPage";
@@ -8,6 +9,7 @@ import { MessagesPage } from "@/pages/MessagesPage";
 import { MorePage } from "@/pages/MorePage";
 import { PreviewPage } from "@/pages/PreviewPage";
 import { ToolboxPage } from "@/pages/ToolboxPage";
+import { TurnDetailPage } from "@/pages/TurnDetailPage";
 import { WhiteboardCanvasPage } from "@/pages/WhiteboardCanvasPage";
 import { WhiteboardPage } from "@/pages/WhiteboardPage";
 import { WhiteboardPreviewPage } from "@/pages/WhiteboardPreviewPage";
@@ -20,7 +22,7 @@ import { MemorySettings } from "@/pages/more/MemorySettings";
 import { ModelSettings } from "@/pages/more/ModelSettings";
 import { ShortcutsSettings } from "@/pages/more/ShortcutsSettings";
 import { UsageSettings } from "@/pages/more/UsageSettings";
-import { TownSimulationPage } from "@/pages/simulation/TownSimulationPage";
+import { TownLauncherPage } from "@/pages/simulation/TownLauncherPage";
 import { GuidelinesPage } from "@/pages/toolbox/GuidelinesPage";
 import { ToolsPage } from "@/pages/toolbox/ToolsPage";
 import {
@@ -44,6 +46,10 @@ export const router = createHashRouter([
       {
         element: <ConversationRoute />,
         children: [{ index: true }, { path: "conversations/:id" }],
+      },
+      {
+        path: "conversations/:id/turn/:turnId",
+        element: <TurnDetailPage />,
       },
       { path: "conversations", element: <ConversationsPage /> },
       { path: "files", element: <FilesPage /> },
@@ -73,8 +79,10 @@ export const router = createHashRouter([
       // Companion offline preview for the self-built whiteboard canvas (a scene surface, not an
       // SSE vector — see preview/whiteboardScenes.ts + scripts/shoot-whiteboard.mjs).
       { path: "preview/whiteboard", element: <WhiteboardPreviewPage /> },
-      // Dev MVP — sidebar nav item is dev-only; route stays registered for deep links.
-      { path: "simulation/town", element: <TownSimulationPage /> },
+      // Preview 开工提案 layout A/B (V2 = production kickoff default).
+      { path: "preview/ask-commence", element: <AskCommencePreviewPage /> },
+      // DT-01: Desktop launcher only (spawn AgentTown.exe + session.json).
+      { path: "simulation/town", element: <TownLauncherPage /> },
       {
         path: "more",
         element: <MorePage />,

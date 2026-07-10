@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using AgentTown.Simulation;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
@@ -9,7 +10,7 @@ namespace AgentTown.Town
     /// <summary>
     /// Resolves the API base / access token / run id at launch (§8). Precedence, low → high:
     /// built-in default → desktop <c>session.json</c> (§8.2) → desktop CLI args (§8.1) →
-    /// WebGL URL query (<c>?api=&amp;token=&amp;run=</c>, §8.1). CLI / URL win so a launcher can
+    /// WebGL URL query (<c>?api=&amp;token=&amp;run=&amp;demo=&amp;pack=&amp;shoot=</c>, §8.1). CLI / URL win so a launcher can
     /// always override the persisted session.
     /// </summary>
     public readonly struct AgentTownLaunchConfig
@@ -19,28 +20,62 @@ namespace AgentTown.Town
         public readonly string ApiBase;
         public readonly string AccessToken;
         public readonly string RunId;
+        /// <summary>When true, boot into client-local offline / demo mode (no backend LLM).</summary>
+        public readonly bool Demo;
+        /// <summary>Offline story pack id (<see cref="DemoPackIds"/>); default price_surge.</summary>
+        public readonly string PackId;
+        /// <summary>
+        /// Headless shoot mode: skip pack-intro modal, seek a landmark interaction tick,
+        /// and expose playhead via <see cref="AgentTownDemoBridge"/>.
+        /// </summary>
+        public readonly bool Shoot;
 
-        public AgentTownLaunchConfig(string apiBase, string accessToken, string runId)
+        public AgentTownLaunchConfig(
+            string apiBase,
+            string accessToken,
+            string runId,
+            bool demo = false,
+            string packId = null,
+            bool shoot = false)
         {
             ApiBase = apiBase;
             AccessToken = accessToken;
             RunId = runId;
+            Demo = demo;
+            PackId = DemoPackIds.Normalize(packId);
+            Shoot = shoot;
         }
+
+        /// <summary>
+        /// True when WebGL / CLI should auto-enter Offline demo: explicit <c>?demo</c>,
+        /// or no live credentials (empty token and run) so the watch surface is never blank.
+        /// </summary>
+        public bool ShouldAutoOfflineDemo =>
+            Demo || (string.IsNullOrEmpty(AccessToken) && string.IsNullOrEmpty(RunId));
 
         public static AgentTownLaunchConfig Load()
         {
             string apiBase = DefaultApiBase;
             string token = "";
             string runId = "";
+            bool demo = false;
+            string packId = DemoPackIds.PriceSurge;
+            bool shoot = false;
 
             ApplySessionJson(ref apiBase, ref token);
-            ApplyCommandLine(ref apiBase, ref token, ref runId);
-            ApplyUrlQuery(ref apiBase, ref token, ref runId);
+            ApplyCommandLine(ref apiBase, ref token, ref runId, ref demo, ref packId, ref shoot);
+            ApplyUrlQuery(ref apiBase, ref token, ref runId, ref demo, ref packId, ref shoot);
 
-            return new AgentTownLaunchConfig(apiBase, token, runId);
+            return new AgentTownLaunchConfig(apiBase, token, runId, demo, packId, shoot);
         }
 
-        private static void ApplyCommandLine(ref string apiBase, ref string token, ref string runId)
+        private static void ApplyCommandLine(
+            ref string apiBase,
+            ref string token,
+            ref string runId,
+            ref bool demo,
+            ref string packId,
+            ref bool shoot)
         {
 #if !UNITY_WEBGL || UNITY_EDITOR
             Dictionary<string, string> args = ParseCommandLine(Environment.GetCommandLineArgs());
@@ -62,10 +97,35 @@ namespace AgentTown.Town
             {
                 runId = run2;
             }
+
+            if (HasFlag(args, "demo") || HasFlag(args, "offline"))
+            {
+                demo = true;
+            }
+
+            if (HasFlag(args, "shoot"))
+            {
+                shoot = true;
+            }
+
+            if (args.TryGetValue("pack", out string pack) && !string.IsNullOrEmpty(pack))
+            {
+                packId = DemoPackIds.Normalize(pack);
+            }
+            else if (args.TryGetValue("demo-pack", out string pack2) && !string.IsNullOrEmpty(pack2))
+            {
+                packId = DemoPackIds.Normalize(pack2);
+            }
 #endif
         }
 
-        private static void ApplyUrlQuery(ref string apiBase, ref string token, ref string runId)
+        private static void ApplyUrlQuery(
+            ref string apiBase,
+            ref string token,
+            ref string runId,
+            ref bool demo,
+            ref string packId,
+            ref bool shoot)
         {
             string url = Application.absoluteURL;
             if (string.IsNullOrEmpty(url) || !url.Contains("?"))
@@ -92,6 +152,39 @@ namespace AgentTown.Town
             {
                 runId = run2;
             }
+
+            if (HasFlag(query, "demo") || HasFlag(query, "offline"))
+            {
+                demo = true;
+            }
+
+            if (HasFlag(query, "shoot"))
+            {
+                shoot = true;
+            }
+
+            if (query.TryGetValue("pack", out string pack) && !string.IsNullOrEmpty(pack))
+            {
+                packId = DemoPackIds.Normalize(pack);
+            }
+        }
+
+        private static bool HasFlag(Dictionary<string, string> map, string key)
+        {
+            if (!map.TryGetValue(key, out string value))
+            {
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(value) ||
+                string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
         }
 
         private static void ApplySessionJson(ref string apiBase, ref string token)

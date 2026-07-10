@@ -77,7 +77,9 @@
         "agent_id": "w1",
         "question": "数据库选 Postgres 还是 MySQL？这关系到后续所有选型，且猜错基本要整段返工。",
         "assumption": "暂按 Postgres 推进",
-        "questions": []
+        "questions": [],
+        "kind": "normal",
+        "awaiting": "user"
       },
       "timestamp": "2026-01-01T00:00:00.004Z"
     },
@@ -285,6 +287,7 @@
         "revisionOf": null,
         "revision": 0,
         "revised": null,
+        "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [],
         "escalations": [
@@ -293,7 +296,8 @@
             "assumption": "暂按 Postgres 推进",
             "blocking": true,
             "status": "resolved",
-            "answer": "用 Postgres。"
+            "answer": "用 Postgres。",
+            "kind": "normal"
           }
         ]
       },
@@ -333,6 +337,7 @@
         "revisionOf": null,
         "revision": 0,
         "revised": null,
+        "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [],
         "escalations": []

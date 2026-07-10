@@ -94,6 +94,22 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
     """Each worker's product folded back to the CEO — SINGLE SOURCE for synthesis + run_context."""
     from agentcore.runtime.runs.constants import CEO_SYNTHESIS_BUDGET, DEP_POINTER_SUMMARY_CHARS
     from agentcore.runtime.runs.fidelity import allocate, truncate_head_tail
+    from agentcore.runtime.runs.types import RunPhase
+
+    # Hot-redirect revisions (``{run_id}_revN``) are not plan nodes; map original → revision
+    # so a CANCELLED+redirected worker surfaces its continued product, not「无输出」.
+    hot_by_original: dict[str, tuple[str, Any]] = {}
+    plan_ids = {n.run_id for n in plan.nodes}
+    for rid, st in results.items():
+        if rid in plan_ids or st is None:
+            continue
+        if st.phase is not RunPhase.COMPLETED or not (st.content or "").strip():
+            continue
+        # Naming: continue_run / revise use ``{target}_rev{n}``
+        if "_rev" in rid:
+            orig = rid.rsplit("_rev", 1)[0]
+            if orig in plan_ids:
+                hot_by_original[orig] = (rid, st)
 
     # 完工交接简报: the content is already the pure deliverable (each worker's brief rides its
     # structured ``debrief`` from the handoff tool — never appended to the prose), so the body
@@ -102,9 +118,18 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
     cleaned: dict[str, tuple[str, dict[str, Any] | None]] = {}
     for node in plan.nodes:
         st = results.get(node.run_id)
-        cleaned[node.run_id] = (st.content, st.debrief) if st and st.content else ("", None)
+        if node.run_id in hot_by_original:
+            _rid, hot_st = hot_by_original[node.run_id]
+            cleaned[node.run_id] = (hot_st.content, hot_st.debrief)
+        else:
+            cleaned[node.run_id] = (st.content, st.debrief) if st and st.content else ("", None)
 
     def _mode(node) -> str:
+        if node.run_id in hot_by_original:
+            _rid, hot_st = hot_by_original[node.run_id]
+            if hot_st.files_touched:
+                return "pointer"
+            return "pass_through" if hot_st.content else "none"
         st = results.get(node.run_id)
         if not st or not st.content:
             return "none"
@@ -123,10 +148,26 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
             CEO_SYNTHESIS_BUDGET,
         )
     )
+    # Cold handoff: a CANCELLED original that a ``_redir`` (replaces_run_id) took over
+    # must not surface as「失败/被跳过」— the handoff node is the product.
+    replaced_ids = {n.replaces_run_id for n in plan.nodes if n.replaces_run_id}
+
     products: list[dict[str, Any]] = []
     for node in plan.nodes:
         state = results.get(node.run_id)
-        status = state.phase.value if state else "unknown"
+        if (
+            state is not None
+            and state.phase is RunPhase.CANCELLED
+            and node.run_id in replaced_ids
+            and node.run_id not in hot_by_original
+        ):
+            continue
+        hot = hot_by_original.get(node.run_id)
+        if hot is not None:
+            status = "completed"
+            state = hot[1]
+        else:
+            status = state.phase.value if state else "unknown"
         label = node.role or node.run_id
         mode = modes[node.run_id]
         clean, debrief = cleaned[node.run_id]
@@ -166,7 +207,7 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
         products.append(
             {
                 "role": label,
-                "run_id": node.run_id,
+                "run_id": hot[0] if hot else node.run_id,
                 "status": status,
                 "body": body,
                 "fidelity": fidelity,

@@ -18,6 +18,7 @@ import {
   Rocket,
 } from "lucide-react";
 import { useState } from "react";
+import { AskCommenceKickoffBody } from "./ask/AskCommenceKickoff";
 import {
   AskNoteField,
   AskQuestionFields,
@@ -108,12 +109,12 @@ const RESOLVED_DECISION_ICON = {
 /**
  * The live, actionable ask_user card body — the single asking surface, shared by the
  * inline live card ({@link CheckpointCard}) and the durable 待恢复 resume card
- * (ResumePrompt). Renders framing + optional 起步计划 (read-only) + askable questions
- * + 风格 + a free note, settled by 提交 (→ continue) or 停止. The picks are composed
- * into ONE readable note (答复模型 α — the only reader is the CEO), handed to
- * `onSubmit`; the caller wires it to the resolve (live) or resume (durable) endpoint.
+ * (ResumePrompt). Settled by 提交/就这样开做 (→ continue) or 停止. Picks compose into
+ * ONE readable note (答复模型 α), handed to `onSubmit`.
  *
- * Tone: 灰壳灰选项（neutral）——内容区低调如配置表单；Footer 主 CTA 仍用品牌蓝承载行动信号。
+ * - **kickoff**：V2 Brief + Choose（左右分区 / 扫读 brief / card 选项 / 主次 CTA）。
+ * - **decision**：紧凑单栏拍板（灰壳灰选项；Footer 主 CTA 仍用品牌蓝）。
+ *
  * icon + caption + CTA 文案由后端 intent 查表驱动。真·风险审批由 ApprovalPrompt 承载（蓝）。
  */
 export function AskUserCard({
@@ -151,11 +152,33 @@ export function AskUserCard({
     });
   };
 
+  // Kickoff: production default = V2 Brief + Choose (same IA as AskCommenceV2 preview).
+  if (intent === "kickoff") {
+    return (
+      <DecisionCard
+        tone="neutral"
+        animate
+        className="flex max-h-[min(78vh,42rem)] flex-col overflow-hidden p-0"
+        data-ask-intent="kickoff"
+      >
+        <AskCommenceKickoffBody
+          content={content}
+          answer={ans}
+          busy={busy}
+          submitting={submitting}
+          onContinue={() => send("continue")}
+          onStop={() => send("stop")}
+        />
+      </DecisionCard>
+    );
+  }
+
   return (
     <DecisionCard
       tone="neutral"
       animate
       className="flex max-h-[min(50vh,28rem)] flex-col overflow-hidden p-0"
+      data-ask-intent="decision"
     >
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 pt-3">
         <div className="flex items-start gap-1.5">
@@ -186,7 +209,7 @@ export function AskUserCard({
           answer={ans}
           tone={tone}
           disabled={busy}
-          placeholder={intent === "kickoff" ? "有补充可以写在这里" : "补充说明"}
+          placeholder="补充说明"
         />
       </div>
 
@@ -224,13 +247,6 @@ export function AskUserCard({
             停止
           </Button>
         </div>
-        {config.showFooterHint && (
-          <span className="block text-xs text-muted-foreground">
-            {ans.presetCount > 0
-              ? `已预填 ${ans.presetCount} 项，直接开做或按需调整`
-              : "也可直接在下方对话框回复"}
-          </span>
-        )}
       </div>
     </DecisionCard>
   );

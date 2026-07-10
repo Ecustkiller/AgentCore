@@ -277,6 +277,35 @@ async def test_delete_bridge_drops_frame(session_factory, monkeypatch):
     assert await persist_mod.claim_paused_turn(mid, conversation_id=cid) is None
 
 
+async def test_restore_paused_turn_after_claim_allows_retry(session_factory, monkeypatch):
+    """Cloud resume failure parity: claim deletes the row; restore puts it back for retry."""
+    monkeypatch.setattr(persist_mod, "async_session_factory", session_factory)
+    mid, cid, uid = str(uuid4()), str(uuid4()), str(uuid4())
+    frame = _frame(mid, cid, uid)
+    await persist_mod.save_paused_turn(frame)
+
+    claimed = await persist_mod.claim_paused_turn(mid, conversation_id=cid)
+    assert claimed is not None
+    assert await persist_mod.list_paused_turns(cid) == []
+    assert await persist_mod.claim_paused_turn(mid, conversation_id=cid) is None
+
+    await persist_mod.restore_paused_turn(claimed)
+
+    pending = await persist_mod.list_paused_turns(cid)
+    assert [f.message_id for f in pending] == [mid]
+    again = await persist_mod.claim_paused_turn(mid, conversation_id=cid)
+    assert again is not None
+    assert again.message_id == mid
+    assert again.checkpoint_id == "ck1"
+    # turn_journal survived the first claim; re-claim still re-hydrates it.
+    assert [e["kind"] for e in again.journal_entries] == [
+        "turn_started",
+        "round_boundary",
+        "llm_call",
+        "plan_review_required",
+    ]
+
+
 async def test_retention_sweep_prunes_aged_and_batches(session_factory, monkeypatch):
     monkeypatch.setattr(retention_mod, "async_session_factory", session_factory)
     monkeypatch.setattr(settings, "structured_suspension_persist_enabled", True)

@@ -41,6 +41,20 @@ export function lastAssistantMessageId(messages: Message[]): string | null {
   return null;
 }
 
+/** Stable turn / execution key: server turn id when stamped, else client bubble id. */
+export function assistantProjectionId(message: Message): string {
+  return message.serverMessageId ?? message.id;
+}
+
+/** Projection key of the last assistant (for live SSE → execution.byId). */
+export function lastAssistantProjectionId(messages: Message[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "assistant")
+      return assistantProjectionId(messages[i]);
+  }
+  return null;
+}
+
 export function runtimeOf(
   state: ConversationStateSlice,
   conversationId?: string | null,

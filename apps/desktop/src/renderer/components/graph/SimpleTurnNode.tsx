@@ -9,9 +9,8 @@ import { useState } from "react";
  * draw, so it degenerates to a light card in the same vertical spine — the canvas
  * stays a faithful record of the whole conversation without faking a graph.
  *
- * Read-only context (the full answer lives in 聊天 view): shows the prompt as title
- * and a short answer snippet. Quieter than {@link TurnSummaryNode} so the eye goes
- * to the real teamwork.
+ * Card face shows the prompt as title and a short answer snippet; click opens the
+ * side-panel `simple-turn` Q&A tab with the full prompt + answer (不离开画布).
  */
 export interface SimpleTurnData {
   prompt: string;
@@ -33,7 +32,7 @@ export function SimpleTurnNode({ data }: NodeProps) {
     <>
       <Handle type="target" position={Position.Top} className="!bg-border" />
       <div
-        className={`w-[320px] rounded-xl border border-border bg-muted/30 px-3.5 py-3 shadow-sm ${
+        className={`w-[320px] cursor-pointer rounded-xl border border-border bg-muted/30 px-3.5 py-3 shadow-sm ${
           entered ? "animate-task-card-enter" : ""
         }`}
       >

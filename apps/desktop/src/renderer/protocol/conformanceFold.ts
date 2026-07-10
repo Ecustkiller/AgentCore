@@ -25,6 +25,7 @@ import {
   foldPlanReviewMarker,
   foldReasoningDelta,
   foldTeamMarker,
+  foldTeamPreviewMarker,
   foldToolUseEnd,
   foldToolUseStart,
 } from "@/lib/foldMessageLane";
@@ -56,6 +57,7 @@ import type {
   RunPlanPayload,
   RunStartedPayload,
   SSEEvent,
+  TeamPreviewRequiredPayload,
   ToolUseEndPayload,
   ToolUseStartPayload,
 } from "@/types/events";
@@ -193,6 +195,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "run_tool_progress":
       case "run_completed":
       case "run_failed":
+      case "run_cancelled":
       case "run_progress":
       //「计划已调整」轻痕迹 (设计 §7.2): a NON-interrupting trace — folds onto the runs'
       // `revised` via the same frame path (no gate, like the escalate banner).
@@ -271,6 +274,25 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         }
         break;
       }
+      case "team_preview_required": {
+        const p = ev.payload as TeamPreviewRequiredPayload;
+        messageLane = foldTeamPreviewMarker(messageLane, p.checkpoint_id);
+        pending = {
+          kind: "team_preview",
+          checkpointId: p.checkpoint_id,
+          workerIds: (p.workers ?? []).map((w) => w.run_id),
+        };
+        status = "paused";
+        break;
+      }
+      case "team_preview_resolved": {
+        const cid = (ev.payload as { checkpoint_id: string }).checkpoint_id;
+        if (pending?.kind === "team_preview" && pending.checkpointId === cid) {
+          pending = null;
+          status = "running";
+        }
+        break;
+      }
       case "approval_required": {
         const p = ev.payload as ApprovalRequiredPayload;
         pending = {
@@ -339,6 +361,11 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "tool_progress":
       case "tool_use_progress":
       case "batch_metrics":
+      case "run_intake":
+      case "run_escalation_gate":
+      case "run_split_assessed":
+      case "run_subworker_started":
+      case "run_subworker_completed":
       case "debate_round_decision_required":
       case "debate_round_decision_resolved":
       case "delegation_authorization_required":
@@ -347,6 +374,8 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "handoff_snapshot_done":
       case "handoff_job_started":
       case "handoff_apply_done":
+      // CEO 协调模式 Phase 1：团队进展摘要 — transport-only 预览，不进 ProjectedTurn。
+      case "team_synthesis_preview":
       case "sim.agent_action":
       case "sim.agent_state":
       case "sim.interaction":
@@ -400,17 +429,26 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     revisionOf: r.revisionOf,
     revision: r.revision,
     revised: r.revised,
+    replacesRunId: r.replacesRunId,
     checkpoint: r.checkpoint,
     receivedContext: r.receivedContext,
     // Strip the desktop-local `id` (the resolve target): the conformance RunEscalation is the
-    // 5-field {question, assumption, blocking, status, answer} the oracle golden carries — keeping
-    // `id` out here is what lets us thread it through the store without widening the cross-end contract.
+    // golden fields the oracle carries — keeping `id` out here is what lets us thread it
+    // through the store without widening the cross-end contract.
     escalations: r.escalations.map((e) => ({
       question: e.question,
       assumption: e.assumption,
       blocking: e.blocking,
       status: e.status,
       answer: e.answer,
+      kind: e.kind ?? "normal",
+      ...(e.awaiting === "ceo" ? { awaiting: "ceo" as const } : {}),
+      ...(e.arbitrated_by === "ceo"
+        ? {
+            arbitrated_by: "ceo" as const,
+            ...(e.via_user != null ? { via_user: e.via_user } : {}),
+          }
+        : {}),
     })),
   }));
 

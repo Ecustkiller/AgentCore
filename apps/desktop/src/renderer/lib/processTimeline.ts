@@ -74,6 +74,15 @@ export function dropTrailingContentSteps(
   return steps;
 }
 
+/** Append the 核验回炉轻 chip after dropping discarded draft content. */
+export function appendReworkStep(
+  process: ProcessStep[] | undefined,
+): ProcessStep[] {
+  const steps = process ? [...process] : [];
+  steps.push({ kind: "rework" });
+  return steps;
+}
+
 /** Append a started tool call as a `running` step to the timeline.
  *
  * Skipped (returns the same reference so callers can no-op) for:
@@ -232,6 +241,20 @@ export function appendPlanReviewStep(
   return [
     ...(process ?? []),
     { kind: "plan_review", checkpoint_id: checkpointId },
+  ];
+}
+
+/** Drop a `team_preview` marker (thin team-preview gate) at its chronological spot. */
+export function appendTeamPreviewStep(
+  process: ProcessStep[] | undefined,
+  checkpointId: string,
+): ProcessStep[] {
+  if (!checkpointId) return process ?? [];
+  if (hasMarker(process, "team_preview", "checkpoint_id", checkpointId))
+    return process ?? [];
+  return [
+    ...(process ?? []),
+    { kind: "team_preview", checkpoint_id: checkpointId },
   ];
 }
 

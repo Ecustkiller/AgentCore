@@ -183,16 +183,21 @@ async def execute_tools(
                 )
                 or "Unknown error"
             )
-        sink.emit(
-            tool_use_end(
-                tc.id,
-                name,
-                success=result.success,
-                output=output,
-                display=result.display,
-                run_id=run_id,
+        # 挂起即收口: a SUSPEND terminal already persisted its *_required card in the
+        # pause snapshot. Emitting a durable tool_use_end here would append a fact that
+        # diverges snapshot vs DB (and the call stays PENDING — no tool_call fact either).
+        # Live UI already has the interaction card; skip the end event entirely.
+        if result.effect is not ToolEffect.SUSPEND:
+            sink.emit(
+                tool_use_end(
+                    tc.id,
+                    name,
+                    success=result.success,
+                    output=output,
+                    display=result.display,
+                    run_id=run_id,
+                )
             )
-        )
         logger.info(
             "tool.execute_end",
             tool=name,

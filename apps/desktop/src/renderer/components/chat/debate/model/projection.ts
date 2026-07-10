@@ -151,7 +151,7 @@ function settledModel(
     verdict: round.verdict,
     inFlight: false,
     clashes: resolveClashes(round.clashes, round.sides),
-    userInterjections: round.user_interjections,
+    userInterjections: round.user_interjections ?? [],
     crossExam: resolveCrossExam(round.cross_exam, round.sides, execution),
     scores: resolveScores(round.scores, round.sides),
     sides: round.sides.map((side): DebateSideModel => {

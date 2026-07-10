@@ -2,6 +2,7 @@ import type {
   DebateNarrativeRound,
   DebateResultPayload,
   RunPlanPayload,
+  TeamSynthesisPreviewPayload,
   ToolUseProgressPayload,
 } from "@/types/events";
 import { create } from "zustand";
@@ -46,6 +47,9 @@ export interface ExecutionRuntime {
   /** Worker-scoped `tool_use_progress` (run_id present), keyed by run id. Transport-only —
    * merged onto agents at projection time; never journaled or replayed. */
   workerToolPhases: Record<string, { phase: string; toolName: string }>;
+  /** CEO 协调模式 Phase 1：`team_synthesis_preview` 最新快照。Transport-only — 不进 frame /
+   * journal；重载恒 null。驱动 StatusStrip「团队进展」预览行。 */
+  teamSynthesisPreview: TeamSynthesisPreviewPayload | null;
 }
 
 /**
@@ -98,6 +102,12 @@ interface ExecutionState {
   ) => void;
   /** Clear a worker's live EXECUTION phase when its tool finishes (`tool_use_end`). */
   clearWorkerToolPhase: (runId: string, messageId: string) => void;
+  /** Stamp the latest multi-worker team progress preview (`team_synthesis_preview`).
+   * Transport-only — not a frame; reload clears it. */
+  setTeamSynthesisPreview: (
+    preview: TeamSynthesisPreviewPayload,
+    messageId: string,
+  ) => void;
   setStatus: (status: ExecutionStatus, messageId: string) => void;
   setPlayhead: (index: number | null, messageId: string) => void;
   goLive: (messageId: string) => void;
@@ -109,6 +119,12 @@ interface ExecutionState {
    * or a late history fetch never clobbers live frames.
    */
   hydrateFromJournal: (messageId: string, journal: ExecutionJournal) => void;
+  /**
+   * One-time migrate when `message_start` stamps `serverMessageId`: move the
+   * execution slot from the client bubble id to the server turn id so pause and
+   * resume share one key. Not a resume remount.
+   */
+  alignTurnKey: (fromId: string, toId: string) => void;
 }
 
 const EMPTY_EXEC: ExecutionRuntime = {
@@ -120,6 +136,7 @@ const EMPTY_EXEC: ExecutionRuntime = {
   debateRounds: [],
   debateDecisions: [],
   workerToolPhases: {},
+  teamSynthesisPreview: null,
 };
 
 /** Map a persisted turn's `finish_reason` to the terminal execution status the
@@ -173,6 +190,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         debateRounds: [],
         debateDecisions: [],
         workerToolPhases: {},
+        teamSynthesisPreview: null,
       })),
 
     ingestPlan: (plan, messageId) => {
@@ -246,6 +264,11 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         return { workerToolPhases: rest };
       }),
 
+    setTeamSynthesisPreview: (preview, messageId) =>
+      patchExec(messageId, (cur) =>
+        cur.plan ? { teamSynthesisPreview: preview } : null,
+      ),
+
     setStatus: (status, messageId) => patchExec(messageId, () => ({ status })),
 
     setPlayhead: (index, messageId) =>
@@ -288,9 +311,25 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               // 交互式逐轮决策卡同为 transport-only：重载恒空（决策已体现在收场叙事 / 轮次）。
               debateDecisions: [],
               workerToolPhases: {},
+              teamSynthesisPreview: null,
             },
           },
         };
+      }),
+
+    alignTurnKey: (fromId, toId) =>
+      set((state) => {
+        if (!fromId || !toId || fromId === toId) return {};
+        const from = state.byId[fromId];
+        if (!from) return {};
+        const to = state.byId[toId];
+        // Prefer the destination if it already has a plan; only move when empty.
+        if (to?.plan) {
+          const { [fromId]: _, ...rest } = state.byId;
+          return { byId: rest };
+        }
+        const { [fromId]: _, ...rest } = state.byId;
+        return { byId: { ...rest, [toId]: from } };
       }),
   };
 });

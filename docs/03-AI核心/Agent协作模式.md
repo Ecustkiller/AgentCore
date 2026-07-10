@@ -79,7 +79,7 @@ Agent 间**不直接通信**——上游产物经调度器中转注入下游；�
 
 worker 唯一的向上通道。`blocking=false`（默认）= 上报后按 `assumption` 继续交付，CEO 收尾纠偏；`run_escalation` SSE 让升级进行中可见。
 
-**阻塞式求决策（`blocking=true`）✅**：worker 撞上「只有用户能定、猜错就作废」的岔路时，经 `ToolContext.escalation` 端口挂起等用户；超时回落非阻塞行为（按 `assumption` 续跑）。**采纳 worker→用户**（复用 `InteractionRegistry` + `ESCALATION` kind），**否决 worker→CEO 波内重入**——CEO 调 `delegate` 后 ReAct 停在工具调用上，波内无活着的 CEO。
+**阻塞式求决策（`blocking=true`）✅**：worker 撞上「只有用户能定、猜错就作废」的岔路时，经 `ToolContext.escalation` 端口挂起等用户；超时回落非阻塞行为（按 `assumption` 续跑）。**采纳 worker→用户**（复用 `InteractionRegistry` + `ESCALATION` kind），默认阻塞 `delegate` 下 **否决 worker→CEO 波内重入**——CEO 调 `delegate` 后 ReAct 停在工具调用上，波内无活着的 CEO。**协调模式例外（✅ D1）**：≥2 worker 默认协调时 CEO 波内存活，阻塞 escalate 改挂起等 CEO 的 `resolve_escalation`（初始不发用户可答卡）；偏好/授权/费用类 CEO 须先 `ask_user` 再 resolve（`via_user`），超时回落 `assumption`。见 [`编排器与CEO主Agent.md` §协调模式](/docs/03-AI核心/编排器与CEO主Agent.md)。
 
 **结构化提问 ✅**：岔路若是干净的 A/B 或多选，worker 可附**结构化 `questions`**（结构同 `ask_user`：choice/text + `options`/`default`，随 `escalation_required` 下发），挂起卡复用 `ask_user` 的问答内核渲染，用户一键拍板而非读散文手敲；纯开放问题则省略、回退自由文本。关键约束：**前端把选项选择拍平成纯文本答复**回填，故后端 resolve 契约（`{answer, use_assumption}`）与挂起恢复路径**保持不变**；`questions` 为 desktop-local（不进 conformance golden），手机端忽略至其应答卡落地。
 
@@ -95,7 +95,7 @@ worker 唯一的向上通道。`blocking=false`（默认）= 上报后按 `assum
 - `kind=scope`：worker 发现自己 / 下游 scope 错了 → 主管在波边界**操舵已有步骤**纠偏（计划漂移）。
 - `kind=dep`：worker 卡在一个**还不存在**的输入 / 依赖（没人产出过、计划也没安排）→ 主管在波边界用 `replan(add)` **追加一个产出它的步骤 / 接一条依赖边**。它是「变·拉取」里「东西不存在」那一支（见 §波内共享上下文：便签墙·拉取）。
 
-worker 全程 non-blocking、照常按假设把能做的做完；简报（`supervised.py::format_scope_boundary`）按 kind 分标「偏离 / 缺输入」并指向对应 `replan` 杠杆，无下游可补时退回收尾路。**度量不串**：`dep` 计入总升级数但**不进** `scope_escalations`，漂移率口径仍纯。执行语义见 [执行引擎 §一·受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)。前端：`EscalationCard`（结构化升级与 `ask_user` 共用问答内核 `AskUserFields`）、图节点「待你拍板」角标；⏳ 手机交互层（fold 已有、应答卡未落地）。
+worker 全程 non-blocking、照常按假设把能做的做完；简报（`supervised.py::format_scope_boundary`）按 kind 分标「偏离 / 缺输入」并指向对应 `replan` 杠杆，无下游可补时退回收尾路。**度量不串**：`dep` 计入总升级数但**不进** `scope_escalations`，漂移率口径仍纯。执行语义见 [执行引擎 §一·受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)。前端：`EscalationCard` / 节点角标按 kind 分标「普通 / 缺输入 / 职责偏离」（`kind` 已上 wire：`run_escalation` / `escalation_required`）；⏳ 手机交互层（fold 已有、应答卡未落地）。
 
 > **schema 姿态（2026-06-30）**：`normal` / `blocking` 克制使用（小事自行假设别升级、blocking 省着用，避「问题墙 / 动辄打断用户」反模式）；**唯独 `dep` 该喊就喊**——真卡在「再猜也是错」的缺口上别硬猜瞎编，主动发 `dep` 强过闷头产一堆作废的东西。
 
@@ -202,11 +202,13 @@ CEO 主 Agent、`delegate` 按需委派与 DAG 波次调度——→ 见 [`编�
 
 ## 七、多 Agent 运行时机制
 
-> 委派地基**已落地**；**§7.2 Preflight / §7.3 Team 编排 / §7.5 A2A 仍为 Phase 2**。
+> 委派地基**已落地**；**团队预审薄预览 ✅**；**§7.2 完整 Preflight Audit / §7.3 Team 编排 / §7.5 A2A 仍为 Phase 2**。
 
-### 7.2 委派预审（Preflight Audit）⏳ 未实现
+### 7.2 委派预审
 
-Captain 委派的两阶段「提案 + 审计 + 确认执行」流程；有界预检环（每轮最多 N 次 audit）——待 preflight 审计回归落地。
+**薄预览（✅ 已落地）**：开干前否决权——首波前展示即将上场的团队（角色 / 任务摘要 / 依赖 / 是否辩论），三按钮开做 / 调整 / 停止。挂起条件、跳过规则、与 `plan_review` / `ask_user` 边界见 [`编排器与CEO主Agent.md` §五](/docs/03-AI核心/编排器与CEO主Agent.md)。Interaction kind = `team_preview`；事件 `team_preview_required` / `team_preview_resolved`；前端 `TeamPreviewCard` + durable resume。
+
+**完整 Preflight Audit（⏳ 未实现）**：有界预检环（每轮最多 N 次 audit）+ 可编辑改 DAG / 换人换边 + Agent 实体化绑定 + 设置项 opt-out——待审计回归落地；本批不是审计环。
 
 ### 7.3 Team 编排（Orchestration）⏳ 未实现
 

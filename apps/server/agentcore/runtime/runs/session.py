@@ -23,14 +23,19 @@ if TYPE_CHECKING:
 
 @dataclass
 class RunSession:
-    """One worker run kept alive for 定向唤回.
+    """One worker run kept alive for 定向唤回 / 跑一半改方向热续写.
 
-    ``transcript`` is the worker's complete message history (system + task + every
-    assistant/tool turn + its final answer) — replayable as the starting point for
-    a revision. ``spec`` is the source :class:`RunSpec` (carries role / model tier /
-    allowed tools / contract), so a continuation runs as the same author under the
-    same policy. ``recall_count`` is how many times this run has been revised (the
-    改次闸 reads it). ``content`` mirrors the latest answer for quick display.
+    ``transcript`` is the worker's message history (system + task + every
+    assistant/tool turn + its final answer when complete) — replayable as the
+    starting point for a revision. ``spec`` is the source :class:`RunSpec` (carries
+    role / model tier / allowed tools / contract), so a continuation runs as the
+    same author under the same policy. ``recall_count`` is how many times this run
+    has been revised (the 改次闸 reads it). ``content`` mirrors the latest answer
+    for quick display.
+
+    ``partial`` marks a mid-flight salvage from a redirect cancel (尚未 COMPLETED、
+    但有可序列化 transcript)。热路径 ``continue_run`` 吃这份草稿；空 transcript 不
+    应建成 partial session（直接冷回落）。
     """
 
     run_id: str
@@ -38,5 +43,6 @@ class RunSession:
     transcript: list[LLMMessage]
     content: str
     recall_count: int = 0
+    partial: bool = False
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)

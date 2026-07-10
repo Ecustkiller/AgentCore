@@ -66,7 +66,7 @@ namespace AgentTown.Tests
                 Location = "市场",
                 Activity = "卖面包",
                 Mood = 0.4,
-                Position = new WireVec3(24.0, 0.0, 0.0),
+                Position = new WireVec3(36.0, 0.0, 0.0),
             };
             session.ApplySnapshot(snapshot);
 
@@ -86,6 +86,30 @@ namespace AgentTown.Tests
             Assert.IsNotNull(chen);
             Assert.IsFalse(chen.HasLiveState, "chen has no live state yet");
             Assert.AreEqual("公园", chen.Location, "location falls back to home region");
+        }
+
+        [Test]
+        public void ResidentMerge_PrefersLiveRelationships()
+        {
+            var session = new SimulationSession();
+            session.Reset();
+
+            var snapshot = new SimTickSnapshot { Tick = 9, Hour = 16 };
+            snapshot.Agents["zhao"] = new SimAgentState
+            {
+                AgentId = "zhao",
+                Location = "市场",
+                Mood = -0.2,
+                Relationships = new Dictionary<string, double> { ["wang"] = -0.85 },
+            };
+            session.ApplySnapshot(snapshot);
+
+            ResidentView zhao = TownResidents.Merge("zhao", session);
+            Assert.IsTrue(zhao.HasLiveState);
+            Assert.IsTrue(zhao.Relationships.ContainsKey("wang"));
+            Assert.AreEqual(-0.85, zhao.Relationships["wang"], 1e-4);
+            // Local persona seed is -0.4; live snapshot must win for HUD detail.
+            Assert.Less(zhao.Relationships["wang"], -0.4);
         }
     }
 }

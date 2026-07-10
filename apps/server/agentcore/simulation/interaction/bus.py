@@ -47,6 +47,15 @@ class InteractionBus:
     def pending_count(self) -> int:
         return len(self._pending)
 
+    def has_pending_kind(self, kind: InteractionKind) -> bool:
+        return any(req.kind == kind for req in self._pending)
+
+    def take_pending(self) -> list[InteractionRequest]:
+        """Drain and return the pending queue (caller owns execution)."""
+        queue = list(self._pending)
+        self._pending.clear()
+        return queue
+
     def enqueue(self, request: InteractionRequest) -> None:
         self._pending.append(request)
 

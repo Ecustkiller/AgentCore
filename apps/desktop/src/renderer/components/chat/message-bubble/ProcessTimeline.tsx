@@ -4,6 +4,7 @@ import { InlineTeamGraph } from "@/components/chat/InlineTeamGraph";
 import { Markdown } from "@/components/chat/Markdown";
 import { NonBlockingAskCard } from "@/components/chat/NonBlockingAskCard";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
+import { TeamPreviewCard } from "@/components/chat/TeamPreviewCard";
 import {
   ComposingToolLine,
   ToolLine,
@@ -14,6 +15,7 @@ import type {
   CheckpointDisplay,
   NonBlockingAskDisplay,
   PlanReviewDisplay,
+  TeamPreviewDisplay,
 } from "@/stores/conversation";
 import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import type { ExecutionJournal } from "@/stores/execution";
@@ -121,6 +123,13 @@ function ProcessRow({
       />
     );
   }
+  if (step.kind === "rework") {
+    return (
+      <span className="inline-flex items-center rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+        已按交付规范重写
+      </span>
+    );
+  }
   // Positional markers (team/checkpoint/ask/plan_review) are resolved in the timeline
   // map, never routed here — only a `tool` step reaches this tail.
   if (step.kind === "tool") return <ToolLine step={step} turnKey={turnKey} />;
@@ -141,6 +150,7 @@ export function ProcessTimeline({
   checkpoints,
   nonBlockingAsks,
   planReviews,
+  teamPreviews,
 }: {
   process: ProcessStep[];
   isStreaming: boolean;
@@ -155,6 +165,7 @@ export function ProcessTimeline({
   checkpoints: CheckpointDisplay[];
   nonBlockingAsks: NonBlockingAskDisplay[];
   planReviews: PlanReviewDisplay[];
+  teamPreviews: TeamPreviewDisplay[];
 }) {
   const last = process[process.length - 1];
   const hasContentStep = process.some((s) => s.kind === "content");
@@ -211,6 +222,10 @@ export function ProcessTimeline({
     if (node.kind === "plan_review") {
       const pr = planReviews.find((p) => p.id === node.checkpoint_id);
       return pr ? <PlanReviewCard key={pr.id} review={pr} /> : null;
+    }
+    if (node.kind === "team_preview") {
+      const tp = teamPreviews.find((p) => p.id === node.checkpoint_id);
+      return tp ? <TeamPreviewCard key={tp.id} preview={tp} /> : null;
     }
     if (node.kind === "tool-group") {
       return (

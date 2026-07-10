@@ -16,15 +16,14 @@
     "deploy:backend": "node deploy/scripts/remote-build-deploy.mjs",
     "deploy:backend:status": "node deploy/scripts/check-remote-build.mjs",
     "sync:logs": "bash scripts/sync-prod-logs.sh",
-    "town:preview": "pnpm -C apps/desktop run shoot:simulation",
-    "town:dev": "pnpm -C apps/desktop run dev:town",
-    "town:install-ue": "powershell -ExecutionPolicy Bypass -File apps/town/scripts/install-ue.ps1",
-    "town:build": "powershell -ExecutionPolicy Bypass -File apps/town/scripts/build-agenttown.ps1",
-    "town:test": "powershell -ExecutionPolicy Bypass -File apps/town/scripts/test-agenttown.ps1",
-    "town:shoot": "powershell -ExecutionPolicy Bypass -File apps/town/scripts/shoot-agenttown.ps1",
+    "town:build": "powershell -ExecutionPolicy Bypass -File apps/town/scripts/build-unity.ps1",
+    "town:build:webgl": "powershell -ExecutionPolicy Bypass -File apps/town/scripts/build-unity.ps1 -Target WebGL",
+    "town:spike:webgl": "powershell -ExecutionPolicy Bypass -File apps/town/scripts/spike-webgl-sse.ps1",
+    "town:serve:webgl": "powershell -ExecutionPolicy Bypass -File apps/town/scripts/serve-webgl-demo.ps1",
+    "town:shoot:webgl": "node apps/town/scripts/shoot-webgl-demo.mjs",
+    "town:sync-assets": "powershell -ExecutionPolicy Bypass -File apps/town/scripts/sync-assets.ps1",
     "town:verify": "powershell -ExecutionPolicy Bypass -File apps/town/scripts/verify-unity.ps1",
-    "town:open": "powershell -ExecutionPolicy Bypass -File apps/town/scripts/open-unity.ps1",
-    "town:watch": "powershell -ExecutionPolicy Bypass -File apps/town/scripts/watch-ue-and-build.ps1"
+    "town:open": "powershell -ExecutionPolicy Bypass -File apps/town/scripts/open-unity.ps1"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -36,5 +35,8 @@
       "esbuild": "^0.25.0",
       "js-yaml": "^4.2.0"
     }
+  },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.23"
   }
 }

@@ -16,6 +16,8 @@ interface ElkGraphNode {
 const NODE_WIDTH = 210;
 const NODE_HEIGHT = 110;
 
+export type NodeSizeMap = Record<string, { width: number; height: number }>;
+
 /** 内嵌聊天气泡（fit-to-width）：偏紧，包围盒小、缩放更接近 1。 */
 export const NODE_SPACING_EMBED = 40;
 /** 全屏 / 画布放大态：同层 +8px，改善宽并行列可读性。 */
@@ -132,9 +134,13 @@ export async function computeLayout(
   bookends: LayoutBookends = {},
   subTeams: SubTeamInput[] = [],
   nodeSpacing: number = NODE_SPACING_EMBED,
+  nodeSizes: NodeSizeMap = {},
 ): Promise<LayoutResult> {
   if (nodeIds.length === 0)
     return { positions: {}, width: 0, height: 0, groups: [] };
+
+  const sizeOf = (id: string): { width: number; height: number } =>
+    nodeSizes[id] ?? { width: NODE_WIDTH, height: NODE_HEIGHT };
 
   const subTeamByParent = new Map(subTeams.map((st) => [st.parentId, st]));
 
@@ -217,29 +223,33 @@ export async function computeLayout(
     });
 
   const buildGroupElkNode = (st: SubTeamInput): ElkGraphNode => {
+    const parentSize = sizeOf(st.parentId);
     const groupChildren: ElkGraphNode[] = [
-      { id: st.parentId, width: NODE_WIDTH, height: NODE_HEIGHT },
+      { id: st.parentId, width: parentSize.width, height: parentSize.height },
     ];
     for (const rev of revisionDescendantsOf(st.parentId)) {
-      groupChildren.push({ id: rev, width: NODE_WIDTH, height: NODE_HEIGHT });
+      const s = sizeOf(rev);
+      groupChildren.push({ id: rev, width: s.width, height: s.height });
     }
     for (const memberId of st.memberIds) {
       const nested = subTeamByParent.get(memberId);
       if (nested) {
         groupChildren.push(buildGroupElkNode(nested));
       } else {
+        const ms = sizeOf(memberId);
         groupChildren.push({
           id: memberId,
-          width: NODE_WIDTH,
-          height: NODE_HEIGHT,
+          width: ms.width,
+          height: ms.height,
         });
         // A leaf member's continuation rounds live in the same compound; ELK sizes
         // the box around them and internal revision edges lay them out in-column.
         for (const rev of revisionDescendantsOf(memberId)) {
+          const rs = sizeOf(rev);
           groupChildren.push({
             id: rev,
-            width: NODE_WIDTH,
-            height: NODE_HEIGHT,
+            width: rs.width,
+            height: rs.height,
           });
         }
       }
@@ -275,10 +285,11 @@ export async function computeLayout(
   const topLevelChildren: ElkGraphNode[] = [];
   for (const id of nodeIds) {
     if (inAnyTeam(id)) continue;
+    const s = sizeOf(id);
     topLevelChildren.push({
       id,
-      width: NODE_WIDTH,
-      height: NODE_HEIGHT,
+      width: s.width,
+      height: s.height,
       ...(id === bookends.source
         ? {
             layoutOptions: {
@@ -395,8 +406,9 @@ export async function computeLayout(
   let maxX = 0;
   let maxY = 0;
   for (const id of Object.keys(positions)) {
-    maxX = Math.max(maxX, positions[id].x + NODE_WIDTH);
-    maxY = Math.max(maxY, positions[id].y + NODE_HEIGHT);
+    const s = sizeOf(id);
+    maxX = Math.max(maxX, positions[id].x + s.width);
+    maxY = Math.max(maxY, positions[id].y + s.height);
   }
   width = Math.max(width, maxX + PADDING);
   height = Math.max(height, maxY + PADDING);
@@ -416,10 +428,11 @@ export async function computeLayout(
     let maxGY = Number.NEGATIVE_INFINITY;
     for (const id of memberIds) {
       if (!positions[id]) continue;
+      const s = sizeOf(id);
       minGX = Math.min(minGX, positions[id].x);
       minGY = Math.min(minGY, positions[id].y);
-      maxGX = Math.max(maxGX, positions[id].x + NODE_WIDTH);
-      maxGY = Math.max(maxGY, positions[id].y + NODE_HEIGHT);
+      maxGX = Math.max(maxGX, positions[id].x + s.width);
+      maxGY = Math.max(maxGY, positions[id].y + s.height);
     }
     if (minGX === Number.POSITIVE_INFINITY) continue;
     g.x = minGX - pad;

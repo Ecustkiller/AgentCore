@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  type CanvasTurnView,
   loadCanvasTurnView,
   persistCanvasTurnView,
   resolveCanvasTurnView,
@@ -9,7 +10,9 @@ describe("resolveCanvasTurnView", () => {
   it("prefers saved when still available, else natural default", () => {
     const available = new Set(["room", "compare", "graph"] as const);
     expect(resolveCanvasTurnView("compare", "room", available)).toBe("compare");
-    expect(resolveCanvasTurnView("timeline", "room", available)).toBe("room");
+    expect(
+      resolveCanvasTurnView("timeline" as CanvasTurnView, "room", available),
+    ).toBe("room");
   });
 });
 

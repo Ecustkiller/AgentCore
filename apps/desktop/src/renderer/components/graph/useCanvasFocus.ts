@@ -7,6 +7,7 @@ import {
   useActiveLoadingOlder,
   useConversationStore,
 } from "@/stores/conversation";
+import { turnDetailPath } from "@/stores/ui";
 import type { Node, ReactFlowInstance } from "@xyflow/react";
 import {
   useCallback,
@@ -15,12 +16,8 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  GAP_Y,
-  SIMPLE_NODE_HEIGHT,
-  TEAM_NODE_HEIGHT,
-  type TurnItem,
-} from "./useCanvasTurns";
+import { useNavigate } from "react-router-dom";
+import { GAP_Y, spineTurnHeight, type TurnItem } from "./useCanvasTurns";
 
 export const TOP_LOAD_THRESHOLD_PX = 240;
 
@@ -98,34 +95,37 @@ export function useCanvasFocus({
       let deltaY = 0;
       for (const t of turns) {
         if (t.id === a.oldestId) break;
-        deltaY +=
-          (t.kind === "team" ? TEAM_NODE_HEIGHT : SIMPLE_NODE_HEIGHT) + GAP_Y;
+        // #3: use real spine height (summary vs expanded turnGroup)
+        deltaY += spineTurnHeight(t, nodes) + GAP_Y;
       }
       rf.setViewport({ x: a.vpX, y: a.vpY - deltaY * a.zoom, zoom: a.zoom });
       pagingAnchorRef.current = null;
     } else if (!loadingOlder) {
       pagingAnchorRef.current = null;
     }
-  }, [turns, loadingOlder]);
+  }, [turns, loadingOlder, nodes]);
 
-  const prevFitFocusRef = useRef<string | null>(null);
+  // Fit to focused turn (overview).
+  const fitTarget = effectiveFocus;
+  const prevFitKeyRef = useRef<string | null>(null);
   useEffect(() => {
     const rf = rfRef.current;
-    if (!rf || !effectiveFocus) return;
+    if (!rf || !fitTarget) return;
     if (pagingAnchorRef.current) return;
-    if (prevFitFocusRef.current === effectiveFocus) return;
-    if (!nodes.some((x) => x.id === effectiveFocus)) return;
-    prevFitFocusRef.current = effectiveFocus;
+    const fitKey = `${fitTarget}:overview`;
+    if (prevFitKeyRef.current === fitKey) return;
+    if (!nodes.some((x) => x.id === fitTarget)) return;
+    prevFitKeyRef.current = fitKey;
     rf.fitView({
-      nodes: [{ id: effectiveFocus }],
+      nodes: [{ id: fitTarget }],
       padding: 0.2,
       maxZoom: 1,
       duration: 400,
     });
-  }, [effectiveFocus, nodes]);
+  }, [fitTarget, nodes]);
 
-  const effectiveFocusRef = useRef<string | null>(effectiveFocus);
-  effectiveFocusRef.current = effectiveFocus;
+  const fitTargetRef = useRef<string | null>(fitTarget);
+  fitTargetRef.current = fitTarget;
   useEffect(() => {
     const el = canvasBoxRef.current;
     if (!el) return;
@@ -144,7 +144,7 @@ export function useCanvasFocus({
       clearTimeout(timer);
       timer = setTimeout(() => {
         const rf = rfRef.current;
-        const focus = effectiveFocusRef.current;
+        const focus = fitTargetRef.current;
         if (!rf || !focus || !rf.getNode(focus)) return;
         if (pagingAnchorRef.current) return;
         rf.fitView({
@@ -181,30 +181,52 @@ export function useCanvasFocus({
   };
 }
 
+/**
+ * Click / double-click / Maximize semantics on the conversation canvas:
+ * - click `teamTurn` → focus + expand that turn (LRU window, max 3)
+ * - click `simpleTurn` → open side-panel Q&A tab (full prompt + answer)
+ * - double-click `teamTurn` → navigate to full-screen turn detail
+ * - `turnGroup` body is non-interactive; Maximize button is the only detail entry
+ *   from the expanded compound (avoids accidental double-click on DAG children)
+ * - DAG agent nodes: single click activates (handled by ConversationCanvas)
+ */
 export function useCanvasNodeHandlers(
   setFocusedTurn: (id: string) => void,
-  openZoom: (turnId: string, replay: boolean) => void,
+  onExpandTurn?: (turnId: string) => void,
+  onSimpleTurnClick?: (turnId: string) => void,
 ) {
+  const navigate = useNavigate();
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
-      if (node.type === "teamTurn") setFocusedTurn(node.id);
+      if (node.type === "teamTurn") {
+        onExpandTurn?.(node.id);
+        setFocusedTurn(node.id);
+      } else if (node.type === "simpleTurn") {
+        onSimpleTurnClick?.(node.id);
+      }
+      // turnGroup: ignore — header Maximize is the explicit detail control
     },
-    [setFocusedTurn],
+    [setFocusedTurn, onExpandTurn, onSimpleTurnClick],
   );
 
   const onNodeDoubleClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
-      if (node.type === "teamTurn" || node.type === "focusedTurn") {
-        openZoom(node.id, false);
+      // Only folded team summaries open turn detail on double-click.
+      // Expanded turnGroup / DAG children must not — Maximize button owns that.
+      if (node.type === "teamTurn" && conversationId) {
+        navigate(turnDetailPath(conversationId, node.id));
       }
     },
-    [openZoom],
+    [navigate, conversationId],
   );
 
   const makeOnRailSelect = useCallback(
     (rfRef: React.RefObject<ReactFlowInstance | null>) =>
       (id: string, kind: "team" | "simple") => {
         if (kind === "team") {
+          onExpandTurn?.(id);
           setFocusedTurn(id);
         } else {
           rfRef.current?.fitView({
@@ -215,7 +237,7 @@ export function useCanvasNodeHandlers(
           });
         }
       },
-    [setFocusedTurn],
+    [setFocusedTurn, onExpandTurn],
   );
 
   return { onNodeClick, onNodeDoubleClick, makeOnRailSelect };

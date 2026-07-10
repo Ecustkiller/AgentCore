@@ -207,6 +207,7 @@ function pendingFrame(messageId: string, conversationId = "c1"): PendingResume {
     userMessageId: "u-orig",
     steps: [],
     pending: [],
+    workers: [],
     question: "",
     context: "",
     assumptions: [],
@@ -221,6 +222,26 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
   beforeEach(() => {
     useConversationStore.setState({ currentConversationId: "c1", byId: {} });
     usePausedTurnStore.setState({ pending: [pendingFrame("m1")] });
+    // Seed the paused assistant so resume reuses it (Option A) instead of fallback-create.
+    const conv = useConversationStore.getState();
+    conv.addMessage({
+      id: "u-orig",
+      role: "user",
+      content: "原始请求",
+      createdAt: "",
+      executionId: null,
+      isStreaming: false,
+    });
+    conv.addMessage({
+      id: "client-paused",
+      role: "assistant",
+      content: "",
+      createdAt: "",
+      executionId: null,
+      isStreaming: false,
+      serverMessageId: "m1",
+      finishReason: "paused",
+    });
   });
 
   it("探活通过 → 本地 sidecar 续跑、认领续跑卡", async () => {
@@ -231,6 +252,10 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
       detail: null,
     });
     resumeViaSidecarMock.mockResolvedValue(undefined as never);
+
+    const before = useConversationStore
+      .getState()
+      .byId.c1!.messages.filter((m) => m.role === "assistant").length;
 
     await runResume("m1", "continue", "");
 
@@ -243,6 +268,12 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     );
     expect(resumeConversationMock).not.toHaveBeenCalled();
     expect(usePausedTurnStore.getState().pending).toHaveLength(0); // 帧已认领
+    const assistants = useConversationStore
+      .getState()
+      .byId.c1!.messages.filter((m) => m.role === "assistant");
+    expect(assistants).toHaveLength(before);
+    expect(assistants[0].id).toBe("client-paused");
+    expect(assistants[0].isStreaming).toBe(true);
   });
 
   it("探活失败 → 保留续跑卡 + 出横幅，绝不降级走云", async () => {

@@ -1,14 +1,11 @@
 // REST-shape conformance for the AI Town simulation contract (ST-02). The backend REST
 // responses (create/tick/ticks/metrics/manifest/status/inject/patch) are frozen; these
-// committed fixtures are the golden shapes the desktop reads. Where the desktop has a real
-// wire→view mapper (runFromWire), we fold through it; otherwise we assert the exact fields
-// the desktop depends on. Type annotations on OpenAPI-backed fixtures also make `pnpm
-// typecheck` fail if a schema drifts.
-import type {
-  SimMetricsResponse,
-  SimTickMetrics,
-} from "@/services/simulation/api";
+// committed fixtures are the golden shapes. Where the desktop has a real wire→view mapper
+// (runFromWire), we fold through it; otherwise we assert the exact fields the contract
+// freezes. Type annotations on OpenAPI-backed fixtures also make `pnpm typecheck` fail if
+// a schema drifts.
 import { runFromWire } from "@/simulation/runModel";
+import type { components } from "@agentcore/contract-rest-types";
 import type { SimAgentState } from "@agentcore/contract-types";
 import restAdvanceTick from "@agentcore/protocol-conformance/fixtures/simulation/rest-advance-tick.json" with {
   type: "json",
@@ -35,6 +32,9 @@ import restTickFrame from "@agentcore/protocol-conformance/fixtures/simulation/r
   type: "json",
 };
 import { describe, expect, it } from "vitest";
+
+type SimTickMetrics = components["schemas"]["TickMetrics"];
+type SimMetricsResponse = components["schemas"]["SimulationRunMetricsResponse"];
 
 function expectAgentState(state: SimAgentState): void {
   expect(typeof state.agent_id).toBe("string");
@@ -63,7 +63,6 @@ function expectTickMetrics(m: SimTickMetrics): void {
 
 describe("simulation ST-02 conformance · REST shape", () => {
   it("create → SimulationRunSummary folds via runFromWire", () => {
-    // runFromWire's parameter type (SimulationRunSummaryWire) also type-guards this fixture.
     const view = runFromWire(restRunSummary.response);
     expect(view).toEqual({
       id: "run-conformance",

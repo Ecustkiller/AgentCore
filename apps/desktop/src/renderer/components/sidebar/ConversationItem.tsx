@@ -32,6 +32,7 @@ import {
 } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
 import { conversationTagLabel } from "@/lib/conversationTag";
+import { shouldShowConversationCloudIcon } from "@/lib/conversationWorkspaceMode";
 import { notifyError, notifyInfo } from "@/lib/toast";
 import {
   type ExportFormat,
@@ -62,6 +63,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { ConversationCloudIcon } from "./ConversationWorkspaceModeIcon";
 
 const PREVIEW_DELAY_MS = 500;
 const PREVIEW_MAX_CHARS = 80;
@@ -120,9 +122,11 @@ function buildMessagePreview(
 
 interface Props {
   conversation: Conversation;
+  /** When set, row only shows a cloud icon if this chat differs from the group default. */
+  groupIsLocal?: boolean;
 }
 
-export function ConversationItem({ conversation }: Props) {
+export function ConversationItem({ conversation, groupIsLocal }: Props) {
   const [hovered, setHovered] = useState(false);
   const [previewVisible, setPreviewVisible] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
@@ -175,6 +179,10 @@ export function ConversationItem({ conversation }: Props) {
     [conversation.lastMessagePreview, cachedMessages],
   );
   const tagLabel = conversationTagLabel(conversation.tag);
+  const showCloudIcon = shouldShowConversationCloudIcon(
+    conversation,
+    groupIsLocal,
+  );
 
   const clearPreviewTimer = useCallback(() => {
     if (previewTimerRef.current) {
@@ -443,6 +451,7 @@ export function ConversationItem({ conversation }: Props) {
                     />
                   </SimpleTooltip>
                 )}
+                {showCloudIcon && <ConversationCloudIcon />}
                 <span className="min-w-0 flex-1 truncate">
                   {conversation.title}
                 </span>

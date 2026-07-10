@@ -24,6 +24,7 @@ export function planFromRunPlan(p: RunPlanPayload): ExecutionPlan {
       stance: s.stance,
       group: s.group,
       round: s.round,
+      replacesRunId: s.replaces_run_id ?? null,
     })),
   };
 }

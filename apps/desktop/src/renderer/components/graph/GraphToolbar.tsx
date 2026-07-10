@@ -9,8 +9,6 @@ interface GraphToolbarProps {
   onLayoutKindChange: (kind: GraphLayout) => void;
   /** Scheduling summary from `batch_metrics` — shown when the turn has parallel workers. */
   metricsSummary?: string | null;
-  /** Whether this turn has enough timing data for timeline layout. */
-  timelineAvailable?: boolean;
   /** Multi-agent turn with audit inject paths available. */
   injectFlowAvailable?: boolean;
   showAuditInjectFlow?: boolean;
@@ -18,15 +16,14 @@ interface GraphToolbarProps {
 }
 
 /**
- * 放大态 layout selector (top-right). Zoom + fit moved to the shared
- * {@link import("./CanvasZoomControls")} cluster (bottom-left, unified with the 总览态).
- * Dependency layouts (左右流 / 树形) plus optional 时间轴 when batch_metrics exists.
+ * Layout selector (top-right). Zoom + fit live in
+ * {@link import("./CanvasZoomControls")} (bottom-left).
+ * Dependency layouts only: 左右流 / 树形.
  */
 export function GraphToolbar({
   layoutKind,
   onLayoutKindChange,
   metricsSummary,
-  timelineAvailable = false,
   injectFlowAvailable = false,
   showAuditInjectFlow = false,
   onShowAuditInjectFlowChange,
@@ -37,7 +34,7 @@ export function GraphToolbar({
       onContextMenu={(e) => e.stopPropagation()}
     >
       {metricsSummary && (
-        <SimpleTooltip label="真实时间轴：重叠＝真并行 · 空档＝并发上限排队 · 最长条＝关键路径">
+        <SimpleTooltip label="调度摘要：峰值并发 · 总时长 · 串行化次数（详情见诊断「调度」块）">
           <span className="rounded-lg border border-border bg-card/90 px-2 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur">
             {metricsSummary}
           </span>
@@ -64,32 +61,24 @@ export function GraphToolbar({
             </span>
           </SimpleTooltip>
         )}
-        {LAYOUT_OPTIONS.map((opt) => {
-          const disabled = !!opt.requiresParallelTimeline && !timelineAvailable;
-          const tip =
-            opt.kind === "timeline" && disabled
-              ? "调度结束后可查看时间布局（需 ≥2 个队员）"
-              : opt.label;
-          return (
-            <SimpleTooltip key={opt.kind} label={tip}>
-              <span className="inline-flex">
-                <IconButton
-                  onClick={() => !disabled && onLayoutKindChange(opt.kind)}
-                  disabled={disabled}
-                  aria-label={opt.label}
-                  aria-pressed={layoutKind === opt.kind}
-                  className={
-                    layoutKind === opt.kind
-                      ? "bg-accent text-foreground hover:bg-accent hover:text-foreground"
-                      : undefined
-                  }
-                >
-                  {opt.icon}
-                </IconButton>
-              </span>
-            </SimpleTooltip>
-          );
-        })}
+        {LAYOUT_OPTIONS.map((opt) => (
+          <SimpleTooltip key={opt.kind} label={opt.label}>
+            <span className="inline-flex">
+              <IconButton
+                onClick={() => onLayoutKindChange(opt.kind)}
+                aria-label={opt.label}
+                aria-pressed={layoutKind === opt.kind}
+                className={
+                  layoutKind === opt.kind
+                    ? "bg-accent text-foreground hover:bg-accent hover:text-foreground"
+                    : undefined
+                }
+              >
+                {opt.icon}
+              </IconButton>
+            </span>
+          </SimpleTooltip>
+        ))}
       </div>
     </div>
   );

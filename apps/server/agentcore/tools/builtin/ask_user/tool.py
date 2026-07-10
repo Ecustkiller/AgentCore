@@ -267,6 +267,19 @@ class AskUserTool:
         # (disconnect) / crash during the wait propagates past the drop below, leaving
         # the frame for ``POST .../resume``; the in-memory resolve still settles a
         # live turn even if the save failed.
+        # CEO 协调模式 Phase 2: snapshot coordination state into the journal before
+        # SUSPEND so resume can rebuild draft / completed / budget.
+        from agentcore.runtime.coordination.session import active_coordination
+
+        coord = active_coordination(context.execution_id)
+        if coord is not None:
+            from agentcore.runtime.coordination.journal import record_coordination_snapshot
+
+            record_coordination_snapshot(coord)
+            # Soft-stop the background scheduler — resume re-drives unfinished workers
+            # from the journal seed. Cancelling avoids orphan tasks after turn end.
+            if coord.drive_task is not None and not coord.drive_task.done():
+                coord.drive_task.cancel()
         saved = await persist_suspension(
             self,
             checkpoint_id=checkpoint_id,

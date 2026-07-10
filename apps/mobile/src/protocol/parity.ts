@@ -89,6 +89,10 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     surface: "TeamView + RunDetail (交接简报 / 资源用量 / 时长 / 关系)",
   },
   run_failed: { verdict: "ported", surface: "TeamView" },
+  run_cancelled: {
+    verdict: "ported",
+    surface: "TeamView · 跑一半改方向 / 整轮停止",
+  },
   run_progress: {
     verdict: "internal",
     reason: "进度由 run 状态派生（仅时间线计数标记），无独立面",
@@ -97,6 +101,26 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   run_escalation: {
     verdict: "ported",
     surface: "TeamView · 上报提示 (非阻塞)",
+  },
+  run_intake: {
+    verdict: "internal",
+    reason: "Worker Intake 诊断元信息（复杂度/策略/预算）；Phase 1 无独立面，fold no-op",
+  },
+  run_escalation_gate: {
+    verdict: "internal",
+    reason: "Escalation Gate 判定实时信号；耐久升级仍走 escalate / RunState.escalations",
+  },
+  run_split_assessed: {
+    verdict: "internal",
+    reason: "顺序分裂评估诊断；Phase 2 无独立面，fold no-op",
+  },
+  run_subworker_started: {
+    verdict: "internal",
+    reason: "Sub-Worker 启动诊断；折叠进父 journal，fold no-op",
+  },
+  run_subworker_completed: {
+    verdict: "internal",
+    reason: "Sub-Worker 完成诊断；折叠进父 journal，fold no-op",
   },
   escalation_required: {
     verdict: "ported",
@@ -123,6 +147,11 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
 
   // —— 团队便签墙 ——
   team_note_posted: { verdict: "ported", surface: "TeamView · 团队便签" },
+  team_synthesis_preview: {
+    verdict: "internal",
+    reason:
+      "Transport-only CEO 协调进展摘要；桌面 StatusStrip 消费，手机无诊断面 (fold no-op)",
+  },
 
   // —— 阻塞交互（统一 PauseCard / ResumeCard）——
   approval_required: { verdict: "ported", surface: "PauseCard" },
@@ -139,6 +168,8 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   checkpoint_resolved: { verdict: "ported", surface: "PauseCard" },
   plan_review_required: { verdict: "ported", surface: "PauseCard" },
   plan_review_resolved: { verdict: "ported", surface: "PauseCard" },
+  team_preview_required: { verdict: "ported", surface: "ResumeCard" },
+  team_preview_resolved: { verdict: "ported", surface: "ResumeCard" },
 
   // —— 非阻塞提问 (①) ——
   question_posted: { verdict: "ported", surface: "NonBlockingAskCard (①)" },
@@ -253,6 +284,7 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   MemoryUpdateCard: { verdict: "ported", surface: "MemoryUpdateCard (③)" },
   CheckpointCard: { verdict: "ported", surface: "PauseCard / ResumeCard" },
   PlanReviewCard: { verdict: "ported", surface: "PauseCard" },
+  TeamPreviewCard: { verdict: "ported", surface: "ResumeCard" },
   ApprovalPrompt: { verdict: "ported", surface: "PauseCard" },
   ResumePrompt: { verdict: "ported", surface: "ResumeCard" },
   FileArtifactsCard: { verdict: "ported", surface: "FileArtifactsCard" },
@@ -443,10 +475,6 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
     reason:
       "桌面白板离线自检回放（#/preview/whiteboard 开发工具），非用户产品面",
   },
-  "simulation/TownSimulationPage": {
-    verdict: "impossible",
-    reason: "AI 小镇模拟仅桌面 MVP，手机无模拟面",
-  },
   "simulation/TownLauncherPage": {
     verdict: "impossible",
     reason: "AI 小镇 AgentTown 独立客户端启动页，桌面专属，手机无模拟面",
@@ -472,5 +500,13 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   PreviewPage: {
     verdict: "internal",
     reason: "桌面渲染层离线自检回放（#/preview 开发工具），非用户产品面",
+  },
+  AskCommencePreviewPage: {
+    verdict: "internal",
+    reason: "桌面 ask commence 离线预览（开发自检），非用户产品面",
+  },
+  TurnDetailPage: {
+    verdict: "simplified",
+    reason: "桌面 run 详情全页；手机在 TeamView / 气泡内嵌简版",
   },
 };

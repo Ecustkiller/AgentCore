@@ -369,6 +369,18 @@ class TurnJournalRepository:
         )
         return [{"kind": r.kind, "payload": r.payload, "ts": r.ts} for r in result.scalars().all()]
 
+    async def max_seq(self, turn_id: str) -> int | None:
+        """Highest journal ``seq`` for ``turn_id``, or ``None`` when the turn has no rows.
+
+        Resume uses this to seed :class:`TurnJournalWriter` past any live append-on-emit
+        facts that outran the pause snapshot (sidecar ``journal_entries`` can be shorter
+        than the DB), avoiding UniqueViolation on the next append.
+        """
+        result = await self._session.execute(
+            select(func.max(TurnJournalRow.seq)).where(TurnJournalRow.turn_id == turn_id)
+        )
+        return result.scalar_one_or_none()
+
     async def load_owned(self, turn_id: str, conversation_id: str) -> list[dict]:
         """One turn's facts, scoped to its conversation (IDOR-safe read).
 

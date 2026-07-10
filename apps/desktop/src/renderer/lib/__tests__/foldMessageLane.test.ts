@@ -42,7 +42,10 @@ describe("foldMessageLane", () => {
     });
     const next = foldContentReset(base);
     expect(next.content).toBe("");
-    expect(next.process).toEqual([{ kind: "reasoning", text: "think" }]);
+    expect(next.process).toEqual([
+      { kind: "reasoning", text: "think" },
+      { kind: "rework" },
+    ]);
   });
 
   it("foldReasoningDelta appends reasoning lane", () => {

@@ -47,6 +47,14 @@ export interface PendingResume {
   steps: PlanReviewStep[];
   /** plan_review: the downstream nodes gated behind the pause. */
   pending: PlanReviewPending[];
+  /** team_preview: upcoming workers before the first wave. */
+  workers: Array<{
+    run_id: string;
+    role: string;
+    task: string;
+    depends_on: string[];
+    debate: boolean;
+  }>;
   /** ask_user: the framing / opening line (always shown). */
   question: string;
   /** ask_user: optional supporting background for the question. */
@@ -77,6 +85,22 @@ const toPending = (raw: PausedTurnSummary["pending"]): PlanReviewPending[] =>
     run_id: String(p.run_id ?? ""),
     role: String(p.role ?? ""),
   }));
+
+const toWorkers = (
+  raw: PausedTurnSummary["workers"] | undefined,
+): PendingResume["workers"] =>
+  (raw ?? []).map((w) => {
+    const row = (w ?? {}) as Record<string, unknown>;
+    return {
+      run_id: String(row.run_id ?? ""),
+      role: String(row.role ?? ""),
+      task: String(row.task ?? ""),
+      depends_on: Array.isArray(row.depends_on)
+        ? row.depends_on.map(String)
+        : [],
+      debate: Boolean(row.debate),
+    };
+  });
 
 /** ask_user rich fields arrive as loose JSON dicts (backend ``list[dict]``); map
  * them to the typed display shapes the unified card reads, tolerating missing keys.
@@ -169,6 +193,7 @@ export const usePausedTurnStore = create<PausedTurnState>((set) => ({
           userMessageId: s.user_message_id ?? "",
           steps: toSteps(s.steps),
           pending: toPending(s.pending),
+          workers: toWorkers(s.workers),
           question: s.question ?? "",
           context: s.context ?? "",
           assumptions: toAssumptions(s.assumptions),

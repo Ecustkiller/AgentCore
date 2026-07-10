@@ -8,6 +8,7 @@ import {
   foldPlanReviewMarker,
   foldReasoningDelta,
   foldTeamMarker,
+  foldTeamPreviewMarker,
   foldToolUseEnd,
   foldToolUsePhase,
   foldToolUseStart,
@@ -26,6 +27,7 @@ import type {
   CostBreakdown,
   PlanReviewRequiredPayload,
   QuestionPostedPayload,
+  TeamPreviewRequiredPayload,
   ToolUseEndPayload,
   ToolUseProgressPayload,
   ToolUseStartPayload,
@@ -36,7 +38,7 @@ import {
   DRAFT_KEY,
   EMPTY_RUNTIME,
   activeRuntime,
-  lastAssistantMessageId,
+  lastAssistantProjectionId,
 } from "./runtime";
 import type { ConversationRuntime, MemoryUpdate, Message } from "./types";
 
@@ -92,6 +94,14 @@ export interface ConversationState {
     messageId: string,
     conversationId?: string | null,
   ) => void;
+  /**
+   * Resume = same-turn continuation: flip the paused assistant back to streaming
+   * under the server turn id. Returns the bubble id, or null if not found.
+   */
+  resumePausedAssistant: (
+    serverMessageId: string,
+    conversationId?: string | null,
+  ) => string | null;
   addProcessTool: (
     payload: ToolUseStartPayload,
     conversationId?: string | null,
@@ -160,6 +170,16 @@ export interface ConversationState {
     conversationId?: string | null,
   ) => void;
   settlePlanReview: (
+    checkpointId: string,
+    decision: CheckpointDecision,
+    note: string,
+    conversationId?: string | null,
+  ) => void;
+  addTeamPreview: (
+    payload: TeamPreviewRequiredPayload,
+    conversationId?: string | null,
+  ) => void;
+  settleTeamPreview: (
     checkpointId: string,
     decision: CheckpointDecision,
     note: string,
@@ -359,15 +379,47 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         return { messages };
       }),
 
-    setServerMessageIdOnLastMessage: (messageId, conversationId) =>
+    setServerMessageIdOnLastMessage: (messageId, conversationId) => {
+      let clientId: string | null = null;
       patchConversation(conversationId, (rt) => {
         if (!messageId) return null;
         const messages = [...rt.messages];
         const last = messages[messages.length - 1];
         if (!last || last.role !== "assistant") return null;
+        clientId = last.id;
         messages[messages.length - 1] = { ...last, serverMessageId: messageId };
         return { messages };
-      }),
+      });
+      // First stamp: align execution.byId client → server so pause/resume share one key.
+      if (clientId && clientId !== messageId) {
+        useExecutionStore.getState().alignTurnKey(clientId, messageId);
+      }
+    },
+
+    resumePausedAssistant: (serverMessageId, conversationId) => {
+      if (!serverMessageId) return null;
+      let foundId: string | null = null;
+      patchConversation(conversationId, (rt) => {
+        const idx = rt.messages.findIndex(
+          (m) =>
+            m.role === "assistant" &&
+            (m.serverMessageId === serverMessageId || m.id === serverMessageId),
+        );
+        if (idx < 0) return null;
+        const messages = [...rt.messages];
+        const prev = messages[idx];
+        foundId = prev.id;
+        messages[idx] = {
+          ...prev,
+          isStreaming: true,
+          serverMessageId: prev.serverMessageId ?? serverMessageId,
+          finishReason: undefined,
+          composingTool: null,
+        };
+        return { messages, isGenerating: true };
+      });
+      return foundId;
+    },
 
     addProcessTool: (payload, conversationId) =>
       patchConversation(conversationId, (rt) => {
@@ -650,6 +702,65 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         return changed ? { messages } : null;
       }),
 
+    addTeamPreview: (payload, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        let idx = -1;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === "assistant") {
+            idx = i;
+            break;
+          }
+        }
+        if (idx === -1) return null;
+        const msg = messages[idx];
+        const existing = msg.teamPreviews ?? [];
+        if (existing.some((c) => c.id === payload.checkpoint_id)) return null;
+        const lane = foldTeamPreviewMarker(
+          messageLaneFromMessage(msg),
+          payload.checkpoint_id,
+        );
+        messages[idx] = {
+          ...msg,
+          process: lane.process,
+          teamPreviews: [
+            ...existing,
+            {
+              id: payload.checkpoint_id,
+              workers: (payload.workers ?? []).map((w) => ({
+                run_id: w.run_id,
+                role: w.role,
+                task: w.task ?? "",
+                depends_on: w.depends_on ?? [],
+                debate: Boolean(w.debate),
+              })),
+              status: "pending",
+              decision: null,
+              note: "",
+            },
+          ],
+        };
+        return { messages };
+      }),
+
+    settleTeamPreview: (checkpointId, decision, note, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        let changed = false;
+        const messages = rt.messages.map((m) => {
+          if (!m.teamPreviews?.some((c) => c.id === checkpointId)) return m;
+          changed = true;
+          return {
+            ...m,
+            teamPreviews: m.teamPreviews.map((c) =>
+              c.id === checkpointId
+                ? { ...c, status: "resolved" as const, decision, note }
+                : c,
+            ),
+          };
+        });
+        return changed ? { messages } : null;
+      }),
+
     createAssistantMessage: (conversationId) => {
       const id = crypto.randomUUID();
       patchConversation(conversationId, (rt) => ({
@@ -824,7 +935,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       patchActive(() => ({ abort: null }));
       get().finalizeLastMessage();
       clearInteractionPrompts(get().currentConversationId ?? DRAFT_KEY);
-      const mid = lastAssistantMessageId(activeRuntime(get()).messages);
+      const mid = lastAssistantProjectionId(activeRuntime(get()).messages);
       if (mid) {
         const exec = useExecutionStore.getState();
         const rt = execRuntime(exec, mid);

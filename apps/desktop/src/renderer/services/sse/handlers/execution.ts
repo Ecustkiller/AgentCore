@@ -14,6 +14,7 @@ import type {
   RunPlanPayload,
   RunStartedPayload,
   SSEEvent,
+  TeamSynthesisPreviewPayload,
   ToolUseEndPayload,
   ToolUseProgressPayload,
   ToolUseStartPayload,
@@ -103,6 +104,7 @@ export function handleExecutionEvent(
     // 结构性帧 (低频): recordFrameNow 先 flush 高频缓冲以保帧顺序，再立即落。
     case "run_completed":
     case "run_failed":
+    case "run_cancelled":
     case "run_progress":
     // 调度埋点量化 (深层诊断指标): the WaveScheduler snapshot folds onto Execution.batches via
     // the same frame path (journaled → replays on reload); shown only in 诊断模式 (run detail).
@@ -112,6 +114,13 @@ export function handleExecutionEvent(
     // conversation-store gate); journaled, so it replays on reload.
     case "plan_revised":
     case "run_escalation":
+    // Worker 内部路由 Phase 1：Intake / Escalation Gate — 诊断帧；Phase 1 无独立 UI，
+    // 仍走 frame 路径以便 journal 重放时不丢事件（intake 为 DURABLE）。
+    case "run_intake":
+    case "run_escalation_gate":
+    case "run_split_assessed":
+    case "run_subworker_started":
+    case "run_subworker_completed":
     // 阻塞式求决策: a worker SUSPENDED on a blocking escalate (escalation_required) then settled
     // (escalation_resolved). Both fold onto the run's escalations via the same frame path
     // (projectExecution appends `pending` / flips `resolved`|`timeout`), driving the bubble's
@@ -126,6 +135,20 @@ export function handleExecutionEvent(
     // pauses the turn (no conversation-store card), just the journaled frame.
     case "team_note_posted": {
       recordFrameNow(event, conversationId);
+      return true;
+    }
+    // CEO 协调模式 Phase 1：多 worker 团队进展摘要。Transport-only — 不进 frame / journal，
+    // 只 stamp 到 execution runtime，供 StatusStrip 展示「进展中」预览。
+    case "team_synthesis_preview": {
+      const mid = execMessageId(conversationId);
+      if (mid) {
+        useExecutionStore
+          .getState()
+          .setTeamSynthesisPreview(
+            event.payload as TeamSynthesisPreviewPayload,
+            mid,
+          );
+      }
       return true;
     }
     case "tool_use_start": {

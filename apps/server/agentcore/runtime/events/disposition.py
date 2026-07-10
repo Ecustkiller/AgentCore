@@ -46,6 +46,10 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     EventType.RUN_CONTEXT: (Disposition.DURABLE, "派发给 run 的上下文/依赖——重放收到的上下文"),
     EventType.RUN_COMPLETED: (Disposition.DURABLE, "run 完成（含 message_final）——重放产出/发言"),
     EventType.RUN_FAILED: (Disposition.DURABLE, "run 失败——重放失败态与原因"),
+    EventType.RUN_CANCELLED: (
+        Disposition.DURABLE,
+        "run 中途取消（redirect/stop）——重放停态，避免假 working",
+    ),
     EventType.RUN_PROGRESS: (Disposition.DURABLE, "run 阶段进度里程碑——重放过程节拍"),
     EventType.BATCH_METRICS: (Disposition.DURABLE, "调度埋点量化——run-detail 诊断信息重放"),
     EventType.DEBATE_RESULT: (Disposition.DURABLE, "辩论最终裁决——重放结论"),
@@ -56,10 +60,31 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     EventType.QUESTION_POSTED: (Disposition.DURABLE, "非阻断/阻断提问（耐久帧）——reload 重现提问"),
     EventType.PLAN_REVIEW_REQUIRED: (Disposition.DURABLE, "计划复核挂起（耐久帧）——reload 重现复核卡"),
     EventType.PLAN_REVIEW_RESOLVED: (Disposition.DURABLE, "计划复核已裁决——重放裁决"),
+    EventType.TEAM_PREVIEW_REQUIRED: (
+        Disposition.DURABLE,
+        "团队预审薄预览挂起（耐久帧）——reload 重现开干前确认卡",
+    ),
+    EventType.TEAM_PREVIEW_RESOLVED: (Disposition.DURABLE, "团队预审已裁决——重放裁决"),
     EventType.PLAN_REVISED: (Disposition.DURABLE, "自主再绑定「计划已调整」轻痕迹——重放"),
     EventType.ESCALATION_REQUIRED: (Disposition.DURABLE, "升级请求（单一发射者）——重放升级"),
     EventType.ESCALATION_RESOLVED: (Disposition.DURABLE, "升级已处理——重放结果"),
     EventType.TEAM_NOTE_POSTED: (Disposition.DURABLE, "团队便签墙——team-notes 面板重放"),
+    EventType.RUN_INTAKE: (
+        Disposition.DURABLE,
+        "Worker Intake 轻量计划头——重放复杂度/策略/token 预算诊断",
+    ),
+    EventType.RUN_SPLIT_ASSESSED: (
+        Disposition.DURABLE,
+        "Worker 顺序分裂评估——重放是否分裂及子任务列表诊断",
+    ),
+    EventType.RUN_SUBWORKER_STARTED: (
+        Disposition.DURABLE,
+        "Sub-Worker 启动——重放顺序分裂链中的子执行单元起点",
+    ),
+    EventType.RUN_SUBWORKER_COMPLETED: (
+        Disposition.DURABLE,
+        "Sub-Worker 完成——重放子结果摘要（折叠进父 Worker journal）",
+    ),
     # ---- DERIVED：经专用列 / 其它投影持久化，reload 时重建（非 journal allow-list） ----
     EventType.CONTENT_DELTA: (Disposition.DERIVED, "正文流——最终态落 Message.content 列"),
     EventType.REASONING_DELTA: (Disposition.DERIVED, "思考流——最终态落 Message.reasoning_content 列"),
@@ -76,6 +101,10 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     EventType.RUN_ESCALATION: (
         Disposition.DERIVED,
         "run 级升级实时信号——耐久记录为已落库的 ESCALATION_REQUIRED/RESOLVED + transcript 投影",
+    ),
+    EventType.RUN_ESCALATION_GATE: (
+        Disposition.DERIVED,
+        "Escalation Gate 方案层判定实时信号——耐久记录并入 RunState.escalations / escalate 通道",
     ),
     # ---- EPHEMERAL：有意不持久化，reload 后按设计丢失（显式取舍，非漏） ----
     EventType.MESSAGE_START: (Disposition.EPHEMERAL, "回合起始控制帧——reload 即已开始，无需重放"),
@@ -127,6 +156,10 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     EventType.TURN_WARNING: (
         Disposition.EPHEMERAL,
         "回合前软门禁提示（supports_tools=false）——传输态，不阻断回合",
+    ),
+    EventType.TEAM_SYNTHESIS_PREVIEW: (
+        Disposition.EPHEMERAL,
+        "CEO 协调模式 Phase 1 团队进展摘要——传输态预览；终稿仍走 CEO 正式回复，不进 journal",
     ),
     EventType.SIM_TICK_STARTED: (
         Disposition.EPHEMERAL,

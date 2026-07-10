@@ -7,6 +7,7 @@ const h = vi.hoisted(() => {
   return {
     appDataDir: `${base}/agenttown-test-${Math.random().toString(36).slice(2)}`,
     exeDir: `${base}/agenttown-exe-${Math.random().toString(36).slice(2)}`,
+    appPath: `${base}/agenttown-app-${Math.random().toString(36).slice(2)}/desktop`,
     cookies: [] as Array<{ name: string; value: string }>,
     isPackaged: false,
   };
@@ -16,7 +17,10 @@ vi.mock("electron", () => ({
   app: {
     getPath: (name: string) =>
       name === "appData" ? h.appDataDir : join(h.appDataDir, "user"),
-    isPackaged: () => h.isPackaged,
+    getAppPath: () => h.appPath,
+    get isPackaged() {
+      return h.isPackaged;
+    },
   },
   session: {
     defaultSession: {
@@ -45,6 +49,7 @@ vi.mock("node:child_process", () => ({
 import { readFileSync } from "node:fs";
 import {
   clearSessionFile,
+  launchAgentTown,
   resolveAgentTownExe,
   writeSessionFile,
 } from "../agenttown-service";
@@ -101,12 +106,19 @@ describe("agenttown session file", () => {
 });
 
 describe("resolveAgentTownExe", () => {
+  const repoBuildsDir = () =>
+    join(h.appPath, "..", "town", "Builds", "Windows");
+
   beforeEach(() => {
     rmSync(h.exeDir, { recursive: true, force: true });
+    rmSync(join(h.appPath, "..", "town"), { recursive: true, force: true });
     process.env.AGENTTOWN_PATH = undefined;
     h.isPackaged = false;
   });
-  afterAll(() => rmSync(h.exeDir, { recursive: true, force: true }));
+  afterAll(() => {
+    rmSync(h.exeDir, { recursive: true, force: true });
+    rmSync(join(h.appPath, ".."), { recursive: true, force: true });
+  });
 
   it("prefers AGENTTOWN_PATH when set", async () => {
     mkdirSync(h.exeDir, { recursive: true });
@@ -114,5 +126,34 @@ describe("resolveAgentTownExe", () => {
     writeFileSync(exe, "");
     process.env.AGENTTOWN_PATH = exe;
     await expect(resolveAgentTownExe()).resolves.toBe(exe);
+  });
+
+  it("finds repo Builds/Windows exe in unpackaged (dev) mode", async () => {
+    const buildsDir = repoBuildsDir();
+    mkdirSync(buildsDir, { recursive: true });
+    const exe = join(buildsDir, "AgentTown.exe");
+    writeFileSync(exe, "");
+    await expect(resolveAgentTownExe()).resolves.toBe(exe);
+  });
+
+  it("returns not_found with candidates and build hint", async () => {
+    const prevPf = process.env.ProgramFiles;
+    process.env.ProgramFiles = join(h.exeDir, "NoProgramFiles");
+    process.env.AGENTTOWN_PATH = join(h.exeDir, "missing", "AgentTown.exe");
+    try {
+      const result = await launchAgentTown();
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toBe("not_found");
+        expect(result.candidates?.length).toBeGreaterThan(0);
+        expect(result.candidates?.some((p) => p.includes("Builds"))).toBe(true);
+        expect(result.message).toMatch(/pnpm town:build|AGENTTOWN_PATH/);
+        expect(result.message).toMatch(/已检查路径/);
+      }
+    } finally {
+      if (prevPf === undefined) delete process.env.ProgramFiles;
+      else process.env.ProgramFiles = prevPf;
+      process.env.AGENTTOWN_PATH = undefined;
+    }
   });
 });

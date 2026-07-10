@@ -313,15 +313,19 @@ class AcceptRunOutcomeRequest(BaseModel):
     """User explicitly accepts a run's terminal outcome that could not be auto-recovered
     (跑一半改方向 Step 4 · 忽略路径收口).
 
-    Two triggers, both surfaced in the run detail from the audit trail: a
-    ``deterministic_failure`` (a non-retryable upstream failure — 重试徒劳) or a
-    ``redirect_ignored`` (a「立即改此人」steer that arrived too late to apply mid-run). Recording
-    the acceptance (后端记录) replaces the old frontend-only ``clearExecution`` so the
-    delegated-turn audit trail carries「用户主动接受此结果」. Idempotent per (turn, run).
+    Triggers surfaced from the audit trail / status strip: a ``deterministic_failure``
+    (non-retryable upstream failure — 重试徒劳), a ``redirect_ignored`` (「立即改此人」steer
+    that arrived too late), or ``recovery_ignored`` (status-strip「忽略」救火 abandon).
+    Recording the acceptance (后端记录) replaces the old frontend-only ``clearExecution`` so
+    the delegated-turn audit trail carries「用户主动接受此结果」. Idempotent per (turn, run).
     """
 
     run_id: str = Field(..., min_length=1, max_length=128)
-    reason: Literal["deterministic_failure", "redirect_ignored"]
+    reason: Literal[
+        "deterministic_failure",
+        "redirect_ignored",
+        "recovery_ignored",
+    ]
     execution_id: str | None = Field(default=None, max_length=128)
     note: str | None = Field(default=None, max_length=1000)
 
@@ -380,10 +384,11 @@ class PausedTurnSummary(BaseModel):
     reuse, so an optimistic bubble reconciles cleanly.
 
     plan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the
-    gated downstream); ask_user carries the unified card payload ``question`` (the
+    gated downstream); team_preview carries ``workers`` (upcoming roles / tasks /
+    deps); ask_user carries the unified card payload ``question`` (the
     framing / opening line) + ``context`` + the optional opening content
     ``assumptions`` / ``questions`` / ``style_options`` (empty for a compact mid-task
-    fork). The unused set is empty for the other kind.
+    fork). The unused set is empty for the other kinds.
     """
 
     message_id: str
@@ -395,6 +400,8 @@ class PausedTurnSummary(BaseModel):
     # plan_review
     steps: list[dict[str, Any]] = Field(default_factory=list)
     pending: list[dict[str, Any]] = Field(default_factory=list)
+    # team_preview
+    workers: list[dict[str, Any]] = Field(default_factory=list)
     # ask_user
     question: str = ""
     context: str = ""

@@ -57,13 +57,18 @@ def run_started(
     stance: str | None = None,
     group: str | None = None,
     round_no: int = 0,
+    replaces_run_id: str | None = None,
 ) -> SSEEvent:
     """A run began. A 续写 revision (辩手的后续轮) additionally carries its debater
     identity (``stance``/``group``) + its TRUE ``round`` so every fold projects 第几轮/
     哪一方 from a single source — round ≠ revision# once a side fails mid-debate, so the
     round is authoritative, not inferred from the version number. These three ride the
     payload ONLY when set (mirrors ``run_payload``), so an ordinary run / hot-fix
-    revision keeps its byte-identical shape."""
+    revision keeps its byte-identical shape.
+
+    ``replaces_run_id`` (冷回落接手): a mid-flight ``_redir`` spawn that takes over a
+    redirected worker — set ONLY when non-empty so ordinary / revision starts stay
+    byte-identical. Fold maps it to the graph「接手」edge (orthogonal to revision)."""
     payload: dict[str, Any] = {
         "run_id": run_id,
         "agent_id": agent_id,
@@ -77,6 +82,8 @@ def run_started(
         payload["group"] = group
     if round_no:
         payload["round"] = round_no
+    if replaces_run_id:
+        payload["replaces_run_id"] = replaces_run_id
     return SSEEvent(type=EventType.RUN_STARTED, payload=payload)
 
 
@@ -133,6 +140,7 @@ def escalation_raised(
     question: str,
     assumption: str,
     blocking: bool,
+    kind: str = "normal",
 ) -> SSEEvent:
     return SSEEvent(
         type=EventType.RUN_ESCALATION,
@@ -142,6 +150,157 @@ def escalation_raised(
             "question": question,
             "assumption": assumption,
             "blocking": blocking,
+            "kind": kind if kind in ("normal", "scope", "dep") else "normal",
+        },
+    )
+
+
+def run_intake(
+    run_id: str,
+    agent_id: str,
+    *,
+    complexity: str,
+    strategy: str,
+    token_budget: int,
+    rationale: str = "",
+    signals: list[str] | None = None,
+) -> SSEEvent:
+    """Worker Intake 轻量计划头（复杂度 / 策略 / token 预算）。
+
+    Emitted once per agent run after context assembly, before the ReAct loop.
+    Journaled so reload / run-detail can show the routing diagnosis.
+    """
+    return SSEEvent(
+        type=EventType.RUN_INTAKE,
+        payload={
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "complexity": complexity,
+            "strategy": strategy,
+            "token_budget": token_budget,
+            "rationale": rationale,
+            "signals": list(signals or []),
+        },
+    )
+
+
+def run_escalation_gate(
+    run_id: str,
+    agent_id: str,
+    *,
+    layer: str,
+    action: str,
+    signals: list[dict[str, Any]],
+) -> SSEEvent:
+    """Escalation Gate 判定结果（方案层 → action=escalate）。
+
+    Live diagnostic twin of a gate trip; durable substance still lands in
+    ``RunState.escalations`` / ``escalation_raised`` when the executor surfaces it.
+    """
+    return SSEEvent(
+        type=EventType.RUN_ESCALATION_GATE,
+        payload={
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "layer": layer,
+            "action": action,
+            "signals": signals,
+        },
+    )
+
+
+def run_split_assessed(
+    run_id: str,
+    agent_id: str,
+    *,
+    should_split: bool,
+    rationale: str = "",
+    triggers: list[str] | None = None,
+    subtasks: list[dict[str, Any]] | None = None,
+    pressure: dict[str, Any] | None = None,
+) -> SSEEvent:
+    """Worker 顺序分裂评估结果（Phase 2）。
+
+    Emitted when runtime pressure trips and an assess pass decides whether to
+    spawn sequential Sub-Workers. Journaled so reload can show the split diagnosis.
+    """
+    return SSEEvent(
+        type=EventType.RUN_SPLIT_ASSESSED,
+        payload={
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "should_split": should_split,
+            "rationale": rationale,
+            "triggers": list(triggers or []),
+            "subtask_count": len(subtasks or []),
+            "subtasks": list(subtasks or []),
+            "pressure": pressure or {},
+        },
+    )
+
+
+def run_subworker_started(
+    run_id: str,
+    agent_id: str,
+    *,
+    subworker_id: str,
+    goal: str,
+    token_budget: int = 0,
+    index: int = 0,
+    total: int = 0,
+    can_split: bool = False,
+    depth: int = 1,
+) -> SSEEvent:
+    """A sequential Sub-Worker is about to start (Phase 2)."""
+    return SSEEvent(
+        type=EventType.RUN_SUBWORKER_STARTED,
+        payload={
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "subworker_id": subworker_id,
+            "goal": goal,
+            "token_budget": token_budget,
+            "index": index,
+            "total": total,
+            "can_split": can_split,
+            "depth": depth,
+        },
+    )
+
+
+def run_subworker_completed(
+    run_id: str,
+    agent_id: str,
+    *,
+    subworker_id: str,
+    success: bool,
+    summary: str = "",
+    artifact_refs: list[str] | None = None,
+    failure: str = "",
+    side_effects: list[str] | None = None,
+    tokens_used: int = 0,
+    rounds: int = 0,
+    index: int = 0,
+    total: int = 0,
+    fold_summary: str = "",
+) -> SSEEvent:
+    """A sequential Sub-Worker finished; payload folds into the parent journal node."""
+    return SSEEvent(
+        type=EventType.RUN_SUBWORKER_COMPLETED,
+        payload={
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "subworker_id": subworker_id,
+            "success": success,
+            "summary": summary,
+            "artifact_refs": list(artifact_refs or []),
+            "failure": failure,
+            "side_effects": list(side_effects or []),
+            "tokens_used": tokens_used,
+            "rounds": rounds,
+            "index": index,
+            "total": total,
+            "fold_summary": fold_summary,
         },
     )
 
@@ -246,10 +405,66 @@ def run_failed(
     return SSEEvent(type=EventType.RUN_FAILED, payload=payload)
 
 
+def run_cancelled(
+    run_id: str,
+    agent_id: str,
+    *,
+    reason: str = "stop",
+) -> SSEEvent:
+    """A run was interrupted mid-flight (跑一半改方向 / 整轮停止).
+
+    ``reason``:
+    - ``redirect`` — user「立即改此人」hard-stopped this worker only; salvage may follow
+      with a hot ``continue_run`` or cold ``_redir`` handoff.
+    - ``stop`` — whole-turn abort (停止整轮); no per-worker redirect follow-up.
+
+    Orthogonal to ``run_failed`` (error terminal). Durable so reload doesn't leave the
+    node stuck ``running`` / agent ``working``.
+    """
+    return SSEEvent(
+        type=EventType.RUN_CANCELLED,
+        payload={"run_id": run_id, "agent_id": agent_id, "reason": reason},
+    )
+
+
 def run_progress(completed: int, total: int) -> SSEEvent:
     return SSEEvent(
         type=EventType.RUN_PROGRESS,
         payload={"completed": completed, "total": total},
+    )
+
+
+def team_synthesis_preview(
+    *,
+    execution_id: str,
+    completed: int,
+    total: int,
+    headline: str,
+    text: str,
+    workers: list[dict[str, Any]],
+    in_progress: bool = True,
+) -> SSEEvent:
+    """CEO 协调模式 Phase 1：多 worker 委派期间的确定性团队进展摘要。
+
+    Emitted from ``drive._progress`` after each worker finishes when the plan has ≥2
+    nodes. Template-only (no LLM) — verifies progressive visibility without changing
+    ReAct / delegate blocking. Transport-only (EPHEMERAL): not journaled, not in
+    ProjectedTurn; the live StatusStrip reads it off the stream. Must NOT reuse
+    ``content_delta`` (would pollute the final CEO bubble).
+
+    → 见 docs/03-AI核心/编排器与CEO主Agent.md §协调模式（合成通道）
+    """
+    return SSEEvent(
+        type=EventType.TEAM_SYNTHESIS_PREVIEW,
+        payload={
+            "execution_id": execution_id,
+            "completed": completed,
+            "total": total,
+            "headline": headline,
+            "text": text,
+            "workers": workers,
+            "in_progress": in_progress,
+        },
     )
 
 

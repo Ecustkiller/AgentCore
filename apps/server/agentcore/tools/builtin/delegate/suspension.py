@@ -4,13 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentcore.core.logging import get_logger
+from agentcore.runtime.suspension_capture import SuspensionCapture, persist_suspension_capture
 
 if TYPE_CHECKING:
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.tools.builtin.delegate.tool import DelegateTool
-
-logger = get_logger(__name__)
 
 
 def can_persist_suspension(tool: DelegateTool) -> bool:
@@ -41,60 +39,36 @@ async def persist_suspension(
     """
     if not can_persist_suspension(tool):
         return False
-    from agentcore.core.log_context import get_log_value
-    from agentcore.runtime.suspension import (
-        PlanReviewSuspension,
-        captain_transcript,
-        find_tool_call_id,
-        turn_history,
-    )
+    from agentcore.runtime.suspension import PlanReviewSuspension, find_tool_call_id
 
-    transcript = captain_transcript.get()
-    if not transcript:
-        logger.info("suspension.no_transcript", checkpoint_id=checkpoint_id)
-        return False
-    from agentcore.runtime.facts import snapshot_fact_log
+    def build_frame(capture: SuspensionCapture) -> PlanReviewSuspension:
+        return PlanReviewSuspension(
+            message_id=tool._message_id or "",
+            conversation_id=tool._conversation_id or "",
+            user_id=tool._base_tool_context.user_id,
+            captain_run_id=tool._captain_run_id or "",
+            checkpoint_id=checkpoint_id,
+            tool_call_id=find_tool_call_id(capture.transcript, "delegate"),
+            base_system_prompt=tool._system_prompt,
+            user_message=tool._user_message,
+            folder_id=tool._folder_id,
+            memory_enabled=tool._memory_enabled,
+            transcript=capture.transcript,
+            history=capture.history,
+            plan=plan,
+            completed=dict(completed),
+            journal_entries=capture.journal_entries,
+            steps=steps,
+            pending=pending,
+            trace_id=capture.trace_id,
+        )
 
-    journal = list(tool._sink.execution_journal() or [])
-    journal.append(
-        {
-            "type": required_event.type.value,
-            "payload": required_event.payload,
-            "timestamp": required_event.timestamp,
-        }
-    )
-    journal_entries = snapshot_fact_log(
-        trailing=[
-            {
-                "kind": required_event.type.value,
-                "payload": required_event.payload,
-                "ts": required_event.timestamp,
-            }
-        ]
-    )
-    frame = PlanReviewSuspension(
-        message_id=tool._message_id or "",
-        conversation_id=tool._conversation_id or "",
-        user_id=tool._base_tool_context.user_id,
-        captain_run_id=tool._captain_run_id or "",
+    return await persist_suspension_capture(
         checkpoint_id=checkpoint_id,
-        tool_call_id=find_tool_call_id(transcript, "delegate"),
-        base_system_prompt=tool._system_prompt,
-        user_message=tool._user_message,
-        folder_id=tool._folder_id,
-        memory_enabled=tool._memory_enabled,
-        transcript=list(transcript),
-        history=list(turn_history.get() or []),
-        plan=plan,
-        completed=dict(completed),
-        journal=journal,
-        journal_entries=journal_entries,
-        steps=steps,
-        pending=pending,
-        trace_id=get_log_value("trace_id"),
+        required_event=required_event,
+        build_frame=build_frame,
+        saver=tool._suspension_saver,  # type: ignore[arg-type]
     )
-    await tool._suspension_saver(frame)  # type: ignore[misc]
-    return True
 
 
 async def drop_suspension(tool: DelegateTool) -> None:

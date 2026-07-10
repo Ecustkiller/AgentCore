@@ -9,6 +9,7 @@ import type {
   PlanReviewResolvedPayload,
   PlanRevisedPayload,
   PlanRevisionKind,
+  RunCancelledPayload,
   RunCompletedPayload,
   RunContextPayload,
   RunEscalationPayload,
@@ -53,6 +54,8 @@ export type RunFrame =
       stance?: Stance;
       group?: string;
       round?: number;
+      // 冷回落接手: mid-flight `_redir` spawn; undefined/null on ordinary / revision starts.
+      replacesRunId?: string | null;
     }
   | {
       t: number;
@@ -100,6 +103,14 @@ export type RunFrame =
       // 完工交接简报: a contract-missing run's authored wrap-up; absent for infra failures.
       debrief?: import("@/types/events").RunDebrief;
     }
+  | {
+      // 跑一半改方向 / 整轮停止: interrupted mid-flight (orthogonal to run_failed).
+      t: number;
+      kind: "run_cancelled";
+      runId: string;
+      agentId: string;
+      reason: "redirect" | "stop";
+    }
   | { t: number; kind: "run_progress"; completed: number; total: number }
   | {
       // 调度埋点量化 (深层诊断指标): a WaveScheduler segment's snapshot, folded onto
@@ -116,6 +127,7 @@ export type RunFrame =
       question: string;
       assumption: string;
       blocking: boolean;
+      escalationKind: import("./types").EscalationKind;
     }
   | {
       // 阻塞式求决策: a worker SUSPENDED on a blocking escalate, awaiting the user.
@@ -127,9 +139,11 @@ export type RunFrame =
       agentId: string;
       question: string;
       assumption: string;
+      escalationKind: import("./types").EscalationKind;
       // 结构化升级: optional structured forks (同 ask_user 的 questions) the card renders. The
       // builder always sets it (`?? []`); optional so hand-built fixtures may omit it.
       questions?: AskQuestion[];
+      awaiting?: "user" | "ceo";
     }
   | {
       // 阻塞式求决策 settlement: the blocking escalate resolved (answer) or timed out.
@@ -139,6 +153,8 @@ export type RunFrame =
       agentId: string;
       status: "resolved" | "timeout";
       answer: string;
+      arbitrated_by?: "user" | "ceo";
+      via_user?: boolean;
     }
   | {
       t: number;
@@ -227,6 +243,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         stance: p.stance,
         group: p.group,
         round: p.round,
+        replacesRunId: p.replaces_run_id ?? null,
       };
     }
     case "run_context": {
@@ -302,6 +319,16 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         debrief: p.debrief,
       };
     }
+    case "run_cancelled": {
+      const p = event.payload as RunCancelledPayload;
+      return {
+        t,
+        kind: "run_cancelled",
+        runId: p.run_id,
+        agentId: p.agent_id,
+        reason: p.reason,
+      };
+    }
     case "run_progress": {
       const p = event.payload as RunProgressPayload;
       return {
@@ -350,6 +377,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         question: p.question,
         assumption: p.assumption,
         blocking: p.blocking,
+        escalationKind: p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
       };
     }
     case "escalation_required": {
@@ -362,7 +390,9 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         agentId: p.agent_id,
         question: p.question,
         assumption: p.assumption,
+        escalationKind: p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
         questions: p.questions ?? [],
+        awaiting: p.awaiting === "ceo" ? "ceo" : "user",
       };
     }
     case "escalation_resolved": {
@@ -374,6 +404,12 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         agentId: p.agent_id,
         status: p.status,
         answer: p.answer,
+        ...(p.arbitrated_by === "user" || p.arbitrated_by === "ceo"
+          ? { arbitrated_by: p.arbitrated_by }
+          : {}),
+        ...(p.arbitrated_by === "ceo" && p.via_user != null
+          ? { via_user: p.via_user }
+          : {}),
       };
     }
     case "tool_use_start": {

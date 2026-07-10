@@ -1,13 +1,19 @@
-import { hasAgentTownLauncher } from "@/lib/capabilities";
 import { OpenInAgentTownButton } from "@/simulation/OpenInAgentTownButton";
 import { SimulationRunManager } from "@/simulation/SimulationRunManager";
 import { ArrowLeft } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
 /**
- * DT-01: Desktop launcher-first entry for AgentTown (R3F frozen as ?preview=1 only).
+ * DT-01: Desktop launcher for AgentTown (spawn exe + session.json).
+ * 3D observation lives in the Unity client — no embedded R3F.
  */
 export function TownLauncherPage() {
+  const [launchHint, setLaunchHint] = useState<{
+    message: string;
+    candidates?: string[];
+  } | null>(null);
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex items-center gap-3 border-b border-border px-4 py-3">
@@ -36,9 +42,53 @@ export function TownLauncherPage() {
             Desktop 负责登录与启动；3D 观测、tick 推进与决策面板在 AgentTown
             客户端中完成。凭据已同步至 session.json。
           </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            开发期：先在仓库根目录执行{" "}
+            <code className="rounded bg-muted px-1 py-0.5">pnpm town:build</code>
+            ，生成{" "}
+            <code className="rounded bg-muted px-1 py-0.5">
+              apps/town/Builds/Windows/AgentTown.exe
+            </code>
+            ；也可设置{" "}
+            <code className="rounded bg-muted px-1 py-0.5">AGENTTOWN_PATH</code>。
+          </p>
         </div>
 
-        <OpenInAgentTownButton size="md" variant="primary" />
+        <OpenInAgentTownButton
+          size="md"
+          variant="primary"
+          onLaunchError={setLaunchHint}
+        />
+
+        {launchHint ? (
+          <div
+            className="w-full max-w-lg rounded-xl border border-border bg-card p-4 text-left"
+            role="alert"
+          >
+            <p className="text-sm text-foreground whitespace-pre-wrap">
+              {launchHint.message}
+            </p>
+            {launchHint.candidates && launchHint.candidates.length > 0 ? (
+              <div className="mt-3">
+                <p className="text-xs font-medium text-muted-foreground">
+                  解析到的候选路径
+                </p>
+                <ul className="mt-1 list-inside list-disc text-xs text-muted-foreground break-all">
+                  {launchHint.candidates.map((path) => (
+                    <li key={path}>{path}</li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  建议：先跑{" "}
+                  <code className="rounded bg-muted px-1">pnpm town:build</code>
+                  ，或设置环境变量{" "}
+                  <code className="rounded bg-muted px-1">AGENTTOWN_PATH</code>{" "}
+                  指向可执行文件。
+                </p>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="w-full max-w-lg rounded-xl border border-border bg-card p-4">
           <p className="mb-3 text-xs font-medium text-muted-foreground">
@@ -46,27 +96,7 @@ export function TownLauncherPage() {
           </p>
           <SimulationRunManager />
         </div>
-
-        <Link
-          to="/simulation/town?preview=1"
-          className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-        >
-          开发对照：内嵌 R3F 预览（冻结，仅离线/联调）
-        </Link>
       </div>
     </div>
-  );
-}
-
-/** Link to frozen R3F preview from other surfaces. */
-export function TownPreviewLink() {
-  if (!hasAgentTownLauncher()) return null;
-  return (
-    <Link
-      to="/simulation/town?preview=1"
-      className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-    >
-      R3F 对照预览
-    </Link>
   );
 }

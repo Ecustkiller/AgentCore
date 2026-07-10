@@ -17,10 +17,11 @@ import {
   useMessageExecution,
 } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
-import { useUIStore } from "@/stores/ui";
+import { turnDetailPath, useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
 import { Pencil, RotateCcw, Square, Wrench } from "lucide-react";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { AuditSection } from "./sections/RunAudit";
 import { RunCausalInjectBlock } from "./sections/RunCausalInject";
@@ -66,8 +67,7 @@ export function RunDetailBody({
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
   const diagnosticMode = useUIStore((s) => s.diagnosticMode);
   const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
-  const requestCanvasFocus = useUIStore((s) => s.requestCanvasFocus);
-  const setConversationView = useUIStore((s) => s.setConversationView);
+  const navigate = useNavigate();
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const traceId = useConversationStore(
     (s) =>
@@ -153,7 +153,11 @@ export function RunDetailBody({
       {agent.status === "working" && (
         <div className="mb-4 space-y-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5 text-xs">
           <p className="text-sm text-foreground">
-            正在实时输出——下方内容会边写边更新。
+            {run.revisionOf != null
+              ? "续写中——带着上一版草稿按新方向改。"
+              : run.replacesRunId != null
+                ? "接手重写——同角色新人按新方向重做。"
+                : "正在实时输出——下方内容会边写边更新。"}
           </p>
           <div className="flex flex-wrap gap-2">
             {canRedirect && (
@@ -257,13 +261,14 @@ export function RunDetailBody({
           onCompare={
             conversationId
               ? () => {
-                  requestCanvasFocus(
-                    messageId,
-                    false,
-                    "compare",
-                    revisionComparePair(chain, run.id),
+                  navigate(
+                    turnDetailPath(
+                      conversationId,
+                      messageId,
+                      "compare",
+                      revisionComparePair(chain, run.id),
+                    ),
                   );
-                  setConversationView(conversationId, "canvas");
                 }
               : undefined
           }

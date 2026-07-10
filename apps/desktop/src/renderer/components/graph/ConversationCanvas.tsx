@@ -1,79 +1,73 @@
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { useBackgroundTasksSync } from "@/stores/backgroundTasks";
 import { useCommandPanelStore } from "@/stores/commandPanel";
 import {
   useActiveGenerating,
   useConversationStore,
 } from "@/stores/conversation";
+import {
+  ExecutionScopeContext,
+  useActiveExecField,
+} from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
-import { Background, Panel, ReactFlow } from "@xyflow/react";
+import {
+  Background,
+  Panel,
+  ReactFlow,
+  ReactFlowProvider,
+} from "@xyflow/react";
 import { ArrowUp, Loader2, Network } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CanvasCommandBar } from "./CanvasCommandBar";
+import { CanvasPlaybackControls } from "./CanvasPlaybackControls";
 import { CanvasTurnRail } from "./CanvasTurnRail";
 import { CanvasZoomControls } from "./CanvasZoomControls";
-import { CanvasZoomedTurn } from "./CanvasZoomedTurn";
-import { FocusedTurnNode } from "./FocusedTurnNode";
+import { GraphContextMenu } from "./GraphContextMenu";
+import { GraphHoverContext } from "./graphHover";
+import { GraphToolbar } from "./GraphToolbar";
 import { SimpleTurnNode } from "./SimpleTurnNode";
+import { TurnGroupNode } from "./TurnGroupNode";
 import { TurnSummaryNode } from "./TurnSummaryNode";
+import { WaveLanes } from "./WaveLanes";
+import { edgeTypes, nodeTypes as dagNodeTypes } from "./constants";
+import { useCanvasFlow } from "./useCanvasFlow";
 import {
   useCanvasFocus,
   useCanvasFocusState,
   useCanvasNodeHandlers,
 } from "./useCanvasFocus";
 import { useCanvasTurns } from "./useCanvasTurns";
-import { useCanvasZoom } from "./useCanvasZoom";
 
 /**
- * 对话级画布（前端UX设计.md §6.1 · 持久累积 + LOD）. The opt-in second
- * view {@link import("../../pages/ConversationPage")} renders in place of {@link
- * import("../chat/ChatView")} when the conversation's view mode is "canvas" (画布
- * 已毕业，无实验开关——入口恒显示、对话页默认聊天，前端UX设计.md §六）。
+ * 对话级画布 — single ReactFlow instance.
  *
- * 乙-1 单张持久画布: ONE pannable surface where every turn accumulates as a node, top
- * → bottom (视觉累积), with a tokenized zoom/fit cluster (no minimap — a vertical spine's
- * minimap is low-value clutter). Identity continuity (「同一拨人」) rides on `agentIdentity`
- * — same role ⇒ same avatar across turns — WITHOUT backend worker实体化 (= 乙-2, 否, 见设计 §八).
- *
- * LOD「只有聚焦回合画完整 DAG」(§七 节点 ≤50 / ≥60fps): exactly ONE team turn is
- * focused (default latest, auto-follows new turns, click a summary to switch). The
- * focused turn expands IN PLACE to its full worker DAG ({@link FocusedTurnNode},
- * embedded GraphView); every other team turn folds to a {@link TurnSummaryNode}
- * (回合摘要节点), and a single-agent turn degenerates to a {@link SimpleTurnNode}
- * (竖排轻卡). So the canvas draws one full DAG + O(turns) summary nodes, never a wall
- * of nodes. The 全屏 button on the focused node hands off to the on-demand overlay.
- *
- * Single data source (设计 §二「一份数据两种渲染」): every node projects from the same
- * `projectExecution` fold the chat view reads. Reloaded team turns are hydrated from
- * their journal here (the chat view's InlineTeamGraph isn't mounted in canvas mode),
- * idempotently. The bottom {@link CanvasCommandBar} is always present (常驻底栏).
+ * LOD: folded turns = TurnSummaryNode / SimpleTurnNode; the focused team turn
+ * expands IN PLACE as a compound TurnGroupNode whose children (AgentNode etc.)
+ * share this same RF store via parentId + extent:"parent". No nested
+ * ReactFlowProvider. Full-screen turn detail lives at
+ * `#/conversations/:id/turn/:turnId` (Maximize / double-click navigate there).
  */
 
-const turnNodeTypes = {
-  focusedTurn: FocusedTurnNode,
+const canvasNodeTypes = {
+  ...dagNodeTypes,
+  turnGroup: TurnGroupNode,
   teamTurn: TurnSummaryNode,
   simpleTurn: SimpleTurnNode,
 };
 
-export function ConversationCanvas() {
+function ConversationCanvasInner() {
   const generating = useActiveGenerating();
 
   const { focusedTurn, setFocusedTurn } = useCanvasFocusState();
-  const {
-    zoomedTurn,
-    zoomAutoplay,
-    zoomView,
-    zoomComparePair,
-    zoomShown,
-    openZoom,
-    exitZoom,
-    onZoomOverlayTransitionEnd,
-    overviewScaleClass,
-  } = useCanvasZoom(setFocusedTurn);
 
-  const { turns, effectiveFocus, railItems, nodes, edges } = useCanvasTurns({
+  const { turns, effectiveFocus, railItems } = useCanvasTurns({
     focusedTurn,
     setFocusedTurn,
-    openZoom,
+  });
+
+  const flow = useCanvasFlow({
+    turns,
+    effectiveFocus,
   });
 
   const {
@@ -84,19 +78,33 @@ export function ConversationCanvas() {
     requestOlder,
     onMove,
     onInit,
-  } = useCanvasFocus({ turns, effectiveFocus, nodes });
+  } = useCanvasFocus({
+    turns,
+    effectiveFocus,
+    nodes: flow.nodes,
+  });
+
+  const showSimpleTurnDetail = useSidePanelStore((s) => s.showSimpleTurnDetail);
+  const onSimpleTurnClick = useCallback(
+    (turnId: string) => {
+      const t = turns.find((x) => x.id === turnId && x.kind === "simple");
+      if (!t) return;
+      showSimpleTurnDetail(
+        t.id,
+        t.promptMessageId,
+        t.answerMessageId,
+        t.prompt || "对话",
+      );
+    },
+    [turns, showSimpleTurnDetail],
+  );
 
   const { onNodeClick, onNodeDoubleClick, makeOnRailSelect } =
-    useCanvasNodeHandlers(setFocusedTurn, openZoom);
+    useCanvasNodeHandlers(setFocusedTurn, flow.onExpandTurn, onSimpleTurnClick);
   const onRailSelect = makeOnRailSelect(rfRef);
 
   const conversationId = useConversationStore((s) => s.currentConversationId);
 
-  // 图上指挥 (§6.2): the 指挥台 now lives in the unified side panel ({@link
-  // import("./CanvasDecisionPanel").CommandRegion}), not a second dock here. Turn focus
-  // is a canvas concept, so publish「canvas active」+ the focused team turn to the bridge
-  // store; the region derives the rest live and self-surfaces. Keep driving the 后台云端
-  // 任务 poll — the region only reads it, and it must tick even while collapsed / closed.
   useBackgroundTasksSync(conversationId);
   useEffect(() => {
     const cmd = useCommandPanelStore.getState();
@@ -114,118 +122,277 @@ export function ConversationCanvas() {
 
   useEffect(() => () => useSidePanelStore.getState().closeContentTabs(), []);
 
+  // #2: ignore turnGroup (compound parent) for hover; short debounce on leave
+  // so parent→child transitions don't flash a false clear.
+  const hoverClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setHoveredNodeId = flow.setHoveredNodeId;
+  const onNodeMouseEnter = useCallback(
+    (_: React.MouseEvent, node: { id: string; type?: string }) => {
+      if (node.type === "turnGroup" || node.type === "subTeamGroup") return;
+      if (hoverClearRef.current != null) {
+        clearTimeout(hoverClearRef.current);
+        hoverClearRef.current = null;
+      }
+      setHoveredNodeId(node.id);
+    },
+    [setHoveredNodeId],
+  );
+  const onNodeMouseLeave = useCallback(
+    (_: React.MouseEvent, node: { type?: string }) => {
+      if (node.type === "turnGroup" || node.type === "subTeamGroup") return;
+      if (hoverClearRef.current != null) clearTimeout(hoverClearRef.current);
+      hoverClearRef.current = setTimeout(() => {
+        setHoveredNodeId(null);
+        hoverClearRef.current = null;
+      }, 40);
+    },
+    [setHoveredNodeId],
+  );
+  useEffect(
+    () => () => {
+      if (hoverClearRef.current != null) clearTimeout(hoverClearRef.current);
+    },
+    [],
+  );
+
+  const activateCanvasNode = flow.activateCanvasNode;
+  const handleKeyboardNav = flow.handleKeyboardNav;
+  const onFlowNodeClick = useCallback(
+    (event: React.MouseEvent, node: { id: string; type?: string }) => {
+      if (
+        node.type === "teamTurn" ||
+        node.type === "simpleTurn" ||
+        node.type === "turnGroup"
+      ) {
+        onNodeClick(event, node as never);
+        return;
+      }
+      activateCanvasNode(node.id);
+    },
+    [onNodeClick, activateCanvasNode],
+  );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (
+        e.key === "ArrowUp" ||
+        e.key === "ArrowDown" ||
+        e.key === "ArrowLeft" ||
+        e.key === "ArrowRight" ||
+        e.key === "Enter" ||
+        e.key === "Escape"
+      ) {
+        if (handleKeyboardNav(e.key)) e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handleKeyboardNav]);
+
+  const setMenuNodeId = flow.setMenuNodeId;
+  const onNodeContextMenu = useCallback(
+    (event: React.MouseEvent, node: { id: string }) => {
+      event.preventDefault();
+      setMenuNodeId(node.id);
+    },
+    [setMenuNodeId],
+  );
+
+  const onPaneContextMenu = useCallback(
+    (event: React.MouseEvent | MouseEvent) => {
+      event.preventDefault();
+      setMenuNodeId(null);
+    },
+    [setMenuNodeId],
+  );
+
+  const centerNode = useCallback(
+    (id: string) => {
+      const namespaced = effectiveFocus ? `${effectiveFocus}::${id}` : id;
+      rfRef.current?.fitView({
+        nodes: [{ id: namespaced }, { id }],
+        padding: 0.4,
+        maxZoom: 1.2,
+        duration: 300,
+      });
+    },
+    [rfRef, effectiveFocus],
+  );
+
+  const fitViewAll = useCallback(() => {
+    rfRef.current?.fitView({
+      padding: 0.2,
+      maxZoom: 1,
+      duration: 300,
+    });
+  }, [rfRef]);
+
+  const showGraphChrome = !!effectiveFocus && !!flow.focusedExec;
+
+  const menuNodeBare = flow.menuNodeId?.includes("::")
+    ? flow.menuNodeId.split("::").pop()!
+    : flow.menuNodeId;
+
   return (
-    <div className="relative flex min-w-0 flex-1 flex-col">
-      <div className="flex h-11 shrink-0 items-center border-b border-border pl-40 pr-12">
-        <span className="truncate text-sm font-medium text-foreground">
-          画布
-        </span>
-        {turns.length > 0 && (
-          <span className="ml-2 shrink-0 text-xs text-muted-foreground">
-            {turns.length} 回合
+    <ExecutionScopeContext.Provider value={effectiveFocus}>
+      <div className="relative flex min-w-0 flex-1 flex-col">
+        <div className="flex h-11 shrink-0 items-center border-b border-border pl-40 pr-12">
+          <span className="truncate text-sm font-medium text-foreground">
+            画布
           </span>
-        )}
-      </div>
-      <div
-        ref={canvasBoxRef}
-        className={`relative min-h-0 flex-1 origin-center transition-transform duration-200 ease-out motion-reduce:transition-none ${overviewScaleClass}`}
-      >
-        {turns.length > 0 ? (
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={turnNodeTypes}
-            onNodeClick={onNodeClick}
-            onNodeDoubleClick={onNodeDoubleClick}
-            onMove={onMove}
-            onInit={onInit}
-            nodesDraggable={false}
-            nodesConnectable={false}
-            elementsSelectable={false}
-            zoomOnDoubleClick={false}
-            minZoom={0.2}
-            maxZoom={1.5}
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background />
-            {hasMoreBefore && (
-              <Panel position="top-center">
-                <button
-                  type="button"
-                  onClick={requestOlder}
-                  disabled={loadingOlder}
-                  className="flex items-center gap-1.5 rounded-full border border-border bg-card/90 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur transition-colors hover:text-foreground"
-                >
-                  {loadingOlder ? (
-                    <>
-                      <Loader2 size={12} className="animate-spin" />
-                      载入更早…
-                    </>
-                  ) : (
-                    <>
-                      <ArrowUp size={12} />
-                      更早
-                    </>
+          {turns.length > 0 && (
+            <span className="ml-2 shrink-0 text-xs text-muted-foreground">
+              {turns.length} 回合
+            </span>
+          )}
+        </div>
+        <div ref={canvasBoxRef} className="relative min-h-0 flex-1">
+          {turns.length > 0 ? (
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <div className="relative h-full w-full">
+                  <GraphHoverContext.Provider value={flow.hoverState}>
+                    <ReactFlow
+                      nodes={flow.nodes}
+                      edges={flow.edges}
+                      nodeTypes={canvasNodeTypes}
+                      edgeTypes={edgeTypes}
+                      onInit={onInit}
+                      onNodesChange={flow.onNodesChange}
+                      onNodeClick={onFlowNodeClick}
+                      onNodeDoubleClick={onNodeDoubleClick}
+                      onNodeMouseEnter={onNodeMouseEnter}
+                      onNodeMouseLeave={onNodeMouseLeave}
+                      onNodeContextMenu={onNodeContextMenu}
+                      onPaneContextMenu={onPaneContextMenu}
+                      onMove={onMove}
+                      nodesDraggable={false}
+                      nodesConnectable={false}
+                      nodesFocusable={false}
+                      elementsSelectable={false}
+                      zoomOnDoubleClick={false}
+                      minZoom={0.15}
+                      maxZoom={1.5}
+                      proOptions={{ hideAttribution: true }}
+                    >
+                      <Background gap={20} size={1} />
+                      {showGraphChrome && <WaveLanes waves={flow.waves} />}
+                      {hasMoreBefore && (
+                        <Panel position="top-center">
+                          <button
+                            type="button"
+                            onClick={requestOlder}
+                            disabled={loadingOlder}
+                            className="flex items-center gap-1.5 rounded-full border border-border bg-card/90 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur transition-colors hover:text-foreground"
+                          >
+                            {loadingOlder ? (
+                              <>
+                                <Loader2 size={12} className="animate-spin" />
+                                载入更早…
+                              </>
+                            ) : (
+                              <>
+                                <ArrowUp size={12} />
+                                更早
+                              </>
+                            )}
+                          </button>
+                        </Panel>
+                      )}
+                      <Panel position="bottom-left">
+                        <div className="flex flex-col gap-2">
+                          {showGraphChrome && <PlaybackIfFrames />}
+                          <CanvasZoomControls
+                            onZoomIn={() =>
+                              rfRef.current?.zoomIn({ duration: 200 })
+                            }
+                            onZoomOut={() =>
+                              rfRef.current?.zoomOut({ duration: 200 })
+                            }
+                            onFit={fitViewAll}
+                          />
+                        </div>
+                      </Panel>
+                    </ReactFlow>
+                  </GraphHoverContext.Provider>
+
+                  {showGraphChrome && (
+                    <GraphToolbar
+                      layoutKind={flow.layoutKind}
+                      onLayoutKindChange={flow.setLayoutKind}
+                      metricsSummary={flow.metricsSummary}
+                      injectFlowAvailable={flow.injectFlowAvailable}
+                      showAuditInjectFlow={flow.showAuditInjectFlow}
+                      onShowAuditInjectFlowChange={flow.setShowAuditInjectFlow}
+                    />
                   )}
-                </button>
-              </Panel>
-            )}
-            <Panel position="bottom-left">
-              <CanvasZoomControls
-                onZoomIn={() => rfRef.current?.zoomIn({ duration: 200 })}
-                onZoomOut={() => rfRef.current?.zoomOut({ duration: 200 })}
-                onFit={() =>
-                  rfRef.current?.fitView({
-                    padding: 0.2,
-                    maxZoom: 1,
-                    duration: 300,
-                  })
-                }
+
+                  {showGraphChrome &&
+                    flow.injectOverlay &&
+                    (flow.showAuditInjectFlow ||
+                      flow.injectOverlay.gapEdges.length > 0) && (
+                      <div className="pointer-events-none absolute bottom-3 right-3 z-10 rounded-lg border border-border bg-card/90 px-2.5 py-1.5 text-xs text-muted-foreground shadow-sm backdrop-blur">
+                        <span className="text-foreground">──</span> 计划依赖
+                        <span className="mx-2 text-muted-foreground/50">·</span>
+                        <span className="text-primary">⇢</span> 数据注入（审计）
+                      </div>
+                    )}
+                </div>
+              </ContextMenuTrigger>
+              <GraphContextMenu
+                menuNodeId={menuNodeBare ?? null}
+                captainRunId={flow.captainRun?.id}
+                taskMessage={flow.taskMessage}
+                finalAnswer={flow.finalAnswer}
+                onNodeSelect={(runId) => activateCanvasNode(runId)}
+                showRunDetailHere={flow.showRunDetailHere}
+                activateNode={(id) => activateCanvasNode(id)}
+                centerNode={centerNode}
+                fitView={fitViewAll}
               />
-            </Panel>
-          </ReactFlow>
-        ) : (
-          <div className="flex h-full items-center justify-center p-6">
-            <div className="max-w-sm text-center">
-              <Network
-                size={28}
-                className="mx-auto mb-3 text-muted-foreground"
-              />
-              <p className="text-sm text-muted-foreground">
-                还没有回合。在下方下达一个需要多 Agent 协作的任务，CEO
-                组好队后这里就会展开画布。
-              </p>
+            </ContextMenu>
+          ) : (
+            <div className="flex h-full items-center justify-center p-6">
+              <div className="max-w-sm text-center">
+                <Network
+                  size={28}
+                  className="mx-auto mb-3 text-muted-foreground"
+                />
+                <p className="text-sm text-muted-foreground">
+                  还没有回合。在下方下达一个需要多 Agent 协作的任务，CEO
+                  组好队后这里就会展开画布。
+                </p>
+              </div>
             </div>
-          </div>
-        )}
-        <CanvasTurnRail
-          items={railItems}
-          focusedId={effectiveFocus}
-          onSelect={onRailSelect}
-        />
-      </div>
-      <CanvasCommandBar
-        onDispatch={() => setDispatched(true)}
-        waiting={dispatched && generating}
-        allowBackground
-      />
-      {zoomedTurn && (
-        <div
-          className={`absolute inset-0 z-20 origin-center transition duration-200 ease-out motion-reduce:transition-none ${
-            zoomShown ? "scale-100 opacity-100" : "scale-[0.92] opacity-0"
-          }`}
-          onTransitionEnd={onZoomOverlayTransitionEnd}
-        >
-          <CanvasZoomedTurn
-            key={zoomedTurn}
-            turnId={zoomedTurn}
-            autoplay={zoomAutoplay}
-            initialView={zoomView}
-            initialComparePair={zoomComparePair}
-            onClose={exitZoom}
+          )}
+          <CanvasTurnRail
+            items={railItems}
+            focusedId={effectiveFocus}
+            onSelect={onRailSelect}
           />
         </div>
-      )}
-    </div>
+        <CanvasCommandBar
+          onDispatch={() => setDispatched(true)}
+          waiting={dispatched && generating}
+          allowBackground
+        />
+      </div>
+    </ExecutionScopeContext.Provider>
+  );
+}
+
+function PlaybackIfFrames({ autoPlay = false }: { autoPlay?: boolean }) {
+  const hasFrames = useActiveExecField((rt) => rt.frames.length > 0);
+  if (!hasFrames) return null;
+  return <CanvasPlaybackControls autoPlay={autoPlay} />;
+}
+
+export function ConversationCanvas() {
+  return (
+    <ReactFlowProvider>
+      <ConversationCanvasInner />
+    </ReactFlowProvider>
   );
 }

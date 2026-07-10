@@ -21,6 +21,7 @@ Subpackages:
 from .entries import KIND_TURN_END, entries_from_runs, journal_entries_from_display_runs
 from .fold import (
     completed_from_journal,
+    execution_id_from_journal,
     plan_from_journal,
     runs_from_entries,
     window_from_journal,
@@ -32,6 +33,7 @@ __all__ = [
     "clear_runs_cache",
     "completed_from_journal",
     "entries_from_runs",
+    "execution_id_from_journal",
     "journal_entries_from_display_runs",
     "TurnJournalWriter",
     "current_journal_writer",

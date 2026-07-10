@@ -10,6 +10,7 @@ import {
   WORKSPACE_TAB_ID,
   contentDetailTabId,
   runDetailTabId,
+  simpleTurnDetailTabId,
   useSidePanelStore,
 } from "../sidePanel";
 
@@ -51,7 +52,6 @@ beforeEach(() => {
   useCommandPanelStore.setState({
     active: false,
     focusedMessageId: null,
-    collapsed: false,
   });
   useConversationStore.setState({ currentConversationId: null });
 });
@@ -224,11 +224,49 @@ describe("showContentDetail", () => {
   });
 });
 
+describe("showSimpleTurnDetail", () => {
+  it("pins a simple-turn Q&A tab, reveals + activates it", () => {
+    panel().showSimpleTurnDetail(MID, "user-1", "asst-1", "直接回答");
+    const id = simpleTurnDetailTabId(MID);
+    expect(panel().open).toBe(true);
+    expect(panel().activeTabId).toBe(id);
+    const tab = panel().tabs[0];
+    expect(tab.kind).toBe("simple-turn");
+    expect(tab.title).toBe("直接回答");
+    if (tab.kind === "simple-turn") {
+      expect(tab.promptMessageId).toBe("user-1");
+      expect(tab.answerMessageId).toBe("asst-1");
+    }
+  });
+
+  it("defaults the title to 对话 and dedups by turn id", () => {
+    panel().showSimpleTurnDetail(MID, "user-1", "asst-1");
+    panel().showSimpleTurnDetail(MID, "user-1", "asst-1", "更新标题");
+    expect(panel().tabs).toHaveLength(1);
+    expect(panel().tabs[0].title).toBe("更新标题");
+    expect(panel().tabs[0].id).toBe(simpleTurnDetailTabId(MID));
+  });
+
+  it("coexists with run tabs", () => {
+    panel().showRunDetail(MID, "run-1", "研究员");
+    panel().showSimpleTurnDetail(MID, "user-1", "asst-1");
+    expect(panel().tabs.map((t) => t.kind)).toEqual(["run", "simple-turn"]);
+  });
+});
+
 describe("closeContentTabs", () => {
   it("drops content tabs but keeps run tabs, re-activating a survivor", () => {
     panel().showRunDetail(MID, "run-1", "研究员");
     panel().showContentDetail(MID, "answer-msg", "最终回答", "answer");
     // The content tab is active; closing content tabs falls back to the run tab.
+    panel().closeContentTabs();
+    expect(panel().tabs.map((t) => t.kind)).toEqual(["run"]);
+    expect(panel().activeTabId).toBe(tabId("run-1"));
+  });
+
+  it("also drops simple-turn Q&A tabs (same reading-context cleanup)", () => {
+    panel().showRunDetail(MID, "run-1", "研究员");
+    panel().showSimpleTurnDetail(MID, "user-1", "asst-1");
     panel().closeContentTabs();
     expect(panel().tabs.map((t) => t.kind)).toEqual(["run"]);
     expect(panel().activeTabId).toBe(tabId("run-1"));
@@ -250,7 +288,7 @@ describe("closeContentTabs", () => {
 });
 
 describe("auto-surface dismiss + pending badge", () => {
-  it("records command context on closePanel when canvas command region is active", () => {
+  it("records command context on closePanel when canvas command tab is active", () => {
     useConversationStore.setState({ currentConversationId: "conv-1" });
     useCommandPanelStore.setState({ active: true, focusedMessageId: MID });
     panel().openPanel();

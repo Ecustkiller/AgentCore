@@ -155,6 +155,21 @@ namespace AgentTown.Simulation
         [JsonProperty("manifest")] public RunManifest Manifest = new();
     }
 
+    public sealed class SimulationRunMetricsResponse
+    {
+        [JsonProperty("run_id")] public string RunId = "";
+        [JsonProperty("metrics")] public List<TickMetrics> Metrics = new();
+    }
+
+    public sealed class InjectSimulationEventResponse
+    {
+        [JsonProperty("run_id")] public string RunId = "";
+        [JsonProperty("event_id")] public string EventId = "";
+        [JsonProperty("event_type")] public string EventType = "";
+        [JsonProperty("title")] public string Title = "";
+        [JsonProperty("queued_for_tick")] public int QueuedForTick;
+    }
+
     // ---- SSE + client-side view types ----
 
     /// <summary>One decoded SSE envelope (<c>{ type, payload, timestamp }</c>).</summary>
@@ -182,6 +197,8 @@ namespace AgentTown.Simulation
         public string Type = "";
         public string AgentId = "";
         public string Summary = "";
+        /// <summary>Optional multi-line body (e.g. conversation transcript) under the summary.</summary>
+        public string Detail = "";
         public string Timestamp = "";
     }
 }

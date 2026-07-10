@@ -103,3 +103,39 @@ async def test_flush_without_any_appends_is_noop() -> None:
     writer = TurnJournalWriter(turn_id="m1", conversation_id="c1", trace_id="t1")
     await writer.flush()  # no drain task ever started → returns immediately
     assert writer.degraded is False
+
+
+async def test_seal_stops_further_durable_appends(monkeypatch) -> None:
+    """After seal, schedule_append must not write more DB rows (pause hard boundary)."""
+    tracker = _SessionTracker()
+    written: list[int] = []
+
+    class Repo:
+        def __init__(self, session: object) -> None:
+            pass
+
+        async def append(self, *, turn_id, seq, conversation_id, trace_id, entry) -> None:
+            written.append(seq)
+
+    _patch(monkeypatch, tracker, Repo)
+    writer = TurnJournalWriter(turn_id="m1", conversation_id="c1", trace_id="t1")
+
+    f0 = writer.schedule_append({"kind": "pre"})
+    await writer.seal()
+
+    assert writer.sealed is True
+    assert writer.next_seq == 1
+    assert written == [0]
+    assert f0 is not None and f0.done()
+
+    # Post-seal appends are durable no-ops: no Future, no seq bump, no DB write.
+    assert writer.schedule_append({"kind": "post"}) is None
+    assert writer.schedule_append({"kind": "post2"}) is None
+    await writer.flush()
+    assert written == [0]
+    assert writer.next_seq == 1
+
+    # Idempotent seal.
+    await writer.seal()
+    assert writer.sealed is True
+    assert written == [0]

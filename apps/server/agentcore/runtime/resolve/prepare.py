@@ -126,6 +126,17 @@ def _assemble_ceo_toolset(
     # 自身无用量面；与 revise 一样恒注册，仅在某次 delegate 让出「计划已让出」简报后才有效，
     # 否则返回友好错误。→ docs/03-AI核心/编排器与CEO主Agent.md §一 replan 原语
     chat_tools.register(ReplanTool(delegate=delegate_tool))
+    # CEO 协调模式：update_synthesis / cancel_worker / resolve_escalation — only
+    # effective while a coordination session is active (tools self-gate otherwise).
+    from agentcore.runtime.coordination.tools import (
+        CancelWorkerTool,
+        ResolveEscalationTool,
+        UpdateSynthesisTool,
+    )
+
+    chat_tools.register(UpdateSynthesisTool(sink=sink))
+    chat_tools.register(CancelWorkerTool())
+    chat_tools.register(ResolveEscalationTool())
     revise_gate = approval_gate if backend_location == "local" else None
     revise_tool = ReviseTool(
         llm=llm,

@@ -5,6 +5,4 @@ export interface DispatchContext {
   conversationId: string;
   /** Which transport delivered this event — set at the dispatch entry (HTTP SSE vs sidecar IPC). */
   source: ResumeOrigin;
-  /** When set, `sim.*` events update the simulation store. */
-  simulationRunId?: string;
 }

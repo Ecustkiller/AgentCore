@@ -7,6 +7,7 @@ import {
   UserRound,
   XCircle,
 } from "lucide-react";
+import { graphNodeDimClass, useGraphNodeDimmed } from "./graphHover";
 import { useTerminalFlash } from "./useTerminalFlash";
 
 /** Which bookend this node is: the synthetic user-input source, or the CEO
@@ -89,6 +90,7 @@ export function EndpointNode({ data }: NodeProps) {
   const flashColor =
     d.status === "failed" ? "var(--destructive)" : "var(--success)";
   const enterDelay = Math.min((d.enterIndex ?? 0) * 35, 280);
+  const dimmed = useGraphNodeDimmed();
 
   const interactiveProps: React.HTMLAttributes<HTMLDivElement> = interactive
     ? {
@@ -114,11 +116,14 @@ export function EndpointNode({ data }: NodeProps) {
         className="!bg-border"
       />
       {/* Entrance wrapper — see AgentNode: keeps the once-on-mount scale/fade off
-          the card so it never collides with the card's `animate-pulse`. */}
-      <div
-        className="animate-graph-node-enter"
-        style={{ animationDelay: `${enterDelay}ms` }}
-      >
+          the card so it never collides with the card's `animate-pulse`.
+          Dim sits outside the entrance wrapper so animation fill-mode cannot
+          override hover opacity. */}
+      <div className={graphNodeDimClass(dimmed)}>
+        <div
+          className="animate-graph-node-enter"
+          style={{ animationDelay: `${enterDelay}ms` }}
+        >
         <div
           {...interactiveProps}
           style={{ "--graph-flash-color": flashColor } as React.CSSProperties}
@@ -168,6 +173,7 @@ export function EndpointNode({ data }: NodeProps) {
               {preview}
             </p>
           )}
+        </div>
         </div>
       </div>
       <Handle

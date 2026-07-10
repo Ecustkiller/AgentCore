@@ -169,7 +169,7 @@ WorldEngine 驱动 tick 推进
 | 3D 场景 | Unity URP + Kenney / Quaternius 免费资产 | Low-Poly；资产源 `packages/town-assets` |
 | NPC | NavMeshAgent + 动画状态机 | 单 FBX/GLB（Xbot）实例化区分居民 |
 | 状态管理 | C# `SimulationSession` 单例 | 禁止多 store 分裂；对齐 tick 快照权威 |
-| Desktop 角色 | 启动器 + `session.json` | 不再内嵌 R3F；`?preview` 对照暂留 |
+| Desktop 角色 | 启动器 + `session.json` | 不再内嵌 3D；`?preview` / R3F **已删** |
 | 场景资产 | Kenney + Quaternius（CC0）+ Unity Asset Store 免费区 | CC0 免费 low-poly 建筑/树木/道具 |
 
 > **中期 Web 传播版（已确认）**：Unity 原生 WebGL2 使同一客户端可导出浏览器版 AI 小镇，服务大众 / 病毒性传播——这是本次选 Unity 而非 UE 的**决定性理由**（落地节点见「七·路线图 Phase 2」）。
@@ -260,6 +260,8 @@ quadrantChart
 | 另有 2+ 同类产品 | — | 赛道合计 6+ 产品 |
 
 **结论**：赛道已拥挤，且核心体验是「陪玩」而非「观察涌现」，与通用多 AI 愿景不符——故首个标杆场景不选 AI 狼人杀，也不做 AI 辩论（看点不足）。
+
+> **传播钩子补丁（2026-07-09）**：对外大众入口改为**观众向 AI 恋综**（非陪玩、非 AI 伴侣）——甜虐赛制 + 竞猜/稀缺公投；小镇仍为中长期世界与引擎锚定场景。→ [AI 恋综场景提案](AI恋综场景提案.md)
 
 ---
 

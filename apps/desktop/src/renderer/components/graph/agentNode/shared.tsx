@@ -29,7 +29,6 @@ export interface AgentNodeData {
   toolCount: number;
   artifacts?: string[];
   focused: boolean;
-  layoutMode?: "dependency" | "timeline";
   nodeWidth?: number;
   model?: string | null;
   durationMs?: number | null;
@@ -40,10 +39,16 @@ export interface AgentNodeData {
   isRevision?: boolean;
   revision?: number;
   revised?: PlanRevisionKind | null;
+  /** 回落换人：接手的原 run id。 */
+  replacesRunId?: string | null;
+  /** worker 核验回炉轻痕迹。 */
+  didRework?: boolean;
   stance?: Stance | null;
   checkpoint?: RunCheckpoint | null;
   escalationPending?: number;
   escalationRaised?: number;
+  /** 节点上最严重的 escalate kind（scope > dep > normal），驱动角标文案。 */
+  escalationKind?: "normal" | "scope" | "dep" | null;
   /** 该 run 的审计事件数（GraphView 角标；0 或未设则不渲染）。 */
   auditEventCount?: number;
   /** Review/QC output flagged by {@link detectReviewConcern} (中间可见性 phase-1). */
@@ -177,9 +182,27 @@ export function revisedBadge(kind: PlanRevisionKind): {
   hint: string;
 } {
   if (kind === "bind") {
-    return { label: "计划已调整", hint: "CEO 据上游产出定稿了这一步的职责" };
+    return { label: "职责已定稿", hint: "CEO 据上游产出定稿了这一步的职责" };
   }
-  return { label: "计划已调整", hint: "CEO 据中途发现调整了这一步的方向" };
+  return { label: "方向已校准", hint: "CEO 据中途发现调整了这一步的方向" };
+}
+
+export function escalationKindLabel(
+  kind: "normal" | "scope" | "dep" | undefined,
+): string {
+  if (kind === "scope") return "职责偏离";
+  if (kind === "dep") return "缺输入";
+  return "普通";
+}
+
+/** Pick the most severe escalate kind on a run (scope > dep > normal). */
+export function pickEscalationKind(
+  escalations: { kind?: "normal" | "scope" | "dep" }[],
+): "normal" | "scope" | "dep" | null {
+  if (escalations.length === 0) return null;
+  if (escalations.some((e) => e.kind === "scope")) return "scope";
+  if (escalations.some((e) => e.kind === "dep")) return "dep";
+  return "normal";
 }
 
 export function checkpointBadge(c: RunCheckpoint): {
@@ -207,7 +230,6 @@ export interface AgentNodePresentation {
   livePreview: string;
   liveThinking: string;
   highlighted: boolean;
-  isTimeline: boolean;
   cardWidth: number;
   enterDelay: number;
   modelText: string;
@@ -220,4 +242,5 @@ export interface AgentNodePresentation {
   reviewConcernFace: { label: string; cls: string } | null;
   statusFace: { text: string; cls: string; tickElapsed: boolean };
   revisionFace: string | null;
+  handoffFace: string | null;
 }

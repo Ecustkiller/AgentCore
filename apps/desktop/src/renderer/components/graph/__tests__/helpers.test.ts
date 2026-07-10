@@ -123,42 +123,44 @@ describe("computeWaves", () => {
   });
 });
 
-describe("computeGraphFold · debate compound", () => {
-  const side = (
-    prefix: string,
-    stance: "pro" | "con",
-    rounds: number,
-  ): GraphRunLike[] => {
-    const original: GraphRunLike = {
-      id: `mod_r1_${prefix}`,
+function debateSide(
+  prefix: string,
+  stance: "pro" | "con",
+  rounds: number,
+): GraphRunLike[] {
+  const original: GraphRunLike = {
+    id: `mod_r1_${prefix}`,
+    dependsOn: [],
+    parentRunId: "mod",
+    revision: 0,
+    revisionOf: null,
+    stance,
+    group: "debate:debate",
+  };
+  const revs: GraphRunLike[] = [];
+  for (let r = 2; r <= rounds; r++) {
+    revs.push({
+      id: `mod_r${r}_${prefix}`,
       dependsOn: [],
-      parentRunId: "mod",
-      revision: 0,
-      revisionOf: null,
+      parentRunId: original.id,
+      revision: r,
+      revisionOf: original.id,
       stance,
       group: "debate:debate",
-    };
-    const revs: GraphRunLike[] = [];
-    for (let r = 2; r <= rounds; r++) {
-      revs.push({
-        id: `mod_r${r}_${prefix}`,
-        dependsOn: [],
-        parentRunId: original.id,
-        revision: r,
-        revisionOf: original.id,
-        stance,
-        group: "debate:debate",
-      });
-    }
-    return [original, ...revs];
-  };
+    });
+  }
+  return [original, ...revs];
+}
 
-  const debateRuns = (rounds: number): GraphRunLike[] => [
+function debateRuns(rounds: number): GraphRunLike[] {
+  return [
     { id: "mod", dependsOn: [], parentRunId: null, kind: "agent" },
-    ...side("pro", "pro", rounds),
-    ...side("con", "con", rounds),
+    ...debateSide("pro", "pro", rounds),
+    ...debateSide("con", "con", rounds),
   ];
+}
 
+describe("computeGraphFold · debate compound", () => {
   it("folds all debater runs under the moderator unit", () => {
     const runs = debateRuns(4);
     expect(debateModeratorId(runs, null)).toBe("mod");
@@ -169,22 +171,66 @@ describe("computeGraphFold · debate compound", () => {
     expect(fold.unitOf.get("mod_r4_con")).toBe("mod");
   });
 
-  it("collapsed graph exposes only the moderator as a top-level worker node", () => {
-    const { nodeIds } = buildGraphStructure(debateRuns(4), "__input__");
-    const workers = nodeIds.filter(
-      (id) => id !== "__input__" && id !== "captain",
-    );
-    expect(workers).toEqual(["mod"]);
-  });
-
-  it("expanded graph includes all debater versions for drill-in layout", () => {
-    const expanded = new Set(["mod"]);
-    const { nodeIds } = buildGraphStructure(
+  it("always expands debate grid without requiring expandedUnits", () => {
+    const { nodeIds, subTeams } = buildGraphStructure(
       debateRuns(4),
       "__input__",
-      expanded,
     );
+    expect(nodeIds).toContain("mod");
     expect(nodeIds).toContain("mod_r1_pro");
     expect(nodeIds).toContain("mod_r4_con");
+    const debateTeam = subTeams.find((t) => t.parentId === "mod");
+    expect(debateTeam?.memberIds).toEqual(
+      expect.arrayContaining([
+        "mod_r1_pro",
+        "mod_r1_con",
+        "mod_r4_pro",
+        "mod_r4_con",
+      ]),
+    );
+  });
+});
+
+describe("buildGraphStructure · bookend sink edges", () => {
+  const captain = (): GraphRunLike => ({
+    id: "captain",
+    dependsOn: [],
+    kind: "captain",
+  });
+
+  const sinkTargets = (edges: { source: string; target: string }[]) =>
+    edges
+      .filter((e) => e.target === "captain")
+      .map((e) => e.source)
+      .sort();
+
+  it("fans parallel leaves into the CEO", () => {
+    const { rawEdges } = buildGraphStructure(
+      [captain(), run("w1"), run("w2"), run("w3")],
+      "__input__",
+    );
+    expect(sinkTargets(rawEdges)).toEqual(["w1", "w2", "w3"]);
+    expect(
+      rawEdges.filter((e) => e.source === "__input__").map((e) => e.target),
+    ).toEqual(expect.arrayContaining(["w1", "w2", "w3"]));
+  });
+
+  it("connects only the serial chain tip to the CEO", () => {
+    const { rawEdges } = buildGraphStructure(
+      [captain(), run("s1"), run("s2", ["s1"]), run("s3", ["s2"])],
+      "__input__",
+    );
+    expect(sinkTargets(rawEdges)).toEqual(["s3"]);
+    expect(
+      rawEdges.some((e) => e.source === "__input__" && e.target === "s1"),
+    ).toBe(true);
+  });
+
+  it("connects the debate moderator unit to the CEO", () => {
+    const { rawEdges } = buildGraphStructure(
+      [captain(), ...debateRuns(2)],
+      "__input__",
+    );
+    expect(sinkTargets(rawEdges)).toEqual(["mod"]);
   });
 });

@@ -40,7 +40,7 @@ class EscalationOutcome:
 
 @dataclass
 class EscalationChannel:
-    """Per-run wiring that lets a worker's ``escalate(blocking=true)`` suspend for the user.
+    """Per-run wiring that lets a worker's ``escalate(blocking=true)`` suspend.
 
     Built by ``build_agent_executor`` for each delegated worker and ``None`` on the
     CEO / tests / unarmed turns (then ``escalate`` keeps its non-blocking behaviour).
@@ -51,15 +51,16 @@ class EscalationChannel:
     resolution into the worker's ``RunState`` for CEO synthesis, and returns the
     :class:`EscalationOutcome`. The tool only decides WHETHER to block and maps the
     outcome to its ``ToolResult``.
+
+    ``awaiting`` on ``request``: ``"user"`` (经典直挂用户) or ``"ceo"`` (协调模式等主管
+    仲裁；初始不发用户可答卡，由 ``resolve_escalation`` 兑现).
     """
 
     armed: bool
-    # ``request(question, assumption, questions)``: ``questions`` is the optional
-    # structured-fork list (同 ask_user 的 questions, already normalized —
-    # id/prompt/kind/options/multiple/default), empty for a plain free-text ask. It
-    # rides the journaled ``escalation_required`` so the card renders the SAME
-    # choice/text UI as ask_user (用户一键拍板而非读散文手敲).
-    request: Callable[[str, str, list[dict[str, Any]]], Awaitable[EscalationOutcome]]
+    # ``request(question, assumption, questions, kind, awaiting="user")``
+    request: Callable[
+        [str, str, list[dict[str, Any]], str, str], Awaitable[EscalationOutcome]
+    ]
 
 
 @dataclass(frozen=True)
@@ -121,13 +122,14 @@ class ToolContext:
     on_note: Callable[[TeamNote], None] | None = None
     # 升级实时可见 (escalation 实时 SSE): a run-scoped live channel for the worker-only
     # ``escalate`` tool to surface its escalation the INSTANT it is raised, called with
-    # ``(question, assumption, blocking)``. Set per delegated-worker node by
-    # ``build_agent_executor`` (it closes over the run's EventSink + run/agent id to emit
-    # ``escalation_raised``); ``None`` for the CEO / tests — the tool keeps working (escalate
-    # 非阻塞), the live banner is simply skipped, and the durable record still rides the
-    # transcript into ``RunState.escalations``. A narrow callback (not the EventSink itself)
-    # keeps tools off the event vocabulary — the executor owns event shape (引擎纯化).
-    on_escalate: Callable[[str, str, bool], None] | None = None
+    # ``(question, assumption, blocking, kind)`` — kind is normal/scope/dep. Set per
+    # delegated-worker node by ``build_agent_executor`` (it closes over the run's EventSink
+    # + run/agent id to emit ``escalation_raised``); ``None`` for the CEO / tests — the tool
+    # keeps working (escalate 非阻塞), the live banner is simply skipped, and the durable
+    # record still rides the transcript into ``RunState.escalations``. A narrow callback
+    # (not the EventSink itself) keeps tools off the event vocabulary — the executor owns
+    # event shape (引擎纯化).
+    on_escalate: Callable[[str, str, bool, str], None] | None = None
     # 阻塞式求决策 (escalate blocking=true): the per-run channel that suspends this worker
     # for the user when it hits a「只有用户能定、且猜错就作废」fork. Set per delegated-worker
     # node by ``build_agent_executor`` (closes over the interaction bridge + EventSink +

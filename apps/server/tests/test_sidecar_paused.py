@@ -48,9 +48,14 @@ def _suspension(
         question="要继续吗？",
         context="背景",
     )
-    susp.journal = [{"type": "checkpoint_required", "payload": {"id": "cp"}, "timestamp": None}]
-    if journal_entries is not None:
-        susp.journal_entries = journal_entries
+    # journal_entries is the 唯一权威载体 (P0-B Phase 3); the display ``journal`` resume seed is
+    # a DERIVED property of it. Default to a single checkpoint_required fact so the round-trip's
+    # derived seed carries the card.
+    susp.journal_entries = (
+        journal_entries
+        if journal_entries is not None
+        else [{"kind": "checkpoint_required", "payload": {"id": "cp"}, "ts": None}]
+    )
     return susp
 
 
@@ -154,7 +159,6 @@ def test_store_recovers_stale_claims_on_init(tmp_path):
         "message_id": "m1",
         "conversation_id": "c1",
         "frame": _suspension("m1", "c1").to_json(),
-        "journal": [],
         "journal_entries": [],
         "history": [],
         "summary": {},

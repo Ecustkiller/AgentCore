@@ -1,13 +1,6 @@
 import { Button } from "@/components/ui";
 import { describeError } from "@/lib/errors";
-import {
-  createSimulationRun,
-  getTickSnapshot,
-} from "@/services/simulation/api";
-import {
-  connectSimulationStream,
-  disconnectSimulationStream,
-} from "@/services/simulation/stream";
+import { createSimulationRun } from "@/services/simulation/api";
 import { OpenInAgentTownButton } from "@/simulation/OpenInAgentTownButton";
 import {
   type SavedSimulationRun,
@@ -16,10 +9,7 @@ import {
 } from "@/simulation/runHistory";
 import type { runFromWire } from "@/simulation/runModel";
 import { runStatusLabel, runStatusTone } from "@/simulation/runStatus";
-import {
-  applyTickSnapshot,
-  useSimulationUiStore,
-} from "@/simulation/store/simulationStore";
+import { useSimulationUiStore } from "@/simulation/store/simulationStore";
 import { useEffect, useState } from "react";
 
 export function SimulationRunManager({
@@ -28,7 +18,6 @@ export function SimulationRunManager({
   onRunActive?: () => void;
 }) {
   const run = useSimulationUiStore((s) => s.run);
-  const streamStatus = useSimulationUiStore((s) => s.streamStatus);
   const [savedRuns, setSavedRuns] = useState<SavedSimulationRun[]>([]);
   const [creating, setCreating] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -38,29 +27,12 @@ export function SimulationRunManager({
     setSavedRuns(listSavedRuns());
   }, []);
 
-  const activateRun = async (
+  const activateRun = (
     next: SavedSimulationRun | ReturnType<typeof runFromWire>,
   ) => {
-    const store = useSimulationUiStore.getState();
-    disconnectSimulationStream();
-    store.resetSession();
-    store.setRun(next);
-    store.clearDecisions();
-    store.clearTickEvents();
-    store.resetPlayback();
+    useSimulationUiStore.getState().setRun(next);
     rememberRun(next);
     setSavedRuns(listSavedRuns());
-    connectSimulationStream(next.id);
-
-    if (next.tick > 0) {
-      try {
-        const frame = await getTickSnapshot(next.id, next.tick);
-        store.cacheTickSnapshot(next.tick, frame.snapshot);
-        applyTickSnapshot(frame.snapshot);
-      } catch {
-        // run may have no snapshots yet
-      }
-    }
     onRunActive?.();
   };
 
@@ -69,7 +41,7 @@ export function SimulationRunManager({
     setActionError(null);
     try {
       const created = await createSimulationRun({ scenario: "town" });
-      await activateRun(created);
+      activateRun(created);
     } catch (err) {
       setActionError(describeError(err)?.message ?? "创建小镇失败");
     } finally {
@@ -77,12 +49,12 @@ export function SimulationRunManager({
     }
   };
 
-  const onLoad = async (saved: SavedSimulationRun) => {
+  const onLoad = (saved: SavedSimulationRun) => {
     if (loadingId) return;
     setLoadingId(saved.id);
     setActionError(null);
     try {
-      await activateRun(saved);
+      activateRun(saved);
     } catch (err) {
       setActionError(describeError(err)?.message ?? "加载 Run 失败");
     } finally {
@@ -110,13 +82,11 @@ export function SimulationRunManager({
         <div className={`text-xs font-medium ${toneClass}`}>
           {runStatusLabel(run.status)}
         </div>
-        <div className="text-xs text-muted-foreground">SSE {streamStatus}</div>
         <OpenInAgentTownButton runId={run.id} />
         <Button
           variant="ghost"
           size="sm"
           onClick={() => {
-            disconnectSimulationStream();
             useSimulationUiStore.getState().resetSession();
           }}
         >
@@ -162,7 +132,7 @@ export function SimulationRunManager({
                   type="button"
                   className="flex w-full items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors hover:bg-muted/40"
                   disabled={loadingId === saved.id}
-                  onClick={() => void onLoad(saved)}
+                  onClick={() => onLoad(saved)}
                 >
                   <div>
                     <div className="font-mono text-sm text-foreground">

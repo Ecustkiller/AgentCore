@@ -97,6 +97,8 @@ def _run_from_plan(s: dict[str, Any]) -> dict[str, Any]:
         # 「计划已调整」轻痕迹 (设计 §7.2): set by the plan_revised fact to "bind"/"steer" when
         # the CEO autonomously re-bound / re-steered this node mid-flight; None otherwise.
         "revised": None,
+        # 回落换人: set from run_plan.replaces_run_id when CEO re-delegates after revise miss.
+        "replacesRunId": s.get("replaces_run_id"),
         "checkpoint": None,
         # 收到的上下文 (上下文传递可视化): filled by the run_context fact; empty until then.
         "receivedContext": [],
@@ -178,6 +180,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             content = ""
             while process and process[-1].get("kind") == "content":
                 process.pop()
+            # 核验回炉轻 chip：大众可见痕迹，不堆被弃全文。
+            process.append({"kind": "rework"})
 
         elif etype == "reasoning_delta":
             delta = p.get("delta") or ""
@@ -303,6 +307,10 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 run["status"] = "running"
                 run["parentRunId"] = parent
                 run["kind"] = kind
+                # 冷回落接手: mid-flight `_redir` carries replaces_run_id on the wire.
+                replaces = p.get("replaces_run_id")
+                if replaces:
+                    run["replacesRunId"] = replaces
             ag = agent_by_id(agid)
             if ag:
                 ag["status"] = "working"
@@ -385,6 +393,20 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 ag["status"] = "error"
                 ag["toolProgress"] = None
 
+        elif etype == "run_cancelled":
+            # 跑一半改方向 / 整轮停止: interrupt mid-flight (orthogonal to run_failed).
+            # reason=redirect → single-worker hard-stop (hot continue_run / cold _redir may
+            # follow); reason=stop → whole-turn abort. Clear currentRunId + toolProgress so
+            # the node leaves its live「正在生成」line (reload-safe).
+            run = run_by_id(p.get("run_id", ""))
+            if run is not None:
+                run["status"] = "cancelled"
+            ag = agent_by_id(p.get("agent_id", ""))
+            if ag:
+                ag["status"] = "cancelled"
+                ag["currentRunId"] = None
+                ag["toolProgress"] = None
+
         elif etype == "run_progress":
             # Progress is derived from run states below (cumulative, multi-batch safe);
             # the wire counter is a timeline marker only.
@@ -415,25 +437,31 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                         "blocking": bool(p.get("blocking")),
                         "status": "raised",
                         "answer": None,
+                        "kind": p.get("kind") or "normal",
                     }
                 )
 
         elif etype == "escalation_required":
-            # 阻塞式求决策: a worker SUSPENDED on a blocking escalate, awaiting the user —
-            # append a "pending" card to its run. The turn does NOT pause (siblings keep
-            # running), so unlike the halting gates this sets no `pending` interaction.
-            # Journaled twin of the run_escalation banner, so it replays on reload.
+            # 阻塞式求决策: a worker SUSPENDED on a blocking escalate — append a "pending"
+            # card to its run. The turn does NOT pause (siblings keep running), so unlike
+            # the halting gates this sets no `pending` interaction.
+            # ``awaiting=ceo`` is projected; classic user path omits (default).
             run = run_by_id(p.get("run_id", ""))
             if run is not None:
-                run["escalations"].append(
-                    {
-                        "question": p.get("question", ""),
-                        "assumption": p.get("assumption", ""),
-                        "blocking": True,
-                        "status": "pending",
-                        "answer": None,
-                    }
-                )
+                awaiting = p.get("awaiting") or "user"
+                if awaiting not in ("user", "ceo"):
+                    awaiting = "user"
+                entry: dict = {
+                    "question": p.get("question", ""),
+                    "assumption": p.get("assumption", ""),
+                    "blocking": True,
+                    "status": "pending",
+                    "answer": None,
+                    "kind": p.get("kind") or "normal",
+                }
+                if awaiting == "ceo":
+                    entry["awaiting"] = "ceo"
+                run["escalations"].append(entry)
 
         elif etype == "escalation_resolved":
             # 阻塞式求决策 settlement: flip this run's pending escalation to resolved/timeout
@@ -453,6 +481,10 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 else:
                     esc["status"] = "timeout"
                     esc["answer"] = None
+                if p.get("arbitrated_by") == "ceo":
+                    esc["arbitrated_by"] = "ceo"
+                    if "via_user" in p:
+                        esc["via_user"] = bool(p.get("via_user"))
 
         elif etype == "debate_result":
             # 一场辩论收场：整段结构化产物（form/motion/rounds/brief/sides/各方 run_id）
@@ -621,6 +653,28 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 pending = None
                 status = "running"
 
+        elif etype == "team_preview_required":
+            cid = p.get("checkpoint_id", "")
+            if cid and not has_marker("team_preview", "checkpoint_id", cid):
+                process.append({"kind": "team_preview", "checkpoint_id": cid})
+            worker_ids = [w.get("run_id", "") for w in (p.get("workers") or [])]
+            pending = {
+                "kind": "team_preview",
+                "checkpointId": cid,
+                "workerIds": worker_ids,
+            }
+            status = "paused"
+
+        elif etype == "team_preview_resolved":
+            cid = p.get("checkpoint_id", "")
+            if (
+                pending
+                and pending.get("kind") == "team_preview"
+                and pending.get("checkpointId") == cid
+            ):
+                pending = None
+                status = "running"
+
         elif etype == "question_posted":
             # 非阻塞发问时间线落点: the CEO surfaced a question and kept working (no gate, no
             # pending) — positional marker only, card body folds separately by ask_id.
@@ -640,8 +694,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             # message_start / turn_saved / title_generated / followups_generated /
             # board_op_required / board_read_required / desktop_notify_required /
             # tool_progress / workspace_op_required /
-            # handoff_* — not part of the normalized turn judge state (no-op). Mirrored by the
-            # frontend folds' assertNever switch so the set stays in lockstep.
+            # handoff_* / team_synthesis_preview — not part of the normalized turn
+            # judge state (no-op). Mirrored by the frontend folds' assertNever switch
+            # so the set stays in lockstep.
             pass
 
     # A cancelled turn never received terminal frames for in-flight nodes; freeze them

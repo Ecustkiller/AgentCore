@@ -1,25 +1,20 @@
-/** Turn spine: hydrate journal, fold messages → turns, build LOD nodes/edges. */
+/** Turn spine: hydrate journal, fold messages → turns (LOD nodes built in useCanvasFlow). */
 
-import { useActiveMessages } from "@/stores/conversation";
+import {
+  assistantProjectionId,
+  useActiveMessages,
+} from "@/stores/conversation";
 import {
   type Execution,
   projectRuntime,
   useExecutionStore,
 } from "@/stores/execution";
-import type { Edge, Node } from "@xyflow/react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import {
   countPendingDecisions,
   isTurnRecoverable,
 } from "./CanvasDecisionPanel";
 import type { TurnRailItem } from "./CanvasTurnRail";
-import {
-  FOCUS_NODE_HEIGHT,
-  FOCUS_NODE_WIDTH,
-  type FocusedTurnData,
-} from "./FocusedTurnNode";
-import type { SimpleTurnData } from "./SimpleTurnNode";
-import type { TurnSummaryData } from "./TurnSummaryNode";
 
 export const TURN_NODE_WIDTH = 320;
 export const TEAM_NODE_HEIGHT = 132;
@@ -32,33 +27,40 @@ export interface TurnItem {
   exec: Execution | null;
   prompt: string;
   answer: string;
+  /** User bubble id for this turn (empty when no preceding user message). */
+  promptMessageId: string;
+  /** Assistant bubble id (client id; may differ from projection `id`). */
+  answerMessageId: string;
   running: boolean;
   pendingDecisions: number;
   recoverable: boolean;
 }
 
-function dedupeRoles(exec: Execution): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const a of exec.agents) {
-    const r = a.role?.trim();
-    if (!r || seen.has(r)) continue;
-    seen.add(r);
-    out.push(r);
+/** Spine height for a turn — prefers rendered RF style/measured height. */
+export function spineTurnHeight(
+  turn: TurnItem,
+  nodes: { id: string; style?: { height?: number | string }; height?: number; measured?: { height?: number } }[],
+): number {
+  const n = nodes.find((x) => x.id === turn.id);
+  const styleH = n?.style?.height;
+  if (typeof styleH === "number" && Number.isFinite(styleH)) return styleH;
+  if (typeof styleH === "string") {
+    const parsed = parseFloat(styleH);
+    if (!Number.isNaN(parsed)) return parsed;
   }
-  return out;
+  const measured = n?.measured?.height ?? n?.height;
+  if (typeof measured === "number" && Number.isFinite(measured)) return measured;
+  return turn.kind === "team" ? TEAM_NODE_HEIGHT : SIMPLE_NODE_HEIGHT;
 }
 
 interface UseCanvasTurnsOptions {
   focusedTurn: string | null;
   setFocusedTurn: (id: string) => void;
-  openZoom: (turnId: string, replay: boolean) => void;
 }
 
 export function useCanvasTurns({
   focusedTurn,
   setFocusedTurn,
-  openZoom,
 }: UseCanvasTurnsOptions) {
   const messages = useActiveMessages();
   const byId = useExecutionStore((s) => s.byId);
@@ -66,13 +68,10 @@ export function useCanvasTurns({
   useEffect(() => {
     const store = useExecutionStore.getState();
     for (const m of messages) {
-      if (
-        m.role === "assistant" &&
-        m.executionId &&
-        m.runs &&
-        !store.byId[m.id]?.plan
-      ) {
-        store.hydrateFromJournal(m.id, m.runs);
+      if (m.role !== "assistant" || !m.executionId || !m.runs) continue;
+      const key = assistantProjectionId(m);
+      if (!store.byId[key]?.plan) {
+        store.hydrateFromJournal(key, m.runs);
       }
     }
   }, [messages]);
@@ -80,35 +79,39 @@ export function useCanvasTurns({
   const turns = useMemo<TurnItem[]>(() => {
     const out: TurnItem[] = [];
     let lastUser = "";
+    let lastUserId = "";
     for (const m of messages) {
       if (m.role === "user") {
         lastUser = m.content;
+        lastUserId = m.id;
         continue;
       }
       if (m.role !== "assistant") continue;
+      const turnId = assistantProjectionId(m);
       if (m.executionId) {
-        // 流式性能 (白屏卡死修复·Stage 3): the shared incremental projection (Stage 2's
-        // liveFolds), not a from-scratch re-fold per tick — the canvas spine had its own
-        // full-fold `projectSlot`, the canvas-side O(n²) twin of the chat's.
-        const rt = byId[m.id];
+        const rt = byId[turnId];
         const exec = rt ? projectRuntime(rt) : null;
         out.push({
-          id: m.id,
+          id: turnId,
           kind: "team",
           exec,
           prompt: lastUser,
           answer: m.content,
+          promptMessageId: lastUserId,
+          answerMessageId: m.id,
           running: exec?.status === "running" || m.isStreaming,
           pendingDecisions: countPendingDecisions(m, exec),
           recoverable: isTurnRecoverable(exec),
         });
       } else {
         out.push({
-          id: m.id,
+          id: turnId,
           kind: "simple",
           exec: null,
           prompt: lastUser,
           answer: m.content,
+          promptMessageId: lastUserId,
+          answerMessageId: m.id,
           running: m.isStreaming,
           pendingDecisions: 0,
           recoverable: false,
@@ -139,93 +142,6 @@ export function useCanvasTurns({
     return latestTeamId;
   }, [focusedTurn, turns, latestTeamId]);
 
-  const seenTurnsRef = useRef<Set<string>>(new Set());
-  const firstSpineRef = useRef(true);
-  useEffect(() => {
-    for (const t of turns) seenTurnsRef.current.add(t.id);
-    firstSpineRef.current = false;
-  }, [turns]);
-
-  const nodes = useMemo<Node[]>(() => {
-    const out: Node[] = [];
-    let y = 0;
-    const lastTurnId = turns[turns.length - 1]?.id;
-    for (const t of turns) {
-      const focused = t.kind === "team" && t.id === effectiveFocus;
-      const width = focused ? FOCUS_NODE_WIDTH : TURN_NODE_WIDTH;
-      const height = focused
-        ? FOCUS_NODE_HEIGHT
-        : t.kind === "team"
-          ? TEAM_NODE_HEIGHT
-          : SIMPLE_NODE_HEIGHT;
-      const position = { x: -(width / 2), y };
-      if (focused) {
-        const data: FocusedTurnData = {
-          messageId: t.id,
-          onMaximize: () => openZoom(t.id, false),
-        };
-        out.push({
-          id: t.id,
-          type: "focusedTurn",
-          position,
-          data,
-          draggable: false,
-        });
-      } else if (t.kind === "team") {
-        const exec = t.exec;
-        const data: TurnSummaryData = {
-          taskSummary: exec?.taskSummary || t.prompt || "团队回合",
-          status: exec?.status ?? "planning",
-          roles: exec ? dedupeRoles(exec) : [],
-          agentCount: exec?.agents.length ?? 0,
-          completed: exec?.progress.completed ?? 0,
-          total: exec?.progress.total ?? 0,
-          pendingDecisions: t.pendingDecisions,
-          recoverable: t.recoverable,
-        };
-        out.push({
-          id: t.id,
-          type: "teamTurn",
-          position,
-          data,
-          draggable: false,
-        });
-      } else {
-        const data: SimpleTurnData = {
-          prompt: t.prompt,
-          answer: t.answer,
-          running: t.running,
-          enter:
-            t.id === lastTurnId &&
-            !firstSpineRef.current &&
-            !seenTurnsRef.current.has(t.id),
-        };
-        out.push({
-          id: t.id,
-          type: "simpleTurn",
-          position,
-          data,
-          draggable: false,
-        });
-      }
-      y += height + GAP_Y;
-    }
-    return out;
-  }, [turns, effectiveFocus, openZoom]);
-
-  const edges = useMemo<Edge[]>(
-    () =>
-      turns.slice(1).map((t, i) => ({
-        id: `${turns[i].id}->${t.id}`,
-        source: turns[i].id,
-        target: t.id,
-        type: "smoothstep",
-        selectable: false,
-        style: { stroke: "var(--border)" },
-      })),
-    [turns],
-  );
-
   const railItems = useMemo<TurnRailItem[]>(
     () =>
       turns.map((t) => ({
@@ -248,7 +164,5 @@ export function useCanvasTurns({
     latestTeamId,
     effectiveFocus,
     railItems,
-    nodes,
-    edges,
   };
 }

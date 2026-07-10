@@ -38,7 +38,10 @@ export async function submitRunRedirect(
 
 /** Why a run reached a terminal dead end the user is asked to accept (跑一半改方向 Step 4):
  *  a non-retryable failure, or a「立即改此人」steer that arrived too late to apply mid-run. */
-export type RunOutcomeReason = "deterministic_failure" | "redirect_ignored";
+export type RunOutcomeReason =
+  | "deterministic_failure"
+  | "redirect_ignored"
+  | "recovery_ignored";
 
 export interface AcceptRunOutcomeParams {
   /** The assistant message (turn) the run belongs to — scopes the audit trail. */

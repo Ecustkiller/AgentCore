@@ -37,6 +37,7 @@ import type {
   RunCompletedPayload,
   RunContextPayload,
   RunEscalationPayload,
+  RunCancelledPayload,
   RunFailedPayload,
   RunOutputDeltaPayload,
   RunOutputResetPayload,
@@ -46,6 +47,8 @@ import type {
   RunToolProgressPayload,
   SSEEvent,
   TeamNotePostedPayload,
+  TeamPreviewRequiredPayload,
+  TeamPreviewResolvedPayload,
   ToolPhase,
   ToolUseEndPayload,
   ToolUseProgressPayload,
@@ -125,6 +128,14 @@ function pushPlanReviewMarker(process: ProcessStep[], id: string): void {
   process.push({ kind: "plan_review", checkpoint_id: id });
 }
 
+/** Drop a `team_preview` marker (thin team-preview gate) at its chronological slot. */
+function pushTeamPreviewMarker(process: ProcessStep[], id: string): void {
+  if (!id) return;
+  if (process.some((s) => s.kind === "team_preview" && s.checkpoint_id === id))
+    return;
+  process.push({ kind: "team_preview", checkpoint_id: id });
+}
+
 /** Fold one 逐轮叙事 update (`debate_round_started` → focus only, verdict null;
  * `debate_round` → full) into the accumulated list, keyed by `round_no` (a later
  * `debate_round` overwrites the focus-only entry — it carries focus too), kept
@@ -148,7 +159,7 @@ function agentFromPlan(a: PlanAgentPayload): ProjectedAgent {
     role: a.role,
     modelPreference: a.model_preference,
     thinking: a.thinking,
-    reasoningEffort: a.reasoning_effort,
+    reasoningEffort: a.reasoning_effort ?? "high",
     status: "idle",
     currentRunId: null,
     output: "",
@@ -181,6 +192,7 @@ function runFromPlan(s: RunPlanPayload["runs"][number]): ProjectedRun {
     revision: 0,
     //「计划已调整」轻痕迹 (设计 §7.2): set by the plan_revised event; null until then.
     revised: null,
+    replacesRunId: s.replaces_run_id ?? null,
     checkpoint: null,
     // 收到的上下文 (上下文传递可视化): filled by the run_context event; empty until then.
     receivedContext: [],
@@ -240,6 +252,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         ) {
           process.pop();
         }
+        process.push({ kind: "rework" });
         break;
       }
       case "reasoning_delta": {
@@ -361,6 +374,8 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           run.status = "running";
           run.parentRunId = p.parent_run_id;
           run.kind = p.kind;
+          // 冷回落接手: mid-flight `_redir` carries replaces_run_id on the wire.
+          if (p.replaces_run_id) run.replacesRunId = p.replaces_run_id;
         }
         const ag = agentById(p.agent_id);
         if (ag) {
@@ -450,6 +465,19 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         }
         break;
       }
+      case "run_cancelled": {
+        // 跑一半改方向 / 整轮停止: interrupt mid-flight (orthogonal to run_failed).
+        const p = ev.payload as RunCancelledPayload;
+        const run = runById(p.run_id);
+        if (run) run.status = "cancelled";
+        const ag = agentById(p.agent_id);
+        if (ag) {
+          ag.status = "cancelled";
+          ag.currentRunId = null;
+          ag.toolProgress = null;
+        }
+        break;
+      }
       case "run_progress":
         // Derived below from run states (cumulative, multi-batch safe); wire counter
         // is a timeline marker only.
@@ -482,13 +510,13 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
             blocking: p.blocking,
             status: "raised",
             answer: null,
+            kind: p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
           });
         break;
       }
       case "escalation_required": {
-        // 阻塞式求决策: a worker SUSPENDED on a blocking escalate, awaiting the user — append
-        // a `pending` card to its run (the turn does NOT pause; siblings keep running). Twin
-        // of the run_escalation banner but journaled, so it replays on reload.
+        // 阻塞式求决策: a worker SUSPENDED on a blocking escalate — append a `pending`
+        // card. awaiting=ceo → 等主管仲裁（不可答）；缺省 → 经典可答。
         const p = ev.payload as EscalationRequiredPayload;
         const run = runById(p.run_id);
         if (run)
@@ -498,13 +526,13 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
             blocking: true,
             status: "pending",
             answer: null,
+            kind: p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
+            ...(p.awaiting === "ceo" ? { awaiting: "ceo" as const } : {}),
           });
         break;
       }
       case "escalation_resolved": {
-        // 阻塞式求决策 settlement: flip this run's pending escalation to resolved/timeout (a
-        // worker is sequential ⇒ at most one pending per run, 设计 §4.7). `resolved` carries
-        // the answer; `timeout` (含按假设继续) falls back to the assumption (answer null).
+        // 阻塞式求决策 settlement: flip this run's pending escalation to resolved/timeout.
         const p = ev.payload as EscalationResolvedPayload;
         const esc = runById(p.run_id)?.escalations.find(
           (e) => e.status === "pending",
@@ -516,6 +544,10 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           } else {
             esc.status = "timeout";
             esc.answer = null;
+          }
+          if (p.arbitrated_by === "ceo") {
+            esc.arbitrated_by = "ceo";
+            if (p.via_user != null) esc.via_user = p.via_user;
           }
         }
         break;
@@ -666,6 +698,28 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         }
         break;
       }
+      case "team_preview_required": {
+        const p = ev.payload as TeamPreviewRequiredPayload;
+        pushTeamPreviewMarker(process, p.checkpoint_id);
+        pending = {
+          kind: "team_preview",
+          checkpointId: p.checkpoint_id,
+          workerIds: (p.workers ?? []).map((w) => w.run_id),
+        };
+        status = "paused";
+        break;
+      }
+      case "team_preview_resolved": {
+        const p = ev.payload as TeamPreviewResolvedPayload;
+        if (
+          pending?.kind === "team_preview" &&
+          pending.checkpointId === p.checkpoint_id
+        ) {
+          pending = null;
+          status = "running";
+        }
+        break;
+      }
       case "question_posted": {
         // 非阻塞提问 (ask_user blocking=false): drop an `ask` marker at its chronological
         // slot; the turn does NOT pause (no `pending`). Mirrors the backend oracle.
@@ -711,6 +765,12 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       // mobile has no diagnostic panel, so it folds to nothing here and stays out of the
       // conformance ProjectedTurn (desktop folds it onto Execution.batches instead).
       case "batch_metrics":
+      // Worker 内部路由 Phase 1：Intake / Escalation Gate — 诊断元信息，不进规范化 ProjectedTurn。
+      case "run_intake":
+      case "run_escalation_gate":
+      case "run_split_assessed":
+      case "run_subworker_started":
+      case "run_subworker_completed":
       // 交互式逐轮辩论的「续辩/收场」决策事件：桌面端 live-only（驱动决策卡），收场叙事
       // 已由 debate_round / debate_result 承载，故 conformance ProjectedTurn 从不携带它们
       // （与桌面 oracle 一致）。手机端无逐轮决策 UI → 折为 no-op，仅在此登记以保穷尽。
@@ -722,6 +782,8 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "handoff_snapshot_done":
       case "handoff_job_started":
       case "handoff_apply_done":
+      // CEO 协调模式 Phase 1：团队进展摘要 — transport-only，不进 ProjectedTurn。
+      case "team_synthesis_preview":
       // AI 小镇模拟事件：桌面 MVP 专属，手机无模拟面 → fold no-op（与 conformance oracle 一致）。
       case "sim.agent_action":
       case "sim.agent_state":

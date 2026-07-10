@@ -4,13 +4,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
-import {
-  AgentNodeCardFace,
-  AgentNodeTimelineFace,
-} from "./agentNode/AgentNodeFace";
+import { AgentNodeCardFace } from "./agentNode/AgentNodeFace";
 import { AgentNodePeek } from "./agentNode/AgentNodePeek";
 import { buildAgentNodePresentation } from "./agentNode/presentation";
 import type { AgentNodeData } from "./agentNode/shared";
+import { graphNodeDimClass, useGraphNodeDimmed } from "./graphHover";
 import { useTerminalFlash } from "./useTerminalFlash";
 
 export type { AgentNodeData } from "./agentNode/shared";
@@ -22,22 +20,7 @@ export function AgentNode({ data }: NodeProps) {
   const flashing = useTerminalFlash(d.status);
   const flashColor =
     d.status === "failed" ? "var(--destructive)" : "var(--success)";
-
-  const face = p.isTimeline ? (
-    <AgentNodeTimelineFace
-      d={d}
-      p={p}
-      flashColor={flashColor}
-      flashing={flashing}
-    />
-  ) : (
-    <AgentNodeCardFace
-      d={d}
-      p={p}
-      flashColor={flashColor}
-      flashing={flashing}
-    />
-  );
+  const dimmed = useGraphNodeDimmed();
 
   return (
     <>
@@ -46,16 +29,25 @@ export function AgentNode({ data }: NodeProps) {
         position={horizontal ? Position.Left : Position.Top}
         className="!bg-border"
       />
-      <div
-        className="animate-graph-node-enter"
-        style={{ animationDelay: `${p.enterDelay}ms` }}
-      >
-        <Tooltip>
-          <TooltipTrigger asChild>{face}</TooltipTrigger>
-          <TooltipContent side="right" align="start" className="w-72">
-            <AgentNodePeek d={d} p={p} />
-          </TooltipContent>
-        </Tooltip>
+      <div className={graphNodeDimClass(dimmed)}>
+        <div
+          className="animate-graph-node-enter"
+          style={{ animationDelay: `${p.enterDelay}ms` }}
+        >
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <AgentNodeCardFace
+                d={d}
+                p={p}
+                flashColor={flashColor}
+                flashing={flashing}
+              />
+            </TooltipTrigger>
+            <TooltipContent side="right" align="start" className="w-72">
+              <AgentNodePeek d={d} p={p} />
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </div>
       <Handle
         type="source"

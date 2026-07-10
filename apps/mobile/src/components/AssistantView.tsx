@@ -325,7 +325,11 @@ function ProcessTimeline({
         }
         // checkpoint·plan_review markers anchor desktop cards; mobile owns these blocking
         // interactions via its PauseCard surface, so they render nothing inline.
-        if (node.kind === "checkpoint" || node.kind === "plan_review")
+        if (
+          node.kind === "checkpoint" ||
+          node.kind === "plan_review" ||
+          node.kind === "team_preview"
+        )
           return null;
         if (node.kind === "tool-group")
           return (
@@ -335,6 +339,13 @@ function ProcessTimeline({
               toolPhases={toolPhases}
             />
           );
+        if (node.kind === "rework")
+          return (
+            <span key={`rework-${i}`} className="rework-chip">
+              已按交付规范重写
+            </span>
+          );
+        if (node.kind !== "tool") return null;
         return (
           <ToolStep
             key={node.step.id}

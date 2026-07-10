@@ -17,6 +17,7 @@ _JOURNAL_SURFACE_TYPES = frozenset(
         EventType.CHECKPOINT_REQUIRED.value,
         EventType.QUESTION_POSTED.value,
         EventType.PLAN_REVIEW_REQUIRED.value,
+        EventType.TEAM_PREVIEW_REQUIRED.value,
     }
 )
 

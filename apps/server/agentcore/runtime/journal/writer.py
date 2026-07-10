@@ -52,6 +52,7 @@ class TurnJournalWriter:
         self.trace_id = trace_id
         self._next_seq = initial_seq
         self._degraded = False
+        self._sealed = False
         self._buffer: deque[tuple[int, dict[str, Any], asyncio.Future[None]]] = deque()
         self._drain_task: asyncio.Task[None] | None = None
 
@@ -59,14 +60,27 @@ class TurnJournalWriter:
     def degraded(self) -> bool:
         return self._degraded
 
+    @property
+    def sealed(self) -> bool:
+        """True after a durable pause save — further appends are no-ops."""
+        return self._sealed
+
+    @property
+    def next_seq(self) -> int:
+        """Next ``seq`` that would be assigned (also the resume ``initial_seq`` seed)."""
+        return self._next_seq
+
     def schedule_append(self, entry: dict[str, Any]) -> asyncio.Future[None] | None:
         """Queue one fact for durable append; returns a Future completed when written.
 
         ``seq`` is assigned here so enqueue order == emit order == the turn's fact-stream
         order; a single drain consumer then writes the queue serially. Returns ``None`` when
         called outside a running loop (standalone engine calls / tests) — recording degrades
-        to a no-op, exactly as before.
+        to a no-op, exactly as before. Also returns ``None`` when :meth:`seal` has closed
+        the writer at a durable pause (post-save emits must not diverge snapshot vs DB).
         """
+        if self._sealed:
+            return None
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -130,3 +144,21 @@ class TurnJournalWriter:
         # enqueue starts one). Drain inline; safe because nothing else is consuming now.
         if self._buffer:
             await self._drain()
+
+    async def seal(self) -> None:
+        """Hard-stop durable appends after a successful pause save.
+
+        Flushes any in-flight queue, then marks the writer sealed so later
+        :meth:`schedule_append` / ``record_turn_fact`` calls no-op for durability.
+        In-memory EventSink / fact-log updates still proceed independently — only the
+        DB write-through is closed. Idempotent.
+        """
+        if self._sealed:
+            return
+        await self.flush()
+        self._sealed = True
+        logger.info(
+            "journal.sealed_at_pause",
+            turn_id=self.turn_id,
+            next_seq=self._next_seq,
+        )

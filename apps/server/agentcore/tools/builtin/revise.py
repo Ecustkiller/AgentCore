@@ -166,7 +166,8 @@ class ReviseTool:
             msg = (
                 f"找不到 run_id 为 `{target}` 的可修订队员（可能不在本回合范围内，或来自"
                 "更早的回合）。请改用 delegate：带上需要修改的旧产物内容 + 具体修改要求，"
-                "重新委派一个 worker 来改。"
+                "重新委派一个 worker 来改，并在新任务上设 replaces_run_id 为该原 run_id，"
+                "以便界面标出「接手」。"
             )
             logger.info("revise.miss", target=target)
             return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
@@ -174,7 +175,8 @@ class ReviseTool:
         if session.recall_count >= DEFAULT_RECALL_LIMIT:
             msg = (
                 f"队员 `{target}` 的定向修订已达上限（{DEFAULT_RECALL_LIMIT} 次），不再"
-                "热修以避免无限打磨。如仍需调整，请改用 delegate 带上当前产物重新委派。"
+                "热修以避免无限打磨。如仍需调整，请改用 delegate 带上当前产物重新委派，"
+                "并在新任务上设 replaces_run_id 为该原 run_id，以便界面标出「接手」。"
             )
             logger.info("revise.capped", target=target, recall_count=session.recall_count)
             return ToolResult(tool_call_id="", success=False, output=msg, error=msg)

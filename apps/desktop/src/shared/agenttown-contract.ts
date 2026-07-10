@@ -1,5 +1,5 @@
 /**
- * AgentTown 启动器 IPC 契约 —— Desktop 写 `session.json` 并 spawn 独立 UE 客户端（§8.2 / §10）。
+ * AgentTown 启动器 IPC 契约 —— Desktop 写 `session.json` 并 spawn 独立 Unity 客户端 AgentTown（§8.2 / §10）。
  *
  * `session.json` 落 `%APPDATA%/AgentCore/session.json`（`app.getPath("appData")/AgentCore/`），
  * 供 AgentTown 冷启动读 token；Desktop 在登录 / 刷新后写入，登出时清除。
@@ -27,6 +27,8 @@ export type AgentTownLaunchResult =
       ok: false;
       reason: "not_found" | "missing_token" | "invalid_args" | "spawn_failed";
       message: string;
+      /** Paths checked when reason is not_found (dev guidance). */
+      candidates?: string[];
     };
 
 export type WriteSessionResult =

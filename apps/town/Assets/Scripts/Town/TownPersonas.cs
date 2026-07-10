@@ -91,7 +91,26 @@ namespace AgentTown.Town
                 return;
             }
 
-            foreach (LocalPersona persona in file.Personas)
+            IndexPersonas(file.Personas);
+        }
+
+        /// <summary>EditMode helper: seed personas without going through JSON.</summary>
+        internal static void PopulateForTests(IReadOnlyList<LocalPersona> personas)
+        {
+            ById.Clear();
+            Ordered.Clear();
+            IndexPersonas(personas);
+            Loaded = true;
+        }
+
+        private static void IndexPersonas(IReadOnlyList<LocalPersona> personas)
+        {
+            if (personas == null)
+            {
+                return;
+            }
+
+            foreach (LocalPersona persona in personas)
             {
                 if (persona == null || string.IsNullOrEmpty(persona.AgentId))
                 {

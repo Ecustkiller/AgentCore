@@ -14,6 +14,8 @@ import type {
   PlanReviewResolvedPayload,
   QuestionPostedPayload,
   SSEEvent,
+  TeamPreviewRequiredPayload,
+  TeamPreviewResolvedPayload,
 } from "@/types/events";
 import { flushPendingContent } from "../contentBuffer";
 import { flushPendingFrames } from "../execFrameBuffer";
@@ -141,6 +143,30 @@ export function handleInteractionEvent(
         const frame = frameFromEvent(event);
         if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
       }
+      return true;
+    }
+    case "team_preview_required": {
+      flushPendingContent(conversationId);
+      flushPendingFrames(conversationId);
+      useConversationStore
+        .getState()
+        .addTeamPreview(
+          event.payload as TeamPreviewRequiredPayload,
+          conversationId,
+        );
+      return true;
+    }
+    case "team_preview_resolved": {
+      const p = event.payload as TeamPreviewResolvedPayload;
+      useConversationStore
+        .getState()
+        .settleTeamPreview(
+          p.checkpoint_id,
+          p.decision,
+          p.note ?? "",
+          conversationId,
+        );
+      usePausedTurnStore.getState().removeByCheckpoint(p.checkpoint_id);
       return true;
     }
     default:

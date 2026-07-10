@@ -5,11 +5,14 @@ import type {
   PlanReviewResolvedPayload,
   QuestionPostedPayload,
   SSEEvent,
+  TeamPreviewRequiredPayload,
+  TeamPreviewResolvedPayload,
 } from "@/types/events";
 import type {
   CheckpointDisplay,
   NonBlockingAskDisplay,
   PlanReviewDisplay,
+  TeamPreviewDisplay,
 } from "./types";
 
 export function checkpointsFromEvents(events: SSEEvent[]): CheckpointDisplay[] {
@@ -94,4 +97,39 @@ export function planReviewsFromEvents(events: SSEEvent[]): PlanReviewDisplay[] {
     }
   }
   return order.map((id) => byId.get(id) as PlanReviewDisplay);
+}
+
+export function teamPreviewsFromEvents(
+  events: SSEEvent[],
+): TeamPreviewDisplay[] {
+  const byId = new Map<string, TeamPreviewDisplay>();
+  const order: string[] = [];
+  for (const e of events) {
+    if (e.type === "team_preview_required") {
+      const p = e.payload as TeamPreviewRequiredPayload;
+      if (!byId.has(p.checkpoint_id)) order.push(p.checkpoint_id);
+      byId.set(p.checkpoint_id, {
+        id: p.checkpoint_id,
+        workers: (p.workers ?? []).map((w) => ({
+          run_id: w.run_id,
+          role: w.role,
+          task: w.task ?? "",
+          depends_on: w.depends_on ?? [],
+          debate: Boolean(w.debate),
+        })),
+        status: "pending",
+        decision: null,
+        note: "",
+      });
+    } else if (e.type === "team_preview_resolved") {
+      const p = e.payload as TeamPreviewResolvedPayload;
+      const cur = byId.get(p.checkpoint_id);
+      if (cur) {
+        cur.status = "resolved";
+        cur.decision = p.decision;
+        cur.note = p.note ?? "";
+      }
+    }
+  }
+  return order.map((id) => byId.get(id) as TeamPreviewDisplay);
 }

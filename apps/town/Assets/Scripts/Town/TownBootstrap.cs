@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using AgentTown.Simulation;
 using AgentTown.UI;
@@ -29,6 +30,11 @@ namespace AgentTown.Town
         [SerializeField] private StyleSheet hudStyleSheet;
 
         private SimulationSession session;
+        private string launchPackId = DemoPackIds.PriceSurge;
+        private bool shootMode;
+        private int lastPublishedDemoTick = -1;
+        private Label bootStatusLabel;
+        private VisualElement bootOverlay;
 
         private async void Start()
         {
@@ -38,6 +44,7 @@ namespace AgentTown.Town
             }
             catch (Exception e)
             {
+                SetBootStatus($"启动失败：{e.Message}");
                 Debug.LogException(e);
             }
         }
@@ -45,6 +52,7 @@ namespace AgentTown.Town
         private void Update()
         {
             session?.Update(Time.deltaTime);
+            PublishDemoTickIfNeeded();
         }
 
         private void OnDestroy()
@@ -72,12 +80,26 @@ namespace AgentTown.Town
 
         private async Task BootAsync()
         {
+            // Spec §7 / §14 #5: aim for ≥30 FPS watch floor (uncap vsync when possible).
+            Application.targetFrameRate = 60;
+            QualitySettings.vSyncCount = 0;
+            TownWatchPerf.ApplyBootPolicy();
+
             AgentTownLaunchConfig config = AgentTownLaunchConfig.Load();
+            launchPackId = config.PackId;
+            shootMode = config.Shoot;
+            if (shootMode)
+            {
+                AgentTownDemoBridge.SetShootMode(true);
+            }
 
             session = SimulationSession.Instance;
             session.Configure(config.ApiBase, config.AccessToken, config.RunId);
+            session.SetStatusMessage("正在加载小镇…");
 
             await TownPersonas.LoadAsync();
+            // Offline story SoT (Fixtures/demo-story-packs.json); Build falls back if missing.
+            await DemoStoryPackCatalog.EnsureLoadedAsync();
 
             Material npcMaterial = CreatePlaceholderMaterial("TownNpc");
             TownBuilder builder = SpawnBuilder();
@@ -85,14 +107,29 @@ namespace AgentTown.Town
 
             TownNpcManager npcManager = SpawnNpcManager(npcMaterial);
             npcManager.SeedFromPersonas(builder.RegionAnchors);
+            TownWatchPerf.SimplifySceneForWebGl(npcManager.transform);
 
-            EnsureLighting();
+            Light sun = EnsureLighting();
+            EnsureDayNight(sun);
+            TownWatchPerf.StripAllLightShadows();
+            EnsureObservationLayers();
             FrameCamera();
             WireHud();
+            SetBootStatus("正在烘焙演示…");
 
-            if (!string.IsNullOrEmpty(config.RunId))
+            if (config.ShouldAutoOfflineDemo)
             {
+                await StartOfflineDemoAsync(config.PackId);
+            }
+            else if (!string.IsNullOrEmpty(config.RunId))
+            {
+                HideBootOverlay();
                 ResumeLaunchRun();
+            }
+            else
+            {
+                // Credentials present but no run — still prefer a watchable surface.
+                await StartOfflineDemoAsync(config.PackId);
             }
         }
 
@@ -112,13 +149,14 @@ namespace AgentTown.Town
             return manager;
         }
 
-        private void EnsureLighting()
+        private Light EnsureLighting()
         {
             foreach (Light existing in FindObjectsByType<Light>(FindObjectsSortMode.None))
             {
                 if (existing.type == LightType.Directional)
                 {
-                    return;
+                    ApplyWatchShadowPolicy(existing);
+                    return existing;
                 }
             }
 
@@ -129,7 +167,59 @@ namespace AgentTown.Town
             sun.type = LightType.Directional;
             sun.color = new Color(1f, 0.96f, 0.9f);
             sun.intensity = 1.1f;
-            sun.shadows = LightShadows.Soft;
+            ApplyWatchShadowPolicy(sun);
+            return sun;
+        }
+
+        private static void ApplyWatchShadowPolicy(Light sun)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // WebGL: soft shadows are a common FPS cliff; keep lighting without the cost.
+            sun.shadows = LightShadows.None;
+#else
+            if (sun.shadows == LightShadows.None)
+            {
+                sun.shadows = LightShadows.Soft;
+            }
+#endif
+        }
+
+        private void EnsureDayNight(Light sun)
+        {
+            TownDayNight dayNight = GetComponent<TownDayNight>();
+            if (dayNight == null)
+            {
+                dayNight = gameObject.AddComponent<TownDayNight>();
+            }
+
+            dayNight.Bind(session, sun);
+        }
+
+        private void EnsureObservationLayers()
+        {
+            TownRegionHeatmap heatmap = GetComponent<TownRegionHeatmap>();
+            if (heatmap == null)
+            {
+                heatmap = gameObject.AddComponent<TownRegionHeatmap>();
+            }
+
+            heatmap.Bind(session);
+
+            TownInteractionOverlays overlays = GetComponent<TownInteractionOverlays>();
+            if (overlays == null)
+            {
+                overlays = gameObject.AddComponent<TownInteractionOverlays>();
+            }
+
+            overlays.Bind(session);
+
+            TownWorldEventFeedback worldFeedback = GetComponent<TownWorldEventFeedback>();
+            if (worldFeedback == null)
+            {
+                worldFeedback = gameObject.AddComponent<TownWorldEventFeedback>();
+            }
+
+            worldFeedback.Bind(session);
         }
 
         private void FrameCamera()
@@ -148,7 +238,9 @@ namespace AgentTown.Town
                 townCamera = cam.gameObject.AddComponent<TownCamera>();
             }
 
-            townCamera.Frame();
+            cam.allowHDR = false;
+            cam.allowMSAA = false;
+            townCamera.Bind(session);
         }
 
         private void WireHud()
@@ -167,6 +259,9 @@ namespace AgentTown.Town
                 TownHudController controller = uiGo.AddComponent<TownHudController>();
                 uiGo.SetActive(true);
                 controller.Bind(session);
+                bootOverlay = document.rootVisualElement?.Q<VisualElement>("boot-overlay");
+                bootStatusLabel = document.rootVisualElement?.Q<Label>("boot-status-label");
+                SetBootStatus("正在加载小镇…");
                 return;
             }
 
@@ -182,6 +277,157 @@ namespace AgentTown.Town
                 "or add a UIDocument + TownHudController to the scene (see EDITOR-WIRING.md).");
         }
 
+        /// <summary>HUD / CLI entry: load local personas + region anchors into an offline demo pack.</summary>
+        public void StartOfflineDemo(string packId = null)
+        {
+            _ = StartOfflineDemoAsync(packId);
+        }
+
+        /// <summary>Async Offline entry — ensures JSON story SoT is loaded before baking frames.</summary>
+        public async Task StartOfflineDemoAsync(string packId = null)
+        {
+            string resolved = DemoPackIds.Normalize(
+                string.IsNullOrEmpty(packId) ? launchPackId : packId);
+            launchPackId = resolved;
+            SetBootStatus($"正在烘焙「{DemoPackIds.DisplayName(resolved)}」…");
+
+            await DemoStoryPackCatalog.EnsureLoadedAsync();
+
+            Dictionary<string, WireVec3> regions = await RegionPositions.LoadAsync();
+            OfflineDemoPack pack = OfflineDemoBuilder.Build(
+                TownPersonas.All, regions, packId: resolved);
+            session.EnterOfflineDemo(pack);
+
+            int seekTick = ResolveOfflineSeekTick(pack, resolved);
+            if (seekTick > 1)
+            {
+                session.SeekTick(seekTick);
+            }
+
+            if (shootMode)
+            {
+                // Landmark seek jumps many ticks — snap NPCs so bubbles/trade icons sit on cue.
+                TownNpcManager npcs = FindFirstObjectByType<TownNpcManager>();
+                npcs?.SnapAllToGoals();
+                FrameShootLandmark(resolved, regions);
+            }
+
+            // Shoot freezes on the landmark interaction so overlays stay visible for PNG.
+            session.SetPlaying(!shootMode);
+            HideBootOverlay();
+            // WebGL shoot / Playwright probe (UI Toolkit text is not in the DOM).
+            AgentTownDemoBridge.SetOfflineReady(resolved, DemoPackIds.DisplayName(resolved));
+            PublishDemoTickIfNeeded(force: true);
+
+            if (!shootMode)
+            {
+                TownHudController hud = FindFirstObjectByType<TownHudController>();
+                hud?.ShowPackIntro(resolved);
+            }
+        }
+
+        /// <summary>Aim bird camera at the pack landmark region so overlays are on-screen.</summary>
+        private void FrameShootLandmark(string packId, Dictionary<string, WireVec3> anchors)
+        {
+            string regionId = DemoPackIds.ShootLandmarkRegion(packId);
+            float wireX;
+            float wireY;
+            float wireZ;
+
+            if (anchors != null && anchors.TryGetValue(regionId, out WireVec3 wire))
+            {
+                wireX = (float)wire.X;
+                wireY = (float)wire.Y;
+                wireZ = (float)wire.Z;
+            }
+            else
+            {
+                // Fallback: Unity anchors from TownBuilder (already transformed).
+                TownBuilder builder = FindFirstObjectByType<TownBuilder>();
+                if (builder == null
+                    || !builder.RegionAnchors.TryGetValue(regionId, out Vector3 unity))
+                {
+                    return;
+                }
+
+                // Inverse of WireCoordinateTransform.ToUnity: (x,y,-z).
+                wireX = unity.x;
+                wireY = 0f;
+                wireZ = -unity.z;
+            }
+
+            Camera cam = Camera.main;
+            TownCamera townCamera = cam != null ? cam.GetComponent<TownCamera>() : null;
+            if (townCamera == null)
+            {
+                return;
+            }
+
+            // Slightly closer than default bird so bubbles / trade labels read in the PNG.
+            townCamera.FrameOnWire(
+                wireX,
+                wireY,
+                wireZ,
+                TownVisualLayout.BirdZoomMinDistance + 2f);
+        }
+
+        /// <summary>
+        /// Normal watch: first story pulse. Shoot: pack landmark (图书馆 / 工坊 / …).
+        /// </summary>
+        private int ResolveOfflineSeekTick(OfflineDemoPack pack, string packId)
+        {
+            if (shootMode)
+            {
+                return DemoPackIds.ShootLandmarkTick(packId);
+            }
+
+            if (pack?.Interactions != null && pack.Interactions.Count > 0)
+            {
+                return pack.Interactions[0].Tick;
+            }
+
+            return 1;
+        }
+
+        private void PublishDemoTickIfNeeded(bool force = false)
+        {
+            if (session == null)
+            {
+                return;
+            }
+
+            int tick = session.DisplayTick;
+            if (!force && tick == lastPublishedDemoTick)
+            {
+                return;
+            }
+
+            lastPublishedDemoTick = tick;
+            AgentTownDemoBridge.SetTick(tick);
+        }
+
+        private void SetBootStatus(string message)
+        {
+            session?.SetStatusMessage(message);
+            if (bootStatusLabel != null)
+            {
+                bootStatusLabel.text = message;
+            }
+
+            if (bootOverlay != null)
+            {
+                bootOverlay.RemoveFromClassList("hidden");
+            }
+        }
+
+        private void HideBootOverlay()
+        {
+            if (bootOverlay != null)
+            {
+                bootOverlay.AddToClassList("hidden");
+            }
+        }
+
         private void ResumeLaunchRun()
         {
             // RunId is already set via Configure; fetch manifest + connect SSE, then a first frame.
@@ -191,7 +437,19 @@ namespace AgentTown.Town
 
         private static Material CreatePlaceholderMaterial(string name)
         {
-            Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+            Shader shader =
+                Shader.Find("Universal Render Pipeline/Lit")
+                ?? Shader.Find("Universal Render Pipeline/Unlit")
+                ?? Shader.Find("Standard")
+                ?? Shader.Find("Unlit/Color")
+                ?? Shader.Find("Sprites/Default")
+                ?? Shader.Find("UI/Default");
+            if (shader == null)
+            {
+                Debug.LogWarning($"[AgentTown] No shader for material '{name}' — using null material");
+                return null;
+            }
+
             return new Material(shader) { name = name };
         }
 

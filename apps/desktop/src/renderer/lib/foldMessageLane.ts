@@ -15,6 +15,8 @@ import {
   appendContentStep,
   appendPlanReviewStep,
   appendReasoningStep,
+  appendReworkStep,
+  appendTeamPreviewStep,
   appendTeamStep,
   appendToolStep,
   dropTrailingContentSteps,
@@ -60,7 +62,7 @@ export function foldContentReset(state: MessageLaneState): MessageLaneState {
   return {
     ...state,
     content: "",
-    process: dropTrailingContentSteps(state.process),
+    process: appendReworkStep(dropTrailingContentSteps(state.process)),
   };
 }
 
@@ -162,5 +164,14 @@ export function foldPlanReviewMarker(
   checkpointId: string,
 ): MessageLaneState {
   const process = appendPlanReviewStep(state.process, checkpointId);
+  return process === state.process ? state : { ...state, process };
+}
+
+/** Fold a `team_preview_required` into the timeline as a positional `team_preview` marker. */
+export function foldTeamPreviewMarker(
+  state: MessageLaneState,
+  checkpointId: string,
+): MessageLaneState {
+  const process = appendTeamPreviewStep(state.process, checkpointId);
   return process === state.process ? state : { ...state, process };
 }

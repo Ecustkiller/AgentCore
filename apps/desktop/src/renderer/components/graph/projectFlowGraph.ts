@@ -1,4 +1,3 @@
-import { toDebateModel } from "@/components/chat/debate/model";
 import type { InjectGraphOverlay } from "@/lib/causalInject";
 import { NODE_HEIGHT, NODE_WIDTH } from "@/lib/elk-layout";
 import type { GroupLayout } from "@/lib/elk-layout";
@@ -15,13 +14,13 @@ import {
   deriveArtifacts,
   resolveHandoff,
 } from "./helpers";
+import { pickEscalationKind } from "./agentNode/shared";
 
 export interface FlowGraphProjectionInput {
   execution: Execution;
   positions: Record<string, { x: number; y: number }>;
   nodeHeights: Record<string, number>;
   nodeSizes: Record<string, { width: number; height: number }>;
-  timelineLayout: boolean;
   handleDirection: "horizontal" | "vertical";
   cnyPerUsd: number;
   litRunId: string | null;
@@ -37,6 +36,8 @@ export interface FlowGraphProjectionInput {
   foldInfo?: GraphFoldInfo;
   expandedUnits?: ReadonlySet<string>;
   onToggleUnitExpand?: (unitId: string) => void;
+  /** Prefer bezier edges (tree / mind-map look). */
+  edgePathType?: "smoothstep" | "bezier";
 }
 
 export interface FlowEdgeProjectionInput extends FlowGraphProjectionInput {
@@ -164,7 +165,6 @@ export function projectFlowNodes({
   positions,
   nodeHeights,
   nodeSizes,
-  timelineLayout,
   handleDirection,
   cnyPerUsd,
   litRunId,
@@ -184,7 +184,6 @@ export function projectFlowNodes({
   const placed = (id: string) => {
     const slot = positions[id];
     if (!slot) return undefined;
-    if (timelineLayout) return slot;
     const h = nodeHeights[id];
     return h ? { x: slot.x, y: slot.y + (NODE_HEIGHT - h) / 2 } : slot;
   };
@@ -193,7 +192,6 @@ export function projectFlowNodes({
   const workerIdSet = new Set(workerRuns.map((r) => r.id));
   const captainId = captainRun?.id ?? null;
   const foldInfo = foldInfoIn ?? computeGraphFold(execution.runs, captainId);
-  const debateModel = toDebateModel(execution);
   const nodes: Node[] = [];
 
   // A revision (辩论/圆桌 续写轮) is laid out inside its source's sub-team compound
@@ -246,7 +244,7 @@ export function projectFlowNodes({
       type: "subTeamGroup",
       position: pos,
       style: { width: group.width, height: group.height },
-      ...(outerGroup && !timelineLayout
+      ...(outerGroup
         ? { parentId: outerGroup.groupId, extent: "parent" as const }
         : {}),
       data: {
@@ -264,44 +262,9 @@ export function projectFlowNodes({
   for (const [i, run] of workerRuns.entries()) {
     const unit = foldInfo.unitOf.get(run.id) ?? run.id;
     const isFoldedChild = foldInfo.folded.has(run.id);
-    if (isFoldedChild && !expandedUnits.has(unit)) continue;
-
-    const isDebateUnit = foldInfo.debateUnits.has(run.id) && unit === run.id;
-    if (isDebateUnit && !expandedUnits.has(run.id)) {
-      const pos = placed(run.id);
-      if (!pos) continue;
-      const childCount = foldInfo.descendants.get(run.id)?.length ?? 0;
-      const roundCount =
-        debateModel?.rounds.length ??
-        Math.max(
-          0,
-          ...workerRuns
-            .filter((r) => foldInfo.unitOf.get(r.id) === run.id)
-            .map((r) => r.round),
-        );
-      const focused = litRunId === run.id;
-      nodes.push({
-        id: run.id,
-        type: "debateCompound",
-        position: pos,
-        data: {
-          runId: run.id,
-          motion: debateModel?.motion ?? null,
-          roundCount,
-          stopReason: debateModel?.stopReason ?? null,
-          durationMs: run.durationMs,
-          status: run.status,
-          childCount,
-          expanded: false,
-          focused,
-          handleDirection,
-          enterIndex: i + 1,
-          onActivate: () => activateNode(run.id),
-          onToggleExpand: () => onToggleUnitExpand?.(run.id),
-        },
-      } as Node);
-      continue;
-    }
+    const unitExpanded =
+      foldInfo.debateUnits.has(unit) || expandedUnits.has(unit);
+    if (isFoldedChild && !unitExpanded) continue;
 
     const group = innermostGroupForRun(layoutOwnerOf(run.id), groups, subTeams);
 
@@ -309,12 +272,10 @@ export function projectFlowNodes({
     if (group) {
       const absPos = positions[run.id];
       if (!absPos) continue;
-      pos = timelineLayout
-        ? placed(run.id)
-        : {
-            x: absPos.x - group.x,
-            y: absPos.y - group.y,
-          };
+      pos = {
+        x: absPos.x - group.x,
+        y: absPos.y - group.y,
+      };
     } else {
       pos = placed(run.id);
     }
@@ -342,11 +303,8 @@ export function projectFlowNodes({
       id: run.id,
       type: "agent",
       position: pos,
-      ...(group && !timelineLayout
+      ...(group
         ? { parentId: group.groupId, extent: "parent" as const }
-        : {}),
-      ...(timelineLayout && size
-        ? { style: { width: size.width, height: size.height } }
         : {}),
       data: {
         agentId: run.agentId,
@@ -365,7 +323,6 @@ export function projectFlowNodes({
         toolCount: agent?.toolCalls.length ?? 0,
         artifacts: agent ? deriveArtifacts(agent.toolCalls) : [],
         focused,
-        layoutMode: timelineLayout ? "timeline" : "dependency",
         nodeWidth: size?.width,
         model: run.model,
         durationMs: run.durationMs,
@@ -379,12 +336,15 @@ export function projectFlowNodes({
         isRevision,
         revision: run.revision,
         revised: run.revised,
+        replacesRunId: run.replacesRunId,
+        didRework: agent?.didRework === true,
         stance: run.stance,
         checkpoint: run.checkpoint,
         escalationPending: run.escalations.filter((e) => e.status === "pending")
           .length,
         escalationRaised: run.escalations.filter((e) => e.status === "raised")
           .length,
+        escalationKind: pickEscalationKind(run.escalations),
         reviewConcern,
         auditEventCount: auditCounts?.[run.id],
         foldedChildCount:
@@ -402,14 +362,10 @@ export function projectFlowNodes({
   if (execution.runs.length > 0) {
     const inputPos = placed(INPUT_ID);
     if (inputPos) {
-      const inputSize = nodeSizes[INPUT_ID];
       nodes.push({
         id: INPUT_ID,
         type: "userInput",
         position: inputPos,
-        ...(timelineLayout && inputSize
-          ? { style: { width: inputSize.width, height: inputSize.height } }
-          : {}),
         data: {
           variant: "input",
           status: "completed",
@@ -424,19 +380,10 @@ export function projectFlowNodes({
     if (captainRun && captainStatus) {
       const captainPos = placed(captainRun.id);
       if (captainPos) {
-        const captainSize = nodeSizes[captainRun.id];
         nodes.push({
           id: captainRun.id,
           type: "captain",
           position: captainPos,
-          ...(timelineLayout && captainSize
-            ? {
-                style: {
-                  width: captainSize.width,
-                  height: captainSize.height,
-                },
-              }
-            : {}),
           data: {
             variant: "captain",
             status: captainStatus,
@@ -466,6 +413,7 @@ export function projectFlowEdges({
   handleDirection,
   captainRun,
   captainStatus,
+  edgePathType = "smoothstep",
 }: Pick<
   FlowEdgeProjectionInput,
   | "edges"
@@ -475,6 +423,7 @@ export function projectFlowEdges({
   | "handleDirection"
   | "captainRun"
   | "captainStatus"
+  | "edgePathType"
 >): Edge[] {
   const gapEdges = injectOverlay?.activeGapEdges ?? [];
   const allEdges = gapEdges.length > 0 ? [...edges, ...gapEdges] : edges;
@@ -508,6 +457,7 @@ export function projectFlowEdges({
         injectHighlight,
         injectDimmed,
         handleDirection,
+        pathType: edgePathType,
         sourcePortIndex: port?.sourcePortIndex ?? 0,
         sourcePortTotal: port?.sourcePortTotal ?? 1,
         targetPortIndex: port?.targetPortIndex ?? 0,

@@ -18,6 +18,19 @@ async def _resolve_when_pending(
 
     for _ in range(500):
         pending = registry.list_pending(conversation_id)
+        # ≥2 worker 首波前会先挂 team_preview；本套测专测波间 plan_review，先放行预审。
+        for p in list(pending):
+            if p.kind.value == "team_preview":
+                registry.resolve(
+                    p.id,
+                    CheckpointResponse(decision=CheckpointDecision.CONTINUE),
+                    conversation_id=conversation_id,
+                )
+        pending = [
+            p
+            for p in registry.list_pending(conversation_id)
+            if p.kind.value == "plan_review"
+        ]
         if pending:
             registry.resolve(
                 pending[0].id,
@@ -33,7 +46,7 @@ async def test_checkpoint_after_pauses_then_continues():
     registry = InteractionRegistry()
     sink = EventSink()
     t = tool_ckpt(Provider(["S1OUT", "S2OUT"]), sink, registry, "conv1", timeout=5.0)
-    exec_task = asyncio.create_task(t.execute({"tasks": CKPT_DAG}, ctx()))
+    exec_task = asyncio.create_task(t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx()))
     pending = await _resolve_when_pending(registry, "conv1", CheckpointDecision.CONTINUE)
     result = await exec_task
 
@@ -52,7 +65,7 @@ async def test_checkpoint_after_stop_halts_downstream():
     registry = InteractionRegistry()
     sink = EventSink()
     t = tool_ckpt(Provider(["S1OUT", "S2OUT"]), sink, registry, "conv1", timeout=5.0)
-    exec_task = asyncio.create_task(t.execute({"tasks": CKPT_DAG}, ctx()))
+    exec_task = asyncio.create_task(t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx()))
     await _resolve_when_pending(registry, "conv1", CheckpointDecision.STOP)
     result = await exec_task
 
@@ -66,7 +79,7 @@ async def test_checkpoint_after_adjust_steers_downstream():
     sink = EventSink()
     provider = Provider(["S1OUT", "S2OUT"])
     t = tool_ckpt(provider, sink, registry, "conv1", timeout=5.0)
-    exec_task = asyncio.create_task(t.execute({"tasks": CKPT_DAG}, ctx()))
+    exec_task = asyncio.create_task(t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx()))
     await _resolve_when_pending(
         registry, "conv1", CheckpointDecision.ADJUST, note="把重点放在风险上"
     )
@@ -88,7 +101,7 @@ async def test_checkpoint_adjust_steers_only_dependents_not_parallel_branch():
     sink = EventSink()
     provider = Provider(["S1OUT", "U1OUT", "S2OUT", "U2OUT"])
     t = tool_ckpt(provider, sink, registry, "conv1", timeout=5.0)
-    exec_task = asyncio.create_task(t.execute({"tasks": CKPT_FORK_DAG}, ctx()))
+    exec_task = asyncio.create_task(t.execute({"tasks": CKPT_FORK_DAG, "coordinate": False}, ctx()))
     await _resolve_when_pending(
         registry, "conv1", CheckpointDecision.ADJUST, note="把重点放在风险上"
     )
@@ -110,7 +123,7 @@ async def test_checkpoint_timeout_continues():
     registry = InteractionRegistry()
     sink = EventSink()
     t = tool_ckpt(Provider(["S1OUT", "S2OUT"]), sink, registry, "conv1", timeout=0.05)
-    result = await t.execute({"tasks": CKPT_DAG}, ctx())
+    result = await t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx())
     assert "S1OUT" in result.output
     assert "S2OUT" in result.output
     sink.close()
@@ -122,7 +135,7 @@ async def test_checkpoint_timeout_continues():
 async def test_checkpoint_inert_when_disabled():
     sink = EventSink()
     t = tool(Provider(["S1OUT", "S2OUT"]), sink=sink)
-    result = await t.execute({"tasks": CKPT_DAG}, ctx())
+    result = await t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx())
     assert "S1OUT" in result.output
     assert "S2OUT" in result.output
     sink.close()

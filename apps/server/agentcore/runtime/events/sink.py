@@ -302,6 +302,11 @@ class EventSink:
             cid = event.payload.get("checkpoint_id") or ""
             if cid and not self._has_marker("plan_review", "checkpoint_id", cid):
                 self._process.append({"kind": "plan_review", "checkpoint_id": cid})
+        elif t == EventType.TEAM_PREVIEW_REQUIRED:
+            # 团队预审时间线落点: thin preview before first wave.
+            cid = event.payload.get("checkpoint_id") or ""
+            if cid and not self._has_marker("team_preview", "checkpoint_id", cid):
+                self._process.append({"kind": "team_preview", "checkpoint_id": cid})
 
     def seed_journal(self, events: list[dict[str, Any]]) -> None:
         self._journal.extend(events)

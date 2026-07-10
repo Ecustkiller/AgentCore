@@ -166,17 +166,11 @@ export function ConversationPage() {
   const setConversationView = useUIStore((s) => s.setConversationView);
   const canvasMode = !!id && conversationView === "canvas";
 
-  // 画布放大态接管整个对话区并自带顶栏（返回 + 图工具栏）；此时隐藏对话级浮动开关，否则它们
-  // 与放大态两角的 chrome 同层重叠，会盖住「返回」。退出放大 / 切回聊天时 `ConversationCanvas`
-  // 复位此标志，开关自动恢复（侧面板仍可经 Ctrl/Cmd+I 或面板自带的关闭按钮控制）。
-  const canvasZoomed = useUIStore((s) => s.canvasZoomed);
-
   return (
     <>
       {canvasMode ? <ConversationCanvas /> : <ChatView />}
-      {/* 视图切换段控件（聊天 ⇄ 画布），置于左上，与右上的侧面板开关对称。放大态隐藏（让位给
-          放大态自带的「返回」）。 */}
-      {id && !canvasZoomed && (
+      {/* 视图切换段控件（聊天 ⇄ 画布），置于左上，与右上的侧面板开关对称。 */}
+      {id && (
         <div className="absolute left-3 top-2 z-20 flex items-center gap-0.5 rounded-lg border border-border bg-card/80 p-0.5 backdrop-blur">
           <Button
             variant="ghost"
@@ -210,9 +204,8 @@ export function ConversationPage() {
           panel still needs a discoverable show/hide control, so it lives at the
           chat's top-right and mirrors Ctrl/Cmd+I. Opening restores the active tab
           (the 工作区 home by default), so a manual open lands on the project
-          files. Stays visible while open (active state) as the close affordance.
-          放大态隐藏（避让放大态图工具栏；面板仍可经 Ctrl/Cmd+I 或其自带关闭按钮控制）。 */}
-      {id && !canvasZoomed && (
+          files. Stays visible while open (active state) as the close affordance. */}
+      {id && (
         <SimpleTooltip
           label={panelOpen ? "隐藏侧面板 (Ctrl/Cmd+I)" : "侧面板 (Ctrl/Cmd+I)"}
         >

@@ -36,7 +36,11 @@ from pathlib import Path
 from typing import Any
 
 from agentcore.core.logging import get_logger
-from agentcore.runtime.suspension import TurnSuspension, suspension_from_json
+from agentcore.runtime.suspension import (
+    TurnSuspension,
+    suspension_from_json,
+    suspension_paused_summary,
+)
 
 logger = get_logger(__name__)
 
@@ -108,24 +112,36 @@ class LocalPausedTurnStore:
         this local file is its ENTIRE persistence: the cloud splits a pause across the
         ``turn_journal`` table (the fact stream) + the messages table (prior-turn history),
         but here BOTH ride inline —
-          * ``journal_entries`` — the §8.3 fact stream the resume folds via
-            ``window_from_journal`` to rebuild the CEO window (the display ``journal`` is the
-            degraded fallback / resume seed);
+          * ``journal_entries`` — the §8.3 fact stream (唯一权威载体) the resume folds via
+            ``window_from_journal`` to rebuild the CEO window; the display ``journal`` resume
+            seed is a DERIVED property of it (P0-B Phase 3), NOT stored — so the Sidecar seeds
+            identically to the cloud claim;
           * ``history`` — the window's prior-turn prefix the resume splices ahead of the
             folded rounds (the journal stores only its length; the cloud reloads it from the
             message DB — the Sidecar from here).
         """
         if not _is_safe_message_id(suspension.message_id):
             return
+        # Local turns still bind an in-process TurnJournalWriter (append-on-emit). Flush
+        # it before the file write so the inline journal_entries snapshot is complete;
+        # seal after a successful write so post-save emits cannot diverge the in-proc
+        # durable stream (same hard boundary as cloud save_paused_turn).
+        from agentcore.runtime.journal.writer import current_journal_writer
+
+        writer = current_journal_writer.get()
+        if writer is not None:
+            await writer.flush()
+            if writer.degraded:
+                suspension.journal_degraded = True
         record = {
             "message_id": suspension.message_id,
             "conversation_id": suspension.conversation_id,
             "user_id": suspension.user_id,
             "frame": suspension.to_json(),
-            "journal": list(suspension.journal),
-            # The §8.3 fact stream + prior-turn history — the window-rebuild inputs the
-            # cloud keeps in turn_journal + the message DB. Here they ride inline since the
-            # Sidecar has no DB (this file is self-contained).
+            # The §8.3 fact stream (唯一权威载体) + prior-turn history — the window-rebuild inputs
+            # the cloud keeps in turn_journal + the message DB. Here they ride inline since the
+            # Sidecar has no DB (this file is self-contained). The display ``journal`` resume seed
+            # is NOT stored: it is a DERIVED property of ``journal_entries`` (P0-B Phase 3).
             "journal_entries": list(suspension.journal_entries),
             "history": list(suspension.history),
             # The resume-card summary (the wire shape) is computed ONCE here and stored
@@ -144,6 +160,9 @@ class LocalPausedTurnStore:
                 conversation_id=suspension.conversation_id,
                 error=str(e),
             )
+            return
+        if writer is not None:
+            await writer.seal()
 
     def _write_sync(self, message_id: str, record: dict[str, Any]) -> None:
         self._base.mkdir(parents=True, exist_ok=True)
@@ -295,14 +314,15 @@ class LocalPausedTurnStore:
 
 
 def _suspension_from_record(record: dict[str, Any]) -> TurnSuspension:
-    """Rebuild a :class:`TurnSuspension` from a stored record (frame + inline journal).
+    """Rebuild a :class:`TurnSuspension` from a stored record (frame + inline fact stream).
 
     Re-hydrates the window-rebuild inputs the frame omits (Phase 2 ⑤): ``journal_entries``
     (folded by ``window_from_journal``) and ``history`` (spliced ahead of the rounds) — the
-    Sidecar's local stand-ins for the cloud's ``turn_journal`` table + message DB.
+    Sidecar's local stand-ins for the cloud's ``turn_journal`` table + message DB. The display
+    ``journal`` resume seed is DERIVED from ``journal_entries`` (a property, P0-B Phase 3), so it
+    is neither stored nor re-hydrated here — the Sidecar seeds identically to the cloud claim.
     """
     suspension = suspension_from_json(record.get("frame") or {})
-    suspension.journal = list(record.get("journal") or [])
     suspension.journal_entries = list(record.get("journal_entries") or [])
     suspension.history = list(record.get("history") or [])
     return suspension
@@ -311,24 +331,8 @@ def _suspension_from_record(record: dict[str, Any]) -> TurnSuspension:
 def paused_summary(suspension: TurnSuspension) -> dict[str, Any]:
     """Project a paused frame into the desktop's resume-card summary (the wire shape).
 
-    Keys mirror the cloud ``PausedTurnSummary`` **verbatim** (snake_case) — the shared
-    id/kind/context fields plus the kind-specific card content (plan_review ``steps`` /
-    ``pending``; ask_user ``question`` + ``assumptions`` / ``questions`` /
-    ``style_options``), unused set empty for the other kind. Same-shape-as-cloud lets the
-    desktop's ``pausedTurns`` store ingest a sidecar summary with zero remapping (same
-    posture as the ``runs`` payload mirroring the cloud replay schema).
+    Keys mirror the cloud ``PausedTurnSummary`` **verbatim** (snake_case) — shared
+    via :func:`~agentcore.runtime.suspension.suspension_paused_summary` so cloud and
+    sidecar cannot drift on kind-specific slots.
     """
-    return {
-        "message_id": suspension.message_id,
-        "kind": suspension.kind.value,
-        "checkpoint_id": suspension.checkpoint_id,
-        "user_message": suspension.user_message,
-        "steps": getattr(suspension, "steps", []),
-        "pending": getattr(suspension, "pending", []),
-        "question": getattr(suspension, "question", ""),
-        "context": getattr(suspension, "context", ""),
-        "assumptions": getattr(suspension, "assumptions", []),
-        "questions": getattr(suspension, "questions", []),
-        "style_options": getattr(suspension, "style_options", []),
-        "intent": getattr(suspension, "intent", None),
-    }
+    return suspension_paused_summary(suspension)

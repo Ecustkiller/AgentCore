@@ -30,21 +30,25 @@ export function ResumeCard({
 }) {
   const [note, setNote] = useState("");
   const isPlanReview = paused.kind === "plan_review";
+  const isTeamPreview = paused.kind === "team_preview";
+  const showWorkers = isPlanReview || isTeamPreview;
 
   return (
     <div className="pause">
       <div className="pause-title">
-        {isPlanReview
-          ? "执行已暂停 · 待你决定是否继续"
-          : "需要你拍板（已离线保留）"}
+        {isTeamPreview
+          ? "团队预审 · 开干前确认"
+          : isPlanReview
+            ? "执行已暂停 · 待你决定是否继续"
+            : "需要你拍板（已离线保留）"}
       </div>
       {paused.user_message && (
         <div className="pause-context">{paused.user_message}</div>
       )}
-      {!isPlanReview && paused.question && (
+      {!showWorkers && paused.question && (
         <div className="pause-question">{paused.question}</div>
       )}
-      {!isPlanReview && paused.context && (
+      {!showWorkers && paused.context && (
         <div className="pause-context">{paused.context}</div>
       )}
       {isPlanReview && (paused.steps?.length ?? 0) > 0 && (
@@ -63,14 +67,31 @@ export function ResumeCard({
           })}
         </div>
       )}
+      {isTeamPreview && (paused.workers?.length ?? 0) > 0 && (
+        <div className="pause-steps">
+          {(paused.workers ?? []).map((w, i) => {
+            const role = str(w, "role");
+            const task = str(w, "task");
+            return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: persisted, stable order
+              <div key={i} className="pause-step">
+                {role && <div className="pause-step-role">{role}</div>}
+                {task && <div className="pause-step-summary">{task}</div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
       <textarea
         className="pause-note"
         rows={2}
         value={note}
         placeholder={
-          isPlanReview
-            ? "可选 · 调整时作为对下游的指示；停止时作为收尾备注"
-            : "可选 · 你的答复或补充，留空则按上面继续"
+          isTeamPreview
+            ? "可选 · 调整时作为对全体队员的指示；停止时作为收尾备注"
+            : isPlanReview
+              ? "可选 · 调整时作为对下游的指示；停止时作为收尾备注"
+              : "可选 · 你的答复或补充，留空则按上面继续"
         }
         onChange={(e) => setNote(e.target.value)}
       />
@@ -80,9 +101,9 @@ export function ResumeCard({
           className="pause-btn pause-btn-primary"
           onClick={() => onResume("continue", note.trim())}
         >
-          继续
+          {isTeamPreview ? "开做" : "继续"}
         </button>
-        {isPlanReview && (
+        {showWorkers && (
           <button
             type="button"
             className="pause-btn pause-btn-neutral"

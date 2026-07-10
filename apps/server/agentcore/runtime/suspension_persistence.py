@@ -1,12 +1,14 @@
-"""DB-backed save / claim / delete for paused turns (结构化挂起 2b turn 级落盘).
+"""DB-backed save / claim / delete / restore for paused turns (结构化挂起 2b turn 级落盘).
 
 Bridges the DB-unaware ``delegate`` checkpoint hook + the resume entry point to the
 ``paused_turns`` table. The pipeline wires :func:`save_paused_turn` / :func:`delete_paused_turn`
 into ``delegate`` (persist a frame before the wait; drop it after a live in-process
 resolve), and ``resume_chat`` calls :func:`claim_paused_turn` (atomic read-and-delete,
 so a turn is never resumed twice) + :func:`list_paused_turns` (a conversation's pending
-frames on reopen). Uses ``async_session_factory`` directly (not an injected request
-session), matching the cost-ledger / session-roster persistence posture.
+frames on reopen). On cloud resume failure, :func:`restore_paused_turn` re-upserts the
+claimed frame (sidecar ``rollback_claim`` parity) so the user can retry. Uses
+``async_session_factory`` directly (not an injected request session), matching the
+cost-ledger / session-roster persistence posture.
 
 The paused turn's journal-so-far rides the ``turn_journal`` table (唯一事实源, §8.3),
 NOT the frame. Facts are normally appended on emit during the turn; at pause time
@@ -28,7 +30,6 @@ from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import PausedTurnRepository, TurnJournalRepository
 from agentcore.push import PushNotification, notify_user
-from agentcore.runtime.journal import runs_from_entries
 from agentcore.runtime.journal.writer import current_journal_writer
 from agentcore.runtime.suspension import (
     SuspensionKind,
@@ -78,6 +79,11 @@ async def save_paused_turn(suspension: TurnSuspension) -> None:
             error=str(e),
         )
         return
+    # Hard boundary: after the durable snapshot is the canonical journal, seal the
+    # append-on-emit writer so post-save emits (trailing *_required, suspending
+    # tool_use_end) cannot diverge DB rows from the paused snapshot.
+    if writer is not None:
+        await writer.seal()
     # A durable pause is the canonical 需要你 (attention) event: the turn is now BLOCKED
     # on the user and stays so until they act. Fan a native push out to their devices so
     # they learn even with the app backgrounded (SSE gone). Best-effort + default-off
@@ -127,6 +133,33 @@ async def delete_paused_turn(message_id: str) -> None:
         logger.warning("suspension.delete_failed", message_id=message_id, error=str(e))
 
 
+async def restore_paused_turn(suspension: TurnSuspension) -> None:
+    """Re-upsert a claimed frame after a failed cloud resume so the user can retry.
+
+    ``claim`` is DELETE ... RETURNING — on resume failure the in-memory
+    :class:`TurnSuspension` and the ``turn_journal`` rows still exist, but the
+    ``paused_turns`` row is gone. This puts the frame back (sidecar's
+    ``rollback_claim`` parity for the cloud path). Does NOT re-push (the user
+    already got the original pause notification) and does NOT rewrite
+    ``turn_journal`` (claim left those rows in place). Best-effort; never raises.
+    """
+    try:
+        async with async_session_factory() as db:
+            await PausedTurnRepository(db).upsert(
+                message_id=suspension.message_id,
+                conversation_id=suspension.conversation_id,
+                user_id=suspension.user_id,
+                frame=suspension.to_json(),
+                trace_id=suspension.trace_id,
+            )
+    except Exception as e:  # noqa: BLE001 — restore must never break the error path
+        logger.warning(
+            "suspension.restore_failed",
+            message_id=suspension.message_id,
+            error=str(e),
+        )
+
+
 async def claim_paused_turn(
     message_id: str, *, conversation_id: str | None = None
 ) -> TurnSuspension | None:
@@ -139,17 +172,16 @@ async def claim_paused_turn(
     claimed within that conversation (IDOR-safe). A load error degrades to ``None``
     (the route reports「已处理或不存在」) rather than raising.
 
-    The journal-so-far is re-hydrated from ``turn_journal`` (唯一事实源, it is not in
-    the frame) onto :attr:`TurnSuspension.journal`, so the resume seeds + replays the
-    whole pre-pause graph. The raw loaded stream is ALSO carried onto
-    :attr:`TurnSuspension.journal_entries` (the §8.3 fact-log stream, incl. the execution
-    facts the display projection drops): the resume folds it via ``window_from_journal`` to
-    rebuild the captain window (执行级事件溯源 Phase 2 ④/⑤ — the window is a projection of the
+    The journal-so-far is re-hydrated from ``turn_journal`` (唯一事实源, it is not in the
+    frame) onto :attr:`TurnSuspension.journal_entries` (the §8.3 fact-log stream, incl. the
+    execution facts the display projection drops): the resume folds it via ``window_from_journal``
+    to rebuild the captain window (执行级事件溯源 Phase 2 ④/⑤ — the window is a projection of the
     journal, no longer read from a frame ``transcript`` blob, which is no longer serialized).
-    The window's prior-turn history is reloaded separately from the message DB by the
-    caller (``service.resume_chat``) and threaded in. The stored rows are left in place: the
-    resumed turn re-records them wholesale on completion (or the TTL sweep clears them if the
-    turn is abandoned).
+    The display ``journal`` resume seed is a DERIVED property of those entries (P0-B Phase 3),
+    so it seeds identically to the Sidecar. The window's prior-turn history is reloaded
+    separately from the message DB by the caller (``service.resume_chat``) and threaded in. The
+    stored rows are left in place: the resumed turn re-records them wholesale on completion (or
+    the TTL sweep clears them if the turn is abandoned).
     """
     try:
         async with async_session_factory() as db:
@@ -161,11 +193,9 @@ async def claim_paused_turn(
     except Exception as e:  # noqa: BLE001 — a claim failure reads as "not resumable"
         logger.warning("suspension.claim_failed", message_id=message_id, error=str(e))
         return None
-    # Raw stream (execution facts + display) for the Phase 2 window rebuild; the display
-    # seed (events only) for the unchanged resume read path.
+    # Re-hydrate the 唯一权威载体 (execution facts + display) for the Phase 2 window rebuild;
+    # the display ``journal`` resume seed is a DERIVED property of these entries (P0-B Phase 3).
     suspension.journal_entries = list(entries or [])
-    runs = runs_from_entries(entries)
-    suspension.journal = list((runs or {}).get("events") or [])
     if suspension.journal_degraded and not suspension.journal_entries:
         logger.warning(
             "suspension.claim_journal_degraded",

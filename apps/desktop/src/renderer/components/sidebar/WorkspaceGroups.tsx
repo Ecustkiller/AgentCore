@@ -1,6 +1,7 @@
 import { SurfaceRowButton } from "@/components/ui";
 import { useConversations } from "@/hooks/useConversations";
 import { useWorkspaceGroups } from "@/hooks/useWorkspaceGroups";
+import { deriveGroupWorkspaceIsLocal } from "@/lib/conversationWorkspaceMode";
 import { useConversationStore } from "@/stores/conversation";
 import { useSidebarStore } from "@/stores/sidebar";
 import { MoreHorizontal } from "lucide-react";
@@ -49,6 +50,7 @@ export function WorkspaceGroups() {
         const expanded =
           stored !== undefined ? stored : folder.id === activeFolderId;
         const overflow = convs.length - MAX_PER_GROUP;
+        const groupIsLocal = deriveGroupWorkspaceIsLocal(folder, convs);
         return (
           <div key={folder.id}>
             <WorkspaceGroupHeader
@@ -60,7 +62,11 @@ export function WorkspaceGroups() {
             {expanded && (
               <div className="space-y-0.5 pl-2">
                 {convs.slice(0, MAX_PER_GROUP).map((c) => (
-                  <ConversationItem key={c.id} conversation={c} />
+                  <ConversationItem
+                    key={c.id}
+                    conversation={c}
+                    groupIsLocal={groupIsLocal}
+                  />
                 ))}
                 {overflow > 0 && (
                   <SurfaceRowButton

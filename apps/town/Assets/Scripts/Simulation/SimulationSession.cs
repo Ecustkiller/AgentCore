@@ -26,12 +26,17 @@ namespace AgentTown.Simulation
         {
             Live,
             Replay,
+            Offline,
         }
 
         private const int MaxDecisions = 50;
         private const int MaxTickEvents = 400;
-        private const float BasePlaybackStepSec = 0.6f;
+        /// <summary>Seconds between playhead steps at 1x (NPC pace + UpdatePlayback share this).</summary>
+        public const float PlaybackStepSeconds = 0.6f;
+
+        private const float BasePlaybackStepSec = PlaybackStepSeconds;
         private const int MinPlaybackTick = 1;
+        private const string OfflineRunId = OfflineDemoPack.DemoRunId;
 
         private static SimulationSession instance;
 
@@ -46,6 +51,12 @@ namespace AgentTown.Simulation
         private readonly Dictionary<int, SimTickSnapshot> tickCache = new();
         private readonly List<SimDecision> decisions = new();
         private readonly List<SimTickEvent> tickEvents = new();
+        private readonly Dictionary<string, ActiveInteraction> activeInteractions = new();
+        private readonly Dictionary<int, List<ActiveInteraction>> offlineInteractionsByTick = new();
+
+        private WorldModifiers modifiers = new();
+        private TickMetrics metrics;
+        private List<WorldEvent> activeEvents = new();
 
         private string apiBase = "";
         private string accessToken = "";
@@ -67,6 +78,8 @@ namespace AgentTown.Simulation
         public ClientMode Mode { get; private set; } = ClientMode.Live;
         public string RunId { get; private set; } = "";
         public string Scenario { get; private set; } = "town";
+        /// <summary>Active offline story pack (<see cref="DemoPackIds"/>); empty when not Offline.</summary>
+        public string OfflinePackId { get; private set; } = "";
         public string Status { get; private set; } = "";
         public string StatusMessage { get; private set; } = "";
         public int Tick { get; private set; }
@@ -85,10 +98,51 @@ namespace AgentTown.Simulation
         public IReadOnlyList<SimDecision> Decisions => decisions;
         public IReadOnlyList<SimTickEvent> TickEvents => tickEvents;
         public IReadOnlyDictionary<int, SimTickSnapshot> TickCache => tickCache;
+        public WorldModifiers Modifiers => modifiers;
+        public TickMetrics Metrics => metrics;
+        public IReadOnlyList<WorldEvent> ActiveEvents => activeEvents;
+        public IReadOnlyDictionary<string, ActiveInteraction> ActiveInteractions => activeInteractions;
+
+        /// <summary>
+        /// Offline story pulses (conversation / trade / vote), tick-ascending.
+        /// Empty when not Offline or pack has no interactions.
+        /// </summary>
+        public IReadOnlyList<ActiveInteraction> OfflineStoryInteractions
+        {
+            get
+            {
+                if (offlineInteractionsByTick.Count == 0)
+                {
+                    return Array.Empty<ActiveInteraction>();
+                }
+
+                var list = new List<ActiveInteraction>();
+                foreach (KeyValuePair<int, List<ActiveInteraction>> pair in offlineInteractionsByTick)
+                {
+                    if (pair.Value == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (ActiveInteraction ix in pair.Value)
+                    {
+                        if (ix != null)
+                        {
+                            list.Add(ix);
+                        }
+                    }
+                }
+
+                list.Sort((a, b) => a.Tick.CompareTo(b.Tick));
+                return list;
+            }
+        }
 
         public int DisplayTick => Playhead ?? Tick;
+        public bool IsOffline => Mode == ClientMode.Offline;
         public bool IsLive => Mode == ClientMode.Live && Playhead == null;
-        public bool IsReplayActive => Mode == ClientMode.Replay || Playhead != null;
+        /// <summary>Replay scrubbing OR offline demo playhead — both ignore live SSE world updates.</summary>
+        public bool IsReplayActive => Mode == ClientMode.Replay || Mode == ClientMode.Offline || Playhead != null;
 
         // ---- events (UI + 3D subscribe) ----
 
@@ -98,6 +152,7 @@ namespace AgentTown.Simulation
         public event Action OnDecisionsChanged;
         public event Action OnEventsChanged;
         public event Action OnSelectionChanged;
+        public event Action OnInteractionsChanged;
 
         // ---- lifecycle ----
 
@@ -126,6 +181,7 @@ namespace AgentTown.Simulation
             Mode = ClientMode.Live;
             RunId = "";
             Scenario = "town";
+            OfflinePackId = "";
             Status = "";
             Tick = 0;
             Hour = 0;
@@ -140,18 +196,25 @@ namespace AgentTown.Simulation
             tickCache.Clear();
             decisions.Clear();
             tickEvents.Clear();
+            activeInteractions.Clear();
+            offlineInteractionsByTick.Clear();
+            modifiers = new WorldModifiers();
+            metrics = null;
+            activeEvents = new List<WorldEvent>();
             Manifest = new RunManifest();
             selectedAgentId = null;
             trackedAgentId = null;
 
             SetStatusMessage("Session reset");
             NotifyPlaybackChanged();
+            OnInteractionsChanged?.Invoke();
         }
 
         /// <summary>Per-frame pump: drain SSE queue then advance auto-playback. Call from MonoBehaviour.Update.</summary>
         public void Update(float deltaTime)
         {
             sse.Poll();
+            PruneExpiredInteractions();
             UpdatePlayback(deltaTime);
         }
 
@@ -179,11 +242,150 @@ namespace AgentTown.Simulation
                 agentUnityPositions[pair.Key] = WireCoordinateTransform.ToUnity(wire);
             }
 
-            CacheSnapshot(snapshot.Tick, snapshot);
+            modifiers = snapshot.Modifiers ?? new WorldModifiers();
+            metrics = snapshot.Metrics;
+            activeEvents = snapshot.ActiveEvents != null
+                ? new List<WorldEvent>(snapshot.ActiveEvents)
+                : new List<WorldEvent>();
 
-            string modeLabel = IsReplayActive ? "Replay" : "Live";
+            CacheSnapshot(snapshot.Tick, snapshot);
+            SyncOfflineInteractionsForTick(snapshot.Tick);
+
+            string modeLabel = IsOffline
+                ? $"离线演示 · 无需后端 · {DemoPackIds.DisplayName(OfflinePackId)}"
+                : IsReplayActive ? "Replay" : "Live";
             SetStatusMessage($"{modeLabel} — Tick {Tick} (hour {Hour}) — {agents.Count} agents");
             OnSnapshotApplied?.Invoke();
+        }
+
+        /// <summary>
+        /// Enter client-local offline / demo mode: no REST/SSE, frames from
+        /// <see cref="OfflineDemoBuilder"/>. Shares <see cref="ApplySnapshot"/> and playhead
+        /// playback with Replay. Does not change backend API contracts.
+        /// </summary>
+        public void EnterOfflineDemo(OfflineDemoPack pack)
+        {
+            if (pack == null || pack.Frames == null || pack.Frames.Count == 0)
+            {
+                SetStatusMessage("离线演示失败：无可用帧");
+                return;
+            }
+
+            DisconnectStream();
+
+            Mode = ClientMode.Offline;
+            RunId = string.IsNullOrEmpty(pack.RunId) ? OfflineRunId : pack.RunId;
+            OfflinePackId = DemoPackIds.Normalize(pack.PackId);
+            Scenario = pack.Manifest?.Scenario ?? "town";
+            Status = "offline";
+            ticking = false;
+            playing = false;
+            PlaybackSpeed = 1f;
+            seekGeneration++;
+            playbackAccumulator = 0f;
+            agents = new Dictionary<string, SimAgentState>();
+            agentUnityPositions.Clear();
+            tickCache.Clear();
+            decisions.Clear();
+            tickEvents.Clear();
+            activeInteractions.Clear();
+            offlineInteractionsByTick.Clear();
+            modifiers = new WorldModifiers();
+            metrics = null;
+            activeEvents = new List<WorldEvent>();
+            Manifest = pack.Manifest ?? new RunManifest();
+            selectedAgentId = null;
+            trackedAgentId = null;
+
+            foreach (SimTickSnapshot frame in pack.Frames)
+            {
+                if (frame == null)
+                {
+                    continue;
+                }
+
+                CacheSnapshot(frame.Tick, frame);
+            }
+
+            if (pack.Interactions != null)
+            {
+                foreach (ActiveInteraction ix in pack.Interactions)
+                {
+                    if (ix == null)
+                    {
+                        continue;
+                    }
+
+                    if (!offlineInteractionsByTick.TryGetValue(ix.Tick, out List<ActiveInteraction> list))
+                    {
+                        list = new List<ActiveInteraction>();
+                        offlineInteractionsByTick[ix.Tick] = list;
+                    }
+
+                    list.Add(ix);
+                }
+            }
+
+            if (pack.Decisions != null)
+            {
+                foreach (SimDecision decision in pack.Decisions)
+                {
+                    if (decision != null)
+                    {
+                        decisions.Add(decision);
+                    }
+                }
+
+                while (decisions.Count > MaxDecisions)
+                {
+                    decisions.RemoveAt(decisions.Count - 1);
+                }
+            }
+
+            if (pack.Events != null)
+            {
+                foreach (SimTickEvent evt in pack.Events)
+                {
+                    if (evt != null)
+                    {
+                        tickEvents.Add(evt);
+                    }
+                }
+
+                while (tickEvents.Count > MaxTickEvents)
+                {
+                    tickEvents.RemoveAt(tickEvents.Count - 1);
+                }
+            }
+
+            int firstTick = pack.Frames[0].Tick;
+            int lastTick = pack.Frames[pack.Frames.Count - 1].Tick;
+            for (int i = 0; i < pack.Frames.Count; i++)
+            {
+                SimTickSnapshot frame = pack.Frames[i];
+                if (frame != null && frame.Tick > lastTick)
+                {
+                    lastTick = frame.Tick;
+                }
+            }
+
+            Playhead = firstTick;
+            NotifyPlaybackChanged();
+            OnDecisionsChanged?.Invoke();
+            OnEventsChanged?.Invoke();
+            OnSelectionChanged?.Invoke();
+            OnInteractionsChanged?.Invoke();
+
+            if (tickCache.TryGetValue(firstTick, out SimTickSnapshot first))
+            {
+                ApplySnapshot(first);
+            }
+
+            // ApplySnapshot overwrites Tick with the viewed frame; keep the demo tail for UI / playback.
+            Tick = lastTick;
+            string packLabel = DemoPackIds.DisplayName(OfflinePackId);
+            SetStatusMessage(
+                $"离线演示 · 无需后端 — {packLabel} — Tick {Playhead} / {Tick} — {agents.Count} agents");
         }
 
         // ---- run control (§5) ----
@@ -211,18 +413,31 @@ namespace AgentTown.Simulation
             tickCache.Clear();
             decisions.Clear();
             tickEvents.Clear();
+            activeInteractions.Clear();
+            offlineInteractionsByTick.Clear();
+            modifiers = new WorldModifiers();
+            metrics = null;
+            activeEvents = new List<WorldEvent>();
             Manifest = new RunManifest();
             NotifyPlaybackChanged();
+            OnInteractionsChanged?.Invoke();
 
             SetStatusMessage($"Run {RunId} created (tick {Tick})");
             OnSnapshotApplied?.Invoke();
 
             await BootstrapActiveRunAsync();
+            RememberLocalHistory(summary.Seed);
             return true;
         }
 
         public async Task<bool> AdvanceTickAsync()
         {
+            if (IsOffline)
+            {
+                SetStatusMessage("离线演示 — 无后端 Tick");
+                return false;
+            }
+
             if (string.IsNullOrEmpty(RunId))
             {
                 SetStatusMessage("No run — create a run first");
@@ -271,7 +486,7 @@ namespace AgentTown.Simulation
 
         public async Task<bool> PauseRunAsync()
         {
-            if (string.IsNullOrEmpty(RunId))
+            if (IsOffline || string.IsNullOrEmpty(RunId))
             {
                 return false;
             }
@@ -291,7 +506,7 @@ namespace AgentTown.Simulation
 
         public async Task<bool> ResumeRunAsync()
         {
-            if (string.IsNullOrEmpty(RunId))
+            if (IsOffline || string.IsNullOrEmpty(RunId))
             {
                 return false;
             }
@@ -307,6 +522,43 @@ namespace AgentTown.Simulation
             SetStatusMessage($"Run resumed (tick {result.CurrentTick})");
             NotifyPlaybackChanged();
             return true;
+        }
+
+        /// <summary>POST inject — God Mode. Offline returns false with a status hint.</summary>
+        public async Task<bool> InjectEventAsync(string eventType, string payloadJson = "{}")
+        {
+            if (IsOffline)
+            {
+                SetStatusMessage("离线演示 — 无法注入事件（需连接后端）");
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(RunId))
+            {
+                SetStatusMessage("No run — create a run first");
+                return false;
+            }
+
+            InjectSimulationEventResponse result = await rest.InjectEventAsync(RunId, eventType, payloadJson);
+            if (result == null)
+            {
+                SetStatusMessage($"Inject failed: {rest.LastError}");
+                return false;
+            }
+
+            SetStatusMessage($"已注入：{result.Title}（Tick {result.QueuedForTick} 生效）");
+            return true;
+        }
+
+        /// <summary>GET metrics series for the current run (optional HUD refresh).</summary>
+        public async Task<SimulationRunMetricsResponse> FetchMetricsAsync()
+        {
+            if (IsOffline || string.IsNullOrEmpty(RunId))
+            {
+                return null;
+            }
+
+            return await rest.GetMetricsAsync(RunId);
         }
 
         /// <summary>
@@ -336,6 +588,7 @@ namespace AgentTown.Simulation
 
             await BootstrapActiveRunAsync();
             await FetchLiveTickAsync(1);
+            RememberLocalHistory(Manifest?.Seed);
             return true;
         }
 
@@ -377,10 +630,30 @@ namespace AgentTown.Simulation
         public async Task GoLiveAsync()
         {
             seekGeneration++;
+            playbackAccumulator = 0f;
+            playing = false;
+
+            if (IsOffline)
+            {
+                // Offline has no live stream — jump to the latest cached demo frame.
+                int tail = HighestCachedTick();
+                if (tail >= MinPlaybackTick && tickCache.TryGetValue(tail, out SimTickSnapshot last))
+                {
+                    Playhead = tail;
+                    NotifyPlaybackChanged();
+                    ApplySnapshot(last);
+                }
+                else
+                {
+                    NotifyPlaybackChanged();
+                    SetStatusMessage("离线演示 — 无可用帧");
+                }
+
+                return;
+            }
+
             Mode = ClientMode.Live;
             Playhead = null;
-            playing = false;
-            playbackAccumulator = 0f;
             NotifyPlaybackChanged();
 
             if (string.IsNullOrEmpty(RunId))
@@ -404,6 +677,12 @@ namespace AgentTown.Simulation
         {
             if (string.IsNullOrEmpty(RunId))
             {
+                return;
+            }
+
+            if (IsOffline)
+            {
+                SeekOfflineTick(targetTick);
                 return;
             }
 
@@ -436,7 +715,7 @@ namespace AgentTown.Simulation
         {
             SetPlaying(false);
 
-            int tail = Tick;
+            int tail = IsOffline ? HighestCachedTick() : Tick;
             int current = Playhead ?? tail;
             int next = current + delta;
 
@@ -445,7 +724,18 @@ namespace AgentTown.Simulation
                 return;
             }
 
-            if (next >= tail)
+            if (next > tail)
+            {
+                if (IsOffline)
+                {
+                    return;
+                }
+
+                GoLive();
+                return;
+            }
+
+            if (!IsOffline && next >= Tick && Tick > 0)
             {
                 GoLive();
                 return;
@@ -471,6 +761,72 @@ namespace AgentTown.Simulation
             NotifyPlaybackChanged();
         }
 
+        /// <summary>
+        /// Offline / Replay: jump to the next story beat (interaction / world_event / vote),
+        /// skipping <c>sim.tick_started</c> / <c>sim.tick_ended</c>. Pauses briefly so the
+        /// cue is readable. Returns false when no later story tick exists.
+        /// Live scripted does not maintain a local story index — use Advance Tick instead.
+        /// </summary>
+        public bool SeekNextStoryTick()
+        {
+            if (!IsOffline && Mode != ClientMode.Replay && Playhead == null)
+            {
+                SetStatusMessage("下一故事仅用于 Offline / Replay（Live 请推进 Tick）");
+                return false;
+            }
+
+            int current = DisplayTick;
+            int? next = FindNextStoryTick(current);
+            if (next == null)
+            {
+                SetStatusMessage("已无后续故事节拍");
+                return false;
+            }
+
+            SetPlaying(false);
+            SeekTick(next.Value);
+            SetStatusMessage($"下一故事 — Tick {next.Value}");
+            return true;
+        }
+
+        /// <summary>
+        /// Next tick &gt; <paramref name="afterTick"/> that carries an interaction, world_event,
+        /// or vote (filters tick bookends). Exposed for EditMode tests.
+        /// </summary>
+        internal int? FindNextStoryTick(int afterTick)
+        {
+            int best = int.MaxValue;
+
+            foreach (KeyValuePair<int, List<ActiveInteraction>> pair in offlineInteractionsByTick)
+            {
+                if (pair.Key > afterTick && pair.Key < best && pair.Value != null && pair.Value.Count > 0)
+                {
+                    best = pair.Key;
+                }
+            }
+
+            for (int i = 0; i < tickEvents.Count; i++)
+            {
+                SimTickEvent evt = tickEvents[i];
+                if (evt == null || evt.Tick <= afterTick)
+                {
+                    continue;
+                }
+
+                if (!SimEventFilters.IsStoryBeat(evt.Type))
+                {
+                    continue;
+                }
+
+                if (evt.Tick < best)
+                {
+                    best = evt.Tick;
+                }
+            }
+
+            return best == int.MaxValue ? null : best;
+        }
+
         public void UpdatePlayback(float deltaTime)
         {
             if (!playing || string.IsNullOrEmpty(RunId))
@@ -487,14 +843,18 @@ namespace AgentTown.Simulation
 
             playbackAccumulator = 0f;
 
-            int tail = Tick;
+            int tail = IsOffline ? HighestCachedTick() : Tick;
             int current = Playhead ?? tail;
             int next = current + 1;
 
             if (next > tail)
             {
                 SetPlaying(false);
-                GoLive();
+                if (!IsOffline)
+                {
+                    GoLive();
+                }
+
                 return;
             }
 
@@ -537,6 +897,12 @@ namespace AgentTown.Simulation
                 return true;
             }
 
+            if (IsOffline)
+            {
+                SetStatusMessage($"离线演示 — 无 tick {tickNumber}");
+                return false;
+            }
+
             SimTickFrameResponse frame = await rest.GetTickSnapshotAsync(RunId, tickNumber);
             if (frame == null)
             {
@@ -555,9 +921,40 @@ namespace AgentTown.Simulation
             return true;
         }
 
+        private void SeekOfflineTick(int targetTick)
+        {
+            int tail = HighestCachedTick();
+            int clamped = Mathf.Clamp(targetTick, MinPlaybackTick, Mathf.Max(MinPlaybackTick, tail));
+            if (!tickCache.TryGetValue(clamped, out SimTickSnapshot cached))
+            {
+                SetStatusMessage($"离线演示 — 无 tick {clamped}");
+                return;
+            }
+
+            seekGeneration++;
+            Playhead = clamped;
+            NotifyPlaybackChanged();
+            ApplySnapshot(cached);
+            Tick = tail;
+        }
+
+        private int HighestCachedTick()
+        {
+            int max = 0;
+            foreach (int key in tickCache.Keys)
+            {
+                if (key > max)
+                {
+                    max = key;
+                }
+            }
+
+            return max;
+        }
+
         private void ConnectStream()
         {
-            if (string.IsNullOrEmpty(RunId))
+            if (string.IsNullOrEmpty(RunId) || IsOffline)
             {
                 return;
             }
@@ -570,17 +967,50 @@ namespace AgentTown.Simulation
 
         private void EnterReplay(int targetTick)
         {
-            Mode = ClientMode.Replay;
+            if (!IsOffline)
+            {
+                Mode = ClientMode.Replay;
+            }
+
             Playhead = targetTick;
+            if (!IsOffline)
+            {
+                activeInteractions.Clear();
+                OnInteractionsChanged?.Invoke();
+            }
+
             NotifyPlaybackChanged();
         }
 
         private void CacheSnapshot(int tickNumber, SimTickSnapshot snapshot) => tickCache[tickNumber] = snapshot;
 
-        private void SetStatusMessage(string message)
+        /// <summary>Public status line for boot / HUD (e.g.「正在加载小镇…」).</summary>
+        public void SetStatusMessage(string message)
         {
-            StatusMessage = message;
-            OnStatusChanged?.Invoke(message);
+            StatusMessage = message ?? "";
+            OnStatusChanged?.Invoke(StatusMessage);
+        }
+
+        /// <summary>Persist to local Run history after create / resume success (§9 UT-10).</summary>
+        private void RememberLocalHistory(int? seed)
+        {
+            if (string.IsNullOrEmpty(RunId))
+            {
+                return;
+            }
+
+            int? resolvedSeed = seed;
+            if ((!resolvedSeed.HasValue || resolvedSeed.Value == 0) && Manifest != null && Manifest.Seed != 0)
+            {
+                resolvedSeed = Manifest.Seed;
+            }
+
+            LocalRunHistory.Remember(
+                RunId,
+                scenario: string.IsNullOrEmpty(Scenario) ? "town" : Scenario,
+                seed: resolvedSeed,
+                lastTick: Tick,
+                status: Status);
         }
 
         private void NotifyPlaybackChanged() => OnPlaybackChanged?.Invoke();
@@ -625,7 +1055,11 @@ namespace AgentTown.Simulation
                     PushTickEvent(evt);
                     break;
                 case "sim.interaction":
+                    HandleInteraction(evt.Payload);
+                    PushTickEvent(evt);
+                    break;
                 case "sim.world_event":
+                    HandleWorldEvent(evt.Payload);
                     PushTickEvent(evt);
                     break;
                 default:
@@ -748,6 +1182,122 @@ namespace AgentTown.Simulation
             OnSnapshotApplied?.Invoke();
         }
 
+        private void HandleInteraction(JObject payload)
+        {
+            if (!InteractionModel.TryParseFromPayload(payload, Time.realtimeSinceStartup, persistent: false, out ActiveInteraction ix)
+                || ix == null)
+            {
+                return;
+            }
+
+            UpsertActiveInteraction(ix);
+            PushDecision(new SimDecision
+            {
+                Tick = ix.Tick,
+                AgentId = ix.InitiatorId,
+                Summary = ix.Summary,
+                ActionType = ix.Kind,
+            });
+        }
+
+        private void HandleWorldEvent(JObject payload)
+        {
+            if (payload?["modifiers"] is JObject modObj)
+            {
+                try
+                {
+                    WorldModifiers parsed = modObj.ToObject<WorldModifiers>(SimJson.Serializer);
+                    if (parsed != null)
+                    {
+                        modifiers = parsed;
+                        OnSnapshotApplied?.Invoke();
+                    }
+                }
+                catch (JsonException)
+                {
+                    // tolerate partial payloads
+                }
+            }
+        }
+
+        private void UpsertActiveInteraction(ActiveInteraction interaction)
+        {
+            if (interaction == null || string.IsNullOrEmpty(interaction.Id))
+            {
+                return;
+            }
+
+            activeInteractions[interaction.Id] = interaction;
+            OnInteractionsChanged?.Invoke();
+        }
+
+        private void SyncOfflineInteractionsForTick(int tick)
+        {
+            if (!IsOffline)
+            {
+                return;
+            }
+
+            // Keep cues through hold+fade so overlays can dwell then fade (speed-scaled).
+            // Worst case at 0.5×: hold≈5 + fade≈3 → look back ~8 ticks.
+            int lookback = 8;
+            activeInteractions.Clear();
+            for (int t = Mathf.Max(1, tick - lookback); t <= tick; t++)
+            {
+                if (!offlineInteractionsByTick.TryGetValue(t, out List<ActiveInteraction> list))
+                {
+                    continue;
+                }
+
+                for (int i = 0; i < list.Count; i++)
+                {
+                    ActiveInteraction ix = list[i];
+                    if (ix == null || string.IsNullOrEmpty(ix.Id))
+                    {
+                        continue;
+                    }
+
+                    float alpha = InteractionModel.OverlayAlpha(ix, tick, offline: true, PlaybackSpeed);
+                    if (alpha > 0.04f)
+                    {
+                        activeInteractions[ix.Id] = ix;
+                    }
+                }
+            }
+
+            OnInteractionsChanged?.Invoke();
+        }
+
+        private void PruneExpiredInteractions()
+        {
+            if (IsOffline || activeInteractions.Count == 0)
+            {
+                return;
+            }
+
+            float now = Time.realtimeSinceStartup;
+            var expired = new List<string>();
+            foreach (KeyValuePair<string, ActiveInteraction> pair in activeInteractions)
+            {
+                if (pair.Value != null && pair.Value.ExpiresAtRealtime < now)
+                {
+                    expired.Add(pair.Key);
+                }
+            }
+
+            if (expired.Count == 0)
+            {
+                return;
+            }
+
+            for (int i = 0; i < expired.Count; i++)
+            {
+                activeInteractions.Remove(expired[i]);
+            }
+
+            OnInteractionsChanged?.Invoke();
+        }
+
         private void PushDecision(SimDecision decision)
         {
             decisions.Insert(0, decision);
@@ -766,7 +1316,8 @@ namespace AgentTown.Simulation
                 Tick = PayloadInt(evt.Payload, "tick"),
                 Type = evt.Type,
                 AgentId = ExtractEventAgentId(evt),
-                Summary = evt.Type,
+                Summary = ExtractEventSummary(evt),
+                Detail = ExtractEventDetail(evt),
                 Timestamp = evt.Timestamp,
             });
 
@@ -778,22 +1329,210 @@ namespace AgentTown.Simulation
             OnEventsChanged?.Invoke();
         }
 
-        private static string ExtractEventAgentId(SimSseEvent evt)
+        /// <summary>Test hook: dispatch one live SSE envelope through the same path as the stream.</summary>
+        internal void IngestSseEvent(SimSseEvent evt) => HandleSseEvent(evt);
+
+        /// <summary>
+        /// Prefer payload summary / title / thought over the raw event type name so the
+        /// Events tab stays readable on Live SSE (Offline already writes Summary by hand).
+        /// </summary>
+        internal static string ExtractEventSummary(SimSseEvent evt)
         {
+            if (evt == null)
+            {
+                return "";
+            }
+
             JObject payload = evt.Payload;
+            if (payload == null)
+            {
+                return string.IsNullOrEmpty(evt.Type) ? "" : evt.Type;
+            }
+
+            switch (evt.Type)
+            {
+                case "sim.interaction":
+                {
+                    if (payload["interaction"] is JObject ix)
+                    {
+                        string summary = PayloadString(ix, "summary");
+                        if (!string.IsNullOrEmpty(summary))
+                        {
+                            return summary;
+                        }
+
+                        string kind = PayloadString(ix, "kind");
+                        if (!string.IsNullOrEmpty(kind))
+                        {
+                            return kind;
+                        }
+                    }
+
+                    break;
+                }
+                case "sim.world_event":
+                {
+                    if (payload["event"] is JObject worldEvt)
+                    {
+                        string title = PayloadString(worldEvt, "title");
+                        if (!string.IsNullOrEmpty(title))
+                        {
+                            return title;
+                        }
+
+                        string description = PayloadString(worldEvt, "description");
+                        if (!string.IsNullOrEmpty(description))
+                        {
+                            return description;
+                        }
+
+                        string kind = PayloadString(worldEvt, "kind");
+                        if (string.IsNullOrEmpty(kind))
+                        {
+                            kind = PayloadString(worldEvt, "event_type");
+                        }
+
+                        if (!string.IsNullOrEmpty(kind))
+                        {
+                            return kind;
+                        }
+                    }
+
+                    break;
+                }
+                case "sim.agent_action":
+                {
+                    if (payload["action"] is JObject action)
+                    {
+                        string thought = PayloadString(action, "thought");
+                        if (!string.IsNullOrEmpty(thought))
+                        {
+                            return thought;
+                        }
+
+                        string detail = PayloadString(action, "detail");
+                        if (!string.IsNullOrEmpty(detail))
+                        {
+                            return detail;
+                        }
+
+                        string actionType = PayloadString(action, "action");
+                        if (!string.IsNullOrEmpty(actionType))
+                        {
+                            return actionType;
+                        }
+                    }
+
+                    break;
+                }
+                case "sim.tick_started":
+                case "sim.tick_ended":
+                {
+                    int tick = PayloadInt(payload, "tick");
+                    if (tick > 0)
+                    {
+                        return evt.Type == "sim.tick_started"
+                            ? $"tick {tick} started"
+                            : $"tick {tick} ended";
+                    }
+
+                    break;
+                }
+            }
+
+            string top = PayloadString(payload, "summary");
+            if (!string.IsNullOrEmpty(top))
+            {
+                return top;
+            }
+
+            return string.IsNullOrEmpty(evt.Type) ? "" : evt.Type;
+        }
+
+        /// <summary>Multi-line transcript (or world-event description) for the Events tab body.</summary>
+        internal static string ExtractEventDetail(SimSseEvent evt)
+        {
+            if (evt?.Payload == null)
+            {
+                return "";
+            }
+
+            JObject payload = evt.Payload;
+            switch (evt.Type)
+            {
+                case "sim.interaction":
+                {
+                    if (payload["interaction"] is not JObject ixObj)
+                    {
+                        return "";
+                    }
+
+                    InteractionResult result;
+                    try
+                    {
+                        result = ixObj.ToObject<InteractionResult>(SimJson.Serializer);
+                    }
+                    catch (JsonException)
+                    {
+                        return "";
+                    }
+
+                    return InteractionModel.FormatTranscript(result?.Transcript);
+                }
+                case "sim.world_event":
+                {
+                    if (payload["event"] is not JObject worldEvt)
+                    {
+                        return "";
+                    }
+
+                    string title = PayloadString(worldEvt, "title");
+                    string description = PayloadString(worldEvt, "description");
+                    if (string.IsNullOrEmpty(description) || description == title)
+                    {
+                        return "";
+                    }
+
+                    return description;
+                }
+                default:
+                    return "";
+            }
+        }
+
+        internal static string ExtractEventAgentId(SimSseEvent evt)
+        {
+            JObject payload = evt?.Payload;
             if (payload == null)
             {
                 return "";
             }
 
+            if (payload["interaction"] is JObject interaction)
+            {
+                string initiator = PayloadString(interaction, "initiator_id");
+                if (!string.IsNullOrEmpty(initiator))
+                {
+                    return initiator;
+                }
+            }
+
             if (payload["action"] is JObject action)
             {
-                return PayloadString(action, "agent_id");
+                string fromAction = PayloadString(action, "agent_id");
+                if (!string.IsNullOrEmpty(fromAction))
+                {
+                    return fromAction;
+                }
             }
 
             if (payload["state"] is JObject state)
             {
-                return PayloadString(state, "agent_id");
+                string fromState = PayloadString(state, "agent_id");
+                if (!string.IsNullOrEmpty(fromState))
+                {
+                    return fromState;
+                }
             }
 
             return PayloadString(payload, "agent_id");

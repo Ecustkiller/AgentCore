@@ -12,7 +12,7 @@ namespace AgentTown.Simulation
     /// so exactly one axis is flipped — the <c>z</c> axis, per the glTF/Three.js →
     /// Unity convention — to avoid a mirrored layout.</para>
     ///
-    /// <para><b>Acceptance oracle</b>: 市场 wire <c>(24, 0, 0)</c> → Unity <c>(24, 0, 0)</c>.</para>
+    /// <para><b>Acceptance oracle</b>: 市场 wire <c>(36, 0, 0)</c> → Unity <c>(36, 0, 0)</c>.</para>
     /// </summary>
     public static class WireCoordinateTransform
     {

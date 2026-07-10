@@ -124,7 +124,7 @@ export function Sidebar() {
                   <span>{item.label}</span>
                   {item.route === "/simulation/town" ? (
                     <span className="text-xs font-normal text-muted-foreground">
-                      内嵌 3D 预览；推荐 AgentTown
+                      启动 AgentTown 3D 观测客户端
                     </span>
                   ) : null}
                 </span>
