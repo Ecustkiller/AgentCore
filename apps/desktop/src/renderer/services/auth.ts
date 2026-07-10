@@ -68,7 +68,6 @@ export async function login(
 export interface RegisterInput {
   username: string;
   password: string;
-  inviteCode: string;
   displayName?: string;
 }
 
@@ -77,7 +76,6 @@ export async function register(input: RegisterInput): Promise<AuthUser> {
     await api.post<BackendUser>("/v1/auth/register", {
       username: input.username,
       password: input.password,
-      invite_code: input.inviteCode,
       display_name: input.displayName || undefined,
     }),
   );

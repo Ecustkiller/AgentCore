@@ -12,20 +12,19 @@ import {
   ScrollText,
   Server,
   ShieldCheck,
-  Ticket,
   Users,
 } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
 /**
- * The console's sections: 概览 / 用户 / 邀请码 / 分析 / 系统 / 审计.
+ * The console's sections: 概览 / 用户 / 分析 / 系统 / 审计.
  * URL-routed via react-router for bookmarkable deep links.
+ * Invites UI is deprecated (open registration); API remains for legacy codes.
  */
 export type AdminTab =
   | "overview"
   | "users"
-  | "invites"
   | "conversations"
   | "analytics"
   | "system"
@@ -35,7 +34,6 @@ const NAV: { id: AdminTab; label: string; icon: LucideIcon; path: string }[] =
   [
     { id: "overview", label: "概览", icon: LayoutDashboard, path: "/overview" },
     { id: "users", label: "用户", icon: Users, path: "/users" },
-    { id: "invites", label: "邀请码", icon: Ticket, path: "/invites" },
     { id: "conversations", label: "对话", icon: MessageSquare, path: "/conversations/conversations" },
     { id: "analytics", label: "分析", icon: BarChart3, path: "/analytics/cost" },
     { id: "audit", label: "审计", icon: ScrollText, path: "/audit" },

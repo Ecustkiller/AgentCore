@@ -5968,8 +5968,6 @@ export interface components {
             display_name?: string | null;
             /** Email */
             email?: string | null;
-            /** Invite Code */
-            invite_code: string;
             /** Password */
             password: string;
             /** Username */

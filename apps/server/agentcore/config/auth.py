@@ -43,6 +43,10 @@ class AuthSettings(BaseModel):
 
     csrf_enabled: bool = True
 
+    # Public registration gate (开放注册). Default open; set REGISTRATION_OPEN=false
+    # to emergency-close signups without reverting to invite codes.
+    registration_open: bool = True
+
     # TOTP issuer shown in authenticator apps (admin MFA).
     mfa_issuer_name: str = "AgentCore Admin"
     # When false, admin login is password-only (session isolation still applies).

@@ -47,7 +47,7 @@ TEST_PASSWORD = "password123"
 
 async def register_and_login(
     client: httpx.AsyncClient,
-    invite_code: str,
+    invite_code: str | None,
     username: str,
     *,
     platform: str = "desktop",
@@ -55,11 +55,15 @@ async def register_and_login(
 ) -> str:
     """Register a product user and complete cookie login (product sessions have no MFA).
 
+    ``invite_code`` is ignored (open registration); kept so existing call sites
+    that still pass a minted code keep working.
+
     Returns the signed-in user's id from ``LoginResponse.user``.
     """
+    del invite_code  # open registration — invite no longer required
     r = await client.post(
         "/v1/auth/register",
-        json={"username": username, "password": password, "invite_code": invite_code},
+        json={"username": username, "password": password},
     )
     assert r.status_code == 201, r.text
     r = await client.post(

@@ -26,7 +26,6 @@ interface ReadinessResponse {
 export interface RegisterInput {
   username: string;
   password: string;
-  inviteCode: string;
   displayName?: string;
 }
 
@@ -38,7 +37,6 @@ export async function register(input: RegisterInput): Promise<User> {
     body: JSON.stringify({
       username: input.username,
       password: input.password,
-      invite_code: input.inviteCode,
       display_name: input.displayName || undefined,
     } satisfies Schemas["RegisterRequest"]),
   });

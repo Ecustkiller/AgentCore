@@ -8,11 +8,10 @@ _PW = "password123"
 
 
 @pytest.mark.csrf
-async def test_login_issues_csrf_and_allows_mutating_request(client, make_invite):
-    code = await make_invite("INV-CSRF-INT")
+async def test_login_issues_csrf_and_allows_mutating_request(client):
     await client.post(
         "/v1/auth/register",
-        json={"username": "csrfint", "password": _PW, "invite_code": code},
+        json={"username": "csrfint", "password": _PW},
     )
     login = await client.post(
         "/v1/auth/login",
@@ -31,13 +30,12 @@ async def test_login_issues_csrf_and_allows_mutating_request(client, make_invite
 
 
 @pytest.mark.csrf
-async def test_me_reissues_csrf_for_resumed_session(client, make_invite):
+async def test_me_reissues_csrf_for_resumed_session(client):
     """Session resumed via the access cookie (app cold start hits /me, not login):
     /me must hand back a usable CSRF token so the first mutating request succeeds."""
-    code = await make_invite("INV-CSRF-ME")
     await client.post(
         "/v1/auth/register",
-        json={"username": "csrfme", "password": _PW, "invite_code": code},
+        json={"username": "csrfme", "password": _PW},
     )
     # Login establishes the access cookie in the client jar; we deliberately ignore
     # the CSRF header it returns to mimic a client that has none yet.

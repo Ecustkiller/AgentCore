@@ -59,13 +59,9 @@ function AuditTarget({ row }: { row: AdminAuditLogLine }) {
 
   if (row.target_type === "invite") {
     return (
-      <Link
-        to="/invites"
-        className="font-mono text-xs text-primary underline-offset-2 hover:underline"
-        title={row.target_id}
-      >
+      <span className="font-mono text-xs text-muted-foreground" title={row.target_id}>
         {label}
-      </Link>
+      </span>
     );
   }
 

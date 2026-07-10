@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=100)
     password: str = Field(..., min_length=8, max_length=256)
-    invite_code: str = Field(..., min_length=1, max_length=64)
     display_name: str | None = Field(None, max_length=200)
     # Plain string for now (email is a reserved/optional profile field); upgrade
     # to validated EmailStr if/when email-validator is added as a dependency.

@@ -21,11 +21,10 @@ async def test_protected_endpoints_require_auth(client):
     assert (await client.get("/v1/auth/me")).status_code == 401
 
 
-async def test_register_login_me_flow(client, make_invite):
-    code = await make_invite("INV-1")
+async def test_register_login_me_flow(client):
     r = await client.post(
         "/v1/auth/register",
-        json={"username": "alice", "password": _PW, "invite_code": code},
+        json={"username": "alice", "password": _PW},
     )
     assert r.status_code == 201, r.text
     body = r.json()
@@ -40,12 +39,14 @@ async def test_register_login_me_flow(client, make_invite):
     assert r.status_code == 200 and r.json()["username"] == "alice"
 
 
-async def test_register_rejects_invalid_invite(client):
+async def test_register_closed_returns_403(client, monkeypatch):
+    monkeypatch.setattr(settings, "registration_open", False)
     r = await client.post(
         "/v1/auth/register",
-        json={"username": "bob", "password": _PW, "invite_code": "NOPE"},
+        json={"username": "bob", "password": _PW},
     )
-    assert r.status_code == 422
+    assert r.status_code == 403
+    assert "注册已关闭" in r.text
 
 
 async def test_conversation_crud_for_owner(client, make_invite):
@@ -164,7 +165,7 @@ async def test_refresh_cookie_path_carries_reverse_proxy_prefix(client, make_inv
     code = await make_invite("INV-PREFIX")
     r = await client.post(
         "/v1/auth/register",
-        json={"username": "pat", "password": _PW, "invite_code": code},
+        json={"username": "pat", "password": _PW},
     )
     assert r.status_code == 201, r.text
     r = await client.post("/v1/auth/login", json={"username": "pat", "password": _PW})
@@ -274,7 +275,7 @@ async def test_delete_account_anonymizes_and_frees_username(client, make_invite)
     code2 = await make_invite("INV-DEL-2")
     r = await client.post(
         "/v1/auth/register",
-        json={"username": "mona", "password": _PW, "invite_code": code2},
+        json={"username": "mona", "password": _PW},
     )
     assert r.status_code == 201, r.text
 
@@ -300,7 +301,7 @@ async def test_token_login_returns_tokens_and_authorizes_via_bearer(client, make
     code = await make_invite("INV-TOK-1")
     r = await client.post(
         "/v1/auth/register",
-        json={"username": "mobile1", "password": _PW, "invite_code": code},
+        json={"username": "mobile1", "password": _PW},
     )
     assert r.status_code == 201, r.text
 
@@ -333,7 +334,7 @@ async def test_token_refresh_rotates_via_body_and_detects_reuse(client, make_inv
     code = await make_invite("INV-TOK-2")
     await client.post(
         "/v1/auth/register",
-        json={"username": "mobile2", "password": _PW, "invite_code": code},
+        json={"username": "mobile2", "password": _PW},
     )
     tok = (
         await client.post("/v1/auth/token", json={"username": "mobile2", "password": _PW})
@@ -360,7 +361,7 @@ async def test_token_revoke_kills_refresh(client, make_invite):
     code = await make_invite("INV-TOK-3")
     await client.post(
         "/v1/auth/register",
-        json={"username": "mobile3", "password": _PW, "invite_code": code},
+        json={"username": "mobile3", "password": _PW},
     )
     tok = (
         await client.post("/v1/auth/token", json={"username": "mobile3", "password": _PW})
@@ -385,7 +386,7 @@ async def test_invite_endpoints_require_auth(client):
     assert (await client.get("/v1/auth/invites/stats")).status_code == 401
 
 
-async def test_admin_issues_invite_and_new_user_registers_with_it(client, make_admin):
+async def test_admin_issues_invite(client, make_admin):
     username, password = await make_admin()
     await login_admin(client, username, password)
 
@@ -393,16 +394,16 @@ async def test_admin_issues_invite_and_new_user_registers_with_it(client, make_a
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["status"] == "active" and body["code"]
-    code = body["code"]
 
     assert (await client.get("/v1/auth/invites")).json()["total"] == 1
 
-    # a brand-new user registers with the freshly minted code
+    # Open registration succeeds without consuming the invite.
     r = await client.post(
         "/v1/auth/register",
-        json={"username": "rookie", "password": _PW, "invite_code": code},
+        json={"username": "rookie", "password": _PW},
     )
     assert r.status_code == 201, r.text
+    assert (await client.get("/v1/auth/invites")).json()["data"][0]["status"] == "active"
 
 
 async def test_admin_batch_issues_invites(client, make_admin):
@@ -493,39 +494,45 @@ async def test_non_admin_cannot_access_invites(client, make_invite):
 # --- invite revocation (邀请码撤销) ---
 
 
-async def test_admin_revokes_invite_blocks_registration(client, make_admin):
+async def test_admin_revokes_invite(client, make_admin):
     username, password = await make_admin()
     await login_admin(client, username, password)
 
     body = (await client.post("/v1/auth/invites", json={})).json()
-    invite_id, code = body["id"], body["code"]
+    invite_id = body["id"]
 
     r = await client.post(f"/v1/auth/invites/{invite_id}/revoke")
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "revoked"
 
-    # the list reflects the new terminal status
     listed = (await client.get("/v1/auth/invites")).json()["data"]
     assert listed[0]["status"] == "revoked"
 
-    # a revoked code can no longer register an account
+    # Registration is open and no longer gated by invite status.
     r = await client.post(
         "/v1/auth/register",
-        json={"username": "toolate", "password": _PW, "invite_code": code},
+        json={"username": "toolate", "password": _PW},
     )
-    assert r.status_code == 422
+    assert r.status_code == 201, r.text
 
 
-async def test_revoke_used_invite_rejected(client, new_client, make_admin):
+async def test_revoke_used_invite_rejected(client, make_admin, session_factory):
+    from datetime import UTC, datetime
+
+    from agentcore.db.models import Invite
+
     username, password = await make_admin()
     await login_admin(client, username, password)
     body = (await client.post("/v1/auth/invites", json={})).json()
-    invite_id, code = body["id"], body["code"]
+    invite_id = body["id"]
 
-    async with new_client() as newcomer:
-        await register_and_login(newcomer, code, "consumer")
+    async with session_factory() as session:
+        invite = await session.get(Invite, invite_id)
+        assert invite is not None
+        invite.used_by = str(uuid4())
+        invite.used_at = datetime.now(UTC)
+        await session.commit()
 
-    # the code is consumed → revoke is refused (422)
     assert (await client.post(f"/v1/auth/invites/{invite_id}/revoke")).status_code == 422
 
 

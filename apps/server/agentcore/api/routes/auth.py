@@ -215,7 +215,6 @@ async def register(
     user = await service.register(
         username=body.username,
         password=body.password,
-        invite_code=body.invite_code,
         display_name=body.display_name,
         email=body.email,
     )

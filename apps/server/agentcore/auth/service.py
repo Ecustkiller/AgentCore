@@ -1,7 +1,7 @@
 """Authentication service: registration, login, token refresh, logout.
 
 Holds all auth business logic and policy:
-- invite-code gated registration (D6),
+- open registration gated by ``REGISTRATION_OPEN`` (invite codes deprecated),
 - brute-force lockout (failed-attempt counting + temporary lock),
 - refresh-token rotation with reuse detection (a presented token that was
   already rotated/revoked compromises the whole family -> revoke it).
@@ -22,6 +22,7 @@ from agentcore.config import settings
 from agentcore.core.errors import (
     AdminProductForbiddenError,
     AuthenticationError,
+    AuthorizationError,
     NotFoundError,
     ValidationError,
 )
@@ -89,12 +90,6 @@ class LoginResult:
     mfa_setup_required: bool = False
 
 
-def _invite_is_valid(invite: Invite | None, now: datetime) -> bool:
-    if invite is None or invite.used_at is not None or invite.revoked_at is not None:
-        return False
-    return not (invite.expires_at is not None and invite.expires_at <= now)
-
-
 class AuthService:
     def __init__(
         self,
@@ -116,19 +111,17 @@ class AuthService:
         *,
         username: str,
         password: str,
-        invite_code: str,
         display_name: str | None = None,
         email: str | None = None,
     ) -> User:
+        if not settings.registration_open:
+            raise AuthorizationError("注册已关闭")
+
         username = username.strip()
         if not username:
             raise ValidationError("请输入用户名")
         if len(password) < _MIN_PASSWORD_LENGTH:
             raise ValidationError(f"密码至少需要 {_MIN_PASSWORD_LENGTH} 个字符")
-
-        invite = await self._invites.get_by_code(invite_code.strip())
-        if not _invite_is_valid(invite, datetime.now(UTC)):
-            raise ValidationError("邀请码无效或已被使用")
 
         if await self._users.get_by_username(username) is not None:
             raise ValidationError("该用户名已被占用")
@@ -137,7 +130,6 @@ class AuthService:
             username=username, display_name=display_name or username, email=email
         )
         await self._credentials.create(user_id=user.user_id, password_hash=hash_password(password))
-        await self._invites.mark_used(invite.id, used_by=user.user_id)
         return user
 
     async def login(
@@ -279,7 +271,7 @@ class AuthService:
     # --- invites (admin) ---
 
     async def create_invite(self, *, created_by: str, expires_in_days: int | None = None) -> Invite:
-        """Mint a single-use invite code (D6). ``expires_in_days`` is optional."""
+        """Mint a single-use invite code (deprecated; registration no longer consumes codes)."""
         invites = await self.create_invites_batch(
             created_by=created_by,
             count=1,
@@ -328,7 +320,7 @@ class AuthService:
         return await self._invites.count_by_status(now=datetime.now(UTC))
 
     async def revoke_invite(self, *, invite_id: str) -> Invite:
-        """Retire an unused invite so it can no longer register an account (邀请码撤销).
+        """Retire an unused invite (邀请码撤销; registration no longer consumes codes).
 
         Only a still-active code can be revoked: a used one is already consumed and an
         already-revoked one is a no-op — both raise rather than silently succeed, so the

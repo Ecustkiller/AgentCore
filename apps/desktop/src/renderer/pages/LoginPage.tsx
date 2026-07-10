@@ -31,14 +31,12 @@ export function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const canSubmit =
     username.trim().length >= 3 &&
     password.length >= (mode === "register" ? 8 : 1) &&
-    (mode === "login" || inviteCode.trim().length > 0) &&
     !busy;
 
   const switchMode = (next: Mode) => {
@@ -58,7 +56,6 @@ export function LoginPage() {
         await register({
           username: username.trim(),
           password,
-          inviteCode: inviteCode.trim(),
           displayName: displayName.trim() || undefined,
         });
       }
@@ -69,7 +66,7 @@ export function LoginPage() {
       setError(
         errorMessage(
           err,
-          mode === "login" ? "登录失败，请重试" : "注册失败，请检查邀请码",
+          mode === "login" ? "登录失败，请重试" : "注册失败，请重试",
         ),
       );
     } finally {
@@ -126,21 +123,13 @@ export function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
           />
           {mode === "register" && (
-            <>
-              <input
-                className={inputClass}
-                placeholder="显示名（可选）"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                autoComplete="name"
-              />
-              <input
-                className={inputClass}
-                placeholder="邀请码"
-                value={inviteCode}
-                onChange={(e) => setInviteCode(e.target.value)}
-              />
-            </>
+            <input
+              className={inputClass}
+              placeholder="显示名（可选）"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              autoComplete="name"
+            />
           )}
 
           {error && <p className="text-sm text-destructive">{error}</p>}

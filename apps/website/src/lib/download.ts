@@ -97,14 +97,14 @@ export const SYSTEM_REQUIREMENTS: Record<PlatformId, string[]> = {
 
 export const WIN_INSTALL_STEPS = [
   "下载并运行安装程序，按向导完成安装。",
-  "首次启动使用邀请码注册并登录。",
+  "首次启动注册账号并登录。",
   "在设置 → 关于 可检查更新；已安装用户会自动收到新版本。",
 ];
 
 export const MAC_INSTALL_STEPS = [
   "下载 DMG，将 AgentCore 拖入「应用程序」文件夹。",
   "首次打开：在启动台或应用程序文件夹中右键 AgentCore →「打开」→ 确认（内测包未签名，勿直接双击）。",
-  "使用邀请码注册并登录；设置 → 关于 可检查更新（更新安装后可能需再次右键打开）。",
+  "注册账号并登录；设置 → 关于 可检查更新（更新安装后可能需再次右键打开）。",
 ];
 
 export const DOWNLOAD_PAGE_PATH = "/download" as const;

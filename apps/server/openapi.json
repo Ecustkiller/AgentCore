@@ -5526,12 +5526,6 @@
             ],
             "title": "Email"
           },
-          "invite_code": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Invite Code",
-            "type": "string"
-          },
           "password": {
             "maxLength": 256,
             "minLength": 8,
@@ -5547,8 +5541,7 @@
         },
         "required": [
           "username",
-          "password",
-          "invite_code"
+          "password"
         ],
         "title": "RegisterRequest",
         "type": "object"

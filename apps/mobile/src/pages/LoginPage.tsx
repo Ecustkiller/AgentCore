@@ -10,14 +10,12 @@ export function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const canSubmit =
     username.trim().length >= 3 &&
     password.length >= (mode === "register" ? 8 : 1) &&
-    (mode === "login" || inviteCode.trim().length > 0) &&
     !busy;
 
   function switchMode(next: Mode) {
@@ -35,7 +33,6 @@ export function LoginPage() {
         await register({
           username: username.trim(),
           password,
-          inviteCode: inviteCode.trim(),
           displayName: displayName.trim() || undefined,
         });
       }
@@ -47,7 +44,7 @@ export function LoginPage() {
           ? err.message
           : mode === "login"
             ? "登录失败，请重试"
-            : "注册失败，请检查邀请码",
+            : "注册失败，请重试",
       );
     } finally {
       setBusy(false);
@@ -96,22 +93,13 @@ export function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
           />
           {mode === "register" && (
-            <>
-              <input
-                placeholder="显示名（可选）"
-                value={displayName}
-                autoComplete="name"
-                disabled={busy}
-                onChange={(e) => setDisplayName(e.target.value)}
-              />
-              <input
-                placeholder="邀请码"
-                value={inviteCode}
-                autoComplete="off"
-                disabled={busy}
-                onChange={(e) => setInviteCode(e.target.value)}
-              />
-            </>
+            <input
+              placeholder="显示名（可选）"
+              value={displayName}
+              autoComplete="name"
+              disabled={busy}
+              onChange={(e) => setDisplayName(e.target.value)}
+            />
           )}
 
           {error && <div className="error">{error}</div>}

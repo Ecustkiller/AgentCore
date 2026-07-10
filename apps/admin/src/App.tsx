@@ -6,7 +6,6 @@ import { AnalyticsPage } from "@/pages/AnalyticsPage";
 import { AuditPage } from "@/pages/AuditPage";
 import { ConversationsPage } from "@/pages/ConversationsPage";
 import { ForcePasswordChangePage } from "@/pages/ForcePasswordChangePage";
-import { InvitesPage } from "@/pages/InvitesPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { MfaSetupPage } from "@/pages/MfaSetupPage";
 import { OverviewPage } from "@/pages/OverviewPage";
@@ -116,7 +115,6 @@ export function App() {
           <Route path="overview" element={<OverviewPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="users/:userId" element={<UsersPage />} />
-          <Route path="invites" element={<InvitesPage />} />
           <Route path="analytics" element={<Navigate to="/analytics/cost" replace />} />
           <Route path="analytics/:segment" element={<AnalyticsPage />} />
           <Route path="conversations" element={<Navigate to="/conversations/conversations" replace />} />
