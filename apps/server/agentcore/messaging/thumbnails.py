@@ -12,8 +12,6 @@ from __future__ import annotations
 
 import io
 
-from PIL import Image, UnidentifiedImageError
-
 from agentcore.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -30,7 +28,16 @@ def make_image_thumbnail(data: bytes) -> bytes | None:
     ``None`` means "serve the original inline": the bytes are not a decodable
     image, are an animated GIF, are already within :data:`THUMBNAIL_MAX_EDGE`, or
     failed to process. Transparency is preserved (RGBA → WebP with alpha).
+
+    Pillow is imported lazily so the messaging package can load without Pillow —
+    required for the sidecar import closure (Pillow is not in the sidecar subset).
     """
+    try:
+        from PIL import Image, UnidentifiedImageError
+    except ImportError:
+        logger.debug("messaging.thumbnail_pillow_missing")
+        return None
+
     try:
         with Image.open(io.BytesIO(data)) as img:
             fmt = (img.format or "").upper()
