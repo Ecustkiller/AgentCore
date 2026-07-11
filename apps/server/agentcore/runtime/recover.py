@@ -1,0 +1,273 @@
+"""Single recover primitive: journal projection → seed WaveScheduler → settle / redrive.
+
+Resume (plan_review / team_preview / ask_user) and crash redrive both route here.
+The journal remains the唯一事实源; :class:`~agentcore.runtime.turn_state.TurnState`
+is the sole projection entry.
+
+Backlog (not this iteration):
+- Write-tool idempotency keys — crash redrive may re-run in-flight workers
+  (``file_write`` overwrite semantics are accepted for now).
+- Cross-process Redis lease backend (Postgres this iteration).
+- retry-failed external semantics (new turn vs same turn) — internal projection
+  already uses ``TurnState.from_journal``; behaviour change is a separate decision.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, NamedTuple
+
+from agentcore.core.logging import get_logger
+from agentcore.core.types import ToolEffect
+from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
+from agentcore.runtime.events import (
+    EventSink,
+    checkpoint_resolved,
+    plan_review_resolved,
+    team_preview_resolved,
+)
+from agentcore.runtime.suspension import (
+    AskUserSuspension,
+    PlanReviewSuspension,
+    TeamPreviewSuspension,
+    TurnSuspension,
+)
+from agentcore.runtime.turn_state import TurnState
+from agentcore.tools.builtin.ask_user import ask_user_tool_result
+from agentcore.tools.builtin.ask_user.schema import option_label
+
+if TYPE_CHECKING:
+    from agentcore.db.models.runs import TurnLeaseRow
+    from agentcore.tools.builtin.delegate import DelegateTool
+
+logger = get_logger(__name__)
+
+
+class SettledSuspension(NamedTuple):
+    """Outcome of recover/settle — tool result text (+ optional terminal reply)."""
+
+    output: str
+    terminal_text: str | None
+
+
+async def recover_turn(
+    *,
+    state: TurnState,
+    sink: EventSink,
+    delegate_tool: DelegateTool,
+    execution_id: str,
+    suspension: TurnSuspension | None = None,
+    decision: CheckpointDecision | None = None,
+    note: str = "",
+    selected: list[str] | None = None,
+) -> SettledSuspension:
+    """Settle a resume decision or CONTINUE-redrive unfinished DAG from ``state``.
+
+    - With ``suspension`` + ``decision``: resume three kinds (behaviour-equivalent to
+      the former ``settle_resumed_suspension``).
+    - Without suspension (crash): ``decision`` defaults to CONTINUE; redrives unfinished
+      plan nodes with ``seed_completed=state.completed`` (completed nodes skipped).
+    """
+    if suspension is not None:
+        if decision is None:
+            raise ValueError("recover_turn resume requires decision")
+        return await _settle_resume(
+            suspension,
+            state=state,
+            decision=decision,
+            note=note,
+            selected=selected or [],
+            sink=sink,
+            delegate_tool=delegate_tool,
+            execution_id=execution_id,
+        )
+
+    decision = decision or CheckpointDecision.CONTINUE
+    plan = state.plan
+    if plan is None:
+        raise ValueError("recover_turn crash redrive requires a plan projection")
+    eid = state.execution_id or execution_id
+    seed = dict(state.completed)
+    logger.info(
+        "recover.crash_redrive",
+        execution_id=eid,
+        completed=len(seed),
+        unfinished=len(state.unfinished_run_ids),
+        decision=decision.value,
+    )
+    delegate_result = await delegate_tool.resume_plan(
+        plan,
+        seed,
+        decision=decision,
+        note=note,
+        checkpoint_run_ids=set(),
+        execution_id=eid,
+    )
+    return SettledSuspension(delegate_result.output, None)
+
+
+async def _settle_resume(
+    suspension: TurnSuspension,
+    *,
+    state: TurnState,
+    decision: CheckpointDecision,
+    note: str,
+    selected: list[str],
+    sink: EventSink,
+    delegate_tool: DelegateTool,
+    execution_id: str,
+) -> SettledSuspension:
+    """Kind-specific resume settle, projecting exclusively via ``state``."""
+    if isinstance(suspension, AskUserSuspension):
+        response = CheckpointResponse(decision=decision, note=note, selected=list(selected))
+        allowed = {
+            option_label(o) for q in suspension.questions for o in q.get("options", [])
+        }
+        response.selected = [s for s in response.selected if s in allowed]
+        sink.emit(
+            checkpoint_resolved(
+                checkpoint_id=suspension.checkpoint_id,
+                decision=response.decision.value,
+                note=response.note,
+                selected=response.selected,
+            )
+        )
+        from agentcore.runtime.coordination.session import (
+            CoordinationSession,
+            current_execution_id,
+            set_active_coordination,
+        )
+
+        snap = state.coordination
+        if snap is not None and snap.active:
+            session = CoordinationSession.from_snapshot(snap)
+            plan = state.plan
+            seed = dict(state.completed)
+            for rid in seed:
+                session.mark_worker_completed(rid)
+            unfinished = plan is not None and any(n.run_id not in seed for n in plan.nodes)
+            if snap.execution_id:
+                current_execution_id.set(snap.execution_id)
+                base_ctx = getattr(delegate_tool, "_base_tool_context", None)
+                if base_ctx is not None:
+                    base_ctx.execution_id = snap.execution_id
+            if unfinished and plan is not None:
+                from agentcore.runtime.coordination.host import try_start_coordination
+
+                try_start_coordination(
+                    delegate_tool,
+                    plan,
+                    execution_id=snap.execution_id,
+                    seed_completed=seed,
+                    finalize=False,
+                    seed_notes=None,
+                    complexity_hint="standard",
+                    call_idx=0,
+                    completion_criteria=None,
+                    coordinate=True,
+                    session=session,
+                )
+            else:
+                set_active_coordination(session)
+        result = ask_user_tool_result(response)
+        terminal = result.final_text if result.effect is ToolEffect.INTERACT else None
+        return SettledSuspension(result.output, terminal)
+
+    if isinstance(suspension, PlanReviewSuspension):
+        sink.emit(
+            plan_review_resolved(
+                checkpoint_id=suspension.checkpoint_id,
+                decision=decision.value,
+                note=note,
+            )
+        )
+        logger.info(
+            "plan_review.resolved",
+            checkpoint_id=suspension.checkpoint_id,
+            decision=decision.value,
+        )
+        seed_completed = dict(state.completed) or suspension.completed
+        plan = state.plan or suspension.plan
+        eid = state.execution_id or execution_id
+        delegate_result = await delegate_tool.resume_plan(
+            plan,
+            seed_completed,
+            decision=decision,
+            note=note,
+            checkpoint_run_ids=suspension.checkpoint_run_ids,
+            execution_id=eid,
+        )
+        return SettledSuspension(delegate_result.output, None)
+
+    if isinstance(suspension, TeamPreviewSuspension):
+        sink.emit(
+            team_preview_resolved(
+                checkpoint_id=suspension.checkpoint_id,
+                decision=decision.value,
+                note=note,
+            )
+        )
+        logger.info(
+            "team_preview.resolved",
+            checkpoint_id=suspension.checkpoint_id,
+            decision=decision.value,
+        )
+        seed_completed = dict(state.completed) or suspension.completed
+        plan = state.plan or suspension.plan
+        eid = state.execution_id or execution_id
+        # Preview hung before the coordinate fork; CONTINUE/ADJUST must arm the
+        # background scheduler (product default for ≥2 workers).
+        delegate_result = await delegate_tool.resume_plan(
+            plan,
+            seed_completed,
+            decision=decision,
+            note=note,
+            checkpoint_run_ids=suspension.checkpoint_run_ids,
+            execution_id=eid,
+            coordinate=True,
+        )
+        return SettledSuspension(delegate_result.output, None)
+
+    raise ValueError(f"unknown suspension kind: {suspension.kind!r}")
+
+
+async def recover_expired_lease(lease: TurnLeaseRow, state: TurnState) -> None:
+    """Background entry for the sweeper: orphan hot pending, then redrive unfinished DAG."""
+    from agentcore.core.types import new_id
+    from agentcore.runtime.events import EventSink
+    from agentcore.runtime.interaction_orphan import orphan_turn_before_recover
+    from agentcore.runtime.leases.service import release_turn_lease
+
+    message_id = lease.message_id
+    try:
+        # D6：先 orphan 热路 pending，再 recover 重驱
+        await orphan_turn_before_recover(
+            turn_id=message_id,
+            conversation_id=lease.conversation_id,
+            trace_id=getattr(lease, "trace_id", None),
+        )
+        sink = EventSink()
+        from agentcore.runtime.recover_hooks import build_crash_delegate_tool
+
+        delegate_tool = await build_crash_delegate_tool(lease, state, sink=sink)
+        if delegate_tool is None:
+            logger.warning(
+                "recover.lease_no_delegate",
+                message_id=message_id,
+            )
+            return
+        await recover_turn(
+            state=state,
+            sink=sink,
+            delegate_tool=delegate_tool,
+            execution_id=state.execution_id or new_id(),
+        )
+        logger.info("recover.lease_done", message_id=message_id)
+    except Exception as e:  # noqa: BLE001
+        logger.error(
+            "recover.lease_failed",
+            message_id=message_id,
+            error=str(e),
+            exc_info=True,
+        )
+    finally:
+        await release_turn_lease(message_id)

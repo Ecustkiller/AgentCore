@@ -27,7 +27,9 @@ namespace AgentTown.Town
         private const float ZoneY = 0.03f;
         private const float RoadY = 0.07f;
         private const float SlabThickness = 0.08f;
-        private const float MarkerHeight = 1.6f;
+        private const float MarkerDiscRadius = 2.2f;
+        private const float MarkerDiscY = 0.16f;
+        private const float RegionLabelHeight = 2.8f;
 
         private Material sharedMaterial;
         private Material asphaltMaterial;
@@ -89,10 +91,23 @@ namespace AgentTown.Town
 
         private NavMeshSurface BuildGroundAndNav()
         {
+            // Soft apron under / beyond the walkable grass so bird's-eye corners
+            // don't fall into the procedural skybox's dark lower hemisphere.
+            var fill = GameObject.CreatePrimitive(PrimitiveType.Plane);
+            fill.name = "TownHorizonFill";
+            fill.transform.SetParent(transform, false);
+            fill.transform.localPosition = new Vector3(0f, -0.06f, 0f);
+            fill.transform.localScale = new Vector3(
+                TownVisualLayout.GroundSize.x * 1.75f / 10f,
+                1f,
+                TownVisualLayout.GroundSize.y * 1.75f / 10f);
+            StripCollider(fill);
+            Paint(fill, TownPalette.HorizonFill);
+
             var ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
             ground.name = "TownGround";
             ground.transform.SetParent(transform, false);
-            // Unity Plane is 10×10 m; scale to the grass footprint (≈120×96).
+            // Unity Plane is 10×10 m; scale to the grass footprint.
             ground.transform.localScale = new Vector3(
                 TownVisualLayout.GroundSize.x / 10f, 1f, TownVisualLayout.GroundSize.y / 10f);
             Paint(ground, TownPalette.Grass);
@@ -481,11 +496,14 @@ namespace AgentTown.Town
 
         private void SpawnRegionMarker(Transform parent, RegionVisualDef region, Vector3 anchorUnity)
         {
-            var marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            // Ground-hugging disc (was a floating sphere) — a zone-tinted floor pad that
+            // anchors the label without a coloured ball hovering over the town.
+            var marker = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             marker.name = $"Region_{region.RegionId}";
             marker.transform.SetParent(parent, false);
-            marker.transform.position = new Vector3(anchorUnity.x, MarkerHeight, anchorUnity.z);
-            marker.transform.localScale = Vector3.one * 1.5f;
+            marker.transform.position = new Vector3(anchorUnity.x, MarkerDiscY, anchorUnity.z);
+            // Unity cylinder: radius 0.5, height 2 → a flat disc when the Y scale is tiny.
+            marker.transform.localScale = new Vector3(MarkerDiscRadius * 2f, 0.06f, MarkerDiscRadius * 2f);
             StripCollider(marker);
             Paint(marker, region.ZoneColor);
 
@@ -497,7 +515,7 @@ namespace AgentTown.Town
         {
             var go = new GameObject($"Label_{regionId}");
             go.transform.SetParent(parent, false);
-            go.transform.position = new Vector3(anchorUnity.x, MarkerHeight + 1.2f, anchorUnity.z);
+            go.transform.position = new Vector3(anchorUnity.x, RegionLabelHeight, anchorUnity.z);
             go.transform.localScale = Vector3.one * 0.04f;
 
             Canvas canvas = go.AddComponent<Canvas>();

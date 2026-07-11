@@ -45,6 +45,8 @@ class LLMRequest:
     tool_choice: Literal["auto", "none", "required"] = "auto"
     stream: bool = True
     scenario: str = "chat"
+    # None = omit (provider default). False/True → DeepSeek V4 ``thinking.type``.
+    thinking: bool | None = None
 
 
 @dataclass
@@ -110,6 +112,13 @@ class LLMChunk:
     usage: TokenUsage | None = None
     empty_diagnosis: str | None = None
     empty_raw_preview: str | None = None
+    # Control signals (mutually exclusive with normal deltas when set):
+    # stream_reset — transparent pre-commit retry; consumer must drop ephemeral
+    #   reasoning and reset the live view before the next attempt's chunks.
+    # aborted — post-commit disconnect; consumer keeps the partial and must not
+    #   treat the stream as a hard raise/discard.
+    stream_reset: bool = False
+    aborted: bool = False
 
 
 class LLMProvider(Protocol):

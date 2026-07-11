@@ -45,7 +45,7 @@ export default defineConfig(({ mode, command }) => {
   },
   renderer: {
     // electron-vite defaults root to src/renderer, so Vite's default publicDir would be
-    // src/renderer/public. Simulation GLBs live at apps/desktop/public/simulation/assets.
+    // src/renderer/public. Point at package-root public/ instead.
     publicDir: resolve(packageDir, "public"),
     // 与主进程 resolveApiBaseUrl 同一包根，避免 cwd 漂移导致主/渲染 API 源分叉。
     envDir: packageDir,

@@ -2,6 +2,7 @@ import { describeStreamError, streamErrorAction } from "@/lib/errors";
 import { loadLatestWindow } from "@/services/messages";
 import { attachConversation } from "@/services/streamConversation";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
+import { useExecutionStore } from "@/stores/execution";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import {
   RECONNECT_BANNER,
@@ -9,6 +10,31 @@ import {
   isTransportDrop,
   lastUserMessageOf,
 } from "./helpers";
+
+/**
+ * Clear-then-fold prep: drop every assistant after ``userMessageId`` from the
+ * conversation slice **and** wipe their process/execution slots so a full journal
+ * replay cannot double-fold tools / team graph (流式回复持久化 §3.6).
+ */
+function clearAfterUserForReplay(
+  conversationId: string,
+  userMessageId: string,
+): void {
+  const rt = getRuntime(conversationId);
+  const idx = rt.messages.findIndex((m) => m.id === userMessageId);
+  if (idx === -1) return;
+  const exec = useExecutionStore.getState();
+  for (const m of rt.messages.slice(idx + 1)) {
+    if (m.role !== "assistant") continue;
+    exec.clearExecution(m.id);
+    if (m.serverMessageId && m.serverMessageId !== m.id) {
+      exec.clearExecution(m.serverMessageId);
+    }
+  }
+  const store = useConversationStore.getState();
+  store.truncateAfter(userMessageId, conversationId);
+  store.createAssistantMessage(conversationId);
+}
 
 /**
  * Rejoin a turn whose live stream dropped mid-flight (实时重连续看 C1 · slice 1b).
@@ -32,10 +58,9 @@ export async function rejoinLiveTurn(conversationId: string): Promise<boolean> {
 
   const store = useConversationStore.getState();
   store.clearError(conversationId);
-  // Drop any partial assistant bubble so the replay rebuilds it cleanly, then open
-  // a fresh placeholder for instant feedback (message_start reuses it).
-  store.truncateAfter(lastUser.id, conversationId);
-  store.createAssistantMessage(conversationId);
+  // Drop any partial assistant bubble + process/execution so the full journal
+  // replay rebuilds cleanly (clear-then-fold · §3.6).
+  clearAfterUserForReplay(conversationId, lastUser.id);
 
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
@@ -78,14 +103,38 @@ export async function rejoinLiveTurn(conversationId: string): Promise<boolean> {
 }
 
 /**
- * On opening a conversation whose latest turn has no persisted reply yet, rejoin a
- * run that may still be live (实时重连续看 C1 · slice 1b — reopen the app / revisit
- * and 续看 it finish).
+ * Mark a dead-lease ghost (``usage.status=running`` but recovery has no live run
+ * and no pause) as interrupted so the bubble stops spinning and offers retry
+ * (流式回复持久化 P4).
+ */
+export function markGhostInterrupted(conversationId: string): void {
+  const store = useConversationStore.getState();
+  const last = getRuntime(conversationId).messages.at(-1);
+  if (!last || last.role !== "assistant" || last.status !== "running") return;
+  store.updateMessage(last.id, {
+    isStreaming: false,
+    status: "incomplete",
+    finishReason: "interrupted",
+    runs: last.runs
+      ? { ...last.runs, finishReason: "interrupted" }
+      : last.runs,
+  });
+  useConversationStore.getState().setGenerating(false, conversationId);
+  const exec = useExecutionStore.getState();
+  exec.clearExecution(last.id);
+  if (last.serverMessageId && last.serverMessageId !== last.id) {
+    exec.clearExecution(last.serverMessageId);
+  }
+}
+
+/**
+ * On opening a conversation, rejoin a live run or surface interrupted affordance
+ * (P4 unified hydrate · 实时重连续看 C1 · slice 1b).
  *
- * Unlike {@link rejoinLiveTurn} this has no partial bubble to reset (the reopened
- * transcript ends at the user message); it attaches bare, and the replay's
- * `message_start` opens the bubble — so a 204 (nothing live) is a clean no-op with
- * no flicker. A drop while attached offers a manual reconnect.
+ * - Last message is user + liveRunning → bare attach (``message_start`` opens bubble).
+ * - Last message is running assistant + liveRunning → clear-then-fold rejoin (overlay
+ *   partial already painted; attach replaces it without double-fold).
+ * - Last message is running assistant but no live / pause → ghost → interrupted.
  */
 export async function attachOnOpen(conversationId: string): Promise<void> {
   const store = useConversationStore.getState();

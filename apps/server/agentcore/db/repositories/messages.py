@@ -8,7 +8,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.types import new_id
-from agentcore.db.models import Conversation, Message, MessageBookmark, PausedTurnRow
+from agentcore.db.models import (
+    Conversation,
+    Message,
+    MessageBookmark,
+    PausedTurnRow,
+    TurnLeaseRow,
+)
 
 from ._audit_cascade import delete_audit_after, delete_audit_for_message
 from ._base import _ilike_pattern
@@ -86,28 +92,48 @@ class MessageRepository:
         metadata: dict | None = None,
         citations: list | None = None,
         trace_id: str | None = None,
+        merge: bool = False,
     ) -> Message:
         """Insert or update an assistant row keyed by ``message_id``.
 
         Used for pause snapshots (first write) and resume completion (update in place)
         so the same pipeline ``message_id`` never hits a unique-constraint error.
+
+        When ``merge=True`` (D7 / ConversationStore finalize), applies content-monotonic
+        and status-gate rules against any existing row before writing.
         """
         mid = message_id or new_id()
+        write_content = content
+        write_usage = metadata
+        write_reasoning = reasoning_content
+        if merge:
+            from agentcore.conversation.store.merge import (
+                merge_usage_status,
+                pick_monotonic_content,
+            )
+
+            existing = await self.get_by_id(mid, conversation_id=conversation_id)
+            if existing is not None:
+                write_content = pick_monotonic_content(existing.content, content)
+                write_reasoning = pick_monotonic_content(
+                    existing.reasoning_content, reasoning_content
+                )
+                write_usage = merge_usage_status(existing.usage, metadata)
         values: dict = {
             "id": mid,
             "conversation_id": conversation_id,
             "role": "assistant",
-            "content": content,
-            "reasoning_content": reasoning_content,
-            "usage": metadata,
+            "content": write_content,
+            "reasoning_content": write_reasoning,
+            "usage": write_usage,
             "trace_id": trace_id,
         }
         if citations is not None:
             values["citations"] = citations
         update_set: dict = {
-            "content": content,
-            "reasoning_content": reasoning_content,
-            "usage": metadata,
+            "content": write_content,
+            "reasoning_content": write_reasoning,
+            "usage": write_usage,
             "trace_id": trace_id,
         }
         if citations is not None:
@@ -129,7 +155,22 @@ class MessageRepository:
         message_id: str,
         content: str,
     ) -> None:
-        """Update only the assistant row's ``content`` (progressive checkpoint)."""
+        """Update only the assistant row's ``content`` (progressive checkpoint).
+
+        D7: refuse to shorten the body or touch a terminal-status row.
+        """
+        from agentcore.conversation.store.merge import should_apply_checkpoint_content
+
+        existing = await self.get_by_id(message_id, conversation_id=conversation_id)
+        if existing is None:
+            return
+        usage = existing.usage or {}
+        if not should_apply_checkpoint_content(
+            existing_content=existing.content,
+            existing_status=usage.get("status"),
+            incoming_content=content,
+        ):
+            return
         await self._session.execute(
             update(Message)
             .where(Message.id == message_id, Message.conversation_id == conversation_id)
@@ -150,6 +191,23 @@ class MessageRepository:
             update(Message)
             .where(Message.id == message_id, Message.conversation_id == conversation_id)
             .values(followups=followups)
+        )
+        await self._session.commit()
+
+    async def set_cost(
+        self, message_id: str, *, conversation_id: str, cost: dict
+    ) -> None:
+        """Backfill the turn's cost snapshot onto an existing assistant row (P2 DERIVED).
+
+        Same finalize-tail pattern as :meth:`set_followups`: the ledger write happens in the
+        same session as the assistant upsert, then this targeted UPDATE stamps the
+        ``message_end.cost`` shape (nano-USD components + currency) so reload footers do not
+        need a second round-trip. Scoped by conversation_id; a no-match id is a no-op.
+        """
+        await self._session.execute(
+            update(Message)
+            .where(Message.id == message_id, Message.conversation_id == conversation_id)
+            .values(cost=cost)
         )
         await self._session.commit()
 
@@ -177,7 +235,7 @@ class MessageRepository:
         Backs 克隆对话 (duplicate a conversation): the target is a freshly-created empty
         conversation, so this bulk-inserts fresh-id copies of the source's rows, preserving
         render order (``created_at`` copied verbatim) and content-level fields (role /
-        content / reasoning / usage / attachments / citations / followups / finish_reason).
+        content / reasoning / usage / attachments / citations / followups / cost).
 
         Intentionally NOT copied: ``trace_id`` (a copy is not a real turn — reusing it would
         double-link the original turn's logs), ``feedback`` (a rating belongs to the turn the
@@ -197,7 +255,7 @@ class MessageRepository:
                 attachments=list(r.attachments or []),
                 citations=list(r.citations or []),
                 followups=list(r.followups or []),
-                finish_reason=r.finish_reason,
+                cost=dict(r.cost) if r.cost else None,
                 created_at=r.created_at,
             )
             for r in rows
@@ -543,6 +601,12 @@ class MessageRepository:
                 PausedTurnRow.message_id.in_(dropped_ids),
             )
         )
+        await self._session.execute(
+            delete(TurnLeaseRow).where(
+                TurnLeaseRow.conversation_id == conversation_id,
+                TurnLeaseRow.message_id.in_(dropped_ids),
+            )
+        )
         # 消息收藏 pointers to any superseded message go with it (a regenerate drops
         # the old branch — its bookmarks would otherwise dangle).
         await self._session.execute(
@@ -578,6 +642,12 @@ class MessageRepository:
             delete(PausedTurnRow).where(
                 PausedTurnRow.message_id == message_id,
                 PausedTurnRow.conversation_id == conversation_id,
+            )
+        )
+        await self._session.execute(
+            delete(TurnLeaseRow).where(
+                TurnLeaseRow.message_id == message_id,
+                TurnLeaseRow.conversation_id == conversation_id,
             )
         )
         # Drop any 消息收藏 pointer to this message (else it would dangle).

@@ -436,10 +436,11 @@ class DebateBrief:
     risk_severities: dict[str, str] = field(default_factory=dict)
     factual_disputes: list[str] = field(default_factory=list)  # 关键事实分歧（AI 可帮判）
     value_disputes: list[str] = field(default_factory=list)  # 价值/偏好分歧（交用户）
-    # 胜负手（记分裁判 P2）：一句话点名【谁的哪个论点被 drop / 被证伪 / 无据】，据此定倾向——让
-    # leaning 由实际交锋记分驱动、可追溯，而非收场拍脑袋。空=未开启记分（零变化回退）。
+    # 胜负手（记分裁判 P2）：对抗形态下一句话点名【谁的哪个论点被 drop / 被证伪 / 无据】，
+    # 据此定倾向——让 leaning 由实际交锋记分驱动。圆桌不裁胜负（记分仅 momentum），decisive
+    # 可空。空=未开启记分 / 圆桌无胜负手（零变化回退）。
     decisive: str = ""
-    leaning: str = ""  # 主持人倾向性判断
+    leaning: str = ""  # 主持人倾向性判断（圆桌=观点光谱小结，非裁赢家）
     confidence: str = ""  # 置信度（含成立条件，如「若你更看重 X 则反向」）
     recommendation: str = ""  # 给用户的建议
     open_questions: list[str] = field(default_factory=list)  # 仅剩需你拍板的点
@@ -716,9 +717,9 @@ class ClosingRunner(Protocol):
 def tally_scores(rounds: Sequence[RoundResult]) -> dict[str, RoundScore]:
     """把各轮各方的 :class:`RoundScore` 累加成每方一个【累计分】（记分裁判 P2）。
 
-    三维逐轮相加、``penalties`` 全场并起（``note`` 累计无意义、留空）。某方某轮无记分则跳过。收场
-    :meth:`Moderator._brief` 据此让 leaning / decisive 与实际交锋记分对齐（净分更高 / 罚分更少的一方
-    更站得住），而非收场一次性拍脑袋。无任何记分（未开启 P2）返回空 dict——简报逐字回退，零变化。
+    三维逐轮相加、``penalties`` 全场并起（``note`` 累计无意义、留空）。某方某轮无记分则跳过。
+    对抗形态下收场简报据此让 leaning / decisive 与交锋对齐；圆桌仅作 momentum 展示、不驱动
+    leaning。无任何记分（未开启 P2）返回空 dict——简报逐字回退，零变化。
     """
     tally: dict[str, RoundScore] = {}
     for rr in rounds:

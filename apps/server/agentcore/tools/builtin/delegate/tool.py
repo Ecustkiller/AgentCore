@@ -41,6 +41,16 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _has_wave_boundary_features(tasks_raw: list[Any]) -> bool:
+    """True when any task needs BIND / CHECKPOINT / DAG wave-boundary machinery."""
+    for task in tasks_raw:
+        if not isinstance(task, dict):
+            continue
+        if task.get("depends_on") or task.get("checkpoint_after") or task.get("bind_after_deps"):
+            return True
+    return False
+
+
 def _should_auto_light_delegate(tasks_raw: list[Any]) -> bool:
     """True when a single dependency-free worker needs no multi-agent coordination."""
     if len(tasks_raw) != 1:
@@ -48,9 +58,7 @@ def _should_auto_light_delegate(tasks_raw: list[Any]) -> bool:
     task = tasks_raw[0]
     if not isinstance(task, dict):
         return False
-    if task.get("depends_on"):
-        return False
-    return not (task.get("checkpoint_after") or task.get("bind_after_deps"))
+    return not _has_wave_boundary_features([task])
 
 
 # Cap on how many nodes `delegate.started` lists by name/task — a big fan-out shouldn't
@@ -80,7 +88,7 @@ class DelegateTool:
         session_saver: SessionSaver | None = None,
         conversation_id: str | None = None,
         registry: ClientRequestBridge | None = None,
-        checkpoint_timeout_seconds: float = 0.0,
+        checkpoint_timeout_seconds: float | None = None,
         checkpoint_enabled: bool = False,
         message_id: str | None = None,
         suspension_saver: SuspensionSaver | None = None,
@@ -203,6 +211,13 @@ class DelegateTool:
         if "complexity_hint" not in arguments and _should_auto_light_delegate(tasks_raw):
             complexity_hint = "light"
             logger.debug("delegate.complexity_hint_inferred", hint="light")
+        elif complexity_hint == "light" and _has_wave_boundary_features(tasks_raw):
+            # 显式 light 与 DAG/波边界字段并存时忽略 light，避免关掉 on_boundary。
+            complexity_hint = "standard"
+            logger.debug(
+                "delegate.complexity_hint_ignored",
+                reason="wave_boundary_features",
+            )
         # 未显式设置时默认授予委派能力（depth 上限由 executor 执行）
         for task in tasks_raw:
             if isinstance(task, dict) and "can_delegate" not in task:
@@ -365,6 +380,7 @@ class DelegateTool:
         note: str,
         checkpoint_run_ids: set[str],
         execution_id: str,
+        coordinate: bool = False,
     ) -> ToolResult:
         if decision is CheckpointDecision.STOP:
             return await finalize_stopped(self, plan, seed_completed)
@@ -381,15 +397,16 @@ class DelegateTool:
             decision=decision.value,
             nodes=len(plan.nodes),
         )
-        # coordinate=False 恒真且正确，非漏配：plan_review/team_preview 挂起帧只可能出自
-        # 经典（非协调）路径——协调 gate（should_enter_coordination）在 preview/波边界
-        # checkpoint 之前就臂起后台协调并 return（drive.py），协调态下波边界暂停只化作
-        # BOUNDARY_YIELD 协调事件（host.py）、绝不生成 TurnSuspension。故被 resume 的
-        # plan_review/team_preview 帧按定义即经典 run，续跑保持经典。协调 run 仅经 ask_user
-        # 挂起，其 resume 在 settle.py 重建 CoordinationSession。
+        # plan_review：仅经典路径 durable 挂起（协调态波边界只发 BOUNDARY_YIELD），续跑保持
+        # coordinate=False。team_preview：挂在 coordinate fork **之前**，开做后续跑须默认
+        # 臂后台（coordinate=True）；显式经典由调用方传 coordinate=False。
         return await drive(
-            self, plan, execution_id=execution_id, seed_completed=seed_completed, finalize=False,
-            coordinate=False,
+            self,
+            plan,
+            execution_id=execution_id,
+            seed_completed=seed_completed,
+            finalize=False,
+            coordinate=coordinate,
         )
 
     async def replan(self, arguments: dict[str, Any]) -> ToolResult:

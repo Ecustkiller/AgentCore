@@ -3,7 +3,8 @@
 A worker's product is accepted only if it satisfies its node's delivery spec
 (:class:`Deliverable`). 阶段2 第一刀只做「机械校验」——看产出的*形*而非*质*：非空（系统
 兜底，始终生效）、最短/最长长度、必含关键词、必备小标题、以及（声明
-``output_format="json"`` 时）能否解析为 JSON。判「写得好不好」的语义裁判（额外一次 LLM
+``output_format="json"`` 时）能否解析为 JSON。``Deliverable.output_schema`` 为阶段2 预留位，
+本函数**不**校验（亦无 contract schema 入口）。判「写得好不好」的语义裁判（额外一次 LLM
 调用）留作后续增强。
 
 校验的后续处置（带反馈返工 / 按 ``strict`` 决定硬退或软提醒）在执行器里，本模块只产出结论

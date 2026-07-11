@@ -88,8 +88,8 @@ async def test_upsert_inserts_then_conflict_updates(session_factory):
 
 
 async def test_save_load_bridge_round_trips(session_factory, monkeypatch):
-    # The bridge uses async_session_factory directly → repoint it at the test schema.
-    monkeypatch.setattr(persist_mod, "async_session_factory", session_factory)
+    # The bridge uses telemetry_session_factory → repoint it at the test schema.
+    monkeypatch.setattr(persist_mod, "telemetry_session_factory", session_factory)
     cid = str(uuid4())
     session = _session("del_y_1", "最终产出", recall=2)
 
@@ -114,7 +114,7 @@ async def test_save_load_bridge_round_trips(session_factory, monkeypatch):
 
 
 async def test_load_miss_returns_none(session_factory, monkeypatch):
-    monkeypatch.setattr(persist_mod, "async_session_factory", session_factory)
+    monkeypatch.setattr(persist_mod, "telemetry_session_factory", session_factory)
     assert await persist_mod.load_run_session("nope_never_saved") is None
 
 

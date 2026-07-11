@@ -38,10 +38,12 @@ from agentcore.runtime.runs.session import RunSession
 logger = get_logger(__name__)
 
 # Durable-roster persistence callbacks (留人 跨进程落盘 P3), implemented by the
-# DB-aware caller (conversation/service.py) and plumbed through the pipeline to
+# DB-aware caller (conversation/turn_runner.py) and plumbed through the pipeline to
 # delegate / revise so the tools and pipeline stay DB-unaware. ``SessionSaver``
-# write-throughs a finished / revised session; ``SessionLoader`` rehydrates one by
-# run_id on an in-memory roster miss. Both optional — absent ⇒ in-memory-only (P2).
+# write-throughs a finished / revised session (pipeline wraps it in
+# ``SessionRosterWriter``: schedule on the hot path, flush at turn end); ``SessionLoader``
+# rehydrates one by run_id on an in-memory roster miss. Both optional — absent ⇒
+# in-memory-only (P2).
 SessionSaver = Callable[[RunSession], Awaitable[None]]
 SessionLoader = Callable[[str], Awaitable[RunSession | None]]
 

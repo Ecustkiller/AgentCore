@@ -26,8 +26,8 @@ async def _seed_audit_rows(session_factory, *, user_id: str, conversation_id: st
 
     import agentcore.runtime.audit.recorder as rec_mod
 
-    original = rec_mod.async_session_factory
-    rec_mod.async_session_factory = session_factory
+    original = rec_mod.telemetry_session_factory
+    rec_mod.telemetry_session_factory = session_factory
     recorder, token = bind_recorder(
         user_id=user_id,
         conversation_id=conversation_id,
@@ -85,7 +85,7 @@ async def _seed_audit_rows(session_factory, *, user_id: str, conversation_id: st
         await recorder.flush()
     finally:
         current_audit_recorder.reset(token)
-        rec_mod.async_session_factory = original
+        rec_mod.telemetry_session_factory = original
     return plan
 
 

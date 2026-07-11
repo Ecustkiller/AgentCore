@@ -66,16 +66,18 @@ export function AgentNodeCardFace({
           : "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60"
       }`}
     >
-      {p.revisionFace && (
+      {p.revisionBadge && (
         <span
           className={`absolute -right-1.5 -top-1.5 z-10 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-medium shadow-sm ring-2 ring-card ${graphBadgeMuted}`}
-          title={`热修修订 ${p.revisionFace}`}
+          title={p.revisionBadge.title}
         >
-          <PencilLine size={10} className="shrink-0" />
-          {p.revisionFace}
+          {p.revisionBadge.kind === "hotfix" && (
+            <PencilLine size={10} className="shrink-0" />
+          )}
+          {p.revisionBadge.label}
         </span>
       )}
-      {p.handoffFace && !p.revisionFace && (
+      {p.handoffFace && !p.revisionBadge && (
         <span
           className={`absolute -right-1.5 -top-1.5 z-10 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-medium shadow-sm ring-2 ring-card ${graphBadgeMuted}`}
           title="已由新队员接手"
@@ -317,6 +319,13 @@ function AgentNodeActivity({
         <span className="ml-0.5 inline-block animate-pulse text-primary">
           ▋
         </span>
+      </p>
+    );
+  }
+  if (showIdleTask && p.revisionFaceHint) {
+    return (
+      <p className="mt-2 line-clamp-2 text-xs leading-snug text-muted-foreground/70">
+        {p.revisionFaceHint}
       </p>
     );
   }

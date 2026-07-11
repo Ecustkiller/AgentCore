@@ -15,6 +15,7 @@ from agentcore.runtime.events.journal_config import (
     _JOURNAL_SURFACE_TYPES,
     cap_process_result,
 )
+from agentcore.runtime.events.stream_checkpointer import StreamCheckpointer
 from agentcore.runtime.events.types import EventType, SSEEvent
 from agentcore.runtime.facts import Fact, record_turn_fact
 
@@ -31,8 +32,6 @@ logger = get_logger(__name__)
 class EventSink:
     """Async queue bridging execution (producer) and SSE (consumer)."""
 
-    _checkpoint_interval: float = 10.0
-
     def __init__(
         self,
         *,
@@ -40,7 +39,7 @@ class EventSink:
         message_id: str | None = None,
     ) -> None:
         self._queue: asyncio.Queue[SSEEvent | None] = asyncio.Queue()
-        self._persist_barriers: asyncio.Queue[asyncio.Future[None] | None] = asyncio.Queue()
+        self._persist_barriers: asyncio.Queue[asyncio.Future[int | None] | None] = asyncio.Queue()
         self._closed = False
         self._detached = False
         self._history: list[SSEEvent] = []
@@ -50,12 +49,9 @@ class EventSink:
         self._has_tool = False
         self._conversation_id = conversation_id
         self._message_id = message_id
-        self._checkpoint_task: asyncio.Task[None] | None = None
-        self._checkpoint_inflight: asyncio.Task[None] | None = None
-        self._last_checkpointed_content: str | None = None
-        self._captain_run_id: str | None = None
+        self._checkpointer: StreamCheckpointer | None = None
         if conversation_id and message_id:
-            self._try_start_checkpoint_loop()
+            self._try_start_stream_checkpointer()
 
     def bind_content_checkpoint(
         self,
@@ -63,83 +59,24 @@ class EventSink:
         conversation_id: str,
         message_id: str,
     ) -> None:
-        """Wire progressive content persistence for this turn's assistant row."""
+        """Wire stream-segment durability for this turn's assistant row (P1).
+
+        Name kept for call-site stability; the 10s ``messages.content`` checkpoint
+        loop is retired in favour of ``StreamCheckpointer`` → ``turn_stream_state``.
+        """
         self._conversation_id = conversation_id
         self._message_id = message_id
-        self._try_start_checkpoint_loop()
+        self._try_start_stream_checkpointer()
 
-    def _try_start_checkpoint_loop(self) -> None:
-        if self._checkpoint_task is not None or self._closed:
+    def _try_start_stream_checkpointer(self) -> None:
+        if self._checkpointer is not None or self._closed or not self._message_id:
             return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return
-        self._checkpoint_task = loop.create_task(self._checkpoint_loop())
-
-    async def _checkpoint_loop(self) -> None:
-        try:
-            while not self._closed:
-                await asyncio.sleep(self._checkpoint_interval)
-                if self._closed:
-                    break
-                await self._do_checkpoint()
-        except asyncio.CancelledError:
-            pass
-
-    async def _do_checkpoint(self) -> None:
-        if not self._conversation_id or not self._message_id:
-            return
-        content = self.streamed_content()
-        if content == self._last_checkpointed_content:
-            return
-        try:
-            from agentcore.db.base import async_session_factory
-            from agentcore.db.repositories import MessageRepository
-
-            async with async_session_factory() as session:
-                await MessageRepository(session).update_assistant_content(
-                    conversation_id=self._conversation_id,
-                    message_id=self._message_id,
-                    content=content,
-                )
-            self._last_checkpointed_content = content
-        except Exception as e:
-            logger.warning(
-                "chat.content_checkpoint_failed",
-                conversation_id=self._conversation_id,
-                message_id=self._message_id,
-                error=str(e),
-            )
-
-    def checkpoint_now(self) -> None:
-        """Schedule an immediate best-effort content checkpoint (non-blocking)."""
-        if not self._conversation_id or not self._message_id or self._closed:
-            return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return
-        if self._checkpoint_inflight is not None and not self._checkpoint_inflight.done():
-            return
-        self._checkpoint_inflight = loop.create_task(self._do_checkpoint())
-
-    def _maybe_checkpoint_on_worker_terminal(self, event: SSEEvent) -> None:
-        t = event.type
-        if t == EventType.RUN_STARTED and event.payload.get("kind") == "captain":
-            self._captain_run_id = event.payload.get("run_id")
-            return
-        if t == EventType.RUN_COMPLETED:
-            if event.payload.get("role") != "captain":
-                self.checkpoint_now()
-        elif t == EventType.RUN_FAILED:
-            run_id = event.payload.get("run_id")
-            if run_id and run_id != self._captain_run_id:
-                self.checkpoint_now()
+        self._checkpointer = StreamCheckpointer(turn_id=self._message_id)
+        self._checkpointer.start()
 
     def emit(self, event: SSEEvent) -> None:
         if not self._closed:
-            persist_future: asyncio.Future[None] | None = None
+            persist_future: asyncio.Future[int | None] | None = None
             if event.type in _JOURNAL_EVENT_TYPES:
                 self._journal.append(
                     {
@@ -157,7 +94,8 @@ class EventSink:
                 )
             self._accumulate_process(event)
             self._record_history(event)
-            self._maybe_checkpoint_on_worker_terminal(event)
+            if self._checkpointer is not None:
+                self._checkpointer.observe(event)
             if not self._detached:
                 self._queue.put_nowait(event)
                 self._persist_barriers.put_nowait(persist_future)
@@ -338,6 +276,23 @@ class EventSink:
             step.get("text", "") for step in self._process if step.get("kind") == "content"
         )
 
+    def streamed_reasoning(self) -> str:
+        """CEO thinking text accumulated so far (process ``reasoning`` steps)."""
+        return "".join(
+            step.get("text", "") for step in self._process if step.get("kind") == "reasoning"
+        )
+
+    def stream_memory_snapshot(self) -> dict[str, str]:
+        """In-memory stream-channel texts (for error/FAILED salvage merge)."""
+        if self._checkpointer is None:
+            return {}
+        return self._checkpointer.memory_snapshot()
+
+    async def flush_stream_state(self) -> None:
+        """Best-effort flush of dirty stream segments (call before turn收口)."""
+        if self._checkpointer is not None:
+            await self._checkpointer.flush()
+
     def captain_context(self) -> list[dict[str, Any]] | None:
         from agentcore.runtime.runs.types import RunKind
 
@@ -367,9 +322,14 @@ class EventSink:
     def close(self) -> None:
         if not self._closed:
             self._closed = True
-            if self._checkpoint_task is not None:
-                self._checkpoint_task.cancel()
-                self._checkpoint_task = None
+            if self._checkpointer is not None:
+                # Schedule final flush without blocking close (SSE consumer may still drain).
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self._checkpointer.close())
+                except RuntimeError:
+                    pass
+                self._checkpointer = None
             self._queue.put_nowait(None)
             self._persist_barriers.put_nowait(None)
 
@@ -379,7 +339,9 @@ class EventSink:
             return None
         barrier = await self._persist_barriers.get()
         if barrier is not None:
-            await barrier
+            allocated = await barrier
+            if allocated is not None:
+                event.seq = allocated
         return event
 
     async def __aiter__(self):

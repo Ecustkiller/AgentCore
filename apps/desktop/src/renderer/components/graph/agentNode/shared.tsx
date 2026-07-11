@@ -38,6 +38,15 @@ export interface AgentNodeData {
   isSubtask?: boolean;
   isRevision?: boolean;
   revision?: number;
+  /** 真·多轮辩论轮次（1-based；0 = 非多轮）。与侧栏 RunRevisionChain 同源。 */
+  round?: number;
+  /** 辩论配对组（`debate:*`）；与 stance 一起判定辩手 / 续轮。 */
+  group?: string | null;
+  /**
+   * 热修 V2+ 改点摘要：来自 `run_context` channel=`revision` 的 body
+   *（定向唤回反馈）。缺省时卡片面回退到继承的原 task。
+   */
+  revisionSummary?: string | null;
   revised?: PlanRevisionKind | null;
   /** 回落换人：接手的原 run id。 */
   replacesRunId?: string | null;
@@ -177,6 +186,76 @@ export function revisionVersionBadge(
   return `v${revision}`;
 }
 
+const DEBATE_GROUP_PREFIX = "debate:";
+
+/** 与 {@link isDebateParticipantRun} 同判定：stance 或 group=`debate:*`。 */
+export function isDebateAgentNode(
+  d: Pick<AgentNodeData, "stance" | "group">,
+): boolean {
+  return (
+    d.stance != null || (d.group?.startsWith(DEBATE_GROUP_PREFIX) ?? false)
+  );
+}
+
+/** 从 `run_context` 的 revision 通道抽出改点正文（唤回原因）。 */
+export function revisionFeedbackSummary(
+  blocks:
+    | ReadonlyArray<{ channel: string; body: string }>
+    | null
+    | undefined,
+): string | null {
+  if (!blocks?.length) return null;
+  const block = blocks.find((b) => b.channel === "revision");
+  const text = block?.body?.trim().replace(/\s+/g, " ");
+  return text || null;
+}
+
+/** 热修 V2 卡片面一行：优先「按指示：改点」，避免只重复原 task。 */
+export function revisionFaceHint(
+  summary: string | null | undefined,
+): string | null {
+  if (!summary) return null;
+  return `按指示：${summary}`;
+}
+
+export type RevisionBadgeKind = "hotfix" | "debate";
+
+export interface RevisionBadgePresentation {
+  kind: RevisionBadgeKind;
+  /** 角标可见文案：`v2` 或 `第 2 轮`。 */
+  label: string;
+  /** tooltip / title。 */
+  title: string;
+}
+
+/**
+ * 协作图修订角标：热修 = 铅笔 + vN（「热修修订」）；辩论续轮 =「第 N 轮」
+ *（与侧栏 RunRevisionChain 一致）。v1 / 非修订不挂角标。
+ */
+export function buildRevisionBadge(opts: {
+  isRevision?: boolean;
+  revision?: number;
+  round?: number;
+  isDebate: boolean;
+}): RevisionBadgePresentation | null {
+  if (!opts.isRevision || !opts.revision || opts.revision <= 1) return null;
+  if (opts.isDebate) {
+    const n =
+      opts.round && opts.round > 0 ? opts.round : opts.revision;
+    return {
+      kind: "debate",
+      label: `第 ${n} 轮`,
+      title: `第 ${n} 轮`,
+    };
+  }
+  const v = `v${opts.revision}`;
+  return {
+    kind: "hotfix",
+    label: v,
+    title: `热修修订 ${v}`,
+  };
+}
+
 export function revisedBadge(kind: PlanRevisionKind): {
   label: string;
   hint: string;
@@ -241,6 +320,9 @@ export interface AgentNodePresentation {
   checkpointFace: { label: string; cls: string } | null;
   reviewConcernFace: { label: string; cls: string } | null;
   statusFace: { text: string; cls: string; tickElapsed: boolean };
-  revisionFace: string | null;
+  /** 热修 vN / 辩论「第 N 轮」角标；null = 不挂。 */
+  revisionBadge: RevisionBadgePresentation | null;
+  /** 热修 V2 空闲态卡片面优先行（按指示：…）；辩论 / 无改点时为 null。 */
+  revisionFaceHint: string | null;
   handoffFace: string | null;
 }

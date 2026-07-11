@@ -63,7 +63,7 @@ Play → 左侧「离线 Demo」后应能看到：
 | `pnpm town:build:webgl` | Unity WebGL 打包 |
 | `pnpm town:serve:webgl` | 静态服 `Builds/WebGL` 并打开 `?demo=1` Offline Demo（无需后端） |
 | `pnpm town:shoot:webgl` | 对三 pack Offline Demo 截 PNG → `apps/town/shoot-out/`（须先 `town:build:webgl` + Playwright） |
-| `pnpm town:spike:webgl` / `town:sync-assets` | WebGL SSE spike（A=CORS；C2=页内 live `sim.*`）/ 资源同步 |
+| `pnpm town:spike:webgl` | WebGL SSE spike（A=CORS；C2=页内 live `sim.*`） |
 
 Editor 接线核对：[EDITOR-WIRING.md](./EDITOR-WIRING.md)
 
@@ -175,18 +175,15 @@ apps/town/
 
 ## 资产
 
-```powershell
-pnpm town:sync-assets          # Desktop public → packages/town-assets + Assets/TownAssets
-# 然后在 Editor：AgentTown → Import Town Assets（Setup Project / town:verify 也会跑）
-```
+真源在 `Assets/TownAssets/`（vendored 入库，clone 即用）。新增 mesh 放入对应子目录后，Editor：`AgentTown → Import Town Assets`（或 `pnpm town:verify` / Setup Project）。
 
 - Catalog：`Assets/Resources/Town/TownMeshCatalog.asset`（建筑 prefab 池 + nature 池 + roads 池 + 可选 Xbot）
-- FE-18：`quaternius/` 10 栋 LowPoly Buildings（CC0）为区域主 mesh；缺省时 `RegionKenneyFallbackMeshNames` → Kenney；再缺则 `PickBuilding` 池填充
-- 自然物：`nature/` Kenney Nature Kit 精选 10 GLB（CC0）→ catalog nature 池；`TownVisualLayout.NatureProps` 公园加密 + 路边点缀；无资产绿色 primitive 回退
-- 道路：色块加宽底图 + Kenney City Kit (Roads) 精选 8 GLB 主干/路口 mesh（`roads/` → catalog road 池）；无资产仅色块、不崩
+- FE-18：`Quaternius/` 10 栋 LowPoly Buildings（CC0）为区域主 mesh；缺省时 `RegionKenneyFallbackMeshNames` → Kenney；再缺则 `PickBuilding` 池填充
+- 自然物：`Nature/` Kenney Nature Kit 精选 10 GLB（CC0）→ catalog nature 池；`TownVisualLayout.NatureProps` 公园加密 + 路边点缀；无资产绿色 primitive 回退
+- 道路：色块加宽底图 + Kenney City Kit (Roads) 精选 8 GLB 主干/路口 mesh（`Roads/` → catalog road 池）；无资产仅色块、不崩
 - 无资产 / Import 失败 → `TownBuilder` / `TownNpc` 回退 primitive / 胶囊
 - 建筑距离 LOD：`TownBuildingLod`（近全模 → 远低模 → 剔除）；自然物更激进 cull（`EnsureNature`）；与 catalog / 回退共用
-- Desktop 源副本：`apps/desktop/public/simulation/assets/`（含 `quaternius/*.fbx`、`nature/*.glb`、`roads/*.glb`）
+- 说明与 workflow：[`Assets/TownAssets/README.md`](./Assets/TownAssets/README.md)
 
 ## 测试
 
@@ -201,4 +198,5 @@ HTTP 后端烟测（不测 3D）：`pnpm -C apps/desktop sim:smoke:e2e`（可加
 
 - 任务映射 `UT-*`：MVP 计划 §2.1
 - Region fixture：`packages/protocol-conformance/fixtures/simulation-region-positions.json`
+- 故事剧本包 SoT：`packages/town-story-packs/`（改完跑 `pnpm gen:story-packs`）
 - Desktop 启动器：`apps/desktop/src/main/agenttown-service.ts`

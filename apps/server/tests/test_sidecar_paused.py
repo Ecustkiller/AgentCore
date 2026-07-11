@@ -16,10 +16,20 @@ import asyncio
 import json
 from typing import Any
 
+import pytest
+
+from agentcore.conversation.store import reset_conversation_store_for_tests
 from agentcore.runtime.suspension import AskUserSuspension
 from agentcore.sidecar import protocol
 from agentcore.sidecar.paused_store import LocalPausedTurnStore
 from agentcore.sidecar.server import SidecarServer
+
+
+@pytest.fixture(autouse=True)
+def _reset_conversation_store():
+    """Sidecar initialize swaps the process-wide store; restore CloudStore default after."""
+    yield
+    reset_conversation_store_for_tests()
 
 
 def _suspension(

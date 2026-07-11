@@ -3,6 +3,7 @@
 import asyncio
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from agentcore.config import settings
 from agentcore.core.errors import LLMTimeoutError
@@ -16,14 +17,34 @@ from .constants import TOOL_PROGRESS_STEP
 logger = get_logger(__name__)
 
 
+@dataclass(frozen=True)
+class StreamRoundResult:
+    """Outcome of one streamed LLM call (including post-commit abort salvage)."""
+
+    content: str
+    reasoning: str
+    tool_calls: list[ToolCall] | None
+    usage: TokenUsage | None
+    empty_diagnosis: str | None = None
+    empty_raw_preview: str | None = None
+    aborted: bool = False
+
+
 async def stream_llm_round(
     llm: OpenAICompatibleProvider,
     request: LLMRequest,
     emit_content: Callable[[str], None],
     emit_reasoning: Callable[[str], None],
     on_tool_progress: Callable[[str, int], None] | None = None,
-) -> tuple[str, str, list[ToolCall] | None, TokenUsage | None, str | None, str | None]:
-    """Stream one LLM call. Returns (content, reasoning, tool_calls, usage, diagnosis, raw_preview)."""
+    on_reset: Callable[[], None] | None = None,
+) -> StreamRoundResult:
+    """Stream one LLM call. Returns accumulated text plus an optional aborted flag.
+
+    Consumes provider control signals:
+    - ``stream_reset`` — clear local accumulators and reset the live view (CEO
+      ``content_reset`` / worker ``run_output_reset`` via ``on_reset``).
+    - ``aborted`` — keep the partial and return normally (no raise).
+    """
 
     content_parts: list[str] = []
     reasoning_parts: list[str] = []
@@ -34,17 +55,23 @@ async def stream_llm_round(
     finish_reason: str | None = None
     empty_diagnosis: str | None = None
     empty_raw_preview: str | None = None
+    aborted = False
     start = time.monotonic()
+
+    def _clear_accumulators() -> None:
+        content_parts.clear()
+        reasoning_parts.clear()
+        tc_accumulators.clear()
+        tc_progress_at.clear()
 
     # 流式停滞闸 (卡死根因): consume the stream under a per-chunk IDLE ceiling. The
     # deadline is reset on EVERY chunk, so a healthy long generation (which keeps
     # streaming reasoning/content) never trips it, but a genuine stall (no bytes for
     # ``idle`` seconds) raises promptly and observably — instead of the provider's
     # silent 120s×3 read-timeout ladder freezing the whole turn for ~6 min. ``0``
-    # disables the gate (``asyncio.timeout(None)`` = no ceiling). On a stall the
-    # ``async for`` cancellation unwinds llm.stream's ``async with client.stream(...)``,
-    # closing the httpx connection; we re-raise as an LLM timeout so run_llm_round's
-    # failure path (DEGRADED/ERROR end) takes over.
+    # disables the gate (``asyncio.timeout(None)`` = no ceiling). Post-commit stall
+    # salvages the partial via the same aborted contract as a mid-stream disconnect;
+    # pre-commit stall still surfaces as LLMTimeoutError.
     idle = settings.engine_llm_stream_idle_timeout_seconds
     loop = asyncio.get_running_loop()
     try:
@@ -52,6 +79,20 @@ async def stream_llm_round(
             async for chunk in llm.stream(request):
                 if idle > 0:
                     cm.reschedule(loop.time() + idle)
+
+                if chunk.stream_reset:
+                    _clear_accumulators()
+                    usage = None
+                    finish_reason = None
+                    empty_diagnosis = None
+                    empty_raw_preview = None
+                    if on_reset is not None:
+                        on_reset()
+                    continue
+
+                if chunk.aborted:
+                    aborted = True
+                    break
 
                 if chunk.empty_diagnosis:
                     empty_diagnosis = chunk.empty_diagnosis
@@ -99,6 +140,7 @@ async def stream_llm_round(
                 if chunk.usage:
                     usage = chunk.usage
     except TimeoutError:
+        committed = bool(content_parts) or bool(tc_accumulators)
         logger.warning(
             "llm.stream_stalled",
             scenario=request.scenario,
@@ -107,14 +149,20 @@ async def stream_llm_round(
             elapsed_ms=int((time.monotonic() - start) * 1000),
             content_chars=sum(len(p) for p in content_parts),
             reasoning_chars=sum(len(p) for p in reasoning_parts),
+            committed=committed,
         )
-        raise LLMTimeoutError("模型流式响应停滞（长时间无输出），请稍后重试") from None
+        if committed:
+            aborted = True
+        else:
+            raise LLMTimeoutError("模型流式响应停滞（长时间无输出），请稍后重试") from None
 
     content = "".join(content_parts)
     reasoning = "".join(reasoning_parts)
 
+    # Incomplete tool-call deltas after abort are not executable — drop them so the
+    # engine keeps prose only (设计: 保留半成品正文, 不执行残缺 tool_calls).
     tool_calls: list[ToolCall] | None = None
-    if tc_accumulators:
+    if tc_accumulators and not aborted:
         tool_calls = []
         for _idx in sorted(tc_accumulators):
             acc = tc_accumulators[_idx]
@@ -136,7 +184,8 @@ async def stream_llm_round(
         scenario=request.scenario,
         model=request.model,
         usage=usage,
-        finish_reason=finish_reason or ("tool_calls" if tool_calls else "stop"),
+        finish_reason=finish_reason
+        or ("tool_calls" if tool_calls else ("aborted" if aborted else "stop")),
         latency_ms=int((time.monotonic() - start) * 1000),
         stream=True,
         messages=request.messages,
@@ -145,4 +194,12 @@ async def stream_llm_round(
         tool_names=[tc.function.name for tc in tool_calls] if tool_calls else None,
     )
 
-    return content, reasoning, tool_calls, usage, empty_diagnosis, empty_raw_preview
+    return StreamRoundResult(
+        content=content,
+        reasoning=reasoning,
+        tool_calls=tool_calls,
+        usage=usage,
+        empty_diagnosis=empty_diagnosis,
+        empty_raw_preview=empty_raw_preview,
+        aborted=aborted,
+    )

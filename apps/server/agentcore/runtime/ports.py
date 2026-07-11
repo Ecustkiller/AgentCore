@@ -20,13 +20,15 @@ Landed as Protocols here:
   message's replay payload is projected on read. Postgres impl =
   ``db.repositories.TurnJournalRepository``; the ``runs``↔facts transform lives in
   ``runtime/journal.py``.
+- **ConversationStore** — turn-authority content persistence (message + journal +
+  completion status). Cloud impl = ``conversation.store.CloudStore``; local sidecar
+  will swap ``OutboxStore`` (as-built: 执行引擎 §8.6; 双模式工作区 §10.3).
 
 The remaining §8.6 ports stay as their concrete implementations until 完全离线
 (06-规划/远期规划 §一.1) needs them swappable — Protocol-izing them now, with
 no second implementation to satisfy, would be premature abstraction:
 
 - InferenceGateway → ``llm`` provider (``llm/factory.build_provider`` → OpenAICompatibleProvider)
-- ConversationStore → ``conversation/service.py`` (message persistence)
 - BillingSink → ``runtime/costing.py`` + cost-event repo
 - ArtifactStore → workspace snapshot store (``workspace/…``)
 - PauseSignal → ``runtime`` pause flag
@@ -36,7 +38,7 @@ no second implementation to satisfy, would be premature abstraction:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from agentcore.runtime.events import EventSink
 
@@ -46,7 +48,7 @@ if TYPE_CHECKING:
 
     from agentcore.runtime.interaction import InteractionKind, InteractionRequest
 
-__all__ = ["ClientRequestBridge", "EventSink", "Journal"]
+__all__ = ["ClientRequestBridge", "ConversationStore", "EventSink", "Journal"]
 
 
 @runtime_checkable
@@ -76,7 +78,7 @@ class ClientRequestBridge(Protocol):
         *,
         kind: InteractionKind,
         payload: dict[str, Any] | None = None,
-        timeout: float,
+        timeout: float | None,
         on_suspended: Callable[[], None] | None = None,
     ) -> Any: ...
 
@@ -112,3 +114,96 @@ class Journal(Protocol):
     async def load(self, turn_id: str) -> list[dict[str, Any]]: ...
 
     async def load_map(self, turn_ids: Sequence[str]) -> dict[str, list[dict[str, Any]]]: ...
+
+
+@runtime_checkable
+class ConversationStore(Protocol):
+    """Turn-authority persistence driver (正文 / journal / 完成态).
+
+    Owns the authoritative write path for a turn's message body, journal facts, and
+    completion status. Telemetry (proxy_spend / audit / roster) stays outside this
+    port — see 成本配额 §三 / 安全权限 §八. Cloud = direct Postgres; sidecar =
+    outbox records → ``POST /local-turns`` → ``finalize(mode="local")``
+    (as-built: 双模式工作区 §10.3; 执行引擎 §8.6).
+    """
+
+    async def begin_turn(
+        self,
+        *,
+        conversation_id: str,
+        message_id: str,
+        trace_id: str,
+    ) -> None: ...
+
+    async def checkpoint(
+        self,
+        *,
+        conversation_id: str,
+        message_id: str,
+        content: str,
+    ) -> None: ...
+
+    async def append_journal(
+        self,
+        *,
+        turn_id: str,
+        seq: int | None,
+        conversation_id: str,
+        trace_id: str | None,
+        entry: dict[str, Any],
+    ) -> int | None:
+        """Append one fact; returns durable seq on insert, None on merge duplicate."""
+        ...
+
+    async def finalize(
+        self,
+        *,
+        mode: Literal["cloud", "local"],
+        **kwargs: Any,
+    ) -> dict[str, Any] | None: ...
+
+    async def salvage(
+        self,
+        *,
+        journal: list[dict[str, Any]],
+        content: str,
+        conversation_id: str,
+        trace_id: str,
+        message_id: str | None,
+    ) -> None: ...
+
+    # --- stream_state (流式回复持久化 §3.1–§3.2 · P1) ---
+    # CloudStore → TurnStreamStateRepository; OutboxStore → no-op (D6).
+
+    async def upsert_stream_segments(
+        self,
+        *,
+        turn_id: str,
+        segments: Sequence[tuple[str, str, int]],
+    ) -> None:
+        """UPSERT in-flight channel snapshots ``(channel, text, generation)``."""
+        ...
+
+    async def list_stream_segments(
+        self,
+        *,
+        turn_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return ``[{channel, text, generation}, …]`` for overlay / salvage."""
+        ...
+
+    async def list_stream_segments_map(
+        self,
+        *,
+        turn_ids: Sequence[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Batch ``list_stream_segments`` keyed by turn_id."""
+        ...
+
+    async def clear_stream_segments(
+        self,
+        *,
+        turn_id: str,
+    ) -> None:
+        """Delete all channel rows after terminal / pause snapshot succeeds."""
+        ...

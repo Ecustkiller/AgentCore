@@ -79,7 +79,7 @@ class DebateTool:
         depth: int = 0,
         registry: InteractionRegistry | None = None,
         conversation_id: str = "",
-        round_decision_timeout: float = 0.0,
+        round_decision_timeout: float | None = None,
         interactive_armed: bool = False,
         prior_seed: DebateSeed | None = None,
     ) -> None:
@@ -201,13 +201,12 @@ class DebateTool:
             )
 
         # 交互式逐轮（opt-in）：仅当 CEO 显式 interactive=true、本回合有活跃用户（armed）、交互桥
-        # 已接入且超时为正时挂起请示用户；否则 on_round_boundary=None ⇒ 主持人按裁判自判收敛（与
-        # 非交互辩论逐字同辙，零行为变化）。挂起复用与 ask_user/escalate 同一条交互桥。
+        # 已接入时挂起请示用户；timeout=None 为无限等（提问确认交互统一 D2）。否则
+        # on_round_boundary=None ⇒ 主持人按裁判自判收敛（与非交互辩论逐字同辙）。
         interactive = (
             bool(arguments.get("interactive"))
             and self._interactive_armed
             and self._registry is not None
-            and self._round_decision_timeout > 0
         )
 
         async def _round_boundary(

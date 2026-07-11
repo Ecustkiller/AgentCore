@@ -1,8 +1,10 @@
 """Cloud SSE turn entry points: send, regenerate, durable resume."""
 
 import asyncio
+import contextlib
 import time
 
+from agentcore.config import settings
 from agentcore.conversation.common import (
     preview,
     resolve_local_binding,
@@ -32,12 +34,17 @@ from agentcore.db.repositories import (
 from agentcore.llm.resolve import LLMCredentials
 from agentcore.runtime.checkpoints import CheckpointResponse
 from agentcore.runtime.events import EventSink, FinishReason, error_event, message_end, turn_saved
-from agentcore.runtime.journal import completed_from_journal
+from agentcore.runtime.leases import (
+    acquire_turn_lease,
+    lease_heartbeat_loop,
+    release_turn_lease,
+)
 from agentcore.runtime.pipeline import resume_chat_pipeline
 from agentcore.runtime.retry import retry_failed_targets, retry_seed
 from agentcore.runtime.runs.types import RunPhase
 from agentcore.runtime.suspension import TurnSuspension
 from agentcore.runtime.suspension_persistence import restore_paused_turn
+from agentcore.runtime.turn_state import TurnState
 from agentcore.workspace.attachments import persist_attachments, to_stored_metadata
 from agentcore.workspace.locate import workspace_storage_key
 from agentcore.workspace.locks import workspace_lock
@@ -249,7 +256,8 @@ async def _extract_completed_seed(
     if not entries:
         return None, []
 
-    all_states = completed_from_journal(entries)
+    # Internal dedup: same projection entry as resume / crash recover (behaviour unchanged).
+    all_states = TurnState.from_journal(entries).completed
     seed = {
         run_id: state
         for run_id, state in all_states.items()
@@ -440,73 +448,103 @@ async def resume_chat(
                     conversation_id=conversation_id,
                     message_id=suspension.message_id,
                 )
-                try:
-                    result = await resume_chat_pipeline(
-                        suspension=suspension,
-                        decision=response.decision,
-                        note=response.note,
-                        selected=response.selected,
-                        sink=sink,
-                        backend=backend,
-                        history=history[:-1],
-                        board_id=board_id,
-                        llm_credentials=llm_credentials,
-                        profile_set=profile_set,
-                        session_saver=session_saver,
-                        session_loader=session_loader,
-                        suspension_saver=suspension_saver,
-                        suspension_deleter=suspension_deleter,
-                        llm_supports_tools=llm_supports_tools,
-                    )
-                except asyncio.CancelledError:
-                    salvage_incomplete_turn(
-                        sink=sink,
-                        conversation_id=conversation_id,
-                        trace_id=trace_id,
+                lease_stop: asyncio.Event | None = None
+                heartbeat_task: asyncio.Task | None = None
+                if settings.turn_lease_enabled:
+                    owner_id = await acquire_turn_lease(
                         message_id=suspension.message_id,
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        phase="resuming",
+                        meta={"trace_id": trace_id, "kind": suspension.kind.value},
                     )
-                    raise
-                finish = result.get("finish_reason")
-                finish_value = getattr(finish, "value", finish)
-                cost_runs = result.get("cost_runs") or []
-                duration_ms = int((time.monotonic() - started) * 1000)
-                workers = max(len(cost_runs) - 1, 0)
-                logger.info(
-                    "chat.resume_complete",
-                    finish_reason=finish_value,
-                    rounds=result.get("rounds", 0),
-                    reply_chars=len(result.get("content") or ""),
-                    reply_preview=preview(result.get("content") or ""),
-                    delegated=workers > 0,
-                    workers=workers,
-                    duration_ms=duration_ms,
-                    error=result.get("error"),
-                )
-                # Decide restore BEFORE persist: a successful / re-paused pipeline must
-                # not re-upsert the old frame even if the post-turn persist raises.
-                if finish_value == FinishReason.PAUSED.value or (
-                    not result.get("error") and finish_value != FinishReason.ERROR.value
-                ):
-                    restore_frame = False
+                    lease_stop = asyncio.Event()
+                    heartbeat_task = asyncio.create_task(
+                        lease_heartbeat_loop(
+                            suspension.message_id,
+                            owner_id=owner_id,
+                            interval_seconds=settings.turn_lease_heartbeat_seconds,
+                            stop=lease_stop,
+                            phase="resuming",
+                        )
+                    )
+                try:
+                    try:
+                        result = await resume_chat_pipeline(
+                            suspension=suspension,
+                            decision=response.decision,
+                            note=response.note,
+                            selected=response.selected,
+                            sink=sink,
+                            backend=backend,
+                            history=history[:-1],
+                            board_id=board_id,
+                            llm_credentials=llm_credentials,
+                            profile_set=profile_set,
+                            session_saver=session_saver,
+                            session_loader=session_loader,
+                            suspension_saver=suspension_saver,
+                            suspension_deleter=suspension_deleter,
+                            llm_supports_tools=llm_supports_tools,
+                        )
+                    except asyncio.CancelledError:
+                        salvage_incomplete_turn(
+                            sink=sink,
+                            conversation_id=conversation_id,
+                            trace_id=trace_id,
+                            message_id=suspension.message_id,
+                        )
+                        raise
+                    finish = result.get("finish_reason")
+                    finish_value = getattr(finish, "value", finish)
+                    cost_runs = result.get("cost_runs") or []
+                    duration_ms = int((time.monotonic() - started) * 1000)
+                    workers = max(len(cost_runs) - 1, 0)
+                    logger.info(
+                        "chat.resume_complete",
+                        finish_reason=finish_value,
+                        rounds=result.get("rounds", 0),
+                        reply_chars=len(result.get("content") or ""),
+                        reply_preview=preview(result.get("content") or ""),
+                        delegated=workers > 0,
+                        workers=workers,
+                        duration_ms=duration_ms,
+                        error=result.get("error"),
+                    )
+                    # Decide restore BEFORE persist: a successful / re-paused pipeline must
+                    # not re-upsert the old frame even if the post-turn persist raises.
+                    if finish_value == FinishReason.PAUSED.value or (
+                        not result.get("error") and finish_value != FinishReason.ERROR.value
+                    ):
+                        restore_frame = False
 
-                # Persist INSIDE the trace scope (same as run_and_persist) so the
-                # resumed turn's tail (cost.recorded / obs.turn_spans / metrics)
-                # inherits trace_id / turn_id instead of losing the join key.
-                await persist_turn_result(
-                    result=result,
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    folder_id=folder_id,
-                    backend=backend,
-                    sink=sink,
-                    user_message=suspension.user_message,
-                    generate_title=True,
-                    llm_credentials=llm_credentials,
-                    trace_id=trace_id,
-                    turn_id=turn_id,
-                    duration_ms=duration_ms,
-                    kind="resume",
-                )
+                    # Persist INSIDE the trace scope (same as run_and_persist) so the
+                    # resumed turn's tail (cost.recorded / obs.turn_spans / metrics)
+                    # inherits trace_id / turn_id instead of losing the join key.
+                    await persist_turn_result(
+                        result=result,
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        folder_id=folder_id,
+                        backend=backend,
+                        sink=sink,
+                        user_message=suspension.user_message,
+                        generate_title=True,
+                        llm_credentials=llm_credentials,
+                        trace_id=trace_id,
+                        turn_id=turn_id,
+                        duration_ms=duration_ms,
+                        kind="resume",
+                    )
+                finally:
+                    if lease_stop is not None:
+                        lease_stop.set()
+                    if heartbeat_task is not None:
+                        heartbeat_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await heartbeat_task
+                    if settings.turn_lease_enabled:
+                        await release_turn_lease(suspension.message_id)
 
     except Exception as e:
         logger.error("chat.resume_error", error=str(e), exc_info=True)

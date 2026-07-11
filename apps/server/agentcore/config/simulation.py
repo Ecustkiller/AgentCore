@@ -8,8 +8,8 @@ class SimulationSettings(BaseModel):
 
     ``simulation_scripted`` (env ``SIMULATION_SCRIPTED``): when true, new runs
     prefer the deterministic schedule-based tick path (demo/dev). That path
-    also emits a demo pulse (conversation/trade every 3 ticks, preset
-    world_event every 6) so Unity demos stay observable without DeepSeek.
+    also emits a demo pulse (conversation/trade every 4 ticks, preset
+    world_event every 8) so Unity demos stay observable without DeepSeek.
     Production default is false — LLM remains the primary path. Independently,
     ``advance_tick`` auto-falls back to scripted when DeepSeek cannot be
     resolved (warning log).

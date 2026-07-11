@@ -1,15 +1,14 @@
 import { StreamError } from "@/lib/errors";
-import type { components } from "@/types/api.generated";
+import type { OutboxFlushTurnResult } from "@shared/outbox-contract";
 import type { SidecarTurnResult } from "@shared/sidecar-contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Resume reuses the普通本地回合 scaffolding; mock the heavy collaborators so the
 // resume link's observable contract is asserted in isolation: the `resume` RPC
-// params, event forwarding/filtering, write-back keyed on the *original* user
+// params, event forwarding/filtering, outbox flush keyed on the *original* user
 // bubble id (pinned on pause write-back), and the failure→StreamError("sidecar") /
 // abort→AbortError mapping. The real conversation store is used (seeded below) so
 // the optimistic-id reconcile is faithful.
-vi.mock("@/services/localTurns", () => ({ recordLocalTurn: vi.fn() }));
 vi.mock("@/services/streamConversation", () => ({
   dispatchSSEEvent: vi.fn(),
   flushPendingContent: vi.fn(),
@@ -39,20 +38,17 @@ vi.mock("@/services/inferenceToken", () => ({
 
 import { notifyWarning } from "@/lib/toast";
 import { resolveSidecarInference } from "@/services/inferenceToken";
-import { recordLocalTurn } from "@/services/localTurns";
 import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 import { dispatchSSEEvent } from "@/services/streamConversation";
 import { useConversationStore } from "@/stores/conversation";
 import { useTurnModelStore } from "@/stores/turnModel";
 import { resumeConversationViaSidecar } from "../streamConversationViaSidecar";
 
-const recordLocalTurnMock = vi.mocked(recordLocalTurn);
 const dispatchSSEEventMock = vi.mocked(dispatchSSEEvent);
 const takeRecentSidecarFailureMock = vi.mocked(takeRecentSidecarFailure);
 const resolveSidecarInferenceMock = vi.mocked(resolveSidecarInference);
 const notifyWarningMock = vi.mocked(notifyWarning);
 
-type RecordTurnResponse = components["schemas"]["RecordTurnResponse"];
 type EventPush = { conversationId: string; event: unknown };
 
 function turnResult(): SidecarTurnResult {
@@ -91,11 +87,11 @@ const baseRequest = {
 let onEventCb: ((push: EventPush) => void) | null;
 let resumeMock: ReturnType<typeof vi.fn>;
 let cancelMock: ReturnType<typeof vi.fn>;
+let flushTurnMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   useConversationStore.setState({ currentConversationId: null, byId: {} });
   useTurnModelStore.setState({ byConversation: {} });
-  recordLocalTurnMock.mockReset();
   dispatchSSEEventMock.mockReset();
   notifyWarningMock.mockReset();
   takeRecentSidecarFailureMock.mockReturnValue(null);
@@ -106,9 +102,21 @@ beforeEach(() => {
   onEventCb = null;
   resumeMock = vi.fn();
   cancelMock = vi.fn(() => Promise.resolve());
+  flushTurnMock = vi.fn(
+    async (): Promise<OutboxFlushTurnResult> => ({
+      ok: true,
+      synced: {
+        conversationId: "c1",
+        userMessageId: "u-orig",
+        cloudUserMessageId: "real-uid",
+        assistantMessageId: "m-asst",
+        title: "续跑标题",
+      },
+    }),
+  );
 
-  // The SUT bridges to the main process via the preload `window.sidecarApi`; the
-  // node test env has no `window`, so define it directly.
+  // The SUT bridges to the main process via the preload `window.sidecarApi` /
+  // `window.outboxApi`; the node test env has no `window`, so define them directly.
   (globalThis as Record<string, unknown>).window = {
     sidecarApi: {
       onEvent: vi.fn((cb: (push: EventPush) => void) => {
@@ -120,6 +128,13 @@ beforeEach(() => {
       startTurn: vi.fn(),
       respond: vi.fn(),
       listPaused: vi.fn(),
+    },
+    outboxApi: {
+      flushTurn: flushTurnMock,
+      flush: vi.fn(),
+      status: vi.fn(async () => ({ pending: [] })),
+      onSynced: vi.fn(() => () => {}),
+      authRefresh: vi.fn(),
     },
   };
 });
@@ -148,11 +163,7 @@ function seedOriginalUserBubble(
 }
 
 describe("resumeConversationViaSidecar", () => {
-  it("drives the resume RPC, forwards only this conversation's events, and reconciles the original user bubble on write-back", async () => {
-    recordLocalTurnMock.mockResolvedValue({
-      user_message_id: "real-uid",
-      title: "续跑标题",
-    } as unknown as RecordTurnResponse);
+  it("drives the resume RPC, forwards only this conversation's events, and reconciles the original user bubble on outbox sync", async () => {
     seedOriginalUserBubble("c1", "u-orig", "原始问题");
 
     const result = turnResult();
@@ -190,14 +201,8 @@ describe("resumeConversationViaSidecar", () => {
     // Foreign-conversation event filtered out; only c1's reached the dispatcher.
     expect(dispatchSSEEventMock).toHaveBeenCalledTimes(1);
 
-    // Write-back carries the original user message + its pinned id (pause write-back).
-    expect(recordLocalTurnMock).toHaveBeenCalledWith(
-      "c1",
-      "原始问题",
-      "u-orig",
-      expect.any(String),
-      result,
-    );
+    // Outbox flush is keyed on the original user bubble id (pause write-back).
+    expect(flushTurnMock).toHaveBeenCalledWith({ userMessageId: "u-orig" });
 
     // The original bubble's id is swapped for the authoritative one when unchanged.
     const userMsg = useConversationStore
@@ -208,10 +213,16 @@ describe("resumeConversationViaSidecar", () => {
 
   it("records the turn's real model and warns (naming it) when it fell back to the local platform model (no token)", async () => {
     resolveSidecarInferenceMock.mockResolvedValue(null); // no token → platform fallback
-    recordLocalTurnMock.mockResolvedValue({
-      user_message_id: "real-uid",
-      title: "",
-    } as unknown as RecordTurnResponse);
+    flushTurnMock.mockResolvedValue({
+      ok: true,
+      synced: {
+        conversationId: "c1",
+        userMessageId: "u-orig",
+        cloudUserMessageId: "real-uid",
+        assistantMessageId: null,
+        title: null,
+      },
+    });
     seedOriginalUserBubble("c1", "u-orig", "原始问题");
     // The sidecar reports the model it actually ran on — here the local platform model.
     resumeMock.mockResolvedValue({ ...turnResult(), model: "gpt-5.5" });
@@ -233,10 +244,16 @@ describe("resumeConversationViaSidecar", () => {
       apiKey: "tok",
       model: "deepseek-v4-flash",
     });
-    recordLocalTurnMock.mockResolvedValue({
-      user_message_id: "real-uid",
-      title: "",
-    } as unknown as RecordTurnResponse);
+    flushTurnMock.mockResolvedValue({
+      ok: true,
+      synced: {
+        conversationId: "c1",
+        userMessageId: "u-orig",
+        cloudUserMessageId: "real-uid",
+        assistantMessageId: null,
+        title: null,
+      },
+    });
     seedOriginalUserBubble("c1", "u-orig", "原始问题");
     resumeMock.mockResolvedValue({
       ...turnResult(),
@@ -257,6 +274,31 @@ describe("resumeConversationViaSidecar", () => {
     expect(notifyWarningMock).not.toHaveBeenCalled();
   });
 
+  it("keeps synced_pending when outbox flush is still pending", async () => {
+    // Token present so platform-fallback warning does not fire — we only assert
+    // the writeback path leaves synced_pending without a sync-retry toast.
+    resolveSidecarInferenceMock.mockResolvedValue({
+      baseUrl: "https://x/v1/inference/v1",
+      apiKey: "tok",
+      model: "deepseek-v4-flash",
+    });
+    flushTurnMock.mockResolvedValue({
+      ok: false,
+      error: "writeback_pending",
+    });
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
+    resumeMock.mockResolvedValue(turnResult());
+
+    await resumeConversationViaSidecar(baseRequest);
+
+    const userMsg = useConversationStore
+      .getState()
+      .byId.c1?.messages.find((m) => m.role === "user");
+    expect(userMsg?.syncStatus).toBe("synced_pending");
+    // No toast / manual-retry path (as-built: 双模式工作区 §10.3; 前端 UX §一B).
+    expect(notifyWarningMock).not.toHaveBeenCalled();
+  });
+
   it("maps a resume failure to a sidecar StreamError carrying the engine's reason", async () => {
     resumeMock.mockRejectedValue(new Error("引擎崩了"));
 
@@ -266,8 +308,8 @@ describe("resumeConversationViaSidecar", () => {
     expect(err).toBeInstanceOf(StreamError);
     expect((err as StreamError).kind).toBe("sidecar");
     expect((err as StreamError).serverMessage).toContain("引擎崩了");
-    // A turn that never completed must not be written back to the cloud.
-    expect(recordLocalTurnMock).not.toHaveBeenCalled();
+    // A turn that never completed must not flush outbox.
+    expect(flushTurnMock).not.toHaveBeenCalled();
   });
 
   it("prefers an onStatus lifecycle diagnostic over the rejection reason", async () => {
@@ -311,6 +353,6 @@ describe("resumeConversationViaSidecar", () => {
     const err = await p.catch((e: unknown) => e);
     expect(err).toBeInstanceOf(DOMException);
     expect((err as DOMException).name).toBe("AbortError");
-    expect(recordLocalTurnMock).not.toHaveBeenCalled();
+    expect(flushTurnMock).not.toHaveBeenCalled();
   });
 });

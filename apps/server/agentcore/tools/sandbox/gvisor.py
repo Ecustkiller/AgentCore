@@ -266,8 +266,11 @@ class GVisorSandbox:
             {"type": "uts"},
             {"type": "mount"},
         ]
-        if request.network_mode != "none":
-            namespaces.append({"type": "network"})
+        # No network namespace: networking is unconditionally disabled by the
+        # ``--network=none`` runsc flag (see the run cmd), matching the "云端默认禁网"
+        # posture (安全权限与治理 §5). ``request.network_mode`` is reserved and NOT honored
+        # today — a future "restricted" mode needs BOTH a network namespace here AND
+        # dropping that flag (05 P3-4).
 
         mounts = [
             {
@@ -276,6 +279,14 @@ class GVisorSandbox:
                 "source": "tmpfs",
                 "options": ["nosuid", "nodev", "size=64m"],
             },
+            # 只读根 + tmpfs 工作区 (安全权限与治理 §5): /workspace is a READ-ONLY view of
+            # the real workspace (so code can read project files) while /scratch is the
+            # writable ephemeral area. KNOWN LIMITATION (05 P3-4): the process cwd is
+            # /workspace, so code that writes via a *relative* path fails silently under
+            # gVisor — unlike the local SubprocessSandbox, which runs cwd=root and persists
+            # writes. Productionizing gVisor should give /workspace an overlay (ro lower +
+            # tmpfs upper) so ephemeral writes land where the model expects; until then
+            # code must target absolute /scratch paths. gVisor is ⏳ off-by-default today.
             {
                 "destination": "/workspace",
                 "type": "bind",

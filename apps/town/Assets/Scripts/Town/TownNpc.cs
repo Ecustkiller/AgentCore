@@ -6,8 +6,8 @@ namespace AgentTown.Town
     /// <summary>
     /// One resident NPC (§7 NpcLayer). Body is Xbot from <see cref="TownMeshCatalog"/> when present,
     /// else a placeholder capsule. Always keeps <see cref="NavMeshAgent"/>; tint via
-    /// <see cref="MaterialPropertyBlock"/> on the primary renderer. World-space nameplate via
-    /// <see cref="TownNpcNameplate"/>.
+    /// <see cref="MaterialPropertyBlock"/> on the primary renderer. Display-name labels are
+    /// screen-space via <see cref="TownNameplateHud"/>.
     ///
     /// <para>Live and Replay/Offline both drive <c>NavMeshAgent.SetDestination</c> toward the
     /// snapshot goal (no whole-frame teleport on sync). Replay may pace agent speed to the
@@ -27,7 +27,6 @@ namespace AgentTown.Town
         private MaterialPropertyBlock propertyBlock;
         private TownMeshCatalog meshCatalog;
         private bool catalogResolved;
-        private TownNpcNameplate nameplate;
 
         /// <summary>Transform-lerp fallback target when NavMesh pathing is unavailable.</summary>
         private Vector3? softTarget;
@@ -62,17 +61,16 @@ namespace AgentTown.Town
                 body.AddComponent<Animator>();
             }
 
-            nameplate = gameObject.AddComponent<TownNpcNameplate>();
-            nameplate.EnsureBuilt();
-            nameplate.SetContent(agentId, "", false);
+            // Nameplates are screen-space via TownNameplateHud (WebGL CJK-safe).
         }
 
-        /// <summary>Update world-space nameplate (name + Role·Mood subtitle + selection highlight).</summary>
+        /// <summary>
+        /// Kept for call-site compatibility; visible labels are drawn by
+        /// <see cref="TownNameplateHud"/> from session agent state.
+        /// </summary>
         public void SetNameplate(string displayName, string subtitle, bool selected)
         {
-            nameplate ??= gameObject.GetComponent<TownNpcNameplate>()
-                ?? gameObject.AddComponent<TownNpcNameplate>();
-            nameplate.SetContent(displayName, subtitle, selected);
+            // Screen-space HUD owns nameplates — no world-space canvas here.
         }
 
         /// <summary>Inject a catalog for EditMode tests (skips Resources load).</summary>

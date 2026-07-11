@@ -7,25 +7,19 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory, ToolEffect, new_id
-from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import (
     EventSink,
     checkpoint_required,
-    checkpoint_resolved,
-    content_delta,
     question_posted,
 )
-from agentcore.runtime.interaction import InteractionKind
 from agentcore.runtime.ports import ClientRequestBridge
 from agentcore.tools.builtin.ask_user.intent import resolve_ask_checkpoint_intent
-from agentcore.tools.builtin.ask_user.result import ask_user_tool_result
 from agentcore.tools.builtin.ask_user.schema import (
     normalize_assumptions,
     normalize_questions,
     normalize_style_options,
-    option_label,
 )
-from agentcore.tools.builtin.ask_user.suspend import drop_suspension, persist_suspension
+from agentcore.tools.builtin.ask_user.suspend import persist_suspension
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 
 if TYPE_CHECKING:
@@ -292,68 +286,22 @@ class AskUserTool:
             required_event=required,
             intent=intent,
         )
-        # 挂起即收口 (②): once the durable frame is saved, END the turn in place instead of
-        # parking on the in-memory interaction Future. We emit the card here (the wait path
-        # emits it via ``on_suspended``) and return a SUSPEND effect — the engine maps it to
-        # FinishReason.PAUSED and leaves THIS call pending (no tool result), so the resumed
-        # window ends exactly at the assistant and EVERY resolution (even in-session) flows
-        # through the one cold ``POST .../resume`` path, collapsing the live/durable dual-state
-        # at its source. Gated on ``saved`` (§六-1 窄兜底): a turn we could not persist can't be
-        # finalized (resume would have no frame to reclaim), so it falls through to the
-        # backend-only timed wait below.
+        # 挂起即收口 (②): once the durable frame is saved, END the turn in place.
+        # D11：删窄兜底——无法落盘则显式失败终止回合（不再假等待）。
         if saved:
             self.sink.emit(required)
             logger.info("checkpoint.finalized", checkpoint_id=checkpoint_id)
             return ToolResult(tool_call_id="", success=True, output="", effect=ToolEffect.SUSPEND)
-        # 窄兜底（薄网，挂起即收口 ② Phase 3）: no durable frame, so hold the turn on a BACKEND-ONLY
-        # bounded wait — the card is surfaced, but no client can settle an ask_user anymore (its
-        # resolve schema is gone from the unified endpoint), so this can only end by timeout →
-        # auto-continue (不丢回合). A disconnect cancels it and the engine salvages the turn.
-        try:
-            response = await self.registry.suspend(
-                checkpoint_id,
-                self.conversation_id,
-                kind=InteractionKind.ASK_USER,
-                payload={
-                    "question": message,
-                    "context": ctx_text,
-                    "assumptions": assumptions,
-                    "questions": questions,
-                    "style_options": style_options,
-                    "intent": intent,
-                },
-                timeout=self.timeout_seconds,
-                on_suspended=lambda: self.sink.emit(required),
-            )
-        except TimeoutError:
-            logger.info("checkpoint.timeout", checkpoint_id=checkpoint_id)
-            response = CheckpointResponse(decision=CheckpointDecision.TIMEOUT)
-        # Reached only on the timeout auto-continue — no client resolve path remains for an
-        # ask_user (its schema is gone from the unified endpoint). A cancel raises
-        # CancelledError, which propagates PAST this; with no saved frame the engine salvages
-        # the turn as usual.
-        await drop_suspension(self)
-
-        # Keep only picks that were actually on some question's menu — a resolve can't
-        # inject arbitrary strings into the CEO's context (the desktop composes its
-        # answer into ``note`` and sends no picks, so this is a guard for other clients).
-        allowed = {option_label(o) for q in questions for o in q.get("options", [])}
-        response.selected = [s for s in response.selected if s in allowed]
-
-        self.sink.emit(
-            checkpoint_resolved(
-                checkpoint_id=checkpoint_id,
-                decision=response.decision.value,
-                note=response.note,
-                selected=response.selected,
-            )
+        logger.error(
+            "checkpoint.persist_unavailable",
+            checkpoint_id=checkpoint_id,
+            reason="no_durable_frame",
         )
-        result = ask_user_tool_result(response)
-        # A stop's closing note rides as ``final_text`` (persist-only); stream it so
-        # the user sees it live too (the engine won't re-emit it). Resume does the same.
-        if result.effect is ToolEffect.INTERACT and result.final_text:
-            self.sink.emit(content_delta(result.final_text))
-        return result
+        return ToolResult(
+            tool_call_id="",
+            success=False,
+            output="无法持久化检查点，回合已终止。请重试。",
+        )
 
     def _post_nonblocking(
         self,

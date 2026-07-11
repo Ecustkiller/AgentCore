@@ -466,6 +466,7 @@ export function RunDetailBody({
           agent={agent}
           cnyPerUsd={cnyPerUsd}
           defaultExpanded
+          keyBase={`run:${runId}`}
         />
       )}
 

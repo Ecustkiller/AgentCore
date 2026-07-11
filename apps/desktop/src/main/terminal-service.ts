@@ -1,7 +1,9 @@
 /**
  * 桌面 Client Tools · 终端出口 —— bash 代码块「在终端运行」+ 工作区「在终端打开」。
  *
- * `runBash` 与 fs/execGate 同姿态：renderer 被攻破时无法静默 RCE，必须过 native 确认。
+ * 用户直触 bash：renderer 聊天内 RunConfirm 后以 `rendererConfirmed: true` 调用，
+ * 跳过 native OS 框（对标 Cursor 单一确认面）。未带确认的旧 string 入参仍走
+ * {@link confirmBashRun} 兜底；「本会话都允许」与 grantSessionRun 共享 flag。
  * `openShellAtRoot` 仅 cd 到已授权工作区目录，不执行任意命令，故零确认（对标 VS Code）。
  */
 import { spawn, spawnSync } from "node:child_process";
@@ -9,8 +11,9 @@ import {
   TERMINAL_CHANNELS,
   type TerminalRunResult,
 } from "@shared/terminal-contract";
-import { BrowserWindow, dialog, ipcMain } from "electron";
+import { ipcMain } from "electron";
 import { getStoredRoot } from "./fs-service";
+import { confirmSessionRun, isSessionRunAllowed } from "./fs/execGate";
 import { resolveLexical } from "./fs/pathGuard";
 
 const PREVIEW_CAP = 2000;
@@ -19,29 +22,13 @@ function clip(s: string): string {
   return s.length > PREVIEW_CAP ? `${s.slice(0, PREVIEW_CAP)}\n…（已截断）` : s;
 }
 
-function activeWindow(): BrowserWindow | null {
-  return (
-    BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
-  );
-}
-
-/** 主侧 native 确认；默认 / 取消均为「取消」（安全失败）。 */
-export async function confirmBashRun(command: string): Promise<boolean> {
-  const win = activeWindow();
-  const box = {
-    type: "warning" as const,
-    buttons: ["取消", "在终端运行"],
-    defaultId: 0,
-    cancelId: 0,
-    noLink: true,
-    title: "AgentCore 安全确认",
+/** 主侧 native 确认兜底；与聊天 RunConfirm / grantSessionRun 共享本会话放行。 */
+export function confirmBashRun(command: string): Promise<boolean> {
+  return confirmSessionRun({
     message: "即将在本机终端运行以下命令",
     detail: clip(command) || "（空）",
-  };
-  const { response } = win
-    ? await dialog.showMessageBox(win, box)
-    : await dialog.showMessageBox(box);
-  return response === 1;
+    runLabel: "在终端运行",
+  });
 }
 
 let wtAvailable: boolean | null = null;
@@ -181,10 +168,30 @@ export async function openShellAtWorkspace(
   }
 }
 
-async function handleRunBash(command: unknown): Promise<TerminalRunResult> {
-  const cmd = typeof command === "string" ? command.trim() : "";
+async function handleRunBash(input: unknown): Promise<TerminalRunResult> {
+  let cmd = "";
+  let rendererConfirmed = false;
+  if (typeof input === "string") {
+    cmd = input.trim();
+  } else if (
+    input != null &&
+    typeof input === "object" &&
+    "command" in input &&
+    typeof (input as { command: unknown }).command === "string"
+  ) {
+    const obj = input as { command: string; rendererConfirmed?: unknown };
+    cmd = obj.command.trim();
+    rendererConfirmed = obj.rendererConfirmed === true;
+  }
   if (!cmd) return { ok: false, reason: "命令为空" };
-  if (!(await confirmBashRun(cmd))) return { ok: false, reason: "已取消" };
+  // 聊天 RunConfirm 已确认，或本会话已放行 → 跳过 native；旧 string 入参仍走兜底。
+  if (
+    !rendererConfirmed &&
+    !isSessionRunAllowed() &&
+    !(await confirmBashRun(cmd))
+  ) {
+    return { ok: false, reason: "已取消" };
+  }
   try {
     await spawnInUserTerminal(cmd);
     return { ok: true };

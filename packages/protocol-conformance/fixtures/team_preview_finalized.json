@@ -235,14 +235,17 @@
       "completed": 0,
       "total": 2
     },
-    "pendingInteraction": {
-      "kind": "team_preview",
-      "checkpointId": "tp1",
-      "workerIds": [
-        "r1",
-        "r2"
-      ]
-    },
+    "interactions": [
+      {
+        "kind": "team_preview",
+        "id": "tp1",
+        "status": "pending",
+        "workerIds": [
+          "r1",
+          "r2"
+        ]
+      }
+    ],
     "cost": {
       "input": 240000,
       "cached": 64000,
@@ -252,6 +255,8 @@
     },
     "debate": null,
     "debateRounds": [],
+    "teamSynthesisPreview": null,
+    "turnWarning": null,
     "teamNotes": []
   }
 }

@@ -57,6 +57,7 @@ async def run_finalize_round(
     run_id: str = "",
     hard_tool_free: bool = False,
     inject_instruction: bool = True,
+    on_reset: Callable[[], None] | None = None,
 ) -> FinalizeRoundResult:
     """One finalize LLM round: coordination tools only, or tool-free when ``hard_tool_free``."""
     if inject_instruction:
@@ -73,9 +74,13 @@ async def run_finalize_round(
     request = build_request(
         profile, messages, tools=tool_defs, tool_choice=tool_choice, model=active_model
     )
-    content, reasoning, tool_calls, usage, _diag, _preview = await stream_llm_round(
-        llm, request, emit_content, emit_reasoning
+    streamed = await stream_llm_round(
+        llm, request, emit_content, emit_reasoning, on_reset=on_reset
     )
+    content = streamed.content
+    reasoning = streamed.reasoning
+    tool_calls = streamed.tool_calls
+    usage = streamed.usage
 
     if hard_tool_free and tool_calls:
         tool_calls = None
@@ -135,6 +140,7 @@ async def force_finalize(
     rounds: int,
     reason: str,
     run_id: str = "",
+    on_reset: Callable[[], None] | None = None,
 ) -> tuple[str, str, TokenUsage, int, FinalizeRoundResult | None]:
     """Attempt a coordination-tool finalize round, then fall back to tool-free.
 
@@ -155,6 +161,7 @@ async def force_finalize(
             emit_reasoning=emit_reasoning,
             run_id=run_id,
             hard_tool_free=False,
+            on_reset=on_reset,
         )
     except Exception as e:
         logger.error("engine.force_finalize_failed", reason=reason, error=str(e))
@@ -189,6 +196,7 @@ async def force_finalize(
             run_id=run_id,
             hard_tool_free=True,
             inject_instruction=False,
+            on_reset=on_reset,
         )
     except Exception as e:
         logger.error("engine.force_finalize_hard_failed", reason=reason, error=str(e))

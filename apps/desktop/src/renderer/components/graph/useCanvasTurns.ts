@@ -3,6 +3,7 @@
 import {
   assistantProjectionId,
   useActiveMessages,
+  useConversationStore,
 } from "@/stores/conversation";
 import {
   type Execution,
@@ -63,6 +64,7 @@ export function useCanvasTurns({
   setFocusedTurn,
 }: UseCanvasTurnsOptions) {
   const messages = useActiveMessages();
+  const conversationId = useConversationStore((s) => s.currentConversationId);
   const byId = useExecutionStore((s) => s.byId);
 
   useEffect(() => {
@@ -100,7 +102,9 @@ export function useCanvasTurns({
           promptMessageId: lastUserId,
           answerMessageId: m.id,
           running: exec?.status === "running" || m.isStreaming,
-          pendingDecisions: countPendingDecisions(m, exec),
+          pendingDecisions: countPendingDecisions(m, exec, {
+            conversationId,
+          }),
           recoverable: isTurnRecoverable(exec),
         });
       } else {
@@ -119,7 +123,7 @@ export function useCanvasTurns({
       }
     }
     return out;
-  }, [messages, byId]);
+  }, [messages, byId, conversationId]);
 
   const latestTeamId = useMemo(() => {
     for (let i = turns.length - 1; i >= 0; i--) {

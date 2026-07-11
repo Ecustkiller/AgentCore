@@ -14,6 +14,8 @@ export async function createSimulationRun(
     {
       scenario: body.scenario ?? "town",
       seed: body.seed,
+      // Align with Unity client: Desktop launcher defaults to scripted (no real LLM).
+      scripted: body.scripted ?? true,
     },
   );
   return runFromWire(raw);

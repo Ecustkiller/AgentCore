@@ -140,6 +140,37 @@ def test_build_payload_echoes_reasoning_content_for_tool_turns():
     assert assistant_msgs[1]["reasoning_content"] == ""
 
 
+def test_build_payload_disables_thinking_for_deepseek_v4_background():
+    """Title/memory one-shots must send thinking.disabled — otherwise V4's default
+    thinking eats a tight max_tokens budget and the sidebar falls back to raw input."""
+    provider = OpenAICompatibleProvider(name="test", api_key="k", base_url="http://x/v1")
+    req = LLMRequest(
+        messages=[LLMMessage(role="user", content="hi")],
+        model=DEEPSEEK_V4_FLASH,
+        max_tokens=64,
+        thinking=False,
+        scenario="title",
+    )
+    payload = provider._build_payload(req, stream=False)
+    assert payload["thinking"] == {"type": "disabled"}
+
+    # Non-DeepSeek models must not get the DeepSeek-only field.
+    other = LLMRequest(
+        messages=[LLMMessage(role="user", content="hi")],
+        model="gpt-4o",
+        thinking=False,
+        scenario="title",
+    )
+    assert "thinking" not in provider._build_payload(other, stream=False)
+
+    # Default (None) leaves thinking omitted so V4 keeps its enabled default.
+    default = LLMRequest(
+        messages=[LLMMessage(role="user", content="hi")],
+        model=DEEPSEEK_V4_FLASH,
+    )
+    assert "thinking" not in provider._build_payload(default, stream=False)
+
+
 def test_balance_and_auth_errors_are_not_retryable():
     assert LLMInsufficientBalanceError().retryable is False
     assert LLMAuthError().retryable is False

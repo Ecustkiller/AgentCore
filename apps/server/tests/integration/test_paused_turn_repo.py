@@ -57,7 +57,6 @@ def _pause_journal_entries() -> list[dict]:
 
 
 def _frame(message_id: str, conversation_id: str, user_id: str) -> PlanReviewSuspension:
-    journal = [{"type": "run_plan", "payload": {}, "timestamp": "t"}]
     journal_entries = _pause_journal_entries()
     return PlanReviewSuspension(
         message_id=message_id,
@@ -88,7 +87,6 @@ def _frame(message_id: str, conversation_id: str, user_id: str) -> PlanReviewSus
             ]
         ),
         completed={"del_a_1": RunState(phase=RunPhase.COMPLETED, content="S1OUT")},
-        journal=journal,
         journal_entries=journal_entries,
         steps=[{"run_id": "del_a_1", "role": "研究员", "summary": "…"}],
         pending=[{"run_id": "del_a_2", "role": "写手"}],

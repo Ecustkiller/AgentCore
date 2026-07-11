@@ -156,16 +156,20 @@ export async function runResume(
 ): Promise<void> {
   const store = useConversationStore.getState();
   const conversationId = store.currentConversationId;
-  if (!conversationId || getRuntime(conversationId).isGenerating) {
-    console.warn(
-      `[Resume] runResume early return messageId=${messageId} decision=${decision} conversationId=${conversationId ?? "null"} isGenerating=${conversationId ? getRuntime(conversationId).isGenerating : "n/a"}`,
-    );
-    return;
+  if (!conversationId) {
+    throw new Error("resume blocked: no active conversation");
   }
-
-  console.warn(
-    `[Resume] runResume start messageId=${messageId} decision=${decision} conversationId=${conversationId}`,
-  );
+  if (getRuntime(conversationId).isGenerating) {
+    // 正在生成时静默 return 会让 ResumePrompt 的 submitting 永远转圈（无请求、无 catch）。
+    // 抛错让调用方复位 submitting，并给用户可感知反馈。
+    store.setError(
+      "当前回合仍在生成中，请稍后再点继续",
+      null,
+      conversationId,
+      null,
+    );
+    throw new Error("resume blocked: turn is still generating");
+  }
 
   store.clearError(conversationId);
   bumpConversationCache(conversationId);
@@ -180,10 +184,6 @@ export async function runResume(
     .pending.find((p) => p.messageId === messageId);
   const sidecarResume = shouldResumeViaSidecar(pending, sidecarTarget);
 
-  console.warn(
-    `[Resume] runResume routing messageId=${messageId} decision=${decision} conversationId=${conversationId} sidecarResume=${sidecarResume} sidecarRootId=${sidecarTarget?.rootId ?? "null"} pendingFound=${pending !== undefined} origin=${pending?.origin ?? "none"}`,
-  );
-
   // A paused sidecar frame lives ONLY on this machine and can only be continued by
   // the local engine — the cloud has no such frame, so (unlike a fresh send) resume
   // must NOT degrade to cloud. Probe first: if the env can't start, keep the resume
@@ -193,9 +193,6 @@ export async function runResume(
   if (sidecarResume && sidecarTarget) {
     const probe = await probeSidecar(sidecarTarget);
     if (!probe.healthy) {
-      console.warn(
-        `[Resume] runResume sidecar probe failed messageId=${messageId} decision=${decision} conversationId=${conversationId} detail=${probe.detail ?? "null"}`,
-      );
       store.setError(
         probe.detail
           ? `${probe.detail}，本地引擎暂不可用，无法继续这次暂停的回合，请稍后重试`
@@ -215,11 +212,8 @@ export async function runResume(
   }
 
   if (isClientOnlyResumeKey(conversationId, messageId)) {
-    console.warn(
-      `[Resume] runResume rejected: client-only resume key messageId=${messageId} decision=${decision} conversationId=${conversationId}`,
-    );
     store.setError(
-      "续跑键无效（缺少服务端消息 ID），请关闭并重新打开会话后重试",
+      "续跑键无效（缺少服务端消息 ID），无法继续这次暂停的回合，请稍后重试",
       () => void runResume(messageId, decision, note, selected),
       conversationId,
       null,
@@ -231,9 +225,6 @@ export async function runResume(
   // Reload race: bubble may be missing → fall back to a fresh streaming slot.
   const resumed = store.resumePausedAssistant(messageId, conversationId);
   if (!resumed) {
-    console.warn(
-      `[Resume] paused assistant not found messageId=${messageId} conversationId=${conversationId}; creating fallback bubble`,
-    );
     store.createAssistantMessage(conversationId);
     store.setServerMessageIdOnLastMessage(messageId, conversationId);
   }
@@ -248,9 +239,6 @@ export async function runResume(
           .reverse()
           .find((m) => m.role === "user")?.id ||
         "";
-      console.warn(
-        `[Resume] runResume calling sidecar resume messageId=${messageId} decision=${decision} conversationId=${conversationId} userMessageId=${userMessageId}`,
-      );
       await resumeConversationViaSidecar({
         conversationId,
         rootId: sidecarTarget.rootId,
@@ -263,14 +251,8 @@ export async function runResume(
         userMessageId,
         signal: ac.signal,
       });
-      console.warn(
-        `[Resume] runResume sidecar resume completed messageId=${messageId} decision=${decision} conversationId=${conversationId}`,
-      );
       usePausedTurnStore.getState().remove(messageId);
     } else {
-      console.warn(
-        `[Resume] runResume calling cloud resume messageId=${messageId} decision=${decision} conversationId=${conversationId}`,
-      );
       await resumeConversation({
         conversationId,
         messageId,
@@ -279,30 +261,17 @@ export async function runResume(
         selected,
         signal: ac.signal,
       });
-      console.warn(
-        `[Resume] runResume cloud resume completed messageId=${messageId} decision=${decision} conversationId=${conversationId}`,
-      );
       usePausedTurnStore.getState().remove(messageId);
     }
   } catch (err) {
     if (isAbort(err)) {
-      console.warn(
-        `[Resume] runResume aborted messageId=${messageId} decision=${decision} conversationId=${conversationId}`,
-      );
       return;
     }
     // A mid-stream drop no longer means the turn died (1a: it runs detached) —
     // rejoin it live (1b) rather than re-resuming, which would double-run it.
     if (isTransportDrop(err) && (await rejoinLiveTurn(conversationId))) {
-      console.warn(
-        `[Resume] runResume transport drop, rejoined live messageId=${messageId} decision=${decision} conversationId=${conversationId}`,
-      );
       return;
     }
-    const errMsg = err instanceof Error ? err.message : String(err);
-    console.warn(
-      `[Resume] runResume failed messageId=${messageId} decision=${decision} conversationId=${conversationId} err=${errMsg}`,
-    );
     const s = useConversationStore.getState();
     if (getRuntime(conversationId).isGenerating) {
       s.finalizeLastMessage(conversationId);

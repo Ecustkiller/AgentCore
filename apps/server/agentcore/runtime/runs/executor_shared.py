@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict
-from typing import Any
 
 from agentcore.llm.pricing import calculate_cost
 from agentcore.llm.profiles import ProfileParams
@@ -121,7 +120,7 @@ async def _react_and_capture(
     round_sink: list[int] | None = None,
     streamed_content: list[str] | None = None,
     gate_escalation_sink: list[dict] | None = None,
-    split_context: dict[str, Any] | None = None,
+    token_budget: int = 0,
 ) -> tuple[str, str, TokenUsage, int]:
     """Run one ReAct pass over ``messages`` (mutated in place — the loop appends
     each assistant tool-call turn + tool results), then append the final assistant
@@ -183,7 +182,7 @@ async def _react_and_capture(
         # so 直播==重载 — keeping the conformance invariant while cleaning the product.
         deliverable_only=True,
         gate_escalation_sink=gate_escalation_sink,
-        split_context=split_context,
+        token_budget=token_budget,
     )
     messages.append(LLMMessage(role="assistant", content=content))
     return content, reasoning, usage, rounds

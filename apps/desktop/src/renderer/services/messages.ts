@@ -2,12 +2,9 @@ import { api } from "@/services/api";
 import {
   type MemoryUpdate,
   type Message,
-  checkpointsFromEvents,
-  nonBlockingAsksFromEvents,
-  planReviewsFromEvents,
-  teamPreviewsFromEvents,
   useConversationStore,
 } from "@/stores/conversation";
+import { hydrateInteractionsFromJournal } from "@/stores/interactions";
 import type { components } from "@/types/api.generated";
 import type {
   ContextBlockWire,
@@ -77,12 +74,18 @@ export interface BackendMessage {
      * `error` SSE event). Replayed onto `message.error` — same `{code, message}` shape the
      * live handler attaches. null for a clean turn. */
     error?: { code: string; message: string } | null;
+    /** 预检警告（P2 DURABLE）：journaled turn_warning lifted for plain-chat reload. */
+    turn_warning?: string | null;
   } | null;
   /** 回合 token 用量 (Tier 2 重载持久化): the turn's token snapshot in the ledger short-key
    * shape, projected server-side from the row's `usage` column. Replayed onto
    * `message.usage` so the bubble's meta row caption replays on reload — live, it rode
    * `message_end`. null for user rows and no-spend (errored/empty) turns. */
   usage?: UsageBreakdown | null;
+  /** Progressive assistant-row lifecycle (``usage.status``). Overlay / salvage
+   * criterion — ``running`` hydrates as streaming partial; ``incomplete`` as
+   * interrupted. */
+  status?: "running" | "complete" | "incomplete" | "failed" | null;
   /** 回合轮次 (Tier 2 重载持久化): ReAct rounds the turn ran, projected from the same column.
    * Replayed onto `message.rounds`; the bubble surfaces「N 轮」only when > 1. null for
    * user / pre-feature rows. */
@@ -95,6 +98,8 @@ export interface BackendMessage {
     escalations: number;
     audit_drops?: number;
   } | null;
+  /** 回合 ¥ 成本 (P2 DERIVED)：messages.cost 列；重载 footer 直接用。 */
+  cost?: import("@/services/usage").CostBreakdown | null;
   created_at: string;
 }
 
@@ -143,17 +148,11 @@ function executionIdOf(events: SSEEvent[]): string | null {
 export function toMessage(m: BackendMessage): Message {
   const events = m.runs?.events ?? [];
   const executionId = executionIdOf(events);
-  // Checkpoints are journaled even on single-agent turns (no run_plan), so parse
-  // them independently of `executionId` — a turn can have a checkpoint without a
-  // team graph.
-  const checkpoints = checkpointsFromEvents(events);
-  // Non-blocking asks (ask_user blocking=false) are journaled too, so a reloaded turn
-  // replays its non-gating cards inline.
-  const nonBlockingAsks = nonBlockingAsksFromEvents(events);
-  // plan_review events are journaled like ask_user checkpoints, so a reloaded turn
-  // replays its structured DAG pauses inline too (结构化挂起 2a).
-  const planReviews = planReviewsFromEvents(events);
-  const teamPreviews = teamPreviewsFromEvents(events);
+  // Journal → InteractionStore (P2 unified store; reload path).
+  // Cold/hot cards render from InteractionStore — no Message field dual-write.
+  if (events.length > 0) {
+    hydrateInteractionsFromJournal(m.conversation_id, m.id, events);
+  }
   // steps — now for single-agent AND multi-agent turns (统一团队时间线). Single-agent
   // tool-less turns synthesize one reasoning step from reasoning_content.
   const process: ProcessStep[] | undefined =
@@ -161,9 +160,21 @@ export function toMessage(m: BackendMessage): Message {
     (!executionId && m.reasoning_content
       ? [{ kind: "reasoning", text: m.reasoning_content }]
       : undefined);
+  // On reload the row `id` IS the server message_id. Stamp `serverMessageId` so
+  // resume guards (`isClientOnlyResumeKey`) match the live path (message_start stamp)
+  // and do not treat a hydrated assistant as client-only.
+  const role = m.role === "assistant" ? "assistant" : "user";
+  // P4: running → stream-style partial; incomplete / interrupted finish → interrupted chip.
+  const status = m.status ?? null;
+  const finishReason =
+    m.runs?.finish_reason ??
+    (status === "incomplete" ? "interrupted" : undefined) ??
+    undefined;
+  const isStreaming = role === "assistant" && status === "running";
   return {
     id: m.id,
-    role: m.role === "assistant" ? "assistant" : "user",
+    ...(role === "assistant" ? { serverMessageId: m.id } : {}),
+    role,
     content: m.content ?? "",
     reasoning: m.reasoning_content ?? undefined,
     // 关联气泡↔日志: replay the turn's trace_id so a reloaded bubble's dev「复制 trace id」
@@ -175,7 +186,7 @@ export function toMessage(m: BackendMessage): Message {
     // below lets that graph replay the turn (both null for non-team turns).
     executionId,
     runs: executionId
-      ? { events, finishReason: m.runs?.finish_reason ?? "stop" }
+      ? { events, finishReason: finishReason ?? "stop" }
       : undefined,
     // 结束原因 chip (Tier 2 c): surface the persisted finish_reason turn-level so a
     // single-agent abnormal turn (max_rounds / degraded / unproductive) replays its
@@ -183,7 +194,8 @@ export function toMessage(m: BackendMessage): Message {
     // single-agent turn has no `runs`. A clean turn carries no journal → undefined → no
     // chip. (Multi-agent also keeps its `runs.finishReason` above; this is redundant but
     // harmless there.)
-    finishReason: m.runs?.finish_reason ?? undefined,
+    finishReason,
+    status,
     // 报错回合 error card (Tier 2 a): replay the inline error card from the persisted
     // outcome, mirroring the live `error` event handler's `{code, message}` attach.
     error: m.runs?.error ?? undefined,
@@ -201,16 +213,16 @@ export function toMessage(m: BackendMessage): Message {
     // 回复反馈 (点赞/点踩): replay the persisted rating so a reloaded bubble shows the
     // user's thumbs; null server-side → null (未评价).
     feedback: m.feedback ?? null,
-    checkpoints: checkpoints.length ? checkpoints : undefined,
-    nonBlockingAsks: nonBlockingAsks.length ? nonBlockingAsks : undefined,
-    planReviews: planReviews.length ? planReviews : undefined,
-    teamPreviews: teamPreviews.length ? teamPreviews : undefined,
+    // 回合 ¥ 成本 (P2 DERIVED)：messages.cost 列；重载 footer 直接用（hover 明细仍走 GET …/cost）。
+    cost: m.cost ?? undefined,
+    // 预检警告（P2）：runs 投影抬升的 turn_warning → 消息横幅。
+    turnWarning: m.runs?.turn_warning ?? undefined,
     // 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): turn-level, so it replays independently
     // of the team graph — present on pure-chat reloads (empty `events`) too.
     captainContext: m.runs?.captain_context?.length
       ? m.runs.captain_context
       : undefined,
-    isStreaming: false,
+    isStreaming,
     attachments: m.attachments?.length
       ? m.attachments.map((a) => ({
           id: crypto.randomUUID(),

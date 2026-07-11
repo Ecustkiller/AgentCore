@@ -94,7 +94,17 @@ async def resolve_model_config(
     user_id: str,
     purpose: ModelPurpose = "chat",
 ) -> ModelConfig | None:
-    """Resolve full upstream config for one LLM purpose."""
+    """Resolve full upstream config for one LLM purpose.
+
+    SELECTION / ADVISORY ONLY — never an authorization path (01 F10). For a BYOK user
+    with no key this deliberately FALLS BACK to the platform model so token advisory
+    model / turn-profile selection still resolves a NAME. That diverges on purpose from
+    the billing gate (``preflight_llm_credentials``), which 402s the same keyless-BYOK
+    case: the gate is the single authorization choke point for building an authed
+    provider. Callers MUST NOT use this result to run a BYOK user's turn on the platform
+    key — today's consumers (``resolve_turn_model`` / ``resolve_user_chat_model``) only
+    read the model name.
+    """
     from agentcore.billing.preference import resolve_effective_billing_mode
     from agentcore.db.repositories import UserRepository
 

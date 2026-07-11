@@ -1,6 +1,6 @@
 """Database layer: ORM models, repositories, session management."""
 
-from agentcore.db.base import Base, async_session_factory, get_session
+from agentcore.db.base import Base, async_session_factory, get_session, telemetry_session_factory
 from agentcore.db.models import (
     Conversation,
     Credentials,
@@ -28,4 +28,5 @@ __all__ = [
     "UserRepository",
     "async_session_factory",
     "get_session",
+    "telemetry_session_factory",
 ]

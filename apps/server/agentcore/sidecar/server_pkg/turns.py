@@ -1,4 +1,4 @@
-"""Sidecar turn execution: run, resume, event pump."""
+"""Sidecar turn execution: run, resume, event pump + outbox finalize."""
 
 from __future__ import annotations
 
@@ -8,14 +8,23 @@ from typing import Any
 
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
+from agentcore.core.types import new_id
 from agentcore.llm.resolve import resolve_turn_model
 from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.events import EventSink
+from agentcore.runtime.journal import runs_from_entries
 from agentcore.runtime.suspension import TurnSuspension
 from agentcore.sidecar import protocol
 from agentcore.sidecar.server_pkg.result import trim_result
 
 logger = get_logger(__name__)
+
+
+def _finish_str(result: dict[str, Any]) -> str | None:
+    finish = result.get("finish_reason")
+    if finish is None:
+        return None
+    return finish.value if hasattr(finish, "value") else str(finish)
 
 
 class TurnExecutionMixin:
@@ -28,16 +37,39 @@ class TurnExecutionMixin:
         # The desktop mints one trace_id per local turn and threads it here + into the
         # write-back, so this turn's proxied LLM calls and its persisted reply share it.
         trace_id = str(params.get("traceId") or "")
+        # Optimistic user bubble id — outbox idempotency anchor (as-built: 双模式工作区 §10.3).
+        user_message_id = str(params.get("userMessageId") or "").strip() or new_id()
+        # Mint assistant message_id up front (cloud turn_runner posture) so begin_turn /
+        # content checkpoints / journal share one id before the pipeline runs.
+        message_id = new_id()
         # 结构化补轮·B（可逆叫停）：续辩 turn 从收场卡发起时带上一场 debate 的投影种子（普通回合为
         # None）。引擎据此让本场 debate 续上一场（焦点正交、首轮辩手读到上一场摘要）。
         raw_seed = params.get("debateSeed")
         debate_seed = raw_seed if isinstance(raw_seed, dict) else None
 
-        turn_creds = self._creds_for(conversation_id, trace_id, turn_id)
+        turn_creds = self._creds_for(conversation_id, trace_id, message_id)
 
         sink = EventSink()
         backend = self._make_backend()
         saver, deleter = self._suspension_hooks()
+        outbox = self._outbox_store
+        if outbox is not None:
+            outbox.bind_turn(
+                conversation_id=conversation_id,
+                user_message_id=user_message_id,
+                user_message=user_message,
+                message_id=message_id,
+                trace_id=trace_id,
+            )
+            await outbox.begin_turn(
+                conversation_id=conversation_id,
+                message_id=message_id,
+                trace_id=trace_id,
+            )
+            sink.bind_content_checkpoint(
+                conversation_id=conversation_id,
+                message_id=message_id,
+            )
         pump = asyncio.create_task(self._pump(turn_id, sink))
         try:
             try:
@@ -64,6 +96,7 @@ class TurnExecutionMixin:
                         suspension_saver=saver,
                         suspension_deleter=deleter,
                         debate_seed=debate_seed,
+                        message_id=message_id,
                     )
             finally:
                 # The pipeline no longer closes the sink (its owner does); the sidecar owns
@@ -71,6 +104,15 @@ class TurnExecutionMixin:
                 # await the None sentinel forever.
                 sink.close()
             await pump  # sink closed above → all events flushed
+            if outbox is not None:
+                await self._outbox_finalize(
+                    outbox,
+                    conversation_id=conversation_id,
+                    user_message=user_message,
+                    user_message_id=user_message_id,
+                    trace_id=trace_id,
+                    result=result,
+                )
             # Surface the model this turn actually ran on: creds present ⇒ the
             # cloud-proxy/account model; None (dev fallback) ⇒ settings.platform_model.
             await self._send(
@@ -80,6 +122,14 @@ class TurnExecutionMixin:
                 )
             )
         except asyncio.CancelledError:
+            if outbox is not None:
+                await outbox.salvage(
+                    journal=list(sink.execution_journal() or []),
+                    content=sink.streamed_content() or "",
+                    conversation_id=conversation_id,
+                    trace_id=trace_id,
+                    message_id=message_id,
+                )
             with contextlib.suppress(Exception):
                 await pump
             # Reply on an independent task: this one is unwinding from cancellation.
@@ -88,12 +138,55 @@ class TurnExecutionMixin:
             )
             raise
         except Exception as e:
+            if outbox is not None:
+                await outbox.salvage(
+                    journal=list(sink.execution_journal() or []),
+                    content=sink.streamed_content() or "",
+                    conversation_id=conversation_id,
+                    trace_id=trace_id,
+                    message_id=message_id,
+                )
             with contextlib.suppress(Exception):
                 await pump
             logger.error("sidecar.turn_failed", turn_id=turn_id, error=str(e), exc_info=True)
             await self._send(protocol.make_error(request_id, protocol.INTERNAL_ERROR, str(e)))
         finally:
+            if outbox is not None:
+                outbox.clear_turn()
             self._turns.pop(turn_id, None)
+
+    async def _outbox_finalize(
+        self,
+        outbox: Any,
+        *,
+        conversation_id: str,
+        user_message: str,
+        user_message_id: str,
+        trace_id: str,
+        result: dict[str, Any],
+    ) -> None:
+        """Seal the outbox record as ready for main-process writeback."""
+        journal_entries = result.get("journal_entries")
+        runs = runs_from_entries(journal_entries) if journal_entries else None
+        await outbox.finalize(
+            mode="local",
+            conversation_id=conversation_id,
+            user_message=user_message,
+            user_message_id=user_message_id,
+            assistant_content=result.get("content") or "",
+            assistant_reasoning=result.get("reasoning_content"),
+            citations=result.get("citations") or [],
+            runs=runs,
+            message_id=result.get("message_id"),
+            input_tokens=int(result.get("input_tokens", 0) or 0),
+            output_tokens=int(result.get("output_tokens", 0) or 0),
+            reasoning_tokens=int(result.get("reasoning_tokens", 0) or 0),
+            cache_hit_tokens=int(result.get("cache_hit_tokens", 0) or 0),
+            cache_miss_tokens=int(result.get("cache_miss_tokens", 0) or 0),
+            rounds=int(result.get("rounds", 0) or 0),
+            trace_id=trace_id,
+            finish_reason=_finish_str(result),
+        )
 
     async def _run_resume(
         self,
@@ -103,6 +196,7 @@ class TurnExecutionMixin:
         note: str,
         selected: list[str],
         trace_id: str = "",
+        user_message_id: str = "",
     ) -> None:
         """Rebuild + finish a durably-paused turn; stream events; reply when done.
 
@@ -113,11 +207,35 @@ class TurnExecutionMixin:
         """
         assert self._root is not None  # guarded by _on_resume
         turn_id = suspension.message_id
+        conversation_id = suspension.conversation_id
+        user_message = suspension.user_message or ""
+        # Prefer the client-pinned user bubble id; fall back to a stable derived key.
+        umid = (user_message_id or getattr(suspension, "user_message_id", None) or "").strip()
+        if not umid:
+            umid = f"resume-{turn_id}"
         # Resolved once so the pipeline runs on it AND the reply surfaces the same model.
-        resume_creds = self._creds_for(suspension.conversation_id, trace_id, turn_id)
+        resume_creds = self._creds_for(conversation_id, trace_id, turn_id)
         sink = EventSink()
         backend = self._make_backend()
         saver, deleter = self._suspension_hooks()
+        outbox = self._outbox_store
+        if outbox is not None:
+            outbox.bind_turn(
+                conversation_id=conversation_id,
+                user_message_id=umid,
+                user_message=user_message,
+                message_id=turn_id,
+                trace_id=trace_id,
+            )
+            await outbox.begin_turn(
+                conversation_id=conversation_id,
+                message_id=turn_id,
+                trace_id=trace_id,
+            )
+            sink.bind_content_checkpoint(
+                conversation_id=conversation_id,
+                message_id=turn_id,
+            )
         pump = asyncio.create_task(self._pump(turn_id, sink))
         try:
             try:
@@ -125,7 +243,7 @@ class TurnExecutionMixin:
                 # resumed reply's message_start + local logs join its proxy logs + write-back.
                 with log_context(
                     trace_id=trace_id,
-                    conversation_id=suspension.conversation_id,
+                    conversation_id=conversation_id,
                     user_id=self._user_id,
                 ):
                     from agentcore.sidecar import server as sidecar_server
@@ -151,6 +269,15 @@ class TurnExecutionMixin:
                 # await the None sentinel forever.
                 sink.close()
             await pump  # sink closed above → all events flushed
+            if outbox is not None:
+                await self._outbox_finalize(
+                    outbox,
+                    conversation_id=conversation_id,
+                    user_message=user_message,
+                    user_message_id=umid,
+                    trace_id=trace_id,
+                    result=result,
+                )
             # Same model signal as a start turn (see _run_turn): the resumed reply reports
             # the model it actually ran on so the badge stays honest across a resume.
             await self._send(
@@ -162,6 +289,14 @@ class TurnExecutionMixin:
         except asyncio.CancelledError:
             if self._paused_store is not None:
                 await self._paused_store.rollback_claim(turn_id)
+            if outbox is not None:
+                await outbox.salvage(
+                    journal=list(sink.execution_journal() or []),
+                    content=sink.streamed_content() or "",
+                    conversation_id=conversation_id,
+                    trace_id=trace_id,
+                    message_id=turn_id,
+                )
             with contextlib.suppress(Exception):
                 await pump
             self._send_soon(
@@ -171,6 +306,14 @@ class TurnExecutionMixin:
         except Exception as e:
             if self._paused_store is not None:
                 await self._paused_store.rollback_claim(turn_id)
+            if outbox is not None:
+                await outbox.salvage(
+                    journal=list(sink.execution_journal() or []),
+                    content=sink.streamed_content() or "",
+                    conversation_id=conversation_id,
+                    trace_id=trace_id,
+                    message_id=turn_id,
+                )
             with contextlib.suppress(Exception):
                 await pump
             logger.error("sidecar.resume_failed", turn_id=turn_id, error=str(e), exc_info=True)
@@ -185,6 +328,8 @@ class TurnExecutionMixin:
             if self._paused_store is not None:
                 await self._paused_store.confirm_claim(turn_id)
         finally:
+            if outbox is not None:
+                outbox.clear_turn()
             self._turns.pop(turn_id, None)
 
     async def _pump(self, turn_id: str, sink: EventSink) -> None:

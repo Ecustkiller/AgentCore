@@ -205,16 +205,16 @@ def test_team_orchestration_skill_teaches_constraint_vs_solution_and_outline_ste
 
 
 def test_team_orchestration_skill_teaches_parallel_review_notewall():
-    # 便签 Phase 1 (06-规划 产品AI协作优化复盘 §10): parallel reviewers must broadcast
-    # direction-level issues via post_note before nitpicking in isolation.
+    # 并行审查须经 post_note 广播方向级问题（便签墙），再各自挑细节。
+    # 决策现状见 docs/03-AI核心/Agent协作模式.md（波内共享上下文 / 便签墙）。
     body = _body("team_orchestration_advanced")
     assert "post_note" in body and "heads_up" in body
     assert "并行审查" in body or "并行" in body
 
 
 def test_team_orchestration_skill_teaches_review_contract_template():
-    # 06-规划 产品AI协作优化复盘 §3.2: CEO must preset contract on review workers so
-    # outputs share problems/suggestions/score fields for mechanical merge + revise.
+    # CEO 须给审查 worker 预设统一契约，使产出共享 problems/suggestions/score 字段、
+    # 便于机械合并 + revise。该范式由 team_orchestration_advanced skill 教学（本测试即钉之）。
     body = _body("team_orchestration_advanced")
     assert "审查类任务的统一契约" in body
     assert "output_format" in body and "json" in body

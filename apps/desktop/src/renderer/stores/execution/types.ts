@@ -201,12 +201,8 @@ export interface RunCheckpoint {
  * turn the moment it fires — a non-blocking `raised` as a passive notice, a `pending` as an
  * interactive 待你拍板 card — not after the CEO synthesizes.
  *
- * `status` is the lifecycle: `raised` = a non-blocking `run_escalation` banner (the worker kept
- * working); `pending` = a blocking `escalation_required` parked on the user (the card is live);
- * `resolved` = the user answered (`answer` carries it); `timeout` = no answer / 按假设继续 (the
- * worker fell back to its `assumption`). A blocking escalation folds `escalation_required`→
- * `pending`, then its `escalation_resolved`→`resolved`/`timeout`. `answer` is the user's reply
- * when resolved, `null` otherwise. Mirrors the conformance `RunEscalation` (golden-pinned). */
+ * `status`: `raised` | `pending` | `resolved` | `assumed` | `timed_out`.
+ * `assumed` = explicit 按假设继续; `timed_out` = wall-clock miss. Both leave answer null. */
 export type EscalationKind = "normal" | "scope" | "dep";
 
 export interface RunEscalation {
@@ -219,7 +215,7 @@ export interface RunEscalation {
   question: string;
   assumption: string;
   blocking: boolean;
-  status: "raised" | "pending" | "resolved" | "timeout";
+  status: "raised" | "pending" | "resolved" | "assumed" | "timed_out";
   answer: string | null;
   /** escalate kind（普通 / 缺输入 / 职责偏离）；旧流缺字段按 `normal`。 */
   kind: EscalationKind;
@@ -418,8 +414,8 @@ export interface Execution {
    * 裁判/小结 + 决策简报（{@link DebateView} 据此渲染）。 */
   debate: DebateResultPayload | null;
   /** 辩论进行中的逐轮叙事（`debate_round_started` / `debate_round` 折叠累积）：让进行中就叠
-   * 出主持人逐轮焦点 / 小结 / 裁判，而非干等 {@link debate} 收场。Transport-only 事件，重载
-   * （journal 无逐轮事件）恒为 `[]`——届时全量叙事线已在 {@link debate}。非辩论恒 `[]`。 */
+   * 出主持人逐轮焦点 / 小结 / 裁判，而非干等 {@link debate} 收场。P2 DURABLE——落 journal，
+   * 刷新后 hydrateFromJournal 重建；收场后全量叙事线亦在 {@link debate}。非辩论恒 `[]`。 */
   debateRounds: DebateNarrativeRound[];
   /** 交互式逐轮辩论决策卡（opt-in, §逐轮交互）：`debate_round_decision_*` 折叠累积。Desktop-
    * local & transport-only —— STRIPPED from the conformance ProjectedTurn、重载恒 `[]`（事件不进

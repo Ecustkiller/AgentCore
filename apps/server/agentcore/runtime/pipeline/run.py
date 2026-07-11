@@ -63,6 +63,7 @@ from agentcore.runtime.runs import (
     RunSpec,
     build_captain_executor,
 )
+from agentcore.runtime.session_persistence import SessionRosterWriter
 from agentcore.runtime.sessions import (
     SessionLoader,
     SessionSaver,
@@ -179,6 +180,10 @@ async def run_chat_pipeline(
         trace_id=get_log_value("trace_id"),
         captain_run_id=captain_run_id,
     )
+    # Session roster write-through (as-built: 成本配额 §三): fire-and-forget on the hot path,
+    # flush with audit at turn-end so cross-turn load-on-miss stays durable.
+    roster_writer = SessionRosterWriter.wrap(session_saver)
+    session_saver = roster_writer.save if roster_writer is not None else None
     # 执行级事件溯源 Phase 2 ⑤: publish this turn's history so a suspending face captures it
     # into the durable frame — the resume window splices it ahead of the journal-folded
     # rounds (the journal stores only history's LENGTH). Reset in finally.
@@ -485,6 +490,26 @@ async def run_chat_pipeline(
             err = captain_state.error or "captain run failed"
             sink.emit(error_event(ErrorCode.PIPELINE_ERROR, err))
             sink.emit(message_end(FinishReason.ERROR))
+            # Salvage longest available text (segment / captain_state / sink) — P1 §3.4.
+            with contextlib.suppress(Exception):
+                await sink.flush_stream_state()
+            from agentcore.conversation.store.merge import pick_longest
+            from agentcore.runtime.events.stream_checkpointer import (
+                CHANNEL_CAPTAIN_CONTENT,
+                CHANNEL_CAPTAIN_REASONING,
+            )
+
+            mem = sink.stream_memory_snapshot()
+            salvaged_content = pick_longest(
+                mem.get(CHANNEL_CAPTAIN_CONTENT),
+                captain_state.content,
+                sink.streamed_content(),
+            )
+            salvaged_reasoning = pick_longest(
+                mem.get(CHANNEL_CAPTAIN_REASONING),
+                captain_state.reasoning,
+                sink.streamed_reasoning(),
+            )
             # A captain that died mid-loop still burned tokens (B-deep 失败计费): the
             # executor priced them onto captain_state, so carry the captain ledger row
             # back even on error — _persist_turn_result writes cost_runs independently
@@ -501,9 +526,12 @@ async def run_chat_pipeline(
                 *(asdict(r) for r in vision_cost_sink),
             ]
             await audit_recorder.flush()
+            if roster_writer is not None:
+                await roster_writer.flush()
             return {
                 "message_id": message_id,
-                "content": "",
+                "content": salvaged_content,
+                "reasoning_content": salvaged_reasoning or None,
                 "error": err,
                 "error_code": ErrorCode.PIPELINE_ERROR,
                 "finish_reason": FinishReason.ERROR,
@@ -609,7 +637,19 @@ async def run_chat_pipeline(
 
         journal_entries = _journal_entries_for_turn(fact_log, sink=sink, finish=finish)
 
+        # Drain journal → audit projection fully BEFORE 定格 audit_drops: the teardown
+        # flush (finally) re-drains the writer, which can schedule + drop more audit
+        # writes after drops was read — undercounting the persisted turn_metrics.audit_drops
+        # (采集降级遥测 → admin aggregate). Mirror the finally order (journal then recorder);
+        # best-effort so a drain fault never turns a successful turn into an error.
+        with contextlib.suppress(Exception):
+            await journal_writer.flush()
         await audit_recorder.flush()
+        if roster_writer is not None:
+            await roster_writer.flush()
+        # 回合收口前 boundary flush (P1) — segments cleared after finalize snapshot.
+        with contextlib.suppress(Exception):
+            await sink.flush_stream_state()
         return {
             "message_id": message_id,
             "content": final_content,
@@ -652,10 +692,31 @@ async def run_chat_pipeline(
             )
         except Exception:  # noqa: BLE001 — salvage is best-effort; keep the real error
             crash_journal = None
+        # Salvage longest available text from segment / sink (captain_state may be absent).
+        with contextlib.suppress(Exception):
+            await sink.flush_stream_state()
+        from agentcore.conversation.store.merge import pick_longest
+        from agentcore.runtime.events.stream_checkpointer import (
+            CHANNEL_CAPTAIN_CONTENT,
+            CHANNEL_CAPTAIN_REASONING,
+        )
+
+        mem = sink.stream_memory_snapshot()
+        salvaged_content = pick_longest(
+            mem.get(CHANNEL_CAPTAIN_CONTENT),
+            sink.streamed_content(),
+        )
+        salvaged_reasoning = pick_longest(
+            mem.get(CHANNEL_CAPTAIN_REASONING),
+            sink.streamed_reasoning(),
+        )
         await audit_recorder.flush()
+        if roster_writer is not None:
+            await roster_writer.flush()
         return {
             "message_id": message_id,
-            "content": "",
+            "content": salvaged_content,
+            "reasoning_content": salvaged_reasoning or None,
             "error": str(e),
             "error_code": code,
             "finish_reason": FinishReason.ERROR,
@@ -663,6 +724,13 @@ async def run_chat_pipeline(
             "audit_drops": audit_recorder.drops,
         }
     finally:
+        # 触发点①：turn 结束防御性 orphan 未 settle 的热路交互
+        with contextlib.suppress(Exception):
+            from agentcore.runtime.interaction_orphan import orphan_registry_pending
+
+            await orphan_registry_pending(
+                conversation_id, turn_id=message_id
+            )
         current_fact_log.reset(fact_log_token)
         # Drain the append-on-emit journal BEFORE dropping the writer: an abandoned in-flight
         # write leaves a checked-out DB connection for the GC to terminate (asyncpg
@@ -674,6 +742,9 @@ async def run_chat_pipeline(
 
         with contextlib.suppress(Exception):
             await audit_recorder.flush()
+        with contextlib.suppress(Exception):
+            if roster_writer is not None:
+                await roster_writer.flush()
         current_audit_recorder.reset(audit_token)
         turn_history.reset(history_token)
         if execution_id_token is not None:

@@ -25,6 +25,10 @@ const COPY: Record<RunOutcomeReason, { heading: string; body: string }> = {
     heading: "重试大概率仍会失败",
     body: "这是确定性失败（如提示过长 / 鉴权 / 余额），同样的重试会再次失败。可接受此结果，让团队据此收尾。",
   },
+  recovery_ignored: {
+    heading: "已忽略这次救火",
+    body: "你在状态条上选择了忽略——该步骤保持失败态收尾。可接受此结果，或在对话里让 CEO 重新安排。",
+  },
 };
 
 function resolveAcceptState(

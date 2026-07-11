@@ -16,6 +16,7 @@ from agentcore.llm.credentials import (
 )
 from agentcore.runtime.suspension import TurnSuspension
 from agentcore.sidecar import protocol
+from agentcore.conversation.store.outbox import OutboxStore
 from agentcore.sidecar.paused_store import LocalPausedTurnStore
 from agentcore.sidecar.server_pkg.handlers import HandlerMixin
 from agentcore.sidecar.server_pkg.turns import TurnExecutionMixin
@@ -39,6 +40,9 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         # The local durable-pause store (§8.6 paused-turn port, local impl), set from
         # ``initialize``'s ``dataDir``. ``None`` ⇒ no data dir ⇒ pauses stay in-memory.
         self._paused_store: LocalPausedTurnStore | None = None
+        # Progressive outbox (as-built: 双模式工作区 §10.3): sibling of paused under dataDir.
+        # ``None`` ⇒ no data dir ⇒ no local outbox (dev without durable write-back).
+        self._outbox_store: OutboxStore | None = None
         # turn_id → running task, so ``cancel`` can reach an in-flight turn. A resume
         # registers under its message_id, so a cancel during resume reaches it too.
         self._turns: dict[str, asyncio.Task[None]] = {}

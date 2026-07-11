@@ -363,7 +363,17 @@
       "completed": 2,
       "total": 2
     },
-    "pendingInteraction": null,
+    "interactions": [
+      {
+        "kind": "team_preview",
+        "id": "tp1",
+        "status": "resolved",
+        "workerIds": [
+          "r1",
+          "r2"
+        ]
+      }
+    ],
     "cost": {
       "input": 240000,
       "cached": 64000,
@@ -373,6 +383,8 @@
     },
     "debate": null,
     "debateRounds": [],
+    "teamSynthesisPreview": null,
+    "turnWarning": null,
     "teamNotes": []
   }
 }

@@ -4,10 +4,9 @@ import {
   planFromRunPlan,
   useExecutionStore,
 } from "@/stores/execution";
+import { applyInteractionWireEvent } from "@/stores/interactions";
 import type {
   DebateResultPayload,
-  DebateRoundDecisionRequiredPayload,
-  DebateRoundDecisionResolvedPayload,
   DebateRoundPayload,
   DebateRoundStartedPayload,
   RunContextPayload,
@@ -118,17 +117,23 @@ export function handleExecutionEvent(
     // 仍走 frame 路径以便 journal 重放时不丢事件（intake 为 DURABLE）。
     case "run_intake":
     case "run_escalation_gate":
-    case "run_split_assessed":
-    case "run_subworker_started":
-    case "run_subworker_completed":
     // 阻塞式求决策: a worker SUSPENDED on a blocking escalate (escalation_required) then settled
     // (escalation_resolved). Both fold onto the run's escalations via the same frame path
-    // (projectExecution appends `pending` / flips `resolved`|`timeout`), driving the bubble's
+    // (projectExecution appends `pending` / flips `resolved`|`assumed`|`timed_out`), driving the bubble's
     // EscalationCard + the node badge. UNLIKE the gates (approval / plan_review) they do NOT pause
     // the turn — siblings keep running — so there is no conversation-store card, just the journaled
     // frame; both are journaled, so the exchange replays inline on reload.
     case "escalation_required":
-    case "escalation_resolved":
+    case "escalation_resolved": {
+      applyInteractionWireEvent(
+        event.type,
+        (event.payload ?? {}) as Record<string, unknown>,
+        conversationId,
+        execMessageId(conversationId) ?? "",
+      );
+      recordFrameNow(event, conversationId);
+      return true;
+    }
     // 团队便签墙 (§2.2 通): a worker broadcast a one-line decision / heads-up to its
     // concurrent siblings. Turn-level (folds onto Execution.teamNotes via the same frame
     // path, not onto a node); journaled, so it replays on reload. Fire-and-forget — it never
@@ -243,38 +248,22 @@ export function handleExecutionEvent(
     // twin settles it. Transport-only (not journaled) — a desktop-live card, like debate_round.
     case "debate_round_decision_required": {
       const mid = execMessageId(conversationId);
-      if (mid) {
-        const p = event.payload as DebateRoundDecisionRequiredPayload;
-        useExecutionStore.getState().recordDebateDecision(
-          {
-            kind: "required",
-            id: p.decision_id,
-            moderatorRunId: p.moderator_run_id,
-            roundNo: p.round_no,
-            focus: p.focus,
-            summary: p.summary,
-            converged: p.converged,
-            rationale: p.rationale,
-          },
-          mid,
-        );
-      }
+      applyInteractionWireEvent(
+        event.type,
+        (event.payload ?? {}) as Record<string, unknown>,
+        conversationId,
+        mid ?? "",
+      );
       return true;
     }
     case "debate_round_decision_resolved": {
       const mid = execMessageId(conversationId);
-      if (mid) {
-        const p = event.payload as DebateRoundDecisionResolvedPayload;
-        useExecutionStore.getState().recordDebateDecision(
-          {
-            kind: "resolved",
-            id: p.decision_id,
-            decision: p.decision,
-            focus: p.focus,
-          },
-          mid,
-        );
-      }
+      applyInteractionWireEvent(
+        event.type,
+        (event.payload ?? {}) as Record<string, unknown>,
+        conversationId,
+        mid ?? "",
+      );
       return true;
     }
     default:

@@ -1,16 +1,14 @@
 import type {
   DebateNarrativeRound,
   DebateResultPayload,
+  DebateRoundPayload,
+  DebateRoundStartedPayload,
   RunPlanPayload,
   TeamSynthesisPreviewPayload,
   ToolUseProgressPayload,
 } from "@/types/events";
 import { create } from "zustand";
-import {
-  type DebateDecisionUpdate,
-  foldDebateDecision,
-  upsertDebateRound,
-} from "./debate";
+import { upsertDebateRound } from "./debate";
 import { type RunFrame, frameFromEvent } from "./frames";
 import { mergePlanInto, planFromRunPlan } from "./plan";
 import type {
@@ -38,17 +36,19 @@ export interface ExecutionRuntime {
   debate: DebateResultPayload | null;
   /** 辩论逐轮叙事（`debate_round_started` / `debate_round` —— 回合级单事件，非 frame）：
    * 折叠累积于此，{@link projectExecution} 透传到 {@link Execution.debateRounds}。`[]` =
-   * 非辩论/无逐轮事件（含重载，逐轮事件 transport-only 不进 journal）。 */
+   * 非辩论/无逐轮事件。P2 起事件 DURABLE：重载由 hydrateFromJournal 以同一 fold 重建。 */
   debateRounds: DebateNarrativeRound[];
   /** 交互式逐轮辩论决策卡（`debate_round_decision_*` —— 回合级单事件，非 frame）：折叠累积于
    * 此，{@link projectExecution} 透传到 {@link Execution.debateDecisions}。`[]` = 非交互辩论 /
-   * 无决策事件（含重载，事件 transport-only 不进 journal）。 */
+   * 无决策事件；事件虽 DURABLE 入 journal，重载时待答态由 InteractionStore 重建，此处恒空
+   * （决策结果已体现在收场叙事/轮次）。 */
   debateDecisions: DebateRoundDecision[];
   /** Worker-scoped `tool_use_progress` (run_id present), keyed by run id. Transport-only —
    * merged onto agents at projection time; never journaled or replayed. */
   workerToolPhases: Record<string, { phase: string; toolName: string }>;
-  /** CEO 协调模式 Phase 1：`team_synthesis_preview` 最新快照。Transport-only — 不进 frame /
-   * journal；重载恒 null。驱动 StatusStrip「团队进展」预览行。 */
+  /** CEO 协调模式 Phase 1：`team_synthesis_preview` 最新快照（同 key 保最新）。P2 起
+   * DURABLE：重载由 hydrateFromJournal 取 journal 中最后一条重建。驱动 StatusStrip
+   * 「团队进展」预览行。 */
   teamSynthesisPreview: TeamSynthesisPreviewPayload | null;
 }
 
@@ -86,14 +86,6 @@ interface ExecutionState {
    * upsertDebateRound}; a no-plan slot ignores it. Drives the进行中 per-round overlay
    * before {@link recordDebateResult}'s 收场 product lands. */
   recordDebateRound: (round: DebateNarrativeRound, messageId: string) => void;
-  /** Fold one 交互式逐轮决策 update (`debate_round_decision_required` → append `pending`;
-   * `..._resolved` → settle by id) into the slot's {@link ExecutionRuntime.debateDecisions}
-   * via {@link foldDebateDecision}; a no-plan slot ignores it. Drives the round-boundary
-   * 决策卡（opt-in, §逐轮交互）. */
-  recordDebateDecision: (
-    update: DebateDecisionUpdate,
-    messageId: string,
-  ) => void;
   /** Stamp a delegated worker's running-tool EXECUTION phase (`tool_use_progress` with
    * `run_id`). Transport-only — not a frame. */
   setWorkerToolPhase: (
@@ -143,7 +135,8 @@ const EMPTY_EXEC: ExecutionRuntime = {
  * fold needs (a journal is only stored for finished turns). */
 function statusFromFinish(finishReason: string): ExecutionStatus {
   if (finishReason === "error") return "failed";
-  if (finishReason === "cancelled") return "cancelled";
+  if (finishReason === "cancelled" || finishReason === "interrupted")
+    return "cancelled";
   // 挂起即收口 (②): a turn finalized AT a durable checkpoint carries finish_reason=paused;
   // its graph stayed paused (the resume card drives it), so a hydrate must keep it paused
   // rather than collapse it to "completed" (mirrors the conformance fold's FINISH_TO_STATUS).
@@ -235,15 +228,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
           : null,
       ),
 
-    recordDebateDecision: (update, messageId) =>
-      patchExec(messageId, (cur) =>
-        cur.plan
-          ? {
-              debateDecisions: foldDebateDecision(cur.debateDecisions, update),
-            }
-          : null,
-      ),
-
     setWorkerToolPhase: (payload, messageId) => {
       if (!payload.run_id) return;
       patchExec(messageId, (cur) => ({
@@ -283,6 +267,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         let plan: ExecutionPlan | null = null;
         const frames: RunFrame[] = [];
         let debate: DebateResultPayload | null = null;
+        let debateRounds: DebateNarrativeRound[] = [];
+        let teamSynthesisPreview: TeamSynthesisPreviewPayload | null = null;
         for (const event of journal.events) {
           if (event.type === "run_plan") {
             const next = planFromRunPlan(event.payload as RunPlanPayload);
@@ -290,6 +276,33 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
           } else if (event.type === "debate_result") {
             // 回合级单事件（非 frame）：直接捕获，回放与直播经同一 slot 渲染辩论视图。
             debate = event.payload as DebateResultPayload;
+          } else if (event.type === "debate_round_started") {
+            // P2 DURABLE：刷新后从 journal 重建辩论进行态（与 live recordDebateRound 同 fold）。
+            const p = event.payload as DebateRoundStartedPayload;
+            debateRounds = upsertDebateRound(debateRounds, {
+              round_no: p.round_no,
+              focus: p.focus,
+              summary: "",
+              verdict: null,
+              sides: [],
+              clashes: [],
+              cross_exam: [],
+            });
+          } else if (event.type === "debate_round") {
+            const p = event.payload as DebateRoundPayload;
+            debateRounds = upsertDebateRound(debateRounds, {
+              round_no: p.round_no,
+              focus: p.focus,
+              summary: p.summary,
+              verdict: p.verdict,
+              sides: p.sides,
+              clashes: p.clashes,
+              cross_exam: p.cross_exam ?? [],
+            });
+          } else if (event.type === "team_synthesis_preview") {
+            // P2 DURABLE：同 key 保最新（后写覆盖）；刷新后 StatusStrip 可重建。
+            teamSynthesisPreview =
+              event.payload as TeamSynthesisPreviewPayload;
           } else {
             const frame = frameFromEvent(event);
             if (frame) frames.push(frame);
@@ -306,12 +319,11 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               playhead: null,
               status: statusFromFinish(journal.finishReason),
               debate,
-              // 逐轮事件 transport-only（不进 journal）：重载无之，全量叙事线在 debate 里。
-              debateRounds: [],
-              // 交互式逐轮决策卡同为 transport-only：重载恒空（决策已体现在收场叙事 / 轮次）。
+              debateRounds,
+              // 交互式逐轮决策卡：决策已体现在收场叙事 / 轮次；重载恒空（卡本身非 DURABLE 展示态）。
               debateDecisions: [],
               workerToolPhases: {},
-              teamSynthesisPreview: null,
+              teamSynthesisPreview,
             },
           },
         };

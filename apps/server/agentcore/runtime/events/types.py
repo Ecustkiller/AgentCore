@@ -88,13 +88,6 @@ class EventType(StrEnum):
     # 模型主动 escalate → run_escalation）。DERIVED：耐久记录仍走 ESCALATION_REQUIRED
     # / RunState.escalations；本事件是实时诊断信号。
     RUN_ESCALATION_GATE = "run_escalation_gate"
-    # Worker 内部路由 Phase 2：顺序分裂——压力触发后的评估结果（是否分裂 / 子任务列表）。
-    # DURABLE：reload 可重放「为何分裂」诊断；Sub-Worker 明细另见 started/completed。
-    RUN_SPLIT_ASSESSED = "run_split_assessed"
-    # Worker 内部路由 Phase 2：单个 Sub-Worker 启动（顺序分裂链中的一环）。
-    RUN_SUBWORKER_STARTED = "run_subworker_started"
-    # Worker 内部路由 Phase 2：单个 Sub-Worker 完成（结果摘要折叠进父 journal）。
-    RUN_SUBWORKER_COMPLETED = "run_subworker_completed"
     ESCALATION_REQUIRED = "escalation_required"
     ESCALATION_RESOLVED = "escalation_resolved"
     # 团队便签墙 (§2.2 通): a worker pinned a short note (我定了 X / 提个醒 Y) to the batch
@@ -103,8 +96,7 @@ class EventType(StrEnum):
     # ProjectedTurn so both ends render it (conformance-visible, unlike transport-only board ops).
     TEAM_NOTE_POSTED = "team_note_posted"
     # CEO 协调模式 Phase 1：多 worker 委派期间的确定性团队进展摘要（模板拼接，不调 LLM）。
-    # Transport-only（EPHEMERAL）——验证「渐进可见性」产品信号；不进 journal / ProjectedTurn，
-    # 避免污染终稿气泡。Phase 2 若升级为 CEO update_synthesis 草稿通道再另定契约。
+    # DURABLE（P2）——落 journal；前端 fold 同 key 保最新，刷新后重建 StatusStrip 预览条。
     # → 见 docs/03-AI核心/编排器与CEO主Agent.md §协调模式（合成通道）
     TEAM_SYNTHESIS_PREVIEW = "team_synthesis_preview"
     DEBATE_RESULT = "debate_result"
@@ -112,8 +104,10 @@ class EventType(StrEnum):
     DEBATE_ROUND = "debate_round"
     DEBATE_ROUND_DECISION_REQUIRED = "debate_round_decision_required"
     DEBATE_ROUND_DECISION_RESOLVED = "debate_round_decision_resolved"
+    # 提问确认交互统一：热路 pending 交互失效（假卡消灭）。payload={interaction_id, kind}。
+    INTERACTION_ORPHANED = "interaction_orphaned"
     # BYOK soft gate (开放主流AI模型接入 §4.5): preflight hint when probe says the
-    # user's model may lack tool calling. Transport-only — not journaled.
+    # user's model may lack tool calling. DURABLE（P2）——落 journal；runs 投影 → 横幅。
     TURN_WARNING = "turn_warning"
     # AI Town simulation (M1): tick lifecycle + agent snapshots. Persisted in sim_event,
     # not turn_journal — EPHEMERAL disposition (see disposition.py).
@@ -133,6 +127,9 @@ class FinishReason(StrEnum):
     UNPRODUCTIVE = "unproductive"
     ERROR = "error"
     CANCELLED = "cancelled"
+    # Crash / lease-sweeper salvage of a mid-flight turn with no unfinished DAG to redrive
+    # (流式回复持久化 §3.4): stream_state → incomplete + turn_end(interrupted).
+    INTERRUPTED = "interrupted"
     # 挂起即收口 (②): the turn ended NOT because it finished, but because it hit a durable
     # checkpoint (ask_user blocking / plan_review) and finalized in place — its frame +
     # journal are persisted and it awaits ``POST .../resume``. Distinct from END_TURN (the
@@ -148,6 +145,9 @@ class SSEEvent:
     type: EventType
     payload: dict[str, Any] = field(default_factory=dict)
     timestamp: str = ""
+    # Journal seq for DURABLE facts (SSE ``id:`` line). Set after the persist barrier
+    # resolves — never part of the JSON envelope. EPHEMERAL / delta events leave this None.
+    seq: int | None = None
 
     def __post_init__(self):
         if not self.timestamp:

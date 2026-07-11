@@ -341,14 +341,56 @@ class TurnJournalRepository:
         self,
         *,
         turn_id: str,
-        seq: int,
+        seq: int | None,
         conversation_id: str,
         trace_id: str | None,
         entry: dict,
-    ) -> None:
-        """Append one journal fact at ``seq`` (emit-on-write path, one commit)."""
-        self._session.add(
-            TurnJournalRow(
+    ) -> int | None:
+        """Append one journal fact (emit-on-write path, one commit).
+
+        **seq 双模式 (D7)**：
+        - ``seq is None`` (live)：事务内 ``pg_advisory_xact_lock(hash(turn_id))`` 后
+          ``COALESCE(MAX(seq),-1)+1`` 原子分配——跨 writer 无竞态。禁止无锁 MAX+1。
+        - ``seq is int`` (merge / outbox 回写)：显式 seq + ``(turn_id, seq)`` 幂等去重，
+          禁止云端重排。
+
+        Returns the durable ``seq`` on fresh insert, or ``None`` on merge-mode duplicate
+        no-op (so the SSE barrier can stamp ``id:`` without a second read).
+        """
+        from sqlalchemy import text
+
+        if seq is None:
+            # Live: advisory lock serializes same-turn writers, then allocate.
+            # hashtext is stable for a given turn_id within PG.
+            await self._session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:tid))"),
+                {"tid": turn_id},
+            )
+            result = await self._session.execute(
+                text(
+                    "SELECT COALESCE(MAX(seq), -1) + 1 FROM turn_journal WHERE turn_id = :tid"
+                ),
+                {"tid": turn_id},
+            )
+            allocated = int(result.scalar_one())
+            self._session.add(
+                TurnJournalRow(
+                    turn_id=turn_id,
+                    seq=allocated,
+                    kind=str(entry.get("kind") or ""),
+                    payload=entry.get("payload") or {},
+                    ts=entry.get("ts"),
+                    conversation_id=conversation_id,
+                    trace_id=trace_id,
+                )
+            )
+            await self._session.commit()
+            return allocated
+
+        # Merge mode: explicit seq + idempotent conflict.
+        stmt = (
+            pg_insert(TurnJournalRow)
+            .values(
                 turn_id=turn_id,
                 seq=seq,
                 kind=str(entry.get("kind") or ""),
@@ -357,8 +399,13 @@ class TurnJournalRepository:
                 conversation_id=conversation_id,
                 trace_id=trace_id,
             )
+            .on_conflict_do_nothing(index_elements=["turn_id", "seq"])
+            .returning(TurnJournalRow.turn_id)
         )
+        result = await self._session.execute(stmt)
+        inserted = result.scalar_one_or_none() is not None
         await self._session.commit()
+        return seq if inserted else None
 
     async def load(self, turn_id: str) -> list[dict]:
         """One turn's facts as ordered ``{kind, payload, ts}`` entries (``[]`` if none)."""
@@ -368,6 +415,21 @@ class TurnJournalRepository:
             .order_by(TurnJournalRow.seq.asc())
         )
         return [{"kind": r.kind, "payload": r.payload, "ts": r.ts} for r in result.scalars().all()]
+
+    async def load_after(self, turn_id: str, after_seq: int) -> list[dict]:
+        """Facts with ``seq > after_seq`` as ordered ``{seq, kind, payload, ts}`` (P3 cursor)."""
+        result = await self._session.execute(
+            select(TurnJournalRow)
+            .where(
+                TurnJournalRow.turn_id == turn_id,
+                TurnJournalRow.seq > after_seq,
+            )
+            .order_by(TurnJournalRow.seq.asc())
+        )
+        return [
+            {"seq": r.seq, "kind": r.kind, "payload": r.payload, "ts": r.ts}
+            for r in result.scalars().all()
+        ]
 
     async def max_seq(self, turn_id: str) -> int | None:
         """Highest journal ``seq`` for ``turn_id``, or ``None`` when the turn has no rows.

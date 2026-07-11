@@ -1,0 +1,241 @@
+/**
+ * ProjectedTurn.interactions[] fold (提问确认统一重构 P3).
+ * Mirrors apps/server/.../pending_interactions.fold_interactions + project_interaction_leaf.
+ * Mobile-local copy — do not import from desktop (cross-platform-frontend.mdc).
+ */
+import type {
+  ProjectedInteraction,
+  InteractionStatus,
+} from "@agentcore/protocol-conformance/projectedTurn";
+import { GATE_INTERACTION_KINDS } from "@agentcore/protocol-conformance/projectedTurn";
+
+type Wire = Record<string, unknown>;
+
+interface Open {
+  leaf: ProjectedInteraction;
+  order: number;
+}
+
+function keyOf(kind: string, id: string): string {
+  return `${kind}:${id}`;
+}
+
+function asRecord(v: unknown): Wire {
+  return v && typeof v === "object" && !Array.isArray(v)
+    ? (v as Wire)
+    : {};
+}
+
+function str(v: unknown, fallback = ""): string {
+  return typeof v === "string" ? v : fallback;
+}
+
+function upsert(
+  map: Map<string, Open>,
+  order: { n: number },
+  leaf: ProjectedInteraction,
+): void {
+  const k = keyOf(leaf.kind, leaf.id);
+  const prev = map.get(k);
+  if (prev && (prev.leaf.status === "resolved" || prev.leaf.status === "orphaned")) {
+    return;
+  }
+  if (!prev) {
+    map.set(k, { leaf, order: order.n++ });
+  } else {
+    prev.leaf = leaf;
+  }
+}
+
+function settle(
+  map: Map<string, Open>,
+  kind: ProjectedInteraction["kind"],
+  id: string,
+  status: Extract<InteractionStatus, "resolved" | "orphaned">,
+): void {
+  const prev = map.get(keyOf(kind, id));
+  if (!prev || prev.leaf.status !== "pending") return;
+  prev.leaf = { ...prev.leaf, status };
+}
+
+/** Fold SSE events → interactions[] (insertion order of required). */
+export function foldInteractions(events: Array<{ type: string; payload: unknown }>): ProjectedInteraction[] {
+  const map = new Map<string, Open>();
+  const order = { n: 0 };
+
+  for (const ev of events) {
+    const p = asRecord(ev.payload);
+    switch (ev.type) {
+      case "approval_required": {
+        const id = str(p.approval_id);
+        if (!id) break;
+        upsert(map, order, {
+          kind: "approval",
+          id,
+          status: "pending",
+          toolCallId: str(p.tool_call_id),
+          toolName: str(p.tool_name),
+          arguments: asRecord(p.arguments),
+        });
+        break;
+      }
+      case "approval_resolved": {
+        const id = str(p.approval_id);
+        if (id) settle(map, "approval", id, "resolved");
+        break;
+      }
+      case "delegation_authorization_required": {
+        const id = str(p.authorization_id);
+        if (!id) break;
+        const workers = Array.isArray(p.workers)
+          ? (p.workers as Array<Record<string, unknown>>)
+          : [];
+        const tools = Array.isArray(p.tools)
+          ? p.tools.filter((t): t is string => typeof t === "string")
+          : [];
+        upsert(map, order, {
+          kind: "delegation_authorization",
+          id,
+          status: "pending",
+          executionId: str(p.execution_id),
+          workers,
+          tools,
+        });
+        break;
+      }
+      case "delegation_authorization_resolved": {
+        const id = str(p.authorization_id);
+        if (id) settle(map, "delegation_authorization", id, "resolved");
+        break;
+      }
+      case "escalation_required": {
+        if (p.awaiting === "ceo") break;
+        const id = str(p.escalation_id);
+        if (!id) break;
+        const leaf: ProjectedInteraction = {
+          kind: "escalation",
+          id,
+          status: "pending",
+          runId: str(p.run_id),
+          agentId: str(p.agent_id),
+          question: str(p.question),
+          assumption: str(p.assumption),
+        };
+        if (p.awaiting === "user" || p.awaiting === "ceo") {
+          leaf.awaiting = p.awaiting;
+        }
+        upsert(map, order, leaf);
+        break;
+      }
+      case "escalation_resolved": {
+        const id = str(p.escalation_id);
+        if (id) settle(map, "escalation", id, "resolved");
+        break;
+      }
+      case "debate_round_decision_required": {
+        const id = str(p.decision_id);
+        if (!id) break;
+        upsert(map, order, {
+          kind: "debate_round",
+          id,
+          status: "pending",
+          executionId: str(p.execution_id),
+          moderatorRunId: str(p.moderator_run_id),
+          roundNo: typeof p.round_no === "number" ? p.round_no : 0,
+          focus: str(p.focus),
+          summary: str(p.summary),
+          converged: Boolean(p.converged),
+          rationale: str(p.rationale),
+        });
+        break;
+      }
+      case "debate_round_decision_resolved": {
+        const id = str(p.decision_id);
+        if (id) settle(map, "debate_round", id, "resolved");
+        break;
+      }
+      case "checkpoint_required": {
+        const id = str(p.checkpoint_id);
+        if (!id) break;
+        upsert(map, order, {
+          kind: "ask_user",
+          id,
+          status: "pending",
+          question: str(p.question),
+          context: str(p.context),
+        });
+        break;
+      }
+      case "checkpoint_resolved": {
+        const id = str(p.checkpoint_id);
+        if (id) settle(map, "ask_user", id, "resolved");
+        break;
+      }
+      case "plan_review_required": {
+        const id = str(p.checkpoint_id);
+        if (!id) break;
+        const steps = Array.isArray(p.steps) ? p.steps : [];
+        const runIds = steps.map((s) => str(asRecord(s).run_id));
+        upsert(map, order, {
+          kind: "plan_review",
+          id,
+          status: "pending",
+          runIds,
+        });
+        break;
+      }
+      case "plan_review_resolved": {
+        const id = str(p.checkpoint_id);
+        if (id) settle(map, "plan_review", id, "resolved");
+        break;
+      }
+      case "team_preview_required": {
+        const id = str(p.checkpoint_id);
+        if (!id) break;
+        const workers = Array.isArray(p.workers) ? p.workers : [];
+        const workerIds = workers.map((w) => str(asRecord(w).run_id));
+        upsert(map, order, {
+          kind: "team_preview",
+          id,
+          status: "pending",
+          workerIds,
+        });
+        break;
+      }
+      case "team_preview_resolved": {
+        const id = str(p.checkpoint_id);
+        if (id) settle(map, "team_preview", id, "resolved");
+        break;
+      }
+      case "question_posted": {
+        const id = str(p.ask_id);
+        if (!id) break;
+        upsert(map, order, {
+          kind: "question_posted",
+          id,
+          status: "pending",
+          question: str(p.question),
+          context: str(p.context),
+        });
+        break;
+      }
+      case "interaction_orphaned": {
+        const id = str(p.interaction_id);
+        const kind = str(p.kind) as ProjectedInteraction["kind"];
+        if (id && kind) settle(map, kind, id, "orphaned");
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  return [...map.values()]
+    .sort((a, b) => a.order - b.order)
+    .map((o) => o.leaf);
+}
+
+export function hasGatePending(interactions: ProjectedInteraction[]): boolean {
+  const gates = new Set<string>(GATE_INTERACTION_KINDS);
+  return interactions.some((i) => i.status === "pending" && gates.has(i.kind));
+}

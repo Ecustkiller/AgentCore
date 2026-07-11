@@ -190,9 +190,26 @@ async def lifespan(app: FastAPI):
     if settings.structured_suspension_persist_enabled:
         paused_turn_retention_task = asyncio.create_task(paused_turn_retention_loop())
 
+    # Durable RUNNING lease sweeper (crash recover): claim heartbeat-expired leases and
+    # redrive unfinished DAG via recover_turn. Boot pass runs inside the loop.
+    turn_lease_sweep_task: asyncio.Task | None = None
+    if settings.turn_lease_enabled:
+        from agentcore.runtime.leases import turn_lease_sweep_loop
+
+        turn_lease_sweep_task = asyncio.create_task(turn_lease_sweep_loop())
+
+    # proxy_spend durable drain (as-built: 成本配额 §三): request path only
+    # enqueues to process-local disk; this consumer writes cost_events on the
+    # telemetry pool. Single-process only — multi-worker needs Redis/DB outbox.
+    from agentcore.billing.proxy_spend_queue import get_proxy_spend_queue
+
+    proxy_spend_queue = get_proxy_spend_queue()
+    proxy_spend_queue.start()
+
     try:
         yield
     finally:
+        await proxy_spend_queue.stop()
         # Stop the boot probe if shutdown races its short window (no-op once done).
         searxng_probe_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -217,6 +234,10 @@ async def lifespan(app: FastAPI):
             paused_turn_retention_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await paused_turn_retention_task
+        if turn_lease_sweep_task is not None:
+            turn_lease_sweep_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await turn_lease_sweep_task
         # Flush in-flight debounced passes and cancel pending timers.
         await shutdown_scheduler()
         # Flush in-flight long-conversation compaction folds.

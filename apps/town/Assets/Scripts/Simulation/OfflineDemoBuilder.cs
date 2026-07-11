@@ -962,7 +962,9 @@ namespace AgentTown.Simulation
         }
 
         // Embedded fallback only — Offline SoT is Fixtures/demo-story-packs.json.
-        // Python scripted.py still embeds (align next iteration). Do not rewrite copy here.
+        // Fallback when StreamingAssets JSON missing / unreadable (runtime).
+        // EditMode asserts JSON loads. Canonical SoT: packages/town-story-packs
+        // → pnpm gen:story-packs. Do not rewrite story copy here.
         private static readonly StoryBeat[] PriceSurgeStoryBeats =
         {
             new StoryBeat

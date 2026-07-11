@@ -333,12 +333,29 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       [clipboard, source, data, revealDir],
     );
 
-    // Ctrl/Cmd + C/X/V。仅当焦点在树内（行按钮）时触发；让出原生文本复制（有选区时）。
+    // Delete/Backspace 删选中项；Ctrl/Cmd + C/X/V 剪贴板。仅当焦点在树内（行按钮）时
+    // 触发；输入框 / 创建·重命名态让出；有选区时让出原生文本复制。
     const onTreeKeyDown = useCallback(
       (e: React.KeyboardEvent) => {
         if (creating || renaming) return;
         const tag = (e.target as HTMLElement).tagName;
         if (tag === "INPUT" || tag === "TEXTAREA") return;
+        if (
+          (e.key === "Delete" || e.key === "Backspace") &&
+          !e.ctrlKey &&
+          !e.metaKey &&
+          !e.altKey
+        ) {
+          if (selected) {
+            e.preventDefault();
+            void remove({
+              path: selected.path,
+              name: baseName(selected.path),
+              isDir: selected.isDir,
+            });
+          }
+          return;
+        }
         if (!(e.ctrlKey || e.metaKey)) return;
         if (window.getSelection()?.toString()) return;
         const key = e.key.toLowerCase();
@@ -362,7 +379,17 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
           void doPaste(destDir);
         }
       },
-      [creating, renaming, selected, clipboard, source, doCopy, doCut, doPaste],
+      [
+        creating,
+        renaming,
+        selected,
+        clipboard,
+        source,
+        remove,
+        doCopy,
+        doCut,
+        doPaste,
+      ],
     );
 
     const rootStatus = data.statusOf("");

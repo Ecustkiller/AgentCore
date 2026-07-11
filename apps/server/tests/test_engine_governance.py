@@ -877,6 +877,33 @@ async def test_llm_failure_with_partial_content_degrades():
     assert len(_errors(sink)) == 1
 
 
+class _AbortAfterContentProvider:
+    """Streams content then signals aborted (post-commit disconnect salvage)."""
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+        self.calls = 0
+
+    async def stream(self, request):  # noqa: ANN001 - duck-typed for the loop
+        self.calls += 1
+        yield _content_chunk(self._text)
+        yield LLMChunk(aborted=True)
+
+
+async def test_stream_aborted_keeps_partial_and_degrades():
+    # Same-round content commit + aborted → DEGRADED with the partial kept (not empty ERROR).
+    provider = _AbortAfterContentProvider("半成品正文")
+    profile = make_profile_params(max_rounds=20)
+    sink = _RecordingSink()
+    content, rounds, finish_override = await _run_with_sink(provider, profile, sink)
+
+    assert content == "半成品正文"
+    assert rounds == 1
+    assert provider.calls == 1
+    assert finish_override == [FinishReason.DEGRADED]
+    assert len(_errors(sink)) == 1
+
+
 async def test_llm_failure_errors_immediately():
     # A first-round hard failure ends the turn on ERROR after a single attempt.
     provider = _FailingProvider([], fail_on={0})

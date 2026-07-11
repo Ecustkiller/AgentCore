@@ -331,10 +331,10 @@ def escalate_tool_result(
     The single source of truth for the live suspend path (and any future durable resume),
     the worker-side dual of :func:`~agentcore.tools.builtin.ask_user.ask_user_tool_result`:
 
-    - ``"resolved"`` → feed the ``answer`` back into the worker's loop, told to
-      prefer it over its暂定假设 and回改 any work already done under the assumption;
-    - ``"timeout"`` (no answer within the window, or 按假设继续) → steer the
-      worker to proceed on its stated ``assumption`` — exactly today's non-blocking behaviour.
+    - ``"resolved"`` → feed the ``answer`` back into the worker's loop;
+    - ``"assumed"`` → explicit 按假设继续 (user or CEO);
+    - ``"timed_out"`` → wall-clock miss;
+    - both assumed and timed_out steer the worker onto its stated ``assumption``.
 
     Never terminal: an escalation RESUMES the worker, it never ends the turn (停回合 is the
     CEO ``ask_user`` / 对话级 job, never a single worker's call — 设计 §4.5).
@@ -352,13 +352,14 @@ def escalate_tool_result(
                 "请据此继续；与你的暂定假设冲突处以用户答复为准，并回改已按假设做出的部分。"
             )
         return ToolResult(tool_call_id="", success=True, output=output)
-    # timeout (含「按假设继续」): fall back to the stated assumption — today's behaviour.
     who = "主管" if arbitrated_by == "ceo" else "用户"
+    if status == "assumed":
+        lead = f"{who}选择按你的假设继续。"
+    else:
+        # timed_out (and any other non-resolved/assumed settlement)
+        lead = f"未在时限内得到{who}答复。"
     return ToolResult(
         tool_call_id="",
         success=True,
-        output=(
-            f"未在时限内得到{who}答复（或选择按你的假设继续）。"
-            f"请按你写明的假设把任务继续做完：{assumption}。"
-        ),
+        output=f"{lead}请按你写明的假设把任务继续做完：{assumption}。",
     )

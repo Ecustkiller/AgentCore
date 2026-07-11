@@ -8,6 +8,7 @@ import type { CheckpointUserDecision } from "@/services/checkpoint";
 import type { CheckpointDisplay } from "@/stores/conversation";
 import type { CheckpointDecision, CheckpointIntent } from "@/types/events";
 import {
+  Ban,
   Check,
   CircleHelp,
   Clock,
@@ -66,6 +67,7 @@ const INTENT_CONFIG = {
       adjust: { label: "已按你的调整开做", tone: "success" },
       stop: { label: "已停止", tone: "destructive" },
       timeout: { label: "未及时回应，已自行开做", tone: "muted" },
+      orphaned: { label: "已失效（回合已结束或服务已重启）", tone: "muted" },
     },
   },
   decision: {
@@ -79,6 +81,7 @@ const INTENT_CONFIG = {
       adjust: { label: "已按你的调整继续", tone: "success" },
       stop: { label: "已停止本回合", tone: "destructive" },
       timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
+      orphaned: { label: "已失效（回合已结束或服务已重启）", tone: "muted" },
     },
   },
 } as const satisfies Record<
@@ -104,6 +107,7 @@ const RESOLVED_DECISION_ICON = {
   adjust: Pencil,
   stop: OctagonX,
   timeout: Clock,
+  orphaned: Ban,
 } as const satisfies Record<CheckpointDecision, LucideIcon>;
 
 /**

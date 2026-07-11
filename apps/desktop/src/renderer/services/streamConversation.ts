@@ -60,9 +60,14 @@ async function streamErrorFromResponse(
   try {
     const body = (await response.json()) as {
       error?: { code?: string; message?: string };
+      detail?: { code?: string; message?: string } | string;
     };
     code = body.error?.code;
     serverMessage = body.error?.message;
+    if (!code && typeof body.detail === "object" && body.detail) {
+      code = body.detail.code;
+      serverMessage = body.detail.message ?? serverMessage;
+    }
   } catch {
     /* non-JSON body — keep status-only phrasing */
   }
@@ -72,6 +77,18 @@ async function streamErrorFromResponse(
     serverMessage,
     retryAfter: Number.isFinite(header) && header > 0 ? header : undefined,
   });
+}
+
+/** Latest journal seq seen on this conversation's SSE (for Last-Event-ID). */
+const lastEventIds = new Map<string, string>();
+
+/** Read the cursor used for precise stream resume. */
+export function peekLastEventId(conversationId: string): string | undefined {
+  return lastEventIds.get(conversationId);
+}
+
+export function clearLastEventId(conversationId: string): void {
+  lastEventIds.delete(conversationId);
 }
 
 /**
@@ -87,6 +104,9 @@ async function streamErrorFromResponse(
  * raise a retriable network error rather than hang. This is an *idle* timeout,
  * never a total-duration cap — a long turn that keeps streaming (or just
  * heart-beating) is never cut off.
+ *
+ * Tracks the latest SSE ``id:`` (journal seq) per conversation for ``Last-Event-ID``
+ * resume (流式回复持久化 P3).
  */
 async function pumpSSE(
   response: Response,
@@ -97,6 +117,8 @@ async function pumpSSE(
 
   const decoder = new TextDecoder();
   let buffer = "";
+  /** Most recent SSE ``id:`` in the current frame (reset each blank-line frame). */
+  let frameId: string | null = null;
 
   const IDLE_TIMEOUT_MS = 60_000;
   const readChunk = (): ReturnType<typeof reader.read> =>
@@ -126,9 +148,22 @@ async function pumpSSE(
     buffer = lines.pop() ?? "";
 
     for (const line of lines) {
+      if (line === "") {
+        frameId = null;
+        continue;
+      }
+      if (line.startsWith("id:")) {
+        const id = line.slice(3).trim();
+        if (id) {
+          frameId = id;
+          lastEventIds.set(conversationId, id);
+        }
+        continue;
+      }
       if (!line.startsWith("data: ")) continue;
       try {
         const event = JSON.parse(line.slice(6)) as SSEEvent;
+        if (frameId) lastEventIds.set(conversationId, frameId);
         dispatchSSEEvent(event, { conversationId, source: "server" });
       } catch {
         /* malformed event — skip */
@@ -142,18 +177,28 @@ export type AttachOutcome = "attached" | "none";
 
 /**
  * Re-attach to a conversation's in-flight turn and 续看 it live (C1 · slice 1b).
+ *
+ * Always sends ``Last-Event-ID`` (last journal seq, or ``0`` when none) so the
+ * backend takes the journal-backed full-turn replay path (流式回复持久化 §3.6 ·
+ * P3). Callers that clear-then-fold (``rejoinLiveTurn``) truncate the bubble /
+ * process / execution before attach — the replay segment folds into the empty
+ * placeholder.
  */
 export async function attachConversation(
   conversationId: string,
   signal?: AbortSignal,
 ): Promise<AttachOutcome> {
-  const doFetch = (signal: AbortSignal) =>
-    fetch(`${BASE_URL}/v1/conversations/${conversationId}/stream`, {
+  const doFetch = (signal: AbortSignal) => {
+    const headers: Record<string, string> = { Accept: "text/event-stream" };
+    // Always present → journal-backed full replay (header value observational).
+    headers["Last-Event-ID"] = lastEventIds.get(conversationId) ?? "0";
+    return fetch(`${BASE_URL}/v1/conversations/${conversationId}/stream`, {
       method: "GET",
       credentials: "include",
-      headers: { Accept: "text/event-stream" },
+      headers,
       signal,
     });
+  };
 
   try {
     let response = await fetchWithConnectTimeout(doFetch, signal);

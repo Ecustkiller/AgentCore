@@ -114,7 +114,7 @@
         "escalation_id": "esc2",
         "run_id": "r1",
         "agent_id": "w1",
-        "status": "timeout",
+        "status": "timed_out",
         "answer": ""
       },
       "timestamp": "2026-01-01T00:00:00.007Z"
@@ -328,7 +328,7 @@
             "question": "部署用 Docker 还是裸机？这关系到运维方案。",
             "assumption": "暂按 Docker 推进",
             "blocking": true,
-            "status": "timeout",
+            "status": "timed_out",
             "answer": null,
             "kind": "normal"
           }
@@ -380,7 +380,28 @@
       "completed": 2,
       "total": 2
     },
-    "pendingInteraction": null,
+    "interactions": [
+      {
+        "kind": "escalation",
+        "id": "esc1",
+        "status": "resolved",
+        "runId": "r1",
+        "agentId": "w1",
+        "question": "数据库选 Postgres 还是 MySQL？这关系到后续所有选型，且猜错基本要整段返工。",
+        "assumption": "暂按 Postgres 推进",
+        "awaiting": "user"
+      },
+      {
+        "kind": "escalation",
+        "id": "esc2",
+        "status": "resolved",
+        "runId": "r1",
+        "agentId": "w1",
+        "question": "部署用 Docker 还是裸机？这关系到运维方案。",
+        "assumption": "暂按 Docker 推进",
+        "awaiting": "user"
+      }
+    ],
     "cost": {
       "input": 240000,
       "cached": 64000,
@@ -390,6 +411,8 @@
     },
     "debate": null,
     "debateRounds": [],
+    "teamSynthesisPreview": null,
+    "turnWarning": null,
     "teamNotes": []
   }
 }

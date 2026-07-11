@@ -45,6 +45,11 @@ export interface SidecarStartTurnRequest {
    *  调用作 header 上报、并随回写落库到 assistant 消息，使推理日志↔气泡归并为同一条 trace
    *  （打通气泡↔日志）。 */
   traceId: string;
+  /**
+   * 本轮用户气泡的乐观 id（干净 UUID）——outbox 幂等锚（as-built: 双模式工作区 §10.3）。
+   * 主进程回写器据此组 `RecordTurnRequest.user_message_id`，与云端 finalize 去重对齐。
+   */
+  userMessageId: string;
   /** 用户本轮消息正文。 */
   userMessage: string;
   /**
@@ -67,7 +72,7 @@ export interface SidecarHistoryEntry {
 }
 
 /** 一条 web 来源（**严格**对齐服务端 `Citation` schema：四字段恒在，缺省为空串）。
- *  renderer 原样转发给 `POST .../local-turns` 落库，故须与生成类型逐字段同形。 */
+ *  主进程 writebacker 原样写入 `POST .../local-turns`，故须与生成类型逐字段同形。 */
 export interface SidecarCitation {
   url: string;
   title: string;
@@ -76,7 +81,8 @@ export interface SidecarCitation {
 }
 
 /** 回合回放载荷（**严格**对齐服务端 `RunsPayload` schema：多 Agent 团队图事件 + 单 Agent
- *  思考·工具时间线）。renderer **原样**转发给云端落库，自身不解读；字段可选性与生成类型一致。 */
+ *  思考·工具时间线）。主进程 writebacker **原样**写入云端落库，renderer 自身不解读；
+ *  字段可选性与生成类型一致。 */
 export interface SidecarRunsPayload {
   events?: Record<string, unknown>[];
   finish_reason?: string | null;
@@ -149,6 +155,8 @@ export interface SidecarResumeRequest {
   /** 本次续跑的 trace_id（同 {@link SidecarStartTurnRequest.traceId}）：续跑也跑 LLM，故
    *  随云代理调用上报、并随回写落库，使这次续跑的推理↔气泡归并为同一条 trace。 */
   traceId: string;
+  /** 挂起时已落库的原始 user 气泡 id —— outbox 幂等锚（同 startTurn.userMessageId）。 */
+  userMessageId?: string;
   /** continue（按 CEO 方向跑门控下游）/ adjust（注入 note 转向后续跑）/ stop（就此结束）。 */
   decision: "continue" | "adjust" | "stop";
   /** adjust 的转向说明 / stop 的收尾语；continue 忽略。 */
@@ -174,6 +182,7 @@ export function buildSidecarResumeRpcParams(
     | "decision"
     | "note"
     | "selected"
+    | "userMessageId"
   >,
   inference?: SidecarInference,
 ): Record<string, unknown> {
@@ -184,6 +193,7 @@ export function buildSidecarResumeRpcParams(
     decision: req.decision,
     note: req.note,
     selected: req.selected ?? [],
+    ...(req.userMessageId ? { userMessageId: req.userMessageId } : {}),
     ...(inference ? { inference } : {}),
   };
 }
@@ -282,7 +292,7 @@ export const SIDECAR_CHANNELS = {
 export interface SidecarApi {
   startTurn(req: SidecarStartTurnRequest): Promise<SidecarTurnResult>;
   cancel(req: SidecarCancelRequest): Promise<void>;
-  respond(req: SidecarRespondRequest): Promise<void>;
+  respond(req: SidecarRespondRequest): Promise<{ resolved: boolean }>;
   runRedirect(req: SidecarRunRedirectRequest): Promise<void>;
   /** 续跑一个持久挂起的本地回合；Promise 在续跑结束时 resolve（同 `startTurn` 携最终结果，
    * 过程事件经 `onEvent` 推来）。 */

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 
 from fastapi import Depends, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -13,6 +12,7 @@ from agentcore.api.dependencies import get_cost_event_repo, get_db
 from agentcore.api.routes.inference.token import inference_user, router
 from agentcore.billing.gate import preflight_llm_credentials
 from agentcore.config import settings
+from agentcore.conversation.inference_rate_limit import enforce_inference_proxy_rate_limit
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import (
     BYOKKeyMissingError,
@@ -103,28 +103,23 @@ async def _record_proxy_spend(
     trace_id: str | None = None,
     message_id: str | None = None,
 ) -> None:
-    from agentcore.api.routes import inference as inf
+    """Enqueue spend for background drain — never touches the primary DB pool.
+
+    Request path only persists to the process-local durable queue (as-built: 成本配额 §三). The
+    drain writes ``cost_events`` on the telemetry pool; ``run_id`` UNIQUE
+    dedupes at-least-once retries. See ``billing.proxy_spend_queue``.
+    """
+    from agentcore.billing.proxy_spend_queue import get_proxy_spend_queue
 
     with log_context(trace_id=trace_id, conversation_id=conversation_id):
-        if not conversation_id:
-            logger.warning("inference.proxy_spend_no_conversation", user_id=user_id, model=model)
-            return
-        run = inf.background_run_cost(inf.ROLE_CAPTAIN, model or "", usage)
-        try:
-            async with inf.async_session_factory() as session:
-                await inf.CostEventRepository(session).record_runs(
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    message_id=message_id,
-                    runs=[asdict(run)],
-                )
-        except Exception as e:
-            logger.warning(
-                "inference.proxy_spend_failed",
-                user_id=user_id,
-                conversation_id=conversation_id,
-                error=str(e),
-            )
+        get_proxy_spend_queue().enqueue(
+            user_id=user_id,
+            conversation_id=conversation_id or "",
+            model=model,
+            usage=usage,
+            trace_id=trace_id,
+            message_id=message_id,
+        )
 
 
 def _error_json(exc: Exception) -> JSONResponse:
@@ -177,6 +172,14 @@ def _llm_request_from_payload(payload: dict, cfg: ModelConfig) -> LLMRequest:
         )
         for m in payload.get("messages", [])
     ]
+    thinking_raw = payload.get("thinking")
+    thinking: bool | None = None
+    if isinstance(thinking_raw, dict):
+        kind = thinking_raw.get("type")
+        if kind == "disabled":
+            thinking = False
+        elif kind == "enabled":
+            thinking = True
     return LLMRequest(
         messages=messages,
         # Server-resolved model is authoritative: the sidecar may still send
@@ -187,6 +190,7 @@ def _llm_request_from_payload(payload: dict, cfg: ModelConfig) -> LLMRequest:
         tools=payload.get("tools"),
         tool_choice=payload.get("tool_choice", "auto"),
         stream=bool(payload.get("stream")),
+        thinking=thinking,
     )
 
 
@@ -199,11 +203,21 @@ async def inference_chat_completions(
 ) -> Response:
     payload = await request.json()
     stream = bool(payload.get("stream"))
+    # conversation_id is client-supplied and intentionally NOT ownership-checked here
+    # (audit 01 F12): cost_events has no FK to conversations (db/models/billing.py), so an
+    # unowned id can't fail the write, and every read aggregates on (user_id,
+    # conversation_id) with user_id taken from the authenticated inference token — so a
+    # forged id can only mis-file the caller's OWN spend inside their own ledger, never
+    # leak across users. Adding a per-turn ownership lookup on this hot path isn't worth it.
     conversation_id = request.headers.get(_CONVERSATION_HEADER) or None
     trace_id = request.headers.get(_TRACE_HEADER) or None
     message_id = request.headers.get(_MESSAGE_HEADER) or None
 
     with log_context(trace_id=trace_id, conversation_id=conversation_id, user_id=user.user_id):
+        # Outer rate fence (成本配额与计费.md §一): once per sidecar turn via
+        # message_id, reusing the cloud user-message limiter — not per LLM call.
+        await enforce_inference_proxy_rate_limit(user.user_id, message_id=message_id)
+
         try:
             cfg = await _resolve_inference_credentials(session, cost_repo, user)
         except (QuotaExceededError, BYOKKeyMissingError) as e:
@@ -336,6 +350,17 @@ async def _forward_stream(
 
     async def _iter_sse():
         async for chunk in provider.stream(request):
+            # Relay the provider's stream-control signals inline (mirror of the
+            # empty_diagnosis relay) so the downstream sidecar reconstructs the exact
+            # LLMChunk protocol across the proxy hop: a transparent pre-commit retry
+            # (stream_reset) and a post-commit disconnect salvage (aborted) would
+            # otherwise flatten to an empty delta and be silently lost.
+            if chunk.stream_reset:
+                yield f"data: {json.dumps({'stream_reset': True})}\n\n"
+                continue
+            if chunk.aborted:
+                yield f"data: {json.dumps({'aborted': True})}\n\n"
+                continue
             data: dict = {"choices": [{"index": 0, "delta": {}, "finish_reason": None}]}
             delta = data["choices"][0]["delta"]
             if chunk.delta_content:
@@ -353,6 +378,15 @@ async def _forward_stream(
                     "prompt_tokens": chunk.usage.input_tokens,
                     "completion_tokens": chunk.usage.output_tokens,
                 }
+            if chunk.empty_diagnosis:
+                # Relay the provider's precise empty-response diagnosis (OAUTH_EXPIRED /
+                # MODEL_UNKNOWN ...) so the sidecar surfaces the actionable hint instead of
+                # re-deriving a generic SILENT_EMPTY from a bare empty delta (01 F8).
+                diag: dict = {"empty_diagnosis": chunk.empty_diagnosis}
+                if chunk.empty_raw_preview is not None:
+                    diag["empty_raw_preview"] = chunk.empty_raw_preview
+                yield f"data: {json.dumps(diag, ensure_ascii=False)}\n\n"
+                continue
             yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 

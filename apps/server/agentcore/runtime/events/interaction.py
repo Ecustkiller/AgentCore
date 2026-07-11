@@ -238,6 +238,9 @@ def escalation_resolved(
     arbitrated_by: str | None = None,
     via_user: bool | None = None,
 ) -> SSEEvent:
+    # Wire status is resolved | assumed | timed_out | orphaned.
+    if status not in ("resolved", "assumed", "timed_out", "orphaned"):
+        status = "timed_out"
     payload: dict[str, Any] = {
         "escalation_id": escalation_id,
         "run_id": run_id,
@@ -297,8 +300,7 @@ def debate_round_decision_resolved(
     focus: str = "",
 ) -> SSEEvent:
     """交互式逐轮辩论：上条决策的结算。``decision`` ∈ ``continue`` / ``conclude`` / ``timeout``
-    （超时或无活跃用户回落裁判自动收敛）；``focus`` 是用户「加角度」给的下一轮议题（仅 continue
-    且非空时有值）。Transport-only（同 required，不进 journal）。"""
+    / ``orphaned``；``focus`` 是用户「加角度」给的下一轮议题（仅 continue 且非空时有值）。"""
     return SSEEvent(
         type=EventType.DEBATE_ROUND_DECISION_RESOLVED,
         payload={
@@ -308,4 +310,12 @@ def debate_round_decision_resolved(
             "decision": decision,
             "focus": focus,
         },
+    )
+
+
+def interaction_orphaned(*, interaction_id: str, kind: str) -> SSEEvent:
+    """热路 pending 交互失效。``kind`` ∈ approval / delegation_authorization / escalation / debate_round。"""
+    return SSEEvent(
+        type=EventType.INTERACTION_ORPHANED,
+        payload={"interaction_id": interaction_id, "kind": kind},
     )

@@ -12,8 +12,8 @@ import {
 import { BrowserWindow, app, dialog, ipcMain } from "electron";
 import { isRecord, requireStringFields } from "../ipc-validate";
 import {
-  confirmExecute,
   confirmOpenPath,
+  grantSessionRun,
   requiresOpenConfirm,
 } from "./execGate";
 import { readFile, readTextFile, writeTextFile } from "./preview";
@@ -208,19 +208,19 @@ export function registerFsIpc(): void {
     if (!args) return opErr("WorkspaceIOError", INVALID_ARGS);
     const opArgs = isRecord(p) ? p.args : undefined;
     if (!isRecord(opArgs)) return opErr("WorkspaceIOError", INVALID_ARGS);
-    // IPC-001（第五轮 IPC 权限面审计）：execute = renderer 被攻破后直达宿主 RCE 的最危险原语。
-    // 审批在 renderer+后端、主进程不在环里，分不清「批准的合法调用」与「直接恶意调用」——故 spawn
-    // 前过一道 renderer 无法伪造的主侧 native 确认。每次必弹、不记忆，与后端 code_execute PER_CALL /
-    // PI-004（注入内容不得搭便车）同姿态（人决策 2026-06-30）。取消→回 ok:false（云端 execute 工具
-    // 据此报失败；未知 kind 在后端 channel 退化为 WorkspaceIOError 并保留 detail）。
-    if (args.op === "execute" && !(await confirmExecute(opArgs))) {
-      return opErr("ExecutionDenied", "用户取消了代码执行（主侧安全确认）");
-    }
+    // execute：聊天审批卡是唯一人门（`workspace_op_required` 仅在后端 ApprovalGate 放行后
+    // 触发）。不再叠主侧 native「即将运行 python」框——对标 Cursor 单一确认面。
+    // native 门仅保留 openPath + 未带 rendererConfirmed 的 bash 兜底（见 terminal-service）。
     return workspaceOp({
       rootId: args.rootId,
       op: args.op as WorkspaceOpName,
       args: opArgs,
     });
+  });
+
+  // 聊天内 RunConfirm「本会话都允许」→ 主进程 session flag（进程重启清零）。
+  ipcMain.handle(FS_CHANNELS.grantSessionRun, () => {
+    grantSessionRun();
   });
 
   ipcMain.handle(FS_CHANNELS.reveal, (_e, p: unknown) => {

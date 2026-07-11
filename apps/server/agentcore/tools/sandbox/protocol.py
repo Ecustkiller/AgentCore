@@ -4,6 +4,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+from agentcore.core.text import truncate_head_tail
+
 
 @dataclass
 class ExecutionRequest:
@@ -20,6 +22,8 @@ class ExecutionRequest:
     on_output: Callable[[str, str], None] | None = None
     # Resource / isolation knobs (optional; defaults preserve subprocess behaviour).
     env: dict[str, str] | None = None
+    # Reserved: NOT honored by GVisorSandbox today — network is always off via the
+    # ``--network=none`` runsc flag; "restricted" is a future hook (05 P3-4).
     network_mode: Literal["none", "restricted"] = "none"
     cpu_limit: float = 1.0
     pids_limit: int = 128
@@ -49,11 +53,16 @@ class ExecutionResult:
     _MAX_OUTPUT_LEN = 8000
 
     def __post_init__(self):
-        if len(self.stdout) > self._MAX_OUTPUT_LEN:
-            self.stdout = self.stdout[: self._MAX_OUTPUT_LEN] + "\n... [truncated]"
+        # HEAD+TAIL cut (not head-only): a long stdout's tail — traceback last line /
+        # exit summary — must survive this sandbox-level cap, otherwise the downstream
+        # ToolResult head+tail (tools/protocol.py) has nothing left to preserve (05 P3-3).
+        capped_stdout = truncate_head_tail(self.stdout, self._MAX_OUTPUT_LEN)
+        if capped_stdout != self.stdout:
+            self.stdout = capped_stdout
             self.truncated = True
-        if len(self.stderr) > self._MAX_OUTPUT_LEN:
-            self.stderr = self.stderr[: self._MAX_OUTPUT_LEN] + "\n... [truncated]"
+        capped_stderr = truncate_head_tail(self.stderr, self._MAX_OUTPUT_LEN)
+        if capped_stderr != self.stderr:
+            self.stderr = capped_stderr
             self.truncated = True
 
 

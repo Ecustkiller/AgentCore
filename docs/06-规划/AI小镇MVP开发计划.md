@@ -106,7 +106,7 @@
 | SPIKE-01 | UT-00 | 0 | Unity Spike | `apps/town` 空项目；Bearer 调 API；1 NPC + 坐标变换 Go/No-Go |
 | SPIKE-05 | — | — | （废弃） | Zustand/R3F 帧率验证不再适用 |
 | FE-01 | UT-01 | 1 | 应用壳 + Session | 场景 Bootstrap + `SimulationSession` 单状态机 |
-| FE-02 | UT-02 | 1 | 10 区域场景 | Kenney 低模；`packages/town-assets` |
+| FE-02 | UT-02 | 1 | 10 区域场景 | Kenney 低模；`apps/town/Assets/TownAssets` |
 | FE-03 | UT-03 | 1 | 单 NPC NavMesh | Xbot 实例化 + Unity NavMesh 寻路 |
 | FE-04 | UT-04 | 1 | REST + SSE 客户端 | 对齐 §6.6 事件表；Live 忽略 `tick_frame` |
 | FE-05 | UT-05 | 1 | Tick 控制 UI | 推 tick / pause / 时钟（Unity UI） |
@@ -156,7 +156,7 @@
 | BE-07 | 后端 | Simulation REST API | 新增 `api/routes/simulation/`：`POST /runs`（创建）、`POST /runs/{id}/tick`（推进一步）、`GET /runs/{id}/stream`（SSE）。复用 `api/sse.py` 包装。 | BE-05, BE-06 | 2d | FE-04 |
 | ST-01 | 集成 | 模拟协议落地到 contract-types | 将 SPIKE-04 草案合入 `packages/contract-types/`：事件名进 Python `EventType`（生成 TS），**手写** `SimTickEvent`/`SimAgentState` payload 双端对齐。（**非** `shared-types`，无自动 codegen） | SPIKE-04, BE-06 | 1d | FE-04 |
 | FE-01 | 前端(Unity) | 应用壳 + Session（→ UT-01） | 场景 Bootstrap + `SimulationSession` 单状态机；Desktop 不再内嵌 3D 页（观测在 AgentTown）。细节见 §2.1 / [AgentTown 规格](AgentTown客户端规格.md)。 | 无 | 1.5d | BE-01, DB-01 |
-| FE-02 | 前端(Unity) | 10 区域场景（→ UT-02，基础美术必做） | 广场/市场/餐厅/面包店/公园/住宅区/镇政厅/图书馆/工坊/码头；**Kenney 现成低模作「基础一档美术」（必做，非占位块）**，`packages/town-assets`。世界约 120×96 m。 | FE-01, UT-00 | 3d | BE-02 |
+| FE-02 | 前端(Unity) | 10 区域场景（→ UT-02，基础美术必做） | 广场/市场/餐厅/面包店/公园/住宅区/镇政厅/图书馆/工坊/码头；**Kenney 现成低模作「基础一档美术」（必做，非占位块）**，`apps/town/Assets/TownAssets`。世界约 120×96 m。 | FE-01, UT-00 | 3d | BE-02 |
 | FE-03 | 前端(Unity) | 单 NPC NavMesh（→ UT-03） | 1 个 Xbot 角色 + Unity NavMesh 寻路，`idle`/`walk` 切换；位置由 tick snapshot 驱动。 | FE-02, UT-00 | 3d | BE-05 |
 | FE-04 | 前端(Unity) | REST + SSE 客户端（→ UT-04） | `SimulationSession` 连接 SSE、解析 `sim.*` 更新 agent 位置/状态/事件流（对齐 [AgentTown 规格](AgentTown客户端规格.md) 事件表）。 | ST-01, UT-00 | 2d | BE-07 |
 | FE-05 | 前端(Unity) | Tick 控制 UI（→ UT-05） | Unity UI 工具栏：「推进 1 tick」「当前 tick / 时刻」显示；调用 `POST .../tick` API。 | FE-04, BE-07 | 1d | FE-03 |

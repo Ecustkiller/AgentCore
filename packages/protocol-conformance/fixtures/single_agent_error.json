@@ -45,10 +45,12 @@
       "completed": 0,
       "total": 0
     },
-    "pendingInteraction": null,
+    "interactions": [],
     "cost": null,
     "debate": null,
     "debateRounds": [],
+    "teamSynthesisPreview": null,
+    "turnWarning": null,
     "teamNotes": []
   }
 }

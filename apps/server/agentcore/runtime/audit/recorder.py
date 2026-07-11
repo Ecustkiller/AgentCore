@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentcore.core.logging import get_logger
-from agentcore.db.base import async_session_factory
+from agentcore.db.base import telemetry_session_factory
 
 logger = get_logger(__name__)
 
@@ -94,7 +94,8 @@ class AuditRecorder:
         try:
             from agentcore.db.repositories import AgentAuditEventRepository
 
-            async with async_session_factory() as db:
+            # Telemetry pool — never contend with content-write connections (as-built: 成本配额 §三).
+            async with telemetry_session_factory() as db:
                 await AgentAuditEventRepository(db).append(
                     user_id=self.user_id,
                     conversation_id=self.conversation_id,

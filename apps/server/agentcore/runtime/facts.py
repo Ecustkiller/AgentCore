@@ -383,14 +383,15 @@ class TurnFactLog:
 current_fact_log: ContextVar[TurnFactLog | None] = ContextVar("current_fact_log", default=None)
 
 
-def record_turn_fact(fact: Fact) -> asyncio.Future[None] | None:
+def record_turn_fact(fact: Fact) -> asyncio.Future[int | None] | None:
     """Append ``fact`` to the turn's ambient log and durable journal (no-op if unbound).
 
     The engine-facing convenience over the :class:`FactRecorder` port: callers build a
     typed fact (``RoundBoundaryFact(...).to_fact()``) and hand it here; whether a log is
     bound is the turn's concern, not the call site's. When a
     :class:`~agentcore.runtime.journal.writer.TurnJournalWriter` is bound, schedules a
-    durable append and returns a Future the SSE consumer awaits before delivery.
+    durable append and returns a Future that resolves to the journal seq (SSE barrier
+    stamps ``id:`` from it before delivery).
     """
     log = current_fact_log.get()
     if log is not None:

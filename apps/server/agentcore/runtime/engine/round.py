@@ -70,7 +70,12 @@ def build_request_window(
 
 @dataclass(frozen=True)
 class LlmRoundOutput:
-    """Successful LLM round: streamed content, reasoning, and optional tool calls."""
+    """Successful LLM round: streamed content, reasoning, and optional tool calls.
+
+    ``aborted`` means the provider signaled a post-commit disconnect: the content
+    / reasoning here are salvageable partials and the loop should finish DEGRADED
+    rather than treating the round as a clean stop.
+    """
 
     content: str
     reasoning: str
@@ -78,6 +83,7 @@ class LlmRoundOutput:
     usage: TokenUsage | None
     empty_diagnosis: str | None = None
     empty_raw_preview: str | None = None
+    aborted: bool = False
 
 
 @dataclass(frozen=True)
@@ -110,6 +116,7 @@ async def run_llm_round(
     round_idx: int,
     run_id: str,
     raise_on_error: bool,
+    on_reset: Callable[[], None] | None = None,
 ) -> LlmRoundOutput | LlmRoundFailure:
     """Stream one LLM round; record facts and round_end log on success."""
     request_window = build_request_window(messages, investigation_tools, round_idx)
@@ -121,10 +128,13 @@ async def run_llm_round(
         model=active_model,
     )
     try:
-        round_content, round_reasoning, round_tool_calls, usage, empty_diagnosis, empty_raw_preview = (
-            await stream_llm_round(
-                llm, request, emit_content, emit_reasoning, on_tool_progress
-            )
+        streamed = await stream_llm_round(
+            llm,
+            request,
+            emit_content,
+            emit_reasoning,
+            on_tool_progress,
+            on_reset=on_reset,
         )
     except Exception as e:
         logger.error(
@@ -147,6 +157,13 @@ async def run_llm_round(
             upstream_error=isinstance(e, LLMUpstreamError),
         )
 
+    round_content = streamed.content
+    round_reasoning = streamed.reasoning
+    round_tool_calls = streamed.tool_calls
+    usage = streamed.usage
+    empty_diagnosis = streamed.empty_diagnosis
+    empty_raw_preview = streamed.empty_raw_preview
+
     record_turn_fact(
         LlmCallFact(
             run_id=run_id,
@@ -155,9 +172,21 @@ async def run_llm_round(
             reasoning_content=round_reasoning,
             tool_calls=tool_calls_to_dicts(round_tool_calls),
             usage=usage.as_dict() if usage else {},
-            finish_reason="tool_calls" if round_tool_calls else "stop",
+            finish_reason=(
+                "aborted"
+                if streamed.aborted
+                else ("tool_calls" if round_tool_calls else "stop")
+            ),
         ).to_fact()
     )
+
+    if streamed.aborted:
+        logger.warning(
+            "llm.stream_aborted",
+            round=round_idx,
+            content_chars=len(round_content),
+            reasoning_chars=len(round_reasoning),
+        )
 
     logger.info(
         "react.round_end",
@@ -166,16 +195,18 @@ async def run_llm_round(
         input_tokens=usage.input_tokens if usage else 0,
         output_tokens=usage.output_tokens if usage else 0,
         reasoning_tokens=usage.reasoning_tokens if usage else 0,
-        done=not round_tool_calls,
+        done=not round_tool_calls and not streamed.aborted,
+        aborted=streamed.aborted or None,
     )
 
     return LlmRoundOutput(
         content=round_content,
         reasoning=round_reasoning,
-        tool_calls=round_tool_calls,
+        tool_calls=round_tool_calls or [],
         usage=usage,
         empty_diagnosis=empty_diagnosis,
         empty_raw_preview=empty_raw_preview,
+        aborted=streamed.aborted,
     )
 
 

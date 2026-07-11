@@ -8,10 +8,35 @@ from __future__ import annotations
 
 import re
 
+from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.runtime.routing.models import Complexity, ExecutionStrategy, IntakeResult
 
 logger = get_logger(__name__)
+
+
+def resolve_worker_token_ceiling(intake_budget: int) -> int:
+    """Loose cumulative-token backstop for a worker run.
+
+    ``clamp(intake_budget × factor, floor, cap)`` — a generous safety valve, not a
+    tight leash: compaction (``engine/tool_clear.py``) does the heavy lifting on the
+    window, this only stops a runaway from blowing far past its estimate (the
+    2221→41378 pathology). The Intake budget is a coarse heuristic (4k/16k/48k), so
+    it is *widened* by ``factor`` before it ever gates a round — a research-heavy
+    worker should not be guillotined at its raw estimate.
+
+    Returns ``0`` (disabled — no ceiling) when the feature is switched off or there
+    is no estimate to widen; ``react_loop`` treats ``0`` as "no token backstop", so
+    CEO / solo paths (which never pass a budget) are unaffected.
+    """
+    factor = settings.engine_worker_token_budget_factor
+    cap = settings.engine_worker_token_budget_cap
+    floor = settings.engine_worker_token_budget_floor
+    if factor <= 0 or cap <= 0 or intake_budget <= 0:
+        return 0
+    ceiling = int(intake_budget * factor)
+    ceiling = max(ceiling, floor)
+    return min(ceiling, cap)
 
 # Token 预算粗估（按复杂度档；非精确计费，仅治理参考）
 _BUDGET: dict[Complexity, int] = {

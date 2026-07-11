@@ -91,9 +91,10 @@ def _interjections_block(rounds: Sequence[RoundResult]) -> str:
 
 
 def _scores_block(config: DebateConfig, tally: dict[str, RoundScore]) -> str:
-    """把全场累计记分渲染进简报 prompt（收场 decisive / leaning 据此，不拍脑袋；记分裁判 P2）。
+    """把全场累计记分渲染进简报 prompt（记分裁判 P2）。
 
-    每方一行「论点+回应+证据 - 罚分 = 净分」+ 罚分事由。无记分（未开启 P2）返回空串（简报零变化）。
+    对抗形态：收场 decisive / leaning 须与累计记分对齐。圆桌：仅作 momentum 展示，
+    不驱动 leaning、不裁胜负（与质询/结辩同属形态门控口径）。无记分返回空串。
     """
     if not tally:
         return ""
@@ -110,6 +111,12 @@ def _scores_block(config: DebateConfig, tally: dict[str, RoundScore]) -> str:
     if not lines:
         return ""
     body = "\n".join(lines)
+    if config.form is DebateForm.ROUNDTABLE:
+        return (
+            "各方【累计记分】（裁判逐轮打分之和；仅作【momentum 展示】——"
+            "圆桌不裁胜负，勿用记分驱动 leaning / decisive、勿据此点名赢家）：\n"
+            f"{body}\n\n"
+        )
     return (
         "各方【累计记分】（裁判逐轮打分之和；你的 decisive / leaning 须与它一致——净分更高 / 罚分"
         f"更少的一方更站得住，相悖须说明为何）：\n{body}\n\n"
@@ -175,12 +182,13 @@ async def build_brief(
     # 用户追问（交互式逐轮）：把全场用户注入的问题喂进简报，让结论【交代是否已回应】——未应答的
     # 追问应进 open_questions（仅剩需你拍板/查证的点），别让用户的问题石沉大海。无追问则省略。
     followups_block = _interjections_block(rounds)
-    # 记分裁判（P2）：全场累计记分喂进简报，让 decisive / leaning 与实际交锋对齐（净分更高、罚分
-    # 更少的一方更站得住），而非收场拍脑袋。无记分（未开启 P2）则空块，简报逐字回退、零变化。
+    # 记分裁判（P2）：全场累计记分喂进简报。对抗形态让 decisive / leaning 与交锋对齐；
+    # 圆桌仅作 momentum（见 _scores_block）。无记分则空块，简报零变化。
     scores_block = _scores_block(config, tally_scores(rounds))
     last_turns = _turns_block(rounds[-1].ok_turns, clip=_TURN_CLIP)
     sides_keys = ", ".join(s.key for s in config.sides)
     is_red_team = config.form is DebateForm.RED_TEAM
+    is_roundtable = config.form is DebateForm.ROUNDTABLE
     # 红队专用：让简报给每条风险（红队成员，不含被审方案方）评严重度，驱动前端「风险看板」
     # 分级 + 总览计数。其余形态不要这个字段（风险严重度对正反/圆桌无意义）。
     severity_field = (
@@ -194,13 +202,33 @@ async def build_brief(
         if is_red_team
         else ""
     )
+    if is_roundtable:
+        score_align_note = (
+            "若上方给了【累计记分】，仅作 momentum 参考、【不】驱动 leaning / decisive、"
+            "【不】裁谁对谁错；decisive 可留空或写「无胜负手（圆桌）」；leaning 写观点光谱"
+            "小结而非点名赢家。"
+        )
+        decisive_field = '  "decisive": "圆桌无胜负手：可留空或写「无胜负手（圆桌）」",\n'
+        leaning_field = (
+            '  "leaning": "观点光谱小结（各视角成立前提与张力，非裁出赢家）",\n'
+        )
+    else:
+        score_align_note = (
+            "若上方给了【累计记分】，你的 decisive / leaning 必须与它一致"
+            "（净分更高 / 罚分更少的一方更站得住；若倾向与记分相悖须在 confidence 里说明为何）；"
+        )
+        decisive_field = (
+            '  "decisive": "胜负手：一句话点名谁的哪个论点被 drop / 证伪 / 无据，据此定倾向",\n'
+        )
+        leaning_field = (
+            '  "leaning": "你的倾向性判断（基于事实与累计记分哪方更站得住）",\n'
+        )
     user = (
         f"辩论命题：{config.motion}\n参与方：\n{_sides_block(config)}\n\n"
         f"各轮推进：\n{timeline}\n\n{scores_block}{followups_block}最后一轮各方发言：\n{last_turns}\n\n"
         f"{_brief_form_hint(config.form)}\n"
         "请据此产出简报，为用户负责到底（不要只把各方观点并排甩给他）：各方最强论点要"
-        "【去水压成单句、只留命门】；若上方给了【累计记分】，你的 decisive / leaning 必须与它一致"
-        "（净分更高 / 罚分更少的一方更站得住；若倾向与记分相悖须在 confidence 里说明为何）；"
+        f"【去水压成单句、只留命门】；{score_align_note}"
         "leaning / confidence 还要写清【反转条件】（在什么前提下倾向会翻）。"
         "【关键事实的证据状态必须继承到结论、不得在收尾抹平】：若 decisive / leaning 依赖的某个"
         "关键事实在辩论里是【待核实】或仅【单一二手来源】，不得把它当既定事实来定倾向——要么在 "
@@ -213,8 +241,8 @@ async def build_brief(
         f"{severity_field}"
         '  "factual_disputes": ["关键【事实】分歧（可据证据帮判的）"],\n'
         '  "value_disputes": ["【价值/偏好】分歧（AI 判不了、必须交用户定的）"],\n'
-        '  "decisive": "胜负手：一句话点名谁的哪个论点被 drop / 证伪 / 无据，据此定倾向",\n'
-        '  "leaning": "你的倾向性判断（基于事实与累计记分哪方更站得住）",\n'
+        f"{decisive_field}"
+        f"{leaning_field}"
         '  "confidence": "置信度及其成立条件（说明在什么前提下倾向会反转）",\n'
         '  "recommendation": "给用户的具体建议",\n'
         '  "open_questions": ["仅剩需用户拍板的点"]\n'

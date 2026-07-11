@@ -1,54 +1,8 @@
 /**
- * 全局协作感知 (前端UX设计.md §一) 的纯逻辑：把「对话生成态 + 审批态」派生成一份活跃对话
- * 清单（侧栏活动横幅用），并判定一次收场是「完成」还是「失败」（跨对话通知用）。无 store /
- * React 依赖，便于单测；订阅接线见 services/teamActivityNotifications.ts（跨对话 toast）与
- * components/sidebar/ActivityBanner.tsx（侧栏横幅）。
+ * 全局协作感知 (前端UX设计.md §一) 的纯逻辑：判定一次收场是「完成」还是「失败」、
+ * 以及当前路由是否应静默（跨对话 toast 用）。无 store / React 依赖，便于单测；
+ * 订阅接线见 services/teamActivityNotifications.ts。
  */
-
-export type ActivityStatus = "running" | "awaiting";
-
-/** A conversation with live team activity — one row in the sidebar activity banner. */
-export interface ActiveConversation {
-  id: string;
-  title: string;
-  status: ActivityStatus;
-}
-
-/**
- * 活跃对话清单：待审批优先于执行中（同一对话既在生成又在等审批时，只以「待审批」出现一次，
- * 因为那才是用户该先处理的信号）。`titleOf` 缺标题（对话不在缓存 / 已删）时回退「对话」。
- */
-export function deriveActiveConversations(
-  generatingIds: string[],
-  awaitingIds: string[],
-  titleOf: (id: string) => string | undefined,
-): ActiveConversation[] {
-  const awaiting = new Set(awaitingIds);
-  const out: ActiveConversation[] = [];
-  for (const id of awaitingIds) {
-    out.push({ id, title: titleOf(id) ?? "对话", status: "awaiting" });
-  }
-  for (const id of generatingIds) {
-    if (awaiting.has(id)) continue; // dedup: awaiting takes priority
-    out.push({ id, title: titleOf(id) ?? "对话", status: "running" });
-  }
-  return out;
-}
-
-/** 活动横幅摘要文案：「N 个任务执行中 · M 个待审批」；无活动返回 null（横幅不渲染）。 */
-export function summarizeActivity(active: ActiveConversation[]): string | null {
-  if (active.length === 0) return null;
-  let running = 0;
-  let awaiting = 0;
-  for (const a of active) {
-    if (a.status === "awaiting") awaiting++;
-    else running++;
-  }
-  const parts: string[] = [];
-  if (running > 0) parts.push(`${running} 个任务执行中`);
-  if (awaiting > 0) parts.push(`${awaiting} 个待审批`);
-  return parts.join(" · ");
-}
 
 interface TurnEndSnapshot {
   error: string | null;

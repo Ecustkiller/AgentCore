@@ -37,6 +37,7 @@ import {
 import { BrowserWindow, type WebContents, app, ipcMain } from "electron";
 import { getStoredRoot } from "./fs-service";
 import { assertShape } from "./ipc-validate";
+import { sidecarDataDir } from "./outbox-writeback";
 
 // 本地回合的审批门（双模式工作区 / 远期规划 §一）。开启后，sidecar 引擎对 worker 的「碰真实
 // 机器」工具（file_write / code_execute 等 GRANTABLE）挂起审批，与云端 local 模式同语义——
@@ -44,12 +45,8 @@ import { assertShape } from "./ipc-validate";
 // 链路（renderer 把统一结算入口 `resolveInteraction` 在本地回合改走 sidecar）。
 const SIDECAR_APPROVALS_ENABLED = true;
 
-// sidecar 的本机数据目录（app 私有）：持久挂起帧落 `<dataDir>/paused/<message_id>.json`。
-// 主进程在 initialize 时下发给 Python（见 `paused_store.LocalPausedTurnStore`），并在
-// 重开会话时**直接读盘**列出待续跑帧（不拉起 Python——只读列表无需引擎）。
-function sidecarDataDir(): string {
-  return join(app.getPath("userData"), "sidecar");
-}
+// sidecar 的本机数据目录（app 私有）：持久挂起帧落 `<dataDir>/paused/<message_id>.json`，
+// 渐进 outbox 落 `<dataDir>/outbox/`（D8 分处理器，同目录根）。主进程在 initialize 时下发。
 
 /**
  * 直接读本机帧文件，列出某会话待续跑的持久挂起帧（不拉起 sidecar 进程）。
@@ -522,6 +519,8 @@ export class SidecarManager {
         conversationId: req.conversationId,
         traceId: req.traceId,
         userMessage: req.userMessage,
+        // Outbox idempotency anchor (as-built: 双模式工作区 §10.3).
+        userMessageId: req.userMessageId,
         history: req.history ?? [],
         // 续辩种子（结构化补轮·B）：原样透传给引擎（None=普通回合）。引擎宽容解析，故无需主进程校验。
         ...(req.debateSeed ? { debateSeed: req.debateSeed } : {}),
@@ -625,14 +624,19 @@ export class SidecarManager {
   }
 
   /** 结算一个被挂起的交互（审批 / ask_user / 本地工具）。 */
-  async respond(req: SidecarRespondRequest): Promise<void> {
+  async respond(req: SidecarRespondRequest): Promise<{ resolved: boolean }> {
     const entry = this.entries.get(entryKey(req.rootId, req.subpath));
-    if (!entry) return;
-    await entry.client.request("respond", {
+    if (!entry) {
+      throw new Error(
+        `本地引擎未就绪（root=${req.rootId} subpath=${req.subpath ?? ""}），无法结算交互`,
+      );
+    }
+    const reply = (await entry.client.request("respond", {
       requestId: req.requestId,
       conversationId: req.conversationId,
       result: req.result,
-    });
+    })) as { resolved?: boolean } | null;
+    return { resolved: Boolean(reply?.resolved) };
   }
 
   /** 退出时清理所有 sidecar（尽力发 shutdown 再终止进程）。 */
@@ -683,7 +687,7 @@ export function registerSidecarIpc(): void {
       assertShape(
         SIDECAR_CHANNELS.startTurn,
         req,
-        ["rootId", "conversationId", "turnId", "traceId", "userMessage"],
+        ["rootId", "conversationId", "turnId", "traceId", "userMessage", "userMessageId"],
         ["subpath"],
       );
       const root = await getStoredRoot(req.rootId);
@@ -743,7 +747,7 @@ export function registerSidecarIpc(): void {
           "decision",
           "note",
         ],
-        ["subpath"],
+        ["subpath", "userMessageId"],
       );
       const root = await getStoredRoot(req.rootId);
       if (!root) throw new Error("本地目录未授权或已移除");

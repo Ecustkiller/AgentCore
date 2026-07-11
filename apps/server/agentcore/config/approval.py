@@ -3,19 +3,15 @@
 from pydantic import BaseModel, Field
 
 
-def _default_approval_timeout_overrides() -> dict[str, float]:
-    # file_write often carries long-form drafts (e.g. paper sections); 5 min was too
-    # tight and surfaced as approval.timeout → run.failed.
-    return {"file_write": 900.0}
-
-
 class ApprovalSettings(BaseModel):
     approval_gate_enabled: bool = True
-    approval_timeout_seconds: float = 300.0
+    # 提问确认交互统一 D2：默认无限等（None）；运维可设上限。timeout 逻辑保留。
+    approval_timeout_seconds: float | None = None
     # Per-tool approval wait ceilings; unset tools fall back to approval_timeout_seconds.
-    approval_timeout_overrides: dict[str, float] = Field(
-        default_factory=_default_approval_timeout_overrides
-    )
+    # 默认清空（不再对 file_write 设 900s）；运维可配置。
+    approval_timeout_overrides: dict[str, float] = Field(default_factory=dict)
 
-    def approval_timeout_for(self, tool_name: str) -> float:
-        return self.approval_timeout_overrides.get(tool_name, self.approval_timeout_seconds)
+    def approval_timeout_for(self, tool_name: str) -> float | None:
+        if tool_name in self.approval_timeout_overrides:
+            return self.approval_timeout_overrides[tool_name]
+        return self.approval_timeout_seconds

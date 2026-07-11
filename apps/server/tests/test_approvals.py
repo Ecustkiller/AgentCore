@@ -196,11 +196,13 @@ async def test_gate_per_tool_timeout_override():
     assert time.monotonic() - t0 < 0.2
 
 
-def test_approval_settings_file_write_default_timeout():
+def test_approval_settings_default_infinite_wait():
+    """提问确认交互统一 D2：默认无限等，overrides 清空。"""
     settings = ApprovalSettings()
-    assert settings.approval_timeout_seconds == 300.0
-    assert settings.approval_timeout_for("file_write") == 900.0
-    assert settings.approval_timeout_for("code_execute") == 300.0
+    assert settings.approval_timeout_seconds is None
+    assert settings.approval_timeout_overrides == {}
+    assert settings.approval_timeout_for("file_write") is None
+    assert settings.approval_timeout_for("code_execute") is None
 
 
 async def test_gate_approve_always_skips_second_prompt():
@@ -307,10 +309,35 @@ async def test_approve_always_files_grants_whole_class():
     assert later_exec is ApprovalDecision.DENY
 
 
+async def test_code_execute_approve_always_grants_turn():
+    """Cursor-aligned: code_execute may take「本轮内都允许」— APPROVE_ALWAYS writes a
+    turn grant and the next code_execute skips the prompt (no longer downgraded)."""
+    reg = InteractionRegistry()
+    sink = EventSink()
+    gate = ApprovalGate(
+        sink=sink,
+        conversation_id="conv-1",
+        registry=reg,
+        timeout_seconds=5.0,
+        per_call_tools=frozenset(),  # production wiring: per_call_tool_names() is empty
+    )
+
+    resolver = asyncio.create_task(
+        _resolve_when_ready(reg, "id1", ApprovalDecision.APPROVE_ALWAYS, "conv-1")
+    )
+    first = await gate.authorize(tool_name="code_execute", tool_call_id="id1", arguments={})
+    await resolver
+    assert first is ApprovalDecision.APPROVE_ALWAYS
+
+    _drain(sink)
+    second = await gate.authorize(tool_name="code_execute", tool_call_id="id2", arguments={})
+    assert second is ApprovalDecision.APPROVE  # whitelisted for the turn
+    assert _drain(sink) == []
+
+
 async def test_per_call_tool_grant_downgraded_to_one_shot():
-    """code_execute is per-call: a「本轮内都允许」(APPROVE_ALWAYS) is downgraded to a
-    one-shot APPROVE and NOT whitelisted, so the next code_execute call prompts again —
-    injected content later in the turn can't ride the earlier grant (PI-004)."""
+    """Defense in depth: when per_call_tools is non-empty, APPROVE_ALWAYS is still
+    downgraded to one-shot and the next call re-prompts."""
     reg = InteractionRegistry()
     sink = EventSink()
     gate = ApprovalGate(
@@ -329,7 +356,6 @@ async def test_per_call_tool_grant_downgraded_to_one_shot():
     assert first is ApprovalDecision.APPROVE  # downgraded from APPROVE_ALWAYS
 
     _drain(sink)
-    # The SECOND code_execute is NOT auto-approved — it must prompt again (deny to prove).
     resolver2 = asyncio.create_task(
         _resolve_when_ready(reg, "id2", ApprovalDecision.DENY, "conv-1")
     )
@@ -364,35 +390,29 @@ async def test_per_call_tool_does_not_affect_other_tools_turn_grant():
     assert _drain(sink) == []
 
 
-def test_per_call_tool_names_is_the_code_execution_class():
-    """The single-source helper marks the whole code-execution class (GRANTABLE ∩
-    EXECUTION = code_execute + test_run) per-call, and NOT the file-mutation tools
-    (which keep the turn / class grant). test_run joins purely by its schema, no
-    hardcoded name."""
+def test_per_call_tool_names_is_empty_cursor_aligned():
+    """Execution tools are no longer forced per-call; turn grants are allowed
+    (Cursor-aligned). The helper stays as the injection point for ApprovalGate."""
     names = per_call_tool_names()
-    assert "code_execute" in names
-    assert "test_run" in names
-    assert "file_write" not in names and "str_replace" not in names
+    assert names == frozenset()
+    assert "code_execute" not in names
+    assert "test_run" not in names
 
 
 def test_test_run_is_governed_by_the_approval_gate():
     """P0 invariant: test_run runs project code through the SAME sandbox chain as
     code_execute, so it must pass the approval gate — it must NOT be NEVER (which slipped
     the gate entirely). Pinned at the class level: its schema is GRANTABLE, so the same
-    ``tool_call_requires_approval`` path that gates code_execute gates it, and it lands in
-    the per-call class. This is the governance test the tool previously lacked."""
+    ``tool_call_requires_approval`` path that gates code_execute gates it.
+    Turn grants are allowed (per_call_tool_names empty); file-class grant still excludes it."""
     schema = TestRunTool().schema
     assert schema.approval is ToolApproval.GRANTABLE
     assert schema.category is ToolCategory.EXECUTION
-    # The gate (tool_exec.py consults this) now returns True for test_run, exactly as it
-    # does for code_execute — no per-tool branch, just the shared GRANTABLE path.
     assert tool_call_requires_approval("test_run", schema.approval, {}) is True
     assert (
         tool_call_requires_approval("code_execute", schema.approval, {}) is True
     )  # same path
-    # And it is confirmed per call (never turn-whitelisted), like code_execute.
-    assert "test_run" in per_call_tool_names()
-    # The registered instance carries the same governed schema (single source).
+    assert "test_run" not in per_call_tool_names()
     assert build_builtin_registry().get("test_run").schema.approval is ToolApproval.GRANTABLE
 
 

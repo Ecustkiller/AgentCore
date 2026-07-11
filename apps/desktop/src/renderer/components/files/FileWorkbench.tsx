@@ -51,12 +51,13 @@ const MEMORY_WS = "__memory__";
  * switching never drops editor / draft state. The tree always stays visible (unlike
  * the swap-style {@link FileBrowser} used in narrow side panels).
  *
- * Workspace lifecycle (rename / delete / new file·folder / view chats / upload)
- * lives on each root's **right-click menu** to keep the rail clean; page-level "new
- * folder / add local" sit in the rail header, with a **name filter** below it
- * (real-time, case-insensitive substring over workspace names; session-only, not
- * persisted — it's a search, not a preference). Reuses {@link FileTree} in its
- * headerless `chrome={false}` form so per-source CRUD / drag / fold all come for free.
+ * Workspace lifecycle (new file·folder / upload / reveal in OS / open chat /
+ * clear files / delete conversation / rename) lives on each root's **right-click
+ * menu** to keep the rail clean; page-level "new folder / add local" sit in the
+ * rail header, with a **name filter** below it (real-time, case-insensitive
+ * substring over workspace names; session-only, not persisted — it's a search,
+ * not a preference). Reuses {@link FileTree} in its headerless `chrome={false}`
+ * form so per-source CRUD / drag / fold all come for free.
  *
  * No longer the lens onto a *single* project's home — that page (`/folders/:id`) is
  * gone (双模式工作区 决策 #9, 端态 I): this is purely the file lens, and chats live

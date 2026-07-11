@@ -12,6 +12,7 @@ import {
   MessageAction,
   MessageTime,
 } from "./MessageActions";
+import { SyncStatusHint } from "./SyncStatusHint";
 import type { MessageBubbleProps } from "./types";
 import { useCopyAction } from "./useCopyAction";
 
@@ -114,6 +115,11 @@ export function UserMessage({ message }: MessageBubbleProps) {
       <div className="max-w-[80%] rounded-xl rounded-br-none bg-muted px-4 py-3 text-sm text-foreground">
         <p className="whitespace-pre-wrap">{message.content}</p>
       </div>
+      {message.syncStatus && (
+        <div className="flex justify-end">
+          <SyncStatusHint syncStatus={message.syncStatus} align="end" />
+        </div>
+      )}
       {!isGenerating && (
         <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <MessageAction

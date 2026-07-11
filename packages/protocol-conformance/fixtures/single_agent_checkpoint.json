@@ -62,15 +62,20 @@
       "completed": 0,
       "total": 0
     },
-    "pendingInteraction": {
-      "kind": "checkpoint",
-      "checkpointId": "cp1",
-      "question": "先做 A 还是 B？",
-      "context": "两条路线各有取舍。"
-    },
+    "interactions": [
+      {
+        "kind": "ask_user",
+        "id": "cp1",
+        "status": "pending",
+        "question": "先做 A 还是 B？",
+        "context": "两条路线各有取舍。"
+      }
+    ],
     "cost": null,
     "debate": null,
     "debateRounds": [],
+    "teamSynthesisPreview": null,
+    "turnWarning": null,
     "teamNotes": []
   }
 }

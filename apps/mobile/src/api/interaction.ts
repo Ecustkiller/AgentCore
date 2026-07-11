@@ -9,14 +9,14 @@ type Schemas = components["schemas"];
 
 /** Settle a paused interaction — discriminated on `kind` (OpenAPI union).
  *
- * 挂起即收口 (②, Phase 3): `ask_user` / `plan_review` are no longer settled here — a CEO
- * checkpoint finalizes the turn (message_end finish_reason=paused) and is continued via the
- * cold resume endpoint (api/turn.ts `resumeStream`), so their resolve schemas are gone from
- * the backend union. Mobile resolves only an approval (PauseCard) or a worker's blocking
- * escalation (decideEscalation) live in-stream. */
+ * 挂起即收口 (②): `ask_user` / `plan_review` / `team_preview` settle via cold resume.
+ * Hot path: approval / escalation / delegation_authorization / debate_round.
+ */
 export type ResolveInteractionBody =
   | Schemas["ResolveApprovalInteraction"]
-  | Schemas["ResolveEscalationInteraction"];
+  | Schemas["ResolveEscalationInteraction"]
+  | Schemas["ResolveDelegationAuthorizationInteraction"]
+  | Schemas["ResolveDebateRoundInteraction"];
 
 /**
  * POST a paused interaction's answer; the live SSE stream resumes.

@@ -43,11 +43,15 @@ from .runs import (
     TurnMetricsRepository,
 )
 from .simulation import SimulationRepository
+from .stream_state import TurnStreamStateRepository
 from .users import (
     UserBlockRepository,
     UserDirectoryRepository,
     UserRepository,
 )
+
+# Lease repo lives under runtime (swappable backend seam); re-exported for DB consumers.
+from agentcore.runtime.leases.repo import TurnLeaseRepository  # noqa: E402
 
 __all__ = [
     "_UNSET",
@@ -74,7 +78,9 @@ __all__ = [
     "RunSessionRepository",
     "SimulationRepository",
     "TurnJournalRepository",
+    "TurnLeaseRepository",
     "TurnMetricsRepository",
+    "TurnStreamStateRepository",
     "UserBlockRepository",
     "UserDirectoryRepository",
     "UserLlmKeyRepository",

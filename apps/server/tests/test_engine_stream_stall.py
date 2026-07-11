@@ -2,8 +2,9 @@
 freezing the whole turn (the 辩论回合卡死 root cause).
 
 Pins ``stream_llm_round``'s per-chunk IDLE ceiling:
-- a stall (no chunk for > idle) raises ``LLMTimeoutError`` — and the pre-stall content
-  that already streamed to the client is preserved on the way out (emitted, not lost);
+- a post-commit stall (content already streamed) returns ``aborted`` with the partial
+  kept — same salvage contract as a mid-stream disconnect;
+- a pre-commit stall (no content / tool_call yet) raises ``LLMTimeoutError``;
 - a healthy trickle (gaps < idle) completes normally regardless of TOTAL duration;
 - disabling the gate (0) never trips.
 """
@@ -49,27 +50,34 @@ class _TrickleProvider:
             yield LLMChunk(delta_content=str(i))
 
 
-async def test_stall_raises_timeout_and_preserves_streamed_prefix(monkeypatch):
+async def test_committed_stall_returns_aborted_partial(monkeypatch):
     monkeypatch.setattr(settings, "engine_llm_stream_idle_timeout_seconds", 0.05)
     seen: list[str] = []
     provider = _StallProvider([LLMChunk(delta_content="thinking…")], stall=1.0)
-    with pytest.raises(LLMTimeoutError):
-        await stream_llm_round(provider, _request(), seen.append, lambda _d: None)
-    # the pre-stall delta DID reach the client before the gate tripped — the freeze is
-    # cut short, not the content that already made it out.
+    result = await stream_llm_round(provider, _request(), seen.append, lambda _d: None)
+    assert result.aborted is True
+    assert result.content == "thinking…"
     assert seen == ["thinking…"]
+
+
+async def test_uncommitted_stall_raises_timeout(monkeypatch):
+    monkeypatch.setattr(settings, "engine_llm_stream_idle_timeout_seconds", 0.05)
+    seen: list[str] = []
+    provider = _StallProvider([LLMChunk(delta_reasoning="…")], stall=1.0)
+    with pytest.raises(LLMTimeoutError):
+        await stream_llm_round(provider, _request(), seen.append, seen.append)
+    assert seen == ["…"]
 
 
 async def test_healthy_trickle_completes(monkeypatch):
     monkeypatch.setattr(settings, "engine_llm_stream_idle_timeout_seconds", 0.2)
     seen: list[str] = []
     provider = _TrickleProvider(n=4, gap=0.02)  # each gap well under the 0.2s ceiling
-    content, reasoning, tool_calls, _usage, _diag, _preview = await stream_llm_round(
-        provider, _request(), seen.append, lambda _d: None
-    )
-    assert content == "0123"
+    result = await stream_llm_round(provider, _request(), seen.append, lambda _d: None)
+    assert result.content == "0123"
     assert seen == ["0", "1", "2", "3"]
-    assert tool_calls is None
+    assert result.tool_calls is None
+    assert result.aborted is False
 
 
 async def test_gate_disabled_never_trips(monkeypatch):
@@ -78,7 +86,35 @@ async def test_gate_disabled_never_trips(monkeypatch):
     provider = _StallProvider([LLMChunk(delta_content="x")], stall=0.1)
     # Gate off (asyncio.timeout(None)) ⇒ the stall is tolerated; bound the test so a
     # regression that re-enables an idle abort here would surface as a raise, not a hang.
-    content, _r, _tc, _u, _diag, _preview = await asyncio.wait_for(
+    result = await asyncio.wait_for(
         stream_llm_round(provider, _request(), seen.append, lambda _d: None), timeout=2.0
     )
-    assert content == "xlate"
+    assert result.content == "xlate"
+
+
+class _ResetThenContentProvider:
+    """Emits ephemeral reasoning, then stream_reset, then fresh content."""
+
+    async def stream(self, request):  # noqa: ANN001 - duck-typed for the loop
+        yield LLMChunk(delta_reasoning="stale")
+        yield LLMChunk(stream_reset=True)
+        yield LLMChunk(delta_content="kept")
+
+
+async def test_stream_reset_clears_ephemeral_and_live_view(monkeypatch):
+    monkeypatch.setattr(settings, "engine_llm_stream_idle_timeout_seconds", 0.0)
+    content_seen: list[str] = []
+    reasoning_seen: list[str] = []
+    resets: list[int] = []
+    result = await stream_llm_round(
+        _ResetThenContentProvider(),
+        _request(),
+        content_seen.append,
+        reasoning_seen.append,
+        on_reset=lambda: resets.append(1),
+    )
+    assert reasoning_seen == ["stale"]
+    assert content_seen == ["kept"]
+    assert result.content == "kept"
+    assert result.reasoning == ""
+    assert resets == [1]

@@ -13,6 +13,11 @@ import {
   type NotificationApi,
 } from "@shared/notification-contract";
 import {
+  OUTBOX_CHANNELS,
+  type OutboxApi,
+  type OutboxSyncedPayload,
+} from "@shared/outbox-contract";
+import {
   SIDECAR_CHANNELS,
   type SidecarApi,
   type SidecarEventPush,
@@ -74,6 +79,7 @@ const fsApi: FsApi = {
   },
   workspaceOp: (rootId, op, args) =>
     ipcRenderer.invoke(FS_CHANNELS.workspaceOp, { rootId, op, args }),
+  grantSessionRun: () => ipcRenderer.invoke(FS_CHANNELS.grantSessionRun),
   reveal: (rootId, relPath) =>
     ipcRenderer.invoke(FS_CHANNELS.reveal, { rootId, relPath }),
   openPath: (rootId, relPath) =>
@@ -102,6 +108,18 @@ const sidecarApi: SidecarApi = {
   },
 };
 
+const outboxApi: OutboxApi = {
+  flush: () => ipcRenderer.invoke(OUTBOX_CHANNELS.flush),
+  flushTurn: (req) => ipcRenderer.invoke(OUTBOX_CHANNELS.flushTurn, req),
+  status: () => ipcRenderer.invoke(OUTBOX_CHANNELS.status),
+  onSynced: (cb) => {
+    const listener = (_e: unknown, payload: OutboxSyncedPayload) => cb(payload);
+    ipcRenderer.on(OUTBOX_CHANNELS.synced, listener);
+    return () => ipcRenderer.removeListener(OUTBOX_CHANNELS.synced, listener);
+  },
+  authRefresh: () => ipcRenderer.invoke(OUTBOX_CHANNELS.authRefresh),
+};
+
 const updaterApi: UpdaterApi = {
   configure: (apiBaseUrl) =>
     ipcRenderer.invoke(UPDATER_CHANNELS.configure, apiBaseUrl),
@@ -120,7 +138,7 @@ const logApi: LogApi = {
 };
 
 const terminalApi: TerminalApi = {
-  runBash: (command) => ipcRenderer.invoke(TERMINAL_CHANNELS.runBash, command),
+  runBash: (input) => ipcRenderer.invoke(TERMINAL_CHANNELS.runBash, input),
   openShellAtRoot: (rootId, subpath) =>
     ipcRenderer.invoke(TERMINAL_CHANNELS.openShellAtRoot, rootId, subpath),
 };
@@ -150,6 +168,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld("agentTownApi", agentTownApi);
     contextBridge.exposeInMainWorld("fsApi", fsApi);
     contextBridge.exposeInMainWorld("sidecarApi", sidecarApi);
+    contextBridge.exposeInMainWorld("outboxApi", outboxApi);
     contextBridge.exposeInMainWorld("updaterApi", updaterApi);
     contextBridge.exposeInMainWorld("logApi", logApi);
     contextBridge.exposeInMainWorld("terminalApi", terminalApi);
@@ -165,6 +184,8 @@ if (process.contextIsolated) {
   window.fsApi = fsApi;
   // @ts-ignore - 非隔离环境下直接挂载
   window.sidecarApi = sidecarApi;
+  // @ts-ignore - 非隔离环境下直接挂载
+  window.outboxApi = outboxApi;
   // @ts-ignore - 非隔离环境下直接挂载
   window.updaterApi = updaterApi;
   // @ts-ignore - 非隔离环境下直接挂载

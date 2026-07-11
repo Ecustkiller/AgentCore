@@ -1,8 +1,7 @@
 import { patchConversationCache } from "@/hooks/useConversations";
 import { StreamError } from "@/lib/errors";
-import { notifySuccess, notifyWarning } from "@/lib/toast";
+import { notifyWarning } from "@/lib/toast";
 import { resolveSidecarInference } from "@/services/inferenceToken";
-import { recordLocalTurn } from "@/services/localTurns";
 import {
   clearActiveSidecarTurn,
   setActiveSidecarTurn,
@@ -36,11 +35,9 @@ import type {
  *   细节已由事件给过）。主进程按 FIFO 先推完事件再回响应，故 resolve 时 `message_end`
  *   已派发、气泡已收尾。
  *
- * 回合结束后回写云端落库 + 计费（双模式工作区 §一.1）：sidecar 本机无库，故携回合结果调
- * `POST .../local-turns` 让云端入库 user/assistant 消息并按 run_id 幂等落 `cost_events`，
- * 再用返回的权威 id 对账乐观气泡——等价云链路的 `turn_saved`（换 user 消息 id）+
- * `title_generated`（更新侧栏标题）。回写是 best-effort 旁路：回合已在本机跑完并展示，
- * 落库失败只记录、不升级为回合失败（否则会把一个成功的回合误报为出错）。
+ * 持久化（as-built: 双模式工作区 §10.3；前端 UX §一B）：sidecar 渐进写入本机 outbox；主进程 Bearer
+ * 回写器投递 `POST .../local-turns`。Renderer 只标记 `synced_pending`、冲刷该 turn、
+ * 并对账乐观气泡——不再做 HTTP 重试 / toast 手动重试。
  */
 
 export interface StreamViaSidecarOptions {
@@ -152,18 +149,12 @@ export async function streamConversationViaSidecar({
         turnId,
         traceId,
         userMessage: content,
+        userMessageId: optimisticUserId,
         history,
         inference,
         debateSeed,
       }),
-    writeBack: (result) =>
-      persistAndReconcile(
-        conversationId,
-        content,
-        optimisticUserId,
-        traceId,
-        result,
-      ),
+    writeBack: () => persistAndReconcile(conversationId, optimisticUserId),
   });
 }
 
@@ -183,7 +174,6 @@ export async function resumeConversationViaSidecar({
   decision,
   note,
   selected,
-  userMessage,
   userMessageId,
   signal,
 }: ResumeViaSidecarOptions): Promise<SidecarTurnResult> {
@@ -211,19 +201,13 @@ export async function resumeConversationViaSidecar({
           conversationId,
           messageId,
           traceId,
+          userMessageId,
           decision,
           note,
           selected,
           inference,
         }),
-      writeBack: (result) =>
-        persistAndReconcile(
-          conversationId,
-          userMessage,
-          userMessageId,
-          traceId,
-          result,
-        ),
+      writeBack: () => persistAndReconcile(conversationId, userMessageId),
     });
     console.warn(
       `[Resume] resumeConversationViaSidecar completed conversationId=${conversationId} messageId=${messageId} decision=${decision}`,
@@ -253,13 +237,13 @@ interface RunSidecarTurnOptions {
   failMessage: string;
   /** 实际的 RPC 调用（startTurn / resume），Promise 在回合结束时携最终结果 resolve。 */
   invoke: () => Promise<SidecarTurnResult>;
-  /** 回合结束后回写云端（落库 + 计费 + 对账），best-effort。 */
+  /** 回合结束后冲刷 outbox 并对账（主进程回写；renderer 只反映同步态）。 */
   writeBack: (result: SidecarTurnResult) => Promise<void>;
 }
 
 /**
  * 在 renderer 这端把一次 sidecar RPC（startTurn / resume）「伪装成」普通流式回合：订阅事件流
- * 并原样喂 `dispatchSSEEvent`、桥接停止按钮到 `cancel`、收尾后回写云端、把本地引擎失败统一
+ * 并原样喂 `dispatchSSEEvent`、桥接停止按钮到 `cancel`、收尾后冲刷 outbox、把本地引擎失败统一
  * 包成带诊断的 `StreamError("sidecar")`。新回合与续跑共用这套脚手架，仅 `invoke` / `writeBack`
  * 不同（避免两条链路各写一份事件/中止/错误处理）。
  */
@@ -313,7 +297,7 @@ async function runSidecarTurn({
     if (usedFallback) {
       warnPlatformModelFallback(result.model);
     }
-    // 回合已在本机跑完——回写云端落库 + 计费，再对账乐观气泡（best-effort）。
+    // 本机已出结果 → 标 synced_pending，冲刷主进程 outbox 并对账。
     await writeBack(result);
     return result;
   } catch (err) {
@@ -346,38 +330,49 @@ async function runSidecarTurn({
 }
 
 /**
- * 回写云端落库 + 计费，并对账乐观气泡（双模式工作区 §一.1）。
+ * 冲刷本机 outbox 并对账乐观气泡（as-built: 双模式工作区 §10.3；前端 UX §一B）。
  *
- * 回合已在本机跑完并展示，落库/计费是旁路；`recordLocalTurn` 自带有限退避重试（幂等安全，
- * 服务端按 `user_message_id` / `run_id` 去重）。全部重试仍失败则**可见降级**：弹非阻断 toast
- * 提示本回合未同步 + 提供手动「重试同步」，而非静默丢历史、也不复用会话错误横幅（那语义是
- * 回合失败→重跑整轮，但回合其实成功了）。
+ * Sidecar 已把 finalize 渐进写入 outbox；主进程 Bearer 回写器投递云端。
+ * Renderer 只反映同步态——失败保留 `synced_pending`，由主进程轮询续传（无 toast / 无
+ * renderer HTTP 双写）。
  */
 async function persistAndReconcile(
   conversationId: string,
-  userMessage: string,
   optimisticUserId: string,
-  traceId: string,
-  result: SidecarTurnResult,
 ): Promise<void> {
+  const store = useConversationStore.getState();
+  store.setTurnSyncStatus(optimisticUserId, "synced_pending", conversationId);
+
+  if (!window.outboxApi?.flushTurn) {
+    // Sidecar only runs in Electron where outboxApi is injected; keep pending hint.
+    console.error(
+      "[sidecar] outboxApi missing — sync left to main-process drain",
+    );
+    return;
+  }
+
   try {
-    const saved = await recordLocalTurn(
-      conversationId,
-      userMessage,
-      optimisticUserId,
-      traceId,
-      result,
-    );
-    applyReconcile(conversationId, optimisticUserId, saved);
+    const flushed = await window.outboxApi.flushTurn({
+      userMessageId: optimisticUserId,
+    });
+    if (flushed.ok && flushed.synced) {
+      applyReconcile(conversationId, optimisticUserId, {
+        user_message_id: flushed.synced.cloudUserMessageId || optimisticUserId,
+        assistant_message_id: flushed.synced.assistantMessageId,
+        title: flushed.synced.title,
+      });
+      // onSynced from main also flips the hint; set here for snappy UI if push races.
+      const anchor = flushed.synced.cloudUserMessageId || optimisticUserId;
+      store.setTurnSyncStatus(anchor, "synced", conversationId);
+      setTimeout(() => {
+        store.setTurnSyncStatus(anchor, undefined, conversationId);
+      }, 2500);
+      return;
+    }
+    // Auth/network — file stays; polling + synced_pending UI cover the rest.
+    console.error("[sidecar] outbox writeback pending", flushed.error);
   } catch (err) {
-    console.error("[sidecar] 本地回合回写云端失败（历史未同步）", err);
-    warnWriteBackFailed(
-      conversationId,
-      userMessage,
-      optimisticUserId,
-      traceId,
-      result,
-    );
+    console.error("[sidecar] outbox flushTurn failed", err);
   }
 }
 
@@ -389,7 +384,11 @@ async function persistAndReconcile(
 function applyReconcile(
   conversationId: string,
   optimisticUserId: string,
-  saved: Awaited<ReturnType<typeof recordLocalTurn>>,
+  saved: {
+    user_message_id: string;
+    assistant_message_id?: string | null;
+    title?: string | null;
+  },
 ): void {
   const messages = getRuntime(conversationId).messages;
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
@@ -417,62 +416,4 @@ function warnPlatformModelFallback(model: string): void {
       ? `未取到云端推理令牌，这轮用本机 ${named} 跑完，而非你配置的账号模型。`
       : "未取到云端推理令牌，这轮用本机平台模型跑完，而非你配置的账号模型。",
   });
-}
-
-/**
- * 回写彻底失败的可见降级：非阻断 toast + 手动「重试同步」。手动重试再 POST（幂等安全）：成功
- * 则对账 + 成功提示，再失败则重新挂回提示（由用户决定何时再试，不无限自动循环）。
- */
-function warnWriteBackFailed(
-  conversationId: string,
-  userMessage: string,
-  optimisticUserId: string,
-  traceId: string,
-  result: SidecarTurnResult,
-): void {
-  notifyWarning("本回合未同步到云端", {
-    description: "重开会话可能看不到这条回复。",
-    action: {
-      label: "重试同步",
-      onClick: () => {
-        void retryWriteBack(
-          conversationId,
-          userMessage,
-          optimisticUserId,
-          traceId,
-          result,
-        );
-      },
-    },
-  });
-}
-
-/** 手动重试一次回写（toast 按钮触发）；成功对账并提示，失败重新挂回降级提示。 */
-async function retryWriteBack(
-  conversationId: string,
-  userMessage: string,
-  optimisticUserId: string,
-  traceId: string,
-  result: SidecarTurnResult,
-): Promise<void> {
-  try {
-    const saved = await recordLocalTurn(
-      conversationId,
-      userMessage,
-      optimisticUserId,
-      traceId,
-      result,
-    );
-    applyReconcile(conversationId, optimisticUserId, saved);
-    notifySuccess("已同步到云端");
-  } catch (err) {
-    console.error("[sidecar] 本地回合回写重试失败（历史仍未同步）", err);
-    warnWriteBackFailed(
-      conversationId,
-      userMessage,
-      optimisticUserId,
-      traceId,
-      result,
-    );
-  }
 }

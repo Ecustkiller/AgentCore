@@ -7,10 +7,12 @@ import {
   type AgentNodePresentation,
   PRESENCE_STYLES,
   STATUS_STYLES,
+  buildRevisionBadge,
   checkpointBadge,
   escalationKindLabel,
+  isDebateAgentNode,
   revisedBadge,
-  revisionVersionBadge,
+  revisionFaceHint,
   statusFaceLabel,
 } from "./shared";
 
@@ -44,18 +46,27 @@ export function buildAgentNodePresentation(
         : "—";
   const durationText = d.durationMs ? formatDuration(d.durationMs) : null;
   const statusFace = statusFaceLabel(d.status, d.durationMs);
-  const revisionFace =
-    d.isRevision && d.revision ? revisionVersionBadge(d.revision) : null;
+  const debate = isDebateAgentNode(d);
+  const revisionBadge = buildRevisionBadge({
+    isRevision: d.isRevision,
+    revision: d.revision,
+    round: d.round,
+    isDebate: debate,
+  });
+  const faceHint =
+    d.isRevision && !debate ? revisionFaceHint(d.revisionSummary) : null;
 
   const ariaLabel = `${d.role}，${statusFace.text.replace(/ · \d+s$/, "")}，模型 ${modelText}，Token ${tokenText}${
     d.costText ? `，成本 ${d.costText}` : ""
   }${durationText ? `，用时 ${durationText}` : ""}${
     d.toolCount > 0 ? `，工具 ${d.toolCount} 次` : ""
-  }${artifacts.length > 0 ? `，产物 ${artifacts.length} 个` : ""  }${
+  }${artifacts.length > 0 ? `，产物 ${artifacts.length} 个` : ""}${
     d.revised ? `，${revisedBadge(d.revised).label}` : ""
-  }${d.replacesRunId ? "，接手" : ""}${revisionFace ? `，修订 ${revisionFace}` : ""}${
-    d.checkpoint ? `，检查点${checkpointBadge(d.checkpoint).label}` : ""
-  }${
+  }${d.replacesRunId ? "，接手" : ""}${
+    revisionBadge
+      ? `，${revisionBadge.kind === "debate" ? revisionBadge.label : `修订 ${revisionBadge.label}`}`
+      : ""
+  }${d.checkpoint ? `，检查点${checkpointBadge(d.checkpoint).label}` : ""}${
     (d.escalationPending ?? 0) > 0
       ? `，${d.escalationPending} 项待你拍板${d.escalationKind && d.escalationKind !== "normal" ? `（${escalationKindLabel(d.escalationKind)}）` : ""}`
       : (d.escalationRaised ?? 0) > 0
@@ -86,7 +97,13 @@ export function buildAgentNodePresentation(
   const peekTags: string[] = [];
   if (d.stance) peekTags.push(STANCE_META[d.stance].label);
   if (d.isSubtask) peekTags.push("子任务");
-  if (d.isRevision) peekTags.push(`修订 v${d.revision ?? 2}`);
+  if (revisionBadge) {
+    peekTags.push(
+      revisionBadge.kind === "debate"
+        ? revisionBadge.label
+        : `热修修订 ${revisionBadge.label}`,
+    );
+  }
   if (d.revised) peekTags.push(revisedBadge(d.revised).label);
   if (d.replacesRunId) peekTags.push("接手");
   if (d.didRework) peekTags.push("已按交付规范重写");
@@ -146,7 +163,8 @@ export function buildAgentNodePresentation(
     checkpointFace,
     reviewConcernFace,
     statusFace,
-    revisionFace,
+    revisionBadge,
+    revisionFaceHint: faceHint,
     handoffFace: d.replacesRunId ? "接手" : null,
   };
 }

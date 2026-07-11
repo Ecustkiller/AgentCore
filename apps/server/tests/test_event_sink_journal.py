@@ -265,8 +265,8 @@ def test_content_only_turn_persists_no_process():
 
 async def test_emit_updates_in_memory_journal_when_writer_sealed(monkeypatch) -> None:
     """Post-pause emit must still update EventSink display journal; sealed writer no-ops DB."""
-    from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
     from agentcore.runtime.events import team_preview_required
+    from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
 
     written: list[int] = []
 
@@ -274,8 +274,9 @@ async def test_emit_updates_in_memory_journal_when_writer_sealed(monkeypatch) ->
         def __init__(self, session: object) -> None:
             pass
 
-        async def append(self, *, turn_id, seq, conversation_id, trace_id, entry) -> None:
+        async def append(self, *, turn_id, seq, conversation_id, trace_id, entry) -> int | None:
             written.append(seq)
+            return 0
 
     class _Sess:
         async def __aenter__(self):
@@ -284,8 +285,10 @@ async def test_emit_updates_in_memory_journal_when_writer_sealed(monkeypatch) ->
         async def __aexit__(self, *exc):
             return False
 
-    monkeypatch.setattr("agentcore.db.base.async_session_factory", lambda: _Sess())
-    monkeypatch.setattr("agentcore.db.repositories.TurnJournalRepository", Repo)
+    monkeypatch.setattr(
+        "agentcore.conversation.store.cloud.telemetry_session_factory", lambda: _Sess()
+    )
+    monkeypatch.setattr("agentcore.conversation.store.cloud.TurnJournalRepository", Repo)
     monkeypatch.setattr(
         "agentcore.runtime.audit.hooks.on_journal_fact_appended", lambda entry: None
     )
@@ -296,7 +299,7 @@ async def test_emit_updates_in_memory_journal_when_writer_sealed(monkeypatch) ->
         sink = EventSink()
         sink.emit(_plan())
         await writer.flush()
-        assert written == [0]
+        assert written == [None]
 
         await writer.seal()
         required = team_preview_required(
@@ -311,7 +314,7 @@ async def test_emit_updates_in_memory_journal_when_writer_sealed(monkeypatch) ->
         journal = sink.execution_journal()
         assert journal is not None
         assert journal[-1]["type"] == EventType.TEAM_PREVIEW_REQUIRED.value
-        assert written == [0]
+        assert written == [None]
         assert writer.schedule_append({"kind": "x"}) is None
     finally:
         current_journal_writer.reset(token)

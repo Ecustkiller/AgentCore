@@ -60,4 +60,4 @@ export {
   discardPendingContent,
   flushPendingContent,
 } from "./contentBuffer";
-export { discardPendingFrames, flushPendingFrames } from "./execFrameBuffer";
+export { flushPendingFrames } from "./execFrameBuffer";

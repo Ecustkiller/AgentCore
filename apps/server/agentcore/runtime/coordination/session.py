@@ -119,6 +119,11 @@ def should_enter_coordination(
     Callers default ``coordinate`` to True when the LLM omits the arg; only an
     explicit false falls back to classic blocking. Solo / nested lead / finalize
     still never enter.
+
+    **Invariant B**: CEO arbitration (``resolve_escalation`` / ``awaiting=ceo``)
+    is available iff a coordination session is active. Solo blocking escalate
+    therefore hangs on the **user**, never the CEO — otherwise worker↔CEO deadlock
+    (CEO blocked inside ``delegate``, worker waiting for ``resolve_escalation``).
     """
     if coordinate is False:
         return False

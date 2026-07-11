@@ -17,15 +17,13 @@ import {
 } from "@/stores/conversation";
 import { ArrowDown, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { ApprovalPrompt } from "./ApprovalPrompt";
 import { ClientToolsPrompt } from "./ClientToolsPrompt";
+import { ConversationDecisionPrompts } from "./ConversationDecisionPrompts";
 import { ConversationOutline } from "./ConversationOutline";
-import { DelegationAuthorizationPrompt } from "./DelegationAuthorizationCard";
 import { FindBar } from "./FindBar";
 import { FollowupChips } from "./FollowupChips";
 import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
-import { ResumePrompt } from "./ResumePrompt";
 import { RetryBanner } from "./RetryBanner";
 import { StreamingIndicator } from "./StreamingIndicator";
 
@@ -164,9 +162,7 @@ export function ChatView() {
 
       {/* Bottom input area */}
       <div className="mx-auto w-full max-w-3xl">
-        <ResumePrompt />
-        <DelegationAuthorizationPrompt />
-        <ApprovalPrompt />
+        <ConversationDecisionPrompts />
         <RetryBanner />
         <FollowupChips followups={followups} />
         <ClientToolsPrompt />

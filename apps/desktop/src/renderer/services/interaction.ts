@@ -45,13 +45,20 @@ export async function resolveInteraction(
 ): Promise<void> {
   const sidecarTarget = getActiveSidecarTarget(conversationId);
   if (sidecarTarget) {
-    await window.sidecarApi.respond({
+    const reply = await window.sidecarApi.respond({
       rootId: sidecarTarget.rootId,
       subpath: sidecarTarget.subpath,
       requestId: interactionId,
       conversationId,
       result: body,
     });
+    // Sidecar mirrors cloud 404 as `{resolved:false}`. Do NOT map this to ApiError(404):
+    // decideEscalation swallows 404 (race with a real timeout), which would leave the card
+    // spinning while the worker is still waiting — the exact「点了继续、后端没收到」failure.
+    // Surface a real error so the card re-enables and the user can retry.
+    if (reply && reply.resolved === false) {
+      throw new Error("交互请求不存在或已处理，请重试");
+    }
     return;
   }
   await api.post(

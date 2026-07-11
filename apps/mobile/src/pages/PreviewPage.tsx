@@ -4,7 +4,6 @@ import { fileArtifactsFromEvents } from "@/lib/fileArtifacts";
 import { PREVIEW_FIXTURES } from "@/preview/fixtures";
 import {
   extractAsks,
-  extractPendingEscalations,
   extractRunToolCalls,
   extractToolPhases,
   extractWorkerToolPhases,
@@ -50,10 +49,15 @@ export function PreviewPage() {
     () => extractWorkerToolPhases(events),
     [events],
   );
-  const pendingEscalations = useMemo(
-    () => extractPendingEscalations(events),
-    [events],
-  );
+  const pendingEscalations = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const i of projected.interactions) {
+      if (i.kind === "escalation" && i.status === "pending") {
+        map.set(i.runId, i.id);
+      }
+    }
+    return map;
+  }, [projected.interactions]);
   const runToolCalls = useMemo(() => extractRunToolCalls(events), [events]);
   const artifacts = useMemo(() => fileArtifactsFromEvents(events), [events]);
 
@@ -77,6 +81,10 @@ export function PreviewPage() {
   function selectScenario(name: string) {
     setSearchParams({ s: name });
   }
+
+  const pendingKinds = projected.interactions
+    .filter((i) => i.status === "pending")
+    .map((i) => i.kind);
 
   function setFrame(next: number | null) {
     if (!current) return;
@@ -144,9 +152,9 @@ export function PreviewPage() {
             toolPhases={toolPhases}
           />
           <FileArtifactsCard artifacts={artifacts} conversationId={null} />
-          {projected.pendingInteraction && (
+          {pendingKinds.length > 0 && (
             <div className="preview-pending muted">
-              交互暂停（预览只读）: {projected.pendingInteraction.kind}
+              交互暂停（预览只读）: {pendingKinds.join(", ")}
             </div>
           )}
         </div>

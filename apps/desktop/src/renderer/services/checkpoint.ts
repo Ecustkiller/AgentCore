@@ -1,13 +1,8 @@
 import type { CheckpointDecision } from "@/types/events";
 
-/** The decisions a user can actively make on an ask_user checkpoint card. `timeout`
- * is engine-only (a no-answer deadline) and is never sent by the client.
+/** Decisions a user can actively make on an ask_user card. `timeout` is
+ * engine-only (no-answer deadline) and is never sent by the client.
  *
- * 挂起即收口 (②, Phase 3): the live in-process `ask_user` resolve was retired — a CEO
- * checkpoint now finalizes the turn (`SUSPEND → PAUSED`) and is continued via the single
- * cold `POST .../resume` path (services/turns.ts `runResume`), never a
- * `POST .../interactions` from here. This module therefore no longer ships a
- * `decideCheckpoint`; only the decision type survives, still consumed by the shared
- * ask_user card body ({@link AskUserCard}) that the durable resume card (ResumePrompt)
- * reuses. */
+ * Settlement is cold `POST .../resume` (services/turns.ts `runResume`); the
+ * shared ask_user body ({@link AskUserCard}) is reused by ResumePrompt. */
 export type CheckpointUserDecision = Exclude<CheckpointDecision, "timeout">;

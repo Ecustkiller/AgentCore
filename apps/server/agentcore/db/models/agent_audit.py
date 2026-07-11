@@ -9,6 +9,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -43,6 +44,8 @@ class AgentAuditEvent(Base):
             "actor_kind in ('captain', 'member', 'system')",
             name="ck_agent_audit_events_actor_kind",
         ),
+        # At-least-once drain / retry dedupe (as-built: 安全权限 §八).
+        UniqueConstraint("turn_id", "seq", name="uq_agent_audit_events_turn_seq"),
         Index("ix_agent_audit_events_conversation_created", "conversation_id", "created_at"),
         Index("ix_agent_audit_events_created_category_action", "created_at", "category", "action"),
         Index(
@@ -54,7 +57,7 @@ class AgentAuditEvent(Base):
     )
 
     id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
-    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
     conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     turn_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)

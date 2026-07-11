@@ -143,10 +143,8 @@ async def test_finalize_returns_suspend_and_skips_the_wait():
     assert any(e.type is EventType.CHECKPOINT_REQUIRED for e in _drain(sink))
 
 
-async def test_finalize_falls_back_to_wait_when_frame_not_saved():
-    # The frame could NOT be captured (no captain_transcript published) ⇒ the turn would be
-    # un-resumable, so the tool MUST fall through to the in-memory wait rather than finalize
-    # and silently strand it (§六-1 narrow live fallback).
+async def test_finalize_fails_explicitly_when_frame_not_saved():
+    # D11：无 transcript ⇒ 无法落盘 ⇒ 显式失败（不再窄兜底假等待）。
     bridge = _RecordingBridge()
     frames: list = []
 
@@ -157,13 +155,12 @@ async def test_finalize_falls_back_to_wait_when_frame_not_saved():
         return None
 
     tool = _ask_tool(bridge, saver, deleter, EventSink())
-    # NB: no captain_transcript.set(...) — persist_suspension returns False (nothing to
-    # capture), so finalize is declined.
     res = await tool.execute({"message": "A 还是 B?"}, _ctx())
 
-    assert frames == []  # nothing saved
-    assert bridge.suspend_calls == 1  # parked on the Future (the blocking path)
+    assert frames == []
+    assert bridge.suspend_calls == 0
     assert res.effect is not ToolEffect.SUSPEND
+    assert res.success is False
 
 
 # --- the engine: a SUSPEND terminal ends the loop on PAUSED, call left pending ------
@@ -287,6 +284,7 @@ async def test_persist_tail_writes_pause_snapshot(monkeypatch):
     from types import SimpleNamespace
 
     from agentcore.conversation import turn_persistence
+    from agentcore.conversation.store import cloud as cloud_mod
 
     upserted: dict = {}
 
@@ -307,9 +305,9 @@ async def test_persist_tail_writes_pause_snapshot(monkeypatch):
     def _bomb_journal(*_args, **_kwargs):
         raise AssertionError("paused turn must not re-write journal")
 
-    monkeypatch.setattr(turn_persistence, "MessageRepository", FakeRepo)
-    monkeypatch.setattr(turn_persistence, "async_session_factory", lambda: FakeSessionCM())
-    monkeypatch.setattr(turn_persistence, "persist_turn_journal", _bomb_journal)
+    monkeypatch.setattr(cloud_mod, "MessageRepository", FakeRepo)
+    monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: FakeSessionCM())
+    monkeypatch.setattr(cloud_mod, "persist_turn_journal", _bomb_journal)
 
     await turn_persistence.persist_turn_result(
         result={

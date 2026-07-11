@@ -10,6 +10,7 @@ vi.mock("@/lib/toast", () => ({
 
 import { handleTerminalResult, runTerminalBash } from "@/lib/terminalFeedback";
 import { notifyError, notifyInfo } from "@/lib/toast";
+import { useRunConfirmStore } from "@/stores/runConfirm";
 
 const notifyErrorMock = vi.mocked(notifyError);
 const notifyInfoMock = vi.mocked(notifyInfo);
@@ -17,6 +18,7 @@ const notifyInfoMock = vi.mocked(notifyInfo);
 beforeEach(() => {
   notifyErrorMock.mockReset();
   notifyInfoMock.mockReset();
+  useRunConfirmStore.getState().reset();
 });
 
 describe("handleTerminalResult", () => {
@@ -38,13 +40,50 @@ describe("handleTerminalResult", () => {
 });
 
 describe("runTerminalBash", () => {
-  it("forwards command to terminalApi and surfaces cancel", async () => {
+  it("经 RunConfirm 后以 rendererConfirmed 调 terminalApi", async () => {
     window.terminalApi = {
-      runBash: vi.fn(async () => ({ ok: false, reason: "已取消" })),
+      runBash: vi.fn(async () => ({ ok: true })),
+      openShellAtRoot: vi.fn(),
     };
-    await runTerminalBash("pnpm test");
-    expect(window.terminalApi.runBash).toHaveBeenCalledWith("pnpm test");
+    const pending = runTerminalBash("pnpm test");
+    // 微任务后 pending 卡应已挂上
+    await Promise.resolve();
+    expect(useRunConfirmStore.getState().pending?.command).toBe("pnpm test");
+    useRunConfirmStore.getState().decide("run");
+    await pending;
+    expect(window.terminalApi.runBash).toHaveBeenCalledWith({
+      command: "pnpm test",
+      rendererConfirmed: true,
+    });
+    window.terminalApi = undefined;
+  });
+
+  it("用户取消 → info toast，不调 runBash", async () => {
+    window.terminalApi = {
+      runBash: vi.fn(async () => ({ ok: true })),
+      openShellAtRoot: vi.fn(),
+    };
+    const pending = runTerminalBash("rm -rf /");
+    await Promise.resolve();
+    useRunConfirmStore.getState().decide("cancel");
+    await pending;
+    expect(window.terminalApi.runBash).not.toHaveBeenCalled();
     expect(notifyInfoMock).toHaveBeenCalledWith("已取消在终端运行");
+    window.terminalApi = undefined;
+  });
+
+  it("本会话已放行 → 直跑，不挂卡", async () => {
+    useRunConfirmStore.getState().markSessionAllowed();
+    window.terminalApi = {
+      runBash: vi.fn(async () => ({ ok: true })),
+      openShellAtRoot: vi.fn(),
+    };
+    await runTerminalBash("echo ok");
+    expect(useRunConfirmStore.getState().pending).toBeNull();
+    expect(window.terminalApi.runBash).toHaveBeenCalledWith({
+      command: "echo ok",
+      rendererConfirmed: true,
+    });
     window.terminalApi = undefined;
   });
 });

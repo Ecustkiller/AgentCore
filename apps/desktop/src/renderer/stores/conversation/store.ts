@@ -15,19 +15,13 @@ import {
   messageLaneFromMessage,
 } from "@/lib/foldMessageLane";
 import { stopConversation } from "@/services/stopTurn";
-import { useApprovalStore } from "@/stores/approvals";
-import { useDelegationAuthStore } from "@/stores/delegationAuth";
 import { execRuntime, useExecutionStore } from "@/stores/execution";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
+import { useInteractionStore } from "@/stores/interactions";
 import type {
-  CheckpointDecision,
-  CheckpointRequiredPayload,
   Citation,
   ContextBlockWire,
   CostBreakdown,
-  PlanReviewRequiredPayload,
-  QuestionPostedPayload,
-  TeamPreviewRequiredPayload,
   ToolUseEndPayload,
   ToolUseProgressPayload,
   ToolUseStartPayload,
@@ -150,39 +144,17 @@ export interface ConversationState {
     },
     conversationId?: string | null,
   ) => void;
-  addCheckpoint: (
-    payload: CheckpointRequiredPayload,
-    conversationId?: string | null,
-  ) => void;
-  settleCheckpoint: (
+  stampCheckpointMarker: (
     checkpointId: string,
-    decision: CheckpointDecision,
-    note: string,
-    selected: string[],
     conversationId?: string | null,
   ) => void;
-  addNonBlockingAsk: (
-    payload: QuestionPostedPayload,
-    conversationId?: string | null,
-  ) => void;
-  addPlanReview: (
-    payload: PlanReviewRequiredPayload,
-    conversationId?: string | null,
-  ) => void;
-  settlePlanReview: (
+  stampAskMarker: (askId: string, conversationId?: string | null) => void;
+  stampPlanReviewMarker: (
     checkpointId: string,
-    decision: CheckpointDecision,
-    note: string,
     conversationId?: string | null,
   ) => void;
-  addTeamPreview: (
-    payload: TeamPreviewRequiredPayload,
-    conversationId?: string | null,
-  ) => void;
-  settleTeamPreview: (
+  stampTeamPreviewMarker: (
     checkpointId: string,
-    decision: CheckpointDecision,
-    note: string,
     conversationId?: string | null,
   ) => void;
   createAssistantMessage: (conversationId?: string | null) => string;
@@ -192,6 +164,12 @@ export interface ConversationState {
   truncateAfter: (id: string, conversationId?: string | null) => void;
   reconcileLastTurn: (
     userMessageId: string,
+    conversationId?: string | null,
+  ) => void;
+  /** Mark user + paired assistant with local outbox sync hint (desktop-only). */
+  setTurnSyncStatus: (
+    userMessageId: string,
+    syncStatus: Message["syncStatus"],
     conversationId?: string | null,
   ) => void;
   setLastAssistantExecutionId: (
@@ -543,7 +521,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         return { messages };
       }),
 
-    addCheckpoint: (payload, conversationId) =>
+    stampCheckpointMarker: (checkpointId, conversationId) =>
       patchConversation(conversationId, (rt) => {
         const messages = [...rt.messages];
         let idx = -1;
@@ -555,37 +533,19 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         }
         if (idx === -1) return null;
         const msg = messages[idx];
-        const existing = msg.checkpoints ?? [];
-        if (existing.some((c) => c.id === payload.checkpoint_id)) return null;
         const lane = foldCheckpointMarker(
           messageLaneFromMessage(msg),
-          payload.checkpoint_id,
+          checkpointId,
         );
         messages[idx] = {
           ...msg,
           content: lane.content,
           process: lane.process,
-          checkpoints: [
-            ...existing,
-            {
-              id: payload.checkpoint_id,
-              question: payload.question,
-              context: payload.context ?? "",
-              assumptions: payload.assumptions ?? [],
-              questions: payload.questions ?? [],
-              styleOptions: payload.style_options ?? [],
-              intent: payload.intent ?? "decision",
-              status: "pending",
-              decision: null,
-              note: "",
-              selected: [],
-            },
-          ],
         };
         return { messages };
       }),
 
-    addNonBlockingAsk: (payload, conversationId) =>
+    stampAskMarker: (askId, conversationId) =>
       patchConversation(conversationId, (rt) => {
         const messages = [...rt.messages];
         let idx = -1;
@@ -597,58 +557,12 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         }
         if (idx === -1) return null;
         const msg = messages[idx];
-        const existing = msg.nonBlockingAsks ?? [];
-        if (existing.some((a) => a.id === payload.ask_id)) return null;
-        const lane = foldAskMarker(messageLaneFromMessage(msg), payload.ask_id);
-        messages[idx] = {
-          ...msg,
-          process: lane.process,
-          nonBlockingAsks: [
-            ...existing,
-            {
-              id: payload.ask_id,
-              question: payload.question,
-              context: payload.context ?? "",
-              assumptions: payload.assumptions ?? [],
-              questions: payload.questions ?? [],
-              styleOptions: payload.style_options ?? [],
-            },
-          ],
-        };
+        const lane = foldAskMarker(messageLaneFromMessage(msg), askId);
+        messages[idx] = { ...msg, process: lane.process };
         return { messages };
       }),
 
-    settleCheckpoint: (
-      checkpointId,
-      decision,
-      note,
-      selected,
-      conversationId,
-    ) =>
-      patchConversation(conversationId, (rt) => {
-        let changed = false;
-        const messages = rt.messages.map((m) => {
-          if (!m.checkpoints?.some((c) => c.id === checkpointId)) return m;
-          changed = true;
-          return {
-            ...m,
-            checkpoints: m.checkpoints.map((c) =>
-              c.id === checkpointId
-                ? {
-                    ...c,
-                    status: "resolved" as const,
-                    decision,
-                    note,
-                    selected,
-                  }
-                : c,
-            ),
-          };
-        });
-        return changed ? { messages } : null;
-      }),
-
-    addPlanReview: (payload, conversationId) =>
+    stampPlanReviewMarker: (checkpointId, conversationId) =>
       patchConversation(conversationId, (rt) => {
         const messages = [...rt.messages];
         let idx = -1;
@@ -660,49 +574,15 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         }
         if (idx === -1) return null;
         const msg = messages[idx];
-        const existing = msg.planReviews ?? [];
-        if (existing.some((c) => c.id === payload.checkpoint_id)) return null;
         const lane = foldPlanReviewMarker(
           messageLaneFromMessage(msg),
-          payload.checkpoint_id,
+          checkpointId,
         );
-        messages[idx] = {
-          ...msg,
-          process: lane.process,
-          planReviews: [
-            ...existing,
-            {
-              id: payload.checkpoint_id,
-              steps: payload.steps ?? [],
-              pending: payload.pending ?? [],
-              status: "pending",
-              decision: null,
-              note: "",
-            },
-          ],
-        };
+        messages[idx] = { ...msg, process: lane.process };
         return { messages };
       }),
 
-    settlePlanReview: (checkpointId, decision, note, conversationId) =>
-      patchConversation(conversationId, (rt) => {
-        let changed = false;
-        const messages = rt.messages.map((m) => {
-          if (!m.planReviews?.some((c) => c.id === checkpointId)) return m;
-          changed = true;
-          return {
-            ...m,
-            planReviews: m.planReviews.map((c) =>
-              c.id === checkpointId
-                ? { ...c, status: "resolved" as const, decision, note }
-                : c,
-            ),
-          };
-        });
-        return changed ? { messages } : null;
-      }),
-
-    addTeamPreview: (payload, conversationId) =>
+    stampTeamPreviewMarker: (checkpointId, conversationId) =>
       patchConversation(conversationId, (rt) => {
         const messages = [...rt.messages];
         let idx = -1;
@@ -714,51 +594,12 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         }
         if (idx === -1) return null;
         const msg = messages[idx];
-        const existing = msg.teamPreviews ?? [];
-        if (existing.some((c) => c.id === payload.checkpoint_id)) return null;
         const lane = foldTeamPreviewMarker(
           messageLaneFromMessage(msg),
-          payload.checkpoint_id,
+          checkpointId,
         );
-        messages[idx] = {
-          ...msg,
-          process: lane.process,
-          teamPreviews: [
-            ...existing,
-            {
-              id: payload.checkpoint_id,
-              workers: (payload.workers ?? []).map((w) => ({
-                run_id: w.run_id,
-                role: w.role,
-                task: w.task ?? "",
-                depends_on: w.depends_on ?? [],
-                debate: Boolean(w.debate),
-              })),
-              status: "pending",
-              decision: null,
-              note: "",
-            },
-          ],
-        };
+        messages[idx] = { ...msg, process: lane.process };
         return { messages };
-      }),
-
-    settleTeamPreview: (checkpointId, decision, note, conversationId) =>
-      patchConversation(conversationId, (rt) => {
-        let changed = false;
-        const messages = rt.messages.map((m) => {
-          if (!m.teamPreviews?.some((c) => c.id === checkpointId)) return m;
-          changed = true;
-          return {
-            ...m,
-            teamPreviews: m.teamPreviews.map((c) =>
-              c.id === checkpointId
-                ? { ...c, status: "resolved" as const, decision, note }
-                : c,
-            ),
-          };
-        });
-        return changed ? { messages } : null;
       }),
 
     createAssistantMessage: (conversationId) => {
@@ -829,6 +670,24 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         return { messages };
       }),
 
+    setTurnSyncStatus: (userMessageId, syncStatus, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        const userIdx = messages.findIndex(
+          (m) => m.id === userMessageId && m.role === "user",
+        );
+        if (userIdx === -1) return null;
+        messages[userIdx] = { ...messages[userIdx], syncStatus };
+        for (let i = userIdx + 1; i < messages.length; i++) {
+          if (messages[i].role === "assistant") {
+            messages[i] = { ...messages[i], syncStatus };
+            break;
+          }
+          if (messages[i].role === "user") break;
+        }
+        return { messages };
+      }),
+
     setLastAssistantExecutionId: (executionId, conversationId) =>
       patchConversation(conversationId, (rt) => {
         const messages = [...rt.messages];
@@ -893,12 +752,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const prev = byId[prevKey];
         const prevBusy =
           !!prev?.isGenerating ||
-          useApprovalStore
-            .getState()
-            .pending.some((p) => p.conversationId === prevKey) ||
-          useDelegationAuthStore
-            .getState()
-            .pending.some((p) => p.conversationId === prevKey);
+          useInteractionStore.getState().listPending(prevKey).length > 0;
         if (!prevBusy) delete byId[prevKey];
         if (!byId[nextKey]) byId[nextKey] = { ...EMPTY_RUNTIME };
         return { currentConversationId: id, byId };
@@ -913,12 +767,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         if (!slice) return {};
         const busy =
           slice.isGenerating ||
-          useApprovalStore
-            .getState()
-            .pending.some((p) => p.conversationId === conversationId) ||
-          useDelegationAuthStore
-            .getState()
-            .pending.some((p) => p.conversationId === conversationId);
+          useInteractionStore.getState().listPending(conversationId).length > 0;
         if (busy) return {};
         const byId = { ...state.byId };
         delete byId[conversationId];

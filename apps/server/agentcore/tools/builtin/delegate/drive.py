@@ -40,6 +40,37 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+async def _team_preview_before_workers(
+    tool: DelegateTool,
+    plan: RunPlan,
+    *,
+    finalize: bool,
+    complexity_hint: str,
+    seed_completed: dict[str, RunState] | None,
+    call_idx: int,
+) -> ToolResult | None:
+    """Hang for team_preview before any worker / coordinate fork. Return early result or None."""
+    if seed_completed is not None or complexity_hint == "light" or tool._depth != 0:
+        return None
+    from agentcore.tools.builtin.delegate.preview import (
+        await_team_preview,
+        should_preview,
+        skip_after_confirmed_ask,
+    )
+
+    if not should_preview(plan, finalize=finalize) or skip_after_confirmed_ask(tool):
+        return None
+    preview_decision = await await_team_preview(tool, plan)
+    if tool._pending_pause:
+        logger.info("delegate.team_preview_paused", call=call_idx, nodes=len(plan.nodes))
+        return ToolResult(tool_call_id="", success=True, output="", effect=ToolEffect.SUSPEND)
+    if preview_decision is CheckpointDecision.STOP:
+        from agentcore.tools.builtin.delegate.supervised import finalize_stopped
+
+        return await finalize_stopped(tool, plan, {})
+    return None
+
+
 async def drive(
     tool: DelegateTool,
     plan: RunPlan,
@@ -60,6 +91,10 @@ async def drive(
     not finalize), starts a background scheduler and returns immediately. Pass
     ``coordinate=False`` for classic blocking. Pass ``session`` only from the
     background task (:func:`drive_coordinated`).
+
+    ``team_preview`` runs on the CEO path **before** the coordinate fork so a durable
+    pause yields ``SUSPEND`` on the main loop (``message_end(paused)``), not only inside
+    the background task.
     """
     tool._pending_boundary = None
     tool._pending_pause = False
@@ -67,6 +102,20 @@ async def drive(
     # 日志必须用调用时定格的值而非活动计数器。resume / checkpoint 重跑时只有单个委派在飞，回退
     # 到活动计数器即可。
     call_idx = call_idx if call_idx is not None else tool._calls
+
+    # 团队预审：必须在 coordinate fork 之前（CEO 主路径）。挂起 → SUSPEND 收口；
+    # 用户开做/调整后续跑再臂后台。后台 drive_coordinated 带 session，跳过本闸。
+    if session is None:
+        preview_early = await _team_preview_before_workers(
+            tool,
+            plan,
+            finalize=finalize,
+            complexity_hint=complexity_hint,
+            seed_completed=seed_completed,
+            call_idx=call_idx,
+        )
+        if preview_early is not None:
+            return preview_early
 
     # CEO 协调模式：默认非阻塞臂（solo / finalize / depth>0 / 显式 false 由 gate 拦下）。
     if session is None and coordinate:
@@ -419,7 +468,12 @@ async def drive(
             tool._sink, plan, completed, execution_id=execution_id
         )
 
-    if complexity_hint == "light":
+    # light 与 depends_on / bind_after_deps / checkpoint_after 并存时忽略 light：
+    # 不得据 light 关掉波边界（否则晚绑定节点会带占位 role/task 直接跑）。
+    has_dag_boundary = any(
+        n.bind_after_deps or n.depends_on or n.checkpoint_after for n in plan.nodes
+    )
+    if complexity_hint == "light" and not has_dag_boundary:
         on_boundary = None
     else:
         on_boundary = (
@@ -432,7 +486,8 @@ async def drive(
             else None
         )
     # Phase 3: under coordination, SCOPE/dep escalations → CEO event queue (PROCEED),
-    # not wave-boundary YIELD. BIND / CHECKPOINT still use the base hook when present.
+    # not wave-boundary YIELD. CHECKPOINT skips durable plan_review (boundary_hook →
+    # ``_pending_boundary`` only); BIND still uses the base hook when present.
     if session is not None:
         from agentcore.runtime.coordination.bridge import coordination_boundary_hook
 
@@ -440,31 +495,6 @@ async def drive(
         # checkpoint markers (parallel fan-out with escalate kind=scope).
         on_boundary = coordination_boundary_hook(session, on_boundary)
     batch_metrics: list[BatchMetrics] = []
-
-    # 团队预审薄预览: first wave only (no seed), top-level, not light — hang before workers
-    # start when ≥2 workers or debate-marked; skip solo finalize and same-turn confirmed ask.
-    if (
-        seed_completed is None
-        and complexity_hint != "light"
-        and tool._depth == 0
-    ):
-        from agentcore.tools.builtin.delegate.preview import (
-            await_team_preview,
-            should_preview,
-            skip_after_confirmed_ask,
-        )
-
-        if should_preview(plan, finalize=finalize) and not skip_after_confirmed_ask(tool):
-            preview_decision = await await_team_preview(tool, plan)
-            if tool._pending_pause:
-                logger.info("delegate.team_preview_paused", call=call_idx, nodes=len(plan.nodes))
-                return ToolResult(
-                    tool_call_id="", success=True, output="", effect=ToolEffect.SUSPEND
-                )
-            if preview_decision is CheckpointDecision.STOP:
-                from agentcore.tools.builtin.delegate.supervised import finalize_stopped
-
-                return await finalize_stopped(tool, plan, {})
 
     delegation_started = False
     if worker_gate is not None and seed_completed is None:
@@ -609,14 +639,19 @@ async def drive(
     # tail parks the turn (the frame is the record). The已完成 workers' usage / ledger /
     # citations are NOT folded here: they ride the durable frame's ``completed`` and bill
     # on the cold resume drive — matching the disconnect→resume path this collapses onto.
+    #
+    # 协调态例外：host 靠 ``_pending_pause`` / ``_pending_boundary`` 投递 BOUNDARY_YIELD。
+    # 若此处清掉标志，host 永远看不到（竞态）。协调路径保留标志、不 SUSPEND、不收口回合。
     if tool._pending_pause:
+        if session is not None:
+            logger.info("delegate.coord_pause_signal", call=call_idx, completed=len(results))
+            return ToolResult(tool_call_id="", success=True, output="")
         tool._pending_pause = False
         logger.info("delegate.paused", call=call_idx, completed=len(results))
         return ToolResult(tool_call_id="", success=True, output="", effect=ToolEffect.SUSPEND)
 
     if tool._pending_boundary is not None:
         reason, nodes = tool._pending_boundary
-        tool._pending_boundary = None
         # 单一事实源 (P5 持久化): a SCOPE yield marked the deviating nodes' escalations
         # ``consumed`` IN PLACE (wave.py). Re-journal their terminal RunState so
         # ``completed_from_journal`` rebuilds the resume seed WITH ``consumed`` — else a
@@ -649,10 +684,20 @@ async def drive(
             boundary=[n.run_id for n in nodes],
             completed=len(results),
         )
+        brief = format_boundary_for_ceo(tool, reason, plan, results, nodes)
+        if session is not None:
+            # Leave ``_pending_boundary`` for host to post BOUNDARY_YIELD + clear.
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output=brief,
+                output_limit=DELEGATE_OUTPUT_LIMIT,
+            )
+        tool._pending_boundary = None
         return ToolResult(
             tool_call_id="",
             success=True,
-            output=format_boundary_for_ceo(tool, reason, plan, results, nodes),
+            output=brief,
             output_limit=DELEGATE_OUTPUT_LIMIT,
         )
 

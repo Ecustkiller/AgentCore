@@ -60,7 +60,7 @@ def tool_call_requires_approval(
 
 
 class ApprovalDecision(StrEnum):
-    """How the user (or a timeout) settled a tool-approval request."""
+    """How the user (or a timeout / orphan) settled a tool-approval request."""
 
     APPROVE = "approve"  # allow this one call
     APPROVE_ALWAYS = "approve_always"  # allow this tool for the rest of the turn
@@ -71,6 +71,7 @@ class ApprovalDecision(StrEnum):
     # 治理 §三 边界2: 信任"这类操作", 不是"随便干").
     APPROVE_ALWAYS_FILES = "approve_always_files"
     DENY = "deny"  # refuse; the model is told and may adapt
+    ORPHANED = "orphaned"  # 热路失效（进程/lease 恢复后旧卡不可答）
 
 
 class DelegationAuthorizationDecision(StrEnum):
@@ -79,6 +80,7 @@ class DelegationAuthorizationDecision(StrEnum):
     GRANT_DELEGATION = "grant_delegation"  # medium-risk tools skip per-call for this delegation
     PER_CALL = "per_call"  # keep existing per-call approval for each tool use
     DENY = "deny"  # refuse; the delegate call does not start workers
+    ORPHANED = "orphaned"  # 热路失效（进程/lease 恢复后旧卡不可答）
 
 
 @dataclass(frozen=True)
@@ -122,31 +124,27 @@ class ApprovalGate:
     Two grant scopes: ``APPROVE_ALWAYS`` whitelists the ONE tool of the card;
     ``APPROVE_ALWAYS_FILES`` whitelists the whole file-mutation class
     (``file_op_tools``) so a multi-file / mixed-op task is unblocked with one click.
-    ``code_execute`` (and any other ``per_call_tools``) is exempt from BOTH: a turn-wide
-    grant is refused for it, so it is confirmed per call and a later injected-content-
-    driven execution cannot ride an earlier "allow for the turn" (PI-004).
+    ``per_call_tools`` (when non-empty) refuses a turn-wide grant and downgrades to
+    one-shot — historically used for execution tools; now empty by default
+    (Cursor-aligned turn grant for ``code_execute`` / ``test_run``).
     """
 
     sink: EventSink
     conversation_id: str
     registry: ClientRequestBridge
-    timeout_seconds: float
+    timeout_seconds: float | None
     # Per-tool approval wait ceilings; unset tools use timeout_seconds.
     timeout_overrides: dict[str, float] = field(default_factory=dict)
     # The file-mutation tool class an APPROVE_ALWAYS_FILES grant covers
-    # (file_write / str_replace / file_delete / file_move). Injected at construction
-    # from the builtin registry (GRANTABLE ∩ FILESYSTEM) — see
-    # tools.builtin.file_mutation_tool_names — so it is a single source of truth;
+    # (file_write / str_replace / file_delete / file_move, PLUS git write
+    # subcommands). Injected at construction via approval_class_tool_names()
+    # (GRANTABLE ∩ FILESYSTEM + git) — see run.py / resume/pipeline.py wiring — so
+    # one file-class grant also clears git writes; single source of truth.
     # empty when not wired (the class grant then degrades to granting nothing).
     file_op_tools: frozenset[str] = frozenset()
-    # GRANTABLE tools that must be confirmed PER CALL — a turn-wide「本轮内都允许」
-    # (APPROVE_ALWAYS) grant is REFUSED for them, so the highest-risk side effect
-    # (code_execute) re-prompts every call and a later injected-content-driven call
-    # cannot ride an earlier grant (PI-004). Injected from the builtin registry
-    # (GRANTABLE ∩ EXECUTION) — see tools.builtin.per_call_tool_names — so it is a
-    # single source of truth; empty when not wired (then nothing is exempt).
-    per_call_tools: frozenset[str] = frozenset()
-    # single source of truth; empty when not wired (then nothing is exempt).
+    # Tools whose turn-wide「本轮内都允许」is refused (downgraded to one-shot).
+    # Injected from ``per_call_tool_names()`` — empty by default (Cursor-aligned);
+    # non-empty keeps the downgrade path for defense in depth / future re-tighten.
     per_call_tools: frozenset[str] = frozenset()
     # Medium-risk tools a per-delegation grant covers (code_execute + file-mutation
     # class). Injected from ``delegation_grantable_tool_names`` — see tools.builtin.
@@ -308,11 +306,9 @@ class ApprovalGate:
             if tool_name in self.per_call_tools and not self._delegation_covers(
                 execution_id, tool_name
             ):
-                # A turn-wide grant is refused for a per-call tool (code_execute): the
-                # user's click authorizes THIS call, but the tool is NOT whitelisted, so
-                # the next call — possibly driven by injected content later in the turn —
-                # prompts again (PI-004). Downgrade to a one-shot APPROVE; the client also
-                # hides the「本轮内都允许」button for these tools, so this is defense in depth.
+                # When tool_name ∈ per_call_tools, refuse the turn-wide grant and
+                # authorize THIS call only (defense in depth). Default set is empty
+                # (Cursor-aligned: code_execute / test_run may take APPROVE_ALWAYS).
                 logger.info(
                     "approval.turn_grant_refused", tool=tool_name, approval_id=approval_id
                 )

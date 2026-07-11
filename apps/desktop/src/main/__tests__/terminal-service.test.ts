@@ -26,6 +26,7 @@ vi.mock("../fs-service", () => ({
 
 import { dialog } from "electron";
 import { getStoredRoot } from "../fs-service";
+import { resetSessionRunAllowed } from "../fs/execGate";
 import { confirmBashRun, openShellAtWorkspace } from "../terminal-service";
 
 const showMessageBox = dialog.showMessageBox as unknown as Mock;
@@ -34,6 +35,7 @@ const getStoredRootMock = getStoredRoot as unknown as Mock;
 beforeEach(() => {
   showMessageBox.mockReset();
   getStoredRootMock.mockReset();
+  resetSessionRunAllowed();
 });
 
 describe("terminal-service.confirmBashRun", () => {
@@ -43,13 +45,28 @@ describe("terminal-service.confirmBashRun", () => {
     expect(showMessageBox.mock.calls.at(-1)?.[0].defaultId).toBe(0);
   });
 
-  it("用户确认后放行", async () => {
+  it("用户确认后放行（单次，不置本会话 flag）", async () => {
     showMessageBox.mockResolvedValueOnce({ response: 1 });
     expect(await confirmBashRun("pnpm test")).toBe(true);
     const box = showMessageBox.mock.calls.at(-1)?.[0];
     expect(box.message).toContain("终端");
     expect(box.detail).toContain("pnpm test");
-    expect(box.buttons).toEqual(["取消", "在终端运行"]);
+    expect(box.buttons).toEqual(["取消", "在终端运行", "本会话都允许"]);
+    showMessageBox.mockResolvedValueOnce({ response: 0 });
+    expect(await confirmBashRun("echo again")).toBe(false);
+    expect(showMessageBox).toHaveBeenCalledTimes(2);
+  });
+
+  it("本会话都允许后同进程跳过弹窗，且与 grantSessionRun / confirmExecute 共享 flag", async () => {
+    const { confirmExecute, grantSessionRun } = await import("../fs/execGate");
+    showMessageBox.mockResolvedValueOnce({ response: 2 });
+    expect(await confirmBashRun("pnpm test")).toBe(true);
+    expect(await confirmExecute({ code: "print(1)" })).toBe(true);
+    expect(showMessageBox).toHaveBeenCalledTimes(1);
+    resetSessionRunAllowed();
+    grantSessionRun();
+    expect(await confirmBashRun("echo via grant")).toBe(true);
+    expect(showMessageBox).toHaveBeenCalledTimes(1);
   });
 
   it("长命令截断预览", async () => {

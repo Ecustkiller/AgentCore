@@ -193,7 +193,37 @@ def format_boundary_for_ceo(
 
     if reason is BoundaryReason.SCOPE:
         return format_scope_boundary(plan, results, nodes)
+    if reason is BoundaryReason.CHECKPOINT:
+        return format_checkpoint_boundary(plan, results, nodes)
     return format_bind_boundary(plan, results, nodes)
+
+
+def format_checkpoint_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec]) -> str:
+    """CHECKPOINT-arm brief (协调态波边界：事件而非回合暂停)."""
+    from agentcore.runtime.runs import RunPhase
+
+    lines = [
+        "## 计划已让出（checkpoint_after 波边界）",
+        "下列步骤已完成并声明了检查点。协调模式下**不挂起回合**——"
+        "若需用户拍板请用 `ask_user`；若可继续请 `replan` 放行下游。",
+    ]
+    for node in nodes:
+        state = results.get(node.run_id)
+        summary = (state.content if state else "") or ""
+        if len(summary) > PLAN_REVIEW_SUMMARY_CHARS:
+            summary = summary[:PLAN_REVIEW_SUMMARY_CHARS] + "…"
+        lines.append(
+            f"\n### 已完成 · run_id: `{node.run_id}`"
+            f"（{node.role or node.run_id}）\n"
+            f"产出摘要：{summary or '（无产出）'}"
+        )
+    pending = [n.run_id for n in plan.nodes if n.run_id not in results]
+    done = sum(1 for s in results.values() if s and s.phase is RunPhase.COMPLETED)
+    lines.append(
+        "\n---\n"
+        f"当前已完成 {done} 步；待跑：{('、'.join(f'`{p}`' for p in pending)) or '（无）'}。"
+    )
+    return "\n".join(lines)
 
 
 def format_bind_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec]) -> str:

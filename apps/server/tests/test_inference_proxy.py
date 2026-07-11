@@ -39,6 +39,7 @@ from agentcore.core.errors import (
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.llm.provider.protocol import (
+    LLMChunk,
     LLMMessage,
     LLMRequest,
     ToolCall,
@@ -217,9 +218,13 @@ class _FakeSession:
         return False
 
 
-def _capture_record_runs(monkeypatch, *, raises: bool = False):
-    """Fake the ledger write, capturing record_runs calls into the returned list."""
+def _capture_record_runs(monkeypatch, tmp_path, *, raises: bool = False):
+    """Enqueue → drain against a fake ledger; capture record_runs kwargs."""
+    from agentcore.billing import proxy_spend_queue as queue_mod
+
     calls: list = []
+    queue = queue_mod.reset_proxy_spend_queue_for_tests()
+    monkeypatch.setattr(queue_mod.settings, "data_dir", str(tmp_path))
 
     class _FakeCostRepo:
         def __init__(self, _session):
@@ -231,13 +236,21 @@ def _capture_record_runs(monkeypatch, *, raises: bool = False):
             calls.append(kw)
             return len(kw.get("runs") or [])
 
-    monkeypatch.setattr(inference, "async_session_factory", lambda: _FakeSession())
-    monkeypatch.setattr(inference, "CostEventRepository", _FakeCostRepo)
-    return calls
+    monkeypatch.setattr(queue_mod, "telemetry_session_factory", lambda: _FakeSession(), raising=False)
+    # Drain imports these lazily from agentcore.db.*; patch at the source modules.
+    monkeypatch.setattr(
+        "agentcore.db.base.telemetry_session_factory",
+        lambda: _FakeSession(),
+    )
+    monkeypatch.setattr(
+        "agentcore.db.repositories.CostEventRepository",
+        _FakeCostRepo,
+    )
+    return calls, queue
 
 
-async def test_record_proxy_spend_prices_and_records(monkeypatch):
-    calls = _capture_record_runs(monkeypatch)
+async def test_record_proxy_spend_prices_and_records(monkeypatch, tmp_path):
+    calls, queue = _capture_record_runs(monkeypatch, tmp_path)
     usage = inference.usage_from_deepseek(
         {
             "prompt_tokens": 1000,
@@ -249,6 +262,7 @@ async def test_record_proxy_spend_prices_and_records(monkeypatch):
     await inference._record_proxy_spend(
         user_id="u1", conversation_id="c1", model="deepseek-v4-flash", usage=usage
     )
+    assert await queue.drain_once() == 1
 
     assert len(calls) == 1
     kw = calls[0]
@@ -263,8 +277,8 @@ async def test_record_proxy_spend_prices_and_records(monkeypatch):
     assert row["tokens"]["input"] == 1000
 
 
-async def test_record_proxy_spend_carries_message_id_for_sidecar_turns(monkeypatch):
-    calls = _capture_record_runs(monkeypatch)
+async def test_record_proxy_spend_carries_message_id_for_sidecar_turns(monkeypatch, tmp_path):
+    calls, queue = _capture_record_runs(monkeypatch, tmp_path)
     usage = inference.usage_from_deepseek({"prompt_tokens": 10, "completion_tokens": 1})
     await inference._record_proxy_spend(
         user_id="u1",
@@ -273,30 +287,40 @@ async def test_record_proxy_spend_carries_message_id_for_sidecar_turns(monkeypat
         usage=usage,
         message_id="msg-sidecar-1",
     )
+    assert await queue.drain_once() == 1
     assert len(calls) == 1
     assert calls[0]["message_id"] == "msg-sidecar-1"
 
 
-async def test_record_proxy_spend_skips_without_conversation(monkeypatch):
-    calls = _capture_record_runs(monkeypatch)
+async def test_record_proxy_spend_skips_without_conversation(monkeypatch, tmp_path):
+    calls, queue = _capture_record_runs(monkeypatch, tmp_path)
     await inference._record_proxy_spend(
         user_id="u1",
         conversation_id=None,
         model="deepseek-v4-flash",
         usage=inference.usage_from_deepseek({"prompt_tokens": 10, "completion_tokens": 1}),
     )
+    assert await queue.drain_once() == 0
     assert calls == []  # no conversation → no row (can't satisfy the NOT NULL column)
 
 
-async def test_record_proxy_spend_swallows_ledger_failure(monkeypatch):
-    _capture_record_runs(monkeypatch, raises=True)
-    # Must not raise — a ledger failure can't break a turn whose answer already streamed.
+async def test_record_proxy_spend_enqueue_survives_ledger_failure(monkeypatch, tmp_path):
+    """Ledger failure on drain must not raise into the already-streamed response path.
+
+    Enqueue itself succeeds; drain leaves the file for retry (at-least-once).
+    """
+    _calls, queue = _capture_record_runs(monkeypatch, tmp_path, raises=True)
     await inference._record_proxy_spend(
         user_id="u1",
         conversation_id="c1",
         model="deepseek-v4-flash",
         usage=inference.usage_from_deepseek({"prompt_tokens": 10, "completion_tokens": 1}),
     )
+    assert await queue.drain_once() == 0  # failed write → file retained
+    # File still on disk for the next attempt.
+    from agentcore.billing.proxy_spend_queue import _queue_dir
+
+    assert list(_queue_dir().glob("*.json"))
 
 
 def test_usage_from_deepseek_maps_fields():
@@ -449,26 +473,35 @@ async def test_forward_stream_relays_and_records(monkeypatch):
 # --- trace stitching (打通气泡↔日志) -----------------------------------------
 
 
-async def test_record_proxy_spend_binds_trace_into_log_context(monkeypatch):
-    """The spend log must carry the turn's trace_id. _record_proxy_spend rebinds it so a
-    STREAMED call's deferred ledger write (which runs from the relay teardown, AFTER the
-    route's log scope has exited) still joins the turn's trace end-to-end."""
+async def test_record_proxy_spend_binds_trace_into_log_context(monkeypatch, tmp_path):
+    """Drain must rebind the turn's trace_id so a streamed call's deferred ledger
+    write (relay teardown, after the route's log scope exited) still joins the
+    turn's trace end-to-end.
+    """
+    from agentcore.billing import proxy_spend_queue as queue_mod
     from agentcore.core.log_context import get_log_value
 
     seen: dict = {}
+    queue = queue_mod.reset_proxy_spend_queue_for_tests()
+    monkeypatch.setattr(queue_mod.settings, "data_dir", str(tmp_path))
 
     class _FakeCostRepo:
         def __init__(self, _session):
             pass
 
         async def record_runs(self, **_kw):
-            # Read what's bound at the moment the ledger row is written.
             seen["trace_id"] = get_log_value("trace_id")
             seen["conversation_id"] = get_log_value("conversation_id")
             return 1
 
-    monkeypatch.setattr(inference, "async_session_factory", lambda: _FakeSession())
-    monkeypatch.setattr(inference, "CostEventRepository", _FakeCostRepo)
+    monkeypatch.setattr(
+        "agentcore.db.base.telemetry_session_factory",
+        lambda: _FakeSession(),
+    )
+    monkeypatch.setattr(
+        "agentcore.db.repositories.CostEventRepository",
+        _FakeCostRepo,
+    )
 
     await inference._record_proxy_spend(
         user_id="u1",
@@ -477,6 +510,7 @@ async def test_record_proxy_spend_binds_trace_into_log_context(monkeypatch):
         usage=inference.usage_from_deepseek({"prompt_tokens": 10, "completion_tokens": 1}),
         trace_id="trace-xyz",
     )
+    assert await queue.drain_once() == 1
     assert seen == {"trace_id": "trace-xyz", "conversation_id": "c1"}
 
 
@@ -903,3 +937,128 @@ async def test_forward_unary_includes_reasoning_content(monkeypatch):
     assert message["reasoning_content"] == "let me search"
     assert message["tool_calls"][0]["id"] == "call_9"
     assert message["tool_calls"][0]["function"]["name"] == "web_search"
+
+
+# --- empty-response diagnosis fidelity (01 F8) -------------------------------
+#
+# On an empty upstream body the provider computes a PRECISE diagnosis (OAUTH_EXPIRED /
+# MODEL_UNKNOWN ...). The proxy must relay it so the sidecar surfaces the actionable
+# hint; otherwise the sidecar re-derives a generic SILENT_EMPTY from the bare empty
+# delta and the user loses the "refresh OAuth" cue.
+
+
+async def test_forward_stream_relays_empty_diagnosis(monkeypatch):
+    """(emit) The proxy puts the provider's empty_diagnosis on the wire."""
+
+    async def _fake_spend(**_kw):
+        pass
+
+    monkeypatch.setattr(inference.proxy, "_record_proxy_spend", _fake_spend)
+
+    class _EmptyDiagProvider:
+        async def stream(self, _request):
+            yield LLMChunk(empty_diagnosis="OAUTH_EXPIRED", empty_raw_preview="<empty>")
+
+        async def close(self):
+            pass
+
+    resp = await inference._forward_stream(
+        _EmptyDiagProvider(), _request(stream=True), user_id="u1", conversation_id="c1"
+    )
+    collected = ""
+    async for chunk in resp.body_iterator:
+        collected += chunk
+
+    assert "OAUTH_EXPIRED" in collected
+    assert "<empty>" in collected
+
+
+async def test_provider_stream_surfaces_forwarded_empty_diagnosis():
+    """(parse) The sidecar's provider surfaces an inbound (proxied) empty_diagnosis
+    verbatim — proof it's forwarded, not re-derived: an empty body would otherwise never
+    yield the specific OAUTH_EXPIRED value."""
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"choices":[{"delta":{}}]}\n\n'
+                b'data: {"empty_diagnosis":"OAUTH_EXPIRED","empty_raw_preview":"<empty>"}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    provider = _provider(_handler)
+    chunks = [c async for c in provider.stream(_request(stream=True))]
+    diag = [c for c in chunks if c.empty_diagnosis]
+    assert len(diag) == 1
+    assert diag[0].empty_diagnosis == "OAUTH_EXPIRED"
+    assert diag[0].empty_raw_preview == "<empty>"
+
+
+# --- stream-control relay fidelity (断线可救跨代理跳) --------------------------
+#
+# The provider's committed-aware stream emits two control signals: stream_reset (a
+# transparent pre-commit retry happened → drop ephemeral reasoning) and aborted (a
+# post-commit disconnect → keep the partial, finish DEGRADED). Across the proxy hop
+# both would flatten to an empty delta and be lost, so the platform path would double
+# up reasoning and mask a truncated turn as a clean finish. These pin the inline relay
+# both directions, parallel to the empty_diagnosis pair.
+
+
+async def test_forward_stream_relays_stream_control_signals(monkeypatch):
+    """(emit) The proxy puts stream_reset / aborted on the wire as inline markers."""
+
+    async def _fake_spend(**_kw):
+        pass
+
+    monkeypatch.setattr(inference.proxy, "_record_proxy_spend", _fake_spend)
+
+    class _ControlSignalProvider:
+        async def stream(self, _request):
+            yield LLMChunk(delta_reasoning="stale thinking")
+            yield LLMChunk(stream_reset=True)
+            yield LLMChunk(delta_content="partial answer")
+            yield LLMChunk(aborted=True)
+
+        async def close(self):
+            pass
+
+    resp = await inference._forward_stream(
+        _ControlSignalProvider(), _request(stream=True), user_id="u1", conversation_id="c1"
+    )
+    collected = ""
+    async for chunk in resp.body_iterator:
+        collected += chunk
+
+    assert '"stream_reset": true' in collected
+    assert '"aborted": true' in collected
+
+
+async def test_provider_stream_reconstructs_forwarded_control_signals():
+    """(parse) The sidecar's provider reconstructs stream_reset / aborted from the
+    proxied inline markers — proof they survive the hop, not re-derived. The aborted
+    marker also terminates the stream without a retry (post-commit is non-retryable)."""
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"choices":[{"delta":{"reasoning_content":"stale"}}]}\n\n'
+                b'data: {"stream_reset": true}\n\n'
+                b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
+                b'data: {"aborted": true}\n\n'
+                b'data: {"choices":[{"delta":{"content":"SHOULD NOT APPEAR"}}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    provider = _provider(_handler)
+    chunks = [c async for c in provider.stream(_request(stream=True))]
+
+    assert any(c.stream_reset for c in chunks)
+    assert any(c.aborted for c in chunks)
+    # The aborted marker returns immediately: nothing after it is surfaced.
+    assert [c.delta_content for c in chunks if c.delta_content] == ["partial"]

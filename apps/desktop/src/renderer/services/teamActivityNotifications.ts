@@ -6,8 +6,8 @@ import {
   runtimeHasError,
 } from "@/lib/teamActivity";
 import { notifyInfo } from "@/lib/toast";
-import { useApprovalStore } from "@/stores/approvals";
 import { DRAFT_KEY, useConversationStore } from "@/stores/conversation";
+import { useInteractionStore } from "@/stores/interactions";
 
 /**
  * 跨对话完成通知 (前端UX设计.md §一 全局协作感知)：只读订阅对话生成态 + 审批态，当用户**不在**某对话
@@ -56,6 +56,19 @@ function notifyApproval(conversationId: string): void {
   void showNativeNotification("AgentCore", message, { conversationId });
 }
 
+function pendingApprovalIds(): string[] {
+  const out: string[] = [];
+  for (const e of useInteractionStore.getState().byId.values()) {
+    if (
+      e.kind === "approval" &&
+      (e.status === "pending" || e.status === "submitting")
+    ) {
+      out.push(e.id);
+    }
+  }
+  return out;
+}
+
 /**
  * Start the ambient cross-conversation notifier. Returns an unsubscribe fn (AppShell
  * calls it on unmount). Idempotent per call — each invocation owns its own subscriptions.
@@ -63,19 +76,13 @@ function notifyApproval(conversationId: string): void {
 export function startTeamActivityNotifications(): () => void {
   // Seed with approvals already pending at startup so a reconnect replay doesn't
   // re-toast prompts the user already knows about.
-  const notifiedApprovals = new Set<string>(
-    useApprovalStore.getState().pending.map((p) => p.approvalId),
-  );
+  const notifiedApprovals = new Set<string>(pendingApprovalIds());
 
   const unsubConversation = useConversationStore.subscribe((state, prev) => {
     for (const [id, prevRt] of Object.entries(prev.byId)) {
       if (id === DRAFT_KEY || !prevRt.isGenerating) continue;
       const nextRt = state.byId[id];
       if (nextRt?.isGenerating) continue; // still streaming — not a turn boundary
-      // isGenerating went true → false: the turn ended. An SSE `error` event stamps
-      // the assistant message BEFORE finalize (visible in `nextRt` now, but the slice
-      // may be released right after), while a transport drop writes the runtime error
-      // AFTER finalize — so capture the boundary snapshot AND re-check post-tick.
       const failedAtBoundary = nextRt
         ? runtimeHasError(nextRt)
         : runtimeHasError(prevRt);
@@ -87,14 +94,16 @@ export function startTeamActivityNotifications(): () => void {
     }
   });
 
-  const unsubApproval = useApprovalStore.subscribe((state) => {
-    for (const p of state.pending) {
-      if (notifiedApprovals.has(p.approvalId)) continue;
-      notifiedApprovals.add(p.approvalId);
-      notifyApproval(p.conversationId);
+  const unsubApproval = useInteractionStore.subscribe((state) => {
+    for (const e of state.byId.values()) {
+      if (e.kind !== "approval") continue;
+      if (e.status !== "pending" && e.status !== "submitting") continue;
+      if (notifiedApprovals.has(e.id)) continue;
+      notifiedApprovals.add(e.id);
+      notifyApproval(e.conversationId);
     }
     // Prune settled ids so the dedup set tracks only live prompts (stays bounded).
-    const live = new Set(state.pending.map((p) => p.approvalId));
+    const live = new Set(pendingApprovalIds());
     for (const seen of notifiedApprovals) {
       if (!live.has(seen)) notifiedApprovals.delete(seen);
     }

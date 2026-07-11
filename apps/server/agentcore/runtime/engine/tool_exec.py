@@ -42,10 +42,12 @@ async def execute_tools(
     """Execute tool calls (parallel, capped).
 
     Returns ``(tool_messages, terminal, attempts)`` where ``terminal`` is the
-    first terminal-effect ToolResult (a tool that already produced the turn's
-    final answer — handoff / ask_user-stop) or ``None``, and ``attempts`` carries
-    the per-call fingerprint + success used by convergence governance to detect
-    mechanical loops.
+    chosen terminal-effect ToolResult (a tool that already produced the turn's
+    final answer — handoff / ask_user-stop — or a SUSPEND pause) or ``None``, and
+    ``attempts`` carries the per-call fingerprint + success used by convergence
+    governance to detect mechanical loops. When multiple terminals appear in one
+    round, SUSPEND wins (durable pause must not lose to call-order luck) and a
+    warning is logged; normal agent toolsets never hold both classes.
 
     When ``citation_sink`` is provided, web sources surfaced by successful research
     tools are merged into it (arrival order, deduped, capped). With
@@ -235,7 +237,20 @@ async def execute_tools(
         return t is not None and t.effect is ToolEffect.SUSPEND
 
     messages = [m for m, t, _, _ in quads if not _suspends(t)]
-    terminal = next((t for _, t, _, _ in quads if t is not None), None)
+    # Terminal selection: prefer SUSPEND over HANDOFF/INTERACT when a round somehow
+    # yields multiple terminals (defense — normal agent toolsets never hold both).
+    # A durable pause must not be overridden by call-order luck with a non-SUSPEND
+    # terminal in the same gather batch. Warn when more than one terminal appears.
+    terminals = [t for _, t, _, _ in quads if t is not None]
+    if len(terminals) > 1:
+        logger.warning(
+            "tool.multi_terminal",
+            count=len(terminals),
+            effects=[t.effect.value for t in terminals],
+        )
+    terminal = next((t for t in terminals if t.effect is ToolEffect.SUSPEND), None)
+    if terminal is None and terminals:
+        terminal = terminals[0]
     attempts = [a for _, _, a, _ in quads]
 
     # Merge web sources into the sink in deterministic call order (not completion

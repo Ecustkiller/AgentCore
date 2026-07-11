@@ -123,7 +123,18 @@
       "completed": 0,
       "total": 0
     },
-    "pendingInteraction": null,
+    "interactions": [
+      {
+        "kind": "approval",
+        "id": "tc1",
+        "status": "resolved",
+        "toolCallId": "tc1",
+        "toolName": "code_execute",
+        "arguments": {
+          "code": "print(1)"
+        }
+      }
+    ],
     "cost": {
       "input": 240000,
       "cached": 64000,
@@ -133,6 +144,8 @@
     },
     "debate": null,
     "debateRounds": [],
+    "teamSynthesisPreview": null,
+    "turnWarning": null,
     "teamNotes": []
   }
 }

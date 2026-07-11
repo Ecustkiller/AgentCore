@@ -14,7 +14,10 @@ import {
   deriveArtifacts,
   resolveHandoff,
 } from "./helpers";
-import { pickEscalationKind } from "./agentNode/shared";
+import {
+  pickEscalationKind,
+  revisionFeedbackSummary,
+} from "./agentNode/shared";
 
 export interface FlowGraphProjectionInput {
   execution: Execution;
@@ -335,6 +338,11 @@ export function projectFlowNodes({
         isSubtask,
         isRevision,
         revision: run.revision,
+        round: run.round,
+        group: run.group,
+        revisionSummary: isRevision
+          ? revisionFeedbackSummary(run.receivedContext)
+          : null,
         revised: run.revised,
         replacesRunId: run.replacesRunId,
         didRework: agent?.didRework === true,

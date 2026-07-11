@@ -9,13 +9,17 @@ import { dialog } from "electron";
 import {
   confirmExecute,
   confirmOpenPath,
+  grantSessionRun,
+  isSessionRunAllowed,
   requiresOpenConfirm,
+  resetSessionRunAllowed,
 } from "../fs/execGate";
 
 const showMessageBox = dialog.showMessageBox as unknown as Mock;
 
 beforeEach(() => {
   showMessageBox.mockReset();
+  resetSessionRunAllowed();
 });
 
 describe("execGate.requiresOpenConfirm（IPC-002 白名单姿态）", () => {
@@ -90,7 +94,15 @@ describe("execGate.requiresOpenConfirm（IPC-002 白名单姿态）", () => {
   });
 });
 
-describe("execGate 确认对话框默认取消（安全失败）", () => {
+describe("execGate.grantSessionRun", () => {
+  it("置位后 isSessionRunAllowed 为 true", () => {
+    expect(isSessionRunAllowed()).toBe(false);
+    grantSessionRun();
+    expect(isSessionRunAllowed()).toBe(true);
+  });
+});
+
+describe("execGate 确认对话框（native 兜底；非 workspaceOp execute 路径）", () => {
   it("confirmExecute：用户取消（response 0）→ false，且默认 / 取消按钮均为取消位", async () => {
     showMessageBox.mockResolvedValueOnce({ response: 0 });
     await expect(
@@ -100,14 +112,24 @@ describe("execGate 确认对话框默认取消（安全失败）", () => {
     expect(box.defaultId).toBe(0);
     expect(box.cancelId).toBe(0);
     expect(box.type).toBe("warning");
-    expect(box.buttons).toHaveLength(2);
+    expect(box.buttons).toEqual(["取消", "运行", "本会话都允许"]);
     expect(box.message).toContain("python");
     expect(box.detail).toContain("print(1)");
   });
 
-  it("confirmExecute：仅确认按钮（response 1）→ true", async () => {
+  it("confirmExecute：仅「运行」（response 1）→ true，不置本会话 flag", async () => {
     showMessageBox.mockResolvedValueOnce({ response: 1 });
     await expect(confirmExecute({ code: "x" })).resolves.toBe(true);
+    showMessageBox.mockResolvedValueOnce({ response: 0 });
+    await expect(confirmExecute({ code: "y" })).resolves.toBe(false);
+    expect(showMessageBox).toHaveBeenCalledTimes(2);
+  });
+
+  it("confirmExecute：「本会话都允许」（response 2）→ true，后续同进程跳过弹窗", async () => {
+    showMessageBox.mockResolvedValueOnce({ response: 2 });
+    await expect(confirmExecute({ code: "x" })).resolves.toBe(true);
+    await expect(confirmExecute({ code: "y" })).resolves.toBe(true);
+    expect(showMessageBox).toHaveBeenCalledTimes(1);
   });
 
   it("E3：stdin 存在时确认框必须展示其内容（隐藏输入不再泄漏）", async () => {
@@ -135,10 +157,12 @@ describe("execGate 确认对话框默认取消（安全失败）", () => {
     expect(showMessageBox.mock.calls.at(-1)?.[0].detail).toContain("已截断");
   });
 
-  it("confirmOpenPath：response→boolean 映射，detail 含文件名", async () => {
+  it("confirmOpenPath：仍为两按钮，response→boolean 映射，detail 含文件名", async () => {
     showMessageBox.mockResolvedValueOnce({ response: 1 });
     await expect(confirmOpenPath("tools/run.bat")).resolves.toBe(true);
-    expect(showMessageBox.mock.calls.at(-1)?.[0].detail).toContain("run.bat");
+    const box = showMessageBox.mock.calls.at(-1)?.[0];
+    expect(box.buttons).toEqual(["取消", "打开"]);
+    expect(box.detail).toContain("run.bat");
 
     showMessageBox.mockResolvedValueOnce({ response: 0 });
     await expect(confirmOpenPath("tools/run.bat")).resolves.toBe(false);

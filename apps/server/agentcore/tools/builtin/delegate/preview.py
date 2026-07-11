@@ -6,12 +6,10 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
-from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
-from agentcore.runtime.events import team_preview_required, team_preview_resolved
-from agentcore.runtime.interaction import InteractionKind
+from agentcore.runtime.checkpoints import CheckpointDecision
+from agentcore.runtime.events import team_preview_required
 from agentcore.tools.builtin.delegate.schema import PLAN_REVIEW_SUMMARY_CHARS
-from agentcore.tools.builtin.delegate.steer import apply_steer
-from agentcore.tools.builtin.delegate.suspension import can_persist_suspension, drop_suspension
+from agentcore.tools.builtin.delegate.suspension import can_persist_suspension
 
 if TYPE_CHECKING:
     from agentcore.runtime.runs.plan import RunPlan
@@ -138,32 +136,10 @@ async def await_team_preview(tool: DelegateTool, plan: RunPlan) -> CheckpointDec
         logger.info("team_preview.finalized", checkpoint_id=checkpoint_id, workers=len(workers))
         return None
 
-    timeout = tool._checkpoint_timeout_seconds
-    try:
-        response = await registry.suspend(
-            checkpoint_id,
-            conversation_id,
-            kind=InteractionKind.TEAM_PREVIEW,
-            payload={"workers": workers},
-            timeout=timeout,
-            on_suspended=lambda: tool._sink.emit(required),
-        )
-    except TimeoutError:
-        logger.info("team_preview.timeout", checkpoint_id=checkpoint_id)
-        response = CheckpointResponse(decision=CheckpointDecision.CONTINUE)
-    await drop_suspension(tool)
-    tool._sink.emit(
-        team_preview_resolved(
-            checkpoint_id=checkpoint_id,
-            decision=response.decision.value,
-            note=response.note,
-        )
-    )
-    logger.info(
-        "team_preview.resolved",
+    # D11：删窄兜底——无法落盘则跳过预审放行（非生产无 transcript 等）。
+    logger.warning(
+        "team_preview.persist_unavailable",
         checkpoint_id=checkpoint_id,
-        decision=response.decision.value,
+        reason="no_durable_frame",
     )
-    if response.decision is CheckpointDecision.ADJUST and response.note.strip():
-        apply_steer(plan, {}, set(), response.note.strip())
-    return response.decision
+    return CheckpointDecision.CONTINUE

@@ -5,6 +5,12 @@ or ``SIMULATION_SCRIPTED`` / run ``scripted`` is set. Residents follow the
 town hourly schedule (role overrides included): move when the schedule
 location differs, otherwise stay and perform the slot activity.
 
+Non-protagonist residents get deterministic schedule dispersion (persona /
+``agent_id`` hash): varied activity copy and staggered public landings so
+the town does not read as a chorus of identical stay/move lines. Story
+cast (Zhao / Wang / Liu) keep schedule locations so demo-pulse geography
+stays predictable between beats.
+
 Still produces ``AgentTickOutcome`` so the service can emit the same
 ``sim.agent_action`` / ``sim.agent_state`` SSE events as the LLM path.
 
@@ -12,22 +18,37 @@ Additionally, every ``SCRIPTED_DEMO_INTERVAL`` ticks a lightweight demo
 pulse advances a fixed multi-beat story arc (Zhao↔Wang market rivalry,
 Liu mediation, town-hall vote) via conversation / trade / vote
 interactions and story-aligned preset ``world_event``s — so Unity demos
-stay readable without DeepSeek.
+stay readable without DeepSeek. Cadence is intentionally a bit sparse
+(interaction every 4 ticks, world_event every 8) so beats remain readable.
 
 God-mode injects (storm / festival / price_surge / announcement) alter
 the *next* scripted tick: shelter / gather / market bias, and queued
 announcement votes are drained deterministically.
+
+Story beats / world presets: single SoT ``packages/town-story-packs`` →
+``pnpm gen:story-packs`` → packaged ``agentcore.simulation.data``.
 """
 
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from agentcore.core.types import new_id
 from agentcore.simulation.agents.models import SimPersona
 from agentcore.simulation.agents.social import adjust_relation, clamp
+from agentcore.simulation.agents.story_packs import (
+    DEMO_PACK_FESTIVAL,
+    DEMO_PACK_IDS,
+    DEMO_PACK_PRICE_SURGE,
+    DEMO_PACK_TOWN_HALL,
+    Speaker,
+    StoryBeat,
+    TradeSpec,
+    beats_for_pack,
+    normalize_demo_pack,
+    presets_for_pack,
+)
 from agentcore.simulation.agents.tick_runner import AgentTickOutcome
 from agentcore.simulation.interaction.models import (
     InteractionRequest,
@@ -35,7 +56,11 @@ from agentcore.simulation.interaction.models import (
     InteractionStateChange,
     InteractionTranscriptLine,
 )
-from agentcore.simulation.scenarios.town.schedule import schedule_hint_for_persona
+from agentcore.simulation.scenarios.town.schedule import (
+    ROLE_HOURLY_OVERRIDES,
+    ScheduleSlot,
+    schedule_hint_for_persona,
+)
 from agentcore.simulation.types import SimAgentAction
 from agentcore.simulation.world.events.models import WorldEvent
 from agentcore.simulation.world.events.templates import build_preset_event
@@ -45,527 +70,173 @@ if TYPE_CHECKING:
     from agentcore.simulation.interaction.bus import InteractionBus
 
 # Demo pulse cadence (ticks). Interaction every N; world_event every 2N.
-SCRIPTED_DEMO_INTERVAL = 3
+# 4/8 gives readable gaps between story beats without starving Unity demos.
+SCRIPTED_DEMO_INTERVAL = 4
 SCRIPTED_WORLD_EVENT_INTERVAL = SCRIPTED_DEMO_INTERVAL * 2
 
-# Offline / scripted story packs (independent of REST ``scenario``; do not change OpenAPI create).
-# Unity Offline is the source of truth for multi-pack; backend keeps price_surge default
-# and accepts demo_pack for tests / future WorldState wiring.
-DEMO_PACK_PRICE_SURGE = "price_surge"
-DEMO_PACK_FESTIVAL = "festival"
-DEMO_PACK_TOWN_HALL = "town_hall"
-DEMO_PACK_IDS = (DEMO_PACK_PRICE_SURGE, DEMO_PACK_FESTIVAL, DEMO_PACK_TOWN_HALL)
-
-# Story-aligned world-event rotation (surge → storm → festival thaw).
-_DEMO_PRESETS = ("price_surge", "storm", "festival")
-_FESTIVAL_PRESETS = ("festival", "festival", "festival")
-_TOWN_HALL_PRESETS = ("announcement", "festival", "festival")
+# Re-export pack ids for callers / tests (SoT lives in story_packs).
+__all__ = [
+    "SCRIPTED_DEMO_INTERVAL",
+    "SCRIPTED_WORLD_EVENT_INTERVAL",
+    "DEMO_PACK_PRICE_SURGE",
+    "DEMO_PACK_FESTIVAL",
+    "DEMO_PACK_TOWN_HALL",
+    "DEMO_PACK_IDS",
+    "normalize_demo_pack",
+    "run_scripted_agent_tick",
+    "run_scripted_ticks",
+    "run_scripted_demo_pulse",
+    "drain_scripted_pending",
+]
 
 _RIVAL_LEFT = "zhao"
 _RIVAL_RIGHT = "wang"
 _MEDIATOR = "liu"
+_STORY_CAST = frozenset({_RIVAL_LEFT, _RIVAL_RIGHT, _MEDIATOR})
 _MARKET = "市场"
 _SQUARE = "广场"
 _TOWN_HALL = "镇政厅"
 _HOME = "住宅区"
 _SHELTER_REGIONS = frozenset({_HOME, _TOWN_HALL, "面包店", "餐厅", "图书馆", "工坊"})
 _PUBLIC_GATHER = (_SQUARE, _MARKET, "公园", "图书馆", "工坊", "码头")
-
-Speaker = Literal["initiator", "target", "mediator"]
-
-
-@dataclass(frozen=True)
-class _TradeSpec:
-    item: str
-    qty: int
-    base_price: float
-
-
-@dataclass(frozen=True)
-class _StoryBeat:
-    """One demo-pulse beat in the Zhao↔Wang rivalry arc."""
-
-    kind: Literal["conversation", "trade", "vote"]
-    lines: tuple[tuple[Speaker, str], ...]
-    mood_initiator: float
-    mood_target: float
-    relation: float
-    summary_template: str
-    trade: _TradeSpec | None = None
-    world_event_blurb: str | None = None
-    vote_motion: str | None = None
-    include_mediator: bool = False
-    # Optional gather region so Unity overlays are visible in 图书馆 / 工坊 / 码头.
-    location: str | None = None
-
-
-# Multi-tick arc (9 beats, % N cycle):
-# probe → surge trade → quarrel → storm deal → Liu mediation →
-# town-hall vote → aftermath → festival thaw → consolidate.
-# Odd pulse_index → conversation; even → trade/vote (cadence tests keep alt rhythm).
-#
-# Offline JSON SoT: apps/town/Assets/StreamingAssets/Fixtures/demo-story-packs.json
-# (Unity OfflineDemoBuilder reads it this iteration). Python keeps embedded beats;
-# align to JSON next iteration — do not dual-edit copy casually.
-_STORY_BEATS: tuple[_StoryBeat, ...] = (
-    _StoryBeat(
-        kind="conversation",
-        lines=(
-            (
-                "initiator",
-                "王婶，听说你今早进的青菜比我便宜两成？这价是从哪来的？",
-            ),
-            (
-                "target",
-                "赵老板少打听！我的老主顾等着要货，你管得着吗？",
-            ),
-            (
-                "initiator",
-                "市场就这么大，别怪我回头压价——咱们走着瞧。",
-            ),
-        ),
-        mood_initiator=-0.06,
-        mood_target=0.04,
-        relation=-0.08,
-        summary_template=(
-            "tick{tick} {a}在市场旁敲打{b}的进货价，两人火药味渐浓（涨价风波·试探）"
-        ),
-    ),
-    _StoryBeat(
-        kind="trade",
-        lines=(
-            (
-                "initiator",
-                "进货渠道都紧了，这批日用品我按市价收——你别跟我扯旧账。",
-            ),
-            (
-                "target",
-                "市价？你分明趁乱加码！……行，先成交，账以后再算。",
-            ),
-            (
-                "initiator",
-                "成交。涨价风一来，谁先囤谁活——你懂的。",
-            ),
-        ),
-        mood_initiator=0.02,
-        mood_target=-0.1,
-        relation=-0.05,
-        summary_template=(
-            "tick{tick} 涨价风中成交：{a}←{b} {item}×{qty} @{price:.0f}币（涨价风波·趁乱）"
-        ),
-        trade=_TradeSpec(item="日用品", qty=1, base_price=12.0),
-        world_event_blurb=(
-            "赵老板与王婶的进货渠道同时告急，日用品与青菜价格飙升，市场人心浮动。"
-        ),
-    ),
-    _StoryBeat(
-        kind="conversation",
-        lines=(
-            (
-                "target",
-                "赵老板！你昨儿那笔日用品明明吃了涨价的红利，还到处说是我哄抬？",
-            ),
-            (
-                "initiator",
-                "我只是跟行情走。你自己进货不稳，别往我身上泼脏水。",
-            ),
-            (
-                "target",
-                "行情？我看是你故意放风！再这样我连你摊位都不让过。",
-            ),
-            (
-                "initiator",
-                "随你。反正镇民认的是货，不是嗓门。",
-            ),
-        ),
-        mood_initiator=-0.08,
-        mood_target=-0.12,
-        relation=-0.14,
-        summary_template=(
-            "tick{tick} {a}与{b}为涨价风波当街对质，关系明显恶化（涨价风波·爆发）"
-        ),
-        location="图书馆",
-    ),
-    _StoryBeat(
-        kind="trade",
-        lines=(
-            (
-                "initiator",
-                "暴风雨要来了，我缺防水布——你那儿还有存货吗？按现价，少废话。",
-            ),
-            (
-                "target",
-                "……有。暴风雨里谁都别想赚痛快钱，拿去，别再扯进货的事。",
-            ),
-            (
-                "initiator",
-                "成交。雨停了咱们再算旧账。",
-            ),
-        ),
-        mood_initiator=-0.04,
-        mood_target=-0.04,
-        relation=-0.02,
-        summary_template=(
-            "tick{tick} 暴风雨前勉强成交：{a}←{b} {item}×{qty} @{price:.0f}币"
-            "（涨价风波·避险）"
-        ),
-        trade=_TradeSpec(item="防水布", qty=1, base_price=18.0),
-        world_event_blurb=(
-            "乌云压镇，狂风暴雨将至；市场早早收摊，居民赶着囤避险物资。"
-        ),
-        location="码头",
-    ),
-    _StoryBeat(
-        kind="conversation",
-        lines=(
-            (
-                "mediator",
-                "赵老板、王婶，再当街吵我就记警告。涨价的事，去镇政厅说清楚。",
-            ),
-            (
-                "initiator",
-                "……听见了，刘警官。我不是要闹事，是进货真紧。",
-            ),
-            (
-                "target",
-                "那行，各卖各的。涨价的事，等雨停了再跟镇政厅说清楚。",
-            ),
-            (
-                "mediator",
-                "好。今晚镇政厅有议题，你们都到场——用投票，别用嗓门。",
-            ),
-        ),
-        mood_initiator=0.06,
-        mood_target=0.08,
-        relation=0.1,
-        summary_template=(
-            "tick{tick} 刘警官介入调解，{a}与{b}收声并约定去镇政厅表决"
-            "（涨价风波·调解）"
-        ),
-        include_mediator=True,
-    ),
-    _StoryBeat(
-        kind="vote",
-        lines=(
-            (
-                "mediator",
-                "议题宣读：是否临时限价并延长夜市，缓解涨价纠纷。请表决。",
-            ),
-            (
-                "initiator",
-                "支持限价——乱涨只会把市场吵散。",
-            ),
-            (
-                "target",
-                "……也支持。限价比互相泼脏水强。",
-            ),
-        ),
-        mood_initiator=0.04,
-        mood_target=0.04,
-        relation=0.06,
-        summary_template=(
-            "tick{tick} 镇政厅投票「{motion}」→ {outcome} "
-            "(支持{yes}/反对{no}/弃权{abstain})（涨价风波·表决）"
-        ),
-        vote_motion="是否临时限价并延长夜市开放时间？",
-        include_mediator=True,
-    ),
-    _StoryBeat(
-        kind="conversation",
-        lines=(
-            (
-                "mediator",
-                "表决结果已经记档。赵老板、王婶，回去各守各的摊，别再当街对骂。",
-            ),
-            (
-                "initiator",
-                "知道了。限价我认——至少规矩清楚。",
-            ),
-            (
-                "target",
-                "我也认。刘警官，下次有事我们直接去镇政厅。",
-            ),
-        ),
-        mood_initiator=0.05,
-        mood_target=0.06,
-        relation=0.08,
-        summary_template=(
-            "tick{tick} 表决后刘警官收场，{a}与{b}关系继续回暖（涨价风波·收场）"
-        ),
-        include_mediator=True,
-    ),
-    _StoryBeat(
-        kind="trade",
-        lines=(
-            (
-                "initiator",
-                "广场在办庆典，我缺点装饰用的彩带——按平价跟你换，算和解？",
-            ),
-            (
-                "target",
-                "……看在节日份上。平价就平价，别再提那阵涨价风。",
-            ),
-            (
-                "initiator",
-                "成交。今天镇上热闹，咱们也别扫兴。",
-            ),
-        ),
-        mood_initiator=0.12,
-        mood_target=0.14,
-        relation=0.16,
-        summary_template=(
-            "tick{tick} 节日和解成交：{a}←{b} {item}×{qty} @{price:.0f}币"
-            "（涨价风波·和解）"
-        ),
-        trade=_TradeSpec(item="彩带", qty=2, base_price=8.0),
-        world_event_blurb=(
-            "广场张灯结彩，节日庆典拉开帷幕；市场恩怨暂搁一边，镇上气氛回暖。"
-        ),
-    ),
-    _StoryBeat(
-        kind="conversation",
-        lines=(
-            (
-                "target",
-                "赵老板，夜市限价后客流回来了——你那摊日用品也别再藏着掖着。",
-            ),
-            (
-                "initiator",
-                "行，货我正常出。王婶，青菜也别再卡我老主顾。",
-            ),
-            (
-                "mediator",
-                "这样就对了。有纠纷还是走镇政厅，别再让我跑第二趟。",
-            ),
-            (
-                "initiator",
-                "听见了。今天市场太平，比吵架强。",
-            ),
-        ),
-        mood_initiator=0.08,
-        mood_target=0.1,
-        relation=0.12,
-        summary_template=(
-            "tick{tick} {a}与{b}在刘警官见证下巩固和解（涨价风波·巩固）"
-        ),
-        include_mediator=True,
-    ),
-)
-
-# Festival pack (6 beats) — gather / decorate / celebrate. Keep copy aligned with
-# apps/town OfflineDemoBuilder FestivalStoryBeats (dual-source this iteration).
-_FESTIVAL_STORY_BEATS: tuple[_StoryBeat, ...] = (
-    _StoryBeat(
-        kind="conversation",
-        lines=(
-            ("initiator", "王婶，广场今晚张灯——你摊上那批彩带借我用用？"),
-            ("target", "节日嘛，谁不乐意热闹。彩带你拿去，记得还。"),
-            ("initiator", "成。咱们市场的人也该去广场露个脸。"),
-        ),
-        mood_initiator=0.06,
-        mood_target=0.06,
-        relation=0.06,
-        summary_template=("tick{tick} {a}邀{b}去广场张灯（节日庆典·邀约）"),
-    ),
-    _StoryBeat(
-        kind="trade",
-        lines=(
-            ("initiator", "庆典要摆摊，我缺两卷彩带——平价跟你换。"),
-            ("target", "平价就平价，看在节日份上。拿去吧。"),
-            ("initiator", "成交。广场见。"),
-        ),
-        mood_initiator=0.08,
-        mood_target=0.08,
-        relation=0.08,
-        summary_template=(
-            "tick{tick} 节日备货：{a}←{b} {item}×{qty} @{price:.0f}币（节日庆典·备货）"
-        ),
-        trade=_TradeSpec(item="彩带", qty=2, base_price=8.0),
-        world_event_blurb=(
-            "广场张灯结彩，节日庆典拉开帷幕；镇民往广场聚集，气氛回暖。"
-        ),
-    ),
-    _StoryBeat(
-        kind="conversation",
-        lines=(
-            ("mediator", "各位，广场灯已点上。今晚别吵进货，先把庆典办好。"),
-            ("initiator", "听见了，刘警官。我把摊挪近广场。"),
-            ("target", "我也去。节日里吵价多没劲。"),
-        ),
-        mood_initiator=0.1,
-        mood_target=0.1,
-        relation=0.1,
-        summary_template=("tick{tick} 镇民往广场聚集（节日庆典·聚集）"),
-        include_mediator=True,
-    ),
-    _StoryBeat(
-        kind="trade",
-        lines=(
-            ("target", "赵老板，我缺几串灯笼——你那儿还有吗？"),
-            ("initiator", "有。节日价，不坑你。"),
-            ("target", "成交。今晚广场见。"),
-        ),
-        mood_initiator=0.1,
-        mood_target=0.12,
-        relation=0.1,
-        summary_template=(
-            "tick{tick} 节日互惠：{a}←{b} {item}×{qty} @{price:.0f}币（节日庆典·互惠）"
-        ),
-        trade=_TradeSpec(item="灯笼", qty=3, base_price=6.0),
-        location="工坊",
-    ),
-    _StoryBeat(
-        kind="conversation",
-        lines=(
-            ("initiator", "王婶，彩带挂上了——今晚广场真热闹。"),
-            ("target", "是啊。涨价那阵子的气，今天先放下。"),
-            ("mediator", "这就对了。节日里和解，比任何公告都管用。"),
-            ("initiator", "干杯——为小镇。"),
-        ),
-        mood_initiator=0.14,
-        mood_target=0.14,
-        relation=0.12,
-        summary_template=("tick{tick} 广场干杯和解（节日庆典·干杯）"),
-        world_event_blurb=("广场庆典进入高潮，灯火与笑语交织；市场恩怨暂搁一边。"),
-        include_mediator=True,
-    ),
-    _StoryBeat(
-        kind="conversation",
-        lines=(
-            ("target", "灯还亮着。赵老板，明天市场照常——别再藏货。"),
-            ("initiator", "行。节日过了也别把气氛弄僵。"),
-            ("mediator", "散场吧。有事还是走镇政厅。"),
-        ),
-        mood_initiator=0.1,
-        mood_target=0.1,
-        relation=0.08,
-        summary_template=("tick{tick} 庆典余韵，关系巩固（节日庆典·余韵）"),
-        include_mediator=True,
-    ),
-)
-
-# Town-hall pack (6 beats) — notice → lobby → debate → vote → announce → settle.
-_TOWN_HALL_STORY_BEATS: tuple[_StoryBeat, ...] = (
-    _StoryBeat(
-        kind="conversation",
-        lines=(
-            ("mediator", "镇政厅贴了告示：下周是否举办镇民大会，今晚表决。"),
-            ("initiator", "终于要开会了？涨价那阵子就该开。"),
-            ("target", "开就开。别又变成吵架场。"),
-        ),
-        mood_initiator=-0.02,
-        mood_target=-0.02,
-        relation=-0.04,
-        summary_template=("tick{tick} 镇政厅公告即将表决（镇政厅·公告）"),
-        world_event_blurb=(
-            "镇政厅张贴公告：今晚就「是否举办镇民大会」进行表决，请镇民到场。"
-        ),
-        include_mediator=True,
-    ),
-    _StoryBeat(
-        kind="conversation",
-        lines=(
-            ("initiator", "王婶，你投赞成吧——大会能把限价规矩说清楚。"),
-            ("target", "我还在想。开会是好事，别变成你单方面压我。"),
-            ("initiator", "规矩对大家都好。晚上镇政厅见。"),
-        ),
-        mood_initiator=0.0,
-        mood_target=-0.04,
-        relation=-0.04,
-        summary_template=("tick{tick} {a}游说{b}支持开会（镇政厅·游说）"),
-        location="图书馆",
-    ),
-    _StoryBeat(
-        kind="conversation",
-        lines=(
-            ("mediator", "议题宣读前，双方各说一句。赵老板？"),
-            ("initiator", "赞成开会——市场纠纷需要公开规则。"),
-            ("target", "我也赞成，但要保证菜贩有发言席。"),
-            ("mediator", "记下了。请入座，准备表决。"),
-        ),
-        mood_initiator=0.04,
-        mood_target=0.04,
-        relation=0.06,
-        summary_template=("tick{tick} 镇政厅辩论后准备表决（镇政厅·辩论）"),
-        include_mediator=True,
-    ),
-    _StoryBeat(
-        kind="vote",
-        lines=(
-            ("mediator", "议题：是否下周举办镇民大会。请表决。"),
-            ("initiator", "支持——把规矩摆到台面上。"),
-            ("target", "支持。有席位我就投。"),
-        ),
-        mood_initiator=0.06,
-        mood_target=0.06,
-        relation=0.1,
-        summary_template=(
-            "tick{tick} 镇政厅投票「{motion}」→ {outcome} "
-            "(支持{yes}/反对{no}/弃权{abstain})（镇政厅·表决）"
-        ),
-        vote_motion="是否下周举办镇民大会？",
-        world_event_blurb=(
-            "镇政厅表决通过：下周举办镇民大会；广场将张灯迎接公开议事。"
-        ),
-        include_mediator=True,
-    ),
-    _StoryBeat(
-        kind="conversation",
-        lines=(
-            ("mediator", "表决结果：通过。下周镇民大会正式排期。"),
-            ("initiator", "好。到时候限价、夜市都摊开说。"),
-            ("target", "行。刘警官，菜贩席位别忘了。"),
-        ),
-        mood_initiator=0.08,
-        mood_target=0.08,
-        relation=0.08,
-        summary_template=("tick{tick} 表决结果宣读（镇政厅·宣读）"),
-        include_mediator=True,
-    ),
-    _StoryBeat(
-        kind="trade",
-        lines=(
-            ("initiator", "大会定了，我缺份告示纸——跟你换点？"),
-            ("target", "换。把「菜贩发言席」也写上。"),
-            ("initiator", "成交。下周镇政厅见。"),
-        ),
-        mood_initiator=0.08,
-        mood_target=0.1,
-        relation=0.1,
-        summary_template=(
-            "tick{tick} 落定成交：{a}←{b} {item}×{qty} @{price:.0f}币（镇政厅·落定）"
-        ),
-        trade=_TradeSpec(item="告示纸", qty=1, base_price=4.0),
-    ),
-)
+# Hours where everyone should stay put (sleep / late home) — no location jitter.
+_ANCHOR_HOURS = frozenset({0, 1, 2, 3, 4, 5, 19, 21, 22, 23})
+# Shared public landings → deterministic alternates so non-cast don't pile up.
+_LOCATION_ALTERNATES: dict[str, tuple[str, ...]] = {
+    "公园": ("公园", "广场", "码头", _HOME),
+    "广场": ("广场", "公园", _MARKET, "图书馆"),
+    "市场": (_MARKET, "广场", "餐厅", "码头"),
+    "餐厅": ("餐厅", _MARKET, "广场"),
+    "图书馆": ("图书馆", "公园", "广场", "工坊"),
+    "工坊": ("工坊", "码头", "图书馆", _MARKET),
+    "码头": ("码头", "公园", "广场", "工坊"),
+    "面包店": ("面包店", _MARKET, "广场"),
+    _TOWN_HALL: (_TOWN_HALL, "广场", "图书馆"),
+    _HOME: (_HOME, "公园", "广场"),
+}
+# When dispersion moves someone off the town-wide default, pick a local activity.
+_LOCATION_IDLE_ACTIVITIES: dict[str, tuple[str, ...]] = {
+    "公园": ("散步", "歇脚", "晒太阳", "看人下棋"),
+    "广场": ("闲逛", "听街坊聊天", "看热闹", "活动筋骨"),
+    "市场": ("逛摊", "询价", "看行情", "帮腔闲聊"),
+    "餐厅": ("找位子歇脚", "看看今日菜", "等人吃饭"),
+    "图书馆": ("翻书", "安静坐读", "看报"),
+    "工坊": ("看手作", "闻木香逛逛", "跟师傅打招呼"),
+    "码头": ("吹风", "看船", "岸边走走"),
+    "面包店": ("闻香路过", "看看橱窗", "买点面包"),
+    "镇政厅": ("办事路过", "看公告栏", "等熟人"),
+    "住宅区": ("在家歇着", "门口坐坐", "收拾屋子"),
+}
+# Exact activity copy variants (same hour, different residents).
+_ACTIVITY_VARIANTS: dict[str, tuple[str, ...]] = {
+    "睡觉": ("睡觉", "安睡", "熟睡中"),
+    "起床洗漱": ("起床洗漱", "洗漱整理", "慢悠悠起床"),
+    "做早饭": ("做早饭", "准备早餐", "热一壶水做饭"),
+    "开门准备": ("开门准备", "收拾门面", "开张前准备"),
+    "早市开张": ("早市开张", "张罗早市", "招呼早客"),
+    "晨练聚集": ("晨练聚集", "跟着晨练", "广场活动筋骨"),
+    "买卖高峰": ("买卖高峰", "忙着招呼客人", "盯着摊位行情"),
+    "午餐营业": ("午餐营业", "张罗午饭", "忙午饭高峰"),
+    "午休散步": ("午休散步", "饭后溜达", "树荫下歇脚", "公园歇息"),
+    "午后阅览": ("午后阅览", "翻书看报", "安静坐读"),
+    "手作忙碌": ("手作忙碌", "打磨手作", "忙活木器"),
+    "闲聊社交": ("闲聊社交", "跟街坊寒暄", "听镇里八卦", "广场唠嗑"),
+    "公务办理": ("公务办理", "跑一趟镇政厅", "办点镇上的事"),
+    "傍晚散步": ("傍晚散步", "吹晚风散步", "码头边走走", "晚饭前溜达"),
+    "晚餐高峰": ("晚餐高峰", "张罗晚饭", "忙晚饭客人"),
+    "回家休息": ("回家休息", "收工回家", "回屋歇着"),
+    "晚间散步": ("晚间散步", "晚饭后散步", "夜色里走走"),
+    "居家放松": ("居家放松", "在家歇着", "屋里闲坐"),
+    "洗漱就寝": ("洗漱就寝", "准备睡觉", "洗漱收工"),
+    "入睡": ("入睡", "熄灯睡觉", "沉沉睡去"),
+    "和面开炉": ("和面开炉", "揉面备炉", "开炉烤面包"),
+    "出炉摆柜": ("出炉摆柜", "摆上面包", "出炉上架"),
+    "取定制托盘": ("取定制托盘", "去工坊取托盘", "取订做的托盘"),
+    "下棋": ("下棋", "公园对弈", "找人杀一盘"),
+    "读报借书": ("读报借书", "翻报借书", "图书馆读报"),
+    "午后读书会": ("午后读书会", "参加读书会", "听读书分享"),
+    "晒太阳聊天": ("晒太阳聊天", "晒暖闲聊", "坐着唠家常"),
+    "守店揽客": ("守店揽客", "看店招呼", "守着摊位"),
+    "订做货箱": ("订做货箱", "去订货箱", "工坊谈货箱"),
+    "盘点库存": ("盘点库存", "清点存货", "核对着货架"),
+    "摆摊卖菜": ("摆摊卖菜", "卖新鲜菜", "招呼买菜的"),
+    "看木器摊": ("看木器摊", "逛工坊木器", "看手作摊"),
+    "收摊后散步": ("收摊后散步", "收摊吹风", "收完摊走走"),
+    "巡逻": ("巡逻", "广场巡一圈", "留意街面动静"),
+    "巡查岸边": ("巡查岸边", "码头巡岸", "查看岸边情况"),
+    "维持秩序": ("维持秩序", "市场维持秩序", "劝散拥堵"),
+    "傍晚巡岸": ("傍晚巡岸", "傍晚巡码头", "岸边再走一遭"),
+    "后厨忙": ("后厨忙", "灶上忙活", "准备午市菜"),
+    "查菜谱灵感": ("查菜谱灵感", "翻菜谱找灵感", "图书馆查菜谱"),
+    "看海鲜到货": ("看海鲜到货", "码头看海鲜", "盯着到货"),
+    "招待客人": ("招待客人", "招呼晚饭客人", "张罗堂食"),
+    "整理借阅": ("整理借阅", "归架整理", "理借阅台"),
+    "主持阅览": ("主持阅览", "照看阅览室", "接待读者"),
+    "读者服务": ("读者服务", "帮读者找书", "答借阅问题"),
+    "上门随访": ("上门随访", "入户随访", "看望住户"),
+    "健康讲座资料": ("健康讲座资料", "整理讲座材料", "查健康资料"),
+    "健康咨询": ("健康咨询", "广场义诊咨询", "解答健康问题"),
+    "开炉备料": ("开炉备料", "备料开炉", "工坊备料"),
+    "打磨木器": ("打磨木器", "细细打磨", "修整木器"),
+    "接待访客": ("接待访客", "招呼来看手作的", "工坊待客"),
+    "手作高峰": ("手作高峰", "赶手作订单", "忙手作活"),
+    "收工清扫": ("收工清扫", "清扫工坊", "收工整理"),
+    "整理公文": ("整理公文", "批阅公文", "整理镇政材料"),
+    "查看货运": ("查看货运", "码头看货运", "核对到港货物"),
+    "查档阅卷": ("查档阅卷", "图书馆查档", "翻阅卷宗"),
+    "接待来访": ("接待来访", "镇政厅接待", "见来访镇民"),
+    "傍晚巡视": ("傍晚巡视", "傍晚巡一圈", "码头巡视"),
+    "节日聚集": ("节日聚集", "凑节日热闹", "跟镇民同乐", "看庆典"),
+    "因风暴避险": ("因风暴避险", "躲雨避险", "暂避风雨"),
+    "关注涨价行情": ("关注涨价行情", "盯涨价盘口", "打听进货价"),
+    "参加镇政厅表决": ("参加镇政厅表决", "到场参加表决", "等候投票议题"),
+}
 
 
-def normalize_demo_pack(pack: str | None) -> str:
-    """Normalize pack id; unknown → price_surge (default 涨价风波)."""
-    if not pack:
-        return DEMO_PACK_PRICE_SURGE
-    key = pack.strip().lower()
-    if key in DEMO_PACK_IDS:
+def _stable_mix(*parts: object) -> int:
+    """FNV-1a style mix — deterministic across processes (no PYTHONHASHSEED)."""
+    h = 2166136261
+    for part in parts:
+        for ch in str(part):
+            h ^= ord(ch)
+            h = (h * 16777619) & 0xFFFFFFFF
+    return h
+
+
+def _pick_variant(key: str, variants: tuple[str, ...], *salt: object) -> str:
+    if not variants:
         return key
-    return DEMO_PACK_PRICE_SURGE
+    return variants[_stable_mix(key, *salt) % len(variants)]
 
 
-def _beats_for_pack(pack: str) -> tuple[_StoryBeat, ...]:
-    resolved = normalize_demo_pack(pack)
-    if resolved == DEMO_PACK_FESTIVAL:
-        return _FESTIVAL_STORY_BEATS
-    if resolved == DEMO_PACK_TOWN_HALL:
-        return _TOWN_HALL_STORY_BEATS
-    return _STORY_BEATS
+def _flavor_activity(persona: SimPersona, hour: int, activity: str) -> str:
+    variants = _ACTIVITY_VARIANTS.get(activity)
+    if variants is None:
+        return activity
+    return _pick_variant(activity, variants, persona.agent_id, hour % 24, "act")
 
 
-def _presets_for_pack(pack: str) -> tuple[str, ...]:
-    resolved = normalize_demo_pack(pack)
-    if resolved == DEMO_PACK_FESTIVAL:
-        return _FESTIVAL_PRESETS
-    if resolved == DEMO_PACK_TOWN_HALL:
-        return _TOWN_HALL_PRESETS
-    return _DEMO_PRESETS
+def _scripted_schedule_slot(persona: SimPersona, hour: int) -> ScheduleSlot:
+    """Schedule slot with deterministic non-cast dispersion (location + activity)."""
+    base = schedule_hint_for_persona(persona, hour)
+    hour_key = hour % 24
+    activity = _flavor_activity(persona, hour_key, base.activity)
+
+    # Story cast: keep canonical landings for demo-pulse continuity.
+    if persona.agent_id in _STORY_CAST:
+        return ScheduleSlot(location=base.location, activity=activity)
+
+    # Role workplace hours + night/home anchors: keep location, vary copy only.
+    role_hours = ROLE_HOURLY_OVERRIDES.get(persona.role, {})
+    if hour_key in role_hours or hour_key in _ANCHOR_HOURS:
+        return ScheduleSlot(location=base.location, activity=activity)
+
+    alts = _LOCATION_ALTERNATES.get(base.location, (base.location,))
+    dest = _pick_variant(base.location, alts, persona.agent_id, hour_key, "loc")
+    if dest != base.location:
+        idle = _LOCATION_IDLE_ACTIVITIES.get(dest, (f"在{dest}晃悠",))
+        activity = _pick_variant(dest, idle, persona.agent_id, hour_key, "idle")
+    return ScheduleSlot(location=dest, activity=activity)
 
 
 async def run_scripted_agent_tick(
@@ -579,6 +250,7 @@ async def run_scripted_agent_tick(
     override = _modifier_destination(world, persona, agent)
     if override is not None:
         dest, activity, reason = override
+        activity = _flavor_activity(persona, world.hour, activity)
         return await _emit_move_or_stay(
             world=world,
             persona=persona,
@@ -589,7 +261,7 @@ async def run_scripted_agent_tick(
             t0=t0,
         )
 
-    slot = schedule_hint_for_persona(persona, world.hour)
+    slot = _scripted_schedule_slot(persona, world.hour)
     return await _emit_move_or_stay(
         world=world,
         persona=persona,
@@ -767,7 +439,7 @@ async def run_scripted_demo_pulse(
 
     ``demo_pack`` selects the story arc (``price_surge`` | ``festival`` |
     ``town_hall``). Prefer ``world.demo_pack`` when unset. Not part of REST
-    create schema — Offline Unity is the multi-pack source of truth; backend
+    create schema — packs load from packaged JSON (``pnpm gen:story-packs``);
     default remains ``price_surge``.
     """
     tick = world.tick
@@ -777,8 +449,8 @@ async def run_scripted_demo_pulse(
     pack = normalize_demo_pack(
         demo_pack if demo_pack is not None else getattr(world, "demo_pack", None)
     )
-    beats = _beats_for_pack(pack)
-    presets = _presets_for_pack(pack)
+    beats = beats_for_pack(pack)
+    presets = presets_for_pack(pack)
 
     interactions: list[InteractionResult] = []
     world_events: list[WorldEvent] = []
@@ -883,7 +555,7 @@ async def _play_story_beat(
     world: WorldState,
     initiator: WorldAgent,
     target: WorldAgent,
-    beat: _StoryBeat,
+    beat: StoryBeat,
 ) -> InteractionResult:
     if beat.kind == "trade":
         return await _scripted_story_trade(world, initiator, target, beat)
@@ -959,7 +631,7 @@ async def _scripted_story_conversation(
     world: WorldState,
     initiator: WorldAgent,
     target: WorldAgent,
-    beat: _StoryBeat,
+    beat: StoryBeat,
 ) -> InteractionResult:
     location = beat.location or _MARKET
     initiator, target = await _ensure_colocated(
@@ -1015,12 +687,12 @@ async def _scripted_story_trade(
     world: WorldState,
     initiator: WorldAgent,
     target: WorldAgent,
-    beat: _StoryBeat,
+    beat: StoryBeat,
 ) -> InteractionResult:
     initiator, target = await _ensure_colocated(
         world, initiator, target, location=beat.location or _MARKET
     )
-    spec = beat.trade or _TradeSpec(item="日用品", qty=1, base_price=10.0)
+    spec = beat.trade or TradeSpec(item="日用品", qty=1, base_price=10.0)
     item, qty = spec.item, spec.qty
     price = spec.base_price
     multiplier = getattr(world.modifiers, "market_price_multiplier", 1.0)
@@ -1099,7 +771,7 @@ async def _run_scripted_vote(
     motion: str,
     detail: str,
     arc_label: str | None,
-    beat: _StoryBeat | None = None,
+    beat: StoryBeat | None = None,
     rivals: tuple[WorldAgent, WorldAgent] | None = None,
 ) -> InteractionResult:
     """Deterministic town-hall vote (no LLM) for scripted / announcement paths."""

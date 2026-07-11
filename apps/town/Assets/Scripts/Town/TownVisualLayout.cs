@@ -147,7 +147,7 @@ namespace AgentTown.Town
         private static readonly Color Sidewalk = new(0.58f, 0.58f, 0.56f);
 
         /// <summary>
-        /// Colour-slab roads / paths spanning the ~120×96 m town (always built).
+        /// Colour-slab roads / paths spanning the built town (always built).
         /// Main arteries + branches; mesh overlays in <see cref="RoadTiles"/> when catalog has roads.
         /// </summary>
         public static readonly GroundPatchDef[] Roads =
@@ -405,18 +405,27 @@ namespace AgentTown.Town
             N(-5, 7, "flower_yellowA", 0.9f, 1.2f, aggressiveLod: false),
         };
 
-        /// <summary>Grass base footprint in wire metres (~120×96).</summary>
-        public static readonly Vector2 GroundSize = new(120f, 96f);
+        /// <summary>
+        /// Grass base footprint in wire metres. Sized past the built town so bird's-eye
+        /// corners land on grass (or <see cref="TownBuilder"/> horizon fill), not dark skybox ground.
+        /// </summary>
+        public static readonly Vector2 GroundSize = new(220f, 180f);
 
-        /// <summary>Approx town centroid for camera framing (wire space).</summary>
-        public static readonly Vector3 ViewCenterWire = new(9f, 0f, 2f);
+        /// <summary>Activity core (plaza ↔ market) for camera framing (wire space).</summary>
+        public static readonly Vector3 ViewCenterWire = new(12f, 0f, 0f);
 
-        /// <summary>Default bird's-eye camera (readable buildings / trees / zone labels on first frame).</summary>
-        public static readonly Vector3 CameraWire = new(22f, 15f, 18f);
+        /// <summary>
+        /// Default bird's-eye basis (wire space). Sets the look direction (oblique ~47°,
+        /// not straight-down) applied at the view centre / shoot landmark.
+        /// </summary>
+        public static readonly Vector3 CameraWire = new(16f, 18f, 16f);
 
         /// <summary>Scroll-zoom distance limits along the bird look ray (metres from view centre).</summary>
-        public const float BirdZoomMinDistance = 16f;
-        public const float BirdZoomMaxDistance = 78f;
-        public const float BirdZoomDefaultDistance = 24f;
+        public const float BirdZoomMinDistance = 10f;
+        public const float BirdZoomMaxDistance = 56f;
+        public const float BirdZoomDefaultDistance = 22f;
+
+        /// <summary>Offline shoot framing distance — mid range: district + surroundings.</summary>
+        public const float BirdZoomShootDistance = 20f;
     }
 }

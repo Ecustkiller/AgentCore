@@ -46,11 +46,7 @@ apps/town/shoot-out/
 # Unity AgentTown player builds（Windows / WebGL）
 apps/town/Builds/
 # AgentTown 3D 资产（CC0，vendored）：源 mesh/纹理 + Import 生成的 prefab/catalog 连 .meta 入库，
-# clone / CI 即得即用，无需本地 sync 或 Editor 手动 Import。来源见 Assets/TownAssets 内 README/License。
-# packages/town-assets：除 README 外均为大二进制（sync 产物）
-packages/town-assets/**
-!packages/town-assets/README.md
-!packages/town-assets/.gitkeep
+# clone / CI 即得即用。来源见 apps/town/Assets/TownAssets/README.md。
 # website 预览自检截图
 apps/website/.shots/
 # 内置 Python 运行时（sidecar 打包产物，由 apps/desktop/scripts/bundle-sidecar.mjs 生成）

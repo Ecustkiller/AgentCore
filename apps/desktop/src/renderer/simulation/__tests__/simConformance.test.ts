@@ -9,6 +9,9 @@ import m1Tick from "@agentcore/protocol-conformance/fixtures/simulation-m1-tick.
 import interactionConversation from "@agentcore/protocol-conformance/fixtures/simulation/interaction-conversation.json" with {
   type: "json",
 };
+import coordinateTransform from "@agentcore/protocol-conformance/fixtures/simulation/coordinate-transform.json" with {
+  type: "json",
+};
 import multiAgentTick from "@agentcore/protocol-conformance/fixtures/simulation/multi-agent-tick.json" with {
   type: "json",
 };
@@ -51,6 +54,7 @@ type SimFoldFixture = {
 const FIXTURES: SimFoldFixture[] = [
   m1Tick as unknown as SimFoldFixture,
   multiAgentTick as unknown as SimFoldFixture,
+  coordinateTransform as unknown as SimFoldFixture,
   interactionConversation as unknown as SimFoldFixture,
   worldEvent as unknown as SimFoldFixture,
   tickFrameSnapshot as unknown as SimFoldFixture,

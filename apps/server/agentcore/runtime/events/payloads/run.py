@@ -158,45 +158,6 @@ class RunEscalationGatePayload(WirePayload):
     signals: list[dict[str, Any]]
 
 
-class RunSplitAssessedPayload(WirePayload):
-    run_id: str
-    agent_id: str
-    should_split: bool
-    rationale: str | None = absent()
-    triggers: list[str] | None = absent()
-    subtask_count: int | None = absent()
-    subtasks: list[dict[str, Any]] | None = absent()
-    pressure: dict[str, Any] | None = absent()
-
-
-class RunSubworkerStartedPayload(WirePayload):
-    run_id: str
-    agent_id: str
-    subworker_id: str
-    goal: str
-    token_budget: int | None = absent()
-    index: int | None = absent()
-    total: int | None = absent()
-    can_split: bool | None = absent()
-    depth: int | None = absent()
-
-
-class RunSubworkerCompletedPayload(WirePayload):
-    run_id: str
-    agent_id: str
-    subworker_id: str
-    success: bool
-    summary: str | None = absent()
-    artifact_refs: list[str] | None = absent()
-    failure: str | None = absent()
-    side_effects: list[str] | None = absent()
-    tokens_used: int | None = absent()
-    rounds: int | None = absent()
-    index: int | None = absent()
-    total: int | None = absent()
-    fold_summary: str | None = absent()
-
-
 class TeamNotePostedPayload(WirePayload):
     execution_id: str
     note_id: str

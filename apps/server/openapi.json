@@ -1615,12 +1615,13 @@
         "type": "object"
       },
       "ApprovalDecision": {
-        "description": "How the user (or a timeout) settled a tool-approval request.",
+        "description": "How the user (or a timeout / orphan) settled a tool-approval request.",
         "enum": [
           "approve",
           "approve_always",
           "approve_always_files",
-          "deny"
+          "deny",
+          "orphaned"
         ],
         "title": "ApprovalDecision",
         "type": "string"
@@ -2622,12 +2623,13 @@
         "type": "object"
       },
       "CheckpointDecision": {
-        "description": "How the user (or a timeout) settled a checkpoint the CEO raised.",
+        "description": "How the user (or a timeout / orphan) settled a checkpoint the CEO raised.",
         "enum": [
           "continue",
           "adjust",
           "stop",
-          "timeout"
+          "timeout",
+          "orphaned"
         ],
         "title": "CheckpointDecision",
         "type": "string"
@@ -3289,7 +3291,8 @@
         "enum": [
           "grant_delegation",
           "per_call",
-          "deny"
+          "deny",
+          "orphaned"
         ],
         "title": "DelegationAuthorizationDecision",
         "type": "string"
@@ -4865,6 +4868,16 @@
             "title": "Conversation Id",
             "type": "string"
           },
+          "cost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CostBreakdown"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -4927,6 +4940,23 @@
                 "type": "null"
               }
             ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "running",
+                  "complete",
+                  "incomplete",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
           },
           "trace_id": {
             "anyOf": [
@@ -5274,38 +5304,39 @@
         "title": "PausedTurnSummary",
         "type": "object"
       },
-      "PendingApprovalSummary": {
-        "description": "A GRANTABLE tool call still awaiting the user's decision (in-process gate).\n\nSurfaced on conversation reopen via ``GET .../recovery`` so the client can\nre-render approval cards after a refresh. Unlike plan_review / ask_user pauses,\napprovals stay on the live turn's interaction bridge — they are NOT durably\npaused turns — but the registry's ``list_pending`` is the authoritative\npending set while the backend run is still alive.",
+      "PendingInteractionSummary": {
+        "description": "One hot-path interaction still awaiting user settlement (journal fold).\n\nSurfaced on conversation reopen via ``GET .../recovery``. ``payload`` is the\noriginal ``*_required`` wire payload verbatim. Cold-path pauses stay in ``paused``.",
         "properties": {
-          "approval_id": {
-            "title": "Approval Id",
+          "id": {
+            "title": "Id",
             "type": "string"
           },
-          "arguments": {
+          "kind": {
+            "enum": [
+              "approval",
+              "delegation_authorization",
+              "escalation",
+              "debate_round"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "payload": {
             "additionalProperties": true,
-            "title": "Arguments",
+            "title": "Payload",
             "type": "object"
-          },
-          "conversation_id": {
-            "title": "Conversation Id",
-            "type": "string"
-          },
-          "tool_call_id": {
-            "title": "Tool Call Id",
-            "type": "string"
-          },
-          "tool_name": {
-            "title": "Tool Name",
-            "type": "string"
           }
         },
         "required": [
-          "approval_id",
-          "conversation_id",
-          "tool_call_id",
-          "tool_name"
+          "kind",
+          "id",
+          "message_id"
         ],
-        "title": "PendingApprovalSummary",
+        "title": "PendingInteractionSummary",
         "type": "object"
       },
       "QuotaStatus": {
@@ -5378,6 +5409,21 @@
             "minimum": 0.0,
             "title": "Input Tokens",
             "type": "integer"
+          },
+          "journal": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Journal"
           },
           "message_id": {
             "anyOf": [
@@ -5924,7 +5970,7 @@
         "type": "object"
       },
       "ResolveEscalationInteraction": {
-        "description": "Settle a worker's blocking escalate (``escalation`` interaction, 阻塞式求决策 §4.5).\n\nRaised when a delegated worker hit a「只有用户能定、且猜错就作废」fork and suspended\nitself to ask the user directly. The user either answers (``answer`` — fed back into the\nworker's loop, overriding its暂定假设) or chooses 按假设继续 (``use_assumption`` true —\nthe worker falls back to its stated assumption, the same disposition as a timeout). A\nlate resolve (the wait already timed out / was answered) falls through the route as 404,\nso the desktop renders it as「已关闭」rather than an error.",
+        "description": "Settle a worker's blocking escalate (``escalation`` interaction, 阻塞式求决策 §4.5).\n\nRaised when a delegated worker hit a「只有用户能定、且猜错就作废」fork and suspended\nitself. Classic (non-coordination) path asks the user; coordination path awaits CEO\n``resolve_escalation`` (Invariant B: solo never uses that tool). The user either answers\n(``answer``) or chooses 按假设继续 (``use_assumption`` true → wire status ``assumed``).\nA wall-clock miss is ``timed_out``. A late resolve falls through as 404.",
         "properties": {
           "answer": {
             "default": "",
@@ -6239,6 +6285,17 @@
               }
             ],
             "title": "Process"
+          },
+          "turn_warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turn Warning"
           }
         },
         "title": "RunsPayload",
@@ -7654,7 +7711,7 @@
         "type": "object"
       },
       "TurnRecoveryResponse": {
-        "description": "One-shot recovery snapshot for a conversation reopen (recovery 统一, 对称 §8.2).\n\nReopen needs to know, from ONE owner-gated point-in-time read, how to recover the\nconversation's latest turn:\n\n- ``live_running``: a detached in-flight run is still alive to 续看 (实时重连续看\n  C1 · slice 1b) — the client attaches (``GET .../stream``) to replay + tail it.\n- ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and\n  lost their live stream (结构化挂起 2b) — each renders a resume card.\n- ``pending_approvals``: GRANTABLE tool calls still blocked on the in-process\n  approval gate (the turn may also be ``live_running``) — each renders an approval\n  card. Unlike ``paused``, these are NOT durable pause frames; they exist only\n  while the backend run is alive.\n\nA turn parked at a checkpoint is BOTH live (its run is parked on the interaction,\nholding the workspace lock until checkpoint_timeout) and paused (its frame is\npersisted before the suspend ``await``), so these overlap. Returning them together\nlets the client pick ONE actionable surface: a durable paused frame is the\nauthoritative \"this turn is paused\" marker, so when ``paused`` is non-empty the\nresume card is the single surface and the client does NOT attach; it attaches only\nwhen ``live_running`` and ``paused`` is empty (a genuinely in-flight, non-paused\nturn). Folding both into one snapshot removes the former two-probe reopen\n(``GET /paused`` + the ``GET /stream`` attach) whose independent results raced into a\nduplicate 拍板 card.",
+        "description": "One-shot recovery snapshot for a conversation reopen (recovery 统一, 对称 §8.2).\n\nReopen needs to know, from ONE owner-gated point-in-time read, how to recover the\nconversation's latest turn:\n\n- ``live_running``: a detached in-flight run is still alive to 续看 (实时重连续看\n  C1 · slice 1b) — the client attaches (``GET .../stream``) to replay + tail it.\n- ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and\n  lost their live stream (结构化挂起 2b) — each renders a resume card.\n- ``pending_interactions``: hot-path interactions still awaiting settlement\n  (journal fold: approval / delegation_authorization / escalation / debate_round).\n  Cold-path stays in ``paused``.",
         "properties": {
           "live_running": {
             "default": false,
@@ -7668,11 +7725,11 @@
             "title": "Paused",
             "type": "array"
           },
-          "pending_approvals": {
+          "pending_interactions": {
             "items": {
-              "$ref": "#/components/schemas/PendingApprovalSummary"
+              "$ref": "#/components/schemas/PendingInteractionSummary"
             },
-            "title": "Pending Approvals",
+            "title": "Pending Interactions",
             "type": "array"
           }
         },
@@ -13824,7 +13881,7 @@
     },
     "/v1/conversations/{conversation_id}/interactions/{interaction_id}": {
       "post": {
-        "description": "Settle any paused interaction over the unified bridge (§8.2).\n\nOne endpoint for every client-resolvable suspend kind, discriminated on\n``body.kind``:\n\n- ``approval`` — authorize / deny a paused GRANTABLE tool call (the gate\n  auto-denies anything left unanswered);\n- ``delegation_authorization`` — grant / per-call / deny before workers start;\n- ``client_tool`` — a bound desktop's result envelope for a local-workspace op;\n- ``escalation`` — a worker's blocking escalate (answer / 按假设继续);\n- ``debate_round`` — an interactive debate round boundary (continue / conclude).\n\n``ask_user`` / ``plan_review`` are NOT settled here anymore: 挂起即收口 (②, Phase 3)\nretired their live in-process resolve — a CEO checkpoint now finalizes the turn\n(``SUSPEND → PAUSED``) and is continued via the single cold ``POST .../resume`` path\ninstead, so their resolve schemas are gone from ``ResolveInteractionRequest``.\n\nThe pending interaction (awaiting in the live ``send_message`` SSE turn) resumes\nwith its kind-specific result. 404 if it is unknown, already settled, timed out,\nbelongs to another conversation, or its kind does not match — a stale resolve\nfalls through as \"not found\".",
+        "description": "Settle any paused interaction over the unified bridge (§8.2).\n\nSettlement 预写 (D8)：先落库 settlement 事实再 settle Future。journal 有 required、\n无 Future → 写 orphaned + HTTP 410。真正未知 id 仍 404。重复答复幂等返回已处理。",
         "operationId": "resolve_interaction_v1_conversations__conversation_id__interactions__interaction_id__post",
         "parameters": [
           {
@@ -14708,7 +14765,7 @@
     },
     "/v1/conversations/{conversation_id}/messages/{message_id}/resume": {
       "post": {
-        "description": "Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).\n\nThe turn paused at a plan_review / ask_user checkpoint and lost its live stream\n(disconnect / restart); only its persisted frame survived. Claims the frame\n(atomic read-and-delete, so a turn is never resumed twice — a second / stale call\n404s), then drives the rest of the turn on a fresh SSE just like a send.\n``body.selected`` carries the user's ask_user picks (ignored for plan_review).\nGated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota\n— all BEFORE the claim, so a refused turn keeps its resumable frame.",
+        "description": "Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).\n\nThe turn paused at a plan_review / ask_user / team_preview checkpoint and lost its\nlive stream (disconnect / restart); only its persisted frame survived.\n\nSettlement 预写 (D8)：① peek frame → ② ``*_resolved`` 落库成功 → ③ ``claim_paused_turn``\n→ ④ resume pipeline（内原有 emit 照旧，journal 幂等跳过）。settlement 写失败 ⇒ 5xx、\n不 claim、frame 保留可重试。Claim 竞争失败按现状 404。Pipeline 启动失败走现有\nrestore 回滚。\n\n``body.selected`` carries the user's ask_user picks (ignored for plan_review).\nGated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota\n— all BEFORE settlement/claim, so a refused turn keeps its resumable frame.",
         "operationId": "resume_message_v1_conversations__conversation_id__messages__message_id__resume_post",
         "parameters": [
           {
@@ -14985,7 +15042,7 @@
     },
     "/v1/conversations/{conversation_id}/recovery": {
       "get": {
-        "description": "One-shot recovery snapshot for a conversation reopen (recovery 统一, 对称 §8.2).\n\nFolds the two reopen probes — is a detached run still live (实时重连续看 1b)? are there\ndurably paused turns (结构化挂起 2b)? — into a single owner-gated read so the client picks\nONE actionable surface without racing two endpoints. The client attaches (``GET .../stream``)\nonly when ``live_running`` and ``paused`` is empty; otherwise a paused turn's resume card is\nits single surface. ``live_running`` mirrors the attach endpoint's own liveness test (a\nregistered run whose task is not done).\n\n挂起即收口 (②): a checkpoint turn now FINALIZES (SUSPEND→PAUSED, the run ends) rather than\nparking, so a paused turn is durable-only — the former live∩paused 冷热重叠 (a run parked on\nits interaction while its frame also persisted) now survives ONLY as the rare §六-1 thin-net\n(a frame that could not be saved keeps a bounded backend wait). Reporting both fields still\nresolves that rare overlap — and a non-paused detached run (1b) — to the one right surface.",
+        "description": "One-shot recovery snapshot for a conversation reopen (recovery 统一, 对称 §8.2).\n\nFolds reopen probes into a single owner-gated read: live_running / paused /\npending_interactions (journal fold of hot-path cards).",
         "operationId": "get_conversation_recovery_v1_conversations__conversation_id__recovery_get",
         "parameters": [
           {
@@ -15793,7 +15850,7 @@
     },
     "/v1/conversations/{conversation_id}/stream": {
       "get": {
-        "description": "Re-attach to the conversation's in-flight turn and 续看 it live (C1 · slice 1b).\n\nSince a disconnect no longer cancels a turn (slice 1a — it runs detached + persists\nin the background), a client that dropped (network blip) or reopened the app can\nrejoin the live run here: the SSE replays the transcript so far (coalesced — one\ncontent / reasoning block, the team graph, finished tool calls) then tails new\nevents, all in the SAME event shape as the original stream, so the client folds it\nthrough one dispatch path.\n\nReturns ``204 No Content`` when no run is live for the conversation (already\nfinished / never started / suspended at a checkpoint) — the client then falls back\nto the persisted transcript (reload) / durable resume. A pure observer: dropping\nthis stream detaches again (never cancels); an explicit 停止 still goes through\n``POST .../stop``. Owner-gated.",
+        "description": "Re-attach to the conversation's in-flight turn and 续看 it live (C1 · slice 1b).\n\nSince a disconnect no longer cancels a turn (slice 1a — it runs detached + persists\nin the background), a client that dropped (network blip) or reopened the app can\nrejoin the live run here: the SSE replays the transcript so far (coalesced — one\ncontent / reasoning block, the team graph, finished tool calls) then tails new\nevents, all in the SAME event shape as the original stream, so the client folds it\nthrough one dispatch path.\n\nWith ``Last-Event-ID`` (P3): journal-backed full-turn durable replay + stream_state\nsynthetic deltas (header value observational — clients clear-then-fold), then live\ntail. Without the header (same-process fast path): ``EventSink.take_over`` full\n``_history`` replay.\n\nReturns ``204 No Content`` when no run is live for the conversation (already\nfinished / never started / suspended at a checkpoint) — the client then falls back\nto the persisted transcript (reload) / durable resume. A pure observer: dropping\nthis stream detaches again (never cancels); an explicit 停止 still goes through\n``POST .../stop``. Owner-gated.",
         "operationId": "attach_stream_v1_conversations__conversation_id__stream_get",
         "parameters": [
           {
@@ -15803,6 +15860,22 @@
             "schema": {
               "title": "Conversation Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
             }
           },
           {

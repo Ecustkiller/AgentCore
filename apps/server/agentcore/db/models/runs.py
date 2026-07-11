@@ -2,7 +2,8 @@
 
 HandoffJob (本地→云交接), RunSessionRow (recoverable worker runs), PausedTurnRow
 (结构化挂起 durable resume), TurnJournalRow (§8.3 唯一事实源), TurnMetricsRow
-(运营观测 telemetry).
+(运营观测 telemetry), TurnLeaseRow (durable RUNNING ownership for crash recover),
+TurnStreamStateRow (流式在飞通道快照 · 流式回复持久化 §3.1).
 """
 
 from datetime import datetime
@@ -170,6 +171,65 @@ class PausedTurnRow(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
     )
+
+
+class TurnLeaseRow(Base):
+    """Durable RUNNING lease for an in-flight turn (crash recover).
+
+    Journal remains the唯一事实源; this row only records owner + heartbeat + phase so
+    a dead process can be swept and ``recover_turn`` can redrive unfinished work.
+    Cleared on terminal finish / durable pause / explicit stop.
+    """
+
+    __tablename__ = "turn_leases"
+    __table_args__ = (
+        Index("ix_turn_leases_conversation", "conversation_id"),
+        Index("ix_turn_leases_heartbeat", "heartbeat_at"),
+    )
+
+    message_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
+    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
+    owner_id: Mapped[str] = mapped_column(String(64))
+    phase: Mapped[str] = mapped_column(String(40), server_default=text("'running'"))
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
+    heartbeat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
+    )
+
+
+class TurnStreamStateRow(Base):
+    """In-flight stream-channel snapshot (流式回复持久化 §3.1).
+
+    One row per ``(turn_id, channel)`` holding the latest accumulated text for a live
+    stream channel (``captain:content`` / ``captain:reasoning`` /
+    ``run:{run_id}:output`` / ``run:{run_id}:reasoning``). UPSERT projection — not a
+    second fact source; deleted after finalize / salvage / pause once the terminal
+    snapshot is written. Same-generation text is monotonic; a higher ``generation``
+    (content_reset / run_output_reset) may clear and restart.
+    """
+
+    __tablename__ = "turn_stream_state"
+    __table_args__ = (
+        # TTL sweep (mirror paused_turns 7d) scans by last-touch.
+        Index("ix_turn_stream_state_updated", "updated_at"),
+    )
+
+    turn_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True)
+    # Channel key — see module docstring. Not a UUID; length covers run-scoped ids.
+    channel: Mapped[str] = mapped_column(String(128), primary_key=True)
+    # ``text`` shadows sqlalchemy.text once assigned — keep server_default=text(...) columns above it.
+    generation: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
+    )
+    text: Mapped[str] = mapped_column(Text, default="", server_default=text("''"))
 
 
 class TurnJournalRow(Base):

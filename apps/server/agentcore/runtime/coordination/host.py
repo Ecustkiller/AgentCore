@@ -139,7 +139,9 @@ async def _background_drive(
             session=session,
         )
         # Boundary / pause results surface as coordination events (CEO still alive).
+        # drive 在 session 路径上故意保留 ``_pending_*``（见 drive.py），此处消费后清掉。
         if tool._pending_pause:
+            tool._pending_pause = False
             session.post(
                 CoordinationEvent(
                     kind=CoordinationEventKind.BOUNDARY_YIELD,
@@ -148,9 +150,14 @@ async def _background_drive(
             )
         elif tool._pending_boundary is not None:
             reason, nodes = tool._pending_boundary
+            tool._pending_boundary = None
             from agentcore.tools.builtin.delegate.supervised import format_boundary_for_ceo
 
-            brief = format_boundary_for_ceo(tool, reason, plan, {}, nodes)
+            # Prefer the brief drive already formatted (includes completed worker output);
+            # fall back to a fresh format when drive returned empty.
+            brief = (result.output if result is not None and result.output else "") or (
+                format_boundary_for_ceo(tool, reason, plan, {}, nodes)
+            )
             session.post(
                 CoordinationEvent(
                     kind=CoordinationEventKind.BOUNDARY_YIELD,

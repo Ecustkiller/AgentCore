@@ -6,6 +6,16 @@ afterEach(() => {
 });
 
 describe("tryRefresh single-flight", () => {
+  afterEach(() => {
+    // Ensure Electron outboxApi path does not short-circuit cookie refresh tests.
+    if (typeof globalThis !== "undefined" && "window" in globalThis) {
+      Reflect.deleteProperty(
+        (globalThis as { window?: object }).window as object,
+        "outboxApi",
+      );
+    }
+  });
+
   it("collapses concurrent refreshes into one /refresh round-trip", async () => {
     // A pending fetch that we resolve only after all three callers have raced in,
     // so the dedup (not fetch timing) is what keeps it to a single request.

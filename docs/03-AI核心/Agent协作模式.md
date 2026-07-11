@@ -79,14 +79,14 @@ Agent 间**不直接通信**——上游产物经调度器中转注入下游；�
 
 worker 唯一的向上通道。`blocking=false`（默认）= 上报后按 `assumption` 继续交付，CEO 收尾纠偏；`run_escalation` SSE 让升级进行中可见。
 
-**阻塞式求决策（`blocking=true`）✅**：worker 撞上「只有用户能定、猜错就作废」的岔路时，经 `ToolContext.escalation` 端口挂起等用户；超时回落非阻塞行为（按 `assumption` 续跑）。**采纳 worker→用户**（复用 `InteractionRegistry` + `ESCALATION` kind），默认阻塞 `delegate` 下 **否决 worker→CEO 波内重入**——CEO 调 `delegate` 后 ReAct 停在工具调用上，波内无活着的 CEO。**协调模式例外（✅ D1）**：≥2 worker 默认协调时 CEO 波内存活，阻塞 escalate 改挂起等 CEO 的 `resolve_escalation`（初始不发用户可答卡）；偏好/授权/费用类 CEO 须先 `ask_user` 再 resolve（`via_user`），超时回落 `assumption`。见 [`编排器与CEO主Agent.md` §协调模式](/docs/03-AI核心/编排器与CEO主Agent.md)。
+**阻塞式求决策（`blocking=true`）✅**：worker 撞上「只有用户能定、猜错就作废」的岔路时，经 `ToolContext.escalation` 端口挂起；结算三分——`resolved`（有答复）/ `assumed`（显式按假设继续）/ `timed_out`（仅运维配置了超时上限才出现），后两者都回落 `assumption` 续跑但**对外语义分开**。**不答语义（提问确认交互统一重构 D2）**：默认**无限期等待**（原「超时回落 assumption」已废除），卡片明示「等你拍板 · 不限时」+ 常驻「按假设继续」按钮（用户手动回落，走 `use_assumption` resolve）；required/resolved 入 journal、重启失效翻 `orphaned` 灰态（机制见 [执行引擎 §8.2](/docs/03-AI核心/执行引擎架构设计.md)）。桌面/手机答复按 `escalation_id` 精确落卡。**经典路径（单 worker / 非协调）**：直挂**用户**（复用 `InteractionRegistry` + `ESCALATION` kind）——默认阻塞 `delegate` 下 CEO 停在工具调用上，波内无活着的 CEO，**否决**改挂 CEO（会死锁）。**协调模式例外（✅ D1 / 不变量 B）**：≥2 worker 默认协调时 CEO 波内存活，阻塞 escalate 改挂起等 CEO 的 `resolve_escalation`（初始不发用户可答卡）；偏好/授权/费用类 CEO 须先 `ask_user` 再 resolve（`via_user`）。单 worker **永不**走 `resolve_escalation`。见 [`编排器与CEO主Agent.md` §协调模式](/docs/03-AI核心/编排器与CEO主Agent.md)。
 
-**结构化提问 ✅**：岔路若是干净的 A/B 或多选，worker 可附**结构化 `questions`**（结构同 `ask_user`：choice/text + `options`/`default`，随 `escalation_required` 下发），挂起卡复用 `ask_user` 的问答内核渲染，用户一键拍板而非读散文手敲；纯开放问题则省略、回退自由文本。关键约束：**前端把选项选择拍平成纯文本答复**回填，故后端 resolve 契约（`{answer, use_assumption}`）与挂起恢复路径**保持不变**；`questions` 为 desktop-local（不进 conformance golden），手机端忽略至其应答卡落地。
+**结构化提问 ✅**：岔路若是干净的 A/B 或多选，worker 可附**结构化 `questions`**（结构同 `ask_user`：choice/text + `options`/`default`，随 `escalation_required` 下发），挂起卡复用 `ask_user` 的问答内核渲染，用户一键拍板而非读散文手敲；纯开放问题则省略、回退自由文本。关键约束：**前端把选项选择拍平成纯文本答复**回填，故后端 resolve 契约（`{answer, use_assumption}`）与挂起恢复路径**保持不变**；`questions` 为 desktop-local（不进 conformance golden），手机应答卡（TeamView `EscalationAnswer`）走自由文本。
 
 | 约束 | 取值 |
 |---|---|
 | 武装门 | 与 `ask_user` 同闸（`checkpoint_enabled` + live client）；无 live user 时自动退化非阻塞 |
-| 超时 | 复用 `checkpoint_timeout_seconds` |
+| 超时 | 复用 `checkpoint_timeout_seconds`（默认 None = 无限期等待，D2） |
 | 同回合并发阻塞上限 | 3（超出退化非阻塞） |
 | 回合状态 | 阻塞升级**不**翻 `paused`（兄弟继续跑）；`escalation_required`/`escalation_resolved` 单一发射者 = awaiter |
 

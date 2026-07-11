@@ -1007,12 +1007,12 @@ def _multi_agent_blocking_escalate() -> list[SSEEvent]:
     ]
 
 def _multi_agent_blocking_escalate_timeout() -> list[SSEEvent]:
-    """多 Agent：阻塞式求决策 — 超时降级路径（安全基石 §4.4）。r1 阻塞挂起（``escalation_required``
-    → pending），但用户在时限内未答（或选「按假设继续」）→ 执行器 emit ``escalation_resolved(status=
-    "timeout")``（单一发射者，``answer`` 空）→ 该项翻 ``{status:"timeout", answer:null}``，r1 回落到
-    它写明的 ``assumption`` 续跑并 COMPLETED。即阻塞 escalate 是「今日非阻塞行为的严格超集」：先等
-    用户 T 秒，等不到就退回今天的样子，不可能回归。注：后端在超时分支【仍 emit】escalation_resolved
-    （单一发射者载 disposition=timeout），与设计 §七「超时变体」的真实实现一致。"""
+    """多 Agent：阻塞式求决策 — 墙钟超时降级（``timed_out``）。
+
+    r1 阻塞挂起 → 时限内未答 → ``escalation_resolved(status=timed_out)`` → 投影
+    ``{status:timed_out, answer:null}``，worker 回落 assumption。显式「按假设继续」走
+    ``assumed``（见其它向量），二者不得糊成同一 ``timeout`` 标签。
+    """
     agents, plan_runs = _blocking_escalate_team()
     return [
         message_start("m1", conversation_id=_CONV),
@@ -1026,8 +1026,7 @@ def _multi_agent_blocking_escalate_timeout() -> list[SSEEvent]:
         ),
         run_started("r1", "w1"),
         escalation_required("r1", "w1", escalation_id="esc1", question=_ESC_Q, assumption=_ESC_A),
-        # 超时（或「按假设继续」）→ 同一 resolve 端点的 timeout disposition，answer 空。
-        escalation_resolved("r1", "w1", escalation_id="esc1", status="timeout", answer=""),
+        escalation_resolved("r1", "w1", escalation_id="esc1", status="timed_out", answer=""),
         run_output_delta("r1", "w1", "未获答复，按 Postgres 假设完成选型调研"),
         run_completed(
             "r1",
@@ -1109,8 +1108,8 @@ def _multi_agent_blocking_escalate_multi() -> list[SSEEvent]:
             question="部署用 Docker 还是裸机？这关系到运维方案。",
             assumption="暂按 Docker 推进",
         ),
-        # 第二次超时降级（answer 空）→ r1 回落到该假设续跑。
-        escalation_resolved("r1", "w1", escalation_id="esc2", status="timeout", answer=""),
+        # 第二次墙钟超时降级（answer 空）→ r1 回落到该假设续跑。
+        escalation_resolved("r1", "w1", escalation_id="esc2", status="timed_out", answer=""),
         run_output_delta("r1", "w1", "已确认 Postgres + Docker，完成选型调研"),
         run_completed(
             "r1",
@@ -2102,9 +2101,9 @@ def _multi_agent_coordinate() -> list[SSEEvent]:
 
     Wire 形状对齐 coordinate=true 路径的可见事件（非阻塞 delegate 立即返回后 CEO 继续
     ReAct）：并行两队员、中途 team_note_posted、update_synthesis 推送的
-    team_synthesis_preview（transport-only，三端 fold no-op）、完成后 CEO 终稿。
-    验 fold 对协调路径 journaled 事件的投影与阻塞路径一致，且 preview 不污染
-    ProjectedTurn。"""
+    team_synthesis_preview（P2 DURABLE——fold 同 key 保最新进 ProjectedTurn.teamSynthesisPreview）、
+    完成后 CEO 终稿。亦作「刷新重建」钉：golden 断言末次 preview 文案。
+    """
     agents = [
         {
             "id": "w1",
@@ -2163,7 +2162,7 @@ def _multi_agent_coordinate() -> list[SSEEvent]:
             ts=1_700_000_000.0,
         ),
         # CEO update_synthesis → team_synthesis_preview（草稿正文在 text；workers 可空）。
-        # Transport-only：三端 fold no-op，不进 ProjectedTurn；桌面 StatusStrip 消费。
+        # P2 DURABLE：三端 fold 同 key 保最新 → ProjectedTurn.teamSynthesisPreview。
         team_synthesis_preview(
             execution_id="exec1",
             completed=0,
@@ -2229,8 +2228,7 @@ def _multi_agent_coordinate() -> list[SSEEvent]:
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_delegate": ("多 Agent：委派 2 队员，runs 树 + 进度 + 总账", _multi_agent_delegate),
     "multi_agent_coordinate": (
-        "多 Agent·CEO 协调模式：≥2 worker 并行 + 波内便签 + team_synthesis_preview 草稿 + 合成收束"
-        "（preview transport-only / fold no-op）",
+        "刷新重建（P2）：协调模式 team_synthesis_preview DURABLE → teamSynthesisPreview（同 key 保最新）",
         _multi_agent_coordinate,
     ),
     "multi_agent_team_notes": (
@@ -2287,7 +2285,7 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_multi_batch": ("多 Agent：同回合两批 delegate（合并 + 累计进度）", _multi_agent_multi_batch),
     "multi_agent_escalation": ("多 Agent：worker 升级实时可见（run_escalation 折到节点 escalations，非阻塞）", _multi_agent_escalation),
     "multi_agent_blocking_escalate": ("多 Agent：阻塞式求决策 答复路径（escalation_required→pending→resolved，回合不 paused）", _multi_agent_blocking_escalate),
-    "multi_agent_blocking_escalate_timeout": ("多 Agent：阻塞式求决策 超时降级（escalation_resolved status=timeout，按假设续跑）", _multi_agent_blocking_escalate_timeout),
+    "multi_agent_blocking_escalate_timeout": ("多 Agent：阻塞式求决策 墙钟超时（escalation_resolved status=timed_out，按假设续跑）", _multi_agent_blocking_escalate_timeout),
     "multi_agent_blocking_escalate_pending": ("多 Agent：阻塞式求决策 进行中（escalation_required 后挂起，回合仍 running、非 paused）", _multi_agent_blocking_escalate_pending),
     "multi_agent_blocking_escalate_multi": ("多 Agent：阻塞式求决策 同一 worker 串行多次升级（多升级 escalations[]，逐条结算）", _multi_agent_blocking_escalate_multi),
     "multi_agent_ceo_arbitrate_escalate": (

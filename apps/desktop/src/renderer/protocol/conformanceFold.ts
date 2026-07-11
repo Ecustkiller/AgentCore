@@ -40,7 +40,6 @@ import {
   upsertDebateRound,
 } from "@/stores/execution";
 import type {
-  ApprovalRequiredPayload,
   CheckpointRequiredPayload,
   CitationsPayload,
   ContentDeltaPayload,
@@ -58,18 +57,20 @@ import type {
   RunStartedPayload,
   SSEEvent,
   TeamPreviewRequiredPayload,
+  TeamSynthesisPreviewPayload,
   ToolUseEndPayload,
   ToolUseStartPayload,
+  TurnWarningPayload,
 } from "@/types/events";
 import type {
   CostBreakdown,
-  PendingInteraction,
   ProjectedAgent,
   ProjectedCitation,
   ProjectedRun,
   ProjectedTurn,
   TurnStatus,
 } from "@agentcore/protocol-conformance/projectedTurn";
+import { foldInteractions, hasGatePending } from "./foldInteractions";
 
 export type { ProjectedTurn };
 
@@ -80,10 +81,12 @@ const FINISH_TO_STATUS: Record<string, TurnStatus> = {
   unproductive: "completed",
   error: "failed",
   cancelled: "cancelled",
+  // Crash / lease-sweeper salvage (流式回复持久化 P4): incomplete → cancelled-class.
+  interrupted: "cancelled",
   // 挂起即收口 (②): a turn finalized AT a durable checkpoint ends with finish_reason=paused
-  // — a terminal message_end whose turn is NOT done. Stay paused (the *_required already set
-  // status + pendingInteraction; this only adds finishReason + cost) so the single resume
-  // card renders, not a completed bubble. Without this it'd fall to "completed" below.
+  // — a terminal message_end whose turn is NOT done. Stay paused (gate interactions[] already
+  // parked; this only adds finishReason + cost) so the resume card renders, not a completed
+  // bubble. Without this it'd fall to "completed" below.
   paused: "paused",
 };
 
@@ -95,12 +98,13 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     process: [],
     citations: [],
   };
-  let status: TurnStatus = "running";
   let finishReason: string | null = null;
   let cost: CostBreakdown | null = null;
   let debate: DebateResultPayload | null = null;
   let debateRounds: DebateNarrativeRound[] = [];
-  let pending: PendingInteraction | null = null;
+  let teamSynthesisPreview: TeamSynthesisPreviewPayload | null = null;
+  let turnWarning: string | null = null;
+  let sawError = false;
   // 收到的上下文 · CEO 侧 (上下文传递可视化): the captain run id (its kind=captain
   // run_started) + the opening context it was fed, routed turn-level — the CEO is the
   // bubble above the graph, not a peer node, so its run_context never becomes a frame.
@@ -247,111 +251,52 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         });
         break;
       }
-      // plan_review gates the turn (pending) AND folds into the graph as a frame so
-      // the gated node carries a checkpoint badge (mirrors streamConversation.ts +
-      // the oracle). Handled in this one pass so a later message_end still wins the
-      // terminal status.
       case "plan_review_required": {
         const frame = frameFromEvent(ev);
         if (frame) frames.push(frame);
         const p = ev.payload as PlanReviewRequiredPayload;
         messageLane = foldPlanReviewMarker(messageLane, p.checkpoint_id);
-        pending = {
-          kind: "plan_review",
-          checkpointId: p.checkpoint_id,
-          runIds: (p.steps ?? []).map((s) => s.run_id),
-        };
-        status = "paused";
         break;
       }
       case "plan_review_resolved": {
         const frame = frameFromEvent(ev);
         if (frame) frames.push(frame);
-        const cid = (ev.payload as { checkpoint_id: string }).checkpoint_id;
-        if (pending?.kind === "plan_review" && pending.checkpointId === cid) {
-          pending = null;
-          status = "running";
-        }
         break;
       }
       case "team_preview_required": {
         const p = ev.payload as TeamPreviewRequiredPayload;
         messageLane = foldTeamPreviewMarker(messageLane, p.checkpoint_id);
-        pending = {
-          kind: "team_preview",
-          checkpointId: p.checkpoint_id,
-          workerIds: (p.workers ?? []).map((w) => w.run_id),
-        };
-        status = "paused";
         break;
       }
-      case "team_preview_resolved": {
-        const cid = (ev.payload as { checkpoint_id: string }).checkpoint_id;
-        if (pending?.kind === "team_preview" && pending.checkpointId === cid) {
-          pending = null;
-          status = "running";
-        }
+      case "team_preview_resolved":
         break;
-      }
-      case "approval_required": {
-        const p = ev.payload as ApprovalRequiredPayload;
-        pending = {
-          kind: "approval",
-          approvalId: p.approval_id,
-          toolCallId: p.tool_call_id,
-          toolName: p.tool_name,
-          arguments: p.arguments ?? {},
-        };
-        status = "paused";
+      case "approval_required":
+      case "approval_resolved":
         break;
-      }
-      case "approval_resolved": {
-        const aid = (ev.payload as { approval_id: string }).approval_id;
-        if (pending?.kind === "approval" && pending.approvalId === aid) {
-          pending = null;
-          status = "running";
-        }
-        break;
-      }
       case "checkpoint_required": {
         const p = ev.payload as CheckpointRequiredPayload;
         messageLane = foldCheckpointMarker(messageLane, p.checkpoint_id);
-        pending = {
-          kind: "checkpoint",
-          checkpointId: p.checkpoint_id,
-          question: p.question,
-          context: p.context,
-        };
-        status = "paused";
         break;
       }
-      case "checkpoint_resolved": {
-        const cid = (ev.payload as { checkpoint_id: string }).checkpoint_id;
-        if (pending?.kind === "checkpoint" && pending.checkpointId === cid) {
-          pending = null;
-          status = "running";
-        }
+      case "checkpoint_resolved":
         break;
-      }
       case "question_posted": {
         const p = ev.payload as QuestionPostedPayload;
         messageLane = foldAskMarker(messageLane, p.ask_id);
         break;
       }
       case "error":
-        status = "failed";
+        sawError = true;
         break;
       case "message_end": {
         const p = ev.payload as MessageEndPayload;
         finishReason = p.finish_reason;
         cost = p.cost ?? null;
-        status = FINISH_TO_STATUS[p.finish_reason] ?? "completed";
         break;
       }
-      // Not part of the normalized judge state (no-op) — enumerated so assertNever
-      // stays exhaustive against @agentcore/contract-types (protocol-conformance §支柱2).
+      // Not part of the normalized judge state beyond interactions[] fold (no-op) —
+      // enumerated so assertNever stays exhaustive against @agentcore/contract-types.
       case "message_start":
-      case "turn_warning":
       case "turn_saved":
       case "title_generated":
       case "followups_generated":
@@ -363,19 +308,15 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "batch_metrics":
       case "run_intake":
       case "run_escalation_gate":
-      case "run_split_assessed":
-      case "run_subworker_started":
-      case "run_subworker_completed":
       case "debate_round_decision_required":
       case "debate_round_decision_resolved":
       case "delegation_authorization_required":
       case "delegation_authorization_resolved":
+      case "interaction_orphaned":
       case "workspace_op_required":
       case "handoff_snapshot_done":
       case "handoff_job_started":
       case "handoff_apply_done":
-      // CEO 协调模式 Phase 1：团队进展摘要 — transport-only 预览，不进 ProjectedTurn。
-      case "team_synthesis_preview":
       case "sim.agent_action":
       case "sim.agent_state":
       case "sim.interaction":
@@ -384,9 +325,30 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "sim.tick_frame":
       case "sim.world_event":
         break;
+      case "turn_warning": {
+        turnWarning = (ev.payload as TurnWarningPayload).message;
+        break;
+      }
+      case "team_synthesis_preview": {
+        // 同 key 保最新（后写覆盖）——journal append-only，fold 侧去重。
+        teamSynthesisPreview = ev.payload as TeamSynthesisPreviewPayload;
+        break;
+      }
       default:
         assertNever(ev.type);
     }
+  }
+
+  const interactions = foldInteractions(events);
+  let status: TurnStatus;
+  if (finishReason != null) {
+    status = FINISH_TO_STATUS[finishReason] ?? "completed";
+  } else if (sawError) {
+    status = "failed";
+  } else if (hasGatePending(interactions)) {
+    status = "paused";
+  } else {
+    status = "running";
   }
 
   const execStatus: ExecutionStatus = status === "running" ? "running" : status;
@@ -463,10 +425,12 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     agents,
     runs,
     progress: execution ? execution.progress : { completed: 0, total: 0 },
-    pendingInteraction: pending,
+    interactions,
     cost,
     debate,
     debateRounds,
+    teamSynthesisPreview,
+    turnWarning,
     // 团队便签墙 (§2.2 通): single source = projectExecution's frame fold (above), mapped to the
     // golden's ProjectedTeamNote shape — the same single-source pattern as `escalations`.
     teamNotes: (execution?.teamNotes ?? []).map((n) => ({

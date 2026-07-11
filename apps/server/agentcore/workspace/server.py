@@ -10,6 +10,7 @@ so executed code sees the workspace files — fixing the long-standing bug where
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import fnmatch
 import os
@@ -485,10 +486,18 @@ class ServerWorkspace:
         return ReplaceOutcome(count=count if all_ else 1, first_line=first_line)
 
     async def grep(self, query: GrepQuery) -> GrepResult:
+        # Path checks stay on the event loop so OutsideWorkspace / PathNotFound
+        # surface immediately; the walk + re.search body is CPU/IO-bound and can
+        # monopolise the loop (ReDoS / large trees), so it runs in a worker thread.
+        # That lets ``asyncio.wait_for`` around tool exec raise on timeout without
+        # waiting for C-level ``re`` to finish — the thread may still run to
+        # completion, but the loop stays free for other work.
         base = self._safe(query.directory)
         if not base.exists():
             raise PathNotFound(query.directory)
+        return await asyncio.to_thread(self._grep_sync, base, query)
 
+    def _grep_sync(self, base: Path, query: GrepQuery) -> GrepResult:
         flags = re.IGNORECASE if query.case_insensitive else 0
         regex = re.compile(query.pattern, flags)
         max_results = max(1, min(query.max_results, _MAX_RESULTS_CAP))

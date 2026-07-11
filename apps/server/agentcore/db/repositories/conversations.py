@@ -13,6 +13,7 @@ from agentcore.db.models import (
     MemoryUpdateRow,
     Message,
     MessageBookmark,
+    TurnLeaseRow,
     TurnMetricsRow,
     User,
 )
@@ -412,6 +413,9 @@ class ConversationRepository:
         )
         await delete_journal_for_conversation(self._session, conversation_id)
         await delete_audit_for_conversation(self._session, conversation_id)
+        await self._session.execute(
+            delete(TurnLeaseRow).where(TurnLeaseRow.conversation_id == conversation_id)
+        )
         # Conversation-tail 记忆已更新 records (keyed by conversation_id, no message FK).
         await self._session.execute(
             delete(MemoryUpdateRow).where(MemoryUpdateRow.conversation_id == conversation_id)

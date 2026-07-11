@@ -5,7 +5,11 @@ import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { fetchMessageWindow, jumpToMessage } from "@/services/messages";
 import { loadRecovery } from "@/services/resume";
-import { attachOnOpen } from "@/services/turns";
+import {
+  attachOnOpen,
+  markGhostInterrupted,
+  rejoinLiveTurn,
+} from "@/services/turns";
 import { useBookmarkStore } from "@/stores/bookmarks";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { WORKSPACE_TAB_ID, useSidePanelStore } from "@/stores/sidePanel";
@@ -75,23 +79,31 @@ export function ConversationPage() {
             // 记忆更新对话内可见 (§1.6): adopt the conversation-tail「记忆已更新」cards
             // returned with the latest window, so they replay on open.
             s.setMemoryUpdates(win.memoryUpdates, id);
-            // 实时重连续看 (C1 · slice 1b): a transcript that ends on a user message
-            // has no persisted reply yet — since 断连不再取消 (slice 1a) a turn may still
-            // be running detached. The recovery snapshot picks the SINGLE actionable
-            // surface (recovery 统一, 对称 §8.2): attach (GET .../stream) to 续看 a detached
-            // live run ONLY when nothing is durably paused. 挂起即收口 (②): a turn that hit a
-            // checkpoint has FINALIZED (run ended, frame persisted), so it is durable-only —
-            // its 待恢复 resume card is the sole surface and we must NOT attach (the lone
-            // live∩paused overlap is the rare §六-1 thin-net, which has no saved frame, so
-            // pausedCount is 0 there anyway and this gate isn't reached). `liveRunning` mirrors
-            // the attach endpoint's own liveness test, so gating on it (vs. attach-then-204)
-            // drops the doomed probe — and because the snapshot is one read, liveRunning /
-            // pausedCount can't disagree (the race is eliminated at the source).
-            if (win.messages.at(-1)?.role === "user") {
+            // P4: running overlay partial paints with stream chrome until attach/ghost settles.
+            if (win.messages.at(-1)?.isStreaming) {
+              s.setGenerating(true, id);
+            }
+            // P4 unified hydrate: messages (overlay partial) + recovery + attach.
+            // - ends on user + live → bare attach
+            // - ends on running assistant + live → clear-then-fold rejoin
+            // - ends on running assistant, no live/pause → ghost → interrupted
+            const last = win.messages.at(-1);
+            if (last) {
               const recovery = await recoveryLoaded;
               if (cancelled) return;
-              if (recovery.liveRunning && recovery.pausedCount === 0) {
+              const canAttach =
+                recovery.liveRunning && recovery.pausedCount === 0;
+              if (last.role === "user" && canAttach) {
                 void attachOnOpen(id);
+              } else if (
+                last.role === "assistant" &&
+                last.status === "running"
+              ) {
+                if (canAttach) {
+                  void rejoinLiveTurn(id);
+                } else if (!recovery.liveRunning && recovery.pausedCount === 0) {
+                  markGhostInterrupted(id);
+                }
               }
             }
           }

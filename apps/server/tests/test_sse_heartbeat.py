@@ -1,4 +1,4 @@
-"""SSE generator: idle heartbeat + event passthrough.
+"""SSE generator: idle heartbeat + event passthrough + optional id: seq.
 
 The generator races each event pull against a heartbeat timeout so a turn that is
 alive but thinking keeps the connection flowing bytes (the client's stall watchdog
@@ -7,6 +7,7 @@ reads those bytes as liveness). No DB, no HTTP — plain async tests
 """
 
 import asyncio
+import json
 
 import pytest
 
@@ -48,3 +49,32 @@ async def test_emits_heartbeat_while_idle(monkeypatch):
             await asyncio.wait_for(gen.__anext__(), timeout=1.0)
     finally:
         await gen.aclose()
+
+
+def test_format_sse_optional_id_line():
+    event = content_delta("partial")
+    plain = sse._format_sse(event)
+    assert "id:" not in plain
+    assert plain.startswith(f"event: {event.type}")
+    assert "\ndata: " in plain
+
+    with_id = sse._format_sse(event, seq=42)
+    assert "\nid: 42\n" in with_id
+    # Envelope JSON unchanged — id is a transport line, not a payload field.
+    data_line = next(line for line in with_id.split("\n") if line.startswith("data: "))
+    envelope = json.loads(data_line[len("data: ") :])
+    assert set(envelope) == {"type", "timestamp", "payload"}
+    assert "id" not in envelope
+
+
+def test_pump_sse_style_parser_ignores_id_lines():
+    """Mirrors desktop/mobile pumpSSE: only ``data:`` lines are parsed."""
+    frame = sse._format_sse(content_delta("hi"), seq=7)
+    events = []
+    for line in frame.split("\n"):
+        if not line.startswith("data: "):
+            continue
+        events.append(json.loads(line[len("data: ") :]))
+    assert len(events) == 1
+    assert events[0]["type"] == "content_delta"
+    assert events[0]["payload"] == {"delta": "hi"}

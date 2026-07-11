@@ -49,6 +49,12 @@ export function AgentNodePeek({
           ))}
         </div>
       )}
+      {p.revisionFaceHint && (
+        <div className="space-y-0.5">
+          <p className="text-muted-foreground">改点</p>
+          <p className="line-clamp-4 text-foreground">{p.revisionFaceHint}</p>
+        </div>
+      )}
       {d.task && (
         <div className="space-y-0.5">
           <p className="text-muted-foreground">任务</p>

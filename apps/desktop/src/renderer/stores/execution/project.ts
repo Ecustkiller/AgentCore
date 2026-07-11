@@ -427,15 +427,20 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
       break;
     }
     case "escalation_resolved": {
-      // 阻塞式求决策 settlement: flip this run's pending escalation to resolved/timeout.
+      // Settlement: flip the matching card by escalation_id (never "first pending").
       const run = s.runIndex.get(f.runId);
-      const esc = run?.escalations.find((e) => e.status === "pending");
+      const esc = run?.escalations.find(
+        (e) => e.id === f.escalationId && e.status === "pending",
+      );
       if (esc) {
         if (f.status === "resolved") {
           esc.status = "resolved";
           esc.answer = f.answer;
+        } else if (f.status === "assumed") {
+          esc.status = "assumed";
+          esc.answer = null;
         } else {
-          esc.status = "timeout";
+          esc.status = "timed_out";
           esc.answer = null;
         }
         if (f.arbitrated_by === "ceo") {
@@ -519,23 +524,25 @@ export function finalizeFold(
     }
   }
 
-  // A stopped turn never receives terminal run frames for its in-flight nodes;
+  // A stopped OR failed turn may leave in-flight nodes with no terminal run frame;
   // freeze them as cancelled so the card leaves its live state (no spinners /
-  // progress bar) instead of looking like it is still running. Copy-on-write so
+  // progress bar) instead of looking like it is still running. `cancelled` is the
+  // graceful stop (workers get run_cancelled); `failed` is the defensive case — a turn
+  // that errors out (hard crash / lost terminal frame) with a still-running worker would
+  // otherwise replay that node as a forever-spinning node on reload. Copy-on-write so
   // the accumulator's live objects are left untouched (a re-fold must not see them
   // frozen).
-  const finalRuns =
-    status === "cancelled"
-      ? runs.map((r) =>
-          r.status === "running" ? { ...r, status: "cancelled" as const } : r,
-        )
-      : runs;
-  const finalAgents =
-    status === "cancelled"
-      ? agents.map((a) =>
-          a.status === "working" ? { ...a, status: "cancelled" as const } : a,
-        )
-      : agents;
+  const frozenTurn = status === "cancelled" || status === "failed";
+  const finalRuns = frozenTurn
+    ? runs.map((r) =>
+        r.status === "running" ? { ...r, status: "cancelled" as const } : r,
+      )
+    : runs;
+  const finalAgents = frozenTurn
+    ? agents.map((a) =>
+        a.status === "working" ? { ...a, status: "cancelled" as const } : a,
+      )
+    : agents;
 
   return {
     id: s.plan.id,
@@ -616,9 +623,13 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
     case "escalation_required":
       return `${role(frame.agentId)} 求决策 · 待你拍板`;
     case "escalation_resolved":
-      return frame.status === "resolved"
-        ? `${role(frame.agentId)} 已获答复 · 继续`
-        : `${role(frame.agentId)} 按假设继续`;
+      if (frame.status === "resolved") {
+        return `${role(frame.agentId)} 已获答复 · 继续`;
+      }
+      if (frame.status === "assumed") {
+        return `${role(frame.agentId)} 按假设继续`;
+      }
+      return `${role(frame.agentId)} 超时未答 · 按假设继续`;
     case "tool_use_start":
       return `调用工具 ${frame.toolName}`;
     case "tool_use_end":

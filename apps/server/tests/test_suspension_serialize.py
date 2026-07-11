@@ -116,7 +116,7 @@ def test_turn_suspension_full_frame_round_trips():
         transcript=transcript,
         plan=plan,
         completed={"del_abc_1": _completed_state()},
-        journal=[{"type": "run_plan", "payload": {}, "timestamp": "t"}],
+        journal_entries=[{"kind": "run_plan", "payload": {}, "ts": "t"}],
         steps=[{"run_id": "del_abc_1", "role": "研究员", "summary": "…"}],
         pending=[{"run_id": "del_abc_2", "role": "工程师"}],
         trace_id="trace123",
@@ -211,7 +211,7 @@ def test_ask_user_suspension_round_trips():
         ],
         style_options=[{"id": "s0", "label": "深色科技"}],
         intent="kickoff",
-        journal=[{"type": "checkpoint_required", "payload": {}, "timestamp": "t"}],
+        journal_entries=[{"kind": "checkpoint_required", "payload": {}, "ts": "t"}],
         trace_id="trace456",
     )
 

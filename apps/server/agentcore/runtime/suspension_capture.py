@@ -69,5 +69,13 @@ async def persist_suspension_capture(
         trace_id=get_log_value("trace_id"),
     )
     frame = build_frame(capture)
-    await saver(frame)
+    try:
+        await saver(frame)
+    except Exception as e:  # noqa: BLE001 — D11：saver 失败 ⇒ saved=False，不 finalize
+        logger.warning(
+            "suspension.saver_failed",
+            checkpoint_id=checkpoint_id,
+            error=str(e),
+        )
+        return False
     return True

@@ -43,7 +43,7 @@ class MoveToTool(_SimActionTool):
                         "enum": list(LOCATIONS),
                         "description": "目标地点",
                     },
-                    "reason": {"type": "string", "description": "简短动机（一句话）"},
+                    "reason": {"type": "string", "description": "此刻你的内心想法（第一人称口语，为什么去那儿）"},
                 },
                 "required": ["destination", "reason"],
             },
@@ -90,7 +90,7 @@ class StayHereTool(_SimActionTool):
                 "type": "object",
                 "properties": {
                     "activity": {"type": "string", "description": "在此地做什么"},
-                    "reason": {"type": "string", "description": "简短动机"},
+                    "reason": {"type": "string", "description": "此刻你的内心想法（第一人称口语，为什么这么做）"},
                 },
                 "required": ["activity", "reason"],
             },
@@ -128,8 +128,12 @@ class SpeakToTool(_SimActionTool):
                 "properties": {
                     "target_name": {"type": "string", "description": "对方姓名"},
                     "message": {"type": "string", "description": "说的话（一两句）"},
+                    "reason": {
+                        "type": "string",
+                        "description": "此刻你的内心想法（第一人称口语，为什么对 TA 说这些）",
+                    },
                 },
-                "required": ["target_name", "message"],
+                "required": ["target_name", "message", "reason"],
             },
         )
 

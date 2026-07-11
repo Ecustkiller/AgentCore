@@ -33,15 +33,6 @@ DURABLE_VECTOR_WAIVERS: dict[EventType, str] = {
         "Worker Intake 轻量计划头——DURABLE（落 journal，reload 可重放诊断），但 Phase 1 尚无 "
         "conformance 向量覆盖其往返；属知情记账，后续补向量后移出豁免。"
     ),
-    EventType.RUN_SPLIT_ASSESSED: (
-        "Worker 顺序分裂评估——DURABLE（落 journal），Phase 2 尚无 conformance 向量；知情记账。"
-    ),
-    EventType.RUN_SUBWORKER_STARTED: (
-        "Sub-Worker 启动——DURABLE（落 journal），Phase 2 尚无 conformance 向量；知情记账。"
-    ),
-    EventType.RUN_SUBWORKER_COMPLETED: (
-        "Sub-Worker 完成——DURABLE（落 journal），Phase 2 尚无 conformance 向量；知情记账。"
-    ),
 }
 
 

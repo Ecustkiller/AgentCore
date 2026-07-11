@@ -25,12 +25,13 @@ AskCheckpointIntent = Literal["kickoff", "decision"]
 
 
 class CheckpointDecision(StrEnum):
-    """How the user (or a timeout) settled a checkpoint the CEO raised."""
+    """How the user (or a timeout / orphan) settled a checkpoint the CEO raised."""
 
     CONTINUE = "continue"  # proceed with the CEO's proposed direction
     ADJUST = "adjust"  # steer the CEO with a note, then continue
     STOP = "stop"  # end this turn gracefully
     TIMEOUT = "timeout"  # no answer within the deadline (engine-set, never user-set)
+    ORPHANED = "orphaned"  # 热路失效终态（冷路检查点一般不走 orphan；枚举公共尾部对齐）
 
 
 @dataclass

@@ -158,7 +158,6 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     reasoning_content: Mapped[str | None] = mapped_column(Text, nullable=True)
-    tool_calls: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     usage: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # User-referenced attachments metadata (list of {name, path, truncated}).
     attachments: Mapped[list] = mapped_column(
@@ -177,6 +176,11 @@ class Message(Base):
     followups: Mapped[list] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
+    # 回合 ¥ 成本 (P2 DERIVED)：finalize 回写的 message_end.cost 快照（nano-USD 分量 +
+    # currency；cny_total 在读路径按当前 FX 投影）。与 followups/title 同辙——重载 footer
+    # 直接用；hover 工资单明细仍走 GET /v1/messages/{id}/cost（cost_events 台账）。
+    # NULL for user / unmetered / pre-feature rows.
+    cost: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # 回复反馈 (点赞/点踩, 对话基础功能补齐): the user's explicit satisfaction signal on an
     # assistant reply — "up" | "down" | NULL(未评价). Toggleable (re-clicking the same
     # side clears it back to NULL). Stored as a plain durable signal only; it does not
@@ -187,7 +191,6 @@ class Message(Base):
     # LONGER stored here — it is the唯一事实源 ``turn_journal`` table (§8.3 Turn
     # Journal), keyed by this message id, and PROJECTED into MessageDetail.runs on
     # read. See agentcore.runtime.journal.
-    finish_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)
     # Correlation key to the turn's runtime logs (logs/dev.jsonl): the assistant
     # message joins to its interaction's full log trace (chat.turn_*/llm/tool/...)
     # — message rows otherwise carry only UUIDs, so trace_id is what makes a turn

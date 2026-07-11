@@ -72,13 +72,14 @@ async def save_paused_turn(suspension: TurnSuspension) -> None:
                 frame=suspension.to_json(),
                 trace_id=trace_id,
             )
-    except Exception as e:  # noqa: BLE001 — persistence must never break the turn
+    except Exception as e:
+        # D11：saver 失败必须如实暴露（假 saved 缝）——不再吞异常报 saved=True。
         logger.warning(
             "suspension.persist_failed",
             message_id=suspension.message_id,
             error=str(e),
         )
-        return
+        raise
     # Hard boundary: after the durable snapshot is the canonical journal, seal the
     # append-on-emit writer so post-save emits (trailing *_required, suspending
     # tool_use_end) cannot diverge DB rows from the paused snapshot.
@@ -158,6 +159,28 @@ async def restore_paused_turn(suspension: TurnSuspension) -> None:
             message_id=suspension.message_id,
             error=str(e),
         )
+
+
+async def load_paused_turn(
+    message_id: str, *, conversation_id: str | None = None
+) -> TurnSuspension | None:
+    """Read a paused turn without claiming (D8 cold-path peek before settlement prewrite).
+
+    Does not touch ``turn_journal`` — the subsequent :func:`claim_paused_turn` re-hydrates
+    entries (including any settlement prewritten between peek and claim). ``None`` when
+    absent / wrong conversation / unreadable.
+    """
+    try:
+        async with async_session_factory() as db:
+            row = await PausedTurnRepository(db).get(message_id)
+            if row is None:
+                return None
+            if conversation_id is not None and row.conversation_id != conversation_id:
+                return None
+            return suspension_from_json(row.frame)
+    except Exception as e:  # noqa: BLE001 — peek failure reads as "not resumable"
+        logger.warning("suspension.load_failed", message_id=message_id, error=str(e))
+        return None
 
 
 async def claim_paused_turn(

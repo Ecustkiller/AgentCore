@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_roundtable_rounds",
-  "description": "多 Agent：圆桌逐轮增量（debate_round_started/debate_round）+ 续写 revision + 中途取消",
+  "description": "刷新重建（P2）：圆桌逐轮 debate_round_started/debate_round DURABLE → debateRounds 进行态",
   "events": [
     {
       "type": "message_start",
@@ -840,7 +840,7 @@
       "completed": 3,
       "total": 6
     },
-    "pendingInteraction": null,
+    "interactions": [],
     "cost": {
       "input": 240000,
       "cached": 64000,
@@ -905,6 +905,8 @@
         "cross_exam": []
       }
     ],
+    "teamSynthesisPreview": null,
+    "turnWarning": null,
     "teamNotes": []
   }
 }

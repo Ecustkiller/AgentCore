@@ -1,13 +1,10 @@
-import { ApprovalPrompt } from "@/components/chat/ApprovalPrompt";
+import { ConversationDecisionPrompts } from "@/components/chat/ConversationDecisionPrompts";
 import { BackgroundTaskCard } from "@/components/chat/BackgroundTaskCard";
 import { CheckpointCard } from "@/components/chat/CheckpointCard";
-import { DelegationAuthorizationPrompt } from "@/components/chat/DelegationAuthorizationCard";
 import { EscalationCards } from "@/components/chat/EscalationCard";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
-import { ResumePrompt } from "@/components/chat/ResumePrompt";
 import { RetryBanner } from "@/components/chat/RetryBanner";
 import { RecoveryActions } from "@/components/chat/StatusStrip";
-import { useApprovalStore } from "@/stores/approvals";
 import {
   useBackgroundTasks,
   useWorkspaceRootId,
@@ -25,6 +22,13 @@ import {
   ExecutionScopeContext,
   useMessageExecution,
 } from "@/stores/execution";
+import {
+  messageCheckpoints,
+  messagePlanReviews,
+  messageTeamPreviews,
+  useInteractionStore,
+  useMessageInteractionCards,
+} from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import { AlertTriangle } from "lucide-react";
@@ -77,21 +81,35 @@ import { useEffect, useMemo, useRef } from "react";
 export function countPendingDecisions(
   message: Message | undefined,
   execution: Execution | null | undefined,
-  opts: { includeDebate?: boolean } = {},
+  opts: { includeDebate?: boolean; conversationId?: string | null } = {},
 ): number {
-  const { includeDebate = true } = opts;
+  const { includeDebate = true, conversationId } = opts;
   let n = 0;
-  // Inline ask_user / plan_review count ONLY while the turn is live (see docstring): once
-  // finalized, the action is the conversation-level resume, not this now-passive inline card.
-  if (message?.isStreaming) {
-    for (const c of message.checkpoints ?? []) if (c.status === "pending") n++;
-    for (const p of message.planReviews ?? []) if (p.status === "pending") n++;
+  const convId = conversationId ?? "";
+  // Inline ask_user / plan_review / team_preview count ONLY while the turn is live
+  // (see docstring): once finalized, the action is the conversation-level resume,
+  // not this now-passive inline card.
+  if (message?.isStreaming && convId) {
+    for (const c of messageCheckpoints(convId, message.id))
+      if (c.status === "pending") n++;
+    for (const p of messagePlanReviews(convId, message.id))
+      if (p.status === "pending") n++;
+    for (const t of messageTeamPreviews(convId, message.id))
+      if (t.status === "pending") n++;
   }
   for (const r of execution?.runs ?? [])
     for (const e of r.escalations) if (e.status === "pending") n++;
-  if (includeDebate)
-    for (const d of execution?.debateDecisions ?? [])
-      if (d.status === "pending") n++;
+  if (includeDebate && convId) {
+    for (const e of useInteractionStore.getState().byId.values()) {
+      if (
+        e.conversationId === convId &&
+        e.kind === "debate_round" &&
+        (e.status === "pending" || e.status === "submitting")
+      ) {
+        n++;
+      }
+    }
+  }
   return n;
 }
 
@@ -160,9 +178,20 @@ export function useCommandRegion(): CommandRegionData {
   );
   const execution = useMessageExecution(focusedMessageId);
   const convError = useActiveError();
-  const approvalCount = useApprovalStore(
-    (s) => s.pending.filter((p) => p.conversationId === conversationId).length,
-  );
+  const approvalCount = useInteractionStore((s) => {
+    if (!conversationId) return 0;
+    let n = 0;
+    for (const e of s.byId.values()) {
+      if (
+        e.conversationId === conversationId &&
+        e.kind === "approval" &&
+        (e.status === "pending" || e.status === "submitting")
+      ) {
+        n++;
+      }
+    }
+    return n;
+  });
   const resumeCount = usePausedTurnStore(
     (s) => s.pending.filter((p) => p.conversationId === conversationId).length,
   );
@@ -172,6 +201,7 @@ export function useCommandRegion(): CommandRegionData {
   // 「待你拍板」chip + 放大查看入口承载，dock 不为它弹面。
   const turnDecisions = countPendingDecisions(message, execution, {
     includeDebate: false,
+    conversationId,
   });
   const pending = turnDecisions + approvalCount + resumeCount;
   const firefighting = !!convError || isTurnRecoverable(execution);
@@ -235,8 +265,10 @@ export function CommandPanelBody({
   CommandRegionData,
   "message" | "execution" | "conversationId" | "interactive"
 >) {
-  const checkpoints = message?.checkpoints ?? [];
-  const planReviews = message?.planReviews ?? [];
+  const { checkpoints, planReviews } = useMessageInteractionCards(
+    conversationId,
+    message?.id ?? "",
+  );
 
   const recoverable = isTurnRecoverable(execution);
   const failedCount =
@@ -278,9 +310,7 @@ export function CommandPanelBody({
       {/* Conversation-level decisions (self-contained: own store + active
           conversation). They bring their own mx-4 mb-2 gutter, so the turn-level
           cards below match with px-4 and the mb-2 supplies the inter-group gap. */}
-      <DelegationAuthorizationPrompt />
-      <ApprovalPrompt />
-      <ResumePrompt />
+      <ConversationDecisionPrompts />
       {/* Turn-level: scoped to the focused turn's message + execution. */}
       <div className="space-y-2 px-4">
         {checkpoints.map((cp) => (

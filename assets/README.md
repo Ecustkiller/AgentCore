@@ -5,6 +5,6 @@
 | 放这里 | 不放这里 |
 |--------|----------|
 | 安装包 / 官网 / 文档共用的图标 | 各 app 运行时静态资源 → 对应 `apps/*/public/` |
-| 设计稿导出的 PNG/SVG 母版 | 小镇 3D 模型与纹理 → `apps/desktop/public/simulation/assets/`（迁移计划见 [`packages/town-assets/README.md`](../packages/town-assets/README.md)） |
+| 设计稿导出的 PNG/SVG 母版 | 小镇 3D 模型与纹理 → [`apps/town/Assets/TownAssets/`](../apps/town/Assets/TownAssets/README.md) |
 
 应用内引用品牌图时，从本目录复制或经构建脚本同步到目标 `public/`，**不要在各 app 各存一份未同步的副本**。

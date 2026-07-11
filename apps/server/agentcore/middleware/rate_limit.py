@@ -162,6 +162,9 @@ def reset_rate_limit_state() -> None:
     auth_rate_limiter.reset()
     message_rate_limiter.reset()
     inference_token_mint_limiter.reset()
+    from agentcore.conversation.inference_rate_limit import reset_inference_proxy_turn_claims
+
+    reset_inference_proxy_turn_claims()
 
 
 def _client_key(request: Request) -> str:

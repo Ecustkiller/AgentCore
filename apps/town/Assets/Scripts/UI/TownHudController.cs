@@ -68,6 +68,13 @@ namespace AgentTown.UI
         private Label metricPop;
         private VisualElement modifierChips;
         private Label godHint;
+        private VisualElement liveRunBlock;
+        private VisualElement offlineWatchBlock;
+        private VisualElement godModeBlock;
+        private Label offlinePackTitle;
+        private Label offlinePackSynopsis;
+        private Label offlineNowLabel;
+        private bool offlineEventsTabApplied;
         private readonly List<Button> godButtons = new();
         private ScrollView residentsList;
         private VisualElement residentDetail;
@@ -150,6 +157,7 @@ namespace AgentTown.UI
             session.OnSelectionChanged += RefreshResidents;
             session.OnDecisionsChanged += RefreshDecisions;
             session.OnEventsChanged += RefreshEvents;
+            session.OnInteractionsChanged += HandleInteractionsChanged;
         }
 
         private void Unsubscribe()
@@ -165,6 +173,7 @@ namespace AgentTown.UI
             session.OnSelectionChanged -= RefreshResidents;
             session.OnDecisionsChanged -= RefreshDecisions;
             session.OnEventsChanged -= RefreshEvents;
+            session.OnInteractionsChanged -= HandleInteractionsChanged;
         }
 
         private void TryBind()
@@ -213,6 +222,12 @@ namespace AgentTown.UI
             metricPop = root.Q<Label>("metric-pop");
             modifierChips = root.Q<VisualElement>("modifier-chips");
             godHint = root.Q<Label>("god-hint");
+            liveRunBlock = root.Q<VisualElement>("live-run-block");
+            offlineWatchBlock = root.Q<VisualElement>("offline-watch-block");
+            godModeBlock = root.Q<VisualElement>("god-mode-block");
+            offlinePackTitle = root.Q<Label>("offline-pack-title");
+            offlinePackSynopsis = root.Q<Label>("offline-pack-synopsis");
+            offlineNowLabel = root.Q<Label>("offline-now-label");
             residentsList = root.Q<ScrollView>("residents-list");
             residentDetail = root.Q<VisualElement>("resident-detail");
             decisionsList = root.Q<ScrollView>("decisions-list");
@@ -583,6 +598,15 @@ namespace AgentTown.UI
             RefreshPlayback();
             RefreshMetrics();
             RefreshModifiers();
+            RefreshDecisions();
+            RefreshEvents();
+            RefreshOfflineWatch();
+        }
+
+        private void HandleInteractionsChanged()
+        {
+            RefreshEvents();
+            RefreshOfflineWatch();
         }
 
         private void RefreshAll()
@@ -596,6 +620,8 @@ namespace AgentTown.UI
             RefreshMetrics();
             RefreshModifiers();
             RefreshFpsLabel();
+            RefreshOfflineWatch();
+            ApplyModeChrome();
         }
 
         private void RefreshFpsLabel()
@@ -674,6 +700,134 @@ namespace AgentTown.UI
                         ? "请先创建或恢复一个模拟 Run"
                         : "向世界注入事件，影响下一 tick";
             }
+
+            ApplyModeChrome();
+            RefreshOfflineWatch();
+
+            if (offline && !offlineEventsTabApplied)
+            {
+                offlineEventsTabApplied = true;
+                ShowInspectTab("events");
+            }
+            else if (!offline)
+            {
+                offlineEventsTabApplied = false;
+            }
+        }
+
+        /// <summary>
+        /// Offline hides Live run-id / God inject chrome and shows a watch brief instead.
+        /// Live layout is unchanged when not offline.
+        /// </summary>
+        private void ApplyModeChrome()
+        {
+            if (!bound || session == null)
+            {
+                return;
+            }
+
+            bool offline = session.IsOffline;
+            SetDisplay(liveRunBlock, !offline);
+            SetDisplay(godModeBlock, !offline);
+            SetDisplay(offlineWatchBlock, offline);
+            if (createRunButton != null)
+            {
+                createRunButton.style.display = offline ? DisplayStyle.None : DisplayStyle.Flex;
+            }
+        }
+
+        private static void SetDisplay(VisualElement element, bool visible)
+        {
+            if (element == null)
+            {
+                return;
+            }
+
+            if (visible)
+            {
+                element.RemoveFromClassList("hidden");
+                element.style.display = DisplayStyle.Flex;
+            }
+            else
+            {
+                element.AddToClassList("hidden");
+                element.style.display = DisplayStyle.None;
+            }
+        }
+
+        /// <summary>
+        /// Left-rail Offline brief from catalog synopsis + current beat / active interaction
+        /// (existing Offline data only — no invented copy).
+        /// </summary>
+        private void RefreshOfflineWatch()
+        {
+            if (!bound || session == null || !session.IsOffline)
+            {
+                return;
+            }
+
+            string packId = DemoPackIds.Normalize(session.OfflinePackId);
+            DemoStoryPackCatalog.EnsureLoadedForBuild();
+            if (DemoStoryPackCatalog.TryGet(packId, out DemoStoryPackDef def))
+            {
+                if (offlinePackTitle != null)
+                {
+                    offlinePackTitle.text = string.IsNullOrEmpty(def.DisplayName)
+                        ? DemoPackIds.DisplayName(packId)
+                        : def.DisplayName;
+                }
+
+                if (offlinePackSynopsis != null)
+                {
+                    offlinePackSynopsis.text = string.IsNullOrEmpty(def.Synopsis)
+                        ? "离线演示 · 无需后端"
+                        : def.Synopsis;
+                }
+            }
+            else if (offlinePackTitle != null)
+            {
+                offlinePackTitle.text = DemoPackIds.DisplayName(packId);
+            }
+
+            if (offlineNowLabel == null)
+            {
+                return;
+            }
+
+            string now = FormatCurrentWatchLine();
+            offlineNowLabel.text = string.IsNullOrEmpty(now) ? "日常过渡中…" : now;
+        }
+
+        private string FormatCurrentWatchLine()
+        {
+            if (session == null)
+            {
+                return "";
+            }
+
+            foreach (KeyValuePair<string, ActiveInteraction> pair in session.ActiveInteractions)
+            {
+                ActiveInteraction ix = pair.Value;
+                if (ix == null || string.IsNullOrEmpty(ix.Summary))
+                {
+                    continue;
+                }
+
+                string kind = string.IsNullOrEmpty(ix.Kind) ? "互动" : ix.Kind;
+                return $"当前 · {kind}：{ix.Summary}";
+            }
+
+            List<StoryBeatProgress.PulseMark> pulses = EnsurePulses();
+            StoryBeatProgress.BarState bar = StoryBeatProgress.Resolve(
+                DemoPackIds.DisplayName(session.OfflinePackId),
+                session.DisplayTick,
+                pulses);
+            if (!string.IsNullOrEmpty(bar.Text))
+            {
+                return bar.Text;
+            }
+
+            return $"Tick {session.DisplayTick} / {session.Tick}";
         }
 
         private void RefreshModeBadge()
@@ -774,11 +928,18 @@ namespace AgentTown.UI
 
             if (tickLabel != null)
             {
-                string mode = session.IsOffline
-                    ? $"离线·{DemoPackIds.DisplayName(session.OfflinePackId)}"
-                    : session.IsLive ? "Live" : "Replay";
                 string playing = session.Playing ? " ▶" : "";
-                tickLabel.text = $"Tick {session.DisplayTick} / {session.Tick} ({mode}{playing}) · {session.PlaybackSpeed:0.#}x";
+                if (session.IsOffline)
+                {
+                    tickLabel.text =
+                        $"Tick {session.DisplayTick}/{session.Tick}{playing} · {session.PlaybackSpeed:0.#}×";
+                }
+                else
+                {
+                    string mode = session.IsLive ? "Live" : "Replay";
+                    tickLabel.text =
+                        $"Tick {session.DisplayTick}/{session.Tick} ({mode}{playing}) · {session.PlaybackSpeed:0.#}×";
+                }
             }
 
             if (streamLabel != null)
@@ -1100,8 +1261,12 @@ namespace AgentTown.UI
             }
 
             eventsList.Clear();
+
+            int shown = 0;
+            shown += AppendActiveInteractionRows(eventsList);
+
             IReadOnlyList<SimTickEvent> events = session.TickEvents;
-            if (events.Count == 0)
+            if (events.Count == 0 && shown == 0)
             {
                 var empty = new Label("暂无事件");
                 empty.AddToClassList("observe-empty");
@@ -1110,7 +1275,6 @@ namespace AgentTown.UI
             }
 
             // Collapse consecutive same-tick rows; hide tick_started/ended noise.
-            int shown = 0;
             int lastTick = int.MinValue;
             int noiseSkipped = 0;
             foreach (SimTickEvent evt in events)
@@ -1152,6 +1316,59 @@ namespace AgentTown.UI
                 empty.AddToClassList("observe-empty");
                 eventsList.Add(empty);
             }
+        }
+
+        /// <summary>
+        /// Pin current ActiveInteractions (dialogue / trade / vote already on the Offline pack)
+        /// at the top of the Events tab — no new data, just surface what the world is doing now.
+        /// </summary>
+        private int AppendActiveInteractionRows(ScrollView list)
+        {
+            if (session == null || session.ActiveInteractions.Count == 0)
+            {
+                return 0;
+            }
+
+            int added = 0;
+            var header = new Label("── 当前互动 ──");
+            header.AddToClassList("observe-now-header");
+            list.Add(header);
+
+            foreach (KeyValuePair<string, ActiveInteraction> pair in session.ActiveInteractions)
+            {
+                ActiveInteraction ix = pair.Value;
+                if (ix == null)
+                {
+                    continue;
+                }
+
+                var row = new VisualElement();
+                row.AddToClassList("observe-row");
+
+                string kind = string.IsNullOrEmpty(ix.Kind) ? "interaction" : ix.Kind;
+                var meta = new Label($"{kind} · tick {ix.Tick}");
+                meta.AddToClassList("observe-meta");
+
+                string summary = string.IsNullOrEmpty(ix.Summary) ? kind : ix.Summary;
+                var body = new Label(summary);
+                body.AddToClassList("observe-summary");
+
+                row.Add(meta);
+                row.Add(body);
+
+                string transcript = InteractionModel.FormatTranscript(ix.Transcript);
+                if (!string.IsNullOrWhiteSpace(transcript))
+                {
+                    var detail = new Label(transcript);
+                    detail.AddToClassList("observe-detail");
+                    row.Add(detail);
+                }
+
+                list.Add(row);
+                added++;
+            }
+
+            return added;
         }
 
         private static VisualElement BuildEventRow(SimTickEvent evt)

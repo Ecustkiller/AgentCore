@@ -1307,25 +1307,8 @@ export interface paths {
          * Resolve Interaction
          * @description Settle any paused interaction over the unified bridge (§8.2).
          *
-         *     One endpoint for every client-resolvable suspend kind, discriminated on
-         *     ``body.kind``:
-         *
-         *     - ``approval`` — authorize / deny a paused GRANTABLE tool call (the gate
-         *       auto-denies anything left unanswered);
-         *     - ``delegation_authorization`` — grant / per-call / deny before workers start;
-         *     - ``client_tool`` — a bound desktop's result envelope for a local-workspace op;
-         *     - ``escalation`` — a worker's blocking escalate (answer / 按假设继续);
-         *     - ``debate_round`` — an interactive debate round boundary (continue / conclude).
-         *
-         *     ``ask_user`` / ``plan_review`` are NOT settled here anymore: 挂起即收口 (②, Phase 3)
-         *     retired their live in-process resolve — a CEO checkpoint now finalizes the turn
-         *     (``SUSPEND → PAUSED``) and is continued via the single cold ``POST .../resume`` path
-         *     instead, so their resolve schemas are gone from ``ResolveInteractionRequest``.
-         *
-         *     The pending interaction (awaiting in the live ``send_message`` SSE turn) resumes
-         *     with its kind-specific result. 404 if it is unknown, already settled, timed out,
-         *     belongs to another conversation, or its kind does not match — a stale resolve
-         *     falls through as "not found".
+         *     Settlement 预写 (D8)：先落库 settlement 事实再 settle Future。journal 有 required、
+         *     无 Future → 写 orphaned + HTTP 410。真正未知 id 仍 404。重复答复幂等返回已处理。
          */
         post: operations["resolve_interaction_v1_conversations__conversation_id__interactions__interaction_id__post"];
         delete?: never;
@@ -1560,13 +1543,17 @@ export interface paths {
          * Resume Message
          * @description Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).
          *
-         *     The turn paused at a plan_review / ask_user checkpoint and lost its live stream
-         *     (disconnect / restart); only its persisted frame survived. Claims the frame
-         *     (atomic read-and-delete, so a turn is never resumed twice — a second / stale call
-         *     404s), then drives the rest of the turn on a fresh SSE just like a send.
+         *     The turn paused at a plan_review / ask_user / team_preview checkpoint and lost its
+         *     live stream (disconnect / restart); only its persisted frame survived.
+         *
+         *     Settlement 预写 (D8)：① peek frame → ② ``*_resolved`` 落库成功 → ③ ``claim_paused_turn``
+         *     → ④ resume pipeline（内原有 emit 照旧，journal 幂等跳过）。settlement 写失败 ⇒ 5xx、
+         *     不 claim、frame 保留可重试。Claim 竞争失败按现状 404。Pipeline 启动失败走现有
+         *     restore 回滚。
+         *
          *     ``body.selected`` carries the user's ask_user picks (ignored for plan_review).
          *     Gated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota
-         *     — all BEFORE the claim, so a refused turn keeps its resumable frame.
+         *     — all BEFORE settlement/claim, so a refused turn keeps its resumable frame.
          */
         post: operations["resume_message_v1_conversations__conversation_id__messages__message_id__resume_post"];
         delete?: never;
@@ -1630,18 +1617,8 @@ export interface paths {
          * Get Conversation Recovery
          * @description One-shot recovery snapshot for a conversation reopen (recovery 统一, 对称 §8.2).
          *
-         *     Folds the two reopen probes — is a detached run still live (实时重连续看 1b)? are there
-         *     durably paused turns (结构化挂起 2b)? — into a single owner-gated read so the client picks
-         *     ONE actionable surface without racing two endpoints. The client attaches (``GET .../stream``)
-         *     only when ``live_running`` and ``paused`` is empty; otherwise a paused turn's resume card is
-         *     its single surface. ``live_running`` mirrors the attach endpoint's own liveness test (a
-         *     registered run whose task is not done).
-         *
-         *     挂起即收口 (②): a checkpoint turn now FINALIZES (SUSPEND→PAUSED, the run ends) rather than
-         *     parking, so a paused turn is durable-only — the former live∩paused 冷热重叠 (a run parked on
-         *     its interaction while its frame also persisted) now survives ONLY as the rare §六-1 thin-net
-         *     (a frame that could not be saved keeps a bounded backend wait). Reporting both fields still
-         *     resolves that rare overlap — and a non-paused detached run (1b) — to the one right surface.
+         *     Folds reopen probes into a single owner-gated read: live_running / paused /
+         *     pending_interactions (journal fold of hot-path cards).
          */
         get: operations["get_conversation_recovery_v1_conversations__conversation_id__recovery_get"];
         put?: never;
@@ -1834,6 +1811,11 @@ export interface paths {
          *     content / reasoning block, the team graph, finished tool calls) then tails new
          *     events, all in the SAME event shape as the original stream, so the client folds it
          *     through one dispatch path.
+         *
+         *     With ``Last-Event-ID`` (P3): journal-backed full-turn durable replay + stream_state
+         *     synthetic deltas (header value observational — clients clear-then-fold), then live
+         *     tail. Without the header (same-process fast path): ``EventSink.take_over`` full
+         *     ``_history`` replay.
          *
          *     Returns ``204 No Content`` when no run is live for the conversation (already
          *     finished / never started / suspended at a checkpoint) — the client then falls back
@@ -4189,10 +4171,10 @@ export interface components {
         };
         /**
          * ApprovalDecision
-         * @description How the user (or a timeout) settled a tool-approval request.
+         * @description How the user (or a timeout / orphan) settled a tool-approval request.
          * @enum {string}
          */
-        ApprovalDecision: "approve" | "approve_always" | "approve_always_files" | "deny";
+        ApprovalDecision: "approve" | "approve_always" | "approve_always_files" | "deny" | "orphaned";
         /** AuditCausalEdge */
         AuditCausalEdge: {
             /** From */
@@ -4632,10 +4614,10 @@ export interface components {
         };
         /**
          * CheckpointDecision
-         * @description How the user (or a timeout) settled a checkpoint the CEO raised.
+         * @description How the user (or a timeout / orphan) settled a checkpoint the CEO raised.
          * @enum {string}
          */
-        CheckpointDecision: "continue" | "adjust" | "stop" | "timeout";
+        CheckpointDecision: "continue" | "adjust" | "stop" | "timeout" | "orphaned";
         /**
          * Citation
          * @description A web source consulted for an assistant message (source-card data).
@@ -4950,7 +4932,7 @@ export interface components {
          * @description How the user settled a per-delegation authorization prompt.
          * @enum {string}
          */
-        DelegationAuthorizationDecision: "grant_delegation" | "per_call" | "deny";
+        DelegationAuthorizationDecision: "grant_delegation" | "per_call" | "deny" | "orphaned";
         /**
          * DeleteAccountRequest
          * @description Self-service account deletion (注销账户): the password re-confirms a
@@ -5658,6 +5640,7 @@ export interface components {
             content: string | null;
             /** Conversation Id */
             conversation_id: string;
+            cost?: components["schemas"]["CostBreakdown"] | null;
             /**
              * Created At
              * Format: date-time
@@ -5676,6 +5659,8 @@ export interface components {
             /** Rounds */
             rounds?: number | null;
             runs?: components["schemas"]["RunsPayload"] | null;
+            /** Status */
+            status?: ("running" | "complete" | "incomplete" | "failed") | null;
             /** Trace Id */
             trace_id?: string | null;
             usage?: components["schemas"]["UsageBreakdown"] | null;
@@ -5846,28 +5831,26 @@ export interface components {
             }[];
         };
         /**
-         * PendingApprovalSummary
-         * @description A GRANTABLE tool call still awaiting the user's decision (in-process gate).
+         * PendingInteractionSummary
+         * @description One hot-path interaction still awaiting user settlement (journal fold).
          *
-         *     Surfaced on conversation reopen via ``GET .../recovery`` so the client can
-         *     re-render approval cards after a refresh. Unlike plan_review / ask_user pauses,
-         *     approvals stay on the live turn's interaction bridge — they are NOT durably
-         *     paused turns — but the registry's ``list_pending`` is the authoritative
-         *     pending set while the backend run is still alive.
+         *     Surfaced on conversation reopen via ``GET .../recovery``. ``payload`` is the
+         *     original ``*_required`` wire payload verbatim. Cold-path pauses stay in ``paused``.
          */
-        PendingApprovalSummary: {
-            /** Approval Id */
-            approval_id: string;
-            /** Arguments */
-            arguments?: {
+        PendingInteractionSummary: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "approval" | "delegation_authorization" | "escalation" | "debate_round";
+            /** Message Id */
+            message_id: string;
+            /** Payload */
+            payload?: {
                 [key: string]: unknown;
             };
-            /** Conversation Id */
-            conversation_id: string;
-            /** Tool Call Id */
-            tool_call_id: string;
-            /** Tool Name */
-            tool_name: string;
         };
         /**
          * QuotaStatus
@@ -5918,6 +5901,10 @@ export interface components {
              * @default 0
              */
             input_tokens: number;
+            /** Journal */
+            journal?: {
+                [key: string]: unknown;
+            }[] | null;
             /** Message Id */
             message_id?: string | null;
             /**
@@ -6180,11 +6167,10 @@ export interface components {
          * @description Settle a worker's blocking escalate (``escalation`` interaction, 阻塞式求决策 §4.5).
          *
          *     Raised when a delegated worker hit a「只有用户能定、且猜错就作废」fork and suspended
-         *     itself to ask the user directly. The user either answers (``answer`` — fed back into the
-         *     worker's loop, overriding its暂定假设) or chooses 按假设继续 (``use_assumption`` true —
-         *     the worker falls back to its stated assumption, the same disposition as a timeout). A
-         *     late resolve (the wait already timed out / was answered) falls through the route as 404,
-         *     so the desktop renders it as「已关闭」rather than an error.
+         *     itself. Classic (non-coordination) path asks the user; coordination path awaits CEO
+         *     ``resolve_escalation`` (Invariant B: solo never uses that tool). The user either answers
+         *     (``answer``) or chooses 按假设继续 (``use_assumption`` true → wire status ``assumed``).
+         *     A wall-clock miss is ``timed_out``. A late resolve falls through as 404.
          */
         ResolveEscalationInteraction: {
             /**
@@ -6384,6 +6370,8 @@ export interface components {
             process?: {
                 [key: string]: unknown;
             }[] | null;
+            /** Turn Warning */
+            turn_warning?: string | null;
         };
         /**
          * SearchItem
@@ -7087,21 +7075,9 @@ export interface components {
          *       C1 · slice 1b) — the client attaches (``GET .../stream``) to replay + tail it.
          *     - ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and
          *       lost their live stream (结构化挂起 2b) — each renders a resume card.
-         *     - ``pending_approvals``: GRANTABLE tool calls still blocked on the in-process
-         *       approval gate (the turn may also be ``live_running``) — each renders an approval
-         *       card. Unlike ``paused``, these are NOT durable pause frames; they exist only
-         *       while the backend run is alive.
-         *
-         *     A turn parked at a checkpoint is BOTH live (its run is parked on the interaction,
-         *     holding the workspace lock until checkpoint_timeout) and paused (its frame is
-         *     persisted before the suspend ``await``), so these overlap. Returning them together
-         *     lets the client pick ONE actionable surface: a durable paused frame is the
-         *     authoritative "this turn is paused" marker, so when ``paused`` is non-empty the
-         *     resume card is the single surface and the client does NOT attach; it attaches only
-         *     when ``live_running`` and ``paused`` is empty (a genuinely in-flight, non-paused
-         *     turn). Folding both into one snapshot removes the former two-probe reopen
-         *     (``GET /paused`` + the ``GET /stream`` attach) whose independent results raced into a
-         *     duplicate 拍板 card.
+         *     - ``pending_interactions``: hot-path interactions still awaiting settlement
+         *       (journal fold: approval / delegation_authorization / escalation / debate_round).
+         *       Cold-path stays in ``paused``.
          */
         TurnRecoveryResponse: {
             /**
@@ -7111,8 +7087,8 @@ export interface components {
             live_running: boolean;
             /** Paused */
             paused?: components["schemas"]["PausedTurnSummary"][];
-            /** Pending Approvals */
-            pending_approvals?: components["schemas"]["PendingApprovalSummary"][];
+            /** Pending Interactions */
+            pending_interactions?: components["schemas"]["PendingInteractionSummary"][];
         };
         /**
          * UpdateBoardRequest
@@ -10783,6 +10759,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
+                "Last-Event-ID"?: string | null;
                 authorization?: string | null;
             };
             path: {

@@ -124,8 +124,9 @@ suggestions（修改建议数组）、score（0–10 整数，该维度打分）
 别的事时才用；只要可能要据结果继续委派、或一次派了多个 worker，就别设。
 - 协调模式（默认开）：派【≥2 个】worker 时默认进入协调——`delegate` 立即返回『团队已启动』，\
 你边看边调（`update_synthesis` 渐进合成 / `cancel_worker` 中途终止 / `resolve_escalation` 仲裁\
-阻塞升级）。只需经典阻塞等待（等全队完成再返回）时传 `coordinate=false` 显式退出。单 worker、\
-`finalize`、嵌套 lead 不进协调。
+阻塞升级）。**`resolve_escalation` 只在协调模式下可用**；单 worker 时阻塞升级直达用户，\
+你无法（也不应尝试）用本工具裁决。只需经典阻塞等待（等全队完成再返回）时传 `coordinate=false`\
+显式退出。单 worker、`finalize`、嵌套 lead 不进协调。
 - 交付物落盘：当产出是用户要【打开 / 运行 / 编辑 / 保存 / 复用】的实质交付物——可运行代码 / \
 网页 / 应用、脚本、配置，以及成篇的报告 / 分析稿 / 方案 / 文档（成篇文字交付写成 .md）——\
 给该 task 设 `deliverable.requires_files=true`：worker 未调用 file_write 落盘即判未达标、自动\

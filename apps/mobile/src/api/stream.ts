@@ -31,6 +31,9 @@ export class StreamNetworkError extends Error {
  *  socket is dead — cancel and surface a retriable error (mirrors desktop streamConversation). */
 const IDLE_TIMEOUT_MS = 60_000;
 
+/** Latest journal seq per conversation (SSE ``id:`` → ``Last-Event-ID`` resume). */
+const lastEventIds = new Map<string, string>();
+
 /** Read an SSE response body to completion, delivering each parsed `data:` frame to
  *  `onEvent`. `event:` lines and `:` heartbeats are ignored (the data JSON already
  *  carries the type). Throws if the response has no readable body.
@@ -40,12 +43,14 @@ const IDLE_TIMEOUT_MS = 60_000;
 async function pumpSSE(
   response: Response,
   onEvent: (event: SSEEvent) => void,
+  conversationId?: string,
 ): Promise<void> {
   const reader = response.body?.getReader();
   if (!reader) throw new Error("无响应流");
 
   const decoder = new TextDecoder();
   let buffer = "";
+  let frameId: string | null = null;
 
   const readChunk = (): ReturnType<typeof reader.read> =>
     new Promise((resolve, reject) => {
@@ -73,9 +78,19 @@ async function pumpSSE(
     const frames = buffer.split("\n\n");
     buffer = frames.pop() ?? "";
     for (const frame of frames) {
+      frameId = null;
       for (const line of frame.split("\n")) {
+        if (line.startsWith("id:")) {
+          const id = line.slice(3).trim();
+          if (id && conversationId) {
+            frameId = id;
+            lastEventIds.set(conversationId, id);
+          }
+          continue;
+        }
         if (!line.startsWith("data:")) continue;
         try {
+          if (frameId && conversationId) lastEventIds.set(conversationId, frameId);
           onEvent(JSON.parse(line.slice(5).trim()) as SSEEvent);
         } catch {
           // Skip a malformed/partial frame; the next read completes it.
@@ -129,7 +144,7 @@ export async function streamMessage(
     }),
   );
   if (!response.ok) throw new Error(`请求失败 (${response.status})`);
-  await pumpSSE(response, onEvent);
+  await pumpSSE(response, onEvent, conversationId);
 }
 
 /** Outcome of a re-attach attempt (执行与请求解耦 C1 · slice 1b). */
@@ -146,11 +161,10 @@ export type AttachOutcome =
 /**
  * Re-attach to a conversation's in-flight turn and 续看 it live (C1 · slice 1b).
  *
- * Since a disconnect no longer cancels a turn, a client that dropped (network blip) or
- * reopened the app can rejoin the live run: the backend replays the transcript so far
- * (coalesced) then tails new events, all in the SAME shape as the original stream, so
- * the caller folds it through the one `fold`. Returns "none" on a 204 (nothing live to
- * rejoin); throws on a transport drop while attached (retriable) or on auth.
+ * Always sends ``Last-Event-ID`` (last journal seq, or ``0`` when none) so the
+ * backend takes the journal-backed full-turn replay path (流式回复持久化 §3.6).
+ * Returns "none" on a 204 (nothing live to rejoin); throws on a transport drop
+ * while attached (retriable) or on auth.
  */
 export async function attachStream(
   conversationId: string,
@@ -158,16 +172,22 @@ export async function attachStream(
   signal?: AbortSignal,
 ): Promise<AttachOutcome> {
   const path = `/v1/conversations/${conversationId}/stream`;
-  const response = await sseFetch(() =>
-    fetch(apiUrl(path), {
+  const response = await sseFetch(() => {
+    const headers: Record<string, string> = {
+      Accept: "text/event-stream",
+      // Always present → journal-backed full replay (header value observational).
+      "Last-Event-ID": lastEventIds.get(conversationId) ?? "0",
+      ...authHeader(),
+    };
+    return fetch(apiUrl(path), {
       method: "GET",
-      headers: { Accept: "text/event-stream", ...authHeader() },
+      headers,
       signal,
-    }),
-  );
+    });
+  });
   if (response.status === 204) return "none";
   if (!response.ok) throw new Error(`续连失败 (${response.status})`);
-  await pumpSSE(response, onEvent);
+  await pumpSSE(response, onEvent, conversationId);
   return "attached";
 }
 
@@ -208,7 +228,34 @@ export async function resumeStream(
     }),
   );
   if (!response.ok) throw new Error(`继续失败 (${response.status})`);
-  await pumpSSE(response, onEvent);
+  await pumpSSE(response, onEvent, conversationId);
+}
+
+/**
+ * Re-run from a persisted user message (regenerate endpoint · P4 interrupted retry).
+ * Same SSE shape as ``streamMessage`` — fold through the caller's ``onEvent``.
+ */
+export async function regenerateStream(
+  conversationId: string,
+  userMessageId: string,
+  onEvent: (event: SSEEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const path = `/v1/conversations/${conversationId}/messages/${userMessageId}/regenerate`;
+  const response = await sseFetch(() =>
+    fetch(apiUrl(path), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        ...authHeader(),
+      },
+      body: "{}",
+      signal,
+    }),
+  );
+  if (!response.ok) throw new Error(`重试失败 (${response.status})`);
+  await pumpSSE(response, onEvent, conversationId);
 }
 
 /** @internal Test hook — production `pumpSSE` with the idle stall watchdog. */

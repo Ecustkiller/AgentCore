@@ -100,6 +100,11 @@ async def test_blocking_escalate_routes_to_ceo_when_coordination_active():
 
 @pytest.mark.asyncio
 async def test_blocking_escalate_stays_user_without_coordination():
+    """Invariant B: no coordination session → awaiting=user (never ceo).
+
+    Solo / classic blocking has no live CEO inside ``delegate``; hanging on CEO
+    would deadlock. ``resolve_escalation`` is coordination-only.
+    """
     clear_active_coordination()
     seen: list[str] = []
 

@@ -16,6 +16,14 @@ from agentcore.simulation.service import SimulationService
 from tests.integration.conftest import register_and_login
 
 TEST_PASSWORD = "password123"
+AGENT_COUNT = 10
+_MOCK_CFG = ModelConfig(
+    model="mock",
+    base_url="http://mock",
+    api_key="x",
+    source="platform",
+    purpose="sim.town",
+)
 
 
 def _stay_provider(*, rounds: int = 60) -> ScriptedProvider:
@@ -28,6 +36,16 @@ def _stay_provider(*, rounds: int = 60) -> ScriptedProvider:
 
 def _service_all_agents(repo):
     return SimulationService(repo, activation_strategy=ActivateAllStrategy())
+
+
+@pytest.fixture(autouse=True)
+def _force_llm_tick_mode(monkeypatch):
+    """Pin LLM mode so local ``SIMULATION_SCRIPTED=true`` cannot mark the run
+    scripted at create (and silently ignore the mock provider on tick).
+    Also lift ``max_agents`` so a local cap of 5 cannot slice the town roster.
+    """
+    monkeypatch.setattr(settings, "simulation_scripted", False)
+    monkeypatch.setattr(settings, "max_agents", AGENT_COUNT)
 
 
 @pytest.mark.asyncio
@@ -46,24 +64,14 @@ async def test_m2_five_tick_full_pipeline(client, make_invite):
     try:
         invite = await make_invite("SIM-M2-INT")
         await register_and_login(client, invite, "sim-m2-int", password=TEST_PASSWORD)
-        create_res = await client.post(
-            "/v1/simulation/runs", json={"scenario": "town", "seed": 99}
-        )
-        assert create_res.status_code == 201
-        run_id = create_res.json()["id"]
 
-        mock_cfg = ModelConfig(
-            model="mock",
-            base_url="http://mock",
-            api_key="x",
-            source="platform",
-            purpose="sim.town",
-        )
-
+        # Patch create as well as ticks: without DeepSeek, create would otherwise
+        # hit SimLlmNotConfigured; with SIMULATION_SCRIPTED that marks the run
+        # scripted and bypasses the mock provider on every subsequent tick.
         with (
             patch(
                 "agentcore.simulation.service.build_sim_provider",
-                new=AsyncMock(return_value=(_stay_provider(), mock_cfg)),
+                new=AsyncMock(return_value=(_stay_provider(), _MOCK_CFG)),
             ),
             patch("agentcore.api.routes.simulation.runs._service", side_effect=_service_all_agents),
             patch(
@@ -71,6 +79,12 @@ async def test_m2_five_tick_full_pipeline(client, make_invite):
                 side_effect=_capture_build,
             ),
         ):
+            create_res = await client.post(
+                "/v1/simulation/runs", json={"scenario": "town", "seed": 99}
+            )
+            assert create_res.status_code == 201
+            run_id = create_res.json()["id"]
+
             snapshots = []
             for expected_tick in range(1, 6):
                 tick_res = await client.post(f"/v1/simulation/runs/{run_id}/tick")
@@ -122,7 +136,7 @@ async def test_m2_five_tick_full_pipeline(client, make_invite):
         with (
             patch(
                 "agentcore.simulation.service.build_sim_provider",
-                new=AsyncMock(return_value=(_stay_provider(rounds=12), mock_cfg)),
+                new=AsyncMock(return_value=(_stay_provider(rounds=12), _MOCK_CFG)),
             ),
             patch("agentcore.api.routes.simulation.runs._service", side_effect=_service_all_agents),
         ):

@@ -256,6 +256,7 @@ async def test_extractor_uses_flash_non_thinking():
     req = provider.requests[0]
     assert req.model == "deepseek-v4-flash"
     assert req.stream is False
+    assert req.thinking is False
 
 
 async def test_extractor_prompt_includes_current_profile_and_convo():

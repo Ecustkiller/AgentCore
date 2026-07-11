@@ -213,7 +213,13 @@ def project_journal_entry(recorder: AuditRecorder, entry: dict[str, Any]) -> Aud
     if kind == "escalation_resolved":
         run_id = str(payload.get("run_id") or "") or None
         status = str(payload.get("status") or "resolved")
-        outcome = "ok" if status == "resolved" else "denied" if status == "timeout" else "failed"
+        outcome = (
+            "ok"
+            if status == "resolved"
+            else "denied"
+            if status in ("timed_out", "orphaned")
+            else "failed"
+        )
         return AuditDraft(
             category="comm",
             action="escalate.resolved",

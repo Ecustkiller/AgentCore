@@ -13,21 +13,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-from agentcore.runtime.journal.entries import KIND_TURN_END
-
-_PROCESS_PREFIX = "process_"
-
-
-def _tail_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Process steps + ``turn_end`` — appended at turn close, not emit-on-write."""
-    return [
-        e
-        for e in entries
-        if e.get("kind") == KIND_TURN_END
-        or str(e.get("kind") or "").startswith(_PROCESS_PREFIX)
-    ]
-
-
 async def persist_turn_journal(
     session: AsyncSession,
     *,
@@ -39,12 +24,13 @@ async def persist_turn_journal(
     """Record a turn's replay payload to the journal (唯一事实源), best-effort.
 
     Called from the message-persistence tail right after the assistant row is
-    written, on the SAME session, keyed by the assistant ``message_id``. When the
-    turn already has append-on-emit rows, only the tail (process / ``turn_end``)
-    is appended; otherwise replaces wholesale (salvage / legacy paths). A failure
-    must NEVER break the turn (文档铁律, same posture as the cost ledger): it rolls
-    back only this write and logs — the reply is already committed and the worst
-    case is a turn that won't replay its graph.
+    written, on the SAME session, keyed by the assistant ``message_id``.
+
+    D7: finalize carries the full journal and upserts by ``seq`` so mid-turn
+    ``append`` holes are filled and duplicates are no-ops (no length-prefix
+    heuristic). A failure must NEVER break the turn: it rolls back only this
+    write and logs — the reply is already committed and the worst case is a
+    turn that won't replay its graph.
 
     ``entries`` is the §8.3 fact-log stream (execution facts interleaved with
     forwarded display facts, plus process / ``turn_end`` tail). Callers that only
@@ -57,40 +43,14 @@ async def persist_turn_journal(
 
     repo = TurnJournalRepository(session)
     try:
-        existing = await repo.load(message_id)
-        if not existing:
-            await repo.record(
+        for seq, entry in enumerate(entries):
+            await repo.append(
                 turn_id=message_id,
+                seq=seq,
                 conversation_id=conversation_id,
                 trace_id=trace_id,
-                entries=entries,
+                entry=entry,
             )
-        elif len(entries) > len(existing):
-            delta = entries[len(existing) :]
-            for seq, entry in enumerate(delta, start=len(existing)):
-                await repo.append(
-                    turn_id=message_id,
-                    seq=seq,
-                    conversation_id=conversation_id,
-                    trace_id=trace_id,
-                    entry=entry,
-                )
-        else:
-            delta = _tail_entries(entries)
-            if not delta:
-                return
-            if any(e.get("kind") == KIND_TURN_END for e in existing):
-                delta = [e for e in delta if e.get("kind") != KIND_TURN_END]
-            if not delta:
-                return
-            for seq, entry in enumerate(delta, start=len(existing)):
-                await repo.append(
-                    turn_id=message_id,
-                    seq=seq,
-                    conversation_id=conversation_id,
-                    trace_id=trace_id,
-                    entry=entry,
-                )
     except Exception as e:  # noqa: BLE001 — journal persistence must never break the turn
         await session.rollback()
         logger.warning(

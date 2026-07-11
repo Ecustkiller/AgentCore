@@ -43,6 +43,7 @@ const fsApi: FsApi = {
     ok: false,
     error: { kind: "WebPreview", detail: "unavailable in web preview" },
   }),
+  grantSessionRun: async () => {},
   reveal: async () => fail(),
   openPath: async () => fail(),
   copyPath: async () => fail(),
@@ -53,7 +54,7 @@ const sidecarApi: SidecarApi = {
     throw new Error("sidecar unavailable in web preview");
   },
   cancel: async () => {},
-  respond: async () => {},
+  respond: async () => ({ resolved: false }),
   runRedirect: async () => {},
   resume: async () => {
     throw new Error("sidecar unavailable in web preview");

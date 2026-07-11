@@ -39,10 +39,21 @@ namespace AgentTown.Tests
         [Test]
         public void GroundAndCamera_MatchExpandedWorld()
         {
-            Assert.AreEqual(120f, TownVisualLayout.GroundSize.x, 0.01f);
-            Assert.AreEqual(96f, TownVisualLayout.GroundSize.y, 0.01f);
-            Assert.Less(TownVisualLayout.CameraWire.y, 18f, "default bird height readable for landmarks");
-            Assert.Less(TownVisualLayout.BirdZoomDefaultDistance, 30f, "default zoom closer than prior 42m sand-table");
+            Assert.AreEqual(220f, TownVisualLayout.GroundSize.x, 0.01f);
+            Assert.AreEqual(180f, TownVisualLayout.GroundSize.y, 0.01f);
+            Assert.Greater(TownVisualLayout.CameraWire.y, 12f, "elevated bird look-down for core framing");
+            Assert.Less(TownVisualLayout.CameraWire.y, 28f, "oblique angle, not straight-down top view");
+            Assert.LessOrEqual(
+                TownVisualLayout.BirdZoomShootDistance,
+                TownVisualLayout.BirdZoomDefaultDistance,
+                "shoot no wider than default watch");
+            Assert.LessOrEqual(
+                TownVisualLayout.BirdZoomDefaultDistance,
+                30f,
+                "mid framing on activity core, not far sand-table");
+            Assert.GreaterOrEqual(
+                TownVisualLayout.BirdZoomShootDistance,
+                TownVisualLayout.BirdZoomMinDistance);
             Assert.Greater(TownVisualLayout.BirdZoomMaxDistance, TownVisualLayout.BirdZoomMinDistance);
             Assert.GreaterOrEqual(
                 TownVisualLayout.BirdZoomDefaultDistance,

@@ -295,12 +295,13 @@ try {
         if (Test-PortListening $Port) {
             throw "Port $Port became busy before serve started — re-run the spike"
         }
-        # Windows: npx.cmd; keep stdout in a log for diagnose
+        # Serve via the canonical Node server (sets Content-Encoding: gzip for Unity .gz
+        # artifacts; plain `npx serve` omits it → "Unable to parse WebGL.framework.js.gz").
         $serveOut = Join-Path $probeDir 'serve.out.log'
         $serveErr = Join-Path $probeDir 'serve.err.log'
-        $npxCmd = if (Get-Command npx.cmd -ErrorAction SilentlyContinue) { 'npx.cmd' } else { 'npx' }
-        $serveProc = Start-Process -FilePath $npxCmd `
-            -ArgumentList @('--yes', 'serve', '-l', "tcp://127.0.0.1:$Port", '.') `
+        $serveScript = Join-Path $PSScriptRoot 'serve-webgl.mjs'
+        $serveProc = Start-Process -FilePath 'node' `
+            -ArgumentList @($serveScript, '--root', $webglDir, '--port', "$Port", '--strict-port', '--no-open') `
             -WorkingDirectory $webglDir -PassThru -WindowStyle Hidden `
             -RedirectStandardOutput $serveOut -RedirectStandardError $serveErr
         $startedServe = $true

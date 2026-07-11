@@ -44,6 +44,20 @@ def _stay_provider(*, rounds: int = 300) -> ScriptedProvider:
     return ScriptedProvider([[content_chunk(payload)] for _ in range(rounds)])
 
 
+@pytest.fixture(autouse=True)
+def _mvp_env(monkeypatch):
+    """INT-04 drives a mock LLM across the full 10-persona roster.
+
+    Force the LLM tick path (a local ``.env`` ``SIMULATION_SCRIPTED=true`` would make
+    ticks scripted and silently ignore the injected provider), and lift the roster cap
+    so ``max_agents=5`` doesn't slice the town down to 5 — the ``== AGENT_COUNT`` asserts
+    require all 10. Open registration is handled globally in
+    ``tests/integration/conftest.py::_open_registration``.
+    """
+    monkeypatch.setattr(settings, "simulation_scripted", False)
+    monkeypatch.setattr(settings, "max_agents", AGENT_COUNT)
+
+
 def _service_all_agents(repo: SimulationRepository) -> SimulationService:
     return SimulationService(repo, activation_strategy=ActivateAllStrategy())
 

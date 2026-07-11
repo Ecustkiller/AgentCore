@@ -1,4 +1,13 @@
-"""Direct react_loop harness for SimAgent ticks (SPIKE-03 core)."""
+"""Single-round SimAgent tick harness (SPIKE-03 core).
+
+Evaluation-side twin of the product decision path
+(``simulation/agents/tick_runner.py``): one LLM round → one action, kept in
+lockstep so SPIKE runs reflect real product behaviour. Deliberately NOT
+``react_loop`` — that task engine's multi-round / convergence / deliverable
+semantics corrupt role-play (助手腔「最终答案」, single-tick teleporting, discarded
+in-character prose). TODO(tech-debt): this duplicates tick_runner over a separate
+WorldState/Persona model; the two should converge onto one runtime.
+"""
 
 from __future__ import annotations
 
@@ -16,8 +25,10 @@ from agentcore.evals.recording_sink import RecordingSink
 from agentcore.llm.factory import build_provider
 from agentcore.llm.pricing import NANO_PER_USD, calculate_cost
 from agentcore.llm.profiles import ProfileParams
-from agentcore.llm.provider.protocol import LLMMessage
-from agentcore.runtime.engine import react_loop
+from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
+from agentcore.runtime.engine.governance import resolve_openai_tool_defs
+from agentcore.runtime.engine.round import LlmRoundFailure, run_llm_round
+from agentcore.runtime.engine.tool_exec import execute_tools
 from agentcore.simulation.llm import build_sim_provider
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
@@ -28,7 +39,14 @@ from .personas import Persona, persona_by_id
 from .sim_tools import MoveToTool, SpeakToTool, StayHereTool, build_sim_tool_registry
 from .world import WorldState
 
-_SIM_PROFILE = ProfileParams(temperature=0.8, max_rounds=4, name="sim.spike")
+# Lockstep with product tick_runner: a role-play tick is ONE round → ONE action.
+# max_rounds=1 stops the task engine's multi-round convergence steering (which
+# injects「给出最终答案」reflection prompts that break character into助手腔).
+_SIM_PROFILE = ProfileParams(temperature=0.8, max_rounds=1, name="sim.spike")
+
+
+def _noop_emit(_delta: str) -> None:
+    """Streamed deltas are ignored — the spike reads the final content."""
 
 
 @dataclass
@@ -103,6 +121,24 @@ def _parse_action_json(text: str) -> dict | None:
     return None
 
 
+def _thought_from_tool_args(args_raw: str) -> str:
+    """Recover the in-character thought from a native tool call.
+
+    Native tool-calling returns empty ``content``; the resident's想法 lives in the
+    tool's ``reason`` arg (fallback to ``message`` for speak_to). Lockstep with
+    product ``tick_runner._thought_from_tool_args``.
+    """
+    if not args_raw:
+        return ""
+    try:
+        args = json.loads(args_raw)
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(args, dict):
+        return ""
+    return str(args.get("reason") or args.get("message") or "").strip()
+
+
 async def _apply_parsed_action(world: WorldState, persona: Persona, payload: dict, ctx: ToolContext) -> tuple[str, str]:
     action = str(payload.get("action", "")).strip()
     args_json = json.dumps(payload, ensure_ascii=False)
@@ -157,29 +193,44 @@ async def run_agent_tick(
     messages = _build_messages(persona, perception, text_mode=effective_text_mode)
     tools = ToolRegistry() if effective_text_mode else build_sim_tool_registry(world)
     model = turn_model or settings.platform_model
+    tool_defs = None if effective_text_mode else resolve_openai_tool_defs(tools, None, set())
     t0 = time.monotonic()
     with log_context(trace_id=new_trace_id(), user_id="sim-spike", agent=persona.agent_id):
         try:
-            content, _reasoning, usage, rounds = await react_loop(
-                messages=messages,
+            result = await run_llm_round(
                 llm=llm,
-                tools=tools,
-                sink=sink,
-                tool_context=ctx,
                 profile=_sim_profile(),
-                turn_model=model,
-                deliverable_only=True,
-                role=persona.role,
+                messages=messages,
+                investigation_tools=frozenset(),
+                tool_defs=tool_defs,
+                active_model=model,
+                emit_content=_noop_emit,
+                emit_reasoning=_noop_emit,
+                on_tool_progress=None,
+                round_idx=0,
                 run_id=ctx.run_id,
-                allowed_tool_names=[] if effective_text_mode else None,
+                raise_on_error=True,
             )
-            tool_calls = list(sink.tool_calls)
+            if isinstance(result, LlmRoundFailure):
+                raise RuntimeError(result.error_message or "LLM round failed")
+            content = result.content or ""
+            usage = result.usage or TokenUsage()
+            tool_calls: list[tuple[str, str]] = []
             if effective_text_mode:
-                payload = _parse_action_json(content or "")
+                payload = _parse_action_json(content)
                 if payload:
                     thought, args_json = await _apply_parsed_action(world, persona, payload, ctx)
                     content = thought
                     tool_calls = [(str(payload.get("action", "?")), args_json)]
+            elif result.tool_calls:
+                # One tick = one action: apply exactly the FIRST tool the agent chose.
+                first = result.tool_calls[0]
+                await execute_tools([first], tools, ctx, sink, run_id=ctx.run_id)
+                args_json = first.function.arguments or ""
+                tool_calls = [(first.function.name, args_json)]
+                # Native tool-calling returns empty content — the in-character thought
+                # lives in the tool's ``reason`` arg. Recover it (fallback to any prose).
+                content = _thought_from_tool_args(args_json) or content
             cost = calculate_cost(model, usage, billing_mode="platform").total
             agent = world.agents[persona.agent_id]
             agent.last_thought = content or ""
@@ -188,7 +239,7 @@ async def run_agent_tick(
                 tick=world.tick,
                 content=content or "",
                 tool_calls=tool_calls,
-                rounds=rounds,
+                rounds=1,
                 latency_ms=int((time.monotonic() - t0) * 1000),
                 usage=usage.as_dict(),
                 cost_usd=cost / NANO_PER_USD,

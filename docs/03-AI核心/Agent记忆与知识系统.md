@@ -115,7 +115,7 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 
 **注入前裁剪「人面 chrome」**：磁盘上的记忆文件顶部带的是给**人**看的标题（`# 用户记忆`）和说明（「本文件由 AI 自动维护，你可随时编辑或删除…」）；这段对模型是噪音——标题 `<rules>` 包装语已给，说明是写给用户的，混进 prompt 没有意义。故注入投影 `strip_memory_chrome`（`memory/user_memory.py`，**逐文件**调用）在合成 `<rules>` 时剥掉每个文件开头的 H1 标题 + 紧随的引用块，只注入实质小节 / 条目。**文件本身不动**——用户打开记忆文件仍看得到说明（参考 Cursor：规则正文才入 prompt，元信息留 UI）。
 
-**记忆分层注入（作用域 + 偏好/画像）**：always 核心逐文件 chrome-strip 后**全文**进 `<rules>`，顺序为 **全局 `偏好.md` → 全局 `画像.md` →（会话在项目里时）项目 `画像.md`**——全局在前坐稳定前缀护 DeepSeek 缓存，项目段后置并带「仅本项目适用」标签（冲突靠措辞 + 就近相关性，§1.4）；整体计入 `MAX_INSTRUCTION_CHARS`、全局优先存活。on_demand `主题/*.md` 把**主题名＋一行摘要**（摘要＝主题文件首行）列进 CEO 提示词的 `<记忆主题目录>`（全局 + 项目主题名合并去重、同名以全局摘要为准，装配序 `MEMORY_TOPICS`，见 §5.5），CEO 判断相关再用 `consult_memory(name)` 把全文拉回 ReAct 循环（**跨作用域查找：项目优先、全局兜底**；与 `consult_skill` 同形的渐进披露原语，正文走工具结果、不进常驻前缀 → 不破缓存）。目录↔工具受 `memory_enabled` 总开关**同闸**：关 → 既不列目录也不挂工具，零记忆面（与 §1.6 注入侧同一隐私 off-ramp）。→ 见代码：`memory/injection.py`（`load_injected_memory` / `load_memory_topics`）、`tools/builtin/consult_memory.py`、`runtime/resolve/prompt.py`（`render_memory_topic_directory`）。
+**记忆分层注入（作用域 + 偏好/画像）**：always 核心逐文件 chrome-strip 后**全文**进 `<rules>`，顺序为 **全局 `偏好.md` → 全局 `画像.md` →（会话在项目里时）项目 `画像.md`**——全局在前坐稳定前缀护 DeepSeek 缓存，项目段后置并带「仅本项目适用」标签（冲突靠措辞 + 就近相关性，§1.4）；每个文件按 `memory_injected_file_char_cap`（默认 4000 字符）**逐文件封顶**后按序拼接，**当前无跨文件总预算、也无「全局优先淘汰」**（`MAX_INSTRUCTION_*` 总预算 + 全局优先存活属云端文件树 rule 注入 ⏳ 目标管线，见 §5.4、尚未落地）。on_demand `主题/*.md` 把**主题名＋一行摘要**（摘要＝主题文件首行）列进 CEO 提示词的 `<记忆主题目录>`（全局 + 项目主题名合并去重、同名以全局摘要为准，装配序 `MEMORY_TOPICS`，见 §5.5），CEO 判断相关再用 `consult_memory(name)` 把全文拉回 ReAct 循环（**跨作用域查找：项目优先、全局兜底**；与 `consult_skill` 同形的渐进披露原语，正文走工具结果、不进常驻前缀 → 不破缓存）。目录↔工具受 `memory_enabled` 总开关**同闸**：关 → 既不列目录也不挂工具，零记忆面（与 §1.6 注入侧同一隐私 off-ramp）。→ 见代码：`memory/injection.py`（`load_injected_memory` / `load_memory_topics`）、`tools/builtin/consult_memory.py`、`runtime/resolve/prompt.py`（`render_memory_topic_directory`）。
 
 **挂起→恢复的记忆接线一致性 ✅**：`plan_review` / `ask_user` 挂起可能**跨进程**恢复，恢复时 `consult_memory` 必须与原回合**同样接线**——故两个回合级状态随挂起帧持久化：**项目作用域 `folder_id`** 与**记忆总开关 `memory_enabled`**。缺任一都会让续跑退化：丢 `folder_id` → 记忆退回全局-only（项目主题召不回）；丢 `memory_enabled` → 用户关了记忆的回合 resume 后又接回 `consult_memory`（隐私回退）。旧帧（无此字段）安全兜底为**作用域=全局 / 记忆=开**，绝不因缺值静默剥夺原回合已有的记忆面。→ 见代码：`runtime/suspension.py`（`TurnSuspension.folder_id` / `.memory_enabled` 随 `to_json`↔`suspension_from_json` 往返）、`runtime/pipeline/resume/pipeline.py`（恢复时把两者回喂 `_assemble_ceo_toolset`，与首跑同源装配）。
 
@@ -163,7 +163,7 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 |---|---|---|---|
 | `rule` | `false` | 用户规则（用户拥有，AI 可起草但不静默改） | 按 `apply_mode` 进入 `<rules>` |
 | `rule` | `true` | AI 维护的长期记忆 | 进入 `<rules>`（默认 `always`，软措辞） |
-| `general` | — | 普通文件/文档 | 列入 `<workspace_context>` 概览，Agent 按需 `file_read`/`grep` 取正文（见 §5.6） |
+| `general` | — | 普通文件/文档 | 列入 `<workspace_file_index>` 概览，Agent 按需 `file_read`/`grep` 取正文（见 §5.6） |
 
 用户视角：`rule + ai_maintained=false` 显示为"规则"，`rule + ai_maintained=true` 显示为"记忆"，`general` 是普通文档。
 
@@ -173,7 +173,7 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 
 全局规则不靠标记位，而靠**位置**：放在云端根（`parent_id IS NULL`）的 `rule` 文档注入所有对话。子文件夹的 `rule` 只对该文件夹上下文内的对话生效。
 
-- 全局规则与文件夹规则共享同一注入预算口径（`MAX_INSTRUCTION_*`），不各自一份
+- 全局规则与文件夹规则共享同一注入预算口径（`MAX_INSTRUCTION_*`），不各自一份 ⏳（此总预算口径随云端文件树 rule 注入管线落地，见 §5.4；今日已落地的记忆注入走逐文件 `memory_injected_file_char_cap`，见 §二）
 - 累积合并时**全局优先**（始终生效基线，预算紧张时优先存活）
 - 委派子 Agent 继承用户全局规则，避免父子行为约束分裂
 
@@ -197,14 +197,14 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 
 ```
 BASE 100 → RUNTIME_CONTEXT 200 → MEMORY 300 → CEO_CORE 400
-→ SKILL_DIRECTORY 500 → MEMORY_TOPICS 550 → CITATION 600 → WORKSPACE_OVERVIEW 800 → ATTACHMENT 900
+→ SKILL_DIRECTORY 500 → MEMORY_TOPICS 550 → CITATION 600 → CEO_VISUALIZATION 700 → WORKSPACE_OVERVIEW 800 → ATTACHMENT 900
 ```
 
 这是**一套**排序坐标系；并非每条路径都用满全部档位（worker 走 `BASE`/`RUNTIME_CONTEXT`/`MEMORY`/`ATTACHMENT`，CEO 聊天走 `BASE`/`CEO_CORE`/`SKILL_DIRECTORY`/`MEMORY_TOPICS`/`CITATION`，再叠 `WORKSPACE_OVERVIEW`/`ATTACHMENT`），但两路径对相对顺序的认知永远一致。`MEMORY_TOPICS`（记忆主题目录，CEO-only）紧挨 `SKILL_DIRECTORY`：二者同形——都是「列个目录、按名拉全文」的按需块（见 §二）。
 
 > **决策：常驻源统一为 contributor 插件、顺序声明化。** 理由：① 新增常驻源只需声明一个 `order` 即落位，无需在某个拼接点插队、改动多处调用；② 渲染序与贡献次序解耦——各调用点本就按升序贡献，稳定排序复现原内联顺序、原 `\n` 拼接，**与统一前逐字节一致**（稳定前缀不变，DeepSeek 前缀缓存不破）；③ 稳定前缀（base + hints）在前、概览 / 附件置尾，护前缀缓存（概览 / 附件都空时与原 CEO 提示词逐字节一致）；④ `budget` 字段为「扳机 B」（预算 / 裁剪 / 降级）预留**唯一读取点**——今天不强制裁剪，按需才长（触发条件见 [上下文工程](/docs/03-AI核心/上下文工程.md) 扳机 B）。→ 见代码：`runtime/context/`（`contributor.py` 定义形状 + `assembler.py` 收集排序）。
 
-**Workspace Context（CEO）= 实时工作区概览 + 项目画像** ✅：每回合 `build_workspace_overview(backend)` 先 best-effort 检测项目画像（`detect_project_profile`：语言/框架/包管理器/monorepo 工具/VCS 分支/常用命令/`AGENTS.md` 摘录；**只读清单文件、不执行命令**；画像 ≤600 字符；失败不阻塞），再拉「最近更新在前」的文件清单（文件数 + 字符预算双重封顶），一并注入 `<workspace_context>`（`WORKSPACE_OVERVIEW` 档）。**项目感知是上下文注入增强、不是新工具**；延续 agentic 检索路线，不上向量 RAG。worker 不走此块——它们已有更丰富的逐运行 manifest。→ 见代码：`runtime/context/workspace_overview.py`、`runtime/context/project_profile.py`。
+**Workspace Context（CEO）= 实时工作区概览 + 项目画像** ✅：每回合 `build_workspace_overview(backend)` 先 best-effort 检测项目画像（`detect_project_profile`：语言/框架/包管理器/monorepo 工具/VCS 分支/常用命令/`AGENTS.md` 摘录；**只读清单文件、不执行命令**；画像 ≤600 字符；失败不阻塞），再拉「最近更新在前」的文件清单（文件数 + 字符预算双重封顶），一并注入 `<workspace_file_index>`（`WORKSPACE_OVERVIEW` 档）。**项目感知是上下文注入增强、不是新工具**；延续 agentic 检索路线，不上向量 RAG。worker 不走此块——它们已有更丰富的逐运行 manifest。→ 见代码：`runtime/context/workspace_overview.py`、`runtime/context/project_profile.py`。
 
 ⏳ **Marketplace Rules**：市场 Rules 绑定待能力域落地后接入装配链。
 
@@ -215,7 +215,7 @@ BASE 100 → RUNTIME_CONTEXT 200 → MEMORY 300 → CEO_CORE 400
 | 机制 | 范围 | 限制手段 |
 |---|---|---|
 | `rule` 注入（规则 + 记忆） | 仅关联文件夹的 **direct children** | `MAX_INSTRUCTION_DOCS` / `MAX_INSTRUCTION_CHARS` |
-| 工作区概览（`<workspace_context>`） | 项目画像 + 关联文件夹文件清单（**整棵子树**，最近更新在前） | 画像 ≤600 字符；文件数 + 字符预算双重封顶；只列路径与元数据、正文不进概览 |
+| 工作区概览（`<workspace_file_index>`） | 项目画像 + 关联文件夹文件清单（**整棵子树**，最近更新在前） | 画像 ≤600 字符；文件数 + 字符预算双重封顶；只列路径与元数据、正文不进概览 |
 | Agentic 检索（`file_read` / `grep` / `file_list` / `git`） | **整棵子树**（`file_list` 递归树有 `max_depth`/条目上限） | Agent 自取正文；`file_read` 支持 `offset`/`limit` 行号范围；单次工具输出截断 |
 
 `rule` 不递归是因为规则按层级生效（子文件夹有自己的规则）；工作区不限深度是因为用户心智是"文件夹里的东西 AI 都能看到"——但**不预建向量索引**：概览给方位、Agent 用文件工具取正文（agentic 检索为主路）。

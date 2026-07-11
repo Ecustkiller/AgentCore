@@ -3,8 +3,8 @@ import {
   Bot,
   CheckCircle2,
   CornerDownRight,
-  History,
   Loader2,
+  PencilLine,
   Sparkles,
   UserRound,
   XCircle,
@@ -223,13 +223,22 @@ export function GraphLegend() {
         />
         <LegendRow
           sample={
-            <span className="flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
-              <History size={10} />
-              修订 vN
+            <span className="flex items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+              <PencilLine size={10} />
+              vN
             </span>
           }
-          name="修订 vN"
-          desc="多轮热修：唤回原队员带记忆续写的新版本。"
+          name="热修修订 vN"
+          desc="定向唤回：铅笔 + 版本号；卡片面优先露出改点（按指示：…）。"
+        />
+        <LegendRow
+          sample={
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+              第 N 轮
+            </span>
+          }
+          name="第 N 轮"
+          desc="辩论续轮角标（与侧栏轮次轨一致），不再标成热修修订。"
         />
         <LegendRow
           sample={

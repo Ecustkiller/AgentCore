@@ -5,7 +5,6 @@ import type {
   SSEEvent,
 } from "@/types/events";
 import { beforeEach, describe, expect, it } from "vitest";
-import { useApprovalStore } from "../approvals";
 import {
   checkpointsFromEvents,
   getActiveRuntime,
@@ -15,8 +14,15 @@ import {
   useConversationStore,
 } from "../conversation";
 import { execRuntime, useExecutionStore } from "../execution";
+import {
+  entryToCheckpoint,
+  entryToNonBlockingAsk,
+  entryToPlanReview,
+  useInteractionStore,
+} from "../interactions";
 
 const store = () => useConversationStore.getState();
+const ix = () => useInteractionStore.getState();
 /** Active conversation's runtime slice — runtime state is now keyed by id. */
 const rt = () => getActiveRuntime();
 
@@ -25,8 +31,7 @@ beforeEach(() => {
     currentConversationId: null,
     byId: {},
   });
-  // The release predicate reads the approval store; keep suites isolated.
-  useApprovalStore.getState().clear();
+  useInteractionStore.getState().clear();
 });
 
 describe("conversation store", () => {
@@ -167,12 +172,17 @@ describe("conversation store", () => {
       store().createAssistantMessage();
       store().switchConversation("b");
       store().finalizeLastMessage("a"); // a is no longer generating…
-      useApprovalStore.getState().add({
-        approval_id: "x",
-        conversation_id: "a",
-        tool_call_id: "t",
-        tool_name: "file_write",
-        arguments: {},
+      ix().upsertRequired({
+        kind: "approval",
+        conversationId: "a",
+        messageId: "",
+        payload: {
+          approval_id: "x",
+          conversation_id: "a",
+          tool_call_id: "t",
+          tool_name: "file_write",
+          arguments: {},
+        },
       });
       store().releaseBackgroundSlice("a"); // …but a paused approval keeps it
       expect(store().byId.a).toBeDefined();
@@ -548,49 +558,97 @@ describe("plan_review cards (结构化挂起 2a)", () => {
     });
   });
 
-  describe("addPlanReview / settlePlanReview (live)", () => {
-    it("attaches a pending card to the live assistant message", () => {
+  describe("InteractionStore plan_review + process stamp (live)", () => {
+    it("upserts a pending card and stamps the process marker", () => {
       store().switchConversation("a");
       store().createAssistantMessage();
-      store().addPlanReview(reqPayload("c1", ["run-1"]), "a");
-      expect(rt().messages[0].planReviews?.[0]).toMatchObject({
-        id: "c1",
-        status: "pending",
+      const mid = rt().messages[0].id;
+      const p = reqPayload("c1", ["run-1"]);
+      ix().upsertRequired({
+        kind: "plan_review",
+        conversationId: "a",
+        messageId: mid,
+        payload: p as unknown as Record<string, unknown>,
       });
+      store().stampPlanReviewMarker("c1", "a");
+      expect(entryToPlanReview(ix().get("c1")!).status).toBe("pending");
+      expect(rt().messages[0].process?.some((s) => s.kind === "plan_review")).toBe(
+        true,
+      );
     });
 
     it("dedupes a re-delivered required event", () => {
       store().switchConversation("a");
       store().createAssistantMessage();
-      store().addPlanReview(reqPayload("c1", ["run-1"]), "a");
-      store().addPlanReview(reqPayload("c1", ["run-1"]), "a");
-      expect(rt().messages[0].planReviews).toHaveLength(1);
+      const mid = rt().messages[0].id;
+      const p = reqPayload("c1", ["run-1"]);
+      ix().upsertRequired({
+        kind: "plan_review",
+        conversationId: "a",
+        messageId: mid,
+        payload: p as unknown as Record<string, unknown>,
+      });
+      ix().upsertRequired({
+        kind: "plan_review",
+        conversationId: "a",
+        messageId: mid,
+        payload: p as unknown as Record<string, unknown>,
+      });
+      expect(
+        [...ix().byId.values()].filter((e) => e.kind === "plan_review"),
+      ).toHaveLength(1);
     });
 
-    it("is a no-op when there is no assistant message yet", () => {
+    it("stamp is a no-op when there is no assistant message yet", () => {
       store().switchConversation("a");
-      store().addPlanReview(reqPayload("c1", ["run-1"]), "a");
+      store().stampPlanReviewMarker("c1", "a");
       expect(rt().messages).toHaveLength(0);
     });
 
-    it("settlePlanReview flips the card to resolved", () => {
+    it("markResolved flips the card to resolved", () => {
       store().switchConversation("a");
       store().createAssistantMessage();
-      store().addPlanReview(reqPayload("c1", ["run-1"]), "a");
-      store().settlePlanReview("c1", "stop", "就此打住", "a");
-      expect(rt().messages[0].planReviews?.[0]).toMatchObject({
+      const mid = rt().messages[0].id;
+      ix().upsertRequired({
+        kind: "plan_review",
+        conversationId: "a",
+        messageId: mid,
+        payload: reqPayload("c1", ["run-1"]) as unknown as Record<
+          string,
+          unknown
+        >,
+      });
+      ix().markResolved({
+        kind: "plan_review",
+        id: "c1",
+        resolution: { decision: "stop", note: "就此打住" },
+      });
+      expect(entryToPlanReview(ix().get("c1")!)).toMatchObject({
         status: "resolved",
         decision: "stop",
         note: "就此打住",
       });
     });
 
-    it("settlePlanReview records an adjust decision + its steer note", () => {
+    it("markResolved records an adjust decision + its steer note", () => {
       store().switchConversation("a");
       store().createAssistantMessage();
-      store().addPlanReview(reqPayload("c1", ["run-1"]), "a");
-      store().settlePlanReview("c1", "adjust", "把重点放在风险上", "a");
-      expect(rt().messages[0].planReviews?.[0]).toMatchObject({
+      const mid = rt().messages[0].id;
+      ix().upsertRequired({
+        kind: "plan_review",
+        conversationId: "a",
+        messageId: mid,
+        payload: reqPayload("c1", ["run-1"]) as unknown as Record<
+          string,
+          unknown
+        >,
+      });
+      ix().markResolved({
+        kind: "plan_review",
+        id: "c1",
+        resolution: { decision: "adjust", note: "把重点放在风险上" },
+      });
+      expect(entryToPlanReview(ix().get("c1")!)).toMatchObject({
         status: "resolved",
         decision: "adjust",
         note: "把重点放在风险上",
@@ -687,38 +745,77 @@ describe("ask_user cards (统一开场引导 + 途中拍板)", () => {
     });
   });
 
-  describe("addCheckpoint / settleCheckpoint (live)", () => {
-    it("attaches a pending card to the live assistant message", () => {
+  describe("InteractionStore ask_user + process stamp (live)", () => {
+    it("upserts a pending card and stamps the process marker", () => {
       store().switchConversation("a");
       store().createAssistantMessage();
-      store().addCheckpoint(reqPayload("c1"), "a");
-      expect(rt().messages[0].checkpoints?.[0]).toMatchObject({
+      const mid = rt().messages[0].id;
+      const p = reqPayload("c1");
+      ix().upsertRequired({
+        kind: "ask_user",
+        conversationId: "a",
+        messageId: mid,
+        payload: p as unknown as Record<string, unknown>,
+      });
+      store().stampCheckpointMarker("c1", "a");
+      expect(entryToCheckpoint(ix().get("c1")!)).toMatchObject({
         id: "c1",
         status: "pending",
         styleOptions: [{ id: "s0", label: "深色科技" }],
       });
+      expect(
+        rt().messages[0].process?.some((s) => s.kind === "checkpoint"),
+      ).toBe(true);
     });
 
     it("dedupes a re-delivered required event", () => {
       store().switchConversation("a");
       store().createAssistantMessage();
-      store().addCheckpoint(reqPayload("c1"), "a");
-      store().addCheckpoint(reqPayload("c1"), "a");
-      expect(rt().messages[0].checkpoints).toHaveLength(1);
+      const mid = rt().messages[0].id;
+      const p = reqPayload("c1");
+      ix().upsertRequired({
+        kind: "ask_user",
+        conversationId: "a",
+        messageId: mid,
+        payload: p as unknown as Record<string, unknown>,
+      });
+      ix().upsertRequired({
+        kind: "ask_user",
+        conversationId: "a",
+        messageId: mid,
+        payload: p as unknown as Record<string, unknown>,
+      });
+      expect(
+        [...ix().byId.values()].filter((e) => e.kind === "ask_user"),
+      ).toHaveLength(1);
     });
 
-    it("is a no-op when there is no assistant message yet", () => {
+    it("stamp is a no-op when there is no assistant message yet", () => {
       store().switchConversation("a");
-      store().addCheckpoint(reqPayload("c1"), "a");
+      store().stampCheckpointMarker("c1", "a");
       expect(rt().messages).toHaveLength(0);
     });
 
-    it("settleCheckpoint flips the card to resolved with the composed note", () => {
+    it("markResolved flips the card to resolved with the composed note", () => {
       store().switchConversation("a");
       store().createAssistantMessage();
-      store().addCheckpoint(reqPayload("c1"), "a");
-      store().settleCheckpoint("c1", "continue", "就按这个开做", [], "a");
-      expect(rt().messages[0].checkpoints?.[0]).toMatchObject({
+      const mid = rt().messages[0].id;
+      ix().upsertRequired({
+        kind: "ask_user",
+        conversationId: "a",
+        messageId: mid,
+        payload: reqPayload("c1") as unknown as Record<string, unknown>,
+      });
+      ix().markResolved({
+        kind: "ask_user",
+        id: "c1",
+        resolution: {
+          decision: "continue",
+          note: "就按这个开做",
+          selected: [],
+        },
+      });
+      expect(entryToCheckpoint(ix().get("c1")!)).toMatchObject({
         status: "resolved",
         decision: "continue",
         note: "就按这个开做",
@@ -783,28 +880,51 @@ describe("non-blocking ask cards (ask_user blocking=false)", () => {
     });
   });
 
-  describe("addNonBlockingAsk (live)", () => {
-    it("attaches a card to the live assistant message", () => {
+  describe("InteractionStore question_posted + process stamp (live)", () => {
+    it("upserts a card and stamps the process marker", () => {
       store().switchConversation("a");
       store().createAssistantMessage();
-      store().addNonBlockingAsk(postedPayload("n1"), "a");
-      expect(rt().messages[0].nonBlockingAsks?.[0]).toMatchObject({
+      const mid = rt().messages[0].id;
+      const p = postedPayload("n1");
+      ix().upsertRequired({
+        kind: "question_posted",
+        conversationId: "a",
+        messageId: mid,
+        payload: p as unknown as Record<string, unknown>,
+      });
+      store().stampAskMarker("n1", "a");
+      expect(entryToNonBlockingAsk(ix().get("n1")!)).toMatchObject({
         id: "n1",
         assumptions: [{ id: "a0", label: "部署", value: "纯静态" }],
       });
+      expect(rt().messages[0].process?.some((s) => s.kind === "ask")).toBe(true);
     });
 
     it("dedupes a re-delivered event", () => {
       store().switchConversation("a");
       store().createAssistantMessage();
-      store().addNonBlockingAsk(postedPayload("n1"), "a");
-      store().addNonBlockingAsk(postedPayload("n1"), "a");
-      expect(rt().messages[0].nonBlockingAsks).toHaveLength(1);
+      const mid = rt().messages[0].id;
+      const p = postedPayload("n1");
+      ix().upsertRequired({
+        kind: "question_posted",
+        conversationId: "a",
+        messageId: mid,
+        payload: p as unknown as Record<string, unknown>,
+      });
+      ix().upsertRequired({
+        kind: "question_posted",
+        conversationId: "a",
+        messageId: mid,
+        payload: p as unknown as Record<string, unknown>,
+      });
+      expect(
+        [...ix().byId.values()].filter((e) => e.kind === "question_posted"),
+      ).toHaveLength(1);
     });
 
-    it("is a no-op when there is no assistant message yet", () => {
+    it("stamp is a no-op when there is no assistant message yet", () => {
       store().switchConversation("a");
-      store().addNonBlockingAsk(postedPayload("n1"), "a");
+      store().stampAskMarker("n1", "a");
       expect(rt().messages).toHaveLength(0);
     });
   });

@@ -83,6 +83,9 @@ class Deliverable:
     name: str = ""
     output_format: str = "text"
     required_sections: list[str] = field(default_factory=list)
+    # 阶段2 预留位：当前无 contract schema 入口（CEO 无法经 delegate.contract 设置），
+    # 且 ``check_contract`` 不校验本字段。保留以兼容序列化 / 既有测试；勿当作已生效的
+    # JSON Schema 约束。
     output_schema: dict[str, Any] | None = None
     must_contain: list[str] = field(default_factory=list)
     min_length: int = 0
@@ -203,7 +206,7 @@ class RunSpec:
     # 字段（task/role/tools…）可先占位，依赖完成后由 CEO 在波边界经 ``replan`` 定稿再
     # dispatch——WaveScheduler 把「依赖已完成但本节点未定稿」当一个决策边界、YIELD 回 CEO
     # 的 ReAct 主循环（区别于 checkpoint_after 的「让给用户 plan_review」）。Inert by
-    # default：未接 on_boundary 的调度（自治 / 测试 / 当前阶段）下完全无效，故一个无晚
+    # default：未接 on_boundary 的调度（自治 / 测试）下完全无效，故一个无晚
     # 绑定节点的 plan 行为逐字不变。→ 见设计: docs/03-AI核心/执行引擎架构设计.md §受监督的波循环
     bind_after_deps: bool = False
     parent_run_id: str | None = None

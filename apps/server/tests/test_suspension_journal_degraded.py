@@ -132,8 +132,8 @@ async def test_save_paused_turn_seals_writer_after_persist() -> None:
 
 
 @pytest.mark.asyncio
-async def test_save_paused_turn_does_not_seal_on_persist_failure() -> None:
-    """A failed persist must leave the writer open (degrades to in-memory pause)."""
+async def test_save_paused_turn_raises_and_does_not_seal_on_persist_failure() -> None:
+    """D11：persist 失败必须抛出；writer 不得 seal（避免假 PAUSED）。"""
     suspension = _ask_user_suspension()
     writer = TurnJournalWriter(
         turn_id="msg-1",
@@ -150,7 +150,8 @@ async def test_save_paused_turn_does_not_seal_on_persist_failure() -> None:
                 "agentcore.runtime.suspension_persistence._notify_pause",
                 AsyncMock(),
             ):
-                await save_paused_turn(suspension)
+                with pytest.raises(RuntimeError, match="db down"):
+                    await save_paused_turn(suspension)
         assert writer.sealed is False
     finally:
         current_journal_writer.reset(token)

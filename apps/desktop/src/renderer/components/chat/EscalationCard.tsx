@@ -9,6 +9,7 @@ import {
   type RunEscalation,
   useMessageExecution,
 } from "@/stores/execution";
+import { useInteractionStore } from "@/stores/interactions";
 import { escalationKindLabel } from "@/components/graph/agentNode/shared";
 import {
   ArrowRight,
@@ -25,6 +26,7 @@ import {
   type AskUserContent,
   useAskAnswer,
 } from "./ask/AskUserFields";
+import { OrphanedInteractionCard } from "./OrphanedInteractionCard";
 
 function escalationKindTag(kind: RunEscalation["kind"] | undefined): string | null {
   if (!kind || kind === "normal") return null;
@@ -48,7 +50,11 @@ export function EscalationCard({
   if (escalation.status === "raised") {
     return <RaisedEscalation escalation={escalation} role={role} />;
   }
-  if (escalation.status === "resolved" || escalation.status === "timeout") {
+  if (
+    escalation.status === "resolved" ||
+    escalation.status === "assumed" ||
+    escalation.status === "timed_out"
+  ) {
     return <ResolvedEscalation escalation={escalation} role={role} />;
   }
   // D1: CEO arbitration pending — visible but not user-answerable.
@@ -101,10 +107,17 @@ function PendingEscalation({
   const send = (decision: EscalationUserDecision) => {
     if (busy || !conversationId || !escalation.id) return;
     setSubmitting(decision.kind);
-    decideEscalation(conversationId, escalation.id, decision).catch((err) => {
-      notifyError(err, "提交失败");
-      setSubmitting(null);
-    });
+    decideEscalation(conversationId, escalation.id, decision)
+      .then((result) => {
+        if (result === "orphaned" || result === "busy") {
+          setSubmitting(null);
+        }
+        // ok: SSE escalation_resolved settles the card
+      })
+      .catch((err) => {
+        notifyError(err, "提交失败");
+        setSubmitting(null);
+      });
   };
 
   return (
@@ -120,6 +133,7 @@ function PendingEscalation({
               ? ` · ${escalationKindTag(escalation.kind)}`
               : ""}
           </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">等你拍板 · 不限时</p>
           <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
             {escalation.question}
           </p>
@@ -287,12 +301,16 @@ function ResolvedEscalation({
   escalation: RunEscalation;
   role: string;
 }) {
-  const isTimeout = escalation.status === "timeout";
   const byCeo = escalation.arbitrated_by === "ceo";
   const viaUser = byCeo && escalation.via_user === true;
+  const assumed = escalation.status === "assumed";
+  const timedOut = escalation.status === "timed_out";
+  const isFallback = assumed || timedOut;
   let headline: string;
-  if (isTimeout) {
-    headline = byCeo ? "主管未裁 · 已按假设继续" : "已按假设继续";
+  if (assumed) {
+    headline = byCeo ? "主管选按假设继续" : "你选了按假设继续";
+  } else if (timedOut) {
+    headline = byCeo ? "主管未裁 · 超时按假设继续" : "超时未答 · 已按假设继续";
   } else if (byCeo) {
     headline = viaUser ? "CEO 已仲裁（经用户）" : "CEO 已仲裁";
   } else {
@@ -302,7 +320,7 @@ function ResolvedEscalation({
     <DecisionCard tone="neutral" className="bg-card/60">
       <div className="flex items-start gap-2">
         <span className="mt-0.5 shrink-0 text-muted-foreground">
-          {isTimeout ? <Clock size={14} /> : <Check size={14} />}
+          {isFallback ? <Clock size={14} /> : <Check size={14} />}
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-muted-foreground">
@@ -311,9 +329,10 @@ function ResolvedEscalation({
           <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
             {escalation.question}
           </p>
-          {isTimeout ? (
+          {isFallback ? (
             <p className="mt-1.5 text-xs text-muted-foreground">
-              按假设继续：{escalation.assumption}
+              {timedOut ? "超时回落假设：" : "按假设继续："}
+              {escalation.assumption}
             </p>
           ) : (
             escalation.answer && (
@@ -338,12 +357,10 @@ export function EscalationCards({
   interactive: boolean;
 }) {
   const execution = useMessageExecution(messageId);
+  const orphanedEscalations = useInteractionStore((s) => s.byId);
   if (!execution) return null;
 
   const roleById = new Map(execution.agents.map((a) => [a.id, a.role]));
-  // Every escalation renders, incl. non-blocking `raised` notices (升级实时可见) — each
-  // EscalationCard picks its own variant by status; the pending count below stays
-  // pending-only so a notice never inflates the 待你拍板 badge.
   const items = execution.runs.flatMap((run) =>
     run.escalations.map((e, i) => ({
       esc: e,
@@ -351,12 +368,28 @@ export function EscalationCards({
       key: e.id ?? `${run.id}-${i}`,
     })),
   );
-  if (items.length === 0) return null;
+  const orphaned = conversationId
+    ? [...orphanedEscalations.values()].filter(
+        (e) =>
+          e.conversationId === conversationId &&
+          e.kind === "escalation" &&
+          e.status === "orphaned" &&
+          (e.messageId === messageId || !e.messageId),
+      )
+    : [];
+  if (items.length === 0 && orphaned.length === 0) return null;
 
   const pendingCount = items.filter((i) => i.esc.status === "pending").length;
 
   return (
     <div className="mt-2 space-y-2">
+      {orphaned.map((o) => (
+        <OrphanedInteractionCard
+          key={o.id}
+          title="升级确认已失效"
+          detail="该升级请求已不可答复（服务已重启或回合已结束）。"
+        />
+      ))}
       {pendingCount > 0 && (
         <p className="text-xs font-medium text-primary">
           团队有 {pendingCount} 项待你拍板

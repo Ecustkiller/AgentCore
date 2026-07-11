@@ -5,7 +5,6 @@ import { useUnreadTotal } from "@/stores/messaging";
 import { useSidebarStore } from "@/stores/sidebar";
 import { useUIStore } from "@/stores/ui";
 import {
-  Building2,
   Files,
   Mail,
   MessageSquare,
@@ -14,7 +13,6 @@ import {
   Wrench,
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ActivityBanner } from "./ActivityBanner";
 import {
   RecentConversations,
   ViewAllConversations,
@@ -22,19 +20,12 @@ import {
 import { UserMenu } from "./UserMenu";
 import { WorkspaceGroups } from "./WorkspaceGroups";
 
-const BASE_NAV_ITEMS = [
+const NAV_ITEMS = [
   { icon: MessageSquare, label: "对话", route: "/" },
   { icon: Files, label: "文件", route: "/files" },
   { icon: Mail, label: "消息", route: "/messages" },
   { icon: Wrench, label: "工具箱", route: "/toolbox" },
 ] as const;
-
-/** Dev-only MVP entries — stripped from production builds via static `import.meta.env.DEV`. */
-const DEV_NAV_ITEMS = import.meta.env.DEV
-  ? [{ icon: Building2, label: "AI 小镇", route: "/simulation/town" } as const]
-  : [];
-
-const NAV_ITEMS = [...BASE_NAV_ITEMS, ...DEV_NAV_ITEMS];
 
 export function Sidebar() {
   const collapsed = useSidebarStore((s) => s.collapsed);
@@ -119,16 +110,7 @@ export function Sidebar() {
               className={`relative text-base ${collapsed ? "justify-center px-0" : ""}`}
             >
               <item.icon size={18} className="shrink-0" />
-              {!collapsed && (
-                <span className="flex flex-1 flex-col text-left">
-                  <span>{item.label}</span>
-                  {item.route === "/simulation/town" ? (
-                    <span className="text-xs font-normal text-muted-foreground">
-                      启动 AgentTown 3D 观测客户端
-                    </span>
-                  ) : null}
-                </span>
-              )}
+              {!collapsed && <span>{item.label}</span>}
               {showBadge &&
                 (collapsed ? (
                   <span
@@ -147,8 +129,6 @@ export function Sidebar() {
 
       {/* Divider — nav vs conversation list */}
       <div className="mx-3 border-t border-sidebar-border" />
-
-      <ActivityBanner collapsed={collapsed} />
 
       {/* 工作区 (collapsible folder groups) + 快速对话 (裸聊 flat list); full list
           lives on /conversations (前端UX §一 方案B). */}

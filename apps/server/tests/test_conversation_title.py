@@ -169,6 +169,8 @@ async def test_generator_uses_flash_non_thinking_short():
     assert req.model == "deepseek-v4-flash"
     assert req.stream is False
     assert req.max_tokens == 64
+    assert req.thinking is False
+    assert req.scenario == "title"
 
 
 async def test_generator_empty_messages_skips_call():

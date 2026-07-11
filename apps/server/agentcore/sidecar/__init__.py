@@ -16,14 +16,14 @@ only the §8.6 host ports are swapped for local implementations:
   key is never placed on the user's machine), wired via the per-turn
   ``LLMCredentials`` the engine already injects into ``build_provider``.
 
-Persistence lands via **cloud write-back**, not a local DB: the sidecar process
-holds no store (its in-process ``ConversationStore`` port stays no-op), so the
-desktop relays each finished turn — messages + citations + replay ``runs`` — to
-``POST .../local-turns``, which lands it in durable history. Spend is metered
+Persistence is progressive **OutboxStore** on disk (as-built: 双模式工作区 §10.3):
+begin / checkpoint / journal / finalize land under ``<dataDir>/outbox/``; the
+Electron main-process writebacker drains ready records via Bearer
+``POST .../local-turns`` → ``CloudStore.finalize(mode="local")``. Spend is metered
 authoritatively at the cloud inference proxy (Slice 4a), not relayed from the
 client. Packaging is handled too: a packaged
 desktop ships a standalone CPython + ``--target`` site-packages and spawns it when
 ``app.isPackaged`` (no system Python/venv/uv needed — see
-``apps/desktop/scripts/bundle-sidecar.mjs``). Still deferred: the Journal and
-offline LLM. See ``docs/06-规划/远期规划.md §一``.
+``apps/desktop/scripts/bundle-sidecar.mjs``). Still deferred: offline LLM. See
+``docs/06-规划/远期规划.md §一``.
 """

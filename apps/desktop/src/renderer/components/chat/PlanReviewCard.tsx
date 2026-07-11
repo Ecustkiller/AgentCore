@@ -1,6 +1,6 @@
 import { DecisionCard, DecisionCardIcon } from "@/components/ui";
 import type { PlanReviewDisplay } from "@/stores/conversation";
-import { Check, Clock, GitBranch, OctagonX, Pencil } from "lucide-react";
+import { Ban, Check, Clock, GitBranch, OctagonX, Pencil } from "lucide-react";
 
 /**
  * Inline plan_review card — the WaveScheduler paused after a `checkpoint_after` step
@@ -73,6 +73,10 @@ function ResolvedPlanReview({ review }: { review: PlanReviewDisplay }) {
     },
     stop: { icon: <OctagonX size={14} />, label: "已停止 · 未运行下游" },
     timeout: { icon: <Clock size={14} />, label: "未及时回应，已自动放行继续" },
+    orphaned: {
+      icon: <Ban size={14} />,
+      label: "已失效（回合已结束或服务已重启）",
+    },
   }[review.decision ?? "timeout"];
 
   return (

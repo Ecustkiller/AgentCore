@@ -1,6 +1,7 @@
 import { IconButton } from "@/components/ui";
 import { copyText } from "@/lib/clipboard";
 import { normalizeMermaidSource } from "@/lib/mermaidNormalize";
+import { sanitizeMarkmapTree } from "@/lib/sanitizeMarkmap";
 import { useIsDark } from "@/lib/useIsDark";
 import {
   Check,
@@ -518,6 +519,10 @@ function MarkmapCanvas({
         const { Transformer, Markmap } = await getMarkmap();
         if (cancelled || !ref.current) return;
         const { root } = new Transformer().transform(code);
+        // markmap has no built-in sanitizer (mermaid/vega each do) — strip remote-image
+        // egress from node labels before render so a ```markmap block can't beacon out
+        // where the CSP isn't enforced (10 P3-3, see sanitizeMarkmap.ts).
+        sanitizeMarkmapTree(root);
         if (!instanceRef.current) {
           instanceRef.current = Markmap.create(ref.current, undefined, root);
         } else {

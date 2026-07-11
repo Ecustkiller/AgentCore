@@ -92,6 +92,29 @@ class _SuspendTool:
         )
 
 
+class _HandoffTool:
+    def __init__(self, name: str = "handoff") -> None:
+        self._name = name
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name=self._name,
+            description="stub",
+            parameters={"type": "object", "properties": {}},
+            category=ToolCategory.ORCHESTRATION,
+        )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output="done",
+            effect=ToolEffect.HANDOFF,
+            final_text="handoff answer",
+        )
+
+
 class _FakeBackend:
     def __init__(self, *, raise_sandbox: bool = False) -> None:
         self._raise_sandbox = raise_sandbox
@@ -176,6 +199,26 @@ async def test_suspend_terminal_unchanged(registry: tuple[ToolRegistry, _OkTool]
     assert ends == []
     starts = [e for e in sink._history if e.type == EventType.TOOL_USE_START]  # noqa: SLF001
     assert len(starts) == 1
+
+
+async def test_multi_terminal_prefers_suspend():
+    # Defense (audit F6): when a round somehow yields both HANDOFF and SUSPEND,
+    # SUSPEND wins (durable pause must not lose to call-order luck). Normal agent
+    # toolsets never hold both; this guards the unreachable race.
+    reg = ToolRegistry()
+    reg.register(_HandoffTool())
+    reg.register(_SuspendTool())
+    sink = EventSink()
+    # HANDOFF listed first — old "first terminal wins" would pick HANDOFF.
+    _messages, terminal, _attempts = await execute_tools(
+        [_call("c1", "handoff"), _call("c2", "ask")],
+        reg,
+        _ctx(),
+        sink,
+        run_id="r1",
+    )
+    assert terminal is not None
+    assert terminal.effect is ToolEffect.SUSPEND
 
 
 async def test_code_execute_maps_sandbox_error_to_failed_result():

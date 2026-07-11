@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
@@ -15,8 +15,12 @@ logger = get_logger(__name__)
 
 
 async def run_audit_retention_sweep() -> int:
-    """Delete audit rows older than ``audit_retention_days``; return rows removed."""
-    before = datetime.now() - timedelta(days=settings.audit_retention_days)
+    """Delete audit rows older than ``audit_retention_days``; return rows removed.
+
+    The cutoff is tz-aware UTC, matching how ``agent_audit_events.created_at`` is
+    stamped (``DateTime(timezone=True)`` / server ``now()``); a naive local ``now()``
+    would shift the TTL boundary by the host offset on non-UTC deployments."""
+    before = datetime.now(UTC) - timedelta(days=settings.audit_retention_days)
     limit = settings.audit_retention_sweep_batch_limit
     total = 0
     async with async_session_factory() as session:

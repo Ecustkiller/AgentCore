@@ -16,6 +16,11 @@ export const FINISH_REASON_META: Record<
     Icon: CircleSlash,
     tone: "muted",
   },
+  interrupted: {
+    label: "已中断，可重试",
+    Icon: CircleSlash,
+    tone: "muted",
+  },
   max_rounds: {
     label: "已达最大轮次 · 提前收尾",
     Icon: Repeat,

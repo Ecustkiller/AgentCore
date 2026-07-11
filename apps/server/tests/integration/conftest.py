@@ -30,6 +30,7 @@ from agentcore.api.dependencies import get_db
 from agentcore.config import settings
 from agentcore.db.base import Base
 from agentcore.db.base import engine as app_engine
+from agentcore.db.base import telemetry_engine as app_telemetry_engine
 from agentcore.db.repositories import (
     AdminMfaRepository,
     CredentialsRepository,
@@ -193,6 +194,7 @@ async def _dispose_app_engine_pool() -> AsyncIterator[None]:
     """
     yield
     await app_engine.dispose()
+    await app_telemetry_engine.dispose()
 
 
 @pytest.fixture(autouse=True)
@@ -204,6 +206,16 @@ def _disable_rate_limit() -> Iterator[None]:
     settings.rate_limit_enabled = False
     yield
     settings.rate_limit_enabled = original
+
+
+@pytest.fixture(autouse=True)
+def _open_registration(monkeypatch) -> None:
+    """Almost every integration test seeds throwaway users via ``register_and_login``;
+    pin registration open so a local ``.env`` (``REGISTRATION_OPEN=false`` — a legitimate
+    prod/local config) can't 403 them during setup. Tests that specifically exercise
+    closed registration re-patch it to False in-body, which overrides this (same
+    function-scoped monkeypatch, applied after fixture setup)."""
+    monkeypatch.setattr(settings, "registration_open", True)
 
 
 @pytest_asyncio.fixture

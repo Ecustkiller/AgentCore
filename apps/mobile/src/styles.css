@@ -395,6 +395,27 @@ button.link {
   color: var(--muted);
 }
 
+.finish-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.retry-btn {
+  margin-top: 8px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--fg);
+  font-size: 13px;
+}
+
 /* 回合总账 — a low-prominence cost caption under a finished assistant bubble. */
 .cost {
   margin-top: 4px;
@@ -2591,6 +2612,21 @@ dialog.dialog::backdrop {
   border: 1px solid var(--warning-border);
   border-left: 3px solid var(--warning);
   border-radius: 12px;
+}
+
+.pause-orphaned {
+  opacity: 0.7;
+  border-color: var(--border);
+  border-left-color: var(--muted);
+}
+
+.pause-orphaned .pause-title {
+  color: var(--muted);
+}
+
+.pause-hint {
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .pause-title {

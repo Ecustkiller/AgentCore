@@ -151,6 +151,7 @@ export const FS_CHANNELS = {
   unwatch: "fs:unwatch",
   changed: "fs:changed",
   workspaceOp: "fs:workspaceOp",
+  grantSessionRun: "fs:grantSessionRun",
   reveal: "fs:reveal",
   openPath: "fs:openPath",
   copyPath: "fs:copyPath",
@@ -230,6 +231,11 @@ export interface FsApi {
     op: WorkspaceOpName,
     args: Record<string, unknown>,
   ): Promise<WorkspaceOpResult>;
+  /**
+   * 聊天内 RunConfirm「本会话都允许」→ 主进程置 session run flag（进程重启清零）。
+   * 不引入永久跨天 allowlist。
+   */
+  grantSessionRun(): Promise<void>;
   /**
    * 在系统文件管理器中定位该路径（Windows 资源管理器 / macOS 访达 / Linux 文件管理器）。
    *

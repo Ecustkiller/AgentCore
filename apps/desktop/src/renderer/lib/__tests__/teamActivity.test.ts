@@ -1,81 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  type ActiveConversation,
   conversationIdFromHash,
-  deriveActiveConversations,
   isTransientRoute,
   runtimeHasError,
-  summarizeActivity,
 } from "../teamActivity";
-
-const title = (map: Record<string, string>) => (id: string) => map[id];
-
-describe("deriveActiveConversations", () => {
-  it("maps generating + awaiting ids to titled rows", () => {
-    const active = deriveActiveConversations(
-      ["a", "b"],
-      ["c"],
-      title({ a: "对话 A", b: "对话 B", c: "对话 C" }),
-    );
-    expect(active).toEqual<ActiveConversation[]>([
-      { id: "c", title: "对话 C", status: "awaiting" },
-      { id: "a", title: "对话 A", status: "running" },
-      { id: "b", title: "对话 B", status: "running" },
-    ]);
-  });
-
-  it("dedups a conversation that is both generating and awaiting (awaiting wins)", () => {
-    const active = deriveActiveConversations(
-      ["a"],
-      ["a"],
-      title({ a: "对话 A" }),
-    );
-    expect(active).toEqual<ActiveConversation[]>([
-      { id: "a", title: "对话 A", status: "awaiting" },
-    ]);
-  });
-
-  it("falls back to a generic title when unknown", () => {
-    const active = deriveActiveConversations(["x"], [], () => undefined);
-    expect(active).toEqual<ActiveConversation[]>([
-      { id: "x", title: "对话", status: "running" },
-    ]);
-  });
-
-  it("is empty when nothing is active", () => {
-    expect(deriveActiveConversations([], [], () => "t")).toEqual([]);
-  });
-});
-
-describe("summarizeActivity", () => {
-  it("returns null with no activity", () => {
-    expect(summarizeActivity([])).toBeNull();
-  });
-
-  it("counts running only", () => {
-    expect(
-      summarizeActivity([
-        { id: "a", title: "A", status: "running" },
-        { id: "b", title: "B", status: "running" },
-      ]),
-    ).toBe("2 个任务执行中");
-  });
-
-  it("counts awaiting only", () => {
-    expect(
-      summarizeActivity([{ id: "a", title: "A", status: "awaiting" }]),
-    ).toBe("1 个待审批");
-  });
-
-  it("joins both with a middot", () => {
-    expect(
-      summarizeActivity([
-        { id: "a", title: "A", status: "running" },
-        { id: "b", title: "B", status: "awaiting" },
-      ]),
-    ).toBe("1 个任务执行中 · 1 个待审批");
-  });
-});
 
 describe("runtimeHasError", () => {
   it("is false for a clean completed turn", () => {

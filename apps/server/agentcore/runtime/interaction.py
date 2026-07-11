@@ -137,7 +137,7 @@ class InteractionRegistry:
         *,
         kind: InteractionKind,
         payload: dict[str, Any] | None = None,
-        timeout: float,
+        timeout: float | None,
         on_suspended: Callable[[], None] | None = None,
     ) -> Any:
         """Register a pending interaction, signal it, and await its resolution.
@@ -148,14 +148,17 @@ class InteractionRegistry:
         resolve always finds it — each face passes its ``*_required`` SSE emit here.
         Raises :class:`TimeoutError` when unresolved within ``timeout`` (the caller
         maps it to its kind-specific default + log + ``*_resolved`` emit, or re-raises
-        a typed error). The entry is ALWAYS discarded on exit — resolved, timed out,
-        or cancelled — so no face can leak a pending request. Per-kind differences
-        (the result type, the resolved emit, the timeout default) stay in the faces.
+        a typed error). ``timeout=None`` waits indefinitely (提问确认交互统一 D2).
+        The entry is ALWAYS discarded on exit — resolved, timed out, or cancelled —
+        so no face can leak a pending request. Per-kind differences (the result type,
+        the resolved emit, the timeout default) stay in the faces.
         """
         fut = self.create(request_id, conversation_id, kind=kind, payload=payload)
         if on_suspended is not None:
             on_suspended()
         try:
+            if timeout is None:
+                return await fut
             return await asyncio.wait_for(fut, timeout=timeout)
         finally:
             self.discard(request_id)

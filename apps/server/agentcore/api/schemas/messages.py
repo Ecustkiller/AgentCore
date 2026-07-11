@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from agentcore.api.schemas.usage import UsageBreakdown
+from agentcore.api.schemas.usage import CostBreakdown, UsageBreakdown
 from agentcore.runtime.approvals import ApprovalDecision, DelegationAuthorizationDecision
 from agentcore.runtime.checkpoints import AskCheckpointIntent, CheckpointDecision
 from agentcore.runtime.suspension import SuspensionKind
@@ -199,11 +199,10 @@ class ResolveEscalationInteraction(BaseModel):
     """Settle a worker's blocking escalate (``escalation`` interaction, 阻塞式求决策 §4.5).
 
     Raised when a delegated worker hit a「只有用户能定、且猜错就作废」fork and suspended
-    itself to ask the user directly. The user either answers (``answer`` — fed back into the
-    worker's loop, overriding its暂定假设) or chooses 按假设继续 (``use_assumption`` true —
-    the worker falls back to its stated assumption, the same disposition as a timeout). A
-    late resolve (the wait already timed out / was answered) falls through the route as 404,
-    so the desktop renders it as「已关闭」rather than an error.
+    itself. Classic (non-coordination) path asks the user; coordination path awaits CEO
+    ``resolve_escalation`` (Invariant B: solo never uses that tool). The user either answers
+    (``answer``) or chooses 按假设继续 (``use_assumption`` true → wire status ``assumed``).
+    A wall-clock miss is ``timed_out``. A late resolve falls through as 404.
     """
 
     kind: Literal["escalation"] = "escalation"
@@ -358,15 +357,21 @@ class ResumeTurnRequest(BaseModel):
     selected: list[str] = Field(default_factory=list, max_length=6)
 
 
-class PendingApprovalSummary(BaseModel):
-    """A GRANTABLE tool call still awaiting the user's decision (in-process gate).
+class PendingInteractionSummary(BaseModel):
+    """One hot-path interaction still awaiting user settlement (journal fold).
 
-    Surfaced on conversation reopen via ``GET .../recovery`` so the client can
-    re-render approval cards after a refresh. Unlike plan_review / ask_user pauses,
-    approvals stay on the live turn's interaction bridge — they are NOT durably
-    paused turns — but the registry's ``list_pending`` is the authoritative
-    pending set while the backend run is still alive.
+    Surfaced on conversation reopen via ``GET .../recovery``. ``payload`` is the
+    original ``*_required`` wire payload verbatim. Cold-path pauses stay in ``paused``.
     """
+
+    kind: Literal["approval", "delegation_authorization", "escalation", "debate_round"]
+    id: str
+    message_id: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class PendingApprovalSummary(BaseModel):
+    """Deprecated alias kept for import compatibility during P1; prefer PendingInteractionSummary."""
 
     approval_id: str
     conversation_id: str
@@ -421,26 +426,14 @@ class TurnRecoveryResponse(BaseModel):
       C1 · slice 1b) — the client attaches (``GET .../stream``) to replay + tail it.
     - ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and
       lost their live stream (结构化挂起 2b) — each renders a resume card.
-    - ``pending_approvals``: GRANTABLE tool calls still blocked on the in-process
-      approval gate (the turn may also be ``live_running``) — each renders an approval
-      card. Unlike ``paused``, these are NOT durable pause frames; they exist only
-      while the backend run is alive.
-
-    A turn parked at a checkpoint is BOTH live (its run is parked on the interaction,
-    holding the workspace lock until checkpoint_timeout) and paused (its frame is
-    persisted before the suspend ``await``), so these overlap. Returning them together
-    lets the client pick ONE actionable surface: a durable paused frame is the
-    authoritative "this turn is paused" marker, so when ``paused`` is non-empty the
-    resume card is the single surface and the client does NOT attach; it attaches only
-    when ``live_running`` and ``paused`` is empty (a genuinely in-flight, non-paused
-    turn). Folding both into one snapshot removes the former two-probe reopen
-    (``GET /paused`` + the ``GET /stream`` attach) whose independent results raced into a
-    duplicate 拍板 card.
+    - ``pending_interactions``: hot-path interactions still awaiting settlement
+      (journal fold: approval / delegation_authorization / escalation / debate_round).
+      Cold-path stays in ``paused``.
     """
 
     live_running: bool = False
     paused: list[PausedTurnSummary] = Field(default_factory=list)
-    pending_approvals: list[PendingApprovalSummary] = Field(default_factory=list)
+    pending_interactions: list[PendingInteractionSummary] = Field(default_factory=list)
 
 
 class Citation(BaseModel):
@@ -487,6 +480,9 @@ class RunsPayload(BaseModel):
     process: list[dict[str, Any]] | None = None
     captain_context: list[dict[str, Any]] | None = None
     error: RunError | None = None
+    # 预检警告（P2 DURABLE）：journaled ``turn_warning`` lifted like captain_context so a
+    # plain-chat turn (no surface events) still replays the banner on reload. null when none.
+    turn_warning: str | None = None
 
 
 class TurnCollabMetrics(BaseModel):
@@ -532,6 +528,11 @@ class MessageDetail(BaseModel):
     # errored / empty turn that spent no tokens — parity with the live bubble's omission).
     usage: UsageBreakdown | None = None
     rounds: int | None = None
+    # Progressive assistant-row lifecycle (messages.usage.status): running / complete /
+    # incomplete / failed. Projected on read like ``rounds`` (not part of UsageBreakdown).
+    # In-flight turns carry ``running`` + may hold partial content/reasoning (P1 overlay
+    # fills those from turn_stream_state). null for user / pre-feature rows.
+    status: Literal["running", "complete", "incomplete", "failed"] | None = None
     # 协作质量 (学·度量 §2.5, 诊断模式): orchestration signals nested in the usage column;
     # projected on read like ``rounds``. null for single-agent / pre-feature rows.
     collab: TurnCollabMetrics | None = None
@@ -539,6 +540,9 @@ class MessageDetail(BaseModel):
     # reply — "up" | "down" | null(未评价). Auto-populated from the ORM attribute via
     # from_attributes so a reloaded bubble replays the user's rating. null for user rows.
     feedback: str | None = None
+    # 回合 ¥ 成本 (P2 DERIVED)：messages.cost 列快照；读路径补 cny_total（当前 FX）。
+    # null for user / unmetered / pre-feature rows. Hover payroll still uses GET …/cost.
+    cost: CostBreakdown | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -561,6 +565,17 @@ class MessageDetail(BaseModel):
                 "cache_hit": v.get("cache_hit_tokens", 0),
                 "cache_miss": v.get("cache_miss_tokens", 0),
             }
+        return v
+
+    @field_validator("cost", mode="before")
+    @classmethod
+    def _cost_from_row(cls, v: object) -> object:
+        # Column stores nano-USD components (+ currency); attach display CNY via the
+        # single server-owned FX rate (parity with cost_view.cost_breakdown).
+        if isinstance(v, dict) and "cny_total" not in v:
+            from agentcore.api.cost_view import cost_breakdown
+
+            return cost_breakdown(v)
         return v
 
 
@@ -644,6 +659,11 @@ class RecordTurnRequest(BaseModel):
     reasoning_content: str | None = Field(None, max_length=500_000)
     citations: list[Citation] = Field(default_factory=list, max_length=50)
     runs: RunsPayload | None = None
+    # Progressive outbox journal facts (``{kind, payload, ts}``), ordered by seq.
+    # Optional + backward-compatible: crash/cancel salvage often has no ``runs``
+    # projection, only the mid-turn ``outbox.journal`` map — finalize persists these
+    # directly when ``runs`` is absent. Happy-path write-back still sends ``runs``.
+    journal: list[dict[str, Any]] | None = None
     # The client-minted id of the user bubble (a clean UUID). Pinning the persisted
     # user row to it makes the whole write-back idempotent: the desktop retries this
     # POST on a flaky response, and a retry after a write we DID commit must not

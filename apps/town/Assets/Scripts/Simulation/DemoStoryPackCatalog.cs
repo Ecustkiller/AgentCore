@@ -11,8 +11,10 @@ namespace AgentTown.Simulation
 {
     /// <summary>
     /// Offline demo story-pack catalog loaded from
-    /// <c>StreamingAssets/Fixtures/demo-story-packs.json</c> (JSON is the Offline SoT).
-    /// Python <c>scripted.py</c> still embeds beats this iteration — align next.
+    /// <c>StreamingAssets/Fixtures/demo-story-packs.json</c>
+    /// (materialized from <c>packages/town-story-packs</c> via <c>pnpm gen:story-packs</c>).
+    /// Mechanism fields in the JSON are ignored by Unity; backend reads the same file
+    /// from packaged <c>agentcore.simulation.data</c>.
     /// </summary>
     public static class DemoStoryPackCatalog
     {

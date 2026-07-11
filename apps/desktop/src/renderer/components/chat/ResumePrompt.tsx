@@ -1,14 +1,21 @@
 import {
+  OrphanedInteractionCard,
+  WaitingForDecisionHint,
+} from "@/components/chat/OrphanedInteractionCard";
+import {
   Badge,
   Button,
   DecisionCard,
   DecisionCardIcon,
   Textarea,
 } from "@/components/ui";
+import { notifyError } from "@/lib/toast";
+import { submitInteraction } from "@/services/interactionSubmit";
 import type { PlanReviewUserDecision } from "@/services/planReview";
-import { runResume } from "@/services/turns";
 import { useConversationStore } from "@/stores/conversation";
+import { useInteractionStore } from "@/stores/interactions";
 import { type PendingResume, usePausedTurnStore } from "@/stores/pausedTurns";
+import type { InteractionKind } from "@/types/interactionExt";
 import {
   ArrowRight,
   Check,
@@ -24,14 +31,25 @@ import { AskUserCard } from "./CheckpointCard";
 export function ResumePrompt() {
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const pending = usePausedTurnStore((s) => s.pending);
+  const byId = useInteractionStore((s) => s.byId);
   const visible = pending.filter((p) => p.conversationId === conversationId);
   if (visible.length === 0) return null;
 
   return (
     <div className="mx-4 mb-2 space-y-2">
-      {visible.map((turn) => (
-        <ResumeCard key={turn.messageId} turn={turn} />
-      ))}
+      {visible.map((turn) => {
+        const entry = byId.get(turn.checkpointId);
+        if (entry?.status === "orphaned") {
+          return (
+            <OrphanedInteractionCard
+              key={turn.messageId}
+              title="确认已失效"
+              detail="该暂停确认已不可答复（服务已重启或回合已结束）。"
+            />
+          );
+        }
+        return <ResumeCard key={turn.messageId} turn={turn} />;
+      })}
     </div>
   );
 }
@@ -44,6 +62,49 @@ function ResumeCard({ turn }: { turn: PendingResume }) {
     return <TeamPreviewResumeCard turn={turn} />;
   }
   return <PlanReviewResumeCard turn={turn} />;
+}
+
+function coldKind(turn: PendingResume): InteractionKind {
+  return turn.kind;
+}
+
+function useColdSubmit(turn: PendingResume) {
+  const [submitting, setSubmitting] = useState<PlanReviewUserDecision | null>(
+    null,
+  );
+  const entryStatus = useInteractionStore(
+    (s) => s.byId.get(turn.checkpointId)?.status,
+  );
+  const busy = submitting !== null || entryStatus === "submitting";
+
+  const send = (
+    decision: PlanReviewUserDecision,
+    selected: string[] = [],
+    note = "",
+  ) => {
+    if (busy) return;
+    setSubmitting(decision);
+    void submitInteraction({
+      id: turn.checkpointId,
+      kind: coldKind(turn),
+      conversationId: turn.conversationId,
+      cold: {
+        messageId: turn.messageId,
+        decision,
+        note,
+        selected,
+      },
+    })
+      .then((result) => {
+        if (result !== "ok") setSubmitting(null);
+      })
+      .catch((err) => {
+        notifyError(err, "提交失败");
+        setSubmitting(null);
+      });
+  };
+
+  return { submitting, busy, send };
 }
 
 function ReviewedSteps({ turn }: { turn: PendingResume }) {
@@ -83,25 +144,7 @@ function PendingPreview({ turn }: { turn: PendingResume }) {
 
 function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
   const [note, setNote] = useState("");
-  const [submitting, setSubmitting] = useState<PlanReviewUserDecision | null>(
-    null,
-  );
-  const busy = submitting !== null;
-
-  const send = (decision: PlanReviewUserDecision) => {
-    if (busy) return;
-    console.warn(
-      `[Resume] PlanReviewResumeCard send decision=${decision} messageId=${turn.messageId} checkpointId=${turn.checkpointId}`,
-    );
-    setSubmitting(decision);
-    void runResume(turn.messageId, decision, note.trim()).catch((err) => {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      console.warn(
-        `[Resume] PlanReviewResumeCard send failed decision=${decision} messageId=${turn.messageId} checkpointId=${turn.checkpointId} err=${errMsg}`,
-      );
-      setSubmitting(null);
-    });
-  };
+  const { submitting, busy, send } = useColdSubmit(turn);
 
   const spinnerOr = (
     decision: PlanReviewUserDecision,
@@ -123,6 +166,7 @@ function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
           <p className="text-xs font-medium text-primary">
             已暂停 · 待你决定是否继续
           </p>
+          <WaitingForDecisionHint />
           <p className="mt-0.5 text-sm text-foreground">
             这一步已完成，请过目：
           </p>
@@ -145,7 +189,7 @@ function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
           variant="primary"
           icon={spinnerOr("continue", <Check size={13} />)}
           disabled={busy}
-          onClick={() => send("continue")}
+          onClick={() => send("continue", [], note.trim())}
         >
           继续
         </Button>
@@ -153,7 +197,7 @@ function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
           variant="neutral"
           icon={spinnerOr("adjust", <Pencil size={13} />)}
           disabled={busy || !note.trim()}
-          onClick={() => send("adjust")}
+          onClick={() => send("adjust", [], note.trim())}
         >
           调整
         </Button>
@@ -161,7 +205,7 @@ function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
           variant="danger"
           icon={spinnerOr("stop", <OctagonX size={13} />)}
           disabled={busy}
-          onClick={() => send("stop")}
+          onClick={() => send("stop", [], note.trim())}
         >
           停止
         </Button>
@@ -202,18 +246,7 @@ function TeamPreviewWorkers({ turn }: { turn: PendingResume }) {
 
 function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
   const [note, setNote] = useState("");
-  const [submitting, setSubmitting] = useState<PlanReviewUserDecision | null>(
-    null,
-  );
-  const busy = submitting !== null;
-
-  const send = (decision: PlanReviewUserDecision) => {
-    if (busy) return;
-    setSubmitting(decision);
-    void runResume(turn.messageId, decision, note.trim()).catch(() => {
-      setSubmitting(null);
-    });
-  };
+  const { submitting, busy, send } = useColdSubmit(turn);
 
   const spinnerOr = (
     decision: PlanReviewUserDecision,
@@ -235,6 +268,7 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
           <p className="text-xs font-medium text-primary">
             团队预审 · 开干前确认
           </p>
+          <WaitingForDecisionHint />
           <p className="mt-0.5 text-sm text-foreground">
             即将上场的队员，请过目：
           </p>
@@ -256,7 +290,7 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
           variant="primary"
           icon={spinnerOr("continue", <Check size={13} />)}
           disabled={busy}
-          onClick={() => send("continue")}
+          onClick={() => send("continue", [], note.trim())}
         >
           开做
         </Button>
@@ -264,7 +298,7 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
           variant="neutral"
           icon={spinnerOr("adjust", <Pencil size={13} />)}
           disabled={busy || !note.trim()}
-          onClick={() => send("adjust")}
+          onClick={() => send("adjust", [], note.trim())}
         >
           调整
         </Button>
@@ -272,7 +306,7 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
           variant="danger"
           icon={spinnerOr("stop", <OctagonX size={13} />)}
           disabled={busy}
-          onClick={() => send("stop")}
+          onClick={() => send("stop", [], note.trim())}
         >
           停止
         </Button>
@@ -286,9 +320,24 @@ function AskUserResumeCard({ turn }: { turn: PendingResume }) {
     <AskUserCard
       content={turn}
       intent={turn.intent}
-      onSubmit={(decision, note) =>
-        runResume(turn.messageId, decision, note, [])
-      }
+      onSubmit={async (decision, note) => {
+        const result = await submitInteraction({
+          id: turn.checkpointId,
+          kind: "ask_user",
+          conversationId: turn.conversationId,
+          cold: {
+            messageId: turn.messageId,
+            decision: decision as PlanReviewUserDecision,
+            note,
+            selected: [],
+          },
+        });
+        if (result !== "ok") {
+          throw new Error(
+            result === "orphaned" ? "确认已失效" : "请稍候再试",
+          );
+        }
+      }}
     />
   );
 }

@@ -14,7 +14,7 @@
 
 import { resolveInteraction } from "@/api/interaction";
 import { PauseCard } from "@/components/PauseCard";
-import type { PendingInteraction } from "@agentcore/protocol-conformance";
+import type { ProjectedInteraction } from "@agentcore/protocol-conformance";
 import {
   cleanup,
   fireEvent,
@@ -36,11 +36,12 @@ beforeEach(() => {
 });
 
 function approval(
-  over: Partial<Extract<PendingInteraction, { kind: "approval" }>> = {},
-): Extract<PendingInteraction, { kind: "approval" }> {
+  over: Partial<Extract<ProjectedInteraction, { kind: "approval" }>> = {},
+): Extract<ProjectedInteraction, { kind: "approval" }> {
   return {
     kind: "approval",
-    approvalId: "appr-1",
+    id: "appr-1",
+    status: "pending",
     toolCallId: "tc-1",
     toolName: "file_write",
     arguments: { path: "/tmp/x" },
@@ -94,7 +95,7 @@ describe("PauseCard · approval", () => {
     );
   });
 
-  it("hides「本轮都允许」+ the file-op grant for code_execute (PI-004 per-call gate)", () => {
+  it("shows「本轮都允许」for code_execute (Cursor-aligned turn grant)", () => {
     render(
       <PauseCard
         pending={approval({
@@ -106,9 +107,9 @@ describe("PauseCard · approval", () => {
     );
     expect(screen.getByText("Agent 请求执行 · 执行代码")).toBeTruthy();
     expect(screen.getByText("允许一次")).toBeTruthy();
+    expect(screen.getByText("本轮都允许")).toBeTruthy();
     expect(screen.getByText("拒绝")).toBeTruthy();
-    // code_execute ∈ PER_CALL_TOOLS and ∉ FILE_OP_TOOLS.
-    expect(screen.queryByText("本轮都允许")).toBeNull();
+    // code_execute ∉ FILE_OP_TOOLS — file-class grant still hidden.
     expect(screen.queryByText("本轮内所有文件改动")).toBeNull();
   });
 

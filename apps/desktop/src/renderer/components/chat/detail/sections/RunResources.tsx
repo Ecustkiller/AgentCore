@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui";
 import { formatCompact, formatCost, formatUsd } from "@/lib/format";
+import { usePersistentDisclosure } from "@/stores/disclosure";
 import {
   type AgentState,
   MODEL_TIER_META,
@@ -7,7 +8,6 @@ import {
   reasoningMeta,
 } from "@/stores/execution";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useState } from "react";
 import { MetricRow } from "./shared";
 
 /**
@@ -20,13 +20,18 @@ export function ResourceSection({
   agent,
   cnyPerUsd,
   defaultExpanded,
+  keyBase,
 }: {
   run: RunNode;
   agent: AgentState;
   cnyPerUsd: number;
   defaultExpanded: boolean;
+  keyBase: string;
 }) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
+  const [expanded, setExpanded] = usePersistentDisclosure(
+    `${keyBase}:resources`,
+    defaultExpanded,
+  );
   const { usage, cost, model } = run;
   const cacheRate =
     usage && usage.input > 0

@@ -19,12 +19,23 @@ from agentcore.runtime.events import EventSink, SSEEvent
 _HEARTBEAT_INTERVAL_S = 15.0
 
 
-def _format_sse(event: SSEEvent) -> str:
+def _format_sse(event: SSEEvent, *, seq: int | None = None) -> str:
+    """Serialize one SSE frame. Envelope JSON (type/timestamp/payload) is unchanged.
+
+    Optional ``seq`` (or ``event.seq``) emits a standard SSE ``id:`` line (journal seq
+    for DURABLE facts; ``Last-Event-ID`` resume). EPHEMERAL / delta events omit ``seq``
+    so they attach after the nearest durable id.
+    """
+    id_seq = seq if seq is not None else event.seq
     data = json.dumps(
         {"type": event.type, "timestamp": event.timestamp, "payload": event.payload},
         ensure_ascii=False,
     )
-    return f"event: {event.type}\ndata: {data}\n\n"
+    parts = [f"event: {event.type}"]
+    if id_seq is not None:
+        parts.append(f"id: {id_seq}")
+    parts.append(f"data: {data}")
+    return "\n".join(parts) + "\n\n"
 
 
 async def _event_generator(
@@ -96,7 +107,11 @@ def sse_response(
     )
 
 
-async def _attach_generator(sink: EventSink) -> AsyncIterator[str]:
+async def _attach_generator(
+    sink: EventSink,
+    *,
+    last_event_id: int | None = None,
+) -> AsyncIterator[str]:
     """Replay a running turn's transcript, then tail it live (实时重连续看, C1 · 1b).
 
     Used by the attach endpoint when a client re-connects to a still-running detached
@@ -104,8 +119,32 @@ async def _attach_generator(sink: EventSink) -> AsyncIterator[str]:
     queue; we flush the snapshot, then drain new events exactly like the primary
     generator (same heartbeat, same disconnect policy). Because the run is detached,
     a disconnect here just detaches again — it never cancels the turn.
+
+    With ``Last-Event-ID`` (P3): skip in-memory ``_history``; replay the turn's **full**
+    durable journal + stream_state synthetic deltas (header value observational —
+    clear-then-fold), then live tail.
     """
-    replay = sink.take_over()
+    if last_event_id is None:
+        replay = sink.take_over()
+    else:
+        # Re-arm the live queue (discard unread backlog) without using _history.
+        sink.take_over()
+        from agentcore.runtime.events.attach_replay import build_cursor_replay
+
+        turn_id = sink._message_id
+        if turn_id:
+            memory = sink.stream_memory_snapshot()
+            agent_ids = (
+                sink._checkpointer.run_agent_ids() if sink._checkpointer is not None else {}
+            )
+            replay = await build_cursor_replay(
+                turn_id=turn_id,
+                after_seq=last_event_id,
+                memory_channels=memory,
+                memory_agent_ids=agent_ids,
+            )
+        else:
+            replay = []
     try:
         for event in replay:
             yield _format_sse(event)
@@ -123,7 +162,11 @@ async def _attach_generator(sink: EventSink) -> AsyncIterator[str]:
         raise
 
 
-def sse_attach_response(sink: EventSink) -> StreamingResponse:
+def sse_attach_response(
+    sink: EventSink,
+    *,
+    last_event_id: int | None = None,
+) -> StreamingResponse:
     """Stream a re-attaching client the replay-then-tail of a live detached run (1b).
 
     The run keeps executing independently (执行与请求解耦); this is a pure observer that
@@ -131,7 +174,7 @@ def sse_attach_response(sink: EventSink) -> StreamingResponse:
     (detach, never cancel — an explicit 停止 still goes through ``POST .../stop``).
     """
     return StreamingResponse(
-        _attach_generator(sink),
+        _attach_generator(sink, last_event_id=last_event_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

@@ -33,6 +33,7 @@ from agentcore.runtime.facts import record_turn_fact
 from agentcore.runtime.interaction import InteractionKind
 from agentcore.runtime.ports import ClientRequestBridge
 from agentcore.runtime.routing import assess_intake
+from agentcore.runtime.routing.intake import resolve_worker_token_ceiling
 from agentcore.runtime.runs.constants import (
     AMEND_NOTE_TOOL_NAME,
     DEFAULT_CONTRACT_RETRIES,
@@ -97,7 +98,7 @@ def build_agent_executor(
     approval_gate: ApprovalGate | None = None,
     delegate_factory: DelegateFactory | None = None,
     interaction_bridge: ClientRequestBridge | None = None,
-    escalation_timeout: float = 0.0,
+    escalation_timeout: float | None = None,
     escalation_armed: bool = False,
     note_wall: NoteWall | None = None,
     collaboration: bool = True,
@@ -321,16 +322,15 @@ def build_agent_executor(
                     ),
                 )
             except TimeoutError:
-                status, answer = "timeout", ""
+                status, answer = "timed_out", ""
             except asyncio.CancelledError:
                 # ask_user soft-stop cancels the drive — keep journaled pending_arbitrations
                 # so resume + resolve_escalation can stash/settle for a re-armed worker.
                 raise
             else:
-                # The resolve body is {answer} or {use_assumption}; 按假设继续 == an early
-                # timeout (same disposition, the worker falls back to its assumption).
+                # Assumed vs timed_out are distinct wire statuses (same worker fallback).
                 if isinstance(result, dict) and result.get("use_assumption"):
-                    status, answer = "timeout", ""
+                    status, answer = "assumed", ""
                 elif isinstance(result, dict):
                     status, answer = "resolved", str(result.get("answer") or "").strip()
                     via_user = bool(result.get("via_user"))
@@ -343,6 +343,14 @@ def build_agent_executor(
                 if session is not None:
                     session.clear_arbitration(run_id)
             resolutions[question] = {"status": status, "answer": answer}
+            logger.info(
+                "worker.escalate.settled",
+                run_id=run_id,
+                escalation_id=escalation_id,
+                status=status,
+                awaiting=who,
+                timeout_s=escalation_timeout,
+            )
             sink.emit(
                 escalation_resolved(
                     run_id,
@@ -354,7 +362,10 @@ def build_agent_executor(
                     via_user=via_user if awaiting_ceo else None,
                 )
             )
-            return EscalationOutcome(status=status, answer=answer if status == "resolved" else None)
+            return EscalationOutcome(
+                status=status,
+                answer=answer if status == "resolved" else None,
+            )
 
         return EscalationChannel(armed=escalation_armed, request=_request)
 
@@ -604,15 +615,10 @@ def build_agent_executor(
                     signals=intake_result.signals,
                 )
             )
-            # Phase 2 · Sequential Split：父 Worker 可分裂；预算来自 Intake + profile。
-            split_context: dict[str, Any] = {
-                "can_split": True,
-                "token_budget": intake_result.token_budget,
-                "max_steps": profile.max_rounds,
-                "task": spec.task,
-                "run_id": spec.run_id,
-                "agent_id": agent_id,
-            }
+            # Worker 硬顶 (loose backstop · 真执行): 累计 token 安全阀。compaction
+            # (tool_clear) 挑大梁做上下文瘦身,这只在失控时 (估计再离谱也炸不穿 clamp) 收口。
+            # 0 = 关闭。react_loop 每轮末比对累计 usage。
+            token_ceiling = resolve_worker_token_ceiling(intake_result.token_budget)
 
             # 团队便签墙 推增量 (§2.2 通): pull the notes siblings posted since this worker last
             # looked and hand them to react_loop as one user message before each of its NEXT
@@ -660,7 +666,7 @@ def build_agent_executor(
                     on_round_begin=_pull_notes,
                     streamed_content=streamed_content,
                     gate_escalation_sink=gate_escalations,
-                    split_context=split_context,
+                    token_budget=token_ceiling,
                 )
                 run_usage = run_usage + round_usage
                 run_rounds += round_rounds

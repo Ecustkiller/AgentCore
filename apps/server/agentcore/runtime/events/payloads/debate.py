@@ -149,5 +149,5 @@ class DebateRoundDecisionResolvedPayload(WirePayload):
     execution_id: str
     moderator_run_id: str
     decision_id: str
-    decision: Literal["continue", "conclude", "timeout"]
+    decision: Literal["continue", "conclude", "timeout", "orphaned"]
     focus: str

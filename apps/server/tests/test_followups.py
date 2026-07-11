@@ -167,6 +167,7 @@ async def test_generator_uses_flash_non_thinking_with_room():
     # Roomier than the title profile (64) so 4 short CJK lines don't get cut off.
     assert req.max_tokens == 256
     assert req.scenario == "followups"
+    assert req.thinking is False
 
 
 async def test_generator_empty_messages_skips_call():

@@ -388,11 +388,11 @@ def _inline_spec(
         ),
         depends_on=depends_on or [],
         # 结构化挂起 2a：计划期挂起标记，宽松读取（非真值即 False），WaveScheduler
-        # 在该节点完成后、其下游运行前挂起请用户 plan_review。schema 入口待激活层
-        # 接入前，CEO 无从设置此字段，故此处恒为 False、完全 inert。
+        # 在该节点完成后、其下游运行前挂起请用户 plan_review。已由 delegate schema 暴露为
+        # 可设 task 字段、并由 on_boundary 消费；未接 on_boundary 的调度（自治/测试）下仍 inert。
         checkpoint_after=bool(item.get("checkpoint_after")),
-        # 晚绑定标记（受监督的波循环）：宽松读取（非真值即 False），同 checkpoint_after。
-        # schema 入口 / 续跑工具（replan）接入前 CEO 无从设置，故恒为 False、完全 inert。
+        # 晚绑定标记（受监督的波循环）：宽松读取（非真值即 False），同 checkpoint_after 已激活。
+        # 由 schema 暴露、replan 在波边界定稿消费；无 on_boundary hook 时 inert。
         bind_after_deps=bool(item.get("bind_after_deps")),
         parent_run_id=parent_run_id,
         depth=depth,

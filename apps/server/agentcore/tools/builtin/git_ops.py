@@ -347,6 +347,8 @@ class GitTool:
     async def _cmd_branch(self, cwd: str, branch: str, start: float) -> ToolResult:
         if not branch:
             return _error("branch 需要 branch 参数", start)
+        if branch.startswith("-"):
+            return _error("分支名不能以 '-' 开头（防止被 git 解析为选项）", start)
         stdout, stderr, code = await _run_git(["branch", branch], cwd=cwd)
         if code != 0:
             return await _git_failure(stdout, stderr, code, start)
@@ -361,6 +363,8 @@ class GitTool:
     ) -> ToolResult:
         if not branch:
             return _error("checkout 需要 branch 参数", start)
+        if branch.startswith("-"):
+            return _error("分支名不能以 '-' 开头（防止被 git 解析为选项）", start)
         args = ["checkout"]
         if create:
             args.extend(["-b", branch])

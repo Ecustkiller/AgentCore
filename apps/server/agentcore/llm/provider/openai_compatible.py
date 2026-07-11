@@ -6,6 +6,8 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 
 import httpx
 
@@ -48,6 +50,12 @@ _BACKOFF_MULTIPLIER = 2.0
 _REQUEST_TIMEOUT = 300.0
 
 
+def _is_deepseek_v4(model: str) -> bool:
+    """True for DeepSeek V4 ids (incl. ``provider/deepseek-v4-…`` routed names)."""
+    name = model.rsplit("/", 1)[-1].lower()
+    return name.startswith("deepseek-v4")
+
+
 def _usage_from(usage_data: dict) -> TokenUsage:
     details = usage_data.get("completion_tokens_details") or {}
     return TokenUsage(
@@ -57,6 +65,30 @@ def _usage_from(usage_data: dict) -> TokenUsage:
         cache_hit_tokens=usage_data.get("prompt_cache_hit_tokens", 0),
         cache_miss_tokens=usage_data.get("prompt_cache_miss_tokens", 0),
     )
+
+
+def _parse_retry_after(raw: str | None, backoff: float) -> float:
+    """Parse an HTTP ``Retry-After`` header (RFC 7231): either delta-seconds or an
+    HTTP-date. Any absent/malformed value falls back to ``backoff`` so a 429 never
+    escapes the retry/error mapping as a generic 502 (audit 01 F9)."""
+    if raw is None:
+        return backoff
+    raw = raw.strip()
+    if not raw:
+        return backoff
+    try:
+        return float(raw)
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(raw)
+    except (TypeError, ValueError):
+        return backoff
+    if when is None:
+        return backoff
+    now = datetime.now(when.tzinfo or UTC)
+    delta = (when - now).total_seconds()
+    return delta if delta > 0 else backoff
 
 
 class OpenAICompatibleProvider:
@@ -157,84 +189,257 @@ class OpenAICompatibleProvider:
         return response
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
+        """Parse-and-retry stream: retry loop sees semantic commit state in-place.
+
+        ``committed`` flips on the first content or tool_call delta. Reasoning,
+        role-only, usage-only, and keepalive chunks do not commit. Pre-commit
+        transport/upstream failures transparently retry the whole request;
+        post-commit disconnect yields ``aborted`` instead of raising so the
+        engine can keep the partial. A transparent retry yields ``stream_reset``
+        so consumers drop ephemeral reasoning before the next attempt.
+        """
         payload = self._build_payload(request, stream=True)
-        has_content = False
-        has_tool_calls = False
-        last_lines: list[str] = []
-        last_finish_reason: str | None = None
-        last_usage: TokenUsage | None = None
-        json_parse_failures = 0
-        parsed_chunks = 0
+        last_error: Exception | None = None
+        backoff = _INITIAL_BACKOFF
+        yielded_ephemeral = False
 
-        async for line in self._stream_with_retry(payload):
-            if len(last_lines) >= 5:
-                last_lines.pop(0)
-            last_lines.append(line)
+        for attempt in range(_MAX_RETRIES):
+            committed = False
+            lines_seen = 0
+            has_content = False
+            has_tool_calls = False
+            last_lines: list[str] = []
+            last_finish_reason: str | None = None
+            last_usage: TokenUsage | None = None
+            json_parse_failures = 0
+            parsed_chunks = 0
+            forwarded_diagnosis: str | None = None
+            forwarded_preview: str | None = None
 
-            if not line.startswith("data: "):
-                continue
-            data_str = line[6:]
-            if data_str.strip() == "[DONE]":
-                break
             try:
-                data = json.loads(data_str)
-            except json.JSONDecodeError:
-                json_parse_failures += 1
-                continue
-            parsed_chunks += 1
-            choices = data.get("choices") or [{}]
-            choice = choices[0]
-            delta = choice.get("delta", {})
-            if delta.get("content"):
-                has_content = True
-            if delta.get("tool_calls"):
-                has_tool_calls = True
-            tc_deltas = None
-            if delta.get("tool_calls"):
-                tc_deltas = [
-                    ToolCallDelta(
-                        index=tc.get("index", 0),
-                        id=tc.get("id"),
-                        function_name=tc.get("function", {}).get("name"),
-                        arguments_delta=tc.get("function", {}).get("arguments"),
+                async with self._client.stream(
+                    "POST", "/chat/completions", json=payload
+                ) as response:
+                    body = await response.aread() if response.status_code >= 400 else None
+                    self._raise_for_status(
+                        response.status_code,
+                        backoff,
+                        response.headers,
+                        body=body,
+                        attempt=attempt,
                     )
-                    for tc in delta["tool_calls"]
-                ]
-            if choice.get("finish_reason"):
-                last_finish_reason = choice.get("finish_reason")
-            usage = _usage_from(data["usage"]) if data.get("usage") else None
-            if usage:
-                last_usage = usage
-            yield LLMChunk(
-                delta_content=delta.get("content"),
-                delta_reasoning=delta.get("reasoning_content"),
-                delta_tool_calls=tc_deltas,
-                finish_reason=choice.get("finish_reason"),
-                usage=usage,
-            )
+                    async for line in response.aiter_lines():
+                        lines_seen += 1
+                        if len(last_lines) >= 5:
+                            last_lines.pop(0)
+                        last_lines.append(line)
 
-        if not has_content and not has_tool_calls:
-            raw_body_preview = body_preview("\n".join(last_lines))
-            format_mismatch = json_parse_failures > 0 and parsed_chunks == 0
-            diagnosis = diagnose_empty_response(
-                raw_body=raw_body_preview,
-                finish_reason=last_finish_reason,
-                format_mismatch=format_mismatch,
-            )
-            logger.warning(
-                "llm.empty_response",
-                model=request.model,
-                scenario=request.scenario,
-                raw_body_preview=raw_body_preview,
-                finish_reason=last_finish_reason,
-                usage=last_usage.as_dict() if last_usage else {},
-                diagnosis=diagnosis.value,
-                sse_tail=last_lines,
-            )
-            yield LLMChunk(
-                empty_diagnosis=diagnosis.value,
-                empty_raw_preview=raw_body_preview,
-            )
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        try:
+                            data = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            json_parse_failures += 1
+                            continue
+                        parsed_chunks += 1
+                        # Proxied upstream forwards empty-response diagnosis inline (01 F8).
+                        if data.get("empty_diagnosis"):
+                            forwarded_diagnosis = data["empty_diagnosis"]
+                            forwarded_preview = data.get("empty_raw_preview")
+                            continue
+                        # Proxied upstream relays the stream-control signals inline (mirror
+                        # of empty_diagnosis) so this hop reconstructs the same LLMChunk
+                        # protocol it would see talking to the real upstream directly:
+                        # a transparent pre-commit retry (stream_reset) and a post-commit
+                        # disconnect salvage (aborted) survive the proxy re-serialization.
+                        if data.get("stream_reset"):
+                            yield LLMChunk(stream_reset=True)
+                            continue
+                        if data.get("aborted"):
+                            yield LLMChunk(aborted=True)
+                            return
+                        choices = data.get("choices") or [{}]
+                        choice = choices[0]
+                        delta = choice.get("delta", {})
+                        content_delta = delta.get("content")
+                        reasoning_delta = delta.get("reasoning_content")
+                        raw_tool_calls = delta.get("tool_calls")
+                        if content_delta:
+                            has_content = True
+                            committed = True
+                        if raw_tool_calls:
+                            has_tool_calls = True
+                            committed = True
+                        tc_deltas = None
+                        if raw_tool_calls:
+                            tc_deltas = [
+                                ToolCallDelta(
+                                    index=tc.get("index", 0),
+                                    id=tc.get("id"),
+                                    function_name=tc.get("function", {}).get("name"),
+                                    arguments_delta=tc.get("function", {}).get(
+                                        "arguments"
+                                    ),
+                                )
+                                for tc in raw_tool_calls
+                            ]
+                        if choice.get("finish_reason"):
+                            last_finish_reason = choice.get("finish_reason")
+                        usage = (
+                            _usage_from(data["usage"]) if data.get("usage") else None
+                        )
+                        if usage:
+                            last_usage = usage
+                        if reasoning_delta:
+                            yielded_ephemeral = True
+                        yield LLMChunk(
+                            delta_content=content_delta,
+                            delta_reasoning=reasoning_delta,
+                            delta_tool_calls=tc_deltas,
+                            finish_reason=choice.get("finish_reason"),
+                            usage=usage,
+                        )
+
+                if not has_content and not has_tool_calls:
+                    if forwarded_diagnosis is not None:
+                        yield LLMChunk(
+                            empty_diagnosis=forwarded_diagnosis,
+                            empty_raw_preview=forwarded_preview,
+                        )
+                        return
+                    raw_body_preview = body_preview("\n".join(last_lines))
+                    format_mismatch = json_parse_failures > 0 and parsed_chunks == 0
+                    diagnosis = diagnose_empty_response(
+                        raw_body=raw_body_preview,
+                        finish_reason=last_finish_reason,
+                        format_mismatch=format_mismatch,
+                    )
+                    logger.warning(
+                        "llm.empty_response",
+                        model=request.model,
+                        scenario=request.scenario,
+                        raw_body_preview=raw_body_preview,
+                        finish_reason=last_finish_reason,
+                        usage=last_usage.as_dict() if last_usage else {},
+                        diagnosis=diagnosis.value,
+                        sse_tail=last_lines,
+                    )
+                    yield LLMChunk(
+                        empty_diagnosis=diagnosis.value,
+                        empty_raw_preview=raw_body_preview,
+                    )
+                return
+
+            except LLMUpstreamError as e:
+                last_error = e
+                if committed:
+                    logger.warning(
+                        "llm.stream_partial_disconnect",
+                        provider=self._name,
+                        partial_sse_lines=lines_seen,
+                        reason=f"upstream_{e.details.get('upstream_status', 500)}",
+                        committed=True,
+                    )
+                    yield LLMChunk(aborted=True)
+                    return
+                if not e.retryable or not self._can_retry_attempt(attempt):
+                    await self._finalize_upstream_error(e, attempt)
+                if yielded_ephemeral:
+                    yield LLMChunk(stream_reset=True)
+                    yielded_ephemeral = False
+                backoff = await self._sleep_before_retry(
+                    attempt=attempt,
+                    backoff=backoff,
+                    stream=True,
+                    reason=f"upstream_{e.details.get('upstream_status', 500)}",
+                    partial_sse_lines=lines_seen,
+                )
+            except (LLMRateLimitError, LLMError) as e:
+                last_error = e
+                if committed:
+                    logger.warning(
+                        "llm.stream_partial_disconnect",
+                        provider=self._name,
+                        partial_sse_lines=lines_seen,
+                        reason=type(e).__name__,
+                        committed=True,
+                    )
+                    yield LLMChunk(aborted=True)
+                    return
+                if not e.retryable or not self._can_retry_attempt(attempt):
+                    raise
+                if yielded_ephemeral:
+                    yield LLMChunk(stream_reset=True)
+                    yielded_ephemeral = False
+                retry_after = e.retry_after if isinstance(e, LLMRateLimitError) else None
+                wait = retry_after or backoff
+                logger.info(
+                    "llm.call_retried",
+                    provider=self._name,
+                    attempt=attempt + 1,
+                    max_attempts=_MAX_RETRIES,
+                    wait_sec=wait,
+                    stream=True,
+                    reason=type(e).__name__,
+                )
+                await asyncio.sleep(wait)
+                backoff *= _BACKOFF_MULTIPLIER
+            except httpx.TimeoutException as e:
+                last_error = LLMTimeoutError(f"连接 {self._name} 超时，请检查网络后重试")
+                if committed:
+                    logger.warning(
+                        "llm.stream_partial_disconnect",
+                        provider=self._name,
+                        partial_sse_lines=lines_seen,
+                        reason="timeout",
+                        committed=True,
+                    )
+                    yield LLMChunk(aborted=True)
+                    return
+                if not self._can_retry_attempt(attempt):
+                    raise last_error from e
+                if yielded_ephemeral:
+                    yield LLMChunk(stream_reset=True)
+                    yielded_ephemeral = False
+                backoff = await self._sleep_before_retry(
+                    attempt=attempt,
+                    backoff=backoff,
+                    stream=True,
+                    reason="timeout",
+                    partial_sse_lines=lines_seen,
+                )
+            except httpx.HTTPError as e:
+                last_error = self._network_error_to_llm(e)
+                if committed:
+                    logger.warning(
+                        "llm.stream_partial_disconnect",
+                        provider=self._name,
+                        partial_sse_lines=lines_seen,
+                        reason=type(e).__name__,
+                        committed=True,
+                    )
+                    yield LLMChunk(aborted=True)
+                    return
+                if (
+                    not last_error.retryable
+                    or not self._can_retry_attempt(attempt)
+                ):
+                    raise last_error from e
+                if yielded_ephemeral:
+                    yield LLMChunk(stream_reset=True)
+                    yielded_ephemeral = False
+                backoff = await self._sleep_before_retry(
+                    attempt=attempt,
+                    backoff=backoff,
+                    stream=True,
+                    reason=type(e).__name__,
+                    partial_sse_lines=lines_seen,
+                )
+
+        raise last_error or LLMError(f"{self._name} 多次重试后仍失败，请稍后重试")
 
     def _build_payload(self, request: LLMRequest, *, stream: bool) -> dict:
         messages = []
@@ -274,6 +479,13 @@ class OpenAICompatibleProvider:
             payload["tool_choice"] = request.tool_choice
         if stream:
             payload["stream_options"] = {"include_usage": True}
+        # DeepSeek V4 defaults to thinking on. Background one-shots (title / memory / …)
+        # must disable it or a tight max_tokens budget is spent on reasoning_content and
+        # the JSON body comes back empty → fallback_title = raw user input in the sidebar.
+        if request.thinking is False and _is_deepseek_v4(request.model):
+            payload["thinking"] = {"type": "disabled"}
+        elif request.thinking is True and _is_deepseek_v4(request.model):
+            payload["thinking"] = {"type": "enabled"}
         return payload
 
     async def _attach_sub2api_diagnosis(self, err: LLMUpstreamError) -> LLMUpstreamError:
@@ -310,7 +522,7 @@ class OpenAICompatibleProvider:
         attempt: int = 0,
     ) -> None:
         if status_code == 429:
-            retry_after = float(headers.get("retry-after", backoff))
+            retry_after = _parse_retry_after(headers.get("retry-after"), backoff)
             raise LLMRateLimitError(retry_after=retry_after)
         if status_code in (401, 403):
             raise LLMAuthError()
@@ -450,102 +662,6 @@ class OpenAICompatibleProvider:
                     backoff=backoff,
                     stream=False,
                     reason=type(e).__name__,
-                )
-        raise last_error or LLMError(f"{self._name} 多次重试后仍失败，请稍后重试")
-
-    async def _stream_with_retry(self, payload: dict) -> AsyncIterator[str]:
-        last_error: Exception | None = None
-        backoff = _INITIAL_BACKOFF
-        for attempt in range(_MAX_RETRIES):
-            lines_yielded = 0
-            try:
-                async with self._client.stream(
-                    "POST", "/chat/completions", json=payload
-                ) as response:
-                    body = await response.aread() if response.status_code >= 400 else None
-                    self._raise_for_status(
-                        response.status_code,
-                        backoff,
-                        response.headers,
-                        body=body,
-                        attempt=attempt,
-                    )
-                    async for line in response.aiter_lines():
-                        lines_yielded += 1
-                        yield line
-                    return
-            except LLMUpstreamError as e:
-                last_error = e
-                if not e.retryable or not self._can_retry_attempt(attempt) or lines_yielded > 0:
-                    if lines_yielded > 0:
-                        logger.warning(
-                            "llm.stream_partial_disconnect",
-                            provider=self._name,
-                            partial_sse_lines=lines_yielded,
-                            reason=f"upstream_{e.details.get('upstream_status', 500)}",
-                        )
-                    await self._finalize_upstream_error(e, attempt)
-                backoff = await self._sleep_before_retry(
-                    attempt=attempt,
-                    backoff=backoff,
-                    stream=True,
-                    reason=f"upstream_{e.details.get('upstream_status', 500)}",
-                )
-            except (LLMRateLimitError, LLMError) as e:
-                last_error = e
-                if not e.retryable or not self._can_retry_attempt(attempt) or lines_yielded > 0:
-                    raise
-                retry_after = e.retry_after if isinstance(e, LLMRateLimitError) else None
-                wait = retry_after or backoff
-                logger.info(
-                    "llm.call_retried",
-                    provider=self._name,
-                    attempt=attempt + 1,
-                    max_attempts=_MAX_RETRIES,
-                    wait_sec=wait,
-                    stream=True,
-                    reason=type(e).__name__,
-                )
-                await asyncio.sleep(wait)
-                backoff *= _BACKOFF_MULTIPLIER
-            except httpx.TimeoutException as e:
-                last_error = LLMTimeoutError(f"连接 {self._name} 超时，请检查网络后重试")
-                if not self._can_retry_attempt(attempt) or lines_yielded > 0:
-                    if lines_yielded > 0:
-                        logger.warning(
-                            "llm.stream_partial_disconnect",
-                            provider=self._name,
-                            partial_sse_lines=lines_yielded,
-                            reason="timeout",
-                        )
-                    raise last_error from e
-                backoff = await self._sleep_before_retry(
-                    attempt=attempt,
-                    backoff=backoff,
-                    stream=True,
-                    reason="timeout",
-                )
-            except httpx.HTTPError as e:
-                last_error = self._network_error_to_llm(e)
-                if (
-                    not last_error.retryable
-                    or not self._can_retry_attempt(attempt)
-                    or lines_yielded > 0
-                ):
-                    if lines_yielded > 0:
-                        logger.warning(
-                            "llm.stream_partial_disconnect",
-                            provider=self._name,
-                            partial_sse_lines=lines_yielded,
-                            reason=type(e).__name__,
-                        )
-                    raise last_error from e
-                backoff = await self._sleep_before_retry(
-                    attempt=attempt,
-                    backoff=backoff,
-                    stream=True,
-                    reason=type(e).__name__,
-                    partial_sse_lines=lines_yielded,
                 )
         raise last_error or LLMError(f"{self._name} 多次重试后仍失败，请稍后重试")
 

@@ -68,29 +68,67 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     EventType.PLAN_REVISED: (Disposition.DURABLE, "自主再绑定「计划已调整」轻痕迹——重放"),
     EventType.ESCALATION_REQUIRED: (Disposition.DURABLE, "升级请求（单一发射者）——重放升级"),
     EventType.ESCALATION_RESOLVED: (Disposition.DURABLE, "升级已处理——重放结果"),
+    EventType.APPROVAL_REQUIRED: (
+        Disposition.DURABLE,
+        "审批门挂起——reload 重现待答卡（提问确认交互统一 P1）",
+    ),
+    EventType.APPROVAL_RESOLVED: (
+        Disposition.DURABLE,
+        "审批门裁决——reload 重放已答态（提问确认交互统一 P1）",
+    ),
+    EventType.DELEGATION_AUTHORIZATION_REQUIRED: (
+        Disposition.DURABLE,
+        "委派级授权挂起——reload 重现待答卡（提问确认交互统一 P1）",
+    ),
+    EventType.DELEGATION_AUTHORIZATION_RESOLVED: (
+        Disposition.DURABLE,
+        "委派级授权裁决——reload 重放已答态（提问确认交互统一 P1）",
+    ),
+    EventType.DEBATE_ROUND_DECISION_REQUIRED: (
+        Disposition.DURABLE,
+        "辩论轮间裁决挂起——reload 重现待答卡（提问确认交互统一 P1）",
+    ),
+    EventType.DEBATE_ROUND_DECISION_RESOLVED: (
+        Disposition.DURABLE,
+        "辩论轮间裁决结果——reload 重放已答态（提问确认交互统一 P1）",
+    ),
+    EventType.INTERACTION_ORPHANED: (
+        Disposition.DURABLE,
+        "热路交互失效——reload 翻「已失效」不可点态（提问确认交互统一 P1）",
+    ),
     EventType.TEAM_NOTE_POSTED: (Disposition.DURABLE, "团队便签墙——team-notes 面板重放"),
     EventType.RUN_INTAKE: (
         Disposition.DURABLE,
         "Worker Intake 轻量计划头——重放复杂度/策略/token 预算诊断",
     ),
-    EventType.RUN_SPLIT_ASSESSED: (
+    EventType.DEBATE_ROUND_STARTED: (
         Disposition.DURABLE,
-        "Worker 顺序分裂评估——重放是否分裂及子任务列表诊断",
+        "辩论轮次开场——hydrateFromJournal / fold 重建辩论室进行态（P2 处置重对账）",
     ),
-    EventType.RUN_SUBWORKER_STARTED: (
+    EventType.DEBATE_ROUND: (
         Disposition.DURABLE,
-        "Sub-Worker 启动——重放顺序分裂链中的子执行单元起点",
+        "辩论单轮叙事——hydrateFromJournal / fold 重建逐轮焦点/小结/裁判（P2）",
     ),
-    EventType.RUN_SUBWORKER_COMPLETED: (
+    EventType.TURN_WARNING: (
         Disposition.DURABLE,
-        "Sub-Worker 完成——重放子结果摘要（折叠进父 Worker journal）",
+        "回合前软门禁提示——用户可见；runs 投影 → toMessage 重现横幅（P2）",
+    ),
+    EventType.TEAM_SYNTHESIS_PREVIEW: (
+        Disposition.DURABLE,
+        "协调模式团队进展预览——同 key 保最新由前端 fold 保证；刷新后 StatusStrip 可重建（P2）",
     ),
     # ---- DERIVED：经专用列 / 其它投影持久化，reload 时重建（非 journal allow-list） ----
     EventType.CONTENT_DELTA: (Disposition.DERIVED, "正文流——最终态落 Message.content 列"),
     EventType.REASONING_DELTA: (Disposition.DERIVED, "思考流——最终态落 Message.reasoning_content 列"),
     EventType.CITATIONS: (Disposition.DERIVED, "联网来源——落 Message.citations 列"),
-    EventType.MESSAGE_END: (Disposition.DERIVED, "收尾（token/finish）——落 Message.usage + finish_reason"),
-    EventType.ERROR: (Disposition.DERIVED, "回合错误——落 Message.finish_reason + 错误正文（不完整回合持久化）"),
+    EventType.MESSAGE_END: (
+        Disposition.DERIVED,
+        "收尾（token/finish/cost）——落 Message.usage + journal turn_end；cost 回写 Message.cost 列",
+    ),
+    EventType.ERROR: (
+        Disposition.DERIVED,
+        "回合错误——落 journal turn_end + usage.status=failed（不完整回合持久化）",
+    ),
     EventType.TITLE_GENERATED: (Disposition.DERIVED, "回合后标题——回写 Conversation.title 列"),
     EventType.FOLLOWUPS_GENERATED: (
         Disposition.DERIVED,
@@ -124,43 +162,6 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     EventType.HANDOFF_SNAPSHOT_DONE: (Disposition.EPHEMERAL, "接管快照控制帧——传输态"),
     EventType.HANDOFF_JOB_STARTED: (Disposition.EPHEMERAL, "接管任务启动控制帧——传输态"),
     EventType.HANDOFF_APPLY_DONE: (Disposition.EPHEMERAL, "接管应用完成控制帧——传输态"),
-    EventType.APPROVAL_REQUIRED: (
-        Disposition.EPHEMERAL,
-        "进程内 HITL 审批门（InteractionRegistry，超时=拒）——结果经 tool_use_* 落库，提示本身瞬态",
-    ),
-    EventType.APPROVAL_RESOLVED: (Disposition.EPHEMERAL, "审批门裁决——瞬态门的关闭，结果体现在后续工具事件"),
-    EventType.DELEGATION_AUTHORIZATION_REQUIRED: (
-        Disposition.EPHEMERAL,
-        "委派级授权挂起（InteractionRegistry，超时=拒）——结果体现在后续工具事件",
-    ),
-    EventType.DELEGATION_AUTHORIZATION_RESOLVED: (
-        Disposition.EPHEMERAL,
-        "委派级授权裁决——瞬态门的关闭，结果体现在后续工具事件",
-    ),
-    EventType.DEBATE_ROUND_STARTED: (
-        Disposition.EPHEMERAL,
-        "辩论轮次开场——实时叙事覆盖层；各方发言经 debater 的 RUN_* 事实持久化",
-    ),
-    EventType.DEBATE_ROUND: (
-        Disposition.EPHEMERAL,
-        "辩论单轮——实时叙事覆盖层；各方发言经 debater 的 RUN_* 事实持久化",
-    ),
-    EventType.DEBATE_ROUND_DECISION_REQUIRED: (
-        Disposition.EPHEMERAL,
-        "辩论轮间交互裁决——进程内活跃态；断线/重启后续看+续辩的耐久化单独一轮（已约定）",
-    ),
-    EventType.DEBATE_ROUND_DECISION_RESOLVED: (
-        Disposition.EPHEMERAL,
-        "辩论轮间裁决结果——进程内活跃态；耐久化单独一轮（已约定）",
-    ),
-    EventType.TURN_WARNING: (
-        Disposition.EPHEMERAL,
-        "回合前软门禁提示（supports_tools=false）——传输态，不阻断回合",
-    ),
-    EventType.TEAM_SYNTHESIS_PREVIEW: (
-        Disposition.EPHEMERAL,
-        "CEO 协调模式 Phase 1 团队进展摘要——传输态预览；终稿仍走 CEO 正式回复，不进 journal",
-    ),
     EventType.SIM_TICK_STARTED: (
         Disposition.EPHEMERAL,
         "模拟 tick 开始——持久化走 sim_event 表，不进 turn_journal",

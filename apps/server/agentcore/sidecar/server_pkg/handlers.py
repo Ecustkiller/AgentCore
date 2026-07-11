@@ -9,6 +9,7 @@ from typing import Annotated, Any
 from pydantic import Field, TypeAdapter, ValidationError
 
 from agentcore.api.schemas.messages import ResolveInteractionRequest, interaction_result_from_body
+from agentcore.conversation.store.outbox import OutboxStore
 from agentcore.core.logging import get_logger
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import PLATFORM_MODEL_FLASH
@@ -42,7 +43,15 @@ class HandlerMixin:
         self._root = root.resolve()
         self._creds = self._parse_inference(params.get("inference"))
         self._approvals_enabled = bool(params.get("approvalsEnabled", True))
-        self._paused_store = self._build_paused_store(params.get("dataDir"))
+        data_dir = str(params.get("dataDir") or "").strip()
+        self._paused_store = self._build_paused_store(data_dir)
+        self._outbox_store = self._build_outbox_store(data_dir)
+        if self._outbox_store is not None:
+            from agentcore.conversation.store import set_conversation_store
+
+            # Swap the process-wide ConversationStore so EventSink checkpoints +
+            # TurnJournalWriter appends land in the local outbox (not CloudStore).
+            set_conversation_store(self._outbox_store)
         self._initialized = True
         logger.info(
             "sidecar.initialized",
@@ -51,6 +60,7 @@ class HandlerMixin:
             inference="cloud-proxy" if self._creds else "platform-fallback",
             approvals=self._approvals_enabled,
             durable_pause=self._paused_store is not None,
+            outbox=self._outbox_store is not None,
         )
         await self._reply(
             request_id,
@@ -64,22 +74,33 @@ class HandlerMixin:
                     # durable plan_review / ask_user resume across a process restart,
                     # gated on a usable local data dir.
                     "durablePause": self._paused_store is not None,
+                    "outbox": self._outbox_store is not None,
                 },
             },
         )
 
     @staticmethod
-    def _build_paused_store(raw: Any) -> LocalPausedTurnStore | None:
+    def _build_paused_store(data_dir: str) -> LocalPausedTurnStore | None:
         """Build the local durable-pause store from ``initialize``'s ``dataDir``.
 
         ``dataDir`` is the desktop's per-app data dir (e.g. ``<userData>/sidecar``);
         frames land under ``<dataDir>/paused``. Absent / blank ⇒ ``None`` ⇒ pauses
         stay in-memory (process-lifetime), the pre-durable behaviour.
         """
-        data_dir = str(raw or "").strip()
         if not data_dir:
             return None
         return LocalPausedTurnStore(Path(data_dir) / "paused")
+
+    @staticmethod
+    def _build_outbox_store(data_dir: str) -> OutboxStore | None:
+        """Build the progressive outbox store (sibling of paused under dataDir).
+
+        Pause/outbox split (as-built: 双模式工作区 §10.4): pause and outbox share
+        the dataDir root but are separate stores / processors — never one state machine.
+        """
+        if not data_dir:
+            return None
+        return OutboxStore(Path(data_dir) / "outbox")
 
     @staticmethod
     def _parse_inference(raw: Any) -> LLMCredentials | None:
@@ -109,7 +130,7 @@ class HandlerMixin:
         """Refresh session creds from a per-turn ``inference`` block when present.
 
         A sidecar is long-lived (one per root, until app quit) but the cloud-proxy
-        token rotates (12h TTL), so the desktop re-sends the current ``inference`` on
+        token rotates (2h TTL), so the desktop re-sends the current ``inference`` on
         every startTurn / resume — this keeps a day-long session from 401-ing once the
         initialize-time token expires. Absent ⇒ keep the initialize-time creds (e.g.
         the dev platform-fallback).
@@ -239,10 +260,19 @@ class HandlerMixin:
         # Per-turn trace_id (mirrors startTurn): ties this continuation's proxied LLM
         # calls to its write-back so the resumed reply is greppable as one trace.
         trace_id = str(params.get("traceId") or "")
+        user_message_id = str(params.get("userMessageId") or "").strip()
         # Adopt this turn's cloud-proxy token before it runs (refreshes a rotated TTL).
         self._refresh_creds(params)
         task = asyncio.create_task(
-            self._run_resume(request_id, suspension, decision, note, selected, trace_id)
+            self._run_resume(
+                request_id,
+                suspension,
+                decision,
+                note,
+                selected,
+                trace_id,
+                user_message_id,
+            )
         )
         self._turns[message_id] = task
 

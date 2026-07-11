@@ -12,6 +12,7 @@ import { registerAgentTownIpc } from "./agenttown-service";
 import { registerFsIpc } from "./fs-service";
 import { registerLogIpc } from "./log-service";
 import { registerNotificationIpc } from "./notification-service";
+import { registerOutboxIpc } from "./outbox-writeback";
 import { registerSidecarIpc } from "./sidecar-service";
 import { registerTerminalIpc } from "./terminal-service";
 import { initUpdater } from "./updater";
@@ -236,6 +237,7 @@ app.whenReady().then(() => {
   registerLogIpc();
   registerFsIpc();
   registerSidecarIpc();
+  registerOutboxIpc();
   registerTerminalIpc();
   registerAgentTownIpc();
   registerNotificationIpc();

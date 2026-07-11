@@ -1,12 +1,17 @@
+import {
+  OrphanedInteractionCard,
+  WaitingForDecisionHint,
+} from "@/components/chat/OrphanedInteractionCard";
 import { Badge, Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
 import { notifyError } from "@/lib/toast";
 import { decideDelegationAuthorization } from "@/services/delegationAuth";
 import { useConversationStore } from "@/stores/conversation";
 import {
-  type DelegationAuthorizationDecision,
-  type PendingDelegationAuthorization,
-  useDelegationAuthStore,
-} from "@/stores/delegationAuth";
+  type DelegationAuthView,
+  useOrphanedDelegations,
+  usePendingDelegations,
+} from "@/stores/interactions";
+import type { DelegationAuthorizationDecision } from "@/types/events";
 import { CheckCheck, ListChecks, Loader2, ShieldAlert, X } from "lucide-react";
 import { useState } from "react";
 
@@ -27,13 +32,20 @@ function toolLabel(name: string): string {
 
 export function DelegationAuthorizationPrompt() {
   const conversationId = useConversationStore((s) => s.currentConversationId);
-  const pending = useDelegationAuthStore((s) => s.pending);
-  const visible = pending.filter((p) => p.conversationId === conversationId);
-  if (visible.length === 0) return null;
+  const pending = usePendingDelegations(conversationId);
+  const orphaned = useOrphanedDelegations(conversationId);
+  if (pending.length === 0 && orphaned.length === 0) return null;
 
   return (
     <div className="mx-4 mb-2 space-y-2">
-      {visible.map((authorization) => (
+      {orphaned.map((o) => (
+        <OrphanedInteractionCard
+          key={o.id}
+          title="团队授权已失效"
+          detail="该委派授权请求已不可答复（服务已重启或回合已结束）。"
+        />
+      ))}
+      {pending.map((authorization) => (
         <DelegationAuthorizationCard
           key={authorization.authorizationId}
           authorization={authorization}
@@ -46,7 +58,7 @@ export function DelegationAuthorizationPrompt() {
 function DelegationAuthorizationCard({
   authorization,
 }: {
-  authorization: PendingDelegationAuthorization;
+  authorization: DelegationAuthView;
 }) {
   const [clicked, setClicked] =
     useState<DelegationAuthorizationDecision | null>(null);
@@ -56,6 +68,7 @@ function DelegationAuthorizationCard({
     setClicked(decision);
     void decideDelegationAuthorization(authorization, decision).catch((err) => {
       notifyError(err, "操作失败");
+      setClicked(null);
     });
   };
 
@@ -81,6 +94,7 @@ function DelegationAuthorizationCard({
         </DecisionCardIcon>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-foreground">团队授权</p>
+          <WaitingForDecisionHint />
           <p className="mt-0.5 text-xs text-muted-foreground">
             委派团队将可能使用中风险工具，请选择授权方式
           </p>

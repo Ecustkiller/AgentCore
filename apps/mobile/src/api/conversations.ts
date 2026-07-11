@@ -32,6 +32,8 @@ export interface RunsPayload {
    *  persisted turn-level so a pure-chat turn (empty `events`) still replays the CEO's
    *  received context on reload. `null` unless the captain shipped context. */
   captain_context?: ContextBlockWire[] | null;
+  /** 预检警告（P2 DURABLE）：lifted turn_warning for plain-chat reload. */
+  turn_warning?: string | null;
 }
 
 /** A user message's attachment as persisted (composer 附件). The agent-chat send ships the
@@ -50,6 +52,10 @@ export interface MessageDetail {
   citations: Citation[];
   runs: RunsPayload | null;
   attachments?: AttachmentMeta[];
+  /** Progressive assistant-row lifecycle (``usage.status`` · P4 hydrate). */
+  status?: "running" | "complete" | "incomplete" | "failed" | null;
+  /** 回合 ¥ 成本 (P2 DERIVED)：messages.cost 列；重载 footer 直接用。 */
+  cost?: Schemas["CostBreakdown"] | null;
   created_at: string;
 }
 
@@ -146,6 +152,10 @@ export interface MessageWindow {
 
 function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
   const runs = row.runs;
+  const status = row.status ?? null;
+  const finish =
+    runs?.finish_reason ??
+    (status === "incomplete" ? "interrupted" : null);
   return {
     id: row.id,
     role: row.role,
@@ -155,17 +165,26 @@ function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
     runs: runs
       ? {
           events: (runs.events ?? []) as unknown as SSEEvent[],
-          finish_reason: runs.finish_reason ?? null,
+          finish_reason: finish,
           process: (runs.process ?? null) as ProcessStep[] | null,
           captain_context: (runs.captain_context ?? null) as
             | ContextBlockWire[]
             | null,
+          turn_warning: runs.turn_warning ?? null,
         }
-      : null,
+      : status === "incomplete"
+        ? {
+            events: [],
+            finish_reason: "interrupted",
+            process: null,
+          }
+        : null,
+    status,
     attachments: row.attachments?.map((a) => ({
       name: a.name,
       truncated: a.truncated,
     })),
+    cost: row.cost ?? null,
     created_at: row.created_at,
   };
 }

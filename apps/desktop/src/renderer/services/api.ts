@@ -54,9 +54,15 @@ export class ApiError extends Error {
     try {
       const parsed = JSON.parse(body) as {
         error?: { code?: string; message?: string };
+        detail?: { code?: string; message?: string } | string;
       };
       this.code = parsed.error?.code;
       this.serverMessage = parsed.error?.message;
+      // FastAPI HTTPException(detail={code, message}) — P1 interaction 410/409.
+      if (!this.code && typeof parsed.detail === "object" && parsed.detail) {
+        this.code = parsed.detail.code;
+        this.serverMessage = parsed.detail.message ?? this.serverMessage;
+      }
     } catch {
       /* non-JSON body — keep the raw text only */
     }
@@ -151,6 +157,17 @@ let refreshInFlight: Promise<boolean> | null = null;
  * refresh-once policy *and* the same dedup, instead of each racing a rotation.
  */
 export function tryRefresh(): Promise<boolean> {
+  // D4: when Electron main owns refresh single-flight, delegate so writebacker
+  // and renderer never rotate the same refresh family concurrently.
+  const outboxRefresh =
+    typeof globalThis !== "undefined" &&
+    "window" in globalThis &&
+    (
+      globalThis as {
+        window?: { outboxApi?: { authRefresh?: () => Promise<boolean> } };
+      }
+    ).window?.outboxApi?.authRefresh;
+  if (outboxRefresh) return outboxRefresh();
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
     try {

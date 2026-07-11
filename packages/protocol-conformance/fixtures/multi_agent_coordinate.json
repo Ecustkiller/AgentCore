@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_coordinate",
-  "description": "多 Agent·CEO 协调模式：≥2 worker 并行 + 波内便签 + team_synthesis_preview 草稿 + 合成收束（preview transport-only / fold no-op）",
+  "description": "刷新重建（P2）：协调模式 team_synthesis_preview DURABLE → teamSynthesisPreview（同 key 保最新）",
   "events": [
     {
       "type": "message_start",
@@ -407,7 +407,7 @@
       "completed": 2,
       "total": 2
     },
-    "pendingInteraction": null,
+    "interactions": [],
     "cost": {
       "input": 240000,
       "cached": 64000,
@@ -417,6 +417,29 @@
     },
     "debate": null,
     "debateRounds": [],
+    "teamSynthesisPreview": {
+      "execution_id": "exec1",
+      "completed": 1,
+      "total": 2,
+      "headline": "已完成 1/2：✅ 研究员 ⏳ 撰写员",
+      "text": "已完成 1/2：✅ 研究员 ⏳ 撰写员\n· 研究员：完成调研",
+      "workers": [
+        {
+          "run_id": "r1",
+          "role": "研究员",
+          "status": "completed",
+          "summary": "完成调研"
+        },
+        {
+          "run_id": "r2",
+          "role": "撰写员",
+          "status": "pending",
+          "summary": ""
+        }
+      ],
+      "in_progress": true
+    },
+    "turnWarning": null,
     "teamNotes": [
       {
         "noteId": "n1",

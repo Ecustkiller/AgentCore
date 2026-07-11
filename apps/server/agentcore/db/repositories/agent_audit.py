@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import case, delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.types import new_id
@@ -32,28 +33,43 @@ class AgentAuditEventRepository:
         target_type: str | None = None,
         target_ref: str | None = None,
         detail: dict[str, Any] | None = None,
-    ) -> AgentAuditEvent:
-        row = AgentAuditEvent(
-            id=new_id(),
-            user_id=user_id,
-            conversation_id=conversation_id,
-            turn_id=turn_id,
-            trace_id=trace_id,
-            execution_id=execution_id,
-            run_id=run_id,
-            parent_run_id=parent_run_id,
-            seq=seq,
-            category=category,
-            action=action,
-            actor_kind=actor_kind,
-            target_type=target_type,
-            target_ref=target_ref,
-            outcome=outcome,
-            detail=detail or {},
+    ) -> AgentAuditEvent | None:
+        """Insert one audit row; idempotent on ``(turn_id, seq)``.
+
+        At-least-once retries (or a drain re-delivery) hit
+        ``uq_agent_audit_events_turn_seq`` and insert nothing — returns ``None``
+        when the conflict path wins, otherwise the refreshed row.
+        """
+        row_id = new_id()
+        stmt = (
+            pg_insert(AgentAuditEvent)
+            .values(
+                id=row_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                turn_id=turn_id,
+                trace_id=trace_id,
+                execution_id=execution_id,
+                run_id=run_id,
+                parent_run_id=parent_run_id,
+                seq=seq,
+                category=category,
+                action=action,
+                actor_kind=actor_kind,
+                target_type=target_type,
+                target_ref=target_ref,
+                outcome=outcome,
+                detail=detail or {},
+            )
+            .on_conflict_do_nothing(constraint="uq_agent_audit_events_turn_seq")
+            .returning(AgentAuditEvent.id)
         )
-        self._session.add(row)
+        result = await self._session.execute(stmt)
+        inserted_id = result.scalar_one_or_none()
         await self._session.commit()
-        await self._session.refresh(row)
+        if inserted_id is None:
+            return None
+        row = await self._session.get(AgentAuditEvent, inserted_id)
         return row
 
     async def list_for_turn(

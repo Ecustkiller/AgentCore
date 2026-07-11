@@ -4,7 +4,7 @@
 // golden for every vector. Internal store shapes may differ (desktop's Zustand
 // `Execution` vs mobile's reducer) — only this snapshot is asserted equal.
 //
-// Shape mirrors the rule's `{ messages, runs(tree), status, pendingInteraction,
+// Shape mirrors the rule's `{ messages, runs(tree), status, interactions[],
 // cost }`, grounded in the two proven projections it must agree with: the desktop
 // `projectExecution` fold (runs/agents/progress — stores/execution.ts) and the
 // backend `EventSink._accumulate_process` fold (the single-agent process timeline —
@@ -25,6 +25,7 @@ import type {
   RunDebrief,
   RunKind,
   Stance,
+  TeamSynthesisPreviewPayload,
   UsageBreakdown,
 } from "@agentcore/contract-types";
 
@@ -36,6 +37,7 @@ export type {
   PlanRevisionKind,
   ProcessStep,
   RunDebrief,
+  TeamSynthesisPreviewPayload,
   UsageBreakdown,
 };
 
@@ -83,10 +85,11 @@ export interface ProjectedAgent {
   toolProgress: { toolName: string; chars: number } | null;
 }
 
-/** A `checkpoint_after` pause on a run (plan_review, 结构化挂起 2a). */
+/** A `checkpoint_after` pause on a run (plan_review, 结构化挂起 2a). `orphaned` =
+ * 已失效 terminal (提问确认统一重构: the pending gate was invalidated by restart/recover). */
 export interface ProjectedRunCheckpoint {
   status: "pending" | "resolved";
-  decision: "continue" | "adjust" | "stop" | "timeout" | null;
+  decision: "continue" | "adjust" | "stop" | "timeout" | "orphaned" | null;
 }
 
 /** 升级实时可见 / 阻塞式求决策: one escalation a worker raised mid-run via `escalate` (its
@@ -94,21 +97,18 @@ export interface ProjectedRunCheckpoint {
  * proceeds on; `blocking` flags that a wrong guess would void its product. Folded onto its
  * {@link ProjectedRun} so every end's node carries the same signal.
  *
- * `status` is the lifecycle (阻塞式求决策 设计 §七): `raised` = a non-blocking `run_escalation`
- * banner (the worker kept working — today's behaviour); `pending` = a blocking
- * `escalation_required` parked on the user (the card is live, awaiting an answer); `resolved` =
- * the user answered (`answer` carries it); `timeout` = no answer within the window or the user
- * chose 按假设继续 (the worker fell back to its `assumption`). A non-blocking escalation stays
- * `raised`; a blocking one folds `escalation_required`→`pending`, then its `escalation_resolved`
- * →`resolved`/`timeout`. Drives the card's render states + the node's ⚠️ badge. `answer` is the
- * user's reply when `status === "resolved"`, `null` otherwise. */
+ * `status` is the lifecycle (阻塞式求决策): `raised` = non-blocking banner; `pending` =
+ * blocking parked; `resolved` = answered; `assumed` = explicit 按假设继续; `timed_out` =
+ * wall-clock miss. `assumed` and `timed_out` both leave `answer` null (worker falls
+ * back to assumption) but must stay distinct — conflating them made「点了按假设继续」
+ * look like system timeout. */
 export type EscalationKind = "normal" | "scope" | "dep";
 
 export interface RunEscalation {
   question: string;
   assumption: string;
   blocking: boolean;
-  status: "raised" | "pending" | "resolved" | "timeout";
+  status: "raised" | "pending" | "resolved" | "assumed" | "timed_out";
   answer: string | null;
   /** escalate kind；旧向量缺字段时按 `normal`。 */
   kind?: EscalationKind;
@@ -191,33 +191,94 @@ export interface ProjectedTeamNote {
   source?: "ceo" | "worker" | "inherited";
 }
 
-/** A pending user gate — the one surface the turn is blocked on (`paused`). Only the
- * GATING interactions (approval / ask_user checkpoint / plan_review) appear; the
- * non-blocking `question_posted` never gates so it is not represented here. */
-export type PendingInteraction =
+/** Interaction lifecycle status in the projected turn (提问确认统一重构 P3). */
+export type InteractionStatus = "pending" | "resolved" | "orphaned";
+
+/** Kinds that pause the turn when status=pending (gate surface). */
+export const GATE_INTERACTION_KINDS = [
+  "approval",
+  "ask_user",
+  "plan_review",
+  "team_preview",
+  "delegation_authorization",
+] as const;
+
+/** One user-facing interaction across its lifecycle — replaces the old single-slot
+ * `pendingInteraction`. All 8 kinds appear; status tracks pending|resolved|orphaned so
+ * reload after settle never re-renders a false pending card. Multi-approval concurrency
+ * is first-class (array, not last-write-wins). */
+export type ProjectedInteraction =
   | {
       kind: "approval";
-      approvalId: string;
+      id: string;
+      status: InteractionStatus;
       toolCallId: string;
       toolName: string;
       arguments: Record<string, unknown>;
     }
   | {
-      kind: "checkpoint";
-      checkpointId: string;
+      kind: "ask_user";
+      id: string;
+      status: InteractionStatus;
       question: string;
       context: string;
     }
   | {
       kind: "plan_review";
-      checkpointId: string;
+      id: string;
+      status: InteractionStatus;
       runIds: string[];
     }
   | {
       kind: "team_preview";
-      checkpointId: string;
+      id: string;
+      status: InteractionStatus;
       workerIds: string[];
+    }
+  | {
+      kind: "delegation_authorization";
+      id: string;
+      status: InteractionStatus;
+      executionId: string;
+      workers: Array<Record<string, unknown>>;
+      /** Wire field `tools` (not grantable_tools). */
+      tools: string[];
+    }
+  | {
+      kind: "escalation";
+      id: string;
+      status: InteractionStatus;
+      runId: string;
+      agentId: string;
+      question: string;
+      assumption: string;
+      awaiting?: "user" | "ceo";
+    }
+  | {
+      kind: "debate_round";
+      id: string;
+      status: InteractionStatus;
+      executionId: string;
+      moderatorRunId: string;
+      roundNo: number;
+      focus: string;
+      summary: string;
+      converged: boolean;
+      rationale: string;
+    }
+  | {
+      kind: "question_posted";
+      id: string;
+      status: InteractionStatus;
+      question: string;
+      context: string;
     };
+
+/** @deprecated Use {@link ProjectedInteraction}; kept as alias during P3 migration. */
+export type PendingInteraction = Extract<
+  ProjectedInteraction,
+  { status: "pending" }
+>;
 
 export interface ProjectedTurn {
   status: TurnStatus;
@@ -245,7 +306,9 @@ export interface ProjectedTurn {
   /** Derived from run states (terminal-completed over total), cumulative across
    * multi-batch delegates — never the per-batch run_progress counters. */
   progress: { completed: number; total: number };
-  pendingInteraction: PendingInteraction | null;
+  /** Full interaction inventory (8 kinds × pending|resolved|orphaned). Replaces the
+   * legacy single-slot `pendingInteraction` (P3 breaking). */
+  interactions: ProjectedInteraction[];
   /** Turn total from message_end.cost (回合总账); null until the turn ends or when no
    * turn ran (error/not-found paths). */
   cost: CostBreakdown | null;
@@ -255,9 +318,13 @@ export interface ProjectedTurn {
    * `run_id`. Null for a turn that ran no debate. */
   debate: DebateResultPayload | null;
   /** 辩论进行中的逐轮叙事（`debate_round_started` / `debate_round` 折叠累积）：让前端进行中
-   * 就叠出主持人逐轮焦点 / 小结 / 裁判，而非干等 {@link debate} 收场。Transport-only 事件，
-   * 故重载（journal 无逐轮事件）恒为 `[]`——届时全量叙事线已在 {@link debate} 里。非辩论恒 `[]`。 */
+   * 就叠出主持人逐轮焦点 / 小结 / 裁判，而非干等 {@link debate} 收场。P2 DURABLE——落 journal，
+   * 刷新后 hydrate/fold 重建；收场后全量叙事线亦在 {@link debate}。非辩论恒 `[]`。 */
   debateRounds: DebateNarrativeRound[];
+  /** 协调模式团队进展预览（`team_synthesis_preview`，同 key 保最新）：P2 DURABLE。null 当无。 */
+  teamSynthesisPreview: TeamSynthesisPreviewPayload | null;
+  /** 预检警告（`turn_warning`）：P2 DURABLE；刷新后横幅重建。null 当无。 */
+  turnWarning: string | null;
   /** 团队便签墙 (§2.2 通): the notes workers broadcast to their siblings this turn (`team_note_posted`),
    * in post order. Journaled, so it replays on reload. Empty for a turn with no team notes. */
   teamNotes: ProjectedTeamNote[];

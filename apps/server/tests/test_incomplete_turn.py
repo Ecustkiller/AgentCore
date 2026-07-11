@@ -190,9 +190,11 @@ async def test_persist_incomplete_writes_cancelled_message(monkeypatch):
     async def fake_journal(_session, **kwargs):
         journaled.update(kwargs)
 
-    monkeypatch.setattr(turn_persistence, "MessageRepository", FakeRepo)
-    monkeypatch.setattr(turn_persistence, "async_session_factory", lambda: FakeSessionCM())
-    monkeypatch.setattr(turn_persistence, "persist_turn_journal", fake_journal)
+    from agentcore.conversation.store import cloud as cloud_mod
+
+    monkeypatch.setattr(cloud_mod, "MessageRepository", FakeRepo)
+    monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: FakeSessionCM())
+    monkeypatch.setattr(cloud_mod, "persist_turn_journal", fake_journal)
 
     journal = [_ev("run_plan"), _ev("run_completed")]
     await persist_incomplete_turn(
@@ -236,9 +238,11 @@ async def test_persist_incomplete_keeps_streamed_reply(monkeypatch):
     async def fake_journal(_session, **kwargs):
         pass
 
-    monkeypatch.setattr(turn_persistence, "MessageRepository", FakeRepo)
-    monkeypatch.setattr(turn_persistence, "async_session_factory", lambda: FakeSessionCM())
-    monkeypatch.setattr(turn_persistence, "persist_turn_journal", fake_journal)
+    from agentcore.conversation.store import cloud as cloud_mod
+
+    monkeypatch.setattr(cloud_mod, "MessageRepository", FakeRepo)
+    monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: FakeSessionCM())
+    monkeypatch.setattr(cloud_mod, "persist_turn_journal", fake_journal)
 
     await persist_incomplete_turn(
         journal=[],
@@ -261,12 +265,14 @@ async def test_persist_incomplete_swallows_db_errors(monkeypatch):
         async def __aexit__(self, *_a):
             return False
 
-    monkeypatch.setattr(turn_persistence, "async_session_factory", lambda: BoomCM())
+    from agentcore.conversation.store import cloud as cloud_mod
+
+    monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: BoomCM())
     # Best-effort (文档铁律): a persistence failure must never escape this task.
     await persist_incomplete_turn(
         journal=[_ev("run_plan")],
         content="",
         conversation_id="conv",
         trace_id="trace",
-        message_id=None,
+        message_id="m3",
     )

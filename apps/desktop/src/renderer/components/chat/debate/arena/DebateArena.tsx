@@ -1,4 +1,5 @@
 import type { Execution } from "@/stores/execution";
+import { useInteractionStore } from "@/stores/interactions";
 import { useCallback, useRef, useState } from "react";
 import { toDebateModel } from "../model";
 import { ClosingBlocks } from "./ClosingBlocks";
@@ -32,6 +33,20 @@ export function DebateArena({
   const model = toDebateModel(execution);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const pendingSteering = useInteractionStore((s) => {
+    if (!conversationId) return false;
+    for (const e of s.byId.values()) {
+      if (
+        e.conversationId === conversationId &&
+        e.kind === "debate_round" &&
+        (e.status === "pending" || e.status === "submitting")
+      ) {
+        return true;
+      }
+    }
+    return false;
+  });
+
   const scrollToAnchor = useCallback((anchorId: string) => {
     const root = scrollRef.current;
     const el = root?.querySelector(`#${CSS.escape(anchorId)}`);
@@ -48,10 +63,6 @@ export function DebateArena({
   }, []);
 
   if (!model) return null;
-
-  const pendingSteering = execution.debateDecisions.some(
-    (d) => d.status === "pending",
-  );
 
   const canSplit = canUseSplitLayout(model);
   const effectiveLayout = canSplit ? layoutMode : "stack";

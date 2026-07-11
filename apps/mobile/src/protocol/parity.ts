@@ -110,18 +110,6 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     verdict: "internal",
     reason: "Escalation Gate 判定实时信号；耐久升级仍走 escalate / RunState.escalations",
   },
-  run_split_assessed: {
-    verdict: "internal",
-    reason: "顺序分裂评估诊断；Phase 2 无独立面，fold no-op",
-  },
-  run_subworker_started: {
-    verdict: "internal",
-    reason: "Sub-Worker 启动诊断；折叠进父 journal，fold no-op",
-  },
-  run_subworker_completed: {
-    verdict: "internal",
-    reason: "Sub-Worker 完成诊断；折叠进父 journal，fold no-op",
-  },
   escalation_required: {
     verdict: "ported",
     surface: "TeamView · EscalationAnswer 待你拍板卡 (②)",
@@ -136,13 +124,12 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     surface: "LiveDebateNarrative / DebateView",
   },
   debate_round_decision_required: {
-    verdict: "simplified",
-    reason:
-      "手机无逐轮辩论决策 UI；收场叙事由 debate_round/result 承载 (fold no-op)",
+    verdict: "ported",
+    surface: "DebateSteeringCard",
   },
   debate_round_decision_resolved: {
-    verdict: "simplified",
-    reason: "同上 · 逐轮续辩/收场决策仅桌面",
+    verdict: "ported",
+    surface: "DebateSteeringCard",
   },
 
   // —— 团队便签墙 ——
@@ -156,18 +143,22 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   // —— 阻塞交互（统一 PauseCard / ResumeCard）——
   approval_required: { verdict: "ported", surface: "PauseCard" },
   approval_resolved: { verdict: "ported", surface: "PauseCard" },
+  interaction_orphaned: {
+    verdict: "ported",
+    surface: "OrphanedInteractionCard",
+  },
   delegation_authorization_required: {
     verdict: "ported",
-    surface: "PauseCard",
+    surface: "DelegationAuthorizationCard",
   },
   delegation_authorization_resolved: {
     verdict: "ported",
-    surface: "PauseCard",
+    surface: "DelegationAuthorizationCard",
   },
   checkpoint_required: { verdict: "ported", surface: "PauseCard / ResumeCard" },
-  checkpoint_resolved: { verdict: "ported", surface: "PauseCard" },
-  plan_review_required: { verdict: "ported", surface: "PauseCard" },
-  plan_review_resolved: { verdict: "ported", surface: "PauseCard" },
+  checkpoint_resolved: { verdict: "ported", surface: "PauseCard / ResumeCard" },
+  plan_review_required: { verdict: "ported", surface: "ResumeCard" },
+  plan_review_resolved: { verdict: "ported", surface: "ResumeCard" },
   team_preview_required: { verdict: "ported", surface: "ResumeCard" },
   team_preview_resolved: { verdict: "ported", surface: "ResumeCard" },
 
@@ -287,6 +278,10 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   TeamPreviewCard: { verdict: "ported", surface: "ResumeCard" },
   ApprovalPrompt: { verdict: "ported", surface: "PauseCard" },
   ResumePrompt: { verdict: "ported", surface: "ResumeCard" },
+  OrphanedInteractionCard: {
+    verdict: "ported",
+    surface: "OrphanedInteractionCard",
+  },
   FileArtifactsCard: { verdict: "ported", surface: "FileArtifactsCard" },
   FollowupChips: { verdict: "ported", surface: "ChatPage · 下一步 chips" },
   ConversationOutline: {
@@ -357,13 +352,22 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     verdict: "impossible",
     reason: "本地工作区快捷操作（打开文件夹/终端/跑 bash），手机无本地侧",
   },
-  DelegationAuthorizationCard: {
+  RunConfirmPrompt: {
     verdict: "impossible",
-    reason: "本地委派工具授权卡，手机无本地引擎侧",
+    reason: "用户直触 bash 的本地运行确认卡（fsApi 本会话放行），手机无本地侧",
+  },
+  DelegationAuthorizationCard: {
+    verdict: "ported",
+    surface: "DelegationAuthorizationCard",
   },
 
   // —— infra / 渲染叶子（非交互-对等面）——
   ChatView: { verdict: "internal", reason: "对话容器" },
+  ConversationDecisionPrompts: {
+    verdict: "internal",
+    reason:
+      "决策卡单挂载容器（提问确认统一重构 P2：Chat/画布互斥复用同一实例），本身无 UI",
+  },
   ConversationRoute: { verdict: "internal", reason: "路由壳" },
   MessageList: { verdict: "internal", reason: "消息列表容器" },
   MessageBubble: { verdict: "internal", reason: "气泡容器" },

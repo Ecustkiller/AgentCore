@@ -11,6 +11,16 @@ from __future__ import annotations
 import pytest
 
 from agentcore.conformance.export import build_fixtures
+from agentcore.runtime.journal.pending_interactions import GATE_KINDS
+
+
+def _pending_gates(p: dict) -> list[dict]:
+    """Gate interactions still awaiting the user (legacy pendingInteraction slot)."""
+    return [
+        i
+        for i in p["interactions"]
+        if i.get("status") == "pending" and i.get("kind") in GATE_KINDS
+    ]
 
 
 @pytest.fixture(scope="module")
@@ -31,7 +41,7 @@ def test_single_agent_text(projected):
     assert p["runs"] == []
     assert p["agents"] == []
     assert p["progress"] == {"completed": 0, "total": 0}
-    assert p["pendingInteraction"] is None
+    assert p["interactions"] == []
     assert p["cost"]["total"] == 360_000
 
 
@@ -81,30 +91,37 @@ def test_approval_paused(projected):
     p = projected["approval_paused"]
     assert p["status"] == "paused"
     assert p["finishReason"] is None
-    assert p["pendingInteraction"] == {
-        "kind": "approval",
-        "approvalId": "tc1",
-        "toolCallId": "tc1",
-        "toolName": "code_execute",
-        "arguments": {"code": "print(1)"},
-    }
+    assert p["interactions"] == [
+        {
+            "kind": "approval",
+            "id": "tc1",
+            "status": "pending",
+            "toolCallId": "tc1",
+            "toolName": "code_execute",
+            "arguments": {"code": "print(1)"},
+        }
+    ]
 
 
 def test_approval_resolved_clears_pending(projected):
     p = projected["approval_resolved_continue"]
     assert p["status"] == "completed"
-    assert p["pendingInteraction"] is None
+    assert _pending_gates(p) == []
+    assert p["interactions"][0]["status"] == "resolved"
     assert p["content"] == "我需要运行代码。运行结果是 1。"
 
 
 def test_plan_review_paused(projected):
     p = projected["plan_review_paused"]
     assert p["status"] == "paused"
-    assert p["pendingInteraction"] == {
-        "kind": "plan_review",
-        "checkpointId": "cp1",
-        "runIds": ["r1"],
-    }
+    assert p["interactions"] == [
+        {
+            "kind": "plan_review",
+            "id": "cp1",
+            "status": "pending",
+            "runIds": ["r1"],
+        }
+    ]
     assert p["runs"][0]["checkpoint"] == {"status": "pending", "decision": None}
     assert p["progress"] == {"completed": 1, "total": 2}
 
@@ -112,7 +129,7 @@ def test_plan_review_paused(projected):
 def test_plan_review_resolved_runs_downstream(projected):
     p = projected["plan_review_resolved_continue"]
     assert p["status"] == "completed"
-    assert p["pendingInteraction"] is None
+    assert _pending_gates(p) == []
     assert p["runs"][0]["checkpoint"] == {"status": "resolved", "decision": "continue"}
     assert p["progress"] == {"completed": 2, "total": 2}
 
@@ -132,7 +149,7 @@ def test_single_agent_checkpoint_finalized_stays_paused(projected):
     assert parked["cost"] is None
     # Same single resume surface as the parked checkpoint — timeline + card body byte-identical,
     # so the client renders the one resume card whether the stream parked or finalized.
-    assert p["pendingInteraction"] == parked["pendingInteraction"]
+    assert p["interactions"] == parked["interactions"]
     assert p["process"] == parked["process"]
     assert p["content"] == parked["content"]
 
@@ -146,15 +163,18 @@ def test_plan_review_finalized_stays_paused(projected):
     assert p["status"] == "paused"
     assert p["finishReason"] == "paused"
     assert p["cost"]["total"] == 360_000
-    assert p["pendingInteraction"] == {
-        "kind": "plan_review",
-        "checkpointId": "cp1",
-        "runIds": ["r1"],
-    }
+    assert p["interactions"] == [
+        {
+            "kind": "plan_review",
+            "id": "cp1",
+            "status": "pending",
+            "runIds": ["r1"],
+        }
+    ]
     assert p["runs"][0]["checkpoint"] == {"status": "pending", "decision": None}
     assert p["progress"] == {"completed": 1, "total": 2}
     # Same resume surface as the parked plan_review — only the terminal frame differs.
-    assert p["pendingInteraction"] == parked["pendingInteraction"]
+    assert p["interactions"] == parked["interactions"]
     assert p["runs"] == parked["runs"]
 
 
@@ -162,11 +182,14 @@ def test_team_preview_finalized(projected):
     p = projected["team_preview_finalized"]
     assert p["status"] == "paused"
     assert p["finishReason"] == "paused"
-    assert p["pendingInteraction"] == {
-        "kind": "team_preview",
-        "checkpointId": "tp1",
-        "workerIds": ["r1", "r2"],
-    }
+    assert p["interactions"] == [
+        {
+            "kind": "team_preview",
+            "id": "tp1",
+            "status": "pending",
+            "workerIds": ["r1", "r2"],
+        }
+    ]
     assert any(
         s.get("kind") == "team_preview" and s.get("checkpoint_id") == "tp1"
         for s in p["process"]
@@ -176,7 +199,7 @@ def test_team_preview_finalized(projected):
 def test_team_preview_resolved_continue(projected):
     p = projected["team_preview_resolved_continue"]
     assert p["status"] == "completed"
-    assert p["pendingInteraction"] is None
+    assert _pending_gates(p) == []
     assert p["progress"]["completed"] == 2
 
 
@@ -289,10 +312,10 @@ def test_multi_agent_plan_revised_trace(projected):
     # 「计划已调整」轻痕迹 (设计 §7.2): plan_revised folds each affected node's kind onto its
     # run's `revised` — "bind" (a late-bound node finalised from upstream) / "steer" (a
     # not-yet-run node re-steered). A node the plan never touched stays `revised=None`. The
-    # trace NEVER pauses the turn: it completes end_turn with no pendingInteraction.
+    # trace NEVER pauses the turn: it completes end_turn with no gate pending.
     p = projected["multi_agent_plan_revised"]
     assert p["status"] == "completed"
-    assert p["pendingInteraction"] is None
+    assert _pending_gates(p) == []
     by_id = {r["id"]: r for r in p["runs"]}
     assert by_id["r1"]["revised"] is None
     assert by_id["r2"]["revised"] == "bind"
@@ -307,7 +330,7 @@ def test_multi_agent_lead_subplan_bind_replan_nests_and_traces(projected):
     # (revised="bind") without pausing the turn; one `team` marker despite two run_plans.
     p = projected["multi_agent_lead_subplan_bind_replan"]
     assert p["status"] == "completed"
-    assert p["pendingInteraction"] is None
+    assert _pending_gates(p) == []
     assert [s["execution_id"] for s in p["process"] if s["kind"] == "team"] == ["exec1"]
     by_id = {r["id"]: r for r in p["runs"]}
     assert by_id["L1"]["parentRunId"] is None  # the lead is a top-level worker (CEO is the bubble)
@@ -326,7 +349,7 @@ def test_multi_agent_lead_subplan_scope_steer_nests_and_traces(projected):
     # Same shared-execution_id nesting (sa/sb under L1) as the bind arm.
     p = projected["multi_agent_lead_subplan_scope_steer"]
     assert p["status"] == "completed"
-    assert p["pendingInteraction"] is None
+    assert _pending_gates(p) == []
     by_id = {r["id"]: r for r in p["runs"]}
     assert by_id["sa"]["parentRunId"] == "L1"
     assert by_id["sb"]["parentRunId"] == "L1"
@@ -371,7 +394,7 @@ def test_multi_agent_blocking_escalate_resolved(projected):
     # flips the run's escalation to resolved + answer. The turn NEVER pauses (non-halting).
     p = projected["multi_agent_blocking_escalate"]
     assert p["status"] == "completed"
-    assert p["pendingInteraction"] is None
+    assert _pending_gates(p) == []
     r1 = next(r for r in p["runs"] if r["id"] == "r1")
     assert r1["escalations"] == [
         {
@@ -387,12 +410,15 @@ def test_multi_agent_blocking_escalate_resolved(projected):
 
 def test_multi_agent_blocking_escalate_pending_does_not_pause(projected):
     # THE 核心不变量 (设计 §4.5/§七): a pending blocking escalate keeps the turn RUNNING (not
-    # paused) and sets NO pendingInteraction — unlike approval/ask_user/plan_review halting
-    # gates. The parallel sibling r2 keeps running, proving the escalation gates only its own
-    # worker, never the wave.
+    # paused) and sets NO gate pending — unlike approval/ask_user/plan_review halting
+    # gates. Escalation still appears in interactions[] (non-gate). The parallel sibling r2
+    # keeps running, proving the escalation gates only its own worker, never the wave.
     p = projected["multi_agent_blocking_escalate_pending"]
     assert p["status"] == "running"
-    assert p["pendingInteraction"] is None
+    assert _pending_gates(p) == []
+    assert any(
+        i["kind"] == "escalation" and i["status"] == "pending" for i in p["interactions"]
+    )
     r1 = next(r for r in p["runs"] if r["id"] == "r1")
     r2 = next(r for r in p["runs"] if r["id"] == "r2")
     assert r1["escalations"][0]["status"] == "pending"
@@ -401,14 +427,12 @@ def test_multi_agent_blocking_escalate_pending_does_not_pause(projected):
 
 
 def test_multi_agent_blocking_escalate_timeout_falls_back(projected):
-    # 超时降级 (安全基石 §4.4): escalation_resolved(timeout) flips the escalation to timeout
-    # (answer None); the worker fell back to its assumption and COMPLETED — blocking is a
-    # strict superset of today's non-blocking behaviour.
+    # Wall-clock miss: escalation_resolved(timed_out) flips to timed_out (answer None).
     p = projected["multi_agent_blocking_escalate_timeout"]
     assert p["status"] == "completed"
-    assert p["pendingInteraction"] is None
+    assert _pending_gates(p) == []
     r1 = next(r for r in p["runs"] if r["id"] == "r1")
-    assert r1["escalations"][0]["status"] == "timeout"
+    assert r1["escalations"][0]["status"] == "timed_out"
     assert r1["escalations"][0]["answer"] is None
 
 
@@ -418,18 +442,18 @@ def test_multi_agent_blocking_escalate_multi_settles_each(projected):
     # fold is order-correct: when esc2 resolves, esc1 is already resolved so it targets esc2).
     p = projected["multi_agent_blocking_escalate_multi"]
     assert p["status"] == "completed"
-    assert p["pendingInteraction"] is None
+    assert _pending_gates(p) == []
     r1 = next(r for r in p["runs"] if r["id"] == "r1")
     assert [(e["status"], e["answer"]) for e in r1["escalations"]] == [
         ("resolved", "用 Postgres。"),
-        ("timeout", None),
+        ("timed_out", None),
     ]
 
 
 def test_multi_agent_ceo_arbitrate_escalate_direct(projected):
     p = projected["multi_agent_ceo_arbitrate_escalate"]
     assert p["status"] == "completed"
-    assert p["pendingInteraction"] is None
+    assert _pending_gates(p) == []
     r1 = next(r for r in p["runs"] if r["id"] == "r1")
     assert len(r1["escalations"]) == 1
     esc = r1["escalations"][0]

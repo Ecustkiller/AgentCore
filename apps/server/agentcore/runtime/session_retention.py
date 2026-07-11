@@ -9,7 +9,7 @@ alive; one left alone for the retention window is pruned (a later 唤回 then �
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
@@ -24,10 +24,11 @@ async def run_session_retention_sweep() -> int:
     """Delete every session idle past the retention window; return rows removed.
 
     Batched (``session_roster_sweep_batch_limit`` per round) so a large backlog is
-    cleared without one huge transaction."""
+    cleared without one huge transaction. The cutoff is tz-aware UTC, matching how
+    ``run_sessions.updated_at`` is stamped (server ``now()``)."""
     if not settings.session_roster_persist_enabled:
         return 0
-    before = datetime.now() - timedelta(days=settings.session_roster_retention_days)
+    before = datetime.now(UTC) - timedelta(days=settings.session_roster_retention_days)
     limit = settings.session_roster_sweep_batch_limit
     total = 0
     async with async_session_factory() as session:

@@ -8,7 +8,9 @@ conversations (IDOR-safe). Sending runs the turn as a detached task tracked in t
 import asyncio
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query, Response
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Header, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.api.dependencies import (
@@ -35,6 +37,11 @@ from agentcore.api.schemas.messages import TurnCollabMetrics
 from agentcore.api.sse import sse_attach_response, sse_response
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.conversation.service import record_local_turn, stream_chat
+from agentcore.conversation.store import get_conversation_store
+from agentcore.conversation.store.overlay import (
+    overlay_message_fields,
+    overlay_runs_with_segments,
+)
 from agentcore.core.errors import NotFoundError
 from agentcore.db.repositories import (
     ConversationRepository,
@@ -111,19 +118,40 @@ async def list_messages(
     # The per-row fold is memoized by (message_id, journal version) so re-opening /
     # reloading a window doesn't re-project unchanged turns (项目审计-成本性能专项 PERF-003).
     journal_map = await journal_repo.load_map([m.id for m in messages])
+    # Batch-load in-flight stream segments for overlay (P1 · §3.3).
+    stream_map = await get_conversation_store().list_stream_segments_map(
+        turn_ids=[m.id for m in messages]
+    )
     details: list[MessageDetail] = []
     for m in messages:
         detail = MessageDetail.model_validate(m)
+        usage = m.usage or {}
+        segments = stream_map.get(m.id) or []
         runs = runs_from_entries_cached(m.id, journal_map.get(m.id))
+        runs = overlay_runs_with_segments(runs, segments, usage=usage)
         if runs is not None:
             detail.runs = RunsPayload.model_validate(runs)
         # 回合轮次 (Tier 2 重载): rounds shares the row's usage column but has no own
         # attribute, so project it on read (usage itself is normalized by the schema
         # validator). Drives the bubble's「N 轮」caption alongside usage.
-        rounds = (m.usage or {}).get("rounds")
+        rounds = usage.get("rounds")
         if rounds is not None:
             detail.rounds = rounds
-        collab = (m.usage or {}).get("collab")
+        # Assistant-row lifecycle (usage.status) — overlay criterion for stream_state.
+        status = usage.get("status")
+        if status is not None:
+            detail.status = status
+        # In-flight overlay: fill content / reasoning from turn_stream_state when running.
+        if segments:
+            content, reasoning = overlay_message_fields(
+                content=detail.content,
+                reasoning_content=detail.reasoning_content,
+                segments=segments,
+                usage=usage,
+            )
+            detail.content = content or ""
+            detail.reasoning_content = reasoning
+        collab = usage.get("collab")
         if collab is not None:
             detail.collab = TurnCollabMetrics.model_validate(collab)
         details.append(detail)
@@ -224,6 +252,36 @@ async def send_message(
     """
     await enforce_user_message_rate_limit(user.user_id)
 
+    # 提问确认交互统一 D9：热路挂起中同对话发新消息 → 409（regenerate/retry 不拦）
+    from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
+
+    _HOT = frozenset(
+        {
+            InteractionKind.APPROVAL,
+            InteractionKind.DELEGATION_AUTHORIZATION,
+            InteractionKind.ESCALATION,
+            InteractionKind.DEBATE_ROUND,
+        }
+    )
+    hot_pending = [
+        r
+        for r in default_interaction_registry().list_pending(conversation_id)
+        if r.kind in _HOT
+        and not (
+            r.kind is InteractionKind.ESCALATION and (r.payload or {}).get("awaiting") == "ceo"
+        )
+    ]
+    if hot_pending:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "pending_interactions_awaiting",
+                "pending_kinds": sorted({r.kind.value for r in hot_pending}),
+            },
+        )
+
     needs_tools = body.requires_tools or body.debate_seed is not None
     preflight = await _preflight_owned_chat_turn(
         conversation_id, user, session, needs_tools=needs_tools
@@ -266,6 +324,10 @@ async def stop_message(
     (already finished / never started), so a late click settles cleanly. Owner-gated.
     """
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    # 触发点④：stop 前 orphan 热路 pending
+    from agentcore.runtime.interaction_orphan import orphan_registry_pending
+
+    await orphan_registry_pending(conversation_id)
     stopped = turn_runs.stop(conversation_id)
     return StopTurnResponse(stopped=stopped)
 
@@ -275,6 +337,7 @@ async def attach_stream(
     conversation_id: str,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
 ):
     """Re-attach to the conversation's in-flight turn and 续看 it live (C1 · slice 1b).
 
@@ -284,6 +347,11 @@ async def attach_stream(
     content / reasoning block, the team graph, finished tool calls) then tails new
     events, all in the SAME event shape as the original stream, so the client folds it
     through one dispatch path.
+
+    With ``Last-Event-ID`` (P3): journal-backed full-turn durable replay + stream_state
+    synthetic deltas (header value observational — clients clear-then-fold), then live
+    tail. Without the header (same-process fast path): ``EventSink.take_over`` full
+    ``_history`` replay.
 
     Returns ``204 No Content`` when no run is live for the conversation (already
     finished / never started / suspended at a checkpoint) — the client then falls back
@@ -295,7 +363,12 @@ async def attach_stream(
     run = turn_runs.get(conversation_id)
     if run is None or run.task.done():
         return Response(status_code=204)
-    return sse_attach_response(run.sink)
+    cursor: int | None = None
+    if last_event_id is not None:
+        raw = last_event_id.strip()
+        if raw.isdigit():
+            cursor = int(raw)
+    return sse_attach_response(run.sink, last_event_id=cursor)
 
 
 @router.post("/{conversation_id}/local-turns", response_model=RecordTurnResponse)
@@ -333,6 +406,7 @@ async def record_local_turn_endpoint(
         assistant_reasoning=body.reasoning_content,
         citations=[c.model_dump() for c in body.citations] or None,
         runs=body.runs.model_dump() if body.runs else None,
+        journal=body.journal,
         user_message_id=body.user_message_id,
         message_id=body.message_id,
         input_tokens=body.input_tokens,

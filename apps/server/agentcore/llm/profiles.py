@@ -26,17 +26,21 @@ class ProfileParams:
     max_tokens: int | None = None
     max_rounds: int = 16
     name: str = ""
+    # None = provider default (DeepSeek V4 → thinking on). False = force off for
+    # background one-shots (title / memory / …) — required so a 64-token title
+    # budget is not eaten by reasoning_content (DeepSeek-V4-API参考 §七.2).
+    thinking: bool | None = None
 
 
 PROFILES: dict[str, ProfileParams] = {
     "chat": ProfileParams(temperature=0.7, max_rounds=16),
     "agent.fast": ProfileParams(temperature=0.7, max_rounds=8),
     "agent.strong": ProfileParams(temperature=0.7, max_rounds=28),
-    "memory": ProfileParams(temperature=0.3, max_rounds=1),
-    "compaction": ProfileParams(temperature=0.3, max_rounds=1),
-    "file.rewrite": ProfileParams(temperature=0.4, max_rounds=1),
-    "title": ProfileParams(temperature=0.3, max_tokens=64, max_rounds=1),
-    "followups": ProfileParams(temperature=0.5, max_tokens=256, max_rounds=1),
+    "memory": ProfileParams(temperature=0.3, max_rounds=1, thinking=False),
+    "compaction": ProfileParams(temperature=0.3, max_rounds=1, thinking=False),
+    "file.rewrite": ProfileParams(temperature=0.4, max_rounds=1, thinking=False),
+    "title": ProfileParams(temperature=0.3, max_tokens=64, max_rounds=1, thinking=False),
+    "followups": ProfileParams(temperature=0.5, max_tokens=256, max_rounds=1, thinking=False),
 }
 
 _DEFAULT_PROFILE = "chat"
@@ -70,6 +74,7 @@ def build_request(
         tool_choice=tool_choice if tools else "none",
         stream=stream,
         scenario=profile.name or _DEFAULT_PROFILE,
+        thinking=profile.thinking,
     )
 
 

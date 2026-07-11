@@ -252,13 +252,16 @@
       "completed": 1,
       "total": 2
     },
-    "pendingInteraction": {
-      "kind": "plan_review",
-      "checkpointId": "cp1",
-      "runIds": [
-        "r1"
-      ]
-    },
+    "interactions": [
+      {
+        "kind": "plan_review",
+        "id": "cp1",
+        "status": "pending",
+        "runIds": [
+          "r1"
+        ]
+      }
+    ],
     "cost": {
       "input": 240000,
       "cached": 64000,
@@ -268,6 +271,8 @@
     },
     "debate": null,
     "debateRounds": [],
+    "teamSynthesisPreview": null,
+    "turnWarning": null,
     "teamNotes": []
   }
 }

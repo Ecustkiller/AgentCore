@@ -3,7 +3,7 @@
 // Requires:
 //   - Backend on SMOKE_API (default http://localhost:8000) with SIMULATION_ENABLED=true
 //   - Seeded dev user (uv run python scripts/seed_dev_user.py)
-//   - Codex proxy on localhost:9090 for real LLM tick (or pass --mock to skip tick)
+//   - Runs are created with scripted:true (no real LLM). Pass --mock to skip tick advancement.
 //
 // Run:
 //   node apps/desktop/scripts/smoke-simulation.mjs
@@ -109,7 +109,7 @@ async function login() {
 async function createRun() {
   const res = await apiFetch("/v1/simulation/runs", {
     method: "POST",
-    body: { scenario: "town", seed: 1 },
+    body: { scenario: "town", seed: 1, scripted: true },
   });
   if (res.status === 404) {
     fail("simulation routes 404 — set SIMULATION_ENABLED=true on backend");

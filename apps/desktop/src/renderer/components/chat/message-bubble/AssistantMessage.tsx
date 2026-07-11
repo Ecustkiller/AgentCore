@@ -5,8 +5,8 @@ import { InlineTeamGraph } from "@/components/chat/InlineTeamGraph";
 import { Markdown } from "@/components/chat/Markdown";
 import { NonBlockingAskCard } from "@/components/chat/NonBlockingAskCard";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
-import { TeamPreviewCard } from "@/components/chat/TeamPreviewCard";
 import { type CitationFlash, SourceCards } from "@/components/chat/SourceCards";
+import { TeamPreviewCard } from "@/components/chat/TeamPreviewCard";
 import { TurnWarningBanner } from "@/components/chat/TurnWarningBanner";
 import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
 import { Button, IconButton } from "@/components/ui";
@@ -34,6 +34,7 @@ import {
   useConversationStore,
 } from "@/stores/conversation";
 import { useMessageExecution } from "@/stores/execution";
+import { useMessageInteractionCards } from "@/stores/interactions";
 import { useUsageStore } from "@/stores/usage";
 import type { ProcessStep } from "@/types/events";
 import {
@@ -48,6 +49,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AssistantMessageFooter } from "./AssistantMessageFooter";
 import { ComposingToolLine, ProcessTimeline } from "./ProcessTimeline";
+import { SyncStatusHint } from "./SyncStatusHint";
 import { ThinkingDots, ThinkingPanel } from "./Thinking";
 import type { MessageBubbleProps } from "./types";
 import { useCopyAction } from "./useCopyAction";
@@ -76,10 +78,10 @@ function MultiAgentFileArtifacts({
 
 /**
  * 续写被截断的回答 (对话基础功能补齐) — when the *latest* reply ended early (用户叫停 =
- * `cancelled`, or the agent hit its round budget = `max_rounds`), offer a one-click
- * 「继续生成」. It sends a minimal「继续」turn so the model resumes from the transcript.
- * Only the last turn is resumable (continuing a mid-history turn would fork the thread),
- * and never while a turn is already streaming.
+ * `cancelled`, crash salvage = `interrupted`, or the agent hit its round budget =
+ * `max_rounds`), offer a one-click 「继续生成」. It sends a minimal「继续」turn so the
+ * model resumes from the transcript. Only the last turn is resumable (continuing a
+ * mid-history turn would fork the thread), and never while a turn is already streaming.
  */
 function ContinueTurnButton({
   message,
@@ -96,22 +98,37 @@ function ContinueTurnButton({
   });
   const [busy, setBusy] = useState(false);
   const eligible =
-    finishReason === "cancelled" || finishReason === "max_rounds";
-  if (
-    !conversationId ||
-    !isLast ||
-    isGenerating ||
-    !eligible ||
-    message.content.length === 0
-  ) {
+    finishReason === "cancelled" ||
+    finishReason === "interrupted" ||
+    finishReason === "max_rounds";
+  if (!conversationId || !isLast || isGenerating || !eligible) {
     return null;
   }
+  // Interrupted salvage may have no body — still offer regenerate (P4).
+  if (finishReason !== "interrupted" && message.content.length === 0) {
+    return null;
+  }
+  const useRegenerate =
+    finishReason === "interrupted" && message.content.length === 0;
   const onContinue = async () => {
     setBusy(true);
     try {
-      await continueTurn(conversationId);
+      if (useRegenerate) {
+        const msgs = getActiveRuntime().messages;
+        const idx = msgs.findIndex((m) => m.id === message.id);
+        let userId: string | null = null;
+        for (let i = idx - 1; i >= 0; i--) {
+          if (msgs[i].role === "user") {
+            userId = msgs[i].id;
+            break;
+          }
+        }
+        if (userId) await runRegenerate(userId);
+      } else {
+        await continueTurn(conversationId);
+      }
     } catch (err) {
-      notifyError(err, "继续生成失败");
+      notifyError(err, useRegenerate ? "重试失败" : "继续生成失败");
     } finally {
       setBusy(false);
     }
@@ -121,11 +138,17 @@ function ContinueTurnButton({
       <Button
         variant="neutral"
         className="border-border/70"
-        icon={<StepForward size={13} />}
+        icon={useRegenerate ? <RefreshCw size={13} /> : <StepForward size={13} />}
         disabled={busy}
         onClick={() => void onContinue()}
       >
-        {busy ? "继续中…" : "继续生成"}
+        {busy
+          ? useRegenerate
+            ? "重试中…"
+            : "继续中…"
+          : useRegenerate
+            ? "重试"
+            : "继续生成"}
       </Button>
     </div>
   );
@@ -152,10 +175,8 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     () => referencedCitationNumbers(message.content, citations.length),
     [message.content, citations.length],
   );
-  const checkpoints = message.checkpoints ?? [];
-  const nonBlockingAsks = message.nonBlockingAsks ?? [];
-  const planReviews = message.planReviews ?? [];
-  const teamPreviews = message.teamPreviews ?? [];
+  const { checkpoints, nonBlockingAsks, planReviews, teamPreviews } =
+    useMessageInteractionCards(conversationId, message.id);
   const hideContentForCheckpoint = checkpoints.some(
     (c) => c.status === "resolved",
   );
@@ -429,6 +450,11 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
               {streamCopied ? <Check size={14} /> : <Copy size={14} />}
             </IconButton>
           </SimpleTooltip>
+        </div>
+      )}
+      {!message.isStreaming && message.syncStatus && (
+        <div className="mt-1">
+          <SyncStatusHint syncStatus={message.syncStatus} />
         </div>
       )}
       {!message.isStreaming && !isGenerating && message.content.length > 0 && (

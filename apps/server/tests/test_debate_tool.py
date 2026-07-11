@@ -5,6 +5,11 @@ RoundRunner】——首轮 ``build_agent_executor`` + ``WaveScheduler`` 派并�
 ``continue_run`` 续写——用一个同时实现 ``complete``（主持人 JSON）+ ``stream``（辩手发言）的
 假 provider 驱动，验证工具壳：双产物输出、三层折账（captain→主持人→辩手）、辩手跨轮带记忆、
 入参校验、本地执行门、红队形态立场注入。真模型留给 nightly。
+
+质询回合（P1）：``questions`` 非空时 ``complete(cross_exam)`` 产出定向质询，``stream`` 对质询
+feedback 回结构化 JSON，驱动真实 ``make_cross_exam_runner``（continue_run → 解析 → 落
+``RoundResult.cross_exam`` / 失败兜底）。默认 ``questions=None`` → cross_exam 步回 ``{}``，
+与既有 thorough 用例「跳过质询 beat」行为一致。
 """
 
 import json
@@ -50,17 +55,41 @@ _BRIEF = {
     "open_questions": ["你的风险偏好是什么"],
 }
 
+# 质询集成默认题集（与断言文案对齐；thorough + 正反才会开质询 beat）。
+_CX_QUESTIONS = {
+    "pro": ["收益是否计入尾部风险？", "熔断成本由谁承担？"],
+    "con": ["你反对的替代方案是什么？"],
+}
+
 
 class _DebateLLM:
     """假 provider：``complete`` 按 scenario 末段返回主持人 JSON，``stream`` 产辩手发言。
 
     ``converge_at`` 控制裁判第几轮起判收敛（测最小轮门槛 / 收敛）；``stream_requests`` 记录每
-    次辩手调用的 LLMRequest，供断言跨轮 feedback 注入与形态角色指引。"""
+    次辩手调用的 LLMRequest，供断言跨轮 feedback 注入与形态角色指引。
 
-    def __init__(self, *, converge_at: int = 1, brief: dict | None = None) -> None:
+    质询（opt-in）：``questions`` 非空时 ``cross_exam`` 步回定向质询；``stream`` 若看到质询
+    feedback（含「质询环节」）则按 ``cx_answer_style`` 产 JSON 作答（``wrapper`` = 带
+    question_index 的对象数组；``scalar`` = 纯字符串数组按位置映射，回归 06 F2）。
+    ``cx_fail_sides`` 内的方对质询回空内容，驱动 runner 失败兜底（exchanges ok=False）。
+    """
+
+    def __init__(
+        self,
+        *,
+        converge_at: int = 1,
+        brief: dict | None = None,
+        questions: dict[str, list[str]] | None = None,
+        cx_answer_style: str = "wrapper",
+        cx_fail_sides: frozenset[str] | None = None,
+    ) -> None:
         self.converge_at = converge_at
         self.brief = brief if brief is not None else _BRIEF
+        self.questions = questions
+        self.cx_answer_style = cx_answer_style
+        self.cx_fail_sides = cx_fail_sides or frozenset()
         self.judge_calls = 0
+        self.cross_exam_calls = 0
         self.stream_calls = 0
         self.stream_requests: list = []
 
@@ -68,6 +97,11 @@ class _DebateLLM:
         step = (request.scenario or "").rsplit(".", 1)[-1]
         if step == "frame":
             return LLMResponse(content=json.dumps({"focus": "本轮焦点"}), usage=_USAGE)
+        if step == "cross_exam":
+            self.cross_exam_calls += 1
+            # 未配置 questions → {}，主持人跳过质询 beat（既有 thorough 用例零行为变化）。
+            payload = {"questions": self.questions} if self.questions else {}
+            return LLMResponse(content=json.dumps(payload), usage=_USAGE)
         if step == "assess":
             # 合并裁判：一次调用同产裁判判定 + 本轮小结（:meth:`Moderator._judge_and_summarize`）。
             self.judge_calls += 1
@@ -86,9 +120,42 @@ class _DebateLLM:
             return LLMResponse(content=json.dumps(self.brief), usage=_USAGE)
         return LLMResponse(content="{}", usage=_USAGE)
 
+    def _cx_answer_content(self, joined: str) -> str:
+        """按 feedback 里出现的质询题匹配 side，产出作答 JSON（或空串触发失败兜底）。"""
+        for key, qs in (self.questions or {}).items():
+            if not qs or qs[0] not in joined:
+                continue
+            if key in self.cx_fail_sides:
+                return ""
+            if self.cx_answer_style == "scalar":
+                return json.dumps(
+                    [f"标量答·{key}·{i + 1}【待核实·推断】" for i in range(len(qs))],
+                    ensure_ascii=False,
+                )
+            return json.dumps(
+                [
+                    {
+                        "question_index": i + 1,
+                        "answer": f"正面答·{key}·{i + 1}【待核实·推断】",
+                        "directly_addressed": True,
+                    }
+                    for i in range(len(qs))
+                ],
+                ensure_ascii=False,
+            )
+        return "[]"
+
     async def stream(self, request):  # noqa: ANN001
         self.stream_calls += 1
         self.stream_requests.append(request)
+        joined = "\n".join(getattr(m, "content", "") or "" for m in request.messages)
+        # 质询 continue_run：feedback 含「质询环节」——回结构化 JSON，驱动真实 runner 解析落库。
+        if "质询环节" in joined:
+            content = self._cx_answer_content(joined)
+            if content:
+                yield LLMChunk(delta_content=content)
+            yield LLMChunk(usage=_USAGE)
+            return
         yield LLMChunk(delta_content=f"辩手发言#{self.stream_calls}")
         yield LLMChunk(usage=_USAGE)
 
@@ -236,6 +303,93 @@ async def test_multi_round_cross_round_memory():
     assert any("_r3_con" in rid for rid in ledger_ids)
     assert any("_closing_pro" in rid for rid in ledger_ids)
     assert any("_closing_con" in rid for rid in ledger_ids)
+
+
+async def test_cross_exam_real_runner_lands_exchanges():
+    """真实 make_cross_exam_runner：主持人 cross_exam 出题 → continue_run 作答 → 解析落
+    RoundResult.cross_exam；ledger 含 ``_r{n}_cx_{key}``；质询 feedback 进辩手 prompt。"""
+    llm = _DebateLLM(converge_at=1, questions=_CX_QUESTIONS)
+    sink = EventSink()
+    tool = _tool(llm, sink=sink)
+    result = await tool.execute(
+        {"motion": "该不该做 X", "form": "debate", "sides": _sides()}, _ctx()
+    )
+    assert result.success is True
+    assert llm.cross_exam_calls == 1
+    # 1 轮 × 2 立论 + 2 质询作答 + 2 结辩 = 6
+    assert llm.stream_calls == 6
+    msgs = [m.content for req in llm.stream_requests for m in req.messages]
+    assert any("质询环节" in c for c in msgs)
+
+    sink.close()
+    events = [e async for e in sink if e.type == EventType.DEBATE_RESULT]
+    assert len(events) == 1
+    cx = events[0].payload["rounds"][0]["cross_exam"]
+    assert [c["target"] for c in cx] == ["pro", "con"]
+    assert cx[0]["answer_run_id"].endswith("_r1_cx_pro")
+    assert cx[1]["answer_run_id"].endswith("_r1_cx_con")
+    assert len(cx[0]["exchanges"]) == 2
+    assert cx[0]["exchanges"][0]["question"] == _CX_QUESTIONS["pro"][0]
+    assert "正面答·pro·1" in cx[0]["exchanges"][0]["answer"]
+    assert cx[0]["exchanges"][0]["ok"] is True
+    assert "正面答·pro·2" in cx[0]["exchanges"][1]["answer"]
+    assert len(cx[1]["exchanges"]) == 1
+    assert "正面答·con·1" in cx[1]["exchanges"][0]["answer"]
+    assert all(ex["ok"] for c in cx for ex in c["exchanges"])
+
+    ledger_ids = [r.run_id for r in tool.run_ledger]
+    assert any("_r1_cx_pro" in rid for rid in ledger_ids)
+    assert any("_r1_cx_con" in rid for rid in ledger_ids)
+
+
+async def test_cross_exam_real_runner_scalar_array_maps_by_position():
+    """端到端回归 06 F2：辩手少包一层 ``["答一","答二"]`` 时，真实 runner 仍按位置映射进
+    exchanges，不静默丢答。"""
+    llm = _DebateLLM(converge_at=1, questions=_CX_QUESTIONS, cx_answer_style="scalar")
+    sink = EventSink()
+    tool = _tool(llm, sink=sink)
+    result = await tool.execute(
+        {"motion": "该不该做 X", "form": "debate", "sides": _sides()}, _ctx()
+    )
+    assert result.success is True
+    sink.close()
+    events = [e async for e in sink if e.type == EventType.DEBATE_RESULT]
+    cx = events[0].payload["rounds"][0]["cross_exam"]
+    pro = next(c for c in cx if c["target"] == "pro")
+    assert len(pro["exchanges"]) == 2
+    assert "标量答·pro·1" in pro["exchanges"][0]["answer"]
+    assert pro["exchanges"][0]["ok"] is True
+    assert "标量答·pro·2" in pro["exchanges"][1]["answer"]
+    assert pro["exchanges"][1]["ok"] is True
+    con = next(c for c in cx if c["target"] == "con")
+    assert "标量答·con·1" in con["exchanges"][0]["answer"]
+    assert con["exchanges"][0]["ok"] is True
+
+
+async def test_cross_exam_real_runner_failed_answer_marks_not_ok():
+    """质询 continue_run 空内容 → runner 走失败兜底：exchanges 全标 ok=False、answer 空。"""
+    llm = _DebateLLM(
+        converge_at=1,
+        questions=_CX_QUESTIONS,
+        cx_fail_sides=frozenset({"con"}),
+    )
+    sink = EventSink()
+    tool = _tool(llm, sink=sink)
+    result = await tool.execute(
+        {"motion": "该不该做 X", "form": "debate", "sides": _sides()}, _ctx()
+    )
+    assert result.success is True
+    sink.close()
+    events = [e async for e in sink if e.type == EventType.DEBATE_RESULT]
+    cx = events[0].payload["rounds"][0]["cross_exam"]
+    by_target = {c["target"]: c for c in cx}
+    assert all(ex["ok"] for ex in by_target["pro"]["exchanges"])
+    assert "正面答·pro" in by_target["pro"]["exchanges"][0]["answer"]
+    assert by_target["con"]["answer_run_id"].endswith("_r1_cx_con")
+    assert len(by_target["con"]["exchanges"]) == 1
+    assert by_target["con"]["exchanges"][0]["question"] == _CX_QUESTIONS["con"][0]
+    assert by_target["con"]["exchanges"][0]["answer"] == ""
+    assert by_target["con"]["exchanges"][0]["ok"] is False
 
 
 async def test_rejects_missing_motion():

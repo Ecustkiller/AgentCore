@@ -1,125 +1,37 @@
-"""Structured checkpoint (plan_review) tests."""
+"""Structured checkpoint (plan_review) tests.
+
+提问确认交互统一 P1 · D11：窄兜底已删。无 durable saver / transcript 时 plan_review
+跳过挂起放行下游（不再假等待）。带 saver 的 continue/stop/adjust 见 test_durable.py。
+"""
 
 import asyncio
 
-from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry
-from tests.delegate.conftest import CKPT_DAG, CKPT_FORK_DAG, Provider, ctx, tool, tool_ckpt
+from agentcore.tools.builtin.delegate import DelegateTool
+from agentcore.tools.registry import ToolRegistry
+from tests.delegate.conftest import CKPT_DAG, Provider, ctx, tool, tool_ckpt
 
 
-async def _resolve_when_pending(
-    registry: InteractionRegistry,
-    conversation_id: str,
-    decision: CheckpointDecision,
-    note: str = "",
-):
-    from agentcore.runtime.checkpoints import CheckpointResponse
-
-    for _ in range(500):
-        pending = registry.list_pending(conversation_id)
-        # ≥2 worker 首波前会先挂 team_preview；本套测专测波间 plan_review，先放行预审。
-        for p in list(pending):
-            if p.kind.value == "team_preview":
-                registry.resolve(
-                    p.id,
-                    CheckpointResponse(decision=CheckpointDecision.CONTINUE),
-                    conversation_id=conversation_id,
-                )
-        pending = [
-            p
-            for p in registry.list_pending(conversation_id)
-            if p.kind.value == "plan_review"
-        ]
-        if pending:
-            registry.resolve(
-                pending[0].id,
-                CheckpointResponse(decision=decision, note=note),
-                conversation_id=conversation_id,
-            )
-            return pending[0]
-        await asyncio.sleep(0.005)
-    raise AssertionError("no pending plan_review appeared")
-
-
-async def test_checkpoint_after_pauses_then_continues():
+async def test_checkpoint_skipped_without_durable_frame():
+    """无 saver/transcript ⇒ persist 失败 ⇒ 跳过挂起，两 worker 都跑完。"""
     registry = InteractionRegistry()
     sink = EventSink()
     t = tool_ckpt(Provider(["S1OUT", "S2OUT"]), sink, registry, "conv1", timeout=5.0)
-    exec_task = asyncio.create_task(t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx()))
-    pending = await _resolve_when_pending(registry, "conv1", CheckpointDecision.CONTINUE)
-    result = await exec_task
+    result = await t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx())
 
-    assert pending.kind.value == "plan_review"
-    assert any(s["role"] == "研究员" for s in pending.payload["steps"])
-    assert any(p["role"] == "写手" for p in pending.payload["pending"])
     assert "S1OUT" in result.output
     assert "S2OUT" in result.output
+    assert registry.list_pending("conv1") == []
     sink.close()
     types = [e.type async for e in sink]
-    assert EventType.PLAN_REVIEW_REQUIRED in types
-    assert EventType.PLAN_REVIEW_RESOLVED in types
+    # 未落盘不 emit required（避免假卡）
+    assert EventType.PLAN_REVIEW_REQUIRED not in types
+    assert EventType.PLAN_REVIEW_RESOLVED not in types
 
 
-async def test_checkpoint_after_stop_halts_downstream():
-    registry = InteractionRegistry()
-    sink = EventSink()
-    t = tool_ckpt(Provider(["S1OUT", "S2OUT"]), sink, registry, "conv1", timeout=5.0)
-    exec_task = asyncio.create_task(t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx()))
-    await _resolve_when_pending(registry, "conv1", CheckpointDecision.STOP)
-    result = await exec_task
-
-    assert "S1OUT" in result.output
-    assert "S2OUT" not in result.output
-    assert "写手" in result.output
-
-
-async def test_checkpoint_after_adjust_steers_downstream():
-    registry = InteractionRegistry()
-    sink = EventSink()
-    provider = Provider(["S1OUT", "S2OUT"])
-    t = tool_ckpt(provider, sink, registry, "conv1", timeout=5.0)
-    exec_task = asyncio.create_task(t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx()))
-    await _resolve_when_pending(
-        registry, "conv1", CheckpointDecision.ADJUST, note="把重点放在风险上"
-    )
-    result = await exec_task
-
-    assert "S2OUT" in result.output
-    s2_user = next(
-        m.content
-        for req in provider.requests
-        for m in req.messages
-        if m.role == "user" and "撰写" in (m.content or "")
-    )
-    assert "把重点放在风险上" in s2_user
-    assert "用户中途调整指示" in s2_user
-
-
-async def test_checkpoint_adjust_steers_only_dependents_not_parallel_branch():
-    registry = InteractionRegistry()
-    sink = EventSink()
-    provider = Provider(["S1OUT", "U1OUT", "S2OUT", "U2OUT"])
-    t = tool_ckpt(provider, sink, registry, "conv1", timeout=5.0)
-    exec_task = asyncio.create_task(t.execute({"tasks": CKPT_FORK_DAG, "coordinate": False}, ctx()))
-    await _resolve_when_pending(
-        registry, "conv1", CheckpointDecision.ADJUST, note="把重点放在风险上"
-    )
-    await exec_task
-
-    def _user_prompt(task_marker: str) -> str:
-        return next(
-            m.content
-            for req in provider.requests
-            for m in req.messages
-            if m.role == "user" and task_marker in (m.content or "")
-        )
-
-    assert "把重点放在风险上" in _user_prompt("撰写")
-    assert "把重点放在风险上" not in _user_prompt("付款")
-
-
-async def test_checkpoint_timeout_continues():
+async def test_checkpoint_timeout_setting_no_longer_auto_continues_via_narrow_net():
+    """原窄兜底 timeout→continue 已删；无 frame 时直接放行，不发 resolved。"""
     registry = InteractionRegistry()
     sink = EventSink()
     t = tool_ckpt(Provider(["S1OUT", "S2OUT"]), sink, registry, "conv1", timeout=0.05)
@@ -128,8 +40,7 @@ async def test_checkpoint_timeout_continues():
     assert "S2OUT" in result.output
     sink.close()
     types = [e.type async for e in sink]
-    assert EventType.PLAN_REVIEW_REQUIRED in types
-    assert EventType.PLAN_REVIEW_RESOLVED in types
+    assert EventType.PLAN_REVIEW_RESOLVED not in types
 
 
 async def test_checkpoint_inert_when_disabled():
@@ -141,3 +52,30 @@ async def test_checkpoint_inert_when_disabled():
     sink.close()
     types = [e.type async for e in sink]
     assert EventType.PLAN_REVIEW_REQUIRED not in types
+
+
+async def test_checkpoint_after_skipped_when_gate_off():
+    """闸关（checkpoint_enabled=False）时含 checkpoint_after 的 DAG 不结构挂起。"""
+    registry = InteractionRegistry()
+    sink = EventSink()
+    t = DelegateTool(
+        llm=Provider(["S1OUT", "S2OUT"]),
+        sink=sink,
+        system_prompt="SYS",
+        user_message="原始请求",
+        history=[],
+        tools=ToolRegistry(),
+        base_tool_context=ctx(),
+        conversation_id="conv-gate-off",
+        registry=registry,
+        checkpoint_timeout_seconds=5.0,
+        checkpoint_enabled=False,
+    )
+    result = await t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx())
+    assert "S1OUT" in result.output
+    assert "S2OUT" in result.output
+    assert registry.list_pending("conv-gate-off") == []
+    sink.close()
+    types = [e.type async for e in sink]
+    assert EventType.PLAN_REVIEW_REQUIRED not in types
+    assert EventType.PLAN_REVIEW_RESOLVED not in types

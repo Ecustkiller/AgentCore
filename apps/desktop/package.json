@@ -17,6 +17,7 @@
     "smoke:simulation": "node scripts/smoke-simulation.mjs",
     "smoke:simulation:mock": "node scripts/smoke-simulation.mjs --mock",
     "sim:smoke:e2e": "node scripts/smoke-simulation-e2e.mjs",
+    "sim:smoke:e2e:mock": "node scripts/smoke-simulation-e2e.mjs --mock",
     "build": "electron-vite build",
     "build:webapp": "vite build --config vite.webapp.config.ts",
     "deploy:web": "node scripts/deploy-web.mjs",

@@ -11,7 +11,7 @@ import type { SidecarHistoryEntry } from "@shared/sidecar-contract";
  * 会话路由判定：一个回合该走本地 sidecar，还是云端 SSE。
  *
  * 双模式工作区 / 远期规划 §一.1。sidecar 的持久化 / 计费现经回合结束**回写云端**已闭环（幂等
- * 可重试，见 `streamConversationViaSidecar` / `localTurns`），且**启动失败会自动降级回云端**
+ * 可重试，见 `streamConversationViaSidecar`），且**启动失败会自动降级回云端**
  * （见 `turns.sendTurn`），故本地引擎已毕业到**默认开**。
  *
  * 路由判定：会话绑定本机存在的本地根、本回合无附件、且开关有效（默认开，用户可在

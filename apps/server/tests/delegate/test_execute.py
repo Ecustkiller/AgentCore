@@ -4,8 +4,9 @@ import agentcore.tools.builtin.delegate.tool as delegate_tool_mod
 from agentcore.core.types import ToolEffect
 from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.events import EventSink, EventType
+from agentcore.runtime.runs import BoundaryReason
 from tests.conftest import LogSpy
-from tests.delegate.conftest import Provider, ctx, tool
+from tests.delegate.conftest import LATE_BIND_DAG, Provider, ctx, tool
 
 
 async def test_parallel_delegate_returns_products_non_terminal():
@@ -165,6 +166,29 @@ async def test_single_worker_with_checkpoint_keeps_standard_complexity_hint(monk
         ctx(),
     )
     assert spy.get("delegate.started")["complexity_hint"] == "standard"
+
+
+async def test_explicit_light_with_dag_features_ignored(monkeypatch):
+    """显式 light + depends_on/bind_after_deps 时忽略 light，保留波边界让出。"""
+    spy = LogSpy()
+    monkeypatch.setattr(delegate_tool_mod, "logger", spy)
+    provider = Provider(["AOUT", "BOUT"])
+    t = tool(provider)
+    first = await t.execute(
+        {
+            "tasks": LATE_BIND_DAG,
+            "complexity_hint": "light",
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert spy.get("delegate.started")["complexity_hint"] == "standard"
+    assert first.success is True
+    assert "计划已让出" in first.output
+    assert "AOUT" in first.output
+    assert "BOUT" not in first.output
+    assert t._supervised is not None
+    assert t._supervised.reason is BoundaryReason.BIND
 
 
 async def test_delegate_started_logs_who_what_and_first_wave_parallel(monkeypatch):

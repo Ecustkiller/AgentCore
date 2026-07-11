@@ -11,6 +11,7 @@
     "./fixtures/simulation-region-positions.json": "./fixtures/simulation-region-positions.json",
     "./fixtures/simulation-m1-tick.json": "./fixtures/simulation-m1-tick.json",
     "./fixtures/simulation/multi-agent-tick.json": "./fixtures/simulation/multi-agent-tick.json",
+    "./fixtures/simulation/coordinate-transform.json": "./fixtures/simulation/coordinate-transform.json",
     "./fixtures/simulation/interaction-conversation.json": "./fixtures/simulation/interaction-conversation.json",
     "./fixtures/simulation/world-event.json": "./fixtures/simulation/world-event.json",
     "./fixtures/simulation/tick-frame-snapshot.json": "./fixtures/simulation/tick-frame-snapshot.json",

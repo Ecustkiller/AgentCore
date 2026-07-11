@@ -36,7 +36,9 @@ from .runs import (
     PausedTurnRow,
     RunSessionRow,
     TurnJournalRow,
+    TurnLeaseRow,
     TurnMetricsRow,
+    TurnStreamStateRow,
 )
 from .simulation import SimAgent, SimEvent, SimTick, SimulationRun
 from .users import User, UserBlock, UserDirectorySettings
@@ -69,7 +71,9 @@ __all__ = [
     "SimTick",
     "SimulationRun",
     "TurnJournalRow",
+    "TurnLeaseRow",
     "TurnMetricsRow",
+    "TurnStreamStateRow",
     "User",
     "UserBlock",
     "UserDirectorySettings",

@@ -209,102 +209,6 @@ def run_escalation_gate(
     )
 
 
-def run_split_assessed(
-    run_id: str,
-    agent_id: str,
-    *,
-    should_split: bool,
-    rationale: str = "",
-    triggers: list[str] | None = None,
-    subtasks: list[dict[str, Any]] | None = None,
-    pressure: dict[str, Any] | None = None,
-) -> SSEEvent:
-    """Worker 顺序分裂评估结果（Phase 2）。
-
-    Emitted when runtime pressure trips and an assess pass decides whether to
-    spawn sequential Sub-Workers. Journaled so reload can show the split diagnosis.
-    """
-    return SSEEvent(
-        type=EventType.RUN_SPLIT_ASSESSED,
-        payload={
-            "run_id": run_id,
-            "agent_id": agent_id,
-            "should_split": should_split,
-            "rationale": rationale,
-            "triggers": list(triggers or []),
-            "subtask_count": len(subtasks or []),
-            "subtasks": list(subtasks or []),
-            "pressure": pressure or {},
-        },
-    )
-
-
-def run_subworker_started(
-    run_id: str,
-    agent_id: str,
-    *,
-    subworker_id: str,
-    goal: str,
-    token_budget: int = 0,
-    index: int = 0,
-    total: int = 0,
-    can_split: bool = False,
-    depth: int = 1,
-) -> SSEEvent:
-    """A sequential Sub-Worker is about to start (Phase 2)."""
-    return SSEEvent(
-        type=EventType.RUN_SUBWORKER_STARTED,
-        payload={
-            "run_id": run_id,
-            "agent_id": agent_id,
-            "subworker_id": subworker_id,
-            "goal": goal,
-            "token_budget": token_budget,
-            "index": index,
-            "total": total,
-            "can_split": can_split,
-            "depth": depth,
-        },
-    )
-
-
-def run_subworker_completed(
-    run_id: str,
-    agent_id: str,
-    *,
-    subworker_id: str,
-    success: bool,
-    summary: str = "",
-    artifact_refs: list[str] | None = None,
-    failure: str = "",
-    side_effects: list[str] | None = None,
-    tokens_used: int = 0,
-    rounds: int = 0,
-    index: int = 0,
-    total: int = 0,
-    fold_summary: str = "",
-) -> SSEEvent:
-    """A sequential Sub-Worker finished; payload folds into the parent journal node."""
-    return SSEEvent(
-        type=EventType.RUN_SUBWORKER_COMPLETED,
-        payload={
-            "run_id": run_id,
-            "agent_id": agent_id,
-            "subworker_id": subworker_id,
-            "success": success,
-            "summary": summary,
-            "artifact_refs": list(artifact_refs or []),
-            "failure": failure,
-            "side_effects": list(side_effects or []),
-            "tokens_used": tokens_used,
-            "rounds": rounds,
-            "index": index,
-            "total": total,
-            "fold_summary": fold_summary,
-        },
-    )
-
-
 def team_note_posted(
     *,
     execution_id: str,
@@ -448,8 +352,8 @@ def team_synthesis_preview(
 
     Emitted from ``drive._progress`` after each worker finishes when the plan has ≥2
     nodes. Template-only (no LLM) — verifies progressive visibility without changing
-    ReAct / delegate blocking. Transport-only (EPHEMERAL): not journaled, not in
-    ProjectedTurn; the live StatusStrip reads it off the stream. Must NOT reuse
+    ReAct / delegate blocking. DURABLE (P2)：落 journal；前端 fold 同 key 保最新，
+    刷新后 StatusStrip / ProjectedTurn.teamSynthesisPreview 可重建。Must NOT reuse
     ``content_delta`` (would pollute the final CEO bubble).
 
     → 见 docs/03-AI核心/编排器与CEO主Agent.md §协调模式（合成通道）

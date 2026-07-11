@@ -40,17 +40,6 @@ export function flushPendingFrames(conversationId: string): void {
   useExecutionStore.getState().recordFrames(buffered, mid);
 }
 
-/** 丢弃某会话已缓冲的 frame 批并取消挂起的 rAF（不落库）。硬重置/中断清理用；
- *  与 {@link discardPendingContent} 对偶。无缓冲时为 no-op。 */
-export function discardPendingFrames(conversationId: string): void {
-  const raf = pendingFrameRaf.get(conversationId);
-  if (raf !== undefined) {
-    cancelAnimationFrame(raf);
-    pendingFrameRaf.delete(conversationId);
-  }
-  pendingFrames.delete(conversationId);
-}
-
 /** 把一个高频帧入桶，并确保已排定一次 frame flush。 */
 export function queueFrame(conversationId: string, frame: RunFrame): void {
   const arr = pendingFrames.get(conversationId);

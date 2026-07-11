@@ -22,7 +22,7 @@ from agentcore.runtime.events import (
     reasoning_delta,
     run_escalation_gate,
 )
-from agentcore.runtime.routing import evaluate_after_tools, signals_as_dicts, total_tool_failures
+from agentcore.runtime.routing import evaluate_after_tools, signals_as_dicts
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 
@@ -81,7 +81,7 @@ async def react_loop(
     deliverable_only: bool = False,
     supports_tools: bool | None = None,
     gate_escalation_sink: list[dict[str, Any]] | None = None,
-    split_context: dict[str, Any] | None = None,
+    token_budget: int = 0,
 ) -> tuple[str, str, TokenUsage, int]:
     """Run the ReAct loop.
 
@@ -172,11 +172,16 @@ async def react_loop(
     runs the Escalation Gate after ``execute_tools``; scheme-layer signals are appended
     here and emitted as ``run_escalation_gate``. CEO / solo leave it ``None`` (gate inert).
 
-    ``split_context`` (Worker routing Phase 2 · Sequential Split): when provided with
-    ``can_split=True`` (parent Worker), each non-terminal tool round — after the
-    Escalation Gate and ``controller.record`` — checks runtime pressure and may spawn
-    sequential Sub-Workers. Sub-Workers pass ``can_split=False`` (depth hard limit).
-    ``None`` leaves splitting inert (CEO / solo / tests).
+    ``token_budget`` (Worker hard ceiling · loose backstop): a cumulative
+    input+output token cap for the whole run, checked at the TOP of each round. Once
+    ``total_usage.total_tokens`` reaches it the loop stops and force-finalizes — the
+    backstop against a worker blowing far past its estimate (the 2221→41378
+    pathology). The terminal finalize (this AND ``max_rounds`` exhaustion) is
+    gate-routed by run health (``controller.is_thrashing()``): an on-track run
+    delivers normally; a thrashing worker finishes DEGRADED and emits an observable
+    ``escalation_raised`` signal (no auto re-decompose — the CEO may voluntarily
+    replan). ``0`` (CEO / solo / tests) disables the backstop, leaving the run bounded
+    only by ``profile.max_rounds``.
     """
     profile = profile or get_profile("chat")
     if usage_sink is not None:
@@ -214,8 +219,26 @@ async def react_loop(
     controller = create_loop_controller(investigation_tools)
     active_model: str | None = base_model
     finish_guard_reworks = 0
+    ceiling_reason = "max_rounds"
+    round_idx = 0
 
     for round_idx in range(profile.max_rounds):
+        # Loose token backstop (Worker 硬顶): stop BEFORE starting a round once the run's
+        # cumulative input+output tokens reach the ceiling, so a runaway overshoots by at
+        # most one round instead of grinding on (根因: 之前没人比对这个累计数). ``total_usage``
+        # is updated at each round's end, so this reflects rounds 0..round_idx-1. 0 =
+        # disabled (CEO / solo / tests → bounded only by max_rounds).
+        if token_budget > 0 and total_usage.total_tokens >= token_budget:
+            ceiling_reason = "token_budget"
+            logger.warning(
+                "engine.token_budget_exhausted",
+                run_id=run_id,
+                role=role,
+                tokens=total_usage.total_tokens,
+                token_budget=token_budget,
+                round=round_idx,
+            )
+            break
         if round_sink is not None:
             round_sink[:] = [round_idx + 1]
         logger.debug("react.round_start", round=round_idx, messages=len(messages))
@@ -253,6 +276,7 @@ async def react_loop(
             round_idx=round_idx,
             run_id=run_id,
             raise_on_error=raise_on_error,
+            on_reset=emit_reset,
         )
 
         if isinstance(round_result, LlmRoundFailure):
@@ -268,6 +292,27 @@ async def react_loop(
                 error_context=round_result.error_context,
             )
             directive: LoopDirective = decide_llm_failure(final_content=final_content)
+        elif round_result.aborted:
+            # Post-commit disconnect / stall: keep the partial prose and finish
+            # DEGRADED (resume entry stays available via existing infrastructure).
+            usage = round_result.usage
+            if usage:
+                total_usage = total_usage + usage
+            if usage_sink is not None:
+                usage_sink[:] = [total_usage]
+            if round_result.content:
+                final_content = join_segments(final_content, round_result.content)
+            if round_result.reasoning:
+                final_reasoning += round_result.reasoning
+            outcome = RoundOutcome(
+                content=round_result.content,
+                reasoning=round_result.reasoning,
+                usage=usage,
+                llm_failed=True,
+                error_code=ErrorCode.LLM_ERROR,
+                error_message="模型响应中断，已保留已生成内容，可继续。",
+            )
+            directive = decide_llm_failure(final_content=final_content)
         else:
             usage = round_result.usage
             if usage:
@@ -395,34 +440,6 @@ async def react_loop(
                     # Mark post-delegate mode if delegate was called
                     if any(a.tool_name == "delegate" for a in outcome.attempts if a.tool_name):
                         controller.mark_post_delegate()
-                    # Worker routing Phase 2 · Sequential Split: after Escalation Gate +
-                    # failure tallies, check pressure and maybe run Sub-Workers.
-                    if (
-                        split_context is not None
-                        and role == "worker"
-                        and split_context.get("can_split", True)
-                        and not split_context.get("already_split")
-                    ):
-                        await _maybe_apply_sequential_split(
-                            split_context=split_context,
-                            messages=messages,
-                            controller=controller,
-                            current_step_count=round_idx + 1,
-                            token_consumed=total_usage.total_tokens,
-                            content_preview=final_content or (outcome.content or ""),
-                            attempts=outcome.attempts,
-                            llm=llm,
-                            tools=tools,
-                            sink=sink,
-                            tool_context=tool_context,
-                            turn_model=active_model or base_model,
-                            allowed_tool_names=allowed_tool_names,
-                            profile=profile,
-                            approval_gate=approval_gate,
-                            on_content=on_content,
-                            on_reasoning=on_reasoning,
-                            run_id=run_id,
-                        )
                     tool_defs = _resolve_tool_defs()
                     breaker = apply_circuit_breaker(
                         controller,
@@ -497,6 +514,7 @@ async def react_loop(
                     rounds=round_idx + 1,
                     reason=reason,
                     run_id=run_id,
+                    on_reset=emit_reset,
                 )
                 if coordination is not None and coordination.kind == "coordination_tools":
                     if coordination.content:
@@ -558,32 +576,6 @@ async def react_loop(
                     controller.record(attempts)
                     if any(a.tool_name == "delegate" for a in attempts if a.tool_name):
                         controller.mark_post_delegate()
-                    if (
-                        split_context is not None
-                        and role == "worker"
-                        and split_context.get("can_split", True)
-                        and not split_context.get("already_split")
-                    ):
-                        await _maybe_apply_sequential_split(
-                            split_context=split_context,
-                            messages=messages,
-                            controller=controller,
-                            current_step_count=round_idx + 1,
-                            token_consumed=total_usage.total_tokens,
-                            content_preview=final_content or (coordination.content or ""),
-                            attempts=attempts,
-                            llm=llm,
-                            tools=tools,
-                            sink=sink,
-                            tool_context=tool_context,
-                            turn_model=active_model or base_model,
-                            allowed_tool_names=allowed_tool_names,
-                            profile=profile,
-                            approval_gate=approval_gate,
-                            on_content=on_content,
-                            on_reasoning=on_reasoning,
-                            run_id=run_id,
-                        )
                     tool_defs = _resolve_tool_defs()
                     breaker = apply_circuit_breaker(
                         controller,
@@ -627,7 +619,60 @@ async def react_loop(
             case Continue():
                 continue
 
-    logger.warning("engine.max_rounds_exhausted", rounds=profile.max_rounds)
+    # Hard-ceiling termination: the token backstop broke the loop, or max_rounds
+    # exhausted. Always force-finalize (杜绝死循环); route the finish by run health so an
+    # on-track worker delivers its work while a thrashing one is flagged. 据审计: the
+    # signal is SURFACED, not auto-actioned — there is no「升级→CEO 自动重分解」闭环; the
+    # CEO may voluntarily replan off this signal.
+    rounds_done = round_idx if ceiling_reason == "token_budget" else profile.max_rounds
+    thrashing = role == "worker" and controller.is_thrashing()
+    logger.warning(
+        "engine.ceiling_finalize",
+        reason=ceiling_reason,
+        thrashing=thrashing,
+        rounds=rounds_done,
+        tokens=total_usage.total_tokens,
+        token_budget=token_budget,
+        run_id=run_id,
+    )
+    if thrashing:
+        if finish_override_sink is not None:
+            finish_override_sink.append(FinishReason.DEGRADED)
+        ceiling_question = (
+            f"Worker 到达硬顶（{ceiling_reason}）时仍在打转，"
+            "已强制收口并交付当前产出——可能不完整。"
+        )
+        # 结构化落入 RunState.escalations（经 gate_escalation_sink → 执行器 harvest 合并去重），
+        # 让 CEO 的 escalation 聚合真正看得到「到顶打转」这一条、可自愿重规划——不止 UI 横幅
+        # （否则「升级了却没人接」）。kind=normal：纯上浮，不触发 wave 边界自动动作，对齐
+        # 「不自动重分解、CEO 自愿决策」的设计取舍。
+        if gate_escalation_sink is not None:
+            gate_escalation_sink.append(
+                {
+                    "question": ceiling_question,
+                    "assumption": "",
+                    "blocking": False,
+                    "kind": "normal",
+                    "source": "ceiling_backstop",
+                    "gate_kind": "normal",
+                    "evidence": (
+                        f"{ceiling_reason}: tokens={total_usage.total_tokens}, "
+                        f"rounds={rounds_done}"
+                    ),
+                    "tool_name": "",
+                    "layer": "scheme",
+                }
+            )
+        sink.emit(
+            escalation_raised(
+                run_id,
+                tool_context.agent_id,
+                question=ceiling_question,
+                assumption="",
+                blocking=False,
+                kind="normal",
+            )
+        )
     final_content, final_reasoning, total_usage, rounds, _coordination = await force_finalize(
         messages=messages,
         llm=llm,
@@ -641,9 +686,10 @@ async def react_loop(
         final_content=final_content,
         final_reasoning=final_reasoning,
         total_usage=total_usage,
-        rounds=profile.max_rounds,
-        reason="max_rounds",
+        rounds=rounds_done,
+        reason=ceiling_reason,
         run_id=run_id,
+        on_reset=emit_reset,
     )
     return final_content, final_reasoning, total_usage, rounds
 
@@ -693,59 +739,4 @@ def _apply_escalation_gate(
                 kind=str(payload.get("kind", "normal")),
             )
         )
-
-
-async def _maybe_apply_sequential_split(
-    *,
-    split_context: dict[str, Any],
-    messages: list[LLMMessage],
-    controller: Any,
-    current_step_count: int,
-    token_consumed: int,
-    content_preview: str,
-    attempts: list[Any],
-    llm: OpenAICompatibleProvider,
-    tools: ToolRegistry,
-    sink: EventSink,
-    tool_context: ToolContext,
-    turn_model: str,
-    allowed_tool_names: list[str] | None,
-    profile: ProfileParams,
-    approval_gate: ApprovalGate | None,
-    on_content: Callable[[str], None] | None,
-    on_reasoning: Callable[[str], None] | None,
-    run_id: str,
-) -> None:
-    """After Escalation Gate + record: maybe sequential-split into Sub-Workers."""
-    from agentcore.runtime.loop_controller import ToolAttempt
-    from agentcore.runtime.routing import apply_sequential_split_after_tools
-
-    typed = [a for a in attempts if isinstance(a, ToolAttempt)]
-    tool_names = [a.tool_name for a in typed if a.tool_name]
-    failure_count = total_tool_failures(getattr(controller, "_tool_failures", {}))
-    # Ensure split_context carries run identity for events.
-    split_context.setdefault("run_id", run_id)
-    split_context.setdefault("agent_id", tool_context.agent_id)
-    split_context.setdefault("max_steps", profile.max_rounds)
-
-    fold, _results = await apply_sequential_split_after_tools(
-        split_context=split_context,
-        current_step_count=current_step_count,
-        token_consumed=token_consumed,
-        tool_failure_count=failure_count,
-        tool_names=tool_names,
-        content_preview=content_preview,
-        llm=llm,
-        tools=tools,
-        sink=sink,
-        tool_context=tool_context,
-        turn_model=turn_model,
-        allowed_tool_names=allowed_tool_names,
-        profile=profile,
-        approval_gate=approval_gate,
-        on_content=on_content,
-        on_reasoning=on_reasoning,
-    )
-    if fold:
-        messages.append(LLMMessage(role="user", content=fold))
 

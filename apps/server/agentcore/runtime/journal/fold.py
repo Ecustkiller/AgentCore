@@ -113,6 +113,9 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
     # by the captain run id (run_started kind=captain).
     captain_run_id: str | None = None
     captain_context: list[dict[str, Any]] | None = None
+    # 预检警告（P2 DURABLE）：plain-chat 也可能只有 turn_warning（无 surface）——像
+    # captain_context 一样抬到顶层，避免 surface gate 清空 events 后整段投影变 None。
+    turn_warning: str | None = None
     # deltas 退场: a worker/revision run's full output + thinking now lives only in its
     # ``message_final`` fact (the per-token run_output_delta / run_reasoning_delta are no
     # longer journaled). Collect those finals (run_id → {content, reasoning}) and the
@@ -170,6 +173,11 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
                 if captain_context is None:
                     captain_context = []
                 captain_context.extend(payload.get("blocks") or [])
+            elif kind == EventType.TURN_WARNING.value:
+                # Keep latest (preflight emits at most one; defensive if multiple).
+                msg = payload.get("message")
+                if isinstance(msg, str) and msg.strip():
+                    turn_warning = msg
             events.append({"type": kind, "payload": payload, "timestamp": entry.get("ts")})
     if final_outputs:
         events = _splice_synthetic_deltas(events, final_outputs, agent_run_ids)
@@ -177,7 +185,7 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
     # that were already gated at write (salvage / incomplete / local-relay).
     if not any(e["type"] in _JOURNAL_SURFACE_TYPES for e in events):
         events = []
-    # None-gate: a plain chat turn (clean end_turn, no graph/process/context/error)
+    # None-gate: a plain chat turn (clean end_turn, no graph/process/context/error/warning)
     # → render a plain bubble. Abnormal finishes (cancelled / error / …) and salvage
     # payloads with only ``turn_end`` still project non-None.
     if (
@@ -185,6 +193,7 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
         and not process
         and not captain_context
         and not turn_error
+        and not turn_warning
         and (finish_reason is None or finish_reason == FinishReason.END_TURN.value)
     ):
         return None
@@ -195,6 +204,8 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
         runs["captain_context"] = captain_context
     if turn_error is not None:
         runs["error"] = turn_error
+    if turn_warning is not None:
+        runs["turn_warning"] = turn_warning
     return runs
 
 

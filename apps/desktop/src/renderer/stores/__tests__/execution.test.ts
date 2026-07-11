@@ -299,6 +299,35 @@ describe("projectExecution (fold)", () => {
     expect(exec.runs.find((s) => s.id === "run-3")?.status).toBe("pending");
   });
 
+  // 08 NV-1: a turn that ends `failed` (hard crash / lost terminal frame) with a worker
+  // still in-flight must NOT replay as a forever-spinning node on reload — the freeze
+  // applies to `failed` too, not just `cancelled`.
+  it("freezes in-flight nodes as cancelled when the run failed", () => {
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      {
+        t: 2,
+        kind: "run_completed",
+        runId: "run-1",
+        agentId: "agent-1",
+        outputSummary: "done",
+        durationMs: 1,
+      },
+      // run-2 / agent-2 are mid-flight (no terminal frame) when the turn errors out.
+      started("agent-2", "run-2"),
+    ];
+    const exec = projectExecution(plan, frames, "failed");
+    // Already-finished work is kept.
+    expect(exec.runs.find((s) => s.id === "run-1")?.status).toBe("completed");
+    // In-flight work is frozen as cancelled — no永久 spinner on a failed-turn reload.
+    expect(exec.runs.find((s) => s.id === "run-2")?.status).toBe("cancelled");
+    expect(exec.agents.find((a) => a.id === "agent-2")?.status).toBe(
+      "cancelled",
+    );
+    // Never-started work stays pending.
+    expect(exec.runs.find((s) => s.id === "run-3")?.status).toBe("pending");
+  });
+
   it("captures the 阶段2 declaration slots (parentRunId/kind) from run_started", () => {
     // Defaulted from the plan: a flat 阶段1 worker is a top-level `agent`.
     const base = projectExecution(plan, [], "running").runs[0];
@@ -656,6 +685,7 @@ describe("projectExecution (fold)", () => {
     frames.push({
       t: 3,
       kind: "escalation_resolved",
+      escalationId: "esc-1",
       runId: "run-1",
       agentId: "agent-1",
       status: "resolved",
@@ -728,7 +758,7 @@ describe("projectExecution (fold)", () => {
     ]);
   });
 
-  it("folds a blocking escalate timeout: status timeout, answer stays null", () => {
+  it("folds a blocking escalate timed_out: status timed_out, answer stays null", () => {
     const frames: RunFrame[] = [
       started("agent-1", "run-1"),
       {
@@ -744,16 +774,17 @@ describe("projectExecution (fold)", () => {
       {
         t: 3,
         kind: "escalation_resolved",
+        escalationId: "esc-1",
         runId: "run-1",
         agentId: "agent-1",
-        status: "timeout",
+        status: "timed_out",
         answer: "",
       },
     ];
     const esc = projectExecution(plan, frames, "running").runs.find(
       (s) => s.id === "run-1",
     )?.escalations[0];
-    expect(esc?.status).toBe("timeout");
+    expect(esc?.status).toBe("timed_out");
     expect(esc?.answer).toBeNull();
   });
 
@@ -798,6 +829,7 @@ describe("projectExecution (fold)", () => {
       {
         t: 3,
         kind: "escalation_resolved",
+        escalationId: "esc-1",
         runId: "run-1",
         agentId: "agent-1",
         status: "resolved",
@@ -816,14 +848,14 @@ describe("projectExecution (fold)", () => {
       {
         t: 5,
         kind: "escalation_resolved",
+        escalationId: "esc-2",
         runId: "run-1",
         agentId: "agent-1",
-        status: "timeout",
+        status: "timed_out",
         answer: "",
       },
     ];
-    // The second resolve targets the only remaining pending one (esc-2), so each settles
-    // independently in fire order — the "find first pending" fold is order-correct.
+    // Each resolve matches by escalationId (not "first pending").
     expect(
       projectExecution(plan, frames, "running").runs.find(
         (s) => s.id === "run-1",
@@ -844,12 +876,55 @@ describe("projectExecution (fold)", () => {
         question: "Q2?",
         assumption: "A2",
         blocking: true,
-        status: "timeout",
+        status: "timed_out",
         answer: null,
         kind: "dep",
         questions: [],
       },
     ]);
+  });
+
+  it("resolves by escalationId even when a later pending exists first in list", () => {
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      {
+        t: 2,
+        kind: "escalation_required",
+        escalationId: "esc-old",
+        runId: "run-1",
+        agentId: "agent-1",
+        question: "old?",
+        assumption: "A",
+        escalationKind: "normal",
+      },
+      {
+        t: 3,
+        kind: "escalation_required",
+        escalationId: "esc-new",
+        runId: "run-1",
+        agentId: "agent-1",
+        question: "new?",
+        assumption: "B",
+        escalationKind: "normal",
+      },
+      {
+        t: 4,
+        kind: "escalation_resolved",
+        escalationId: "esc-new",
+        runId: "run-1",
+        agentId: "agent-1",
+        status: "resolved",
+        answer: "答新",
+      },
+    ];
+    const escs = projectExecution(plan, frames, "running").runs.find(
+      (s) => s.id === "run-1",
+    )?.escalations;
+    expect(escs?.find((e) => e.id === "esc-old")?.status).toBe("pending");
+    expect(escs?.find((e) => e.id === "esc-new")).toMatchObject({
+      status: "resolved",
+      answer: "答新",
+    });
   });
 
   it("ignores an escalation_resolved with no matching pending (safe no-op)", () => {
@@ -858,6 +933,7 @@ describe("projectExecution (fold)", () => {
       {
         t: 2,
         kind: "escalation_resolved",
+        escalationId: "esc-ghost",
         runId: "run-1",
         agentId: "agent-1",
         status: "resolved",
@@ -2184,23 +2260,9 @@ describe("交互式逐轮辩论决策 (foldDebateDecision, §逐轮交互)", () 
     expect(exec.debateDecisions).toBe(decisions);
   });
 
-  it("recordDebateDecision folds onto the slot (live path: required → resolved)", () => {
+  it("debate_round decisions live in InteractionStore (execution slot stays empty)", () => {
     store().startExecution(plan, MID);
-    store().recordDebateDecision(required("d-1", 1, false), MID);
-    expect(rt().debateDecisions).toHaveLength(1);
-    expect(rt().debateDecisions[0].status).toBe("pending");
-    store().recordDebateDecision(
-      { kind: "resolved", id: "d-1", decision: "continue", focus: "聚焦成本" },
-      MID,
-    );
-    expect(rt().debateDecisions[0]).toMatchObject({
-      status: "continued",
-      decisionFocus: "聚焦成本",
-    });
-  });
-
-  it("recordDebateDecision is a no-op without an active plan", () => {
-    store().recordDebateDecision(required("d-1", 1, false), MID);
+    // Live SSE path writes InteractionStore only — execution.debateDecisions retired.
     expect(rt().debateDecisions).toEqual([]);
   });
 

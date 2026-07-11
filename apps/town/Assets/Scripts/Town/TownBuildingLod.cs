@@ -12,7 +12,7 @@ namespace AgentTown.Town
     public sealed class TownBuildingLod : MonoBehaviour
     {
         /// <summary>
-        /// Buildings on ~120×96 world: full mesh near camera; mid-distance → LodLow cube.
+        /// Buildings on the expanded grass footprint: full mesh near camera; mid-distance → LodLow cube.
         /// Tuned so default bird (~24 m) still shows nearby full meshes while far districts proxy.
         /// </summary>
         public const float DefaultLowDetailDistance = 32f;

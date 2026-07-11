@@ -1,11 +1,12 @@
 import { DecisionCard, DecisionCardIcon } from "@/components/ui";
 import type { TeamPreviewDisplay } from "@/stores/conversation";
-import { Check, Clock, OctagonX, Pencil, Users } from "lucide-react";
+import { Ban, Check, Clock, OctagonX, Pencil, Users } from "lucide-react";
 
 /**
  * Inline team_preview card — thin preflight before the first worker wave starts.
- * Actionable surface is the durable ResumePrompt (挂起即收口); inline is a passive
- * record (dormant pending / resolved), same posture as PlanReviewCard.
+ * Actionable surface is the durable ResumePrompt (挂起即收口); inline pending is a
+ * passive「等待确认」record (resolved shows the settled decision), same posture as
+ * PlanReviewCard.
  */
 export function TeamPreviewCard({ preview }: { preview: TeamPreviewDisplay }) {
   if (preview.status === "resolved") {
@@ -52,9 +53,7 @@ function DormantTeamPreview({ preview }: { preview: TeamPreviewDisplay }) {
           <Users size={16} />
         </DecisionCardIcon>
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium text-muted-foreground">
-            曾在此预览过团队（本回合已结束）
-          </p>
+          <p className="text-xs font-medium text-muted-foreground">等待确认</p>
           <WorkerRows preview={preview} />
         </div>
       </div>
@@ -71,12 +70,18 @@ function ResolvedTeamPreview({ preview }: { preview: TeamPreviewDisplay }) {
     },
     stop: { icon: <OctagonX size={14} />, label: "已停止 · 团队未启动" },
     timeout: { icon: <Clock size={14} />, label: "未及时回应，已自动开做" },
+    orphaned: {
+      icon: <Ban size={14} />,
+      label: "已失效（回合已结束或服务已重启）",
+    },
   }[preview.decision ?? "timeout"];
 
   return (
     <DecisionCard tone="neutral" className="bg-card/60">
       <div className="flex items-start gap-2">
-        <span className="mt-0.5 shrink-0 text-muted-foreground">{meta.icon}</span>
+        <span className="mt-0.5 shrink-0 text-muted-foreground">
+          {meta.icon}
+        </span>
         <div className="min-w-0 flex-1">
           <WorkerRows preview={preview} />
           <p className="mt-1.5 text-xs font-medium text-muted-foreground">

@@ -64,3 +64,47 @@ def test_missing_usage_column_omits_usage():
     # User rows / pre-feature rows carry no usage snapshot.
     d = MessageDetail.model_validate(_row(None))
     assert d.usage is None
+
+
+def test_inflight_partial_message_detail_shape():
+    """流中刷新形状契约 (P0): running + partial content/reasoning is a valid MessageDetail.
+
+    Overlay that *fills* those fields from turn_stream_state is P1; this nails the
+    wire shape clients must accept on reload of an in-flight turn.
+    """
+    d = MessageDetail.model_validate(
+        {
+            "id": "m-inflight",
+            "conversation_id": "c1",
+            "role": "assistant",
+            "content": "正在生成的半截正",
+            "reasoning_content": "先想一步…",
+            "status": "running",
+            "created_at": datetime.now(UTC),
+            "usage": None,
+        }
+    )
+    assert d.status == "running"
+    assert d.content and d.content.startswith("正在生成")
+    assert d.reasoning_content and "想" in d.reasoning_content
+    assert d.usage is None  # mid-stream often has no token snapshot yet
+
+
+def test_inflight_fixture_validates_against_message_detail():
+    """Committed rest fixture stays aligned with MessageDetail (contracts gate)."""
+    import json
+    from pathlib import Path
+
+    fixture_path = (
+        Path(__file__).resolve().parents[3]
+        / "packages"
+        / "protocol-conformance"
+        / "fixtures"
+        / "rest"
+        / "message-detail-inflight-partial.json"
+    )
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    d = MessageDetail.model_validate(payload["response"])
+    assert d.status == "running"
+    assert d.content
+    assert d.reasoning_content

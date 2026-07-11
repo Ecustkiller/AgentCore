@@ -40,8 +40,12 @@ class _FakeSession:
 
 
 def _patch(monkeypatch, tracker: _SessionTracker, repo_cls: type) -> None:
-    monkeypatch.setattr("agentcore.db.base.async_session_factory", tracker.factory)
-    monkeypatch.setattr("agentcore.db.repositories.TurnJournalRepository", repo_cls)
+    monkeypatch.setattr(
+        "agentcore.conversation.store.cloud.telemetry_session_factory", tracker.factory
+    )
+    monkeypatch.setattr(
+        "agentcore.conversation.store.cloud.TurnJournalRepository", repo_cls
+    )
     monkeypatch.setattr(
         "agentcore.runtime.audit.hooks.on_journal_fact_appended", lambda entry: None
     )
@@ -55,11 +59,12 @@ async def test_appends_serialized_ordered_and_all_futures_resolve(monkeypatch) -
         def __init__(self, session: object) -> None:
             pass
 
-        async def append(self, *, turn_id, seq, conversation_id, trace_id, entry) -> None:
+        async def append(self, *, turn_id, seq, conversation_id, trace_id, entry) -> int | None:
             # Yield twice: an overlapping (fanned-out) drain would surface as max_open > 1.
             await asyncio.sleep(0)
             await asyncio.sleep(0)
             written.append(seq)
+            return len(written) - 1
 
     _patch(monkeypatch, tracker, Repo)
     writer = TurnJournalWriter(turn_id="m1", conversation_id="c1", trace_id="t1")
@@ -68,8 +73,9 @@ async def test_appends_serialized_ordered_and_all_futures_resolve(monkeypatch) -
     await writer.flush()
 
     assert tracker.max_open == 1  # bounded to a single connection — no fan-out storm
-    assert written == list(range(25))  # serial, in emit order
-    assert all(f is not None and f.done() for f in futures)  # every SSE barrier released
+    # D7 live: seq=None（DB 分配）；仍串行、emit 序、Future 全 resolve
+    assert written == [None] * 25
+    assert all(f is not None and f.done() for f in futures)
     assert writer.degraded is False
 
 
@@ -81,10 +87,11 @@ async def test_write_failure_degrades_but_never_hangs(monkeypatch) -> None:
         def __init__(self, session: object) -> None:
             pass
 
-        async def append(self, *, turn_id, seq, conversation_id, trace_id, entry) -> None:
+        async def append(self, *, turn_id, seq, conversation_id, trace_id, entry) -> int | None:
             if entry.get("kind") == "bad":
                 raise RuntimeError("boom")
             written.append(seq)
+            return len(written) - 1
 
     _patch(monkeypatch, tracker, Repo)
     writer = TurnJournalWriter(turn_id="m1", conversation_id="c1", trace_id="t1")
@@ -95,7 +102,7 @@ async def test_write_failure_degrades_but_never_hangs(monkeypatch) -> None:
     await writer.flush()
 
     assert writer.degraded is True  # the failure is surfaced (turn journal degraded)
-    assert written == [0, 2]  # the bad fact is skipped, the rest still persist
+    assert written == [None, None]  # bad skipped; live seq=None
     assert all(f is not None and f.done() for f in (f_ok, f_bad, f_ok2))  # none hang
 
 
@@ -114,8 +121,9 @@ async def test_seal_stops_further_durable_appends(monkeypatch) -> None:
         def __init__(self, session: object) -> None:
             pass
 
-        async def append(self, *, turn_id, seq, conversation_id, trace_id, entry) -> None:
+        async def append(self, *, turn_id, seq, conversation_id, trace_id, entry) -> int | None:
             written.append(seq)
+            return len(written) - 1
 
     _patch(monkeypatch, tracker, Repo)
     writer = TurnJournalWriter(turn_id="m1", conversation_id="c1", trace_id="t1")
@@ -125,17 +133,17 @@ async def test_seal_stops_further_durable_appends(monkeypatch) -> None:
 
     assert writer.sealed is True
     assert writer.next_seq == 1
-    assert written == [0]
+    assert written == [None]
     assert f0 is not None and f0.done()
 
     # Post-seal appends are durable no-ops: no Future, no seq bump, no DB write.
     assert writer.schedule_append({"kind": "post"}) is None
     assert writer.schedule_append({"kind": "post2"}) is None
     await writer.flush()
-    assert written == [0]
+    assert written == [None]
     assert writer.next_seq == 1
 
     # Idempotent seal.
     await writer.seal()
     assert writer.sealed is True
-    assert written == [0]
+    assert written == [None]

@@ -1,8 +1,15 @@
-import { useApprovalStore } from "@/stores/approvals";
-import { useDelegationAuthStore } from "@/stores/delegationAuth";
+import { useInteractionStore } from "@/stores/interactions";
 
-/** Clear turn-scoped interaction prompts (approval + delegation authorization). */
+/**
+ * Turn-boundary cleanup for interaction prompts.
+ *
+ * Sidecar / process death: hot-path cards flip to orphaned 灰态 (假卡可见) rather
+ * than vanishing. Full wipe (logout / tests) still clears when no conversationId.
+ */
 export function clearInteractionPrompts(conversationId?: string): void {
-  useApprovalStore.getState().clear(conversationId);
-  useDelegationAuthStore.getState().clear(conversationId);
+  if (conversationId === undefined) {
+    useInteractionStore.getState().clear();
+    return;
+  }
+  useInteractionStore.getState().orphanConversation(conversationId, true);
 }

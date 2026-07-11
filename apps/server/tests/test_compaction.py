@@ -58,6 +58,25 @@ def test_select_fold_fires_at_min_fold_boundary():
     assert fold[-1].created_at == 3
 
 
+def test_select_fold_floors_to_user_turn_boundary():
+    """C&M-04: odd fold count would leave the tail starting on assistant.
+
+    Alternating u/a, 25 msgs, recency=20 → naive fold=5 (ends mid-turn, tail[0]=assistant).
+    Floor to 4 so the watermark sits on a complete turn and the tail starts on user.
+    """
+    batch = _msgs(25)
+    fold = _select_fold(batch, recency=20, min_fold=4)
+    assert len(fold) == 4
+    assert fold[-1].role == "assistant"
+    assert batch[len(fold)].role == "user"
+
+
+def test_select_fold_noop_when_flooring_drops_below_min_fold():
+    # Naive fold=5, floor to 4; with min_fold=5 the floored count is not worth a call.
+    batch = _msgs(25)
+    assert _select_fold(batch, recency=20, min_fold=5) == []
+
+
 # --- _truncate_head_tail (budget safety net) ---
 
 
@@ -122,6 +141,52 @@ def test_summary_block_is_assistant_role_with_framing():
     assert "已确立：X" in block["content"]
 
 
+async def test_load_chat_context_no_consecutive_roles_after_pair_fold(monkeypatch):
+    """C&M-04 ratchet: fold boundary that would land before an assistant must not
+    produce [summary(assistant), assistant, …] from load_chat_context.
+
+    Simulates the compaction → loader seam: _select_fold sets the watermark, then
+    load_chat_context prefixes the summary to the post-watermark tail.
+    """
+    import agentcore.conversation.history as history_mod
+
+    messages = _msgs(25)
+    fold = _select_fold(messages, recency=20, min_fold=4)
+    assert fold, "pair-floor should still fold enough for min_fold=4"
+    watermark = fold[-1].created_at
+    tail = [m for m in messages if m.created_at > watermark]
+    assert tail[0].role == "user"
+
+    conv = SimpleNamespace(
+        compaction_summary="## 已确立的事实\n- X",
+        compacted_through=watermark,
+    )
+
+    class _FakeConvRepo:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id_unscoped(self, conversation_id):
+            return conv
+
+    class _FakeMsgRepo:
+        def __init__(self, session):
+            pass
+
+        async def list_recent_after(self, conversation_id, *, after, limit):
+            return [m for m in messages if m.created_at > after][:limit]
+
+    monkeypatch.setattr(history_mod, "ConversationRepository", _FakeConvRepo)
+    monkeypatch.setattr(history_mod, "MessageRepository", _FakeMsgRepo)
+    monkeypatch.setattr(history_mod.settings, "compaction_context_max_messages", 40, raising=True)
+
+    out = await history_mod.load_chat_context(SimpleNamespace(), "c1")
+    assert out[0]["role"] == "assistant"  # summary block
+    assert "摘要" in out[0]["content"]
+    roles = [item["role"] for item in out]
+    assert all(a != b for a, b in zip(roles, roles[1:], strict=False))
+
+
 # --- _summarize (async, fake provider) ---
 
 
@@ -144,6 +209,7 @@ async def test_summarize_uses_flash_non_thinking_and_injects_budget(monkeypatch)
     assert out == "## 已确立的事实\n- X"
     req = provider.requests[0]
     assert req.model == "deepseek-v4-flash"
+    assert req.thinking is False
     # The budget placeholder is resolved into the real system prompt, never leaked.
     assert "__BUDGET__" not in req.messages[0].content
     assert "4000" in req.messages[0].content

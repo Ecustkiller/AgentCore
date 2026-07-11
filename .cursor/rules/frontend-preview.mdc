@@ -1,5 +1,5 @@
 ---
-description: 改桌面前端组件/样式/布局后想自检渲染效果、或想离线查看某个 AI 态（辩论/派单/升级/审批/计划复核/工具/引用…）时读——#/preview 离线回放 conformance 向量、帧滑块逐帧看流式中间态、pnpm dev:web 纯浏览器跑渲染层、pnpm shoot 无头截图自检、CI 渲染冒烟门禁。别再靠跑真实 AI 看前端效果。
+description: 改桌面前端组件/样式/布局后想自检渲染效果、或想离线查看某个 AI 态（辩论/派单/升级/审批/计划复核/工具/引用…）时读——#/preview 离线回放 conformance 向量、帧滑块逐帧看流式中间态、pnpm dev:web 纯浏览器跑渲染层、pnpm shoot 无头截图自检、CI 渲染冒烟门禁。别再靠跑真实 AI 看前端效果。改 AI 小镇 3D（apps/town Unity）自检见文末——用 Offline Demo + pnpm town:shoot:webgl，别问用户能否跑 Unity。
 alwaysApply: false
 ---
 
@@ -20,5 +20,15 @@ alwaysApply: false
 - 改桌面组件/样式/布局 → `pnpm shoot` → 读 `shoot-out/*.png` 自检，形成「改→截→看→迭代」紧回路。
 - **`pnpm shoot` 是渲染冒烟门禁**（`ci.yml` frontend job，但 GHA 无配额、实际不跑）：任一场景渲染崩（未捕获报错 / `#/preview` 挂不上）即红。**发布前本地必跑自检**——CI 不会替你兜。
 - 新 AI 态补向量：后端 `conformance/vectors/` 加场景 → `cd apps/server && uv run python -m agentcore.conformance.export` 重导 fixture → `#/preview` 与 `pnpm conformance` 同步刷新。
+
+## AI 小镇 3D（`apps/town` Unity，不走 #/preview）
+
+小镇观测层是**独立 Unity 客户端**，有自己的离线自检链（无后端 / 无 LLM），**别用 #/preview**：
+
+- Offline Demo：Play 点左侧「离线 Demo」/ `AgentTown.exe --demo` / WebGL `?demo=1`（本地合成帧）
+- 截图自检 `pnpm town:shoot:webgl` → `apps/town/shoot-out/*.png`（须先 `town:build:webgl`）；逻辑冒烟 `pnpm town:verify`
+- 无 DeepSeek 连后端走 scripted（`SIMULATION_SCRIPTED=true` 或建 run `scripted:true`）
+
+**开发机已装 Unity 6，别再问用户能否跑 Unity**——按上面自检。命令/前置详见 [`apps/town/README.md`](/apps/town/README.md)。
 
 完整机制 / 浏览器打桩 / AuthGate 离线旁路 / 被否决方案（Storybook、手写 mock 态）→ [`前端技术与架构.md §12.3`](/docs/04-前端/前端技术与架构.md)。

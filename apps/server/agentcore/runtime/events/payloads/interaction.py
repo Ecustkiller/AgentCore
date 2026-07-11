@@ -186,8 +186,12 @@ class EscalationRequiredPayload(WirePayload):
 
 
 class EscalationResolvedPayload(WirePayload):
-    """阻塞式求决策 settlement: `resolved` (answered) or `timeout` (fall back to the
-    stated assumption). Emitted by the suspending tool's awaiter ONLY; journaled.
+    """阻塞式求决策 settlement. Emitted by the suspending tool's awaiter ONLY; journaled.
+
+    ``status`` 三分（对 worker 回落假设的实现可共享，对外语义必须分开）：
+    - ``resolved`` — 有裁决/答复（``answer`` 非空语义由调用方保证）
+    - ``assumed`` — 用户或主管显式选了「按假设继续」
+    - ``timed_out`` — 墙钟时限内未答复
 
     ``arbitrated_by`` / ``via_user`` annotate CEO 协调仲裁可见性（经典用户直答路径可缺省）。
     """
@@ -195,7 +199,7 @@ class EscalationResolvedPayload(WirePayload):
     escalation_id: str
     run_id: str
     agent_id: str
-    status: Literal["resolved", "timeout"]
+    status: Literal["resolved", "assumed", "timed_out", "orphaned"]
     answer: str
     arbitrated_by: Literal["user", "ceo"] | None = absent(
         "裁决方：user=用户直答；ceo=主管仲裁。旧流缺字段按 user。"
@@ -203,3 +207,10 @@ class EscalationResolvedPayload(WirePayload):
     via_user: bool | None = absent(
         "仅 arbitrated_by=ceo 时有意义：true=主管经 ask_user 转交用户后再 resolve。"
     )
+
+
+class InteractionOrphanedPayload(WirePayload):
+    """热路 pending 交互失效（假卡消灭）。kind ∈ 热路四 kind。"""
+
+    interaction_id: str
+    kind: Literal["approval", "delegation_authorization", "escalation", "debate_round"]

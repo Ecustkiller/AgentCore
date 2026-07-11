@@ -27,11 +27,16 @@ if TYPE_CHECKING:
 class EscalationOutcome:
     """The result of a worker's blocking escalate (阻塞式求决策 §4.4).
 
-    ``status`` is ``"resolved"`` (the user answered — ``answer`` carries it),
-    ``"timeout"`` (no answer within the window, or the user chose 按假设继续 — the
-    worker falls back to its stated assumption), or ``"degraded"`` (the request was
-    never suspended — the per-turn concurrency cap was full — so the caller proceeds
-    on its assumption exactly as a non-blocking escalate would).
+    ``status``:
+    - ``"resolved"`` — answered (``answer`` carries it);
+    - ``"assumed"`` — explicit 按假设继续 (user or CEO);
+    - ``"timed_out"`` — wall-clock miss (no answer within the window);
+    - ``"degraded"`` — never suspended (concurrency cap) → proceed on assumption
+      like a non-blocking escalate.
+
+    ``assumed`` and ``timed_out`` share the worker fallback (use stated assumption)
+    but must stay distinct on the wire — conflating them as ``timeout`` made
+    「点了按假设继续」look like「系统超时没收到点击」.
     """
 
     status: str

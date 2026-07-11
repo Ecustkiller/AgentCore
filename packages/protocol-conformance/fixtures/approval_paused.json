@@ -50,18 +50,23 @@
       "completed": 0,
       "total": 0
     },
-    "pendingInteraction": {
-      "kind": "approval",
-      "approvalId": "tc1",
-      "toolCallId": "tc1",
-      "toolName": "code_execute",
-      "arguments": {
-        "code": "print(1)"
+    "interactions": [
+      {
+        "kind": "approval",
+        "id": "tc1",
+        "status": "pending",
+        "toolCallId": "tc1",
+        "toolName": "code_execute",
+        "arguments": {
+          "code": "print(1)"
+        }
       }
-    },
+    ],
     "cost": null,
     "debate": null,
     "debateRounds": [],
+    "teamSynthesisPreview": null,
+    "turnWarning": null,
     "teamNotes": []
   }
 }

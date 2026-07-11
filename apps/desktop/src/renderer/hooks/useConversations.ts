@@ -1,5 +1,9 @@
+import {
+  patchConversationScratch,
+  removeConversationScratch,
+} from "@/hooks/useWorkspaces";
 import { queryClient } from "@/lib/queryClient";
-import { conversationKeys } from "@/lib/queryKeys";
+import { conversationKeys, workspaceKeys } from "@/lib/queryKeys";
 import {
   deleteConversation as apiDeleteConversation,
   duplicateConversation as apiDuplicateConversation,
@@ -142,11 +146,15 @@ export function useRenameConversation() {
     onMutate: ({ id, title }) => {
       const prev = getConversations().find((c) => c.id === id)?.title ?? null;
       patchConversationCache(id, { title });
+      // Keep the files-hub rail label in sync when that cache is warm.
+      patchConversationScratch(id, { name: title });
       return { id, prev };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prev != null)
+      if (ctx?.prev != null) {
         patchConversationCache(ctx.id, { title: ctx.prev });
+        patchConversationScratch(ctx.id, { name: ctx.prev });
+      }
     },
   });
 }
@@ -179,6 +187,10 @@ export function useDeleteConversation() {
       // Purge this conversation's persisted fold/expand prefs so the disclosure
       // map doesn't leak keys for gone conversations (守「表恒收敛不膨胀」).
       clearDisclosureForConversation(id);
+      // Drop the files-hub rail section + refetch so open tabs close via
+      // FileWorkbench's「workspace gone → close tabs」effect.
+      removeConversationScratch(id);
+      void queryClient.invalidateQueries({ queryKey: workspaceKeys.list });
     },
   });
 }

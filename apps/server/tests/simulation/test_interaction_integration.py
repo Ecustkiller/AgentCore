@@ -119,6 +119,15 @@ def _interaction_sse_events(run_id: str):
     return [event for event in sink.take_over() if event.type == EventType.SIM_INTERACTION]
 
 
+@pytest.fixture(autouse=True)
+def _force_llm_tick_mode(monkeypatch):
+    """Pin ``simulation_scripted=False`` so a local ``.env`` (``SIMULATION_SCRIPTED=true``,
+    a legitimate config) can't force scripted ticks that silently ignore the injected
+    mock provider — the exact seam these INT-03 tests guard. (Open registration is
+    handled globally by ``tests/integration/conftest.py::_open_registration``.)"""
+    monkeypatch.setattr(settings, "simulation_scripted", False)
+
+
 @pytest.mark.asyncio
 async def test_conversation_path_speak_to(client, make_invite, session_factory):
     """speak_to → InteractionBus conversation → sim_event + relations + SSE."""
@@ -219,17 +228,22 @@ async def test_vote_path_propose_vote(client, make_invite, session_factory):
     try:
         run_id = await _create_authed_run(client, make_invite, invite_code="INT03-VOTE", username="int03-vote")
         motion = "是否同意本周市场休市一天？"
-        move_chen = {
+        # run_vote tallies EVERY agent standing in 镇政厅 (needs ≥2), and yes/no/abstain
+        # each need a distinct body. Gather 3 residents that survive the max_agents=5
+        # slice (chen/zhao/wang) into the hall. The old test drove 徐(xu) — persona #10,
+        # sliced away — so nobody ever proposed, and only chen would have been present
+        # anyway (DRIFT on both roster size and quorum).
+        to_hall = {
             "action": "move_to",
             "destination": "镇政厅",
             "reason": "参会",
-            "thought": "去镇政厅。",
+            "thought": "去开会。",
         }
         await _advance_tick(
             client,
             run_id,
-            _action_provider(move_chen),
-            strategy=ActivateOnlyStrategy(frozenset({"chen"})),
+            _json_chunks(to_hall, to_hall, to_hall),
+            strategy=ActivateOnlyStrategy(frozenset({"chen", "zhao", "wang"})),
         )
         vote = {
             "action": "propose_vote",
@@ -237,16 +251,15 @@ async def test_vote_path_propose_vote(client, make_invite, session_factory):
             "reason": "征求意见",
             "thought": "发起投票。",
         }
+        # chen proposes (1 decision), then chen/zhao/wang each cast a ballot (3) — the
+        # provider serves exactly these 4 chunks in order.
         provider = _json_chunks(
             vote,
             {"vote": "yes", "reason": "支持"},
             {"vote": "no", "reason": "反对"},
             {"vote": "abstain", "reason": "再想想"},
-            {"vote": "yes", "reason": "支持"},
-            {"vote": "no", "reason": "反对"},
-            {"vote": "abstain", "reason": "再想想"},
         )
-        strategy = ActivateOnlyStrategy(frozenset({"xu"}))
+        strategy = ActivateOnlyStrategy(frozenset({"chen"}))
         snapshot = await _advance_tick(client, run_id, provider, strategy=strategy)
 
         tick_number = snapshot["tick"]

@@ -36,6 +36,12 @@ namespace AgentTown.Town
         /// <summary>Grass base under the whole town (Desktop <c>townGround</c> BASE_GRASS colour).</summary>
         public static readonly Color Grass = new(0.49f, 0.72f, 0.49f);
 
+        /// <summary>
+        /// Soft horizon apron beyond the walkable grass — muted so bird-corner fill
+        /// reads as ground, not a second bright lawn.
+        /// </summary>
+        public static readonly Color HorizonFill = new(0.42f, 0.58f, 0.48f);
+
         /// <summary>Road / path surface tint (darker asphalt vs grass).</summary>
         public static readonly Color Road = new(0.32f, 0.34f, 0.36f);
 

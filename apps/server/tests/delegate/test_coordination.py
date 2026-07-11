@@ -19,6 +19,7 @@ from agentcore.runtime.coordination.session import (
 )
 from agentcore.runtime.coordination.tools import CancelWorkerTool, UpdateSynthesisTool
 from agentcore.runtime.events import EventSink, EventType
+from agentcore.runtime.interaction import InteractionRegistry
 from tests.delegate.conftest import Provider, ctx, tool
 
 
@@ -592,3 +593,96 @@ async def test_concurrent_sessions_isolated_by_execution_id():
     clear_active_coordination("exec-iso-b")
     assert active_coordination("exec-iso-b") is None
     clear_active_coordination()
+
+
+async def test_coordination_checkpoint_yields_without_durable_pause(monkeypatch):
+    """选项 1：协调态 + checkpoint_after → BOUNDARY_YIELD，不 persist / 不 seal / 不收口。"""
+    from agentcore.runtime.suspension import TurnSuspension
+    from tests.delegate.conftest import CKPT_DAG, tool_durable
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.delegate.preview.should_preview",
+        lambda *a, **k: False,
+    )
+    clear_active_coordination()
+    registry = InteractionRegistry()
+    sink = EventSink()
+    saved: list[TurnSuspension] = []
+
+    async def _save(frame):
+        saved.append(frame)
+
+    async def _drop(_mid):
+        pass
+
+    t = tool_durable(Provider(["S1OUT", "S2OUT"]), sink, registry, _save, _drop)
+    result = await t.execute({"tasks": CKPT_DAG}, ctx())
+    assert result.success is True
+    assert "团队已启动" in result.output
+
+    session = active_coordination("e")
+    assert session is not None and session.drive_task is not None
+    await asyncio.wait_for(session.drive_task, timeout=10)
+
+    assert saved == [], "协调态 checkpoint 不得 persist TurnSuspension"
+    assert t._pending_pause is False
+    assert t._pending_boundary is None
+
+    events = session.drain_nowait()
+    kinds = [e.kind for e in events]
+    assert CoordinationEventKind.BOUNDARY_YIELD in kinds
+    byield = next(e for e in events if e.kind is CoordinationEventKind.BOUNDARY_YIELD)
+    assert byield.payload.get("reason") == "checkpoint"
+    brief = byield.payload.get("brief") or ""
+    assert "checkpoint" in brief.lower() or "检查点" in brief
+
+    # No plan_review_required as turn-closure card (协调态不发收口事件).
+    assert not any(e.type is EventType.PLAN_REVIEW_REQUIRED for e in sink._history)
+    clear_active_coordination("e")
+
+
+async def test_classic_checkpoint_still_durable_when_not_coordinating(monkeypatch):
+    """经典阻塞 path（coordinate=false）仍 durable plan_review 挂起即收口。"""
+    from agentcore.core.types import ToolEffect
+    from agentcore.runtime.suspension import TurnSuspension, captain_transcript
+    from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
+    from tests.delegate.conftest import CKPT_DAG, tool_durable
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.delegate.preview.should_preview",
+        lambda *a, **k: False,
+    )
+    clear_active_coordination()
+    registry = InteractionRegistry()
+    sink = EventSink()
+    saved: list[TurnSuspension] = []
+
+    async def _save(frame):
+        saved.append(frame)
+
+    async def _drop(_mid):
+        pass
+
+    t = tool_durable(Provider(["S1OUT", "S2OUT"]), sink, registry, _save, _drop)
+    transcript = [
+        LLMMessage(role="user", content="原始请求"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="call_del",
+                    function=ToolCallFunction(name="delegate", arguments="{}"),
+                )
+            ],
+        ),
+    ]
+    token = captain_transcript.set(transcript)
+    try:
+        result = await t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx())
+    finally:
+        captain_transcript.reset(token)
+
+    assert result.effect is ToolEffect.SUSPEND
+    assert len(saved) == 1
+    assert any(e.type is EventType.PLAN_REVIEW_REQUIRED for e in sink._history)

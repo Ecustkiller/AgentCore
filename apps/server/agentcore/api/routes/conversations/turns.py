@@ -2,7 +2,7 @@
 
 import asyncio
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.api.dependencies import (
@@ -12,7 +12,7 @@ from agentcore.api.dependencies import (
 )
 from agentcore.api.schemas import (
     PausedTurnSummary,
-    PendingApprovalSummary,
+    PendingInteractionSummary,
     RegenerateMessageRequest,
     ResumeTurnRequest,
     RetryFailedRequest,
@@ -22,14 +22,19 @@ from agentcore.api.sse import sse_response
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.conversation.service import regenerate_chat, resume_chat, retry_failed_chat
 from agentcore.core.errors import NotFoundError
-from agentcore.db.repositories import ConversationRepository
+from agentcore.core.logging import get_logger
+from agentcore.db.base import async_session_factory
+from agentcore.db.repositories import ConversationRepository, TurnJournalRepository
 from agentcore.runtime.checkpoints import CheckpointResponse
 from agentcore.runtime.events import EventSink
-from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
+from agentcore.runtime.interaction_orphan import orphan_registry_pending
+from agentcore.runtime.journal.pending_interactions import fold_pending_interactions
+from agentcore.runtime.settlement import prewrite_cold_resume_settlement
 from agentcore.runtime.suspension import TurnSuspension, suspension_summary_fields
 from agentcore.runtime.suspension_persistence import (
     claim_paused_turn,
     list_paused_turns,
+    load_paused_turn,
 )
 from agentcore.runtime.turn_runs import turn_runs
 
@@ -39,6 +44,8 @@ from ._helpers import (
     emit_preflight_warnings,
     release_request_db_before_sse,
 )
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -57,20 +64,48 @@ def _paused_summary(f: TurnSuspension) -> PausedTurnSummary:
     )
 
 
-def _pending_approval_summaries(conversation_id: str) -> list[PendingApprovalSummary]:
-    """In-process GRANTABLE tool gates still awaiting a user decision."""
-    registry = default_interaction_registry()
-    return [
-        PendingApprovalSummary(
-            approval_id=req.id,
-            conversation_id=req.conversation_id,
-            tool_call_id=str(req.payload.get("tool_call_id") or ""),
-            tool_name=str(req.payload.get("tool_name") or ""),
-            arguments=dict(req.payload.get("arguments") or {}),
-        )
-        for req in registry.list_pending(conversation_id)
-        if req.kind is InteractionKind.APPROVAL
-    ]
+async def _pending_interaction_summaries(
+    conversation_id: str,
+) -> list[PendingInteractionSummary]:
+    """Journal-fold pending hot-path interactions for recovery (D5)."""
+    run = turn_runs.get(conversation_id)
+    turn_ids: list[str] = []
+    if run is not None:
+        mid = getattr(run.sink, "_message_id", None) or getattr(run.sink, "message_id", None)
+        if mid:
+            turn_ids.append(str(mid))
+
+    async with async_session_factory() as db:
+        if not turn_ids:
+            from sqlalchemy import select
+
+            from agentcore.db.models.runs import TurnJournalRow
+
+            result = await db.execute(
+                select(TurnJournalRow.turn_id)
+                .where(TurnJournalRow.conversation_id == conversation_id)
+                .order_by(TurnJournalRow.seq.desc())
+                .limit(80)
+            )
+            turn_ids = list(dict.fromkeys(r for r in result.scalars().all()))
+
+        out: list[PendingInteractionSummary] = []
+        seen: set[str] = set()
+        for turn_id in turn_ids:
+            entries = await TurnJournalRepository(db).load(turn_id)
+            for pending in fold_pending_interactions(entries, message_id=turn_id):
+                if pending.id in seen:
+                    continue
+                seen.add(pending.id)
+                out.append(
+                    PendingInteractionSummary(
+                        kind=pending.kind,  # type: ignore[arg-type]
+                        id=pending.id,
+                        message_id=pending.message_id,
+                        payload=pending.payload,
+                    )
+                )
+        return out
 
 
 @router.post("/{conversation_id}/messages/{message_id}/regenerate")
@@ -97,6 +132,10 @@ async def regenerate_message(
 
     preflight = await _preflight_owned_chat_turn(conversation_id, user, session)
     await release_request_db_before_sse(session)
+
+    # 触发点④：regenerate 前 orphan 热路 pending
+    await orphan_registry_pending(conversation_id)
+    await turn_runs.stop_and_drain(conversation_id)
 
     sink = EventSink()
     emit_preflight_warnings(sink, preflight)
@@ -138,6 +177,10 @@ async def retry_failed_message(
     )
     await release_request_db_before_sse(session)
 
+    # 触发点④：retry 前 orphan 热路 pending
+    await orphan_registry_pending(conversation_id)
+    await turn_runs.stop_and_drain(conversation_id)
+
     sink = EventSink()
     emit_preflight_warnings(sink, preflight)
 
@@ -164,27 +207,18 @@ async def get_conversation_recovery(
 ):
     """One-shot recovery snapshot for a conversation reopen (recovery 统一, 对称 §8.2).
 
-    Folds the two reopen probes — is a detached run still live (实时重连续看 1b)? are there
-    durably paused turns (结构化挂起 2b)? — into a single owner-gated read so the client picks
-    ONE actionable surface without racing two endpoints. The client attaches (``GET .../stream``)
-    only when ``live_running`` and ``paused`` is empty; otherwise a paused turn's resume card is
-    its single surface. ``live_running`` mirrors the attach endpoint's own liveness test (a
-    registered run whose task is not done).
-
-    挂起即收口 (②): a checkpoint turn now FINALIZES (SUSPEND→PAUSED, the run ends) rather than
-    parking, so a paused turn is durable-only — the former live∩paused 冷热重叠 (a run parked on
-    its interaction while its frame also persisted) now survives ONLY as the rare §六-1 thin-net
-    (a frame that could not be saved keeps a bounded backend wait). Reporting both fields still
-    resolves that rare overlap — and a non-paused detached run (1b) — to the one right surface.
+    Folds reopen probes into a single owner-gated read: live_running / paused /
+    pending_interactions (journal fold of hot-path cards).
     """
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
     run = turn_runs.get(conversation_id)
     live_running = run is not None and not run.task.done()
     frames = await list_paused_turns(conversation_id)
+    pending = await _pending_interaction_summaries(conversation_id)
     return TurnRecoveryResponse(
         live_running=live_running,
         paused=[_paused_summary(f) for f in frames],
-        pending_approvals=_pending_approval_summaries(conversation_id),
+        pending_interactions=pending,
     )
 
 
@@ -198,18 +232,45 @@ async def resume_message(
 ):
     """Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).
 
-    The turn paused at a plan_review / ask_user checkpoint and lost its live stream
-    (disconnect / restart); only its persisted frame survived. Claims the frame
-    (atomic read-and-delete, so a turn is never resumed twice — a second / stale call
-    404s), then drives the rest of the turn on a fresh SSE just like a send.
+    The turn paused at a plan_review / ask_user / team_preview checkpoint and lost its
+    live stream (disconnect / restart); only its persisted frame survived.
+
+    Settlement 预写 (D8)：① peek frame → ② ``*_resolved`` 落库成功 → ③ ``claim_paused_turn``
+    → ④ resume pipeline（内原有 emit 照旧，journal 幂等跳过）。settlement 写失败 ⇒ 5xx、
+    不 claim、frame 保留可重试。Claim 竞争失败按现状 404。Pipeline 启动失败走现有
+    restore 回滚。
+
     ``body.selected`` carries the user's ask_user picks (ignored for plan_review).
     Gated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota
-    — all BEFORE the claim, so a refused turn keeps its resumable frame.
+    — all BEFORE settlement/claim, so a refused turn keeps its resumable frame.
     """
     await enforce_user_message_rate_limit(user.user_id)
 
     preflight = await _preflight_owned_chat_turn(conversation_id, user, session)
     await release_request_db_before_sse(session)
+
+    peeked = await load_paused_turn(message_id, conversation_id=conversation_id)
+    if peeked is None:
+        raise NotFoundError("挂起的回合不存在或已处理")
+
+    decision = body.decision.value if hasattr(body.decision, "value") else str(body.decision)
+    try:
+        await prewrite_cold_resume_settlement(
+            peeked,
+            decision=decision,
+            note=body.note or "",
+            selected=list(body.selected or []),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "resume.settlement_prewrite_failed",
+            message_id=message_id,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "settlement_write_failed"},
+        ) from e
 
     suspension = await claim_paused_turn(message_id, conversation_id=conversation_id)
     if suspension is None:

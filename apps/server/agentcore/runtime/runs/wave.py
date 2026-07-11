@@ -38,8 +38,9 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import replace
 
+from agentcore.core.logging import get_logger
 from agentcore.runtime.runs.concurrency import child_budget, current_budget, set_budget
-from agentcore.runtime.runs.plan import RunPlan
+from agentcore.runtime.runs.plan import RunPlan, RunPlanError
 from agentcore.runtime.runs.scheduler import (
     BoundaryOutcome,
     BoundaryReason,
@@ -53,6 +54,8 @@ from agentcore.runtime.runs.types import (
     RunSpec,
     RunState,
 )
+
+logger = get_logger(__name__)
 
 # Host progress hook: sync (legacy tests) or async (drive hot-continue).
 OnProgress = Callable[[Mapping[str, RunState]], None | Awaitable[None]]
@@ -113,6 +116,10 @@ class WaveScheduler:
         re-scanned each cycle, so a node appended mid-run (``RunPlan.add``) joins as
         soon as it is eligible.
 
+        Entry runs a cheap ``plan.waves()`` topology self-check (same as build-time):
+        a cycle or dangling ``depends_on`` raises :class:`RunPlanError` instead of
+        silently dropping unreachable nodes from the result map.
+
         - ``seed_completed`` pre-seeds finished nodes (a resume): they are treated as
           done, so only the unfinished tail re-runs.
         - ``should_stop`` is checked before each dispatch decision; once True no new
@@ -168,6 +175,15 @@ class WaveScheduler:
         aborted = False
         stopped = False
 
+        # Cheap topology self-check (defense): build-time paths already call
+        # ``plan.waves()``; catch plans that bypassed construction (direct construct /
+        # bad resume seed). Fail explicitly — never silently drop cycle / dangling nodes.
+        try:
+            plan.waves()
+        except RunPlanError as exc:
+            logger.warning("wave.bad_topology", error=str(exc), nodes=len(plan.nodes))
+            raise
+
         # Fixed concurrency width + per-child budget for the whole run (waves overlap,
         # so the budget divisor can't be a per-wave chunk size). width ≤ the node
         # count keeps the common small batch's child budget == the legacy per-wave
@@ -216,8 +232,9 @@ class WaveScheduler:
                 # resolved is NOT dispatchable — its spec must first be finalised by the
                 # host (CEO ``replan``). Once in-flight work is quiescent, yield the
                 # boundary: PROCEED (host bound it in place → next ready-scan dispatches
-                # it; if it bound nothing, no node is ready and the run reaches terminal,
-                # no spin), YIELD (soft pause → CEO takes over, a resume re-runs the tail),
+                # it; if PROCEED left ``bind_after_deps`` set, treat as no-progress —
+                # warn once and SKIP those nodes so the boundary cannot busy-wait),
+                # YIELD (soft pause → CEO takes over, a resume re-runs the tail),
                 # or ABORT. Inert unless a hook is wired AND such a node exists (none in an
                 # ordinary plan), so a plan without late-binding is byte-for-byte untouched.
                 if not holding and defer_bind and not running:
@@ -231,6 +248,19 @@ class WaveScheduler:
                         elif outcome is BoundaryOutcome.YIELD:
                             stopped = True
                             holding = True
+                        elif outcome is BoundaryOutcome.PROCEED:
+                            # Defense: host returned PROCEED but left bind_after_deps set
+                            # → no progress. Do not re-fire (would busy-wait / livelock).
+                            stuck = [n for n in bind_ready if n.bind_after_deps]
+                            if stuck:
+                                stuck_ids = [n.run_id for n in stuck]
+                                logger.warning(
+                                    "wave.bind_proceed_no_progress",
+                                    run_ids=stuck_ids,
+                                )
+                                for n in stuck:
+                                    skipped.add(n.run_id)
+                                    dispatched.add(n.run_id)
                 if not holding:
                     for spec in self._select_ready(
                         plan, completed, skipped, dispatched, defer_bind=defer_bind

@@ -124,7 +124,7 @@ def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, 
     (执行引擎架构设计.md §受监督的波循环); ``"normal"`` is an ordinary 待决问题 resolved at
     synthesis. ``status`` defaults to ``"raised"`` (a non-blocking escalate, or a blocking
     one that degraded) with no ``answer``; the executor overrides these to ``"resolved"``
-    / ``"timeout"`` for a blocking escalate that actually suspended for the user (阻塞式求
+    / ``"assumed"`` / ``"timed_out"`` for a blocking escalate that actually suspended (阻塞式求
     决策 §4.7). Mirrors
     :func:`files_touched_from_transcript`: intent-level, read off the call itself; a call
     with malformed args or an empty ``question`` is skipped. The DelegateTool surfaces

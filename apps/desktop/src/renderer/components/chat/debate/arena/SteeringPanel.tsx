@@ -1,3 +1,7 @@
+import {
+  OrphanedInteractionCard,
+  WaitingForDecisionHint,
+} from "@/components/chat/OrphanedInteractionCard";
 import { Button, Textarea } from "@/components/ui";
 import { surfaceSubtle } from "@/components/ui/tone-presets";
 import { notifyError } from "@/lib/toast";
@@ -6,6 +10,10 @@ import {
   decideDebateRound,
 } from "@/services/debate";
 import type { DebateRoundDecision, Execution } from "@/stores/execution";
+import {
+  entryToDebateDecision,
+  useInteractionStore,
+} from "@/stores/interactions";
 import {
   ArrowRight,
   Check,
@@ -16,7 +24,7 @@ import {
   Plus,
   Scale,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { DebateModel } from "../model";
 import { steeringAnchorId } from "./anchors";
 
@@ -38,7 +46,7 @@ function steerJudgeHint(decision: DebateRoundDecision): string {
 /** 掌舵面板：live 轮边界挂起时全宽 primary 淡面。 */
 export function SteeringPanel({
   model,
-  execution,
+  execution: _execution,
   conversationId,
   interactive,
 }: {
@@ -48,17 +56,44 @@ export function SteeringPanel({
   interactive: boolean;
 }) {
   const [sentAsks, setSentAsks] = useState<SentAsk[]>([]);
-  const pending = execution.debateDecisions.find((d) => d.status === "pending");
+  const byId = useInteractionStore((s) => s.byId);
+
+  const { pending, orphaned } = useMemo(() => {
+    let pending: DebateRoundDecision | undefined;
+    const orphaned: DebateRoundDecision[] = [];
+    if (!conversationId) return { pending, orphaned };
+    for (const e of byId.values()) {
+      if (e.conversationId !== conversationId) continue;
+      if (e.kind !== "debate_round") continue;
+      if (e.status === "orphaned") {
+        orphaned.push(entryToDebateDecision(e));
+      } else if (
+        (e.status === "pending" || e.status === "submitting") &&
+        !pending
+      ) {
+        pending = entryToDebateDecision(e);
+      }
+    }
+    return { pending, orphaned };
+  }, [byId, conversationId]);
+
   const targets: SteerTarget[] = pending
     ? (model.rounds
         .find((r) => r.roundNo === pending.roundNo)
         ?.sides.map((s) => ({ key: s.sideKey, name: s.name })) ?? [])
     : [];
 
-  if (sentAsks.length === 0 && !pending) return null;
+  if (sentAsks.length === 0 && !pending && orphaned.length === 0) return null;
 
   return (
     <div id={steeringAnchorId()} className="scroll-mt-28 space-y-3 py-4">
+      {orphaned.map((d) => (
+        <OrphanedInteractionCard
+          key={d.id}
+          title="辩论掌舵已失效"
+          detail="该轮次决策已不可答复（服务已重启或回合已结束）。"
+        />
+      ))}
       {sentAsks.map((a, i) => (
         <div
           key={`${a.ask}-${i}`}
@@ -106,7 +141,10 @@ function SteeringBar({
   const [askTarget, setAskTarget] = useState("");
   const [showAngle, setShowAngle] = useState(false);
   const [submitting, setSubmitting] = useState<string | null>(null);
-  const busy = submitting !== null;
+  const entryStatus = useInteractionStore(
+    (s) => s.byId.get(decision.id)?.status,
+  );
+  const busy = submitting !== null || entryStatus === "submitting";
   const hasAsk = ask.trim().length > 0;
   const hasAngle = angle.trim().length > 0;
 
@@ -121,7 +159,11 @@ function SteeringBar({
         ? { kind, focus, ask: trimmedAsk, askTarget: target }
         : { kind, ask: trimmedAsk, askTarget: target };
     decideDebateRound(conversationId, decision.id, call)
-      .then(() => {
+      .then((result) => {
+        if (result !== "ok") {
+          setSubmitting(null);
+          return;
+        }
         if (trimmedAsk) {
           const targetName = target
             ? (targets.find((t) => t.key === target)?.name ?? null)
@@ -147,6 +189,7 @@ function SteeringBar({
         <Hand size={14} className="text-muted-foreground" />
         轮到你掌舵 · 第 {decision.roundNo} 轮结束
       </span>
+      <WaitingForDecisionHint />
       <p className="mt-0.5 flex items-start gap-1 text-xs text-muted-foreground">
         <Scale size={13} className="mt-0.5 shrink-0" />
         <span>{steerJudgeHint(decision)}</span>
@@ -223,7 +266,7 @@ function SteeringBar({
             )
           }
         >
-          够了，出结论
+          让裁判决定
         </Button>
         {!showAngle && (
           <Button

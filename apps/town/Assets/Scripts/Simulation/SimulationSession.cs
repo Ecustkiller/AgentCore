@@ -1179,6 +1179,18 @@ namespace AgentTown.Simulation
 
             agents[agent.AgentId] = agent;
             agentUnityPositions[agent.AgentId] = WireCoordinateTransform.ToUnity(agent.Position);
+
+            // Backfill the freshest decision's resolved location from this tick's agent_state
+            // (ST-02 oracle parity — Desktop foldSimulation does the same so the decisions feed
+            // shows where the move/talk landed). Only when decisions[0] is this agent + tick.
+            if (decisions.Count > 0
+                && decisions[0].AgentId == agent.AgentId
+                && decisions[0].Tick == PayloadInt(payload, "tick"))
+            {
+                decisions[0].Location = agent.Location;
+                OnDecisionsChanged?.Invoke();
+            }
+
             OnSnapshotApplied?.Invoke();
         }
 

@@ -1,19 +1,21 @@
 /**
  * 危险原生出口的主进程侧确认门（IPC-001 / IPC-002 · 第五轮 IPC 权限面审计）。
  *
- * 背景：`fs:workspaceOp('execute')`（跑任意代码）与 `fs:openPath`（用 OS 关联打开——可执行
- * 类型 = 经文件关联执行）是「renderer 被攻破后直达宿主 RCE」的两个头。审批发生在 renderer +
- * 后端、**主进程不在审批环里**，故主进程分不清「批准后的合法调用」与「直接恶意调用」。
+ * 门分工（对标 Cursor · 单一聊天确认面，2026-07）：
+ * - **`workspaceOp('execute')`**：不再走本模块 native 框。`workspace_op_required` 仅在后端
+ *   `ApprovalGate` 放行后触发 → 聊天审批卡是唯一人门（见 `fs/ipc.ts`）。
+ * - **用户直触 bash**（代码块「在终端运行」）：聊天内 RunConfirm DecisionCard；经
+ *   `rendererConfirmed` / {@link grantSessionRun} 跳过 native。未带确认的旧 IPC 入参仍走
+ *   {@link confirmSessionRun} 兜底。
+ * - **`openPath`**：仍白名单 + 单次 native 确认——黑名单永远列不全，且 Windows 会抹掉文件名
+ *   末尾的点 / 空格使「假装无害」的名字仍被执行（红队 2026-06-30：E1/E2）。
  *
- * 唯一 renderer **无法伪造**的门 = 主进程侧 native 确认（人决策 2026-06-30）。它是**叠加**层
- * （不动受 conformance 门禁的审批 fold），代价是合法的云端本地执行会在审批卡之外多弹一次主侧
- * 确认——这与后端 `code_execute` 的 PER_CALL / PI-004（注入内容不得搭便车）同一姿态：故 execute
- * **每次必弹、不记忆**。openPath 改用**白名单姿态**：仅「已知安全类型」（文档 / 媒体 / 图片 /
- * 文本 / 压缩包）直开零打扰，其余一律弹确认——黑名单永远列不全，且 Windows 会抹掉文件名末尾的
- * 点 / 空格使「假装无害」的名字仍被执行（红队 2026-06-30：E1 黑名单缺口 + E2 文件名归一化绕过）。
+ * 本会话放行 flag（模块级，进程重启清零）：聊天「本会话都允许」经 {@link grantSessionRun}
+ * IPC 置位；native bash 兜底三按钮亦可置位。不引入永久跨天 allowlist。
  *
- * 放在 IPC 缝（被 `fs/ipc.ts` 调用），不进 `opExecute`/`dispatch`（后者纯函数、被 headless 单测
- * 直接调，混入 dialog 会破坏可测性）。`requiresOpenConfirm` 为纯函数、单独可测。
+ * 放在 IPC 缝（被 `fs/ipc.ts` / `terminal-service` 调用），不进 `opExecute`/`dispatch`
+ * （后者纯函数、被 headless 单测直接调，混入 dialog 会破坏可测性）。
+ * `requiresOpenConfirm` 为纯函数、单独可测。
  */
 import { BrowserWindow, dialog } from "electron";
 
@@ -100,6 +102,30 @@ const SAFE_OPEN_EXTS: ReadonlySet<string> = new Set([
   "zst",
 ]);
 
+/**
+ * 本会话「允许运行」flag（bash native 兜底 + 聊天 RunConfirm「本会话都允许」共享）。
+ * 进程重启清零。聊天路径经 {@link grantSessionRun} IPC 置位（本地可信用户取舍）。
+ */
+let sessionRunAllowed = false;
+
+/** 本会话是否已放行运行类出口（bash）。 */
+export function isSessionRunAllowed(): boolean {
+  return sessionRunAllowed;
+}
+
+/**
+ * 聊天内「本会话都允许」置位（`fs:grantSessionRun`）。幂等；进程重启清零。
+ * 不引入永久跨天 allowlist。
+ */
+export function grantSessionRun(): void {
+  sessionRunAllowed = true;
+}
+
+/** 测试用：清零本会话放行（生产路径靠进程生命周期自然清零）。 */
+export function resetSessionRunAllowed(): void {
+  sessionRunAllowed = false;
+}
+
 /** relPath 的最后一段文件名（容错两种路径分隔符）。 */
 function baseName(relPath: string): string {
   return relPath.split(/[\\/]/).pop() ?? "";
@@ -149,6 +175,37 @@ async function confirmDanger(opts: {
   return response === 1; // 仅「确认」按钮放行；关闭 / Esc → cancelId(0) → false
 }
 
+/**
+ * 运行类三按钮确认（取消 | 单次运行 | 本会话都允许）。对标 Cursor session allow。
+ * 默认 / 取消均为「取消」（安全失败）；仅点「本会话都允许」才置共享 flag。
+ */
+async function confirmRunWithSessionOption(opts: {
+  message: string;
+  detail: string;
+  runLabel: string;
+}): Promise<boolean> {
+  if (sessionRunAllowed) return true;
+  const win = activeWindow();
+  const box = {
+    type: "warning" as const,
+    buttons: ["取消", opts.runLabel, "本会话都允许"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    title: "AgentCore 安全确认",
+    message: opts.message,
+    detail: opts.detail,
+  };
+  const { response } = win
+    ? await dialog.showMessageBox(win, box)
+    : await dialog.showMessageBox(box);
+  if (response === 2) {
+    sessionRunAllowed = true;
+    return true;
+  }
+  return response === 1;
+}
+
 // 预览上限：够看清意图，又不把对话框撑爆。code 与 stdin 各自独立截断。
 const PREVIEW_CAP = 2000;
 
@@ -158,12 +215,8 @@ function clip(s: string): string {
 }
 
 /**
- * execute 门：spawn 前确认（每次必弹，与后端 code_execute PER_CALL / PI-004 一致）。
- *
- * 展示**全部影响执行的输入**：除 code 外，`stdin` 也会被子进程读取（如 `exec(sys.stdin.read())`
- * / `bash` 从 stdin 读脚本），同属「影响执行的输入」，必须一并显示——否则把 payload 藏进 stdin，
- * 确认框只显示无害的 code 即可骗过人（红队 2026-06-30：E3 隐藏输入泄漏）。stdin 缺省时不显示该段，
- * 避免给常规执行添噪。
+ * 历史 execute native 门（**非** `workspaceOp('execute')` 路径——该路径已改走聊天审批卡）。
+ * 保留供单测覆盖三按钮 / stdin 预览 / 本会话 flag 语义；生产 IPC 不再调用。
  */
 export function confirmExecute(
   args: Record<string, unknown>,
@@ -178,11 +231,23 @@ export function confirmExecute(
     clip(code) || "（空）",
   ];
   if (stdin) sections.push("", "── 标准输入 stdin ──", clip(stdin));
-  return confirmDanger({
+  return confirmRunWithSessionOption({
     message: `即将在本机运行 ${language} 代码`,
     detail: sections.join("\n"),
-    confirmLabel: "运行",
+    runLabel: "运行",
   });
+}
+
+/**
+ * bash native 兜底门（未带 `rendererConfirmed` 的旧 IPC 入参）。
+ * 与 {@link grantSessionRun} / 聊天 RunConfirm 共享本会话 flag。
+ */
+export function confirmSessionRun(opts: {
+  message: string;
+  detail: string;
+  runLabel: string;
+}): Promise<boolean> {
+  return confirmRunWithSessionOption(opts);
 }
 
 /** openPath 门：打开「非已知安全类型」前确认（白名单姿态，见 {@link requiresOpenConfirm}）。 */

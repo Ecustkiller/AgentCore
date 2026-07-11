@@ -1101,12 +1101,15 @@
       "completed": 6,
       "total": 6
     },
-    "pendingInteraction": {
-      "kind": "checkpoint",
-      "checkpointId": "cp1",
-      "question": "是否采纳终稿并提交？（含 1 处 [待核验] 法条）",
-      "context": "原告红队已挖尽收敛，核验报告与答辩状初稿见工作区；终稿将标注法域 + 免责。"
-    },
+    "interactions": [
+      {
+        "kind": "ask_user",
+        "id": "cp1",
+        "status": "pending",
+        "question": "是否采纳终稿并提交？（含 1 处 [待核验] 法条）",
+        "context": "原告红队已挖尽收敛，核验报告与答辩状初稿见工作区；终稿将标注法域 + 免责。"
+      }
+    ],
     "cost": null,
     "debate": {
       "execution_id": "exec1",
@@ -1210,6 +1213,8 @@
       }
     },
     "debateRounds": [],
+    "teamSynthesisPreview": null,
+    "turnWarning": null,
     "teamNotes": []
   }
 }

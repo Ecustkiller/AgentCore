@@ -19,7 +19,7 @@
 | 角色 | AgentCore **模拟观测客户端**——与 Desktop（协作/聊天）并列入口，**同一账号、同一后端** |
 | 核心价值 | 「好看、能看的 3D AI 小镇」观看体验；手动 tick + 连续回放 |
 | 主入口 | **直接启动 AgentTown**（独立安装包 / WebGL 页面） |
-| 副入口 | AgentCore Desktop「打开小镇」→ 启动子进程并传入 `--run-id` / token |
+| 副入口 | AgentCore Desktop「工具箱 → 实验 → AI 小镇」（仅 DEV）→ 启动子进程并传入 `--run-id` / token；命令面板「AI 小镇」同效 |
 | 非目标 | 不重写 Python WorldEngine；不 fork 后端仓库；MVP 不做完整 OAuth 登录 UI |
 
 **用户路径**
@@ -100,14 +100,13 @@ AgentCore/
 │       ├── ProjectSettings/         # 6000.0.78f1
 │       └── scripts/                 # open-unity / verify-unity / build-unity / spike-webgl
 ├── packages/
-│   ├── town-assets/                 # 3D 资产单一源（⏳ 尚未迁入；源仍在 desktop/public）
 │   ├── contract-types/
 │   └── protocol-conformance/fixtures/
 │       ├── simulation-region-positions.json
 │       └── simulation-m1-tick.json
 ```
 
-场景与区域锚点**运行时代码生成**；真资产（Kenney/Xbot）导入后替换 primitive。日常文档：`apps/town/README.md`、`EDITOR-WIRING.md`。
+场景与区域锚点**运行时代码生成**；3D 资产真源 `Assets/TownAssets/`（vendored）。日常文档：`apps/town/README.md`、`EDITOR-WIRING.md`。
 
 **Desktop 保留（路线 B）**
 
@@ -271,7 +270,7 @@ AgentCore/
 
 **NPC 渲染（定案）**：单骨骼 FBX/glTF（`Xbot`）**共享骨骼动画 + 预制体实例化**，`MaterialPropertyBlock` 标色区分居民（对齐现 Desktop，非每人独立 Mixamo 文件）。
 
-**资产（定案）**：`packages/town-assets/` 为单一源；自 `apps/desktop/public/simulation/assets/` 迁出或 CI 同步脚本导入 Unity `Assets/`，避免双份手工维护。Kenney / Quaternius（CC0）+ 其它免费包可选用。
+**资产（定案）**：`apps/town/Assets/TownAssets/` 为单一真源（CC0 Kenney/Quaternius/Nature/Roads + Mixamo Xbot，vendored 入库，clone 即用）。新增 mesh 放对应子目录后 Editor Import Town Assets（或 `pnpm town:verify`）。
 
 **性能**：10 NPC ≥ 30 FPS（Windows 中端 GPU）。
 
@@ -389,7 +388,7 @@ AgentCore/
 - [x] 10 区域运行时建镇 + Session 单状态机 + 多 NPC
 - [x] SSE live + GET 回放/倍速 + manifest 居民列表（HUD）
 - [x] Tick 控制 UI（Create / Advance / Replay）
-- [x] Kenney + Xbot 资产管线（`town:sync-assets` + Import；无资产回退占位）；FE-18：Quaternius 源已进（精选 10 栋）+ 区域绑定（Quaternius 优先 / Kenney fallback）；公园自然物：Kenney Nature Kit 精选 10 GLB + nature 池；主干道路：Kenney City Kit (Roads) 精选 8 GLB + road 池（无资产回退色块）+ LOD/剔除守 10 NPC ≥ 30 FPS
+- [x] Kenney + Xbot 资产管线（vendored `Assets/TownAssets` + Import；无资产回退占位）；FE-18：Quaternius 源已进（精选 10 栋）+ 区域绑定（Quaternius 优先 / Kenney fallback）；公园自然物：Kenney Nature Kit 精选 10 GLB + nature 池；主干道路：Kenney City Kit (Roads) 精选 8 GLB + road 池（无资产回退色块）+ LOD/剔除守 10 NPC ≥ 30 FPS
 - [x] 本地 Run 历史（§9，最近 12 条）
 - [x] Windows `AgentTown.exe` + WebGL 构建；`pnpm town:build` / `town:verify`（29/29）
 - [x] Desktop 路由仅启动器（`#/simulation/town` → `TownLauncherPage`；失败路径提示；开发期找 `Builds/Windows/AgentTown.exe`）
@@ -445,7 +444,7 @@ AgentCore/
 | 后端 | `simulation/`、REST/SSE、Postgres 四表 |
 | Fixtures | `simulation-region-positions.json`、`simulation-m1-tick.json` → `Assets/StreamingAssets/Fixtures/` |
 | 类型契约 | `packages/contract-types` / OpenAPI → 手写 C# DTO |
-| 资产 | `packages/town-assets`（Kenney/Quaternius）→ Unity `Assets/` |
+| 资产 | `apps/town/Assets/TownAssets`（Kenney/Quaternius 等，vendored） |
 | 人设 | `town-personas.json` |
 
 ### 15.2 移植进度
@@ -470,7 +469,7 @@ AgentCore/
 | 4 | Run 历史：本地缓存 + 中期 `GET /runs` |
 | 5 | 主入口 AgentTown；Desktop 仅启动器副入口（无内嵌 3D） |
 | 6 | **UE + Desktop R3F 已删**；删栈门禁 = scripted + WebGL C2 live + FPS 顶栏；真 LLM 另线 |
-| 7 | 资产 `packages/town-assets`（CC0 Kenney/Quaternius + 免费包） |
+| 7 | 资产 `apps/town/Assets/TownAssets`（CC0 Kenney/Quaternius + 免费包，vendored） |
 | 8 | **Unity 6 LTS + URP**；Windows 先行、**WebGL 中期**、macOS 后 |
 | 9 | Replay 仅 GET 逐帧；Live 忽略 `tick_frame` |
 | 10 | MVP FE 任务映射为 **UT-***（Unity Town；见 MVP 计划 §2.1） |

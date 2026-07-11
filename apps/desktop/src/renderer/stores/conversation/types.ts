@@ -115,7 +115,8 @@ export interface Message {
    * bubble's own `id` is a client UUID). It is the resume KEY — the id a durable frame is
    * persisted under and that `POST .../resume` claims — so a turn that ends paused
    * in-session must surface its resume card keyed by THIS, not the client id (which 404s).
-   * Absent until message_start stamps it (and on reload, where `id` is already the server id). */
+   * Absent until message_start stamps it on the live path; on reload `toMessage` sets it
+   * to the persisted row id (already the server id) so resume guards stay live-aligned. */
   serverMessageId?: string;
   role: "user" | "assistant";
   content: string;
@@ -124,6 +125,16 @@ export interface Message {
   createdAt: string;
   executionId: string | null;
   isStreaming: boolean;
+  /**
+   * Local-only outbox sync hint for sidecar turns (as-built: 前端 UX §一B；双模式 §10.3).
+   * `synced_pending` = on disk, cloud not acked; `synced` = cloud just acked.
+   * Never on SSE / REST / conformance — desktop UI only.
+   */
+  syncStatus?: "synced_pending" | "synced";
+  /** Progressive assistant-row lifecycle from ``messages.usage.status`` (P1 overlay /
+   * P4 hydrate). ``running`` → stream-style partial; ``incomplete`` → interrupted
+   * affordance. null for user / pre-feature rows. */
+  status?: "running" | "complete" | "incomplete" | "failed" | null;
   composingTool?: { toolName: string; chars: number } | null;
   attachments?: MessageAttachmentMeta[];
   citations?: Citation[];
@@ -137,10 +148,6 @@ export interface Message {
   collab?: import("@/types/events").TurnCollabMetrics;
   runs?: ExecutionJournal;
   captainContext?: ContextBlockWire[];
-  checkpoints?: CheckpointDisplay[];
-  nonBlockingAsks?: NonBlockingAskDisplay[];
-  planReviews?: PlanReviewDisplay[];
-  teamPreviews?: TeamPreviewDisplay[];
   error?: {
     code: string;
     message: string;

@@ -87,7 +87,15 @@
       "completed": 0,
       "total": 0
     },
-    "pendingInteraction": null,
+    "interactions": [
+      {
+        "kind": "question_posted",
+        "id": "ask1",
+        "status": "pending",
+        "question": "需要同时导出 PDF 吗？",
+        "context": "默认仅 Markdown。"
+      }
+    ],
     "cost": {
       "input": 240000,
       "cached": 64000,
@@ -97,6 +105,8 @@
     },
     "debate": null,
     "debateRounds": [],
+    "teamSynthesisPreview": null,
+    "turnWarning": null,
     "teamNotes": []
   }
 }

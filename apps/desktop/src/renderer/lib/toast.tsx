@@ -93,8 +93,8 @@ export function notifyActionError(context: string, err: unknown): void {
  * A non-blocking warning toast with an optional one-click action.
  *
  * Distinct from {@link notifyError}: the user's primary action SUCCEEDED, this just
- * flags a degraded side-effect they can act on (e.g. a best-effort write-back that
- * failed and can be retried). Muted icon on the neutral surface (color-tokens), so it
+ * flags a degraded side-effect they can act on (e.g. a platform-model fallback
+ * when the cloud inference token was unavailable). Muted icon on the neutral surface (color-tokens), so it
  * reads as "heads up", not "failed". The action is caller-supplied (not the error map).
  */
 export function notifyWarning(

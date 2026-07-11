@@ -4,6 +4,7 @@ import type { AgentTownApi } from "@shared/agenttown-contract";
 import type { FsApi } from "@shared/ipc-contract";
 import type { LogApi } from "@shared/log-contract";
 import type { NotificationApi } from "@shared/notification-contract";
+import type { OutboxApi } from "@shared/outbox-contract";
 import type { SidecarApi } from "@shared/sidecar-contract";
 import type { TerminalApi } from "@shared/terminal-contract";
 import type { UpdaterApi } from "@shared/updater-contract";
@@ -21,6 +22,8 @@ declare global {
     agentTownApi?: AgentTownApi;
     fsApi: FsApi;
     sidecarApi: SidecarApi;
+    /** Main-process outbox writeback + auth refresh (Electron only). */
+    outboxApi?: OutboxApi;
     /** Electron preload 注入；纯浏览器 / 单测环境可能缺失。 */
     updaterApi?: UpdaterApi;
     /** 结构化产品日志（落主进程 desktop.jsonl）；纯浏览器 / 单测环境可能缺失。 */

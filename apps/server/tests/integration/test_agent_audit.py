@@ -13,7 +13,7 @@ from agentcore.runtime.runs import build_run_plan
 @pytest.mark.asyncio
 async def test_delegate_turn_audit_rows(session_factory, monkeypatch):
     monkeypatch.setattr(
-        "agentcore.runtime.audit.recorder.async_session_factory",
+        "agentcore.runtime.audit.recorder.telemetry_session_factory",
         session_factory,
     )
     user_id = str(uuid4())

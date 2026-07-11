@@ -166,8 +166,9 @@ class ResolveEscalationTool:
         return ToolSchema(
             name="resolve_escalation",
             description=(
-                "【仅协调模式】兑现队员的【阻塞升级】——把你的裁决回传给挂起的 worker，"
+                "【仅协调模式·≥2 worker】兑现队员的【阻塞升级】——把你的裁决回传给挂起的 worker，"
                 "它经 escalate 恢复后继续。这是阻塞仲裁的【唯一兑现路径】。\n"
+                "单 worker / 非协调时不可用（那时升级直挂用户，你波内已停在 delegate 上）。\n"
                 "直裁：对技术/范围类问题直接给 answer。\n"
                 "转交用户：偏好 / 授权 / 花钱类须先 ask_user 征询用户，拿到答复后再调本工具，"
                 "并设 via_user=true（你是过滤器不是墙）。\n"

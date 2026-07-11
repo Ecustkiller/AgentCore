@@ -20,8 +20,10 @@ the oracle never invents behavior the product doesn't already have:
   None for a turn with no structural step);
 - ``content`` / ``reasoning`` accumulate the captain bubble's deltas (present even in
   a multi-agent turn — the CEO speaks above the graph);
-- ``status`` / ``pendingInteraction`` fold the gate state machine (a *_required pauses,
-  its *_resolved resumes; a paused turn's stream simply ends at the *_required);
+- ``status`` / ``interactions[]`` fold the gate state machine (a gate *_required pauses,
+  its *_resolved resumes when no gate remains pending; a paused turn's stream may end
+  at the *_required). Full interaction lifecycle (pending|resolved|orphaned) is projected
+  via :func:`fold_interactions` (runtime journal fold — single implementation);
 - ``cost`` / ``finishReason`` come from message_end (回合总账).
 
 Output keys are the camelCase ProjectedTurn shape (see
@@ -35,6 +37,11 @@ from typing import Any
 
 from agentcore.runtime.events.journal_config import cap_process_result
 from agentcore.runtime.events.sink import ORCHESTRATION_TOOLS
+from agentcore.runtime.journal.pending_interactions import (
+    GATE_KINDS,
+    fold_interactions,
+    project_interaction_leaf,
+)
 
 # message_end.finish_reason → terminal TurnStatus (parity with desktop statusFromFinish,
 # extended with the non-error completed reasons the chat turn can carry).
@@ -45,11 +52,14 @@ _FINISH_TO_STATUS: dict[str, str] = {
     "unproductive": "completed",
     "error": "failed",
     "cancelled": "cancelled",
+    # Crash / lease-sweeper salvage (流式回复持久化 §3.4 / P4): incomplete turn kept as
+    # cancelled-class terminal so the bubble offers retry, not a completed chip.
+    "interrupted": "cancelled",
     # 挂起即收口 (②): a turn that ended AT a durable checkpoint (ask_user blocking /
     # plan_review) finalizes with finish_reason=paused — the stream carries a terminal
-    # message_end yet the turn is NOT done. It must STAY paused (the *_required already set
-    # status + pendingInteraction; message_end only adds finishReason + cost), so the single
-    # resume card renders, NOT a completed bubble. Without this the trailing message_end would
+    # message_end yet the turn is NOT done. It must STAY paused (gate *_required already
+    # parked interactions[]; message_end only adds finishReason + cost), so the resume
+    # card renders, NOT a completed bubble. Without this the trailing message_end would
     # fall through to "completed" and erase the pause.
     "paused": "paused",
 }
@@ -121,16 +131,19 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     agents: list[dict[str, Any]] = []
     runs: list[dict[str, Any]] = []
     plan_id: str | None = None
-    status = "running"
     finish_reason: str | None = None
     cost: dict[str, Any] | None = None
-    pending: dict[str, Any] | None = None
+    saw_error = False
     # 辩论编排收场产物（debate_result）：整段 payload verbatim 折入，与 run_plan 的辩手
     # 节点互补（图承载执行/发言全文，本字段承载决策简报 + 交锋叙事线）。None=本回合无辩论。
     debate: dict[str, Any] | None = None
     # 辩论逐轮叙事（debate_round_started / debate_round）：进行中实时叠加，折叠累积按 round_no
-    # 升序。transport-only 事件 → 重载（journal 无之）恒为 []，届时全量叙事线在 debate 里。
+    # 升序。P2 DURABLE——落 journal，刷新后 hydrate/fold 重建；收场后全量叙事线亦在 debate。
     debate_rounds: list[dict[str, Any]] = []
+    # 协调模式团队进展预览（team_synthesis_preview）：同 key 保最新。P2 DURABLE。
+    team_synthesis_preview: dict[str, Any] | None = None
+    # 预检警告（turn_warning）：P2 DURABLE。
+    turn_warning: str | None = None
     # 团队便签墙 (§2.2 通): the batch's posted notes in chronological order. Journaled, so it
     # replays on reload (unlike transport-only board ops). Deduped by noteId for replay safety.
     team_notes: list[dict[str, Any]] = []
@@ -464,10 +477,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 run["escalations"].append(entry)
 
         elif etype == "escalation_resolved":
-            # 阻塞式求决策 settlement: flip this run's pending escalation to resolved/timeout
-            # (a worker is sequential ⇒ at most one pending per run, 设计 §4.7). "resolved"
-            # carries the answer; "timeout" (含按假设继续) falls back to the assumption
-            # (answer stays None). Single-emitter: only the suspending tool sends this.
+            # Settlement: flip this run's pending escalation. Wire status is
+            # resolved | assumed | timed_out. Projected RunEscalation keeps
+            # assumed/timed_out distinct; both leave answer null.
             run = run_by_id(p.get("run_id", ""))
             esc = (
                 next((e for e in run["escalations"] if e.get("status") == "pending"), None)
@@ -475,11 +487,15 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 else None
             )
             if esc is not None:
-                if p.get("status") == "resolved":
+                raw = p.get("status")
+                if raw == "resolved":
                     esc["status"] = "resolved"
                     esc["answer"] = p.get("answer", "")
+                elif raw == "assumed":
+                    esc["status"] = "assumed"
+                    esc["answer"] = None
                 else:
-                    esc["status"] = "timeout"
+                    esc["status"] = "timed_out"
                     esc["answer"] = None
                 if p.get("arbitrated_by") == "ceo":
                     esc["arbitrated_by"] = "ceo"
@@ -557,42 +573,18 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     )
 
         elif etype == "approval_required":
-            pending = {
-                "kind": "approval",
-                "approvalId": p.get("approval_id", ""),
-                "toolCallId": p.get("tool_call_id", ""),
-                "toolName": p.get("tool_name", ""),
-                "arguments": p.get("arguments") or {},
-            }
-            status = "paused"
+            # Gate lifecycle → fold_interactions at end; only turn-status side effects
+            # lived here historically. Process markers N/A for approval.
+            pass
 
         elif etype == "approval_resolved":
-            if (
-                pending
-                and pending.get("kind") == "approval"
-                and pending.get("approvalId") == p.get("approval_id")
-            ):
-                pending = None
-                status = "running"
+            pass
 
         elif etype == "delegation_authorization_required":
-            pending = {
-                "kind": "delegation_authorization",
-                "authorizationId": p.get("authorization_id", ""),
-                "executionId": p.get("execution_id", ""),
-                "workers": p.get("workers") or [],
-                "grantableTools": p.get("grantable_tools") or [],
-            }
-            status = "paused"
+            pass
 
         elif etype == "delegation_authorization_resolved":
-            if (
-                pending
-                and pending.get("kind") == "delegation_authorization"
-                and pending.get("authorizationId") == p.get("authorization_id")
-            ):
-                pending = None
-                status = "running"
+            pass
 
         elif etype == "checkpoint_required":
             cid = p.get("checkpoint_id", "")
@@ -605,22 +597,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             # (card body folds separately, keyed by id). Mirrors EventSink.
             if cid and not has_marker("checkpoint", "checkpoint_id", cid):
                 process.append({"kind": "checkpoint", "checkpoint_id": cid})
-            pending = {
-                "kind": "checkpoint",
-                "checkpointId": cid,
-                "question": p.get("question", ""),
-                "context": p.get("context", ""),
-            }
-            status = "paused"
 
         elif etype == "checkpoint_resolved":
-            if (
-                pending
-                and pending.get("kind") == "checkpoint"
-                and pending.get("checkpointId") == p.get("checkpoint_id")
-            ):
-                pending = None
-                status = "running"
+            pass
 
         elif etype == "plan_review_required":
             cid = p.get("checkpoint_id", "")
@@ -633,8 +612,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 run = run_by_id(rid)
                 if run is not None:
                     run["checkpoint"] = {"status": "pending", "decision": None}
-            pending = {"kind": "plan_review", "checkpointId": cid, "runIds": run_ids}
-            status = "paused"
 
         elif etype == "plan_review_resolved":
             cid = p.get("checkpoint_id", "")
@@ -645,63 +622,72 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                         "status": "resolved",
                         "decision": p.get("decision"),
                     }
-            if (
-                pending
-                and pending.get("kind") == "plan_review"
-                and pending.get("checkpointId") == cid
-            ):
-                pending = None
-                status = "running"
 
         elif etype == "team_preview_required":
             cid = p.get("checkpoint_id", "")
             if cid and not has_marker("team_preview", "checkpoint_id", cid):
                 process.append({"kind": "team_preview", "checkpoint_id": cid})
-            worker_ids = [w.get("run_id", "") for w in (p.get("workers") or [])]
-            pending = {
-                "kind": "team_preview",
-                "checkpointId": cid,
-                "workerIds": worker_ids,
-            }
-            status = "paused"
 
         elif etype == "team_preview_resolved":
-            cid = p.get("checkpoint_id", "")
-            if (
-                pending
-                and pending.get("kind") == "team_preview"
-                and pending.get("checkpointId") == cid
-            ):
-                pending = None
-                status = "running"
+            pass
 
         elif etype == "question_posted":
-            # 非阻塞发问时间线落点: the CEO surfaced a question and kept working (no gate, no
-            # pending) — positional marker only, card body folds separately by ask_id.
+            # 非阻塞发问时间线落点: the CEO surfaced a question and kept working (no gate) —
+            # positional marker only; interactions[] carries the card body by ask_id.
             aid = p.get("ask_id", "")
             if aid and not has_marker("ask", "ask_id", aid):
                 process.append({"kind": "ask", "ask_id": aid})
 
         elif etype == "error":
-            status = "failed"
+            saw_error = True
 
         elif etype == "message_end":
             finish_reason = p.get("finish_reason")
             cost = p.get("cost")
-            status = _FINISH_TO_STATUS.get(finish_reason or "", "completed")
+
+        elif etype == "turn_warning":
+            msg = p.get("message")
+            if isinstance(msg, str) and msg.strip():
+                turn_warning = msg
+
+        elif etype == "team_synthesis_preview":
+            # 同 key 保最新（后写覆盖）。
+            team_synthesis_preview = p
 
         else:
             # message_start / turn_saved / title_generated / followups_generated /
             # board_op_required / board_read_required / desktop_notify_required /
             # tool_progress / workspace_op_required /
-            # handoff_* / team_synthesis_preview — not part of the normalized turn
-            # judge state (no-op). Mirrored by the frontend folds' assertNever switch
+            # handoff_* / debate_round_decision_* /
+            # interaction_orphaned / escalation_* (run escalations folded above) —
+            # not part of the normalized turn judge state beyond interactions[] fold
+            # (no-op here). Mirrored by the frontend folds' assertNever switch
             # so the set stays in lockstep.
             pass
 
-    # A cancelled turn never received terminal frames for in-flight nodes; freeze them
-    # (parity with projectExecution's cancelled pass).
-    if status == "cancelled":
+    # Interactions[] — single fold implementation (runtime pending_interactions).
+    interactions = [
+        project_interaction_leaf(rec) for rec in fold_interactions(events)
+    ]
+    gate_pending = any(
+        i.get("status") == "pending" and i.get("kind") in GATE_KINDS for i in interactions
+    )
+    if finish_reason is not None:
+        status = _FINISH_TO_STATUS.get(finish_reason or "", "completed")
+    elif saw_error:
+        status = "failed"
+    elif gate_pending:
+        status = "paused"
+    else:
+        status = "running"
+
+    # A cancelled OR failed turn may leave in-flight nodes with no terminal frame; freeze
+    # them as cancelled (parity with projectExecution's freeze pass). The cancelled case is
+    # the graceful one (workers get run_cancelled). The failed case is the defensive one: a
+    # turn that errors out (hard crash / lost terminal frame) while a worker is still
+    # in-flight would otherwise replay that node as a forever-spinning "running" on reload —
+    # 避免假 working must cover the failed outcome too, not just the stop.
+    if status in ("cancelled", "failed"):
         for r in runs:
             if r["status"] == "running":
                 r["status"] = "cancelled"
@@ -732,10 +718,12 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             "completed": sum(1 for r in runs if r["status"] == "completed"),
             "total": len(runs),
         },
-        "pendingInteraction": pending,
+        "interactions": interactions,
         "cost": cost,
         "debate": debate,
         "debateRounds": debate_rounds,
+        "teamSynthesisPreview": team_synthesis_preview,
+        "turnWarning": turn_warning,
         # 团队便签墙 (§2.2 通): the turn's posted notes (chronological), [] when none.
         "teamNotes": team_notes,
     }

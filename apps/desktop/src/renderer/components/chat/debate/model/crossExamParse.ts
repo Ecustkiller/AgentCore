@@ -1,8 +1,8 @@
 /** 质询作答 blob → 逐条 Q↔A 解析（JSON 数组，与后端 `cross_exam_parse.py` 对齐）。
  *
  * 权威路径是结构化 ``cross_exam[].exchanges[]``（收场后由后端解析下发）；本模块仅在 live
- * 流式阶段、从 ``_cx_`` run 的 ``outputChunks`` 重建作答时调用。非 JSON 作答在结构化
- * 事件到达前保持空 answer。 */
+ * 流式阶段、从 ``_cx_`` run 的 ``outputChunks`` 重建作答时调用。dict 项按 ``question_index``；
+ * 标量字符串/数字数组按位置映射。非 JSON 作答在结构化事件到达前保持空 answer。 */
 
 export interface CrossExamQaView {
   question: string;
@@ -62,13 +62,25 @@ function exchangesFromJsonItems(
     ok: false,
   }));
   items.forEach((raw, pos) => {
-    if (typeof raw !== "object" || raw === null) return;
-    const item = raw as Record<string, unknown>;
-    const idx = resolveQuestionIndex(item.question_index, pos);
-    if (idx === null || idx < 0 || idx >= out.length) return;
-    const answer = asAnswerText(item.answer);
-    const ok = resolveDirectlyAddressed(item, answer);
-    out[idx] = { question: questions[idx], answer, ok };
+    // dict 项：按 question_index / 位置取 answer
+    if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+      const item = raw as Record<string, unknown>;
+      const idx = resolveQuestionIndex(item.question_index, pos);
+      if (idx === null || idx < 0 || idx >= out.length) return;
+      const answer = asAnswerText(item.answer);
+      const ok = resolveDirectlyAddressed(item, answer);
+      out[idx] = { question: questions[idx], answer, ok };
+      return;
+    }
+    // 标量数组：按位置映射为 answer（兼容少包一层 wrapper 的 ["答一","答二"]）
+    if (pos >= out.length) return;
+    if (typeof raw !== "string" && typeof raw !== "number") return;
+    const answer = asAnswerText(raw);
+    out[pos] = {
+      question: questions[pos],
+      answer,
+      ok: Boolean(answer.trim()),
+    };
   });
   return out;
 }

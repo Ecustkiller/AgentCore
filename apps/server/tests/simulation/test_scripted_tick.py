@@ -56,14 +56,50 @@ async def test_scripted_agent_tick_follows_schedule():
     world = seed_town_world()
     engine = WorldEngine(world=world)
     await engine.advance()
+    # Lin is story-adjacent baker with a role override at many hours; scripted
+    # path keeps workplace landings and only flavors activity copy.
     slot = schedule_hint_for_persona(LIN_PERSONA, world.hour)
     outcome = await run_scripted_agent_tick(world=world, persona=LIN_PERSONA)
     assert outcome.error is None
     assert outcome.action.success
     assert world.agents["lin"].location == slot.location
-    assert slot.activity in world.agents["lin"].activity or world.agents["lin"].activity.startswith(
-        "前往"
-    )
+    assert world.agents["lin"].activity
+    assert world.agents["lin"].activity.startswith("前往") or len(
+        world.agents["lin"].activity
+    ) >= 2
+
+
+@pytest.mark.asyncio
+async def test_scripted_schedule_disperses_non_cast_deterministically():
+    """Non-protagonists stagger public landings; same inputs → same slot."""
+    from agentcore.simulation.agents.scripted import _scripted_schedule_slot
+    from agentcore.simulation.scenarios.town.config import persona_by_id
+
+    hour = 12  # town-wide 公园 · 午休散步 — no role override for chen/yang/sun
+    chen = persona_by_id("chen")
+    yang = persona_by_id("yang")
+    sun = persona_by_id("sun")
+    zhao = persona_by_id("zhao")
+
+    base = schedule_hint_for_persona(chen, hour)
+    assert base.location == "公园"
+
+    s_chen = _scripted_schedule_slot(chen, hour)
+    s_yang = _scripted_schedule_slot(yang, hour)
+    s_sun = _scripted_schedule_slot(sun, hour)
+    s_zhao = _scripted_schedule_slot(zhao, hour)
+
+    # Story cast keeps canonical landing.
+    assert s_zhao.location == base.location
+    # Non-cast: not everyone clones the same activity string.
+    activities = {s_chen.activity, s_yang.activity, s_sun.activity}
+    assert len(activities) >= 2
+    # Re-run is bit-identical (deterministic).
+    assert _scripted_schedule_slot(chen, hour) == s_chen
+    assert _scripted_schedule_slot(yang, hour) == s_yang
+    # At least one non-cast lands off the pile-up default (dispersion).
+    non_cast_locs = {s_chen.location, s_yang.location, s_sun.location}
+    assert len(non_cast_locs) >= 2 or "公园" not in non_cast_locs
 
 
 @pytest.mark.asyncio
@@ -392,7 +428,7 @@ async def test_scripted_demo_pulse_persists_observable_events(
             f"expected conversation/trade or sim.world_event after "
             f"{DEMO_TICK_COUNT} scripted ticks; got {sorted(kinds)}"
         )
-        # Demo pulse should have produced both by tick 6.
+        # Demo pulse should have produced both by SCRIPTED_WORLD_EVENT_INTERVAL.
         assert has_interaction, f"missing interaction rows; kinds={sorted(kinds)}"
         assert has_world_event, f"missing world_event rows; kinds={sorted(kinds)}"
     finally:

@@ -117,12 +117,12 @@ async def test_nonblocking_without_any_default_is_rejected():
     assert _drain(tool.sink) == []  # nothing surfaced on the rejected path
 
 
-async def test_blocking_defaults_true_and_takes_the_suspend_path():
-    # Omitting `blocking` keeps the default suspend+resume behavior — proven by the
-    # suspend bridge being reached (the non-blocking branch would have returned first).
+async def test_blocking_defaults_true_and_fails_without_durable_frame():
+    # D11：无 transcript/saver 时不再走窄兜底 suspend，显式失败。
     tool = _tool()
-    with pytest.raises(_SuspendReached):
-        await tool.execute({"message": "A 还是 B?"}, _ctx())
+    res = await tool.execute({"message": "A 还是 B?"}, _ctx())
+    assert res.success is False
+    assert "持久化" in (res.output or "")
 
 
 async def test_empty_message_rejected_before_blocking_branch():

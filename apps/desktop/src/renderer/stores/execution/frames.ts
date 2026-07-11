@@ -146,12 +146,14 @@ export type RunFrame =
       awaiting?: "user" | "ceo";
     }
   | {
-      // 阻塞式求决策 settlement: the blocking escalate resolved (answer) or timed out.
+      // 阻塞式求决策 settlement.
       t: number;
       kind: "escalation_resolved";
+      /** Match the pending card by id (not "first pending"). */
+      escalationId: string;
       runId: string;
       agentId: string;
-      status: "resolved" | "timeout";
+      status: "resolved" | "assumed" | "timed_out";
       answer: string;
       arbitrated_by?: "user" | "ceo";
       via_user?: boolean;
@@ -397,12 +399,18 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
     }
     case "escalation_resolved": {
       const p = event.payload as EscalationResolvedPayload;
+      const raw = p.status as string;
+      const status: "resolved" | "assumed" | "timed_out" =
+        raw === "resolved" || raw === "assumed" || raw === "timed_out"
+          ? raw
+          : "timed_out";
       return {
         t,
         kind: "escalation_resolved",
+        escalationId: p.escalation_id,
         runId: p.run_id,
         agentId: p.agent_id,
-        status: p.status,
+        status,
         answer: p.answer,
         ...(p.arbitrated_by === "user" || p.arbitrated_by === "ceo"
           ? { arbitrated_by: p.arbitrated_by }

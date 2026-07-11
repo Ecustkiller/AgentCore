@@ -339,4 +339,20 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     await vi.waitFor(() => expect(probeSidecarMock).toHaveBeenCalledTimes(2));
     expect(usePausedTurnStore.getState().pending).toHaveLength(1); // 仍未续成功 → 帧保留
   });
+
+  it("isGenerating 时点继续 → 抛错 + 出横幅（不静默卡死 submitting）", async () => {
+    useConversationStore.getState().setGenerating(true, "c1");
+    resolveSidecarRootMock.mockResolvedValue(TARGET);
+
+    await expect(runResume("m1", "continue", "")).rejects.toThrow(
+      /still generating/,
+    );
+
+    expect(resumeViaSidecarMock).not.toHaveBeenCalled();
+    expect(resumeConversationMock).not.toHaveBeenCalled();
+    expect(usePausedTurnStore.getState().pending).toHaveLength(1);
+    expect(useConversationStore.getState().byId.c1?.error).toContain(
+      "仍在生成中",
+    );
+  });
 });

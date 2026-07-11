@@ -47,22 +47,36 @@
                     </ui:VisualElement>
                     <ui:Label class="section-subtitle" text="剧本包" />
                     <ui:DropdownField name="pack-dropdown" class="pack-dropdown" />
-                    <ui:VisualElement class="row">
-                        <ui:TextField name="run-id-field" class="run-field grow" label="" />
-                        <ui:Button name="resume-run-button" class="btn" text="恢复" />
-                    </ui:VisualElement>
-                    <ui:Label class="section-subtitle" text="最近" />
-                    <ui:ScrollView name="run-history-list" class="run-history-list" />
 
-                    <ui:Label class="section-title" text="上帝模式" />
-                    <ui:Label name="god-hint" class="god-hint" text="" />
-                    <ui:VisualElement class="row god-row">
-                        <ui:Button name="inject-price" class="btn god grow" text="物价" />
-                        <ui:Button name="inject-storm" class="btn god grow" text="风暴" />
+                    <!-- Live-only: run id / history (hidden in Offline). -->
+                    <ui:VisualElement name="live-run-block">
+                        <ui:VisualElement class="row">
+                            <ui:TextField name="run-id-field" class="run-field grow" label="" />
+                            <ui:Button name="resume-run-button" class="btn" text="恢复" />
+                        </ui:VisualElement>
+                        <ui:Label class="section-subtitle" text="最近" />
+                        <ui:ScrollView name="run-history-list" class="run-history-list" />
                     </ui:VisualElement>
-                    <ui:VisualElement class="row god-row">
-                        <ui:Button name="inject-festival" class="btn god grow" text="节庆" />
-                        <ui:Button name="inject-announce" class="btn god grow" text="公告" />
+
+                    <!-- Offline watch brief: pack synopsis + current beat (no invented data). -->
+                    <ui:VisualElement name="offline-watch-block" class="hidden">
+                        <ui:Label class="section-subtitle" text="正在观看" />
+                        <ui:Label name="offline-pack-title" class="offline-pack-title" text="" />
+                        <ui:Label name="offline-pack-synopsis" class="offline-pack-synopsis" text="" />
+                        <ui:Label name="offline-now-label" class="offline-now-label" text="" />
+                    </ui:VisualElement>
+
+                    <ui:VisualElement name="god-mode-block">
+                        <ui:Label class="section-title" text="上帝模式" />
+                        <ui:Label name="god-hint" class="god-hint" text="" />
+                        <ui:VisualElement class="row god-row">
+                            <ui:Button name="inject-price" class="btn god grow" text="物价" />
+                            <ui:Button name="inject-storm" class="btn god grow" text="风暴" />
+                        </ui:VisualElement>
+                        <ui:VisualElement class="row god-row">
+                            <ui:Button name="inject-festival" class="btn god grow" text="节庆" />
+                            <ui:Button name="inject-announce" class="btn god grow" text="公告" />
+                        </ui:VisualElement>
                     </ui:VisualElement>
                 </ui:ScrollView>
             </ui:VisualElement>

@@ -1,11 +1,13 @@
 import { useConversationStore } from "@/stores/conversation";
+import { useInteractionStore } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import type {
   CheckpointRequiredPayload,
   PlanReviewRequiredPayload,
 } from "@/types/events";
 import { beforeEach, describe, expect, it } from "vitest";
-import { surfaceResumeFromLiveTurn } from "../resume";
+import { toMessage } from "../messages";
+import { isClientOnlyResumeKey, surfaceResumeFromLiveTurn } from "../resume";
 
 // 挂起即收口 (②) cold-path coverage: a turn that ENDS at a checkpoint on the live stream
 // (message_end finish_reason=paused) must hand off to the SINGLE durable resume card,
@@ -15,12 +17,14 @@ import { surfaceResumeFromLiveTurn } from "../resume";
 
 const conv = () => useConversationStore.getState();
 const paused = () => usePausedTurnStore.getState();
+const ix = () => useInteractionStore.getState();
 
 const CID = "conv-1";
 
 beforeEach(() => {
   useConversationStore.setState({ currentConversationId: null, byId: {} });
   usePausedTurnStore.getState().clear();
+  useInteractionStore.getState().clear();
 });
 
 /** Seed a user request + a (streaming) assistant bubble whose client id is a UUID,
@@ -70,10 +74,28 @@ const prPayload = (
   ...over,
 });
 
+function upsertAsk(messageId = "client-uuid"): void {
+  ix().upsertRequired({
+    kind: "ask_user",
+    conversationId: CID,
+    messageId,
+    payload: cpPayload() as unknown as Record<string, unknown>,
+  });
+}
+
+function upsertPlanReview(messageId = "client-uuid"): void {
+  ix().upsertRequired({
+    kind: "plan_review",
+    conversationId: CID,
+    messageId,
+    payload: prPayload() as unknown as Record<string, unknown>,
+  });
+}
+
 describe("surfaceResumeFromLiveTurn", () => {
   it("surfaces one ask_user resume entry keyed by the SERVER message_id", () => {
     seedTurn("m-server-1");
-    conv().addCheckpoint(cpPayload(), CID);
+    upsertAsk();
 
     surfaceResumeFromLiveTurn(CID, "server");
 
@@ -94,7 +116,7 @@ describe("surfaceResumeFromLiveTurn", () => {
 
   it("surfaces one plan_review resume entry carrying steps + pending", () => {
     seedTurn("m-server-2");
-    conv().addPlanReview(prPayload(), CID);
+    upsertPlanReview();
 
     surfaceResumeFromLiveTurn(CID, "server");
 
@@ -113,7 +135,7 @@ describe("surfaceResumeFromLiveTurn", () => {
 
   it("does not surface when no server id was stamped", () => {
     seedTurn(); // a turn that somehow streamed without a message_start
-    conv().addCheckpoint(cpPayload(), CID);
+    upsertAsk();
 
     surfaceResumeFromLiveTurn(CID, "server");
 
@@ -122,7 +144,7 @@ describe("surfaceResumeFromLiveTurn", () => {
 
   it("is idempotent by messageId — a second call does not stack a duplicate", () => {
     seedTurn("m-server-1");
-    conv().addCheckpoint(cpPayload(), CID);
+    upsertAsk();
 
     surfaceResumeFromLiveTurn(CID, "server");
     surfaceResumeFromLiveTurn(CID, "server");
@@ -131,7 +153,7 @@ describe("surfaceResumeFromLiveTurn", () => {
   });
 
   it("is a no-op when the finalized turn carries no pending checkpoint", () => {
-    seedTurn("m-server-1"); // no addCheckpoint / addPlanReview
+    seedTurn("m-server-1");
 
     surfaceResumeFromLiveTurn(CID, "server");
 
@@ -148,7 +170,7 @@ describe("surfaceResumeFromLiveTurn", () => {
 
   it("tags origin=sidecar when caller passes sidecar", () => {
     seedTurn("m-server-1");
-    conv().addCheckpoint(cpPayload(), CID);
+    upsertAsk();
 
     surfaceResumeFromLiveTurn(CID, "sidecar");
 
@@ -157,10 +179,41 @@ describe("surfaceResumeFromLiveTurn", () => {
 
   it("tags origin=server when caller passes server", () => {
     seedTurn("m-server-1");
-    conv().addCheckpoint(cpPayload(), CID);
+    upsertAsk();
 
     surfaceResumeFromLiveTurn(CID, "server");
 
     expect(paused().pending[0]?.origin).toBe("server");
+  });
+});
+
+describe("isClientOnlyResumeKey", () => {
+  it("is true for a live client bubble that never got message_start", () => {
+    seedTurn(); // client-uuid, no serverMessageId stamp
+    expect(isClientOnlyResumeKey(CID, "client-uuid")).toBe(true);
+  });
+
+  it("is false after live message_start stamps serverMessageId", () => {
+    seedTurn("m-server-1");
+    // Resume key is the SERVER id; looking up by client id finds the bubble
+    // but serverMessageId is set → not client-only.
+    expect(isClientOnlyResumeKey(CID, "client-uuid")).toBe(false);
+  });
+
+  it("is false for a hydrated assistant (toMessage stamps serverMessageId)", () => {
+    conv().switchConversation(CID);
+    conv().addMessage(
+      toMessage({
+        id: "srv-msg-1",
+        conversation_id: CID,
+        role: "assistant",
+        content: "paused reply",
+        reasoning_content: null,
+        created_at: "2026-01-01T00:00:00Z",
+      }),
+    );
+
+    // After reload, bubble id === server id; guard must not reject resume.
+    expect(isClientOnlyResumeKey(CID, "srv-msg-1")).toBe(false);
   });
 });

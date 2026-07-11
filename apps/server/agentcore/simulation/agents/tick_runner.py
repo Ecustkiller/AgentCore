@@ -1,4 +1,14 @@
-"""Single SimAgent tick via react_loop (bypasses conversation / turn journal)."""
+"""Single SimAgent tick: one LLM round → one action (role-play, not a task turn).
+
+Deliberately NOT ``react_loop``: a resident's tick is a single in-character
+decision, not a multi-round task turn. Reusing the task engine leaked its
+semantics into role-play — convergence steering injected「给出最终答案」reflection
+prompts (agents replied with「## 最终答案」助手腔), multi-round ReAct let one tick
+teleport through several locations, and ``deliverable_only`` discarded the very
+in-character prose we want as the thought. This runs ONE round via
+``run_llm_round`` and applies exactly the first action tool, keeping the streamed
+prose verbatim as the agent's thought.
+"""
 
 from __future__ import annotations
 
@@ -16,8 +26,10 @@ from agentcore.core.types import new_id
 from agentcore.evals.recording_sink import RecordingSink
 from agentcore.llm.pricing import NANO_PER_USD, calculate_cost
 from agentcore.llm.profiles import ProfileParams
-from agentcore.llm.provider.protocol import LLMMessage
-from agentcore.runtime.engine import react_loop
+from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
+from agentcore.runtime.engine.governance import resolve_openai_tool_defs
+from agentcore.runtime.engine.round import LlmRoundFailure, run_llm_round
+from agentcore.runtime.engine.tool_exec import execute_tools
 from agentcore.simulation.agents.memory import format_tick_memories_for_perception
 from agentcore.simulation.agents.models import (
     MotivationAssessment,
@@ -40,7 +52,14 @@ from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
-_SIM_PROFILE = ProfileParams(temperature=0.8, max_rounds=4, name="sim.town")
+# Role-play tick = ONE LLM round, ONE action. max_rounds=1 keeps the engine's
+# multi-round convergence steering (which injects「给出最终答案」reflection prompts
+# that break character into助手腔) from ever firing — a resident thinks once and acts.
+_SIM_PROFILE = ProfileParams(temperature=0.8, max_rounds=1, name="sim.town")
+
+
+def _noop_emit(_delta: str) -> None:
+    """Sink for streamed deltas — sim reads the final content, not the live stream."""
 
 
 @dataclass
@@ -143,6 +162,25 @@ async def _apply_parsed_action(
     return action, thought or result.output, args_json
 
 
+def _thought_from_tool_args(args_raw: str) -> str:
+    """Recover the in-character thought from a native tool call.
+
+    DeepSeek (and most providers) return empty ``content`` when they emit a tool
+    call, so ``content`` can't carry the resident's想法. The thought lives in the
+    tool's ``reason`` arg (every sim action tool requires it); fall back to
+    ``message`` so a ``speak_to`` still surfaces something if ``reason`` is absent.
+    """
+    if not args_raw:
+        return ""
+    try:
+        args = json.loads(args_raw)
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(args, dict):
+        return ""
+    return str(args.get("reason") or args.get("message") or "").strip()
+
+
 def _action_from_tool(
     name: str, args_raw: str, thought: str, *, success: bool, detail: str
 ) -> SimAgentAction:
@@ -219,30 +257,40 @@ async def run_agent_tick(
     perception = f"{perception}\n{motivation.hint_line()}"
     messages = _build_messages(persona, perception, text_mode=text_mode)
     model = turn_model or settings.platform_model
+    # text_mode → no tools (model emits a JSON action); native tools → offer the sim
+    # action tools. Either way we run ONE round and apply exactly one action.
+    tool_defs = None if text_mode else resolve_openai_tool_defs(tools, None, set())
     t0 = time.monotonic()
     with log_context(trace_id=new_trace_id(), user_id="simulation", agent=persona.agent_id):
         try:
-            content, _reasoning, usage, rounds = await react_loop(
-                messages=messages,
+            result = await run_llm_round(
                 llm=llm,
-                tools=tools,
-                sink=sink,
-                tool_context=ctx,
                 profile=_SIM_PROFILE,
-                turn_model=model,
-                deliverable_only=True,
-                role=persona.role,
+                messages=messages,
+                investigation_tools=frozenset(),
+                tool_defs=tool_defs,
+                active_model=model,
+                emit_content=_noop_emit,
+                emit_reasoning=_noop_emit,
+                on_tool_progress=None,
+                round_idx=0,
                 run_id=run_id,
-                allowed_tool_names=[] if text_mode else None,
+                raise_on_error=True,
             )
-            tool_calls = list(sink.tool_calls)
+            if isinstance(result, LlmRoundFailure):
+                raise RuntimeError(result.error_message or "LLM round failed")
+            content = result.content or ""
+            usage = result.usage or TokenUsage()
+            # The agent's in-character prose IS its thought — kept verbatim (no
+            # deliverable rollback that would discard it in favour of a later
+            # "summary" round).
+            thought = content
             action_name = ""
             args_json = ""
-            thought = content or ""
             success = True
             detail = ""
             if text_mode:
-                payload = _parse_action_json(content or "")
+                payload = _parse_action_json(content)
                 if payload:
                     action_name, thought, args_json = await _apply_parsed_action(
                         world, payload, ctx
@@ -251,8 +299,25 @@ async def run_agent_tick(
                     success = False
                     detail = "failed to parse action JSON"
                     action_name = "error"
-            elif tool_calls:
-                action_name, args_json = tool_calls[0]
+            elif result.tool_calls:
+                # One tick = one action: apply exactly the FIRST tool the agent chose,
+                # so a resident can't teleport through several locations in a single tick.
+                first = result.tool_calls[0]
+                _msgs, _terminal, attempts = await execute_tools(
+                    [first], tools, ctx, sink, run_id=run_id
+                )
+                action_name = first.function.name
+                args_json = first.function.arguments or ""
+                # Native tool-calling returns empty content — the in-character thought
+                # lives in the tool's ``reason`` arg. Recover it (fallback to any prose).
+                thought = _thought_from_tool_args(args_json) or content
+                if attempts and not attempts[0].success:
+                    success = False
+                    detail = (_msgs[0].content if _msgs else "") or "行动失败"
+            else:
+                success = False
+                detail = "模型未选择任何行动工具"
+                action_name = "idle"
             agent = world.agents[persona.agent_id]
             async with world.mutation_lock():
                 agent.last_thought = thought
@@ -263,7 +328,7 @@ async def run_agent_tick(
             action.agent_id = persona.agent_id
             return AgentTickOutcome(
                 action=action,
-                rounds=rounds,
+                rounds=1,
                 latency_ms=int((time.monotonic() - t0) * 1000),
                 usage=usage.as_dict(),
                 cost_usd=cost / NANO_PER_USD,

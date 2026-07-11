@@ -329,12 +329,12 @@ class TestRunTool:
             # code_execute (context.backend.execute) — a test suite executes arbitrary
             # project code (conftest, fixtures, plugins), so its execution power is
             # equivalent. It therefore belongs to the same code-execution class and must
-            # carry the SAME governance: GRANTABLE ∩ EXECUTION makes the approval gate and
-            # per_call_tool_names() cover it automatically (per-call consent, never
-            # turn-whitelisted), the CEO NEVER-filter keeps it worker-only, and the cloud
-            # availability gate (code_execution_enabled_for) withholds it where the sandbox
-            # isn't a real isolation boundary — closing the P0 where a NEVER test_run ran
-            # ungated (local: user's real machine; cloud default: subprocess RCE).
+            # carry the SAME governance: GRANTABLE so the approval gate covers it, the CEO
+            # NEVER-filter keeps it worker-only, and the cloud availability gate
+            # (code_execution_enabled_for) withholds it where the sandbox isn't a real
+            # isolation boundary — closing the P0 where a NEVER test_run ran ungated
+            # (local: user's real machine; cloud default: subprocess RCE). Turn grants
+            # are allowed (per_call_tool_names empty, Cursor-aligned).
             approval=ToolApproval.GRANTABLE,
             timeout_seconds=_DEFAULT_TIMEOUT,
         )

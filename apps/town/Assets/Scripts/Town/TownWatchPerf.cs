@@ -12,8 +12,11 @@ namespace AgentTown.Town
         /// <summary>WebGL quality tier index in <c>QualitySettings</c> (Low).</summary>
         public const int WebGlQualityLevel = 1;
 
-        /// <summary>Nameplates hide beyond this camera distance (metres).</summary>
-        public const float NameplateHideDistance = 26f;
+        /// <summary>
+        /// Nameplates hide beyond this camera distance (metres). Bird's-eye watch sits
+        /// ~20–56 m from the look target — keep plates visible across the mid framing.
+        /// </summary>
+        public const float NameplateHideDistance = 96f;
 
         /// <summary>Max concurrent world-space interaction canvases (bubbles + trade + vote).</summary>
         public const int MaxVisibleInteractionLabels = 3;

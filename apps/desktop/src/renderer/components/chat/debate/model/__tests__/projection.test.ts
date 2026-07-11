@@ -198,3 +198,87 @@ describe("toDebateModel live cross-exam", () => {
     expect(answer).toBe("后端解析的权威答案");
   });
 });
+
+describe("toDebateModel live 2-side sideKey (directed follow-up contract, 09 F6)", () => {
+  function twoSideExecution(proKey: string, conKey: string): Execution {
+    const mkRun = (id: string, stance: "pro" | "con") =>
+      ({
+        id,
+        agentId: id,
+        status: "completed",
+        stance,
+        group: "debate:debate",
+        round: 1,
+        revision: 1,
+        revisionOf: null,
+        parentRunId: null,
+        kind: "agent",
+        receivedContext: [],
+      }) as unknown as RunNode;
+    const mkAgent = (id: string, role: string) =>
+      ({
+        id,
+        role,
+        status: "completed",
+        outputChunks: [],
+        reasoningChunks: [],
+        currentRunId: null,
+        toolProgress: null,
+        toolExecutionLive: null,
+      }) as unknown as AgentState;
+    return baseExecution({
+      runs: [mkRun("mod_r1_pro", "pro"), mkRun("mod_r1_con", "con")],
+      agents: [mkAgent("mod_r1_pro", "卖方"), mkAgent("mod_r1_con", "买方")],
+      debateRounds: [
+        {
+          round_no: 1,
+          focus: "焦点",
+          summary: "",
+          verdict: {
+            real_clash: true,
+            new_arguments: true,
+            converged: false,
+            stop_reason: "",
+            rationale: "",
+          },
+          sides: [
+            { key: proKey, name: "卖方", run_id: "mod_r1_pro", ok: true },
+            { key: conKey, name: "买方", run_id: "mod_r1_con", ok: true },
+          ],
+          clashes: [],
+          cross_exam: [],
+        },
+      ],
+    });
+  }
+
+  it("uses backend side.key (not stance) so ask_target matches even for non-pro/con keys", () => {
+    const model = toDebateModel(twoSideExecution("卖方", "买方"));
+    expect(model?.settled).toBe(false);
+    const round = model?.rounds[0];
+    const pro = round?.sides.find((s) => s.stance === "pro");
+    const con = round?.sides.find((s) => s.stance === "con");
+    // sideKey（→ 掌舵 ask_target / clash 匹配）取后端真实 key，不再硬编码 stance
+    expect(pro?.sideKey).toBe("卖方");
+    expect(con?.sideKey).toBe("买方");
+    // stance 保留（左右布局 + 固定红蓝对垒色靠它）
+    expect(pro?.stance).toBe("pro");
+    expect(con?.stance).toBe("con");
+  });
+
+  it("stays pro/con when the backend uses the pro/con convention (no-op for common case)", () => {
+    const model = toDebateModel(twoSideExecution("pro", "con"));
+    const round = model?.rounds[0];
+    expect(round?.sides.find((s) => s.stance === "pro")?.sideKey).toBe("pro");
+    expect(round?.sides.find((s) => s.stance === "con")?.sideKey).toBe("con");
+  });
+
+  it("falls back to stance as sideKey before the round narrative arrives", () => {
+    const exec = twoSideExecution("卖方", "买方");
+    // 尚无 debate_round 叙事（narr.sides 缺）→ 回退 stance
+    const model = toDebateModel(baseExecution({ runs: exec.runs, agents: exec.agents }));
+    const round = model?.rounds[0];
+    expect(round?.sides.find((s) => s.stance === "pro")?.sideKey).toBe("pro");
+    expect(round?.sides.find((s) => s.stance === "con")?.sideKey).toBe("con");
+  });
+});

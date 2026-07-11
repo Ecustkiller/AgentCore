@@ -10,6 +10,8 @@ scheduler's control flow is exercised in isolation.
 
 import asyncio
 
+import pytest
+
 from agentcore.runtime.runs.concurrency import reset_budget, set_budget
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.scheduler import BoundaryOutcome, BoundaryReason
@@ -455,6 +457,48 @@ async def test_bind_boundary_not_fired_until_deps_resolve():
     res = await WaveScheduler().run(plan, slow_a, on_boundary=hook)
     assert fires["n"] == 1
     assert res["b"].phase is RunPhase.COMPLETED
+
+
+async def test_bind_proceed_without_clearing_skips_no_spin():
+    # Defense (audit F4): host PROCEEDs but leaves bind_after_deps set → no progress.
+    # Scheduler must warn once, SKIP the stuck node, and NOT re-fire the BIND boundary
+    # (busy-wait / livelock). Current production host always YIELDs; this guards a
+    # future host that PROCEEDs without finalising.
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",), bind_after_deps=True))
+    fires = {"n": 0}
+
+    async def hook(_reason, _nodes, _completed):
+        fires["n"] += 1
+        return BoundaryOutcome.PROCEED  # deliberately does NOT clear bind_after_deps
+
+    res = await WaveScheduler().run(plan, _ok, on_boundary=hook)
+    assert fires["n"] == 1  # fired once, never spun
+    assert res["a"].phase is RunPhase.COMPLETED
+    assert res["b"].phase is RunPhase.SKIPPED
+
+
+async def test_run_rejects_cyclic_plan():
+    # Defense (audit F5): entry topology self-check — a cycle must raise, not silently
+    # drop the cycle nodes from the completed map.
+    from agentcore.runtime.runs.plan import RunPlanError
+
+    plan = RunPlan()
+    plan.add(_spec("a", ("b",)))
+    plan.add(_spec("b", ("a",)))
+    with pytest.raises(RunPlanError, match="dependency cycle"):
+        await WaveScheduler().run(plan, _ok)
+
+
+async def test_run_rejects_dangling_depends_on():
+    # Defense (audit F5): unknown depends_on edge fails explicitly at run entry.
+    from agentcore.runtime.runs.plan import RunPlanError
+
+    plan = RunPlan()
+    plan.add(_spec("a", ("missing",)))
+    with pytest.raises(RunPlanError, match="unknown run"):
+        await WaveScheduler().run(plan, _ok)
 
 
 # --- 受监督的波循环: on_boundary SCOPE arm (偏离信号) -----

@@ -22,6 +22,7 @@ from agentcore.runtime.events import (
     run_started,
     tool_use_end,
     tool_use_start,
+    turn_warning,
 )
 
 from ._common import _CONV, _COST, _USAGE, _ctx_block
@@ -182,6 +183,48 @@ def _single_agent_captain_context() -> list[SSEEvent]:
     ]
 
 
+def _reload_turn_warning() -> list[SSEEvent]:
+    """刷新重建（P2）：预检 ``turn_warning`` 已 DURABLE——向量模拟「流中/收口后刷新」重放
+    journal 可见事件，golden 钉住 ``turnWarning`` 横幅文案（三端 fold 同形）。"""
+    return [
+        message_start("m1", conversation_id=_CONV),
+        turn_warning("当前模型可能不支持工具调用，复杂任务效果可能受限。"),
+        content_delta("好的，我先用纯文本回答。"),
+        message_end(FinishReason.END_TURN, input_tokens=800, output_tokens=120, cost=_COST),
+    ]
+
+
+def _reload_interrupted_partial() -> list[SSEEvent]:
+    """中断回合 + 部分内容（P4）：lease sweeper salvage 写 ``finish_reason=interrupted``，
+    半截思考/正文保留；golden 钉住 finishReason + cancelled-class status + 部分文本。"""
+    return [
+        message_start("m1", conversation_id=_CONV),
+        reasoning_delta("先想一下方案。"),
+        content_delta("根据现有信息，"),
+        content_delta("建议先做这一步"),
+        message_end(
+            FinishReason.INTERRUPTED,
+            input_tokens=400,
+            output_tokens=80,
+            cost=_COST,
+        ),
+    ]
+
+
+def _reload_cursor_structure() -> list[SSEEvent]:
+    """游标重连结构完整（P3/P4）：clear-then-fold 全量 journal 回放——游标前的工具行必须在场，
+    正文为单块（segment 合成同构），无叠字。钉住 process 工具步 + 正文。"""
+    return [
+        message_start("m1", conversation_id=_CONV),
+        reasoning_delta("我先搜索。"),
+        tool_use_start("tc1", "web_search", {"query": "AgentCore"}),
+        tool_use_end("tc1", "web_search", success=True, output="找到 3 条结果。"),
+        # Single-block content (stream_state / coalesced replay shape).
+        content_delta("根据搜索，答案如下。"),
+        message_end(FinishReason.END_TURN, input_tokens=1500, output_tokens=200, cost=_COST),
+    ]
+
+
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "single_agent_text": ("单聊：思考+正文+总账，end_turn 完成", _single_agent_text),
     "single_agent_tool": ("单聊：思考→工具→正文（process 时间线）", _single_agent_tool),
@@ -190,4 +233,16 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "single_agent_citations": ("单聊：思考→工具→正文 + citations 来源卡", _single_agent_citations),
     "single_agent_content_reset": ("单聊：交付前核验回炉 (finish_guard) content_reset 丢弃违规版正文、重写修正版", _single_agent_content_reset),
     "single_agent_captain_context": ("单聊：CEO 收到的上下文（run_context kind=captain → 回合级 captainContext，system/history/request）", _single_agent_captain_context),
+    "reload_turn_warning": (
+        "刷新重建（P2）：turn_warning DURABLE → ProjectedTurn.turnWarning 横幅",
+        _reload_turn_warning,
+    ),
+    "reload_interrupted_partial": (
+        "中断回合+部分内容（P4）：finish_reason=interrupted → 半截正文/思考 + cancelled status",
+        _reload_interrupted_partial,
+    ),
+    "reload_cursor_structure": (
+        "游标重连结构完整（P3）：全量 journal 回放 → 工具行+正文同在、无叠字",
+        _reload_cursor_structure,
+    ),
 }

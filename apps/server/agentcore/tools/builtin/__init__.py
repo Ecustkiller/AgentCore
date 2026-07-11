@@ -176,28 +176,20 @@ def delegation_grantable_tool_names() -> frozenset[str]:
     ``file_append``). After the user chooses ``grant_delegation`` at delegate
     start, these tools skip per-call approval for the rest of THAT delegation
     (keyed by ``execution_id``). ``test_run`` and ``git`` are intentionally
-    excluded — execution-class ``test_run`` keeps per-call posture; ``git`` keeps
-    its existing write-subcommand gate.
+    excluded — ``test_run`` stays outside the delegation grant (still turn-grantable
+    via approve_always); ``git`` keeps its existing write-subcommand gate.
     """
     return file_mutation_tool_names() | frozenset({"code_execute"})
 
 
 def per_call_tool_names() -> frozenset[str]:
-    """The GRANTABLE tools that must be confirmed PER CALL — never whitelisted for the
-    rest of the turn by a「本轮内都允许」(APPROVE_ALWAYS) grant (the code-execution class:
-    ``code_execute`` + ``test_run``).
+    """Tools whose「本轮内都允许」is refused and downgraded to a one-shot approve.
 
-    Derived from the single builtin registry as ``GRANTABLE ∩ EXECUTION`` (the same
-    single-source posture as ``file_mutation_tool_names``): these run code through the
-    sandbox chain — the highest-risk side effect — so a turn-wide grant is refused and
-    each call is confirmed individually, closing the「授权一次 → 本回合后续被注入内容驱动的
-    执行免再问」缺口 (PI-004 / 安全权限与治理 §三 边界2). Because it is a class predicate,
-    ``test_run`` joins automatically once its schema is EXECUTION + GRANTABLE — no
-    hardcoded tool name. ``ApprovalGate`` consumes this.
+    Empty by design (Cursor-aligned UX, 2026-07): execution-class tools
+    (``code_execute`` / ``test_run``) may take a turn-wide ``APPROVE_ALWAYS`` grant
+    like other GRANTABLE tools. PI-004「注入搭便车」is accepted as the same tradeoff
+    Cursor makes for a local trusted user; the main-process native gate still requires
+    a first click (optional session allow). ``ApprovalGate`` keeps the downgrade path
+    for a non-empty set (defense in depth / future re-tightening).
     """
-    full = build_builtin_registry()
-    return frozenset(
-        schema.name
-        for schema in full.list_all()
-        if schema.approval is ToolApproval.GRANTABLE and schema.category is ToolCategory.EXECUTION
-    )
+    return frozenset()

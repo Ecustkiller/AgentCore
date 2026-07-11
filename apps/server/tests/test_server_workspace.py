@@ -6,7 +6,9 @@ contract are exercised without touching the real repo. The ``execute`` test also
 pins the cwd fix: code runs in the workspace root and can read workspace files.
 """
 
+import contextlib
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -184,6 +186,64 @@ async def test_read_only_ops_do_not_dirty(tmp_path: Path):
     await ws.list(".", "*")
     await ws.grep(GrepQuery(pattern="hello"))
     assert ws.dirty is False
+
+
+# --- grep thread offload (ReDoS / event-loop safety) ---
+
+
+async def test_grep_wait_for_timeout_fires_while_scan_runs(tmp_path: Path, monkeypatch):
+    """``asyncio.wait_for`` must be able to expire while grep is still scanning.
+
+    Before the to_thread offload, sync ``re`` / ``os.walk`` held the event loop so
+    the timeout could not fire until the whole scan finished.
+    """
+    import asyncio
+
+    (tmp_path / "f.txt").write_text("hello\n", encoding="utf-8")
+    ws = _ws(tmp_path)
+    real = ServerWorkspace._grep_sync
+
+    def slow(self: ServerWorkspace, base: Path, query: GrepQuery):
+        time.sleep(1.0)
+        return real(self, base, query)
+
+    monkeypatch.setattr(ServerWorkspace, "_grep_sync", slow)
+
+    ticks = 0
+
+    async def ticker() -> None:
+        nonlocal ticks
+        while True:
+            ticks += 1
+            await asyncio.sleep(0.05)
+
+    task = asyncio.create_task(ticker())
+    try:
+        t0 = time.monotonic()
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(ws.grep(GrepQuery(pattern="hello")), timeout=0.15)
+        elapsed = time.monotonic() - t0
+        # Timeout must surface promptly (not after the 1s sleep), and the loop
+        # must have kept scheduling the ticker while wait_for was pending.
+        assert elapsed < 0.6
+        assert ticks >= 2
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+async def test_grep_result_shape_unchanged_after_offload(tmp_path: Path):
+    """Thread offload must not change GrepResult fields / hit formatting inputs."""
+    (tmp_path / "a.py").write_text("foo = 1\nbar = 2\nfoo again\n", encoding="utf-8")
+    result = await _ws(tmp_path).grep(GrepQuery(pattern="foo", max_results=10))
+    assert result.total_matches == 2
+    assert result.truncated is False
+    assert [(h.path, h.line_no, h.text) for h in result.hits] == [
+        ("a.py", 1, "foo = 1"),
+        ("a.py", 3, "foo again"),
+    ]
+    assert result.file_counts == [("a.py", 2)]
 
 
 async def test_write_marks_dirty(tmp_path: Path):

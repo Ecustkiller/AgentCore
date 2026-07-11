@@ -109,7 +109,8 @@ export type ApprovalDecision =
   | "approve"
   | "approve_always"
   | "approve_always_files"
-  | "deny";
+  | "deny"
+  | "orphaned";
 
 export interface ApprovalRequiredPayload {
   approval_id: string;
@@ -126,7 +127,11 @@ export interface ApprovalResolvedPayload {
 }
 
 /** The user's settlement of a delegation-level authorization gate (委派级授权). */
-export type DelegationAuthorizationDecision = "grant_delegation" | "per_call" | "deny";
+export type DelegationAuthorizationDecision =
+  | "grant_delegation"
+  | "per_call"
+  | "deny"
+  | "orphaned";
 
 /** One worker row on the delegation authorization card (role + task preview). */
 export interface DelegationAuthorizationWorker {
@@ -155,7 +160,8 @@ export type CheckpointDecision =
   | "continue"
   | "adjust"
   | "stop"
-  | "timeout";
+  | "timeout"
+  | "orphaned";
 
 export interface AskAssumption {
   id: string;
@@ -392,45 +398,6 @@ export interface RunEscalationGatePayload {
   signals: Record<string, unknown>[];
 }
 
-export interface RunSplitAssessedPayload {
-  run_id: string;
-  agent_id: string;
-  should_split: boolean;
-  rationale?: string;
-  triggers?: string[];
-  subtask_count?: number;
-  subtasks?: Record<string, unknown>[];
-  pressure?: Record<string, unknown>;
-}
-
-export interface RunSubworkerStartedPayload {
-  run_id: string;
-  agent_id: string;
-  subworker_id: string;
-  goal: string;
-  token_budget?: number;
-  index?: number;
-  total?: number;
-  can_split?: boolean;
-  depth?: number;
-}
-
-export interface RunSubworkerCompletedPayload {
-  run_id: string;
-  agent_id: string;
-  subworker_id: string;
-  success: boolean;
-  summary?: string;
-  artifact_refs?: string[];
-  failure?: string;
-  side_effects?: string[];
-  tokens_used?: number;
-  rounds?: number;
-  index?: number;
-  total?: number;
-  fold_summary?: string;
-}
-
 /** 阻塞式求决策 (escalate blocking=true): a delegated worker SUSPENDED itself awaiting
  * a decision. JOURNALED (unlike the transport-only `run_escalation` banner); the
  * turn never flips to `paused` (siblings keep running).
@@ -451,20 +418,30 @@ export interface EscalationRequiredPayload {
   awaiting?: "user" | "ceo";
 }
 
-/** 阻塞式求决策 settlement: `resolved` (answered) or `timeout` (fall back to the
- * stated assumption). Emitted by the suspending tool's awaiter ONLY; journaled.
+/** 阻塞式求决策 settlement. Emitted by the suspending tool's awaiter ONLY; journaled.
+ * 
+ * ``status`` 三分（对 worker 回落假设的实现可共享，对外语义必须分开）：
+ * - ``resolved`` — 有裁决/答复（``answer`` 非空语义由调用方保证）
+ * - ``assumed`` — 用户或主管显式选了「按假设继续」
+ * - ``timed_out`` — 墙钟时限内未答复
  * 
  * ``arbitrated_by`` / ``via_user`` annotate CEO 协调仲裁可见性（经典用户直答路径可缺省）。 */
 export interface EscalationResolvedPayload {
   escalation_id: string;
   run_id: string;
   agent_id: string;
-  status: "resolved" | "timeout";
+  status: "resolved" | "assumed" | "timed_out" | "orphaned";
   answer: string;
   /** 裁决方：user=用户直答；ceo=主管仲裁。旧流缺字段按 user。 */
   arbitrated_by?: "user" | "ceo";
   /** 仅 arbitrated_by=ceo 时有意义：true=主管经 ask_user 转交用户后再 resolve。 */
   via_user?: boolean;
+}
+
+/** 热路 pending 交互失效（假卡消灭）。kind ∈ 热路四 kind。 */
+export interface InteractionOrphanedPayload {
+  interaction_id: string;
+  kind: "approval" | "delegation_authorization" | "escalation" | "debate_round";
 }
 
 export interface TeamNotePostedPayload {
@@ -723,7 +700,7 @@ export interface DebateRoundDecisionResolvedPayload {
   execution_id: string;
   moderator_run_id: string;
   decision_id: string;
-  decision: "continue" | "conclude" | "timeout";
+  decision: "continue" | "conclude" | "timeout" | "orphaned";
   focus: string;
 }
 
@@ -750,7 +727,7 @@ export interface MessageEndUsage {
 /** Terminal turn event. `finish_reason=paused` = 挂起即收口: the turn finalized AT a
  * durable checkpoint and awaits POST .../resume — NOT done and not aborted. */
 export interface MessageEndPayload {
-  finish_reason: "end_turn" | "max_rounds" | "degraded" | "unproductive" | "error" | "cancelled" | "paused";
+  finish_reason: "end_turn" | "max_rounds" | "degraded" | "unproductive" | "error" | "cancelled" | "interrupted" | "paused";
   usage?: MessageEndUsage;
   cost?: CostBreakdown;
   rounds?: number;
@@ -1078,11 +1055,9 @@ export type SSEPayloadMap = {
   run_escalation: RunEscalationPayload;
   run_intake: RunIntakePayload;
   run_escalation_gate: RunEscalationGatePayload;
-  run_split_assessed: RunSplitAssessedPayload;
-  run_subworker_started: RunSubworkerStartedPayload;
-  run_subworker_completed: RunSubworkerCompletedPayload;
   escalation_required: EscalationRequiredPayload;
   escalation_resolved: EscalationResolvedPayload;
+  interaction_orphaned: InteractionOrphanedPayload;
   team_note_posted: TeamNotePostedPayload;
   team_synthesis_preview: TeamSynthesisPreviewPayload;
   debate_result: DebateResultPayload;

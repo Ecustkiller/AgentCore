@@ -1107,9 +1107,38 @@ def test_brief_carries_cumulative_scores_and_parses_decisive():
     result = _run(llm, _RecordingRunner(), _config(policy=RoundPolicy(max_rounds=1)))
     brief_prompts = [u for (s, u) in llm.seen if "请据此产出简报" in u]
     assert brief_prompts and "累计记分" in brief_prompts[0] and "净分" in brief_prompts[0]
+    assert "须与它一致" in brief_prompts[0]
     assert result.brief.decisive == decisive
     assert "胜负手" in result.to_ceo_output() and decisive in result.to_ceo_output()
     assert result.to_event_payload()["brief"]["decisive"] == decisive
+
+
+def test_roundtable_brief_scores_are_momentum_only():
+    """圆桌：累计记分仍喂进简报（momentum），但不要求 decisive/leaning 对齐、不裁胜负。"""
+    sides = [
+        DebateSide(key="a", name="视角A", stance="A"),
+        DebateSide(key="b", name="视角B", stance="B"),
+        DebateSide(key="c", name="视角C", stance="C"),
+    ]
+    judge = {
+        **_CONVERGE,
+        "scores": {
+            "a": {"argument": 3, "engagement": 3, "evidence": 3},
+            "b": {"argument": 4, "engagement": 4, "evidence": 4},
+            "c": {"argument": 2, "engagement": 2, "evidence": 2},
+        },
+    }
+    llm = _ScriptedLLM(judge_results=[judge])
+    _run(
+        llm,
+        _RecordingRunner(),
+        _config(form=DebateForm.ROUNDTABLE, sides=sides, policy=RoundPolicy(max_rounds=1)),
+    )
+    brief_prompts = [u for (s, u) in llm.seen if "请据此产出简报" in u]
+    assert brief_prompts and "累计记分" in brief_prompts[0]
+    assert "momentum" in brief_prompts[0]
+    assert "须与它一致" not in brief_prompts[0]
+    assert "不】驱动 leaning" in brief_prompts[0] or "不驱动 leaning" in brief_prompts[0]
 
 
 def test_round_payload_has_cross_exam_and_scores_without_polluting_verdict():

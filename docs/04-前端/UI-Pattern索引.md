@@ -53,7 +53,6 @@ Radix overlay（dialog / popover / tooltip 等）仍在 `components/ui/`，与 p
 | **PanelShell** | 右侧面板、指挥台 | `SidePanel.tsx`、`CanvasDecisionPanel.tsx` |
 | **SearchField** | 页内列表/树筛选、Popover 选项过滤 | `search-field.tsx`（`field` / `plain`） |
 | **SearchTrigger** | 全局搜索与命令面板入口 | `search-trigger.tsx` + `CommandPalette.tsx` |
-| **ActivityBanner** | 侧栏全局协作感知横幅（跨对话执行/审批） | `sidebar/ActivityBanner.tsx`（`lib/teamActivity.ts` 派生，见 [`前端UX设计 §一`](前端UX设计.md)） |
 
 新交互卡片应优先复用 **DecisionCard + Button**，并确保聊天与画布双视图可共用（见 `CanvasDecisionPanel.tsx`）。
 

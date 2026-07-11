@@ -80,8 +80,21 @@ def _select_fold(batch: Sequence[Message], *, recency: int, min_fold: int) -> li
     ``min_fold`` messages qualify. ``batch`` is the un-folded tail, oldest-first; the
     last folded message's created_at becomes the new watermark, so folding advances
     sequentially and a long backlog catches up incrementally across passes.
+
+    Fold count is floored to a complete turn boundary so the verbatim tail (when
+    non-empty) starts on a ``user`` message. A naive message-count cut can land
+    just before an assistant reply; the loader then prefixes an assistant-role
+    summary block and the provider sees two consecutive assistant messages
+    (strict OpenAI-compatible backends may 400). Walking the cut back to the
+    nearest user-led boundary keeps watermark idempotency and only folds one
+    fewer message when needed — the leftover is picked up on a later pass.
     """
     fold_count = len(batch) - recency
+    if fold_count < min_fold:
+        return []
+    # Floor to a user-turn boundary: tail[0] must be user (or there is no tail).
+    while fold_count > 0 and fold_count < len(batch) and batch[fold_count].role != "user":
+        fold_count -= 1
     if fold_count < min_fold:
         return []
     return list(batch[:fold_count])

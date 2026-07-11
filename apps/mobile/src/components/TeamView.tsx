@@ -93,12 +93,13 @@ function lastLine(text: string | undefined): string | null {
   return lines[lines.length - 1] || null;
 }
 
-/** The read-only one-liner under an escalation's question, by lifecycle: 已答复 carries the
- *  user's answer; 已超时/非阻塞上报/待裁决(非交互) fall back to the worker's 假设. */
+/** The read-only one-liner under an escalation's question, by lifecycle. */
 function escalationDetail(esc: RunEscalation): string | null {
   if (esc.status === "resolved" && esc.answer) return `已答复：${esc.answer}`;
-  if (esc.status === "timeout")
-    return esc.assumption ? `已按假设继续：${esc.assumption}` : null;
+  if (esc.status === "assumed")
+    return esc.assumption ? `按假设继续：${esc.assumption}` : null;
+  if (esc.status === "timed_out")
+    return esc.assumption ? `超时回落假设：${esc.assumption}` : null;
   return esc.assumption ? `暂用假设：${esc.assumption}` : null;
 }
 
@@ -121,8 +122,7 @@ export function TeamView({
   /** 阻塞式求决策 (②): present on a live multi-agent turn so a worker's pending escalation
    *  renders as an actionable answer card. */
   conversationId?: string | null;
-  /** runId → pending `escalation_id` (transport-only sibling extractPendingEscalations); the
-   *  resolve key the conformance RunEscalation deliberately omits. */
+  /** runId → pending escalation id from ProjectedTurn.interactions (P3 · 按 id 精确提交). */
   pendingEscalations?: Map<string, string>;
   /** Live turn → the pending escalation is answerable over the open stream (else read-only). */
   escalationsInteractive?: boolean;

@@ -48,10 +48,9 @@ Bootstrap 运行时自建 `UIDocument` + `TownHudController` 并绑定。Inspect
 
 ## 4. 真资产（Kenney / Xbot）
 
-1. `pnpm town:sync-assets` → `packages/town-assets/` + `Assets/TownAssets/`（Kenney FBX、Quaternius 10 栋 FE-18、Nature 精选 GLB、Roads 精选 GLB、Buildings GLB、Characters/Xbot.glb）
-2. Editor：`AgentTown → Import Town Assets`（或 `Setup Project` / `pnpm town:verify` 内会调用）→ 写 `Resources/Town/TownMeshCatalog.asset`（building + nature + road 池）+ `TownAssets/Prefabs/`
-3. 运行时：`TownBuilder` / `TownNpc` 有 catalog 则实例化 mesh（`TownMeshFit` 统一贴地与高度），否则回退 primitive / 胶囊；无资产也可跑
-4. 尺度：Quaternius FBX 与 Kenney GLB 混用时由 `TownMeshFit` 按目标高度归一；道路 mesh 叠在色块路网上（`RoadTiles` 对齐 `Roads`）
+1. 资产已 vendored 于 `Assets/TownAssets/`（clone 即用）。新增 mesh 放入对应子目录后，Editor：`AgentTown → Import Town Assets`（或 `Setup Project` / `pnpm town:verify`）→ 写 `Resources/Town/TownMeshCatalog.asset`（building + nature + road 池）+ `TownAssets/Prefabs/`
+2. 运行时：`TownBuilder` / `TownNpc` 有 catalog 则实例化 mesh（`TownMeshFit` 统一贴地与高度），否则回退 primitive / 胶囊；无资产也可跑
+3. 尺度：Quaternius FBX 与 Kenney GLB 混用时由 `TownMeshFit` 按目标高度归一；道路 mesh 叠在色块路网上（`RoadTiles` 对齐 `Roads`）
 
 ## 5. NavMesh
 

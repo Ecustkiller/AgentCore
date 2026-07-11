@@ -35,6 +35,7 @@ async def _resolve_when_pending(registry, conversation_id, decision, note=""):
 
 
 async def test_durable_pause_persists_frame_on_finalize(monkeypatch):
+    from agentcore.runtime.facts import TurnFactLog, current_fact_log
     from agentcore.runtime.suspension import TurnSuspension, captain_transcript
 
     # Skip team_preview so this fixture reaches plan_review (wave-boundary durable pause).
@@ -68,12 +69,15 @@ async def test_durable_pause_persists_frame_on_finalize(monkeypatch):
             ],
         ),
     ]
-    token = captain_transcript.set(transcript)
+    log = TurnFactLog()
+    fl_token = current_fact_log.set(log)
+    ct_token = captain_transcript.set(transcript)
     try:
         # ②: the durable checkpoint finalizes in place (SUSPEND) — no live resolve, no drop.
         result = await t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx())
     finally:
-        captain_transcript.reset(token)
+        captain_transcript.reset(ct_token)
+        current_fact_log.reset(fl_token)
 
     assert result.effect is ToolEffect.SUSPEND
     assert len(saved) == 1
@@ -86,6 +90,8 @@ async def test_durable_pause_persists_frame_on_finalize(monkeypatch):
     assert frame.completed
     assert any(s["role"] == "研究员" for s in frame.steps)
     assert any(p["role"] == "写手" for p in frame.pending)
+    # journal_entries is the 唯一权威载体; the display seed derives (P0-B Phase 3).
+    assert any(e["kind"] == "plan_review_required" for e in frame.journal_entries)
     assert any(e["type"] == "plan_review_required" for e in frame.journal)
     assert dropped == []  # finalize never drops the frame — it IS the resume record
 
@@ -137,6 +143,7 @@ async def test_durable_pause_captures_resume_scope():
 
 
 async def test_durable_capture_skipped_without_transcript():
+    """无 transcript ⇒ persist 返回 False ⇒ 跳过挂起放行（D11 删窄兜底）。"""
     registry = InteractionRegistry()
     saved: list = []
 
@@ -147,10 +154,11 @@ async def test_durable_capture_skipped_without_transcript():
         pass
 
     t = tool_durable(Provider(["S1OUT", "S2OUT"]), EventSink(), registry, _save, _drop)
-    exec_task = asyncio.create_task(t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx()))
-    await _resolve_when_pending(registry, "conv1", CheckpointDecision.CONTINUE)
-    await exec_task
+    result = await t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx())
     assert saved == []
+    assert registry.list_pending("conv1") == []
+    assert "S1OUT" in result.output
+    assert "S2OUT" in result.output
 
 
 async def test_durable_resume_drives_tail_from_journal_not_frame(monkeypatch):
@@ -258,13 +266,6 @@ async def test_settle_resume_reuses_journal_execution_id():
         completed=seed,
         steps=[{"run_id": plan.nodes[0].run_id, "role": "研究员", "summary": "S1OUT"}],
         pending=[{"run_id": plan.nodes[1].run_id, "role": "写手"}],
-        journal=[
-            {
-                "type": EventType.RUN_PLAN.value,
-                "payload": {"execution_id": "e_pause"},
-                "timestamp": "t0",
-            },
-        ],
         journal_entries=[
             {"kind": EventType.RUN_PLAN.value, "payload": {"execution_id": "e_pause"}, "ts": "t0"},
         ],

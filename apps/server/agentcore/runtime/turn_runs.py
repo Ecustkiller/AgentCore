@@ -20,12 +20,12 @@ Resulting lifecycle
 
 Posture
 -------
-State is in-process — the same single-worker stance approvals / interaction /
-locks already take (see ``approvals.py``). A process restart drops in-flight runs
-(they simply end, like handoff jobs today); a durable cross-process queue
-(C2 / Redis) is the 放量-time successor. The registry also holds a strong reference
-to each task, so a detached run is never garbage-collected mid-flight (the role
-``_background_tasks`` plays for handoff jobs in ``conversation/service.py``).
+This registry is the **process-local cache** of live tasks + sinks. Durable RUNNING
+ownership lives in ``turn_leases`` (Postgres; heartbeat + owner) so a process restart
+no longer silently drops in-flight turns — the lease sweeper claims expired rows and
+routes them through ``recover_turn``. Reconnect (``EventSink.take_over`` / ``detach``)
+and stop stay orthogonal to recover. Cross-process Redis lease backend is a later
+swap behind the same repository seam.
 """
 
 import asyncio

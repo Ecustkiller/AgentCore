@@ -6,7 +6,7 @@
 // Requires:
 //   - Backend on SMOKE_API (default http://localhost:8000) with SIMULATION_ENABLED=true
 //   - Seeded dev user (uv run python scripts/seed_dev_user.py)
-//   - LLM configured for simulation ticks (or set SMOKE_MOCK=1 to skip tick advancement)
+//   - Runs are created with scripted:true (no real LLM). Set SMOKE_MOCK=1 to skip tick advancement.
 //
 // Run:
 //   pnpm -C apps/desktop sim:smoke:e2e
@@ -122,7 +122,7 @@ async function login() {
 async function createRun() {
   const res = await apiFetch("/v1/simulation/runs", {
     method: "POST",
-    body: { scenario: "town", seed: 42 },
+    body: { scenario: "town", seed: 42, scripted: true },
   });
   if (res.status === 404) {
     fail("simulation routes 404 — set SIMULATION_ENABLED=true on backend");

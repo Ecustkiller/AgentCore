@@ -200,6 +200,11 @@ function resolveMessage(f: ErrorFacts): string {
     if (f.retryAfter) return `操作过于频繁，请约 ${f.retryAfter} 秒后再试`;
     return "操作过于频繁或额度已用尽，请稍后再试";
   }
+  if (f.code === "pending_interactions_awaiting") {
+    return (
+      f.serverMessage ?? "有待拍板的确认卡，先处理或停止当前任务"
+    );
+  }
   // A 402 LLM_KEY_REQUIRED is a deliberate BYOK refusal (no DeepSeek key yet);
   // surface the backend's actionable message (or a config hint), never a
   // misleading "service unavailable".

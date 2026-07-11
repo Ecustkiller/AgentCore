@@ -68,6 +68,8 @@ CEO 是**管理者**（不是调查员）：它只直接持有「只读 / 检索
 > **产出形态：文件落盘 vs 文字直出 ✅ 已落地**：worker 按交付【形态】判定写文件还是写正文；CEO 在 task 里点明落盘要求，`ask_user` 开工卡也说明最终交付是工作区实文件。→ 见代码：`runtime/runs/executor.py`、`runtime/resolve/prompt.py`、`runtime/skills.py`。
 
 > **落盘契约门 `requires_files` ✅ 已落地**：CEO 设 `contract.requires_files=true` 声明文件交付；执行器用 `files_touched` 确定性判定，未达标自动返工一次。→ 见代码：`runtime/runs/contract.py`、`tools/builtin/delegate/`。
+>
+> **`Deliverable.output_schema` ⏳ 阶段 2 预留**：字段可解析进 `Deliverable`，但 delegate schema **不暴露**、`check_contract` **不校验**——保留位，勿当已生效能力。→ 见代码：`runtime/runs/types.py`、`runtime/runs/contract.py`。
 
 > **CEO 提示词形态：精简核心 + 能力目录 + 按需 consult ✅ 已落地**：常驻只保留路由脊柱 + 能力目录；进阶机制做成系统 Skill，用时 `consult_skill`。**分层不变量**：同一条知识只在唯一所有者出现。→ 见代码：`runtime/resolve/prompt.py`、`runtime/skills.py`、`tools/builtin/`。
 
@@ -132,8 +134,10 @@ CEO 在自己的 ReAct 循环里调用单一的 `delegate` 工具把一批子任
 |---|---|
 | 启用门 | ≥2 worker + 根 only + 非 finalize；显式 `coordinate=false` 退出 |
 | 合成通道 | 草稿走 `team_synthesis_preview`（`in_progress`）；终稿仍 `content_delta` |
-| 挂起 | 协调中 `ask_user` 软挂起即收口；状态入 journal，续跑重建（不保活后台调度器） |
+| 挂起 | **`team_preview` 在 coordinate fork 之前**挂起即收口（开做后续跑再臂后台）。协调中 `ask_user` 软挂起即收口；状态入 journal，续跑重建（不保活后台调度器）。`checkpoint_after` 波边界**不** durable `plan_review` 收口——只发 `BOUNDARY_YIELD` 协调事件；经典阻塞（`coordinate=false`）仍挂起即收口 |
 | Phase 3 | 超时只通知不自动取消；非阻塞 escalate / 便签冲突进事件队列；SCOPE 边界 PROCEED 由 CEO 仲裁；**阻塞 escalate 改 CEO 仲裁**（`resolve_escalation`；偏好/授权/费用类先 ask_user 再 resolve） |
+
+**不变量 B（CEO 仲裁 ⇔ 协调存活）**：`resolve_escalation` **仅**在协调 session 活跃时可用。单 worker / `finalize` / 嵌套 lead / 显式 `coordinate=false` 走经典阻塞——CEO 卡在 `delegate` await 上、波内无活着的 CEO，阻塞 escalate **直挂用户**（`awaiting=user`），**绝不**改挂 CEO（否则 worker↔CEO 死锁，只能靠超时回落）。测 `resolve_escalation` 必须 ≥2 worker 进协调。否决「单人也 awaiting=ceo」除非先改 drive 让单人亦保 CEO 存活（真·A，未做）。
 
 **决策（为何 CEO 自协调）**：通用协调走 **CEO ReAct + 事件队列**，不引入独立协调 / 合成 Agent（延续上文否决 SYNTHESIS），也不复用辩论 Moderator 的确定性循环——CEO 已持完整用户意图与元权限（`replan` / `cancel` / `ask_user`），独立协调者只会多一层意图损失；Moderator 继续专管辩论。成本纪律见 [执行引擎 §协调模式例外](/docs/03-AI核心/执行引擎架构设计.md)。
 
@@ -279,6 +283,14 @@ CEO 不指定具体模型，只表达能力需求（快/强），由运行时映
 
 > 设计理由：worker 能不能干活属正确性、工具收窄属优化，故安全默认必须是「有能力」，least-privilege 由 CEO 主动 opt-in。被否决：要求 CEO 必填 `tools`（依赖 LLM 自觉、脆弱，正是此前 worker 静默不落盘的翻车点）。→ 见代码：`runtime/runs/builder.py` `_tools`、`runtime/runs/types.py` `RunSpec.tools`、`runtime/runs/executor.py`（`None`→offer 全部）。
 
+### 2.6 `completion_criteria` — worker 完工判据（默认 `files_written`，运行/打开类自动升 `code_verified`）✅
+
+worker 任务「怎样算干完」的验收契约，两档：`files_written`（产物落盘即完，**默认**）/ `code_verified`（须真跑通——收尾校验该 worker 确有 `code_execute` / `test_run` 成功记录才放行）。
+
+- **默认低档 + 按 task 语义自动升档**：`DEFAULT_COMPLETION_CRITERIA="files_written"`；task 含「运行 / 打开 / 安装 / 启动」类语义时引擎自动推断为 `code_verified`（CEO 亦可显式声明）。**为何不一律 `code_verified`**：写文档 / 改文案 / 纯配置类任务本不需要「跑」，强制跑通只会平白加一轮、拖慢、甚至让不可运行的任务永远达不成——按语义分流是「交付即验收」与成本的平衡点。
+- **对治「写了但跑不起来」**：触发案例（trace `d1bc76f3…`）worker 写出软件却没跑通、CEO 凭记忆答「在 mini-claw/」并口头让用户自己去终端跑；`code_verified` 自动推断 + 收尾校验直接堵住。这是「打开软件」双路径的**路径 A·工作区内验收**（路径 B·本机 OS 启动走 sidecar / Client Tools，见 [`双模式工作区.md` §十](/docs/02-架构/双模式工作区.md)、[`安全权限与治理.md` §三](/docs/05-平台与运维/安全权限与治理.md)）。
+- → 见代码：`runtime/runs/completion.py`（`DEFAULT_COMPLETION_CRITERIA` / 推断 / 校验）、`tools/builtin/delegate/schema.py`、`tools/builtin/delegate/drive.py`。
+
 ---
 
 ## 三、失败处理
@@ -324,7 +336,7 @@ CEO 不指定具体模型，只表达能力需求（快/强），由运行时映
 
 **阻塞与否（`blocking`）则归模型——与上面不矛盾**：开场/途中是伪选择（同一机制的内容差异），而「这个岔路值不值得冻住用户」是**真·语义判断**，只有模型知道自己手上的默认有多稳、岔路猜错代价多大，运行时无从代判。故新增一个正交维度交给模型：默认 `blocking=true`（挂起等答复，用于高风险 / 不可逆 / 无合理默认）；`blocking=false` 时**抛出问题但不挂起**——模型必须在 `assumptions` 或某 `question.default` 写明将先采用的默认（否则该调用被拒，防"非阻塞=偷偷瞎猜"），随即按默认续跑把回合做完，用户回复作为新消息在后续轮次并入。这是 worker `escalate`「问而不停」在 CEO↔用户层的对偶。
 
-提交答复（阻塞）是 `ToolEffect.CONTINUE`；停止是 `ToolEffect.INTERACT`。经 `InteractionRegistry` 挂起、`POST …/interactions/{id}` 回值；挂起/续跑契约见 [`执行引擎架构设计.md` §检查点决策语义 / §暂停与恢复](/docs/03-AI核心/执行引擎架构设计.md)。前端卡片见 [`../04-前端/前端UX设计.md`](/docs/04-前端/前端UX设计.md)。
+阻塞检查点走**挂起即收口**：到点落帧收口回合（`FinishReason.PAUSED`），答复经单一冷路 `POST …/messages/{id}/resume` 续跑（不再 `POST …/interactions` 原地解析）；挂起/续跑契约见 [`执行引擎架构设计.md` §检查点决策语义 / §暂停与恢复](/docs/03-AI核心/执行引擎架构设计.md)。前端卡片见 [`../04-前端/前端UX设计.md`](/docs/04-前端/前端UX设计.md)。
 
 **何时不用 `ask_user`**：简单问答 / 闲聊 / 检索直答——直接答；需求已说全、无值得确认的决策——直接 `delegate` 开干；连意图都不可解（目标都复述不出）——先用一句普通文字问清意图，而不是出卡。
 

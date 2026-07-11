@@ -1,6 +1,6 @@
 """Database and cache connection settings."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DatabaseSettings(BaseModel):
@@ -13,3 +13,15 @@ class DatabaseSettings(BaseModel):
     # conversation impossible to follow. Flip this on only when diagnosing a query;
     # it stays off even in dev by default.
     db_echo: bool = False
+
+    # Connection-pool budget (as-built: 成本配额 §三).
+    # Split so mid-turn telemetry (proxy_spend / journal / audit / roster) never
+    # starves content writes (messages finalize / checkpoint / request sessions).
+    # Defaults keep the historical ~40-connection ceiling: 16+16 primary + 4+4 telemetry.
+    db_pool_size: int = Field(default=16, ge=1)
+    db_max_overflow: int = Field(default=16, ge=0)
+    db_pool_timeout: int = Field(default=30, ge=1)
+
+    db_telemetry_pool_size: int = Field(default=4, ge=1)
+    db_telemetry_max_overflow: int = Field(default=4, ge=0)
+    db_telemetry_pool_timeout: int = Field(default=30, ge=1)

@@ -1,5 +1,9 @@
 import { CodeBlock } from "@/components/chat/CodeBlock";
 import {
+  OrphanedInteractionCard,
+  WaitingForDecisionHint,
+} from "@/components/chat/OrphanedInteractionCard";
+import {
   codeExecuteLanguage,
   deriveCodeExecuteRiskTags,
   fencedCodeMarkdown,
@@ -13,9 +17,13 @@ import {
   isFileOpTool,
   supportsTurnGrant,
 } from "@/services/approvals";
-import { type PendingApproval, useApprovalStore } from "@/stores/approvals";
 import { useConversationStore } from "@/stores/conversation";
-import { useDelegationAuthStore } from "@/stores/delegationAuth";
+import {
+  type ApprovalView,
+  isToolGranted,
+  useOrphanedApprovals,
+  usePendingApprovals,
+} from "@/stores/interactions";
 import type { ApprovalDecision } from "@/types/events";
 import {
   Check,
@@ -66,18 +74,22 @@ function primaryArg(
 
 export function ApprovalPrompt() {
   const conversationId = useConversationStore((s) => s.currentConversationId);
-  const pending = useApprovalStore((s) => s.pending);
-  const isToolGranted = useDelegationAuthStore((s) => s.isToolGranted);
+  const pending = usePendingApprovals(conversationId);
+  const orphaned = useOrphanedApprovals(conversationId);
   const visible = pending.filter(
-    (p) =>
-      conversationId != null &&
-      p.conversationId === conversationId &&
-      !isToolGranted(conversationId, p.toolName),
+    (p) => conversationId != null && !isToolGranted(conversationId, p.toolName),
   );
-  if (visible.length === 0) return null;
+  if (visible.length === 0 && orphaned.length === 0) return null;
 
   return (
     <div className="mx-4 mb-2 space-y-2">
+      {orphaned.map((o) => (
+        <OrphanedInteractionCard
+          key={o.id}
+          title="审批已失效"
+          detail="该工具放行请求已不可答复（服务已重启或回合已结束）。"
+        />
+      ))}
       {visible.map((approval) => (
         <ApprovalCard key={approval.approvalId} approval={approval} />
       ))}
@@ -85,7 +97,7 @@ export function ApprovalPrompt() {
   );
 }
 
-function ApprovalCard({ approval }: { approval: PendingApproval }) {
+function ApprovalCard({ approval }: { approval: ApprovalView }) {
   const [expanded, setExpanded] = useState(false);
   const [clicked, setClicked] = useState<ApprovalDecision | null>(null);
 
@@ -139,6 +151,7 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
             <span className="text-muted-foreground"> · </span>
             <span className="font-medium">{toolLabel(approval.toolName)}</span>
           </p>
+          <WaitingForDecisionHint />
           {headline && (
             <SimpleTooltip label={headline}>
               <p

@@ -15,6 +15,7 @@ from agentcore.llm.provider.openai_compatible import (
     _INITIAL_BACKOFF,
     _MAX_RETRIES,
     OpenAICompatibleProvider,
+    _parse_retry_after,
 )
 from agentcore.llm.provider.protocol import LLMMessage, LLMRequest
 
@@ -30,6 +31,13 @@ def _ok_body() -> dict:
 def _sse_line(text: str = "hi") -> str:
     payload = {
         "choices": [{"delta": {"content": text}, "finish_reason": None}],
+    }
+    return f"data: {json.dumps(payload)}\n"
+
+
+def _sse_reasoning(text: str = "think") -> str:
+    payload = {
+        "choices": [{"delta": {"reasoning_content": text}, "finish_reason": None}],
     }
     return f"data: {json.dumps(payload)}\n"
 
@@ -177,15 +185,40 @@ async def test_stream_retries_502_before_any_sse_line(monkeypatch):
 
     provider = await _mock_provider(handler)
     try:
-        lines = [line async for line in provider._stream_with_retry({"model": "x"})]
-        assert any("done" in line for line in lines)
+        chunks = [c async for c in provider.stream(_req())]
+        assert any(c.delta_content == "done" for c in chunks)
         assert calls["n"] == 2
         assert sleeps == [_INITIAL_BACKOFF]
     finally:
         await provider.close()
 
 
-async def test_stream_does_not_retry_after_partial_sse_lines():
+def test_parse_retry_after_seconds_and_fallbacks():
+    # Delta-seconds (the DeepSeek case) parses straight through.
+    assert _parse_retry_after("120", 2.0) == 120.0
+    assert _parse_retry_after(" 5 ", 2.0) == 5.0
+    # audit 01 F9: absent / blank / malformed must fall back to backoff, never raise
+    # (a raised ValueError used to escape the retry path and surface as a generic 502).
+    assert _parse_retry_after(None, 2.0) == 2.0
+    assert _parse_retry_after("", 2.0) == 2.0
+    assert _parse_retry_after("not-a-date", 2.0) == 2.0
+
+
+def test_parse_retry_after_http_date():
+    from datetime import UTC, datetime, timedelta
+    from email.utils import format_datetime
+
+    # An HTTP-date value (RFC 7231) resolves to a positive delta, not a ValueError.
+    future = format_datetime(datetime.now(UTC) + timedelta(seconds=60))
+    delta = _parse_retry_after(future, 2.0)
+    assert 0 < delta <= 60
+    # A past HTTP-date has a non-positive delta → fall back to backoff.
+    past = format_datetime(datetime.now(UTC) - timedelta(seconds=60))
+    assert _parse_retry_after(past, 2.0) == 2.0
+
+
+async def test_stream_does_not_retry_after_committed_content():
+    """Content delta commits the stream: disconnect yields aborted, no retry."""
     provider = OpenAICompatibleProvider(
         name="test", api_key="k", base_url="http://example.invalid/v1"
     )
@@ -204,11 +237,66 @@ async def test_stream_does_not_retry_after_partial_sse_lines():
 
     provider._client.stream = MagicMock(return_value=mock_response)
     try:
-        collected: list[str] = []
-        with pytest.raises(LLMUpstreamError):
-            async for line in provider._stream_with_retry({"model": "x"}):
-                collected.append(line)
-        assert collected == [_sse_line("partial")]
+        chunks = [c async for c in provider.stream(_req())]
+        assert [c.delta_content for c in chunks if c.delta_content] == ["partial"]
+        assert chunks[-1].aborted is True
         provider._client.stream.assert_called_once()
+    finally:
+        await provider.close()
+
+
+async def test_stream_retries_after_reasoning_only_disconnect(monkeypatch):
+    """Reasoning deltas do not commit: RemoteProtocolError → transparent retry."""
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    async def fake_sleep(sec: float) -> None:
+        sleeps.append(sec)
+
+    monkeypatch.setattr("agentcore.llm.provider.openai_compatible.asyncio.sleep", fake_sleep)
+
+    provider = OpenAICompatibleProvider(
+        name="test", api_key="k", base_url="http://example.invalid/v1"
+    )
+
+    async def first_lines():
+        yield _sse_reasoning("step1")
+        yield _sse_reasoning("step2")
+        raise httpx.RemoteProtocolError("peer closed connection")
+
+    async def second_lines():
+        yield _sse_reasoning("fresh")
+        yield _sse_line("final answer")
+        yield "data: [DONE]\n"
+
+    def make_response(line_iter):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.aread = AsyncMock(return_value=b"")
+        mock_response.aiter_lines = line_iter
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+        return mock_response
+
+    responses = [make_response(first_lines), make_response(second_lines)]
+
+    def stream_side_effect(*_a, **_kw):
+        calls["n"] += 1
+        return responses[calls["n"] - 1]
+
+    provider._client.stream = MagicMock(side_effect=stream_side_effect)
+    try:
+        chunks = [c async for c in provider.stream(_req())]
+        assert calls["n"] == 2
+        assert sleeps == [_INITIAL_BACKOFF]
+        assert any(c.stream_reset for c in chunks)
+        assert [c.delta_reasoning for c in chunks if c.delta_reasoning] == [
+            "step1",
+            "step2",
+            "fresh",
+        ]
+        assert [c.delta_content for c in chunks if c.delta_content] == ["final answer"]
+        assert not any(c.aborted for c in chunks)
     finally:
         await provider.close()

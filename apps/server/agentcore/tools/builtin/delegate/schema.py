@@ -311,7 +311,8 @@ DELEGATE_PARAMETERS = {
             "description": (
                 "可选，默认 standard。声明本次委派的复杂度：light = 轻量委派（单 worker、"
                 "简单任务，引擎跳过不必要的协调设施），standard = 标准委派。引擎据此裁剪：light "
-                "时跳过 playbook 匹配、不初始化便签墙、默认 finalize=true 行为。"
+                "时跳过 playbook 匹配、不初始化便签墙。"
+                "与 depends_on / bind_after_deps / checkpoint_after 并存时忽略 light（保留波边界）。"
             ),
         },
         "completion_criteria": {

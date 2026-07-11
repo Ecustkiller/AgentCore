@@ -5,10 +5,10 @@ import {
   createConversation,
   getMessages,
 } from "@/api/conversations";
-import { attachStream, resumeStream, streamMessage } from "@/api/stream";
+import { attachStream, regenerateStream, resumeStream, streamMessage } from "@/api/stream";
 import {
   type PausedTurnSummary,
-  type PendingApprovalSummary,
+  type PendingInteractionSummary,
   type TurnRecovery,
   getRecovery,
   stopConversation,
@@ -16,6 +16,8 @@ import {
 import { getMessageCostTotal } from "@/api/usage";
 import { AssistantContent } from "@/components/AssistantView";
 import { ConversationDrawer } from "@/components/ConversationDrawer";
+import { DebateSteeringCard } from "@/components/DebateSteeringCard";
+import { DelegationAuthorizationCard } from "@/components/DelegationAuthorizationCard";
 import { FileArtifactsCard } from "@/components/FileArtifactsCard";
 import { MemoryUpdateCard } from "@/components/MemoryUpdateCard";
 import { PauseCard } from "@/components/PauseCard";
@@ -31,7 +33,6 @@ import { useVoiceInput } from "@/lib/useVoiceInput";
 import {
   extractAsks,
   extractFollowups,
-  extractPendingEscalations,
   extractRunToolCalls,
   extractToolPhases,
   extractWorkerToolPhases,
@@ -39,12 +40,13 @@ import {
 } from "@/protocol/fold";
 import type {
   CheckpointDecision,
+  DebateNarrativeRound,
   MessageEndPayload,
   SSEEvent,
   TurnWarningPayload,
 } from "@agentcore/contract-types";
 import type {
-  PendingInteraction,
+  ProjectedInteraction,
   ProjectedTurn,
 } from "@agentcore/protocol-conformance";
 import { Folder, Menu, Sparkles, SquarePen } from "lucide-react";
@@ -144,6 +146,7 @@ function useLazyMessageCost(messageId: string): {
     () => costCache.get(messageId) ?? null,
   );
   useEffect(() => {
+    if (!messageId) return;
     if (costCache.has(messageId)) {
       setTotal(costCache.get(messageId) ?? null);
       return;
@@ -173,14 +176,58 @@ function useLazyMessageCost(messageId: string): {
 }
 
 function recoveredApprovalPending(
-  a: PendingApprovalSummary,
-): Extract<PendingInteraction, { kind: "approval" }> {
+  a: PendingInteractionSummary,
+): Extract<ProjectedInteraction, { kind: "approval" }> | null {
+  if (a.kind !== "approval") return null;
+  const p = a.payload ?? {};
   return {
     kind: "approval",
-    approvalId: a.approval_id,
-    toolCallId: a.tool_call_id,
-    toolName: a.tool_name,
-    arguments: (a.arguments ?? {}) as Record<string, unknown>,
+    id: a.id,
+    status: "pending",
+    toolCallId: typeof p.tool_call_id === "string" ? p.tool_call_id : a.id,
+    toolName: typeof p.tool_name === "string" ? p.tool_name : "tool",
+    arguments: (p.arguments as Record<string, unknown>) ?? {},
+  };
+}
+
+function recoveredDelegation(
+  a: PendingInteractionSummary,
+): Extract<ProjectedInteraction, { kind: "delegation_authorization" }> | null {
+  if (a.kind !== "delegation_authorization") return null;
+  const p = a.payload ?? {};
+  const workers = Array.isArray(p.workers)
+    ? (p.workers as Array<Record<string, unknown>>)
+    : [];
+  const tools = Array.isArray(p.tools)
+    ? p.tools.filter((t): t is string => typeof t === "string")
+    : [];
+  return {
+    kind: "delegation_authorization",
+    id: a.id,
+    status: "pending",
+    executionId: typeof p.execution_id === "string" ? p.execution_id : "",
+    workers,
+    tools,
+  };
+}
+
+function recoveredDebate(
+  a: PendingInteractionSummary,
+): Extract<ProjectedInteraction, { kind: "debate_round" }> | null {
+  if (a.kind !== "debate_round") return null;
+  const p = a.payload ?? {};
+  return {
+    kind: "debate_round",
+    id: a.id,
+    status: "pending",
+    executionId: typeof p.execution_id === "string" ? p.execution_id : "",
+    moderatorRunId:
+      typeof p.moderator_run_id === "string" ? p.moderator_run_id : "",
+    roundNo: typeof p.round_no === "number" ? p.round_no : 0,
+    focus: typeof p.focus === "string" ? p.focus : "",
+    summary: typeof p.summary === "string" ? p.summary : "",
+    converged: Boolean(p.converged),
+    rationale: typeof p.rationale === "string" ? p.rationale : "",
   };
 }
 
@@ -240,12 +287,16 @@ function AssistantBubble({
     () => extractWorkerToolPhases(turn.events),
     [turn.events],
   );
-  // 阻塞式求决策「待你拍板」: runId→pending escalation_id (旁路读原始事件)，喂给团队视图把待答
-  // 的 worker 升级渲染成可交互答复卡；仅实时回合 (live) 可答。
-  const pendingEscalations = useMemo(
-    () => extractPendingEscalations(turn.events),
-    [turn.events],
-  );
+  // 阻塞式求决策「待你拍板」: runId→escalation id from interactions[] (P3 · 按 id 精确提交).
+  const pendingEscalations = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const i of p.interactions) {
+      if (i.kind === "escalation" && i.status === "pending") {
+        map.set(i.runId, i.id);
+      }
+    }
+    return map;
+  }, [p.interactions]);
   // 队员工具明细 (RunDetail): runId→worker 工具调用 (旁路读原始事件，不入 ProjectedTurn)，喂给
   // 团队视图的队员详情面；实时与回放同一条接线（history 走 HistoryAssistant 里的同一提取器）。
   const runToolCalls = useMemo(
@@ -271,10 +322,7 @@ function AssistantBubble({
     !isMulti && p.process.length === 0 && !p.content && !p.reasoning;
   // 回合总账 — populated by message_end (null while streaming, so it appears on finish).
   const cost = formatCost(p.cost?.total);
-  const turnWarning = useMemo(
-    () => extractTurnWarning(turn.events),
-    [turn.events],
-  );
+  const turnWarning = p.turnWarning;
   return (
     <div className="bubble assistant">
       {turnWarning && <div className="turn-warning">{turnWarning}</div>}
@@ -316,15 +364,27 @@ function HistoryAssistant({
   m,
   conversationId,
   onFill,
+  onRetry,
+  isLast,
 }: {
   m: MessageDetail;
   conversationId: string | null;
   onFill: (text: string) => void;
+  onRetry?: () => void;
+  isLast?: boolean;
 }) {
-  const { team, debate } = useMemo(() => {
+  const { team, debate, debateRounds, turnWarning } = useMemo(() => {
     const events = m.runs?.events;
+    const warning =
+      m.runs?.turn_warning ??
+      (events?.length ? extractTurnWarning(events) : null);
     if (!events || events.length === 0)
-      return { team: undefined, debate: null };
+      return {
+        team: undefined,
+        debate: null,
+        debateRounds: [] as DebateNarrativeRound[],
+        turnWarning: warning,
+      };
     const p = fold(events);
     const team =
       p.runs.length > 0
@@ -333,12 +393,15 @@ function HistoryAssistant({
             runs: p.runs,
             progress: p.progress,
             teamNotes: p.teamNotes,
-            // 队员工具明细 (RunDetail): re-folded from the journaled multi-agent runs.events —
-            // the same transport-only extractor the live turn uses (there is no second path).
             runToolCalls: extractRunToolCalls(events),
           }
         : undefined;
-    return { team, debate: p.debate };
+    return {
+      team,
+      debate: p.debate,
+      debateRounds: p.debateRounds,
+      turnWarning: warning ?? p.turnWarning,
+    };
   }, [m.runs]);
   const process = m.runs?.process ?? undefined;
   // 本回合产出文件：单聊读 runs.process，多 Agent 读 runs.events 日志；合并去重（另一支为空）。
@@ -352,9 +415,15 @@ function HistoryAssistant({
   );
   // 非阻塞提问卡内容：仅多 Agent 历史持久化 runs.events（单聊为空 → 无卡，与桌面一致）。
   const asks = useMemo(() => extractAsks(m.runs?.events ?? []), [m.runs]);
-  // A persisted message carries no cost; lazy-fetch it from the ledger when seen.
-  const { ref, total } = useLazyMessageCost(m.id);
-  const cost = formatCost(total);
+  // P2：优先用 messages.cost 列；缺列时仍 lazy-fetch 台账（旧行 / 未回写）。
+  const columnTotal = m.cost?.total ?? null;
+  const { ref, total: lazyTotal } = useLazyMessageCost(
+    columnTotal == null ? m.id : "",
+  );
+  const cost = formatCost(columnTotal ?? lazyTotal);
+  const streaming = m.status === "running";
+  const interrupted =
+    m.status === "incomplete" || m.runs?.finish_reason === "interrupted";
 
   if (
     !team &&
@@ -362,28 +431,45 @@ function HistoryAssistant({
     !m.content &&
     !m.reasoning_content &&
     m.citations.length === 0 &&
-    artifacts.length === 0
+    artifacts.length === 0 &&
+    !turnWarning &&
+    !interrupted &&
+    !streaming
   ) {
     return null;
   }
   return (
-    <div className="bubble assistant" ref={ref}>
-      <AssistantContent
-        process={process}
-        content={m.content ?? ""}
-        reasoning={m.reasoning_content ?? undefined}
-        citations={m.citations}
-        captainContext={m.runs?.captain_context ?? undefined}
-        team={team}
-        debate={debate}
-        asks={asks}
-        onFill={onFill}
-      />
+    <div className="bubble assistant" ref={columnTotal == null ? ref : undefined}>
+      {turnWarning && <div className="turn-warning">{turnWarning}</div>}
+      {interrupted && (
+        <div className="finish-chip muted">已中断，可重试</div>
+      )}
+      {streaming && !m.content && !m.reasoning_content && !process?.length ? (
+        <span className="muted">…</span>
+      ) : (
+        <AssistantContent
+          process={process}
+          content={m.content ?? ""}
+          reasoning={m.reasoning_content ?? undefined}
+          citations={m.citations}
+          captainContext={m.runs?.captain_context ?? undefined}
+          team={team}
+          debate={debate}
+          debateRounds={debateRounds}
+          asks={asks}
+          onFill={onFill}
+        />
+      )}
       <FileArtifactsCard
         artifacts={artifacts}
         conversationId={conversationId}
       />
-      {cost && <div className="cost">{cost}</div>}
+      {interrupted && isLast && onRetry && (
+        <button type="button" className="retry-btn" onClick={onRetry}>
+          重试
+        </button>
+      )}
+      {cost && !streaming && <div className="cost">{cost}</div>}
     </div>
   );
 }
@@ -408,8 +494,8 @@ export function ChatPage() {
   // Turns that paused at a checkpoint then lost their stream (durable resume frames),
   // surfaced as ResumeCards on reopen (结构化挂起 2b).
   const [paused, setPaused] = useState<PausedTurnSummary[]>([]);
-  const [recoveredApprovals, setRecoveredApprovals] = useState<
-    PendingApprovalSummary[]
+  const [recoveredInteractions, setRecoveredInteractions] = useState<
+    PendingInteractionSummary[]
   >([]);
   // Older messages exist above the loaded window (drives 加载更早); `loadingOlder` blocks
   // re-entrancy while a page is in flight (历史上翻分页).
@@ -483,7 +569,7 @@ export function ChatPage() {
     setError(null);
     setSending(false);
     setPaused([]);
-    setRecoveredApprovals([]);
+    setRecoveredInteractions([]);
     setHasMoreBefore(false);
     setMemoryUpdates([]);
     let cancelled = false;
@@ -495,13 +581,13 @@ export function ChatPage() {
       (): TurnRecovery => ({
         liveRunning: false,
         paused: [],
-        pendingApprovals: [],
+        pendingInteractions: [],
       }),
     );
     void recoveryLoaded.then((r) => {
       if (!cancelled) {
         setPaused(r.paused);
-        setRecoveredApprovals(r.pendingApprovals);
+        setRecoveredInteractions(r.pendingInteractions);
       }
     });
     getMessages(conversationId)
@@ -532,6 +618,32 @@ export function ChatPage() {
           if (cancelled) return;
           if (recovery.liveRunning && recovery.paused.length === 0) {
             void attachOnOpen(conversationId);
+          }
+        } else if (last && last.role === "assistant" && last.status === "running") {
+          // P4: overlay partial already painted; live → clear-then-fold rejoin;
+          // dead lease ghost → interrupted affordance (no forever spinner).
+          const recovery = await recoveryLoaded;
+          if (cancelled) return;
+          if (recovery.liveRunning && recovery.paused.length === 0) {
+            void rejoinRunningHistory(conversationId);
+          } else if (!recovery.liveRunning && recovery.paused.length === 0) {
+            setHistory((h) => {
+              if (!h || h.length === 0) return h;
+              const next = h.slice();
+              const i = next.length - 1;
+              next[i] = {
+                ...next[i],
+                status: "incomplete",
+                runs: {
+                  events: next[i].runs?.events ?? [],
+                  finish_reason: "interrupted",
+                  process: next[i].runs?.process ?? null,
+                  captain_context: next[i].runs?.captain_context,
+                  turn_warning: next[i].runs?.turn_warning,
+                },
+              };
+              return next;
+            });
           }
         }
       })
@@ -605,17 +717,43 @@ export function ChatPage() {
     () => (liveTurn ? fold(liveTurn.events) : null),
     [liveTurn],
   );
-  // 挂起即收口 (②, Phase 3): only an approval still resolves live in-stream — a checkpoint
-  // (ask_user) / plan_review now finalizes the turn (message_end finish_reason=paused) and is
-  // continued via the durable ResumeCard below, never an in-stream PauseCard. So the live
-  // pause surface is narrowed to approvals; a finalized checkpoint folds to the ResumeCard.
-  const livePending = sending
-    ? (liveProjection?.pendingInteraction ?? null)
-    : null;
-  const liveApproval = livePending?.kind === "approval" ? livePending : null;
-  const approvalCards = liveApproval
-    ? [liveApproval]
-    : recoveredApprovals.map(recoveredApprovalPending);
+  // 挂起即收口 (②, Phase 3): hot-path cards resolve live in-stream; cold path
+  // (ask_user / plan_review / team_preview) finalizes and uses ResumeCard.
+  const liveInteractions = sending
+    ? (liveProjection?.interactions ?? []).filter((i) => i.status === "pending")
+    : [];
+  const liveApprovals = liveInteractions.filter(
+    (i): i is Extract<ProjectedInteraction, { kind: "approval" }> =>
+      i.kind === "approval",
+  );
+  const liveDelegations = liveInteractions.filter(
+    (i): i is Extract<
+      ProjectedInteraction,
+      { kind: "delegation_authorization" }
+    > => i.kind === "delegation_authorization",
+  );
+  const liveDebates = liveInteractions.filter(
+    (i): i is Extract<ProjectedInteraction, { kind: "debate_round" }> =>
+      i.kind === "debate_round",
+  );
+  const approvalCards =
+    liveApprovals.length > 0
+      ? liveApprovals
+      : recoveredInteractions
+          .map(recoveredApprovalPending)
+          .filter((x): x is NonNullable<typeof x> => x != null);
+  const delegationCards =
+    liveDelegations.length > 0
+      ? liveDelegations
+      : recoveredInteractions
+          .map(recoveredDelegation)
+          .filter((x): x is NonNullable<typeof x> => x != null);
+  const debateCards =
+    liveDebates.length > 0
+      ? liveDebates
+      : recoveredInteractions
+          .map(recoveredDebate)
+          .filter((x): x is NonNullable<typeof x> => x != null);
 
   // 下一步推荐 chips: the just-finished turn's followups, surfaced above the composer (tapping
   // fills the input — review/edit before send, mirroring desktop). Transport-only, read off the
@@ -791,6 +929,48 @@ export function ChatPage() {
     }
   }
 
+  // P4: interrupted salvage → regenerate from the preceding user message (same endpoint
+  // as desktop runRegenerate; no new API).
+  async function retryInterrupted() {
+    if (!conversationId || !history || sending) return;
+    const last = history[history.length - 1];
+    if (!last || last.role !== "assistant") return;
+    let userId: string | null = null;
+    for (let i = history.length - 2; i >= 0; i--) {
+      if (history[i].role === "user") {
+        userId = history[i].id;
+        break;
+      }
+    }
+    if (!userId) return;
+    setError(null);
+    setSending(true);
+    // Drop interrupted assistant from history; live turn carries the regenerate stream.
+    setHistory((h) => (h ? h.slice(0, -1) : h));
+    setTurns([
+      {
+        id: crypto.randomUUID(),
+        userText: null,
+        events: [],
+      },
+    ]);
+    const ac = new AbortController();
+    abortRef.current = ac;
+    try {
+      await regenerateStream(conversationId, userId, appendEvent, ac.signal);
+    } catch (e) {
+      if (isAbort(e)) return;
+      if (!isAbort(e)) {
+        setError({ text: e instanceof Error ? e.message : "重试失败" });
+      }
+    } finally {
+      if (abortRef.current === ac) {
+        setSending(false);
+        abortRef.current = null;
+      }
+    }
+  }
+
   // On reopen, rejoin a run that may still be live for the latest (reply-less) turn. Unlike
   // reconnect there is no partial bubble to reset — the reopened transcript ends at the
   // user message; appendEvent lazily opens the assistant bubble, so a 204 (nothing live)
@@ -805,6 +985,39 @@ export function ChatPage() {
       if (outcome === "none" && abortRef.current === ac) {
         // Finished / never ran / suspended — reload to catch a reply that landed between
         // the history load and the attach (a suspended turn surfaces via durable resume).
+        const { messages, hasMoreBefore: more } = await getMessages(cid);
+        if (abortRef.current === ac) {
+          setHistory(messages);
+          setHasMoreBefore(more);
+        }
+      }
+    } catch (e) {
+      if (!isAbort(e)) setError({ text: RECONNECT_BANNER, reconnect: true });
+    } finally {
+      if (abortRef.current === ac) {
+        setSending(false);
+        abortRef.current = null;
+      }
+    }
+  }
+
+  // P4 clear-then-fold: history already shows a running overlay partial — drop it so the
+  // full journal replay does not double-fold tools/content, then attach live.
+  async function rejoinRunningHistory(cid: string) {
+    setError(null);
+    setSending(true);
+    setHistory((h) => {
+      if (!h || h.length === 0) return h;
+      const last = h[h.length - 1];
+      if (last.role === "assistant") return h.slice(0, -1);
+      return h;
+    });
+    setTurns([]);
+    const ac = new AbortController();
+    abortRef.current = ac;
+    try {
+      const outcome = await attachStream(cid, appendEvent, ac.signal);
+      if (outcome === "none" && abortRef.current === ac) {
         const { messages, hasMoreBefore: more } = await getMessages(cid);
         if (abortRef.current === ac) {
           setHistory(messages);
@@ -934,7 +1147,7 @@ export function ChatPage() {
             {loadingOlder ? "加载中…" : "加载更早的消息"}
           </button>
         )}
-        {history?.map((m) => {
+        {history?.map((m, i) => {
           if (m.role !== "user")
             return (
               <HistoryAssistant
@@ -942,6 +1155,12 @@ export function ChatPage() {
                 m={m}
                 conversationId={conversationId ?? null}
                 onFill={fillFollowup}
+                isLast={i === history.length - 1 && turns.length === 0}
+                onRetry={
+                  i === history.length - 1 && turns.length === 0
+                    ? () => void retryInterrupted()
+                    : undefined
+                }
               />
             );
           const atts = m.attachments ?? [];
@@ -978,12 +1197,40 @@ export function ChatPage() {
       {approvalCards.map((pending) =>
         conversationId ? (
           <PauseCard
-            key={pending.approvalId}
+            key={pending.id}
             pending={pending}
             conversationId={conversationId}
             onResolved={() =>
-              setRecoveredApprovals((prev) =>
-                prev.filter((a) => a.approval_id !== pending.approvalId),
+              setRecoveredInteractions((prev) =>
+                prev.filter((a) => a.id !== pending.id),
+              )
+            }
+          />
+        ) : null,
+      )}
+      {delegationCards.map((pending) =>
+        conversationId ? (
+          <DelegationAuthorizationCard
+            key={pending.id}
+            pending={pending}
+            conversationId={conversationId}
+            onResolved={() =>
+              setRecoveredInteractions((prev) =>
+                prev.filter((a) => a.id !== pending.id),
+              )
+            }
+          />
+        ) : null,
+      )}
+      {debateCards.map((pending) =>
+        conversationId ? (
+          <DebateSteeringCard
+            key={pending.id}
+            pending={pending}
+            conversationId={conversationId}
+            onResolved={() =>
+              setRecoveredInteractions((prev) =>
+                prev.filter((a) => a.id !== pending.id),
               )
             }
           />

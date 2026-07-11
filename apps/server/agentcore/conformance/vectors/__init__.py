@@ -16,6 +16,7 @@ from agentcore.runtime.events import SSEEvent
 from .board import VECTORS as _BOARD
 from .debate import VECTORS as _DEBATE
 from .gates import VECTORS as _GATES
+from .interactions import VECTORS as _INTERACTIONS
 from .legal import VECTORS as _LEGAL
 from .memory import MEMORY_VECTORS, MemoryConsolidationVector
 from .multi_agent import VECTORS as _MULTI_AGENT
@@ -24,6 +25,7 @@ from .single_agent import VECTORS as _SINGLE_AGENT
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     **_SINGLE_AGENT,
     **_GATES,
+    **_INTERACTIONS,
     **_MULTI_AGENT,
     **_DEBATE,
     **_LEGAL,

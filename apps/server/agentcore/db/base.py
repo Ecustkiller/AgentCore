@@ -1,4 +1,15 @@
-"""SQLAlchemy base configuration and session management."""
+"""SQLAlchemy base configuration and session management.
+
+Two pools share one Postgres URL but separate budgets (as-built: 成本配额 §三):
+
+* ``engine`` / ``async_session_factory`` — **primary** (content-write priority):
+  request sessions, turn finalize, content checkpoints, and other authoritative
+  conversation writes.
+* ``telemetry_engine`` / ``telemetry_session_factory`` — **telemetry**:
+  proxy_spend ledger drain, journal append-on-emit, audit, session roster.
+  Sized smaller so a debate-storm of telemetry writes cannot exhaust the
+  primary pool and starve message persistence.
+"""
 
 import asyncio
 from collections.abc import AsyncGenerator
@@ -23,21 +34,35 @@ class Base(DeclarativeBase):
     pass
 
 
-engine = create_async_engine(
-    settings.database_url,
-    # SQL echo is governed by its own switch (NOT `debug`) so DEBUG app logs don't
-    # drown the AI turn logs under every statement + parameters (see config.py).
-    echo=settings.db_echo,
-    pool_size=20,
-    max_overflow=20,
-    pool_timeout=30,
-    # Pooled connections die out-of-band (PG idle timeout, NAT/firewall drop, laptop
-    # sleep, DB restart): a stale checkout then raises asyncpg "connection is closed"
-    # as a one-off 500. pre_ping validates liveness before each use and transparently
-    # swaps in a fresh connection; recycle proactively retires connections older than
-    # 30 min so they're replaced before the server's idle timeout can drop them.
-    pool_pre_ping=True,
-    pool_recycle=1800,
+def _build_engine(*, pool_size: int, max_overflow: int, pool_timeout: int):
+    return create_async_engine(
+        settings.database_url,
+        # SQL echo is governed by its own switch (NOT `debug`) so DEBUG app logs don't
+        # drown the AI turn logs under every statement + parameters (see config.py).
+        echo=settings.db_echo,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
+        pool_timeout=pool_timeout,
+        # Pooled connections die out-of-band (PG idle timeout, NAT/firewall drop, laptop
+        # sleep, DB restart): a stale checkout then raises asyncpg "connection is closed"
+        # as a one-off 500. pre_ping validates liveness before each use and transparently
+        # swaps in a fresh connection; recycle proactively retires connections older than
+        # 30 min so they're replaced before the server's idle timeout can drop them.
+        pool_pre_ping=True,
+        pool_recycle=1800,
+    )
+
+
+engine = _build_engine(
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+    pool_timeout=settings.db_pool_timeout,
+)
+
+telemetry_engine = _build_engine(
+    pool_size=settings.db_telemetry_pool_size,
+    max_overflow=settings.db_telemetry_max_overflow,
+    pool_timeout=settings.db_telemetry_pool_timeout,
 )
 
 async_session_factory = async_sessionmaker(
@@ -46,9 +71,15 @@ async_session_factory = async_sessionmaker(
     expire_on_commit=False,
 )
 
+telemetry_session_factory = async_sessionmaker(
+    telemetry_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
+
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency that yields an async DB session."""
+    """Dependency that yields an async DB session from the primary pool."""
     async with async_session_factory() as session:
         yield session
 

@@ -1297,7 +1297,7 @@
       "completed": 7,
       "total": 7
     },
-    "pendingInteraction": null,
+    "interactions": [],
     "cost": {
       "input": 240000,
       "cached": 64000,
@@ -1514,6 +1514,8 @@
       }
     },
     "debateRounds": [],
+    "teamSynthesisPreview": null,
+    "turnWarning": null,
     "teamNotes": []
   }
 }

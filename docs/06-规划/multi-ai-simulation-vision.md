@@ -166,7 +166,7 @@ WorldEngine 驱动 tick 推进
 | 组件 | 选择 | 理由 |
 |------|------|------|
 | 观测客户端 | **Unity 6 LTS + URP + C#**（`apps/town` AgentTown） | **原生 WebGL2 支持中期 Web 传播版**；单人 + AI 下 C# 迭代快；低模无需 UE 重型渲染 → [AgentTown 客户端规格](06-规划/AgentTown客户端规格.md) |
-| 3D 场景 | Unity URP + Kenney / Quaternius 免费资产 | Low-Poly；资产源 `packages/town-assets` |
+| 3D 场景 | Unity URP + Kenney / Quaternius 免费资产 | Low-Poly；资产源 `apps/town/Assets/TownAssets` |
 | NPC | NavMeshAgent + 动画状态机 | 单 FBX/GLB（Xbot）实例化区分居民 |
 | 状态管理 | C# `SimulationSession` 单例 | 禁止多 store 分裂；对齐 tick 快照权威 |
 | Desktop 角色 | 启动器 + `session.json` | 不再内嵌 3D；`?preview` / R3F **已删** |

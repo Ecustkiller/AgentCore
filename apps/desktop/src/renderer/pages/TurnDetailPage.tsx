@@ -7,7 +7,11 @@ import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { fetchMessageWindow } from "@/services/messages";
 import { loadRecovery } from "@/services/resume";
-import { attachOnOpen } from "@/services/turns";
+import {
+  attachOnOpen,
+  markGhostInterrupted,
+  rejoinLiveTurn,
+} from "@/services/turns";
 import {
   getRuntime,
   useActiveGenerating,
@@ -89,11 +93,26 @@ export function TurnDetailPage() {
               conversationId,
             );
             s.setMemoryUpdates(win.memoryUpdates, conversationId);
-            if (win.messages.at(-1)?.role === "user") {
+            if (win.messages.at(-1)?.isStreaming) {
+              s.setGenerating(true, conversationId);
+            }
+            const last = win.messages.at(-1);
+            if (last) {
               const recovery = await recoveryLoaded;
               if (cancelled) return;
-              if (recovery.liveRunning && recovery.pausedCount === 0) {
+              const canAttach =
+                recovery.liveRunning && recovery.pausedCount === 0;
+              if (last.role === "user" && canAttach) {
                 void attachOnOpen(conversationId);
+              } else if (
+                last.role === "assistant" &&
+                last.status === "running"
+              ) {
+                if (canAttach) {
+                  void rejoinLiveTurn(conversationId);
+                } else if (!recovery.liveRunning && recovery.pausedCount === 0) {
+                  markGhostInterrupted(conversationId);
+                }
               }
             }
           }
@@ -274,42 +293,53 @@ export function TurnDetailPage() {
           </div>
         </div>
 
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          {view === "graph" && (
-            <div className="min-h-0 flex-1">
-              <ReactFlowProvider>
-                <GraphView interactive fitMode="view" autoplay={autoplay} />
-              </ReactFlowProvider>
+        {/* Body row: the content column (graph/debate/compare + 命令栏) and the
+            right-docked SidePanel sit side-by-side in a flex-ROW, so the panel
+            docks to the side instead of falling to the bottom of the page column
+            (mirrors AppShell/ConversationPage, where SidePanel is a flex-row
+            sibling — it is built as a `shrink-0 flex-col border-l` right dock). */}
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+              {view === "graph" && (
+                <div className="min-h-0 flex-1">
+                  <ReactFlowProvider>
+                    <GraphView interactive fitMode="view" autoplay={autoplay} />
+                  </ReactFlowProvider>
+                </div>
+              )}
+              {view === "debate" && debate && execution && (
+                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                  <DebateArena
+                    execution={execution}
+                    messageId={scopeId}
+                    conversationId={conversationId}
+                    interactive={interactive}
+                    onClose={goBack}
+                  />
+                </div>
+              )}
+              {view === "compare" && showCompare && execution && (
+                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                  <div className="mx-auto max-w-5xl">
+                    <TurnCompare
+                      execution={execution}
+                      messageId={scopeId}
+                      initialPair={initialComparePair}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-          {view === "debate" && debate && execution && (
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              <DebateArena
-                execution={execution}
-                messageId={scopeId}
-                conversationId={conversationId}
-                interactive={interactive}
-                onClose={goBack}
-              />
-            </div>
-          )}
-          {view === "compare" && showCompare && execution && (
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              <div className="mx-auto max-w-5xl">
-                <TurnCompare
-                  execution={execution}
-                  messageId={scopeId}
-                  initialPair={initialComparePair}
-                />
-              </div>
-            </div>
-          )}
-        </div>
 
-        <CanvasCommandBar
-          onDispatch={() => setFollowing(true)}
-          waiting={following && generating}
-        />
+            <CanvasCommandBar
+              onDispatch={() => setFollowing(true)}
+              waiting={following && generating}
+            />
+          </div>
+
+          <SidePanel />
+        </div>
 
         <SimpleTooltip
           label={panelOpen ? "隐藏侧面板 (Ctrl/Cmd+I)" : "侧面板 (Ctrl/Cmd+I)"}
@@ -333,7 +363,6 @@ export function TurnDetailPage() {
             </IconButton>
           </div>
         </SimpleTooltip>
-        <SidePanel />
       </div>
     </ExecutionScopeContext.Provider>
   );

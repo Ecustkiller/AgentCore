@@ -6,12 +6,9 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
-from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
-from agentcore.runtime.events import plan_review_required, plan_review_resolved
-from agentcore.runtime.interaction import InteractionKind
+from agentcore.runtime.events import plan_review_required
 from agentcore.tools.builtin.delegate.schema import PLAN_REVIEW_SUMMARY_CHARS
-from agentcore.tools.builtin.delegate.steer import apply_steer
-from agentcore.tools.builtin.delegate.suspension import drop_suspension, persist_suspension
+from agentcore.tools.builtin.delegate.suspension import persist_suspension
 
 if TYPE_CHECKING:
     from agentcore.runtime.runs.plan import RunPlan
@@ -48,22 +45,38 @@ def boundary_hook(tool: DelegateTool, plan: RunPlan):
     """Build the WaveScheduler ``on_boundary`` hook for ``plan`` (受监督的波循环)."""
     from agentcore.runtime.runs import BoundaryOutcome, BoundaryReason
 
-    registry = tool._registry
-    conversation_id = tool._conversation_id
-    timeout = tool._checkpoint_timeout_seconds
-
     async def on_boundary(reason, nodes, completed) -> BoundaryOutcome:
         if reason is BoundaryReason.BIND or reason is BoundaryReason.SCOPE:
             tool._pending_boundary = (reason, list(nodes))
             return BoundaryOutcome.YIELD
-        if registry is None or conversation_id is None:
+        # CHECKPOINT 结构挂起须尊重 checkpoint 闸（``checkpoint_gate_enabled ∧ approvals`` →
+        # ``tool._checkpoint_enabled``，经 ``checkpoint_active``）。闸关时跳过。
+        # BIND/SCOPE（上面）不受此闸约束。
+        if not checkpoint_active(tool):
             return BoundaryOutcome.PROCEED
         # 挂起即收口 (②, Phase 3): plan_review 是「顶层 (depth 0) 用户监督点」。嵌套子团队
         # (depth>0) 的回合无法 durable 恢复（``can_persist_suspension`` 要求 depth==0），② 收口
         # 只在顶层成立；嵌套若在此暂停只能退到已退役的 live-park 双态。故嵌套不再为复核暂停，
-        # 直接放行（顶层 CEO 仍照常 checkpoint）。BIND/SCOPE（上面）与 escalation 不受此限。
+        # 直接放行（顶层 CEO 仍照常 checkpoint）。
         if tool._depth != 0:
             return BoundaryOutcome.PROCEED
+
+        # 协调态 + checkpoint_after → 事件，不是回合暂停（选项 1）：不写 TurnSuspension、
+        # 不 seal journal、不发 plan_review_required 作收口。波边界只 YIELD，由 host 投递
+        # BOUNDARY_YIELD；真正要用户拍板走 ask_user 软停。经典阻塞 drive（无 CoordinationSession）
+        # 仍走下方 durable plan_review。
+        from agentcore.runtime.coordination.session import active_coordination
+
+        if active_coordination() is not None:
+            tool._pending_boundary = (BoundaryReason.CHECKPOINT, list(nodes))
+            logger.info(
+                "plan_review.coord_yield",
+                nodes=[n.run_id for n in nodes],
+            )
+            return BoundaryOutcome.YIELD
+
+        conversation_id = tool._conversation_id
+        assert conversation_id is not None  # checkpoint_active
 
         checkpoint_id = new_id()
         steps = [review_step(n, completed) for n in nodes]
@@ -77,50 +90,17 @@ def boundary_hook(tool: DelegateTool, plan: RunPlan):
         saved = await persist_suspension(
             tool, checkpoint_id, plan, completed, steps, pending, required
         )
-        # 挂起即收口 (②): once the durable frame is saved, END the turn at the wave boundary
-        # instead of parking the scheduler on the in-memory Future. We emit the card here (the
-        # wait path emits it via ``on_suspended``) and YIELD — the scheduler soft-pauses
-        # (in-flight drained, the un-run tail left for a resume), then ``drive`` reads
-        # ``_pending_pause`` and returns a SUSPEND ToolResult so the engine maps the turn to
-        # FinishReason.PAUSED. Every resolution (even in-session) now flows through the one cold
-        # ``POST .../resume`` path. Gated on ``saved`` (§六-1 窄兜底): a plan we could not
-        # persist can't be finalized (resume would have no frame to reclaim), so it falls
-        # through to the backend-only timed wait below.
         if saved:
             tool._sink.emit(required)
             tool._pending_pause = True
             logger.info("plan_review.finalized", checkpoint_id=checkpoint_id)
             return BoundaryOutcome.YIELD
-        # 窄兜底（薄网，挂起即收口 ② Phase 3）: no durable frame, so hold the wave on a BACKEND-ONLY
-        # bounded wait — the card is surfaced, but no client can settle a plan_review anymore (its
-        # resolve schema is gone from the unified endpoint), so this ends only by timeout →
-        # auto-continue / 放行下游 (不丢回合). A disconnect cancels it and the engine salvages.
-        try:
-            response = await registry.suspend(
-                checkpoint_id,
-                conversation_id,
-                kind=InteractionKind.PLAN_REVIEW,
-                payload={"steps": steps, "pending": pending},
-                timeout=timeout,
-                on_suspended=lambda: tool._sink.emit(required),
-            )
-        except TimeoutError:
-            logger.info("plan_review.timeout", checkpoint_id=checkpoint_id)
-            response = CheckpointResponse(decision=CheckpointDecision.CONTINUE)
-        await drop_suspension(tool)
-        tool._sink.emit(
-            plan_review_resolved(
-                checkpoint_id=checkpoint_id,
-                decision=response.decision.value,
-                note=response.note,
-            )
+        # D11：删窄兜底——无法落盘则跳过挂起放行下游（非生产无 transcript 等）。
+        logger.warning(
+            "plan_review.persist_unavailable",
+            checkpoint_id=checkpoint_id,
+            reason="no_durable_frame",
         )
-        if response.decision is CheckpointDecision.ADJUST and response.note.strip():
-            apply_steer(plan, completed, {n.run_id for n in nodes}, response.note.strip())
-        return (
-            BoundaryOutcome.ABORT
-            if response.decision is CheckpointDecision.STOP
-            else BoundaryOutcome.PROCEED
-        )
+        return BoundaryOutcome.PROCEED
 
     return on_boundary

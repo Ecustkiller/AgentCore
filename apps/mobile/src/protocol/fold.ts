@@ -9,13 +9,10 @@
 // @agentcore/contract-types breaks this build until it is handled here.
 
 import type {
-  ApprovalRequiredPayload,
-  ApprovalResolvedPayload,
   AskAssumption,
   AskQuestion,
   AskStyleOption,
   CheckpointRequiredPayload,
-  CheckpointResolvedPayload,
   CitationsPayload,
   ContentDeltaPayload,
   ContextBlockWire,
@@ -48,14 +45,14 @@ import type {
   SSEEvent,
   TeamNotePostedPayload,
   TeamPreviewRequiredPayload,
-  TeamPreviewResolvedPayload,
+  TeamSynthesisPreviewPayload,
   ToolPhase,
   ToolUseEndPayload,
   ToolUseProgressPayload,
   ToolUseStartPayload,
+  TurnWarningPayload,
 } from "@agentcore/contract-types";
 import type {
-  PendingInteraction,
   ProcessStep,
   ProjectedAgent,
   ProjectedCitation,
@@ -64,6 +61,7 @@ import type {
   ProjectedTurn,
   TurnStatus,
 } from "@agentcore/protocol-conformance";
+import { foldInteractions, hasGatePending } from "./foldInteractions";
 
 const FINISH_TO_STATUS: Record<string, TurnStatus> = {
   end_turn: "completed",
@@ -72,10 +70,12 @@ const FINISH_TO_STATUS: Record<string, TurnStatus> = {
   unproductive: "completed",
   error: "failed",
   cancelled: "cancelled",
+  // Crash / lease-sweeper salvage (流式回复持久化 P4): incomplete → cancelled-class.
+  interrupted: "cancelled",
   // 挂起即收口 (②): a turn finalized AT a durable checkpoint ends with finish_reason=paused
-  // — a terminal message_end whose turn is NOT done. Stay paused (the *_required already set
-  // status + pendingInteraction; this only adds finishReason + cost) so the single resume
-  // card renders, not a completed bubble. Without this it'd fall to "completed" below.
+  // — a terminal message_end whose turn is NOT done. Stay paused (gate interactions[] already
+  // parked; this only adds finishReason + cost) so the resume card renders, not a completed
+  // bubble. Without this it'd fall to "completed" below.
   paused: "paused",
 };
 
@@ -214,14 +214,15 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
   const agents: ProjectedAgent[] = [];
   const runs: ProjectedRun[] = [];
   let planId: string | null = null;
-  let status: TurnStatus = "running";
   let finishReason: string | null = null;
   let cost: CostBreakdown | null = null;
   let debate: DebateResultPayload | null = null;
   let debateRounds: DebateNarrativeRound[] = [];
+  let teamSynthesisPreview: TeamSynthesisPreviewPayload | null = null;
+  let turnWarning: string | null = null;
   // 团队便签墙 (§2.2 通): notes broadcast to siblings this turn, in post order (deduped by noteId).
   const teamNotes: ProjectedTeamNote[] = [];
-  let pending: PendingInteraction | null = null;
+  let sawError = false;
   const checkpointSteps = new Map<string, string[]>();
 
   const agentById = (id: string) => agents.find((a) => a.id === id);
@@ -532,7 +533,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         break;
       }
       case "escalation_resolved": {
-        // 阻塞式求决策 settlement: flip this run's pending escalation to resolved/timeout.
+        // Settlement: flip pending → resolved | assumed | timed_out.
         const p = ev.payload as EscalationResolvedPayload;
         const esc = runById(p.run_id)?.escalations.find(
           (e) => e.status === "pending",
@@ -541,8 +542,11 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           if (p.status === "resolved") {
             esc.status = "resolved";
             esc.answer = p.answer;
+          } else if (p.status === "assumed") {
+            esc.status = "assumed";
+            esc.answer = null;
           } else {
-            esc.status = "timeout";
+            esc.status = "timed_out";
             esc.answer = null;
           }
           if (p.arbitrated_by === "ceo") {
@@ -615,29 +619,9 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         }
         break;
       }
-      case "approval_required": {
-        const p = ev.payload as ApprovalRequiredPayload;
-        pending = {
-          kind: "approval",
-          approvalId: p.approval_id,
-          toolCallId: p.tool_call_id,
-          toolName: p.tool_name,
-          arguments: p.arguments ?? {},
-        };
-        status = "paused";
+      case "approval_required":
+      case "approval_resolved":
         break;
-      }
-      case "approval_resolved": {
-        const p = ev.payload as ApprovalResolvedPayload;
-        if (
-          pending?.kind === "approval" &&
-          pending.approvalId === p.approval_id
-        ) {
-          pending = null;
-          status = "running";
-        }
-        break;
-      }
       case "checkpoint_required": {
         const p = ev.payload as CheckpointRequiredPayload;
         // Absorb same-round CEO prose into the checkpoint card (mirrors desktop
@@ -645,26 +629,10 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         dropTrailingContentSteps(process);
         content = "";
         pushCheckpointMarker(process, p.checkpoint_id);
-        pending = {
-          kind: "checkpoint",
-          checkpointId: p.checkpoint_id,
-          question: p.question,
-          context: p.context,
-        };
-        status = "paused";
         break;
       }
-      case "checkpoint_resolved": {
-        const p = ev.payload as CheckpointResolvedPayload;
-        if (
-          pending?.kind === "checkpoint" &&
-          pending.checkpointId === p.checkpoint_id
-        ) {
-          pending = null;
-          status = "running";
-        }
+      case "checkpoint_resolved":
         break;
-      }
       case "plan_review_required": {
         const p = ev.payload as PlanReviewRequiredPayload;
         pushPlanReviewMarker(process, p.checkpoint_id);
@@ -674,12 +642,6 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           const run = runById(rid);
           if (run) run.checkpoint = { status: "pending", decision: null };
         }
-        pending = {
-          kind: "plan_review",
-          checkpointId: p.checkpoint_id,
-          runIds,
-        };
-        status = "paused";
         break;
       }
       case "plan_review_resolved": {
@@ -689,102 +651,54 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           if (run)
             run.checkpoint = { status: "resolved", decision: p.decision };
         }
-        if (
-          pending?.kind === "plan_review" &&
-          pending.checkpointId === p.checkpoint_id
-        ) {
-          pending = null;
-          status = "running";
-        }
         break;
       }
       case "team_preview_required": {
         const p = ev.payload as TeamPreviewRequiredPayload;
         pushTeamPreviewMarker(process, p.checkpoint_id);
-        pending = {
-          kind: "team_preview",
-          checkpointId: p.checkpoint_id,
-          workerIds: (p.workers ?? []).map((w) => w.run_id),
-        };
-        status = "paused";
         break;
       }
-      case "team_preview_resolved": {
-        const p = ev.payload as TeamPreviewResolvedPayload;
-        if (
-          pending?.kind === "team_preview" &&
-          pending.checkpointId === p.checkpoint_id
-        ) {
-          pending = null;
-          status = "running";
-        }
+      case "team_preview_resolved":
         break;
-      }
       case "question_posted": {
         // 非阻塞提问 (ask_user blocking=false): drop an `ask` marker at its chronological
-        // slot; the turn does NOT pause (no `pending`). Mirrors the backend oracle.
+        // slot; the turn does NOT pause. Mirrors the backend oracle.
         const p = ev.payload as QuestionPostedPayload;
         pushAskMarker(process, p.ask_id);
         break;
       }
       case "error":
-        status = "failed";
+        sawError = true;
         break;
       case "message_end": {
         const p = ev.payload as MessageEndPayload;
         finishReason = p.finish_reason;
         cost = p.cost ?? null;
-        status = FINISH_TO_STATUS[p.finish_reason] ?? "completed";
         break;
       }
-      // Not part of the normalized turn judge state (no-op) — but enumerated so the
-      // assertNever below stays exhaustive against @agentcore/contract-types.
+      // Not part of the normalized turn judge state beyond interactions[] fold (no-op) —
+      // enumerated so assertNever stays exhaustive against @agentcore/contract-types.
       case "message_start":
-      case "turn_warning":
       case "turn_saved":
       case "title_generated":
-      // CEO→用户「下一步推荐」: post-turn quick-reply chips, filled into the composer on tap.
-      // Transport-only — never journaled/persisted and excluded from the normalized judge
-      // state (same as the desktop oracle) → no-op here. The live chip UI reads it straight
-      // off the raw turn events via `extractFollowups` (below), NOT off this fold.
       case "followups_generated":
-      // AI 协作白板 client-tool requests (board_op = 改板 / board_read = 读板): transport-only
-      // request/response exchanges that settle the bound desktop's board, never turn content →
-      // no-op (mobile has no board surface). Mirrors the desktop conformanceFold no-op group.
       case "board_op_required":
       case "board_read_required":
       case "desktop_notify_required":
       case "tool_progress":
-      // 工具执行阶段进度 (联网搜索前端展示优化): a running tool's coarse phase (web_search →
-      // querying / queued / fallback). Transport-only liveliness — NEVER journaled and excluded
-      // from the normalized judge state (so the golden stays phase-less), exactly like
-      // `tool_progress`. The LIVE waiting UI reads it off the raw events via {@link
-      // extractToolPhases}, NOT this fold → no-op here (enumerated to keep assertNever exhaustive).
       case "tool_use_progress":
-      // 调度埋点量化 (深层诊断指标): a desktop-only 诊断模式 surface (run detail's 调度 block) —
-      // mobile has no diagnostic panel, so it folds to nothing here and stays out of the
-      // conformance ProjectedTurn (desktop folds it onto Execution.batches instead).
       case "batch_metrics":
-      // Worker 内部路由 Phase 1：Intake / Escalation Gate — 诊断元信息，不进规范化 ProjectedTurn。
       case "run_intake":
       case "run_escalation_gate":
-      case "run_split_assessed":
-      case "run_subworker_started":
-      case "run_subworker_completed":
-      // 交互式逐轮辩论的「续辩/收场」决策事件：桌面端 live-only（驱动决策卡），收场叙事
-      // 已由 debate_round / debate_result 承载，故 conformance ProjectedTurn 从不携带它们
-      // （与桌面 oracle 一致）。手机端无逐轮决策 UI → 折为 no-op，仅在此登记以保穷尽。
       case "debate_round_decision_required":
       case "debate_round_decision_resolved":
       case "delegation_authorization_required":
       case "delegation_authorization_resolved":
+      case "interaction_orphaned":
       case "workspace_op_required":
       case "handoff_snapshot_done":
       case "handoff_job_started":
       case "handoff_apply_done":
-      // CEO 协调模式 Phase 1：团队进展摘要 — transport-only，不进 ProjectedTurn。
-      case "team_synthesis_preview":
-      // AI 小镇模拟事件：桌面 MVP 专属，手机无模拟面 → fold no-op（与 conformance oracle 一致）。
       case "sim.agent_action":
       case "sim.agent_state":
       case "sim.interaction":
@@ -793,12 +707,37 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "sim.tick_frame":
       case "sim.world_event":
         break;
+      case "turn_warning": {
+        turnWarning = (ev.payload as TurnWarningPayload).message;
+        break;
+      }
+      case "team_synthesis_preview": {
+        teamSynthesisPreview = ev.payload as TeamSynthesisPreviewPayload;
+        break;
+      }
       default:
         assertNever(type);
     }
   }
 
-  if (status === "cancelled") {
+  const interactions = foldInteractions(events);
+  let status: TurnStatus;
+  if (finishReason != null) {
+    status = FINISH_TO_STATUS[finishReason] ?? "completed";
+  } else if (sawError) {
+    status = "failed";
+  } else if (hasGatePending(interactions)) {
+    status = "paused";
+  } else {
+    status = "running";
+  }
+
+  // A cancelled OR failed turn may leave in-flight nodes with no terminal frame; freeze
+  // them as cancelled (parity with the desktop finalizeFold + backend oracle). `cancelled`
+  // is the graceful stop; `failed` is the defensive case — a turn that errors out (hard
+  // crash / lost terminal frame) with a still-running worker would otherwise replay as a
+  // forever-spinning node on reload.
+  if (status === "cancelled" || status === "failed") {
     for (const r of runs) if (r.status === "running") r.status = "cancelled";
     for (const a of agents) if (a.status === "working") a.status = "cancelled";
   }
@@ -819,10 +758,12 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       completed: runs.filter((r) => r.status === "completed").length,
       total: runs.length,
     },
-    pendingInteraction: pending,
+    interactions,
     cost,
     debate,
     debateRounds,
+    teamSynthesisPreview,
+    turnWarning,
     teamNotes,
   };
 }
@@ -940,33 +881,6 @@ export function extractAsks(events: SSEEvent[]): NonBlockingAsk[] {
   return order.map((id) => byId.get(id) as NonBlockingAsk);
 }
 
-/**
- * 阻塞式求决策 (escalate blocking=true): the `escalation_id` of each run's CURRENTLY-pending
- * blocking escalation — a transport-only sibling of {@link fold} (twin of {@link extractAsks}),
- * keyed by `run_id`. The conformance {@link RunEscalation} carries no id (it is excluded from
- * the golden), so the interactive answer card reads the resolve key from HERE, off the raw
- * `escalation_required` events, and clears it on the matching `escalation_resolved`.
- *
- * A worker is sequential ⇒ at most one pending escalation per run (设计 §4.7), so a flat
- * runId→escalationId map suffices. Only LIVE turns carry these events (history replays them
- * already settled → empty), so the card is naturally live-only — matching desktop.
- */
-export function extractPendingEscalations(
-  events: SSEEvent[],
-): Map<string, string> {
-  const pending = new Map<string, string>();
-  for (const ev of events) {
-    if (ev.type === "escalation_required") {
-      const p = ev.payload as EscalationRequiredPayload;
-      pending.set(p.run_id, p.escalation_id);
-    } else if (ev.type === "escalation_resolved") {
-      const p = ev.payload as EscalationResolvedPayload;
-      pending.delete(p.run_id);
-    }
-  }
-  return pending;
-}
-
 /** One tool call a delegated worker made, for its run-detail 工具明细 (RunDetail). Mirrors the
  *  process timeline's `tool` step shape (中文名 + args/result peek) minus the live-only `phase`
  *  — a settled/replayed run's tools are all resolved, and a running one just shows「进行中」. */
@@ -980,14 +894,17 @@ export interface RunToolCall {
 
 /**
  * 队员工具明细 (RunDetail · 工具调用): the run-scoped tool calls each delegated worker made, pulled
- * straight off a turn's raw SSE events — a transport-only sibling of {@link fold} (twin of {@link
- * extractPendingEscalations} / {@link extractAsks}), keyed by `run_id`, calls in fire order.
+ * straight off a turn's raw SSE events — a transport-only sibling of {@link fold} (twin of
+ * {@link extractAsks}), keyed by `run_id`, calls in fire order.
  *
  * The conformance {@link ProjectedTurn} folds a WORKER's run-scoped tool calls to NOTHING: they
  * belong to the worker's node, not the CEO's inline timeline (统一团队时间线 = the CEO's OWN steps),
  * and the golden carries no per-run tool IO — so the fold {@link fold} skips a `run_id`-tagged
  * `tool_use_*` (leaving only the coarse {@link ProjectedAgent.toolProgress}). The run-detail panel
- * reads the full call list from HERE instead, exactly like the asks / escalations side channels.
+ * reads the full call list from HERE instead, exactly like the asks side channel.
+ *
+ * Escalation submit ids come from {@link ProjectedTurn.interactions} (kind=escalation,
+ * status=pending) — not a parallel extract map (P3).
  *
  * A `tool_use_start` opens a `running` call (null result) appended to its run; the matching
  * `tool_use_end` folds in its `result`/`status`. Orchestration tools (delegate/debate) are skipped

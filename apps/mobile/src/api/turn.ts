@@ -12,7 +12,7 @@ type Schemas = components["schemas"];
 
 export type SuspensionKind = Schemas["SuspensionKind"];
 export type PausedTurnSummary = Schemas["PausedTurnSummary"];
-export type PendingApprovalSummary = Schemas["PendingApprovalSummary"];
+export type PendingInteractionSummary = Schemas["PendingInteractionSummary"];
 
 type StopTurnResponse = Schemas["StopTurnResponse"];
 type TurnRecoveryResponse = Schemas["TurnRecoveryResponse"];
@@ -46,8 +46,8 @@ export interface TurnRecovery {
    *  stream (结构化挂起 2b), oldest-first. When non-empty the resume card is the single
    *  actionable surface, so the caller must NOT also attach. */
   paused: PausedTurnSummary[];
-  /** GRANTABLE tool gates still awaiting a user decision on a live backend run. */
-  pendingApprovals: PendingApprovalSummary[];
+  /** Hot-path interactions still awaiting settlement (journal fold · P1/P3). */
+  pendingInteractions: PendingInteractionSummary[];
 }
 
 /**
@@ -70,6 +70,6 @@ export async function getRecovery(
   return {
     liveRunning: Boolean(data.live_running),
     paused: data.paused ?? [],
-    pendingApprovals: data.pending_approvals ?? [],
+    pendingInteractions: data.pending_interactions ?? [],
   };
 }

@@ -193,6 +193,7 @@ namespace AgentTown.Town
             }
 
             dayNight.Bind(session, sun);
+            RenderSettings.sun = sun;
         }
 
         private void EnsureObservationLayers()
@@ -240,6 +241,11 @@ namespace AgentTown.Town
 
             cam.allowHDR = false;
             cam.allowMSAA = false;
+            // Built-in skybox background — infinite, always drawn behind all geometry.
+            cam.clearFlags = CameraClearFlags.Skybox;
+            cam.farClipPlane = Mathf.Max(cam.farClipPlane, 400f);
+            // Mid framing: district + surroundings — neither face-to-face nor far sand-table.
+            cam.fieldOfView = shootMode ? 50f : 52f;
             townCamera.Bind(session);
         }
 
@@ -257,8 +263,10 @@ namespace AgentTown.Town
                 document.visualTreeAsset = hudUxml;
 
                 TownHudController controller = uiGo.AddComponent<TownHudController>();
+                TownNameplateHud nameplates = uiGo.AddComponent<TownNameplateHud>();
                 uiGo.SetActive(true);
                 controller.Bind(session);
+                nameplates.Bind(session);
                 bootOverlay = document.rootVisualElement?.Q<VisualElement>("boot-overlay");
                 bootStatusLabel = document.rootVisualElement?.Q<Label>("boot-status-label");
                 SetBootStatus("正在加载小镇…");
@@ -269,6 +277,9 @@ namespace AgentTown.Town
             if (existing != null)
             {
                 existing.Bind(session);
+                TownNameplateHud plates = existing.GetComponent<TownNameplateHud>()
+                    ?? existing.gameObject.AddComponent<TownNameplateHud>();
+                plates.Bind(session);
                 return;
             }
 
@@ -326,7 +337,11 @@ namespace AgentTown.Town
             }
         }
 
-        /// <summary>Aim bird camera at the pack landmark region so overlays are on-screen.</summary>
+        /// <summary>
+        /// Aim bird camera at the pack landmark so story overlays stay on-screen.
+        /// Keep look-at on the landmark (not biased to core) — periphery districts are where
+        /// the scripted gather happens; the skybox fills the map-edge rim.
+        /// </summary>
         private void FrameShootLandmark(string packId, Dictionary<string, WireVec3> anchors)
         {
             string regionId = DemoPackIds.ShootLandmarkRegion(packId);
@@ -363,12 +378,17 @@ namespace AgentTown.Town
                 return;
             }
 
-            // Slightly closer than default bird so bubbles / trade labels read in the PNG.
             townCamera.FrameOnWire(
                 wireX,
                 wireY,
                 wireZ,
-                TownVisualLayout.BirdZoomMinDistance + 2f);
+                TownVisualLayout.BirdZoomShootDistance);
+            // Re-assert skybox clear flags after shoot framing rebinds the camera pose.
+            TownDayNight dayNight = GetComponent<TownDayNight>();
+            if (dayNight != null)
+            {
+                dayNight.RefreshSky();
+            }
         }
 
         /// <summary>

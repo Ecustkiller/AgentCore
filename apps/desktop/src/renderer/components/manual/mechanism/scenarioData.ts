@@ -296,7 +296,9 @@ export const SCENARIOS: Scenario[] = [
         modelPreference: "strong",
       }),
       agent("rev", "撰写员", "completed", {
-        task: "按反馈重写第 2 章并扩充论据",
+        // 与生产一致：续写继承原 task，改点走 revisionSummary（run_context.revision）。
+        task: "撰写报告初稿",
+        revisionSummary: "重写第 2 章并扩充论据",
         durationMs: 3800,
         toolCount: 1,
         modelPreference: "strong",

@@ -32,14 +32,14 @@ from agentcore.runtime.facts import TurnFactLog, current_fact_log
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
 from agentcore.runtime.pipeline.resume.finish import finish_resume_turn, finish_terminal_resume
-from agentcore.runtime.pipeline.resume.settle import (
-    append_resumed_tool_results,
-    settle_resumed_suspension,
-)
+from agentcore.runtime.pipeline.resume.settle import append_resumed_tool_results
 from agentcore.runtime.pipeline.resume.window import pre_pause_content, resumed_captain_window
+from agentcore.runtime.recover import recover_turn
 from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset, _wire_worker_memory_tools
 from agentcore.runtime.runs import RunKind, RunPhase, RunSpec, build_captain_resumer
+from agentcore.runtime.session_persistence import SessionRosterWriter
 from agentcore.runtime.sessions import SessionLoader, SessionSaver, default_session_registry
+from agentcore.runtime.settlement import seed_settlement_dedupe_from_entries
 from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.runtime.suspension import (
     SuspensionDeleter,
@@ -48,6 +48,7 @@ from agentcore.runtime.suspension import (
     captain_transcript,
     turn_history,
 )
+from agentcore.runtime.turn_state import TurnState
 from agentcore.tools.builtin import (
     approval_class_tool_names,
     build_worker_registry,
@@ -88,7 +89,7 @@ async def resume_chat_pipeline(
     by folding the journal facts** (:func:`resumed_captain_window` — the captain
     transcript is a projection of the journal, no longer read from ``frame.transcript``,
     执行级事件溯源 Phase 2 ④), apply the user's decision to the paused frame by kind
-    (:func:`settle_resumed_suspension`), feed the settled result back as the suspended
+    (:func:`recover_turn`), feed the settled result back as the suspended
     tool result, and — unless the answer ended the turn in-band (ask_user ``stop``) — run
     the CEO loop on the rebuilt window to its reply. ``history`` is the reloaded prior
     context (the caller passes ``load_chat_context(...)[:-1]`` exactly as a fresh send),
@@ -156,6 +157,9 @@ async def resume_chat_pipeline(
         trace_id=suspension.trace_id or get_log_value("trace_id"),
         initial_seq=initial_seq,
     )
+    # D8：冷路端点已预写 ``*_resolved``；claim 把它收进 journal_entries。种子化 dedupe，
+    # 使 recover 路径的同形 emit 跳过重复落库（SSE 仍发）。
+    seed_settlement_dedupe_from_entries(journal_writer, suspension.journal_entries)
     journal_writer_token = current_journal_writer.set(journal_writer)
     audit_recorder, audit_token = bind_recorder(
         user_id=suspension.user_id,
@@ -165,6 +169,9 @@ async def resume_chat_pipeline(
         captain_run_id=captain_run_id,
         delegated=bool(getattr(suspension, "plan", None) and getattr(suspension.plan, "nodes", None)),
     )
+    # Session roster write-through (as-built: 成本配额 §三): fire-and-forget + turn-end flush (parity with run).
+    roster_writer = SessionRosterWriter.wrap(session_saver)
+    session_saver = roster_writer.save if roster_writer is not None else None
     fact_log = TurnFactLog(inherited_entries=list(suspension.journal_entries))
     fact_log_token = current_fact_log.set(fact_log)
     execution_id_token = None
@@ -297,14 +304,20 @@ async def resume_chat_pipeline(
         # transcript the CEO is still suspended on — symmetric with the original pause.
         token = captain_transcript.set(transcript)
         try:
-            settled = await settle_resumed_suspension(
-                suspension,
-                decision=decision,
-                note=note,
-                selected=selected or [],
+            # Single recover primitive: journal projection → seed WaveScheduler / settle.
+            turn_state = TurnState.from_journal(
+                suspension.journal_entries,
+                display_journal=suspension.journal,
+            )
+            settled = await recover_turn(
+                state=turn_state,
                 sink=sink,
                 delegate_tool=delegate_tool,
                 execution_id=base_tool_context.execution_id,
+                suspension=suspension,
+                decision=decision,
+                note=note,
+                selected=selected or [],
             )
             logger.info(
                 "pipeline.resume_settled",
@@ -336,6 +349,8 @@ async def resume_chat_pipeline(
                 sink=sink,
             )
             await audit_recorder.flush()
+            if roster_writer is not None:
+                await roster_writer.flush()
             result["audit_drops"] = audit_recorder.drops
             return result
 
@@ -370,6 +385,27 @@ async def resume_chat_pipeline(
             err = captain_state.error or "captain resume failed"
             sink.emit(error_event(ErrorCode.PIPELINE_ERROR, err))
             sink.emit(message_end(FinishReason.ERROR))
+            with contextlib.suppress(Exception):
+                await sink.flush_stream_state()
+            from agentcore.conversation.store.merge import pick_longest
+            from agentcore.runtime.engine import join_segments
+            from agentcore.runtime.events.stream_checkpointer import (
+                CHANNEL_CAPTAIN_CONTENT,
+                CHANNEL_CAPTAIN_REASONING,
+            )
+
+            mem = sink.stream_memory_snapshot()
+            post = pick_longest(
+                mem.get(CHANNEL_CAPTAIN_CONTENT),
+                captain_state.content,
+                sink.streamed_content(),
+            )
+            salvaged_content = join_segments(pre_pause, post)
+            salvaged_reasoning = pick_longest(
+                mem.get(CHANNEL_CAPTAIN_REASONING),
+                captain_state.reasoning,
+                sink.streamed_reasoning(),
+            )
             # Bill the resumed captain's partial spend on a hard failure (B-deep 失败
             # 计费), same as the fresh-turn path: priced onto captain_state, persisted
             # by _persist_turn_result even without an assistant reply. No usage → no row.
@@ -384,9 +420,12 @@ async def resume_chat_pipeline(
                 *(asdict(r) for r in vision_cost_sink),
             ]
             await audit_recorder.flush()
+            if roster_writer is not None:
+                await roster_writer.flush()
             return {
                 "message_id": message_id,
-                "content": "",
+                "content": salvaged_content,
+                "reasoning_content": salvaged_reasoning or None,
                 "error": err,
                 "error_code": ErrorCode.PIPELINE_ERROR,
                 "finish_reason": FinishReason.ERROR,
@@ -408,7 +447,16 @@ async def resume_chat_pipeline(
             vision_cost_runs=vision_cost_sink,
             audit_drops=audit_recorder.drops,
         )
+        # Drain journal → audit projection fully BEFORE 定格 audit_drops (parity with
+        # run_chat_pipeline): the finally re-flush would otherwise drop more audit writes
+        # after drops was read, undercounting turn_metrics.audit_drops. Best-effort.
+        with contextlib.suppress(Exception):
+            await journal_writer.flush()
         await audit_recorder.flush()
+        if roster_writer is not None:
+            await roster_writer.flush()
+        with contextlib.suppress(Exception):
+            await sink.flush_stream_state()
         result["audit_drops"] = audit_recorder.drops
         return result
 
@@ -421,16 +469,44 @@ async def resume_chat_pipeline(
         )
         sink.emit(error_event(code, message, context=err_ctx))
         sink.emit(message_end(FinishReason.ERROR))
+        with contextlib.suppress(Exception):
+            await sink.flush_stream_state()
+        from agentcore.conversation.store.merge import pick_longest
+        from agentcore.runtime.engine import join_segments
+        from agentcore.runtime.events.stream_checkpointer import (
+            CHANNEL_CAPTAIN_CONTENT,
+            CHANNEL_CAPTAIN_REASONING,
+        )
+
+        mem = sink.stream_memory_snapshot()
+        post = pick_longest(mem.get(CHANNEL_CAPTAIN_CONTENT), sink.streamed_content())
+        # pre_pause may be unbound if the crash was before it was computed.
+        prior = locals().get("pre_pause") or ""
+        salvaged_content = join_segments(prior, post) if prior or post else ""
+        salvaged_reasoning = pick_longest(
+            mem.get(CHANNEL_CAPTAIN_REASONING),
+            sink.streamed_reasoning(),
+        )
         await audit_recorder.flush()
+        if roster_writer is not None:
+            await roster_writer.flush()
         return {
             "message_id": message_id,
-            "content": "",
+            "content": salvaged_content,
+            "reasoning_content": salvaged_reasoning or None,
             "error": str(e),
             "error_code": code,
             "finish_reason": FinishReason.ERROR,
             "audit_drops": audit_recorder.drops,
         }
     finally:
+        # 触发点①：resume turn 结束防御性 orphan
+        with contextlib.suppress(Exception):
+            from agentcore.runtime.interaction_orphan import orphan_registry_pending
+
+            await orphan_registry_pending(
+                conversation_id, turn_id=message_id
+            )
         current_fact_log.reset(fact_log_token)
         # Drain the append-on-emit journal BEFORE dropping the writer: an abandoned in-flight
         # write leaves a checked-out DB connection for the GC to terminate (asyncpg
@@ -442,6 +518,9 @@ async def resume_chat_pipeline(
 
         with contextlib.suppress(Exception):
             await audit_recorder.flush()
+        with contextlib.suppress(Exception):
+            if roster_writer is not None:
+                await roster_writer.flush()
         current_audit_recorder.reset(audit_token)
         turn_history.reset(history_token)
         if execution_id_token is not None:

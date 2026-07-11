@@ -38,7 +38,7 @@ import {
   type ExportFormat,
   exportConversation,
 } from "@/services/conversations";
-import { useApprovalStore } from "@/stores/approvals";
+import { useInteractionStore } from "@/stores/interactions";
 import {
   type Conversation,
   useConversationGenerating,
@@ -156,8 +156,13 @@ export function ConversationItem({ conversation, groupIsLocal }: Props) {
   const unarchiveMutation = useUnarchiveConversation();
   const folders = useFolders();
   const isGenerating = useConversationGenerating(conversation.id);
-  const awaitingApproval = useApprovalStore((s) =>
-    s.pending.some((p) => p.conversationId === conversation.id),
+  const awaitingApproval = useInteractionStore((s) =>
+    [...s.byId.values()].some(
+      (e) =>
+        e.conversationId === conversation.id &&
+        e.kind === "approval" &&
+        (e.status === "pending" || e.status === "submitting"),
+    ),
   );
   const navigate = useNavigate();
   const isActive = conversation.id === currentId;

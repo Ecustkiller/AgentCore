@@ -429,6 +429,25 @@ class LoopController:
         """Consecutive investigation-only rounds re-reading the same targets."""
         return self._same_target_investigation_streak
 
+    def is_thrashing(self) -> bool:
+        """Read-only run-health verdict for a HARD-CEILING termination boundary.
+
+        When a hard ceiling (token backstop / max rounds) forces the run to stop —
+        as opposed to the model choosing to finish — this routes the finalize: a
+        *thrashing* run (sustained all-failing-no-output rounds, or over-investigation
+        spinning / absolute-cap) should finish DEGRADED and surface an observable
+        signal, while an *on-track* run (made real progress, just ran out of budget)
+        should finalize normally and deliver.
+
+        Distinct from the per-round governance triggers (which stop the loop
+        mid-run): those already fired earlier if they were going to, so at a natural
+        max-rounds exit this is usually ``False`` (= deliver). It matters most for the
+        token backstop, which can break the loop at any round. No side effects.
+        """
+        if self.unproductive_early_stop():
+            return True
+        return self.convergence_action() is Intervention.FINALIZE
+
     def detect(self) -> StuckSignal | None:
         """Return the strongest stuck signal in the window, or ``None``.
 

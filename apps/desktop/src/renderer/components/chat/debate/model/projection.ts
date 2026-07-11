@@ -242,14 +242,20 @@ function liveTwoSideRounds(
 
   const rounds: DebateRoundModel[] = [];
   for (const roundNo of [...roundNos].sort((a, b) => a - b)) {
+    const narr = narrativeFor(execution, roundNo);
+    // 2 方语义 key 以本轮 narr.sides 的 run_id→key 为准（后端真实 side.key）——掌舵定向 ask_target
+    // 与裁判 clash from/to key 都按它匹配，而后端 key 是 CEO 自定、未必是 pro/con；narr 未到时
+    // 回退 stance（此过渡态尚无掌舵边界，不影响定向）。同 liveMultiSideRounds 的 run_id→key 反查。
+    const keyByRunId = new Map((narr?.sides ?? []).map((s) => [s.run_id, s.key]));
     const sides: DebateSideModel[] = [];
     for (const group of groups) {
       const bucket = group.rounds.find((b) => b.round === roundNo);
       if (!bucket) continue;
-      for (const run of bucket.pro) sides.push(twoSide(run, "pro"));
-      for (const run of bucket.con) sides.push(twoSide(run, "con"));
+      for (const run of bucket.pro)
+        sides.push(twoSide(run, "pro", keyByRunId.get(run.id)));
+      for (const run of bucket.con)
+        sides.push(twoSide(run, "con", keyByRunId.get(run.id)));
     }
-    const narr = narrativeFor(execution, roundNo);
     rounds.push({
       roundNo,
       focus: narr?.focus ?? "",
@@ -267,12 +273,15 @@ function liveTwoSideRounds(
   return rounds;
 }
 
-function twoSide(run: RunNode, stance: Stance): DebateSideModel {
+function twoSide(run: RunNode, stance: Stance, realKey?: string): DebateSideModel {
   const name = STANCE_META[stance].label;
-  // 2 方正反的语义 key 即 stance (pro/con)，与裁判 clash 的 from/to key 同名 → 可精确高亮。
+  // sideKey 取后端真实 side.key（掌舵定向 ask_target 与裁判 clash from/to key 都按它匹配），
+  // narr 未到时回退 stance。**颜色仍按 stance** 走固定红蓝对垒——debateSideColorVar 只认 pro/con，
+  // 传非常规真实 key 会掉进名字 hash、丢掉阵营色（约定下 realKey 即 pro/con，二者一致、无差异）。
+  const sideKey = realKey || stance;
   return {
     key: run.id,
-    sideKey: stance,
+    sideKey,
     name,
     stance,
     colorVar: debateSideColorVar(stance, name),

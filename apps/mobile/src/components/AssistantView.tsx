@@ -49,7 +49,7 @@ export interface TeamProjection {
    *  worker's pending escalation can render as an actionable answer card. All optional — a
    *  read-only / history team simply omits them. */
   conversationId?: string | null;
-  /** runId → pending `escalation_id` (transport-only sibling extractPendingEscalations). */
+  /** runId → pending escalation id from ProjectedTurn.interactions (P3). */
   pendingEscalations?: Map<string, string>;
   /** Live turn → the pending escalation is answerable over the open stream. */
   escalationsInteractive?: boolean;
