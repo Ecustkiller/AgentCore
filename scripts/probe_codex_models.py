@@ -1,23 +1,34 @@
 """Try model discovery and more model names on Codex backend."""
 import json
+import os
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-CRED = json.loads(
-    (Path(__file__).resolve().parent.parent / "api" / "cpa-to-sub2api-20260707143913.json").read_text()
-)
-acc = CRED["accounts"][0]["credentials"]
-TOKEN = acc["access_token"]
-ACCOUNT_ID = acc["account_id"]
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_CRED = _REPO_ROOT / "config" / "codex-credentials.json"
 
-HEADERS = {
-    "Authorization": f"Bearer {TOKEN}",
-    "Content-Type": "application/json",
-    "Accept": "application/json",
-    "OpenAI-Beta": "responses=v1",
-    "chatgpt-account-id": ACCOUNT_ID,
-}
+
+def _cred_path() -> Path:
+    override = os.environ.get("CODEX_CREDENTIALS_PATH")
+    return Path(override) if override else _DEFAULT_CRED
+
+
+def load_creds() -> tuple[str, str]:
+    path = _cred_path()
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Credentials not found: {path}\n"
+            "Place ChatGPT OAuth creds in config/codex-credentials.json "
+            "(gitignored), or set CODEX_CREDENTIALS_PATH."
+        )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if "access_token" in data:
+        return data["access_token"], data.get("account_id", "")
+    acc = data["accounts"][0]["credentials"]
+    return acc["access_token"], acc["account_id"]
+
 
 MODELS = [
     "auto",
@@ -45,8 +56,8 @@ GET_PATHS = [
 ]
 
 
-def get(url: str) -> None:
-    req = urllib.request.Request(url, headers=HEADERS, method="GET")
+def get(url: str, headers: dict[str, str]) -> None:
+    req = urllib.request.Request(url, headers=headers, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             print(f"GET {url}: {resp.status}")
@@ -56,12 +67,12 @@ def get(url: str) -> None:
         print(e.read().decode()[:500])
 
 
-def try_model(model: str) -> str:
+def try_model(model: str, headers: dict[str, str]) -> str:
     body = json.dumps({"model": model, "input": "say hi", "stream": True}).encode()
     req = urllib.request.Request(
         "https://chatgpt.com/backend-api/codex/responses",
         data=body,
-        headers={**HEADERS, "Accept": "text/event-stream"},
+        headers={**headers, "Accept": "text/event-stream"},
         method="POST",
     )
     try:
@@ -77,10 +88,25 @@ def try_model(model: str) -> str:
         return f"FAIL {e.code}: {detail}"
 
 
-print("=== Discovery ===")
-for p in GET_PATHS:
-    get(p)
+def main() -> int:
+    token, account_id = load_creds()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "OpenAI-Beta": "responses=v1",
+        "chatgpt-account-id": account_id,
+    }
 
-print("\n=== Model sweep ===")
-for m in MODELS:
-    print(f"  {m}: {try_model(m)}")
+    print("=== Discovery ===")
+    for p in GET_PATHS:
+        get(p, headers)
+
+    print("\n=== Model sweep ===")
+    for m in MODELS:
+        print(f"  {m}: {try_model(m, headers)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

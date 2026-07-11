@@ -1,28 +1,35 @@
 """Test OpenAI Responses API and Codex backend for ChatGPT OAuth tokens."""
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-CRED_PATHS = [
-    Path(__file__).resolve().parent.parent / "api" / "cpa_gedaimei1562405bc9@outlook.com.json",
-    Path(__file__).resolve().parent.parent / "api" / "cpa-to-sub2api-20260707143913.json",
-]
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_CRED = _REPO_ROOT / "config" / "codex-credentials.json"
 CODEX_UPSTREAM = "https://chatgpt.com/backend-api/codex/responses"
 OPENAI_UPSTREAM = "https://api.openai.com/v1/responses"
 
 
+def _cred_path() -> Path:
+    override = os.environ.get("CODEX_CREDENTIALS_PATH")
+    return Path(override) if override else _DEFAULT_CRED
+
+
 def load_creds() -> tuple[str, str]:
-    for path in CRED_PATHS:
-        if not path.exists():
-            continue
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if "access_token" in data:
-            return data["access_token"], data.get("account_id", "")
-        creds = data["accounts"][0]["credentials"]
-        return creds["access_token"], creds.get("account_id", "")
-    raise FileNotFoundError(f"No credentials found in {CRED_PATHS}")
+    path = _cred_path()
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Credentials not found: {path}\n"
+            "Place ChatGPT OAuth creds in config/codex-credentials.json "
+            "(gitignored), or set CODEX_CREDENTIALS_PATH."
+        )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if "access_token" in data:
+        return data["access_token"], data.get("account_id", "")
+    creds = data["accounts"][0]["credentials"]
+    return creds["access_token"], creds.get("account_id", "")
 
 
 def post(url: str, token: str, account_id: str, model: str, label: str) -> None:
@@ -76,7 +83,11 @@ def main() -> int:
     for model in ["gpt-4o", "gpt-5.4", "gpt-5.5"]:
         post(CODEX_UPSTREAM, token, account_id, model, "codex backend")
 
-    api_key = "sk-1f7e27e768bf5df95d6a3ad48cb02231875bfb2222b510e78d6e683f43a8e8a6"
+    api_key = os.environ.get("PLATFORM_API_KEY")
+    if not api_key:
+        print("\n=== sub2api skipped: set PLATFORM_API_KEY to probe localhost:8080 ===")
+        return 0
+
     for model in ["gpt-4o", "gpt-5.4"]:
         req = urllib.request.Request(
             "http://localhost:8080/v1/responses",

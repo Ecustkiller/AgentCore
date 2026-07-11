@@ -44,6 +44,6 @@ jobs:
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: e784e487f8ab57882d4b24d845ccfad1
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: apps/website
           command: pages deploy out --project-name=agentcore-website --branch=main

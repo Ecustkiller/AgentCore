@@ -41,7 +41,7 @@ jobs:
       - name: Ensure Cloudflare Pages project exists
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: e784e487f8ab57882d4b24d845ccfad1
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           if ! npx --yes wrangler@4 pages project list | grep -q 'agentcore-mobile'; then
@@ -51,14 +51,14 @@ jobs:
       - name: Deploy to Cloudflare Pages
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: e784e487f8ab57882d4b24d845ccfad1
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@4 pages deploy apps/mobile/dist --project-name=agentcore-mobile --branch=main
 
       - name: Bind custom domain m.fashitianxia.xyz
         continue-on-error: true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: e784e487f8ab57882d4b24d845ccfad1
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           code="$(curl -sS -o /tmp/cf-domain.json -w '%{http_code}' \

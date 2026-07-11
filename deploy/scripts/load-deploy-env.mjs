@@ -8,7 +8,6 @@ import { fileURLToPath } from "node:url";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = join(__dir, "../..");
-export const CF_ACCOUNT_ID = "e784e487f8ab57882d4b24d845ccfad1";
 
 const ENV_FILES = [
   join(REPO_ROOT, "deploy/.env.deploy.local"),
@@ -78,12 +77,18 @@ export function runWranglerPagesDeploy(project, distPath, { branch = "main" } = 
   }
 }
 
+/** Cloudflare Account ID from env (after loadDeployEnv). Missing → exit with hint. */
+export function resolveCfAccountId() {
+  return requireEnv("CLOUDFLARE_ACCOUNT_ID");
+}
+
 export function cfEnv() {
   const token = requireEnv("CLOUDFLARE_API_TOKEN");
+  const accountId = resolveCfAccountId();
   return {
     ...process.env,
     CLOUDFLARE_API_TOKEN: token,
-    CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT_ID,
+    CLOUDFLARE_ACCOUNT_ID: accountId,
   };
 }
 

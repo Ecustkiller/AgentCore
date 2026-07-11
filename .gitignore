@@ -69,14 +69,28 @@ apps/desktop/build/*
 *~
 
 # Environment
-.env
-.env.local
-.env.*.local
+.env*
+!.env.example
+!.env.*.example
+# Intentionally tracked: public API URL only (no secrets)
+!apps/desktop/.env.production
 # Local dev API credentials (probe scripts only)
 config/codex-credentials.json
 apps/server/.pytest-result.txt
+apps/server/_pytest*.txt
+apps/server/_pf*.txt
 # Real production secrets (created on the server from production.env.example)
 deploy/config/production.env
+
+# Certificates / keystores (private material). Public .pem in-tree: re-narrow if needed.
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+
+# Cloudflare Wrangler local state
+.wrangler/
 
 # OS
 .DS_Store

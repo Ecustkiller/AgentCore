@@ -1,21 +1,42 @@
 """Probe Codex backend endpoints for K-12 ChatGPT OAuth token."""
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-CRED_PATH = Path(__file__).resolve().parent.parent / "api" / "cpa-to-sub2api-20260707143913.json"
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_CRED = _REPO_ROOT / "config" / "codex-credentials.json"
+
+
+def _cred_path() -> Path:
+    override = os.environ.get("CODEX_CREDENTIALS_PATH")
+    return Path(override) if override else _DEFAULT_CRED
 
 
 def load_creds() -> dict:
-    data = json.loads(CRED_PATH.read_text(encoding="utf-8"))
+    path = _cred_path()
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Credentials not found: {path}\n"
+            "Place ChatGPT OAuth creds in config/codex-credentials.json "
+            "(gitignored), or set CODEX_CREDENTIALS_PATH."
+        )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if "access_token" in data:
+        return {
+            "access_token": data["access_token"],
+            "session_token": data.get("session_token", ""),
+            "account_id": data.get("account_id", ""),
+            "email": data.get("email", ""),
+        }
     acc = data["accounts"][0]["credentials"]
     return {
         "access_token": acc["access_token"],
         "session_token": acc.get("session_token", ""),
         "account_id": acc["account_id"],
-        "email": acc["email"],
+        "email": acc.get("email", ""),
     }
 
 

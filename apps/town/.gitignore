@@ -1,4 +1,12 @@
 # UE 已退役（Source/ · .uproject · Config/ · Content/ 已删）
+# 残留构建/缓存目录仍可能出现在本机，继续忽略
+Intermediate/
+Binaries/
+Saved/
+DerivedDataCache/
+.vs/
+*.suo
+*.user
 
 # OS
 .DS_Store

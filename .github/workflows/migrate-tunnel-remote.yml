@@ -14,7 +14,7 @@ jobs:
         uses: appleboy/ssh-action@v1
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: e784e487f8ab57882d4b24d845ccfad1
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         with:
           host: ${{ secrets.DEPLOY_SSH_HOST }}
           username: ${{ secrets.DEPLOY_SSH_USER }}
@@ -115,7 +115,7 @@ jobs:
       - name: Show remote ingress from API
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: e784e487f8ab57882d4b24d845ccfad1
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
           tunnels="$(curl -sS \

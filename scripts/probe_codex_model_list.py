@@ -1,14 +1,29 @@
 """Query available Codex models for the configured account."""
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-DEFAULT_CRED = Path(__file__).resolve().parent.parent / "api" / "cpa-to-sub2api-20260707143913.json"
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_CRED = _REPO_ROOT / "config" / "codex-credentials.json"
+
+
+def _cred_path() -> Path:
+    if len(sys.argv) > 1:
+        return Path(sys.argv[1])
+    override = os.environ.get("CODEX_CREDENTIALS_PATH")
+    return Path(override) if override else _DEFAULT_CRED
 
 
 def load_token(cred_path: Path) -> tuple[str, str]:
+    if not cred_path.exists():
+        raise FileNotFoundError(
+            f"Credentials not found: {cred_path}\n"
+            "Place ChatGPT OAuth creds in config/codex-credentials.json "
+            "(gitignored), set CODEX_CREDENTIALS_PATH, or pass a path as argv[1]."
+        )
     data = json.loads(cred_path.read_text(encoding="utf-8"))
     if "access_token" in data:
         return data["access_token"], data.get("account_id", "")
@@ -17,7 +32,7 @@ def load_token(cred_path: Path) -> tuple[str, str]:
 
 
 def main() -> int:
-    cred_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_CRED
+    cred_path = _cred_path()
     token, account_id = load_token(cred_path)
     headers = {
         "Authorization": f"Bearer {token}",
