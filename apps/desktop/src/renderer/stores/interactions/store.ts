@@ -1,8 +1,8 @@
-import { create } from "zustand";
 import type {
   InteractionKind,
   InteractionStatus,
 } from "@/types/interactionExt";
+import { create } from "zustand";
 import {
   type InteractionEntry,
   idFromRequiredPayload,
@@ -62,7 +62,9 @@ interface InteractionState {
   ) => InteractionEntry[];
 }
 
-function mapCopy(src: Map<string, InteractionEntry>): Map<string, InteractionEntry> {
+function mapCopy(
+  src: Map<string, InteractionEntry>,
+): Map<string, InteractionEntry> {
   return new Map(src);
 }
 

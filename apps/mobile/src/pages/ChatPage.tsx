@@ -5,7 +5,12 @@ import {
   createConversation,
   getMessages,
 } from "@/api/conversations";
-import { attachStream, regenerateStream, resumeStream, streamMessage } from "@/api/stream";
+import {
+  attachStream,
+  regenerateStream,
+  resumeStream,
+  streamMessage,
+} from "@/api/stream";
 import {
   type PausedTurnSummary,
   type PendingInteractionSummary,
@@ -29,6 +34,7 @@ import {
   fileArtifactsFromProcess,
   mergeArtifacts,
 } from "@/lib/fileArtifacts";
+import { useStickScroll } from "@/lib/useStickScroll";
 import { useVoiceInput } from "@/lib/useVoiceInput";
 import {
   extractAsks,
@@ -49,15 +55,8 @@ import type {
   ProjectedInteraction,
   ProjectedTurn,
 } from "@agentcore/protocol-conformance";
-import { Folder, Menu, Sparkles, SquarePen } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { ArrowDown, Folder, Menu, Sparkles, SquarePen } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 // One-shot handoff from a draft send (at `/`) to the freshly-created conversation's first
@@ -439,11 +438,12 @@ function HistoryAssistant({
     return null;
   }
   return (
-    <div className="bubble assistant" ref={columnTotal == null ? ref : undefined}>
+    <div
+      className="bubble assistant"
+      ref={columnTotal == null ? ref : undefined}
+    >
       {turnWarning && <div className="turn-warning">{turnWarning}</div>}
-      {interrupted && (
-        <div className="finish-chip muted">已中断，可重试</div>
-      )}
+      {interrupted && <div className="finish-chip muted">已中断，可重试</div>}
       {streaming && !m.content && !m.reasoning_content && !process?.length ? (
         <span className="muted">…</span>
       ) : (
@@ -504,12 +504,17 @@ export function ChatPage() {
   // 「记忆已更新」卡 (③ §1.6): the latest window's offline-consolidation results, pinned at the
   // thread tail. Only the newest window carries them, so scroll-up (loadOlder) leaves them be.
   const [memoryUpdates, setMemoryUpdates] = useState<MemoryUpdate[]>([]);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  // Set just before an older page is prepended: the viewport's distance-from-bottom to
-  // restore afterwards, so the content under the user's eyes doesn't jump (scroll anchor).
-  const prependAnchorRef = useRef<number | null>(null);
   // The controller for the stream currently held open (send / reattach). 停止 aborts it.
   const abortRef = useRef<AbortController | null>(null);
+
+  // Stick-to-bottom with upward-gesture detach + hysteresis (流式时上滑不强制贴底).
+  // contentKey grows with the live tail so streaming tokens re-pin only while stuck.
+  const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
+  const lastHist =
+    history && history.length > 0 ? history[history.length - 1] : null;
+  const scrollContentKey = `${history?.length ?? 0}-${turns.length}-${lastTurn?.id ?? ""}-${lastTurn?.events.length ?? 0}-${lastHist?.id ?? ""}-${lastHist?.content?.length ?? 0}`;
+  const { scrollRef, atBottom, jumpToBottom, preparePrepend, cancelPrepend } =
+    useStickScroll(scrollContentKey, conversationId ?? null);
 
   // 语音输入 (桌面对齐)：转写文本追加到现有草稿 (不覆盖)，完成后聚焦输入框供编辑再发。
   // web 浏览器走 Web Speech API、原生壳走 capgo 插件，两者都不可用则 isSupported=false (按钮隐藏)。
@@ -619,7 +624,11 @@ export function ChatPage() {
           if (recovery.liveRunning && recovery.paused.length === 0) {
             void attachOnOpen(conversationId);
           }
-        } else if (last && last.role === "assistant" && last.status === "running") {
+        } else if (
+          last &&
+          last.role === "assistant" &&
+          last.status === "running"
+        ) {
           // P4: overlay partial already painted; live → clear-then-fold rejoin;
           // dead lease ghost → interrupted affordance (no forever spinner).
           const recovery = await recoveryLoaded;
@@ -666,21 +675,6 @@ export function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, navigate]);
 
-  // Keep the view pinned to the bottom for new/streamed content, EXCEPT right after an
-  // older page is prepended: then restore the prior distance-from-bottom so the messages
-  // under the user's eyes stay put (useLayoutEffect → before paint, no visible jump).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on every `turns`/`history` change to re-pin/restore scroll; the body reads refs, not these values
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    if (prependAnchorRef.current != null) {
-      el.scrollTop = el.scrollHeight - prependAnchorRef.current;
-      prependAnchorRef.current = null;
-    } else {
-      el.scrollTo({ top: el.scrollHeight });
-    }
-  }, [turns, history]);
-
   // Page strictly older messages in above the window (历史上翻分页). The oldest loaded
   // row's created_at is the cursor; we anchor the viewport (distance-from-bottom) so the
   // prepend doesn't yank the scroll. Re-entrancy-guarded; the chat keeps working if it fails.
@@ -688,8 +682,7 @@ export function ChatPage() {
     if (!conversationId || loadingOlder || !hasMoreBefore) return;
     const oldest = history?.[0];
     if (!oldest) return;
-    const el = scrollRef.current;
-    prependAnchorRef.current = el ? el.scrollHeight - el.scrollTop : 0;
+    preparePrepend();
     setLoadingOlder(true);
     try {
       const { messages, hasMoreBefore: more } = await getMessages(
@@ -699,7 +692,7 @@ export function ChatPage() {
       setHistory((h) => [...messages, ...(h ?? [])]);
       setHasMoreBefore(more);
     } catch (e) {
-      prependAnchorRef.current = null;
+      cancelPrepend();
       setError({
         text: e instanceof Error ? e.message : "加载更早消息失败",
       });
@@ -727,7 +720,9 @@ export function ChatPage() {
       i.kind === "approval",
   );
   const liveDelegations = liveInteractions.filter(
-    (i): i is Extract<
+    (
+      i,
+    ): i is Extract<
       ProjectedInteraction,
       { kind: "delegation_authorization" }
     > => i.kind === "delegation_authorization",
@@ -755,14 +750,23 @@ export function ChatPage() {
           .map(recoveredDebate)
           .filter((x): x is NonNullable<typeof x> => x != null);
 
-  // 下一步推荐 chips: the just-finished turn's followups, surfaced above the composer (tapping
-  // fills the input — review/edit before send, mirroring desktop). Transport-only, read off the
-  // raw events (not the fold/ProjectedTurn): only a turn streamed this session carries them, and
-  // they retire the instant the next turn starts (`sending`) — a reload never re-shows stale ones.
-  const followups = useMemo(
-    () => (sending || !liveTurn ? [] : extractFollowups(liveTurn.events)),
-    [sending, liveTurn],
-  );
+  // 下一步推荐 chips: live path matches followups_generated.message_id to this turn's
+  // message_start; reload (no live turn) replays MessageDetail.followups on the latest
+  // finished assistant. Retire when the next turn starts (`sending`).
+  const followups = useMemo(() => {
+    if (sending) return [];
+    if (liveTurn) return extractFollowups(liveTurn.events);
+    const last =
+      history && history.length > 0 ? history[history.length - 1] : null;
+    if (
+      last?.role === "assistant" &&
+      last.followups &&
+      last.followups.length > 0
+    ) {
+      return last.followups;
+    }
+    return [];
+  }, [sending, liveTurn, history]);
 
   // Stage picked files as text attachments (composer 附件). Each is read on the spot (the
   // pick is the grant); images / binaries are refused with a reason and skipped. The input
@@ -842,6 +846,7 @@ export function ChatPage() {
     setAttachError(null);
     setError(null);
     setSending(true);
+    jumpToBottom();
     setTurns((t) => [
       ...t,
       {
@@ -1121,77 +1126,90 @@ export function ChatPage() {
         </div>
       </header>
 
-      <div className="messages" ref={scrollRef}>
-        {history === null && !error && <p className="muted hint">加载中…</p>}
-        {history !== null &&
-          history.length === 0 &&
-          turns.length === 0 &&
-          !error &&
-          (conversationId ? (
-            <p className="muted hint">发一条消息开始对话。</p>
-          ) : (
-            <div className="chat-welcome">
-              <div className="chat-welcome-title">开始新对话</div>
-              <div className="chat-welcome-sub">
-                向你的 Agent 团队提问，或交派一个任务。
+      <div className="messages-pane">
+        <div className="messages" ref={scrollRef}>
+          {history === null && !error && <p className="muted hint">加载中…</p>}
+          {history !== null &&
+            history.length === 0 &&
+            turns.length === 0 &&
+            !error &&
+            (conversationId ? (
+              <p className="muted hint">发一条消息开始对话。</p>
+            ) : (
+              <div className="chat-welcome">
+                <div className="chat-welcome-title">开始新对话</div>
+                <div className="chat-welcome-sub">
+                  向你的 Agent 团队提问，或交派一个任务。
+                </div>
               </div>
-            </div>
-          ))}
-        {hasMoreBefore && (
-          <button
-            type="button"
-            className="load-older"
-            onClick={() => void loadOlder()}
-            disabled={loadingOlder}
-          >
-            {loadingOlder ? "加载中…" : "加载更早的消息"}
-          </button>
-        )}
-        {history?.map((m, i) => {
-          if (m.role !== "user")
+            ))}
+          {hasMoreBefore && (
+            <button
+              type="button"
+              className="load-older"
+              onClick={() => void loadOlder()}
+              disabled={loadingOlder}
+            >
+              {loadingOlder ? "加载中…" : "加载更早的消息"}
+            </button>
+          )}
+          {history?.map((m, i) => {
+            if (m.role !== "user")
+              return (
+                <HistoryAssistant
+                  key={m.id}
+                  m={m}
+                  conversationId={conversationId ?? null}
+                  onFill={fillFollowup}
+                  isLast={i === history.length - 1 && turns.length === 0}
+                  onRetry={
+                    i === history.length - 1 && turns.length === 0
+                      ? () => void retryInterrupted()
+                      : undefined
+                  }
+                />
+              );
+            const atts = m.attachments ?? [];
+            if (!m.content && atts.length === 0) return null;
             return (
-              <HistoryAssistant
-                key={m.id}
-                m={m}
+              <div key={m.id} className="bubble user">
+                {m.content}
+                <AttachmentChips items={atts} />
+              </div>
+            );
+          })}
+          {turns.map((turn, i) => (
+            <div key={turn.id} className="turn">
+              {turn.userText !== null && (
+                <div className="bubble user">
+                  {turn.userText}
+                  <AttachmentChips items={turn.attachments ?? []} />
+                </div>
+              )}
+              <AssistantBubble
+                turn={turn}
+                live={sending && i === turns.length - 1}
                 conversationId={conversationId ?? null}
                 onFill={fillFollowup}
-                isLast={i === history.length - 1 && turns.length === 0}
-                onRetry={
-                  i === history.length - 1 && turns.length === 0
-                    ? () => void retryInterrupted()
-                    : undefined
-                }
               />
-            );
-          const atts = m.attachments ?? [];
-          if (!m.content && atts.length === 0) return null;
-          return (
-            <div key={m.id} className="bubble user">
-              {m.content}
-              <AttachmentChips items={atts} />
             </div>
-          );
-        })}
-        {turns.map((turn, i) => (
-          <div key={turn.id} className="turn">
-            {turn.userText !== null && (
-              <div className="bubble user">
-                {turn.userText}
-                <AttachmentChips items={turn.attachments ?? []} />
-              </div>
-            )}
-            <AssistantBubble
-              turn={turn}
-              live={sending && i === turns.length - 1}
-              conversationId={conversationId ?? null}
-              onFill={fillFollowup}
-            />
-          </div>
-        ))}
-        {/* 「记忆已更新」卡 (③ §1.6): offline-consolidation results pinned at the thread tail
-            — it post-dates every turn (consolidation folds a window of finished turns). The
-            card filters empty updates itself, so the common (none) case renders nothing. */}
-        <MemoryUpdateCard updates={memoryUpdates} />
+          ))}
+          {/* 「记忆已更新」卡 (③ §1.6): offline-consolidation results pinned at the thread tail
+              — it post-dates every turn (consolidation folds a window of finished turns). The
+              card filters empty updates itself, so the common (none) case renders nothing. */}
+          <MemoryUpdateCard updates={memoryUpdates} />
+        </div>
+        {!atBottom && (history?.length || turns.length) ? (
+          <button
+            type="button"
+            className="jump-bottom"
+            onClick={jumpToBottom}
+            aria-label="回到底部"
+          >
+            <ArrowDown size={14} aria-hidden />
+            回到底部
+          </button>
+        ) : null}
       </div>
 
       {approvalCards.map((pending) =>

@@ -224,7 +224,7 @@ class TurnStreamStateRow(Base):
     turn_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True)
     # Channel key — see module docstring. Not a UUID; length covers run-scoped ids.
     channel: Mapped[str] = mapped_column(String(128), primary_key=True)
-    # ``text`` shadows sqlalchemy.text once assigned — keep server_default=text(...) columns above it.
+    # ``text`` shadows sqlalchemy.text once assigned — keep server_default=text(...) above it.
     generation: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now

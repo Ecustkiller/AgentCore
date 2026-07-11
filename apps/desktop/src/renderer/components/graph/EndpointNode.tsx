@@ -124,56 +124,56 @@ export function EndpointNode({ data }: NodeProps) {
           className="animate-graph-node-enter"
           style={{ animationDelay: `${enterDelay}ms` }}
         >
-        <div
-          {...interactiveProps}
-          style={{ "--graph-flash-color": flashColor } as React.CSSProperties}
-          className={`w-[210px] rounded-xl border px-3 py-2.5 shadow-sm outline-none ${
-            isInput
-              ? "border-border bg-muted/40"
-              : `bg-card ring-2 ${style.ring}`
-          } ${running ? "animate-pulse" : ""} ${flashing ? "animate-graph-node-flash" : ""} ${interactive ? "cursor-pointer" : ""} ${
-            highlighted
-              ? "outline outline-2 outline-offset-2 outline-primary"
-              : interactive
-                ? "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60"
-                : ""
-          }`}
-        >
-          <div className="flex items-center gap-2.5">
-            <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted">
-              {isInput ? (
-                <UserRound size={16} className="text-muted-foreground" />
-              ) : (
-                style.icon
-              )}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-foreground">
-                {isInput ? "你的任务" : "CEO 汇总"}
-              </p>
-              {/* 端点副标题是描述/汇聚状态（非冗余状态文字）：输入端「对话发起」恒显，
+          <div
+            {...interactiveProps}
+            style={{ "--graph-flash-color": flashColor } as React.CSSProperties}
+            className={`w-[210px] rounded-xl border px-3 py-2.5 shadow-sm outline-none ${
+              isInput
+                ? "border-border bg-muted/40"
+                : `bg-card ring-2 ${style.ring}`
+            } ${running ? "animate-pulse" : ""} ${flashing ? "animate-graph-node-flash" : ""} ${interactive ? "cursor-pointer" : ""} ${
+              highlighted
+                ? "outline outline-2 outline-offset-2 outline-primary"
+                : interactive
+                  ? "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60"
+                  : ""
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted">
+                {isInput ? (
+                  <UserRound size={16} className="text-muted-foreground" />
+                ) : (
+                  style.icon
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-foreground">
+                  {isInput ? "你的任务" : "CEO 汇总"}
+                </p>
+                {/* 端点副标题是描述/汇聚状态（非冗余状态文字）：输入端「对话发起」恒显，
                   CEO 汇总端保留「汇总中…/已汇总」叙事（前端UX设计 §五约定的例外）。
                   与 AgentNode 第二行同节奏（mt-0.5）。 */}
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                {isInput ? "对话发起" : sinkLabel(d.status)}
-              </p>
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                  {isInput ? "对话发起" : sinkLabel(d.status)}
+                </p>
+              </div>
             </div>
-          </div>
 
-          {/* 预览取向与 AgentNode 对齐：输入端=任务摘要（task 语义，/70）、CEO 汇总端=
+            {/* 预览取向与 AgentNode 对齐：输入端=任务摘要（task 语义，/70）、CEO 汇总端=
               答案开头（output 语义，/80；headText 取开头，见 GraphView）。 */}
-          {preview && (
-            <p
-              className={`mt-2 line-clamp-2 text-xs leading-snug ${
-                isInput
-                  ? "text-muted-foreground/70"
-                  : "text-muted-foreground/80"
-              }`}
-            >
-              {preview}
-            </p>
-          )}
-        </div>
+            {preview && (
+              <p
+                className={`mt-2 line-clamp-2 text-xs leading-snug ${
+                  isInput
+                    ? "text-muted-foreground/70"
+                    : "text-muted-foreground/80"
+                }`}
+              >
+                {preview}
+              </p>
+            )}
+          </div>
         </div>
       </div>
       <Handle

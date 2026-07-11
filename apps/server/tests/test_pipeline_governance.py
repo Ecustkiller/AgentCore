@@ -194,7 +194,7 @@ async def test_pipeline_leaves_sink_open_for_post_turn_tail(monkeypatch):
     assert sink._closed is False
 
     # The tail emit persist_turn_result does after the pipeline still lands on the sink.
-    sink.emit(followups_generated(["帮我把结论整理成一页纪要"], conversation_id="conv-1"))
+    sink.emit(followups_generated(["帮我把结论整理成一页纪要"], conversation_id="conv-1", message_id="m1"))
     sink.close()  # the owner (here, the test) closes once the tail is emitted
     types = [e.type async for e in sink]
 

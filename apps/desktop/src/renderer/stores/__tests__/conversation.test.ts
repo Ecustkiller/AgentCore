@@ -23,6 +23,12 @@ import {
 
 const store = () => useConversationStore.getState();
 const ix = () => useInteractionStore.getState();
+function mustGet(id: string) {
+  const entry = ix().get(id);
+  expect(entry).toBeDefined();
+  if (!entry) throw new Error(`expected interaction ${id}`);
+  return entry;
+}
 /** Active conversation's runtime slice — runtime state is now keyed by id. */
 const rt = () => getActiveRuntime();
 
@@ -259,7 +265,7 @@ describe("conversation store", () => {
     });
 
     // 交付前核验回炉（content_reset）：done 轮草稿未过轻层核验（如编造引用），清空已流式的
-    // 正文 + 弹掉尾部 content 步，但保留思考步——让重写版替换草稿而非追加拼接。
+    // 正文 + 弹掉尾部 content 步，保留思考步，并追加 rework chip——让重写版替换草稿而非追加拼接。
     it("resetStreamingContent clears content + trailing content step, keeps reasoning", () => {
       store().createAssistantMessage();
       store().appendReasoningToLastMessage("先想一下");
@@ -267,7 +273,10 @@ describe("conversation store", () => {
       store().resetStreamingContent();
       const msg = rt().messages[0];
       expect(msg.content).toBe("");
-      expect(msg.process).toEqual([{ kind: "reasoning", text: "先想一下" }]);
+      expect(msg.process).toEqual([
+        { kind: "reasoning", text: "先想一下" },
+        { kind: "rework" },
+      ]);
     });
 
     it("resetStreamingContent no-ops when the last message is not assistant", () => {
@@ -361,10 +370,48 @@ describe("conversation store", () => {
         clientId,
       );
       store().setServerMessageIdOnLastMessage("srv-align");
-      expect(execRuntime(useExecutionStore.getState(), clientId).plan).toBeNull();
+      expect(
+        execRuntime(useExecutionStore.getState(), clientId).plan,
+      ).toBeNull();
       expect(
         execRuntime(useExecutionStore.getState(), "srv-align").plan?.id,
       ).toBe("exec-1");
+    });
+  });
+
+  describe("attachFollowups", () => {
+    it("stamps chips on the assistant matched by serverMessageId", () => {
+      store().createAssistantMessage();
+      store().setServerMessageIdOnLastMessage("srv-fu");
+      store().finalizeLastMessage();
+      store().createAssistantMessage(); // newer bubble must not steal chips
+      store().finalizeLastMessage();
+
+      store().attachFollowups(["下一步 A", "下一步 B"], "srv-fu");
+
+      expect(rt().messages[0].followups).toEqual(["下一步 A", "下一步 B"]);
+      expect(rt().messages[1].followups).toBeUndefined();
+    });
+
+    it("no-ops when message_id is missing (never hangs on last)", () => {
+      store().createAssistantMessage();
+      store().setServerMessageIdOnLastMessage("srv-fu");
+      store().finalizeLastMessage();
+
+      store().attachFollowups(["不应挂上"], undefined);
+      store().attachFollowups(["不应挂上"], "");
+
+      expect(rt().messages[0].followups).toBeUndefined();
+    });
+
+    it("no-ops when no assistant matches the message_id", () => {
+      store().createAssistantMessage();
+      store().setServerMessageIdOnLastMessage("srv-fu");
+      store().finalizeLastMessage();
+
+      store().attachFollowups(["孤儿"], "srv-other");
+
+      expect(rt().messages[0].followups).toBeUndefined();
     });
   });
 
@@ -571,10 +618,10 @@ describe("plan_review cards (结构化挂起 2a)", () => {
         payload: p as unknown as Record<string, unknown>,
       });
       store().stampPlanReviewMarker("c1", "a");
-      expect(entryToPlanReview(ix().get("c1")!).status).toBe("pending");
-      expect(rt().messages[0].process?.some((s) => s.kind === "plan_review")).toBe(
-        true,
-      );
+      expect(entryToPlanReview(mustGet("c1")).status).toBe("pending");
+      expect(
+        rt().messages[0].process?.some((s) => s.kind === "plan_review"),
+      ).toBe(true);
     });
 
     it("dedupes a re-delivered required event", () => {
@@ -623,7 +670,7 @@ describe("plan_review cards (结构化挂起 2a)", () => {
         id: "c1",
         resolution: { decision: "stop", note: "就此打住" },
       });
-      expect(entryToPlanReview(ix().get("c1")!)).toMatchObject({
+      expect(entryToPlanReview(mustGet("c1"))).toMatchObject({
         status: "resolved",
         decision: "stop",
         note: "就此打住",
@@ -648,7 +695,7 @@ describe("plan_review cards (结构化挂起 2a)", () => {
         id: "c1",
         resolution: { decision: "adjust", note: "把重点放在风险上" },
       });
-      expect(entryToPlanReview(ix().get("c1")!)).toMatchObject({
+      expect(entryToPlanReview(mustGet("c1"))).toMatchObject({
         status: "resolved",
         decision: "adjust",
         note: "把重点放在风险上",
@@ -758,7 +805,7 @@ describe("ask_user cards (统一开场引导 + 途中拍板)", () => {
         payload: p as unknown as Record<string, unknown>,
       });
       store().stampCheckpointMarker("c1", "a");
-      expect(entryToCheckpoint(ix().get("c1")!)).toMatchObject({
+      expect(entryToCheckpoint(mustGet("c1"))).toMatchObject({
         id: "c1",
         status: "pending",
         styleOptions: [{ id: "s0", label: "深色科技" }],
@@ -815,7 +862,7 @@ describe("ask_user cards (统一开场引导 + 途中拍板)", () => {
           selected: [],
         },
       });
-      expect(entryToCheckpoint(ix().get("c1")!)).toMatchObject({
+      expect(entryToCheckpoint(mustGet("c1"))).toMatchObject({
         status: "resolved",
         decision: "continue",
         note: "就按这个开做",
@@ -893,11 +940,13 @@ describe("non-blocking ask cards (ask_user blocking=false)", () => {
         payload: p as unknown as Record<string, unknown>,
       });
       store().stampAskMarker("n1", "a");
-      expect(entryToNonBlockingAsk(ix().get("n1")!)).toMatchObject({
+      expect(entryToNonBlockingAsk(mustGet("n1"))).toMatchObject({
         id: "n1",
         assumptions: [{ id: "a0", label: "部署", value: "纯静态" }],
       });
-      expect(rt().messages[0].process?.some((s) => s.kind === "ask")).toBe(true);
+      expect(rt().messages[0].process?.some((s) => s.kind === "ask")).toBe(
+        true,
+      );
     });
 
     it("dedupes a re-delivered event", () => {

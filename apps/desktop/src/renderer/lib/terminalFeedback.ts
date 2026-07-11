@@ -26,8 +26,9 @@ export async function runTerminalBash(command: string): Promise<void> {
     return;
   }
 
-  const decision =
-    await useRunConfirmStore.getState().requestRunConfirm(command);
+  const decision = await useRunConfirmStore
+    .getState()
+    .requestRunConfirm(command);
   if (decision === "cancel") {
     notifyInfo("已取消在终端运行");
     return;

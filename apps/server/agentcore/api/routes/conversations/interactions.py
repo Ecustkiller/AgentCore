@@ -95,8 +95,9 @@ async def _journal_pending_for_id(
 
     async with async_session_factory() as db:
         # Also scan recent assistant turns if needed — load by conversation.
-        from agentcore.db.models.runs import TurnJournalRow
         from sqlalchemy import select
+
+        from agentcore.db.models.runs import TurnJournalRow
 
         if not candidate_ids:
             result = await db.execute(
@@ -134,7 +135,11 @@ async def resolve_interaction(
     registry = default_interaction_registry()
     pending = registry.get(interaction_id)
 
-    if pending is not None and pending.conversation_id == conversation_id and pending.kind == body.kind:
+    if (
+        pending is not None
+        and pending.conversation_id == conversation_id
+        and pending.kind == body.kind
+    ):
         if (
             pending.kind.value == "escalation"
             and (pending.payload or {}).get("awaiting") == "ceo"

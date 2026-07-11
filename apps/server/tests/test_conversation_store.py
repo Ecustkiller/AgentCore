@@ -423,6 +423,80 @@ async def test_finalize_local_mints_followups(monkeypatch):
             "followups": ["下一步 A", "下一步 B"],
         }
     ]
+    assert result["followups"] == ["下一步 A", "下一步 B"]
+
+
+async def test_finalize_local_skips_followups_when_not_end_turn(monkeypatch):
+    """Positive gate: only end_turn + non-empty body mints; degraded/etc. do not."""
+    followup_calls: list[dict] = []
+    mint = AsyncMock(return_value=["不应出现"])
+
+    class MsgRepo:
+        def __init__(self, _s):
+            pass
+
+        async def get_by_id(self, *_a, **_k):
+            return None
+
+        async def create(self, **kw):
+            return SimpleNamespace(id=kw["message_id"])
+
+        async def upsert_assistant(self, **kw):
+            return SimpleNamespace(id=kw["message_id"])
+
+        async def user_message_for_assistant(self, **_k):
+            return None
+
+        async def set_followups(self, message_id, *, conversation_id, followups):
+            followup_calls.append(
+                {
+                    "message_id": message_id,
+                    "conversation_id": conversation_id,
+                    "followups": followups,
+                }
+            )
+
+    class ConvRepo:
+        def __init__(self, _s):
+            pass
+
+        async def get_by_id_unscoped(self, _cid):
+            return SimpleNamespace(title="already")
+
+    class CM:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_a):
+            return False
+
+    monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
+    monkeypatch.setattr(cloud_mod, "MessageRepository", MsgRepo)
+    monkeypatch.setattr(cloud_mod, "ConversationRepository", ConvRepo)
+    monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
+    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
+    monkeypatch.setattr(
+        cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
+    )
+    monkeypatch.setattr(cloud_mod, "resolve_user_model", lambda *_a, **_k: "m")
+    monkeypatch.setattr(cloud_mod, "mint_followups", mint)
+
+    result = await CloudStore().finalize(
+        mode="local",
+        conversation_id="c1",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="partial reply",
+        runs={"events": [], "finish_reason": "degraded"},
+        user_message_id="u1m",
+        message_id="m1",
+        trace_id="t" * 32,
+        finish_reason=FinishReason.DEGRADED.value,
+    )
+    assert result is not None
+    assert followup_calls == []
+    assert mint.await_count == 0
+    assert result["followups"] is None
 
 
 async def test_persist_turn_journal_upserts_by_seq(monkeypatch):

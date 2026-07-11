@@ -14,8 +14,8 @@ import {
   useExecutionStore,
 } from "@/stores/execution";
 import {
-  type DetailTab,
   COMMAND_TAB_ID,
+  type DetailTab,
   WORKSPACE_TAB_ID,
   useSidePanelStore,
 } from "@/stores/sidePanel";
@@ -190,9 +190,7 @@ export function SidePanel() {
           </div>
         )}
         {command.show && (
-          <div
-            className={`absolute inset-0 ${commandActive ? "" : "hidden"}`}
-          >
+          <div className={`absolute inset-0 ${commandActive ? "" : "hidden"}`}>
             <CommandPanelBody
               message={command.message}
               execution={command.execution}
@@ -221,11 +219,15 @@ export function SidePanel() {
           // Canvas SimpleTurn light card: full Q&A (prompt + answer), no execution.
           <div className="absolute inset-0 overflow-y-auto p-4">
             <section className="space-y-2">
-              <h3 className="text-xs font-medium text-muted-foreground">提问</h3>
+              <h3 className="text-xs font-medium text-muted-foreground">
+                提问
+              </h3>
               <Markdown content={simplePromptText || "（无提问）"} />
             </section>
             <section className="mt-6 space-y-2 border-t border-border pt-6">
-              <h3 className="text-xs font-medium text-muted-foreground">回答</h3>
+              <h3 className="text-xs font-medium text-muted-foreground">
+                回答
+              </h3>
               <Markdown
                 content={
                   simpleAnswerText ||

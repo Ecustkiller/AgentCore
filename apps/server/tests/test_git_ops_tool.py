@@ -16,10 +16,10 @@ from typing import Any
 import pytest
 
 from agentcore.tools.builtin.git_ops import (
-    GitTool,
     _ALLOWED_SUBCOMMANDS,
     _FORBIDDEN_PATTERNS,
     _PROTECTED_BRANCHES,
+    GitTool,
     _validate_add_paths,
     git_write_subcommands,
 )
@@ -84,7 +84,7 @@ def test_forbidden_patterns_disjoint_from_allowlist():
     # Defense-in-depth: every hard-banned verb must stay outside the allowlist so a
     # future allowlist expansion cannot silently re-enable push/reset/….
     assert _FORBIDDEN_PATTERNS.isdisjoint(_ALLOWED_SUBCOMMANDS)
-    assert _FORBIDDEN_PATTERNS >= {"push", "reset", "rebase", "merge", "clean", "stash"}
+    assert {"push", "reset", "rebase", "merge", "clean", "stash"} <= _FORBIDDEN_PATTERNS
 
 
 @pytest.mark.parametrize("subcommand", sorted(_FORBIDDEN_PATTERNS))

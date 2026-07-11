@@ -17,7 +17,7 @@ import {
   useState,
 } from "react";
 import { useNavigate } from "react-router-dom";
-import { GAP_Y, spineTurnHeight, type TurnItem } from "./useCanvasTurns";
+import { GAP_Y, type TurnItem, spineTurnHeight } from "./useCanvasTurns";
 
 export const TOP_LOAD_THRESHOLD_PX = 240;
 

@@ -30,7 +30,11 @@ export function handleMetaEvent(
       const payload = event.payload as FollowupsGeneratedPayload;
       useConversationStore
         .getState()
-        .attachFollowupsToLastMessage(payload.followups, conversationId);
+        .attachFollowups(
+          payload.followups,
+          payload.message_id,
+          conversationId,
+        );
       return true;
     }
     case "turn_saved": {

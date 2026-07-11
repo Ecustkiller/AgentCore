@@ -4,7 +4,6 @@
 跳过挂起放行下游（不再假等待）。带 saver 的 continue/stop/adjust 见 test_durable.py。
 """
 
-import asyncio
 
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry

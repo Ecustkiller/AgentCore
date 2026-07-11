@@ -163,8 +163,8 @@ export interface Message {
   /** CEO→用户「下一步推荐」(下一步推荐): post-turn quick-reply suggestions, shown as
    * one-click chips under the latest assistant turn (fill the composer on click).
    * DERIVED-persisted (messages.followups column, twin of the title): live they ride
-   * `followups_generated`; on reload `toMessage` replays them so reopening a conversation
-   * still shows the last turn's chips. */
+   * `followups_generated` (matched by `message_id` → `id || serverMessageId`); on reload
+   * `toMessage` replays them so reopening a conversation still shows the last turn's chips. */
   followups?: string[];
   /** 回复反馈 (点赞/点踩, 对话基础功能补齐): the user's satisfaction rating on this assistant
    * reply — `"up"` / `"down"`, or `null` / undefined for 未评价. Persisted (messages.feedback

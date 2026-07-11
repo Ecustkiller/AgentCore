@@ -8,8 +8,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from agentcore.runtime.debate.moderator_common import (
-    CompleteJson,
     _SUMMARY_CLIP,
+    CompleteJson,
     _as_str,
     _as_str_list,
     _clip,

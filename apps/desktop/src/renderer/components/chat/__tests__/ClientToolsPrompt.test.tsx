@@ -25,9 +25,17 @@ vi.mock("@/lib/capabilities", () => ({
 
 import { useConversationFileSource } from "@/hooks/useConversationFileSource";
 import { hasTerminalRun } from "@/lib/capabilities";
+import { useRunConfirmStore } from "@/stores/runConfirm";
 
 const useSourceMock = vi.mocked(useConversationFileSource);
 const hasTerminalRunMock = vi.mocked(hasTerminalRun);
+
+function mockTerminalApi() {
+  return {
+    runBash: vi.fn(async () => ({ ok: true as const })),
+    openShellAtRoot: vi.fn(async () => ({ ok: true as const })),
+  };
+}
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
@@ -66,7 +74,9 @@ const baseMsg = {
 beforeEach(() => {
   queryClient.clear();
   hasTerminalRunMock.mockReturnValue(true);
-  window.terminalApi = { runBash: vi.fn(async () => ({ ok: true })) };
+  useRunConfirmStore.getState().reset();
+  useRunConfirmStore.getState().markSessionAllowed();
+  window.terminalApi = mockTerminalApi();
   useConversationStore.setState({
     currentConversationId: "c1",
     byId: {
@@ -96,6 +106,7 @@ afterEach(() => {
   cleanup();
   window.terminalApi = undefined;
   useSourceMock.mockReset();
+  useRunConfirmStore.getState().reset();
 });
 
 describe("ClientToolsPrompt", () => {
@@ -121,7 +132,10 @@ describe("ClientToolsPrompt", () => {
     expect(reveal).toHaveBeenCalledWith("");
     expect(openShell).toHaveBeenCalledWith(".");
     await waitFor(() => {
-      expect(window.terminalApi?.runBash).toHaveBeenCalledWith("pnpm dev");
+      expect(window.terminalApi?.runBash).toHaveBeenCalledWith({
+        command: "pnpm dev",
+        rendererConfirmed: true,
+      });
     });
   });
 

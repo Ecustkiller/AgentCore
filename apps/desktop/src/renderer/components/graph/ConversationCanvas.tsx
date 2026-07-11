@@ -5,17 +5,9 @@ import {
   useActiveGenerating,
   useConversationStore,
 } from "@/stores/conversation";
-import {
-  ExecutionScopeContext,
-  useActiveExecField,
-} from "@/stores/execution";
+import { ExecutionScopeContext, useActiveExecField } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
-import {
-  Background,
-  Panel,
-  ReactFlow,
-  ReactFlowProvider,
-} from "@xyflow/react";
+import { Background, Panel, ReactFlow, ReactFlowProvider } from "@xyflow/react";
 import { ArrowUp, Loader2, Network } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CanvasCommandBar } from "./CanvasCommandBar";
@@ -23,13 +15,13 @@ import { CanvasPlaybackControls } from "./CanvasPlaybackControls";
 import { CanvasTurnRail } from "./CanvasTurnRail";
 import { CanvasZoomControls } from "./CanvasZoomControls";
 import { GraphContextMenu } from "./GraphContextMenu";
-import { GraphHoverContext } from "./graphHover";
 import { GraphToolbar } from "./GraphToolbar";
 import { SimpleTurnNode } from "./SimpleTurnNode";
 import { TurnGroupNode } from "./TurnGroupNode";
 import { TurnSummaryNode } from "./TurnSummaryNode";
 import { WaveLanes } from "./WaveLanes";
-import { edgeTypes, nodeTypes as dagNodeTypes } from "./constants";
+import { nodeTypes as dagNodeTypes, edgeTypes } from "./constants";
+import { GraphHoverContext } from "./graphHover";
 import { useCanvasFlow } from "./useCanvasFlow";
 import {
   useCanvasFocus,
@@ -232,7 +224,7 @@ function ConversationCanvasInner() {
   const showGraphChrome = !!effectiveFocus && !!flow.focusedExec;
 
   const menuNodeBare = flow.menuNodeId?.includes("::")
-    ? flow.menuNodeId.split("::").pop()!
+    ? (flow.menuNodeId.split("::").pop() ?? flow.menuNodeId)
     : flow.menuNodeId;
 
   return (

@@ -258,7 +258,11 @@ class CoordinationSession:
             return
         if run_id in self._timeout_tasks and not self._timeout_tasks[run_id].done():
             return
-        threshold = float(timeout_s) if timeout_s and float(timeout_s) > 0 else DEFAULT_WORKER_TIMEOUT_S
+        threshold = (
+            float(timeout_s)
+            if timeout_s and float(timeout_s) > 0
+            else DEFAULT_WORKER_TIMEOUT_S
+        )
         self._worker_started_at[run_id] = time.monotonic()
         self._timeout_notified.discard(run_id)
 
@@ -335,15 +339,16 @@ class CoordinationSession:
                 return True
             if ev.kind is CoordinationEventKind.ESCALATION:
                 return True
-            if ev.kind is CoordinationEventKind.TIMEOUT:
+            if ev.kind is CoordinationEventKind.TIMEOUT and ev.payload.get("run_id"):
                 # Per-worker timeout is a decision point; idle-wait nudge (no run_id) is not.
-                if ev.payload.get("run_id"):
-                    return True
+                return True
             if ev.kind is CoordinationEventKind.BOUNDARY_YIELD:
                 return True
-            if ev.kind is CoordinationEventKind.WORKER_COMPLETED:
-                if not self._saw_first_completion:
-                    return True
+            if (
+                ev.kind is CoordinationEventKind.WORKER_COMPLETED
+                and not self._saw_first_completion
+            ):
+                return True
         return False
 
     def note_decision_points(self, events: list[CoordinationEvent]) -> None:

@@ -73,18 +73,14 @@ function SteeringBody({
     }
   }
 
-  const judgeHint = pending.converged
-    ? "裁判：本轮已收敛"
-    : "裁判：建议再辩";
+  const judgeHint = pending.converged ? "裁判：本轮已收敛" : "裁判：建议再辩";
   const rationale = pending.rationale
     ? `${judgeHint}（${pending.rationale}）`
     : judgeHint;
 
   return (
     <div className="pause">
-      <div className="pause-title">
-        辩论掌舵 · 第 {pending.roundNo} 轮
-      </div>
+      <div className="pause-title">辩论掌舵 · 第 {pending.roundNo} 轮</div>
       {pending.focus && (
         <div className="pause-question">焦点：{pending.focus}</div>
       )}

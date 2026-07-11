@@ -68,8 +68,8 @@ from agentcore.runtime.runs.executor_shared import (
 )
 from agentcore.runtime.runs.notewall import NOTE_NUDGE_TEXT, NoteWall, format_notes_for_injection
 from agentcore.runtime.runs.plan import RunPlan
-from agentcore.runtime.runs.scheduler import RunExecutor
 from agentcore.runtime.runs.salvage import cancelled_state_from_salvage, try_salvage_session
+from agentcore.runtime.runs.scheduler import RunExecutor
 from agentcore.runtime.runs.serialize import (
     debrief_from_transcript,
     escalations_from_transcript,
@@ -393,7 +393,7 @@ def build_agent_executor(
         run_rounds = 0
         inflight: list[TokenUsage] = []
         priced_model: str | None = None
-        # Hoisted so a mid-flight CancelledError can salvage partial transcript (run_redirect 热续写).
+        # Hoisted so mid-flight CancelledError can salvage partial transcript (run_redirect 热续写).
         messages: list[LLMMessage] = []
         # Live draft chunks (run_output_delta) — may exist before the final assistant
         # turn is appended to ``messages``; folded into salvage on redirect cancel.

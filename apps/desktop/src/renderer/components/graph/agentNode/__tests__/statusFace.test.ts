@@ -56,7 +56,9 @@ describe("revisionFeedbackSummary", () => {
   });
 
   it("returns null when revision block missing or empty", () => {
-    expect(revisionFeedbackSummary([{ channel: "task", body: "起草" }])).toBeNull();
+    expect(
+      revisionFeedbackSummary([{ channel: "task", body: "起草" }]),
+    ).toBeNull();
     expect(
       revisionFeedbackSummary([{ channel: "revision", body: "   " }]),
     ).toBeNull();

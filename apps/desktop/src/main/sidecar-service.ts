@@ -687,7 +687,14 @@ export function registerSidecarIpc(): void {
       assertShape(
         SIDECAR_CHANNELS.startTurn,
         req,
-        ["rootId", "conversationId", "turnId", "traceId", "userMessage", "userMessageId"],
+        [
+          "rootId",
+          "conversationId",
+          "turnId",
+          "traceId",
+          "userMessage",
+          "userMessageId",
+        ],
         ["subpath"],
       );
       const root = await getStoredRoot(req.rootId);

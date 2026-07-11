@@ -25,16 +25,17 @@ import type {
   EscalationResolvedPayload,
   FollowupsGeneratedPayload,
   MessageEndPayload,
+  MessageStartPayload,
   PlanAgentPayload,
   PlanReviewRequiredPayload,
   PlanReviewResolvedPayload,
   PlanRevisedPayload,
   QuestionPostedPayload,
   ReasoningDeltaPayload,
+  RunCancelledPayload,
   RunCompletedPayload,
   RunContextPayload,
   RunEscalationPayload,
-  RunCancelledPayload,
   RunFailedPayload,
   RunOutputDeltaPayload,
   RunOutputResetPayload,
@@ -771,19 +772,27 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
 /**
  * 下一步推荐 (CEO→用户): pull a finished turn's followup suggestions straight off its raw SSE
  * events — a transport-only sibling of {@link fold}, deliberately kept OUT of the normalized
- * {@link ProjectedTurn}. Followups are never journaled/persisted and are excluded from the
- * conformance golden (matching the desktop oracle), so the fold no-ops `followups_generated`;
- * the live chat surfaces them as one-tap chips above the composer instead.
+ * {@link ProjectedTurn}. Followups are DERIVED-persisted on `Message.followups` (reload via
+ * MessageDetail); the live path rides `followups_generated`. Conformance fold still no-ops
+ * the event (ProjectedTurn does not carry chips).
  *
- * Returns the LAST emitted batch (the backend emits at most one per turn, after `message_end`);
- * empty when none. A reloaded turn (history replay) carries no `followups_generated`, so stale
- * chips never reappear — same semantics as desktop.
+ * Identity seam: chips are matched by `message_id` against this turn's `message_start`.
+ * Missing `message_id` → empty (never fall back to「last batch」). A mismatched id (late
+ * event appended to the wrong live turn after a fast consecutive send) is also empty.
  */
 export function extractFollowups(events: SSEEvent[]): string[] {
-  for (let i = events.length - 1; i >= 0; i--) {
-    if (events[i].type === "followups_generated") {
-      return (events[i].payload as FollowupsGeneratedPayload).followups;
+  let turnMessageId: string | null = null;
+  for (const ev of events) {
+    if (ev.type === "message_start") {
+      turnMessageId = (ev.payload as MessageStartPayload).message_id;
     }
+  }
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type !== "followups_generated") continue;
+    const p = events[i].payload as FollowupsGeneratedPayload;
+    if (!p.message_id) return [];
+    if (turnMessageId && p.message_id !== turnMessageId) continue;
+    return p.followups;
   }
   return [];
 }

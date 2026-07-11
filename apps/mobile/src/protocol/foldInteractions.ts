@@ -4,8 +4,8 @@
  * Mobile-local copy — do not import from desktop (cross-platform-frontend.mdc).
  */
 import type {
-  ProjectedInteraction,
   InteractionStatus,
+  ProjectedInteraction,
 } from "@agentcore/protocol-conformance/projectedTurn";
 import { GATE_INTERACTION_KINDS } from "@agentcore/protocol-conformance/projectedTurn";
 
@@ -21,9 +21,7 @@ function keyOf(kind: string, id: string): string {
 }
 
 function asRecord(v: unknown): Wire {
-  return v && typeof v === "object" && !Array.isArray(v)
-    ? (v as Wire)
-    : {};
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Wire) : {};
 }
 
 function str(v: unknown, fallback = ""): string {
@@ -37,7 +35,10 @@ function upsert(
 ): void {
   const k = keyOf(leaf.kind, leaf.id);
   const prev = map.get(k);
-  if (prev && (prev.leaf.status === "resolved" || prev.leaf.status === "orphaned")) {
+  if (
+    prev &&
+    (prev.leaf.status === "resolved" || prev.leaf.status === "orphaned")
+  ) {
     return;
   }
   if (!prev) {
@@ -59,7 +60,9 @@ function settle(
 }
 
 /** Fold SSE events → interactions[] (insertion order of required). */
-export function foldInteractions(events: Array<{ type: string; payload: unknown }>): ProjectedInteraction[] {
+export function foldInteractions(
+  events: Array<{ type: string; payload: unknown }>,
+): ProjectedInteraction[] {
   const map = new Map<string, Open>();
   const order = { n: 0 };
 
@@ -230,9 +233,7 @@ export function foldInteractions(events: Array<{ type: string; payload: unknown 
     }
   }
 
-  return [...map.values()]
-    .sort((a, b) => a.order - b.order)
-    .map((o) => o.leaf);
+  return [...map.values()].sort((a, b) => a.order - b.order).map((o) => o.leaf);
 }
 
 export function hasGatePending(interactions: ProjectedInteraction[]): boolean {

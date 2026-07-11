@@ -1154,7 +1154,8 @@ export interface paths {
          *     Reads the WHOLE transcript server-side (not a scroll window, so nothing is
          *     missed) and renders it owner-scoped (404 for a non-owner). ``format=md`` is a
          *     clean, content-only Markdown record (the default a user reads / pastes);
-         *     ``format=json`` is a full-fidelity dump for power users / re-import. Spend is
+         *     ``format=json`` is a full-fidelity dump for power users / re-import. JSON
+         *     projects ``finish_reason`` from turn journal / usage when available. Spend is
          *     never exported — it lives in the cost ledger, not the message body.
          */
         get: operations["export_conversation_v1_conversations__conversation_id__export_get"];
@@ -5936,11 +5937,14 @@ export interface components {
          * RecordTurnResponse
          * @description The persisted ids for a recorded local turn (the desktop reconciles its
          *     optimistic user/assistant bubbles against these; ``title`` is set only when this
-         *     turn minted the conversation's first title).
+         *     turn minted the conversation's first title; ``followups`` mirrors the live
+         *     ``followups_generated`` chips when this turn minted them).
          */
         RecordTurnResponse: {
             /** Assistant Message Id */
             assistant_message_id?: string | null;
+            /** Followups */
+            followups?: string[] | null;
             /** Title */
             title?: string | null;
             /** User Message Id */

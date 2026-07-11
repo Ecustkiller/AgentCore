@@ -479,7 +479,9 @@ class CloudStore:
             with contextlib.suppress(Exception):
                 await self.clear_stream_segments(turn_id=message_id)
 
-        wants_followups = bool(assistant_reply.strip()) and not abnormal
+        wants_followups = (
+            finish_value == FinishReason.END_TURN.value and bool(assistant_reply.strip())
+        )
 
         if needs_title or wants_followups:
             async with async_session_factory() as session:
@@ -524,7 +526,11 @@ class CloudStore:
                                 followups=followups,
                             )
                         sink.emit(
-                            followups_generated(followups, conversation_id=conversation_id)
+                            followups_generated(
+                                followups,
+                                conversation_id=conversation_id,
+                                message_id=message_id,
+                            )
                         )
             finally:
                 await provider.close()
@@ -719,6 +725,7 @@ class CloudStore:
                 "user_message_id": user_msg_id,
                 "assistant_message_id": assistant_message_id,
                 "title": None,
+                "followups": None,
             }
 
         async with async_session_factory() as session:
@@ -728,7 +735,12 @@ class CloudStore:
 
         title: str | None = existing_title
         tag: str | None = None
-        wants_followups = bool((assistant_content or "").strip()) and bool(assistant_message_id)
+        minted_followups: list[str] | None = None
+        wants_followups = (
+            finish_value == FinishReason.END_TURN.value
+            and bool((assistant_content or "").strip())
+            and bool(assistant_message_id)
+        )
         if needs_title or wants_followups:
             provider = build_provider(llm_credentials)
             try:
@@ -762,6 +774,7 @@ class CloudStore:
                                 conversation_id=conversation_id,
                                 followups=followups,
                             )
+                        minted_followups = followups
             finally:
                 await provider.close()
 
@@ -778,6 +791,7 @@ class CloudStore:
             "user_message_id": user_msg_id,
             "assistant_message_id": assistant_message_id,
             "title": title,
+            "followups": minted_followups,
         }
 
 

@@ -37,10 +37,10 @@ HOT_ORPHAN_KINDS: frozenset[str] = frozenset(
 def _should_orphan_pending(pending: PendingInteraction) -> bool:
     if pending.kind not in HOT_ORPHAN_KINDS:
         return False
-    if pending.kind == InteractionKind.ESCALATION.value:
-        if pending.payload.get("awaiting") == "ceo":
-            return False
-    return True
+    return not (
+        pending.kind == InteractionKind.ESCALATION.value
+        and pending.payload.get("awaiting") == "ceo"
+    )
 
 
 async def emit_orphan_fact(

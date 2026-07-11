@@ -20,8 +20,8 @@ alwaysApply: false
 - **凭据禁令**：`deploy/.env.deploy.local` 不入仓。禁止在 chat 索要/回显 token / SSH 私钥 / `RELEASE_GH_TOKEN`。
 - **不重新启用** deploy/release workflow 的 push/tag/schedule 自动触发。
 - **新增/改接口 → 后端必须先部署**。前端 deploy 脚本内置版本漂移门禁。
-- **桌面发版**：Win = 本地 `release:win`（或分步 electron-builder --win）；Mac = GHA `Release Desktop`（仅 mac）。为省额度：GHA 桌面发布仅 Mac；Win 本地；**勿用 GHA 打 Win**。
-- 发布前本地跑全套门禁为验证基准（`ci.yml` 触发保留，不关 CI）。
+- **桌面发版**：Win = 本地 `release:win`（`--publish never` + `gh upload` + 资产断言；对齐 Mac）；Mac = GHA `Release Desktop`（仅 mac）。为省额度：GHA 桌面发布仅 Mac；Win 本地；**勿用 GHA 打 Win**。
+- 发布前本地一键门禁：`pnpm release:gate`（与 `ci.yml` 同构；触发保留，不关 CI）。
 
 ## 全端发布顺序（速查）
 

@@ -40,17 +40,23 @@ export interface TurnItem {
 /** Spine height for a turn — prefers rendered RF style/measured height. */
 export function spineTurnHeight(
   turn: TurnItem,
-  nodes: { id: string; style?: { height?: number | string }; height?: number; measured?: { height?: number } }[],
+  nodes: {
+    id: string;
+    style?: { height?: number | string };
+    height?: number;
+    measured?: { height?: number };
+  }[],
 ): number {
   const n = nodes.find((x) => x.id === turn.id);
   const styleH = n?.style?.height;
   if (typeof styleH === "number" && Number.isFinite(styleH)) return styleH;
   if (typeof styleH === "string") {
-    const parsed = parseFloat(styleH);
+    const parsed = Number.parseFloat(styleH);
     if (!Number.isNaN(parsed)) return parsed;
   }
   const measured = n?.measured?.height ?? n?.height;
-  if (typeof measured === "number" && Number.isFinite(measured)) return measured;
+  if (typeof measured === "number" && Number.isFinite(measured))
+    return measured;
   return turn.kind === "team" ? TEAM_NODE_HEIGHT : SIMPLE_NODE_HEIGHT;
 }
 

@@ -301,8 +301,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
             });
           } else if (event.type === "team_synthesis_preview") {
             // P2 DURABLE：同 key 保最新（后写覆盖）；刷新后 StatusStrip 可重建。
-            teamSynthesisPreview =
-              event.payload as TeamSynthesisPreviewPayload;
+            teamSynthesisPreview = event.payload as TeamSynthesisPreviewPayload;
           } else {
             const frame = frameFromEvent(event);
             if (frame) frames.push(frame);

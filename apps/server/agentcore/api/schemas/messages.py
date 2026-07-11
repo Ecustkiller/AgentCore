@@ -371,7 +371,7 @@ class PendingInteractionSummary(BaseModel):
 
 
 class PendingApprovalSummary(BaseModel):
-    """Deprecated alias kept for import compatibility during P1; prefer PendingInteractionSummary."""
+    """Deprecated alias for import compatibility during P1; prefer PendingInteractionSummary."""
 
     approval_id: str
     conversation_id: str
@@ -691,11 +691,13 @@ class RecordTurnRequest(BaseModel):
 class RecordTurnResponse(BaseModel):
     """The persisted ids for a recorded local turn (the desktop reconciles its
     optimistic user/assistant bubbles against these; ``title`` is set only when this
-    turn minted the conversation's first title)."""
+    turn minted the conversation's first title; ``followups`` mirrors the live
+    ``followups_generated`` chips when this turn minted them)."""
 
     user_message_id: str
     assistant_message_id: str | None = None
     title: str | None = None
+    followups: list[str] | None = None
 
 
 class StopTurnResponse(BaseModel):

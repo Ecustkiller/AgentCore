@@ -10,9 +10,9 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.runtime.debate.moderator_common import (
-    CompleteJson,
     _SUMMARY_CLIP,
     _TURN_CLIP,
+    CompleteJson,
     _as_str,
     _as_str_list,
     _clip,

@@ -222,6 +222,7 @@ async function drainOutboxDetailed(opts?: {
         user_message_id?: string;
         assistant_message_id?: string | null;
         title?: string | null;
+        followups?: string[] | null;
       };
       const payload: OutboxSyncedPayload = {
         conversationId: record.conversation_id,
@@ -229,6 +230,7 @@ async function drainOutboxDetailed(opts?: {
         cloudUserMessageId: body.user_message_id || record.user_message_id,
         assistantMessageId: body.assistant_message_id ?? null,
         title: body.title ?? null,
+        followups: body.followups ?? null,
       };
       await deleteRecord(record.user_message_id);
       recentSyncedConversation.set(

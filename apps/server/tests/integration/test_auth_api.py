@@ -162,7 +162,7 @@ async def test_refresh_cookie_path_carries_reverse_proxy_prefix(client, make_inv
     # Path is a prefix of that — a bare /v1/auth scope silently drops it (forced
     # re-login once the access token expires). COOKIE_PATH_PREFIX must carry the mount.
     monkeypatch.setattr(settings, "cookie_path_prefix", "/api")
-    code = await make_invite("INV-PREFIX")
+    await make_invite("INV-PREFIX")
     r = await client.post(
         "/v1/auth/register",
         json={"username": "pat", "password": _PW},
@@ -272,7 +272,7 @@ async def test_delete_account_anonymizes_and_frees_username(client, make_invite)
         await client.post("/v1/auth/login", json={"username": "mona", "password": _PW})
     ).status_code == 401
     # the username was anonymized away → a brand-new account can reclaim it
-    code2 = await make_invite("INV-DEL-2")
+    await make_invite("INV-DEL-2")
     r = await client.post(
         "/v1/auth/register",
         json={"username": "mona", "password": _PW},
@@ -298,7 +298,7 @@ async def test_delete_account_requires_auth(client):
 
 
 async def test_token_login_returns_tokens_and_authorizes_via_bearer(client, make_invite):
-    code = await make_invite("INV-TOK-1")
+    await make_invite("INV-TOK-1")
     r = await client.post(
         "/v1/auth/register",
         json={"username": "mobile1", "password": _PW},
@@ -331,7 +331,7 @@ async def test_token_refresh_rotates_via_body_and_detects_reuse(client, make_inv
     # Close the grace window so the old token re-presented after rotation reads as
     # a genuine reuse (benign within-grace concurrency is unit-tested separately).
     monkeypatch.setattr("agentcore.auth.service._REFRESH_REUSE_GRACE", timedelta(0))
-    code = await make_invite("INV-TOK-2")
+    await make_invite("INV-TOK-2")
     await client.post(
         "/v1/auth/register",
         json={"username": "mobile2", "password": _PW},
@@ -358,7 +358,7 @@ async def test_token_refresh_rotates_via_body_and_detects_reuse(client, make_inv
 
 
 async def test_token_revoke_kills_refresh(client, make_invite):
-    code = await make_invite("INV-TOK-3")
+    await make_invite("INV-TOK-3")
     await client.post(
         "/v1/auth/register",
         json={"username": "mobile3", "password": _PW},

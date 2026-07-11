@@ -7,10 +7,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 /** Runtime key guard — compile-time ``SidecarTurnResult`` + contract JSON must agree. */
-function assertExactKeys(
-  obj: Record<string, unknown>,
-  keys: readonly string[],
-): void {
+function assertExactKeys(obj: object, keys: readonly string[]): void {
   expect(Object.keys(obj).sort()).toEqual([...keys].sort());
 }
 

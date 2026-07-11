@@ -7,6 +7,7 @@ from agentcore.llm import LLMRequest, LLMResponse
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 from agentcore.memory.followups import (
     _FOLLOWUPS_SYSTEM_PROMPT,
+    FOLLOWUPS_ITEM_MAX_CHARS,
     FOLLOWUPS_MAX,
     FollowupInput,
     LLMFollowupsGenerator,
@@ -61,10 +62,13 @@ def test_sanitize_dedups_case_insensitively():
     assert out == ["Export to PDF", "做竞品对比"]
 
 
-def test_sanitize_drops_overlong_lines():
+def test_sanitize_truncates_overlong_lines():
     long = "帮我" + "细化" * 40  # well over the per-item char cap
     out = _sanitize_followups(f"帮我导出 PDF\n{long}\n做竞品对比")
-    assert out == ["帮我导出 PDF", "做竞品对比"]
+    assert out[0] == "帮我导出 PDF"
+    assert out[1].endswith("…")
+    assert len(out[1]) == FOLLOWUPS_ITEM_MAX_CHARS + 1  # truncated body + …
+    assert out[2] == "做竞品对比"
 
 
 def test_sanitize_caps_to_max():
@@ -76,6 +80,12 @@ def test_sanitize_caps_to_max():
 def test_sanitize_empty_returns_empty_list():
     assert _sanitize_followups("") == []
     assert _sanitize_followups("   \n  ") == []
+
+
+def test_followups_prompt_asks_for_40_chars():
+    assert FOLLOWUPS_ITEM_MAX_CHARS == 40
+    assert "40 字以内" in _FOLLOWUPS_SYSTEM_PROMPT
+    assert "约 24" not in _FOLLOWUPS_SYSTEM_PROMPT
 
 
 # --- _render_followups_prompt ---

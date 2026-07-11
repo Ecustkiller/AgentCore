@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { resolveApiBaseUrl } from "../../../scripts/resolve-api-base-url";
 
 afterEach(() => {
-  delete process.env.VITE_API_URL;
+  // Must delete: assigning `undefined` stringifies to "undefined" in process.env.
+  Reflect.deleteProperty(process.env, "VITE_API_URL");
 });
 
 function envDirWith(files: Record<string, string>): string {

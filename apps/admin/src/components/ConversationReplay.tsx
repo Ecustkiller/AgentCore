@@ -1,3 +1,4 @@
+import { Markdown } from "@/components/Markdown";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
@@ -180,9 +181,7 @@ function MessageBlock({
       </div>
 
       {message.content ? (
-        <div className="whitespace-pre-wrap break-words text-foreground text-sm">
-          {message.content}
-        </div>
+        <Markdown content={message.content} />
       ) : (
         <div className="text-muted-foreground text-sm italic">（无正文）</div>
       )}

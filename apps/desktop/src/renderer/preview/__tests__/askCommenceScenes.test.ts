@@ -1,3 +1,4 @@
+import { describe, expect, it } from "vitest";
 import { ASK_COMMENCE_MOCK } from "../askCommenceMock";
 import { ASK_COMMENCE_SCENES } from "../askCommenceScenes";
 
@@ -25,9 +26,9 @@ describe("ASK_COMMENCE_SCENES", () => {
     expect(ASK_COMMENCE_MOCK.question.length).toBeGreaterThan(0);
     expect(ASK_COMMENCE_MOCK.assumptions.length).toBeGreaterThan(0);
     expect(ASK_COMMENCE_MOCK.questions.length).toBeGreaterThan(0);
-    expect(
-      ASK_COMMENCE_MOCK.questions.every((q) => q.kind === "choice"),
-    ).toBe(true);
+    expect(ASK_COMMENCE_MOCK.questions.every((q) => q.kind === "choice")).toBe(
+      true,
+    );
   });
 
   it("v2 scene is the production kickoff default reference", () => {

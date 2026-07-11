@@ -14,7 +14,9 @@ class DebateSideInfo(WirePayload):
     name: str
     stance: str
     is_subject: bool
-    model: str | None = absent("Display-only model hint on some debate forms; absent on older wire.")
+    model: str | None = absent(
+        "Display-only model hint on some debate forms; absent on older wire."
+    )
 
 
 class DebateRoundSide(WirePayload):

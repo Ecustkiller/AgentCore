@@ -119,7 +119,12 @@ export function surfaceResumeFromLiveTurn(
   const ix = useInteractionStore.getState();
   const pending = ix
     .listPending(conversationId, ["ask_user", "plan_review", "team_preview"])
-    .filter((e) => !e.messageId || e.messageId === turn.id || e.messageId === serverMessageId);
+    .filter(
+      (e) =>
+        !e.messageId ||
+        e.messageId === turn.id ||
+        e.messageId === serverMessageId,
+    );
 
   const ask = pending.find((e) => e.kind === "ask_user");
   if (ask) {

@@ -57,10 +57,9 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
             "enum": ["text", "json"],
             "description": "要求的产出格式；json 会校验能否解析。",
         },
-        "output_schema": {
-            "type": "object",
-            "description": "output_format=json 时可选的 JSON Schema。",
-        },
+        # ``output_schema`` is intentionally NOT exposed here: Deliverable keeps the
+        # field for internal/builder parse, but check_contract does not validate it
+        # (阶段2 预留). Fake capability must not appear in the CEO/delegate tool schema.
         "requires_files": {
             "type": "boolean",
             "description": (

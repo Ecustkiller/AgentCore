@@ -25,7 +25,7 @@ import {
   useMessageExecution,
 } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
-import { turnDetailPath, type TurnDetailView } from "@/stores/ui";
+import { type TurnDetailView, turnDetailPath } from "@/stores/ui";
 import { ReactFlowProvider } from "@xyflow/react";
 import {
   ArrowLeft,
@@ -35,11 +35,7 @@ import {
   PanelRight,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  useNavigate,
-  useParams,
-  useSearchParams,
-} from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 function parseView(raw: string | null): TurnDetailView | null {
   if (raw === "graph" || raw === "debate" || raw === "compare") return raw;
@@ -110,7 +106,10 @@ export function TurnDetailPage() {
               ) {
                 if (canAttach) {
                   void rejoinLiveTurn(conversationId);
-                } else if (!recovery.liveRunning && recovery.pausedCount === 0) {
+                } else if (
+                  !recovery.liveRunning &&
+                  recovery.pausedCount === 0
+                ) {
                   markGhostInterrupted(conversationId);
                 }
               }

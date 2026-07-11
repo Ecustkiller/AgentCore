@@ -56,6 +56,8 @@ export interface MessageDetail {
   status?: "running" | "complete" | "incomplete" | "failed" | null;
   /** 回合 ¥ 成本 (P2 DERIVED)：messages.cost 列；重载 footer 直接用。 */
   cost?: Schemas["CostBreakdown"] | null;
+  /** CEO→用户「下一步」chips (DERIVED · messages.followups)；重载重现. */
+  followups?: string[];
   created_at: string;
 }
 
@@ -154,8 +156,7 @@ function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
   const runs = row.runs;
   const status = row.status ?? null;
   const finish =
-    runs?.finish_reason ??
-    (status === "incomplete" ? "interrupted" : null);
+    runs?.finish_reason ?? (status === "incomplete" ? "interrupted" : null);
   return {
     id: row.id,
     role: row.role,
@@ -185,6 +186,7 @@ function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
       truncated: a.truncated,
     })),
     cost: row.cost ?? null,
+    followups: row.followups?.length ? row.followups : undefined,
     created_at: row.created_at,
   };
 }

@@ -1,6 +1,7 @@
 """CEO 协调模式（Phase 2–3）：非阻塞 delegate + 事件驱动协调循环。
 
-→ 见 docs/03-AI核心/编排器与CEO主Agent.md §协调模式、docs/03-AI核心/执行引擎架构设计.md §协调事件注入
+→ 见 docs/03-AI核心/编排器与CEO主Agent.md §协调模式、
+docs/03-AI核心/执行引擎架构设计.md §协调事件注入
 """
 
 from __future__ import annotations

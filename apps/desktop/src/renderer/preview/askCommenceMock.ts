@@ -12,7 +12,11 @@ export const ASK_COMMENCE_MOCK: AskUserContent = {
   assumptions: [
     { id: "a0", label: "交付物", value: "响应式落地页（单页）+ 基础 SEO" },
     { id: "a1", label: "部署", value: "纯静态，托管到现有 CDN" },
-    { id: "a2", label: "首版范围", value: "Hero / 卖点 / 案例 / CTA，不含后台" },
+    {
+      id: "a2",
+      label: "首版范围",
+      value: "Hero / 卖点 / 案例 / CTA，不含后台",
+    },
     { id: "a3", label: "工期假设", value: "先出可上线稿，再迭代动效与文案" },
   ],
   questions: [

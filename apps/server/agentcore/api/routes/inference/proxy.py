@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 
-from fastapi import Depends, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.api.dependencies import get_cost_event_repo, get_db
-from agentcore.api.routes.inference.token import inference_user, router
+from agentcore.api.routes.inference.token import inference_user
 from agentcore.billing.gate import preflight_llm_credentials
 from agentcore.config import settings
 from agentcore.conversation.inference_rate_limit import enforce_inference_proxy_rate_limit
@@ -42,6 +42,8 @@ from agentcore.llm.provider.protocol import (
 from agentcore.llm.resolve import ModelConfig, platform_llm_credentials
 
 logger = get_logger(__name__)
+
+router = APIRouter()
 
 _CONVERSATION_HEADER = INFERENCE_CONVERSATION_HEADER
 _TRACE_HEADER = INFERENCE_TRACE_HEADER

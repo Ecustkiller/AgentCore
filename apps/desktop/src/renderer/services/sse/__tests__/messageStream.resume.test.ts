@@ -1,8 +1,8 @@
 import { handleMessageStreamEvent } from "@/services/sse/handlers/messageStream";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import {
-  execRuntime,
   type ExecutionPlan,
+  execRuntime,
   useExecutionStore,
 } from "@/stores/execution";
 import { beforeEach, describe, expect, it } from "vitest";

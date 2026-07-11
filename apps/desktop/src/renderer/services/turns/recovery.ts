@@ -115,9 +115,7 @@ export function markGhostInterrupted(conversationId: string): void {
     isStreaming: false,
     status: "incomplete",
     finishReason: "interrupted",
-    runs: last.runs
-      ? { ...last.runs, finishReason: "interrupted" }
-      : last.runs,
+    runs: last.runs ? { ...last.runs, finishReason: "interrupted" } : last.runs,
   });
   useConversationStore.getState().setGenerating(false, conversationId);
   const exec = useExecutionStore.getState();

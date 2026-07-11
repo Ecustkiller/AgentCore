@@ -16,6 +16,7 @@ from agentcore.api.dependencies import (
     get_conversation_share_repo,
     get_folder_repo,
     get_message_repo,
+    get_turn_journal_repo,
 )
 from agentcore.api.schemas import (
     ConversationListResponse,
@@ -38,6 +39,7 @@ from agentcore.db.repositories import (
     ConversationShareRepository,
     FolderRepository,
     MessageRepository,
+    TurnJournalRepository,
 )
 
 from ._helpers import _get_owned_conversation
@@ -295,20 +297,23 @@ async def export_conversation(
     format: str = Query("md", pattern="^(md|json)$"),
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     msg_repo: MessageRepository = Depends(get_message_repo),
+    journal_repo: TurnJournalRepository = Depends(get_turn_journal_repo),
 ):
     """Export a conversation's full transcript as a download (导出对话).
 
     Reads the WHOLE transcript server-side (not a scroll window, so nothing is
     missed) and renders it owner-scoped (404 for a non-owner). ``format=md`` is a
     clean, content-only Markdown record (the default a user reads / pastes);
-    ``format=json`` is a full-fidelity dump for power users / re-import. Spend is
+    ``format=json`` is a full-fidelity dump for power users / re-import. JSON
+    projects ``finish_reason`` from turn journal / usage when available. Spend is
     never exported — it lives in the cost ledger, not the message body.
     """
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     messages = await msg_repo.list_all_for_conversation(conversation_id)
     stem = _safe_export_stem(conv.title, conversation_id)
     if format == "json":
-        payload = conversation_to_json(conv, messages)
+        journal_map = await journal_repo.load_map([m.id for m in messages])
+        payload = conversation_to_json(conv, messages, journal_map=journal_map)
         content = json.dumps(payload, ensure_ascii=False, indent=2)
         return Response(
             content=content,

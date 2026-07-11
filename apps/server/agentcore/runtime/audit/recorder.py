@@ -94,7 +94,7 @@ class AuditRecorder:
         try:
             from agentcore.db.repositories import AgentAuditEventRepository
 
-            # Telemetry pool — never contend with content-write connections (as-built: 成本配额 §三).
+            # Telemetry pool — never contend with content-write connections (成本配额 §三).
             async with telemetry_session_factory() as db:
                 await AgentAuditEventRepository(db).append(
                     user_id=self.user_id,

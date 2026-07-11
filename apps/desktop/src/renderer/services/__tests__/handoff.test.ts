@@ -232,12 +232,14 @@ describe("applyHandoffJob", () => {
 
 describe("readLocalShas (假 fsApi)", () => {
   it("hashes readable files and nulls missing / non-desktop", async () => {
-    const workspaceOp = vi.fn(async (_root: string, _op: string, args: { path: string }) => {
-      if (args.path === "ok.txt") {
-        return { ok: true, value: btoa("hello") };
-      }
-      return { ok: false, error: { kind: "PathNotFound", detail: "" } };
-    });
+    const workspaceOp = vi.fn(
+      async (_root: string, _op: string, args: { path: string }) => {
+        if (args.path === "ok.txt") {
+          return { ok: true, value: btoa("hello") };
+        }
+        return { ok: false, error: { kind: "PathNotFound", detail: "" } };
+      },
+    );
     vi.stubGlobal("window", { fsApi: { workspaceOp } });
 
     const map = await readLocalShas("root-1", ["ok.txt", "gone.txt"]);
@@ -271,10 +273,7 @@ describe("应用前重哈希冲突门 (review → fresh shas → apply body)", (
       sizeBytes: 5,
     };
     // Review-time: local still at base → clean, default cloud.
-    const reviewRows = buildReviewRows(
-      [change],
-      new Map([["a.txt", "base"]]),
-    );
+    const reviewRows = buildReviewRows([change], new Map([["a.txt", "base"]]));
     expect(reviewRows[0].verdict).toBe("clean");
     expect(reviewRows[0].decision).toBe("cloud");
 

@@ -1,3 +1,4 @@
+import { escalationKindLabel } from "@/components/graph/agentNode/shared";
 import { Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
 import { interactiveCheckpointTone } from "@/components/ui/tone-presets";
 import { notifyError } from "@/lib/toast";
@@ -5,12 +6,8 @@ import {
   type EscalationUserDecision,
   decideEscalation,
 } from "@/services/escalation";
-import {
-  type RunEscalation,
-  useMessageExecution,
-} from "@/stores/execution";
+import { type RunEscalation, useMessageExecution } from "@/stores/execution";
 import { useInteractionStore } from "@/stores/interactions";
-import { escalationKindLabel } from "@/components/graph/agentNode/shared";
 import {
   ArrowRight,
   Check,
@@ -20,15 +17,17 @@ import {
   Megaphone,
 } from "lucide-react";
 import { useState } from "react";
+import { OrphanedInteractionCard } from "./OrphanedInteractionCard";
 import {
   AskNoteField,
   AskQuestionFields,
   type AskUserContent,
   useAskAnswer,
 } from "./ask/AskUserFields";
-import { OrphanedInteractionCard } from "./OrphanedInteractionCard";
 
-function escalationKindTag(kind: RunEscalation["kind"] | undefined): string | null {
+function escalationKindTag(
+  kind: RunEscalation["kind"] | undefined,
+): string | null {
   if (!kind || kind === "normal") return null;
   return escalationKindLabel(kind);
 }
@@ -133,7 +132,9 @@ function PendingEscalation({
               ? ` · ${escalationKindTag(escalation.kind)}`
               : ""}
           </p>
-          <p className="mt-0.5 text-xs text-muted-foreground">等你拍板 · 不限时</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            等你拍板 · 不限时
+          </p>
           <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
             {escalation.question}
           </p>

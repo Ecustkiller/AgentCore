@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import Field
-
 from agentcore.runtime.events.payloads._base import WirePayload, absent
 from agentcore.runtime.events.payloads.shared import CostBreakdown, RunDebrief, UsageBreakdown
 from agentcore.runtime.runs.types import RunKind
@@ -251,5 +249,3 @@ class BatchMetricsPayload(WirePayload):
 RunPlanNode = RunPlanRunEntry
 
 # Re-export shared leaf types referenced by ``payloads/__init__.py`` TS_EXPORTS.
-from agentcore.runtime.events.payloads.shared import CostBreakdown, RunDebrief, UsageBreakdown  # noqa: E402,F401
-from agentcore.runtime.runs.types import RunKind as RunKind  # noqa: F401

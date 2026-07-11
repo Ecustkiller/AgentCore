@@ -28,10 +28,7 @@ def is_continuable_transcript(messages: list[LLMMessage]) -> bool:
     Opening system/user-only prompts are NOT enough — that is the「刚启动几乎空」
     cold path. Completed tool results and/or assistant drafts qualify.
     """
-    for msg in messages:
-        if msg.role in ("assistant", "tool"):
-            return True
-    return False
+    return any(msg.role in ("assistant", "tool") for msg in messages)
 
 
 def freeze_partial_transcript(messages: list[LLMMessage]) -> list[LLMMessage]:

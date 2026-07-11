@@ -333,9 +333,7 @@ function AskUserResumeCard({ turn }: { turn: PendingResume }) {
           },
         });
         if (result !== "ok") {
-          throw new Error(
-            result === "orphaned" ? "确认已失效" : "请稍候再试",
-          );
+          throw new Error(result === "orphaned" ? "确认已失效" : "请稍候再试");
         }
       }}
     />

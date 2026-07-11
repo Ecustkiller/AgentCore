@@ -51,6 +51,8 @@ export function AskCommenceV3({ content }: { content: AskUserContent }) {
               {content.question}
             </p>
             {total > 1 && (
+              // Progress dots are navigated via the child buttons; the bar itself is not a tab stop.
+              // biome-ignore lint/a11y/useFocusableInteractive: child buttons own keyboard focus
               <div
                 className="flex items-center gap-1"
                 role="progressbar"

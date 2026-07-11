@@ -1,14 +1,14 @@
 import { ApiError } from "@/services/api";
 import { resolveInteraction } from "@/services/interaction";
 import type { ResolveInteractionBody } from "@/services/interaction";
-import { runResume } from "@/services/turns";
 import type { PlanReviewUserDecision } from "@/services/planReview";
+import { runResume } from "@/services/turns";
+import { useComposerDraftStore } from "@/stores/composer";
 import {
   INTERACTION_SUBMIT_PATH,
   useInteractionStore,
 } from "@/stores/interactions";
 import type { InteractionKind } from "@/types/interactionExt";
-import { useComposerDraftStore } from "@/stores/composer";
 
 /** True when the API says this interaction is no longer answerable. */
 export function isInteractionOrphanedError(err: unknown): boolean {

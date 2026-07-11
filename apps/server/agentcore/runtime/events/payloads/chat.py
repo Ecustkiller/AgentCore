@@ -7,7 +7,7 @@ from typing import Any, Literal
 from pydantic import ConfigDict, Field
 
 from agentcore.runtime.events.payloads._base import WirePayload, absent
-from agentcore.runtime.events.payloads.shared import Citation, CitationsPayload, CostBreakdown
+from agentcore.runtime.events.payloads.shared import CostBreakdown
 from agentcore.runtime.events.types import FinishReason
 
 
@@ -109,9 +109,11 @@ class TitleGeneratedPayload(WirePayload):
 
 class FollowupsGeneratedPayload(WirePayload):
     """CEO→用户「下一步推荐」: 2-4 quick-reply chips for the just-finished turn, emitted
-    after `message_end`. Persisted on `Message.followups` (DERIVED), no-op in folds."""
+    after `message_end`. Persisted on `Message.followups` (DERIVED), no-op in folds.
+    `message_id` is the assistant row the chips belong to (same id as `set_followups`)."""
 
     conversation_id: str
+    message_id: str
     followups: list[str]
 
 

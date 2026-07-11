@@ -31,11 +31,10 @@ describe("resolveSpawnConfig packaged unix", () => {
   const prevPlatform = Object.getOwnPropertyDescriptor(process, "platform");
 
   beforeEach(() => {
-    delete process.env.AGENTCORE_SIDECAR_CMD;
+    Reflect.deleteProperty(process.env, "AGENTCORE_SIDECAR_CMD");
     h.isPackaged = true;
-    (
-      process as NodeJS.Process & { resourcesPath?: string }
-    ).resourcesPath = h.resourcesPath;
+    (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath =
+      h.resourcesPath;
     Object.defineProperty(process, "platform", {
       value: "darwin",
       configurable: true,
@@ -46,15 +45,13 @@ describe("resolveSpawnConfig packaged unix", () => {
   afterEach(() => {
     rmSync(h.resourcesPath, { recursive: true, force: true });
     if (prevResources === undefined) {
-      delete (process as NodeJS.Process & { resourcesPath?: string })
-        .resourcesPath;
+      Reflect.deleteProperty(process, "resourcesPath");
     } else {
-      (
-        process as NodeJS.Process & { resourcesPath?: string }
-      ).resourcesPath = prevResources;
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath =
+        prevResources;
     }
     if (prevOverride === undefined) {
-      delete process.env.AGENTCORE_SIDECAR_CMD;
+      Reflect.deleteProperty(process.env, "AGENTCORE_SIDECAR_CMD");
     } else {
       process.env.AGENTCORE_SIDECAR_CMD = prevOverride;
     }

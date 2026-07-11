@@ -341,6 +341,7 @@ function ProcessTimeline({
           );
         if (node.kind === "rework")
           return (
+            // biome-ignore lint/suspicious/noArrayIndexKey: timeline is an append-only stream; segments never reorder, so the index is stable identity
             <span key={`rework-${i}`} className="rework-chip">
               已按交付规范重写
             </span>

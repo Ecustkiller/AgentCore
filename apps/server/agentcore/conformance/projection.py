@@ -577,13 +577,11 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             # lived here historically. Process markers N/A for approval.
             pass
 
-        elif etype == "approval_resolved":
-            pass
-
-        elif etype == "delegation_authorization_required":
-            pass
-
-        elif etype == "delegation_authorization_resolved":
+        elif etype in (
+            "approval_resolved",
+            "delegation_authorization_required",
+            "delegation_authorization_resolved",
+        ):
             pass
 
         elif etype == "checkpoint_required":

@@ -148,9 +148,7 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
   const { hoveredNodeId, keepBrightIds } = useContext(GraphHoverContext);
   // Bright when both ends sit on the hover path (full upstream/downstream set).
   const isHoverRelated =
-    keepBrightIds != null &&
-    keepBrightIds.has(props.source) &&
-    keepBrightIds.has(props.target);
+    keepBrightIds?.has(props.source) && keepBrightIds.has(props.target);
   const hoverActive = hoveredNodeId != null;
 
   let strokeOpacity: number;
@@ -169,7 +167,8 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
     strokeWidth = 2.5;
     strokeColor = "var(--primary)";
   } else if (!hoverActive) {
-    strokeOpacity = isDelegate || isRevision || isHandoff || isInject ? 0.35 : 0.4;
+    strokeOpacity =
+      isDelegate || isRevision || isHandoff || isInject ? 0.35 : 0.4;
     strokeWidth = 1.5;
     strokeColor = "var(--muted-foreground)";
   } else if (isHoverRelated) {

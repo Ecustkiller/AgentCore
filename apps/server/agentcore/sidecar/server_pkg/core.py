@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from agentcore.conversation.store.outbox import OutboxStore
 from agentcore.core.logging import get_logger
 from agentcore.llm.credentials import (
     INFERENCE_CONVERSATION_HEADER,
@@ -16,7 +17,6 @@ from agentcore.llm.credentials import (
 )
 from agentcore.runtime.suspension import TurnSuspension
 from agentcore.sidecar import protocol
-from agentcore.conversation.store.outbox import OutboxStore
 from agentcore.sidecar.paused_store import LocalPausedTurnStore
 from agentcore.sidecar.server_pkg.handlers import HandlerMixin
 from agentcore.sidecar.server_pkg.turns import TurnExecutionMixin

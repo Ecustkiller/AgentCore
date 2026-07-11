@@ -39,19 +39,30 @@ describe("handleTerminalResult", () => {
   });
 });
 
+function mockTerminalApi(
+  over?: Partial<{
+    runBash: ReturnType<typeof vi.fn>;
+    openShellAtRoot: ReturnType<typeof vi.fn>;
+  }>,
+) {
+  return {
+    runBash: vi.fn(async () => ({ ok: true as const })),
+    openShellAtRoot: vi.fn(async () => ({ ok: true as const })),
+    ...over,
+  };
+}
+
 describe("runTerminalBash", () => {
   it("经 RunConfirm 后以 rendererConfirmed 调 terminalApi", async () => {
-    window.terminalApi = {
-      runBash: vi.fn(async () => ({ ok: true })),
-      openShellAtRoot: vi.fn(),
-    };
+    const api = mockTerminalApi();
+    window.terminalApi = api;
     const pending = runTerminalBash("pnpm test");
     // 微任务后 pending 卡应已挂上
     await Promise.resolve();
     expect(useRunConfirmStore.getState().pending?.command).toBe("pnpm test");
     useRunConfirmStore.getState().decide("run");
     await pending;
-    expect(window.terminalApi.runBash).toHaveBeenCalledWith({
+    expect(api.runBash).toHaveBeenCalledWith({
       command: "pnpm test",
       rendererConfirmed: true,
     });
@@ -59,28 +70,24 @@ describe("runTerminalBash", () => {
   });
 
   it("用户取消 → info toast，不调 runBash", async () => {
-    window.terminalApi = {
-      runBash: vi.fn(async () => ({ ok: true })),
-      openShellAtRoot: vi.fn(),
-    };
+    const api = mockTerminalApi();
+    window.terminalApi = api;
     const pending = runTerminalBash("rm -rf /");
     await Promise.resolve();
     useRunConfirmStore.getState().decide("cancel");
     await pending;
-    expect(window.terminalApi.runBash).not.toHaveBeenCalled();
+    expect(api.runBash).not.toHaveBeenCalled();
     expect(notifyInfoMock).toHaveBeenCalledWith("已取消在终端运行");
     window.terminalApi = undefined;
   });
 
   it("本会话已放行 → 直跑，不挂卡", async () => {
     useRunConfirmStore.getState().markSessionAllowed();
-    window.terminalApi = {
-      runBash: vi.fn(async () => ({ ok: true })),
-      openShellAtRoot: vi.fn(),
-    };
+    const api = mockTerminalApi();
+    window.terminalApi = api;
     await runTerminalBash("echo ok");
     expect(useRunConfirmStore.getState().pending).toBeNull();
-    expect(window.terminalApi.runBash).toHaveBeenCalledWith({
+    expect(api.runBash).toHaveBeenCalledWith({
       command: "echo ok",
       rendererConfirmed: true,
     });

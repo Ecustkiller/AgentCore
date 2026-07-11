@@ -64,9 +64,7 @@ describe("backgroundTasks store", () => {
     listJobs.mockResolvedValueOnce([job({ status: "succeeded" })]);
     await store().load("c1");
     expect(listJobs).toHaveBeenCalledWith("c1");
-    expect(store().byConversation.c1).toEqual([
-      job({ status: "succeeded" }),
-    ]);
+    expect(store().byConversation.c1).toEqual([job({ status: "succeeded" })]);
   });
 
   it("upsert inserts then replaces by id (optimistic → poll refresh)", () => {

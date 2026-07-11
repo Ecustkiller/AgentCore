@@ -5505,7 +5505,7 @@
         "type": "object"
       },
       "RecordTurnResponse": {
-        "description": "The persisted ids for a recorded local turn (the desktop reconciles its\noptimistic user/assistant bubbles against these; ``title`` is set only when this\nturn minted the conversation's first title).",
+        "description": "The persisted ids for a recorded local turn (the desktop reconciles its\noptimistic user/assistant bubbles against these; ``title`` is set only when this\nturn minted the conversation's first title; ``followups`` mirrors the live\n``followups_generated`` chips when this turn minted them).",
         "properties": {
           "assistant_message_id": {
             "anyOf": [
@@ -5517,6 +5517,20 @@
               }
             ],
             "title": "Assistant Message Id"
+          },
+          "followups": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Followups"
           },
           "title": {
             "anyOf": [
@@ -13377,7 +13391,7 @@
     },
     "/v1/conversations/{conversation_id}/export": {
       "get": {
-        "description": "Export a conversation's full transcript as a download (导出对话).\n\nReads the WHOLE transcript server-side (not a scroll window, so nothing is\nmissed) and renders it owner-scoped (404 for a non-owner). ``format=md`` is a\nclean, content-only Markdown record (the default a user reads / pastes);\n``format=json`` is a full-fidelity dump for power users / re-import. Spend is\nnever exported — it lives in the cost ledger, not the message body.",
+        "description": "Export a conversation's full transcript as a download (导出对话).\n\nReads the WHOLE transcript server-side (not a scroll window, so nothing is\nmissed) and renders it owner-scoped (404 for a non-owner). ``format=md`` is a\nclean, content-only Markdown record (the default a user reads / pastes);\n``format=json`` is a full-fidelity dump for power users / re-import. JSON\nprojects ``finish_reason`` from turn journal / usage when available. Spend is\nnever exported — it lives in the cost ledger, not the message body.",
         "operationId": "export_conversation_v1_conversations__conversation_id__export_get",
         "parameters": [
           {

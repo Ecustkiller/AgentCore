@@ -149,10 +149,7 @@ interface GraphState {
     collapsed: boolean,
   ) => void;
   /** Seed newly discovered foldable parents as collapsed (default). */
-  ensureSubtreeDefaults: (
-    conversationId: string,
-    parentIds: string[],
-  ) => void;
+  ensureSubtreeDefaults: (conversationId: string, parentIds: string[]) => void;
 
   expandTurn: (conversationId: string, turnId: string) => void;
   collapseTurn: (conversationId: string, turnId: string) => void;
@@ -187,9 +184,13 @@ export const useGraphStore = create<GraphState>()(
           ? prev.collapsedSubtrees.filter((id) => id !== parentId)
           : [...prev.collapsedSubtrees, parentId];
         set({
-          foldByConversation: patchFold(get().foldByConversation, conversationId, {
-            collapsedSubtrees,
-          }),
+          foldByConversation: patchFold(
+            get().foldByConversation,
+            conversationId,
+            {
+              collapsedSubtrees,
+            },
+          ),
         });
       },
 
@@ -201,9 +202,13 @@ export const useGraphStore = create<GraphState>()(
           ? [...prev.collapsedSubtrees, parentId]
           : prev.collapsedSubtrees.filter((id) => id !== parentId);
         set({
-          foldByConversation: patchFold(get().foldByConversation, conversationId, {
-            collapsedSubtrees,
-          }),
+          foldByConversation: patchFold(
+            get().foldByConversation,
+            conversationId,
+            {
+              collapsedSubtrees,
+            },
+          ),
         });
       },
 
@@ -214,10 +219,14 @@ export const useGraphStore = create<GraphState>()(
         const fresh = parentIds.filter((id) => !seen.has(id));
         if (fresh.length === 0) return;
         set({
-          foldByConversation: patchFold(get().foldByConversation, conversationId, {
-            collapsedSubtrees: [...prev.collapsedSubtrees, ...fresh],
-            seenSubtreeParents: [...prev.seenSubtreeParents, ...fresh],
-          }),
+          foldByConversation: patchFold(
+            get().foldByConversation,
+            conversationId,
+            {
+              collapsedSubtrees: [...prev.collapsedSubtrees, ...fresh],
+              seenSubtreeParents: [...prev.seenSubtreeParents, ...fresh],
+            },
+          ),
         });
       },
 
@@ -229,9 +238,13 @@ export const useGraphStore = create<GraphState>()(
           expandedTurns.shift();
         }
         set({
-          foldByConversation: patchFold(get().foldByConversation, conversationId, {
-            expandedTurns,
-          }),
+          foldByConversation: patchFold(
+            get().foldByConversation,
+            conversationId,
+            {
+              expandedTurns,
+            },
+          ),
         });
       },
 
@@ -239,9 +252,13 @@ export const useGraphStore = create<GraphState>()(
         const prev = foldOf(get().foldByConversation, conversationId);
         if (!prev.expandedTurns.includes(turnId)) return;
         set({
-          foldByConversation: patchFold(get().foldByConversation, conversationId, {
-            expandedTurns: prev.expandedTurns.filter((id) => id !== turnId),
-          }),
+          foldByConversation: patchFold(
+            get().foldByConversation,
+            conversationId,
+            {
+              expandedTurns: prev.expandedTurns.filter((id) => id !== turnId),
+            },
+          ),
         });
       },
 
@@ -253,10 +270,14 @@ export const useGraphStore = create<GraphState>()(
           .slice(0, MAX_EXPANDED_TURNS)
           .reverse(); // oldest→newest among the kept window
         set({
-          foldByConversation: patchFold(get().foldByConversation, conversationId, {
-            expandedTurns,
-            turnsSeeded: true,
-          }),
+          foldByConversation: patchFold(
+            get().foldByConversation,
+            conversationId,
+            {
+              expandedTurns,
+              turnsSeeded: true,
+            },
+          ),
         });
       },
     }),

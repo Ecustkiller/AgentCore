@@ -236,8 +236,7 @@ export function useMultiTurnLayouts(
             .join(",");
           const struct = t.execution.runs
             .map(
-              (r) =>
-                `${r.id}:${r.dependsOn.join(",")}:${r.parentRunId ?? ""}`,
+              (r) => `${r.id}:${r.dependsOn.join(",")}:${r.parentRunId ?? ""}`,
             )
             .join("|");
           return `${t.turnId}#${struct}#${units}`;
@@ -246,6 +245,8 @@ export function useMultiTurnLayouts(
     [turns, collapsedSubtrees],
   );
 
+  // turnKey encodes turns + collapsedSubtrees; heightByTurn patches must not re-ELK.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: structural key is turnKey; height patches intentionally omitted
   useEffect(() => {
     const gen = ++genRef.current;
     if (turns.length === 0) {
@@ -264,12 +265,11 @@ export function useMultiTurnLayouts(
         );
         const captainId =
           t.execution.runs.find((r) => r.kind === "captain")?.id ?? null;
-        const {
-          nodeIds,
-          rawEdges,
-          subTeams,
-          foldInfo,
-        } = buildGraphStructure(t.execution.runs, INPUT_ID, expandedUnits);
+        const { nodeIds, rawEdges, subTeams, foldInfo } = buildGraphStructure(
+          t.execution.runs,
+          INPUT_ID,
+          expandedUnits,
+        );
         const sizeMap = buildNodeSizeMap(nodeIds);
 
         const result = await computeLayout(
@@ -322,50 +322,45 @@ export function useMultiTurnLayouts(
     return () => {
       cancelled = true;
     };
-    // heightByTurn intentionally omitted — dimension patches don't re-ELK.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [turnKey, layoutKind, fitMode]);
 
-  const onNodesChange = useCallback(
-    (turnId: string, changes: NodeChange[]) => {
-      setHeightByTurn((prev) => {
-        const cur = prev[turnId] ?? {};
-        let next = cur;
-        for (const c of changes) {
-          if (c.type === "dimensions" && c.dimensions) {
-            const h = c.dimensions.height;
-            if (h > 0 && cur[c.id] !== h) {
-              if (next === cur) next = { ...cur };
-              next[c.id] = h;
-            }
+  const onNodesChange = useCallback((turnId: string, changes: NodeChange[]) => {
+    setHeightByTurn((prev) => {
+      const cur = prev[turnId] ?? {};
+      let next = cur;
+      for (const c of changes) {
+        if (c.type === "dimensions" && c.dimensions) {
+          const h = c.dimensions.height;
+          if (h > 0 && cur[c.id] !== h) {
+            if (next === cur) next = { ...cur };
+            next[c.id] = h;
           }
         }
-        if (next === cur) return prev;
-        return { ...prev, [turnId]: next };
-      });
-      setLayouts((prev) => {
-        const slice = prev[turnId];
-        if (!slice) return prev;
-        const cur = slice.nodeHeights;
-        let next = cur;
-        for (const c of changes) {
-          if (c.type === "dimensions" && c.dimensions) {
-            const h = c.dimensions.height;
-            if (h > 0 && cur[c.id] !== h) {
-              if (next === cur) next = { ...cur };
-              next[c.id] = h;
-            }
+      }
+      if (next === cur) return prev;
+      return { ...prev, [turnId]: next };
+    });
+    setLayouts((prev) => {
+      const slice = prev[turnId];
+      if (!slice) return prev;
+      const cur = slice.nodeHeights;
+      let next = cur;
+      for (const c of changes) {
+        if (c.type === "dimensions" && c.dimensions) {
+          const h = c.dimensions.height;
+          if (h > 0 && cur[c.id] !== h) {
+            if (next === cur) next = { ...cur };
+            next[c.id] = h;
           }
         }
-        if (next === cur) return prev;
-        return {
-          ...prev,
-          [turnId]: { ...slice, nodeHeights: next },
-        };
-      });
-    },
-    [],
-  );
+      }
+      if (next === cur) return prev;
+      return {
+        ...prev,
+        [turnId]: { ...slice, nodeHeights: next },
+      };
+    });
+  }, []);
 
   return { layouts, onNodesChange };
 }

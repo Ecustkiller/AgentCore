@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
+  type ExecutionPlan,
   ExecutionScopeContext,
   projectExecution,
-  type ExecutionPlan,
   useExecutionStore,
 } from "@/stores/execution";
 import { cleanup, render, screen } from "@testing-library/react";

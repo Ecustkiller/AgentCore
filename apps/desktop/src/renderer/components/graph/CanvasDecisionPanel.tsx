@@ -1,6 +1,6 @@
-import { ConversationDecisionPrompts } from "@/components/chat/ConversationDecisionPrompts";
 import { BackgroundTaskCard } from "@/components/chat/BackgroundTaskCard";
 import { CheckpointCard } from "@/components/chat/CheckpointCard";
+import { ConversationDecisionPrompts } from "@/components/chat/ConversationDecisionPrompts";
 import { EscalationCards } from "@/components/chat/EscalationCard";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
 import { RetryBanner } from "@/components/chat/RetryBanner";
@@ -289,9 +289,7 @@ export function CommandPanelBody({
           focused turn's ExecutionScope. */}
       <RetryBanner />
       {recoverable && message && (
-        <ExecutionScopeContext.Provider
-          value={assistantProjectionId(message)}
-        >
+        <ExecutionScopeContext.Provider value={assistantProjectionId(message)}>
           <div className="mx-4 mb-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2">
             <div className="flex items-start gap-2 text-xs text-destructive">
               <AlertTriangle size={13} className="mt-0.5 shrink-0" />

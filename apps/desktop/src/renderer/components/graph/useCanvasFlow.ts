@@ -17,23 +17,13 @@ import {
   type RunStatus,
   useMessageExecution,
 } from "@/stores/execution";
-import {
-  useConversationFold,
-  useGraphStore,
-} from "@/stores/graph";
+import { useConversationFold, useGraphStore } from "@/stores/graph";
 import { type EndpointKind, useSidePanelStore } from "@/stores/sidePanel";
 import { turnDetailPath } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
 import type { Edge, Node, NodeChange } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  type WaveBand,
-  computeGraphFold,
-  computeWaves,
-  deriveCaptainStatus,
-} from "./helpers";
-import { projectFlowEdges, projectFlowNodes } from "./projectFlowGraph";
 import type { SimpleTurnData } from "./SimpleTurnNode";
 import type { TurnGroupData } from "./TurnGroupNode";
 import {
@@ -42,10 +32,14 @@ import {
   TURN_GROUP_PAD,
 } from "./TurnGroupNode";
 import type { TurnSummaryData } from "./TurnSummaryNode";
+import { computeKeepBrightIds, hoverRelatedIds } from "./graphHover";
 import {
-  computeKeepBrightIds,
-  hoverRelatedIds,
-} from "./graphHover";
+  type WaveBand,
+  computeGraphFold,
+  computeWaves,
+  deriveCaptainStatus,
+} from "./helpers";
+import { projectFlowEdges, projectFlowNodes } from "./projectFlowGraph";
 import {
   GAP_Y,
   SIMPLE_NODE_HEIGHT,
@@ -63,9 +57,7 @@ import {
 const TURN_GROUP_FALLBACK_W = 760;
 const TURN_GROUP_FALLBACK_H = 470;
 
-function dedupeRoles(
-  exec: NonNullable<TurnItem["exec"]>,
-): string[] {
+function dedupeRoles(exec: NonNullable<TurnItem["exec"]>): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const a of exec.agents) {
@@ -125,10 +117,7 @@ export interface UseCanvasFlowOptions {
   effectiveFocus: string | null;
 }
 
-export function useCanvasFlow({
-  turns,
-  effectiveFocus,
-}: UseCanvasFlowOptions) {
+export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
   const navigate = useNavigate();
   const focusedExec = useMessageExecution(effectiveFocus);
   const conversationId = useConversationStore((s) => s.currentConversationId);
@@ -315,9 +304,11 @@ export function useCanvasFlow({
       ? ("horizontal" as const)
       : ("vertical" as const);
   const edgePathType =
-    effectiveLayoutKind === "tree" ? ("bezier" as const) : ("smoothstep" as const);
+    effectiveLayoutKind === "tree"
+      ? ("bezier" as const)
+      : ("smoothstep" as const);
 
-  const captainStatus = useMemo<RunStatus | null>(
+  const _captainStatus = useMemo<RunStatus | null>(
     () =>
       focusedExec && captainRun
         ? deriveCaptainStatus(focusedExec, captainRun.id)
@@ -371,6 +362,7 @@ export function useCanvasFlow({
   const [menuNodeId, setMenuNodeId] = useState<string | null>(null);
   const [keyboardFocusId, setKeyboardFocusId] = useState<string | null>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset hover/menu when focus target changes
   useEffect(() => {
     setHoveredNodeId(null);
     setMenuNodeId(null);
@@ -389,7 +381,11 @@ export function useCanvasFlow({
   const projectedByTurn = useMemo(() => {
     const out = new Map<
       string,
-      { layoutNodes: Node[]; presentData: Map<string, Node["data"]>; edges: Edge[] }
+      {
+        layoutNodes: Node[];
+        presentData: Map<string, Node["data"]>;
+        edges: Edge[];
+      }
     >();
     for (const { turnId, execution } of expandedTurnInputs) {
       const slice = turnLayouts[turnId];
@@ -398,8 +394,7 @@ export function useCanvasFlow({
         execution.runs,
         collapsedSubtrees,
       );
-      const captain =
-        execution.runs.find((r) => r.kind === "captain") ?? null;
+      const captain = execution.runs.find((r) => r.kind === "captain") ?? null;
       const capStatus = captain
         ? deriveCaptainStatus(execution, captain.id)
         : null;
@@ -501,201 +496,199 @@ export function useCanvasFlow({
   const expandedKey = fold.expandedTurns.join(",");
   const projectedReadyKey = [...projectedByTurn.keys()].sort().join(",");
 
-  const {
-    layoutNodes,
-    layoutEdges,
-    focusedGroupOrigin,
-    focusedWaves,
-  } = useMemo(() => {
-    const turnsNow = turnsRef.current;
-    const outNodes: Node[] = [];
-    const outEdges: Edge[] = [];
-    let y = 0;
-    const lastTurnId = turnsNow[turnsNow.length - 1]?.id;
-    let groupOrigin: {
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    } | null = null;
-    let waves: WaveBand[] = [];
+  // *Key strings force recompute when ref-backed turn data changes under stable deps.
+  const { layoutNodes, layoutEdges, focusedGroupOrigin, focusedWaves } =
+    // biome-ignore lint/correctness/useExhaustiveDependencies: turnSpineKey/expandedKey/projectedReadyKey are intentional invalidation keys
+    useMemo(() => {
+      const turnsNow = turnsRef.current;
+      const outNodes: Node[] = [];
+      const outEdges: Edge[] = [];
+      let y = 0;
+      const lastTurnId = turnsNow[turnsNow.length - 1]?.id;
+      let groupOrigin: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      } | null = null;
+      let waves: WaveBand[] = [];
 
-    for (const t of turnsNow) {
-      const expanded = t.kind === "team" && expandedTurnSet.has(t.id);
-      const projected = projectedByTurn.get(t.id);
-      const slice = turnLayouts[t.id];
+      for (const t of turnsNow) {
+        const expanded = t.kind === "team" && expandedTurnSet.has(t.id);
+        const projected = projectedByTurn.get(t.id);
+        const slice = turnLayouts[t.id];
 
-      if (expanded && projected && slice?.layoutReady && slice.bbox) {
-        const notes = t.exec?.teamNotes;
-        const notesFooter =
-          (notes?.length ?? 0) > 0 ? TURN_GROUP_NOTES_FOOTER_H : 0;
-        const width = Math.max(
-          TURN_GROUP_FALLBACK_W,
-          slice.bbox.width + TURN_GROUP_PAD * 2,
-        );
-        const height = Math.max(
-          TURN_GROUP_FALLBACK_H + notesFooter,
-          TURN_GROUP_HEADER_H +
-            slice.bbox.height +
-            TURN_GROUP_PAD * 2 +
-            notesFooter,
-        );
-        const groupX = -(width / 2);
-        const groupData: TurnGroupData = {
-          messageId: t.id,
-          taskSummary: t.exec?.taskSummary || t.prompt || "团队回合",
-          pendingDecisions: t.pendingDecisions,
-          recoverable: t.recoverable,
-          onMaximize: () => maximizeTurn(t.id),
-          onCollapse: () => onCollapseTurn(t.id),
-          teamNotes: notes,
-          status: t.exec?.status,
-        };
-        outNodes.push({
-          id: t.id,
-          type: "turnGroup",
-          position: { x: groupX, y },
-          style: { width, height },
-          data: groupData,
-          draggable: false,
-          zIndex: 0,
-          className: morphing ? "graph-layout-morphing" : undefined,
-        });
-        if (t.id === effectiveFocus) {
-          groupOrigin = { x: groupX, y, width, height };
-          if (t.exec) {
-            const cap = t.exec.runs.find((r) => r.kind === "captain");
-            waves = computeWaves(
-              t.exec,
-              slice.positions,
-              slice.bbox,
-              effectiveLayoutKind,
-              cap?.id ?? null,
-            );
+        if (expanded && projected && slice?.layoutReady && slice.bbox) {
+          const notes = t.exec?.teamNotes;
+          const notesFooter =
+            (notes?.length ?? 0) > 0 ? TURN_GROUP_NOTES_FOOTER_H : 0;
+          const width = Math.max(
+            TURN_GROUP_FALLBACK_W,
+            slice.bbox.width + TURN_GROUP_PAD * 2,
+          );
+          const height = Math.max(
+            TURN_GROUP_FALLBACK_H + notesFooter,
+            TURN_GROUP_HEADER_H +
+              slice.bbox.height +
+              TURN_GROUP_PAD * 2 +
+              notesFooter,
+          );
+          const groupX = -(width / 2);
+          const groupData: TurnGroupData = {
+            messageId: t.id,
+            taskSummary: t.exec?.taskSummary || t.prompt || "团队回合",
+            pendingDecisions: t.pendingDecisions,
+            recoverable: t.recoverable,
+            onMaximize: () => maximizeTurn(t.id),
+            onCollapse: () => onCollapseTurn(t.id),
+            teamNotes: notes,
+            status: t.exec?.status,
+          };
+          outNodes.push({
+            id: t.id,
+            type: "turnGroup",
+            position: { x: groupX, y },
+            style: { width, height },
+            data: groupData,
+            draggable: false,
+            zIndex: 0,
+            className: morphing ? "graph-layout-morphing" : undefined,
+          });
+          if (t.id === effectiveFocus) {
+            groupOrigin = { x: groupX, y, width, height };
+            if (t.exec) {
+              const cap = t.exec.runs.find((r) => r.kind === "captain");
+              waves = computeWaves(
+                t.exec,
+                slice.positions,
+                slice.bbox,
+                effectiveLayoutKind,
+                cap?.id ?? null,
+              );
+            }
           }
-        }
 
-        for (const n of projected.layoutNodes) {
-          const nested = nestUnderTurn(n, t.id);
-          const classes = [
-            nested.className,
-            morphing ? "graph-layout-morphing" : "",
-            keyboardFocusId === nested.id ? "graph-keyboard-focus" : "",
-          ]
-            .filter(Boolean)
-            .join(" ");
-          nested.className = classes || undefined;
-          outNodes.push(nested);
+          for (const n of projected.layoutNodes) {
+            const nested = nestUnderTurn(n, t.id);
+            const classes = [
+              nested.className,
+              morphing ? "graph-layout-morphing" : "",
+              keyboardFocusId === nested.id ? "graph-keyboard-focus" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
+            nested.className = classes || undefined;
+            outNodes.push(nested);
+          }
+          y += height + GAP_Y;
+        } else if (expanded && t.kind === "team") {
+          // Expanded but layout still computing — placeholder compound.
+          const notes = t.exec?.teamNotes;
+          const notesFooter =
+            (notes?.length ?? 0) > 0 ? TURN_GROUP_NOTES_FOOTER_H : 0;
+          const width = TURN_GROUP_FALLBACK_W;
+          const height = TURN_GROUP_FALLBACK_H + notesFooter;
+          const groupX = -(width / 2);
+          const groupData: TurnGroupData = {
+            messageId: t.id,
+            taskSummary: t.exec?.taskSummary || t.prompt || "团队回合",
+            pendingDecisions: t.pendingDecisions,
+            recoverable: t.recoverable,
+            onMaximize: () => maximizeTurn(t.id),
+            onCollapse: () => onCollapseTurn(t.id),
+            teamNotes: notes,
+            status: t.exec?.status,
+          };
+          outNodes.push({
+            id: t.id,
+            type: "turnGroup",
+            position: { x: groupX, y },
+            style: { width, height },
+            data: groupData,
+            draggable: false,
+            zIndex: 0,
+          });
+          if (t.id === effectiveFocus) {
+            groupOrigin = { x: groupX, y, width, height };
+          }
+          y += height + GAP_Y;
+        } else if (t.kind === "team") {
+          const exec = t.exec;
+          const noteCount = exec?.teamNotes.length ?? 0;
+          const data: TurnSummaryData = {
+            taskSummary: exec?.taskSummary || t.prompt || "团队回合",
+            status: exec?.status ?? "planning",
+            roles: exec ? dedupeRoles(exec) : [],
+            agentCount: exec?.agents.length ?? 0,
+            completed: exec?.progress.completed ?? 0,
+            total: exec?.progress.total ?? 0,
+            pendingDecisions: t.pendingDecisions,
+            recoverable: t.recoverable,
+            noteCount,
+          };
+          outNodes.push({
+            id: t.id,
+            type: "teamTurn",
+            position: { x: -(TURN_NODE_WIDTH / 2), y },
+            data,
+            draggable: false,
+          });
+          y += TEAM_NODE_HEIGHT + (noteCount > 0 ? 28 : 0) + GAP_Y;
+        } else {
+          const data: SimpleTurnData = {
+            prompt: t.prompt,
+            answer: t.answer,
+            running: t.running,
+            enter:
+              t.id === lastTurnId &&
+              !firstSpineRef.current &&
+              !seenTurnsRef.current.has(t.id),
+          };
+          outNodes.push({
+            id: t.id,
+            type: "simpleTurn",
+            position: { x: -(TURN_NODE_WIDTH / 2), y },
+            data,
+            draggable: false,
+          });
+          y += SIMPLE_NODE_HEIGHT + GAP_Y;
         }
-        y += height + GAP_Y;
-      } else if (expanded && t.kind === "team") {
-        // Expanded but layout still computing — placeholder compound.
-        const notes = t.exec?.teamNotes;
-        const notesFooter =
-          (notes?.length ?? 0) > 0 ? TURN_GROUP_NOTES_FOOTER_H : 0;
-        const width = TURN_GROUP_FALLBACK_W;
-        const height = TURN_GROUP_FALLBACK_H + notesFooter;
-        const groupX = -(width / 2);
-        const groupData: TurnGroupData = {
-          messageId: t.id,
-          taskSummary: t.exec?.taskSummary || t.prompt || "团队回合",
-          pendingDecisions: t.pendingDecisions,
-          recoverable: t.recoverable,
-          onMaximize: () => maximizeTurn(t.id),
-          onCollapse: () => onCollapseTurn(t.id),
-          teamNotes: notes,
-          status: t.exec?.status,
-        };
-        outNodes.push({
-          id: t.id,
-          type: "turnGroup",
-          position: { x: groupX, y },
-          style: { width, height },
-          data: groupData,
-          draggable: false,
-          zIndex: 0,
-        });
-        if (t.id === effectiveFocus) {
-          groupOrigin = { x: groupX, y, width, height };
-        }
-        y += height + GAP_Y;
-      } else if (t.kind === "team") {
-        const exec = t.exec;
-        const noteCount = exec?.teamNotes.length ?? 0;
-        const data: TurnSummaryData = {
-          taskSummary: exec?.taskSummary || t.prompt || "团队回合",
-          status: exec?.status ?? "planning",
-          roles: exec ? dedupeRoles(exec) : [],
-          agentCount: exec?.agents.length ?? 0,
-          completed: exec?.progress.completed ?? 0,
-          total: exec?.progress.total ?? 0,
-          pendingDecisions: t.pendingDecisions,
-          recoverable: t.recoverable,
-          noteCount,
-        };
-        outNodes.push({
-          id: t.id,
-          type: "teamTurn",
-          position: { x: -(TURN_NODE_WIDTH / 2), y },
-          data,
-          draggable: false,
-        });
-        y += TEAM_NODE_HEIGHT + (noteCount > 0 ? 28 : 0) + GAP_Y;
-      } else {
-        const data: SimpleTurnData = {
-          prompt: t.prompt,
-          answer: t.answer,
-          running: t.running,
-          enter:
-            t.id === lastTurnId &&
-            !firstSpineRef.current &&
-            !seenTurnsRef.current.has(t.id),
-        };
-        outNodes.push({
-          id: t.id,
-          type: "simpleTurn",
-          position: { x: -(TURN_NODE_WIDTH / 2), y },
-          data,
-          draggable: false,
-        });
-        y += SIMPLE_NODE_HEIGHT + GAP_Y;
       }
-    }
 
-    for (const t of turnsNow) seenTurnsRef.current.add(t.id);
-    firstSpineRef.current = false;
+      for (const t of turnsNow) seenTurnsRef.current.add(t.id);
+      firstSpineRef.current = false;
 
-    for (let i = 1; i < turnsNow.length; i++) {
-      outEdges.push({
-        id: `${turnsNow[i - 1].id}->${turnsNow[i].id}`,
-        source: turnsNow[i - 1].id,
-        target: turnsNow[i].id,
-        type: "smoothstep",
-        selectable: false,
-        style: { stroke: "var(--border)" },
-      });
-    }
+      for (let i = 1; i < turnsNow.length; i++) {
+        outEdges.push({
+          id: `${turnsNow[i - 1].id}->${turnsNow[i].id}`,
+          source: turnsNow[i - 1].id,
+          target: turnsNow[i].id,
+          type: "smoothstep",
+          selectable: false,
+          style: { stroke: "var(--border)" },
+        });
+      }
 
-    return {
-      layoutNodes: outNodes,
-      layoutEdges: outEdges,
-      focusedGroupOrigin: groupOrigin,
-      focusedWaves: waves,
-    };
-  }, [
-    turnSpineKey,
-    expandedKey,
-    projectedReadyKey,
-    effectiveFocus,
-    projectedByTurn,
-    turnLayouts,
-    expandedTurnSet,
-    maximizeTurn,
-    onCollapseTurn,
-    morphing,
-    keyboardFocusId,
-    effectiveLayoutKind,
-  ]);
+      return {
+        layoutNodes: outNodes,
+        layoutEdges: outEdges,
+        focusedGroupOrigin: groupOrigin,
+        focusedWaves: waves,
+      };
+    }, [
+      turnSpineKey,
+      expandedKey,
+      projectedReadyKey,
+      effectiveFocus,
+      projectedByTurn,
+      turnLayouts,
+      expandedTurnSet,
+      maximizeTurn,
+      onCollapseTurn,
+      morphing,
+      keyboardFocusId,
+      effectiveLayoutKind,
+    ]);
 
   // Patch presentation data onto layout-stable nodes.
   const baseNodes = useMemo(() => {
@@ -913,9 +906,7 @@ export function useCanvasFlow({
   );
 
   const layoutReady =
-    !effectiveFocus ||
-    !focusedExec ||
-    (focusedSlice?.layoutReady ?? false);
+    !effectiveFocus || !focusedExec || (focusedSlice?.layoutReady ?? false);
 
   return {
     nodes,

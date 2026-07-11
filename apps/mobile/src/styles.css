@@ -276,6 +276,40 @@ body {
   opacity: 0.6;
 }
 
+/* Relative wrapper so the floating 回到底部 button stays put over the scroller. */
+.messages-pane {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Light affordance when the user has scrolled away from the live tail. */
+.jump-bottom {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 2px 8px color-mix(in oklch, var(--fg) 12%, transparent);
+}
+
+.jump-bottom:active {
+  color: var(--fg);
+}
+
 input {
   min-height: 44px;
   padding: 0 14px;
@@ -355,6 +389,7 @@ button.link {
 
 .messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;

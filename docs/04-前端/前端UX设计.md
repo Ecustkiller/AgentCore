@@ -107,7 +107,7 @@ skip_if:
 
 **协作图默认展开（✅ 已落地）**：内嵌协作图默认一直展开（含完成 / 取消 / 失败与辩论回合），保留状态条折叠按钮；用户手动切换后以其选择为准（`expandedOverride` 优先于默认）。辩论正文仍归画布放大态「辩论室」（§4.2），聊天侧图展开不替代赛事页。→ 见代码 `InlineTeamGraph.tsx`（`expandedOverride ?? true`）。
 
-⏳ **余项**：`RecoveryActions` 的重试/regenerate 仍取 `lastUserMessageId()` 而非 `ExecutionScope`——画布聚焦历史失败回合点重试可能打到最新一轮；「忽略」仅 `clearExecution`、后端无感知。→ 见代码：`StatusStrip.tsx`、`services/turns/regenerate.ts`；后端契约见 [执行引擎 §retry-failed](/docs/03-AI核心/执行引擎架构设计.md)
+**救火行 `RecoveryActions`（✅）**：重试 / regenerate 经 `userMessageIdForAssistant(ExecutionScope)` 锚定本回合用户消息（找不到才回落 `lastUserMessageId()`）；「忽略」先 `acceptRunOutcome(..., reason: recovery_ignored)` 再 `clearExecution`。→ 见代码 `StatusStrip.tsx`；后端契约见 [执行引擎 §retry-failed](/docs/03-AI核心/执行引擎架构设计.md)
 
 **出现时机规则**（核心决策）：
 
@@ -121,7 +121,7 @@ skip_if:
 
 **为何无「规划中」态**（决策）：CEO + `delegate` 架构下 `run_plan` 同步到达，无独立规划空窗；「系统在思考」由 CEO reasoning 气泡覆盖；`tool_use_start(delegate)` 前无法预知是否组团，故状态条不设「规划中」态。→ 见代码 `tools/builtin/delegate/`、`runtime/engine/`。
 
-**中间可见性（✅ Phase 1 · ⏳ Phase 2a 后端）**：并行 worker 产出经 `run_output_delta` fold 到 `agent.outputChunks`；协作图节点 `AgentNodeActivity` 显示 `livePreview`；侧栏 `RunDetailBody` 流式 Markdown。**审查预警**：`lib/reviewConcern.ts` 解析 `7/10`、方向类措辞 → 节点「待关注 / 方向风险」琥珀/红徽章。**一键下钻**：`StatusStrip`「查看进行中」→ 打开首个 running worker 侧栏；`RunDetailBody` 进行中提示流式更新 +「记下改法」预填输入框 +「停止整轮」。**跑一半改方向**：`RunDetailBody`「立即改此人」（Step 1 交互 ✅；scheduler 单人取消 + 冷重跑 ⏳，见 [`多轮编排与队员热修.md` §十](/docs/03-AI核心/多轮编排与队员热修.md)）。**团队便签**：协作图下 `TeamNotesPanel`；有便签时状态条「团队便签 N」徽章（见 [`Agent协作模式.md` §便签墙](/docs/03-AI核心/Agent协作模式.md)）。
+**中间可见性（✅ Phase 1 · ⏳ Phase 2a 后端）**：并行 worker 产出经 `run_output_delta` fold 到 `agent.outputChunks`；协作图节点 `AgentNodeActivity` 显示 `livePreview`；侧栏 `RunDetailBody` 流式 Markdown。**审查预警**：`lib/reviewConcern.ts` 解析 `7/10`、方向类措辞 → 节点「待关注 / 方向风险」琥珀/红徽章。**一键下钻**：`StatusStrip`「查看进行中」→ 打开首个 running worker 侧栏；`RunDetailBody` 进行中提示流式更新 +「记下改法」预填输入框 +「停止整轮」。**跑一半改方向（`run_redirect` ✅）**：`RunDetailBody`「立即改此人」→ 单人 cancel + 热续写 / 冷接手 + 忽略收口（Step 1–4 全 ✅，见 [`多轮编排与队员热修.md` §十](/docs/03-AI核心/多轮编排与队员热修.md)）。**团队便签**：协作图下 `TeamNotesPanel`；有便签时状态条「团队便签 N」徽章（见 [`Agent协作模式.md` §便签墙](/docs/03-AI核心/Agent协作模式.md)）。
 
 → 见代码：`lib/reviewConcern.ts`、`StatusStrip.tsx`、`RunDetailBody.tsx`、`agentNode/*`、`TeamNotesPanel.tsx`。
 

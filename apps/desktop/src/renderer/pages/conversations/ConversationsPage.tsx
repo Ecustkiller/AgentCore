@@ -10,8 +10,8 @@ import {
   useDeleteConversation,
   useUnarchiveConversation,
 } from "@/hooks/useConversations";
-import { startNewConversation } from "@/lib/newConversation";
 import { deriveGroupWorkspaceIsLocal } from "@/lib/conversationWorkspaceMode";
+import { startNewConversation } from "@/lib/newConversation";
 import { notifyError } from "@/lib/toast";
 import type { FolderMeta } from "@/services/folders";
 import { type Conversation, useConversationStore } from "@/stores/conversation";

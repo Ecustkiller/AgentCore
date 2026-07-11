@@ -15,8 +15,8 @@ import type {
   PlanReviewStep,
 } from "@/types/events";
 import type { InteractionKind } from "@/types/interactionExt";
-import type { InteractionEntry } from "./types";
 import { useInteractionStore } from "./store";
+import type { InteractionEntry } from "./types";
 
 function str(v: unknown, fallback = ""): string {
   return typeof v === "string" ? v : fallback;
@@ -67,7 +67,9 @@ export function entryToCheckpoint(e: InteractionEntry): CheckpointDisplay {
   };
 }
 
-export function entryToNonBlockingAsk(e: InteractionEntry): NonBlockingAskDisplay {
+export function entryToNonBlockingAsk(
+  e: InteractionEntry,
+): NonBlockingAskDisplay {
   const p = e.payload;
   return {
     id: e.id,
@@ -146,17 +148,16 @@ export function entryToDelegationAuth(e: InteractionEntry): DelegationAuthView {
   };
 }
 
-const DECISION_TO_STATUS: Record<
-  string,
-  DebateRoundDecision["status"]
-> = {
+const DECISION_TO_STATUS: Record<string, DebateRoundDecision["status"]> = {
   continue: "continued",
   conclude: "concluded",
   timeout: "timeout",
 };
 
 /** Map a debate_round InteractionEntry to the SteeringPanel view model. */
-export function entryToDebateDecision(e: InteractionEntry): DebateRoundDecision {
+export function entryToDebateDecision(
+  e: InteractionEntry,
+): DebateRoundDecision {
   const p = e.payload;
   const r = e.resolution ?? {};
   let status: DebateRoundDecision["status"] = "pending";
@@ -173,8 +174,7 @@ export function entryToDebateDecision(e: InteractionEntry): DebateRoundDecision 
     converged: Boolean(p.converged),
     rationale: str(p.rationale),
     status,
-    decisionFocus:
-      status === "continued" ? str(r.focus ?? p.focus) : "",
+    decisionFocus: status === "continued" ? str(r.focus ?? p.focus) : "",
   };
 }
 
@@ -215,9 +215,9 @@ export function messageNonBlockingAsks(
   conversationId: string,
   messageId: string,
 ): NonBlockingAskDisplay[] {
-  return listMessageEntries(conversationId, messageId, [
-    "question_posted",
-  ]).map(entryToNonBlockingAsk);
+  return listMessageEntries(conversationId, messageId, ["question_posted"]).map(
+    entryToNonBlockingAsk,
+  );
 }
 
 export function messagePlanReviews(

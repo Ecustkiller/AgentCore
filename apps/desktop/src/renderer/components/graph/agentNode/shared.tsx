@@ -199,10 +199,7 @@ export function isDebateAgentNode(
 
 /** 从 `run_context` 的 revision 通道抽出改点正文（唤回原因）。 */
 export function revisionFeedbackSummary(
-  blocks:
-    | ReadonlyArray<{ channel: string; body: string }>
-    | null
-    | undefined,
+  blocks: ReadonlyArray<{ channel: string; body: string }> | null | undefined,
 ): string | null {
   if (!blocks?.length) return null;
   const block = blocks.find((b) => b.channel === "revision");
@@ -240,8 +237,7 @@ export function buildRevisionBadge(opts: {
 }): RevisionBadgePresentation | null {
   if (!opts.isRevision || !opts.revision || opts.revision <= 1) return null;
   if (opts.isDebate) {
-    const n =
-      opts.round && opts.round > 0 ? opts.round : opts.revision;
+    const n = opts.round && opts.round > 0 ? opts.round : opts.revision;
     return {
       kind: "debate",
       label: `第 ${n} 轮`,

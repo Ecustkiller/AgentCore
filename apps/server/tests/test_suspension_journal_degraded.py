@@ -149,9 +149,8 @@ async def test_save_paused_turn_raises_and_does_not_seal_on_persist_failure() ->
             with patch(
                 "agentcore.runtime.suspension_persistence._notify_pause",
                 AsyncMock(),
-            ):
-                with pytest.raises(RuntimeError, match="db down"):
-                    await save_paused_turn(suspension)
+            ), pytest.raises(RuntimeError, match="db down"):
+                await save_paused_turn(suspension)
         assert writer.sealed is False
     finally:
         current_journal_writer.reset(token)

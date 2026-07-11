@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { computeKeepBrightIds, hoverRelatedIds } from "../graphHover";
 
+function sortedIds(set: Set<string> | null): string[] {
+  expect(set).not.toBeNull();
+  return [...(set ?? [])].sort();
+}
+
 describe("hoverRelatedIds", () => {
   const edges = [
     { source: "a", target: "b" },
@@ -13,7 +18,7 @@ describe("hoverRelatedIds", () => {
   });
 
   it("includes the hovered node and full upstream + downstream path", () => {
-    expect([...hoverRelatedIds("b", edges)!].sort()).toEqual(["a", "b", "c"]);
+    expect(sortedIds(hoverRelatedIds("b", edges))).toEqual(["a", "b", "c"]);
   });
 
   it("walks past direct neighbors along the chain", () => {
@@ -22,13 +27,13 @@ describe("hoverRelatedIds", () => {
       { source: "b", target: "c" },
       { source: "c", target: "d" },
     ];
-    expect([...hoverRelatedIds("b", chain)!].sort()).toEqual([
+    expect(sortedIds(hoverRelatedIds("b", chain))).toEqual([
       "a",
       "b",
       "c",
       "d",
     ]);
-    expect([...hoverRelatedIds("c", chain)!].sort()).toEqual([
+    expect(sortedIds(hoverRelatedIds("c", chain))).toEqual([
       "a",
       "b",
       "c",
@@ -37,8 +42,8 @@ describe("hoverRelatedIds", () => {
   });
 
   it("does not cross into an unrelated component", () => {
-    expect([...hoverRelatedIds("a", edges)!].sort()).toEqual(["a", "b", "c"]);
-    expect([...hoverRelatedIds("x", edges)!].sort()).toEqual(["x", "y"]);
+    expect(sortedIds(hoverRelatedIds("a", edges))).toEqual(["a", "b", "c"]);
+    expect(sortedIds(hoverRelatedIds("x", edges))).toEqual(["x", "y"]);
   });
 
   it("works with namespaced canvas ids", () => {
@@ -47,7 +52,7 @@ describe("hoverRelatedIds", () => {
       { source: "t1::b", target: "t1::c" },
       { source: "t1::c", target: "t1::d" },
     ];
-    expect([...hoverRelatedIds("t1::b", nested)!].sort()).toEqual([
+    expect(sortedIds(hoverRelatedIds("t1::b", nested))).toEqual([
       "t1::a",
       "t1::b",
       "t1::c",
@@ -71,9 +76,6 @@ describe("computeKeepBrightIds", () => {
   it("intersects hover and inject constraints", () => {
     const hover = new Set(["a", "b", "c"]);
     const inject = new Set(["b", "c", "d"]);
-    expect([...computeKeepBrightIds(hover, inject)!].sort()).toEqual([
-      "b",
-      "c",
-    ]);
+    expect(sortedIds(computeKeepBrightIds(hover, inject))).toEqual(["b", "c"]);
   });
 });

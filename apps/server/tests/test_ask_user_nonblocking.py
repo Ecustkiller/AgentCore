@@ -9,8 +9,6 @@ stream a non-gating ``content_delta`` notice (NOT a checkpoint card), and feed t
 
 from pathlib import Path
 
-import pytest
-
 from agentcore.core.types import ToolEffect
 from agentcore.runtime.events import EventSink, EventType, SSEEvent
 from agentcore.tools.builtin.ask_user import AskUserTool

@@ -1,4 +1,9 @@
+import { FollowupChips } from "@/components/chat/FollowupChips";
 import { TurnComposer } from "@/components/chat/message-input/TurnComposer";
+import {
+  useActiveGenerating,
+  useActiveMessages,
+} from "@/stores/conversation";
 
 /**
  * Persistent bottom command bar for the team canvas (画布常驻命令栏，前端UX设计.md
@@ -14,6 +19,9 @@ import { TurnComposer } from "@/components/chat/message-input/TurnComposer";
  *
  * 后台云端 toggle (`allowBackground`): offered ONLY where the resulting 后台云端任务
  * card is afterward visible (the overview's 指挥台 feed), NOT the single-turn detail page.
+ *
+ * 下一步推荐 chips sit above the composer (same gate as ChatView): latest finished
+ * assistant turn's persisted/live followups.
  */
 export function CanvasCommandBar({
   onDispatch,
@@ -24,6 +32,14 @@ export function CanvasCommandBar({
   waiting: boolean;
   allowBackground?: boolean;
 }) {
+  const messages = useActiveMessages();
+  const isGenerating = useActiveGenerating();
+  const last = messages[messages.length - 1];
+  const followups =
+    !isGenerating && last?.role === "assistant" && !last.isStreaming
+      ? (last.followups ?? [])
+      : [];
+
   return (
     <div className="shrink-0 border-t border-border bg-background px-4 pb-4 pt-2">
       {waiting && (
@@ -32,6 +48,7 @@ export function CanvasCommandBar({
         </div>
       )}
       <div className="mx-auto max-w-3xl">
+        <FollowupChips followups={followups} />
         <TurnComposer
           placeholder="向 CEO 下达下一步指令…"
           allowBackground={allowBackground}

@@ -207,8 +207,9 @@ export function toMessage(m: BackendMessage): Message {
     rounds: m.rounds ?? undefined,
     collab: m.collab ?? undefined,
     // 下一步推荐 chips (DERIVED 持久化): replay the last turn's persisted chips on reload,
-    // mirroring the live `attachFollowupsToLastMessage` stamp (twin of the title). Empty []
-    // server-side → undefined; ChatView only surfaces them on the latest finished turn.
+    // mirroring the live `attachFollowups` stamp (twin of the title). Empty []
+    // server-side → undefined; ChatView / CanvasCommandBar only surface them on the
+    // latest finished turn.
     followups: m.followups?.length ? m.followups : undefined,
     // 回复反馈 (点赞/点踩): replay the persisted rating so a reloaded bubble shows the
     // user's thumbs; null server-side → null (未评价).

@@ -7,7 +7,6 @@ conversations (IDOR-safe). Sending runs the turn as a detached task tracked in t
 
 import asyncio
 from datetime import datetime
-
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Query, Response
@@ -255,7 +254,7 @@ async def send_message(
     # 提问确认交互统一 D9：热路挂起中同对话发新消息 → 409（regenerate/retry 不拦）
     from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
 
-    _HOT = frozenset(
+    _hot = frozenset(
         {
             InteractionKind.APPROVAL,
             InteractionKind.DELEGATION_AUTHORIZATION,
@@ -266,7 +265,7 @@ async def send_message(
     hot_pending = [
         r
         for r in default_interaction_registry().list_pending(conversation_id)
-        if r.kind in _HOT
+        if r.kind in _hot
         and not (
             r.kind is InteractionKind.ESCALATION and (r.payload or {}).get("awaiting") == "ceo"
         )

@@ -1,3 +1,9 @@
+import {
+  distanceFromBottom,
+  isScrollUpTouch,
+  isScrollUpWheel,
+  nextStickState,
+} from "@/lib/stickScroll";
 import type { Message } from "@/stores/conversation";
 import {
   useCallback,
@@ -16,8 +22,9 @@ import {
  *
  * - **Stick to bottom** while the user is at the live head, so a streaming turn
  *   stays in view — but only when the window actually reaches the tail
- *   (`hasMoreAfter === false`). In a historical window (after a search-hit jump)
- *   sticking is disabled, so appended pages don't yank the viewport past them.
+ *   (`hasMoreAfter === false`). Upward wheel/touch detaches immediately so the
+ *   stream cannot yank the viewport back; hysteresis governs position-based
+ *   re-attach. In a historical window sticking is disabled.
  * - **Load older on scroll-up**: near the top, fetch the previous page and
  *   prepend it; the inflated top is anchored so the viewport stays on the same
  *   line instead of jumping.
@@ -33,8 +40,6 @@ import {
  * append-only and needs none of the windowing here.
  */
 
-/** Re-stick / detach band: treat "within this of the bottom" as at-bottom. */
-const STICK_THRESHOLD_PX = 80;
 /** Fetch the previous page once the user scrolls within this of the top. */
 const TOP_LOAD_THRESHOLD_PX = 240;
 /** Fetch the next page once within this of a historical window's bottom. */
@@ -62,6 +67,7 @@ export function useChatScroll(opts: ChatScrollOptions) {
   const { messages, resetKey, contentKey, loadingOlder } = opts;
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
+  const touchYRef = useRef<number | null>(null);
   const [atBottom, setAtBottom] = useState(true);
 
   // Latest props for the scroll listener, so it subscribes once yet always reads
@@ -79,12 +85,9 @@ export function useChatScroll(opts: ChatScrollOptions) {
 
   const firstId = messages[0]?.id ?? null;
 
-  const isNearBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return true;
-    return (
-      el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD_PX
-    );
+  const applyStick = useCallback((stuck: boolean) => {
+    stickRef.current = stuck;
+    setAtBottom(stuck);
   }, []);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior) => {
@@ -97,27 +100,31 @@ export function useChatScroll(opts: ChatScrollOptions) {
     // Reading history (newer pages unloaded): snap back to the live head by
     // reloading the latest window; the content-key effect then lands at bottom.
     if (liveRef.current.hasMoreAfter) {
-      stickRef.current = true;
-      setAtBottom(true);
+      applyStick(true);
       liveRef.current.onJumpToLatest();
       return;
     }
-    stickRef.current = true;
-    setAtBottom(true);
+    applyStick(true);
     scrollToBottom("auto");
-  }, [scrollToBottom]);
+  }, [applyStick, scrollToBottom]);
 
-  // User-driven scroll: toggle the stick, and page in either direction when the
-  // user reaches an edge that still has more.
+  // User-driven scroll + upward gesture: toggle stick, page at either edge.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+
+    const syncStickFromPosition = () => {
+      const live = liveRef.current;
+      if (live.hasMoreAfter) {
+        applyStick(false);
+        return;
+      }
+      applyStick(nextStickState(stickRef.current, distanceFromBottom(el)));
+    };
+
     const onScroll = () => {
       const live = liveRef.current;
-      const near = isNearBottom();
-      // Stick only at the true tail — never in a historical window.
-      stickRef.current = near && !live.hasMoreAfter;
-      setAtBottom(near && !live.hasMoreAfter);
+      syncStickFromPosition();
 
       if (
         el.scrollTop < TOP_LOAD_THRESHOLD_PX &&
@@ -134,18 +141,61 @@ export function useChatScroll(opts: ChatScrollOptions) {
       }
 
       if (
-        el.scrollHeight - el.scrollTop - el.clientHeight <
-          BOTTOM_LOAD_THRESHOLD_PX &&
+        distanceFromBottom(el) < BOTTOM_LOAD_THRESHOLD_PX &&
         live.hasMoreAfter &&
         !live.loadingNewer
       ) {
         live.onLoadNewer();
       }
     };
+
+    const onWheel = (e: WheelEvent) => {
+      if (
+        isScrollUpWheel(e.deltaY) &&
+        stickRef.current &&
+        !liveRef.current.hasMoreAfter
+      ) {
+        applyStick(false);
+      }
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      touchYRef.current = e.touches[0]?.clientY ?? null;
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY;
+      const prev = touchYRef.current;
+      if (y == null || prev == null) return;
+      if (
+        isScrollUpTouch(prev, y) &&
+        stickRef.current &&
+        !liveRef.current.hasMoreAfter
+      ) {
+        applyStick(false);
+      }
+      touchYRef.current = y;
+    };
+
+    const onTouchEnd = () => {
+      touchYRef.current = null;
+    };
+
     el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
-    // Reads live flags/edges through liveRef, so it binds once per mount.
-  }, [isNearBottom]);
+    el.addEventListener("wheel", onWheel, { passive: true });
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: true });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    el.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, [applyStick]);
 
   // Older page landed (or finished with nothing new): restore the anchored
   // position so the inflated top doesn't shift the user's place, then release
@@ -169,18 +219,18 @@ export function useChatScroll(opts: ChatScrollOptions) {
     if (stickRef.current && !liveRef.current.hasMoreAfter) {
       scrollToBottom("auto");
     } else {
-      setAtBottom(isNearBottom() && !liveRef.current.hasMoreAfter);
+      // Detached or historical window: keep 回到底部 visible until jump / re-attach.
+      setAtBottom(false);
     }
-  }, [contentKey, isNearBottom, scrollToBottom]);
+  }, [contentKey, scrollToBottom]);
 
   // Context switch: re-stick and land on the latest item, dropping any anchor.
   // biome-ignore lint/correctness/useExhaustiveDependencies: resetKey is an intentional re-run key.
   useLayoutEffect(() => {
-    stickRef.current = true;
-    setAtBottom(true);
+    applyStick(true);
     anchorRef.current = null;
     scrollToBottom("auto");
-  }, [resetKey, scrollToBottom]);
+  }, [resetKey, applyStick, scrollToBottom]);
 
   return { scrollRef, atBottom, jumpToBottom };
 }

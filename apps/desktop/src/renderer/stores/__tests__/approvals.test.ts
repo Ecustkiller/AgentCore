@@ -138,10 +138,7 @@ describe("autoApproveSiblings (本轮内都允许 batch放行)", () => {
 
   it("skips cards already submitting", () => {
     const siblings = autoApproveSiblings(
-      [
-        card(),
-        card({ approvalId: "a2", toolCallId: "a2", resolving: true }),
-      ],
+      [card(), card({ approvalId: "a2", toolCallId: "a2", resolving: true })],
       card(),
       "approve_always",
     );

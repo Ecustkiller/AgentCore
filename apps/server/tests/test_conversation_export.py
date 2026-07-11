@@ -82,7 +82,7 @@ def test_json_export_is_full_fidelity():
             "a",
             reasoning_content="思考",
             citations=[{"url": "https://x.io", "title": "X"}],
-            finish_reason="stop",
+            usage={"status": "complete", "finish_reason": "cancelled"},
         ),
     ]
     out = conversation_to_json(conv, messages)
@@ -92,8 +92,34 @@ def test_json_export_is_full_fidelity():
     assert len(out["messages"]) == 2
     assistant = out["messages"][1]
     assert assistant["reasoning_content"] == "思考"
-    assert assistant["finish_reason"] == "stop"
+    # finish_reason is projected from usage when journal is absent.
+    assert assistant["finish_reason"] == "cancelled"
     assert assistant["citations"] == [{"url": "https://x.io", "title": "X"}]
+
+
+def test_json_export_finish_reason_from_journal():
+    """Journal ``turn_end`` is the preferred source over usage."""
+    conv = _conv("J")
+    assistant = _msg(
+        "assistant",
+        "a",
+        usage={"status": "complete", "finish_reason": "cancelled"},
+    )
+    assistant.id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    journal_map = {
+        assistant.id: [
+            {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
+        ]
+    }
+    out = conversation_to_json(conv, [assistant], journal_map=journal_map)
+    assert out["messages"][0]["finish_reason"] == "end_turn"
+
+
+def test_json_export_omits_finish_reason_when_unknown():
+    """No journal / usage finish_reason → omit the key (no AttributeError, no fake)."""
+    conv = _conv("J")
+    out = conversation_to_json(conv, [_msg("assistant", "a", usage={"status": "complete"})])
+    assert "finish_reason" not in out["messages"][0]
 
 
 def test_share_snapshot_is_content_only():

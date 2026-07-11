@@ -78,7 +78,8 @@ def _format_one(session: CoordinationSession, ev: CoordinationEvent) -> str:
             )
         return (
             f"- escalation【{role}】{esc_kind}（via {src}）：{question}"
-            " ——可 update_synthesis 记分歧、cancel_worker、ask_user 请用户裁决、或 post_note 给指导。"
+            " ——可 update_synthesis 记分歧、cancel_worker、"
+            "ask_user 请用户裁决、或 post_note 给指导。"
         )
     if ev.kind is CoordinationEventKind.TIMEOUT:
         rid = p.get("run_id") or "?"

@@ -461,8 +461,7 @@ export function buildGraphStructure(
   for (const run of workerRuns) {
     for (const depId of run.dependsOn) {
       const collapsed =
-        folded.has(run.id) &&
-        !isUnitExpanded(unitOf.get(run.id) ?? run.id);
+        folded.has(run.id) && !isUnitExpanded(unitOf.get(run.id) ?? run.id);
       addEdge(
         {
           id: `${depId}->${run.id}`,

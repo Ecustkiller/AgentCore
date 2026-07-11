@@ -6,6 +6,10 @@ import { detectReviewConcern } from "@/lib/reviewConcern";
 import type { Execution, RunStatus } from "@/stores/execution";
 import type { GraphEdge } from "@/stores/graph";
 import type { Edge, Node } from "@xyflow/react";
+import {
+  pickEscalationKind,
+  revisionFeedbackSummary,
+} from "./agentNode/shared";
 import { INPUT_ID } from "./constants";
 import {
   type GraphFoldInfo,
@@ -14,10 +18,6 @@ import {
   deriveArtifacts,
   resolveHandoff,
 } from "./helpers";
-import {
-  pickEscalationKind,
-  revisionFeedbackSummary,
-} from "./agentNode/shared";
 
 export interface FlowGraphProjectionInput {
   execution: Execution;
@@ -306,9 +306,7 @@ export function projectFlowNodes({
       id: run.id,
       type: "agent",
       position: pos,
-      ...(group
-        ? { parentId: group.groupId, extent: "parent" as const }
-        : {}),
+      ...(group ? { parentId: group.groupId, extent: "parent" as const } : {}),
       data: {
         agentId: run.agentId,
         role: agent?.role ?? run.agentId,

@@ -104,11 +104,13 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   },
   run_intake: {
     verdict: "internal",
-    reason: "Worker Intake 诊断元信息（复杂度/策略/预算）；Phase 1 无独立面，fold no-op",
+    reason:
+      "Worker Intake 诊断元信息（复杂度/策略/预算）；Phase 1 无独立面，fold no-op",
   },
   run_escalation_gate: {
     verdict: "internal",
-    reason: "Escalation Gate 判定实时信号；耐久升级仍走 escalate / RunState.escalations",
+    reason:
+      "Escalation Gate 判定实时信号；耐久升级仍走 escalate / RunState.escalations",
   },
   escalation_required: {
     verdict: "ported",

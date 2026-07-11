@@ -1,13 +1,13 @@
 import { StatusStrip } from "@/components/chat/StatusStrip";
 import { TeamNotesPanel } from "@/components/chat/TeamNotesPanel";
 import { GraphView } from "@/components/graph/GraphView";
+import { formatCollabSummary } from "@/lib/collabSummary";
 import {
   EMBED_DEFAULT_COL_WIDTH,
   estimateBbox,
   fitWidthBox,
   workerGraphShape,
 } from "@/lib/elk-layout";
-import { formatCollabSummary } from "@/lib/collabSummary";
 import { useConversationStore } from "@/stores/conversation";
 import {
   type Execution,

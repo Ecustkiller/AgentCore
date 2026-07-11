@@ -176,7 +176,7 @@ async def run_and_persist(
                 delegated=workers > 0,
                 workers=workers,
                 # 协作质量 (学·度量 §2.5): per-turn orchestration signals, also persisted to
-                # turn_metrics for the operator面 (offline log_stats derives the same from raw events).
+                # turn_metrics for the operator面 (offline log_stats derives same from raw events).
                 boundary_yields=collab.get("boundary_yields", 0),
                 scope_signals=collab.get("scope_signals", 0),
                 escalations=collab.get("escalations", 0),

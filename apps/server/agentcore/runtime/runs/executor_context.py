@@ -193,7 +193,8 @@ def _build_captain_context_blocks(
 ) -> list[ContextBlock]:
     """The ordered :class:`ContextBlock` list describing the CEO captain's OPENING context
     (上下文传递可视化, CEO 侧 通道①): its ``system`` prompt (决策②: 桌面按需弹窗对所有人可见 /
-    手机恒隐藏, 旧 powerMode/usageDetail 门控已退役), the ``history`` it carries, and this turn's ``request``.
+    手机恒隐藏, 旧 powerMode/usageDetail 门控已退役), the ``history`` it carries, and this
+    turn's ``request``.
 
     Unlike a worker — whose single user message is *rendered FROM* its blocks — the captain
     is fed a real multi-message chat (system + history + user). So these blocks MIRROR that

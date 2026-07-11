@@ -69,7 +69,12 @@ describe("submitInteraction path table", () => {
       cold: { messageId: "srv-m1", decision: "continue", note: "" },
     });
     expect(result).toBe("ok");
-    expect(resumeMock).toHaveBeenCalledWith("srv-m1", "continue", "", undefined);
+    expect(resumeMock).toHaveBeenCalledWith(
+      "srv-m1",
+      "continue",
+      "",
+      undefined,
+    );
     expect(store().get("cp1")?.status).toBe("resolved");
   });
 
@@ -81,7 +86,10 @@ describe("submitInteraction path table", () => {
       payload: { escalation_id: "e1", question: "q", assumption: "a" },
     });
     resolveMock.mockRejectedValue(
-      new ApiError(410, JSON.stringify({ detail: { code: "interaction_orphaned" } })),
+      new ApiError(
+        410,
+        JSON.stringify({ detail: { code: "interaction_orphaned" } }),
+      ),
     );
     const result = await submitInteraction({
       id: "e1",
@@ -161,7 +169,10 @@ describe("error helpers", () => {
     const err = new ApiError(
       409,
       JSON.stringify({
-        detail: { code: "pending_interactions_awaiting", pending_kinds: ["approval"] },
+        detail: {
+          code: "pending_interactions_awaiting",
+          pending_kinds: ["approval"],
+        },
       }),
     );
     expect(isPendingInteractionsAwaitingError(err)).toBe(true);

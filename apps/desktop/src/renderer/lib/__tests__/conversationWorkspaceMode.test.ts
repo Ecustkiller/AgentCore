@@ -14,10 +14,9 @@ describe("conversationWorkspaceMode", () => {
 
   it("deriveGroupWorkspaceIsLocal prefers folder.localDir", () => {
     expect(
-      deriveGroupWorkspaceIsLocal(
-        { localDir: "/home/proj" },
-        [{ localContainerRootId: null }],
-      ),
+      deriveGroupWorkspaceIsLocal({ localDir: "/home/proj" }, [
+        { localContainerRootId: null },
+      ]),
     ).toBe(true);
   });
 
@@ -41,13 +40,10 @@ describe("conversationWorkspaceMode", () => {
 
   it("deriveGroupWorkspaceIsLocal breaks ties on most recent conv", () => {
     expect(
-      deriveGroupWorkspaceIsLocal(
-        { localDir: null },
-        [
-          { localContainerRootId: "a" },
-          { localContainerRootId: null },
-        ],
-      ),
+      deriveGroupWorkspaceIsLocal({ localDir: null }, [
+        { localContainerRootId: "a" },
+        { localContainerRootId: null },
+      ]),
     ).toBe(true);
   });
 

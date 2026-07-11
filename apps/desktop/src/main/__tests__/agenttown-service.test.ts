@@ -112,7 +112,7 @@ describe("resolveAgentTownExe", () => {
   beforeEach(() => {
     rmSync(h.exeDir, { recursive: true, force: true });
     rmSync(join(h.appPath, "..", "town"), { recursive: true, force: true });
-    process.env.AGENTTOWN_PATH = undefined;
+    Reflect.deleteProperty(process.env, "AGENTTOWN_PATH");
     h.isPackaged = false;
   });
   afterAll(() => {
@@ -151,9 +151,10 @@ describe("resolveAgentTownExe", () => {
         expect(result.message).toMatch(/已检查路径/);
       }
     } finally {
-      if (prevPf === undefined) delete process.env.ProgramFiles;
+      if (prevPf === undefined)
+        Reflect.deleteProperty(process.env, "ProgramFiles");
       else process.env.ProgramFiles = prevPf;
-      process.env.AGENTTOWN_PATH = undefined;
+      Reflect.deleteProperty(process.env, "AGENTTOWN_PATH");
     }
   });
 });

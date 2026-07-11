@@ -26,6 +26,7 @@ from agentcore.memory.conversation_title import (
     TitleResult,
 )
 from agentcore.memory.followups import (
+    FOLLOWUPS_ITEM_MAX_CHARS,
     FOLLOWUPS_MAX,
     FollowupInput,
     FollowupsGenerator,
@@ -76,6 +77,7 @@ __all__ = [
     "FollowupsGenerator",
     "LLMFollowupsGenerator",
     "FOLLOWUPS_MAX",
+    "FOLLOWUPS_ITEM_MAX_CHARS",
     "MEMORY_SECTIONS",
     "PREFERENCES_SECTIONS",
     "PROFILE_SECTIONS",

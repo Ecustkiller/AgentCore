@@ -314,7 +314,8 @@ def debate_round_decision_resolved(
 
 
 def interaction_orphaned(*, interaction_id: str, kind: str) -> SSEEvent:
-    """热路 pending 交互失效。``kind`` ∈ approval / delegation_authorization / escalation / debate_round。"""
+    """热路 pending 交互失效。``kind`` ∈ approval / delegation_authorization /
+    escalation / debate_round。"""
     return SSEEvent(
         type=EventType.INTERACTION_ORPHANED,
         payload={"interaction_id": interaction_id, "kind": kind},

@@ -17,6 +17,7 @@ path and do not re-enter coordination.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 
@@ -293,10 +294,8 @@ async def test_ask_user_soft_stop_rebuilds_coordination_on_resume(monkeypatch):
     live = active_coordination(EXEC_ID)
     if live is not None and live.drive_task is not None and not live.drive_task.done():
         live.drive_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError, Exception):
             await live.drive_task
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001 — teardown only
-            pass
     clear_active_coordination(EXEC_ID)
     clear_active_coordination()
     assert active_coordination(EXEC_ID) is None
@@ -360,9 +359,7 @@ async def test_ask_user_soft_stop_rebuilds_coordination_on_resume(monkeypatch):
     # Cleanup background re-drive if settle re-armed unfinished workers.
     if session.drive_task is not None and not session.drive_task.done():
         session.drive_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError, Exception):
             await session.drive_task
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
-            pass
     clear_active_coordination(EXEC_ID)
     clear_active_coordination()

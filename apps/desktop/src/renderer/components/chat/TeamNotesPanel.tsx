@@ -99,7 +99,9 @@ export function TeamNotesPanel({
         <span className="flex-1 text-left">团队便签</span>
         <span className="tabular-nums">{notes.length}</span>
       </button>
-      {expanded && <NotesList notes={notes} compact={compact} className="mt-1.5" />}
+      {expanded && (
+        <NotesList notes={notes} compact={compact} className="mt-1.5" />
+      )}
     </section>
   );
 }

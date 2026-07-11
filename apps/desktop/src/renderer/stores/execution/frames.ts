@@ -379,7 +379,8 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         question: p.question,
         assumption: p.assumption,
         blocking: p.blocking,
-        escalationKind: p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
+        escalationKind:
+          p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
       };
     }
     case "escalation_required": {
@@ -392,7 +393,8 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         agentId: p.agent_id,
         question: p.question,
         assumption: p.assumption,
-        escalationKind: p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
+        escalationKind:
+          p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
         questions: p.questions ?? [],
         awaiting: p.awaiting === "ceo" ? "ceo" : "user",
       };

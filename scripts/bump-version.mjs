@@ -135,6 +135,35 @@ function writePyprojectVersion(filePath, version) {
   writeFileSync(filePath, next, "utf8");
 }
 
+/** Website download fallback — must track desktop semver (部署与运维 §7.6). */
+const DESKTOP_FALLBACK_FILES = [
+  join(ROOT, "apps/website/functions/api/desktop-release.mjs"),
+  join(ROOT, "apps/website/scripts/fetch-release.mjs"),
+];
+
+function syncDesktopFallbackVersion(version, { dryRun = false } = {}) {
+  for (const filePath of DESKTOP_FALLBACK_FILES) {
+    const text = readFileSync(filePath, "utf8");
+    if (!/const FALLBACK_VERSION = "[^"]+"/.test(text)) {
+      throw new Error(`No FALLBACK_VERSION const in ${filePath}`);
+    }
+    const next = text.replace(
+      /const FALLBACK_VERSION = "[^"]+"/,
+      `const FALLBACK_VERSION = "${version}"`,
+    );
+    if (next === text) {
+      console.log(`  FALLBACK_VERSION already ${version} in ${filePath}`);
+      continue;
+    }
+    if (dryRun) {
+      console.log(`  would sync FALLBACK_VERSION → ${version} in ${filePath}`);
+      continue;
+    }
+    writeFileSync(filePath, next, "utf8");
+    console.log(`✓ Synced FALLBACK_VERSION → ${version} in ${filePath}`);
+  }
+}
+
 function main() {
   const { track, trackConfig, bumpArg, dryRun } = parseArgs(process.argv.slice(2));
   const current = trackConfig.read(trackConfig.path);
@@ -142,10 +171,17 @@ function main() {
 
   console.log(`${trackConfig.label}: ${current} → ${next}${dryRun ? " (dry-run)" : ""}`);
 
-  if (dryRun) return;
+  if (dryRun) {
+    if (track === "desktop") syncDesktopFallbackVersion(next, { dryRun: true });
+    return;
+  }
 
   trackConfig.write(trackConfig.path, next);
   console.log(`✓ Updated ${trackConfig.path}`);
+
+  if (track === "desktop") {
+    syncDesktopFallbackVersion(next);
+  }
 }
 
 main();

@@ -72,7 +72,9 @@ _EXECUTION_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
 )
 
 # 协调类工具失败不走 Gate 升级（它们有自己的通道）
-_SKIP_TOOLS = frozenset({"escalate", "post_note", "read_notes", "amend_note", "handoff", "delegate"})
+_SKIP_TOOLS = frozenset(
+    {"escalate", "post_note", "read_notes", "amend_note", "handoff", "delegate"}
+)
 
 
 def evaluate_after_tools(
@@ -159,7 +161,10 @@ def _question_for(kind: EscalationKind, tool_name: str, snippet: str) -> str:
     if kind is EscalationKind.CONTRADICTION:
         return f"任务需求存在矛盾{tool}：检测到「{snippet}」。请上级明确优先级或取舍。"
     if kind is EscalationKind.CONTRACT:
-        return f"继续执行可能改动接口契约或超出权限{tool}：检测到「{snippet}」。请上级确认是否允许。"
+        return (
+            f"继续执行可能改动接口契约或超出权限{tool}："
+            f"检测到「{snippet}」。请上级确认是否允许。"
+        )
     if kind is EscalationKind.SCOPE:
         return f"发现职责/范围可能偏离初始计划{tool}：检测到「{snippet}」。请上级确认真实目标。"
     if kind is EscalationKind.DEP:

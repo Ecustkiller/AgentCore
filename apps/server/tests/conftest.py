@@ -14,6 +14,8 @@ import time
 import uuid
 from pathlib import Path
 
+os.environ["LOG_LEVEL"] = "WARNING"
+
 import pytest
 
 # A stale per-session tmp dir is reaped only once it is older than this — long past any

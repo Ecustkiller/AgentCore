@@ -28,7 +28,8 @@ export function deriveGroupWorkspaceIsLocal(
   const cloudCount = convs.length - localCount;
   if (localCount > cloudCount) return true;
   if (cloudCount > localCount) return false;
-  return isConversationLocal(convs[0]!);
+  const [first] = convs;
+  return first ? isConversationLocal(first) : false;
 }
 
 /**

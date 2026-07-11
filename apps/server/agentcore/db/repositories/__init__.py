@@ -14,6 +14,9 @@ keeps working unchanged across the codebase. ``_ilike_pattern`` is re-exported
 because the global-search tests import it directly.
 """
 
+# Lease repo lives under runtime (swappable backend seam); re-exported for DB consumers.
+from agentcore.runtime.leases.repo import TurnLeaseRepository  # noqa: E402
+
 from ._base import _UNSET, _ilike_pattern
 from .admin_audit import AdminAuditRepository
 from .admin_mfa import AdminMfaRepository
@@ -49,9 +52,6 @@ from .users import (
     UserDirectoryRepository,
     UserRepository,
 )
-
-# Lease repo lives under runtime (swappable backend seam); re-exported for DB consumers.
-from agentcore.runtime.leases.repo import TurnLeaseRepository  # noqa: E402
 
 __all__ = [
     "_UNSET",

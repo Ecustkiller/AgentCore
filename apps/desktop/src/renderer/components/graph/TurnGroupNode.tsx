@@ -47,9 +47,7 @@ export function TurnGroupNode({ data }: NodeProps) {
       />
       <div
         className={`pointer-events-none flex h-full w-full flex-col overflow-hidden rounded-xl border-2 bg-card shadow-md ${
-          d.dimmed
-            ? "border-border opacity-40"
-            : "border-primary"
+          d.dimmed ? "border-border opacity-40" : "border-primary"
         }`}
       >
         <div

@@ -34,7 +34,8 @@ export function ResumeCard({
   const [note, setNote] = useState("");
   const isPlanReview = paused.kind === "plan_review";
   const isTeamPreview = paused.kind === "team_preview";
-  const isAskUser = paused.kind === "ask_user" || (!isPlanReview && !isTeamPreview);
+  const isAskUser =
+    paused.kind === "ask_user" || (!isPlanReview && !isTeamPreview);
   const showWorkers = isPlanReview || isTeamPreview;
   const questions = asRecords(paused.questions);
   const assumptions = asRecords(paused.assumptions);
@@ -68,7 +69,10 @@ export function ResumeCard({
         <div className="ask-assume">
           <div className="ask-assume-label">我先按这些默认推进</div>
           {assumptions.map((a) => (
-            <div key={str(a, "id") ?? str(a, "label") ?? ""} className="ask-assume-row">
+            <div
+              key={str(a, "id") ?? str(a, "label") ?? ""}
+              className="ask-assume-row"
+            >
               <span className="ask-assume-k">{str(a, "label")}</span>
               <span className="ask-assume-v">{str(a, "value")}</span>
             </div>
@@ -87,11 +91,13 @@ export function ResumeCard({
               ? def
                 ? [{ label: def }]
                 : []
-              : options.map((o) => ({
-                  label: str(o, "label") ?? "",
-                  detail: str(o, "detail") ?? undefined,
-                  recommended: Boolean(o.recommended),
-                })).filter((o) => o.label);
+              : options
+                  .map((o) => ({
+                    label: str(o, "label") ?? "",
+                    detail: str(o, "detail") ?? undefined,
+                    recommended: Boolean(o.recommended),
+                  }))
+                  .filter((o) => o.label);
           return (
             <div key={id} className="ask-question">
               {prompt && <div className="ask-prompt">{prompt}</div>}

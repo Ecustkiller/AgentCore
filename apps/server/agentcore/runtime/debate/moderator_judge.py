@@ -12,10 +12,10 @@ from typing import Any
 from agentcore.core.logging import get_logger
 from agentcore.runtime.debate.moderator_agenda import _form_guidance
 from agentcore.runtime.debate.moderator_common import (
-    CompleteJson,
     _LEDGER_CLASHES_PER_ROUND,
     _LEDGER_SUMMARY_CLIP,
     _SUMMARY_CLIP,
+    CompleteJson,
     _as_bool,
     _as_str,
     _as_str_list,
@@ -308,10 +308,7 @@ async def judge_and_summarize(
     # （真实 trace 曾出现第 1 轮未收敛却标 focus_clarified）。收敛时校验取值落在词表内，
     # 否则回落 STOP_CONVERGED——与循环层归一（下方 verdict.converged 分支）同一口径。
     raw_stop = _as_str(data.get("stop_reason"))
-    if converged:
-        stop_reason = raw_stop if raw_stop in STOP_REASONS else STOP_CONVERGED
-    else:
-        stop_reason = ""
+    stop_reason = (raw_stop if raw_stop in STOP_REASONS else STOP_CONVERGED) if converged else ""
     side_keys = {s.key for s in config.sides}
     verdict = JudgeVerdict(
         real_clash=_as_bool(data.get("real_clash"), True),

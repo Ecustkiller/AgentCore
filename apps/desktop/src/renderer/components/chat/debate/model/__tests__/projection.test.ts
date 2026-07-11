@@ -276,7 +276,9 @@ describe("toDebateModel live 2-side sideKey (directed follow-up contract, 09 F6)
   it("falls back to stance as sideKey before the round narrative arrives", () => {
     const exec = twoSideExecution("卖方", "买方");
     // 尚无 debate_round 叙事（narr.sides 缺）→ 回退 stance
-    const model = toDebateModel(baseExecution({ runs: exec.runs, agents: exec.agents }));
+    const model = toDebateModel(
+      baseExecution({ runs: exec.runs, agents: exec.agents }),
+    );
     const round = model?.rounds[0];
     expect(round?.sides.find((s) => s.stance === "pro")?.sideKey).toBe("pro");
     expect(round?.sides.find((s) => s.stance === "con")?.sideKey).toBe("con");

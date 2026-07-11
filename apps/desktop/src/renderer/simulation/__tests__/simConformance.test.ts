@@ -6,10 +6,10 @@ import type { SSEEvent, WorldModifiersWire } from "@agentcore/contract-types";
 import m1Tick from "@agentcore/protocol-conformance/fixtures/simulation-m1-tick.json" with {
   type: "json",
 };
-import interactionConversation from "@agentcore/protocol-conformance/fixtures/simulation/interaction-conversation.json" with {
+import coordinateTransform from "@agentcore/protocol-conformance/fixtures/simulation/coordinate-transform.json" with {
   type: "json",
 };
-import coordinateTransform from "@agentcore/protocol-conformance/fixtures/simulation/coordinate-transform.json" with {
+import interactionConversation from "@agentcore/protocol-conformance/fixtures/simulation/interaction-conversation.json" with {
   type: "json",
 };
 import multiAgentTick from "@agentcore/protocol-conformance/fixtures/simulation/multi-agent-tick.json" with {

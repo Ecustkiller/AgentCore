@@ -911,9 +911,11 @@ export interface SimWorldEventPayload {
 }
 
 /** CEO→用户「下一步推荐」: 2-4 quick-reply chips for the just-finished turn, emitted
- * after `message_end`. Persisted on `Message.followups` (DERIVED), no-op in folds. */
+ * after `message_end`. Persisted on `Message.followups` (DERIVED), no-op in folds.
+ * `message_id` is the assistant row the chips belong to (same id as `set_followups`). */
 export interface FollowupsGeneratedPayload {
   conversation_id: string;
+  message_id: string;
   followups: string[];
 }
 

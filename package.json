@@ -12,6 +12,7 @@
     "gen:story-packs": "node scripts/sync-story-packs.mjs",
     "gen:story-packs:check": "node scripts/sync-story-packs.mjs --check",
     "bump-version": "node scripts/bump-version.mjs",
+    "release:gate": "node scripts/release-gate.mjs",
     "test:server": "cd apps/server && uv run pytest --tb=short -q",
     "test:server:unit": "cd apps/server && uv run pytest --ignore=tests/integration --tb=short -q",
     "test:server:slow": "cd apps/server && uv run pytest --durations=20 -q",

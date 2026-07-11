@@ -1,22 +1,25 @@
 #!/usr/bin/env node
 /**
- * Windows desktop release: bundle sidecar → electron-vite build → electron-builder upload.
+ * Windows desktop release: bundle sidecar → electron-vite build → local package
+ * → `gh release upload` (Mac-aligned; no electron-builder --publish).
  *
  *   pnpm -C apps/desktop release:win
  *   pnpm -C apps/desktop release:win -- --skip-draft   # draft already exists
  *
  * Prerequisites:
  *   - `gh auth login` with write access to Lawofall/AgentCore-releases
- *   - GH_TOKEN or `gh auth token` available (electron-builder publish)
+ *   - GH_TOKEN or `gh auth token` available
  *
- * See docs/05-平台与运维/部署与运维.md §7.6 — pre-create draft release to avoid
- * electron-builder#6676 upload race (only .blockmap, missing .exe).
+ * Mirrors `.github/workflows/release-desktop.yml` Mac path:
+ *   electron-builder --publish never → assert local assets → gh upload --clobber
+ *   → parse `gh release view` asset list (missing → non-zero exit).
+ *
+ * See docs/05-平台与运维/部署与运维.md §7.6 — pre-create draft release.
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
 import { loadDeployEnv, REPO_ROOT, run } from "../../../deploy/scripts/load-deploy-env.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -30,17 +33,29 @@ function readVersion() {
   return pkg.version;
 }
 
-function gh(args, { allowFail = false } = {}) {
+function winAssetNames(version) {
+  return [
+    `AgentCore-${version}-win-x64.exe`,
+    `AgentCore-${version}-win-x64.exe.blockmap`,
+    "latest.yml",
+  ];
+}
+
+function gh(args, { allowFail = false, capture = false } = {}) {
   const result = spawnSync("gh", args, {
     cwd: REPO_ROOT,
-    stdio: "inherit",
+    stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit",
+    encoding: capture ? "utf8" : undefined,
     shell: false,
     env: process.env,
   });
   if (!allowFail && result.status !== 0) {
+    if (capture && result.stderr) process.stderr.write(result.stderr);
     process.exit(result.status ?? 1);
   }
-  return result.status === 0;
+  return capture
+    ? { ok: result.status === 0, stdout: result.stdout ?? "", stderr: result.stderr ?? "" }
+    : result.status === 0;
 }
 
 function ensureGhToken() {
@@ -82,6 +97,47 @@ function ensureDraftRelease(tag) {
   ]);
 }
 
+function assertLocalAssets(releaseDir, version) {
+  const names = winAssetNames(version);
+  const paths = [];
+  for (const name of names) {
+    const path = join(releaseDir, name);
+    if (!existsSync(path)) {
+      console.error(`Missing local asset: ${path}`);
+      process.exit(1);
+    }
+    paths.push(path);
+  }
+  console.log(`→ local assets ok: ${names.join(", ")}`);
+  return paths;
+}
+
+function uploadAndVerify(tag, version, paths) {
+  console.log(`→ gh release upload ${tag} --clobber`);
+  gh(["release", "upload", tag, ...paths, "--repo", RELEASES_REPO, "--clobber"]);
+
+  const { stdout } = gh(
+    ["release", "view", tag, "--repo", RELEASES_REPO, "--json", "assets"],
+    { capture: true },
+  );
+  let assets;
+  try {
+    assets = JSON.parse(stdout).assets ?? [];
+  } catch (err) {
+    console.error(`Failed to parse gh release view JSON: ${err}`);
+    process.exit(1);
+  }
+  const present = new Set(assets.map((a) => a.name));
+  const required = winAssetNames(version);
+  const missing = required.filter((name) => !present.has(name));
+  if (missing.length > 0) {
+    console.error(`Release ${tag} missing assets: ${missing.join(", ")}`);
+    console.error(`Present: ${[...present].join(", ") || "(none)"}`);
+    process.exit(1);
+  }
+  console.log(`✓ remote assets verified on ${tag}: ${required.join(", ")}`);
+}
+
 function main() {
   loadDeployEnv();
   ensureGhToken();
@@ -97,24 +153,27 @@ function main() {
   run("electron-vite build", "pnpm", ["exec", "electron-vite", "build"], {
     cwd: DESKTOP_DIR,
   });
-  run("electron-builder --win --publish always", "pnpm", [
+  // Mac-aligned: never publish via electron-builder (avoids #6676 / #2393).
+  run("electron-builder --win --publish never", "pnpm", [
     "exec",
     "electron-builder",
     "--win",
     "--publish",
-    "always",
+    "never",
   ], { cwd: DESKTOP_DIR, env: process.env });
 
+  const paths = assertLocalAssets(releaseDir, version);
+  uploadAndVerify(tag, version, paths);
+
   console.log("");
-  console.log("✓ Build + upload finished. Verify assets:");
-  console.log(`  gh release view ${tag} --repo ${RELEASES_REPO}`);
-  console.log(`  ls ${releaseDir}`);
+  console.log(`✓ Win release ${tag} built and uploaded to ${RELEASES_REPO}`);
+  console.log(`  local: ${releaseDir}`);
   console.log("");
   console.log("Win-only dev publish (optional):");
   console.log(
     `  gh release edit ${tag} --repo ${RELEASES_REPO} --draft=false --latest`,
   );
-  console.log("Then bump website FALLBACK_VERSION + pnpm -C apps/website deploy:pages");
+  console.log("Then: pnpm -C apps/website deploy:pages (FALLBACK synced by bump-version desktop)");
 }
 
 main();

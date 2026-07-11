@@ -14,6 +14,8 @@ export interface OutboxSyncedPayload {
   cloudUserMessageId: string;
   assistantMessageId: string | null;
   title: string | null;
+  /** CEO→用户「下一步」chips minted during local finalize (twin of live SSE). */
+  followups?: string[] | null;
 }
 
 /** Pending / failed outbox row for status IPC. */

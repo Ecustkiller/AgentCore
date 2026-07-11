@@ -290,11 +290,7 @@ export function ToolboxPage() {
 
         {EXPERIMENTS.length > 0 ? (
           <>
-            <ToolboxSectionHeader
-              className="mt-6"
-              label="实验"
-              meta="开发期"
-            />
+            <ToolboxSectionHeader className="mt-6" label="实验" meta="开发期" />
             {EXPERIMENTS.map((entry) => (
               <ToolboxTileCard key={entry.id} entry={entry} />
             ))}

@@ -203,9 +203,9 @@ def coordination_boundary_hook(
 
 
 def wrap_executor_with_timeouts(
-    executor: Callable[..., Awaitable["RunState"]],
+    executor: Callable[..., Awaitable[RunState]],
     session: CoordinationSession,
-) -> Callable[..., Awaitable["RunState"]]:
+) -> Callable[..., Awaitable[RunState]]:
     """Arm per-worker timeout timers around the real executor (notify only, no cancel)."""
 
     async def coordinated_executor(spec: RunSpec, completed: dict[str, RunState]) -> RunState:

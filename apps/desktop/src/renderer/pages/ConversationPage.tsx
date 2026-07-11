@@ -101,7 +101,10 @@ export function ConversationPage() {
               ) {
                 if (canAttach) {
                   void rejoinLiveTurn(id);
-                } else if (!recovery.liveRunning && recovery.pausedCount === 0) {
+                } else if (
+                  !recovery.liveRunning &&
+                  recovery.pausedCount === 0
+                ) {
                   markGhostInterrupted(id);
                 }
               }

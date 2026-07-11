@@ -1,9 +1,9 @@
+import type { BatchMetricsSnapshot, Execution } from "@/stores/execution";
 /**
  * Scheduling helpers from batch_metrics — metrics chip gate + summary.
  * Gantt / ParallelTimeline page UI removed with collaboration-graph timeline layout.
  */
 import { describe, expect, it } from "vitest";
-import type { BatchMetricsSnapshot, Execution } from "@/stores/execution";
 import {
   fmtMs,
   hasParallelTimeline,

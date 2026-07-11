@@ -23,7 +23,8 @@ SUSPENDS in place. Who mediates depends on mode:
 
 - **经典路径**（无活跃协调 session）：波内没有在跑的 CEO，故直挂用户（同 ``ask_user`` 交互桥，
   ``InteractionKind.ESCALATION``）。
-- **协调模式**（根 CEO 协调 session 活跃，≥2 worker 默认）：CEO 波内存活，阻塞升级改由 CEO 仲裁——worker
+- **协调模式**（根 CEO 协调 session 活跃，≥2 worker 默认）：CEO 波内存活，阻塞升级改由 CEO
+  仲裁——worker
   挂起等 ``resolve_escalation``；初始不发用户可答卡。偏好/授权/费用类由 CEO 先 ``ask_user``
   再 resolve（单一兑现路径）。超时仍回落 ``assumption``，绝不永久卡住。
 
@@ -353,11 +354,12 @@ def escalate_tool_result(
             )
         return ToolResult(tool_call_id="", success=True, output=output)
     who = "主管" if arbitrated_by == "ceo" else "用户"
-    if status == "assumed":
-        lead = f"{who}选择按你的假设继续。"
-    else:
-        # timed_out (and any other non-resolved/assumed settlement)
-        lead = f"未在时限内得到{who}答复。"
+    # timed_out (and any other non-resolved/assumed settlement) → second branch
+    lead = (
+        f"{who}选择按你的假设继续。"
+        if status == "assumed"
+        else f"未在时限内得到{who}答复。"
+    )
     return ToolResult(
         tool_call_id="",
         success=True,

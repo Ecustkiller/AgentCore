@@ -644,8 +644,8 @@ async def test_coordination_checkpoint_yields_without_durable_pause(monkeypatch)
 async def test_classic_checkpoint_still_durable_when_not_coordinating(monkeypatch):
     """经典阻塞 path（coordinate=false）仍 durable plan_review 挂起即收口。"""
     from agentcore.core.types import ToolEffect
-    from agentcore.runtime.suspension import TurnSuspension, captain_transcript
     from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
+    from agentcore.runtime.suspension import TurnSuspension, captain_transcript
     from tests.delegate.conftest import CKPT_DAG, tool_durable
 
     monkeypatch.setattr(

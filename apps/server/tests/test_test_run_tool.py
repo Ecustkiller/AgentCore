@@ -15,8 +15,8 @@ import pytest
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.runtime.context.project_profile import ProjectProfile
 from agentcore.tools.builtin.test_run import (
-    TestRunTool,
     _ALLOWED_PREFIXES,
+    TestRunTool,
     _base_command,
     _detect_framework,
     _is_allowed_command,

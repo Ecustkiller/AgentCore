@@ -360,6 +360,7 @@ async function persistAndReconcile(
         user_message_id: flushed.synced.cloudUserMessageId || optimisticUserId,
         assistant_message_id: flushed.synced.assistantMessageId,
         title: flushed.synced.title,
+        followups: flushed.synced.followups,
       });
       // onSynced from main also flips the hint; set here for snappy UI if push races.
       const anchor = flushed.synced.cloudUserMessageId || optimisticUserId;
@@ -388,6 +389,7 @@ function applyReconcile(
     user_message_id: string;
     assistant_message_id?: string | null;
     title?: string | null;
+    followups?: string[] | null;
   },
 ): void {
   const messages = getRuntime(conversationId).messages;
@@ -399,6 +401,16 @@ function applyReconcile(
   }
   if (saved.title) {
     patchConversationCache(conversationId, { title: saved.title });
+  }
+  // Local twin of followups_generated: stamp chips on the assistant row by id.
+  if (saved.followups?.length && saved.assistant_message_id) {
+    useConversationStore
+      .getState()
+      .attachFollowups(
+        saved.followups,
+        saved.assistant_message_id,
+        conversationId,
+      );
   }
 }
 

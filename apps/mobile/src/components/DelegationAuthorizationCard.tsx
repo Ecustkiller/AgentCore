@@ -64,9 +64,7 @@ function DelegationBody({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function submit(
-    decision: "grant_delegation" | "per_call" | "deny",
-  ) {
+  async function submit(decision: "grant_delegation" | "per_call" | "deny") {
     if (busy) return;
     setBusy(true);
     setErr(null);

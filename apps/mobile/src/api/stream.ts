@@ -90,7 +90,8 @@ async function pumpSSE(
         }
         if (!line.startsWith("data:")) continue;
         try {
-          if (frameId && conversationId) lastEventIds.set(conversationId, frameId);
+          if (frameId && conversationId)
+            lastEventIds.set(conversationId, frameId);
           onEvent(JSON.parse(line.slice(5).trim()) as SSEEvent);
         } catch {
           // Skip a malformed/partial frame; the next read completes it.

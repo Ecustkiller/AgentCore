@@ -130,6 +130,12 @@ jobs:
       - name: UI token gate
         run: pnpm --filter agentcore-desktop check-ui-tokens
 
+      - name: Typecheck
+        run: pnpm --filter agentcore-desktop typecheck
+
+      - name: Conformance
+        run: pnpm --filter agentcore-desktop conformance
+
       - name: Test
         run: pnpm --filter agentcore-desktop test -- --run
 

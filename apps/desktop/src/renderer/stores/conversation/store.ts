@@ -112,8 +112,9 @@ export interface ConversationState {
     citations: Citation[],
     conversationId?: string | null,
   ) => void;
-  attachFollowupsToLastMessage: (
+  attachFollowups: (
     followups: string[],
+    messageId: string | null | undefined,
     conversationId?: string | null,
   ) => void;
   recordTurnWarning: (warning: string, conversationId?: string | null) => void;
@@ -449,13 +450,20 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         return { messages };
       }),
 
-    attachFollowupsToLastMessage: (followups, conversationId) =>
+    attachFollowups: (followups, messageId, conversationId) =>
       patchConversation(conversationId, (rt) => {
-        if (followups.length === 0) return null;
+        // Identity seam: chips belong to a specific assistant row. Missing message_id
+        // is a no-op — never fall back to「last assistant」(fast consecutive turns
+        // would otherwise stamp the wrong bubble).
+        if (followups.length === 0 || !messageId) return null;
         const messages = [...rt.messages];
-        const last = messages[messages.length - 1];
-        if (!last || last.role !== "assistant") return null;
-        messages[messages.length - 1] = { ...last, followups };
+        const idx = messages.findIndex(
+          (m) =>
+            m.role === "assistant" &&
+            (m.id === messageId || m.serverMessageId === messageId),
+        );
+        if (idx < 0) return null;
+        messages[idx] = { ...messages[idx], followups };
         return { messages };
       }),
 

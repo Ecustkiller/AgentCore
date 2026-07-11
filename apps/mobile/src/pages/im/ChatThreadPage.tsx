@@ -21,6 +21,8 @@ import {
 import { shareOrDownloadFile } from "@/lib/share";
 import { clock } from "@/lib/time";
 import { usePolling } from "@/lib/usePolling";
+import { useStickScroll } from "@/lib/useStickScroll";
+import { ArrowDown } from "lucide-react";
 // 消息线程 (/im/c/:chatId) — one human↔human thread. REST + polling (no SSE): the open
 // thread refetches the most-recent page every 4s and merges by id, so sends from the peer
 // appear within a cycle. IM list pagination is created_at ASC (page 1 = oldest), so the
@@ -72,12 +74,19 @@ export function ChatThreadPage() {
   // StoredAttachments (unlike agent-chat, IM ships the file itself, images included).
   const [pending, setPending] = useState<File[]>([]);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
-  const atBottomRef = useRef(true);
   const totalRef = useRef(0);
   const initedRef = useRef(false);
   const lastMarkedRef = useRef<string | null>(null);
+
+  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+  const scrollContentKey = lastMsg
+    ? `${lastMsg.id}-${messages.length}`
+    : `empty-${messages.length}`;
+  const { scrollRef, atBottom, jumpToBottom } = useStickScroll(
+    scrollContentKey,
+    chatId ?? null,
+  );
 
   // My identity (mine vs theirs alignment).
   useEffect(() => {
@@ -157,15 +166,6 @@ export function ChatThreadPage() {
     }
   }, [messages, chatId]);
 
-  // Keep pinned to the bottom for new messages — but only if the user is already there
-  // (don't yank them up from reading history).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on every new `messages` batch to follow the stream; the body reads refs, not messages
-  useEffect(() => {
-    if (atBottomRef.current && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages]);
-
   async function loadOlder() {
     const target = oldestPage - 1;
     if (target < 1 || !chatId) return;
@@ -231,7 +231,7 @@ export function ChatThreadPage() {
       setText("");
       setPending([]);
       totalRef.current += 1;
-      atBottomRef.current = true;
+      jumpToBottom();
       setMessages((prev) => mergeMessages(prev, [msg]));
     } catch (e) {
       setError(e instanceof Error ? e.message : "发送失败");
@@ -281,42 +281,47 @@ export function ChatThreadPage() {
         </button>
       </header>
 
-      <div
-        className="messages"
-        ref={scrollRef}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          atBottomRef.current =
-            el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-        }}
-      >
-        {!loaded && <p className="muted hint">加载中…</p>}
-        {loaded && oldestPage > 1 && (
+      <div className="messages-pane">
+        <div className="messages" ref={scrollRef}>
+          {!loaded && <p className="muted hint">加载中…</p>}
+          {loaded && oldestPage > 1 && (
+            <button
+              type="button"
+              className="load-older"
+              onClick={() => void loadOlder()}
+            >
+              加载更早
+            </button>
+          )}
+          {loaded && messages.length === 0 && !error && (
+            <p className="muted hint">还没有消息，发送第一条吧。</p>
+          )}
+          {messages.map((m) => (
+            <MessageRow
+              key={m.id}
+              message={m}
+              mine={!!myId && m.sender_user_id === myId}
+              chatId={chatId ?? ""}
+              isGroup={!isDm}
+              senderName={
+                m.sender_user_id
+                  ? members.get(m.sender_user_id)?.display_name
+                  : undefined
+              }
+            />
+          ))}
+        </div>
+        {!atBottom && messages.length > 0 ? (
           <button
             type="button"
-            className="load-older"
-            onClick={() => void loadOlder()}
+            className="jump-bottom"
+            onClick={jumpToBottom}
+            aria-label="回到底部"
           >
-            加载更早
+            <ArrowDown size={14} aria-hidden />
+            回到底部
           </button>
-        )}
-        {loaded && messages.length === 0 && !error && (
-          <p className="muted hint">还没有消息，发送第一条吧。</p>
-        )}
-        {messages.map((m) => (
-          <MessageRow
-            key={m.id}
-            message={m}
-            mine={!!myId && m.sender_user_id === myId}
-            chatId={chatId ?? ""}
-            isGroup={!isDm}
-            senderName={
-              m.sender_user_id
-                ? members.get(m.sender_user_id)?.display_name
-                : undefined
-            }
-          />
-        ))}
+        ) : null}
       </div>
 
       {chat?.state === "pending" && (

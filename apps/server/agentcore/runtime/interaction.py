@@ -45,7 +45,8 @@ class InteractionKind(StrEnum):
     TEAM_PREVIEW = "team_preview"
     # 阻塞式求决策 (escalate blocking=true): a delegated worker hit a「猜错就作废」fork and
     # suspended. Classic path asks the user directly; coordination-active path awaits CEO
-    # ``resolve_escalation`` (awaiting=ceo, not user-answerable) → result: ``{answer | use_assumption}``.
+    # ``resolve_escalation`` (awaiting=ceo, not user-answerable) →
+    # result: ``{answer | use_assumption}``.
     # Unlike the halting gates above, this does NOT pause the turn — siblings keep running
     # and a timeout degrades to the worker's stated assumption (设计: 06-规划/阻塞式求决策设计).
     ESCALATION = "escalation"

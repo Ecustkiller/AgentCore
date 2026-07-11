@@ -255,7 +255,7 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
 
     const before = useConversationStore
       .getState()
-      .byId.c1!.messages.filter((m) => m.role === "assistant").length;
+      .byId.c1?.messages.filter((m) => m.role === "assistant").length;
 
     await runResume("m1", "continue", "");
 
@@ -270,7 +270,7 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     expect(usePausedTurnStore.getState().pending).toHaveLength(0); // 帧已认领
     const assistants = useConversationStore
       .getState()
-      .byId.c1!.messages.filter((m) => m.role === "assistant");
+      .byId.c1?.messages.filter((m) => m.role === "assistant");
     expect(assistants).toHaveLength(before);
     expect(assistants[0].id).toBe("client-paused");
     expect(assistants[0].isStreaming).toBe(true);

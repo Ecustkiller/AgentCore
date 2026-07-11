@@ -17,7 +17,7 @@ import {
 import { useGraphStore } from "@/stores/graph";
 import type { EndpointKind } from "@/stores/sidePanel";
 import { useUsageStore } from "@/stores/usage";
-import { Background, ReactFlow, type Node } from "@xyflow/react";
+import { Background, type Node, ReactFlow } from "@xyflow/react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { CanvasPlaybackControls } from "./CanvasPlaybackControls";
 import { CanvasZoomControls } from "./CanvasZoomControls";
@@ -384,9 +384,7 @@ export function GraphView({
 
             {interactive && (
               <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-2">
-                {hasFrames && (
-                  <CanvasPlaybackControls autoPlay={autoplay} />
-                )}
+                {hasFrames && <CanvasPlaybackControls autoPlay={autoplay} />}
                 <CanvasZoomControls
                   onZoomIn={() => rfRef.current?.zoomIn({ duration: 200 })}
                   onZoomOut={() => rfRef.current?.zoomOut({ duration: 200 })}

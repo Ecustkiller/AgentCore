@@ -436,7 +436,7 @@ async def test_record_local_turn_persists_followups(monkeypatch):
     events: list = []
     _patch_persistence(monkeypatch, events, existing_title="已有标题")
 
-    await record_local_turn(
+    result = await record_local_turn(
         conversation_id="c1",
         user_id="u1",
         user_message="hi",
@@ -449,3 +449,4 @@ async def test_record_local_turn_persists_followups(monkeypatch):
     )
 
     assert ("followups", "assistant-id", ["建议一", "建议二"]) in events
+    assert result["followups"] == ["建议一", "建议二"]

@@ -6,7 +6,7 @@
  * {@link confirmBashRun} 兜底；「本会话都允许」与 grantSessionRun 共享 flag。
  * `openShellAtRoot` 仅 cd 到已授权工作区目录，不执行任意命令，故零确认（对标 VS Code）。
  */
-import { spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import {
   TERMINAL_CHANNELS,
   type TerminalRunResult,

@@ -1,19 +1,19 @@
-import { useMemo } from "react";
 import type {
   CheckpointDisplay,
   NonBlockingAskDisplay,
   PlanReviewDisplay,
   TeamPreviewDisplay,
 } from "@/stores/conversation/types";
+import { useMemo } from "react";
 import {
+  type ApprovalView,
+  type DelegationAuthView,
   entryToApproval,
   entryToCheckpoint,
   entryToDelegationAuth,
   entryToNonBlockingAsk,
   entryToPlanReview,
   entryToTeamPreview,
-  type ApprovalView,
-  type DelegationAuthView,
 } from "./adapters";
 import { useInteractionStore } from "./store";
 import type { InteractionEntry } from "./types";
@@ -52,8 +52,7 @@ export function useMessageInteractionCards(
       if (e.kind === "ask_user") checkpoints.push(entryToCheckpoint(e));
       else if (e.kind === "question_posted")
         nonBlockingAsks.push(entryToNonBlockingAsk(e));
-      else if (e.kind === "plan_review")
-        planReviews.push(entryToPlanReview(e));
+      else if (e.kind === "plan_review") planReviews.push(entryToPlanReview(e));
       else if (e.kind === "team_preview")
         teamPreviews.push(entryToTeamPreview(e));
     }

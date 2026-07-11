@@ -38,12 +38,12 @@ import {
   type ExportFormat,
   exportConversation,
 } from "@/services/conversations";
-import { useInteractionStore } from "@/stores/interactions";
 import {
   type Conversation,
   useConversationGenerating,
   useConversationStore,
 } from "@/stores/conversation";
+import { useInteractionStore } from "@/stores/interactions";
 import { useShareStore } from "@/stores/share";
 import {
   Archive,

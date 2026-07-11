@@ -138,7 +138,9 @@ function ContinueTurnButton({
       <Button
         variant="neutral"
         className="border-border/70"
-        icon={useRegenerate ? <RefreshCw size={13} /> : <StepForward size={13} />}
+        icon={
+          useRegenerate ? <RefreshCw size={13} /> : <StepForward size={13} />
+        }
         disabled={busy}
         onClick={() => void onContinue()}
       >

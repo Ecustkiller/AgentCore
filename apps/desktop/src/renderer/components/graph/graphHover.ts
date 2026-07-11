@@ -42,7 +42,8 @@ export function hoverRelatedIds(
   const walk = (adj: Map<string, string[]>) => {
     const stack = [hoveredNodeId];
     while (stack.length > 0) {
-      const cur = stack.pop()!;
+      const cur = stack.pop();
+      if (cur === undefined) break;
       for (const next of adj.get(cur) ?? []) {
         if (related.has(next)) continue;
         related.add(next);
