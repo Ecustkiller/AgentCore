@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 /**
- * 用户直触 bash（代码块「在终端运行」/ ClientTools「运行」）的聊天内确认门。
+ * 用户直触 bash（代码块「在终端运行」）的聊天内确认门。
  *
  * 对标 Cursor：确认面在聊天内，不叠 OS 模态。三按钮决策后由
  * {@link import("@/lib/terminalFeedback").runTerminalBash} 以 `rendererConfirmed`

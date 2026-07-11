@@ -89,6 +89,7 @@ function runFromPlan(plan: ExecutionPlan, id: string): RunNode | null {
     revision: 0,
     revised: null,
     replacesRunId: spec.replacesRunId ?? null,
+    delegateBatch: spec.delegateBatch,
     checkpoint: null,
     receivedContext: [],
     escalations: [],
@@ -346,6 +347,14 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
       }
       break;
     }
+    case "run_skipped": {
+      // 级联跳过 / graceful abort: node never ran —「未执行」. Materialize from plan
+      // (never got run_started) then mark skipped; agent stays idle.
+      ensureRun(s, f.runId);
+      const run = s.runIndex.get(f.runId);
+      if (run) run.status = "skipped";
+      break;
+    }
     case "run_progress": {
       // Progress is derived from run states below so it stays correct and
       // cumulative across multiple delegate batches (the per-batch wire
@@ -533,7 +542,7 @@ export function finalizeFold(
   // the accumulator's live objects are left untouched (a re-fold must not see them
   // frozen).
   const frozenTurn = status === "cancelled" || status === "failed";
-  const finalRuns = frozenTurn
+  let finalRuns = frozenTurn
     ? runs.map((r) =>
         r.status === "running" ? { ...r, status: "cancelled" as const } : r,
       )
@@ -543,6 +552,18 @@ export function finalizeFold(
         a.status === "working" ? { ...a, status: "cancelled" as const } : a,
       )
     : agents;
+
+  // Turn terminal: any plan-declared node that never got a terminal run frame
+  // (old journals without run_skipped, or grant-then-end) closes as skipped —
+  //「未执行」instead of forever「排队中」. Live streams emit run_skipped at wave
+  // close; this is the journal-compat / defensive finalize pass. Covers
+  // completed as well as cancelled/failed (cascade-skipped tails after a
+  // successful upstream sibling batch).
+  if (status === "completed" || status === "cancelled" || status === "failed") {
+    finalRuns = finalRuns.map((r) =>
+      r.status === "pending" ? { ...r, status: "skipped" as const } : r,
+    );
+  }
 
   return {
     id: s.plan.id,
@@ -614,6 +635,10 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
       return frame.reason === "redirect"
         ? `${role(frame.agentId)} 已改方向`
         : `${role(frame.agentId)} 已停止`;
+    case "run_skipped":
+      return frame.reason === "abort"
+        ? `${role(frame.agentId)} 未执行 · 已中止`
+        : `${role(frame.agentId)} 未执行`;
     case "run_progress":
       return `进度 ${frame.completed}/${frame.total}`;
     case "batch_metrics":

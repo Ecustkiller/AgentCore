@@ -1167,29 +1167,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/conversations/{conversation_id}/folder": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Move Conversation To Folder
-         * @description Move a conversation into a folder, or out of one (``folder_id=null``).
-         *
-         *     A non-null target must be one of the user's own live folders (else 404). Folder
-         *     is pure sidebar grouping — moving never changes the conversation's scratch path.
-         */
-        patch: operations["move_conversation_to_folder_v1_conversations__conversation_id__folder_patch"];
-        trace?: never;
-    };
     "/v1/conversations/{conversation_id}/handoff/jobs": {
         parameters: {
             query?: never;
@@ -1842,20 +1819,20 @@ export interface paths {
         };
         /**
          * Get Workspace Binding
-         * @description Report a conversation's resolved scratch workspace mode (local vs cloud).
+         * @description Report a conversation's resolved workspace mode (local vs cloud).
          */
         get: operations["get_workspace_binding_v1_conversations__conversation_id__workspace_binding_get"];
         /**
          * Bind Workspace
-         * @description Bind the conversation's scratch workspace to a desktop FS root (switch to local).
+         * @description Bind a 裸聊's scratch workspace to a desktop FS root (switch to local).
          *
-         *     Idempotent — re-binding overwrites the stored root id on the conversation row.
+         *     Project conversations inherit an immutable project binding — returns 409.
          */
         put: operations["bind_workspace_v1_conversations__conversation_id__workspace_binding_put"];
         post?: never;
         /**
          * Unbind Workspace
-         * @description Unbind the conversation's scratch workspace (fall back to cloud).
+         * @description Unbind a 裸聊's scratch workspace (fall back to cloud). Project chats → 409.
          */
         delete: operations["unbind_workspace_v1_conversations__conversation_id__workspace_binding_delete"];
         options?: never;
@@ -2216,10 +2193,9 @@ export interface paths {
         post?: never;
         /**
          * Delete Folder Permanent
-         * @description 彻底删除文件夹：移除分组容器，成员对话解除分组后保留。
+         * @description 彻底删除项目：移除容器；成员对话保留但解除分组（permanent path）.
          *
-         *     Distinct from ``DELETE /{folder_id}`` (soft-delete container with retention).
-         *     Member conversations keep their scratch workspaces; only the grouping row is removed.
+         *     Distinct from ``DELETE /{folder_id}`` (soft-delete + archive members).
          */
         delete: operations["delete_folder_permanent_v1_folders__folder_id__permanent_delete"];
         options?: never;
@@ -2679,7 +2655,6 @@ export interface paths {
          *     scopes to one folder/工作区 — it filters the conversation and message sections
          *     and drops the folder section entirely (searching *within* a workspace and
          *     searching *for* a folder are mutually exclusive intents).
-         *     ``tag`` keeps only hits whose owning conversation carries that auto-tag.
          */
         get: operations["search_v1_search_get"];
         put?: never;
@@ -2898,6 +2873,24 @@ export interface paths {
          */
         get: operations["get_usage_summary_v1_usage_summary_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/me/autonomy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Autonomy */
+        get: operations["get_autonomy_v1_users_me_autonomy_get"];
+        /** Put Autonomy */
+        put: operations["put_autonomy_v1_users_me_autonomy_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3218,7 +3211,7 @@ export interface paths {
         };
         /**
          * List Workspaces
-         * @description Enumerate conversation scratch workspaces that have files or a local binding.
+         * @description Enumerate project workspaces + bare-chat scratches that have files or a local bind.
          */
         get: operations["list_workspaces_v1_workspaces_get"];
         put?: never;
@@ -4201,6 +4194,27 @@ export interface components {
             /** Run Id */
             run_id: string;
         };
+        /**
+         * AutonomyPolicy
+         * @description User-global capability-authorization posture (能力授权维度；不动计划确认).
+         *
+         *     - ``always_ask`` — every GRANTABLE call prompts; kickoff has no grant shortcut
+         *     - ``first_grant`` — kickoff once authorizes the grantable set for the delegation
+         *       (default; continuous with the prior delegation-authorization card)
+         *     - ``full_auto`` — kickoff auto-grants without listing capability items
+         * @enum {string}
+         */
+        AutonomyPolicy: "always_ask" | "first_grant" | "full_auto";
+        /** AutonomyUpdate */
+        AutonomyUpdate: {
+            /** @description always_ask | first_grant | full_auto */
+            policy: components["schemas"]["AutonomyPolicy"];
+        };
+        /** AutonomyView */
+        AutonomyView: {
+            /** @default first_grant */
+            policy: components["schemas"]["AutonomyPolicy"];
+        };
         /** BatchCreateInviteRequest */
         BatchCreateInviteRequest: {
             /** Count */
@@ -4616,9 +4630,14 @@ export interface components {
         /**
          * CheckpointDecision
          * @description How the user (or a timeout / orphan) settled a checkpoint the CEO raised.
+         *
+         *     ``CONTINUE`` / ``ADJUST`` / ``STOP`` are shared by ask_user / plan_review /
+         *     team_preview (开工卡). On the kickoff card, ``CONTINUE`` means grant-all-needed
+         *     capabilities and start; ``PER_CALL`` means start with per-call approval (no
+         *     delegation grant). ``PER_CALL`` is kickoff-only — ask_user / plan_review ignore it.
          * @enum {string}
          */
-        CheckpointDecision: "continue" | "adjust" | "stop" | "timeout" | "orphaned";
+        CheckpointDecision: "continue" | "per_call" | "adjust" | "stop" | "timeout" | "orphaned";
         /**
          * Citation
          * @description A web source consulted for an assistant message (source-card data).
@@ -4711,8 +4730,6 @@ export interface components {
              * @default false
              */
             pinned: boolean;
-            /** Tag */
-            tag?: string | null;
             /** Title */
             title: string | null;
             /**
@@ -4787,10 +4804,20 @@ export interface components {
             /** Title */
             title: string;
         };
-        /** CreateFolderRequest */
+        /**
+         * CreateFolderRequest
+         * @description Create a project (= workspace). ``mode`` is required and immutable after create.
+         */
         CreateFolderRequest: {
-            /** Local Dir */
-            local_dir?: string | null;
+            /** Local Root Id */
+            local_root_id?: string | null;
+            /** Local Subpath */
+            local_subpath?: string | null;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "local" | "cloud";
             /** Name */
             name: string;
         };
@@ -4930,7 +4957,7 @@ export interface components {
         };
         /**
          * DelegationAuthorizationDecision
-         * @description How the user settled a per-delegation authorization prompt.
+         * @description Settlement dialect for kickoff capability-authorization choices.
          * @enum {string}
          */
         DelegationAuthorizationDecision: "grant_delegation" | "per_call" | "deny" | "orphaned";
@@ -5044,15 +5071,22 @@ export interface components {
         };
         /**
          * FolderGroup
-         * @description A folder plus the conversations it holds (grouped sidebar payload).
+         * @description A project plus the conversations it holds (grouped sidebar payload).
          */
         FolderGroup: {
             /** Conversations */
             conversations: components["schemas"]["ConversationSummary"][];
             /** Id */
             id: string;
-            /** Local Dir */
-            local_dir: string | null;
+            /** Local Root Id */
+            local_root_id?: string | null;
+            /** Local Subpath */
+            local_subpath?: string | null;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "local" | "cloud";
             /** Name */
             name: string;
         };
@@ -5065,8 +5099,15 @@ export interface components {
             created_at: string;
             /** Id */
             id: string;
-            /** Local Dir */
-            local_dir: string | null;
+            /** Local Root Id */
+            local_root_id?: string | null;
+            /** Local Subpath */
+            local_subpath?: string | null;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "local" | "cloud";
             /** Name */
             name: string;
             /**
@@ -5728,14 +5769,6 @@ export interface components {
             required: boolean;
         };
         /**
-         * MoveConversationRequest
-         * @description Move a conversation into a folder, or out of one with ``folder_id=null``.
-         */
-        MoveConversationRequest: {
-            /** Folder Id */
-            folder_id?: string | null;
-        };
-        /**
          * MoveFileRequest
          * @description Move/rename a workspace file or directory (both workspace-relative).
          */
@@ -5764,19 +5797,20 @@ export interface components {
         };
         /**
          * PausedTurnSummary
-         * @description A turn awaiting resume after a durable plan_review / ask_user pause (结构化挂起 2b).
+         * @description A turn awaiting resume after a durable plan_review / ask_user / kickoff pause.
          *
          *     Surfaced on conversation reopen so the client can re-render the right resume card
-         *     by ``kind`` and offer continue / adjust / stop → the resume endpoint.
+         *     by ``kind`` and offer continue / per_call / adjust / stop → the resume endpoint.
          *     ``message_id`` is both the pause key and the id the resumed assistant message will
          *     reuse, so an optimistic bubble reconciles cleanly.
          *
          *     plan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the
-         *     gated downstream); team_preview carries ``workers`` (upcoming roles / tasks /
-         *     deps); ask_user carries the unified card payload ``question`` (the
-         *     framing / opening line) + ``context`` + the optional opening content
-         *     ``assumptions`` / ``questions`` / ``style_options`` (empty for a compact mid-task
-         *     fork). The unused set is empty for the other kinds.
+         *     gated downstream); team_preview (开工卡) carries ``workers`` (upcoming roles /
+         *     tasks / deps) + ``tools`` (grantable capabilities for this delegation); ask_user
+         *     carries the unified card payload ``question`` (the framing / opening line) +
+         *     ``context`` + the optional opening content ``assumptions`` / ``questions`` /
+         *     ``style_options`` (empty for a compact mid-task fork). The unused set is empty
+         *     for the other kinds.
          */
         PausedTurnSummary: {
             /** Assumptions */
@@ -5816,6 +5850,8 @@ export interface components {
             style_options?: {
                 [key: string]: unknown;
             }[];
+            /** Tools */
+            tools?: string[];
             /**
              * User Message
              * @default
@@ -6256,10 +6292,11 @@ export interface components {
         };
         /**
          * RoleCostLine
-         * @description One role's spend over a window — the team payroll grouped by role.
+         * @description One persona/role's spend over a window — the team payroll grouped by label.
          *
          *     The account dashboard's product differentiator (§7.3D): multi-agent spend
-         *     splits by the ledger ``role`` (CEO / 队员 / 汇总 / …), which a single-agent
+         *     splits by ``COALESCE(persona, role)`` (调研员 / CEO / …, falling back to the
+         *     structural captain/member bucket for legacy rows), which a single-agent
          *     competitor can't show. Money is integer nano-USD; the client formats ¥ from
          *     the summary's single ``cny_per_usd`` (no per-row re-pricing here).
          */
@@ -6401,8 +6438,6 @@ export interface components {
             role?: string | null;
             /** Snippet */
             snippet?: string | null;
-            /** Tag */
-            tag?: string | null;
             /** Title */
             title?: string | null;
             /** Updated At */
@@ -6888,10 +6923,14 @@ export interface components {
         };
         /**
          * ToolApproval
-         * @description Tool approval requirement levels.
+         * @description Tool approval requirement levels (可逆性 × 副作用).
+         *
+         *     Two live levels: ``NEVER`` (silent) and ``GRANTABLE`` (first-grant / per-call
+         *     via AutonomyPolicy). The former ``ALWAYS`` (every call, no turn grant) had no
+         *     consumers and was removed — irreversible external tools are not in the MVP set.
          * @enum {string}
          */
-        ToolApproval: "never" | "grantable" | "always";
+        ToolApproval: "never" | "grantable";
         /**
          * ToolCategory
          * @enum {string}
@@ -7133,10 +7172,11 @@ export interface components {
              */
             status: "open" | "acknowledged" | "resolved" | "closed";
         };
-        /** UpdateFolderRequest */
+        /**
+         * UpdateFolderRequest
+         * @description Rename only — project workspace binding is immutable after create.
+         */
         UpdateFolderRequest: {
-            /** Local Dir */
-            local_dir?: string | null;
             /** Name */
             name?: string | null;
         };
@@ -7303,6 +7343,11 @@ export interface components {
         /**
          * WorkspaceBindingResponse
          * @description A conversation's resolved workspace mode + where its binding lives.
+         *
+         *     ``mode`` / ``root_id`` follow the turn-routing口径 (``resolve_local_binding``):
+         *     an explicit ``local_root_id`` OR the desktop's ``local_container_root_id`` default
+         *     both count as local. ``source`` distinguishes how the effective bind was chosen
+         *     so the client can present「显式绑定」vs「容器默认」without guessing.
          */
         WorkspaceBindingResponse: {
             /**
@@ -7317,6 +7362,8 @@ export interface components {
              * @enum {string}
              */
             scope: "folder" | "conversation";
+            /** Source */
+            source?: ("explicit" | "container") | null;
         };
         /**
          * WorkspaceEditDoc
@@ -9738,45 +9785,6 @@ export interface operations {
             };
         };
     };
-    move_conversation_to_folder_v1_conversations__conversation_id__folder_patch: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                conversation_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MoveConversationRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConversationSummary"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     list_handoff_jobs_v1_conversations__conversation_id__handoff_jobs_get: {
         parameters: {
             query?: never;
@@ -10047,6 +10055,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
+                "X-Client-Platform"?: string | null;
                 authorization?: string | null;
             };
             path: {
@@ -10281,6 +10290,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
+                "X-Client-Platform"?: string | null;
                 authorization?: string | null;
             };
             path: {
@@ -12576,8 +12586,6 @@ export interface operations {
                 updated_after?: string | null;
                 /** @description 限定在某文件夹/工作区内检索（仅作用于对话与消息，工作区过滤） */
                 folder_id?: string | null;
-                /** @description 按对话自动标签筛选（code_review/research/writing/analysis，仅对话与消息） */
-                tag?: string | null;
             };
             header?: {
                 authorization?: string | null;
@@ -13029,6 +13037,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_autonomy_v1_users_me_autonomy_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutonomyView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_autonomy_v1_users_me_autonomy_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutonomyUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutonomyView"];
                 };
             };
             /** @description Validation Error */

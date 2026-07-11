@@ -40,6 +40,7 @@ def test_member_run_cost_reads_state_without_repricing():
     row = member_run_cost(spec, state, parent_run_id="cap-1")
 
     assert row.role == ROLE_MEMBER
+    assert row.persona == "研究员"
     assert row.run_id == "run-1"
     assert row.parent_run_id == "cap-1"
     assert row.agent_id == "agent-1"
@@ -96,6 +97,7 @@ def test_captain_run_cost_from_state_reads_priced_state():
     row = captain_run_cost_from_state("cap-1", state)
 
     assert row.role == ROLE_CAPTAIN
+    assert row.persona == "CEO"
     assert row.run_id == "cap-1"
     assert row.parent_run_id is None  # the root run
     assert row.agent_id is None

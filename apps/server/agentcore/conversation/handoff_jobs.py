@@ -69,6 +69,15 @@ async def persist_job_turn(*, user_id: str, conversation_id: str, result: dict) 
                     conversation_id=conversation_id,
                     error=str(e),
                 )
+                from agentcore.billing.cost_ledger_queue import get_cost_ledger_queue
+
+                get_cost_ledger_queue().enqueue_runs(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message_id=result.get("message_id"),
+                    runs=list(cost_runs),
+                    source="handoff",
+                )
 
 
 async def run_handoff_job(

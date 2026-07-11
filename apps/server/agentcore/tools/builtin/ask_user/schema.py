@@ -30,10 +30,12 @@ def normalize_options(raw: Any) -> list[dict[str, Any]]:
     """Cap (≤6) the choice options, accepting either bare strings or rich objects.
 
     A bare ``"Postgres"`` becomes ``{"label": "Postgres"}``; an object may add a one-line
-    ``detail`` (the trade-off shown under the label) and ``recommended`` (the asker's
-    advised option — advisory only, never a pre-selection). Empty-label entries drop, and
-    only the FIRST ``recommended`` survives (至多一个推荐项), so the card shows one clear
-    「推荐」without a wall of badges.
+    ``detail`` (the trade-off shown under the label), ``recommended`` (the asker's
+    advised option — advisory only, never a pre-selection), and ``action`` (a desktop
+    client action such as ``bind_local_folder`` — unknown values drop so a hallucinated
+    action never reaches the wire). Empty-label entries drop, and only the FIRST
+    ``recommended`` survives (至多一个推荐项), so the card shows one clear「推荐」without
+    a wall of badges.
     """
     items = raw if isinstance(raw, list) else []
     out: list[dict[str, Any]] = []
@@ -50,6 +52,9 @@ def normalize_options(raw: Any) -> list[dict[str, Any]]:
             if bool(it.get("recommended")) and not recommended_taken:
                 opt["recommended"] = True
                 recommended_taken = True
+            action = str(it.get("action") or "").strip()
+            if action == "bind_local_folder":
+                opt["action"] = "bind_local_folder"
         out.append(opt)
         if len(out) >= _MAX_OPTIONS:
             break

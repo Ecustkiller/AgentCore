@@ -420,6 +420,14 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 ag["currentRunId"] = None
                 ag["toolProgress"] = None
 
+        elif etype == "run_skipped":
+            # 级联跳过 / graceful abort: node never ran — materialised SKIPPED so the graph
+            # shows「未执行」instead of forever-pending. Orthogonal to run_cancelled.
+            run = run_by_id(p.get("run_id", ""))
+            if run is not None:
+                run["status"] = "skipped"
+            # Agent never started — leave idle (no currentRunId / toolProgress to clear).
+
         elif etype == "run_progress":
             # Progress is derived from run states below (cumulative, multi-batch safe);
             # the wire counter is a timeline marker only.
@@ -692,6 +700,15 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         for a in agents:
             if a["status"] == "working":
                 a["status"] = "cancelled"
+
+    # Turn terminal (completed / cancelled / failed): any plan-declared node that never got
+    # a terminal run frame (old journals without run_skipped, or a grant-then-end vector)
+    # closes as skipped —「未执行」instead of forever「排队中」. Live streams emit run_skipped
+    # at wave close; this is the journal-compat / defensive finalize pass.
+    if status in ("completed", "cancelled", "failed"):
+        for r in runs:
+            if r["status"] == "pending":
+                r["status"] = "skipped"
 
     return {
         "status": status,

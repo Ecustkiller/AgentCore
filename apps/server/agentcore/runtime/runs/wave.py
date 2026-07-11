@@ -59,6 +59,9 @@ logger = get_logger(__name__)
 
 # Host progress hook: sync (legacy tests) or async (drive hot-continue).
 OnProgress = Callable[[Mapping[str, RunState]], None | Awaitable[None]]
+# Host skip-materialisation hook: (run_id, agent_id, reason) where reason is
+# ``cascade`` | ``abort``. Drive wires this to ``sink.emit(run_skipped(...))``.
+OnSkipped = Callable[[str, str, str], None]
 
 # The most nodes this scheduler runs at once. Ready nodes beyond this stay pending
 # and ride a freed slot. Kept in step with MAX_PARALLEL_DELEGATIONS (the tree-wide
@@ -104,6 +107,7 @@ class WaveScheduler:
         cancel_run_ids: Callable[[], frozenset[str]] | None = None,
         on_progress: OnProgress | None = None,
         on_boundary: OnBoundary | None = None,
+        on_skipped: OnSkipped | None = None,
         metrics_sink: list[BatchMetrics] | None = None,
     ) -> dict[str, RunState]:
         """Drive ``plan`` to completion; return each node's terminal
@@ -155,6 +159,10 @@ class WaveScheduler:
           No hook ⇒ all markers inert (a ``bind_after_deps`` node then dispatches
           normally; a scope escalation just rides to synthesis); no marked node / no
           pending ⇒ untouched.
+        - ``on_skipped`` fires once per newly materialised SKIPPED node at wave close
+          (cascade-skip set + graceful-abort tail), with ``reason`` ``cascade`` or
+          ``abort``. Drive wires it to ``run_skipped`` SSE so the graph shows「未执行」
+          instead of forever-pending. Seeded SKIPPED nodes are not re-emitted.
         - ``metrics_sink`` (调度埋点量化), when given, receives ONE :class:`BatchMetrics`
           appended at terminal — concurrency / parallelism / slot-starvation / outcome
           counts for this run — for the host to log. Kept as a sink (not a return /
@@ -412,9 +420,21 @@ class WaveScheduler:
                 await asyncio.shield(asyncio.gather(*running, return_exceptions=True))
             raise
 
-        # Materialise cascade-skipped nodes (never ran) as SKIPPED.
+        # Materialise cascade-skipped nodes (never ran) as SKIPPED + emit run_skipped
+        # so the graph shows「未执行」instead of forever-pending. Seeded entries are
+        # left alone (setdefault / membership check) — no re-emit on resume.
+        def _materialise_skipped(run_id: str, reason: str) -> None:
+            if run_id in completed:
+                return
+            completed[run_id] = RunState(phase=RunPhase.SKIPPED)
+            if on_skipped is None:
+                return
+            node = plan.by_id(run_id)
+            agent_id = (node.agent_id if node and node.agent_id else "") or run_id
+            on_skipped(run_id, agent_id, reason)
+
         for run_id in skipped:
-            completed.setdefault(run_id, RunState(phase=RunPhase.SKIPPED))
+            _materialise_skipped(run_id, "cascade")
         # A graceful abort (on_failure=abort, or a plan_review stop) ends scheduling
         # with an un-run tail; materialise it as SKIPPED — the same shape as a cascade
         # skip — so the CEO overview / graph shows「未执行」cleanly instead of a silently
@@ -422,7 +442,7 @@ class WaveScheduler:
         # so its tail is left out of ``completed`` to re-run on resume.)
         if aborted:
             for node in plan.nodes:
-                completed.setdefault(node.run_id, RunState(phase=RunPhase.SKIPPED))
+                _materialise_skipped(node.run_id, "abort")
 
         # 调度埋点量化: hand the host one snapshot of this run (counts exclude resume-seeded
         # nodes — they didn't run here). Appended only when a sink was given.

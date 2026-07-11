@@ -4,9 +4,11 @@
 // `apiFetch` (mobile has no cookie origin). 精简版 (手机端): GLOBAL scope only — no
 // per-project layer, no AI 改写 / preview. The phone is a 查看 + 改 + 删 lens on the
 // always-injected core (偏好 全局 + 画像 全局) and the on-demand 主题 notes, plus the
-// master switch. The contract mirrors the workspace edit contract: full text + a
-// content-addressed `version` baseline the next write does its CAS against.
+// master switch and cross-conversation「最近更新」feed. The contract mirrors the
+// workspace edit contract: full text + a content-addressed `version` baseline the
+// next write does its CAS against.
 import { apiFetch } from "@/api/client";
+import type { MemoryUpdateItem } from "@/api/conversations";
 
 export interface MemoryDoc {
   content: string;
@@ -151,4 +153,57 @@ export function writeMemoryTopic(
     { content, baseline },
     "保存失败",
   );
+}
+
+/**
+ * One offline-consolidation pass in the cross-conversation「最近更新」feed (§1.6).
+ * Same applied-change items as the in-conversation card, plus `conversationId` so the
+ * feed can jump back to the source thread.
+ */
+export interface MemoryUpdateFeedEntry {
+  id: string;
+  conversationId: string;
+  createdAt: string;
+  items: MemoryUpdateItem[];
+}
+
+interface MemoryUpdateFeedItemWire {
+  id: string;
+  conversation_id: string;
+  created_at: string;
+  items?: Array<{
+    action: string;
+    file: string;
+    section: string;
+    scope: string;
+    content: string;
+    target: string;
+  }>;
+}
+
+/**
+ * The signed-in user's recent memory updates across ALL conversations, newest-first
+ * (记忆更新对话内可见 §1.6 — write-side home on `/memory`). `limit` caps how many
+ * recent passes to pull.
+ */
+export async function listMemoryUpdates(
+  limit = 30,
+): Promise<MemoryUpdateFeedEntry[]> {
+  const data = await getJson<{ updates: MemoryUpdateFeedItemWire[] }>(
+    `/v1/users/me/memory/updates?limit=${limit}`,
+    "加载记忆更新失败",
+  );
+  return (data.updates ?? []).map((u) => ({
+    id: u.id,
+    conversationId: u.conversation_id,
+    createdAt: u.created_at,
+    items: (u.items ?? []).map((it) => ({
+      action: it.action,
+      file: it.file,
+      section: it.section ?? "",
+      scope: it.scope ?? "global",
+      content: it.content ?? "",
+      target: it.target ?? "",
+    })),
+  }));
 }

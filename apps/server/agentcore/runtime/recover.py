@@ -224,6 +224,7 @@ async def _settle_resume(
             checkpoint_run_ids=suspension.checkpoint_run_ids,
             execution_id=eid,
             coordinate=True,
+            apply_kickoff_grant=True,
         )
         return SettledSuspension(delegate_result.output, None)
 

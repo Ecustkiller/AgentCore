@@ -10,7 +10,6 @@ import {
 import { useTurnAudit } from "@/hooks/useTurnAudit";
 import { buildInjectGraphOverlay } from "@/lib/causalInject";
 import { resolveEffectiveGraphLayout } from "@/lib/graph-layout-utils";
-import { groupAuditCountsByRun } from "@/services/audit";
 import { useConversationStore } from "@/stores/conversation";
 import {
   type Execution,
@@ -39,6 +38,7 @@ import {
   computeWaves,
   deriveCaptainStatus,
 } from "./helpers";
+import { planCapabilities } from "./planCapabilities";
 import { projectFlowEdges, projectFlowNodes } from "./projectFlowGraph";
 import {
   GAP_Y,
@@ -121,14 +121,10 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
   const navigate = useNavigate();
   const focusedExec = useMessageExecution(effectiveFocus);
   const conversationId = useConversationStore((s) => s.currentConversationId);
-  const isMultiAgent = focusedExec?.planType === "multi_agent";
+  const caps = planCapabilities(focusedExec?.planType);
   const { data: turnAudit } = useTurnAudit(
-    isMultiAgent ? conversationId : null,
-    isMultiAgent ? effectiveFocus : null,
-  );
-  const auditCounts = useMemo(
-    () => (turnAudit ? groupAuditCountsByRun(turnAudit.data) : {}),
-    [turnAudit],
+    caps.auditInject ? conversationId : null,
+    caps.auditInject ? effectiveFocus : null,
   );
 
   const layoutKind = useGraphStore((s) => s.layoutKind);
@@ -323,7 +319,7 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
 
   const injectOverlay = useMemo(
     () =>
-      isMultiAgent && focusedLayout
+      caps.auditInject && focusedLayout
         ? buildInjectGraphOverlay(
             turnAudit?.causal_graph,
             focusedLayout.edges,
@@ -334,7 +330,7 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
           )
         : null,
     [
-      isMultiAgent,
+      caps.auditInject,
       turnAudit?.causal_graph,
       focusedLayout,
       litRunId,
@@ -344,10 +340,10 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
 
   const injectFlowAvailable = useMemo(
     () =>
-      isMultiAgent &&
+      caps.auditInject &&
       (turnAudit?.causal_graph?.edges?.some((e) => e.kind === "inject") ??
         false),
-    [isMultiAgent, turnAudit?.causal_graph],
+    [caps.auditInject, turnAudit?.causal_graph],
   );
 
   const metricsSummary = useMemo(
@@ -415,7 +411,6 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
         activateNode: isFocus ? activateNode : () => undefined,
         groups: slice.groups,
         subTeams: slice.subTeams,
-        auditCounts: isFocus ? auditCounts : undefined,
         foldInfo: slice.foldInfo ?? undefined,
         expandedUnits,
         onToggleUnitExpand,
@@ -443,7 +438,6 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
     finalAnswer,
     taskMessage,
     activateNode,
-    auditCounts,
     onToggleUnitExpand,
     edgePathType,
     injectOverlay,
@@ -457,6 +451,7 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
     return expandedTurnInputs
       .map(({ turnId }) => {
         const s = turnLayouts[turnId];
+        if (s?.layoutError) return `${turnId}:error:${s.layoutError}`;
         if (!s?.layoutReady) return `${turnId}:pending`;
         return `${turnId}:${layoutStructureSig(s.positions, s.nodeHeights, s.nodeSizes)}`;
       })
@@ -526,13 +521,14 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
             TURN_GROUP_FALLBACK_W,
             slice.bbox.width + TURN_GROUP_PAD * 2,
           );
-          const height = Math.max(
-            TURN_GROUP_FALLBACK_H + notesFooter,
+          // Height follows placed-content bbox only (host contract). Do not floor
+          // to FALLBACK_H after layout — that recreated the “content at top /
+          // empty band below” sink sibling of the old ELK dead zone.
+          const height =
             TURN_GROUP_HEADER_H +
-              slice.bbox.height +
-              TURN_GROUP_PAD * 2 +
-              notesFooter,
-          );
+            slice.bbox.height +
+            TURN_GROUP_PAD * 2 +
+            notesFooter;
           const groupX = -(width / 2);
           const groupData: TurnGroupData = {
             messageId: t.id,
@@ -907,11 +903,13 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
 
   const layoutReady =
     !effectiveFocus || !focusedExec || (focusedSlice?.layoutReady ?? false);
+  const layoutError = focusedSlice?.layoutError ?? null;
 
   return {
     nodes,
     edges,
     layoutReady,
+    layoutError,
     onNodesChange,
     focusedExec,
     effectiveLayoutKind,

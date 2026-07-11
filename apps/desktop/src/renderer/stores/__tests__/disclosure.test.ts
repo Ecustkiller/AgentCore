@@ -62,7 +62,7 @@ describe("disclosure store", () => {
     expect(localStorage.getItem(KEY)).toBeNull();
   });
 
-  it("survives a fresh import (restart) from localStorage", async () => {
+  it("survives a fresh import (restart) from uiStorage", async () => {
     const first = await freshStore();
     first.useDisclosureStore.getState().setKey("c1::m1:reason:0", true, false);
     expect(persisted()["c1::m1:reason:0"]).toBe(true);
@@ -88,6 +88,23 @@ describe("disclosure store", () => {
     expect(map).not.toHaveProperty("c1::m2:reason:0");
     expect(map["c2::m9:tool:z"]).toBe(true); // untouched
     expect(persisted()["c2::m9:tool:z"]).toBe(true);
+  });
+
+  it("clearConversationUiState also clears disclosure via the registered clearer", async () => {
+    vi.resetModules();
+    const { useDisclosureStore } = await import("@/stores/disclosure");
+    const { clearConversationUiState } = await import(
+      "@/lib/clearConversationUiState"
+    );
+
+    useDisclosureStore.getState().setKey("c1::m1:tool:a", true, false);
+    useDisclosureStore.getState().setKey("c2::m9:tool:z", true, false);
+
+    clearConversationUiState("c1");
+
+    const map = useDisclosureStore.getState().map;
+    expect(map).not.toHaveProperty("c1::m1:tool:a");
+    expect(map["c2::m9:tool:z"]).toBe(true);
   });
 
   it("ignores a corrupt persisted payload", async () => {

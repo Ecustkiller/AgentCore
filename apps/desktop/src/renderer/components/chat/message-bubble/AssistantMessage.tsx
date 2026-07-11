@@ -10,6 +10,12 @@ import { TeamPreviewCard } from "@/components/chat/TeamPreviewCard";
 import { TurnWarningBanner } from "@/components/chat/TurnWarningBanner";
 import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
 import { Button, IconButton } from "@/components/ui";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { FinishReasonChip } from "@/components/ui/finish-reason-chip";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { referencedCitationNumbers } from "@/lib/citations";
@@ -24,6 +30,7 @@ import {
   mergeArtifacts,
 } from "@/lib/fileArtifacts";
 import { formatCost } from "@/lib/format";
+import { formatMessageExport } from "@/lib/messageExport";
 import { notifyError } from "@/lib/toast";
 import { continueTurn, runRegenerate } from "@/services/turns";
 import {
@@ -72,7 +79,11 @@ function MultiAgentFileArtifacts({
     [process, execution],
   );
   return (
-    <FileArtifactsCard artifacts={artifacts} conversationId={conversationId} />
+    <FileArtifactsCard
+      artifacts={artifacts}
+      conversationId={conversationId}
+      turnKey={messageId}
+    />
   );
 }
 
@@ -260,10 +271,14 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   // 流式中可复制 (对话基础功能补齐): the full footer is gated until the turn settles (its
   // usage / regenerate actions are meaningless mid-stream), but a long reply is often worth
   // copying before it finishes — so expose a lightweight copy affordance while streaming.
-  // The getter reads the latest content each render, so a click copies what's on screen now.
-  const { copied: streamCopied, onCopy: onStreamCopy } = useCopyAction(
-    () => message.content,
+  // Default = 仅交付; with process timeline offer「含过程」too.
+  const { copied: streamCopied, onCopy: onStreamCopy } = useCopyAction(() =>
+    formatMessageExport(message.content, message.process, "deliverable"),
   );
+  const { copied: streamCopiedProcess, onCopy: onStreamCopyProcess } =
+    useCopyAction(() =>
+      formatMessageExport(message.content, message.process, "with_process"),
+    );
 
   const handleRegenerate = () => {
     const msgs = getActiveRuntime().messages;
@@ -407,6 +422,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           <FileArtifactsCard
             artifacts={singleAgentArtifacts}
             conversationId={conversationId}
+            turnKey={projectionId}
           />
         )
       ) : (
@@ -420,6 +436,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           citations={citations}
           flash={citeFlash}
           referenced={referenced}
+          turnKey={projectionId}
         />
       )}
       {bottomCheckpoints.map((cp) => (
@@ -443,15 +460,43 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       )}
       {message.isStreaming && message.content.length > 0 && (
         <div className="mt-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-          <SimpleTooltip label={streamCopied ? "已复制" : "复制"}>
-            <IconButton
-              size="sm"
-              aria-label="复制"
-              onClick={() => void onStreamCopy()}
-            >
-              {streamCopied ? <Check size={14} /> : <Copy size={14} />}
-            </IconButton>
-          </SimpleTooltip>
+          {(message.process?.length ?? 0) > 0 ? (
+            <DropdownMenu>
+              <SimpleTooltip
+                label={
+                  streamCopied || streamCopiedProcess ? "已复制" : "复制"
+                }
+              >
+                <DropdownMenuTrigger asChild>
+                  <IconButton size="sm" aria-label="复制">
+                    {streamCopied || streamCopiedProcess ? (
+                      <Check size={14} />
+                    ) : (
+                      <Copy size={14} />
+                    )}
+                  </IconButton>
+                </DropdownMenuTrigger>
+              </SimpleTooltip>
+              <DropdownMenuContent align="start" className="min-w-40">
+                <DropdownMenuItem onSelect={() => void onStreamCopy()}>
+                  仅交付
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void onStreamCopyProcess()}>
+                  含过程
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <SimpleTooltip label={streamCopied ? "已复制" : "复制"}>
+              <IconButton
+                size="sm"
+                aria-label="复制"
+                onClick={() => void onStreamCopy()}
+              >
+                {streamCopied ? <Check size={14} /> : <Copy size={14} />}
+              </IconButton>
+            </SimpleTooltip>
+          )}
         </div>
       )}
       {!message.isStreaming && message.syncStatus && (

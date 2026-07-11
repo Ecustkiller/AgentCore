@@ -1,7 +1,16 @@
 import { ApiError } from "@/services/api";
 import { resolveInteraction } from "@/services/interaction";
+import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import type { WorkspaceOpRequiredPayload } from "@/types/events";
 import type { WorkspaceOpName, WorkspaceOpResult } from "@shared/ipc-contract";
+
+/** 后台进程 op：通道注入 conversation_id（公开工具 schema 不含此字段）。 */
+const PROCESS_OPS = new Set<string>([
+  "process_start",
+  "process_read",
+  "process_stop",
+  "process_list",
+]);
 
 /**
  * Desktop half of the local-workspace op channel (双模式工作区 P2a).
@@ -22,7 +31,7 @@ export async function performWorkspaceOp(
   payload: WorkspaceOpRequiredPayload,
   conversationId: string,
 ): Promise<void> {
-  const result = await runLocalOp(payload);
+  const result = await runLocalOp(payload, conversationId);
   try {
     await resolveInteraction(conversationId, payload.request_id, {
       kind: "client_tool",
@@ -36,17 +45,41 @@ export async function performWorkspaceOp(
 
 async function runLocalOp(
   payload: WorkspaceOpRequiredPayload,
+  conversationId: string,
 ): Promise<WorkspaceOpResult> {
   const fsApi = typeof window !== "undefined" ? window.fsApi : undefined;
   if (!fsApi?.workspaceOp) {
     return ioError("本地工作区不可用（非桌面环境）");
   }
+  let rootId = payload.root_id;
+  let args = payload.args;
+  if (PROCESS_OPS.has(payload.op)) {
+    args = {
+      ...payload.args,
+      conversation_id: payload.conversation_id || conversationId,
+    };
+    // 进程 op 直发通道、绕过 LocalWorkspace 的 subpath 前缀（工具不感知 scratch），
+    // 且 sidecar 通道不知道桌面根注册表（root_id 恒空）。按会话绑定统一补齐：
+    // root_id 缺失用绑定容器根（与 sidecar respond 寻址同构）；process_start 的
+    // cwd 前缀 scratch 子路径（绑定无 subpath 时为无操作）。read / stop / list
+    // 按 process_id / conversation_id 寻址，root 存在即可。
+    if (!rootId || payload.op === "process_start") {
+      const target = await resolveConversationLocalTarget(conversationId);
+      if (!rootId) {
+        if (!target) {
+          return ioError("会话未绑定本地工作区，无法执行后台进程操作");
+        }
+        rootId = target.rootId;
+      }
+      if (payload.op === "process_start" && target?.subpath) {
+        const cwd = String(args.cwd ?? "").trim();
+        args.cwd =
+          cwd && cwd !== "." ? `${target.subpath}/${cwd}` : target.subpath;
+      }
+    }
+  }
   try {
-    return await fsApi.workspaceOp(
-      payload.root_id,
-      payload.op as WorkspaceOpName,
-      payload.args,
-    );
+    return await fsApi.workspaceOp(rootId, payload.op as WorkspaceOpName, args);
   } catch (e) {
     return ioError(e instanceof Error ? e.message : String(e));
   }

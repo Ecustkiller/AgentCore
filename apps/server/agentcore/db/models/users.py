@@ -33,6 +33,10 @@ class User(Base):
             "billing_preference in ('platform', 'byok')",
             name="ck_users_billing_preference",
         ),
+        CheckConstraint(
+            "autonomy_policy in ('always_ask', 'first_grant', 'full_auto')",
+            name="ck_users_autonomy_policy",
+        ),
     )
 
     user_id: Mapped[str] = mapped_column(
@@ -71,6 +75,12 @@ class User(Base):
     # them). Defaults True (memory on, matching the product default).
     memory_enabled: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default=text("true")
+    )
+    # Capability-authorization posture (安全权限与治理 §三 AutonomyPolicy).
+    # always_ask | first_grant (default) | full_auto — only the capability-auth
+    # dimension; plan_review / checkpoint confirmation is unchanged.
+    autonomy_policy: Mapped[str] = mapped_column(
+        String(20), default="first_grant", server_default=text("'first_grant'")
     )
     # Per-user billing mode: platform free quota vs BYOK. Defaults to the deployment
     # ``billing_mode`` at account creation; users may switch in 设置·模型配置 when both

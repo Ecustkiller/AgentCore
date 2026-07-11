@@ -4,8 +4,9 @@
  */
 import { Button, Textarea } from "@/components/ui";
 import { interactiveCheckpointTone } from "@/components/ui/tone-presets";
-import type { AskAssumption, AskQuestion } from "@/types/events";
-import { Check } from "lucide-react";
+import { hasLocalFiles } from "@/lib/capabilities";
+import type { AskAssumption, AskOption, AskQuestion } from "@/types/events";
+import { Check, FolderOpen, Loader2 } from "lucide-react";
 import type { AskTone, AskUserContent } from "./AskUserFields";
 
 /** Kickoff option selection uses primary so chosen cards read clearly vs idle. */
@@ -150,6 +151,7 @@ export function OptionButton({
   layout = "row",
   size = "md",
   tone = COMMENCE_TONE,
+  leadingIcon,
 }: {
   label: string;
   detail?: string;
@@ -161,6 +163,7 @@ export function OptionButton({
   layout?: "row" | "card";
   size?: "md" | "lg";
   tone?: AskTone;
+  leadingIcon?: React.ReactNode;
 }) {
   const badges = (
     <>
@@ -203,6 +206,7 @@ export function OptionButton({
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            {leadingIcon}
             <span className="text-sm font-medium text-foreground">{label}</span>
             {badges}
           </span>
@@ -226,9 +230,10 @@ export function OptionButton({
         variant="ghost"
         disabled={disabled}
         onClick={onClick}
-        className={`h-auto w-full justify-start rounded-lg border px-2.5 py-1.5 text-left text-xs font-normal disabled:opacity-40 ${
+        className={`h-auto w-full justify-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-left text-xs font-normal disabled:opacity-40 ${
           active ? tone.optActive : tone.optIdle
         }`}
+        icon={leadingIcon}
       >
         <span className="whitespace-pre-wrap">{label}</span>
         {recommended && (
@@ -263,6 +268,9 @@ export function ChoiceQuestion({
   emphasizePrompt = false,
   optionSize = "md",
   tone = COMMENCE_TONE,
+  conversationId,
+  bindBusyLabel,
+  onBindOption,
 }: {
   question: AskQuestion;
   index: number;
@@ -279,7 +287,12 @@ export function ChoiceQuestion({
   emphasizePrompt?: boolean;
   optionSize?: "md" | "lg";
   tone?: AskTone;
+  conversationId?: string | null;
+  bindBusyLabel?: string | null;
+  onBindOption?: (opt: AskOption) => void;
 }) {
+  const canBindAction =
+    !!conversationId && !!onBindOption && hasLocalFiles() && !!window.fsApi;
   return (
     <div className="min-w-0">
       <div className="flex items-start gap-2">
@@ -330,23 +343,45 @@ export function ChoiceQuestion({
                   : "flex flex-col gap-1.5"
               }
             >
-              {question.options.map((opt) => (
-                <OptionButton
-                  key={opt.label}
-                  label={opt.label}
-                  detail={opt.detail}
-                  recommended={opt.recommended}
-                  isDefault={
-                    !!question.default && opt.label === question.default
-                  }
-                  active={answer.includes(opt.label)}
-                  disabled={disabled}
-                  onClick={() => onToggle(opt.label)}
-                  layout={optionLayout}
-                  size={optionSize}
-                  tone={tone}
-                />
-              ))}
+              {question.options.map((opt) => {
+                const isBindAction =
+                  canBindAction && opt.action === "bind_local_folder";
+                const bindBusy = bindBusyLabel === opt.label;
+                return (
+                  <OptionButton
+                    key={opt.label}
+                    label={opt.label}
+                    detail={opt.detail}
+                    recommended={opt.recommended}
+                    isDefault={
+                      !!question.default && opt.label === question.default
+                    }
+                    active={answer.includes(opt.label) || !!bindBusy}
+                    disabled={disabled || (!!bindBusyLabel && !bindBusy)}
+                    onClick={() =>
+                      isBindAction ? onBindOption?.(opt) : onToggle(opt.label)
+                    }
+                    layout={optionLayout}
+                    size={optionSize}
+                    tone={tone}
+                    leadingIcon={
+                      isBindAction ? (
+                        bindBusy ? (
+                          <Loader2
+                            size={14}
+                            className="shrink-0 animate-spin text-muted-foreground"
+                          />
+                        ) : (
+                          <FolderOpen
+                            size={14}
+                            className="shrink-0 text-muted-foreground"
+                          />
+                        )
+                      ) : undefined
+                    }
+                  />
+                );
+              })}
               <Button
                 variant="ghost"
                 disabled={disabled}

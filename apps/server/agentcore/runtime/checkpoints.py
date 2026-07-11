@@ -25,10 +25,17 @@ AskCheckpointIntent = Literal["kickoff", "decision"]
 
 
 class CheckpointDecision(StrEnum):
-    """How the user (or a timeout / orphan) settled a checkpoint the CEO raised."""
+    """How the user (or a timeout / orphan) settled a checkpoint the CEO raised.
 
-    CONTINUE = "continue"  # proceed with the CEO's proposed direction
-    ADJUST = "adjust"  # steer the CEO with a note, then continue
+    ``CONTINUE`` / ``ADJUST`` / ``STOP`` are shared by ask_user / plan_review /
+    team_preview (开工卡). On the kickoff card, ``CONTINUE`` means grant-all-needed
+    capabilities and start; ``PER_CALL`` means start with per-call approval (no
+    delegation grant). ``PER_CALL`` is kickoff-only — ask_user / plan_review ignore it.
+    """
+
+    CONTINUE = "continue"  # proceed (kickoff: grant + start)
+    PER_CALL = "per_call"  # kickoff only: start without a delegation grant
+    ADJUST = "adjust"  # steer with a note, then continue (kickoff: also grants)
     STOP = "stop"  # end this turn gracefully
     TIMEOUT = "timeout"  # no answer within the deadline (engine-set, never user-set)
     ORPHANED = "orphaned"  # 热路失效终态（冷路检查点一般不走 orphan；枚举公共尾部对齐）

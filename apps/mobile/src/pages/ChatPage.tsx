@@ -5,6 +5,7 @@ import {
   createConversation,
   getMessages,
 } from "@/api/conversations";
+import { getLlmKey } from "@/api/model";
 import {
   attachStream,
   regenerateStream,
@@ -29,6 +30,12 @@ import { PauseCard } from "@/components/PauseCard";
 import { ResumeCard } from "@/components/ResumeCard";
 import { VoiceButton, VoiceRecordingBar } from "@/components/VoiceInput";
 import { type MessageAttachment, readTextAttachment } from "@/lib/attachments";
+import {
+  type ErrorAction,
+  StreamHttpError,
+  describeStreamHttpError,
+  emptyChatCopy,
+} from "@/lib/errors";
 import {
   fileArtifactsFromEvents,
   fileArtifactsFromProcess,
@@ -108,10 +115,11 @@ function AttachmentChips({
 const RECONNECT_BANNER = "连接中断，回合仍在后台继续。点「重连」继续查看。";
 
 /** A turn-level error with an optional one-tap reconnect (a held SSE that dropped while
- *  the run lives on). */
+ *  the run lives on) or a config remedy (e.g.「去配置」→ 模型配置 for LLM_KEY_REQUIRED). */
 interface ChatError {
   text: string;
   reconnect?: boolean;
+  action?: ErrorAction;
 }
 
 /** The user's 停止 (abort button), never surfaced as an error. */
@@ -310,6 +318,7 @@ function AssistantBubble({
         runs: p.runs,
         progress: p.progress,
         teamNotes: p.teamNotes,
+        status: p.status,
         conversationId,
         pendingEscalations,
         escalationsInteractive: live,
@@ -392,6 +401,7 @@ function HistoryAssistant({
             runs: p.runs,
             progress: p.progress,
             teamNotes: p.teamNotes,
+            status: p.status,
             runToolCalls: extractRunToolCalls(events),
           }
         : undefined;
@@ -484,6 +494,8 @@ export function ChatPage() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<ChatError | null>(null);
+  // BYOK key presence for the empty-chat gate (null = still loading / unknown).
+  const [keyConfigured, setKeyConfigured] = useState<boolean | null>(null);
   // Files staged for the next send: their text rides the body (composer 附件). A pick that
   // can't be read as text (image / binary) surfaces `attachError` and isn't staged.
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
@@ -504,6 +516,9 @@ export function ChatPage() {
   // 「记忆已更新」卡 (③ §1.6): the latest window's offline-consolidation results, pinned at the
   // thread tail. Only the newest window carries them, so scroll-up (loadOlder) leaves them be.
   const [memoryUpdates, setMemoryUpdates] = useState<MemoryUpdate[]>([]);
+  // Offline consolidation post-dates the turn — bump this gen to cancel in-flight polls on
+  // conversation switch / unmount (mobile has no memory_updated firehose).
+  const memoryPollGenRef = useRef(0);
   // The controller for the stream currently held open (send / reattach). 停止 aborts it.
   const abortRef = useRef<AbortController | null>(null);
 
@@ -525,6 +540,21 @@ export function ChatPage() {
     }, []),
   });
 
+  // BYOK status for empty-chat guidance (fail-open to welcome if the status call fails).
+  useEffect(() => {
+    let alive = true;
+    getLlmKey()
+      .then((s) => {
+        if (alive) setKeyConfigured(!!s.configured);
+      })
+      .catch(() => {
+        if (alive) setKeyConfigured(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   // Append an event to the live (last) turn — lazily opening a userText-less turn when
   // none exists yet (a reattach on reopen, whose user bubble is already in history).
   const appendEvent = (event: SSEEvent) => {
@@ -543,14 +573,42 @@ export function ChatPage() {
     // its durable ResumeCard surfaces once the stream settles (the single cold resume
     // path), exactly as a reopen would. One chokepoint for every stream
     // (send/resume/reconnect/attach), mirroring the desktop's message_end handler.
-    if (
-      conversationId &&
-      event.type === "message_end" &&
-      (event.payload as MessageEndPayload).finish_reason === "paused"
-    ) {
-      void refreshPaused(conversationId);
+    if (conversationId && event.type === "message_end") {
+      if ((event.payload as MessageEndPayload).finish_reason === "paused") {
+        void refreshPaused(conversationId);
+      }
+      // 记忆更新可发现性: consolidation is offline/async — schedule delayed refreshes of
+      // the thread-tail card so the user does not have to leave and reopen the chat.
+      scheduleMemoryPoll(conversationId);
     }
   };
+
+  // Pull the latest window's memory_updates into the thread-tail card. Best-effort; a
+  // failure must never disrupt the settled turn.
+  async function refreshMemoryUpdates(cid: string) {
+    try {
+      const { memoryUpdates: next } = await getMessages(cid);
+      setMemoryUpdates(next);
+    } catch {
+      /* ignore — poll is best-effort */
+    }
+  }
+
+  // Delayed poll after message_end (2s / 8s / 20s). Always runs the full schedule so a
+  // pre-existing card from an earlier turn does not abort before a fresh pass lands;
+  // cancelled when the conversation changes (gen bump).
+  function scheduleMemoryPoll(cid: string) {
+    const gen = ++memoryPollGenRef.current;
+    const delays = [2000, 8000, 20000];
+    void (async () => {
+      for (const ms of delays) {
+        await new Promise((r) => setTimeout(r, ms));
+        if (memoryPollGenRef.current !== gen) return;
+        await refreshMemoryUpdates(cid);
+        if (memoryPollGenRef.current !== gen) return;
+      }
+    })();
+  }
 
   // Load the persisted transcript for the conversation in the URL — this is what makes a
   // refresh keep the conversation (刷新不丢): the id rides the route, the history is the
@@ -558,6 +616,8 @@ export function ChatPage() {
   // turn has no persisted reply (ends at a user message), a run may still be live
   // (执行与请求解耦 C1 · slice 1b): rejoin it and 续看 it finish.
   useEffect(() => {
+    // Cancel any in-flight memory-update polls from the previous conversation.
+    memoryPollGenRef.current += 1;
     if (!conversationId) {
       // Draft (直接对话): no server conversation yet — ready to type, nothing to load.
       setHistory([]);
@@ -601,8 +661,8 @@ export function ChatPage() {
         setHistory(messages);
         setHasMoreBefore(more);
         // 「记忆已更新」卡 (③ §1.6): only the latest window carries them — pin at the thread
-        // tail. A (re)open/refresh loads them; scroll-up (loadOlder) never overwrites them,
-        // matching desktop (mobile has no live firehose, so they surface on load, not push).
+        // tail. A (re)open/refresh loads them; after message_end we also poll (no firehose),
+        // and scroll-up (loadOlder) never overwrites them.
         setMemoryUpdates(memoryUpdates);
         // A draft's first message, handed off across the / → /c/:id remount: POST + stream
         // it now (the conversation exists but has no run yet, so attach would no-op).
@@ -872,6 +932,16 @@ export function ChatPage() {
       );
     } catch (e) {
       if (isAbort(e)) return; // 停止 / conversation switch — partial stays, server salvages
+      // Pre-stream refusal (402 LLM_KEY_REQUIRED etc.) — surface banner +「去配置」, do not
+      // treat as a dropped live run (nothing started).
+      if (e instanceof StreamHttpError) {
+        const d = describeStreamHttpError(e);
+        setError({
+          text: d.message,
+          action: d.action ?? undefined,
+        });
+        return;
+      }
       // A mid-stream drop no longer means the turn died (slice 1a: it runs detached) —
       // rejoin it (1b) rather than resending, which would double-run it.
       await reconnect();
@@ -917,11 +987,12 @@ export function ChatPage() {
       );
       if (outcome === "none" && abortRef.current === ac) {
         setTurns((t) => t.slice(0, -1));
-        const { messages, hasMoreBefore: more } =
+        const { messages, hasMoreBefore: more, memoryUpdates: mem } =
           await getMessages(conversationId);
         if (abortRef.current === ac) {
           setHistory(messages);
           setHasMoreBefore(more);
+          setMemoryUpdates(mem);
         }
       }
     } catch (e) {
@@ -965,9 +1036,15 @@ export function ChatPage() {
       await regenerateStream(conversationId, userId, appendEvent, ac.signal);
     } catch (e) {
       if (isAbort(e)) return;
-      if (!isAbort(e)) {
-        setError({ text: e instanceof Error ? e.message : "重试失败" });
+      if (e instanceof StreamHttpError) {
+        const d = describeStreamHttpError(e);
+        setError({
+          text: d.message,
+          action: d.action ?? undefined,
+        });
+        return;
       }
+      setError({ text: e instanceof Error ? e.message : "重试失败" });
     } finally {
       if (abortRef.current === ac) {
         setSending(false);
@@ -990,10 +1067,12 @@ export function ChatPage() {
       if (outcome === "none" && abortRef.current === ac) {
         // Finished / never ran / suspended — reload to catch a reply that landed between
         // the history load and the attach (a suspended turn surfaces via durable resume).
-        const { messages, hasMoreBefore: more } = await getMessages(cid);
+        const { messages, hasMoreBefore: more, memoryUpdates: mem } =
+          await getMessages(cid);
         if (abortRef.current === ac) {
           setHistory(messages);
           setHasMoreBefore(more);
+          setMemoryUpdates(mem);
         }
       }
     } catch (e) {
@@ -1023,10 +1102,12 @@ export function ChatPage() {
     try {
       const outcome = await attachStream(cid, appendEvent, ac.signal);
       if (outcome === "none" && abortRef.current === ac) {
-        const { messages, hasMoreBefore: more } = await getMessages(cid);
+        const { messages, hasMoreBefore: more, memoryUpdates: mem } =
+          await getMessages(cid);
         if (abortRef.current === ac) {
           setHistory(messages);
           setHasMoreBefore(more);
+          setMemoryUpdates(mem);
         }
       }
     } catch (e) {
@@ -1133,16 +1214,34 @@ export function ChatPage() {
             history.length === 0 &&
             turns.length === 0 &&
             !error &&
-            (conversationId ? (
-              <p className="muted hint">发一条消息开始对话。</p>
-            ) : (
-              <div className="chat-welcome">
-                <div className="chat-welcome-title">开始新对话</div>
-                <div className="chat-welcome-sub">
-                  向你的 Agent 团队提问，或交派一个任务。
+            (() => {
+              if (keyConfigured === false) {
+                const copy = emptyChatCopy(false);
+                return (
+                  <div className="chat-welcome">
+                    <div className="chat-welcome-title">{copy.title}</div>
+                    <div className="chat-welcome-sub">{copy.subtitle}</div>
+                    <button
+                      type="button"
+                      className="chat-welcome-cta"
+                      onClick={() => navigate("/more/model")}
+                    >
+                      {copy.action?.label ?? "去配置"}
+                    </button>
+                  </div>
+                );
+              }
+              if (conversationId) {
+                return <p className="muted hint">发一条消息开始对话。</p>;
+              }
+              const copy = emptyChatCopy(true);
+              return (
+                <div className="chat-welcome">
+                  <div className="chat-welcome-title">{copy.title}</div>
+                  <div className="chat-welcome-sub">{copy.subtitle}</div>
                 </div>
-              </div>
-            ))}
+              );
+            })()}
           {hasMoreBefore && (
             <button
               type="button"
@@ -1271,6 +1370,19 @@ export function ChatPage() {
       {error && (
         <div className="error bar">
           <span>{error.text}</span>
+          {error.action && (
+            <button
+              type="button"
+              className="link config-action"
+              onClick={() => {
+                const href = error.action!.href;
+                setError(null);
+                navigate(href);
+              }}
+            >
+              {error.action.label}
+            </button>
+          )}
           {error.reconnect && (
             <button
               type="button"

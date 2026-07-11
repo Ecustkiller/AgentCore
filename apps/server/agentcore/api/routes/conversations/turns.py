@@ -1,8 +1,9 @@
 """Turn re-execution and durable resume: regenerate / list paused / resume (结构化挂起)."""
 
 import asyncio
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.api.dependencies import (
@@ -229,6 +230,7 @@ async def resume_message(
     body: ResumeTurnRequest,
     user: AuthUser,
     session: AsyncSession = Depends(get_db),
+    x_client_platform: Annotated[str | None, Header(alias="X-Client-Platform")] = None,
 ):
     """Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).
 
@@ -296,6 +298,7 @@ async def resume_message(
             sink=sink,
             llm_credentials=preflight.credentials,
             llm_supports_tools=preflight.supports_tools,
+            x_client_platform=x_client_platform,
         )
     )
     # 执行与请求解耦 (C1 · slice 1a): track the resumed run so a disconnect lets it

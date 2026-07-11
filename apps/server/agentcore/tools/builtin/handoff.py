@@ -18,9 +18,11 @@ before a NON-terminal tool is rolled back as narration, Fork-B) — so ``content
 and the brief rides the tool args. ``final_text`` is empty: the deliverable is already the streamed
 content, so nothing is appended to it.
 
-Optional: a worker may finish with a plain no-tool answer (no ``handoff``) — then there is simply no
-debrief and the deliverable stands alone. Never forced, so a short / self-evident deliverable isn't
-padded with a redundant restatement of itself (根治「结论≈输出」的语义冗余).
+Optional for leaf workers (no downstream dependents): a worker may finish with a plain no-tool
+answer (no ``handoff``) — then there is simply no debrief and the deliverable stands alone.
+Nodes that feed downstream dependents **must** handoff (executor injects one correction shot;
+still missing → engine synthesizes a degraded brief). Never pad a short leaf product with a
+redundant restatement of itself.
 
 Wired into the delegated worker toolset (``build_worker_registry``) and NOT into
 ``build_builtin_registry`` — so it never reaches the CEO's own toolset (``build_ceo_tool_registry``

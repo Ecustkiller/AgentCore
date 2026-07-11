@@ -33,6 +33,8 @@ const CONTEXT_CHANNEL_META: Record<string, { label: string; hint: string }> = {
   opponent: { label: "对方论点", hint: "对方上一轮的发言（供针对性回应）" },
   challenge: { label: "被驳命门", hint: "上一轮裁判记录你被反驳的点" },
   interjection: { label: "用户追问", hint: "用户本轮要求正面回应的问题" },
+  cross_exam: { label: "质询", hint: "本轮定向质询：你被追问的问题" },
+  closing: { label: "结辩", hint: "收场结辩：归纳本方胜局、不添新论据" },
   // 定向唤回热修 (continue_run 修订): the CEO feedback this recall was fed.
   revision: { label: "修订要求", hint: "老板定向唤回你本次要改的点" },
 };

@@ -1,26 +1,8 @@
+import { createZustandUiStorage } from "@/lib/uiStorage";
 import { create } from "zustand";
-import {
-  type StateStorage,
-  createJSONStorage,
-  persist,
-} from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 
-/** localStorage when available (Electron renderer), else a no-op so persistence
- * silently degrades to session-only outside a DOM (e.g. vitest's node env) —
- * mirrors the try/catch localStorage guards used elsewhere (sidePanel.ts). */
-const safeStorage = createJSONStorage<unknown>(() => {
-  try {
-    if (typeof localStorage !== "undefined") return localStorage;
-  } catch {
-    /* access denied — fall through */
-  }
-  const noop: StateStorage = {
-    getItem: () => null,
-    setItem: () => undefined,
-    removeItem: () => undefined,
-  };
-  return noop;
-});
+const uiPersistStorage = createJSONStorage(() => createZustandUiStorage());
 
 interface SidebarState {
   collapsed: boolean;
@@ -42,7 +24,7 @@ export const useSidebarStore = create<SidebarState>()(
   persist(
     (set) => ({
       collapsed: false,
-      expandedSections: { ungrouped: true },
+      expandedSections: {},
 
       toggleCollapsed: () => set((s) => ({ collapsed: !s.collapsed })),
       setCollapsed: (collapsed) => set({ collapsed }),
@@ -59,8 +41,8 @@ export const useSidebarStore = create<SidebarState>()(
         })),
     }),
     {
-      name: "agentcore.sidebar",
-      storage: safeStorage,
+      name: "sidebar",
+      storage: uiPersistStorage,
       // Persist only view prefs (rail collapse + per-workspace expand state) so
       // expanded projects stay open across restarts; methods aren't serialized.
       partialize: (s) => ({

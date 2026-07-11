@@ -83,6 +83,8 @@ node scripts/check-ui-tokens.mjs --src apps/mobile/src
 
 禁止：`rounded-md/sm/2xl`、自定义 px 字号（10/11/13）、Tailwind 调色板类、hex 任意色。已接入两端 `pnpm lint` 与 CI。
 
+桌面 `pnpm lint` 另跑 `scripts/check-no-localstorage.mjs`（业务禁直碰 `localStorage`，统一走 `lib/uiStorage.ts`，见 [`前端技术与架构.md` §9.11](/docs/04-前端/前端技术与架构.md)）。
+
 ## design-tokens 同步清单
 
 变更语义色 / 侧栏 / 身份色 / 语法高亮时：
@@ -224,7 +226,7 @@ L2/L3 共享的 Tailwind 类组合 → `apps/desktop/src/renderer/components/ui/
 
 **禁止**：`text-[10px]`、`text-[11px]`、`text-[13px]`、`text-lg` 及任何自定义像素值。
 
-对话页空状态欢迎语（无消息时的引导 hero）使用 `text-2xl`（24px）为专用例外——空屏中唯一的视觉落点，需更强召唤力；其余场景一律不得超过 `text-xl`。
+对话页空状态欢迎语（无消息时的引导 hero）使用 `text-2xl`（24px）为专用例外——空屏中唯一的视觉落点，需更强召唤力；同理，一次性首启全屏接管（`OnboardingFlow`，见 [前端UX设计 §二](/docs/04-前端/前端UX设计.md)）的价值主张标题可用至 `text-4xl`——它是品牌时刻而非应用 chrome，且新用户一生只见一次。其余场景一律不得超过 `text-xl`。
 
 ### 圆角层级（严格 3 级）
 

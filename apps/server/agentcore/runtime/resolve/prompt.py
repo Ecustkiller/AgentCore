@@ -204,11 +204,13 @@ _CEO_CORE_HINT = """
 多方向并行、多依赖流水线、需要不同专长或多视角对比 / 辩论，\
 先 `consult_skill(team_orchestration_advanced)` 再规划团队形态。
 
-【执行 / 运行 / 打开】用户要安装依赖、跑测试、启动应用、打开刚写的软件——一律【委派】给 worker\
-（`completion_criteria=code_verified` 或 task 里写清「进程启动成功 / 测试通过」），由 worker 用\
-`code_execute` / `test_run` 在工作区里跑通；你绝不口头拒绝说「我没法运行终端」或把命令块甩给用户\
-自己跑。若工作区尚不可执行（未绑定本机文件夹 / 本地引擎未就绪），用 `ask_user` 引导用户绑定本地\
-文件夹或开启本地引擎，再委派修复与验收——不要假装已完成。
+【执行 / 运行 / 打开】先看本回合 `<workspace_context>` 的执行位置与能力，再路由：\
+任务需要用户本机（打开本机应用、操作用户提到但工作区里不存在的本地项目）且执行位置=云端沙箱时——\
+**不要先委派**，第一轮就用 `ask_user` 对齐；若工具 schema 允许选项带 \
+`action=bind_local_folder`，用该动作选项引导绑定本地文件夹，绑定完成后再委派。\
+执行位置=用户本机，或工作区已含目标项目时——照常【委派】给 worker（`completion_criteria=code_verified` \
+或 task 里写清「进程启动成功 / 测试通过」），由 worker 用已装配的 `code_execute` / `test_run` / \
+`terminal` 在工作区里跑通；你绝不口头拒绝说「我没法运行终端」或把命令块甩给用户自己跑。
 
 【回忆 / 核实产出】用户问「刚才做了什么」「产出在哪」「你知道交付物吗」——先用 `file_list` / \
 `file_read` 核实工作区现状再回答；禁止 tools=0 凭记忆断言路径或完成度。若工作区空而历史有委派，\
@@ -274,6 +276,7 @@ def assemble_system_prompt(
     *,
     memory_markdown: str | None = None,
     extra_context: str | None = None,
+    workspace_context: str | None = None,
 ) -> str:
     """Build the system prompt for a conversation.
 
@@ -282,11 +285,16 @@ def assemble_system_prompt(
     is shared by the CEO chat agent and the delegated workers (runs/executor.py),
     so memory reaches every agent.
 
+    ``workspace_context`` is the per-turn ``<workspace_context>`` environment-facts
+    block (execution location / desktop channel / capabilities) — injected into the
+    SHARED base so workers also see where they run (防止空云 scratch 里幻觉装软件).
+
     Sections are stitched by :class:`ContextAssembler` (上下文注入统一): base →
-    runtime context → memory <rules> → attachment context, joined with "\n". Empty
-    optional sections (memory, attachments) are skipped, so the output is
-    byte-identical to the prior inline ``"\n".join(parts)`` assembly — load-bearing
-    for DeepSeek prefix-cache stability (see ``_RUNTIME_CONTEXT_TEMPLATE`` / pipeline.run).
+    runtime context → workspace facts → memory <rules> → attachment context, joined
+    with "\n". Empty optional sections (memory, attachments, workspace facts) are
+    skipped. Without ``workspace_context`` the output stays byte-identical to the
+    prior assembly — load-bearing for DeepSeek prefix-cache stability when the
+    caller omits facts (catalog / tests).
 
     The ``base`` fragment goes through ``prompt_profile.resolve`` (方向① 变体注入): with no
     active profile — the production state always — it returns ``_DEFAULT_SYSTEM_PROMPT``
@@ -301,6 +309,7 @@ def assemble_system_prompt(
         ContextAssembler()
         .add("base", resolve(FRAGMENT_BASE, _DEFAULT_SYSTEM_PROMPT), SectionOrder.BASE)
         .add("runtime_context", runtime_context, SectionOrder.RUNTIME_CONTEXT)
+        .add("workspace_facts", workspace_context, SectionOrder.WORKSPACE_FACTS)
         .add("memory_rules", _format_memory_rules(memory_markdown), SectionOrder.MEMORY)
         .add("attachment_context", extra_context, SectionOrder.ATTACHMENT)
         .render()

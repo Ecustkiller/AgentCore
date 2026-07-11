@@ -17,7 +17,10 @@ from agentcore.api.schemas import (
     SetLlmKeyRequest,
     StatusResponse,
 )
+from agentcore.core.logging import get_logger
 from agentcore.llm.key_service import LlmKeyService, LlmKeyStatus
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/users/me/llm-key", tags=["llm-key"])
 
@@ -71,14 +74,20 @@ async def set_llm_key(
     service: LlmKeyService = Depends(get_llm_key_service),
 ):
     """Store or replace the user's LLM config (key encrypted at rest; status reset)."""
-    return _to_response(
-        await service.set_key(
-            user.user_id,
-            body.api_key,
-            base_url=body.base_url,
-            default_model=body.default_model,
-        )
+    status = await service.set_key(
+        user.user_id,
+        body.api_key,
+        base_url=body.base_url,
+        default_model=body.default_model,
     )
+    # Activation funnel: LLM key configured (no key material logged).
+    logger.info(
+        "llm_key.configured",
+        user_id=user.user_id,
+        base_url=status.base_url,
+        default_model=status.default_model,
+    )
+    return _to_response(status)
 
 
 @router.delete("", response_model=StatusResponse)

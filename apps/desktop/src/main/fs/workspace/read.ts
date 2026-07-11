@@ -31,9 +31,13 @@ export async function opRead(
   if (st.size > WORKSPACE_READ_MAX)
     return opErr("WorkspaceIOError", "文件过大，无法读取");
   const real = await realInside(root, abs);
-  if (!real) return opErr("OutsideWorkspace", relPath);
+  if (!real.ok) {
+    return real.code === "out_of_root"
+      ? opErr("OutsideWorkspace", relPath)
+      : opErr("PathNotFound", relPath);
+  }
   try {
-    const buf = await fs.readFile(real);
+    const buf = await fs.readFile(real.path);
     if (buf.includes(0))
       return opErr("WorkspaceIOError", "二进制文件，无法以文本读取");
     return opOk(buf.toString("utf-8"));
@@ -52,14 +56,17 @@ export async function opList(
   const baseReal = await realInside(root, baseAbs);
   // 服务端 list：base 非目录（含不存在）一律 NotADirectory。
   let baseStat: import("node:fs").Stats | undefined;
-  if (baseReal) {
+  if (baseReal.ok) {
     try {
-      baseStat = await fs.stat(baseReal);
+      baseStat = await fs.stat(baseReal.path);
     } catch {
       baseStat = undefined;
     }
   }
-  if (!baseReal || !baseStat?.isDirectory()) {
+  if (!baseReal.ok || !baseStat?.isDirectory()) {
+    if (baseReal.ok === false && baseReal.code === "out_of_root") {
+      return opErr("OutsideWorkspace", directory);
+    }
     return opErr("NotADirectory", directory);
   }
 
@@ -101,7 +108,7 @@ export async function opList(
     }
   };
 
-  await walk(baseReal, "", 0);
+  await walk(baseReal.path, "", 0);
   results.sort((a, b) => a.path.localeCompare(b.path));
   return opOk(results.slice(0, WORKSPACE_LIST_MAX));
 }
@@ -137,9 +144,13 @@ export async function opReadLines(
   if (st.size > WORKSPACE_READ_MAX)
     return opErr("WorkspaceIOError", "文件过大，无法读取");
   const real = await realInside(root, abs);
-  if (!real) return opErr("OutsideWorkspace", relPath);
+  if (!real.ok) {
+    return real.code === "out_of_root"
+      ? opErr("OutsideWorkspace", relPath)
+      : opErr("PathNotFound", relPath);
+  }
   try {
-    const buf = await fs.readFile(real);
+    const buf = await fs.readFile(real.path);
     if (buf.includes(0))
       return opErr("WorkspaceIOError", "二进制文件，无法以文本读取");
     const lines = splitLinesLikePython(buf.toString("utf-8"));
@@ -178,14 +189,17 @@ export async function opListTree(
   if (!baseAbs) return opErr("OutsideWorkspace", directory);
   const baseReal = await realInside(root, baseAbs);
   let baseStat: import("node:fs").Stats | undefined;
-  if (baseReal) {
+  if (baseReal.ok) {
     try {
-      baseStat = await fs.stat(baseReal);
+      baseStat = await fs.stat(baseReal.path);
     } catch {
       baseStat = undefined;
     }
   }
-  if (!baseReal || !baseStat?.isDirectory()) {
+  if (!baseReal.ok || !baseStat?.isDirectory()) {
+    if (baseReal.ok === false && baseReal.code === "out_of_root") {
+      return opErr("OutsideWorkspace", directory);
+    }
     return opErr("NotADirectory", directory);
   }
 
@@ -224,7 +238,7 @@ export async function opListTree(
   };
 
   try {
-    await walk(baseReal, 1);
+    await walk(baseReal.path, 1);
   } catch (e) {
     return opErr("WorkspaceIOError", toReason(e));
   }
@@ -249,8 +263,14 @@ export async function opIndexFiles(
   const baseAbs = resolveLexical(root, sub || ".");
   if (!baseAbs) return opErr("OutsideWorkspace", base);
   const baseReal = await realInside(root, baseAbs);
-  if (!baseReal) return opOk({ paths: [], truncated: false });
-  const { files, truncated } = await collectWorkspaceFiles(baseReal, order);
+  // 子树尚不存在（裸聊懒建后尚未产文件）→ 空列表；越界仍硬错。
+  if (!baseReal.ok) {
+    if (baseReal.code === "out_of_root") {
+      return opErr("OutsideWorkspace", base);
+    }
+    return opOk({ paths: [], truncated: false });
+  }
+  const { files, truncated } = await collectWorkspaceFiles(baseReal.path, order);
   const prefix = sub ? `${sub}/` : "";
   return opOk({ paths: files.map((f) => prefix + f.relPath), truncated });
 }

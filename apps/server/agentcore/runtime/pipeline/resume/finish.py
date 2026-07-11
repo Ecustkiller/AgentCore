@@ -6,7 +6,7 @@ from dataclasses import asdict
 
 from agentcore.core.logging import get_logger
 from agentcore.llm.provider.protocol import TokenUsage
-from agentcore.runtime.citations import merge_citations, out_of_range_markers
+from agentcore.runtime.citations import merge_citations, reconcile_citations
 from agentcore.runtime.costing import aggregate_cost, captain_run_cost_from_state
 from agentcore.runtime.engine import join_segments
 from agentcore.runtime.events import EventSink, FinishReason, citations_event, message_end
@@ -71,7 +71,8 @@ def finish_resume_turn(
     merge_citations(citations, delegate_tool.citations)
     merge_citations(citations, revise_tool.citations)
     merge_citations(citations, debate_tool.citations)
-    stray_markers = out_of_range_markers(final_content, len(citations))
+    # Mirror run_chat_pipeline: observe then strip dangling markers before persist.
+    final_content, citations, stray_markers = reconcile_citations(final_content, citations)
     if stray_markers:
         logger.warning(
             "citations.out_of_range",

@@ -173,7 +173,7 @@ async def test_delete_key_clears_it(client, make_invite, byok):
 
 
 class _FakeProvider:
-    def __init__(self, *, fail: bool, supports_tools: bool = True) -> None:
+    def __init__(self, *, fail: bool, supports_tools: bool | None = True) -> None:
         self._fail = fail
         self._supports_tools = supports_tools
         self.probe_model: str | None = None
@@ -183,7 +183,7 @@ class _FakeProvider:
         if self._fail:
             raise LLMError("API Key 无效或无权限（鉴权失败），请检查后重试")
 
-    async def probe_tools(self, *, model: str) -> bool:
+    async def probe_tools(self, *, model: str) -> bool | None:
         return self._supports_tools
 
     async def close(self) -> None:

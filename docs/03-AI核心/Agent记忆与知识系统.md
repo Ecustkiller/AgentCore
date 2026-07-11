@@ -47,6 +47,10 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 
 唯一保留的是**自动标题**：一句话标题，写入已有的 `conversations.title` 列，仅用于侧边栏展示。它是 UX 特性、不是记忆层——**不进任何 Agent 上下文、不含 `key_decisions`**。
 
+生成走 `title` profile（小 token 上限 + **强制关思考**——曾实证 reasoning 吃光 max_tokens 致正文为空）；空响应重试一次、超时不重试，最终回退为截断的用户首句。→ 见代码：`memory/conversation_title.py`、`llm/profiles.py`。
+
+> **对话自动标签已同路退役**（2026-07）：`memory/conversation_tag.py` 与 `conversations.tag` 列整体移除（迁移 `d2e8f1a4c7b9` drop 列），对话归组走文件夹 + 搜索——勿从旧迁移文件反推该功能仍在。
+
 ### 1.4 用户长期记忆（AI 维护的记忆文件夹）
 
 用户的长期记忆是文件树里一个 AI 维护的**文件夹** `记忆/`（其内每个 `.md` 都是 `role=rule`、`ai_maintained=true`；与用户手写规则同载体、同注入，区别仅在 AI 可静默改写，详见 §五）。**记忆按位置分两个作用域**（位置即作用域，[§5.3](#53-位置即作用域)——不另立标记位、不给用户手动开关）：用户云端根（`parent_id IS NULL`）下是**全局**（注入每次对话），项目文件夹下是**项目级**（仅绑定该文件夹的对话才注入）。`apply_mode` 由位置约定派生（无 manifest）：

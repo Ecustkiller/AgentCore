@@ -19,7 +19,9 @@ import type { InteractionKind } from "@/types/interactionExt";
 import {
   ArrowRight,
   Check,
+  CheckCheck,
   GitBranch,
+  ListChecks,
   Loader2,
   OctagonX,
   Pencil,
@@ -247,6 +249,7 @@ function TeamPreviewWorkers({ turn }: { turn: PendingResume }) {
 function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
   const [note, setNote] = useState("");
   const { submitting, busy, send } = useColdSubmit(turn);
+  const showCapabilities = turn.tools.length > 0;
 
   const spinnerOr = (
     decision: PlanReviewUserDecision,
@@ -258,6 +261,20 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
       icon
     );
 
+  const toolLabel = (name: string) =>
+    (
+      ({
+        file_write: "写入文件",
+        file_append: "追加文件",
+        str_replace: "修改文件",
+        file_delete: "删除文件",
+        file_move: "移动文件",
+        code_execute: "执行代码",
+        test_run: "运行测试",
+        git: "Git 写入",
+      }) as Record<string, string>
+    )[name] ?? name;
+
   return (
     <DecisionCard tone="primary" animate className="mx-0">
       <div className="flex items-start gap-2">
@@ -266,13 +283,28 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
         </DecisionCardIcon>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-primary">
-            团队预审 · 开干前确认
+            开工卡 · 计划与授权
           </p>
           <WaitingForDecisionHint />
           <p className="mt-0.5 text-sm text-foreground">
-            即将上场的队员，请过目：
+            即将上场的队员，请过目后授权开工：
           </p>
           <TeamPreviewWorkers turn={turn} />
+
+          {showCapabilities && (
+            <div className="mt-2">
+              <p className="text-xs font-medium text-foreground">
+                本次所需能力
+              </p>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {turn.tools.map((tool) => (
+                  <Badge key={tool} tone="muted" className="font-normal">
+                    {toolLabel(tool)}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
 
           <Textarea
             value={note}
@@ -288,12 +320,22 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
       <div className="mt-2.5 flex flex-wrap items-center gap-1.5 pl-6">
         <Button
           variant="primary"
-          icon={spinnerOr("continue", <Check size={13} />)}
+          icon={spinnerOr("continue", <CheckCheck size={13} />)}
           disabled={busy}
           onClick={() => send("continue", [], note.trim())}
         >
-          开做
+          {showCapabilities ? "授权并开工" : "开做"}
         </Button>
+        {showCapabilities && (
+          <Button
+            variant="neutral"
+            icon={spinnerOr("per_call", <ListChecks size={13} />)}
+            disabled={busy}
+            onClick={() => send("per_call", [], note.trim())}
+          >
+            逐次审批开工
+          </Button>
+        )}
         <Button
           variant="neutral"
           icon={spinnerOr("adjust", <Pencil size={13} />)}
@@ -320,6 +362,8 @@ function AskUserResumeCard({ turn }: { turn: PendingResume }) {
     <AskUserCard
       content={turn}
       intent={turn.intent}
+      disclosureKey={turn.checkpointId}
+      conversationId={turn.conversationId}
       onSubmit={async (decision, note) => {
         const result = await submitInteraction({
           id: turn.checkpointId,

@@ -1,7 +1,8 @@
 /** Pure graph derivation helpers (status, handoffs, artifacts, wave lanes). */
 
 import { NODE_HEIGHT, NODE_WIDTH } from "@/lib/elk-layout";
-import type { Execution, RunStatus } from "@/stores/execution";
+import type { DebateBeat, Execution, RunStatus } from "@/stores/execution";
+import { debateBeatFromContext } from "@/stores/execution";
 import type { GraphEdge, GraphLayout } from "@/stores/graph";
 import type { EdgeHandoff } from "./StepEdge";
 
@@ -163,6 +164,92 @@ export function computeTopologicalRunWaves(
   return waveByRun;
 }
 
+/**
+ * Top-level worker runs that participate in lane banding (exclude captain +
+ * folded nested sub-workers — those live inside a sub-team box).
+ */
+function laneEligibleRunIds(
+  runs: GraphRunLike[],
+  captainId: string | null,
+  positioned: ReadonlySet<string>,
+): string[] {
+  const fold = computeGraphFold(runs, captainId);
+  const out: string[] = [];
+  for (const r of runs) {
+    if (r.id === captainId) continue;
+    if (!positioned.has(r.id)) continue;
+    if (fold.folded.has(r.id)) continue;
+    if (fold.unitOf.get(r.id) !== r.id) continue;
+    out.push(r.id);
+  }
+  return out;
+}
+
+/**
+ * Distinct delegate-batch indexes among lane-eligible workers. Empty when the
+ * turn has only one ingest batch (or no stamps) — callers fall back to topo waves.
+ */
+export function distinctDelegateBatches(
+  runs: GraphRunLike[],
+  captainId: string | null,
+  positioned: ReadonlySet<string>,
+): number[] {
+  const batches = new Set<number>();
+  const byId = new Map(runs.map((r) => [r.id, r]));
+  for (const id of laneEligibleRunIds(runs, captainId, positioned)) {
+    batches.add(byId.get(id)?.delegateBatch ?? 1);
+  }
+  return [...batches].sort((a, b) => a - b);
+}
+
+function bandFromMembers(
+  id: string,
+  label: string,
+  members: { x: number; y: number }[],
+  bbox: { width: number; height: number },
+  /** When true, band spans the flow axis (topo wave column/row). When false,
+   * band spans the cross axis (delegate-batch strip — each 委派 is a chain that
+   * already advances along the flow, so we band the sibling stacks). */
+  alongFlow: boolean,
+  horizontal: boolean,
+): WaveBand {
+  if (alongFlow === horizontal) {
+    // leftright + alongFlow → vertical strip; tree + !alongFlow → vertical strip
+    const x0 = Math.min(...members.map((m) => m.x));
+    const x1 = Math.max(...members.map((m) => m.x + NODE_WIDTH));
+    return {
+      id,
+      label,
+      x: x0 - WAVE_PAD,
+      y: -WAVE_PAD,
+      w: x1 - x0 + WAVE_PAD * 2,
+      h: bbox.height + WAVE_PAD * 2,
+      labelX: x0 - WAVE_PAD + 6,
+      labelY: -WAVE_PAD + 6,
+    };
+  }
+  const y0 = Math.min(...members.map((m) => m.y));
+  const y1 = Math.max(...members.map((m) => m.y + NODE_HEIGHT));
+  return {
+    id,
+    label,
+    x: -WAVE_PAD,
+    y: y0 - WAVE_PAD,
+    w: bbox.width + WAVE_PAD * 2,
+    h: y1 - y0 + WAVE_PAD * 2,
+    labelX: -WAVE_PAD + 6,
+    labelY: y0 - WAVE_PAD + 6,
+  };
+}
+
+/**
+ * Wave / batch lanes behind the collaboration graph.
+ *
+ * Prefer「第 N 次委派」when the turn merged ≥2 same-execution `run_plan`s whose
+ * top-level workers are visible — topo waves would otherwise group roots from
+ * *different* delegates into one「批次」column and erase the追加 narrative.
+ * Otherwise keep the WaveScheduler topo bands（批次 N）.
+ */
 export function computeWaves(
   execution: Execution,
   positions: Record<string, { x: number; y: number }>,
@@ -171,18 +258,49 @@ export function computeWaves(
   captainId: string | null,
 ): WaveBand[] {
   const horizontal = layoutKind === "leftright";
-  const waveByRun = computeTopologicalRunWaves(execution.runs, captainId);
+  const positioned = new Set(Object.keys(positions));
+  const byId = new Map(execution.runs.map((r) => [r.id, r]));
+  const delegateKeys = distinctDelegateBatches(
+    execution.runs,
+    captainId,
+    positioned,
+  );
 
+  if (delegateKeys.length >= 2) {
+    const bands: WaveBand[] = [];
+    for (let i = 0; i < delegateKeys.length; i++) {
+      const batchKey = delegateKeys[i];
+      const runIds = laneEligibleRunIds(
+        execution.runs,
+        captainId,
+        positioned,
+      ).filter((id) => (byId.get(id)?.delegateBatch ?? 1) === batchKey);
+      const members = runIds
+        .map((id) => positions[id])
+        .filter((p): p is { x: number; y: number } => p != null);
+      if (members.length === 0) continue;
+      bands.push(
+        bandFromMembers(
+          `delegate-${batchKey}`,
+          `第 ${i + 1} 次委派（${runIds.length} 节点）`,
+          members,
+          bbox,
+          false,
+          horizontal,
+        ),
+      );
+    }
+    return bands.length >= 2 ? bands : [];
+  }
+
+  const waveByRun = computeTopologicalRunWaves(execution.runs, captainId);
   const groups = new Map<number, string[]>();
-  for (const r of execution.runs) {
-    if (r.id === captainId) continue;
-    const p = positions[r.id];
-    if (!p) continue;
-    const wave = waveByRun.get(r.id);
+  for (const id of laneEligibleRunIds(execution.runs, captainId, positioned)) {
+    const wave = waveByRun.get(id);
     if (wave === undefined) continue;
     const arr = groups.get(wave);
-    if (arr) arr.push(r.id);
-    else groups.set(wave, [r.id]);
+    if (arr) arr.push(id);
+    else groups.set(wave, [id]);
   }
 
   const keys = [...groups.keys()].sort((a, b) => a - b);
@@ -194,34 +312,14 @@ export function computeWaves(
       .map((id) => positions[id])
       .filter((p): p is { x: number; y: number } => p != null);
     const count = runIds.length;
-    const label = `批次 ${i + 1}（${count} 节点）`;
-
-    if (horizontal) {
-      const x0 = Math.min(...members.map((m) => m.x));
-      const x1 = Math.max(...members.map((m) => m.x + NODE_WIDTH));
-      return {
-        id: `wave-${i}`,
-        label,
-        x: x0 - WAVE_PAD,
-        y: -WAVE_PAD,
-        w: x1 - x0 + WAVE_PAD * 2,
-        h: bbox.height + WAVE_PAD * 2,
-        labelX: x0 - WAVE_PAD + 6,
-        labelY: -WAVE_PAD + 6,
-      };
-    }
-    const y0 = Math.min(...members.map((m) => m.y));
-    const y1 = Math.max(...members.map((m) => m.y + NODE_HEIGHT));
-    return {
-      id: `wave-${i}`,
-      label,
-      x: -WAVE_PAD,
-      y: y0 - WAVE_PAD,
-      w: bbox.width + WAVE_PAD * 2,
-      h: y1 - y0 + WAVE_PAD * 2,
-      labelX: -WAVE_PAD + 6,
-      labelY: y0 - WAVE_PAD + 6,
-    };
+    return bandFromMembers(
+      `wave-${i}`,
+      `批次 ${i + 1}（${count} 节点）`,
+      members,
+      bbox,
+      true,
+      horizontal,
+    );
   });
 }
 
@@ -234,7 +332,14 @@ export interface GraphRunLike {
   replacesRunId?: string | null;
   stance?: string | null;
   group?: string | null;
+  round?: number;
   kind?: string;
+  /** 同回合第几次 delegate 追加（呈现层；测试可省略 → 视为单批）。 */
+  delegateBatch?: number;
+  /** 辩论 continue_run 的 `run_context`（读 channel 得 beat）；测试可省略。 */
+  receivedContext?: ReadonlyArray<{ channel: string }> | null;
+  status?: RunStatus;
+  durationMs?: number | null;
 }
 
 const DEBATE_GROUP_PREFIX = "debate:";
@@ -244,6 +349,124 @@ export function isDebateParticipantRun(r: GraphRunLike): boolean {
   return (
     r.stance != null || (r.group?.startsWith(DEBATE_GROUP_PREFIX) ?? false)
   );
+}
+
+/** 协作图可见列用的 beat：质询折进同轮陈词，结辩仍独立。 */
+export function graphDebateBeat(r: GraphRunLike): DebateBeat {
+  return debateBeatFromContext(r.receivedContext);
+}
+
+/** 质询作答：同辩手同轮的 continue_run，协作图不独立成列。 */
+export function isDebateCrossExamRun(r: GraphRunLike): boolean {
+  return isDebateParticipantRun(r) && graphDebateBeat(r) === "cross_exam";
+}
+
+/** 结辩：独立列 +「结辩」角标。 */
+export function isDebateClosingRun(r: GraphRunLike): boolean {
+  return isDebateParticipantRun(r) && graphDebateBeat(r) === "closing";
+}
+
+/**
+ * 同辩手同轮的陈词宿主：质询折进此节点。首轮 revision=0 与续轮陈词均算陈词。
+ */
+export function debateStatementHostId(
+  cx: GraphRunLike,
+  runs: GraphRunLike[],
+  workerIds?: Set<string>,
+): string | null {
+  if (!isDebateCrossExamRun(cx)) return null;
+  const ids = workerIds ?? new Set(runs.map((r) => r.id));
+  const byId = new Map(runs.map((r) => [r.id, r]));
+  const root = revisionRootId(cx.id, byId, ids);
+  const round = cx.round ?? 0;
+  for (const r of runs) {
+    if (!ids.has(r.id)) continue;
+    if (revisionRootId(r.id, byId, ids) !== root) continue;
+    if ((r.round ?? 0) !== round) continue;
+    if (isDebateCrossExamRun(r) || isDebateClosingRun(r)) continue;
+    return r.id;
+  }
+  return null;
+}
+
+/** 运行中 / 失败优先于完成（轮节点聚合质询后的可见状态）。 */
+export function aggregateDebateRoundStatus(
+  statuses: readonly RunStatus[],
+): RunStatus {
+  if (statuses.length === 0) return "pending";
+  if (statuses.some((s) => s === "failed")) return "failed";
+  if (statuses.some((s) => s === "running")) return "running";
+  if (statuses.some((s) => s === "cancelled")) return "cancelled";
+  if (statuses.every((s) => s === "completed")) return "completed";
+  if (statuses.every((s) => s === "skipped")) return "skipped";
+  return "pending";
+}
+
+/** 轮内活跃 beat：质询在跑 / 待答 → cross_exam；否则立论。 */
+export function debateRoundActiveBeat(
+  statementStatus: RunStatus,
+  cxStatuses: readonly RunStatus[],
+): "statement" | "cross_exam" {
+  if (cxStatuses.some((s) => s === "running")) {
+    return "cross_exam";
+  }
+  if (
+    (statementStatus === "completed" || statementStatus === "cancelled") &&
+    cxStatuses.some((s) => s === "pending")
+  ) {
+    return "cross_exam";
+  }
+  return "statement";
+}
+
+/** 直播态轮节点状态条文案后缀（立论中 / 质询作答中）。 */
+export function debateRoundPhaseLabel(
+  aggregated: RunStatus,
+  activeBeat: "statement" | "cross_exam",
+  hasCrossExam: boolean,
+): string | null {
+  if (!hasCrossExam || aggregated !== "running") return null;
+  return activeBeat === "cross_exam" ? "质询作答中" : "立论中";
+}
+
+/**
+ * 收场态轮节点质询标记：完成「含质询」后缀，或质询失败时整行归因「质询作答失败」。
+ * 立论失败（质询未败）不挂标记，沿用默认「失败」。
+ */
+export type DebateCrossExamMark = {
+  label: string;
+  mode: "suffix" | "replace";
+};
+
+export function debateRoundSettledMark(
+  aggregated: RunStatus,
+  hasCrossExam: boolean,
+  cxStatuses: readonly RunStatus[],
+): DebateCrossExamMark | null {
+  if (!hasCrossExam) return null;
+  if (aggregated === "failed" && cxStatuses.some((s) => s === "failed")) {
+    return { label: "质询作答失败", mode: "replace" };
+  }
+  if (aggregated === "completed") {
+    return { label: "含质询", mode: "suffix" };
+  }
+  return null;
+}
+
+/**
+ * 质询直达 runId：活跃 running > 失败 > 最新。
+ * 与直播 faceRun / activateId 选取同构，供收场「含质询」点击入口。
+ */
+export function pickDebateCrossExamActivateId(
+  cxRuns: ReadonlyArray<{ id: string; status: RunStatus }>,
+): string | null {
+  if (cxRuns.length === 0) return null;
+  const active = cxRuns.find((r) => r.status === "running");
+  if (active) return active.id;
+  for (let i = cxRuns.length - 1; i >= 0; i--) {
+    if (cxRuns[i].status === "failed") return cxRuns[i].id;
+  }
+  return cxRuns[cxRuns.length - 1].id;
 }
 
 function revisionRootId(
@@ -418,11 +641,17 @@ export function buildGraphStructure(
     r.parentRunId !== r.id &&
     workerIds.has(r.parentRunId);
 
+  /** 质询作答不进协作图列（折进同轮陈词）；结辩仍可见。 */
+  const beatHidden = new Set(
+    workerRuns.filter(isDebateCrossExamRun).map((r) => r.id),
+  );
+
   /** Debate units are always expanded; other units follow user toggle. */
   const isUnitExpanded = (unit: string): boolean =>
     debateUnits.has(unit) || expandedUnits.has(unit);
 
   const isLayoutVisible = (runId: string): boolean => {
+    if (beatHidden.has(runId)) return false;
     if (!folded.has(runId)) return true;
     const unit = unitOf.get(runId) ?? runId;
     return isUnitExpanded(unit);
@@ -447,18 +676,21 @@ export function buildGraphStructure(
     const src = lift ? (unitOf.get(e.source) ?? e.source) : e.source;
     const tgt = lift ? (unitOf.get(e.target) ?? e.target) : e.target;
     if (src === tgt) return;
+    if (beatHidden.has(src) || beatHidden.has(tgt)) return;
     if (!isLayoutVisible(src) && folded.has(src)) return;
     if (!isLayoutVisible(tgt) && folded.has(tgt)) return;
     const lifted = lift ? liftEdgeEndpoints(e.source, e.target, unitOf) : null;
     const finalSrc = lifted?.source ?? src;
     const finalTgt = lifted?.target ?? tgt;
     if (finalSrc === finalTgt) return;
+    if (beatHidden.has(finalSrc) || beatHidden.has(finalTgt)) return;
     const key = edgeKey({ ...e, source: finalSrc, target: finalTgt });
     if (edgeSet.has(key)) return;
     edgeSet.set(key, { ...e, id: e.id, source: finalSrc, target: finalTgt });
   };
 
   for (const run of workerRuns) {
+    if (beatHidden.has(run.id)) continue;
     for (const depId of run.dependsOn) {
       const collapsed =
         folded.has(run.id) && !isUnitExpanded(unitOf.get(run.id) ?? run.id);
@@ -490,11 +722,13 @@ export function buildGraphStructure(
     });
   }
 
-  // Debate units are always expanded: one flat sub-team holds all debate descendants
-  // (辩手 + 续轮 revisions) so ELK lays the full 参与者×轮次 grid.
+  // Debate units are always expanded: one flat sub-team holds visible debate
+  // descendants (辩手 + 轮次陈词 + 结辩；质询已折进轮节点) so ELK lays 参与者×轮次.
   const modId = debateModeratorId(runs, captainId);
   if (modId) {
-    const members = (descendants.get(modId) ?? []).filter((id) => id !== modId);
+    const members = (descendants.get(modId) ?? []).filter(
+      (id) => id !== modId && !beatHidden.has(id),
+    );
     if (members.length > 0) {
       subTeamMap.set(modId, members);
     }
@@ -508,6 +742,7 @@ export function buildGraphStructure(
     }),
   );
 
+  // 修订链只连可见节点（轮→轮→结辩），跳过已折进的质询，避免悬空边 / phantom 列。
   const revisionsByOriginal = new Map<string, GraphRunLike[]>();
   for (const r of layoutWorkers) {
     if (isRevision(r) && r.revisionOf && workerIds.has(r.revisionOf)) {
@@ -517,6 +752,7 @@ export function buildGraphStructure(
     }
   }
   for (const [originalId, revisions] of revisionsByOriginal) {
+    if (beatHidden.has(originalId) || !isLayoutVisible(originalId)) continue;
     const ordered = revisions
       .slice()
       .sort((a, b) => (a.revision ?? 0) - (b.revision ?? 0));

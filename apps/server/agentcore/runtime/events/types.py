@@ -77,6 +77,9 @@ class EventType(StrEnum):
     # 跑一半改方向 / 整轮停止：单 run 被中断（与 run_failed 正交）。
     # reason=redirect → 用户「立即改此人」；reason=stop → 整轮 abort。
     RUN_CANCELLED = "run_cancelled"
+    # 级联跳过 / graceful abort：未运行尾部物化为 SKIPPED（与 run_cancelled 正交）。
+    # reason=cascade → on_failure=skip 波及下游；reason=abort → 整波 ABORT / plan_review stop。
+    RUN_SKIPPED = "run_skipped"
     RUN_PROGRESS = "run_progress"
     RUN_TOOL_PROGRESS = "run_tool_progress"
     BATCH_METRICS = "batch_metrics"

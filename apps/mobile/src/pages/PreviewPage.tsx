@@ -68,6 +68,7 @@ export function PreviewPage() {
         runs: projected.runs,
         progress: projected.progress,
         teamNotes: projected.teamNotes,
+        status: projected.status,
         conversationId: null,
         pendingEscalations,
         escalationsInteractive: false,

@@ -247,6 +247,15 @@ def format_for_ceo(
     if escalation:
         lines.append(escalation)
 
+    from agentcore.tools.builtin.delegate.completion import (
+        collect_worker_gaps,
+        format_worker_gaps_block,
+    )
+
+    gaps_block = format_worker_gaps_block(collect_worker_gaps(plan, results))
+    if gaps_block:
+        lines.append(gaps_block)
+
     products = worker_products(tool, plan, results)
     emit_captain_readback(tool, products)
     # 完工交接简报: surface each worker's 建议下一步 (proactive, non-blocking — distinct from the

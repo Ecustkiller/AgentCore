@@ -26,6 +26,7 @@ from agentcore.runtime.events import (
     run_plan,
     run_progress,
     run_reasoning_delta,
+    run_skipped,
     run_started,
     run_tool_progress,
     team_note_posted,
@@ -168,6 +169,71 @@ def _multi_agent_worker_failed_debrief() -> list[SSEEvent]:
         tool_use_end("dc1", "delegate", success=True, output="团队完成（含 1 项未达标）。"),
         content_delta(" 调研初步完成，但引用需补齐。"),
         message_end(FinishReason.END_TURN, input_tokens=2000, output_tokens=400, cost=_COST),
+    ]
+
+
+def _multi_agent_run_skipped_cascade() -> list[SSEEvent]:
+    """多 Agent · 级联跳过：上游 r1 失败后下游 r2 从未开跑，wave 收口 emit
+    ``run_skipped(reason=cascade)`` —— 图节点折为 skipped「未执行」，而非永久「排队中」。
+    同时覆盖 abort 形态：并行未派发的 r3 经 graceful abort 收口为
+    ``run_skipped(reason=abort)``（与 cascade 同终态、不同 reason）。"""
+    agents = [
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "撰写员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w3",
+            "role": "校对员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "撰写", "depends_on": ["r1"]},
+        {"id": "r3", "agent_id": "w3", "task": "校对", "depends_on": []},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排团队。"),
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {
+                "tasks": [{"role": "研究员"}, {"role": "撰写员"}, {"role": "校对员"}],
+                "coordinate": False,
+            },
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="调研 → 撰写；并行校对",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        run_output_delta("r1", "w1", "调研中断"),
+        run_failed("r1", "w1", "上游失败：资料源不可用"),
+        # Cascade: r2 depends on r1 (on_failure=skip) — never dispatched.
+        run_skipped("r2", "w2", reason="cascade"),
+        # Graceful abort tail: independent r3 never launched before scheduling ended.
+        run_skipped("r3", "w3", reason="abort"),
+        run_progress(0, 3),
+        tool_use_end("dc1", "delegate", success=True, output="团队部分未执行。"),
+        content_delta(" 调研失败，下游未执行。"),
+        message_end(FinishReason.END_TURN, input_tokens=1500, output_tokens=200, cost=_COST),
     ]
 
 
@@ -747,6 +813,158 @@ def _multi_agent_multi_batch() -> list[SSEEvent]:
         ),
         message_end(FinishReason.END_TURN, input_tokens=5000, output_tokens=900, cost=_COST),
     ]
+
+
+def _multi_agent_multi_batch_disjoint() -> list[SSEEvent]:
+    """多 Agent：同回合两批 ``delegate``（同 ``execution_id``），跨批**无** ``depends_on``。
+
+    第一批是小链（调研→分析）；第二批在第一批部分完成后到达，另起一条独立链（撰写→审校）。
+    用来钉前端协作图在「两坨互不相连」时的呈现——协议层不携带批次元数据，图上不应伪造依赖边。
+    """
+    batch1_agents = [
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "分析师",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    batch1_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研素材", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "分析结论", "depends_on": ["r1"]},
+    ]
+    batch2_agents = [
+        {
+            "id": "w3",
+            "role": "撰写员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w4",
+            "role": "审校员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    batch2_runs = [
+        {"id": "r3", "agent_id": "w3", "task": "撰写文稿", "depends_on": []},
+        {"id": "r4", "agent_id": "w4", "task": "审校定稿", "depends_on": ["r3"]},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("先调研分析。"),
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {
+                "tasks": [{"role": "研究员"}, {"role": "分析师"}],
+                "coordinate": True,
+            },
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="两批独立任务线",
+            agents=batch1_agents,
+            runs=batch1_runs,
+        ),
+        tool_use_end(
+            "dc1",
+            "delegate",
+            success=True,
+            output="【团队已启动·协调模式】已派出 2 名队员（研究员、分析师）。",
+        ),
+        run_started("r1", "w1"),
+        run_output_delta("r1", "w1", "素材就绪"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="调研完成",
+            duration_ms=900,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_progress(1, 2),
+        run_started("r2", "w2"),
+        run_output_delta("r2", "w2", "分析进行中…"),
+        # 第二批在第一批仍有人在跑时到达；跨批无 depends_on。
+        content_delta(" 并行追加撰写审校。"),
+        tool_use_start(
+            "dc2",
+            "delegate",
+            {
+                "tasks": [{"role": "撰写员"}, {"role": "审校员"}],
+                "coordinate": True,
+            },
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="两批独立任务线",
+            agents=batch2_agents,
+            runs=batch2_runs,
+        ),
+        tool_use_end(
+            "dc2",
+            "delegate",
+            success=True,
+            output="【团队已启动·协调模式】已派出 2 名队员（撰写员、审校员）。",
+        ),
+        run_started("r3", "w3"),
+        run_output_delta("r2", "w2", "分析定稿"),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="分析完成",
+            duration_ms=1100,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_progress(2, 4),
+        run_output_delta("r3", "w3", "文稿草稿"),
+        run_completed(
+            "r3",
+            "w3",
+            output_summary="撰写完成",
+            duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_progress(3, 4),
+        run_started("r4", "w4"),
+        run_output_delta("r4", "w4", "审校通过"),
+        run_completed(
+            "r4",
+            "w4",
+            output_summary="审校完成",
+            duration_ms=800,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_progress(4, 4),
+        content_delta(" 两批任务线均已完成。"),
+        message_end(FinishReason.END_TURN, input_tokens=6200, output_tokens=1100, cost=_COST),
+    ]
+
 
 def _multi_agent_received_context() -> list[SSEEvent]:
     """多 Agent：收到的上下文 (上下文传递可视化)。每个 worker 在 ``run_started`` 后 emit 一条
@@ -2247,6 +2465,11 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         "多 Agent：worker 未过契约（run_failed）但调 handoff 交了交接简报——失败节点也 surface debrief",
         _multi_agent_worker_failed_debrief,
     ),
+    "multi_agent_run_skipped_cascade": (
+        "多 Agent·未执行收口：级联跳过 run_skipped(cascade) + graceful abort run_skipped(abort)，"
+        "节点折 skipped「未执行」而非永久排队",
+        _multi_agent_run_skipped_cascade,
+    ),
     "multi_agent_run_redirect_ignored": (
         "多 Agent·跑一半改方向·忽略路径：改方向来不及应用（r1 确定性失败），忽略+接受走审计/REST 带外，wire 投影保持干净（r1 failed、并行 r2 completed、1/2、无幻影重跑节点）",
         _multi_agent_run_redirect_ignored,
@@ -2283,6 +2506,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         _multi_agent_lead_subplan_scope_steer,
     ),
     "multi_agent_multi_batch": ("多 Agent：同回合两批 delegate（合并 + 累计进度）", _multi_agent_multi_batch),
+    "multi_agent_multi_batch_disjoint": (
+        "多 Agent：同回合两批 delegate、跨批无 depends_on（两坨独立任务线；第二批中途追加）",
+        _multi_agent_multi_batch_disjoint,
+    ),
     "multi_agent_escalation": ("多 Agent：worker 升级实时可见（run_escalation 折到节点 escalations，非阻塞）", _multi_agent_escalation),
     "multi_agent_blocking_escalate": ("多 Agent：阻塞式求决策 答复路径（escalation_required→pending→resolved，回合不 paused）", _multi_agent_blocking_escalate),
     "multi_agent_blocking_escalate_timeout": ("多 Agent：阻塞式求决策 墙钟超时（escalation_resolved status=timed_out，按假设续跑）", _multi_agent_blocking_escalate_timeout),

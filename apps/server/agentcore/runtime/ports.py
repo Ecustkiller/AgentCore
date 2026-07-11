@@ -173,7 +173,7 @@ class ConversationStore(Protocol):
     ) -> None: ...
 
     # --- stream_state (流式回复持久化 §3.1–§3.2 · P1) ---
-    # CloudStore → TurnStreamStateRepository; OutboxStore → no-op (D6).
+    # CloudStore → TurnStreamStateRepository; OutboxStore → record.stream_segments (D6).
 
     async def upsert_stream_segments(
         self,

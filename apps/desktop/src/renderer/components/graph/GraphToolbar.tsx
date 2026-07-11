@@ -9,7 +9,7 @@ interface GraphToolbarProps {
   onLayoutKindChange: (kind: GraphLayout) => void;
   /** Scheduling summary from `batch_metrics` — shown when the turn has parallel workers. */
   metricsSummary?: string | null;
-  /** Multi-agent turn with audit inject paths available. */
+  /** Team turn with audit inject paths available (`planCapabilities.auditInject`). */
   injectFlowAvailable?: boolean;
   showAuditInjectFlow?: boolean;
   onShowAuditInjectFlowChange?: (on: boolean) => void;

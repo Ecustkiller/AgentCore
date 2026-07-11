@@ -55,6 +55,8 @@ export interface PendingResume {
     depends_on: string[];
     debate: boolean;
   }>;
+  /** team_preview (开工卡): grantable tools listed for capability auth. */
+  tools: string[];
   /** ask_user: the framing / opening line (always shown). */
   question: string;
   /** ask_user: optional supporting background for the question. */
@@ -114,7 +116,7 @@ const toAssumptions = (
     value: String(a.value ?? ""),
   }));
 
-/** Options rehydrate as `{label, detail?, recommended?}` objects from the backend. */
+/** Options rehydrate as `{label, detail?, recommended?, action?}` from the backend. */
 const toOptions = (raw: unknown): AskOption[] =>
   Array.isArray(raw)
     ? raw.map((o) => {
@@ -123,6 +125,9 @@ const toOptions = (raw: unknown): AskOption[] =>
           label: String(obj.label ?? ""),
           ...(obj.detail ? { detail: String(obj.detail) } : {}),
           ...(obj.recommended ? { recommended: true } : {}),
+          ...(obj.action === "bind_local_folder"
+            ? { action: "bind_local_folder" as const }
+            : {}),
         };
       })
     : [];
@@ -194,6 +199,11 @@ export const usePausedTurnStore = create<PausedTurnState>((set) => ({
           steps: toSteps(s.steps),
           pending: toPending(s.pending),
           workers: toWorkers(s.workers),
+          tools: Array.isArray((s as { tools?: unknown }).tools)
+            ? ((s as { tools: unknown[] }).tools.filter(
+                (t): t is string => typeof t === "string",
+              ) as string[])
+            : [],
           question: s.question ?? "",
           context: s.context ?? "",
           assumptions: toAssumptions(s.assumptions),

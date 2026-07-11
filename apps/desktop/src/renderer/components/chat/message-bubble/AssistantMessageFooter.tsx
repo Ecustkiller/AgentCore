@@ -13,6 +13,7 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { copyText } from "@/lib/clipboard";
 import { formatCollabSummary } from "@/lib/collabSummary";
 import { formatCompact } from "@/lib/format";
+import { formatMessageExport } from "@/lib/messageExport";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import { setMessageFeedback } from "@/services/messages";
 import type { UsageBreakdown } from "@/services/usage";
@@ -385,7 +386,13 @@ export function AssistantMessageFooter({
   finishReason: string | undefined;
   onRegenerate: () => void;
 }) {
-  const { copied, onCopy } = useCopyAction(() => message.content);
+  const hasProcess = (message.process?.length ?? 0) > 0;
+  const { copied, onCopy } = useCopyAction(() =>
+    formatMessageExport(message.content, message.process, "deliverable"),
+  );
+  const { copied: copiedProcess, onCopy: onCopyProcess } = useCopyAction(() =>
+    formatMessageExport(message.content, message.process, "with_process"),
+  );
   const collabSummary = useMemo(
     () => formatCollabSummary(message.collab),
     [message.collab],
@@ -394,11 +401,39 @@ export function AssistantMessageFooter({
   return (
     <div className="mt-1 flex items-center justify-between gap-2 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
       <div className="flex min-w-0 items-center gap-0.5">
-        <SimpleTooltip label={copied ? "已复制" : "复制"}>
-          <IconButton size="sm" aria-label="复制" onClick={() => void onCopy()}>
-            {copied ? <Check size={14} /> : <Copy size={14} />}
-          </IconButton>
-        </SimpleTooltip>
+        {hasProcess ? (
+          <DropdownMenu>
+            <SimpleTooltip label={copied || copiedProcess ? "已复制" : "复制"}>
+              <DropdownMenuTrigger asChild>
+                <IconButton size="sm" aria-label="复制">
+                  {copied || copiedProcess ? (
+                    <Check size={14} />
+                  ) : (
+                    <Copy size={14} />
+                  )}
+                </IconButton>
+              </DropdownMenuTrigger>
+            </SimpleTooltip>
+            <DropdownMenuContent align="start" className="min-w-40">
+              <DropdownMenuItem onSelect={() => void onCopy()}>
+                仅交付
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void onCopyProcess()}>
+                含过程
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <SimpleTooltip label={copied ? "已复制" : "复制"}>
+            <IconButton
+              size="sm"
+              aria-label="复制"
+              onClick={() => void onCopy()}
+            >
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+            </IconButton>
+          </SimpleTooltip>
+        )}
         <FeedbackButtons message={message} />
         <BookmarkButton message={message} />
         <SimpleTooltip label="重新生成">

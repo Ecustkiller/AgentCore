@@ -3,10 +3,9 @@ import { useCallback, useState } from "react";
 import { type DebateClashView, type DebateModel, isFlatRound } from "../model";
 import { CrossExamSection } from "./CrossExamSection";
 import { JudgeNote } from "./JudgeNote";
-import { RoundFocusCard } from "./RoundFocusCard";
+import { OpeningNote } from "./OpeningNote";
 import { SectionHeader } from "./SectionHeader";
 import { SpeakerBlock, speechStageLabel } from "./SpeakerBlock";
-import { StageDivider } from "./StageDivider";
 import { SteeringPanel } from "./SteeringPanel";
 import { UserInterjection } from "./UserInterjection";
 import { roundAnchorId, speakerAnchorId } from "./anchors";
@@ -88,7 +87,7 @@ export function Transcript({
 
   return (
     <div className="space-y-1">
-      {openingLine && <JudgeNote text={openingLine} />}
+      {openingLine && <OpeningNote text={openingLine} />}
 
       {model.rounds.map((round) => {
         const flat = isFlatRound(round);
@@ -117,12 +116,6 @@ export function Transcript({
               />
             ))}
 
-            <RoundFocusCard
-              round={round}
-              topicMotion={topicMotion}
-              execution={execution}
-            />
-
             {useSplit ? (
               <div className="grid grid-cols-2 items-start gap-4">
                 {(() => {
@@ -144,14 +137,13 @@ export function Transcript({
             )}
 
             {round.crossExam.length > 0 && (
-              <>
-                <StageDivider label="质询" icon="⚔️" />
-                <CrossExamSection
-                  exchanges={round.crossExam}
-                  messageId={messageId}
-                  sceneKey={`${messageId}:cx:r${round.roundNo}`}
-                />
-              </>
+              <CrossExamSection
+                exchanges={round.crossExam}
+                execution={execution}
+                messageId={messageId}
+                sceneKey={`${messageId}:cx:r${round.roundNo}`}
+                layoutMode={layoutMode}
+              />
             )}
 
             {round.summary && !round.inFlight ? (

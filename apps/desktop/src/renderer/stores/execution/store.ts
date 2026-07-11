@@ -10,7 +10,7 @@ import type {
 import { create } from "zustand";
 import { upsertDebateRound } from "./debate";
 import { type RunFrame, frameFromEvent } from "./frames";
-import { mergePlanInto, planFromRunPlan } from "./plan";
+import { ensureDelegateBatchStamps, mergePlanInto, planFromRunPlan } from "./plan";
 import type {
   DebateRoundDecision,
   ExecutionJournal,
@@ -95,7 +95,7 @@ interface ExecutionState {
   /** Clear a worker's live EXECUTION phase when its tool finishes (`tool_use_end`). */
   clearWorkerToolPhase: (runId: string, messageId: string) => void;
   /** Stamp the latest multi-worker team progress preview (`team_synthesis_preview`).
-   * Transport-only — not a frame; reload clears it. */
+   * Live stamp (同 key 保最新); journal is DURABLE — hydrateFromJournal rebuilds it. */
   setTeamSynthesisPreview: (
     preview: TeamSynthesisPreviewPayload,
     messageId: string,
@@ -175,7 +175,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
 
     startExecution: (plan, messageId) =>
       patchExec(messageId, () => ({
-        plan,
+        plan: ensureDelegateBatchStamps(plan),
         frames: [],
         playhead: null,
         status: "running",
@@ -272,7 +272,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         for (const event of journal.events) {
           if (event.type === "run_plan") {
             const next = planFromRunPlan(event.payload as RunPlanPayload);
-            plan = plan ? mergePlanInto(plan, next) : next;
+            plan = plan
+              ? mergePlanInto(plan, next)
+              : ensureDelegateBatchStamps(next);
           } else if (event.type === "debate_result") {
             // 回合级单事件（非 frame）：直接捕获，回放与直播经同一 slot 渲染辩论视图。
             debate = event.payload as DebateResultPayload;

@@ -1,5 +1,7 @@
 """Engine-level wall-clock ceilings for tool execution."""
 
+from typing import Any
+
 from agentcore.config import settings
 from agentcore.core.types import ToolCategory
 from agentcore.tools.protocol import ToolSchema
@@ -7,15 +9,23 @@ from agentcore.tools.protocol import ToolSchema
 from .constants import TIMEOUT_EXEMPT_CATEGORIES
 
 
-def resolve_tool_timeout(schema: ToolSchema) -> float | None:
+def resolve_tool_timeout(
+    schema: ToolSchema, arguments: dict[str, Any] | None = None
+) -> float | None:
     """The engine-level wall-clock ceiling (seconds) for one call of this tool.
 
     ``None`` ⇒ no engine backstop (the tool manages its own lifecycle). Precedence:
-    an explicit ``schema.timeout_seconds`` wins; else the tool's category decides —
-    ORCHESTRATION / INTERACTION are exempt (``None``), EXECUTION gets the higher
-    execution ceiling (it runs code), everything else the default. This is a coarse
-    safety net layered above each tool's own finer timeout, never a replacement (B1).
+    ``terminal`` derives a dynamic ceiling from ``wait_for`` / ``wait_timeout_seconds``
+    (must outlive the channel per-op deadline); else an explicit
+    ``schema.timeout_seconds`` wins; else the tool's category decides — ORCHESTRATION
+    / INTERACTION are exempt (``None``), EXECUTION gets the higher execution ceiling
+    (it runs code), everything else the default. This is a coarse safety net layered
+    above each tool's own finer timeout, never a replacement (B1).
     """
+    if schema.name == "terminal":
+        from agentcore.tools.builtin.terminal import terminal_op_timeout_seconds
+
+        return terminal_op_timeout_seconds(arguments)
     if schema.timeout_seconds is not None:
         return schema.timeout_seconds
     if schema.category in TIMEOUT_EXEMPT_CATEGORIES:

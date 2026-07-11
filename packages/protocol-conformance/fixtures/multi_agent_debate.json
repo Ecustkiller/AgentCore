@@ -215,6 +215,17 @@
         "agent_id": "debate_mod1_r1_cx_pro",
         "blocks": [
           {
+            "channel": "task",
+            "heading": "质询环节",
+            "body": "## 第 1 轮 · 质询环节（本轮焦点：方案 A 的收益与风险敞口）\n主持人代表交锋，向你发出以下【必须正面回答】的质询。\n质询列表（共 2 条）：\n1. 收益量化口径是否计入了尾部风险？请是/否直接回答。\n2. 若熔断触发、灰度止损，已投入成本由谁承担？",
+            "chars": 129,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
+          {
             "channel": "cross_exam",
             "heading": "第 1 轮 · 质询（必须正面回答）",
             "body": "- 收益量化口径是否计入了尾部风险？请是/否直接回答。\n- 若熔断触发、灰度止损，已投入成本由谁承担？",
@@ -284,6 +295,17 @@
         "run_id": "debate_mod1_r1_cx_con",
         "agent_id": "debate_mod1_r1_cx_con",
         "blocks": [
+          {
+            "channel": "task",
+            "heading": "质询环节",
+            "body": "## 第 1 轮 · 质询环节（本轮焦点：方案 A 的收益与风险敞口）\n主持人代表交锋，向你发出以下【必须正面回答】的质询。\n质询列表（共 1 条）：\n1. 你主张的风险敞口，有无可量化的历史故障率支撑？没有就直说。",
+            "chars": 108,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
           {
             "channel": "cross_exam",
             "heading": "第 1 轮 · 质询（必须正面回答）",
@@ -355,10 +377,21 @@
         "agent_id": "debate_mod1_closing_pro",
         "blocks": [
           {
+            "channel": "task",
+            "heading": "结辩环节",
+            "body": "## 结辩环节（本场辩论已充分交锋，现在请你做【结辩陈词】）\n这是你的**最后陈词**，不是新一轮立论——请【只讲胜负手】；【不得引入任何新论据 / 新事实 / 新案例】。直接输出你的结辩陈词。",
+            "chars": 97,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
+          {
             "channel": "closing",
             "heading": "结辩环节",
-            "body": "辩论已充分交锋，请做结辩陈词（只讲胜负手、不引入新论据）。",
-            "chars": 29,
+            "body": "本场辩论已充分交锋，现请做结辩陈词。",
+            "chars": 18,
             "truncated": false,
             "source_role": "",
             "source_run_id": "",
@@ -425,10 +458,21 @@
         "agent_id": "debate_mod1_closing_con",
         "blocks": [
           {
+            "channel": "task",
+            "heading": "结辩环节",
+            "body": "## 结辩环节（本场辩论已充分交锋，现在请你做【结辩陈词】）\n这是你的**最后陈词**，不是新一轮立论——请【只讲胜负手】；【不得引入任何新论据 / 新事实 / 新案例】。直接输出你的结辩陈词。",
+            "chars": 97,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
+          {
             "channel": "closing",
             "heading": "结辩环节",
-            "body": "辩论已充分交锋，请做结辩陈词（只讲胜负手、不引入新论据）。",
-            "chars": 29,
+            "body": "本场辩论已充分交锋，现请做结辩陈词。",
+            "chars": 18,
             "truncated": false,
             "source_role": "",
             "source_run_id": "",
@@ -929,6 +973,17 @@
         "checkpoint": null,
         "receivedContext": [
           {
+            "channel": "task",
+            "heading": "质询环节",
+            "body": "## 第 1 轮 · 质询环节（本轮焦点：方案 A 的收益与风险敞口）\n主持人代表交锋，向你发出以下【必须正面回答】的质询。\n质询列表（共 2 条）：\n1. 收益量化口径是否计入了尾部风险？请是/否直接回答。\n2. 若熔断触发、灰度止损，已投入成本由谁承担？",
+            "chars": 129,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
+          {
             "channel": "cross_exam",
             "heading": "第 1 轮 · 质询（必须正面回答）",
             "body": "- 收益量化口径是否计入了尾部风险？请是/否直接回答。\n- 若熔断触发、灰度止损，已投入成本由谁承担？",
@@ -979,6 +1034,17 @@
         "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [
+          {
+            "channel": "task",
+            "heading": "质询环节",
+            "body": "## 第 1 轮 · 质询环节（本轮焦点：方案 A 的收益与风险敞口）\n主持人代表交锋，向你发出以下【必须正面回答】的质询。\n质询列表（共 1 条）：\n1. 你主张的风险敞口，有无可量化的历史故障率支撑？没有就直说。",
+            "chars": 108,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
           {
             "channel": "cross_exam",
             "heading": "第 1 轮 · 质询（必须正面回答）",
@@ -1031,10 +1097,21 @@
         "checkpoint": null,
         "receivedContext": [
           {
+            "channel": "task",
+            "heading": "结辩环节",
+            "body": "## 结辩环节（本场辩论已充分交锋，现在请你做【结辩陈词】）\n这是你的**最后陈词**，不是新一轮立论——请【只讲胜负手】；【不得引入任何新论据 / 新事实 / 新案例】。直接输出你的结辩陈词。",
+            "chars": 97,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
+          {
             "channel": "closing",
             "heading": "结辩环节",
-            "body": "辩论已充分交锋，请做结辩陈词（只讲胜负手、不引入新论据）。",
-            "chars": 29,
+            "body": "本场辩论已充分交锋，现请做结辩陈词。",
+            "chars": 18,
             "truncated": false,
             "source_role": "",
             "source_run_id": "",
@@ -1082,10 +1159,21 @@
         "checkpoint": null,
         "receivedContext": [
           {
+            "channel": "task",
+            "heading": "结辩环节",
+            "body": "## 结辩环节（本场辩论已充分交锋，现在请你做【结辩陈词】）\n这是你的**最后陈词**，不是新一轮立论——请【只讲胜负手】；【不得引入任何新论据 / 新事实 / 新案例】。直接输出你的结辩陈词。",
+            "chars": 97,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
+          {
             "channel": "closing",
             "heading": "结辩环节",
-            "body": "辩论已充分交锋，请做结辩陈词（只讲胜负手、不引入新论据）。",
-            "chars": 29,
+            "body": "本场辩论已充分交锋，现请做结辩陈词。",
+            "chars": 18,
             "truncated": false,
             "source_role": "",
             "source_run_id": "",

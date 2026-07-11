@@ -81,7 +81,7 @@ async def test_create_conversation_records_local_intent(client, make_invite, _fs
 
     # Moot once foldered: a chat born into a folder inherits its binding, so the
     # standalone intent is not recorded even if the client passes one.
-    folder = await client.post("/v1/folders", json={"name": "proj"})
+    folder = await client.post("/v1/folders", json={"name": "proj", "mode": "cloud"})
     assert folder.status_code == 201, folder.text
     r = await client.post(
         "/v1/conversations",
@@ -89,6 +89,40 @@ async def test_create_conversation_records_local_intent(client, make_invite, _fs
     )
     assert r.status_code == 201, r.text
     assert r.json()["local_container_root_id"] is None
+
+
+async def test_project_conversations_share_cloud_workspace(client, make_invite, _fs_data_dir):
+    """Cloud project chats inherit shared folder:<id> space (not per-conv scratch)."""
+    code = await make_invite("INV-WS-SHARE")
+    await register_and_login(client, code, "wsshare")
+    folder = (
+        await client.post("/v1/folders", json={"name": "Shared", "mode": "cloud"})
+    ).json()
+    folder_id = folder["id"]
+    a = (
+        await client.post(
+            "/v1/conversations", json={"title": "a", "folder_id": folder_id}
+        )
+    ).json()["id"]
+    b = (
+        await client.post(
+            "/v1/conversations", json={"title": "b", "folder_id": folder_id}
+        )
+    ).json()["id"]
+
+    body = b"shared-bytes"
+    r = await client.put(
+        f"/v1/conversations/{a}/workspace/files/notes/a.txt", content=body
+    )
+    assert r.status_code == 200, r.text
+
+    r = await client.get(f"/v1/conversations/{b}/workspace/files/notes/a.txt")
+    assert r.status_code == 200
+    assert r.content == body
+
+    r = await client.get(f"/v1/workspaces/folder:{folder_id}/files", params={"recursive": True})
+    assert r.status_code == 200
+    assert "notes/a.txt" in {e["path"] for e in r.json()["data"]}
 
 
 async def test_upload_list_download_roundtrip(client, make_invite, _fs_data_dir):

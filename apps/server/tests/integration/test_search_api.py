@@ -48,7 +48,7 @@ async def test_search_fans_out_over_all_entity_types(client, make_invite, sessio
 
     conv = await _new_conversation(client, "Deploy checklist")
     await _seed_message(session_factory, conv, "remember to deploy on friday")
-    await client.post("/v1/folders", json={"name": "Deploy notes"})
+    await client.post("/v1/folders", json={"name": "Deploy notes", "mode": "cloud"})
 
     body = (await client.get("/v1/search", params={"q": "deploy"})).json()
     assert body["query"] == "deploy"
@@ -84,7 +84,7 @@ async def test_search_types_filter_narrows_sections(client, make_invite, session
     await register_and_login(client, code, "searchuser3")
     conv = await _new_conversation(client, "alpha conversation")
     await _seed_message(session_factory, conv, "alpha message body")
-    await client.post("/v1/folders", json={"name": "alpha folder"})
+    await client.post("/v1/folders", json={"name": "alpha folder", "mode": "cloud"})
 
     body = (await client.get("/v1/search", params={"q": "alpha", "types": "folder"})).json()
     sections = _sections(body)
@@ -117,7 +117,7 @@ async def test_search_folder_id_scopes_to_workspace(client, make_invite, session
     code = await make_invite("INV-SR-7")
     await register_and_login(client, code, "searchuser7")
 
-    folder = (await client.post("/v1/folders", json={"name": "scoped ws"})).json()["id"]
+    folder = (await client.post("/v1/folders", json={"name": "scoped ws", "mode": "cloud"})).json()["id"]
     inside = (
         await client.post(
             "/v1/conversations", json={"title": "scoped alpha", "folder_id": folder}
@@ -163,42 +163,13 @@ async def test_search_updated_after_filters_by_time(client, make_invite):
     assert "conversation" in _sections(past)
 
 
-async def test_search_tag_filters_conversations_and_messages(
-    client, make_invite, session_factory
-):
-    """``tag`` (标签过滤) keeps only hits in the tagged conversation."""
-    from agentcore.db.repositories import ConversationRepository
-
-    code = await make_invite("INV-SR-9")
-    await register_and_login(client, code, "searchuser9")
-
-    tagged = await _new_conversation(client, "tagged alpha")
-    untagged = await _new_conversation(client, "tagged alpha other")
-    async with session_factory() as session:
-        await ConversationRepository(session).update_title_unscoped(
-            tagged, "tagged alpha", tag="research"
-        )
-        await ConversationRepository(session).update_title_unscoped(
-            untagged, "tagged alpha other"
-        )
-    await _seed_message(session_factory, tagged, "tagged alpha body")
-    await _seed_message(session_factory, untagged, "tagged alpha body")
-
-    body = (
-        await client.get("/v1/search", params={"q": "tagged alpha", "tag": "research"})
-    ).json()
-    sections = _sections(body)
-    assert {i["id"] for i in sections.get("conversation", [])} == {tagged}
-    assert {i["conversation_id"] for i in sections.get("message", [])} == {tagged}
-
-
 async def test_search_is_owner_scoped(client, make_invite, new_client, session_factory):
     """A user's search never surfaces another user's conversations/messages/folders."""
     code_a = await make_invite("INV-SR-6A")
     await register_and_login(client, code_a, "searchowner")
     conv = await _new_conversation(client, "confidential roadmap")
     await _seed_message(session_factory, conv, "confidential launch date")
-    await client.post("/v1/folders", json={"name": "confidential folder"})
+    await client.post("/v1/folders", json={"name": "confidential folder", "mode": "cloud"})
 
     code_b = await make_invite("INV-SR-6B")
     async with new_client() as other:

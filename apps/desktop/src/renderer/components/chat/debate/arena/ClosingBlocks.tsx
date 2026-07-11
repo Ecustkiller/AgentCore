@@ -50,32 +50,40 @@ function ClosingBlock({
     : undefined;
   const text = agent ? agent.outputChunks.join("") : "";
 
+  const meta = (
+    <>
+      <span className="font-medium" style={{ color: closing.colorVar }}>
+        {closing.name}
+      </span>
+      <span className="text-muted-foreground">· 结辩</span>
+      {!closing.ok && (
+        <span className="inline-flex items-center gap-0.5 text-destructive">
+          <TriangleAlert size={11} />
+          未产出
+        </span>
+      )}
+    </>
+  );
+
   return (
     <div
       className="border-l-[3px] pl-3"
       style={{ borderLeftColor: closing.colorVar }}
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-        <span className="font-medium" style={{ color: closing.colorVar }}>
-          {closing.name}
-        </span>
-        <span className="text-muted-foreground">· 结辩</span>
-        {!closing.ok && (
-          <span className="inline-flex items-center gap-0.5 text-destructive">
-            <TriangleAlert size={11} />
-            未产出
-          </span>
-        )}
-        {run && text && (
+        {run ? (
+          // 对齐 SpeakerBlock / CrossExamSideBlock：名字行即钻取入口（有 run 即可点）。
           <Button
             variant="ghost"
             onClick={() =>
               showRunDetail(messageId, run.id, `${closing.name} · 结辩`)
             }
-            className="ml-auto h-auto px-0 py-0 text-xs text-primary hover:bg-transparent"
+            className="h-auto justify-start gap-2 rounded-none px-0 py-0 text-xs hover:bg-transparent"
           >
-            查看产出
+            {meta}
           </Button>
+        ) : (
+          <span className="flex items-center gap-2">{meta}</span>
         )}
       </div>
       <div className="mt-1 pb-4 text-sm text-foreground">

@@ -29,6 +29,10 @@ export interface SidecarInference {
  *  引擎 `DebateSeed.from_payload`）；IPC 仅透传，引擎侧宽容解析。 */
 export type SidecarDebateSeed = components["schemas"]["DebateSeedInput"];
 
+/** 自主度三档（安全权限与治理 §三）——与服务端 `AutonomyPolicy` 枚举逐字对齐。
+ *  sidecar 无用户库，桌面按回合把当前设置随参数送达本地引擎（中途改设置下一回合即生效）。 */
+export type SidecarAutonomyPolicy = "always_ask" | "first_grant" | "full_auto";
+
 /** renderer 发起一次本地回合所需的入参（主进程据此驱动对应 root 的 sidecar）。 */
 export interface SidecarStartTurnRequest {
   /** 目标会话 id —— 回流的 `turn/event` 用它定位 renderer 侧的会话切片。 */
@@ -63,6 +67,8 @@ export interface SidecarStartTurnRequest {
    *  已谈、首轮辩手读到上一场摘要）。普通回合缺省。主进程原样透传给 Python sidecar 的
    *  `startTurn.debateSeed`，引擎经 `params.get("debateSeed")` 喂 `run_chat_pipeline`。 */
   debateSeed?: SidecarDebateSeed;
+  /** 用户当前自主度（能力授权三档）。缺省 = sidecar 沿用当前值（初始默认 first_grant）。 */
+  autonomyPolicy?: SidecarAutonomyPolicy;
 }
 
 /** 一条历史消息（与引擎 `run_chat_pipeline` 的 history 形状对齐）。 */
@@ -157,14 +163,16 @@ export interface SidecarResumeRequest {
   traceId: string;
   /** 挂起时已落库的原始 user 气泡 id —— outbox 幂等锚（同 startTurn.userMessageId）。 */
   userMessageId?: string;
-  /** continue（按 CEO 方向跑门控下游）/ adjust（注入 note 转向后续跑）/ stop（就此结束）。 */
-  decision: "continue" | "adjust" | "stop";
+  /** continue（授权并开工）/ per_call（逐次审批开工）/ adjust（注入 note 转向后续跑）/ stop（就此结束）。 */
+  decision: "continue" | "per_call" | "adjust" | "stop";
   /** adjust 的转向说明 / stop 的收尾语；continue 忽略。 */
   note: string;
   /** ask_user 的选项选择；plan_review 忽略。 */
   selected?: string[];
   /** 云代理凭据（同 `startTurn`）——续跑要跑 LLM；重启后续跑会新拉起引擎，故须随带。 */
   inference?: SidecarInference;
+  /** 用户当前自主度（同 `startTurn.autonomyPolicy`）——续跑期间的能力授权同样按当前设置。 */
+  autonomyPolicy?: SidecarAutonomyPolicy;
 }
 
 /**
@@ -183,6 +191,7 @@ export function buildSidecarResumeRpcParams(
     | "note"
     | "selected"
     | "userMessageId"
+    | "autonomyPolicy"
   >,
   inference?: SidecarInference,
 ): Record<string, unknown> {
@@ -195,6 +204,7 @@ export function buildSidecarResumeRpcParams(
     selected: req.selected ?? [],
     ...(req.userMessageId ? { userMessageId: req.userMessageId } : {}),
     ...(inference ? { inference } : {}),
+    ...(req.autonomyPolicy ? { autonomyPolicy: req.autonomyPolicy } : {}),
   };
 }
 

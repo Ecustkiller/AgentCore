@@ -34,6 +34,10 @@ class SectionOrder(IntEnum):
 
     BASE = 100
     RUNTIME_CONTEXT = 200
+    # Per-turn environment facts (location / desktop / capabilities). Volatile with
+    # binding changes; sits after the date line so the shared base can carry it to
+    # both CEO and workers without riding the CEO-only overview tail.
+    WORKSPACE_FACTS = 250
     MEMORY = 300
     CEO_CORE = 400
     SKILL_DIRECTORY = 500

@@ -345,6 +345,8 @@ def test_resume_claims_frame_and_drives_resume_pipeline(tmp_path, monkeypatch):
         captured["saver"] = kwargs.get("suspension_saver")
         # The Sidecar has no DB → history must come from the claimed local frame record.
         captured["history"] = kwargs.get("history")
+        # The user's CURRENT autonomy posture rides the resume params (安全权限与治理 §三).
+        captured["autonomy"] = kwargs.get("autonomy_policy")
         kwargs["sink"].close()
         return {
             "finish_reason": "end_turn",
@@ -375,6 +377,7 @@ def test_resume_claims_frame_and_drives_resume_pipeline(tmp_path, monkeypatch):
                         "conversationId": "c1",
                         "decision": "adjust",
                         "note": "换个方向",
+                        "autonomyPolicy": "always_ask",
                     },
                 }
             )
@@ -390,6 +393,10 @@ def test_resume_claims_frame_and_drives_resume_pipeline(tmp_path, monkeypatch):
     assert captured["decision"] == "adjust"
     assert captured["note"] == "换个方向"
     assert captured["saver"] is not None
+    # A non-default per-resume autonomy posture reached the pipeline (not reset to default).
+    from agentcore.core.types import AutonomyPolicy
+
+    assert captured["autonomy"] is AutonomyPolicy.ALWAYS_ASK
     # the reloaded history (from the local frame) is threaded into the resume pipeline so
     # window_from_journal can splice it ahead of the folded rounds (Phase 2 ⑤).
     assert captured["history"] == history

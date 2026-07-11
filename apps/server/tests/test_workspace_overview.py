@@ -38,6 +38,9 @@ async def test_empty_workspace_yields_guidance_hint():
     assert out.startswith("<workspace_file_index>")
     assert "工作区当前为空" in out
     assert "file_list" in out
+    # Environment mismatch guidance moved to ``<workspace_context>`` — no guessing prose.
+    assert "云端/本地工作区未对齐" not in out
+    assert "workspace_context" in out
 
 
 async def test_listing_failure_degrades_to_empty():

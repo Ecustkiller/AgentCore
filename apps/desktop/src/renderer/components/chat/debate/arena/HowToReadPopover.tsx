@@ -30,7 +30,7 @@ export function HowToReadPopover({ form }: { form: DebateForm }) {
           </li>
           <li>
             <span className="font-medium text-foreground">质询</span>
-            ：主持人当面追问，圆点表示是否正面回答。
+            ：主持人发出必答追问，题旁 ✓/⚠ 表示是否正面回答。
           </li>
           <li>
             <span className="font-medium text-foreground">结辩</span>

@@ -34,15 +34,16 @@ class AskUserTool:
 
     Constructed per turn where the sink is available (mirrors ``ApprovalGate`` /
     ``DelegateTool``): ``sink`` carries the prompt + resolution to the client,
-    ``registry`` bridges the resolve endpoint, ``timeout_seconds`` bounds the wait.
+    ``registry`` bridges the resolve endpoint, ``timeout_seconds`` is the ops-configured
+    wait bound (default unlimited / D2 — ``None`` at settings maps to a large sentinel).
 
-    结构化挂起 2b: when ``message_id`` + the suspension closures are wired (always, on
-    the live CEO path), the pause is also persisted to ``paused_turns`` so a
-    disconnect / restart is recoverable via ``POST .../resume``. The frame needs the
-    turn-level constants (``captain_run_id`` / ``base_system_prompt`` /
-    ``user_message``) to re-wire the CEO toolset on resume. Left ``None`` / empty
-    (standalone / tests) ⇒ no durable frame, so the pause degrades to the backend-only
-    timed wait (窄兜底) that auto-continues on timeout.
+    结构化挂起 2b + 挂起即收口 (②) / D11: when ``message_id`` + the suspension closures
+    are wired (live CEO path), the pause is persisted to ``paused_turns`` and the turn
+    ends in place (``ToolEffect.SUSPEND``); resume is the single cold path
+    ``POST .../resume``. The frame needs the turn-level constants (``captain_run_id`` /
+    ``base_system_prompt`` / ``user_message``) to re-wire the CEO toolset on resume.
+    If the durable frame cannot be saved ⇒ **explicit failure** (no in-memory timed
+    wait, no auto-continue on timeout — the narrow兜底 was deleted).
     """
 
     sink: EventSink
@@ -62,21 +63,70 @@ class AskUserTool:
     # The memory master switch, captured so resume re-wires consult_memory as this turn did
     # (off ⇒ stays off). Capture-only; defaults True (always-on).
     memory_enabled: bool = True
+    # Advertise ``action=bind_local_folder`` on choice options only when the desktop client
+    # can fulfil it (same live-user gate family as ask_user itself — cloud web/mobile omit).
+    advertise_bind_local_folder: bool = False
 
     @property
     def schema(self) -> ToolSchema:
+        option_properties: dict[str, Any] = {
+            "label": {
+                "type": "string",
+                "description": "选项文字（即用户选它时回传的答案）。",
+            },
+            "detail": {
+                "type": "string",
+                "description": (
+                    "可选：这个选项的一行权衡 / 代价，展示在选项下方，帮用户看懂「为什么选它」。"
+                ),
+            },
+            "recommended": {
+                "type": "boolean",
+                "description": (
+                    "可选：标记你建议的那一项（至多一个）。仅「推荐」高亮、不会替用户预选；"
+                    "要预选请用 default。"
+                ),
+            },
+        }
+        questions_desc = (
+            "可选：真正要用户拍板的问题（最多 5 个）。途中岔路通常就一个；"
+            "开场可摊开数个高杠杆决策（含影响大的技术选择，如是否响应式 / "
+            "双语 / 带后台）。开场的问题应尽量预填 default，让想省事的用户一键"
+            "全默认通过；途中的关键岔路通常不填 default（就是要 ta 选）。choice "
+            "选项可给每项配一行 detail（权衡/代价），并把你最建议的一项标 "
+            "recommended，帮用户看懂取舍、快速拍板。"
+        )
+        tool_desc = (
+            "向用户发问。默认【暂停回合】等 ta 回应后回到你的循环继续（用户选「停止」则结束"
+            "本回合）；也可设 blocking=false 做【非阻塞发问】——抛出问题但你按既定默认继续、"
+            "不等待，用户答复会作为新消息在后续轮次并入。这是你唯一的「问用户」原语，开场引导"
+            "与执行途中拍板共用。对「能做但没说全」的产出类请求，开工提案卡是首选开场（预填默认、"
+            "可一键通过，不是问题墙）；要克制的是【执行途中为能自行决定的小事打断用户】，"
+            "不是【开工前对齐】。何时该问 / 该不该阻塞、"
+            "开工提案卡怎么分档、途中拍板怎么给选项，"
+            "见 consult_skill（开场用 ask_user_kickoff、途中用 ask_user_midtask）。"
+        )
+        if self.advertise_bind_local_folder:
+            option_properties["action"] = {
+                "type": "string",
+                "enum": ["bind_local_folder"],
+                "description": (
+                    "可选。设为 bind_local_folder 时：桌面端把该选项渲染为「选择本地文件夹」"
+                    "动作——用户点选后绑定本对话工作区到所选目录再 resume，而不是回传纯文本。"
+                    "仅当 `<workspace_context>` 显示执行位置=云端且任务需要本机时使用。"
+                ),
+            }
+            questions_desc += (
+                " 当任务需要用户本机而执行位置仍是云端时，给 choice 选项加 "
+                "action=bind_local_folder，引导绑定本地文件夹（不要先空跑委派）。"
+            )
+            tool_desc += (
+                " 本回合桌面端在线：choice 选项可标 action=bind_local_folder 发起绑定。"
+            )
+
         return ToolSchema(
             name="ask_user",
-            description=(
-                "向用户发问。默认【暂停回合】等 ta 回应后回到你的循环继续（用户选「停止」则结束"
-                "本回合）；也可设 blocking=false 做【非阻塞发问】——抛出问题但你按既定默认继续、"
-                "不等待，用户答复会作为新消息在后续轮次并入。这是你唯一的「问用户」原语，开场引导"
-                "与执行途中拍板共用。对「能做但没说全」的产出类请求，开工提案卡是首选开场（预填默认、"
-                "可一键通过，不是问题墙）；要克制的是【执行途中为能自行决定的小事打断用户】，"
-                "不是【开工前对齐】。何时该问 / 该不该阻塞、"
-                "开工提案卡怎么分档、途中拍板怎么给选项，"
-                "见 consult_skill（开场用 ask_user_kickoff、途中用 ask_user_midtask）。"
-            ),
+            description=tool_desc,
             parameters={
                 "type": "object",
                 "properties": {
@@ -117,14 +167,7 @@ class AskUserTool:
                     },
                     "questions": {
                         "type": "array",
-                        "description": (
-                            "可选：真正要用户拍板的问题（最多 5 个）。途中岔路通常就一个；"
-                            "开场可摊开数个高杠杆决策（含影响大的技术选择，如是否响应式 / "
-                            "双语 / 带后台）。开场的问题应尽量预填 default，让想省事的用户一键"
-                            "全默认通过；途中的关键岔路通常不填 default（就是要 ta 选）。choice "
-                            "选项可给每项配一行 detail（权衡/代价），并把你最建议的一项标 "
-                            "recommended，帮用户看懂取舍、快速拍板。"
-                        ),
+                        "description": questions_desc,
                         "items": {
                             "type": "object",
                             "properties": {
@@ -144,29 +187,7 @@ class AskUserTool:
                                     "description": "kind=choice 时的候选项（最多 6 个）。",
                                     "items": {
                                         "type": "object",
-                                        "properties": {
-                                            "label": {
-                                                "type": "string",
-                                                "description": (
-                                                    "选项文字（即用户选它时回传的答案）。"
-                                                ),
-                                            },
-                                            "detail": {
-                                                "type": "string",
-                                                "description": (
-                                                    "可选：这个选项的一行权衡 / 代价，展示在"
-                                                    "选项下方，帮用户看懂「为什么选它」。"
-                                                ),
-                                            },
-                                            "recommended": {
-                                                "type": "boolean",
-                                                "description": (
-                                                    "可选：标记你建议的那一项（至多一个）。"
-                                                    "仅「推荐」高亮、不会替用户预选；"
-                                                    "要预选请用 default。"
-                                                ),
-                                            },
-                                        },
+                                        "properties": option_properties,
                                         "required": ["label"],
                                     },
                                 },
@@ -235,6 +256,11 @@ class AskUserTool:
         assumptions = normalize_assumptions(arguments.get("assumptions"))
         questions = normalize_questions(arguments.get("questions"))
         style_options = normalize_style_options(arguments.get("style_options"))
+        if not self.advertise_bind_local_folder:
+            for q in questions:
+                for opt in q.get("options") or []:
+                    if isinstance(opt, dict):
+                        opt.pop("action", None)
 
         # 非阻塞发问 (Cursor 式): surface + proceed, never freeze the turn. Branch BEFORE
         # any suspend / durable-frame machinery — it shares none of it.
@@ -257,10 +283,8 @@ class AskUserTool:
             style_options=style_options,
             intent=intent,
         )
-        # 结构化挂起 2b: durable backstop BEFORE the wait (best-effort). A cancel
-        # (disconnect) / crash during the wait propagates past the drop below, leaving
-        # the frame for ``POST .../resume``; the in-memory resolve still settles a
-        # live turn even if the save failed.
+        # 结构化挂起 2b + D11: persist the durable frame BEFORE finalize. Save success
+        # ⇒ 挂起即收口 (②); save failure ⇒ explicit error (no in-memory wait fallback).
         # CEO 协调模式 Phase 2: snapshot coordination state into the journal before
         # SUSPEND so resume can rebuild draft / completed / budget.
         from agentcore.runtime.coordination.session import active_coordination

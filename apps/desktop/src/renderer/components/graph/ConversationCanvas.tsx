@@ -22,6 +22,7 @@ import { TurnSummaryNode } from "./TurnSummaryNode";
 import { WaveLanes } from "./WaveLanes";
 import { nodeTypes as dagNodeTypes, edgeTypes } from "./constants";
 import { GraphHoverContext } from "./graphHover";
+import { GraphLayoutError } from "./GraphLayoutError";
 import { useCanvasFlow } from "./useCanvasFlow";
 import {
   useCanvasFocus,
@@ -331,6 +332,11 @@ function ConversationCanvasInner() {
                         <span className="text-primary">⇢</span> 数据注入（审计）
                       </div>
                     )}
+                  {flow.layoutError && (
+                    <div className="absolute inset-0 z-20 bg-background/85">
+                      <GraphLayoutError detail={flow.layoutError} />
+                    </div>
+                  )}
                 </div>
               </ContextMenuTrigger>
               <GraphContextMenu

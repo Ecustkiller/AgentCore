@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { autoApproveSiblings } from "../../services/approvals";
+import {
+  FILE_OP_TOOLS,
+  autoApproveSiblings,
+  isFileOpTool,
+} from "../../services/approvals";
 import type { ApprovalRequiredPayload } from "../../types/events";
 import {
   type ApprovalView,
@@ -102,6 +106,21 @@ const card = (over: Partial<ApprovalView> = {}): ApprovalView => ({
 });
 
 describe("autoApproveSiblings (本轮内都允许 batch放行)", () => {
+  it("FILE_OP_TOOLS matches backend approval_class_tool_names (五文件工具 ∪ git)", () => {
+    expect([...FILE_OP_TOOLS].sort()).toEqual(
+      [
+        "file_append",
+        "file_delete",
+        "file_move",
+        "file_write",
+        "git",
+        "str_replace",
+      ].sort(),
+    );
+    expect(isFileOpTool("git")).toBe(true);
+    expect(isFileOpTool("code_execute")).toBe(false);
+  });
+
   it("returns the other pending cards for the same tool", () => {
     const siblings = autoApproveSiblings(
       [
@@ -124,6 +143,23 @@ describe("autoApproveSiblings (本轮内都允许 batch放行)", () => {
       [
         card(),
         card({ approvalId: "a2", toolCallId: "a2", toolName: "file_append" }),
+        card({
+          approvalId: "a3",
+          toolCallId: "a3",
+          toolName: "code_execute",
+        }),
+      ],
+      card(),
+      "approve_always_files",
+    );
+    expect(siblings.map((s) => s.approvalId)).toEqual(["a2"]);
+  });
+
+  it("approve_always_files covers git (aligned with backend approval_class_tool_names)", () => {
+    const siblings = autoApproveSiblings(
+      [
+        card(),
+        card({ approvalId: "a2", toolCallId: "a2", toolName: "git" }),
         card({
           approvalId: "a3",
           toolCallId: "a3",

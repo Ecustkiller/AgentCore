@@ -401,3 +401,55 @@
   gap: 12px;
   padding: 4px 0 12px;
 }
+
+/* Autonomy (and similar) single-select choice list. */
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.choice-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 14px;
+  text-align: left;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.choice-row:active:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
+
+.choice-row:disabled {
+  opacity: 0.7;
+}
+
+.choice-row-active {
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.choice-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.choice-label {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.choice-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}

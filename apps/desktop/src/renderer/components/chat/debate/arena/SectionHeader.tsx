@@ -8,19 +8,19 @@ export function SectionHeader({
   sublabel?: string;
 }) {
   return (
-    <div id={id} className="scroll-mt-28 flex items-center gap-3 py-3">
-      <span className="h-px flex-1 bg-border" />
-      <span className="shrink-0 text-xs text-muted-foreground">
-        {sublabel ? (
-          <>
-            <span className="font-medium text-foreground">{label}</span>
-            <span> · {sublabel}</span>
-          </>
-        ) : (
-          <span className="font-medium text-foreground">{label}</span>
-        )}
-      </span>
-      <span className="h-px flex-1 bg-border" />
+    <div id={id} className="scroll-mt-28 pt-6 pb-2">
+      {sublabel ? (
+        <>
+          <p className="text-xs font-medium text-muted-foreground">{label}</p>
+          <h3 className="mt-1 text-xl font-semibold leading-snug text-foreground">
+            {sublabel}
+          </h3>
+        </>
+      ) : (
+        <h3 className="text-xl font-semibold leading-snug text-foreground">
+          {label}
+        </h3>
+      )}
     </div>
   );
 }

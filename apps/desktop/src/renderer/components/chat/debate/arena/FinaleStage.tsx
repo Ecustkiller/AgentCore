@@ -65,21 +65,24 @@ export function FinaleStage({
       className="scroll-mt-28 mt-8 border-t-2 border-border pt-6"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold text-foreground">主持人终审</h2>
-        <ModelBadge model={moderatorRun?.model ?? ""} />
-        <span className="text-xs text-muted-foreground">
-          {stopLabel(model.stopReason)}
-        </span>
-        <span className="min-w-0 flex-1" />
-        {moderatorRun && (
+        {moderatorRun ? (
+          // 对齐 SpeakerBlock 惯例：身份行（标题 + 模型徽章）即钻取入口。
           <Button
             variant="ghost"
             onClick={() => showRunDetail(messageId, moderatorRun.id, "主持人")}
-            className="h-auto px-0 py-0 text-xs text-primary hover:bg-transparent"
+            className="h-auto justify-start gap-2 rounded-none px-0 py-0 hover:bg-transparent"
           >
-            裁决过程
+            <h2 className="text-sm font-semibold text-foreground">
+              主持人终审
+            </h2>
+            <ModelBadge model={moderatorRun.model ?? ""} />
           </Button>
+        ) : (
+          <h2 className="text-sm font-semibold text-foreground">主持人终审</h2>
         )}
+        <span className="text-xs text-muted-foreground">
+          {stopLabel(model.stopReason)}
+        </span>
       </div>
 
       {hasBrief ? (
@@ -93,6 +96,7 @@ export function FinaleStage({
             sides={sides}
             form={model.form}
             scores={scoresByKey}
+            sceneKey={`${messageId}:brief`}
           />
           {tally.length > 0 && <FinaleScoreboard tally={tally} />}
           {stanceAgree !== null && stanceSide && (

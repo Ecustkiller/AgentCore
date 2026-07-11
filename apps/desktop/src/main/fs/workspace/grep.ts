@@ -34,10 +34,14 @@ export async function opGrep(
   const baseAbs = resolveLexical(root, directory);
   if (!baseAbs) return opErr("OutsideWorkspace", directory);
   const baseReal = await realInside(root, baseAbs);
-  if (!baseReal) return opErr("PathNotFound", directory);
+  if (!baseReal.ok) {
+    return baseReal.code === "out_of_root"
+      ? opErr("OutsideWorkspace", directory)
+      : opErr("PathNotFound", directory);
+  }
   let baseIsFile = false;
   try {
-    const st = await fs.stat(baseReal);
+    const st = await fs.stat(baseReal.path);
     baseIsFile = st.isFile();
     if (!st.isDirectory() && !st.isFile()) {
       return opErr("PathNotFound", directory);
@@ -97,7 +101,7 @@ export async function opGrep(
   // `directory` may name a single file (rg PATTERN FILE): scan just it, no walk.
   // `glob` is moot — the file is already pinpointed.
   if (baseIsFile) {
-    await scanFile(baseReal);
+    await scanFile(baseReal.path);
     return opOk({
       hits,
       file_counts: fileCounts,
@@ -137,7 +141,7 @@ export async function opGrep(
     }
   };
 
-  await walk(baseReal);
+  await walk(baseReal.path);
   return opOk({
     hits,
     file_counts: fileCounts,

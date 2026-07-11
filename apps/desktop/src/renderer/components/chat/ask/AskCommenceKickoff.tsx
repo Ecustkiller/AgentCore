@@ -3,8 +3,14 @@
  * Wired by {@link AskUserCard} when intent === "kickoff".
  */
 import { Button } from "@/components/ui";
+import {
+  formatBindLocalFolderAnswer,
+  pickAndBindLocalFolder,
+} from "@/lib/bindLocalFolder";
 import type { CheckpointUserDecision } from "@/services/checkpoint";
+import type { AskOption, AskQuestion } from "@/types/events";
 import { FileText, Loader2, OctagonX, Rocket } from "lucide-react";
+import { useState } from "react";
 import {
   ChoiceQuestion,
   CommenceNote,
@@ -22,6 +28,8 @@ export function AskCommenceKickoffBody({
   submitting,
   onContinue,
   onStop,
+  conversationId,
+  onBindResolve,
 }: {
   content: AskUserContent;
   answer: ReturnType<typeof useAskAnswer>;
@@ -29,8 +37,30 @@ export function AskCommenceKickoffBody({
   submitting: CheckpointUserDecision | null;
   onContinue: () => void;
   onStop: () => void;
+  conversationId?: string | null;
+  onBindResolve?: (composedAnswer: string) => void | Promise<void>;
 }) {
   const { lead, points } = splitBriefContext(content.context);
+  const [bindBusyLabel, setBindBusyLabel] = useState<string | null>(null);
+  const [bindError, setBindError] = useState<string | null>(null);
+
+  const handleBindOption = async (q: AskQuestion, opt: AskOption) => {
+    if (!conversationId || !onBindResolve || busy || bindBusyLabel) return;
+    setBindBusyLabel(opt.label);
+    setBindError(null);
+    const result = await pickAndBindLocalFolder(conversationId);
+    if (!result.ok) {
+      if (result.reason === "error") setBindError(result.message);
+      setBindBusyLabel(null);
+      return;
+    }
+    const value = formatBindLocalFolderAnswer(opt.label, result.root.name);
+    try {
+      await onBindResolve(answer.composeWithAnswer("kickoff", q.id, value));
+    } catch {
+      setBindBusyLabel(null);
+    }
+  };
 
   return (
     <div
@@ -102,14 +132,18 @@ export function AskCommenceKickoffBody({
               answer={answer.answers[q.id] ?? []}
               otherOn={answer.otherOn[q.id] ?? false}
               otherText={answer.otherText[q.id] ?? ""}
-              disabled={busy}
+              disabled={busy || !!bindBusyLabel}
               onToggle={(opt) => answer.toggleChoice(q, opt)}
               onSetText={(v) => answer.setText(q, v)}
               onToggleOther={() => answer.toggleOther(q)}
               onSetOther={(v) => answer.setOtherValue(q, v)}
               optionLayout="card"
+              conversationId={conversationId}
+              bindBusyLabel={bindBusyLabel}
+              onBindOption={(opt) => void handleBindOption(q, opt)}
             />
           ))}
+          {bindError && <p className="text-xs text-destructive">{bindError}</p>}
           <CommenceNote answer={answer} disabled={busy} />
         </div>
 

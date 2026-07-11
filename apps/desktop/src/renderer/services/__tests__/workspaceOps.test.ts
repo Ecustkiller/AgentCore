@@ -6,8 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // rejection from the real request (user code) is tracked normally, so the
 // stale-404 swallow can be asserted cleanly. Mirrors auth.test.ts.
 import { BASE_URL } from "@/services/api";
+import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import { performWorkspaceOp } from "@/services/workspaceOps";
 import type { WorkspaceOpRequiredPayload } from "@/types/events";
+
+vi.mock("@/services/sidecarRouting", () => ({
+  resolveConversationLocalTarget: vi.fn(() => Promise.resolve(null)),
+  // interaction.ts（回填入口）也 import 本模块：null = 云路由，测试断言 HTTP 回填。
+  getActiveSidecarTarget: vi.fn(() => null),
+}));
+
+const resolveTarget = vi.mocked(resolveConversationLocalTarget);
 
 const payload = (
   over: Partial<WorkspaceOpRequiredPayload> = {},
@@ -41,6 +50,8 @@ let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   fetchMock = vi.fn().mockResolvedValue(okResponse());
   vi.stubGlobal("fetch", fetchMock);
+  resolveTarget.mockReset();
+  resolveTarget.mockResolvedValue(null);
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -60,6 +71,62 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
       ok: true,
       value: "hello",
     });
+  });
+
+  it("injects conversation_id into process_* op args (channel context)", async () => {
+    const workspaceOp = vi.fn().mockResolvedValue({
+      ok: true,
+      value: { processes: [] },
+    });
+    stubFsApi(workspaceOp);
+
+    await performWorkspaceOp(payload({ op: "process_list", args: {} }), "c1");
+
+    expect(workspaceOp).toHaveBeenCalledWith("root-1", "process_list", {
+      conversation_id: "c1",
+    });
+  });
+
+  it("resolves the bound root for a sidecar process op (empty root_id) and prefixes the scratch subpath into start cwd", async () => {
+    const workspaceOp = vi.fn().mockResolvedValue({
+      ok: true,
+      value: { process_id: "p1", status: "running", output: "" },
+    });
+    stubFsApi(workspaceOp);
+    resolveTarget.mockResolvedValue({ rootId: "container-1", subpath: "conv-c1" });
+
+    await performWorkspaceOp(
+      payload({
+        op: "process_start",
+        root_id: "",
+        args: { command: "pnpm dev", cwd: "web" },
+      }),
+      "c1",
+    );
+
+    expect(workspaceOp).toHaveBeenCalledWith("container-1", "process_start", {
+      command: "pnpm dev",
+      cwd: "conv-c1/web",
+      conversation_id: "c1",
+    });
+  });
+
+  it("answers with an IO error when a sidecar process op has no local binding", async () => {
+    const workspaceOp = vi.fn();
+    stubFsApi(workspaceOp);
+
+    await performWorkspaceOp(
+      payload({ op: "process_list", root_id: "", args: {} }),
+      "c1",
+    );
+
+    expect(workspaceOp).not.toHaveBeenCalled();
+    const body = postedBody(fetchMock) as {
+      ok: boolean;
+      error: { kind: string };
+    };
+    expect(body.ok).toBe(false);
+    expect(body.error.kind).toBe("WorkspaceIOError");
   });
 
   it("posts a typed error envelope (kind survives for the tool layer)", async () => {

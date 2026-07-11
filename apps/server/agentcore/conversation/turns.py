@@ -7,6 +7,7 @@ import time
 from agentcore.config import settings
 from agentcore.conversation.common import (
     preview,
+    resolve_autonomy_policy,
     resolve_local_binding,
     resolve_memory_enabled,
     resolve_profile_set,
@@ -62,6 +63,7 @@ async def stream_chat(
     llm_credentials: LLMCredentials | None = None,
     debate_seed: dict | None = None,
     llm_supports_tools: bool | None = None,
+    x_client_platform: str | None = None,
 ) -> None:
     """Main entry: persist user message, run pipeline, persist assistant reply.
 
@@ -80,6 +82,7 @@ async def stream_chat(
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
             memory_enabled = await resolve_memory_enabled(session, user_id)
+            autonomy_policy = await resolve_autonomy_policy(session, user_id)
             # AI 协作白板 (§六 M2): if this conversation is a board's dedicated thread, the
             # turn is a 白板会话 — hand its board id to the pipeline so the CEO gets board_ops.
             board = await BoardRepository(session).get_by_conversation_id(
@@ -90,13 +93,14 @@ async def stream_chat(
         backend = build_turn_backend(
             user_id=user_id,
             conversation_id=conversation_id,
+            folder_id=folder_id,
             sink=sink,
             local_binding=local_binding,
         )
 
         async with workspace_lock(
             workspace_storage_key(
-                user_id=user_id, folder_id=None, conversation_id=conversation_id
+                user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
             )
         ):
             resident_attachments = await persist_attachments(backend, attachments)
@@ -125,9 +129,11 @@ async def stream_chat(
                 llm_credentials=llm_credentials,
                 profile_set=profile_set,
                 memory_enabled=memory_enabled,
+                autonomy_policy=autonomy_policy,
                 board_id=board_id,
                 debate_seed=debate_seed,
                 llm_supports_tools=llm_supports_tools,
+                x_client_platform=x_client_platform,
             )
 
     except Exception as e:
@@ -180,9 +186,11 @@ async def regenerate_chat(
 
             user_message = edited_content if edited_content is not None else (target.content or "")
             history = await load_chat_context(session, conversation_id, max_messages=40)
+            folder_id = conv.folder_id
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
             memory_enabled = await resolve_memory_enabled(session, user_id)
+            autonomy_policy = await resolve_autonomy_policy(session, user_id)
             board = await BoardRepository(session).get_by_conversation_id(
                 conversation_id, user_id=user_id
             )
@@ -191,6 +199,7 @@ async def regenerate_chat(
         backend = build_turn_backend(
             user_id=user_id,
             conversation_id=conversation_id,
+            folder_id=folder_id,
             sink=sink,
             local_binding=local_binding,
         )
@@ -198,7 +207,7 @@ async def regenerate_chat(
         async with workspace_lock(
             workspace_storage_key(
                 user_id=user_id,
-                folder_id=None,
+                folder_id=folder_id,
                 conversation_id=conversation_id,
             )
         ):
@@ -206,7 +215,7 @@ async def regenerate_chat(
                 conversation_id=conversation_id,
                 user_message=user_message,
                 user_id=user_id,
-                folder_id=conv.folder_id,
+                folder_id=folder_id,
                 sink=sink,
                 history=history[:-1],
                 attachments=None,
@@ -215,6 +224,7 @@ async def regenerate_chat(
                 llm_credentials=llm_credentials,
                 profile_set=profile_set,
                 memory_enabled=memory_enabled,
+                autonomy_policy=autonomy_policy,
                 board_id=board_id,
                 llm_supports_tools=llm_supports_tools,
             )
@@ -315,9 +325,11 @@ async def retry_failed_chat(
 
             user_message = target.content or ""
             history = await load_chat_context(session, conversation_id, max_messages=40)
+            folder_id = conv.folder_id
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
             memory_enabled = await resolve_memory_enabled(session, user_id)
+            autonomy_policy = await resolve_autonomy_policy(session, user_id)
             board = await BoardRepository(session).get_by_conversation_id(
                 conversation_id, user_id=user_id
             )
@@ -326,6 +338,7 @@ async def retry_failed_chat(
         backend = build_turn_backend(
             user_id=user_id,
             conversation_id=conversation_id,
+            folder_id=folder_id,
             sink=sink,
             local_binding=local_binding,
         )
@@ -333,7 +346,7 @@ async def retry_failed_chat(
         async with workspace_lock(
             workspace_storage_key(
                 user_id=user_id,
-                folder_id=None,
+                folder_id=folder_id,
                 conversation_id=conversation_id,
             )
         ):
@@ -344,7 +357,7 @@ async def retry_failed_chat(
                     conversation_id=conversation_id,
                     user_message=user_message,
                     user_id=user_id,
-                    folder_id=conv.folder_id,
+                    folder_id=folder_id,
                     sink=sink,
                     history=history[:-1],
                     attachments=None,
@@ -353,6 +366,7 @@ async def retry_failed_chat(
                     llm_credentials=llm_credentials,
                     profile_set=profile_set,
                     memory_enabled=memory_enabled,
+                    autonomy_policy=autonomy_policy,
                     board_id=board_id,
                     llm_supports_tools=llm_supports_tools,
                 )
@@ -382,6 +396,7 @@ async def resume_chat(
     sink: EventSink,
     llm_credentials: LLMCredentials | None = None,
     llm_supports_tools: bool | None = None,
+    x_client_platform: str | None = None,
 ) -> None:
     """Continue a turn paused at a plan_review / ask_user checkpoint (结构化挂起 2b resume).
 
@@ -404,6 +419,9 @@ async def resume_chat(
             folder_id = conv.folder_id
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
+            # The user's CURRENT autonomy posture (not frozen into the frame): a settings
+            # change while the turn sat paused applies to the resumed continuation.
+            autonomy_policy = await resolve_autonomy_policy(session, user_id)
             history = await load_chat_context(session, conversation_id, max_messages=40)
             # AI 协作白板 (§六 M2): re-derive the board binding (authoritative in the DB, not
             # carried in the frame) so a board turn paused at a checkpoint regains board_ops
@@ -416,6 +434,7 @@ async def resume_chat(
         backend = build_turn_backend(
             user_id=user_id,
             conversation_id=conversation_id,
+            folder_id=folder_id,
             sink=sink,
             local_binding=local_binding,
         )
@@ -424,7 +443,7 @@ async def resume_chat(
 
         async with workspace_lock(
             workspace_storage_key(
-                user_id=user_id, folder_id=None, conversation_id=conversation_id
+                user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
             )
         ):
             trace_id = suspension.trace_id or new_trace_id()
@@ -435,7 +454,10 @@ async def resume_chat(
                 conversation_id=conversation_id,
                 user_id=user_id,
                 turn_id=turn_id,
+                message_id=suspension.message_id,
                 agent_id="CEO",
+                cost_role="captain",
+                persona="CEO",
             ):
                 logger.info(
                     "chat.resume_start",
@@ -486,6 +508,8 @@ async def resume_chat(
                             suspension_saver=suspension_saver,
                             suspension_deleter=suspension_deleter,
                             llm_supports_tools=llm_supports_tools,
+                            autonomy_policy=autonomy_policy,
+                            x_client_platform=x_client_platform,
                         )
                     except asyncio.CancelledError:
                         salvage_incomplete_turn(

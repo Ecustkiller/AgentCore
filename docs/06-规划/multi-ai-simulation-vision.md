@@ -161,11 +161,11 @@ WorldEngine 驱动 tick 推进
 
 直接采用 3D 低多边形（Low-Poly）风格，不经过 2D 过渡阶段。
 
-> **客户端实现路线（2026-07-08）**：观测层为 **Unity 6 LTS + URP + C# 独立应用 AgentTown**（路线 B），不再在 Desktop 内嵌 R3F。详见 → [AgentTown 客户端规格](06-规划/AgentTown客户端规格.md)。
+> **客户端实现路线（2026-07-08）**：观测层为 **Unity 6 LTS + URP + C# 独立应用 AgentTown**（路线 B），不再在 Desktop 内嵌 R3F。详见 → [AgentTown 客户端规格](AgentTown客户端规格.md)。
 
 | 组件 | 选择 | 理由 |
 |------|------|------|
-| 观测客户端 | **Unity 6 LTS + URP + C#**（`apps/town` AgentTown） | **原生 WebGL2 支持中期 Web 传播版**；单人 + AI 下 C# 迭代快；低模无需 UE 重型渲染 → [AgentTown 客户端规格](06-规划/AgentTown客户端规格.md) |
+| 观测客户端 | **Unity 6 LTS + URP + C#**（`apps/town` AgentTown） | **原生 WebGL2 支持中期 Web 传播版**；单人 + AI 下 C# 迭代快；低模无需 UE 重型渲染 → [AgentTown 客户端规格](AgentTown客户端规格.md) |
 | 3D 场景 | Unity URP + Kenney / Quaternius 免费资产 | Low-Poly；资产源 `apps/town/Assets/TownAssets` |
 | NPC | NavMeshAgent + 动画状态机 | 单 FBX/GLB（Xbot）实例化区分居民 |
 | 状态管理 | C# `SimulationSession` 单例 | 禁止多 store 分裂；对齐 tick 快照权威 |

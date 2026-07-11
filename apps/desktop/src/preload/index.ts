@@ -18,6 +18,16 @@ import {
   type OutboxSyncedPayload,
 } from "@shared/outbox-contract";
 import {
+  PROCESS_CHANNELS,
+  type ProcessApi,
+  type ProcessEventPush,
+} from "@shared/process-contract";
+import {
+  PTY_CHANNELS,
+  type PtyApi,
+  type PtyEventPush,
+} from "@shared/pty-contract";
+import {
   SIDECAR_CHANNELS,
   type SidecarApi,
   type SidecarEventPush,
@@ -143,6 +153,35 @@ const terminalApi: TerminalApi = {
     ipcRenderer.invoke(TERMINAL_CHANNELS.openShellAtRoot, rootId, subpath),
 };
 
+const processApi: ProcessApi = {
+  list: (req) => ipcRenderer.invoke(PROCESS_CHANNELS.list, req),
+  stop: (req) => ipcRenderer.invoke(PROCESS_CHANNELS.stop, req),
+  read: (req) => ipcRenderer.invoke(PROCESS_CHANNELS.read, req),
+  killConversation: (req) =>
+    ipcRenderer.invoke(PROCESS_CHANNELS.killConversation, req),
+  onEvent: (cb) => {
+    const listener = (_e: unknown, payload: ProcessEventPush) => cb(payload);
+    ipcRenderer.on(PROCESS_CHANNELS.event, listener);
+    return () => ipcRenderer.removeListener(PROCESS_CHANNELS.event, listener);
+  },
+};
+
+const ptyApi: PtyApi = {
+  spawn: (req) => ipcRenderer.invoke(PTY_CHANNELS.spawn, req),
+  input: (req) => ipcRenderer.invoke(PTY_CHANNELS.input, req),
+  resize: (req) => ipcRenderer.invoke(PTY_CHANNELS.resize, req),
+  kill: (req) => ipcRenderer.invoke(PTY_CHANNELS.kill, req),
+  list: (req) => ipcRenderer.invoke(PTY_CHANNELS.list, req),
+  read: (req) => ipcRenderer.invoke(PTY_CHANNELS.read, req),
+  killConversation: (req) =>
+    ipcRenderer.invoke(PTY_CHANNELS.killConversation, req),
+  onEvent: (cb) => {
+    const listener = (_e: unknown, payload: PtyEventPush) => cb(payload);
+    ipcRenderer.on(PTY_CHANNELS.event, listener);
+    return () => ipcRenderer.removeListener(PTY_CHANNELS.event, listener);
+  },
+};
+
 const notificationApi: NotificationApi = {
   show: (input) => ipcRenderer.invoke(NOTIFICATION_CHANNELS.show, input),
   onClicked: (cb) => {
@@ -172,6 +211,8 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld("updaterApi", updaterApi);
     contextBridge.exposeInMainWorld("logApi", logApi);
     contextBridge.exposeInMainWorld("terminalApi", terminalApi);
+    contextBridge.exposeInMainWorld("processApi", processApi);
+    contextBridge.exposeInMainWorld("ptyApi", ptyApi);
     contextBridge.exposeInMainWorld("notificationApi", notificationApi);
     contextBridge.exposeInMainWorld("windowApi", windowApi);
   } catch (error) {
@@ -192,6 +233,10 @@ if (process.contextIsolated) {
   window.logApi = logApi;
   // @ts-ignore - 非隔离环境下直接挂载
   window.terminalApi = terminalApi;
+  // @ts-ignore - 非隔离环境下直接挂载
+  window.processApi = processApi;
+  // @ts-ignore - 非隔离环境下直接挂载
+  window.ptyApi = ptyApi;
   // @ts-ignore - 非隔离环境下直接挂载
   window.notificationApi = notificationApi;
   // @ts-ignore - 非隔离环境下直接挂载

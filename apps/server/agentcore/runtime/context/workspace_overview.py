@@ -72,11 +72,12 @@ async def build_workspace_overview(backend: WorkspaceBackend | None) -> str:
         if not profile_text:
             return ""
     elif not paths and not profile_text:
+        # Environment mismatch guidance lives in ``<workspace_context>`` (explicit facts);
+        # this block only states the file-index emptiness so the model does not re-guess.
         return (
             "<workspace_file_index>\n"
             "工作区当前为空（无文件路径可列）。若对话历史显示曾委派产出，仍须先 "
-            "file_list 核实；若确认为空，向用户说明可能是云端/本地工作区未对齐，"
-            "并引导绑定本地文件夹或检查侧栏工作区。\n"
+            "file_list 核实后再回答；环境与绑定以本回合 `<workspace_context>` 为准。\n"
             "</workspace_file_index>"
         )
 

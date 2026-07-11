@@ -9,7 +9,7 @@ from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import error_fields_for
 from agentcore.core.logging import get_logger
-from agentcore.core.types import new_id
+from agentcore.core.types import AutonomyPolicy, new_id
 from agentcore.desktop.channel import DesktopClientChannel
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
@@ -22,11 +22,13 @@ from agentcore.memory import (
 )
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.audit.hooks import bind_recorder
-from agentcore.runtime.citations import merge_citations, out_of_range_markers
+from agentcore.runtime.citations import merge_citations, reconcile_citations
 from agentcore.runtime.context import (
     ContextAssembler,
     SectionOrder,
+    build_workspace_context,
     build_workspace_overview,
+    desktop_client_can_bind,
 )
 from agentcore.runtime.costing import RunCost, aggregate_cost, captain_run_cost_from_state
 from agentcore.runtime.debate import DebateSeed
@@ -87,6 +89,7 @@ from agentcore.tools.builtin.board_ops import BoardOpsTool
 from agentcore.tools.builtin.board_read import BoardReadTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.vision import build_vision_reader
+from agentcore.workspace.locate import workspace_channel_for_tools
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
@@ -105,6 +108,7 @@ async def run_chat_pipeline(
     attachments: list[dict] | None = None,
     approvals_enabled: bool = True,
     memory_enabled: bool = True,
+    autonomy_policy: AutonomyPolicy | None = None,
     profile_set: ProfileSet | None = None,
     llm_credentials: LLMCredentials | None = None,
     session_saver: SessionSaver | None = None,
@@ -114,6 +118,7 @@ async def run_chat_pipeline(
     debate_seed: dict | None = None,
     llm_supports_tools: bool | None = None,
     message_id: str | None = None,
+    x_client_platform: str | None = None,
 ) -> dict:
     """Run the full chat pipeline for a single user message.
 
@@ -129,6 +134,10 @@ async def run_chat_pipeline(
     ``memory_enabled`` is the user's long-term-memory master switch (resolved by the
     caller): False injects no memory <rules> this turn (Agent记忆与知识系统 §一).
 
+    ``autonomy_policy`` is the user's capability-authorization posture (安全权限与治理
+    §三): always_ask / first_grant (default) / full_auto. Only the capability-auth
+    dimension — plan_review / checkpoint confirmation is unchanged.
+
     ``folder_id`` is the conversation's project (None for a bare/global chat): it selects
     the memory SCOPE so a project conversation also gets that project's memory layer
     injected (global + project), and ``consult_memory`` searches both (Agent记忆与知识系统 §二).
@@ -137,6 +146,11 @@ async def run_chat_pipeline(
     gains the ``board_ops`` tool + a :class:`BoardChannel` bound to that board, so it can
     apply structured ops to the user's open whiteboard canvas. ``None`` for every ordinary
     chat — then ``board_ops`` is neither wired nor reachable.
+
+    ``x_client_platform`` is the raw ``X-Client-Platform`` header (desktop / mobile-web /
+    …). Gates ``ask_user``'s ``action=bind_local_folder`` advertisement and the
+    ``<workspace_context>`` desktop-online line — cloud web/mobile must not see the bind
+    action. ``None`` / absent defaults to desktop (legacy tests).
 
     ``profile_set`` is the turn's per-scenario model set — which model each scenario
     (chat / agent.strong / ...) runs this turn — resolved by the caller from the user's
@@ -218,12 +232,19 @@ async def run_chat_pipeline(
         memory_topics = await load_memory_topics(
             memory_store, user_id, folder_id=folder_id, enabled=memory_enabled
         )
-        # Clean, stable base (base + date + memory): NO attachments, NO CEO hints.
-        # This is the cacheable prefix shared by the CEO and reused verbatim by
-        # workers. The (per-turn, variable) attachment block is appended LAST below —
-        # after the stable CEO hint stack — so a turn carrying attached files does not
-        # bust DeepSeek's prefix cache for the hints (缓存友好: 易变内容置于稳定前缀之后).
-        system_prompt = assemble_system_prompt(memory_markdown=memory_markdown)
+        # Clean, stable base (base + date + workspace facts + memory): NO attachments,
+        # NO CEO hints. This is the cacheable prefix shared by the CEO and reused
+        # verbatim by workers. Environment facts ride the shared base so workers also
+        # know execution location (防止空云 scratch 里幻觉装软件). The (per-turn, variable)
+        # attachment block is appended LAST below — after the stable CEO hint stack —
+        # so a turn carrying attached files does not bust DeepSeek's prefix cache for
+        # the hints (缓存友好: 易变内容置于稳定前缀之后).
+        desktop_online = desktop_client_can_bind(x_client_platform) or backend.location == "local"
+        workspace_facts = build_workspace_context(backend, desktop_online=desktop_online)
+        system_prompt = assemble_system_prompt(
+            memory_markdown=memory_markdown,
+            workspace_context=workspace_facts,
+        )
         attachment_context = _build_attachment_context(attachments)
         # Workers hold no CEO hints; their base is the shared base + optional simplified
         # 记忆主题目录 + the same attachment block at the end — byte-identical to the old
@@ -274,6 +295,11 @@ async def run_chat_pipeline(
             if backend.location == "local"
             else None
         )
+        workspace_channel = workspace_channel_for_tools(
+            backend,
+            sink=sink,
+            conversation_id=conversation_id,
+        )
 
         # AI 协作白板 §九.4 Gap ②: the turn-level vision cost sink. ``board_read`` appends a
         # priced ``role=vision`` ledger row here per 读图 sub-call. Shared by REFERENCE across
@@ -294,6 +320,7 @@ async def run_chat_pipeline(
             conversation_id=conversation_id,
             board_channel=board_channel,
             desktop_channel=desktop_channel,
+            workspace_channel=workspace_channel,
             # §九.4: vision provider (QwenVL) — set VISION_API_KEY to enable; None ⇒
             # board_read returns a clean「读图能力未配置」error (「插上即用」).
             vision_reader=build_vision_reader(),
@@ -329,6 +356,8 @@ async def run_chat_pipeline(
         # in local mode (双模式工作区 P2d 执行门) — so a delegated worker can't run
         # code / mutate files on the user's real machine without consent, while a
         # cloud team stays un-gated (isolated sandbox).
+        if autonomy_policy is None:
+            autonomy_policy = AutonomyPolicy.FIRST_GRANT
         approval_gate = (
             ApprovalGate(
                 sink=sink,
@@ -339,6 +368,7 @@ async def run_chat_pipeline(
                 file_op_tools=approval_class_tool_names(),
                 per_call_tools=per_call_tool_names(),
                 delegation_grantable_tools=delegation_grantable_tool_names(),
+                autonomy_policy=autonomy_policy,
             )
             if (settings.approval_gate_enabled and approvals_enabled)
             else None
@@ -386,6 +416,11 @@ async def run_chat_pipeline(
             folder_id=folder_id,
             # 结构化补轮·B：前端从收场卡发起续辩时直传的上一场种子（宽容解析；无实质内容→None）。
             debate_seed=DebateSeed.from_payload(debate_seed),
+            autonomy_policy=autonomy_policy,
+            # Same live-user gate as ask_user itself, plus desktop-only: web/mobile omit.
+            advertise_bind_local_folder=checkpoint_enabled and desktop_client_can_bind(
+                x_client_platform
+            ),
         )
 
         # AI 协作白板: in a 白板会话, hand the CEO the board tools so it can draw on
@@ -599,10 +634,9 @@ async def run_chat_pipeline(
         merge_citations(citations, revise_tool.citations)
         merge_citations(citations, debate_tool.citations)
 
-        # 引用越界观测：模型偶尔写出指向「不存在来源卡」的 [n]（数错或想指上一轮的号）。
-        # 客户端会把这类越界角标降级成纯文本，所以正文不动——只记一条 warning，让这种
-        # 误引率可被度量（logs/dev.jsonl，conversation_id 由 contextvars 自动带上）。
-        stray_markers = out_of_range_markers(final_content, len(citations))
+        # 引用出口自洽：finish_guard 回炉耗尽后正文仍可能带悬空 [n]。先记 warning
+        #（观测），再剥离悬空角标，保证进入 conversation store 的终稿与 citations 自洽。
+        final_content, citations, stray_markers = reconcile_citations(final_content, citations)
         if stray_markers:
             logger.warning(
                 "citations.out_of_range",

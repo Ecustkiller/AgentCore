@@ -22,9 +22,9 @@ export type StrokeStyle = "solid" | "dashed";
 export type TextAlign = "left" | "center" | "right";
 
 /** A delegated run's lifecycle status as the board renders it (AI协作白板 M3 进度贴源). A
- * whiteboard-local mirror of the execution store's `RunStatus` (mapping its `ready`→`pending`)
+ * whiteboard-local mirror of the execution store's `RunStatus`
  * so the engine stays independent of the run store; drives the `agentNode` card's status accent
- * (running→primary, completed→success, failed→destructive, pending/cancelled→muted). */
+ * (running→primary, completed→success, failed→destructive, pending/cancelled/skipped→muted). */
 export type RunVisualStatus =
   | "pending"
   | "running"

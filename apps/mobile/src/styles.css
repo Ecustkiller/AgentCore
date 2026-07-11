@@ -459,6 +459,28 @@ button.link {
   font-variant-numeric: tabular-nums;
 }
 
+/* 消息复制出口：仅交付 / 含过程 */
+.msg-copy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.msg-copy-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.msg-copy-btn:active {
+  background: var(--accent);
+}
+
 .bubble.user {
   align-self: flex-end;
   background: var(--user);
@@ -1302,7 +1324,8 @@ button.link {
 }
 
 /* 团队便签墙 (§2.2 通): the one-line decisions / heads-ups workers broadcast to their concurrent
-   siblings — a glass-box notes panel under the team runs (贴事实·不要求回应, NOT a chat). */
+   siblings — a glass-box notes panel under the team runs (贴事实·不要求回应, NOT a chat).
+   Collapsible via the same <details> fold idiom as 思考 (.reasoning) / 工具组 (.tool-group). */
 .team-notes {
   display: flex;
   flex-direction: column;
@@ -1315,6 +1338,26 @@ button.link {
   font-size: 12px;
   font-weight: 500;
   color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.team-notes-head::-webkit-details-marker {
+  display: none;
+}
+
+.team-notes-head::before {
+  content: "▸ ";
+}
+
+.team-notes[open] > .team-notes-head::before {
+  content: "▾ ";
+}
+
+.team-notes-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .team-note {
@@ -2635,6 +2678,14 @@ dialog.dialog::backdrop {
   font-weight: 600;
 }
 
+/* 「去配置」on a BYOK refusal banner — same accent weight as 重连 (parity with desktop
+   RetryBanner primary action). */
+.error.bar .config-action {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* Interactive pause card (审批 / 检查点 / plan_review) — the actionable surface for a turn
    blocked on the user. Amber accent = 待裁决; sits above the composer, always visible. */
 .pause {
@@ -3025,6 +3076,17 @@ dialog.viewer::backdrop {
   color: var(--muted);
 }
 
+.chat-welcome-cta {
+  margin-top: 16px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+}
+
 /* 「记忆已更新」卡 (③ Agent记忆与知识系统 §1.6): offline-consolidation results pinned at the
    thread tail — the WRITE side of memory made visible (读侧 consult_memory 本就内联可见)。
    中性 chrome：记忆是被动后台行为，不是「需要你」的面（品牌/状态色留给待裁决类），故卡身走
@@ -3174,6 +3236,21 @@ dialog.viewer::backdrop {
 
 .mem-update-link:active {
   color: var(--fg);
+}
+
+/* 「最近更新」feed on /memory — reuse .mem-update chrome; head is time + source link. */
+.mem-feed .mem-updates {
+  margin-top: 0;
+}
+
+.mem-feed-when {
+  margin-left: 0;
+}
+
+.mem-feed-source {
+  margin-left: auto;
+  align-self: center;
+  padding: 0;
 }
 
 /* --- Dev offline preview (/preview) --- */

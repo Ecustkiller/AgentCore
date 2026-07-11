@@ -1,13 +1,13 @@
 import type { GroupedConversations } from "@/hooks/useConversations";
 import {
   getConversations,
-  patchConversationCache,
   removeConversationFromCache,
   useGroupedConversations,
 } from "@/hooks/useConversations";
 import { queryClient } from "@/lib/queryClient";
 import { conversationKeys } from "@/lib/queryKeys";
 import {
+  type CreateFolderInput,
   type FolderMeta,
   createFolder,
   deleteFolder,
@@ -19,9 +19,8 @@ import { useMutation } from "@tanstack/react-query";
 /**
  * Folders as React Query data — folders share the `/grouped` query (and its
  * cache entry) with conversations, so this reads/writes the `folders` half of
- * that same entry. Pure-UI folder state (pending rename, pending new-chat
- * target) stays in the zustand folders store; only the server-owned list lives
- * here.
+ * that same entry. Pure-UI folder state (pending rename, draft workspace intent)
+ * stays in the zustand folders store; only the server-owned list lives here.
  */
 const EMPTY_FOLDERS: FolderMeta[] = [];
 
@@ -66,62 +65,49 @@ export function useFolders(): FolderMeta[] {
   return useGroupedConversations().data?.folders ?? EMPTY_FOLDERS;
 }
 
-/** Create a folder, then add it to the cache. `mutateAsync` returns the new
- * folder so the caller can name / select it. */
+/** Create a project (= workspace), then add it to the cache. */
 export function useCreateFolder() {
   return useMutation({
-    mutationFn: ({
-      name,
-      localDir,
-    }: {
-      name: string;
-      localDir?: string | null;
-    }) => createFolder(name, localDir),
+    mutationFn: (input: CreateFolderInput) => createFolder(input),
     onSuccess: (folder) => {
       addFolderCache(folder);
     },
   });
 }
 
-/** Rename / re-bind a folder, optimistic with rollback on failure. */
+/** Rename a folder, optimistic with rollback on failure. */
 export function useUpdateFolder() {
   return useMutation({
-    mutationFn: ({
-      id,
-      patch,
-    }: {
-      id: string;
-      patch: { name?: string; localDir?: string | null };
-    }) => updateFolder(id, patch),
+    mutationFn: ({ id, patch }: { id: string; patch: { name?: string } }) =>
+      updateFolder(id, patch),
     onMutate: ({ id, patch }) => {
       const prev = getFolders().find((f) => f.id === id) ?? null;
       const cachePatch: Partial<FolderMeta> = {};
       if (patch.name !== undefined) cachePatch.name = patch.name;
-      if (patch.localDir !== undefined) cachePatch.localDir = patch.localDir;
       patchFolderCache(id, cachePatch);
       return { prev };
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) {
-        patchFolderCache(ctx.prev.id, {
-          name: ctx.prev.name,
-          localDir: ctx.prev.localDir,
-        });
+        patchFolderCache(ctx.prev.id, { name: ctx.prev.name });
       }
     },
   });
 }
 
-/** Delete a folder server-side, then drop it from the cache and unbind its
- * conversations into 未分组 (the server does the unbind; we mirror it). */
+/**
+ * Soft-delete a folder. Server archives member conversations (不解组);
+ * drop the folder from cache and refresh conversation lists.
+ */
 export function useDeleteFolder() {
   return useMutation({
     mutationFn: (id: string) => deleteFolder(id),
     onSuccess: (_data, id) => {
-      for (const c of getConversations()) {
-        if (c.folderId === id) patchConversationCache(c.id, { folderId: null });
-      }
       removeFolderFromCache(id);
+      void queryClient.invalidateQueries({ queryKey: conversationKeys.grouped });
+      void queryClient.invalidateQueries({
+        queryKey: conversationKeys.archived,
+      });
     },
   });
 }

@@ -10,9 +10,8 @@ import {
 } from "../shared";
 
 describe("statusFaceLabel", () => {
-  it("shows 排队中 for pending and ready", () => {
+  it("shows 排队中 for pending", () => {
     expect(statusFaceLabel("pending", null).text).toBe("排队中");
-    expect(statusFaceLabel("ready", null).text).toBe("排队中");
   });
 
   it("shows live elapsed for running workers", () => {
@@ -30,9 +29,10 @@ describe("statusFaceLabel", () => {
     expect(statusFaceLabel("completed", null).text).toBe("已完成");
   });
 
-  it("shows failure and cancelled states", () => {
+  it("shows failure, cancelled, and skipped states", () => {
     expect(statusFaceLabel("failed", null).text).toBe("失败");
     expect(statusFaceLabel("cancelled", null).text).toBe("已停止");
+    expect(statusFaceLabel("skipped", null).text).toBe("未执行");
   });
 });
 
@@ -81,18 +81,47 @@ describe("buildRevisionBadge", () => {
     });
   });
 
-  it("debate continuation uses 第 N 轮 (round preferred)", () => {
+  it("debate statement continuation uses 第 N 轮 (round preferred)", () => {
     expect(
       buildRevisionBadge({
         isRevision: true,
         revision: 2,
         round: 3,
         isDebate: true,
+        beat: "statement",
       }),
     ).toEqual({
       kind: "debate",
       label: "第 3 轮",
       title: "第 3 轮",
+    });
+  });
+
+  it("debate cross-exam is not a graph badge (folded into round node)", () => {
+    expect(
+      buildRevisionBadge({
+        isRevision: true,
+        revision: 2,
+        round: 2,
+        isDebate: true,
+        beat: "cross_exam",
+      }),
+    ).toBeNull();
+  });
+
+  it("debate closing uses 结辩 (no round in label)", () => {
+    expect(
+      buildRevisionBadge({
+        isRevision: true,
+        revision: 4,
+        round: 2,
+        isDebate: true,
+        beat: "closing",
+      }),
+    ).toEqual({
+      kind: "debate",
+      label: "结辩",
+      title: "结辩",
     });
   });
 
@@ -158,6 +187,7 @@ describe("buildAgentNodePresentation revision face", () => {
         revision: 2,
         round: 2,
         stance: "pro",
+        debateBeat: "statement",
         revisionSummary: "应被忽略的热修文案",
       }),
     );
@@ -171,6 +201,64 @@ describe("buildAgentNodePresentation revision face", () => {
     expect(p.peekTags.some((t) => t.includes("热修"))).toBe(false);
   });
 
+  it("debate closing badge is 结辩; cross-exam has no graph badge", () => {
+    const cx = buildAgentNodePresentation(
+      baseNode({
+        isRevision: true,
+        revision: 2,
+        round: 2,
+        stance: "pro",
+        debateBeat: "cross_exam",
+      }),
+    );
+    expect(cx.revisionBadge).toBeNull();
+    const closing = buildAgentNodePresentation(
+      baseNode({
+        isRevision: true,
+        revision: 3,
+        round: 2,
+        stance: "con",
+        debateBeat: "closing",
+      }),
+    );
+    expect(closing.revisionBadge?.label).toBe("结辩");
+  });
+
+  it("debate round phase overrides running status face", () => {
+    const p = buildAgentNodePresentation(
+      baseNode({
+        status: "running",
+        isAnimating: true,
+        stance: "pro",
+        debateRoundPhase: "质询作答中",
+      }),
+    );
+    expect(p.statusFace.text).toBe("质询作答中");
+    expect(p.statusFace.cls).toContain("primary");
+  });
+
+  it("settled 含质询 suffix and 质询作答失败 replace on status face", () => {
+    const done = buildAgentNodePresentation(
+      baseNode({
+        status: "completed",
+        durationMs: 88_000,
+        stance: "pro",
+        debateCrossExamMark: { label: "含质询", mode: "suffix" },
+      }),
+    );
+    expect(done.statusFace.text).toBe("已完成 · 1m28s · 含质询");
+
+    const failed = buildAgentNodePresentation(
+      baseNode({
+        status: "failed",
+        stance: "con",
+        debateCrossExamMark: { label: "质询作答失败", mode: "replace" },
+      }),
+    );
+    expect(failed.statusFace.text).toBe("质询作答失败");
+    expect(failed.statusFace.cls).toContain("destructive");
+  });
+
   it("debate via group=debate:* without stance", () => {
     const p = buildAgentNodePresentation(
       baseNode({
@@ -178,6 +266,7 @@ describe("buildAgentNodePresentation revision face", () => {
         revision: 2,
         round: 2,
         group: "debate:topic-1",
+        debateBeat: "statement",
       }),
     );
     expect(p.revisionBadge?.kind).toBe("debate");

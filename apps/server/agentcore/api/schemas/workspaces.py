@@ -21,13 +21,21 @@ class BindLocalWorkspaceRequest(BaseModel):
 
 
 class WorkspaceBindingResponse(BaseModel):
-    """A conversation's resolved workspace mode + where its binding lives."""
+    """A conversation's resolved workspace mode + where its binding lives.
+
+    ``mode`` / ``root_id`` follow the turn-routing口径 (``resolve_local_binding``):
+    an explicit ``local_root_id`` OR the desktop's ``local_container_root_id`` default
+    both count as local. ``source`` distinguishes how the effective bind was chosen
+    so the client can present「显式绑定」vs「容器默认」without guessing.
+    """
 
     mode: Literal["local", "cloud"]
     # Which record carries the binding: the shared folder, or the conversation.
     scope: Literal["folder", "conversation"]
     # The bound desktop root id when local; None when cloud.
     root_id: str | None = None
+    # How the effective local root was chosen. Absent/None when cloud.
+    source: Literal["explicit", "container"] | None = None
 
 
 class WorkspaceSummary(BaseModel):

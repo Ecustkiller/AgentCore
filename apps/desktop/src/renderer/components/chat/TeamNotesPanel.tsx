@@ -1,4 +1,5 @@
 import { agentColorVar, agentGlyph } from "@/lib/agentIdentity";
+import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import type { TeamNote } from "@/stores/execution";
 import { ChevronDown, ChevronRight, StickyNote } from "lucide-react";
 import { useState } from "react";
@@ -28,12 +29,32 @@ const NOTE_STATUS_META: Record<string, { label: string; className: string }> = {
 export interface TeamNotesPanelProps {
   notes: TeamNote[];
   /**
-   * Canvas compact wall: tighter padding, optional collapse. Chat keeps the
-   * always-open section (default).
+   * Canvas compact wall: tighter padding. Chat / canvas both use the collapsible
+   * header when controlled or when `defaultExpanded` / `disclosureKey` is set.
    */
   compact?: boolean;
-  /** When set, the wall is a toggle; omit for chat's always-visible list. */
+  /**
+   * Uncontrolled collapse seed (legacy canvas remount path). Prefer
+   * `disclosureKey` + `live` for stream-aware persistence.
+   */
   defaultExpanded?: boolean;
+  /**
+   * Persistent key for uncontrolled stream-aware open state
+   * (`${messageId}:team-notes`). Omit in controlled mode.
+   */
+  disclosureKey?: string | null;
+  /**
+   * Live signal for stream-aware uncontrolled mode: running + active notes →
+   * expand by default; settled → collapse default (user override persists).
+   */
+  live?: boolean;
+  /**
+   * Controlled open state. When set, the wall is collapsible and ignores internal
+   * state — pair with `onExpandedChange` (chat `InlineTeamGraph`).
+   */
+  expanded?: boolean;
+  /** Controlled toggle; called with the next open state. */
+  onExpandedChange?: (expanded: boolean) => void;
 }
 
 /**
@@ -45,16 +66,35 @@ export interface TeamNotesPanelProps {
  * shown with its author (谁贴的) and kind (我定了 / 提个醒), in post order. Renders nothing for a
  * turn that posted no notes (the common case), so it is pure addition over today's behaviour.
  *
- * Canvas reuses the same rows / labels (`compact` + `defaultExpanded`) under the focused turn DAG;
- * collapsed summaries only show a「便签 N」chip (see TurnSummaryNode).
+ * Canvas reuses the same rows / labels (`compact` + stream-aware `disclosureKey`/`live`) under the
+ * focused turn DAG; chat lifts open state via `expanded` / `onExpandedChange`. Collapsed summaries
+ * only show a 「便签 N」chip (see TurnSummaryNode).
  */
 export function TeamNotesPanel({
   notes,
   compact = false,
   defaultExpanded,
+  disclosureKey,
+  live = false,
+  expanded: expandedProp,
+  onExpandedChange,
 }: TeamNotesPanelProps) {
-  const collapsible = defaultExpanded !== undefined;
-  const [expanded, setExpanded] = useState(defaultExpanded ?? true);
+  const controlled = expandedProp !== undefined;
+  const collapsible =
+    controlled || defaultExpanded !== undefined || disclosureKey != null;
+
+  // Uncontrolled stream-aware path (canvas TurnGroupNode). Hooks must stay unconditional.
+  const [streamExpanded, toggleStream] = useStreamAwareDisclosure(
+    controlled ? null : (disclosureKey ?? null),
+    live,
+  );
+  const [legacyExpanded, setLegacyExpanded] = useState(defaultExpanded ?? true);
+
+  const expanded = controlled
+    ? expandedProp
+    : disclosureKey != null
+      ? streamExpanded
+      : legacyExpanded;
 
   if (notes.length === 0) return null;
 
@@ -73,6 +113,16 @@ export function TeamNotesPanel({
     );
   }
 
+  const toggle = () => {
+    if (controlled) {
+      onExpandedChange?.(!expanded);
+    } else if (disclosureKey != null) {
+      toggleStream();
+    } else {
+      setLegacyExpanded((v) => !v);
+    }
+  };
+
   return (
     <section
       className={
@@ -86,7 +136,7 @@ export function TeamNotesPanel({
         className="flex w-full items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
         onClick={(e) => {
           e.stopPropagation();
-          setExpanded((v) => !v);
+          toggle();
         }}
         aria-expanded={expanded}
       >

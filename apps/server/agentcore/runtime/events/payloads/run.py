@@ -213,6 +213,12 @@ class RunCancelledPayload(WirePayload):
     reason: Literal["redirect", "stop"]
 
 
+class RunSkippedPayload(WirePayload):
+    run_id: str
+    agent_id: str
+    reason: Literal["cascade", "abort"]
+
+
 class RunProgressPayload(WirePayload):
     completed: int
     total: int

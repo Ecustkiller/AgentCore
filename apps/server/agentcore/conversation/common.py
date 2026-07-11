@@ -57,14 +57,26 @@ def preview(text: str, *, limit: int = LOG_PREVIEW_CHARS) -> str:
 
 
 async def resolve_local_binding(session: AsyncSession, conv: Conversation) -> LocalBinding | None:
-    """Resolve a turn's local-mode binding from the conversation's own columns.
+    """Resolve a turn's local-mode binding (项目即工作区).
 
-    ``local_root_id`` is an explicit bind; ``local_container_root_id`` is the
-    desktop's local-first intent at conversation creation. Cloud SSE turns must
-    honor both so sidecar-written files stay visible when the turn falls back
-    from sidecar to cloud (``local-turns`` persists messages only, not files).
+    - **Project chat** (``folder_id`` set): inherit the project's ``local_root_id`` /
+      ``local_subpath``. Cloud projects (both NULL) → ``None``.
+    - **裸聊**: ``local_root_id`` (explicit) or ``local_container_root_id`` (desktop
+      local-first intent). Cloud SSE turns honor both so sidecar-written files stay
+      visible when the turn falls back from sidecar to cloud.
     """
     from agentcore.conversation.scratch import resolve_conversation_local_binding
+    from agentcore.db.repositories import FolderRepository
+
+    if conv.folder_id:
+        folder = await FolderRepository(session).get_by_id_unscoped(conv.folder_id)
+        if not folder:
+            return None
+        return resolve_conversation_local_binding(
+            local_root_id=folder.local_root_id,
+            local_subpath=folder.local_subpath,
+            label=folder.name or "workspace",
+        )
 
     return resolve_conversation_local_binding(
         local_root_id=conv.local_root_id or conv.local_container_root_id,
@@ -81,7 +93,12 @@ async def generate_title(
     assistant_reply: str,
     model: str | None = None,
 ) -> TitleResult:
-    """Best-effort title + tag via the fast model; title falls back to truncation."""
+    """Best-effort title via the fast model; falls back to truncation.
+
+    ``LLMTitleGenerator`` already retries once on an empty model body (timeout
+    does not retry). An empty result after that — or any call-level error —
+    degrades to ``fallback_title`` (first user message, ≤30 chars).
+    """
     fallback = fallback_title(user_message)
     if not user_message.strip():
         return TitleResult(title=fallback)
@@ -95,7 +112,7 @@ async def generate_title(
             TitleInput(conversation_id=conversation_id, messages=messages)
         )
         title = result.title or fallback
-        return TitleResult(title=title, tag=result.tag)
+        return TitleResult(title=title)
     except Exception as e:
         logger.warning("chat.title_failed", conversation_id=conversation_id, error=str(e))
         return TitleResult(title=fallback)
@@ -156,3 +173,19 @@ async def resolve_memory_enabled(session: AsyncSession, user_id: str) -> bool:
     """
     user = await UserRepository(session).get_by_id(user_id)
     return user.memory_enabled if user else True
+
+
+async def resolve_autonomy_policy(session: AsyncSession, user_id: str):
+    """This turn's capability-authorization posture (安全权限与治理 §三).
+
+    Defaults to ``first_grant`` (kickoff once authorizes) — continuous with the
+    prior delegation-authorization card default.
+    """
+    from agentcore.core.types import AutonomyPolicy
+
+    user = await UserRepository(session).get_by_id(user_id)
+    raw = (user.autonomy_policy if user else None) or AutonomyPolicy.FIRST_GRANT.value
+    try:
+        return AutonomyPolicy(raw)
+    except ValueError:
+        return AutonomyPolicy.FIRST_GRANT

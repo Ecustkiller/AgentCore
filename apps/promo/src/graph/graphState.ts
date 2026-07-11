@@ -17,9 +17,9 @@ import { typeOut } from "../motion/primitives";
  * Scene-local frames (fps 30), 0 = 7s:
  *   0–120   entrance cascade (layer by layer, all pending)
  *   120–180 L1 并行调研 running → done
- *   195–285 辩论对射
- *   300–345 策略定稿
- *   360–390 L4 并行产出
+ *   195–285 L3 圆桌交锋（四方 + 主持人）
+ *   300–345 L4 策略定稿
+ *   360–390 L5 并行产出
  */
 
 export const GRAPH_SCENE_FRAMES = 390; // 13s @ 30fps (7–20s)
@@ -59,7 +59,7 @@ const STREAM: Record<string, string> = {
   view_cost: "提醒算力与维护成本、落地复杂度，要求每一步都留有可回退的安全边界……",
   strategy: "综合各方圆桌论点：先验证关键风险，再分阶段放大投入，锁定团队协作主线……",
   spec_product: "拆出 6 个里程碑，首版聚焦团队协作主链路……",
-  spec_tech: "定下 DAG 调度 + 共享工作区 + MCP/A2A 的技术骨架……",
+  spec_tech: "定下 DAG 波调度 + 共享工作区 + 团队便签的技术骨架……",
 };
 
 const DURATION_MS: Record<string, number> = {

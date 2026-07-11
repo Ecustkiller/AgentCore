@@ -299,12 +299,12 @@ class PlanReviewSuspension(TurnSuspension):
 
 @dataclass(kw_only=True)
 class TeamPreviewSuspension(TurnSuspension):
-    """A turn frozen at a ``team_preview`` gate — first-wave preview before workers start.
+    """A turn frozen at the kickoff gate (开工卡) — plan + capability auth before workers.
 
-    Same resume substrate as :class:`PlanReviewSuspension` (``delegate.resume_plan``), but
-    the card shows upcoming workers rather than completed checkpoint steps. ``plan`` /
-    ``completed`` are in-memory carriers only (journal rebuild on claim); ``workers`` rides
-    the frame for resume-card re-render.
+    Same resume substrate as :class:`PlanReviewSuspension` (``delegate.resume_plan``).
+    ``workers`` = plan half; ``tools`` = capability-auth half (may be empty under
+    AutonomyPolicy.full_auto / always_ask). ``plan`` / ``completed`` are in-memory
+    carriers only (journal rebuild on claim).
     """
 
     kind: ClassVar[SuspensionKind] = SuspensionKind.TEAM_PREVIEW
@@ -313,6 +313,8 @@ class TeamPreviewSuspension(TurnSuspension):
     completed: dict[str, RunState] = field(default_factory=dict)
     # Upcoming workers the user is confirming ({run_id, role, task, depends_on, debate}).
     workers: list[dict[str, Any]] = field(default_factory=list)
+    # GRANTABLE tools the kickoff grant would cover (统一授权白名单).
+    tools: list[str] = field(default_factory=list)
 
     @property
     def checkpoint_run_ids(self) -> set[str]:
@@ -356,6 +358,7 @@ _EMPTY_SUMMARY_EXTRAS: dict[str, Any] = {
     "steps": [],
     "pending": [],
     "workers": [],
+    "tools": [],
     "question": "",
     "context": "",
     "assumptions": [],
@@ -400,7 +403,7 @@ def _plan_review_summary_extras(s: TurnSuspension) -> dict[str, Any]:
 
 def _team_preview_frame_extras(s: TurnSuspension) -> dict[str, Any]:
     assert isinstance(s, TeamPreviewSuspension)
-    return {"workers": list(s.workers)}
+    return {"workers": list(s.workers), "tools": list(s.tools)}
 
 
 def _team_preview_from_extras(data: dict[str, Any]) -> dict[str, Any]:
@@ -409,13 +412,17 @@ def _team_preview_from_extras(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "plan": plan_from_json({}),
         "workers": list(data.get("workers") or []),
+        "tools": list(data.get("tools") or []),
     }
 
 
 def _team_preview_summary_extras(s: TurnSuspension) -> dict[str, Any]:
     assert isinstance(s, TeamPreviewSuspension)
-    return {**_EMPTY_SUMMARY_EXTRAS, "workers": list(s.workers)}
-
+    return {
+        **_EMPTY_SUMMARY_EXTRAS,
+        "workers": list(s.workers),
+        "tools": list(s.tools),
+    }
 
 def _ask_user_frame_extras(s: TurnSuspension) -> dict[str, Any]:
     assert isinstance(s, AskUserSuspension)

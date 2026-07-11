@@ -31,11 +31,29 @@ class MessageRole(StrEnum):
 
 
 class ToolApproval(StrEnum):
-    """Tool approval requirement levels."""
+    """Tool approval requirement levels (可逆性 × 副作用).
+
+    Two live levels: ``NEVER`` (silent) and ``GRANTABLE`` (first-grant / per-call
+    via AutonomyPolicy). The former ``ALWAYS`` (every call, no turn grant) had no
+    consumers and was removed — irreversible external tools are not in the MVP set.
+    """
 
     NEVER = "never"
     GRANTABLE = "grantable"
-    ALWAYS = "always"
+
+
+class AutonomyPolicy(StrEnum):
+    """User-global capability-authorization posture (能力授权维度；不动计划确认).
+
+    - ``always_ask`` — every GRANTABLE call prompts; kickoff has no grant shortcut
+    - ``first_grant`` — kickoff once authorizes the grantable set for the delegation
+      (default; continuous with the prior delegation-authorization card)
+    - ``full_auto`` — kickoff auto-grants without listing capability items
+    """
+
+    ALWAYS_ASK = "always_ask"
+    FIRST_GRANT = "first_grant"
+    FULL_AUTO = "full_auto"
 
 
 class ToolCategory(StrEnum):

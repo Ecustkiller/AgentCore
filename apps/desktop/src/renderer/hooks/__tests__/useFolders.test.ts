@@ -11,7 +11,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 const mk = (id: string, name = id): FolderMeta => ({
   id,
   name,
-  localDir: null,
+  mode: "cloud",
+  localRootId: null,
+  localSubpath: null,
 });
 
 function readFolders(): FolderMeta[] {

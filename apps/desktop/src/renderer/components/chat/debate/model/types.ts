@@ -123,8 +123,8 @@ export interface DebateRoundModel {
    *  权威 `debate_result.rounds[*].user_interjections` 为准；进行中恒空——live 孪生
    *  {@link DebateNarrativeRound} 刻意不携带（守 conformance 不动），追问在收场复盘可见。 */
   userInterjections: DebateUserInterjection[];
-  /** 本轮质询环节的问答（质询回合 P1）。收场以权威 `debate_result.rounds[*].cross_exam` 为准；
-   *  进行中恒空——live 孪生刻意不携带（与 `userInterjections` 同策），质询在收场复盘可见。 */
+  /** 本轮质询环节的问答（质询回合 P1）。进行中由 live 孪生 {@link DebateNarrativeRound}.cross_exam
+   *  （或质询 beat 的 `_cx_` run 重建）填充；收场以权威 `debate_result.rounds[*].cross_exam` 为准。 */
   crossExam: DebateCrossExamView[];
   /** 本轮记分裁判的各方得分（记分裁判 P2）。收场以权威 `debate_result.rounds[*].scores` 为准；
    *  进行中恒空（live 孪生不携带）。空=未开启记分（快速对碰），前端不渲染比分。 */

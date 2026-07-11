@@ -64,6 +64,7 @@ const INTENT_CONFIG = {
     showFooterHint: true,
     resolved: {
       continue: { label: "已按方案开做", tone: "success" },
+      per_call: { label: "已按方案开做", tone: "success" },
       adjust: { label: "已按你的调整开做", tone: "success" },
       stop: { label: "已停止", tone: "destructive" },
       timeout: { label: "未及时回应，已自行开做", tone: "muted" },
@@ -78,6 +79,7 @@ const INTENT_CONFIG = {
     showFooterHint: false,
     resolved: {
       continue: { label: "已按你的决定继续", tone: "success" },
+      per_call: { label: "已按你的决定继续", tone: "success" },
       adjust: { label: "已按你的调整继续", tone: "success" },
       stop: { label: "已停止本回合", tone: "destructive" },
       timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
@@ -104,6 +106,7 @@ const TONE = interactiveCheckpointTone;
 
 const RESOLVED_DECISION_ICON = {
   continue: Check,
+  per_call: Check,
   adjust: Pencil,
   stop: OctagonX,
   timeout: Clock,
@@ -126,6 +129,8 @@ export function AskUserCard({
   intent,
   caption,
   onSubmit,
+  disclosureKey,
+  conversationId,
 }: {
   content: AskUserContent;
   intent: CheckpointIntent;
@@ -134,6 +139,10 @@ export function AskUserCard({
     decision: CheckpointUserDecision,
     note: string,
   ) => void | Promise<void>;
+  /** 检查点 id：给了才把起步计划开合持久化。 */
+  disclosureKey?: string | null;
+  /** Enables bind_local_folder action options on desktop. */
+  conversationId?: string | null;
 }) {
   const config = INTENT_CONFIG[intent];
   const tone = TONE.neutral;
@@ -145,16 +154,23 @@ export function AskUserCard({
   const HeaderIcon = config.icon;
   const CtaIcon = config.ctaIcon;
 
-  const send = (decision: CheckpointUserDecision) => {
+  const send = (decision: CheckpointUserDecision, noteOverride?: string) => {
     if (busy) return;
     setSubmitting(decision);
     const composed =
-      decision === "stop" ? ans.note.trim() : ans.compose(intent);
+      noteOverride !== undefined
+        ? noteOverride
+        : decision === "stop"
+          ? ans.note.trim()
+          : ans.compose(intent);
     Promise.resolve(onSubmit(decision, composed)).catch((err) => {
       notifyError(err, "提交失败");
       setSubmitting(null);
     });
   };
+
+  const onBindResolve = (composedAnswer: string) =>
+    send("continue", composedAnswer);
 
   // Kickoff: production default = V2 Brief + Choose (same IA as AskCommenceV2 preview).
   if (intent === "kickoff") {
@@ -172,6 +188,8 @@ export function AskUserCard({
           submitting={submitting}
           onContinue={() => send("continue")}
           onStop={() => send("stop")}
+          conversationId={conversationId}
+          onBindResolve={onBindResolve}
         />
       </DecisionCard>
     );
@@ -207,6 +225,9 @@ export function AskUserCard({
           answer={ans}
           tone={tone}
           disabled={busy}
+          disclosureKey={disclosureKey}
+          conversationId={conversationId}
+          onBindResolve={onBindResolve}
         />
 
         <AskNoteField

@@ -18,9 +18,10 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
     "type": "object",
     "description": (
         "可选：该 worker 的交付物规格——描述性（name）与验收底线（required_sections / "
-        "must_contain / 篇幅 / 格式 / requires_files / strict）合一。name 描述期望产出形态；"
-        "其余字段声明产出必须满足的硬性兜底（非事前结构蓝图）。不达标会带着具体差距自动返工一次；"
-        "返工后仍不达标时，默认仅附质检提醒（软），strict=true 则判该 worker 失败（硬退）。"
+        "must_contain / 篇幅 / 格式 / requires_files / artifacts / strict）合一。"
+        "name 描述期望产出形态；其余字段声明产出必须满足的硬性兜底（非事前结构蓝图）。"
+        "不达标会带着具体差距自动返工一次；返工后仍不达标时，默认仅附质检提醒（软），"
+        "strict=true 则判该 worker 失败（硬退）。"
     ),
     "properties": {
         "name": {
@@ -57,9 +58,6 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
             "enum": ["text", "json"],
             "description": "要求的产出格式；json 会校验能否解析。",
         },
-        # ``output_schema`` is intentionally NOT exposed here: Deliverable keeps the
-        # field for internal/builder parse, but check_contract does not validate it
-        # (阶段2 预留). Fake capability must not appear in the CEO/delegate tool schema.
         "requires_files": {
             "type": "boolean",
             "description": (
@@ -67,7 +65,17 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
                 "数据文件等用户要打开 / 运行 / 保存的东西）时设 true：未调用"
                 " file_write 把产物写进工作区即判未达标、自动返工，杜绝把整份"
                 "文件内容粘在回复正文、工作区却空着。纯文字交付（分析 / 说明 /"
-                " 问答）不要设。"
+                " 问答）不要设。若已用 artifacts 声明具体路径则不必再设（自动隐含）。"
+            ),
+        },
+        "artifacts": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "声明式交付物路径清单（相对工作区）：具体文件、目录（以 / 结尾）或通配"
+                "（如 `src/**/*.py`、`examples/*`）。收尾时对工作区做存在性对账，缺漏"
+                "自动返工一次；非 strict 时矫正后仍缺则软接受并在汇总里结构化标缺口。"
+                "声明即启用对应完工验收；省略 = 不强制路径对账。"
             ),
         },
         "strict": {

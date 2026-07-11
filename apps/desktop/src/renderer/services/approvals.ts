@@ -29,12 +29,15 @@ export async function resolveApproval(
   });
 }
 
+/** 本轮内允许所有文件改动 — 对齐后端 ``approval_class_tool_names()``
+ * （文件改动五工具 ∪ {git}）。 */
 export const FILE_OP_TOOLS: ReadonlySet<string> = new Set([
   "file_write",
   "file_append",
   "str_replace",
   "file_delete",
   "file_move",
+  "git",
 ]);
 
 export function isFileOpTool(name: string): boolean {

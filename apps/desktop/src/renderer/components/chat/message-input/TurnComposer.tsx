@@ -1,11 +1,10 @@
 import { DraftWorkspaceAssignPrompt } from "@/components/chat/DraftWorkspaceAssignPrompt";
-import { DraftWorkspacePicker } from "@/components/chat/DraftWorkspacePicker";
 import { MentionMenu } from "@/components/chat/MentionMenu";
 import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useFolders } from "@/hooks/useFolders";
 import { useLlmKey } from "@/hooks/useLlmKey";
-import { TOOLS_GATE_HINT, isToolsGateBlocked } from "@/lib/llmToolsGate";
+import { TOOLS_GATE_HINT, needsToolsGateHint } from "@/lib/llmToolsGate";
 import { useBackgroundTasksStore } from "@/stores/backgroundTasks";
 import { draftKeyFor, useComposerDraftStore } from "@/stores/composer";
 import {
@@ -24,6 +23,7 @@ import {
 import type { SetStateAction } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AttachmentChips } from "./AttachmentChips";
+import { ComposerWorkspaceChip } from "./ComposerWorkspaceChip";
 import { CurrentModelBadge } from "./CurrentModelBadge";
 import { RecordingBar } from "./RecordingBar";
 import {
@@ -72,7 +72,7 @@ export function TurnComposer({
 }) {
   const isGenerating = useActiveGenerating();
   const { data: llmKey } = useLlmKey();
-  const toolsBlocked = isToolsGateBlocked(llmKey?.supports_tools);
+  const toolsGateHint = needsToolsGateHint(llmKey?.supports_tools);
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const draftKey = draftKeyFor(conversationId);
   const value = useComposerDraftStore((s) => s.drafts[draftKey]?.value ?? "");
@@ -94,7 +94,9 @@ export function TurnComposer({
   const [isLocal, setIsLocal] = useState(false);
   const [backgroundMode, setBackgroundMode] = useState(false);
   const folders = useFolders();
-  const pendingFolderId = useFoldersStore((s) => s.pendingNewChatFolderId);
+  const draftIntent = useFoldersStore((s) => s.draftWorkspaceIntent);
+  const pendingFolderId =
+    draftIntent.kind === "project" ? draftIntent.folderId : null;
   const dismissedAssignRef = useRef<Set<string>>(new Set());
   const [assignHint, setAssignHint] = useState<AttachmentProjectHint | null>(
     null,
@@ -103,10 +105,12 @@ export function TurnComposer({
   const handleAttachmentProjectHint = useCallback(
     (hint: AttachmentProjectHint) => {
       const store = useFoldersStore.getState();
-      if (store.pendingNewChatFolderId === hint.folderId) return;
+      const intent = store.draftWorkspaceIntent;
+      if (intent.kind === "project" && intent.folderId === hint.folderId) {
+        return;
+      }
       if (
-        !store.pendingNewChatFolderId &&
-        !store.pendingNewChatCloud &&
+        intent.kind !== "project" &&
         dismissedAssignRef.current.has(hint.folderId)
       ) {
         return;
@@ -193,9 +197,10 @@ export function TurnComposer({
 
   const acceptAssignHint = useCallback(() => {
     if (!assignHint) return;
-    const store = useFoldersStore.getState();
-    store.setPendingNewChatFolder(assignHint.folderId);
-    store.setPendingNewChatCloud(false);
+    useFoldersStore.getState().setDraftWorkspaceIntent({
+      kind: "project",
+      folderId: assignHint.folderId,
+    });
     setAssignHint(null);
   }, [assignHint]);
 
@@ -438,7 +443,7 @@ export function TurnComposer({
       <div className="flex items-center justify-between px-4 pb-3">
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <CurrentModelBadge disabled={isGenerating} />
-          {!conversationId && <DraftWorkspacePicker />}
+          <ComposerWorkspaceChip conversationId={conversationId} />
           <IconButton
             size="md"
             onClick={mention.openBrowse}
@@ -455,8 +460,12 @@ export function TurnComposer({
           {showBackground && (
             <SimpleTooltip
               label={
-                toolsBlocked
-                  ? TOOLS_GATE_HINT
+                toolsGateHint
+                  ? `${TOOLS_GATE_HINT}。${
+                      bg
+                        ? "已切到「后台云端」：发送会把任务交给云端团队后台跑"
+                        : "切到「后台云端」：把任务交给云端团队后台跑，结果回来再应用"
+                    }`
                   : bg
                     ? "已切到「后台云端」：发送会把任务交给云端团队后台跑"
                     : "切到「后台云端」：把任务交给云端团队后台跑，结果回来再应用"
@@ -464,16 +473,14 @@ export function TurnComposer({
             >
               <IconButton
                 size="md"
-                onClick={() => !toolsBlocked && setBackgroundMode((v) => !v)}
-                disabled={isGenerating || toolsBlocked}
+                onClick={() => setBackgroundMode((v) => !v)}
+                disabled={isGenerating}
                 aria-label="切换后台云端任务"
                 aria-pressed={bg}
                 className={
                   bg
                     ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-                    : toolsBlocked
-                      ? "opacity-40"
-                      : undefined
+                    : undefined
                 }
               >
                 <Cloud size={14} />

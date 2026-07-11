@@ -1,5 +1,32 @@
 import type { Execution, RunNode } from "./types";
 
+/** Minimal run shape for walking `revisionOf` to the chain root. */
+export interface RevisionLink {
+  id: string;
+  revisionOf: string | null;
+}
+
+/**
+ * Walk `revisionOf` back to the original run id for this revision chain.
+ * Standalone runs (no `revisionOf`) return themselves. Missing / cyclic links
+ * stop at the last reachable id.
+ */
+export function revisionRootId(
+  runId: string,
+  runs: ReadonlyArray<RevisionLink>,
+): string {
+  const byId = new Map(runs.map((r) => [r.id, r]));
+  let cur = runId;
+  const seen = new Set<string>();
+  while (!seen.has(cur)) {
+    seen.add(cur);
+    const r = byId.get(cur);
+    if (!r?.revisionOf || !byId.has(r.revisionOf)) break;
+    cur = r.revisionOf;
+  }
+  return cur;
+}
+
 /** One version in a revision chain (乙 热修 P4): the original is `version` 1, each
  * 续写 carries its own `version` (2, 3…). `run` is the projected node for that
  * version, so the compare card reads its output / status / role straight off it. */

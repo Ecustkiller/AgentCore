@@ -1,6 +1,7 @@
 import { patchConversationCache } from "@/hooks/useConversations";
 import { StreamError } from "@/lib/errors";
 import { notifyWarning } from "@/lib/toast";
+import { resolveAutonomyPolicy } from "@/services/autonomyPolicy";
 import { resolveSidecarInference } from "@/services/inferenceToken";
 import {
   clearActiveSidecarTurn,
@@ -67,7 +68,7 @@ export interface ResumeViaSidecarOptions {
   subpath?: string;
   /** 挂起回合的 assistant message_id（续跑键；也是事件路由 / cancel 的寻址键）。 */
   messageId: string;
-  decision: "continue" | "adjust" | "stop";
+  decision: "continue" | "per_call" | "adjust" | "stop";
   note: string;
   selected?: string[];
   /** 挂起回合的原始用户消息（来自帧）——续跑完成后随回写落库。 */
@@ -132,6 +133,8 @@ export async function streamConversationViaSidecar({
   // 云推理凭据（平台 key 不下放本机，走云端代理鉴权——Slice 4a）。取不到则带 undefined：
   // dev 下 sidecar 回退其自身配置，生产则以可重试的引擎错误失败（胜过静默跑成无计费回合）。
   const inference = (await resolveSidecarInference()) ?? undefined;
+  // 当前自主度（能力授权三档）随回合送达本地引擎；取不到则 sidecar 沿用其当前值。
+  const autonomyPolicy = await resolveAutonomyPolicy();
   return runSidecarTurn({
     conversationId,
     rootId,
@@ -153,6 +156,7 @@ export async function streamConversationViaSidecar({
         history,
         inference,
         debateSeed,
+        autonomyPolicy,
       }),
     writeBack: () => persistAndReconcile(conversationId, optimisticUserId),
   });
@@ -182,6 +186,8 @@ export async function resumeConversationViaSidecar({
   );
   // 续跑同样要跑 LLM（重启后会新拉起引擎），故随带当前云推理凭据（同 startTurn）。
   const inference = (await resolveSidecarInference()) ?? undefined;
+  // 当前自主度（同 startTurn）：续跑期间的能力授权同样按用户当前设置。
+  const autonomyPolicy = await resolveAutonomyPolicy();
   // 本次续跑的 trace_id（同 startTurn）：贯穿续跑的推理调用 + 回写落库。
   const traceId = newTraceId();
   try {
@@ -206,6 +212,7 @@ export async function resumeConversationViaSidecar({
           note,
           selected,
           inference,
+          autonomyPolicy,
         }),
       writeBack: () => persistAndReconcile(conversationId, userMessageId),
     });

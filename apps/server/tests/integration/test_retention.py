@@ -5,10 +5,9 @@ uses ``async_session_factory`` directly (not the request-scoped ``get_db``), so 
 is repointed at the test schema here; ``data_dir`` + storage are redirected to a
 tmp dir so the purge only touches throwaway files.
 
-Folder 重构 To-Be: each conversation owns ``conv/<id>/`` scratch. An aged
-soft-deleted conversation loses its scratch + record; an aged soft-deleted folder
-loses only the folder row; a sibling conversation's scratch in the same folder
-survives.
+项目即工作区: aged soft-deleted projects purge shared ``folder:<id>`` space;
+aged soft-deleted 裸聊 purge ``conv:<id>``; project-member conversation rows do
+not rmtree the shared project root.
 """
 
 from datetime import datetime, timedelta
@@ -55,19 +54,16 @@ async def test_retention_sweep_purges_aged_soft_deletes(
 
     async with session_factory() as s:
         repo = ConversationRepository(s)
-        grouped = await repo.create(user_id=uid, title="grouped")
-        await repo.set_folder(grouped.id, fb, user_id=uid)
-        grouped_alive = await repo.create(user_id=uid, title="grouped-alive")
-        await repo.set_folder(grouped_alive.id, fb, user_id=uid)
+        # Born into project B (shared folder space).
+        grouped = await repo.create(user_id=uid, title="grouped", folder_id=fb)
+        grouped_alive = await repo.create(user_id=uid, title="grouped-alive", folder_id=fb)
         ungrouped = await repo.create(user_id=uid, title="ungrouped")
         recent = await repo.create(user_id=uid, title="recent")
     gid, gaid, ugid, rid = grouped.id, grouped_alive.id, ungrouped.id, recent.id
 
-    _seed_space(uid, fb, gid)
-    _seed_space(uid, fb, gaid)
+    _seed_space(uid, fb, gid)  # shared project root
     _seed_space(uid, None, ugid)
     await create_snapshot(user_id=uid, folder_id=fb, conversation_id=gid)
-    await create_snapshot(user_id=uid, folder_id=fb, conversation_id=gaid)
     await create_snapshot(user_id=uid, folder_id=None, conversation_id=ugid)
 
     async with session_factory() as s:
@@ -98,7 +94,7 @@ async def test_retention_sweep_purges_aged_soft_deletes(
     assert gid not in convs and ugid not in convs
     assert rid in convs and gaid in convs
 
-    assert not workspace_root_path(user_id=uid, folder_id=fb, conversation_id=gid).exists()
+    # Soft-deleted project member did NOT rmtree the shared project space (sibling alive).
     assert workspace_root_path(user_id=uid, folder_id=fb, conversation_id=gaid).exists()
     assert not workspace_root_path(user_id=uid, folder_id=None, conversation_id=ugid).exists()
 

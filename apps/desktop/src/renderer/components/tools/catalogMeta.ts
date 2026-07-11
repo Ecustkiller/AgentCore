@@ -40,15 +40,13 @@ export const CATEGORY_ORDER: ToolCategory[] = [
 export const APPROVAL_LABEL: Record<ToolApproval, string> = {
   never: "自动执行",
   grantable: "需审批",
-  always: "始终审批",
 };
 
 // Governance colors map to the project's status tokens: neutral (auto / asks the
-// user — 极简中性下分类态不再用琥珀), destructive (always gated). No hardcoded palette.
+// user — 极简中性下分类态不再用琥珀). No hardcoded palette.
 export const APPROVAL_BADGE: Record<ToolApproval, string> = {
   never: "bg-muted text-muted-foreground",
   grantable: "bg-muted text-muted-foreground",
-  always: "bg-destructive/10 text-destructive",
 };
 
 /** Which side of the team holds a tool — the CEO coordinator, the 队员 (workers),

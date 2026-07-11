@@ -1,12 +1,11 @@
 """Resolve a conversation to its server-side workspace (cloud mode).
 
-Path policy (双模式工作区设计 §七 / 决策③):
+Path policy (项目即工作区):
 
-- A conversation **in a folder** shares that folder's workspace — the folder is
-  the "project", so work accumulates in one place across its conversations:
-  ``<data_dir>/workspaces/<user_id>/<folder_id>/``.
-- An **ungrouped** conversation gets its own independent workspace so unrelated
-  chats never collide: ``<data_dir>/workspaces/<user_id>/conv/<conversation_id>/``.
+- A conversation **in a project (folder)** shares that project's workspace:
+  ``<data_dir>/workspaces/<user_id>/<folder_id>/`` (``folder:<id>``).
+- A **裸聊** (ungrouped) gets its own independent scratch:
+  ``<data_dir>/workspaces/<user_id>/conv/<conversation_id>/`` (``conv:<id>``).
 
 User-scoped top segment keeps tenants isolated by directory; the traversal guard
 inside ``ServerWorkspace`` then prevents escaping the resolved root. IDs are
@@ -42,12 +41,13 @@ def _workspaces_base() -> Path:
 
 
 def _workspace_relpath(*, user_id: str, folder_id: str | None, conversation_id: str) -> str:
-    """The conversation scratch path relative to the workspaces base (POSIX).
+    """Workspace path relative to the workspaces base (POSIX).
 
-    Folder refactor (To-Be): every conversation owns ``conv/<id>/`` scratch;
-    ``folder_id`` is sidebar grouping only and does not affect storage layout.
+    Project (= folder) conversations share ``<user>/<folder_id>/``; 裸聊 uses
+    ``<user>/conv/<conversation_id>/``.
     """
-    del folder_id
+    if folder_id:
+        return f"{user_id}/{folder_id}"
     return f"{user_id}/conv/{conversation_id}"
 
 
@@ -69,11 +69,9 @@ class WorkspaceId:
 
 
 def format_workspace_id(*, folder_id: str | None, conversation_id: str) -> str:
-    """The public workspace id for a conversation's scratch space (``conv:<id>``).
-
-    ``folder_id`` is ignored — folders are pure sidebar grouping (Folder 重构 To-Be).
-    """
-    del folder_id
+    """Public workspace id: ``folder:<id>`` for a project, else ``conv:<id>``."""
+    if folder_id:
+        return f"folder{_WORKSPACE_ID_SEP}{folder_id}"
     return f"conv{_WORKSPACE_ID_SEP}{conversation_id}"
 
 
@@ -274,4 +272,33 @@ def build_workspace(
         folder_id=folder_id,
         conversation_id=conversation_id,
         sandbox=sandbox,
+    )
+
+
+def workspace_channel_for_tools(
+    backend: WorkspaceBackend,
+    *,
+    sink: EventSink,
+    conversation_id: str,
+    registry: ClientRequestBridge | None = None,
+) -> WorkspaceChannel | None:
+    """The ``workspace_op_required`` channel tools use for desktop-held process ops.
+
+    LocalWorkspace already owns a channel (file / execute ops) — reuse it so process
+    ops share root_id + registry. Sidecar uses ServerWorkspace(location=local) with
+    direct Path I/O and no channel; build one so ``terminal`` still leaves the
+    short-lived sidecar for the desktop main process (双模式工作区 §四).
+    Cloud server backends return ``None`` (terminal is not registered there).
+    """
+    if backend.location != "local":
+        return None
+    existing = getattr(backend, "_channel", None)
+    if isinstance(existing, WorkspaceChannel):
+        return existing
+    return WorkspaceChannel(
+        sink=sink,
+        conversation_id=conversation_id,
+        registry=registry or default_interaction_registry(),
+        timeout_seconds=settings.workspace_op_timeout_seconds,
+        root_id="",
     )

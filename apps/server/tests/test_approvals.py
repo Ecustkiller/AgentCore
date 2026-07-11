@@ -3,12 +3,13 @@
 Covers three layers:
   * ``InteractionRegistry`` — the in-process bridge: unknown / double / wrong-
     conversation resolves are refused; a matching resolve settles the Future.
-  * ``ApprovalGate`` — per-turn suspension: approve, timeout→deny, and
-    "approve for the rest of the turn" skipping the second prompt; plus the
-    required→resolved event pair.
+  * ``ApprovalGate`` — per-turn suspension: approve, timeout→deny, deny-reuse
+    (no second card), and "approve for the rest of the turn" skipping the second
+    prompt; plus the required→resolved event pair.
   * ``react_loop`` integration — a GRANTABLE tool is gated (runs on approve,
-    skipped with a denial tool-message on deny), while a non-GRANTABLE tool runs
-    un-gated even when a gate is present.
+    skipped with a denial tool-message on deny; denials do not trip the tool
+    circuit breaker), while a non-GRANTABLE tool runs un-gated even when a gate
+    is present.
 """
 
 import asyncio
@@ -23,7 +24,6 @@ from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.runtime.approvals import (
     ApprovalDecision,
     ApprovalGate,
-    DelegationAuthorizationDecision,
     tool_call_requires_approval,
 )
 from agentcore.runtime.engine import react_loop
@@ -302,11 +302,10 @@ async def test_approve_always_files_grants_whole_class():
     later = await gate.authorize(tool_name="file_delete", tool_call_id="d", arguments={})
     assert later is ApprovalDecision.APPROVE
     assert _drain(sink) == []
-    # But a LATER code_execute still prompts (the class grant never covered it).
-    resolver = asyncio.create_task(_resolve_when_ready(reg, "x2", ApprovalDecision.DENY, "conv-1"))
+    # A LATER code_execute after the earlier deny short-circuits — no second card.
     later_exec = await gate.authorize(tool_name="code_execute", tool_call_id="x2", arguments={})
-    await resolver
     assert later_exec is ApprovalDecision.DENY
+    assert _drain(sink) == []
 
 
 async def test_code_execute_approve_always_grants_turn():
@@ -606,6 +605,98 @@ async def test_engine_gates_grantable_tool_skips_on_deny():
     assert len(denial) == 1
 
 
+async def test_denied_tool_skips_reprompt_on_later_call():
+    """After an explicit deny, a later call to the same tool must not re-open a card."""
+    provider = _ScriptedProvider(
+        [
+            [_tool_chunk("file_write", '{"path": "a.txt"}', call_id="c1")],
+            [_tool_chunk("file_write", '{"path": "b.txt"}', call_id="c2")],
+            [_content_chunk("done")],
+        ]
+    )
+    tool = _GrantableTool()
+    reg = InteractionRegistry()
+    sink = EventSink()
+    gate = _gate(sink, reg)
+    messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
+
+    resolver = asyncio.create_task(
+        _resolve_when_ready(reg, "c1", ApprovalDecision.DENY, "conv-1")
+    )
+    content, *_ = await react_loop(
+        messages=messages,
+        llm=provider,
+        tools=_registry(tool),
+        sink=sink,
+        tool_context=_context(),
+        profile=_profile(),
+        turn_model="m",
+        approval_gate=gate,
+    )
+    await resolver
+
+    assert content == "done"
+    assert tool.calls == 0
+    events = _drain(sink)
+    required = [e for e in events if e.type is EventType.APPROVAL_REQUIRED]
+    assert len(required) == 1  # second call short-circuited — no new card
+    denials = [m for m in messages if m.role == "tool" and "未获用户授权" in (m.content or "")]
+    assert len(denials) == 2
+
+
+async def test_approval_denials_do_not_trip_circuit_breaker():
+    """User/timeout denials are policy failures — tool stays offered after ≥3 refuses."""
+
+    class _RecordingProvider:
+        def __init__(self, rounds: list[list[LLMChunk]]) -> None:
+            self._rounds = rounds
+            self.calls = 0
+            self.offered: list[list[str]] = []
+
+        async def stream(self, request):  # noqa: ANN001
+            self.offered.append([t["function"]["name"] for t in (request.tools or [])])
+            chunks = self._rounds[self.calls] if self.calls < len(self._rounds) else []
+            self.calls += 1
+            for chunk in chunks:
+                yield chunk
+
+    provider = _RecordingProvider(
+        [
+            [_content_chunk("t0"), _tool_chunk("file_write", '{"path": "a"}', call_id="c1")],
+            [_content_chunk("t1"), _tool_chunk("file_write", '{"path": "b"}', call_id="c2")],
+            [_content_chunk("t2"), _tool_chunk("file_write", '{"path": "c"}', call_id="c3")],
+            [_content_chunk("done")],
+        ]
+    )
+    tool = _GrantableTool()
+    reg = InteractionRegistry()
+    sink = EventSink()
+    # First call denied by user; later calls short-circuit via _denied (no more cards).
+    gate = _gate(sink, reg)
+    messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
+
+    resolver = asyncio.create_task(
+        _resolve_when_ready(reg, "c1", ApprovalDecision.DENY, "conv-1")
+    )
+    await react_loop(
+        messages=messages,
+        llm=provider,
+        tools=_registry(tool),
+        sink=sink,
+        tool_context=_context(),
+        profile=make_profile_params(max_rounds=20),
+        turn_model="m",
+        approval_gate=gate,
+    )
+    await resolver
+
+    assert tool.calls == 0
+    # Circuit breaker must NOT remove file_write — denials are governance, not exec fails.
+    assert all("file_write" in offered for offered in provider.offered)
+    steers = [m.content or "" for m in messages if m.role == "user"]
+    assert not any("停用" in s for s in steers)
+
+
 async def test_engine_does_not_gate_non_grantable_tool():
     provider = _ScriptedProvider([[_tool_chunk("search", '{"q": "x"}')], [_content_chunk("done")]])
     tool = _NeverGatedTool()
@@ -631,47 +722,32 @@ async def test_engine_does_not_gate_non_grantable_tool():
     assert not any(e.type is EventType.APPROVAL_REQUIRED for e in _drain(sink))
 
 
-async def _resolve_delegation_when_ready(
-    registry: InteractionRegistry,
-    authorization_id: str,
-    decision: DelegationAuthorizationDecision,
-    conversation_id: str,
-) -> None:
-    for _ in range(2000):
-        if registry.resolve(authorization_id, decision, conversation_id=conversation_id):
-            return
-        await asyncio.sleep(0)
-    raise AssertionError(f"delegation authorization {authorization_id!r} never became pending")
-
-
-async def test_delegation_authorization_emits_event_pair():
+async def test_kickoff_grant_via_gate_api():
+    """开工卡 grant is recorded on the gate (hot-path request_delegation_authorization retired)."""
     reg = InteractionRegistry()
     sink = EventSink()
     gate = _gate(sink, reg)
 
-    resolver = asyncio.create_task(
-        _resolve_delegation_when_ready(
-            reg,
-            "delegation-exec-1",
-            DelegationAuthorizationDecision.GRANT_DELEGATION,
-            "conv-1",
-        )
-    )
-    decision = await gate.request_delegation_authorization(
-        execution_id="exec-1",
-        workers=[{"role": "研究员", "task_preview": "调研竞品"}],
-    )
-    await resolver
-
-    assert decision is DelegationAuthorizationDecision.GRANT_DELEGATION
-    events = _drain(sink)
-    assert [e.type for e in events] == [
-        EventType.DELEGATION_AUTHORIZATION_REQUIRED,
-        EventType.DELEGATION_AUTHORIZATION_RESOLVED,
-    ]
-    assert events[0].payload["workers"][0]["role"] == "研究员"
-    assert "code_execute" in events[0].payload["tools"]
+    gate.grant_delegation("exec-1")
+    assert gate.has_delegation_grant("exec-1")
     assert "exec-1" in gate._delegation_grants  # noqa: SLF001
+
+    decision = await gate.authorize(
+        tool_name="code_execute",
+        tool_call_id="ce-1",
+        arguments={"code": "print(1)"},
+        execution_id="exec-1",
+    )
+    assert decision is ApprovalDecision.APPROVE
+    assert _drain(sink) == []
+
+    decision2 = await gate.authorize(
+        tool_name="test_run",
+        tool_call_id="tr-1",
+        arguments={},
+        execution_id="exec-1",
+    )
+    assert decision2 is ApprovalDecision.APPROVE
 
 
 async def test_delegation_grant_skips_code_execute_approval():
@@ -692,6 +768,39 @@ async def test_delegation_grant_skips_code_execute_approval():
     assert _drain(sink) == []
 
 
+async def test_always_ask_policy_ignores_kickoff_grant():
+    """autonomy=always_ask（安全权限与治理 §三）：开工卡授权不短路——每个可授权调用仍出卡。"""
+    from agentcore.core.types import AutonomyPolicy
+
+    reg = InteractionRegistry()
+    sink = EventSink()
+    gate = ApprovalGate(
+        sink=sink,
+        conversation_id="conv-1",
+        registry=reg,
+        timeout_seconds=5.0,
+        delegation_grantable_tools=delegation_grantable_tool_names(),
+        autonomy_policy=AutonomyPolicy.ALWAYS_ASK,
+    )
+    gate.grant_delegation("exec-1")
+    assert gate.has_delegation_grant("exec-1")  # the grant exists…
+
+    resolver = asyncio.create_task(
+        _resolve_when_ready(reg, "ce-1", ApprovalDecision.APPROVE, "conv-1")
+    )
+    decision = await gate.authorize(
+        tool_name="code_execute",
+        tool_call_id="ce-1",
+        arguments={"code": "print(1)"},
+        execution_id="exec-1",
+    )
+    await resolver
+
+    assert decision is ApprovalDecision.APPROVE
+    # …but always_ask still surfaced the card (no silent short-circuit).
+    assert any(e.type is EventType.APPROVAL_REQUIRED for e in _drain(sink))
+
+
 async def test_delegation_grant_revoked_restores_per_call():
     reg = InteractionRegistry()
     sink = EventSink()
@@ -710,8 +819,24 @@ async def test_delegation_grant_revoked_restores_per_call():
     assert decision is ApprovalDecision.DENY
 
 
-def test_delegation_grantable_tool_names_includes_code_execute_and_file_ops():
+def test_delegation_grantable_tool_names_includes_execution_and_file_ops():
     names = delegation_grantable_tool_names()
     assert "code_execute" in names
+    assert "test_run" in names
+    assert "terminal" in names
+    assert "git" in names
     assert "file_write" in names
-    assert "test_run" not in names
+
+
+def test_terminal_start_requires_approval_like_git_writes():
+    """terminal schema is NEVER; only start is gated (git write subcommand posture)."""
+    from agentcore.tools.builtin.terminal import TerminalTool
+
+    schema = TerminalTool().schema
+    assert schema.approval is ToolApproval.NEVER
+    assert tool_call_requires_approval(
+        "terminal", schema.approval, {"subcommand": "start", "command": "pnpm dev"}
+    )
+    assert not tool_call_requires_approval(
+        "terminal", schema.approval, {"subcommand": "list"}
+    )

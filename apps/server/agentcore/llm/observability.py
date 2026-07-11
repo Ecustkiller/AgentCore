@@ -109,6 +109,22 @@ def log_llm_call(
         **extra,
     )
 
+    # Cloud in-process metering: enqueue a cost_calls detail when the ledger
+    # drainer is running (API server lifespan). Sidecar never starts the drain —
+    # its spend is recorded by the cloud inference proxy instead — so this is a
+    # no-op there and never double-bills.
+    if usage is not None and (usage.input_tokens or usage.output_tokens):
+        try:
+            from agentcore.billing.call_meter import maybe_enqueue_inprocess_call
+
+            maybe_enqueue_inprocess_call(
+                model=model,
+                usage=usage,
+                duration_ms=latency_ms,
+            )
+        except Exception:  # noqa: BLE001 — metering must never break the LLM path
+            pass
+
     if not settings.log_llm_bodies:
         return
     # Emitted at info (not debug) so the single ``log_llm_bodies`` switch is sufficient —

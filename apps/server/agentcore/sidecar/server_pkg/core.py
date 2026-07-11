@@ -10,6 +10,7 @@ from typing import Any
 
 from agentcore.conversation.store.outbox import OutboxStore
 from agentcore.core.logging import get_logger
+from agentcore.core.types import AutonomyPolicy
 from agentcore.llm.credentials import (
     INFERENCE_CONVERSATION_HEADER,
     INFERENCE_TRACE_HEADER,
@@ -37,6 +38,10 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         self._root: Path | None = None
         self._creds: LLMCredentials | None = None
         self._approvals_enabled = True
+        # The user's capability-authorization posture (安全权限与治理 §三). The sidecar has
+        # no users DB — the desktop sends it on initialize and refreshes it per turn/resume
+        # (the policy can change mid-session; an initialize snapshot would go stale).
+        self._autonomy_policy: AutonomyPolicy = AutonomyPolicy.FIRST_GRANT
         # The local durable-pause store (§8.6 paused-turn port, local impl), set from
         # ``initialize``'s ``dataDir``. ``None`` ⇒ no data dir ⇒ pauses stay in-memory.
         self._paused_store: LocalPausedTurnStore | None = None

@@ -48,7 +48,11 @@ Config.overrideWebpackConfig((currentConfiguration) => {
           PACKAGES,
           "contract-types/src/index.ts",
         ),
-        "@agentcore/protocol-conformance": path.join(
+        "@agentcore/protocol-conformance/projectedTurn": path.join(
+          PACKAGES,
+          "protocol-conformance/src/projectedTurn.ts",
+        ),
+        "@agentcore/protocol-conformance$": path.join(
           PACKAGES,
           "protocol-conformance/src/index.ts",
         ),

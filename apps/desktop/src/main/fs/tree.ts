@@ -11,7 +11,13 @@ import {
   LIST_FILES_MAX_DEPTH,
   LIST_FILES_SKIP_DIRS,
 } from "./constants";
-import { locate, realInside, toReason } from "./pathGuard";
+import {
+  fromErrno,
+  fsErr,
+  locate,
+  realFail,
+  realInside,
+} from "./pathGuard";
 import { ensureReady } from "./roots";
 import { resolveWritable } from "./workspace/write";
 
@@ -94,9 +100,9 @@ export async function listDir(
   const loc = locate(rootId, relPath);
   if ("error" in loc) return loc.error;
   const real = await realInside(loc.root, loc.abs);
-  if (!real) return { ok: false, reason: "无法访问（不存在或越界）" };
+  if (!real.ok) return realFail(real);
   try {
-    const dirents = await fs.readdir(real, { withFileTypes: true });
+    const dirents = await fs.readdir(real.path, { withFileTypes: true });
     const entries: FsEntry[] = [];
     for (const d of dirents) {
       const childRel = relPath ? `${relPath}/${d.name}` : d.name;
@@ -104,7 +110,7 @@ export async function listDir(
       let size: number | null = null;
       let modifiedMs: number | null = null;
       try {
-        const st = await fs.stat(join(real, d.name));
+        const st = await fs.stat(join(real.path, d.name));
         size = isDir ? null : st.size;
         modifiedMs = st.mtimeMs;
       } catch {
@@ -127,7 +133,7 @@ export async function listDir(
     );
     return { ok: true, data: entries };
   } catch (e) {
-    return { ok: false, reason: toReason(e) };
+    return fromErrno(e);
   }
 }
 
@@ -138,12 +144,12 @@ export async function listFiles(
   const loc = locate(rootId, "");
   if ("error" in loc) return loc.error;
   const real = await realInside(loc.root, loc.abs);
-  if (!real) return { ok: false, reason: "无法访问（不存在或越界）" };
+  if (!real.ok) return realFail(real);
   try {
-    const { files } = await collectWorkspaceFiles(real);
+    const { files } = await collectWorkspaceFiles(real.path);
     return { ok: true, data: files };
   } catch (e) {
-    return { ok: false, reason: toReason(e) };
+    return fromErrno(e);
   }
 }
 
@@ -163,28 +169,28 @@ export async function rename(
   newName: string,
 ): Promise<FsResult> {
   await ensureReady();
-  if (!isValidName(newName)) return { ok: false, reason: "名称非法" };
-  if (!relPath) return { ok: false, reason: "不能重命名根目录" };
+  if (!isValidName(newName)) return fsErr("invalid", "名称非法");
+  if (!relPath) return fsErr("invalid", "不能重命名根目录");
   const loc = locate(rootId, relPath);
   if ("error" in loc) return loc.error;
   const srcReal = await realInside(loc.root, loc.abs);
-  if (!srcReal) return { ok: false, reason: "源不存在或越界" };
+  if (!srcReal.ok) return realFail(srcReal);
   const destAbs = join(dirname(loc.abs), newName);
   const destRel = relative(loc.root.absPath, destAbs);
   if (destRel.startsWith("..") || isAbsolute(destRel)) {
-    return { ok: false, reason: "目标越界，已拒绝" };
+    return fsErr("out_of_root", "目标越界，已拒绝");
   }
   try {
     await fs.access(destAbs);
-    return { ok: false, reason: "同名文件已存在" };
+    return fsErr("exists", "同名文件已存在");
   } catch {
     // 目标不存在 —— 符合预期
   }
   try {
-    await fs.rename(srcReal, destAbs);
+    await fs.rename(srcReal.path, destAbs);
     return { ok: true, data: undefined };
   } catch (e) {
-    return { ok: false, reason: toReason(e) };
+    return fromErrno(e);
   }
 }
 
@@ -194,42 +200,50 @@ export async function move(
   destDirRelPath: string,
 ): Promise<FsResult> {
   await ensureReady();
-  if (!srcRelPath) return { ok: false, reason: "不能移动根目录" };
+  if (!srcRelPath) return fsErr("invalid", "不能移动根目录");
   const srcLoc = locate(rootId, srcRelPath);
   if ("error" in srcLoc) return srcLoc.error;
   const destLoc = locate(rootId, destDirRelPath);
   if ("error" in destLoc) return destLoc.error;
 
   const srcReal = await realInside(srcLoc.root, srcLoc.abs);
-  if (!srcReal) return { ok: false, reason: "源不存在或越界" };
-  const destDirReal = await realInside(destLoc.root, destLoc.abs);
-  if (!destDirReal) return { ok: false, reason: "目标目录不存在或越界" };
+  if (!srcReal.ok) return realFail(srcReal);
 
+  // 目标目录可不存在：resolveWritable + mkdir recursive（懒物化工作区首写粘贴）。
+  const destDirTarget = await resolveWritable(destLoc.root, destDirRelPath);
+  if (!destDirTarget) return fsErr("out_of_root", "目标越界，已拒绝");
   try {
-    const st = await fs.stat(destDirReal);
-    if (!st.isDirectory()) return { ok: false, reason: "目标不是目录" };
+    await fs.mkdir(destDirTarget, { recursive: true });
   } catch (e) {
-    return { ok: false, reason: toReason(e) };
+    return fromErrno(e);
+  }
+  const destDirCheck = await realInside(destLoc.root, destDirTarget);
+  if (!destDirCheck.ok) return realFail(destDirCheck);
+  try {
+    const st = await fs.stat(destDirCheck.path);
+    if (!st.isDirectory()) return fsErr("invalid", "目标不是目录");
+  } catch (e) {
+    return fromErrno(e);
   }
 
   // 禁止把目录移动进自身或其子树
-  const intoRel = relative(srcReal, destDirReal);
+  const intoRel = relative(srcReal.path, destDirCheck.path);
   if (intoRel === "" || (!intoRel.startsWith("..") && !isAbsolute(intoRel))) {
-    return { ok: false, reason: "不能移动到自身或其子目录" };
+    return fsErr("invalid", "不能移动到自身或其子目录");
   }
 
-  const destAbs = join(destDirReal, basename(srcReal));
+  const destAbs = join(destDirCheck.path, basename(srcReal.path));
   try {
     await fs.access(destAbs);
-    return { ok: false, reason: "目标位置已存在同名项" };
+    return fsErr("exists", "目标位置已存在同名项");
   } catch {
     // 目标不存在 —— 符合预期
   }
   try {
-    await fs.rename(srcReal, destAbs);
+    await fs.rename(srcReal.path, destAbs);
     return { ok: true, data: undefined };
   } catch (e) {
-    return { ok: false, reason: toReason(e) };
+    return fromErrno(e);
   }
 }
 
@@ -244,37 +258,37 @@ export async function copy(
   destRelPath: string,
 ): Promise<FsResult> {
   await ensureReady();
-  if (!srcRelPath) return { ok: false, reason: "不能复制根目录" };
+  if (!srcRelPath) return fsErr("invalid", "不能复制根目录");
   const srcLoc = locate(rootId, srcRelPath);
   if ("error" in srcLoc) return srcLoc.error;
   const srcReal = await realInside(srcLoc.root, srcLoc.abs);
-  if (!srcReal) return { ok: false, reason: "源不存在或越界" };
+  if (!srcReal.ok) return realFail(srcReal);
 
   // 目标可不存在：经 resolveWritable 校验在根内（含对已存在祖先的 realpath 复核）。
   const dstTarget = await resolveWritable(srcLoc.root, destRelPath);
-  if (!dstTarget) return { ok: false, reason: "目标越界，已拒绝" };
+  if (!dstTarget) return fsErr("out_of_root", "目标越界，已拒绝");
   if (dstTarget === srcLoc.root.absPath) {
-    return { ok: false, reason: "不能覆盖根目录" };
+    return fsErr("invalid", "不能覆盖根目录");
   }
 
   // 禁止把目录复制进自身或其子树（否则 fs.cp 会自我递归）。文件复制为同名兄弟不受影响。
-  const intoRel = relative(srcReal, dstTarget);
+  const intoRel = relative(srcReal.path, dstTarget);
   if (intoRel === "" || (!intoRel.startsWith("..") && !isAbsolute(intoRel))) {
-    return { ok: false, reason: "不能复制到自身或其子目录" };
+    return fsErr("invalid", "不能复制到自身或其子目录");
   }
 
   try {
     await fs.access(dstTarget);
-    return { ok: false, reason: "目标位置已存在同名项" };
+    return fsErr("exists", "目标位置已存在同名项");
   } catch {
     // 目标不存在 —— 符合预期
   }
   try {
     await fs.mkdir(dirname(dstTarget), { recursive: true });
-    await fs.cp(srcReal, dstTarget, { recursive: true, errorOnExist: true });
+    await fs.cp(srcReal.path, dstTarget, { recursive: true, errorOnExist: true });
     return { ok: true, data: undefined };
   } catch (e) {
-    return { ok: false, reason: toReason(e) };
+    return fromErrno(e);
   }
 }
 
@@ -285,23 +299,25 @@ export async function create(
 ): Promise<FsResult> {
   await ensureReady();
   const name = basename(relPath);
-  if (!isValidName(name)) return { ok: false, reason: "名称非法" };
+  if (!isValidName(name)) return fsErr("invalid", "名称非法");
   const loc = locate(rootId, relPath);
   if ("error" in loc) return loc.error;
 
-  // 父目录必须存在且在根内
-  const parentAbs = dirname(loc.abs);
-  const parentReal = await realInside(loc.root, parentAbs);
-  if (!parentReal) return { ok: false, reason: "父目录不存在或越界" };
-  const target = join(parentReal, name);
+  // 目标可不存在：resolveWritable + 父目录 mkdir recursive（懒物化工作区首写）。
+  const target = await resolveWritable(loc.root, relPath);
+  if (!target) return fsErr("out_of_root", "路径越界，已拒绝");
+  if (target === loc.root.absPath) {
+    return fsErr("invalid", "不能覆盖根目录");
+  }
 
   try {
     await fs.access(target);
-    return { ok: false, reason: "已存在同名项" };
+    return fsErr("exists", "已存在同名项");
   } catch {
     // 不存在 —— 符合预期
   }
   try {
+    await fs.mkdir(dirname(target), { recursive: true });
     if (kind === "dir") {
       await fs.mkdir(target);
     } else {
@@ -310,7 +326,7 @@ export async function create(
     }
     return { ok: true, data: undefined };
   } catch (e) {
-    return { ok: false, reason: toReason(e) };
+    return fromErrno(e);
   }
 }
 
@@ -319,15 +335,15 @@ export async function remove(
   relPath: string,
 ): Promise<FsResult> {
   await ensureReady();
-  if (!relPath) return { ok: false, reason: "不能删除根目录" };
+  if (!relPath) return fsErr("invalid", "不能删除根目录");
   const loc = locate(rootId, relPath);
   if ("error" in loc) return loc.error;
   const real = await realInside(loc.root, loc.abs);
-  if (!real) return { ok: false, reason: "目标不存在或越界" };
+  if (!real.ok) return realFail(real);
   try {
-    await fs.rm(real, { recursive: true, force: false });
+    await fs.rm(real.path, { recursive: true, force: false });
     return { ok: true, data: undefined };
   } catch (e) {
-    return { ok: false, reason: toReason(e) };
+    return fromErrno(e);
   }
 }

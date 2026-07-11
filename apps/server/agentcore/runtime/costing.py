@@ -1,15 +1,14 @@
-"""Per-run cost ledger rows — RunState/TokenUsage → the ``cost_events`` shape.
+"""Per-call detail + per-run aggregate ledger shapes.
 
-决策②: one ledger row per Run = one Agent's participation in a turn (the captain
-root included). This module is the single bridge that turns a finished run into a
-ledger row, so the delegate tool (members) and the pipeline (captain root) build
-rows the *same* way and the repository persists them uniformly.
+``CallCost`` → ``cost_calls`` (authority). ``RunCost`` → ``cost_events`` (per-run
+materialized view the product surfaces read). Both carry structural ``role``
+(captain/member/…) and optional ``persona`` (调研员 / CEO / …) so persona-level
+payroll derives from the same attribution fields on every path (cloud finalize
+and sidecar-via-proxy).
 
 Money stays integer nano-USD throughout; pricing happens exactly once via
-:func:`agentcore.llm.pricing.calculate_cost` in the run executor, which stamps
-both the captain root and every delegated worker onto their :class:`RunState`.
-This module only *reshapes* those priced states into ledger rows — it never
-re-prices.
+:func:`agentcore.llm.pricing.calculate_cost`. This module only *reshapes*
+priced states / usages into ledger rows — it never re-prices.
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.citations import merge_citations
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 
-# cost_events.role categories (mirror the DB CheckConstraint). A turn's run tree
+# Structural role categories (mirror the DB CheckConstraint). A turn's run tree
 # produces captain + member; ``title`` / ``memory`` tag the off-turn background
 # LLM calls (标题生成 / 记忆整合) so their spend rolls into account/conversation
 # totals without polluting the per-message team payroll. ``arena`` is reserved.
@@ -37,6 +36,8 @@ ROLE_MEMORY = "memory"
 # it gets its own priced ledger row (one model = one row, 同跨档不复价) so its spend shows
 # as its own line on the team payroll + the by-role dashboard.
 ROLE_VISION = "vision"
+
+PERSONA_CEO = "CEO"
 
 # The four money keys carried in cost_events.cost (integer nano-USD). The Cost
 # dataclass also exposes ``currency``, which rides in its own column instead.
@@ -60,7 +61,7 @@ def usage_metadata(usage: Mapping[str, int]) -> dict[str, int]:
 
 @dataclass(frozen=True)
 class RunCost:
-    """One ledger row's run-specific payload.
+    """One per-run ledger row (``cost_events`` materialized view).
 
     The user / conversation / message envelope is attached at persistence time by
     the conversation service (which owns the DB session), so this stays a pure
@@ -78,6 +79,25 @@ class RunCost:
     currency: str
     rounds: int
     duration_ms: int
+    persona: str | None = None
+
+
+@dataclass(frozen=True)
+class CallCost:
+    """One per-call detail row (``cost_calls`` — billing authority)."""
+
+    call_id: str
+    run_id: str
+    parent_run_id: str | None
+    agent_id: str | None
+    role: str
+    model: str
+    tokens: dict[str, int]
+    cost: dict[str, int]
+    cost_total_nano: int
+    currency: str
+    duration_ms: int
+    persona: str | None = None
 
 
 def _split_cost(cost: dict) -> tuple[dict[str, int], int, str]:
@@ -96,14 +116,17 @@ def member_run_cost(spec: RunSpec, state: RunState, *, parent_run_id: str | None
 
     The executor already priced this run onto ``state.cost``; this only reshapes
     it into a ledger row (no re-pricing). ``parent_run_id`` is the delegating
-    captain's run id, so the turn's run tree is reconstructable.
+    captain's run id, so the turn's run tree is reconstructable. ``persona`` is
+    the worker's human-facing role label from the plan (调研员 / 写作 / …).
     """
     body, total, currency = _split_cost(state.cost)
+    persona = (spec.role or "").strip() or None
     return RunCost(
         run_id=spec.run_id,
         parent_run_id=parent_run_id,
         agent_id=spec.agent_id or spec.run_id,
         role=ROLE_MEMBER,
+        persona=persona,
         model=state.model,
         tokens=dict(state.usage),
         cost=body,
@@ -129,6 +152,7 @@ def captain_run_cost_from_state(run_id: str, state: RunState) -> RunCost:
         parent_run_id=None,
         agent_id=None,
         role=ROLE_CAPTAIN,
+        persona=PERSONA_CEO,
         model=state.model,
         tokens=dict(state.usage),
         cost=body,
@@ -160,6 +184,7 @@ def background_run_cost(role: str, model: str, usage: TokenUsage) -> RunCost:
         parent_run_id=None,
         agent_id=None,
         role=role,
+        persona=None,
         model=model,
         tokens=usage.as_dict(),
         cost=body,
@@ -167,6 +192,43 @@ def background_run_cost(role: str, model: str, usage: TokenUsage) -> RunCost:
         currency=currency,
         rounds=1,
         duration_ms=0,
+    )
+
+
+def priced_call_cost(
+    *,
+    model: str,
+    usage: TokenUsage,
+    role: str,
+    run_id: str | None = None,
+    parent_run_id: str | None = None,
+    agent_id: str | None = None,
+    persona: str | None = None,
+    call_id: str | None = None,
+    duration_ms: int = 0,
+) -> CallCost:
+    """Price one LLM call into a ``cost_calls`` detail row (不变量 #2).
+
+    Used by the inference proxy (sidecar path) and in-process cloud metering.
+    ``call_id`` is the idempotency key; when omitted a fresh id is minted.
+    ``run_id`` defaults to a fresh id when the caller has no run tree (title /
+    memory / unattributed proxy call) — each such call is its own run aggregate.
+    """
+    body, total, currency = _split_cost(asdict(calculate_cost(model, usage)))
+    rid = run_id or new_id()
+    return CallCost(
+        call_id=call_id or f"call_{new_id()}",
+        run_id=rid,
+        parent_run_id=parent_run_id,
+        agent_id=agent_id,
+        role=role,
+        persona=(persona or "").strip() or None,
+        model=model,
+        tokens=usage.as_dict(),
+        cost=body,
+        cost_total_nano=total,
+        currency=currency,
+        duration_ms=duration_ms,
     )
 
 
@@ -194,6 +256,7 @@ def vision_run_cost(
         parent_run_id=parent_run_id,
         agent_id=None,
         role=ROLE_VISION,
+        persona=None,
         model=model,
         tokens=usage.as_dict(),
         cost=body,
@@ -201,6 +264,50 @@ def vision_run_cost(
         currency=currency,
         rounds=1,
         duration_ms=duration_ms,
+    )
+
+
+def run_cost_from_calls(calls: Sequence[CallCost | Mapping[str, Any]]) -> RunCost | None:
+    """Materialize one per-run aggregate from a batch of call details.
+
+    Sums tokens / cost / duration; ``rounds`` = call count. Attribution
+    (role / persona / agent / parent) is taken from the first call. Returns
+    ``None`` when ``calls`` is empty.
+    """
+    if not calls:
+        return None
+    first = calls[0]
+    if isinstance(first, CallCost):
+        first_map: Mapping[str, Any] = asdict(first)
+    else:
+        first_map = first
+    tokens = {key: 0 for key in _USAGE_KEYS}
+    cost_body = {key: 0 for key in _COST_KEYS}
+    total = 0
+    duration = 0
+    for raw in calls:
+        row = asdict(raw) if isinstance(raw, CallCost) else raw
+        for key in _USAGE_KEYS:
+            tokens[key] += int((row.get("tokens") or {}).get(key, 0) or 0)
+        c = row.get("cost") or {}
+        for key in ("input", "cached", "output"):
+            cost_body[key] += int(c.get(key, 0) or 0)
+        total += int(row.get("cost_total_nano", c.get("total", 0)) or 0)
+        duration += int(row.get("duration_ms", 0) or 0)
+    cost_body["total"] = total
+    return RunCost(
+        run_id=str(first_map["run_id"]),
+        parent_run_id=first_map.get("parent_run_id"),
+        agent_id=first_map.get("agent_id"),
+        role=str(first_map.get("role") or ROLE_MEMBER),
+        persona=(str(first_map["persona"]).strip() if first_map.get("persona") else None),
+        model=str(first_map.get("model") or ""),
+        tokens=tokens,
+        cost=cost_body,
+        cost_total_nano=total,
+        currency=str(first_map.get("currency") or "USD"),
+        rounds=len(calls),
+        duration_ms=duration,
     )
 
 

@@ -107,15 +107,17 @@ describe("buildProgressOverlay", () => {
     expect(card?.text).toContain("已完成");
   });
 
-  it("collapses the scheduler-internal `ready` status into `pending`", () => {
+  it("maps skipped to muted cancelled tone with 未执行 label", () => {
     const out = buildProgressOverlay(
       execution({
         agents: [agent("ag1", "工程师")],
-        runs: [run("r1", "ag1", "ready")],
+        runs: [run("r1", "ag1", "skipped")],
       }),
       anchor,
     );
-    expect(out.find((e) => e.id === "ovl-run-r1")?.runStatus).toBe("pending");
+    const card = out.find((e) => e.id === "ovl-run-r1");
+    expect(card?.runStatus).toBe("cancelled");
+    expect(card?.text).toContain("未执行");
   });
 
   it("drives the header status from the execution status", () => {

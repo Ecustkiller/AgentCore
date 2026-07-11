@@ -283,9 +283,13 @@ def test_skill_teaches_constraint_vs_solution_boundary():
 
 
 def test_core_teaches_execution_and_recall_routing():
-    # MiniClaw 复盘：「打开软件」须委派验收；「刚才产出」须先核实工作区。
+    # 环境事实驱动：本机任务在云端时先 ask_user（bind_local_folder），已在本机则委派验收；
+    # 「刚才产出」须先核实工作区。
     hint = _CEO_CORE_HINT
     assert "【执行 / 运行 / 打开】" in hint
+    assert "workspace_context" in hint
+    assert "不要先委派" in hint
+    assert "bind_local_folder" in hint
     assert "completion_criteria=code_verified" in hint
     assert "【回忆 / 核实产出】" in hint
     assert "file_list" in hint

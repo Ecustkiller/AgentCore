@@ -44,6 +44,7 @@ FINALIZE_FORBIDDEN_TOOLS = frozenset(
         "file_write",
         "str_replace",
         "code_execute",
+        "terminal",
     }
 )
 

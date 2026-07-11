@@ -1,6 +1,8 @@
 import { Markdown } from "@/components/chat/Markdown";
 import { ReceivedContextSection } from "@/components/chat/ReceivedContext";
+import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
 import { toolPhaseText } from "@/components/chat/message-bubble/constants";
+import { planCapabilities } from "@/components/graph/planCapabilities";
 import { Button } from "@/components/ui";
 import { useRunLlmWindow } from "@/hooks/useRunLlmWindow";
 import { useTurnAudit } from "@/hooks/useTurnAudit";
@@ -23,7 +25,10 @@ import { Pencil, RotateCcw, Square, Wrench } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { AuditSection } from "./sections/RunAudit";
+import {
+  receivedContextForList,
+  selectRunTaskSection,
+} from "./runTaskSection";
 import { RunCausalInjectBlock } from "./sections/RunCausalInject";
 import { DebriefSection } from "./sections/RunDebrief";
 import { DiagnosticSection } from "./sections/RunDiagnostics";
@@ -92,10 +97,10 @@ export function RunDetailBody({
   const agent = run
     ? execution?.agents.find((a) => a.id === run.agentId)
     : null;
-  const isMultiAgent = execution?.planType === "multi_agent";
+  const caps = planCapabilities(execution?.planType);
   const turnAudit = useTurnAudit(
-    isMultiAgent && conversationId != null ? conversationId : null,
-    isMultiAgent ? messageId : null,
+    caps.auditInject && conversationId != null ? conversationId : null,
+    caps.auditInject ? messageId : null,
   );
   const llmWindow = useRunLlmWindow(
     conversationId,
@@ -111,7 +116,7 @@ export function RunDetailBody({
   const canRedirect =
     turnInteractive &&
     agent.status === "working" &&
-    execution.planType === "multi_agent" &&
+    caps.runRedirect &&
     conversationId != null;
   const thinkingLive =
     agent.status === "working" && output.length === 0 && !agent.toolProgress;
@@ -125,16 +130,17 @@ export function RunDetailBody({
       : null;
   const childCount = countDescendants(execution.runs, run.id);
   const hasInjectIn =
-    isMultiAgent &&
+    caps.auditInject &&
     filterInjectInEdges(turnAudit.data?.causal_graph, run.id).length > 0;
   const chain =
     revisionChains(execution).find((c) =>
       c.versions.some((v) => v.run.id === run.id),
     ) ?? null;
-  const roundFocus =
-    run.revisionOf != null
-      ? run.receivedContext.find((b) => b.channel === "round_focus")?.body
-      : undefined;
+  const taskSection = selectRunTaskSection(run);
+  const contextBlocks = receivedContextForList(
+    run.receivedContext,
+    taskSection.promotedTask,
+  );
 
   return (
     <div className="p-4">
@@ -247,8 +253,14 @@ export function RunDetailBody({
         </div>
       )}
 
-      <Section title={roundFocus != null ? "本轮焦点" : "任务"}>
-        <Markdown content={roundFocus ?? run.task} />
+      <Section title={taskSection.title}>
+        <CollapsibleSpeech
+          contentKey={taskSection.body}
+          fadeToClass="from-card"
+          sceneKey={`run:${runId}:task`}
+        >
+          <Markdown content={taskSection.body} />
+        </CollapsibleSpeech>
       </Section>
 
       {chain && (
@@ -284,9 +296,9 @@ export function RunDetailBody({
         />
       )}
 
-      {run.receivedContext.length > 0 && (
+      {contextBlocks.length > 0 && (
         <ReceivedContextSection
-          blocks={run.receivedContext}
+          blocks={contextBlocks}
           defaultExpanded={false}
           keyBase={`run:${runId}`}
           onNavigate={(rid) => {
@@ -331,7 +343,6 @@ export function RunDetailBody({
           Gated to terminal runs so an in-flight run never triggers the audit read. */}
       {conversationId != null &&
         run.status !== "pending" &&
-        run.status !== "ready" &&
         run.status !== "running" && (
           <RunOutcomeAcceptSection
             conversationId={conversationId}
@@ -478,14 +489,6 @@ export function RunDetailBody({
           batches={execution.batches}
           collab={turnCollab}
           keyBase={`run:${runId}`}
-        />
-      )}
-
-      {conversationId != null && (
-        <AuditSection
-          conversationId={conversationId}
-          messageId={messageId}
-          runId={runId}
         />
       )}
     </div>

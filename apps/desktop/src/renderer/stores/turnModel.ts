@@ -23,6 +23,8 @@ interface TurnModelState {
     conversationId: string,
     model: string | null | undefined,
   ) => void;
+  /** 删除对话时丢掉该会话的模型旁路信号，避免 byConversation 泄漏。 */
+  clearConversation: (conversationId: string) => void;
 }
 
 export const useTurnModelStore = create<TurnModelState>((set) => ({
@@ -41,4 +43,10 @@ export const useTurnModelStore = create<TurnModelState>((set) => ({
           },
     );
   },
+  clearConversation: (conversationId) =>
+    set((state) => {
+      if (!(conversationId in state.byConversation)) return state;
+      const { [conversationId]: _, ...rest } = state.byConversation;
+      return { byConversation: rest };
+    }),
 }));

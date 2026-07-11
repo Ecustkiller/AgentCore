@@ -179,9 +179,9 @@ def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, 
 # to read, survives budget-trim) and the CEO aggregate can surface 建议下一步 to relay to the user,
 # instead of every reader re-deriving the gist from raw prose. Same discipline as the sibling
 # transcript harvesters (escalations_from_transcript / files_touched_from_transcript): intent-level,
-# best-effort, pure, unit-testable; a run with no ``handoff`` call (a worker that finished with a
-# plain no-tool answer) degrades to ``None`` — the deliverable simply stands alone (never forced,
-# so a short / self-evident product isn't padded with a redundant restatement).
+# pure, unit-testable. Nodes with downstream dependents **require** a minimum-quality handoff
+# (executor injects one correction shot; still missing → synthesize_debrief with ``degraded``);
+# leaf nodes (no dependents) may finish without handoff and degrade to ``None``.
 #
 # The tool name is the literal ``"handoff"`` (= ``HANDOFF_TOOL_NAME``); kept inline here to keep
 # this serialization module dependency-light, exactly as ``escalations_from_transcript`` keeps

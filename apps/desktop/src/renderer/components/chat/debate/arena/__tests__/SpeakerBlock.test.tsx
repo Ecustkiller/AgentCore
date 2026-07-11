@@ -1,0 +1,180 @@
+// @vitest-environment jsdom
+/**
+ * 立论块「展开全文」交互：
+ * - 默认论点列表视图；头行 / 底部开关共享同一 showAll 状态；
+ * - 全文视图直接渲染 Markdown，不再套 CollapsibleSpeech（无 max-h-72 夹层回归锁）。
+ */
+
+import type { AgentState, Execution, RunNode } from "@/stores/execution";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { DebateRoundModel, DebateSideModel } from "../../model";
+import { SpeakerBlock } from "../SpeakerBlock";
+
+vi.mock("@/components/chat/Markdown", () => ({
+  Markdown: ({ content }: { content: string }) => (
+    <div data-testid="markdown">{content}</div>
+  ),
+}));
+
+/** 可被 parseSpeechArguments 拆成多条论点的结构化发言。 */
+const STRUCTURED_OUTPUT = [
+  "1. 第一论点：平台应承担尾部风险。",
+  "2. 第二论点：熔断机制保护用户。",
+].join("\n");
+
+function speechRun(id = "mod_r1_pro"): RunNode {
+  return {
+    id,
+    agentId: id,
+    status: "completed",
+    kind: "agent",
+    parentRunId: null,
+    revisionOf: null,
+    receivedContext: [],
+  } as unknown as RunNode;
+}
+
+function executionWith(agents: Partial<AgentState>[]): Execution {
+  return {
+    status: "completed",
+    runs: [],
+    agents: agents as AgentState[],
+    frames: [],
+    debate: null,
+    debateRounds: [],
+    debateDecisions: [],
+    teamNotes: [],
+  } as unknown as Execution;
+}
+
+function sideModel(overrides: Partial<DebateSideModel> = {}): DebateSideModel {
+  return {
+    key: "mod_r1_pro",
+    sideKey: "pro",
+    name: "支持方",
+    stance: "pro",
+    colorVar: "var(--debate-pro)",
+    model: "",
+    run: speechRun(),
+    ...overrides,
+  };
+}
+
+function roundModel(sides: DebateSideModel[]): DebateRoundModel {
+  return {
+    roundNo: 1,
+    focus: "",
+    summary: "",
+    verdict: null,
+    sides,
+    clashes: [],
+    inFlight: false,
+    userInterjections: [],
+    crossExam: [],
+    scores: [],
+  };
+}
+
+function renderBlock(output = STRUCTURED_OUTPUT) {
+  const side = sideModel();
+  const execution = executionWith([
+    { id: "mod_r1_pro", outputChunks: [output] },
+  ]);
+  return render(
+    <SpeakerBlock
+      side={side}
+      round={roundModel([side])}
+      execution={execution}
+      messageId="m1"
+      stage="立论"
+    />,
+  );
+}
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+describe("SpeakerBlock 展开全文", () => {
+  it("默认渲染论点列表，不直接展示全文 Markdown", () => {
+    renderBlock();
+
+    // 论点标题在折叠行按钮上（aria-expanded=false）；正文 Markdown 也挂着但折叠。
+    expect(
+      screen.getByRole("button", { name: /第一论点/, expanded: false }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /第二论点/, expanded: false }),
+    ).toBeTruthy();
+    expect(
+      screen
+        .queryAllByTestId("markdown")
+        .every((el) => el.textContent !== STRUCTURED_OUTPUT),
+    ).toBe(true);
+    expect(screen.getAllByRole("button", { name: "展开全文" })).toHaveLength(
+      2,
+    );
+  });
+
+  it("头行与底部开关都能切换且状态同步", () => {
+    renderBlock();
+
+    const expandButtons = screen.getAllByRole("button", { name: "展开全文" });
+    expect(expandButtons).toHaveLength(2);
+
+    // 点头行展开 → 两枚都变成「收起全文」，全文 Markdown 出现。
+    fireEvent.click(expandButtons[0]);
+    expect(screen.getByTestId("markdown").textContent).toBe(STRUCTURED_OUTPUT);
+    expect(screen.getAllByRole("button", { name: "收起全文" })).toHaveLength(
+      2,
+    );
+    expect(screen.queryByRole("button", { name: "展开全文" })).toBeNull();
+    // 论点列表行已卸下。
+    expect(
+      screen.queryByRole("button", { name: /第一论点/ }),
+    ).toBeNull();
+
+    // 点底部收起 → 回到列表，两枚都变回「展开全文」。
+    const collapseButtons = screen.getAllByRole("button", {
+      name: "收起全文",
+    });
+    fireEvent.click(collapseButtons[1]);
+    expect(
+      screen
+        .queryAllByTestId("markdown")
+        .every((el) => el.textContent !== STRUCTURED_OUTPUT),
+    ).toBe(true);
+    expect(
+      screen.getByRole("button", { name: /第一论点/, expanded: false }),
+    ).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "展开全文" })).toHaveLength(
+      2,
+    );
+
+    // 再点底部展开，再用头行收起，确认双向同步。
+    fireEvent.click(screen.getAllByRole("button", { name: "展开全文" })[1]);
+    expect(screen.getByTestId("markdown").textContent).toBe(STRUCTURED_OUTPUT);
+    fireEvent.click(screen.getAllByRole("button", { name: "收起全文" })[0]);
+    expect(
+      screen
+        .queryAllByTestId("markdown")
+        .every((el) => el.textContent !== STRUCTURED_OUTPUT),
+    ).toBe(true);
+    expect(screen.getAllByRole("button", { name: "展开全文" })).toHaveLength(
+      2,
+    );
+  });
+
+  it("全文视图下 DOM 无 max-h-72 夹层容器（双层折叠回归锁）", () => {
+    const { container } = renderBlock();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "展开全文" })[0]);
+
+    expect(screen.getByTestId("markdown").textContent).toBe(STRUCTURED_OUTPUT);
+    expect(container.querySelector(".max-h-72")).toBeNull();
+    // CollapsibleSpeech 展开后文案是「收起」，不应出现。
+    expect(screen.queryByRole("button", { name: "收起" })).toBeNull();
+  });
+});

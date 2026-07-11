@@ -47,6 +47,7 @@ export type SSEEventType =
   | "run_plan"
   | "run_progress"
   | "run_reasoning_delta"
+  | "run_skipped"
   | "run_started"
   | "run_tool_progress"
   | "sim.agent_action"

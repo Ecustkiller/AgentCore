@@ -30,7 +30,7 @@ skip_if:
 /conversations/:id（单栏聊天区）
   消息流（多 Agent 回合：助手消息内嵌 InlineTeamGraph）+ ApprovalPrompt（工具审批）
   └ MessageInput（底部固定）
-内嵌图状态条「在画布打开」→ 切画布、就地放大该回合（放大态 · CanvasZoomedTurn，含回放 Timeline + 大画布）
+内嵌图状态条「在画布打开」→ 全屏回合详情页（`TurnDetailPage`，路由 `/conversations/:id/turns/:turnId`：协作图 / 辩论室 / 对比平级 tab）
 点图节点 → 右侧 SidePanel 新开该 run 的详情 tab（被动下钻）；面板是一条扁平 tab 栏——固定首位「工作区」tab（文件/快照）+ 按需的 run 详情 tab。右上「侧面板」开关 / Ctrl+I → 显隐（冷启动落「工作区」tab），Ctrl+J → 直达「工作区」tab
 ```
 
@@ -40,7 +40,7 @@ skip_if:
 - **下·裸聊扁平列表**（仅未归属文件夹的对话）：置顶优先、当前裸聊对话恒可见；**上限自适应**——无工作区分组时独占侧栏给足 15、有分组时放宽到 10，溢出走「查看全部对话」（侧栏单层外滚，不另设嵌套滚动条）。
 - **底部**：「查看全部对话」入口（归档等低频整理在页内左侧筛选「已归档」）。
 
-**对话行操作**：hover 为整理主路径——重命名 + 归档 +「更多」（置顶 / 移到 / 分享 / 导出 / 永久删除）；归档成功 toast 5s 内可撤销；右键菜单同集。批量归档 / 永久删除与「30 天未活跃」快筛仅在 `/conversations`。
+**对话行操作**：hover 为整理主路径——重命名 + 归档 +「更多」（置顶 / **在项目中继续**〔目标项目开新草稿、携带上下文摘要；替代已删除的「移到」——会话与项目出生定终身〕/ 分享 / 导出 / 永久删除）；归档成功 toast 5s 内可撤销；右键菜单同集。批量归档 / 永久删除与「30 天未活跃」快筛仅在 `/conversations`。
 
 **归档 vs 删除**：归档可取消、仅从活跃列表隐藏；删除对用户为永久（后端 soft-delete 保留期不暴露回收站 UI）。
 
@@ -65,6 +65,7 @@ skip_if:
 - **决策与理由（为何全内联）**：单 Agent 回合每轮 `思考→正文→工具` 交替（ReAct），**忠实时序优先**——正文回归它在思考/工具间的真实位置；噪音改用「思考逐段折叠」兜。仍被否决的是**常驻、打碎正文的吵闹工具卡**——本方案工具行紧凑、思考可折叠，噪音可控。
 - **决策与理由（连续工具折叠 `ProcessToolGroup`）**：CEO 连读 10 个文件曾平铺成 10 行 `读取文件`，满屏噪音。对齐 Cursor「Read N files」/ Claude「Researched…」的行业做法——把**时间上连续、被思考/正文打断即断组**的工具并成一条「动词＋计数」可折叠摘要，**保序**（思考/正文天然作分隔，不打碎时序，故未取「按类别全回合归桶」那种碎序方案）。纯**渲染层 fold**（`lib/processTimeline.ts` 的纯函数 `groupToolRuns` + 桌面 `ProcessToolGroup`），`process[]` 形状不变 → **不动后端 / `turn_journal` / conformance**；**末段正文（最终答案）是 `content` 步、永不进组**，答案绝不会被折叠藏起来。阈值＝连续 ≥2 才折（单个保持平铺）。手机端 `AssistantView` 是另一套实现、本次不含（分组是 chrome、非协议 fold）。
 - **完成态整段过程折叠（✅ 已落地）**：回合收场（`!isStreaming`）后，把该回合**所有过程节点**（思考 / 工具 / 工具组）再收进**一行摘要**「思考了 N 步 · 调用了 M 个工具」，点开还原完整时间线；**可见节点**（正文 / 内嵌团队图 / 检查点 / 发问 / 计划复核）始终在外、绝不入折。流式中全展开（边想边看），收场默认收起并按 `messageId` 持久化；单条纯思考（1 步 0 工具）不折。是「思考逐段折叠」之上的**回合级**折叠——前者折单个思考块、本条折整段过程为一行，二者叠加＝完成态默认只见「摘要行 + 最终答案」。→ 见代码 `ProcessTimeline.tsx`（`shouldCollapseProcess` / `formatProcessSummary` / `useStreamAwareDisclosure`）。
+- **复制 / 分享出口两档（✅ 已落地）**：持久化 `messages.content` 只留最终交付（[多轮编排 §八](/docs/03-AI核心/多轮编排与队员热修.md) deliverable_only），过程旁白在时间线可见——复制若只读交付会丢用户看得见的过程。助手气泡复制提供 **「仅交付」（默认）/「含过程」**：含过程按 `process[]` 时序拼可读文本（思考 / 旁白 / 关键工具动作）；无过程时间线时退化为单键仅交付。搜索与下轮 history **仍只用交付**（不动）。桌面 footer / 流式轻量复制；手机气泡底「复制交付 / 含过程」。→ 见代码桌面 `lib/messageExport.ts` + `AssistantMessageFooter`；手机 `lib/messageExport.ts` + `AssistantView`。
 - **本地回合同步态提示 `synced_pending`（✅ · 桌面本地引擎）**：sidecar 本地回合正文由主进程异步回写云端（[双模式 §10.3](/docs/02-架构/双模式工作区.md)），气泡在「本机已写 outbox、云未确认」窗口挂一枚轻量「待同步」提示，主进程 `outbox:synced` 回传后清除——纠正「把已渲染当已保存」。**纯本机同步指示、不进 SSE / 跨端契约**（`SyncStatusHint`，`Never serialized`），故手机 / 云端桌面无此态。→ 见代码 `message-bubble/SyncStatusHint.tsx`、`services/outboxReconcile.ts`。
 - **保序持久化**：时间线随回合持久化（后端落 `turn_journal`，读取投影为 `runs.process` 载荷），刷新可回放。→ 见代码 `components/chat/MessageBubble.tsx`、`services/streamConversation.ts`
 - **「正在生成 {工具}…」实时行 `ComposingToolLine`**：CEO captain 拼装大工具调用参数时，时间线尾部一行实时显示「正在生成 {工具} · N 字 ▋」——补 `tool_use_start` 之前的空白期。**纯传输、不持久化**。
@@ -81,15 +82,42 @@ skip_if:
 
 > 信息分层（Layer 0–4 模型）：单 Agent 回合 = 一条内联「思考·正文·工具」时间线（§一B，思考/工具＝Layer 1–3、末段正文＝Layer 0 输出，按真实顺序交织）；多 Agent 回合 = 内嵌图（Layer 1–3 状态/进度/协作）+ 点节点进面板看 run 全文（Layer 4）。
 
-**聊天特有元素**（检查点 / 非阻塞发问 / 结构化挂起 / 断连续跑 / 工具审批等）→ 见代码 `components/chat/`；消息载入契约见 [`前端技术与架构.md` §9.7](/docs/04-前端/前端技术与架构.md)。**已否决**：Slash 命令、Agent/Team 选择器、产物 Pill、常驻吵闹工具卡（每回合落点 pill 式噪音）、草稿期常驻「自动」chip（改为默认静默 + 可选「归入项目…」，见 §九）。
+**聊天特有元素**（检查点 / 非阻塞发问 / 结构化挂起 / 断连续跑 / 工具审批等）→ 见代码 `components/chat/`；消息载入契约见 [`前端技术与架构.md` §9.7](/docs/04-前端/前端技术与架构.md)。**已否决**：Slash 命令、Agent/Team 选择器、产物 Pill、常驻吵闹工具卡（每回合落点 pill 式噪音）、草稿期「存储位置 ⊥ 归入项目」双入口（合并为单一「在哪工作」选择器，见 §九）。
 
 > 页面宽度 → 见 `.cursor/rules/desktop-layout.mdc`；对话页 / 文件页自有布局除外。
 
 ---
 
+## 二、新用户首启与空态引导 ✅ 已落地
+
+新用户激活 = **首次成功跑完一个真实回合**（不是注册完成、不是配置完成）；产品的差异化 aha = 第一次亲眼看到团队分工协作。BYOK 下「配 Key」是发首条消息前的硬门槛，引导因此从「错误驱动」（发消息 → 402 → 横幅「去配置」，仍保留为兜底）前移为「主动引导」。
+
+**一次性首启流程 `OnboardingFlow`**（`AppShell` 挂 `OnboardingGate`）：满足「未配 Key ∧ 0 对话 ∧ 未跳过」自动全屏接管——价值一屏（团队心智，对比提示者/指令者/领导者）→ 模型接入 → 测连通等待期轮播产品能力（等待期也讲产品故事，**否决**裸 spinner）。右上可跳过；配完 Key 或产生对话后永不再现。
+
+- **判定纯客户端推导，否决服务端 onboarding 状态 / DB 列**：三个条件全部可从既有状态推导（`LlmKeyStatus` + 对话列表），不新增漂移面；仅「跳过」落本地 `uiStorage`。
+- **模型接入表单单一真相源 `ModelKeyForm`**：首启第二屏与「设置·模型配置」共用同一组件（厂商预设 / Key / Base URL / 默认模型），禁止第二份配置逻辑。
+- **否决强制配完才能进**（form gate 反模式）：跳过后落草稿页 needs_key 空态，仍可自由浏览产品。
+
+**草稿空态三态 `DraftEmptyState`**：未配 Key →「先连接你的模型」+ 主 CTA（重开接入流程）+ 产品手册副链接；已配 Key ∧ 0 对话 →「今天想解决什么问题？」+ 3 枚**首启任务 chips**（内容设计为天然触发多 Agent 分工的真实任务，点击仅填输入框、不自动发送）；老用户 → 维持单句零噪音。
+
+- **决策修订（2026-07）**：原「空态只留一句提问；场景模板卡片否决（与手机端、宣传素材对齐）」修订为**仅新用户可见的首启 chips**——空白画布冻结是 Agent 产品激活的头号杀手，chips 让首跑直达多 Agent 差异化时刻；原否决的关切（日常噪音）由「产生第一个对话后永久消失」保住，老用户与宣传素材所见空态不变。
+- Composer 模型角标 `CurrentModelBadge`「未配置」由只读改为可点、直达模型配置（§十三）。
+
+**首次协作情境提示 `ContextualTip`**（非 Tour）：首次出现内嵌协作图（「点节点可看每个 Agent 的实时工作」）与首次出现拍板面（「团队在等你拍板」）各一枚一次性浮层——可随手关闭、本地记 seen、总量 ≤3。渐进披露的延伸，**否决**多步 Tour / 教程墙 / 轮播弹窗。
+
+**帮助可发现性**：空态副链接 + 侧栏用户菜单补「产品手册」入口（工具箱首卡、命令面板既有入口不变）。
+
+**激活漏斗（日志埋点）**：`auth.register` / `llm_key.configured` / 首回合成功（沿用既有回合完成日志）三事件在 `logs/dev.jsonl` 可查漏斗；开发期不建分析面板。
+
+**Mobile 最小 parity**：发送遇 `LLM_KEY_REQUIRED` 错误条带「去配置」直达模型配置；未配 Key 聊天空态「先连接你的模型」。首启流程与任务 chips 桌面验证后再下放。
+
+→ 见代码 `components/onboarding/`（`OnboardingFlow` / `OnboardingGate` / `DraftEmptyState` / `ContextualTip`）、`lib/onboarding.ts`、`hooks/useOnboarding.ts`；离线预览 `#/preview/onboarding` + `pnpm -C apps/desktop shoot:onboarding` 截图自检。
+
+---
+
 ## 三、内嵌协作图与状态条（现状）
 
-多 Agent 回合的团队界面是内嵌进助手消息的协作图（`InlineTeamGraph`，→ 见代码 `components/chat/InlineTeamGraph.tsx`）：图顶一条**状态条**按 `execution.status` 分四态渲染，下方是可折叠的协作图（`GraphView` 内嵌形态），状态条「在画布打开」切画布放大态（Route A · `CanvasZoomedTurn`，就地放大该回合、非独立全屏）。状态条吃下了原任务卡片的全部职责（AgentCore 聊天界面与普通对话 AI 的核心视觉差异点）：
+多 Agent 回合的团队界面是内嵌进助手消息的协作图（`InlineTeamGraph`，→ 见代码 `components/chat/InlineTeamGraph.tsx`）：图顶一条**状态条**按 `execution.status` 分四态渲染，下方是可折叠的协作图（`GraphView` 内嵌形态），状态条「在画布打开」进入全屏回合详情（`TurnDetailPage`，就地放大该回合）。状态条吃下了原任务卡片的全部职责（AgentCore 聊天界面与普通对话 AI 的核心视觉差异点）：
 
 - **执行中**（`RunningStrip`）：转圈 + 任务摘要 + 进度 `completed/total` + 进度条；尾部控件（停止 / 折叠图 / 在画布打开）。Agent 状态/工具/输出在下方图节点上呈现；**慢工具诚实阶段（✅ 已落地）**：并行 worker 执行 `web_search` 等阻塞工具时，节点除「运行中」外显示 transport-only 阶段文案（排队中 / 正在检索 / 改用备用引擎…，与 CEO `ToolLine` 同源 `TOOL_PHASE_TEXT`），重载后不保留。
 - **已完成**（`CompletedStrip`）：一行战绩「团队完成 · N 个 Agent · M/M 子任务 · 用时 · ¥合计」（用时取帧流挂钟跨度 `elapsedMs`，¥ 取 `message_end` 回合合计 §7.3A）。**部分失败**（CEO 完成但有 worker 失败）额外显示琥珀色「N 个子任务失败」横幅 + 救火行。
@@ -105,7 +133,7 @@ skip_if:
 
 状态条尾部为一级图标按钮：执行中给「停止」、已完成/已停止给「回放」（切画布放大态自动播放时间轴），外加常驻的折叠 /「在画布打开」；不设 `[···]` 菜单——整轮重新执行统一交给消息级「重新生成」与救火行。内嵌图块在 `run_plan` 首次挂载时播放一次入场动画（`animate-task-card-enter`，遵循 `prefers-reduced-motion`，见 `styles/globals.css`）。
 
-**协作图默认展开（✅ 已落地）**：内嵌协作图默认一直展开（含完成 / 取消 / 失败与辩论回合），保留状态条折叠按钮；用户手动切换后以其选择为准（`expandedOverride` 优先于默认）。辩论正文仍归画布放大态「辩论室」（§4.2），聊天侧图展开不替代赛事页。→ 见代码 `InlineTeamGraph.tsx`（`expandedOverride ?? true`）。
+**协作图默认展开（✅ 已落地）**：内嵌协作图默认一直展开（含完成 / 取消 / 失败与辩论回合），保留状态条折叠按钮；用户手动切换后以其选择为准，且**按对话持久化**（`usePersistentDisclosure`，键 `{messageId}:inline-graph`，与画布 graph-fold 互不相通；持久化架构见 [`前端技术与架构.md` §9.11](/docs/04-前端/前端技术与架构.md)）。辩论正文仍归画布放大态「辩论室」（§4.2），聊天侧图展开不替代赛事页。→ 见代码 `InlineTeamGraph.tsx`。
 
 **救火行 `RecoveryActions`（✅）**：重试 / regenerate 经 `userMessageIdForAssistant(ExecutionScope)` 锚定本回合用户消息（找不到才回落 `lastUserMessageId()`）；「忽略」先 `acceptRunOutcome(..., reason: recovery_ignored)` 再 `clearExecution`。→ 见代码 `StatusStrip.tsx`；后端契约见 [执行引擎 §retry-failed](/docs/03-AI核心/执行引擎架构设计.md)
 
@@ -121,7 +149,7 @@ skip_if:
 
 **为何无「规划中」态**（决策）：CEO + `delegate` 架构下 `run_plan` 同步到达，无独立规划空窗；「系统在思考」由 CEO reasoning 气泡覆盖；`tool_use_start(delegate)` 前无法预知是否组团，故状态条不设「规划中」态。→ 见代码 `tools/builtin/delegate/`、`runtime/engine/`。
 
-**中间可见性（✅ Phase 1 · ⏳ Phase 2a 后端）**：并行 worker 产出经 `run_output_delta` fold 到 `agent.outputChunks`；协作图节点 `AgentNodeActivity` 显示 `livePreview`；侧栏 `RunDetailBody` 流式 Markdown。**审查预警**：`lib/reviewConcern.ts` 解析 `7/10`、方向类措辞 → 节点「待关注 / 方向风险」琥珀/红徽章。**一键下钻**：`StatusStrip`「查看进行中」→ 打开首个 running worker 侧栏；`RunDetailBody` 进行中提示流式更新 +「记下改法」预填输入框 +「停止整轮」。**跑一半改方向（`run_redirect` ✅）**：`RunDetailBody`「立即改此人」→ 单人 cancel + 热续写 / 冷接手 + 忽略收口（Step 1–4 全 ✅，见 [`多轮编排与队员热修.md` §十](/docs/03-AI核心/多轮编排与队员热修.md)）。**团队便签**：协作图下 `TeamNotesPanel`；有便签时状态条「团队便签 N」徽章（见 [`Agent协作模式.md` §便签墙](/docs/03-AI核心/Agent协作模式.md)）。
+**中间可见性（✅ Phase 1 + Phase 2a 均已落地）**：并行 worker 产出经 `run_output_delta` fold 到 `agent.outputChunks`；协作图节点 `AgentNodeActivity` 显示 `livePreview`；侧栏 `RunDetailBody` 流式 Markdown。**审查预警**：`lib/reviewConcern.ts` 解析 `7/10`、方向类措辞 → 节点「待关注 / 方向风险」琥珀/红徽章。**一键下钻**：`StatusStrip`「查看进行中」→ 打开首个 running worker 侧栏；`RunDetailBody` 进行中提示流式更新 +「记下改法」预填输入框 +「停止整轮」。**跑一半改方向（`run_redirect` ✅）**：`RunDetailBody`「立即改此人」→ 单人 cancel + 热续写 / 冷接手 + 忽略收口（Step 1–4 全 ✅，见 [`多轮编排与队员热修.md` §十](/docs/03-AI核心/多轮编排与队员热修.md)）。**团队便签**：协作图下 `TeamNotesPanel`；有便签时状态条「团队便签 N」徽章（见 [`Agent协作模式.md` §便签墙](/docs/03-AI核心/Agent协作模式.md)）。
 
 → 见代码：`lib/reviewConcern.ts`、`StatusStrip.tsx`、`RunDetailBody.tsx`、`agentNode/*`、`TeamNotesPanel.tsx`。
 
@@ -139,7 +167,7 @@ skip_if:
 
 → 见代码 `components/chat/PlanReviewCard.tsx`；语义见 [`编排器与CEO主Agent.md` §四](/docs/03-AI核心/编排器与CEO主Agent.md)。
 
-**统一团队时间线 · 卡片落点（✅ 已落地）**：上述「某一时刻发生」的交互卡片——检查点 / 非阻塞发问 / 计划复核 / **队员升级求决策**（`EscalationCard`）——不再统一堆在气泡最底部，而是按真实时序内联在回合时间线（`ProcessTimeline`，§一B）上。CEO 自调的检查点 / 发问 / 复核各在其事件处落一枚零宽 `process` 标记（`checkpoint` / `ask` / `plan_review`），卡片在标记槽位回放；**队员升级是执行级时刻**（worker 在团队执行内 `escalate`，并非 CEO 的某一步），故不另发标记，而是随**团队执行槽**渲染——紧贴协作图（`team` 标记）之下、在 CEO 收尾答案**之前**，与它所属的团队执行同处。两形态都落此槽位：阻塞 `pending` = 可拍板卡，非阻塞 `raised` =「边干边上报」轻提示（无需拍板、不计入待决数），后者补齐「折叠协作图后队员上报仍可见」的「升级实时可见」。仅持久化前、无标记的旧回合回退到底部堆叠（绝不双渲染）。**回合级汇总**（引用来源 `SourceCards`、文件产物 `FileArtifactsCard`）仍留答案下方——它们是整轮的参考书目 / 交付物清单、非某一时刻事件（单次文件写入本身已作为工具步内联）。→ 见代码 `components/chat/message-bubble/ProcessTimeline.tsx`、`AssistantMessage.tsx`、`lib/processTimeline.ts`。
+**统一团队时间线 · 卡片落点（✅ 已落地）**：上述「某一时刻发生」的交互卡片——检查点 / 非阻塞发问 / 计划复核 / **队员升级求决策**（`EscalationCard`）——不再统一堆在气泡最底部，而是按真实时序内联在回合时间线（`ProcessTimeline`，§一B）上。CEO 自调的检查点 / 发问 / 复核各在其事件处落一枚零宽 `process` 标记（`checkpoint` / `ask` / `plan_review`），卡片在标记槽位回放；**队员升级是执行级时刻**（worker 在团队执行内 `escalate`，并非 CEO 的某一步），故不另发标记，而是随**团队执行槽**渲染——紧贴协作图（`team` 标记）之下、在 CEO 收尾答案**之前**，与它所属的团队执行同处。两形态都落此槽位：阻塞 `pending` = 可拍板卡，非阻塞 `raised` =「边干边上报」轻提示（无需拍板、不计入待决数），后者补齐「折叠协作图后队员上报仍可见」的「升级实时可见」。仅持久化前、无标记的旧回合回退到底部堆叠（绝不双渲染）。**回合级汇总**（引用来源 `SourceCards`、文件产物 `FileArtifactsCard`）仍留答案下方——它们是整轮的参考书目 / 交付物清单、非某一时刻事件（单次文件写入本身已作为工具步内联）。**记忆更新卡 `MemoryUpdateCard`** 更外一层：消息列表级独立时间线项（「这次对话 AI 记了什么」，与气泡平级），跨对话「最近更新」feed 与共享行组件见 [记忆系统 §1.6](/docs/03-AI核心/Agent记忆与知识系统.md)。→ 见代码 `components/chat/message-bubble/ProcessTimeline.tsx`、`AssistantMessage.tsx`、`lib/processTimeline.ts`。
 
 **续跑卡片 `ResumePrompt`（✅ 已落地 · 结构化挂起的常规且唯一可操作面，不限断连）**：所有 live 结构化挂起（`ask_user` / `plan_review` / `team_preview`）的可操作面都由它承载，渲染在**输入框上方**（内容同 `PlanReviewCard` / `AskUserCard` / `TeamPreviewCard`），**继续 / 调整 / 停止** → `POST …/messages/{mid}/resume` 走 SSE 续跑（断连 / 重启后同样在此恢复）。
 
@@ -159,7 +187,7 @@ skip_if:
 
 ### 4.1 辩论室：赛事页（✅ 已落地）
 
-把整场辩论呈现为**体育赛事直播页 + 法庭记录**——三层纵向结构，入口仍为画布放大态「辩论室」（状态条**「打开辩论室」CTA** → `CanvasZoomedTurn`）。
+把整场辩论呈现为**体育赛事直播页 + 法庭记录**——三层纵向结构，入口为全屏回合详情「辩论室」tab（状态条**「打开辩论室」CTA** → `TurnDetailPage?view=debate`）。
 
 | 层 | 组件 | 职责 |
 |---|---|---|
@@ -174,7 +202,7 @@ skip_if:
 | **布局** | 赛事页 `max-w-7xl`；正反两方默认**左右并排**（正方左 / 反方右）、记分牌「布局」开关可切 `max-w-3xl` 单栏；红队 / 圆桌恒单栏 | 对抗感靠**阵营色 + 身份色轨 + 记分牌 VS 对垒 + 引用回复**（`ReplyQuote`）；正反另提供**可选左右并排**（仅逐轮发言分栏，轮头 / 质询 / 裁判札记通栏），偏好持久化、长文可随时切单栏 |
 | **单流** | 直播与收场同一条流，轮次=章节锚 | 收场 = 主列跑完追加 `FinaleStage`，不是另一个视图 |
 | **结论** | 流末「主持人终审」= 唯一结论面 | 记分牌提供「终审 ↓」锚滚动至 `FinaleStage` |
-| **落点** | 画布放大态唯一内容主视图 | 辩论回合无平级 tab；协作图仍为头部浮层（`graphOverlay`，§6.5） |
+| **落点** | `TurnDetailPage` 平级 tab「辩论室」 | 辩论回合默认落辩论室；「协作图」「对比」同为顶栏平级 tab（§6.5） |
 | **记分牌滚动** | 不 sticky | 长文阅读优先：记分牌随剧本滚走；章节 chips / 比分回顶可见，放大态顶栏仍保留任务摘要 |
 
 > **阵营色 = 辩论对立 token（决策·2026-07）**：正反 2 方按语义 key 定死红蓝对垒（`pro=蓝` / `con=红`），专用 token 独立于 `--agent-N` 身份色板；多方（圆桌 / 红队 / subject）仍按名字 hash 分色。→ `debate/model.ts` `debateSideColorVar`（`Scoreboard` / `SpeakerBlock` / `brief/` 同源消费）。
@@ -196,7 +224,7 @@ skip_if:
 
 **约束**：纯前端渲染层重构，**不动协议 fold / conformance**——`toDebateModel` 读 `execution`、已归一 live+收场（守 [`protocol-conformance.mdc`](/.cursor/rules/protocol-conformance.mdc)）。
 
-→ 见代码：`components/chat/debate/arena/`（`DebateArena` 壳 + `Scoreboard` / `Transcript` / `SpeakerBlock` / `JudgeNote` / `CrossExamSection` / `SteeringPanel` / `FinaleStage` / `ClosingBlocks` / `brief/`）+ `DebateStream.tsx`（`DebateArena` 兼容导出）+ `graph/CanvasZoomedTurn.tsx`。
+→ 见代码：`components/chat/debate/arena/`（`DebateArena` 壳 + `Scoreboard` / `Transcript` / `SpeakerBlock` / `JudgeNote` / `CrossExamSection` / `SteeringPanel` / `FinaleStage` / `ClosingBlocks` / `brief/`）+ `DebateStream.tsx`（`DebateArena` 兼容导出）+ `pages/TurnDetailPage.tsx`。
 
 ### 4.1b 旧范式退场与组件去向（✅ 已完成）
 
@@ -218,9 +246,9 @@ skip_if:
 | `Continue`（`DebateContinue`） | ✅ 保留 → `FinaleStage` 底栏「换角度再辩」 |
 | `FlowToolbar`（流式/并排） | ✅ 删 → 全局流式/并排开关废弃；并排后由记分牌「布局」开关（仅正反 · 可切单栏）重做（2026-07-07） |
 
-净效：主视图 `DebateArena`（记分牌 + 剧本主列 + 终审舞台）；放大态辩论回合无平级 tab，协作图仍为头部浮层（`graphOverlay`，§6.5）。
+净效：主视图 `DebateArena`（记分牌 + 剧本主列 + 终审舞台）；放大态辩论回合与协作图 / 对比同为 `TurnDetailPage` 平级 tab（§6.5）。
 
-→ 见代码：`components/chat/debate/arena/` + `DebateStream.tsx`（`DebateArena` 兼容导出）+ `graph/CanvasZoomedTurn.tsx` + 手机 `apps/mobile/src/components/DebateView.tsx`（精简镜像）。
+→ 见代码：`components/chat/debate/arena/` + `DebateStream.tsx`（`DebateArena` 兼容导出）+ `pages/TurnDetailPage.tsx` + 手机 `apps/mobile/src/components/DebateView.tsx`（精简镜像）。
 
 ### 4.2 团队图上的辩论标记（✅）
 
@@ -232,7 +260,7 @@ skip_if:
 | 节点 badge | 对立节点显「正方/反方」徽章（`primary` 令牌，与 6 态状态色解耦）——`AgentNode` |
 | 图分列对置 | 正/反节点按 `stance` 排序 + ELK `considerModelOrder`，分两带对置——`GraphView` / `lib/elk-layout.ts` |
 | 节点层级 | CEO（主气泡，不进图）→ 主持人（完成态节点）→ 辩手（挂主持人下），见 [`辩论编排设计.md §7.3`](/docs/03-AI核心/辩论编排设计.md) |
-| 辩论全程 | **不内联聊天**——辩论全程（逐轮发言 + 决策简报 + 交锋，§4.1）归画布放大态「辩论室：赛事页」主视图；聊天侧内嵌协作图**默认展开**（与普通团队同，可手动收起），入口为**醒目「打开辩论室」CTA**；live 与收场是同一条流、无跳跃——`DebateArena`（在 `CanvasZoomedTurn`，`debate/model.ts` 归一 live+收场） |
+| 辩论全程 | **不内联聊天**——辩论全程（逐轮发言 + 决策简报 + 交锋，§4.1）归 `TurnDetailPage`「辩论室」tab；聊天侧内嵌协作图**默认展开**（与普通团队同，可手动收起），入口为**醒目「打开辩论室」CTA**；live 与收场是同一条流、无跳跃——`DebateArena`（`debate/model.ts` 归一 live+收场） |
 
 ### 4.3 老板介入、追问与续辩（✅）
 
@@ -259,7 +287,7 @@ skip_if:
 
 ### 4.5 论证地图透镜（已移除）
 
-曾把辩论读成节点（各方 + 最强主张）+ 有向边（各轮 `clashes` 谁驳谁）的 `ArgMap` 次级透镜，**已随「视图过多」收口移除**（2026-06）。攻防结构的逐轮交锋仍可在赛事页 `ReplyQuote` + 记分牌 VS 对垒读到。放大态辩论视图现为 **赛事页（唯一内容主视图）+ 协作图浮层**（头部按钮唤出），见 §4.1b / §6.5。
+曾把辩论读成节点（各方 + 最强主张）+ 有向边（各轮 `clashes` 谁驳谁）的 `ArgMap` 次级透镜，**已随「视图过多」收口移除**（2026-06）。攻防结构的逐轮交锋仍可在赛事页 `ReplyQuote` + 记分牌 VS 对垒读到。放大态辩论视图现为 **`TurnDetailPage` 平级 tab「辩论室」**（协作图 / 对比同页切换），见 §4.1b / §6.5。
 
 > **决策演进**：「主持人是 CEO 之下、辩手之上的一层、底层无 debate 专用执行路径」**仍成立**——只是这层落成 `debate` 工具内的确定性循环 + 图上完成态节点，而非一个 LLM 委派角色。旧「多轮 = CEO 手搓跨轮 DAG」**被替代**，见 [`辩论编排设计.md §八`](/docs/03-AI核心/辩论编排设计.md)。
 
@@ -267,19 +295,35 @@ skip_if:
 
 ## 五、图视图（现状）
 
-**内嵌静态 + 画布放大态探索**（核心 UX 规则）：内嵌 `GraphView`（`embedded` 形态）为**静态预览**——禁缩放交互，滚动对话而非缩放画布；状态条「在画布打开」切画布放大态（`CanvasZoomedTurn`）做缩放/平移/回放。内嵌 fit-to-width 定高，节点 face 三层：角色 → 在干什么 → 用时（**工具次数归 hover 速览卡 / run 详情**；**¥ / token 归 run 详情**，§7.3B）。点节点下钻：内嵌图开右坞 `SidePanel` run 详情 tab；**放大态点 worker 同样走右坞 `SidePanel` run 详情——复用同一 `sidePanel` store（节点高亮、退出放大态后右坞仍展示同一 run），端点（用户输入 / CEO 汇聚点）同样开到右坞 `SidePanel`——作「内容 tab」渲染提问 / 最终回答正文（是气泡非 run，故另立 tab 类；画布无气泡陪同，最终回答首入自动开一次）。详情一律向右开、不退出放大态；Esc 渐进收起（先收右坞面板、再退放大态）。内容 tab 是画布专属——离开画布阅读上下文（退放大态 / 切回聊天）自动清掉、run tab 保留，故答案不与对话气泡重复。内嵌图的端点点击仍跳对话气泡（气泡就在阅读列内，无需面板）**。
+**内嵌静态 + 画布放大态探索**（核心 UX 规则）：内嵌 `GraphView`（`embedded` 形态）为**静态预览**——禁缩放交互，滚动对话而非缩放画布；状态条「在画布打开」进入全屏 `TurnDetailPage` 做缩放/平移/回放。内嵌 fit-to-width 定高，节点 face 三层：角色 → 在干什么 → 用时（**工具次数归 hover 速览卡 / run 详情**；**¥ / token 归 run 详情**，§7.3B）。点节点下钻：内嵌图开右坞 `SidePanel` run 详情 tab；**放大态点 worker 同样走右坞 `SidePanel` run 详情——复用同一 `sidePanel` store（节点高亮、退出放大态后右坞仍展示同一 run），端点（用户输入 / CEO 汇聚点）同样开到右坞 `SidePanel`——作「内容 tab」渲染提问 / 最终回答正文（是气泡非 run，故另立 tab 类；画布无气泡陪同，最终回答首入自动开一次）。详情一律向右开、不退出放大态；Esc 渐进收起（先收右坞面板、再退放大态）。内容 tab 是画布专属——离开画布阅读上下文（退放大态 / 切回聊天）自动清掉、run tab 保留，故答案不与对话气泡重复。内嵌图的端点点击仍跳对话气泡（气泡就在阅读列内，无需面板）**。
 
-→ 见代码 `components/graph/GraphView.tsx`、`components/graph/`
+→ 见代码 `components/graph/GraphView.tsx`、`components/graph/`、`pages/TurnDetailPage.tsx`
+
+**节点身份与重复执行呈现（裁决准则，2026-07）**：图节点 = **一次执行（run）**，非 agent 实体——阶段 1 后端无稳定 worker 实体（`agent_id == run_id`，见 [`编排器与CEO主Agent.md` §Agent 实体化](/docs/03-AI核心/编排器与CEO主Agent.md)）。二次委派 / 修订 / 辩论续 beat 等重复迭代场景统一按三分裁决：① **产生独立产出、值得单独下钻或对比的执行 → 新节点**，以链边挂在源节点之后（热修修订链 `原始→v2→v3`、辩论续轮「第 N 轮」与结辩列、`replaces_run_id` 接手、普通再委派）；② **轮内从属 beat → 折进宿主节点**（仅辩论质询，见下「辩论 beat 折叠」段）；③ **不产生新执行、只是既有执行的状态变化 → 原节点角标/徽标**（检查点暂停徽标、`plan_revised` 轻痕迹）。**被否决 · 单卡堆叠计数**（原节点挂 ×N 角标代替新节点）：版本对比失去落点（对比透镜依赖各版本皆为可点节点）、DAG 失真（第二次执行的 `depends_on` 边无处画）、一卡挤多态；**图膨胀一律走折叠**（子队盒 / 质询折进轮节点 / 回合折叠态），不动节点身份模型。**同 role 再委派 ≠ 同一人**：后端语义是冷启动新 worker（不继承上次 transcript，CEO 须在 task 里自包含转述；真·同人续写仅 `revise` 修订链与同 run 契约返工）——身份色头像按角色名派生，表达「角色延续」心智而非实体身份，**禁止** UI 文案把同 role 多节点表述为「同一人第 N 次受派」（Phase 2 实体化落地前没有这个事实）。
+
+### 5.1 模式能力表（✅）
+
+`planType`（`single_agent` / `multi_agent` / `debate`）在图上的能力**一处声明、处处查表**——禁止散落 `planType === "multi_agent"` 等值判断（曾导致辩论回合漏掉审计注入）。表字段：`showsTeamGraph`、`auditInject`、`forceExpandDebateUnits`、`inlineDefaultExpanded`、`revisionBadgeStyle`、`runRedirect`。辩论与 multi_agent 共享 `auditInject`；角标风格辩论为 beat（第 N 轮 / 结辩；质询已折进轮节点）、multi_agent 为热修 vN。
+
+**辩论不开放「改方向」（产品决策，2026-07）**：辩手中途「场边教练」会污染独立对抗的胜负参照（「反方略占优」将混入人为干预），想干预方向应重开一场改辩题；且辩论轮次编排是否消费 redirect 队列未打通。若未来立项开放，前置 = 后端消费路径 + 记分牌/总结的「受指导痕迹」呈现设计。
+
+→ 见代码 `components/graph/planCapabilities.ts`（消费点：`GraphView` / `useCanvasFlow` / `InlineTeamGraph` / `RunDetailBody`）。
+
+**宿主契约（✅）**：三入口（聊天内联 / 画布回合 / 全屏）共用 `graphHost`——Provider、内容包围盒 fit、原点归一化后的 `computeLayout` bbox；全屏 `fitMode=view` 为 fitView 基准。布局失败须显式错误态（`GraphLayoutError`），禁止 `layoutReady` 永假空白占位；不做自动重试。
 
 **嵌套子团队 · 子队盒**：子 worker 经虚线委派边挂父 worker 下、带「子任务」徽章，并由 ELK compound 包成一个虚线**子队盒**（`SubTeamGroupNode`，标「X 子队 · N 人」）；嵌套委派 → 盒中盒。**修订轮归属子队（布局不变量）**：被盒住的成员若有续写轮（辩论/圆桌逐轮＝修订 `revision≥2`），整条修订链归入**同一子队盒**并按网格排（参与者＝行 / 轮次＝列）；归属沿**修订根**解析，须在「归属判定 / compound 子节点 / bbox / 投影 `parentId`」四处一致——否则修订会逃逸到盒外、在框外自成一层，与源之间空出一列 phantom gap（历史 bug）。→ 见代码 `lib/elk-layout.ts`（compound + `containsTeam` 修订感知；网格由 compound 内修订边直接排出，参与者＝行 / 轮次＝列）、`components/graph/projectFlowGraph.ts`（修订解析到修订根挂 `parentId`）、`components/graph/SubTeamGroupNode.tsx`。
+
+**辩论 beat 折叠与角标（✅ 2026-07 改版）**：认真辩透的对抗辩论里，同辩手的质询 / 结辩也是 `continue_run`（与续轮陈词共用 `round`），但协作图**一列 = 一轮**：质询作答折进同轮陈词节点——状态取轮内最差态（失败 / 运行中优先于完成）、耗时/成本/token 合计、直播中状态条显「立论中 / 质询作答中」且输出预览跟随活跃 beat；**收场**折叠了质询的轮节点状态行挂「含质询」标记（可点直达该轮质询 run；多修订时活跃 > 失败 > 最新），质询作答失败时状态文案归因「质询作答失败」（同样可点）；点整卡仍开陈词/宿主 run。结辩保留独立列。角标读 `run_context.channel`——续轮陈词「第 N 轮」、结辩「结辩」，首轮陈词无角标；「第 N 轮·质询」不再出现在图上（beat 明细归侧栏 RunRevisionChain 与辩论室 `CrossExamSection`）。修订链边连可见节点（轮→轮→结辩）。状态条「改了 N 版」只计定向唤回热修，辩论 continue_run 不计。**被替代**：初版「质询独立成列」——thorough 3 轮每方 7 列、同质卡片墙。→ 见代码 `components/graph/helpers.ts`（`debateStatementHostId` / `aggregateDebateRoundStatus` / `debateRoundPhaseLabel` / `debateRoundSettledMark` / `pickDebateCrossExamActivateId`）、`components/graph/projectFlowGraph.ts`（折叠聚合）；金样 `multi_agent_debate_multibeat`。
 
 **角色身份（✅ 已落地）**：每个队员节点的头像 = 按角色名**稳定派生**的「颜色 + 首字字形」（`lib/agentIdentity.ts` 用 FNV hash → `--agent-1..8` 身份色板，CJK 角色名首字即天然字号头像「研/工/设」），让一支团队读作「一个个人」而非一排同款 Bot 图标。**身份与状态解耦**：身份在头像盘，运行状态走卡片色环 + 头像角标的「在线点」（运行/完成/失败带小字形，保留非颜色线索），故身份色永不与 6 态状态色抢色（见 `.cursor/rules/color-tokens.mdc`「分类色板」）。
 
 **信息流边（✅ 已落地）**：队员间的依赖边不再只表「先后」，而是据下游 run 的 `receivedContext`（按 `source_run_id` 精确匹配上游产物块）标注**真实交接**——仅在**有损**交接（`摘要` / `递指针` / `截断`）时挂一枚小标签，`全文`（pass_through）交接保持干净线，故标签精准落在「队友只拿到了不完整产物」处；hover 标签看「来自 X · 保真度 · N 字 · 是否截断」。纯渲染层派生（`GraphView` `flowEdges` + `StepEdge` 的 `EdgeLabelRenderer`），**不改协议 fold / conformance**。
 
-**审计数据流高亮（✅ Phase 2）**：多 Agent 回合经 `useTurnAudit` 读 `causal_graph` inject 边——**打开某 run 详情时**（`litRunId`）高亮该 run 的 inject 入/出邻域（与 dep 重合则加粗原箭头、不画二线；仅 audit 有 inject 时补虚线）；其余边/节点变淡。工具栏可选 toggle「始终显示审计数据流」（默认关）。与 run 详情「数据从哪来」同源。桌面 UI **仅展示 inject**（`parent` / `depends_on` 与「关系」/协作图 dep 边重复，不另画）。**已否决**：全量 inject 虚线叠加 · Run 详情迷你 DAG · ELK 为 inject 重布局 · 用 audit 替换 handoff 标签 · conformance 变更。→ 见代码 `lib/causalInject.ts` · `GraphView.tsx` · `StepEdge.tsx`。
+**审计数据流高亮（✅ Phase 2）**：`multi_agent` / `debate` 回合经 `useTurnAudit` 读 `causal_graph` inject 边（能力表 `auditInject`）——**打开某 run 详情时**（`litRunId`）高亮该 run 的 inject 入/出邻域（与 dep 重合则加粗原箭头、不画二线；仅 audit 有 inject 时补虚线）；其余边/节点变淡。工具栏可选 toggle「始终显示审计数据流」（默认关）。与 run 详情「数据从哪来」同源。桌面 UI **仅展示 inject**（`parent` / `depends_on` 与「关系」/协作图 dep 边重复，不另画）。**已否决**：全量 inject 虚线叠加 · Run 详情迷你 DAG · ELK 为 inject 重布局 · 用 audit 替换 handoff 标签 · conformance 变更。→ 见代码 `lib/causalInject.ts` · `planCapabilities.ts` · `GraphView.tsx` · `StepEdge.tsx`。
 
 **波次泳道（✅ 已落地）**：协作图按 `WaveScheduler` 波次（ELK 同层 = 同波）在节点后方画半透明泳道 + 「第 N 波」标签，让「团队分轮推进（并行扇出 → 汇总 → …）」一眼可读；**单波（纯并行扇出）/ 单 Agent 不出泳道**，简单回合保持干净；端点（用户输入 / CEO 汇聚点）在泳道之外。经 `ViewportPortal` 在画布坐标系渲染（泳道 z-index -1 沉底、标签浮顶），随平移/缩放联动。→ 见代码 `components/graph/GraphView.tsx`（`computeWaves`）。
+
+**同回合多次 `delegate` 泳道（✅ 已落地）**：CEO 同回合再委派会合并进同一 `execution_id`（`mergePlanInto`），跨批常无 `depends_on`——拓扑波次会把不同委派的根节点编进同一「批次」列，抹掉「先后追加」叙事。呈现层在 ingest 时给 plan run 盖 `delegateBatch` 戳（**不进协议 / ProjectedTurn**）；当可见顶层 worker 跨 ≥2 次委派时，泳道改标「第 N 次委派」并沿交叉轴分条（不画假依赖边、不合并节点、不把同 role 写成「同一人」）。单次委派仍走上方拓扑波次泳道。
 
 **hover 速览卡（✅ 已落地）**：hover 队员节点弹一张**比 face 更详、比右侧面板更轻**的速览（角色 + 状态 + 分类标记 + 任务 + 更长的「在做 / 产出」预览 + 模型·token·用时·工具 一行），补「节点 face → 完整面板」之间的渐进披露层；复用 face 同源信号、只给更多空间，不新增数据通路。模型档/深度的小徽标 tooltip 已并入此速览（避免节点内嵌套 tooltip）。→ 见代码 `components/graph/AgentNode.tsx`。
 
@@ -350,14 +394,14 @@ skip_if:
 
 → 见代码：`stores/ui.ts`（`conversationViews` 持久化、只落画布 override；`pendingCanvasFocus` 携可选深链 `view`＝`CanvasFocusView`）、`pages/ConversationPage.tsx`（视图切换 + 偏好读取）、`chat/StatusStrip.tsx`（团队回合入口：辩论「打开辩论室」CTA / 普通「在画布打开」+「改了 N 版」版本对比信号 chip）、`graph/ConversationCanvas.tsx`（持久累积 + LOD + 发布画布 active/聚焦回合 + 后台任务同步驱动）、`stores/commandPanel.ts`（画布→指挥台区桥：active/聚焦 + 折叠态）、`graph/CanvasDecisionPanel.tsx`（`useCommandRegion` 派生 + 自动浮出 + `CommandRegion` 折叠区，复用 §三 同款决策卡片）、`layout/SidePanel.tsx`（顶部承载指挥台区，§十）、`graph/TurnSummaryNode.tsx`（含「便签 N」chip） / `graph/SimpleTurnNode.tsx`（点轻卡 → `showSimpleTurnDetail` Q&A tab） / `graph/TurnGroupNode.tsx`（内嵌 DAG + 图下 `TeamNotesPanel` 同源便签墙 + 端点开右坞内容 tab + 版本对比脚抽屉〔辩论走放大态辩论室〕 + 提示牌）、`graph/CanvasCommandBar.tsx`（常驻命令栏 + 后台云端派发）、`pages/TurnDetailPage.tsx`（放大态多视图）、`chat/compare/`（`TurnCompare` 壳 + `RevisionOverview` 胶片轨/聚焦精读 + `ComparePane` 回合级「跨方任意两段」对比 + 相似修订自动 `@codemirror/merge` diff + `cells.ts` 统一 pick 单元；嵌放大态「对比」视图 / 概览脚抽屉；聊天正文已不再内联）、`lib/agentIdentity.ts`（身份延续）。
 
-### 6.5 放大态视图：群聊 / 协作图 / 对比 ✅ 已落地
+### 6.5 放大态视图：协作图 / 辩论室 / 对比 ✅ 已落地
 
 放大态（`TurnDetailPage`，路由 `/conversations/:id/turns/:turnId`）顶栏给一个**视图切换器**（≥2 个可用视图才出现），同一回合在多种渲染间切换，**按回合性质分叉**：
 
-- **辩论回合**：只有 **辩论室**（赛事页 `DebateArena`，§4.1）作内容主视图；**两方对照＝辩论室内可选「左右并排」布局**（仅正反 2 方 · 记分牌「布局」开关、默认并排可切单栏、逐轮发言分栏，§4.1）、**协作图＝头部按钮唤出的浮层**（`graphOverlay`；浮层内为与非辩论相同的 `GraphView` + 布局 toolbar），均不再是平级 tab，故辩论回合放大态基本无 tab 条。
+- **辩论回合**：**辩论室**（赛事页 `DebateArena`，§4.1）为默认内容主视图；**协作图**与（若有热修链）**对比**同为顶栏**平级 tab**——不再是头部浮层 `graphOverlay`。两方对照仍可由辩论室内可选「左右并排」布局承担（仅正反 2 方 · 记分牌「布局」开关，§4.1）。
 - **非辩论回合**：**协作图**（依赖结构，默认）/ **对比**（统一对比透镜 `compare/TurnCompare`，**仅定向唤回修订** → 版本轨〔`RevisionOverview`，胶片轨 + 聚焦精读，下文〕；点任意两格进共享精读对比面〔`ComparePane`，2-up / 真·文本 diff〕；仅当本回合有修订链，§6.4——聊天正文已不再内联，改由状态条「改了 N 版」信号 chip **深链**首挂直达）。
 
-默认：辩论落群聊、非辩论落协作图（**左右流**依赖布局）、聊天「回放」深链落协作图并自动帧回放；**对比恒为可选透镜、从不作默认**（可经信号 chip 深链首挂直达）。
+默认：辩论落辩论室、非辩论落协作图；聊天「回放」深链落协作图并自动帧回放；**对比恒为可选透镜、从不作默认**（可经信号 chip 深链首挂直达）。
 
 **协作图两种布局（用户偏好持久化 `stores/graph.ts`）**：放大态与非嵌入 `GraphView` 右上角 toolbar 切换——① **左右流**（默认，ELK 横向依赖 DAG）② **树形**（ELK 纵向）。依赖布局背景的 `WaveLanes` 文案为 **「依赖层」**（ELK 深度，≠ 调度时间）。**帧回放**（左下 HUD `CanvasPlaybackControls`）在两种依赖布局下均可用。Toolbar 旁仍可挂 **`metricsSummary` chip**（峰值并发 · 总时长 · 串行化次数，来自 `batch_metrics`）。内嵌聊天列 `GraphView`（`embedded`）不展示布局 toolbar。曾有时间轴布局、因视图收口删除；时间真相改由诊断 SchedulingDiag / `batch_metrics` 聚合。
 
@@ -393,19 +437,19 @@ skip_if:
 | 展开目录 | 懒读子项 + 启动 watch；折叠即停止 watch |
 | 内联改名 | 就地 input，回车/blur 提交，Esc 取消 |
 | 拖拽移动 | 落点校验（非原父/非自身子树） |
-| 右键菜单 | 普通节点：新建/下载/打开/重命名/删除（共用 `FileTree`）；**工作区根节点**（文件中枢 `FileWorkbench`）：重命名/删除/新建文件·文件夹/上传/查看对话（跳 `/conversations` 筛该项目）；根级「设为项目」已隐含（加文件夹即建项目），「连接/断开」本地目录 ⏳（待文件夹级绑定端点） |
+| 右键菜单 | 普通节点：新建/下载/打开/重命名/删除（共用 `FileTree`）；**工作区根节点**（文件中枢 `FileWorkbench`）：重命名/删除/新建文件·文件夹/上传/查看对话（跳 `/conversations` 筛该项目）；根级「设为项目」已隐含（加文件夹即建项目）；项目工作区位置**创建时定、不可改**（无「连接/断开」，本期不做 relocate） |
 
 **工作区删除 vs 对话整理（✅ 已确定 · 对标 ChatGPT/Codex 分层）**：**对话层**——归档（可恢复，隐藏活跃列表）/ 永久删除（用户视角不可恢复），见 §一；**工作区（Folder）层**——**不做「归档项目」**（行业亦无独立概念），侧栏降噪靠**组头「归档全部对话」**（批量归档该项目下活跃对话）或在 `/conversations` 按文件夹批量归档。**删除项目**（`/files` 工作区根右键 + 侧栏组头「删除项目…」· 现有 `folders` soft-delete，共用 `DeleteProjectDialog`）：仅删容器——其下对话**固定归档**、**不**删对话记录；项目文件归 Folder 所有，保留至保留期（默认 30 天，见 [`双模式工作区.md` §七](/docs/02-架构/双模式工作区.md)）后 sweeper 物理清理。**否决** ChatGPT 式「删 Project 级联删全部聊天+文件」——真实工作区（本地盘 + OSS）下对话是索引、文件是资产，级联过狠。**否决** `Folder.archived` 第三整理层。**删除确认**（✅ 已落地）：主对话框两行说明（对话归档 + 文件约 30 天清理）+「取消 / 删除项目」；底部链「需要立即清除全部数据？」进入第二步二次确认（无输入项目名）。软删路径固定归档其下对话。**「彻底删除项目」**（✅ 核按钮、第二步）：一次性清对话+文件+快照（`DELETE /v1/folders/{id}/permanent`）；本地项目不删用户磁盘文件。→ 见代码 `components/folders/DeleteProjectDialog.tsx`、`agentcore/folders/permanent_delete.py`。
 
 **审批 UX（写操作）**：只读时尝试写引导开启；可写时写前弹审批（可「本轮内都允许」按同名工具、或「本轮内允许所有文件改动」按整类一次放行，依赖 §三工具审批三态 `grantable` 级别，避免 N 次写/改/删 = N 次弹窗）。
 
-**对话落点表达（✅ 草稿期工作区选择器 · B3+）**：新对话草稿输入框工具行挂 `DraftWorkspacePicker`。**默认不选**时不挂 chip，仅轻量「归入项目…」；不选 ≡ 桌面 local-first 懒建（零门槛不变）。显式选「仅云端」或某项目后显示确认 chip（云端 / 项目名 + 清除；清项目保留存储、清云端回到本地默认）。面板分两区：**存储位置**（桌面：本地默认 / 仅云端随手聊；web 默认云端故不展示存储区）与 **归入项目（可选）**（搜索 + 最近 3 条，只选已有项目、不在此创建）。**新建项目** canonical 入口 = 命令面板「新建项目」（`CreateProjectDialog`）；草稿期若正在新对话，创建后自动归入该项目。**B4**：草稿期 `@` / 浏览附加来自某项目的文件时，内联提示是否归入该项目（`DraftWorkspaceAssignPrompt`）。落点经 `pendingNewChat*` 传给首发建会话；侧栏工作区组头另提供「新建对话」预填落点。首发后锁定，改由 `WorkspaceModeBar` 承担。→ 见代码 `components/chat/DraftWorkspacePicker.tsx`、`components/folders/CreateProjectDialog.tsx`、`components/chat/DraftWorkspaceAssignPrompt.tsx`、`components/sidebar/WorkspaceGroupHeader.tsx`。
+**对话落点表达（✅ 项目=工作区 · 单一「在哪工作」入口）**：草稿输入框工具行只挂一个 `ComposerWorkspaceChip`。菜单：快速对话（本地草稿·桌面默认）/ 云端草稿（web 默认）/ 项目列表（名称+位置副文）/ 新建项目… / 打开本地文件夹…（= 以该文件夹创建项目，1:1）。选定后 chip 显示单一事实（如「快速对话」/「项目名 · 本地」）。草稿意向为判别联合 `draftWorkspaceIntent`（quick_local / quick_cloud / project）。**新建项目**必选位置（本地文件夹 / 默认 `~/Documents/AgentCore/<名>` / 云端）。已建会话只读展示工作区；无会话级「绑定/断开」；「在项目中继续」从会话菜单开新草稿并携带摘要。**B4** 附件提示 `DraftWorkspaceAssignPrompt` 仍适配新 store。→ 见代码 `ComposerWorkspaceChip.tsx`、`CreateProjectDialog.tsx`、`DraftWorkspaceAssignPrompt.tsx`、`stores/folders.ts`。
 
 **隐私承诺**：默认不留存（未备份内容不进云）；在途可用（读文件时正文临时发给模型）；备份/分享 = 显式上传（不自动同步，操作前明示）。
 
 **AI 产物可编辑**：工作区面板 `.md/.markdown` 可编辑（CodeMirror + 编辑/预览切换、CAS 写盘、选区 AI 改写）。→ 见 [`前端技术与架构.md` §八](/docs/04-前端/前端技术与架构.md)（`lib/fileSource.ts`、Markdown 编辑）。
 
-**回合内文件呈现（✅ 已落地）**：① **文件产物内联卡**——回合若写了文件，答复正文下方挂一张 `FileArtifactsCard` 列出本回合产物，点行经 `useSidePanelStore` 在工作区面板预览（单 Agent 取 `process`、多 Agent 取 execution 投影，去重合并）；② **工作区升级提示**——裸聊首次写文件触发 `workspace_promoted`（升为文件夹工作区）时，给当前助手气泡内联一条「已升级为工作区『X』」轻提示，解释文件夹为何突然出现。**live-only 不持久化**：重载后文件夹本就在、不再是「新闻」。→ 见代码 `components/chat/FileArtifactsCard.tsx`、`components/chat/message-bubble/AssistantMessage.tsx`、`services/sse/handlers/workspace.ts`。
+**回合内文件呈现（✅ 已落地）**：**文件产物内联卡**——回合若写了文件，答复正文下方挂一张 `FileArtifactsCard` 列出本回合产物，点行经 `useSidePanelStore` 在工作区面板预览（单 Agent 取 `process`、多 Agent 取 execution 投影，去重合并）。原「工作区升级提示」（`workspace_promoted` 内联轻提示）已随 auto-promote 链路整体移除。→ 见代码 `components/chat/FileArtifactsCard.tsx`、`components/chat/message-bubble/AssistantMessage.tsx`。
 
 ---
 
@@ -414,6 +458,7 @@ skip_if:
 > **实现现状**：对话右侧收敛为**单一侧面板** `SidePanel`，建模为**一条扁平 tab 栏**（外壳：拖拽 resize + tab 栏 + 关闭）——
 >
 > - **固定首位「工作区」home tab**（永不关闭，**文件即主体**）：头栏模式 pill（点开 popover 承载云/本地切换·绑定/重连/备份到云）+ 🕘 快照（右侧 slide-over）图标浮层；文件树即面板主体（交接已下沉为对话时间线卡片、不占面板入口，见下）。
+> - **固定「终端」tab（条件显隐）✅**：本对话有存活 / 曾有后台进程（AI `terminal` 工具），**或**有一次性执行记录（`code_execute` / `test_run`），**或**有用户交互 shell / 本对话已绑本地工作区可新开终端——云对话因此可有纯观测面；不绑画布模式。主体 = **你的终端区**（M3：会话行 +「+」新开 + 关闭；选中挂 xterm 真终端；提示「AI 可读取此终端输出」；单对话上限 3；无本地绑定不提供新开入口）+ **后台进程区**（名称/命令、状态点、时长、停止）+ **执行记录区**（时间序平铺：状态点 / 工具·命令摘要 / agent 角色 / 时长；选中滚屏；多 Agent 行可「跳 run 详情」）+ 选中项输出（用户终端 = xterm；进程/记录 = 纯文本 strip ANSI）。手动停止进程 / 关闭用户终端 = 用户主权不走审批；AI 经既有 `process_list` / `process_read` 可读用户终端（strip ANSI），`process_stop` 拒停用户终端。数据源：用户终端 → 主进程 `pty-service` / `ptyApi`；进程 → `process-service` / `processApi`；执行记录 → 从 message.process / execution 投影**派生**（非第三份权威副本），live 滚屏消费 `tool_use_progress` phase=output chunk buffer，重载回落 `tool_use_end.display`。→ 见代码 `components/terminal/TerminalPanel.tsx`、`main/pty-service.ts`、`lib/executionRecords.ts`、`stores/toolOutputLive.ts`、`stores/backgroundProcesses.ts`、`stores/userTerminals.ts`
 > - **按需详情 tab**：点内嵌协作图 worker 节点把该 run 钉为 run 详情 tab；点端点（用户输入 / CEO 汇聚点）在画布钉为「内容 tab」读提问 / 最终回答（是气泡非 run）；点画布 `SimpleTurn` 轻卡钉为「`simple-turn` Q&A tab」一次读完整提问 + 回答（无 execution，live 校验不依赖 plan）。可并存对比、上限 6（进度/协作图归内嵌图，面板不设独立 tab）。离开画布 / 放大态时 `closeContentTabs` 清掉内容类阅读 tab（`content` + `simple-turn`），保留已开的 run tab。
 > - **顶部常驻钉区（画布模式）**：tab 栏下、tab 体上可有可折叠的常驻区——**指挥台** `CommandRegion`（有待裁决 / 救火 / 后台云端任务时，§6.2）。~~辩论裁判台 `DebateHudRegion`~~ **已移除**（2026-07-06，记分/掌舵归赛事页主列，§4.1）——各自封顶 + 区内滚动、保 tab 体可用；聊天模式不出现（决策内联在消息流、辩论只在放大态）。
 > - **单一面板取代并排双右坞**（并排会挤爆聊天）：工作区即常驻首 tab、run 与它同栏并列，故面板永不出现空详情占位（**否决**「详情 / 工作区」段控互斥）；画布指挥台亦并入本面板**顶部常驻区**、不再另开右坞（§6.2）。工作区 body 首次激活懒挂载、之后 keep-alive 不卸载（文件不重拉）。
@@ -440,9 +485,9 @@ skip_if:
 | 打开方式 | 点内嵌图节点下钻该 run（无自动进度 tab）；点 `SimpleTurn` 开 Q&A tab | 按需、零噪音 |
 | 节点高亮 | 内嵌图与放大态**同源派生自**面板当前激活详情 tab（run tab 亮 worker、内容 tab 亮端点；切/关 tab、切到「工作区」tab、关面板自动跟随）——放大态点节点把 run 详情 / 端点内容开到右坞 `SidePanel`（复用同一 `sidePanel` store） | 一面一个高亮源，**否决**反向 `selectRun` 跨 store 对账 |
 
-**run-detail 区段构成**（顺序即 `RunDetailBody.tsx` 渲染序，条件区段无数据时不渲染）：头部（角色 / 状态 / 用时）、任务、**改版链**（同一 worker 多次修订的版本链 +「对比」入画布）、**升级**（`run.escalations`：worker 中途求决策 / 汇报）、**收到的上下文**（该 run 实际被喂进的结构化上下文：原始请求 / 团队位置 / 前置结果〔含来源·保真度·是否截断〕/ 工作区 / 任务…，由 `run_context` 事件折入；守「单一源：用户看到的 == LLM 吃到的」，每块一张可展开卡片，默认折叠；详见 [`../03-AI核心/上下文传递可视化.md`](/docs/03-AI核心/上下文传递可视化.md)）、**思考过程**（worker 思考全文，`run_reasoning_delta` 流式；流式时自动展开、完成自动收起）、**错误**（失败强制展开）、**正在生成**（worker 拼装工具调用参数时的实时行「{工具} · N 字」，`run_tool_progress`；仅运行中且参数流式中出现，参数拼完即让位给下方工具调用行）、**工具调用**、**输出**、**结论 / debrief**（`run.debrief` 或 `outputSummary`）、**关系**（单节合并：`dependsOn` 依赖 / 后续 + 上级 captain / 子任务树——横向 DAG 依赖与纵向委派层级并列于同一区段；多 Agent 回合另有 **「数据从哪来」** 子块（默认折叠）：`GET …/audit?include_causal=true` 拉回合因果图，仅渲染当前 run 的 **inject 入边** 列表，上游行可下钻；保真度/截断不重复——见上方「收到的上下文」；无 inject 入边则不显示子块）、**资源消耗**（全量 token + ¥ 明细 + 模型档位·思考强度；**恒默认展开**，见 [成本呈现 §7.1](/docs/04-前端/前端成本呈现.md)；¥ 合计常驻区段头部。档位·思考强度原为独立「模型与推理」区段，因属低频信息已并入此处）、**诊断信息**（仅 `diagnosticMode` 开启时出现、默认折叠：run / agent / 执行 / trace id 及类型·依赖·模型等底层标识，便于把该 run 对回服务端日志；纯展示，气泡另挂 trace id 一键复制）、**审计**（`AuditSection`，有 conversationId 时）。**独立 `reasoning` Tab 已否决**——思考全文本质 per-run，归 run-detail「思考过程」区段而非全局 Tab。→ 见代码 `RunDetailBody.tsx`。
+**run-detail 区段构成**（顺序即 `RunDetailBody.tsx` 渲染序，条件区段无数据时不渲染）：头部（角色 / 状态 / 用时）、任务、**改版链**（同一 worker 多次修订的版本链 +「对比」入画布）、**升级**（`run.escalations`：worker 中途求决策 / 汇报）、**收到的上下文**（该 run 实际被喂进的结构化上下文：原始请求 / 团队位置 / 前置结果〔含来源·保真度·是否截断〕/ 工作区 / 任务…，由 `run_context` 事件折入；守「单一源：用户看到的 == LLM 吃到的」，每块一张可展开卡片，默认折叠；详见 [`../03-AI核心/上下文传递可视化.md`](/docs/03-AI核心/上下文传递可视化.md)）、**思考过程**（worker 思考全文，`run_reasoning_delta` 流式；流式时自动展开、完成自动收起）、**错误**（失败强制展开）、**正在生成**（worker 拼装工具调用参数时的实时行「{工具} · N 字」，`run_tool_progress`；仅运行中且参数流式中出现，参数拼完即让位给下方工具调用行）、**工具调用**、**输出**、**结论 / debrief**（`run.debrief` 或 `outputSummary`）、**关系**（单节合并：`dependsOn` 依赖 / 后续 + 上级 captain / 子任务树——横向 DAG 依赖与纵向委派层级并列于同一区段；多 Agent 回合另有 **「数据从哪来」** 子块（默认折叠）：`GET …/audit?include_causal=true` 拉回合因果图，仅渲染当前 run 的 **inject 入边** 列表，上游行可下钻；保真度/截断不重复——见上方「收到的上下文」；无 inject 入边则不显示子块）、**资源消耗**（全量 token + ¥ 明细 + 模型档位·思考强度；**恒默认展开**，见 [成本呈现 §7.1](/docs/04-前端/前端成本呈现.md)；¥ 合计常驻区段头部。档位·思考强度原为独立「模型与推理」区段，因属低频信息已并入此处）、**诊断信息**（仅 `diagnosticMode` 开启时出现、默认折叠：run / agent / 执行 / trace id 及类型·依赖·模型等底层标识，便于把该 run 对回服务端日志；纯展示，气泡另挂 trace id 一键复制）。**独立 `reasoning` Tab 已否决**——思考全文本质 per-run，归 run-detail「思考过程」区段而非全局 Tab。→ 见代码 `RunDetailBody.tsx`。
 
-**诊断 / 开发者模式（✅ 已落地 · 骨架）**：独立用户开关 `diagnosticMode`（默认关，持久化 `localStorage: agentcore:diagnostic-mode`），诊断是开发者「底层信息」专用开关，**与「用量 / 成本」呈现无关**（用量明细已恒展示、无粒度开关，见 [成本呈现 §7.1](/docs/04-前端/前端成本呈现.md)）；单独一开关，免得开发者噪音污染大众面。入口：「关于」页开关 + 命令面板「开发者 / 诊断模式」。开后落点：助手气泡挂「复制 trace id」动作（DEV 恒开）+ run 详情「诊断信息」区（上段：run / agent / 执行 / trace id 等底层标识，对回服务端日志）。**深层诊断指标（部分落地）**：调度 `BatchMetrics` ✅——WaveScheduler 每批快照经 `batch_metrics` SSE 折进 `execution.batches`，run 详情「诊断信息」渲染「调度」块（节点 / 上限 / 峰值、平均并发=`busyMs/wallMs`、完成·失败·跳过、槽位等待、自我纠偏边界=绑定/操舵/复核、队员上报），多批（checkpoint/scope 让渡续跑）按「批次 N」分段；收敛 `turn_metrics`、单 run 的 LLM 窗口/prompt 仍 ⏳ 待后端经 SSE/接口暴露（见 §十五）。→ 见代码 `stores/ui.ts`（`diagnosticMode`）、`pages/more/AboutSettings.tsx`、`lib/paletteCommands.ts`、`components/chat/detail/RunDetailBody.tsx`、`components/chat/message-bubble/AssistantMessage.tsx`。
+**诊断 / 开发者模式（✅ 已落地 · 骨架）**：独立用户开关 `diagnosticMode`（默认关；持久化经 `lib/uiStorage.ts` 统一门面落 `agentcore:diagnostic-mode`——业务不直碰 localStorage，见 [前端技术与架构 §9.11](/docs/04-前端/前端技术与架构.md)），诊断是开发者「底层信息」专用开关，**与「用量 / 成本」呈现无关**（用量明细已恒展示、无粒度开关，见 [成本呈现 §7.1](/docs/04-前端/前端成本呈现.md)）；单独一开关，免得开发者噪音污染大众面。入口：「关于」页开关 + 命令面板「开发者 / 诊断模式」。开后落点：助手气泡挂「复制 trace id」动作（DEV 恒开）+ run 详情「诊断信息」区（上段：run / agent / 执行 / trace id 等底层标识，对回服务端日志）。**深层诊断指标（部分落地）**：调度 `BatchMetrics` ✅——WaveScheduler 每批快照经 `batch_metrics` SSE 折进 `execution.batches`，run 详情「诊断信息」渲染「调度」块（节点 / 上限 / 峰值、平均并发=`busyMs/wallMs`、完成·失败·跳过、槽位等待、自我纠偏边界=绑定/操舵/复核、队员上报），多批（checkpoint/scope 让渡续跑）按「批次 N」分段；收敛 `turn_metrics`、单 run 的 LLM 窗口/prompt 仍 ⏳ 待后端经 SSE/接口暴露（见 §十五）。→ 见代码 `stores/ui.ts`（`diagnosticMode`）、`pages/more/AboutSettings.tsx`、`lib/paletteCommands.ts`、`components/chat/detail/RunDetailBody.tsx`、`components/chat/message-bubble/AssistantMessage.tsx`。
 
 **委派展示统一**：单一可视化（`GraphView` 一张图同表委派树与 `depends_on` 依赖）+ 单一数据模型（`AgentRun`：编排步骤与委派子 Agent 共用同一节点类型）+ `run_*` 事件族（前端不拼接两路流）。**被否决**：前端按 N 隐藏其一（状态仍分叉）；保留双协议只在前端合并（双写漂移）。
 
@@ -487,18 +532,20 @@ skip_if:
 
 - **三字段**：API Key、Base URL（含 `/v1` 前缀）、默认模型名
 - **测试连接**：probe 连通性 + `supports_tools` 能力标记（✅ 支持工具调用 / ⚠️ 仅对话）
-- **输入区**：`CurrentModelBadge` 只读展示当前模型，无切换入口
-- **工具门禁**：`supports_tools=false` 时委派/辩论入口灰显 + 引导换模型（soft gate——probe 失败不 hard block 聊天）
+- **输入区**：`CurrentModelBadge` 展示当前模型；未配置时可点直达「设置 · 模型配置」，已配置点击同样进入该页
+- **工具门禁（软提示）**：`supports_tools=false` 时委派/辩论工具卡保留可展开交互，仅附不确定提示（连接测试未确认工具调用支持、可能降级、以运行为准；可在模型设置重新测试）——与后端 preflight warning 对齐，**不**硬禁用入口或绝对断言「不支持」
 
 全链路（聊天、委派、辩论）统一用该模型；场景差异（温度、回合预算等）由引擎内部画像处理，用户不可见。后端决策见 [`编排器与CEO主Agent.md` §2.1](/docs/03-AI核心/编排器与CEO主Agent.md)；BYOK 用量呈现见 [`前端成本呈现.md` §7.4](/docs/04-前端/前端成本呈现.md)。
 
 → 见代码 `pages/more/ModelSettings.tsx`、`components/chat/message-input/CurrentModelBadge.tsx`、`components/llm/ToolsCapabilityBadge.tsx`。
 
+**设置 · 自主度（✅ 已落地）**：More → 自主度（`#/more/autonomy`）——用户全局选能力授权三档：`always_ask`（每次都问）/ `first_grant`（首次授权，同类后续放行）/ `full_auto`（完全放权）。只控 **GRANTABLE 能力授权**（开工卡合并征询的那部分），不动 `plan_review` / `ask_user` 等拍板节点。语义与全链路取值权威见 [安全权限与治理 §三](/docs/05-平台与运维/安全权限与治理.md)。桌面与手机设置页产品对等（手机纯云端回合，无 sidecar 本地缓存）。→ 见代码桌面 `pages/more/AutonomySettings.tsx` + `services/autonomyPolicy.ts`；手机 `apps/mobile/src/pages/more/AutonomySettings.tsx`。
+
 ---
 
 ## 十四、全局搜索与命令面板（现状）
 
-`Ctrl/Cmd+K`：Tier 1 关键词搜索 + Tier 2 命令导航 ✅。空查询显最近对话+命令；有查询 300ms 防抖后端搜索；消息命中走 load-around。入口为 TitleBar / Web 侧栏 **假输入框**（`SearchTrigger`，文案「搜索或运行命令…」），侧栏不放真输入框。
+`Ctrl/Cmd+K`：Tier 1 关键词搜索 + Tier 2 命令导航 ✅。空查询显最近对话+命令；有查询 300ms 防抖后端搜索；消息命中走 load-around。有查询时可按时间 / 工作区筛选结果。入口为 TitleBar / Web 侧栏 **假输入框**（`SearchTrigger`，文案「搜索或运行命令…」），侧栏不放真输入框。
 
 **搜索 / 筛选 / 查找 三层用词**（✅ 组件已收口）：
 
@@ -524,8 +571,5 @@ skip_if:
 | 无障碍访问 | 图视图的键盘导航和屏幕阅读器支持 |
 | 离线态 UX | 已连接但目录不可达时的降级展示 |
 | 深层诊断指标 | 诊断模式骨架 + 调度 `BatchMetrics` 已落地（§十，run 详情「调度」块）；收敛 `turn_metrics`、单 run 的 LLM 窗口/prompt 待后端经 SSE/接口暴露后挂入 run 详情/回合 meta ⏳ |
-| 空对话引导 | ✅ 空态仅保留主标题「今天想解决什么问题？」；场景模板卡片已否决（与手机端、宣传素材对齐） |
 | 流式文字平滑追加 | 正文按 2–3 字一组平滑追加的微动画（现 `streamingMarkdown.ts` 为逐块切分、无字符级动画） |
-| 对话自动标签 | 对话按类型（代码审查/研究/写作/分析）自动打标，供侧栏/检索筛选 |
 | 消息收藏 bookmark | 消息级收藏 → 侧栏「已收藏」聚合（现 `MessageActions` 仅删除） |
-| 搜索过滤器 | `Cmd/Ctrl+K` 搜索结果按时间/工作区/标签过滤（现为无过滤器关键词搜索，§十四） |

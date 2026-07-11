@@ -13,10 +13,11 @@ if TYPE_CHECKING:
 
 
 def can_persist_suspension(tool: AskUserTool) -> bool:
-    """Whether this ask_user pause should be durably persisted (结构化挂起 2b).
+    """Whether this ask_user pause can be durably persisted (结构化挂起 2b).
 
     The turn's ``message_id`` + the persist closure must be wired (the live CEO
-    path) — a standalone / un-wired construction (tests) keeps 2a in-memory only."""
+    path). Un-wired constructions (tests / standalone) return False — under D11
+    that means the tool fails the turn (no in-memory wait fallback)."""
     return bool(tool.message_id and tool.suspension_saver is not None and tool.conversation_id)
 
 
@@ -37,14 +38,15 @@ async def persist_suspension(
 
     Reads the CEO transcript off the ``captain_transcript`` contextvar (published
     by the captain executor) — without it a faithful resume is impossible, so
-    capture is skipped (the live resolve still works). Folds the about-to-emit
+    capture is skipped and this returns ``False``. Folds the about-to-emit
     ``checkpoint_required`` into the frame's journal so a resume replays the
-    prompt+resolution as a pair. Best-effort: the saver swallows its own errors.
+    prompt+resolution as a pair.
 
     Returns ``True`` iff a durable frame was actually saved. The 挂起即收口 (②)
     finalize path keys its「end the turn now」decision on this so it NEVER finalizes a
-    turn it could not later resume — an un-wired / transcript-less construction (tests,
-    标准 standalone) returns ``False`` and falls back to the in-memory wait.
+    turn it could not later resume. Under D11 an un-wired / transcript-less /
+    saver-failed construction returns ``False`` and the tool **explicitly fails** the
+    turn (no in-memory timed wait / no auto-continue).
     """
     if not can_persist_suspension(tool):
         return False
@@ -83,6 +85,9 @@ async def persist_suspension(
 
 
 async def drop_suspension(tool: AskUserTool) -> None:
-    """Delete the durable frame after a live in-process resolve / timeout (2b)."""
+    """Delete the durable frame after a live in-process resolve (2b; rare hot path).
+
+    Primary path is 挂起即收口 (②): frame stays until cold ``POST .../resume`` claims it.
+    """
     if can_persist_suspension(tool) and tool.suspension_deleter is not None:
         await tool.suspension_deleter(tool.message_id or "")

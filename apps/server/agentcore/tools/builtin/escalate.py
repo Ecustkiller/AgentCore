@@ -26,13 +26,16 @@ SUSPENDS in place. Who mediates depends on mode:
 - **协调模式**（根 CEO 协调 session 活跃，≥2 worker 默认）：CEO 波内存活，阻塞升级改由 CEO
   仲裁——worker
   挂起等 ``resolve_escalation``；初始不发用户可答卡。偏好/授权/费用类由 CEO 先 ``ask_user``
-  再 resolve（单一兑现路径）。超时仍回落 ``assumption``，绝不永久卡住。
+  再 resolve（单一兑现路径）。默认无限期等待（D2：``checkpoint_timeout_seconds`` 默认 None）；
+  用户 / CEO 可显式「按假设继续」；仅运维配置了超时上限时才出现 ``timed_out`` 并回落
+  ``assumption``。
 
 Un-armed turns (autonomous / handoff) and a full concurrency cap degrade to the
-non-blocking path. The mechanism (cap / suspend / SSE events / RunState recording) lives
-behind ``ToolContext.escalation`` so this tool stays off the event vocabulary (引擎纯化);
-the tool owns only the decision + the outcome→result mapping (:func:`escalate_tool_result`).
-设计见 docs/06-规划/阻塞式求决策设计.md / CEO协调模式；对比见 docs/03-AI核心/Agent协作模式.md。
+non-blocking path (自动按 ``assumption`` 继续). The mechanism (cap / suspend / SSE events /
+RunState recording) lives behind ``ToolContext.escalation`` so this tool stays off the event
+vocabulary (引擎纯化); the tool owns only the decision + the outcome→result mapping
+(:func:`escalate_tool_result`).
+设计见 docs/03-AI核心/Agent协作模式.md / 执行引擎架构设计.md（D2）；对比见编排器文档。
 """
 
 from __future__ import annotations
@@ -94,7 +97,8 @@ class EscalateTool:
                         "type": "string",
                         "description": (
                             "在拿到答复前你暂时采用的假设（你正/将据此继续）。blocking=true 时"
-                            "【必填】：等不到答复时按它继续（超时回落）；blocking=false 时"
+                            "【必填】：用户 / 主管显式「按假设继续」、或未武装 / 并发满退化为非阻"
+                            "塞、或运维配置了超时上限且届时未答复时，按它继续；blocking=false 时"
                             "强烈建议——写明它，主管才能判断你的产物是否需要据真实答案返工。"
                         ),
                     },
@@ -103,8 +107,9 @@ class EscalateTool:
                         "description": (
                             "可选，默认 false。false=【非阻塞】：上报后你立刻按假设把活做完、"
                             "主管收尾纠偏。true=【阻塞·求决策】：仅当这个岔路【猜错你的产物基本"
-                            "作废】时用——你会原地挂起等裁决再继续（须写明 assumption；"
-                            "等不到/无活跃用户则自动按假设继续，绝不会把你永久卡住）。"
+                            "作废】时用——你会原地挂起等裁决再继续（须写明 assumption；默认无限"
+                            "期等待，用户 / 主管可点「按假设继续」；仅未武装 sink、并发满、或运维"
+                            "显式配置超时时才自动按假设继续）。"
                         ),
                     },
                     "kind": {
@@ -216,17 +221,19 @@ class EscalateTool:
         kind = str(arguments.get("kind") or "normal").strip().lower()
         if kind not in ("normal", "scope", "dep"):
             kind = "normal"
-        # blocking=true 须带 assumption: it is the超时回落 (设计 §4.1, the dual of
-        # ask_user(blocking=false) requiring a fallback). Without it a timeout would have
-        # nowhere to land — so reject rather than silently guess.
+        # blocking=true 须带 assumption: dual of ask_user(blocking=false) requiring a
+        # fallback — used when the user/CEO explicitly「按假设继续」, when the call degrades
+        # to non-blocking (unarmed / concurrency cap), or when ops configured a timeout.
+        # Without it those paths would have nowhere to land — reject rather than guess.
         if blocking and not assumption:
             return ToolResult(
                 tool_call_id="",
                 success=False,
                 output="",
                 error=(
-                    "escalate(blocking=true) 必须写明 assumption：等不到答复时你将按它继续"
-                    "（超时回落）。若你本就能自行假设、不需拍板，请改用 blocking=false。"
+                    "escalate(blocking=true) 必须写明 assumption：显式「按假设继续」、未武装/"
+                    "并发满退化、或运维配置超时未答复时，你将按它继续。"
+                    "若你本就能自行假设、不需拍板，请改用 blocking=false。"
                 ),
             )
         logger.info(

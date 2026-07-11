@@ -63,7 +63,7 @@ async def test_loop_finalizes_plan_review_to_paused(monkeypatch):
     # PENDING, and the persisted journal must fold to the captain transcript.
     # Skip team_preview so this fixture reaches plan_review (wave-boundary durable pause).
     monkeypatch.setattr(
-        "agentcore.tools.builtin.delegate.preview.should_preview",
+        "agentcore.tools.builtin.delegate.preview.should_kickoff",
         lambda *a, **k: False,
     )
     system_prompt = "你是 CEO。"

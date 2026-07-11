@@ -31,10 +31,24 @@ import type {
   RunDebrief,
   RunEscalation,
   RunStatus,
+  TurnStatus,
 } from "@agentcore/protocol-conformance";
 import { type ReactNode, useState } from "react";
 
 type CheckpointDecision = NonNullable<ProjectedRun["checkpoint"]>["decision"];
+
+/**
+ * 团队便签墙默认展开规则（对齐桌面/画布，手机端自写一份，不共享桌面实现）：
+ * 便签为空 → 不渲染（调用方短路）；运行中且存在 active 便签 → 默认展开；否则默认收起。
+ */
+export function teamNotesDefaultExpanded(
+  status: TurnStatus | null | undefined,
+  notes: readonly ProjectedTeamNote[],
+): boolean {
+  if (notes.length === 0) return false;
+  if (status !== "running") return false;
+  return notes.some((n) => n.status === "active");
+}
 
 /** 团队便签墙 (§2.2 通) note kind → 中文 label + css class. `decision` (我定了) is a choice others
  * depend on (an interface / field name / format / naming); `heads_up` (提个醒) is a pitfall /
@@ -60,11 +74,11 @@ const NOTE_KIND_CLASS: Record<string, string> = {
 
 const RUN_STATUS: Record<RunStatus, { label: string; tone: string }> = {
   pending: { label: "等待", tone: "muted" },
-  ready: { label: "就绪", tone: "muted" },
   running: { label: "进行中", tone: "run" },
   completed: { label: "完成", tone: "ok" },
   failed: { label: "失败", tone: "err" },
   cancelled: { label: "已取消", tone: "muted" },
+  skipped: { label: "未执行", tone: "muted" },
 };
 
 function formatDuration(ms: number): string {
@@ -108,6 +122,7 @@ export function TeamView({
   runs,
   progress,
   teamNotes = [],
+  status,
   conversationId = null,
   pendingEscalations,
   escalationsInteractive = false,
@@ -119,6 +134,8 @@ export function TeamView({
   progress: { completed: number; total: number };
   /** 团队便签墙 (§2.2 通): notes workers broadcast to their concurrent siblings this turn. */
   teamNotes?: ProjectedTeamNote[];
+  /** Turn lifecycle from ProjectedTurn — drives team-notes default expand/collapse. */
+  status?: TurnStatus | null;
   /** 阻塞式求决策 (②): present on a live multi-agent turn so a worker's pending escalation
    *  renders as an actionable answer card. */
   conversationId?: string | null;
@@ -146,6 +163,7 @@ export function TeamView({
   const isDebate = workers.some((r) => r.stance);
   const pct =
     progress.total > 0 ? (progress.completed / progress.total) * 100 : 0;
+  const notesDefaultOpen = teamNotesDefaultExpanded(status, teamNotes);
 
   // Indent a nested delegate by how many worker parents it chains through (stage-2 子任务).
   const depthOf = (run: ProjectedRun): number => {
@@ -194,47 +212,15 @@ export function TeamView({
       {/* 团队便签墙 (§2.2 通): the one-line decisions / heads-ups workers broadcast to their
           concurrent siblings this turn — the visible, glass-box face of the note wall (贴事实·
           不要求回应, NOT a chat). Shown attributed (谁贴的) + kind-tagged (我定了 / 提个醒), in post
-          order. Empty (the common case) renders nothing. */}
+          order. Empty (the common case) renders nothing. Collapsible like 思考/工具组 (<details>):
+          running + active note → default open; finished/stopped → collapsed「团队便签 N」. Remount
+          via key when the default flips so turn completion re-applies the collapsed default. */}
       {teamNotes.length > 0 && (
-        <div className="team-notes">
-          <div className="team-notes-head">团队便签 {teamNotes.length}</div>
-          {teamNotes.map((note) => {
-            // 便签会过期 → supersession (§2.2): a 改写/作废'd note is struck + dimmed with a status
-            // pill, so a stale decision can't be mistaken for current truth. `active` → no pill.
-            const statusLabel = NOTE_STATUS_LABEL[note.status];
-            return (
-              <div
-                key={note.noteId}
-                className={`team-note${statusLabel ? " team-note-stale" : ""}`}
-              >
-                <div className="team-note-meta">
-                  <span
-                    className={`team-note-kind ${
-                      NOTE_KIND_CLASS[note.kind] ?? "kind-headsup"
-                    }`}
-                  >
-                    {NOTE_KIND_LABEL[note.kind] ?? "提醒"}
-                  </span>
-                  <span className="team-note-author">
-                    {note.role || note.agentId}
-                  </span>
-                  {statusLabel && (
-                    <span
-                      className={`team-note-status ${
-                        note.status === "voided"
-                          ? "status-voided"
-                          : "status-superseded"
-                      }`}
-                    >
-                      {statusLabel}
-                    </span>
-                  )}
-                </div>
-                <div className="team-note-text">{note.text}</div>
-              </div>
-            );
-          })}
-        </div>
+        <TeamNotesWall
+          key={notesDefaultOpen ? "open" : "shut"}
+          notes={teamNotes}
+          defaultOpen={notesDefaultOpen}
+        />
       )}
       {/* 深度检视单个队员 (RunDetail): the detail panel for the tapped run — a native <dialog>
           bottom sheet. Navigating (修订链切换 / 关系跳转) swaps `selectedRunId` so the SAME open
@@ -250,6 +236,65 @@ export function TeamView({
         />
       )}
     </div>
+  );
+}
+
+/** Collapsible team-notes wall — remounted by the parent when `defaultOpen` flips so the
+ *  running→finished transition re-applies the collapsed default (same key trick as desktop). */
+function TeamNotesWall({
+  notes,
+  defaultOpen,
+}: {
+  notes: ProjectedTeamNote[];
+  defaultOpen: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <details
+      className="team-notes"
+      open={open}
+      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+    >
+      <summary className="team-notes-head">团队便签 {notes.length}</summary>
+      <div className="team-notes-body">
+        {notes.map((note) => {
+          // 便签会过期 → supersession (§2.2): a 改写/作废'd note is struck + dimmed with a status
+          // pill, so a stale decision can't be mistaken for current truth. `active` → no pill.
+          const statusLabel = NOTE_STATUS_LABEL[note.status];
+          return (
+            <div
+              key={note.noteId}
+              className={`team-note${statusLabel ? " team-note-stale" : ""}`}
+            >
+              <div className="team-note-meta">
+                <span
+                  className={`team-note-kind ${
+                    NOTE_KIND_CLASS[note.kind] ?? "kind-headsup"
+                  }`}
+                >
+                  {NOTE_KIND_LABEL[note.kind] ?? "提醒"}
+                </span>
+                <span className="team-note-author">
+                  {note.role || note.agentId}
+                </span>
+                {statusLabel && (
+                  <span
+                    className={`team-note-status ${
+                      note.status === "voided"
+                        ? "status-voided"
+                        : "status-superseded"
+                    }`}
+                  >
+                    {statusLabel}
+                  </span>
+                )}
+              </div>
+              <div className="team-note-text">{note.text}</div>
+            </div>
+          );
+        })}
+      </div>
+    </details>
   );
 }
 

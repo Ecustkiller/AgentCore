@@ -6,45 +6,26 @@ import {
 } from "../conversationWorkspaceMode";
 
 describe("conversationWorkspaceMode", () => {
-  it("isConversationLocal follows localContainerRootId", () => {
+  it("isConversationLocal follows container for bare chats and folder.mode for projects", () => {
     expect(isConversationLocal({ localContainerRootId: null })).toBe(false);
     expect(isConversationLocal({ localContainerRootId: "root-1" })).toBe(true);
-    expect(isConversationLocal({})).toBe(false);
-  });
-
-  it("deriveGroupWorkspaceIsLocal prefers folder.localDir", () => {
     expect(
-      deriveGroupWorkspaceIsLocal({ localDir: "/home/proj" }, [
-        { localContainerRootId: null },
-      ]),
-    ).toBe(true);
-  });
-
-  it("deriveGroupWorkspaceIsLocal uses majority of conversations", () => {
-    const folder = { localDir: null };
-    expect(
-      deriveGroupWorkspaceIsLocal(folder, [
-        { localContainerRootId: "a" },
-        { localContainerRootId: "b" },
-        { localContainerRootId: null },
-      ]),
+      isConversationLocal(
+        { localContainerRootId: null, folderId: "f1" },
+        { mode: "local" },
+      ),
     ).toBe(true);
     expect(
-      deriveGroupWorkspaceIsLocal(folder, [
-        { localContainerRootId: null },
-        { localContainerRootId: null },
-        { localContainerRootId: "a" },
-      ]),
+      isConversationLocal(
+        { localContainerRootId: null, folderId: "f1" },
+        { mode: "cloud" },
+      ),
     ).toBe(false);
   });
 
-  it("deriveGroupWorkspaceIsLocal breaks ties on most recent conv", () => {
-    expect(
-      deriveGroupWorkspaceIsLocal({ localDir: null }, [
-        { localContainerRootId: "a" },
-        { localContainerRootId: null },
-      ]),
-    ).toBe(true);
+  it("deriveGroupWorkspaceIsLocal reads folder.mode", () => {
+    expect(deriveGroupWorkspaceIsLocal({ mode: "local" })).toBe(true);
+    expect(deriveGroupWorkspaceIsLocal({ mode: "cloud" })).toBe(false);
   });
 
   it("shouldShowConversationCloudIcon for bare and grouped rows", () => {

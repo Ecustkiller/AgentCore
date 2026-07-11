@@ -41,7 +41,12 @@ describe("workspace binding service", () => {
 
     expect(fetchMock.mock.calls[0][0]).toBe(URL);
     expect(callInit(fetchMock).method ?? "GET").toBe("GET");
-    expect(b).toEqual({ mode: "local", scope: "folder", rootId: "root-9" });
+    expect(b).toEqual({
+      mode: "local",
+      scope: "folder",
+      rootId: "root-9",
+      source: null,
+    });
   });
 
   it("binds a local root with a PUT carrying { root_id }", async () => {
@@ -60,6 +65,7 @@ describe("workspace binding service", () => {
       mode: "local",
       scope: "conversation",
       rootId: "root-1",
+      source: null,
     });
   });
 
@@ -72,7 +78,12 @@ describe("workspace binding service", () => {
 
     expect(fetchMock.mock.calls[0][0]).toBe(URL);
     expect(callInit(fetchMock).method).toBe("DELETE");
-    expect(b).toEqual({ mode: "cloud", scope: "conversation", rootId: null });
+    expect(b).toEqual({
+      mode: "cloud",
+      scope: "conversation",
+      rootId: null,
+      source: null,
+    });
   });
 });
 
@@ -85,13 +96,19 @@ describe("isBoundRootMissing (§八 degradation gate)", () => {
     mode: "local",
     scope: "conversation",
     rootId,
+    source: "explicit",
   });
 
   it("is false for no binding or cloud mode (nothing to lose)", () => {
     expect(isBoundRootMissing(null, roots)).toBe(false);
     expect(
       isBoundRootMissing(
-        { mode: "cloud", scope: "conversation", rootId: null },
+        {
+          mode: "cloud",
+          scope: "conversation",
+          rootId: null,
+          source: null,
+        },
         roots,
       ),
     ).toBe(false);

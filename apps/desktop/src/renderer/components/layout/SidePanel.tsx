@@ -4,6 +4,10 @@ import {
   CommandPanelBody,
   useCommandRegion,
 } from "@/components/graph/CanvasDecisionPanel";
+import {
+  TerminalPanelBody,
+  useTerminalRegion,
+} from "@/components/terminal/TerminalPanel";
 import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { WorkspaceMode } from "@/components/workspace/WorkspacePanel";
@@ -16,6 +20,7 @@ import {
 import {
   COMMAND_TAB_ID,
   type DetailTab,
+  TERMINAL_TAB_ID,
   WORKSPACE_TAB_ID,
   useSidePanelStore,
 } from "@/stores/sidePanel";
@@ -24,6 +29,7 @@ import {
   Gavel,
   MessageSquare,
   Sparkles,
+  Terminal,
   UserRound,
   X,
 } from "lucide-react";
@@ -82,17 +88,22 @@ export function SidePanel() {
   // never steals active tab). Hook runs before the `open` early-return so its effect
   // can reveal the panel even while closed. Inert in chat mode (`active` is false).
   const command = useCommandRegion();
+  // 后台进程终端 tab：有存活/曾有进程才出现；不绑画布模式。
+  const terminal = useTerminalRegion();
 
   const visibleTabs = useMemo(() => {
     const live = new Set(liveTabKey ? liveTabKey.split("\u0001") : []);
     return tabs.filter((t) => live.has(t.id));
   }, [tabs, liveTabKey]);
   const activeTab =
-    activeTabId === WORKSPACE_TAB_ID || activeTabId === COMMAND_TAB_ID
+    activeTabId === WORKSPACE_TAB_ID ||
+    activeTabId === COMMAND_TAB_ID ||
+    activeTabId === TERMINAL_TAB_ID
       ? null
       : (visibleTabs.find((t) => t.id === activeTabId) ?? null);
   const workspaceActive = activeTabId === WORKSPACE_TAB_ID;
   const commandActive = command.show && activeTabId === COMMAND_TAB_ID;
+  const terminalActive = terminal.show && activeTabId === TERMINAL_TAB_ID;
 
   // Leaving canvas while on 指挥台: fall back to 工作区 (the tab disappears).
   useEffect(() => {
@@ -100,6 +111,13 @@ export function SidePanel() {
       setActiveTab(WORKSPACE_TAB_ID);
     }
   }, [command.show, activeTabId, setActiveTab]);
+
+  // 终端 tab 消失时回落工作区。
+  useEffect(() => {
+    if (!terminal.show && activeTabId === TERMINAL_TAB_ID) {
+      setActiveTab(WORKSPACE_TAB_ID);
+    }
+  }, [terminal.show, activeTabId, setActiveTab]);
 
   // Content / simple-turn tabs read message text via narrow slices so a streaming
   // turn (a new `messages` array every tick) never re-renders this dock (收窄订阅).
@@ -163,6 +181,12 @@ export function SidePanel() {
               onClick={() => setActiveTab(COMMAND_TAB_ID)}
             />
           )}
+          {terminal.show && (
+            <TerminalTab
+              active={terminalActive}
+              onClick={() => setActiveTab(TERMINAL_TAB_ID)}
+            />
+          )}
           {visibleTabs.map((tab) => (
             <RunTabChip
               key={tab.id}
@@ -199,10 +223,15 @@ export function SidePanel() {
             />
           </div>
         )}
+        {terminal.show && (
+          <div className={`absolute inset-0 ${terminalActive ? "" : "hidden"}`}>
+            <TerminalPanelBody />
+          </div>
+        )}
         {activeTab?.kind === "run" && (
           <div className="absolute inset-0 overflow-y-auto">
             <RunDetailBody
-              key={activeTab.id}
+              key={`${activeTab.id}:${activeTab.runId}`}
               messageId={activeTab.messageId}
               runId={activeTab.runId}
             />
@@ -294,6 +323,30 @@ function CommandTab({
           {badge > 9 ? "9+" : badge}
         </span>
       )}
+    </Button>
+  );
+}
+
+/** Fixed 终端 tab：有后台进程才出现，不绑画布；永不关闭（随内容消失）。 */
+function TerminalTab({
+  active,
+  onClick,
+}: {
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      variant="ghost"
+      onClick={onClick}
+      className={`shrink-0 gap-1.5 px-2.5 py-1 text-sm font-medium ${
+        active
+          ? "bg-accent text-foreground"
+          : "text-muted-foreground hover:bg-accent/50"
+      }`}
+      icon={<Terminal size={14} />}
+    >
+      终端
     </Button>
   );
 }

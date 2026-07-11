@@ -53,11 +53,11 @@ export type TurnStatus =
 
 export type RunStatus =
   | "pending"
-  | "ready"
   | "running"
   | "completed"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "skipped";
 
 export type ModelTier = "fast" | "strong";
 export type ReasoningEffort = "high" | "max" | "low" | null;
@@ -89,7 +89,7 @@ export interface ProjectedAgent {
  * 已失效 terminal (提问确认统一重构: the pending gate was invalidated by restart/recover). */
 export interface ProjectedRunCheckpoint {
   status: "pending" | "resolved";
-  decision: "continue" | "adjust" | "stop" | "timeout" | "orphaned" | null;
+  decision: "continue" | "per_call" | "adjust" | "stop" | "timeout" | "orphaned" | null;
 }
 
 /** 升级实时可见 / 阻塞式求决策: one escalation a worker raised mid-run via `escalate` (its

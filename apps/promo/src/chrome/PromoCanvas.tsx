@@ -4,8 +4,9 @@ import {
   AlertTriangle,
   ArrowUp,
   CheckCircle2,
+  ClipboardCheck,
   Cloud,
-  Gavel,
+  ListChecks,
   Loader2,
   Maximize,
   Maximize2,
@@ -31,7 +32,7 @@ import { buildGraphState } from "../graph/graphState";
  * team is alive in it", AND "you command that team" — the三连 the chat-only crops miss.
  *
  * The spine cards mirror SimpleTurnNode / TurnSummaryNode; the focused card mirrors
- * FocusedTurnNode; the right rail mirrors CanvasDecisionPanel (指挥台, 待你拍板 + 工作者
+ * FocusedTurnNode; the right rail mirrors CanvasDecisionPanel (指挥台, 计划复核 + 工作者
  * 上报); the bottom bar mirrors CanvasCommandBar. Bottom-anchored so the focused turn
  * sits low (above the bar, under a spotlight) with earlier turns climbing into the
  * header — the same latest-turn camera the real canvas parks on.
@@ -242,7 +243,7 @@ function FocusedTurnCard() {
         </span>
         <span className="flex shrink-0 items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
           <AlertTriangle size={12} />
-          待你拍板 1
+          待你确认 1
         </span>
         <span className="flex size-7 items-center justify-center rounded-lg text-muted-foreground">
           <Maximize2 size={15} />
@@ -314,13 +315,13 @@ function CommandBar() {
 }
 
 /** 图上指挥 指挥台 (前端UX设计.md §6.2): the boss's pending decisions docked right.
- * Mirrors CanvasDecisionPanel — a 待你拍板 checkpoint (the debate's ruling) + a worker
+ * Mirrors CanvasDecisionPanel — a 计划复核 checkpoint (plan_review) + a worker
  * 上报 (成本分析 waiting on the budget cap that paused the budget turn above). */
 function CommandDeck() {
   return (
     <aside className="flex w-[360px] shrink-0 flex-col border-l border-border bg-card">
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border pl-3 pr-1">
-        <Gavel size={15} className="shrink-0 text-warning" />
+        <ListChecks size={15} className="shrink-0 text-warning" />
         <span className="min-w-0 flex-1 text-sm font-medium text-foreground">
           指挥台
           <span className="ml-1.5 rounded-full bg-warning/15 px-1.5 py-0.5 text-xs font-medium text-warning">
@@ -334,21 +335,21 @@ function CommandDeck() {
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
         <div className="rounded-xl border border-warning/30 bg-warning/5 p-3">
           <div className="mb-1.5 flex items-center gap-1.5">
-            <Gavel size={14} className="text-warning" />
-            <span className="text-sm font-medium text-warning">待你拍板</span>
+            <ClipboardCheck size={14} className="text-warning" />
+            <span className="text-sm font-medium text-warning">计划复核</span>
           </div>
           <p className="text-sm font-medium text-foreground">
-            是否采用激进重构方案？
+            CEO 已定稿产品策略，待你确认推进
           </p>
           <p className="mt-1 text-xs leading-snug text-muted-foreground">
-            正反两营已交锋：架构师主张押注长期收益，成本分析坚持保留可回退边界。请你裁决方向。
+            综合圆桌辩论的主持人裁决：先验证关键风险，再分阶段放大投入，锁定团队协作主线。确认后并行产出产品需求与技术方案。
           </p>
           <div className="mt-3 flex gap-2">
             <span className="flex-1 rounded-lg bg-primary px-3 py-1.5 text-center text-sm font-medium text-primary-foreground">
-              采用
+              继续
             </span>
             <span className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-center text-sm text-foreground">
-              否决
+              调整
             </span>
           </div>
         </div>

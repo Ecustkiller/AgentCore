@@ -42,7 +42,7 @@ export const BYOK_PROVIDER_PRESETS: readonly ByokProviderPreset[] = [
     baseUrl: "https://api.deepseek.com",
     baseUrlAliases: ["https://api.deepseek.com/v1"],
     defaultModel: "deepseek-v4-pro",
-    models: ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat"],
+    models: ["deepseek-v4-pro", "deepseek-v4-flash"],
     keyHelpUrl: "https://platform.deepseek.com/api_keys",
   },
   {

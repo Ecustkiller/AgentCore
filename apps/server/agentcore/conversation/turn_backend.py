@@ -9,17 +9,18 @@ def build_turn_backend(
     *,
     user_id: str,
     conversation_id: str,
+    folder_id: str | None,
     sink: EventSink,
     local_binding: LocalBinding | None,
 ) -> WorkspaceBackend:
     """Pick a turn's workspace backend: local when bound, else cloud.
 
-    Post Folder-refactor: every conversation always has a scratch space
-    (folder_id=None forces the conv:<id> path). No more DeferredWorkspace.
+    Project conversations pass ``folder_id`` so cloud mode shares ``folder:<id>``;
+    裸聊 passes ``folder_id=None`` for per-conversation ``conv:<id>`` scratch.
     """
     return build_workspace(
         user_id=user_id,
-        folder_id=None,
+        folder_id=folder_id,
         conversation_id=conversation_id,
         sink=sink,
         local_binding=local_binding,

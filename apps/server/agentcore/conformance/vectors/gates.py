@@ -262,6 +262,7 @@ def _team_preview_finalized() -> list[SSEEvent]:
                     "debate": False,
                 },
             ],
+            tools=["code_execute", "file_write", "test_run"],
         ),
         message_end(FinishReason.PAUSED, input_tokens=1200, output_tokens=80, cost=_COST),
     ]

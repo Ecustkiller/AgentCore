@@ -9,11 +9,17 @@ is intentionally NOT here: unification is injection-side only (文档「守恒�
 
 from agentcore.runtime.context.assembler import ContextAssembler
 from agentcore.runtime.context.contributor import PromptContributor, SectionOrder
+from agentcore.runtime.context.workspace_context import (
+    build_workspace_context,
+    desktop_client_can_bind,
+)
 from agentcore.runtime.context.workspace_overview import build_workspace_overview
 
 __all__ = [
     "ContextAssembler",
     "PromptContributor",
     "SectionOrder",
+    "build_workspace_context",
     "build_workspace_overview",
+    "desktop_client_can_bind",
 ]

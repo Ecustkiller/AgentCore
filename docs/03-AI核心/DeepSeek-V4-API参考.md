@@ -224,7 +224,7 @@ messages.append({
 
 4. **并发限制**：Flash 2,500 并发 / Pro 500 并发。Multi-Agent 场景下注意 Pro 的并发上限。
 
-5. **不支持强制 tool_choice**：V4 不支持用 `tool_choice` 参数强制模型必须调用某个工具，由模型自主决定是否调用。（我方代码只发 `auto`＝放行 / `none`＝禁用工具，均正常生效；从不发 `required`，故不受此限。）
+5. **不支持强制 tool_choice**：V4 不支持用 `tool_choice` 参数强制模型必须调用某个工具，由模型自主决定是否调用。运行时对话只发 `auto`／`none`；BYOK `probe_tools` 会先试一次 `required`，遇 HTTP 400 再回退为省略 tool_choice（见 `OpenAICompatibleProvider.probe_tools`）。
 
 6. **不支持 developer role**：不支持 OpenAI 的 `developer` role，只支持 `system`、`user`、`assistant`、`tool`。
 

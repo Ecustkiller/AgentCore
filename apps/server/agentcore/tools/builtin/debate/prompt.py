@@ -308,18 +308,20 @@ def round_context_blocks(
     round_no: int,
     focus: str,
     last_round: RoundResult,
+    feedback: str,
     interjections: Sequence[UserInterjection] = (),
 ) -> list[ContextBlock]:
     """后续轮 continue_run 的【收到的上下文】展示投影（上下文传递可视化）。
 
-    与 :func:`round_feedback`（渲染给 LLM 吃的字符串）**从同一批输入孪生构造**——本轮焦点 /
-    用户追问 / 对方上一轮论点(每方一段·头尾裁剪) / 上一轮被驳命门。二者共享 :func:`_clip` /
-    :func:`_interjection_mine` / :func:`_challenged_lines` 这几个内容源，避开「拼给 LLM」与
-    「展示给用户」双源漂移（补丁绊线：同一份事实只算一次）。``continue_run`` 把这批 block 作为
-    ``run_context`` 事件抛出，前端修订节点的「任务/收到的上下文」据此渲染（辩论 v2+ 面板不再空白
-    也不再显示首轮通用任务）。"""
+    首块 ``channel=task`` 的 ``body`` **逐字复用** :func:`round_feedback` 返回值（禁止二次改写），
+    ``heading`` 标明「第 N 轮任务」——前端拿 heading 当标题、拿 body 展示该轮真实指令。其后为
+    浓缩孪生材料块：本轮焦点 / 用户追问 / 对方上一轮论点(每方一段·头尾裁剪) / 上一轮被驳命门，
+    与 feedback **从同一批输入孪生构造**，共享 :func:`_clip` / :func:`_interjection_mine` /
+    :func:`_challenged_lines`，避开「拼给 LLM」与「展示给用户」双源漂移。``continue_run`` 把这批
+    block 作为 ``run_context`` 事件抛出。"""
     blocks: list[ContextBlock] = [
-        ContextBlock(channel="round_focus", heading=f"第 {round_no} 轮 · 本轮焦点", body=focus)
+        ContextBlock(channel="task", heading=f"第 {round_no} 轮任务", body=feedback),
+        ContextBlock(channel="round_focus", heading=f"第 {round_no} 轮 · 本轮焦点", body=focus),
     ]
     mine = _interjection_mine(side, interjections)
     if mine:
@@ -359,11 +361,29 @@ def round_context_blocks(
     return blocks
 
 
-# 结辩环节喂给辩手的定调（阶段化发言角色 P4）：与 closing_task 从同一句意图孪生，供 run_context 展示。
-_CLOSING_CONTEXT_BODY = (
-    "本场辩论已充分交锋，主持人请你做【结辩陈词】：只讲胜负手（本方最强 1–2 点 + 为何对方最关键的"
-    "反驳不成立），不得引入任何新论据 / 新事实 / 新案例，短而有力地收束。"
-)
+def cx_context_blocks(
+    round_no: int,
+    questions: Sequence[str],
+    feedback: str,
+) -> list[ContextBlock]:
+    """质询环节 continue_run 的【收到的上下文】展示投影。
+
+    首块 ``channel=task`` 的 ``body`` **逐字复用** :func:`cx_answer_feedback` 返回值；
+    ``heading`` 为「质询环节」。其后保留 ``cross_exam`` 问题清单块（前端靠通道 presence
+    判 beat / chip 标签），与既有契约不变。"""
+    return [
+        ContextBlock(channel="task", heading="质询环节", body=feedback),
+        ContextBlock(
+            channel="cross_exam",
+            heading=f"第 {round_no} 轮 · 质询（必须正面回答）",
+            body="\n".join(f"- {q}" for q in questions),
+        ),
+    ]
+
+
+# 结辩通道块的环节标记（纯 presence / chip 标签用）：真实指令走 task 块复用 closing_task，
+# 本句不再复述胜负手 / 禁新论据等约束（那些只在 feedback / task.body 里出现一次）。
+_CLOSING_CONTEXT_BODY = "本场辩论已充分交锋，现请做结辩陈词。"
 
 
 def closing_task(config: DebateConfig, side: DebateSide) -> str:
@@ -387,9 +407,17 @@ def closing_task(config: DebateConfig, side: DebateSide) -> str:
     )
 
 
-def closing_context_blocks(config: DebateConfig, side: DebateSide) -> list[ContextBlock]:
-    """结辩环节 continue_run 的【收到的上下文】展示投影（上下文传递可视化）——与 :func:`closing_task`
-    同源孪生。结辩不再喂对手全文（辩手全程记忆已在 session 里），只给「请做结辩、只讲胜负手」这一定调，
-    前端结辩修订节点的「收到的上下文」据此渲染，而非空白或沿用上一轮的逐轮任务。"""
-    _ = side  # 结辩定调对各方一致（角色差异已由 role_directive 进 feedback），此处不因方而变。
-    return [ContextBlock(channel="closing", heading="结辩环节", body=_CLOSING_CONTEXT_BODY)]
+def closing_context_blocks(
+    config: DebateConfig, side: DebateSide, feedback: str
+) -> list[ContextBlock]:
+    """结辩环节 continue_run 的【收到的上下文】展示投影（上下文传递可视化）。
+
+    首块 ``channel=task`` 的 ``body`` **逐字复用** :func:`closing_task` 返回值，``heading`` 为
+    「结辩环节」。其后保留 ``closing`` 通道块（前端靠通道 presence 判 beat / chip），body 仅为
+    纯环节标记短句（:data:`_CLOSING_CONTEXT_BODY`），不再复述指令内容。结辩不再喂对手全文
+    （辩手全程记忆已在 session 里）。"""
+    _ = (config, side)  # 角色差异已由 role_directive 进 feedback；通道标记各方一致。
+    return [
+        ContextBlock(channel="task", heading="结辩环节", body=feedback),
+        ContextBlock(channel="closing", heading="结辩环节", body=_CLOSING_CONTEXT_BODY),
+    ]

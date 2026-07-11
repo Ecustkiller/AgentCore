@@ -20,6 +20,10 @@ export function artifactUrlsForVersion(version) {
  * Skips draft latest (CI upload) so the site stays on the last public version
  * until Publish — same rule as build-time fetch-release.mjs.
  *
+ * When GitHub latest is **older** than ``fallbackVersion`` (bump already landed
+ * in source but the release is not published yet), keep the fallback so a
+ * premature website deploy cannot bake a regressive version into SSG.
+ *
  * @param {string} fallbackVersion
  * @returns {Promise<ReleaseArtifacts>}
  */
@@ -38,6 +42,10 @@ export async function fetchLatestReleaseArtifacts(fallbackVersion) {
       throw new Error(`Latest release ${data.tag_name} is still draft`);
     }
     const version = String(data.tag_name).replace(/^v/, "");
+    if (compareSemver(fallbackVersion, version) > 0) {
+      // Source FALLBACK is ahead of GitHub latest — prefer FALLBACK URLs.
+      return fallback;
+    }
     const assets = data.assets ?? [];
     const winAsset = assets.find((a) => /-win-x64\.exe$/i.test(a.name));
     const macAsset = assets.find((a) => /-mac-arm64\.dmg$/i.test(a.name));
@@ -53,4 +61,16 @@ export async function fetchLatestReleaseArtifacts(fallbackVersion) {
   } catch {
     return fallback;
   }
+}
+
+/** @param {string} a @param {string} b @returns {number} */
+function compareSemver(a, b) {
+  const pa = String(a).split(".").map((x) => parseInt(x, 10) || 0);
+  const pb = String(b).split(".").map((x) => parseInt(x, 10) || 0);
+  const n = Math.max(pa.length, pb.length);
+  for (let i = 0; i < n; i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
 }

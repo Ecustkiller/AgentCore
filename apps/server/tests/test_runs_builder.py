@@ -520,6 +520,23 @@ def test_requires_files_false_alone_is_no_rule():
     assert plan.nodes[0].deliverable is None
 
 
+def test_artifacts_parsed_and_imply_requires_files():
+    plan, _ = build_run_plan(
+        [
+            {
+                "role": "集成",
+                "task": "收口",
+                "deliverable": {"artifacts": ["README.md", "examples/", "pkg/**/*.py"]},
+            }
+        ],
+        id_prefix="t",
+    )
+    d = plan.nodes[0].deliverable
+    assert d is not None
+    assert d.artifacts == ["README.md", "examples/", "pkg/**/*.py"]
+    assert d.requires_files is True
+
+
 def test_dag_step_deliverable_parsed_independently():
     tasks = [
         {"id": "s1", "role": "A", "task": "a", "deliverable": {"min_length": 50}},

@@ -29,7 +29,8 @@ function byPinnedThenRecency(a: Conversation, b: Conversation): number {
  *
  * No section title — group headers (cloud/local icon + trailing chevron) vs flat
  * {@link ConversationItem} rows carry the IA. When both zones exist, a hairline divider
- * separates them. When every chat is foldered this zone renders nothing.
+ * separates them; inside this zone a second hairline splits 置顶 from 普通 whenever both
+ * groups are present. When every chat is foldered this zone renders nothing.
  */
 export function RecentConversations() {
   const conversations = useConversations();
@@ -62,15 +63,32 @@ export function RecentConversations() {
   // Every chat is foldered → no 裸聊 to show; the「工作区」zone carries the rail.
   if (recent.length === 0) return null;
 
+  // 置顶浮顶后，用一条 hairline 把置顶与普通裸聊分成两区（两组都非空时才出现）。
+  // 显式按 pinned 切分而非靠排序下标，才不会被上面「活跃裸聊兜底入列」打乱分区。
+  const pinned = recent.filter((c) => c.pinned);
+  const rest = recent.filter((c) => !c.pinned);
+
   return (
     <div
       className={`px-2 py-1 ${hasGroups ? "mx-3 border-t border-sidebar-border pt-2" : ""}`}
     >
-      <div className="space-y-0.5">
-        {recent.map((conv) => (
-          <ConversationItem key={conv.id} conversation={conv} />
-        ))}
-      </div>
+      {pinned.length > 0 && (
+        <div className="space-y-0.5">
+          {pinned.map((conv) => (
+            <ConversationItem key={conv.id} conversation={conv} />
+          ))}
+        </div>
+      )}
+      {pinned.length > 0 && rest.length > 0 && (
+        <div className="my-1.5 border-t border-sidebar-border/60" />
+      )}
+      {rest.length > 0 && (
+        <div className="space-y-0.5">
+          {rest.map((conv) => (
+            <ConversationItem key={conv.id} conversation={conv} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

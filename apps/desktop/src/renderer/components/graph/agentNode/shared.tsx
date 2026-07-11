@@ -2,6 +2,7 @@ import { statusPillSoft } from "@/components/ui/tone-presets";
 import { formatDuration } from "@/lib/format";
 import type { ReviewConcernLevel } from "@/lib/reviewConcern";
 import type {
+  DebateBeat,
   ModelTier,
   PlanRevisionKind,
   ReasoningEffort,
@@ -9,6 +10,7 @@ import type {
   RunStatus,
   Stance,
 } from "@/stores/execution";
+import { debateBeatLabel } from "@/stores/execution";
 import { Check, Loader2, X } from "lucide-react";
 
 export interface AgentNodeData {
@@ -40,6 +42,25 @@ export interface AgentNodeData {
   revision?: number;
   /** 真·多轮辩论轮次（1-based；0 = 非多轮）。与侧栏 RunRevisionChain 同源。 */
   round?: number;
+  /**
+   * 辩论 continue_run 发言角色（陈词 / 质询 / 结辩）。来自 `run_context.channel`；
+   * 缺省按陈词。协作图质询已折进轮节点，角标仅陈词续轮「第 N 轮」/ 结辩「结辩」；
+   * 质询态见 {@link debateRoundPhase}。
+   */
+  debateBeat?: DebateBeat | null;
+  /**
+   * 轮节点折叠质询后的直播进度文案（「立论中」/「质询作答中」）；无折叠或非运行中为 null。
+   */
+  debateRoundPhase?: string | null;
+  /**
+   * 收场态质询标记：完成「含质询」后缀 / 质询失败整行归因；可点直达质询 run。
+   */
+  debateCrossExamMark?: {
+    label: string;
+    mode: "suffix" | "replace";
+  } | null;
+  /** 点击质询标记 → activateNode(质询 runId)；与整卡 onActivate 分路。 */
+  onActivateCrossExam?: () => void;
   /** 辩论配对组（`debate:*`）；与 stance 一起判定辩手 / 续轮。 */
   group?: string | null;
   /**
@@ -58,8 +79,6 @@ export interface AgentNodeData {
   escalationRaised?: number;
   /** 节点上最严重的 escalate kind（scope > dep > normal），驱动角标文案。 */
   escalationKind?: "normal" | "scope" | "dep" | null;
-  /** 该 run 的审计事件数（GraphView 角标；0 或未设则不渲染）。 */
-  auditEventCount?: number;
   /** Review/QC output flagged by {@link detectReviewConcern} (中间可见性 phase-1). */
   reviewConcern?: ReviewConcernLevel | null;
   /** Folded child runs under this unit root (delegation drill-in). */
@@ -76,11 +95,11 @@ export const PEEK_ARTIFACT_CAP = 6;
 
 export const STATUS_STYLES: Record<string, { ring: string; bg: string }> = {
   pending: { ring: "ring-muted-foreground/30", bg: "bg-card" },
-  ready: { ring: "ring-muted-foreground/30", bg: "bg-card" },
   running: { ring: "ring-primary", bg: "bg-card" },
   completed: { ring: "ring-success", bg: "bg-card" },
   failed: { ring: "ring-destructive", bg: "bg-card" },
   cancelled: { ring: "ring-muted-foreground/30", bg: "bg-muted" },
+  skipped: { ring: "ring-muted-foreground/30", bg: "bg-muted" },
 };
 
 export const PRESENCE_STYLES: Record<
@@ -88,7 +107,6 @@ export const PRESENCE_STYLES: Record<
   { cls: string; icon: React.ReactNode | null }
 > = {
   pending: { cls: "bg-muted-foreground/50", icon: null },
-  ready: { cls: "bg-muted-foreground/50", icon: null },
   running: {
     cls: "bg-primary",
     icon: <Loader2 size={9} className="animate-spin text-primary-foreground" />,
@@ -106,6 +124,7 @@ export const PRESENCE_STYLES: Record<
     ),
   },
   cancelled: { cls: "bg-muted-foreground/50", icon: null },
+  skipped: { cls: "bg-muted-foreground/50", icon: null },
 };
 
 export function basename(path: string): string {
@@ -117,11 +136,11 @@ export function basename(path: string): string {
 export function statusLabel(status: RunStatus): string {
   const labels: Record<RunStatus, string> = {
     pending: "等待中",
-    ready: "就绪",
     running: "执行中",
     completed: "已完成",
     failed: "失败",
     cancelled: "已停止",
+    skipped: "未执行",
   };
   return labels[status] ?? status;
 }
@@ -131,10 +150,20 @@ export function statusFaceLabel(
   status: RunStatus,
   durationMs: number | null | undefined,
   elapsedSec?: number,
+  /** 辩论轮节点折叠质询后的进度覆盖（立论中 / 质询作答中）。 */
+  debateRoundPhase?: string | null,
 ): { text: string; cls: string; tickElapsed: boolean } {
+  if (debateRoundPhase && status === "running") {
+    const suffix =
+      elapsedSec !== undefined && elapsedSec >= 1 ? ` · ${elapsedSec}s` : "";
+    return {
+      text: `${debateRoundPhase}${suffix}`,
+      cls: "text-primary/90",
+      tickElapsed: true,
+    };
+  }
   switch (status) {
     case "pending":
-    case "ready":
       return {
         text: "排队中",
         cls: "text-muted-foreground",
@@ -166,6 +195,12 @@ export function statusFaceLabel(
     case "cancelled":
       return {
         text: "已停止",
+        cls: "text-muted-foreground",
+        tickElapsed: false,
+      };
+    case "skipped":
+      return {
+        text: "未执行",
         cls: "text-muted-foreground",
         tickElapsed: false,
       };
@@ -219,29 +254,37 @@ export type RevisionBadgeKind = "hotfix" | "debate";
 
 export interface RevisionBadgePresentation {
   kind: RevisionBadgeKind;
-  /** 角标可见文案：`v2` 或 `第 2 轮`。 */
+  /** 角标可见文案：`v2` / `第 2 轮` / `第 2 轮·质询` / `结辩`。 */
   label: string;
   /** tooltip / title。 */
   title: string;
 }
 
 /**
- * 协作图修订角标：热修 = 铅笔 + vN（「热修修订」）；辩论续轮 =「第 N 轮」
- *（与侧栏 RunRevisionChain 一致）。v1 / 非修订不挂角标。
+ * 协作图修订角标：热修 = 铅笔 + vN（「热修修订」）；辩论可见列按 beat——续轮陈词
+ * 「第 N 轮」、结辩「结辩」。质询已折进轮节点，图上不再挂「第 N 轮·质询」
+ *（该文案仍留给侧栏 RunRevisionChain）。v1 / 非修订不挂角标。
  */
 export function buildRevisionBadge(opts: {
   isRevision?: boolean;
   revision?: number;
   round?: number;
   isDebate: boolean;
+  beat?: DebateBeat | null;
 }): RevisionBadgePresentation | null {
   if (!opts.isRevision || !opts.revision || opts.revision <= 1) return null;
   if (opts.isDebate) {
-    const n = opts.round && opts.round > 0 ? opts.round : opts.revision;
+    // 协作图节点不会是 cross_exam；若误传入则不挂角标（质询态在轮内 phase）。
+    if (opts.beat === "cross_exam") return null;
+    const label = debateBeatLabel({
+      round: opts.round,
+      revision: opts.revision,
+      beat: opts.beat,
+    });
     return {
       kind: "debate",
-      label: `第 ${n} 轮`,
-      title: `第 ${n} 轮`,
+      label,
+      title: label,
     };
   }
   const v = `v${opts.revision}`;

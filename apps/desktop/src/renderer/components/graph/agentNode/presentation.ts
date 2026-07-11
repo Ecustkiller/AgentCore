@@ -45,13 +45,28 @@ export function buildAgentNodePresentation(
         ? `≈${formatCompact(d.tokenCount)}`
         : "—";
   const durationText = d.durationMs ? formatDuration(d.durationMs) : null;
-  const statusFace = statusFaceLabel(d.status, d.durationMs);
+  const baseFace = statusFaceLabel(
+    d.status,
+    d.durationMs,
+    undefined,
+    d.debateRoundPhase,
+  );
+  const statusFace =
+    d.debateCrossExamMark?.mode === "replace"
+      ? { ...baseFace, text: d.debateCrossExamMark.label }
+      : d.debateCrossExamMark?.mode === "suffix"
+        ? {
+            ...baseFace,
+            text: `${baseFace.text} · ${d.debateCrossExamMark.label}`,
+          }
+        : baseFace;
   const debate = isDebateAgentNode(d);
   const revisionBadge = buildRevisionBadge({
     isRevision: d.isRevision,
     revision: d.revision,
     round: d.round,
     isDebate: debate,
+    beat: d.debateBeat,
   });
   const faceHint =
     d.isRevision && !debate ? revisionFaceHint(d.revisionSummary) : null;

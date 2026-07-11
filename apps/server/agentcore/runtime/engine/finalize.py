@@ -15,7 +15,7 @@ from agentcore.tools.registry import ToolRegistry
 
 from .constants import FINALIZE_COORDINATION_TOOLS, FINALIZE_INSTRUCTION
 from .governance import resolve_finalize_coordination_tools
-from .segments import join_segments
+from .segments import deliverable_continuity_instruction, join_segments
 from .stream import stream_llm_round
 
 logger = get_logger(__name__)
@@ -32,15 +32,31 @@ class FinalizeRoundResult:
     tool_calls: list[ToolCall] | None = None
 
 
-def _record_finalize_instruction(*, run_id: str) -> None:
+def _record_note(*, content: str, reason: str, run_id: str) -> None:
     record_turn_fact(
         NoteFact(
             role="user",
-            content=FINALIZE_INSTRUCTION,
-            reason="finalize",
+            content=content,
+            reason=reason,
             run_id=run_id,
         ).to_fact()
     )
+
+
+def _inject_finalize_instructions(
+    messages: list[LLMMessage],
+    *,
+    run_id: str,
+    prior_deliverable: str = "",
+) -> None:
+    """Inject continuity (when prior交付 exists) then the standard finalize steer."""
+    prior = prior_deliverable.strip()
+    if prior:
+        continuity = deliverable_continuity_instruction(prior_deliverable=prior)
+        messages.append(LLMMessage(role="user", content=continuity))
+        _record_note(content=continuity, reason="continuity", run_id=run_id)
+    messages.append(LLMMessage(role="user", content=FINALIZE_INSTRUCTION))
+    _record_note(content=FINALIZE_INSTRUCTION, reason="finalize", run_id=run_id)
 
 
 async def run_finalize_round(
@@ -58,11 +74,13 @@ async def run_finalize_round(
     hard_tool_free: bool = False,
     inject_instruction: bool = True,
     on_reset: Callable[[], None] | None = None,
+    prior_deliverable: str = "",
 ) -> FinalizeRoundResult:
     """One finalize LLM round: coordination tools only, or tool-free when ``hard_tool_free``."""
     if inject_instruction:
-        messages.append(LLMMessage(role="user", content=FINALIZE_INSTRUCTION))
-        _record_finalize_instruction(run_id=run_id)
+        _inject_finalize_instructions(
+            messages, run_id=run_id, prior_deliverable=prior_deliverable
+        )
 
     if hard_tool_free:
         tool_defs = None
@@ -162,6 +180,7 @@ async def force_finalize(
             run_id=run_id,
             hard_tool_free=False,
             on_reset=on_reset,
+            prior_deliverable=final_content,
         )
     except Exception as e:
         logger.error("engine.force_finalize_failed", reason=reason, error=str(e))

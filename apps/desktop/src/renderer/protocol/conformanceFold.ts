@@ -200,6 +200,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "run_completed":
       case "run_failed":
       case "run_cancelled":
+      case "run_skipped":
       case "run_progress":
       //「计划已调整」轻痕迹 (设计 §7.2): a NON-interrupting trace — folds onto the runs'
       // `revised` via the same frame path (no gate, like the escalate banner).

@@ -39,6 +39,7 @@ const INVALID_ARGS = "无效的请求参数";
 const invalidFsResult = (): FsResult<never> => ({
   ok: false,
   reason: INVALID_ARGS,
+  code: "invalid",
 });
 const invalidWriteResult = (): FsWriteResult => ({
   ok: false,
@@ -241,7 +242,7 @@ export function registerFsIpc(): void {
       requiresOpenConfirm(args.relPath) &&
       !(await confirmOpenPath(args.relPath))
     ) {
-      return { ok: false, reason: "已取消（未确认打开该文件）" };
+      return { ok: false, reason: "已取消（未确认打开该文件）", code: "invalid" };
     }
     return openWithDefaultApp(args.rootId, args.relPath);
   });

@@ -47,10 +47,6 @@ const SINK_STYLES: Record<string, { ring: string; icon: React.ReactNode }> = {
     ring: "ring-muted-foreground/30",
     icon: <Sparkles size={15} className="text-muted-foreground" />,
   },
-  ready: {
-    ring: "ring-muted-foreground/30",
-    icon: <Sparkles size={15} className="text-muted-foreground" />,
-  },
   running: {
     ring: "ring-primary",
     icon: <Loader2 size={15} className="animate-spin text-primary" />,
@@ -66,6 +62,10 @@ const SINK_STYLES: Record<string, { ring: string; icon: React.ReactNode }> = {
   cancelled: {
     ring: "ring-muted-foreground/30",
     icon: <XCircle size={15} className="text-muted-foreground" />,
+  },
+  skipped: {
+    ring: "ring-muted-foreground/30",
+    icon: <Sparkles size={15} className="text-muted-foreground" />,
   },
 };
 
@@ -188,11 +188,11 @@ export function EndpointNode({ data }: NodeProps) {
 function sinkLabel(status: RunStatus): string {
   const labels: Record<RunStatus, string> = {
     pending: "待汇总",
-    ready: "待汇总",
     running: "汇总中…",
     completed: "已汇总",
     failed: "失败",
     cancelled: "已停止",
+    skipped: "未执行",
   };
   return labels[status] ?? status;
 }

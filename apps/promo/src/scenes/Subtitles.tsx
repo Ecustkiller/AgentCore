@@ -19,7 +19,7 @@ const CUES: Cue[] = [
   { from: 210, to: 330, text: "AI 也一样" },
   { from: 330, to: 600, text: "单个模型有天花板，协作没有" },
   { from: 600, to: 720, text: "结果，自动汇聚为一个答案" },
-  { from: 720, to: 810, text: "并行 · 辩论 · 嵌套，一张图" },
+  { from: 720, to: 810, text: "并行 · 圆桌 · 嵌套，一张图" },
 ];
 
 const FADE = 8;

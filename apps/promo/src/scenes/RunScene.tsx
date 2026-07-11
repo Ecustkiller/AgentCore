@@ -17,11 +17,11 @@ import { caretVisible, entranceStyle, typeOut } from "../motion/primitives";
 const ANSWER_AT = GRAPH_SCENE_FRAMES; // 390 — convergence begins
 const CAPTAIN_PREVIEW = "汇总团队结论，输出最终方案……";
 
-const ANSWER = `综合团队的并行调研、正反方辩论与策略裁决，结论如下：
+const ANSWER = `综合团队的并行调研、多方圆桌论证与策略裁决，结论如下：
 
 以「真正的多 Agent 团队协作」为核心差异点切入——先用一条最小可用的协作主链路验证关键风险，再分阶段放大投入。
 
-首版聚焦 6 个里程碑；技术上以 DAG 调度 + 共享工作区 + MCP/A2A 为骨架，让团队能真正分工、并行、互相校对。`;
+首版聚焦 6 个里程碑；技术上以 DAG 波调度 + 共享工作区 + 团队便签为骨架，让团队能真正分工、并行、互相校对。`;
 
 export function RunMain() {
   const frame = useCurrentFrame();

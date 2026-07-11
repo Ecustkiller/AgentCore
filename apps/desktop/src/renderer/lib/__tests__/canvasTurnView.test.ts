@@ -16,7 +16,7 @@ describe("resolveCanvasTurnView", () => {
   });
 });
 
-describe("canvas turn view persistence (vitest env = node → stub localStorage)", () => {
+describe("canvas turn view persistence (vitest env = node → stub uiStorage backend)", () => {
   const KEY = "agentcore:canvas-turn-views";
   let store: Record<string, string>;
 

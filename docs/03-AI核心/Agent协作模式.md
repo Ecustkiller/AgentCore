@@ -95,11 +95,20 @@ worker 唯一的向上通道。`blocking=false`（默认）= 上报后按 `assum
 - `kind=scope`：worker 发现自己 / 下游 scope 错了 → 主管在波边界**操舵已有步骤**纠偏（计划漂移）。
 - `kind=dep`：worker 卡在一个**还不存在**的输入 / 依赖（没人产出过、计划也没安排）→ 主管在波边界用 `replan(add)` **追加一个产出它的步骤 / 接一条依赖边**。它是「变·拉取」里「东西不存在」那一支（见 §波内共享上下文：便签墙·拉取）。
 
-worker 全程 non-blocking、照常按假设把能做的做完；简报（`supervised.py::format_scope_boundary`）按 kind 分标「偏离 / 缺输入」并指向对应 `replan` 杠杆，无下游可补时退回收尾路。**度量不串**：`dep` 计入总升级数但**不进** `scope_escalations`，漂移率口径仍纯。执行语义见 [执行引擎 §一·受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)。前端：`EscalationCard` / 节点角标按 kind 分标「普通 / 缺输入 / 职责偏离」（`kind` 已上 wire：`run_escalation` / `escalation_required`）；⏳ 手机交互层（fold 已有、应答卡未落地）。
+worker 全程 non-blocking、照常按假设把能做的做完；简报（`supervised.py::format_scope_boundary`）按 kind 分标「偏离 / 缺输入」并指向对应 `replan` 杠杆，无下游可补时退回收尾路。**度量不串**：`dep` 计入总升级数但**不进** `scope_escalations`，漂移率口径仍纯。执行语义见 [执行引擎 §一·受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)。前端：`EscalationCard` / 节点角标按 kind 分标「普通 / 缺输入 / 职责偏离」（`kind` 已上 wire：`run_escalation` / `escalation_required`）；手机交互层 ✅（fold + 升级应答卡均已移植，`apps/mobile/src/components/TeamView.tsx`、`protocol/parity.ts`）。
 
 > **schema 姿态（2026-06-30）**：`normal` / `blocking` 克制使用（小事自行假设别升级、blocking 省着用，避「问题墙 / 动辄打断用户」反模式）；**唯独 `dep` 该喊就喊**——真卡在「再猜也是错」的缺口上别硬猜瞎编，主动发 `dep` 强过闷头产一堆作废的东西。
 
 → 见代码：`tools/builtin/escalate.py`、`runtime/interaction.py`（`ESCALATION`）、`runtime/runs/executor_agent.py`（`_escalation_channel`）
+
+### worker `handoff` 交接简报 ✅ 已落地（质量门禁 ✅）
+
+worker 收尾的结构化向上通道（与 `escalate` 的「途中上报」对偶）：终态工具 `handoff`，字段 `summary`（必填）+ `key_points` / `assumptions` / `next_steps`（可选），产出 `debrief` 注入下游节点（「上游交接结论」头）与 CEO 汇总。
+
+- **有下游依赖的节点强制 handoff**：未调用或信息量不足（summary 少于 50 字且 key_points 少于 2 条）时，收尾护栏注入矫正指令逼出一次；仍缺则引擎从正文 + `files_touched` 合成降级 debrief（标 `degraded=true`），并进入 CEO 汇总「契约缺口」段。
+- **无下游依赖的节点保持可选**：短 / 自明交付不必为交而交；缺失时下游退回正文 + `files_touched` 指针（合法降级分支，conformance 有向量）。
+
+→ 见代码：`tools/builtin/handoff.py`、`runtime/runs/contract.py`（门禁阈值 / 合成）、`runtime/runs/serialize.py`、`runtime/runs/executor_agent.py`。
 
 ### Worker 问题处理：三档自主度 ✅ 已落地
 
@@ -184,7 +193,7 @@ CEO 主 Agent、`delegate` 按需委派与 DAG 波次调度——→ 见 [`编�
 |---|------|------|
 | 1 | **单一职责** | ✅ 每 Agent 一个明确职责 |
 | 2 | **强制上层委派** | ✅ 任务传递只走编排器调度 |
-| 3 | **读写分离** | CEO 只读 / worker 变更（⏳ `mutation` 工具过滤未实现） |
+| 3 | **读写分离** | ✅ CEO 只读 / worker 变更——CEO registry 仅收 `approval=NEVER` 只读子集（`build_ceo_tool_registry`，按审批级过滤） |
 | 4 | **上下文最小传递** | ✅ worker 隔离上下文，不全量历史 |
 | 5 | **分层熔断** | ✅ 引擎 `LoopController`（⏳ Redis 熔断 fail-open 未实现） |
 | 6 | **幂等性执行** | ⏳ 写操作 idempotency key 未实现 |
@@ -206,7 +215,7 @@ CEO 主 Agent、`delegate` 按需委派与 DAG 波次调度——→ 见 [`编�
 
 ### 7.2 委派预审
 
-**薄预览（✅ 已落地）**：开干前否决权——首波前展示即将上场的团队（角色 / 任务摘要 / 依赖 / 是否辩论），三按钮开做 / 调整 / 停止。挂起条件、跳过规则、与 `plan_review` / `ask_user` 边界见 [`编排器与CEO主Agent.md` §五](/docs/03-AI核心/编排器与CEO主Agent.md)。Interaction kind = `team_preview`；事件 `team_preview_required` / `team_preview_resolved`；前端 `TeamPreviewCard` + durable resume。
+**薄预览（✅ 已落地）**：开干前否决权——首波前展示即将上场的团队（角色 / 任务摘要 / 依赖 / 是否辩论），开工卡四选一：授权并开工 / 逐次审批 / 调整 / 停止（合并能力授权征询，`delegate/preview.py`；受用户自治三档影响，见 [安全权限与治理 §三](/docs/05-平台与运维/安全权限与治理.md)）。挂起条件、跳过规则、与 `plan_review` / `ask_user` 边界见 [`编排器与CEO主Agent.md` §五](/docs/03-AI核心/编排器与CEO主Agent.md)。Interaction kind = `team_preview`；事件 `team_preview_required` / `team_preview_resolved`；前端 `TeamPreviewCard` + durable resume。
 
 **完整 Preflight Audit（⏳ 未实现）**：有界预检环（每轮最多 N 次 audit）+ 可编辑改 DAG / 换人换边 + Agent 实体化绑定 + 设置项 opt-out——待审计回归落地；本批不是审计环。
 

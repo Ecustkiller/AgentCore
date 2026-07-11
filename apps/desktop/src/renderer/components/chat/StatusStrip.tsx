@@ -52,6 +52,8 @@ export interface StatusStripProps {
   /** 定向唤回「修订 vN」的回合：聊天正文不再内联版本对比大卡，改由状态条「改了 N 版」信号 chip
    *  深链画布放大态统一「对比」视图（前端UX设计.md §4.2/§6.4）。无修订 / 未提供则不出 chip。 */
   onOpenRevisions?: () => void;
+  /** Expand the in-chat team-notes wall (and scroll it into view). */
+  onOpenTeamNotes?: () => void;
   /** 协作质量轻信号（message_end.collab）；有非零才显。 */
   collabSummary?: string | null;
 }
@@ -112,10 +114,10 @@ function StripControls({
   const canReplay =
     execution.status === "completed" || execution.status === "cancelled";
   const debate = isDebate(execution);
-  // 定向唤回「修订 vN」条数（版本对比信号 chip 的计数与门）；0 则不出信号。
-  const revisionCount = execution.runs.filter(
-    (r) => r.revisionOf != null,
-  ).length;
+  // 「改了 N 版」仅计定向唤回热修；辩论 continue_run（陈词/质询/结辩）不是修订。
+  const revisionCount = debate
+    ? 0
+    : execution.runs.filter((r) => r.revisionOf != null).length;
 
   return (
     <>
@@ -181,6 +183,7 @@ function RunningStrip({
   onReplay,
   onOpenRevisions,
   onPeekRunning,
+  onOpenTeamNotes,
   collabSummary,
 }: StatusStripProps) {
   const { completed, total } = execution.progress;
@@ -226,12 +229,20 @@ function RunningStrip({
           </Button>
         </div>
       )}
-      {noteCount > 0 && (
-        <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-          <Badge tone="primary" pill className="font-medium">
-            团队便签 {noteCount}
-          </Badge>
-          <span>队员广播的决定 / 提醒，见下方便签墙</span>
+      {noteCount > 0 && onOpenTeamNotes && (
+        <div className="mt-2 flex items-center gap-2">
+          <SimpleTooltip label="展开团队便签">
+            <button
+              type="button"
+              className="inline-flex"
+              onClick={onOpenTeamNotes}
+              aria-label={`展开团队便签，共 ${noteCount} 条`}
+            >
+              <Badge tone="primary" pill className="font-medium">
+                团队便签 {noteCount}
+              </Badge>
+            </button>
+          </SimpleTooltip>
         </div>
       )}
       <TeamSynthesisPreviewLine />

@@ -353,7 +353,7 @@ async def test_plan_review_pause_journal_projects_to_captain_transcript(monkeypa
     # gating the Phase 2 resume cutover for the plan_review suspend point.
     # Skip team_preview so this fixture reaches plan_review (wave-boundary durable pause).
     monkeypatch.setattr(
-        "agentcore.tools.builtin.delegate.preview.should_preview",
+        "agentcore.tools.builtin.delegate.preview.should_kickoff",
         lambda *a, **k: False,
     )
     system_prompt = "你是 CEO。"

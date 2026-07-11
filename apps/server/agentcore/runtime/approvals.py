@@ -18,13 +18,11 @@ from enum import StrEnum
 from typing import Any
 
 from agentcore.core.logging import get_logger
-from agentcore.core.types import ToolApproval
+from agentcore.core.types import AutonomyPolicy, ToolApproval
 from agentcore.runtime.events import (
     EventSink,
     approval_required,
     approval_resolved,
-    delegation_authorization_required,
-    delegation_authorization_resolved,
 )
 from agentcore.runtime.interaction import InteractionKind
 from agentcore.runtime.ports import ClientRequestBridge
@@ -37,7 +35,6 @@ _PREVIEW_VALUE_MAX = 600
 # code_execute's ``code`` is the review surface — users must see enough to approve.
 _PREVIEW_CODE_EXECUTE_CODE_MAX = 20_000
 _TRUNCATION_SUFFIX = "… [truncated]"
-_DELEGATION_TASK_PREVIEW_MAX = 200
 
 
 def tool_call_requires_approval(
@@ -45,9 +42,10 @@ def tool_call_requires_approval(
 ) -> bool:
     """Whether a tool call must pass ``ApprovalGate`` before execution.
 
-    GRANTABLE tools always do. ``git`` is ``NEVER`` at schema level (so the CEO
-    registry filter keeps read subcommands) but write subcommands are gated here
-    on workers — same posture as ``file_write``.
+    GRANTABLE tools always do. ``git`` / ``terminal`` are ``NEVER`` at schema level
+    (so the CEO registry filter keeps read-only subcommands / so read·stop·list stay
+    ungated) but mutating subcommands are gated here on workers — same posture as
+    ``file_write``.
     """
     if approval is ToolApproval.GRANTABLE:
         return True
@@ -56,6 +54,11 @@ def tool_call_requires_approval(
 
         subcommand = str(arguments.get("subcommand", "")).strip().lower()
         return subcommand in git_write_subcommands()
+    if tool_name == "terminal":
+        from agentcore.tools.builtin.terminal import terminal_approval_subcommands
+
+        subcommand = str(arguments.get("subcommand", "")).strip().lower()
+        return subcommand in terminal_approval_subcommands()
     return False
 
 
@@ -74,20 +77,23 @@ class ApprovalDecision(StrEnum):
     ORPHANED = "orphaned"  # 热路失效（进程/lease 恢复后旧卡不可答）
 
 
-class DelegationAuthorizationDecision(StrEnum):
-    """How the user settled a per-delegation authorization prompt."""
-
-    GRANT_DELEGATION = "grant_delegation"  # medium-risk tools skip per-call for this delegation
-    PER_CALL = "per_call"  # keep existing per-call approval for each tool use
-    DENY = "deny"  # refuse; the delegate call does not start workers
-    ORPHANED = "orphaned"  # 热路失效（进程/lease 恢复后旧卡不可答）
-
-
 @dataclass(frozen=True)
 class DelegationGrant:
-    """An active per-delegation grant keyed by ``execution_id``."""
+    """An active per-delegation grant keyed by ``execution_id`` (开工卡一次授权)."""
 
     execution_id: str
+
+
+# Kept as an alias for resume / settlement that still speak the old card dialect
+# (grant_delegation / per_call / deny). Kickoff maps continue→grant, per_call→per_call,
+# stop→deny. Hot-path ``request_delegation_authorization`` was retired.
+class DelegationAuthorizationDecision(StrEnum):
+    """Settlement dialect for kickoff capability-authorization choices."""
+
+    GRANT_DELEGATION = "grant_delegation"
+    PER_CALL = "per_call"
+    DENY = "deny"
+    ORPHANED = "orphaned"
 
 
 def _preview_value_max(tool_name: str, key: str) -> int:
@@ -117,9 +123,12 @@ class ApprovalGate:
 
     One instance per chat turn. ``_granted`` remembers tools the user chose to
     allow for the rest of the turn, so a LATER call to the same tool does not
-    re-prompt. A grant also sweeps the matching calls ALREADY suspended on this gate
-    (parallel workers share one gate in local mode), so a single "allow" clears
-    every matching pending prompt at once — not just the one the user clicked.
+    re-prompt. ``_denied`` remembers tools the user (or a timeout) refused, so a
+    later call to the same tool skips the card and returns DENY immediately —
+    denials are a governance signal, not an invitation to re-ask. A grant also
+    sweeps the matching calls ALREADY suspended on this gate (parallel workers
+    share one gate in local mode), so a single "allow" clears every matching
+    pending prompt at once — not just the one the user clicked.
 
     Two grant scopes: ``APPROVE_ALWAYS`` whitelists the ONE tool of the card;
     ``APPROVE_ALWAYS_FILES`` whitelists the whole file-mutation class
@@ -146,102 +155,39 @@ class ApprovalGate:
     # Injected from ``per_call_tool_names()`` — empty by default (Cursor-aligned);
     # non-empty keeps the downgrade path for defense in depth / future re-tighten.
     per_call_tools: frozenset[str] = frozenset()
-    # Medium-risk tools a per-delegation grant covers (code_execute + file-mutation
-    # class). Injected from ``delegation_grantable_tool_names`` — see tools.builtin.
+    # Medium-risk tools a kickoff grant covers (统一授权白名单). Injected from
+    # ``delegation_grantable_tool_names`` — see tools.builtin.
     delegation_grantable_tools: frozenset[str] = frozenset()
+    # Capability-authorization posture (能力授权维度). ``always_ask`` forces every
+    # GRANTABLE call through the card; ``first_grant`` / ``full_auto`` honor
+    # kickoff-issued delegation grants.
+    autonomy_policy: AutonomyPolicy = AutonomyPolicy.FIRST_GRANT
     _granted: set[str] = field(default_factory=set)
+    # Tools the user (or timeout→deny) refused this turn — later calls skip the card.
+    _denied: set[str] = field(default_factory=set)
     _delegation_grants: dict[str, DelegationGrant] = field(default_factory=dict)
 
     def _delegation_covers(self, execution_id: str, tool_name: str) -> bool:
+        if self.autonomy_policy is AutonomyPolicy.ALWAYS_ASK:
+            return False
         if not execution_id or tool_name not in self.delegation_grantable_tools:
             return False
         return execution_id in self._delegation_grants
 
-    async def request_delegation_authorization(
-        self,
-        *,
-        execution_id: str,
-        workers: list[dict[str, str]],
-    ) -> DelegationAuthorizationDecision:
-        """Suspend before workers start; await the user's delegation-level decision.
-
-        ``grant_delegation`` records a per-delegation grant so medium-risk tools
-        skip per-call approval for the rest of THIS delegation. ``per_call`` leaves
-        the existing gate behaviour. ``deny`` refuses to start workers. A timeout
-        is treated as ``deny``.
-        """
-        if execution_id in self._delegation_grants:
-            logger.info("delegation.grant_reuse", execution_id=execution_id)
-            return DelegationAuthorizationDecision.GRANT_DELEGATION
-
-        authorization_id = f"delegation-{execution_id}"
-        grantable_tools = sorted(self.delegation_grantable_tools)
-        preview_workers = [
-            {
-                "role": w.get("role", ""),
-                "task": _preview_task(w.get("task_preview", "")),
-            }
-            for w in workers
-        ]
-        logger.info(
-            "delegation.authorization_requested",
-            execution_id=execution_id,
-            worker_count=len(preview_workers),
-            grantable_tools=grantable_tools,
-        )
-        try:
-            decision = await self.registry.suspend(
-                authorization_id,
-                self.conversation_id,
-                kind=InteractionKind.DELEGATION_AUTHORIZATION,
-                payload={
-                    "authorization_id": authorization_id,
-                    "conversation_id": self.conversation_id,
-                    "execution_id": execution_id,
-                    "workers": preview_workers,
-                    "tools": grantable_tools,
-                },
-                timeout=self.timeout_seconds,
-                on_suspended=lambda: self.sink.emit(
-                    delegation_authorization_required(
-                        authorization_id=authorization_id,
-                        conversation_id=self.conversation_id,
-                        execution_id=execution_id,
-                        workers=preview_workers,
-                        tools=grantable_tools,
-                    )
-                ),
-            )
-        except TimeoutError:
-            logger.info(
-                "delegation.authorization_timeout",
-                execution_id=execution_id,
-                authorization_id=authorization_id,
-            )
-            decision = DelegationAuthorizationDecision.DENY
-
-        if decision is DelegationAuthorizationDecision.GRANT_DELEGATION:
-            self._delegation_grants[execution_id] = DelegationGrant(execution_id=execution_id)
-            logger.info("delegation.grant_issued", execution_id=execution_id)
-
-        self.sink.emit(
-            delegation_authorization_resolved(
-                authorization_id=authorization_id,
-                execution_id=execution_id,
-                decision=decision.value,
-            )
-        )
-        logger.info(
-            "delegation.authorization_resolved",
-            execution_id=execution_id,
-            decision=decision.value,
-        )
-        return decision
+    def grant_delegation(self, execution_id: str) -> None:
+        """Record a kickoff grant so medium-risk tools skip per-call for this delegation."""
+        if not execution_id:
+            return
+        self._delegation_grants[execution_id] = DelegationGrant(execution_id=execution_id)
+        logger.info("delegation.grant_issued", execution_id=execution_id)
 
     def revoke_delegation(self, execution_id: str) -> None:
         """Clear the per-delegation grant when a delegate segment ends."""
         if self._delegation_grants.pop(execution_id, None) is not None:
             logger.info("delegation.grant_revoked", execution_id=execution_id)
+
+    def has_delegation_grant(self, execution_id: str) -> bool:
+        return bool(execution_id) and execution_id in self._delegation_grants
 
     async def authorize(
         self,
@@ -253,12 +199,12 @@ class ApprovalGate:
     ) -> ApprovalDecision:
         """Block until the user authorizes (or denies) this tool call.
 
-        A per-delegation grant (``grant_delegation`` at delegate start) short-circuits
+        A kickoff grant (``grant_delegation`` / continue on the开工卡) short-circuits
         medium-risk tools for THAT ``execution_id`` before the per-turn grant or
-        per-call prompt. ``APPROVE_ALWAYS`` also whitelists ``tool_name`` for the rest
-        of the turn; ``APPROVE_ALWAYS_FILES`` whitelists the whole ``file_op_tools``
-        class. A tool in ``per_call_tools`` (code_execute) is exempt from turn-wide
-        grants unless a delegation grant covers it. A timeout is treated as ``DENY``.
+        per-call prompt — unless ``autonomy_policy`` is ``always_ask``.
+        ``APPROVE_ALWAYS`` also whitelists ``tool_name`` for the rest of the turn;
+        ``APPROVE_ALWAYS_FILES`` whitelists the whole ``file_op_tools`` class.
+        A prior ``DENY`` for ``tool_name`` this turn short-circuits without re-prompting.
         """
         if self._delegation_covers(execution_id, tool_name):
             logger.debug(
@@ -270,6 +216,11 @@ class ApprovalGate:
 
         if tool_name in self._granted:
             return ApprovalDecision.APPROVE
+
+        # Prior deny (user click or timeout) for this tool this turn: do not re-prompt.
+        if tool_name in self._denied:
+            logger.info("approval.denied_reuse", tool=tool_name, tool_call_id=tool_call_id)
+            return ApprovalDecision.DENY
 
         approval_id = tool_call_id
         preview = _preview_arguments(tool_name, arguments)
@@ -302,7 +253,9 @@ class ApprovalGate:
             on_approval_timeout(tool_name=tool_name, tool_call_id=tool_call_id)
             decision = ApprovalDecision.DENY
 
-        if decision is ApprovalDecision.APPROVE_ALWAYS:
+        if decision is ApprovalDecision.DENY:
+            self._denied.add(tool_name)
+        elif decision is ApprovalDecision.APPROVE_ALWAYS:
             if tool_name in self.per_call_tools and not self._delegation_covers(
                 execution_id, tool_name
             ):
@@ -377,9 +330,3 @@ class ApprovalGate:
             from agentcore.runtime.audit.hooks import on_approval_swept
 
             on_approval_swept(tool_names=sorted(tool_names), swept=swept)
-
-
-def _preview_task(text: str) -> str:
-    if len(text) <= _DELEGATION_TASK_PREVIEW_MAX:
-        return text
-    return text[:_DELEGATION_TASK_PREVIEW_MAX] + _TRUNCATION_SUFFIX

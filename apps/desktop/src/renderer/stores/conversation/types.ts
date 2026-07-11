@@ -58,6 +58,8 @@ export interface TeamPreviewWorkerDisplay {
 export interface TeamPreviewDisplay {
   id: string;
   workers: TeamPreviewWorkerDisplay[];
+  /** Grantable tools listed on the kickoff card (may be empty under full_auto). */
+  tools: string[];
   status: "pending" | "resolved";
   decision: CheckpointDecision | null;
   note: string;
@@ -73,8 +75,6 @@ export interface Conversation {
   localContainerRootId?: string | null;
   pinned?: boolean;
   archived?: boolean;
-  /** Auto-classified on first-turn title minting; null = unclassified. */
-  tag?: string | null;
 }
 
 export interface MessageAttachmentMeta {

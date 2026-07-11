@@ -11,6 +11,7 @@ from agentcore.conversation.store import reset_conversation_store_for_tests
 from agentcore.conversation.store.outbox import (
     PHASE_READY,
     OutboxStore,
+    captain_text_from_stream_segments,
     list_outbox_records,
     to_record_turn_body,
 )
@@ -92,6 +93,39 @@ def test_progressive_begin_checkpoint_finalize(tmp_path):
     assert body["user_message_id"] == "u1"
     assert body["content"] == "Hello world"
     assert body["input_tokens"] == 3
+
+
+def test_finalize_complete_overrides_longer_checkpoint(tmp_path):
+    """Happy-path finalize may replace a longer mid-stream checkpoint body."""
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="hi",
+        message_id="m1",
+        trace_id="f" * 32,
+    )
+
+    async def run() -> dict:
+        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="f" * 32)
+        await store.checkpoint(
+            conversation_id="c1",
+            message_id="m1",
+            content="a long mid-stream draft that spilled past the final",
+        )
+        await store.finalize(
+            conversation_id="c1",
+            user_message="hi",
+            assistant_content="final",
+            user_message_id="u1",
+            message_id="m1",
+            trace_id="f" * 32,
+            finish_reason="end_turn",
+        )
+        return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+
+    record = _drive(run())
+    assert record["content"] == "final"
 
 
 def test_begin_turn_idempotent(tmp_path):
@@ -209,3 +243,95 @@ def test_list_outbox_records(tmp_path):
     records = list_outbox_records(base)
     assert len(records) == 1
     assert records[0]["user_message_id"] == "u1"
+
+
+def test_stream_segments_survive_hard_kill_without_salvage(tmp_path):
+    """D6: StreamCheckpointer flush lands on disk; hard-kill skips salvage but snapshots remain."""
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="hello",
+        message_id="m1",
+        trace_id="g" * 32,
+    )
+
+    async def run() -> None:
+        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="g" * 32)
+        await store.upsert_stream_segments(
+            turn_id="m1",
+            segments=[
+                ("captain:content", "half-written reply", 0),
+                ("captain:reasoning", "thinking…", 0),
+            ],
+        )
+        # Simulate hard-kill: no salvage / finalize / clear_turn — just drop the process.
+        # (ctx stays bound here; the durable proof is the file on disk.)
+
+    _drive(run())
+    path = tmp_path / "outbox" / "u1.json"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert record["phase"] == "open"
+    assert (record.get("content") or "") == ""
+    assert record["stream_segments"]["captain:content"] == {
+        "text": "half-written reply",
+        "generation": 0,
+    }
+    assert record["stream_segments"]["captain:reasoning"] == {
+        "text": "thinking…",
+        "generation": 0,
+    }
+    content, reasoning = captain_text_from_stream_segments(record["stream_segments"])
+    assert content == "half-written reply"
+    assert reasoning == "thinking…"
+    assert "stream_segments" in record["ops"]
+    # Read-side overlay stays out of scope for local outbox.
+    assert _drive(store.list_stream_segments(turn_id="m1")) == []
+
+
+def test_stream_segments_monotonic_and_ready_sealed(tmp_path):
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="hi",
+        message_id="m1",
+        trace_id="h" * 32,
+    )
+
+    async def run() -> dict:
+        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="h" * 32)
+        await store.upsert_stream_segments(
+            turn_id="m1",
+            segments=[("captain:content", "hello", 0)],
+        )
+        # Same-gen shorter must not shrink.
+        await store.upsert_stream_segments(
+            turn_id="m1",
+            segments=[("captain:content", "he", 0)],
+        )
+        await store.upsert_stream_segments(
+            turn_id="m1",
+            segments=[("captain:content", "hello world", 0)],
+        )
+        await store.finalize(
+            conversation_id="c1",
+            user_message="hi",
+            user_message_id="u1",
+            assistant_content="final",
+            message_id="m1",
+            trace_id="h" * 32,
+            finish_reason="stop",
+        )
+        # Sealed ready: further stream upserts ignored.
+        await store.upsert_stream_segments(
+            turn_id="m1",
+            segments=[("captain:content", "should not land", 1)],
+        )
+        return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+
+    record = _drive(run())
+    assert record["content"] == "final"
+    assert record["stream_segments"]["captain:content"]["text"] == "hello world"
+    assert record["phase"] == PHASE_READY
+

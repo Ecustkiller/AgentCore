@@ -7,6 +7,7 @@ import { ExplorePage } from "@/pages/ExplorePage";
 import { FilesPage } from "@/pages/FilesPage";
 import { MessagesPage } from "@/pages/MessagesPage";
 import { MorePage } from "@/pages/MorePage";
+import { OnboardingPreviewPage } from "@/pages/OnboardingPreviewPage";
 import { PreviewPage } from "@/pages/PreviewPage";
 import { ToolboxPage } from "@/pages/ToolboxPage";
 import { TurnDetailPage } from "@/pages/TurnDetailPage";
@@ -16,6 +17,7 @@ import { WhiteboardPreviewPage } from "@/pages/WhiteboardPreviewPage";
 import { AboutSettings } from "@/pages/more/AboutSettings";
 import { AccountSettings } from "@/pages/more/AccountSettings";
 import { AppearanceSettings } from "@/pages/more/AppearanceSettings";
+import { AutonomySettings } from "@/pages/more/AutonomySettings";
 import { FeedbackSettings } from "@/pages/more/FeedbackSettings";
 import { ImPrivacySettings } from "@/pages/more/ImPrivacySettings";
 import { MemorySettings } from "@/pages/more/MemorySettings";
@@ -81,6 +83,8 @@ export const router = createHashRouter([
       { path: "preview/whiteboard", element: <WhiteboardPreviewPage /> },
       // Preview 开工提案 layout A/B (V2 = production kickoff default).
       { path: "preview/ask-commence", element: <AskCommencePreviewPage /> },
+      // Preview 首启体验（价值一屏 / 模型接入 / 空态三态）.
+      { path: "preview/onboarding", element: <OnboardingPreviewPage /> },
       // DT-01: Desktop launcher only (spawn AgentTown.exe + session.json).
       { path: "simulation/town", element: <TownLauncherPage /> },
       {
@@ -91,6 +95,7 @@ export const router = createHashRouter([
           { index: true, element: <Navigate to="/more/model" replace /> },
           { path: "model", element: <ModelSettings /> },
           { path: "memory", element: <MemorySettings /> },
+          { path: "autonomy", element: <AutonomySettings /> },
           { path: "account", element: <AccountSettings /> },
           { path: "messages", element: <ImPrivacySettings /> },
           { path: "usage", element: <UsageSettings /> },

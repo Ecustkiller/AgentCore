@@ -19,14 +19,26 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal
 
-from agentcore.conversation.store.merge import pick_monotonic_content
+from agentcore.conversation.store.merge import (
+    MESSAGE_STATUS_COMPLETE,
+    MESSAGE_STATUS_FAILED,
+    MESSAGE_STATUS_INCOMPLETE,
+    MESSAGE_STATUS_RUNNING,
+    pick_merged_content,
+    pick_monotonic_content,
+)
 from agentcore.core.logging import get_logger
+from agentcore.db.repositories.stream_state import resolve_stream_upsert
 
 logger = get_logger(__name__)
 
 SCHEMA_VERSION = 1
 PHASE_OPEN = "open"
 PHASE_READY = "ready"
+
+# Mirror StreamCheckpointer channel ids (avoid store → runtime import).
+_CHANNEL_CAPTAIN_CONTENT = "captain:content"
+_CHANNEL_CAPTAIN_REASONING = "captain:reasoning"
 
 
 def _is_safe_id(value: str) -> bool:
@@ -94,6 +106,8 @@ class OutboxStore:
             "citations": [],
             "runs": None,
             "journal": {},  # seq(str) → entry — idempotent append
+            # channel → {text, generation} — StreamCheckpointer mid-stream snapshots (D6)
+            "stream_segments": {},
             "input_tokens": 0,
             "output_tokens": 0,
             "reasoning_tokens": 0,
@@ -260,7 +274,21 @@ class OutboxStore:
             record["trace_id"] = kwargs.get("trace_id") or record.get("trace_id")
             content = kwargs.get("assistant_content")
             if content is not None:
-                record["content"] = pick_monotonic_content(record.get("content"), content)
+                finish = kwargs.get("finish_reason")
+                if finish == "cancelled":
+                    status = MESSAGE_STATUS_INCOMPLETE
+                elif finish == "error":
+                    status = MESSAGE_STATUS_FAILED
+                elif finish == "paused":
+                    status = MESSAGE_STATUS_RUNNING
+                else:
+                    # Happy-path / missing finish_reason: treat as complete delivery.
+                    status = MESSAGE_STATUS_COMPLETE
+                record["content"] = pick_merged_content(
+                    record.get("content"),
+                    content,
+                    incoming_status=status,
+                )
             if "assistant_reasoning" in kwargs:
                 record["reasoning_content"] = kwargs.get("assistant_reasoning")
             if kwargs.get("citations") is not None:
@@ -328,19 +356,76 @@ class OutboxStore:
 
         await self._mutate(user_message_id, mutate)
 
+    def _user_message_id_for_turn(self, turn_id: str) -> str | None:
+        """Resolve outbox file key for a stream-segment turn_id (assistant message_id)."""
+        ctx = self._ctx or {}
+        user_message_id = str(ctx.get("user_message_id") or "")
+        if not user_message_id:
+            return None
+        ctx_mid = ctx.get("message_id")
+        if ctx_mid and str(ctx_mid) != turn_id:
+            return None
+        return user_message_id
+
     async def upsert_stream_segments(
         self,
         *,
         turn_id: str,
         segments: Sequence[tuple[str, str, int]],
     ) -> None:
-        """D6: local mid-stream durability is out of scope — no-op."""
+        """Persist StreamCheckpointer flushes into the open outbox record (D6).
+
+        Write cadence matches the checkpointer (3s / 4KB / semantic) — callers must
+        not invoke this per delta. Read-side overlay stays out of scope
+        (``list_stream_segments`` remains empty).
+        """
+        if not segments:
+            return
+        user_message_id = self._user_message_id_for_turn(turn_id)
+        if not user_message_id:
+            return
+
+        def mutate(record: dict[str, Any]) -> None:
+            if record.get("phase") == PHASE_READY:
+                return
+            if turn_id and not record.get("message_id"):
+                record["message_id"] = turn_id
+            segs: dict[str, Any] = record.setdefault("stream_segments", {})
+            if not isinstance(segs, dict):
+                segs = {}
+                record["stream_segments"] = segs
+            for channel, text, generation in segments:
+                if not channel:
+                    continue
+                existing = segs.get(channel) if isinstance(segs.get(channel), dict) else {}
+                resolved = resolve_stream_upsert(
+                    existing_text=existing.get("text") if existing else None,
+                    existing_generation=(
+                        int(existing["generation"])
+                        if existing and existing.get("generation") is not None
+                        else None
+                    ),
+                    incoming_text=text if isinstance(text, str) else str(text or ""),
+                    incoming_generation=int(generation or 0),
+                )
+                if resolved is None:
+                    continue
+                new_text, new_gen = resolved
+                segs[channel] = {"text": new_text, "generation": new_gen}
+            ops = record.setdefault("ops", [])
+            if "stream_segments" not in ops:
+                ops.append("stream_segments")
+
+        await self._mutate(user_message_id, mutate)
 
     async def list_stream_segments(
         self,
         *,
         turn_id: str,
     ) -> list[dict[str, Any]]:
+        # Local mid-stream overlay is out of scope — desktop salvage reads the
+        # outbox JSON directly; cloud overlay stays on CloudStore.
+        del turn_id
         return []
 
     async def list_stream_segments_map(
@@ -348,6 +433,7 @@ class OutboxStore:
         *,
         turn_ids: Sequence[str],
     ) -> dict[str, list[dict[str, Any]]]:
+        del turn_ids
         return {}
 
     async def clear_stream_segments(
@@ -355,7 +441,32 @@ class OutboxStore:
         *,
         turn_id: str,
     ) -> None:
-        return
+        user_message_id = self._user_message_id_for_turn(turn_id)
+        if not user_message_id:
+            return
+
+        def mutate(record: dict[str, Any]) -> None:
+            record["stream_segments"] = {}
+
+        await self._mutate(user_message_id, mutate)
+
+
+def captain_text_from_stream_segments(
+    stream_segments: dict[str, Any] | None,
+) -> tuple[str, str | None]:
+    """Extract captain content / reasoning snapshots from an outbox ``stream_segments`` map."""
+    if not stream_segments or not isinstance(stream_segments, dict):
+        return "", None
+    content = ""
+    reasoning: str | None = None
+    content_entry = stream_segments.get(_CHANNEL_CAPTAIN_CONTENT)
+    if isinstance(content_entry, dict):
+        content = str(content_entry.get("text") or "")
+    reasoning_entry = stream_segments.get(_CHANNEL_CAPTAIN_REASONING)
+    if isinstance(reasoning_entry, dict):
+        text = str(reasoning_entry.get("text") or "")
+        reasoning = text if text else None
+    return content, reasoning
 
 
 def journal_entries_from_map(journal: dict[str, Any] | None) -> list[dict[str, Any]] | None:

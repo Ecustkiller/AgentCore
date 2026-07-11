@@ -1,9 +1,9 @@
-import { create } from "zustand";
 import {
-  type StateStorage,
-  createJSONStorage,
-  persist,
-} from "zustand/middleware";
+  createZustandUiStorage,
+  registerConversationUiClearer,
+} from "@/lib/uiStorage";
+import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 
 /** Structural edge. Visual state (animated) is derived live.
  *
@@ -25,16 +25,13 @@ export interface GraphEdge {
  * toolbar). `leftright` is the default left-to-right layered flow — it suits the
  * widescreen displays the desktop targets and keeps the inline↔full-screen
  * direction consistent (no 90° flip on maximize); `tree` is the same layered
- * algorithm rotated top-down. (Former `timeline` layout was removed; stale
- * localStorage values fall back to `leftright`.)
+ * algorithm rotated top-down.
  */
 export type GraphLayout = "tree" | "leftright";
 
 /** Max team turns expanded as TurnGroupNode compounds on the conversation spine. */
 export const MAX_EXPANDED_TURNS = 3;
 
-const LAYOUT_KEY = "agentcore:graph-layout";
-const INJECT_FLOW_KEY = "agentcore:graph-inject-flow";
 const LAYOUTS: GraphLayout[] = ["tree", "leftright"];
 
 export interface ConversationFoldState {
@@ -55,56 +52,7 @@ const EMPTY_FOLD: ConversationFoldState = {
   turnsSeeded: false,
 };
 
-// localStorage is wrapped: it throws in private-mode / non-DOM (test) contexts.
-function loadLayout(): GraphLayout {
-  try {
-    const v = localStorage.getItem(LAYOUT_KEY);
-    return v && (LAYOUTS as string[]).includes(v)
-      ? (v as GraphLayout)
-      : "leftright";
-  } catch {
-    return "leftright";
-  }
-}
-
-function persistLayout(v: GraphLayout): void {
-  try {
-    localStorage.setItem(LAYOUT_KEY, v);
-  } catch {
-    /* unavailable — session-only */
-  }
-}
-
-function loadInjectFlow(): boolean {
-  try {
-    return localStorage.getItem(INJECT_FLOW_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function persistInjectFlow(v: boolean): void {
-  try {
-    if (v) localStorage.setItem(INJECT_FLOW_KEY, "1");
-    else localStorage.removeItem(INJECT_FLOW_KEY);
-  } catch {
-    /* unavailable — session-only */
-  }
-}
-
-const safeStorage = createJSONStorage<unknown>(() => {
-  try {
-    if (typeof localStorage !== "undefined") return localStorage;
-  } catch {
-    /* access denied — fall through */
-  }
-  const noop: StateStorage = {
-    getItem: () => null,
-    setItem: () => undefined,
-    removeItem: () => undefined,
-  };
-  return noop;
-});
+const uiPersistStorage = createJSONStorage(() => createZustandUiStorage());
 
 function foldOf(
   byConversation: Record<string, ConversationFoldState>,
@@ -163,17 +111,16 @@ interface GraphState {
 export const useGraphStore = create<GraphState>()(
   persist(
     (set, get) => ({
-      layoutKind: loadLayout(),
-      showAuditInjectFlow: loadInjectFlow(),
+      layoutKind: "leftright",
+      showAuditInjectFlow: false,
       foldByConversation: {},
 
       setLayoutKind: (layoutKind) => {
-        persistLayout(layoutKind);
+        if (!(LAYOUTS as string[]).includes(layoutKind)) return;
         set({ layoutKind });
       },
 
       setShowAuditInjectFlow: (showAuditInjectFlow) => {
-        persistInjectFlow(showAuditInjectFlow);
         set({ showAuditInjectFlow });
       },
 
@@ -282,41 +229,24 @@ export const useGraphStore = create<GraphState>()(
       },
     }),
     {
-      name: "agentcore.graph-fold",
-      storage: safeStorage,
-      version: 1,
-      migrate: (persisted) => {
-        // Drop legacy collapsedNodes (single-node compact leaf) from v0.
-        const raw = persisted as {
-          foldByConversation?: Record<string, Record<string, unknown>>;
-        };
-        if (!raw?.foldByConversation) return persisted as typeof raw;
-        const foldByConversation: Record<string, ConversationFoldState> = {};
-        for (const [id, fold] of Object.entries(raw.foldByConversation)) {
-          const {
-            collapsedNodes: _drop,
-            collapsedSubtrees,
-            seenSubtreeParents,
-            expandedTurns,
-            turnsSeeded,
-          } = fold as Partial<ConversationFoldState> & {
-            collapsedNodes?: string[];
-          };
-          foldByConversation[id] = {
-            collapsedSubtrees: collapsedSubtrees ?? [],
-            seenSubtreeParents: seenSubtreeParents ?? [],
-            expandedTurns: expandedTurns ?? [],
-            turnsSeeded: turnsSeeded ?? false,
-          };
-        }
-        return { ...raw, foldByConversation };
-      },
+      name: "graph",
+      storage: uiPersistStorage,
       partialize: (s) => ({
+        layoutKind: s.layoutKind,
+        showAuditInjectFlow: s.showAuditInjectFlow,
         foldByConversation: s.foldByConversation,
       }),
     },
   ),
 );
+
+registerConversationUiClearer((conversationId) => {
+  const { foldByConversation } = useGraphStore.getState();
+  if (!(conversationId in foldByConversation)) return;
+  const next = { ...foldByConversation };
+  delete next[conversationId];
+  useGraphStore.setState({ foldByConversation: next });
+});
 
 /** Read fold state for a conversation (stable empty when missing). */
 export function selectConversationFold(

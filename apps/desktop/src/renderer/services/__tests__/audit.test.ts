@@ -1,10 +1,5 @@
 import { ApiError } from "@/services/api";
-import {
-  fetchFileAudit,
-  fetchTurnAudit,
-  groupAuditCountsByRun,
-} from "@/services/audit";
-import type { AgentAuditEvent } from "@agentcore/contract-rest-types/audit";
+import { fetchFileAudit, fetchTurnAudit } from "@/services/audit";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/api", async (importOriginal) => {
@@ -18,44 +13,6 @@ vi.mock("@/services/api", async (importOriginal) => {
 });
 
 const { api } = await import("@/services/api");
-
-function ev(
-  partial: Partial<AgentAuditEvent> & Pick<AgentAuditEvent, "id">,
-): AgentAuditEvent {
-  return {
-    turn_id: "turn-1",
-    trace_id: null,
-    execution_id: null,
-    run_id: null,
-    parent_run_id: null,
-    seq: 1,
-    category: "tool",
-    action: "tool.file_write",
-    actor_kind: "member",
-    target_type: "file",
-    target_ref: "out.txt",
-    outcome: "ok",
-    detail: {},
-    created_at: "2026-07-06T00:00:00Z",
-    ...partial,
-  };
-}
-
-describe("groupAuditCountsByRun", () => {
-  it("groups events by run_id and skips null run_id", () => {
-    const counts = groupAuditCountsByRun([
-      ev({ id: "1", run_id: "run-a" }),
-      ev({ id: "2", run_id: "run-a" }),
-      ev({ id: "3", run_id: "run-b" }),
-      ev({ id: "4", run_id: null }),
-    ]);
-    expect(counts).toEqual({ "run-a": 2, "run-b": 1 });
-  });
-
-  it("returns empty object for no events", () => {
-    expect(groupAuditCountsByRun([])).toEqual({});
-  });
-});
 
 describe("fetchFileAudit", () => {
   it("returns null on 404", async () => {

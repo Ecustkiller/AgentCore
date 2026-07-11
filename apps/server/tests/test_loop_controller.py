@@ -232,6 +232,24 @@ def test_circuit_breaker_ignores_policy_failures():
     assert not c.tool_circuit_breaker()
 
 
+def test_circuit_breaker_ignores_approval_denial_policy_failures():
+    # Approval denials are stamped policy_failure=True in tool_exec — same posture
+    # as SSRF/egress blocks: honest for the model, invisible to the breaker.
+    c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+    denial = ToolAttempt("a", "file_write", success=False, policy_failure=True)
+    c.record([denial, denial, denial])
+    assert not c.tool_circuit_breaker()
+    assert c.tool_failure_count("file_write") == 0
+
+
+def test_circuit_breaker_still_counts_real_execution_failures():
+    c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+    real = ToolAttempt("a", "file_write", success=False, policy_failure=False)
+    c.record([real, real, real])
+    cb = c.tool_circuit_breaker()
+    assert cb.disabled == ("file_write",)
+
+
 def test_circuit_breaker_tally_survives_nudge_window_clear():
     # The cumulative per-tool tally is run-scoped: the nudge's sliding-window reset
     # must NOT reset it (otherwise a tool failing across a nudge would never trip).

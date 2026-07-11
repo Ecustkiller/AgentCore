@@ -49,16 +49,25 @@ async def test_purge_conversation_space_removes_own_space(fs_storage):
     (root / "note.txt").write_text("data", encoding="utf-8")
     await create_snapshot(user_id="u1", folder_id=None, conversation_id="c9")
 
-    await _purge_conversation_space(user_id="u1", conversation_id="c9")
+    await _purge_conversation_space(user_id="u1", conversation_id="c9", folder_id=None)
 
     assert not workspace_root_path(user_id="u1", folder_id=None, conversation_id="c9").exists()
     assert await list_snapshots(user_id="u1", folder_id=None, conversation_id="c9") == []
 
 
+async def test_purge_conversation_space_skips_project_member(fs_storage):
+    root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
+    (root / "shared.txt").write_text("data", encoding="utf-8")
+
+    await _purge_conversation_space(user_id="u1", conversation_id="c1", folder_id="f1")
+
+    assert workspace_root_path(user_id="u1", folder_id="f1", conversation_id="c1").exists()
+
+
 async def test_purge_is_idempotent_on_missing(fs_storage):
     # Purging a never-created space must not raise (idempotent cleanup).
     await purge_folder_space(user_id="u1", folder_id="ghost")
-    await _purge_conversation_space(user_id="u1", conversation_id="ghost")
+    await _purge_conversation_space(user_id="u1", conversation_id="ghost", folder_id=None)
 
 
 async def test_sweep_disabled_is_noop(fs_storage, monkeypatch):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import re
 from dataclasses import asdict
 
 import agentcore.runtime.pipeline as pipeline_pkg
@@ -11,14 +12,16 @@ from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import error_fields_for
 from agentcore.core.logging import get_logger
-from agentcore.core.types import new_id
+from agentcore.core.types import AutonomyPolicy, new_id
 from agentcore.desktop.channel import DesktopClientChannel
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
 from agentcore.llm.profiles import turn_profiles_for_turn
+from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.audit.hooks import bind_recorder
 from agentcore.runtime.checkpoints import CheckpointDecision
+from agentcore.runtime.context import build_workspace_context, desktop_client_can_bind
 from agentcore.runtime.costing import RunCost, captain_run_cost_from_state
 from agentcore.runtime.events import (
     EventSink,
@@ -59,9 +62,28 @@ from agentcore.tools.builtin.board_ops import BoardOpsTool
 from agentcore.tools.builtin.board_read import BoardReadTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.vision import build_vision_reader
+from agentcore.workspace.locate import workspace_channel_for_tools
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
+
+_WORKSPACE_CONTEXT_RE = re.compile(
+    r"<workspace_context>.*?</workspace_context>\n?",
+    re.DOTALL,
+)
+
+
+def _restamp_workspace_facts(prompt: str, facts: str) -> str:
+    """Replace (or append) ``<workspace_context>`` so post-bind resume workers see the new location."""
+    stripped = _WORKSPACE_CONTEXT_RE.sub("", prompt or "").rstrip()
+    if not facts:
+        return stripped
+    marker = "</runtime_context>"
+    idx = stripped.find(marker)
+    if idx >= 0:
+        insert_at = idx + len(marker)
+        return stripped[:insert_at] + "\n" + facts + stripped[insert_at:]
+    return stripped + "\n" + facts
 
 
 async def resume_chat_pipeline(
@@ -81,6 +103,8 @@ async def resume_chat_pipeline(
     suspension_saver: SuspensionSaver | None = None,
     suspension_deleter: SuspensionDeleter | None = None,
     llm_supports_tools: bool | None = None,
+    autonomy_policy: AutonomyPolicy | None = None,
+    x_client_platform: str | None = None,
 ) -> dict:
     """Continue a turn paused at a plan_review / ask_user checkpoint (结构化挂起 2b resume).
 
@@ -105,7 +129,14 @@ async def resume_chat_pipeline(
     its :class:`BoardChannel` on resume and can keep drawing on the user's canvas. ``None``
     for every ordinary chat — then ``board_ops`` is neither wired nor reachable, exactly as
     on the fresh-turn path.
+
+    ``autonomy_policy`` mirrors :func:`run_chat_pipeline`: the user's CURRENT
+    capability-authorization posture (安全权限与治理 §三), resolved by the caller at
+    resume time — not frozen into the frame, so a mid-pause settings change applies.
+    ``None`` falls back to ``first_grant``.
     """
+    if autonomy_policy is None:
+        autonomy_policy = AutonomyPolicy.FIRST_GRANT
     profiles = turn_profiles_for_turn(profile_set, llm_credentials)
     message_id = suspension.message_id
     conversation_id = suspension.conversation_id
@@ -215,6 +246,11 @@ async def resume_chat_pipeline(
             if backend.location == "local"
             else None
         )
+        workspace_channel = workspace_channel_for_tools(
+            backend,
+            sink=sink,
+            conversation_id=conversation_id,
+        )
         # AI 协作白板 §九.4 Gap ②: the resumed turn's vision cost sink, shared by reference
         # across derived run contexts — symmetric with the fresh-turn path (run.py). A
         # board_read after the checkpoint bills its 读图 row here; folded into cost_runs below.
@@ -228,6 +264,7 @@ async def resume_chat_pipeline(
             conversation_id=conversation_id,
             board_channel=board_channel,
             desktop_channel=desktop_channel,
+            workspace_channel=workspace_channel,
             # §九.4: vision provider (QwenVL) — set VISION_API_KEY to enable; None ⇒
             # board_read returns a clean「读图能力未配置」error (「插上即用」).
             vision_reader=build_vision_reader(),
@@ -247,16 +284,27 @@ async def resume_chat_pipeline(
                 file_op_tools=approval_class_tool_names(),
                 per_call_tools=per_call_tool_names(),
                 delegation_grantable_tools=delegation_grantable_tool_names(),
+                autonomy_policy=autonomy_policy,
             )
             if settings.approval_gate_enabled
             else None
         )
         session_store = default_session_registry().get_or_create(conversation_id)
         checkpoint_enabled = settings.checkpoint_gate_enabled
+        # Re-stamp environment facts onto the stored worker base: resume rebuilds the
+        # backend from the CURRENT binding (bind-during-ask_user → local), so workers
+        # delegated after resume must not inherit a stale cloud ``<workspace_context>``.
+        desktop_online = (
+            desktop_client_can_bind(x_client_platform) or backend.location == "local"
+        )
+        refreshed_base = _restamp_workspace_facts(
+            suspension.base_system_prompt,
+            build_workspace_context(backend, desktop_online=desktop_online),
+        )
         delegate_tool, revise_tool, debate_tool, chat_tools = _assemble_ceo_toolset(
             llm=llm,
             sink=sink,
-            base_system_prompt=suspension.base_system_prompt,
+            base_system_prompt=refreshed_base,
             user_message=suspension.user_message,
             history=[],
             worker_tools=worker_tools,
@@ -276,6 +324,9 @@ async def resume_chat_pipeline(
             skill_registry=skill_registry,
             folder_id=suspension.folder_id,
             memory_enabled=suspension.memory_enabled,
+            autonomy_policy=autonomy_policy,
+            advertise_bind_local_folder=checkpoint_enabled
+            and desktop_client_can_bind(x_client_platform),
         )
 
         # AI 协作白板: re-give the resumed CEO the board tools (``board_ops`` §六 M2 +
@@ -336,6 +387,24 @@ async def resume_chat_pipeline(
         # history) would lose everything written before the pause — parity with live.
         pre_pause = pre_pause_content(transcript)
         append_resumed_tool_results(messages, suspension.tool_call_id, settled.output)
+
+        # 终稿多段衔接: when the pause kept deliverable prose, steer the resumed answer
+        # round to continue it (join_segments alone can't invent transitions). Skip when
+        # the user STOPPED (terminal_text path finishes without another CEO round).
+        if pre_pause.strip() and settled.terminal_text is None:
+            from agentcore.runtime.engine import deliverable_continuity_instruction
+            from agentcore.runtime.facts import NoteFact, record_turn_fact
+
+            continuity = deliverable_continuity_instruction(prior_deliverable=pre_pause)
+            messages.append(LLMMessage(role="user", content=continuity))
+            record_turn_fact(
+                NoteFact(
+                    role="user",
+                    content=continuity,
+                    reason="continuity",
+                    run_id=captain_run_id,
+                ).to_fact()
+            )
 
         # ask_user stop: the closing note IS the reply (terminal effect) — finish
         # without another CEO round, mirroring the engine's terminal-effect branch.

@@ -225,6 +225,8 @@ async def register(
         await messaging.join_auto_join_chats(user_id=user.user_id)
     except Exception:
         logger.warning("chat.auto_join_failed", user=user.user_id, exc_info=True)
+    # Activation funnel: registration (queryable in logs/dev.jsonl).
+    logger.info("auth.register", user_id=user.user_id)
     return _user_response(user)
 
 

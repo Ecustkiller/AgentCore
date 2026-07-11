@@ -1,3 +1,13 @@
+---
+status: landed
+code: apps/desktop/src/renderer/whiteboard/
+related:
+  - docs/03-AI核心/工具与能力系统.md
+  - docs/02-架构/核心接口定义.md
+skip_if:
+  - 不涉及白板 / 画布引擎 / AI 读图摆元素
+---
+
 # AI 协作白板（桌面端 · as-built）
 
 > **定位**：AgentCore 桌面端的一块**协作白板**（市场款无限画布，便签/形状/箭头/手绘），差异点是**白板里有一支 AI 团队**（读图 / 摆元素 / 拉团队照白板干活）。落地为 **`apps/desktop` 内一个页面/路由**（非独立 app），**数据模型用空间 JSON 为真相**，复用 AgentCore 地基（账号、Agent 团队后端、LLM 推理、存储）。本文是**现状说明书**：§一/§二 产品差异化与定位；§三–§五 关键决策（含被否决方案）；§六 = 自研引擎 as-built（`apps/desktop/src/renderer/whiteboard/`）；§七–§九 数据契约 / 后端接线 / 读图；§十 交付现状。冲突以代码为准。
@@ -20,7 +30,7 @@
 | **人手绘 / 视觉输入当需求，AI 看懂据此干活** | 无 | ✅ 文本真表达不了，**白板独有** |
 | **把多个文件 / 产物空间化成「项目地图」** | 仅列表视图（`/files`） | ✅ 空间 vs 列表，互补 |
 
-**结论**：纯白板是红海，再造一个 Miro / Excalidraw 没意义。**唯一值得做的差异点 = 白板里有一支 AI 团队**——能看懂你的手绘、按草图摆元素 / 生成结构、甚至拉团队照着白板干活。这正好兑现 AgentCore 的核心心智「管理一个 Agent 团队」（[项目上下文](/.cursor/rules/project-context.mdc)）。
+**结论**：纯白板是红海，再造一个 Miro / Excalidraw 没意义。**唯一值得做的差异点 = 白板里有一支 AI 团队**——能看懂你的手绘、按草图摆元素 / 生成结构、甚至拉团队照着白板干活。这正好兑现 AgentCore 的核心心智「管理一个 Agent 团队」（[产品定位与品牌](/docs/01-产品/产品定位与品牌.md)）。
 
 > **空间 JSON 为真相，与 §3.3 不冲突**：[工具与能力系统 §3.3](/docs/03-AI核心/工具与能力系统.md)「文本为典范模型」针对的是**本可用文本表达**的协作内容；白板 scene 是**本质空间**的（手绘/位置/连线，文本真表达不了，§一已述），故用空间 JSON 当真相是必然，不与文本典范铁律冲突。
 
@@ -317,7 +327,7 @@ sequenceDiagram
 - **典范模型 = 场景 JSON**（scene：形状 / 位置 / 连线 / 分组 / 手绘笔触）。一块 board = 一条记录 + 一份 scene blob。两类 AgentCore 特有元素（`agentNode` / `artifactCard`）是**自研引擎一等形状**（非挂第三方 `customData`），机制见 §六；**brief 不是元素**，= 选区 / `frame`（§九）。
 - **AI 读写原则**：**写**走**结构化运行时 ops**（add/move/connect/group），**不**走「让 AI 生成整张图片」，规避表达走工具的「4 失败点」（[工具与能力系统 §3.2](/docs/03-AI核心/工具与能力系统.md)）；**读 = 同一选区混合**：结构元素直接读 scene JSON（`getScene`，精确便宜），手绘 / 截图子集才栅格化喂视觉模型（G6）。自研引擎侧落地见 §六。
 - **`boards` 表（Postgres）**：`id` / `user_id` / `folder_id`（G3）/ `title` / `scene`（小场景内联 JSONB）/ `scene_blob_ref`（超阈值 S3 指针，G4）/ `version`（CAS）/ `created_at` / `updated_at`。
-- **存储阈值（G4 ✅）**：scene JSON < **256 KB** 内联行内 JSONB；≥ 256 KB 落 S3、行内只存 `scene_blob_ref`。autosave 防抖 **~1.5s**；版本历史 = 保留**最近 K 次 autosave + 显式命名快照**（K 默认 20，实现细节可调）。复用 AgentCore 存储栈（[项目上下文](/.cursor/rules/project-context.mdc)：PostgreSQL / Redis / S3）。
+- **存储阈值（G4 ✅）**：scene JSON < **256 KB** 内联行内 JSONB；≥ 256 KB 落 S3、行内只存 `scene_blob_ref`。autosave 防抖 **~1.5s**；版本历史 = 保留**最近 K 次 autosave + 显式命名快照**（K 默认 20，实现细节可调）。复用 AgentCore 存储栈（PostgreSQL / Redis / S3，见 [技术架构与基础设施](/docs/02-架构/技术架构与基础设施.md)）。
 - **REST 契约**：新增 `/v1/boards` CRUD，**照 [`folders.py`](/apps/server/agentcore/api/routes/folders.py) 范式**——`AuthUser` 作用域、非属主 404（IDOR-safe）、`repository` 模式、Pydantic schema 在 route 层转换。CAS 写法照 [`memory.py`](/apps/server/agentcore/api/routes/memory.py)：full text + `version` baseline，冲突回 `conflict` 不覆盖。
 - **类型单一源**：route + schema 落地后 → 重生成 `pnpm -C packages/contract-rest-types gen`（`openapi-typescript apps/server/openapi.json`），白板前端 import 生成类型，不手写。
 - **DB 迁移**：alembic 新 revision（照 `db/migrations/versions/` 现有范式）。

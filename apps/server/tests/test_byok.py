@@ -111,10 +111,21 @@ async def test_probe_raises_timeout_on_httpx_timeout():
 
 
 class _ToolResp:
-    status_code = 200
+    def __init__(self, *, tool_calls: bool = True, status_code: int = 200) -> None:
+        self.status_code = status_code
+        self._tool_calls = tool_calls
 
     def json(self) -> dict:
-        return {"choices": [{"message": {"tool_calls": [{"id": "1"}]}}]}
+        message: dict = {}
+        if self._tool_calls:
+            message["tool_calls"] = [{"id": "1"}]
+        return {"choices": [{"message": message}]}
+
+
+class _TextResp:
+    def __init__(self, status_code: int, text: str = "") -> None:
+        self.status_code = status_code
+        self.text = text
 
 
 async def test_probe_tools_true_when_tool_calls_present():
@@ -128,12 +139,105 @@ async def test_probe_tools_true_when_tool_calls_present():
         await provider.close()
 
 
-async def test_probe_tools_false_on_auth_failure():
+async def test_probe_tools_none_when_2xx_without_tool_calls():
+    """Endpoint accepted tools but model did not call — unknown, not False."""
+
+    async def post(*a, **k):
+        return _ToolResp(tool_calls=False)
+
+    provider = _provider(post)
+    try:
+        assert await provider.probe_tools(model=DEEPSEEK_V4_FLASH) is None
+    finally:
+        await provider.close()
+
+
+async def test_probe_tools_none_on_auth_failure():
     async def post(*a, **k):
         return _Resp(401)
+
+    provider = _provider(post)
+    try:
+        assert await provider.probe_tools(model=DEEPSEEK_V4_FLASH) is None
+    finally:
+        await provider.close()
+
+
+async def test_probe_tools_none_on_timeout():
+    async def post(*a, **k):
+        raise httpx.TimeoutException("slow")
+
+    provider = _provider(post)
+    try:
+        assert await provider.probe_tools(model=DEEPSEEK_V4_FLASH) is None
+    finally:
+        await provider.close()
+
+
+async def test_probe_tools_none_on_429():
+    async def post(*a, **k):
+        return _Resp(429)
+
+    provider = _provider(post)
+    try:
+        assert await provider.probe_tools(model=DEEPSEEK_V4_FLASH) is None
+    finally:
+        await provider.close()
+
+
+async def test_probe_tools_false_on_explicit_tools_rejection():
+    """Clear 4xx rejection of tools parameter → False (after required→400 fallback)."""
+    calls: list[dict | None] = []
+
+    async def post(*a, **k):
+        payload = k.get("json") or {}
+        calls.append(payload.get("tool_choice"))
+        if payload.get("tool_choice") == "required":
+            return _TextResp(400, "tool_choice required is not supported")
+        return _TextResp(400, "This model does not support tools / function calling")
 
     provider = _provider(post)
     try:
         assert await provider.probe_tools(model=DEEPSEEK_V4_FLASH) is False
     finally:
         await provider.close()
+    assert calls == ["required", None]
+
+
+async def test_probe_tools_required_400_falls_back_to_auto_true():
+    """DeepSeek-style: required → 400, then auto path returns tool_calls → True."""
+    calls: list[dict | None] = []
+
+    async def post(*a, **k):
+        payload = k.get("json") or {}
+        calls.append(payload.get("tool_choice"))
+        assert payload.get("max_tokens", 0) >= 256
+        if payload.get("tool_choice") == "required":
+            return _TextResp(400, "tool_choice=required is not supported in thinking mode")
+        return _ToolResp()
+
+    provider = _provider(post)
+    try:
+        assert await provider.probe_tools(model=DEEPSEEK_V4_FLASH) is True
+    finally:
+        await provider.close()
+    assert calls == ["required", None]
+
+
+async def test_probe_tools_required_400_falls_back_unknown_without_calls():
+    """required → 400, auto → 2xx without tool_calls → None (not False)."""
+    calls: list[dict | None] = []
+
+    async def post(*a, **k):
+        payload = k.get("json") or {}
+        calls.append(payload.get("tool_choice"))
+        if payload.get("tool_choice") == "required":
+            return _TextResp(400, "tool_choice required not supported")
+        return _ToolResp(tool_calls=False)
+
+    provider = _provider(post)
+    try:
+        assert await provider.probe_tools(model=DEEPSEEK_V4_FLASH) is None
+    finally:
+        await provider.close()
+    assert calls == ["required", None]

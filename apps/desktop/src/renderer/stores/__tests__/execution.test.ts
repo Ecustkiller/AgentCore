@@ -295,8 +295,8 @@ describe("projectExecution (fold)", () => {
     expect(exec.agents.find((a) => a.id === "agent-2")?.status).toBe(
       "cancelled",
     );
-    // Never-started work stays pending.
-    expect(exec.runs.find((s) => s.id === "run-3")?.status).toBe("pending");
+    // Never-started work closes as skipped —「未执行」, not forever「排队中」.
+    expect(exec.runs.find((s) => s.id === "run-3")?.status).toBe("skipped");
   });
 
   // 08 NV-1: a turn that ends `failed` (hard crash / lost terminal frame) with a worker
@@ -324,8 +324,8 @@ describe("projectExecution (fold)", () => {
     expect(exec.agents.find((a) => a.id === "agent-2")?.status).toBe(
       "cancelled",
     );
-    // Never-started work stays pending.
-    expect(exec.runs.find((s) => s.id === "run-3")?.status).toBe("pending");
+    // Never-started work closes as skipped —「未执行」, not forever「排队中」.
+    expect(exec.runs.find((s) => s.id === "run-3")?.status).toBe("skipped");
   });
 
   it("captures the 阶段2 declaration slots (parentRunId/kind) from run_started", () => {
@@ -1491,6 +1491,8 @@ describe("ingestPlan (multi-batch delegate merge)", () => {
     ]);
     // The batch-1 frame stream is preserved across the merge.
     expect(rt().frames).toHaveLength(1);
+    // Presentation stamps: first plan = 委派 #1, appended plan = #2 (graph lanes).
+    expect(rt().plan?.runs.map((s) => s.delegateBatch)).toEqual([1, 1, 1, 2]);
   });
 
   it("dedupes agents/runs already on the graph", () => {

@@ -4,8 +4,9 @@
  * this file keeps preview-only shell + footer + answer alias.
  */
 import { Button } from "@/components/ui";
+import { usePersistentDisclosure } from "@/stores/disclosure";
 import type { AskAssumption } from "@/types/events";
-import { Loader2, OctagonX, Rocket } from "lucide-react";
+import { ChevronRight, Loader2, OctagonX, Rocket } from "lucide-react";
 import type { ReactNode } from "react";
 import {
   COMMENCE_TONE,
@@ -96,40 +97,54 @@ export function CommenceFooter({
 export function PlanDetails({
   assumptions,
   defaultOpen = false,
+  disclosureKey,
 }: {
   assumptions: AskAssumption[];
   defaultOpen?: boolean;
+  /** Preview/stable key；缺省退化为会话内存态。 */
+  disclosureKey?: string | null;
 }) {
+  const [open, setOpen] = usePersistentDisclosure(
+    disclosureKey ? `${disclosureKey}:assumptions` : null,
+    defaultOpen,
+  );
   if (assumptions.length === 0) return null;
   return (
-    <details
-      className="group rounded-lg bg-muted/20"
-      open={defaultOpen || undefined}
-    >
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 [&::-webkit-details-marker]:hidden">
-        <span className="text-xs text-muted-foreground transition-transform group-open:rotate-90">
-          ›
-        </span>
+    <div className="rounded-lg bg-muted/20">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 text-left"
+      >
+        <ChevronRight
+          size={13}
+          className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
+        />
         <span className="shrink-0 text-xs font-medium text-muted-foreground">
           起步计划
         </span>
-        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/70 group-open:hidden">
-          {assumptions.map((a) => a.label).join(" · ")}
-        </span>
-      </summary>
-      <div className="space-y-0.5 px-2.5 pb-2 pl-6">
-        {assumptions.map((a) => (
-          <div key={a.id} className="flex gap-1.5 text-xs">
-            <span className="w-14 shrink-0 text-muted-foreground">
-              {a.label}
-            </span>
-            <span className="min-w-0 flex-1 whitespace-pre-wrap text-foreground">
-              {a.value}
-            </span>
-          </div>
-        ))}
-      </div>
-    </details>
+        {!open && (
+          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/70">
+            {assumptions.map((a) => a.label).join(" · ")}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="space-y-0.5 px-2.5 pb-2 pl-6">
+          {assumptions.map((a) => (
+            <div key={a.id} className="flex gap-1.5 text-xs">
+              <span className="w-14 shrink-0 text-muted-foreground">
+                {a.label}
+              </span>
+              <span className="min-w-0 flex-1 whitespace-pre-wrap text-foreground">
+                {a.value}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

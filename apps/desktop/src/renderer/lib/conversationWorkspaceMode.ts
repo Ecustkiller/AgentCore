@@ -1,35 +1,23 @@
 import type { FolderMeta } from "@/services/folders";
 import type { Conversation } from "@/stores/conversation";
 
-/** `localContainerRootId == null` → cloud; otherwise local. */
-export function isConversationLocal(conv: {
-  localContainerRootId?: string | null;
-}): boolean {
+/** Bare chat: `localContainerRootId` set → local scratch. Project chats inherit folder.mode. */
+export function isConversationLocal(
+  conv: Pick<Conversation, "localContainerRootId" | "folderId">,
+  folder?: Pick<FolderMeta, "mode"> | null,
+): boolean {
+  if (conv.folderId && folder) return folder.mode === "local";
   return conv.localContainerRootId != null;
 }
 
 /**
- * Derive a folder group's default workspace mode for the sidebar header and
- * row deduplication. Uses `folder.localDir` when set; otherwise majority vote
- * over member conversations' `localContainerRootId`; ties break on the most
- * recent conversation (callers should pass recency-sorted `convs`).
+ * Folder group's workspace mode for the sidebar header — reads project `mode`
+ * (project = workspace). No majority vote over member conversations.
  */
 export function deriveGroupWorkspaceIsLocal(
-  folder: Pick<FolderMeta, "localDir">,
-  convs: Pick<Conversation, "localContainerRootId">[],
+  folder: Pick<FolderMeta, "mode">,
 ): boolean {
-  if (folder.localDir) return true;
-  if (convs.length === 0) return false;
-
-  let localCount = 0;
-  for (const c of convs) {
-    if (isConversationLocal(c)) localCount++;
-  }
-  const cloudCount = convs.length - localCount;
-  if (localCount > cloudCount) return true;
-  if (cloudCount > localCount) return false;
-  const [first] = convs;
-  return first ? isConversationLocal(first) : false;
+  return folder.mode === "local";
 }
 
 /**
@@ -38,10 +26,11 @@ export function deriveGroupWorkspaceIsLocal(
  * is local (desktop noise reduction — never show HardDrive on rows).
  */
 export function shouldShowConversationCloudIcon(
-  conv: Pick<Conversation, "localContainerRootId">,
+  conv: Pick<Conversation, "localContainerRootId" | "folderId">,
   groupIsLocal?: boolean,
+  folder?: Pick<FolderMeta, "mode"> | null,
 ): boolean {
-  const convIsLocal = isConversationLocal(conv);
+  const convIsLocal = isConversationLocal(conv, folder);
   if (groupIsLocal === undefined) return !convIsLocal;
   if (convIsLocal === groupIsLocal) return false;
   return !convIsLocal;

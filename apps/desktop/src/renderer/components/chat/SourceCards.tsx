@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui";
 import { cleanSourceTitle } from "@/lib/citations";
+import { usePersistentDisclosure } from "@/stores/disclosure";
 import type { Citation } from "@/types/events";
 import { ChevronDown, ChevronUp, Globe } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -34,6 +35,7 @@ export function SourceCards({
   citations,
   flash,
   referenced,
+  turnKey,
 }: {
   citations: Citation[];
   flash?: CitationFlash | null;
@@ -41,8 +43,13 @@ export function SourceCards({
    * this set are dimmed as "retrieved but not cited"; empty/undefined disables
    * dimming (e.g. a reply with sources but no inline `[n]` markers). */
   referenced?: Set<number>;
+  /** 回合作用域（= messageId）：给了才把「展开全部」跨卸载/刷新记住。 */
+  turnKey?: string;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = usePersistentDisclosure(
+    turnKey ? `${turnKey}:sources` : null,
+    false,
+  );
   const [highlight, setHighlight] = useState<number | null>(null);
   const refs = useRef<(HTMLAnchorElement | null)[]>([]);
   const hlTimer = useRef<ReturnType<typeof setTimeout>>(undefined);

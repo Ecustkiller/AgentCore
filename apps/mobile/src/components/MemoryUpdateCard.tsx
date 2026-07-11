@@ -2,9 +2,9 @@
 // components/chat/MemoryUpdateCard.tsx)。AI 离线消化对话后，把「记了什么」逐条挂在对话尾部：
 // 读侧 (consult_memory) 本就内联可见，这张卡让写侧 (offline consolidation) 也可见可审。
 //
-// 减能力 (手机无 per-user firehose): 桌面是「加载窗口 + 实时推送」双管；手机只在(重)开对话/刷新
-// 时随最新窗口的 memory_updates 一并取（消化本就是离线异步、晚于回合，故载入态呈现是合理 lite）。
-// 点「在 AI 记忆中查看」跳到精简记忆页（手机记忆是单页，不按叶子深链——控制随可见而至即可）。
+// 可发现性 (相对桌面减能力补齐): 手机无 per-user firehose；ChatPage 在 message_end 后延迟
+// 轮询最新窗口的 memory_updates，避免「必须退出再进对话才看见」。点「在 AI 记忆中查看」
+// 跳到 `/memory#updates`（跨会话「最近更新」feed）。
 import type { MemoryUpdate } from "@/api/conversations";
 import { Brain, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -81,7 +81,7 @@ export function MemoryUpdateCard({ updates }: { updates: MemoryUpdate[] }) {
           <button
             type="button"
             className="mem-update-link"
-            onClick={() => navigate("/memory")}
+            onClick={() => navigate("/memory#updates")}
           >
             在「AI 记忆」中查看
             <ChevronRight size={14} aria-hidden />

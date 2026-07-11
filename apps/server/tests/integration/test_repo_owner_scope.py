@@ -42,7 +42,7 @@ _CONTRACT: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     ),
     "folders.py": (
         "FolderRepository",
-        ("get_by_id", "update", "set_local_root_id", "soft_delete"),
+        ("get_by_id", "update", "soft_delete"),
         ("get_by_id_unscoped",),
     ),
 }

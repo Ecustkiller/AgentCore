@@ -25,7 +25,6 @@ from agentcore.db.repositories import (
     FolderRepository,
     MessageRepository,
 )
-from agentcore.memory.conversation_tag import parse_conversation_tag
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -84,10 +83,6 @@ async def search(
     folder_id: str | None = Query(
         None, description="限定在某文件夹/工作区内检索（仅作用于对话与消息，工作区过滤）"
     ),
-    tag: str | None = Query(
-        None,
-        description="按对话自动标签筛选（code_review/research/writing/analysis，仅对话与消息）",
-    ),
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     msg_repo: MessageRepository = Depends(get_message_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
@@ -104,10 +99,8 @@ async def search(
     scopes to one folder/工作区 — it filters the conversation and message sections
     and drops the folder section entirely (searching *within* a workspace and
     searching *for* a folder are mutually exclusive intents).
-    ``tag`` keeps only hits whose owning conversation carries that auto-tag.
     """
     wanted = _parse_types(types)
-    tag_filter = parse_conversation_tag(tag)
     sections: list[SearchSection] = []
 
     if "conversation" in wanted:
@@ -117,7 +110,6 @@ async def search(
             limit=limit,
             updated_after=updated_after,
             folder_id=folder_id,
-            tag=tag_filter,
         )
         if convs:
             sections.append(
@@ -128,7 +120,6 @@ async def search(
                             id=c.id,
                             title=c.title,
                             updated_at=c.updated_at,
-                            tag=c.tag,
                         )
                         for c in convs
                     ],
@@ -142,7 +133,6 @@ async def search(
             limit=limit,
             updated_after=updated_after,
             folder_id=folder_id,
-            tag=tag_filter,
         )
         if hits:
             items: list[SearchItem] = []

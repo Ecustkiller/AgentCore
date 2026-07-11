@@ -72,10 +72,23 @@ async def test_upload_traversal_is_blocked():
         )
 
 
-async def test_conversation_scratch_spaces_are_independent():
-    """Each conversation's scratch is keyed by its own id, not the folder."""
+async def test_conversation_scratch_spaces_are_independent_when_bare():
+    """Bare chats (folder_id=None) each own an independent scratch."""
+    await upload_file(
+        user_id="u1", folder_id=None, conversation_id="c1", path="shared.txt", data=b"v"
+    )
+    with pytest.raises(PathNotFound):
+        await download_file(
+            user_id="u1", folder_id=None, conversation_id="c2", path="shared.txt"
+        )
+
+
+async def test_project_conversations_share_folder_space():
+    """Siblings in the same project share one workspace root."""
     await upload_file(
         user_id="u1", folder_id="f1", conversation_id="c1", path="shared.txt", data=b"v"
     )
-    with pytest.raises(PathNotFound):
-        await download_file(user_id="u1", folder_id="f1", conversation_id="c2", path="shared.txt")
+    got = await download_file(
+        user_id="u1", folder_id="f1", conversation_id="c2", path="shared.txt"
+    )
+    assert got == b"v"

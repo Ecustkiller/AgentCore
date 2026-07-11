@@ -26,19 +26,19 @@ export function Section({
 export function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     pending: "bg-muted text-muted-foreground",
-    ready: "bg-muted text-muted-foreground",
     running: "bg-primary/10 text-primary",
     completed: "bg-success/10 text-success",
     failed: "bg-destructive/10 text-destructive",
     cancelled: "bg-muted text-muted-foreground",
+    skipped: "bg-muted text-muted-foreground",
   };
   const labels: Record<string, string> = {
     pending: "等待中",
-    ready: "就绪",
     running: "执行中",
     completed: "已完成",
     failed: "失败",
     cancelled: "已停止",
+    skipped: "未执行",
   };
   return (
     <span
@@ -51,11 +51,11 @@ export function StatusBadge({ status }: { status: string }) {
 
 const STATUS_DOT: Record<string, string> = {
   pending: "bg-muted-foreground/30",
-  ready: "bg-muted-foreground/30",
   running: "bg-primary",
   completed: "bg-success",
   failed: "bg-destructive",
   cancelled: "bg-muted-foreground/30",
+  skipped: "bg-muted-foreground/30",
 };
 
 export function RunStatusDot({ status }: { status: RunNode["status"] }) {

@@ -83,10 +83,6 @@ class Deliverable:
     name: str = ""
     output_format: str = "text"
     required_sections: list[str] = field(default_factory=list)
-    # 阶段2 预留位：当前无 contract schema 入口（CEO 无法经 delegate.contract 设置），
-    # 且 ``check_contract`` 不校验本字段。保留以兼容序列化 / 既有测试；勿当作已生效的
-    # JSON Schema 约束。
-    output_schema: dict[str, Any] | None = None
     must_contain: list[str] = field(default_factory=list)
     min_length: int = 0
     max_length: int = 0
@@ -97,6 +93,11 @@ class Deliverable:
     # files_touched signal (the model declares a file deliverable; the code enforces
     # it landed). Off by default → prose deliverables are unaffected.
     requires_files: bool = False
+    # Declarative artifact path list (files / dirs / globs). When non-empty, the
+    # contract gate reconciles each pattern against the live workspace (existence),
+    # auto-implies ``requires_files``, and a batch that declares any artifacts
+    # auto-enables completion acceptance. Omit = no path enforcement.
+    artifacts: list[str] = field(default_factory=list)
     strict: bool = False
 
 

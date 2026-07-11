@@ -60,7 +60,9 @@ async def _conv_workspace_lock(
     user_id: str,
 ) -> AsyncIterator[None]:
     """Lock a conversation's scratch workspace for a creating panel op."""
-    key = workspace_storage_key(user_id=user_id, folder_id=None, conversation_id=conv.id)
+    key = workspace_storage_key(
+        user_id=user_id, folder_id=conv.folder_id, conversation_id=conv.id
+    )
     async with workspace_lock(key):
         yield
 
@@ -76,7 +78,7 @@ async def list_workspace_files(
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     entries = await list_files(
         user_id=user.user_id,
-        folder_id=None,
+        folder_id=conv.folder_id,
         conversation_id=conv.id,
         recursive=recursive,
     )
@@ -114,7 +116,7 @@ async def upload_workspace_file(
         async with _conv_workspace_lock(conv, user_id=user.user_id):
             written = await upload_file(
                 user_id=user.user_id,
-                folder_id=None,
+                folder_id=conv.folder_id,
                 conversation_id=conv.id,
                 path=path,
                 data=data,
@@ -143,7 +145,7 @@ async def read_workspace_file_for_edit(
     try:
         text, mtime_ms, eol = await read_file_for_edit(
             user_id=user.user_id,
-            folder_id=None,
+            folder_id=conv.folder_id,
             conversation_id=conv.id,
             path=path,
         )
@@ -182,7 +184,7 @@ async def write_workspace_file(
         async with _conv_workspace_lock(conv, user_id=user.user_id):
             ok, mtime_ms = await write_file_text(
                 user_id=user.user_id,
-                folder_id=None,
+                folder_id=conv.folder_id,
                 conversation_id=conv.id,
                 path=path,
                 content=body.content,
@@ -208,7 +210,7 @@ async def download_workspace_file(
     try:
         data = await download_file(
             user_id=user.user_id,
-            folder_id=None,
+            folder_id=conv.folder_id,
             conversation_id=conv.id,
             path=path,
         )
@@ -235,12 +237,12 @@ async def delete_workspace_file(
 ):
     """Delete a file or directory from the conversation's scratch workspace."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
-    key = workspace_storage_key(user_id=user.user_id, folder_id=None, conversation_id=conv.id)
+    key = workspace_storage_key(user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conv.id)
     try:
         async with workspace_lock(key):
             await delete_file(
                 user_id=user.user_id,
-                folder_id=None,
+                folder_id=conv.folder_id,
                 conversation_id=conv.id,
                 path=path,
             )
@@ -260,12 +262,12 @@ async def move_workspace_file(
 ):
     """Move/rename a file or directory within the conversation's scratch workspace."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
-    key = workspace_storage_key(user_id=user.user_id, folder_id=None, conversation_id=conv.id)
+    key = workspace_storage_key(user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conv.id)
     try:
         async with workspace_lock(key):
             await move_file(
                 user_id=user.user_id,
-                folder_id=None,
+                folder_id=conv.folder_id,
                 conversation_id=conv.id,
                 src=body.src,
                 dst=body.dst,
@@ -292,7 +294,7 @@ async def create_workspace_dir(
         async with _conv_workspace_lock(conv, user_id=user.user_id):
             await create_dir(
                 user_id=user.user_id,
-                folder_id=None,
+                folder_id=conv.folder_id,
                 conversation_id=conv.id,
                 path=body.path,
             )
@@ -316,7 +318,7 @@ async def clone_repo_into_workspace(
         async with _conv_workspace_lock(conv, user_id=user.user_id):
             dest = await clone_repo(
                 user_id=user.user_id,
-                folder_id=None,
+                folder_id=conv.folder_id,
                 conversation_id=conv.id,
                 repo_url=body.repo_url,
                 dest=body.dest,

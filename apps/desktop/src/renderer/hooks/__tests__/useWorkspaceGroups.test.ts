@@ -9,7 +9,9 @@ import { describe, expect, it } from "vitest";
 const folder = (id: string, name = id): FolderMeta => ({
   id,
   name,
-  localDir: null,
+  mode: "cloud",
+  localRootId: null,
+  localSubpath: null,
 });
 
 const conv = (

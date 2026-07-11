@@ -1,6 +1,6 @@
 import type { FsResult } from "@shared/ipc-contract";
 import { clipboard, shell } from "electron";
-import { locate, realInside } from "./pathGuard";
+import { locate, realFail, realInside } from "./pathGuard";
 import { ensureReady } from "./roots";
 
 // --- 系统集成（在资源管理器中显示 / 用默认程序打开 / 复制路径）---
@@ -18,8 +18,8 @@ export async function reveal(
   const loc = locate(rootId, relPath);
   if ("error" in loc) return loc.error;
   const real = await realInside(loc.root, loc.abs);
-  if (!real) return { ok: false, reason: "无法访问（不存在或越界）" };
-  shell.showItemInFolder(real);
+  if (!real.ok) return realFail(real);
+  shell.showItemInFolder(real.path);
   return { ok: true, data: undefined };
 }
 
@@ -32,9 +32,9 @@ export async function openWithDefaultApp(
   const loc = locate(rootId, relPath);
   if ("error" in loc) return loc.error;
   const real = await realInside(loc.root, loc.abs);
-  if (!real) return { ok: false, reason: "无法访问（不存在或越界）" };
-  const err = await shell.openPath(real);
-  if (err) return { ok: false, reason: err };
+  if (!real.ok) return realFail(real);
+  const err = await shell.openPath(real.path);
+  if (err) return { ok: false, reason: err, code: "error" };
   return { ok: true, data: undefined };
 }
 
@@ -47,7 +47,7 @@ export async function copyPath(
   const loc = locate(rootId, relPath);
   if ("error" in loc) return loc.error;
   const real = await realInside(loc.root, loc.abs);
-  if (!real) return { ok: false, reason: "无法访问（不存在或越界）" };
-  clipboard.writeText(real);
+  if (!real.ok) return realFail(real);
+  clipboard.writeText(real.path);
   return { ok: true, data: undefined };
 }

@@ -57,15 +57,30 @@ def plan_suggests_code_verification(plan: RunPlan) -> bool:
     return False
 
 
+def plan_declares_artifacts(plan: RunPlan) -> bool:
+    """True when any worker deliverable declares a non-empty ``artifacts`` list."""
+    for node in plan.nodes:
+        d = node.deliverable
+        if d is not None and d.artifacts:
+            return True
+    return False
+
+
 def resolve_completion_criteria(
     raw: Any,
     plan: RunPlan | None = None,
 ) -> CompletionCriteria | None:
-    """Parse explicit criteria, or infer ``code_verified`` from delegate task text."""
+    """Parse explicit criteria, or infer from task text / declared artifacts.
+
+    Omitted criteria stay unenforced unless (a) task text implies run/open/install
+    → ``code_verified``, or (b) any worker declared ``artifacts`` → ``files_written``.
+    """
     if raw is not None:
         return parse_completion_criteria(raw)
     if plan is not None and plan_suggests_code_verification(plan):
         return CompletionCriteria(kind="code_verified")
+    if plan is not None and plan_declares_artifacts(plan):
+        return CompletionCriteria(kind="files_written")
     return None
 
 
@@ -137,15 +152,22 @@ def check_delegate_completion(
     criteria: CompletionCriteria | None,
     results: dict[str, RunState],
 ) -> tuple[bool, list[str]]:
-    """Return ``(ok, gaps)`` after all workers in a delegate batch finish."""
+    """Return ``(ok, gaps)`` after all workers in a delegate batch finish.
+
+    Explicit ``criteria`` is evaluated against every COMPLETED worker's real
+    signals (``files_touched``, transcript tool results, handoff ``debrief``,
+    prose ``content``)—not only workers with non-empty body text. A pure
+    file_write / handoff finish with empty streamed content must still be
+    checked; with no matching evidence the result is a gap, never a vacuous
+    pass. ``criteria is None`` (omitted) remains unenforced.
+    """
     if criteria is None:
         return True, []
 
-    completed = [
-        s
-        for s in results.values()
-        if s.phase is RunPhase.COMPLETED and s.content.strip()
-    ]
+    # Include all COMPLETED workers — empty body is a valid finish mode
+    # (落盘 / handoff-only). Filtering on content.strip() used to drop them
+    # and vacuous-pass when the filtered set was empty.
+    completed = [s for s in results.values() if s.phase is RunPhase.COMPLETED]
     if not completed:
         return True, []
 
@@ -169,3 +191,45 @@ def check_delegate_completion(
 
 def format_completion_gap_message(gaps: list[str]) -> str:
     return "[系统提示] 完成条件未满足：" + "；".join(gaps)
+
+
+def collect_worker_gaps(
+    plan: RunPlan,
+    results: dict[str, RunState],
+) -> list[tuple[str, list[str]]]:
+    """Per-worker structured gaps for CEO synthesis (warnings + degraded handoff).
+
+    Returns ``[(role_label, gap_lines), ...]`` only for workers that still carry
+    contract / handoff shortfalls after soft-accept — so forced convergence finalize
+    (write tools withheld) still surfaces what was never delivered.
+    """
+    out: list[tuple[str, list[str]]] = []
+    for node in plan.nodes:
+        state = results.get(node.run_id)
+        if state is None or state.phase is not RunPhase.COMPLETED:
+            continue
+        gaps: list[str] = []
+        if state.warnings:
+            gaps.extend(str(w) for w in state.warnings if str(w).strip())
+        debrief = state.debrief if isinstance(state.debrief, dict) else None
+        if debrief and debrief.get("degraded"):
+            gaps.append("交接简报由引擎降级合成（worker 未提交合格 handoff）")
+        if gaps:
+            label = node.role or node.run_id
+            out.append((label, gaps))
+    return out
+
+
+def format_worker_gaps_block(gaps_by_worker: list[tuple[str, list[str]]]) -> str:
+    """CEO-facing「契约缺口」section, or "" when nobody has residual gaps."""
+    if not gaps_by_worker:
+        return ""
+    lines = [
+        "\n### ⚠️ 契约缺口（请据缺口补派 / revise，勿靠自觉扫清单）\n"
+        "以下是各队员收尾后仍未对齐的声明交付物 / 交接缺口（含收敛强制收尾后无法再写文件"
+        "留下的缺口）。用 delegate / revise 补齐，别假装收工。\n"
+    ]
+    for label, gaps in gaps_by_worker:
+        joined = "；".join(gaps)
+        lines.append(f"- **{label}**：{joined}")
+    return "\n".join(lines)

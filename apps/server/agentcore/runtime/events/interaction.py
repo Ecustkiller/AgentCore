@@ -172,14 +172,20 @@ def team_preview_required(
     checkpoint_id: str,
     conversation_id: str,
     workers: list[dict[str, Any]],
+    tools: list[str] | None = None,
 ) -> SSEEvent:
-    """首波启动前的团队薄预览 gate（角色 / 任务摘要 / 依赖 / 是否辩论）。"""
+    """开工卡：首波启动前的计划预览 + 能力授权（两卡合一）。
+
+    ``workers`` = 角色 / 任务摘要 / 依赖 / 是否辩论；``tools`` = 本次委派所需
+    GRANTABLE 能力清单（AutonomyPolicy.full_auto / always_ask 时可为空）。
+    """
     return SSEEvent(
         type=EventType.TEAM_PREVIEW_REQUIRED,
         payload={
             "checkpoint_id": checkpoint_id,
             "conversation_id": conversation_id,
             "workers": workers,
+            "tools": list(tools or []),
         },
     )
 

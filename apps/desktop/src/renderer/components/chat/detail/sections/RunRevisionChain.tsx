@@ -1,6 +1,7 @@
 import { charCount, outputOf } from "@/components/chat/compare/cells";
 import { Button } from "@/components/ui";
 import type { AgentState, Execution, RevisionChain } from "@/stores/execution";
+import { debateBeatFromContext, debateBeatLabel } from "@/stores/execution";
 import { Columns2 } from "lucide-react";
 import { RunStatusDot, Section } from "./shared";
 
@@ -70,7 +71,13 @@ export function RevisionChainSection({
           const role =
             agents.find((a) => a.id === run.agentId)?.role ?? run.agentId;
           const label = isDebate
-            ? `第 ${run.round || version} 轮`
+            ? run.revisionOf == null
+              ? `第 ${run.round || version} 轮`
+              : debateBeatLabel({
+                  round: run.round,
+                  revision: version,
+                  beat: debateBeatFromContext(run.receivedContext),
+                })
             : `v${version}`;
           const prevRun = idx > 0 ? chain.versions[idx - 1].run : null;
           const delta =

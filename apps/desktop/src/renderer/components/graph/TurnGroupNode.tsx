@@ -102,10 +102,10 @@ export function TurnGroupNode({ data }: NodeProps) {
             onDoubleClick={(e) => e.stopPropagation()}
           >
             <TeamNotesPanel
-              key={`${d.messageId}:${teamNotesDefaultExpanded(d.status, notes) ? "open" : "shut"}`}
               notes={notes}
               compact
-              defaultExpanded={teamNotesDefaultExpanded(d.status, notes)}
+              disclosureKey={`${d.messageId}:team-notes`}
+              live={teamNotesDefaultExpanded(d.status, notes)}
             />
           </div>
         )}

@@ -6,7 +6,7 @@ const store = () => useSidebarStore.getState();
 beforeEach(() => {
   useSidebarStore.setState({
     collapsed: false,
-    expandedSections: { ungrouped: true },
+    expandedSections: { "folder-a": true },
   });
 });
 
@@ -35,13 +35,13 @@ describe("sidebar store", () => {
 
   describe("toggleSection", () => {
     it("toggles a section open/closed", () => {
-      expect(store().expandedSections.ungrouped).toBe(true);
+      expect(store().expandedSections["folder-a"]).toBe(true);
 
-      store().toggleSection("ungrouped");
-      expect(store().expandedSections.ungrouped).toBe(false);
+      store().toggleSection("folder-a");
+      expect(store().expandedSections["folder-a"]).toBe(false);
 
-      store().toggleSection("ungrouped");
-      expect(store().expandedSections.ungrouped).toBe(true);
+      store().toggleSection("folder-a");
+      expect(store().expandedSections["folder-a"]).toBe(true);
     });
 
     it("defaults undefined sections to toggled on", () => {
@@ -61,7 +61,7 @@ describe("sidebar store", () => {
 
     it("leaves other sections untouched", () => {
       store().setSection("ws-1", true);
-      expect(store().expandedSections.ungrouped).toBe(true);
+      expect(store().expandedSections["folder-a"]).toBe(true);
     });
   });
 });

@@ -1,3 +1,4 @@
+import { usePersistentDisclosure } from "@/stores/disclosure";
 import type { DebateBriefInfo, DebateSideInfo } from "@/types/events";
 import {
   ChevronDown,
@@ -13,7 +14,7 @@ import {
   Users,
   Wrench,
 } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import type { ReactNode } from "react";
 import { SideIdentity } from "../../SideChip";
 import { type DebateForm, debateSideColorVar } from "../../model";
 import {
@@ -31,25 +32,39 @@ export function BriefCard({
   sides,
   form,
   scores,
+  sceneKey,
 }: {
   brief: DebateBriefInfo;
   sides: DebateSideInfo[];
   form: DebateForm;
   scores?: Record<string, number>;
+  /** `${messageId}:brief` — 给了才把「展开依据」持久化。 */
+  sceneKey?: string | null;
 }) {
-  if (form === "red_team") return <RedTeamBrief brief={brief} sides={sides} />;
-  if (form === "roundtable") return <RoundtableBrief brief={brief} />;
-  return <DebateBrief brief={brief} sides={sides} scores={scores} />;
+  if (form === "red_team")
+    return <RedTeamBrief brief={brief} sides={sides} sceneKey={sceneKey} />;
+  if (form === "roundtable")
+    return <RoundtableBrief brief={brief} sceneKey={sceneKey} />;
+  return (
+    <DebateBrief
+      brief={brief}
+      sides={sides}
+      scores={scores}
+      sceneKey={sceneKey}
+    />
+  );
 }
 
 function DebateBrief({
   brief,
   sides,
   scores,
+  sceneKey,
 }: {
   brief: DebateBriefInfo;
   sides: DebateSideInfo[];
   scores?: Record<string, number>;
+  sceneKey?: string | null;
 }) {
   return (
     <div className="space-y-3">
@@ -65,7 +80,11 @@ function DebateBrief({
       />
       <RecommendationInline text={brief.recommendation} />
       {hasClarify(brief) && (
-        <Disclosure summary="展开依据" teaser={evidenceTeaser(brief, false)}>
+        <Disclosure
+          summary="展开依据"
+          teaser={evidenceTeaser(brief, false)}
+          sceneKey={sceneKey ? `${sceneKey}:evidence` : null}
+        >
           <StillToClarify
             factual={brief.factual_disputes}
             open={brief.open_questions}
@@ -79,9 +98,11 @@ function DebateBrief({
 function RedTeamBrief({
   brief,
   sides,
+  sceneKey,
 }: {
   brief: DebateBriefInfo;
   sides: DebateSideInfo[];
+  sceneKey?: string | null;
 }) {
   const subject = sides.find((s) => s.is_subject) ?? null;
   const risks = buildRiskItems(sides, brief);
@@ -119,7 +140,11 @@ function RedTeamBrief({
         </div>
       )}
       {hasClarify(brief) && (
-        <Disclosure summary="展开依据" teaser={evidenceTeaser(brief, false)}>
+        <Disclosure
+          summary="展开依据"
+          teaser={evidenceTeaser(brief, false)}
+          sceneKey={sceneKey ? `${sceneKey}:evidence` : null}
+        >
           <StillToClarify
             factual={brief.factual_disputes}
             open={brief.open_questions}
@@ -217,7 +242,13 @@ export function RoundtableSpectrum({
   );
 }
 
-function RoundtableBrief({ brief }: { brief: DebateBriefInfo }) {
+function RoundtableBrief({
+  brief,
+  sceneKey,
+}: {
+  brief: DebateBriefInfo;
+  sceneKey?: string | null;
+}) {
   if (
     !brief.crux &&
     brief.factual_disputes.length === 0 &&
@@ -242,7 +273,11 @@ function RoundtableBrief({ brief }: { brief: DebateBriefInfo }) {
         factual={brief.factual_disputes}
       />
       {hasClarify(brief) && (
-        <Disclosure summary="展开依据" teaser={evidenceTeaser(brief, false)}>
+        <Disclosure
+          summary="展开依据"
+          teaser={evidenceTeaser(brief, false)}
+          sceneKey={sceneKey ? `${sceneKey}:evidence` : null}
+        >
           <StillToClarify
             factual={brief.factual_disputes}
             open={brief.open_questions}
@@ -321,12 +356,14 @@ export function Disclosure({
   summary,
   teaser,
   children,
+  sceneKey,
 }: {
   summary: ReactNode;
   teaser?: string;
   children: ReactNode;
+  sceneKey?: string | null;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = usePersistentDisclosure(sceneKey ?? null, false);
   return (
     <div className="border-t border-border pt-1">
       <button

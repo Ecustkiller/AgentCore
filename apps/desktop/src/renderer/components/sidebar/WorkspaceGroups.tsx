@@ -50,7 +50,7 @@ export function WorkspaceGroups() {
         const expanded =
           stored !== undefined ? stored : folder.id === activeFolderId;
         const overflow = convs.length - MAX_PER_GROUP;
-        const groupIsLocal = deriveGroupWorkspaceIsLocal(folder, convs);
+        const groupIsLocal = deriveGroupWorkspaceIsLocal(folder);
         return (
           <div key={folder.id}>
             <WorkspaceGroupHeader

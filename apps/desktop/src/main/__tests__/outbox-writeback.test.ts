@@ -170,4 +170,52 @@ describe("drainOutbox", () => {
     };
     expect(body.finish_reason).toBe("cancelled");
   });
+
+  it("salvageOpen promotes open rows with empty content from captain stream_segments", async () => {
+    const { recoverLocalPersistence } = await import("../outbox-writeback");
+    writeReady("u-snap", {
+      phase: "open",
+      content: "",
+      reasoning_content: null,
+      finish_reason: null,
+      stream_segments: {
+        "captain:content": { text: "half reply from flush", generation: 0 },
+        "captain:reasoning": { text: "mid think", generation: 0 },
+      },
+    });
+    h.bearerPostJson.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: {
+        user_message_id: "u-snap",
+        assistant_message_id: "m1",
+        title: null,
+      },
+    });
+
+    await recoverLocalPersistence();
+    expect(h.bearerPostJson).toHaveBeenCalledOnce();
+    const body = h.bearerPostJson.mock.calls[0]?.[1] as {
+      content?: string;
+      reasoning_content?: string | null;
+      finish_reason?: string;
+    };
+    expect(body.content).toBe("half reply from flush");
+    expect(body.reasoning_content).toBe("mid think");
+    expect(body.finish_reason).toBe("cancelled");
+  });
+
+  it("regular drain still skips open rows that only have stream_segments", async () => {
+    writeReady("u-open-segs", {
+      phase: "open",
+      content: "",
+      stream_segments: {
+        "captain:content": { text: "should not promote mid-turn", generation: 0 },
+      },
+    });
+    const status = await drainOutbox();
+    expect(h.bearerPostJson).not.toHaveBeenCalled();
+    expect(status.pending).toHaveLength(1);
+    expect(status.pending[0]?.phase).toBe("open");
+  });
 });

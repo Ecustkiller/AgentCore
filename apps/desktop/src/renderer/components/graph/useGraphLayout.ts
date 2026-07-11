@@ -20,6 +20,7 @@ import {
   buildGraphStructure,
   computeGraphFold,
 } from "./helpers";
+import { logLayoutFailure } from "./layoutFailure";
 import type { GraphFitMode } from "./useGraphViewport";
 
 export interface TurnLayoutSlice {
@@ -27,6 +28,8 @@ export interface TurnLayoutSlice {
   edges: GraphEdge[];
   bbox: { width: number; height: number } | null;
   layoutReady: boolean;
+  /** ELK 失败时非空；与 layoutReady=false 同时出现，避免永久空白占位。 */
+  layoutError: string | null;
   nodeHeights: Record<string, number>;
   nodeSizes: Record<string, { width: number; height: number }>;
   groups: GroupLayout[];
@@ -39,6 +42,7 @@ const EMPTY_SLICE: TurnLayoutSlice = {
   edges: [],
   bbox: null,
   layoutReady: false,
+  layoutError: null,
   nodeHeights: {},
   nodeSizes: {},
   groups: [],
@@ -92,6 +96,7 @@ export function useGraphLayout(
     Record<string, { width: number; height: number }>
   >({});
   const [layoutReady, setLayoutReady] = useState(false);
+  const [layoutError, setLayoutError] = useState<string | null>(null);
   const [nodeHeights, setNodeHeights] = useState<Record<string, number>>({});
   const [groups, setGroups] = useState<GroupLayout[]>([]);
 
@@ -150,6 +155,7 @@ export function useGraphLayout(
       setNodeSizes({});
       setGroups([]);
       setLayoutReady(false);
+      setLayoutError(null);
       return;
     }
     const runs = projectedRunsRef.current ?? [];
@@ -162,6 +168,8 @@ export function useGraphLayout(
     const sizeMap = buildNodeSizeMap(nodeIds);
 
     let cancelled = false;
+    setLayoutReady(false);
+    setLayoutError(null);
     const elkLayout = layoutKind as ElkGraphLayout;
     const nodeSpacing = nodeSpacingForFitMode(fitMode);
     computeLayout(
@@ -175,14 +183,26 @@ export function useGraphLayout(
       layoutSubTeams,
       nodeSpacing,
       sizeMap,
-    ).then((result) => {
-      if (cancelled) return;
-      setLayout(result.positions, rawEdges);
-      setBbox({ width: result.width, height: result.height });
-      setNodeSizes(sizeMap);
-      setGroups(result.groups);
-      setLayoutReady(true);
-    });
+    )
+      .then((result) => {
+        if (cancelled) return;
+        setLayout(result.positions, rawEdges);
+        setBbox({ width: result.width, height: result.height });
+        setNodeSizes(sizeMap);
+        setGroups(result.groups);
+        setLayoutError(null);
+        setLayoutReady(true);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message = logLayoutFailure(err, { fitMode, layoutKind });
+        setLayout({}, []);
+        setBbox(null);
+        setNodeSizes({});
+        setGroups([]);
+        setLayoutReady(false);
+        setLayoutError(message);
+      });
     return () => {
       cancelled = true;
     };
@@ -193,6 +213,7 @@ export function useGraphLayout(
     edges,
     bbox,
     layoutReady,
+    layoutError,
     nodeHeights,
     nodeSizes,
     onNodesChange,
@@ -271,28 +292,44 @@ export function useMultiTurnLayouts(
           expandedUnits,
         );
         const sizeMap = buildNodeSizeMap(nodeIds);
+        const foldForTurn = foldInfo;
 
-        const result = await computeLayout(
-          nodeIds,
-          rawEdges,
-          layoutKind as ElkGraphLayout,
-          { source: INPUT_ID, sink: captainId ?? undefined },
-          subTeams,
-          nodeSpacingForFitMode(fitMode),
-          sizeMap,
-        );
-        if (cancelled || gen !== genRef.current) return;
-        next[t.turnId] = {
-          positions: result.positions,
-          edges: rawEdges,
-          bbox: { width: result.width, height: result.height },
-          layoutReady: true,
-          nodeHeights: heightByTurn[t.turnId] ?? {},
-          nodeSizes: sizeMap,
-          groups: result.groups,
-          subTeams,
-          foldInfo,
-        };
+        try {
+          const result = await computeLayout(
+            nodeIds,
+            rawEdges,
+            layoutKind as ElkGraphLayout,
+            { source: INPUT_ID, sink: captainId ?? undefined },
+            subTeams,
+            nodeSpacingForFitMode(fitMode),
+            sizeMap,
+          );
+          if (cancelled || gen !== genRef.current) return;
+          next[t.turnId] = {
+            positions: result.positions,
+            edges: rawEdges,
+            bbox: { width: result.width, height: result.height },
+            layoutReady: true,
+            layoutError: null,
+            nodeHeights: heightByTurn[t.turnId] ?? {},
+            nodeSizes: sizeMap,
+            groups: result.groups,
+            subTeams,
+            foldInfo,
+          };
+        } catch (err) {
+          if (cancelled || gen !== genRef.current) return;
+          const message = logLayoutFailure(err, {
+            fitMode,
+            layoutKind,
+            turnId: t.turnId,
+          });
+          next[t.turnId] = {
+            ...EMPTY_SLICE,
+            layoutError: message,
+            foldInfo: foldForTurn,
+          };
+        }
       }
       if (cancelled || gen !== genRef.current) return;
       setLayouts(next);

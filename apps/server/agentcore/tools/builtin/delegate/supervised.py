@@ -152,6 +152,7 @@ async def finalize_stopped(
     tool: DelegateTool, plan: RunPlan, seed_completed: dict[str, RunState]
 ) -> ToolResult:
     """Wrap up a partial plan without running the tail."""
+    from agentcore.runtime.events import run_skipped
     from agentcore.runtime.runs import RunPhase, RunState
     from agentcore.tools.builtin.delegate.accumulate import (
         accumulate_usage,
@@ -164,7 +165,12 @@ async def finalize_stopped(
 
     results: dict[str, RunState] = dict(seed_completed)
     for node in plan.nodes:
-        results.setdefault(node.run_id, RunState(phase=RunPhase.SKIPPED))
+        if node.run_id in results:
+            continue
+        results[node.run_id] = RunState(phase=RunPhase.SKIPPED)
+        # Graceful stop (replan stop / dispose): un-run tail → run_skipped(abort).
+        agent_id = node.agent_id or node.run_id
+        tool._sink.emit(run_skipped(node.run_id, agent_id, reason="abort"))
     accumulate_usage(tool, results)
     collect_ledger(tool, plan, results)
     collect_citations(tool, results)

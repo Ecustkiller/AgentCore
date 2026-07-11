@@ -1,5 +1,7 @@
 import type { FsApi, FsResult, WorkspaceOpResult } from "@shared/ipc-contract";
 import type { LogApi } from "@shared/log-contract";
+import type { ProcessApi } from "@shared/process-contract";
+import type { PtyApi } from "@shared/pty-contract";
 import type { SidecarApi } from "@shared/sidecar-contract";
 import type { UpdaterApi } from "@shared/updater-contract";
 import type { WindowApi } from "@shared/window-contract";
@@ -15,7 +17,11 @@ import type { WindowApi } from "@shared/window-contract";
 // no-op inside the real Electron shell.
 
 const noop = (): void => {};
-const fail = (): FsResult<never> => ({ ok: false, reason: "web-preview" });
+const fail = (): FsResult<never> => ({
+  ok: false,
+  reason: "web-preview",
+  code: "error",
+});
 
 const fsApi: FsApi = {
   addRoot: async () => null,
@@ -77,6 +83,49 @@ const logApi: LogApi = {
   write: noop,
 };
 
+const processApi: ProcessApi = {
+  list: async () => ({ processes: [] }),
+  stop: async (req) => ({
+    process_id: req.process_id,
+    status: "exited",
+    output: "",
+    exit_code: -1,
+  }),
+  read: async (req) => ({
+    process_id: req.process_id,
+    status: "exited",
+    output: "",
+  }),
+  killConversation: async () => {},
+  onEvent: () => noop,
+};
+
+const ptyApi: PtyApi = {
+  spawn: async () => ({
+    ok: false,
+    error: { kind: "WorkspaceIOError", detail: "web-preview" },
+  }),
+  input: async () => ({
+    ok: false,
+    error: { kind: "WorkspaceIOError", detail: "web-preview" },
+  }),
+  resize: async () => ({
+    ok: false,
+    error: { kind: "WorkspaceIOError", detail: "web-preview" },
+  }),
+  kill: async () => ({
+    ok: false,
+    error: { kind: "WorkspaceIOError", detail: "web-preview" },
+  }),
+  list: async () => ({ sessions: [] }),
+  read: async () => ({
+    ok: false,
+    error: { kind: "WorkspaceIOError", detail: "web-preview" },
+  }),
+  killConversation: async () => {},
+  onEvent: () => noop,
+};
+
 const windowApi: WindowApi = {
   minimize: noop,
   maximize: noop,
@@ -90,6 +139,8 @@ if (typeof window !== "undefined") {
   if (!window.sidecarApi) window.sidecarApi = sidecarApi;
   if (!window.updaterApi) window.updaterApi = updaterApi;
   if (!window.logApi) window.logApi = logApi;
+  if (!window.processApi) window.processApi = processApi;
+  if (!window.ptyApi) window.ptyApi = ptyApi;
   if (!window.windowApi) window.windowApi = windowApi;
   // Mark the browser runtime (no native fs/sidecar/updater/window): capability proxies
   // (lib/capabilities) read this so the app creates cloud — never local — conversations

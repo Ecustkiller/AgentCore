@@ -87,25 +87,34 @@ async def execute_tools(
         if approval_gate is not None and tool_call_requires_approval(
             name, tool.schema.approval, args
         ):
-            decision = await approval_gate.authorize(
-                tool_name=name,
-                tool_call_id=tc.id,
-                arguments=args,
-                execution_id=context.execution_id,
-            )
-            if decision is ApprovalDecision.DENY:
-                denial = (
-                    f"工具 '{name}' 未获用户授权，该操作未执行。"
-                    "不要重试它——请调整方案或询问如何继续。"
+            from agentcore.runtime.sandbox_approval import execution_tool_auto_passes
+
+            if execution_tool_auto_passes(context.backend, name):
+                logger.info("approval.sandbox_auto_pass", tool=name)
+            else:
+                decision = await approval_gate.authorize(
+                    tool_name=name,
+                    tool_call_id=tc.id,
+                    arguments=args,
+                    execution_id=context.execution_id,
                 )
-                sink.emit(tool_use_end(tc.id, name, success=False, output=denial, run_id=run_id))
-                logger.info("tool.execute_end", tool=name, status="denied", duration_ms=0)
-                return (
-                    LLMMessage(role="tool", content=denial, tool_call_id=tc.id),
-                    None,
-                    ToolAttempt(fingerprint, name, success=False),
-                    [],
-                )
+                if decision is ApprovalDecision.DENY:
+                    # Denial is a governance signal (user refuse / timeout), not an execution
+                    # failure — mark policy_failure so the run-scoped circuit breaker ignores it.
+                    denial = (
+                        f"工具 '{name}' 未获用户授权，该操作未执行。"
+                        "请改用其他方案或询问如何继续，不要再调用此工具。"
+                    )
+                    sink.emit(
+                        tool_use_end(tc.id, name, success=False, output=denial, run_id=run_id)
+                    )
+                    logger.info("tool.execute_end", tool=name, status="denied", duration_ms=0)
+                    return (
+                        LLMMessage(role="tool", content=denial, tool_call_id=tc.id),
+                        None,
+                        ToolAttempt(fingerprint, name, success=False, policy_failure=True),
+                        [],
+                    )
 
         # 工具执行阶段进度 (联网搜索前端展示优化): inject a per-call phase callback so a
         # long-running tool (web_search) can report a coarse EXECUTION phase mid-flight. The
@@ -120,7 +129,7 @@ async def execute_tools(
         ctx = replace(context, on_phase=_emit_phase, on_progress=_emit_progress)
 
         started = time.monotonic()
-        timeout = resolve_tool_timeout(tool.schema)
+        timeout = resolve_tool_timeout(tool.schema, args)
         try:
             if timeout is None:
                 result = await tool.execute(args, ctx)

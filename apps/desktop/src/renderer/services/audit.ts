@@ -6,19 +6,6 @@ import type {
 
 export type { AgentAuditEvent, AgentAuditListResponse };
 
-/** 按 run_id 分组计数（无 run_id 的事件跳过）。 */
-export function groupAuditCountsByRun(
-  events: AgentAuditEvent[],
-): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const ev of events) {
-    const rid = ev.run_id;
-    if (!rid) continue;
-    counts[rid] = (counts[rid] ?? 0) + 1;
-  }
-  return counts;
-}
-
 export type FetchTurnAuditOptions = {
   includeCausal?: boolean;
 };

@@ -9,7 +9,7 @@ from sqlalchemy import BigInteger, cast, func
 from sqlalchemy.sql.elements import ColumnElement
 
 # Sentinel for "field not provided" in partial updates, distinct from an explicit
-# None (which clears a nullable column, e.g. unbinding a folder's local_dir).
+# None (which clears a nullable column).
 _UNSET: object = object()
 
 

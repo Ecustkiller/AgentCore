@@ -1,4 +1,4 @@
-import { tagFilterParam, timeFilterSince } from "@/lib/searchFilters";
+import { timeFilterSince } from "@/lib/searchFilters";
 import { describe, expect, it } from "vitest";
 
 describe("timeFilterSince", () => {
@@ -36,16 +36,5 @@ describe("timeFilterSince", () => {
     expect(new Date(since as string).getTime()).toBe(
       now.getTime() - 30 * 24 * 60 * 60 * 1000,
     );
-  });
-});
-
-describe("tagFilterParam", () => {
-  it("returns undefined for 全部标签", () => {
-    expect(tagFilterParam("all")).toBeUndefined();
-  });
-
-  it("passes through enum values", () => {
-    expect(tagFilterParam("code_review")).toBe("code_review");
-    expect(tagFilterParam("research")).toBe("research");
   });
 });

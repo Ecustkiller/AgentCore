@@ -35,6 +35,8 @@ interface BackgroundTasksState {
    * 写回本地用）。
    */
   ensureMode: (conversationId: string) => Promise<WorkspaceMode>;
+  /** 删除对话时丢掉该会话的任务列表 / 模式缓存，避免分桶泄漏。 */
+  clearConversation: (conversationId: string) => void;
 }
 
 /** ensureMode 的并发去重：同一对话多处同时问模式，只打一次 binding 请求。 */
@@ -92,6 +94,17 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>(
       })();
       modeInFlight.set(conversationId, p);
       return p;
+    },
+    clearConversation: (conversationId) => {
+      modeInFlight.delete(conversationId);
+      set((s) => {
+        const { [conversationId]: _jobs, ...byConversation } = s.byConversation;
+        const { [conversationId]: _mode, ...modeByConversation } =
+          s.modeByConversation;
+        const { [conversationId]: _root, ...rootIdByConversation } =
+          s.rootIdByConversation;
+        return { byConversation, modeByConversation, rootIdByConversation };
+      });
     },
   }),
 );

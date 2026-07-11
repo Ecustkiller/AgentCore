@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from agentcore.api.routes import (
     admin,
     auth,
+    autonomy,
     boards,
     bookmarks,
     capabilities,
@@ -198,18 +199,19 @@ async def lifespan(app: FastAPI):
 
         turn_lease_sweep_task = asyncio.create_task(turn_lease_sweep_loop())
 
-    # proxy_spend durable drain (as-built: 成本配额 §三): request path only
-    # enqueues to process-local disk; this consumer writes cost_events on the
-    # telemetry pool. Single-process only — multi-worker needs Redis/DB outbox.
-    from agentcore.billing.proxy_spend_queue import get_proxy_spend_queue
+    # Cost ledger durable drain (as-built: 成本配额 §三): proxy spend always
+    # enqueues; turn/handoff enqueue on sync write failure. Consumer writes
+    # cost_events on the telemetry pool. Single-process only — multi-worker
+    # needs Redis/DB outbox.
+    from agentcore.billing.cost_ledger_queue import get_cost_ledger_queue
 
-    proxy_spend_queue = get_proxy_spend_queue()
-    proxy_spend_queue.start()
+    cost_ledger_queue = get_cost_ledger_queue()
+    cost_ledger_queue.start()
 
     try:
         yield
     finally:
-        await proxy_spend_queue.stop()
+        await cost_ledger_queue.stop()
         # Stop the boot probe if shutdown races its short window (no-op once done).
         searxng_probe_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -297,6 +299,7 @@ async def agentcore_error_handler(request, exc: AgentCoreError):
 app.include_router(system.router)
 app.include_router(admin.router, prefix="/v1")
 app.include_router(auth.router, prefix="/v1")
+app.include_router(autonomy.router, prefix="/v1")
 app.include_router(boards.router, prefix="/v1")
 app.include_router(bookmarks.router, prefix="/v1")
 app.include_router(capabilities.router, prefix="/v1")

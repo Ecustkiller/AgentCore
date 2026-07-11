@@ -175,10 +175,8 @@ def error_event(code: str, message: str, *, context: dict | None = None) -> SSEE
     )
 
 
-def title_generated(title: str, *, conversation_id: str, tag: str | None = None) -> SSEEvent:
+def title_generated(title: str, *, conversation_id: str) -> SSEEvent:
     payload: dict[str, str] = {"conversation_id": conversation_id, "title": title}
-    if tag:
-        payload["tag"] = tag
     return SSEEvent(
         type=EventType.TITLE_GENERATED,
         payload=payload,

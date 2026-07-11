@@ -199,11 +199,11 @@ function SegBtn({
 
 const STATUS_DOT: Record<RunNode["status"], string> = {
   pending: "bg-muted-foreground/30",
-  ready: "bg-muted-foreground/30",
   running: "bg-primary",
   completed: "bg-success",
   failed: "bg-destructive",
   cancelled: "bg-muted-foreground/30",
+  skipped: "bg-muted-foreground/30",
 };
 
 /** 一枚随 run 状态着色的状态点（对比透镜两层共用）。 */

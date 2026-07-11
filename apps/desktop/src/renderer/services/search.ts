@@ -22,8 +22,6 @@ export interface SearchOptions {
   /** 工作区过滤: scope conversation/message hits to one folder (drops the folder
    *  section server-side). */
   folderId?: string;
-  /** 标签过滤: scope conversation/message hits to one auto-tag. */
-  tag?: string;
 }
 
 /**
@@ -47,6 +45,5 @@ export async function searchAll(
   if (opts.types?.length) params.set("types", opts.types.join(","));
   if (opts.updatedAfter) params.set("updated_after", opts.updatedAfter);
   if (opts.folderId) params.set("folder_id", opts.folderId);
-  if (opts.tag) params.set("tag", opts.tag);
   return api.get<SearchResponse>(`/v1/search?${params.toString()}`);
 }

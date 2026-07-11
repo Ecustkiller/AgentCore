@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from pydantic import Field
+
 from agentcore.runtime.approvals import ApprovalDecision, DelegationAuthorizationDecision
 from agentcore.runtime.checkpoints import AskCheckpointIntent, CheckpointDecision
 from agentcore.runtime.events.payloads._base import WirePayload, absent
@@ -61,11 +63,15 @@ class AskAssumption(WirePayload):
 class AskOption(WirePayload):
     """One selectable answer to a choice AskQuestion. `label` is both the displayed text
     and the value composed back into the answer; `recommended` is advisory highlight only
-    (NOT a pre-selection)."""
+    (NOT a pre-selection). `action` marks an option that the desktop client fulfils with a
+    native client action instead of a plain text answer (unknown/absent → plain option):
+    `bind_local_folder` renders as a folder picker that binds the conversation workspace
+    to the chosen local directory before resuming the turn."""
 
     label: str
     detail: str | None = absent()
     recommended: bool | None = absent()
+    action: Literal["bind_local_folder"] | None = absent()
 
 
 class AskQuestion(WirePayload):
@@ -150,14 +156,17 @@ class TeamPreviewWorker(WirePayload):
 
 
 class TeamPreviewRequiredPayload(WirePayload):
+    """开工卡：计划预览 + 能力授权（两卡合一）。``tools`` may be empty under full_auto."""
+
     checkpoint_id: str
     conversation_id: str
     workers: list[TeamPreviewWorker]
+    tools: list[str] = Field(default_factory=list)
 
 
 class TeamPreviewResolvedPayload(WirePayload):
     checkpoint_id: str
-    decision: CheckpointDecision
+    decision: CheckpointDecision  # continue(=grant) / per_call / adjust / stop / …
     note: str
 
 

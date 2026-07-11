@@ -1,3 +1,4 @@
+import { registerConversationUiClearer, uiGet, uiSet } from "@/lib/uiStorage";
 import { useConversationStore } from "@/stores/conversation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { create } from "zustand";
@@ -10,41 +11,33 @@ import { create } from "zustand";
  * 设计对齐仓内既有、已验证的两处持久化：`components/files/fileTreeExpanded.ts`（按树 id 存展开集）
  * 与 `stores/ui.ts` 的 `conversationViews`（每对话视图偏好、**只落偏离默认的项**，故表恒收敛不膨胀）。
  * 这里同样**只存「偏离默认」的项**——一旦某条被切回其默认值即删键——所以这张 map 收敛在用户真正
- * 动过的少数折叠上，不随历史回合无限增长。删除对话时可 {@link clearDisclosureForConversation} 连带清理。
+ * 动过的少数折叠上，不随历史回合无限增长。删除对话时经 {@link clearConversationUiState} /
+ * {@link clearDisclosureForConversation} 连带清理。
  *
  * **键的作用域**：有效键 = `${当前对话 id}::${调用方给的稳定 key}`。对话 id 由 hook 内部读，故调用方
  * 只需给「回合/运行 + 元素」这段稳定标识（messageId / runId / step.id / 轮号 / sideKey / 通道+序号…）。
  * 无对话 id（草稿/流式裸态）或未给 key 时**退化为会话内存态**（普通 `useState`），保证任何环境都不炸。
  *
- * 纯前端 UX 层、设备本地（localStorage），**不碰协议 fold / conformance**。
+ * 纯前端 UX 层、经 {@link uiGet}/{@link uiSet} 落盘，**不碰协议 fold / conformance**。
  */
 
-const STORAGE_KEY = "agentcore:disclosure";
+const STORAGE_KEY = "disclosure";
 const SCOPE_SEP = "::";
 
-/** 读回持久化的「偏离默认」map。私密模式 / 非 DOM 测试环境抛错时回退空表（退化为会话内存态）。 */
+/** 读回持久化的「偏离默认」map。损坏 / 不可用时回退空表（退化为会话内存态）。 */
 function load(): Record<string, boolean> {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return {};
-    const out: Record<string, boolean> = {};
-    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof v === "boolean") out[k] = v;
-    }
-    return out;
-  } catch {
-    return {};
+  const parsed = uiGet<Record<string, unknown>>(STORAGE_KEY);
+  if (!parsed || typeof parsed !== "object") return {};
+  const out: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(parsed)) {
+    if (typeof v === "boolean") out[k] = v;
   }
+  return out;
 }
 
 function persist(map: Record<string, boolean>): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
-  } catch {
-    /* unavailable — session-only */
-  }
+  if (Object.keys(map).length === 0) uiSet(STORAGE_KEY, undefined);
+  else uiSet(STORAGE_KEY, map);
 }
 
 interface DisclosureState {
@@ -81,7 +74,11 @@ export const useDisclosureStore = create<DisclosureState>((set) => ({
     }),
 }));
 
-/** 命令式清理入口（对话删除时调用）。 */
+registerConversationUiClearer((conversationId) => {
+  useDisclosureStore.getState().clearConversation(conversationId);
+});
+
+/** 命令式清理入口（对话删除时亦可走 {@link clearConversationUiState}）。 */
 export function clearDisclosureForConversation(conversationId: string): void {
   useDisclosureStore.getState().clearConversation(conversationId);
 }

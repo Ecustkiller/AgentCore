@@ -38,12 +38,21 @@ from agentcore.runtime.runs.constants import (
     AMEND_NOTE_TOOL_NAME,
     DEFAULT_CONTRACT_RETRIES,
     ESCALATE_TOOL_NAME,
+    HANDOFF_TOOL_NAME,
     MAX_CONTRACT_RETRIES,
     MAX_DELEGATION_DEPTH,
     POST_NOTE_TOOL_NAME,
     READ_NOTES_TOOL_NAME,
 )
-from agentcore.runtime.runs.contract import ContractVerdict, check_contract, format_feedback
+from agentcore.runtime.runs.contract import (
+    ContractVerdict,
+    check_contract,
+    debrief_meets_minimum,
+    format_feedback,
+    format_handoff_feedback,
+    node_has_dependents,
+    synthesize_debrief,
+)
 from agentcore.runtime.runs.executor_context import (
     _ancestors_by_id,
     _build_messages,
@@ -673,23 +682,53 @@ def build_agent_executor(
                 # This pass's usage is now folded into run_usage via its return value;
                 # drop the mirror so a later non-react raise can't double-count it.
                 inflight.clear()
-                # files_written backs the contract's requires_files gate: derived
-                # from this transcript's file-tool calls so a file deliverable that
-                # was only pasted into the reply (never written) fails and reworks.
+                # files_written backs the contract's requires_files gate; workspace_paths
+                # reconciles declarative artifacts against the live workspace (+ this
+                # run's own writes). Handoff gate: nodes with downstream dependents must
+                # submit a minimum-quality brief (one correction shot, then degraded synth).
+                touched_now = files_touched_from_transcript(messages)
+                debrief_now = debrief_from_transcript(messages)
+                # Re-index the live workspace only when reconciling declarative
+                # artifacts — otherwise keep the once-per-turn opening snapshot
+                # (peer/preexisting manifest) and this run's own writes.
+                if deliverable and deliverable.artifacts:
+                    live_index = await _safe_index_files(tool_ctx.backend)
+                    workspace_paths = list(dict.fromkeys([*live_index, *touched_now]))
+                else:
+                    workspace_paths = list(touched_now)
                 verdict = check_contract(
                     content,
                     deliverable,
-                    files_written=len(files_touched_from_transcript(messages)),
-                    debrief=debrief_from_transcript(messages),
+                    files_written=len(touched_now),
+                    debrief=debrief_now,
+                    workspace_paths=workspace_paths,
                 )
-                if verdict.ok or attempt == attempts - 1:
+                # Handoff gate only forces a correction shot when the tool is actually
+                # offered (production worker registry). Empty-registry unit tests still
+                # get a degraded synth below without burning an extra LLM round.
+                needs_handoff = node_has_dependents(plan, spec.run_id)
+                handoff_offered = worker_tools.get_optional(HANDOFF_TOOL_NAME) is not None
+                handoff_ok = (
+                    (not needs_handoff)
+                    or debrief_meets_minimum(debrief_now)
+                    or not handoff_offered
+                )
+                if (verdict.ok and handoff_ok) or attempt == attempts - 1:
                     break
-                messages.append(_retry_message(format_feedback(verdict)))
+                parts: list[str] = []
+                if not verdict.ok:
+                    parts.append(format_feedback(verdict))
+                if needs_handoff and handoff_offered and not debrief_meets_minimum(debrief_now):
+                    parts.append(
+                        format_handoff_feedback(present_but_thin=debrief_now is not None)
+                    )
+                messages.append(_retry_message("\n\n".join(p for p in parts if p)))
                 logger.info(
                     "contract.retry",
                     run_id=spec.run_id,
                     attempt=attempt + 1,
                     failures=verdict.failures,
+                    handoff_ok=handoff_ok,
                 )
 
             duration_ms = int((time.monotonic() - start) * 1000)
@@ -722,8 +761,18 @@ def build_agent_executor(
             # (best-effort; None when it finished without one) so downstream dep injection / CEO
             # synthesis read the author's own 结论 + 建议下一步 instead of re-deriving them from
             # prose. Carried on BOTH terminal states (a worker that failed its contract can still
-            # have submitted a useful brief before failing).
+            # have submitted a useful brief before failing). Nodes with downstream dependents
+            # that still lack a minimum-quality brief get an engine-synthesized degraded debrief.
             debrief = debrief_from_transcript(messages)
+            touched = files_touched_from_transcript(messages)
+            author_brief = debrief
+            if node_has_dependents(plan, spec.run_id) and not debrief_meets_minimum(debrief):
+                debrief = synthesize_debrief(content, touched)
+                logger.info(
+                    "handoff.degraded_synth",
+                    run_id=spec.run_id,
+                    had_author_brief=author_brief is not None,
+                )
             if not verdict.ok and _is_hard_failure(content, deliverable):
                 reason = "；".join(verdict.failures)
                 logger.info("contract.failed", run_id=spec.run_id, failures=verdict.failures)
@@ -751,7 +800,6 @@ def build_agent_executor(
             # The worker's terminal RunState is journaled at the ``execute`` choke point
             # below (run_final_fact — covers COMPLETED *and* FAILED in one place), so resume
             # re-seeds it from facts not the旁路 frame (执行级事件溯源 Phase 2 ⑥).
-            touched = files_touched_from_transcript(messages)
             sink.emit(
                 run_completed(
                     spec.run_id,
@@ -863,7 +911,14 @@ def build_agent_executor(
         # auto-clears on exit; contextvars are task-local, so concurrent workers in a
         # wave never bleed identities into one another.
         agent_id = spec.agent_id or spec.run_id
-        with log_context(run_id=spec.run_id, agent_id=agent_id, depth=spec.depth):
+        with log_context(
+            run_id=spec.run_id,
+            agent_id=agent_id,
+            depth=spec.depth,
+            cost_role="member",
+            persona=(spec.role or "").strip() or None,
+            parent_run_id=spec.parent_run_id or None,
+        ):
             state = await _execute_node(spec, completed, agent_id)
             # 执行级事件溯源 Phase 2 ⑥: journal the worker's terminal RunState (the seed shape)
             # at the SINGLE run choke point — every phase (COMPLETED / FAILED) covered once —

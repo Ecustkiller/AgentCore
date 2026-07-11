@@ -2,7 +2,8 @@
 
 Four invariants under outbox reorder / retry:
 
-1. **content monotonic** — a late checkpoint must not shorten (or overwrite terminal) body.
+1. **content merge** — checkpoints / salvage / incomplete stay length-monotonic; a
+   ``complete`` finalize delivery is authoritative and may replace a longer mid-stream body.
 2. **status gate** — completion status only advances (never ``complete`` → ``running``).
 3. **journal seq idempotent** — duplicate appends dedupe on ``(turn_id, seq)``.
 4. **finalize full journal** — finalize upserts the full fact list by seq to fill holes.
@@ -87,10 +88,27 @@ def should_apply_checkpoint_content(
 
 
 def pick_monotonic_content(existing: str | None, incoming: str | None) -> str:
-    """Prefer the longer body when merging finalize retries (D7 content monotonic)."""
+    """Prefer the longer body (salvage / incomplete / checkpoint monotonic protection)."""
     a = existing or ""
     b = incoming or ""
     return b if len(b) >= len(a) else a
+
+
+def pick_merged_content(
+    existing: str | None,
+    incoming: str | None,
+    *,
+    incoming_status: str | None = None,
+) -> str:
+    """Merge assistant body for finalize / upsert.
+
+    ``complete`` finalize is the authoritative delivery — it may replace a longer
+    mid-stream draft. Salvage / incomplete / failed keep length-monotonic protection
+    so a shorter crash salvage cannot erase a fuller checkpoint.
+    """
+    if incoming_status == MESSAGE_STATUS_COMPLETE:
+        return incoming or ""
+    return pick_monotonic_content(existing, incoming)
 
 
 def pick_longest(*candidates: str | None) -> str:

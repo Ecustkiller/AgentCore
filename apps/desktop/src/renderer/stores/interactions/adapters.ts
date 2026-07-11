@@ -116,6 +116,7 @@ export function entryToTeamPreview(e: InteractionEntry): TeamPreviewDisplay {
       depends_on: w.depends_on ?? [],
       debate: Boolean(w.debate),
     })),
+    tools: arr<string>(p.tools),
     status: resolved ? "resolved" : "pending",
     decision: resolved
       ? ((r.decision as CheckpointDecision | null | undefined) ?? null)

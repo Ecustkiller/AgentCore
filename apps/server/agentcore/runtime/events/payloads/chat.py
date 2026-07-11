@@ -102,9 +102,6 @@ class ToolUseEndPayload(WirePayload):
 class TitleGeneratedPayload(WirePayload):
     conversation_id: str
     title: str
-    tag: str | None = absent(
-        "Conversation auto-tag minted with the title; present only when classified."
-    )
 
 
 class FollowupsGeneratedPayload(WirePayload):

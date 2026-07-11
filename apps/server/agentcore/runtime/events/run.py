@@ -331,6 +331,30 @@ def run_cancelled(
     )
 
 
+def run_skipped(
+    run_id: str,
+    agent_id: str,
+    *,
+    reason: str = "cascade",
+) -> SSEEvent:
+    """A plan node never ran and was materialised as SKIPPED (级联跳过 / graceful abort).
+
+    ``reason``:
+    - ``cascade`` — a dependency failed with ``on_failure=skip``; this node (and further
+      dependents) were never dispatched.
+    - ``abort`` — scheduling ended via graceful abort (``on_failure=abort``, plan_review
+      stop, or supervised ``replan(stop=true)``); the un-run tail was materialised SKIPPED
+      so the graph shows「未执行」instead of a forever-pending queue.
+
+    Orthogonal to ``run_cancelled`` (mid-flight interrupt). Durable so reload doesn't leave
+    the node stuck ``pending`` / 「排队中」after the turn has closed.
+    """
+    return SSEEvent(
+        type=EventType.RUN_SKIPPED,
+        payload={"run_id": run_id, "agent_id": agent_id, "reason": reason},
+    )
+
+
 def run_progress(completed: int, total: int) -> SSEEvent:
     return SSEEvent(
         type=EventType.RUN_PROGRESS,

@@ -32,7 +32,8 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",
-      "electron"
+      "electron",
+      "node-pty"
     ],
     "overrides": {
       "@radix-ui/react-slot": "1.3.0",

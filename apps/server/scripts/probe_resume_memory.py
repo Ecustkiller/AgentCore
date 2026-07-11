@@ -197,7 +197,7 @@ async def run(args: argparse.Namespace) -> int:
 
         # 2) 项目文件夹 + 绑定会话
         fr = await client.post(
-            f"{base}/v1/folders", headers=headers, json={"name": "记忆resume探针"}
+            f"{base}/v1/folders", headers=headers, json={"name": "记忆resume探针", "mode": "cloud"}
         )
         fr.raise_for_status()
         folder_id = fr.json()["id"]

@@ -1,8 +1,27 @@
+import { hasLocalFiles } from "@/lib/capabilities";
+import { createZustandUiStorage } from "@/lib/uiStorage";
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 
 /** Filter key for the synthetic "ungrouped" section (not a real folder). */
 export const UNGROUPED_KEY = "__ungrouped__";
+
+const uiPersistStorage = createJSONStorage(() => createZustandUiStorage());
+
+/**
+ * Draft-time「在哪工作」intent — single discriminant union.
+ * Desktop default = quick local scratch; web (no fsApi) = quick cloud.
+ */
+export type DraftWorkspaceIntent =
+  | { kind: "quick_local" }
+  | { kind: "quick_cloud" }
+  | { kind: "project"; folderId: string };
+
+export function defaultDraftWorkspaceIntent(): DraftWorkspaceIntent {
+  return hasLocalFiles()
+    ? { kind: "quick_local" }
+    : { kind: "quick_cloud" };
+}
 
 /**
  * Pure-UI folder state. The folder *list* is server data owned by React Query
@@ -13,21 +32,16 @@ export const UNGROUPED_KEY = "__ungrouped__";
 interface FoldersUiState {
   /** A just-created folder whose header should open in inline-rename mode. */
   pendingRenameId: string | null;
-  /** Folder a freshly-started draft conversation should be filed into on its
-   * first send ("新建对话" from a folder header). Cleared once consumed. */
-  pendingNewChatFolderId: string | null;
-  /** 「云端临时对话」逃生口标记（决策 #11）：true ⇒ 这条草稿首发显式走纯云、绕开桌面
-   * 默认本地工作区。与 `pendingNewChatFolderId == null` 的「未指定（桌面默认本地）」区分——
-   * 否则首发处无法分辨「没选文件夹」和「明确要云」。消费后复位 false。 */
-  pendingNewChatCloud: boolean;
+  /** Where the current draft will land on first send. */
+  draftWorkspaceIntent: DraftWorkspaceIntent;
   /** User-pinned folders shown at the top of workspace pickers. */
   pinnedFolderIds: string[];
   /** Canonical「新建项目」dialog (command palette, etc.). */
   createProjectOpen: boolean;
 
   setPendingRename: (id: string | null) => void;
-  setPendingNewChatFolder: (id: string | null) => void;
-  setPendingNewChatCloud: (cloud: boolean) => void;
+  setDraftWorkspaceIntent: (intent: DraftWorkspaceIntent) => void;
+  resetDraftWorkspaceIntent: () => void;
   openCreateProject: () => void;
   closeCreateProject: () => void;
   togglePinFolder: (id: string) => void;
@@ -37,13 +51,14 @@ export const useFoldersStore = create<FoldersUiState>()(
   persist(
     (set) => ({
       pendingRenameId: null,
-      pendingNewChatFolderId: null,
-      pendingNewChatCloud: false,
+      draftWorkspaceIntent: defaultDraftWorkspaceIntent(),
       pinnedFolderIds: [],
       createProjectOpen: false,
       setPendingRename: (id) => set({ pendingRenameId: id }),
-      setPendingNewChatFolder: (id) => set({ pendingNewChatFolderId: id }),
-      setPendingNewChatCloud: (cloud) => set({ pendingNewChatCloud: cloud }),
+      setDraftWorkspaceIntent: (intent) =>
+        set({ draftWorkspaceIntent: intent }),
+      resetDraftWorkspaceIntent: () =>
+        set({ draftWorkspaceIntent: defaultDraftWorkspaceIntent() }),
       openCreateProject: () => set({ createProjectOpen: true }),
       closeCreateProject: () => set({ createProjectOpen: false }),
       togglePinFolder: (id) =>
@@ -55,6 +70,7 @@ export const useFoldersStore = create<FoldersUiState>()(
     }),
     {
       name: "folders-ui",
+      storage: uiPersistStorage,
       partialize: (s) => ({ pinnedFolderIds: s.pinnedFolderIds }),
     },
   ),

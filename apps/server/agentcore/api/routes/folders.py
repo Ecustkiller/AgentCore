@@ -1,8 +1,9 @@
-"""Folder CRUD routes (sidebar conversation grouping).
+"""Folder CRUD routes (项目 = 工作区).
 
 Folders are user-scoped: every route resolves the authenticated user and a
-non-owner receives 404 (IDOR-safe). Deleting a folder keeps its conversations —
-their membership just falls back to ungrouped (see the repository).
+non-owner receives 404 (IDOR-safe). Soft-deleting a folder archives its
+conversations in place (keeps ``folder_id``); workspace binding is set at
+create and is immutable thereafter.
 """
 
 from fastapi import APIRouter, Depends
@@ -30,9 +31,10 @@ async def create_folder(
     folder = await repo.create(
         user_id=user.user_id,
         name=body.name,
-        local_dir=body.local_dir,
+        local_root_id=body.local_root_id if body.mode == "local" else None,
+        local_subpath=body.local_subpath if body.mode == "local" else None,
     )
-    return FolderSummary.model_validate(folder)
+    return FolderSummary.from_folder(folder)
 
 
 @router.get("", response_model=list[FolderSummary])
@@ -41,7 +43,7 @@ async def list_folders(
     repo: FolderRepository = Depends(get_folder_repo),
 ):
     folders = await repo.list_by_user(user.user_id)
-    return [FolderSummary.model_validate(f) for f in folders]
+    return [FolderSummary.from_folder(f) for f in folders]
 
 
 @router.patch("/{folder_id}", response_model=FolderSummary)
@@ -51,18 +53,14 @@ async def update_folder(
     user: AuthUser,
     repo: FolderRepository = Depends(get_folder_repo),
 ):
-    # Pass only the fields the client actually sent, so an omitted ``local_dir``
-    # is left untouched while an explicit null clears the binding.
     fields = body.model_fields_set
     kwargs: dict = {}
     if "name" in fields:
         kwargs["name"] = body.name
-    if "local_dir" in fields:
-        kwargs["local_dir"] = body.local_dir
     folder = await repo.update(folder_id, user_id=user.user_id, **kwargs)
     if not folder:
         raise NotFoundError("文件夹不存在")
-    return FolderSummary.model_validate(folder)
+    return FolderSummary.from_folder(folder)
 
 
 @router.delete("/{folder_id}", response_model=StatusResponse)
@@ -82,10 +80,9 @@ async def delete_folder_permanent(
     folder_id: str,
     user: AuthUser,
 ):
-    """彻底删除文件夹：移除分组容器，成员对话解除分组后保留。
+    """彻底删除项目：移除容器；成员对话保留但解除分组（permanent path）.
 
-    Distinct from ``DELETE /{folder_id}`` (soft-delete container with retention).
-    Member conversations keep their scratch workspaces; only the grouping row is removed.
+    Distinct from ``DELETE /{folder_id}`` (soft-delete + archive members).
     """
     deleted = await permanent_delete_folder(folder_id=folder_id, user_id=user.user_id)
     if not deleted:

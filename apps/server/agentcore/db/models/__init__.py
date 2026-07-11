@@ -18,7 +18,7 @@ from .admin_audit import AdminAuditLog
 from .admin_mfa import AdminMfa
 from .agent_audit import AgentAuditEvent
 from .auth import Credentials, Invite, RefreshToken, UserLlmKey
-from .billing import CostEvent
+from .billing import CostCall, CostEvent
 from .boards import Board
 from .chat import Chat, ChatMember, ChatMessage
 from .conversations import (
@@ -53,6 +53,7 @@ __all__ = [
     "ChatMessage",
     "Conversation",
     "ConversationShare",
+    "CostCall",
     "CostEvent",
     "Credentials",
     "FeedbackRow",

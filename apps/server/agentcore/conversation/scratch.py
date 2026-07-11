@@ -1,10 +1,13 @@
-"""Per-conversation scratch workspace helpers (Folder 重构: 对话级文件空间).
+"""Per-conversation / project workspace helpers (项目即工作区).
 
-Every conversation owns an independent file space. Cloud path:
-``workspaces/<user_id>/conv/<conversation_id>/``. Local path:
-``<local_root_id>/<local_subpath>/`` (bound on the conversation row).
+Bare chat cloud path: ``workspaces/<user_id>/conv/<conversation_id>/``.
+Project cloud path: ``workspaces/<user_id>/<folder_id>/`` (shared by all
+conversations in the project). Local path uses the governing binding's
+``local_root_id`` / ``local_subpath`` (project row when foldered; conversation
+row when bare).
 """
 
+from agentcore.db.models import Conversation
 from agentcore.workspace.locate import LocalBinding
 
 
@@ -14,12 +17,7 @@ def resolve_conversation_local_binding(
     local_subpath: str | None = None,
     label: str = "workspace",
 ) -> LocalBinding | None:
-    """Resolve a conversation's scratch local binding from its own columns.
-
-    ``local_root_id`` is an explicit bind; callers may also pass
-    ``local_container_root_id`` (desktop local-first intent) via
-    ``conversation.common.resolve_local_binding``.
-    """
+    """Build a local binding from root/subpath columns, or None when unbound (cloud)."""
     if not local_root_id:
         return None
     return LocalBinding(
@@ -27,3 +25,8 @@ def resolve_conversation_local_binding(
         root_label=label,
         subpath=local_subpath or "",
     )
+
+
+def conversation_workspace_folder_id(conv: Conversation) -> str | None:
+    """Effective folder_id for path/key resolution (project share vs conv scratch)."""
+    return conv.folder_id

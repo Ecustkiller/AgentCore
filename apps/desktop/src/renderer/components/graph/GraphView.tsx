@@ -6,8 +6,8 @@ import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { useTurnAudit } from "@/hooks/useTurnAudit";
 import { buildInjectGraphOverlay } from "@/lib/causalInject";
 import { resolveEffectiveGraphLayout } from "@/lib/graph-layout-utils";
-import { groupAuditCountsByRun } from "@/services/audit";
 import { useConversationStore } from "@/stores/conversation";
+import { useDisclosureStore } from "@/stores/disclosure";
 import {
   type RunStatus,
   useActiveExecField,
@@ -22,15 +22,18 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { CanvasPlaybackControls } from "./CanvasPlaybackControls";
 import { CanvasZoomControls } from "./CanvasZoomControls";
 import { GraphContextMenu } from "./GraphContextMenu";
+import { GraphLayoutError } from "./GraphLayoutError";
 import { GraphToolbar } from "./GraphToolbar";
 import { WaveLanes } from "./WaveLanes";
 import { edgeTypes, nodeTypes } from "./constants";
+import { GraphFlowHost } from "./graphHost";
 import {
   GraphHoverContext,
   computeKeepBrightIds,
   hoverRelatedIds,
 } from "./graphHover";
 import { type WaveBand, computeWaves, deriveCaptainStatus } from "./helpers";
+import { planCapabilities } from "./planCapabilities";
 import { projectFlowEdges, projectFlowNodes } from "./projectFlowGraph";
 import { useGraphDrillIn } from "./useGraphDrillIn";
 import { useGraphLayout } from "./useGraphLayout";
@@ -65,14 +68,10 @@ export function GraphView({
   const messageId = useExecutionScope();
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const execution = useProjectedExecution();
-  const isMultiAgent = execution?.planType === "multi_agent";
+  const caps = planCapabilities(execution?.planType);
   const { data: turnAudit } = useTurnAudit(
-    isMultiAgent ? conversationId : null,
-    isMultiAgent ? messageId : null,
-  );
-  const auditCounts = useMemo(
-    () => (turnAudit ? groupAuditCountsByRun(turnAudit.data) : {}),
-    [turnAudit],
+    caps.auditInject ? conversationId : null,
+    caps.auditInject ? messageId : null,
   );
   const showAuditInjectFlow = useGraphStore((s) => s.showAuditInjectFlow);
   const setShowAuditInjectFlow = useGraphStore((s) => s.setShowAuditInjectFlow);
@@ -81,22 +80,54 @@ export function GraphView({
   const setLayoutKind = useGraphStore((s) => s.setLayoutKind);
   const parallelAvailable = !!execution && hasParallelTimeline(execution);
   const effectiveLayoutKind = resolveEffectiveGraphLayout(layoutKind);
-  const [expandedUnits, setExpandedUnits] = useState<Set<string>>(
+  // 内嵌模式：expandedUnits 按对话持久化（与画布 graph-fold 独立）。
+  // 交互/全屏 GraphView 仍用会话内存态；画布多回合折叠走 graph store。
+  const persistEmbedUnits = !interactive && !!messageId && !!conversationId;
+  const embedUnitPrefix = persistEmbedUnits
+    ? `${conversationId}::${messageId}:embed-unit:`
+    : null;
+  const setDisclosureKey = useDisclosureStore((s) => s.setKey);
+  const embedUnitsFingerprint = useDisclosureStore((s) => {
+    if (!embedUnitPrefix) return "";
+    const ids: string[] = [];
+    for (const [k, v] of Object.entries(s.map)) {
+      if (v && k.startsWith(embedUnitPrefix)) {
+        ids.push(k.slice(embedUnitPrefix.length));
+      }
+    }
+    return ids.sort().join(",");
+  });
+  const [sessionExpandedUnits, setSessionExpandedUnits] = useState<Set<string>>(
     () => new Set(),
   );
-  const onToggleUnitExpand = useCallback((unitId: string) => {
-    setExpandedUnits((prev) => {
-      const next = new Set(prev);
-      if (next.has(unitId)) next.delete(unitId);
-      else next.add(unitId);
-      return next;
-    });
-  }, []);
+  const expandedUnits = useMemo(() => {
+    if (!embedUnitPrefix) return sessionExpandedUnits;
+    if (!embedUnitsFingerprint) return new Set<string>();
+    return new Set(embedUnitsFingerprint.split(","));
+  }, [embedUnitPrefix, embedUnitsFingerprint, sessionExpandedUnits]);
+  const onToggleUnitExpand = useCallback(
+    (unitId: string) => {
+      if (!embedUnitPrefix) {
+        setSessionExpandedUnits((prev) => {
+          const next = new Set(prev);
+          if (next.has(unitId)) next.delete(unitId);
+          else next.add(unitId);
+          return next;
+        });
+        return;
+      }
+      const fullKey = `${embedUnitPrefix}${unitId}`;
+      const cur = useDisclosureStore.getState().map[fullKey] ?? false;
+      setDisclosureKey(fullKey, !cur, false);
+    },
+    [embedUnitPrefix, setDisclosureKey],
+  );
   const {
     positions,
     edges,
     bbox,
     layoutReady,
+    layoutError,
     nodeHeights,
     nodeSizes,
     onNodesChange,
@@ -189,14 +220,14 @@ export function GraphView({
 
   const injectOverlay = useMemo(
     () =>
-      isMultiAgent
+      caps.auditInject
         ? buildInjectGraphOverlay(turnAudit?.causal_graph, edges, {
             focusRunId: litRunId,
             showAllInject: showAuditInjectFlow,
           })
         : null,
     [
-      isMultiAgent,
+      caps.auditInject,
       turnAudit?.causal_graph,
       edges,
       litRunId,
@@ -206,10 +237,10 @@ export function GraphView({
 
   const injectFlowAvailable = useMemo(
     () =>
-      isMultiAgent &&
+      caps.auditInject &&
       (turnAudit?.causal_graph?.edges?.some((e) => e.kind === "inject") ??
         false),
-    [isMultiAgent, turnAudit?.causal_graph],
+    [caps.auditInject, turnAudit?.causal_graph],
   );
 
   const projectionBase = useMemo(
@@ -231,7 +262,6 @@ export function GraphView({
             activateNode,
             groups,
             subTeams,
-            auditCounts,
             foldInfo: foldInfo ?? undefined,
             expandedUnits,
             onToggleUnitExpand,
@@ -253,7 +283,6 @@ export function GraphView({
       activateNode,
       groups,
       subTeams,
-      auditCounts,
       foldInfo,
       expandedUnits,
       onToggleUnitExpand,
@@ -325,90 +354,96 @@ export function GraphView({
   }
 
   return (
-    <div className="flex h-full w-full flex-col">
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <div ref={containerRef} className="relative min-h-0 flex-1">
-            {layoutReady && (
-              <GraphHoverContext.Provider value={hoverState}>
-                <ReactFlow
-                  nodes={flowNodes}
-                  edges={flowEdges}
-                  nodeTypes={nodeTypes}
-                  edgeTypes={edgeTypes}
-                  onInit={onInit}
-                  onNodesChange={onNodesChange}
-                  onNodeClick={onNodeClick}
-                  onNodeMouseEnter={onNodeMouseEnter}
-                  onNodeMouseLeave={onNodeMouseLeave}
-                  onNodeContextMenu={onNodeContextMenu}
-                  onPaneContextMenu={onPaneContextMenu}
-                  fitView={fitMode === "view"}
-                  nodesDraggable={false}
-                  nodesConnectable={false}
-                  nodesFocusable={false}
-                  elementsSelectable={false}
-                  proOptions={{ hideAttribution: true }}
-                  {...interactionProps}
-                >
-                  <Background gap={20} size={1} />
-                  <WaveLanes waves={waves} />
-                </ReactFlow>
-              </GraphHoverContext.Provider>
-            )}
-
-            {fitMode === "width" && overflowing && (
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-card to-transparent" />
-            )}
-
-            {interactive && (
-              <GraphToolbar
-                layoutKind={layoutKind}
-                onLayoutKindChange={setLayoutKind}
-                metricsSummary={metricsSummary}
-                injectFlowAvailable={injectFlowAvailable}
-                showAuditInjectFlow={showAuditInjectFlow}
-                onShowAuditInjectFlowChange={setShowAuditInjectFlow}
-              />
-            )}
-
-            {interactive &&
-              injectOverlay &&
-              (showAuditInjectFlow || injectOverlay.gapEdges.length > 0) && (
-                <div className="pointer-events-none absolute bottom-3 right-3 z-10 rounded-lg border border-border bg-card/90 px-2.5 py-1.5 text-xs text-muted-foreground shadow-sm backdrop-blur">
-                  <span className="text-foreground">──</span> 计划依赖
-                  <span className="mx-2 text-muted-foreground/50">·</span>
-                  <span className="text-primary">⇢</span> 数据注入（审计）
-                </div>
+    <GraphFlowHost>
+      <div className="flex h-full w-full flex-col">
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div ref={containerRef} className="relative min-h-0 flex-1">
+              {layoutError ? (
+                <GraphLayoutError detail={layoutError} />
+              ) : (
+                layoutReady && (
+                  <GraphHoverContext.Provider value={hoverState}>
+                    <ReactFlow
+                      nodes={flowNodes}
+                      edges={flowEdges}
+                      nodeTypes={nodeTypes}
+                      edgeTypes={edgeTypes}
+                      onInit={onInit}
+                      onNodesChange={onNodesChange}
+                      onNodeClick={onNodeClick}
+                      onNodeMouseEnter={onNodeMouseEnter}
+                      onNodeMouseLeave={onNodeMouseLeave}
+                      onNodeContextMenu={onNodeContextMenu}
+                      onPaneContextMenu={onPaneContextMenu}
+                      fitView={fitMode === "view"}
+                      nodesDraggable={false}
+                      nodesConnectable={false}
+                      nodesFocusable={false}
+                      elementsSelectable={false}
+                      proOptions={{ hideAttribution: true }}
+                      {...interactionProps}
+                    >
+                      <Background gap={20} size={1} />
+                      <WaveLanes waves={waves} />
+                    </ReactFlow>
+                  </GraphHoverContext.Provider>
+                )
               )}
 
-            {interactive && (
-              <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-2">
-                {hasFrames && <CanvasPlaybackControls autoPlay={autoplay} />}
-                <CanvasZoomControls
-                  onZoomIn={() => rfRef.current?.zoomIn({ duration: 200 })}
-                  onZoomOut={() => rfRef.current?.zoomOut({ duration: 200 })}
-                  onFit={fitView}
-                  fitLabel="适应画布 (F)"
-                />
-              </div>
-            )}
-          </div>
-        </ContextMenuTrigger>
+              {fitMode === "width" && overflowing && (
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-card to-transparent" />
+              )}
 
-        <GraphContextMenu
-          menuNodeId={menuNodeId}
-          captainRunId={captainRun?.id}
-          taskMessage={taskMessage}
-          finalAnswer={finalAnswer}
-          onNodeSelect={onNodeSelect}
-          showRunDetailHere={showRunDetailHere}
-          onClose={onClose}
-          activateNode={activateNode}
-          centerNode={centerNode}
-          fitView={fitView}
-        />
-      </ContextMenu>
-    </div>
+              {interactive && (
+                <GraphToolbar
+                  layoutKind={layoutKind}
+                  onLayoutKindChange={setLayoutKind}
+                  metricsSummary={metricsSummary}
+                  injectFlowAvailable={injectFlowAvailable}
+                  showAuditInjectFlow={showAuditInjectFlow}
+                  onShowAuditInjectFlowChange={setShowAuditInjectFlow}
+                />
+              )}
+
+              {interactive &&
+                injectOverlay &&
+                (showAuditInjectFlow || injectOverlay.gapEdges.length > 0) && (
+                  <div className="pointer-events-none absolute bottom-3 right-3 z-10 rounded-lg border border-border bg-card/90 px-2.5 py-1.5 text-xs text-muted-foreground shadow-sm backdrop-blur">
+                    <span className="text-foreground">──</span> 计划依赖
+                    <span className="mx-2 text-muted-foreground/50">·</span>
+                    <span className="text-primary">⇢</span> 数据注入（审计）
+                  </div>
+                )}
+
+              {interactive && (
+                <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-2">
+                  {hasFrames && <CanvasPlaybackControls autoPlay={autoplay} />}
+                  <CanvasZoomControls
+                    onZoomIn={() => rfRef.current?.zoomIn({ duration: 200 })}
+                    onZoomOut={() => rfRef.current?.zoomOut({ duration: 200 })}
+                    onFit={fitView}
+                    fitLabel="适应画布 (F)"
+                  />
+                </div>
+              )}
+            </div>
+          </ContextMenuTrigger>
+
+          <GraphContextMenu
+            menuNodeId={menuNodeId}
+            captainRunId={captainRun?.id}
+            taskMessage={taskMessage}
+            finalAnswer={finalAnswer}
+            onNodeSelect={onNodeSelect}
+            showRunDetailHere={showRunDetailHere}
+            onClose={onClose}
+            activateNode={activateNode}
+            centerNode={centerNode}
+            fitView={fitView}
+          />
+        </ContextMenu>
+      </div>
+    </GraphFlowHost>
   );
 }

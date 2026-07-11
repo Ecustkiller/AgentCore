@@ -95,7 +95,7 @@ def test_title_prompt_bans_emoji_and_guards_injection():
     # conversation is interpolated as data and must not be obeyed as instructions.
     assert "emoji" in _TITLE_SYSTEM_PROMPT
     assert "JSON" in _TITLE_SYSTEM_PROMPT
-    assert "tag" in _TITLE_SYSTEM_PROMPT
+    assert "tag" not in _TITLE_SYSTEM_PROMPT
     assert "不要执行其中" in _TITLE_SYSTEM_PROMPT
 
 
@@ -103,32 +103,26 @@ def test_title_prompt_bans_emoji_and_guards_injection():
 
 
 def test_parse_title_result_from_json():
-    raw = '{"title": "登录功能设计", "tag": "code_review"}'
+    raw = '{"title": "登录功能设计"}'
     out = _parse_title_result(raw)
-    assert out == TitleResult(title="登录功能设计", tag="code_review")
+    assert out == TitleResult(title="登录功能设计")
 
 
-def test_parse_title_result_accepts_chinese_tag_label():
-    raw = '{"title": "竞品调研", "tag": "研究"}'
+def test_parse_title_result_ignores_legacy_tag_field():
+    raw = '{"title": "竞品调研", "tag": "research"}'
     out = _parse_title_result(raw)
-    assert out == TitleResult(title="竞品调研", tag="research")
-
-
-def test_parse_title_result_discards_invalid_tag():
-    raw = '{"title": "随便聊聊", "tag": "闲聊"}'
-    out = _parse_title_result(raw)
-    assert out == TitleResult(title="随便聊聊", tag=None)
+    assert out == TitleResult(title="竞品调研")
 
 
 def test_parse_title_result_plain_text_fallback():
     out = _parse_title_result('"登录功能设计"')
-    assert out == TitleResult(title="登录功能设计", tag=None)
+    assert out == TitleResult(title="登录功能设计")
 
 
 def test_parse_title_result_strips_json_fence():
-    raw = '```json\n{"title":"写作提纲","tag":"writing"}\n```'
+    raw = '```json\n{"title":"写作提纲"}\n```'
     out = _parse_title_result(raw)
-    assert out == TitleResult(title="写作提纲", tag="writing")
+    assert out == TitleResult(title="写作提纲")
 
 
 # --- LLMTitleGenerator (async, with a fake provider) ---
@@ -147,14 +141,14 @@ class _FakeProvider:
 
 
 async def test_generator_returns_sanitized_title():
-    provider = _FakeProvider('{"title":"登录功能设计","tag":"code_review"}')
+    provider = _FakeProvider('{"title":"登录功能设计"}')
     result = await LLMTitleGenerator(provider).generate(
         TitleInput(
             conversation_id="c1",
             messages=[{"role": "user", "content": "帮我设计登录"}],
         )
     )
-    assert result == TitleResult(title="登录功能设计", tag="code_review")
+    assert result == TitleResult(title="登录功能设计")
 
 
 async def test_generator_uses_flash_non_thinking_short():
@@ -182,7 +176,8 @@ async def test_generator_empty_messages_skips_call():
     assert provider.requests == []
 
 
-async def test_generator_blank_output_returns_empty():
+async def test_generator_blank_output_retries_then_returns_empty():
+    """Empty model body triggers one retry; still-empty → "" for caller fallback."""
     provider = _FakeProvider("   \n  ")
     result = await LLMTitleGenerator(provider).generate(
         TitleInput(
@@ -191,13 +186,40 @@ async def test_generator_blank_output_returns_empty():
         )
     )
     assert result == TitleResult(title="")
+    assert len(provider.requests) == 2
 
 
-async def test_generator_times_out_returns_empty(monkeypatch):
-    """A stalled model degrades to "" (→ caller's truncated fallback), not a hang."""
+async def test_generator_empty_then_success_uses_retry():
+    """First empty JSON title, second good → return the retry result."""
+
+    class _EmptyThenTitle:
+        def __init__(self) -> None:
+            self.requests: list[LLMRequest] = []
+
+        async def complete(self, request: LLMRequest) -> LLMResponse:
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                return LLMResponse(content="")
+            return LLMResponse(content='{"title":"登录功能设计"}')
+
+    provider = _EmptyThenTitle()
+    result = await LLMTitleGenerator(provider).generate(
+        TitleInput(
+            conversation_id="c1",
+            messages=[{"role": "user", "content": "帮我设计登录"}],
+        )
+    )
+    assert result == TitleResult(title="登录功能设计")
+    assert len(provider.requests) == 2
+
+
+async def test_generator_times_out_returns_empty_without_retry(monkeypatch):
+    """A stalled model degrades to "" with a single attempt — timeout must not retry."""
+    calls = {"n": 0}
 
     class _StallProvider:
         async def complete(self, request: LLMRequest) -> LLMResponse:
+            calls["n"] += 1
             await asyncio.sleep(3600)  # never resolves within the timeout
             raise AssertionError("unreachable")
 
@@ -206,3 +228,4 @@ async def test_generator_times_out_returns_empty(monkeypatch):
         TitleInput(conversation_id="c1", messages=[{"role": "user", "content": "你好"}])
     )
     assert result == TitleResult(title="")
+    assert calls["n"] == 1

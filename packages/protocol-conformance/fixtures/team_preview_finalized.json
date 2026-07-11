@@ -99,6 +99,11 @@
             ],
             "debate": false
           }
+        ],
+        "tools": [
+          "code_execute",
+          "file_write",
+          "test_run"
         ]
       },
       "timestamp": "2026-01-01T00:00:00.004Z"

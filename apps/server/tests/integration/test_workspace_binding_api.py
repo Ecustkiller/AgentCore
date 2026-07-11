@@ -35,11 +35,21 @@ async def test_bind_conversation_scratch(client, make_invite):
 
     r = await client.get(f"/v1/conversations/{conv}/workspace/binding")
     assert r.status_code == 200, r.text
-    assert r.json() == {"mode": "cloud", "scope": "conversation", "root_id": None}
+    assert r.json() == {
+        "mode": "cloud",
+        "scope": "conversation",
+        "root_id": None,
+        "source": None,
+    }
 
     r = await client.put(f"/v1/conversations/{conv}/workspace/binding", json={"root_id": _ROOT})
     assert r.status_code == 200, r.text
-    assert r.json() == {"mode": "local", "scope": "conversation", "root_id": _ROOT}
+    assert r.json() == {
+        "mode": "local",
+        "scope": "conversation",
+        "root_id": _ROOT,
+        "source": "explicit",
+    }
 
     detail = (await client.get(f"/v1/conversations/{conv}")).json()
     assert detail["folder_id"] is None
@@ -49,33 +59,54 @@ async def test_bind_conversation_scratch(client, make_invite):
 
     r = await client.delete(f"/v1/conversations/{conv}/workspace/binding")
     assert r.status_code == 200, r.text
-    assert r.json() == {"mode": "cloud", "scope": "conversation", "root_id": None}
+    assert r.json() == {
+        "mode": "cloud",
+        "scope": "conversation",
+        "root_id": None,
+        "source": None,
+    }
 
 
-async def test_bind_foldered_siblings_are_independent(client, make_invite):
+async def test_project_chat_inherits_binding_and_rejects_rebind(client, make_invite):
+    """Project chats inherit the project's workspace; conversation bind returns 409."""
     code = await make_invite("INV-B2")
     await register_and_login(client, code, "binduser2")
-    folder_id = (await client.post("/v1/folders", json={"name": "Proj"})).json()["id"]
-    conv_a = await _new_conversation(client, "a")
-    conv_b = await _new_conversation(client, "b")
+    folder = (
+        await client.post(
+            "/v1/folders",
+            json={"name": "Proj", "mode": "local", "local_root_id": _ROOT},
+        )
+    ).json()
+    folder_id = folder["id"]
+    conv_a = (
+        await client.post(
+            "/v1/conversations", json={"title": "a", "folder_id": folder_id}
+        )
+    ).json()["id"]
+    conv_b = (
+        await client.post(
+            "/v1/conversations", json={"title": "b", "folder_id": folder_id}
+        )
+    ).json()["id"]
+
     for cid in (conv_a, conv_b):
-        await client.patch(f"/v1/conversations/{cid}/folder", json={"folder_id": folder_id})
+        r = await client.get(f"/v1/conversations/{cid}/workspace/binding")
+        assert r.status_code == 200, r.text
+        assert r.json() == {
+            "mode": "local",
+            "scope": "folder",
+            "root_id": _ROOT,
+            "source": "explicit",
+        }
 
-    r = await client.put(f"/v1/conversations/{conv_a}/workspace/binding", json={"root_id": _ROOT})
-    assert r.status_code == 200, r.text
-    assert r.json() == {"mode": "local", "scope": "conversation", "root_id": _ROOT}
-
-    r = await client.get(f"/v1/conversations/{conv_b}/workspace/binding")
-    assert r.json() == {"mode": "cloud", "scope": "conversation", "root_id": None}
+    r = await client.put(
+        f"/v1/conversations/{conv_a}/workspace/binding", json={"root_id": "other"}
+    )
+    assert r.status_code == 409, r.text
 
     grouped = (await client.get("/v1/conversations/grouped")).json()
-    assert grouped["folders"][0].get("local_root_id") is None
-
-    r = await client.delete(f"/v1/conversations/{conv_a}/workspace/binding")
-    assert r.json() == {"mode": "cloud", "scope": "conversation", "root_id": None}
-    assert (await client.get(f"/v1/conversations/{conv_b}/workspace/binding")).json()[
-        "mode"
-    ] == "cloud"
+    assert grouped["folders"][0]["local_root_id"] == _ROOT
+    assert grouped["folders"][0]["mode"] == "local"
 
 
 async def test_bind_rejects_empty_root_id(client, make_invite):

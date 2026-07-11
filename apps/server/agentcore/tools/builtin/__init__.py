@@ -1,5 +1,7 @@
 """Built-in tool implementations."""
 
+from typing import Literal
+
 from agentcore.config import settings
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.builtin.amend_note import AmendNoteTool
@@ -21,6 +23,7 @@ from agentcore.tools.builtin.grep import GrepTool
 from agentcore.tools.builtin.handoff import HandoffTool
 from agentcore.tools.builtin.post_note import PostNoteTool
 from agentcore.tools.builtin.read_notes import ReadNotesTool
+from agentcore.tools.builtin.terminal import TerminalTool
 from agentcore.tools.builtin.test_run import TestRunTool
 from agentcore.tools.builtin.web.read_url import ReadUrlTool
 from agentcore.tools.builtin.web.search import WebSearchTool
@@ -46,7 +49,11 @@ def code_execution_enabled_for(backend: WorkspaceBackend | None) -> bool:
     return settings.gvisor_enabled or settings.code_execute_cloud_enabled
 
 
-def build_builtin_registry(*, include_execution_tools: bool = True) -> ToolRegistry:
+def build_builtin_registry(
+    *,
+    include_execution_tools: bool = True,
+    location: Literal["server", "local"] | None = None,
+) -> ToolRegistry:
     """Register the platform's built-in tools (single source of truth).
 
     Both the chat pipeline (worker toolset) and the read-only ``GET /tools``
@@ -60,6 +67,10 @@ def build_builtin_registry(*, include_execution_tools: bool = True) -> ToolRegis
     execution-class tool is governed the same way without another call-site edit. The
     default (True) keeps them present for the class-defining derivations
     (``per_call_tool_names`` / ``build_ceo_tool_registry``) and the ``GET /tools`` catalog.
+
+    ``location`` stamps ``code_execute``'s description to match the turn's backend
+    (server sandbox vs user machine). ``None`` (catalog) keeps a binding-agnostic
+    wording — never the old two-way「可能跑在用户机器上」hedge.
     """
     registry = ToolRegistry()
     registry.register(WebSearchTool())
@@ -76,7 +87,7 @@ def build_builtin_registry(*, include_execution_tools: bool = True) -> ToolRegis
     registry.register(GitTool())
     if include_execution_tools:
         registry.register(TestRunTool())
-        registry.register(CodeExecuteTool())
+        registry.register(CodeExecuteTool(location=location))
     return registry
 
 
@@ -92,8 +103,10 @@ def build_worker_registry(*, backend: WorkspaceBackend | None = None) -> ToolReg
     ``escalate`` too (a sub-worker escalates to its captain worker, which can re-escalate
     to the CEO).
     """
+    location = backend.location if backend is not None else None
     registry = build_builtin_registry(
         include_execution_tools=code_execution_enabled_for(backend),
+        location=location,
     )
     registry.register(EscalateTool())
     # post_note (the 便签墙 broadcast channel, §2.2 通) rides the same worker-only path as
@@ -112,6 +125,11 @@ def build_worker_registry(*, backend: WorkspaceBackend | None = None) -> ToolReg
     # doubles it.
     registry.register(HandoffTool())
     registry.register(DesktopNotifyTool())
+    # terminal (后台进程): local-only — processes are held by the desktop main process
+    # over workspace_op_required. Kept out of build_builtin_registry so NEVER does not
+    # leak into the CEO read-only filter (工具与能力系统 terminal 行).
+    if backend is not None and backend.location == "local":
+        registry.register(TerminalTool())
     return registry
 
 
@@ -169,17 +187,17 @@ def file_mutation_tool_names() -> frozenset[str]:
 
 
 def delegation_grantable_tool_names() -> frozenset[str]:
-    """Tools covered by a per-delegation grant (委派级授权).
+    """Tools covered by a kickoff / per-delegation grant (统一授权白名单).
 
-    The medium-risk class: ``code_execute`` plus the file-mutation tools
-    (``file_write`` / ``str_replace`` / ``file_delete`` / ``file_move`` /
-    ``file_append``). After the user chooses ``grant_delegation`` at delegate
-    start, these tools skip per-call approval for the rest of THAT delegation
-    (keyed by ``execution_id``). ``test_run`` and ``git`` are intentionally
-    excluded — ``test_run`` stays outside the delegation grant (still turn-grantable
-    via approve_always); ``git`` keeps its existing write-subcommand gate.
+    Same medium-risk set the turn-level grants can cover: file-mutation class
+    (``file_write`` / ``file_append`` / ``str_replace`` / ``file_delete`` /
+    ``file_move``) + ``git`` writes + execution class (``code_execute`` /
+    ``test_run`` / ``terminal`` start). After the user chooses grant-and-start on the
+    kickoff card, these tools skip per-call approval for the rest of THAT delegation
+    (keyed by ``execution_id``). Keep this set aligned with turn-level scopes so
+    a kickoff grant and a「本轮内都允许」do not disagree on what is covered.
     """
-    return file_mutation_tool_names() | frozenset({"code_execute"})
+    return approval_class_tool_names() | frozenset({"code_execute", "test_run", "terminal"})
 
 
 def per_call_tool_names() -> frozenset[str]:

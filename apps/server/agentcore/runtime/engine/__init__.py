@@ -10,7 +10,12 @@ All intermediate events are emitted to an EventSink for SSE delivery.
 """
 
 from .loop import react_loop
-from .segments import join_segments
+from .segments import deliverable_continuity_instruction, join_segments
 from .timeout import resolve_tool_timeout
 
-__all__ = ["join_segments", "react_loop", "resolve_tool_timeout"]
+__all__ = [
+    "deliverable_continuity_instruction",
+    "join_segments",
+    "react_loop",
+    "resolve_tool_timeout",
+]

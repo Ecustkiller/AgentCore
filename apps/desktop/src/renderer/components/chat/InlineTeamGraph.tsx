@@ -1,6 +1,9 @@
 import { StatusStrip } from "@/components/chat/StatusStrip";
 import { TeamNotesPanel } from "@/components/chat/TeamNotesPanel";
+import { teamNotesDefaultExpanded } from "@/components/chat/teamNotesDefaults";
 import { GraphView } from "@/components/graph/GraphView";
+import { planCapabilities } from "@/components/graph/planCapabilities";
+import { ContextualTip } from "@/components/onboarding/ContextualTip";
 import { formatCollabSummary } from "@/lib/collabSummary";
 import {
   EMBED_DEFAULT_COL_WIDTH,
@@ -9,6 +12,10 @@ import {
   workerGraphShape,
 } from "@/lib/elk-layout";
 import { useConversationStore } from "@/stores/conversation";
+import {
+  usePersistentDisclosure,
+  useStreamAwareDisclosure,
+} from "@/stores/disclosure";
 import {
   type Execution,
   type ExecutionJournal,
@@ -19,7 +26,7 @@ import {
 import { useGraphStore } from "@/stores/graph";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import { turnDetailPath } from "@/stores/ui";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 /** Re-export for canvas 指挥台 and other consumers. */
@@ -51,10 +58,7 @@ export function InlineTeamGraph({
   executionId: string;
   journal?: ExecutionJournal;
 }) {
-  // null = 未手动切换，默认展开；用户点折叠后以其选择为准。
-  const [expandedOverride, setExpandedOverride] = useState<boolean | null>(
-    null,
-  );
+  const notesPanelRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const conversationId = useConversationStore((s) => s.currentConversationId);
   // 「在画布打开」/「回放」→ 全屏回合详情页（协作图 / 辩论室 / 对比）。
@@ -114,47 +118,76 @@ export function InlineTeamGraph({
     return fitWidthBox(est.width, est.height, EMBED_DEFAULT_COL_WIDTH).height;
   }, [execution, layoutKind]);
 
-  if (
-    !execution ||
-    execution.id !== executionId ||
-    execution.planType === "single_agent"
-  ) {
+  const caps = planCapabilities(execution?.planType);
+  // 内嵌协作图收起/展开：与画布 graph-fold 独立语义（不互通）。
+  const [expanded, setExpanded] = usePersistentDisclosure(
+    `${messageId}:inline-graph`,
+    caps.inlineDefaultExpanded,
+  );
+
+  // 便签墙：运行中默认展开、结束默认折叠；用户选择跨卸载/刷新保留。
+  const notesLive = teamNotesDefaultExpanded(
+    execution?.status,
+    execution?.teamNotes ?? [],
+  );
+  const [notesExpanded, , setNotesExpanded] = useStreamAwareDisclosure(
+    `${messageId}:team-notes`,
+    notesLive,
+  );
+
+  const openTeamNotes = useCallback(() => {
+    setNotesExpanded(true);
+    requestAnimationFrame(() => {
+      notesPanelRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    });
+  }, [setNotesExpanded]);
+
+  if (!execution || execution.id !== executionId || !caps.showsTeamGraph) {
     return null;
   }
 
   const graphHeight = measured?.height ?? fallbackHeight;
-  // 默认一直展开（含完成态与辩论）；用户可手动收起。辩论正文仍归画布「辩论室」，状态条保留「打开辩论室」CTA。
-  const expanded = expandedOverride ?? true;
 
   return (
     <ExecutionScopeContext.Provider value={messageId}>
-      <div className="animate-task-card-enter mb-3 overflow-hidden rounded-xl border border-border bg-card">
-        {/* 辩论全过程 / 版本对比等「过程产物」不再内联聊天——它们归画布放大态（统一辩论室 /
-            统一「对比」视图），聊天正文只在状态条留信号（辩论 pill /「改了 N 版」chip）+ 入口 CTA
-            （前端UX设计.md §4.1/§4.2/§6.4）。 */}
-        <StatusStrip
-          execution={execution}
-          expanded={expanded}
-          onToggle={() => setExpandedOverride(!expanded)}
-          onMaximize={() => openInCanvas(false)}
-          onReplay={() => openInCanvas(true)}
-          onOpenRevisions={openRevisionsInCanvas}
-          onPeekRunning={onPeekRunning}
-          collabSummary={collabSummary}
-        />
-        {expanded && (
-          <GraphArea
+      <ContextualTip tipId="inline_team_graph" placement="top" active>
+        <div className="animate-task-card-enter mb-3 overflow-hidden rounded-xl border border-border bg-card">
+          {/* 辩论全过程 / 版本对比等「过程产物」不再内联聊天——它们归画布放大态（统一辩论室 /
+              统一「对比」视图），聊天正文只在状态条留信号（辩论 pill /「改了 N 版」chip）+ 入口 CTA
+              （前端UX设计.md §4.1/§4.2/§6.4）。 */}
+          <StatusStrip
             execution={execution}
-            messageId={messageId}
-            height={graphHeight}
-            onMeasure={onMeasure}
+            expanded={expanded}
+            onToggle={() => setExpanded(!expanded)}
+            onMaximize={() => openInCanvas(false)}
+            onReplay={() => openInCanvas(true)}
+            onOpenRevisions={openRevisionsInCanvas}
+            onPeekRunning={onPeekRunning}
+            onOpenTeamNotes={openTeamNotes}
+            collabSummary={collabSummary}
           />
-        )}
-        {/* 团队便签墙 (§2.2 通): the one-line decisions / heads-ups workers broadcast to their
-            concurrent siblings this turn — shown whether the graph is expanded or collapsed, so
-            it stays a compact, always-visible artifact. Renders nothing for a turn with no notes. */}
-        <TeamNotesPanel notes={execution.teamNotes} />
-      </div>
+          {expanded && (
+            <GraphArea
+              execution={execution}
+              messageId={messageId}
+              height={graphHeight}
+              onMeasure={onMeasure}
+            />
+          )}
+          {/* 团队便签墙 (§2.2 通): collapsible; stays available when the graph is folded.
+              Empty turns render nothing. */}
+          <div ref={notesPanelRef}>
+            <TeamNotesPanel
+              notes={execution.teamNotes}
+              expanded={notesExpanded}
+              onExpandedChange={setNotesExpanded}
+            />
+          </div>
+        </div>
+      </ContextualTip>
     </ExecutionScopeContext.Provider>
   );
 }

@@ -145,11 +145,11 @@ export const modelTierBadge: Record<"strong" | "fast", string> = {
 /** Run status dot (color-tokens.mdc state mapping). */
 export const runStatusDot = {
   pending: "bg-muted-foreground/30",
-  ready: "bg-muted-foreground/30",
   running: "bg-primary",
   completed: "bg-success",
   failed: "bg-destructive",
   cancelled: "bg-muted-foreground/30",
+  skipped: "bg-muted-foreground/30",
 } as const;
 
 /** Status / count chip (Badge, inline pills). */

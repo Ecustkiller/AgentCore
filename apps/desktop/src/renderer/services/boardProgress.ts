@@ -36,9 +36,9 @@ const GAP_Y = 14;
 /** Horizontal breathing room between the brief's right edge and the team column. */
 const GAP_X = 96;
 
-/** Map the execution store's {@link RunStatus} onto the engine's {@link RunVisualStatus}
- * (collapsing `ready`, an internal scheduling state, into `pending`). Shared with the Slice 3
- * crystallizer so a live overlay card and its persisted twin read the same status color. */
+/** Map the execution store's {@link RunStatus} onto the engine's {@link RunVisualStatus}.
+ * Shared with the Slice 3 crystallizer so a live overlay card and its persisted twin
+ * read the same status color. */
 export function runVisualStatus(status: RunStatus): RunVisualStatus {
   switch (status) {
     case "running":
@@ -49,6 +49,8 @@ export function runVisualStatus(status: RunStatus): RunVisualStatus {
       return "failed";
     case "cancelled":
       return "cancelled";
+    case "skipped":
+      return "cancelled"; // muted「未执行」— engine has no skipped chip; reuse cancelled tone
     default:
       return "pending";
   }
@@ -64,6 +66,8 @@ export function runStatusLabel(status: RunStatus): string {
       return "失败";
     case "cancelled":
       return "已取消";
+    case "skipped":
+      return "未执行";
     default:
       return "排队中";
   }

@@ -6,6 +6,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, replace
 
+from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
 from agentcore.llm.pricing import calculate_cost
 from agentcore.llm.profiles import ProfileParams
@@ -190,34 +191,40 @@ async def _drive_captain_loop(
     # so the turn finishes on that reason instead of END_TURN.
     finish_override: list[FinishReason] = []
     try:
-        content, reasoning, usage, rounds = await react_loop(
-            messages=messages,
-            llm=llm,
-            tools=tools,
-            sink=sink,
-            tool_context=tool_ctx,
-            profile=profile,
-            turn_model=turn_model,
-            # The captain's content/reasoning stream to the bubble (engine defaults);
-            # its tool-call ARGUMENT assembly (the big delegate 任务书, composed before
-            # run_plan exists) rides a bubble-scoped tool_progress so it isn't invisible.
-            on_tool_progress=lambda tool, chars: sink.emit(tool_progress(tool, chars)),
-            citation_sink=citation_sink,
-            annotate_citations=True,
-            approval_gate=approval_gate,
-            usage_sink=inflight,
-            finish_override_sink=finish_override,
+        with log_context(
             run_id=spec.run_id,
-            role="captain",
-            # 交付正文只留最终交付、旁白入 journal (Fork-B): the CEO bubble's persisted
-            # content (→ messages.content + MessageFinalFact + next-turn history) drops
-            # the prose written before a non-terminal tool call (process narration /
-            # steer acknowledgements). Captain-only: its content is NOT reload-synthesized
-            # from message_final (unlike workers), so this stays conformance-neutral —
-            # the live content_delta stream the folds/oracle read is untouched.
-            deliverable_only=True,
-            supports_tools=supports_tools,
-        )
+            agent_id=agent_id,
+            cost_role="captain",
+            persona="CEO",
+        ):
+            content, reasoning, usage, rounds = await react_loop(
+                messages=messages,
+                llm=llm,
+                tools=tools,
+                sink=sink,
+                tool_context=tool_ctx,
+                profile=profile,
+                turn_model=turn_model,
+                # The captain's content/reasoning stream to the bubble (engine defaults);
+                # its tool-call ARGUMENT assembly (the big delegate 任务书, composed before
+                # run_plan exists) rides a bubble-scoped tool_progress so it isn't invisible.
+                on_tool_progress=lambda tool, chars: sink.emit(tool_progress(tool, chars)),
+                citation_sink=citation_sink,
+                annotate_citations=True,
+                approval_gate=approval_gate,
+                usage_sink=inflight,
+                finish_override_sink=finish_override,
+                run_id=spec.run_id,
+                role="captain",
+                # 交付正文只留最终交付、旁白入 journal (Fork-B): the CEO bubble's persisted
+                # content (→ messages.content + MessageFinalFact + next-turn history) drops
+                # the prose written before a non-terminal tool call (process narration /
+                # steer acknowledgements). Captain-only: its content is NOT reload-synthesized
+                # from message_final (unlike workers), so this stays conformance-neutral —
+                # the live content_delta stream the folds/oracle read is untouched.
+                deliverable_only=True,
+                supports_tools=supports_tools,
+            )
         duration_ms = int((time.monotonic() - start) * 1000)
         usage_dict = usage.as_dict()
         cost = asdict(calculate_cost(turn_model, usage))

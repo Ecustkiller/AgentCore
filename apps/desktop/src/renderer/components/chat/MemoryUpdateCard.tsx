@@ -6,8 +6,8 @@ import { Card } from "@/components/ui";
 import { countPillMuted, statusCardChrome } from "@/components/ui/tone-presets";
 import { memoryLeafTabName } from "@/services/sources/memorySource";
 import type { MemoryUpdate } from "@/stores/conversation";
+import { usePersistentDisclosure } from "@/stores/disclosure";
 import { Brain, ChevronDown, ChevronRight } from "lucide-react";
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 /**
@@ -36,7 +36,7 @@ export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
   const chrome = statusCardChrome("muted");
   // Collapsed by default — a memory write is ambient FYI, not something to read every
   // time; expand on demand to audit what changed.
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = usePersistentDisclosure(`memory:${update.id}`, false);
 
   if (update.items.length === 0) return null;
 

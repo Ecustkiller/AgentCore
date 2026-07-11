@@ -56,7 +56,7 @@ async def _new_conversation(client: httpx.AsyncClient, title: str = "chat") -> s
 
 
 async def _new_folder(client: httpx.AsyncClient, name: str) -> str:
-    r = await client.post("/v1/folders", json={"name": name})
+    r = await client.post("/v1/folders", json={"name": name, "mode": "cloud"})
     assert r.status_code == 201, r.text
     return r.json()["id"]
 
@@ -94,18 +94,19 @@ async def test_conv_scratch_file_crud_by_ws_id(client, make_invite, _fs_data_dir
     assert (await client.delete(f"/v1/workspaces/{ws}/files/out/a.bin")).status_code == 200
 
 
-async def test_enumeration_lists_conv_scratch_only(client, make_invite, _fs_data_dir):
+async def test_enumeration_lists_projects_and_conv_scratch(client, make_invite, _fs_data_dir):
     code = await make_invite("INV-WSX-ENUM")
     await register_and_login(client, code, "wsxenum")
-    await _new_folder(client, "Alpha")
+    folder_id = await _new_folder(client, "Alpha")
     bare_conv = await _new_conversation(client, "bare")
 
     r = await client.get("/v1/workspaces")
     assert r.status_code == 200, r.text
     by_id = {w["ws_id"]: w for w in r.json()["data"]}
 
-    # Empty scratch spaces are omitted; folders never appear as workspaces.
-    assert by_id == {}
+    # Empty cloud projects always list; empty bare scratch is omitted.
+    assert f"folder:{folder_id}" in by_id
+    assert by_id[f"folder:{folder_id}"]["location"] == "cloud"
     assert f"conv:{bare_conv}" not in by_id
 
     await client.put(f"/v1/workspaces/conv:{bare_conv}/files/note.txt", content=b"x")
@@ -222,13 +223,14 @@ async def test_bad_and_foreign_ws_ids_404(client, new_client, make_invite, _fs_d
     assert (await client.get("/v1/workspaces/garbage/files")).status_code == 404
     assert (await client.get("/v1/workspaces/team:abc/files")).status_code == 404
     assert (await client.get(f"/v1/workspaces/folder:{conv_id}/files")).status_code == 404
-    assert (await client.get(f"/v1/workspaces/folder:{folder_id}/files")).status_code == 404
+    assert (await client.get(f"/v1/workspaces/folder:{folder_id}/files")).status_code == 200
     assert (await client.get(f"/v1/workspaces/conv:{conv_id}/files")).status_code == 200
 
     code_b = await make_invite("INV-WSX-IDOR-B")
     async with new_client() as other:
         await register_and_login(other, code_b, "wsxintruder")
         assert (await other.get(f"/v1/workspaces/conv:{conv_id}/files")).status_code == 404
+        assert (await other.get(f"/v1/workspaces/folder:{folder_id}/files")).status_code == 404
 
 
 async def test_file_index_lists_files_pruning_ignored(client, make_invite, _fs_data_dir):

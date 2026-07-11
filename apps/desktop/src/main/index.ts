@@ -13,6 +13,8 @@ import { registerFsIpc } from "./fs-service";
 import { registerLogIpc } from "./log-service";
 import { registerNotificationIpc } from "./notification-service";
 import { registerOutboxIpc } from "./outbox-writeback";
+import { registerProcessIpc } from "./process-service";
+import { registerPtyIpc } from "./pty-service";
 import { registerSidecarIpc } from "./sidecar-service";
 import { registerTerminalIpc } from "./terminal-service";
 import { initUpdater } from "./updater";
@@ -239,6 +241,8 @@ app.whenReady().then(() => {
   registerSidecarIpc();
   registerOutboxIpc();
   registerTerminalIpc();
+  registerProcessIpc();
+  registerPtyIpc();
   registerAgentTownIpc();
   registerNotificationIpc();
   const mainWindow = createWindow();

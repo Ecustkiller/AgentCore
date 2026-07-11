@@ -138,7 +138,7 @@ export async function opExecute(
   if (sub) {
     const resolved = resolveLexical(root, sub);
     const real = resolved ? await realInside(root, resolved) : null;
-    if (real) cwdAbs = real;
+    if (real?.ok) cwdAbs = real.path;
   }
 
   // 脚本写入临时目录（与服务端一致：代码文件在临时区，进程 cwd 才是工作区）。

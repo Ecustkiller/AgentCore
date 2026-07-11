@@ -141,7 +141,7 @@
         "id": "r1",
         "agentId": "w1",
         "task": "调研",
-        "status": "pending",
+        "status": "skipped",
         "dependsOn": [],
         "outputSummary": null,
         "debrief": null,

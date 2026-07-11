@@ -30,18 +30,18 @@ from agentcore.workspace.locate import (
 from agentcore.workspace.server import ServerWorkspace
 
 
-def test_foldered_conversation_uses_conv_scratch(tmp_path: Path, monkeypatch):
+def test_foldered_conversation_shares_folder_root(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
-    assert root == tmp_path / "workspaces" / "u1" / "conv" / "c1"
+    assert root == tmp_path / "workspaces" / "u1" / "f1"
     assert root.is_dir()
 
 
-def test_conversations_in_same_folder_have_independent_roots(tmp_path: Path, monkeypatch):
+def test_conversations_in_same_folder_share_root(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     r1 = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
     r2 = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c2")
-    assert r1 != r2
+    assert r1 == r2
 
 
 def test_ungrouped_conversations_get_independent_roots(tmp_path: Path, monkeypatch):
@@ -58,7 +58,7 @@ def test_users_are_isolated_by_directory(tmp_path: Path, monkeypatch):
     a = resolve_workspace_root(user_id="alice", folder_id="f1", conversation_id="c1")
     b = resolve_workspace_root(user_id="bob", folder_id="f1", conversation_id="c1")
     assert a != b
-    assert a.parent.parent.name == "alice"  # <workspaces>/<user_id>/conv/<id>
+    assert a.parent.name == "alice"  # <workspaces>/<user_id>/<folder_id>
 
 
 def test_build_server_workspace_targets_resolved_root(tmp_path: Path, monkeypatch):
@@ -134,9 +134,9 @@ def test_build_workspace_falls_back_to_cloud_when_unbound(tmp_path: Path, monkey
 # --- storage key (mirrors the on-disk layout for snapshots) ---
 
 
-def test_storage_key_conv_scratch():
+def test_storage_key_folder_project():
     key = workspace_storage_key(user_id="u1", folder_id="f1", conversation_id="c1")
-    assert key == "workspaces/u1/conv/c1"
+    assert key == "workspaces/u1/f1"
 
 
 def test_storage_key_ungrouped_space():
@@ -154,16 +154,16 @@ def test_storage_key_mirrors_on_disk_root(tmp_path: Path, monkeypatch):
 # --- public workspace id (the /v1/workspaces addressing token) ---
 
 
-def test_format_workspace_id_is_always_conv():
-    assert format_workspace_id(folder_id="f1", conversation_id="c1") == "conv:c1"
+def test_format_workspace_id_folder_vs_conv():
+    assert format_workspace_id(folder_id="f1", conversation_id="c1") == "folder:f1"
     assert format_workspace_id(folder_id=None, conversation_id="c1") == "conv:c1"
 
 
-def test_parse_workspace_id_round_trips_conv():
+def test_parse_workspace_id_round_trips():
     assert parse_workspace_id("conv:c1") == WorkspaceId(kind="conv", ident="c1")
+    assert parse_workspace_id("folder:f9") == WorkspaceId(kind="folder", ident="f9")
     parsed = parse_workspace_id(format_workspace_id(folder_id="f9", conversation_id="c9"))
-    assert parsed.ident == "c9"
-    assert parsed.kind == "conv"
+    assert parsed == WorkspaceId(kind="folder", ident="f9")
 
 
 def test_parse_workspace_id_accepts_uuid_idents():

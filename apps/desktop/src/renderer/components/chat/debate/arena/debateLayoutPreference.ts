@@ -1,29 +1,20 @@
+import { uiGet, uiSet } from "@/lib/uiStorage";
 import type { DebateModel, DebateSideModel } from "../model";
 
 /** 辩论室剧本主列布局：并排对照 vs 上下单栏（长文阅读）。 */
 export type DebateArenaLayout = "split" | "stack";
 
-const STORAGE_KEY = "agentcore:debate-arena-layout";
+const STORAGE_KEY = "debate-arena-layout";
 
 /** 赛事页外层容器宽度（记分牌 + 剧本主列共用）。 */
 export const DEBATE_ARENA_PAGE_MAX = "max-w-7xl";
 
 export function loadDebateArenaLayout(): DebateArenaLayout {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === "stack") return "stack";
-    return "split";
-  } catch {
-    return "split";
-  }
+  return uiGet<string>(STORAGE_KEY) === "stack" ? "stack" : "split";
 }
 
 export function saveDebateArenaLayout(layout: DebateArenaLayout): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, layout);
-  } catch {
-    /* unavailable — session-only */
-  }
+  uiSet(STORAGE_KEY, layout);
 }
 
 /** 仅正反 2 方、有 pro/con 语义身份时可并排。 */

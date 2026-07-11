@@ -16,6 +16,7 @@ import { ChatThreadPage } from "@/pages/im/ChatThreadPage";
 import { NewDmPage } from "@/pages/im/NewDmPage";
 import { AboutSettings } from "@/pages/more/AboutSettings";
 import { AccountSettings } from "@/pages/more/AccountSettings";
+import { AutonomySettings } from "@/pages/more/AutonomySettings";
 import { ModelSettings } from "@/pages/more/ModelSettings";
 import { UsageSettings } from "@/pages/more/UsageSettings";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
@@ -160,6 +161,14 @@ function AppShell() {
           element={
             <RequireAuth>
               <ModelSettings />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/more/autonomy"
+          element={
+            <RequireAuth>
+              <AutonomySettings />
             </RequireAuth>
           }
         />

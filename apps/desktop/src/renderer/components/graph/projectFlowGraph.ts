@@ -3,7 +3,8 @@ import { NODE_HEIGHT, NODE_WIDTH } from "@/lib/elk-layout";
 import type { GroupLayout } from "@/lib/elk-layout";
 import { estimateTokens, formatCost, headText, tailText } from "@/lib/format";
 import { detectReviewConcern } from "@/lib/reviewConcern";
-import type { Execution, RunStatus } from "@/stores/execution";
+import type { Execution, RunNode, RunStatus } from "@/stores/execution";
+import { debateBeatFromContext } from "@/stores/execution";
 import type { GraphEdge } from "@/stores/graph";
 import type { Edge, Node } from "@xyflow/react";
 import {
@@ -14,8 +15,15 @@ import { INPUT_ID } from "./constants";
 import {
   type GraphFoldInfo,
   type SubTeam,
+  aggregateDebateRoundStatus,
   computeGraphFold,
+  debateRoundActiveBeat,
+  debateRoundPhaseLabel,
+  debateRoundSettledMark,
+  debateStatementHostId,
   deriveArtifacts,
+  isDebateCrossExamRun,
+  pickDebateCrossExamActivateId,
   resolveHandoff,
 } from "./helpers";
 
@@ -35,7 +43,6 @@ export interface FlowGraphProjectionInput {
   activateNode: (id: string) => void;
   groups: GroupLayout[];
   subTeams: SubTeam[];
-  auditCounts?: Record<string, number>;
   foldInfo?: GraphFoldInfo;
   expandedUnits?: ReadonlySet<string>;
   onToggleUnitExpand?: (unitId: string) => void;
@@ -162,6 +169,37 @@ function computeEdgePorts(
   return result;
 }
 
+/** 质询折进同轮陈词：hostId → 被折进的质询 runs。 */
+function debateCrossExamFolds(
+  runs: RunNode[],
+  workerIds: Set<string>,
+): Map<string, RunNode[]> {
+  const folds = new Map<string, RunNode[]>();
+  for (const r of runs) {
+    if (!isDebateCrossExamRun(r)) continue;
+    const hostId = debateStatementHostId(r, runs, workerIds);
+    if (!hostId) continue;
+    const list = folds.get(hostId) ?? [];
+    list.push(r);
+    folds.set(hostId, list);
+  }
+  return folds;
+}
+
+function sumDurationMs(
+  runs: readonly { durationMs?: number | null }[],
+): number | null {
+  let sum = 0;
+  let any = false;
+  for (const r of runs) {
+    if (r.durationMs != null && r.durationMs > 0) {
+      sum += r.durationMs;
+      any = true;
+    }
+  }
+  return any ? sum : null;
+}
+
 /** Pure projection: Execution + layout → React Flow nodes. */
 export function projectFlowNodes({
   execution,
@@ -179,7 +217,6 @@ export function projectFlowNodes({
   activateNode,
   groups,
   subTeams,
-  auditCounts,
   foldInfo: foldInfoIn,
   expandedUnits = new Set(),
   onToggleUnitExpand,
@@ -195,6 +232,7 @@ export function projectFlowNodes({
   const workerIdSet = new Set(workerRuns.map((r) => r.id));
   const captainId = captainRun?.id ?? null;
   const foldInfo = foldInfoIn ?? computeGraphFold(execution.runs, captainId);
+  const cxFolds = debateCrossExamFolds(workerRuns, workerIdSet);
   const nodes: Node[] = [];
 
   // A revision (辩论/圆桌 续写轮) is laid out inside its source's sub-team compound
@@ -263,6 +301,9 @@ export function projectFlowNodes({
   }
 
   for (const [i, run] of workerRuns.entries()) {
+    // 质询作答折进同轮陈词，不独立成图节点。
+    if (isDebateCrossExamRun(run)) continue;
+
     const unit = foldInfo.unitOf.get(run.id) ?? run.id;
     const isFoldedChild = foldInfo.folded.has(run.id);
     const unitExpanded =
@@ -283,17 +324,44 @@ export function projectFlowNodes({
       pos = placed(run.id);
     }
     if (!pos) continue;
-    const agent = execution.agents.find((a) => a.id === run.agentId);
+
+    const foldedCx = cxFolds.get(run.id) ?? [];
+    const roundRuns = foldedCx.length > 0 ? [run, ...foldedCx] : [run];
+    const aggregatedStatus: RunStatus =
+      foldedCx.length > 0
+        ? aggregateDebateRoundStatus(roundRuns.map((r) => r.status))
+        : run.status;
+    const activeBeat =
+      foldedCx.length > 0
+        ? debateRoundActiveBeat(
+            run.status,
+            foldedCx.map((r) => r.status),
+          )
+        : "statement";
+    const phaseLabel = debateRoundPhaseLabel(
+      aggregatedStatus,
+      activeBeat,
+      foldedCx.length > 0,
+    );
+    const faceRun =
+      activeBeat === "cross_exam"
+        ? (foldedCx.find((r) => r.status === "running") ??
+          foldedCx[foldedCx.length - 1] ??
+          run)
+        : run;
+    const agent = execution.agents.find((a) => a.id === faceRun.agentId);
+    const hostAgent = execution.agents.find((a) => a.id === run.agentId);
     const output = agent ? agent.outputChunks.join("") : "";
     const reasoning = agent ? agent.reasoningChunks.join("") : "";
     const reviewConcern =
       output.length >= 12
         ? detectReviewConcern(output, {
-            role: agent?.role ?? run.role,
-            runId: run.id,
+            role: agent?.role ?? faceRun.role,
+            runId: faceRun.id,
           })
         : null;
-    const focused = litRunId === run.id;
+    const focused =
+      litRunId === run.id || foldedCx.some((r) => r.id === litRunId);
     const isRevision = run.revision > 0;
     const isSubtask =
       !isRevision &&
@@ -302,6 +370,28 @@ export function projectFlowNodes({
       workerIdSet.has(run.parentRunId);
     const foldedChildCount = foldInfo.descendants.get(run.id)?.length ?? 0;
     const size = nodeSizes[run.id];
+    const durationMs =
+      foldedCx.length > 0 ? sumDurationMs(roundRuns) : run.durationMs;
+    // 轮节点聚合口径与 durationMs 一致：成本 / token 计入折进的质询作答。
+    const costTotal = roundRuns.reduce((n, r) => n + (r.cost?.total ?? 0), 0);
+    const realTokens = roundRuns.reduce(
+      (n, r) => n + (r.usage ? r.usage.input + r.usage.output : 0),
+      0,
+    );
+    const activateId =
+      aggregatedStatus === "running" && faceRun.id !== run.id
+        ? faceRun.id
+        : run.id;
+    const cxActivateId =
+      foldedCx.length > 0 ? pickDebateCrossExamActivateId(foldedCx) : null;
+    const settledMark =
+      foldedCx.length > 0
+        ? debateRoundSettledMark(
+            aggregatedStatus,
+            true,
+            foldedCx.map((r) => r.status),
+          )
+        : null;
     nodes.push({
       id: run.id,
       type: "agent",
@@ -309,12 +399,12 @@ export function projectFlowNodes({
       ...(group ? { parentId: group.groupId, extent: "parent" as const } : {}),
       data: {
         agentId: run.agentId,
-        role: agent?.role ?? run.agentId,
-        modelPreference: agent?.modelPreference,
-        reasoningEffort: agent?.reasoningEffort,
+        role: (hostAgent ?? agent)?.role ?? run.agentId,
+        modelPreference: (hostAgent ?? agent)?.modelPreference,
+        reasoningEffort: (hostAgent ?? agent)?.reasoningEffort,
         runId: run.id,
-        status: run.status,
-        isAnimating: run.status === "running",
+        status: aggregatedStatus,
+        isAnimating: aggregatedStatus === "running",
         task: run.task,
         outputPreview: tailText(output),
         reasoningPreview: tailText(reasoning),
@@ -325,34 +415,47 @@ export function projectFlowNodes({
         artifacts: agent ? deriveArtifacts(agent.toolCalls) : [],
         focused,
         nodeWidth: size?.width,
-        model: run.model,
-        durationMs: run.durationMs,
-        realTokens: run.usage ? run.usage.input + run.usage.output : 0,
-        costText:
-          run.cost && run.cost.total > 0
-            ? formatCost(run.cost.total, cnyPerUsd)
-            : undefined,
+        model: faceRun.model ?? run.model,
+        durationMs,
+        realTokens,
+        costText: costTotal > 0 ? formatCost(costTotal, cnyPerUsd) : undefined,
         handleDirection,
         isSubtask,
         isRevision,
         revision: run.revision,
         round: run.round,
+        debateBeat: isRevision
+          ? debateBeatFromContext(run.receivedContext)
+          : null,
+        debateRoundPhase: phaseLabel,
+        debateCrossExamMark: settledMark,
+        onActivateCrossExam:
+          settledMark && cxActivateId
+            ? () => activateNode(cxActivateId)
+            : undefined,
         group: run.group,
         revisionSummary: isRevision
           ? revisionFeedbackSummary(run.receivedContext)
           : null,
         revised: run.revised,
         replacesRunId: run.replacesRunId,
-        didRework: agent?.didRework === true,
+        didRework: (hostAgent ?? agent)?.didRework === true,
         stance: run.stance,
         checkpoint: run.checkpoint,
-        escalationPending: run.escalations.filter((e) => e.status === "pending")
-          .length,
-        escalationRaised: run.escalations.filter((e) => e.status === "raised")
-          .length,
-        escalationKind: pickEscalationKind(run.escalations),
+        escalationPending: roundRuns.reduce(
+          (n, r) =>
+            n + r.escalations.filter((e) => e.status === "pending").length,
+          0,
+        ),
+        escalationRaised: roundRuns.reduce(
+          (n, r) =>
+            n + r.escalations.filter((e) => e.status === "raised").length,
+          0,
+        ),
+        escalationKind: pickEscalationKind(
+          roundRuns.flatMap((r) => r.escalations),
+        ),
         reviewConcern,
-        auditEventCount: auditCounts?.[run.id],
         foldedChildCount:
           foldedChildCount > 0 && !foldInfo.debateUnits.has(run.id)
             ? foldedChildCount
@@ -360,7 +463,7 @@ export function projectFlowNodes({
         unitExpanded: expandedUnits.has(run.id),
         onToggleUnitExpand: () => onToggleUnitExpand?.(run.id),
         enterIndex: i + 1,
-        onActivate: () => activateNode(run.id),
+        onActivate: () => activateNode(activateId),
       },
     } as Node);
   }

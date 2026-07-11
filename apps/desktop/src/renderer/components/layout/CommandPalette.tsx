@@ -14,13 +14,9 @@ import {
   commandMatches,
 } from "@/lib/paletteCommands";
 import {
-  TAG_FILTER_LABELS,
-  TAG_FILTER_ORDER,
   TIME_FILTER_LABELS,
   TIME_FILTER_ORDER,
-  type TagFilter,
   type TimeFilter,
-  tagFilterParam,
   timeFilterSince,
 } from "@/lib/searchFilters";
 import {
@@ -134,8 +130,6 @@ function PaletteFilterBar({
   showSearchFilters,
   timeFilter,
   onTimeFilter,
-  tagFilter,
-  onTagFilter,
   folders,
   folderId,
   onFolderId,
@@ -145,8 +139,6 @@ function PaletteFilterBar({
   showSearchFilters: boolean;
   timeFilter: TimeFilter;
   onTimeFilter: (t: TimeFilter) => void;
-  tagFilter: TagFilter;
-  onTagFilter: (t: TagFilter) => void;
   folders: { id: string; name: string }[];
   folderId: string | null;
   onFolderId: (id: string | null) => void;
@@ -183,23 +175,6 @@ function PaletteFilterBar({
                 }`}
               >
                 {TIME_FILTER_LABELS[t]}
-              </button>
-            ))}
-          </div>
-          <div className="flex items-center gap-1">
-            {TAG_FILTER_ORDER.map((t) => (
-              <button
-                key={t}
-                type="button"
-                aria-pressed={tagFilter === t}
-                onClick={() => onTagFilter(t)}
-                className={`rounded-full px-2.5 py-1 text-xs transition-colors ${
-                  tagFilter === t
-                    ? "bg-primary/15 text-foreground"
-                    : "text-muted-foreground hover:bg-accent"
-                }`}
-              >
-                {TAG_FILTER_LABELS[t]}
               </button>
             ))}
           </div>
@@ -286,7 +261,6 @@ export function CommandPalette() {
   const [bookmarksMode, setBookmarksMode] = useState(false);
   // 搜索结果过滤 (方向 4): time + workspace facets, applied to backend search only.
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
-  const [tagFilter, setTagFilter] = useState<TagFilter>("all");
   const [folderId, setFolderId] = useState<string | null>(null);
   const [sections, setSections] = useState<
     { type: SearchSectionType; items: SearchItem[] }[]
@@ -325,7 +299,6 @@ export function CommandPalette() {
     setQuery(searchInitialQuery);
     setBookmarksMode(searchInitialBookmarks);
     setTimeFilter("all");
-    setTagFilter("all");
     setFolderId(null);
     if (searchInitialQuery || searchInitialBookmarks) {
       useUIStore.setState({
@@ -368,7 +341,6 @@ export function CommandPalette() {
             limit: PER_TYPE_LIMIT,
             updatedAfter: timeFilterSince(timeFilter),
             folderId: folderId ?? undefined,
-            tag: tagFilterParam(tagFilter),
           });
           if (seq !== seqRef.current) return;
           setSections(
@@ -384,7 +356,7 @@ export function CommandPalette() {
       })();
     }, DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [query, open, timeFilter, tagFilter, folderId, bookmarksMode]);
+  }, [query, open, timeFilter, folderId, bookmarksMode]);
 
   const isEmptyQuery = query.trim().length === 0;
 
@@ -489,10 +461,6 @@ export function CommandPalette() {
   };
   const applyTimeFilter = (t: TimeFilter) => {
     setTimeFilter(t);
-    inputRef.current?.focus();
-  };
-  const applyTagFilter = (t: TagFilter) => {
-    setTagFilter(t);
     inputRef.current?.focus();
   };
   const applyFolderId = (id: string | null) => {
@@ -626,8 +594,6 @@ export function CommandPalette() {
             showSearchFilters={!isEmptyQuery && !bookmarksMode}
             timeFilter={timeFilter}
             onTimeFilter={applyTimeFilter}
-            tagFilter={tagFilter}
-            onTagFilter={applyTagFilter}
             folders={folders}
             folderId={folderId}
             onFolderId={applyFolderId}

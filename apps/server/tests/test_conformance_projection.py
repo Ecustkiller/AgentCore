@@ -279,6 +279,38 @@ def test_multi_agent_debate_products(projected):
     assert rd["sides"][0]["run_id"] == "debate_mod1_r1_pro"
 
 
+def test_multi_agent_debate_multibeat_channels(projected):
+    """多轮对抗 + 每轮质询 + 结辩：钉死 beat 列数与 run_context.channel（角标语义上游）。"""
+    p = projected["multi_agent_debate_multibeat"]
+    assert p["status"] == "completed"
+    # 1 主持人 + 2 首轮陈词 + 2×质询×2 轮 + 2 第2轮陈词 + 2 结辩 = 11
+    assert p["progress"] == {"completed": 11, "total": 11}
+    by_id = {r["id"]: r for r in p["runs"]}
+    mod = "debate_mb_mod1"
+
+    def _channels(run_id: str) -> list[str]:
+        return [b["channel"] for b in by_id[run_id]["receivedContext"]]
+
+    # 续写 beat：首块 task（真实指令）+ 环节通道块（presence / chip）
+    assert _channels(f"{mod}_r1_cx_pro")[0] == "task"
+    assert "cross_exam" in _channels(f"{mod}_r1_cx_pro")
+    assert _channels(f"{mod}_r2_cx_con")[0] == "task"
+    assert "cross_exam" in _channels(f"{mod}_r2_cx_con")
+    assert _channels(f"{mod}_closing_pro")[0] == "task"
+    assert "closing" in _channels(f"{mod}_closing_pro")
+    assert _channels(f"{mod}_r2_pro")[0] == "task"
+    assert "round_focus" in _channels(f"{mod}_r2_pro")
+    assert by_id[f"{mod}_r2_pro"]["round"] == 2
+    assert by_id[f"{mod}_r2_cx_pro"]["round"] == 2
+    assert by_id[f"{mod}_closing_con"]["round"] == 2
+    d = p["debate"]
+    assert d is not None
+    assert len(d["rounds"]) == 2
+    assert len(d["rounds"][0]["cross_exam"]) == 2
+    assert len(d["rounds"][1]["cross_exam"]) == 2
+    assert len(d["closings"]) == 2
+
+
 def test_multi_agent_revision_synthesizes_node(projected):
     p = projected["multi_agent_revision"]
     assert p["status"] == "completed"
@@ -306,6 +338,21 @@ def test_multi_agent_multi_batch_merges(projected):
     assert all(r["status"] == "completed" for r in p["runs"])
     assert p["progress"] == {"completed": 2, "total": 2}
     assert p["content"] == "先调研。 再撰写。"
+
+
+def test_multi_agent_multi_batch_disjoint_merges_without_cross_deps(projected):
+    """同回合两批 delegate、跨批无 depends_on：fold 仍合并进同一 execution，不伪造依赖。"""
+    p = projected["multi_agent_multi_batch_disjoint"]
+    assert p["status"] == "completed"
+    assert [a["id"] for a in p["agents"]] == ["w1", "w2", "w3", "w4"]
+    assert [r["id"] for r in p["runs"]] == ["r1", "r2", "r3", "r4"]
+    by_id = {r["id"]: r for r in p["runs"]}
+    assert by_id["r1"]["dependsOn"] == []
+    assert by_id["r2"]["dependsOn"] == ["r1"]
+    assert by_id["r3"]["dependsOn"] == []
+    assert by_id["r4"]["dependsOn"] == ["r3"]
+    assert all(r["status"] == "completed" for r in p["runs"])
+    assert p["progress"] == {"completed": 4, "total": 4}
 
 
 def test_multi_agent_plan_revised_trace(projected):

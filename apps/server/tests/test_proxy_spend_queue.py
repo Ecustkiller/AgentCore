@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from agentcore.billing import cost_ledger_queue as ledger_mod
 from agentcore.billing import proxy_spend_queue as queue_mod
 from agentcore.llm.provider.protocol import TokenUsage
 
@@ -25,7 +26,7 @@ def _usage() -> TokenUsage:
 @pytest.fixture
 def spend_queue(monkeypatch, tmp_path):
     queue = queue_mod.reset_proxy_spend_queue_for_tests()
-    monkeypatch.setattr(queue_mod.settings, "data_dir", str(tmp_path))
+    monkeypatch.setattr(ledger_mod.settings, "data_dir", str(tmp_path))
     return queue
 
 
@@ -36,9 +37,12 @@ async def test_enqueue_writes_disk_then_drain_records(monkeypatch, spend_queue, 
         def __init__(self, _session):
             pass
 
-        async def record_runs(self, **kw):
+        async def record_calls(self, **kw):
             calls.append(kw)
             return 1
+
+        async def record_runs(self, **kw):
+            raise AssertionError("proxy path should materialize via record_calls")
 
     monkeypatch.setattr("agentcore.db.base.telemetry_session_factory", lambda: _FakeSession())
     monkeypatch.setattr("agentcore.db.repositories.CostEventRepository", Repo)
@@ -50,28 +54,36 @@ async def test_enqueue_writes_disk_then_drain_records(monkeypatch, spend_queue, 
         usage=_usage(),
         message_id="m1",
         trace_id="t1",
+        run_id="run-1",
+        role="member",
+        persona="调研员",
     )
     assert rid is not None
-    files = list((tmp_path / "telemetry" / "proxy_spend_queue").glob("*.json"))
+    files = list((tmp_path / "telemetry" / "cost_ledger_queue").glob("*.json"))
     assert len(files) == 1
+    payload = json.loads(files[0].read_text(encoding="utf-8"))
+    assert payload["calls"][0]["persona"] == "调研员"
+    assert payload["calls"][0]["run_id"] == "run-1"
+    assert payload["materialize_runs"] is True
 
     assert await spend_queue.drain_once() == 1
     assert calls and calls[0]["message_id"] == "m1"
-    assert calls[0]["runs"][0]["run_id"]
+    assert calls[0]["calls"][0]["call_id"]
+    assert calls[0]["materialize_runs"] is True
     # Acked — file gone.
-    assert list((tmp_path / "telemetry" / "proxy_spend_queue").glob("*.json")) == []
+    assert list((tmp_path / "telemetry" / "cost_ledger_queue").glob("*.json")) == []
 
 
-async def test_drain_retry_same_run_id_no_double_bill(monkeypatch, spend_queue, tmp_path):
-    """At-least-once: re-draining the same record must reuse run_id (ledger dedupes)."""
-    seen_run_ids: list[str] = []
+async def test_drain_retry_same_call_id_no_double_bill(monkeypatch, spend_queue, tmp_path):
+    """At-least-once: re-draining the same record must reuse call_id (ledger dedupes)."""
+    seen_call_ids: list[str] = []
 
     class Repo:
         def __init__(self, _session):
             pass
 
-        async def record_runs(self, **kw):
-            seen_run_ids.append(kw["runs"][0]["run_id"])
+        async def record_calls(self, **kw):
+            seen_call_ids.append(kw["calls"][0]["call_id"])
             return 1
 
     monkeypatch.setattr("agentcore.db.base.telemetry_session_factory", lambda: _FakeSession())
@@ -83,23 +95,18 @@ async def test_drain_retry_same_run_id_no_double_bill(monkeypatch, spend_queue, 
         model="m",
         usage=_usage(),
     )
-    qdir = tmp_path / "telemetry" / "proxy_spend_queue"
+    qdir = tmp_path / "telemetry" / "cost_ledger_queue"
     files = list(qdir.glob("*.json"))
     assert len(files) == 1
     payload = json.loads(files[0].read_text(encoding="utf-8"))
-    run_id = payload["runs"][0]["run_id"]
+    call_id = payload["calls"][0]["call_id"]
 
-    # Simulate: DB write succeeded but ack (unlink) failed — file still present.
-    # First drain would normally delete; instead we call record path twice manually
-    # by re-writing the file after a successful drain... simpler: drain once, then
-    # put the same payload back and drain again — run_id must be identical.
     assert await spend_queue.drain_once() == 1
-    assert seen_run_ids == [run_id]
+    assert seen_call_ids == [call_id]
 
-    # Re-drop the same durable record (crash between commit and unlink).
     files[0].write_text(json.dumps(payload), encoding="utf-8")
     assert await spend_queue.drain_once() == 1
-    assert seen_run_ids == [run_id, run_id]  # same key twice → ON CONFLICT DO NOTHING
+    assert seen_call_ids == [call_id, call_id]
 
 
 async def test_survives_process_restart_via_disk(monkeypatch, spend_queue, tmp_path):
@@ -110,7 +117,7 @@ async def test_survives_process_restart_via_disk(monkeypatch, spend_queue, tmp_p
         def __init__(self, _session):
             pass
 
-        async def record_runs(self, **kw):
+        async def record_calls(self, **kw):
             calls.append(kw)
             return 1
 
@@ -125,7 +132,7 @@ async def test_survives_process_restart_via_disk(monkeypatch, spend_queue, tmp_p
     )
     # New process = new queue singleton; disk still has the file.
     restarted = queue_mod.reset_proxy_spend_queue_for_tests()
-    monkeypatch.setattr(queue_mod.settings, "data_dir", str(tmp_path))
+    monkeypatch.setattr(ledger_mod.settings, "data_dir", str(tmp_path))
     assert await restarted.drain_once() == 1
     assert len(calls) == 1
 

@@ -230,6 +230,7 @@ async def send_message(
     body: SendMessageRequest,
     user: AuthUser,
     session: AsyncSession = Depends(get_db),
+    x_client_platform: Annotated[str | None, Header(alias="X-Client-Platform")] = None,
 ):
     """Send a user message and get a streaming AI response via SSE.
 
@@ -300,6 +301,7 @@ async def send_message(
             llm_credentials=preflight.credentials,
             debate_seed=body.debate_seed.model_dump() if body.debate_seed else None,
             llm_supports_tools=preflight.supports_tools,
+            x_client_platform=x_client_platform,
         )
     )
     turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)

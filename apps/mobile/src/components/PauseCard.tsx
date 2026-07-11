@@ -32,13 +32,15 @@ const TOOL_LABELS: Record<string, string> = {
   code_execute: "执行代码",
 };
 
-/** The file-mutation tool class the「本轮内所有文件改动」grant covers. */
-const FILE_OP_TOOLS: ReadonlySet<string> = new Set([
+/** 本轮内所有文件改动 — 对齐后端 ``approval_class_tool_names()``
+ * （文件改动五工具 ∪ {git}）。 */
+export const FILE_OP_TOOLS: ReadonlySet<string> = new Set([
   "file_write",
   "file_append",
   "str_replace",
   "file_delete",
   "file_move",
+  "git",
 ]);
 
 /** Tools whose card omits「本轮都允许」— mirrors backend per_call_tool_names(). */

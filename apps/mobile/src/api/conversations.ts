@@ -137,7 +137,8 @@ export interface MemoryUpdateItem {
 
 /** One offline-consolidation pass — what the AI remembered FROM this conversation (写也可见,
  *  §1.6). Returned ONLY with the latest messages window (the card sits at the thread tail).
- *  Mobile has no per-user firehose, so unlike desktop it surfaces on (re)load, not live push. */
+ *  Mobile has no per-user firehose; ChatPage polls the latest window after message_end so
+ *  the card can surface without requiring a full reopen. */
 export interface MemoryUpdate {
   id: string;
   createdAt: string;

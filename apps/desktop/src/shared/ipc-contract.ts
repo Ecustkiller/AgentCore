@@ -38,10 +38,24 @@ export interface FsFileRef {
   name: string;
 }
 
+/**
+ * Fs IPC 失败判别码——renderer 按码分支（如懒物化工作区对 `not_found`），
+ * **禁止**匹配 `reason` 中文文案。
+ */
+export type FsErrorCode =
+  | "not_found"
+  | "out_of_root"
+  | "unauthorized"
+  | "invalid"
+  | "exists"
+  | "denied"
+  | "busy"
+  | "error";
+
 /** 统一的判别式结果。 */
 export type FsResult<T = void> =
   | { ok: true; data: T }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; code: FsErrorCode };
 
 export type FsCreateKind = "file" | "dir";
 
@@ -90,12 +104,13 @@ export type FsWriteResult =
     };
 
 /**
- * 本地工作区 op 名（双模式工作区 P2）—— 与服务端 `WorkspaceOp` 一一对应。
+ * 本地工作区 op 名（双模式工作区）—— 与服务端 ``WorkspaceOp`` 一一对应。
  *
- * 服务端 `LocalWorkspace` 把每个 backend 方法序列化成一条 op 经 SSE 下发，主进程
- * 在授权根上执行后回填。P2a 先打通只读三件套（read/list/grep）。
+ * 服务端 ``LocalWorkspace`` 把每个 backend 方法序列化成一条 op 经 SSE 下发，主进程
+ * 在授权根上执行后回填。覆盖读 / 写 / 树 / grep / 执行 / 进程管理等全套 op（不再仅
+ * P2a 只读三件套）。
  *
- * `archive` 不对应任何 backend 方法——它是本地→云交接（P2e / e1）专用 op：把整个绑定
+ * ``archive`` 不对应任何 backend 方法——它是本地→云交接（P2e / e1）专用 op：把整个绑定
  * 根打包成单个归档（套用忽略规则）交服务端暂存并快照，由 handoff 编排直接下发。
  */
 export type WorkspaceOpName =
@@ -114,7 +129,11 @@ export type WorkspaceOpName =
   | "replace"
   | "grep"
   | "execute"
-  | "archive";
+  | "archive"
+  | "process_start"
+  | "process_read"
+  | "process_stop"
+  | "process_list";
 
 /**
  * 一次本地 op 的执行结果信封 —— 形状与服务端回填端点 `ResolveClientToolInteraction.result`

@@ -7,8 +7,11 @@ rendering the executor uses for the retry prompt.
 
 from agentcore.runtime.runs.contract import (
     check_contract,
+    debrief_meets_minimum,
     describe_deliverable,
     format_feedback,
+    node_has_dependents,
+    synthesize_debrief,
 )
 from agentcore.runtime.runs.types import Deliverable, RunContract
 
@@ -175,3 +178,93 @@ def test_describe_deliverable_renders_requires_files():
     desc = describe_deliverable(Deliverable(requires_files=True))
     assert "file_write" in desc
     assert "工作区" in desc
+
+
+# --- artifacts: declarative path reconciliation ---------------------------------
+
+
+def test_artifacts_pass_when_exact_path_present():
+    v = check_contract(
+        "done",
+        RunContract(artifacts=["README.md"]),
+        files_written=1,
+        workspace_paths=["README.md", "src/main.py"],
+    )
+    assert v.ok
+
+
+def test_artifacts_fail_when_path_missing():
+    v = check_contract(
+        "done",
+        RunContract(artifacts=["README.md", "examples/demo.py"]),
+        files_written=1,
+        workspace_paths=["src/main.py"],
+    )
+    assert not v.ok
+    assert any("README.md" in f for f in v.failures)
+    assert any("examples/demo.py" in f for f in v.failures)
+
+
+def test_artifacts_glob_and_directory_match():
+    d = RunContract(artifacts=["src/**/*.py", "examples/", "pkg/"])
+    assert check_contract(
+        "ok",
+        d,
+        files_written=2,
+        workspace_paths=["src/a/b.py", "examples/x.txt", "pkg/__init__.py"],
+    ).ok
+    v = check_contract(
+        "ok",
+        d,
+        files_written=1,
+        workspace_paths=["src/a/b.py"],
+    )
+    assert not v.ok
+    assert any("examples/" in f for f in v.failures)
+
+
+def test_artifacts_empty_workspace_all_missing():
+    v = check_contract(
+        "贴了代码",
+        RunContract(artifacts=["a.py"]),
+        files_written=0,
+        workspace_paths=[],
+    )
+    assert not v.ok
+    # requires_files is implied by artifacts in builder; here we set artifacts alone
+    # so both the files_written and path checks can fire depending on flags.
+    assert any("a.py" in f for f in v.failures)
+
+
+def test_describe_deliverable_renders_artifacts():
+    desc = describe_deliverable(Deliverable(artifacts=["README.md", "examples/*"]))
+    assert "README.md" in desc
+    assert "examples/*" in desc
+
+
+def test_debrief_meets_minimum_summary_or_key_points():
+    assert not debrief_meets_minimum(None)
+    assert not debrief_meets_minimum({"summary": "太短"})
+    assert debrief_meets_minimum({"summary": "x" * 50})
+    assert debrief_meets_minimum({"summary": "短", "key_points": ["a", "b"]})
+
+
+def test_synthesize_debrief_marks_degraded():
+    d = synthesize_debrief("正文结论一段", ["a.py", "b.py"])
+    assert d["degraded"] is True
+    assert "正文结论" in d["summary"]
+    assert d["key_points"]
+
+
+def test_node_has_dependents():
+    from agentcore.runtime.runs.plan import RunPlan
+    from agentcore.runtime.runs.types import RunSpec
+
+    plan = RunPlan(
+        nodes=[
+            RunSpec(run_id="a", task="t"),
+            RunSpec(run_id="b", task="t", depends_on=["a"]),
+        ]
+    )
+    assert node_has_dependents(plan, "a")
+    assert not node_has_dependents(plan, "b")

@@ -7,7 +7,7 @@ import {
   baseName,
   parentDir,
 } from "@/lib/fileSource";
-import type { FilePreview as LocalPreview } from "@shared/ipc-contract";
+import type { FilePreview as LocalPreview, FsErrorCode } from "@shared/ipc-contract";
 
 /** Map the local IPC preview shape into the unified result. */
 function adaptPreview(p: LocalPreview): FilePreviewResult {
@@ -18,6 +18,20 @@ function adaptPreview(p: LocalPreview): FilePreviewResult {
     return { kind: "image", dataUrl: p.dataUrl, mime: p.mime, size: p.size };
   }
   return { kind: "binary", mime: p.mime, size: p.size, reason: p.reason };
+}
+
+/** Thrown from local IPC failures so callers can branch on {@link FsErrorCode}. */
+export class LocalFsError extends Error {
+  readonly code: FsErrorCode;
+  constructor(reason: string, code: FsErrorCode) {
+    super(reason);
+    this.name = "LocalFsError";
+    this.code = code;
+  }
+}
+
+function throwFs(reason: string, code: FsErrorCode): never {
+  throw new LocalFsError(reason, code);
 }
 
 /**
@@ -37,6 +51,9 @@ function adaptPreview(p: LocalPreview): FilePreviewResult {
  * so the tree, editor, and watcher only ever see paths relative to *this*
  * workspace, never the container root. `""` = the root itself (an explicitly-added
  * local project), a pure pass-through.
+ *
+ * Lazy materialization: a non-empty `subpath` may not exist on disk yet (zero
+ * files). Reads treat `not_found` as empty; writes mkdir-recursive in main.
  */
 export function createLocalRootSource(
   rootId: string,
@@ -70,7 +87,11 @@ export function createLocalRootSource(
     },
     async listDir(dir) {
       const res = await window.fsApi.listDir(rootId, inPath(dir));
-      if (!res.ok) throw new Error(res.reason);
+      if (!res.ok) {
+        // Lazy workspace: missing base (or unrealized nested path) ≡ empty.
+        if (base && res.code === "not_found") return [];
+        throwFs(res.reason, res.code);
+      }
       return res.data.map(
         (e): FileNode => ({
           path: outPath(e.relPath),
@@ -86,8 +107,17 @@ export function createLocalRootSource(
       // subtree — wasteful but self-contained (no IPC surface), and rarely hit:
       // the /files rail browses via listDir, and @ mention sources are built at
       // root level. Best-effort like the rest of the @ index.
+      //
+      // Lazy workspace: probe base first — missing ≡ empty index (no full scan).
+      if (base) {
+        const probe = await window.fsApi.listDir(rootId, base);
+        if (!probe.ok) {
+          if (probe.code === "not_found") return [];
+          throwFs(probe.reason, probe.code);
+        }
+      }
       const res = await window.fsApi.listFiles(rootId);
-      if (!res.ok) throw new Error(res.reason);
+      if (!res.ok) throwFs(res.reason, res.code);
       if (!base) return res.data.map((f) => f.relPath);
       const prefix = `${base}/`;
       return res.data
@@ -98,21 +128,25 @@ export function createLocalRootSource(
       const resolvedPath = inPath(path);
       const res = await window.fsApi.readFile(rootId, resolvedPath);
       if (!res.ok) {
-        console.error(
-          `[FilePreview] localRootSource.read failed ${JSON.stringify({
-            rootId,
-            path,
-            resolvedPath,
-            reason: res.reason,
-          })}`,
-        );
-        throw new Error(res.reason);
+        // not_found is a calm answer for preview; other codes stay error-logged.
+        if (res.code !== "not_found") {
+          console.error(
+            `[FilePreview] localRootSource.read failed ${JSON.stringify({
+              rootId,
+              path,
+              resolvedPath,
+              reason: res.reason,
+              code: res.code,
+            })}`,
+          );
+        }
+        throwFs(res.reason, res.code);
       }
       return adaptPreview(res.data);
     },
     async readForEdit(path): Promise<FileEditDoc> {
       const res = await window.fsApi.readTextFile(rootId, inPath(path));
-      if (!res.ok) throw new Error(res.reason);
+      if (!res.ok) throwFs(res.reason, res.code);
       const { content, mtimeMs, encoding, eol } = res.data;
       return { text: content, version: { mtimeMs }, encoding, eol };
     },
@@ -143,11 +177,11 @@ export function createLocalRootSource(
     },
     async createFile(path) {
       const res = await window.fsApi.create(rootId, inPath(path), "file");
-      if (!res.ok) throw new Error(res.reason);
+      if (!res.ok) throwFs(res.reason, res.code);
     },
     async mkdir(path) {
       const res = await window.fsApi.create(rootId, inPath(path), "dir");
-      if (!res.ok) throw new Error(res.reason);
+      if (!res.ok) throwFs(res.reason, res.code);
     },
     async move(src, dst) {
       // sameParent/sameName are computed on the workspace-relative paths (a prefix
@@ -162,7 +196,7 @@ export function createLocalRootSource(
           inPath(src),
           baseName(dst),
         );
-        if (!res.ok) throw new Error(res.reason);
+        if (!res.ok) throwFs(res.reason, res.code);
         return;
       }
       if (sameName) {
@@ -171,7 +205,7 @@ export function createLocalRootSource(
           inPath(src),
           inPath(parentDir(dst)),
         );
-        if (!res.ok) throw new Error(res.reason);
+        if (!res.ok) throwFs(res.reason, res.code);
         return;
       }
       throw new Error("暂不支持同时移动并改名");
@@ -180,13 +214,15 @@ export function createLocalRootSource(
       // copy 收完整目标路径（与 move 译成 rename/move-into-dir 不同）：主进程经 fs.cp 递归
       // 复制到该精确路径，故能在同目录内另存为新名（去重粘贴）。subpath 前缀两端同样抵消。
       const res = await window.fsApi.copy(rootId, inPath(src), inPath(dst));
-      if (!res.ok) throw new Error(res.reason);
+      if (!res.ok) throwFs(res.reason, res.code);
     },
     async delete(path) {
       const res = await window.fsApi.delete(rootId, inPath(path));
-      if (!res.ok) throw new Error(res.reason);
+      if (!res.ok) throwFs(res.reason, res.code);
     },
     watch(dir, onChange) {
+      // Missing dirs are tolerated (fs.watch throws → main ignores); after first
+      // write materializes the base, a remount/reload re-attaches the watcher.
       const watched = inPath(dir);
       void window.fsApi.watch(rootId, watched);
       const off = window.fsApi.onChanged((e) => {
@@ -201,15 +237,15 @@ export function createLocalRootSource(
     // 不回到 renderer。失败以异常上抛，调用方 toast（与本源其他方法的 `!ok` 抛错一致）。
     async revealInOsFileManager(path) {
       const res = await window.fsApi.reveal(rootId, inPath(path));
-      if (!res.ok) throw new Error(res.reason);
+      if (!res.ok) throwFs(res.reason, res.code);
     },
     async openWithOsDefaultApp(path) {
       const res = await window.fsApi.openPath(rootId, inPath(path));
-      if (!res.ok) throw new Error(res.reason);
+      if (!res.ok) throwFs(res.reason, res.code);
     },
     async copyOsPath(path) {
       const res = await window.fsApi.copyPath(rootId, inPath(path));
-      if (!res.ok) throw new Error(res.reason);
+      if (!res.ok) throwFs(res.reason, res.code);
     },
     async openShellAtPath(path) {
       const api = window.terminalApi;

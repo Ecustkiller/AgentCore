@@ -103,7 +103,7 @@ async def test_get_status_byok_mode_uses_stored_model(service, monkeypatch):
 
 
 class _FakeProbeProvider:
-    def __init__(self, *, fail: bool, supports_tools: bool) -> None:
+    def __init__(self, *, fail: bool, supports_tools: bool | None) -> None:
         self._fail = fail
         self._supports_tools = supports_tools
         self.probe_model: str | None = None
@@ -113,7 +113,7 @@ class _FakeProbeProvider:
         if self._fail:
             raise LLMError("bad key")
 
-    async def probe_tools(self, *, model: str) -> bool:
+    async def probe_tools(self, *, model: str) -> bool | None:
         return self._supports_tools
 
     async def close(self) -> None:
@@ -143,3 +143,27 @@ async def test_test_key_uses_user_model_and_records_tools(service):
     assert status.status == "active"
     assert status.supports_tools is True
     service._repo.update_supports_tools.assert_awaited_once_with("u1", True)
+
+
+@pytest.mark.asyncio
+async def test_test_key_persists_unknown_tools_as_none(service):
+    service._repo.get_by_user_id = AsyncMock(return_value=_row(api_key_enc=b"x"))
+    creds = LLMCredentials(
+        api_key="sk-abc",
+        base_url="https://api.openai.com/v1",
+        default_model="gpt-4o",
+    )
+    fake = _FakeProbeProvider(fail=False, supports_tools=None)
+
+    with (
+        patch(
+            "agentcore.llm.key_service.resolve_user_llm_credentials",
+            AsyncMock(return_value=creds),
+        ),
+        patch("agentcore.llm.key_service.build_provider", return_value=fake),
+    ):
+        status = await service.test_key("u1")
+
+    assert status.status == "active"
+    assert status.supports_tools is None
+    service._repo.update_supports_tools.assert_awaited_once_with("u1", None)

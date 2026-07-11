@@ -1,4 +1,5 @@
 import { useConversations } from "@/hooks/useConversations";
+import { useFolders } from "@/hooks/useFolders";
 import { useConversationWorkspace } from "@/hooks/useWorkspaces";
 import { hasLocalFiles } from "@/lib/capabilities";
 import type { FileSource } from "@/lib/fileSource";
@@ -12,11 +13,8 @@ import { useEffect, useMemo, useState } from "react";
 type LocalFallback = "idle" | "pending" | FileSource | null;
 
 /**
- * The {@link FileSource} for a conversation's side-panel file browser — the
- * single resolver shared by {@link WorkspaceMode}. When the workspace list has
- * no `conv:<id>` row (common right after a sidecar write, before explicit bind),
- * falls back to the same `localContainerRootId` resolution sidecar uses instead
- * of the cloud REST alias (which 404s on not-yet-promoted local scratch).
+ * FileSource for a conversation's side-panel file browser.
+ * Project local chats inherit folder root+subpath; bare local use container.
  */
 export function useConversationFileSource(
   conversationId: string | null,
@@ -24,9 +22,15 @@ export function useConversationFileSource(
   const ws = useConversationWorkspace(conversationId);
   const fsAvailable = hasLocalFiles();
   const conversations = useConversations();
-  const localContainerRootId =
-    conversations.find((c) => c.id === conversationId)?.localContainerRootId ??
-    null;
+  const folders = useFolders();
+  const conv = conversations.find((c) => c.id === conversationId) ?? null;
+  const folder = conv?.folderId
+    ? (folders.find((f) => f.id === conv.folderId) ?? null)
+    : null;
+  const localContainerRootId = conv?.localContainerRootId ?? null;
+  const needsLocalFallback =
+    (folder?.mode === "local" && !!folder.localRootId) ||
+    !!localContainerRootId;
 
   const [localFallback, setLocalFallback] = useState<LocalFallback>("idle");
 
@@ -35,7 +39,7 @@ export function useConversationFileSource(
       setLocalFallback("idle");
       return;
     }
-    if (!fsAvailable || !localContainerRootId) {
+    if (!fsAvailable || !needsLocalFallback) {
       setLocalFallback(null);
       return;
     }
@@ -48,7 +52,7 @@ export function useConversationFileSource(
     return () => {
       cancelled = true;
     };
-  }, [ws, conversationId, fsAvailable, localContainerRootId]);
+  }, [ws, conversationId, fsAvailable, needsLocalFallback]);
 
   return useMemo(() => {
     if (ws) return resolveWorkspaceSource(ws, fsAvailable);
@@ -56,13 +60,33 @@ export function useConversationFileSource(
 
     const awaitingLocal =
       fsAvailable &&
-      !!localContainerRootId &&
+      needsLocalFallback &&
       (localFallback === "pending" || localFallback === "idle");
     if (awaitingLocal) return null;
 
     if (localFallback && typeof localFallback !== "string") {
       return localFallback;
     }
+    if (folder && folder.mode === "cloud") {
+      return resolveWorkspaceSource(
+        {
+          wsId: `folder:${folder.id}`,
+          name: folder.name,
+          location: "cloud",
+          rootId: null,
+          subpath: "",
+          hasFiles: true,
+        },
+        fsAvailable,
+      );
+    }
     return createWorkspaceSource(conversationId);
-  }, [ws, conversationId, fsAvailable, localContainerRootId, localFallback]);
+  }, [
+    ws,
+    conversationId,
+    fsAvailable,
+    needsLocalFallback,
+    localFallback,
+    folder,
+  ]);
 }

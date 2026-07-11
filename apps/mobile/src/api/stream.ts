@@ -1,5 +1,6 @@
 import { apiUrl, authHeader, refreshTokens } from "@/api/client";
 import type { MessageAttachment } from "@/lib/attachments";
+import { StreamHttpError } from "@/lib/errors";
 // SSE transport for the mobile client (前端技术与架构 §七).
 //
 // The backend streams a turn as a POST returning text/event-stream (api/sse.py):
@@ -17,6 +18,26 @@ import type { MessageAttachment } from "@/lib/attachments";
 // still-live run after a drop / on reopen), and `resumeStream` (continue a durably
 // paused turn). An explicit 停止 is a separate JSON call (api/turn.ts).
 import type { CheckpointDecision, SSEEvent } from "@agentcore/contract-types";
+
+/** Build a {@link StreamHttpError} from a non-OK response. A refused turn (e.g.
+ *  402 LLM_KEY_REQUIRED / 429 quota) arrives as plain JSON `{error:{code,message}}`,
+ *  not an SSE stream — pull those out so ChatPage can offer「去配置」. */
+async function streamErrorFromResponse(
+  response: Response,
+): Promise<StreamHttpError> {
+  let code: string | undefined;
+  let serverMessage: string | undefined;
+  try {
+    const body = (await response.json()) as {
+      error?: { code?: string; message?: string };
+    };
+    code = body.error?.code;
+    serverMessage = body.error?.message;
+  } catch {
+    /* non-JSON body — keep status-only phrasing */
+  }
+  return new StreamHttpError(response.status, code, serverMessage);
+}
 
 /** Raised when the SSE body goes silent too long (dead socket / proxy drop). */
 export class StreamNetworkError extends Error {
@@ -144,7 +165,7 @@ export async function streamMessage(
       signal,
     }),
   );
-  if (!response.ok) throw new Error(`请求失败 (${response.status})`);
+  if (!response.ok) throw await streamErrorFromResponse(response);
   await pumpSSE(response, onEvent, conversationId);
 }
 
@@ -187,7 +208,7 @@ export async function attachStream(
     });
   });
   if (response.status === 204) return "none";
-  if (!response.ok) throw new Error(`续连失败 (${response.status})`);
+  if (!response.ok) throw await streamErrorFromResponse(response);
   await pumpSSE(response, onEvent, conversationId);
   return "attached";
 }
@@ -228,7 +249,7 @@ export async function resumeStream(
       signal,
     }),
   );
-  if (!response.ok) throw new Error(`继续失败 (${response.status})`);
+  if (!response.ok) throw await streamErrorFromResponse(response);
   await pumpSSE(response, onEvent, conversationId);
 }
 
@@ -255,7 +276,7 @@ export async function regenerateStream(
       signal,
     }),
   );
-  if (!response.ok) throw new Error(`重试失败 (${response.status})`);
+  if (!response.ok) throw await streamErrorFromResponse(response);
   await pumpSSE(response, onEvent, conversationId);
 }
 

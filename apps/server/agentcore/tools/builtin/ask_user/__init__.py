@@ -34,13 +34,14 @@ stop is ``ToolEffect.INTERACT`` — a terminal effect that ends the turn gracefu
 (its closing note rides as ``ToolResult.final_text``). The question + answer are
 journaled (``events._JOURNAL_EVENT_TYPES``) so a reload replays the exchange inline.
 
-结构化挂起 2b (turn 级落盘 + ``POST .../resume``): like the ``delegate`` checkpoint hook,
-the suspend is backed by a durable frame — an :class:`AskUserSuspension` is saved to
-``paused_turns`` BEFORE the wait and dropped after a live in-process resolve / timeout. A
-disconnect / restart during the wait leaves the frame so ``POST .../resume`` can map the
-user's answer back to this tool's result and continue the CEO loop. The answer→result
-mapping is :func:`result.ask_user_tool_result` so the live path and resume share one
-source of truth.
+结构化挂起 2b + 挂起即收口 (②) / D11 (turn 级落盘 + ``POST .../resume``): like the
+``delegate`` checkpoint hook, the suspend is backed by a durable frame — an
+:class:`AskUserSuspension` is saved to ``paused_turns`` and the turn ends in place
+(``SUSPEND→PAUSED``). All resumes — same session or after restart — go through the
+single cold path ``POST .../resume``, which maps the user's answer back to this tool's
+result and continues the CEO loop. If the frame cannot be saved ⇒ **explicit failure**
+(no in-memory timed wait / no timeout auto-continue). The answer→result mapping is
+:func:`result.ask_user_tool_result` so resume shares one source of truth.
 """
 
 from agentcore.tools.builtin.ask_user.result import ask_user_tool_result

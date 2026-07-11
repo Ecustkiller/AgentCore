@@ -1,12 +1,24 @@
 import { Button, Textarea } from "@/components/ui";
 import type { interactiveCheckpointTone } from "@/components/ui/tone-presets";
+import {
+  formatBindLocalFolderAnswer,
+  pickAndBindLocalFolder,
+} from "@/lib/bindLocalFolder";
+import { hasLocalFiles } from "@/lib/capabilities";
+import { usePersistentDisclosure } from "@/stores/disclosure";
 import type {
   AskAssumption,
+  AskOption,
   AskQuestion,
   AskStyleOption,
   CheckpointIntent,
 } from "@/types/events";
-import { ChevronRight, SlidersHorizontal } from "lucide-react";
+import {
+  ChevronRight,
+  FolderOpen,
+  Loader2,
+  SlidersHorizontal,
+} from "lucide-react";
 import { useState } from "react";
 
 /**
@@ -107,6 +119,22 @@ export function useAskAnswer(content: AskUserContent) {
       intent === "kickoff",
     );
 
+  /** Compose with one question forced to `value` (bind_local_folder resolve path). */
+  const composeWithAnswer = (
+    intent: CheckpointIntent,
+    questionId: string,
+    value: string,
+  ) =>
+    composeAnswer(
+      content,
+      { ...answers, [questionId]: [value] },
+      { ...otherOn, [questionId]: false },
+      otherText,
+      styleId,
+      note,
+      intent === "kickoff",
+    );
+
   return {
     answers,
     otherOn,
@@ -121,6 +149,7 @@ export function useAskAnswer(content: AskUserContent) {
     setOtherValue,
     presetCount,
     compose,
+    composeWithAnswer,
   };
 }
 
@@ -135,42 +164,50 @@ export function AskQuestionFields({
   answer,
   tone,
   disabled,
+  disclosureKey,
+  conversationId,
+  onBindResolve,
 }: {
   content: AskUserContent;
   answer: ReturnType<typeof useAskAnswer>;
   tone: AskTone;
   disabled: boolean;
+  /** 检查点/升级 id：给了才把「起步计划」开合持久化。 */
+  disclosureKey?: string | null;
+  /** Desktop conversation id — enables bind_local_folder action options. */
+  conversationId?: string | null;
+  /** After a successful bind, resolve the checkpoint with the composed answer. */
+  onBindResolve?: (composedAnswer: string) => void | Promise<void>;
 }) {
+  const [bindBusyLabel, setBindBusyLabel] = useState<string | null>(null);
+  const [bindError, setBindError] = useState<string | null>(null);
+
+  const handleBindOption = async (q: AskQuestion, opt: AskOption) => {
+    if (!conversationId || !onBindResolve || disabled || bindBusyLabel) return;
+    setBindBusyLabel(opt.label);
+    setBindError(null);
+    const result = await pickAndBindLocalFolder(conversationId);
+    if (!result.ok) {
+      if (result.reason === "error") setBindError(result.message);
+      setBindBusyLabel(null);
+      return;
+    }
+    const value = formatBindLocalFolderAnswer(opt.label, result.root.name);
+    try {
+      await onBindResolve(answer.composeWithAnswer("decision", q.id, value));
+    } catch {
+      setBindBusyLabel(null);
+    }
+  };
+
   return (
     <div className="space-y-2.5">
       {/* 起步计划：可折叠的只读信息块（默认收起；summary 预览各项名）。 */}
       {content.assumptions.length > 0 && (
-        <details className="group rounded-lg bg-muted/20">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 [&::-webkit-details-marker]:hidden">
-            <ChevronRight
-              size={13}
-              className="shrink-0 text-muted-foreground transition-transform group-open:rotate-90"
-            />
-            <span className="shrink-0 text-xs font-medium text-muted-foreground">
-              起步计划
-            </span>
-            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/70 group-open:hidden">
-              {content.assumptions.map((a) => a.label).join(" · ")}
-            </span>
-          </summary>
-          <div className="space-y-0.5 px-2.5 pb-2 pl-6">
-            {content.assumptions.map((a) => (
-              <div key={a.id} className="flex gap-1.5 text-xs">
-                <span className="w-14 shrink-0 text-muted-foreground">
-                  {a.label}
-                </span>
-                <span className="min-w-0 flex-1 whitespace-pre-wrap text-foreground">
-                  {a.value}
-                </span>
-              </div>
-            ))}
-          </div>
-        </details>
+        <AssumptionsDisclosure
+          assumptions={content.assumptions}
+          disclosureKey={disclosureKey}
+        />
       )}
 
       {content.questions.map((q, i) => (
@@ -184,12 +221,17 @@ export function AskQuestionFields({
           otherText={answer.otherText[q.id] ?? ""}
           disabled={disabled}
           tone={tone}
+          conversationId={conversationId}
+          bindBusyLabel={bindBusyLabel}
           onToggleChoice={(opt) => answer.toggleChoice(q, opt)}
           onSetText={(v) => answer.setText(q, v)}
           onToggleOther={() => answer.toggleOther(q)}
           onSetOther={(v) => answer.setOtherValue(q, v)}
+          onBindOption={(opt) => void handleBindOption(q, opt)}
         />
       ))}
+
+      {bindError && <p className="text-xs text-destructive">{bindError}</p>}
 
       {content.styleOptions.length > 0 && (
         <div>
@@ -217,6 +259,59 @@ export function AskQuestionFields({
               );
             })}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Controlled 起步计划 fold — replaces native `<details>` so open state can persist. */
+function AssumptionsDisclosure({
+  assumptions,
+  disclosureKey,
+  defaultOpen = false,
+}: {
+  assumptions: AskAssumption[];
+  disclosureKey?: string | null;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = usePersistentDisclosure(
+    disclosureKey ? `${disclosureKey}:assumptions` : null,
+    defaultOpen,
+  );
+  return (
+    <div className="rounded-lg bg-muted/20">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 text-left"
+      >
+        <ChevronRight
+          size={13}
+          className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
+        />
+        <span className="shrink-0 text-xs font-medium text-muted-foreground">
+          起步计划
+        </span>
+        {!open && (
+          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/70">
+            {assumptions.map((a) => a.label).join(" · ")}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="space-y-0.5 px-2.5 pb-2 pl-6">
+          {assumptions.map((a) => (
+            <div key={a.id} className="flex gap-1.5 text-xs">
+              <span className="w-14 shrink-0 text-muted-foreground">
+                {a.label}
+              </span>
+              <span className="min-w-0 flex-1 whitespace-pre-wrap text-foreground">
+                {a.value}
+              </span>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -260,10 +355,13 @@ function QuestionField({
   otherText,
   disabled,
   tone,
+  conversationId,
+  bindBusyLabel,
   onToggleChoice,
   onSetText,
   onToggleOther,
   onSetOther,
+  onBindOption,
 }: {
   index: number;
   numbered: boolean;
@@ -273,11 +371,17 @@ function QuestionField({
   otherText: string;
   disabled: boolean;
   tone: AskTone;
+  conversationId?: string | null;
+  bindBusyLabel?: string | null;
   onToggleChoice: (opt: string) => void;
   onSetText: (value: string) => void;
   onToggleOther: () => void;
   onSetOther: (value: string) => void;
+  onBindOption?: (opt: AskOption) => void;
 }) {
+  const canBindAction =
+    !!conversationId && !!onBindOption && hasLocalFiles() && !!window.fsApi;
+
   return (
     <div className="min-w-0">
       <div className="flex items-center gap-2">
@@ -314,15 +418,37 @@ function QuestionField({
                 const active = answer.includes(opt.label);
                 const isDefault =
                   !!question.default && opt.label === question.default;
+                const isBindAction =
+                  canBindAction && opt.action === "bind_local_folder";
+                const bindBusy = bindBusyLabel === opt.label;
                 return (
                   <div key={opt.label} className="flex w-full flex-col">
                     <Button
                       variant="ghost"
-                      disabled={disabled}
-                      onClick={() => onToggleChoice(opt.label)}
-                      className={`h-auto w-full justify-start rounded-lg border px-2.5 py-1.5 text-left text-xs font-normal disabled:opacity-40 ${
-                        active ? tone.optActive : tone.optIdle
+                      disabled={disabled || (!!bindBusyLabel && !bindBusy)}
+                      onClick={() =>
+                        isBindAction
+                          ? onBindOption?.(opt)
+                          : onToggleChoice(opt.label)
+                      }
+                      className={`h-auto w-full justify-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-left text-xs font-normal disabled:opacity-40 ${
+                        active || bindBusy ? tone.optActive : tone.optIdle
                       }`}
+                      icon={
+                        isBindAction ? (
+                          bindBusy ? (
+                            <Loader2
+                              size={14}
+                              className="shrink-0 animate-spin text-muted-foreground"
+                            />
+                          ) : (
+                            <FolderOpen
+                              size={14}
+                              className="shrink-0 text-muted-foreground"
+                            />
+                          )
+                        ) : undefined
+                      }
                     >
                       <span className="whitespace-pre-wrap">{opt.label}</span>
                       {opt.recommended && (
@@ -380,8 +506,9 @@ function QuestionField({
 /** Compose the user's picks + style + free note into ONE readable answer the CEO / worker
  * can act on (答复模型 α): each answered question, the chosen style, and any note. Plain
  * text — the only reader is an LLM, so there is no structured wire payload it would just
- * flatten back to prose. A pure free-text ask (no structured items) sends the raw note. */
-function composeAnswer(
+ * flatten back to prose. A pure free-text ask (no structured items) sends the raw note.
+ * Exported for unit tests (bind_local_folder answer composition). */
+export function composeAnswer(
   content: AskUserContent,
   answers: Record<string, string[]>,
   otherOn: Record<string, boolean>,

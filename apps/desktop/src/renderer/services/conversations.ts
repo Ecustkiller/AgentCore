@@ -30,7 +30,6 @@ function toConversation(c: BackendConversation): Conversation {
     localContainerRootId: c.local_container_root_id ?? null,
     pinned: c.pinned ?? false,
     archived: c.archived ?? false,
-    tag: c.tag ?? null,
   };
 }
 
@@ -63,7 +62,9 @@ export async function listGrouped(): Promise<{
     toFolder({
       id: f.id,
       name: f.name,
-      local_dir: f.local_dir,
+      mode: f.mode,
+      local_root_id: f.local_root_id,
+      local_subpath: f.local_subpath,
       created_at: "",
       updated_at: "",
     }),
@@ -73,14 +74,6 @@ export async function listGrouped(): Promise<{
     ...res.ungrouped.map(toConversation),
   ];
   return { folders, conversations };
-}
-
-/** Move a conversation into a folder, or out of one with `folderId = null`. */
-export async function moveConversation(
-  id: string,
-  folderId: string | null,
-): Promise<void> {
-  await api.patch(`/v1/conversations/${id}/folder`, { folder_id: folderId });
 }
 
 /** Soft-delete a conversation server-side. */

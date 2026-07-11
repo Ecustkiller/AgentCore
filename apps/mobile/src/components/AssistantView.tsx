@@ -32,8 +32,14 @@ import type {
   ProjectedAgent,
   ProjectedRun,
   ProjectedTeamNote,
+  TurnStatus,
 } from "@agentcore/protocol-conformance";
 import { useEffect, useState } from "react";
+import {
+  copyText,
+  formatMessageExport,
+  type MessageCopyMode,
+} from "@/lib/messageExport";
 
 type ToolStepData = Extract<ProcessStep, { kind: "tool" }>;
 
@@ -45,6 +51,8 @@ export interface TeamProjection {
    *  (`team_note_posted`), in post order — rendered by {@link TeamView}. Optional so the promo
    *  still (which builds team from a truncated vector) and legacy callers keep compiling. */
   teamNotes?: ProjectedTeamNote[];
+  /** Turn lifecycle from ProjectedTurn — drives team-notes default expand/collapse. */
+  status?: TurnStatus | null;
   /** 阻塞式求决策 (②): forwarded straight to {@link TeamView} via the `{...team}` spread so a
    *  worker's pending escalation can render as an actionable answer card. All optional — a
    *  read-only / history team simply omits them. */
@@ -135,7 +143,50 @@ export function AssistantContent({
       {citations && citations.length > 0 ? (
         <Citations items={citations} />
       ) : null}
+      <MessageCopyActions content={content} process={process} />
     </>
+  );
+}
+
+/** 复制出口：仅交付（默认）/ 含过程 — 对齐桌面两档，搜索与 history 仍只用交付。 */
+function MessageCopyActions({
+  content,
+  process,
+}: {
+  content: string;
+  process?: ProcessStep[];
+}) {
+  const [copied, setCopied] = useState<MessageCopyMode | null>(null);
+  if (!content.trim() && !(process && process.length > 0)) return null;
+  const hasProcess = (process?.length ?? 0) > 0;
+
+  const onCopy = async (mode: MessageCopyMode) => {
+    const text = formatMessageExport(content, process, mode);
+    if (await copyText(text)) {
+      setCopied(mode);
+      window.setTimeout(() => setCopied(null), 1500);
+    }
+  };
+
+  return (
+    <div className="msg-copy">
+      <button
+        type="button"
+        className="msg-copy-btn"
+        onClick={() => void onCopy("deliverable")}
+      >
+        {copied === "deliverable" ? "已复制" : "复制交付"}
+      </button>
+      {hasProcess && (
+        <button
+          type="button"
+          className="msg-copy-btn"
+          onClick={() => void onCopy("with_process")}
+        >
+          {copied === "with_process" ? "已复制" : "含过程"}
+        </button>
+      )}
+    </div>
   );
 }
 

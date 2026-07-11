@@ -80,6 +80,8 @@ def _assemble_ceo_toolset(
     memory_enabled: bool = True,
     folder_id: str | None = None,
     debate_seed: DebateSeed | None = None,
+    autonomy_policy=None,
+    advertise_bind_local_folder: bool = False,
 ) -> tuple[DelegateTool, ReviseTool, DebateTool, ToolRegistry]:
     """Wire the CEO coordinator's toolset (delegate + revise + read/retrieval +
     consult_skill + an optional consult_memory + an optional ask_user), shared by a
@@ -118,6 +120,7 @@ def _assemble_ceo_toolset(
         suspension_deleter=suspension_deleter,
         folder_id=folder_id,
         memory_enabled=memory_enabled,
+        autonomy_policy=autonomy_policy,
     )
     chat_tools = build_ceo_tool_registry()
     chat_tools.register(delegate_tool)
@@ -209,6 +212,7 @@ def _assemble_ceo_toolset(
                 suspension_deleter=suspension_deleter,
                 folder_id=folder_id,
                 memory_enabled=memory_enabled,
+                advertise_bind_local_folder=advertise_bind_local_folder,
             )
         )
     return delegate_tool, revise_tool, debate_tool, chat_tools

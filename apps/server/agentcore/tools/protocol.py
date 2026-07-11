@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from agentcore.runtime.costing import RunCost
     from agentcore.runtime.runs.notewall import NoteWall, TeamNote
     from agentcore.vision.protocol import VisionReader
+    from agentcore.workspace.channel import WorkspaceChannel
     from agentcore.workspace.protocol import WorkspaceBackend
     from agentcore.workspace.write_claims import WriteCoordinator
 
@@ -154,6 +155,12 @@ class ToolContext:
     # Set when ``backend.location == "local"`` so delegated workers can ping the user
     # on the bound Electron app; ``None`` on cloud-only runs.
     desktop_channel: DesktopClientChannel | None = None
+    # Background process ops (terminal tool): the same ``workspace_op_required`` channel
+    # LocalWorkspace already uses for file/execute ops. Reused from LocalWorkspace when
+    # present; for sidecar (ServerWorkspace location=local) a channel is built so process
+    # ops still leave the short-lived sidecar and land in the desktop main process.
+    # ``None`` on cloud-only runs — ``terminal`` is not registered there.
+    workspace_channel: WorkspaceChannel | None = None
     # AI 协作白板 (AI协作白板.md §九.4): the optional vision port ``board_read`` uses to turn a
     # rasterized hand-drawn / screenshot selection into text (DeepSeek V4 无多模态, so 读图 is a
     # separate model). Wired by ``build_vision_reader`` when ``VISION_API_KEY`` is set; ``None``

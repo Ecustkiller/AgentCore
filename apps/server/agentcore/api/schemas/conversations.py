@@ -1,52 +1,32 @@
-"""Conversation and folder (sidebar grouping) request/response schemas."""
+"""Conversation and folder (project = workspace) request/response schemas."""
 
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class CreateConversationRequest(BaseModel):
     title: str | None = None
-    # File the new chat into a folder at creation (a "新建对话 from a folder"), so
-    # it is born in that folder's workspace instead of being created-then-moved
-    # (which would race the workspace-lock guard once the first turn lands — see
-    # 双模式工作区 §九 ⑩). None = ungrouped.
+    # File the new chat into a project at creation. Born into that project's
+    # shared workspace (no session-level local_* columns written). None = 裸聊.
     folder_id: str | None = None
-    # Desktop's default local container root (工作区对称化 D1a), captured at creation so
-    # locality is decided once. When set (and the chat is born ungrouped), its first
-    # file write — Agent turn OR panel op — lazily promotes it into a *local* workspace
-    # under this root instead of a cloud folder, so both promotion paths agree. None =
-    # cloud intent (web / mobile /「云端临时对话」). Opaque desktop FS-root handle; moot
-    # when ``folder_id`` is set (a foldered chat inherits its folder's binding).
+    # Desktop's default local container root for a 裸聊 (local-first intent).
+    # Recorded only when ``folder_id`` is None; project chats inherit the project's
+    # binding instead.
     local_container_root_id: str | None = Field(None, max_length=200)
 
 
 class ConversationSummary(BaseModel):
     id: str
     title: str | None
-    # Auto-classified on first-turn title minting (对话自动标签); null = unclassified.
-    tag: str | None = Field(None, pattern="^(code_review|research|writing|analysis)$")
     updated_at: datetime
     created_at: datetime
-    # Number of messages; 0 for a brand-new, unsent chat. The sidebar uses this to
-    # lock workspace-changing folder moves once a conversation has started (双模式
-    # 工作区 §九 ⑩). Populated by the list/grouped endpoints; defaults to 0 on the
-    # single-conversation responses where the count isn't needed.
     message_count: int = 0
-    # Folder membership; None = 裸聊 (ungrouped, no workspace yet). A conversation's
-    # workspace/mode is derived from its folder (文件夹即工作区); see 对话列表设计.
+    # Project membership; None = 裸聊. When set, effective workspace is the project's.
     folder_id: str | None = None
-    # Desktop's stored local-first intent (工作区对称化 D1a), echoed so the client can
-    # decide a **裸聊's** panel transport the same way the server decides promotion: set
-    # (and ``folder_id`` still None) ⇒ desktop's first panel write goes via IPC and
-    # lazily promotes a *local* workspace (a client-side mirror of ``DeferredWorkspace``),
-    # rather than the cloud REST source which would mis-write a local folder server-side.
-    # None ⇒ cloud intent; moot once foldered (the folder's own binding governs).
+    # Desktop local-first intent for a 裸聊; moot once foldered.
     local_container_root_id: str | None = None
-    # Sidebar housekeeping (对话基础功能补齐). ``pinned`` floats the row to the top
-    # (置顶对话); ``archived`` marks it as hidden from the live list (归档对话) — the
-    # grouped/live endpoints already exclude archived rows, so this is True only on
-    # the「已归档」view's payloads.
     pinned: bool = False
     archived: bool = False
 
@@ -62,46 +42,69 @@ class ConversationListResponse(BaseModel):
 
 class UpdateConversationRequest(BaseModel):
     title: str | None = None
-    # Sidebar housekeeping toggles (对话基础功能补齐). Optional — omit to leave
-    # unchanged (the route reads ``model_fields_set``); never null (no tri-state).
     pinned: bool | None = None
     archived: bool | None = None
 
 
-class MoveConversationRequest(BaseModel):
-    """Move a conversation into a folder, or out of one with ``folder_id=null``."""
-
-    folder_id: str | None = None
-
-
 class CreateFolderRequest(BaseModel):
+    """Create a project (= workspace). ``mode`` is required and immutable after create."""
+
     model_config = {"extra": "forbid"}
 
     name: str
-    local_dir: str | None = None
+    mode: Literal["local", "cloud"]
+    # Required when ``mode=local``; forbidden when ``mode=cloud``.
+    local_root_id: str | None = Field(None, max_length=200)
+    local_subpath: str | None = Field(None, max_length=400)
+
+    @model_validator(mode="after")
+    def _validate_mode_binding(self) -> "CreateFolderRequest":
+        if self.mode == "local":
+            if not self.local_root_id:
+                raise ValueError("local 模式必须提供 local_root_id")
+        elif self.local_root_id is not None or self.local_subpath is not None:
+            raise ValueError("cloud 模式不能绑定本地路径")
+        return self
 
 
 class UpdateFolderRequest(BaseModel):
+    """Rename only — project workspace binding is immutable after create."""
+
     name: str | None = None
-    local_dir: str | None = None
 
 
 class FolderSummary(BaseModel):
     id: str
     name: str
-    local_dir: str | None
+    mode: Literal["local", "cloud"]
+    local_root_id: str | None = None
+    local_subpath: str | None = None
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
 
+    @classmethod
+    def from_folder(cls, folder) -> "FolderSummary":
+        return cls(
+            id=folder.id,
+            name=folder.name,
+            mode="local" if folder.local_root_id else "cloud",
+            local_root_id=folder.local_root_id,
+            local_subpath=folder.local_subpath,
+            created_at=folder.created_at,
+            updated_at=folder.updated_at,
+        )
+
 
 class FolderGroup(BaseModel):
-    """A folder plus the conversations it holds (grouped sidebar payload)."""
+    """A project plus the conversations it holds (grouped sidebar payload)."""
 
     id: str
     name: str
-    local_dir: str | None
+    mode: Literal["local", "cloud"]
+    local_root_id: str | None = None
+    local_subpath: str | None = None
     conversations: list[ConversationSummary]
 
 

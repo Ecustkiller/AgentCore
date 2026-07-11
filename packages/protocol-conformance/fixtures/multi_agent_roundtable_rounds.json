@@ -344,6 +344,17 @@
         "agent_id": "rt_a2",
         "blocks": [
           {
+            "channel": "task",
+            "heading": "第 2 轮任务",
+            "body": "## 第 2 轮 · 本轮焦点：三方就『问责机制』正面交锋\n对方上一轮的论点如下，请回应并补充。",
+            "chars": 48,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
+          {
             "channel": "round_focus",
             "heading": "第 2 轮 · 本轮焦点",
             "body": "三方就『问责机制』正面交锋",
@@ -408,6 +419,17 @@
         "run_id": "rt_mod1_r2_b",
         "agent_id": "rt_b2",
         "blocks": [
+          {
+            "channel": "task",
+            "heading": "第 2 轮任务",
+            "body": "## 第 2 轮 · 本轮焦点：三方就『问责机制』正面交锋\n对方上一轮的论点如下，请回应并补充。",
+            "chars": 48,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
           {
             "channel": "round_focus",
             "heading": "第 2 轮 · 本轮焦点",
@@ -739,6 +761,17 @@
         "checkpoint": null,
         "receivedContext": [
           {
+            "channel": "task",
+            "heading": "第 2 轮任务",
+            "body": "## 第 2 轮 · 本轮焦点：三方就『问责机制』正面交锋\n对方上一轮的论点如下，请回应并补充。",
+            "chars": 48,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
+          {
             "channel": "round_focus",
             "heading": "第 2 轮 · 本轮焦点",
             "body": "三方就『问责机制』正面交锋",
@@ -799,6 +832,17 @@
         "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [
+          {
+            "channel": "task",
+            "heading": "第 2 轮任务",
+            "body": "## 第 2 轮 · 本轮焦点：三方就『问责机制』正面交锋\n对方上一轮的论点如下，请回应并补充。",
+            "chars": 48,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
           {
             "channel": "round_focus",
             "heading": "第 2 轮 · 本轮焦点",

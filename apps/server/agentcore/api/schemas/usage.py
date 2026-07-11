@@ -87,10 +87,11 @@ class QuotaStatus(BaseModel):
 
 
 class RoleCostLine(BaseModel):
-    """One role's spend over a window — the team payroll grouped by role.
+    """One persona/role's spend over a window — the team payroll grouped by label.
 
     The account dashboard's product differentiator (§7.3D): multi-agent spend
-    splits by the ledger ``role`` (CEO / 队员 / 汇总 / …), which a single-agent
+    splits by ``COALESCE(persona, role)`` (调研员 / CEO / …, falling back to the
+    structural captain/member bucket for legacy rows), which a single-agent
     competitor can't show. Money is integer nano-USD; the client formats ¥ from
     the summary's single ``cny_per_usd`` (no per-row re-pricing here).
     """

@@ -81,7 +81,6 @@ from .conversations import (
     FolderGroup,
     FolderSummary,
     GroupedConversationsResponse,
-    MoveConversationRequest,
     UpdateConversationRequest,
     UpdateFolderRequest,
 )
@@ -255,7 +254,6 @@ __all__ = [
     "ConversationSummary",
     "ConversationListResponse",
     "UpdateConversationRequest",
-    "MoveConversationRequest",
     "CreateFolderRequest",
     "UpdateFolderRequest",
     "FolderSummary",

@@ -104,13 +104,20 @@ async def _record_proxy_spend(
     usage: TokenUsage,
     trace_id: str | None = None,
     message_id: str | None = None,
+    run_id: str | None = None,
+    parent_run_id: str | None = None,
+    agent_id: str | None = None,
+    role: str | None = None,
+    persona: str | None = None,
+    call_id: str | None = None,
 ) -> None:
-    """Enqueue spend for background drain — never touches the primary DB pool.
+    """Enqueue a per-call detail (+ materialize per-run) — never touches primary DB.
 
-    Request path only persists to the process-local durable queue (as-built: 成本配额 §三). The
-    drain writes ``cost_events`` on the telemetry pool; ``run_id`` UNIQUE
-    dedupes at-least-once retries. See ``billing.proxy_spend_queue``.
+    Request path only persists to the process-local durable queue (as-built: 成本配额 §三).
+    Drain writes ``cost_calls`` then upserts ``cost_events`` on the telemetry pool;
+    ``call_id`` UNIQUE dedupes at-least-once retries. See ``billing.proxy_spend_queue``.
     """
+    from agentcore.billing.attribution import default_role_for_agent
     from agentcore.billing.proxy_spend_queue import get_proxy_spend_queue
 
     with log_context(trace_id=trace_id, conversation_id=conversation_id):
@@ -121,6 +128,12 @@ async def _record_proxy_spend(
             usage=usage,
             trace_id=trace_id,
             message_id=message_id,
+            run_id=run_id,
+            parent_run_id=parent_run_id,
+            agent_id=agent_id,
+            role=role or default_role_for_agent(agent_id=agent_id, run_id=run_id),
+            persona=persona,
+            call_id=call_id,
         )
 
 
@@ -214,6 +227,9 @@ async def inference_chat_completions(
     conversation_id = request.headers.get(_CONVERSATION_HEADER) or None
     trace_id = request.headers.get(_TRACE_HEADER) or None
     message_id = request.headers.get(_MESSAGE_HEADER) or None
+    from agentcore.billing.attribution import parse_attribution_headers
+
+    attribution = parse_attribution_headers(request.headers)
 
     with log_context(trace_id=trace_id, conversation_id=conversation_id, user_id=user.user_id):
         # Outer rate fence (成本配额与计费.md §一): once per sidecar turn via
@@ -239,6 +255,7 @@ async def inference_chat_completions(
                 conversation_id=conversation_id,
                 trace_id=trace_id,
                 message_id=message_id,
+                attribution=attribution,
             )
         return await _forward_unary(
             provider,
@@ -247,6 +264,7 @@ async def inference_chat_completions(
             conversation_id=conversation_id,
             trace_id=trace_id,
             message_id=message_id,
+            attribution=attribution,
         )
 
 
@@ -258,6 +276,7 @@ async def _forward_unary(
     conversation_id: str | None,
     trace_id: str | None = None,
     message_id: str | None = None,
+    attribution: dict | None = None,
 ) -> Response:
     try:
         response = await provider.complete(request)
@@ -302,6 +321,7 @@ async def _forward_unary(
             },
         }
     ).encode()
+    attr = attribution or {}
     await _record_proxy_spend(
         user_id=user_id,
         conversation_id=conversation_id,
@@ -309,6 +329,12 @@ async def _forward_unary(
         usage=response.usage,
         trace_id=trace_id,
         message_id=message_id,
+        run_id=attr.get("run_id"),
+        parent_run_id=attr.get("parent_run_id"),
+        agent_id=attr.get("agent_id"),
+        role=attr.get("role"),
+        persona=attr.get("persona"),
+        call_id=attr.get("call_id"),
     )
     return Response(content=body, status_code=200, media_type="application/json")
 
@@ -347,8 +373,10 @@ async def _forward_stream(
     conversation_id: str | None,
     trace_id: str | None = None,
     message_id: str | None = None,
+    attribution: dict | None = None,
 ) -> Response:
     captured: dict = {}
+    attr = attribution or {}
 
     async def _iter_sse():
         async for chunk in provider.stream(request):
@@ -425,6 +453,12 @@ async def _forward_stream(
                     usage=usage,
                     trace_id=trace_id,
                     message_id=message_id,
+                    run_id=attr.get("run_id"),
+                    parent_run_id=attr.get("parent_run_id"),
+                    agent_id=attr.get("agent_id"),
+                    role=attr.get("role"),
+                    persona=attr.get("persona"),
+                    call_id=attr.get("call_id"),
                 )
 
     return StreamingResponse(relay(), media_type="text/event-stream")

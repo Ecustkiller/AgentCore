@@ -11,6 +11,7 @@ from pydantic import Field, TypeAdapter, ValidationError
 from agentcore.api.schemas.messages import ResolveInteractionRequest, interaction_result_from_body
 from agentcore.conversation.store.outbox import OutboxStore
 from agentcore.core.logging import get_logger
+from agentcore.core.types import AutonomyPolicy
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import PLATFORM_MODEL_FLASH
 from agentcore.runtime.interaction import default_interaction_registry
@@ -43,6 +44,9 @@ class HandlerMixin:
         self._root = root.resolve()
         self._creds = self._parse_inference(params.get("inference"))
         self._approvals_enabled = bool(params.get("approvalsEnabled", True))
+        self._autonomy_policy = (
+            self._parse_autonomy(params.get("autonomyPolicy")) or AutonomyPolicy.FIRST_GRANT
+        )
         data_dir = str(params.get("dataDir") or "").strip()
         self._paused_store = self._build_paused_store(data_dir)
         self._outbox_store = self._build_outbox_store(data_dir)
@@ -59,6 +63,7 @@ class HandlerMixin:
             root_label=self._root.name,
             inference="cloud-proxy" if self._creds else "platform-fallback",
             approvals=self._approvals_enabled,
+            autonomy=self._autonomy_policy.value,
             durable_pause=self._paused_store is not None,
             outbox=self._outbox_store is not None,
         )
@@ -138,6 +143,26 @@ class HandlerMixin:
         if "inference" in params:
             self._creds = self._parse_inference(params.get("inference"))
 
+    @staticmethod
+    def _parse_autonomy(raw: Any) -> AutonomyPolicy | None:
+        """Coerce the desktop's autonomy string; unknown / missing ⇒ ``None`` (keep current)."""
+        try:
+            return AutonomyPolicy(str(raw or "").strip())
+        except ValueError:
+            return None
+
+    def _refresh_autonomy(self, params: dict[str, Any]) -> None:
+        """Adopt the user's CURRENT autonomy posture from per-turn params when present.
+
+        Same rationale as :meth:`_refresh_creds`: the sidecar is long-lived while the
+        setting lives in the cloud (`PUT /v1/users/me/autonomy`) — the desktop re-sends
+        it on every startTurn / resume so a mid-session change applies to the next turn.
+        Absent / invalid ⇒ keep the current value.
+        """
+        parsed = self._parse_autonomy(params.get("autonomyPolicy"))
+        if parsed is not None:
+            self._autonomy_policy = parsed
+
     async def _on_start_turn(self, request_id: Any, params: dict[str, Any]) -> None:
         if not self._initialized or self._root is None:
             await self._send(
@@ -162,6 +187,7 @@ class HandlerMixin:
 
         # Adopt this turn's cloud-proxy token before it runs (refreshes a rotated TTL).
         self._refresh_creds(params)
+        self._refresh_autonomy(params)
 
         # The response to startTurn is DEFERRED until the turn completes (it carries
         # the final result); the live events flow as ``turn/event`` notifications in
@@ -263,6 +289,7 @@ class HandlerMixin:
         user_message_id = str(params.get("userMessageId") or "").strip()
         # Adopt this turn's cloud-proxy token before it runs (refreshes a rotated TTL).
         self._refresh_creds(params)
+        self._refresh_autonomy(params)
         task = asyncio.create_task(
             self._run_resume(
                 request_id,

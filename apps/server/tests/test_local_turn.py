@@ -109,7 +109,7 @@ def _patch_persistence(
         async def get_by_id_unscoped(self, _conversation_id):
             return SimpleNamespace(title=existing_title)
 
-        async def update_title_unscoped(self, conversation_id, title, *, tag=None):
+        async def update_title_unscoped(self, conversation_id, title):
             events.append(("title", conversation_id, title))
 
     async def _fake_journal(_session, **kw):
@@ -133,7 +133,7 @@ def _patch_persistence(
     from agentcore.memory.conversation_title import TitleResult
 
     async def _fake_title(**_kw):
-        return TitleResult(title="本地回合标题", tag="research")
+        return TitleResult(title="本地回合标题")
 
     monkeypatch.setattr(cloud_mod, "mint_title", _fake_title)
     # Keep local_turn import path stable for any residual patches.

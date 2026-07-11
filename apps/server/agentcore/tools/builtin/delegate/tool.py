@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.text import clip_preview
-from agentcore.core.types import ToolApproval, ToolCategory, new_id
+from agentcore.core.types import AutonomyPolicy, ToolApproval, ToolCategory, new_id
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
 from agentcore.llm.profiles import default_turn_profiles as default_profile_set
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
@@ -95,6 +95,7 @@ class DelegateTool:
         suspension_deleter: SuspensionDeleter | None = None,
         folder_id: str | None = None,
         memory_enabled: bool = True,
+        autonomy_policy: AutonomyPolicy | None = None,
         depth: int = 0,
     ) -> None:
         self._llm = llm
@@ -107,6 +108,8 @@ class DelegateTool:
         self._profile_set = profile_set or default_profile_set()
         self._max_parallel = max_parallel
         self._approval_gate = approval_gate
+        self._autonomy_policy = autonomy_policy or AutonomyPolicy.FIRST_GRANT
+        self._auto_grant_pending = False
         self._captain_run_id = captain_run_id
         self._session_store = session_store
         self._session_saver = session_saver
@@ -381,12 +384,23 @@ class DelegateTool:
         checkpoint_run_ids: set[str],
         execution_id: str,
         coordinate: bool = False,
+        apply_kickoff_grant: bool = False,
     ) -> ToolResult:
         if decision is CheckpointDecision.STOP:
             return await finalize_stopped(self, plan, seed_completed)
 
         if decision is CheckpointDecision.ADJUST and note.strip():
             apply_steer(plan, seed_completed, checkpoint_run_ids, note.strip())
+        # Kickoff (开工卡): continue / adjust → grant; per_call → no grant.
+        # apply_kickoff_grant is True only when resuming a team_preview suspension.
+        if apply_kickoff_grant and self._approval_gate is not None:
+            if decision is CheckpointDecision.PER_CALL:
+                pass  # start with per-call approval
+            elif decision in (CheckpointDecision.CONTINUE, CheckpointDecision.ADJUST):
+                self._approval_gate.grant_delegation(execution_id)
+            elif decision is CheckpointDecision.TIMEOUT:
+                # Historical timeout→auto-continue: grant (same as continue).
+                self._approval_gate.grant_delegation(execution_id)
         # Resume never re-runs the original execute() path, so re-emit run_plan here:
         # the frontend drops the pause bubble on message_start and must re-bind the DAG
         # under the new streaming assistant before worker frames arrive.

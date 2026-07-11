@@ -3,9 +3,10 @@ import { useLlmKey } from "@/hooks/useLlmKey";
 import { useConversationStore } from "@/stores/conversation";
 import { useTurnModelStore } from "@/stores/turnModel";
 import { Bot, Loader2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 /**
- * Read-only「当前模型」展示 — replaces the retired per-conversation 质量档 picker.
+ * 「当前模型」展示 — 未配置时可点，直达接入流程 / 模型配置。
  *
  * Shows the model **this conversation's last turn actually ran on** when known — the
  * local (sidecar) turn result reports its real model ({@link useTurnModelStore}), which
@@ -21,6 +22,7 @@ export function CurrentModelBadge({ disabled }: { disabled?: boolean }) {
   const lastTurnModel = useTurnModelStore((s) =>
     conversationId ? s.byConversation[conversationId] : undefined,
   );
+  const navigate = useNavigate();
 
   // Only wait on the account-config fetch when there's no per-turn model to show.
   if (isLoading && !lastTurnModel) {
@@ -31,6 +33,7 @@ export function CurrentModelBadge({ disabled }: { disabled?: boolean }) {
     );
   }
 
+  const configured = !!data?.configured || data?.billing_mode === "platform";
   const accountLabel =
     data?.default_model?.trim() ||
     data?.platform_model?.trim() ||
@@ -40,6 +43,37 @@ export function CurrentModelBadge({ disabled }: { disabled?: boolean }) {
         ? "已配置模型"
         : "未配置");
   const label = lastTurnModel ?? accountLabel;
+  const unconfigured = !configured && !lastTurnModel;
+
+  const goConfigure = () => {
+    if (disabled) return;
+    navigate("/more/model");
+  };
+
+  const body = (
+    <>
+      <Bot size={14} className="shrink-0" />
+      <span className="truncate font-mono">{label}</span>
+    </>
+  );
+
+  if (unconfigured) {
+    return (
+      <SimpleTooltip label="点击配置模型">
+        <button
+          type="button"
+          onClick={goConfigure}
+          disabled={disabled}
+          aria-label="未配置模型，点击前往配置"
+          className={`inline-flex h-8 max-w-40 items-center gap-1 rounded-lg px-2 text-xs text-warning hover:bg-warning/10 ${
+            disabled ? "cursor-not-allowed opacity-60" : ""
+          }`}
+        >
+          {body}
+        </button>
+      </SimpleTooltip>
+    );
+  }
 
   return (
     <SimpleTooltip
@@ -49,15 +83,20 @@ export function CurrentModelBadge({ disabled }: { disabled?: boolean }) {
           : "当前模型（在设置 · 模型配置中修改）"
       }
     >
-      <span
-        className={`inline-flex h-8 max-w-40 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground ${
-          disabled ? "opacity-60" : ""
-        }`}
+      <button
+        type="button"
+        onClick={() => {
+          if (disabled) return;
+          navigate("/more/model");
+        }}
+        disabled={disabled}
         aria-label={`当前模型：${label}`}
+        className={`inline-flex h-8 max-w-40 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground ${
+          disabled ? "cursor-not-allowed opacity-60" : ""
+        }`}
       >
-        <Bot size={14} className="shrink-0" />
-        <span className="truncate font-mono">{label}</span>
-      </span>
+        {body}
+      </button>
     </SimpleTooltip>
   );
 }

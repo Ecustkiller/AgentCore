@@ -1,8 +1,11 @@
-"""Conversation CRUD: create / list / grouped / get / update / move / delete / export.
+"""Conversation CRUD: create / list / grouped / get / update / delete / export.
 
 Every route requires an authenticated user and is scoped to that user's own
 conversations: reads/writes pass ``user_id`` into the repository so a non-owner
 receives 404 (never another user's data — IDOR-safe).
+
+Project membership is birth-time only (``folder_id`` on create); there is no
+PATCH …/folder — sessions keep their birth project for life.
 """
 
 import json
@@ -24,7 +27,6 @@ from agentcore.api.schemas import (
     CreateConversationRequest,
     FolderGroup,
     GroupedConversationsResponse,
-    MoveConversationRequest,
     StatusResponse,
     UpdateConversationRequest,
 )
@@ -77,9 +79,8 @@ async def create_conversation(
         user_id=user.user_id,
         title=body.title,
         folder_id=body.folder_id,
-        # Desktop's local-first lazy-promote intent (工作区对称化 D1a), stored so every
-        # promotion path (turn / panel) later agrees on locality. Moot once foldered —
-        # a foldered chat inherits its folder's binding — so only record it for a 裸聊.
+        # Project chats inherit the project's workspace — never write session-level
+        # local_* / container columns. 裸聊 keeps desktop local-first intent.
         local_container_root_id=(body.local_container_root_id if body.folder_id is None else None),
     )
     return ConversationSummary.model_validate(conv)
@@ -172,7 +173,9 @@ async def list_conversations_grouped(
             FolderGroup(
                 id=f.id,
                 name=f.name,
-                local_dir=f.local_dir,
+                mode="local" if f.local_root_id else "cloud",
+                local_root_id=f.local_root_id,
+                local_subpath=f.local_subpath,
                 conversations=buckets[f.id],
             )
             for f in folders
@@ -214,33 +217,6 @@ async def update_conversation(
         conv = await repo.set_pinned(conversation_id, body.pinned, user_id=user.user_id)
     if "archived" in fields and body.archived is not None:
         conv = await repo.set_archived(conversation_id, body.archived, user_id=user.user_id)
-    return ConversationSummary.model_validate(conv)
-
-
-@router.patch("/{conversation_id}/folder", response_model=ConversationSummary)
-async def move_conversation_to_folder(
-    conversation_id: str,
-    body: MoveConversationRequest,
-    user: AuthUser,
-    conv_repo: ConversationRepository = Depends(get_conversation_repo),
-    folder_repo: FolderRepository = Depends(get_folder_repo),
-):
-    """Move a conversation into a folder, or out of one (``folder_id=null``).
-
-    A non-null target must be one of the user's own live folders (else 404). Folder
-    is pure sidebar grouping — moving never changes the conversation's scratch path.
-    """
-    conv = await conv_repo.get_by_id(conversation_id, user_id=user.user_id)
-    if not conv:
-        raise NotFoundError("对话不存在")
-    if conv.folder_id != body.folder_id:
-        if body.folder_id is not None:
-            folder = await folder_repo.get_by_id(body.folder_id, user_id=user.user_id)
-            if not folder:
-                raise NotFoundError("文件夹不存在")
-        conv = await conv_repo.set_folder(conversation_id, body.folder_id, user_id=user.user_id)
-        if not conv:
-            raise NotFoundError("对话不存在")
     return ConversationSummary.model_validate(conv)
 
 

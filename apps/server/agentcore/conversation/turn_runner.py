@@ -67,9 +67,11 @@ async def run_and_persist(
     llm_credentials: LLMCredentials | None,
     profile_set: ProfileSet | None = None,
     memory_enabled: bool = True,
+    autonomy_policy=None,
     board_id: str | None = None,
     debate_seed: dict | None = None,
     llm_supports_tools: bool | None = None,
+    x_client_platform: str | None = None,
 ) -> None:
     """Run the pipeline, persist the assistant reply, then title + memory.
 
@@ -91,7 +93,10 @@ async def run_and_persist(
         conversation_id=conversation_id,
         user_id=user_id,
         turn_id=turn_id,
+        message_id=message_id,
         agent_id="CEO",
+        cost_role="captain",
+        persona="CEO",
     ):
         logger.info(
             "chat.turn_start",
@@ -142,6 +147,7 @@ async def run_and_persist(
                     attachments=attachments,
                     llm_credentials=llm_credentials,
                     memory_enabled=memory_enabled,
+                    autonomy_policy=autonomy_policy,
                     profile_set=profile_set,
                     session_saver=session_saver,
                     session_loader=session_loader,
@@ -150,6 +156,7 @@ async def run_and_persist(
                     debate_seed=debate_seed,
                     llm_supports_tools=llm_supports_tools,
                     message_id=message_id,
+                    x_client_platform=x_client_platform,
                 )
             except asyncio.CancelledError:
                 salvage_incomplete_turn(

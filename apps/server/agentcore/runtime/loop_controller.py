@@ -93,8 +93,9 @@ class ToolAttempt:
     fingerprint: str
     tool_name: str
     success: bool
-    # Policy/environment blocks (SSRF, egress breaker) are honest tool failures for the
-    # model but must not trip the run-scoped circuit breaker — the tool is fine.
+    # Policy/environment/governance blocks (SSRF, egress breaker, approval denial) are
+    # honest tool failures for the model but must not trip the run-scoped circuit
+    # breaker — the tool itself is fine; the call was refused upstream.
     policy_failure: bool = False
 
 

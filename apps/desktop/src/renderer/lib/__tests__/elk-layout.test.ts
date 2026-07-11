@@ -5,7 +5,15 @@ import {
 import type { GraphEdge } from "@/stores/graph";
 import { describe, expect, it } from "vitest";
 import type { SubTeamInput } from "../elk-layout";
-import { NODE_SPACING_EMBED, computeLayout } from "../elk-layout";
+import {
+  EMBED_DEFAULT_COL_WIDTH,
+  EMBED_MIN_HEIGHT,
+  NODE_SPACING_EMBED,
+  computeLayout,
+  estimateBbox,
+  fitWidthBox,
+  workerGraphShape,
+} from "../elk-layout";
 
 /** Derive compound sub-teams from delegate edges (mirrors buildGraphStructure). */
 function subTeamsFromEdges(edges: GraphEdge[]): SubTeamInput[] {
@@ -558,5 +566,210 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
     // 同一辩手的 5 个版本两两不重叠（旧星型下 v2…v5 会叠在同一坐标 → 只看得到 v5）。
     expect(noneOverlap(positions, proVersions)).toEqual([]);
     expect(noneOverlap(positions, conVersions)).toEqual([]);
+  });
+
+  it("辩论 compound 原点钉在 padding、bbox 无虚高死区", async () => {
+    const side = (prefix: string, stance: "pro" | "con"): GraphRunLike[] => {
+      const original: GraphRunLike = {
+        id: `mod_r1_${prefix}`,
+        dependsOn: [],
+        parentRunId: "mod",
+        revision: 0,
+        revisionOf: null,
+        stance,
+        group: "debate:debate",
+        round: 1,
+      };
+      return [
+        original,
+        {
+          id: `mod_r1_cx_${prefix}`,
+          dependsOn: [],
+          parentRunId: original.id,
+          revision: 2,
+          revisionOf: original.id,
+          stance,
+          group: "debate:debate",
+          round: 1,
+          receivedContext: [{ channel: "cross_exam" }],
+        },
+        {
+          id: `mod_closing_${prefix}`,
+          dependsOn: [],
+          parentRunId: original.id,
+          revision: 3,
+          revisionOf: original.id,
+          stance,
+          group: "debate:debate",
+          round: 1,
+          receivedContext: [{ channel: "closing" }],
+        },
+      ];
+    };
+    const runs: GraphRunLike[] = [
+      { id: "captain", dependsOn: [], kind: "captain" },
+      { id: "mod", dependsOn: [], parentRunId: null, kind: "agent" },
+      ...side("pro", "pro"),
+      ...side("con", "con"),
+    ];
+    const { nodeIds, rawEdges, subTeams } = buildGraphStructure(
+      runs,
+      "__input__",
+    );
+    // 质询折进轮节点：每方仅陈词 + 结辩。
+    expect(nodeIds).not.toContain("mod_r1_cx_pro");
+    expect(nodeIds).not.toContain("mod_r1_cx_con");
+    const { positions, width, height, groups } = await computeLayout(
+      nodeIds,
+      rawEdges,
+      "leftright",
+      { source: "__input__", sink: "captain" },
+      subTeams,
+    );
+    const ys = Object.values(positions).map((p) => p.y);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    // Origin pinned to padding (24); no multi-hundred-px dead band above content.
+    expect(minY).toBeGreaterThanOrEqual(24);
+    expect(minY).toBeLessThan(80);
+    // Bbox height tracks content span, not ELK's inflated root stamp.
+    expect(height).toBeLessThan(maxY - minY + 300);
+    expect(width).toBeGreaterThan(0);
+    const g = groups.find((x) => x.groupId === "__group__mod");
+    expect(g).toBeDefined();
+    expect(g!.y).toBeGreaterThanOrEqual(24);
+  });
+
+  it("workerGraphShape 辩论网格：compoundLanes=辩手数，首帧 fit 高度贴近真实布局", async () => {
+    const runs: GraphRunLike[] = [
+      { id: "captain", dependsOn: [], kind: "captain" },
+      {
+        id: "mod",
+        dependsOn: [],
+        parentRunId: null,
+        kind: "agent",
+        group: "debate:debate",
+      },
+      {
+        id: "mod_r1_pro",
+        dependsOn: [],
+        parentRunId: "mod",
+        revision: 0,
+        stance: "pro",
+        group: "debate:debate",
+      },
+      {
+        id: "mod_r1_con",
+        dependsOn: [],
+        parentRunId: "mod",
+        revision: 0,
+        stance: "con",
+        group: "debate:debate",
+      },
+    ];
+    const shape = workerGraphShape(runs);
+    expect(shape.compoundLanes).toBe(2);
+    expect(shape.parallelism).toBe(1);
+    expect(shape.depth).toBe(4);
+
+    const est = estimateBbox(shape, "leftright");
+    const estFit = fitWidthBox(est.width, est.height, EMBED_DEFAULT_COL_WIDTH);
+    const { nodeIds, rawEdges, subTeams } = buildGraphStructure(
+      runs,
+      "__input__",
+    );
+    const layout = await computeLayout(
+      nodeIds,
+      rawEdges,
+      "leftright",
+      { source: "__input__", sink: "captain" },
+      subTeams,
+    );
+    const realFit = fitWidthBox(
+      layout.width,
+      layout.height,
+      EMBED_DEFAULT_COL_WIDTH,
+    );
+    // Old collapse-to-parallelism=1 path clamped at EMBED_MIN (180) while real
+    // sat ~225 — a ~45px first-paint jump. Compound-lane estimate stays within
+    // a small band of the measured fit height.
+    expect(Math.abs(estFit.height - realFit.height)).toBeLessThan(20);
+    expect(estFit.height).toBeGreaterThan(EMBED_MIN_HEIGHT);
+  });
+
+  it("workerGraphShape 多轮：深度按可见轮列（质询不计），不把主持人算进车道", () => {
+    const runs: GraphRunLike[] = [
+      { id: "captain", dependsOn: [], kind: "captain" },
+      {
+        id: "mod",
+        dependsOn: [],
+        kind: "agent",
+        group: "debate:debate",
+      },
+      {
+        id: "mod_r1_pro",
+        dependsOn: [],
+        parentRunId: "mod",
+        revision: 0,
+        stance: "pro",
+        group: "debate:debate",
+        round: 1,
+      },
+      {
+        id: "mod_r1_cx_pro",
+        dependsOn: [],
+        parentRunId: "mod_r1_pro",
+        revision: 2,
+        revisionOf: "mod_r1_pro",
+        stance: "pro",
+        group: "debate:debate",
+        round: 1,
+        receivedContext: [{ channel: "cross_exam" }],
+      },
+      {
+        id: "mod_r2_pro",
+        dependsOn: [],
+        parentRunId: "mod_r1_pro",
+        revision: 3,
+        revisionOf: "mod_r1_pro",
+        stance: "pro",
+        group: "debate:debate",
+        round: 2,
+      },
+      {
+        id: "mod_r1_con",
+        dependsOn: [],
+        parentRunId: "mod",
+        revision: 0,
+        stance: "con",
+        group: "debate:debate",
+        round: 1,
+      },
+      {
+        id: "mod_r1_cx_con",
+        dependsOn: [],
+        parentRunId: "mod_r1_con",
+        revision: 2,
+        revisionOf: "mod_r1_con",
+        stance: "con",
+        group: "debate:debate",
+        round: 1,
+        receivedContext: [{ channel: "cross_exam" }],
+      },
+      {
+        id: "mod_r2_con",
+        dependsOn: [],
+        parentRunId: "mod_r1_con",
+        revision: 3,
+        revisionOf: "mod_r1_con",
+        stance: "con",
+        group: "debate:debate",
+        round: 2,
+      },
+    ];
+    const shape = workerGraphShape(runs);
+    expect(shape.compoundLanes).toBe(2);
+    // input + mod + 2 轮列（质询折进）+ captain
+    expect(shape.depth).toBe(5);
   });
 });

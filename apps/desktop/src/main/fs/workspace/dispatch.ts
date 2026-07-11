@@ -5,6 +5,12 @@ import { ensureReady, getRoot } from "../roots";
 import { opArchive } from "./archive";
 import { opExecute } from "./exec";
 import { opGrep } from "./grep";
+import {
+  opProcessList,
+  opProcessRead,
+  opProcessStart,
+  opProcessStop,
+} from "./process";
 import { opIndexFiles, opList, opListTree, opRead, opReadLines } from "./read";
 import { opErr } from "./result";
 import {
@@ -116,6 +122,14 @@ export async function executeWorkspaceOp(
         return await opExecute(root, args);
       case "archive":
         return await opArchive(root, args);
+      case "process_start":
+        return await opProcessStart(root, args);
+      case "process_read":
+        return await opProcessRead(root, args);
+      case "process_stop":
+        return await opProcessStop(root, args);
+      case "process_list":
+        return await opProcessList(root, args);
       default:
         return opErr("WorkspaceIOError", `本地工作区未知的操作：${op}`);
     }

@@ -41,6 +41,7 @@ import type {
   RunOutputResetPayload,
   RunPlanPayload,
   RunReasoningDeltaPayload,
+  RunSkippedPayload,
   RunStartedPayload,
   RunToolProgressPayload,
   SSEEvent,
@@ -480,6 +481,13 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         }
         break;
       }
+      case "run_skipped": {
+        // 级联跳过 / graceful abort: node never ran —「未执行」. Agent stays idle.
+        const p = ev.payload as RunSkippedPayload;
+        const run = runById(p.run_id);
+        if (run) run.status = "skipped";
+        break;
+      }
       case "run_progress":
         // Derived below from run states (cumulative, multi-batch safe); wire counter
         // is a timeline marker only.
@@ -741,6 +749,12 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
   if (status === "cancelled" || status === "failed") {
     for (const r of runs) if (r.status === "running") r.status = "cancelled";
     for (const a of agents) if (a.status === "working") a.status = "cancelled";
+  }
+
+  // Turn terminal: plan-declared nodes with no terminal frame → skipped（旧 journal 无
+  // run_skipped 时靠本收口兜住；completed 也要处理 pending 残留）。
+  if (status === "completed" || status === "cancelled" || status === "failed") {
+    for (const r of runs) if (r.status === "pending") r.status = "skipped";
   }
 
   return {

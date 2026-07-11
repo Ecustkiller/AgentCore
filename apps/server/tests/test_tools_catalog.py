@@ -72,7 +72,14 @@ def test_registry_excludes_ceo_only_delegate():
 # 变·worker 的「拉」); `handoff` is the terminal 完工交接简报 submission (结论 / 关键要点 /
 # 关键假设 / 建议下一步, read off the call args — never parsed out of prose). All stay
 # where they belong instead of leaking platform-wide.
-_WORKER_ONLY_NAMES = {"escalate", "post_note", "read_notes", "amend_note", "handoff", "desktop_notify"}
+_WORKER_ONLY_NAMES = {
+    "escalate",
+    "post_note",
+    "read_notes",
+    "amend_note",
+    "handoff",
+    "desktop_notify",
+}
 
 
 def test_worker_registry_adds_worker_only_tools_without_leaking_them():
@@ -115,15 +122,18 @@ def test_file_mutation_class_is_grantable_filesystem_without_code_execute():
 
 
 def test_code_execute_description_does_not_overpromise_sandbox():
-    # In local mode code_execute runs on the user's REAL machine (workspace/local.py
-    # forwards it to the desktop's bound directory), protected only by the approval
-    # gate (P2d 执行门) — not an isolated sandbox. The old "sandboxed environment"
-    # wording was false there; pin the honest framing so the model treats execution
-    # with appropriate care and the claim can't silently regress.
-    schemas = {s.name: s for s in build_builtin_registry().list_all()}
-    desc = schemas["code_execute"].description
-    assert "sandboxed environment" not in desc
-    assert "用户自己的机器" in desc
+    # Location-aware wording: catalog (no location) must not claim「用户自己的机器」;
+    # local registry must; server registry must name the cloud sandbox.
+    from agentcore.tools.builtin.code_execute import CodeExecuteTool, code_execute_description
+
+    catalog = {s.name: s for s in build_builtin_registry().list_all()}
+    assert "用户自己的机器" not in catalog["code_execute"].description
+    assert "可能【直接运行" not in catalog["code_execute"].description
+
+    assert "用户本机" in code_execute_description("local")
+    assert "云端沙箱" in code_execute_description("server")
+    assert "用户本机" in CodeExecuteTool(location="local").schema.description
+    assert "云端沙箱" in CodeExecuteTool(location="server").schema.description
 
 
 def test_read_url_description_does_not_overclaim_completeness():
@@ -203,3 +213,19 @@ def test_worker_registry_keeps_execution_class_on_local_server_workspace():
     names = {s.name for s in build_worker_registry(backend=backend).list_all()}
     assert "code_execute" in names
     assert "test_run" in names
+    assert "terminal" in names
+
+
+def test_worker_registry_omits_terminal_on_cloud_server():
+    from pathlib import Path
+
+    from agentcore.tools.sandbox.subprocess import SubprocessSandbox
+    from agentcore.workspace.server import ServerWorkspace
+
+    backend = ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox(), location="server")
+    names = {s.name for s in build_worker_registry(backend=backend).list_all()}
+    assert "terminal" not in names
+    # Catalog path (no backend) also omits local-only terminal.
+    assert "terminal" not in {s.name for s in build_worker_registry().list_all()}
+    assert "terminal" not in {s.name for s in build_builtin_registry().list_all()}
+    assert "terminal" not in {s.name for s in build_ceo_tool_registry().list_all()}

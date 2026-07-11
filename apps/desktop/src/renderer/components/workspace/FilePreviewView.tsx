@@ -6,6 +6,7 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useFileAudit } from "@/hooks/useFileAudit";
 import type { FilePreviewResult, FileSource } from "@/lib/fileSource";
 import { notifyActionError, notifyError } from "@/lib/toast";
+import { LocalFsError } from "@/services/sources/localRootSource";
 import { useConversationStore } from "@/stores/conversation";
 import {
   ChevronLeft,
@@ -40,6 +41,7 @@ export function FilePreviewView({
 }) {
   const [result, setResult] = useState<FilePreviewResult | null>(null);
   const [error, setError] = useState(false);
+  const [missing, setMissing] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -50,18 +52,29 @@ export function FilePreviewView({
   const load = useCallback(async () => {
     setResult(null);
     setError(false);
+    setMissing(false);
     setEditing(false);
     try {
       setResult(await source.read(path));
     } catch (err) {
-      console.error(
-        `[FilePreview] source.read failed ${JSON.stringify({
-          path,
-          sourceId: source.id,
-          error: err instanceof Error ? err.message : String(err),
-        })}`,
-      );
-      setError(true);
+      const notFound =
+        (err instanceof LocalFsError && err.code === "not_found") ||
+        (typeof err === "object" &&
+          err !== null &&
+          "code" in err &&
+          (err as { code: unknown }).code === "not_found");
+      if (notFound) {
+        setMissing(true);
+      } else {
+        console.error(
+          `[FilePreview] source.read failed ${JSON.stringify({
+            path,
+            sourceId: source.id,
+            error: err instanceof Error ? err.message : String(err),
+          })}`,
+        );
+        setError(true);
+      }
     }
   }, [source, path]);
 
@@ -246,6 +259,10 @@ export function FilePreviewView({
           />
         ) : error ? (
           <InlineError onRetry={() => void load()} />
+        ) : missing ? (
+          <Centered>
+            <p className="text-xs text-muted-foreground">文件不存在</p>
+          </Centered>
         ) : result === null ? (
           <Centered>
             <Loader2

@@ -24,6 +24,7 @@ from agentcore.tools.builtin.debate.prompt import (
     closing_context_blocks,
     closing_task,
     cx_answer_feedback,
+    cx_context_blocks,
     debater_task,
     round_context_blocks,
     round_feedback,
@@ -135,7 +136,16 @@ async def first_round(
     )
     scheduler = WaveScheduler(tool._max_parallel or DEFAULT_MAX_PARALLEL)
     batch_metrics: list[BatchMetrics] = []
-    results = await scheduler.run(plan, executor, metrics_sink=batch_metrics)
+    from agentcore.runtime.events import run_skipped
+
+    results = await scheduler.run(
+        plan,
+        executor,
+        on_skipped=lambda rid, aid, reason: tool._sink.emit(
+            run_skipped(rid, aid, reason=reason)
+        ),
+        metrics_sink=batch_metrics,
+    )
     if batch_metrics:
         # 调度埋点量化: the debaters fan out as one parallel wave per round — same
         # batch-health read as delegate (avg_parallelism = busy/wall, slot_starved).
@@ -209,11 +219,9 @@ async def next_round(
             return None
         revision_run_id = f"{moderator_run_id}_r{round_no}_{side.key}"
         feedback = round_feedback(config, side, round_no, focus, last_round, interjections)
-        # 收到的上下文 (上下文传递可视化): the display twin of `feedback` — 本轮焦点 / 对方上轮
-        # 论点 / 被驳命门 / 追问 — from the SAME inputs, shipped as this round's run_context so
-        # the revision node's panel shows what it was fed instead of the empty first-round task.
+        # 收到的上下文：task 块 body 逐字复用 feedback；其后为焦点 / 对方 / 命门 / 追问浓缩孪生块。
         context_blocks = round_context_blocks(
-            config, side, round_no, focus, last_round, interjections
+            config, side, round_no, focus, last_round, feedback, interjections
         )
         async with semaphore:
             return await continue_run(
@@ -268,7 +276,6 @@ def make_cross_exam_runner(
 
     async def run_cross_exam(*, round_no, focus, sides, turns, questions):  # noqa: ANN001, ARG001
         from agentcore.runtime.runs import DEFAULT_MAX_PARALLEL, RunPhase, continue_run
-        from agentcore.runtime.runs.types import ContextBlock
 
         sides_by_key = {s.key: s for s in sides}
         worker_gate = (
@@ -290,14 +297,8 @@ def make_cross_exam_runner(
                 return None
             cx_run_id = f"{moderator_run_id}_r{round_no}_cx_{side_key}"
             feedback = cx_answer_feedback(config, side, round_no, focus, qs)
-            # 收到的上下文（上下文传递可视化）：质询作答节点面板展示它被问了什么，而非空白 / 首轮任务。
-            context_blocks = [
-                ContextBlock(
-                    channel="cross_exam",
-                    heading=f"第 {round_no} 轮 · 质询（必须正面回答）",
-                    body="\n".join(f"- {q}" for q in qs),
-                )
-            ]
+            # 收到的上下文：task 块 body 逐字复用 feedback；cross_exam 清单块保留（beat presence）。
+            context_blocks = cx_context_blocks(round_no, qs, feedback)
             async with semaphore:
                 return await continue_run(
                     session=session,
@@ -389,8 +390,8 @@ def make_closing_runner(
                 return None
             closing_run_id = f"{moderator_run_id}_closing_{side.key}"
             feedback = closing_task(config, side)
-            # 收到的上下文（上下文传递可视化）：结辩节点面板展示「请做结辩、只讲胜负手」定调，而非空白。
-            context_blocks = closing_context_blocks(config, side)
+            # 收到的上下文：task 块 body 逐字复用 feedback；closing 通道块保留为纯环节标记。
+            context_blocks = closing_context_blocks(config, side, feedback)
             async with semaphore:
                 return await continue_run(
                     session=session,

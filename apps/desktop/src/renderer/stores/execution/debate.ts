@@ -93,6 +93,39 @@ export function upsertDebateRound(
 }
 
 /**
+ * 辩论 continue_run 的发言角色（阶段化 beat）：与 `run_context.channel` 对齐——
+ * `cross_exam` / `closing` 已在 wire；陈词续轮无专属 channel，归 `statement`。
+ * 协作图角标 / 侧栏轮次轨据此区分「第 N 轮」与「第 N 轮·质询」/「结辩」，避免同轮双列同文。
+ */
+export type DebateBeat = "statement" | "cross_exam" | "closing";
+
+/** 从 `run_context` blocks 读 beat（复用既有 channel，不新造 wire 字段）。 */
+export function debateBeatFromContext(
+  blocks: ReadonlyArray<{ channel: string }> | null | undefined,
+): DebateBeat {
+  if (!blocks?.length) return "statement";
+  if (blocks.some((b) => b.channel === "closing")) return "closing";
+  if (blocks.some((b) => b.channel === "cross_exam")) return "cross_exam";
+  return "statement";
+}
+
+/**
+ * 辩论续写节点可见文案：首轮陈词无角标（由调用方跳过）；续轮陈词「第 N 轮」；
+ * 质询「第 N 轮·质询」；结辩「结辩」（不挂轮次，避免与末轮陈词撞文）。
+ */
+export function debateBeatLabel(opts: {
+  round?: number;
+  revision?: number;
+  beat?: DebateBeat | null;
+}): string {
+  const beat = opts.beat ?? "statement";
+  if (beat === "closing") return "结辩";
+  const n = opts.round && opts.round > 0 ? opts.round : (opts.revision ?? 0);
+  if (beat === "cross_exam") return `第 ${n} 轮·质询`;
+  return `第 ${n} 轮`;
+}
+
+/**
  * Whether a turn is a 辩论/审查 (前端UX设计.md §四).
  *
  * This is the single client-side signal that differentiates a debate from an

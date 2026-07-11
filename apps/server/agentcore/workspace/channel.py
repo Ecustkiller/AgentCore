@@ -78,6 +78,13 @@ class WorkspaceOp(StrEnum):
     # NOT a WorkspaceBackend method — issued directly by the handoff orchestrator
     # (workspace/handoff.py), not by the engine/tools.
     ARCHIVE = "archive"
+    # Background process ops (双模式工作区 §四): spawn / read / stop / list long-lived
+    # processes held by the desktop main process. NOT WorkspaceBackend methods — issued by
+    # the worker-only ``terminal`` tool over the same channel (LocalWorkspace + sidecar).
+    PROCESS_START = "process_start"
+    PROCESS_READ = "process_read"
+    PROCESS_STOP = "process_stop"
+    PROCESS_LIST = "process_list"
 
 
 # Map a serialized error ``kind`` back to its WorkspaceError subclass, so a remote

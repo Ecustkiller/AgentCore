@@ -25,13 +25,12 @@ import {
   useArchiveConversation,
   useDeleteConversation,
   useDuplicateConversation,
-  useMoveConversation,
   useRenameConversation,
   useTogglePin,
   useUnarchiveConversation,
 } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
-import { conversationTagLabel } from "@/lib/conversationTag";
+import { continueInProject } from "@/lib/continueInProject";
 import { shouldShowConversationCloudIcon } from "@/lib/conversationWorkspaceMode";
 import { notifyError, notifyInfo } from "@/lib/toast";
 import {
@@ -44,6 +43,7 @@ import {
   useConversationStore,
 } from "@/stores/conversation";
 import { useInteractionStore } from "@/stores/interactions";
+import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { useShareStore } from "@/stores/share";
 import {
   Archive,
@@ -51,8 +51,7 @@ import {
   Copy,
   Download,
   FileJson,
-  Folder,
-  Inbox,
+  FolderInput,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -148,7 +147,6 @@ export function ConversationItem({ conversation, groupIsLocal }: Props) {
     (s) => s.dropConversationRuntime,
   );
   const renameMutation = useRenameConversation();
-  const moveMutation = useMoveConversation();
   const deleteMutation = useDeleteConversation();
   const pinMutation = useTogglePin();
   const duplicateMutation = useDuplicateConversation();
@@ -164,6 +162,12 @@ export function ConversationItem({ conversation, groupIsLocal }: Props) {
         (e.status === "pending" || e.status === "submitting"),
     ),
   );
+  const awaitingKickoff = usePausedTurnStore((s) =>
+    s.pending.some(
+      (p) =>
+        p.conversationId === conversation.id && p.kind === "team_preview",
+    ),
+  );
   const navigate = useNavigate();
   const isActive = conversation.id === currentId;
   const currentFolderId = conversation.folderId ?? null;
@@ -172,21 +176,24 @@ export function ConversationItem({ conversation, groupIsLocal }: Props) {
     ? "确认永久删除（项目文件会保留）"
     : "确认永久删除（无法恢复）";
 
-  const status: "running" | "awaiting" | null = awaitingApproval
-    ? "awaiting"
-    : isGenerating
-      ? "running"
-      : null;
+  const status: "running" | "awaiting" | null =
+    awaitingApproval || awaitingKickoff
+      ? "awaiting"
+      : isGenerating
+        ? "running"
+        : null;
 
   const suppressPreview = moreOpen || confirmingDelete || contextMenuOpen;
   const messagePreview = useMemo(
     () => buildMessagePreview(conversation.lastMessagePreview, cachedMessages),
     [conversation.lastMessagePreview, cachedMessages],
   );
-  const tagLabel = conversationTagLabel(conversation.tag);
   const showCloudIcon = shouldShowConversationCloudIcon(
     conversation,
     groupIsLocal,
+    conversation.folderId
+      ? (folders.find((f) => f.id === conversation.folderId) ?? null)
+      : null,
   );
 
   const clearPreviewTimer = useCallback(() => {
@@ -273,9 +280,9 @@ export function ConversationItem({ conversation, groupIsLocal }: Props) {
     });
   };
 
-  const moveTo = (folderId: string | null) => {
-    if (folderId === currentFolderId) return;
-    moveMutation.mutate({ id: conversation.id, folderId });
+  const handleContinueInProject = (folderId: string) => {
+    setMoreOpen(false);
+    continueInProject(navigate, conversation.id, folderId);
   };
 
   const handleDuplicate = () => {
@@ -310,53 +317,47 @@ export function ConversationItem({ conversation, groupIsLocal }: Props) {
   const rowActionClass =
     "size-6 text-sidebar-foreground/40 hover:text-sidebar-foreground";
 
-  const moveMenuSection =
-    folders.length > 0 || currentFolderId ? (
+  const continueMenuSection =
+    folders.length > 0 ? (
       <>
         <DropdownMenuSeparator />
-        <DropdownMenuLabel>移到</DropdownMenuLabel>
+        <DropdownMenuLabel>在项目中继续</DropdownMenuLabel>
         <div className="max-h-52 overflow-y-auto">
           {folders.map((f) => (
-            <DropdownMenuItem key={f.id} onSelect={() => void moveTo(f.id)}>
-              <Folder size={14} className="shrink-0" />
+            <DropdownMenuItem
+              key={f.id}
+              onSelect={() => handleContinueInProject(f.id)}
+            >
+              <FolderInput size={14} className="shrink-0" />
               <span className="flex-1 truncate">{f.name}</span>
-              {f.id === currentFolderId && (
-                <Check size={13} className="shrink-0" />
-              )}
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {f.mode === "local" ? "本地" : "云端"}
+              </span>
             </DropdownMenuItem>
           ))}
         </div>
-        {currentFolderId && (
-          <DropdownMenuItem onSelect={() => void moveTo(null)}>
-            <Inbox size={14} className="shrink-0" />
-            <span className="flex-1 truncate">移出文件夹</span>
-          </DropdownMenuItem>
-        )}
       </>
     ) : null;
 
-  const contextMoveSection =
-    folders.length > 0 || currentFolderId ? (
+  const contextContinueSection =
+    folders.length > 0 ? (
       <>
         <ContextMenuSeparator />
-        <ContextMenuLabel>移到</ContextMenuLabel>
+        <ContextMenuLabel>在项目中继续</ContextMenuLabel>
         <div className="max-h-52 overflow-y-auto">
           {folders.map((f) => (
-            <ContextMenuItem key={f.id} onSelect={() => void moveTo(f.id)}>
-              <Folder size={14} className="shrink-0" />
+            <ContextMenuItem
+              key={f.id}
+              onSelect={() => handleContinueInProject(f.id)}
+            >
+              <FolderInput size={14} className="shrink-0" />
               <span className="flex-1 truncate">{f.name}</span>
-              {f.id === currentFolderId && (
-                <Check size={13} className="shrink-0" />
-              )}
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {f.mode === "local" ? "本地" : "云端"}
+              </span>
             </ContextMenuItem>
           ))}
         </div>
-        {currentFolderId && (
-          <ContextMenuItem onSelect={() => void moveTo(null)}>
-            <Inbox size={14} className="shrink-0" />
-            <span className="flex-1 truncate">移出文件夹</span>
-          </ContextMenuItem>
-        )}
       </>
     ) : null;
 
@@ -460,11 +461,6 @@ export function ConversationItem({ conversation, groupIsLocal }: Props) {
                 <span className="min-w-0 flex-1 truncate">
                   {conversation.title}
                 </span>
-                {tagLabel && (
-                  <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs leading-none text-muted-foreground">
-                    {tagLabel}
-                  </span>
-                )}
               </div>
               {confirmingDelete ? (
                 <span className="flex shrink-0 items-center gap-0.5">
@@ -550,7 +546,7 @@ export function ConversationItem({ conversation, groupIsLocal }: Props) {
                           {conversation.pinned ? "取消置顶" : "置顶"}
                         </span>
                       </DropdownMenuItem>
-                      {moveMenuSection}
+                      {continueMenuSection}
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onSelect={handleDuplicate}>
                         <Copy size={14} className="shrink-0" />
@@ -637,7 +633,7 @@ export function ConversationItem({ conversation, groupIsLocal }: Props) {
             {conversation.pinned ? "取消置顶" : "置顶"}
           </span>
         </ContextMenuItem>
-        {contextMoveSection}
+        {contextContinueSection}
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={handleDuplicate}>
           <Copy size={14} className="shrink-0" />

@@ -1,14 +1,14 @@
 import { type User, logout, me } from "@/api/auth";
 import { getTokens } from "@/api/client";
 import { Avatar } from "@/pages/more/Avatar";
-// Settings hub (设置/更多) — mobile's home for account/model/usage/about.
+// Settings hub (设置/更多) — mobile's home for account/model/autonomy/usage/about.
 //
 // Desktop has a left-nav + content split (MorePage.tsx); mobile is touch-native: a hub
-// list of rows that drill into full-screen sub-pages (/more/model · /more/account ·
-// /more/usage · /more/about). Two desktop sections are dropped by the 减法 boundary —
-// 外观 (手机端只浅色、无暗色) and 快捷键 (无物理键盘) — and 成员 (admin) stays a
-// desktop/admin-web task. There is no global auth store on mobile, so identity is
-// fetched here on open (matches the skeleton's per-page fetch convention).
+// list of rows that drill into full-screen sub-pages (/more/model · /more/autonomy ·
+// /more/account · /more/usage · /more/about). Two desktop sections are dropped by the
+// 减法 boundary — 外观 (手机端只浅色、无暗色) and 快捷键 (无物理键盘) — and 成员
+// (admin) stays a desktop/admin-web task. There is no global auth store on mobile, so
+// identity is fetched here on open (matches the skeleton's per-page fetch convention).
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "@/pages/more/more.css";
@@ -58,6 +58,7 @@ export function MorePage() {
 
         <div className="more-group">
           <NavRow label="模型配置" onClick={() => navigate("/more/model")} />
+          <NavRow label="自主度" onClick={() => navigate("/more/autonomy")} />
           <NavRow label="账户设置" onClick={() => navigate("/more/account")} />
           <NavRow label="用量" onClick={() => navigate("/more/usage")} />
           <NavRow label="关于" onClick={() => navigate("/more/about")} />

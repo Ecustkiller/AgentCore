@@ -5,7 +5,7 @@ import { usePersistentDisclosure } from "@/stores/disclosure";
 import type { Execution } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import { ChevronDown, ChevronRight, CornerDownRight } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { CollapsibleSpeech } from "../CollapsibleSpeech";
 import type {
   DebateClashView,
@@ -69,6 +69,25 @@ export function SpeakerBlock({
   ) : null;
 
   const sceneKey = `${messageId}:arena:r${round.roundNo}:${side.sideKey || side.key}`;
+  // 头行/底部「展开全文」共享同一实例——无对话 id 时 usePersistentDisclosure 退化为
+  // 组件本地 useState，若父子各自调同键会脱同步（测试环境即此形态）。
+  const [showAll, setShowAll] = usePersistentDisclosure(
+    `${sceneKey}:all`,
+    false,
+  );
+  const arguments_ =
+    !streaming && output ? parseSpeechArguments(output) : [];
+  const showFullTextToggle =
+    !streaming && !!output && arguments_.length > 0;
+
+  const meta = (
+    <SpeakerMeta
+      name={side.name}
+      colorVar={side.colorVar}
+      stage={stage}
+      status={status}
+    />
+  );
 
   return (
     <div
@@ -93,27 +112,29 @@ export function SpeakerBlock({
           </span>
         </button>
       ))}
-      {run ? (
-        <Button
-          variant="ghost"
-          onClick={() => showRunDetail(messageId, run.id, side.name)}
-          className="h-auto w-full justify-start gap-2 rounded-none px-0 py-0 hover:bg-transparent"
-        >
-          <SpeakerMeta
-            name={side.name}
-            colorVar={side.colorVar}
-            stage={stage}
-            status={status}
-          />
-        </Button>
-      ) : (
-        <SpeakerMeta
-          name={side.name}
-          colorVar={side.colorVar}
-          stage={stage}
-          status={status}
-        />
-      )}
+      <div className="flex items-center gap-2 text-xs">
+        {run ? (
+          <Button
+            variant="ghost"
+            onClick={() => showRunDetail(messageId, run.id, side.name)}
+            className="h-auto justify-start gap-2 rounded-none px-0 py-0 hover:bg-transparent"
+          >
+            {meta}
+          </Button>
+        ) : (
+          meta
+        )}
+        {showFullTextToggle && (
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            aria-expanded={showAll}
+            className="ml-auto shrink-0 text-xs font-medium text-primary hover:underline"
+          >
+            {showAll ? "收起全文" : "展开全文"}
+          </button>
+        )}
+      </div>
       <div className="mt-1 pb-4 text-sm text-foreground">
         {streaming ? (
           <div className="whitespace-pre-wrap break-words">
@@ -124,7 +145,13 @@ export function SpeakerBlock({
             />
           </div>
         ) : output ? (
-          <ArgumentSpeech output={output} sceneKey={sceneKey} />
+          <ArgumentSpeech
+            output={output}
+            sceneKey={sceneKey}
+            arguments_={arguments_}
+            showAll={showAll}
+            setShowAll={setShowAll}
+          />
         ) : (
           <p className="text-xs text-muted-foreground">
             {speechPlaceholder(run)}
@@ -138,23 +165,21 @@ export function SpeakerBlock({
 function ArgumentSpeech({
   output,
   sceneKey,
+  arguments_,
+  showAll,
+  setShowAll,
 }: {
   output: string;
   sceneKey: string;
+  arguments_: SpeechArgument[];
+  showAll: boolean;
+  setShowAll: (value: boolean | ((prev: boolean) => boolean)) => void;
 }) {
-  const arguments_ = parseSpeechArguments(output);
-  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
-  const [showAll, setShowAll] = usePersistentDisclosure(
-    `${sceneKey}:all`,
-    false,
-  );
-
   if (showAll) {
+    // 用户显式「展开全文」= 要看完整内容，不再套 CollapsibleSpeech（避免双层折叠）。
     return (
       <div>
-        <CollapsibleSpeech contentKey={output} sceneKey={`${sceneKey}:full`}>
-          <Markdown content={output} evidence />
-        </CollapsibleSpeech>
+        <Markdown content={output} evidence />
         <button
           type="button"
           onClick={() => setShowAll(false)}
@@ -177,12 +202,11 @@ function ArgumentSpeech({
   return (
     <div>
       <ul className="space-y-0.5">
-        {arguments_.map((arg, i) => (
+        {arguments_.map((arg) => (
           <ArgumentRow
             key={arg.id}
             argument={arg}
-            open={expandedIdx === i}
-            onToggle={() => setExpandedIdx((prev) => (prev === i ? null : i))}
+            sceneKey={`${sceneKey}:arg:${arg.id}`}
           />
         ))}
       </ul>
@@ -199,18 +223,17 @@ function ArgumentSpeech({
 
 function ArgumentRow({
   argument,
-  open,
-  onToggle,
+  sceneKey,
 }: {
   argument: SpeechArgument;
-  open: boolean;
-  onToggle: () => void;
+  sceneKey: string;
 }) {
+  const [open, setOpen] = usePersistentDisclosure(sceneKey, false);
   return (
     <li className="list-none rounded-lg bg-muted/15">
       <button
         type="button"
-        onClick={onToggle}
+        onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className="flex w-full items-start gap-1.5 px-2 py-1.5 text-left text-xs hover:bg-muted/35"
       >
@@ -258,7 +281,7 @@ function SpeakerMeta({
   status: ReactNode;
 }) {
   return (
-    <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
       <span className="font-medium text-foreground" style={{ color: colorVar }}>
         {name}
       </span>

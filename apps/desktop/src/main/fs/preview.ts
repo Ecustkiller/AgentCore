@@ -15,7 +15,14 @@ import {
   IMAGE_PREVIEW_CAP,
   TEXT_PREVIEW_CAP,
 } from "./constants";
-import { locate, realInside, toReason } from "./pathGuard";
+import {
+  fromErrno,
+  fsErr,
+  locate,
+  realFail,
+  realInside,
+  toReason,
+} from "./pathGuard";
 import { ensureReady, getRoot } from "./roots";
 import { atomicWrite, resolveWritable } from "./workspace/write";
 
@@ -86,12 +93,12 @@ export async function readFile(
   const loc = locate(rootId, relPath);
   if ("error" in loc) return loc.error;
   const real = await realInside(loc.root, loc.abs);
-  if (!real) return { ok: false, reason: "无法访问（不存在或越界）" };
+  if (!real.ok) return realFail(real);
   try {
-    const st = await fs.stat(real);
-    if (!st.isFile()) return { ok: false, reason: "不是文件" };
+    const st = await fs.stat(real.path);
+    if (!st.isFile()) return { ok: false, reason: "不是文件", code: "invalid" };
 
-    const ext = extname(real).toLowerCase();
+    const ext = extname(real.path).toLowerCase();
     const imgMime = IMAGE_MIME[ext];
     if (imgMime) {
       if (st.size > IMAGE_PREVIEW_CAP) {
@@ -105,7 +112,7 @@ export async function readFile(
           },
         };
       }
-      const buf = await fs.readFile(real);
+      const buf = await fs.readFile(real.path);
       const dataUrl = `data:${imgMime};base64,${buf.toString("base64")}`;
       return {
         ok: true,
@@ -114,7 +121,7 @@ export async function readFile(
     }
 
     // 文本/二进制：仅读取前 256KB+1 字节用于判别与展示，避免大文件全量读入。
-    const fh = await fs.open(real, "r");
+    const fh = await fs.open(real.path, "r");
     try {
       const buf = Buffer.alloc(TEXT_PREVIEW_CAP + 1);
       const { bytesRead } = await fh.read(buf, 0, TEXT_PREVIEW_CAP + 1, 0);
@@ -139,7 +146,7 @@ export async function readFile(
       await fh.close();
     }
   } catch (e) {
-    return { ok: false, reason: toReason(e) };
+    return fromErrno(e);
   }
 }
 
@@ -151,15 +158,15 @@ export async function readTextFile(
   const loc = locate(rootId, relPath);
   if ("error" in loc) return loc.error;
   const real = await realInside(loc.root, loc.abs);
-  if (!real) return { ok: false, reason: "无法访问（不存在或越界）" };
+  if (!real.ok) return realFail(real);
   try {
-    const st = await fs.stat(real);
-    if (!st.isFile()) return { ok: false, reason: "不是文件" };
+    const st = await fs.stat(real.path);
+    if (!st.isFile()) return fsErr("invalid", "不是文件");
     if (st.size > EDIT_READ_MAX) {
-      return { ok: false, reason: "文件过大，暂不支持在面板内编辑" };
+      return fsErr("invalid", "文件过大，暂不支持在面板内编辑");
     }
-    const buf = await fs.readFile(real);
-    if (sniffBinary(buf)) return { ok: false, reason: "二进制文件，无法编辑" };
+    const buf = await fs.readFile(real.path);
+    if (sniffBinary(buf)) return fsErr("invalid", "二进制文件，无法编辑");
     const { encoding, text } = decodeText(buf);
     const eol: FsEol = text.includes("\r\n") ? "crlf" : "lf";
     return {
@@ -172,7 +179,7 @@ export async function readTextFile(
       },
     };
   } catch (e) {
-    return { ok: false, reason: toReason(e) };
+    return fromErrno(e);
   }
 }
 

@@ -19,6 +19,7 @@ import type {
   RunOutputResetPayload,
   RunProgressPayload,
   RunReasoningDeltaPayload,
+  RunSkippedPayload,
   RunStartedPayload,
   RunToolProgressPayload,
   SSEEvent,
@@ -110,6 +111,14 @@ export type RunFrame =
       runId: string;
       agentId: string;
       reason: "redirect" | "stop";
+    }
+  | {
+      // 级联跳过 / graceful abort: node never ran — materialised SKIPPED.
+      t: number;
+      kind: "run_skipped";
+      runId: string;
+      agentId: string;
+      reason: "cascade" | "abort";
     }
   | { t: number; kind: "run_progress"; completed: number; total: number }
   | {
@@ -326,6 +335,16 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
       return {
         t,
         kind: "run_cancelled",
+        runId: p.run_id,
+        agentId: p.agent_id,
+        reason: p.reason,
+      };
+    }
+    case "run_skipped": {
+      const p = event.payload as RunSkippedPayload;
+      return {
+        t,
+        kind: "run_skipped",
         runId: p.run_id,
         agentId: p.agent_id,
         reason: p.reason,

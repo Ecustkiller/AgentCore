@@ -1,10 +1,10 @@
-"""Per-run cost ledger: CostEvent.
+"""Cost ledger: per-call details (``CostCall``) + per-run aggregate (``CostEvent``).
 
-Append-only ledger: one row per Run (= one Agent's participation in a turn;
-the CEO/captain root counts as a row too). This is the single source of truth
-for real money spent (不变量 #1) — ``Message.usage`` is only a display snapshot.
-The team「工资单」(GET /messages/{id}/cost) is rebuilt by querying this table by
-message_id, so it replays on reload without any extra snapshot column.
+``cost_calls`` is the authority for every LLM spend line; ``cost_events`` is the
+per-run materialized view product surfaces (工资单 / 仪表盘 / 配额 SUM) read.
+``persona`` holds the human-facing role label (调研员 / CEO / …) so payroll can
+group beyond the structural captain/member bucket. Old rows may lack call
+details or persona — read side tolerates missing fields (no backfill).
 """
 
 from datetime import datetime
@@ -26,18 +26,14 @@ from agentcore.db.base import Base
 
 from ._helpers import _new_uuid
 
+_ROLE_CHECK = "role in ('captain', 'member', 'arena', 'title', 'memory', 'vision')"
+
 
 class CostEvent(Base):
     __tablename__ = "cost_events"
     __table_args__ = (
-        CheckConstraint(
-            "role in ('captain', 'member', 'arena', 'title', 'memory', 'vision')",
-            name="ck_cost_events_role",
-        ),
-        # Account-window aggregation (dashboard + quota): SUM over a user's recent
-        # rows hits this composite index.
+        CheckConstraint(_ROLE_CHECK, name="ck_cost_events_role"),
         Index("ix_cost_events_user_created", "user_id", "created_at"),
-        # Team payroll: fetch every run row for one assistant turn.
         Index("ix_cost_events_message", "message_id"),
     )
 
@@ -63,6 +59,9 @@ class CostEvent(Base):
     parent_run_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     agent_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     role: Mapped[str] = mapped_column(String(20))
+    # Human-facing persona label (调研员 / CEO / …). NULL on legacy rows; read
+    # side falls back to ``role`` for dashboard grouping.
+    persona: Mapped[str | None] = mapped_column(String(128), nullable=True)
     model: Mapped[str] = mapped_column(String(50))
     # Token counts ({input, output, reasoning, cache_hit, cache_miss}).
     tokens: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
@@ -78,6 +77,43 @@ class CostEvent(Base):
     # Correlation key to the turn's runtime logs: joins a spend row to its trace
     # (per-run `run_id` already correlates to worker logs; trace_id gives the
     # turn-level join). NULL on untraced (handoff) turns. See core/log_context.py.
+    trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+
+
+class CostCall(Base):
+    """One LLM call's priced detail line — the billing authority.
+
+    Multiple calls share a ``run_id``; ``cost_events`` materializes their SUM.
+    Idempotent by ``call_id`` (UNIQUE + ON CONFLICT DO NOTHING).
+    """
+
+    __tablename__ = "cost_calls"
+    __table_args__ = (
+        CheckConstraint(_ROLE_CHECK, name="ck_cost_calls_role"),
+        Index("ix_cost_calls_user_created", "user_id", "created_at"),
+        Index("ix_cost_calls_message", "message_id"),
+        Index("ix_cost_calls_run", "run_id"),
+    )
+
+    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
+    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
+    message_id: Mapped[str | None] = mapped_column(PG_UUID(as_uuid=False), nullable=True)
+    call_id: Mapped[str] = mapped_column(String(128), unique=True)
+    run_id: Mapped[str] = mapped_column(String(128))
+    parent_run_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    agent_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    role: Mapped[str] = mapped_column(String(20))
+    persona: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    model: Mapped[str] = mapped_column(String(50))
+    tokens: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
+    cost: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
+    cost_total_nano: Mapped[int] = mapped_column(BigInteger, default=0, server_default=text("0"))
+    currency: Mapped[str] = mapped_column(String(8), default="USD", server_default=text("'USD'"))
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")

@@ -25,4 +25,4 @@ alwaysApply: false
 
 ## 全端发布顺序（速查）
 
-git push → 后端 `pnpm deploy:backend <sha>` → 官网 → 手机 → admin → web 客户端 → 验收 → tag。
+git push → 后端 `pnpm deploy:backend <sha>` →（若桌面已 bump：先 Publish 桌面 release）→ 官网 → 手机 → admin → web 客户端 → 验收 → tag。

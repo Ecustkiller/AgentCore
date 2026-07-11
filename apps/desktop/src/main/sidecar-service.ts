@@ -528,6 +528,8 @@ export class SidecarManager {
         // but the token rotates (12h TTL), so the engine adopts the fresh one per turn
         // (initialize-time creds would otherwise 401 after expiry).
         ...(req.inference ? { inference: req.inference } : {}),
+        // 自主度按回合随送（同 inference 的刷新姿态）：设置中途改，下一回合即生效。
+        ...(req.autonomyPolicy ? { autonomyPolicy: req.autonomyPolicy } : {}),
       });
       return result as SidecarTurnResult;
     } finally {
@@ -695,7 +697,7 @@ export function registerSidecarIpc(): void {
           "userMessage",
           "userMessageId",
         ],
-        ["subpath"],
+        ["subpath", "autonomyPolicy"],
       );
       const root = await getStoredRoot(req.rootId);
       if (!root) throw new Error("本地目录未授权或已移除");
@@ -754,7 +756,7 @@ export function registerSidecarIpc(): void {
           "decision",
           "note",
         ],
-        ["subpath", "userMessageId"],
+        ["subpath", "userMessageId", "autonomyPolicy"],
       );
       const root = await getStoredRoot(req.rootId);
       if (!root) throw new Error("本地目录未授权或已移除");

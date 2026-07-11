@@ -99,8 +99,9 @@ class MessageRepository:
         Used for pause snapshots (first write) and resume completion (update in place)
         so the same pipeline ``message_id`` never hits a unique-constraint error.
 
-        When ``merge=True`` (D7 / ConversationStore finalize), applies content-monotonic
-        and status-gate rules against any existing row before writing.
+        When ``merge=True`` (D7 / ConversationStore finalize), applies content-merge
+        (complete delivery authoritative; other statuses length-monotonic) and
+        status-gate rules against any existing row before writing.
         """
         mid = message_id or new_id()
         write_content = content
@@ -109,14 +110,21 @@ class MessageRepository:
         if merge:
             from agentcore.conversation.store.merge import (
                 merge_usage_status,
-                pick_monotonic_content,
+                pick_merged_content,
             )
 
             existing = await self.get_by_id(mid, conversation_id=conversation_id)
             if existing is not None:
-                write_content = pick_monotonic_content(existing.content, content)
-                write_reasoning = pick_monotonic_content(
-                    existing.reasoning_content, reasoning_content
+                incoming_status = (metadata or {}).get("status")
+                write_content = pick_merged_content(
+                    existing.content,
+                    content,
+                    incoming_status=incoming_status,
+                )
+                write_reasoning = pick_merged_content(
+                    existing.reasoning_content,
+                    reasoning_content,
+                    incoming_status=incoming_status,
                 )
                 write_usage = merge_usage_status(existing.usage, metadata)
         values: dict = {
@@ -303,7 +311,6 @@ class MessageRepository:
         limit: int,
         updated_after: datetime | None = None,
         folder_id: str | None = None,
-        tag: str | None = None,
     ) -> Sequence[tuple[Message, str]]:
         """Owner-scoped message-content substring search (全局搜索 Tier 1).
 
@@ -334,8 +341,6 @@ class MessageRepository:
             stmt = stmt.where(Message.created_at >= updated_after)
         if folder_id is not None:
             stmt = stmt.where(Conversation.folder_id == folder_id)
-        if tag is not None:
-            stmt = stmt.where(Conversation.tag == tag)
         result = await self._session.execute(
             stmt.order_by(Message.created_at.desc()).limit(limit)
         )

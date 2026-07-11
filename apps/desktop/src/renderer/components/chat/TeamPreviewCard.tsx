@@ -63,7 +63,11 @@ function DormantTeamPreview({ preview }: { preview: TeamPreviewDisplay }) {
 
 function ResolvedTeamPreview({ preview }: { preview: TeamPreviewDisplay }) {
   const meta = {
-    continue: { icon: <Check size={14} />, label: "已开做 · 首波已放行" },
+    continue: { icon: <Check size={14} />, label: "已授权开工 · 首波已放行" },
+    per_call: {
+      icon: <Check size={14} />,
+      label: "已开工 · 将逐次审批能力调用",
+    },
     adjust: {
       icon: <Pencil size={14} />,
       label: "已调整 · 备注已注入队员并开做",

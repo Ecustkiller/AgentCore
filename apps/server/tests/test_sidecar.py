@@ -406,6 +406,70 @@ def test_sidecar_binds_local_backend_with_approvals(tmp_path, monkeypatch):
     assert captured["approvals_enabled"] is True
 
 
+def test_sidecar_threads_autonomy_policy_per_turn(tmp_path, monkeypatch):
+    """The user's autonomy posture reaches the local engine (安全权限与治理 §三): initialize
+    seeds it, a per-turn ``autonomyPolicy`` refreshes it (a mid-session settings change
+    applies to the NEXT turn), and an absent param keeps the current value — never a
+    silent reset to the default."""
+    from agentcore.core.types import AutonomyPolicy
+
+    captured: list[AutonomyPolicy] = []
+
+    async def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
+        captured.append(kwargs["autonomy_policy"])
+        kwargs["sink"].close()
+        return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}
+
+    monkeypatch.setattr("agentcore.sidecar.server.run_chat_pipeline", fake_pipeline)
+
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+
+    async def start_turn(turn_id: str, extra: dict[str, Any]) -> None:
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": turn_id,
+                    "method": "startTurn",
+                    "params": {
+                        "turnId": turn_id,
+                        "conversationId": "c1",
+                        "userMessage": "跑点代码",
+                        **extra,
+                    },
+                }
+            )
+        )
+        await asyncio.gather(*list(server._turns.values()))
+
+    async def drive() -> None:
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "userId": "u",
+                        "workspaceRoot": str(tmp_path),
+                        "autonomyPolicy": "full_auto",
+                    },
+                }
+            )
+        )
+        await start_turn("t1", {})  # no per-turn value → the initialize seed applies
+        await start_turn("t2", {"autonomyPolicy": "always_ask"})  # per-turn refresh
+        await start_turn("t3", {})  # absent again → keeps the refreshed value
+
+    asyncio.run(drive())
+    assert captured == [
+        AutonomyPolicy.FULL_AUTO,
+        AutonomyPolicy.ALWAYS_ASK,
+        AutonomyPolicy.ALWAYS_ASK,
+    ]
+
+
 def test_creds_for_stamps_conversation_and_trace_headers():
     """Each turn's proxy creds carry the conversation header (spend attribution) AND the
     trace header (so every proxied LLM call joins the turn's trace, 打通气泡↔日志). An

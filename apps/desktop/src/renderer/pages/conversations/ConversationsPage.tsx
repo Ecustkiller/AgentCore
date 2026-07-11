@@ -74,7 +74,7 @@ export function ConversationsPage() {
     const map = new Map<string, boolean>();
     for (const folder of folders) {
       const convs = conversations.filter((c) => c.folderId === folder.id);
-      map.set(folder.id, deriveGroupWorkspaceIsLocal(folder, convs));
+      map.set(folder.id, deriveGroupWorkspaceIsLocal(folder));
     }
     return map;
   }, [folders, conversations]);

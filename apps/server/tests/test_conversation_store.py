@@ -16,6 +16,7 @@ from agentcore.conversation.store.merge import (
     MESSAGE_STATUS_INCOMPLETE,
     MESSAGE_STATUS_RUNNING,
     merge_usage_status,
+    pick_merged_content,
     pick_monotonic_content,
     should_advance_status,
     should_apply_checkpoint_content,
@@ -76,6 +77,36 @@ def test_d7_merge_usage_status_keeps_terminal():
 def test_d7_pick_monotonic_content_prefers_longer():
     assert pick_monotonic_content("short", "much longer text") == "much longer text"
     assert pick_monotonic_content("already long enough", "short") == "already long enough"
+
+
+def test_d7_complete_finalize_overrides_longer_midstream():
+    """Complete delivery is authoritative even when shorter than a checkpoint draft."""
+    assert (
+        pick_merged_content(
+            "a long mid-stream draft that spilled past the final answer",
+            "final answer",
+            incoming_status=MESSAGE_STATUS_COMPLETE,
+        )
+        == "final answer"
+    )
+
+
+def test_d7_salvage_paths_keep_monotonic_protection():
+    long_draft = "checkpoint body that is longer than salvage"
+    short_salvage = "salvage"
+    for status in (MESSAGE_STATUS_INCOMPLETE, MESSAGE_STATUS_FAILED, MESSAGE_STATUS_RUNNING):
+        assert (
+            pick_merged_content(long_draft, short_salvage, incoming_status=status)
+            == long_draft
+        )
+    assert (
+        pick_merged_content(
+            "short",
+            "much longer salvage text",
+            incoming_status=MESSAGE_STATUS_INCOMPLETE,
+        )
+        == "much longer salvage text"
+    )
 
 
 # --- Protocol shape ---

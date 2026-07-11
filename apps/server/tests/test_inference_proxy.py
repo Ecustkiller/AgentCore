@@ -219,16 +219,23 @@ class _FakeSession:
 
 
 def _capture_record_runs(monkeypatch, tmp_path, *, raises: bool = False):
-    """Enqueue → drain against a fake ledger; capture record_runs kwargs."""
+    """Enqueue → drain against a fake ledger; capture record_calls kwargs."""
+    from agentcore.billing import cost_ledger_queue as ledger_mod
     from agentcore.billing import proxy_spend_queue as queue_mod
 
     calls: list = []
     queue = queue_mod.reset_proxy_spend_queue_for_tests()
-    monkeypatch.setattr(queue_mod.settings, "data_dir", str(tmp_path))
+    monkeypatch.setattr(ledger_mod.settings, "data_dir", str(tmp_path))
 
     class _FakeCostRepo:
         def __init__(self, _session):
             pass
+
+        async def record_calls(self, **kw):
+            if raises:
+                raise RuntimeError("ledger boom")
+            calls.append(kw)
+            return len(kw.get("calls") or [])
 
         async def record_runs(self, **kw):
             if raises:
@@ -270,14 +277,15 @@ async def test_record_proxy_spend_prices_and_records(monkeypatch, tmp_path):
     assert kw["conversation_id"] == "c1"
     # Off-turn shape: lands in account/conversation totals, out of per-message payroll.
     assert kw["message_id"] is None
-    (row,) = kw["runs"]
+    assert kw["materialize_runs"] is True
+    (row,) = kw["calls"]
     assert row["role"] == inference.ROLE_CAPTAIN
     # Priced server-side off the real usage (not trusted from the client).
     assert row["cost_total_nano"] > 0
     assert row["tokens"]["input"] == 1000
 
 
-async def test_record_proxy_spend_carries_message_id_for_sidecar_turns(monkeypatch, tmp_path):
+async def test_record_proxy_spend_carries_attribution(monkeypatch, tmp_path):
     calls, queue = _capture_record_runs(monkeypatch, tmp_path)
     usage = inference.usage_from_deepseek({"prompt_tokens": 10, "completion_tokens": 1})
     await inference._record_proxy_spend(
@@ -286,10 +294,20 @@ async def test_record_proxy_spend_carries_message_id_for_sidecar_turns(monkeypat
         model="deepseek-v4-flash",
         usage=usage,
         message_id="msg-sidecar-1",
+        run_id="del_abc_0",
+        agent_id="del_abc_0",
+        role="member",
+        persona="调研员",
+        call_id="call_stable_1",
     )
     assert await queue.drain_once() == 1
     assert len(calls) == 1
     assert calls[0]["message_id"] == "msg-sidecar-1"
+    row = calls[0]["calls"][0]
+    assert row["run_id"] == "del_abc_0"
+    assert row["role"] == "member"
+    assert row["persona"] == "调研员"
+    assert row["call_id"] == "call_stable_1"
 
 
 async def test_record_proxy_spend_skips_without_conversation(monkeypatch, tmp_path):
@@ -318,7 +336,7 @@ async def test_record_proxy_spend_enqueue_survives_ledger_failure(monkeypatch, t
     )
     assert await queue.drain_once() == 0  # failed write → file retained
     # File still on disk for the next attempt.
-    from agentcore.billing.proxy_spend_queue import _queue_dir
+    from agentcore.billing.cost_ledger_queue import _queue_dir
 
     assert list(_queue_dir().glob("*.json"))
 
@@ -478,21 +496,25 @@ async def test_record_proxy_spend_binds_trace_into_log_context(monkeypatch, tmp_
     write (relay teardown, after the route's log scope exited) still joins the
     turn's trace end-to-end.
     """
+    from agentcore.billing import cost_ledger_queue as ledger_mod
     from agentcore.billing import proxy_spend_queue as queue_mod
     from agentcore.core.log_context import get_log_value
 
     seen: dict = {}
     queue = queue_mod.reset_proxy_spend_queue_for_tests()
-    monkeypatch.setattr(queue_mod.settings, "data_dir", str(tmp_path))
+    monkeypatch.setattr(ledger_mod.settings, "data_dir", str(tmp_path))
 
     class _FakeCostRepo:
         def __init__(self, _session):
             pass
 
-        async def record_runs(self, **_kw):
+        async def record_calls(self, **_kw):
             seen["trace_id"] = get_log_value("trace_id")
             seen["conversation_id"] = get_log_value("conversation_id")
             return 1
+
+        async def record_runs(self, **_kw):
+            return 0
 
     monkeypatch.setattr(
         "agentcore.db.base.telemetry_session_factory",

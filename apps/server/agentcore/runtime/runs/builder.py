@@ -529,24 +529,25 @@ def _parse_deliverable(item: dict[str, Any]) -> Deliverable | None:
 def _deliverable_from_dict(raw: dict[str, Any], *, name: str = "") -> Deliverable:
     required_sections = _str_list(raw.get("required_sections"))
     must_contain = _str_list(raw.get("must_contain"))
+    artifacts = _str_list(raw.get("artifacts"))
     min_length = raw.get("min_length")
     max_length = raw.get("max_length")
     min_length = min_length if isinstance(min_length, int) and min_length > 0 else 0
     max_length = max_length if isinstance(max_length, int) and max_length > 0 else 0
     fmt = raw.get("output_format")
     output_format = fmt if fmt in _VALID_OUTPUT_FORMATS else "text"
-    output_schema = raw.get("output_schema")
-    if output_schema is not None and not isinstance(output_schema, dict):
-        output_schema = None
+    # Declaring concrete artifact paths implies a file deliverable — path
+    # reconciliation is stricter than a bare requires_files count check.
+    requires_files = bool(raw.get("requires_files", False)) or bool(artifacts)
     return Deliverable(
         name=name,
         output_format=output_format,
         required_sections=required_sections,
-        output_schema=output_schema,
         must_contain=must_contain,
         min_length=min_length,
         max_length=max_length,
-        requires_files=bool(raw.get("requires_files", False)),
+        requires_files=requires_files,
+        artifacts=artifacts,
         strict=bool(raw.get("strict", False)),
     )
 
@@ -560,7 +561,7 @@ def _deliverable_has_content(deliverable: Deliverable) -> bool:
         or deliverable.max_length
         or deliverable.output_format == "json"
         or deliverable.requires_files
-        or deliverable.output_schema
+        or deliverable.artifacts
     )
 
 

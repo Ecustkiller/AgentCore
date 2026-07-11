@@ -5,6 +5,8 @@ import type { FsApi } from "@shared/ipc-contract";
 import type { LogApi } from "@shared/log-contract";
 import type { NotificationApi } from "@shared/notification-contract";
 import type { OutboxApi } from "@shared/outbox-contract";
+import type { ProcessApi } from "@shared/process-contract";
+import type { PtyApi } from "@shared/pty-contract";
 import type { SidecarApi } from "@shared/sidecar-contract";
 import type { TerminalApi } from "@shared/terminal-contract";
 import type { UpdaterApi } from "@shared/updater-contract";
@@ -30,6 +32,10 @@ declare global {
     logApi?: LogApi;
     /** bash 代码块「在终端运行」；纯浏览器 / 单测环境可能缺失。 */
     terminalApi?: TerminalApi;
+    /** 后台进程（终端 tab）；纯浏览器 / 单测环境可能缺失。 */
+    processApi?: ProcessApi;
+    /** 用户交互 shell（终端 tab · M3）；纯浏览器 / 单测环境可能缺失。 */
+    ptyApi?: PtyApi;
     /** OS 原生通知（窗口失焦时跨对话提醒）；纯浏览器 / 单测环境可能缺失。 */
     notificationApi?: NotificationApi;
     windowApi: WindowApi;

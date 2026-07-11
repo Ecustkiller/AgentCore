@@ -13,8 +13,8 @@ export function DraftWorkspaceAssignPrompt({
   onKeep: () => void;
 }) {
   const message = currentProjectName
-    ? `附件来自「${attachmentProjectName}」，当前将归入「${currentProjectName}」。改为归入附件所在项目？`
-    : `附件来自「${attachmentProjectName}」，是否将本对话归入该项目？`;
+    ? `附件来自「${attachmentProjectName}」，当前将在「${currentProjectName}」工作。改为在附件所在项目？`
+    : `附件来自「${attachmentProjectName}」，是否在该项目中开始本对话？`;
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-2">
@@ -24,7 +24,7 @@ export function DraftWorkspaceAssignPrompt({
           {currentProjectName ? "保持现状" : "先聊到再说"}
         </Button>
         <Button variant="primary" size="sm" onClick={onAssign}>
-          归入
+          改用该项目
         </Button>
       </div>
     </div>

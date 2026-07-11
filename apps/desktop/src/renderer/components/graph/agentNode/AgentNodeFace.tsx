@@ -12,7 +12,6 @@ import {
   ArrowUp,
   ChevronDown,
   ChevronRight,
-  ClipboardList,
   FileText,
   Pause,
   PencilLine,
@@ -172,21 +171,11 @@ function AgentNodeHeader({
         {(d.stance ||
           p.checkpointFace ||
           p.reviewConcernFace ||
-          (d.escalationPending ?? 0) > 0 ||
-          (d.auditEventCount ?? 0) > 0) && (
+          (d.escalationPending ?? 0) > 0) && (
           <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
             {d.stance && (
               <span className={graphBadgeMutedPlain}>
                 {STANCE_META[d.stance].label}
-              </span>
-            )}
-            {(d.auditEventCount ?? 0) > 0 && (
-              <span
-                className={`flex shrink-0 items-center gap-1 ${graphBadgeMutedPlain}`}
-                title={`${d.auditEventCount} 条活动记录`}
-              >
-                <ClipboardList size={10} />
-                活动 {d.auditEventCount}
               </span>
             )}
             {p.reviewConcernFace && (
@@ -258,10 +247,58 @@ function AgentNodeStatusLine({
   p: AgentNodePresentation;
 }) {
   const elapsed = useRunningElapsed(p.statusFace.tickElapsed);
-  const face = statusFaceLabel(d.status, d.durationMs, elapsed);
+  const face = statusFaceLabel(
+    d.status,
+    d.durationMs,
+    elapsed,
+    d.debateRoundPhase,
+  );
+  const mark = d.debateCrossExamMark;
+  const activateCx = d.onActivateCrossExam;
+
+  const markButton =
+    mark && activateCx ? (
+      <button
+        type="button"
+        className={
+          mark.mode === "replace"
+            ? "text-destructive hover:underline focus-visible:underline focus-visible:outline-none"
+            : "text-primary hover:underline focus-visible:underline focus-visible:outline-none"
+        }
+        aria-label={
+          mark.mode === "replace"
+            ? "查看质询作答详情"
+            : "查看本轮质询作答详情"
+        }
+        onClick={(e) => {
+          e.stopPropagation();
+          activateCx();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+        }}
+      >
+        {mark.label}
+      </button>
+    ) : null;
+
+  if (mark?.mode === "replace" && markButton) {
+    return (
+      <p className={`mt-1 text-xs tabular-nums leading-snug ${face.cls}`}>
+        {markButton}
+      </p>
+    );
+  }
+
   return (
     <p className={`mt-1 text-xs tabular-nums leading-snug ${face.cls}`}>
       {face.text}
+      {mark?.mode === "suffix" && markButton && (
+        <>
+          {" · "}
+          {markButton}
+        </>
+      )}
     </p>
   );
 }

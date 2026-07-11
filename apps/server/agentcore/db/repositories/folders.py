@@ -1,4 +1,4 @@
-"""Folder (对话文件夹 / 本地绑定项目) data access."""
+"""Folder (项目 = 工作区) data access."""
 
 from collections.abc import Sequence
 from datetime import datetime
@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agentcore.core.types import new_id
 from agentcore.db.models import Board, Conversation, Folder
 
-from ._base import _UNSET, _ilike_pattern
+from ._base import _ilike_pattern
 
 
 class FolderRepository:
@@ -21,20 +21,18 @@ class FolderRepository:
         *,
         user_id: str,
         name: str,
-        local_dir: str | None = None,
         local_root_id: str | None = None,
         local_subpath: str | None = None,
     ) -> Folder:
-        # ``local_root_id`` binds the folder to a desktop FS root at creation (文件
-        # 中枢统一 F2): the hub's "添加文件夹 = 建本地绑定项目" is one insert, not a
-        # create-then-bind round trip. ``local_subpath`` (工作区对称化 D1a) marks a
-        # per-conversation workspace lazily promoted under a shared container root;
-        # NULL for an explicitly-added project bound at its root.
+        """Create a project workspace.
+
+        ``local_root_id`` set → local project; both binding columns NULL → cloud
+        project (shared ``folder:<id>`` scope). Binding is immutable after create.
+        """
         folder = Folder(
             id=new_id(),
             user_id=user_id,
             name=name,
-            local_dir=local_dir,
             local_root_id=local_root_id,
             local_subpath=local_subpath,
         )
@@ -82,13 +80,7 @@ class FolderRepository:
         limit: int,
         updated_after: datetime | None = None,
     ) -> Sequence[Folder]:
-        """Owner-scoped folder-name substring search (全局搜索 Tier 1).
-
-        ILIKE over ``name``, most-recently-updated first, capped at ``limit``;
-        soft-deleted folders are excluded. ``updated_after`` applies the 时间过滤
-        facet (recently-touched folders only); folders carry no folder membership,
-        so the workspace facet is handled by the route dropping this section.
-        """
+        """Owner-scoped folder-name substring search (全局搜索 Tier 1)."""
         stmt = select(Folder).where(
             Folder.user_id == user_id,
             Folder.deleted_at.is_(None),
@@ -107,41 +99,22 @@ class FolderRepository:
         *,
         user_id: str,
         name: str | None = None,
-        local_dir: str | None | object = _UNSET,
     ) -> Folder | None:
+        """Rename only — workspace binding is immutable after create."""
         folder = await self.get_by_id(folder_id, user_id=user_id)
         if not folder:
             return None
         if name is not None:
             folder.name = name
-        if local_dir is not _UNSET:
-            # Explicit None clears the binding (disconnect the local directory).
-            folder.local_dir = local_dir  # type: ignore[assignment]
         await self._session.commit()
         await self._session.refresh(folder)
         return folder
 
-    async def set_local_root_id(
-        self, folder_id: str, root_id: str | None, *, user_id: str
-    ) -> Folder | None:
-        """Bind (or unbind, with ``root_id=None``) a folder to a desktop FS root.
-
-        The folder is the shared project space (双模式工作区 §七), so this flips
-        every conversation in it to local mode against ``root_id`` (or back to
-        cloud when cleared).
-        """
-        folder = await self.get_by_id(folder_id, user_id=user_id)
-        if folder:
-            folder.local_root_id = root_id
-            await self._session.commit()
-            await self._session.refresh(folder)
-        return folder
-
     async def soft_delete(self, folder_id: str, *, user_id: str) -> bool:
-        """Soft-delete a folder; its conversations fall back to ungrouped.
+        """Soft-delete a project; archive its conversations (keep ``folder_id``).
 
-        The conversations themselves are kept — only their membership is cleared
-        (``folder_id`` → NULL), so deleting a folder never loses chats.
+        Conversations are archived in place — not ungrouped — so project membership
+        survives soft-delete. Boards fall back to ungrouped (boards are not sessions).
         """
         folder = await self.get_by_id(folder_id, user_id=user_id)
         if not folder:
@@ -153,10 +126,8 @@ class FolderRepository:
                 Conversation.user_id == user_id,
                 Conversation.folder_id == folder_id,
             )
-            .values(folder_id=None)
+            .values(archived=True)
         )
-        # Boards in this folder fall back to ungrouped too (never lose a board to a
-        # deleted folder — symmetric with conversations above).
         await self._session.execute(
             update(Board)
             .where(Board.user_id == user_id, Board.folder_id == folder_id)
@@ -166,12 +137,7 @@ class FolderRepository:
         return True
 
     async def list_purgeable(self, *, before: datetime, limit: int) -> Sequence[Folder]:
-        """Soft-deleted folders whose ``deleted_at`` is at/older than ``before``.
-
-        Backs retention cleanup (决策⑦). A deleted folder's conversations were
-        already re-parented to ungrouped at soft-delete, so only the folder's own
-        (orphaned) project workspace + record remain to purge.
-        """
+        """Soft-deleted folders whose ``deleted_at`` is at/older than ``before``."""
         result = await self._session.execute(
             select(Folder)
             .where(Folder.deleted_at.is_not(None), Folder.deleted_at <= before)
@@ -181,6 +147,6 @@ class FolderRepository:
         return result.scalars().all()
 
     async def hard_delete(self, folder_id: str) -> None:
-        """Physically remove a folder record (its conversations are already detached)."""
+        """Physically remove a folder record."""
         await self._session.execute(delete(Folder).where(Folder.id == folder_id))
         await self._session.commit()

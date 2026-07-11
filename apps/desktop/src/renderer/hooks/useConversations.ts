@@ -2,12 +2,13 @@ import {
   patchConversationScratch,
   removeConversationScratch,
 } from "@/hooks/useWorkspaces";
+import { clearConversationUiState } from "@/lib/clearConversationUiState";
+import { purgeConversationRuntimeState } from "@/lib/purgeConversationRuntimeState";
 import { queryClient } from "@/lib/queryClient";
 import { conversationKeys, workspaceKeys } from "@/lib/queryKeys";
 import {
   deleteConversation as apiDeleteConversation,
   duplicateConversation as apiDuplicateConversation,
-  moveConversation as apiMoveConversation,
   renameConversation as apiRenameConversation,
   setConversationArchived as apiSetArchived,
   setConversationPinned as apiSetPinned,
@@ -16,7 +17,6 @@ import {
 } from "@/services/conversations";
 import type { FolderMeta } from "@/services/folders";
 import type { Conversation } from "@/stores/conversation";
-import { clearDisclosureForConversation } from "@/stores/disclosure";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
 /**
@@ -159,24 +159,6 @@ export function useRenameConversation() {
   });
 }
 
-/** Move a conversation into a folder (`null` = ungrouped), optimistic with
- * rollback to the previous folder if the server rejects the move. */
-export function useMoveConversation() {
-  return useMutation({
-    mutationFn: ({ id, folderId }: { id: string; folderId: string | null }) =>
-      apiMoveConversation(id, folderId),
-    onMutate: ({ id, folderId }) => {
-      const prev =
-        getConversations().find((c) => c.id === id)?.folderId ?? null;
-      patchConversationCache(id, { folderId });
-      return { id, prev };
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx) patchConversationCache(ctx.id, { folderId: ctx.prev });
-    },
-  });
-}
-
 /** Soft-delete a conversation server-side, then drop it from the cache (delete
  * first so a failed delete leaves the row in place). */
 export function useDeleteConversation() {
@@ -184,12 +166,16 @@ export function useDeleteConversation() {
     mutationFn: (id: string) => apiDeleteConversation(id),
     onSuccess: (_data, id) => {
       removeConversationFromCache(id);
-      // Purge this conversation's persisted fold/expand prefs so the disclosure
-      // map doesn't leak keys for gone conversations (守「表恒收敛不膨胀」).
-      clearDisclosureForConversation(id);
+      // Purge this conversation's persisted UI prefs (disclosure / drafts /
+      // views / canvas-turn / graph-fold) so blob maps don't leak keys for gone
+      // conversations (守「表恒收敛不膨胀」).
+      clearConversationUiState(id);
       // Drop the files-hub rail section + refetch so open tabs close via
       // FileWorkbench's「workspace gone → close tabs」effect.
       removeConversationScratch(id);
+      // In-memory runtime buckets (pausedTurns / interactions / turnModel /
+      // backgroundTasks / processes / terminals / toolOutput).
+      purgeConversationRuntimeState(id);
       void queryClient.invalidateQueries({ queryKey: workspaceKeys.list });
     },
   });

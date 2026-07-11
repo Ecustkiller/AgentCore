@@ -1,4 +1,10 @@
-"""Cost ledger data access (成本配额与计费): the append-only per-run spend store."""
+"""Cost ledger data access: per-call details + per-run aggregates.
+
+``cost_calls`` is the authority; ``cost_events`` is the per-run materialized view
+product surfaces read (工资单 / 仪表盘 / 配额). Writes go through the shared
+:class:`~agentcore.billing.cost_ledger_queue.CostLedgerQueue` outbox for
+at-least-once durability.
+"""
 
 from collections.abc import Sequence
 from datetime import datetime
@@ -9,19 +15,50 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from agentcore.core.types import new_id
-from agentcore.db.models import CostEvent, User
+from agentcore.db.models import CostCall, CostEvent, User
+from agentcore.runtime.costing import run_cost_from_calls
 
 from ._base import _json_int, _sum_int
 
 
-class CostEventRepository:
-    """Append-only per-run cost ledger (决策②: one row per Run = one Agent's
-    participation in a turn, captain root included).
+def _run_row_values(
+    *,
+    user_id: str,
+    conversation_id: str,
+    message_id: str | None,
+    runs: Sequence[dict],
+    trace_id: str | None,
+) -> list[dict]:
+    return [
+        {
+            "id": new_id(),
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "message_id": message_id,
+            "run_id": r["run_id"],
+            "parent_run_id": r.get("parent_run_id"),
+            "agent_id": r.get("agent_id"),
+            "role": r.get("role", "member"),
+            "persona": (str(r["persona"]).strip() if r.get("persona") else None),
+            "model": r.get("model", ""),
+            "tokens": r.get("tokens") or {},
+            "cost": r.get("cost") or {},
+            "cost_total_nano": int(r.get("cost_total_nano", 0)),
+            "currency": r.get("currency", "USD"),
+            "rounds": int(r.get("rounds", 0)),
+            "duration_ms": int(r.get("duration_ms", 0)),
+            "trace_id": trace_id,
+        }
+        for r in runs
+    ]
 
-    This is the persistence truth source for money spent: the team payroll is
-    rebuilt by querying on ``message_id`` and the account dashboard / quota SUMs
-    by ``(user_id, created_at)`` — both reads land here and hit the two composite
-    indexes on the table.
+
+class CostEventRepository:
+    """Append-only cost ledger (per-call details + per-run aggregates).
+
+    Product reads (payroll / dashboard / quota) hit ``cost_events``. Call details
+    live in ``cost_calls`` and are the authority for proxy metering; per-run rows
+    may be dual-written at finalize or materialized from calls.
     """
 
     def __init__(self, session: AsyncSession):
@@ -36,23 +73,43 @@ class CostEventRepository:
         runs: Sequence[dict],
         trace_id: str | None = None,
     ) -> int:
-        """Append one ledger row per run for an assistant turn; return rows written.
+        """Append per-run aggregate rows; idempotent by ``run_id`` (DO NOTHING).
 
-        ``runs`` are the runtime's per-run payloads (``asdict(RunCost)``): the
-        caller (conversation service) supplies the user / conversation / message
-        envelope here so the runtime stays DB-unaware. Idempotent by ``run_id``
-        (unique): a retried turn re-sending the same runs inserts nothing the
-        second time, so a run is never double-billed. A row id is minted per row
-        because a Core bulk insert does not fire the ORM-level default. ``trace_id``
-        (the turn's log correlation key) stamps every row so the spend joins to its
-        log trace.
-
-        ``message_id`` is ``None`` for off-turn background LLM calls (标题生成 /
-        记忆整合, Gap C) — those belong to no assistant turn, so the NULL keeps them
-        out of any single turn's per-message 工资单 and out of the「请求数」count,
-        while still summing into the account/conversation cost totals.
+        Used by cloud finalize / handoff when the run aggregate is already known.
+        Proxy materialization uses :meth:`upsert_runs_from_calls` instead so
+        growing call counts replace the aggregate.
         """
         if not runs:
+            return 0
+        rows = _run_row_values(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            runs=runs,
+            trace_id=trace_id,
+        )
+        stmt = pg_insert(CostEvent).values(rows).on_conflict_do_nothing(index_elements=["run_id"])
+        result = await self._session.execute(stmt)
+        await self._session.commit()
+        return result.rowcount or 0
+
+    async def record_calls(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        message_id: str | None,
+        calls: Sequence[dict],
+        trace_id: str | None = None,
+        materialize_runs: bool = False,
+    ) -> int:
+        """Append per-call detail rows; idempotent by ``call_id``.
+
+        When ``materialize_runs`` is true (proxy path), also upserts ``cost_events``
+        by re-aggregating all calls for each touched ``run_id`` so the product
+        view stays in sync without a separate finalize write.
+        """
+        if not calls:
             return 0
         rows = [
             {
@@ -60,25 +117,131 @@ class CostEventRepository:
                 "user_id": user_id,
                 "conversation_id": conversation_id,
                 "message_id": message_id,
-                "run_id": r["run_id"],
-                "parent_run_id": r.get("parent_run_id"),
-                "agent_id": r.get("agent_id"),
-                "role": r.get("role", "member"),
-                "model": r.get("model", ""),
-                "tokens": r.get("tokens") or {},
-                "cost": r.get("cost") or {},
-                "cost_total_nano": int(r.get("cost_total_nano", 0)),
-                "currency": r.get("currency", "USD"),
-                "rounds": int(r.get("rounds", 0)),
-                "duration_ms": int(r.get("duration_ms", 0)),
+                "call_id": c["call_id"],
+                "run_id": c["run_id"],
+                "parent_run_id": c.get("parent_run_id"),
+                "agent_id": c.get("agent_id"),
+                "role": c.get("role", "member"),
+                "persona": (str(c["persona"]).strip() if c.get("persona") else None),
+                "model": c.get("model", ""),
+                "tokens": c.get("tokens") or {},
+                "cost": c.get("cost") or {},
+                "cost_total_nano": int(c.get("cost_total_nano", 0)),
+                "currency": c.get("currency", "USD"),
+                "duration_ms": int(c.get("duration_ms", 0)),
                 "trace_id": trace_id,
             }
-            for r in runs
+            for c in calls
         ]
-        stmt = pg_insert(CostEvent).values(rows).on_conflict_do_nothing(index_elements=["run_id"])
+        stmt = pg_insert(CostCall).values(rows).on_conflict_do_nothing(index_elements=["call_id"])
         result = await self._session.execute(stmt)
+        written = result.rowcount or 0
+        if materialize_runs:
+            run_ids = sorted({str(c["run_id"]) for c in calls if c.get("run_id")})
+            await self._materialize_runs_for(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                message_id=message_id,
+                run_ids=run_ids,
+                trace_id=trace_id,
+            )
         await self._session.commit()
-        return result.rowcount or 0
+        return written
+
+    async def _materialize_runs_for(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        message_id: str | None,
+        run_ids: Sequence[str],
+        trace_id: str | None,
+    ) -> None:
+        """Recompute ``cost_events`` for ``run_ids`` from ``cost_calls`` (upsert)."""
+        if not run_ids:
+            return
+        result = await self._session.execute(
+            select(CostCall).where(
+                CostCall.user_id == user_id,
+                CostCall.run_id.in_(list(run_ids)),
+            )
+        )
+        by_run: dict[str, list[CostCall]] = {}
+        for row in result.scalars().all():
+            by_run.setdefault(row.run_id, []).append(row)
+
+        aggregates: list[dict] = []
+        for run_id in run_ids:
+            call_rows = by_run.get(run_id) or []
+            if not call_rows:
+                continue
+            # Stable order for first-call attribution.
+            call_rows.sort(key=lambda r: (r.created_at, r.call_id))
+            payloads = [
+                {
+                    "call_id": r.call_id,
+                    "run_id": r.run_id,
+                    "parent_run_id": r.parent_run_id,
+                    "agent_id": r.agent_id,
+                    "role": r.role,
+                    "persona": r.persona,
+                    "model": r.model,
+                    "tokens": r.tokens or {},
+                    "cost": r.cost or {},
+                    "cost_total_nano": int(r.cost_total_nano or 0),
+                    "currency": r.currency or "USD",
+                    "duration_ms": int(r.duration_ms or 0),
+                }
+                for r in call_rows
+            ]
+            agg = run_cost_from_calls(payloads)
+            if agg is None:
+                continue
+            aggregates.append(
+                {
+                    "run_id": agg.run_id,
+                    "parent_run_id": agg.parent_run_id,
+                    "agent_id": agg.agent_id,
+                    "role": agg.role,
+                    "persona": agg.persona,
+                    "model": agg.model,
+                    "tokens": agg.tokens,
+                    "cost": agg.cost,
+                    "cost_total_nano": agg.cost_total_nano,
+                    "currency": agg.currency,
+                    "rounds": agg.rounds,
+                    "duration_ms": agg.duration_ms,
+                }
+            )
+        if not aggregates:
+            return
+        rows = _run_row_values(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            runs=aggregates,
+            trace_id=trace_id,
+        )
+        insert_stmt = pg_insert(CostEvent).values(rows)
+        upsert = insert_stmt.on_conflict_do_update(
+            index_elements=["run_id"],
+            set_={
+                "parent_run_id": insert_stmt.excluded.parent_run_id,
+                "agent_id": insert_stmt.excluded.agent_id,
+                "role": insert_stmt.excluded.role,
+                "persona": insert_stmt.excluded.persona,
+                "model": insert_stmt.excluded.model,
+                "tokens": insert_stmt.excluded.tokens,
+                "cost": insert_stmt.excluded.cost,
+                "cost_total_nano": insert_stmt.excluded.cost_total_nano,
+                "currency": insert_stmt.excluded.currency,
+                "rounds": insert_stmt.excluded.rounds,
+                "duration_ms": insert_stmt.excluded.duration_ms,
+                "message_id": insert_stmt.excluded.message_id,
+                "trace_id": insert_stmt.excluded.trace_id,
+            },
+        )
+        await self._session.execute(upsert)
 
     async def list_for_message(self, message_id: str, *, user_id: str) -> Sequence[CostEvent]:
         """The per-run rows for one assistant turn — the team payroll (工资单).
@@ -155,28 +318,25 @@ class CostEventRepository:
     async def aggregate_by_role_for_window(
         self, *, user_id: str | None = None, since: datetime
     ) -> list[dict]:
-        """Per-role spend since a cutoff (本月各角色花销 — 团队工资单 by role).
+        """Per-persona spend since a cutoff (本月各角色花销 — 团队工资单).
 
-        Groups the window by the ledger ``role`` and SUMs the scalar
-        ``cost_total_nano`` (the money truth, index-friendly) plus a distinct-turn
-        count per role. Only roles that actually spent (>0) are returned, ordered
-        by spend desc so the dashboard leads with the biggest spender (Top 花销) —
-        the multi-agent product differentiator a single-agent tool can't show.
-        ``user_id`` scopes to one account (hits ``ix_cost_events_user_created``);
-        ``None`` is platform-wide (admin 全站看板).
+        Groups by ``COALESCE(persona, role)`` so new rows with human-facing
+        labels (调研员 / CEO) surface as persona payroll, while legacy rows
+        without ``persona`` still roll up under the structural role bucket.
         """
+        bucket = func.coalesce(CostEvent.persona, CostEvent.role)
         total = _sum_int(CostEvent.cost_total_nano)
         conditions: list[ColumnElement] = [CostEvent.created_at >= since]
         if user_id is not None:
             conditions.append(CostEvent.user_id == user_id)
         stmt = (
             select(
-                CostEvent.role.label("role"),
+                bucket.label("role"),
                 total.label("c_total"),
                 func.count(distinct(CostEvent.message_id)).label("turns"),
             )
             .where(*conditions)
-            .group_by(CostEvent.role)
+            .group_by(bucket)
             .having(total > 0)
             .order_by(total.desc())
         )

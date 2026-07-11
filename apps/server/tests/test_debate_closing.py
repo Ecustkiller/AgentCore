@@ -46,9 +46,14 @@ def test_closing_task_carries_phased_length_budget():
 
 
 def test_closing_context_blocks_shows_closing_framing():
-    """结辩节点的『收到的上下文』展示投影：单个 closing block、标明结辩环节定调（供前端修订面板渲染）。"""
-    blocks = closing_context_blocks(_config(), _two_sides()[0])
-    assert len(blocks) == 1
-    assert blocks[0].channel == "closing"
+    """结辩节点的『收到的上下文』：task 块复用 feedback + closing 通道块纯环节标记。"""
+    fb = closing_task(_config(), _two_sides()[0])
+    blocks = closing_context_blocks(_config(), _two_sides()[0], fb)
+    assert [b.channel for b in blocks] == ["task", "closing"]
+    assert blocks[0].body == fb
     assert "结辩" in blocks[0].heading
-    assert "胜负手" in blocks[0].body or "结辩" in blocks[0].body
+    assert "结辩" in blocks[1].heading
+    assert "结辩" in blocks[1].body
+    # closing 通道不再复述指令（胜负手 / 禁新论据只在 task/feedback）
+    assert "胜负手" not in blocks[1].body
+    assert "新论据" not in blocks[1].body

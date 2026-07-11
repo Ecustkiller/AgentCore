@@ -10,17 +10,23 @@ import {
 import { useCreateFolder } from "@/hooks/useFolders";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { notifyError, notifySuccess } from "@/lib/toast";
+import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
+import { sanitizeProjectSubpath } from "@/services/folders";
 import { useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
-import { FolderOpen, Loader2 } from "lucide-react";
+import { Cloud, FolderOpen, HardDrive, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 const isDesktop = hasLocalFiles();
 
+type LocationChoice =
+  | { kind: "pick_local"; rootId: string; rootName: string }
+  | { kind: "default_container" }
+  | { kind: "cloud" };
+
 /**
- * Canonical「新建项目」dialog — mounted once at the app shell, opened from the
- * command palette (and other folder-lifecycle entry points). Draft workspace
- * picker only selects existing projects; creation lives here.
+ * Canonical「新建项目」dialog — location is required (local folder / default
+ * container subpath / cloud). Draft composer auto-selects the new project.
  */
 export function CreateProjectDialog() {
   const open = useFoldersStore((s) => s.createProjectOpen);
@@ -41,35 +47,59 @@ export function CreateProjectDialog() {
 function CreateProjectDialogBody({ onClose }: { onClose: () => void }) {
   const createFolder = useCreateFolder();
   const [name, setName] = useState("");
-  const [pickedRoot, setPickedRoot] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
+  const [location, setLocation] = useState<LocationChoice | null>(
+    isDesktop ? { kind: "default_container" } : { kind: "cloud" },
+  );
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
+    if (isDesktop) void ensureDefaultContainerRoot();
   }, []);
 
   const handlePickLocalDir = async () => {
     if (!window.fsApi) return;
     const root = await window.fsApi.addRoot();
-    if (root) setPickedRoot(root);
+    if (root) setLocation({ kind: "pick_local", rootId: root.id, rootName: root.name });
   };
 
   const handleSubmit = async () => {
     const trimmed = name.trim();
-    if (!trimmed || createFolder.isPending) return;
+    if (!trimmed || !location || createFolder.isPending) return;
     try {
-      const folder = await createFolder.mutateAsync({
-        name: trimmed,
-        localDir: pickedRoot?.name ?? null,
-      });
+      let folder;
+      if (location.kind === "cloud") {
+        folder = await createFolder.mutateAsync({
+          name: trimmed,
+          mode: "cloud",
+        });
+      } else if (location.kind === "pick_local") {
+        folder = await createFolder.mutateAsync({
+          name: trimmed,
+          mode: "local",
+          localRootId: location.rootId,
+          localSubpath: null,
+        });
+      } else {
+        const rootId = await ensureDefaultContainerRoot();
+        if (!rootId) {
+          notifyError(new Error("无法初始化默认本地目录"), "创建项目失败");
+          return;
+        }
+        folder = await createFolder.mutateAsync({
+          name: trimmed,
+          mode: "local",
+          localRootId: rootId,
+          localSubpath: sanitizeProjectSubpath(trimmed),
+        });
+      }
       const draft =
         useConversationStore.getState().currentConversationId === null;
       if (draft) {
-        useFoldersStore.getState().setPendingNewChatFolder(folder.id);
-        useFoldersStore.getState().setPendingNewChatCloud(false);
+        useFoldersStore.getState().setDraftWorkspaceIntent({
+          kind: "project",
+          folderId: folder.id,
+        });
       }
       useFoldersStore.getState().setPendingRename(folder.id);
       notifySuccess(`已创建项目「${folder.name}」`);
@@ -79,12 +109,15 @@ function CreateProjectDialogBody({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const locationReady = location != null;
+  const suggestedSubpath = sanitizeProjectSubpath(name || "项目名");
+
   return (
     <DialogContent className="sm:max-w-md">
       <DialogHeader>
         <DialogTitle>新建项目</DialogTitle>
         <DialogDescription>
-          侧栏分组容器，可选绑定本机文件夹。创建后可在对话草稿里归入该项目。
+          项目即工作区：创建时选定位置，之后会话继承该空间。
         </DialogDescription>
       </DialogHeader>
 
@@ -94,7 +127,7 @@ function CreateProjectDialogBody({ onClose }: { onClose: () => void }) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && name.trim()) {
+            if (e.key === "Enter" && name.trim() && locationReady) {
               e.preventDefault();
               void handleSubmit();
             }
@@ -103,16 +136,39 @@ function CreateProjectDialogBody({ onClose }: { onClose: () => void }) {
           aria-label="项目名称"
           className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
         />
-        {isDesktop && (
-          <button
-            type="button"
-            onClick={() => void handlePickLocalDir()}
-            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <FolderOpen size={14} />
-            {pickedRoot ? pickedRoot.name : "绑定本地文件夹（可选）"}
-          </button>
-        )}
+
+        <div className="space-y-1.5">
+          <p className="text-xs text-muted-foreground">位置（必选）</p>
+          {isDesktop && (
+            <>
+              <LocationOption
+                selected={location?.kind === "default_container"}
+                icon={<HardDrive size={14} />}
+                label="本机默认目录"
+                hint={`~/Documents/AgentCore/${suggestedSubpath}`}
+                onClick={() => setLocation({ kind: "default_container" })}
+              />
+              <LocationOption
+                selected={location?.kind === "pick_local"}
+                icon={<FolderOpen size={14} />}
+                label={
+                  location?.kind === "pick_local"
+                    ? `已选：${location.rootName}`
+                    : "选择本地文件夹…"
+                }
+                hint="以该文件夹为项目根"
+                onClick={() => void handlePickLocalDir()}
+              />
+            </>
+          )}
+          <LocationOption
+            selected={location?.kind === "cloud"}
+            icon={<Cloud size={14} />}
+            label="云端空间"
+            hint="团队共享，不落本机"
+            onClick={() => setLocation({ kind: "cloud" })}
+          />
+        </div>
       </div>
 
       <DialogFooter>
@@ -126,7 +182,7 @@ function CreateProjectDialogBody({ onClose }: { onClose: () => void }) {
         <Button
           variant="primary"
           onClick={() => void handleSubmit()}
-          disabled={!name.trim() || createFolder.isPending}
+          disabled={!name.trim() || !locationReady || createFolder.isPending}
         >
           {createFolder.isPending ? (
             <>
@@ -139,5 +195,39 @@ function CreateProjectDialogBody({ onClose }: { onClose: () => void }) {
         </Button>
       </DialogFooter>
     </DialogContent>
+  );
+}
+
+function LocationOption({
+  selected,
+  icon,
+  label,
+  hint,
+  onClick,
+}: {
+  selected: boolean;
+  icon: React.ReactNode;
+  label: string;
+  hint: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-start gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+        selected
+          ? "border-primary bg-primary/5 text-foreground"
+          : "border-border text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground"
+      }`}
+    >
+      <span className="mt-0.5 shrink-0">{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-medium text-foreground">{label}</span>
+        <span className="block truncate text-xs text-muted-foreground">
+          {hint}
+        </span>
+      </span>
+    </button>
   );
 }

@@ -28,11 +28,11 @@ export type { PlanRevisionKind } from "@/types/events";
 
 export type RunStatus =
   | "pending"
-  | "ready"
   | "running"
   | "completed"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "skipped";
 
 export type ExecutionStatus =
   | "planning"
@@ -235,15 +235,16 @@ export interface RunEscalation {
 
 /** 交互式逐轮辩论决策卡 (opt-in, 辩论编排设计.md §逐轮交互): one round boundary the user is (was)
  * asked to steer — 继续辩 / 加角度 / 够了出结论 — instead of the judge auto-converging. Folded
- * desktop-live-only from `debate_round_decision_required` (→ `pending`) + its `debate_round_decision_
+ * desktop-live from `debate_round_decision_required` (→ `pending`) + its `debate_round_decision_
  * resolved` (→ `continued`/`concluded`/`timeout`), keyed by `id` (the decision_id the card POSTs to,
  * `POST …/interactions/{id}` kind=`debate_round`). `focus`/`summary` are this round's context;
  * `converged`/`rationale` are the judge's read (the card highlights it as the default); `decisionFocus`
  * is the 加角度 the user injected for the next round (`continued` only).
  *
- * Transport-only & ephemeral: STRIPPED from the conformance ProjectedTurn (like {@link
- * RunEscalation.id}) — the events aren't journaled, so on reload this is `[]` and the concluded
- * exchange lives in {@link Execution.debate}. Non-interactive debates carry none. */
+ * Events are DURABLE (journaled). On reload {@link Execution.debateDecisions} is intentionally
+ * emptied — pending cards rebuild via InteractionStore; concluded choices already live in
+ * {@link Execution.debate} / rounds. STRIPPED from the conformance ProjectedTurn. Non-interactive
+ * debates carry none. */
 export interface DebateRoundDecision {
   id: string;
   moderatorRunId: string;
@@ -341,6 +342,11 @@ export interface RunNode {
   revised: PlanRevisionKind | null;
   /** 回落换人：接手的原 run id；null = 普通委派。 */
   replacesRunId: string | null;
+  /**
+   * 同回合第几次 delegate 追加（1-based）。从 plan skeleton 投影而来；协作图用来区分
+   * 「先后追加的两批任务」与拓扑波次。协议 / ProjectedTurn 不承载此字段。
+   */
+  delegateBatch?: number;
   /** A `checkpoint_after` pause that fired *after* this run (plan_review, 结构化挂起
    * 2a); null for a run that never gated. Surfaced as a node pause badge so the
    * graph shows where the scheduler stopped for the user. */
@@ -418,8 +424,9 @@ export interface Execution {
    * 刷新后 hydrateFromJournal 重建；收场后全量叙事线亦在 {@link debate}。非辩论恒 `[]`。 */
   debateRounds: DebateNarrativeRound[];
   /** 交互式逐轮辩论决策卡（opt-in, §逐轮交互）：`debate_round_decision_*` 折叠累积。Desktop-
-   * local & transport-only —— STRIPPED from the conformance ProjectedTurn、重载恒 `[]`（事件不进
-   * journal）。仅 `debate(interactive=true)` 且有活跃用户的辩论非空；其余恒 `[]`。 */
+   * local；事件 DURABLE 入 journal，但重载时本列表恒 `[]`（待答态由 InteractionStore 重建，
+   * 已裁决体现在 {@link debate} / rounds）。STRIPPED from the conformance ProjectedTurn。
+   * 仅 `debate(interactive=true)` 且有活跃用户的辩论非空；其余恒 `[]`。 */
   debateDecisions: DebateRoundDecision[];
   /** 团队便签墙 (§2.2 通): the notes workers broadcast to their concurrent siblings this turn
    * (`team_note_posted`), in post order, deduped by noteId — folded from the frame stream by
@@ -466,6 +473,12 @@ export interface ExecutionPlan {
     round?: number;
     /** 回落换人：接手的原 worker run_id。 */
     replacesRunId?: string | null;
+    /**
+     * 同回合第几次 `run_plan` / delegate 追加（1-based）。呈现层专用：协议不携带批次元数据，
+     * 由 {@link planFromRunPlan} / {@link mergePlanInto} 在 ingest 时盖戳，供协作图画
+     * 「第 N 次委派」泳道。不进 ProjectedTurn。
+     */
+    delegateBatch?: number;
   }[];
 }
 

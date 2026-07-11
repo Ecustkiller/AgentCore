@@ -41,7 +41,10 @@ export function AskCommenceV1({ content }: { content: AskUserContent }) {
           </p>
         )}
 
-        <PlanDetails assumptions={content.assumptions} />
+        <PlanDetails
+          assumptions={content.assumptions}
+          disclosureKey="preview:ask-commence-v1"
+        />
 
         <div className="space-y-3 border-t border-border pt-2.5">
           {content.questions.map((q, i) => (

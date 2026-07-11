@@ -9,6 +9,7 @@ import {
   MessageSquarePlus,
   Palette,
   Shield,
+  SlidersHorizontal,
   UserCog,
 } from "lucide-react";
 import { Outlet } from "react-router-dom";
@@ -34,7 +35,10 @@ const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: "AI",
-    items: [{ icon: Brain, label: "AI 记忆", path: "/more/memory" }],
+    items: [
+      { icon: Brain, label: "AI 记忆", path: "/more/memory" },
+      { icon: SlidersHorizontal, label: "自主度", path: "/more/autonomy" },
+    ],
   },
   {
     label: "账户",

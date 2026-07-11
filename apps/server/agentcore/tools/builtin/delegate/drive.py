@@ -7,10 +7,9 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolEffect
-from agentcore.runtime.approvals import DelegationAuthorizationDecision
 from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.events import batch_metrics as batch_metrics_event
-from agentcore.runtime.events import run_progress, team_note_posted
+from agentcore.runtime.events import run_progress, run_skipped, team_note_posted
 from agentcore.runtime.runs.redirect_queue import RunRedirectRequest, take_redirects
 from agentcore.runtime.runs.types import RunSpec, RunState
 from agentcore.tools.builtin.delegate.accumulate import (
@@ -49,18 +48,54 @@ async def _team_preview_before_workers(
     seed_completed: dict[str, RunState] | None,
     call_idx: int,
 ) -> ToolResult | None:
-    """Hang for team_preview before any worker / coordinate fork. Return early result or None."""
+    """Hang for the kickoff card (计划+能力) before any worker / coordinate fork.
+
+    Returns an early ToolResult (SUSPEND / stop) or None to proceed. Under
+    AutonomyPolicy.full_auto with no plan-preview need, silently issues a
+    delegation grant and continues without pausing.
+    """
     if seed_completed is not None or complexity_hint == "light" or tool._depth != 0:
         return None
+    from agentcore.core.types import AutonomyPolicy
+    from agentcore.runtime.sandbox_approval import worker_gate_applies
     from agentcore.tools.builtin.delegate.preview import (
         await_team_preview,
-        should_preview,
+        needs_capability_auth,
+        should_kickoff,
+        should_preview_plan,
         skip_after_confirmed_ask,
     )
 
-    if not should_preview(plan, finalize=finalize) or skip_after_confirmed_ask(tool):
+    autonomy = getattr(tool, "_autonomy_policy", None) or AutonomyPolicy.FIRST_GRANT
+    local_gate = worker_gate_applies(tool._base_tool_context.backend)
+    if not should_kickoff(
+        plan, finalize=finalize, local_gate=local_gate, autonomy=autonomy
+    ):
+        # full_auto + local: auto-grant without a card when no plan preview.
+        if (
+            local_gate
+            and autonomy is AutonomyPolicy.FULL_AUTO
+            and tool._approval_gate is not None
+            and not should_preview_plan(plan, finalize=finalize)
+        ):
+            # Grant is applied later in drive once execution_id is known — mark intent.
+            tool._auto_grant_pending = True  # type: ignore[attr-defined]
         return None
-    preview_decision = await await_team_preview(tool, plan)
+    if skip_after_confirmed_ask(tool) and not needs_capability_auth(
+        local_gate=local_gate, autonomy=autonomy
+    ):
+        # Plan half skipped after confirmed ask; capability half may still need a card.
+        # If only plan would have shown, skip entirely (legacy dual-card avoidance).
+        if should_preview_plan(plan, finalize=finalize):
+            return None
+    show_capabilities = needs_capability_auth(local_gate=local_gate, autonomy=autonomy)
+    # full_auto with plan preview: still show plan, hide capability list, auto-grant on continue.
+    if autonomy is AutonomyPolicy.FULL_AUTO and should_preview_plan(plan, finalize=finalize):
+        show_capabilities = False
+        tool._auto_grant_pending = True  # type: ignore[attr-defined]
+    preview_decision = await await_team_preview(
+        tool, plan, show_capabilities=show_capabilities
+    )
     if tool._pending_pause:
         logger.info("delegate.team_preview_paused", call=call_idx, nodes=len(plan.nodes))
         return ToolResult(tool_call_id="", success=True, output="", effect=ToolEffect.SUSPEND)
@@ -191,8 +226,10 @@ async def drive(
                 execution_id=execution_id,
             )
 
+    from agentcore.runtime.sandbox_approval import worker_gate_applies
+
     worker_gate = (
-        tool._approval_gate if tool._base_tool_context.backend.location == "local" else None
+        tool._approval_gate if worker_gate_applies(tool._base_tool_context.backend) else None
     )
 
     executor = build_agent_executor(
@@ -496,27 +533,23 @@ async def drive(
         on_boundary = coordination_boundary_hook(session, on_boundary)
     batch_metrics: list[BatchMetrics] = []
 
+    # Kickoff grant: issued by resume (continue/adjust) or full_auto auto-grant.
+    # Hot-path ``request_delegation_authorization`` retired — capability auth lives
+    # on the durable开工卡 (team_preview) or is silent under full_auto.
     delegation_started = False
     if worker_gate is not None and seed_completed is None:
-        workers = [
-            {
-                "role": node.role or node.agent_name,
-                "task_preview": node.task or node.objective,
-            }
-            for node in plan.nodes
-        ]
-        auth_decision = await worker_gate.request_delegation_authorization(
-            execution_id=execution_id,
-            workers=workers,
-        )
-        if auth_decision is DelegationAuthorizationDecision.DENY:
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error="用户未授权本次委派，团队未启动。",
-            )
-        delegation_started = True
+        from agentcore.core.types import AutonomyPolicy
+
+        auto = bool(getattr(tool, "_auto_grant_pending", False))
+        already = worker_gate.has_delegation_grant(execution_id)
+        autonomy = getattr(tool, "_autonomy_policy", None) or AutonomyPolicy.FIRST_GRANT
+        if auto or already or autonomy is AutonomyPolicy.FULL_AUTO:
+            if not already:
+                worker_gate.grant_delegation(execution_id)
+            tool._auto_grant_pending = False  # type: ignore[attr-defined]
+            delegation_started = True
+        elif worker_gate.has_delegation_grant(execution_id):
+            delegation_started = True
 
     try:
         results = await WaveScheduler(tool._max_parallel or DEFAULT_MAX_PARALLEL).run(
@@ -526,6 +559,9 @@ async def drive(
             cancel_run_ids=_cancel_run_ids,
             on_progress=_progress,
             on_boundary=on_boundary,
+            on_skipped=lambda rid, aid, reason: tool._sink.emit(
+                run_skipped(rid, aid, reason=reason)
+            ),
             metrics_sink=batch_metrics,
         )
     finally:
@@ -571,6 +607,9 @@ async def drive(
             cancel_run_ids=_cancel_run_ids,
             on_progress=_progress,
             on_boundary=None,
+            on_skipped=lambda rid, aid, reason: tool._sink.emit(
+                run_skipped(rid, aid, reason=reason)
+            ),
         )
         results.update(more)
     results.update(_hot_revision_states)

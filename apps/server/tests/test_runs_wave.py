@@ -78,9 +78,13 @@ async def test_skip_cascades_to_dependents():
             return RunState(phase=RunPhase.FAILED, error="boom")
         return RunState(phase=RunPhase.COMPLETED, content="b")
 
-    res = await WaveScheduler().run(plan, ex)
+    skipped: list[tuple[str, str, str]] = []
+    res = await WaveScheduler().run(
+        plan, ex, on_skipped=lambda rid, aid, reason: skipped.append((rid, aid, reason))
+    )
     assert res["a"].phase is RunPhase.FAILED
     assert res["b"].phase is RunPhase.SKIPPED
+    assert skipped == [("b", "b", "cascade")]
 
 
 async def test_abort_stops_later_waves():
@@ -93,10 +97,14 @@ async def test_abort_stops_later_waves():
             return RunState(phase=RunPhase.FAILED, error="boom")
         return RunState(phase=RunPhase.COMPLETED, content="b")
 
-    res = await WaveScheduler().run(plan, ex)
+    skipped: list[tuple[str, str, str]] = []
+    res = await WaveScheduler().run(
+        plan, ex, on_skipped=lambda rid, aid, reason: skipped.append((rid, aid, reason))
+    )
     assert res["a"].phase is RunPhase.FAILED
     # The unrun tail materialises as SKIPPED (graceful abort), not absent.
     assert res["b"].phase is RunPhase.SKIPPED
+    assert skipped == [("b", "b", "abort")]
 
 
 async def test_degrade_lets_dependents_proceed():

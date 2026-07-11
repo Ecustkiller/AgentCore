@@ -93,6 +93,10 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     verdict: "ported",
     surface: "TeamView · 跑一半改方向 / 整轮停止",
   },
+  run_skipped: {
+    verdict: "ported",
+    surface: "TeamView · 未执行（级联跳过 / graceful abort）",
+  },
   run_progress: {
     verdict: "internal",
     reason: "进度由 run 状态派生（仅时间线计数标记），无独立面",
@@ -137,9 +141,8 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   // —— 团队便签墙 ——
   team_note_posted: { verdict: "ported", surface: "TeamView · 团队便签" },
   team_synthesis_preview: {
-    verdict: "internal",
-    reason:
-      "Transport-only CEO 协调进展摘要；桌面 StatusStrip 消费，手机无诊断面 (fold no-op)",
+    verdict: "ported",
+    surface: "TeamView · 协调进展预览（fold 对齐 StatusStrip）",
   },
 
   // —— 阻塞交互（统一 PauseCard / ResumeCard）——
@@ -325,8 +328,8 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     reason: "手机 composer 不带 @ 提及菜单 (niche)",
   },
   RetryBanner: {
-    verdict: "simplified",
-    reason: "手机走更强的实时重连续看 + reconnect 条代替失败重试",
+    verdict: "ported",
+    surface: "ChatPage · 错误条（去配置 / 重连）",
   },
   SourcePreview: {
     verdict: "simplified",
@@ -349,10 +352,6 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   DraftWorkspaceAssignPrompt: {
     verdict: "impossible",
     reason: "指派本地工作区，手机无本地",
-  },
-  ClientToolsPrompt: {
-    verdict: "impossible",
-    reason: "本地工作区快捷操作（打开文件夹/终端/跑 bash），手机无本地侧",
   },
   RunConfirmPrompt: {
     verdict: "impossible",
@@ -401,6 +400,10 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
     surface: "ChatPage · 会话列表（抽屉）",
   },
   MorePage: { verdict: "ported", surface: "MorePage（设置中心）" },
+  OnboardingPreviewPage: {
+    verdict: "simplified",
+    reason: "桌面 #/preview 离线 onboarding 场景页；手机无对等预览路由",
+  },
   LoginPage: { verdict: "ported", surface: "LoginPage" },
   FilesPage: { verdict: "ported", surface: "FilesPage / WorkspacesPage" },
   MessagesPage: { verdict: "ported", surface: "MessagesPage（IM）+ im/*" },
@@ -426,6 +429,10 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   "more/MemorySettings": {
     verdict: "ported",
     surface: "MemoryPage（手机独立记忆页）",
+  },
+  "more/AutonomySettings": {
+    verdict: "ported",
+    surface: "more/AutonomySettings（/more/autonomy）",
   },
 
   // —— 有意精简 / 保持不做（⑥ 精简陪伴定位 & 明确决策）——

@@ -1,78 +1,50 @@
+import { registerConversationUiClearer, uiGet, uiSet } from "@/lib/uiStorage";
 import { create } from "zustand";
 
-const DIAGNOSTIC_MODE_KEY = "agentcore:diagnostic-mode";
-const THEME_KEY = "agentcore:theme";
-const SIDECAR_KEY = "agentcore:sidecar-enabled";
-const CONVERSATION_VIEWS_KEY = "agentcore:conversation-views";
+const DIAGNOSTIC_MODE_KEY = "diagnostic-mode";
+const THEME_KEY = "theme";
+const SIDECAR_KEY = "sidecar-enabled";
+const CONVERSATION_VIEWS_KEY = "conversation-views";
 
 type Theme = "light" | "dark" | "system";
 
-// 开发者 / 诊断模式 (前端UX设计.md §十): off by default. Same localStorage wrapper
-// (private-mode / non-DOM test safe).
+// 开发者 / 诊断模式 (前端UX设计.md §十): off by default.
 function loadDiagnosticMode(): boolean {
-  try {
-    return localStorage.getItem(DIAGNOSTIC_MODE_KEY) === "true";
-  } catch {
-    return false;
-  }
+  return uiGet<boolean>(DIAGNOSTIC_MODE_KEY) === true;
 }
 
 function persistDiagnosticMode(v: boolean): void {
-  try {
-    localStorage.setItem(DIAGNOSTIC_MODE_KEY, String(v));
-  } catch {
-    /* unavailable — session-only */
-  }
+  uiSet(DIAGNOSTIC_MODE_KEY, v);
 }
 
 // 每对话的视图偏好（聊天 ⇄ 画布，前端UX设计.md §六）。只存「切到画布」的对话——聊天是
 // 默认、不落键，故这张表恒收敛在用户偏好画布的那批对话上（守原「不无限增长」约束）。
-// localStorage 包裹：私密模式 / 非 DOM 测试环境抛错时回退空表、退化为会话内存态。
 function loadConversationViews(): Record<string, "chat" | "canvas"> {
-  try {
-    const raw = localStorage.getItem(CONVERSATION_VIEWS_KEY);
-    if (!raw) return {};
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return {};
-    const out: Record<string, "chat" | "canvas"> = {};
-    for (const [id, mode] of Object.entries(
-      parsed as Record<string, unknown>,
-    )) {
-      if (mode === "canvas") out[id] = "canvas";
-    }
-    return out;
-  } catch {
-    return {};
+  const parsed = uiGet<Record<string, unknown>>(CONVERSATION_VIEWS_KEY);
+  if (!parsed || typeof parsed !== "object") return {};
+  const out: Record<string, "chat" | "canvas"> = {};
+  for (const [id, mode] of Object.entries(parsed)) {
+    if (mode === "canvas") out[id] = "canvas";
   }
+  return out;
 }
 
 function persistConversationViews(
   views: Record<string, "chat" | "canvas">,
 ): void {
-  try {
-    localStorage.setItem(CONVERSATION_VIEWS_KEY, JSON.stringify(views));
-  } catch {
-    /* unavailable — session-only */
-  }
+  if (Object.keys(views).length === 0) uiSet(CONVERSATION_VIEWS_KEY, undefined);
+  else uiSet(CONVERSATION_VIEWS_KEY, views);
 }
 
 // Theme is persisted so the choice survives a reload; it is *applied* to the DOM
 // by lib/theme.ts (the store only holds the value). Falls back to 跟随系统.
 function loadTheme(): Theme {
-  try {
-    const v = localStorage.getItem(THEME_KEY);
-    return v === "light" || v === "dark" || v === "system" ? v : "system";
-  } catch {
-    return "system";
-  }
+  const v = uiGet<string>(THEME_KEY);
+  return v === "light" || v === "dark" || v === "system" ? v : "system";
 }
 
 function persistTheme(v: Theme): void {
-  try {
-    localStorage.setItem(THEME_KEY, v);
-  } catch {
-    /* unavailable — session-only */
-  }
+  uiSet(THEME_KEY, v);
 }
 
 // 本地引擎（sidecar）开关——三态偏好（双模式工作区 §一.1 / 本地引擎毕业方案 · 阶段三）。
@@ -90,22 +62,14 @@ type SidecarPreference = "unset" | "on" | "off";
 const SIDECAR_DEFAULT_ENABLED = true;
 
 function loadSidecarPreference(): SidecarPreference {
-  try {
-    const v = localStorage.getItem(SIDECAR_KEY);
-    if (v === "on") return "on";
-    if (v === "off") return "off";
-    return "unset";
-  } catch {
-    return "unset";
-  }
+  const v = uiGet<string>(SIDECAR_KEY);
+  if (v === "on") return "on";
+  if (v === "off") return "off";
+  return "unset";
 }
 
 function persistSidecarPreference(p: "on" | "off"): void {
-  try {
-    localStorage.setItem(SIDECAR_KEY, p);
-  } catch {
-    /* unavailable — session-only */
-  }
+  uiSet(SIDECAR_KEY, p);
 }
 
 /** 有效开关值：未表态时取产品默认，否则取用户显式选择。 */
@@ -126,12 +90,12 @@ interface UIState {
   theme: Theme;
   /** 开发者 / 诊断模式 (前端UX设计.md §十). When true, low-level execution
    * diagnostics (run / trace ids 等) surface in run detail + the bubble's trace-id
-   * action — dev-only noise kept off the 大众 path. Persisted to
-   * `localStorage: agentcore:diagnostic-mode`. */
+   * action — dev-only noise kept off the 大众 path. Persisted via uiStorage
+   * (`agentcore:diagnostic-mode`). */
   diagnosticMode: boolean;
   /** 每对话的视图模式（聊天 ⇄ 画布双视图，前端UX设计.md §六）。默认聊天（`"chat"`），
    * 用户可在对话顶栏切到画布（`"canvas"`）。画布已毕业（无实验开关），入口恒显示。
-   * **持久化**到 `localStorage: agentcore:conversation-views`，但只落「切到画布」的对话（切回聊天
+   * **持久化**到 `agentcore:conversation-views`，但只落「切到画布」的对话（切回聊天
    * 即删键）→ 表恒收敛、不无限增长；未表态 / 草稿（无 id）恒为聊天。 */
   conversationViews: Record<string, "chat" | "canvas">;
   /** 本地引擎（sidecar）**有效**开关（双模式工作区 §一.1）：= `resolveSidecarEnabled(偏好)`，
@@ -142,7 +106,7 @@ interface UIState {
   sidecarEnabled: boolean;
   /** 本地引擎开关的**持久化偏好**（三态）：`unset` 跟随 `SIDECAR_DEFAULT_ENABLED`、`on`/`off` 为
    * 用户显式选择——为「毕业到默认开」铺路（翻默认时不误开显式关过的人）。持久化到
-   * `localStorage: agentcore:sidecar-enabled`；设置开关只关心 {@link sidecarEnabled}。 */
+   * `agentcore:sidecar-enabled`；设置开关只关心 {@link sidecarEnabled}。 */
   sidecarPreference: SidecarPreference;
 
   openSearch: (initialQuery?: string, opts?: { bookmarks?: boolean }) => void;
@@ -247,3 +211,12 @@ export const useUIStore = create<UIState>((set) => ({
     set({ sidecarEnabled, sidecarPreference });
   },
 }));
+
+registerConversationUiClearer((conversationId) => {
+  const views = useUIStore.getState().conversationViews;
+  if (!(conversationId in views)) return;
+  const conversationViews = { ...views };
+  delete conversationViews[conversationId];
+  persistConversationViews(conversationViews);
+  useUIStore.setState({ conversationViews });
+});

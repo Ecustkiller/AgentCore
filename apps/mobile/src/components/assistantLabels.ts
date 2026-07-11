@@ -30,6 +30,7 @@ export const CONTEXT_CHANNEL_LABEL: Record<string, string> = {
   interjection: "你的追问",
   revision: "修订要求",
   cross_exam: "质询",
+  closing: "结辩",
 };
 
 /** 中文工具名 — an unknown tool falls back to its raw backend name so a newly added tool still

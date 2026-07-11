@@ -12,7 +12,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { cfEnv, loadDeployEnv } from "./load-deploy-env.mjs";
 
 function parseArgs(argv) {
@@ -62,6 +62,11 @@ const result = spawnSync(
     branch,
   ],
   {
+    // Pages Functions live in `<project>/functions` next to the build output
+    // (e.g. apps/website/functions beside apps/website/out). Wrangler only
+    // picks them up when that folder exists in the process cwd — deploying
+    // from the monorepo root silently drops Functions → /api/* 404.
+    cwd: dirname(distPath),
     stdio: "inherit",
     env,
     shell: process.platform === "win32",

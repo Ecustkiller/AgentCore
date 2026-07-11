@@ -215,6 +215,17 @@
         "agent_id": "debate_fu_mod1_r2_pro",
         "blocks": [
           {
+            "channel": "task",
+            "heading": "第 2 轮任务",
+            "body": "## 第 2 轮 · 本轮焦点：灰度期的兜底与熔断机制\n⚠️ 用户在本轮追问（向你提出）：\n- 灰度期谁来兜底？\n对方上一轮的论点如下，请针对性回应。",
+            "chars": 75,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
+          {
             "channel": "round_focus",
             "heading": "第 2 轮 · 本轮焦点",
             "body": "灰度期的兜底与熔断机制",
@@ -306,6 +317,17 @@
         "run_id": "debate_fu_mod1_r2_con",
         "agent_id": "debate_fu_mod1_r2_con",
         "blocks": [
+          {
+            "channel": "task",
+            "heading": "第 2 轮任务",
+            "body": "## 第 2 轮 · 本轮焦点：灰度期的兜底与熔断机制\n对方上一轮的论点如下，请针对性回应。",
+            "chars": 46,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
           {
             "channel": "round_focus",
             "heading": "第 2 轮 · 本轮焦点",
@@ -399,6 +421,17 @@
         "agent_id": "debate_fu_mod1_r3_pro",
         "blocks": [
           {
+            "channel": "task",
+            "heading": "第 3 轮任务",
+            "body": "## 第 3 轮 · 本轮焦点：熔断阈值如何取值\n对方上一轮的论点如下，请针对性回应。",
+            "chars": 43,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
+          {
             "channel": "round_focus",
             "heading": "第 3 轮 · 本轮焦点",
             "body": "熔断阈值如何取值",
@@ -479,6 +512,17 @@
         "run_id": "debate_fu_mod1_r3_con",
         "agent_id": "debate_fu_mod1_r3_con",
         "blocks": [
+          {
+            "channel": "task",
+            "heading": "第 3 轮任务",
+            "body": "## 第 3 轮 · 本轮焦点：熔断阈值如何取值\n对方上一轮的论点如下，请针对性回应。",
+            "chars": 43,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
           {
             "channel": "round_focus",
             "heading": "第 3 轮 · 本轮焦点",
@@ -1060,6 +1104,17 @@
         "checkpoint": null,
         "receivedContext": [
           {
+            "channel": "task",
+            "heading": "第 2 轮任务",
+            "body": "## 第 2 轮 · 本轮焦点：灰度期的兜底与熔断机制\n⚠️ 用户在本轮追问（向你提出）：\n- 灰度期谁来兜底？\n对方上一轮的论点如下，请针对性回应。",
+            "chars": 75,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
+          {
             "channel": "round_focus",
             "heading": "第 2 轮 · 本轮焦点",
             "body": "灰度期的兜底与熔断机制",
@@ -1132,6 +1187,17 @@
         "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [
+          {
+            "channel": "task",
+            "heading": "第 2 轮任务",
+            "body": "## 第 2 轮 · 本轮焦点：灰度期的兜底与熔断机制\n对方上一轮的论点如下，请针对性回应。",
+            "chars": 46,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
           {
             "channel": "round_focus",
             "heading": "第 2 轮 · 本轮焦点",
@@ -1206,6 +1272,17 @@
         "checkpoint": null,
         "receivedContext": [
           {
+            "channel": "task",
+            "heading": "第 3 轮任务",
+            "body": "## 第 3 轮 · 本轮焦点：熔断阈值如何取值\n对方上一轮的论点如下，请针对性回应。",
+            "chars": 43,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
+          {
             "channel": "round_focus",
             "heading": "第 3 轮 · 本轮焦点",
             "body": "熔断阈值如何取值",
@@ -1267,6 +1344,17 @@
         "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [
+          {
+            "channel": "task",
+            "heading": "第 3 轮任务",
+            "body": "## 第 3 轮 · 本轮焦点：熔断阈值如何取值\n对方上一轮的论点如下，请针对性回应。",
+            "chars": 43,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
           {
             "channel": "round_focus",
             "heading": "第 3 轮 · 本轮焦点",

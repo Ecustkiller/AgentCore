@@ -60,13 +60,15 @@ export function useComposerSend({
     let conversationId = store.currentConversationId;
     let createdNew = false;
     if (!conversationId) {
-      const foldersStore = useFoldersStore.getState();
-      const targetFolderId = foldersStore.pendingNewChatFolderId;
-      const cloudEscape = foldersStore.pendingNewChatCloud;
-      const localContainerRootId =
-        targetFolderId || cloudEscape
-          ? null
-          : await ensureDefaultContainerRoot();
+      const intent = useFoldersStore.getState().draftWorkspaceIntent;
+      const targetFolderId =
+        intent.kind === "project" ? intent.folderId : null;
+      // Project chats inherit workspace — never write session-level local_*.
+      // Quick cloud → null container. Quick local → default container root.
+      let localContainerRootId: string | null = null;
+      if (intent.kind === "quick_local") {
+        localContainerRootId = await ensureDefaultContainerRoot();
+      }
       try {
         const conv = await api.post<{ id: string }>("/v1/conversations", {
           title: null,
@@ -85,8 +87,7 @@ export function useComposerSend({
         });
         useConversationStore.getState().switchConversation(conv.id);
         createdNew = true;
-        useFoldersStore.getState().setPendingNewChatFolder(null);
-        useFoldersStore.getState().setPendingNewChatCloud(false);
+        useFoldersStore.getState().resetDraftWorkspaceIntent();
       } catch (err) {
         notifyError(err, "新建对话失败");
         return;

@@ -1,3 +1,4 @@
+import { EXECUTION_RECORD_TOOLS } from "@/lib/executionRecords";
 import { useConversationStore } from "@/stores/conversation";
 import {
   frameFromEvent,
@@ -5,6 +6,7 @@ import {
   useExecutionStore,
 } from "@/stores/execution";
 import { applyInteractionWireEvent } from "@/stores/interactions";
+import { useToolOutputLiveStore } from "@/stores/toolOutputLive";
 import type {
   DebateResultPayload,
   DebateRoundPayload,
@@ -104,6 +106,7 @@ export function handleExecutionEvent(
     case "run_completed":
     case "run_failed":
     case "run_cancelled":
+    case "run_skipped":
     case "run_progress":
     // 调度埋点量化 (深层诊断指标): the WaveScheduler snapshot folds onto Execution.batches via
     // the same frame path (journaled → replays on reload); shown only in 诊断模式 (run detail).
@@ -142,8 +145,9 @@ export function handleExecutionEvent(
       recordFrameNow(event, conversationId);
       return true;
     }
-    // CEO 协调模式 Phase 1：多 worker 团队进展摘要。Transport-only — 不进 frame / journal，
-    // 只 stamp 到 execution runtime，供 StatusStrip 展示「进展中」预览。
+    // CEO 协调模式：多 worker 团队进展摘要。P2 DURABLE——入 journal；live 另 stamp 到
+    // execution runtime（同 key 保最新），hydrateFromJournal 取最后一条重建，供 StatusStrip
+    // 「团队进展」预览行。
     case "team_synthesis_preview": {
       const mid = execMessageId(conversationId);
       if (mid) {
@@ -159,9 +163,17 @@ export function handleExecutionEvent(
     case "tool_use_start": {
       recordFrameNow(event, conversationId);
       flushPendingContent(conversationId);
+      const startPayload = event.payload as ToolUseStartPayload;
+      if (EXECUTION_RECORD_TOOLS.has(startPayload.tool_name)) {
+        useToolOutputLiveStore.getState().seed({
+          toolCallId: startPayload.tool_call_id,
+          toolName: startPayload.tool_name,
+          conversationId,
+        });
+      }
       useConversationStore
         .getState()
-        .addProcessTool(event.payload as ToolUseStartPayload, conversationId);
+        .addProcessTool(startPayload, conversationId);
       return true;
     }
     case "tool_use_end": {
@@ -175,6 +187,10 @@ export function handleExecutionEvent(
             .getState()
             .clearWorkerToolPhase(endPayload.run_id, mid);
       }
+      // 结束态权威输出在 display；保留 live buffer 至会话清理，供竞态帧回落。
+      if (EXECUTION_RECORD_TOOLS.has(endPayload.tool_name)) {
+        useToolOutputLiveStore.getState().markEnded(endPayload.tool_call_id);
+      }
       useConversationStore
         .getState()
         .endProcessTool(endPayload, conversationId);
@@ -184,8 +200,14 @@ export function handleExecutionEvent(
     // (web_search → querying / queued / fallback). Transport-only liveliness — NOT journaled, so
     // no frame is recorded (a reloaded turn's tools are already resolved); it only stamps the live
     // running tool step's phase for the waiting UI.
+    // M2：code_execute / test_run 的 phase=output + {stream,chunk} 另写入 live-only buffer。
     case "tool_use_progress": {
       const progressPayload = event.payload as ToolUseProgressPayload;
+      if (progressPayload.phase === "output") {
+        useToolOutputLiveStore
+          .getState()
+          .appendProgress(progressPayload, conversationId);
+      }
       if (progressPayload.run_id) {
         const mid = execMessageId(conversationId);
         if (mid)

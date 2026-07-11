@@ -8,6 +8,7 @@ import {
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useFileAudit } from "@/hooks/useFileAudit";
 import type { FileArtifact, FileOp } from "@/lib/fileArtifacts";
+import { usePersistentDisclosure } from "@/stores/disclosure";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import {
   ArrowRight,
@@ -21,15 +22,14 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
-import { useState } from "react";
 
 /**
  * 「本回合产出文件」卡 —— 把一回合内成功的文件写/改/删/移聚合成一张回合级清单，挂在
  * 答复正文下方（前端UX设计.md §九「回合内文件呈现」）。点任一可预览行 → 经 {@link useSidePanelStore}
  * 的 `showFile` 把右侧工作区面板切到该文件预览，与文件树/详情共用同一套预览（不另起编辑器）。
  *
- * 删除态无文件可看 → 该行不可点（仅留痕）。卡只读已折好的运行时状态、不持久化，真相仍以
- * 工作区文件树为准；故重载后由各回合 journal 重建 process/execution 时清单自然复现。
+ * 删除态无文件可看 → 该行不可点（仅留痕）。卡只读已折好的运行时状态；折叠偏好按对话持久化。
+ * 工作区文件树仍是真相源；重载后由各回合 journal 重建 process/execution 时清单自然复现。
  */
 
 const OP_META: Record<
@@ -70,13 +70,18 @@ const OP_META: Record<
 function FileRow({
   artifact,
   conversationId,
+  turnKey,
   onOpen,
 }: {
   artifact: FileArtifact;
   conversationId: string | null;
+  turnKey?: string;
   onOpen: () => void;
 }) {
-  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditOpen, setAuditOpen] = usePersistentDisclosure(
+    turnKey ? `${turnKey}:file-audit:${artifact.path}` : null,
+    false,
+  );
   const auditState = useFileAudit(
     conversationId,
     artifact.path,
@@ -159,12 +164,18 @@ function FileRow({
 export function FileArtifactsCard({
   artifacts,
   conversationId = null,
+  turnKey,
 }: {
   artifacts: FileArtifact[];
   conversationId?: string | null;
+  /** 回合作用域（= messageId）：给了才把整卡/审计行开合持久化。 */
+  turnKey?: string;
 }) {
   // 文件不多（≤4）默认展开一目了然；多了先收起，避免长清单淹没答复。
-  const [expanded, setExpanded] = useState(artifacts.length <= 4);
+  const [expanded, setExpanded] = usePersistentDisclosure(
+    turnKey ? `${turnKey}:files` : null,
+    artifacts.length <= 4,
+  );
   const showFile = useSidePanelStore((s) => s.showFile);
 
   if (artifacts.length === 0) return null;
@@ -201,6 +212,7 @@ export function FileArtifactsCard({
               key={`${a.op}:${a.path}`}
               artifact={a}
               conversationId={conversationId}
+              turnKey={turnKey}
               onOpen={() => showFile(a.path, a.name)}
             />
           ))}

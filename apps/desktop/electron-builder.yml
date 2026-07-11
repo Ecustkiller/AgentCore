@@ -31,6 +31,15 @@ files:
   - "!out/cmdregion/**"
   - "!out/route-shots/**"
 
+# node-pty 原生 .node / conpty DLL 不可进 asar（运行时 dlopen 失败）；解包到 app.asar.unpacked。
+asarUnpack:
+  - "**/node_modules/node-pty/**"
+
+# node-pty 官方 prebuilds 走 N-API，Electron ABI 可直接加载；打包时勿强制 node-gyp
+# rebuild（本机缺 Spectre 缓解库时会失败）。asarUnpack 见上。
+npmRebuild: false
+nodeGypRebuild: false
+
 # 内置 Python 运行时（远期规划 §一.1「内置 Python 打包」方案 B）：由 scripts/bundle-sidecar.mjs
 # 预构建到 resources/sidecar/（独立 CPython + --target site-packages），随包拷入应用
 # resources/sidecar/。主进程 resolveSpawnConfig 在 app.isPackaged 时据此拉起 sidecar，

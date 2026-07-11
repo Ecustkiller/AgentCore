@@ -31,6 +31,9 @@ import { bearerPostJson, refreshAccessToken } from "./auth-client";
 const PHASE_READY = "ready";
 const PHASE_OPEN = "open";
 
+const CHANNEL_CAPTAIN_CONTENT = "captain:content";
+const CHANNEL_CAPTAIN_REASONING = "captain:reasoning";
+
 export function sidecarDataDir(): string {
   return join(app.getPath("userData"), "sidecar");
 }
@@ -56,6 +59,11 @@ interface OutboxRecord {
   runs?: unknown;
   /** seq(str) → {kind,payload,ts} — progressive journal; crash salvage has no runs. */
   journal?: Record<string, unknown>;
+  /**
+   * Mid-stream channel snapshots from StreamCheckpointer (D6).
+   * channel → { text, generation }; desktop restart salvage reads captain:* when content is empty.
+   */
+  stream_segments?: Record<string, { text?: string; generation?: number }>;
   input_tokens?: number;
   output_tokens?: number;
   reasoning_tokens?: number;
@@ -79,6 +87,37 @@ function journalEntriesFromMap(
   });
   if (keys.length === 0) return undefined;
   return keys.map((k) => journal[k]);
+}
+
+/**
+ * When hard-kill left content empty, promote captain stream snapshots into
+ * content / reasoning_content (incomplete salvage). Returns true when the
+ * record has any salvageable body after this fill.
+ */
+function fillFromCaptainStreamSegments(record: OutboxRecord): boolean {
+  const segs = record.stream_segments;
+  if (!segs || typeof segs !== "object") {
+    return !!(record.content || "").trim() || !!(record.reasoning_content || "").trim();
+  }
+  const contentSeg = segs[CHANNEL_CAPTAIN_CONTENT];
+  const contentText =
+    contentSeg && typeof contentSeg === "object"
+      ? String(contentSeg.text || "")
+      : "";
+  if (!(record.content || "").trim() && contentText.trim()) {
+    record.content = contentText;
+  }
+  const reasoningSeg = segs[CHANNEL_CAPTAIN_REASONING];
+  const reasoningText =
+    reasoningSeg && typeof reasoningSeg === "object"
+      ? String(reasoningSeg.text || "")
+      : "";
+  if (!(record.reasoning_content || "").trim() && reasoningText.trim()) {
+    record.reasoning_content = reasoningText;
+  }
+  return (
+    !!(record.content || "").trim() || !!(record.reasoning_content || "").trim()
+  );
 }
 
 function toRecordTurnBody(record: OutboxRecord): Record<string, unknown> {
@@ -181,21 +220,21 @@ async function drainOutboxDetailed(opts?: {
     const synced: OutboxSyncedPayload[] = [];
     const records = await readOutboxRecords();
     for (const record of records) {
-      // App-restart salvage only: open + has content → treat as ready incomplete.
-      // Regular polling must NOT promote open rows — the sidecar may still be writing.
-      if (
-        salvageOpen &&
-        record.phase === PHASE_OPEN &&
-        (record.content || "").trim()
-      ) {
-        record.phase = PHASE_READY;
-        // Align with CloudStore.salvage / OutboxStore.salvage: cancelled + incomplete.
-        record.finish_reason = record.finish_reason || "cancelled";
-        try {
-          await writeRecord(record);
-        } catch (err) {
-          console.error("[outbox] salvage promote failed", err);
-          continue;
+      // App-restart salvage only: open + salvageable body → treat as ready incomplete.
+      // Body may come from content, or (D6 hard-kill) captain stream_segments when
+      // content was never checkpointed. Regular polling must NOT promote open rows.
+      if (salvageOpen && record.phase === PHASE_OPEN) {
+        const salvageable = fillFromCaptainStreamSegments(record);
+        if (salvageable) {
+          record.phase = PHASE_READY;
+          // Align with CloudStore.salvage / OutboxStore.salvage: cancelled + incomplete.
+          record.finish_reason = record.finish_reason || "cancelled";
+          try {
+            await writeRecord(record);
+          } catch (err) {
+            console.error("[outbox] salvage promote failed", err);
+            continue;
+          }
         }
       }
       if (record.phase !== PHASE_READY) continue;

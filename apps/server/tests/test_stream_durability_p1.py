@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -380,18 +381,30 @@ async def test_event_sink_observes_deltas_into_checkpointer(monkeypatch):
     await sink.flush_stream_state()
 
 
-async def test_outbox_stream_methods_are_noop():
-    from pathlib import Path
-
+async def test_outbox_stream_segments_persist_without_overlay(tmp_path):
+    """D6: upsert writes stream_segments; list_* stays empty (no local overlay)."""
     from agentcore.conversation.store.outbox import OutboxStore
+    from agentcore.runtime.events.stream_checkpointer import CHANNEL_CAPTAIN_CONTENT
 
-    store = OutboxStore(Path("/tmp/outbox-test-unused"))
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="hi",
+        message_id="t1",
+        trace_id="i" * 32,
+    )
+    await store.begin_turn(conversation_id="c1", message_id="t1", trace_id="i" * 32)
     await store.upsert_stream_segments(
         turn_id="t1", segments=[(CHANNEL_CAPTAIN_CONTENT, "x", 0)]
     )
+    record = json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+    assert record["stream_segments"][CHANNEL_CAPTAIN_CONTENT]["text"] == "x"
     assert await store.list_stream_segments(turn_id="t1") == []
     assert await store.list_stream_segments_map(turn_ids=["t1"]) == {}
     await store.clear_stream_segments(turn_id="t1")
+    cleared = json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+    assert cleared["stream_segments"] == {}
 
 
 async def test_cloud_clear_after_pause_snapshot(monkeypatch):

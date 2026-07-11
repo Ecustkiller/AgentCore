@@ -40,7 +40,7 @@ async def test_durable_pause_persists_frame_on_finalize(monkeypatch):
 
     # Skip team_preview so this fixture reaches plan_review (wave-boundary durable pause).
     monkeypatch.setattr(
-        "agentcore.tools.builtin.delegate.preview.should_preview",
+        "agentcore.tools.builtin.delegate.preview.should_kickoff",
         lambda *a, **k: False,
     )
 
@@ -172,7 +172,7 @@ async def test_durable_resume_drives_tail_from_journal_not_frame(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.delegate.preview.should_preview",
+        "agentcore.tools.builtin.delegate.preview.should_kickoff",
         lambda *a, **k: False,
     )
 

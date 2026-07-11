@@ -1,11 +1,8 @@
 """Local-mode worker gating tests."""
 
-import asyncio
-
 from agentcore.runtime.events import EventSink, EventType
 from tests.delegate.conftest import (
     Provider,
-    auto_resolve_delegation,
     capture_gate,
     ctx,
     gate,
@@ -16,12 +13,15 @@ from tests.delegate.conftest import (
 
 
 async def test_workers_gated_in_local_mode(monkeypatch):
+    # Skip kickoff so the executor path runs (gate forwarding is what we assert).
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.delegate.preview.should_kickoff",
+        lambda *a, **k: False,
+    )
     captured = capture_gate(monkeypatch)
     g = gate()
     t = tool_with_gate(local_ctx(), g)
-    resolver = asyncio.create_task(auto_resolve_delegation(g.registry, "c"))
     await t.execute({"tasks": [{"role": "A", "task": "a"}]}, local_ctx())
-    await resolver
     assert captured["gate"] is g
 
 

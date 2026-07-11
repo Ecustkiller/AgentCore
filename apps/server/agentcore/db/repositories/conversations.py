@@ -240,7 +240,6 @@ class ConversationRepository:
         limit: int,
         updated_after: datetime | None = None,
         folder_id: str | None = None,
-        tag: str | None = None,
     ) -> Sequence[Conversation]:
         """Owner-scoped title substring search (全局搜索 Tier 1).
 
@@ -263,8 +262,6 @@ class ConversationRepository:
             stmt = stmt.where(Conversation.updated_at >= updated_after)
         if folder_id is not None:
             stmt = stmt.where(Conversation.folder_id == folder_id)
-        if tag is not None:
-            stmt = stmt.where(Conversation.tag == tag)
         result = await self._session.execute(
             stmt.order_by(Conversation.updated_at.desc()).limit(limit)
         )
@@ -278,24 +275,20 @@ class ConversationRepository:
         return await self._write_title(conv, title)
 
     async def update_title_unscoped(
-        self, conversation_id: str, title: str, *, tag: str | None = None
+        self, conversation_id: str, title: str
     ) -> Conversation | None:
         """Title write for trusted internal callers — post-turn auto-title minting — that
         hold an already-authorized ``conversation_id`` but no user (SEC-002)."""
         conv = await self.get_by_id_unscoped(conversation_id)
-        return await self._write_title(conv, title, tag=tag)
+        return await self._write_title(conv, title)
 
     async def _write_title(
         self,
         conv: Conversation | None,
         title: str,
-        *,
-        tag: str | None = None,
     ) -> Conversation | None:
         if conv:
             conv.title = title
-            if tag is not None:
-                conv.tag = tag
             await self._session.commit()
             await self._session.refresh(conv)
         return conv

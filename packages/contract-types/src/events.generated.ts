@@ -158,6 +158,7 @@ export interface DelegationAuthorizationResolvedPayload {
 /** The user's settlement of a checkpoint the CEO raised (ask_user). */
 export type CheckpointDecision =
   | "continue"
+  | "per_call"
   | "adjust"
   | "stop"
   | "timeout"
@@ -171,11 +172,15 @@ export interface AskAssumption {
 
 /** One selectable answer to a choice AskQuestion. `label` is both the displayed text
  * and the value composed back into the answer; `recommended` is advisory highlight only
- * (NOT a pre-selection). */
+ * (NOT a pre-selection). `action` marks an option that the desktop client fulfils with a
+ * native client action instead of a plain text answer (unknown/absent → plain option):
+ * `bind_local_folder` renders as a folder picker that binds the conversation workspace
+ * to the chosen local directory before resuming the turn. */
 export interface AskOption {
   label: string;
   detail?: string;
   recommended?: boolean;
+  action?: "bind_local_folder";
 }
 
 export interface AskQuestion {
@@ -258,10 +263,12 @@ export interface TeamPreviewWorker {
   debate: boolean;
 }
 
+/** 开工卡：计划预览 + 能力授权（两卡合一）。``tools`` may be empty under full_auto. */
 export interface TeamPreviewRequiredPayload {
   checkpoint_id: string;
   conversation_id: string;
   workers: TeamPreviewWorker[];
+  tools?: string[];
 }
 
 export interface TeamPreviewResolvedPayload {
@@ -527,6 +534,12 @@ export interface RunCancelledPayload {
   reason: "redirect" | "stop";
 }
 
+export interface RunSkippedPayload {
+  run_id: string;
+  agent_id: string;
+  reason: "cascade" | "abort";
+}
+
 export interface RunProgressPayload {
   completed: number;
   total: number;
@@ -750,8 +763,6 @@ export interface ErrorPayload {
 export interface TitleGeneratedPayload {
   conversation_id: string;
   title: string;
-  /** Conversation auto-tag minted with the title; present only when classified. */
-  tag?: string;
 }
 
 /** BYOK soft gate: preflight hint when probe says the user's model may lack tool
@@ -1052,6 +1063,7 @@ export type SSEPayloadMap = {
   run_completed: RunCompletedPayload;
   run_failed: RunFailedPayload;
   run_cancelled: RunCancelledPayload;
+  run_skipped: RunSkippedPayload;
   run_progress: RunProgressPayload;
   batch_metrics: BatchMetricsPayload;
   run_escalation: RunEscalationPayload;

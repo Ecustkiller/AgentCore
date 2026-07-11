@@ -195,6 +195,84 @@ describe("showRunDetail", () => {
     expect(panel().activeTabId).toBe(tabId("run-1"));
     expect(panel().tabs[0].title).toBe("研究员");
   });
+
+  it("reuses one tab for a revision chain and switches runId in place", () => {
+    exec().startExecution(plan, MID);
+    exec().recordFrames(
+      [
+        {
+          t: 1,
+          kind: "run_started",
+          agentId: "agent-1",
+          runId: "run-1",
+          parentRunId: null,
+          runKind: "agent",
+          revision: 0,
+        },
+        {
+          t: 2,
+          kind: "run_completed",
+          runId: "run-1",
+          agentId: "agent-1",
+          outputSummary: "done",
+          durationMs: 1,
+        },
+        {
+          t: 3,
+          kind: "run_started",
+          agentId: "run-1_rev1",
+          runId: "run-1_rev1",
+          parentRunId: "run-1",
+          runKind: "agent",
+          revision: 2,
+        },
+        {
+          t: 4,
+          kind: "run_started",
+          agentId: "run-1_rev2",
+          runId: "run-1_rev2",
+          parentRunId: "run-1",
+          runKind: "agent",
+          revision: 3,
+        },
+      ],
+      MID,
+    );
+
+    panel().showRunDetail(MID, "run-1", "研究员");
+    panel().showRunDetail(MID, "run-1_rev1", "研究员");
+    panel().showRunDetail(MID, "run-1_rev2", "研究员");
+
+    expect(panel().tabs).toHaveLength(1);
+    expect(panel().tabs[0].id).toBe(tabId("run-1"));
+    expect(panel().activeTabId).toBe(tabId("run-1"));
+    const tab = panel().tabs[0];
+    expect(tab.kind).toBe("run");
+    if (tab.kind === "run") {
+      expect(tab.runId).toBe("run-1_rev2");
+    }
+  });
+
+  it("keeps separate tabs for unrelated (non-revision) runs", () => {
+    const multi: ExecutionPlan = {
+      ...plan,
+      agents: [
+        ...plan.agents,
+        { id: "agent-2", role: "评论员", modelPreference: "fast" },
+      ],
+      runs: [
+        ...plan.runs,
+        { id: "run-2", agentId: "agent-2", task: "评论", dependsOn: [] },
+      ],
+    };
+    exec().startExecution(multi, MID);
+    panel().showRunDetail(MID, "run-1", "研究员");
+    panel().showRunDetail(MID, "run-2", "评论员");
+    expect(panel().tabs.map((t) => t.id)).toEqual([
+      tabId("run-1"),
+      tabId("run-2"),
+    ]);
+  });
 });
 
 describe("showContentDetail", () => {

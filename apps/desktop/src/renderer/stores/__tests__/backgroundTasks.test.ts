@@ -52,6 +52,7 @@ beforeEach(() => {
     mode: "local",
     scope: "conversation",
     rootId: "root-1",
+    source: "explicit",
   });
 });
 
@@ -187,6 +188,7 @@ describe("useBackgroundTasksSync 轮询", () => {
       mode: "cloud",
       scope: "conversation",
       rootId: null,
+      source: null,
     });
     renderHook(() => useBackgroundTasksSync("c-cloud"));
     await waitFor(() => {

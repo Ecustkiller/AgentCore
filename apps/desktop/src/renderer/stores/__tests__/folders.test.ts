@@ -1,27 +1,47 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useFoldersStore } from "../folders";
+import {
+  defaultDraftWorkspaceIntent,
+  useFoldersStore,
+} from "../folders";
 
 const store = () => useFoldersStore.getState();
 
 beforeEach(() => {
-  // Pin a known baseline so each test starts empty and deterministic. The folder
-  // list itself now lives in React Query (hooks/useFolders); the store only
-  // holds these one-shot UI markers.
   useFoldersStore.setState({
     pendingRenameId: null,
-    pendingNewChatFolderId: null,
+    draftWorkspaceIntent: defaultDraftWorkspaceIntent(),
   });
 });
 
 describe("pending markers", () => {
-  it("tracks pending rename and new-chat folder targets independently", () => {
+  it("tracks pending rename independently of draft intent", () => {
     store().setPendingRename("a");
-    store().setPendingNewChatFolder("b");
+    store().setDraftWorkspaceIntent({ kind: "project", folderId: "b" });
     expect(store().pendingRenameId).toBe("a");
-    expect(store().pendingNewChatFolderId).toBe("b");
+    expect(store().draftWorkspaceIntent).toEqual({
+      kind: "project",
+      folderId: "b",
+    });
 
     store().setPendingRename(null);
     expect(store().pendingRenameId).toBeNull();
-    expect(store().pendingNewChatFolderId).toBe("b");
+    expect(store().draftWorkspaceIntent).toEqual({
+      kind: "project",
+      folderId: "b",
+    });
+  });
+
+  it("switches among quick local / cloud / project intents", () => {
+    store().setDraftWorkspaceIntent({ kind: "quick_cloud" });
+    expect(store().draftWorkspaceIntent).toEqual({ kind: "quick_cloud" });
+
+    store().setDraftWorkspaceIntent({ kind: "project", folderId: "f1" });
+    expect(store().draftWorkspaceIntent).toEqual({
+      kind: "project",
+      folderId: "f1",
+    });
+
+    store().resetDraftWorkspaceIntent();
+    expect(store().draftWorkspaceIntent.kind).toMatch(/quick_/);
   });
 });

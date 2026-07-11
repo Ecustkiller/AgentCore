@@ -117,6 +117,7 @@ export function teamPreviewsFromEvents(
           depends_on: w.depends_on ?? [],
           debate: Boolean(w.debate),
         })),
+        tools: Array.isArray(p.tools) ? [...p.tools] : [],
         status: "pending",
         decision: null,
         note: "",

@@ -601,7 +601,7 @@ async def test_coordination_checkpoint_yields_without_durable_pause(monkeypatch)
     from tests.delegate.conftest import CKPT_DAG, tool_durable
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.delegate.preview.should_preview",
+        "agentcore.tools.builtin.delegate.preview.should_kickoff",
         lambda *a, **k: False,
     )
     clear_active_coordination()
@@ -649,7 +649,7 @@ async def test_classic_checkpoint_still_durable_when_not_coordinating(monkeypatc
     from tests.delegate.conftest import CKPT_DAG, tool_durable
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.delegate.preview.should_preview",
+        "agentcore.tools.builtin.delegate.preview.should_kickoff",
         lambda *a, **k: False,
     )
     clear_active_coordination()

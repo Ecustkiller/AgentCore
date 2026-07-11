@@ -1,6 +1,8 @@
+import { uiGet, uiSet } from "@/lib/uiStorage";
 import { create } from "zustand";
 import { useCommandPanelStore } from "./commandPanel";
 import { useConversationStore } from "./conversation";
+import { projectRuntime, revisionRootId, useExecutionStore } from "./execution";
 
 /**
  * Unified conversation side panel (前端UX设计.md §十) — the chat's single
@@ -10,9 +12,10 @@ import { useConversationStore } from "./conversation";
  *    files body, with 快照 / 交接 as on-demand overlays), always first;
  *  - in canvas mode only: a fixed, non-closable 「指挥台」 tab (boss decisions /
  *    救火 / 后台云端任务), always second — not a closable run/content detail;
- *  - a closable detail tab per drill: a run-detail tab for each inline-graph
- *    worker node, a content tab for an endpoint bubble (提问 / 最终回答), or a
- *    simple-turn Q&A tab for a canvas SimpleTurn light card (前端UX设计.md §五/§六).
+ *  - a closable detail tab per drill: one run-detail tab per revision chain
+ *    (or standalone run) from an inline-graph worker node, a content tab for an
+ *    endpoint bubble (提问 / 最终回答), or a simple-turn Q&A tab for a canvas
+ *    SimpleTurn light card (前端UX设计.md §五/§六).
  *
  * There is no separate "detail mode" — the detail tabs ARE the detail, so the panel
  * never shows an empty detail placeholder. `open` / `width` are persisted; the detail
@@ -27,8 +30,8 @@ const DEFAULT_WIDTH = 400;
 /** Cap on run-detail tabs: opening a 7th drops the oldest (工作区 is exempt). */
 const MAX_TABS = 6;
 
-const OPEN_KEY = "agentcore:side-panel-open";
-const WIDTH_KEY = "agentcore:side-panel-width";
+const OPEN_KEY = "side-panel-open";
+const WIDTH_KEY = "side-panel-width";
 
 export const SIDE_PANEL_MIN_WIDTH = MIN_WIDTH;
 export const SIDE_PANEL_MAX_WIDTH = MAX_WIDTH;
@@ -40,6 +43,9 @@ export const WORKSPACE_TAB_ID = "workspace";
 /** Reserved id of the fixed 「指挥台」 tab (canvas mode only; always second, never closes). */
 export const COMMAND_TAB_ID = "command";
 
+/** Reserved id of the fixed 「终端」 tab（有后台进程或本对话执行记录才出现；不绑画布）。 */
+export const TERMINAL_TAB_ID = "terminal";
+
 /** After the last closable detail tab closes → 工作区。 */
 function homeTabAfterDetailClose(): string {
   return WORKSPACE_TAB_ID;
@@ -48,34 +54,23 @@ function homeTabAfterDetailClose(): string {
 const clampWidth = (w: number): number =>
   Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(w)));
 
-// localStorage access is wrapped because it throws in private-mode / non-DOM
-// (test) contexts; a failed read falls back to the default, a failed write keeps
-// the value in memory for the session.
 function loadOpen(): boolean {
-  try {
-    return localStorage.getItem(OPEN_KEY) === "true";
-  } catch {
-    return false;
-  }
+  return uiGet<boolean>(OPEN_KEY) === true;
 }
 
 function loadWidth(): number {
-  try {
-    const raw = localStorage.getItem(WIDTH_KEY);
-    if (!raw) return DEFAULT_WIDTH;
-    const n = Number.parseInt(raw, 10);
-    return Number.isFinite(n) ? clampWidth(n) : DEFAULT_WIDTH;
-  } catch {
-    return DEFAULT_WIDTH;
-  }
+  const raw = uiGet<number>(WIDTH_KEY);
+  return typeof raw === "number" && Number.isFinite(raw)
+    ? clampWidth(raw)
+    : DEFAULT_WIDTH;
 }
 
-function persist(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    /* unavailable — session-only */
-  }
+function persistOpen(open: boolean): void {
+  uiSet(OPEN_KEY, open);
+}
+
+function persistWidth(width: number): void {
+  uiSet(WIDTH_KEY, width);
 }
 
 /** Record dismiss for whichever auto-surface context is currently active. */
@@ -90,20 +85,21 @@ function recordActiveContextDismiss(
 }
 
 /**
- * A run-detail tab — one per drilled-into run. Clicking an inline graph node
- * pins that run here (前端UX设计.md §十). Scoped by message so two turns that
- * each pin a run never collide in the strip (§9.3).
+ * A run-detail tab — one per revision chain (tab id = chain root) or standalone
+ * run. Clicking an inline graph node pins that run here (前端UX设计.md §十);
+ * switching rounds/chips updates `runId` in place without a new tab. Scoped by
+ * message so two turns that each pin a run never collide in the strip (§9.3).
  */
 export interface RunDetailTab {
   /** Discriminator: a worker run's structured detail (RunDetailBody). */
   kind: "run";
-  /** Dedup identity: `run-detail:<messageId>:<runId>`. */
+  /** Dedup identity: `run-detail:<messageId>:<chainRootOrRunId>`. */
   id: string;
   /** Label shown in the tab strip (the agent's role). */
   title: string;
   /** The assistant message whose execution slot holds this run. */
   messageId: string;
-  /** The run this tab drills into. */
+  /** The run currently shown in this tab (may be a revision of the chain root). */
   runId: string;
 }
 
@@ -158,6 +154,9 @@ export interface SimpleTurnDetailTab {
 /** A side-panel detail tab: a worker run, an endpoint bubble, or a simple-turn Q&A. */
 export type DetailTab = RunDetailTab | ContentDetailTab | SimpleTurnDetailTab;
 
+/** Tab-strip id for a run detail. Prefer the revision-chain root so all beats
+ * of the same speaker share one tab; pass the root (or the run itself when it
+ * has no `revisionOf`). */
 export const runDetailTabId = (messageId: string, runId: string): string =>
   `run-detail:${messageId}:${runId}`;
 
@@ -179,7 +178,7 @@ interface SidePanelState {
    * simple-turn tabs stay live without a plan). The 工作区 home tab is implicit
    * and is NOT part of this array. */
   tabs: DetailTab[];
-  /** Active tab: `WORKSPACE_TAB_ID` / `COMMAND_TAB_ID` for fixed tabs, else a detail
+  /** Active tab: `WORKSPACE_TAB_ID` / `COMMAND_TAB_ID` / `TERMINAL_TAB_ID` for fixed tabs, else a detail
    * tab id. Defaults to the workspace home so a manual open lands on the project files. */
   activeTabId: string;
   /**
@@ -211,7 +210,7 @@ interface SidePanelState {
   /** Close a detail tab; falls back to a neighbour tab, else the 工作区 home.
    * Never closes the panel (the home tab is always there). */
   closeTab: (id: string) => void;
-  /** Activate a tab (`WORKSPACE_TAB_ID` / `COMMAND_TAB_ID` or a detail tab id). */
+  /** Activate a tab (`WORKSPACE_TAB_ID` / `COMMAND_TAB_ID` / `TERMINAL_TAB_ID` or a detail tab id). */
   setActiveTab: (id: string) => void;
   /**
    * Pin a run (of a specific message's turn) and reveal it. The inline graph
@@ -299,7 +298,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     set((s) => ({ pendingBadge: s.pendingBadge + 1 })),
 
   openTab: (tab, opts) => {
-    persist(OPEN_KEY, "true");
+    persistOpen(true);
     set((s) => {
       const exists = s.tabs.some((t) => t.id === tab.id);
       // A re-open replaces the tab wholesale (same id ⇒ same kind, namespaced
@@ -335,9 +334,17 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   setActiveTab: (id) => set({ activeTabId: id }),
 
   showRunDetail: (messageId, runId, title) => {
+    // Same revision chain → one tab keyed by the chain root; `runId` tracks the
+    // beat currently shown (graph node / 轮次 chip). Non-revision runs keep a
+    // 1:1 tab. If the turn isn't projected yet, fall back to the clicked id.
+    const rt = useExecutionStore.getState().byId[messageId];
+    const projected = rt ? projectRuntime(rt) : null;
+    const tabKeyRunId = projected
+      ? revisionRootId(runId, projected.runs)
+      : runId;
     get().openTab({
       kind: "run",
-      id: runDetailTabId(messageId, runId),
+      id: runDetailTabId(messageId, tabKeyRunId),
       title: title ?? "详情",
       messageId,
       runId,
@@ -388,17 +395,17 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   },
 
   openPanel: () => {
-    persist(OPEN_KEY, "true");
+    persistOpen(true);
     set({ open: true, pendingBadge: 0 });
   },
 
   showWorkspace: () => {
-    persist(OPEN_KEY, "true");
+    persistOpen(true);
     set({ open: true, activeTabId: WORKSPACE_TAB_ID, pendingBadge: 0 });
   },
 
   showFile: (path, name) => {
-    persist(OPEN_KEY, "true");
+    persistOpen(true);
     set((s) => ({
       open: true,
       activeTabId: WORKSPACE_TAB_ID,
@@ -413,21 +420,21 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   clearFilePreview: () => set({ pendingFilePreview: null }),
 
   closePanel: () => {
-    persist(OPEN_KEY, "false");
+    persistOpen(false);
     recordActiveContextDismiss(get);
     set({ open: false });
   },
 
   togglePanel: () => {
     const next = !get().open;
-    persist(OPEN_KEY, String(next));
+    persistOpen(next);
     if (!next) recordActiveContextDismiss(get);
     set({ open: next, pendingBadge: next ? 0 : get().pendingBadge });
   },
 
   setWidth: (width) => {
     const clamped = clampWidth(width);
-    persist(WIDTH_KEY, String(clamped));
+    persistWidth(clamped);
     set({ width: clamped });
   },
 }));

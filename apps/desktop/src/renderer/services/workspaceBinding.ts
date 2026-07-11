@@ -20,17 +20,24 @@ type BindingScope = Schemas["WorkspaceBindingResponse"]["scope"];
 
 export interface WorkspaceBinding {
   mode: WorkspaceMode;
-  /** Where the binding lives — `folder` means unbinding affects sibling chats. */
+  /** Where the binding lives — `folder` means the conversation inherits the project. */
   scope: BindingScope;
   /** The bound desktop root id when local; null when cloud. */
   rootId: string | null;
+  /** How the effective bind was chosen (explicit project/bind vs container default). */
+  source: "explicit" | "container" | null;
 }
 
 /** Server binding payload (`/workspace/binding`), generated from OpenAPI. */
 type BackendBinding = Schemas["WorkspaceBindingResponse"];
 
 function toBinding(b: BackendBinding): WorkspaceBinding {
-  return { mode: b.mode, scope: b.scope, rootId: b.root_id ?? null };
+  return {
+    mode: b.mode,
+    scope: b.scope,
+    rootId: b.root_id ?? null,
+    source: b.source ?? null,
+  };
 }
 
 /** Resolve a conversation's current workspace mode (cloud vs local). */

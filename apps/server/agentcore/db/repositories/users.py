@@ -210,6 +210,13 @@ class UserRepository:
         )
         await self._session.commit()
 
+    async def set_autonomy_policy(self, user_id: str, policy: str) -> None:
+        """Set the user's capability-authorization posture (安全权限与治理 §三)."""
+        await self._session.execute(
+            update(User).where(User.user_id == user_id).values(autonomy_policy=policy)
+        )
+        await self._session.commit()
+
     async def set_billing_preference(self, user_id: str, billing_preference: str) -> User | None:
         """Set per-user billing mode (platform free quota vs BYOK)."""
         await self._session.execute(

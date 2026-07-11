@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from typing import Literal
 
 import httpx
 
@@ -42,12 +44,54 @@ from agentcore.llm.sub2api_probe import probe_sub2api_diagnosis_result
 
 logger = get_logger(__name__)
 
+
+def _request_attribution_headers() -> dict[str, str]:
+    """Merge billing attribution headers when talking to the cloud inference proxy.
+
+    No-op (empty) when log context has no run stamps — BYOK / direct upstream
+    calls ignore unknown headers; the cloud proxy uses them for cost_calls.
+    """
+    try:
+        from agentcore.billing.attribution import attribution_headers_from_context
+
+        return attribution_headers_from_context()
+    except Exception:  # noqa: BLE001 — never let billing headers break LLM I/O
+        return {}
+
 _MAX_RETRIES = 3
 _INITIAL_BACKOFF = 2.0
 _BACKOFF_MULTIPLIER = 2.0
 # Unary completions can run 150s+ for long-form writing; streaming read timeout is
 # per-chunk idle, so a generous ceiling avoids false positives on slow generations.
 _REQUEST_TIMEOUT = 300.0
+# Thinking models (e.g. DeepSeek V4) burn tokens on reasoning before any tool_calls;
+# keep a floor so the probe is not starved by a tiny completion budget.
+_PROBE_TOOLS_MAX_TOKENS = 256
+_PROBE_TOOLS_RETRY = "retry_without_required"
+# Body must mention tools/function-calling AND a rejection cue — avoids treating
+# generic 4xx (auth, quota, bad model id) as "does not support tools".
+_TOOLS_PARAM_MARKERS = re.compile(
+    r"\b(tools?|tool[_-]?choice|function[_-]?call(?:ing)?|functions)\b",
+    re.IGNORECASE,
+)
+_TOOLS_REJECT_MARKERS = re.compile(
+    r"(not\s+support|unsupported|does\s+not\s+support|invalid|unknown|"
+    r"not\s+allowed|not\s+available|unrecognized|no\s+longer\s+supported|"
+    r"不支持|无效|未知)",
+    re.IGNORECASE,
+)
+
+
+def _is_tools_unsupported_rejection(status: int, body: str) -> bool:
+    """True when a 4xx body clearly rejects tools / function calling parameters."""
+    if status < 400 or status >= 500 or status == 429:
+        return False
+    # Auth / payment / missing route are not evidence about tool support.
+    if status in (401, 402, 403, 404):
+        return False
+    if not body.strip():
+        return False
+    return bool(_TOOLS_PARAM_MARKERS.search(body) and _TOOLS_REJECT_MARKERS.search(body))
 
 
 def _is_deepseek_v4(model: str) -> bool:
@@ -218,7 +262,10 @@ class OpenAICompatibleProvider:
 
             try:
                 async with self._client.stream(
-                    "POST", "/chat/completions", json=payload
+                    "POST",
+                    "/chat/completions",
+                    json=payload,
+                    headers=_request_attribution_headers() or None,
                 ) as response:
                     body = await response.aread() if response.status_code >= 400 else None
                     self._raise_for_status(
@@ -610,7 +657,11 @@ class OpenAICompatibleProvider:
         backoff = _INITIAL_BACKOFF
         for attempt in range(_MAX_RETRIES):
             try:
-                response = await self._client.post("/chat/completions", json=payload)
+                response = await self._client.post(
+                    "/chat/completions",
+                    json=payload,
+                    headers=_request_attribution_headers() or None,
+                )
                 body = response.content if response.status_code >= 400 else None
                 self._raise_for_status(
                     response.status_code, backoff, response.headers, body=body, attempt=attempt
@@ -693,8 +744,28 @@ class OpenAICompatibleProvider:
             raise LLMError(f"{self._name} 服务端错误（{code}），请稍后再试")
         raise LLMError(f"{self._name} 连通测试失败（HTTP {code}）")
 
-    async def probe_tools(self, *, model: str) -> bool:
-        payload = {
+    async def probe_tools(self, *, model: str) -> bool | None:
+        """Probe whether the endpoint *accepts* tool calling (three-state).
+
+        - ``True``: strong evidence — response included ``tool_calls``
+        - ``False``: 4xx body clearly rejects tools / tools parameters
+        - ``None``: unknown — 2xx without tool_calls, timeout, network, 429,
+          auth errors, or any ambiguous failure (never pretend False)
+
+        Strategy: try ``tool_choice="required"`` first; on HTTP 400 (e.g. DeepSeek
+        V4 rejecting forced tool_choice) fall back to omitting tool_choice.
+        """
+        outcome = await self._probe_tools_once(model=model, tool_choice="required")
+        if outcome == _PROBE_TOOLS_RETRY:
+            outcome = await self._probe_tools_once(model=model, tool_choice=None)
+        if outcome == _PROBE_TOOLS_RETRY:
+            return None
+        return outcome
+
+    async def _probe_tools_once(
+        self, *, model: str, tool_choice: str | None
+    ) -> bool | None | Literal["retry_without_required"]:
+        payload: dict = {
             "model": model,
             "messages": [{"role": "user", "content": "Call the dummy tool."}],
             "tools": [
@@ -707,24 +778,38 @@ class OpenAICompatibleProvider:
                     },
                 }
             ],
-            "max_tokens": 16,
+            "max_tokens": _PROBE_TOOLS_MAX_TOKENS,
             "stream": False,
         }
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
         try:
             response = await self._client.post("/chat/completions", json=payload)
         except (httpx.TimeoutException, httpx.HTTPError):
-            return False
-        if response.status_code >= 300 and response.status_code != 429:
-            return False
+            return None
+        code = response.status_code
+        if code == 429 or code >= 500:
+            return None
+        if 200 <= code < 300:
+            try:
+                data = response.json()
+            except ValueError:
+                return None
+            choices = data.get("choices") or []
+            if not choices:
+                return None
+            message = choices[0].get("message") or {}
+            return True if message.get("tool_calls") else None
+        # Any 400 under forced tool_choice → retry without it (DeepSeek V4 etc.).
+        if code == 400 and tool_choice == "required":
+            return _PROBE_TOOLS_RETRY
         try:
-            data = response.json()
-        except ValueError:
+            body = response.text or ""
+        except Exception:  # noqa: BLE001 — body read is best-effort for classification
+            body = ""
+        if _is_tools_unsupported_rejection(code, body):
             return False
-        choices = data.get("choices") or []
-        if not choices:
-            return False
-        message = choices[0].get("message") or {}
-        return bool(message.get("tool_calls"))
+        return None
 
     async def close(self) -> None:
         await self._client.aclose()

@@ -6,18 +6,49 @@ root, so executed code sees the same files the file tools do.
 """
 
 import time
-from typing import Any
+from typing import Any, Literal
 
 from agentcore.core.errors import SandboxError
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.sandbox.protocol import ExecutionRequest
 
+_USAGE_TAIL = (
+    "\n用法要点：① 优先用 language=python 或 javascript 直接运行内联代码，"
+    "少用 bash 外壳——bash 在部分主机（如 Windows）可能不可用。② 代码的"
+    "工作目录就是工作区根目录，访问工作区文件请用相对路径（如 fib.py），"
+    "不要假设 /workspace 之类的绝对路径。③ 抓取网页或调用公开 HTTP API "
+    "优先用 read_url / web_search 工具，不要在代码里发网络请求。"
+)
+
+
+def code_execute_description(location: Literal["server", "local"] | None = None) -> str:
+    """Location-aware tool description (云端沙箱 vs 用户本机)."""
+    if location == "local":
+        where = (
+            "在【用户本机】工作区目录中执行代码（支持 Python、JavaScript、Bash），"
+            "可访问工作区内的文件。命令真实跑在用户机器上，除非确有必要，"
+            "避免破坏性或不可逆的操作。"
+        )
+    elif location == "server":
+        where = (
+            "在【服务端云端沙箱】工作区目录中执行代码（支持 Python、JavaScript、Bash），"
+            "可访问工作区内的文件。沙箱触达不了用户的电脑、本机应用与本机文件。"
+        )
+    else:
+        # Catalog / unknown backend: stay honest without the old two-way hedge.
+        where = (
+            "在当前对话工作区目录中执行代码（支持 Python、JavaScript、Bash），"
+            "可访问工作区内的文件。具体是云端沙箱还是用户本机，取决于本回合工作区绑定"
+            "（见 `<workspace_context>`）。"
+        )
+    return where + _USAGE_TAIL
+
 
 def _make_output_callback(context: ToolContext):
     """Forward sandbox output chunks via ``on_progress`` when a live sink is wired."""
     on_progress = context.on_progress
-    if not on_progress:
+    if on_progress is None:
         return None
 
     def callback(stream: str, chunk: str) -> None:
@@ -27,23 +58,16 @@ def _make_output_callback(context: ToolContext):
 
 
 class CodeExecuteTool:
-    """Execute code in a sandboxed environment."""
+    """Execute code in the workspace environment for this turn's backend."""
+
+    def __init__(self, *, location: Literal["server", "local"] | None = None) -> None:
+        self._location = location
 
     @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="code_execute",
-            description=(
-                "在工作区目录中执行代码（支持 Python、JavaScript、Bash），可访问"
-                "工作区内的文件。视工作区模式而定，它可能【直接运行在用户自己的"
-                "机器上】（本地模式），而非服务器沙箱；因此除非确有必要，避免执行"
-                "破坏性或不可逆的命令。\n"
-                "用法要点：① 优先用 language=python 或 javascript 直接运行内联代码，"
-                "少用 bash 外壳——bash 在部分主机（如 Windows）可能不可用。② 代码的"
-                "工作目录就是工作区根目录，访问工作区文件请用相对路径（如 fib.py），"
-                "不要假设 /workspace 之类的绝对路径。③ 抓取网页或调用公开 HTTP API "
-                "优先用 read_url / web_search 工具，不要在代码里发网络请求。"
-            ),
+            description=code_execute_description(self._location),
             parameters={
                 "type": "object",
                 "properties": {

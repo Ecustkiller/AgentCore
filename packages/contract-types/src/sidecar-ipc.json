@@ -31,7 +31,8 @@
       "note",
       "subpath",
       "selected",
-      "inference"
+      "inference",
+      "autonomyPolicy"
     ],
     "required": [
       "rootId",
@@ -50,7 +51,8 @@
       "decision",
       "note",
       "selected",
-      "inference"
+      "inference",
+      "autonomyPolicy"
     ],
     "required": [
       "messageId",

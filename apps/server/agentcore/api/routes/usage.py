@@ -83,7 +83,7 @@ async def get_message_cost(
         AgentCostLine(
             run_id=row.run_id,
             agent_id=row.agent_id,
-            role=row.role,
+            role=row.persona or row.role,
             model=row.model,
             usage=usage_breakdown(row.tokens or {}),
             cost=cost_breakdown(row.cost or {}),

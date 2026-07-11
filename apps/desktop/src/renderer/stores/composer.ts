@@ -1,4 +1,5 @@
 import type { PendingAttachment } from "@/components/chat/message-input/composerAttachments";
+import { registerConversationUiClearer, uiGet, uiSet } from "@/lib/uiStorage";
 import { useConversationStore } from "@/stores/conversation";
 import type { SetStateAction } from "react";
 import { create } from "zustand";
@@ -14,12 +15,10 @@ import { create } from "zustand";
  * subscribing composer is briefly unmounted. Entries self-delete once both text and
  * attachments are empty, so the map stays bounded to conversations with a live draft.
  *
- * Persistence: draft TEXT survives an app restart (`localStorage`, debounced +
+ * Persistence: draft TEXT survives an app restart (`uiStorage`, debounced +
  * flushed on unload, capped to the {@link PERSIST_LIMIT} most recent). Attachments
  * are session-only by design — their payloads are full file contents (up to 256KB
- * each, quota hazard) that go stale on disk anyway; re-attaching is cheap. Same
- * private-mode / non-DOM wrapper as the other persisted UI stores (a failed read
- * falls back to empty; a failed write keeps the draft in memory for the session).
+ * each, quota hazard) that go stale on disk anyway; re-attaching is cheap.
  *
  * 回填 channel: a non-blocking ask card ({@link NonBlockingAskCard}) or a 下一步推荐
  * chip ({@link FollowupChips}) drops its pick into the ACTIVE conversation's draft via
@@ -37,7 +36,7 @@ export interface ComposerDraft {
 
 const EMPTY_DRAFT: ComposerDraft = { value: "", attachments: [], updatedAt: 0 };
 
-const COMPOSER_DRAFTS_KEY = "agentcore:composer-drafts";
+const COMPOSER_DRAFTS_KEY = "composer-drafts";
 /** Persist at most this many drafts (most recently edited win). */
 const PERSIST_LIMIT = 30;
 const PERSIST_DEBOUNCE_MS = 300;
@@ -48,52 +47,35 @@ export function draftKeyFor(conversationId: string | null): string {
 }
 
 function loadDrafts(): Record<string, ComposerDraft> {
-  try {
-    const raw = localStorage.getItem(COMPOSER_DRAFTS_KEY);
-    if (!raw) return {};
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return {};
-    const out: Record<string, ComposerDraft> = {};
-    for (const [key, entry] of Object.entries(
-      parsed as Record<string, unknown>,
-    )) {
-      if (!entry || typeof entry !== "object") continue;
-      const { value, updatedAt } = entry as {
-        value?: unknown;
-        updatedAt?: unknown;
-      };
-      if (typeof value !== "string" || !value) continue;
-      out[key] = {
-        value,
-        attachments: [],
-        updatedAt: typeof updatedAt === "number" ? updatedAt : 0,
-      };
-    }
-    return out;
-  } catch {
-    return {};
+  const parsed = uiGet<Record<string, unknown>>(COMPOSER_DRAFTS_KEY);
+  if (!parsed || typeof parsed !== "object") return {};
+  const out: Record<string, ComposerDraft> = {};
+  for (const [key, entry] of Object.entries(parsed)) {
+    if (!entry || typeof entry !== "object") continue;
+    const { value, updatedAt } = entry as {
+      value?: unknown;
+      updatedAt?: unknown;
+    };
+    if (typeof value !== "string" || !value) continue;
+    out[key] = {
+      value,
+      attachments: [],
+      updatedAt: typeof updatedAt === "number" ? updatedAt : 0,
+    };
   }
+  return out;
 }
 
 function persistDrafts(drafts: Record<string, ComposerDraft>): void {
-  try {
-    const entries = Object.entries(drafts)
-      .filter(([, d]) => d.value)
-      .sort(([, a], [, b]) => b.updatedAt - a.updatedAt)
-      .slice(0, PERSIST_LIMIT)
-      .map(
-        ([key, d]) =>
-          [key, { value: d.value, updatedAt: d.updatedAt }] as const,
-      );
-    if (entries.length === 0) localStorage.removeItem(COMPOSER_DRAFTS_KEY);
-    else
-      localStorage.setItem(
-        COMPOSER_DRAFTS_KEY,
-        JSON.stringify(Object.fromEntries(entries)),
-      );
-  } catch {
-    /* unavailable (private mode / quota) — session-only */
-  }
+  const entries = Object.entries(drafts)
+    .filter(([, d]) => d.value)
+    .sort(([, a], [, b]) => b.updatedAt - a.updatedAt)
+    .slice(0, PERSIST_LIMIT)
+    .map(
+      ([key, d]) => [key, { value: d.value, updatedAt: d.updatedAt }] as const,
+    );
+  if (entries.length === 0) uiSet(COMPOSER_DRAFTS_KEY, undefined);
+  else uiSet(COMPOSER_DRAFTS_KEY, Object.fromEntries(entries));
 }
 
 function resolve<T>(action: SetStateAction<T>, prev: T): T {
@@ -192,3 +174,14 @@ useComposerDraftStore.subscribe((s, prev) => {
 if (typeof window !== "undefined") {
   window.addEventListener("beforeunload", flushPersist);
 }
+
+registerConversationUiClearer((conversationId) => {
+  const key = draftKeyFor(conversationId);
+  const drafts = useComposerDraftStore.getState().drafts;
+  if (!(key in drafts)) return;
+  const next = { ...drafts };
+  delete next[key];
+  useComposerDraftStore.setState({ drafts: next });
+  persistDrafts(next);
+  lastPersisted = next;
+});

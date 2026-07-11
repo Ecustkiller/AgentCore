@@ -1,11 +1,16 @@
-"""Unit tests for citation-marker bounds validation (out_of_range_markers).
+"""Unit tests for citation-marker bounds validation and exit reconciliation.
 
 Mirrors the desktop renderer's marker semantics (remarkCitations.ts): only
 ``1..count`` are real chips; anything else is a marker pointing at a source card
-that does not exist, which the server logs for observability.
+that does not exist. ``out_of_range_markers`` observes; ``reconcile_citations``
+strips dangling markers so the persisted body stays self-consistent.
 """
 
-from agentcore.runtime.citations import out_of_range_markers
+from agentcore.runtime.citations import (
+    out_of_range_markers,
+    reconcile_citations,
+    strip_out_of_range_markers,
+)
 
 
 def test_in_range_markers_are_clean():
@@ -55,3 +60,40 @@ def test_negative_like_bracket_is_not_a_marker():
 def test_empty_or_markerless_content():
     assert out_of_range_markers("", 5) == []
     assert out_of_range_markers("No markers at all.", 0) == []
+
+
+def test_strip_removes_dangling_keeps_valid():
+    assert strip_out_of_range_markers("See [1] and [3].", 2) == "See [1] and."
+    assert out_of_range_markers(strip_out_of_range_markers("See [1] and [3].", 2), 2) == []
+
+
+def test_strip_empty_citations_removes_all_prose_markers():
+    cleaned = strip_out_of_range_markers("Unsupported claim [1] and [2].", 0)
+    assert cleaned == "Unsupported claim and."
+    assert out_of_range_markers(cleaned, 0) == []
+
+
+def test_strip_preserves_code_and_links():
+    content = "Real [9].\n```python\nfoo = arr[9]\n```\nUse `arr[9]` and [8](http://x.com)."
+    cleaned = strip_out_of_range_markers(content, 0)
+    assert "arr[9]" in cleaned
+    assert "[8](http://x.com)" in cleaned
+    assert "Real." in cleaned
+    assert out_of_range_markers(cleaned, 0) == []
+
+
+def test_reconcile_strips_and_reports_stray():
+    citations = [{"url": "https://a.example"}, {"url": "https://b.example"}]
+    cleaned, out_citations, stray = reconcile_citations("Claim [1] then [5].", citations)
+    assert stray == [5]
+    assert cleaned == "Claim [1] then."
+    assert out_citations is citations  # list identity preserved (cards stay)
+    assert out_of_range_markers(cleaned, len(out_citations)) == []
+
+
+def test_reconcile_noop_when_clean():
+    citations = [{"url": "https://a.example"}]
+    cleaned, out_citations, stray = reconcile_citations("Only [1].", citations)
+    assert stray == []
+    assert cleaned == "Only [1]."
+    assert out_citations is citations

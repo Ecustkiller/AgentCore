@@ -1,14 +1,17 @@
-/** Fit-to-width viewport, resize observers, and zoom helpers for GraphView. */
+/** Fit-to-width viewport, resize observers, and zoom helpers for GraphView.
+ * Host contract (Provider / fit / overflow) → `graphHost.tsx`. */
 
 import { fitWidthBox } from "@/lib/elk-layout";
 import type { ReactFlowInstance } from "@xyflow/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { prefersReducedMotion } from "./constants";
+import type { GraphFitMode } from "./graphHost";
 
-export type GraphFitMode = "width" | "contain" | "view";
+export type { GraphFitMode };
 
 interface UseGraphViewportOptions {
   fitMode: GraphFitMode;
+  /** Content bbox from computeLayout (origin pinned near padding; no dead band). */
   bbox: { width: number; height: number } | null;
   layoutReady: boolean;
   onMeasure?: (m: { height: number; overflowing: boolean }) => void;
@@ -83,6 +86,8 @@ export function useGraphViewport({
     ) {
       return;
     }
+    // bbox is the placed-content footprint (computeLayout normalizes origin).
+    // Never assume a phantom band above y=0 — pin overflow to the content top.
     const fit = fitWidthBox(bbox.width, bbox.height, colWidth);
     const x = Math.max(0, (colWidth - fit.renderedWidth) / 2);
     const y =

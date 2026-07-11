@@ -1,6 +1,5 @@
-/** 论点标题 / 摘要截断上限（展示层）。 */
+/** 论点标题截断上限（展示层）。 */
 export const ARGUMENT_TITLE_MAX = 30;
-export const TEXT_SUMMARY_MAX = 80;
 
 export interface SpeechArgument {
   id: string;
@@ -98,36 +97,71 @@ function stripListMarker(line: string): string {
 }
 
 /**
+ * 明显的开场白 / 引导语：仅保守匹配。
+ * 拿不准一律返回 false（宁可漏过滤，不可误删真实论点）。
+ */
+function isOpeningPreamble(block: string): boolean {
+  const text = stripListMarker(block)
+    .replace(/^#{1,3}\s+/, "")
+    .trim();
+  if (!text) return false;
+
+  // 「以下是……的立论/论点/观点/论述」类框架句
+  if (
+    /^以下是[\s\S]{0,48}(?:的)?(?:立论|论点|观点|论述|发言)/.test(text)
+  ) {
+    return true;
+  }
+
+  // 「现在我已有足够信息来构建/提出论点」类过程句
+  if (
+    /^现在我(?:已|已经)?有足够(?:的)?信息来(?:构建|提出|阐述)(?:论点|立论|观点)?/.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+
+  // 「接下来我将从以下几个方面阐述」类目录预告（无实质主张）
+  if (
+    /^(?:接下来|下面)我(?:将|会|来)?从以下(?:几|数)?个?(?:方面|角度|论点|要点)/.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function blockToArgument(block: string, i: number): SpeechArgument {
+  if (/^#{1,3}\s+/.test(block)) {
+    const { title, body } = titleFromHeaderBlock(block);
+    return { id: `arg-${i}`, title, body };
+  }
+
+  const stripped = stripListMarker(block);
+  return {
+    id: `arg-${i}`,
+    title: argumentTitle(stripped),
+    body: stripped,
+  };
+}
+
+/**
  * 把辩手发言拆成论点列表（展示层纯函数，不改数据契约）。
  * 识别 markdown 标题、有序 / 无序列表、空行分段；单段则整段为一个论点。
+ * 首块若明显是开场白/引导语则剔除；过滤后为空则回退保留原块。
  */
 export function parseSpeechArguments(text: string): SpeechArgument[] {
   const blocks = splitBlocks(text);
   if (blocks.length === 0) return [];
 
-  return blocks.map((block, i) => {
-    if (/^#{1,3}\s+/.test(block)) {
-      const { title, body } = titleFromHeaderBlock(block);
-      return { id: `arg-${i}`, title, body };
-    }
+  const usable =
+    blocks.length > 0 && isOpeningPreamble(blocks[0])
+      ? blocks.slice(1)
+      : blocks;
+  const source = usable.length > 0 ? usable : blocks;
 
-    const stripped = stripListMarker(block);
-    return {
-      id: `arg-${i}`,
-      title: argumentTitle(stripped),
-      body: stripped,
-    };
-  });
-}
-
-/** 一方核心立场摘要：首个论点标题，否则全文摘要。 */
-export function sidePositionSummary(
-  output: string,
-  maxLen = TEXT_SUMMARY_MAX,
-): string {
-  const trimmed = output.trim();
-  if (!trimmed) return "";
-  const args = parseSpeechArguments(trimmed);
-  const raw = args.length > 0 && args[0].title ? args[0].title : trimmed;
-  return summarizeText(raw, maxLen);
+  return source.map((block, i) => blockToArgument(block, i));
 }

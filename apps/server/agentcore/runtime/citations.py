@@ -81,13 +81,19 @@ def annotate_tool_citations(
 
 # 客户端把正文里的 [n] 渲染成可点的来源角标，但只解析 1..来源数；越界的 [n]（模型
 # 引用了一个没有对应卡片的编号——多半是数错或想指上一轮的号）会被原样留成纯文本。
-# 服务端在 message_end 前用下面这支度量这种「引用了不存在来源」的发生率，正文不改。
+# 服务端在 message_end 前用下面这支度量这种「引用了不存在来源」的发生率；finish_guard
+# 回炉耗尽后，出口再用 :func:`reconcile_citations` 剥离悬空角标，保证落库正文自洽。
 _MARKER_RE = re.compile(r"\[(\d+)\]")
 # 扫描前先抠掉代码块 / 行内代码 / Markdown 链接：里头的 [5]、[label](url) 是数组
 # 下标、代码样例或链接锚，不是引用角标（客户端渲染也跳过它们），抠掉以免误报越界。
 _FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 _MD_LINK_RE = re.compile(r"\[[^\]]*\]\([^)]*\)")
+# 剥离悬空角标后收尾空白/标点空隙，避免「声称 [9]。」变成「声称 。」
+_STRIP_SPACE_PUNCT_RE = re.compile(r" +([.,;:!?。，；：！？、])")
+_STRIP_MULTI_SPACE_RE = re.compile(r"[ \t]{2,}")
+_PROTECT_SENTINEL = "\x00P{0}\x00"
+_PROTECT_RESTORE_RE = re.compile(r"\x00P(\d+)\x00")
 
 
 def out_of_range_markers(content: str, citation_count: int) -> list[int]:
@@ -95,8 +101,7 @@ def out_of_range_markers(content: str, citation_count: int) -> list[int]:
 
     合法编号是 ``1..citation_count``（= 来源卡数）。返回 ``n < 1`` 或 ``n > 上限``
     的那些——客户端只把 ``1..上限`` 渲染成可点角标、越界的留成纯文本，即模型引用了
-    一个没有卡片的编号。仅用于可观测度量，不改写正文（裸 ``[n]`` 未必是引用，且客户端
-    已优雅降级）。
+    一个没有卡片的编号。仅用于可观测度量；落库前由 :func:`reconcile_citations` 剥离。
 
     扫描前抠掉代码块 / 行内代码 / Markdown 链接，镜像客户端 remark 插件的跳过规则，
     避免把 ``arr[5]`` 这类下标误判成越界引用。裸正文里的 ``[5]`` 与客户端同样无法
@@ -111,3 +116,59 @@ def out_of_range_markers(content: str, citation_count: int) -> list[int]:
         n for n in (int(x) for x in _MARKER_RE.findall(scannable)) if n < 1 or n > citation_count
     }
     return sorted(bad)
+
+
+def _protect_non_citation_spans(content: str) -> tuple[str, list[str]]:
+    """Replace fenced/inline code and markdown links with sentinels (restore later)."""
+    placeholders: list[str] = []
+
+    def _protect(pattern: re.Pattern[str], text: str) -> str:
+        def repl(match: re.Match[str]) -> str:
+            placeholders.append(match.group(0))
+            return _PROTECT_SENTINEL.format(len(placeholders) - 1)
+
+        return pattern.sub(repl, text)
+
+    text = _protect(_FENCED_CODE_RE, content)
+    text = _protect(_INLINE_CODE_RE, text)
+    text = _protect(_MD_LINK_RE, text)
+    return text, placeholders
+
+
+def strip_out_of_range_markers(content: str, citation_count: int) -> str:
+    """从正文剥离悬空 ``[n]`` 角标（越界或来源卡为空），保持代码/链接不动、文句通顺。
+
+    合法 ``1..citation_count`` 角标保留；剥离后折叠多余空白与「词 + 标点」空隙。
+    """
+    if not content:
+        return content
+    text, placeholders = _protect_non_citation_spans(content)
+
+    def _strip_or_keep(match: re.Match[str]) -> str:
+        n = int(match.group(1))
+        if n < 1 or n > citation_count:
+            return ""
+        return match.group(0)
+
+    text = _MARKER_RE.sub(_strip_or_keep, text)
+    text = _STRIP_MULTI_SPACE_RE.sub(" ", text)
+    text = _STRIP_SPACE_PUNCT_RE.sub(r"\1", text)
+    if placeholders:
+        text = _PROTECT_RESTORE_RE.sub(lambda m: placeholders[int(m.group(1))], text)
+    return text
+
+
+def reconcile_citations(
+    content: str, citations: list[dict[str, Any]]
+) -> tuple[str, list[dict[str, Any]], list[int]]:
+    """Runtime 出口自洽：剥离悬空角标，使正文 ``[n]`` 均落在 ``1..len(citations)``。
+
+    返回 ``(cleaned_content, citations, stray_markers)``。``citations`` 列表本身不动
+    （来源卡仍可展示；仅去掉无卡可指的角标）。``stray_markers`` 供调用方记
+    ``citations.out_of_range`` 观测日志；无悬空时正文原样返回。
+    """
+    stray = out_of_range_markers(content, len(citations))
+    if not stray:
+        return content, citations, []
+    cleaned = strip_out_of_range_markers(content, len(citations))
+    return cleaned, citations, stray

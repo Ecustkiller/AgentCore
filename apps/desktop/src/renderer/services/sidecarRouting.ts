@@ -1,4 +1,5 @@
 import { getConversations } from "@/hooks/useConversations";
+import { getFolders } from "@/hooks/useFolders";
 import { hasLocalEngine } from "@/lib/capabilities";
 import { queryClient } from "@/lib/queryClient";
 import { workspaceKeys } from "@/lib/queryKeys";
@@ -70,34 +71,48 @@ export function isSidecarEnabled(): boolean {
 
 function scratchFromWorkspaceCache(
   conversationId: string,
+  folderId: string | null,
 ): { rootId: string | null; subpath: string } | null {
   const workspaces = queryClient.getQueryData<WorkspaceInfo[]>(
     workspaceKeys.list,
   );
-  const ws = workspaces?.find((w) => w.wsId === `conv:${conversationId}`);
+  if (!workspaces) return null;
+  if (folderId) {
+    const folderWs = workspaces.find((w) => w.wsId === `folder:${folderId}`);
+    if (folderWs) {
+      return { rootId: folderWs.rootId, subpath: folderWs.subpath ?? "" };
+    }
+  }
+  const ws = workspaces.find((w) => w.wsId === `conv:${conversationId}`);
   if (!ws) return null;
   return { rootId: ws.rootId, subpath: ws.subpath ?? "" };
 }
 
 /**
- * 解析一个会话「能用本地引擎」时的目标（容器根 id + scratch 子路径），**不看开关是否已开**——
- * 纯看会话有没有绑定一个本机确实存在的本地根。两处复用：① {@link resolveSidecarRoot} 在
- * 开关开时据此寻址；② {@link canConversationUseSidecar} 作为「该对话能否走本地引擎」的公共
- * 查询（与开关状态正交，供 UI 状态展示 / 启动探活等复用）。
+ * 解析会话的本地工作区目标（容器根 + scratch / 项目子路径），与 sidecar 寻址同构。
  *
- * 从 conversation scratch 字段（经 workspace rail 缓存或 `localContainerRootId` 意向）解析，
- * 再核对该根**确在本机**（否则属 §八「路径不存在」降级，交回云链路处理）。
+ * 项目会话：继承 Folder 的 `local_root_id` + `local_subpath`。
+ * 裸聊：workspace rail 缓存或 `localContainerRootId` 意向。
+ * 根不在本机 → null（§八 降级走云）。
  */
-/** 解析会话的本地工作区目标（容器根 + scratch 子路径），与 sidecar 寻址同构。
- * 供文件面板等读路径与 sidecar 写路径对齐——workspace list 未列出时仍可用
- * `localContainerRootId` 回落到本机 IPC。 */
 export async function resolveConversationLocalTarget(
   conversationId: string,
 ): Promise<SidecarTarget | null> {
   const conv = getConversations().find((c) => c.id === conversationId) ?? null;
   if (!conv) return null;
 
-  const cached = scratchFromWorkspaceCache(conversationId);
+  if (conv.folderId) {
+    const folder = getFolders().find((f) => f.id === conv.folderId);
+    if (!folder || folder.mode !== "local" || !folder.localRootId) return null;
+    const roots = await window.fsApi.listRoots();
+    if (!roots.some((r) => r.id === folder.localRootId)) return null;
+    return {
+      rootId: folder.localRootId,
+      subpath: folder.localSubpath ?? "",
+    };
+  }
+
+  const cached = scratchFromWorkspaceCache(conversationId, null);
   const rootId = cached?.rootId ?? conv.localContainerRootId ?? null;
   const subpath = cached?.subpath ?? "";
   if (!rootId) return null;

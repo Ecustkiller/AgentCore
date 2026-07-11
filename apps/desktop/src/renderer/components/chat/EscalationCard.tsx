@@ -148,6 +148,7 @@ function PendingEscalation({
                 answer={ans}
                 tone={tone}
                 disabled={busy}
+                disclosureKey={escalation.id}
               />
             )}
             <AskNoteField

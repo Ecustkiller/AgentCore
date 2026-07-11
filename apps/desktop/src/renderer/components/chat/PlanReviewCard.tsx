@@ -10,9 +10,9 @@ import { Ban, Check, Clock, GitBranch, OctagonX, Pencil } from "lucide-react";
  *
  * 挂起即收口 (②, Phase 3): plan_review never parks live inline anymore — the scheduler
  * finalizes the turn at the boundary (`SUSPEND → PAUSED`), so the actionable surface is the
- * durable resume card (ResumePrompt). Inline, this renders only as a passive record: a
- * pending review on a finished/reloaded turn is a dormant record; a resolved one shows its
- * settled state (继续 ran the gated downstream / 调整 steered it / 停止 ended the run).
+ * durable resume card (ResumePrompt). Inline pending is a passive「等待确认」record
+ * (same posture as TeamPreviewCard — does not imply the turn is over); a resolved one shows
+ * its settled state (继续 ran the gated downstream / 调整 steered it / 停止 ended the run).
  */
 export function PlanReviewCard({ review }: { review: PlanReviewDisplay }) {
   if (review.status === "resolved") {
@@ -43,8 +43,7 @@ function ReviewedSteps({ review }: { review: PlanReviewDisplay }) {
   );
 }
 
-/** A pending review on a turn that is no longer live (reloaded, or the turn ended
- * without an answer): shown as a record, not actionable. */
+/** Inline pending plan_review: passive「等待确认」record; ResumePrompt is actionable. */
 function DormantPlanReview({ review }: { review: PlanReviewDisplay }) {
   return (
     <DecisionCard tone="neutral">
@@ -53,9 +52,7 @@ function DormantPlanReview({ review }: { review: PlanReviewDisplay }) {
           <GitBranch size={16} />
         </DecisionCardIcon>
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium text-muted-foreground">
-            曾在此暂停过目（本回合已结束）
-          </p>
+          <p className="text-xs font-medium text-muted-foreground">等待确认</p>
           <ReviewedSteps review={review} />
         </div>
       </div>
@@ -67,6 +64,7 @@ function DormantPlanReview({ review }: { review: PlanReviewDisplay }) {
 function ResolvedPlanReview({ review }: { review: PlanReviewDisplay }) {
   const meta = {
     continue: { icon: <Check size={14} />, label: "已继续 · 放行下游" },
+    per_call: { icon: <Check size={14} />, label: "已继续 · 放行下游" },
     adjust: {
       icon: <Pencil size={14} />,
       label: "已调整 · 指示已注入下游并继续",

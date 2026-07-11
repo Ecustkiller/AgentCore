@@ -19,7 +19,7 @@ from agentcore.conversation.store.merge import (
     MESSAGE_STATUS_INCOMPLETE,
     MESSAGE_STATUS_RUNNING,
     merge_usage_status,
-    pick_monotonic_content,
+    pick_merged_content,
 )
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.logging import get_logger
@@ -412,6 +412,16 @@ class CloudStore:
                         message_id=result.get("message_id"),
                         error=str(e),
                     )
+                    from agentcore.billing.cost_ledger_queue import get_cost_ledger_queue
+
+                    get_cost_ledger_queue().enqueue_runs(
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        message_id=result.get("message_id"),
+                        runs=list(cost_runs),
+                        trace_id=trace_id,
+                        source="turn",
+                    )
                 else:
                     # P2 DERIVED: stamp turn total onto messages.cost (footer reload).
                     # Best-effort sibling of the ledger write — failure must not undo ledger.
@@ -500,13 +510,12 @@ class CloudStore:
                     if minted.title:
                         async with async_session_factory() as session:
                             await ConversationRepository(session).update_title_unscoped(
-                                conversation_id, minted.title, tag=minted.tag
+                                conversation_id, minted.title
                             )
                         sink.emit(
                             title_generated(
                                 minted.title,
                                 conversation_id=conversation_id,
-                                tag=minted.tag,
                             )
                         )
                 if wants_followups:
@@ -677,9 +686,10 @@ class CloudStore:
                 # Clear stale pause flag once a non-paused finalize lands.
                 if not is_paused:
                     merged_usage.pop("paused", None)
-                content = pick_monotonic_content(
+                content = pick_merged_content(
                     existing.content if existing else None,
                     content_to_write,
+                    incoming_status=terminal_status,
                 )
                 assistant_msg = await MessageRepository(session).upsert_assistant(
                     conversation_id=conversation_id,
@@ -734,7 +744,6 @@ class CloudStore:
             existing_title = conv.title if conv else None
 
         title: str | None = existing_title
-        tag: str | None = None
         minted_followups: list[str] | None = None
         wants_followups = (
             finish_value == FinishReason.END_TURN.value
@@ -753,11 +762,10 @@ class CloudStore:
                         model=resolve_user_model(llm_credentials),
                     )
                     title = minted.title
-                    tag = minted.tag
                     if title:
                         async with async_session_factory() as session:
                             await ConversationRepository(session).update_title_unscoped(
-                                conversation_id, title, tag=tag
+                                conversation_id, title
                             )
                 if wants_followups:
                     followups = await mint_followups(

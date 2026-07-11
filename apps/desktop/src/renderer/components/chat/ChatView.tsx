@@ -1,3 +1,4 @@
+import { DraftEmptyState } from "@/components/onboarding/DraftEmptyState";
 import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useChatScroll } from "@/lib/useChatScroll";
@@ -17,7 +18,6 @@ import {
 } from "@/stores/conversation";
 import { ArrowDown, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { ClientToolsPrompt } from "./ClientToolsPrompt";
 import { ConversationDecisionPrompts } from "./ConversationDecisionPrompts";
 import { ConversationOutline } from "./ConversationOutline";
 import { FindBar } from "./FindBar";
@@ -138,11 +138,7 @@ export function ChatView() {
             </div>
           ) : (
             <div className="flex h-full items-center justify-center py-10">
-              <div className="text-center">
-                <p className="text-2xl font-medium text-foreground">
-                  今天想解决什么问题？
-                </p>
-              </div>
+              <DraftEmptyState />
             </div>
           )}
         </div>
@@ -165,7 +161,6 @@ export function ChatView() {
         <ConversationDecisionPrompts />
         <RetryBanner />
         <FollowupChips followups={followups} />
-        <ClientToolsPrompt />
         <StreamingIndicator />
         <MessageInput />
       </div>

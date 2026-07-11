@@ -46,8 +46,8 @@ export async function resolveWritable(
     }
   }
   const realExisting = await realInside(root, existing);
-  if (!realExisting) return null;
-  return tail.length > 0 ? join(realExisting, ...tail) : realExisting;
+  if (!realExisting.ok) return null;
+  return tail.length > 0 ? join(realExisting.path, ...tail) : realExisting.path;
 }
 
 export async function opReadBytes(
@@ -70,10 +70,14 @@ export async function opReadBytes(
     return opErr("WorkspaceIOError", "文件过大，无法读取");
   }
   const real = await realInside(root, abs);
-  if (!real) return opErr("OutsideWorkspace", relPath);
+  if (!real.ok) {
+    return real.code === "out_of_root"
+      ? opErr("OutsideWorkspace", relPath)
+      : opErr("PathNotFound", relPath);
+  }
   try {
     // JSON 无字节类型：以 base64 回填，服务端 LocalWorkspace.read_bytes 解码还原。
-    return opOk((await fs.readFile(real)).toString("base64"));
+    return opOk((await fs.readFile(real.path)).toString("base64"));
   } catch (e) {
     return opErr("WorkspaceIOError", toReason(e));
   }
@@ -182,9 +186,13 @@ export async function opDelete(
     return opErr("WorkspaceIOError", toReason(e));
   }
   const real = await realInside(root, abs);
-  if (!real) return opErr("OutsideWorkspace", relPath);
+  if (!real.ok) {
+    return real.code === "out_of_root"
+      ? opErr("OutsideWorkspace", relPath)
+      : opErr("PathNotFound", relPath);
+  }
   try {
-    await fs.rm(real, { recursive: true, force: false });
+    await fs.rm(real.path, { recursive: true, force: false });
   } catch (e) {
     return opErr("WorkspaceIOError", toReason(e));
   }
@@ -208,7 +216,11 @@ export async function opMove(
     return opErr("WorkspaceIOError", toReason(e));
   }
   const srcReal = await realInside(root, srcAbs);
-  if (!srcReal) return opErr("OutsideWorkspace", src);
+  if (!srcReal.ok) {
+    return srcReal.code === "out_of_root"
+      ? opErr("OutsideWorkspace", src)
+      : opErr("PathNotFound", src);
+  }
 
   const dstTarget = await resolveWritable(root, dst);
   if (!dstTarget) return opErr("OutsideWorkspace", dst);
@@ -222,7 +234,7 @@ export async function opMove(
   if (dstExists) return opErr("AlreadyExists", dst);
   try {
     await fs.mkdir(dirname(dstTarget), { recursive: true });
-    await fs.rename(srcReal, dstTarget);
+    await fs.rename(srcReal.path, dstTarget);
   } catch (e) {
     return opErr("WorkspaceIOError", toReason(e));
   }
@@ -247,10 +259,14 @@ export async function opReplace(
     return opErr("WorkspaceIOError", toReason(e));
   }
   const real = await realInside(root, abs);
-  if (!real) return opErr("OutsideWorkspace", relPath);
+  if (!real.ok) {
+    return real.code === "out_of_root"
+      ? opErr("OutsideWorkspace", relPath)
+      : opErr("PathNotFound", relPath);
+  }
   let st: import("node:fs").Stats;
   try {
-    st = await fs.stat(real);
+    st = await fs.stat(real.path);
   } catch (e) {
     return opErr("WorkspaceIOError", toReason(e));
   }
@@ -258,7 +274,7 @@ export async function opReplace(
 
   let content: string;
   try {
-    const buf = await fs.readFile(real);
+    const buf = await fs.readFile(real.path);
     // fatal 解码：非法 UTF-8 抛 TypeError → NotUTF8（对齐服务端 read_bytes().decode）。
     content = new TextDecoder("utf-8", { fatal: true }).decode(buf);
   } catch (e) {
@@ -284,7 +300,7 @@ export async function opReplace(
     firstLine = content.slice(0, idx).split("\n").length; // = count("\n") + 1
   }
   try {
-    await atomicWrite(real, Buffer.from(newContent, "utf-8"));
+    await atomicWrite(real.path, Buffer.from(newContent, "utf-8"));
   } catch (e) {
     return opErr("WorkspaceIOError", toReason(e));
   }

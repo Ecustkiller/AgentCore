@@ -108,7 +108,7 @@ async def _resolve_owned_workspace(
     conv_repo: ConversationRepository,
     folder_repo: FolderRepository,
 ) -> _WsTarget:
-    """Resolve a ws id to an owned conversation scratch workspace, or 404."""
+    """Resolve a ws id to an owned project or conversation scratch, or 404."""
     try:
         parsed = parse_workspace_id(ws_id)
     except ValueError as e:
@@ -118,6 +118,20 @@ async def _resolve_owned_workspace(
         conv = await conv_repo.get_by_id(parsed.ident, user_id=user_id)
         if not conv:
             raise NotFoundError("工作区不存在")
+        # Project chats address via folder:<id>; a bare conv: id that somehow
+        # carries folder_id still resolves to the conversation row for alias paths.
+        if conv.folder_id:
+            folder = await folder_repo.get_by_id(conv.folder_id, user_id=user_id)
+            if not folder:
+                raise NotFoundError("工作区不存在")
+            return _WsTarget(
+                ws_id=f"folder:{folder.id}",
+                folder_id=folder.id,
+                conversation_id=conv.id,
+                name=folder.name,
+                location="local" if folder.local_root_id else "cloud",
+                root_id=folder.local_root_id,
+            )
         return _WsTarget(
             ws_id=ws_id,
             folder_id=None,
@@ -127,8 +141,17 @@ async def _resolve_owned_workspace(
             root_id=conv.local_root_id,
         )
 
-    # Phase 1 (Folder 重构): ``folder:<id>`` is reserved; only conv scratch is addressable.
-    raise NotFoundError("工作区不存在")
+    folder = await folder_repo.get_by_id(parsed.ident, user_id=user_id)
+    if not folder:
+        raise NotFoundError("工作区不存在")
+    return _WsTarget(
+        ws_id=ws_id,
+        folder_id=folder.id,
+        conversation_id="",
+        name=folder.name,
+        location="local" if folder.local_root_id else "cloud",
+        root_id=folder.local_root_id,
+    )
 
 
 def _require_cloud(target: _WsTarget) -> None:
@@ -154,11 +177,36 @@ def _storage_key(user_id: str, target: _WsTarget) -> str:
 async def list_workspaces(
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
-    """Enumerate conversation scratch workspaces that have files or a local binding."""
-    conversations = await conv_repo.list_all_by_user(user.user_id)
+    """Enumerate project workspaces + bare-chat scratches that have files or a local bind."""
+    folders = await folder_repo.list_by_user(user.user_id)
     items: list[WorkspaceSummary] = []
+    for folder in folders:
+        local = folder.local_root_id is not None
+        has_files = (
+            True
+            if local
+            else workspace_has_entries(
+                user_id=user.user_id, folder_id=folder.id, conversation_id=""
+            )
+        )
+        # Projects always list (a project is a project), even when empty cloud.
+        items.append(
+            WorkspaceSummary(
+                ws_id=f"folder:{folder.id}",
+                name=folder.name,
+                location="local" if local else "cloud",
+                root_id=folder.local_root_id,
+                subpath=folder.local_subpath,
+                has_files=has_files if not local else True,
+            )
+        )
+
+    conversations = await conv_repo.list_all_by_user(user.user_id)
     for conv in conversations:
+        if conv.folder_id is not None:
+            continue  # covered by project entry above
         local = conv.local_root_id is not None
         has_files = (
             True

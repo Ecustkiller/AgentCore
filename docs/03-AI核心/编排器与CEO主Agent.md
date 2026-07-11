@@ -67,9 +67,9 @@ CEO 是**管理者**（不是调查员）：它只直接持有「只读 / 检索
 
 > **产出形态：文件落盘 vs 文字直出 ✅ 已落地**：worker 按交付【形态】判定写文件还是写正文；CEO 在 task 里点明落盘要求，`ask_user` 开工卡也说明最终交付是工作区实文件。→ 见代码：`runtime/runs/executor.py`、`runtime/resolve/prompt.py`、`runtime/skills.py`。
 
-> **落盘契约门 `requires_files` ✅ 已落地**：CEO 设 `contract.requires_files=true` 声明文件交付；执行器用 `files_touched` 确定性判定，未达标自动返工一次。→ 见代码：`runtime/runs/contract.py`、`tools/builtin/delegate/`。
->
-> **`Deliverable.output_schema` ⏳ 阶段 2 预留**：字段可解析进 `Deliverable`，但 delegate schema **不暴露**、`check_contract` **不校验**——保留位，勿当已生效能力。→ 见代码：`runtime/runs/types.py`、`runtime/runs/contract.py`。
+> **落盘契约门 `requires_files` / 声明式 `artifacts` ✅ 已落地**：CEO 可设 `deliverable.requires_files=true`（任意落盘）或 `deliverable.artifacts=[路径…]`（具体文件 / 目录 / 通配）声明文件交付；收尾 `check_contract` 对工作区做存在性对账，未达标自动返工一次；非 strict 时矫正后仍缺则软接受并在 delegate 汇总「契约缺口」段结构化上报。声明了 `artifacts` 的批次自动启用对应完工验收（省略仍=不强制）。→ 见代码：`runtime/runs/contract.py`、`tools/builtin/delegate/schema.py`、`tools/builtin/delegate/completion.py`。
+
+> **否决悬空预留 `Deliverable.output_schema`**：曾作阶段 2 JSON Schema 预留位，无 schema 入口、不校验——假能力已删除；路径级验收由 `artifacts` 清单承载。
 
 > **CEO 提示词形态：精简核心 + 能力目录 + 按需 consult ✅ 已落地**：常驻只保留路由脊柱 + 能力目录；进阶机制做成系统 Skill，用时 `consult_skill`。**分层不变量**：同一条知识只在唯一所有者出现。→ 见代码：`runtime/resolve/prompt.py`、`runtime/skills.py`、`tools/builtin/`。
 
@@ -154,7 +154,7 @@ CEO 在自己的 ReAct 循环里调用单一的 `delegate` 工具把一批子任
 CEO 收尾从「写综述」升级为「**先对账拼图边、再核验原始目标、最后写概览**」——纯提示升级（不加人 / 不加新暂停 / 不新子系统），落在 CEO 既有看产物的接缝。两道与既有各闸**显式分层不重叠**：per-piece `contract` 管单块达标、**4b** 管块间拼接、**4a** 管整体达成原始意图、防幻觉铁律管文件真落盘。
 
 - **第一道（4b）· 语义边界对账**：在三处接缝先对「拼不拼得上」——**只查冲突 / 缺口 / 重复，不评每块好不好**：① `format_for_ceo`（合并前；CEO 自判「相互依赖、要拼到一起」才查，独立并行跳过）；② `supervised.py::format_bind_boundary`（定稿下游前对上游，catch-early）；③ `format_scope_boundary`（队员报偏离时主动查兄弟接缝——即「`escalate scope` 等举手」的**主动版**）。对出问题就地 `revise`/`replan`/`ask_user`，别在概览里糊过去。判据同便签墙：块间有没有共享接口 / 相互依赖。
-- **第二道（4a）· 成品对照原始目标 + 完工判定**（实证 ROI 最高）：写概览前对照【用户原始请求 + 各 task 的 `expected_output`】逐条核验「实质达成」，给明确**完工判定**——未达成就 `delegate`/`replan`/`revise` 补、别假装收工；已达成就收口、别空转。直接对治 MAST 实测两大失败（不认终止条件 / 过早终止），其「加高层目标验证 +15.6%」是全表 ROI 最高的单点干预。
+- **第二道（4a）· 成品对照原始目标 + 完工判定**（实证 ROI 最高）：写概览前对照【用户原始请求 + 各 task 的任务描述与 `deliverable`】逐条核验「实质达成」，给明确**完工判定**——未达成就 `delegate`/`replan`/`revise` 补、别假装收工；已达成就收口、别空转。直接对治 MAST 实测两大失败（不认终止条件 / 过早终止），其「加高层目标验证 +15.6%」是全表 ROI 最高的单点干预。
 - **一处覆盖两条收尾路径**：改 `ceo_format.py::format_for_ceo` 即同时盖正常终态综述（`drive.py`）与 `replan(stop)` 收尾（`supervised.py::finalize_stopped`）；【团队便签】（便签墙 `active_notes`）正是 4b 的现成输入（见 [`Agent协作模式.md` §波内共享上下文](/docs/03-AI核心/Agent协作模式.md)）。
 - **暂不建（开放项）**：高风险「**独立验证回合**」（换一双眼睛复核）人 2026-06-30 明确**暂不建**——它是唯一「新机制 + 每高风险回合真成本」项（不像 4a/4b 是可退提示词），且 4a 已 inline 覆盖；走「先开度量数据闸门、证明 CEO 自检确实漏了『自己批自己』再建」。→ 远期项见 [`../06-规划/远期规划.md` §2.5](/docs/06-规划/远期规划.md)。
 
@@ -216,7 +216,7 @@ CEO 不指定具体模型，只表达能力需求（快/强），由运行时映
 
 - **被否决：质量档矩阵**（`经济档`/`高质量档`、CEO vs worker 分选 Flash/Pro）——多数用户只想「配一个能用的模型」；内测期 Pro 撤出 ceiling 后机制对用户已无价值。质量档解析链、`/v1/model-modes` API、`conversation.model_mode` 与 `users.default_model_mode` 列**均已永久移除**（迁移 drop 表 + 两列）。
 - **MVP 约束**：`thinking` / `reasoning_effort` 默认不发（走各家默认行为）；⏳ per-provider 推理字段适配、原生 Claude/Gemini provider 见远期。
-- **`supports_tools` soft gate**：probe 测 tool calling，结果作 UI 提示 + preflight warning，**不做 hard 400**——中转兼容性参差不齐，probe 失败不等于端点真不支持；委派/辩论 preflight 返回 warning 后可继续，运行时 `tool_calls` 缺失则 graceful error 提示换模型。
+- **`supports_tools` soft gate**：BYOK probe 判定「端点是否接受工具调用」，三态持久化（`True` / `False` / `None`）——`tool_calls` 回包 = 强证据 `True`；可判定为拒绝 tools 参数的 4xx = `False`；其余（2xx 无 tool_calls、超时、网络错、429、鉴权失败、模糊错误）一律 `None`，**不再把未知冒充 False**（旧判据「max_tokens=16 且自愿回 tool_calls」对 DeepSeek V4 等 thinking 模型假阴性严重）。探测先试 `tool_choice=required`，遇 400 回退省略 tool_choice，`max_tokens≥256`。结果作 UI 提示 + preflight warning，**不做 hard 400**；运行时降级文案仅在 `supports_tools is False` 时触发，`None` 不触发。
 - **后台 one-shot**（memory / title / compaction）：**platform key 优先、BYOK 兜底**——有运营 platform 凭据时不消耗用户 token；仅 BYOK 时走用户 model 并降 temperature / max_tokens。`build_provider(purpose=user_facing|platform_internal)` 区分，不暴露给用户。
 - **Provider 路由保留、MVP 不暴露**：`ProviderRouter` 的 `provider/model` 前缀路由供 eval / ⏳ 辩论多模型辩手；MVP 辩论统一用户 model。
 
@@ -283,13 +283,15 @@ CEO 不指定具体模型，只表达能力需求（快/强），由运行时映
 
 > 设计理由：worker 能不能干活属正确性、工具收窄属优化，故安全默认必须是「有能力」，least-privilege 由 CEO 主动 opt-in。被否决：要求 CEO 必填 `tools`（依赖 LLM 自觉、脆弱，正是此前 worker 静默不落盘的翻车点）。→ 见代码：`runtime/runs/builder.py` `_tools`、`runtime/runs/types.py` `RunSpec.tools`、`runtime/runs/executor.py`（`None`→offer 全部）。
 
-### 2.6 `completion_criteria` — worker 完工判据（默认 `files_written`，运行/打开类自动升 `code_verified`）✅
+### 2.6 `completion_criteria` — worker 完工判据（省略不强制，运行/打开类自动推断 `code_verified`；声明 `artifacts` 自动启用）✅
 
-worker 任务「怎样算干完」的验收契约，两档：`files_written`（产物落盘即完，**默认**）/ `code_verified`（须真跑通——收尾校验该 worker 确有 `code_execute` / `test_run` 成功记录才放行）。
+批次「怎样算干完」的验收契约，档位：`files_written`（有 worker 产物落盘）/ `code_verified`（须真跑通——校验确有 `code_execute` / `test_run` 成功记录）/ `custom`（描述性，机械校验不了即报缺口）。
 
-- **默认低档 + 按 task 语义自动升档**：`DEFAULT_COMPLETION_CRITERIA="files_written"`；task 含「运行 / 打开 / 安装 / 启动」类语义时引擎自动推断为 `code_verified`（CEO 亦可显式声明）。**为何不一律 `code_verified`**：写文档 / 改文案 / 纯配置类任务本不需要「跑」，强制跑通只会平白加一轮、拖慢、甚至让不可运行的任务永远达不成——按语义分流是「交付即验收」与成本的平衡点。
+- **省略 = 不强制 + 按 task / artifacts 自动推断**：CEO 未显式声明时**不启用批次验收**（单测钉死该语义）；例外：① task 含「运行 / 打开 / 安装 / 启动」类语义 → 推断 `code_verified`；② 任一 worker 声明了 `deliverable.artifacts` → 推断 `files_written`（路径级对账另由 per-worker 契约门执行）。**为何不默认强制**：写文档 / 改文案 / 纯讨论类批次本无落盘或跑通语义，强制只会平白加一轮返工；落盘要求由 per-worker 的 `deliverable.requires_files` / `artifacts` 承载。
+- **评估口径（vacuous pass 已修）**：显式 criteria 针对**全部 COMPLETED worker** 的真实信号（落盘记录 / transcript 工具结果 / handoff / 正文）评估——纯落盘、纯 handoff 的空正文完成态同样计入；无任何证据 = 缺口，绝不空过。
+- **收敛强制收尾与缺口上报**：治理 `convergence_finalize` 仍禁写文件（只读收口），但收尾后契约缺口以 per-worker gaps 段写入 delegate 汇总，让 CEO 补派有据、不靠自觉扫清单。
 - **对治「写了但跑不起来」**：触发案例（trace `d1bc76f3…`）worker 写出软件却没跑通、CEO 凭记忆答「在 mini-claw/」并口头让用户自己去终端跑；`code_verified` 自动推断 + 收尾校验直接堵住。这是「打开软件」双路径的**路径 A·工作区内验收**（路径 B·本机 OS 启动走 sidecar / Client Tools，见 [`双模式工作区.md` §十](/docs/02-架构/双模式工作区.md)、[`安全权限与治理.md` §三](/docs/05-平台与运维/安全权限与治理.md)）。
-- → 见代码：`runtime/runs/completion.py`（`DEFAULT_COMPLETION_CRITERIA` / 推断 / 校验）、`tools/builtin/delegate/schema.py`、`tools/builtin/delegate/drive.py`。
+- → 见代码：`tools/builtin/delegate/completion.py`（解析 / 推断 / 校验 / gaps 汇总）、`tools/builtin/delegate/schema.py`、`tools/builtin/delegate/drive.py`、`tools/builtin/delegate/ceo_format.py`。
 
 ---
 
@@ -348,11 +350,13 @@ worker 任务「怎样算干完」的验收契约，两档：`files_written`（�
 
 **产品触发**：CEO 在关键岔路调 `ask_user`（运行时自决）；DAG 计划在 step 标 `checkpoint_after` 时由调度器波间挂起 `plan_review`。**边界**：`ask_user` = CEO 工具效应；`checkpoint_after` = 计划期声明的结构挂起——语义、2b 续跑、事件契约见 [`执行引擎架构设计.md` §检查点决策语义 / §暂停与恢复](/docs/03-AI核心/执行引擎架构设计.md)。
 
-**团队预审薄预览（✅ 已落地）**：首次顶层 `delegate` 在 `run_plan` 已发出、**首波尚未启动**时，若计划满足「≥2 worker **或** 含辩论标记（`stance`/`round`）」则挂起 `team_preview`（新 Interaction kind，事件对 `team_preview_required` / `team_preview_resolved`）。卡片展示角色 / 任务摘要 / 依赖 / 是否辩论；动作与 `plan_review` 同构——**开做 / 调整（备注注入全部未跑下游）/ 停止**。续跑复用既有 durable Interaction / `POST …/resume` 管线。
+**团队开工卡（两卡合一 ✅）**：首次顶层 `delegate` 在 `run_plan` 已发出、**首波尚未启动**时，若计划需预审（≥2 worker **或** 含辩论标记）**或**本地模式下需能力授权（`AutonomyPolicy.first_grant`），则挂起 `team_preview` 开工卡（事件对 `team_preview_required` / `team_preview_resolved`）。卡片同时展示角色 / 任务摘要 / 依赖 / 是否辩论 **与** 本次委派所需 GRANTABLE 能力；动作：**授权并开工**（默认）/ **逐次审批开工** / **调整（备注注入全部未跑下游）** / **停止**。续跑复用既有 durable Interaction / `POST …/resume` 管线。原独立热路 `delegation_authorization` 卡已并入。
 
-**跳过（完成态降噪）**：单 worker + `finalize` 直出；同 CEO 回合内已有阻塞 `ask_user` 且用户已提交确认（journal 含 `checkpoint_resolved`）时跳过，避免双卡。非阻塞 ask 或未 ask → 仍预审。嵌套 `depth>0` / `light` / 续跑（`seed_completed`）不挂。
+**跳过（完成态降噪）**：单 worker + `finalize` 直出且无需能力授权；同 CEO 回合内已有阻塞 `ask_user` 且用户已提交确认、且无需能力授权时跳过。`AutonomyPolicy.full_auto` 自动授权（计划确认仍可挂）。嵌套 `depth>0` / `light` / 续跑（`seed_completed`）不挂。
 
-**与近邻边界**：`team_preview` = 开干前否决权（首波前）；`plan_review` = 波间结构化挂起（`checkpoint_after` 后）；`ask_user` = CEO 主动拍板。三者 kind / 事件 / 卡片分离，勿混用。
+**与近邻边界**：开工卡 = 开干前否决权 + 能力授权（首波前）；`plan_review` = 波间结构化挂起（`checkpoint_after` 后）；`ask_user` = CEO 主动拍板。勿混用。
+
+**AutonomyPolicy（能力授权三档 ✅）**：用户设置全局 `always_ask` / `first_grant`（默认）/ `full_auto`——只控能力授权，不动 `plan_review` / checkpoint。→ 见 [安全权限与治理 §三](/docs/05-平台与运维/安全权限与治理.md)。
 
 **§7.2 Preflight Audit（⏳ 远期）**：有界审计环 / 可编辑改 DAG / Agent 实体化绑定 / 设置项 opt-out **本批不做**——见 [`Agent协作模式.md` §7.2](/docs/03-AI核心/Agent协作模式.md)。
 
@@ -381,7 +385,6 @@ worker 任务「怎样算干完」的验收契约，两档：`files_written`（�
 |---|---|---|
 | finalize 单 worker 早释放 | CEO 委派后提前释放 LLM 上下文，worker 完成后再唤回 CEO 写综述 | 需状态落盘续跑能力成熟后 |
 | 协调效率指标 | batch_metrics 中增加有效并行度、协调税率等观测指标 | 有真实用户流量后 |
-| AutonomyPolicy 可配置 | CEO 按任务设定 worker 自主度档位 | 真实反馈证明需要差异化控制时 |
 
 ### 已否决方案
 

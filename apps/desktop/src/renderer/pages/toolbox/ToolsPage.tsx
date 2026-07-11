@@ -7,13 +7,13 @@ import { catalogCategoryColorVar } from "@/lib/catalogColors";
 import {
   TOOLS_GATE_HINT,
   TOOL_CALLING_TOOL_NAMES,
-  isToolsGateBlocked,
+  needsToolsGateHint,
 } from "@/lib/llmToolsGate";
 
 /** 工具箱「能力」组 → 工具：Agent 可调用的动作工具，按类分组，每个工具可展开调用参数。 */
 export function ToolsPage() {
   const { data: llmKey } = useLlmKey();
-  const toolsBlocked = isToolsGateBlocked(llmKey?.supports_tools);
+  const showToolsHint = needsToolsGateHint(llmKey?.supports_tools);
 
   return (
     <CapabilityPage
@@ -56,10 +56,12 @@ export function ToolsPage() {
                       <ToolCard
                         key={tool.name}
                         tool={tool}
-                        disabled={
-                          toolsBlocked && TOOL_CALLING_TOOL_NAMES.has(tool.name)
+                        capabilityHint={
+                          showToolsHint &&
+                          TOOL_CALLING_TOOL_NAMES.has(tool.name)
+                            ? TOOLS_GATE_HINT
+                            : undefined
                         }
-                        disabledHint={TOOLS_GATE_HINT}
                       />
                     ))}
                   </div>

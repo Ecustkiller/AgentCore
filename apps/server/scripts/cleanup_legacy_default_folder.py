@@ -20,7 +20,7 @@ become 裸聊 again and re-promote to their own local folder on the next file wr
 
 CAVEAT: a folder a user *deliberately* named「我的工作区」would also match
 (structurally identical). Always eyeball the dry-run preview (it prints id / owner /
-local_dir / root_id / conversation counts) before passing ``--apply``.
+root_id / conversation counts) before passing ``--apply``.
 
 Run from ``apps/server``::
 
@@ -146,7 +146,7 @@ async def _run(args: argparse.Namespace) -> None:
             deleted_tag = " [already soft-deleted]" if f.deleted_at else ""
             print(f"  • {f.name!r}  id={f.id}{deleted_tag}")
             print(f"      owner={f.user_id}")
-            print(f"      local_dir={f.local_dir!r}  root_id={f.local_root_id!r}")
+            print(f"      root_id={f.local_root_id!r}  subpath={f.local_subpath!r}")
             print(f"      conversations: {live} live / {total} total → unbound to 裸聊")
 
         if not args.apply:

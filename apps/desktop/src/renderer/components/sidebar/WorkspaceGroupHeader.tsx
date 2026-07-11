@@ -71,8 +71,8 @@ export function WorkspaceGroupHeader({
 
   const liveConvCount = convs.length;
   const groupIsLocal = useMemo(
-    () => deriveGroupWorkspaceIsLocal(folder, convs),
-    [folder, convs],
+    () => deriveGroupWorkspaceIsLocal(folder),
+    [folder],
   );
 
   const viewAllConversations = () => {

@@ -70,6 +70,9 @@ async def continue_run(
         run_id=revision_run_id,
         agent_id=revision_run_id,
         depth=session.spec.depth,
+        cost_role="member",
+        persona=(session.spec.role or "").strip() or None,
+        parent_run_id=session.spec.parent_run_id or None,
     ):
         return await _continue_run_scoped(
             session=session,
@@ -185,13 +188,15 @@ async def _continue_run_scoped(
         usage = round_usage.as_dict()
         cost = asdict(calculate_cost(priced_model, round_usage))
         # files_written counts the whole continued transcript (original draft + this
-        # revision), so a requires_files contract isn't spuriously flagged when the
-        # recall edits prose around files the first pass already wrote.
+        # revision), so a requires_files / artifacts contract isn't spuriously flagged
+        # when the recall edits prose around files the first pass already wrote.
+        touched_for_gate = files_touched_from_transcript(messages)
         verdict = check_contract(
             content,
             spec.deliverable,
-            files_written=len(files_touched_from_transcript(messages)),
+            files_written=len(touched_for_gate),
             debrief=debrief_from_transcript(messages),
+            workspace_paths=touched_for_gate,
         )
         # 执行级事件溯源 (§8.3): the revised FULL product (content + 思考) under the
         # revision run id, so the version chain's latest output AND thinking are

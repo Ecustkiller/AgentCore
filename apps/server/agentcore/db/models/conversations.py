@@ -34,9 +34,6 @@ class Conversation(Base):
         server_default=text("'00000000-0000-0000-0000-000000000000'"),
     )
     title: Mapped[str] = mapped_column(String(500), nullable=False, server_default=text("''"))
-    # Auto-classified on first-turn title minting (对话自动标签, 前端UX设计 §十五).
-    # One of code_review | research | writing | analysis; NULL = unclassified.
-    tag: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Sidebar housekeeping (对话基础功能补齐):
     # - ``pinned`` floats a conversation to the top of the sidebar / list (ordered
     #   pinned-first, then by recency).
@@ -101,8 +98,11 @@ class Conversation(Base):
 
 
 # --- Folders ---
-# User-created conversation folders (sidebar grouping). A folder may bind a
-# local directory (metadata only for now). Soft-deleted like conversations.
+# Project = workspace (项目即工作区). Every folder owns a shared workspace:
+# local (``local_root_id`` set) or cloud (both binding columns NULL → disk
+# scope ``folder:<id>``). Conversations born into a folder inherit it; bare
+# chats keep per-conversation ``conv:<id>`` scratch. Soft-deleted like
+# conversations; soft-delete archives member conversations (does not ungroup).
 
 
 class Folder(Base):
@@ -111,22 +111,11 @@ class Folder(Base):
     id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    # Optional bound local directory; stored as opaque metadata (no FS coupling).
-    # This is the human-readable *path label* the user sees, distinct from the
-    # machine-addressable binding below.
-    local_dir: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    # Local-mode binding (双模式工作区 §七): the desktop FS root id this folder (=
-    # 工作区) is bound to. NULL = cloud. Its conversations all run in local mode
-    # against this root. Opaque desktop handle minted by the desktop (fs-service
-    # `randomUUID`), so a plain string, not PG_UUID (not a server-owned id).
+    # Local-mode binding: desktop FS root id. NULL + NULL ``local_subpath`` = cloud
+    # project (shared ``folder:<id>`` scope). Opaque desktop handle (not a
+    # server-owned UUID). Immutable after create (no relocate this period).
     local_root_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    # Sub-path *within* ``local_root_id`` this workspace lives at (工作区对称化 D1a).
-    # NULL/"" = the folder is the root itself (an explicitly-added local project).
-    # A non-empty segment marks a per-conversation workspace lazily promoted under a
-    # shared container root (~/Documents/AgentCore/<title>/): same container root,
-    # distinct subpath, so each file-producing desktop chat reads as its own card —
-    # symmetric with cloud bare-chat promotion. Server-generated (not user input),
-    # a single FS-safe path segment; the desktop joins ``root + subpath``.
+    # Sub-path within ``local_root_id``. NULL/"" = bound at the root itself.
     local_subpath: Mapped[str | None] = mapped_column(String(400), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")

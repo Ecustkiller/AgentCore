@@ -381,19 +381,20 @@ class PendingApprovalSummary(BaseModel):
 
 
 class PausedTurnSummary(BaseModel):
-    """A turn awaiting resume after a durable plan_review / ask_user pause (结构化挂起 2b).
+    """A turn awaiting resume after a durable plan_review / ask_user / kickoff pause.
 
     Surfaced on conversation reopen so the client can re-render the right resume card
-    by ``kind`` and offer continue / adjust / stop → the resume endpoint.
+    by ``kind`` and offer continue / per_call / adjust / stop → the resume endpoint.
     ``message_id`` is both the pause key and the id the resumed assistant message will
     reuse, so an optimistic bubble reconciles cleanly.
 
     plan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the
-    gated downstream); team_preview carries ``workers`` (upcoming roles / tasks /
-    deps); ask_user carries the unified card payload ``question`` (the
-    framing / opening line) + ``context`` + the optional opening content
-    ``assumptions`` / ``questions`` / ``style_options`` (empty for a compact mid-task
-    fork). The unused set is empty for the other kinds.
+    gated downstream); team_preview (开工卡) carries ``workers`` (upcoming roles /
+    tasks / deps) + ``tools`` (grantable capabilities for this delegation); ask_user
+    carries the unified card payload ``question`` (the framing / opening line) +
+    ``context`` + the optional opening content ``assumptions`` / ``questions`` /
+    ``style_options`` (empty for a compact mid-task fork). The unused set is empty
+    for the other kinds.
     """
 
     message_id: str
@@ -405,8 +406,9 @@ class PausedTurnSummary(BaseModel):
     # plan_review
     steps: list[dict[str, Any]] = Field(default_factory=list)
     pending: list[dict[str, Any]] = Field(default_factory=list)
-    # team_preview
+    # team_preview (开工卡)
     workers: list[dict[str, Any]] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
     # ask_user
     question: str = ""
     context: str = ""

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   argumentTitle,
   parseSpeechArguments,
-  sidePositionSummary,
   summarizeText,
 } from "../parseSpeechArguments";
 
@@ -69,15 +68,44 @@ describe("parseSpeechArguments", () => {
     expect(args[0].body).toBe(text);
     expect(args[0].title).toContain("反对理由");
   });
-});
 
-describe("sidePositionSummary", () => {
-  it("returns first argument title", () => {
-    expect(sidePositionSummary("1. 收益显著\n2. 风险可控")).toContain("收益");
+  it("strips clear opening preamble before real arguments", () => {
+    const args = parseSpeechArguments(
+      "以下是正方的立论。\n\n成本可控，回收周期短。\n\n风险有明确兜底。",
+    );
+    expect(args).toHaveLength(2);
+    expect(args[0].body).toContain("成本可控");
+    expect(args.every((a) => !a.body.includes("以下是"))).toBe(true);
   });
 
-  it("summarizes plain text when no structure", () => {
-    const text = "这是一段没有明显结构的长篇立论内容需要被摘要";
-    expect(sidePositionSummary(text, 10).length).toBeLessThanOrEqual(11);
+  it("strips meta info-ready preamble", () => {
+    const args = parseSpeechArguments(
+      "现在我已有足够信息来构建论点。\n\n收益可量化。\n\n迁移路径清晰。",
+    );
+    expect(args).toHaveLength(2);
+    expect(args[0].body).toContain("收益");
+  });
+
+  it("strips catalog-style preamble", () => {
+    const args = parseSpeechArguments(
+      "接下来我将从以下几个方面阐述。\n\n第一点：成本。\n\n第二点：风险。",
+    );
+    expect(args).toHaveLength(2);
+    expect(args[0].body).toContain("成本");
+  });
+
+  it("keeps ambiguous first block that looks like a real argument", () => {
+    const args = parseSpeechArguments(
+      "首先成本是可控的，因为规模效应明显。\n\n其次风险有兜底。",
+    );
+    expect(args).toHaveLength(2);
+    expect(args[0].body).toContain("成本是可控的");
+  });
+
+  it("falls back when preamble is the only block", () => {
+    const text = "以下是正方的立论。";
+    const args = parseSpeechArguments(text);
+    expect(args).toHaveLength(1);
+    expect(args[0].body).toBe(text);
   });
 });

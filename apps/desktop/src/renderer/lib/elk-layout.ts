@@ -380,39 +380,29 @@ export async function computeLayout(
   // this single cross-axis polish pulls those onto their neighbors' midline.
   centerLoneEndpoints(positions, edges, layout);
 
-  // Post-processing can push nodes negative on the cross axis; shift the whole
-  // graph so the bbox origin stays at ELK padding (keeps promo stills / fit-to-width sane).
+  // Always pin the placed-node origin to ELK padding. INCLUDE_CHILDREN compounds
+  // (esp. debate grids) often stamp a root size far larger than the cluster and
+  // park every node hundreds/thousands of px below y=0. Trusting that stamp made
+  // embed fit-to-width and canvas turn-group height treat phantom bands as real
+  // content (聊天内联空白 / 画布沉底). Fit hosts assume content starts near (0,0).
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
   for (const id of Object.keys(positions)) {
     minX = Math.min(minX, positions[id].x);
     minY = Math.min(minY, positions[id].y);
   }
-  const normDx = minX < PADDING ? PADDING - minX : 0;
-  const normDy = minY < PADDING ? PADDING - minY : 0;
-  if (normDx !== 0 || normDy !== 0) {
-    for (const id of Object.keys(positions)) {
-      positions[id].x += normDx;
-      positions[id].y += normDy;
+  if (Number.isFinite(minX) && Number.isFinite(minY)) {
+    const normDx = PADDING - minX;
+    const normDy = PADDING - minY;
+    if (normDx !== 0 || normDy !== 0) {
+      for (const id of Object.keys(positions)) {
+        positions[id].x += normDx;
+        positions[id].y += normDy;
+      }
     }
   }
 
-  // ELK stamps the laid-out root with its total size (content + the padding set
-  // above), but the post-processing above can push a sub-team past ELK's bbox, so
-  // re-derive the extent from the final positions and keep whichever is larger
-  // (also the fallback when a build omits the stamped size).
-  let width = laidOut.width ?? 0;
-  let height = laidOut.height ?? 0;
-  let maxX = 0;
-  let maxY = 0;
-  for (const id of Object.keys(positions)) {
-    const s = sizeOf(id);
-    maxX = Math.max(maxX, positions[id].x + s.width);
-    maxY = Math.max(maxY, positions[id].y + s.height);
-  }
-  width = Math.max(width, maxX + PADDING);
-  height = Math.max(height, maxY + PADDING);
-
+  // Bbox is finalized after group chrome (below) so topPad cannot escape the frame.
   const pad = 12;
   const topPad = 32;
   for (const g of groups) {
@@ -440,6 +430,44 @@ export async function computeLayout(
     g.width = maxGX - minGX + pad * 2;
     g.height = maxGY - minGY + topPad + pad;
   }
+
+  // Group chrome (topPad) can sit above the node-origin pin; shift so the full
+  // rendered footprint (nodes + group boxes) stays in the positive quadrant.
+  let frameMinX = Number.POSITIVE_INFINITY;
+  let frameMinY = Number.POSITIVE_INFINITY;
+  let frameMaxX = 0;
+  let frameMaxY = 0;
+  for (const id of Object.keys(positions)) {
+    const s = sizeOf(id);
+    frameMinX = Math.min(frameMinX, positions[id].x);
+    frameMinY = Math.min(frameMinY, positions[id].y);
+    frameMaxX = Math.max(frameMaxX, positions[id].x + s.width);
+    frameMaxY = Math.max(frameMaxY, positions[id].y + s.height);
+  }
+  for (const g of groups) {
+    frameMinX = Math.min(frameMinX, g.x);
+    frameMinY = Math.min(frameMinY, g.y);
+    frameMaxX = Math.max(frameMaxX, g.x + g.width);
+    frameMaxY = Math.max(frameMaxY, g.y + g.height);
+  }
+  if (Number.isFinite(frameMinX) && Number.isFinite(frameMinY)) {
+    const frameDx = frameMinX < PADDING ? PADDING - frameMinX : 0;
+    const frameDy = frameMinY < PADDING ? PADDING - frameMinY : 0;
+    if (frameDx !== 0 || frameDy !== 0) {
+      for (const id of Object.keys(positions)) {
+        positions[id].x += frameDx;
+        positions[id].y += frameDy;
+      }
+      for (const g of groups) {
+        g.x += frameDx;
+        g.y += frameDy;
+      }
+      frameMaxX += frameDx;
+      frameMaxY += frameDy;
+    }
+  }
+  const width = frameMaxX + PADDING;
+  const height = frameMaxY + PADDING;
 
   return { positions, width, height, groups };
 }
@@ -544,6 +572,112 @@ export interface GraphShape {
   /** Widest layer — the count of nodes laid out across the flow (what actually
    * drives height in the left-right default). */
   parallelism: number;
+  /**
+   * Debate compound only: participant lanes stacked inside the always-expanded
+   * box (正/反 = 2, 圆桌 = N). When set, {@link estimateBbox} sizes height from
+   * the compound chrome + lane stack instead of treating the whole debate as a
+   * single NODE_HEIGHT unit (which underestimates and flickers on measure).
+   */
+  compoundLanes?: number;
+}
+
+/** Mirrors buildGroupElkNode padding — must stay in lockstep for first-paint. */
+const COMPOUND_PAD_TOP = 32;
+const COMPOUND_PAD_BOTTOM = 12;
+
+type ShapeRun = {
+  id: string;
+  dependsOn: string[];
+  parentRunId?: string | null;
+  kind?: string;
+  revision?: number;
+  revisionOf?: string | null;
+  stance?: string | null;
+  group?: string | null;
+  /** 辩论 beat 折叠：有 channel=cross_exam 的列不计入首帧深度。 */
+  receivedContext?: ReadonlyArray<{ channel: string }> | null;
+};
+
+function isDebateRun(r: ShapeRun): boolean {
+  return (
+    r.stance != null || (r.group != null && r.group.startsWith("debate:"))
+  );
+}
+
+function isCrossExamShapeRun(r: ShapeRun): boolean {
+  return (
+    isDebateRun(r) &&
+    (r.receivedContext?.some((b) => b.channel === "cross_exam") ?? false)
+  );
+}
+
+/**
+ * Debate grids are always-expanded compounds (参与者 × 轮次列). Collapsing them
+ * to parallelism=1 (the compound unit) was the first-paint under-estimate; derive
+ * lane count + round columns from revision roots (质询折进轮节点，不计独立列).
+ */
+function debateGraphShape(workers: ShapeRun[], ids: Set<string>): GraphShape | null {
+  if (!workers.some(isDebateRun)) return null;
+
+  const byId = new Map(workers.map((r) => [r.id, r]));
+  const revisionRootOf = (id: string): string => {
+    let cur = id;
+    const seen = new Set<string>();
+    while (!seen.has(cur)) {
+      seen.add(cur);
+      const r = byId.get(cur);
+      if (!r?.revisionOf || !ids.has(r.revisionOf)) break;
+      cur = r.revisionOf;
+    }
+    return cur;
+  };
+
+  const laneRoots = new Set<string>();
+  for (const w of workers) {
+    if (!isDebateRun(w)) continue;
+    if ((w.revision ?? 0) > 0 && w.revisionOf) continue;
+    // Moderator carries debate: group too, but is the compound parent — not a lane.
+    // Only count as mod when it parents *original* debaters (not revision chains).
+    const isModerator = workers.some((c) => {
+      if (c.parentRunId !== w.id || c.id === w.id) return false;
+      if ((c.revision ?? 0) > 0 || c.revisionOf) return false;
+      return isDebateRun(c);
+    });
+    if (isModerator) continue;
+    laneRoots.add(w.id);
+  }
+  // Roundtable / untagged sides: originals under the moderator still form lanes.
+  let modId: string | null = null;
+  for (const rootId of laneRoots) {
+    const root = byId.get(rootId);
+    const parent = root?.parentRunId;
+    if (parent && ids.has(parent)) {
+      modId = parent;
+      break;
+    }
+  }
+  if (modId) {
+    for (const w of workers) {
+      if (w.id === modId) continue;
+      if (w.parentRunId !== modId) continue;
+      if ((w.revision ?? 0) > 0 || w.revisionOf) continue;
+      laneRoots.add(w.id);
+    }
+  }
+
+  const lanes = Math.max(1, laneRoots.size);
+  let beatCols = 1;
+  for (const rootId of laneRoots) {
+    const colCount = workers.filter(
+      (w) =>
+        revisionRootOf(w.id) === rootId && !isCrossExamShapeRun(w),
+    ).length;
+    beatCols = Math.max(beatCols, colCount);
+  }
+
+  // Layers: input + optional moderator column + round columns + captain.
+  const depth = 2 + (modId ? 1 : 0) + beatCols;
+  return { depth, parallelism: 1, compoundLanes: lanes };
 }
 
 /**
@@ -553,19 +687,18 @@ export interface GraphShape {
  * enough for an estimate: workers only (the captain is the sink bookend), a
  * parent link counts as a dependency so a sub-team sits a layer deeper, and +2
  * layers stand in for the synthetic input root + CEO captain sink.
+ *
+ * Debate compounds take a dedicated path ({@link debateGraphShape}): the box is
+ * a 参与者×轮次 grid, not a single collapsed parallel unit.
  */
-export function workerGraphShape(
-  runs: {
-    id: string;
-    dependsOn: string[];
-    parentRunId?: string | null;
-    kind?: string;
-  }[],
-): GraphShape {
+export function workerGraphShape(runs: ShapeRun[]): GraphShape {
   const workers = runs.filter((r) => r.kind !== "captain");
   if (workers.length === 0) return { depth: 1, parallelism: 1 };
   const ids = new Set(workers.map((r) => r.id));
   const byId = new Map(workers.map((r) => [r.id, r]));
+
+  const debate = debateGraphShape(workers, ids);
+  if (debate) return debate;
 
   const subTeamRoots = new Set<string>();
   const subTeamMembers = new Set<string>();
@@ -638,19 +771,37 @@ export function estimateBbox(
   layout: ElkGraphLayout,
   nodeSpacing: number = NODE_SPACING_EMBED,
 ): { width: number; height: number } {
-  const { depth, parallelism } = shape;
+  const { depth, parallelism, compoundLanes } = shape;
   const within = (n: number, size: number) =>
     n * size + (n - 1) * nodeSpacing + 2 * PADDING;
-  const across = (n: number, size: number) =>
-    n * size + (n - 1) * LAYER_SPACING[layout] + 2 * PADDING;
+  const across = (n: number, size: number, gap: number = LAYER_SPACING[layout]) =>
+    n * size + (n - 1) * gap + 2 * PADDING;
+  // Debate compound: root pad + box (compound chrome + lane stack). Matches
+  // computeLayout's INCLUDE_CHILDREN group height, not a flat NODE_HEIGHT slot.
+  const compoundCross =
+    compoundLanes != null && compoundLanes > 0
+      ? 2 * PADDING +
+        COMPOUND_PAD_TOP +
+        COMPOUND_PAD_BOTTOM +
+        compoundLanes * NODE_HEIGHT +
+        (compoundLanes - 1) * NODE_SPACING_EMBED
+      : null;
   if (layout === "leftright") {
+    // Compound internals use 40px layer gaps; only the two bookend gaps stay at 80.
+    const debateAcross =
+      compoundLanes != null && depth >= 3
+        ? depth * NODE_WIDTH +
+          2 * LAYER_SPACING.leftright +
+          Math.max(0, depth - 3) * 40 +
+          2 * PADDING
+        : null;
     return {
-      width: across(depth, NODE_WIDTH),
-      height: within(parallelism, NODE_HEIGHT),
+      width: debateAcross ?? across(depth, NODE_WIDTH),
+      height: compoundCross ?? within(parallelism, NODE_HEIGHT),
     };
   }
   return {
-    width: within(parallelism, NODE_WIDTH),
+    width: compoundCross ?? within(parallelism, NODE_WIDTH),
     height: across(depth, NODE_HEIGHT),
   };
 }
