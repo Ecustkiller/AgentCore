@@ -66,7 +66,7 @@ skip_if:
 - **决策与理由（连续工具折叠 `ProcessToolGroup`）**：CEO 连读 10 个文件曾平铺成 10 行 `读取文件`，满屏噪音。对齐 Cursor「Read N files」/ Claude「Researched…」的行业做法——把**时间上连续、被思考/正文打断即断组**的工具并成一条「动词＋计数」可折叠摘要，**保序**（思考/正文天然作分隔，不打碎时序，故未取「按类别全回合归桶」那种碎序方案）。纯**渲染层 fold**（`lib/processTimeline.ts` 的纯函数 `groupToolRuns` + 桌面 `ProcessToolGroup`），`process[]` 形状不变 → **不动后端 / `turn_journal` / conformance**；**末段正文（最终答案）是 `content` 步、永不进组**，答案绝不会被折叠藏起来。阈值＝连续 ≥2 才折（单个保持平铺）。手机端 `AssistantView` 是另一套实现、本次不含（分组是 chrome、非协议 fold）。
 - **完成态整段过程折叠（✅ 已落地）**：回合收场（`!isStreaming`）后，把该回合**所有过程节点**（思考 / 工具 / 工具组）再收进**一行摘要**「思考了 N 步 · 调用了 M 个工具」，点开还原完整时间线；**可见节点**（正文 / 内嵌团队图 / 检查点 / 发问 / 计划复核）始终在外、绝不入折。流式中全展开（边想边看），收场默认收起并按 `messageId` 持久化；单条纯思考（1 步 0 工具）不折。是「思考逐段折叠」之上的**回合级**折叠——前者折单个思考块、本条折整段过程为一行，二者叠加＝完成态默认只见「摘要行 + 最终答案」。→ 见代码 `ProcessTimeline.tsx`（`shouldCollapseProcess` / `formatProcessSummary` / `useStreamAwareDisclosure`）。
 - **复制 / 分享出口两档（✅ 已落地）**：持久化 `messages.content` 只留最终交付（[多轮编排 §八](/docs/03-AI核心/多轮编排与同人续派.md) deliverable_only），过程旁白在时间线可见——复制若只读交付会丢用户看得见的过程。助手气泡复制提供 **「仅交付」（默认）/「含过程」**：含过程按 `process[]` 时序拼可读文本（思考 / 旁白 / 关键工具动作）；无过程时间线时退化为单键仅交付。搜索与下轮 history **仍只用交付**（不动）。桌面 footer / 流式轻量复制；手机气泡底「复制交付 / 含过程」。→ 见代码桌面 `lib/messageExport.ts` + `AssistantMessageFooter`；手机 `lib/messageExport.ts` + `AssistantView`。
-- **本地回合同步态提示 `synced_pending`（✅ · 桌面本地引擎）**：sidecar 本地回合正文由主进程异步回写云端（[双模式 §10.3](/docs/02-架构/双模式工作区.md)），气泡在「本机已写 outbox、云未确认」窗口挂一枚轻量「待同步」提示，主进程 `outbox:synced` 回传后清除——纠正「把已渲染当已保存」。**纯本机同步指示、不进 SSE / 跨端契约**（`SyncStatusHint`，`Never serialized`），故手机 / 云端桌面无此态。→ 见代码 `message-bubble/SyncStatusHint.tsx`、`services/outboxReconcile.ts`。
+- **本地回合同步态提示 `synced_pending`（✅ · 桌面本地引擎）**：sidecar 本地回合正文由主进程异步回写云端（[双模式 §10.3](/docs/02-架构/双模式工作区.md)），气泡按「**静默成功、显式失败**」反映同步态——pending 头 ~5s 宽限内**不渲染任何提示**（快乐路径全程静默，免每回合「待同步→已同步」闪现噪音）；超宽限仍未获云确认才挂「待同步」直到同步完成（离线 / 云端慢 / 认证失效的真实异常信号）；「已同步」仅在「待同步」曾实际可见时短闪（~2.5s）收环，否则成功同样静默——对齐 IM 送达回执 / 云盘同步「异常才开口」惯例，仍纠正「把已渲染当已保存」。**纯本机同步指示、不进 SSE / 跨端契约**（`SyncStatusHint`，`Never serialized`），故手机 / 云端桌面无此态。→ 见代码 `message-bubble/SyncStatusHint.tsx`、`services/outboxReconcile.ts`。
 - **保序持久化**：时间线随回合持久化（后端落 `turn_journal`，读取投影为 `runs.process` 载荷），刷新可回放。→ 见代码 `components/chat/MessageBubble.tsx`、`services/streamConversation.ts`
 - **「正在生成 {工具}…」实时行 `ComposingToolLine`**：CEO captain 拼装大工具调用参数时，时间线尾部一行实时显示「正在生成 {工具} · N 字 ▋」——补 `tool_use_start` 之前的空白期。**纯传输、不持久化**。
 - **慢工具等待态（✅ 已落地）**：`web_search` / `read_url` / `code_execute` 等阻塞型工具运行中，工具行除脉冲点外显示后端 `tool_use_progress` 的**诚实阶段**（正在检索 / 抓取网页 / 提取正文 / 执行 / 出网受限 / 排队 / 改用备用引擎…）+ **客户端计时秒数**；`web_search` 额外骨架条预览结果卡形状。阶段事件 **transport-only**（不进 journal / 历史回放），重载后不保留阶段文案；无 phase 时仍显示通用计时。→ 见代码 `ToolLine.tsx`、`constants.ts`（`TOOL_PHASE_TEXT`）、`streamConversation.ts`。
@@ -105,7 +105,7 @@ skip_if:
 
 **首次协作情境提示 `ContextualTip`**（非 Tour）：首次出现内嵌协作图（「点节点可看每个 Agent 的实时工作」）与首次出现拍板面（「团队在等你拍板」）各一枚一次性浮层——可随手关闭、本地记 seen、总量 ≤3。渐进披露的延伸，**否决**多步 Tour / 教程墙 / 轮播弹窗。
 
-**帮助可发现性**：空态副链接 + 侧栏用户菜单补「产品手册」入口（工具箱首卡、命令面板既有入口不变）。
+**帮助可发现性**：空态副链接 + 侧栏用户菜单补「产品手册」入口（工具箱首卡、命令面板既有入口不变）；功能现场 `?` 深链——检查点拍板卡 / 工具审批卡 / 协作图工具条 / 辩论室「怎么看」/ 自主度设置 / 升级卡六处，HelpCircle 图标 + tooltip 深链到手册对应节（统一走 `components/ManualHelpLink.tsx` 登记，节 ID 消费手册 `sectionIds.ts`，禁手写路由）。
 
 **激活漏斗（日志埋点）**：`auth.register` / `llm_key.configured` / 首回合成功（沿用既有回合完成日志）三事件在 `logs/dev.jsonl` 可查漏斗；开发期不建分析面板。
 

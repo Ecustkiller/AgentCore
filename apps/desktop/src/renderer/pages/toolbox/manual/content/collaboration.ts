@@ -2,7 +2,11 @@ import { APP_PATHS } from "../paths";
 import { MANUAL_SECTION_IDS, manualHref } from "../sectionIds";
 import type { ManualChapterContent } from "../types";
 
-/** 指挥你的团队 —— 结构化内容源（无 JSX）。 */
+/**
+ * 指挥你的团队 —— 结构化内容源（无 JSX）。
+ *
+ * 口径：任务导向、实用不营销；真组件演示归机制章，本章纯文字 block。
+ */
 export const collaborationChapter: ManualChapterContent = {
   id: "collaboration",
   path: APP_PATHS.toolbox.manual.collaboration,
@@ -57,15 +61,15 @@ export const collaborationChapter: ManualChapterContent = {
           type: "callout",
           variant: "tip",
           text: [
-            "组团话术与快速上手见 ",
+            "想指定并行 / 串行 / 辩论，话术见 ",
             {
-              text: "认识 AgentCore · 5 分钟上手",
+              text: "怎么下任务",
               link: {
-                kind: "go",
-                to: manualHref("intro", MANUAL_SECTION_IDS.intro.quickstart),
+                kind: "jump",
+                to: MANUAL_SECTION_IDS.collaboration.briefing,
               },
             },
-            "；图上符号见 ",
+            "。图上符号见 ",
             {
               text: "看懂协作图",
               link: {
@@ -76,7 +80,7 @@ export const collaborationChapter: ManualChapterContent = {
                 ),
               },
             },
-            "。辩论三形态与辩论室细节见下节 ",
+            "；辩论室细节见 ",
             {
               text: "辩论室",
               link: {
@@ -133,19 +137,31 @@ export const collaborationChapter: ManualChapterContent = {
           },
         },
         {
+          type: "paragraph",
+          text: "想指定协作姿势时",
+          emphasis: true,
+        },
+        {
+          type: "bullets",
+          items: [
+            {
+              title: "并行",
+              desc: "「分三路并行调研：竞品定价、用户痛点、渠道策略，各自产出一页摘要后由你汇总。」",
+            },
+            {
+              title: "串行",
+              desc: "「先调研再分析再写方案，上游产出喂给下游。」",
+            },
+            {
+              title: "辩论",
+              desc: "「就这个方案开一场正反辩论，再给我决策简报。」或指定红队挑刺 / 多方圆桌。",
+            },
+          ],
+        },
+        {
           type: "callout",
           variant: "tip",
-          text: [
-            "不确定怎么拆？只说目标就行。想指定并行 / 串行 / 辩论，可参考 ",
-            {
-              text: "5 分钟上手",
-              link: {
-                kind: "go",
-                to: manualHref("intro", MANUAL_SECTION_IDS.intro.quickstart),
-              },
-            },
-            " 里的组团话术——说清「要什么」永远比说清「怎么做」更重要。",
-          ],
+          text: "不确定怎么拆？只说目标就行——说清「要什么」永远比说清「怎么做」更重要。",
         },
       ],
     },
@@ -232,8 +248,6 @@ export const collaborationChapter: ManualChapterContent = {
             },
           ],
         },
-        { type: "embed", key: "ManualDebateScoreboardPreview" },
-        { type: "embed", key: "ManualDebateFinalePreview" },
         {
           type: "paragraph",
           text: "站队与掌舵",
@@ -261,7 +275,7 @@ export const collaborationChapter: ManualChapterContent = {
           type: "callout",
           variant: "info",
           text: [
-            "入口：状态条「打开辩论室」，或全屏回合详情的「辩论室」tab。协作图符号见 ",
+            "入口：协作图状态条出现「辩论」pill 时，点「打开辩论室」；也可在全屏回合详情切「辩论室」tab。协作图符号见 ",
             {
               text: "看懂协作图",
               link: {
@@ -387,7 +401,7 @@ export const collaborationChapter: ManualChapterContent = {
         },
         {
           type: "paragraph",
-          text: "拍板卡怎么点",
+          text: "拍板卡怎么点（两类按键不同）",
           emphasis: true,
         },
         {
@@ -395,7 +409,7 @@ export const collaborationChapter: ManualChapterContent = {
           items: [
             {
               title: "ask_user 拍板卡",
-              desc: "两键：提交（带上你的选择与说明继续）/ 停止（结束本回合）。",
+              desc: "两键：提交（带上选择与说明继续）+ 停止（结束本回合）。没有单独的「继续 / 调整」。",
             },
             {
               title: "plan_review 计划复核",
@@ -403,12 +417,11 @@ export const collaborationChapter: ManualChapterContent = {
             },
           ],
         },
-        { type: "embed", key: "ManualCheckpointCardPreview" },
         {
           type: "callout",
           variant: "info",
           text: [
-            "工具审批（写文件、跑代码等）与 ",
+            "写文件、跑代码等工具审批与 ",
             {
               text: "自主度",
               link: {
@@ -416,7 +429,7 @@ export const collaborationChapter: ManualChapterContent = {
                 to: MANUAL_SECTION_IDS.collaboration.autonomy,
               },
             },
-            " 联动：档位越高，同类能力越少逐次弹窗；计划确认与拍板卡不受自主度改写。",
+            " 联动：档位越高，同类能力越少逐次弹窗。ask_user / plan_review 拍板节点不受自主度改写。",
           ],
         },
         {
@@ -433,7 +446,7 @@ export const collaborationChapter: ManualChapterContent = {
       blocks: [
         {
           type: "lead",
-          text: "自主度只管「能力授权」——工具审批弹多少次。检查点与计划复核仍会按需出现。",
+          text: "自主度管「开工卡 + 可授权工具」弹多少次。ask_user / plan_review 拍板仍会按需出现。",
         },
         {
           type: "paragraph",
@@ -454,7 +467,7 @@ export const collaborationChapter: ManualChapterContent = {
             },
             {
               title: "全自动授权",
-              desc: "开工卡自动授权、不列能力项；计划确认（如有）仍会展示。",
+              desc: "不弹开工卡：能力与开工计划确认一并跳过；拍板检查点仍会出现。",
             },
           ],
         },
@@ -480,7 +493,7 @@ export const collaborationChapter: ManualChapterContent = {
                 to: MANUAL_SECTION_IDS.collaboration.checkpoint,
               },
             },
-            " 的关系：自主度减的是工具审批疲劳；拍板与计划复核仍走检查点。",
+            " 的关系：自主度减的是工具审批与开工卡疲劳；拍板与计划复核仍走检查点。",
           ],
         },
       ],
@@ -548,18 +561,18 @@ export const collaborationChapter: ManualChapterContent = {
       blocks: [
         {
           type: "lead",
-          text: "产物不满意？说清要改哪——CEO 唤回原队员，带着完整现场接着改（口语有时叫「热修」），不是从零重来。",
+          text: "产物不满意？说清要改哪——CEO 唤回原队员，带着完整现场接着改（口语也叫「同人接续」；旧称「热修」），不是从零重来。",
         },
         {
           type: "bullets",
           items: [
             {
-              title: "同人接续",
+              title: "接续链",
               desc: "同一队员、同一上下文；协作图上挂「续 ×N」接续链，可打开版本对比看各次产出。",
             },
             {
-              title: "什么时候用",
-              desc: "方向大致对、只想改局部；若整轮方向错了，用「重新生成」或明确说「推翻重来」。",
+              title: "和「重新生成」的区别",
+              desc: "续派 = 方向大致对、只改局部；重新生成 = 从最后一条用户消息整轮再答。整轮方向错了就用后者，或明确说「推翻重来」。",
             },
           ],
         },

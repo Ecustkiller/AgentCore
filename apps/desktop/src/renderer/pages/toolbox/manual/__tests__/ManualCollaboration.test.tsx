@@ -48,7 +48,7 @@ describe("ManualCollaboration", () => {
     expect(screen.getByText("每次询问")).toBeTruthy();
   });
 
-  it("registers required embeds and preserves section order", () => {
+  it("preserves section order and stays text-only (embeds belong to mechanism)", () => {
     expect(collaborationChapter.sections.map((s) => s.id)).toEqual([
       ...SECTION_IDS,
     ]);
@@ -56,10 +56,6 @@ describe("ManualCollaboration", () => {
     const embedKeys = collaborationChapter.sections.flatMap((s) =>
       s.blocks.filter((b) => b.type === "embed").map((b) => b.key),
     );
-    expect(embedKeys).toEqual([
-      "ManualDebateScoreboardPreview",
-      "ManualDebateFinalePreview",
-      "ManualCheckpointCardPreview",
-    ]);
+    expect(embedKeys).toEqual([]);
   });
 });

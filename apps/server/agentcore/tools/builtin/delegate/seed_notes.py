@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from agentcore.core.logging import get_logger
 from agentcore.runtime.events import team_note_posted
@@ -23,6 +23,50 @@ CEO_SEED_AGENT_ID = "ceo"
 CEO_SEED_ROLE = "主协调"
 MAX_SEED_NOTES = 8
 MAX_TEAM_BRIEF_CHARS = 1500
+
+CoordinationMode = Literal["wall", "none"]
+
+# Playbooks whose tasks assume mid-flight note-wall alignment (interface broadcast, etc.).
+_WALL_DEFAULT_PLAYBOOKS = frozenset({"build_feature"})
+
+
+def resolve_coordination(
+    *,
+    raw: Any,
+    complexity_hint: str,
+    seed_notes: list[dict[str, str]] | None,
+    team_brief: str | None,
+    playbook: str | None = None,
+) -> CoordinationMode:
+    """Resolve batch-level note-wall coordination (缺省 none；seed/brief 隐含升级).
+
+    ``light`` always resolves to ``none`` (existing skip-wall behaviour).
+    ``build_feature`` playbook defaults to ``wall`` when the CEO omitted the field.
+    Non-empty ``seed_notes`` / ``team_brief`` upgrades ``none`` → ``wall`` (even if
+    the CEO explicitly passed ``none``), with a debug log.
+    """
+    if complexity_hint == "light":
+        return "none"
+
+    if raw == "wall" or raw == "none":
+        resolved: CoordinationMode = raw
+    elif playbook in _WALL_DEFAULT_PLAYBOOKS:
+        resolved = "wall"
+    else:
+        resolved = "none"
+
+    has_seed = bool(seed_notes)
+    has_brief = bool(team_brief and str(team_brief).strip())
+    if resolved == "none" and (has_seed or has_brief):
+        reason = "seed_notes" if has_seed else "team_brief"
+        logger.debug(
+            "delegate.coordination_upgraded",
+            reason=reason,
+            from_mode="none",
+            to_mode="wall",
+        )
+        return "wall"
+    return resolved
 
 
 def _clean_brief(text: str) -> str:

@@ -94,21 +94,19 @@ escalate 是「缺了它整件事会走偏、需要现在有人拍板」，交�
 # WriteCoordinator's hard file guard: announce a piece you're taking so siblings don't dup it),
 # PULL the whole wall on demand (read_notes), 改写/作废 a stale note you posted (amend_note,
 # §2.2 便签会过期), and — when what you need isn't there at all — flag the dependency gap
-# (escalate kind=dep). Framed 主动-but-no-chatter (06-规划 §五 全量铺开, 2026-06-30 — 人决策,
-# 先于 §2.5 度量闸门): workers ACTIVELY broadcast every real decision / heads-up / claim and PULL
-# (read_notes) when unsure; only 社交闲聊 is held back, so the wall stays signal not noise.
+# (escalate kind=dep). Benefit-gated broadcast: only post when a still-running sibling would
+# change course; completion belongs in handoff, not on the wall.
 _WORKER_TEAM_NOTE_POLICY = """\
-你和若干队友正在【并行】干这一批活。当你做出别人要依赖的决定、踩到值得提醒队友的坑 / 发现、\
-或要认领一块活 / 文件免得和队友撞活时，用 post_note 贴一条【一行、具体】的便签广播给并行队友：\
+你和若干队友正在【并行】干这一批活。贴便签前先问：这条会让某个【还在跑的】队友改变做法吗？\
+不会就别贴。值得贴时用 post_note 贴一条【一行、具体】的便签广播给并行队友：\
 kind=decision 是「我定了」（接口 / 字段名 / 格式 / 命名等别人要对齐的决定），\
 kind=heads_up 是「提个醒」（坑 / 发现），\
-kind=claim 是「我领了」（你要负责的一块活 / 文件，如『登录页我来写』，\
-免得俩人干同一件事或抢同一个文件）。\
+kind=claim 是「我领了」——【开工前占坑】（你正要动手的一块活 / 文件，如『登录页我来写』，\
+免得俩人干同一件事或抢同一个文件）。完工信息是 handoff 的职责，【不要】贴完工宣告。\
 贴完就【立刻继续做你的活】——\
 它是顺手广播、不等任何回复，既不是聊天也不是提问（要上级拍板仍用 escalate）。\
-你每一步开始前，队友新贴的便签会自动推给你：据此对齐接口、避免和队友重复或冲突，但你【不必回应】。\
-当你干到一半、需要某个队友已定下的东西（接口 / 字段名 / 约定）却想不起来时，\
-用 read_notes 主动翻一遍当前整面便签墙取用——它只是读、不打断你也不等回复。\
+队友新贴的便签每轮开始前会自动推给你：据此对齐接口、避免和队友重复或冲突，但你【不必回应】。\
+read_notes 只用于找推送里没有的旧约定——它只是读、不打断你也不等回复。\
 若你早先贴的某条决定后来【变了 / 不作数了】（如字段从 password 改成 pwd），\
 用 amend_note 把它更正掉，免得队友照过时的便签做错：\
 ref 填那条便签的编号（post_note 成功时返回的 N 编号），\
@@ -116,9 +114,8 @@ ref 填那条便签的编号（post_note 成功时返回的 N 编号），\
 若你要的东西【墙上根本没有】（没人产出过、计划也没安排），那是依赖缺口：别硬猜瞎编一个凑数、\
 真卡在再猜也是错的缺口上就主动用 escalate kind=dep 写清你卡在缺什么（强过闷头产出一堆作废的东西），\
 主管 / lead 会在波边界补上；期间你照常按假设把能做的做完，【绝不要空等队友】。\
-拿捏分寸：凡是【别人要依赖的决定 / 会害人踩坑的发现 / 你认领的一块活】都值得【主动】贴出来——\
-这是团队不撞车的关键，别自己定了却闷不吭声；拿不准某个接口 / 字段 / 约定时也先 read_notes 翻一遍\
-再动手，别凭空猜。唯一要避开的是寒暄与无关碎话（这里不是聊天区）：只要是真影响活的事，就主动发、主动拉。
+拿捏分寸：只有【会让还在跑的队友改做法】的决定 / 坑 / 开工占坑才值得贴——别自己定了却闷不吭声，\
+也别把完工宣告或无关碎话贴上墙（这里不是聊天区）。
 
 【并行审查 / 质检专则】若你的角色是审查、质检、红队、语言/体验/可读性等【审别人的产出】，且你与别的\
 审查官【同一波并行】：一旦发现整体方向偏差、致命问题、或打分≤7/10且主因是方向/定位（而非标点级细节），\

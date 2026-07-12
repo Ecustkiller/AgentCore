@@ -1,3 +1,4 @@
+import { MANUAL_HELP, ManualHelpLink } from "@/components/ManualHelpLink";
 import { escalationKindLabel } from "@/components/graph/agentNode/shared";
 import { Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
 import { interactiveCheckpointTone } from "@/components/ui/tone-presets";
@@ -126,12 +127,15 @@ function PendingEscalation({
           <HelpCircle size={16} />
         </DecisionCardIcon>
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium text-primary">
-            {role} · 请你拍板
-            {escalationKindTag(escalation.kind)
-              ? ` · ${escalationKindTag(escalation.kind)}`
-              : ""}
-          </p>
+          <div className="flex items-center gap-1">
+            <p className="min-w-0 flex-1 text-xs font-medium text-primary">
+              {role} · 请你拍板
+              {escalationKindTag(escalation.kind)
+                ? ` · ${escalationKindTag(escalation.kind)}`
+                : ""}
+            </p>
+            <ManualHelpLink to={MANUAL_HELP.control} />
+          </div>
           <p className="mt-0.5 text-xs text-muted-foreground">
             等你拍板 · 不限时
           </p>

@@ -191,6 +191,114 @@ async def test_explicit_light_with_dag_features_ignored(monkeypatch):
     assert t._supervised.reason is BoundaryReason.BIND
 
 
+async def test_multi_worker_default_coordination_none_skips_wall(monkeypatch):
+    """多节点缺省 coordination=none：不建墙、不授便签三件套、无 team_note_posted。"""
+    from agentcore.runtime.events import EventType
+    from agentcore.runtime.runs.types import RunPhase, RunState
+
+    spy = LogSpy()
+    monkeypatch.setattr(delegate_tool_mod, "logger", spy)
+    captured: dict = {}
+
+    async def _exec(spec, completed):  # noqa: ANN001
+        return RunState(phase=RunPhase.COMPLETED, content=f"{spec.role}_OUT")
+
+    def _capture_build(**kwargs):  # noqa: ANN003
+        captured["collaboration"] = kwargs.get("collaboration")
+        captured["note_wall"] = kwargs.get("note_wall")
+        return _exec
+
+    monkeypatch.setattr("agentcore.runtime.runs.build_agent_executor", _capture_build)
+    sink = EventSink()
+    t = tool(Provider([]), sink=sink)
+    result = await t.execute(
+        {
+            "tasks": [{"role": "A", "task": "a"}, {"role": "B", "task": "b"}],
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert result.success is True
+    assert spy.get("delegate.started")["coordination"] == "none"
+    assert captured["collaboration"] is False
+    assert captured["note_wall"] is None
+    assert t._note_wall is None
+    assert not any(e.type == EventType.TEAM_NOTE_POSTED for e in sink._history)  # noqa: SLF001
+
+
+async def test_multi_worker_coordination_wall_grants_note_channel(monkeypatch):
+    """coordination=wall：行为与旧「多节点即建墙」一致。"""
+    from agentcore.runtime.runs.notewall import NoteWall
+    from agentcore.runtime.runs.types import RunPhase, RunState
+
+    spy = LogSpy()
+    monkeypatch.setattr(delegate_tool_mod, "logger", spy)
+    captured: dict = {}
+
+    async def _exec(spec, completed):  # noqa: ANN001
+        return RunState(phase=RunPhase.COMPLETED, content="OK")
+
+    def _capture_build(**kwargs):  # noqa: ANN003
+        captured["collaboration"] = kwargs.get("collaboration")
+        captured["note_wall"] = kwargs.get("note_wall")
+        return _exec
+
+    monkeypatch.setattr("agentcore.runtime.runs.build_agent_executor", _capture_build)
+    t = tool(Provider([]))
+    result = await t.execute(
+        {
+            "tasks": [{"role": "A", "task": "a"}, {"role": "B", "task": "b"}],
+            "coordination": "wall",
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert result.success is True
+    assert spy.get("delegate.started")["coordination"] == "wall"
+    assert captured["collaboration"] is True
+    assert isinstance(captured["note_wall"], NoteWall)
+    assert t._note_wall is captured["note_wall"]
+
+
+async def test_seed_notes_implies_wall_even_when_none(monkeypatch):
+    """非空 seed_notes 隐含升级为 wall（即使显式 none）。"""
+    from agentcore.runtime.events import EventType
+    from agentcore.runtime.runs.types import RunPhase, RunState
+
+    spy = LogSpy()
+    monkeypatch.setattr(delegate_tool_mod, "logger", spy)
+    captured: dict = {}
+
+    async def _exec(spec, completed):  # noqa: ANN001
+        return RunState(phase=RunPhase.COMPLETED, content="OK")
+
+    def _capture_build(**kwargs):  # noqa: ANN003
+        captured["collaboration"] = kwargs.get("collaboration")
+        captured["note_wall"] = kwargs.get("note_wall")
+        return _exec
+
+    monkeypatch.setattr("agentcore.runtime.runs.build_agent_executor", _capture_build)
+    sink = EventSink()
+    t = tool(Provider([]), sink=sink)
+    result = await t.execute(
+        {
+            "tasks": [{"role": "A", "task": "a"}, {"role": "B", "task": "b"}],
+            "coordination": "none",
+            "seed_notes": [{"kind": "decision", "text": "接口用 REST"}],
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert result.success is True
+    assert spy.get("delegate.started")["coordination"] == "wall"
+    assert captured["collaboration"] is True
+    assert captured["note_wall"] is not None
+    notes = [e for e in sink._history if e.type == EventType.TEAM_NOTE_POSTED]  # noqa: SLF001
+    assert len(notes) == 1
+    assert notes[0].payload["source"] == "ceo"
+    assert notes[0].payload["text"] == "接口用 REST"
+
+
 async def test_delegate_started_logs_who_what_and_first_wave_parallel(monkeypatch):
     # 决策可观测: delegate.started must carry「派了谁·干什么」(agents) + 首波扇出 (parallel),
     # not just a node count — so an offline analysis can see the delegation's input basis.
@@ -406,6 +514,9 @@ def test_schema_exposes_playbook_params_and_relaxes_required():
     assert "playbook_args" in props
     # tasks is no longer HARD-required (playbook is an alternative entry); runtime enforces XOR.
     assert "tasks" not in params.get("required", [])
+    coord = props["coordination"]
+    assert coord["enum"] == ["wall", "none"]
+    assert coord.get("default") == "none"
 
 
 def test_strict_description_separates_rework_from_disposition():

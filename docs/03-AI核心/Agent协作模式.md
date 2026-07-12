@@ -126,6 +126,8 @@ Worker 遇到障碍时按三档策略自主处理，写入 worker system prompt�
 
 **解决的痛**：同扇出的并行兄弟过去只看到「开局快照」（队友产物去重清单 + 兄弟感知块），波内**看不到彼此「进行中」的发现**——各自猜接口 / 字段、最后才发现对不上、返工。便签墙把「开局冻住的快照」升级为「**边干边更新的共享面**」，让「中间的互相影响」真正发生。
 
+**墙的存在性由派单 `coordination` 声明**：`delegate` 批次级参数 `coordination`（`wall` | `none`，**缺省 `none`**）——子任务间存在需要边干边对齐的共享面（共建接口 / 字段 / 文件、结论互相影响、互相审查）→ `wall`；各写各的、互不依赖的正交扇出 → `none`（不建墙、不授便签三件套、无 `team_note_posted`，消灭正交批次的便签开销与 UI 噪音）。引擎接线：`collaboration = 节点数>1 且 coordination=="wall"`（复用既有 `collaboration=False` 路径）。非空 `seed_notes` / `team_brief` 隐含升级为 `wall`；`complexity_hint=light` 隐含 `none`；辩论路径显式 `collaboration=False` 不动。`build_feature` playbook 默认 `wall`。
+
 **本质是「贴便签」，不是「打电话」**（故仍守 §为什么不要 Agent 直接通信）：
 
 - **贴在明处**：每张便签是一条被记录的事件（`team_note_posted`，入 journal），能 fold 进团队卡「团队便签」面板——平台全可见，守玻璃箱。
@@ -138,8 +140,8 @@ Worker 遇到障碍时按三档策略自主处理，写入 worker system prompt�
 |---|---|---|
 | 我定了 X | `post_note(kind=decision)` | 别人要依赖的决定：接口 / 字段名 / 格式 / 命名 |
 | 提个醒 Y | `post_note(kind=heads_up)` | 我踩到的坑 / 发现（如「这个模块是异步的」）|
-| 我领了 Z | `post_note(kind=claim)` | 避免重复 / 撞活——`WriteCoordinator` 防撞的**台面化** |
-| 拉取 | `read_notes` | 干到一半需要某队友已定的接口 / 约定却想不起来 → 主动翻当前整面墙（纯读·排除自己·不动推送游标）|
+| 我领了 Z | `post_note(kind=claim)` | **开工前占坑**——避免重复 / 撞活（完工走 handoff，不贴完工宣告）|
+| 拉取 | `read_notes` | 找推送里没有的旧约定 → 主动翻当前整面墙（纯读·排除自己·不动推送游标）；队友新便签每轮自动推送 |
 
 > **「我卡在 W」不走便签**：缺一个**还不存在**的输入是**计划问题**，走 `escalate kind=dep` + 边界 `replan(add)`（见上 §escalate）。「缺」分两种正好对到两件：(a) 东西已存在 → `read_notes` 读出来；(b) 不存在 → `escalate kind=dep`。
 

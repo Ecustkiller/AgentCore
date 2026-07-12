@@ -452,6 +452,10 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
     verdict: "simplified",
     reason: "产品手册保持不做（本轮决策）",
   },
+  "toolbox/manual/embeds/ManualApprovalCardPreview": {
+    verdict: "simplified",
+    reason: "产品手册内嵌预览，手册保持不做（本轮决策）",
+  },
   "toolbox/manual/embeds/ManualCheckpointCardPreview": {
     verdict: "simplified",
     reason: "产品手册内嵌预览，手册保持不做（本轮决策）",

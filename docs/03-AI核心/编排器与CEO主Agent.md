@@ -63,6 +63,8 @@ CEO 是**管理者**（不是调查员）：它只直接持有「只读 / 检索
 
 > **`complexity_hint` 优化信号 ✅ 已落地**：`delegate` schema 含 `complexity_hint`（`light`/`standard` 两档），CEO 显式声明任务复杂度；引擎据此裁剪规划开销——`light` 时跳过 playbook 匹配、默认 finalize、不注入便签墙与兄弟感知块。**引擎自动推断**：单 worker 且无依赖时，若 CEO 未显式声明，引擎自动设为 `light`；缺省 `standard` 时行为不变。→ 见代码：`tools/builtin/delegate/`、`runtime/resolve/prompt.py`。
 
+> **`coordination` 便签墙开关 ✅ 已落地**：`delegate` 批次级参数 `coordination`（`wall` | `none`，**缺省 `none`**）声明本批次是否需要团队便签墙。`wall`＝子任务间有边干边对齐的共享面（共建接口 / 字段 / 文件、结论互相影响、互相审查）；`none`＝正交扇出（各写各的）——不建墙、不授 `post_note`/`read_notes`/`amend_note`。接线：`collaboration = 节点数>1 且 coordination=="wall"`。非空 `seed_notes` / `team_brief` 隐含升级为 `wall`；`light` 隐含 `none`；`build_feature` playbook 默认 `wall`。辩论路径不动。→ 见代码：`tools/builtin/delegate/`、`runtime/runs/executor_agent.py`；产品语义见 [`Agent协作模式.md` §波内共享上下文](/docs/03-AI核心/Agent协作模式.md)。
+
 > **委派后不重复调查 ✅ 已落地**：CEO 委派后，收尾续轮中不 redo 已委派的工作——系统提示强化「用团队产出写综述，不要重复调查」，而非硬禁只读工具（CEO 收尾仍须偶尔读 worker 产出验证）。→ 见代码：`runtime/resolve/prompt.py`。
 
 > **产出形态：文件落盘 vs 文字直出 ✅ 已落地**：worker 按交付【形态】判定写文件还是写正文；CEO 在 task 里点明落盘要求，`ask_user` 开工卡也说明最终交付是工作区实文件。→ 见代码：`runtime/runs/executor.py`、`runtime/resolve/prompt.py`、`runtime/skills.py`。

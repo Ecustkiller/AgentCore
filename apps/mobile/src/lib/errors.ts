@@ -62,6 +62,22 @@ export function describeStreamHttpError(err: StreamHttpError): {
 }
 
 /**
+ * 账号是否已具备发消息的模型接入 —— 与桌面 `hasModelAccess` 对齐。
+ * `configured` 覆盖 BYOK；`billing_mode === "platform"` 覆盖平台代付路径，
+ * 避免代付用户在聊天空态被误判为「未配置」而看到接入引导。
+ */
+export function hasModelAccess(
+  status:
+    | { configured?: boolean | null; billing_mode?: string | null }
+    | null
+    | undefined,
+): boolean {
+  if (!status) return false;
+  if (status.configured) return true;
+  return status.billing_mode === "platform";
+}
+
+/**
  * Draft / empty-chat copy given BYOK key status. Pure helper so the empty-state
  * branch stays unit-testable without mounting ChatPage.
  */

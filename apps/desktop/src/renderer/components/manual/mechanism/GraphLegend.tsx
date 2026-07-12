@@ -1,8 +1,12 @@
+import {
+  graphBadgeMuted,
+  graphBadgeMutedPlain,
+  modelTierBadge,
+} from "@/components/ui/tone-presets";
 import { MODEL_TIER_META } from "@/stores/execution";
 import {
   Bot,
   CheckCircle2,
-  CornerDownRight,
   Loader2,
   PencilLine,
   Sparkles,
@@ -101,20 +105,15 @@ function LegendGroup({
   );
 }
 
-// 复刻 AgentNode 的徽章样式（这些是纯 span，无 Handle，可安全离开 ReactFlow 渲染）。
+/** 复刻模型档徽章（与 tone-presets.modelTierBadge 同构：纯分类走中性灰）。 */
 const tierBadge = (tier: "strong" | "fast") => (
-  <span
-    className={`rounded-full px-1.5 py-0.5 text-xs font-medium ${
-      tier === "strong"
-        ? "bg-primary/10 text-primary"
-        : "bg-muted text-muted-foreground"
-    }`}
-  >
-    {MODEL_TIER_META[tier].short}
-  </span>
+  <span className={modelTierBadge[tier]}>{MODEL_TIER_META[tier].short}</span>
 );
 
-/** ③ 图例：节点 / 状态 / 连线 / 徽章的含义，样式与聊天内嵌图一字不差。 */
+/**
+ * 图例：节点 / 状态 / 连线 / 徽章。
+ * 样式对齐协作图真实节点（AgentNode / StepEdge / EndpointNode）。
+ */
 export function GraphLegend() {
   return (
     <div className="grid gap-3 lg:grid-cols-2">
@@ -151,7 +150,7 @@ export function GraphLegend() {
       <LegendGroup title="状态（节点色环）">
         <LegendRow
           sample={<Bot size={18} className="text-muted-foreground" />}
-          name="等待中"
+          name="排队中"
           desc="还没轮到或在排队，灰环。"
         />
         <LegendRow
@@ -180,7 +179,7 @@ export function GraphLegend() {
         <LegendRow
           sample={<EdgeSample variant="delegate" />}
           name="委派（虚线）"
-          desc="队长再带小队时的委派线。"
+          desc="队员再带小队时的委派线。"
         />
         <LegendRow
           sample={<EdgeSample variant="continuation" />}
@@ -203,55 +202,32 @@ export function GraphLegend() {
             </span>
           }
           name="模型档"
-          desc="强力档 / 快速档——CEO 表达的能力需求偏好。"
+          desc="强力档 / 快速档——CEO 表达的能力需求偏好（详情 peek 可见）。"
         />
         <LegendRow
           sample={
-            <span className="flex items-center gap-0.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
-              <Sparkles size={10} />
-              深度
+            <span className={graphBadgeMuted}>
+              <PencilLine size={10} className="shrink-0" />
+              {"续 ×N"}
             </span>
           }
-          name="深度思考"
-          desc="最强推理强度。"
+          name="带现场续派"
+          desc="同人接续角标：铅笔 +「续 ×N」；卡片优先露出改点。"
         />
         <LegendRow
-          sample={
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <CornerDownRight size={10} className="text-primary/70" />
-              子任务
-            </span>
-          }
-          name="子任务"
-          desc="嵌套小队里的子队员。"
-        />
-        <LegendRow
-          sample={
-            <span className="flex items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
-              <PencilLine size={10} />
-              vN
-            </span>
-          }
-          name="热修修订 vN"
-          desc="定向唤回改稿：铅笔 + 版本号；卡片优先露出改点。"
-        />
-        <LegendRow
-          sample={
-            <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
-              第 N 轮
-            </span>
-          }
+          sample={<span className={graphBadgeMutedPlain}>第 N 轮</span>}
           name="第 N 轮"
-          desc="辩论续轮角标（与侧栏轮次轨一致），不是热修修订。"
+          desc="辩论续轮角标（与侧栏轮次轨一致），不是带现场续派。"
         />
         <LegendRow
-          sample={
-            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
-              正方
-            </span>
-          }
+          sample={<span className={graphBadgeMutedPlain}>正方</span>}
           name="辩论立场"
           desc="正方 / 反方，图上左右对置后汇到裁决。"
+        />
+        <LegendRow
+          sample={<span className={graphBadgeMutedPlain}>子任务</span>}
+          name="子任务"
+          desc="嵌套小队里的子队员（虚线委派连过来）。"
         />
       </LegendGroup>
     </div>

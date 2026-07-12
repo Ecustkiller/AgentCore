@@ -34,6 +34,7 @@ import {
   StreamHttpError,
   describeStreamHttpError,
   emptyChatCopy,
+  hasModelAccess,
 } from "@/lib/errors";
 import {
   fileArtifactsFromEvents,
@@ -519,12 +520,13 @@ export function ChatPage() {
     }, []),
   });
 
-  // BYOK status for empty-chat guidance (fail-open to welcome if the status call fails).
+  // 模型接入状态（BYOK 已配置或平台代付）for empty-chat guidance
+  // (fail-open to welcome if the status call fails).
   useEffect(() => {
     let alive = true;
     getLlmKey()
       .then((s) => {
-        if (alive) setKeyConfigured(!!s.configured);
+        if (alive) setKeyConfigured(hasModelAccess(s));
       })
       .catch(() => {
         if (alive) setKeyConfigured(true);

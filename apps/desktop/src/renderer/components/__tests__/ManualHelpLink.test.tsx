@@ -3,7 +3,11 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it } from "vitest";
-import { MANUAL_HELP, ManualHelpLink } from "../ManualHelpLink";
+import {
+  MANUAL_HELP,
+  ManualHelpLink,
+  ManualHelpTextLink,
+} from "../ManualHelpLink";
 
 function LocationProbe() {
   const loc = useLocation();
@@ -36,6 +40,25 @@ function renderHelp(to: string) {
   );
 }
 
+function renderTextHelp(to: string, label: string) {
+  return render(
+    <MemoryRouter initialEntries={["/"]}>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <>
+              <ManualHelpTextLink to={to} label={label} />
+              <LocationProbe />
+            </>
+          }
+        />
+        <Route path="/toolbox/manual/*" element={<LocationProbe />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 afterEach(cleanup);
 
 describe("ManualHelpLink", () => {
@@ -50,6 +73,33 @@ describe("ManualHelpLink", () => {
     fireEvent.click(screen.getByRole("button", { name: "看手册说明" }));
     expect(screen.getByTestId("loc").textContent).toBe(
       "/toolbox/manual/collaboration?s=checkpoint",
+    );
+  });
+
+  it("covers autonomy / control deep-links", () => {
+    renderHelp(MANUAL_HELP.autonomy);
+    expect(
+      screen
+        .getByRole("button", { name: "看手册说明" })
+        .getAttribute("data-manual-help"),
+    ).toBe(MANUAL_HELP.autonomy);
+    cleanup();
+    renderHelp(MANUAL_HELP.control);
+    fireEvent.click(screen.getByRole("button", { name: "看手册说明" }));
+    expect(screen.getByTestId("loc").textContent).toBe(
+      "/toolbox/manual/collaboration?s=control",
+    );
+  });
+});
+
+describe("ManualHelpTextLink", () => {
+  it("renders label and navigates on click", () => {
+    renderTextHelp(MANUAL_HELP.debate, "手册·辩论");
+    const btn = screen.getByRole("button", { name: "手册·辩论" });
+    expect(btn.getAttribute("data-manual-help")).toBe(MANUAL_HELP.debate);
+    fireEvent.click(btn);
+    expect(screen.getByTestId("loc").textContent).toBe(
+      "/toolbox/manual/collaboration?s=debate",
     );
   });
 });

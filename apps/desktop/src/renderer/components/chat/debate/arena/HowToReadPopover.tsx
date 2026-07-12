@@ -1,3 +1,4 @@
+import { MANUAL_HELP, ManualHelpTextLink } from "@/components/ManualHelpLink";
 import { Button } from "@/components/ui";
 import {
   Popover,
@@ -72,6 +73,9 @@ export function HowToReadPopover({ form }: { form: DebateForm }) {
             ：仅你可见的倾向标记，不影响 AI 裁决。
           </li>
         </ul>
+        <p className="mt-3 border-t border-border pt-2">
+          <ManualHelpTextLink to={MANUAL_HELP.debate} label="手册·辩论" />
+        </p>
       </PopoverContent>
     </Popover>
   );

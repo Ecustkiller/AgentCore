@@ -48,10 +48,9 @@ describe("manual route / anchor gates", () => {
 
     for (const link of links) {
       if (link.kind === "jump") {
-        const ids = sectionsByChapter.get(link.chapterId);
-        if (!ids?.has(link.to)) {
+        if (!isRegisteredSectionId(link.to)) {
           failures.push(
-            `${link.where}: jump 锚点「${link.to}」不是同章 ${link.chapterId} 的 section id`,
+            `${link.where}: jump 锚点「${link.to}」不在 sectionIds 注册表`,
           );
         }
         continue;
@@ -69,7 +68,7 @@ describe("manual route / anchor gates", () => {
     expect(failures, failures.join("\n")).toEqual([]);
   });
 
-  it("MANUAL_HELP 三条深链对齐手册章与 section", () => {
+  it("MANUAL_HELP 深链对齐手册章与 section", () => {
     const sectionsByChapter = chapterSectionIds();
     const pathChapter = pathToChapterId();
     const failures: string[] = [];
@@ -85,7 +84,9 @@ describe("manual route / anchor gates", () => {
     }
 
     expect(Object.keys(MANUAL_HELP).sort()).toEqual([
+      "autonomy",
       "checkpoint",
+      "control",
       "debate",
       "legend",
     ]);

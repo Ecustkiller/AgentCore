@@ -1,9 +1,15 @@
-// Screenshot harness for static product-manual pages (e.g. #/toolbox/manual/reference).
+// Screenshot harness for static product-manual pages (four chapters).
 //
 // The SSE conformance preview (`scripts/shoot.mjs` → `#/preview`) replays AI event
 // vectors only — it cannot render static routes. This companion script boots the same
 // offline web entry (vite.web.config.ts → main.web.tsx) and deep-links manual routes
 // declared in src/renderer/preview/manual-scenes.json.
+//
+// Wait strategy for real graphs / lazy embeds:
+//   1. data-preview-manual + section marker
+//   2. scroll section into view (instant)
+//   3. data-manual-embed keys (Suspense resolved = no .animate-pulse)
+//   4. for HeroGraph / MechanismScenarios: data-elk-ready="true" (ELK layout done)
 //
 // Usage:
 //   node scripts/shoot-manual.mjs
@@ -37,6 +43,9 @@ const filter = (process.argv[2] ?? "").toLowerCase();
 /** Min PNG size (bytes) — below this is treated as blank / failed capture. */
 const MIN_PNG_BYTES = 8_000;
 
+/** Embed keys that wrap real ELK + React Flow canvases. */
+const ELK_EMBED_KEYS = new Set(["HeroGraph", "MechanismScenarios"]);
+
 async function loadScenes() {
   const scenes = JSON.parse(await readFile(scenesPath, "utf8"));
   if (!Array.isArray(scenes))
@@ -55,6 +64,39 @@ function previewManualFor(scene) {
   // Derive from path: /toolbox/manual/reference → manual-reference
   const m = String(scene.path).match(/\/toolbox\/manual\/([^/?#]+)/);
   return m ? `manual-${m[1]}` : "manual-reference";
+}
+
+async function waitForEmbedReady(page, key) {
+  await page.waitForSelector(`[data-manual-embed="${key}"]`, {
+    timeout: 20_000,
+  });
+  // Lazy chunk + Suspense: wait until pulse fallback is gone inside the embed.
+  await page.waitForFunction(
+    (embedKey) => {
+      const root = document.querySelector(`[data-manual-embed="${embedKey}"]`);
+      if (!root) return false;
+      return !root.querySelector(".animate-pulse");
+    },
+    key,
+    { timeout: 20_000 },
+  );
+  // Scroll embed into view so LazyMount (non-shoot) / layout measure can run.
+  await page.evaluate((embedKey) => {
+    document
+      .querySelector(`[data-manual-embed="${embedKey}"]`)
+      ?.scrollIntoView({ behavior: "instant", block: "center" });
+  }, key);
+  if (!ELK_EMBED_KEYS.has(key)) return;
+  // ELK async layout: EmbeddedGraphCanvas sets data-elk-ready when layout+width ready.
+  await page.waitForSelector(
+    `[data-manual-embed="${key}"] [data-elk-ready="true"]`,
+    { timeout: 25_000 },
+  );
+  await page
+    .waitForSelector(`[data-manual-embed="${key}"] .react-flow`, {
+      timeout: 10_000,
+    })
+    .catch(() => {});
 }
 
 async function main() {
@@ -136,31 +178,26 @@ async function main() {
         `[data-preview-manual="${previewManual}"][data-preview-section="${section}"]`,
         { timeout: 15_000 },
       );
+      // Scroll section first so LazyMount / section-relative embeds can mount.
+      if (scene.section) {
+        await page.evaluate((id) => {
+          document
+            .getElementById(id)
+            ?.scrollIntoView({ behavior: "instant", block: "start" });
+        }, scene.section);
+      }
       const embeds = Array.isArray(scene.waitEmbeds) ? scene.waitEmbeds : [];
       for (const key of embeds) {
-        await page.waitForSelector(`[data-manual-embed="${key}"]`, {
-          timeout: 20_000,
-        });
-        // Lazy chunk + Suspense: wait until pulse fallback is gone inside the embed.
-        await page.waitForFunction(
-          (embedKey) => {
-            const root = document.querySelector(
-              `[data-manual-embed="${embedKey}"]`,
-            );
-            if (!root) return false;
-            return !root.querySelector(".animate-pulse");
-          },
-          key,
-          { timeout: 20_000 },
-        );
+        await waitForEmbedReady(page, key);
       }
-      // Real graphs (HeroGraph / scenarios): wait for at least one react-flow pane if present.
-      if (embeds.some((k) => k === "HeroGraph" || k === "MechanismScenarios")) {
-        await page
-          .waitForSelector(".react-flow", { timeout: 20_000 })
-          .catch(() => {});
-      }
-      if (scene.section) {
+      // Frame: prefer first waited embed (cards/graphs) over section heading.
+      if (embeds.length > 0) {
+        await page.evaluate((embedKey) => {
+          document
+            .querySelector(`[data-manual-embed="${embedKey}"]`)
+            ?.scrollIntoView({ behavior: "instant", block: "start" });
+        }, embeds[0]);
+      } else if (scene.section) {
         await page.evaluate((id) => {
           document
             .getElementById(id)

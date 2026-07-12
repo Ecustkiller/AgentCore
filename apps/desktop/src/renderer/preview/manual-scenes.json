@@ -6,36 +6,49 @@
     "previewManual": "manual-intro"
   },
   {
-    "id": "manual-collaboration-debate",
-    "description": "指挥团队 · 辩论节（记分牌 / 终审预览）",
+    "id": "manual-collaboration-briefing",
+    "description": "指挥团队 · 任务简报节",
     "path": "/toolbox/manual/collaboration",
-    "section": "debate",
-    "previewManual": "manual-collaboration",
-    "waitEmbeds": ["ManualDebateScoreboardPreview", "ManualDebateFinalePreview"]
+    "section": "briefing",
+    "previewManual": "manual-collaboration"
   },
   {
     "id": "manual-collaboration-checkpoint",
-    "description": "指挥团队 · 检查点节（拍板卡预览）",
+    "description": "指挥团队 · 检查点节",
     "path": "/toolbox/manual/collaboration",
     "section": "checkpoint",
-    "previewManual": "manual-collaboration",
-    "waitEmbeds": ["ManualCheckpointCardPreview"]
+    "previewManual": "manual-collaboration"
+  },
+  {
+    "id": "manual-collaboration-debate",
+    "description": "指挥团队 · 辩论室节",
+    "path": "/toolbox/manual/collaboration",
+    "section": "debate",
+    "previewManual": "manual-collaboration"
   },
   {
     "id": "manual-mechanism-live",
-    "description": "看懂协作 · 实况节（HeroGraph）",
+    "description": "看懂协作 · 实况节（HeroGraph 真图）",
     "path": "/toolbox/manual/mechanism",
     "section": "live",
     "previewManual": "manual-mechanism",
     "waitEmbeds": ["HeroGraph"]
   },
   {
+    "id": "manual-mechanism-embeds",
+    "description": "看懂协作 · 协作回合（拍板卡 + 审批卡）",
+    "path": "/toolbox/manual/mechanism",
+    "section": "turnflow",
+    "previewManual": "manual-mechanism",
+    "waitEmbeds": ["ManualCheckpointCardPreview", "ManualApprovalCardPreview"]
+  },
+  {
     "id": "manual-mechanism-scenarios",
-    "description": "看懂协作 · 机制场景图",
+    "description": "看懂协作 · 机制场景（记分牌 + 场景画廊）",
     "path": "/toolbox/manual/mechanism",
     "section": "scenarios",
     "previewManual": "manual-mechanism",
-    "waitEmbeds": ["MechanismScenarios"]
+    "waitEmbeds": ["ManualDebateScoreboardPreview", "MechanismScenarios"]
   },
   {
     "id": "manual-reference",
@@ -59,7 +72,7 @@
   },
   {
     "id": "manual-reference-privacy",
-    "description": "参考手册 · 数据与隐私（反馈上下文说明）",
+    "description": "参考手册 · 数据与隐私",
     "path": "/toolbox/manual/reference",
     "section": "privacy",
     "previewManual": "manual-reference"

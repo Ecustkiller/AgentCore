@@ -43,6 +43,7 @@ def try_start_coordination(
     call_idx: int,
     completion_criteria: Any,
     coordinate: bool,
+    coordination: str = "none",
     session: CoordinationSession | None = None,
 ) -> ToolResult | None:
     """If the coordinate gate passes, arm a background drive and return the start result.
@@ -78,6 +79,7 @@ def try_start_coordination(
             finalize=finalize,
             seed_notes=seed_notes,
             complexity_hint=complexity_hint,
+            coordination=coordination,
             call_idx=call_idx,
             completion_criteria=completion_criteria,
             session=session,
@@ -121,6 +123,7 @@ async def _background_drive(
     call_idx: int,
     completion_criteria: Any,
     session: CoordinationSession,
+    coordination: str = "none",
 ) -> None:
     """Run blocking drive semantics, posting coordination events along the way."""
     from agentcore.tools.builtin.delegate.drive import drive_coordinated
@@ -134,6 +137,7 @@ async def _background_drive(
             finalize=finalize,
             seed_notes=seed_notes,
             complexity_hint=complexity_hint,
+            coordination=coordination,
             call_idx=call_idx,
             completion_criteria=completion_criteria,
             session=session,

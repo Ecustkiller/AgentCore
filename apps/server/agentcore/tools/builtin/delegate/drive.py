@@ -111,6 +111,7 @@ async def drive(
     finalize: bool,
     seed_notes: list[dict[str, str]] | None = None,
     complexity_hint: str = "standard",
+    coordination: str = "none",
     call_idx: int | None = None,
     completion_criteria: Any = None,
     coordinate: bool = True,
@@ -160,6 +161,7 @@ async def drive(
             finalize=finalize,
             seed_notes=seed_notes,
             complexity_hint=complexity_hint,
+            coordination=coordination,
             call_idx=call_idx,
             completion_criteria=completion_criteria,
             coordinate=coordinate,
@@ -184,8 +186,9 @@ async def drive(
     # amend on it) AND stashed on the tool so format_for_ceo reaches it on BOTH finalize paths
     # (normal 终态 below + replan(stop) finalize_stopped). One wall per drive call = per fan-out
     # batch, matching the wall's existing per-batch visibility scope.
-    # light 委派跳过便签墙初始化（build_agent_executor 在 note_wall=None 时会自建空墙，开销可忽略）。
-    if complexity_hint == "light":
+    # 存在性由 CEO 的 coordination 声明（缺省 none）；light 隐含 none。collaboration 仍走既有开关。
+    collaboration = len(plan.nodes) > 1 and coordination == "wall"
+    if not collaboration:
         note_wall = None
         tool._note_wall = None
     else:
@@ -246,7 +249,7 @@ async def drive(
         escalation_timeout=tool._checkpoint_timeout_seconds,
         escalation_armed=checkpoint_active(tool),
         note_wall=note_wall,
-        collaboration=len(plan.nodes) > 1,
+        collaboration=collaboration,
         team_brief=tool._team_brief,
     )
 
@@ -903,6 +906,7 @@ async def drive_coordinated(
     finalize: bool,
     seed_notes: list[dict[str, str]] | None = None,
     complexity_hint: str = "standard",
+    coordination: str = "none",
     call_idx: int | None = None,
     completion_criteria: Any = None,
     session: Any,
@@ -916,6 +920,7 @@ async def drive_coordinated(
         finalize=finalize,
         seed_notes=seed_notes,
         complexity_hint=complexity_hint,
+        coordination=coordination,
         call_idx=call_idx,
         completion_criteria=completion_criteria,
         coordinate=False,

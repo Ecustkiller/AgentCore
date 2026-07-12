@@ -167,6 +167,9 @@ async def _settle_resume(
                     finalize=False,
                     seed_notes=None,
                     complexity_hint="standard",
+                    # Prefer the in-process mode from the live tool; missing (process
+                    # restart) → wall so mid-flight teams keep the prior default.
+                    coordination=getattr(delegate_tool, "_coordination", None) or "wall",
                     call_idx=0,
                     completion_criteria=None,
                     coordinate=True,

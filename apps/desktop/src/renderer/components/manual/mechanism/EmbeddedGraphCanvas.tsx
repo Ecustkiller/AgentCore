@@ -189,13 +189,16 @@ export function EmbeddedGraphCanvas({
     );
   }, [nodes, edges, layout, layoutKind]);
 
+  const elkReady = Boolean(layout && colWidth > 0);
+
   return (
     <div
       ref={containerRef}
       className="relative overflow-hidden rounded-xl border border-border bg-card"
       style={{ height: fit?.height ?? EMBED_MIN_HEIGHT }}
+      data-elk-ready={elkReady ? "true" : "false"}
     >
-      {layout && colWidth > 0 && (
+      {elkReady && (
         <ReactFlow
           nodes={flowNodes}
           edges={flowEdges}

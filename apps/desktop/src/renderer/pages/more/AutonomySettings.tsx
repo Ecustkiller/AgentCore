@@ -1,3 +1,4 @@
+import { MANUAL_HELP, ManualHelpLink } from "@/components/ManualHelpLink";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import { api } from "@/services/api";
 import { setCachedAutonomyPolicy } from "@/services/autonomyPolicy";
@@ -82,6 +83,7 @@ export function AutonomySettings() {
       <SettingsHeader
         title="自主度"
         description="控制团队开工时能力授权的节奏。只影响写文件 / 跑代码等可授权工具，不影响计划确认与检查点。"
+        action={<ManualHelpLink to={MANUAL_HELP.autonomy} />}
       />
 
       <section className="mt-6 space-y-2">

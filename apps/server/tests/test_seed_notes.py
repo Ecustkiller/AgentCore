@@ -8,6 +8,7 @@ from agentcore.tools.builtin.delegate.seed_notes import (
     MAX_TEAM_BRIEF_CHARS,
     parse_seed_notes,
     parse_team_brief,
+    resolve_coordination,
     seed_note_wall,
 )
 
@@ -76,3 +77,81 @@ def test_ceo_seeds_visible_to_workers_via_new_for():
     fresh = wall.new_for("worker-run-1")
     assert [n.text for n in fresh] == ["共享验收维度"]
     assert fresh[0].run_id == CEO_SEED_RUN_ID
+
+
+def test_resolve_coordination_defaults_none():
+    assert (
+        resolve_coordination(
+            raw=None, complexity_hint="standard", seed_notes=None, team_brief=None
+        )
+        == "none"
+    )
+
+
+def test_resolve_coordination_explicit_wall():
+    assert (
+        resolve_coordination(
+            raw="wall", complexity_hint="standard", seed_notes=None, team_brief=None
+        )
+        == "wall"
+    )
+
+
+def test_resolve_coordination_light_forces_none():
+    assert (
+        resolve_coordination(
+            raw="wall",
+            complexity_hint="light",
+            seed_notes=[{"text": "x"}],
+            team_brief="brief",
+        )
+        == "none"
+    )
+
+
+def test_resolve_coordination_seed_notes_upgrades_none():
+    assert (
+        resolve_coordination(
+            raw="none",
+            complexity_hint="standard",
+            seed_notes=[{"text": "定了 X"}],
+            team_brief=None,
+        )
+        == "wall"
+    )
+
+
+def test_resolve_coordination_team_brief_upgrades_none():
+    assert (
+        resolve_coordination(
+            raw=None,
+            complexity_hint="standard",
+            seed_notes=None,
+            team_brief="共享验收",
+        )
+        == "wall"
+    )
+
+
+def test_resolve_coordination_build_feature_playbook_defaults_wall():
+    assert (
+        resolve_coordination(
+            raw=None,
+            complexity_hint="standard",
+            seed_notes=None,
+            team_brief=None,
+            playbook="build_feature",
+        )
+        == "wall"
+    )
+    # Explicit none is respected when there is no seed/brief upgrade.
+    assert (
+        resolve_coordination(
+            raw="none",
+            complexity_hint="standard",
+            seed_notes=None,
+            team_brief=None,
+            playbook="build_feature",
+        )
+        == "none"
+    )

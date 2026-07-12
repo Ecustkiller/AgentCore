@@ -39,6 +39,11 @@ export const EMBED_REGISTRY: Record<string, EmbedComponent> = {
       default: m.ManualCheckpointCardPreview,
     })),
   ),
+  ManualApprovalCardPreview: lazy(() =>
+    import("./embeds").then((m) => ({
+      default: m.ManualApprovalCardPreview,
+    })),
+  ),
 };
 
 export function resolveEmbed(key: string): EmbedComponent | undefined {

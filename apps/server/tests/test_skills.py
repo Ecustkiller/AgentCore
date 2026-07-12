@@ -226,6 +226,16 @@ def test_team_orchestration_skill_teaches_review_contract_template():
 def test_team_orchestration_skill_teaches_seed_notes_and_team_brief():
     body = _body("team_orchestration_advanced")
     assert "seed_notes" in body and "team_brief" in body
+    assert 'coordination="wall"' in body or "coordination" in body
+    assert "wall" in body and "none" in body
+    assert "正交" in body or "互不依赖" in body
+
+
+def test_team_orchestration_skill_teaches_coordination_wall_vs_none():
+    body = _body("team_orchestration_advanced")
+    assert "coordination" in body
+    assert "wall" in body and "none" in body
+    assert "build_feature" in body
 
 
 def test_debate_skill_teaches_debate_tool_forms_and_dual_products():

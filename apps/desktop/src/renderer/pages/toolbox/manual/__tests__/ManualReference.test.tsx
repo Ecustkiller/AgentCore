@@ -54,12 +54,12 @@ describe("ManualReference", () => {
 
   it("marks upcoming tools and BYOK model FAQ", () => {
     renderReference();
-    expect(screen.getByText(/MCP（即将上线）/)).toBeTruthy();
-    expect(screen.getByText(/A2A（即将上线）/)).toBeTruthy();
+    expect(screen.getByText(/MCP（规划中）/)).toBeTruthy();
+    expect(screen.getByText(/A2A（规划中）/)).toBeTruthy();
     expect(screen.getByText(/其他创作工具（即将上线）/)).toBeTruthy();
     expect(screen.getByText(/白板（已可用）/)).toBeTruthy();
     expect(screen.getByText("用的什么模型？")).toBeTruthy();
-    expect(screen.getByText(/OpenAI \/ Kimi \/ 智谱/)).toBeTruthy();
+    expect(screen.getByText(/OpenAI \/ DeepSeek \/ Kimi \/ 智谱/)).toBeTruthy();
     expect(screen.getByText("画布和白板有什么区别？")).toBeTruthy();
   });
 
@@ -67,6 +67,8 @@ describe("ManualReference", () => {
     renderReference();
     expect(screen.getByText("怎么强制多人干？")).toBeTruthy();
     expect(screen.getByText("怎么下任务")).toBeTruthy();
+    expect(screen.getByText("检查点怎么答？")).toBeTruthy();
+    expect(screen.getByText("检查点与审批")).toBeTruthy();
     expect(screen.getByText("跑偏了 / 中途想改方向？")).toBeTruthy();
     expect(screen.getByText("中途接管")).toBeTruthy();
   });
@@ -74,6 +76,21 @@ describe("ManualReference", () => {
   it("renders settings rows including memory and autonomy", () => {
     renderReference();
     expect(screen.getByText("AI 记忆")).toBeTruthy();
+    expect(screen.getAllByText("自主度").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders glossary terms aligned with product glossary", () => {
+    renderReference();
+    expect(screen.getByText("队员")).toBeTruthy();
+    expect(screen.getByText("放行")).toBeTruthy();
+    expect(screen.getByText("已停止")).toBeTruthy();
+    expect(screen.getByText("重新生成")).toBeTruthy();
+    expect(screen.getByText("带现场续派（同人接续）")).toBeTruthy();
+    expect(screen.getByText("辩论室")).toBeTruthy();
+    expect(screen.getByText("接续链")).toBeTruthy();
+    expect(screen.getByText("站队")).toBeTruthy();
+    expect(screen.getAllByText("画布").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("白板").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("自主度").length).toBeGreaterThanOrEqual(1);
   });
 });

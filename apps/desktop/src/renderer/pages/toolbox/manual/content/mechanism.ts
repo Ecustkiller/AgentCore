@@ -2,7 +2,13 @@ import { APP_PATHS } from "../paths";
 import { MANUAL_SECTION_IDS } from "../sectionIds";
 import type { ManualChapterContent } from "../types";
 
-/** 看懂协作（选读）——结构化内容源；真图仍走 embed。 */
+/**
+ * 看懂协作（选读）——结构化内容源；真图 / 真 UI 经 embed 槽接入。
+ *
+ * 口径：机制透明是信任资产——用用户叙事讲清「团队怎么开工、怎么分批、怎么收口」，
+ * 禁止实现术语（SSE / WaveScheduler / ReAct / finish_reason / depends_on /
+ * Prepare·Execute·Finalize / max_parallel 等）。
+ */
 export const mechanismChapter: ManualChapterContent = {
   id: "mechanism",
   path: APP_PATHS.toolbox.manual.mechanism,
@@ -65,21 +71,26 @@ export const mechanismChapter: ManualChapterContent = {
           items: [
             {
               title: "接单准备",
-              desc: "CEO 接到你的目标，备好该用的能力与对话上下文。简单问题当场答；只有需要产出、变更或多人协作时，才组团。",
+              desc: "CEO 接到你的目标，备好该用的能力与对话上下文。闲聊或简单问答当场答；只有需要产出、变更或多人协作时，才组团。",
               icon: "Target",
             },
             {
               title: "分工推进",
-              desc: "CEO 拆活、派人：能同时干的一起开干，有先后的按依赖排队；每个人干完，产出交给下一位或汇总回 CEO。",
+              desc: "CEO 拆活、派人：没有先后依赖的人同一批一起开干；有先后的等上游交活再解锁下一批。每位队员干完，产出交给下一位或汇总回 CEO。中途若要你拍板或放行敏感操作，会停下来问你——其他还能并行的人不受影响。",
               icon: "UsersRound",
               highlight: true,
             },
             {
               title: "收尾交付",
-              desc: "CEO 用自己的声音把结果交给你。中途断线也会尽量保住已完成的部分，不会一刀切全丢。",
+              desc: "活干完后回到 CEO，用自己的声音把结果交给你。中途断线也会尽量保住已完成的部分，不会一刀切全丢。",
               icon: "ShieldCheck",
             },
           ],
+        },
+        {
+          type: "callout",
+          variant: "info",
+          text: "分批推进看的是分工有没有先后，不是另开一种「并行模式」——能一起干的就一起干，必须等的就排队。",
         },
       ],
     },
@@ -105,15 +116,15 @@ export const mechanismChapter: ManualChapterContent = {
             },
             {
               title: "协作图先成形",
-              desc: "本批队员节点一次性点亮为「等待中」——开跑前你就能看见整张分工图。",
+              desc: "本批队员节点一次性点亮为排队态——开跑前你就能看见整张分工图。",
             },
             {
               title: "按依赖分批推进",
-              desc: "没有先后依赖的人同一批同时开工；有依赖的等上游齐了再解锁下一批。",
+              desc: "没有先后依赖的人同一批同时开工；有依赖的等上游齐了再解锁下一批。一批人同时干活时也有人数上限，超了会自动拆成更多批。",
             },
             {
               title: "队员各自干活",
-              desc: "每位队员独立推进自己的任务，答案边写边流到节点上，入边走粒子。",
+              desc: "每位队员独立推进自己的任务，答案边写边流到节点上，入边走粒子。需要你拍板或放行工具时，会单独停下来问你。",
             },
             {
               title: "CEO 收口汇报",
@@ -125,6 +136,17 @@ export const mechanismChapter: ManualChapterContent = {
             },
           ],
         },
+        {
+          type: "paragraph",
+          text: "中途你会看见的真界面",
+          emphasis: true,
+        },
+        {
+          type: "paragraph",
+          text: "关键岔路弹出拍板卡；写文件、跑代码等敏感操作要你点「允许」才放行——下面就是对话里同一套组件，不是截图。",
+        },
+        { type: "embed", key: "ManualCheckpointCardPreview" },
+        { type: "embed", key: "ManualApprovalCardPreview" },
       ],
     },
     {
@@ -145,6 +167,16 @@ export const mechanismChapter: ManualChapterContent = {
           variant: "info",
           text: "不是截图，是实时渲染的真实组件。滚到才加载，随便看。",
         },
+        {
+          type: "paragraph",
+          text: "辩论时，记分牌也是真组件",
+          emphasis: true,
+        },
+        {
+          type: "paragraph",
+          text: "辩题、轮次、阵营比分与动量——和辩论室顶栏同一套。",
+        },
+        { type: "embed", key: "ManualDebateScoreboardPreview" },
         { type: "embed", key: "MechanismScenarios" },
       ],
     },

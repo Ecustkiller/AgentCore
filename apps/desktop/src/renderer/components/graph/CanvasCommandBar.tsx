@@ -2,12 +2,12 @@ import { FollowupChips } from "@/components/chat/FollowupChips";
 import { TurnComposer } from "@/components/chat/message-input/TurnComposer";
 import { IconButton } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { draftKeyFor, useComposerDraftStore } from "@/stores/composer";
 import {
   useActiveGenerating,
   useActiveMessages,
   useConversationStore,
 } from "@/stores/conversation";
-import { draftKeyFor, useComposerDraftStore } from "@/stores/composer";
 import { ChevronDown, PenLine } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -71,6 +71,7 @@ export function CanvasCommandBar({
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Remount / conversation / empty-state change → reset open policy.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: conversationId is an intentional re-run key — reset the open policy when switching conversations.
   useEffect(() => {
     setExpanded(emptyConversation);
   }, [conversationId, emptyConversation]);
@@ -117,10 +118,7 @@ export function CanvasCommandBar({
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-3">
-      <div
-        ref={panelRef}
-        className="pointer-events-auto w-full max-w-3xl"
-      >
+      <div ref={panelRef} className="pointer-events-auto w-full max-w-3xl">
         {waiting && (
           <div className="mb-1 text-center text-xs text-muted-foreground">
             新回合执行中，画布将自动跟随…
@@ -151,9 +149,7 @@ export function CanvasCommandBar({
           <button
             type="button"
             onClick={expand}
-            aria-label={
-              hasDraft ? "展开指令栏（有待发送草稿）" : "展开指令栏"
-            }
+            aria-label={hasDraft ? "展开指令栏（有待发送草稿）" : "展开指令栏"}
             className={cn(
               "flex w-full items-center gap-2 rounded-xl border px-3 py-2.5 text-left shadow-md backdrop-blur transition-colors",
               hasDraft

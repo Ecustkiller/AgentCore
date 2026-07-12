@@ -5,12 +5,19 @@
  */
 
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it } from "vitest";
-import { SyncStatusHint } from "../SyncStatusHint";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PENDING_REVEAL_MS, SyncStatusHint } from "../SyncStatusHint";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+beforeEach(() => {
+  vi.useFakeTimers();
+});
 
 function wrap(ui: ReactNode) {
   return render(<TooltipProvider>{ui}</TooltipProvider>);
@@ -22,17 +29,65 @@ describe("SyncStatusHint", () => {
     expect(container.childElementCount).toBe(0);
   });
 
-  it("shows 待同步 for synced_pending", () => {
+  it("stays silent within the pending reveal threshold", () => {
+    const { container } = wrap(<SyncStatusHint syncStatus="synced_pending" />);
+    expect(screen.queryByTestId("sync-status-synced_pending")).toBeNull();
+    expect(container.childElementCount).toBe(0);
+
+    act(() => {
+      vi.advanceTimersByTime(PENDING_REVEAL_MS - 1);
+    });
+    expect(screen.queryByTestId("sync-status-synced_pending")).toBeNull();
+  });
+
+  it("shows 待同步 after the pending reveal threshold", () => {
     wrap(<SyncStatusHint syncStatus="synced_pending" />);
+
+    act(() => {
+      vi.advanceTimersByTime(PENDING_REVEAL_MS);
+    });
+
     const el = screen.getByTestId("sync-status-synced_pending");
     expect(el.textContent).toContain("待同步");
     expect(screen.getByLabelText("待同步")).toBeTruthy();
   });
 
-  it("shows 已同步 for synced", () => {
-    wrap(<SyncStatusHint syncStatus="synced" />);
+  it("flashes 已同步 only when 待同步 was actually visible", () => {
+    const { rerender } = wrap(<SyncStatusHint syncStatus="synced_pending" />);
+
+    act(() => {
+      vi.advanceTimersByTime(PENDING_REVEAL_MS);
+    });
+    expect(screen.getByTestId("sync-status-synced_pending")).toBeTruthy();
+
+    rerender(
+      <TooltipProvider>
+        <SyncStatusHint syncStatus="synced" />
+      </TooltipProvider>,
+    );
+
     const el = screen.getByTestId("sync-status-synced");
     expect(el.textContent).toContain("已同步");
     expect(screen.getByLabelText("已同步")).toBeTruthy();
+  });
+
+  it("stays silent on synced when pending never became visible", () => {
+    const { rerender, container } = wrap(
+      <SyncStatusHint syncStatus="synced_pending" />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(PENDING_REVEAL_MS - 1);
+    });
+    expect(screen.queryByTestId("sync-status-synced_pending")).toBeNull();
+
+    rerender(
+      <TooltipProvider>
+        <SyncStatusHint syncStatus="synced" />
+      </TooltipProvider>,
+    );
+
+    expect(screen.queryByTestId("sync-status-synced")).toBeNull();
+    expect(container.childElementCount).toBe(0);
   });
 });

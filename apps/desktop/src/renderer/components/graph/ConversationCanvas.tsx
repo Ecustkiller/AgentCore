@@ -363,8 +363,8 @@ function ConversationCanvasInner() {
                   className="mx-auto mb-3 text-muted-foreground"
                 />
                 <p className="text-sm text-muted-foreground">
-                  还没有回合。用底部指令入口下达一个需要多 Agent
-                  协作的任务，CEO 组好队后这里就会展开画布。
+                  还没有回合。用底部指令入口下达一个需要多 Agent 协作的任务，CEO
+                  组好队后这里就会展开画布。
                 </p>
               </div>
             </div>

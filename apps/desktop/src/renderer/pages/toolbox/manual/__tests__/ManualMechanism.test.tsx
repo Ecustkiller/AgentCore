@@ -28,8 +28,23 @@ describe("ManualMechanism", () => {
     expect(screen.getByText("收尾交付")).toBeTruthy();
     expect(screen.getByText("你说出目标")).toBeTruthy();
     expect(screen.getByText("答案落进气泡")).toBeTruthy();
+    expect(screen.getByText("中途你会看见的真界面")).toBeTruthy();
     expect(screen.queryByText(/WaveScheduler/)).toBeNull();
     expect(screen.queryByText(/finish_reason/)).toBeNull();
     expect(screen.queryByText(/ReAct/)).toBeNull();
+    expect(screen.queryByText(/depends_on/)).toBeNull();
+    expect(screen.queryByText(/max_parallel/)).toBeNull();
+
+    const embeds = Array.from(
+      document.querySelectorAll("[data-manual-embed]"),
+    ).map((el) => el.getAttribute("data-manual-embed"));
+    expect(embeds).toEqual([
+      "HeroGraph",
+      "GraphLegend",
+      "ManualCheckpointCardPreview",
+      "ManualApprovalCardPreview",
+      "ManualDebateScoreboardPreview",
+      "MechanismScenarios",
+    ]);
   });
 });

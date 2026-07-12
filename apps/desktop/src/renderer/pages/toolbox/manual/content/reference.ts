@@ -1,5 +1,5 @@
 import { APP_PATHS } from "../paths";
-import { MANUAL_SECTION_IDS, manualHref } from "../sectionIds";
+import { MANUAL_SECTION_IDS } from "../sectionIds";
 import type { ManualChapterContent } from "../types";
 
 /** 参考 · 排查 · 信任 —— 结构化内容源（无 JSX）。 */
@@ -66,12 +66,12 @@ export const referenceChapter: ManualChapterContent = {
               desc: "文档 / 思维导图 / 表格 / 幻灯片 / 流程图 / 表单 / 可运行产物——尚未开放。",
             },
             {
-              title: "MCP（即将上线）",
-              desc: "接入第三方工具与数据源的行业标准协议。",
+              title: "MCP（规划中）",
+              desc: "接入第三方工具与数据源的行业标准协议——工具箱「集成 · 连接器」仍为占位。",
             },
             {
-              title: "A2A（即将上线）",
-              desc: "连接外部 Agent 的行业标准协议。",
+              title: "A2A（规划中）",
+              desc: "连接外部 Agent 的行业标准协议——尚未开放入口。",
             },
           ],
         },
@@ -230,14 +230,30 @@ export const referenceChapter: ManualChapterContent = {
                     {
                       text: "怎么下任务",
                       link: {
-                        kind: "go",
-                        to: manualHref(
-                          "collaboration",
-                          MANUAL_SECTION_IDS.collaboration.briefing,
-                        ),
+                        kind: "jump",
+                        to: MANUAL_SECTION_IDS.collaboration.briefing,
                       },
                     },
                     "——并行 / 串行 / 辩论的说法都在那。",
+                  ],
+                },
+              ],
+            },
+            {
+              q: "检查点怎么答？",
+              a: [
+                {
+                  type: "text",
+                  text: [
+                    "见「指挥你的团队」· ",
+                    {
+                      text: "检查点与审批",
+                      link: {
+                        kind: "jump",
+                        to: MANUAL_SECTION_IDS.collaboration.checkpoint,
+                      },
+                    },
+                    "——拍板卡、审批放行与计划复核都在那。",
                   ],
                 },
               ],
@@ -252,25 +268,11 @@ export const referenceChapter: ManualChapterContent = {
                     {
                       text: "中途接管",
                       link: {
-                        kind: "go",
-                        to: manualHref(
-                          "collaboration",
-                          MANUAL_SECTION_IDS.collaboration.control,
-                        ),
+                        kind: "jump",
+                        to: MANUAL_SECTION_IDS.collaboration.control,
                       },
                     },
-                    "（纠偏、带现场续派、停止）与 ",
-                    {
-                      text: "检查点与审批",
-                      link: {
-                        kind: "go",
-                        to: manualHref(
-                          "collaboration",
-                          MANUAL_SECTION_IDS.collaboration.checkpoint,
-                        ),
-                      },
-                    },
-                    "——不在这里复述。",
+                    "——纠偏、带现场续派、停止，不在这里复述。",
                   ],
                 },
               ],
@@ -350,7 +352,7 @@ export const referenceChapter: ManualChapterContent = {
                       text: "模型配置",
                       link: { kind: "go", to: APP_PATHS.more.model },
                     },
-                    " 接 OpenAI / Kimi / 智谱 / 豆包 / OpenRouter，或填自定义端点。全链路用你选的那一个模型。",
+                    " 接 OpenAI / DeepSeek / Kimi / 智谱 / 豆包 / OpenRouter，或填自定义端点。全链路用你选的那一个模型。",
                   ],
                 },
               ],
@@ -525,6 +527,15 @@ export const referenceChapter: ManualChapterContent = {
               ],
             },
             {
+              q: "对话",
+              a: [
+                {
+                  type: "text",
+                  text: "你与团队的一通聊天单元（对话页 / 对话列表）。中文一律「对话」，不用「会话」指这层实体。",
+                },
+              ],
+            },
+            {
               q: "协作图",
               a: [
                 {
@@ -548,6 +559,24 @@ export const referenceChapter: ManualChapterContent = {
                 {
                   type: "text",
                   text: "工具箱里的独立创作工具（已可用）——自由摆元素、读图协作。≠ 画布。",
+                },
+              ],
+            },
+            {
+              q: "辩论室",
+              a: [
+                {
+                  type: "text",
+                  text: "辩论回合的赛事页呈现——记分牌 + 剧本主列 + 终审舞台；入口为状态条「打开辩论室」或全屏「辩论室」tab。",
+                },
+              ],
+            },
+            {
+              q: "站队",
+              a: [
+                {
+                  type: "text",
+                  text: "辩论记分牌上点选你的倾向——仅你可见，绝不改写 AI 裁决；会话内态，重载即重置。",
                 },
               ],
             },
@@ -593,6 +622,15 @@ export const referenceChapter: ManualChapterContent = {
                 {
                   type: "text",
                   text: "唤回刚干完的同一队员，带着完整现场接着改稿或接强相关新任务——不是新队员从零来。",
+                },
+              ],
+            },
+            {
+              q: "接续链",
+              a: [
+                {
+                  type: "text",
+                  text: "协作图上同一现场根的「续 ×N」节点链；状态条可显「接续 N 次」。有接续标记才是同人，无标记的同角色再委派仍是冷启动新人。",
                 },
               ],
             },

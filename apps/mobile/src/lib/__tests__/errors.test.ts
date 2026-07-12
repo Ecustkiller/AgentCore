@@ -5,6 +5,7 @@ import {
   describeStreamHttpError,
   emptyChatCopy,
   errorActionForCode,
+  hasModelAccess,
 } from "../errors";
 
 describe("errorActionForCode", () => {
@@ -72,5 +73,25 @@ describe("emptyChatCopy", () => {
     expect(copy.title).toBe("开始新对话");
     expect(copy.subtitle).toContain("Agent 团队");
     expect(copy.action).toBeNull();
+  });
+});
+
+describe("hasModelAccess", () => {
+  it("treats a configured BYOK key as access", () => {
+    expect(hasModelAccess({ configured: true })).toBe(true);
+  });
+
+  it("treats platform billing as access even without a BYOK key", () => {
+    expect(
+      hasModelAccess({ configured: false, billing_mode: "platform" }),
+    ).toBe(true);
+  });
+
+  it("denies access when unconfigured and not platform-billed", () => {
+    expect(hasModelAccess({ configured: false, billing_mode: "byok" })).toBe(
+      false,
+    );
+    expect(hasModelAccess({ configured: false })).toBe(false);
+    expect(hasModelAccess(null)).toBe(false);
   });
 });

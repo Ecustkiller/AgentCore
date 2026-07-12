@@ -153,6 +153,8 @@ class DelegateTool:
         self._note_wall: NoteWall | None = None
         # Turn-level team consensus (team_brief): survives across delegate calls in one CEO turn.
         self._team_brief: str | None = None
+        # Last resolved note-wall coordination mode (wall|none); resume/replan reuse it.
+        self._coordination: str = "none"
 
     def _kickoff_system_prompt(self) -> str:
         return self._system_prompt
@@ -286,6 +288,7 @@ class DelegateTool:
         from agentcore.tools.builtin.delegate.seed_notes import (
             parse_seed_notes,
             parse_team_brief,
+            resolve_coordination,
         )
 
         seed_notes, seed_err = parse_seed_notes(arguments.get("seed_notes"))
@@ -297,6 +300,16 @@ class DelegateTool:
             if brief_err:
                 return ToolResult(tool_call_id="", success=False, output=brief_err, error=brief_err)
             self._team_brief = brief
+
+        playbook_name = playbook.strip() if isinstance(playbook, str) and playbook.strip() else None
+        coordination = resolve_coordination(
+            raw=arguments.get("coordination") if "coordination" in arguments else None,
+            complexity_hint=complexity_hint,
+            seed_notes=seed_notes,
+            team_brief=self._team_brief,
+            playbook=playbook_name,
+        )
+        self._coordination = coordination
 
         record_plan_snapshot(plan)
 
@@ -318,6 +331,7 @@ class DelegateTool:
             call=call_idx,
             parallel=sum(1 for n in plan.nodes if not n.depends_on),
             complexity_hint=complexity_hint,
+            coordination=coordination,
             plan=[
                 {"id": n.run_id, "role": n.role, "depends_on": n.depends_on}
                 for n in plan.nodes
@@ -365,6 +379,7 @@ class DelegateTool:
             finalize=bool(arguments.get("finalize")),
             seed_notes=seed_notes,
             complexity_hint=complexity_hint,
+            coordination=coordination,
             call_idx=call_idx,
             completion_criteria=arguments.get("completion_criteria"),
             # Omit → True（默认协调）；显式 false → 经典阻塞。勿用 bool(get())，
@@ -394,6 +409,7 @@ class DelegateTool:
             finalize=finalize,
             seed_notes=seed_notes or [],
             complexity_hint=complexity_hint,
+            coordination=self._coordination,
         )
 
     async def resume_plan(
@@ -442,6 +458,7 @@ class DelegateTool:
             execution_id=execution_id,
             seed_completed=seed_completed,
             finalize=False,
+            coordination=self._coordination,
             coordinate=coordinate,
         )
 
@@ -537,6 +554,7 @@ class DelegateTool:
             execution_id=sup.execution_id,
             seed_completed=sup.completed,
             finalize=sup.finalize,
+            coordination=self._coordination,
             coordinate=False,
         )
 

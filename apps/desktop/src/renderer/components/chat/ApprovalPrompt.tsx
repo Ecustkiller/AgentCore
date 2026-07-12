@@ -1,3 +1,4 @@
+import { MANUAL_HELP, ManualHelpLink } from "@/components/ManualHelpLink";
 import { CodeBlock } from "@/components/chat/CodeBlock";
 import {
   OrphanedInteractionCard,
@@ -97,7 +98,14 @@ export function ApprovalPrompt() {
   );
 }
 
-function ApprovalCard({ approval }: { approval: ApprovalView }) {
+/** 单张工具审批卡。可选 `onDecide` 供手册等纯演示覆盖默认提交路径。 */
+export function ApprovalCard({
+  approval,
+  onDecide: onDecideProp,
+}: {
+  approval: ApprovalView;
+  onDecide?: (decision: ApprovalDecision) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [clicked, setClicked] = useState<ApprovalDecision | null>(null);
 
@@ -127,6 +135,10 @@ function ApprovalCard({ approval }: { approval: ApprovalView }) {
 
   const onDecide = (decision: ApprovalDecision) => {
     setClicked(decision);
+    if (onDecideProp) {
+      onDecideProp(decision);
+      return;
+    }
     void decideApproval(approval, decision).catch((err) => {
       notifyError(err, "操作失败");
     });
@@ -146,11 +158,16 @@ function ApprovalCard({ approval }: { approval: ApprovalView }) {
           <ShieldAlert size={16} />
         </DecisionCardIcon>
         <div className="min-w-0 flex-1">
-          <p className="text-sm text-foreground">
-            <span className="font-medium">Agent 请求执行</span>
-            <span className="text-muted-foreground"> · </span>
-            <span className="font-medium">{toolLabel(approval.toolName)}</span>
-          </p>
+          <div className="flex items-center gap-1">
+            <p className="min-w-0 flex-1 text-sm text-foreground">
+              <span className="font-medium">Agent 请求执行</span>
+              <span className="text-muted-foreground"> · </span>
+              <span className="font-medium">
+                {toolLabel(approval.toolName)}
+              </span>
+            </p>
+            <ManualHelpLink to={MANUAL_HELP.autonomy} />
+          </div>
           <WaitingForDecisionHint />
           {headline && (
             <SimpleTooltip label={headline}>

@@ -291,11 +291,25 @@ DELEGATE_PARAMETERS = {
                 + "；".join(f"{p.name}：{p.slots}" for p in PLAYBOOKS.values())
             ),
         },
+        "coordination": {
+            "type": "string",
+            "enum": ["wall", "none"],
+            "default": "none",
+            "description": (
+                "可选，默认 none。声明本批次是否需要团队便签墙（波内边干边对齐的共享面）。"
+                "wall＝子任务间存在需要边干边对齐的共享面（共建接口 / 字段 / 文件、结论互相影响、"
+                "互相审查）——建墙并授予 post_note / read_notes / amend_note；"
+                "none＝各写各的、互不依赖（正交扇出）——不建墙、不授便签三件套，省开销与 UI 噪音。"
+                "传了非空 seed_notes / team_brief 时即使填 none 也会隐含升级为 wall；"
+                "complexity_hint=light 隐含 none。辩论路径不受本参数影响。"
+            ),
+        },
         "seed_notes": {
             "type": "array",
             "description": (
                 "可选：主 Agent 在团队开跑前预贴到便签墙的共识（一行一条，最多 8 条）。"
                 "并行 worker 开局即能通过便签墙收到，减少在每个 task 里重复粘贴同一段背景。"
+                "传了非空 seed_notes 即隐含 coordination=wall。"
                 "kind 同 post_note：decision=我定了 / heads_up=提个醒 / claim=我领了。"
             ),
             "items": {
@@ -320,6 +334,7 @@ DELEGATE_PARAMETERS = {
                 "可选：本回合团队级共识长文（≤1500 字），注入每个 worker 开局的「团队共识」"
                 "上下文块；同一回合后续 delegate 仍沿用，直到你用新的 team_brief 覆盖。"
                 "与 seed_notes 可并用：brief 写总述，seed_notes 钉关键决定。"
+                "传了非空 team_brief 即隐含 coordination=wall。"
             ),
         },
         "complexity_hint": {

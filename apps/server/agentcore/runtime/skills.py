@@ -173,16 +173,21 @@ worker 据定稿提纲写全文，用 `depends_on` 串起。提纲由专家据�
 开工前先对一下：本次的活是不是正好是这些形状之一？是就直接套（省去手搓、还自带依赖编排与便签墙\
 对齐等最佳实践），别再一片片手搭；只有形态确实特殊时才手写 tasks。各形状的槽位见 `delegate` 的 \
 playbook_args 参数说明。
-- 团队便签墙（并行兄弟对齐）：同一批无 `depends_on`、同时开跑的 worker 共享一面便签墙（`post_note` / \
-`read_notes` / `amend_note`）。**主 Agent 可在 `delegate` 上预置共识**：`seed_notes`（`[{kind,text}]` \
+- 团队便签墙（并行兄弟对齐）：同一批无 `depends_on`、同时开跑的 worker 可共享一面便签墙\
+（`post_note` / `read_notes` / `amend_note`）。**墙的存在性由你在 `delegate` 上显式声明**\
+`coordination`（缺省 `none`）：子任务间存在需要边干边对齐的共享面（共建接口 / 字段 / 文件、\
+结论互相影响、互相审查）→ `coordination="wall"`；各写各的、互不依赖的正交扇出 → 保持缺省\
+`none`（不建墙、不授便签三件套，省开销与 UI 噪音）。传了非空 `seed_notes` / `team_brief` 会\
+隐含升级为 wall；`complexity_hint=light` 隐含 none。`build_feature` playbook 默认 wall（接口\
+契约经便签对齐）。**主 Agent 可在 `delegate` 上预置共识**：`seed_notes`（`[{kind,text}]` \
 写入便签墙，首波并行 worker 开局即见）与 `team_brief`（回合级「团队共识」块注入每个 worker 开局上下文，\
 跨多波 `delegate` 仍沿用直至覆盖）——brief 写总述、seed 钉关键决定，减少在各 task 里重复粘贴同一段背景。\
 当你一次派出【多路并行审查 / 质检 / 多角度审同一份上游产物】时：\
-① 每个审查 task 必设统一 `deliverable`（见上「审查类任务的统一契约」）；② 各 task 写清共享验收\
-维度（受众 / 风格 / 方向底线），但不必给每个审查官复制粘贴同一大段背景——横向重大信号靠便签\
-补齐；③ 在各 task 里明确要求：谁先发现【整体方向错了 / 致命问题 / 继续抠细节已无意义】，必须\
-【立刻】`post_note`（kind=heads_up）广播一行警示，【再】写详细意见，免得并行队友还在无关细节上\
-白费（简介流水线类任务尤甚）；④ `build_feature` 等 playbook 已把接口契约类决定写成「我定了」\
+① 设 `coordination="wall"`；② 每个审查 task 必设统一 `deliverable`（见上「审查类任务的统一契约」）；\
+③ 各 task 写清共享验收维度（受众 / 风格 / 方向底线），但不必给每个审查官复制粘贴同一大段背景——\
+横向重大信号靠便签补齐；④ 在各 task 里明确要求：谁先发现【整体方向错了 / 致命问题 / 继续抠细节已无意义】，\
+必须【立刻】`post_note`（kind=heads_up）广播一行警示，【再】写详细意见，免得并行队友还在无关细节上\
+白费（简介流水线类任务尤甚）；⑤ `build_feature` 等 playbook 已把接口契约类决定写成「我定了」\
 便签——手搓并行审查时照此照办。收工时读概览里的【团队便签】核对是否与各人产出一致。
 </team_orchestration_advanced>"""
 

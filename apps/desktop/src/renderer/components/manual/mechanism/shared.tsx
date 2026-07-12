@@ -12,9 +12,17 @@ export const nodeTypes = {
 };
 export const edgeTypes = { step: StepEdge };
 
+/** `pnpm shoot:manual` 深链带 `?shoot-manual=` —— 跳过懒挂载，避免空白截图。 */
+function isShootManual(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("shoot-manual")
+  );
+}
+
 /**
  * 视口懒挂载：滚动进入（提前 200px）才挂子树，避免一次性挂多个 ReactFlow。
- * 占位用 minHeight 防跳动。
+ * 占位用 minHeight 防跳动。无头截图模式下立即挂载。
  */
 export function LazyMount({
   minHeight,
@@ -24,7 +32,7 @@ export function LazyMount({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const [show, setShow] = useState(false);
+  const [show, setShow] = useState(isShootManual);
   useEffect(() => {
     if (show) return;
     const el = ref.current;
