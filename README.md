@@ -45,16 +45,7 @@ cd apps/server && uv sync && cd ../..
 # 3. 按本地开发文档启动后端与桌面端
 ```
 
-## 许可证与第三方资产
+## 第三方资产
 
-本仓库代码以 [Apache License 2.0](LICENSE) 授权。
-
-第三方 3D 资产致谢与再分发约束见 [`NOTICE`](NOTICE)（含 Mixamo Xbot 风险说明——**非 CC0**，再分发前请自行核验）。
-
-## 安全
-
-发现安全漏洞请按 [`SECURITY.md`](SECURITY.md) 私下披露，**不要**在公开 Issue 中粘贴密钥或敏感信息。
-
-## 贡献
-
-欢迎提 Issue / Pull Request。贡献约定见 [`CONTRIBUTING.md`](CONTRIBUTING.md)；完整 CONTRIBUTING 指南后续补充。
+AgentTown 3D 资产来源、许可与 Mixamo 再分发警示见
+[`apps/town/Assets/TownAssets/README.md`](apps/town/Assets/TownAssets/README.md)。

@@ -10,7 +10,11 @@ AgentTown 3D 资产单一真源（vendored 入库，clone 即用）。
 | Quaternius | Quaternius LowPoly Buildings（精选） | CC0 |
 | Nature | Kenney Nature Kit（精选） | CC0 |
 | Roads | Kenney City Kit (Roads)（精选） | CC0 |
-| Characters | Mixamo Xbot | Mixamo 许可 |
+| Characters | Mixamo Xbot | Mixamo 许可（**非 CC0**） |
+
+> **Mixamo 再分发警示**：Characters 下的 Mixamo Xbot 资产受 Mixamo/Adobe 服务条款约束，
+> 不属于 CC0。任何对外再分发本仓库（或包含这些资产的构建产物）之前，必须自行核验
+> Mixamo 的再分发权利；建议尽快用可明确再分发的替代资产换掉。
 
 Import 产物：`Prefabs/` + `Resources/Town/TownMeshCatalog.asset`（连 `.meta`）一并入库。
 
