@@ -17,7 +17,7 @@ export interface GraphEdge {
   id: string;
   source: string;
   target: string;
-  kind?: "dep" | "delegate" | "revision" | "inject" | "handoff";
+  kind?: "dep" | "delegate" | "continuation" | "inject" | "handoff";
 }
 
 /**

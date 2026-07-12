@@ -69,16 +69,14 @@ export function SpeakerBlock({
   ) : null;
 
   const sceneKey = `${messageId}:arena:r${round.roundNo}:${side.sideKey || side.key}`;
-  // 头行/底部「展开全文」共享同一实例——无对话 id 时 usePersistentDisclosure 退化为
-  // 组件本地 useState，若父子各自调同键会脱同步（测试环境即此形态）。
+  // 头行 toggle 与展开态底部「收起全文」共享同一实例——无对话 id 时 usePersistentDisclosure
+  // 退化为组件本地 useState，若父子各自调同键会脱同步（测试环境即此形态）。
   const [showAll, setShowAll] = usePersistentDisclosure(
     `${sceneKey}:all`,
     false,
   );
-  const arguments_ =
-    !streaming && output ? parseSpeechArguments(output) : [];
-  const showFullTextToggle =
-    !streaming && !!output && arguments_.length > 0;
+  const arguments_ = !streaming && output ? parseSpeechArguments(output) : [];
+  const showFullTextToggle = !streaming && !!output && arguments_.length > 0;
 
   const meta = (
     <SpeakerMeta
@@ -200,24 +198,15 @@ function ArgumentSpeech({
   }
 
   return (
-    <div>
-      <ul className="space-y-0.5">
-        {arguments_.map((arg) => (
-          <ArgumentRow
-            key={arg.id}
-            argument={arg}
-            sceneKey={`${sceneKey}:arg:${arg.id}`}
-          />
-        ))}
-      </ul>
-      <button
-        type="button"
-        onClick={() => setShowAll(true)}
-        className="mt-2 text-xs font-medium text-primary hover:underline"
-      >
-        展开全文
-      </button>
-    </div>
+    <ul className="space-y-0.5">
+      {arguments_.map((arg) => (
+        <ArgumentRow
+          key={arg.id}
+          argument={arg}
+          sceneKey={`${sceneKey}:arg:${arg.id}`}
+        />
+      ))}
+    </ul>
   );
 }
 

@@ -7,11 +7,22 @@ class AuthSettings(BaseModel):
     jwt_secret_key: str = "dev-secret-change-in-production"
     jwt_access_token_expire_minutes: int = 30
     # Refresh tokens rotate on every use and each rotation stamps a fresh
-    # now+N-day expiry (auth/service.py _issue_tokens) with no absolute family
-    # cap — a *sliding* window: any launch within N days of the last keeps the
-    # user signed in. 30d (was 7d) tolerates a month of inactivity before a forced
-    # re-login. The refresh + CSRF cookies' max_age both track this value.
+    # now+N-day expiry (auth/service.py _issue_tokens) — a *sliding* idle window
+    # capped by refresh_family_max_days / admin_refresh_family_max_hours. 30d
+    # tolerates a month of inactivity before a forced re-login. The refresh +
+    # CSRF cookies' max_age both track this value.
     jwt_refresh_token_expire_days: int = 30
+    # Absolute ceiling on a refresh family (from family_started_at), independent of
+    # the sliding jwt_refresh_token_expire_days window. Past this → force re-login.
+    refresh_family_max_days: int = 90
+    # Admin-audience families get a tighter absolute ceiling (hours), overriding
+    # refresh_family_max_days when client_aud=admin.
+    admin_refresh_family_max_hours: int = 24
+    # GC: keep terminal refresh rows (rotated/revoked/expired) this long so reuse
+    # detection still sees recent rotations; then hard-delete.
+    refresh_token_retention_days: int = 7
+    refresh_token_sweep_interval_seconds: int = 6 * 3600
+    refresh_token_sweep_batch_limit: int = 500
     inference_token_expire_minutes: int = 120  # 2h — scoped sidecar proxy token
 
     inference_token_mint_max: int = 10

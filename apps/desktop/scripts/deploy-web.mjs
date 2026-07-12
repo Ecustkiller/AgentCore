@@ -71,4 +71,6 @@ echo "nginx reloaded; local probe app.fashitianxia.xyz/ → HTTP $CODE"
 `);
 
 unlinkSync(TARBALL);
-console.log("✓ Web client deploy complete — verify https://app.fashitianxia.xyz/");
+console.log(
+  "✓ Web client deploy complete — verify https://app.fashitianxia.xyz/",
+);

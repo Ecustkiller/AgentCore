@@ -237,7 +237,9 @@ async def delete_workspace_file(
 ):
     """Delete a file or directory from the conversation's scratch workspace."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
-    key = workspace_storage_key(user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conv.id)
+    key = workspace_storage_key(
+        user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conv.id
+    )
     try:
         async with workspace_lock(key):
             await delete_file(
@@ -262,7 +264,9 @@ async def move_workspace_file(
 ):
     """Move/rename a file or directory within the conversation's scratch workspace."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
-    key = workspace_storage_key(user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conv.id)
+    key = workspace_storage_key(
+        user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conv.id
+    )
     try:
         async with workspace_lock(key):
             await move_file(

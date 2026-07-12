@@ -199,7 +199,7 @@ def spans_from_entries(entries: list[dict[str, Any]] | None) -> Span | None:
                 continue
             agent_id = payload.get("agent_id") or ""
             run_kind = payload.get("kind") or RunKind.AGENT.value
-            revision = payload.get("revision") or 0
+            revision = payload.get("continues_run_id")
             label = "captain" if run_kind == RunKind.CAPTAIN.value else (agent_id or rid[:8])
             attrs: dict[str, Any] = {
                 "gen_ai.operation.name": "invoke_agent",
@@ -209,7 +209,8 @@ def spans_from_entries(entries: list[dict[str, Any]] | None) -> Span | None:
                 "agentcore.run.kind": run_kind,
             }
             if revision:
-                attrs["agentcore.run.revision"] = revision
+                attrs["agentcore.run.continues_run_id"] = revision
+                label = f"{label} (cont)"
             runs[rid] = Span(
                 span_id=f"run:{rid}",
                 parent_span_id=None,  # linked after the pass (parent may appear later)

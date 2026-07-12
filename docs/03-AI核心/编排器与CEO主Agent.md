@@ -145,7 +145,7 @@ CEO 在自己的 ReAct 循环里调用单一的 `delegate` 工具把一批子任
 
 > **文件产出清单（收敛免回工作区核对）✅**：`delegate` 汇总附各 worker「文件产出」行，CEO 据此收尾、不必再 `file_list` 回工作区核对。→ 见代码：`runtime/runs/executor.py`、`tools/builtin/delegate/`。
 >
-> **同一清单兼作防幻觉凭据（footer 守卫）✅**：清单为空时 CEO 不得报「已创建/已完成」，应 `revise` 唤回或重派。→ 见代码：`tools/builtin/delegate/`。
+> **同一清单兼作防幻觉凭据（footer 守卫）✅**：清单为空时 CEO 不得报「已创建/已完成」，应带现场续派唤回或重派。→ 见代码：`tools/builtin/delegate/`。
 
 > **回合级「下一步推荐」(CEO→用户) ✅ 已落地**：回合收尾后另发 2-4 条可点选的快捷追问（下一步建议）挂在助手回复下，点选即回填输入框、可改后发——CEO→用户收尾面的延伸（与 §核心定位「收尾向用户汇报」一脉）。它是 worker→CEO「交接简报·建议下一步」的用户侧对偶。机制（finalize 的 World B 窄任务 + `followups_generated`（含 `message_id`）事件、DERIVED 回写 `Message.followups` 列故重载重现、桌面+手机+画布均有）见 [`执行引擎架构设计.md` §回合级「下一步推荐」](/docs/03-AI核心/执行引擎架构设计.md)。
 
@@ -153,8 +153,8 @@ CEO 在自己的 ReAct 循环里调用单一的 `delegate` 工具把一批子任
 
 CEO 收尾从「写综述」升级为「**先对账拼图边、再核验原始目标、最后写概览**」——纯提示升级（不加人 / 不加新暂停 / 不新子系统），落在 CEO 既有看产物的接缝。两道与既有各闸**显式分层不重叠**：per-piece `contract` 管单块达标、**4b** 管块间拼接、**4a** 管整体达成原始意图、防幻觉铁律管文件真落盘。
 
-- **第一道（4b）· 语义边界对账**：在三处接缝先对「拼不拼得上」——**只查冲突 / 缺口 / 重复，不评每块好不好**：① `format_for_ceo`（合并前；CEO 自判「相互依赖、要拼到一起」才查，独立并行跳过）；② `supervised.py::format_bind_boundary`（定稿下游前对上游，catch-early）；③ `format_scope_boundary`（队员报偏离时主动查兄弟接缝——即「`escalate scope` 等举手」的**主动版**）。对出问题就地 `revise`/`replan`/`ask_user`，别在概览里糊过去。判据同便签墙：块间有没有共享接口 / 相互依赖。
-- **第二道（4a）· 成品对照原始目标 + 完工判定**（实证 ROI 最高）：写概览前对照【用户原始请求 + 各 task 的任务描述与 `deliverable`】逐条核验「实质达成」，给明确**完工判定**——未达成就 `delegate`/`replan`/`revise` 补、别假装收工；已达成就收口、别空转。直接对治 MAST 实测两大失败（不认终止条件 / 过早终止），其「加高层目标验证 +15.6%」是全表 ROI 最高的单点干预。
+- **第一道（4b）· 语义边界对账**：在三处接缝先对「拼不拼得上」——**只查冲突 / 缺口 / 重复，不评每块好不好**：① `format_for_ceo`（合并前；CEO 自判「相互依赖、要拼到一起」才查，独立并行跳过）；② `supervised.py::format_bind_boundary`（定稿下游前对上游，catch-early）；③ `format_scope_boundary`（队员报偏离时主动查兄弟接缝——即「`escalate scope` 等举手」的**主动版**）。对出问题就地续派/`replan`/`ask_user`，别在概览里糊过去。判据同便签墙：块间有没有共享接口 / 相互依赖。
+- **第二道（4a）· 成品对照原始目标 + 完工判定**（实证 ROI 最高）：写概览前对照【用户原始请求 + 各 task 的任务描述与 `deliverable`】逐条核验「实质达成」，给明确**完工判定**——未达成就 `delegate`（冷委派或带现场续派）/`replan` 补、别假装收工；已达成就收口、别空转。直接对治 MAST 实测两大失败（不认终止条件 / 过早终止），其「加高层目标验证 +15.6%」是全表 ROI 最高的单点干预。
 - **一处覆盖两条收尾路径**：改 `ceo_format.py::format_for_ceo` 即同时盖正常终态综述（`drive.py`）与 `replan(stop)` 收尾（`supervised.py::finalize_stopped`）；【团队便签】（便签墙 `active_notes`）正是 4b 的现成输入（见 [`Agent协作模式.md` §波内共享上下文](/docs/03-AI核心/Agent协作模式.md)）。
 - **暂不建（开放项）**：高风险「**独立验证回合**」（换一双眼睛复核）人 2026-06-30 明确**暂不建**——它是唯一「新机制 + 每高风险回合真成本」项（不像 4a/4b 是可退提示词），且 4a 已 inline 覆盖；走「先开度量数据闸门、证明 CEO 自检确实漏了『自己批自己』再建」。→ 远期项见 [`../06-规划/远期规划.md` §2.5](/docs/06-规划/远期规划.md)。
 
@@ -166,7 +166,7 @@ CEO 收尾从「写综述」升级为「**先对账拼图边、再核验原始�
 
 ### `replan`：波边界续跑（第三编排原语）✅ 已落地
 
-`delegate` / `revise` 之外的第三个编排原语。当计划含**晚绑定节点**（`bind_after_deps`）或队员报告**职责偏离**（`escalate kind=scope`）时，`WaveScheduler` 在决策边界把控制权交回 CEO——`delegate` 输出**非终态**「计划已让出」简报，CEO 调 `replan` 定稿 / 纠偏 / 追加 / 收口后**续跑同一张 DAG**。执行语义（边界判据、`YIELD` 软暂停、晚绑定、成本纪律、被否决项）见 [`执行引擎架构设计.md` §受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)；此处只记 CEO 侧的工具形态与设计理由。
+`delegate`（含带现场续派）之外的第二个编排原语。当计划含**晚绑定节点**（`bind_after_deps`）或队员报告**职责偏离**（`escalate kind=scope`）时，`WaveScheduler` 在决策边界把控制权交回 CEO——`delegate` 输出**非终态**「计划已让出」简报，CEO 调 `replan` 定稿 / 纠偏 / 追加 / 收口后**续跑同一张 DAG**。执行语义（边界判据、`YIELD` 软暂停、晚绑定、成本纪律、被否决项）见 [`执行引擎架构设计.md` §受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)；此处只记 CEO 侧的工具形态与设计理由。
 
 | 参数 | 语义 |
 |---|---|
@@ -179,7 +179,7 @@ CEO 收尾从「写综述」升级为「**先对账拼图边、再核验原始�
 >
 > **薄封装、共享账目**：`ReplanTool` 持本回合的 `DelegateTool` 并转发 `DelegateTool.replan`——后者持暂停态（`_supervised`）、校验、in-place 再绑定与续跑驱动；故 worker usage / 账目 / 来源累加在**同一个 `DelegateTool` 实例**上、被回合总账折算，`replan` 自身无账目面。
 >
-> **被否决**：① 重载 `delegate`（语义混淆「发起新任务」与「续跑旧计划」）；② 复用 `revise`（那是在 worker transcript 上续写、非计划续跑，见 [`多轮编排与队员热修.md`](/docs/03-AI核心/多轮编排与队员热修.md)）——故 `replan` 独立成工具。`add` 早期曾计划推迟，现已与 binds / steers / stop 一并落地。
+> **被否决**：① 重载 `delegate`（语义混淆「发起新任务」与「续跑旧计划」）；② 复用带现场续派（那是在 worker transcript 上续写、非计划续跑，见 [`多轮编排与同人续派.md`](/docs/03-AI核心/多轮编排与同人续派.md)）——故 `replan` 独立成工具。`add` 早期曾计划推迟，现已与 binds / steers / stop 一并落地。
 >
 > → 见代码：`tools/builtin/replan.py`、`tools/builtin/delegate/supervised.py`（`apply_replan` / `finalize_stopped` / 边界简报）、`runtime/runs/builder.py`（`build_added_nodes`）。
 
@@ -279,7 +279,7 @@ CEO 不指定具体模型，只表达能力需求（快/强），由运行时映
 
 - **缺省即全量（fail-safe）**：`builder._tools` **永不产出 `[]`**——省略 / 只含未知名 → `None`（引擎读作「不限制、提供全部工具」）；非空且经 allow-list 过滤后仍非空 → 该子集。
 - **否决「缺省 = 空列表」**：引擎把空 allow-list 读作「不提供任何工具」（`tool_choice="none"`）。一旦把缺省喂成 `[]`，本该 `file_write` 落盘的 worker 会被逼成纯文本 Agent——把整份文件内容吐进聊天、工作区空空，CEO 收尾时还据「文件产出清单为空」误报成功。正确性绝不能押在「CEO 每次都记得枚举 tools」上。
-- **revise 一致**：`RunSpec.tools` 落盘为 `list | None`，缺省序列化为 `null`，热修（续写）唤回时还原成「不限制」而非「无工具」。
+- **续派一致**：`RunSpec.tools` 落盘为 `list | None`，缺省序列化为 `null`，带现场续派（续写）唤回时还原成「不限制」而非「无工具」。
 
 > 设计理由：worker 能不能干活属正确性、工具收窄属优化，故安全默认必须是「有能力」，least-privilege 由 CEO 主动 opt-in。被否决：要求 CEO 必填 `tools`（依赖 LLM 自觉、脆弱，正是此前 worker 静默不落盘的翻车点）。→ 见代码：`runtime/runs/builder.py` `_tools`、`runtime/runs/types.py` `RunSpec.tools`、`runtime/runs/executor.py`（`None`→offer 全部）。
 
@@ -292,6 +292,10 @@ CEO 不指定具体模型，只表达能力需求（快/强），由运行时映
 - **收敛强制收尾与缺口上报**：治理 `convergence_finalize` 仍禁写文件（只读收口），但收尾后契约缺口以 per-worker gaps 段写入 delegate 汇总，让 CEO 补派有据、不靠自觉扫清单。
 - **对治「写了但跑不起来」**：触发案例（trace `d1bc76f3…`）worker 写出软件却没跑通、CEO 凭记忆答「在 mini-claw/」并口头让用户自己去终端跑；`code_verified` 自动推断 + 收尾校验直接堵住。这是「打开软件」双路径的**路径 A·工作区内验收**（路径 B·本机 OS 启动走 sidecar / Client Tools，见 [`双模式工作区.md` §十](/docs/02-架构/双模式工作区.md)、[`安全权限与治理.md` §三](/docs/05-平台与运维/安全权限与治理.md)）。
 - → 见代码：`tools/builtin/delegate/completion.py`（解析 / 推断 / 校验 / gaps 汇总）、`tools/builtin/delegate/schema.py`、`tools/builtin/delegate/drive.py`、`tools/builtin/delegate/ceo_format.py`。
+
+### 2.7 `continue_from_run_id` — 带现场续派（同人接续）✅
+
+task 级可选字段：声明该任务由目标 run 的作者**带完整 ReAct 现场（transcript）**接着干——改自己的稿或接强相关新任务（同一动作，task 内容区分；独立工具 `revise` 已退役）。续派任务享有 delegate 全套能力（`depends_on` / `deliverable` / `objective`…），可与依赖同批混排（依赖同批完成的 run 也可续，登记时机 = 单 run 完成即登记）。强相关接续 → 续派；换角色 / 救失败稿 / 合并多产物 / 独立新任务 → 冷委派（防上下文污染），必要时以 `replaces_run_id` 标接手。miss / 超限 / 目标进行中 / 自指 → **明确拒绝**该项并提示回落冷委派，不静默降级。机制、留人存储与约束边界的权威文档见 [`多轮编排与同人续派.md`](/docs/03-AI核心/多轮编排与同人续派.md)。→ 见代码：`tools/builtin/delegate/schema.py`、`tools/builtin/delegate/continuation.py`。
 
 ---
 
@@ -331,7 +335,7 @@ CEO 不指定具体模型，只表达能力需求（快/强），由运行时映
 |---|---|---|
 | 时机 | 回合开场，请求能做但没说全 | 执行途中撞上高代价岔路 |
 | 内容 | `message` 复述目标 + `assumptions` 起步计划 + ≤5 预填 `default` 的 `questions` + 视觉类 `style_options` | `message` 说清现状 + 通常一个无 `default` 的 `questions`（就是要用户选） |
-| 卡片语气 | 蓝（就绪 / 确认即开做） | 琥珀（待裁决 / 谨慎） |
+| 卡片语气 | 中性灰壳 + 蓝主 CTA（V2 Brief+Choose，选项选中态蓝） | 中性灰壳灰选项 + 蓝主 CTA（原「琥珀待裁决」已废除，2026-07 拍板：拍板类卡片不用琥珀） |
 | 回合 | 默认**挂起**待回值；用户选「停止」结束本回合（也可 `blocking=false` 非阻塞，见下） | 同左 |
 
 **为什么不让模型选「开场工具 vs 途中工具」**：开场 vs 途中是**内容形态**之别，不是机制之别——该结束还是该挂起是**运行时**的职责。挂起 + 恢复是通用情形（保留在途上下文——委派结果、已读文件），开场只是「在途上下文很少」的特例、以可忽略成本被它涵盖。模型只需决定**要不要发问**（克制），不必判别**哪种发问**。
@@ -350,13 +354,24 @@ CEO 不指定具体模型，只表达能力需求（快/强），由运行时映
 
 **产品触发**：CEO 在关键岔路调 `ask_user`（运行时自决）；DAG 计划在 step 标 `checkpoint_after` 时由调度器波间挂起 `plan_review`。**边界**：`ask_user` = CEO 工具效应；`checkpoint_after` = 计划期声明的结构挂起——语义、2b 续跑、事件契约见 [`执行引擎架构设计.md` §检查点决策语义 / §暂停与恢复](/docs/03-AI核心/执行引擎架构设计.md)。
 
-**团队开工卡（两卡合一 ✅）**：首次顶层 `delegate` 在 `run_plan` 已发出、**首波尚未启动**时，若计划需预审（≥2 worker **或** 含辩论标记）**或**本地模式下需能力授权（`AutonomyPolicy.first_grant`），则挂起 `team_preview` 开工卡（事件对 `team_preview_required` / `team_preview_resolved`）。卡片同时展示角色 / 任务摘要 / 依赖 / 是否辩论 **与** 本次委派所需 GRANTABLE 能力；动作：**授权并开工**（默认）/ **逐次审批开工** / **调整（备注注入全部未跑下游）** / **停止**。续跑复用既有 durable Interaction / `POST …/resume` 管线。原独立热路 `delegation_authorization` 卡已并入。
+**团队开工卡（编排层统一 ✅）**：顶层编排原语（``delegate`` / ``debate``）在 fan-out /
+主持人循环启动前，经编排层公共 kickoff gate 决定是否挂起 `team_preview` 开工卡（事件对
+`team_preview_required` / `team_preview_resolved`；payload 带 ``primitive`` 判别）。
+触发规则只存在一份（`runtime/kickoff`）。
 
-**跳过（完成态降噪）**：单 worker + `finalize` 直出且无需能力授权；同 CEO 回合内已有阻塞 `ask_user` 且用户已提交确认、且无需能力授权时跳过。`AutonomyPolicy.full_auto` 自动授权（计划确认仍可挂）。嵌套 `depth>0` / `light` / 续跑（`seed_completed`）不挂。
+- **delegate**：`run_plan` 已发出、**首波尚未启动**时，若计划需预审（≥2 worker **或** 含辩论标记）
+  **或**本地模式下需能力授权（`AutonomyPolicy.first_grant`），则挂卡。卡片展示角色 / 任务摘要 /
+  依赖 / 是否辩论 **与** 本次委派所需 GRANTABLE 能力；动作：**授权并开工**（默认）/
+  **逐次审批开工** / **调整（备注注入全部未跑下游）** / **停止**。
+- **debate**：顶层调用一律弹计划卡（辩题 / 各方立场 / 轮次预算）；能力半边对只读辩手为 False。
+  动作组一致；**调整** = 用户改写辩题后开赛。暂停点在 `debate.started` 之前。
+- 续跑复用既有 durable Interaction / `POST …/resume` 管线。原独立热路 `delegation_authorization` 卡已并入。
 
-**与近邻边界**：开工卡 = 开干前否决权 + 能力授权（首波前）；`plan_review` = 波间结构化挂起（`checkpoint_after` 后）；`ask_user` = CEO 主动拍板。勿混用。
+**跳过（完成态降噪）**：单 worker + `finalize` 直出且无需能力授权；同 CEO 回合内已有阻塞 `ask_user` 且用户已提交确认、且无需能力授权时跳过。`AutonomyPolicy.full_auto` **放行计划半边与能力半边**（两原语都不弹开工卡，能力静默授权）。嵌套 `depth>0` / `light` / 续跑（`seed_completed`）不挂。
 
-**AutonomyPolicy（能力授权三档 ✅）**：用户设置全局 `always_ask` / `first_grant`（默认）/ `full_auto`——只控能力授权，不动 `plan_review` / checkpoint。→ 见 [安全权限与治理 §三](/docs/05-平台与运维/安全权限与治理.md)。
+**与近邻边界**：开工卡 = 开干前否决权 + 能力授权（fan-out 前）；`plan_review` = 波间结构化挂起（`checkpoint_after` 后）；`ask_user` = CEO 主动拍板。勿混用。
+
+**AutonomyPolicy 三档 ✅**：`always_ask` / `first_grant`（默认）/ `full_auto`——`full_auto` 跳过整张开工卡；`first_grant` / `always_ask` 能力半边语义不变；`plan_review` / checkpoint 不受此三档影响。→ 见 [安全权限与治理 §三](/docs/05-平台与运维/安全权限与治理.md)。
 
 **§7.2 Preflight Audit（⏳ 远期）**：有界审计环 / 可编辑改 DAG / Agent 实体化绑定 / 设置项 opt-out **本批不做**——见 [`Agent协作模式.md` §7.2](/docs/03-AI核心/Agent协作模式.md)。
 

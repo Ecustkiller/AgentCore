@@ -28,7 +28,7 @@ export const CONTEXT_CHANNEL_LABEL: Record<string, string> = {
   opponent: "对方论点",
   challenge: "被驳命门",
   interjection: "你的追问",
-  revision: "修订要求",
+  continuation: "接续指令",
   cross_exam: "质询",
   closing: "结辩",
 };
@@ -50,7 +50,6 @@ const TOOL_LABEL: Record<string, string> = {
   delegate: "委派任务",
   ask_user: "向你确认",
   consult_skill: "查阅能力",
-  revise: "修订产物",
   escalate: "上报问题",
 };
 

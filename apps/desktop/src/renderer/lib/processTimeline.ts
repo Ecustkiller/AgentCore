@@ -244,7 +244,10 @@ export function appendPlanReviewStep(
   ];
 }
 
-/** Drop a `team_preview` marker (thin team-preview gate) at its chronological spot. */
+/** Drop a `team_preview` marker (开工卡 gate). Event order is run_plan →
+ * team_preview_required, but product narrative is 开工卡 → 协作图 — if a `team`
+ * marker already exists, insert before the last one; else append. Dedupes by
+ * checkpoint_id. Mirrors backend `EventSink._accumulate_process`. */
 export function appendTeamPreviewStep(
   process: ProcessStep[] | undefined,
   checkpointId: string,
@@ -252,10 +255,17 @@ export function appendTeamPreviewStep(
   if (!checkpointId) return process ?? [];
   if (hasMarker(process, "team_preview", "checkpoint_id", checkpointId))
     return process ?? [];
-  return [
-    ...(process ?? []),
-    { kind: "team_preview", checkpoint_id: checkpointId },
-  ];
+  const steps = process ?? [];
+  const marker: ProcessStep = {
+    kind: "team_preview",
+    checkpoint_id: checkpointId,
+  };
+  for (let i = steps.length - 1; i >= 0; i--) {
+    if (steps[i].kind === "team") {
+      return [...steps.slice(0, i), marker, ...steps.slice(i)];
+    }
+  }
+  return [...steps, marker];
 }
 
 /** A tool step (narrowed from {@link ProcessStep}). */

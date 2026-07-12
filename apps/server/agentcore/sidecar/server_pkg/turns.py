@@ -39,13 +39,9 @@ class TurnExecutionMixin:
         trace_id = str(params.get("traceId") or "")
         # Optimistic user bubble id — outbox idempotency anchor (as-built: 双模式工作区 §10.3).
         user_message_id = str(params.get("userMessageId") or "").strip() or new_id()
-        # Mint assistant message_id up front (cloud turn_runner posture) so begin_turn /
+        # mint assistant message_id up front (cloud turn_runner posture) so begin_turn /
         # content checkpoints / journal share one id before the pipeline runs.
         message_id = new_id()
-        # 结构化补轮·B（可逆叫停）：续辩 turn 从收场卡发起时带上一场 debate 的投影种子（普通回合为
-        # None）。引擎据此让本场 debate 续上一场（焦点正交、首轮辩手读到上一场摘要）。
-        raw_seed = params.get("debateSeed")
-        debate_seed = raw_seed if isinstance(raw_seed, dict) else None
 
         turn_creds = self._creds_for(conversation_id, trace_id, message_id)
 
@@ -96,7 +92,6 @@ class TurnExecutionMixin:
                         llm_credentials=turn_creds,
                         suspension_saver=saver,
                         suspension_deleter=deleter,
-                        debate_seed=debate_seed,
                         message_id=message_id,
                     )
             finally:

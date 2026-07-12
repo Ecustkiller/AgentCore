@@ -20,6 +20,7 @@ from agentcore.security.tokens import (
     create_mfa_pending_token,
     decode_access_token,
     decode_access_token_claims,
+    decode_access_token_family,
     decode_inference_token,
     decode_mfa_pending_token,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "create_mfa_pending_token",
     "decode_access_token",
     "decode_access_token_claims",
+    "decode_access_token_family",
     "decode_inference_token",
     "decode_mfa_pending_token",
     "generate_invite_code",

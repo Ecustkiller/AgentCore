@@ -18,20 +18,19 @@ export function SubTeamGroupNode({ data }: NodeProps) {
       ? `辩论 · ${d.memberCount} 辩手 run`
       : `${d.parentRole} 子队 · ${d.memberCount} 人`;
 
-  const boxClass =
-    d.variant === "debate"
-      ? "border-dashed border-primary/40"
-      : "border-dashed border-muted-foreground/40 bg-muted/20";
-  const labelClass =
-    d.variant === "debate" ? "text-primary/80" : "text-muted-foreground";
+  // 辩论整场外框不画（改由每阶段的 DebateStageBands 分区表达）；仅保留布局与 Handle。
+  const isDebate = d.variant === "debate";
+  const boxClass = isDebate
+    ? ""
+    : "rounded-xl border border-dashed border-muted-foreground/40 bg-muted/20";
 
   return (
-    <div
-      className={`h-full w-full rounded-xl border ${boxClass} ${graphNodeDimClass(dimmed)}`}
-    >
-      <div className={`px-2.5 py-1 text-xs font-medium ${labelClass}`}>
-        {label}
-      </div>
+    <div className={`h-full w-full ${boxClass} ${graphNodeDimClass(dimmed)}`}>
+      {!isDebate && (
+        <div className="px-2.5 py-1 text-xs font-medium text-muted-foreground">
+          {label}
+        </div>
+      )}
       <Handle
         type="target"
         position={horizontal ? Position.Left : Position.Top}

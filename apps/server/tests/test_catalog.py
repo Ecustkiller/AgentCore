@@ -19,7 +19,7 @@ from agentcore.tools.catalog import (
 # What the CEO holds beyond the read-only built-ins (mirrors pipeline._assemble_ceo_toolset).
 _CEO_ORCHESTRATION = {
     "delegate",
-    "revise",
+    "replan",
     "debate",
     "consult_skill",
     "ask_user",
@@ -67,7 +67,7 @@ def test_catalog_has_no_duplicate_tools():
 
 
 def test_ceo_orchestration_tools_are_present_and_ceo_only():
-    """The drift the old GET /tools had: delegate/revise/consult_skill/ask_user missing."""
+    """The drift the old GET /tools had: delegate/replan/consult_skill/ask_user missing."""
     entries = _by_name()
     for name in _CEO_ORCHESTRATION:
         assert name in entries, f"{name} missing from catalog"

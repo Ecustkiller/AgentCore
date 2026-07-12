@@ -31,21 +31,14 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  readlinkSync,
   readdirSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   symlinkSync,
   unlinkSync,
 } from "node:fs";
-import {
-  dirname,
-  isAbsolute,
-  join,
-  relative,
-  resolve,
-  sep,
-} from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** 内置 CPython 版本（对齐 dev server `.venv`；改这里即整体换版）。 */

@@ -39,7 +39,7 @@ describe("resolveInteraction (统一 choke point)", () => {
     );
   });
 
-  it("cloud turn: routes escalate / debate_round bodies the same way", async () => {
+  it("cloud turn: routes escalate bodies the same way", async () => {
     await resolveInteraction("conv-1", "esc-1", {
       kind: "escalation",
       answer: "选 A",
@@ -48,25 +48,6 @@ describe("resolveInteraction (统一 choke point)", () => {
     expect(post).toHaveBeenCalledWith(
       "/v1/conversations/conv-1/interactions/esc-1",
       { kind: "escalation", answer: "选 A", use_assumption: false },
-    );
-
-    post.mockClear();
-    await resolveInteraction("conv-1", "deb-1", {
-      kind: "debate_round",
-      decision: "continue",
-      focus: "风险",
-      ask: "",
-      ask_target: "",
-    });
-    expect(post).toHaveBeenCalledWith(
-      "/v1/conversations/conv-1/interactions/deb-1",
-      {
-        kind: "debate_round",
-        decision: "continue",
-        focus: "风险",
-        ask: "",
-        ask_target: "",
-      },
     );
   });
 

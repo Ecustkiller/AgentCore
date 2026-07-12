@@ -84,9 +84,6 @@ class EventType(StrEnum):
     RUN_TOOL_PROGRESS = "run_tool_progress"
     BATCH_METRICS = "batch_metrics"
     RUN_ESCALATION = "run_escalation"
-    # Worker 内部路由 Phase 1：Intake 轻量计划头（复杂度 / 策略 / token 预算）。
-    # 挂在 run 上、与 run_context 同属「开跑前元信息」；DURABLE 以便 reload 重现诊断。
-    RUN_INTAKE = "run_intake"
     # Worker 内部路由 Phase 1：Escalation Gate 方案层判定（确定性后置检查，正交于
     # 模型主动 escalate → run_escalation）。DERIVED：耐久记录仍走 ESCALATION_REQUIRED
     # / RunState.escalations；本事件是实时诊断信号。
@@ -105,8 +102,6 @@ class EventType(StrEnum):
     DEBATE_RESULT = "debate_result"
     DEBATE_ROUND_STARTED = "debate_round_started"
     DEBATE_ROUND = "debate_round"
-    DEBATE_ROUND_DECISION_REQUIRED = "debate_round_decision_required"
-    DEBATE_ROUND_DECISION_RESOLVED = "debate_round_decision_resolved"
     # 提问确认交互统一：热路 pending 交互失效（假卡消灭）。payload={interaction_id, kind}。
     INTERACTION_ORPHANED = "interaction_orphaned"
     # BYOK soft gate (开放主流AI模型接入 §4.5): preflight hint when probe says the

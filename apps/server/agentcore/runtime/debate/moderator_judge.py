@@ -42,10 +42,14 @@ _ASSESS_SYSTEM = (
     "① 收敛裁判——做【辩论领域内】的判定（是否真针锋相对、是否还在产生新论点、是否可以收场），"
     "而【不是】评价谁的文笔好，客观严格、不因发言更长就认为更有料；"
     "② 书记——为本轮写一句精炼小结，串起整场的认知推进线，让速读者 30 秒看懂辩论怎么演进；"
+    "未收敛时，把小结里【仍存的决定性分歧】顺手压成下一轮争议焦点（next_focus）——与小结同源、"
+    "不是另起炉灶；已收敛则 next_focus 留空；"
     "③ 记分裁判——给各方本轮的【论证有效性 / 证据 / 是否正面回应（含质询）】打分：证据分要看"
     "【来源等级】（一手 / 权威源 = 强，决定性事实仅【单一二手来源】= 弱、封顶打低），逻辑谬误"
     "（如循环论证）与【把待核实 / 无据主张硬拗成既定事实】必须扣分（但辩手【诚实标注待核实】不罚"
-    "——诚实存疑是美德不是罪）——这仍是辩论【领域内】的判定，不是通用文笔质量门。"
+    "——诚实存疑是美德不是罪）；质询回应上【诚实认输 / 让步 ≠ 回避】——正面接招但承认弱点 / "
+    "缺证据算正面回应（论点让步由 argument 维体现），只有答非所问 / 打太极 / 复述立论不接招才算"
+    "回避、才压低 engagement——这仍是辩论【领域内】的判定，不是通用文笔质量门。"
     "三项判断互不迁就、都要诚实。严格只输出要求的 JSON。"
 )
 
@@ -84,8 +88,9 @@ def _prior_ledger(history: Sequence[RoundResult]) -> str:
 def _cross_exam_block(config: DebateConfig, cross_exam: Sequence[CrossExamExchange]) -> str:
     """把本轮质询问答渲染进裁判 prompt（记分裁判据此判「是否正面回应质询」，质询回合 P1）。
 
-    每条 = 对某方的质询（问题列表）+ 该方回答（头尾裁剪防爆 prompt）；回答失败 / 未答如实标注，让裁判
-    据「回避 / 答非所问」扣 engagement。无质询（未开启 / 全空）返回空串，裁判退化为只看立论、零变化。
+    每条 = 对某方的质询（问题列表）+ 该方回答（头尾裁剪防爆 prompt）；空答如实标注未作答。
+    裁判须区分：【诚实认输 / 让步】= 正面回应（不因认输扣 engagement）；【答非所问 / 打太极 /
+    复述立论不接招】= 回避（压低 engagement，可在简报 decisive 点名）。无质询返回空串。
     """
     if not cross_exam:
         return ""
@@ -95,11 +100,7 @@ def _cross_exam_block(config: DebateConfig, cross_exam: Sequence[CrossExamExchan
         name = names.get(cx.target, cx.target)
         lines: list[str] = []
         for ex in cx.exchanges:
-            ans = (
-                _clip(ex.answer)
-                if ex.ok and ex.answer.strip()
-                else "（未正面作答 / 作答失败）"
-            )
+            ans = _clip(ex.answer) if ex.answer.strip() else "（未作答 / 作答失败）"
             lines.append(f"  Q: {ex.question}\n  A: {ans}")
         if not lines:
             continue
@@ -107,8 +108,10 @@ def _cross_exam_block(config: DebateConfig, cross_exam: Sequence[CrossExamExchan
         blocks.append(f"### 对「{name}」的质询\n{qa}")
     body = "\n\n".join(blocks)
     return (
-        "本轮【质询环节】问答（各方是否【正面】回答质询直接影响 engagement 记分——回避 / 答非所问 / "
-        f"硬扛无据都要扣）：\n{body}\n\n"
+        "本轮【质询环节】问答（由你裁定各方是否【正面】回答——直接影响 engagement；"
+        "【诚实认输 / 让步 ≠ 回避】：正面接招但承认弱点 / 缺证据算正面回应，不因认输扣 engagement；"
+        "只有答非所问 / 打太极 / 复述立论不接招才算回避、才压低 engagement）：\n"
+        f"{body}\n\n"
     )
 
 
@@ -252,16 +255,20 @@ async def judge_and_summarize(
         "（第 1 轮无对方可回应——改评论点展开是否完整、有无遗漏本应覆盖的核心论域）"
         if round_no == 1
         else "engagement 回应完整度"
-        "（是否正面回应对方命门与【质询】、有无回避 / 答非所问 / drop 掉对方要害）"
+        "（是否正面回应对方命门与【质询】；【诚实认输 / 让步 ≠ 回避】——正面接招但承认弱点算正面"
+        "回应，不因认输扣分；只有答非所问 / 打太极 / 复述立论不接招 / drop 掉对方要害才压低）"
     )
     user = (
         f"辩论命题：{config.motion}\n本轮焦点：{focus}\n{_form_guidance(config.form)}\n{gate_note}\n\n"
         f"{ledger_block}{prev_block}本轮各方发言：\n{_turns_block(turns)}\n\n{cx_block}"
         "请一次性完成三件事——① 做【辩论领域内】的交锋质量与收敛判定（不是判谁写得好）；"
-        "② 写一句【本轮小结】；③ 给各方【本轮记分】（辩论领域内、不评文笔）。只输出一个 JSON：\n"
+        "② 写一句【本轮小结】（推进 / 共识 / 仍存分歧）；③ 给各方【本轮记分】（辩论领域内、不评文笔）。"
+        "若判定【未收敛】，把小结里【仍存的决定性分歧】同时压成 next_focus（下一轮争议焦点短语）——"
+        "与小结同源、不是额外任务；已收敛则 next_focus 给空串。"
+        "只输出一个 JSON：\n"
         '{"real_clash": true/false, "new_arguments": true/false, "converged": true/false, '
         '"stop_reason": "converged|focus_clarified|red_team_exhausted", '
-        '"next_focus": "若未收敛，下一轮应聚焦的点", '
+        '"next_focus": "未收敛时必填：仍存分歧压成的下一轮焦点；已收敛给空串", '
         '"rationale": "一句话点出本轮的实质推进：谁让步 / 谁补强 / 谁被驳倒", '
         '"clashes": [{"from": "<side_key>", "to": "<被反驳方 side_key>", '
         '"point": "这条反驳的命门（一句话、锋利具体、抓住要害）"}], '
@@ -273,6 +280,9 @@ async def judge_and_summarize(
         "已有的论点换措辞 / 换例子重述【不算】新论点（=false），只有出现账本里没有、且会推进交锋"
         "的论点才算 true；无账本（首轮）时看本轮是否亮出实质立论。\n"
         "- converged：是否可以收场（无新论点 / 焦点已澄清为价值之争 / 红队风险已挖尽）。\n"
+        "- next_focus：仅【未收敛】时需要——把本轮小结里【仍存的决定性分歧】压成一句 ≤30 字的"
+        "下一轮焦点短语（与定议题同规格、像小标题），供下一轮直接采用、避免再读一遍本轮发言；"
+        "已收敛则给空串。\n"
         "- rationale：别写空话套话，点出本轮交锋的【实质推进】（哪一方在哪个点上让步 / 补强 / "
         "被驳倒），并点明【真正的分歧现在收窄到哪个决定性点，或已见底成哪个价值选择】，"
         "让人一句话读懂本轮的胜负手与还剩什么待决。\n"

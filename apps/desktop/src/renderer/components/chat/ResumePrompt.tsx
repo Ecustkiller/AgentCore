@@ -246,10 +246,51 @@ function TeamPreviewWorkers({ turn }: { turn: PendingResume }) {
   );
 }
 
+function TeamPreviewDebateBody({ turn }: { turn: PendingResume }) {
+  const budget =
+    turn.maxRounds > 0
+      ? turn.thorough
+        ? `认真辩透 · 上限 ${turn.maxRounds} 轮`
+        : `快速对碰 · ${turn.maxRounds} 轮`
+      : turn.thorough
+        ? "认真辩透"
+        : "快速对碰";
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      {turn.motion && (
+        <p className="whitespace-pre-wrap text-sm text-foreground">
+          {turn.motion}
+        </p>
+      )}
+      <p className="text-xs text-muted-foreground">{budget}</p>
+      {turn.sides.map((s) => (
+        <div
+          key={s.key}
+          className="rounded-lg border border-border bg-card/60 px-2.5 py-1.5"
+        >
+          <div className="flex flex-wrap items-center gap-1.5">
+            <p className="text-xs font-medium text-foreground">{s.name}</p>
+            {s.is_subject && (
+              <span className="text-xs text-muted-foreground">方案方</span>
+            )}
+          </div>
+          {s.stance && (
+            <p className="mt-0.5 whitespace-pre-wrap text-xs text-muted-foreground">
+              {s.stance}
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
   const [note, setNote] = useState("");
   const { submitting, busy, send } = useColdSubmit(turn);
-  const showCapabilities = turn.tools.length > 0;
+  const isDebate = turn.primitive === "debate";
+  const showCapabilities = !isDebate && turn.tools.length > 0;
 
   const spinnerOr = (
     decision: PlanReviewUserDecision,
@@ -283,13 +324,19 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
         </DecisionCardIcon>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-primary">
-            开工卡 · 计划与授权
+            {isDebate ? "开工卡 · 辩论计划" : "开工卡 · 计划与授权"}
           </p>
           <WaitingForDecisionHint />
           <p className="mt-0.5 text-sm text-foreground">
-            即将上场的队员，请过目后授权开工：
+            {isDebate
+              ? "即将开赛的辩题与各方立场，请过目后授权开赛："
+              : "即将上场的队员，请过目后授权开工："}
           </p>
-          <TeamPreviewWorkers turn={turn} />
+          {isDebate ? (
+            <TeamPreviewDebateBody turn={turn} />
+          ) : (
+            <TeamPreviewWorkers turn={turn} />
+          )}
 
           {showCapabilities && (
             <div className="mt-2">
@@ -311,7 +358,11 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
             onChange={(e) => setNote(e.target.value)}
             disabled={busy}
             rows={2}
-            placeholder="可选 · 备注（调整时作为对全体队员的指示；停止时作为收尾备注）"
+            placeholder={
+              isDebate
+                ? "可选 · 调整时填写新辩题后开赛；停止时作为收尾备注"
+                : "可选 · 备注（调整时作为对全体队员的指示；停止时作为收尾备注）"
+            }
             className="mt-2 w-full border-border bg-card/70 focus:border-primary/60"
           />
         </div>
@@ -324,7 +375,7 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
           disabled={busy}
           onClick={() => send("continue", [], note.trim())}
         >
-          {showCapabilities ? "授权并开工" : "开做"}
+          {isDebate ? "授权开赛" : showCapabilities ? "授权并开工" : "开做"}
         </Button>
         {showCapabilities && (
           <Button

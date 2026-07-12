@@ -2,6 +2,9 @@
 
 主路径：辩手输出结构化 JSON 数组（dict 项按 ``question_index``；标量项按位置），
 构造 ``exchanges[]``。降级：JSON 解析失败时回退到启发式 blob 拆分（``build_cross_exam_exchanges``）。
+
+是否正面回应 / 回避由裁判据 Q↔A 原文裁定（engagement + decisive），本模块只负责问↔答对齐，
+不产出任何二元褒贬字段。
 """
 
 from __future__ import annotations
@@ -32,16 +35,11 @@ _JSON_ARRAY_FENCE_RE = re.compile(r"```(?:json)?\s*(\[.*?\])\s*```", re.DOTALL)
 def parse_cross_exam_response(
     questions: Sequence[str],
     content: str,
-    *,
-    overall_ok: bool = True,
 ) -> list[CrossExamQa]:
     """从辩手质询作答构造与 ``questions`` 等长的逐条交换。
 
     优先解析结构化 JSON 数组；失败时降级为启发式 blob 拆分。
-
-    ``overall_ok``：整段作答是否有效（如 runner 判定失败）。JSON 主路径与启发式降级
-    均纳入——有答文时 ``ok = 条目自身 ok ∧ overall_ok``；空答恒 ``ok=False``。
-    真实调用通常 ``overall_ok=True``；失败兜底可传 ``False`` 强制全条 not-ok。
+    只对齐 question ↔ answer；空答表示未作答 / 解析失败兜底。
     """
     qs = [q.strip() for q in questions if q and q.strip()]
     if not qs:
@@ -49,14 +47,14 @@ def parse_cross_exam_response(
 
     items = _extract_json_array(content)
     if items is not None:
-        return _exchanges_from_json_items(qs, items, overall_ok=overall_ok)
+        return _exchanges_from_json_items(qs, items)
 
     logger.info(
         "debate.cross_exam_parse.fallback",
         question_count=len(qs),
         content_len=len((content or "").strip()),
     )
-    return build_cross_exam_exchanges(qs, content, overall_ok=overall_ok)
+    return build_cross_exam_exchanges(qs, content)
 
 
 def _extract_json_array(content: str) -> list[Any] | None:
@@ -86,24 +84,20 @@ def _extract_json_array(content: str) -> list[Any] | None:
 def _exchanges_from_json_items(
     questions: Sequence[str],
     items: Sequence[Any],
-    *,
-    overall_ok: bool = True,
 ) -> list[CrossExamQa]:
     """把 JSON 数组项映射到与 ``questions`` 对齐的 ``CrossExamQa`` 列表。
 
     dict 项按 ``question_index`` / 位置取 ``answer``；标量（str/int/float）按位置直接作答，
-    兼容辩手少包一层 wrapper 的 ``["答一","答二"]``。``overall_ok=False`` 时有答文也标
-    not-ok（与启发式 ``_qa_ok`` 同口径）。
+    兼容辩手少包一层 wrapper 的 ``["答一","答二"]``。忽略历史字段 ``directly_addressed`` / ``ok``。
     """
-    out = [CrossExamQa(question=q, answer="", ok=False) for q in questions]
+    out = [CrossExamQa(question=q, answer="") for q in questions]
     for pos, raw in enumerate(items):
         if isinstance(raw, dict):
             idx = _resolve_question_index(raw.get("question_index"), pos)
             if idx is None or idx < 0 or idx >= len(out):
                 continue
             answer = _as_answer_text(raw.get("answer"))
-            ok = _resolve_directly_addressed(raw, answer) and overall_ok
-            out[idx] = CrossExamQa(question=questions[idx], answer=answer, ok=ok)
+            out[idx] = CrossExamQa(question=questions[idx], answer=answer)
             continue
         # 标量数组：按位置映射为 answer（bool 排除，避免 True/False 误当答文）
         if pos >= len(out):
@@ -111,11 +105,7 @@ def _exchanges_from_json_items(
         if isinstance(raw, bool) or not isinstance(raw, (str, int, float)):
             continue
         answer = _as_answer_text(raw)
-        out[pos] = CrossExamQa(
-            question=questions[pos],
-            answer=answer,
-            ok=bool(answer.strip()) and overall_ok,
-        )
+        out[pos] = CrossExamQa(question=questions[pos], answer=answer)
     return out
 
 
@@ -142,36 +132,25 @@ def _as_answer_text(value: Any) -> str:
     return str(value).strip()
 
 
-def _resolve_directly_addressed(item: dict[str, Any], answer: str) -> bool:
-    for key in ("directly_addressed", "ok"):
-        val = item.get(key)
-        if isinstance(val, bool):
-            return val
-    return bool(answer.strip())
-
-
 def build_cross_exam_exchanges(
     questions: Sequence[str],
     answer: str,
-    *,
-    overall_ok: bool = True,
 ) -> list[CrossExamQa]:
     """把辩手一次性产出的作答全文拆成与 ``questions`` 等长的逐条交换（启发式降级）。
 
-    优先按「质询一/质询二」「Q1/Q2」「1.」等标题切段；切不出时把全文归第一条、其余留空，
-    并按 ``overall_ok`` 与是否有实质内容启发式标 ``ok``。
+    优先按「质询一/质询二」「Q1/Q2」「1.」等标题切段；切不出时把全文归第一条、其余留空。
     """
     qs = [q.strip() for q in questions if q and q.strip()]
     if not qs:
         return []
     text = answer.strip()
     if not text:
-        return [CrossExamQa(question=q, answer="", ok=False) for q in qs]
+        return [CrossExamQa(question=q, answer="") for q in qs]
 
     sections = _split_sections(text)
     if len(sections) == len(qs):
         return [
-            CrossExamQa(question=q, answer=sec, ok=_qa_ok(sec, overall_ok))
+            CrossExamQa(question=q, answer=sec)
             for q, sec in zip(qs, sections, strict=True)
         ]
     if len(sections) > 1:
@@ -181,18 +160,18 @@ def build_cross_exam_exchanges(
         else:
             sections = sections + [""] * (len(qs) - len(sections))
         return [
-            CrossExamQa(question=q, answer=sec, ok=_qa_ok(sec, overall_ok))
+            CrossExamQa(question=q, answer=sec)
             for q, sec in zip(qs, sections, strict=True)
         ]
 
     # 无法切段：全文挂第一条，其余空（常见「作答：…；…」连写）。
     if len(qs) == 1:
-        return [CrossExamQa(question=qs[0], answer=text, ok=_qa_ok(text, overall_ok))]
+        return [CrossExamQa(question=qs[0], answer=text)]
     out: list[CrossExamQa] = []
     parts = _split_by_semicolon_chunks(text, len(qs))
     for i, q in enumerate(qs):
         sec = parts[i] if i < len(parts) else ""
-        out.append(CrossExamQa(question=q, answer=sec, ok=_qa_ok(sec, overall_ok)))
+        out.append(CrossExamQa(question=q, answer=sec))
     return out
 
 
@@ -219,9 +198,3 @@ def _split_by_semicolon_chunks(text: str, n: int) -> list[str]:
     if len(chunks) == 1 and n > 1:
         return [chunks[0]] + [""] * (n - 1)
     return chunks + [""] * (n - len(chunks))
-
-
-def _qa_ok(answer: str, overall_ok: bool) -> bool:
-    if not answer.strip():
-        return False
-    return overall_ok

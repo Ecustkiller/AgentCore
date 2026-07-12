@@ -111,8 +111,9 @@ def log_llm_call(
 
     # Cloud in-process metering: enqueue a cost_calls detail when the ledger
     # drainer is running (API server lifespan). Sidecar never starts the drain —
-    # its spend is recorded by the cloud inference proxy instead — so this is a
-    # no-op there and never double-bills.
+    # its spend is recorded by the cloud inference proxy instead. Proxy-forwarded
+    # unary complete() calls still hit this path for llm.call latency logs, but
+    # maybe_enqueue skips when scenario is PROXY_LLM_SCENARIO (proxy_spend only).
     if usage is not None and (usage.input_tokens or usage.output_tokens):
         try:
             from agentcore.billing.call_meter import maybe_enqueue_inprocess_call
@@ -121,6 +122,7 @@ def log_llm_call(
                 model=model,
                 usage=usage,
                 duration_ms=latency_ms,
+                scenario=scenario,
             )
         except Exception:  # noqa: BLE001 — metering must never break the LLM path
             pass

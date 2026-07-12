@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, replace
 from typing import Any
 
+from agentcore.config import settings
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
@@ -25,15 +26,12 @@ from agentcore.runtime.events import (
     run_completed,
     run_context,
     run_failed,
-    run_intake,
     run_started,
     team_note_posted,
 )
 from agentcore.runtime.facts import record_turn_fact
 from agentcore.runtime.interaction import InteractionKind
 from agentcore.runtime.ports import ClientRequestBridge
-from agentcore.runtime.routing import assess_intake
-from agentcore.runtime.routing.intake import resolve_worker_token_ceiling
 from agentcore.runtime.runs.constants import (
     AMEND_NOTE_TOOL_NAME,
     DEFAULT_CONTRACT_RETRIES,
@@ -417,7 +415,6 @@ def build_agent_executor(
         # rounds, merged into RunState.escalations alongside transcript-harvested escalate
         # tool calls.
         gate_escalations: list[dict[str, Any]] = []
-        intake_payload: dict[str, Any] | None = None
         # 受监督子计划 B: a lead's nested-delegation handle (delegate + replan + dispose),
         # hoisted so the finally can fold a sub-plan the lead yielded-but-never-resumed back
         # into the ledger before the parent absorbs this child (堵漏账). Stays None for a leaf
@@ -604,30 +601,14 @@ def build_agent_executor(
             # soon as the worker starts thinking. Bodies capped + journaled (see run_context).
             sink.emit(run_context(spec.run_id, agent_id, _context_block_payloads(received_blocks)))
 
-            # Worker 内部路由 Phase 1 · Intake：轻量计划头（复杂度 / 策略 / token 预算）。
-            # 挂在执行上下文（RunState.intake），经 run_intake 事件发射；不产出逐步计划。
-            intake_result = assess_intake(
-                task=spec.task,
-                role=spec.role,
-                objective=spec.objective,
-                tools=spec.tools,
+            # Worker 累计 token 硬顶 (loose backstop · 真执行): 统一可配置上限。compaction
+            # (tool_clear) 挑大梁做上下文瘦身,这只在失控时收口。≤0 = 关闭。
+            # react_loop 每轮末比对累计 usage。CEO / solo 路径不经此分支,保持 0。
+            token_ceiling = (
+                settings.engine_worker_token_ceiling
+                if settings.engine_worker_token_ceiling > 0
+                else 0
             )
-            intake_payload = intake_result.to_event_payload()
-            sink.emit(
-                run_intake(
-                    spec.run_id,
-                    agent_id,
-                    complexity=intake_result.complexity.value,
-                    strategy=intake_result.strategy.value,
-                    token_budget=intake_result.token_budget,
-                    rationale=intake_result.rationale,
-                    signals=intake_result.signals,
-                )
-            )
-            # Worker 硬顶 (loose backstop · 真执行): 累计 token 安全阀。compaction
-            # (tool_clear) 挑大梁做上下文瘦身,这只在失控时 (估计再离谱也炸不穿 clamp) 收口。
-            # 0 = 关闭。react_loop 每轮末比对累计 usage。
-            token_ceiling = resolve_worker_token_ceiling(intake_result.token_budget)
 
             # 团队便签墙 推增量 (§2.2 通): pull the notes siblings posted since this worker last
             # looked and hand them to react_loop as one user message before each of its NEXT
@@ -795,7 +776,6 @@ def build_agent_executor(
                     cost=cost,
                     transcript=messages,
                     received_context=received_blocks,
-                    intake=intake_payload,
                 )
             # The worker's terminal RunState is journaled at the ``execute`` choke point
             # below (run_final_fact — covers COMPLETED *and* FAILED in one place), so resume
@@ -835,7 +815,6 @@ def build_agent_executor(
                 cost=cost,
                 transcript=messages,
                 received_context=received_blocks,
-                intake=intake_payload,
             )
         except asyncio.CancelledError as e:
             # Dual cancel semantics: redirect = salvage + return CANCELLED (wave absorbs);

@@ -19,6 +19,7 @@ import {
 import { useAuthStore } from "@/stores/auth";
 import { Loader2 } from "lucide-react";
 import { useRef, useState } from "react";
+import { LoginSessionsSection } from "./LoginSessionsSection";
 import { SettingsHeader } from "./SettingsHeader";
 
 // Mirror of the server's avatar_upload_max_bytes so an oversized pick fails fast,
@@ -37,22 +38,20 @@ function errMsg(e: unknown, fallback: string): string {
 /**
  * 账户设置 (/more/account) — self-service identity management.
  *
- * Three independent sections, each posting on its own: 个人资料 (display name +
- * email, synced back into the auth store on success), 修改密码 (current + new,
- * the backend keeps this device signed in and kicks the others), and a 危险区域
- * that注销 (soft-delete + anonymize) the account behind a password-confirm dialog.
+ * Sections: 个人资料 / 修改密码 / 登录设备 / 危险区域 (注销).
  */
 export function AccountSettings() {
   return (
     <div>
       <SettingsHeader
         title="账户设置"
-        description="管理你的个人资料、登录密码与账户。"
+        description="管理你的个人资料、登录密码、登录设备与账户。"
       />
       <div className="mt-6 space-y-8">
         <AvatarSection />
         <ProfileSection />
         <PasswordSection />
+        <LoginSessionsSection />
         <DangerSection />
       </div>
     </div>

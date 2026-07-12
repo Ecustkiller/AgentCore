@@ -40,7 +40,7 @@ export async function authedFetch(
   let res: Response;
   try {
     res = await fetch(url, withCsrf);
-    if (res.status === 401 && (await tryRefresh())) {
+    if (res.status === 401 && (await tryRefresh()) === "renewed") {
       res = await fetch(url, withCsrf);
     }
   } catch (cause) {

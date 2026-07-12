@@ -8,7 +8,6 @@ from typing import Any
 from agentcore.runtime.debate import (
     DebateConfig,
     DebateForm,
-    DebateSeed,
     DebateSide,
     RoundResult,
     UserInterjection,
@@ -26,6 +25,9 @@ from agentcore.tools.builtin.debate.schema import (
 # 全文，不裁会让 prompt 暴涨、烧钱且稀释焦点（主持人侧 judge/brief 早已 _clip，唯独喂辩手没裁）。
 # 头尾保留：对手的立论（头）与结论（尾）都留，只挖中段——辩手看要旨足以针对性回应。
 _OPP_CLIP = 1500
+# 首轮案件底料（config.background）进 debater_task 前的封顶：CEO 可能塞入长调研笔记，
+# 不裁会撑爆首轮 prompt；头尾保留与对手发言裁剪同思路。
+_BG_CLIP = 2000
 
 
 def _clip(text: str, limit: int = _OPP_CLIP) -> str:
@@ -35,6 +37,20 @@ def _clip(text: str, limit: int = _OPP_CLIP) -> str:
         return text
     half = max(1, (limit - 20) // 2)
     return f"{text[:half]}\n……（中段略）……\n{text[-half:]}"
+
+
+def _background_block(config: DebateConfig) -> str:
+    """首轮可选案件底料块：空串 → 不注入（零行为变化）；非空 → 裁剪后以主持人名义喂双方。"""
+    bg = (config.background or "").strip()
+    if not bg:
+        return ""
+    clipped = _clip(bg, _BG_CLIP)
+    return (
+        "\n\n【主持人整理的案件底料·双方共享】\n"
+        "以下为开场前已核实的客观事实清单（非观点、非评价）。引用其中事实时，【沿用清单中的出处"
+        "标记】——不得把本底料本身包装成新的【已核实】来源。支持你立场的证据与论证仍需独立检索"
+        f"取证。\n{clipped}\n"
+    )
 
 
 # 举证责任·证据状态铁律（辩论编排设计.md §4-2.3 契约② P3，方案 A 内联标记）。放进辩手
@@ -100,39 +116,6 @@ def side_system(config: DebateConfig, side: DebateSide) -> str:
     return f"{base}{role_directive(config, side)}{EVIDENCE_RULE}{SEARCH_QUERY_RULE}"
 
 
-def seed_block(seed: DebateSeed | None, side: DebateSide) -> str:
-    """续辩（结构化补轮·B）首轮辩手的「上一场摘要」块——让本方读懂上一场后【接着往深里辩】。
-
-    只喂【事实性的过程摘要】（逐轮焦点/小结 + 本方上一场最强论点 + 仍未决的分歧 + 争议焦点），
-    **刻意不喂主持人的倾向判断 leaning**（那是裁判口径，喂给辩手会污染新一场的中立性）。无种子
-    返回空串（首轮 task 不变、逐字回退到全新辩论）。"""
-    if seed is None:
-        return ""
-    parts: list[str] = []
-    if seed.rounds:
-        arc = "\n".join(
-            f"- 第 {r.round_no} 轮 · {r.focus}：{r.summary}" for r in seed.rounds if r.focus or r.summary
-        )
-        if arc:
-            parts.append(f"上一场各轮交锋：\n{arc}")
-    mine = seed.strongest_points.get(side.key, "")
-    if mine:
-        parts.append(f"你（{side.name}）上一场最强论点：{mine}")
-    if seed.crux:
-        parts.append(f"上一场争议焦点：{seed.crux}")
-    unresolved = list(seed.value_disputes) + list(seed.open_questions)
-    if unresolved:
-        parts.append("上一场仍【未决】的分歧（本场请往这些上面推进）：\n" + "\n".join(f"- {u}" for u in unresolved))
-    if not parts:
-        return ""
-    body = "\n\n".join(parts)
-    return (
-        "\n\n【这是续辩——接着上一场辩论往深里辩】\n"
-        f"{body}\n"
-        "请在上一场的基础上提出【新的】论点或更深一层的论证，别重复上一场已说透的内容。\n"
-    )
-
-
 def debater_task(
     config: DebateConfig,
     side: DebateSide,
@@ -140,23 +123,22 @@ def debater_task(
     *,
     round_no: int,
     focus: str,
-    seed: DebateSeed | None = None,
 ) -> dict[str, Any]:
-    """构造首轮单个辩手的 task dict（build_run_plan 入参）。
-
-    ``seed`` 非空时（结构化补轮·B）注入上一场摘要块，让本方从「读懂上一场」处接着辩。"""
+    """构造首轮单个辩手的 task dict（build_run_plan 入参）。"""
     # 快速对碰：注入轻量约束压住「为小题深挖」（少检索、收窄论点）；认真辩透则不加。
     quick_suffix = "" if config.policy.thorough else f"\n{QUICK_DEBATER_HINT}"
-    prior = seed_block(seed, side)
+    # 可选案件底料：仅首轮 debater_task 注入（后续轮 / 质询 / 结辩经 continue_run 自带记忆）。
+    bg_block = _background_block(config)
     task = (
         f"你在一场【{FORM_LABELS.get(config.form, '辩论')}】中代表「{side.name}」。\n"
         f"辩论命题：{config.motion}\n"
         f"你的立场 / 视角：{side.stance}\n"
         f"本轮议题：{focus}\n\n"
-        f"{role_directive(config, side)}{prior}\n"
+        f"{role_directive(config, side)}\n"
         f"请就本轮议题给出有力、具体、有论据的论证（这是你的开场立论）：聚焦你最能站住的论点，"
         f"用具体证据 / 例子 / 推理链支撑（必要时用 web_search / read_url 取证）；关键事实主张按"
         f"【证据状态铁律】标注【已核实·出处】/【待核实·推断】。{LENGTH_HINT}{quick_suffix}"
+        f"{bg_block}"
     )
     payload: dict[str, Any] = {
         "role": side.name,
@@ -275,10 +257,10 @@ def cx_answer_feedback(
 ) -> str:
     """质询环节（质询回合 P1）喂给 continue_run 的 feedback：主持人代表交锋向本方发出的必答质询。
 
-    要求辩手输出**结构化 JSON 数组**（逐条对应、自评是否正面回应）；每条 ``answer`` 内仍可用自然语言
-    论证（先「是 / 否 / 部分成立」表态、再用证据或推理支撑）。涉及具体事实的前提按【证据状态铁律】标注
-    `【已核实·出处】`/`【待核实·推断】`（举证责任 P3，全文口径见 :data:`EVIDENCE_RULE`）；不得回避 /
-    答非所问 / 复述已说过的立论——``directly_addressed: false`` 或回避会在裁判 engagement 记分被扣。
+    要求辩手输出**结构化 JSON 数组**（逐条 ``question_index`` + ``answer`` 对齐）；每条 ``answer``
+    内仍可用自然语言论证（先「是 / 否 / 部分成立」表态、再用证据或推理支撑）。涉及具体事实的前提
+    按【证据状态铁律】标注 `【已核实·出处】`/`【待核实·推断】`（举证责任 P3，全文口径见
+    :data:`EVIDENCE_RULE`）。是否正面回应由裁判裁定（engagement + decisive），辩手不必自报。
     辩手在自己的 transcript 上作答，故答复进入本方跨轮记忆、下一轮立论可见。"""
     n = len(questions)
     numbered = "\n".join(f"{i}. {q}" for i, q in enumerate(questions, start=1))
@@ -288,16 +270,16 @@ def cx_answer_feedback(
         "主持人代表交锋，向你发出以下【必须正面回答】的质询。请逐条作答，并**只输出一个 JSON 数组**"
         f"（共 {n} 条，与下方编号一一对应；不要 markdown 代码块外的解释文字）：\n"
         "[\n"
-        '  {"question_index": 1, "answer": "对该条的正面回答（可用自然语言论证）", '
-        '"directly_addressed": true},\n'
-        '  {"question_index": 2, "answer": "...", "directly_addressed": false}\n'
+        '  {"question_index": 1, "answer": "对该条的正面回答（可用自然语言论证）"},\n'
+        '  {"question_index": 2, "answer": "..."}\n'
         "]\n\n"
         "字段说明：\n"
         "- question_index：与下方质询编号一致（从 1 起）\n"
         "- answer：对该条的正面回答——先用「是 / 否 / 部分成立」明确表态，再用具体证据或推理支撑；"
-        "凡涉及具体事实的前提都按【证据状态铁律】标注【已核实·出处】/【待核实·推断】，拿不出出处就诚实标"
-        "【待核实·推断】、别含糊带过或硬拗成已核实\n"
-        "- directly_addressed：你是否正面回应了该条（true/false；回避、答非所问、重复已说过的立论标 false）\n\n"
+        "优先基于已有调研与辩论材料作答，确需补证至多 1–2 次检索；凡涉及具体事实的前提都按"
+        "【证据状态铁律】标注【已核实·出处】/【待核实·推断】，拿不出出处就诚实标【待核实·推断】、"
+        "别含糊带过或硬拗成已核实；若该认输 / 让步就坦诚承认，别答非所问、打太极或复述已说过的立论"
+        "来回避\n\n"
         f"质询列表（共 {n} 条）：\n{numbered}"
     )
 

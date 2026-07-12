@@ -88,23 +88,11 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
         Disposition.DURABLE,
         "委派级授权裁决——reload 重放已答态（提问确认交互统一 P1）",
     ),
-    EventType.DEBATE_ROUND_DECISION_REQUIRED: (
-        Disposition.DURABLE,
-        "辩论轮间裁决挂起——reload 重现待答卡（提问确认交互统一 P1）",
-    ),
-    EventType.DEBATE_ROUND_DECISION_RESOLVED: (
-        Disposition.DURABLE,
-        "辩论轮间裁决结果——reload 重放已答态（提问确认交互统一 P1）",
-    ),
     EventType.INTERACTION_ORPHANED: (
         Disposition.DURABLE,
         "热路交互失效——reload 翻「已失效」不可点态（提问确认交互统一 P1）",
     ),
     EventType.TEAM_NOTE_POSTED: (Disposition.DURABLE, "团队便签墙——team-notes 面板重放"),
-    EventType.RUN_INTAKE: (
-        Disposition.DURABLE,
-        "Worker Intake 轻量计划头——重放复杂度/策略/token 预算诊断",
-    ),
     EventType.DEBATE_ROUND_STARTED: (
         Disposition.DURABLE,
         "辩论轮次开场——hydrateFromJournal / fold 重建辩论室进行态（P2 处置重对账）",

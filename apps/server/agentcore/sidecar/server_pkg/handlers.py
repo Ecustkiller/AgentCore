@@ -347,3 +347,31 @@ class HandlerMixin:
             conversation_id=conversation_id,
         )
         await self._reply(request_id, {"ok": True, "queued": peek_redirect_count(execution_id)})
+
+    async def _on_debate_steer(self, request_id: Any, params: dict[str, Any]) -> None:
+        from agentcore.runtime.debate.steer_queue import enqueue_steer, peek_steer_count
+
+        execution_id = str(params.get("executionId") or "").strip()
+        conversation_id = str(params.get("conversationId") or "").strip()
+        decision = str(params.get("decision") or "continue").strip()
+        focus = str(params.get("focus") or "").strip()
+        ask = str(params.get("ask") or "").strip()
+        ask_target = str(params.get("askTarget") or "").strip()
+        if not execution_id or not conversation_id or decision not in ("continue", "conclude"):
+            await self._send(
+                protocol.make_error(
+                    request_id,
+                    protocol.INVALID_PARAMS,
+                    "debateSteer requires executionId, conversationId, decision∈continue|conclude",
+                )
+            )
+            return
+        enqueue_steer(
+            execution_id=execution_id,
+            conversation_id=conversation_id,
+            decision=decision,  # type: ignore[arg-type]
+            focus=focus,
+            ask=ask,
+            ask_target=ask_target,
+        )
+        await self._reply(request_id, {"ok": True, "queued": peek_steer_count(execution_id)})

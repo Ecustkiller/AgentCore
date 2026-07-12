@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { tryRefresh } from "../api";
+import { setSessionRenewedHandler, tryRefresh } from "../api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  setSessionRenewedHandler(null);
 });
 
-describe("tryRefresh single-flight", () => {
+describe("tryRefresh single-flight + three-state", () => {
   afterEach(() => {
     // Ensure Electron outboxApi path does not short-circuit cookie refresh tests.
     if (typeof globalThis !== "undefined" && "window" in globalThis) {
@@ -29,7 +30,7 @@ describe("tryRefresh single-flight", () => {
     const all = Promise.all([tryRefresh(), tryRefresh(), tryRefresh()]);
     release(new Response(null, { status: 200 }));
 
-    expect(await all).toEqual([true, true, true]);
+    expect(await all).toEqual(["renewed", "renewed", "renewed"]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0][0])).toContain("/v1/auth/refresh");
   });
@@ -40,29 +41,59 @@ describe("tryRefresh single-flight", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(await tryRefresh()).toBe(true);
-    expect(await tryRefresh()).toBe(true);
+    expect(await tryRefresh()).toBe("renewed");
+    expect(await tryRefresh()).toBe("renewed");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("reports failure and resets so a later attempt can retry", async () => {
+  it("returns auth_dead on 401 and resets so a later attempt can retry", async () => {
     const fetchMock = vi.fn(() =>
       Promise.resolve(new Response(null, { status: 401 })),
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(await tryRefresh()).toBe(false);
+    expect(await tryRefresh()).toBe("auth_dead");
     // Not stuck on the previous (failed) promise — a new round-trip is issued.
-    expect(await tryRefresh()).toBe(false);
+    expect(await tryRefresh()).toBe("auth_dead");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("swallows transport errors as a failed (non-throwing) refresh", async () => {
+  it("returns transient on transport errors (non-throwing)", async () => {
     const fetchMock = vi.fn(() =>
       Promise.reject(new TypeError("Failed to fetch")),
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(tryRefresh()).resolves.toBe(false);
+    await expect(tryRefresh()).resolves.toBe("transient");
+  });
+
+  it("returns transient on 5xx", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(new Response(null, { status: 503 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await tryRefresh()).toBe("transient");
+  });
+
+  it("fires onSessionRenewed when outboxApi authRefresh renews", async () => {
+    const renewed = vi.fn();
+    setSessionRenewedHandler(renewed);
+    const authRefresh = vi.fn(async () => "renewed" as const);
+    vi.stubGlobal("window", { outboxApi: { authRefresh } });
+
+    expect(await tryRefresh()).toBe("renewed");
+    expect(authRefresh).toHaveBeenCalledOnce();
+    expect(renewed).toHaveBeenCalledOnce();
+  });
+
+  it("does not fire onSessionRenewed on outboxApi transient", async () => {
+    const renewed = vi.fn();
+    setSessionRenewedHandler(renewed);
+    const authRefresh = vi.fn(async () => "transient" as const);
+    vi.stubGlobal("window", { outboxApi: { authRefresh } });
+
+    expect(await tryRefresh()).toBe("transient");
+    expect(renewed).not.toHaveBeenCalled();
   });
 });

@@ -104,7 +104,13 @@
           "code_execute",
           "file_write",
           "test_run"
-        ]
+        ],
+        "primitive": "delegate",
+        "motion": "",
+        "form": "",
+        "sides": [],
+        "max_rounds": 0,
+        "thorough": true
       },
       "timestamp": "2026-01-01T00:00:00.004Z"
     },
@@ -143,12 +149,12 @@
         "text": "我来安排团队。"
       },
       {
-        "kind": "team",
-        "execution_id": "exec1"
-      },
-      {
         "kind": "team_preview",
         "checkpoint_id": "tp1"
+      },
+      {
+        "kind": "team",
+        "execution_id": "exec1"
       }
     ],
     "citations": [],
@@ -198,8 +204,7 @@
         "stance": null,
         "group": null,
         "round": 0,
-        "revisionOf": null,
-        "revision": 0,
+        "continuesRunId": null,
         "revised": null,
         "replacesRunId": null,
         "checkpoint": null,
@@ -227,8 +232,7 @@
         "stance": null,
         "group": null,
         "round": 0,
-        "revisionOf": null,
-        "revision": 0,
+        "continuesRunId": null,
         "revised": null,
         "replacesRunId": null,
         "checkpoint": null,

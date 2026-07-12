@@ -5,6 +5,7 @@ import {
   type GraphRunLike,
   aggregateDebateRoundStatus,
   buildGraphStructure,
+  computeDebateStageBands,
   computeGraphFold,
   computeTopologicalRunWaves,
   computeWaves,
@@ -40,8 +41,8 @@ function minimalExecution(
             id: r.id,
             dependsOn: r.dependsOn,
             parentRunId: r.parentRunId ?? null,
-            revision: r.revision,
-            revisionOf: r.revisionOf,
+            continuationIndex: r.continuationIndex ?? 0,
+            continuesRunId: r.continuesRunId ?? null,
             kind: "agent",
             delegateBatch: r.delegateBatch,
           }) as Execution["runs"][0],
@@ -159,6 +160,102 @@ describe("computeWaves", () => {
   });
 });
 
+/** Execution 保真构造：保留 stance/group/round/receivedContext（minimalExecution 会剥掉）。 */
+function debateStageExecution(
+  runs: GraphRunLike[],
+  captainId = "captain",
+): Execution {
+  return {
+    runs: [{ id: captainId, kind: "captain", dependsOn: [] }, ...runs],
+  } as unknown as Execution;
+}
+
+describe("computeDebateStageBands", () => {
+  const positions = {
+    mod: { x: 0, y: 120 },
+    mod_r1_pro: { x: 260, y: 0 },
+    mod_r1_con: { x: 260, y: 240 },
+    mod_r2_pro: { x: 520, y: 0 },
+    mod_r2_con: { x: 520, y: 240 },
+    mod_closing_pro: { x: 780, y: 0 },
+    mod_closing_con: { x: 780, y: 240 },
+  };
+
+  it("returns [] for non-debate executions", () => {
+    const exec = debateStageExecution([
+      { id: "a", dependsOn: [] },
+      { id: "b", dependsOn: [] },
+    ]);
+    expect(
+      computeDebateStageBands(
+        exec,
+        { a: { x: 0, y: 0 }, b: { x: 200, y: 0 } },
+        "captain",
+      ),
+    ).toEqual([]);
+  });
+
+  it("partitions multibeat debate into 第1轮/第2轮/结辩 left-to-right", () => {
+    const exec = debateStageExecution(debateMultibeatRuns());
+    const bands = computeDebateStageBands(exec, positions, "captain");
+    expect(bands.map((b) => b.label)).toEqual(["第 1 轮", "第 2 轮", "结辩"]);
+    expect(bands[0]?.x).toBeLessThan(bands[1]?.x ?? 0);
+    expect(bands[1]?.x).toBeLessThan(bands[2]?.x ?? 0);
+  });
+
+  it("folds the moderator opening into the 第1轮 band (widest stage)", () => {
+    const exec = debateStageExecution(debateMultibeatRuns());
+    const bands = computeDebateStageBands(exec, positions, "captain");
+    const first = bands[0];
+    // 第1轮 spans moderator(x=0) → round-1 column, wider than a single-column stage.
+    expect(first?.x).toBeLessThanOrEqual(0);
+    expect(first?.w ?? 0).toBeGreaterThan(bands[1]?.w ?? 0);
+    // label anchored centered inside its own band.
+    expect(first?.labelX ?? 0).toBeGreaterThan(first?.x ?? 0);
+    expect(first?.labelX ?? 0).toBeLessThan((first?.x ?? 0) + (first?.w ?? 0));
+  });
+
+  it("never turns cross-exam into its own stage (3 stages only)", () => {
+    const exec = debateStageExecution(debateMultibeatRuns());
+    const bands = computeDebateStageBands(exec, positions, "captain");
+    expect(bands).toHaveLength(3);
+  });
+
+  it("labels a single statement round as 第1轮", () => {
+    const single: GraphRunLike[] = [
+      { id: "mod", dependsOn: [], parentRunId: null },
+      {
+        id: "mod_r1_pro",
+        dependsOn: [],
+        parentRunId: "mod",
+        continuesRunId: null,
+        stance: "pro",
+        group: "debate:debate",
+        round: 1,
+      },
+      {
+        id: "mod_r1_con",
+        dependsOn: [],
+        parentRunId: "mod",
+        continuesRunId: null,
+        stance: "con",
+        group: "debate:debate",
+        round: 1,
+      },
+    ];
+    const bands = computeDebateStageBands(
+      debateStageExecution(single),
+      {
+        mod: { x: 0, y: 120 },
+        mod_r1_pro: { x: 260, y: 0 },
+        mod_r1_con: { x: 260, y: 240 },
+      },
+      "captain",
+    );
+    expect(bands.map((b) => b.label)).toEqual(["第 1 轮"]);
+  });
+});
+
 function debateSide(
   prefix: string,
   stance: "pro" | "con",
@@ -168,8 +265,8 @@ function debateSide(
     id: `mod_r1_${prefix}`,
     dependsOn: [],
     parentRunId: "mod",
-    revision: 0,
-    revisionOf: null,
+    continuationIndex: 0,
+    continuesRunId: null,
     stance,
     group: "debate:debate",
   };
@@ -179,8 +276,8 @@ function debateSide(
       id: `mod_r${r}_${prefix}`,
       dependsOn: [],
       parentRunId: original.id,
-      revision: r,
-      revisionOf: original.id,
+      continuationIndex: r - 1,
+      continuesRunId: original.id,
       stance,
       group: "debate:debate",
     });
@@ -197,8 +294,8 @@ function debateMultibeatSide(
     id: `mod_r1_${prefix}`,
     dependsOn: [],
     parentRunId: "mod",
-    revision: 0,
-    revisionOf: null,
+    continuationIndex: 0,
+    continuesRunId: null,
     stance,
     group: "debate:debate",
     round: 1,
@@ -209,8 +306,8 @@ function debateMultibeatSide(
       id: `mod_r1_cx_${prefix}`,
       dependsOn: [],
       parentRunId: original.id,
-      revision: 2,
-      revisionOf: original.id,
+      continuationIndex: 1,
+      continuesRunId: original.id,
       stance,
       group: "debate:debate",
       round: 1,
@@ -220,8 +317,8 @@ function debateMultibeatSide(
       id: `mod_r2_${prefix}`,
       dependsOn: [],
       parentRunId: original.id,
-      revision: 3,
-      revisionOf: original.id,
+      continuationIndex: 2,
+      continuesRunId: original.id,
       stance,
       group: "debate:debate",
       round: 2,
@@ -230,8 +327,8 @@ function debateMultibeatSide(
       id: `mod_r2_cx_${prefix}`,
       dependsOn: [],
       parentRunId: original.id,
-      revision: 4,
-      revisionOf: original.id,
+      continuationIndex: 3,
+      continuesRunId: original.id,
       stance,
       group: "debate:debate",
       round: 2,
@@ -241,8 +338,8 @@ function debateMultibeatSide(
       id: `mod_closing_${prefix}`,
       dependsOn: [],
       parentRunId: original.id,
-      revision: 5,
-      revisionOf: original.id,
+      continuationIndex: 4,
+      continuesRunId: original.id,
       stance,
       group: "debate:debate",
       round: 2,
@@ -328,7 +425,7 @@ describe("computeGraphFold · debate compound", () => {
     }
     // 修订链：轮→轮→结辩，无质询 phantom。
     const revEdges = rawEdges
-      .filter((e) => e.kind === "revision")
+      .filter((e) => e.kind === "continuation")
       .map((e) => `${e.source}->${e.target}`)
       .sort();
     expect(revEdges).toEqual(
@@ -340,51 +437,49 @@ describe("computeGraphFold · debate compound", () => {
       ].sort(),
     );
     // 侧栏仍可辨识 beat 文案；图上质询角标随独立节点消失。
-    expect(
-      debateBeatLabel({ round: 1, revision: 2, beat: "cross_exam" }),
-    ).toBe("第 1 轮·质询");
-    expect(
-      debateBeatLabel({ round: 2, revision: 3, beat: "statement" }),
-    ).toBe("第 2 轮");
-    expect(
-      debateBeatLabel({ round: 2, revision: 5, beat: "closing" }),
-    ).toBe("结辩");
+    expect(debateBeatLabel({ round: 1, revision: 2, beat: "cross_exam" })).toBe(
+      "第 1 轮·质询",
+    );
+    expect(debateBeatLabel({ round: 2, revision: 3, beat: "statement" })).toBe(
+      "第 2 轮",
+    );
+    expect(debateBeatLabel({ round: 2, revision: 5, beat: "closing" })).toBe(
+      "结辩",
+    );
   });
 });
 
 describe("debate beat fold helpers", () => {
   it("aggregates status with running/failed over completed", () => {
-    expect(
-      aggregateDebateRoundStatus(["completed", "running"]),
-    ).toBe("running");
+    expect(aggregateDebateRoundStatus(["completed", "running"])).toBe(
+      "running",
+    );
     expect(aggregateDebateRoundStatus(["completed", "failed"])).toBe("failed");
-    expect(
-      aggregateDebateRoundStatus(["completed", "completed"]),
-    ).toBe("completed");
+    expect(aggregateDebateRoundStatus(["completed", "completed"])).toBe(
+      "completed",
+    );
   });
 
   it("labels live phase as 质询作答中 when CX is active", () => {
     expect(debateRoundActiveBeat("completed", ["running"])).toBe("cross_exam");
-    expect(
-      debateRoundPhaseLabel("running", "cross_exam", true),
-    ).toBe("质询作答中");
+    expect(debateRoundPhaseLabel("running", "cross_exam", true)).toBe(
+      "质询作答中",
+    );
     expect(debateRoundPhaseLabel("running", "statement", true)).toBe("立论中");
     expect(debateRoundPhaseLabel("completed", "statement", true)).toBeNull();
   });
 
   it("settled mark: 含质询 on completed, 质询作答失败 when CX failed", () => {
-    expect(
-      debateRoundSettledMark("completed", true, ["completed"]),
-    ).toEqual({ label: "含质询", mode: "suffix" });
-    expect(
-      debateRoundSettledMark("failed", true, ["failed"]),
-    ).toEqual({ label: "质询作答失败", mode: "replace" });
-    expect(
-      debateRoundSettledMark("failed", true, ["completed"]),
-    ).toBeNull();
-    expect(
-      debateRoundSettledMark("running", true, ["running"]),
-    ).toBeNull();
+    expect(debateRoundSettledMark("completed", true, ["completed"])).toEqual({
+      label: "含质询",
+      mode: "suffix",
+    });
+    expect(debateRoundSettledMark("failed", true, ["failed"])).toEqual({
+      label: "质询作答失败",
+      mode: "replace",
+    });
+    expect(debateRoundSettledMark("failed", true, ["completed"])).toBeNull();
+    expect(debateRoundSettledMark("running", true, ["running"])).toBeNull();
     expect(debateRoundSettledMark("completed", false, [])).toBeNull();
   });
 

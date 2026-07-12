@@ -153,7 +153,7 @@ def test_format_for_ceo_surfaces_escalations_blockers_first():
     assert "其暂用假设：暂用 PG" in out
     assert "【关键阻塞】" in out
     assert out.index("Postgres") < out.index("目标受众")
-    assert "ask_user" in out and "revise" in out
+    assert "ask_user" in out and "continue_from_run_id" in out
     assert "已升级 1 项待决问题" in out
 
 

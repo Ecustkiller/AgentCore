@@ -770,6 +770,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sessions
+         * @description List the caller's active login devices (one row per refresh-token family).
+         */
+        get: operations["list_sessions_v1_auth_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/sessions/revoke-others": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke Other Sessions
+         * @description Log out every other device; keep the caller's current family.
+         *
+         *     Access tokens without a ``fam`` claim (pre-upgrade) cannot identify "current"
+         *     → 422 rather than revoke-all (which would drop this session too).
+         */
+        post: operations["revoke_other_sessions_v1_auth_sessions_revoke_others_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/sessions/{family_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke Session
+         * @description Log out one device (revoke its refresh-token family). Own current session OK.
+         */
+        delete: operations["revoke_session_v1_auth_sessions__family_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/token": {
         parameters: {
             query?: never;
@@ -1107,6 +1170,30 @@ export interface paths {
         get: operations["get_conversation_cost_v1_conversations__conversation_id__cost_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{conversation_id}/debate-steer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Debate Steer
+         * @description Queue an ambient steer for the live debate (下一轮边界非阻塞生效).
+         *
+         *     The Moderator never hard-stops for the user — this fire-and-forget channel is the
+         *     boss直控 path (同 ``run-redirect`` 模式). Applied at the next round boundary via
+         *     existing ``pending_interjections`` / ``focus_override`` / ``CONCLUDE`` mechanisms.
+         */
+        post: operations["submit_debate_steer_v1_conversations__conversation_id__debate_steer_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4196,12 +4283,13 @@ export interface components {
         };
         /**
          * AutonomyPolicy
-         * @description User-global capability-authorization posture (能力授权维度；不动计划确认).
+         * @description User-global kickoff / capability-authorization posture.
          *
          *     - ``always_ask`` — every GRANTABLE call prompts; kickoff has no grant shortcut
          *     - ``first_grant`` — kickoff once authorizes the grantable set for the delegation
          *       (default; continuous with the prior delegation-authorization card)
-         *     - ``full_auto`` — kickoff auto-grants without listing capability items
+         *     - ``full_auto`` — skip the kickoff card entirely (plan + capability); silent
+         *       auto-grant of GRANTABLE tools for the delegation
          * @enum {string}
          */
         AutonomyPolicy: "always_ask" | "first_grant" | "full_auto";
@@ -4892,68 +4980,6 @@ export interface components {
             errors: number;
             /** Turns */
             turns: number;
-        };
-        /**
-         * DebateSeedBriefInput
-         * @description The prior debate's brief digest carried in a 续辩 seed (no 辩手全文).
-         */
-        DebateSeedBriefInput: {
-            /**
-             * Crux
-             * @default
-             */
-            crux: string;
-            /**
-             * Leaning
-             * @default
-             */
-            leaning: string;
-            /** Open Questions */
-            open_questions?: string[];
-            /** Strongest Points */
-            strongest_points?: {
-                [key: string]: string;
-            };
-            /** Value Disputes */
-            value_disputes?: string[];
-        };
-        /**
-         * DebateSeedInput
-         * @description 结构化补轮·B（可逆叫停）：前端从收场卡发起续辩时，把上一场 ``debate_result`` 投影成的最小
-         *     种子（辩论编排设计.md §6.6）。后端据此让本回合的 debate 续上一场（主持人焦点
-         *     正交于已谈、首轮辩手读到上一场摘要）。只带过程摘要 + 简报关键项，**不带辩手全文**（全文随辩手
-         *     run 走执行事件，体量大）。
-         */
-        DebateSeedInput: {
-            brief?: components["schemas"]["DebateSeedBriefInput"];
-            /**
-             * Motion
-             * @default
-             */
-            motion: string;
-            /** Rounds */
-            rounds?: components["schemas"]["DebateSeedRoundInput"][];
-        };
-        /**
-         * DebateSeedRoundInput
-         * @description One prior-debate round's digest (结构化补轮·B seed).
-         */
-        DebateSeedRoundInput: {
-            /**
-             * Focus
-             * @default
-             */
-            focus: string;
-            /**
-             * Round No
-             * @default 0
-             */
-            round_no: number;
-            /**
-             * Summary
-             * @default
-             */
-            summary: string;
         };
         /**
          * DelegationAuthorizationDecision
@@ -5805,12 +5831,12 @@ export interface components {
          *     reuse, so an optimistic bubble reconciles cleanly.
          *
          *     plan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the
-         *     gated downstream); team_preview (开工卡) carries ``workers`` (upcoming roles /
-         *     tasks / deps) + ``tools`` (grantable capabilities for this delegation); ask_user
-         *     carries the unified card payload ``question`` (the framing / opening line) +
-         *     ``context`` + the optional opening content ``assumptions`` / ``questions`` /
-         *     ``style_options`` (empty for a compact mid-task fork). The unused set is empty
-         *     for the other kinds.
+         *     gated downstream); team_preview (开工卡) carries ``primitive`` (``delegate`` /
+         *     ``debate``) + ``workers`` / ``tools`` (delegate) or ``motion`` / ``sides`` /
+         *     ``max_rounds`` / ``thorough`` (debate); ask_user carries the unified card payload
+         *     ``question`` (the framing / opening line) + ``context`` + the optional opening
+         *     content ``assumptions`` / ``questions`` / ``style_options`` (empty for a compact
+         *     mid-task fork). The unused set is empty for the other kinds.
          */
         PausedTurnSummary: {
             /** Assumptions */
@@ -5824,15 +5850,35 @@ export interface components {
              * @default
              */
             context: string;
+            /**
+             * Form
+             * @default
+             */
+            form: string;
             /** Intent */
             intent?: ("kickoff" | "decision") | null;
             kind: components["schemas"]["SuspensionKind"];
+            /**
+             * Max Rounds
+             * @default 0
+             */
+            max_rounds: number;
             /** Message Id */
             message_id: string;
+            /**
+             * Motion
+             * @default
+             */
+            motion: string;
             /** Pending */
             pending?: {
                 [key: string]: unknown;
             }[];
+            /**
+             * Primitive
+             * @default delegate
+             */
+            primitive: string;
             /**
              * Question
              * @default
@@ -5840,6 +5886,10 @@ export interface components {
             question: string;
             /** Questions */
             questions?: {
+                [key: string]: unknown;
+            }[];
+            /** Sides */
+            sides?: {
                 [key: string]: unknown;
             }[];
             /** Steps */
@@ -5850,6 +5900,11 @@ export interface components {
             style_options?: {
                 [key: string]: unknown;
             }[];
+            /**
+             * Thorough
+             * @default true
+             */
+            thorough: boolean;
             /** Tools */
             tools?: string[];
             /**
@@ -5881,7 +5936,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "approval" | "delegation_authorization" | "escalation" | "debate_round";
+            kind: "approval" | "delegation_authorization" | "escalation";
             /** Message Id */
             message_id: string;
             /** Payload */
@@ -6134,56 +6189,6 @@ export interface components {
             ok: boolean;
             /** Value */
             value?: unknown | null;
-        };
-        /**
-         * ResolveDebateRoundInteraction
-         * @description Settle an interactive debate round boundary (``debate_round`` interaction, 逐轮交互).
-         *
-         *     Raised when a ``debate(interactive=true)`` Moderator paused at a round boundary so the user
-         *     can steer depth instead of letting the judge auto-converge. ``decision`` is ``continue``
-         *     (debate another round — ``focus``, if given, overrides the next round's framing = 「加角度」,
-         *     steering the debate onto the dimension the user cares about) or ``conclude`` (stop now and
-         *     emit the brief, even if the judge had not converged).
-         *
-         *     ``ask`` is an optional user 【追问】 — orthogonal to ``focus`` (focus reframes the round's
-         *     topic; ask is a concrete question the next round's debaters MUST answer head-on). ``ask_target``
-         *     optionally directs it at one side (a :class:`DebateSide` key; empty = ask everyone). A follow-up
-         *     rides a ``continue`` (追问即续辩, the next round addresses it); it is recorded verbatim as a
-         *     :class:`~agentcore.runtime.debate.types.UserInterjection` on that round and survives reload via
-         *     ``debate_result.rounds[*].user_interjections``.
-         *
-         *     A late resolve (the round already timed out → judge auto-convergence took over) falls through
-         *     the route as 404, so the desktop renders it as「已关闭」rather than an error. In-process only
-         *     (not durably persisted): a disconnect / restart drops the live debate, so there is no
-         *     ``resume`` counterpart.
-         */
-        ResolveDebateRoundInteraction: {
-            /**
-             * Ask
-             * @default
-             */
-            ask: string;
-            /**
-             * Ask Target
-             * @default
-             */
-            ask_target: string;
-            /**
-             * Decision
-             * @default continue
-             * @enum {string}
-             */
-            decision: "continue" | "conclude";
-            /**
-             * Focus
-             * @default
-             */
-            focus: string;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "debate_round";
         };
         /**
          * ResolveDelegationAuthorizationInteraction
@@ -6494,12 +6499,47 @@ export interface components {
             attachments?: components["schemas"]["MessageAttachment"][];
             /** Content */
             content: string;
-            debate_seed?: components["schemas"]["DebateSeedInput"] | null;
             /**
              * Requires Tools
              * @default false
              */
             requires_tools: boolean;
+        };
+        /** SessionListResponse */
+        SessionListResponse: {
+            /** Data */
+            data: components["schemas"]["SessionSummary"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * SessionSummary
+         * @description One active login device (refresh-token family), owner-scoped.
+         */
+        SessionSummary: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Current
+             * @default false
+             */
+            current: boolean;
+            /** Id */
+            id: string;
+            /** Ip */
+            ip?: string | null;
+            /**
+             * Last Used At
+             * Format: date-time
+             */
+            last_used_at: string;
+            /** Platform */
+            platform?: string | null;
+            /** User Agent */
+            user_agent?: string | null;
         };
         /**
          * SetBillingPreferenceRequest
@@ -6808,6 +6848,53 @@ export interface components {
             workspace_path?: string | null;
         };
         /**
+         * SubmitDebateSteerRequest
+         * @description Ambient debate steer — fire-and-forget boss intervention (辩论编排设计.md §六).
+         *
+         *     Queued while ``debate`` drives; the Moderator drains at the next round boundary
+         *     (non-blocking). ``decision=continue`` (+ optional ``focus``/``ask``) folds into the
+         *     existing pending_interjections / focus_override path; ``conclude`` stops at that
+         *     boundary (current round finishes first — never mid-generation).
+         */
+        SubmitDebateSteerRequest: {
+            /**
+             * Ask
+             * @default
+             */
+            ask: string;
+            /**
+             * Ask Target
+             * @default
+             */
+            ask_target: string;
+            /**
+             * Decision
+             * @default continue
+             * @enum {string}
+             */
+            decision: "continue" | "conclude";
+            /** Execution Id */
+            execution_id: string;
+            /**
+             * Focus
+             * @default
+             */
+            focus: string;
+        };
+        /** SubmitDebateSteerResponse */
+        SubmitDebateSteerResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Queued
+             * @description Pending steer count for this execution after enqueue.
+             */
+            queued: number;
+        };
+        /**
          * SubmitRunRedirectRequest
          * @description User mid-flight steer for one running worker (中间可见性 Phase 2a).
          *
@@ -6895,6 +6982,8 @@ export interface components {
          *     its body-returning twin for clients whose origin (``capacitor://`` / a new web
          *     origin) can't rely on SameSite cookies (认证与会话.md §十). ``expires_in`` is the
          *     access token's lifetime in seconds so the client refreshes before it lapses;
+         *     ``refresh_expires_in`` is the refresh token's lifetime in seconds (clients that
+         *     persist the refresh token as a cookie need this for ``expirationDate``);
          *     ``user`` rides the login response (identity in one round trip) and is omitted on
          *     refresh.
          */
@@ -6903,6 +6992,8 @@ export interface components {
             access_token: string;
             /** Expires In */
             expires_in: number;
+            /** Refresh Expires In */
+            refresh_expires_in?: number | null;
             /** Refresh Token */
             refresh_token: string;
             /**
@@ -7119,7 +7210,7 @@ export interface components {
          *     - ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and
          *       lost their live stream (结构化挂起 2b) — each renders a resume card.
          *     - ``pending_interactions``: hot-path interactions still awaiting settlement
-         *       (journal fold: approval / delegation_authorization / escalation / debate_round).
+         *       (journal fold: approval / delegation_authorization / escalation).
          *       Cold-path stays in ``paused``.
          */
         TurnRecoveryResponse: {
@@ -8559,7 +8650,9 @@ export interface operations {
     login_mfa_v1_auth_login_mfa_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Client-Platform"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -8882,6 +8975,107 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sessions_v1_auth_sessions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_other_sessions_v1_auth_sessions_revoke_others_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_session_v1_auth_sessions__family_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                family_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9713,6 +9907,45 @@ export interface operations {
             };
         };
     };
+    submit_debate_steer_v1_conversations__conversation_id__debate_steer_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitDebateSteerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubmitDebateSteerResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     duplicate_conversation_v1_conversations__conversation_id__duplicate_post: {
         parameters: {
             query?: never;
@@ -9948,7 +10181,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ResolveApprovalInteraction"] | components["schemas"]["ResolveDelegationAuthorizationInteraction"] | components["schemas"]["ResolveClientToolInteraction"] | components["schemas"]["ResolveEscalationInteraction"] | components["schemas"]["ResolveDebateRoundInteraction"];
+                "application/json": components["schemas"]["ResolveApprovalInteraction"] | components["schemas"]["ResolveDelegationAuthorizationInteraction"] | components["schemas"]["ResolveClientToolInteraction"] | components["schemas"]["ResolveEscalationInteraction"];
             };
         };
         responses: {

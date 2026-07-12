@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.scheduler import BoundaryReason
     from agentcore.runtime.runs.types import RunSpec, RunState
-    from agentcore.runtime.sessions import SessionSaver, SessionStore
+    from agentcore.runtime.sessions import SessionLoader, SessionSaver, SessionStore
     from agentcore.runtime.suspension import SuspensionDeleter, SuspensionSaver
 
 logger = get_logger(__name__)
@@ -86,6 +86,7 @@ class DelegateTool:
         approval_gate: ApprovalGate | None = None,
         session_store: SessionStore | None = None,
         session_saver: SessionSaver | None = None,
+        session_loader: SessionLoader | None = None,
         conversation_id: str | None = None,
         registry: ClientRequestBridge | None = None,
         checkpoint_timeout_seconds: float | None = None,
@@ -113,6 +114,7 @@ class DelegateTool:
         self._captain_run_id = captain_run_id
         self._session_store = session_store
         self._session_saver = session_saver
+        self._session_loader = session_loader
         self._depth = depth
         self._conversation_id = conversation_id
         self._registry = registry
@@ -135,6 +137,8 @@ class DelegateTool:
         from agentcore.runtime.costing import WorkerResultAccumulator
 
         self._acc = WorkerResultAccumulator()
+        # 续派次数（CEO continue_from + redirect 热修；不计辩论）— turn_metrics.revises。
+        self._continuation_ids: list[str] = []
         self._supervised: SupervisedRun | None = None
         self._pending_boundary: tuple[BoundaryReason, list[RunSpec]] | None = None
         # 挂起即收口 (②): set by the CHECKPOINT boundary hook when it finalizes the turn at a
@@ -150,6 +154,12 @@ class DelegateTool:
         # Turn-level team consensus (team_brief): survives across delegate calls in one CEO turn.
         self._team_brief: str | None = None
 
+    def _kickoff_system_prompt(self) -> str:
+        return self._system_prompt
+
+    def _kickoff_tool_name(self) -> str:
+        return "delegate"
+
     @property
     def usage(self) -> dict[str, int]:
         return self._acc.usage
@@ -161,6 +171,18 @@ class DelegateTool:
     @property
     def citations(self) -> list[dict[str, Any]]:
         return self._acc.citations
+
+    @property
+    def continuation_count(self) -> int:
+        """CEO 侧续派次数（continue_from + redirect 热修；不计辩论编排续写）。"""
+        n = len(self._continuation_ids)
+        for child in self._children:
+            n += child.continuation_count
+        return n
+
+    def note_continuation(self, run_id: str) -> None:
+        """Record a successful CEO-side continuation for turn_metrics.revises."""
+        self._continuation_ids.append(run_id)
 
     @property
     def collab(self) -> dict[str, int]:

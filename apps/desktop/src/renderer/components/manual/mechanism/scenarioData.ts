@@ -12,8 +12,7 @@ export interface Scenario {
   desc: string;
   /** ELK 布局；缺省走左右流（与产品默认一致）。串行链用 "tree" 自上而下读。 */
   layout?: ElkGraphLayout;
-  /** 进阶形态：默认折进「更多形态」（执行中态 / 多层嵌套 / 热修 / 超大团队），常用四式
-   * （并行 / 串行 / 辩论 / 嵌套小队）常驻，避免画廊读起来像测试网格。 */
+  /** 进阶形态：默认折进「更多形态」；常用四式（并行 / 串行 / 正反辩论 / 嵌套小队）常驻。 */
   advanced?: boolean;
   nodes: PreviewNode[];
   edges: GraphEdge[];
@@ -58,14 +57,13 @@ const captain = (id: string, status: RunStatus, preview = ""): PreviewNode => ({
 const edge = (
   source: string,
   target: string,
-  kind: "dep" | "delegate" | "revision" = "dep",
+  kind: "dep" | "delegate" | "continuation" = "dep",
 ): GraphEdge => ({ id: `${source}->${target}`, source, target, kind });
 
 export const SCENARIOS: Scenario[] = [
   {
-    title: "并行扇出（fan-out）",
-    desc: "三个 worker 的 depends_on 均为空 → WaveScheduler 判为同一波、asyncio 并发起跑；全部完成后 CEO 汇聚点收尾。并行度是数据（depends_on）不是模式。",
-    // 实现：runs/wave.py
+    title: "多人同时开工",
+    desc: "三位队员没有先后依赖，同一批一起开干；全部完成后 CEO 汇总收口。能不能并行，看的是分工有没有先后，不是另开一种模式。",
     nodes: [
       input("把这个需求拆成三块并行做"),
       agent("w1", "文件操作员", "completed", {
@@ -102,10 +100,9 @@ export const SCENARIOS: Scenario[] = [
     ],
   },
   {
-    title: "串行流水线（depends_on 链）",
+    title: "一条线按顺序推进",
     layout: "tree",
-    desc: "调研 → 分析 → 撰写：每个节点 depends_on 上一个，调度器逐个解锁；上游 RunState.content 按 result_handling（默认全文）注入下游。树形布局自上而下读更顺。",
-    // 实现：runs/executor.py
+    desc: "调研 → 分析 → 撰写：每个人都等上一位交活再开工；上游结论会交给下游接着用。树形布局自上而下读更顺。",
     nodes: [
       input("调研近 7 日成本趋势并产出一段摘要"),
       agent("s1", "调研员", "completed", {
@@ -135,55 +132,20 @@ export const SCENARIOS: Scenario[] = [
     ],
   },
   {
-    title: "执行中（流式输出 · 待定 · 深度思考）",
-    advanced: true,
-    desc: "运行中节点带脉冲 + run_output 流式预览 + 光标，入边走 primary 粒子流；未解锁节点灰显 pending；reasoning=max 的 worker 带「深度」徽章。",
-    // 实现：runtime/events.py
-    nodes: [
-      input("分析近 7 日成本趋势并产出一段摘要"),
-      agent("r1", "调研员", "running", {
-        task: "检索最佳实践",
-        outputPreview:
-          "正在检索 React Flow 自定义节点的最佳实践，已找到 3 篇相关文档，正在归纳关键结论",
-        toolCount: 2,
-        modelPreference: "strong",
-        reasoningEffort: "max",
-      }),
-      agent("r2", "数据分析师", "completed", {
-        task: "汇总近 7 日成本趋势数据",
-        durationMs: 3200,
-        toolCount: 1,
-        modelPreference: "fast",
-      }),
-      agent("r3", "文案", "pending", {
-        task: "根据分析结论撰写一段摘要",
-        modelPreference: "fast",
-      }),
-      captain("cap2", "pending", ""),
-    ],
-    edges: [
-      edge("__input__", "r1"),
-      edge("__input__", "r2"),
-      edge("__input__", "r3"),
-      edge("r1", "cap2"),
-      edge("r2", "cap2"),
-      edge("r3", "cap2"),
-    ],
-  },
-  {
-    title: "辩论 / 审查（正方 · 反方）",
-    desc: "带 stance 标记的普通 AGENT DAG（非独立模式）。ELK considerModelOrder 把正 / 反分带对置，再汇聚到 CEO 裁决；立场徽章用 primary 令牌、与状态色解耦。",
-    // 实现：lib/elk-layout.ts
+    title: "正反辩论",
+    desc: "辩论三形态之一：正方与反方对垒，图上左右分带，最后汇到 CEO 裁决。另外两种——红队挑刺、多方圆桌——在「更多形态」里。",
     nodes: [
       input("评估是否采用激进重构方案"),
       agent("pro", "架构师", "completed", {
         stance: "pro",
+        group: "debate:debate",
         task: "论证采用激进重构方案的收益与可行性",
         durationMs: 5000,
         modelPreference: "strong",
       }),
       agent("con", "架构师", "completed", {
         stance: "con",
+        group: "debate:debate",
         task: "论证保持稳健迭代、反对激进重构的理由",
         durationMs: 4800,
         modelPreference: "strong",
@@ -202,9 +164,8 @@ export const SCENARIOS: Scenario[] = [
     ],
   },
   {
-    title: "嵌套小队（can_delegate，一层）+ 失败",
-    desc: "项目经理被标 can_delegate → 获得绑定自身的 delegate，再带一支小队（虚线委派边 + 子任务徽章）。子 worker 失败按 on_failure 处理，红环 + 红叉，不拖垮整 DAG。",
-    // 实现：runs/executor.py
+    title: "嵌套小队",
+    desc: "项目经理再带一支小队（虚线委派）。子队员失败会标红，但不拖垮整队——CEO 仍可汇总已完成的部分。",
     nodes: [
       input("实现一个新设置页，前端 + 测试分工完成"),
       agent("pm", "项目经理", "completed", {
@@ -239,10 +200,122 @@ export const SCENARIOS: Scenario[] = [
     ],
   },
   {
-    title: "多层嵌套（depth ≤ 2）+ 子树整体下沉",
+    title: "执行中的样子",
     advanced: true,
-    desc: "CEO(0) → worker(1) → sub-worker(2)：深度 2 永不再获 delegate（硬上限封死递归）。整条委派子树作为整体下沉到主干线之下，CEO 汇聚点恒在末层、不被横穿。",
-    // 实现：runs/constants.py
+    desc: "有人正在写（蓝环 + 流式预览）、有人已交活、有人还在等；深度思考的队员会带「深度」徽章。",
+    nodes: [
+      input("分析近 7 日成本趋势并产出一段摘要"),
+      agent("r1", "调研员", "running", {
+        task: "检索最佳实践",
+        outputPreview:
+          "正在检索 React Flow 自定义节点的最佳实践，已找到 3 篇相关文档，正在归纳关键结论",
+        toolCount: 2,
+        modelPreference: "strong",
+        reasoningEffort: "max",
+      }),
+      agent("r2", "数据分析师", "completed", {
+        task: "汇总近 7 日成本趋势数据",
+        durationMs: 3200,
+        toolCount: 1,
+        modelPreference: "fast",
+      }),
+      agent("r3", "文案", "pending", {
+        task: "根据分析结论撰写一段摘要",
+        modelPreference: "fast",
+      }),
+      captain("cap2", "pending", ""),
+    ],
+    edges: [
+      edge("__input__", "r1"),
+      edge("__input__", "r2"),
+      edge("__input__", "r3"),
+      edge("r1", "cap2"),
+      edge("r2", "cap2"),
+      edge("r3", "cap2"),
+    ],
+  },
+  {
+    title: "红队挑刺",
+    advanced: true,
+    desc: "辩论三形态之二：方案方被审，红队专找风险与漏洞；挖尽或修补到位后收口，侧重风险清单与加固建议。",
+    nodes: [
+      input("压力测试这个上线方案，把隐患挖出来"),
+      agent("scheme", "方案方", "completed", {
+        group: "debate:red_team",
+        task: "陈述上线方案与已做防护",
+        durationMs: 4200,
+        modelPreference: "strong",
+      }),
+      agent("rt1", "红队·安全", "completed", {
+        group: "debate:red_team",
+        task: "攻击权限边界与数据泄露面",
+        durationMs: 5100,
+        modelPreference: "strong",
+      }),
+      agent("rt2", "红队·合规", "completed", {
+        group: "debate:red_team",
+        task: "挑刺审计留痕与用户告知义务",
+        durationMs: 4600,
+        modelPreference: "strong",
+      }),
+      captain(
+        "rtcap",
+        "completed",
+        "共挖出 4 项高优风险；方案方已回应修补路径，建议上线前先关权限与告知两项。",
+      ),
+    ],
+    edges: [
+      edge("__input__", "scheme"),
+      edge("__input__", "rt1"),
+      edge("__input__", "rt2"),
+      edge("scheme", "rtcap"),
+      edge("rt1", "rtcap"),
+      edge("rt2", "rtcap"),
+    ],
+  },
+  {
+    title: "多方圆桌",
+    advanced: true,
+    desc: "辩论三形态之三：三个以上视角多边碰撞，把观点光谱铺开；适合探讨与学习，过程地图往往比单一裁决更有用。",
+    nodes: [
+      input("从产品、工程、运营三个视角讨论远程办公政策"),
+      agent("p1", "产品视角", "completed", {
+        group: "debate:roundtable",
+        task: "从用户体验与节奏谈利弊",
+        durationMs: 3800,
+        modelPreference: "strong",
+      }),
+      agent("p2", "工程视角", "completed", {
+        group: "debate:roundtable",
+        task: "从协作成本与交付质量谈利弊",
+        durationMs: 4100,
+        modelPreference: "strong",
+      }),
+      agent("p3", "运营视角", "completed", {
+        group: "debate:roundtable",
+        task: "从人效与合规谈利弊",
+        durationMs: 3900,
+        modelPreference: "strong",
+      }),
+      captain(
+        "rtbcap",
+        "completed",
+        "三视角光谱已铺开：核心分歧在「同步密度」与「办公日门槛」，交给你拍板。",
+      ),
+    ],
+    edges: [
+      edge("__input__", "p1"),
+      edge("__input__", "p2"),
+      edge("__input__", "p3"),
+      edge("p1", "rtbcap"),
+      edge("p2", "rtbcap"),
+      edge("p3", "rtbcap"),
+    ],
+  },
+  {
+    title: "多层小队",
+    advanced: true,
+    desc: "CEO → 项目经理 → 前端组长 → 工程师：小队还能再带一层。嵌套有硬上限，不会无限拆下去；整条子树沉在主干线下方。",
     nodes: [
       input("拆解并实现协作图，前端再分一层小队"),
       agent("mpm", "项目经理", "completed", {
@@ -266,8 +339,8 @@ export const SCENARIOS: Scenario[] = [
         isSubtask: true,
       }),
       agent("eng2", "前端工程师", "running", {
-        task: "接入真实 ELK 布局并联调",
-        outputPreview: "正在把 fit-to-width 接到内嵌画布，已联通 2/3…",
+        task: "接入真实布局并联调",
+        outputPreview: "正在把适应宽度接到内嵌画布，已联通 2/3…",
         toolCount: 2,
         modelPreference: "fast",
         isSubtask: true,
@@ -283,10 +356,9 @@ export const SCENARIOS: Scenario[] = [
     ],
   },
   {
-    title: "多轮热修（修订 vN 版本链）",
+    title: "带现场续派",
     advanced: true,
-    desc: "后续消息要求返工时，CEO 经 revise 唤回原队员带现场记忆续写，图上挂一条点线「修订 vN」版本链——是同一节点的新版本，不是新队员（留人双 miss 才回落重派）。",
-    // 实现：tools/builtin/revise.py
+    desc: "CEO 唤回刚干完的同一位队员，带着上次的现场接着改——图上挂一条点线「续 ×N」。是同一个人的下一次产出，不是新队员；现场对不上会明确拒绝，不会悄悄换人。",
     nodes: [
       input("把上一版报告的第 2 章重写得更详细"),
       agent("orig", "撰写员", "completed", {
@@ -296,13 +368,13 @@ export const SCENARIOS: Scenario[] = [
         modelPreference: "strong",
       }),
       agent("rev", "撰写员", "completed", {
-        // 与生产一致：续写继承原 task，改点走 revisionSummary（run_context.revision）。
         task: "撰写报告初稿",
         revisionSummary: "重写第 2 章并扩充论据",
         durationMs: 3800,
         toolCount: 1,
         modelPreference: "strong",
         isRevision: true,
+        continuationIndex: 1,
         revision: 2,
       }),
       captain("rcap", "completed", "已交付重写后的第 2 章，其余章节沿用初稿。"),
@@ -310,14 +382,13 @@ export const SCENARIOS: Scenario[] = [
     edges: [
       edge("__input__", "orig"),
       edge("orig", "rcap"),
-      edge("orig", "rev", "revision"),
+      edge("orig", "rev", "continuation"),
     ],
   },
   {
-    title: "超大团队（9 路并行 · 执行中）",
+    title: "大团队并行",
     advanced: true,
-    desc: "并行度拉满（max_parallel = 10 上限内）：横向填满列宽、纵向超过内嵌高度上限(520) → 顶对齐 + 底部渐隐示意「还有更多」，看全图进全屏。也用来检验小缩放下节点是否仍可读。",
-    // 实现：runs/wave.py
+    desc: "九路同时润色：横向铺满、纵向超出内嵌高度时顶对齐 + 底部渐隐，提示「还有更多」——看全图请进全屏。也用来感受小缩放下节点是否仍可读。",
     nodes: [
       input("把这份长报告拆成 9 块并行润色"),
       agent("b1", "润色员", "completed", {

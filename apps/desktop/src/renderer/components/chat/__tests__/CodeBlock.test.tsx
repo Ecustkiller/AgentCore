@@ -3,9 +3,13 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/capabilities", () => ({
-  hasTerminalRun: vi.fn(() => true),
-}));
+vi.mock("@/lib/capabilities", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/capabilities")>();
+  return {
+    ...actual,
+    hasTerminalRun: vi.fn(() => true),
+  };
+});
 
 import { hasTerminalRun } from "@/lib/capabilities";
 import { useRunConfirmStore } from "@/stores/runConfirm";

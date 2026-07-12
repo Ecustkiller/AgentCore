@@ -28,10 +28,10 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
-# debate / delegate / revise are wired on every path; ask_user is live-user only.
+# debate / delegate are wired on every path; ask_user is live-user only.
 # verify_and_fix / long_form_writing / team_orchestration_advanced ride delegate.
-_FULL_TOOLS = {"delegate", "revise", "ask_user", "debate"}
-_NO_LIVE_USER = {"delegate", "revise", "debate"}  # autonomous path: no ask_user
+_FULL_TOOLS = {"delegate", "ask_user", "debate"}
+_NO_LIVE_USER = {"delegate", "debate"}  # autonomous path: no ask_user
 
 
 def _ctx() -> ToolContext:
@@ -261,11 +261,10 @@ def test_debate_skill_teaches_intent_alignment_before_opening():
 
 def test_revise_skill_teaches_recall_and_delegate_fallback():
     body = _body("revising_a_product")
-    assert "revise" in body
-    assert "target_run_id" in body
-    assert "feedback" in body
-    # The fallback boundary: 换角色 / 救失败稿 / 合并 → delegate.
+    assert "continue_from_run_id" in body
     assert "delegate" in body
+    # The fallback boundary: 换角色 / 救失败稿 / 合并 → 冷委派.
+    assert "冷委派" in body or "replaces_run_id" in body
 
 
 def test_ask_user_kickoff_skill_teaches_impact_tiered_proposal_card():

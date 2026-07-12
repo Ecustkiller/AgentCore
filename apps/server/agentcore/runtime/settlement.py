@@ -24,7 +24,6 @@ SETTLEMENT_EVENT_KINDS: frozenset[str] = frozenset(
         EventType.APPROVAL_RESOLVED.value,
         EventType.DELEGATION_AUTHORIZATION_RESOLVED.value,
         EventType.ESCALATION_RESOLVED.value,
-        EventType.DEBATE_ROUND_DECISION_RESOLVED.value,
         EventType.CHECKPOINT_RESOLVED.value,
         EventType.PLAN_REVIEW_RESOLVED.value,
         EventType.TEAM_PREVIEW_RESOLVED.value,

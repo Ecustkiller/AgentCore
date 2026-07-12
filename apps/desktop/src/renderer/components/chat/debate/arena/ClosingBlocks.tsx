@@ -5,7 +5,7 @@ import { useSidePanelStore } from "@/stores/sidePanel";
 import { TriangleAlert } from "lucide-react";
 import { CollapsibleSpeech } from "../CollapsibleSpeech";
 import type { DebateClosingView } from "../model";
-import { StageDivider } from "./StageDivider";
+import { SectionHeader } from "./SectionHeader";
 import { closingAnchorId } from "./anchors";
 
 export function ClosingBlocks({
@@ -19,7 +19,7 @@ export function ClosingBlocks({
 }) {
   return (
     <div>
-      <StageDivider id={closingAnchorId()} label="结辩" />
+      <SectionHeader id={closingAnchorId()} label="结辩" />
       <div className="space-y-4">
         {closings.map((c) => (
           <ClosingBlock

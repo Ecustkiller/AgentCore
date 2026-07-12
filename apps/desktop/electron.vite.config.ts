@@ -1,12 +1,14 @@
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
-import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import react from "@vitejs/plugin-react";
+import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import { searchForWorkspaceRoot } from "vite";
 import { viteClientBuildDefine } from "../../scripts/client-build-info.mjs";
 import { resolveApiBaseUrl } from "./scripts/resolve-api-base-url";
 
-const clientBuildDefine = viteClientBuildDefine(new URL("./package.json", import.meta.url));
+const clientBuildDefine = viteClientBuildDefine(
+  new URL("./package.json", import.meta.url),
+);
 
 // 包根（本文件所在目录）——与 renderer envDir / .env.production 同目录。
 // 禁止用 process.cwd()：cwd ≠ 包根时主进程读不到 .env.production，CSP 会钉死 localhost，
@@ -24,52 +26,52 @@ export default defineConfig(({ mode, command }) => {
   }
 
   return {
-  main: {
-    plugins: [externalizeDepsPlugin()],
-    define: {
-      __API_BASE_URL__: JSON.stringify(apiBaseUrl),
-    },
-    resolve: {
-      alias: {
-        "@shared": resolve(packageDir, "src/shared"),
+    main: {
+      plugins: [externalizeDepsPlugin()],
+      define: {
+        __API_BASE_URL__: JSON.stringify(apiBaseUrl),
+      },
+      resolve: {
+        alias: {
+          "@shared": resolve(packageDir, "src/shared"),
+        },
       },
     },
-  },
-  preload: {
-    plugins: [externalizeDepsPlugin()],
-    resolve: {
-      alias: {
-        "@shared": resolve(packageDir, "src/shared"),
+    preload: {
+      plugins: [externalizeDepsPlugin()],
+      resolve: {
+        alias: {
+          "@shared": resolve(packageDir, "src/shared"),
+        },
       },
     },
-  },
-  renderer: {
-    // electron-vite defaults root to src/renderer, so Vite's default publicDir would be
-    // src/renderer/public. Point at package-root public/ instead.
-    publicDir: resolve(packageDir, "public"),
-    // 与主进程 resolveApiBaseUrl 同一包根，避免 cwd 漂移导致主/渲染 API 源分叉。
-    envDir: packageDir,
-    define: clientBuildDefine,
-    // SECURITY (XSS-001 前端XSS·CSP): drop Vite's inline modulepreload polyfill. Electron's
-    // bundled Chromium supports <link rel=modulepreload> natively, so the polyfill is dead
-    // weight — and removing it means the built index.html has NO inline <script>, which is
-    // what lets the app:// CSP use a strict `script-src 'self'` (see src/main/index.ts)
-    // without a blank-screen regression.
-    build: {
-      modulePreload: { polyfill: false },
-    },
-    resolve: {
-      alias: {
-        "@": resolve(packageDir, "src/renderer"),
-        "@shared": resolve(packageDir, "src/shared"),
+    renderer: {
+      // electron-vite defaults root to src/renderer, so Vite's default publicDir would be
+      // src/renderer/public. Point at package-root public/ instead.
+      publicDir: resolve(packageDir, "public"),
+      // 与主进程 resolveApiBaseUrl 同一包根，避免 cwd 漂移导致主/渲染 API 源分叉。
+      envDir: packageDir,
+      define: clientBuildDefine,
+      // SECURITY (XSS-001 前端XSS·CSP): drop Vite's inline modulepreload polyfill. Electron's
+      // bundled Chromium supports <link rel=modulepreload> natively, so the polyfill is dead
+      // weight — and removing it means the built index.html has NO inline <script>, which is
+      // what lets the app:// CSP use a strict `script-src 'self'` (see src/main/index.ts)
+      // without a blank-screen regression.
+      build: {
+        modulePreload: { polyfill: false },
       },
+      resolve: {
+        alias: {
+          "@": resolve(packageDir, "src/renderer"),
+          "@shared": resolve(packageDir, "src/shared"),
+        },
+      },
+      // Allow serving the monorepo root so the 前端预览 route (#/preview) can glob the
+      // committed conformance vectors from packages/protocol-conformance/fixtures.
+      server: {
+        fs: { allow: [searchForWorkspaceRoot(packageDir)] },
+      },
+      plugins: [react()],
     },
-    // Allow serving the monorepo root so the 前端预览 route (#/preview) can glob the
-    // committed conformance vectors from packages/protocol-conformance/fixtures.
-    server: {
-      fs: { allow: [searchForWorkspaceRoot(packageDir)] },
-    },
-    plugins: [react()],
-  },
   };
 });

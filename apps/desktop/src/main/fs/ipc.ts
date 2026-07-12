@@ -242,7 +242,11 @@ export function registerFsIpc(): void {
       requiresOpenConfirm(args.relPath) &&
       !(await confirmOpenPath(args.relPath))
     ) {
-      return { ok: false, reason: "已取消（未确认打开该文件）", code: "invalid" };
+      return {
+        ok: false,
+        reason: "已取消（未确认打开该文件）",
+        code: "invalid",
+      };
     }
     return openWithDefaultApp(args.rootId, args.relPath);
   });

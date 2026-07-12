@@ -233,12 +233,14 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
                 "red_proc": "high",
                 "red_subst": "medium",
             },
-            "factual_disputes": ["质量异议函是否在合理期限内送达原告口径不一"],
-            "value_disputes": ["以程序抗辩拖延 vs 实体一次性了结的策略取舍"],
+            "handoffs": [
+                {"kind": "value", "text": "以程序抗辩拖延 vs 实体一次性了结的策略取舍"},
+                {"kind": "fact", "text": "质量异议函是否在合理期限内送达原告口径不一"},
+                {"kind": "question", "text": "违约金调减的请求权基础按哪条主张？"},
+            ],
             "leaning": "有条件成立：补强送达证据 + 异议函具体化 + 逐项否认后可扛住",
             "confidence": "medium",
             "recommendation": "终稿前必须：① 补送达签收链证据 ② 异议函按批次 / 标准逐条具体化 ③ 对原告每项主张明确否认，杜绝沉默推定。",
-            "open_questions": ["违约金调减的请求权基础按哪条主张？"],
         },
     }
     return [
@@ -625,12 +627,14 @@ def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
                 "red_proc": "high",
                 "red_subst": "medium",
             },
-            "factual_disputes": ["质量异议函是否在合理期限内送达原告口径不一"],
-            "value_disputes": ["以程序抗辩拖延 vs 实体一次性了结的策略取舍"],
+            "handoffs": [
+                {"kind": "value", "text": "以程序抗辩拖延 vs 实体一次性了结的策略取舍"},
+                {"kind": "fact", "text": "质量异议函是否在合理期限内送达原告口径不一"},
+                {"kind": "question", "text": "违约金调减的请求权基础按哪条主张？"},
+            ],
             "leaning": "有条件成立：补强送达证据 + 异议函具体化 + 逐项否认后可扛住",
             "confidence": "medium",
             "recommendation": "终稿前必须：① 补送达签收链证据 ② 异议函按批次 / 标准逐条具体化 ③ 对原告每项主张明确否认，杜绝沉默推定。",
-            "open_questions": ["违约金调减的请求权基础按哪条主张？"],
         },
     }
     return [
@@ -1018,12 +1022,15 @@ def _multi_agent_legal_case_analysis() -> list[SSEEvent]:
                 "pro": "合同 + 送货单 + 对账单可证交付与欠款，凭证较充分。",
                 "con": "若能补强及时书面异议 + 质量鉴定，则可主张减款 / 拒付。",
             },
-            "factual_disputes": ["买方是否在合理期限内书面提出质量异议", "是否存在质量鉴定结论"],
-            "value_disputes": ["先和解止损 vs 补证后再诉的策略取舍"],
+            "handoffs": [
+                {"kind": "value", "text": "先和解止损 vs 补证后再诉的策略取舍"},
+                {"kind": "fact", "text": "买方是否在合理期限内书面提出质量异议"},
+                {"kind": "fact", "text": "是否存在质量鉴定结论"},
+                {"kind": "question", "text": "买方主张的减款金额与依据为何？"},
+            ],
             "leaning": "在买方补足质量异议举证前，付款义务大概率成立（倾向研判，非判决结果预测）",
             "confidence": "medium",
             "recommendation": "接案前请买方补：① 质量异议的书面记录及送达凭证 ② 质量鉴定报告 ③ 损失证据；据补证情况再定接案 / 和解。",
-            "open_questions": ["买方主张的减款金额与依据为何？"],
         },
     }
     return [
@@ -1081,8 +1088,8 @@ def _multi_agent_legal_case_analysis() -> list[SSEEvent]:
             usage=_USAGE,
             cost=_COST,
         ),
-        # 第 2 轮：辩手为首轮 revision=2 续写——交锋收敛到质量异议的举证。
-        run_started(pro_r2, "d_pro2", parent_run_id=pro_run, revision=2),
+        # 第 2 轮：辩手为首轮 continue_run 续写——交锋收敛到质量异议的举证。
+        run_started(pro_r2, "d_pro2", parent_run_id=mod, continues_run_id=pro_run),
         run_output_delta(
             pro_r2, "d_pro2", "原告（续）：买方未在合理期限内书面异议、无质量鉴定，应视为认可。"
         ),
@@ -1096,7 +1103,7 @@ def _multi_agent_legal_case_analysis() -> list[SSEEvent]:
             usage=_USAGE,
             cost=_COST,
         ),
-        run_started(con_r2, "d_con2", parent_run_id=con_run, revision=2),
+        run_started(con_r2, "d_con2", parent_run_id=mod, continues_run_id=con_run),
         run_output_delta(con_r2, "d_con2", "被告（续）：曾口头异议，但书面凭证与鉴定确有缺口。"),
         run_completed(
             con_r2,

@@ -77,8 +77,8 @@ def escalation_block(tool: DelegateTool, plan: RunPlan, results: dict) -> str:
             "以下是队员无法独自拍板、需要你定夺的关键岔路 / 缺失信息。它们已按各自的暂定假设"
             "继续交付，但你应先处理这些问题：能自己答的就在概览里给出并据此判断相关产物是否需"
             "返工；确需用户拍板的就用 ask_user 问（可把问题 near-verbatim 转给用户）；需要原"
-            "作者据答案重做的就用 revise 唤回；标【缺输入·依赖缺口】的是队员卡在缺一个还不存在"
-            "的输入——用 delegate 补一个产出它的步骤，再用 revise 把结果交回原作者据此续写。\n"
+            "作者据答案重做的就用 delegate 设 continue_from_run_id 带现场续派；标【缺输入·依赖缺口】的是队员卡在缺一个还不存在"
+            "的输入——用 delegate 补一个产出它的步骤，再设 continue_from_run_id 把结果交回原作者据此续写。\n"
             + "\n".join(line for _, line in pending)
         )
     if answered:
@@ -105,7 +105,7 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
             continue
         if st.phase is not RunPhase.COMPLETED or not (st.content or "").strip():
             continue
-        # Naming: continue_run / revise use ``{target}_rev{n}``
+        # Naming: continue_run / redirect use ``{target}_rev{n}``
         if "_rev" in rid:
             orig = rid.rsplit("_rev", 1)[0]
             if orig in plan_ids:
@@ -282,13 +282,13 @@ def format_for_ceo(
     lines.append(
         "\n---\n以上为团队产出。各成员的「文件产出（已写入工作区）」行是落盘的地面真相。\n"
         "⚠️ 防幻觉铁律：worker 是否真写了文件，只看「文件产出」行——正文声称写了却无此行 = 未真正"
-        "落盘，判为【未达成】，用 revise 唤回落盘或重新委派。纯文本产出的 worker（调研 / 分析等）"
+        "落盘，判为【未达成】，用 delegate 设 continue_from_run_id 带现场续派落盘或重新冷委派。纯文本产出的 worker（调研 / 分析等）"
         "无文件产出属正常。\n"
         "多路并行且相互依赖时，做一步【语义边界对账】：查冲突（双方对同一接口假设不一致）、"
         "缺口（掉在缝里没人做）、重复（两人做了同一件事）；上方若有【团队便签】一并对照。"
-        "对出问题用 revise / replan 修，别糊过去。独立并行（各干各的）跳过此步。\n"
+        "对出问题用 continue_from_run_id 续派 / replan 修，别糊过去。独立并行（各干各的）跳过此步。\n"
         "收尾前对照用户原始请求做【完工核验】：每件事是否实质达成？未达成就补（delegate / replan / "
-        "revise），已达成就自信收口、不无谓空转。然后用你自己的声音写一段简短概览，串起各人结论，"
+        "continue_from_run_id），已达成就自信收口、不无谓空转。然后用你自己的声音写一段简短概览，串起各人结论，"
         "指引用户看细节，不逐字复述。如有队员建议的下一步，择有价值者带给用户。"
     )
     output = "\n".join(lines)

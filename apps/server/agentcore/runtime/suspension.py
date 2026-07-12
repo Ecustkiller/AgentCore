@@ -17,11 +17,11 @@ union (base :class:`TurnSuspension` + :class:`PlanReviewSuspension` /
   ``pending`` (display re-render): the ``plan`` (with minted run_ids) and the
   finished-worker ``completed`` seed are BOTH re-projected from the journal on resume
   (``plan_from_journal`` / ``completed_from_journal``), not serialized — 执行级事件溯源 Phase 2.
-- **team_preview** — the first ``delegate`` wave paused BEFORE any worker starts
-  (thin team preview). Resume uses the same ``delegate.resume_plan`` substrate as
-  plan_review (continue / adjust-steer / stop-skip), with an empty ``completed`` seed
-  and empty ``checkpoint_run_ids`` so an adjust steers every not-yet-run node. Carries
-  the ``workers`` card rows (role / task / depends_on / debate).
+- **team_preview** — orchestration kickoff gate paused BEFORE fan-out /
+  moderator start (``delegate`` workers or ``debate`` loop). Resume branches on
+  ``primitive``: delegate uses ``delegate.resume_plan``; debate re-enters
+  ``DebateTool.execute`` (skip kickoff). Carries workers (delegate) or
+  motion/sides/budget (debate) plus optional capability ``tools``.
 - **ask_user** — the CEO paused mid-loop on its ``ask_user`` checkpoint (the one
   asking primitive — opening 引导 or mid-task fork). Resume maps the user's answer
   to the ``ask_user`` tool result and continues the CEO loop (no plan tail). Carries
@@ -299,12 +299,12 @@ class PlanReviewSuspension(TurnSuspension):
 
 @dataclass(kw_only=True)
 class TeamPreviewSuspension(TurnSuspension):
-    """A turn frozen at the kickoff gate (开工卡) — plan + capability auth before workers.
+    """A turn frozen at the kickoff gate (开工卡) — plan + capability auth before fan-out.
 
-    Same resume substrate as :class:`PlanReviewSuspension` (``delegate.resume_plan``).
-    ``workers`` = plan half; ``tools`` = capability-auth half (may be empty under
-    AutonomyPolicy.full_auto / always_ask). ``plan`` / ``completed`` are in-memory
-    carriers only (journal rebuild on claim).
+    Shared by ``delegate`` (workers wave) and ``debate`` (moderator loop). Resume
+    branches on ``primitive``: delegate → ``delegate.resume_plan``; debate →
+    ``debate.execute`` with the stored ``debate_arguments``. ``plan`` / ``completed``
+    are in-memory carriers only for delegate (journal rebuild on claim).
     """
 
     kind: ClassVar[SuspensionKind] = SuspensionKind.TEAM_PREVIEW
@@ -315,6 +315,16 @@ class TeamPreviewSuspension(TurnSuspension):
     workers: list[dict[str, Any]] = field(default_factory=list)
     # GRANTABLE tools the kickoff grant would cover (统一授权白名单).
     tools: list[str] = field(default_factory=list)
+    # Orchestration primitive discriminant (delegate | debate).
+    primitive: str = "delegate"
+    # Debate card fields (empty for delegate).
+    motion: str = ""
+    form: str = ""
+    sides: list[dict[str, Any]] = field(default_factory=list)
+    max_rounds: int = 0
+    thorough: bool = True
+    # Resume blob for debate.execute (motion/form/sides/thorough).
+    debate_arguments: dict[str, Any] = field(default_factory=dict)
 
     @property
     def checkpoint_run_ids(self) -> set[str]:
@@ -359,6 +369,12 @@ _EMPTY_SUMMARY_EXTRAS: dict[str, Any] = {
     "pending": [],
     "workers": [],
     "tools": [],
+    "primitive": "delegate",
+    "motion": "",
+    "form": "",
+    "sides": [],
+    "max_rounds": 0,
+    "thorough": True,
     "question": "",
     "context": "",
     "assumptions": [],
@@ -403,7 +419,17 @@ def _plan_review_summary_extras(s: TurnSuspension) -> dict[str, Any]:
 
 def _team_preview_frame_extras(s: TurnSuspension) -> dict[str, Any]:
     assert isinstance(s, TeamPreviewSuspension)
-    return {"workers": list(s.workers), "tools": list(s.tools)}
+    return {
+        "workers": list(s.workers),
+        "tools": list(s.tools),
+        "primitive": s.primitive,
+        "motion": s.motion,
+        "form": s.form,
+        "sides": list(s.sides),
+        "max_rounds": s.max_rounds,
+        "thorough": s.thorough,
+        "debate_arguments": dict(s.debate_arguments),
+    }
 
 
 def _team_preview_from_extras(data: dict[str, Any]) -> dict[str, Any]:
@@ -413,6 +439,13 @@ def _team_preview_from_extras(data: dict[str, Any]) -> dict[str, Any]:
         "plan": plan_from_json({}),
         "workers": list(data.get("workers") or []),
         "tools": list(data.get("tools") or []),
+        "primitive": data.get("primitive") or "delegate",
+        "motion": data.get("motion") or "",
+        "form": data.get("form") or "",
+        "sides": list(data.get("sides") or []),
+        "max_rounds": int(data.get("max_rounds") or 0),
+        "thorough": bool(data.get("thorough", True)),
+        "debate_arguments": dict(data.get("debate_arguments") or {}),
     }
 
 
@@ -422,6 +455,12 @@ def _team_preview_summary_extras(s: TurnSuspension) -> dict[str, Any]:
         **_EMPTY_SUMMARY_EXTRAS,
         "workers": list(s.workers),
         "tools": list(s.tools),
+        "primitive": s.primitive,
+        "motion": s.motion,
+        "form": s.form,
+        "sides": list(s.sides),
+        "max_rounds": s.max_rounds,
+        "thorough": s.thorough,
     }
 
 def _ask_user_frame_extras(s: TurnSuspension) -> dict[str, Any]:

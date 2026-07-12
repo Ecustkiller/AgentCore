@@ -19,18 +19,19 @@ from agentcore.runtime.debate.moderator_common import (
 from agentcore.runtime.debate.types import (
     DebateConfig,
     DebateForm,
-    DebateSeed,
     RoundResult,
     SideTurn,
 )
 
-# 第 1 轮【开场白】规格（喂给 :func:`frame_round` 的首轮分支）：主持人口吻的一句开场，供前端
-# 顶部「会说话的主持人」气泡定调。空 / 解析失败时前端回落到模板开场白，故它是【锦上添花】而非硬依赖
-# ——别为凑它牺牲 focus 质量。仅首轮产出（续辩首轮亦然），后续轮恒 ""（换轮点题由前端模板承担）。
+# 第 1 轮【开场白】规格（喂给 :func:`frame_round` 的首轮分支）：主持人面向普通观众的一句人话
+# 开场，供前端顶部「会说话的主持人」气泡定调。空 / 解析失败时前端回落到模板开场白，故它是【锦上
+# 添花】而非硬依赖——别为凑它牺牲 focus 质量。仅首轮产出，后续轮恒 ""（换轮点题由前端模板承担）。
 _OPENING_SPEC = (
-    "另外附一句【开场白】opening：用主持人的口吻、一句话（≤40 字）为整场定调——点出"
-    "【这场要替用户定什么】＋【为什么先从这个焦点切入】。不复述命题原文、不剧透结论、不站队、"
-    "不用寒暄套话。\n"
+    "另外附一句【开场白】opening：以主持人身份、面向一位【不熟悉这个领域的普通观众】开场——"
+    "用大白话把观众领进场：点出【这场要帮你定的核心分歧是什么】＋【为什么先从它看起】。"
+    "一两句话、≤60 字，务必【说人话】：不堆专业术语、不用名词化行话（非用不可的专业词就顺带"
+    "一句大白话解释），不复述命题原文、不剧透结论、不站队、不寒暄。口吻示范："
+    "『先帮你把最要紧的一件事说清楚：X 到底算不算数——因为后面成不成，全看这一步。』\n"
 )
 
 _FRAME_SYSTEM = (
@@ -105,31 +106,14 @@ async def frame_round(
     complete_json: CompleteJson,
     config: DebateConfig,
     history: list[RoundResult],
-    seed: DebateSeed | None = None,
 ) -> tuple[str, str]:
     """定本轮议题焦点；第 1 轮附带一句主持人【开场白】。
 
-    返回 ``(focus, opening)``：``focus`` 是本轮争议焦点；``opening`` 仅【首轮】（全新辩论 /
-    续辩首轮）产出——主持人口吻的一句开场，供前端顶部「会说话的主持人」气泡渲染（空 / 解析失败
-    前端回落到模板开场白，故非硬依赖）。后续轮恒 ``""``（换轮点题由前端模板承担）。
+    返回 ``(focus, opening)``：``focus`` 是本轮争议焦点；``opening`` 仅【首轮】产出——主持人口吻
+    的一句开场，供前端顶部「会说话的主持人」气泡渲染（空 / 解析失败前端回落到模板开场白，故非硬
+    依赖）。后续轮恒 ``""``（换轮点题由前端模板承担）。
     """
-    # 结构化补轮·B：上一场已谈焦点（续辩须正交于它，不重复换说法重谈）。扁平 if/elif/else 避免
-    # 嵌套加深缩进（否则全新辩论 prompt 行被推过 100 字超长）。
-    prior_focuses = seed.covered_focuses if seed else []
-    if not history and prior_focuses:
-        # 续辩首轮：把上一场焦点列为「已覆盖」，逼出一个正交的新焦点（更深 / 换维度）。
-        covered = "\n".join(f"- {f}" for f in prior_focuses)
-        user = (
-            f"辩论命题：{config.motion}\n\n这是【续辩】——上一场已覆盖这些焦点"
-            f"（本场须正交、勿换说法重谈）：\n{covered}\n\n"
-            f"参与方：\n{_sides_block(config)}\n\n{_frame_form_hint(config.form)}\n\n"
-            "请为【本场第一轮】定一个【正交于已谈焦点】的争议点——换一个尚未谈透的"
-            "维度或更深一层，把上一场辩论往前推。焦点须是【一句≤30 字短语】、像小标题，"
-            "聚焦单一争议点、不复述命题。\n"
-            f"{_OPENING_SPEC}"
-            '只输出 JSON：{"focus": "...", "opening": "..."}'
-        )
-    elif not history:
+    if not history:
         user = (
             f"辩论命题：{config.motion}\n\n参与方：\n{_sides_block(config)}\n\n"
             f"{_frame_form_hint(config.form)}\n\n"
@@ -144,9 +128,7 @@ async def frame_round(
         last = history[-1]
         # 已谈焦点清单（全部历史轮，非仅上轮）：喂给主持人做「别换个说法重谈」的防重锚点——
         # 让它往深里钻决定性分歧，而非每轮硬换正交新维度（旧「强制正交」把决策辩论推满上限）。
-        # 续辩时上一场焦点也并入清单，跨场也不重谈。
-        covered_lines = [f"- （上一场）{f}" for f in prior_focuses]
-        covered_lines += [f"- 第 {rr.round_no} 轮：{rr.focus}" for rr in history]
+        covered_lines = [f"- 第 {rr.round_no} 轮：{rr.focus}" for rr in history]
         covered = "\n".join(covered_lines)
         user = (
             f"辩论命题：{config.motion}\n\n已谈过的焦点（别换个说法重谈；往深推、或推进到下一个更决定结论的点）：\n{covered}\n\n"
@@ -198,7 +180,10 @@ async def cross_exam_questions(
         "尚无定论的东西当已成立的论据、给不出出处的具体数字 / 事实、回避了对方的命门。"
         "【举证责任】要盯紧：凡该方标了【待核实】却当决定性论据用、或给了具体数字/案号却【未标证据状态】"
         "（默认视为待核实）的主张，都要当面追问「这条你有出处吗？拿不出为何还当论据？」。问题要"
-        "【具体、锋利、可被正面回答】（可用是 / 否逼答），别泛泛而问、别复述其发言。只输出一个 JSON：\n"
+        "【具体、锋利、可被正面回答】（可用是 / 否逼答），别泛泛而问、别复述其发言。"
+        "同一方的这 2–3 条质询须【各打一个不同的命门】（分别针对不同的漏洞 / 无据主张 / 谬误），"
+        "不得把同一个点换个问法重复问——覆盖面比条数更重要，宁可 2 条各中要害、不凑 3 条问同一件事。"
+        "只输出一个 JSON：\n"
         f'{{"questions": {{"<side_key∈[{", ".join(sorted(valid_keys))}]>": ["质询1", "质询2"]}}}}'
     )
     data = await complete_json(_CROSS_EXAM_SYSTEM, user, "cross_exam")

@@ -108,8 +108,11 @@ export function teamPreviewsFromEvents(
     if (e.type === "team_preview_required") {
       const p = e.payload as TeamPreviewRequiredPayload;
       if (!byId.has(p.checkpoint_id)) order.push(p.checkpoint_id);
+      const primitive =
+        p.primitive === "debate" ? ("debate" as const) : ("delegate" as const);
       byId.set(p.checkpoint_id, {
         id: p.checkpoint_id,
+        primitive,
         workers: (p.workers ?? []).map((w) => ({
           run_id: w.run_id,
           role: w.role,
@@ -118,6 +121,16 @@ export function teamPreviewsFromEvents(
           debate: Boolean(w.debate),
         })),
         tools: Array.isArray(p.tools) ? [...p.tools] : [],
+        motion: p.motion ?? "",
+        form: p.form ?? "",
+        sides: (p.sides ?? []).map((s) => ({
+          key: s.key,
+          name: s.name,
+          stance: s.stance,
+          ...(s.is_subject ? { is_subject: true } : {}),
+        })),
+        maxRounds: typeof p.max_rounds === "number" ? p.max_rounds : 0,
+        thorough: p.thorough !== false,
         status: "pending",
         decision: null,
         note: "",

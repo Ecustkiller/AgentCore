@@ -213,9 +213,19 @@ DELEGATE_PARAMETERS = {
                     "replaces_run_id": {
                         "type": "string",
                         "description": (
-                            "可选：回落换人标记。当 revise 未命中 / 超改次上限、改用本工具重派新人时，"
+                            "可选：回落换人标记。当带现场续派未命中 / 超唤回上限、改用冷委派重派新人时，"
                             "填被接手的原 worker 的 run_id——前端在图上标「接手」角标与「接替」边；"
                             "执行不受影响。普通委派不要设。"
+                        ),
+                    },
+                    "continue_from_run_id": {
+                        "type": "string",
+                        "description": (
+                            "可选：带现场续派。填本对话内已完成、可唤回的 worker 的 run_id（现场根），"
+                            "该任务由原作者带着 ReAct 轨迹接着干——改稿、延续调查、接着实现等强相关"
+                            "接续用此；独立新任务不要设（防上下文污染，改走冷委派）。"
+                            "可与 depends_on / deliverable / objective 同用；目标进行中、未登记、"
+                            "自指或现场双 miss 时该项会被拒绝并提示改冷委派。"
                         ),
                     },
                     "checkpoint_after": {

@@ -195,14 +195,17 @@ def _retry_message(feedback: str) -> LLMMessage:
     return LLMMessage(role="user", content=feedback)
 
 
-def _revision_message(feedback: str) -> LLMMessage:
-    """The CEO's 热修 instruction appended to a worker's saved transcript on a
-    定向唤回 (revise) — the same author continues on its own draft."""
+def _continuation_message(feedback: str) -> LLMMessage:
+    """统一「续干」指令：追加到 worker 已保存 transcript，同一作者带现场接着干。
+
+    改稿 / 接新任务 / redirect 热修 / 辩论续轮共用此模板；区别只在 ``feedback`` 内容
+    （及调用方注入的依赖产物块）。"""
     return LLMMessage(
         role="user",
         content=(
-            f"## 修改要求（请在你上一版产出的基础上修订）\n{feedback}\n\n"
-            "直接输出修订后的【完整最终产出】，未提及之处保持原样，"
+            f"## 续干指令\n{feedback}\n\n"
+            "请在你已有现场与上一版产出的基础上继续完成上述指令，"
+            "直接输出【完整最终产出】；未提及之处保持原样，"
             "不要解释、不要复述改动清单。"
         ),
     )

@@ -22,7 +22,7 @@ from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
 # legal_answer_brief gates on delegate + debate (both wired on the CEO path).
-_FULL_TOOLS = {"delegate", "revise", "ask_user", "debate", "test_run"}
+_FULL_TOOLS = {"delegate", "ask_user", "debate", "test_run"}
 
 
 def _ctx() -> ToolContext:

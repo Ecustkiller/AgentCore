@@ -5,12 +5,12 @@ import { RunStatusDot } from "./shared";
 
 /** Total nested runs under a run (direct children + their descendants). 阶段2
  * caps nesting at CEO → worker → sub-worker, so this stays shallow, but it is
- * written generally to match the indented tree it labels. Revision edges
- * (`revisionOf != null`, 辩论轮次 / 热修) are skipped — they are a VERSION chain, not a
+ * written generally to match the indented tree it labels. Continuation edges
+ * (`continuesRunId != null`, 辩论轮次 / 热修) are skipped — they are a VERSION chain, not a
  * delegated sub-task, so a debater's later rounds never count as its 子任务. */
 export function countDescendants(runs: RunNode[], parentId: string): number {
   return runs
-    .filter((r) => r.parentRunId === parentId && r.revisionOf == null)
+    .filter((r) => r.parentRunId === parentId && r.continuesRunId == null)
     .reduce((n, r) => n + 1 + countDescendants(runs, r.id), 0);
 }
 
@@ -34,7 +34,7 @@ export function SubtaskTree({
   onSelect: (runId: string, title?: string) => void;
 }) {
   const children = runs.filter(
-    (r) => r.parentRunId === parentId && r.revisionOf == null,
+    (r) => r.parentRunId === parentId && r.continuesRunId == null,
   );
   if (children.length === 0) return null;
   return (

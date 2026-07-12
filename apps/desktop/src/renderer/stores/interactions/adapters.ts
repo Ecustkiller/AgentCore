@@ -4,7 +4,6 @@ import type {
   PlanReviewDisplay,
   TeamPreviewDisplay,
 } from "@/stores/conversation/types";
-import type { DebateRoundDecision } from "@/stores/execution/types";
 import type {
   AskAssumption,
   AskQuestion,
@@ -101,8 +100,10 @@ export function entryToTeamPreview(e: InteractionEntry): TeamPreviewDisplay {
   const p = e.payload;
   const r = e.resolution ?? {};
   const resolved = e.status === "resolved";
+  const primitiveRaw = str(p.primitive, "delegate");
   return {
     id: e.id,
+    primitive: primitiveRaw === "debate" ? "debate" : "delegate",
     workers: arr<{
       run_id: string;
       role: string;
@@ -117,6 +118,21 @@ export function entryToTeamPreview(e: InteractionEntry): TeamPreviewDisplay {
       debate: Boolean(w.debate),
     })),
     tools: arr<string>(p.tools),
+    motion: str(p.motion),
+    form: str(p.form),
+    sides: arr<{
+      key: string;
+      name: string;
+      stance: string;
+      is_subject?: boolean;
+    }>(p.sides).map((s) => ({
+      key: s.key,
+      name: s.name,
+      stance: s.stance,
+      ...(s.is_subject ? { is_subject: true } : {}),
+    })),
+    maxRounds: typeof p.max_rounds === "number" ? p.max_rounds : 0,
+    thorough: p.thorough !== false,
     status: resolved ? "resolved" : "pending",
     decision: resolved
       ? ((r.decision as CheckpointDecision | null | undefined) ?? null)
@@ -146,36 +162,6 @@ export function entryToDelegationAuth(e: InteractionEntry): DelegationAuthView {
     workers: arr<{ role: string; task: string }>(p.workers),
     tools: arr<string>(p.tools),
     resolving: e.status === "submitting",
-  };
-}
-
-const DECISION_TO_STATUS: Record<string, DebateRoundDecision["status"]> = {
-  continue: "continued",
-  conclude: "concluded",
-  timeout: "timeout",
-};
-
-/** Map a debate_round InteractionEntry to the SteeringPanel view model. */
-export function entryToDebateDecision(
-  e: InteractionEntry,
-): DebateRoundDecision {
-  const p = e.payload;
-  const r = e.resolution ?? {};
-  let status: DebateRoundDecision["status"] = "pending";
-  if (e.status === "resolved") {
-    const d = str(r.decision);
-    status = DECISION_TO_STATUS[d] ?? "concluded";
-  }
-  return {
-    id: e.id,
-    moderatorRunId: str(p.moderator_run_id),
-    roundNo: typeof p.round_no === "number" ? p.round_no : 0,
-    focus: str(p.focus),
-    summary: str(p.summary),
-    converged: Boolean(p.converged),
-    rationale: str(p.rationale),
-    status,
-    decisionFocus: status === "continued" ? str(r.focus ?? p.focus) : "",
   };
 }
 

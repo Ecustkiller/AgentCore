@@ -5,8 +5,8 @@
  * 搜索与下轮 history 仍只用交付正文。
  */
 
-import type { ProcessStep } from "@agentcore/contract-types";
 import { toolDetail, toolLabel } from "@/components/assistantLabels";
+import type { ProcessStep } from "@agentcore/contract-types";
 
 export type MessageCopyMode = "deliverable" | "with_process";
 
@@ -14,11 +14,17 @@ function formatToolLine(step: Extract<ProcessStep, { kind: "tool" }>): string {
   const label = toolLabel(step.tool_name);
   const detail = toolDetail(step.arguments ?? {});
   const status =
-    step.status === "error" ? "（失败）" : step.status === "running" ? "（进行中）" : "";
+    step.status === "error"
+      ? "（失败）"
+      : step.status === "running"
+        ? "（进行中）"
+        : "";
   return detail ? `· ${label}${status}：${detail}` : `· ${label}${status}`;
 }
 
-export function formatProcessExport(process: ProcessStep[] | undefined): string {
+export function formatProcessExport(
+  process: ProcessStep[] | undefined,
+): string {
   if (!process?.length) return "";
   const lines: string[] = [];
   for (const step of process) {

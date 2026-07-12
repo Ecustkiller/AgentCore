@@ -1,92 +1,54 @@
-import { ApiError } from "@/services/api";
-import { resolveInteraction } from "@/services/interaction";
-import { useInteractionStore } from "@/stores/interactions";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { decideDebateRound } from "../debate";
 
-vi.mock("@/services/interaction", () => ({
-  resolveInteraction: vi.fn(),
+vi.mock("@/services/api", () => ({
+  api: { post: vi.fn() },
 }));
 
-const resolve = vi.mocked(resolveInteraction);
+vi.mock("@/services/sidecarRouting", () => ({
+  getActiveSidecarTarget: vi.fn(() => null),
+}));
 
-function seed(id: string) {
-  useInteractionStore.getState().upsertRequired({
-    kind: "debate_round",
-    conversationId: "conv-1",
-    messageId: "m1",
-    payload: { decision_id: id },
+import { api } from "@/services/api";
+import { submitDebateSteer } from "../debate";
+
+const post = vi.mocked(api.post);
+
+describe("submitDebateSteer", () => {
+  beforeEach(() => {
+    post.mockReset();
+    post.mockResolvedValue({ ok: true, queued: 1 });
   });
-}
 
-beforeEach(() => {
-  useInteractionStore.getState().clear();
-  resolve.mockReset();
-  resolve.mockResolvedValue(undefined);
-});
-
-describe("decideDebateRound", () => {
-  it("posts continue with decision/focus/ask/ask_target via resolveInteraction", async () => {
-    seed("dec-1");
-    await decideDebateRound("conv-1", "dec-1", {
-      kind: "continue",
-      focus: "成本",
-      ask: "谁来背锅？",
-      askTarget: "pro",
+  it("posts continue with focus/ask to debate-steer", async () => {
+    await submitDebateSteer("conv-1", {
+      executionId: "exec-1",
+      decision: {
+        kind: "continue",
+        focus: "定价",
+        ask: "谁兜底？",
+        askTarget: "pro",
+      },
     });
-
-    expect(resolve).toHaveBeenCalledWith("conv-1", "dec-1", {
-      kind: "debate_round",
+    expect(post).toHaveBeenCalledWith("/v1/conversations/conv-1/debate-steer", {
+      execution_id: "exec-1",
       decision: "continue",
-      focus: "成本",
-      ask: "谁来背锅？",
+      focus: "定价",
+      ask: "谁兜底？",
       ask_target: "pro",
     });
   });
 
-  it("posts conclude with empty focus (focus only rides continue)", async () => {
-    seed("dec-2");
-    await decideDebateRound("conv-1", "dec-2", {
-      kind: "conclude",
-      ask: "记下这句",
-      askTarget: "",
+  it("posts conclude without focus", async () => {
+    await submitDebateSteer("conv-1", {
+      executionId: "exec-1",
+      decision: { kind: "conclude", ask: "", askTarget: "" },
     });
-
-    expect(resolve).toHaveBeenCalledWith("conv-1", "dec-2", {
-      kind: "debate_round",
+    expect(post).toHaveBeenCalledWith("/v1/conversations/conv-1/debate-steer", {
+      execution_id: "exec-1",
       decision: "conclude",
       focus: "",
-      ask: "记下这句",
+      ask: "",
       ask_target: "",
     });
-  });
-
-  it("410/404 → orphaned (假卡可见)", async () => {
-    seed("dec-stale");
-    resolve.mockRejectedValueOnce(new ApiError(404, "gone"));
-    await expect(
-      decideDebateRound("conv-1", "dec-stale", {
-        kind: "continue",
-        focus: "",
-        ask: "",
-        askTarget: "",
-      }),
-    ).resolves.toBe("orphaned");
-    expect(useInteractionStore.getState().get("dec-stale")?.status).toBe(
-      "orphaned",
-    );
-  });
-
-  it("rethrows non-404 failures so the card can retry", async () => {
-    seed("dec-1");
-    const err = new ApiError(500, "boom");
-    resolve.mockRejectedValueOnce(err);
-    await expect(
-      decideDebateRound("conv-1", "dec-1", {
-        kind: "conclude",
-        ask: "",
-        askTarget: "",
-      }),
-    ).rejects.toBe(err);
   });
 });

@@ -27,6 +27,10 @@ Run from ``apps/server``::
     # purge user-trash (soft-deleted) conversations
     uv run python scripts/cleanup_test_conversations.py --purge-soft-deleted
     uv run python scripts/cleanup_test_conversations.py --apply --purge-soft-deleted
+
+    # full dev wipe — purge EVERY conversation (clean slate; irreversible)
+    uv run python scripts/cleanup_test_conversations.py --all
+    uv run python scripts/cleanup_test_conversations.py --apply --all
 """
 
 from __future__ import annotations
@@ -36,7 +40,7 @@ import asyncio
 import sys
 from dataclasses import dataclass
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.db import async_session_factory
@@ -108,6 +112,15 @@ def _soft_deleted_predicate():
     return Conversation.deleted_at.is_not(None)
 
 
+def _all_predicate():
+    """SQLAlchemy boolean expression: every conversation (full dev wipe).
+
+    Matches both active and soft-deleted rows — used for a clean-slate reset of a
+    dev database where all history is throwaway test data.
+    """
+    return true()
+
+
 @dataclass(frozen=True)
 class _PurgeStats:
     conversations: int
@@ -156,8 +169,14 @@ async def _list_matched(
     *,
     username: str | None,
     purge_soft_deleted: bool,
+    all_conversations: bool = False,
 ) -> list[_MatchedConversation]:
-    predicate = _soft_deleted_predicate() if purge_soft_deleted else _junk_predicate()
+    if all_conversations:
+        predicate = _all_predicate()
+    elif purge_soft_deleted:
+        predicate = _soft_deleted_predicate()
+    else:
+        predicate = _junk_predicate()
     stmt = (
         select(
             Conversation.id,
@@ -239,6 +258,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="purge user-trash rows (deleted_at IS NOT NULL) instead of probe/test junk",
     )
+    p.add_argument(
+        "--all",
+        action="store_true",
+        help="purge EVERY conversation (full dev wipe; overrides junk/soft filters)",
+    )
     return p.parse_args()
 
 
@@ -277,7 +301,12 @@ async def _count_orphan_journal(session: AsyncSession) -> int:
 
 async def _main() -> None:
     args = _parse_args()
-    purge_mode = "soft-deleted" if args.purge_soft_deleted else "probe/test junk"
+    if args.all:
+        purge_mode = "ALL conversations (full wipe)"
+    elif args.purge_soft_deleted:
+        purge_mode = "soft-deleted"
+    else:
+        purge_mode = "probe/test junk"
 
     async with async_session_factory() as session:
         before_total = await session.scalar(select(func.count()).select_from(Conversation))
@@ -287,6 +316,7 @@ async def _main() -> None:
             session,
             username=args.username,
             purge_soft_deleted=args.purge_soft_deleted,
+            all_conversations=args.all,
         )
         if args.limit is not None:
             matched = matched[: args.limit]
@@ -334,6 +364,7 @@ async def _main() -> None:
             session,
             username=args.username,
             purge_soft_deleted=args.purge_soft_deleted,
+            all_conversations=args.all,
         )
         total_conv = await session.scalar(select(func.count()).select_from(Conversation))
         total_tj = await session.scalar(select(func.count()).select_from(TurnJournalRow))

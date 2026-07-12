@@ -123,7 +123,8 @@ async function runStream(signal: AbortSignal): Promise<StreamOutcome> {
   }
 
   if (response.status === 401) {
-    if (await tryRefresh()) return "reconnect";
+    const outcome = await tryRefresh();
+    if (outcome === "renewed" || outcome === "transient") return "reconnect";
     notifyUnauthorized();
     return "stop";
   }

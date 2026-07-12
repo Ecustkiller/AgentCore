@@ -97,7 +97,10 @@ function journalEntriesFromMap(
 function fillFromCaptainStreamSegments(record: OutboxRecord): boolean {
   const segs = record.stream_segments;
   if (!segs || typeof segs !== "object") {
-    return !!(record.content || "").trim() || !!(record.reasoning_content || "").trim();
+    return (
+      !!(record.content || "").trim() ||
+      !!(record.reasoning_content || "").trim()
+    );
   }
   const contentSeg = segs[CHANNEL_CAPTAIN_CONTENT];
   const contentText =

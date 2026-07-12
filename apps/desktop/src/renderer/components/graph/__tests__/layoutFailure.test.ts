@@ -22,7 +22,9 @@ describe("describeLayoutFailure", () => {
 
   it("falls back for unknown shapes", () => {
     expect(describeLayoutFailure(null)).toBe(LAYOUT_FAILURE_USER_MESSAGE);
-    expect(describeLayoutFailure({ code: 1 })).toBe(LAYOUT_FAILURE_USER_MESSAGE);
+    expect(describeLayoutFailure({ code: 1 })).toBe(
+      LAYOUT_FAILURE_USER_MESSAGE,
+    );
   });
 });
 

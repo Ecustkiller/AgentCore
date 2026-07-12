@@ -79,9 +79,7 @@ function captureCsrf(response) {
 
 function authHeaders(method = "GET", extra = {}) {
   const headers = { ...extra };
-  const cookie = [...cookies.entries()]
-    .map(([k, v]) => `${k}=${v}`)
-    .join("; ");
+  const cookie = [...cookies.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
   if (cookie) headers.Cookie = cookie;
   if (
     csrfToken &&
@@ -186,7 +184,8 @@ async function advanceTick(runId) {
     );
     storeCookies(res);
     captureCsrf(res);
-    if (!res.ok) fail(`advance tick failed (${res.status}): ${await res.text()}`);
+    if (!res.ok)
+      fail(`advance tick failed (${res.status}): ${await res.text()}`);
     return res.json();
   } finally {
     clearTimeout(timer);
@@ -197,7 +196,8 @@ async function readTick(runId, tickNumber) {
   const res = await apiFetch(
     `/v1/simulation/runs/${encodeURIComponent(runId)}/ticks/${tickNumber}`,
   );
-  if (!res.ok) fail(`read tick ${tickNumber} failed (${res.status}): ${await res.text()}`);
+  if (!res.ok)
+    fail(`read tick ${tickNumber} failed (${res.status}): ${await res.text()}`);
   return res.json();
 }
 
@@ -232,13 +232,15 @@ async function pauseResume(runId) {
   if (!pause.ok) fail(`pause failed (${pause.status}): ${await pause.text()}`);
   const paused = await pause.json();
   requireFields(paused, ["run_id", "status", "current_tick"], "pause");
-  if (paused.status !== "paused") fail(`expected status paused, got ${paused.status}`);
+  if (paused.status !== "paused")
+    fail(`expected status paused, got ${paused.status}`);
 
   const resume = await apiFetch(
     `/v1/simulation/runs/${encodeURIComponent(runId)}/resume`,
     { method: "POST", body: {} },
   );
-  if (!resume.ok) fail(`resume failed (${resume.status}): ${await resume.text()}`);
+  if (!resume.ok)
+    fail(`resume failed (${resume.status}): ${await resume.text()}`);
   const resumed = await resume.json();
   requireFields(resumed, ["run_id", "status", "current_tick"], "resume");
   summary.pauseResumeOk = true;
@@ -252,7 +254,8 @@ async function injectEvent(runId) {
       body: { event_type: "announcement", payload: { title: "冒烟通告" } },
     },
   );
-  if (res.status !== 202) fail(`inject failed (${res.status}): ${await res.text()}`);
+  if (res.status !== 202)
+    fail(`inject failed (${res.status}): ${await res.text()}`);
   const body = await res.json();
   requireFields(
     body,
@@ -270,7 +273,11 @@ async function patchAgent(runId, agentId) {
   if (!res.ok) fail(`patch agent failed (${res.status}): ${await res.text()}`);
   const body = await res.json();
   requireFields(body, ["run_id", "agent_id", "state"], "patch");
-  requireFields(body.state, ["agent_id", "name", "location", "position"], "patch.state");
+  requireFields(
+    body.state,
+    ["agent_id", "name", "location", "position"],
+    "patch.state",
+  );
   summary.patchOk = true;
 }
 
@@ -298,7 +305,10 @@ async function getMetrics(runId, expectedLen) {
 async function replayRange(runId, fromTick, toTick) {
   const res = await fetch(
     `${API}/v1/simulation/runs/${encodeURIComponent(runId)}/replay?from=${fromTick}&to=${toTick}`,
-    { method: "GET", headers: authHeaders("GET", { Accept: "text/event-stream" }) },
+    {
+      method: "GET",
+      headers: authHeaders("GET", { Accept: "text/event-stream" }),
+    },
   );
   if (!res.ok || !res.body) fail(`replay failed (${res.status})`);
   const reader = res.body.getReader();

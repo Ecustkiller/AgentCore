@@ -15,6 +15,5 @@ export { runRegenerate, runRetryFailed, runResume } from "./turns/regenerate";
 export {
   sendTurn,
   continueTurn,
-  sendDebateContinuation,
   type SendTurnSpec,
 } from "./turns/stream";

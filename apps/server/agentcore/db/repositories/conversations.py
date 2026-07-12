@@ -326,6 +326,10 @@ class ConversationRepository:
         conv = await self.get_by_id(conversation_id, user_id=user_id)
         if conv:
             conv.deleted_at = datetime.now()
+            # 现场跟随对话：软删也清 run_sessions，避免唤回已删对话的现场。
+            from agentcore.db.repositories.runs import RunSessionRepository
+
+            await RunSessionRepository(self._session).delete_for_conversation(conversation_id)
             await self._session.commit()
             return True
         return False
@@ -337,12 +341,24 @@ class ConversationRepository:
         soft-deleted rows are skipped. Returns the number newly soft-deleted. The
         retention sweeper later reclaims their workspaces just like any soft delete.
         """
-        result = await self._session.execute(
-            update(Conversation)
-            .where(
+        # Collect ids first so we can cascade-clear run_sessions for those chats.
+        ids_result = await self._session.execute(
+            select(Conversation.id).where(
                 Conversation.user_id == user_id,
                 Conversation.deleted_at.is_(None),
             )
+        )
+        conv_ids = list(ids_result.scalars().all())
+        if not conv_ids:
+            return 0
+        from agentcore.db.models import RunSessionRow
+
+        await self._session.execute(
+            delete(RunSessionRow).where(RunSessionRow.conversation_id.in_(conv_ids))
+        )
+        result = await self._session.execute(
+            update(Conversation)
+            .where(Conversation.id.in_(conv_ids))
             .values(deleted_at=datetime.now())
         )
         await self._session.commit()
@@ -388,8 +404,8 @@ class ConversationRepository:
         App-level cascade (no DB FK, per repo convention). Used only by retention
         after the grace period — distinct from ``soft_delete`` (the user-facing
         recoverable delete). The ``turn_journal`` replay stream (唯一事实源, §8.3)
-        is dropped here too — it would otherwise orphan (it has no own TTL sweep,
-        unlike paused_turns / run_sessions).
+        is dropped here too — it would otherwise orphan (it has no own TTL sweep).
+        ``run_sessions`` are also cleared (现场跟随对话).
         """
         await self._session.execute(
             delete(Message).where(Message.conversation_id == conversation_id)
@@ -413,6 +429,10 @@ class ConversationRepository:
         await self._session.execute(
             delete(MemoryUpdateRow).where(MemoryUpdateRow.conversation_id == conversation_id)
         )
+        # 现场跟随对话：硬删级联清 run_sessions（与 soft_delete 对称）。
+        from agentcore.db.repositories.runs import RunSessionRepository
+
+        await RunSessionRepository(self._session).delete_for_conversation(conversation_id)
         await self._session.execute(delete(Conversation).where(Conversation.id == conversation_id))
         await self._session.commit()
 

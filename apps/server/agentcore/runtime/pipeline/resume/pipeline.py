@@ -301,7 +301,7 @@ async def resume_chat_pipeline(
             suspension.base_system_prompt,
             build_workspace_context(backend, desktop_online=desktop_online),
         )
-        delegate_tool, revise_tool, debate_tool, chat_tools = _assemble_ceo_toolset(
+        delegate_tool, debate_tool, chat_tools = _assemble_ceo_toolset(
             llm=llm,
             sink=sink,
             base_system_prompt=refreshed_base,
@@ -364,6 +364,7 @@ async def resume_chat_pipeline(
                 state=turn_state,
                 sink=sink,
                 delegate_tool=delegate_tool,
+                debate_tool=debate_tool,
                 execution_id=base_tool_context.execution_id,
                 suspension=suspension,
                 decision=decision,
@@ -508,7 +509,6 @@ async def resume_chat_pipeline(
             captain_state=captain_state,
             pre_pause_content=pre_pause,
             delegate_tool=delegate_tool,
-            revise_tool=revise_tool,
             debate_tool=debate_tool,
             profile=profile,
             citations=citations,

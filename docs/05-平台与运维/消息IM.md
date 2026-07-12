@@ -52,7 +52,7 @@ skip_if:
 
 - **传输**：`GET /v1/realtime` 每用户一条长连 SSE firehose（server→client），发送走上面的 POST。鉴权复用 Cookie；此流自带 401→刷新→重连（[认证与会话 §六](/docs/05-平台与运维/认证与会话.md)），前端客户端见 `renderer/services/realtime.ts`（§六）。
 - **fan-out**：A 发 → 落库 `chat_messages` → 经 `HubChatEventPublisher`（`messaging/hub.py` 进程内 pub/sub）推送给在线成员的 firehose。
-- **多载事件**：这条 firehose 不止 IM 消息——是该用户通用的「跨端 server→client」管线。除 `chat_message` 外，还载 `workspace_promoted`（裸聊任一端懒建工作区时由提升收口广播，重组机制见 [双模式工作区 §对话级路由](/docs/02-架构/双模式工作区.md)）与 `memory_updated`（记忆整合后由 `memory/consolidation.py` 广播，前端 `realtime.ts` 据此实时补「记忆已更新」卡 / toast）。**扩展性**：新事件类型只需 `_format_event` 透传 + 前端 `handleFrame` 加一分支，无需新通道。
+- **多载事件**：这条 firehose 不止 IM 消息——是该用户通用的「跨端 server→client」管线。除 `chat_message` 外，还载 `memory_updated`（记忆整合后由 `memory/consolidation.py` 广播，前端 `realtime.ts` 据此实时补「记忆已更新」卡 / toast）。原 `workspace_promoted` 已随 auto-promote 链路移除（现为「项目即工作区」，见 [双模式工作区 §六](/docs/02-架构/双模式工作区.md)）。**扩展性**：新事件类型只需 `_format_event` 透传 + 前端 `handleFrame` 加一分支，无需新通道。
 - **离线补偿**：不另建表，上线时按 `last_read_message_id` 拉 `chat_messages` 增量。
 - **多 worker（⏳）**：换 Redis / NATS pub-sub——`ChatEventPublisher` Protocol 已抽象（`events.py`），届时为 seam 局部替换，不动业务逻辑（同限流 / 审批门的多机化路径）。
 

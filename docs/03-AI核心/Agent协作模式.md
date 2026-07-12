@@ -152,7 +152,7 @@ Worker 遇到障碍时按三档策略自主处理，写入 worker system prompt�
 
 **护栏（不烧爆 / 不失控）**：`MAX_NOTE_CHARS=200`（一行硬截断）/ `MAX_WALL_NOTES=50`（满了丢最旧）/ `MAX_PUSH_PER_ROUND=8`；**可见域 = 同一扇出批**（一个 `build_agent_executor` 生命周期一面墙，非全树）；脱队（无并行兄弟）返干净的「无队友可看」结果而非假装贴成功。
 
-**并入「合·对账」收尾**：CEO 收尾时读 `NoteWall.active_notes()`（全队当前有效便签），经 `format_notes_for_synthesis` 渲成概览里的【团队便签】清单，并把语义边界对账（见 [`编排器与CEO主Agent.md` §一·合·验证](/docs/03-AI核心/编排器与CEO主Agent.md)）指到它（改了成品没跟 / 两人认领同一块 / 成品与广播决定矛盾 → 就地 `revise`/`replan`）。
+**并入「合·对账」收尾**：CEO 收尾时读 `NoteWall.active_notes()`（全队当前有效便签），经 `format_notes_for_synthesis` 渲成概览里的【团队便签】清单，并把语义边界对账（见 [`编排器与CEO主Agent.md` §一·合·验证](/docs/03-AI核心/编排器与CEO主Agent.md)）指到它（改了成品没跟 / 两人认领同一块 / 成品与广播决定矛盾 → 就地续派/`replan`）。
 
 **三端一致折叠**：`team_note_posted`（journaled，随 delegate 回合 surface、重载可回放）三端 fold 到 `ProjectedTurn.teamNotes`（按贴出序、`noteId` 去重，与图节点 / process 正交），据 `supersedes` 翻 target 状态渲「已被更新 / 已作废」；桌面 `TeamNotesPanel`、手机 `TeamView` 渲染。
 
@@ -215,7 +215,14 @@ CEO 主 Agent、`delegate` 按需委派与 DAG 波次调度——→ 见 [`编�
 
 ### 7.2 委派预审
 
-**薄预览（✅ 已落地）**：开干前否决权——首波前展示即将上场的团队（角色 / 任务摘要 / 依赖 / 是否辩论），开工卡四选一：授权并开工 / 逐次审批 / 调整 / 停止（合并能力授权征询，`delegate/preview.py`；受用户自治三档影响，见 [安全权限与治理 §三](/docs/05-平台与运维/安全权限与治理.md)）。挂起条件、跳过规则、与 `plan_review` / `ask_user` 边界见 [`编排器与CEO主Agent.md` §五](/docs/03-AI核心/编排器与CEO主Agent.md)。Interaction kind = `team_preview`；事件 `team_preview_required` / `team_preview_resolved`；前端 `TeamPreviewCard` + durable resume。
+**薄预览（✅ 已落地）**：开干前否决权——编排层公共 kickoff gate（`runtime/kickoff`）供
+`delegate` / `debate` 共用。delegate：首波前展示即将上场的团队（角色 / 任务摘要 / 依赖 /
+是否辩论）；debate：主持人循环前展示辩题 / 立场 / 轮次预算。开工卡动作：授权开工/开赛 /
+逐次审批（仅 delegate）/ 调整 / 停止（合并能力授权征询；受用户自治三档影响，见
+[安全权限与治理 §三](/docs/05-平台与运维/安全权限与治理.md)）。挂起条件、跳过规则、与
+`plan_review` / `ask_user` 边界见 [`编排器与CEO主Agent.md` §五](/docs/03-AI核心/编排器与CEO主Agent.md)。
+Interaction kind = `team_preview`（payload ``primitive`` 判别）；事件 `team_preview_required` /
+`team_preview_resolved`；前端 `TeamPreviewCard` + durable resume。
 
 **完整 Preflight Audit（⏳ 未实现）**：有界预检环（每轮最多 N 次 audit）+ 可编辑改 DAG / 换人换边 + Agent 实体化绑定 + 设置项 opt-out——待审计回归落地；本批不是审计环。
 
@@ -231,7 +238,7 @@ Team 实体 + `orchestration` 字段为 Phase 2；执行形状语义 → 见 [`�
 
 - **主持人是编排角色，不是执行引擎**：底层仍是普通并行委派 + 上游产物注入（守「形状是数据」——无 debate 专用执行分支）；主持人落成 `debate` 工具内的确定性循环（非 LLM 委派角色），辩手是工具内派出的 `depth+2` 叶子，仍卡在 `MAX_DELEGATION_DEPTH=2` 内。
 - **轮次收敛驱动、对用户隐藏**：取代旧的「一次 `delegate` 静态展开 2N 节点」，改由主持人逐轮判收敛（无新论点 / 焦点澄清 / 安全上限）后自停；用户只选形态、不设轮数。
-- **辩手跨轮带记忆**：复用 `continue_run` 续写（`revise` 的同源原语，`DebateTool` 直接持有辩手 session、无需下放工具），辩手在自己 transcript 上续写，取代旧的「每轮全新失忆 worker」。
+- **辩手跨轮带记忆**：复用 `continue_run` 续写（带现场续派的同源原语，`DebateTool` 直接持有辩手 session、无需下放工具），辩手在自己 transcript 上续写，取代旧的「每轮全新失忆 worker」。
 
 > **被否决：独立 Arena 子系统**（独立 SSE + 状态机 + 阶段轮转引擎 + `arena` RunKind）——**仍否决**。主持人复用 DAG 调度，只补回「主持 / 收敛 / 产物」产品层，不是独立引擎。`arena` RunKind 已删，best-of-N 归 `RunPolicy.candidates`。
 > **被替代：CEO 手搓静态辩论 DAG + `round` display-only 标记**——理由（轮数先验固定 / 手搓依赖易错 / round 与依赖脱节）见 [`辩论编排设计.md §八`](/docs/03-AI核心/辩论编排设计.md)。

@@ -29,10 +29,6 @@ DURABLE_VECTOR_WAIVERS: dict[EventType, str] = {
         "Execution.batches / 手机 conformance fold 显式 no-op），但**不进**规范化 ProjectedTurn "
         "表面，故没有 golden 能断言其往返。属知情记账，非静默盲区。"
     ),
-    EventType.RUN_INTAKE: (
-        "Worker Intake 轻量计划头——DURABLE（落 journal，reload 可重放诊断），但 Phase 1 尚无 "
-        "conformance 向量覆盖其往返；属知情记账，后续补向量后移出豁免。"
-    ),
 }
 
 

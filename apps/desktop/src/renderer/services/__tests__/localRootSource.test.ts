@@ -39,7 +39,9 @@ describe("createLocalRootSource lazy workspace", () => {
     listDir.mockResolvedValue(fail("not_found", "文件或目录不存在"));
     const src = createLocalRootSource("r1", "chat", "我的对话");
     expect(src.listFileIndex).toBeDefined();
-    await expect(src.listFileIndex!()).resolves.toEqual([]);
+    const listFileIndex = src.listFileIndex;
+    if (listFileIndex == null) throw new Error("expected listFileIndex");
+    await expect(listFileIndex()).resolves.toEqual([]);
     expect(listFiles).not.toHaveBeenCalled();
   });
 

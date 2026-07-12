@@ -110,7 +110,8 @@ def _multi_agent_debate() -> list[SSEEvent]:
         "motion": "是否采用方案 A",
         "stop_reason": "converged",
         # 主持人开场白（可选、渐进式契约）：证明「会说话的主持人」开场白经 fold verbatim 折入
-        # ProjectedTurn.debate.opening 的端到端链路；其余向量省略此字段验证缺省回落（前端拼模板）。
+        # ProjectedTurn.debate.opening 的端到端链路；其余向量省略此字段验证缺省回落
+        # （opening 空 → 前端不渲染主持人入场，不再拼模板假冒开口）。
         "opening": "这场要定的是该不该上方案 A，先从最要害的成本与收益切入。",
         "narrative_first": False,
         "sides": [
@@ -159,12 +160,10 @@ def _multi_agent_debate() -> list[SSEEvent]:
                             {
                                 "question": "收益量化口径是否计入了尾部风险？请是/否直接回答。",
                                 "answer": "量化口径未含尾部风险【待核实·推断】",
-                                "ok": True,
                             },
                             {
                                 "question": "若熔断触发、灰度止损，已投入成本由谁承担？",
                                 "answer": "成本由灰度预算池兜底、触发熔断即回滚【已核实·灰度预案v2】",
-                                "ok": True,
                             },
                         ],
                         "answer_run_id": pro_cx,
@@ -176,7 +175,6 @@ def _multi_agent_debate() -> list[SSEEvent]:
                             {
                                 "question": "你主张的风险敞口，有无可量化的历史故障率支撑？没有就直说。",
                                 "answer": "暂无统一口径的历史故障率【待核实·推断】；但同类系统的尾部事件可作参照【已核实·SRE年报】",
-                                "ok": True,
                             },
                         ],
                         "answer_run_id": con_cx,
@@ -212,14 +210,16 @@ def _multi_agent_debate() -> list[SSEEvent]:
         "brief": {
             "crux": "方案 A 的风险是否可控",
             "strongest_points": {"pro": "收益显著且可量化", "con": "风险敞口缺乏兜底"},
-            "factual_disputes": ["历史故障率的数据口径不一致"],
-            "value_disputes": ["增长优先 vs 稳健优先"],
+            "handoffs": [
+                {"kind": "value", "text": "增长优先 vs 稳健优先"},
+                {"kind": "fact", "text": "历史故障率的数据口径不一致"},
+                {"kind": "question", "text": "灰度的回滚阈值如何设定？"},
+            ],
             # 胜负手（P2）：据逐轮记分推导——点名谁的哪点被扣分 / 更站得住，让 leaning 可追溯。
             "decisive": "反对方紧咬「风险敞口未对冲」命门，却把未证实的尾部风险当既定事实（记分 -1）；支持方收益量化更扎实、质询下给出熔断兜底，综合净分小幅领先（10 : 8）。",
             "leaning": "倾向有条件采用",
             "confidence": "medium",
             "recommendation": "先小流量灰度验证风险，再决定是否全量。",
-            "open_questions": ["灰度的回滚阈值如何设定？"],
         },
     }
     return [
@@ -278,7 +278,7 @@ def _multi_agent_debate() -> list[SSEEvent]:
         # run_started 携 revision=2 + 原辩手 stance/group/round；run_context 首块 task=真实 feedback
         # 逐字孪生 + cross_exam 清单块（beat presence）；作答全文随本 run 走）。
         run_started(
-            pro_cx, pro_cx, parent_run_id=pro_run, revision=2,
+            pro_cx, pro_cx, parent_run_id=mod, continues_run_id=pro_run,
             stance="pro", group="debate:debate", round_no=1,
         ),
         run_context(
@@ -319,7 +319,7 @@ def _multi_agent_debate() -> list[SSEEvent]:
             cost=_COST,
         ),
         run_started(
-            con_cx, con_cx, parent_run_id=con_run, revision=2,
+            con_cx, con_cx, parent_run_id=mod, continues_run_id=con_run,
             stance="con", group="debate:debate", round_no=1,
         ),
         run_context(
@@ -360,7 +360,7 @@ def _multi_agent_debate() -> list[SSEEvent]:
         # 结辩收束（P4）：质询后、主持人终审前，各方 continue_run 做结辩陈词（faithful：结辩是续写，
         # run_started 携 revision=3；run_context 首块 task=closing_task 逐字孪生 + closing 通道纯环节标记）。
         run_started(
-            pro_closing, pro_closing, parent_run_id=pro_run, revision=3,
+            pro_closing, pro_closing, parent_run_id=mod, continues_run_id=pro_run,
             stance="pro", group="debate:debate", round_no=1,
         ),
         run_context(
@@ -394,7 +394,7 @@ def _multi_agent_debate() -> list[SSEEvent]:
             cost=_COST,
         ),
         run_started(
-            con_closing, con_closing, parent_run_id=con_run, revision=3,
+            con_closing, con_closing, parent_run_id=mod, continues_run_id=con_run,
             stance="con", group="debate:debate", round_no=1,
         ),
         run_context(
@@ -446,7 +446,7 @@ def _side_continue(
     run_id: str,
     *,
     parent: str,
-    revision: int,
+    continues_run_id: str,
     stance: str,
     round_no: int,
     context_blocks: list[dict],
@@ -454,13 +454,16 @@ def _side_continue(
     output_summary: str,
     duration_ms: int,
 ) -> list[SSEEvent]:
-    """One debate continue_run beat (陈词续轮 / 质询 / 结辩) as SSE events."""
+    """One debate continue_run beat (陈词续轮 / 质询 / 结辩) as SSE events.
+
+    ``continues_run_id`` = session root (星型); ``parent`` = true parent (moderator).
+    """
     return [
         run_started(
             run_id,
             run_id,
             parent_run_id=parent,
-            revision=revision,
+            continues_run_id=continues_run_id,
             stance=stance,
             group="debate:debate",
             round_no=round_no,
@@ -592,7 +595,6 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
                             {
                                 "question": "收益口径是否含尾部？",
                                 "answer": "未含【待核实·推断】",
-                                "ok": True,
                             },
                         ],
                         "answer_run_id": pro_r1_cx,
@@ -604,7 +606,6 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
                             {
                                 "question": "风险有无量化故障率？",
                                 "answer": "暂无【待核实·推断】",
-                                "ok": True,
                             },
                         ],
                         "answer_run_id": con_r1_cx,
@@ -636,7 +637,6 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
                             {
                                 "question": "熔断谁买单？",
                                 "answer": "灰度预算池【已核实·预案】",
-                                "ok": True,
                             },
                         ],
                         "answer_run_id": pro_r2_cx,
@@ -648,7 +648,6 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
                             {
                                 "question": "反对全量的硬门槛是？",
                                 "answer": "须有双写一致性 SLA【待核实·推断】",
-                                "ok": True,
                             },
                         ],
                         "answer_run_id": con_r2_cx,
@@ -664,13 +663,11 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
         "brief": {
             "crux": "方案 A 风险是否可控",
             "strongest_points": {"pro": "灰度可兜底", "con": "双写窗口未解"},
-            "factual_disputes": [],
-            "value_disputes": [],
+            "handoffs": [],
             "decisive": "综合净分接近，倾向有条件灰度。",
             "leaning": "倾向有条件采用",
             "confidence": "medium",
             "recommendation": "先灰度再全量。",
-            "open_questions": [],
         },
     }
     cx1 = [
@@ -741,9 +738,7 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
             cost=_COST,
         ),
         *(_side_continue(
-            pro_r1_cx,
-            parent=pro_r1,
-            revision=2,
+            pro_r1_cx, parent=mod, continues_run_id=pro_r1,
             stance="pro",
             round_no=1,
             context_blocks=cx1,
@@ -752,9 +747,7 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
             duration_ms=600,
         )),
         *(_side_continue(
-            con_r1_cx,
-            parent=con_r1,
-            revision=2,
+            con_r1_cx, parent=mod, continues_run_id=con_r1,
             stance="con",
             round_no=1,
             context_blocks=cx1,
@@ -763,9 +756,7 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
             duration_ms=610,
         )),
         *(_side_continue(
-            pro_r2,
-            parent=pro_r1,
-            revision=3,
+            pro_r2, parent=mod, continues_run_id=pro_r1,
             stance="pro",
             round_no=2,
             context_blocks=r2_ctx,
@@ -774,9 +765,7 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
             duration_ms=700,
         )),
         *(_side_continue(
-            con_r2,
-            parent=con_r1,
-            revision=3,
+            con_r2, parent=mod, continues_run_id=con_r1,
             stance="con",
             round_no=2,
             context_blocks=r2_ctx,
@@ -785,9 +774,7 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
             duration_ms=720,
         )),
         *(_side_continue(
-            pro_r2_cx,
-            parent=pro_r1,
-            revision=4,
+            pro_r2_cx, parent=mod, continues_run_id=pro_r1,
             stance="pro",
             round_no=2,
             context_blocks=cx2,
@@ -796,9 +783,7 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
             duration_ms=580,
         )),
         *(_side_continue(
-            con_r2_cx,
-            parent=con_r1,
-            revision=4,
+            con_r2_cx, parent=mod, continues_run_id=con_r1,
             stance="con",
             round_no=2,
             context_blocks=cx2,
@@ -807,9 +792,7 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
             duration_ms=590,
         )),
         *(_side_continue(
-            pro_closing,
-            parent=pro_r1,
-            revision=5,
+            pro_closing, parent=mod, continues_run_id=pro_r1,
             stance="pro",
             round_no=2,
             context_blocks=closing_ctx,
@@ -818,9 +801,7 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
             duration_ms=500,
         )),
         *(_side_continue(
-            con_closing,
-            parent=con_r1,
-            revision=5,
+            con_closing, parent=mod, continues_run_id=con_r1,
             stance="con",
             round_no=2,
             context_blocks=closing_ctx,
@@ -848,8 +829,8 @@ def _multi_agent_debate_followup() -> list[SSEEvent]:
     """多 Agent：正反辩论【收场】带【用户追问】+【3 轮版本链】（交互式逐轮 / 追问，Phase 2）。
     第 1 轮后用户向支持方【追问】「灰度期数据口径不一致谁来兜底」并选续辩，第 2、3 轮辩手
     （continue revision）逐轮续写 → 收场 ``debate_result`` 的 ``rounds[1]`` 携 verbatim
-    ``user_interjections``=``[{ask, target_key:"pro", answered:true}]``——这是【唯一耐久】的
-    用户追问痕迹（决策事件 transport-only 不入 journal），三端 verbatim 折入
+    ``user_interjections``=``[{ask, target_key:"pro", answered:true}]``——verbatim 追问痕迹
+    以此为准（逐轮决策事件 D3 起虽 DURABLE，但只承载 decision/focus），三端 verbatim 折入
     ``ProjectedTurn.debate``，重载复盘可见。
 
     亦是【乙 wire 携 round/stance · 单一轮次投影】的 3 轮回归床（用户报的「5 轮只剩 2 版本」
@@ -1060,15 +1041,20 @@ def _multi_agent_debate_followup() -> list[SSEEvent]:
                 "pro": "收益显著且可量化，已就追问给出灰度兜底（保守口径 + 熔断 + 按分位设阈自动回滚）",
                 "con": "风险敞口缺乏兜底，熔断阈值仍可能过松",
             },
-            "factual_disputes": ["历史故障率的数据口径不一致"],
-            "value_disputes": ["增长优先 vs 稳健优先"],
+            "handoffs": [
+                {"kind": "value", "text": "增长优先 vs 稳健优先"},
+                {"kind": "fact", "text": "历史故障率的数据口径不一致"},
+                # 用户追问已被回应、但仅剩的阈值取舍上交用户拍板（追问不石沉大海）。
+                {
+                    "kind": "question",
+                    "text": "灰度的回滚/熔断阈值取多少（你的追问已促成兜底，取值仍需你定）？",
+                },
+            ],
             # 胜负手（P2）：据逐轮记分累计（净分 30 : 25）——胜负手在第 2 轮拉开。
             "decisive": "胜负手在第 2 轮：支持方正面接住你的追问、给出灰度兜底（回应完整度跳升），反对方却回避成本归属被扣分；第 3 轮双方就阈值机制达成一致。累计净分 30 : 25，支持方占优，仅剩阈值取值是价值取舍。",
             "leaning": "倾向有条件采用",
             "confidence": "medium",
             "recommendation": "采纳支持方的灰度兜底方案（按分位设阈 + 自动回滚），阈值取值需你拍板。",
-            # 用户追问已被回应、但仅剩的阈值取舍上交用户拍板（追问不石沉大海）。
-            "open_questions": ["灰度的回滚/熔断阈值取多少（你的追问已促成兜底，取值仍需你定）？"],
         },
     }
     return [
@@ -1117,7 +1103,7 @@ def _multi_agent_debate_followup() -> list[SSEEvent]:
         # 携 round/stance：修订 run_started 携 stance/group + 真实 round=2，三端 fold 投到修订
         # 节点上（单一轮次投影）。
         run_started(
-            pro_r2, pro_r2, parent_run_id=pro_r1, revision=2,
+            pro_r2, pro_r2, parent_run_id=mod, continues_run_id=pro_r1,
             stance="pro", group="debate:debate", round_no=2,
         ),
         # 续写轮收到的上下文：task=真实 feedback 孪生 + 浓缩材料块（焦点 / 追问 / 对方）。
@@ -1159,7 +1145,7 @@ def _multi_agent_debate_followup() -> list[SSEEvent]:
             cost=_COST,
         ),
         run_started(
-            con_r2, con_r2, parent_run_id=con_r1, revision=2,
+            con_r2, con_r2, parent_run_id=mod, continues_run_id=con_r1,
             stance="con", group="debate:debate", round_no=2,
         ),
         run_context(
@@ -1202,7 +1188,7 @@ def _multi_agent_debate_followup() -> list[SSEEvent]:
         # （session.run_id 跨轮不变）——修订是绕原始的「星」，revisionOf 全指向 pro_r1；图层据
         # revision 排序把星铺成 原始→v2→v3 的链，验多轮不塌成 2 版本。
         run_started(
-            pro_r3, pro_r3, parent_run_id=pro_r1, revision=3,
+            pro_r3, pro_r3, parent_run_id=mod, continues_run_id=pro_r1,
             stance="pro", group="debate:debate", round_no=3,
         ),
         run_context(
@@ -1236,7 +1222,7 @@ def _multi_agent_debate_followup() -> list[SSEEvent]:
             cost=_COST,
         ),
         run_started(
-            con_r3, con_r3, parent_run_id=con_r1, revision=3,
+            con_r3, con_r3, parent_run_id=mod, continues_run_id=con_r1,
             stance="con", group="debate:debate", round_no=3,
         ),
         run_context(
@@ -1462,7 +1448,7 @@ def _multi_agent_roundtable_rounds() -> list[SSEEvent]:
         # 乙 wire 携 round/stance（多方无 stance）：续写携 group + 真实 round=2，三端 fold 投到
         # 修订节点上，debateLiveRounds 据 round 而非版本号铺轮次（单一轮次投影）。
         run_started(
-            r2a, "rt_a2", parent_run_id=r1a, revision=2,
+            r2a, "rt_a2", parent_run_id=mod, continues_run_id=r1a,
             group="debate:roundtable", round_no=2,
         ),
         # 圆桌续写轮：task=真实 feedback 孪生 + 焦点 + 其余各方上轮论点。
@@ -1495,7 +1481,7 @@ def _multi_agent_roundtable_rounds() -> list[SSEEvent]:
         ),
         run_output_delta(r2a, "rt_a2", "技术视角续：问责需可观测性支撑。"),
         run_started(
-            r2b, "rt_b2", parent_run_id=r1b, revision=2,
+            r2b, "rt_b2", parent_run_id=mod, continues_run_id=r1b,
             group="debate:roundtable", round_no=2,
         ),
         run_context(
@@ -1711,12 +1697,14 @@ def _multi_agent_red_team() -> list[SSEEvent]:
                 "red2": "medium",
                 "red3": "low",
             },
-            "factual_disputes": ["自建 vs 外采的真实合规改造工作量缺乏一致口径"],
-            "value_disputes": ["把鉴权握在自己手里的掌控感 vs 外采省心"],
+            "handoffs": [
+                {"kind": "value", "text": "把鉴权握在自己手里的掌控感 vs 外采省心"},
+                {"kind": "fact", "text": "自建 vs 外采的真实合规改造工作量缺乏一致口径"},
+                {"kind": "question", "text": "密钥轮换的运维归属谁？"},
+            ],
             "leaning": "有条件通过：先补 3 项加固再上线",
             "confidence": "medium",
             "recommendation": "上线前必须：① 刷新令牌轮换 + 设备绑定 ② 登录限速与异常告警 ③ 第三方渗透测试。",
-            "open_questions": ["密钥轮换的运维归属谁？"],
         },
     }
     return [
@@ -1944,12 +1932,14 @@ def _multi_agent_roundtable_settled() -> list[SSEEvent]:
                 "b": "缺的是问责主体，须以立法明确责任归属。",
                 "c": "一刀切立法抬高合规成本，应分级分场景落地。",
             },
-            "factual_disputes": ["现有事故里『能力外溢』与『问责缺位』各占多少缺一致数据"],
-            "value_disputes": ["创新速度优先 vs 风险兜底优先"],
+            "handoffs": [
+                {"kind": "value", "text": "创新速度优先 vs 风险兜底优先"},
+                {"kind": "fact", "text": "现有事故里『能力外溢』与『问责缺位』各占多少缺一致数据"},
+                {"kind": "question", "text": "谁来认定与维护『高风险场景』清单？"},
+            ],
             "leaning": "三方共识：分级治理 + 可观测先行，问责随之立法",
             "confidence": "medium",
             "recommendation": "按能力分级，先强制高风险场景的可观测与熔断，再补问责立法。",
-            "open_questions": ["谁来认定与维护『高风险场景』清单？"],
         },
     }
     return [

@@ -307,10 +307,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "tool_progress":
       case "tool_use_progress":
       case "batch_metrics":
-      case "run_intake":
       case "run_escalation_gate":
-      case "debate_round_decision_required":
-      case "debate_round_decision_resolved":
       case "delegation_authorization_required":
       case "delegation_authorization_resolved":
       case "interaction_orphaned":
@@ -389,8 +386,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     stance: r.stance,
     group: r.group,
     round: r.round,
-    revisionOf: r.revisionOf,
-    revision: r.revision,
+    continuesRunId: r.continuesRunId,
     revised: r.revised,
     replacesRunId: r.replacesRunId,
     checkpoint: r.checkpoint,

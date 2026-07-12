@@ -263,12 +263,36 @@ export interface TeamPreviewWorker {
   debate: boolean;
 }
 
-/** 开工卡：计划预览 + 能力授权（两卡合一）。``tools`` may be empty under full_auto. */
+/** One debate participant on the debate kickoff card. */
+export interface TeamPreviewSide {
+  key: string;
+  name: string;
+  stance: string;
+  is_subject?: boolean;
+}
+
+/** 开工卡：计划预览 + 能力授权（两卡合一）。
+ * 
+ * ``primitive`` discriminates ``delegate`` (workers 分工表) vs ``debate``
+ * (motion / sides / max_rounds). ``tools`` may be empty under full_auto /
+ * always_ask / debate read-only debaters. */
 export interface TeamPreviewRequiredPayload {
   checkpoint_id: string;
   conversation_id: string;
   workers: TeamPreviewWorker[];
   tools?: string[];
+  /** 编排原语判别；缺省按 delegate（旧 journal / 向量兼容）。 */
+  primitive?: "delegate" | "debate";
+  /** 辩论辩题；仅 primitive=debate。 */
+  motion?: string;
+  /** 辩论形态 debate/red_team/roundtable。 */
+  form?: string;
+  /** 辩论各方立场。 */
+  sides?: TeamPreviewSide[];
+  /** 辩论轮次安全上限（预算展示）。 */
+  max_rounds?: number;
+  /** 辩论认真辩透 vs 快速对碰。 */
+  thorough?: boolean;
 }
 
 export interface TeamPreviewResolvedPayload {
@@ -327,7 +351,7 @@ export interface RunStartedPayload {
   agent_id: string;
   parent_run_id: string | null;
   kind: RunKind;
-  revision?: number;
+  continues_run_id?: string;
   stance?: Stance;
   group?: string;
   round?: number;
@@ -335,7 +359,7 @@ export interface RunStartedPayload {
 }
 
 export interface ContextBlockWire {
-  channel: "system" | "history" | "request" | "team_position" | "dependency" | "workspace" | "task" | "deliverable" | "team_brief" | "steer" | "team_result" | "round_focus" | "opponent" | "challenge" | "interjection" | "revision" | "cross_exam" | "closing";
+  channel: "system" | "history" | "request" | "team_position" | "dependency" | "workspace" | "task" | "deliverable" | "team_brief" | "steer" | "team_result" | "round_focus" | "opponent" | "challenge" | "interjection" | "continuation" | "cross_exam" | "closing";
   heading: string;
   body: string;
   chars: number;
@@ -385,16 +409,6 @@ export interface RunEscalationPayload {
   assumption: string;
   blocking: boolean;
   kind?: EscalationKind;
-}
-
-export interface RunIntakePayload {
-  run_id: string;
-  agent_id: string;
-  complexity: "simple" | "moderate" | "complex";
-  strategy: "direct_execute" | "needs_tools" | "needs_research";
-  token_budget: number;
-  rationale?: string;
-  signals?: string[];
 }
 
 export interface RunEscalationGatePayload {
@@ -611,7 +625,6 @@ export interface DebateUserInterjection {
 export interface DebateCrossExamExchange {
   question: string;
   answer: string;
-  ok: boolean;
 }
 
 export interface DebateCrossExam {
@@ -659,17 +672,21 @@ export interface DebateNarrativeRound {
   cross_exam: DebateCrossExam[];
 }
 
+/** 交接清单条目：按解决路径分类（value / fact / question）。 */
+export interface DebateHandoffInfo {
+  kind: "value" | "fact" | "question";
+  text: string;
+}
+
 export interface DebateBriefInfo {
   crux: string;
   strongest_points: Record<string, string>;
   risk_severities?: Record<string, string>;
-  factual_disputes: string[];
-  value_disputes: string[];
+  handoffs?: DebateHandoffInfo[];
   decisive?: string;
   leaning: string;
   confidence: string;
   recommendation: string;
-  open_questions: string[];
 }
 
 export interface DebateResultPayload {
@@ -696,25 +713,6 @@ export interface DebateRoundStartedPayload {
 export interface DebateRoundPayload extends DebateRoundInfo {
   execution_id: string;
   moderator_run_id: string;
-}
-
-export interface DebateRoundDecisionRequiredPayload {
-  execution_id: string;
-  moderator_run_id: string;
-  decision_id: string;
-  round_no: number;
-  focus: string;
-  summary: string;
-  converged: boolean;
-  rationale: string;
-}
-
-export interface DebateRoundDecisionResolvedPayload {
-  execution_id: string;
-  moderator_run_id: string;
-  decision_id: string;
-  decision: "continue" | "conclude" | "timeout" | "orphaned";
-  focus: string;
 }
 
 /** 协作质量: turn-level orchestration signals for 诊断模式. Omitted on single-agent
@@ -1067,7 +1065,6 @@ export type SSEPayloadMap = {
   run_progress: RunProgressPayload;
   batch_metrics: BatchMetricsPayload;
   run_escalation: RunEscalationPayload;
-  run_intake: RunIntakePayload;
   run_escalation_gate: RunEscalationGatePayload;
   escalation_required: EscalationRequiredPayload;
   escalation_resolved: EscalationResolvedPayload;
@@ -1077,8 +1074,6 @@ export type SSEPayloadMap = {
   debate_result: DebateResultPayload;
   debate_round_started: DebateRoundStartedPayload;
   debate_round: DebateRoundPayload;
-  debate_round_decision_required: DebateRoundDecisionRequiredPayload;
-  debate_round_decision_resolved: DebateRoundDecisionResolvedPayload;
   message_end: MessageEndPayload;
   error: ErrorPayload;
   title_generated: TitleGeneratedPayload;

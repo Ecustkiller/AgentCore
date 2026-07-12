@@ -1,9 +1,6 @@
 import type { ProcessStep } from "@agentcore/contract-types";
 import { describe, expect, it } from "vitest";
-import {
-  formatMessageExport,
-  formatProcessExport,
-} from "../messageExport";
+import { formatMessageExport, formatProcessExport } from "../messageExport";
 
 const steps: ProcessStep[] = [
   { kind: "reasoning", text: "先查资料" },

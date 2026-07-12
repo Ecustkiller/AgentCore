@@ -65,12 +65,13 @@ async def fetch_conversation(conn: Any, conv_id: str) -> dict | None:
 async def fetch_messages(conn: Any, conv_id: str) -> list[dict]:
     from sqlalchemy import text
 
+    # messages schema (db/models/conversations.Message): no tool_calls /
+    # finish_reason columns — those live in turn_journal when present.
     rows = (
         await conn.execute(
             text(
-                "SELECT id, role, content, reasoning_content, tool_calls, "
-                "usage, finish_reason, created_at FROM messages "
-                "WHERE conversation_id = :cid ORDER BY created_at"
+                "SELECT id, role, content, reasoning_content, usage, created_at "
+                "FROM messages WHERE conversation_id = :cid ORDER BY created_at"
             ),
             {"cid": conv_id},
         )
@@ -92,18 +93,18 @@ async def fetch_messages(conn: Any, conv_id: str) -> list[dict]:
     for r in rows:
         msg: dict[str, Any] = {
             "type": "message",
-            "timestamp": str(r[7]),
+            "timestamp": str(r[5]),
             "id": r[0],
             "role": r[1],
             "content_preview": (r[2] or "")[:200],
             "content_len": len(r[2] or ""),
             "has_reasoning": bool(r[3]),
-            "tool_calls_count": len(r[4]) if r[4] else 0,
+            "tool_calls_count": 0,
             "runs_count": journal_counts.get(r[0], 0),
-            "finish_reason": r[6],
+            "finish_reason": None,
         }
-        if r[5]:
-            msg["usage"] = r[5]
+        if r[4]:
+            msg["usage"] = r[4]
         messages.append(msg)
     return messages
 

@@ -217,7 +217,8 @@ function RecentUpdates({
     <section className="section" id="memory-updates">
       <h2 className="section-title">最近更新</h2>
       <p className="section-note">
-        AI 最近从各处对话里记下的内容。整理在后台异步进行，刚聊完可能稍晚才出现。
+        AI
+        最近从各处对话里记下的内容。整理在后台异步进行，刚聊完可能稍晚才出现。
       </p>
       <div className="section-card mem-feed">
         {entries === null ? (

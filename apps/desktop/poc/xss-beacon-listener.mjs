@@ -54,12 +54,17 @@ const server = createServer((req, res) => {
   console.log(
     "  ⚠️  如果这是 A 场景（图片信标）自动触发的，说明 PI-001 的图片降级失效了——请排查。",
   );
-  res.writeHead(200, { "content-type": "image/gif", "cache-control": "no-store" });
+  res.writeHead(200, {
+    "content-type": "image/gif",
+    "cache-control": "no-store",
+  });
   res.end(PIXEL);
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`本地外泄信标监听器已启动：http://${HOST}:${PORT}/  (Ctrl+C 退出)`);
+  console.log(
+    `本地外泄信标监听器已启动：http://${HOST}:${PORT}/  (Ctrl+C 退出)`,
+  );
   console.log("等待请求中……（理想情况下只应看到你手动点击的 http 链接命中）");
 });
 

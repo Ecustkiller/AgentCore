@@ -1,78 +1,5 @@
 import type { DebateNarrativeRound } from "@/types/events";
-import type { DebateRoundDecision, Execution, RunNode } from "./types";
-
-/** A folded update to the 交互式逐轮辩论 decision list: a `debate_round_decision_required`
- * (`required` → append a `pending` card) or its `debate_round_decision_resolved` (`resolved` →
- * settle the matching card by `id`). The SSE handler builds one from each event; {@link
- * foldDebateDecision} applies it. */
-export type DebateDecisionUpdate =
-  | {
-      kind: "required";
-      id: string;
-      moderatorRunId: string;
-      roundNo: number;
-      focus: string;
-      summary: string;
-      converged: boolean;
-      rationale: string;
-    }
-  | {
-      kind: "resolved";
-      id: string;
-      decision: "continue" | "conclude" | "timeout";
-      focus: string;
-    };
-
-/** 结算事件的 `decision` → 决策卡 `status`：continue→continued / conclude→concluded /
- * timeout→timeout（未应答或无活跃用户，裁判自动收敛接管）。 */
-const DECISION_TO_STATUS: Record<
-  "continue" | "conclude" | "timeout",
-  DebateRoundDecision["status"]
-> = {
-  continue: "continued",
-  conclude: "concluded",
-  timeout: "timeout",
-};
-
-/**
- * Fold one {@link DebateDecisionUpdate} into the decision list (desktop-live-only; the
- * conformance ProjectedTurn never carries these). `required` appends a `pending` card (or
- * replaces one with the same `id`, defensively); `resolved` settles the matching card by `id`
- * — a resolve for an unknown id is ignored (stale / already gone). Insertion order is kept
- * (rounds arrive ascending), so the view renders them top-to-bottom as they happened.
- */
-export function foldDebateDecision(
-  decisions: DebateRoundDecision[],
-  update: DebateDecisionUpdate,
-): DebateRoundDecision[] {
-  if (update.kind === "required") {
-    const card: DebateRoundDecision = {
-      id: update.id,
-      moderatorRunId: update.moderatorRunId,
-      roundNo: update.roundNo,
-      focus: update.focus,
-      summary: update.summary,
-      converged: update.converged,
-      rationale: update.rationale,
-      status: "pending",
-      decisionFocus: "",
-    };
-    const idx = decisions.findIndex((d) => d.id === update.id);
-    if (idx === -1) return [...decisions, card];
-    const next = [...decisions];
-    next[idx] = card;
-    return next;
-  }
-  const idx = decisions.findIndex((d) => d.id === update.id);
-  if (idx === -1) return decisions;
-  const next = [...decisions];
-  next[idx] = {
-    ...next[idx],
-    status: DECISION_TO_STATUS[update.decision],
-    decisionFocus: update.decision === "continue" ? update.focus : "",
-  };
-  return next;
-}
+import type { Execution, RunNode } from "./types";
 
 /** Fold one 逐轮叙事 update (`debate_round_started` → focus only, verdict null;
  * `debate_round` → full focus/summary/verdict/sides) into the accumulated list,
@@ -236,15 +163,15 @@ export function debateLiveRounds(execution: Execution): DebateLiveRound[] {
     (r) =>
       r.group?.startsWith("debate:") &&
       r.stance == null &&
-      r.revisionOf == null,
+      r.continuesRunId == null,
   );
   if (sides.length === 0) return [];
   const revisionsByOriginal = new Map<string, RunNode[]>();
   for (const run of execution.runs) {
-    if (run.revisionOf == null) continue;
-    const list = revisionsByOriginal.get(run.revisionOf) ?? [];
+    if (run.continuesRunId == null) continue;
+    const list = revisionsByOriginal.get(run.continuesRunId) ?? [];
     list.push(run);
-    revisionsByOriginal.set(run.revisionOf, list);
+    revisionsByOriginal.set(run.continuesRunId, list);
   }
   // 单一轮次投影: round 只读 wire 字段（无 round 时为 0）。
   const roundOf = (r: RunNode): number => r.round ?? 0;

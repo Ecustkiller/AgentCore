@@ -28,7 +28,7 @@ export interface EdgeHandoff {
 
 type StepEdgeData = Edge<{
   animated: boolean;
-  kind?: "dep" | "delegate" | "revision" | "inject" | "handoff";
+  kind?: "dep" | "delegate" | "continuation" | "inject" | "handoff";
   handoff?: EdgeHandoff | null;
   injectHighlight?: boolean;
   injectDimmed?: boolean;
@@ -139,7 +139,7 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
   // a sub-team reads as grouped under its parent, distinct from the solid DAG
   // dependency / bookend flow.
   const isDelegate = data?.kind === "delegate";
-  const isRevision = data?.kind === "revision";
+  const isContinuation = data?.kind === "continuation";
   const isHandoff = data?.kind === "handoff";
   const isInject = data?.kind === "inject";
   const injectHighlight = data?.injectHighlight === true;
@@ -168,7 +168,7 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
     strokeColor = "var(--primary)";
   } else if (!hoverActive) {
     strokeOpacity =
-      isDelegate || isRevision || isHandoff || isInject ? 0.35 : 0.4;
+      isDelegate || isContinuation || isHandoff || isInject ? 0.35 : 0.4;
     strokeWidth = 1.5;
     strokeColor = "var(--muted-foreground)";
   } else if (isHoverRelated) {
@@ -182,7 +182,7 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
   }
 
   let strokeDasharray: string | undefined;
-  if (isRevision) strokeDasharray = "2 4";
+  if (isContinuation) strokeDasharray = "2 4";
   else if (isHandoff) strokeDasharray = "3 3";
   else if (isDelegate) strokeDasharray = "5 4";
   else if (isInject) strokeDasharray = "6 4";

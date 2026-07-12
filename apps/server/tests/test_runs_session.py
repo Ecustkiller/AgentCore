@@ -1,9 +1,9 @@
-"""RunSession capture + continue_run (统一「续写」原语 P1).
+"""RunSession capture + continue_run (统一「续干」原语).
 
 Proves a finished worker is kept alive as a recoverable RunSession and that
-``continue_run`` recalls the SAME author to revise its own draft: it sees its
-prior transcript + the appended instruction, extends the transcript, and emits
-revision graph events parented to the original run (版本链).
+``continue_run`` recalls the SAME author: it sees its prior transcript + the
+appended instruction, extends the transcript, and emits continuation graph
+events with ``continues_run_id`` = session root and ``parent_run_id`` = true parent.
 """
 
 from pathlib import Path
@@ -68,7 +68,9 @@ async def _make_session(provider: _ContentProvider, *, run_id: str = "t_1") -> R
     """Run one worker through the executor and snapshot it as a RunSession."""
     from agentcore.runtime.runs import WaveScheduler
 
-    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    plan, _ = build_run_plan(
+        [{"role": "A", "task": "做A"}], id_prefix="t", parent_run_id="CEO"
+    )
     res = await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
     state = res[run_id]
     return RunSession(
@@ -77,9 +79,6 @@ async def _make_session(provider: _ContentProvider, *, run_id: str = "t_1") -> R
         transcript=state.transcript,
         content=state.content,
     )
-
-
-# --- SessionStore ----------------------------------------------------------
 
 
 def test_session_store_put_get_and_miss():
@@ -94,18 +93,15 @@ def test_session_store_put_get_and_miss():
     assert len(store) == 1
 
 
-# --- continue_run ----------------------------------------------------------
-
-
 async def test_continue_run_revises_from_transcript_and_extends_it():
-    provider = _ContentProvider(["第一版", "修订版"])  # call0 = worker, call1 = revision
+    provider = _ContentProvider(["第一版", "修订版"])
     session = await _make_session(provider)
     original_len = len(session.transcript)
 
     state = await continue_run(
         session=session,
         feedback="把语气改正式",
-        revision_run_id="t_1_rev1",
+        continuation_run_id="t_1_rev1",
         llm=provider,
         tools=ToolRegistry(),
         sink=EventSink(),
@@ -115,55 +111,54 @@ async def test_continue_run_revises_from_transcript_and_extends_it():
 
     assert state.phase is RunPhase.COMPLETED
     assert state.content == "修订版"
-    # the recalled author saw its OWN prior draft + the new instruction
     rev_request = provider.requests[-1]
     assert any(role == "assistant" and content == "第一版" for role, content in rev_request)
     assert any(role == "user" and "把语气改正式" in content for role, content in rev_request)
-    # the returned transcript is EXTENDED and ends with the new draft (续写起点)
     assert len(state.transcript) > original_len
     assert state.transcript[-1].role == "assistant"
     assert state.transcript[-1].content == "修订版"
 
 
 async def test_continue_run_does_not_mutate_stored_transcript_until_committed():
-    # continue_run works on a COPY — a session's stored transcript is unchanged by
-    # the call itself (the ReviseTool commits the extended one only on success).
     provider = _ContentProvider(["第一版", "修订版"])
     session = await _make_session(provider)
     before = list(session.transcript)
     await continue_run(
         session=session,
         feedback="改",
-        revision_run_id="t_1_rev1",
+        continuation_run_id="t_1_rev1",
         llm=provider,
         tools=ToolRegistry(),
         sink=EventSink(),
         base_tool_context=_ctx(),
         execution_id="e",
     )
-    assert session.transcript == before  # untouched
+    assert session.transcript == before
 
 
-async def test_continue_run_emits_revision_events_parented_to_original():
+async def test_continue_run_emits_continues_run_id_and_true_parent():
     provider = _ContentProvider(["第一版", "修订版"])
     session = await _make_session(provider)
     sink = EventSink()
     await continue_run(
         session=session,
         feedback="改",
-        revision_run_id="t_1_rev1",
+        continuation_run_id="t_1_rev1",
         llm=provider,
         tools=ToolRegistry(),
         sink=sink,
         base_tool_context=_ctx(),
         execution_id="e",
+        parent_run_id="CEO",
     )
     sink.close()
     events = [e async for e in sink]
     started = [e for e in events if e.type == EventType.RUN_STARTED]
     assert len(started) == 1
     assert started[0].payload["run_id"] == "t_1_rev1"
-    assert started[0].payload["parent_run_id"] == "t_1"  # 版本链 child of the original
+    assert started[0].payload["continues_run_id"] == "t_1"
+    assert started[0].payload["parent_run_id"] == "CEO"
+    assert "revision" not in started[0].payload
     completed = [e for e in events if e.type == EventType.RUN_COMPLETED]
     assert completed and completed[0].payload["run_id"] == "t_1_rev1"
     assert completed[0].payload["role"] == "member"
@@ -182,7 +177,7 @@ async def test_continue_run_failure_returns_failed_state():
     state = await continue_run(
         session=session,
         feedback="改",
-        revision_run_id="t_1_rev1",
+        continuation_run_id="t_1_rev1",
         llm=_Boom(),
         tools=ToolRegistry(),
         sink=sink,

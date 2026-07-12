@@ -61,15 +61,10 @@ async def stream_chat(
     sink: EventSink,
     attachments: list[dict] | None = None,
     llm_credentials: LLMCredentials | None = None,
-    debate_seed: dict | None = None,
     llm_supports_tools: bool | None = None,
     x_client_platform: str | None = None,
 ) -> None:
     """Main entry: persist user message, run pipeline, persist assistant reply.
-
-    ``debate_seed`` (结构化补轮·B): when the desktop starts a 续辩 from a settled debate
-    card, it carries the prior debate's projected result so this turn's debate continues
-    the prior one (threaded to the DebateTool). ``None`` for an ordinary message.
     """
     try:
         async with async_session_factory() as session:
@@ -131,7 +126,6 @@ async def stream_chat(
                 memory_enabled=memory_enabled,
                 autonomy_policy=autonomy_policy,
                 board_id=board_id,
-                debate_seed=debate_seed,
                 llm_supports_tools=llm_supports_tools,
                 x_client_platform=x_client_platform,
             )

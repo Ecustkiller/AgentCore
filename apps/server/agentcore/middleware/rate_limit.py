@@ -167,7 +167,9 @@ def reset_rate_limit_state() -> None:
     reset_inference_proxy_turn_claims()
 
 
-def _client_key(request: Request) -> str:
+def get_client_ip(request: Request) -> str:
+    """Resolve the client IP using the same trust_proxy / XFF hop rules as rate limiting
+    (SEC-008). Auth session bookkeeping must call this — do not re-invent XFF parsing."""
     if settings.trust_proxy:
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
@@ -184,6 +186,10 @@ def _client_key(request: Request) -> str:
             # real socket peer rather than honor a (possibly spoofed) shorter chain.
     client = request.client
     return client.host if client else "unknown"
+
+
+def _client_key(request: Request) -> str:
+    return get_client_ip(request)
 
 
 class AuthRateLimitMiddleware(BaseHTTPMiddleware):

@@ -34,7 +34,7 @@ skip_if:
 | `Input` / `Textarea` | 表单、内联编辑 |
 | `SearchField` / `SearchTrigger` | 页内筛选输入框；全局 `Cmd+K` 假入口（见下节） |
 | `SectionLabel` | 分组小标题（工具箱、设置） |
-| `DecisionCard` | 裁决类卡片外壳（primary / warning / neutral） |
+| `DecisionCard` | 裁决类卡片外壳（primary / neutral 两态；warning 变体已废除） |
 | `SurfaceRow` / `SurfaceRowButton` | 列表行 chrome（file / sidebar variant） |
 | `PatternCardHeader` | 时间线卡片头栏（标签 + badge + 时间戳） |
 
@@ -130,7 +130,7 @@ OKLCH 语义色单源：**`packages/design-tokens/`**
 |---|---|---|
 | 品牌 / 主 CTA / 活跃 / 运行中 / 信息提示 | `primary` `primary-foreground` | `bg-primary` `text-primary` |
 | 成功 / 已完成（绿） | `success` `success-foreground` | `text-success` `ring-success` |
-| 警告 / 检查点 / 待裁决（琥珀） | `warning` `warning-foreground` | `text-warning` `bg-warning/10` |
+| 警示信号（琥珀）——仅审查预警「待关注」/ 额度告警 / 未配置模型角标等真警示；**不再用于检查点 / 拍板类卡片**（2026-07 拍板：拍板类统一中性灰壳 + 蓝 CTA） | `warning` `warning-foreground` | `text-warning` `bg-warning/10` |
 | 错误 / 失败 / 停止（红） | `destructive` `destructive-foreground` | `text-destructive` |
 | 闲置 / 等待 / 次要文本 / 浅灰表面 | `muted` `muted-foreground` | `text-muted-foreground` `bg-muted` |
 | hover 表面 / 选中底色（**中性，非状态色**） | `accent` `accent-foreground` | `hover:bg-accent` |
@@ -148,7 +148,7 @@ OKLCH 语义色单源：**`packages/design-tokens/`**
 | `running` | `primary`（品牌蓝） |
 | `completed` | `success`（绿） |
 | `failed` | `destructive`（红） |
-| 检查点 / 待裁决 | `warning`（琥珀） |
+| 检查点 / 待裁决（待放行 / 待你拍板） | `primary`（品牌蓝，「需要你」信号） |
 
 ### 分类色板（非状态语义，定义在 tokens.css）
 

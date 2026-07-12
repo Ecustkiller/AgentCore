@@ -34,18 +34,18 @@ def _started(model_profile="chat") -> dict:
     )
 
 
-def _run_started(run_id, agent_id, *, kind="agent", parent=None, revision=0, ts="t") -> dict:
-    return _fact(
-        "run_started",
-        {
-            "run_id": run_id,
-            "agent_id": agent_id,
-            "parent_run_id": parent,
-            "kind": kind,
-            "revision": revision,
-        },
-        ts=ts,
-    )
+def _run_started(
+    run_id, agent_id, *, kind="agent", parent=None, continues_run_id=None, ts="t"
+) -> dict:
+    payload = {
+        "run_id": run_id,
+        "agent_id": agent_id,
+        "parent_run_id": parent,
+        "kind": kind,
+    }
+    if continues_run_id:
+        payload["continues_run_id"] = continues_run_id
+    return _fact("run_started", payload, ts=ts)
 
 
 def _run_completed(
@@ -262,17 +262,17 @@ def test_display_only_journal_still_builds_run_spans():
     assert "agentcore.rounds" not in spans["run:w1"].attributes
 
 
-def test_revision_run_carries_revision_attr():
+def test_continuation_run_carries_continues_attr():
     entries = [
         _started(),
         _run_started("cap", "cap", kind="captain", ts="t0"),
-        _run_started("w1", "w1", kind="agent", parent="cap", revision=2, ts="t1"),
+        _run_started("w1", "w1", kind="agent", parent="cap", continues_run_id="w0", ts="t1"),
         _run_completed("w1", "w1", ts="t2"),
         _run_completed("cap", "cap", ts="t3"),
         _fact("turn_end", {"finish_reason": "end_turn"}),
     ]
     root = spans_from_entries(entries)
-    assert _by_id(root)["run:w1"].attributes["agentcore.run.revision"] == 2
+    assert _by_id(root)["run:w1"].attributes["agentcore.run.continues_run_id"] == "w0"
 
 
 # ── projection: nothing-to-trace + empties ───────────────────────────────────────

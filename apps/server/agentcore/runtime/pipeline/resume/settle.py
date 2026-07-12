@@ -12,6 +12,7 @@ from agentcore.runtime.events import EventSink
 from agentcore.runtime.recover import SettledSuspension
 from agentcore.runtime.suspension import TurnSuspension
 from agentcore.runtime.turn_state import TurnState
+from agentcore.tools.builtin.debate import DebateTool
 from agentcore.tools.builtin.delegate import DelegateTool
 
 __all__ = [
@@ -27,9 +28,9 @@ def append_resumed_tool_results(
     """Close the suspended tool-call in the rebuilt CEO transcript (结构化挂起 2b).
 
     The transcript ends with the assistant message that issued the suspended call
-    (``delegate`` for plan_review, ``ask_user`` for ask_user — the pause happened
-    inside it). Append the settled result as that call's tool result so the loop
-    continues from a valid assistant-tool_call → tool-result pair. Any SIBLING
+    (``delegate`` / ``debate`` for kickoff, ``ask_user`` for ask_user — the pause
+    happened inside it). Append the settled result as that call's tool result so the
+    loop continues from a valid assistant-tool_call → tool-result pair. Any SIBLING
     tool_calls in the same assistant turn (a rare concurrent call) get a placeholder
     result, since every tool_call MUST have a matching result or the next request
     400s — their work wasn't captured (the pause unwound only the suspended call).
@@ -61,6 +62,7 @@ async def settle_resumed_suspension(
     sink: EventSink,
     delegate_tool: DelegateTool,
     execution_id: str,
+    debate_tool: DebateTool | None = None,
 ) -> SettledSuspension:
     """Façade: project via ``TurnState.from_journal``, then ``recover_turn``."""
     from agentcore.runtime.recover import recover_turn
@@ -73,6 +75,7 @@ async def settle_resumed_suspension(
         state=state,
         sink=sink,
         delegate_tool=delegate_tool,
+        debate_tool=debate_tool,
         execution_id=execution_id,
         suspension=suspension,
         decision=decision,

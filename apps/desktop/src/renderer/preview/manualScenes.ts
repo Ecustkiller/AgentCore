@@ -6,6 +6,10 @@ export interface ManualPreviewScene {
   path: string;
   /** Scroll target section id (`?s=`). Omit for page top. */
   section?: string;
+  /** Matches `ChapterRenderer` `previewManual` / `data-preview-manual`. */
+  previewManual?: string;
+  /** Wait for these `data-manual-embed` keys (lazy embeds / real graphs) before shot. */
+  waitEmbeds?: string[];
 }
 
 /** Static manual pages for offline screenshot harness (`pnpm shoot:manual`). */

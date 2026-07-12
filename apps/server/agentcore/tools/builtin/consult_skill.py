@@ -4,7 +4,7 @@ CEO-only: wired in ``runtime.pipeline`` next to ``delegate`` / ``ask_user`` and
 deliberately NOT in ``build_builtin_registry`` (a delegated worker does not hold
 it). The CEO's always-on prompt carries only a one-line「能力目录」of advanced
 capabilities (``skills.render_skill_directory``); when it decides to use one
-(advanced orchestration / debate / revise / asking the user) it calls
+(advanced orchestration / debate / continuation / asking the user) it calls
 ``consult_skill(name)`` to feed that skill's full HOW guidance back into its
 own ReAct loop (``ToolEffect.CONTINUE``), then acts on it.
 
@@ -62,7 +62,7 @@ class ConsultSkillTool:
                 },
                 "required": ["name"],
             },
-            # A CEO orchestration primitive (sits beside delegate / replan / revise in
+            # A CEO orchestration primitive (sits beside delegate / replan in
             # _CEO_ORCHESTRATION_TOOLS), NOT a「技能」-category tool: 技能 are Prompt
             # injection, surfaced in the「AI 提示词」catalog, not as a tool group. Keeping
             # this orchestration also drops the spurious「技能」group from the tools page.

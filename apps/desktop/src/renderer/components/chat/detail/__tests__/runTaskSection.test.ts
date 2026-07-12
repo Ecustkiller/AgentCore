@@ -8,7 +8,7 @@ describe("selectRunTaskSection", () => {
   it("non-revision runs keep run.task as 「任务」", () => {
     expect(
       selectRunTaskSection({
-        revisionOf: null,
+        continuesRunId: null,
         task: "开场立论全文",
         receivedContext: [
           {
@@ -28,7 +28,7 @@ describe("selectRunTaskSection", () => {
   it("revision runs prefer the task block heading + body", () => {
     expect(
       selectRunTaskSection({
-        revisionOf: "run-1",
+        continuesRunId: "run-1",
         task: "开场立论全文",
         receivedContext: [
           {
@@ -53,7 +53,7 @@ describe("selectRunTaskSection", () => {
   it("falls back to round_focus when no task block (legacy vectors)", () => {
     expect(
       selectRunTaskSection({
-        revisionOf: "run-1",
+        continuesRunId: "run-1",
         task: "开场立论全文",
         receivedContext: [
           {
@@ -73,7 +73,7 @@ describe("selectRunTaskSection", () => {
   it("falls back to run.task when neither task nor round_focus exists", () => {
     expect(
       selectRunTaskSection({
-        revisionOf: "run-1",
+        continuesRunId: "run-1",
         task: "开场立论全文",
         receivedContext: [{ channel: "closing", heading: "结辩", body: "…" }],
       }),
@@ -87,7 +87,7 @@ describe("selectRunTaskSection", () => {
   it("blank task heading falls back to 「任务」", () => {
     expect(
       selectRunTaskSection({
-        revisionOf: "run-1",
+        continuesRunId: "run-1",
         task: "旧",
         receivedContext: [{ channel: "task", heading: "  ", body: "新指令" }],
       }),
@@ -101,7 +101,7 @@ describe("selectRunTaskSection", () => {
   it("prefers task over coexisting round_focus", () => {
     expect(
       selectRunTaskSection({
-        revisionOf: "run-1",
+        continuesRunId: "run-1",
         task: "旧",
         receivedContext: [
           { channel: "round_focus", heading: "本轮焦点", body: "焦点" },

@@ -310,6 +310,7 @@ async def test_token_login_returns_tokens_and_authorizes_via_bearer(client, make
     body = r.json()
     assert body["access_token"] and body["refresh_token"]
     assert body["token_type"] == "bearer" and body["expires_in"] > 0
+    assert body["refresh_expires_in"] and body["refresh_expires_in"] > body["expires_in"]
     assert body["user"]["username"] == "mobile1"
     # The bearer flow sets NO cookies (it's for capacitor:// / new-origin clients).
     assert "access_token" not in client.cookies
@@ -600,3 +601,178 @@ async def test_mfa_status_reports_required_flag(client, make_admin, monkeypatch)
     r = await client.get("/v1/auth/mfa/status")
     assert r.status_code == 200
     assert r.json()["required"] is False
+
+
+# --- sessions (device management) ---
+
+
+async def test_list_sessions_aggregates_and_marks_current(client, new_client, make_invite):
+    await make_invite("INV-SESS-1")
+    await register_and_login(client, "INV-SESS-1", "sess_alice")
+
+    async with new_client() as other:
+        r = await other.post(
+            "/v1/auth/login", json={"username": "sess_alice", "password": _PW}
+        )
+        assert r.status_code == 200
+
+    listed = await client.get("/v1/auth/sessions")
+    assert listed.status_code == 200, listed.text
+    body = listed.json()
+    assert body["total"] >= 2
+    currents = [s for s in body["data"] if s["current"]]
+    assert len(currents) == 1
+    assert currents[0]["platform"] == "desktop"
+    assert "user_agent" in currents[0] and "ip" in currents[0]
+    assert currents[0]["created_at"] and currents[0]["last_used_at"]
+
+
+async def test_sessions_cross_user_family_404(client, new_client, make_invite):
+    await make_invite("INV-SESS-A")
+    await register_and_login(client, "INV-SESS-A", "sess_owner")
+    family_id = (await client.get("/v1/auth/sessions")).json()["data"][0]["id"]
+
+    await make_invite("INV-SESS-B")
+    async with new_client() as attacker:
+        await register_and_login(attacker, "INV-SESS-B", "sess_attacker")
+        assert (
+            await attacker.delete(f"/v1/auth/sessions/{family_id}")
+        ).status_code == 404
+
+
+async def test_revoke_session_blocks_refresh(client, make_invite):
+    await make_invite("INV-SESS-2")
+    await register_and_login(client, "INV-SESS-2", "sess_bob")
+    family_id = (await client.get("/v1/auth/sessions")).json()["data"][0]["id"]
+    assert (await client.delete(f"/v1/auth/sessions/{family_id}")).status_code == 200
+    assert (await client.post("/v1/auth/refresh")).status_code == 401
+
+
+async def test_revoke_others_keeps_current(client, new_client, make_invite):
+    await make_invite("INV-SESS-3")
+    await register_and_login(client, "INV-SESS-3", "sess_carol")
+
+    async with new_client() as other:
+        r = await other.post(
+            "/v1/auth/login", json={"username": "sess_carol", "password": _PW}
+        )
+        assert r.status_code == 200
+        other_refresh = other.cookies.get("refresh_token")
+
+        assert (await client.post("/v1/auth/sessions/revoke-others")).status_code == 200
+        # current device still refreshes
+        assert (await client.post("/v1/auth/refresh")).status_code == 200
+        # other device's refresh is dead
+        resp = await other.post(
+            "/v1/auth/refresh", headers={"Cookie": f"refresh_token={other_refresh}"}
+        )
+        assert resp.status_code == 401
+
+
+async def test_family_max_days_rejects_refresh(client, make_invite, session_factory, monkeypatch):
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select, update
+
+    from agentcore.db.models import RefreshToken
+
+    monkeypatch.setattr(settings, "refresh_family_max_days", 1)
+    await make_invite("INV-SESS-4")
+    await register_and_login(client, "INV-SESS-4", "sess_dave")
+
+    async with session_factory() as session:
+        result = await session.execute(select(RefreshToken))
+        rows = list(result.scalars().all())
+        assert rows
+        await session.execute(
+            update(RefreshToken).values(
+                family_started_at=datetime.now(UTC) - timedelta(days=2)
+            )
+        )
+        await session.commit()
+
+    assert (await client.post("/v1/auth/refresh")).status_code == 401
+
+
+async def test_admin_family_max_hours_rejects_refresh(
+    client, make_admin, session_factory, monkeypatch
+):
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update
+
+    from agentcore.db.models import RefreshToken
+
+    monkeypatch.setattr(settings, "admin_mfa_required", False)
+    monkeypatch.setattr(settings, "admin_refresh_family_max_hours", 1)
+    username, password = await make_admin()
+    r = await client.post(
+        "/v1/auth/login",
+        json={"username": username, "password": password},
+        headers={"X-Client-Platform": "admin"},
+    )
+    assert r.status_code == 200, r.text
+
+    async with session_factory() as session:
+        await session.execute(
+            update(RefreshToken).values(
+                family_started_at=datetime.now(UTC) - timedelta(hours=2)
+            )
+        )
+        await session.commit()
+
+    assert (await client.post("/v1/auth/refresh")).status_code == 401
+
+
+async def test_refresh_token_gc_keeps_active_tips(session_factory, monkeypatch):
+    from datetime import UTC, datetime
+
+    import agentcore.auth.retention as retention_mod
+    from agentcore.auth.retention import run_refresh_token_retention_sweep
+    from agentcore.db.models import RefreshToken
+    from agentcore.db.repositories import CredentialsRepository, UserRepository
+    from agentcore.security import hash_password, hash_refresh_token
+
+    monkeypatch.setattr(settings, "refresh_token_retention_days", 7)
+    monkeypatch.setattr(retention_mod, "async_session_factory", session_factory)
+
+    async with session_factory() as session:
+        user = await UserRepository(session).create(
+            username=f"gc_{uuid4().hex[:8]}", display_name="GC"
+        )
+        await CredentialsRepository(session).create(
+            user_id=user.user_id, password_hash=hash_password(_PW)
+        )
+        family = str(uuid4())
+        live = RefreshToken(
+            id=str(uuid4()),
+            user_id=user.user_id,
+            token_hash=hash_refresh_token(f"live-{uuid4().hex}"),
+            token_family=family,
+            expires_at=datetime.now(UTC) + timedelta(days=30),
+            client_aud="product",
+            family_started_at=datetime.now(UTC),
+            last_used_at=datetime.now(UTC),
+        )
+        old_rotated = RefreshToken(
+            id=str(uuid4()),
+            user_id=user.user_id,
+            token_hash=hash_refresh_token(f"old-{uuid4().hex}"),
+            token_family=family,
+            expires_at=datetime.now(UTC) + timedelta(days=30),
+            client_aud="product",
+            rotated_at=datetime.now(UTC) - timedelta(days=10),
+            family_started_at=datetime.now(UTC) - timedelta(days=10),
+            last_used_at=datetime.now(UTC) - timedelta(days=10),
+        )
+        session.add_all([live, old_rotated])
+        await session.commit()
+        live_id, old_id = live.id, old_rotated.id
+
+    deleted = await run_refresh_token_retention_sweep()
+    assert deleted >= 1
+
+    async with session_factory() as session:
+        assert await session.get(RefreshToken, live_id) is not None
+        assert await session.get(RefreshToken, old_id) is None
+

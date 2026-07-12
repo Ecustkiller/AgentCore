@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentcore.auth import AuthService
+from agentcore.config import settings
 from agentcore.core.errors import (
     AuthenticationError,
     AuthorizationError,
@@ -16,6 +17,12 @@ from agentcore.core.types import new_id
 from agentcore.security import decode_access_token, hash_refresh_token
 
 _PW = "password123"
+
+
+@pytest.fixture(autouse=True)
+def _open_registration(monkeypatch):
+    """Unit tests assume open registration; local .env may close the gate."""
+    monkeypatch.setattr(settings, "registration_open", True)
 
 
 async def _do_login(svc: AuthService, **kwargs):
@@ -117,7 +124,21 @@ class FakeRefreshTokens:
     def __init__(self) -> None:
         self.records: dict = {}
 
-    async def create(self, *, user_id, token_hash, token_family, expires_at, client_aud="product"):
+    async def create(
+        self,
+        *,
+        user_id,
+        token_hash,
+        token_family,
+        expires_at,
+        client_aud="product",
+        client_platform=None,
+        user_agent=None,
+        ip=None,
+        family_started_at=None,
+        last_used_at=None,
+    ):
+        now = datetime.now(UTC)
         rec = SimpleNamespace(
             id=new_id(),
             user_id=user_id,
@@ -127,6 +148,12 @@ class FakeRefreshTokens:
             revoked_at=None,
             rotated_at=None,
             client_aud=client_aud,
+            client_platform=client_platform,
+            user_agent=user_agent,
+            ip=ip,
+            family_started_at=family_started_at or now,
+            last_used_at=last_used_at or now,
+            created_at=now,
         )
         self.records[rec.id] = rec
         return rec
@@ -146,6 +173,50 @@ class FakeRefreshTokens:
         for rec in self.records.values():
             if rec.user_id == user_id and rec.revoked_at is None:
                 rec.revoked_at = datetime.now(UTC)
+
+    async def revoke_other_families(self, user_id, *, keep_family):
+        n = 0
+        for rec in self.records.values():
+            if (
+                rec.user_id == user_id
+                and rec.token_family != keep_family
+                and rec.revoked_at is None
+            ):
+                rec.revoked_at = datetime.now(UTC)
+                n += 1
+        return n
+
+    async def family_belongs_to_user(self, *, user_id, token_family):
+        return any(
+            r.user_id == user_id and r.token_family == token_family
+            for r in self.records.values()
+        )
+
+    async def list_active_session_tips(self, *, user_id, now=None):
+        now = now or datetime.now(UTC)
+        return [
+            r
+            for r in self.records.values()
+            if r.user_id == user_id
+            and r.revoked_at is None
+            and r.rotated_at is None
+            and r.expires_at > now
+        ]
+
+    async def delete_terminal_stale(self, *, before, limit):
+        now = datetime.now(UTC)
+        doomed = []
+        for rec in self.records.values():
+            terminal = rec.revoked_at or rec.rotated_at
+            if terminal is None and rec.expires_at < now:
+                terminal = rec.expires_at
+            if terminal is not None and terminal < before:
+                doomed.append(rec.id)
+            if len(doomed) >= limit:
+                break
+        for rid in doomed:
+            del self.records[rid]
+        return len(doomed)
 
 
 class FakeInvites:
@@ -713,3 +784,129 @@ async def test_delete_account_unknown_user_raises_not_found():
     svc, *_ = _make()
     with pytest.raises(NotFoundError):
         await svc.delete_account(user_id="ghost", password=_PW)
+
+
+# --- sessions + family absolute max ---
+
+
+async def test_access_token_carries_fam_claim():
+    from agentcore.security import decode_access_token_family
+
+    svc, *_ = _make()
+    await svc.register(username="fam1", password=_PW)
+    _, pair = await _do_login(svc, username="fam1", password=_PW)
+    fam = decode_access_token_family(pair.access_token)
+    assert fam
+    tips = await svc._refresh_tokens.list_active_session_tips(
+        user_id=(await svc._users.get_by_username("fam1")).user_id
+    )
+    assert any(t.token_family == fam for t in tips)
+
+
+async def test_list_sessions_marks_current_and_aggregates():
+    svc, *_ = _make()
+    await svc.register(username="sess1", password=_PW)
+    user, pair_a = await _do_login(svc, username="sess1", password=_PW)
+    _, pair_b = await _do_login(svc, username="sess1", password=_PW)
+    from agentcore.security import decode_access_token_family
+
+    fam_b = decode_access_token_family(pair_b.access_token)
+    sessions = await svc.list_sessions(user_id=user.user_id, current_family=fam_b)
+    assert len(sessions) == 2
+    currents = [s for s in sessions if s.current]
+    assert len(currents) == 1 and currents[0].id == fam_b
+
+
+async def test_revoke_session_kills_refresh():
+    svc, *_ = _make()
+    await svc.register(username="sess2", password=_PW)
+    user, pair = await _do_login(svc, username="sess2", password=_PW)
+    from agentcore.security import decode_access_token_family
+
+    fam = decode_access_token_family(pair.access_token)
+    assert fam
+    await svc.revoke_session(user_id=user.user_id, family_id=fam)
+    with pytest.raises(AuthenticationError):
+        await svc.refresh(refresh_token=pair.refresh_token)
+
+
+async def test_revoke_session_foreign_family_404():
+    svc, *_ = _make()
+    await svc.register(username="own", password=_PW)
+    await svc.register(username="oth", password=_PW)
+    owner, _ = await _do_login(svc, username="own", password=_PW)
+    _, other_pair = await _do_login(svc, username="oth", password=_PW)
+    from agentcore.security import decode_access_token_family
+
+    other_fam = decode_access_token_family(other_pair.access_token)
+    with pytest.raises(NotFoundError):
+        await svc.revoke_session(user_id=owner.user_id, family_id=other_fam)
+
+
+async def test_revoke_other_sessions_keeps_current():
+    svc, *_ = _make()
+    await svc.register(username="sess3", password=_PW)
+    user, pair_a = await _do_login(svc, username="sess3", password=_PW)
+    _, pair_b = await _do_login(svc, username="sess3", password=_PW)
+    from agentcore.security import decode_access_token_family
+
+    fam_b = decode_access_token_family(pair_b.access_token)
+    await svc.revoke_other_sessions(user_id=user.user_id, current_family=fam_b)
+    with pytest.raises(AuthenticationError):
+        await svc.refresh(refresh_token=pair_a.refresh_token)
+    rotated = await svc.refresh(refresh_token=pair_b.refresh_token)
+    assert rotated.refresh_token
+
+
+async def test_family_absolute_max_rejects_product(monkeypatch):
+    monkeypatch.setattr(
+        "agentcore.auth.service.settings.refresh_family_max_days", 1
+    )
+    svc, *_ = _make()
+    await svc.register(username="max1", password=_PW)
+    _, pair = await _do_login(svc, username="max1", password=_PW)
+    tip = next(iter(svc._refresh_tokens.records.values()))
+    tip.family_started_at = datetime.now(UTC) - timedelta(days=2)
+    with pytest.raises(AuthenticationError):
+        await svc.refresh(refresh_token=pair.refresh_token)
+
+
+async def test_family_absolute_max_admin_hours(monkeypatch):
+    monkeypatch.setattr(
+        "agentcore.auth.service.settings.admin_refresh_family_max_hours", 1
+    )
+    monkeypatch.setattr(
+        "agentcore.auth.service.settings.admin_mfa_required", False
+    )
+    svc, users, creds, tokens, invites = _make()
+    admin = await users.create(username="admmax", display_name="A", role="admin")
+    from agentcore.security import hash_password
+
+    await creds.create(user_id=admin.user_id, password_hash=hash_password(_PW))
+    _, pair = await _do_login(
+        svc, username="admmax", password=_PW, platform="admin"
+    )
+    tip = next(iter(tokens.records.values()))
+    tip.family_started_at = datetime.now(UTC) - timedelta(hours=2)
+    assert tip.client_aud == "admin"
+    with pytest.raises(AuthenticationError):
+        await svc.refresh(refresh_token=pair.refresh_token)
+
+
+async def test_gc_deletes_only_terminal_old_rows():
+    svc, *_ = _make()
+    await svc.register(username="gc1", password=_PW)
+    user, pair = await _do_login(svc, username="gc1", password=_PW)
+    # Rotate once → old tip is terminal (rotated).
+    await svc.refresh(refresh_token=pair.refresh_token)
+    tokens = svc._refresh_tokens
+    old = [r for r in tokens.records.values() if r.rotated_at is not None][0]
+    live = [r for r in tokens.records.values() if r.rotated_at is None][0]
+    old.rotated_at = datetime.now(UTC) - timedelta(days=10)
+    deleted = await tokens.delete_terminal_stale(
+        before=datetime.now(UTC) - timedelta(days=7), limit=100
+    )
+    assert deleted == 1
+    assert old.id not in tokens.records
+    assert live.id in tokens.records
+

@@ -50,11 +50,14 @@ export function ResumeCard({
   return (
     <div className="pause">
       <div className="pause-title">
-        {isTeamPreview
-          ? "团队预审 · 开干前确认"
-          : isPlanReview
-            ? "执行已暂停 · 待你决定是否继续"
-            : "需要你拍板（已离线保留）"}
+        {isTeamPreview &&
+        (paused as { primitive?: string }).primitive === "debate"
+          ? "辩论开工 · 开赛前确认"
+          : isTeamPreview
+            ? "团队预审 · 开干前确认"
+            : isPlanReview
+              ? "执行已暂停 · 待你决定是否继续"
+              : "需要你拍板（已离线保留）"}
       </div>
       {paused.user_message && (
         <div className="pause-context">{paused.user_message}</div>
@@ -158,31 +161,62 @@ export function ResumeCard({
           })}
         </div>
       )}
-      {isTeamPreview && (paused.workers?.length ?? 0) > 0 && (
-        <div className="pause-steps">
-          {(paused.workers ?? []).map((w, i) => {
-            const role = str(w, "role");
-            const task = str(w, "task");
-            return (
-              // biome-ignore lint/suspicious/noArrayIndexKey: persisted, stable order
-              <div key={i} className="pause-step">
-                {role && <div className="pause-step-role">{role}</div>}
-                {task && <div className="pause-step-summary">{task}</div>}
+      {isTeamPreview &&
+        (paused as { primitive?: string }).primitive === "debate" && (
+          <div className="pause-steps">
+            {(paused as { motion?: string }).motion && (
+              <div className="pause-step">
+                <div className="pause-step-role">辩题</div>
+                <div className="pause-step-summary">
+                  {(paused as { motion: string }).motion}
+                </div>
               </div>
-            );
-          })}
-        </div>
-      )}
+            )}
+            {(
+              (paused as { sides?: Array<Record<string, unknown>> }).sides ?? []
+            ).map((s, i) => {
+              const name = str(s, "name");
+              const stance = str(s, "stance");
+              return (
+                // biome-ignore lint/suspicious/noArrayIndexKey: persisted, stable order
+                <div key={i} className="pause-step">
+                  {name && <div className="pause-step-role">{name}</div>}
+                  {stance && <div className="pause-step-summary">{stance}</div>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      {isTeamPreview &&
+        (paused as { primitive?: string }).primitive !== "debate" &&
+        (paused.workers?.length ?? 0) > 0 && (
+          <div className="pause-steps">
+            {(paused.workers ?? []).map((w, i) => {
+              const role = str(w, "role");
+              const task = str(w, "task");
+              return (
+                // biome-ignore lint/suspicious/noArrayIndexKey: persisted, stable order
+                <div key={i} className="pause-step">
+                  {role && <div className="pause-step-role">{role}</div>}
+                  {task && <div className="pause-step-summary">{task}</div>}
+                </div>
+              );
+            })}
+          </div>
+        )}
       <textarea
         className="pause-note"
         rows={2}
         value={note}
         placeholder={
-          isTeamPreview
-            ? "可选 · 调整时作为对全体队员的指示；停止时作为收尾备注"
-            : isPlanReview
-              ? "可选 · 调整时作为对下游的指示；停止时作为收尾备注"
-              : "可选 · 你的答复或补充，留空则按上面继续"
+          isTeamPreview &&
+          (paused as { primitive?: string }).primitive === "debate"
+            ? "可选 · 调整时填写新辩题后开赛；停止时作为收尾备注"
+            : isTeamPreview
+              ? "可选 · 调整时作为对全体队员的指示；停止时作为收尾备注"
+              : isPlanReview
+                ? "可选 · 调整时作为对下游的指示；停止时作为收尾备注"
+                : "可选 · 你的答复或补充，留空则按上面继续"
         }
         onChange={(e) => setNote(e.target.value)}
       />
@@ -193,7 +227,12 @@ export function ResumeCard({
           className="pause-btn pause-btn-primary"
           onClick={() => onResume("continue", note.trim())}
         >
-          {isTeamPreview ? "开做" : "继续"}
+          {isTeamPreview &&
+          (paused as { primitive?: string }).primitive === "debate"
+            ? "开赛"
+            : isTeamPreview
+              ? "开做"
+              : "继续"}
         </button>
         {showWorkers && (
           <button

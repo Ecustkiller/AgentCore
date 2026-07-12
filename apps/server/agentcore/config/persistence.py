@@ -7,7 +7,9 @@ class PersistenceSettings(BaseModel):
     incomplete_turn_persist_enabled: bool = True
 
     session_roster_persist_enabled: bool = True
-    session_roster_retention_days: int = 7
+    # 现场保留语义「对话在，现场就在」（同人连续委派，2026-07-12 拍板）：删对话级联清理是
+    # 唯一默认清理路径；按时长清扫默认关（0 = 不清），>0 仅作放量后的存储保护兜底。
+    session_roster_retention_days: int = 0
     session_roster_sweep_interval_seconds: int = 6 * 3600
     session_roster_sweep_batch_limit: int = 200
 

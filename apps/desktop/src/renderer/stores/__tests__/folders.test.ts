@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-  defaultDraftWorkspaceIntent,
-  useFoldersStore,
-} from "../folders";
+import { defaultDraftWorkspaceIntent, useFoldersStore } from "../folders";
 
 const store = () => useFoldersStore.getState();
 

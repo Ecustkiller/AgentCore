@@ -10,12 +10,8 @@ vi.mock("electron", () => ({
   BrowserWindow: { getFocusedWindow: () => null, getAllWindows: () => [] },
 }));
 
-import {
-  locate,
-  realInside,
-  resolveLexical,
-} from "../fs/pathGuard";
-import { setRoot, type StoredRoot } from "../fs/roots";
+import { locate, realInside, resolveLexical } from "../fs/pathGuard";
+import { type StoredRoot, setRoot } from "../fs/roots";
 import { create, listDir } from "../fs/tree";
 
 describe("pathGuard realInside / locate error codes", () => {

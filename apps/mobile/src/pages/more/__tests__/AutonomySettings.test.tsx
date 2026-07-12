@@ -57,40 +57,30 @@ describe("AutonomySettings", () => {
     );
     expect(screen.getByText("每次询问")).toBeTruthy();
     expect(screen.getByText("全自动授权")).toBeTruthy();
-    expect(
-      screen.getByText(/每个可授权工具调用都弹出审批/),
-    ).toBeTruthy();
+    expect(screen.getByText(/每个可授权工具调用都弹出审批/)).toBeTruthy();
 
     const selected = screen.getByRole("radio", {
       name: /开工一次授权/,
     });
-    expect(selected.getAttribute("aria-checked")).toBe("true");
+    expect((selected as HTMLInputElement).checked).toBe(true);
   });
 
   it("PUTs the selected policy and shows inline success feedback", async () => {
     render(<AutonomySettings />);
-    await waitFor(() =>
-      expect(screen.getByText("全自动授权")).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByText("全自动授权")).toBeTruthy());
 
     fireEvent.click(screen.getByText("全自动授权"));
-    await waitFor(() =>
-      expect(mockSet).toHaveBeenCalledWith("full_auto"),
-    );
-    await waitFor(() =>
-      expect(screen.getByText("已更新自主度")).toBeTruthy(),
-    );
+    await waitFor(() => expect(mockSet).toHaveBeenCalledWith("full_auto"));
+    await waitFor(() => expect(screen.getByText("已更新自主度")).toBeTruthy());
 
     const selected = screen.getByRole("radio", { name: /全自动授权/ });
-    expect(selected.getAttribute("aria-checked")).toBe("true");
+    expect((selected as HTMLInputElement).checked).toBe(true);
   });
 
   it("shows an inline error when save fails and keeps the prior selection", async () => {
     mockSet.mockRejectedValue(new Error("设置失败 (500)"));
     render(<AutonomySettings />);
-    await waitFor(() =>
-      expect(screen.getByText("每次询问")).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByText("每次询问")).toBeTruthy());
 
     fireEvent.click(screen.getByText("每次询问"));
     await waitFor(() =>
@@ -100,7 +90,7 @@ describe("AutonomySettings", () => {
     const selected = screen.getByRole("radio", {
       name: /开工一次授权/,
     });
-    expect(selected.getAttribute("aria-checked")).toBe("true");
+    expect((selected as HTMLInputElement).checked).toBe(true);
   });
 
   it("does not PUT when re-selecting the already-active policy", async () => {

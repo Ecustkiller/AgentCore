@@ -155,14 +155,31 @@ export function EmbeddedGraphCanvas({
     );
   }, [edges, statuses]);
 
-  // 波次泳道（与 GraphView 同源）：computeWaves 只读 execution.runs[].id，喂一份最小
-  // runs 形状即可。worker 列 ≥2 才出泳道（纯并行扇出 / 单 Agent 自动不出，复刻产品）。
+  // 波次泳道（与 GraphView 同源）：喂 GraphRunLike（含 dependsOn），worker 列 ≥2 才出泳道。
   const waves = useMemo<WaveBand[]>(() => {
     if (!layout) return [];
     const captainId = nodes.find((n) => n.type === "captain")?.id ?? null;
+    const dependsByTarget = new Map<string, string[]>();
+    for (const e of edges) {
+      if ((e.kind ?? "dep") !== "dep") continue;
+      // 端点边（用户输入）不参与 worker 拓扑
+      if (e.source.startsWith("__")) continue;
+      const list = dependsByTarget.get(e.target) ?? [];
+      list.push(e.source);
+      dependsByTarget.set(e.target, list);
+    }
     const runs = nodes
-      .filter((n) => n.type === "agent")
-      .map((n) => ({ id: n.id }));
+      .filter((n) => n.type === "agent" || n.type === "captain")
+      .map((n) => ({
+        id: n.id,
+        dependsOn: dependsByTarget.get(n.id) ?? [],
+        parentRunId:
+          typeof n.data.parentRunId === "string" ? n.data.parentRunId : null,
+        continuesRunId:
+          typeof n.data.continuesRunId === "string"
+            ? n.data.continuesRunId
+            : null,
+      }));
     return computeWaves(
       { runs } as unknown as Execution,
       layout.positions,
@@ -170,7 +187,7 @@ export function EmbeddedGraphCanvas({
       layoutKind,
       captainId,
     );
-  }, [nodes, layout, layoutKind]);
+  }, [nodes, edges, layout, layoutKind]);
 
   return (
     <div

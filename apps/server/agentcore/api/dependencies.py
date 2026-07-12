@@ -47,7 +47,7 @@ from agentcore.db.repositories import (
 )
 from agentcore.messaging import MessagingService
 from agentcore.messaging.hub import HubChatEventPublisher, default_chat_hub
-from agentcore.security.tokens import decode_access_token_claims
+from agentcore.security.tokens import decode_access_token_claims, decode_access_token_family
 from agentcore.storage.assets import AssetStorage, build_asset_storage
 
 # Cookie name carrying the access JWT (set by the auth routes).
@@ -263,6 +263,7 @@ async def get_current_user(
     if user is None or user.status != "active":
         raise AuthenticationError("User not found or inactive")
     request.state.token_aud = aud
+    request.state.token_family = decode_access_token_family(token)
     _enforce_audience_bounds(request, user, aud)
     return user
 
@@ -285,6 +286,10 @@ async def get_optional_user(
     if user is None or user.status != "active":
         return None
     request.state.token_aud = aud
+    try:
+        request.state.token_family = decode_access_token_family(token)
+    except AuthenticationError:
+        request.state.token_family = None
     try:
         _enforce_audience_bounds(request, user, aud)
     except (AdminProductForbiddenError, AuthorizationError):

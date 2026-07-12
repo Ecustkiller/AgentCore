@@ -37,9 +37,7 @@ export function shouldShowTerminalTab(
   ptyCount = 0,
   canOpenPty = false,
 ): boolean {
-  return (
-    processCount > 0 || recordCount > 0 || ptyCount > 0 || canOpenPty
-  );
+  return processCount > 0 || recordCount > 0 || ptyCount > 0 || canOpenPty;
 }
 
 /** 人类可读时长（自 started_at ISO）。 */

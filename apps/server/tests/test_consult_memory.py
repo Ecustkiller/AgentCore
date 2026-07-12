@@ -219,7 +219,7 @@ def _assemble_chat_tools(*, folder_id: str | None, memory_enabled: bool = True):
     from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset
     from agentcore.tools.registry import ToolRegistry
 
-    _, _, _, chat_tools = _assemble_ceo_toolset(
+    _, _, chat_tools = _assemble_ceo_toolset(
         llm=object(),
         sink=EventSink(),
         base_system_prompt="SYS",

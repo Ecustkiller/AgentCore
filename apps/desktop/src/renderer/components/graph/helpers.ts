@@ -73,13 +73,13 @@ export function deriveArtifacts(
   return out;
 }
 
-function isRevisionRun(r: GraphRunLike): boolean {
-  return (r.revision ?? 0) > 0;
+function isContinuationRun(r: GraphRunLike): boolean {
+  return r.continuesRunId != null;
 }
 
 function _isSubRun(r: GraphRunLike, workerIds: Set<string>): boolean {
   return (
-    !isRevisionRun(r) &&
+    !isContinuationRun(r) &&
     !!r.parentRunId &&
     r.parentRunId !== r.id &&
     workerIds.has(r.parentRunId)
@@ -125,7 +125,7 @@ export function computeTopologicalRunWaves(
     for (const memberId of members) {
       const r = runById.get(memberId);
       if (!r) continue;
-      for (const depId of r.dependsOn) {
+      for (const depId of r.dependsOn ?? []) {
         if (!workerIds.has(depId)) continue;
         const depUnit = unitOf(depId);
         if (depUnit === unitId) continue;
@@ -242,6 +242,73 @@ function bandFromMembers(
   };
 }
 
+const STAGE_PAD = 16;
+
+/**
+ * 辩论阶段分区带（协作图）：把每一"阶段"的节点用一个柔和框圈起——
+ * 第 1 轮（含主持人开场）/ 第 N 轮 / 结辩。质询折进轮节点，不单独成段。
+ * 坐标同 {@link WaveBand}（flow 坐标，经 ViewportPortal 渲染）；标签锚点取框顶居中。
+ * 非辩论 / 无坐标 → 空数组（调用方不渲染）。
+ */
+export function computeDebateStageBands(
+  execution: Execution,
+  positions: Record<string, { x: number; y: number }>,
+  captainId: string | null,
+): WaveBand[] {
+  const runs = execution.runs;
+  const modId = debateModeratorId(runs, captainId);
+  const CLOSING_ORDER = Number.MAX_SAFE_INTEGER;
+  const stages = new Map<number, { label: string; ids: string[] }>();
+  const ensure = (order: number, label: string) => {
+    let s = stages.get(order);
+    if (!s) {
+      s = { label, ids: [] };
+      stages.set(order, s);
+    }
+    return s;
+  };
+  for (const r of runs) {
+    if (!isDebateParticipantRun(r)) continue;
+    if (isDebateCrossExamRun(r)) continue; // 质询折进轮节点，不独立成段
+    if (isDebateClosingRun(r)) {
+      ensure(CLOSING_ORDER, "结辩").ids.push(r.id);
+      continue;
+    }
+    const round =
+      r.continuesRunId == null ? 1 : r.round && r.round > 1 ? r.round : 2;
+    ensure(round, `第 ${round} 轮`).ids.push(r.id);
+  }
+  if (stages.size === 0) return [];
+  // 主持人开场并入第 1 轮段。
+  const first = stages.get(1);
+  if (modId && first) first.ids.push(modId);
+
+  const bands: WaveBand[] = [];
+  for (const order of [...stages.keys()].sort((a, b) => a - b)) {
+    const s = stages.get(order);
+    if (!s) continue;
+    const pts = s.ids
+      .map((id) => positions[id])
+      .filter((p): p is { x: number; y: number } => p != null);
+    if (pts.length === 0) continue;
+    const x0 = Math.min(...pts.map((p) => p.x));
+    const y0 = Math.min(...pts.map((p) => p.y));
+    const x1 = Math.max(...pts.map((p) => p.x + NODE_WIDTH));
+    const y1 = Math.max(...pts.map((p) => p.y + NODE_HEIGHT));
+    bands.push({
+      id: `debate-stage-${order}`,
+      label: s.label,
+      x: x0 - STAGE_PAD,
+      y: y0 - STAGE_PAD,
+      w: x1 - x0 + STAGE_PAD * 2,
+      h: y1 - y0 + STAGE_PAD * 2,
+      labelX: (x0 + x1) / 2,
+      labelY: y0 - STAGE_PAD,
+    });
+  }
+  return bands;
+}
+
 /**
  * Wave / batch lanes behind the collaboration graph.
  *
@@ -327,8 +394,8 @@ export interface GraphRunLike {
   id: string;
   dependsOn: string[];
   parentRunId?: string | null;
-  revision?: number;
-  revisionOf?: string | null;
+  continuationIndex?: number;
+  continuesRunId?: string | null;
   replacesRunId?: string | null;
   stance?: string | null;
   group?: string | null;
@@ -367,7 +434,7 @@ export function isDebateClosingRun(r: GraphRunLike): boolean {
 }
 
 /**
- * 同辩手同轮的陈词宿主：质询折进此节点。首轮 revision=0 与续轮陈词均算陈词。
+ * 同辩手同轮的陈词宿主：质询折进此节点。首轮与续轮陈词均算陈词。
  */
 export function debateStatementHostId(
   cx: GraphRunLike,
@@ -377,11 +444,11 @@ export function debateStatementHostId(
   if (!isDebateCrossExamRun(cx)) return null;
   const ids = workerIds ?? new Set(runs.map((r) => r.id));
   const byId = new Map(runs.map((r) => [r.id, r]));
-  const root = revisionRootId(cx.id, byId, ids);
+  const root = continuationRootId(cx.id, byId, ids);
   const round = cx.round ?? 0;
   for (const r of runs) {
     if (!ids.has(r.id)) continue;
-    if (revisionRootId(r.id, byId, ids) !== root) continue;
+    if (continuationRootId(r.id, byId, ids) !== root) continue;
     if ((r.round ?? 0) !== round) continue;
     if (isDebateCrossExamRun(r) || isDebateClosingRun(r)) continue;
     return r.id;
@@ -469,7 +536,7 @@ export function pickDebateCrossExamActivateId(
   return cxRuns[cxRuns.length - 1].id;
 }
 
-function revisionRootId(
+function continuationRootId(
   runId: string,
   runById: Map<string, GraphRunLike>,
   workerIds: Set<string>,
@@ -479,8 +546,8 @@ function revisionRootId(
   while (!seen.has(cur)) {
     seen.add(cur);
     const r = runById.get(cur);
-    if (!r?.revisionOf || !workerIds.has(r.revisionOf)) break;
-    cur = r.revisionOf;
+    if (!r?.continuesRunId || !workerIds.has(r.continuesRunId)) break;
+    cur = r.continuesRunId;
   }
   return cur;
 }
@@ -495,7 +562,7 @@ export function debateModeratorId(
   const runById = new Map(workers.map((r) => [r.id, r]));
   for (const r of workers) {
     if (!isDebateParticipantRun(r)) continue;
-    const root = revisionRootId(r.id, runById, workerIds);
+    const root = continuationRootId(r.id, runById, workerIds);
     const rootRun = runById.get(root);
     const parentId = rootRun?.parentRunId;
     if (parentId && workerIds.has(parentId)) return parentId;
@@ -511,8 +578,8 @@ function belongsToDebateUnit(
 ): boolean {
   if (r.id === moderatorId) return false;
   if (isDebateParticipantRun(r)) return true;
-  if ((r.revision ?? 0) > 0 && r.revisionOf && workerIds.has(r.revisionOf)) {
-    const root = runById.get(revisionRootId(r.id, runById, workerIds));
+  if (r.continuesRunId && workerIds.has(r.continuesRunId)) {
+    const root = runById.get(continuationRootId(r.id, runById, workerIds));
     return root != null && isDebateParticipantRun(root);
   }
   return false;
@@ -556,18 +623,18 @@ export function computeGraphFold(
       return modId;
     }
 
-    if ((r.revision ?? 0) > 0 && r.revisionOf && workerIds.has(r.revisionOf)) {
+    if (r.continuesRunId && workerIds.has(r.continuesRunId)) {
       if (modId && belongsToDebateUnit(r, modId, runById, workerIds)) {
         unitOf.set(runId, modId);
         return modId;
       }
-      // Non-debate revisions stay individually visible (revision chain on the graph).
+      // Non-debate continuations stay individually visible (continuation chain on the graph).
       unitOf.set(runId, runId);
       return runId;
     }
 
     if (
-      !((r.revision ?? 0) > 0) &&
+      !r.continuesRunId &&
       r.parentRunId &&
       r.parentRunId !== r.id &&
       workerIds.has(r.parentRunId)
@@ -618,7 +685,7 @@ export interface SubTeam {
   groupId: string;
 }
 
-/** Build ELK node ids + graph edges from projected runs (plan + revisions). */
+/** Build ELK node ids + graph edges from projected runs (plan + continuations). */
 export function buildGraphStructure(
   runs: GraphRunLike[],
   inputId: string,
@@ -634,9 +701,9 @@ export function buildGraphStructure(
   const workerIds = new Set(workerRuns.map((r) => r.id));
   const foldInfo = computeGraphFold(runs, captainId);
   const { folded, unitOf, descendants, debateUnits } = foldInfo;
-  const isRevision = (r: GraphRunLike): boolean => (r.revision ?? 0) > 0;
+  const isContinuation = (r: GraphRunLike): boolean => r.continuesRunId != null;
   const isSub = (r: GraphRunLike): boolean =>
-    !isRevision(r) &&
+    !isContinuation(r) &&
     !!r.parentRunId &&
     r.parentRunId !== r.id &&
     workerIds.has(r.parentRunId);
@@ -742,33 +809,38 @@ export function buildGraphStructure(
     }),
   );
 
-  // 修订链只连可见节点（轮→轮→结辩），跳过已折进的质询，避免悬空边 / phantom 列。
-  const revisionsByOriginal = new Map<string, GraphRunLike[]>();
+  // 接续链只连可见节点（轮→轮→结辩），跳过已折进的质询，避免悬空边 / phantom 列。
+  // 星型 continuesRunId 铺成链（历史教训：勿照星型画平行边）。
+  const continuationsByOriginal = new Map<string, GraphRunLike[]>();
   for (const r of layoutWorkers) {
-    if (isRevision(r) && r.revisionOf && workerIds.has(r.revisionOf)) {
-      const list = revisionsByOriginal.get(r.revisionOf) ?? [];
+    if (
+      isContinuation(r) &&
+      r.continuesRunId &&
+      workerIds.has(r.continuesRunId)
+    ) {
+      const list = continuationsByOriginal.get(r.continuesRunId) ?? [];
       list.push(r);
-      revisionsByOriginal.set(r.revisionOf, list);
+      continuationsByOriginal.set(r.continuesRunId, list);
     }
   }
-  for (const [originalId, revisions] of revisionsByOriginal) {
+  for (const [originalId, continuations] of continuationsByOriginal) {
     if (beatHidden.has(originalId) || !isLayoutVisible(originalId)) continue;
-    const ordered = revisions
+    const ordered = continuations
       .slice()
-      .sort((a, b) => (a.revision ?? 0) - (b.revision ?? 0));
+      .sort((a, b) => (a.continuationIndex ?? 0) - (b.continuationIndex ?? 0));
     let prev = originalId;
-    for (const rev of ordered) {
+    for (const cont of ordered) {
       addEdge({
-        id: `${prev}~>${rev.id}`,
+        id: `${prev}~>${cont.id}`,
         source: prev,
-        target: rev.id,
-        kind: "revision",
+        target: cont.id,
+        kind: "continuation",
       });
-      prev = rev.id;
+      prev = cont.id;
     }
   }
 
-  // 回落换人：replaces_run_id → new worker「接替」边（与 revision 链正交）。
+  // 回落换人：replaces_run_id → new worker「接替」边（与接续链正交）。
   for (const r of layoutWorkers) {
     const from = r.replacesRunId;
     if (!from || !workerIds.has(from) || !isLayoutVisible(r.id)) continue;

@@ -14,7 +14,6 @@ from agentcore.runtime.facts import current_fact_log
 from agentcore.runtime.pipeline.finalize import _journal_entries_for_turn
 from agentcore.tools.builtin.debate import DebateTool
 from agentcore.tools.builtin.delegate import DelegateTool
-from agentcore.tools.builtin.revise import ReviseTool
 
 logger = get_logger(__name__)
 
@@ -26,7 +25,6 @@ def finish_resume_turn(
     captain_state,
     pre_pause_content: str,
     delegate_tool: DelegateTool,
-    revise_tool: ReviseTool,
     debate_tool: DebateTool,
     profile,
     citations: list[dict],
@@ -37,13 +35,13 @@ def finish_resume_turn(
     """Bill + close a resumed turn whose CEO loop ran (plan_review / ask_user continue).
 
     The whole turn bills once here: the captain's resume round + any delegated
-    workers' usage (seeds + tail, folded by ``resume_plan``) + any revise. Mirrors
-    :func:`run_chat_pipeline`'s tail (usage roll-up, per-run ledger, citations,
+    workers' usage (seeds + tail, folded by ``resume_plan``) + any continuation.
+    Mirrors :func:`run_chat_pipeline`'s tail (usage roll-up, per-run ledger, citations,
     message_end), returning the same result shape for the service to persist.
 
     ``vision_cost_runs`` are the resumed turn's board_read 读图 ledger rows (role=vision,
     §九.4 Gap ②), collected off the shared ``ToolContext.cost_sink``. Folded into
-    ``cost_runs`` like the delegate / revise rows; vision spend has no usage that rolls
+    ``cost_runs`` like the delegate rows; vision spend has no usage that rolls
     into ``turn_usage`` (a separate model, billed only as its own priced row).
     """
     final_content = join_segments(pre_pause_content, captain_state.content)
@@ -52,7 +50,6 @@ def finish_resume_turn(
     turn_usage = (
         TokenUsage.from_usage_dict(captain_state.usage)
         + TokenUsage.from_usage_dict(delegate_tool.usage)
-        + TokenUsage.from_usage_dict(revise_tool.usage)
         + TokenUsage.from_usage_dict(debate_tool.usage)
     )
     finish = captain_state.finish_override or (
@@ -62,14 +59,12 @@ def finish_resume_turn(
     cost_runs = [
         asdict(captain_cost),
         *(asdict(r) for r in delegate_tool.run_ledger),
-        *(asdict(r) for r in revise_tool.run_ledger),
         *(asdict(r) for r in debate_tool.run_ledger),
-        # board_read 视觉子调用账（§九.4 Gap ②），与 delegate/revise 同形折账。
+        # board_read 视觉子调用账（§九.4 Gap ②），与 delegate 同形折账。
         *(asdict(r) for r in (vision_cost_runs or [])),
     ]
     turn_cost = aggregate_cost(cost_runs)
     merge_citations(citations, delegate_tool.citations)
-    merge_citations(citations, revise_tool.citations)
     merge_citations(citations, debate_tool.citations)
     # Mirror run_chat_pipeline: observe then strip dangling markers before persist.
     final_content, citations, stray_markers = reconcile_citations(final_content, citations)
@@ -84,7 +79,7 @@ def finish_resume_turn(
         sink.emit(citations_event(citations))
     collab = {
         **delegate_tool.collab,
-        "revises": len(revise_tool.run_ledger),
+        "revises": delegate_tool.continuation_count,
         "audit_drops": audit_drops,
     }
     sink.emit(

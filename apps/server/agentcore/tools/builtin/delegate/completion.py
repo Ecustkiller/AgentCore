@@ -225,9 +225,9 @@ def format_worker_gaps_block(gaps_by_worker: list[tuple[str, list[str]]]) -> str
     if not gaps_by_worker:
         return ""
     lines = [
-        "\n### ⚠️ 契约缺口（请据缺口补派 / revise，勿靠自觉扫清单）\n"
+        "\n### ⚠️ 契约缺口（请据缺口补派 / continue_from_run_id 续派，勿靠自觉扫清单）\n"
         "以下是各队员收尾后仍未对齐的声明交付物 / 交接缺口（含收敛强制收尾后无法再写文件"
-        "留下的缺口）。用 delegate / revise 补齐，别假装收工。\n"
+        "留下的缺口）。用 delegate / continue_from_run_id 补齐，别假装收工。\n"
     ]
     for label, gaps in gaps_by_worker:
         joined = "；".join(gaps)

@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { APP_PATHS } from "./paths";
+import { resolveSectionHref } from "./sectionIds";
 
 export function GoLink({ to, children }: { to: string; children: ReactNode }) {
   const navigate = useNavigate();
@@ -23,18 +25,27 @@ export function GoLink({ to, children }: { to: string; children: ReactNode }) {
   );
 }
 
+/**
+ * 手册内节间深链：`to` 为节 ID（见 sectionIds.ts）。
+ * 同页优先滚动；DOM 未挂载时按注册表解析章 path 再 navigate。
+ */
 export function JumpLink({
   to,
   children,
 }: { to: string; children: ReactNode }) {
+  const navigate = useNavigate();
   return (
     <Button
       variant="ghost"
-      onClick={() =>
-        document
-          .getElementById(to)
-          ?.scrollIntoView({ behavior: "smooth", block: "start" })
-      }
+      onClick={() => {
+        const el = document.getElementById(to);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+          return;
+        }
+        const href = resolveSectionHref(to);
+        if (href) navigate(href);
+      }}
       className="h-auto px-0 py-0 font-medium text-primary underline-offset-2 hover:underline"
     >
       {children}
@@ -56,8 +67,8 @@ const CALLOUT = {
   },
   info: {
     Icon: Info,
-    box: "border-primary/30 bg-primary/5",
-    icon: "text-primary",
+    box: "border-border bg-muted/30",
+    icon: "text-muted-foreground",
   },
   warning: {
     Icon: AlertTriangle,
@@ -235,7 +246,7 @@ export function Faq({ items }: { items: { q: string; a: ReactNode }[] }) {
   );
 }
 
-/** 三列边界表——用于 Git / 代码能力等「会做 / 需批准 / 不会做」说明。 */
+/** 三列边界表——用于 Git / 代码能力等「会做 / 需你放行 / 不会做」说明。 */
 export function BoundaryTable({
   rows,
 }: {
@@ -245,7 +256,7 @@ export function BoundaryTable({
     <div className="mt-2 overflow-hidden rounded-lg border border-border text-xs">
       <div className="grid grid-cols-3 border-b border-border bg-muted/40 font-medium text-foreground">
         <span className="px-3 py-2">会做</span>
-        <span className="border-l border-border px-3 py-2">需你批准</span>
+        <span className="border-l border-border px-3 py-2">需你放行</span>
         <span className="border-l border-border px-3 py-2">不会做</span>
       </div>
       {rows.map((r) => (
@@ -266,24 +277,48 @@ export function BoundaryTable({
   );
 }
 
-export function SettingsTable() {
+const DEFAULT_SETTINGS_ROWS: { label: string; desc: string; to: string }[] = [
+  {
+    label: "模型配置",
+    desc: "填入 API Key（BYOK）、选择团队使用的模型",
+    to: APP_PATHS.more.model,
+  },
+  {
+    label: "AI 记忆",
+    desc: "长期记忆总开关——关掉则不再读写记忆",
+    to: APP_PATHS.more.memory,
+  },
+  {
+    label: "自主度",
+    desc: "团队遇敏感操作时问你多还是少",
+    to: APP_PATHS.more.autonomy,
+  },
+  { label: "用量", desc: "查看花费与额度", to: APP_PATHS.more.usage },
+  {
+    label: "外观",
+    desc: "明暗主题与界面偏好",
+    to: APP_PATHS.more.appearance,
+  },
+  {
+    label: "快捷键",
+    desc: "常用操作的键盘快捷键",
+    to: APP_PATHS.more.shortcuts,
+  },
+  {
+    label: "反馈",
+    desc: "提 Bug、功能建议或体验改进",
+    to: APP_PATHS.more.feedback,
+  },
+  { label: "关于", desc: "版本与产品信息", to: APP_PATHS.more.about },
+];
+
+/** 设置速查行——内容源可传入 rows；旧章 SettingsTable 仍用默认列表。 */
+export function SettingsRows({
+  rows,
+}: {
+  rows: { label: string; desc: string; to: string }[];
+}) {
   const navigate = useNavigate();
-  const rows: { label: string; desc: string; to: string }[] = [
-    {
-      label: "模型配置",
-      desc: "填入 API Key（BYOK）、选择团队使用的模型",
-      to: "/more/model",
-    },
-    { label: "用量", desc: "查看花费与额度", to: "/more/usage" },
-    { label: "外观", desc: "明暗主题与界面偏好", to: "/more/appearance" },
-    { label: "快捷键", desc: "常用操作的键盘快捷键", to: "/more/shortcuts" },
-    {
-      label: "反馈",
-      desc: "提 Bug、功能建议或体验改进",
-      to: "/more/feedback",
-    },
-    { label: "关于", desc: "版本与产品信息", to: "/more/about" },
-  ];
   return (
     <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
       {rows.map((r) => (
@@ -302,6 +337,10 @@ export function SettingsTable() {
       ))}
     </div>
   );
+}
+
+export function SettingsTable() {
+  return <SettingsRows rows={DEFAULT_SETTINGS_ROWS} />;
 }
 
 export function SectionHeading({

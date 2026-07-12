@@ -173,11 +173,18 @@ def team_preview_required(
     conversation_id: str,
     workers: list[dict[str, Any]],
     tools: list[str] | None = None,
+    primitive: str = "delegate",
+    motion: str = "",
+    form: str = "",
+    sides: list[dict[str, Any]] | None = None,
+    max_rounds: int = 0,
+    thorough: bool = True,
 ) -> SSEEvent:
-    """开工卡：首波启动前的计划预览 + 能力授权（两卡合一）。
+    """开工卡：编排原语 fan-out 前的计划预览 + 能力授权（两卡合一）。
 
-    ``workers`` = 角色 / 任务摘要 / 依赖 / 是否辩论；``tools`` = 本次委派所需
-    GRANTABLE 能力清单（AutonomyPolicy.full_auto / always_ask 时可为空）。
+    ``primitive`` 判别 ``delegate`` / ``debate``。delegate：``workers`` = 角色 /
+    任务摘要 / 依赖；debate：``motion`` / ``sides`` / ``max_rounds`` / ``thorough``。
+    ``tools`` = GRANTABLE 能力清单（debate 辩手只读 → 常空；full_auto / always_ask 亦可空）。
     """
     return SSEEvent(
         type=EventType.TEAM_PREVIEW_REQUIRED,
@@ -186,6 +193,12 @@ def team_preview_required(
             "conversation_id": conversation_id,
             "workers": workers,
             "tools": list(tools or []),
+            "primitive": primitive,
+            "motion": motion,
+            "form": form,
+            "sides": list(sides or []),
+            "max_rounds": max_rounds,
+            "thorough": thorough,
         },
     )
 
@@ -264,64 +277,8 @@ def escalation_resolved(
     )
 
 
-def debate_round_decision_required(
-    *,
-    execution_id: str,
-    moderator_run_id: str,
-    decision_id: str,
-    round_no: int,
-    focus: str,
-    summary: str,
-    converged: bool,
-    rationale: str = "",
-) -> SSEEvent:
-    """交互式逐轮辩论：主持人在一轮边界挂起等用户「继续辩 / 加角度 / 够了出结论」。
-
-    ``decision_id`` 是 resolve 端点的交互 id（前端 POST 用户的选择回它）；``converged`` /
-    ``rationale`` 是裁判对本轮的判读（卡片把它作为默认建议高亮）。Transport-only liveliness：
-    NOT journaled——耐久记录是最终 ``debate_result``（用户的选择体现在实际发生的轮次 /
-    stop_reason），重载据其重建，故本卡不进 journal / conformance（与 ``debate_round`` 同辙）。
-    """
-    return SSEEvent(
-        type=EventType.DEBATE_ROUND_DECISION_REQUIRED,
-        payload={
-            "execution_id": execution_id,
-            "moderator_run_id": moderator_run_id,
-            "decision_id": decision_id,
-            "round_no": round_no,
-            "focus": focus,
-            "summary": summary,
-            "converged": converged,
-            "rationale": rationale,
-        },
-    )
-
-
-def debate_round_decision_resolved(
-    *,
-    execution_id: str,
-    moderator_run_id: str,
-    decision_id: str,
-    decision: str,
-    focus: str = "",
-) -> SSEEvent:
-    """交互式逐轮辩论：上条决策的结算。``decision`` ∈ ``continue`` / ``conclude`` / ``timeout``
-    / ``orphaned``；``focus`` 是用户「加角度」给的下一轮议题（仅 continue 且非空时有值）。"""
-    return SSEEvent(
-        type=EventType.DEBATE_ROUND_DECISION_RESOLVED,
-        payload={
-            "execution_id": execution_id,
-            "moderator_run_id": moderator_run_id,
-            "decision_id": decision_id,
-            "decision": decision,
-            "focus": focus,
-        },
-    )
-
-
 def interaction_orphaned(*, interaction_id: str, kind: str) -> SSEEvent:
-    """热路 pending 交互失效。``kind`` ∈ approval / delegation_authorization /
-    escalation / debate_round。"""
+    """热路 pending 交互失效。``kind`` ∈ approval / delegation_authorization / escalation。"""
     return SSEEvent(
         type=EventType.INTERACTION_ORPHANED,
         payload={"interaction_id": interaction_id, "kind": kind},

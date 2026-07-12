@@ -4,7 +4,7 @@
 供 ``GET …/recovery``（热路 pending 子集）+ conformance oracle（ProjectedTurn.interactions）共用——
 **单一实现，不双写规则**。
 
-8 kind：approval / delegation_authorization / escalation / debate_round /
+8 kind：approval / delegation_authorization / escalation /
 ask_user / plan_review / team_preview / question_posted。
 
 ``awaiting=ceo`` 的 escalation 不进用户可答清单（由活着的 CEO 仲裁）。
@@ -28,11 +28,6 @@ _KIND_SPEC: dict[str, tuple[str, str | None, str]] = {
         "authorization_id",
     ),
     "escalation": ("escalation_required", "escalation_resolved", "escalation_id"),
-    "debate_round": (
-        "debate_round_decision_required",
-        "debate_round_decision_resolved",
-        "decision_id",
-    ),
     "ask_user": ("checkpoint_required", "checkpoint_resolved", "checkpoint_id"),
     "plan_review": ("plan_review_required", "plan_review_resolved", "checkpoint_id"),
     "team_preview": ("team_preview_required", "team_preview_resolved", "checkpoint_id"),
@@ -40,7 +35,7 @@ _KIND_SPEC: dict[str, tuple[str, str | None, str]] = {
 }
 
 _HOT_KINDS = frozenset(
-    {"approval", "delegation_authorization", "escalation", "debate_round"}
+    {"approval", "delegation_authorization", "escalation"}
 )
 
 # Gate kinds that pause the turn in ProjectedTurn (hot approval/delegation + cold path).
@@ -237,17 +232,6 @@ def project_interaction_leaf(rec: InteractionRecord) -> dict[str, Any]:
         if p.get("awaiting") in ("user", "ceo"):
             leaf["awaiting"] = p["awaiting"]
         return leaf
-    if rec.kind == "debate_round":
-        return {
-            **base,
-            "executionId": p.get("execution_id", ""),
-            "moderatorRunId": p.get("moderator_run_id", ""),
-            "roundNo": p.get("round_no", 0),
-            "focus": p.get("focus", ""),
-            "summary": p.get("summary", ""),
-            "converged": bool(p.get("converged", False)),
-            "rationale": p.get("rationale", ""),
-        }
     if rec.kind == "question_posted":
         return {
             **base,
@@ -273,9 +257,7 @@ def settlement_dedupe_key(
 ) -> tuple[str, str, str] | None:
     """``(turn_id, kind, id)`` for settlement dedupe, or None if not a settlement fact."""
     if event_kind.endswith("_resolved") or event_kind.endswith("_required"):
-        if event_kind.startswith("debate_round_decision_"):
-            interaction_kind = "debate_round"
-        elif event_kind.startswith("delegation_authorization_"):
+        if event_kind.startswith("delegation_authorization_"):
             interaction_kind = "delegation_authorization"
         elif event_kind.startswith("plan_review_"):
             interaction_kind = "plan_review"

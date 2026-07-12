@@ -14,7 +14,9 @@ import { CanvasCommandBar } from "./CanvasCommandBar";
 import { CanvasPlaybackControls } from "./CanvasPlaybackControls";
 import { CanvasTurnRail } from "./CanvasTurnRail";
 import { CanvasZoomControls } from "./CanvasZoomControls";
+import { DebateStageBands } from "./DebateStageBands";
 import { GraphContextMenu } from "./GraphContextMenu";
+import { GraphLayoutError } from "./GraphLayoutError";
 import { GraphToolbar } from "./GraphToolbar";
 import { SimpleTurnNode } from "./SimpleTurnNode";
 import { TurnGroupNode } from "./TurnGroupNode";
@@ -22,7 +24,6 @@ import { TurnSummaryNode } from "./TurnSummaryNode";
 import { WaveLanes } from "./WaveLanes";
 import { nodeTypes as dagNodeTypes, edgeTypes } from "./constants";
 import { GraphHoverContext } from "./graphHover";
-import { GraphLayoutError } from "./GraphLayoutError";
 import { useCanvasFlow } from "./useCanvasFlow";
 import {
   useCanvasFocus,
@@ -272,6 +273,9 @@ function ConversationCanvasInner() {
                     >
                       <Background gap={20} size={1} />
                       {showGraphChrome && <WaveLanes waves={flow.waves} />}
+                      {showGraphChrome && (
+                        <DebateStageBands bands={flow.debateBands} />
+                      )}
                       {hasMoreBefore && (
                         <Panel position="top-center">
                           <button
@@ -359,8 +363,8 @@ function ConversationCanvasInner() {
                   className="mx-auto mb-3 text-muted-foreground"
                 />
                 <p className="text-sm text-muted-foreground">
-                  还没有回合。在下方下达一个需要多 Agent 协作的任务，CEO
-                  组好队后这里就会展开画布。
+                  还没有回合。用底部指令入口下达一个需要多 Agent
+                  协作的任务，CEO 组好队后这里就会展开画布。
                 </p>
               </div>
             </div>
@@ -370,12 +374,13 @@ function ConversationCanvasInner() {
             focusedId={effectiveFocus}
             onSelect={onRailSelect}
           />
+          <CanvasCommandBar
+            onDispatch={() => setDispatched(true)}
+            waiting={dispatched && generating}
+            allowBackground
+            emptyConversation={turns.length === 0}
+          />
         </div>
-        <CanvasCommandBar
-          onDispatch={() => setDispatched(true)}
-          waiting={dispatched && generating}
-          allowBackground
-        />
       </div>
     </ExecutionScopeContext.Provider>
   );

@@ -57,6 +57,19 @@ export interface PendingResume {
   }>;
   /** team_preview (开工卡): grantable tools listed for capability auth. */
   tools: string[];
+  /** team_preview: orchestration primitive discriminant. */
+  primitive: "delegate" | "debate";
+  /** debate kickoff: motion / form / sides / budget. */
+  motion: string;
+  form: string;
+  sides: Array<{
+    key: string;
+    name: string;
+    stance: string;
+    is_subject?: boolean;
+  }>;
+  maxRounds: number;
+  thorough: boolean;
   /** ask_user: the framing / opening line (always shown). */
   question: string;
   /** ask_user: optional supporting background for the question. */
@@ -103,6 +116,22 @@ const toWorkers = (
       debate: Boolean(row.debate),
     };
   });
+
+const toSides = (raw: unknown): PendingResume["sides"] =>
+  Array.isArray(raw)
+    ? raw.map((s) => {
+        const row = (s ?? {}) as Record<string, unknown>;
+        return {
+          key: String(row.key ?? ""),
+          name: String(row.name ?? ""),
+          stance: String(row.stance ?? ""),
+          ...(row.is_subject ? { is_subject: true as const } : {}),
+        };
+      })
+    : [];
+
+const toPrimitive = (raw: unknown): PendingResume["primitive"] =>
+  raw === "debate" ? "debate" : "delegate";
 
 /** ask_user rich fields arrive as loose JSON dicts (backend ``list[dict]``); map
  * them to the typed display shapes the unified card reads, tolerating missing keys.
@@ -204,6 +233,12 @@ export const usePausedTurnStore = create<PausedTurnState>((set) => ({
                 (t): t is string => typeof t === "string",
               ) as string[])
             : [],
+          primitive: toPrimitive((s as { primitive?: unknown }).primitive),
+          motion: String((s as { motion?: unknown }).motion ?? ""),
+          form: String((s as { form?: unknown }).form ?? ""),
+          sides: toSides((s as { sides?: unknown }).sides),
+          maxRounds: Number((s as { max_rounds?: unknown }).max_rounds ?? 0),
+          thorough: (s as { thorough?: unknown }).thorough !== false,
           question: s.question ?? "",
           context: s.context ?? "",
           assumptions: toAssumptions(s.assumptions),

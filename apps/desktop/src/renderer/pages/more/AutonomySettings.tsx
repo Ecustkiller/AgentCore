@@ -1,9 +1,9 @@
-import { SettingsHeader } from "./SettingsHeader";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import { api } from "@/services/api";
 import { setCachedAutonomyPolicy } from "@/services/autonomyPolicy";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { SettingsHeader } from "./SettingsHeader";
 
 type AutonomyPolicy = "always_ask" | "first_grant" | "full_auto";
 
@@ -27,13 +27,13 @@ const OPTIONS: AutonomyOption[] = [
   {
     value: "full_auto",
     label: "全自动授权",
-    description: "开工卡自动授权、不列出能力项；计划确认（如有）仍会展示。",
+    description: "完全放权：不弹开工卡，能力与计划确认一并跳过。",
   },
 ];
 
 /**
  * 自主度设置（/more/autonomy）— AutonomyPolicy 三档（安全权限与治理 §三）。
- * 只管能力授权维度，不动计划确认 / checkpoint。
+ * full_auto 放行开工卡计划半边 + 能力半边；first_grant / always_ask 能力语义不变。
  */
 export function AutonomySettings() {
   const [policy, setPolicy] = useState<AutonomyPolicy | null>(null);

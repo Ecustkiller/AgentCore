@@ -18,9 +18,13 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadDeployEnv, REPO_ROOT, run } from "../../../deploy/scripts/load-deploy-env.mjs";
+import {
+  REPO_ROOT,
+  loadDeployEnv,
+  run,
+} from "../../../deploy/scripts/load-deploy-env.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const DESKTOP_DIR = join(__dir, "..");
@@ -29,7 +33,9 @@ const RELEASES_REPO = "Lawofall/AgentCore-releases";
 const skipDraft = process.argv.includes("--skip-draft");
 
 function readVersion() {
-  const pkg = JSON.parse(readFileSync(join(DESKTOP_DIR, "package.json"), "utf8"));
+  const pkg = JSON.parse(
+    readFileSync(join(DESKTOP_DIR, "package.json"), "utf8"),
+  );
   return pkg.version;
 }
 
@@ -54,7 +60,11 @@ function gh(args, { allowFail = false, capture = false } = {}) {
     process.exit(result.status ?? 1);
   }
   return capture
-    ? { ok: result.status === 0, stdout: result.stdout ?? "", stderr: result.stderr ?? "" }
+    ? {
+        ok: result.status === 0,
+        stdout: result.stdout ?? "",
+        stderr: result.stderr ?? "",
+      }
     : result.status === 0;
 }
 
@@ -75,11 +85,15 @@ function ensureGhToken() {
 
 function ensureDraftRelease(tag) {
   if (skipDraft) {
-    console.log(`→ skip draft (--skip-draft); expecting ${tag} on ${RELEASES_REPO}`);
+    console.log(
+      `→ skip draft (--skip-draft); expecting ${tag} on ${RELEASES_REPO}`,
+    );
     return;
   }
   console.log(`→ ensure draft release ${tag} on ${RELEASES_REPO}`);
-  if (gh(["release", "view", tag, "--repo", RELEASES_REPO], { allowFail: true })) {
+  if (
+    gh(["release", "view", tag, "--repo", RELEASES_REPO], { allowFail: true })
+  ) {
     console.log(`  draft/release ${tag} already exists`);
     return;
   }
@@ -114,7 +128,15 @@ function assertLocalAssets(releaseDir, version) {
 
 function uploadAndVerify(tag, version, paths) {
   console.log(`→ gh release upload ${tag} --clobber`);
-  gh(["release", "upload", tag, ...paths, "--repo", RELEASES_REPO, "--clobber"]);
+  gh([
+    "release",
+    "upload",
+    tag,
+    ...paths,
+    "--repo",
+    RELEASES_REPO,
+    "--clobber",
+  ]);
 
   const { stdout } = gh(
     ["release", "view", tag, "--repo", RELEASES_REPO, "--json", "assets"],
@@ -154,13 +176,12 @@ function main() {
     cwd: DESKTOP_DIR,
   });
   // Mac-aligned: never publish via electron-builder (avoids #6676 / #2393).
-  run("electron-builder --win --publish never", "pnpm", [
-    "exec",
-    "electron-builder",
-    "--win",
-    "--publish",
-    "never",
-  ], { cwd: DESKTOP_DIR, env: process.env });
+  run(
+    "electron-builder --win --publish never",
+    "pnpm",
+    ["exec", "electron-builder", "--win", "--publish", "never"],
+    { cwd: DESKTOP_DIR, env: process.env },
+  );
 
   const paths = assertLocalAssets(releaseDir, version);
   uploadAndVerify(tag, version, paths);
@@ -173,7 +194,9 @@ function main() {
   console.log(
     `  gh release edit ${tag} --repo ${RELEASES_REPO} --draft=false --latest`,
   );
-  console.log("Then: pnpm -C apps/website deploy:pages (FALLBACK synced by bump-version desktop)");
+  console.log(
+    "Then: pnpm -C apps/website deploy:pages (FALLBACK synced by bump-version desktop)",
+  );
 }
 
 main();

@@ -34,6 +34,7 @@ import type { TurnSummaryData } from "./TurnSummaryNode";
 import { computeKeepBrightIds, hoverRelatedIds } from "./graphHover";
 import {
   type WaveBand,
+  computeDebateStageBands,
   computeGraphFold,
   computeWaves,
   deriveCaptainStatus,
@@ -492,7 +493,13 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
   const projectedReadyKey = [...projectedByTurn.keys()].sort().join(",");
 
   // *Key strings force recompute when ref-backed turn data changes under stable deps.
-  const { layoutNodes, layoutEdges, focusedGroupOrigin, focusedWaves } =
+  const {
+    layoutNodes,
+    layoutEdges,
+    focusedGroupOrigin,
+    focusedWaves,
+    focusedDebateBands,
+  } =
     // biome-ignore lint/correctness/useExhaustiveDependencies: turnSpineKey/expandedKey/projectedReadyKey are intentional invalidation keys
     useMemo(() => {
       const turnsNow = turnsRef.current;
@@ -507,6 +514,7 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
         height: number;
       } | null = null;
       let waves: WaveBand[] = [];
+      let debateBands: WaveBand[] = [];
 
       for (const t of turnsNow) {
         const expanded = t.kind === "team" && expandedTurnSet.has(t.id);
@@ -559,6 +567,11 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
                 slice.positions,
                 slice.bbox,
                 effectiveLayoutKind,
+                cap?.id ?? null,
+              );
+              debateBands = computeDebateStageBands(
+                t.exec,
+                slice.positions,
                 cap?.id ?? null,
               );
             }
@@ -670,6 +683,7 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
         layoutEdges: outEdges,
         focusedGroupOrigin: groupOrigin,
         focusedWaves: waves,
+        focusedDebateBands: debateBands,
       };
     }, [
       turnSpineKey,
@@ -840,6 +854,19 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
     }));
   }, [focusedWaves, focusedGroupOrigin]);
 
+  const canvasDebateBands = useMemo<WaveBand[]>(() => {
+    if (!focusedGroupOrigin || focusedDebateBands.length === 0) return [];
+    const ox = focusedGroupOrigin.x + TURN_GROUP_PAD;
+    const oy = focusedGroupOrigin.y + TURN_GROUP_HEADER_H + TURN_GROUP_PAD;
+    return focusedDebateBands.map((b) => ({
+      ...b,
+      x: b.x + ox,
+      y: b.y + oy,
+      labelX: b.labelX + ox,
+      labelY: b.labelY + oy,
+    }));
+  }, [focusedDebateBands, focusedGroupOrigin]);
+
   const focusedSlice = effectiveFocus ? turnLayouts[effectiveFocus] : null;
 
   const activateCanvasNode = useCallback(
@@ -914,6 +941,7 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
     focusedExec,
     effectiveLayoutKind,
     waves: canvasWaves,
+    debateBands: canvasDebateBands,
     bbox: focusedSlice?.bbox ?? null,
     layoutKind,
     setLayoutKind,

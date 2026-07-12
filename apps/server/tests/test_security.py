@@ -42,9 +42,20 @@ def test_hash_password_is_salted():
 
 
 def test_access_token_roundtrip():
-    token = create_access_token("user-123", audience="product")
+    token = create_access_token("user-123", audience="product", family="fam-abc")
     assert decode_access_token(token) == "user-123"
     assert decode_access_token_claims(token) == ("user-123", "product")
+    from agentcore.security import decode_access_token_family
+
+    assert decode_access_token_family(token) == "fam-abc"
+
+
+def test_access_token_without_fam_still_validates():
+    token = create_access_token("user-123", audience="product")
+    assert decode_access_token(token) == "user-123"
+    from agentcore.security import decode_access_token_family
+
+    assert decode_access_token_family(token) is None
 
 
 def test_access_token_expired_is_rejected():

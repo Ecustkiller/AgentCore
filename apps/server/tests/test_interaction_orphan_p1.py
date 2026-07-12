@@ -75,7 +75,7 @@ def test_projector_accepts_timed_out_and_orphaned() -> None:
         assert draft.action == "escalate.resolved"
 
 
-def test_fold_four_hot_kinds_all_pending() -> None:
+def test_fold_three_hot_kinds_all_pending() -> None:
     entries = [
         {
             "kind": "approval_required",
@@ -107,23 +107,10 @@ def test_fold_four_hot_kinds_all_pending() -> None:
                 "assumption": "x",
             },
         },
-        {
-            "kind": "debate_round_decision_required",
-            "payload": {
-                "execution_id": "ex",
-                "moderator_run_id": "m",
-                "decision_id": "dec",
-                "round_no": 1,
-                "focus": "",
-                "summary": "s",
-                "converged": False,
-            },
-        },
     ]
     pending = fold_pending_interactions(entries)
     assert {p.kind for p in pending} == {
         "approval",
         "delegation_authorization",
         "escalation",
-        "debate_round",
     }

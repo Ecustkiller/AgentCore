@@ -6,7 +6,7 @@ to continue on its own draft (统一「续写」原语) instead of re-delegating
 worker. The :class:`~agentcore.runtime.sessions.SessionStore` holds the live roster;
 the executor's ``continue_run`` re-runs a session with an appended instruction.
 
-→ 见设计: docs/03-AI核心/多轮编排与队员热修.md §二（可恢复运行 RunSession + 续写）
+→ 见设计: docs/03-AI核心/多轮编排与同人续派.md §二（可恢复运行 RunSession + 续写）
 """
 
 from __future__ import annotations

@@ -48,14 +48,13 @@ export type RunFrame =
       // carries the wire `kind` (captain/agent).
       parentRunId: string | null;
       runKind: RunKind;
-      // 续写 version (乙 热修 P4): 0 for an ordinary run, >=2 for a revision (then
-      // parentRunId is the original run it revises).
-      revision: number;
-      // 乙 wire 携 round/stance (单一轮次投影): undefined on ordinary / hot-fix revisions.
+      /** 同人接续现场根；undefined/null = 冷开局。 */
+      continuesRunId?: string | null;
+      // 乙 wire 携 round/stance (单一轮次投影): undefined on ordinary / hot-fix starts.
       stance?: Stance;
       group?: string;
       round?: number;
-      // 冷回落接手: mid-flight `_redir` spawn; undefined/null on ordinary / revision starts.
+      // 冷回落接手: mid-flight `_redir` spawn; undefined/null on ordinary / continuation starts.
       replacesRunId?: string | null;
     }
   | {
@@ -250,7 +249,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         runId: p.run_id,
         parentRunId: p.parent_run_id,
         runKind: p.kind,
-        revision: p.revision ?? 0,
+        continuesRunId: p.continues_run_id ?? null,
         stance: p.stance,
         group: p.group,
         round: p.round,

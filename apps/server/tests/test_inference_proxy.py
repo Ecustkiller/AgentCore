@@ -380,6 +380,7 @@ def _request(model: str = "deepseek-v4-flash", *, stream: bool = False) -> LLMRe
 
 
 async def test_llm_request_from_payload_uses_server_resolved_model():
+    from agentcore.billing.call_meter import PROXY_LLM_SCENARIO
     from agentcore.llm.resolve import ModelConfig
 
     req = inference.proxy._llm_request_from_payload(
@@ -396,6 +397,7 @@ async def test_llm_request_from_payload_uses_server_resolved_model():
         ),
     )
     assert req.model == "deepseek-v4-flash"
+    assert req.scenario == PROXY_LLM_SCENARIO
 
 
 async def test_forward_unary_passes_through_and_records(monkeypatch):
@@ -413,7 +415,13 @@ async def test_forward_unary_passes_through_and_records(monkeypatch):
             json={
                 "model": "deepseek-v4-flash",
                 "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "prompt_cache_hit_tokens": 7,
+                    "prompt_cache_miss_tokens": 3,
+                    "completion_tokens_details": {"reasoning_tokens": 2},
+                },
             },
         )
 
@@ -424,10 +432,19 @@ async def test_forward_unary_passes_through_and_records(monkeypatch):
 
     assert resp.status_code == 200
     assert b'"content": "hi"' in resp.body
+    body = json.loads(resp.body)
+    usage = body["usage"]
+    assert usage["prompt_tokens"] == 10
+    assert usage["completion_tokens"] == 5
+    assert usage["prompt_cache_hit_tokens"] == 7
+    assert usage["prompt_cache_miss_tokens"] == 3
+    assert usage["completion_tokens_details"]["reasoning_tokens"] == 2
     assert len(spend) == 1
     assert spend[0]["conversation_id"] == "c1"
     assert spend[0]["model"] == "deepseek-v4-flash"
     assert spend[0]["usage"].output_tokens == 5
+    assert spend[0]["usage"].cache_hit_tokens == 7
+    assert spend[0]["usage"].reasoning_tokens == 2
 
 
 async def test_forward_unary_passes_error_status_through(monkeypatch):
@@ -463,7 +480,9 @@ async def test_forward_stream_relays_and_records(monkeypatch):
             yield b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
             yield (
                 b'data: {"choices":[{"delta":{}}],'
-                b'"usage":{"prompt_tokens":10,"completion_tokens":5},'
+                b'"usage":{"prompt_tokens":10,"completion_tokens":5,'
+                b'"prompt_cache_hit_tokens":7,"prompt_cache_miss_tokens":3,'
+                b'"completion_tokens_details":{"reasoning_tokens":2}},'
                 b'"model":"deepseek-v4-flash"}\n\n'
             )
             yield b"data: [DONE]\n\n"
@@ -482,9 +501,14 @@ async def test_forward_stream_relays_and_records(monkeypatch):
     # The content delta + DONE sentinel are relayed verbatim to the sidecar.
     assert '"content": "hi"' in collected or '"content":"hi"' in collected
     assert "[DONE]" in collected
+    assert '"prompt_cache_hit_tokens": 7' in collected or '"prompt_cache_hit_tokens":7' in collected
+    assert '"prompt_cache_miss_tokens": 3' in collected or '"prompt_cache_miss_tokens":3' in collected
+    assert '"reasoning_tokens": 2' in collected or '"reasoning_tokens":2' in collected
     # The final usage chunk is teed → spend recorded once, after the stream ends.
     assert len(spend) == 1
     assert spend[0]["usage"].output_tokens == 5
+    assert spend[0]["usage"].cache_hit_tokens == 7
+    assert spend[0]["usage"].reasoning_tokens == 2
     assert spend[0]["model"] == "deepseek-v4-flash"
 
 

@@ -260,7 +260,6 @@ async def send_message(
             InteractionKind.APPROVAL,
             InteractionKind.DELEGATION_AUTHORIZATION,
             InteractionKind.ESCALATION,
-            InteractionKind.DEBATE_ROUND,
         }
     )
     hot_pending = [
@@ -282,7 +281,7 @@ async def send_message(
             },
         )
 
-    needs_tools = body.requires_tools or body.debate_seed is not None
+    needs_tools = body.requires_tools
     preflight = await _preflight_owned_chat_turn(
         conversation_id, user, session, needs_tools=needs_tools
     )
@@ -299,7 +298,6 @@ async def send_message(
             sink=sink,
             attachments=[a.model_dump() for a in body.attachments],
             llm_credentials=preflight.credentials,
-            debate_seed=body.debate_seed.model_dump() if body.debate_seed else None,
             llm_supports_tools=preflight.supports_tools,
             x_client_platform=x_client_platform,
         )

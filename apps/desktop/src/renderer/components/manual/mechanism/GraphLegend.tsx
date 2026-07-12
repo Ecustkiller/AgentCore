@@ -24,17 +24,21 @@ function IconChip({ children }: { children: ReactNode }) {
 function EdgeSample({
   variant,
 }: {
-  variant: "dep" | "delegate" | "revision" | "running";
+  variant: "dep" | "delegate" | "continuation" | "running";
 }) {
   const stroke =
     variant === "running" ? "var(--primary)" : "var(--muted-foreground)";
   const dash =
-    variant === "revision" ? "2 4" : variant === "delegate" ? "5 4" : undefined;
+    variant === "continuation"
+      ? "2 4"
+      : variant === "delegate"
+        ? "5 4"
+        : undefined;
   const opacity = variant === "running" ? 1 : variant === "dep" ? 0.6 : 0.45;
   const label = {
     dep: "实线依赖边",
     delegate: "虚线委派边",
-    revision: "点线修订边",
+    continuation: "点线接续边",
     running: "运行中粒子边",
   }[variant];
   return (
@@ -122,7 +126,7 @@ export function GraphLegend() {
             </IconChip>
           }
           name="你的任务"
-          desc="本回合 prompt，无 run 的合成端点；点它跳回完整提问。"
+          desc="本回合你说的那句话；点它跳回完整提问。"
         />
         <LegendRow
           sample={
@@ -130,8 +134,8 @@ export function GraphLegend() {
               <Bot size={16} className="text-muted-foreground" />
             </IconChip>
           }
-          name="worker 节点"
-          desc="一个 worker run：角色 → 在干什么 → 用时 / 工具。"
+          name="队员节点"
+          desc="一位队员：角色 → 在干什么 → 用时 / 工具。"
         />
         <LegendRow
           sample={
@@ -140,30 +144,30 @@ export function GraphLegend() {
             </IconChip>
           }
           name="CEO 汇总"
-          desc="captain 根 run（汇聚点），状态全队派生，答案入气泡。"
+          desc="汇聚点：全队状态汇总到这里，最终答案也从这里进气泡。"
         />
       </LegendGroup>
 
       <LegendGroup title="状态（节点色环）">
         <LegendRow
           sample={<Bot size={18} className="text-muted-foreground" />}
-          name="等待中 pending"
-          desc="未解锁或排队中，灰环。"
+          name="等待中"
+          desc="还没轮到或在排队，灰环。"
         />
         <LegendRow
           sample={<Loader2 size={18} className="animate-spin text-primary" />}
-          name="执行中 running"
-          desc="正在跑，primary 环 + 脉冲，入边走粒子流。"
+          name="执行中"
+          desc="正在干，蓝环 + 脉冲，入边走粒子。"
         />
         <LegendRow
           sample={<CheckCircle2 size={18} className="text-success" />}
-          name="已完成 completed"
-          desc="success 环，进终态闪烁一次。"
+          name="已完成"
+          desc="绿环，完成时闪一下。"
         />
         <LegendRow
           sample={<XCircle size={18} className="text-destructive" />}
-          name="失败 failed"
-          desc="destructive 环；按 on_failure 处理，不必拖垮全 DAG。"
+          name="失败"
+          desc="红环；一个人挂了不必拖垮整队。"
         />
       </LegendGroup>
 
@@ -171,22 +175,22 @@ export function GraphLegend() {
         <LegendRow
           sample={<EdgeSample variant="dep" />}
           name="依赖（实线）"
-          desc="depends_on——并行 / 串行的唯一开关。"
+          desc="先后关系：无依赖可同时干，有依赖就等上游。"
         />
         <LegendRow
           sample={<EdgeSample variant="delegate" />}
           name="委派（虚线）"
-          desc="can_delegate：captain worker → 子 worker（一层）。"
+          desc="队长再带小队时的委派线。"
         />
         <LegendRow
-          sample={<EdgeSample variant="revision" />}
-          name="修订（点线）"
-          desc="原 run → 「修订 vN」续写，是版本不是新队员。"
+          sample={<EdgeSample variant="continuation" />}
+          name="接续（点线）"
+          desc="同一人带现场接着干（「续 ×N」），不是新队员。"
         />
         <LegendRow
           sample={<EdgeSample variant="running" />}
           name="运行中（粒子流）"
-          desc="run_output 流式：粒子由上游流向运行中节点。"
+          desc="上游产出正往正在干活的节点流。"
         />
       </LegendGroup>
 
@@ -199,7 +203,7 @@ export function GraphLegend() {
             </span>
           }
           name="模型档"
-          desc="强力档 / 快速档（model_preference 的 fast·strong 抽象）。"
+          desc="强力档 / 快速档——CEO 表达的能力需求偏好。"
         />
         <LegendRow
           sample={
@@ -209,7 +213,7 @@ export function GraphLegend() {
             </span>
           }
           name="深度思考"
-          desc="reasoning_effort = max，最强推理强度。"
+          desc="最强推理强度。"
         />
         <LegendRow
           sample={
@@ -219,7 +223,7 @@ export function GraphLegend() {
             </span>
           }
           name="子任务"
-          desc="嵌套委派的子 worker（parent 是另一个 worker）。"
+          desc="嵌套小队里的子队员。"
         />
         <LegendRow
           sample={
@@ -229,7 +233,7 @@ export function GraphLegend() {
             </span>
           }
           name="热修修订 vN"
-          desc="定向唤回：铅笔 + 版本号；卡片面优先露出改点（按指示：…）。"
+          desc="定向唤回改稿：铅笔 + 版本号；卡片优先露出改点。"
         />
         <LegendRow
           sample={
@@ -238,7 +242,7 @@ export function GraphLegend() {
             </span>
           }
           name="第 N 轮"
-          desc="辩论续轮角标（与侧栏轮次轨一致），不再标成热修修订。"
+          desc="辩论续轮角标（与侧栏轮次轨一致），不是热修修订。"
         />
         <LegendRow
           sample={
@@ -247,7 +251,7 @@ export function GraphLegend() {
             </span>
           }
           name="辩论立场"
-          desc="stance 正方 / 反方，ELK 分带对置后汇聚裁决。"
+          desc="正方 / 反方，图上左右对置后汇到裁决。"
         />
       </LegendGroup>
     </div>

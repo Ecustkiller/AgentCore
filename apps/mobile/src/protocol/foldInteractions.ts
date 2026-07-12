@@ -135,28 +135,6 @@ export function foldInteractions(
         if (id) settle(map, "escalation", id, "resolved");
         break;
       }
-      case "debate_round_decision_required": {
-        const id = str(p.decision_id);
-        if (!id) break;
-        upsert(map, order, {
-          kind: "debate_round",
-          id,
-          status: "pending",
-          executionId: str(p.execution_id),
-          moderatorRunId: str(p.moderator_run_id),
-          roundNo: typeof p.round_no === "number" ? p.round_no : 0,
-          focus: str(p.focus),
-          summary: str(p.summary),
-          converged: Boolean(p.converged),
-          rationale: str(p.rationale),
-        });
-        break;
-      }
-      case "debate_round_decision_resolved": {
-        const id = str(p.decision_id);
-        if (id) settle(map, "debate_round", id, "resolved");
-        break;
-      }
       case "checkpoint_required": {
         const id = str(p.checkpoint_id);
         if (!id) break;

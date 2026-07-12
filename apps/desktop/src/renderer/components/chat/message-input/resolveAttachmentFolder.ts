@@ -35,9 +35,7 @@ export function resolveFolderFromIndexedEntry(
     const folder = getFolders().find(
       (f) => f.mode === "local" && f.localRootId === rootId,
     );
-    return folder
-      ? { folderId: folder.id, folderName: folder.name }
-      : null;
+    return folder ? { folderId: folder.id, folderName: folder.name } : null;
   }
 
   return null;

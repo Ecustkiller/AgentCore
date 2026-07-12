@@ -144,15 +144,15 @@ export async function computeLayout(
 
   const subTeamByParent = new Map(subTeams.map((st) => [st.parentId, st]));
 
-  // Revision chains (原始 → v2 → v3…): a sub-team member's continuation rounds
+  // Continuation chains (原始 → 续×1 → 续×2…): a sub-team member's continuation rounds
   // (辩论/圆桌逐轮). They must share the SAME compound as their source so the box
-  // wraps the whole debate matrix — otherwise ELK lays each revision out in a
+  // wraps the whole debate matrix — otherwise ELK lays each continuation out in a
   // top-level layer OUTSIDE the box, drawing a long escape edge and a phantom gap
   // instead of the tight 参与者×轮次 grid the compound gives.
   const revisionSuccessors = new Map<string, string[]>();
   const revisionSourceOf = new Map<string, string>();
   for (const e of edges) {
-    if (e.kind !== "revision") continue;
+    if (e.kind !== "continuation") continue;
     const arr = revisionSuccessors.get(e.source);
     if (arr) arr.push(e.target);
     else revisionSuccessors.set(e.source, [e.target]);
@@ -590,8 +590,8 @@ type ShapeRun = {
   dependsOn: string[];
   parentRunId?: string | null;
   kind?: string;
-  revision?: number;
-  revisionOf?: string | null;
+  continuationIndex?: number;
+  continuesRunId?: string | null;
   stance?: string | null;
   group?: string | null;
   /** 辩论 beat 折叠：有 channel=cross_exam 的列不计入首帧深度。 */
@@ -599,9 +599,7 @@ type ShapeRun = {
 };
 
 function isDebateRun(r: ShapeRun): boolean {
-  return (
-    r.stance != null || (r.group != null && r.group.startsWith("debate:"))
-  );
+  return r.stance != null || !!r.group?.startsWith("debate:");
 }
 
 function isCrossExamShapeRun(r: ShapeRun): boolean {
@@ -616,7 +614,10 @@ function isCrossExamShapeRun(r: ShapeRun): boolean {
  * to parallelism=1 (the compound unit) was the first-paint under-estimate; derive
  * lane count + round columns from revision roots (质询折进轮节点，不计独立列).
  */
-function debateGraphShape(workers: ShapeRun[], ids: Set<string>): GraphShape | null {
+function debateGraphShape(
+  workers: ShapeRun[],
+  ids: Set<string>,
+): GraphShape | null {
   if (!workers.some(isDebateRun)) return null;
 
   const byId = new Map(workers.map((r) => [r.id, r]));
@@ -626,8 +627,8 @@ function debateGraphShape(workers: ShapeRun[], ids: Set<string>): GraphShape | n
     while (!seen.has(cur)) {
       seen.add(cur);
       const r = byId.get(cur);
-      if (!r?.revisionOf || !ids.has(r.revisionOf)) break;
-      cur = r.revisionOf;
+      if (!r?.continuesRunId || !ids.has(r.continuesRunId)) break;
+      cur = r.continuesRunId;
     }
     return cur;
   };
@@ -635,12 +636,12 @@ function debateGraphShape(workers: ShapeRun[], ids: Set<string>): GraphShape | n
   const laneRoots = new Set<string>();
   for (const w of workers) {
     if (!isDebateRun(w)) continue;
-    if ((w.revision ?? 0) > 0 && w.revisionOf) continue;
+    if (w.continuesRunId) continue;
     // Moderator carries debate: group too, but is the compound parent — not a lane.
-    // Only count as mod when it parents *original* debaters (not revision chains).
+    // Only count as mod when it parents *original* debaters (not continuation chains).
     const isModerator = workers.some((c) => {
       if (c.parentRunId !== w.id || c.id === w.id) return false;
-      if ((c.revision ?? 0) > 0 || c.revisionOf) return false;
+      if (c.continuesRunId) return false;
       return isDebateRun(c);
     });
     if (isModerator) continue;
@@ -660,7 +661,7 @@ function debateGraphShape(workers: ShapeRun[], ids: Set<string>): GraphShape | n
     for (const w of workers) {
       if (w.id === modId) continue;
       if (w.parentRunId !== modId) continue;
-      if ((w.revision ?? 0) > 0 || w.revisionOf) continue;
+      if (w.continuesRunId) continue;
       laneRoots.add(w.id);
     }
   }
@@ -669,8 +670,7 @@ function debateGraphShape(workers: ShapeRun[], ids: Set<string>): GraphShape | n
   let beatCols = 1;
   for (const rootId of laneRoots) {
     const colCount = workers.filter(
-      (w) =>
-        revisionRootOf(w.id) === rootId && !isCrossExamShapeRun(w),
+      (w) => revisionRootOf(w.id) === rootId && !isCrossExamShapeRun(w),
     ).length;
     beatCols = Math.max(beatCols, colCount);
   }
@@ -774,8 +774,11 @@ export function estimateBbox(
   const { depth, parallelism, compoundLanes } = shape;
   const within = (n: number, size: number) =>
     n * size + (n - 1) * nodeSpacing + 2 * PADDING;
-  const across = (n: number, size: number, gap: number = LAYER_SPACING[layout]) =>
-    n * size + (n - 1) * gap + 2 * PADDING;
+  const across = (
+    n: number,
+    size: number,
+    gap: number = LAYER_SPACING[layout],
+  ) => n * size + (n - 1) * gap + 2 * PADDING;
   // Debate compound: root pad + box (compound chrome + lane stack). Matches
   // computeLayout's INCLUDE_CHILDREN group height, not a flat NODE_HEIGHT slot.
   const compoundCross =

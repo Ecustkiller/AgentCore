@@ -16,8 +16,7 @@
         "run_id": "c1",
         "agent_id": "c1",
         "parent_run_id": null,
-        "kind": "captain",
-        "revision": 0
+        "kind": "captain"
       },
       "timestamp": "2026-01-01T00:00:00.001Z"
     },

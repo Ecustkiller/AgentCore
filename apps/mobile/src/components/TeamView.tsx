@@ -198,6 +198,7 @@ export function TeamView({
             run={run}
             agent={agents.find((a) => a.id === run.agentId)}
             depth={depthOf(run)}
+            continuationIndex={continuationIndexOf(workers, run)}
             conversationId={conversationId}
             pendingEscalationId={
               escalationsInteractive
@@ -298,14 +299,22 @@ function TeamNotesWall({
   );
 }
 
-/** The status / role pills on a run (stance / 修订 vN / 计划已调整 / 子任务 / checkpoint / 上报),
+/** The status / role pills on a run (stance / 续 ×N / 计划已调整 / 子任务 / checkpoint / 上报),
  *  shared by the {@link RunCard} peek and the {@link RunDetailPanel} header so the two read the
  *  same. `isChild` (a delegated sub-task) is passed in — the card knows it from graph depth, the
  *  panel from the run's parent. Renders nothing when the run has no pill. */
-function RunPills({ run, isChild }: { run: ProjectedRun; isChild: boolean }) {
+function RunPills({
+  run,
+  isChild,
+  continuationIndex = 0,
+}: {
+  run: ProjectedRun;
+  isChild: boolean;
+  continuationIndex?: number;
+}) {
   const hasPill =
     run.stance ||
-    run.revision >= 2 ||
+    continuationIndex >= 1 ||
     run.revised ||
     isChild ||
     run.checkpoint ||
@@ -318,24 +327,31 @@ function RunPills({ run, isChild }: { run: ProjectedRun; isChild: boolean }) {
           {run.stance === "pro" ? "正方" : "反方"}
         </span>
       )}
-      {run.revision >= 2 && (
-        <span className="run-pill">修订 v{run.revision}</span>
+      {continuationIndex >= 1 && (
+        <span className="run-pill">续 ×{continuationIndex}</span>
       )}
       {/* 「计划已调整」轻痕迹 (设计 §7.2): the CEO autonomously re-bound (bind) / re-steered
           (steer) this node mid-flight — a non-interrupting cue mirroring the desktop node badge. */}
       {run.revised && <span className="run-pill">计划已调整</span>}
       {isChild && <span className="run-pill">子任务</span>}
+      {/* 拍板类不用琥珀（2026-07 拍板）：pending「需要你」= 蓝 pill-act，已决记录 = 中性
+          run-pill（对齐桌面 checkpointBadge：pending primary / settled muted）。 */}
       {run.checkpoint && (
-        <span className="run-pill pill-warn">
+        <span
+          className={`run-pill${run.checkpoint.status === "pending" ? " pill-act" : ""}`}
+        >
           {run.checkpoint.status === "pending"
             ? "待放行"
             : checkpointLabel(run.checkpoint.decision)}
         </span>
       )}
       {/* 升级实时可见: a worker flagged a blocker for the CEO — a 待裁决 cue mirroring the desktop
-          node ⚠️ badge; the full ask renders below / in the panel. */}
+          node ⚠️ badge; the full ask renders below / in the panel. Pending = 蓝（待你拍板），
+          其余（已答复 / 按假设 / 非阻塞上报）= 中性记录. */}
       {run.escalations.length > 0 && (
-        <span className="run-pill pill-warn">
+        <span
+          className={`run-pill${run.escalations.some((e) => e.status === "pending") ? " pill-act" : ""}`}
+        >
           上报{run.escalations.length > 1 ? ` ${run.escalations.length}` : ""}
         </span>
       )}
@@ -347,6 +363,7 @@ function RunCard({
   run,
   agent,
   depth,
+  continuationIndex = 0,
   conversationId,
   pendingEscalationId,
   workerToolPhase,
@@ -355,6 +372,7 @@ function RunCard({
   run: ProjectedRun;
   agent: ProjectedAgent | undefined;
   depth: number;
+  continuationIndex?: number;
   conversationId: string | null;
   /** The run's pending blocking escalation id (set only on a live turn) → answer card. */
   pendingEscalationId: string | undefined;
@@ -389,7 +407,11 @@ function RunCard({
           <span className="run-name">{name}</span>
           <span className={`run-badge badge-${st.tone}`}>{st.label}</span>
         </div>
-        <RunPills run={run} isChild={depth > 0} />
+        <RunPills
+          run={run}
+          isChild={depth > 0}
+          continuationIndex={continuationIndex}
+        />
         {run.task && <div className="run-task">{run.task}</div>}
         {preview && <div className="run-preview">{preview}</div>}
         {run.error && <div className="run-error">{run.error}</div>}
@@ -537,26 +559,27 @@ interface RevisionVersion {
   run: ProjectedRun;
 }
 
-/** 修订/轮次链 (同链版本从 runs 数组聚合): the version chain containing `runId`, or null when the
- *  run is a lone version (no chain to show). A revision points at the ORIGINAL (star model), so the
- *  chain is [v1 原始, …续写 by ascending version]; a debate reads 第 N 轮 off `round`, a 热修 vN off
- *  `revision`. Mirrors the desktop `revisionChains` projection (built here from the run slice). */
+/** 同根接续链上的序号（1-based）；非接续为 0。 */
+function continuationIndexOf(runs: ProjectedRun[], run: ProjectedRun): number {
+  if (run.continuesRunId == null) return 0;
+  const siblings = runs.filter((r) => r.continuesRunId === run.continuesRunId);
+  const i = siblings.findIndex((r) => r.id === run.id);
+  return i >= 0 ? i + 1 : 1;
+}
 function revisionChainFor(
   runs: ProjectedRun[],
   runId: string,
 ): RevisionVersion[] | null {
   const run = runs.find((r) => r.id === runId);
   if (!run) return null;
-  const originalId = run.revisionOf ?? run.id;
+  const originalId = run.continuesRunId ?? run.id;
   const original = runs.find((r) => r.id === originalId);
   if (!original) return null;
-  const revisions = runs
-    .filter((r) => r.revisionOf === originalId)
-    .sort((a, b) => a.revision - b.revision);
-  if (revisions.length === 0) return null;
+  const continuations = runs.filter((r) => r.continuesRunId === originalId);
+  if (continuations.length === 0) return null;
   return [
     { version: 1, run: original },
-    ...revisions.map((r) => ({ version: r.revision, run: r })),
+    ...continuations.map((r, i) => ({ version: i + 2, run: r })),
   ];
 }
 
@@ -588,12 +611,12 @@ function RunDetailPanel({
   const name = run.role ?? agent?.role ?? run.agentId;
   const reasoning = agent?.reasoning ?? "";
   const output = agent?.output ?? "";
-  const isChild = run.parentRunId != null && run.revisionOf == null;
+  const isChild = run.parentRunId != null && run.continuesRunId == null;
 
-  // 本轮焦点: a 续写 run (辩论逐轮 / 定向唤回) was fed round-scoped context — show its 本轮焦点 in
+  // 本轮焦点: a 续写 run (辩论逐轮 / 同人接续) was fed round-scoped context — show its 本轮焦点 in
   // place of the (inherited) task, mirroring the desktop RunDetail.
   const roundFocus =
-    run.revisionOf != null
+    run.continuesRunId != null
       ? run.receivedContext.find((b) => b.channel === "round_focus")?.body
       : undefined;
 
@@ -612,11 +635,11 @@ function RunDetailPanel({
     .filter((r): r is ProjectedRun => r != null);
   const downstream = runs.filter((r) => r.dependsOn.includes(run.id));
   const parent =
-    run.parentRunId != null && run.revisionOf == null
+    run.parentRunId != null && run.continuesRunId == null
       ? (runs.find((r) => r.id === run.parentRunId) ?? null)
       : null;
   const children = runs.filter(
-    (r) => r.parentRunId === run.id && r.revisionOf == null,
+    (r) => r.parentRunId === run.id && r.continuesRunId == null,
   );
   const roleOf = (r: ProjectedRun): string =>
     r.role ?? agents.find((a) => a.id === r.agentId)?.role ?? r.agentId;
@@ -650,20 +673,26 @@ function RunDetailPanel({
         </button>
       </header>
       <div className="rd-body">
-        <RunPills run={run} isChild={isChild} />
+        <RunPills
+          run={run}
+          isChild={isChild}
+          continuationIndex={continuationIndexOf(runs, run)}
+        />
 
         <RunSection title={roundFocus != null ? "本轮焦点" : "任务"}>
           <Markdown content={roundFocus ?? run.task} evidence />
         </RunSection>
 
         {chain && (
-          <RunSection title={isDebateChain ? "轮次" : "版本"}>
+          <RunSection title={isDebateChain ? "轮次" : "接续"}>
             <div className="rd-chain">
               {chain.map(({ version, run: v }) => {
                 const current = v.id === run.id;
                 const label = isDebateChain
                   ? `第 ${v.round || version} 轮`
-                  : `v${version}`;
+                  : version === 1
+                    ? "现场"
+                    : `续 ×${version - 1}`;
                 return (
                   <button
                     key={v.id}

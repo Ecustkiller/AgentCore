@@ -58,35 +58,6 @@ class StoredAttachment(BaseModel):
     thumb_path: str | None = None
 
 
-class DebateSeedRoundInput(BaseModel):
-    """One prior-debate round's digest (结构化补轮·B seed)."""
-
-    round_no: int = 0
-    focus: str = Field("", max_length=2000)
-    summary: str = Field("", max_length=8000)
-
-
-class DebateSeedBriefInput(BaseModel):
-    """The prior debate's brief digest carried in a 续辩 seed (no 辩手全文)."""
-
-    crux: str = Field("", max_length=8000)
-    strongest_points: dict[str, str] = Field(default_factory=dict)
-    leaning: str = Field("", max_length=8000)
-    value_disputes: list[str] = Field(default_factory=list, max_length=40)
-    open_questions: list[str] = Field(default_factory=list, max_length=40)
-
-
-class DebateSeedInput(BaseModel):
-    """结构化补轮·B（可逆叫停）：前端从收场卡发起续辩时，把上一场 ``debate_result`` 投影成的最小
-    种子（辩论编排设计.md §6.6）。后端据此让本回合的 debate 续上一场（主持人焦点
-    正交于已谈、首轮辩手读到上一场摘要）。只带过程摘要 + 简报关键项，**不带辩手全文**（全文随辩手
-    run 走执行事件，体量大）。"""
-
-    motion: str = Field("", max_length=8000)
-    rounds: list[DebateSeedRoundInput] = Field(default_factory=list, max_length=40)
-    brief: DebateSeedBriefInput = Field(default_factory=DebateSeedBriefInput)
-
-
 class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=32000)
     attachments: list[MessageAttachment] = Field(default_factory=list, max_length=20)
@@ -94,9 +65,6 @@ class SendMessageRequest(BaseModel):
     # conversation state (``Conversation.local_container_root_id``, set at creation and
     # read by every promotion path), so a 裸聊 promotes to the same place whether the
     # turn or a panel write lands first (工作区对称化 D1a).
-    # 结构化补轮·B (可逆叫停): a 续辩 turn started from a settled debate card carries the prior
-    # debate's projected result so this turn's debate continues it. None for an ordinary turn.
-    debate_seed: DebateSeedInput | None = None
     # Soft gate: set when this turn is expected to call orchestration tools (delegate/debate).
     # Triggers a preflight warning (not a block) when probe recorded supports_tools=false.
     requires_tools: bool = False
@@ -210,34 +178,6 @@ class ResolveEscalationInteraction(BaseModel):
     use_assumption: bool = False
 
 
-class ResolveDebateRoundInteraction(BaseModel):
-    """Settle an interactive debate round boundary (``debate_round`` interaction, 逐轮交互).
-
-    Raised when a ``debate(interactive=true)`` Moderator paused at a round boundary so the user
-    can steer depth instead of letting the judge auto-converge. ``decision`` is ``continue``
-    (debate another round — ``focus``, if given, overrides the next round's framing = 「加角度」,
-    steering the debate onto the dimension the user cares about) or ``conclude`` (stop now and
-    emit the brief, even if the judge had not converged).
-
-    ``ask`` is an optional user 【追问】 — orthogonal to ``focus`` (focus reframes the round's
-    topic; ask is a concrete question the next round's debaters MUST answer head-on). ``ask_target``
-    optionally directs it at one side (a :class:`DebateSide` key; empty = ask everyone). A follow-up
-    rides a ``continue`` (追问即续辩, the next round addresses it); it is recorded verbatim as a
-    :class:`~agentcore.runtime.debate.types.UserInterjection` on that round and survives reload via
-    ``debate_result.rounds[*].user_interjections``.
-
-    A late resolve (the round already timed out → judge auto-convergence took over) falls through
-    the route as 404, so the desktop renders it as「已关闭」rather than an error. In-process only
-    (not durably persisted): a disconnect / restart drops the live debate, so there is no
-    ``resume`` counterpart.
-    """
-
-    kind: Literal["debate_round"] = "debate_round"
-    decision: Literal["continue", "conclude"] = "continue"
-    focus: str = Field("", max_length=2000)
-    ask: str = Field("", max_length=2000)
-    ask_target: str = Field("", max_length=200)
-
 
 # Discriminated union body for the unified resolve endpoint.
 ResolveInteractionRequest = (
@@ -245,7 +185,6 @@ ResolveInteractionRequest = (
     | ResolveDelegationAuthorizationInteraction
     | ResolveClientToolInteraction
     | ResolveEscalationInteraction
-    | ResolveDebateRoundInteraction
 )
 
 
@@ -279,15 +218,7 @@ def interaction_result_from_body(body: ResolveInteractionRequest) -> Any:
         # 阻塞式求决策: the escalate channel awaits {answer} | {use_assumption}; 按假设继续
         # is an early timeout (the worker falls back to its assumption).
         return {"answer": body.answer, "use_assumption": body.use_assumption}
-    if isinstance(body, ResolveDebateRoundInteraction):
-        # 逐轮交互: the round-boundary hook awaits {decision, focus, ask, ask_target}; conclude
-        # stops now, continue (+ optional focus=加角度 / ask=追问) debates another round.
-        return {
-            "decision": body.decision,
-            "focus": body.focus,
-            "ask": body.ask,
-            "ask_target": body.ask_target,
-        }
+
     raise ValueError(f"unknown interaction kind: {getattr(body, 'kind', None)!r}")
 
 
@@ -306,6 +237,27 @@ class SubmitRunRedirectRequest(BaseModel):
 class SubmitRunRedirectResponse(BaseModel):
     ok: bool = True
     queued: int = Field(..., description="Pending redirect count for this execution after enqueue.")
+
+
+class SubmitDebateSteerRequest(BaseModel):
+    """Ambient debate steer — fire-and-forget boss intervention (辩论编排设计.md §六).
+
+    Queued while ``debate`` drives; the Moderator drains at the next round boundary
+    (non-blocking). ``decision=continue`` (+ optional ``focus``/``ask``) folds into the
+    existing pending_interjections / focus_override path; ``conclude`` stops at that
+    boundary (current round finishes first — never mid-generation).
+    """
+
+    execution_id: str = Field(..., min_length=1, max_length=128)
+    decision: Literal["continue", "conclude"] = "continue"
+    focus: str = Field("", max_length=2000)
+    ask: str = Field("", max_length=2000)
+    ask_target: str = Field("", max_length=200)
+
+
+class SubmitDebateSteerResponse(BaseModel):
+    ok: bool = True
+    queued: int = Field(..., description="Pending steer count for this execution after enqueue.")
 
 
 class AcceptRunOutcomeRequest(BaseModel):
@@ -364,7 +316,7 @@ class PendingInteractionSummary(BaseModel):
     original ``*_required`` wire payload verbatim. Cold-path pauses stay in ``paused``.
     """
 
-    kind: Literal["approval", "delegation_authorization", "escalation", "debate_round"]
+    kind: Literal["approval", "delegation_authorization", "escalation"]
     id: str
     message_id: str
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -389,12 +341,12 @@ class PausedTurnSummary(BaseModel):
     reuse, so an optimistic bubble reconciles cleanly.
 
     plan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the
-    gated downstream); team_preview (开工卡) carries ``workers`` (upcoming roles /
-    tasks / deps) + ``tools`` (grantable capabilities for this delegation); ask_user
-    carries the unified card payload ``question`` (the framing / opening line) +
-    ``context`` + the optional opening content ``assumptions`` / ``questions`` /
-    ``style_options`` (empty for a compact mid-task fork). The unused set is empty
-    for the other kinds.
+    gated downstream); team_preview (开工卡) carries ``primitive`` (``delegate`` /
+    ``debate``) + ``workers`` / ``tools`` (delegate) or ``motion`` / ``sides`` /
+    ``max_rounds`` / ``thorough`` (debate); ask_user carries the unified card payload
+    ``question`` (the framing / opening line) + ``context`` + the optional opening
+    content ``assumptions`` / ``questions`` / ``style_options`` (empty for a compact
+    mid-task fork). The unused set is empty for the other kinds.
     """
 
     message_id: str
@@ -409,6 +361,12 @@ class PausedTurnSummary(BaseModel):
     # team_preview (开工卡)
     workers: list[dict[str, Any]] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list)
+    primitive: str = "delegate"
+    motion: str = ""
+    form: str = ""
+    sides: list[dict[str, Any]] = Field(default_factory=list)
+    max_rounds: int = 0
+    thorough: bool = True
     # ask_user
     question: str = ""
     context: str = ""
@@ -429,7 +387,7 @@ class TurnRecoveryResponse(BaseModel):
     - ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and
       lost their live stream (结构化挂起 2b) — each renders a resume card.
     - ``pending_interactions``: hot-path interactions still awaiting settlement
-      (journal fold: approval / delegation_authorization / escalation / debate_round).
+      (journal fold: approval / delegation_authorization / escalation).
       Cold-path stays in ``paused``.
     """
 

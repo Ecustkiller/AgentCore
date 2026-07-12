@@ -63,12 +63,12 @@ _NO_NEW = {
 _DEFAULT_BRIEF = {
     "crux": "做不做 X 的核心权衡",
     "strongest_points": {"pro": "正方最强论点", "con": "反方最强论点"},
-    "factual_disputes": ["X 的成本到底多少"],
     "value_disputes": ["你更看重速度还是稳妥"],
+    "factual_disputes": ["X 的成本到底多少"],
     "leaning": "基于事实反方略稳",
     "confidence": "中（若你更看重速度则正方成立）",
     "recommendation": "先小步验证再决定",
-    "open_questions": ["你的风险偏好是什么"],
+    "open_questions": ["灰度窗口外的政策会不会变"],
 }
 
 
@@ -125,7 +125,7 @@ class _ScriptedLLM:
 class _RecordingCrossExam:
     """假 CrossExamRunner：记录每次被调，返回各方对质询的（成功）作答。
 
-    ``fail`` 模拟作答失败（ok=False）；返回顺序即 ``questions`` 的插入序（与真实实现按 sides 声明序
+    ``fail`` 模拟作答失败（answer 空）；返回顺序即 ``questions`` 的插入序（与真实实现按 sides 声明序
     一致的近似），供断言 cross_exam 落进 RoundResult 且喂进裁判记分。
     """
 
@@ -142,7 +142,6 @@ class _RecordingCrossExam:
                     CrossExamQa(
                         question=q,
                         answer="" if self.fail else f"对「{key}」质询「{q}」的正面回答",
-                        ok=not self.fail,
                     )
                     for q in qs
                 ],
@@ -509,7 +508,8 @@ def test_dual_products_present():
     # 结论产物
     assert result.brief.crux
     assert result.brief.strongest_points == {"pro": "正方最强论点", "con": "反方最强论点"}
-    assert result.brief.factual_disputes and result.brief.value_disputes
+    kinds = {h.kind for h in result.brief.handoffs}
+    assert "fact" in kinds and "value" in kinds
     assert result.brief.recommendation
     # 过程产物（叙事线）
     assert all(r.summary for r in result.rounds)  # L1
@@ -693,7 +693,7 @@ def test_round_boundary_continue_overrides_convergence_with_focus():
 
 
 def test_round_boundary_continue_without_focus_uses_auto_frame():
-    """CONTINUE 但不带焦点 → 下一轮回落主持人自动定焦点（_frame 照常被调）。"""
+    """CONTINUE 但不带焦点，且上轮 verdict 无 next_focus（收敛判）→ 下一轮回落主持人 _frame。"""
     decisions = [
         RoundBoundary(decision=RoundDecision.CONTINUE),  # 不加角度
         RoundBoundary(decision=RoundDecision.CONCLUDE),
@@ -707,9 +707,81 @@ def test_round_boundary_continue_without_focus_uses_auto_frame():
     result = _run_interactive(llm, runner, _config(policy=RoundPolicy(max_rounds=5)), boundary)
 
     assert len(result.rounds) == 2
-    # 两轮都走主持人自动定焦点（_frame 各调一次），焦点为「焦点1」「焦点2」。
+    # 上轮收敛 verdict 无 next_focus → 两轮都走 _frame，焦点为「焦点1」「焦点2」。
     assert llm.frame_calls == 2
     assert [c["focus"] for c in runner.calls] == ["焦点1", "焦点2"]
+
+
+# --- assess 兼产 next_focus（真去重）：焦点优先级 focus_override > next_focus > _frame --------
+
+
+def test_assess_next_focus_adopted_on_next_round():
+    """未收敛时 assess 产出的 next_focus 被下一轮直接采用，跳过 _frame（真去重）。"""
+    llm = _ScriptedLLM(judge_results=[_KEEP_GOING, _CONVERGE])
+    runner = _RecordingRunner()
+    result = _run(llm, runner, _config(policy=RoundPolicy(max_rounds=5)))
+
+    assert len(result.rounds) == 2
+    assert llm.frame_calls == 1  # 仅首轮定议题；第 2 轮用 next_focus
+    assert runner.calls[0]["focus"] == "焦点1"
+    assert runner.calls[1]["focus"] == "更深的点"  # _KEEP_GOING.next_focus
+    assert result.rounds[0].verdict.next_focus == "更深的点"
+
+
+def test_missing_or_blank_next_focus_falls_back_to_frame():
+    """next_focus 缺失或空串 → 回退 _frame（零风险降级）；收敛 verdict 同理。"""
+    no_focus = {**_KEEP_GOING}
+    del no_focus["next_focus"]
+    blank = {**_KEEP_GOING, "next_focus": "   "}
+
+    for judge in (no_focus, blank):
+        llm = _ScriptedLLM(judge_results=[judge, _CONVERGE])
+        runner = _RecordingRunner()
+        result = _run(llm, runner, _config(policy=RoundPolicy(max_rounds=5)))
+        assert len(result.rounds) == 2
+        assert llm.frame_calls == 2  # 两轮都走 _frame
+        assert [c["focus"] for c in runner.calls] == ["焦点1", "焦点2"]
+
+
+def test_focus_override_beats_assess_next_focus():
+    """用户掌舵 focus_override 优先级高于上轮 next_focus。"""
+    decisions = [
+        RoundBoundary(decision=RoundDecision.CONTINUE, focus="用户加的角度"),
+        RoundBoundary(decision=RoundDecision.CONCLUDE),
+    ]
+
+    async def boundary(*, round_no, result, converged, max_rounds):  # noqa: ANN001
+        return decisions[round_no - 1]
+
+    # 第 1 轮未收敛且带 next_focus；用户 CONTINUE 覆写焦点 → 第 2 轮用覆写值，不采纳 next_focus。
+    llm = _ScriptedLLM(judge_results=[_KEEP_GOING, _CONVERGE])
+    runner = _RecordingRunner()
+    result = _run_interactive(llm, runner, _config(policy=RoundPolicy(max_rounds=5)), boundary)
+
+    assert len(result.rounds) == 2
+    assert runner.calls[1]["focus"] == "用户加的角度"
+    assert runner.calls[1]["focus"] != "更深的点"
+    assert llm.frame_calls == 1  # 第 2 轮跳过 _frame（覆写）
+
+
+def test_first_round_still_frames_opening():
+    """首轮仍走 _frame：开场白 + 首焦点；开场白全场只取一次。"""
+    class _OpeningLLM(_ScriptedLLM):
+        async def complete(self, request):  # noqa: ANN001
+            step = request.scenario.rsplit(".", 1)[-1]
+            if step == "frame":
+                self.frame_calls += 1
+                self.seen.append((request.messages[0].content, request.messages[1].content))
+                return LLMResponse(
+                    content=json.dumps({"focus": "首轮焦点", "opening": "先帮你把最要紧的事说清。"})
+                )
+            return await super().complete(request)
+
+    llm = _OpeningLLM(judge_results=[_CONVERGE])
+    result = _run(llm, _RecordingRunner(), _config(policy=RoundPolicy(max_rounds=1)))
+    assert llm.frame_calls == 1
+    assert result.opening == "先帮你把最要紧的事说清。"
+    assert result.rounds[0].focus == "首轮焦点"
 
 
 def test_round_boundary_none_falls_back_to_judge_convergence():
@@ -900,9 +972,7 @@ def test_cross_exam_beat_populates_round_and_feeds_judge():
     assert cx.calls[0]["questions"] == {"pro": ["逼问正方"], "con": ["逼问反方"]}
     got = result.rounds[0].cross_exam
     assert [e.target for e in got] == ["pro", "con"]
-    assert all(
-        ex.ok and ex.answer for e in got for ex in e.exchanges
-    )
+    assert all(ex.answer for e in got for ex in e.exchanges)
     # 裁判 prompt（「请一次性完成三件事」）看到质询问答块。
     assess = [u for (s, u) in llm.seen if "请一次性完成三件事" in u]
     assert assess and "本轮【质询环节】问答" in assess[0]
@@ -979,6 +1049,60 @@ def test_closing_beat_populates_closings_after_rounds():
     assert closing.calls[0]["sides"] == ["pro", "con"]
     assert [c.side_key for c in result.closings] == ["pro", "con"]
     assert all(c.ok and c.content for c in result.closings)
+
+
+def test_closing_and_brief_run_in_parallel_both_complete():
+    """结辩与简报 asyncio.gather 并行：二者重叠执行，双产物（closings + brief）均完整返回。"""
+
+    class _OverlappingClosing:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.brief_entered = asyncio.Event()
+
+        async def __call__(self, *, sides, rounds):  # noqa: ANN001
+            self.started.set()
+            # 等 brief 侧进入（握手证明并行），再完成结辩。
+            await asyncio.wait_for(self.brief_entered.wait(), timeout=2.0)
+            return [
+                ClosingStatement(
+                    side_key=s.key,
+                    side_name=s.name,
+                    run_id=f"mod_closing_{s.key}",
+                    content=f"{s.name}的结辩陈词",
+                    ok=True,
+                )
+                for s in sides
+            ]
+
+    class _BriefAwareLLM(_ScriptedLLM):
+        def __init__(self, closing: _OverlappingClosing, **kwargs):  # noqa: ANN001
+            super().__init__(**kwargs)
+            self._closing = closing
+
+        async def complete(self, request):  # noqa: ANN001
+            step = request.scenario.rsplit(".", 1)[-1]
+            if step == "brief":
+                await asyncio.wait_for(self._closing.started.wait(), timeout=2.0)
+                self._closing.brief_entered.set()
+            return await super().complete(request)
+
+    closing = _OverlappingClosing()
+    llm = _BriefAwareLLM(closing, judge_results=[_CONVERGE])
+    mod = Moderator(provider=llm, model="m")
+    result = asyncio.run(
+        mod.run(
+            _config(policy=RoundPolicy(max_rounds=1)),
+            run_round=_RecordingRunner(),
+            run_closing=closing,
+        )
+    )
+    assert closing.started.is_set() and closing.brief_entered.is_set()
+    assert len(result.closings) == 2
+    assert all(c.ok and c.content for c in result.closings)
+    assert result.brief.crux == _DEFAULT_BRIEF["crux"]
+    assert llm.brief_calls == 1
+    # 主持人用量累计：frame + assess + brief = 3（结辩走 runner 不经 Moderator LLM）。
+    assert mod.llm_rounds == 3
 
 
 def test_closing_skipped_for_quick_and_roundtable():
@@ -1108,6 +1232,8 @@ def test_brief_carries_cumulative_scores_and_parses_decisive():
     brief_prompts = [u for (s, u) in llm.seen if "请据此产出简报" in u]
     assert brief_prompts and "累计记分" in brief_prompts[0] and "净分" in brief_prompts[0]
     assert "须与它一致" in brief_prompts[0]
+    assert "方向" in brief_prompts[0]  # 「一致」= 倾向方向，禁抄记分数字进正文
+    assert "单句≤50字" in brief_prompts[0]
     assert result.brief.decisive == decisive
     assert "胜负手" in result.to_ceo_output() and decisive in result.to_ceo_output()
     assert result.to_event_payload()["brief"]["decisive"] == decisive

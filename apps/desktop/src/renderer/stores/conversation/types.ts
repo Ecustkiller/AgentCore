@@ -55,11 +55,27 @@ export interface TeamPreviewWorkerDisplay {
   debate: boolean;
 }
 
+export interface TeamPreviewSideDisplay {
+  key: string;
+  name: string;
+  stance: string;
+  is_subject?: boolean;
+}
+
+export type KickoffPrimitive = "delegate" | "debate";
+
 export interface TeamPreviewDisplay {
   id: string;
+  /** Orchestration primitive — drives card layout (分工表 vs 辩题/立场). */
+  primitive: KickoffPrimitive;
   workers: TeamPreviewWorkerDisplay[];
   /** Grantable tools listed on the kickoff card (may be empty under full_auto). */
   tools: string[];
+  motion: string;
+  form: string;
+  sides: TeamPreviewSideDisplay[];
+  maxRounds: number;
+  thorough: boolean;
   status: "pending" | "resolved";
   decision: CheckpointDecision | null;
   note: string;

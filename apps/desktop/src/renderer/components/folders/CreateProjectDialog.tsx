@@ -11,7 +11,7 @@ import { useCreateFolder } from "@/hooks/useFolders";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
-import { sanitizeProjectSubpath } from "@/services/folders";
+import { type FolderMeta, sanitizeProjectSubpath } from "@/services/folders";
 import { useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
 import { Cloud, FolderOpen, HardDrive, Loader2 } from "lucide-react";
@@ -60,14 +60,15 @@ function CreateProjectDialogBody({ onClose }: { onClose: () => void }) {
   const handlePickLocalDir = async () => {
     if (!window.fsApi) return;
     const root = await window.fsApi.addRoot();
-    if (root) setLocation({ kind: "pick_local", rootId: root.id, rootName: root.name });
+    if (root)
+      setLocation({ kind: "pick_local", rootId: root.id, rootName: root.name });
   };
 
   const handleSubmit = async () => {
     const trimmed = name.trim();
     if (!trimmed || !location || createFolder.isPending) return;
     try {
-      let folder;
+      let folder: FolderMeta;
       if (location.kind === "cloud") {
         folder = await createFolder.mutateAsync({
           name: trimmed,

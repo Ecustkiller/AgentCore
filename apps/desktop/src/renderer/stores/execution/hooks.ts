@@ -106,7 +106,6 @@ function computeProjection(
       rt.status,
       rt.debate,
       rt.debateRounds,
-      rt.debateDecisions,
     );
   }
   // Live tail: advance the incremental accumulator to the current frame count, applying
@@ -115,13 +114,7 @@ function computeProjection(
   for (let i = fold.count; i < upto; i++) applyFrame(fold.state, rt.frames[i]);
   fold.count = upto;
   liveFolds.set(plan, fold);
-  return finalizeFold(
-    fold.state,
-    rt.status,
-    rt.debate,
-    rt.debateRounds,
-    rt.debateDecisions,
-  );
+  return finalizeFold(fold.state, rt.status, rt.debate, rt.debateRounds);
 }
 
 /** Project a specific message's execution at its current playhead — live tail

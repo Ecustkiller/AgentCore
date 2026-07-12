@@ -463,9 +463,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           {(message.process?.length ?? 0) > 0 ? (
             <DropdownMenu>
               <SimpleTooltip
-                label={
-                  streamCopied || streamCopiedProcess ? "已复制" : "复制"
-                }
+                label={streamCopied || streamCopiedProcess ? "已复制" : "复制"}
               >
                 <DropdownMenuTrigger asChild>
                   <IconButton size="sm" aria-label="复制">

@@ -22,6 +22,7 @@ import { join } from "node:path";
 import {
   SIDECAR_CHANNELS,
   type SidecarCancelRequest,
+  type SidecarDebateSteerRequest,
   type SidecarInference,
   type SidecarListPausedRequest,
   type SidecarPausedTurn,
@@ -522,8 +523,6 @@ export class SidecarManager {
         // Outbox idempotency anchor (as-built: 双模式工作区 §10.3).
         userMessageId: req.userMessageId,
         history: req.history ?? [],
-        // 续辩种子（结构化补轮·B）：原样透传给引擎（None=普通回合）。引擎宽容解析，故无需主进程校验。
-        ...(req.debateSeed ? { debateSeed: req.debateSeed } : {}),
         // Re-send the current cloud-proxy token every turn: the sidecar is long-lived
         // but the token rotates (12h TTL), so the engine adopts the fresh one per turn
         // (initialize-time creds would otherwise 401 after expiry).
@@ -625,6 +624,24 @@ export class SidecarManager {
     }
   }
 
+  /** 辩论 ambient 掌舵（fire-and-forget，下一轮边界生效）。 */
+  async debateSteer(req: SidecarDebateSteerRequest): Promise<void> {
+    const entry = this.entries.get(entryKey(req.rootId, req.subpath));
+    if (!entry) return;
+    try {
+      await entry.client.request("debateSteer", {
+        conversationId: req.conversationId,
+        executionId: req.executionId,
+        decision: req.decision,
+        focus: req.focus ?? "",
+        ask: req.ask ?? "",
+        askTarget: req.askTarget ?? "",
+      });
+    } catch {
+      // sidecar 不可达时静默——与 runRedirect 一致。
+    }
+  }
+
   /** 结算一个被挂起的交互（审批 / ask_user / 本地工具）。 */
   async respond(req: SidecarRespondRequest): Promise<{ resolved: boolean }> {
     const entry = this.entries.get(entryKey(req.rootId, req.subpath));
@@ -682,7 +699,7 @@ export function registerSidecarIpc(): void {
   // IPC-004（第五轮 IPC 权限面审计）：每个句柄进入业务前在边界结构校验寻址 / 标识类 string
   // 字段（rootId / turnId / …）+ 可选 subpath。畸形入参（仅来自被攻破的 renderer）抛
   // `IpcInvalidArgsError` → invoke reject，与本组句柄「拉不起 / 引擎异常即 reject 让 renderer
-  // 降级」的契约一致。数据载荷（history / inference / result / debateSeed）仍由下游 / 引擎宽容消费。
+  // 降级」的契约一致。数据载荷（history / inference / result）仍由下游 / 引擎宽容消费。
   ipcMain.handle(
     SIDECAR_CHANNELS.startTurn,
     async (e, req: SidecarStartTurnRequest): Promise<SidecarTurnResult> => {
@@ -739,6 +756,19 @@ export function registerSidecarIpc(): void {
         ["subpath"],
       );
       return manager.runRedirect(req);
+    },
+  );
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.debateSteer,
+    (_e, req: SidecarDebateSteerRequest) => {
+      assertShape(
+        SIDECAR_CHANNELS.debateSteer,
+        req,
+        ["rootId", "conversationId", "executionId", "decision"],
+        ["subpath", "focus", "ask", "askTarget"],
+      );
+      return manager.debateSteer(req);
     },
   );
 

@@ -4,8 +4,8 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -22,7 +22,9 @@ function hasPrebuild() {
 }
 
 if (hasPrebuild()) {
-  console.log("[rebuild-native] node-pty prebuild present — skip electron-rebuild");
+  console.log(
+    "[rebuild-native] node-pty prebuild present — skip electron-rebuild",
+  );
   process.exit(0);
 }
 

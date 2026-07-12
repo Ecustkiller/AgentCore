@@ -72,7 +72,11 @@ export function executionRecordSummary(
   const language =
     asStr(display?.language).trim() || asStr(args.language).trim();
   const code = asStr(args.code).trim();
-  const firstLine = code.split("\n").find((l) => l.trim())?.trim() ?? "";
+  const firstLine =
+    code
+      .split("\n")
+      .find((l) => l.trim())
+      ?.trim() ?? "";
   if (language && firstLine) {
     const short =
       firstLine.length > 48 ? `${firstLine.slice(0, 48)}…` : firstLine;
@@ -160,7 +164,11 @@ function recordFromToolCall(
   return {
     id: tc.id,
     toolName: tc.toolName,
-    summary: executionRecordSummary(tc.toolName, tc.arguments ?? {}, tc.display),
+    summary: executionRecordSummary(
+      tc.toolName,
+      tc.arguments ?? {},
+      tc.display,
+    ),
     agentRole,
     status: statusFromTool(tc.status, out.exitCode),
     runId,

@@ -151,7 +151,15 @@ async function consumeWorkspaceStream<T>(
   try {
     response = await doFetch();
     if (response.status === 401) {
-      if (await tryRefresh()) response = await doFetch();
+      const outcome = await tryRefresh();
+      if (outcome === "renewed") {
+        response = await doFetch();
+      } else if (outcome === "auth_dead") {
+        notifyUnauthorized();
+        throw new StreamError("auth");
+      } else {
+        throw new StreamError("network");
+      }
       if (response.status === 401) {
         notifyUnauthorized();
         throw new StreamError("auth");

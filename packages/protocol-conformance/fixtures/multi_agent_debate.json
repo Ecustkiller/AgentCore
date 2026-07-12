@@ -50,8 +50,7 @@
         "run_id": "debate_mod1",
         "agent_id": "debate_mod1",
         "parent_run_id": "captain1",
-        "kind": "agent",
-        "revision": 0
+        "kind": "agent"
       },
       "timestamp": "2026-01-01T00:00:00.003Z"
     },
@@ -108,8 +107,7 @@
         "run_id": "debate_mod1_r1_pro",
         "agent_id": "d_pro",
         "parent_run_id": "debate_mod1",
-        "kind": "agent",
-        "revision": 0
+        "kind": "agent"
       },
       "timestamp": "2026-01-01T00:00:00.005Z"
     },
@@ -154,8 +152,7 @@
         "run_id": "debate_mod1_r1_con",
         "agent_id": "d_con",
         "parent_run_id": "debate_mod1",
-        "kind": "agent",
-        "revision": 0
+        "kind": "agent"
       },
       "timestamp": "2026-01-01T00:00:00.008Z"
     },
@@ -199,9 +196,9 @@
       "payload": {
         "run_id": "debate_mod1_r1_cx_pro",
         "agent_id": "debate_mod1_r1_cx_pro",
-        "parent_run_id": "debate_mod1_r1_pro",
+        "parent_run_id": "debate_mod1",
         "kind": "agent",
-        "revision": 2,
+        "continues_run_id": "debate_mod1_r1_pro",
         "stance": "pro",
         "group": "debate:debate",
         "round": 1
@@ -280,9 +277,9 @@
       "payload": {
         "run_id": "debate_mod1_r1_cx_con",
         "agent_id": "debate_mod1_r1_cx_con",
-        "parent_run_id": "debate_mod1_r1_con",
+        "parent_run_id": "debate_mod1",
         "kind": "agent",
-        "revision": 2,
+        "continues_run_id": "debate_mod1_r1_con",
         "stance": "con",
         "group": "debate:debate",
         "round": 1
@@ -361,9 +358,9 @@
       "payload": {
         "run_id": "debate_mod1_closing_pro",
         "agent_id": "debate_mod1_closing_pro",
-        "parent_run_id": "debate_mod1_r1_pro",
+        "parent_run_id": "debate_mod1",
         "kind": "agent",
-        "revision": 3,
+        "continues_run_id": "debate_mod1_r1_pro",
         "stance": "pro",
         "group": "debate:debate",
         "round": 1
@@ -442,9 +439,9 @@
       "payload": {
         "run_id": "debate_mod1_closing_con",
         "agent_id": "debate_mod1_closing_con",
-        "parent_run_id": "debate_mod1_r1_con",
+        "parent_run_id": "debate_mod1",
         "kind": "agent",
-        "revision": 3,
+        "continues_run_id": "debate_mod1_r1_con",
         "stance": "con",
         "group": "debate:debate",
         "round": 1
@@ -608,13 +605,11 @@
                 "exchanges": [
                   {
                     "question": "收益量化口径是否计入了尾部风险？请是/否直接回答。",
-                    "answer": "量化口径未含尾部风险【待核实·推断】",
-                    "ok": true
+                    "answer": "量化口径未含尾部风险【待核实·推断】"
                   },
                   {
                     "question": "若熔断触发、灰度止损，已投入成本由谁承担？",
-                    "answer": "成本由灰度预算池兜底、触发熔断即回滚【已核实·灰度预案v2】",
-                    "ok": true
+                    "answer": "成本由灰度预算池兜底、触发熔断即回滚【已核实·灰度预案v2】"
                   }
                 ],
                 "answer_run_id": "debate_mod1_r1_cx_pro"
@@ -625,8 +620,7 @@
                 "exchanges": [
                   {
                     "question": "你主张的风险敞口，有无可量化的历史故障率支撑？没有就直说。",
-                    "answer": "暂无统一口径的历史故障率【待核实·推断】；但同类系统的尾部事件可作参照【已核实·SRE年报】",
-                    "ok": true
+                    "answer": "暂无统一口径的历史故障率【待核实·推断】；但同类系统的尾部事件可作参照【已核实·SRE年报】"
                   }
                 ],
                 "answer_run_id": "debate_mod1_r1_cx_con"
@@ -674,19 +668,24 @@
             "pro": "收益显著且可量化",
             "con": "风险敞口缺乏兜底"
           },
-          "factual_disputes": [
-            "历史故障率的数据口径不一致"
-          ],
-          "value_disputes": [
-            "增长优先 vs 稳健优先"
+          "handoffs": [
+            {
+              "kind": "value",
+              "text": "增长优先 vs 稳健优先"
+            },
+            {
+              "kind": "fact",
+              "text": "历史故障率的数据口径不一致"
+            },
+            {
+              "kind": "question",
+              "text": "灰度的回滚阈值如何设定？"
+            }
           ],
           "decisive": "反对方紧咬「风险敞口未对冲」命门，却把未证实的尾部风险当既定事实（记分 -1）；支持方收益量化更扎实、质询下给出熔断兜底，综合净分小幅领先（10 : 8）。",
           "leaning": "倾向有条件采用",
           "confidence": "medium",
-          "recommendation": "先小流量灰度验证风险，再决定是否全量。",
-          "open_questions": [
-            "灰度的回滚阈值如何设定？"
-          ]
+          "recommendation": "先小流量灰度验证风险，再决定是否全量。"
         }
       },
       "timestamp": "2026-01-01T00:00:00.028Z"
@@ -849,8 +848,7 @@
         "stance": null,
         "group": null,
         "round": 0,
-        "revisionOf": null,
-        "revision": 0,
+        "continuesRunId": null,
         "revised": null,
         "replacesRunId": null,
         "checkpoint": null,
@@ -888,8 +886,7 @@
         "stance": "pro",
         "group": "debate:debate",
         "round": 1,
-        "revisionOf": null,
-        "revision": 0,
+        "continuesRunId": null,
         "revised": null,
         "replacesRunId": null,
         "checkpoint": null,
@@ -927,8 +924,7 @@
         "stance": "con",
         "group": "debate:debate",
         "round": 1,
-        "revisionOf": null,
-        "revision": 0,
+        "continuesRunId": null,
         "revised": null,
         "replacesRunId": null,
         "checkpoint": null,
@@ -945,7 +941,7 @@
         "debrief": null,
         "durationMs": 640,
         "error": null,
-        "parentRunId": "debate_mod1_r1_pro",
+        "parentRunId": "debate_mod1",
         "kind": "agent",
         "role": "member",
         "model": "deepseek-v4-flash",
@@ -966,8 +962,7 @@
         "stance": "pro",
         "group": "debate:debate",
         "round": 1,
-        "revisionOf": "debate_mod1_r1_pro",
-        "revision": 2,
+        "continuesRunId": "debate_mod1_r1_pro",
         "revised": null,
         "replacesRunId": null,
         "checkpoint": null,
@@ -1007,7 +1002,7 @@
         "debrief": null,
         "durationMs": 620,
         "error": null,
-        "parentRunId": "debate_mod1_r1_con",
+        "parentRunId": "debate_mod1",
         "kind": "agent",
         "role": "member",
         "model": "deepseek-v4-flash",
@@ -1028,8 +1023,7 @@
         "stance": "con",
         "group": "debate:debate",
         "round": 1,
-        "revisionOf": "debate_mod1_r1_con",
-        "revision": 2,
+        "continuesRunId": "debate_mod1_r1_con",
         "revised": null,
         "replacesRunId": null,
         "checkpoint": null,
@@ -1069,7 +1063,7 @@
         "debrief": null,
         "durationMs": 520,
         "error": null,
-        "parentRunId": "debate_mod1_r1_pro",
+        "parentRunId": "debate_mod1",
         "kind": "agent",
         "role": "member",
         "model": "deepseek-v4-flash",
@@ -1090,8 +1084,7 @@
         "stance": "pro",
         "group": "debate:debate",
         "round": 1,
-        "revisionOf": "debate_mod1_r1_pro",
-        "revision": 3,
+        "continuesRunId": "debate_mod1_r1_pro",
         "revised": null,
         "replacesRunId": null,
         "checkpoint": null,
@@ -1131,7 +1124,7 @@
         "debrief": null,
         "durationMs": 540,
         "error": null,
-        "parentRunId": "debate_mod1_r1_con",
+        "parentRunId": "debate_mod1",
         "kind": "agent",
         "role": "member",
         "model": "deepseek-v4-flash",
@@ -1152,8 +1145,7 @@
         "stance": "con",
         "group": "debate:debate",
         "round": 1,
-        "revisionOf": "debate_mod1_r1_con",
-        "revision": 3,
+        "continuesRunId": "debate_mod1_r1_con",
         "revised": null,
         "replacesRunId": null,
         "checkpoint": null,
@@ -1258,13 +1250,11 @@
               "exchanges": [
                 {
                   "question": "收益量化口径是否计入了尾部风险？请是/否直接回答。",
-                  "answer": "量化口径未含尾部风险【待核实·推断】",
-                  "ok": true
+                  "answer": "量化口径未含尾部风险【待核实·推断】"
                 },
                 {
                   "question": "若熔断触发、灰度止损，已投入成本由谁承担？",
-                  "answer": "成本由灰度预算池兜底、触发熔断即回滚【已核实·灰度预案v2】",
-                  "ok": true
+                  "answer": "成本由灰度预算池兜底、触发熔断即回滚【已核实·灰度预案v2】"
                 }
               ],
               "answer_run_id": "debate_mod1_r1_cx_pro"
@@ -1275,8 +1265,7 @@
               "exchanges": [
                 {
                   "question": "你主张的风险敞口，有无可量化的历史故障率支撑？没有就直说。",
-                  "answer": "暂无统一口径的历史故障率【待核实·推断】；但同类系统的尾部事件可作参照【已核实·SRE年报】",
-                  "ok": true
+                  "answer": "暂无统一口径的历史故障率【待核实·推断】；但同类系统的尾部事件可作参照【已核实·SRE年报】"
                 }
               ],
               "answer_run_id": "debate_mod1_r1_cx_con"
@@ -1324,19 +1313,24 @@
           "pro": "收益显著且可量化",
           "con": "风险敞口缺乏兜底"
         },
-        "factual_disputes": [
-          "历史故障率的数据口径不一致"
-        ],
-        "value_disputes": [
-          "增长优先 vs 稳健优先"
+        "handoffs": [
+          {
+            "kind": "value",
+            "text": "增长优先 vs 稳健优先"
+          },
+          {
+            "kind": "fact",
+            "text": "历史故障率的数据口径不一致"
+          },
+          {
+            "kind": "question",
+            "text": "灰度的回滚阈值如何设定？"
+          }
         ],
         "decisive": "反对方紧咬「风险敞口未对冲」命门，却把未证实的尾部风险当既定事实（记分 -1）；支持方收益量化更扎实、质询下给出熔断兜底，综合净分小幅领先（10 : 8）。",
         "leaning": "倾向有条件采用",
         "confidence": "medium",
-        "recommendation": "先小流量灰度验证风险，再决定是否全量。",
-        "open_questions": [
-          "灰度的回滚阈值如何设定？"
-        ]
+        "recommendation": "先小流量灰度验证风险，再决定是否全量。"
       }
     },
     "debateRounds": [],

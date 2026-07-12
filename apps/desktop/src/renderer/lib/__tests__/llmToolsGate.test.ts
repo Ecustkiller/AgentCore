@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
 import {
   TOOLS_GATE_HINT,
   TOOL_CALLING_TOOL_NAMES,
   needsToolsGateHint,
 } from "@/lib/llmToolsGate";
+import { describe, expect, it } from "vitest";
 
 describe("llmToolsGate", () => {
   it("flags only explicit false as needing a soft hint", () => {

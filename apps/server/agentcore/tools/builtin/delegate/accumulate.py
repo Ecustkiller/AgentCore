@@ -34,7 +34,11 @@ def collect_citations(tool: DelegateTool, results: dict) -> None:
 
 
 def register_sessions(tool: DelegateTool, plan: RunPlan, results: dict) -> list:
-    """Keep each COMPLETED worker alive as a recoverable RunSession (留人)."""
+    """Keep each COMPLETED worker alive as a recoverable RunSession (留人).
+
+    Idempotent with mid-wave :func:`register_completed_session`: if a session was
+    already extended by 续派 / redirect, keep its transcript / recall_count.
+    """
     if tool._session_store is None:
         return []
     from agentcore.runtime.runs import RunPhase, RunSession
@@ -43,11 +47,22 @@ def register_sessions(tool: DelegateTool, plan: RunPlan, results: dict) -> list:
     for node in plan.nodes:
         state = results.get(node.run_id)
         if state and state.phase is RunPhase.COMPLETED and state.transcript:
+            # 续派节点：现场挂在 continue_from 根上，不另开键。
+            if node.continue_from_run_id:
+                continue
+            existing = tool._session_store.get(node.run_id)
+            if existing is not None and (
+                existing.recall_count > 0 or len(existing.transcript) > len(state.transcript)
+            ):
+                # Already extended by continuation — don't clobber.
+                registered.append(existing)
+                continue
             session = RunSession(
                 run_id=node.run_id,
                 spec=node,
                 transcript=state.transcript,
                 content=state.content,
+                recall_count=existing.recall_count if existing is not None else 0,
             )
             tool._session_store.put(session)
             registered.append(session)

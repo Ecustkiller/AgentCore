@@ -6,9 +6,9 @@ import { SCENARIOS } from "./scenarioData";
 import { LazyMount } from "./shared";
 
 /**
- * ⑤ 机制场景：真实协作图画廊，单列、按需懒挂载。四个常用形态（并行 / 串行 / 辩论 /
- * 嵌套小队）常驻；进阶形态（执行中态 / 多层嵌套 / 热修 / 超大团队）折进「更多形态」，
- * 点开再挂，避免画廊读起来像测试网格、也省掉一次性挂多个 ReactFlow。
+ * 机制场景：真实协作图画廊，单列、按需懒挂载。四个常用形态（并行 / 串行 / 正反辩论 /
+ * 嵌套小队）常驻；进阶形态（执行中 / 红队 / 圆桌 / 多层小队 / 带现场续派 / 大团队）
+ * 折进「更多形态」，点开再挂。
  */
 export function MechanismScenarios() {
   const [showMore, setShowMore] = useState(false);

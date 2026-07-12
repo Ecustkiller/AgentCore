@@ -13,7 +13,7 @@
  * Run:  pnpm stills        (cwd = apps/promo; needs `pnpm stills:layout` first if
  *                           STILL_DEFS changed)
  *
- * Each id maps to a `Still-<id>` composition registered in src/Root.tsx.
+ * Each id maps to a `Still-<id>` composition registered via src/stills/manifest.ts.
  */
 import { execSync } from "node:child_process";
 import { mkdirSync } from "node:fs";

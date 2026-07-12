@@ -14,8 +14,6 @@
  * 本文件是「引擎本体就在本地」的通道，两者是双模式的两条独立链路。
  */
 
-import type { components } from "@agentcore/contract-rest-types";
-
 /** 一次回合的云代理推理凭据：把引擎的 LLM 调用指向云端推理代理（平台 key 不下放本机）。 */
 export interface SidecarInference {
   baseUrl: string;
@@ -23,11 +21,6 @@ export interface SidecarInference {
   /** 服务端在铸 inference token 时解析的上游模型名（与推理代理一致）。 */
   model: string;
 }
-
-/** 续辩种子（结构化补轮·B / 可逆叫停）：前端从收场卡发起续辩时把上一场 debate_result 投影成
- *  的最小种子。= 云链路 `SendMessageRequest.debate_seed` 同一生成类型（snake_case，逐字对齐
- *  引擎 `DebateSeed.from_payload`）；IPC 仅透传，引擎侧宽容解析。 */
-export type SidecarDebateSeed = components["schemas"]["DebateSeedInput"];
 
 /** 自主度三档（安全权限与治理 §三）——与服务端 `AutonomyPolicy` 枚举逐字对齐。
  *  sidecar 无用户库，桌面按回合把当前设置随参数送达本地引擎（中途改设置下一回合即生效）。 */
@@ -63,10 +56,6 @@ export interface SidecarStartTurnRequest {
   history?: SidecarHistoryEntry[];
   /** 云代理凭据；缺省则 sidecar 回退到其自身 server 配置（dev 便利，非生产姿态）。 */
   inference?: SidecarInference;
-  /** 续辩种子（结构化补轮·B / 可逆叫停）：非空 = 本回合的 debate 续上一场（主持人焦点正交于
-   *  已谈、首轮辩手读到上一场摘要）。普通回合缺省。主进程原样透传给 Python sidecar 的
-   *  `startTurn.debateSeed`，引擎经 `params.get("debateSeed")` 喂 `run_chat_pipeline`。 */
-  debateSeed?: SidecarDebateSeed;
   /** 用户当前自主度（能力授权三档）。缺省 = sidecar 沿用当前值（初始默认 first_grant）。 */
   autonomyPolicy?: SidecarAutonomyPolicy;
 }
@@ -279,12 +268,25 @@ export interface SidecarRunRedirectRequest {
   feedback: string;
 }
 
+/** 辩论 ambient 掌舵（fire-and-forget，下一轮边界生效）。 */
+export interface SidecarDebateSteerRequest {
+  rootId: string;
+  subpath?: string;
+  conversationId: string;
+  executionId: string;
+  decision: "continue" | "conclude";
+  focus?: string;
+  ask?: string;
+  askTarget?: string;
+}
+
 /** IPC 通道名 —— 主进程与 preload 共用，避免硬编码漂移。 */
 export const SIDECAR_CHANNELS = {
   startTurn: "sidecar:startTurn",
   cancel: "sidecar:cancel",
   respond: "sidecar:respond",
   runRedirect: "sidecar:runRedirect",
+  debateSteer: "sidecar:debateSteer",
   resume: "sidecar:resume",
   listPaused: "sidecar:listPaused",
   probe: "sidecar:probe",
@@ -304,6 +306,7 @@ export interface SidecarApi {
   cancel(req: SidecarCancelRequest): Promise<void>;
   respond(req: SidecarRespondRequest): Promise<{ resolved: boolean }>;
   runRedirect(req: SidecarRunRedirectRequest): Promise<void>;
+  debateSteer(req: SidecarDebateSteerRequest): Promise<void>;
   /** 续跑一个持久挂起的本地回合；Promise 在续跑结束时 resolve（同 `startTurn` 携最终结果，
    * 过程事件经 `onEvent` 推来）。 */
   resume(req: SidecarResumeRequest): Promise<SidecarTurnResult>;

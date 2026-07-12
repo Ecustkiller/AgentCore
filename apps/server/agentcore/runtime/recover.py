@@ -37,6 +37,7 @@ from agentcore.tools.builtin.ask_user.schema import option_label
 
 if TYPE_CHECKING:
     from agentcore.db.models.runs import TurnLeaseRow
+    from agentcore.tools.builtin.debate import DebateTool
     from agentcore.tools.builtin.delegate import DelegateTool
 
 logger = get_logger(__name__)
@@ -59,6 +60,7 @@ async def recover_turn(
     decision: CheckpointDecision | None = None,
     note: str = "",
     selected: list[str] | None = None,
+    debate_tool: DebateTool | None = None,
 ) -> SettledSuspension:
     """Settle a resume decision or CONTINUE-redrive unfinished DAG from ``state``.
 
@@ -66,6 +68,8 @@ async def recover_turn(
       the former ``settle_resumed_suspension``).
     - Without suspension (crash): ``decision`` defaults to CONTINUE; redrives unfinished
       plan nodes with ``seed_completed=state.completed`` (completed nodes skipped).
+    - ``debate_tool`` is required when settling a ``team_preview`` with
+      ``primitive=debate``.
     """
     if suspension is not None:
         if decision is None:
@@ -78,6 +82,7 @@ async def recover_turn(
             selected=selected or [],
             sink=sink,
             delegate_tool=delegate_tool,
+            debate_tool=debate_tool,
             execution_id=execution_id,
         )
 
@@ -114,6 +119,7 @@ async def _settle_resume(
     selected: list[str],
     sink: EventSink,
     delegate_tool: DelegateTool,
+    debate_tool: DebateTool | None,
     execution_id: str,
 ) -> SettledSuspension:
     """Kind-specific resume settle, projecting exclusively via ``state``."""
@@ -210,7 +216,18 @@ async def _settle_resume(
             "team_preview.resolved",
             checkpoint_id=suspension.checkpoint_id,
             decision=decision.value,
+            primitive=suspension.primitive,
         )
+        if suspension.primitive == "debate":
+            if debate_tool is None:
+                raise ValueError("recover_turn debate kickoff requires debate_tool")
+            debate_result = await debate_tool.resume_after_kickoff(
+                decision=decision,
+                note=note,
+                arguments=dict(suspension.debate_arguments),
+            )
+            return SettledSuspension(debate_result.output, None)
+
         seed_completed = dict(state.completed) or suspension.completed
         plan = state.plan or suspension.plan
         eid = state.execution_id or execution_id

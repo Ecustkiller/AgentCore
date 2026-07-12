@@ -14,6 +14,7 @@ from agentcore.runtime.debate import (
     DebateBrief,
     DebateConfig,
     DebateForm,
+    DebateHandoff,
     DebateResult,
     DebateSide,
     JudgeVerdict,
@@ -21,12 +22,14 @@ from agentcore.runtime.debate import (
     RoundPolicy,
     RoundResult,
     SideTurn,
+    normalize_handoff_kind,
 )
 from agentcore.runtime.debate.moderator import (
     _ASSESS_SYSTEM,
     _BRIEF_SYSTEM,
     _CROSS_EXAM_SYSTEM,
 )
+from agentcore.runtime.debate.moderator_brief import _as_handoffs
 from agentcore.tools.builtin.debate.prompt import (
     EVIDENCE_RULE,
     SEARCH_QUERY_RULE,
@@ -128,8 +131,12 @@ def test_cx_answer_feedback_uses_canonical_markers():
     fb = cx_answer_feedback(_config(), _two_sides()[0], 1, "成本", ["你这条有出处吗？"])
     assert "【已核实" in fb and "【待核实" in fb
     assert "JSON" in fb
-    assert "directly_addressed" in fb
     assert "question_index" in fb
+    assert "directly_addressed" not in fb
+    # 取证预算：优先既有材料，确需补证至多 1–2 次检索，拿不出出处诚实标待核实
+    assert "优先基于已有调研与辩论材料作答" in fb
+    assert "至多 1–2 次检索" in fb
+    assert "【证据状态铁律】" in fb
 
 
 # --- 主持人侧：质询盯待核实、裁判据标记记分/罚且诚实不罚 ---------------------
@@ -145,6 +152,17 @@ def test_cross_exam_questions_prompt_targets_unverified_claims():
     user = llm.requests[-1].messages[-1].content
     assert "待核实" in user  # 盯待核实当决定性论据
     assert "出处" in user
+
+
+def test_cross_exam_questions_prompt_demands_distinct_targets():
+    """源头质询去重：同一方多条质询须各打不同命门，不得换问法重复问同一点。"""
+    llm = _CaptureLLM()
+    mod = Moderator(provider=llm, model="m")
+    asyncio.run(mod._cross_exam_questions(_config(), "成本是否可控", _turns()))
+
+    user = llm.requests[-1].messages[-1].content
+    assert "各打一个不同的命门" in user
+    assert "重复问" in user
 
 
 def test_judge_prompt_scores_evidence_by_markers_and_spares_honest_hedging():
@@ -207,14 +225,40 @@ def test_brief_prompt_inherits_evidence_status_into_conclusion():
     assert "继承到结论" in user
     assert "需一手核实" in user
     assert "二手来源" in user  # 单一二手来源不当既定事实
-    # 要么显式降级、要么移进 factual_disputes / open_questions（别在收尾抹平）。
+    # 要么显式降级、要么移进交接清单（factual_disputes / open_questions；别在收尾抹平）。
     assert "factual_disputes" in user and "open_questions" in user
+    assert "交接清单" in user or "value_disputes" in user
 
 
 def test_brief_prompt_keeps_reversal_condition_after_grounding_insert():
     """插入 grounding 约束后，原有『反转条件』要求仍在场（不被覆盖回归）。"""
     user = _brief_user_prompt()
     assert "反转条件" in user
+
+
+def test_brief_prompt_handoffs_questionify_value_and_length_discipline():
+    """交接清单：value 问句化 + 影响结论；三键去水压成单句（对齐 strongest_points）。"""
+    user = _brief_user_prompt()
+    assert "问句" in user
+    assert "你的选择如何影响结论" in user
+    assert "去水压成单句" in user and "只留命门" in user
+    assert "禁复合长句堆叠" in user
+    # 判别铁律与证据状态内联仍在场（不被问句化覆盖回归）。
+    assert "按解决路径互斥归类" in user
+    assert "内联在条目文本" in user or "证据状态语内联" in user
+
+
+def test_brief_prompt_field_mutex_and_length_discipline():
+    """简报字段互斥 + 对抗形态字数纪律：禁互相复述 / 禁抄记分 / 单句上限。"""
+    user = _brief_user_prompt()
+    assert "字段互斥" in user and "互不复述" in user
+    assert "单句≤50字" in user
+    assert "≤60字" in user and "禁分号堆叠" in user
+    assert "禁复述记分数字" in user or "禁】把记分数字" in user
+    assert "下一步动作单句" in user and "不复述判断理由" in user
+    assert "方向" in user  # 与累计记分仅方向一致，不是抄数字
+    # crux 生成要求仍在场（其他消费方仍用）。
+    assert '"crux"' in user and "争议焦点" in user
 
 
 def test_brief_system_carries_grounding_principle():
@@ -234,3 +278,44 @@ def test_ceo_output_preserves_unverified_reservations():
     assert "待核实" in out
     assert "保留" in out
     assert "既定事实" in out
+
+
+def test_as_handoffs_maps_three_keys_and_normalizes_bad_kind():
+    """LLM 三键 → handoffs；坏 kind 归 question，不丢内容。"""
+    items = _as_handoffs(
+        {
+            "value_disputes": ["更看重速度还是稳妥"],
+            "factual_disputes": ["成本口径【待核实·推断】"],
+            "open_questions": ["政策窗口会不会变"],
+        }
+    )
+    assert [(h.kind, h.text) for h in items] == [
+        ("value", "更看重速度还是稳妥"),
+        ("fact", "成本口径【待核实·推断】"),
+        ("question", "政策窗口会不会变"),
+    ]
+    assert normalize_handoff_kind("weird") == "question"
+    assert normalize_handoff_kind("FACT") == "fact"
+    bad = _as_handoffs({"handoffs": [{"kind": "mystery", "text": "仍要保留"}]})
+    assert bad == [DebateHandoff(kind="question", text="仍要保留")]
+
+
+def test_ceo_output_renders_handoffs_by_kind():
+    """CEO 简报文本按三类交接清单分组渲染。"""
+    result = DebateResult(
+        config=_config(),
+        rounds=[_last_round()],
+        brief=DebateBrief(
+            crux="成本",
+            handoffs=[
+                DebateHandoff(kind="value", text="速度优先？"),
+                DebateHandoff(kind="fact", text="真实成本【待核实】"),
+                DebateHandoff(kind="question", text="明年监管会不会收紧？"),
+            ],
+        ),
+    )
+    out = result.to_ceo_output()
+    assert "需你定夺" in out and "速度优先？" in out
+    assert "事实分歧" in out and "真实成本【待核实】" in out
+    assert "待解问题" in out and "明年监管会不会收紧？" in out
+    assert "仅剩需你拍板的点" not in out

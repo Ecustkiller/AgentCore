@@ -39,8 +39,12 @@ export interface AgentNodeData {
   handleDirection?: "vertical" | "horizontal";
   isSubtask?: boolean;
   isRevision?: boolean;
+  /** @deprecated Prefer {@link continuationIndex}; kept as version-shaped (index+1) for debateBeatLabel fallback. */
   revision?: number;
-  /** 真·多轮辩论轮次（1-based；0 = 非多轮）。与侧栏 RunRevisionChain 同源。 */
+  /** 接续序号（1-based）；角标「续 ×N」。 */
+  continuationIndex?: number;
+  continuesRunId?: string | null;
+  /** 真·多轮辩论轮次（1-based；0 = 非多轮）。与侧栏接续链同源。 */
   round?: number;
   /**
    * 辩论 continue_run 发言角色（陈词 / 质询 / 结辩）。来自 `run_context.channel`；
@@ -64,8 +68,8 @@ export interface AgentNodeData {
   /** 辩论配对组（`debate:*`）；与 stance 一起判定辩手 / 续轮。 */
   group?: string | null;
   /**
-   * 热修 V2+ 改点摘要：来自 `run_context` channel=`revision` 的 body
-   *（定向唤回反馈）。缺省时卡片面回退到继承的原 task。
+   * 热修 / 续派改点摘要：来自 `run_context` channel=`continuation` 的 body。
+   * 缺省时卡片面回退到继承的原 task。
    */
   revisionSummary?: string | null;
   revised?: PlanRevisionKind | null;
@@ -213,12 +217,12 @@ export function statusFaceLabel(
   }
 }
 
-/** 热修修订角标文案（v2 / v3…）；original 为 v1、不在节点上挂角标。 */
+/** 热修 / 续派角标文案（续 ×N）；非接续不挂角标。 */
 export function revisionVersionBadge(
-  revision: number | undefined,
+  continuationIndex: number | undefined,
 ): string | null {
-  if (!revision || revision <= 1) return null;
-  return `v${revision}`;
+  if (!continuationIndex || continuationIndex < 1) return null;
+  return `续 ×${continuationIndex}`;
 }
 
 const DEBATE_GROUP_PREFIX = "debate:";
@@ -232,17 +236,17 @@ export function isDebateAgentNode(
   );
 }
 
-/** 从 `run_context` 的 revision 通道抽出改点正文（唤回原因）。 */
+/** 从 `run_context` 的 continuation 通道抽出改点正文（唤回 / 续派指令）。 */
 export function revisionFeedbackSummary(
   blocks: ReadonlyArray<{ channel: string; body: string }> | null | undefined,
 ): string | null {
   if (!blocks?.length) return null;
-  const block = blocks.find((b) => b.channel === "revision");
+  const block = blocks.find((b) => b.channel === "continuation");
   const text = block?.body?.trim().replace(/\s+/g, " ");
   return text || null;
 }
 
-/** 热修 V2 卡片面一行：优先「按指示：改点」，避免只重复原 task。 */
+/** 热修 / 续派卡片面一行：优先「按指示：改点」，避免只重复原 task。 */
 export function revisionFaceHint(
   summary: string | null | undefined,
 ): string | null {
@@ -254,25 +258,32 @@ export type RevisionBadgeKind = "hotfix" | "debate";
 
 export interface RevisionBadgePresentation {
   kind: RevisionBadgeKind;
-  /** 角标可见文案：`v2` / `第 2 轮` / `第 2 轮·质询` / `结辩`。 */
+  /** 角标可见文案：`续 ×1` / `第 2 轮` / `结辩`。 */
   label: string;
   /** tooltip / title。 */
   title: string;
 }
 
 /**
- * 协作图修订角标：热修 = 铅笔 + vN（「热修修订」）；辩论可见列按 beat——续轮陈词
- * 「第 N 轮」、结辩「结辩」。质询已折进轮节点，图上不再挂「第 N 轮·质询」
- *（该文案仍留给侧栏 RunRevisionChain）。v1 / 非修订不挂角标。
+ * 协作图接续角标：multi_agent = 「续 ×N」；辩论可见列按 beat——续轮陈词
+ * 「第 N 轮」、结辩「结辩」。质询已折进轮节点，图上不再挂「第 N 轮·质询」。
+ * 非接续不挂角标。
  */
 export function buildRevisionBadge(opts: {
   isRevision?: boolean;
   revision?: number;
+  continuationIndex?: number;
   round?: number;
   isDebate: boolean;
   beat?: DebateBeat | null;
 }): RevisionBadgePresentation | null {
-  if (!opts.isRevision || !opts.revision || opts.revision <= 1) return null;
+  const idx =
+    opts.continuationIndex && opts.continuationIndex > 0
+      ? opts.continuationIndex
+      : opts.revision && opts.revision > 1
+        ? opts.revision - 1
+        : 0;
+  if (!opts.isRevision || idx < 1) return null;
   if (opts.isDebate) {
     // 协作图节点不会是 cross_exam；若误传入则不挂角标（质询态在轮内 phase）。
     if (opts.beat === "cross_exam") return null;
@@ -287,11 +298,11 @@ export function buildRevisionBadge(opts: {
       title: label,
     };
   }
-  const v = `v${opts.revision}`;
+  const v = `续 ×${idx}`;
   return {
     kind: "hotfix",
     label: v,
-    title: `热修修订 ${v}`,
+    title: `同人接续 ${v}`,
   };
 }
 

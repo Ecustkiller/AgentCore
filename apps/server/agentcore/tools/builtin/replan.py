@@ -1,7 +1,7 @@
 """replan: the CEO's 波边界续跑 primitive — finalise / re-steer and resume the SAME
 delegate plan (受监督的波循环).
 
-The third orchestration primitive after ``delegate`` / ``revise``. The ``WaveScheduler``
+The companion to ``delegate``. The ``WaveScheduler``
 YIELDs control back to the CEO at a *decision boundary* (instead of running an under- or
 mis-specified tail) for two reasons, both surfaced as a non-terminal「计划已让出」brief:
 

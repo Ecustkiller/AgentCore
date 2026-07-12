@@ -49,7 +49,6 @@ class DebateUserInterjection(WirePayload):
 class DebateCrossExamExchange(WirePayload):
     question: str
     answer: str
-    ok: bool
 
 
 class DebateCrossExam(WirePayload):
@@ -97,17 +96,22 @@ class DebateNarrativeRound(WirePayload):
     cross_exam: list[DebateCrossExam]
 
 
+class DebateHandoffInfo(WirePayload):
+    """交接清单条目：按解决路径分类（value / fact / question）。"""
+
+    kind: Literal["value", "fact", "question"]
+    text: str
+
+
 class DebateBriefInfo(WirePayload):
     crux: str
     strongest_points: dict[str, str]
     risk_severities: dict[str, str] = Field(default_factory=dict)
-    factual_disputes: list[str]
-    value_disputes: list[str]
+    handoffs: list[DebateHandoffInfo] = Field(default_factory=list)
     decisive: str = ""
     leaning: str
     confidence: str
     recommendation: str
-    open_questions: list[str]
 
 
 class DebateResultPayload(WirePayload):
@@ -134,22 +138,3 @@ class DebateRoundStartedPayload(WirePayload):
 class DebateRoundPayload(DebateRoundInfo):
     execution_id: str
     moderator_run_id: str
-
-
-class DebateRoundDecisionRequiredPayload(WirePayload):
-    execution_id: str
-    moderator_run_id: str
-    decision_id: str
-    round_no: int
-    focus: str
-    summary: str
-    converged: bool
-    rationale: str
-
-
-class DebateRoundDecisionResolvedPayload(WirePayload):
-    execution_id: str
-    moderator_run_id: str
-    decision_id: str
-    decision: Literal["continue", "conclude", "timeout", "orphaned"]
-    focus: str

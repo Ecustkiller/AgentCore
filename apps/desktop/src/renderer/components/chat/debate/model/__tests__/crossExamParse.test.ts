@@ -11,20 +11,16 @@ describe("parseCrossExamResponse", () => {
       {
         question_index: 1,
         answer: "否，量化口径未含尾部风险【待核实·推断】。",
-        directly_addressed: true,
       },
       {
         question_index: 2,
         answer: "成本由灰度预算池兜底、触发熔断即回滚【已核实·灰度预案v2】",
-        directly_addressed: true,
       },
     ];
     const got = parseCrossExamResponse(qs, JSON.stringify(payload));
     expect(got).toHaveLength(2);
     expect(got[0].answer).toContain("尾部");
-    expect(got[0].ok).toBe(true);
     expect(got[1].answer).toContain("灰度");
-    expect(got[1].ok).toBe(true);
   });
 
   it("parses JSON inside markdown fence", () => {
@@ -33,12 +29,10 @@ describe("parseCrossExamResponse", () => {
       {
         question_index: 1,
         answer: "暂无统一出处【待核实·推断】",
-        directly_addressed: false,
       },
     ])}\n\`\`\``;
     const got = parseCrossExamResponse(qs, raw);
     expect(got).toHaveLength(1);
-    expect(got[0].ok).toBe(false);
     expect(got[0].answer).toContain("出处");
   });
 
@@ -48,7 +42,21 @@ describe("parseCrossExamResponse", () => {
     const got = parseCrossExamResponse(qs, ans);
     expect(got).toHaveLength(1);
     expect(got[0].answer).toBe("");
-    expect(got[0].ok).toBe(false);
+  });
+
+  it("ignores legacy directly_addressed / ok fields", () => {
+    const qs = ["Q1"];
+    const payload = [
+      {
+        question_index: 1,
+        answer: "我承认没有数据支持【待核实·推断】",
+        directly_addressed: false,
+        ok: false,
+      },
+    ];
+    const got = parseCrossExamResponse(qs, JSON.stringify(payload));
+    expect(got[0].answer).toContain("我承认");
+    expect(got[0]).not.toHaveProperty("ok");
   });
 
   it("maps scalar string array by position (missing dict wrapper)", () => {
@@ -60,9 +68,7 @@ describe("parseCrossExamResponse", () => {
     const got = parseCrossExamResponse(qs, JSON.stringify(payload));
     expect(got).toHaveLength(2);
     expect(got[0].answer).toContain("尾部");
-    expect(got[0].ok).toBe(true);
     expect(got[1].answer).toContain("灰度");
-    expect(got[1].ok).toBe(true);
   });
 
   it("maps scalar array embedded in prose by position", () => {
@@ -70,8 +76,6 @@ describe("parseCrossExamResponse", () => {
     const raw = '作答如下：\n["答一内容", "答二内容"]\n以上。';
     const got = parseCrossExamResponse(qs, raw);
     expect(got[0].answer).toBe("答一内容");
-    expect(got[0].ok).toBe(true);
     expect(got[1].answer).toBe("答二内容");
-    expect(got[1].ok).toBe(true);
   });
 });

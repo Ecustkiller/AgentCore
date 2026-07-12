@@ -26,8 +26,9 @@ from agentcore.core.errors import (
     NotFoundError,
     ValidationError,
 )
+from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
-from agentcore.db.models import Invite, User
+from agentcore.db.models import Invite, RefreshToken, User
 from agentcore.db.repositories import (
     CredentialsRepository,
     InviteRepository,
@@ -47,9 +48,12 @@ from agentcore.security import (
 )
 from agentcore.security.tokens import TokenAudience
 
+logger = get_logger(__name__)
+
 _MIN_PASSWORD_LENGTH = 8
 _MAX_FAILED_ATTEMPTS = 5
 _LOCKOUT_DURATION = timedelta(minutes=15)
+_USER_AGENT_MAX = 512
 # Benign-concurrency grace for refresh rotation: a just-rotated token re-presented
 # within this window is treated as the *same* logical refresh, not a leak. Clients
 # routinely fire several requests at once; when the access token has expired they
@@ -88,6 +92,37 @@ class LoginResult:
     mfa_required: bool = False
     pending_token: str | None = None
     mfa_setup_required: bool = False
+
+
+@dataclass(frozen=True)
+class SessionMeta:
+    """Request-bound session bookkeeping captured at login / refresh."""
+
+    platform: ClientPlatform | None = None
+    user_agent: str | None = None
+    ip: str | None = None
+
+
+@dataclass(frozen=True)
+class AuthSession:
+    """One active login device (refresh-token family), owner-scoped."""
+
+    id: str
+    platform: str | None
+    user_agent: str | None
+    ip: str | None
+    created_at: datetime
+    last_used_at: datetime
+    current: bool
+
+
+def _truncate_ua(user_agent: str | None) -> str | None:
+    if user_agent is None:
+        return None
+    ua = user_agent.strip()
+    if not ua:
+        return None
+    return ua[:_USER_AGENT_MAX]
 
 
 class AuthService:
@@ -138,6 +173,7 @@ class AuthService:
         username: str,
         password: str,
         platform: ClientPlatform = "desktop",
+        meta: SessionMeta | None = None,
     ) -> LoginResult:
         user = await self._users.get_by_username(username.strip())
         creds = await self._credentials.get_by_user_id(user.user_id) if user else None
@@ -166,6 +202,7 @@ class AuthService:
             raise AuthenticationError("用户名或密码错误")
 
         audience = platform_to_audience(platform)
+        session_meta = meta or SessionMeta(platform=platform)
 
         if user.role == "admin":
             if (
@@ -180,7 +217,11 @@ class AuthService:
                     pending_token=pending,
                 )
             tokens = await self._issue_tokens(
-                user.user_id, family=new_id(), now=now, audience=audience
+                user.user_id,
+                family=new_id(),
+                now=now,
+                audience=audience,
+                meta=session_meta,
             )
             return LoginResult(
                 user=user,
@@ -189,7 +230,11 @@ class AuthService:
             )
 
         tokens = await self._issue_tokens(
-            user.user_id, family=new_id(), now=now, audience=audience
+            user.user_id,
+            family=new_id(),
+            now=now,
+            audience=audience,
+            meta=session_meta,
         )
         return LoginResult(user=user, tokens=tokens)
 
@@ -199,6 +244,7 @@ class AuthService:
         pending_token: str,
         code: str | None = None,
         recovery_code: str | None = None,
+        meta: SessionMeta | None = None,
     ) -> tuple[User, TokenPair]:
         if self._mfa is None:
             raise AuthenticationError("MFA not configured")
@@ -218,12 +264,20 @@ class AuthService:
         if not verified:
             raise AuthenticationError("验证码无效或已过期")
         now = datetime.now(UTC)
+        platform: ClientPlatform = "admin" if audience == "admin" else "desktop"
+        session_meta = meta or SessionMeta(platform=platform)
         tokens = await self._issue_tokens(
-            user.user_id, family=new_id(), now=now, audience=audience
+            user.user_id,
+            family=new_id(),
+            now=now,
+            audience=audience,
+            meta=session_meta,
         )
         return user, tokens
 
-    async def refresh(self, *, refresh_token: str) -> TokenPair:
+    async def refresh(
+        self, *, refresh_token: str, meta: SessionMeta | None = None
+    ) -> TokenPair:
         record = await self._refresh_tokens.get_by_hash(hash_refresh_token(refresh_token))
         now = datetime.now(UTC)
 
@@ -235,6 +289,13 @@ class AuthService:
         if record.revoked_at is not None:
             await self._refresh_tokens.revoke_family(record.token_family)
             raise AuthenticationError("Refresh token reuse detected")
+
+        # Absolute family ceiling (sliding renewals must not outlive this).
+        try:
+            self._assert_family_within_max(record, now=now)
+        except AuthenticationError:
+            await self._refresh_tokens.revoke_family(record.token_family)
+            raise
 
         # Already rotated: benign concurrent retry vs. a real replay/leak. Inside
         # the grace window it's the same logical refresh (the access token expired
@@ -250,6 +311,8 @@ class AuthService:
                 family=record.token_family,
                 now=now,
                 audience=record.client_aud,  # type: ignore[arg-type]
+                meta=self._meta_for_refresh(record, meta),
+                family_started_at=record.family_started_at,
             )
 
         if record.expires_at <= now:
@@ -261,12 +324,65 @@ class AuthService:
             family=record.token_family,
             now=now,
             audience=record.client_aud,  # type: ignore[arg-type]
+            meta=self._meta_for_refresh(record, meta),
+            family_started_at=record.family_started_at,
         )
 
     async def logout(self, *, refresh_token: str) -> None:
         record = await self._refresh_tokens.get_by_hash(hash_refresh_token(refresh_token))
         if record is not None:
             await self._refresh_tokens.revoke_family(record.token_family)
+
+    # --- sessions (device management) ---
+
+    async def list_sessions(
+        self, *, user_id: str, current_family: str | None
+    ) -> list[AuthSession]:
+        """List active login devices for ``user_id``, aggregated by token family."""
+        tips = await self._refresh_tokens.list_active_session_tips(user_id=user_id)
+        by_family: dict[str, RefreshToken] = {}
+        for tip in tips:
+            prev = by_family.get(tip.token_family)
+            if prev is None or tip.last_used_at >= prev.last_used_at:
+                by_family[tip.token_family] = tip
+        sessions = [
+            AuthSession(
+                id=row.token_family,
+                platform=row.client_platform,
+                user_agent=row.user_agent,
+                ip=row.ip,
+                created_at=row.family_started_at,
+                last_used_at=row.last_used_at,
+                current=bool(current_family and row.token_family == current_family),
+            )
+            for row in by_family.values()
+        ]
+        sessions.sort(key=lambda s: s.last_used_at, reverse=True)
+        return sessions
+
+    async def revoke_session(self, *, user_id: str, family_id: str) -> None:
+        """Revoke one device family. Non-owner / unknown → 404 (no existence leak)."""
+        owned = await self._refresh_tokens.family_belongs_to_user(
+            user_id=user_id, token_family=family_id
+        )
+        if not owned:
+            raise NotFoundError("会话不存在")
+        await self._refresh_tokens.revoke_family(family_id)
+        logger.info("auth.session_revoked", user_id=user_id, family_id=family_id)
+
+    async def revoke_other_sessions(self, *, user_id: str, current_family: str) -> None:
+        """Revoke every family except the caller's current one.
+
+        Requires a ``fam`` claim on the access token so "current" is well-defined —
+        legacy tokens without ``fam`` get 422 rather than silently logging the caller
+        out (revoke-all) or guessing which family to keep.
+        """
+        await self._refresh_tokens.revoke_other_families(
+            user_id, keep_family=current_family
+        )
+        logger.info(
+            "auth.sessions_revoke_others", user_id=user_id, keep_family=current_family
+        )
 
     # --- invites (admin) ---
 
@@ -509,20 +625,60 @@ class AuthService:
         family: str,
         now: datetime,
         audience: TokenAudience = "product",
+        meta: SessionMeta | None = None,
+        family_started_at: datetime | None = None,
     ) -> TokenPair:
         raw, token_hash = generate_refresh_token()
         expires_at = now + timedelta(days=settings.jwt_refresh_token_expire_days)
+        platform = meta.platform if meta else None
         await self._refresh_tokens.create(
             user_id=user_id,
             token_hash=token_hash,
             token_family=family,
             expires_at=expires_at,
             client_aud=audience,
+            client_platform=platform,
+            user_agent=_truncate_ua(meta.user_agent if meta else None),
+            ip=meta.ip if meta else None,
+            family_started_at=family_started_at or now,
+            last_used_at=now,
         )
         return TokenPair(
-            access_token=create_access_token(user_id, audience=audience),
+            access_token=create_access_token(
+                user_id, audience=audience, family=family
+            ),
             refresh_token=raw,
         )
+
+    def _meta_for_refresh(
+        self, record: RefreshToken, request_meta: SessionMeta | None
+    ) -> SessionMeta:
+        """Inherit platform from the family; refresh IP/UA from the current request
+        when provided so the session list reflects latest activity location."""
+        raw_platform = record.client_platform
+        platform: ClientPlatform | None = (
+            raw_platform if raw_platform in ("desktop", "mobile", "admin") else None  # type: ignore[assignment]
+        )
+        if request_meta is None:
+            return SessionMeta(
+                platform=platform,
+                user_agent=record.user_agent,
+                ip=record.ip,
+            )
+        return SessionMeta(
+            platform=platform,
+            user_agent=request_meta.user_agent or record.user_agent,
+            ip=request_meta.ip or record.ip,
+        )
+
+    def _assert_family_within_max(self, record: RefreshToken, *, now: datetime) -> None:
+        started = record.family_started_at
+        if record.client_aud == "admin":
+            max_age = timedelta(hours=settings.admin_refresh_family_max_hours)
+        else:
+            max_age = timedelta(days=settings.refresh_family_max_days)
+        if now - started > max_age:
+            raise AuthenticationError("Refresh token family expired")
 
     async def _register_failure(self, user_id: str, current_attempts: int, now: datetime) -> None:
         new_attempts = current_attempts + 1

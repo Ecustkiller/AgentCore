@@ -1,4 +1,3 @@
-import type { DebateSeed } from "@/components/chat/debate/seed";
 import { StreamError } from "@/lib/errors";
 import {
   BASE_URL,
@@ -203,8 +202,14 @@ export async function attachConversation(
   try {
     let response = await fetchWithConnectTimeout(doFetch, signal);
     if (response.status === 401) {
-      if (await tryRefresh()) {
+      const outcome = await tryRefresh();
+      if (outcome === "renewed") {
         response = await fetchWithConnectTimeout(doFetch, signal);
+      } else if (outcome === "auth_dead") {
+        notifyUnauthorized();
+        throw new StreamError("auth");
+      } else {
+        throw new StreamError("network");
       }
       if (response.status === 401) {
         notifyUnauthorized();
@@ -264,8 +269,14 @@ async function runMessageStream(
       ok: response.ok,
     });
     if (response.status === 401) {
-      if (await tryRefresh()) {
+      const outcome = await tryRefresh();
+      if (outcome === "renewed") {
         response = await fetchWithConnectTimeout(doFetch, signal);
+      } else if (outcome === "auth_dead") {
+        notifyUnauthorized();
+        throw new StreamError("auth");
+      } else {
+        throw new StreamError("network");
       }
       if (response.status === 401) {
         notifyUnauthorized();
@@ -306,9 +317,6 @@ export interface StreamConversationOptions {
   conversationId: string;
   content: string;
   attachments?: OutgoingAttachment[];
-  /** 续辩种子（结构化补轮·B / 可逆叫停）：非空 = 本回合 debate 续上一场。落到请求体的
-   *  `debate_seed`（snake_case，对齐 `SendMessageRequest.debate_seed`）。 */
-  debateSeed?: DebateSeed;
   signal?: AbortSignal;
 }
 
@@ -317,12 +325,10 @@ export async function streamConversation({
   conversationId,
   content,
   attachments,
-  debateSeed,
   signal,
 }: StreamConversationOptions): Promise<void> {
   const payload: Record<string, unknown> = { content };
   if (attachments && attachments.length > 0) payload.attachments = attachments;
-  if (debateSeed) payload.debate_seed = debateSeed;
   await runMessageStream(
     `/v1/conversations/${conversationId}/messages`,
     JSON.stringify(payload),

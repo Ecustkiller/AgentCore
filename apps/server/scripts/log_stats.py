@@ -64,9 +64,9 @@ def _accumulate_trace(rec: dict, event: str, obj: dict) -> None:
         rec["contract_retry"] += 1
     elif event == "contract.failed":
         rec["contract_failed"] += 1
-    elif event == "revise.started":
+    elif event == "revise.started" or event == "delegate.continuation_ok":
         rec["revise"] += 1
-    elif event == "run.revise_failed":
+    elif event == "run.revise_failed" or event == "run.continuation_failed":
         rec["revise_failed"] += 1
     elif event == "delegate.started":
         rec["delegated"] = True

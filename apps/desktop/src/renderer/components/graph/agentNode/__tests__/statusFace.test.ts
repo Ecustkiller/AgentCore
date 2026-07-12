@@ -37,47 +37,50 @@ describe("statusFaceLabel", () => {
 });
 
 describe("revisionVersionBadge", () => {
-  it("returns vN for hot-fix revision nodes only", () => {
+  it("returns 续 ×N for continuation nodes only", () => {
     expect(revisionVersionBadge(0)).toBeNull();
-    expect(revisionVersionBadge(1)).toBeNull();
-    expect(revisionVersionBadge(2)).toBe("v2");
-    expect(revisionVersionBadge(3)).toBe("v3");
+    expect(revisionVersionBadge(1)).toBe("续 ×1");
+    expect(revisionVersionBadge(2)).toBe("续 ×2");
+    expect(revisionVersionBadge(3)).toBe("续 ×3");
   });
 });
 
 describe("revisionFeedbackSummary", () => {
-  it("reads body from channel=revision", () => {
+  it("reads body from channel=continuation", () => {
     expect(
       revisionFeedbackSummary([
         { channel: "task", body: "起草" },
-        { channel: "revision", body: "  补一段风险对冲，并收紧结论口径。  " },
+        {
+          channel: "continuation",
+          body: "  补一段风险对冲，并收紧结论口径。  ",
+        },
       ]),
     ).toBe("补一段风险对冲，并收紧结论口径。");
   });
 
-  it("returns null when revision block missing or empty", () => {
+  it("returns null when continuation block missing or empty", () => {
     expect(
       revisionFeedbackSummary([{ channel: "task", body: "起草" }]),
     ).toBeNull();
     expect(
-      revisionFeedbackSummary([{ channel: "revision", body: "   " }]),
+      revisionFeedbackSummary([{ channel: "continuation", body: "   " }]),
     ).toBeNull();
     expect(revisionFeedbackSummary(undefined)).toBeNull();
   });
 });
 
 describe("buildRevisionBadge", () => {
-  it("hot-fix keeps pencil semantics (vN + 热修修订 title)", () => {
+  it("hot-fix uses 续 ×N badge", () => {
     expect(
       buildRevisionBadge({
         isRevision: true,
-        revision: 2,
+        continuationIndex: 1,
         isDebate: false,
       }),
     ).toEqual({
       kind: "hotfix",
-      label: "v2",
-      title: "热修修订 v2",
+      label: "续 ×1",
+      title: "同人接续 续 ×1",
     });
   });
 
@@ -85,6 +88,7 @@ describe("buildRevisionBadge", () => {
     expect(
       buildRevisionBadge({
         isRevision: true,
+        continuationIndex: 1,
         revision: 2,
         round: 3,
         isDebate: true,
@@ -101,6 +105,7 @@ describe("buildRevisionBadge", () => {
     expect(
       buildRevisionBadge({
         isRevision: true,
+        continuationIndex: 1,
         revision: 2,
         round: 2,
         isDebate: true,
@@ -113,6 +118,7 @@ describe("buildRevisionBadge", () => {
     expect(
       buildRevisionBadge({
         isRevision: true,
+        continuationIndex: 3,
         revision: 4,
         round: 2,
         isDebate: true,
@@ -136,7 +142,7 @@ describe("buildRevisionBadge", () => {
     ).toBe("第 2 轮");
   });
 
-  it("skips v1 / non-revision", () => {
+  it("skips non-continuation", () => {
     expect(
       buildRevisionBadge({ isRevision: false, revision: 2, isDebate: false }),
     ).toBeNull();
@@ -163,27 +169,29 @@ function baseNode(extra: Partial<AgentNodeData> = {}): AgentNodeData {
 }
 
 describe("buildAgentNodePresentation revision face", () => {
-  it("hot-fix V2 exposes 按指示 hint and hotfix badge", () => {
+  it("continuation exposes 按指示 hint and 续 ×N badge", () => {
     const p = buildAgentNodePresentation(
       baseNode({
         isRevision: true,
+        continuationIndex: 1,
         revision: 2,
         revisionSummary: "补一段风险对冲",
       }),
     );
     expect(p.revisionBadge).toEqual({
       kind: "hotfix",
-      label: "v2",
-      title: "热修修订 v2",
+      label: "续 ×1",
+      title: "同人接续 续 ×1",
     });
     expect(p.revisionFaceHint).toBe("按指示：补一段风险对冲");
-    expect(p.peekTags).toContain("热修修订 v2");
+    expect(p.peekTags).toContain("接续 撰写员 的现场 · 续 ×1");
   });
 
   it("debate continuation badge is 第 N 轮 without 热修修订", () => {
     const p = buildAgentNodePresentation(
       baseNode({
         isRevision: true,
+        continuationIndex: 1,
         revision: 2,
         round: 2,
         stance: "pro",

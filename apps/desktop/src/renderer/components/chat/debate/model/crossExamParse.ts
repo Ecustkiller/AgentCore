@@ -2,12 +2,12 @@
  *
  * 权威路径是结构化 ``cross_exam[].exchanges[]``（收场后由后端解析下发）；本模块仅在 live
  * 流式阶段、从 ``_cx_`` run 的 ``outputChunks`` 重建作答时调用。dict 项按 ``question_index``；
- * 标量字符串/数字数组按位置映射。非 JSON 作答在结构化事件到达前保持空 answer。 */
+ * 标量字符串/数字数组按位置映射。非 JSON 作答在结构化事件到达前保持空 answer。
+ * 只对齐问↔答；是否正面回应由裁判裁定，本模块不产出二元褒贬字段。 */
 
 export interface CrossExamQaView {
   question: string;
   answer: string;
-  ok: boolean;
 }
 
 const JSON_ARRAY_FENCE_RE = /```(?:json)?\s*(\[.*?\])\s*```/s;
@@ -25,7 +25,7 @@ export function parseCrossExamResponse(
     return exchangesFromJsonItems(qs, items);
   }
 
-  return qs.map((question) => ({ question, answer: "", ok: false }));
+  return qs.map((question) => ({ question, answer: "" }));
 }
 
 function extractJsonArray(content: string): unknown[] | null {
@@ -59,7 +59,6 @@ function exchangesFromJsonItems(
   const out: CrossExamQaView[] = questions.map((question) => ({
     question,
     answer: "",
-    ok: false,
   }));
   items.forEach((raw, pos) => {
     // dict 项：按 question_index / 位置取 answer
@@ -68,8 +67,7 @@ function exchangesFromJsonItems(
       const idx = resolveQuestionIndex(item.question_index, pos);
       if (idx === null || idx < 0 || idx >= out.length) return;
       const answer = asAnswerText(item.answer);
-      const ok = resolveDirectlyAddressed(item, answer);
-      out[idx] = { question: questions[idx], answer, ok };
+      out[idx] = { question: questions[idx], answer };
       return;
     }
     // 标量数组：按位置映射为 answer（兼容少包一层 wrapper 的 ["答一","答二"]）
@@ -79,7 +77,6 @@ function exchangesFromJsonItems(
     out[pos] = {
       question: questions[pos],
       answer,
-      ok: Boolean(answer.trim()),
     };
   });
   return out;
@@ -106,15 +103,4 @@ function asAnswerText(value: unknown): string {
   if (typeof value === "string") return value.trim();
   if (value == null) return "";
   return String(value).trim();
-}
-
-function resolveDirectlyAddressed(
-  item: Record<string, unknown>,
-  answer: string,
-): boolean {
-  for (const key of ["directly_addressed", "ok"] as const) {
-    const val = item[key];
-    if (typeof val === "boolean") return val;
-  }
-  return Boolean(answer.trim());
 }

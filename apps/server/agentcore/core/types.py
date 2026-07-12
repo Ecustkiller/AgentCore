@@ -43,12 +43,13 @@ class ToolApproval(StrEnum):
 
 
 class AutonomyPolicy(StrEnum):
-    """User-global capability-authorization posture (能力授权维度；不动计划确认).
+    """User-global kickoff / capability-authorization posture.
 
     - ``always_ask`` — every GRANTABLE call prompts; kickoff has no grant shortcut
     - ``first_grant`` — kickoff once authorizes the grantable set for the delegation
       (default; continuous with the prior delegation-authorization card)
-    - ``full_auto`` — kickoff auto-grants without listing capability items
+    - ``full_auto`` — skip the kickoff card entirely (plan + capability); silent
+      auto-grant of GRANTABLE tools for the delegation
     """
 
     ALWAYS_ASK = "always_ask"

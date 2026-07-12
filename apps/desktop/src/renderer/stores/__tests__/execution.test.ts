@@ -1,7 +1,6 @@
 import type { DebateResultPayload, SSEEvent } from "@/types/events";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  type DebateRoundDecision,
   type ExecutionJournal,
   type ExecutionPlan,
   type RunFrame,
@@ -10,7 +9,6 @@ import {
   debateSides,
   elapsedMs,
   execRuntime,
-  foldDebateDecision,
   frameFromEvent,
   hasRevisions,
   isDebate,
@@ -57,18 +55,17 @@ function started(agentId: string, runId: string, t = 1): RunFrame {
     runId,
     parentRunId: null,
     runKind: "agent",
-    revision: 0,
+    continuesRunId: null,
   };
 }
 
-/** A 定向唤回 续写 (乙 热修 P4) run_started frame: a revision of `parentRunId`, born
- * outside the plan, carrying its version number (original = v1, so first rev = v2). */
-function revised(
+/** 同人接续 run_started：未入 plan，continuesRunId 指现场根（星型）。 */
+function continued(
   runId: string,
-  parentRunId: string,
-  revision: number,
+  continuesRunId: string,
   t = 1,
   round?: number,
+  parentRunId: string | null = null,
 ): Extract<RunFrame, { kind: "run_started" }> {
   return {
     t,
@@ -77,9 +74,20 @@ function revised(
     runId,
     parentRunId,
     runKind: "agent",
-    revision,
+    continuesRunId,
     ...(round != null ? { round } : {}),
   };
+}
+
+/** @deprecated test alias — parent arg is the continues root. */
+function revised(
+  runId: string,
+  continuesRunId: string,
+  _revision: number,
+  t = 1,
+  round?: number,
+): Extract<RunFrame, { kind: "run_started" }> {
+  return continued(runId, continuesRunId, t, round);
 }
 
 beforeEach(() => {
@@ -244,7 +252,7 @@ describe("projectExecution (fold)", () => {
         runId: "run-1-redir",
         parentRunId: null,
         runKind: "agent",
-        revision: 0,
+        continuesRunId: null,
         replacesRunId: "run-1",
       },
     ];
@@ -343,7 +351,7 @@ describe("projectExecution (fold)", () => {
         runId: "run-1",
         parentRunId: "del0_root",
         runKind: "captain",
-        revision: 0,
+        continuesRunId: null,
       },
     ];
     const run = projectExecution(plan, frames, "running").runs.find(
@@ -1614,12 +1622,14 @@ describe("辩论/审查 display tags (前端UX设计.md §四)", () => {
     brief: {
       crux: "团队规模是否撑得起微服务运维",
       strongest_points: { pro: "可独立扩展", con: "运维成本高" },
-      factual_disputes: ["当前 QPS 峰值口径不一致"],
-      value_disputes: ["迭代速度优先 vs 稳定优先"],
+      handoffs: [
+        { kind: "value", text: "迭代速度优先 vs 稳定优先" },
+        { kind: "fact", text: "当前 QPS 峰值口径不一致" },
+        { kind: "question", text: "触发拆分的指标阈值如何设定？" },
+      ],
       leaning: "倾向暂缓",
       confidence: "medium",
       recommendation: "先做模块化单体，规模上来再按域拆分。",
-      open_questions: ["触发拆分的指标阈值如何设定？"],
     },
   };
 
@@ -1954,19 +1964,21 @@ describe("定向唤回 版本链 (乙 热修 P4)", () => {
     };
   }
 
-  it("ordinary runs default to no revision (revisionOf null, revision 0)", () => {
-    // 续写 is the only thing that marks a run as a revision; a plain plan must
+  it("ordinary runs default to no continuation (continuesRunId null, index 0)", () => {
+    // 接续 is the only thing that marks a run; a plain plan must
     // project null/0 (not a stray version).
     const exec = projectExecution(plan, [], "running");
     expect(
-      exec.runs.every((r) => r.revisionOf === null && r.revision === 0),
+      exec.runs.every(
+        (r) => r.continuesRunId === null && r.continuationIndex === 0,
+      ),
     ).toBe(true);
     expect(hasRevisions(exec)).toBe(false);
     expect(revisionChains(exec)).toEqual([]);
   });
 
-  it("synthesizes a 修订 node + agent from a revision run_started (not in plan)", () => {
-    // A revision is born from its frame, NOT the plan — so without synthesis it
+  it("synthesizes a 接续 node + agent from a continues_run_id run_started (not in plan)", () => {
+    // A continuation is born from its frame, NOT the plan — so without synthesis it
     // would be dropped. It must materialize, hang off the original, and fold its
     // own output through the inherited (original) display identity.
     const frames: RunFrame[] = [
@@ -1981,9 +1993,8 @@ describe("定向唤回 版本链 (乙 热修 P4)", () => {
 
     const rev = exec.runs.find((r) => r.id === "run-1_rev1");
     expect(rev).toBeTruthy();
-    expect(rev?.revisionOf).toBe("run-1");
-    expect(rev?.revision).toBe(2);
-    expect(rev?.parentRunId).toBe("run-1");
+    expect(rev?.continuesRunId).toBe("run-1");
+    expect(rev?.continuationIndex).toBe(1);
     expect(rev?.status).toBe("completed");
     // inherits the original worker's display role (not the raw run id)
     const revAgent = exec.agents.find((a) => a.id === "run-1_rev1");
@@ -2001,16 +2012,16 @@ describe("定向唤回 版本链 (乙 热修 P4)", () => {
     expect(exec.runs).toHaveLength(3); // only the plan's own runs
   });
 
-  it("revisionChains builds v1 原始 + 续写 in ascending version order", () => {
-    // rev2 (v3) arrives BEFORE rev1 (v2) to prove the chain sorts by version, not
-    // arrival — every version is kept (P-2 保留版本链), original first.
+  it("revisionChains builds 现场根 + 续写 in event/continuationIndex order", () => {
+    // Wire 已无 revision 序号；链序由事件序（continuationIndex）保证。
+    // 先到的续写是 续×1，后到的是 续×2。
     const frames: RunFrame[] = [
       started("agent-1", "run-1"),
       completed("run-1", "agent-1", 2),
-      revised("run-1_rev2", "run-1", 3, 3),
-      completed("run-1_rev2", "run-1_rev2", 4),
-      revised("run-1_rev1", "run-1", 2, 5),
-      completed("run-1_rev1", "run-1_rev1", 6),
+      revised("run-1_rev_a", "run-1", 2, 3),
+      completed("run-1_rev_a", "run-1_rev_a", 4),
+      revised("run-1_rev_b", "run-1", 3, 5),
+      completed("run-1_rev_b", "run-1_rev_b", 6),
     ];
     const exec = projectExecution(plan, frames, "completed");
 
@@ -2021,8 +2032,8 @@ describe("定向唤回 版本链 (乙 热修 P4)", () => {
     expect(chains[0].versions.map((v) => v.version)).toEqual([1, 2, 3]);
     expect(chains[0].versions.map((v) => v.run.id)).toEqual([
       "run-1",
-      "run-1_rev1",
-      "run-1_rev2",
+      "run-1_rev_a",
+      "run-1_rev_b",
     ]);
   });
 
@@ -2123,8 +2134,8 @@ describe("乙 wire 携 round/stance (单一轮次投影)", () => {
       stance: "pro",
       group: "debate:debate",
       round: 2,
-      revision: 2,
-      revisionOf: "pro1",
+      continuationIndex: 1,
+      continuesRunId: "pro1",
     });
   });
 
@@ -2150,124 +2161,7 @@ describe("乙 wire 携 round/stance (单一轮次投影)", () => {
   });
 });
 
-// 交互式逐轮辩论决策 (opt-in, 辩论编排设计.md §逐轮交互): the Moderator suspends at a round
-// boundary; `debate_round_decision_required` appends a `pending` card and its `_resolved` twin
-// settles it. Desktop-live & transport-only (not journaled) — folded by foldDebateDecision, NOT
-// projected from frames, and STRIPPED from the conformance ProjectedTurn.
-describe("交互式逐轮辩论决策 (foldDebateDecision, §逐轮交互)", () => {
-  const required = (
-    id: string,
-    roundNo: number,
-    converged: boolean,
-  ): Parameters<typeof foldDebateDecision>[1] => ({
-    kind: "required",
-    id,
-    moderatorRunId: "mod-1",
-    roundNo,
-    focus: `第 ${roundNo} 轮焦点`,
-    summary: `第 ${roundNo} 轮小结`,
-    converged,
-    rationale: "裁判判读",
-  });
-
-  it("required appends a pending card carrying the judge's read (decisionFocus empty)", () => {
-    const out = foldDebateDecision([], required("d-1", 1, false));
-    expect(out).toEqual<DebateRoundDecision[]>([
-      {
-        id: "d-1",
-        moderatorRunId: "mod-1",
-        roundNo: 1,
-        focus: "第 1 轮焦点",
-        summary: "第 1 轮小结",
-        converged: false,
-        rationale: "裁判判读",
-        status: "pending",
-        decisionFocus: "",
-      },
-    ]);
-  });
-
-  it("resolved continue settles to continued and keeps 加角度 as decisionFocus", () => {
-    const pending = foldDebateDecision([], required("d-1", 1, false));
-    const out = foldDebateDecision(pending, {
-      kind: "resolved",
-      id: "d-1",
-      decision: "continue",
-      focus: "聚焦成本",
-    });
-    expect(out[0]).toMatchObject({
-      status: "continued",
-      decisionFocus: "聚焦成本",
-    });
-  });
-
-  it("resolved conclude settles to concluded with no decisionFocus", () => {
-    const pending = foldDebateDecision([], required("d-1", 1, true));
-    const out = foldDebateDecision(pending, {
-      kind: "resolved",
-      id: "d-1",
-      decision: "conclude",
-      focus: "",
-    });
-    expect(out[0]).toMatchObject({ status: "concluded", decisionFocus: "" });
-  });
-
-  it("resolved timeout settles to timeout (裁判自动收敛接管, decisionFocus dropped)", () => {
-    const pending = foldDebateDecision([], required("d-1", 1, true));
-    const out = foldDebateDecision(pending, {
-      kind: "resolved",
-      id: "d-1",
-      // A timeout never carries a user 加角度, even if the wire echoed one.
-      decision: "timeout",
-      focus: "ignored",
-    });
-    expect(out[0]).toMatchObject({ status: "timeout", decisionFocus: "" });
-  });
-
-  it("a resolve for an unknown id is a safe no-op (stale / already gone)", () => {
-    const pending = foldDebateDecision([], required("d-1", 1, false));
-    const out = foldDebateDecision(pending, {
-      kind: "resolved",
-      id: "ghost",
-      decision: "conclude",
-      focus: "",
-    });
-    expect(out).toBe(pending);
-  });
-
-  it("keeps multiple rounds' cards in fire order, settling each by id", () => {
-    let list = foldDebateDecision([], required("d-1", 1, false));
-    list = foldDebateDecision(list, {
-      kind: "resolved",
-      id: "d-1",
-      decision: "continue",
-      focus: "",
-    });
-    list = foldDebateDecision(list, required("d-2", 2, true));
-    expect(list.map((d) => d.id)).toEqual(["d-1", "d-2"]);
-    expect(list.map((d) => d.status)).toEqual(["continued", "pending"]);
-  });
-
-  it("a re-fired required for the same id replaces the card (defensive)", () => {
-    const first = foldDebateDecision([], required("d-1", 1, false));
-    const again = foldDebateDecision(first, required("d-1", 1, true));
-    expect(again).toHaveLength(1);
-    expect(again[0].converged).toBe(true);
-  });
-
-  it("projectExecution carries debateDecisions verbatim, defaulting to []", () => {
-    expect(projectExecution(plan, [], "running").debateDecisions).toEqual([]);
-    const decisions = foldDebateDecision([], required("d-1", 1, false));
-    const exec = projectExecution(plan, [], "running", null, [], decisions);
-    expect(exec.debateDecisions).toBe(decisions);
-  });
-
-  it("debate_round decisions live in InteractionStore (execution slot stays empty)", () => {
-    store().startExecution(plan, MID);
-    // Live SSE path writes InteractionStore only — execution.debateDecisions retired.
-    expect(rt().debateDecisions).toEqual([]);
-  });
-
+describe("worker tool_use_progress overlay", () => {
   it("overlays worker tool_use_progress onto the matching agent by run_id", () => {
     store().startExecution(plan, MID);
     store().recordFrame(started("agent-1", "run-1"), MID);

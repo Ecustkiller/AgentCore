@@ -246,8 +246,8 @@ export function projectFlowNodes({
     while (!seen.has(cur)) {
       seen.add(cur);
       const r = runById.get(cur);
-      if (!r?.revisionOf || r.revisionOf === cur) break;
-      cur = r.revisionOf;
+      if (!r?.continuesRunId || r.continuesRunId === cur) break;
+      cur = r.continuesRunId;
     }
     return cur;
   };
@@ -362,9 +362,9 @@ export function projectFlowNodes({
         : null;
     const focused =
       litRunId === run.id || foldedCx.some((r) => r.id === litRunId);
-    const isRevision = run.revision > 0;
+    const isContinuation = run.continuesRunId != null;
     const isSubtask =
-      !isRevision &&
+      !isContinuation &&
       !!run.parentRunId &&
       run.parentRunId !== run.id &&
       workerIdSet.has(run.parentRunId);
@@ -421,10 +421,12 @@ export function projectFlowNodes({
         costText: costTotal > 0 ? formatCost(costTotal, cnyPerUsd) : undefined,
         handleDirection,
         isSubtask,
-        isRevision,
-        revision: run.revision,
+        isRevision: isContinuation,
+        revision: run.continuationIndex > 0 ? run.continuationIndex + 1 : 0,
+        continuationIndex: run.continuationIndex,
+        continuesRunId: run.continuesRunId,
         round: run.round,
-        debateBeat: isRevision
+        debateBeat: isContinuation
           ? debateBeatFromContext(run.receivedContext)
           : null,
         debateRoundPhase: phaseLabel,
@@ -434,7 +436,7 @@ export function projectFlowNodes({
             ? () => activateNode(cxActivateId)
             : undefined,
         group: run.group,
-        revisionSummary: isRevision
+        revisionSummary: isContinuation
           ? revisionFeedbackSummary(run.receivedContext)
           : null,
         revised: run.revised,

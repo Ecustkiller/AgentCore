@@ -80,7 +80,10 @@ async function renderOnce(engine) {
   });
   const url = new URL(base);
   url.searchParams.set("engine", engine);
-  const resp = await page.goto(url.href, { waitUntil: "load", timeout: 30_000 });
+  const resp = await page.goto(url.href, {
+    waitUntil: "load",
+    timeout: 30_000,
+  });
   console.log(
     `   [doc CSP header] ${resp?.headers()["content-security-policy"] ?? "(none)"}`,
   );
@@ -97,7 +100,9 @@ async function renderOnce(engine) {
 
 const results = {};
 for (const e of engines) {
-  console.log(`\n渲染 ${e}（全程无点击${useCsp ? " · 已盖修复后 CSP img-src 'self' data:" : ""}）……`);
+  console.log(
+    `\n渲染 ${e}（全程无点击${useCsp ? " · 已盖修复后 CSP img-src 'self' data:" : ""}）……`,
+  );
   results[e] = await renderOnce(e);
 }
 
@@ -109,8 +114,12 @@ for (const e of engines) {
   const r = results[e];
   console.log(
     `${e.padEnd(14)}：真命中（收到回包）${r.hits.length} 次 · 被拦 ${r.blocked.length} 次` +
-      (r.hits.length ? `\n     ✗ 出网 → ${r.hits.join("\n     ✗ 出网 → ")}` : "") +
-      (r.blocked.length ? `\n     ✓ 拦下 → ${r.blocked.join("\n     ✓ 拦下 → ")}` : "") +
+      (r.hits.length
+        ? `\n     ✗ 出网 → ${r.hits.join("\n     ✗ 出网 → ")}`
+        : "") +
+      (r.blocked.length
+        ? `\n     ✓ 拦下 → ${r.blocked.join("\n     ✓ 拦下 → ")}`
+        : "") +
       (r.err ? `\n     (render error: ${r.err})` : ""),
   );
 }

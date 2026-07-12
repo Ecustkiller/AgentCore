@@ -6,29 +6,26 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
-from agentcore.core.types import ToolApproval, ToolCategory, new_id
+from agentcore.core.types import AutonomyPolicy, ToolApproval, ToolCategory, ToolEffect, new_id
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
 from agentcore.llm.profiles import default_turn_profiles as default_profile_set
 from agentcore.llm.provider.protocol import LLMProvider
+from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.debate import (
     DebateConfig,
-    DebateSeed,
     Moderator,
     RoundBoundary,
-    RoundDecision,
     RoundPolicy,
     RoundResult,
 )
+from agentcore.runtime.debate.steer_queue import fold_steers, take_steers
 from agentcore.runtime.events import (
     EventSink,
     debate_result,
     debate_round,
-    debate_round_decision_required,
-    debate_round_decision_resolved,
     debate_round_started,
     run_started,
 )
-from agentcore.runtime.interaction import InteractionKind
 from agentcore.tools.builtin.debate.events import account_moderator, moderator_plan_event
 from agentcore.tools.builtin.debate.rounds import (
     make_closing_runner,
@@ -40,6 +37,7 @@ from agentcore.tools.builtin.debate.schema import (
     DEBATE_OUTPUT_LIMIT,
     DEBATE_PARAMETERS,
     err,
+    parse_background,
     parse_form,
     parse_sides,
 )
@@ -49,8 +47,9 @@ from agentcore.tools.registry import ToolRegistry
 if TYPE_CHECKING:
     from agentcore.runtime.approvals import ApprovalGate
     from agentcore.runtime.costing import RunCost
-    from agentcore.runtime.interaction import InteractionRegistry
+    from agentcore.runtime.ports import ClientRequestBridge
     from agentcore.runtime.runs.session import RunSession
+    from agentcore.runtime.suspension import SuspensionDeleter, SuspensionSaver
 
 logger = get_logger(__name__)
 
@@ -61,6 +60,9 @@ class DebateTool:
     持有与 ``DelegateTool`` 同形的「用量 + 账目 + 引用」累加器（``_acc``），辩手 run（首轮
     executor、后续轮 continue_run）与主持人自身 LLM 调用都折算进去，由 pipeline 折回回合总账。
     ``_debater_sessions`` 按 side.key 留住每个辩手的可续写 session，支撑跨轮带记忆。
+
+    顶层调用在主持人循环启动前走编排层开工卡（``team_preview``，primitive=debate）；
+    嵌套 / 续跑 / full_auto 跳过语义对齐 delegate。
     """
 
     def __init__(
@@ -77,11 +79,15 @@ class DebateTool:
         captain_run_id: str | None = None,
         approval_gate: ApprovalGate | None = None,
         depth: int = 0,
-        registry: InteractionRegistry | None = None,
         conversation_id: str = "",
-        round_decision_timeout: float | None = None,
-        interactive_armed: bool = False,
-        prior_seed: DebateSeed | None = None,
+        ambient_armed: bool = False,
+        message_id: str | None = None,
+        suspension_saver: SuspensionSaver | None = None,
+        suspension_deleter: SuspensionDeleter | None = None,
+        folder_id: str | None = None,
+        memory_enabled: bool = True,
+        autonomy_policy: AutonomyPolicy | None = None,
+        registry: ClientRequestBridge | None = None,
     ) -> None:
         self._llm = llm
         self._sink = sink
@@ -94,22 +100,30 @@ class DebateTool:
         self._captain_run_id = captain_run_id
         self._approval_gate = approval_gate
         self._depth = depth
-        # 交互式逐轮（opt-in）的挂起桥接：``registry`` 是统一交互桥（与 ask_user/escalate 同一个）；
-        # ``interactive_armed`` 是「有活跃用户」闸（同 ask_user 的 checkpoint 闸）——无活跃用户
-        # （自治 / handoff）即便 debate(interactive=true) 也回落到主持人自判收敛，不挂起。
-        self._registry = registry
+        # ambient 掌舵闸：有活跃用户即武装（同 ask_user 的 checkpoint 闸）——无活跃用户
+        # （自治 / handoff）不挂 on_round_boundary，辩论纯裁判自判；有用户则轮次边界非阻塞
+        # drain steer 队列（永不硬停）。
         self._conversation_id = conversation_id
-        self._round_decision_timeout = round_decision_timeout
-        self._interactive_armed = interactive_armed
-        # 结构化补轮·B（可逆叫停）：上一场辩论的结构化种子（前端从收场卡发起续辩时直传，经
-        # pipeline 线到此）。非空 ⇒ 本回合的 debate 调用是「续辩」：主持人 _frame 正交于上一场
-        # 焦点、首轮辩手读到上一场摘要。``None`` = 全新辩论（逐字回退，零行为变化）。
-        self._prior_seed = prior_seed
+        self._ambient_armed = ambient_armed
+        self._message_id = message_id
+        self._suspension_saver = suspension_saver
+        self._suspension_deleter = suspension_deleter
+        self._folder_id = folder_id
+        self._memory_enabled = memory_enabled
+        self._autonomy_policy = autonomy_policy or AutonomyPolicy.FIRST_GRANT
+        self._registry = registry
+        self._pending_pause = False
         # 每个 side 的可续写 session（跨轮带记忆）：首轮执行后留人，后续轮 continue_run 取用。
         self._debater_sessions: dict[str, RunSession] = {}
         from agentcore.runtime.costing import WorkerResultAccumulator
 
         self._acc = WorkerResultAccumulator()
+
+    def _kickoff_system_prompt(self) -> str:
+        return self._system_prompt
+
+    def _kickoff_tool_name(self) -> str:
+        return "debate"
 
     @property
     def usage(self) -> dict[str, int]:
@@ -136,9 +150,16 @@ class DebateTool:
             approval=ToolApproval.NEVER,
         )
 
-    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+    async def execute(
+        self,
+        arguments: dict[str, Any],
+        context: ToolContext,
+        *,
+        skip_kickoff: bool = False,
+    ) -> ToolResult:
         from agentcore.runtime.costing import usage_metadata
 
+        self._pending_pause = False
         motion = str(arguments.get("motion") or "").strip()
         if not motion:
             return err("debate 需要 motion（辩论命题 / 要解决的问题）。")
@@ -150,8 +171,101 @@ class DebateTool:
         if not isinstance(thorough, bool):
             thorough = True
         policy = RoundPolicy.for_form(form, thorough=thorough)
-        config = DebateConfig(motion=motion, form=form, sides=sides, policy=policy)
+        config = DebateConfig(
+            motion=motion,
+            form=form,
+            sides=sides,
+            policy=policy,
+            background=parse_background(arguments.get("background")),
+        )
 
+        if not skip_kickoff:
+            early = await self._kickoff_before_moderator(config, arguments)
+            if early is not None:
+                return early
+
+        return await self._run_moderator(config, usage_metadata)
+
+    async def resume_after_kickoff(
+        self,
+        *,
+        decision: CheckpointDecision,
+        note: str,
+        arguments: dict[str, Any],
+    ) -> ToolResult:
+        """Settle a debate kickoff: STOP → cancel; CONTINUE/ADJUST → run moderator."""
+
+        if decision is CheckpointDecision.STOP:
+            closing = (note or "").strip() or "用户停止了辩论，未开赛。"
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output=closing,
+                effect=ToolEffect.CONTINUE,
+            )
+
+        args = dict(arguments)
+        if decision is CheckpointDecision.ADJUST and (note or "").strip():
+            # 调整 = 用户改写辩题后开赛（立场保留；备注覆盖 motion）。
+            args["motion"] = note.strip()
+
+        return await self.execute(args, self._base_tool_context, skip_kickoff=True)
+
+    async def _kickoff_before_moderator(
+        self,
+        config: DebateConfig,
+        arguments: dict[str, Any],
+    ) -> ToolResult | None:
+        """Durable kickoff before ``debate.started``. Nested / full_auto skip."""
+        if self._depth != 0:
+            return None
+        from agentcore.runtime.kickoff import (
+            await_kickoff,
+            debate_kickoff_summary,
+            needs_capability_auth,
+            should_kickoff,
+            skip_after_confirmed_ask,
+        )
+        from agentcore.runtime.sandbox_approval import worker_gate_applies
+
+        autonomy = self._autonomy_policy
+        local_gate = worker_gate_applies(self._base_tool_context.backend)
+        # Debate always wants the plan half at top-level; capability half is False
+        # for read-only debaters (local_gate tools aren't grantable for debate).
+        if not should_kickoff(
+            plan_preview=True,
+            local_gate=local_gate,
+            autonomy=autonomy,
+        ):
+            return None
+        if (
+            skip_after_confirmed_ask(self)
+            and not needs_capability_auth(local_gate=local_gate, autonomy=autonomy)
+        ):
+            return None
+
+        # Capability half stays False for debate (read-only debaters) — never list tools.
+        summary = debate_kickoff_summary(config, arguments=arguments, tools=[])
+        decision = await await_kickoff(self, summary, plan=None)
+        if self._pending_pause:
+            logger.info(
+                "debate.team_preview_paused",
+                sides=len(config.sides),
+                motion=config.motion[:80],
+            )
+            return ToolResult(
+                tool_call_id="", success=True, output="", effect=ToolEffect.SUSPEND
+            )
+        if decision is CheckpointDecision.STOP:
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output="用户停止了辩论，未开赛。",
+                effect=ToolEffect.CONTINUE,
+            )
+        return None
+
+    async def _run_moderator(self, config: DebateConfig, usage_metadata) -> ToolResult:
         execution_id = self._base_tool_context.execution_id or new_id()
         moderator_run_id = f"debate_{new_id()}"
         moderator_model = self._profile_set.model_for(
@@ -169,18 +283,18 @@ class DebateTool:
                 parent_run_id=self._captain_run_id,
             )
         )
-        logger.info("debate.started", form=form.value, sides=len(sides), motion=motion[:80])
+        logger.info(
+            "debate.started",
+            form=config.form.value,
+            sides=len(config.sides),
+            motion=config.motion[:80],
+        )
 
         moderator = Moderator(provider=self._llm, model=moderator_model)
         runner = make_round_runner(self, execution_id, moderator_run_id, config)
-        # 质询回合（P1）：注入质询作答 runner；主持人仅在【认真辩透 + 对抗形态】开启质询 beat
-        # （见 Moderator._cross_exam_enabled），快速对碰 / 圆桌自动跳过，零额外开销。
         cross_exam_runner = make_cross_exam_runner(self, execution_id, moderator_run_id, config)
-        # 结辩收束（P4）：注入结辩 runner；主持人仅在【认真辩透 + 对抗形态】收场后开结辩 beat
-        # （见 Moderator._closing_enabled），快速对碰 / 圆桌 / 全员失败自动跳过，零额外开销。
         closing_runner = make_closing_runner(self, execution_id, moderator_run_id, config)
 
-        # 逐轮增量 SSE（进行中实时叠加，transport-only）：开场先报焦点，收尾再报本轮裁判 + 小结。
         async def _emit_round_start(round_no: int, focus: str) -> None:
             self._sink.emit(
                 debate_round_started(
@@ -200,86 +314,20 @@ class DebateTool:
                 )
             )
 
-        # 交互式逐轮（opt-in）：仅当 CEO 显式 interactive=true、本回合有活跃用户（armed）、交互桥
-        # 已接入时挂起请示用户；timeout=None 为无限等（提问确认交互统一 D2）。否则
-        # on_round_boundary=None ⇒ 主持人按裁判自判收敛（与非交互辩论逐字同辙）。
-        interactive = (
-            bool(arguments.get("interactive"))
-            and self._interactive_armed
-            and self._registry is not None
-        )
-
         async def _round_boundary(
             *, round_no: int, result: RoundResult, converged: bool, max_rounds: int
         ) -> RoundBoundary | None:
-            assert self._registry is not None  # gated by `interactive`
-            decision_id = f"debate_round_{new_id()}"
-            rationale = result.verdict.rationale
-            payload = {
-                "execution_id": execution_id,
-                "moderator_run_id": moderator_run_id,
-                "decision_id": decision_id,
-                "round_no": round_no,
-                "focus": result.focus,
-                "summary": result.summary,
-                "converged": converged,
-                "rationale": rationale,
-            }
-            try:
-                outcome = await self._registry.suspend(
-                    decision_id,
-                    self._conversation_id,
-                    kind=InteractionKind.DEBATE_ROUND,
-                    payload=payload,
-                    timeout=self._round_decision_timeout,
-                    on_suspended=lambda: self._sink.emit(
-                        debate_round_decision_required(
-                            execution_id=execution_id,
-                            moderator_run_id=moderator_run_id,
-                            decision_id=decision_id,
-                            round_no=round_no,
-                            focus=result.focus,
-                            summary=result.summary,
-                            converged=converged,
-                            rationale=rationale,
-                        )
-                    ),
-                )
-            except TimeoutError:
-                # 用户未应答 ⇒ 交回裁判自动收敛（返回 None）；emit resolved=timeout 让前端收卡。
-                logger.info("debate.round_decision.timeout", decision_id=decision_id, r=round_no)
-                self._sink.emit(
-                    debate_round_decision_resolved(
-                        execution_id=execution_id,
-                        moderator_run_id=moderator_run_id,
-                        decision_id=decision_id,
-                        decision="timeout",
-                    )
-                )
-                return None
-            decision = str(outcome.get("decision") or "").strip()
-            focus = str(outcome.get("focus") or "").strip()
-            # 追问（与 focus 正交）：要下一轮辩手正面回答的问题，可定向某方（ask_target=side key）。
-            ask = str(outcome.get("ask") or "").strip()
-            ask_target = str(outcome.get("ask_target") or "").strip()
-            self._sink.emit(
-                debate_round_decision_resolved(
+            steers = take_steers(execution_id)
+            boundary = fold_steers(steers)
+            if boundary is not None:
+                logger.info(
+                    "debate.steer.applied",
                     execution_id=execution_id,
-                    moderator_run_id=moderator_run_id,
-                    decision_id=decision_id,
-                    decision=decision or "continue",
-                    focus=focus,
+                    round_no=round_no,
+                    decision=boundary.decision.value,
+                    n=len(steers),
                 )
-            )
-            if decision == "conclude":
-                # 收场仍带追问 ⇒ 主持人记为未应答留痕（无后续轮可答）。
-                return RoundBoundary(
-                    decision=RoundDecision.CONCLUDE, ask=ask, ask_target=ask_target
-                )
-            # continue（含未知值兜底）：续辩；focus 非空=「加角度」、ask 非空=追问注入下一轮。
-            return RoundBoundary(
-                decision=RoundDecision.CONTINUE, focus=focus, ask=ask, ask_target=ask_target
-            )
+            return boundary
 
         started_at = time.monotonic()
         try:
@@ -290,16 +338,14 @@ class DebateTool:
                 run_closing=closing_runner,
                 on_round_start=_emit_round_start,
                 on_round=_emit_round,
-                on_round_boundary=_round_boundary if interactive else None,
-                seed=self._prior_seed,
+                on_round_boundary=_round_boundary if self._ambient_armed else None,
             )
         except Exception as exc:  # noqa: BLE001 — 辩论崩溃降级为工具失败，让 CEO 回落
-            logger.exception("debate.failed", motion=motion[:80])
+            logger.exception("debate.failed", motion=config.motion[:80])
             return err(f"辩论执行失败：{exc}。可重试，或改用 delegate 单独处理。")
 
         duration_ms = int((time.monotonic() - started_at) * 1000)
         account_moderator(self, moderator, moderator_run_id, moderator_model, result, duration_ms)
-        # 收场广播完整辩论结构（简报 + 叙事线），前端据此渲染辩论视图；进 journal 可重载回放。
         self._sink.emit(
             debate_result(
                 execution_id=execution_id,

@@ -94,15 +94,6 @@ export function InlineTeamGraph({
     () => formatCollabSummary(message?.collab),
     [message?.collab],
   );
-  const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
-  const onPeekRunning = useCallback(() => {
-    if (!execution) return;
-    const running = execution.runs.find((r) => r.status === "running");
-    if (!running) return;
-    const role = execution.agents.find((a) => a.id === running.agentId)?.role;
-    showRunDetail(messageId, running.id, role);
-  }, [execution, messageId, showRunDetail]);
-
   const [measured, setMeasured] = useState<{
     height: number;
     overflowing: boolean;
@@ -165,7 +156,6 @@ export function InlineTeamGraph({
             onMaximize={() => openInCanvas(false)}
             onReplay={() => openInCanvas(true)}
             onOpenRevisions={openRevisionsInCanvas}
-            onPeekRunning={onPeekRunning}
             onOpenTeamNotes={openTeamNotes}
             collabSummary={collabSummary}
           />

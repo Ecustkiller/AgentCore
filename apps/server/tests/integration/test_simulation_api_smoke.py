@@ -33,7 +33,9 @@ def _move_to_market_provider(*, rounds: int = 12) -> ScriptedProvider:
 async def test_simulation_api_smoke_mock_llm(client, make_invite):
     """REST closed loop with mock LLM — no real Codex proxy required."""
     original = settings.simulation_enabled
+    original_scripted = settings.simulation_scripted
     settings.simulation_enabled = True
+    settings.simulation_scripted = False
     try:
         invite = await make_invite("SIM-INVITE")
         await register_and_login(client, invite, "sim-smoke", password=TEST_PASSWORD)
@@ -72,3 +74,4 @@ async def test_simulation_api_smoke_mock_llm(client, make_invite):
         assert frame_res.json()["snapshot"]["agents"]["chen"]["location"] == "市场"
     finally:
         settings.simulation_enabled = original
+        settings.simulation_scripted = original_scripted

@@ -106,11 +106,6 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     verdict: "ported",
     surface: "TeamView · 上报提示 (非阻塞)",
   },
-  run_intake: {
-    verdict: "internal",
-    reason:
-      "Worker Intake 诊断元信息（复杂度/策略/预算）；Phase 1 无独立面，fold no-op",
-  },
   run_escalation_gate: {
     verdict: "internal",
     reason:
@@ -128,14 +123,6 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   debate_round: {
     verdict: "ported",
     surface: "LiveDebateNarrative / DebateView",
-  },
-  debate_round_decision_required: {
-    verdict: "ported",
-    surface: "DebateSteeringCard",
-  },
-  debate_round_decision_resolved: {
-    verdict: "ported",
-    surface: "DebateSteeringCard",
   },
 
   // —— 团队便签墙 ——
@@ -345,10 +332,6 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     verdict: "impossible",
     reason: "同上 · 评审并把云端改动合并回本地磁盘",
   },
-  DraftWorkspacePicker: {
-    verdict: "impossible",
-    reason: "选本地文件夹，纯云瘦客户端无本地",
-  },
   DraftWorkspaceAssignPrompt: {
     verdict: "impossible",
     reason: "指派本地工作区，手机无本地",
@@ -434,6 +417,10 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
     verdict: "ported",
     surface: "more/AutonomySettings（/more/autonomy）",
   },
+  "more/LoginSessionsSection": {
+    verdict: "ported",
+    surface: "more/AccountSettings · 登录会话（sessionDisplay 同源裁决）",
+  },
 
   // —— 有意精简 / 保持不做（⑥ 精简陪伴定位 & 明确决策）——
   ToolboxPage: { verdict: "simplified", reason: "工具箱保持不做（⑥）" },
@@ -464,6 +451,18 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   "toolbox/manual/ManualReference": {
     verdict: "simplified",
     reason: "产品手册保持不做（本轮决策）",
+  },
+  "toolbox/manual/embeds/ManualCheckpointCardPreview": {
+    verdict: "simplified",
+    reason: "产品手册内嵌预览，手册保持不做（本轮决策）",
+  },
+  "toolbox/manual/embeds/ManualDebateFinalePreview": {
+    verdict: "simplified",
+    reason: "产品手册内嵌预览，手册保持不做（本轮决策）",
+  },
+  "toolbox/manual/embeds/ManualDebateScoreboardPreview": {
+    verdict: "simplified",
+    reason: "产品手册内嵌预览，手册保持不做（本轮决策）",
   },
   ExplorePage: {
     verdict: "simplified",
@@ -509,6 +508,18 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   "toolbox/manual/primitives": {
     verdict: "internal",
     reason: "产品手册渲染基件（非独立面）",
+  },
+  "toolbox/manual/BlockRenderer": {
+    verdict: "internal",
+    reason: "产品手册渲染基件（非独立面）",
+  },
+  "toolbox/manual/ChapterRenderer": {
+    verdict: "internal",
+    reason: "产品手册渲染基件（非独立面）",
+  },
+  "toolbox/manual/renderRichText": {
+    verdict: "internal",
+    reason: "产品手册富文本渲染基件（非独立面）",
   },
   PreviewPage: {
     verdict: "internal",

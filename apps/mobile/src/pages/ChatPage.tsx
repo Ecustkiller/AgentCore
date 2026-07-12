@@ -22,7 +22,6 @@ import {
 import { getMessageCostTotal } from "@/api/usage";
 import { AssistantContent } from "@/components/AssistantView";
 import { ConversationDrawer } from "@/components/ConversationDrawer";
-import { DebateSteeringCard } from "@/components/DebateSteeringCard";
 import { DelegationAuthorizationCard } from "@/components/DelegationAuthorizationCard";
 import { FileArtifactsCard } from "@/components/FileArtifactsCard";
 import { MemoryUpdateCard } from "@/components/MemoryUpdateCard";
@@ -215,26 +214,6 @@ function recoveredDelegation(
     executionId: typeof p.execution_id === "string" ? p.execution_id : "",
     workers,
     tools,
-  };
-}
-
-function recoveredDebate(
-  a: PendingInteractionSummary,
-): Extract<ProjectedInteraction, { kind: "debate_round" }> | null {
-  if (a.kind !== "debate_round") return null;
-  const p = a.payload ?? {};
-  return {
-    kind: "debate_round",
-    id: a.id,
-    status: "pending",
-    executionId: typeof p.execution_id === "string" ? p.execution_id : "",
-    moderatorRunId:
-      typeof p.moderator_run_id === "string" ? p.moderator_run_id : "",
-    roundNo: typeof p.round_no === "number" ? p.round_no : 0,
-    focus: typeof p.focus === "string" ? p.focus : "",
-    summary: typeof p.summary === "string" ? p.summary : "",
-    converged: Boolean(p.converged),
-    rationale: typeof p.rationale === "string" ? p.rationale : "",
   };
 }
 
@@ -787,10 +766,6 @@ export function ChatPage() {
       { kind: "delegation_authorization" }
     > => i.kind === "delegation_authorization",
   );
-  const liveDebates = liveInteractions.filter(
-    (i): i is Extract<ProjectedInteraction, { kind: "debate_round" }> =>
-      i.kind === "debate_round",
-  );
   const approvalCards =
     liveApprovals.length > 0
       ? liveApprovals
@@ -802,12 +777,6 @@ export function ChatPage() {
       ? liveDelegations
       : recoveredInteractions
           .map(recoveredDelegation)
-          .filter((x): x is NonNullable<typeof x> => x != null);
-  const debateCards =
-    liveDebates.length > 0
-      ? liveDebates
-      : recoveredInteractions
-          .map(recoveredDebate)
           .filter((x): x is NonNullable<typeof x> => x != null);
 
   // 下一步推荐 chips: live path matches followups_generated.message_id to this turn's
@@ -987,8 +956,11 @@ export function ChatPage() {
       );
       if (outcome === "none" && abortRef.current === ac) {
         setTurns((t) => t.slice(0, -1));
-        const { messages, hasMoreBefore: more, memoryUpdates: mem } =
-          await getMessages(conversationId);
+        const {
+          messages,
+          hasMoreBefore: more,
+          memoryUpdates: mem,
+        } = await getMessages(conversationId);
         if (abortRef.current === ac) {
           setHistory(messages);
           setHasMoreBefore(more);
@@ -1067,8 +1039,11 @@ export function ChatPage() {
       if (outcome === "none" && abortRef.current === ac) {
         // Finished / never ran / suspended — reload to catch a reply that landed between
         // the history load and the attach (a suspended turn surfaces via durable resume).
-        const { messages, hasMoreBefore: more, memoryUpdates: mem } =
-          await getMessages(cid);
+        const {
+          messages,
+          hasMoreBefore: more,
+          memoryUpdates: mem,
+        } = await getMessages(cid);
         if (abortRef.current === ac) {
           setHistory(messages);
           setHasMoreBefore(more);
@@ -1102,8 +1077,11 @@ export function ChatPage() {
     try {
       const outcome = await attachStream(cid, appendEvent, ac.signal);
       if (outcome === "none" && abortRef.current === ac) {
-        const { messages, hasMoreBefore: more, memoryUpdates: mem } =
-          await getMessages(cid);
+        const {
+          messages,
+          hasMoreBefore: more,
+          memoryUpdates: mem,
+        } = await getMessages(cid);
         if (abortRef.current === ac) {
           setHistory(messages);
           setHasMoreBefore(more);
@@ -1339,20 +1317,6 @@ export function ChatPage() {
           />
         ) : null,
       )}
-      {debateCards.map((pending) =>
-        conversationId ? (
-          <DebateSteeringCard
-            key={pending.id}
-            pending={pending}
-            conversationId={conversationId}
-            onResolved={() =>
-              setRecoveredInteractions((prev) =>
-                prev.filter((a) => a.id !== pending.id),
-              )
-            }
-          />
-        ) : null,
-      )}
 
       {/* Durable resume cards (a turn that paused then lost its stream). Hidden while a
           stream is live — a live run owns the pause surface (PauseCard) instead. */}
@@ -1375,7 +1339,8 @@ export function ChatPage() {
               type="button"
               className="link config-action"
               onClick={() => {
-                const href = error.action!.href;
+                const href = error.action?.href;
+                if (!href) return;
                 setError(null);
                 navigate(href);
               }}

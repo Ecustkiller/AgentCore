@@ -75,11 +75,11 @@ async function probeGraph(page, label) {
       },
     );
 
-    const viewports = [...document.querySelectorAll(".react-flow__viewport")].map(
-      (el) => ({
-        transform: el.style.transform || getComputedStyle(el).transform,
-      }),
-    );
+    const viewports = [
+      ...document.querySelectorAll(".react-flow__viewport"),
+    ].map((el) => ({
+      transform: el.style.transform || getComputedStyle(el).transform,
+    }));
 
     const c0 = containers[0];
     const intersecting = nodes.filter((n) => {
@@ -87,10 +87,7 @@ async function probeGraph(page, label) {
       const nr = n.bbox.x + n.bbox.w;
       const nb = n.bbox.y + n.bbox.h;
       return (
-        nr > c0.x &&
-        n.bbox.x < c0.right &&
-        nb > c0.y &&
-        n.bbox.y < c0.bottom
+        nr > c0.x && n.bbox.x < c0.right && nb > c0.y && n.bbox.y < c0.bottom
       );
     });
     const fullyInside = nodes.filter((n) => {
@@ -120,12 +117,8 @@ async function probeGraph(page, label) {
         return m ? { id: n.id, x: +m[1], y: +m[2] } : null;
       })
       .filter(Boolean);
-    const minFlowY = flowYs.length
-      ? Math.min(...flowYs.map((p) => p.y))
-      : null;
-    const maxFlowY = flowYs.length
-      ? Math.max(...flowYs.map((p) => p.y))
-      : null;
+    const minFlowY = flowYs.length ? Math.min(...flowYs.map((p) => p.y)) : null;
+    const maxFlowY = flowYs.length ? Math.max(...flowYs.map((p) => p.y)) : null;
 
     const card = document.querySelector(".animate-task-card-enter");
     const cardRect = card?.getBoundingClientRect();
@@ -331,7 +324,7 @@ async function main() {
     if (s.reactFlowCount === 0) {
       notes.push("c: no .react-flow → layoutReady false or graph not mounted");
     }
-    const agents = (s.typeCounts?.["react-flow__node-agent"] ?? 0);
+    const agents = s.typeCounts?.["react-flow__node-agent"] ?? 0;
     const groups =
       (s.typeCounts?.["react-flow__node-subTeamGroup"] ?? 0) +
       (s.typeCounts?.["react-flow__node-turnGroup"] ?? 0);
@@ -339,7 +332,8 @@ async function main() {
       notes.push("b: groups only, agents skipped (positions miss)");
     }
     if (agents > 0) notes.push(`not-b: ${agents} agent nodes mounted`);
-    if (s.reactFlowCount > 0) notes.push("not-c: ReactFlow mounted (layoutReady true)");
+    if (s.reactFlowCount > 0)
+      notes.push("not-c: ReactFlow mounted (layoutReady true)");
     if (s.emptyTopRatio != null && s.emptyTopRatio > 0.35) {
       notes.push(
         `a: emptyTopRatio=${s.emptyTopRatio} — content cluster sits low; upper pane looks like empty dots`,

@@ -416,7 +416,6 @@ function resolveCrossExam(
       exchanges: exchanges.map((ex) => ({
         question: ex.question,
         answer: ex.answer,
-        ok: ex.ok,
       })),
       answerRun,
     });

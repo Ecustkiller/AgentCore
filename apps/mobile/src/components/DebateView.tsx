@@ -8,6 +8,7 @@
 // source, phone-sized). Consumed identically by live turns and history replay off the same
 // ProjectedTurn.debate (fold) — no second data path.
 import type {
+  DebateHandoffInfo,
   DebateNarrativeRound,
   DebateResultPayload,
   DebateRoundInfo,
@@ -37,8 +38,23 @@ const CONFIDENCE_LABEL: Record<string, string> = {
   low: "低",
 };
 
-export function DebateView({ debate }: { debate: DebateResultPayload }) {
-  const brief = <Brief debate={debate} />;
+type HandoffKind = "value" | "fact" | "question";
+
+function asHandoffKind(raw: string): HandoffKind {
+  return raw === "value" || raw === "fact" || raw === "question"
+    ? raw
+    : "question";
+}
+
+export function DebateView({
+  debate,
+  onFill,
+}: {
+  debate: DebateResultPayload;
+  /** 有则展示「回复拍板 / 派查证」并回填 composer；只读上下文省略。 */
+  onFill?: (text: string) => void;
+}) {
+  const brief = <Brief debate={debate} onFill={onFill} />;
   const narrative = <Narrative debate={debate} />;
   return (
     <div className="debate">
@@ -64,9 +80,15 @@ export function DebateView({ debate }: { debate: DebateResultPayload }) {
   );
 }
 
-/** 决策简报 (结论): 倾向 + 置信 up top, then 争点 / 各方最强论点 / 分歧 / 建议 / 待解.
+/** 决策简报 (结论): 倾向 + 置信 up top, then 争点 / 各方最强论点 / 留给你的 / 建议。
  *  Empty sections are omitted (honest gaps). */
-function Brief({ debate }: { debate: DebateResultPayload }) {
+function Brief({
+  debate,
+  onFill,
+}: {
+  debate: DebateResultPayload;
+  onFill?: (text: string) => void;
+}) {
   const b = debate.brief;
   const conf = CONFIDENCE_LABEL[b.confidence] ?? b.confidence;
   return (
@@ -88,15 +110,77 @@ function Brief({ debate }: { debate: DebateResultPayload }) {
           </div>
         ))}
       </div>
-      {b.factual_disputes.length > 0 && (
-        <ListField label="事实分歧" items={b.factual_disputes} />
-      )}
-      {b.value_disputes.length > 0 && (
-        <ListField label="价值分歧" items={b.value_disputes} />
-      )}
+      <HandoffsBlock items={b.handoffs ?? []} onFill={onFill} />
       <Field label="建议">{b.recommendation}</Field>
-      {b.open_questions.length > 0 && (
-        <ListField label="待解问题" items={b.open_questions} />
+    </div>
+  );
+}
+
+/**
+ * 「留给你的」：按 kind 三种异质形态——
+ * value 问句卡 / fact 查证任务行 / question 脚注；旧分类名词退场。
+ */
+function HandoffsBlock({
+  items,
+  onFill,
+}: {
+  items: DebateHandoffInfo[];
+  onFill?: (text: string) => void;
+}) {
+  if (items.length === 0) return null;
+  const normalized = items.map((h) => ({
+    kind: asHandoffKind(h.kind),
+    text: h.text,
+  }));
+  const values = normalized.filter((h) => h.kind === "value");
+  const facts = normalized.filter((h) => h.kind === "fact");
+  const questions = normalized.filter((h) => h.kind === "question");
+  return (
+    <div className="debate-handoffs">
+      <div className="debate-handoffs-title">留给你的</div>
+      {values.map((h) => {
+        // 问号兜底仅当末尾无终结标点（历史数据是「。」收尾的陈述句，别拼成「。？」）。
+        const mark = /[？?。！!…]$/.test(h.text) ? "" : "？";
+        return (
+          <div key={h.text} className="debate-handoff-value">
+            <p className="debate-handoff-value-text">
+              {h.text}
+              {mark}
+            </p>
+            {onFill && (
+              <button
+                type="button"
+                className="debate-handoff-action"
+                onClick={() => onFill(`关于「${h.text}」，我的取舍是：`)}
+              >
+                回复拍板
+              </button>
+            )}
+          </div>
+        );
+      })}
+      {facts.length > 0 && (
+        <ul className="debate-handoff-facts">
+          {facts.map((h) => (
+            <li key={h.text} className="debate-handoff-fact">
+              <span className="debate-handoff-fact-text">{h.text}</span>
+              {onFill && (
+                <button
+                  type="button"
+                  className="debate-handoff-action debate-handoff-action-muted"
+                  onClick={() => onFill(`帮我查证：${h.text}`)}
+                >
+                  派查证
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {questions.length > 0 && (
+        <p className="debate-handoff-footnote">
+          只能等的：{questions.map((h) => h.text).join("；")}
+        </p>
       )}
     </div>
   );
@@ -249,19 +333,6 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     <div className="debate-field">
       <span className="debate-field-label">{label}</span>
       <span className="debate-field-value">{children}</span>
-    </div>
-  );
-}
-
-function ListField({ label, items }: { label: string; items: string[] }) {
-  return (
-    <div className="debate-field">
-      <span className="debate-field-label">{label}</span>
-      <ul className="debate-list">
-        {items.map((it) => (
-          <li key={it}>{it}</li>
-        ))}
-      </ul>
     </div>
   );
 }

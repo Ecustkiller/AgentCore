@@ -73,11 +73,10 @@ export function ConversationsPage() {
   const folderGroupIsLocal = useMemo(() => {
     const map = new Map<string, boolean>();
     for (const folder of folders) {
-      const convs = conversations.filter((c) => c.folderId === folder.id);
       map.set(folder.id, deriveGroupWorkspaceIsLocal(folder));
     }
     return map;
-  }, [folders, conversations]);
+  }, [folders]);
 
   const activeName = activeFilterName(selected, folders);
   const isFolderFilter = isRealFolderFilter(selected, folderIds);

@@ -241,10 +241,18 @@ class EventSink:
             if cid and not self._has_marker("plan_review", "checkpoint_id", cid):
                 self._process.append({"kind": "plan_review", "checkpoint_id": cid})
         elif t == EventType.TEAM_PREVIEW_REQUIRED:
-            # 团队预审时间线落点: thin preview before first wave.
+            # 开工卡时间线落点: thin preview before first wave. Event order is
+            # run_plan → team_preview_required, but product narrative is 开工卡 → 协作图 —
+            # if a team marker already exists, insert before the last one; else append.
             cid = event.payload.get("checkpoint_id") or ""
             if cid and not self._has_marker("team_preview", "checkpoint_id", cid):
-                self._process.append({"kind": "team_preview", "checkpoint_id": cid})
+                marker = {"kind": "team_preview", "checkpoint_id": cid}
+                for i in range(len(self._process) - 1, -1, -1):
+                    if self._process[i].get("kind") == "team":
+                        self._process.insert(i, marker)
+                        break
+                else:
+                    self._process.append(marker)
 
     def seed_journal(self, events: list[dict[str, Any]]) -> None:
         self._journal.extend(events)

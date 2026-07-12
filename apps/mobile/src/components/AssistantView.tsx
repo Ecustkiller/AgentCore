@@ -7,6 +7,11 @@ import {
   toolDetail,
   toolLabel,
 } from "@/components/assistantLabels";
+import {
+  type MessageCopyMode,
+  copyText,
+  formatMessageExport,
+} from "@/lib/messageExport";
 import type { NonBlockingAsk, RunToolCall } from "@/protocol/fold";
 // Rich assistant rendering shared by live turns and history replay (前端技术与架构 §七 ·
 // 富渲染 + 多 Agent 团队视图). One {@link AssistantContent} consumes the same fields whether
@@ -35,11 +40,6 @@ import type {
   TurnStatus,
 } from "@agentcore/protocol-conformance";
 import { useEffect, useState } from "react";
-import {
-  copyText,
-  formatMessageExport,
-  type MessageCopyMode,
-} from "@/lib/messageExport";
 
 type ToolStepData = Extract<ProcessStep, { kind: "tool" }>;
 
@@ -112,7 +112,7 @@ export function AssistantContent({
   return (
     <>
       {debate ? (
-        <DebateView debate={debate} />
+        <DebateView debate={debate} onFill={onFill} />
       ) : debateRounds && debateRounds.length > 0 ? (
         <LiveDebateNarrative rounds={debateRounds} />
       ) : null}

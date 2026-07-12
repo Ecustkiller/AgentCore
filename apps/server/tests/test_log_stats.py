@@ -20,6 +20,7 @@ def test_accumulate_trace_folds_every_collab_signal():
         ("chat.turn_complete", {"delegated": True, "finish_reason": "end_turn"}),
         ("contract.retry", {}),
         ("revise.started", {}),
+        ("delegate.continuation_ok", {}),
         ("delegate.started", {}),
         ("delegate.completed", {"escalations": 4, "scope": 1, "scope_ratio": 0.5}),
         ("delegate.yielded", {"reason": "scope"}),
@@ -31,7 +32,7 @@ def test_accumulate_trace_folds_every_collab_signal():
     assert rec["delegated"] is True
     assert rec["finish_reason"] == "end_turn"
     assert rec["contract_retry"] == 1
-    assert rec["revise"] == 1
+    assert rec["revise"] == 2
     assert rec["delegate_batches"] == 1
     assert rec["escalations"] == 4
     assert rec["scope_boundaries"] == 1

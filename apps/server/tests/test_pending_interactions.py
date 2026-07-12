@@ -80,26 +80,6 @@ def test_fold_pending_skips_awaiting_ceo() -> None:
     assert fold_pending_interactions(entries) == []
 
 
-def test_fold_pending_debate_round() -> None:
-    entries = [
-        {
-            "kind": "debate_round_decision_required",
-            "payload": {
-                "execution_id": "ex",
-                "moderator_run_id": "m",
-                "decision_id": "dec-1",
-                "round_no": 1,
-                "focus": "",
-                "summary": "s",
-                "converged": False,
-            },
-        },
-    ]
-    pending = fold_pending_interactions(entries, message_id="t")
-    assert len(pending) == 1
-    assert pending[0].kind == "debate_round"
-    assert pending[0].id == "dec-1"
-
 
 @pytest.mark.asyncio
 async def test_interaction_registry_timeout_none_waits() -> None:

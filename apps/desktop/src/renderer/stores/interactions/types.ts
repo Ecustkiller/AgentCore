@@ -29,7 +29,6 @@ export const INTERACTION_SUBMIT_PATH: Record<
   approval: "hot",
   delegation_authorization: "hot",
   escalation: "hot",
-  debate_round: "hot",
   question_posted: "compose",
 };
 
@@ -38,7 +37,6 @@ export const INTERACTION_ID_FIELD: Record<InteractionKind, string> = {
   approval: "approval_id",
   delegation_authorization: "authorization_id",
   escalation: "escalation_id",
-  debate_round: "decision_id",
   ask_user: "checkpoint_id",
   plan_review: "checkpoint_id",
   team_preview: "checkpoint_id",
@@ -64,8 +62,6 @@ export function kindFromRequiredEvent(
       return "delegation_authorization";
     case "escalation_required":
       return "escalation";
-    case "debate_round_decision_required":
-      return "debate_round";
     case "checkpoint_required":
       return "ask_user";
     case "plan_review_required":
@@ -89,8 +85,6 @@ export function kindFromResolvedEvent(
       return "delegation_authorization";
     case "escalation_resolved":
       return "escalation";
-    case "debate_round_decision_resolved":
-      return "debate_round";
     case "checkpoint_resolved":
       return "ask_user";
     case "plan_review_resolved":
@@ -106,9 +100,5 @@ export function idFromResolvedPayload(
   kind: InteractionKind,
   payload: Record<string, unknown>,
 ): string | null {
-  if (kind === "debate_round") {
-    const id = payload.decision_id ?? payload.id;
-    return typeof id === "string" && id.length > 0 ? id : null;
-  }
   return idFromRequiredPayload(kind, payload);
 }

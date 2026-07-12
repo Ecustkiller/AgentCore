@@ -5,6 +5,9 @@ import {
   changePassword,
   deleteAccount,
   deleteAvatar,
+  listSessions,
+  revokeOtherSessions,
+  revokeSession,
   updateProfile,
   uploadAvatar,
 } from "../auth";
@@ -305,5 +308,46 @@ describe("deleteAvatar", () => {
     expect(calls[0].url).toContain("/v1/users/me/avatar");
     expect(calls[0].method).toBe("DELETE");
     expect(user.avatarUrl).toBeNull();
+  });
+});
+
+describe("listSessions / revokeSession / revokeOtherSessions", () => {
+  const session = {
+    id: "fam-1",
+    platform: "desktop",
+    user_agent: "Mozilla/5.0",
+    ip: "127.0.0.1",
+    created_at: "2026-07-01T00:00:00Z",
+    last_used_at: "2026-07-12T00:00:00Z",
+    current: true,
+  };
+
+  it("GETs /auth/sessions and returns the list payload", async () => {
+    const calls = captureFetch(json({ data: [session], total: 1 }));
+
+    const res = await listSessions();
+
+    expect(calls[0].url).toContain("/v1/auth/sessions");
+    expect(calls[0].method).toBeUndefined(); // GET default
+    expect(res.total).toBe(1);
+    expect(res.data[0].id).toBe("fam-1");
+  });
+
+  it("DELETEs /auth/sessions/{family_id}", async () => {
+    const calls = captureFetch(json({ status: "ok" }));
+
+    await revokeSession("fam-1");
+
+    expect(calls[0].url).toContain("/v1/auth/sessions/fam-1");
+    expect(calls[0].method).toBe("DELETE");
+  });
+
+  it("POSTs /auth/sessions/revoke-others", async () => {
+    const calls = captureFetch(json({ status: "ok" }));
+
+    await revokeOtherSessions();
+
+    expect(calls[0].url).toContain("/v1/auth/sessions/revoke-others");
+    expect(calls[0].method).toBe("POST");
   });
 });

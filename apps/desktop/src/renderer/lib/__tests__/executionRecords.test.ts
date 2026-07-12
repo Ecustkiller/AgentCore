@@ -1,3 +1,5 @@
+import type { Message } from "@/stores/conversation/types";
+import type { RunFrame } from "@/stores/execution";
 import { describe, expect, it } from "vitest";
 import {
   deriveExecutionRecords,
@@ -7,8 +9,6 @@ import {
   resolveRecordOutput,
   runIdFromFrames,
 } from "../executionRecords";
-import type { Message } from "@/stores/conversation/types";
-import type { RunFrame } from "@/stores/execution";
 import { shouldShowTerminalTab } from "../processOutput";
 
 describe("executionRecordSummary", () => {
@@ -115,7 +115,12 @@ describe("recordsFromProcess", () => {
           arguments: { language: "bash", code: "echo hi" },
           result: "ok",
           status: "success",
-          display: { stdout: "hi\n", stderr: "", exit_code: 0, language: "bash" },
+          display: {
+            stdout: "hi\n",
+            stderr: "",
+            exit_code: 0,
+            language: "bash",
+          },
         },
         {
           kind: "tool",

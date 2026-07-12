@@ -15,8 +15,7 @@ type Schemas = components["schemas"];
 export type ResolveInteractionBody =
   | Schemas["ResolveApprovalInteraction"]
   | Schemas["ResolveEscalationInteraction"]
-  | Schemas["ResolveDelegationAuthorizationInteraction"]
-  | Schemas["ResolveDebateRoundInteraction"];
+  | Schemas["ResolveDelegationAuthorizationInteraction"];
 
 /**
  * POST a paused interaction's answer; the live SSE stream resumes.

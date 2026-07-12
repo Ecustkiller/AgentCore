@@ -19,18 +19,26 @@ def create_access_token(
     user_id: str,
     *,
     audience: TokenAudience,
+    family: str | None = None,
     expires_delta: timedelta | None = None,
 ) -> str:
-    """Mint a short-lived access JWT carrying ``user_id`` as the subject."""
+    """Mint a short-lived access JWT carrying ``user_id`` as the subject.
+
+    ``family`` (claim ``fam``) binds the access token to its refresh-token family
+    so session-management endpoints can mark the current device. Omitted only for
+    legacy test helpers; production issuance always passes it.
+    """
     now = datetime.now(UTC)
     expire = now + (expires_delta or timedelta(minutes=settings.jwt_access_token_expire_minutes))
-    claims = {
+    claims: dict = {
         "sub": user_id,
         "type": "access",
         "session": audience,
         "iat": int(now.timestamp()),
         "exp": int(expire.timestamp()),
     }
+    if family is not None:
+        claims["fam"] = family
     return jwt.encode(claims, settings.jwt_secret_key, algorithm=_JWT_ALGORITHM)
 
 
@@ -46,6 +54,22 @@ def decode_access_token(token: str) -> str:
 
 def decode_access_token_claims(token: str) -> AccessTokenClaims:
     """Return ``(user_id, audience)`` from a valid access token."""
+    claims = _decode_access_claims(token)
+    return claims["sub"], claims["session"]
+
+
+def decode_access_token_family(token: str) -> str | None:
+    """Return the ``fam`` claim if present; ``None`` for legacy tokens without it.
+
+    Still validates the token (type / signature / expiry) so callers can trust a
+    missing fam as "old token", not "invalid token".
+    """
+    claims = _decode_access_claims(token)
+    fam = claims.get("fam")
+    return fam if isinstance(fam, str) and fam else None
+
+
+def _decode_access_claims(token: str) -> dict:
     try:
         claims = jwt.decode(token, settings.jwt_secret_key, algorithms=[_JWT_ALGORITHM])
     except JWTError as exc:
@@ -59,7 +83,7 @@ def decode_access_token_claims(token: str) -> AccessTokenClaims:
     aud = claims.get("session")
     if aud not in ("product", "admin"):
         raise AuthenticationError("Token missing session audience")
-    return sub, aud
+    return claims
 
 
 def create_mfa_pending_token(

@@ -1,8 +1,11 @@
 """Conformance vectors — interaction lifecycle (提问确认统一重构 P3).
 
-Covers the five ratchet scenarios from the plan §3.3:
-delegation_authorization / debate_round_decision / resolved-reload /
+Covers ratchet scenarios: delegation_authorization / resolved-reload /
 orphaned / approval sibling sweep. Also lifts P1 DURABLE_VECTOR_WAIVERS.
+
+Debate ambient steer is fire-and-forget (no blocking interaction / no
+``debate_round_decision_*`` events) — covered by moderator unit tests +
+``multi_agent_debate_followup`` (user_interjections on debate_result).
 """
 
 from __future__ import annotations
@@ -17,8 +20,6 @@ from agentcore.runtime.events import (
     checkpoint_required,
     checkpoint_resolved,
     content_delta,
-    debate_round_decision_required,
-    debate_round_decision_resolved,
     delegation_authorization_required,
     delegation_authorization_resolved,
     interaction_orphaned,
@@ -71,39 +72,6 @@ def _delegation_authorization_resolved() -> list[SSEEvent]:
         ),
         content_delta(" 已获授权，开工。"),
         message_end(FinishReason.END_TURN, input_tokens=900, output_tokens=80, cost=_COST),
-    ]
-
-
-def _debate_round_decision_paused() -> list[SSEEvent]:
-    """辩论轮间裁决挂起：debate_round_decision_required → interactions[] pending。"""
-    return [
-        message_start("m1", conversation_id=_CONV),
-        content_delta("开始辩论。"),
-        debate_round_decision_required(
-            execution_id="exec-d",
-            moderator_run_id="mod1",
-            decision_id="dec1",
-            round_no=1,
-            focus="定价策略",
-            summary="双方各执一词。",
-            converged=False,
-            rationale="证据不足，建议再辩一轮。",
-        ),
-    ]
-
-
-def _debate_round_decision_resolved() -> list[SSEEvent]:
-    """辩论轮间裁决：用户让裁判决定（conclude）。"""
-    return [
-        *_debate_round_decision_paused(),
-        debate_round_decision_resolved(
-            execution_id="exec-d",
-            moderator_run_id="mod1",
-            decision_id="dec1",
-            decision="conclude",
-        ),
-        content_delta(" 按裁判结论收场。"),
-        message_end(FinishReason.END_TURN, input_tokens=1200, output_tokens=200, cost=_COST),
     ]
 
 
@@ -188,14 +156,6 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "delegation_authorization_resolved": (
         "委派授权：放行后继续到 end_turn（P3）",
         _delegation_authorization_resolved,
-    ),
-    "debate_round_decision_paused": (
-        "辩论轮间裁决：debate_round_decision_required → interactions[] pending（P3）",
-        _debate_round_decision_paused,
-    ),
-    "debate_round_decision_resolved": (
-        "辩论轮间裁决：conclude 后继续到 end_turn（P3）",
-        _debate_round_decision_resolved,
     ),
     "checkpoint_resolved_reload": (
         "检查点：required+resolved 重载呈已答态，无假 pending（P3 / 不变量 4）",

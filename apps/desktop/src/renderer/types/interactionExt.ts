@@ -8,7 +8,6 @@ export type InteractionKind =
   | "approval"
   | "delegation_authorization"
   | "escalation"
-  | "debate_round"
   | "ask_user"
   | "plan_review"
   | "team_preview"

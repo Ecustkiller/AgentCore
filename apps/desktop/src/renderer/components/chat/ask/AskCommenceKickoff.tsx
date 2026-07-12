@@ -2,6 +2,7 @@
  * Production kickoff Ask card — V2 Brief + Choose (Notion AI / product-brief split).
  * Wired by {@link AskUserCard} when intent === "kickoff".
  */
+import { MANUAL_HELP, ManualHelpLink } from "@/components/ManualHelpLink";
 import { Button } from "@/components/ui";
 import {
   formatBindLocalFolderAnswer,
@@ -72,7 +73,10 @@ export function AskCommenceKickoffBody({
         <div>
           <div className="flex items-center gap-1.5">
             <FileText size={14} className="shrink-0 text-muted-foreground" />
-            <p className="text-xs font-medium text-muted-foreground">Brief</p>
+            <p className="min-w-0 flex-1 text-xs font-medium text-muted-foreground">
+              Brief
+            </p>
+            <ManualHelpLink to={MANUAL_HELP.checkpoint} />
           </div>
           <p className="mt-2 text-sm font-semibold leading-snug text-foreground">
             {content.question}

@@ -230,16 +230,16 @@ _DEBATE_AND_REVIEW = """\
 
 _REVISING_A_PRODUCT = """\
 <revising_a_product>
-当用户看到某个 worker 的产物后，要求对【它】做小改 / 增补 / 调整（例如「把风险那节展开」\
-「换个更正式的语气」「再补一节测试用例」），且仍由原角色来改最合适时，调用 `revise` 唤回\
-那个 worker：它会带着自己的现场记忆、在自己上一版产出的基础上继续修订，而不是从零另派一个\
-看不到旧稿的新人重做（更快、更省，且不丢原有思路）。传入 `target_run_id`（要修订的那个产物\
-的 run_id，取自团队执行结果里每个成员标注的 run_id）和 `feedback`（具体、可执行的修改意见）。\
-修订结果会作为新的一版返回给你，由你照常收尾。
+当用户看到某个 worker 的产物后，要求对【它】做小改 / 增补 / 调整，或让同一人接着干强相关
+的新任务（例如「把风险那节展开」「换个更正式的语气」「接着实现方案 B」），且仍由原角色
+带着现场来干最合适时，用 `delegate` 并在该 task 上设 `continue_from_run_id`（取自团队执行
+结果里标注的 run_id）——原作者带着 ReAct 轨迹接着干，而不是从零另派看不到旧稿的新人。
+task 正文写清续干指令（改哪里 / 新任务是什么）；可与 depends_on / deliverable 同用。
 
-什么时候【不要】用 `revise`，而改用 `delegate` 带上旧产物重新委派：要换一个角色来改（如研究\
-员的稿子交给工程师重写）、原稿本身是失败的、或要把多份产物合并了再改。若 `revise` 提示找不到\
-该 run 或已达修订上限，也按同样方式改用 `delegate`。
+什么时候【不要】带现场续派，而改用冷委派（不设 continue_from_run_id）：要换一个角色来改、
+原稿本身是失败的、要把多份产物合并了再改、或独立新任务（防上下文污染）。若续派提示找不
+到该 run、已达唤回上限、或目标仍在进行中，也按同样方式改冷委派，必要时设 replaces_run_id
+标接手。
 </revising_a_product>"""
 
 _ASK_USER_KICKOFF = """\
@@ -385,7 +385,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     ),
     SystemSkill(
         name="revising_a_product",
-        summary="定向唤回原作者，在其旧稿上修订某个已有产物",
+        summary="带现场续派：唤回原作者改稿或接强相关新任务",
         body=_REVISING_A_PRODUCT,
     ),
     SystemSkill(

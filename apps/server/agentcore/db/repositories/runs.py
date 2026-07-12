@@ -172,6 +172,16 @@ class RunSessionRepository:
         await self._session.commit()
         return result.rowcount or 0
 
+    async def delete_for_conversation(self, conversation_id: str) -> int:
+        """Cascade-clear recoverable sessions when a conversation is soft/hard deleted.
+
+        现场生命周期跟随对话：对话不在则现场不可唤回。Does not commit — caller owns the txn.
+        """
+        result = await self._session.execute(
+            delete(RunSessionRow).where(RunSessionRow.conversation_id == conversation_id)
+        )
+        return int(result.rowcount or 0)
+
 
 class PausedTurnRepository:
     """Durable store for turns suspended at a plan_review checkpoint (结构化挂起

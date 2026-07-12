@@ -3,7 +3,6 @@ import type { RunFrame } from "./frames";
 import {
   type AgentState,
   type BatchMetricsSnapshot,
-  type DebateRoundDecision,
   type Execution,
   type ExecutionPlan,
   type ExecutionStatus,
@@ -85,8 +84,8 @@ function runFromPlan(plan: ExecutionPlan, id: string): RunNode | null {
     stance: spec.stance ?? null,
     group: spec.group ?? null,
     round: spec.round ?? 0,
-    revisionOf: null,
-    revision: 0,
+    continuesRunId: null,
+    continuationIndex: 0,
     revised: null,
     replacesRunId: spec.replacesRunId ?? null,
     delegateBatch: spec.delegateBatch,
@@ -144,16 +143,16 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
   switch (f.kind) {
     case "run_started": {
       let run = s.runIndex.get(f.runId);
-      // 定向唤回 续写 (乙 热修 P4): a revision (`revision >= 2`) is NOT in the plan —
-      // it is born from this frame. Synthesize its run + agent, inheriting the
-      // ORIGINAL's display identity (role / tier / task), and hang it off the
-      // original as a「修订 vN」child so its output / cost / status fold in just
-      // like a planned worker. Guarded on the original existing, so a stray
-      // revision frame (parent not on this graph) is ignored, not mis-drawn.
-      if (!run && f.revision > 0 && f.parentRunId) {
-        // Parent is plan-declared and may not be materialized yet (lazy fold).
-        ensureRun(s, f.parentRunId);
-        const original = s.runIndex.get(f.parentRunId);
+      const continuesRoot = f.continuesRunId ?? null;
+      // 计划内节点优先从 plan 物化，避免「计划内续派」被误当成未入 plan 的合成续写
+      //（否则会继承现场根的 task / 丢 depends_on）。
+      if (!run) ensureRun(s, f.runId);
+      run = s.runIndex.get(f.runId);
+      // 同人接续：未入 plan 的续写（热修 / 辩论 continue_run）由本 frame 出生。
+      // 身份继承自现场根（continuesRunId），parentRunId 只承载真实委派父。
+      if (!run && continuesRoot) {
+        ensureRun(s, continuesRoot);
+        const original = s.runIndex.get(continuesRoot);
         if (original) {
           ensureAgent(s, original.agentId);
           const originAgent = s.agentIndex.get(original.agentId);
@@ -171,6 +170,12 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
             toolProgress: null,
             toolExecutionLive: null,
           });
+          let maxIdx = 0;
+          for (const r of s.runs) {
+            if (r.continuesRunId === continuesRoot) {
+              maxIdx = Math.max(maxIdx, r.continuationIndex);
+            }
+          }
           run = {
             id: f.runId,
             agentId: f.agentId,
@@ -192,8 +197,8 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
             stance: f.stance ?? null,
             group: f.group ?? null,
             round: f.round ?? 0,
-            revisionOf: f.parentRunId,
-            revision: f.revision,
+            continuesRunId: continuesRoot,
+            continuationIndex: maxIdx + 1,
             revised: null,
             replacesRunId: null,
             checkpoint: null,
@@ -212,6 +217,18 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
         // can read them from the projected run (inert in 阶段1).
         run.parentRunId = f.parentRunId;
         run.kind = f.runKind;
+        // 计划内续派：run 已在 plan，started 时写入接续标记。
+        if (continuesRoot && run.continuesRunId == null) {
+          let maxIdx = 0;
+          for (const r of s.runs) {
+            if (r.id === run.id) continue;
+            if (r.continuesRunId === continuesRoot) {
+              maxIdx = Math.max(maxIdx, r.continuationIndex);
+            }
+          }
+          run.continuesRunId = continuesRoot;
+          run.continuationIndex = maxIdx + 1;
+        }
         // 冷回落接手: mid-flight `_redir` carries replaces_run_id on the wire.
         if (f.replacesRunId) run.replacesRunId = f.replacesRunId;
       }
@@ -513,7 +530,6 @@ export function finalizeFold(
   status: ExecutionStatus,
   debate: DebateResultPayload | null = null,
   debateRounds: DebateNarrativeRound[] = [],
-  debateDecisions: DebateRoundDecision[] = [],
 ): Execution {
   // Plan-declared nodes not yet touched by frames stay visible as pending/idle
   // (replay playhead before their run_started) — appended after started nodes so
@@ -581,7 +597,6 @@ export function finalizeFold(
     batches: s.batches,
     debate,
     debateRounds,
-    debateDecisions,
     teamNotes: s.teamNotes,
   };
 }
@@ -600,11 +615,10 @@ export function projectExecution(
   status: ExecutionStatus,
   debate: DebateResultPayload | null = null,
   debateRounds: DebateNarrativeRound[] = [],
-  debateDecisions: DebateRoundDecision[] = [],
 ): Execution {
   const state = initFold(plan);
   for (const f of frames) applyFrame(state, f);
-  return finalizeFold(state, status, debate, debateRounds, debateDecisions);
+  return finalizeFold(state, status, debate, debateRounds);
 }
 
 /** Human-readable label for a frame, used by the timeline scrubber. */

@@ -82,10 +82,8 @@ async def first_round(
     )
 
     sides = list(sides)
-    # 结构化补轮·B：若本回合带上一场种子，首轮辩手 task 注入上一场摘要（接着辩、不重复）。
-    seed = tool._prior_seed
     tasks_raw = [
-        debater_task(config, side, idx, round_no=1, focus=focus, seed=seed)
+        debater_task(config, side, idx, round_no=1, focus=focus)
         for idx, side in enumerate(sides)
     ]
     valid_tools = {s.name for s in tool._tools.list_all()}
@@ -227,7 +225,7 @@ async def next_round(
             return await continue_run(
                 session=session,
                 feedback=feedback,
-                revision_run_id=revision_run_id,
+                continuation_run_id=revision_run_id,
                 llm=tool._llm,
                 tools=tool._tools,
                 sink=tool._sink,
@@ -235,10 +233,11 @@ async def next_round(
                 execution_id=execution_id,
                 profile_set=tool._profile_set,
                 approval_gate=worker_gate,
-                # 单一轮次投影: carry this side's TRUE round onto the revision's run_started
-                # (辩论逐轮), so every fold reads 第几轮 from the wire, not the version number.
+                # 单一轮次投影: carry this side's TRUE round onto the continuation's run_started
+                # (辩论逐轮), so every fold reads 第几轮 from the wire, not a version number.
                 round_no=round_no,
                 context_blocks=context_blocks,
+                parent_run_id=moderator_run_id,
             )
 
     states = await asyncio.gather(*(_continue_side(side) for side in sides))
@@ -303,7 +302,7 @@ def make_cross_exam_runner(
                 return await continue_run(
                     session=session,
                     feedback=feedback,
-                    revision_run_id=cx_run_id,
+                    continuation_run_id=cx_run_id,
                     llm=tool._llm,
                     tools=tool._tools,
                     sink=tool._sink,
@@ -313,6 +312,7 @@ def make_cross_exam_runner(
                     approval_gate=worker_gate,
                     round_no=round_no,
                     context_blocks=context_blocks,
+                    parent_run_id=moderator_run_id,
                 )
 
         states = await asyncio.gather(*(_answer(k, qs) for k, qs in targets))
@@ -325,7 +325,7 @@ def make_cross_exam_runner(
                 exchanges.append(
                     CrossExamExchange(
                         target=side_key,
-                        exchanges=build_cross_exam_exchanges(qs, "", overall_ok=False),
+                        exchanges=build_cross_exam_exchanges(qs, ""),
                         answer_run_id=cx_run_id,
                     )
                 )
@@ -337,7 +337,7 @@ def make_cross_exam_runner(
                 session.transcript = state.transcript
                 session.content = state.content
                 session.recall_count += 1
-                qa_pairs = parse_cross_exam_response(qs, state.content, overall_ok=True)
+                qa_pairs = parse_cross_exam_response(qs, state.content)
                 exchanges.append(
                     CrossExamExchange(
                         target=side_key,
@@ -349,7 +349,7 @@ def make_cross_exam_runner(
                 exchanges.append(
                     CrossExamExchange(
                         target=side_key,
-                        exchanges=build_cross_exam_exchanges(qs, "", overall_ok=False),
+                        exchanges=build_cross_exam_exchanges(qs, ""),
                         answer_run_id=cx_run_id,
                     )
                 )
@@ -396,7 +396,7 @@ def make_closing_runner(
                 return await continue_run(
                     session=session,
                     feedback=feedback,
-                    revision_run_id=closing_run_id,
+                    continuation_run_id=closing_run_id,
                     llm=tool._llm,
                     tools=tool._tools,
                     sink=tool._sink,
@@ -406,6 +406,7 @@ def make_closing_runner(
                     approval_gate=worker_gate,
                     round_no=final_round_no,
                     context_blocks=context_blocks,
+                    parent_run_id=moderator_run_id,
                 )
 
         states = await asyncio.gather(*(_close(s) for s in targets))

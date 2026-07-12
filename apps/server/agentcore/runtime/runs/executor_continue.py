@@ -23,9 +23,9 @@ from agentcore.runtime.facts import MessageFinalFact, record_turn_fact
 from agentcore.runtime.runs.contract import check_contract
 from agentcore.runtime.runs.executor_context import _context_block_payloads
 from agentcore.runtime.runs.executor_shared import (
+    _continuation_message,
     _priced_failure,
     _react_and_capture,
-    _revision_message,
 )
 from agentcore.runtime.runs.serialize import debrief_from_transcript, files_touched_from_transcript
 from agentcore.runtime.runs.session import RunSession
@@ -40,7 +40,7 @@ async def continue_run(
     *,
     session: RunSession,
     feedback: str,
-    revision_run_id: str,
+    continuation_run_id: str,
     llm: LLMProvider,
     tools: ToolRegistry,
     sink: EventSink,
@@ -50,34 +50,34 @@ async def continue_run(
     approval_gate: ApprovalGate | None = None,
     round_no: int = 0,
     context_blocks: list[ContextBlock] | None = None,
+    parent_run_id: str | None = None,
 ) -> RunState:
-    """续写 a saved worker session under the revision's log scope: binds
-    run_id/agent_id/depth so all of the 热修's logs (tool.execute_end, run.*, llm.*)
-    split by worker like any delegated run. Delegates to :func:`_continue_run_scoped`
-    (see it for the full behavior); the scope auto-clears and is task-local.
+    """续写 a saved worker session under the continuation's log scope.
 
-    ``round_no`` (辩论逐轮, 0 = ordinary 热修) is the revision's TRUE debate round — carried
-    onto its ``run_started`` so every fold reads 第几轮 from the wire, not the version
-    number (which drifts from the round once a side fails mid-debate).
+    ``continues_run_id`` on the wire is always the session root (``session.run_id``);
+    ``parent_run_id`` is the true delegation parent (captain / moderator), not the
+    continued run. ``round_no`` (辩论逐轮, 0 = ordinary 续干) rides ``run_started``
+    so every fold reads 第几轮 from the wire.
 
-    ``context_blocks`` (上下文传递可视化) is the structured context THIS continuation was fed
-    — a debate 续写 gets 本轮焦点 / 对方上轮论点 / 被驳命门 / 追问 (see
-    :func:`~agentcore.tools.builtin.debate.prompt.round_context_blocks`); it rides a
-    ``run_context`` event right after ``run_started`` so the revision node's「收到的上下文」
-    fills like a first-round worker's (before this, 续写 emitted none → the panel was empty).
-    ``None`` for a plain 热修 whose caller supplies no blocks → no event, unchanged."""
+    ``context_blocks`` surface on ``run_context`` (用户看到的 == 结构化展示)；LLM 侧
+    吃的是 ``feedback`` 经统一续干模板追加进 transcript 的内容。
+    """
     with log_context(
-        run_id=revision_run_id,
-        agent_id=revision_run_id,
+        run_id=continuation_run_id,
+        agent_id=continuation_run_id,
         depth=session.spec.depth,
         cost_role="member",
         persona=(session.spec.role or "").strip() or None,
-        parent_run_id=session.spec.parent_run_id or None,
+        parent_run_id=(
+            parent_run_id
+            if parent_run_id is not None
+            else (session.spec.parent_run_id or None)
+        ),
     ):
         return await _continue_run_scoped(
             session=session,
             feedback=feedback,
-            revision_run_id=revision_run_id,
+            continuation_run_id=continuation_run_id,
             llm=llm,
             tools=tools,
             sink=sink,
@@ -87,6 +87,7 @@ async def continue_run(
             approval_gate=approval_gate,
             round_no=round_no,
             context_blocks=context_blocks,
+            parent_run_id=parent_run_id,
         )
 
 
@@ -94,7 +95,7 @@ async def _continue_run_scoped(
     *,
     session: RunSession,
     feedback: str,
-    revision_run_id: str,
+    continuation_run_id: str,
     llm: LLMProvider,
     tools: ToolRegistry,
     sink: EventSink,
@@ -104,50 +105,33 @@ async def _continue_run_scoped(
     approval_gate: ApprovalGate | None = None,
     round_no: int = 0,
     context_blocks: list[ContextBlock] | None = None,
+    parent_run_id: str | None = None,
 ) -> RunState:
-    """续写 a saved worker session: recall the SAME author to revise its own draft.
-
-    Appends the CEO's revision instruction to the worker's preserved transcript and
-    re-runs the ReAct loop under the original spec's profile / allowed tools — the
-    乙 热修 path (faster, cheaper, keeps the original train of thought) vs. re-
-    delegating a cold new worker (甲). Emits ``run_*`` events under
-    ``revision_run_id`` parented to the original run (the graph's「修订」child node,
-    P-2 版本链), prices the continuation once onto the returned RunState, and
-    carries the EXTENDED transcript so the next revision continues from here. The
-    contract gate is re-checked as warnings (a revision is content-quality, not a
-    hard gate)."""
+    """续写 a saved worker session: same author, extended transcript, new run id."""
     profiles = profile_set or default_profile_set()
     spec = session.spec
-    agent_id = revision_run_id
-    # Version number for the graph's「修订 vN」child node (P4 版本链): the original is
-    # v1, so the first revision (recall_count 0 here, pre-increment) is v2.
-    revision = session.recall_count + 2
-    # 乙 wire 携 round/stance (单一轮次投影): a debate 续写 keeps the original debater's
-    # stance/group (same author, same side) and carries its TRUE round (round_no) so every
-    # fold reads 第几轮/哪一方 from one place. A plain 热修 (round_no=0, spec.stance="") emits
-    # none of the three → its run_started stays byte-identical.
+    agent_id = continuation_run_id
+    wire_parent = (
+        parent_run_id if parent_run_id is not None else session.spec.parent_run_id
+    )
+    # 星型：continues_run_id 恒指现场根（RunSession 键）。
     sink.emit(
         run_started(
-            revision_run_id,
+            continuation_run_id,
             agent_id,
-            parent_run_id=session.run_id,
+            parent_run_id=wire_parent,
             kind=spec.kind,
-            revision=revision,
+            continues_run_id=session.run_id,
             stance=spec.stance or None,
             group=spec.group or None,
             round_no=round_no,
         )
     )
-    # 收到的上下文 (上下文传递可视化): surface what THIS continuation was fed right after it
-    # starts — the same fact first-round workers emit (executor_agent). Bodies are head+tail
-    # capped + journaled by `_context_block_payloads`, so the revision node's panel fills on
-    # both live and reload, mirroring the original run instead of showing an empty context.
     if context_blocks:
-        sink.emit(run_context(revision_run_id, agent_id, _context_block_payloads(context_blocks)))
+        sink.emit(
+            run_context(continuation_run_id, agent_id, _context_block_payloads(context_blocks))
+        )
     start = time.monotonic()
-    # Mirror the continuation's spend so a hard failure still bills it (B-deep 失败
-    # 计费); priced_model stays None until the profile resolves (an early setup failure
-    # carries no usage to price).
     inflight: list[TokenUsage] = []
     priced_model: str | None = None
     try:
@@ -160,14 +144,12 @@ async def _continue_run_scoped(
         priced_model = spec.model or profiles.model_for(f"agent.{pref}")
         tool_ctx = replace(
             base_tool_context,
-            run_id=revision_run_id,
+            run_id=continuation_run_id,
             agent_id=agent_id,
             execution_id=execution_id,
         )
-        # Continue on a COPY so a failed continuation leaves the stored session
-        # intact (the caller only commits the extended transcript on success).
         messages = list(session.transcript)
-        messages.append(_revision_message(feedback))
+        messages.append(_continuation_message(feedback))
         citations: list[dict] = []
         content, reasoning, round_usage, round_rounds = await _react_and_capture(
             messages,
@@ -178,7 +160,7 @@ async def _continue_run_scoped(
             profile=profile,
             turn_model=priced_model,
             allowed_tools=spec.tools,
-            run_id=revision_run_id,
+            run_id=continuation_run_id,
             agent_id=agent_id,
             citation_sink=citations,
             approval_gate=approval_gate,
@@ -187,9 +169,6 @@ async def _continue_run_scoped(
         duration_ms = int((time.monotonic() - start) * 1000)
         usage = round_usage.as_dict()
         cost = asdict(calculate_cost(priced_model, round_usage))
-        # files_written counts the whole continued transcript (original draft + this
-        # revision), so a requires_files / artifacts contract isn't spuriously flagged
-        # when the recall edits prose around files the first pass already wrote.
         touched_for_gate = files_touched_from_transcript(messages)
         verdict = check_contract(
             content,
@@ -198,21 +177,16 @@ async def _continue_run_scoped(
             debrief=debrief_from_transcript(messages),
             workspace_paths=touched_for_gate,
         )
-        # 执行级事件溯源 (§8.3): the revised FULL product (content + 思考) under the
-        # revision run id, so the version chain's latest output AND thinking are
-        # reconstructable from the journal — the reload synthesizes this run node's
-        # run_output_delta / run_reasoning_delta from here once the live deltas stop
-        # being journaled (deltas 退场).
         record_turn_fact(
-            MessageFinalFact(run_id=revision_run_id, content=content, reasoning=reasoning).to_fact()
+            MessageFinalFact(
+                run_id=continuation_run_id, content=content, reasoning=reasoning
+            ).to_fact()
         )
-        # 交接简报单一源: harvest the revised product's brief from its ``handoff`` tool call (best-
-        # effort None), so its 结论 is the summary and the structured brief rides the run_completed.
         debrief = debrief_from_transcript(messages)
         touched = files_touched_from_transcript(messages)
         sink.emit(
             run_completed(
-                revision_run_id,
+                continuation_run_id,
                 agent_id,
                 output_summary=(debrief or {}).get("summary", ""),
                 duration_ms=duration_ms,
@@ -239,11 +213,13 @@ async def _continue_run_scoped(
             cost=cost,
             transcript=messages,
         )
-    except Exception as e:  # noqa: BLE001 — surface any revision failure to UI/state
+    except Exception as e:  # noqa: BLE001 — surface any continuation failure to UI/state
         duration_ms = int((time.monotonic() - start) * 1000)
         partial = inflight[0] if inflight else TokenUsage()
-        logger.error("run.revise_failed", run_id=revision_run_id, error=str(e), exc_info=True)
-        sink.emit(run_failed(revision_run_id, agent_id, str(e)))
+        logger.error(
+            "run.continuation_failed", run_id=continuation_run_id, error=str(e), exc_info=True
+        )
+        sink.emit(run_failed(continuation_run_id, agent_id, str(e)))
         return _priced_failure(
             str(e),
             model=priced_model,

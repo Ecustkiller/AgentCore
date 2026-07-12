@@ -17,22 +17,18 @@ def test_parse_cross_exam_response_json_array():
         {
             "question_index": 1,
             "answer": "否，量化口径未含尾部风险【待核实·推断】。",
-            "directly_addressed": True,
         },
         {
             "question_index": 2,
             "answer": "成本由灰度预算池兜底、触发熔断即回滚【已核实·灰度预案v2】",
-            "directly_addressed": True,
         },
     ]
     got = parse_cross_exam_response(qs, json.dumps(payload, ensure_ascii=False))
     assert len(got) == 2
     assert got[0].question == qs[0]
     assert "尾部" in got[0].answer
-    assert got[0].ok is True
     assert got[1].question == qs[1]
     assert "灰度" in got[1].answer
-    assert got[1].ok is True
 
 
 def test_parse_cross_exam_response_json_in_fence():
@@ -40,24 +36,22 @@ def test_parse_cross_exam_response_json_in_fence():
     raw = (
         "说明：以下是我的回答\n```json\n"
         + json.dumps(
-            [{"question_index": 1, "answer": "暂无统一出处【待核实·推断】", "directly_addressed": False}],
+            [{"question_index": 1, "answer": "暂无统一出处【待核实·推断】"}],
             ensure_ascii=False,
         )
         + "\n```"
     )
     got = parse_cross_exam_response(qs, raw)
     assert len(got) == 1
-    assert got[0].ok is False
     assert "出处" in got[0].answer
 
 
-def test_parse_cross_exam_response_missing_item_marks_not_ok():
+def test_parse_cross_exam_response_missing_item_leaves_empty_answer():
     qs = ["Q1", "Q2"]
-    payload = [{"question_index": 1, "answer": "只答了第一条", "directly_addressed": True}]
+    payload = [{"question_index": 1, "answer": "只答了第一条"}]
     got = parse_cross_exam_response(qs, json.dumps(payload))
-    assert got[0].ok is True
+    assert got[0].answer == "只答了第一条"
     assert got[1].answer == ""
-    assert got[1].ok is False
 
 
 def test_parse_cross_exam_response_scalar_string_array():
@@ -70,9 +64,7 @@ def test_parse_cross_exam_response_scalar_string_array():
     got = parse_cross_exam_response(qs, json.dumps(payload, ensure_ascii=False))
     assert len(got) == 2
     assert "尾部" in got[0].answer
-    assert got[0].ok is True
     assert "灰度" in got[1].answer
-    assert got[1].ok is True
 
 
 def test_parse_cross_exam_response_scalar_array_in_prose():
@@ -81,9 +73,7 @@ def test_parse_cross_exam_response_scalar_array_in_prose():
     raw = '作答如下：\n["答一内容", "答二内容"]\n以上。'
     got = parse_cross_exam_response(qs, raw)
     assert got[0].answer == "答一内容"
-    assert got[0].ok is True
     assert got[1].answer == "答二内容"
-    assert got[1].ok is True
 
 
 def test_parse_cross_exam_response_falls_back_to_heuristic():
@@ -92,7 +82,21 @@ def test_parse_cross_exam_response_falls_back_to_heuristic():
     got = parse_cross_exam_response(qs, ans)
     assert len(got) == 1
     assert "尾部" in got[0].answer
-    assert got[0].ok is True
+
+
+def test_parse_ignores_legacy_directly_addressed():
+    """历史 ``directly_addressed`` / ``ok`` 字段被忽略，只取 answer。"""
+    qs = ["Q1"]
+    payload = [
+        {
+            "question_index": 1,
+            "answer": "我承认没有数据支持【待核实·推断】",
+            "directly_addressed": False,
+            "ok": False,
+        }
+    ]
+    got = parse_cross_exam_response(qs, json.dumps(payload, ensure_ascii=False))
+    assert got[0].answer.startswith("我承认")
 
 
 def test_build_cross_exam_exchanges_single_question():
@@ -102,7 +106,6 @@ def test_build_cross_exam_exchanges_single_question():
     assert len(got) == 1
     assert got[0].question == qs[0]
     assert "尾部" in got[0].answer
-    assert got[0].ok is True
 
 
 def test_build_cross_exam_exchanges_splits_by_semicolon():
@@ -116,29 +119,14 @@ def test_build_cross_exam_exchanges_splits_by_semicolon():
     )
     got = build_cross_exam_exchanges(qs, ans)
     assert len(got) == 2
-    assert got[0].ok and got[1].ok
     assert "尾部" in got[0].answer
     assert "灰度" in got[1].answer
 
 
-def test_build_cross_exam_exchanges_empty_answer_marks_not_ok():
-    got = build_cross_exam_exchanges(["Q1", "Q2"], "", overall_ok=False)
+def test_build_cross_exam_exchanges_empty_answer():
+    got = build_cross_exam_exchanges(["Q1", "Q2"], "")
     assert len(got) == 2
-    assert all(not ex.ok for ex in got)
-
-
-def test_parse_json_path_respects_overall_ok():
-    """JSON 主路径纳入 overall_ok：有答文时 overall_ok=False → ok 全 False。"""
-    qs = ["Q1", "Q2"]
-    payload = [
-        {"question_index": 1, "answer": "答一", "directly_addressed": True},
-        {"question_index": 2, "answer": "答二", "directly_addressed": True},
-    ]
-    got = parse_cross_exam_response(
-        qs, json.dumps(payload, ensure_ascii=False), overall_ok=False
-    )
-    assert all(ex.answer for ex in got)
-    assert all(not ex.ok for ex in got)
+    assert all(ex.answer == "" for ex in got)
 
 
 def test_section_split_ignores_decimal_like_line_starts():
@@ -153,7 +141,6 @@ def test_section_split_ignores_decimal_like_line_starts():
     assert "尾部" in got[0].answer
     assert "灰度" in got[1].answer
     assert "3.5" in got[1].answer
-    assert got[0].ok and got[1].ok
 
 
 def test_section_split_does_not_treat_lone_decimal_as_section_marker():

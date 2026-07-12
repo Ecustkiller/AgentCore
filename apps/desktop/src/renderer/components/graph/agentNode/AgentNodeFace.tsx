@@ -65,7 +65,7 @@ export function AgentNodeCardFace({
           : "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60"
       }`}
     >
-      {p.revisionBadge && (
+      {p.revisionBadge && p.revisionBadge.kind !== "debate" && (
         <span
           className={`absolute -right-1.5 -top-1.5 z-10 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-medium shadow-sm ring-2 ring-card ${graphBadgeMuted}`}
           title={p.revisionBadge.title}
@@ -266,9 +266,7 @@ function AgentNodeStatusLine({
             : "text-primary hover:underline focus-visible:underline focus-visible:outline-none"
         }
         aria-label={
-          mark.mode === "replace"
-            ? "查看质询作答详情"
-            : "查看本轮质询作答详情"
+          mark.mode === "replace" ? "查看质询作答详情" : "查看本轮质询作答详情"
         }
         onClick={(e) => {
           e.stopPropagation();

@@ -121,6 +121,20 @@ class RefreshToken(Base):
     client_aud: Mapped[str] = mapped_column(
         String(20), default="product", server_default=text("'product'")
     )
+    # Client surface (desktop/mobile/admin) at family start; refresh inherits.
+    client_platform: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Raw User-Agent truncated at insert; display parsing is a frontend concern.
+    user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Last successful refresh / issuance for this row (session activity).
+    last_used_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    # Absolute family ceiling anchor — set on first login of the family, inherited
+    # on every rotation (refresh_family_max_days / admin_refresh_family_max_hours).
+    family_started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

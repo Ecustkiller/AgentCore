@@ -1,8 +1,8 @@
 import { resolveFolderFromIndexedEntry } from "@/components/chat/message-input/resolveAttachmentFolder";
 import { getConversations } from "@/hooks/useConversations";
 import { getFolders } from "@/hooks/useFolders";
-import type { FolderMeta } from "@/services/folders";
 import type { IndexedEntry } from "@/lib/fileIndex";
+import type { FolderMeta } from "@/services/folders";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/hooks/useConversations", () => ({
@@ -13,7 +13,11 @@ vi.mock("@/hooks/useFolders", () => ({
   getFolders: vi.fn(),
 }));
 
-const folder = (id: string, name: string, patch: Partial<FolderMeta> = {}): FolderMeta => ({
+const folder = (
+  id: string,
+  name: string,
+  patch: Partial<FolderMeta> = {},
+): FolderMeta => ({
   id,
   name,
   mode: "cloud",

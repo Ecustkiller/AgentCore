@@ -48,18 +48,18 @@ export interface DebateClashView {
 
 /**
  * 质询环节的一条 Q↔A 展示态（质询回合 P1）。
+ * 只承载问↔答原文；是否正面回应由裁判 engagement / decisive 裁定，不设二元褒贬字段。
  */
 export interface DebateCrossExamExchangeView {
   question: string;
   answer: string;
-  ok: boolean;
 }
 
 /**
  * 质询环节对某一方的一组逐条交换（质询回合 P1）已解析成可渲染的展示态：被质询方 `target` 的显示名 +
  * 身份色 + 逐条 Q↔A + 该方作答的辩手 run（{@link DebateSideModel.run} 同源，完整产出钻取用）。
  * 由 {@link resolveCrossExam} 把契约的 {@link DebateCrossExam}（语义 key + answer_run_id 引用）据
- * 本轮 `sides` 与执行图 runs 映射而成——让「主持人当面质询、某方回避/接招」在群聊里可见。
+ * 本轮 `sides` 与执行图 runs 映射而成——让「主持人当面质询、某方接招」在群聊里可见。
  */
 export interface DebateCrossExamView {
   /** 被质询方语义 key（匹配 {@link DebateSideModel.sideKey}）。 */
@@ -148,8 +148,8 @@ export interface DebateModel {
    *  解析陈词 run；进行中恒空（结辩是收场后一次性 beat，live 无孪生）。空=未开启结辩（快速对碰 / 圆桌），
    *  前端不渲染结辩区。 */
   closings: DebateClosingView[];
-  /** 主持人开场白（收场权威产出）：顶部「会说话的主持人」气泡。空（进行中、未产出）时由
-   *  {@link DebateArena} 回落到 motion+首轮焦点拼出的模板开场白。 */
+  /** 主持人开场白（收场权威产出）：顶部「会说话的主持人」入场气泡。空（进行中、未产出、旧数据）
+   *  ⇒ 前端不渲染入场（不再拼模板假冒开口），开场由第 1 轮焦点标题承担。 */
   opening: string | null;
   settled: boolean;
 }

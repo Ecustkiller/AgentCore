@@ -8,13 +8,29 @@ import {
 } from "@/api/account";
 import { type User, logout, me } from "@/api/auth";
 import { getTokens } from "@/api/client";
+import {
+  type SessionSummary,
+  listSessions,
+  revokeOtherSessions,
+  revokeSession,
+} from "@/api/sessions";
 import { Avatar } from "@/pages/more/Avatar";
-// 账户设置 (/more/account) — profile / password / avatar / 注销 (mirrors desktop).
+import {
+  formatDeviceLabel,
+  formatRelativeTime,
+} from "@/pages/more/sessionDisplay";
+// 账户设置 (/more/account) — profile / password / avatar / 登录设备 / 注销.
 //
-// Four independent sections, each posting on its own. No global auth store on mobile, so
+// Independent sections, each posting on its own. No global auth store on mobile, so
 // the page loads `me()` on open and keeps the user in local state, re-syncing it after
 // each mutation that returns the refreshed user.
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import "@/pages/more/more.css";
 
@@ -57,6 +73,12 @@ export function AccountSettings() {
             <AvatarSection user={user} onUser={setUser} />
             <ProfileSection user={user} onUser={setUser} />
             <PasswordSection />
+            <SessionsSection
+              onSignedOut={async () => {
+                await logout().catch(() => {});
+                navigate("/login", { replace: true });
+              }}
+            />
             <DangerSection
               onDeleted={async () => {
                 await logout().catch(() => {});
@@ -316,6 +338,222 @@ function PasswordSection() {
           {saving ? "更新中…" : "更新密码"}
         </button>
       </div>
+    </Section>
+  );
+}
+
+function SessionsSection({ onSignedOut }: { onSignedOut: () => void }) {
+  const navigate = useNavigate();
+  const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [confirmOthers, setConfirmOthers] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await listSessions();
+      setSessions(res.data);
+    } catch (e) {
+      if (!getTokens()) {
+        navigate("/login", { replace: true });
+        return;
+      }
+      setError(e instanceof Error ? e.message : "加载登录设备失败");
+      setSessions(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [navigate]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function doRevoke(session: SessionSummary) {
+    setBusyId(session.id);
+    setActionError(null);
+    try {
+      await revokeSession(session.id);
+      if (session.current) {
+        onSignedOut();
+        return;
+      }
+      setConfirmId(null);
+      await load();
+    } catch (e) {
+      if (!getTokens()) {
+        navigate("/login", { replace: true });
+        return;
+      }
+      setActionError(e instanceof Error ? e.message : "退出设备失败");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function doRevokeOthers() {
+    setBusyId("__others__");
+    setActionError(null);
+    try {
+      await revokeOtherSessions();
+      setConfirmOthers(false);
+      await load();
+    } catch (e) {
+      if (!getTokens()) {
+        navigate("/login", { replace: true });
+        return;
+      }
+      setActionError(e instanceof Error ? e.message : "退出其他设备失败");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const showOthers = (sessions?.length ?? 0) > 1;
+  const busy = busyId !== null;
+
+  return (
+    <Section
+      title="登录设备"
+      note="查看当前活跃的登录会话，可退出不再使用的设备。"
+    >
+      {loading && sessions === null && <p className="muted hint">加载中…</p>}
+      {error && (
+        <div>
+          <p className="error">{error}</p>
+          <div className="field-actions">
+            <button
+              type="button"
+              className="btn-outline"
+              onClick={() => void load()}
+              disabled={loading}
+            >
+              重试
+            </button>
+          </div>
+        </div>
+      )}
+      {!error && sessions && sessions.length === 0 && (
+        <p className="section-note">暂无活跃登录设备。</p>
+      )}
+      {sessions && sessions.length > 0 && (
+        <div className="session-list">
+          {sessions.map((s) => {
+            const confirming = confirmId === s.id;
+            return (
+              <div key={s.id} className="session-row">
+                <div className="session-head">
+                  <span className="session-label">
+                    {formatDeviceLabel(s.platform, s.user_agent)}
+                  </span>
+                  {s.current && <span className="session-badge">本机</span>}
+                </div>
+                <div className="session-meta">
+                  {s.ip ? <span>IP {s.ip}</span> : <span>IP 未知</span>}
+                  <span>最后活跃 {formatRelativeTime(s.last_used_at)}</span>
+                </div>
+                {!confirming ? (
+                  <div className="session-actions">
+                    <button
+                      type="button"
+                      className="btn-danger-outline btn-sm"
+                      disabled={busy}
+                      onClick={() => {
+                        setConfirmOthers(false);
+                        setConfirmId(s.id);
+                        setActionError(null);
+                      }}
+                    >
+                      退出
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <p className="section-note">
+                      {s.current
+                        ? "退出后需要重新登录本机。"
+                        : "确认退出该设备？该设备上的登录将立即失效。"}
+                    </p>
+                    <div className="session-actions">
+                      <button
+                        type="button"
+                        className="btn-outline btn-sm"
+                        disabled={busy}
+                        onClick={() => {
+                          setConfirmId(null);
+                          setActionError(null);
+                        }}
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-danger btn-sm"
+                        disabled={busy}
+                        onClick={() => void doRevoke(s)}
+                      >
+                        {busyId === s.id ? "退出中…" : "确认退出"}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {showOthers &&
+        (!confirmOthers ? (
+          <div className="field-actions">
+            <button
+              type="button"
+              className="btn-danger-outline"
+              disabled={busy}
+              onClick={() => {
+                setConfirmId(null);
+                setConfirmOthers(true);
+                setActionError(null);
+              }}
+            >
+              退出其他所有设备
+            </button>
+          </div>
+        ) : (
+          <>
+            <p className="section-note">
+              将退出除本机外的全部登录设备，那些设备需重新登录。
+            </p>
+            <div className="field-actions">
+              <button
+                type="button"
+                className="btn-outline"
+                disabled={busy}
+                onClick={() => {
+                  setConfirmOthers(false);
+                  setActionError(null);
+                }}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn-danger"
+                disabled={busy}
+                onClick={() => void doRevokeOthers()}
+              >
+                {busyId === "__others__" ? "处理中…" : "确认退出其他设备"}
+              </button>
+            </div>
+          </>
+        ))}
+
+      {actionError && <p className="error">{actionError}</p>}
     </Section>
   );
 }

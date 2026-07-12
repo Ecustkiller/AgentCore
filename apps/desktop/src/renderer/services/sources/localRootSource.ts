@@ -7,7 +7,10 @@ import {
   baseName,
   parentDir,
 } from "@/lib/fileSource";
-import type { FilePreview as LocalPreview, FsErrorCode } from "@shared/ipc-contract";
+import type {
+  FsErrorCode,
+  FilePreview as LocalPreview,
+} from "@shared/ipc-contract";
 
 /** Map the local IPC preview shape into the unified result. */
 function adaptPreview(p: LocalPreview): FilePreviewResult {

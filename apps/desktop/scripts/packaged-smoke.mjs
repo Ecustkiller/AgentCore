@@ -35,10 +35,12 @@ try {
   console.log("CHAT_INPUT_VISIBLE:", hasInput);
   console.log("LOGIN_SCREEN:", hasLogin);
   if (!hasInput && !hasLogin) {
-    const preview = (await win.locator("body").innerText().catch(() => "")).slice(
-      0,
-      300,
-    );
+    const preview = (
+      await win
+        .locator("body")
+        .innerText()
+        .catch(() => "")
+    ).slice(0, 300);
     console.log("BODY:", preview.replace(/\s+/g, " "));
     throw new Error("expected login screen or chat input");
   }

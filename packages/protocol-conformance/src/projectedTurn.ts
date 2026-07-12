@@ -145,8 +145,8 @@ export interface ProjectedRun {
   stance: Stance | null;
   group: string | null;
   round: number;
-  revisionOf: string | null;
-  revision: number;
+  /** 同人续派 / 热修 / 辩论续写：现场根 run id（星型）；null = 冷开局. */
+  continuesRunId: string | null;
   /**「计划已调整」轻痕迹 (设计 §7.2): set by `plan_revised` to "bind" (a late-bound
    * placeholder finalised from upstream evidence) or "steer" (a not-yet-run node re-steered
    * after a scope deviation) when the CEO autonomously adjusted this paused node mid-flight;
@@ -253,18 +253,6 @@ export type ProjectedInteraction =
       question: string;
       assumption: string;
       awaiting?: "user" | "ceo";
-    }
-  | {
-      kind: "debate_round";
-      id: string;
-      status: InteractionStatus;
-      executionId: string;
-      moderatorRunId: string;
-      roundNo: number;
-      focus: string;
-      summary: string;
-      converged: boolean;
-      rationale: string;
     }
   | {
       kind: "question_posted";

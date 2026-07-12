@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 /**
  * 立论块「展开全文」交互：
- * - 默认论点列表视图；头行 / 底部开关共享同一 showAll 状态；
+ * - 默认论点列表视图，收起态只有头行一枚「展开全文」（对齐质询区，无底部冗余入口）；
+ * - 展开后头行 + 底部各一枚「收起全文」，共享同一 showAll，任一处收起都同步；
  * - 全文视图直接渲染 Markdown，不再套 CollapsibleSpeech（无 max-h-72 夹层回归锁）。
  */
 
@@ -30,7 +31,7 @@ function speechRun(id = "mod_r1_pro"): RunNode {
     status: "completed",
     kind: "agent",
     parentRunId: null,
-    revisionOf: null,
+    continuesRunId: null,
     receivedContext: [],
   } as unknown as RunNode;
 }
@@ -43,7 +44,6 @@ function executionWith(agents: Partial<AgentState>[]): Execution {
     frames: [],
     debate: null,
     debateRounds: [],
-    debateDecisions: [],
     teamNotes: [],
   } as unknown as Execution;
 }
@@ -113,34 +113,25 @@ describe("SpeakerBlock 展开全文", () => {
         .queryAllByTestId("markdown")
         .every((el) => el.textContent !== STRUCTURED_OUTPUT),
     ).toBe(true);
-    expect(screen.getAllByRole("button", { name: "展开全文" })).toHaveLength(
-      2,
-    );
+    expect(screen.getByRole("button", { name: "展开全文" })).toBeTruthy();
   });
 
-  it("头行与底部开关都能切换且状态同步", () => {
+  it("头行展开、展开态头行/底部两枚收起都同步", () => {
     renderBlock();
 
-    const expandButtons = screen.getAllByRole("button", { name: "展开全文" });
-    expect(expandButtons).toHaveLength(2);
+    // 收起态只有头行一枚「展开全文」。
+    expect(screen.getByRole("button", { name: "展开全文" })).toBeTruthy();
 
-    // 点头行展开 → 两枚都变成「收起全文」，全文 Markdown 出现。
-    fireEvent.click(expandButtons[0]);
+    // 点头行展开 → 头行 + 底部各一枚「收起全文」，全文 Markdown 出现。
+    fireEvent.click(screen.getByRole("button", { name: "展开全文" }));
     expect(screen.getByTestId("markdown").textContent).toBe(STRUCTURED_OUTPUT);
-    expect(screen.getAllByRole("button", { name: "收起全文" })).toHaveLength(
-      2,
-    );
+    expect(screen.getAllByRole("button", { name: "收起全文" })).toHaveLength(2);
     expect(screen.queryByRole("button", { name: "展开全文" })).toBeNull();
     // 论点列表行已卸下。
-    expect(
-      screen.queryByRole("button", { name: /第一论点/ }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /第一论点/ })).toBeNull();
 
-    // 点底部收起 → 回到列表，两枚都变回「展开全文」。
-    const collapseButtons = screen.getAllByRole("button", {
-      name: "收起全文",
-    });
-    fireEvent.click(collapseButtons[1]);
+    // 点底部「收起全文」→ 回到列表，头行变回「展开全文」。
+    fireEvent.click(screen.getAllByRole("button", { name: "收起全文" })[1]);
     expect(
       screen
         .queryAllByTestId("markdown")
@@ -149,12 +140,10 @@ describe("SpeakerBlock 展开全文", () => {
     expect(
       screen.getByRole("button", { name: /第一论点/, expanded: false }),
     ).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "展开全文" })).toHaveLength(
-      2,
-    );
+    expect(screen.getByRole("button", { name: "展开全文" })).toBeTruthy();
 
-    // 再点底部展开，再用头行收起，确认双向同步。
-    fireEvent.click(screen.getAllByRole("button", { name: "展开全文" })[1]);
+    // 再次头行展开，改用头行「收起全文」收起，确认双向同步。
+    fireEvent.click(screen.getByRole("button", { name: "展开全文" }));
     expect(screen.getByTestId("markdown").textContent).toBe(STRUCTURED_OUTPUT);
     fireEvent.click(screen.getAllByRole("button", { name: "收起全文" })[0]);
     expect(
@@ -162,15 +151,13 @@ describe("SpeakerBlock 展开全文", () => {
         .queryAllByTestId("markdown")
         .every((el) => el.textContent !== STRUCTURED_OUTPUT),
     ).toBe(true);
-    expect(screen.getAllByRole("button", { name: "展开全文" })).toHaveLength(
-      2,
-    );
+    expect(screen.getByRole("button", { name: "展开全文" })).toBeTruthy();
   });
 
   it("全文视图下 DOM 无 max-h-72 夹层容器（双层折叠回归锁）", () => {
     const { container } = renderBlock();
 
-    fireEvent.click(screen.getAllByRole("button", { name: "展开全文" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "展开全文" }));
 
     expect(screen.getByTestId("markdown").textContent).toBe(STRUCTURED_OUTPUT);
     expect(container.querySelector(".max-h-72")).toBeNull();

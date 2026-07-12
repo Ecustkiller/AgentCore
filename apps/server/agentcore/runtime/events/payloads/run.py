@@ -57,7 +57,8 @@ class RunStartedPayload(WirePayload):
     agent_id: str
     parent_run_id: str | None
     kind: RunKind
-    revision: int | None = absent()
+    # 同人续派 / 热修 / 辩论续写：恒指现场根（RunSession 键）；星型，前端铺链。
+    continues_run_id: str | None = absent()
     stance: Stance | None = absent()
     group: str | None = absent()
     round: int | None = absent()
@@ -80,7 +81,7 @@ ContextChannel = Literal[
     "opponent",
     "challenge",
     "interjection",
-    "revision",
+    "continuation",
     "cross_exam",
     "closing",
 ]
@@ -136,16 +137,6 @@ class RunEscalationPayload(WirePayload):
     assumption: str
     blocking: bool
     kind: EscalationKind | None = absent()
-
-
-class RunIntakePayload(WirePayload):
-    run_id: str
-    agent_id: str
-    complexity: Literal["simple", "moderate", "complex"]
-    strategy: Literal["direct_execute", "needs_tools", "needs_research"]
-    token_budget: int
-    rationale: str | None = absent()
-    signals: list[str] | None = absent()
 
 
 class RunEscalationGatePayload(WirePayload):

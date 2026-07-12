@@ -1,8 +1,4 @@
-import {
-  type AutonomyPolicy,
-  getAutonomy,
-  setAutonomy,
-} from "@/api/autonomy";
+import { type AutonomyPolicy, getAutonomy, setAutonomy } from "@/api/autonomy";
 // 自主度 (/more/autonomy) — AutonomyPolicy 三档（安全权限与治理 §三）。
 //
 // Mirrors desktop AutonomySettings product-wise: three radio options + semantics.
@@ -32,7 +28,7 @@ const OPTIONS: AutonomyOption[] = [
   {
     value: "full_auto",
     label: "全自动授权",
-    description: "开工卡自动授权、不列出能力项；计划确认（如有）仍会展示。",
+    description: "完全放权：不弹开工卡，能力与计划确认一并跳过。",
   },
 ];
 
@@ -93,7 +89,8 @@ export function AutonomySettings() {
 
       <div className="settings-body">
         <p className="settings-desc">
-          控制团队开工时能力授权的节奏。只影响写文件 / 跑代码等可授权工具，不影响计划确认与检查点。
+          控制团队开工时能力授权的节奏。只影响写文件 /
+          跑代码等可授权工具，不影响计划确认与检查点。
         </p>
 
         {policy === null && !loadError ? (
@@ -105,22 +102,26 @@ export function AutonomySettings() {
               {OPTIONS.map((option) => {
                 const selected = option.value === policy;
                 return (
-                  <button
+                  <label
                     key={option.value}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    disabled={pending || policy === null}
-                    onClick={() => void onSelect(option.value)}
                     className={
                       selected ? "choice-row choice-row-active" : "choice-row"
                     }
                   >
+                    <input
+                      type="radio"
+                      name="autonomy-policy"
+                      value={option.value}
+                      checked={selected}
+                      disabled={pending || policy === null}
+                      onChange={() => void onSelect(option.value)}
+                      className="choice-radio-input"
+                    />
                     <div className="choice-text">
                       <span className="choice-label">{option.label}</span>
                       <span className="choice-desc">{option.description}</span>
                     </div>
-                  </button>
+                  </label>
                 );
               })}
             </div>

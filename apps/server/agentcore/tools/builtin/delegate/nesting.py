@@ -29,6 +29,7 @@ def make_child(tool: DelegateTool, captain_run_id: str, captain_depth: int) -> D
         approval_gate=tool._approval_gate,
         session_store=tool._session_store,
         session_saver=tool._session_saver,
+        session_loader=tool._session_loader,
         conversation_id=tool._conversation_id,
         registry=tool._registry,
         checkpoint_timeout_seconds=tool._checkpoint_timeout_seconds,

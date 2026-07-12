@@ -35,6 +35,7 @@ from agentcore.api.routes import (
     users,
     workspaces,
 )
+from agentcore.auth.retention import refresh_token_retention_loop
 from agentcore.config import settings
 from agentcore.conversation.compaction import shutdown_compaction
 from agentcore.core.errors import AgentCoreError
@@ -184,6 +185,8 @@ async def lifespan(app: FastAPI):
     audit_retention_task: asyncio.Task | None = None
     audit_retention_task = asyncio.create_task(audit_retention_loop())
 
+    refresh_token_retention_task = asyncio.create_task(refresh_token_retention_loop())
+
     # Paused-turn TTL sweep (结构化挂起 2b): prune paused_turns frames abandoned past
     # the 7-day window so durable suspensions stay bounded. The live resolve path drops
     # connected pauses; this only catches the disconnected, never-resumed remainder.
@@ -232,6 +235,9 @@ async def lifespan(app: FastAPI):
             audit_retention_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await audit_retention_task
+        refresh_token_retention_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await refresh_token_retention_task
         if paused_turn_retention_task is not None:
             paused_turn_retention_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

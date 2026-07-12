@@ -1,19 +1,20 @@
 import type { Execution, RunNode } from "./types";
 
-/** Minimal run shape for walking `revisionOf` to the chain root. */
-export interface RevisionLink {
+/** Minimal run shape for walking `continuesRunId` to the chain root. */
+export interface ContinuationLink {
   id: string;
-  revisionOf: string | null;
+  continuesRunId: string | null;
 }
 
 /**
- * Walk `revisionOf` back to the original run id for this revision chain.
- * Standalone runs (no `revisionOf`) return themselves. Missing / cyclic links
- * stop at the last reachable id.
+ * Walk `continuesRunId` back to the original run id for this continuation chain.
+ * Standalone runs (no `continuesRunId`) return themselves. Missing / cyclic links
+ * stop at the last reachable id. Wire is star-shaped (always points at the root);
+ * the walk also tolerates a linear chain if present.
  */
-export function revisionRootId(
+export function continuationRootId(
   runId: string,
-  runs: ReadonlyArray<RevisionLink>,
+  runs: ReadonlyArray<ContinuationLink>,
 ): string {
   const byId = new Map(runs.map((r) => [r.id, r]));
   let cur = runId;
@@ -21,64 +22,78 @@ export function revisionRootId(
   while (!seen.has(cur)) {
     seen.add(cur);
     const r = byId.get(cur);
-    if (!r?.revisionOf || !byId.has(r.revisionOf)) break;
-    cur = r.revisionOf;
+    if (!r?.continuesRunId || !byId.has(r.continuesRunId)) break;
+    cur = r.continuesRunId;
   }
   return cur;
 }
 
-/** One version in a revision chain (乙 热修 P4): the original is `version` 1, each
- * 续写 carries its own `version` (2, 3…). `run` is the projected node for that
- * version, so the compare card reads its output / status / role straight off it. */
-export interface RevisionVersion {
+/** @deprecated Prefer {@link continuationRootId}. */
+export const revisionRootId = continuationRootId;
+
+/** One version in a continuation chain: the original is `version` 1, each
+ * 续写 carries its own `version` (2, 3… = continuationIndex + 1). `run` is the
+ * projected node for that version. */
+export interface ContinuationVersion {
   version: number;
   run: RunNode;
 }
 
-/** A revised worker's full version chain (乙 热修 P4): the original plus every
- *「修订 vN」续写 of it, in version order (v1 first). */
-export interface RevisionChain {
+/** @deprecated Prefer {@link ContinuationVersion}. */
+export type RevisionVersion = ContinuationVersion;
+
+/** A worker's full continuation chain: the original plus every 续写 of it, in
+ * version order (v1 first). */
+export interface ContinuationChain {
   originalId: string;
-  versions: RevisionVersion[];
+  versions: ContinuationVersion[];
 }
 
-/** Whether any worker in the turn was 定向唤回 revised — the single signal that
- * gates the统一「对比」透镜的版本轨 (compare/RevisionOverview) + the graph's revision
- * styling (mirrors {@link isDebate} for debates). */
-export function hasRevisions(execution: Execution): boolean {
-  return execution.runs.some((r) => r.revisionOf != null);
+/** @deprecated Prefer {@link ContinuationChain}. */
+export type RevisionChain = ContinuationChain;
+
+/** Whether any worker in the turn was 同人接续 — gates the统一「对比」透镜 + graph
+ * continuation styling (mirrors {@link isDebate} for debates). */
+export function hasContinuations(execution: Execution): boolean {
+  return execution.runs.some((r) => r.continuesRunId != null);
 }
+
+/** @deprecated Prefer {@link hasContinuations}. */
+export const hasRevisions = hasContinuations;
 
 /**
- * Group the turn's runs into revision chains (乙 热修 P4), one per revised original
+ * Group the turn's runs into continuation chains, one per continued original
  * (in first-seen original order). Each chain is the original (v1) followed by its
- * 续写 versions in ascending version order — the projection the统一「对比」透镜的版本轨
- * (compare/RevisionOverview) lays out side by side. Originals with no revision are
- * omitted (a chain needs ≥2
- * versions to compare); a stray revision whose original is absent is dropped.
+ * 续写 versions in ascending continuationIndex — the projection the统一「对比」透镜
+ * lays out side by side. Originals with no continuation are omitted; a stray
+ * continuation whose original is absent is dropped.
  */
-export function revisionChains(execution: Execution): RevisionChain[] {
-  const revisionsByOriginal = new Map<string, RunNode[]>();
+export function continuationChains(execution: Execution): ContinuationChain[] {
+  const byRoot = new Map<string, RunNode[]>();
   for (const run of execution.runs) {
-    if (run.revisionOf == null) continue;
-    const list = revisionsByOriginal.get(run.revisionOf) ?? [];
+    if (run.continuesRunId == null) continue;
+    const list = byRoot.get(run.continuesRunId) ?? [];
     list.push(run);
-    revisionsByOriginal.set(run.revisionOf, list);
+    byRoot.set(run.continuesRunId, list);
   }
-  const chains: RevisionChain[] = [];
+  const chains: ContinuationChain[] = [];
   for (const run of execution.runs) {
-    const revisions = revisionsByOriginal.get(run.id);
-    // Iterate originals (revisionOf == null) so each chain is built once, in
-    // graph order; a revision node itself is skipped here.
-    if (run.revisionOf != null || !revisions) continue;
-    const versions: RevisionVersion[] = [
+    const continuations = byRoot.get(run.id);
+    if (run.continuesRunId != null || !continuations) continue;
+    const versions: ContinuationVersion[] = [
       { version: 1, run },
-      ...revisions
+      ...continuations
         .slice()
-        .sort((a, b) => a.revision - b.revision)
-        .map((r) => ({ version: r.revision, run: r })),
+        .sort((a, b) => a.continuationIndex - b.continuationIndex)
+        .map((r) => ({
+          version: r.continuationIndex + 1,
+          run: r,
+        })),
     ];
     chains.push({ originalId: run.id, versions });
   }
   return chains;
 }
+
+/** @deprecated Prefer {@link continuationChains}. */
+export const revisionChains = continuationChains;

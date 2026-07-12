@@ -29,7 +29,6 @@ HOT_ORPHAN_KINDS: frozenset[str] = frozenset(
         InteractionKind.APPROVAL.value,
         InteractionKind.DELEGATION_AUTHORIZATION.value,
         InteractionKind.ESCALATION.value,
-        InteractionKind.DEBATE_ROUND.value,
     }
 )
 

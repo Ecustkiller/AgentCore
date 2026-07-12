@@ -1,51 +1,43 @@
 import { Markdown } from "@/components/chat/Markdown";
-import { Button } from "@/components/ui";
-import {
-  usePersistentDisclosure,
-  useStreamAwareDisclosure,
-} from "@/stores/disclosure";
-import type { Execution } from "@/stores/execution";
+import { Badge, Button } from "@/components/ui";
+import type { BadgeTone } from "@/components/ui/badge";
+import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import { useSidePanelStore } from "@/stores/sidePanel";
-import {
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  CornerDownRight,
-  TriangleAlert,
-} from "lucide-react";
-import { CollapsibleSpeech } from "../CollapsibleSpeech";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import type {
   DebateCrossExamExchangeView,
   DebateCrossExamView,
 } from "../model";
+import { ModeratorIdentity } from "./ModeratorIdentity";
 import type { DebateArenaLayout } from "./debateLayoutPreference";
 import { summarizeText } from "./parseSpeechArguments";
 
-const ANSWER_SUMMARY_LEN = 30;
+const ANSWER_PREVIEW_LEN = 48;
+const QUESTION_PREVIEW_LEN = 72;
 
-/** 质询小节：与立论区同视觉语言；split 时按方入列，问题完整展示、回答默认折叠。 */
+/** 质询小节：审计清单范式；split 时按方入列，答案为主、问题降权。 */
 export function CrossExamSection({
   exchanges,
-  execution,
   messageId,
   sceneKey,
   layoutMode = "stack",
+  moderatorModel,
 }: {
   exchanges: DebateCrossExamView[];
-  execution: Execution;
   messageId: string;
   sceneKey: string;
   layoutMode?: DebateArenaLayout;
+  /** 主持人模型；直播态 null → 报幕无徽章。 */
+  moderatorModel?: string | null;
 }) {
   const useSplit = layoutMode === "split";
 
   return (
     <div className="space-y-3">
-      <ModeratorCrossExamCue />
+      <ModeratorCrossExamCue model={moderatorModel} />
       {useSplit ? (
         <SplitCrossExamColumns
           exchanges={exchanges}
-          execution={execution}
           messageId={messageId}
           sceneKey={sceneKey}
         />
@@ -54,7 +46,6 @@ export function CrossExamSection({
           <CrossExamSideBlock
             key={cx.targetKey}
             cx={cx}
-            execution={execution}
             messageId={messageId}
             sceneKey={sceneKey}
           />
@@ -64,26 +55,25 @@ export function CrossExamSection({
   );
 }
 
-/** 质询阶段子标题：环节标题，纯文字不套横带（法槌留给裁判小结）。 */
-function ModeratorCrossExamCue() {
+/** 质询阶段报幕：居中环节标题 + 主持人身份壳，低于轮次大标题一级。 */
+function ModeratorCrossExamCue({ model }: { model?: string | null }) {
   return (
-    <div className="mt-3 flex items-baseline gap-2 border-t border-border pt-3">
-      <h4 className="shrink-0 text-xl font-semibold text-foreground">质询</h4>
-      <span className="min-w-0 truncate text-xs text-muted-foreground">
-        主持人发出必答质询
-      </span>
+    <div className="mt-3 border-t border-border pt-3 text-center">
+      <h4 className="text-base font-semibold text-foreground">质询</h4>
+      <p className="mt-1 flex flex-wrap items-center justify-center gap-1.5 text-xs text-muted-foreground">
+        <ModeratorIdentity model={model} gavelSize={13} className="text-xs" />
+        <span>发出必答质询</span>
+      </p>
     </div>
   );
 }
 
 function SplitCrossExamColumns({
   exchanges,
-  execution,
   messageId,
   sceneKey,
 }: {
   exchanges: DebateCrossExamView[];
-  execution: Execution;
   messageId: string;
   sceneKey: string;
 }) {
@@ -100,7 +90,6 @@ function SplitCrossExamColumns({
           {pro && (
             <CrossExamSideBlock
               cx={pro}
-              execution={execution}
               messageId={messageId}
               sceneKey={sceneKey}
             />
@@ -110,7 +99,6 @@ function SplitCrossExamColumns({
           {con && (
             <CrossExamSideBlock
               cx={con}
-              execution={execution}
               messageId={messageId}
               sceneKey={sceneKey}
             />
@@ -121,7 +109,6 @@ function SplitCrossExamColumns({
         <CrossExamSideBlock
           key={cx.targetKey}
           cx={cx}
-          execution={execution}
           messageId={messageId}
           sceneKey={sceneKey}
         />
@@ -132,31 +119,18 @@ function SplitCrossExamColumns({
 
 function CrossExamSideBlock({
   cx,
-  execution,
   messageId,
   sceneKey,
 }: {
   cx: DebateCrossExamView;
-  execution: Execution;
   messageId: string;
   sceneKey: string;
 }) {
   const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
   const run = cx.answerRun;
-  const agent = run
-    ? execution.agents.find((a) => a.id === run.agentId)
-    : undefined;
-  const fullOutput = agent ? agent.outputChunks.join("") : "";
   const streaming = run?.status === "running";
+  const answerFailed = run?.status === "failed";
   const total = cx.exchanges.length;
-  const answered = cx.exchanges.filter((ex) => ex.ok).length;
-
-  // 「展开全文」与立论区 ArgumentSpeech 的 showAll 同语义：就地全文视图，持久化记住。
-  const [showAll, setShowAll] = usePersistentDisclosure(
-    `${sceneKey}:${cx.targetKey}:all`,
-    false,
-  );
-  const canExpand = fullOutput.trim().length > 0;
 
   const openRunDetail = () => {
     if (!run) return;
@@ -169,7 +143,7 @@ function CrossExamSideBlock({
         {cx.targetName}
       </span>
       <span className="text-muted-foreground">
-        {total === 0 ? "暂无质询问答" : `· ${answered}/${total} 正面回答`}
+        {total === 0 ? "暂无质询问答" : `· ${total} 条质询`}
       </span>
     </>
   );
@@ -179,7 +153,7 @@ function CrossExamSideBlock({
       className="border-l-[3px] pl-3"
       style={{ borderLeftColor: cx.targetColorVar }}
     >
-      <div className="mb-1 flex items-center gap-2 text-xs">
+      <div className="mb-1.5 flex items-center gap-2 text-xs">
         {run ? (
           // 对齐 SpeakerBlock：点名字行打开该方作答 run 的详情侧栏。
           <Button
@@ -192,49 +166,16 @@ function CrossExamSideBlock({
         ) : (
           <span className="flex items-center gap-2">{meta}</span>
         )}
-        {canExpand && (
-          <button
-            type="button"
-            onClick={() => setShowAll((v) => !v)}
-            aria-expanded={showAll}
-            className="ml-auto shrink-0 text-xs font-medium text-primary hover:underline"
-          >
-            {showAll ? "收起全文" : "展开全文"}
-          </button>
-        )}
       </div>
-      {showAll && canExpand ? (
-        <div className="pb-2 text-sm text-foreground">
-          {streaming ? (
-            <p className="whitespace-pre-wrap break-words">
-              {fullOutput}
-              <span
-                className="ml-0.5 inline-block h-[1em] w-px animate-pulse bg-primary align-text-bottom"
-                aria-hidden
-              />
-            </p>
-          ) : (
-            <>
-              {/* 用户显式「展开全文」= 要看完整内容，不再套 CollapsibleSpeech。 */}
-              <Markdown content={fullOutput} evidence />
-              <button
-                type="button"
-                onClick={() => setShowAll(false)}
-                className="mt-1 text-xs font-medium text-primary hover:underline"
-              >
-                收起全文
-              </button>
-            </>
-          )}
-        </div>
-      ) : total > 0 ? (
-        <ul className="divide-y divide-border/40">
+      {total > 0 ? (
+        <ul className="space-y-1">
           {cx.exchanges.map((ex, i) => (
             <CrossExamQaRow
               key={`${cx.targetKey}:${i}`}
               exchange={ex}
               index={i}
               streaming={streaming && i === cx.exchanges.length - 1}
+              answerFailed={answerFailed}
               sceneKey={`${sceneKey}:qa:${cx.targetKey}:${i}`}
             />
           ))}
@@ -248,92 +189,101 @@ function CrossExamQaRow({
   exchange,
   index,
   streaming,
+  answerFailed,
   sceneKey,
 }: {
   exchange: DebateCrossExamExchangeView;
   index: number;
   streaming: boolean;
+  answerFailed: boolean;
   sceneKey: string;
 }) {
   const hasAnswer = exchange.answer.trim().length > 0;
-  const live = streaming && !hasAnswer;
+  // 整条 live 流式（含逐字作答）保持自动展开，收场后交回持久化折叠。
+  const live = streaming;
   const [answerOpen, toggleAnswerOpen] = useStreamAwareDisclosure(
     `${sceneKey}:ans`,
     live,
   );
-  const answerSummary = summarizeAnswer(exchange.answer);
+  const status = resolveQaStatus({
+    hasAnswer,
+    streaming,
+    answerFailed,
+  });
+  const answerPreview = previewAnswer(exchange.answer, {
+    streaming,
+    hasAnswer,
+  });
+  const questionPreview = summarizeText(
+    exchange.question.trim().replace(/\s+/g, " "),
+    QUESTION_PREVIEW_LEN,
+  );
 
   return (
-    <li className="py-1.5">
-      <div className="flex items-start gap-1.5 text-sm text-foreground">
-        <span className="shrink-0 text-xs text-muted-foreground">
-          Q{index + 1}.
-        </span>
-        <span className="min-w-0 flex-1 leading-snug">{exchange.question}</span>
-        <QaStatus ok={exchange.ok} hasAnswer={hasAnswer} />
-      </div>
-
-      <div className="mt-1 border-t border-border/40 pt-1">
-        <button
-          type="button"
-          onClick={toggleAnswerOpen}
-          aria-expanded={answerOpen}
-          className="flex w-full items-start gap-1.5 text-left text-xs hover:text-foreground"
-        >
-          {answerOpen ? (
-            <ChevronDown
-              size={12}
-              className="mt-0.5 shrink-0 text-muted-foreground"
-            />
-          ) : (
-            <ChevronRight
-              size={12}
-              className="mt-0.5 shrink-0 text-muted-foreground"
-            />
+    <li className="list-none rounded-lg bg-muted/15">
+      <button
+        type="button"
+        onClick={toggleAnswerOpen}
+        aria-expanded={answerOpen}
+        className="flex w-full items-start gap-1.5 px-2 py-1.5 text-left hover:bg-muted/35"
+      >
+        {status ? <QaStatusBadge status={status} /> : null}
+        <span className="min-w-0 flex-1">
+          <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">
+            <span className="text-muted-foreground/80">Q{index + 1}. </span>
+            {questionPreview}
+          </span>
+          {!answerOpen && answerPreview.text.length > 0 && (
+            <span
+              className={`mt-0.5 block truncate text-sm leading-snug ${
+                answerPreview.placeholder
+                  ? "text-muted-foreground"
+                  : "text-foreground"
+              }`}
+            >
+              {answerPreview.text}
+            </span>
           )}
-          <CornerDownRight
-            size={11}
+        </span>
+        {answerOpen ? (
+          <ChevronDown
+            size={12}
             className="mt-0.5 shrink-0 text-muted-foreground"
           />
-          {!answerOpen && hasAnswer && (
-            <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-              {answerSummary}
-            </span>
-          )}
-          {!answerOpen && !hasAnswer && (
-            <span className="text-muted-foreground">
-              {exchange.ok ? "等待作答…" : "未作答"}
-            </span>
-          )}
-        </button>
+        ) : (
+          <ChevronRight
+            size={12}
+            className="mt-0.5 shrink-0 text-muted-foreground"
+          />
+        )}
+      </button>
 
-        <div
-          className="grid transition-[grid-template-rows,opacity] duration-200 ease-out"
-          style={{
-            gridTemplateRows: answerOpen ? "1fr" : "0fr",
-            opacity: answerOpen ? 1 : 0,
-          }}
-        >
-          <div className="overflow-hidden">
-            <div className="px-2 pb-1 pt-1 text-sm">
-              {streaming && hasAnswer ? (
-                <p className="whitespace-pre-wrap break-words">
-                  {exchange.answer}
-                  <span className="ml-0.5 inline-block h-[1em] w-px animate-pulse bg-primary align-text-bottom" />
-                </p>
-              ) : hasAnswer ? (
-                <CollapsibleSpeech
-                  contentKey={exchange.answer}
-                  sceneKey={`${sceneKey}:ans-body`}
-                >
-                  <Markdown content={exchange.answer} evidence />
-                </CollapsibleSpeech>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {exchange.ok ? "等待作答…" : "未作答。"}
-                </p>
-              )}
-            </div>
+      <div
+        className="grid transition-[grid-template-rows,opacity] duration-200 ease-out"
+        style={{
+          gridTemplateRows: answerOpen ? "1fr" : "0fr",
+          opacity: answerOpen ? 1 : 0,
+        }}
+      >
+        <div className="overflow-hidden">
+          <div className="px-2 pb-2 pt-0.5 text-sm text-foreground">
+            {streaming && hasAnswer ? (
+              <p className="whitespace-pre-wrap break-words">
+                {exchange.answer}
+                <span
+                  className="ml-0.5 inline-block h-[1em] w-px animate-pulse bg-primary align-text-bottom"
+                  aria-hidden
+                />
+              </p>
+            ) : hasAnswer ? (
+              <Markdown content={exchange.answer} evidence />
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {status?.label === "待答"
+                  ? "作答中…"
+                  : (status?.label ?? "未作答")}
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -341,21 +291,102 @@ function CrossExamQaRow({
   );
 }
 
-function QaStatus({ ok, hasAnswer }: { ok: boolean; hasAnswer: boolean }) {
-  if (ok && hasAnswer) {
-    return <CheckCircle2 size={12} className="shrink-0 text-success" />;
+/** 客观状态徽章：仅「作答中 / 作答失败 / 未作答」；有答文时不贴褒贬标签。 */
+type QaStatusKind = "待答" | "作答失败" | "未作答";
+
+function resolveQaStatus({
+  hasAnswer,
+  streaming,
+  answerFailed,
+}: {
+  hasAnswer: boolean;
+  streaming: boolean;
+  answerFailed: boolean;
+}): { label: QaStatusKind; tone: BadgeTone; pulse?: boolean } | null {
+  // live 流式该条尚未定谳，统一「待答」脉冲。
+  if (streaming) {
+    return { label: "待答", tone: "primary", pulse: true };
   }
-  if (!hasAnswer && ok) {
-    return (
-      <span className="size-2 shrink-0 animate-pulse rounded-full bg-primary" />
-    );
+  // 有作答：中性原文，不贴「正面回应 / 回避」褒贬徽章。
+  if (hasAnswer) {
+    return null;
   }
-  return <TriangleAlert size={12} className="shrink-0 text-muted-foreground" />;
+  if (answerFailed) {
+    return { label: "作答失败", tone: "destructive" };
+  }
+  return { label: "未作答", tone: "muted" };
 }
 
-function summarizeAnswer(text: string): string {
+function QaStatusBadge({
+  status,
+}: {
+  status: { label: QaStatusKind; tone: BadgeTone; pulse?: boolean };
+}) {
+  return (
+    <Badge
+      tone={status.tone}
+      pill
+      className={`mt-0.5 font-medium ${status.pulse ? "animate-pulse" : ""}`}
+    >
+      {status.label}
+    </Badge>
+  );
+}
+
+/**
+ * 折叠预览：剥 markdown → 纯文本截断；疑似原始 JSON / 质询 blob 时回落占位，
+ * 绝不把原始 blob 露到折叠行。
+ */
+function previewAnswer(
+  text: string,
+  { streaming, hasAnswer }: { streaming: boolean; hasAnswer: boolean },
+): { text: string; placeholder: boolean } {
+  if (!hasAnswer) {
+    // 无作答：流式提示「作答中」；收场无作答则不占预览行（徽章已表「未作答/作答失败」）。
+    return { text: streaming ? "作答中…" : "", placeholder: true };
+  }
   const trimmed = text.trim();
-  if (!trimmed) return "";
-  const firstSentence = trimmed.split(/[。；]/)[0]?.trim() || trimmed;
-  return summarizeText(firstSentence, ANSWER_SUMMARY_LEN);
+  if (looksLikeRawBlob(trimmed)) {
+    return {
+      text: streaming ? "作答中…" : "点开查看",
+      placeholder: true,
+    };
+  }
+  const plain = stripMarkdownLite(trimmed);
+  if (!plain || looksLikeRawBlob(plain)) {
+    return {
+      text: streaming ? "作答中…" : "点开查看",
+      placeholder: true,
+    };
+  }
+  return {
+    text: summarizeText(plain, ANSWER_PREVIEW_LEN),
+    placeholder: false,
+  };
+}
+
+/** 粗剥 markdown 记号，只为折叠一行预览；展开仍走完整 Markdown。 */
+function stripMarkdownLite(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*>+\s?/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/[*_~]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** 疑似原始作答 blob（JSON / 质询应答标题块），折叠行不得原样露出。 */
+function looksLikeRawBlob(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (t.startsWith("{") || t.startsWith("[")) return true;
+  if (t.startsWith("## 质询应答")) return true;
+  if (/^```(?:json)?\s*[\[{]/i.test(t)) return true;
+  return false;
 }

@@ -93,7 +93,10 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
       value: { process_id: "p1", status: "running", output: "" },
     });
     stubFsApi(workspaceOp);
-    resolveTarget.mockResolvedValue({ rootId: "container-1", subpath: "conv-c1" });
+    resolveTarget.mockResolvedValue({
+      rootId: "container-1",
+      subpath: "conv-c1",
+    });
 
     await performWorkspaceOp(
       payload({

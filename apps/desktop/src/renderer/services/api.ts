@@ -1,4 +1,7 @@
 import { clientHeaders } from "@/lib/clientBuildInfo";
+import type { AuthRefreshResult } from "../../shared/outbox-contract";
+
+export type { AuthRefreshResult };
 
 export const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -146,17 +149,18 @@ const isAuthPath = (path: string): boolean => path.startsWith("/v1/auth/");
 // revoke the whole family, and the user would be logged out mid-session
 // (认证与会话.md §五/§七). Collapsing the burst into one promise guarantees a
 // single rotation; the backend grace window is the cross-window backstop.
-let refreshInFlight: Promise<boolean> | null = null;
+let refreshInFlight: Promise<AuthRefreshResult> | null = null;
 
 /**
- * Attempt a single token refresh; returns true if the session was renewed.
+ * Attempt a single token refresh; three-state so transient outages never look
+ * like session death.
  *
  * Single-flight: concurrent callers share one /refresh round-trip (see
  * {@link refreshInFlight}). Exported so non-`api` callers (the raw-fetch SSE
  * stream, the workspace/handoff/realtime channels) reuse the exact same
  * refresh-once policy *and* the same dedup, instead of each racing a rotation.
  */
-export function tryRefresh(): Promise<boolean> {
+export function tryRefresh(): Promise<AuthRefreshResult> {
   // D4: when Electron main owns refresh single-flight, delegate so writebacker
   // and renderer never rotate the same refresh family concurrently.
   const outboxRefresh =
@@ -164,22 +168,33 @@ export function tryRefresh(): Promise<boolean> {
     "window" in globalThis &&
     (
       globalThis as {
-        window?: { outboxApi?: { authRefresh?: () => Promise<boolean> } };
+        window?: {
+          outboxApi?: { authRefresh?: () => Promise<AuthRefreshResult> };
+        };
       }
     ).window?.outboxApi?.authRefresh;
-  if (outboxRefresh) return outboxRefresh();
+  if (outboxRefresh) {
+    return outboxRefresh().then((outcome) => {
+      if (outcome === "renewed") onSessionRenewed?.();
+      return outcome;
+    });
+  }
   if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = (async () => {
+  refreshInFlight = (async (): Promise<AuthRefreshResult> => {
     try {
       const res = await fetchWithTimeout(`${BASE_URL}/v1/auth/refresh`, {
         method: "POST",
         credentials: "include",
       });
       captureCsrf(res);
-      if (res.ok) onSessionRenewed?.();
-      return res.ok;
+      if (res.ok) {
+        onSessionRenewed?.();
+        return "renewed";
+      }
+      if (res.status === 401 || res.status === 403) return "auth_dead";
+      return "transient";
     } catch {
-      return false;
+      return "transient";
     }
   })().finally(() => {
     // Let the next expiry start a fresh refresh once this one has settled.
@@ -225,14 +240,23 @@ async function request<T>(
     return response.json();
   }
 
-  // Access token likely expired: refresh once and replay, then give up to the
-  // login screen. Auth endpoints opt out so login failures and the refresh call
-  // itself never recurse.
+  // Access token likely expired: refresh once and replay. Auth endpoints opt
+  // out so login failures and the refresh call itself never recurse.
+  // Three-state: only `auth_dead` drops to login; `transient` uses the outage gate.
   if (response.status === 401 && !isAuthPath(path)) {
-    if (!retry && (await tryRefresh())) {
-      return request<T>(path, options, true);
+    if (!retry) {
+      const outcome = await tryRefresh();
+      if (outcome === "renewed") {
+        return request<T>(path, options, true);
+      }
+      if (outcome === "transient") {
+        onServiceUnavailable?.();
+      } else {
+        onUnauthorized?.();
+      }
+    } else {
+      onUnauthorized?.();
     }
-    onUnauthorized?.();
   }
 
   // A 5xx means the server is reachable but broken; flag a possible outage so

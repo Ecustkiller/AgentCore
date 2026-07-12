@@ -27,7 +27,7 @@ function closingRun(id = "mod_closing_pro"): RunNode {
     status: "completed",
     kind: "agent",
     parentRunId: null,
-    revisionOf: null,
+    continuesRunId: null,
     receivedContext: [],
   } as unknown as RunNode;
 }
@@ -40,7 +40,6 @@ function executionWith(agents: Partial<AgentState>[]): Execution {
     frames: [],
     debate: null,
     debateRounds: [],
-    debateDecisions: [],
     teamNotes: [],
   } as unknown as Execution;
 }

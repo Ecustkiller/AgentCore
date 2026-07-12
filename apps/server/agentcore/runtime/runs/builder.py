@@ -398,12 +398,21 @@ def _inline_spec(
         depth=depth,
         can_delegate=_parse_can_delegate(item.get("can_delegate")),
         replaces_run_id=_parse_replaces_run_id(item.get("replaces_run_id")),
+        continue_from_run_id=_parse_continue_from_run_id(item.get("continue_from_run_id")),
         policy=policy,
     )
 
 
 def _parse_replaces_run_id(raw: Any) -> str | None:
     """Normalise optional ``replaces_run_id`` (回落换人) → stripped id or None."""
+    if not isinstance(raw, str):
+        return None
+    cleaned = raw.strip()
+    return cleaned or None
+
+
+def _parse_continue_from_run_id(raw: Any) -> str | None:
+    """Normalise optional ``continue_from_run_id`` (同人续派) → stripped id or None."""
     if not isinstance(raw, str):
         return None
     cleaned = raw.strip()

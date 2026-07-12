@@ -120,13 +120,13 @@ DEBATE_PARAMETERS = {
                 "对碰、一次交锋即收。轮数与收敛全由主持人自调，你和用户都不设轮数。"
             ),
         },
-        "interactive": {
-            "type": "boolean",
+        "background": {
+            "type": "string",
             "description": (
-                "是否逐轮请用户掌舵（默认 false=主持人自判收敛、全程自动）。true=每轮辩完暂停，"
-                "让用户在「继续辩 / 加角度（给下一轮议题）/ 够了出结论」间抉择。仅当用户明确想"
-                "亲自把控辩论深度 / 走向时才开；用户没要就别开（增加来回、打断自动流）。无活跃"
-                "用户或用户超时不应答则自动回落到主持人自判收敛。"
+                "（可选）案件底料：发起前若你已调研，把已核实的【客观事实清单】整理传入，"
+                "首轮由主持人以「双方共享底料」名义喂给全部辩手，避免各方重复检索同一批基础事实。"
+                "只放已核实的客观事实（主体 / 时间线 / 金额 / 程序节点等，尽量带出处）；"
+                "不放观点、评价、立场分析。不传则辩手自行取证，行为与现网一致。"
             ),
         },
     },
@@ -145,6 +145,13 @@ def parse_form(raw: Any) -> DebateForm:
         except ValueError:
             pass
     return DebateForm.DEBATE
+
+
+def parse_background(raw: Any) -> str:
+    """解析可选案件底料；仅收非空字符串，其它类型 / 缺省 → 空串（零行为变化路径）。"""
+    if not isinstance(raw, str):
+        return ""
+    return raw.strip()
 
 
 def parse_sides(raw: Any) -> tuple[list[DebateSide], str]:

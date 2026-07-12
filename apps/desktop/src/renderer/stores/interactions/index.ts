@@ -18,7 +18,6 @@ export {
   type DelegationAuthView,
   entryToApproval,
   entryToCheckpoint,
-  entryToDebateDecision,
   entryToDelegationAuth,
   entryToNonBlockingAsk,
   entryToPlanReview,

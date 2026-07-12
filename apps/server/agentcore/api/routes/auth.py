@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Cookie, Depends, Query, Response
+from fastapi import APIRouter, Cookie, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.admin.audit import record_admin_audit
@@ -49,6 +49,8 @@ from agentcore.api.schemas import (
     MfaSetupResponse,
     MfaStatusResponse,
     RegisterRequest,
+    SessionListResponse,
+    SessionSummary,
     StatusResponse,
     TokenRefreshRequest,
     TokenResponse,
@@ -59,9 +61,9 @@ from agentcore.api.schemas import (
 from agentcore.auth import AuthService, TokenPair
 from agentcore.auth.client import ClientPlatform, parse_client_platform
 from agentcore.auth.mfa import AdminMfaService
-from agentcore.auth.service import LoginResult
+from agentcore.auth.service import LoginResult, SessionMeta
 from agentcore.config import settings
-from agentcore.core.errors import AuthenticationError
+from agentcore.core.errors import AuthenticationError, ValidationError
 from agentcore.core.logging import get_logger
 from agentcore.db.models import Invite, User
 from agentcore.db.repositories import (
@@ -99,6 +101,23 @@ def _refresh_cookie_path() -> str:
 
 
 RefreshCookie = Annotated[str | None, Cookie(alias=REFRESH_TOKEN_COOKIE)]
+
+
+def _session_meta_from_request(
+    request: Request, *, platform: ClientPlatform | None = None
+) -> SessionMeta:
+    from agentcore.middleware.rate_limit import get_client_ip
+
+    return SessionMeta(
+        platform=platform,
+        user_agent=request.headers.get("user-agent"),
+        ip=get_client_ip(request),
+    )
+
+
+def _current_family_from_request(request: Request) -> str | None:
+    fam = getattr(request.state, "token_family", None)
+    return fam if isinstance(fam, str) and fam else None
 
 
 def _user_response(user: User, *, password_must_change: bool = False) -> UserResponse:
@@ -233,13 +252,17 @@ async def register(
 @router.post("/login", response_model=LoginResponse)
 async def login(
     body: LoginRequest,
+    request: Request,
     response: Response,
     platform: Annotated[ClientPlatform, Depends(parse_client_platform)],
     service: AuthService = Depends(get_auth_service),
     creds_repo: CredentialsRepository = Depends(get_credentials_repo),
 ):
     result = await service.login(
-        username=body.username, password=body.password, platform=platform
+        username=body.username,
+        password=body.password,
+        platform=platform,
+        meta=_session_meta_from_request(request, platform=platform),
     )
     if result.tokens is not None:
         _set_auth_cookies(response, result.tokens, user_id=result.user.user_id)
@@ -249,7 +272,9 @@ async def login(
 @router.post("/login/mfa", response_model=LoginResponse)
 async def login_mfa(
     body: LoginMfaRequest,
+    request: Request,
     response: Response,
+    platform: Annotated[ClientPlatform, Depends(parse_client_platform)],
     service: AuthService = Depends(get_auth_service),
     creds_repo: CredentialsRepository = Depends(get_credentials_repo),
 ):
@@ -257,6 +282,7 @@ async def login_mfa(
         pending_token=body.pending_token,
         code=body.code,
         recovery_code=body.recovery_code,
+        meta=_session_meta_from_request(request, platform=platform),
     )
     _set_auth_cookies(response, tokens, user_id=user.user_id)
     return await _login_response_for(LoginResult(user=user, tokens=tokens), creds_repo)
@@ -264,6 +290,7 @@ async def login_mfa(
 
 @router.post("/refresh", response_model=StatusResponse)
 async def refresh(
+    request: Request,
     response: Response,
     refresh_token: RefreshCookie = None,
     service: AuthService = Depends(get_auth_service),
@@ -271,7 +298,10 @@ async def refresh(
     if not refresh_token:
         raise AuthenticationError("Missing refresh token")
     try:
-        tokens = await service.refresh(refresh_token=refresh_token)
+        tokens = await service.refresh(
+            refresh_token=refresh_token,
+            meta=_session_meta_from_request(request),
+        )
     except AuthenticationError:
         # Token invalid/expired/reused: clear cookies so the client logs in again.
         _clear_auth_cookies(response)
@@ -317,6 +347,7 @@ def _token_response(
         access_token=tokens.access_token,
         refresh_token=tokens.refresh_token,
         expires_in=settings.jwt_access_token_expire_minutes * 60,
+        refresh_expires_in=settings.jwt_refresh_token_expire_days * 86400,
         user=_user_response(user, password_must_change=password_must_change)
         if user is not None
         else None,
@@ -326,6 +357,7 @@ def _token_response(
 @router.post("/token", response_model=TokenResponse)
 async def token_login(
     body: LoginRequest,
+    request: Request,
     platform: Annotated[ClientPlatform, Depends(parse_client_platform)],
     service: AuthService = Depends(get_auth_service),
     creds_repo: CredentialsRepository = Depends(get_credentials_repo),
@@ -333,7 +365,10 @@ async def token_login(
     """Bearer-token login: same credential check as cookie ``/login`` but returns the
     access + refresh tokens in the JSON body (plus the user — identity in one call)."""
     result = await service.login(
-        username=body.username, password=body.password, platform=platform
+        username=body.username,
+        password=body.password,
+        platform=platform,
+        meta=_session_meta_from_request(request, platform=platform),
     )
     if result.mfa_required:
         raise AuthenticationError("MFA required — complete /v1/auth/login/mfa first")
@@ -348,11 +383,15 @@ async def token_login(
 @router.post("/token/refresh", response_model=TokenResponse)
 async def token_refresh(
     body: TokenRefreshRequest,
+    request: Request,
     service: AuthService = Depends(get_auth_service),
 ):
     """Rotate a bearer client's token pair (refresh token carried in the body). Reuse /
     expiry detection is the same family-revoking logic as cookie refresh."""
-    tokens = await service.refresh(refresh_token=body.refresh_token)
+    tokens = await service.refresh(
+        refresh_token=body.refresh_token,
+        meta=_session_meta_from_request(request),
+    )
     return _token_response(tokens)
 
 
@@ -381,6 +420,64 @@ async def me(
     if settings.csrf_enabled:
         issue_csrf_token(response, user.user_id)
     return await _user_response_for(user, creds_repo)
+
+
+# --- Sessions (device / login management) ---
+
+
+@router.get("/sessions", response_model=SessionListResponse)
+async def list_sessions(
+    request: Request,
+    user: AuthUser,
+    service: AuthService = Depends(get_auth_service),
+):
+    """List the caller's active login devices (one row per refresh-token family)."""
+    sessions = await service.list_sessions(
+        user_id=user.user_id,
+        current_family=_current_family_from_request(request),
+    )
+    data = [
+        SessionSummary(
+            id=s.id,
+            platform=s.platform,
+            user_agent=s.user_agent,
+            ip=s.ip,
+            created_at=s.created_at,
+            last_used_at=s.last_used_at,
+            current=s.current,
+        )
+        for s in sessions
+    ]
+    return SessionListResponse(data=data, total=len(data))
+
+
+@router.delete("/sessions/{family_id}", response_model=StatusResponse)
+async def revoke_session(
+    family_id: str,
+    user: AuthUser,
+    service: AuthService = Depends(get_auth_service),
+):
+    """Log out one device (revoke its refresh-token family). Own current session OK."""
+    await service.revoke_session(user_id=user.user_id, family_id=family_id)
+    return StatusResponse()
+
+
+@router.post("/sessions/revoke-others", response_model=StatusResponse)
+async def revoke_other_sessions(
+    request: Request,
+    user: AuthUser,
+    service: AuthService = Depends(get_auth_service),
+):
+    """Log out every other device; keep the caller's current family.
+
+    Access tokens without a ``fam`` claim (pre-upgrade) cannot identify "current"
+    → 422 rather than revoke-all (which would drop this session too).
+    """
+    current = _current_family_from_request(request)
+    if not current:
+        raise ValidationError("当前会话缺少 fam 声明，请重新登录后再试")
+    await service.revoke_other_sessions(user_id=user.user_id, current_family=current)
+    return StatusResponse()
 
 
 @router.patch("/me", response_model=UserResponse)

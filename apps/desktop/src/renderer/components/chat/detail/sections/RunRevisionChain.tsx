@@ -51,7 +51,7 @@ export function RevisionChainSection({
   );
   return (
     <Section
-      title={isDebate ? "轮次" : "版本"}
+      title={isDebate ? "轮次" : "接续"}
       action={
         onCompare && (
           <Button
@@ -60,7 +60,7 @@ export function RevisionChainSection({
             className="h-6 shrink-0 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
           >
             <Columns2 size={12} />
-            {isDebate ? "对比各轮" : "对比各版"}
+            {isDebate ? "对比各轮" : "对比接续"}
           </Button>
         )
       }
@@ -71,14 +71,16 @@ export function RevisionChainSection({
           const role =
             agents.find((a) => a.id === run.agentId)?.role ?? run.agentId;
           const label = isDebate
-            ? run.revisionOf == null
+            ? run.continuesRunId == null
               ? `第 ${run.round || version} 轮`
               : debateBeatLabel({
                   round: run.round,
                   revision: version,
                   beat: debateBeatFromContext(run.receivedContext),
                 })
-            : `v${version}`;
+            : version === 1
+              ? "现场"
+              : `续 ×${version - 1}`;
           const prevRun = idx > 0 ? chain.versions[idx - 1].run : null;
           const delta =
             !isDebate && prevRun

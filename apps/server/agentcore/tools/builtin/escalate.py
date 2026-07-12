@@ -15,7 +15,7 @@ NOT a stop. The escalation is harvested from the worker's transcript
 (``runs.serialize.escalations_from_transcript``) into ``RunState.escalations`` and surfaced
 PROMINENTLY in the CEO-facing aggregate (``ceo_format.format_for_ceo``), where the CEO
 resolves it at synthesis with its OWN levers: ``ask_user`` (if the user must decide),
-``revise`` (recall the author with the answer), or a fresh ``delegate``. A wrong assumption
+``delegate``（设 ``continue_from_run_id`` 带现场续派），或冷委派新人。A wrong assumption
 is corrected at synthesis, not propagated silently down the chain.
 
 BLOCKING (阻塞式求决策, ``blocking`` true): for a「猜错你的产物基本作废」fork, the worker

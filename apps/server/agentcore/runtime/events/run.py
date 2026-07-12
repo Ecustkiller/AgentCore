@@ -53,29 +53,28 @@ def run_started(
     *,
     parent_run_id: str | None = None,
     kind: str = "agent",
-    revision: int = 0,
+    continues_run_id: str | None = None,
     stance: str | None = None,
     group: str | None = None,
     round_no: int = 0,
     replaces_run_id: str | None = None,
 ) -> SSEEvent:
-    """A run began. A 续写 revision (辩手的后续轮) additionally carries its debater
-    identity (``stance``/``group``) + its TRUE ``round`` so every fold projects 第几轮/
-    哪一方 from a single source — round ≠ revision# once a side fails mid-debate, so the
-    round is authoritative, not inferred from the version number. These three ride the
-    payload ONLY when set (mirrors ``run_payload``), so an ordinary run / hot-fix
-    revision keeps its byte-identical shape.
+    """A run began. A 续写 (CEO 续派 / redirect 热修 / 辩手后续轮) carries
+    ``continues_run_id`` pointing at the session root (星型), while ``parent_run_id``
+    stays the true delegation parent (captain / moderator). Debate continuations
+    additionally carry ``stance``/``group`` + TRUE ``round`` so every fold projects
+    第几轮/哪一方 from the wire. Optional fields ride the payload ONLY when set.
 
     ``replaces_run_id`` (冷回落接手): a mid-flight ``_redir`` spawn that takes over a
-    redirected worker — set ONLY when non-empty so ordinary / revision starts stay
-    byte-identical. Fold maps it to the graph「接手」edge (orthogonal to revision)."""
+    redirected worker — orthogonal to continuation."""
     payload: dict[str, Any] = {
         "run_id": run_id,
         "agent_id": agent_id,
         "parent_run_id": parent_run_id,
         "kind": kind,
-        "revision": revision,
     }
+    if continues_run_id:
+        payload["continues_run_id"] = continues_run_id
     if stance:
         payload["stance"] = stance
     if group:
@@ -151,35 +150,6 @@ def escalation_raised(
             "assumption": assumption,
             "blocking": blocking,
             "kind": kind if kind in ("normal", "scope", "dep") else "normal",
-        },
-    )
-
-
-def run_intake(
-    run_id: str,
-    agent_id: str,
-    *,
-    complexity: str,
-    strategy: str,
-    token_budget: int,
-    rationale: str = "",
-    signals: list[str] | None = None,
-) -> SSEEvent:
-    """Worker Intake 轻量计划头（复杂度 / 策略 / token 预算）。
-
-    Emitted once per agent run after context assembly, before the ReAct loop.
-    Journaled so reload / run-detail can show the routing diagnosis.
-    """
-    return SSEEvent(
-        type=EventType.RUN_INTAKE,
-        payload={
-            "run_id": run_id,
-            "agent_id": agent_id,
-            "complexity": complexity,
-            "strategy": strategy,
-            "token_budget": token_budget,
-            "rationale": rationale,
-            "signals": list(signals or []),
         },
     )
 

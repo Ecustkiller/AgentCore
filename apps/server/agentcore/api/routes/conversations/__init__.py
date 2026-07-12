@@ -16,6 +16,7 @@ from . import (
     audit,
     binding,
     crud,
+    debate_steer,
     files,
     handoff,
     interactions,
@@ -38,6 +39,7 @@ router.include_router(audit.router)
 router.include_router(llm_window.router)
 router.include_router(interactions.router)
 router.include_router(run_redirect.router)
+router.include_router(debate_steer.router)
 router.include_router(binding.router)
 router.include_router(handoff.router)
 router.include_router(turns.router)

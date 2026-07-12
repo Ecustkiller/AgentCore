@@ -11,13 +11,7 @@ import {
   LIST_FILES_MAX_DEPTH,
   LIST_FILES_SKIP_DIRS,
 } from "./constants";
-import {
-  fromErrno,
-  fsErr,
-  locate,
-  realFail,
-  realInside,
-} from "./pathGuard";
+import { fromErrno, fsErr, locate, realFail, realInside } from "./pathGuard";
 import { ensureReady } from "./roots";
 import { resolveWritable } from "./workspace/write";
 
@@ -285,7 +279,10 @@ export async function copy(
   }
   try {
     await fs.mkdir(dirname(dstTarget), { recursive: true });
-    await fs.cp(srcReal.path, dstTarget, { recursive: true, errorOnExist: true });
+    await fs.cp(srcReal.path, dstTarget, {
+      recursive: true,
+      errorOnExist: true,
+    });
     return { ok: true, data: undefined };
   } catch (e) {
     return fromErrno(e);

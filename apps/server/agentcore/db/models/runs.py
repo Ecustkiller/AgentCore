@@ -80,14 +80,16 @@ class HandoffJob(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-# --- Recoverable worker runs (留人 跨进程落盘: 乙 热修 P3) ---
+# --- Recoverable worker runs (留人 跨进程落盘) ---
 # The in-memory roster (runtime/sessions.py) keeps a finished worker alive within a
-# process so the CEO can 定向唤回 (revise) it; this table is the durable backstop so
-# "改下刚才那个" still hits after a restart or memory eviction. A revise loads the
-# row on an in-memory miss, continues the run, and writes the extended transcript
-# back. Pruned by a 7-day idle TTL sweeper (runtime/session_retention.py) on
-# ``updated_at`` — independent of the turn_journal graph-replay facts (different
-# lifecycle, 见 docs/03-AI核心/多轮编排与队员热修.md §六 T-2 / T-5).
+# process so the CEO can 带现场续派 (delegate continue_from_run_id) it; this table is
+# the durable backstop so "让刚才那个人接着干" still hits after a restart or memory
+# eviction. A continuation loads the row on an in-memory miss, continues the run, and
+# writes the extended transcript back. Lifecycle =「对话在，现场就在」: cascaded away
+# with conversation delete (ConversationRepository), NOT time-pruned by default (the
+# idle sweeper in runtime/session_retention.py only runs when retention_days > 0, as
+# a post-scale storage backstop) — independent of the turn_journal graph-replay facts
+# (different lifecycle, 见 docs/03-AI核心/多轮编排与同人续派.md).
 
 
 class RunSessionRow(Base):

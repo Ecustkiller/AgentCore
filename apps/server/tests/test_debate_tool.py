@@ -31,7 +31,7 @@ from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.runs.types import RunPhase, RunState
 from agentcore.tools.builtin.debate import DebateTool
 from agentcore.tools.builtin.debate.prompt import debater_task, round_feedback
-from agentcore.tools.builtin.debate.schema import parse_sides
+from agentcore.tools.builtin.debate.schema import parse_background, parse_sides
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -47,12 +47,12 @@ _USAGE = TokenUsage(
 _BRIEF = {
     "crux": "做不做 X 的核心权衡",
     "strongest_points": {"pro": "正方最强论点", "con": "反方最强论点"},
-    "factual_disputes": ["X 的成本到底多少"],
     "value_disputes": ["你更看重速度还是稳妥"],
+    "factual_disputes": ["X 的成本到底多少"],
     "leaning": "基于事实反方略稳",
     "confidence": "中",
     "recommendation": "先小步验证再决定",
-    "open_questions": ["你的风险偏好是什么"],
+    "open_questions": ["灰度窗口外的政策会不会变"],
 }
 
 # 质询集成默认题集（与断言文案对齐；thorough + 正反才会开质询 beat）。
@@ -71,7 +71,7 @@ class _DebateLLM:
     质询（opt-in）：``questions`` 非空时 ``cross_exam`` 步回定向质询；``stream`` 若看到质询
     feedback（含「质询环节」）则按 ``cx_answer_style`` 产 JSON 作答（``wrapper`` = 带
     question_index 的对象数组；``scalar`` = 纯字符串数组按位置映射，回归 06 F2）。
-    ``cx_fail_sides`` 内的方对质询回空内容，驱动 runner 失败兜底（exchanges ok=False）。
+    ``cx_fail_sides`` 内的方对质询回空内容，驱动 runner 失败兜底（exchanges answer 空）。
     """
 
     def __init__(
@@ -137,7 +137,6 @@ class _DebateLLM:
                     {
                         "question_index": i + 1,
                         "answer": f"正面答·{key}·{i + 1}【待核实·推断】",
-                        "directly_addressed": True,
                     }
                     for i in range(len(qs))
                 ],
@@ -331,11 +330,11 @@ async def test_cross_exam_real_runner_lands_exchanges():
     assert len(cx[0]["exchanges"]) == 2
     assert cx[0]["exchanges"][0]["question"] == _CX_QUESTIONS["pro"][0]
     assert "正面答·pro·1" in cx[0]["exchanges"][0]["answer"]
-    assert cx[0]["exchanges"][0]["ok"] is True
     assert "正面答·pro·2" in cx[0]["exchanges"][1]["answer"]
     assert len(cx[1]["exchanges"]) == 1
     assert "正面答·con·1" in cx[1]["exchanges"][0]["answer"]
-    assert all(ex["ok"] for c in cx for ex in c["exchanges"])
+    assert all("ok" not in ex for c in cx for ex in c["exchanges"])
+    assert all(ex["answer"] for c in cx for ex in c["exchanges"])
 
     ledger_ids = [r.run_id for r in tool.run_ledger]
     assert any("_r1_cx_pro" in rid for rid in ledger_ids)
@@ -358,16 +357,13 @@ async def test_cross_exam_real_runner_scalar_array_maps_by_position():
     pro = next(c for c in cx if c["target"] == "pro")
     assert len(pro["exchanges"]) == 2
     assert "标量答·pro·1" in pro["exchanges"][0]["answer"]
-    assert pro["exchanges"][0]["ok"] is True
     assert "标量答·pro·2" in pro["exchanges"][1]["answer"]
-    assert pro["exchanges"][1]["ok"] is True
     con = next(c for c in cx if c["target"] == "con")
     assert "标量答·con·1" in con["exchanges"][0]["answer"]
-    assert con["exchanges"][0]["ok"] is True
 
 
-async def test_cross_exam_real_runner_failed_answer_marks_not_ok():
-    """质询 continue_run 空内容 → runner 走失败兜底：exchanges 全标 ok=False、answer 空。"""
+async def test_cross_exam_real_runner_failed_answer_leaves_empty():
+    """质询 continue_run 空内容 → runner 走失败兜底：exchanges answer 空、无 ok 字段。"""
     llm = _DebateLLM(
         converge_at=1,
         questions=_CX_QUESTIONS,
@@ -383,13 +379,13 @@ async def test_cross_exam_real_runner_failed_answer_marks_not_ok():
     events = [e async for e in sink if e.type == EventType.DEBATE_RESULT]
     cx = events[0].payload["rounds"][0]["cross_exam"]
     by_target = {c["target"]: c for c in cx}
-    assert all(ex["ok"] for ex in by_target["pro"]["exchanges"])
+    assert all(ex["answer"] for ex in by_target["pro"]["exchanges"])
     assert "正面答·pro" in by_target["pro"]["exchanges"][0]["answer"]
     assert by_target["con"]["answer_run_id"].endswith("_r1_cx_con")
     assert len(by_target["con"]["exchanges"]) == 1
     assert by_target["con"]["exchanges"][0]["question"] == _CX_QUESTIONS["con"][0]
     assert by_target["con"]["exchanges"][0]["answer"] == ""
-    assert by_target["con"]["exchanges"][0]["ok"] is False
+    assert "ok" not in by_target["con"]["exchanges"][0]
 
 
 async def test_rejects_missing_motion():
@@ -497,31 +493,23 @@ def test_round_feedback_injects_targeted_user_followup():
     assert "边界在哪？" in fb_con_all
 
 
-def test_resolve_debate_round_body_carries_ask():
-    """REST resolve body → 引擎侧 outcome 的契约缝：debate_round 把 decision/focus/ask/ask_target
-    透传给主持人轮边界钩子（tool._round_boundary 据此构造 RoundBoundary）。"""
-    from agentcore.api.schemas.messages import (
-        ResolveDebateRoundInteraction,
-        interaction_result_from_body,
-    )
+def test_submit_debate_steer_body_shape():
+    """REST debate-steer body 契约：decision/focus/ask/ask_target 可入队。"""
+    from agentcore.api.schemas.messages import SubmitDebateSteerRequest
 
-    body = ResolveDebateRoundInteraction(
-        decision="continue", focus="加角度", ask="谁兜底？", ask_target="pro"
+    body = SubmitDebateSteerRequest(
+        execution_id="exec1",
+        decision="continue",
+        focus="加角度",
+        ask="谁兜底？",
+        ask_target="pro",
     )
-    assert interaction_result_from_body(body) == {
-        "decision": "continue",
-        "focus": "加角度",
-        "ask": "谁兜底？",
-        "ask_target": "pro",
-    }
-    # 缺省时全空（与现有非追问 resolve 行为一致，零行为变化）。
-    bare = ResolveDebateRoundInteraction(decision="conclude")
-    assert interaction_result_from_body(bare) == {
-        "decision": "conclude",
-        "focus": "",
-        "ask": "",
-        "ask_target": "",
-    }
+    assert body.decision == "continue"
+    assert body.focus == "加角度"
+    assert body.ask == "谁兜底？"
+    assert body.ask_target == "pro"
+    bare = SubmitDebateSteerRequest(execution_id="exec1", decision="conclude")
+    assert bare.focus == "" and bare.ask == "" and bare.ask_target == ""
 
 
 # --- 本地执行门（双模式工作区 P2d）：辩手仅在 local backend 继承 CEO 的 gate -----
@@ -592,6 +580,95 @@ def test_quick_mode_injects_concise_hint_thorough_does_not():
     thorough_task = debater_task(thorough_cfg, sides[0], 0, round_no=1, focus="正统")["task"]
     assert QUICK_DEBATER_HINT in quick_task
     assert QUICK_DEBATER_HINT not in thorough_task
+
+
+def test_parse_background_strips_and_rejects_non_str():
+    """可选 background：字符串 strip；缺省 / 非字符串 → 空串（零行为变化路径）。"""
+    assert parse_background(None) == ""
+    assert parse_background(123) == ""
+    assert parse_background(["a"]) == ""
+    assert parse_background("  主体A 于 2024 年起诉  ") == "主体A 于 2024 年起诉"
+    assert parse_background("") == ""
+    assert parse_background("   ") == ""
+
+
+def test_debate_config_carries_background():
+    """DebateConfig 默认 background 空串；显式传入后可被 debater_task 读到。"""
+    sides = [DebateSide("pro", "正方", "支持"), DebateSide("con", "反方", "反对")]
+    bare = DebateConfig(motion="X", form=DebateForm.DEBATE, sides=sides)
+    assert bare.background == ""
+    filled = DebateConfig(
+        motion="X", form=DebateForm.DEBATE, sides=sides, background="事实一：判赔 100 万"
+    )
+    assert filled.background == "事实一：判赔 100 万"
+
+
+def test_debater_task_omits_background_when_empty():
+    """不传 / 空底料：首轮 task 不含案件底料块（与现网逐字同形）。"""
+    sides = [DebateSide("pro", "正方", "支持"), DebateSide("con", "反方", "反对")]
+    cfg = DebateConfig(motion="该不该做 X", form=DebateForm.DEBATE, sides=sides)
+    task = debater_task(cfg, sides[0], 0, round_no=1, focus="成本")["task"]
+    assert "案件底料" not in task
+    assert "双方共享" not in task
+
+
+def test_debater_task_injects_background_block():
+    """有底料：首轮 task 注入「主持人整理的案件底料·双方共享」+ 事实正文 + 独立检索 / 出处沿用口径。"""
+    sides = [DebateSide("pro", "正方", "支持"), DebateSide("con", "反方", "反对")]
+    facts = "- 主体：甲公司 vs 乙公司\n- 时间线：2023 起诉，2024 一审判赔 80 万"
+    cfg = DebateConfig(
+        motion="该不该上诉", form=DebateForm.DEBATE, sides=sides, background=facts
+    )
+    for i, side in enumerate(sides):
+        task = debater_task(cfg, side, i, round_no=1, focus="风险")["task"]
+        assert "【主持人整理的案件底料·双方共享】" in task
+        assert facts in task
+        assert "独立检索" in task
+        assert "不得把本底料本身包装成新的【已核实】来源" in task
+
+
+def test_debater_task_clips_oversized_background():
+    """超长底料进 prompt 前头尾裁剪（与 _clip 同思路），防撑爆首轮。"""
+    from agentcore.tools.builtin.debate.prompt import _BG_CLIP, _clip
+
+    sides = [DebateSide("pro", "正方", "支持"), DebateSide("con", "反方", "反对")]
+    head = "HEAD_MARKER_" + ("甲" * 100)
+    tail = ("乙" * 100) + "_TAIL_MARKER"
+    mid = "中段应被略去_" + ("X" * (_BG_CLIP + 500))
+    long_bg = head + mid + tail
+    assert len(long_bg) > _BG_CLIP
+    cfg = DebateConfig(
+        motion="X", form=DebateForm.DEBATE, sides=sides, background=long_bg
+    )
+    task = debater_task(cfg, sides[0], 0, round_no=1, focus="焦点")["task"]
+    clipped = _clip(long_bg, _BG_CLIP)
+    assert "……（中段略）……" in task
+    assert clipped in task
+    assert "HEAD_MARKER_" in task
+    assert "_TAIL_MARKER" in task
+    assert mid not in task  # 中段全文不应原样出现
+    assert len(clipped) < len(long_bg)
+
+
+async def test_tool_passes_background_into_first_round_tasks():
+    """工具壳：arguments.background → DebateConfig → 首轮辩手 prompt（stream 消息可见）。"""
+    llm = _DebateLLM(converge_at=1)
+    tool = _tool(llm)
+    facts = "已核实：2024 年报披露营收 12 亿"
+    result = await tool.execute(
+        {
+            "motion": "该不该扩产",
+            "form": "debate",
+            "sides": _sides(),
+            "thorough": False,
+            "background": facts,
+        },
+        _ctx(),
+    )
+    assert result.success is True
+    joined = "\n".join(m.content for req in llm.stream_requests for m in req.messages)
+    assert "【主持人整理的案件底料·双方共享】" in joined
+    assert facts in joined
 
 
 async def test_workers_gated_in_local_mode(monkeypatch):

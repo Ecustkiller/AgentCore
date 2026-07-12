@@ -18,6 +18,12 @@ import type { components } from "@/types/api.generated";
 /** Server user payload (`/auth/me|register`), generated from OpenAPI. */
 type BackendUser = components["schemas"]["UserResponse"];
 type LoginResponse = components["schemas"]["LoginResponse"];
+type SessionListResponse = components["schemas"]["SessionListResponse"];
+type SessionSummary = components["schemas"]["SessionSummary"];
+type StatusResponse = components["schemas"]["StatusResponse"];
+
+/** One active login device (refresh-token family). Re-exported for UI consumers. */
+export type { SessionSummary };
 
 /** Resolve the backend's relative avatar URL (`/v1/users/<id>/avatar?v=…`) against
  *  the API base so consumers can drop it straight into an `<img src>`. Leaves
@@ -94,6 +100,24 @@ export async function logout(): Promise<void> {
   void clearAgentTownSession();
 }
 
+/** List the caller's active login devices (one row per refresh-token family). */
+export async function listSessions(): Promise<SessionListResponse> {
+  return api.get<SessionListResponse>("/v1/auth/sessions");
+}
+
+/** Log out one device by refresh-token family id. Revoking the current family
+ *  ends this session — callers should then run the normal logout clear-state path. */
+export async function revokeSession(familyId: string): Promise<void> {
+  await api.delete<StatusResponse>(
+    `/v1/auth/sessions/${encodeURIComponent(familyId)}`,
+  );
+}
+
+/** Log out every other device; keep the caller's current family. */
+export async function revokeOtherSessions(): Promise<void> {
+  await api.post<StatusResponse>("/v1/auth/sessions/revoke-others");
+}
+
 /**
  * Change the signed-in user's password (修改密码). The backend revokes every other
  * device's session and re-issues this one's cookies, so the caller stays logged in
@@ -144,7 +168,9 @@ export async function uploadAvatar(file: File): Promise<AuthUser> {
   let res: Response;
   try {
     res = await send();
-    if (res.status === 401 && (await tryRefresh())) res = await send();
+    if (res.status === 401 && (await tryRefresh()) === "renewed") {
+      res = await send();
+    }
   } catch (cause) {
     throw new NetworkError(cause);
   }
@@ -316,10 +342,16 @@ export async function bootstrapAuth(): Promise<BootstrapResult> {
   //    refresh here, or every relaunch past the access TTL forces a needless
   //    re-login (precisely the "have to log in every time I open the app" bug).
   try {
-    if (await tryRefresh()) {
+    const outcome = await tryRefresh();
+    if (outcome === "renewed") {
       const user = await bootstrapFetchMe();
       logBootstrap("refreshed");
       return { kind: "authenticated", user };
+    }
+    if (outcome === "transient") {
+      const reason = (await diagnoseOutage()) ?? "后端服务异常：请稍后重试。";
+      logBootstrap("outage", { stage: "refresh", reason });
+      return { kind: "unavailable", reason };
     }
   } catch (err) {
     if (isOutage(err)) {

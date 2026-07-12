@@ -6,9 +6,11 @@ import {
 } from "@/components/ui/popover";
 import { Info } from "lucide-react";
 import { type DebateForm, debateFormBlurb } from "../model";
+import { SCORE_DIMENSIONS } from "./ScoreBreakdown";
 
 /** 全页唯一概念解释入口（收编质询/结辩/记分/举证等）。 */
 export function HowToReadPopover({ form }: { form: DebateForm }) {
+  const showScoring = form === "debate";
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -24,13 +26,42 @@ export function HowToReadPopover({ form }: { form: DebateForm }) {
         <p className="font-medium text-foreground">怎么读这场辩论</p>
         <p className="mt-2 text-muted-foreground">{debateFormBlurb(form)}</p>
         <ul className="mt-3 space-y-2 text-xs text-muted-foreground">
-          <li>
-            <span className="font-medium text-foreground">记分牌</span>
-            ：累计净分与逐轮动量，佐证下方裁决倾向。
-          </li>
+          {showScoring && (
+            <>
+              <li>
+                <span className="font-medium text-foreground">净分</span>
+                ：三维分之和减去罚分（可为负）；越高越占优。顶栏比分一眼可读，点净分可看三维构成。
+              </li>
+              <li>
+                <span className="font-medium text-foreground">三维分</span>
+                （每轮各维 0–5，中性量；顶栏/战果为跨轮累计）：
+                {SCORE_DIMENSIONS.map((d) => (
+                  <span key={d.key}>
+                    {" "}
+                    <span className="text-foreground">{d.label}</span>=
+                    {d.description}；
+                  </span>
+                ))}
+              </li>
+              <li>
+                <span className="font-medium text-foreground">罚分</span>
+                ：谬误、无据硬拗等违规条目；记分牌与裁判札记可展开查看具体犯规。
+              </li>
+              <li>
+                <span className="font-medium text-foreground">动量图</span>
+                ：逐轮各方净分柱高；悬停看该轮净分与三维。图例色点对应各方。
+              </li>
+            </>
+          )}
+          {!showScoring && (
+            <li>
+              <span className="font-medium text-foreground">记分牌</span>
+              ：本形态不按三维净分对垒；圆桌铺光谱，红队看风险清单。
+            </li>
+          )}
           <li>
             <span className="font-medium text-foreground">质询</span>
-            ：主持人发出必答追问，题旁 ✓/⚠ 表示是否正面回答。
+            ：主持人发出必答追问，辩手逐条作答；是否回避由裁判记分与胜负手裁定。
           </li>
           <li>
             <span className="font-medium text-foreground">结辩</span>

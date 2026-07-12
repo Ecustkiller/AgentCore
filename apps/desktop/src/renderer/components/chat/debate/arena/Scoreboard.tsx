@@ -1,3 +1,4 @@
+import { MANUAL_HELP, ManualHelpLink } from "@/components/ManualHelpLink";
 import { Button } from "@/components/ui";
 import { useDebateTake, useDebateUserTake } from "@/stores/debateUserTake";
 import { Hand } from "lucide-react";
@@ -19,6 +20,7 @@ import {
 } from "../severity";
 import { HowToReadPopover } from "./HowToReadPopover";
 import { MomentumChart } from "./MomentumChart";
+import { ScoreTotalPortal, formatNetTotal } from "./ScoreBreakdown";
 import {
   closingAnchorId,
   finaleAnchorId,
@@ -79,12 +81,12 @@ export function Scoreboard({
           <div className="flex shrink-0 items-center gap-2">
             {hasPendingSteering && (
               <Button
-                variant="primary"
+                variant="neutral"
                 size="sm"
                 onClick={() => onScrollTo(steeringAnchorId())}
                 icon={<Hand size={13} />}
               >
-                等你掌舵
+                掌舵
               </Button>
             )}
             <StatusLine
@@ -94,6 +96,7 @@ export function Scoreboard({
               totalRounds={totalRounds}
             />
             <HowToReadPopover form={model.form} />
+            <ManualHelpLink to={MANUAL_HELP.debate} />
           </div>
         </div>
 
@@ -119,6 +122,9 @@ export function Scoreboard({
                 r.sideKey,
                 debateSideColorVar(r.sideKey, r.name),
               ]),
+            )}
+            nameByKey={Object.fromEntries(
+              roster.map((r) => [r.sideKey, r.name]),
             )}
           />
           <div className="flex flex-1 flex-wrap gap-1">
@@ -237,7 +243,6 @@ function ScoreboardRow2({
   }
 
   if (isVersus && tally.length >= 2 && model.sides) {
-    const [a, b] = tally;
     const proSide = model.sides.find((s) => s.stance === "pro");
     const conSide = model.sides.find((s) => s.stance === "con");
     const proRoster = proSide
@@ -246,34 +251,83 @@ function ScoreboardRow2({
     const conRoster = conSide
       ? roster.find((r) => r.sideKey === conSide.key)
       : roster[1];
-    const proKey = proSide?.key ?? proRoster?.sideKey ?? a.sideKey;
-    const conKey = conSide?.key ?? conRoster?.sideKey ?? b.sideKey;
+    const proKey = proSide?.key ?? proRoster?.sideKey ?? tally[0].sideKey;
+    const conKey = conSide?.key ?? conRoster?.sideKey ?? tally[1].sideKey;
+    const proScore = tally.find((s) => s.sideKey === proKey) ?? tally[0];
+    const conScore = tally.find((s) => s.sideKey === conKey) ?? tally[1];
     const proModel = sideRunModel(model, proKey);
     const conModel = sideRunModel(model, conKey);
     return (
       <div className="flex flex-wrap items-center justify-between gap-3">
         <VersusSide
-          name={proRoster?.name ?? a.name}
+          name={proRoster?.name ?? proScore.name}
           model={proModel}
           colorVar={debateSideColorVar(
-            proRoster?.sideKey ?? a.sideKey,
-            proRoster?.name ?? a.name,
+            proRoster?.sideKey ?? proScore.sideKey,
+            proRoster?.name ?? proScore.name,
           )}
           align="left"
         />
-        <span className="text-xl font-semibold tabular-nums text-foreground">
-          {a.total} ： {b.total}
+        <span className="inline-flex items-baseline gap-1 text-xl font-semibold tabular-nums text-foreground">
+          <ScoreTotalPortal score={proScore}>
+            <button
+              type="button"
+              className="rounded-lg px-1 hover:bg-muted/50"
+              aria-label={`${proScore.name}净分构成`}
+            >
+              {proScore.total}
+            </button>
+          </ScoreTotalPortal>
+          <span className="text-muted-foreground">：</span>
+          <ScoreTotalPortal score={conScore}>
+            <button
+              type="button"
+              className="rounded-lg px-1 hover:bg-muted/50"
+              aria-label={`${conScore.name}净分构成`}
+            >
+              {conScore.total}
+            </button>
+          </ScoreTotalPortal>
         </span>
         <VersusSide
-          name={conRoster?.name ?? b.name}
+          name={conRoster?.name ?? conScore.name}
           model={conModel}
           colorVar={debateSideColorVar(
-            conRoster?.sideKey ?? b.sideKey,
-            conRoster?.name ?? b.name,
+            conRoster?.sideKey ?? conScore.sideKey,
+            conRoster?.name ?? conScore.name,
           )}
           align="right"
         />
         <StanceControl turnId={messageId} model={model} />
+      </div>
+    );
+  }
+
+  // 3+ 方 debate：紧凑 chip 累计分（唯一顶栏累计出口；1v1 走上方对阵式）
+  if (model.form === "debate" && tally.length > 0) {
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        {tally.map((s) => (
+          <ScoreTotalPortal key={s.sideKey} score={s}>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs text-foreground hover:bg-muted/40"
+              aria-label={`${s.name}净分构成`}
+            >
+              <span
+                className="size-2 shrink-0 rounded-full"
+                style={{ backgroundColor: s.colorVar }}
+              />
+              <span className="font-medium">{s.name}</span>
+              <span className="font-semibold tabular-nums">
+                {formatNetTotal(s.total)}
+              </span>
+              {s.penalties.length > 0 && (
+                <span className="text-muted-foreground">·罚</span>
+              )}
+            </button>
+          </ScoreTotalPortal>
+        ))}
       </div>
     );
   }

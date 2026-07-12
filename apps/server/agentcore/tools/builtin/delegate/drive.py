@@ -51,8 +51,8 @@ async def _team_preview_before_workers(
     """Hang for the kickoff card (计划+能力) before any worker / coordinate fork.
 
     Returns an early ToolResult (SUSPEND / stop) or None to proceed. Under
-    AutonomyPolicy.full_auto with no plan-preview need, silently issues a
-    delegation grant and continues without pausing.
+    AutonomyPolicy.full_auto, skips the card entirely and silently marks a
+    delegation grant for later application.
     """
     if seed_completed is not None or complexity_hint == "light" or tool._depth != 0:
         return None
@@ -68,31 +68,27 @@ async def _team_preview_before_workers(
 
     autonomy = getattr(tool, "_autonomy_policy", None) or AutonomyPolicy.FIRST_GRANT
     local_gate = worker_gate_applies(tool._base_tool_context.backend)
+    plan_preview = should_preview_plan(plan, finalize=finalize)
     if not should_kickoff(
         plan, finalize=finalize, local_gate=local_gate, autonomy=autonomy
     ):
-        # full_auto + local: auto-grant without a card when no plan preview.
+        # full_auto + local: silent grant (plan half also released under full_auto).
         if (
             local_gate
             and autonomy is AutonomyPolicy.FULL_AUTO
             and tool._approval_gate is not None
-            and not should_preview_plan(plan, finalize=finalize)
         ):
-            # Grant is applied later in drive once execution_id is known — mark intent.
             tool._auto_grant_pending = True  # type: ignore[attr-defined]
         return None
-    if skip_after_confirmed_ask(tool) and not needs_capability_auth(
-        local_gate=local_gate, autonomy=autonomy
+    # Plan half skipped after confirmed ask; capability half may still need a card.
+    # If only plan would have shown, skip entirely (legacy dual-card avoidance).
+    if (
+        skip_after_confirmed_ask(tool)
+        and not needs_capability_auth(local_gate=local_gate, autonomy=autonomy)
+        and plan_preview
     ):
-        # Plan half skipped after confirmed ask; capability half may still need a card.
-        # If only plan would have shown, skip entirely (legacy dual-card avoidance).
-        if should_preview_plan(plan, finalize=finalize):
-            return None
+        return None
     show_capabilities = needs_capability_auth(local_gate=local_gate, autonomy=autonomy)
-    # full_auto with plan preview: still show plan, hide capability list, auto-grant on continue.
-    if autonomy is AutonomyPolicy.FULL_AUTO and should_preview_plan(plan, finalize=finalize):
-        show_capabilities = False
-        tool._auto_grant_pending = True  # type: ignore[attr-defined]
     preview_decision = await await_team_preview(
         tool, plan, show_capabilities=show_capabilities
     )
@@ -232,7 +228,7 @@ async def drive(
         tool._approval_gate if worker_gate_applies(tool._base_tool_context.backend) else None
     )
 
-    executor = build_agent_executor(
+    cold_executor = build_agent_executor(
         plan=plan,
         llm=tool._llm,
         tools=tool._tools,
@@ -253,6 +249,22 @@ async def drive(
         collaboration=len(plan.nodes) > 1,
         team_brief=tool._team_brief,
     )
+
+    async def _continuation_aware_executor(spec: RunSpec, completed: dict) -> RunState:
+        """带 continue_from_run_id 的节点走续写；其余冷开局。"""
+        if spec.continue_from_run_id:
+            from agentcore.tools.builtin.delegate.continuation import run_continuation
+
+            return await run_continuation(
+                tool,
+                spec,
+                completed,
+                execution_id=execution_id,
+                approval_gate=worker_gate,
+            )
+        return await cold_executor(spec, completed)
+
+    executor = _continuation_aware_executor
     # Phase 3: per-worker timeout notify (CEO decides; never auto-cancel).
     if session is not None:
         from agentcore.runtime.coordination.bridge import wrap_executor_with_timeouts
@@ -264,7 +276,7 @@ async def drive(
     # 跑一半改方向：单人 cancel + 热优先 continue_run / 冷诚实 _redir 接手
     _cancel_ids: set[str] = set()
     _redirect_feedback: dict[str, RunRedirectRequest] = {}
-    # Hot-path revision states keyed by revision_run_id (not in plan.nodes until cold).
+    # Hot-path continuation states keyed by continuation run_id.
     _hot_revision_states: dict[str, RunState] = {}
     # In-drive author sessions (run_id → latest draft + recall_count) so a second
     # redirect on the same cancelled worker increments ``_revN`` even without a
@@ -332,13 +344,10 @@ async def drive(
     ) -> bool:
         """Salvage → continue_run. True on successful hot path; False → caller cold-falls.
 
-        Revision ids follow the same 改次闸 as ``revise`` / ``continue_run``:
-        ``{run_id}_rev{recall_count+1}`` with ``revision = recall_count+2`` on the wire.
-        A second redirect on the same author (e.g. sibling still running → another
-        ``run_redirect`` for the cancelled node) continues from the author session so
+        Continuation ids follow the same 唤回闸 as CEO ``continue_from``:
+        ``{run_id}_rev{recall_count+1}`` with ``continues_run_id`` = session root on the wire.
+        A second redirect on the same author continues from the author session so
         numbering increments (``_rev2``, …) instead of minting a duplicate ``_rev1``.
-        Cold ``_redir`` nodes keep their own run_id; a later hot redirect on that
-        handoff revises under ``{redir_id}_revN``.
         """
         from agentcore.runtime.runs import RunSession, continue_run
         from agentcore.runtime.runs.constants import DEFAULT_RECALL_LIMIT
@@ -376,10 +385,10 @@ async def drive(
                 recall_count=session.recall_count,
             )
             return False
-        revision_run_id = f"{original.run_id}_rev{session.recall_count + 1}"
+        continuation_run_id = f"{original.run_id}_rev{session.recall_count + 1}"
         context_blocks = [
             ContextBlock(
-                channel="revision",
+                channel="continuation",
                 heading="本次改方向（用户立即改此人）",
                 body=redir.feedback,
             )
@@ -388,7 +397,7 @@ async def drive(
             rev_state = await continue_run(
                 session=session,
                 feedback=redir.feedback,
-                revision_run_id=revision_run_id,
+                continuation_run_id=continuation_run_id,
                 llm=tool._llm,
                 tools=tool._tools,
                 sink=tool._sink,
@@ -397,6 +406,7 @@ async def drive(
                 profile_set=tool._profile_set,
                 approval_gate=worker_gate,
                 context_blocks=context_blocks,
+                parent_run_id=original.parent_run_id,
             )
         except Exception:  # noqa: BLE001 — hot fail → cold fallback
             logger.exception(
@@ -413,7 +423,6 @@ async def drive(
                 phase=rev_state.phase.value,
             )
             return False
-        # Commit like revise: bump 改次闸 so the next redirect / CEO revise continues.
         committed = RunSession(
             run_id=original.run_id,
             spec=original,
@@ -425,12 +434,15 @@ async def drive(
         _author_sessions[original.run_id] = committed
         if tool._session_store is not None:
             tool._session_store.put(committed)
-        _hot_revision_states[revision_run_id] = rev_state
+        if tool._session_saver is not None:
+            await tool._session_saver(committed)
+        _hot_revision_states[continuation_run_id] = rev_state
+        tool.note_continuation(continuation_run_id)
         logger.info(
             "delegate.run_redirect_hot",
             execution_id=execution_id,
             cancelled_run_id=original.run_id,
-            revision_run_id=revision_run_id,
+            continuation_run_id=continuation_run_id,
             recall_count=committed.recall_count,
             feedback_preview=redir.feedback[:120],
         )
@@ -440,6 +452,20 @@ async def drive(
 
     async def _progress(completed) -> None:
         nonlocal total, _coord_seen
+        # 单个 run 完成即登记现场，使同批「depends_on X + continue_from X」成立。
+        from agentcore.tools.builtin.delegate.continuation import register_completed_session
+
+        newly_registered: list = []
+        for rid, st in completed.items():
+            sess = register_completed_session(
+                tool, plan, rid, st, author_sessions=_author_sessions
+            )
+            if sess is not None:
+                newly_registered.append(sess)
+        if tool._session_saver is not None:
+            for sess in newly_registered:
+                await tool._session_saver(sess)
+
         done = sum(1 for s in completed.values() if s.phase is RunPhase.COMPLETED)
         # Count successful hot revisions toward progress (they are not plan nodes).
         done += sum(

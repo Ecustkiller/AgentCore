@@ -96,7 +96,9 @@ export function ToolCard({
       </Button>
       <p className="mt-2 text-muted-foreground text-xs">{tool.description}</p>
       {capabilityHint && (
-        <p className="mt-2 text-xs text-muted-foreground/80">{capabilityHint}</p>
+        <p className="mt-2 text-xs text-muted-foreground/80">
+          {capabilityHint}
+        </p>
       )}
       <Button
         variant="ghost"

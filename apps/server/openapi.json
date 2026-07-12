@@ -1709,7 +1709,7 @@
         "type": "object"
       },
       "AutonomyPolicy": {
-        "description": "User-global capability-authorization posture (能力授权维度；不动计划确认).\n\n- ``always_ask`` — every GRANTABLE call prompts; kickoff has no grant shortcut\n- ``first_grant`` — kickoff once authorizes the grantable set for the delegation\n  (default; continuous with the prior delegation-authorization card)\n- ``full_auto`` — kickoff auto-grants without listing capability items",
+        "description": "User-global kickoff / capability-authorization posture.\n\n- ``always_ask`` — every GRANTABLE call prompts; kickoff has no grant shortcut\n- ``first_grant`` — kickoff once authorizes the grantable set for the delegation\n  (default; continuous with the prior delegation-authorization card)\n- ``full_auto`` — skip the kickoff card entirely (plan + capability); silent\n  auto-grant of GRANTABLE tools for the delegation",
         "enum": [
           "always_ask",
           "first_grant",
@@ -3239,96 +3239,6 @@
           "errors"
         ],
         "title": "DailyTurns",
-        "type": "object"
-      },
-      "DebateSeedBriefInput": {
-        "description": "The prior debate's brief digest carried in a 续辩 seed (no 辩手全文).",
-        "properties": {
-          "crux": {
-            "default": "",
-            "maxLength": 8000,
-            "title": "Crux",
-            "type": "string"
-          },
-          "leaning": {
-            "default": "",
-            "maxLength": 8000,
-            "title": "Leaning",
-            "type": "string"
-          },
-          "open_questions": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 40,
-            "title": "Open Questions",
-            "type": "array"
-          },
-          "strongest_points": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Strongest Points",
-            "type": "object"
-          },
-          "value_disputes": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 40,
-            "title": "Value Disputes",
-            "type": "array"
-          }
-        },
-        "title": "DebateSeedBriefInput",
-        "type": "object"
-      },
-      "DebateSeedInput": {
-        "description": "结构化补轮·B（可逆叫停）：前端从收场卡发起续辩时，把上一场 ``debate_result`` 投影成的最小\n种子（辩论编排设计.md §6.6）。后端据此让本回合的 debate 续上一场（主持人焦点\n正交于已谈、首轮辩手读到上一场摘要）。只带过程摘要 + 简报关键项，**不带辩手全文**（全文随辩手\nrun 走执行事件，体量大）。",
-        "properties": {
-          "brief": {
-            "$ref": "#/components/schemas/DebateSeedBriefInput"
-          },
-          "motion": {
-            "default": "",
-            "maxLength": 8000,
-            "title": "Motion",
-            "type": "string"
-          },
-          "rounds": {
-            "items": {
-              "$ref": "#/components/schemas/DebateSeedRoundInput"
-            },
-            "maxItems": 40,
-            "title": "Rounds",
-            "type": "array"
-          }
-        },
-        "title": "DebateSeedInput",
-        "type": "object"
-      },
-      "DebateSeedRoundInput": {
-        "description": "One prior-debate round's digest (结构化补轮·B seed).",
-        "properties": {
-          "focus": {
-            "default": "",
-            "maxLength": 2000,
-            "title": "Focus",
-            "type": "string"
-          },
-          "round_no": {
-            "default": 0,
-            "title": "Round No",
-            "type": "integer"
-          },
-          "summary": {
-            "default": "",
-            "maxLength": 8000,
-            "title": "Summary",
-            "type": "string"
-          }
-        },
-        "title": "DebateSeedRoundInput",
         "type": "object"
       },
       "DelegationAuthorizationDecision": {
@@ -5264,7 +5174,7 @@
         "type": "object"
       },
       "PausedTurnSummary": {
-        "description": "A turn awaiting resume after a durable plan_review / ask_user / kickoff pause.\n\nSurfaced on conversation reopen so the client can re-render the right resume card\nby ``kind`` and offer continue / per_call / adjust / stop → the resume endpoint.\n``message_id`` is both the pause key and the id the resumed assistant message will\nreuse, so an optimistic bubble reconciles cleanly.\n\nplan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the\ngated downstream); team_preview (开工卡) carries ``workers`` (upcoming roles /\ntasks / deps) + ``tools`` (grantable capabilities for this delegation); ask_user\ncarries the unified card payload ``question`` (the framing / opening line) +\n``context`` + the optional opening content ``assumptions`` / ``questions`` /\n``style_options`` (empty for a compact mid-task fork). The unused set is empty\nfor the other kinds.",
+        "description": "A turn awaiting resume after a durable plan_review / ask_user / kickoff pause.\n\nSurfaced on conversation reopen so the client can re-render the right resume card\nby ``kind`` and offer continue / per_call / adjust / stop → the resume endpoint.\n``message_id`` is both the pause key and the id the resumed assistant message will\nreuse, so an optimistic bubble reconciles cleanly.\n\nplan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the\ngated downstream); team_preview (开工卡) carries ``primitive`` (``delegate`` /\n``debate``) + ``workers`` / ``tools`` (delegate) or ``motion`` / ``sides`` /\n``max_rounds`` / ``thorough`` (debate); ask_user carries the unified card payload\n``question`` (the framing / opening line) + ``context`` + the optional opening\ncontent ``assumptions`` / ``questions`` / ``style_options`` (empty for a compact\nmid-task fork). The unused set is empty for the other kinds.",
         "properties": {
           "assumptions": {
             "items": {
@@ -5281,6 +5191,11 @@
           "context": {
             "default": "",
             "title": "Context",
+            "type": "string"
+          },
+          "form": {
+            "default": "",
+            "title": "Form",
             "type": "string"
           },
           "intent": {
@@ -5301,8 +5216,18 @@
           "kind": {
             "$ref": "#/components/schemas/SuspensionKind"
           },
+          "max_rounds": {
+            "default": 0,
+            "title": "Max Rounds",
+            "type": "integer"
+          },
           "message_id": {
             "title": "Message Id",
+            "type": "string"
+          },
+          "motion": {
+            "default": "",
+            "title": "Motion",
             "type": "string"
           },
           "pending": {
@@ -5312,6 +5237,11 @@
             },
             "title": "Pending",
             "type": "array"
+          },
+          "primitive": {
+            "default": "delegate",
+            "title": "Primitive",
+            "type": "string"
           },
           "question": {
             "default": "",
@@ -5324,6 +5254,14 @@
               "type": "object"
             },
             "title": "Questions",
+            "type": "array"
+          },
+          "sides": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Sides",
             "type": "array"
           },
           "steps": {
@@ -5341,6 +5279,11 @@
             },
             "title": "Style Options",
             "type": "array"
+          },
+          "thorough": {
+            "default": true,
+            "title": "Thorough",
+            "type": "boolean"
           },
           "tools": {
             "items": {
@@ -5387,8 +5330,7 @@
             "enum": [
               "approval",
               "delegation_authorization",
-              "escalation",
-              "debate_round"
+              "escalation"
             ],
             "title": "Kind",
             "type": "string"
@@ -5996,46 +5938,6 @@
         "title": "ResolveClientToolInteraction",
         "type": "object"
       },
-      "ResolveDebateRoundInteraction": {
-        "description": "Settle an interactive debate round boundary (``debate_round`` interaction, 逐轮交互).\n\nRaised when a ``debate(interactive=true)`` Moderator paused at a round boundary so the user\ncan steer depth instead of letting the judge auto-converge. ``decision`` is ``continue``\n(debate another round — ``focus``, if given, overrides the next round's framing = 「加角度」,\nsteering the debate onto the dimension the user cares about) or ``conclude`` (stop now and\nemit the brief, even if the judge had not converged).\n\n``ask`` is an optional user 【追问】 — orthogonal to ``focus`` (focus reframes the round's\ntopic; ask is a concrete question the next round's debaters MUST answer head-on). ``ask_target``\noptionally directs it at one side (a :class:`DebateSide` key; empty = ask everyone). A follow-up\nrides a ``continue`` (追问即续辩, the next round addresses it); it is recorded verbatim as a\n:class:`~agentcore.runtime.debate.types.UserInterjection` on that round and survives reload via\n``debate_result.rounds[*].user_interjections``.\n\nA late resolve (the round already timed out → judge auto-convergence took over) falls through\nthe route as 404, so the desktop renders it as「已关闭」rather than an error. In-process only\n(not durably persisted): a disconnect / restart drops the live debate, so there is no\n``resume`` counterpart.",
-        "properties": {
-          "ask": {
-            "default": "",
-            "maxLength": 2000,
-            "title": "Ask",
-            "type": "string"
-          },
-          "ask_target": {
-            "default": "",
-            "maxLength": 200,
-            "title": "Ask Target",
-            "type": "string"
-          },
-          "decision": {
-            "default": "continue",
-            "enum": [
-              "continue",
-              "conclude"
-            ],
-            "title": "Decision",
-            "type": "string"
-          },
-          "focus": {
-            "default": "",
-            "maxLength": 2000,
-            "title": "Focus",
-            "type": "string"
-          },
-          "kind": {
-            "const": "debate_round",
-            "default": "debate_round",
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "title": "ResolveDebateRoundInteraction",
-        "type": "object"
-      },
       "ResolveDelegationAuthorizationInteraction": {
         "description": "Settle a paused per-delegation authorization (``delegation_authorization``).\n\nRaised before workers start so the user can grant medium-risk tools for the\nwhole delegation in one click. ``grant_delegation`` whitelists code_execute +\nfile-mutation tools for this delegation; ``per_call`` keeps per-call approval;\n``deny`` refuses to start workers.",
         "properties": {
@@ -6604,16 +6506,6 @@
             "title": "Content",
             "type": "string"
           },
-          "debate_seed": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DebateSeedInput"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "requires_tools": {
             "default": false,
             "title": "Requires Tools",
@@ -6624,6 +6516,91 @@
           "content"
         ],
         "title": "SendMessageRequest",
+        "type": "object"
+      },
+      "SessionListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/SessionSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total"
+        ],
+        "title": "SessionListResponse",
+        "type": "object"
+      },
+      "SessionSummary": {
+        "description": "One active login device (refresh-token family), owner-scoped.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current": {
+            "default": false,
+            "title": "Current",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip"
+          },
+          "last_used_at": {
+            "format": "date-time",
+            "title": "Last Used At",
+            "type": "string"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "last_used_at"
+        ],
+        "title": "SessionSummary",
         "type": "object"
       },
       "SetBillingPreferenceRequest": {
@@ -7271,6 +7248,68 @@
         "title": "StoredAttachment",
         "type": "object"
       },
+      "SubmitDebateSteerRequest": {
+        "description": "Ambient debate steer — fire-and-forget boss intervention (辩论编排设计.md §六).\n\nQueued while ``debate`` drives; the Moderator drains at the next round boundary\n(non-blocking). ``decision=continue`` (+ optional ``focus``/``ask``) folds into the\nexisting pending_interjections / focus_override path; ``conclude`` stops at that\nboundary (current round finishes first — never mid-generation).",
+        "properties": {
+          "ask": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Ask",
+            "type": "string"
+          },
+          "ask_target": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Ask Target",
+            "type": "string"
+          },
+          "decision": {
+            "default": "continue",
+            "enum": [
+              "continue",
+              "conclude"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "execution_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Execution Id",
+            "type": "string"
+          },
+          "focus": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Focus",
+            "type": "string"
+          }
+        },
+        "required": [
+          "execution_id"
+        ],
+        "title": "SubmitDebateSteerRequest",
+        "type": "object"
+      },
+      "SubmitDebateSteerResponse": {
+        "properties": {
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "queued": {
+            "description": "Pending steer count for this execution after enqueue.",
+            "title": "Queued",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queued"
+        ],
+        "title": "SubmitDebateSteerResponse",
+        "type": "object"
+      },
       "SubmitRunRedirectRequest": {
         "description": "User mid-flight steer for one running worker (中间可见性 Phase 2a).\n\nQueued while ``delegate`` drives; the scheduler drains and applies cancel + re-run\nin a later step. Does not pause the turn (parallel siblings keep running).",
         "properties": {
@@ -7393,7 +7432,7 @@
         "type": "object"
       },
       "TokenResponse": {
-        "description": "Bearer-token bundle for non-cookie clients (mobile web / Capacitor shell, M2).\n\nThe cookie login (``/v1/auth/login``) keeps tokens in httpOnly cookies; this is\nits body-returning twin for clients whose origin (``capacitor://`` / a new web\norigin) can't rely on SameSite cookies (认证与会话.md §十). ``expires_in`` is the\naccess token's lifetime in seconds so the client refreshes before it lapses;\n``user`` rides the login response (identity in one round trip) and is omitted on\nrefresh.",
+        "description": "Bearer-token bundle for non-cookie clients (mobile web / Capacitor shell, M2).\n\nThe cookie login (``/v1/auth/login``) keeps tokens in httpOnly cookies; this is\nits body-returning twin for clients whose origin (``capacitor://`` / a new web\norigin) can't rely on SameSite cookies (认证与会话.md §十). ``expires_in`` is the\naccess token's lifetime in seconds so the client refreshes before it lapses;\n``refresh_expires_in`` is the refresh token's lifetime in seconds (clients that\npersist the refresh token as a cookie need this for ``expirationDate``);\n``user`` rides the login response (identity in one round trip) and is omitted on\nrefresh.",
         "properties": {
           "access_token": {
             "title": "Access Token",
@@ -7402,6 +7441,17 @@
           "expires_in": {
             "title": "Expires In",
             "type": "integer"
+          },
+          "refresh_expires_in": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Expires In"
           },
           "refresh_token": {
             "title": "Refresh Token",
@@ -7785,7 +7835,7 @@
         "type": "object"
       },
       "TurnRecoveryResponse": {
-        "description": "One-shot recovery snapshot for a conversation reopen (recovery 统一, 对称 §8.2).\n\nReopen needs to know, from ONE owner-gated point-in-time read, how to recover the\nconversation's latest turn:\n\n- ``live_running``: a detached in-flight run is still alive to 续看 (实时重连续看\n  C1 · slice 1b) — the client attaches (``GET .../stream``) to replay + tail it.\n- ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and\n  lost their live stream (结构化挂起 2b) — each renders a resume card.\n- ``pending_interactions``: hot-path interactions still awaiting settlement\n  (journal fold: approval / delegation_authorization / escalation / debate_round).\n  Cold-path stays in ``paused``.",
+        "description": "One-shot recovery snapshot for a conversation reopen (recovery 统一, 对称 §8.2).\n\nReopen needs to know, from ONE owner-gated point-in-time read, how to recover the\nconversation's latest turn:\n\n- ``live_running``: a detached in-flight run is still alive to 续看 (实时重连续看\n  C1 · slice 1b) — the client attaches (``GET .../stream``) to replay + tail it.\n- ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and\n  lost their live stream (结构化挂起 2b) — each renders a resume card.\n- ``pending_interactions``: hot-path interactions still awaiting settlement\n  (journal fold: approval / delegation_authorization / escalation).\n  Cold-path stays in ``paused``.",
         "properties": {
           "live_running": {
             "default": false,
@@ -11107,6 +11157,24 @@
     "/v1/auth/login/mfa": {
       "post": {
         "operationId": "login_mfa_v1_auth_login_mfa_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Client-Platform",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Client-Platform"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -11713,6 +11781,213 @@
           }
         },
         "summary": "Register",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/sessions": {
+      "get": {
+        "description": "List the caller's active login devices (one row per refresh-token family).",
+        "operationId": "list_sessions_v1_auth_sessions_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Sessions",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/sessions/revoke-others": {
+      "post": {
+        "description": "Log out every other device; keep the caller's current family.\n\nAccess tokens without a ``fam`` claim (pre-upgrade) cannot identify \"current\"\n→ 422 rather than revoke-all (which would drop this session too).",
+        "operationId": "revoke_other_sessions_v1_auth_sessions_revoke_others_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Other Sessions",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/sessions/{family_id}": {
+      "delete": {
+        "description": "Log out one device (revoke its refresh-token family). Own current session OK.",
+        "operationId": "revoke_session_v1_auth_sessions__family_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "family_id",
+            "required": true,
+            "schema": {
+              "title": "Family Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Session",
         "tags": [
           "auth"
         ]
@@ -13379,6 +13654,91 @@
         ]
       }
     },
+    "/v1/conversations/{conversation_id}/debate-steer": {
+      "post": {
+        "description": "Queue an ambient steer for the live debate (下一轮边界非阻塞生效).\n\nThe Moderator never hard-stops for the user — this fire-and-forget channel is the\nboss直控 path (同 ``run-redirect`` 模式). Applied at the next round boundary via\nexisting ``pending_interjections`` / ``focus_override`` / ``CONCLUDE`` mechanisms.",
+        "operationId": "submit_debate_steer_v1_conversations__conversation_id__debate_steer_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitDebateSteerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitDebateSteerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Debate Steer",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/v1/conversations/{conversation_id}/duplicate": {
       "post": {
         "description": "Clone a conversation into a brand-new one carrying a copy of its transcript (克隆对话).\n\nOwner-scoped (404 for a non-owner / missing source). The copy inherits the source's\nfolder (so it stays in the same project/workspace) and local-first intent, with a\n「… 副本」title, then bulk-copies the source's messages via\n``MessageRepository.copy_all`` (content-level fields only — see that method for what is\nintentionally not carried over, e.g. the team-graph replay journal). Returns the new\nconversation summary with its (copied) message count so the sidebar can insert it.",
@@ -13937,7 +14297,6 @@
                   "mapping": {
                     "approval": "#/components/schemas/ResolveApprovalInteraction",
                     "client_tool": "#/components/schemas/ResolveClientToolInteraction",
-                    "debate_round": "#/components/schemas/ResolveDebateRoundInteraction",
                     "delegation_authorization": "#/components/schemas/ResolveDelegationAuthorizationInteraction",
                     "escalation": "#/components/schemas/ResolveEscalationInteraction"
                   },
@@ -13955,9 +14314,6 @@
                   },
                   {
                     "$ref": "#/components/schemas/ResolveEscalationInteraction"
-                  },
-                  {
-                    "$ref": "#/components/schemas/ResolveDebateRoundInteraction"
                   }
                 ],
                 "title": "Body"

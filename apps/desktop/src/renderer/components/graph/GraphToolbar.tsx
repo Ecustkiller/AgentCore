@@ -1,3 +1,4 @@
+import { MANUAL_HELP, ManualHelpLink } from "@/components/ManualHelpLink";
 import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { GraphLayout } from "@/stores/graph";
@@ -80,6 +81,10 @@ export function GraphToolbar({
           </SimpleTooltip>
         ))}
       </div>
+      <ManualHelpLink
+        to={MANUAL_HELP.legend}
+        className="rounded-full border border-border bg-card/90 shadow-sm backdrop-blur"
+      />
     </div>
   );
 }

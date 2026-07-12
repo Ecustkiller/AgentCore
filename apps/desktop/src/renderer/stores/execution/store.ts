@@ -10,13 +10,12 @@ import type {
 import { create } from "zustand";
 import { upsertDebateRound } from "./debate";
 import { type RunFrame, frameFromEvent } from "./frames";
-import { ensureDelegateBatchStamps, mergePlanInto, planFromRunPlan } from "./plan";
-import type {
-  DebateRoundDecision,
-  ExecutionJournal,
-  ExecutionPlan,
-  ExecutionStatus,
-} from "./types";
+import {
+  ensureDelegateBatchStamps,
+  mergePlanInto,
+  planFromRunPlan,
+} from "./plan";
+import type { ExecutionJournal, ExecutionPlan, ExecutionStatus } from "./types";
 
 /**
  * The execution state of a single assistant message's turn — plan, frame
@@ -38,11 +37,6 @@ export interface ExecutionRuntime {
    * 折叠累积于此，{@link projectExecution} 透传到 {@link Execution.debateRounds}。`[]` =
    * 非辩论/无逐轮事件。P2 起事件 DURABLE：重载由 hydrateFromJournal 以同一 fold 重建。 */
   debateRounds: DebateNarrativeRound[];
-  /** 交互式逐轮辩论决策卡（`debate_round_decision_*` —— 回合级单事件，非 frame）：折叠累积于
-   * 此，{@link projectExecution} 透传到 {@link Execution.debateDecisions}。`[]` = 非交互辩论 /
-   * 无决策事件；事件虽 DURABLE 入 journal，重载时待答态由 InteractionStore 重建，此处恒空
-   * （决策结果已体现在收场叙事/轮次）。 */
-  debateDecisions: DebateRoundDecision[];
   /** Worker-scoped `tool_use_progress` (run_id present), keyed by run id. Transport-only —
    * merged onto agents at projection time; never journaled or replayed. */
   workerToolPhases: Record<string, { phase: string; toolName: string }>;
@@ -126,7 +120,6 @@ const EMPTY_EXEC: ExecutionRuntime = {
   status: "planning",
   debate: null,
   debateRounds: [],
-  debateDecisions: [],
   workerToolPhases: {},
   teamSynthesisPreview: null,
 };
@@ -181,7 +174,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         status: "running",
         debate: null,
         debateRounds: [],
-        debateDecisions: [],
         workerToolPhases: {},
         teamSynthesisPreview: null,
       })),
@@ -321,8 +313,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               status: statusFromFinish(journal.finishReason),
               debate,
               debateRounds,
-              // 交互式逐轮决策卡：决策已体现在收场叙事 / 轮次；重载恒空（卡本身非 DURABLE 展示态）。
-              debateDecisions: [],
               workerToolPhases: {},
               teamSynthesisPreview,
             },

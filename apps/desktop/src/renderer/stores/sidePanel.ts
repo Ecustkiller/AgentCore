@@ -154,9 +154,9 @@ export interface SimpleTurnDetailTab {
 /** A side-panel detail tab: a worker run, an endpoint bubble, or a simple-turn Q&A. */
 export type DetailTab = RunDetailTab | ContentDetailTab | SimpleTurnDetailTab;
 
-/** Tab-strip id for a run detail. Prefer the revision-chain root so all beats
+/** Tab-strip id for a run detail. Prefer the continuation-chain root so all beats
  * of the same speaker share one tab; pass the root (or the run itself when it
- * has no `revisionOf`). */
+ * has no `continuesRunId`). */
 export const runDetailTabId = (messageId: string, runId: string): string =>
   `run-detail:${messageId}:${runId}`;
 

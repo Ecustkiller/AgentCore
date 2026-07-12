@@ -49,6 +49,14 @@ export const OUTBOX_CHANNELS = {
   authRefresh: "outbox:authRefresh",
 } as const;
 
+/**
+ * Silent token refresh outcome (main ↔ renderer).
+ * - `renewed` — new tokens written; caller may replay / reconnect
+ * - `auth_dead` — session is gone (401/403 / missing refresh); drop to login
+ * - `transient` — network / 5xx / cookie-write failure; never treat as logout
+ */
+export type AuthRefreshResult = "renewed" | "auth_dead" | "transient";
+
 export interface OutboxApi {
   /** Drain all ready outbox records (exit / manual). */
   flush(): Promise<OutboxStatusSnapshot>;
@@ -59,5 +67,5 @@ export interface OutboxApi {
   /** Subscribe to successful cloud acks (reconcile optimistic bubbles). */
   onSynced(cb: (payload: OutboxSyncedPayload) => void): () => void;
   /** Main-owned token refresh (single-flight across renderer + writebacker). */
-  authRefresh(): Promise<boolean>;
+  authRefresh(): Promise<AuthRefreshResult>;
 }

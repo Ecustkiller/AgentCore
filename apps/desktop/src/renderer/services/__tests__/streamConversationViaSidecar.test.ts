@@ -134,7 +134,7 @@ beforeEach(() => {
       flush: vi.fn(),
       status: vi.fn(async () => ({ pending: [] })),
       onSynced: vi.fn(() => () => {}),
-      authRefresh: vi.fn(),
+      authRefresh: vi.fn(async () => "auth_dead" as const),
     },
   };
 });

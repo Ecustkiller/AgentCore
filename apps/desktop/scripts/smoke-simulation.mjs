@@ -66,9 +66,7 @@ function captureCsrf(response) {
 
 function authHeaders(method = "GET", extra = {}) {
   const headers = { ...extra };
-  const cookie = [...cookies.entries()]
-    .map(([k, v]) => `${k}=${v}`)
-    .join("; ");
+  const cookie = [...cookies.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
   if (cookie) headers.Cookie = cookie;
   if (
     csrfToken &&
@@ -173,7 +171,8 @@ async function advanceTick(runId) {
     );
     storeCookies(res);
     captureCsrf(res);
-    if (!res.ok) fail(`advance tick failed (${res.status}): ${await res.text()}`);
+    if (!res.ok)
+      fail(`advance tick failed (${res.status}): ${await res.text()}`);
     const body = await res.json();
     summary.tickAdvanced = true;
     return body.snapshot;

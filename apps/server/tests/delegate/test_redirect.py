@@ -24,7 +24,12 @@ class _RedirectProvider:
 
     async def stream(self, request):  # noqa: ANN001
         user = " ".join(m.content or "" for m in request.messages if m.role == "user")
-        if "修改要求" in user or "立即改此人" in user or "改方向" in user:
+        if (
+            "续干指令" in user
+            or "修改要求" in user
+            or "立即改此人" in user
+            or "改方向" in user
+        ):
             self.hot_calls += 1
             yield LLMChunk(delta_content="HOT_DONE")
             return
@@ -72,7 +77,7 @@ class _HotRedirectProvider:
     async def stream(self, request):  # noqa: ANN001
         self.calls += 1
         user = " ".join(m.content or "" for m in request.messages if m.role == "user")
-        if "修改要求" in user:
+        if "续干指令" in user or "修改要求" in user:
             self.hot_calls += 1
             yield LLMChunk(delta_content="HOT_DONE")
             return
@@ -91,16 +96,16 @@ class _HotRedirectSink(EventSink):
         self._sent = False
         self.redirected_run_id = ""
         self.cancelled_reasons: list[str] = []
-        self.revision_parents: list[str] = []
+        self.continues_roots: list[str] = []
         self.replaces: list[str] = []
 
     def emit(self, event) -> None:  # noqa: ANN001
         if event.type is EventType.RUN_CANCELLED:
             self.cancelled_reasons.append(str(event.payload.get("reason") or ""))
         if event.type is EventType.RUN_STARTED:
-            parent = event.payload.get("parent_run_id")
-            if parent:
-                self.revision_parents.append(str(parent))
+            continues = event.payload.get("continues_run_id")
+            if continues:
+                self.continues_roots.append(str(continues))
             replaces = event.payload.get("replaces_run_id")
             if replaces:
                 self.replaces.append(str(replaces))
@@ -189,7 +194,7 @@ async def test_redirect_hot_continue_when_partial_draft_exists():
     assert provider.hot_calls >= 1
     assert "HOT_DONE" in result.output
     assert "redirect" in sink.cancelled_reasons
-    assert sink.redirected_run_id in sink.revision_parents
+    assert sink.redirected_run_id in sink.continues_roots
     # No cold handoff node.
     assert sink.replaces == []
     redir_starts = [
@@ -217,6 +222,7 @@ class _DoubleHotProvider:
         # continue_run appends prior assistant turns + revision instruction.
         if (
             any(m.role == "assistant" for m in request.messages)
+            or "续干指令" in user
             or "修改要求" in user
             or "立即改此人" in user
             or "改方向" in user
@@ -244,16 +250,20 @@ class _DoubleHotSink(EventSink):
         super().__init__()
         self.redirected_run_id = ""
         self.redirect_count = 0
-        self.revision_starts: list[tuple[str, str | None, int | None]] = []
+        self.revision_starts: list[tuple[str, str | None, str | None]] = []
 
     def emit(self, event) -> None:  # noqa: ANN001
         if event.type is EventType.RUN_STARTED:
             rid = str(event.payload.get("run_id") or "")
             parent = event.payload.get("parent_run_id")
-            rev = event.payload.get("revision")
-            if parent:
+            continues = event.payload.get("continues_run_id")
+            if continues:
                 self.revision_starts.append(
-                    (rid, str(parent) if parent else None, int(rev) if rev is not None else None)
+                    (
+                        rid,
+                        str(parent) if parent else None,
+                        str(continues) if continues else None,
+                    )
                 )
                 # Second redirect on the same author once the first hot revision is live.
                 if self.redirect_count == 1 and self.redirected_run_id:
@@ -303,10 +313,8 @@ async def test_redirect_hot_twice_increments_revision_ids():
     assert provider.hot_calls >= 2
     assert sink.redirect_count == 2
     orig = sink.redirected_run_id
-    rev_ids = [rid for rid, parent, _ in sink.revision_starts if parent == orig]
+    rev_ids = [rid for rid, _parent, continues in sink.revision_starts if continues == orig]
     assert rev_ids == [f"{orig}_rev1", f"{orig}_rev2"]
-    revisions = [rev for rid, parent, rev in sink.revision_starts if parent == orig]
-    assert revisions == [2, 3]
     # No cold handoff for this author.
     assert not any(
         str(e.payload.get("run_id") or "").endswith("_redir")
@@ -348,6 +356,7 @@ class _ColdThenHotProvider:
         user = " ".join(m.content or "" for m in request.messages if m.role == "user")
         if (
             any(m.role == "assistant" for m in request.messages)
+            or "续干指令" in user
             or "修改要求" in user
             or "立即改此人" in user
             or "改方向" in user
@@ -376,7 +385,7 @@ class _ColdThenHotSink(EventSink):
         self.redir_run_id = ""
         self.redirect_count = 0
         self.replaces: list[str] = []
-        self.revision_starts: list[tuple[str, str | None, int | None]] = []
+        self.revision_starts: list[tuple[str, str | None, str | None]] = []
 
     def emit(self, event) -> None:  # noqa: ANN001
         if event.type is EventType.RUN_STARTED:
@@ -385,10 +394,14 @@ class _ColdThenHotSink(EventSink):
             if replaces:
                 self.replaces.append(str(replaces))
             parent = event.payload.get("parent_run_id")
-            rev = event.payload.get("revision")
-            if parent:
+            continues = event.payload.get("continues_run_id")
+            if continues:
                 self.revision_starts.append(
-                    (rid, str(parent) if parent else None, int(rev) if rev is not None else None)
+                    (
+                        rid,
+                        str(parent) if parent else None,
+                        str(continues),
+                    )
                 )
             if (
                 self.redirect_count == 0
@@ -452,9 +465,7 @@ async def test_redirect_cold_redir_then_hot_continue_on_handoff():
     ]
     assert redir_starts == [redir]
 
-    rev_ids = [rid for rid, parent, _ in sink.revision_starts if parent == redir]
+    rev_ids = [rid for rid, _parent, continues in sink.revision_starts if continues == redir]
     assert rev_ids == [f"{redir}_rev1"]
-    revisions = [rev for rid, parent, rev in sink.revision_starts if parent == redir]
-    assert revisions == [2]
-    # No revision chain hanging off the cancelled original (cold, not hot).
-    assert not any(parent == orig for _, parent, _ in sink.revision_starts)
+    # No continuation hanging off the cancelled original (cold, not hot).
+    assert not any(continues == orig for _, _, continues in sink.revision_starts)

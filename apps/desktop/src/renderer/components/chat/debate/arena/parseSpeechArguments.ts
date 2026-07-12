@@ -107,9 +107,7 @@ function isOpeningPreamble(block: string): boolean {
   if (!text) return false;
 
   // 「以下是……的立论/论点/观点/论述」类框架句
-  if (
-    /^以下是[\s\S]{0,48}(?:的)?(?:立论|论点|观点|论述|发言)/.test(text)
-  ) {
+  if (/^以下是[\s\S]{0,48}(?:的)?(?:立论|论点|观点|论述|发言)/.test(text)) {
     return true;
   }
 

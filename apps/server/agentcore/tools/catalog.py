@@ -4,12 +4,12 @@ the desktop 能力图鉴.
 
 Single source of truth: tool schemas come from the SAME tool classes the runtime
 wires — the worker built-ins via :func:`build_worker_registry`, the CEO-only
-orchestration primitives (``delegate`` / ``replan`` / ``revise`` / ``debate`` /
+orchestration primitives (``delegate`` / ``replan`` / ``debate`` /
 ``consult_skill`` / ``consult_memory`` / ``ask_user``)
 by reading their static ``schema`` descriptor. So a tool added / renamed / re-described
 in the runtime shows up here with NO hand-maintained list to drift — fixing the gap the
 old ``GET /tools`` had (it only ever served the worker built-ins, never the CEO's
-``delegate`` / ``replan`` / ``revise`` / ``debate`` / ``consult_skill`` /
+``delegate`` / ``replan`` / ``debate`` / ``consult_skill`` /
 ``consult_memory`` / ``ask_user``, so the user-facing catalog
 never matched the CEO's real repertoire).
 """
@@ -27,7 +27,6 @@ from agentcore.tools.builtin.consult_skill import ConsultSkillTool
 from agentcore.tools.builtin.debate import DebateTool
 from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.builtin.replan import ReplanTool
-from agentcore.tools.builtin.revise import ReviseTool
 from agentcore.tools.protocol import ToolSchema
 
 # Who may call a tool. The CEO coordinator holds the read-only built-ins + the
@@ -48,7 +47,7 @@ class CatalogTool:
 # The CEO-only orchestration tools, wired in ``runtime.pipeline._assemble_ceo_toolset``
 # behind heavy runtime deps (llm / sink / session_store / …). Their ``schema`` is a
 # pure STATIC descriptor — it reads only module-level constants, never instance state
-# (verified across delegate / replan / revise / debate / consult_skill / consult_memory /
+# (verified across delegate / replan / debate / consult_skill / consult_memory /
 # ask_user) — so the catalog reads
 # it off an uninitialised instance (:func:`_static_schema`). This keeps the tool class
 # the single source of each schema WITHOUT fabricating a turn's worth of runtime objects
@@ -59,7 +58,6 @@ class CatalogTool:
 _CEO_ORCHESTRATION_TOOLS: tuple[type, ...] = (
     DelegateTool,
     ReplanTool,
-    ReviseTool,
     DebateTool,
     ConsultSkillTool,
     ConsultMemoryTool,

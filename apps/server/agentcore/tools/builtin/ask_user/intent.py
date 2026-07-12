@@ -16,7 +16,6 @@ _EXECUTION_TOOLS = frozenset(
     {
         "delegate",
         "debate",
-        "revise",
         "replan",
         "file_write",
         "file_append",

@@ -45,8 +45,7 @@ export async function createFolder(
     name: input.name,
     mode: input.mode,
     local_root_id: input.mode === "local" ? (input.localRootId ?? null) : null,
-    local_subpath:
-      input.mode === "local" ? (input.localSubpath ?? null) : null,
+    local_subpath: input.mode === "local" ? (input.localSubpath ?? null) : null,
   };
   const res = await api.post<BackendFolder>("/v1/folders", body);
   return toFolder(res);

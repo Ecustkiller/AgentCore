@@ -24,7 +24,7 @@ vi.mock("electron", () => ({
 
 vi.mock("../auth-client", () => ({
   bearerPostJson: h.bearerPostJson,
-  refreshAccessToken: vi.fn(async () => true),
+  refreshAccessToken: vi.fn(async () => "renewed" as const),
 }));
 
 import { drainOutbox, outboxDir } from "../outbox-writeback";
@@ -210,7 +210,10 @@ describe("drainOutbox", () => {
       phase: "open",
       content: "",
       stream_segments: {
-        "captain:content": { text: "should not promote mid-turn", generation: 0 },
+        "captain:content": {
+          text: "should not promote mid-turn",
+          generation: 0,
+        },
       },
     });
     const status = await drainOutbox();

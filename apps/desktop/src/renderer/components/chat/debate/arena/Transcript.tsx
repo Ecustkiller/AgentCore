@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { type DebateClashView, type DebateModel, isFlatRound } from "../model";
 import { CrossExamSection } from "./CrossExamSection";
 import { JudgeNote } from "./JudgeNote";
+import { resolveModeratorModel } from "./ModeratorIdentity";
 import { OpeningNote } from "./OpeningNote";
 import { SectionHeader } from "./SectionHeader";
 import { SpeakerBlock, speechStageLabel } from "./SpeakerBlock";
@@ -32,6 +33,7 @@ export function Transcript({
 }) {
   const topicMotion = model.motion ?? model.rounds[0]?.focus ?? "";
   const openingLine = openingText(model);
+  const moderatorModel = resolveModeratorModel(model, execution);
 
   const lastRoundBySideKey = new Map<string, number>();
   for (const r of model.rounds) {
@@ -87,7 +89,7 @@ export function Transcript({
 
   return (
     <div className="space-y-1">
-      {openingLine && <OpeningNote text={openingLine} />}
+      {openingLine && <OpeningNote text={openingLine} model={moderatorModel} />}
 
       {model.rounds.map((round) => {
         const flat = isFlatRound(round);
@@ -139,17 +141,24 @@ export function Transcript({
             {round.crossExam.length > 0 && (
               <CrossExamSection
                 exchanges={round.crossExam}
-                execution={execution}
                 messageId={messageId}
                 sceneKey={`${messageId}:cx:r${round.roundNo}`}
                 layoutMode={layoutMode}
+                moderatorModel={moderatorModel}
               />
             )}
 
             {round.summary && !round.inFlight ? (
-              <JudgeNote text={round.summary} round={round} form={model.form} />
+              <JudgeNote
+                text={round.summary}
+                round={round}
+                form={model.form}
+                model={moderatorModel}
+              />
             ) : (
-              showModeratorPending && <JudgeNote text="" pending />
+              showModeratorPending && (
+                <JudgeNote text="" pending model={moderatorModel} />
+              )
             )}
           </div>
         );

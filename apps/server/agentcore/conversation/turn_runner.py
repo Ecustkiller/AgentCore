@@ -69,15 +69,10 @@ async def run_and_persist(
     memory_enabled: bool = True,
     autonomy_policy=None,
     board_id: str | None = None,
-    debate_seed: dict | None = None,
     llm_supports_tools: bool | None = None,
     x_client_platform: str | None = None,
 ) -> None:
     """Run the pipeline, persist the assistant reply, then title + memory.
-
-    ``debate_seed`` (结构化补轮·B): the prior debate's projected result, sent by the
-    desktop when the user starts a 续辩 from a settled debate card — threaded to the
-    DebateTool so this turn's debate continues the prior one. ``None`` for an ordinary turn.
     """
     session_saver, session_loader = session_callbacks(conversation_id)
     suspension_saver, suspension_deleter = suspension_callbacks()
@@ -153,7 +148,6 @@ async def run_and_persist(
                     session_loader=session_loader,
                     suspension_saver=suspension_saver,
                     suspension_deleter=suspension_deleter,
-                    debate_seed=debate_seed,
                     llm_supports_tools=llm_supports_tools,
                     message_id=message_id,
                     x_client_platform=x_client_platform,

@@ -35,8 +35,11 @@ const CONTEXT_CHANNEL_META: Record<string, { label: string; hint: string }> = {
   interjection: { label: "用户追问", hint: "用户本轮要求正面回应的问题" },
   cross_exam: { label: "质询", hint: "本轮定向质询：你被追问的问题" },
   closing: { label: "结辩", hint: "收场结辩：归纳本方胜局、不添新论据" },
-  // 定向唤回热修 (continue_run 修订): the CEO feedback this recall was fed.
-  revision: { label: "修订要求", hint: "老板定向唤回你本次要改的点" },
+  // 同人接续 (continue_run / 续派): the instruction this continuation was fed.
+  continuation: {
+    label: "接续指令",
+    hint: "带着现场接着干的新指令（改稿或新任务）",
+  },
 };
 
 /** Dependency fidelity → 中文 label (递指针/摘要/全文): HOW an upstream teammate's product

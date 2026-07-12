@@ -217,10 +217,13 @@ class RunSpec:
     # ``depth < MAX_DELEGATION_DEPTH`` (executor enforces the cap). depth-2
     # sub-workers never delegate regardless of this flag; explicit ``False`` opts out.
     can_delegate: bool = True
-    # 回落换人 (多轮编排 P-3): when the CEO re-delegates after a revise miss / cap,
+    # 回落换人 (多轮编排 P-3): when the CEO re-delegates after a continue miss / cap,
     # this points at the original worker run the new node is taking over. Display-only
     # for the graph「接手」badge +「接替」edge; the scheduler never reads it.
     replaces_run_id: str | None = None
+    # 同人续派：目标 run 的现场根（RunSession 键）。设了则执行走 continue_run 而非冷开局；
+    # wire 的 continues_run_id 恒等于该值（星型）。校验与闸在驱动层，调度器不读。
+    continue_from_run_id: str | None = None
     policy: RunPolicy = field(default_factory=RunPolicy)
     # Fan-out awareness: a concise list of the *other* nodes that fanned out from
     # the same point — those sharing this node's exact ``depends_on`` set, i.e. the
@@ -323,11 +326,6 @@ class RunState:
     # Escalation Gate (routing Phase 1) may also append scheme-layer signals here
     # (``source=escalation_gate``) so CEO synthesis sees deterministic gate trips.
     escalations: list[dict[str, Any]] = field(default_factory=list)
-    # Worker Intake 轻量计划头（routing Phase 1）: complexity / strategy / token_budget
-    # attached to the live execution context (no separate store). ``None`` until Intake
-    # runs (CEO / seed / pre-intake failure). Serialized for resume so a paused worker
-    # keeps its budget diagnosis.
-    intake: dict[str, Any] | None = None
     # Web sources this worker consulted (web_search / read_url), de-duped across
     # contract retries. Collected un-numbered (the worker text is not annotated):
     # the DelegateTool folds these into the turn's shared source card so the user

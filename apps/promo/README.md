@@ -86,15 +86,27 @@
 
 ## 工程结构（以代码为准）
 
-- `Root.tsx` —— Remotion compositions 注册（成片 `Promo` + 像素核对 `PixelCheck` + 各 still）
-- `Video.tsx` —— 成片主时间轴
-- `scenes/` —— 分段镜头（`OpeningScene` / `RunScene` / `ScenarioScene` / `LogoScene` + `Subtitles`，及若干 still 场景）
-- `chrome/` —— 桌面外壳脚手架（`PromoShell` / `PromoCanvas` / `ChatBits`）
-- `graph/` —— 协作图（`GraphStage` / `PromoNodes` / `PromoFlowEdge` / `graphState`，在 desktop 渲染层组件 + 样式之上做帧驱动编排）
-- `motion/primitives.ts` —— 帧驱动运动原语
-- `data/` —— demo / 场景 / 预计算布局等固定数据
-- `fonts.ts` —— 内嵌字体加载
-- `scripts/` —— ELK 坐标预计算等
+两层产线：`core/` 通用引擎 + `videos/<id>/` 视频包（+ 平行的 `stills/` 素材包）。
+
+- `src/core/` —— 通用引擎（**禁止** import `videos/`）
+  - `chrome/` —— 桌面外壳脚手架（`PromoShell` / `PromoCanvas` / `ChatBits`；任务标题 / 主题 / 尺寸由 props + `useVideoConfig` 传入）
+  - `graph/` —— 协作图运行器（`GraphStage` / `PromoNodes` / `PromoFlowEdge` + 帧求值器 `graphState`）
+  - `motion/primitives.ts` —— 帧驱动运动原语
+  - `Subtitles.tsx` —— 字幕组件（cues 由视频包传入）
+  - `fonts.ts` + `fonts/` —— 内嵌字体加载
+  - `styles.css` —— 同源接缝（`@import` desktop `globals.css`）
+- `src/videos/brand-30s/` —— 现 30s 品牌片专属内容
+  - `timeline.ts` —— 段边界单一真相源（Sequence / composition 时长 / 字幕 cue 都从这里取）
+  - `manifest.ts` —— 本包 composition 注册表（Root 手写 import）
+  - `Video.tsx` —— 成片主时间轴
+  - `scenes/` —— 分段镜头（`OpeningScene` / `RunScene` / `ScenarioScene` / `LogoScene`）
+  - `data/` —— demo / 场景 / 预计算布局 / 字幕 cue / 波次调度表
+- `src/stills/` —— 与视频包平行的素材包（管线独立）
+  - `manifest.ts` + `scenes/` + `data/`
+- `src/Root.tsx` —— 按视频包 / stills manifest 手写注册
+- `scripts/` —— ELK 预计算（`pnpm layout -- --video=brand-30s`）与渲染（`pnpm render -- <compositionId>`）
+
+以后加一支新视频：在 `src/videos/<id>/` 建包（`timeline` / `manifest` / `Video` / scenes / data）→ 在 `Root.tsx` 手写 import 该 manifest → 需要布局时跑 `pnpm layout -- --video=<id>`。
 
 ## 渲染 / 预览 / BGM
 
@@ -106,7 +118,7 @@ pnpm build   # 渲染成片 → out/promo.mp4
 pnpm still   # 像素核对静帧 → out/pixel-check.png
 ```
 
-> **加 BGM**：见 [`public/README.md`](./public/README.md)（放 `bgm.mp3` + 把 `Video.tsx` 的 `BGM_FILE` 由 `null` 改为文件名再重渲）。
+> **加 BGM**：见 [`public/README.md`](./public/README.md)（放 `bgm.mp3` + 把 `videos/brand-30s/Video.tsx` 的 `BGM_FILE` 由 `null` 改为文件名再重渲）。
 
 ## 关联
 

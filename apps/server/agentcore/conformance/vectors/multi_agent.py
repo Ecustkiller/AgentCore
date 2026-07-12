@@ -408,13 +408,13 @@ def _multi_agent_run_redirect_hot() -> list[SSEEvent]:
         run_output_delta("r1", "w1", "初稿：竞品定价区间偏高，建议……"),
         run_cancelled("r1", "w1", reason="redirect"),
         # Hot revision child (not in plan) — synthesized from run_started like multi_agent_revision.
-        run_started("r1_rev1", "r1_rev1", parent_run_id="r1", revision=2),
+        run_started("r1_rev1", "r1_rev1", parent_run_id=None, continues_run_id="r1"),
         run_context(
             "r1_rev1",
             "r1_rev1",
             [
                 _ctx_block(
-                    "revision",
+                    "continuation",
                     "本次改方向（用户立即改此人）",
                     "别写定价区间，改成只比功能差异。",
                 )
@@ -596,8 +596,8 @@ def _multi_agent_worker_tool() -> list[SSEEvent]:
     ]
 
 def _multi_agent_revision() -> list[SSEEvent]:
-    """多 Agent：定向唤回续写 (乙 热修 P4)。修订 run(``revision=2`` + ``parent_run_id``)不在
-    plan 里——三端都从其 ``run_started`` 帧合成出一个修订节点 + 继承原 agent 身份的新 agent。"""
+    """多 Agent：同人续派（原 revise 迁续派语义）。续写 run 携 ``continues_run_id``（星型根），
+    不在 plan 里——三端都从其 ``run_started`` 帧合成出续派节点 + 继承原 agent 身份的新 agent。"""
     agents = [
         {
             "id": "w1",
@@ -631,13 +631,13 @@ def _multi_agent_revision() -> list[SSEEvent]:
             usage=_USAGE,
             cost=_COST,
         ),
-        run_started("r1v2", "w1b", parent_run_id="r1", revision=2),
+        run_started("r1v2", "w1b", parent_run_id=None, continues_run_id="r1"),
         # 定向唤回热修：修订节点也 emit run_context——承载 CEO 喂给它的「修订要求」(revision 通道)，
         # 于是非辩论 V2 节点的「收到的上下文」也有内容，而非空白（用户看到的 == LLM 吃到的）。
         run_context(
             "r1v2",
             "w1b",
-            [_ctx_block("revision", "本次修订要求（定向唤回）", "补一段风险对冲，并收紧结论口径。")],
+            [_ctx_block("continuation", "本次修订要求（定向唤回）", "补一段风险对冲，并收紧结论口径。")],
         ),
         run_output_delta("r1v2", "w1b", "修订稿"),
         run_completed(
@@ -652,6 +652,105 @@ def _multi_agent_revision() -> list[SSEEvent]:
         ),
         message_end(FinishReason.END_TURN, input_tokens=2000, output_tokens=400, cost=_COST),
     ]
+
+
+def _multi_agent_redelegate_continuation() -> list[SSEEvent]:
+    """多 Agent：delegate 同批 ``depends_on`` + ``continue_from_run_id``。
+
+    r1 冷开局完成 → r2 在计划内带 continue_from=r1 续写（wire 携 continues_run_id=r1，
+    parent=captain）。与 multi_agent_revision（计划外合成）互补：本向量钉「计划内续派节点」。
+    """
+    agents = [
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w1b",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "先调研", "depends_on": []},
+        {
+            "id": "r2",
+            "agent_id": "w1b",
+            "task": "据调研接着写实现要点",
+            "depends_on": ["r1"],
+        },
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="调研后同人续写",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("cap", "cap", kind="captain"),
+        run_started("r1", "w1", parent_run_id="cap"),
+        run_output_delta("r1", "w1", "调研稿"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="调研完成",
+            duration_ms=700,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started(
+            "r2",
+            "w1b",
+            parent_run_id="cap",
+            continues_run_id="r1",
+        ),
+        run_context(
+            "r2",
+            "w1b",
+            [
+                _ctx_block("continuation", "续干指令", "据调研接着写实现要点"),
+                _ctx_block(
+                    "dependency",
+                    "上游产物（r1）",
+                    "调研稿",
+                    source_run_id="r1",
+                    fidelity="pass_through",
+                ),
+            ],
+        ),
+        run_output_delta("r2", "w1b", "实现要点……"),
+        run_completed(
+            "r2",
+            "w1b",
+            output_summary="续写完成",
+            duration_ms=500,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_completed(
+            "cap",
+            "cap",
+            output_summary="已安排同人续派",
+            duration_ms=100,
+            role="captain",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        message_end(FinishReason.END_TURN, input_tokens=2200, output_tokens=450, cost=_COST),
+    ]
+
 
 def _multi_agent_plan_revised() -> list[SSEEvent]:
     """多 Agent：自主再绑定「计划已调整」轻痕迹 (受监督的波循环, 设计 §7.2)。计划含一个待定稿的
@@ -2495,7 +2594,11 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         "多 Agent·交付正文只留最终交付：worker 调非终止工具前的旁白 run_output_reset 清掉（落点在工具后）、保留思考、只留最终交付",
         _multi_agent_worker_deliverable_reset,
     ),
-    "multi_agent_revision": ("多 Agent：定向唤回续写（revision 合成节点）", _multi_agent_revision),
+    "multi_agent_revision": ("多 Agent：同人续派（continues_run_id 合成节点）", _multi_agent_revision),
+    "multi_agent_redelegate_continuation": (
+        "多 Agent：delegate 带 continue_from_run_id 的同批续派（计划内节点 + continues_run_id）",
+        _multi_agent_redelegate_continuation,
+    ),
     "multi_agent_plan_revised": ("多 Agent：自主再绑定「计划已调整」轻痕迹（plan_revised 折 bind/steer 到节点 revised）", _multi_agent_plan_revised),
     "multi_agent_lead_subplan_bind_replan": (
         "多 Agent·嵌套 lead 在自己子计划上晚定稿续跑（受监督子计划 B：同 execution_id 合并子图 + lead 自主 replan bind 折到子节点）",

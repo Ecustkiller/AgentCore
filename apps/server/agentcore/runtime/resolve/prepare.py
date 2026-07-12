@@ -5,7 +5,6 @@ from agentcore.core.logging import get_logger
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
 from agentcore.memory import default_memory_store
 from agentcore.runtime.approvals import ApprovalGate
-from agentcore.runtime.debate import DebateSeed
 from agentcore.runtime.events import (
     EventSink,
 )
@@ -30,7 +29,6 @@ from agentcore.tools.builtin.consult_skill import ConsultSkillTool
 from agentcore.tools.builtin.debate import DebateTool
 from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.builtin.replan import ReplanTool
-from agentcore.tools.builtin.revise import ReviseTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 
@@ -79,24 +77,22 @@ def _assemble_ceo_toolset(
     skill_registry: SkillRegistry,
     memory_enabled: bool = True,
     folder_id: str | None = None,
-    debate_seed: DebateSeed | None = None,
     autonomy_policy=None,
     advertise_bind_local_folder: bool = False,
-) -> tuple[DelegateTool, ReviseTool, DebateTool, ToolRegistry]:
-    """Wire the CEO coordinator's toolset (delegate + revise + read/retrieval +
+) -> tuple[DelegateTool, DebateTool, ToolRegistry]:
+    """Wire the CEO coordinator's toolset (delegate + read/retrieval +
     consult_skill + an optional consult_memory + an optional ask_user), shared by a
     fresh turn and a 2b resume.
 
     The CEO is a COORDINATOR: it holds only the read/retrieval built-ins plus the
     orchestration primitives, never the mutation tools (those live with workers via
-    ``delegate``). ``base_system_prompt`` is the CLEAN prompt handed to delegate /
-    revise (reused verbatim by workers — no CEO-chat hints). ``skill_registry`` backs
+    ``delegate``). ``base_system_prompt`` is the CLEAN prompt handed to delegate
+    (reused verbatim by workers — no CEO-chat hints). ``skill_registry`` backs
     the CEO-only ``consult_skill`` tool (提示词瘦身 P2): the advanced-mechanism guidance
     is pulled on demand instead of riding the prompt every turn. ``message_id`` + the
     suspension closures arm durable plan_review pauses (结构化挂起 2b) on the
-    top-level delegate. Returns ``(delegate_tool, revise_tool, debate_tool,
-    chat_tools)`` — the tools whose accumulated usage/ledger/citations the caller
-    folds into the turn totals.
+    top-level delegate. Returns ``(delegate_tool, debate_tool, chat_tools)`` — the
+    tools whose accumulated usage/ledger/citations the caller folds into the turn totals.
     """
     delegate_tool = DelegateTool(
         llm=llm,
@@ -111,6 +107,7 @@ def _assemble_ceo_toolset(
         profile_set=profiles,
         session_store=session_store,
         session_saver=session_saver,
+        session_loader=session_loader,
         conversation_id=conversation_id,
         registry=default_interaction_registry(),
         checkpoint_timeout_seconds=settings.checkpoint_timeout_seconds,
@@ -126,7 +123,7 @@ def _assemble_ceo_toolset(
     chat_tools.register(delegate_tool)
     # 受监督的波循环 (replan): delegate 的伴生工具——在波边界把晚绑定步骤定稿并续跑同一张
     # 暂停的计划。共享当回合的 DelegateTool 实例（其 ``_supervised`` 暂停态 + 累加器），故
-    # 自身无用量面；与 revise 一样恒注册，仅在某次 delegate 让出「计划已让出」简报后才有效，
+    # 自身无用量面；恒注册，仅在某次 delegate 让出「计划已让出」简报后才有效，
     # 否则返回友好错误。→ docs/03-AI核心/编排器与CEO主Agent.md §一 replan 原语
     chat_tools.register(ReplanTool(delegate=delegate_tool))
     # CEO 协调模式：update_synthesis / cancel_worker / resolve_escalation — only
@@ -140,20 +137,6 @@ def _assemble_ceo_toolset(
     chat_tools.register(UpdateSynthesisTool(sink=sink))
     chat_tools.register(CancelWorkerTool())
     chat_tools.register(ResolveEscalationTool())
-    revise_gate = approval_gate if backend_location == "local" else None
-    revise_tool = ReviseTool(
-        llm=llm,
-        sink=sink,
-        session_store=session_store,
-        tools=worker_tools,
-        base_tool_context=base_tool_context,
-        profile_set=profiles,
-        captain_run_id=captain_run_id,
-        approval_gate=revise_gate,
-        session_saver=session_saver,
-        session_loader=session_loader,
-    )
-    chat_tools.register(revise_tool)
     # debate (辩论编排原语): the CEO's对抗性多视角思考 primitive, sibling to delegate. A
     # Moderator hosts an adaptive多轮 debate内部 and returns双产物 (决策简报 + 交锋叙事线);
     # like delegate它非终结且把辩手/主持人的 usage/ledger/citations累加在实例上，由本回合
@@ -168,14 +151,17 @@ def _assemble_ceo_toolset(
         profile_set=profiles,
         captain_run_id=captain_run_id,
         approval_gate=approval_gate,
-        # 交互式逐轮（opt-in）的挂起桥接：同 ask_user/escalate 共用统一交互桥 + checkpoint 超时；
-        # ``checkpoint_enabled`` 即「有活跃用户」闸（自治 / handoff 回合不武装 → 回落自判收敛）。
-        registry=default_interaction_registry(),
+        # ambient 掌舵：有活跃用户即武装（checkpoint_enabled）；辩论永不硬停，轮次边界非阻塞
+        # drain steer 队列。自治 / handoff 不武装 → 纯裁判自判。
         conversation_id=conversation_id,
-        round_decision_timeout=settings.checkpoint_timeout_seconds,
-        interactive_armed=checkpoint_enabled,
-        # 结构化补轮·B：前端从收场卡发起续辩时直传的上一场种子（None=全新辩论）。
-        prior_seed=debate_seed,
+        ambient_armed=checkpoint_enabled,
+        message_id=message_id,
+        suspension_saver=suspension_saver,
+        suspension_deleter=suspension_deleter,
+        folder_id=folder_id,
+        memory_enabled=memory_enabled,
+        autonomy_policy=autonomy_policy,
+        registry=default_interaction_registry(),
     )
     chat_tools.register(debate_tool)
     # consult_skill (提示词瘦身 P2): always wired (not live-user gated) so the CEO can
@@ -215,7 +201,7 @@ def _assemble_ceo_toolset(
                 advertise_bind_local_folder=advertise_bind_local_folder,
             )
         )
-    return delegate_tool, revise_tool, debate_tool, chat_tools
+    return delegate_tool, debate_tool, chat_tools
 
 
 def _build_attachment_context(attachments: list[dict] | None) -> str | None:

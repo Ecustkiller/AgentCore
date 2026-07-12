@@ -21,6 +21,7 @@ import { Background, type Node, ReactFlow } from "@xyflow/react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { CanvasPlaybackControls } from "./CanvasPlaybackControls";
 import { CanvasZoomControls } from "./CanvasZoomControls";
+import { DebateStageBands } from "./DebateStageBands";
 import { GraphContextMenu } from "./GraphContextMenu";
 import { GraphLayoutError } from "./GraphLayoutError";
 import { GraphToolbar } from "./GraphToolbar";
@@ -32,7 +33,12 @@ import {
   computeKeepBrightIds,
   hoverRelatedIds,
 } from "./graphHover";
-import { type WaveBand, computeWaves, deriveCaptainStatus } from "./helpers";
+import {
+  type WaveBand,
+  computeDebateStageBands,
+  computeWaves,
+  deriveCaptainStatus,
+} from "./helpers";
 import { planCapabilities } from "./planCapabilities";
 import { projectFlowEdges, projectFlowNodes } from "./projectFlowGraph";
 import { useGraphDrillIn } from "./useGraphDrillIn";
@@ -329,6 +335,14 @@ export function GraphView({
     [execution, positions, bbox, effectiveLayoutKind, captainRun],
   );
 
+  const debateBands = useMemo<WaveBand[]>(
+    () =>
+      execution
+        ? computeDebateStageBands(execution, positions, captainRun?.id ?? null)
+        : [],
+    [execution, positions, captainRun],
+  );
+
   const interactionProps = !interactive
     ? {
         zoomOnScroll: false,
@@ -386,6 +400,7 @@ export function GraphView({
                     >
                       <Background gap={20} size={1} />
                       <WaveLanes waves={waves} />
+                      <DebateStageBands bands={debateBands} />
                     </ReactFlow>
                   </GraphHoverContext.Provider>
                 )

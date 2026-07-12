@@ -96,7 +96,6 @@ export const TOOL_LABELS: Record<string, string> = {
   ask_user: "向你确认",
   consult_skill: "查阅能力",
   consult_memory: "查阅记忆",
-  revise: "修订产物",
   // Worker-only upward channel (build_worker_registry); surfaces in run detail.
   escalate: "上报问题",
   // 团队便签墙 (workers broadcast to concurrent siblings) + AI 协作白板 (board-bound turns).
@@ -233,30 +232,6 @@ export interface RunEscalation {
   via_user?: boolean;
 }
 
-/** 交互式逐轮辩论决策卡 (opt-in, 辩论编排设计.md §逐轮交互): one round boundary the user is (was)
- * asked to steer — 继续辩 / 加角度 / 够了出结论 — instead of the judge auto-converging. Folded
- * desktop-live from `debate_round_decision_required` (→ `pending`) + its `debate_round_decision_
- * resolved` (→ `continued`/`concluded`/`timeout`), keyed by `id` (the decision_id the card POSTs to,
- * `POST …/interactions/{id}` kind=`debate_round`). `focus`/`summary` are this round's context;
- * `converged`/`rationale` are the judge's read (the card highlights it as the default); `decisionFocus`
- * is the 加角度 the user injected for the next round (`continued` only).
- *
- * Events are DURABLE (journaled). On reload {@link Execution.debateDecisions} is intentionally
- * emptied — pending cards rebuild via InteractionStore; concluded choices already live in
- * {@link Execution.debate} / rounds. STRIPPED from the conformance ProjectedTurn. Non-interactive
- * debates carry none. */
-export interface DebateRoundDecision {
-  id: string;
-  moderatorRunId: string;
-  roundNo: number;
-  focus: string;
-  summary: string;
-  converged: boolean;
-  rationale: string;
-  status: "pending" | "continued" | "concluded" | "timeout";
-  decisionFocus: string;
-}
-
 /** 团队便签墙 (§2.2 通): one note a worker broadcast to its CONCURRENT siblings via `post_note`
  * (`team_note_posted`), folded TURN-LEVEL onto {@link Execution.teamNotes} (not onto a graph
  * node) for the「团队便签」panel. `kind` is `decision` (我定了 — others depend on it: an interface /
@@ -326,14 +301,11 @@ export interface RunNode {
   stance: Stance | null;
   group: string | null;
   round: number;
-  /** 定向唤回 续写 (乙 热修 P4): the ORIGINAL run id this node revises, or null for a
-   * first-time run. A revision is NOT in the run_plan — it is synthesized into the
-   * projection from its `run_started` frame and hung off the original as a
-   *「修订 vN」child (distinct from a 阶段2 delegation, which is plan-declared). */
-  revisionOf: string | null;
-  /** Version number of a revision (original = v1, first revision = v2…); 0 for a
-   * first-time run. From the wire `revision` flag. */
-  revision: number;
+  /** 同人接续（续派 / 热修 / 辩论续写）：现场根 run id（星型），null = 冷开局。
+   * 未进 plan 的续写由 `run_started` 合成；计划内续派节点亦在 started 时写入本字段。 */
+  continuesRunId: string | null;
+  /** 接续序号（同根链上第几次续写，1-based）；0 = 非接续。角标「续 ×N」据此派生。 */
+  continuationIndex: number;
   /**「计划已调整」轻痕迹 (设计 §7.2): set by a `plan_revised` frame to "bind" (a late-bound
    * placeholder finalised from upstream evidence) or "steer" (a not-yet-run node re-steered
    * after a 队员 scope deviation) when the CEO autonomously adjusted this paused node
@@ -423,11 +395,6 @@ export interface Execution {
    * 出主持人逐轮焦点 / 小结 / 裁判，而非干等 {@link debate} 收场。P2 DURABLE——落 journal，
    * 刷新后 hydrateFromJournal 重建；收场后全量叙事线亦在 {@link debate}。非辩论恒 `[]`。 */
   debateRounds: DebateNarrativeRound[];
-  /** 交互式逐轮辩论决策卡（opt-in, §逐轮交互）：`debate_round_decision_*` 折叠累积。Desktop-
-   * local；事件 DURABLE 入 journal，但重载时本列表恒 `[]`（待答态由 InteractionStore 重建，
-   * 已裁决体现在 {@link debate} / rounds）。STRIPPED from the conformance ProjectedTurn。
-   * 仅 `debate(interactive=true)` 且有活跃用户的辩论非空；其余恒 `[]`。 */
-  debateDecisions: DebateRoundDecision[];
   /** 团队便签墙 (§2.2 通): the notes workers broadcast to their concurrent siblings this turn
    * (`team_note_posted`), in post order, deduped by noteId — folded from the frame stream by
    * {@link projectExecution}. Journaled, so it replays on reload (hydrateFromJournal). Empty for

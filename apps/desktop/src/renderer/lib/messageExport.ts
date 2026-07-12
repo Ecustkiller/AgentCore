@@ -57,12 +57,18 @@ function formatToolLine(step: Extract<ProcessStep, { kind: "tool" }>): string {
   const label = TOOL_LABEL[step.tool_name] ?? step.tool_name;
   const detail = toolDetail(step.arguments ?? {});
   const status =
-    step.status === "error" ? "（失败）" : step.status === "running" ? "（进行中）" : "";
+    step.status === "error"
+      ? "（失败）"
+      : step.status === "running"
+        ? "（进行中）"
+        : "";
   return detail ? `· ${label}${status}：${detail}` : `· ${label}${status}`;
 }
 
 /** Format the turn's process timeline into plain readable text (旁白 + 关键工具). */
-export function formatProcessExport(process: ProcessStep[] | undefined): string {
+export function formatProcessExport(
+  process: ProcessStep[] | undefined,
+): string {
   if (!process?.length) return "";
   const lines: string[] = [];
   for (const step of process) {

@@ -1,4 +1,4 @@
-"""Interaction resolution: settle a paused approval / escalation / debate / delegation."""
+"""Interaction resolution: settle a paused approval / escalation / delegation."""
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
@@ -14,7 +14,6 @@ from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import ConversationRepository, TurnJournalRepository
 from agentcore.runtime.events import (
     approval_resolved,
-    debate_round_decision_resolved,
     delegation_authorization_resolved,
     escalation_resolved,
 )
@@ -34,7 +33,6 @@ _HOT_KINDS = frozenset(
         InteractionKind.APPROVAL.value,
         InteractionKind.DELEGATION_AUTHORIZATION.value,
         InteractionKind.ESCALATION.value,
-        InteractionKind.DEBATE_ROUND.value,
     }
 )
 
@@ -69,14 +67,6 @@ def _settlement_event_for_resolve(
             status=status,
             answer=answer,
             arbitrated_by="user",
-        )
-    if body.kind == InteractionKind.DEBATE_ROUND.value:
-        return debate_round_decision_resolved(
-            execution_id=str(payload.get("execution_id") or ""),
-            moderator_run_id=str(payload.get("moderator_run_id") or ""),
-            decision_id=interaction_id,
-            decision=str(getattr(body, "decision", "continue") or "continue"),
-            focus=str(getattr(body, "focus", "") or ""),
         )
     return None
 

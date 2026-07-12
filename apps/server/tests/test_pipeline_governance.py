@@ -112,12 +112,13 @@ def _patch_pipeline(monkeypatch, provider: _ScriptedProvider, registry: ToolRegi
 
     monkeypatch.setattr("agentcore.runtime.pipeline.run.default_memory_store", lambda: _FakeStore())
 
-    # delegate / revise / debate are unused on this single-agent path, but the pipeline
+    # delegate / debate are unused on this single-agent path, but the pipeline
     # tail folds their usage/ledger/citations — give them empty doubles. The delegate
     # double also needs ``dispose_open_supervised`` (受监督的波循环 P5 Edge): the tail
     # awaits it to release any dangling supervised plan before the usage fold, plus
     # ``collab`` (协作质量 §2.5): the tail spreads ``delegate_tool.collab`` into the turn
-    # result, so the double mirrors the real tool's zeroed tally.
+    # result, so the double mirrors the real tool's zeroed tally. ``continuation_count``
+    # feeds turn_metrics.revises (续派次数).
     async def _noop_dispose() -> None:
         return None
 
@@ -127,12 +128,12 @@ def _patch_pipeline(monkeypatch, provider: _ScriptedProvider, registry: ToolRegi
         citations=[],
         dispose_open_supervised=_noop_dispose,
         collab={"boundary_yields": 0, "scope_signals": 0, "escalations": 0},
+        continuation_count=0,
     )
-    fake_revise = SimpleNamespace(usage={}, run_ledger=[], citations=[])
     fake_debate = SimpleNamespace(usage={}, run_ledger=[], citations=[])
 
     def _fake_assemble(**_kwargs):
-        return fake_delegate, fake_revise, fake_debate, registry
+        return fake_delegate, fake_debate, registry
 
     monkeypatch.setattr("agentcore.runtime.pipeline.run._assemble_ceo_toolset", _fake_assemble)
 

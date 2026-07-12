@@ -19,7 +19,6 @@ export type ResolveInteractionBody =
   | Schemas["ResolveApprovalInteraction"]
   | Schemas["ResolveClientToolInteraction"]
   | Schemas["ResolveEscalationInteraction"]
-  | Schemas["ResolveDebateRoundInteraction"]
   | ResolveDelegationAuthorizationBody;
 
 /**

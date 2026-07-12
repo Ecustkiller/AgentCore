@@ -1,5 +1,4 @@
 import type { Execution } from "@/stores/execution";
-import { useInteractionStore } from "@/stores/interactions";
 import { useCallback, useRef, useState } from "react";
 import { toDebateModel } from "../model";
 import { ClosingBlocks } from "./ClosingBlocks";
@@ -22,30 +21,14 @@ export function DebateArena({
   messageId,
   conversationId,
   interactive,
-  onClose,
 }: {
   execution: Execution;
   messageId: string;
   conversationId: string | null;
   interactive: boolean;
-  onClose?: () => void;
 }) {
   const model = toDebateModel(execution);
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  const pendingSteering = useInteractionStore((s) => {
-    if (!conversationId) return false;
-    for (const e of s.byId.values()) {
-      if (
-        e.conversationId === conversationId &&
-        e.kind === "debate_round" &&
-        (e.status === "pending" || e.status === "submitting")
-      ) {
-        return true;
-      }
-    }
-    return false;
-  });
 
   const scrollToAnchor = useCallback((anchorId: string) => {
     const root = scrollRef.current;
@@ -66,13 +49,14 @@ export function DebateArena({
 
   const canSplit = canUseSplitLayout(model);
   const effectiveLayout = canSplit ? layoutMode : "stack";
+  const showSteerShortcut = interactive && !model.settled && !!conversationId;
 
   return (
     <div ref={scrollRef} className={`mx-auto w-full ${DEBATE_ARENA_PAGE_MAX}`}>
       <Scoreboard
         model={model}
         messageId={messageId}
-        hasPendingSteering={pendingSteering && interactive}
+        hasPendingSteering={showSteerShortcut}
         onScrollTo={scrollToAnchor}
         canSplit={canSplit}
         layoutMode={effectiveLayout}
@@ -101,7 +85,6 @@ export function DebateArena({
             model={model}
             execution={execution}
             messageId={messageId}
-            onClose={onClose}
           />
         )}
       </div>

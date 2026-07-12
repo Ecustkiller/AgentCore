@@ -11,9 +11,17 @@ const h = vi.hoisted(() => {
     cookieGet: vi.fn(async () =>
       [...cookies.entries()].map(([name, value]) => ({ name, value })),
     ),
-    cookieSet: vi.fn(async (details: { name: string; value: string }) => {
-      cookies.set(details.name, details.value);
-    }),
+    cookieSet: vi.fn(
+      async (details: {
+        name: string;
+        value: string;
+        sameSite?: string;
+        secure?: boolean;
+        expirationDate?: number;
+      }) => {
+        cookies.set(details.name, details.value);
+      },
+    ),
   };
 });
 
@@ -31,6 +39,7 @@ vi.stubGlobal("__API_BASE_URL__", "http://localhost:8000");
 
 import {
   bearerPostJson,
+  deriveAuthCookieAttrs,
   refreshAccessToken,
   resetAuthClientForTests,
 } from "../auth-client";
@@ -47,19 +56,37 @@ afterEach(() => {
   resetAuthClientForTests();
 });
 
+describe("deriveAuthCookieAttrs", () => {
+  it("uses lax + insecure for http (dev localhost)", () => {
+    expect(deriveAuthCookieAttrs("http://localhost:8000")).toEqual({
+      secure: false,
+      sameSite: "lax",
+    });
+  });
+
+  it("uses no_restriction + secure for https (prod)", () => {
+    expect(deriveAuthCookieAttrs("https://api.example.com")).toEqual({
+      secure: true,
+      sameSite: "no_restriction",
+    });
+  });
+});
+
 describe("refreshAccessToken (Bearer body refresh)", () => {
   it("POSTs /v1/auth/token/refresh without Cookie and writes new tokens", async () => {
     h.cookies.set("refresh_token", "old-refresh");
     h.fetchMock.mockResolvedValueOnce({
       ok: true,
+      status: 200,
       json: async () => ({
         access_token: "new-access",
         refresh_token: "new-refresh",
         expires_in: 3600,
+        refresh_expires_in: 30 * 86400,
       }),
     });
 
-    expect(await refreshAccessToken()).toBe(true);
+    expect(await refreshAccessToken()).toBe("renewed");
     expect(h.fetchMock).toHaveBeenCalledOnce();
     const [url, init] = h.fetchMock.mock.calls[0] as [
       string,
@@ -74,6 +101,56 @@ describe("refreshAccessToken (Bearer body refresh)", () => {
     expect(JSON.parse(init.body)).toEqual({ refresh_token: "old-refresh" });
     expect(h.cookies.get("access_token")).toBe("new-access");
     expect(h.cookies.get("refresh_token")).toBe("new-refresh");
+
+    // http API → lax + insecure (Chromium rejects SameSite=None without Secure)
+    const accessSet = h.cookieSet.mock.calls.find(
+      (c) => (c[0] as { name: string }).name === "access_token",
+    )?.[0] as {
+      sameSite: string;
+      secure: boolean;
+      expirationDate?: number;
+    };
+    const refreshSet = h.cookieSet.mock.calls.find(
+      (c) => (c[0] as { name: string }).name === "refresh_token",
+    )?.[0] as {
+      sameSite: string;
+      secure: boolean;
+      expirationDate?: number;
+    };
+    expect(accessSet.sameSite).toBe("lax");
+    expect(accessSet.secure).toBe(false);
+    expect(refreshSet.sameSite).toBe("lax");
+    expect(refreshSet.secure).toBe(false);
+    expect(accessSet.expirationDate).toBeGreaterThan(
+      Math.floor(Date.now() / 1000),
+    );
+    expect(refreshSet.expirationDate).toBeGreaterThan(
+      Math.floor(Date.now() / 1000) + 29 * 86400,
+    );
+  });
+
+  it("falls back to 30d refresh expirationDate when field omitted", async () => {
+    h.cookies.set("refresh_token", "old-refresh");
+    const before = Math.floor(Date.now() / 1000);
+    h.fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        access_token: "a",
+        refresh_token: "r",
+        expires_in: 60,
+      }),
+    });
+    expect(await refreshAccessToken()).toBe("renewed");
+    const refreshSet = h.cookieSet.mock.calls.find(
+      (c) => (c[0] as { name: string }).name === "refresh_token",
+    )?.[0] as { expirationDate: number };
+    expect(refreshSet.expirationDate).toBeGreaterThanOrEqual(
+      before + 30 * 86400,
+    );
+    expect(refreshSet.expirationDate).toBeLessThanOrEqual(
+      before + 30 * 86400 + 5,
+    );
   });
 
   it("single-flights concurrent refresh callers", async () => {
@@ -89,14 +166,63 @@ describe("refreshAccessToken (Bearer body refresh)", () => {
     const b = refreshAccessToken();
     resolveFetch({
       ok: true,
+      status: 200,
       json: async () => ({
         access_token: "a",
         refresh_token: "r2",
         expires_in: 60,
+        refresh_expires_in: 86400,
       }),
     });
-    expect(await Promise.all([a, b])).toEqual([true, true]);
+    expect(await Promise.all([a, b])).toEqual(["renewed", "renewed"]);
     expect(h.fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("returns auth_dead when refresh cookie is missing", async () => {
+    expect(await refreshAccessToken()).toBe("auth_dead");
+    expect(h.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns auth_dead on 401/403", async () => {
+    h.cookies.set("refresh_token", "r1");
+    h.fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "revoked" }),
+    });
+    expect(await refreshAccessToken()).toBe("auth_dead");
+  });
+
+  it("returns transient on network error", async () => {
+    h.cookies.set("refresh_token", "r1");
+    h.fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    expect(await refreshAccessToken()).toBe("transient");
+  });
+
+  it("returns transient on 5xx / 429", async () => {
+    h.cookies.set("refresh_token", "r1");
+    h.fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      json: async () => ({ error: "down" }),
+    });
+    expect(await refreshAccessToken()).toBe("transient");
+  });
+
+  it("returns transient when cookie write fails after server rotation", async () => {
+    h.cookies.set("refresh_token", "r1");
+    h.fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        access_token: "a",
+        refresh_token: "r2",
+        expires_in: 60,
+        refresh_expires_in: 86400,
+      }),
+    });
+    h.cookieSet.mockRejectedValueOnce(new Error("Chromium rejected cookie"));
+    expect(await refreshAccessToken()).toBe("transient");
   });
 });
 
@@ -112,10 +238,12 @@ describe("bearerPostJson", () => {
       })
       .mockResolvedValueOnce({
         ok: true,
+        status: 200,
         json: async () => ({
           access_token: "fresh",
           refresh_token: "r2",
           expires_in: 60,
+          refresh_expires_in: 86400,
         }),
       })
       .mockResolvedValueOnce({

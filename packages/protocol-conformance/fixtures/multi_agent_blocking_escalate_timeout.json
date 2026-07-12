@@ -64,8 +64,7 @@
         "run_id": "r1",
         "agent_id": "w1",
         "parent_run_id": null,
-        "kind": "agent",
-        "revision": 0
+        "kind": "agent"
       },
       "timestamp": "2026-01-01T00:00:00.003Z"
     },
@@ -135,8 +134,7 @@
         "run_id": "r2",
         "agent_id": "w2",
         "parent_run_id": null,
-        "kind": "agent",
-        "revision": 0
+        "kind": "agent"
       },
       "timestamp": "2026-01-01T00:00:00.008Z"
     },
@@ -284,8 +282,7 @@
         "stance": null,
         "group": null,
         "round": 0,
-        "revisionOf": null,
-        "revision": 0,
+        "continuesRunId": null,
         "revised": null,
         "replacesRunId": null,
         "checkpoint": null,
@@ -334,8 +331,7 @@
         "stance": null,
         "group": null,
         "round": 0,
-        "revisionOf": null,
-        "revision": 0,
+        "continuesRunId": null,
         "revised": null,
         "replacesRunId": null,
         "checkpoint": null,

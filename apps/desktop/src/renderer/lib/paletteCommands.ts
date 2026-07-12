@@ -288,10 +288,10 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
     },
     {
       id: "nav-mechanism",
-      title: "团队运行机制",
+      title: "看懂协作（手册）",
       category: "前往",
       icon: Workflow,
-      keywords: ["team", "mechanism", "graph", "tuandui"],
+      keywords: ["team", "mechanism", "graph", "tuandui", "xiezuo", "manual"],
       run: go("/toolbox/manual/mechanism?s=panorama"),
     },
     {

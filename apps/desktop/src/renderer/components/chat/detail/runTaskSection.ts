@@ -1,8 +1,8 @@
 import type { ContextBlockWire } from "@/types/events";
 
-/** Inputs needed to pick the run-detail 「任务」header (revision rounds prefer wire blocks). */
+/** Inputs needed to pick the run-detail 「任务」header (continuation rounds prefer wire blocks). */
 export interface RunTaskSectionInput {
-  revisionOf: string | null;
+  continuesRunId: string | null;
   task: string;
   receivedContext: ReadonlyArray<
     Pick<ContextBlockWire, "channel" | "body" | "heading">
@@ -25,12 +25,12 @@ export interface RunTaskSection {
 /**
  * Pick the top task section for a run detail panel.
  *
- * Revision runs (`revisionOf != null`): prefer the wire `task` block (this
+ * Continuation runs (`continuesRunId != null`): prefer the wire `task` block (this
  * beat's real instruction), then `round_focus` (legacy), then `run.task`.
- * Non-revision runs keep showing `run.task` as 「任务」.
+ * Cold-start runs keep showing `run.task` as 「任务」.
  */
 export function selectRunTaskSection(run: RunTaskSectionInput): RunTaskSection {
-  if (run.revisionOf == null) {
+  if (run.continuesRunId == null) {
     return { title: "任务", body: run.task, promotedTask: false };
   }
 

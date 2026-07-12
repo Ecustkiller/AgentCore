@@ -270,7 +270,10 @@ export async function opIndexFiles(
     }
     return opOk({ paths: [], truncated: false });
   }
-  const { files, truncated } = await collectWorkspaceFiles(baseReal.path, order);
+  const { files, truncated } = await collectWorkspaceFiles(
+    baseReal.path,
+    order,
+  );
   const prefix = sub ? `${sub}/` : "";
   return opOk({ paths: files.map((f) => prefix + f.relPath), truncated });
 }

@@ -265,7 +265,8 @@ def format_bind_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec]) -> 
         "`steers=[{run_id, note}]` 操舵其它未跑步骤；确无需继续则 `replan(stop=true)`。\n"
         "定稿前先对一下上游这几块的【拼图边】（语义边界对账）：彼此对同一共享点"
         "（接口 / 字段 / 数据格式）的假设是否一致、有没有缺口或重复——据此把待定稿步骤定准；"
-        "若某已完成步骤与上游对不上，用 `revise` 唤回它对齐，别让下游接着错下去。\n"
+        "若某已完成步骤与上游对不上，用 `delegate` 设 `continue_from_run_id` "
+        "带现场续派对齐，别让下游接着错下去。\n"
         f"当前已完成 {done} 步；待跑：{('、'.join(f'`{p}`' for p in pending)) or '（无）'}。"
     )
     return "\n".join(lines)
@@ -327,7 +328,8 @@ def format_scope_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec]) ->
         "直接 `replan()` 续跑；确无需继续则 `replan(stop=true)`。\n"
         "校准前主动对一遍【拼图边】（语义边界对账）：这次信号很可能波及兄弟步骤——别只盯举手这块，"
         "查其它已完成步骤与它在共享点（接口 / 字段 / 数据格式）上是否还对得上，有冲突 / 缺口 / 重复"
-        "就一并用 `steers` 操舵未跑步骤、或用 `revise` 唤回已跑步骤对齐。\n"
+        "就一并用 `steers` 操舵未跑步骤、或用 `delegate`（`continue_from_run_id`）"
+        "带现场续派已跑步骤对齐。\n"
         f"当前已完成 {done} 步；待跑：{('、'.join(f'`{p}`' for p in pending)) or '（无）'}。"
     )
     return "\n".join(lines)

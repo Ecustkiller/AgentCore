@@ -61,8 +61,7 @@ export function useComposerSend({
     let createdNew = false;
     if (!conversationId) {
       const intent = useFoldersStore.getState().draftWorkspaceIntent;
-      const targetFolderId =
-        intent.kind === "project" ? intent.folderId : null;
+      const targetFolderId = intent.kind === "project" ? intent.folderId : null;
       // Project chats inherit workspace — never write session-level local_*.
       // Quick cloud → null container. Quick local → default container root.
       let localContainerRootId: string | null = null;

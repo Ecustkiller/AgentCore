@@ -1,9 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import {
-  progressOutputChunk,
-  useToolOutputLiveStore,
-} from "../toolOutputLive";
 import type { ToolUseProgressPayload } from "@/types/events";
+import { beforeEach, describe, expect, it } from "vitest";
+import { progressOutputChunk, useToolOutputLiveStore } from "../toolOutputLive";
 
 const store = () => useToolOutputLiveStore.getState();
 

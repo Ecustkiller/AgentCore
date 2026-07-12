@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.api.dependencies import get_cost_event_repo, get_db
 from agentcore.api.routes.inference.token import inference_user
+from agentcore.billing.call_meter import PROXY_LLM_SCENARIO
 from agentcore.billing.gate import preflight_llm_credentials
 from agentcore.config import settings
 from agentcore.conversation.inference_rate_limit import enforce_inference_proxy_rate_limit
@@ -49,6 +50,19 @@ _CONVERSATION_HEADER = INFERENCE_CONVERSATION_HEADER
 _TRACE_HEADER = INFERENCE_TRACE_HEADER
 _MESSAGE_HEADER = INFERENCE_MESSAGE_HEADER
 _UPSTREAM_RETRIED_HEADER = {"X-Upstream-Retried": str(3)}
+
+
+def _usage_to_openai_wire(usage: TokenUsage) -> dict:
+    """OpenAI/DeepSeek-shaped usage for sidecar ``_usage_from`` (cache + reasoning)."""
+    return {
+        "prompt_tokens": usage.input_tokens,
+        "completion_tokens": usage.output_tokens,
+        "prompt_cache_hit_tokens": usage.cache_hit_tokens,
+        "prompt_cache_miss_tokens": usage.cache_miss_tokens,
+        "completion_tokens_details": {
+            "reasoning_tokens": usage.reasoning_tokens,
+        },
+    }
 
 
 def _credentials_from_config(cfg: ModelConfig, *, conversation_id: str | None, trace_id: str | None) -> LLMCredentials:
@@ -206,6 +220,9 @@ def _llm_request_from_payload(payload: dict, cfg: ModelConfig) -> LLMRequest:
         tool_choice=payload.get("tool_choice", "auto"),
         stream=bool(payload.get("stream")),
         thinking=thinking,
+        # Marks proxy-forwarded calls so in-process metering skips (proxy_spend
+        # is the sole ledger source); llm.call logging still uses this scenario.
+        scenario=PROXY_LLM_SCENARIO,
     )
 
 
@@ -315,10 +332,7 @@ async def _forward_unary(
             "object": "chat.completion",
             "model": response.model,
             "choices": [{"index": 0, "message": message, "finish_reason": response.finish_reason}],
-            "usage": {
-                "prompt_tokens": response.usage.input_tokens,
-                "completion_tokens": response.usage.output_tokens,
-            },
+            "usage": _usage_to_openai_wire(response.usage),
         }
     ).encode()
     attr = attribution or {}
@@ -404,10 +418,7 @@ async def _forward_stream(
             if chunk.usage:
                 captured["usage"] = chunk.usage
                 captured["model"] = request.model
-                data["usage"] = {
-                    "prompt_tokens": chunk.usage.input_tokens,
-                    "completion_tokens": chunk.usage.output_tokens,
-                }
+                data["usage"] = _usage_to_openai_wire(chunk.usage)
             if chunk.empty_diagnosis:
                 # Relay the provider's precise empty-response diagnosis (OAUTH_EXPIRED /
                 # MODEL_UNKNOWN ...) so the sidecar surfaces the actionable hint instead of

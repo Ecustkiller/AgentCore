@@ -4,43 +4,27 @@ import { isMac, macTitleBarInsetClass } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/ui";
 import {
-  Activity,
   ArrowLeft,
-  BookMarked,
-  BookOpen,
-  Brain,
   ChevronLeft,
   ChevronRight,
-  Compass,
-  Crown,
-  FolderOpen,
-  Hand,
-  HelpCircle,
-  Layers,
-  LayoutGrid,
-  LifeBuoy,
-  Lock,
+  List,
   type LucideIcon,
-  MessageSquare,
-  Network,
-  PlayCircle,
-  Rocket,
-  Route,
-  Settings,
-  ShieldCheck,
-  Target,
-  UsersRound,
-  Wrench,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { CONTENT_CHAPTERS } from "./content";
+import { resolveManualIcon } from "./icons";
+import {
+  type SearchEntry,
+  buildContentSearchEntries,
+  matchSnippet,
+} from "./searchIndex";
 
 export interface ManualNavItem {
   id: string;
   label: string;
   Icon: LucideIcon;
-  /** For sections within a chapter page, used as scroll target */
-  scrollTo?: string;
 }
 
 export interface ManualChapter {
@@ -50,71 +34,20 @@ export interface ManualChapter {
   items: ManualNavItem[];
 }
 
-export const CHAPTERS: ManualChapter[] = [
-  {
-    id: "intro",
-    path: "/toolbox/manual/intro",
-    label: "认识 AgentCore",
-    items: [
-      { id: "what", label: "这是什么", Icon: Compass },
-      { id: "mindset", label: "核心心智", Icon: Crown },
-      { id: "quickstart", label: "快速上手", Icon: Rocket },
-    ],
-  },
-  {
-    id: "collaboration",
-    path: "/toolbox/manual/collaboration",
-    label: "指挥你的团队",
-    items: [
-      { id: "collab-overview", label: "团队协作", Icon: Network },
-      { id: "briefing", label: "怎么下任务", Icon: Target },
-      { id: "roles", label: "角色分配", Icon: UsersRound },
-      { id: "progress", label: "任务进度", Icon: Activity },
-      { id: "checkpoint", label: "检查点与审批", Icon: ShieldCheck },
-      { id: "control", label: "中途接管", Icon: Hand },
-      { id: "memory", label: "记忆", Icon: Brain },
-    ],
-  },
-  {
-    id: "mechanism",
-    path: "/toolbox/manual/mechanism",
-    label: "看懂协作（选读）",
-    items: [
-      { id: "live", label: "看团队跑一遍", Icon: PlayCircle },
-      { id: "legend", label: "看懂协作图", Icon: BookOpen },
-      { id: "panorama", label: "运行时全景", Icon: Layers },
-      { id: "turnflow", label: "协作回合", Icon: Route },
-      { id: "scenarios", label: "机制场景", Icon: LayoutGrid },
-    ],
-  },
-  {
-    id: "reference",
-    path: "/toolbox/manual/reference",
-    label: "参考 · 排查 · 信任",
-    items: [
-      { id: "chat", label: "对话", Icon: MessageSquare },
-      { id: "tools", label: "工具与能力", Icon: Wrench },
-      { id: "workspace", label: "工作区与文件", Icon: FolderOpen },
-      { id: "settings", label: "设置速查", Icon: Settings },
-      { id: "faq", label: "常见问题", Icon: HelpCircle },
-      { id: "troubleshooting", label: "故障排查", Icon: LifeBuoy },
-      { id: "privacy", label: "数据与隐私", Icon: Lock },
-      { id: "glossary", label: "术语", Icon: BookMarked },
-    ],
-  },
-];
-
-/** 扁平条目索引：覆盖全部章节小节，供侧栏搜索过滤。 */
-const SEARCH_ENTRIES = CHAPTERS.flatMap((chapter) =>
-  chapter.items.map((item) => ({
-    id: `${chapter.id}-${item.id}`,
-    itemId: item.id,
-    label: item.label,
-    group: chapter.label,
-    Icon: item.Icon,
-    to: `${chapter.path}?s=${item.id}`,
+/** 侧栏目录直接从内容源派生——标签/图标与正文单源，不再手工维护。 */
+export const CHAPTERS: ManualChapter[] = CONTENT_CHAPTERS.map((chapter) => ({
+  id: chapter.id,
+  path: chapter.path,
+  label: chapter.label,
+  items: chapter.sections.map((section) => ({
+    id: section.id,
+    label: section.title,
+    Icon: resolveManualIcon(section.icon),
   })),
-);
+}));
+
+/** 搜索索引：全部章节由内容源生成（标题 + 正文 + FAQ 问句全文）。 */
+const SEARCH_ENTRIES: SearchEntry[] = buildContentSearchEntries();
 
 function getAdjacentChapters(currentPath: string) {
   const idx = CHAPTERS.findIndex((c) => currentPath.startsWith(c.path));
@@ -122,6 +55,117 @@ function getAdjacentChapters(currentPath: string) {
     prev: idx > 0 ? CHAPTERS[idx - 1] : null,
     next: idx < CHAPTERS.length - 1 ? CHAPTERS[idx + 1] : null,
   };
+}
+
+function ManualNavBody({
+  query,
+  onQueryChange,
+  results,
+  currentChapter,
+  activeId,
+  onNavClick,
+  onResultClick,
+  onChapterClick,
+}: {
+  query: string;
+  onQueryChange: (v: string) => void;
+  results: SearchEntry[];
+  currentChapter: ManualChapter | undefined;
+  activeId: string | null;
+  onNavClick: (chapter: ManualChapter, itemId: string) => void;
+  onResultClick: (entry: SearchEntry) => void;
+  onChapterClick: (path: string) => void;
+}) {
+  const q = query.trim();
+  return (
+    <>
+      <div className="shrink-0 p-3">
+        <SearchField
+          value={query}
+          onValueChange={onQueryChange}
+          placeholder="搜索手册…"
+          aria-label="搜索手册"
+        />
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-6">
+        {q ? (
+          <div className="space-y-0.5">
+            {results.length === 0 ? (
+              <p className="px-3 py-2 text-xs text-muted-foreground">
+                没找到相关内容
+              </p>
+            ) : (
+              results.map((r) => {
+                const Icon = r.Icon ?? resolveManualIcon(r.icon ?? "BookOpen");
+                const snippet = r.body ? matchSnippet(r.body, query) : r.group;
+                return (
+                  <SurfaceRowButton
+                    key={r.id}
+                    variant="settings"
+                    onClick={() => onResultClick(r)}
+                    className="h-auto gap-2.5 px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                  >
+                    <Icon size={16} className="shrink-0" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{r.label}</span>
+                      <span className="block truncate text-xs text-muted-foreground/70">
+                        {snippet}
+                      </span>
+                    </span>
+                  </SurfaceRowButton>
+                );
+              })
+            )}
+          </div>
+        ) : (
+          <div className="space-y-5">
+            {CHAPTERS.map((chapter) => {
+              const isCurrent = currentChapter?.id === chapter.id;
+              return (
+                <div key={chapter.id}>
+                  <button
+                    type="button"
+                    onClick={() => onChapterClick(chapter.path)}
+                    className={cn(
+                      "w-full px-3 pb-1.5 text-left text-xs font-medium transition-colors",
+                      isCurrent
+                        ? "text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {chapter.label}
+                  </button>
+                  <div className="space-y-0.5">
+                    {chapter.items.map((item) => {
+                      const Icon = item.Icon;
+                      const isActive = isCurrent && activeId === item.id;
+                      return (
+                        <SurfaceRowButton
+                          key={item.id}
+                          variant="settings"
+                          onClick={() => onNavClick(chapter, item.id)}
+                          className={cn(
+                            "h-9 gap-2.5 px-3 text-sm hover:bg-accent/60 hover:text-foreground",
+                            isActive
+                              ? "bg-accent text-foreground"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          <Icon size={16} className="shrink-0" />
+                          <span className="truncate">{item.label}</span>
+                        </SurfaceRowButton>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </>
+  );
 }
 
 export function ManualShell() {
@@ -133,6 +177,7 @@ export function ManualShell() {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const currentChapter = CHAPTERS.find((c) =>
     location.pathname.startsWith(c.path),
@@ -141,19 +186,28 @@ export function ManualShell() {
   const results = useMemo(() => {
     if (!q) return [];
     return SEARCH_ENTRIES.filter(
-      (e) =>
-        e.label.toLowerCase().includes(q) || e.group.toLowerCase().includes(q),
+      (e) => e.haystack.includes(q) || e.group.toLowerCase().includes(q),
     );
   }, [q]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || useUIStore.getState().searchOpen) return;
+      if (drawerOpen) {
+        setDrawerOpen(false);
+        return;
+      }
       exit();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [exit]);
+  }, [exit, drawerOpen]);
+
+  // 切章时关抽屉
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname 变化即关
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [location.pathname]);
 
   // 滚动高亮（scroll-spy）：观察当前章节各小节标题，高亮目录中对应项。
   // biome-ignore lint/correctness/useExhaustiveDependencies: `location.pathname` resets scroll-spy when switching manual chapters.
@@ -189,6 +243,7 @@ export function ManualShell() {
   }, [currentChapter, location.pathname]);
 
   const handleNavClick = (chapter: ManualChapter, itemId: string) => {
+    setDrawerOpen(false);
     if (location.pathname !== chapter.path) {
       navigate(`${chapter.path}?s=${itemId}`);
     } else {
@@ -199,7 +254,27 @@ export function ManualShell() {
     }
   };
 
+  const handleResultClick = (entry: SearchEntry) => {
+    setDrawerOpen(false);
+    navigate(entry.to);
+    setQuery("");
+  };
+
   const { prev, next } = getAdjacentChapters(location.pathname);
+
+  const navProps = {
+    query,
+    onQueryChange: setQuery,
+    results,
+    currentChapter,
+    activeId,
+    onNavClick: handleNavClick,
+    onResultClick: handleResultClick,
+    onChapterClick: (path: string) => {
+      setDrawerOpen(false);
+      navigate(path);
+    },
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
@@ -216,6 +291,14 @@ export function ManualShell() {
         >
           返回
         </Button>
+        <Button
+          variant="ghost"
+          size="md"
+          onClick={() => setDrawerOpen(true)}
+          icon={<List size={16} />}
+          className="ml-1 [-webkit-app-region:no-drag] md:hidden"
+          aria-label="打开目录"
+        />
         <span className="ml-1 text-sm font-medium text-foreground">
           产品手册
         </span>
@@ -225,7 +308,7 @@ export function ManualShell() {
               size={14}
               className="ml-1.5 text-muted-foreground/60"
             />
-            <span className="ml-1.5 text-sm text-muted-foreground">
+            <span className="ml-1.5 truncate text-sm text-muted-foreground">
               {currentChapter.label}
             </span>
           </>
@@ -238,96 +321,37 @@ export function ManualShell() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        {/* Left sidebar：常驻完整目录 + 搜索 */}
+        {/* Left sidebar：常驻完整目录 + 搜索（≥md） */}
         <nav className="hidden w-[260px] shrink-0 flex-col overflow-hidden border-r border-border bg-muted/30 md:flex">
-          <div className="shrink-0 p-3">
-            <SearchField
-              value={query}
-              onValueChange={setQuery}
-              placeholder="筛选手册…"
-              aria-label="筛选手册目录"
-            />
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-6">
-            {q ? (
-              <div className="space-y-0.5">
-                {results.length === 0 ? (
-                  <p className="px-3 py-2 text-xs text-muted-foreground">
-                    没找到相关内容
-                  </p>
-                ) : (
-                  results.map((r) => {
-                    const Icon = r.Icon;
-                    return (
-                      <SurfaceRowButton
-                        key={r.id}
-                        variant="settings"
-                        onClick={() => {
-                          navigate(r.to);
-                          setQuery("");
-                        }}
-                        className="h-auto gap-2.5 px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                      >
-                        <Icon size={16} className="shrink-0" />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate">{r.label}</span>
-                          <span className="block truncate text-xs text-muted-foreground/70">
-                            {r.group}
-                          </span>
-                        </span>
-                      </SurfaceRowButton>
-                    );
-                  })
-                )}
-              </div>
-            ) : (
-              <div className="space-y-5">
-                {CHAPTERS.map((chapter) => {
-                  const isCurrent = currentChapter?.id === chapter.id;
-                  return (
-                    <div key={chapter.id}>
-                      <button
-                        type="button"
-                        onClick={() => navigate(chapter.path)}
-                        className={cn(
-                          "w-full px-3 pb-1.5 text-left text-xs font-medium transition-colors",
-                          isCurrent
-                            ? "text-foreground"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        {chapter.label}
-                      </button>
-                      <div className="space-y-0.5">
-                        {chapter.items.map((item) => {
-                          const Icon = item.Icon;
-                          const isActive = isCurrent && activeId === item.id;
-                          return (
-                            <SurfaceRowButton
-                              key={item.id}
-                              variant="settings"
-                              onClick={() => handleNavClick(chapter, item.id)}
-                              className={cn(
-                                "h-9 gap-2.5 px-3 text-sm hover:bg-accent/60 hover:text-foreground",
-                                isActive
-                                  ? "bg-accent text-foreground"
-                                  : "text-muted-foreground",
-                              )}
-                            >
-                              <Icon size={16} className="shrink-0" />
-                              <span className="truncate">{item.label}</span>
-                            </SurfaceRowButton>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          <ManualNavBody {...navProps} />
         </nav>
+
+        {/* 窄屏目录抽屉 */}
+        {drawerOpen && (
+          <div className="fixed inset-0 z-50 md:hidden">
+            <button
+              type="button"
+              className="absolute inset-0 bg-background/60"
+              aria-label="关闭目录"
+              onClick={() => setDrawerOpen(false)}
+            />
+            <nav className="absolute inset-y-0 left-0 flex w-[min(300px,85vw)] flex-col overflow-hidden border-r border-border bg-background shadow-lg">
+              <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-3">
+                <span className="text-sm font-medium text-foreground">
+                  目录
+                </span>
+                <Button
+                  variant="ghost"
+                  size="md"
+                  onClick={() => setDrawerOpen(false)}
+                  icon={<X size={16} />}
+                  aria-label="关闭"
+                />
+              </div>
+              <ManualNavBody {...navProps} />
+            </nav>
+          </div>
+        )}
 
         {/* Content area */}
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">

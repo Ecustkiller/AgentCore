@@ -102,12 +102,11 @@ def _run_from_plan(s: dict[str, Any]) -> dict[str, Any]:
         "stance": s.get("stance"),
         "group": s.get("group"),
         "round": s.get("round") or 0,
-        "revisionOf": None,
-        "revision": 0,
+        "continuesRunId": None,
         # 「计划已调整」轻痕迹 (设计 §7.2): set by the plan_revised fact to "bind"/"steer" when
         # the CEO autonomously re-bound / re-steered this node mid-flight; None otherwise.
         "revised": None,
-        # 回落换人: set from run_plan.replaces_run_id when CEO re-delegates after revise miss.
+        # 回落换人: set from run_plan.replaces_run_id when CEO re-delegates after continue miss.
         "replacesRunId": s.get("replaces_run_id"),
         "checkpoint": None,
         # 收到的上下文 (上下文传递可视化): filled by the run_context fact; empty until then.
@@ -271,7 +270,7 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         elif etype == "run_started":
             rid = p.get("run_id", "")
             agid = p.get("agent_id", "")
-            revision = p.get("revision") or 0
+            continues = p.get("continues_run_id")
             parent = p.get("parent_run_id")
             kind = p.get("kind") or "agent"
             # The CEO captain is the turn's root (kind=captain); remember its run id so its
@@ -280,10 +279,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             if kind == "captain":
                 captain_run_id = rid
             run = run_by_id(rid)
-            # 定向唤回 续写 (乙 热修 P4): a revision (>=2) is not in the plan — synthesize
-            # it off the original, mirroring projectExecution.
-            if run is None and revision and parent:
-                original = run_by_id(parent)
+            # 同人续派 / 热修 / 辩论续写: not in the plan — synthesize off the session root.
+            if run is None and continues:
+                original = run_by_id(continues)
                 if original is not None:
                     origin_agent = agent_by_id(original["agentId"])
                     agents.append(
@@ -308,8 +306,7 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                         **_run_from_plan({"id": rid, "agent_id": agid, "task": original["task"]}),
                         "parentRunId": parent,
                         "kind": kind,
-                        "revisionOf": parent,
-                        "revision": revision,
+                        "continuesRunId": continues,
                         # 乙 wire 携 round/stance：debate 续写从 wire 读身份与轮次。
                         "stance": p.get("stance"),
                         "group": p.get("group"),
@@ -320,6 +317,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 run["status"] = "running"
                 run["parentRunId"] = parent
                 run["kind"] = kind
+                if continues:
+                    run["continuesRunId"] = continues
                 # 冷回落接手: mid-flight `_redir` carries replaces_run_id on the wire.
                 replaces = p.get("replaces_run_id")
                 if replaces:
@@ -630,9 +629,17 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     }
 
         elif etype == "team_preview_required":
+            # Event order is run_plan → team_preview_required, but product narrative is
+            # 开工卡 → 协作图 — insert before the last team marker when one exists.
             cid = p.get("checkpoint_id", "")
             if cid and not has_marker("team_preview", "checkpoint_id", cid):
-                process.append({"kind": "team_preview", "checkpoint_id": cid})
+                marker = {"kind": "team_preview", "checkpoint_id": cid}
+                for i in range(len(process) - 1, -1, -1):
+                    if process[i].get("kind") == "team":
+                        process.insert(i, marker)
+                        break
+                else:
+                    process.append(marker)
 
         elif etype == "team_preview_resolved":
             pass
@@ -664,7 +671,7 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             # message_start / turn_saved / title_generated / followups_generated /
             # board_op_required / board_read_required / desktop_notify_required /
             # tool_progress / workspace_op_required /
-            # handoff_* / debate_round_decision_* /
+            # handoff_* /
             # interaction_orphaned / escalation_* (run escalations folded above) —
             # not part of the normalized turn judge state beyond interactions[] fold
             # (no-op here). Mirrored by the frontend folds' assertNever switch

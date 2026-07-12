@@ -26,15 +26,8 @@ node_modules/
 out/
 release/
 # pnpm shoot 截图（须在 out/ 外，避免 electron-builder 误打进安装包）
-apps/desktop/shoot-out/
-apps/desktop/shoot-out-manual/
-apps/desktop/shoot-out-whiteboard/
-apps/desktop/shoot-out-ask-commence/
-apps/desktop/shoot-out-graph-probe/
-apps/desktop/shoot-out-cx/
-apps/desktop/shoot-out-onboarding/
-apps/desktop/shoot-out-multi-batch-before/
-apps/desktop/shoot-out-multi-batch-after/
+# 通配所有 shoot-out 变体（-manual/-whiteboard/-finale/-slice2…），新增目录不必再逐条枚举
+apps/desktop/shoot-out*/
 # pnpm smoke:webapp 截图（同上：web 冒烟产物，不入仓 / 不打包）
 apps/desktop/smoke-out/
 # web 客户端构建产物（渲染层跑浏览器，形态 A）——由 deploy:web / deploy-web.yml 的

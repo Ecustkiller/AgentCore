@@ -100,15 +100,9 @@ export function countPendingDecisions(
   for (const r of execution?.runs ?? [])
     for (const e of r.escalations) if (e.status === "pending") n++;
   if (includeDebate && convId) {
-    for (const e of useInteractionStore.getState().byId.values()) {
-      if (
-        e.conversationId === convId &&
-        e.kind === "debate_round" &&
-        (e.status === "pending" || e.status === "submitting")
-      ) {
-        n++;
-      }
-    }
+    // ambient 掌舵不进 InteractionStore——指挥台对辩论恒传 includeDebate=false。
+    void includeDebate;
+    void convId;
   }
   return n;
 }

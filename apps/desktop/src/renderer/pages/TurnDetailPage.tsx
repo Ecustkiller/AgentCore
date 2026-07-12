@@ -1,6 +1,5 @@
 import { TurnCompare } from "@/components/chat/compare/TurnCompare";
 import { DebateArena } from "@/components/chat/debate/arena/DebateArena";
-import { CanvasCommandBar } from "@/components/graph/CanvasCommandBar";
 import { GraphView } from "@/components/graph/GraphView";
 import { SidePanel } from "@/components/layout/SidePanel";
 import { Button, IconButton } from "@/components/ui";
@@ -14,7 +13,6 @@ import {
 } from "@/services/turns";
 import {
   getRuntime,
-  useActiveGenerating,
   useActiveMessages,
   useConversationStore,
 } from "@/stores/conversation";
@@ -25,7 +23,7 @@ import {
   useMessageExecution,
 } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
-import { type TurnDetailView, turnDetailPath } from "@/stores/ui";
+import type { TurnDetailView } from "@/stores/ui";
 import { ReactFlowProvider } from "@xyflow/react";
 import {
   ArrowLeft,
@@ -33,6 +31,7 @@ import {
   MessagesSquare,
   Network,
   PanelRight,
+  Square,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -44,7 +43,8 @@ function parseView(raw: string | null): TurnDetailView | null {
 
 /**
  * Full-screen turn detail — graph / debate / compare for one turn.
- * Replaces the former in-canvas zoom overlay (前端UX设计.md §六).
+ * Pure deep-read / replay surface (前端UX设计.md §六); no conversation-level
+ * composer. Live turns only expose a top-bar Stop for the turn being viewed.
  */
 export function TurnDetailPage() {
   const { id: conversationId, turnId } = useParams<{
@@ -133,7 +133,8 @@ export function TurnDetailPage() {
   const execution = useMessageExecution(scopeId);
   const taskSummary = execution?.taskSummary;
   const messages = useActiveMessages();
-  const interactive =
+  // Scoped to the turn being viewed — not "conversation is generating somewhere".
+  const liveViewedTurn =
     messages.find((m) => m.id === scopeId)?.isStreaming ?? false;
 
   const debate = !!execution && isDebate(execution);
@@ -172,27 +173,9 @@ export function TurnDetailPage() {
     else navigate(-1);
   }, [navigate, conversationId]);
 
-  // Follow newly dispatched turns (same semantics as former CanvasZoomOverlay).
-  const generating = useActiveGenerating();
-  const [following, setFollowing] = useState(false);
-  useEffect(() => {
-    if (!following || !conversationId) return;
-    let last: (typeof messages)[number] | undefined;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "assistant") {
-        last = messages[i];
-        break;
-      }
-    }
-    if (!last || last.id === scopeId) return;
-    if (last.executionId) {
-      setFollowing(false);
-      navigate(turnDetailPath(conversationId, last.id), { replace: true });
-    } else if (!last.isStreaming && !generating) {
-      setFollowing(false);
-      navigate(`/conversations/${conversationId}`);
-    }
-  }, [following, messages, generating, scopeId, conversationId, navigate]);
+  const stopGeneration = useCallback(() => {
+    useConversationStore.getState().stopGeneration();
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -245,54 +228,67 @@ export function TurnDetailPage() {
               {taskSummary}
             </span>
           )}
-          <div className="ml-auto flex shrink-0 items-center gap-0.5 rounded-lg border border-border bg-card p-0.5">
-            <Button
-              variant="ghost"
-              onClick={() => setView("graph")}
-              aria-pressed={view === "graph"}
-              icon={<Network size={14} />}
-              className={
-                view === "graph"
-                  ? "bg-accent text-foreground hover:bg-accent"
-                  : undefined
-              }
-            >
-              协作图
-            </Button>
-            {debate && (
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {liveViewedTurn && (
               <Button
                 variant="ghost"
-                onClick={() => setView("debate")}
-                aria-pressed={view === "debate"}
-                icon={<MessagesSquare size={14} />}
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                icon={<Square size={14} />}
+                onClick={stopGeneration}
+                aria-label="停止生成"
+              >
+                停止
+              </Button>
+            )}
+            <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-border bg-card p-0.5">
+              <Button
+                variant="ghost"
+                onClick={() => setView("graph")}
+                aria-pressed={view === "graph"}
+                icon={<Network size={14} />}
                 className={
-                  view === "debate"
+                  view === "graph"
                     ? "bg-accent text-foreground hover:bg-accent"
                     : undefined
                 }
               >
-                辩论室
+                协作图
               </Button>
-            )}
-            {showCompare && (
-              <Button
-                variant="ghost"
-                onClick={() => setView("compare")}
-                aria-pressed={view === "compare"}
-                icon={<GitCompare size={14} />}
-                className={
-                  view === "compare"
-                    ? "bg-accent text-foreground hover:bg-accent"
-                    : undefined
-                }
-              >
-                对比
-              </Button>
-            )}
+              {debate && (
+                <Button
+                  variant="ghost"
+                  onClick={() => setView("debate")}
+                  aria-pressed={view === "debate"}
+                  icon={<MessagesSquare size={14} />}
+                  className={
+                    view === "debate"
+                      ? "bg-accent text-foreground hover:bg-accent"
+                      : undefined
+                  }
+                >
+                  辩论室
+                </Button>
+              )}
+              {showCompare && (
+                <Button
+                  variant="ghost"
+                  onClick={() => setView("compare")}
+                  aria-pressed={view === "compare"}
+                  icon={<GitCompare size={14} />}
+                  className={
+                    view === "compare"
+                      ? "bg-accent text-foreground hover:bg-accent"
+                      : undefined
+                  }
+                >
+                  对比
+                </Button>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Body row: the content column (graph/debate/compare + 命令栏) and the
+        {/* Body row: the content column (graph/debate/compare) and the
             right-docked SidePanel sit side-by-side in a flex-ROW, so the panel
             docks to the side instead of falling to the bottom of the page column
             (mirrors AppShell/ConversationPage, where SidePanel is a flex-row
@@ -313,8 +309,7 @@ export function TurnDetailPage() {
                     execution={execution}
                     messageId={scopeId}
                     conversationId={conversationId}
-                    interactive={interactive}
-                    onClose={goBack}
+                    interactive={liveViewedTurn}
                   />
                 </div>
               )}
@@ -330,11 +325,6 @@ export function TurnDetailPage() {
                 </div>
               )}
             </div>
-
-            <CanvasCommandBar
-              onDispatch={() => setFollowing(true)}
-              waiting={following && generating}
-            />
           </div>
 
           <SidePanel />

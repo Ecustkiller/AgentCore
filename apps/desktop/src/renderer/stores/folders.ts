@@ -18,9 +18,7 @@ export type DraftWorkspaceIntent =
   | { kind: "project"; folderId: string };
 
 export function defaultDraftWorkspaceIntent(): DraftWorkspaceIntent {
-  return hasLocalFiles()
-    ? { kind: "quick_local" }
-    : { kind: "quick_cloud" };
+  return hasLocalFiles() ? { kind: "quick_local" } : { kind: "quick_cloud" };
 }
 
 /**

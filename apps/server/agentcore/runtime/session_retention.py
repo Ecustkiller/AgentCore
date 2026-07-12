@@ -1,9 +1,9 @@
-"""7-day idle TTL sweep for persisted 留人 sessions (乙 热修 P3).
+"""Idle TTL sweep for persisted 留人 sessions — 默认禁用的存储保护兜底.
 
-Mirrors workspace retention: a periodic backstop that deletes ``run_sessions`` rows
-untouched within the window, so the durable roster does not grow without bound. A
-row's ``updated_at`` advances on each revision, so an actively-revised session stays
-alive; one left alone for the retention window is pruned (a later 唤回 then 回落甲).
+现场保留语义「对话在，现场就在」（同人连续委派拍板）：现场随删对话级联清理
+（ConversationRepository → run_sessions），不按时长过期。本 sweep 仅当显式配置
+``session_roster_retention_days > 0`` 时启用（放量后的存储保护兜底）；启用时
+``updated_at`` 随每次续写前移，活跃现场不会被清。
 """
 
 from __future__ import annotations
@@ -27,6 +27,10 @@ async def run_session_retention_sweep() -> int:
     cleared without one huge transaction. The cutoff is tz-aware UTC, matching how
     ``run_sessions.updated_at`` is stamped (server ``now()``)."""
     if not settings.session_roster_persist_enabled:
+        return 0
+    # 「对话在，现场就在」：retention_days <= 0 = 按时长清扫禁用（默认）。现场随删对话
+    # 级联清理；本 sweep 仅在放量后显式配置 >0 时作为存储保护兜底。
+    if settings.session_roster_retention_days <= 0:
         return 0
     before = datetime.now(UTC) - timedelta(days=settings.session_roster_retention_days)
     limit = settings.session_roster_sweep_batch_limit

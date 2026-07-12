@@ -164,8 +164,7 @@ export function ConversationItem({ conversation, groupIsLocal }: Props) {
   );
   const awaitingKickoff = usePausedTurnStore((s) =>
     s.pending.some(
-      (p) =>
-        p.conversationId === conversation.id && p.kind === "team_preview",
+      (p) => p.conversationId === conversation.id && p.kind === "team_preview",
     ),
   );
   const navigate = useNavigate();

@@ -9,10 +9,16 @@
  * cookies so the renderer stays in sync. Single-flight across writeback +
  * renderer IPC so refresh-family rotation never double-fires.
  */
+import type { components } from "@agentcore/contract-rest-types";
 import { net, session } from "electron";
+import type { AuthRefreshResult } from "../shared/outbox-contract";
+
+type TokenResponse = components["schemas"]["TokenResponse"];
 
 const ACCESS_COOKIE = "access_token";
 const REFRESH_COOKIE = "refresh_token";
+/** Fallback when bearer TokenResponse omits `refresh_expires_in` (older servers). */
+const DEFAULT_REFRESH_EXPIRES_SEC = 30 * 86400;
 
 declare const __API_BASE_URL__: string;
 
@@ -41,6 +47,21 @@ export function apiPathPrefix(): string {
   } catch {
     return "";
   }
+}
+
+/**
+ * Derive cookie SameSite/Secure from the API URL.
+ * https → None+Secure (prod cross-site); http → Lax+insecure (dev localhost).
+ */
+export function deriveAuthCookieAttrs(cookieUrl: string): {
+  secure: boolean;
+  sameSite: "lax" | "no_restriction";
+} {
+  const secure = cookieUrl.startsWith("https:");
+  return {
+    secure,
+    sameSite: secure ? "no_restriction" : "lax",
+  };
 }
 
 function apiUrl(path: string): string {
@@ -73,13 +94,17 @@ async function writeAuthCookies(tokens: {
   access_token: string;
   refresh_token: string;
   expires_in?: number;
+  refresh_expires_in?: number;
 }): Promise<void> {
   const url = cookieUrl();
-  const secure = url.startsWith("https");
+  const { secure, sameSite } = deriveAuthCookieAttrs(url);
+  const nowSec = Math.floor(Date.now() / 1000);
   const accessExpiry =
     typeof tokens.expires_in === "number"
-      ? Math.floor(Date.now() / 1000) + tokens.expires_in
+      ? nowSec + tokens.expires_in
       : undefined;
+  const refreshExpiry =
+    nowSec + (tokens.refresh_expires_in ?? DEFAULT_REFRESH_EXPIRES_SEC);
   await session.defaultSession.cookies.set({
     url,
     name: ACCESS_COOKIE,
@@ -87,7 +112,7 @@ async function writeAuthCookies(tokens: {
     path: "/",
     httpOnly: true,
     secure,
-    sameSite: "no_restriction",
+    sameSite,
     expirationDate: accessExpiry,
   });
   await session.defaultSession.cookies.set({
@@ -97,49 +122,59 @@ async function writeAuthCookies(tokens: {
     path: refreshCookiePath(),
     httpOnly: true,
     secure,
-    sameSite: "no_restriction",
+    sameSite,
+    expirationDate: refreshExpiry,
   });
 }
 
-let refreshInFlight: Promise<boolean> | null = null;
+let refreshInFlight: Promise<AuthRefreshResult> | null = null;
 
 /**
  * Rotate tokens via body refresh; single-flight for main + renderer callers.
- * Returns true when a fresh access token was written to the cookie jar.
+ * Three-state so transient outages are never mistaken for session death.
  */
-export function refreshAccessToken(): Promise<boolean> {
+export function refreshAccessToken(): Promise<AuthRefreshResult> {
   if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = (async () => {
+  refreshInFlight = (async (): Promise<AuthRefreshResult> => {
     const cookies = await readAuthCookies();
     const refresh = cookies.refresh_token?.trim();
-    if (!refresh) return false;
+    if (!refresh) return "auth_dead";
+    let res: Response;
     try {
       // `credentials: "omit"` is REQUIRED (not cosmetic): a main-process net.fetch has
       // no document origin, so Electron coerces the default `same-origin` credentials to
       // `include` (electron/lib/browser/api/net-fetch.ts) and would attach defaultSession
       // cookies. This must stay a pure Bearer client — refresh travels in the body only.
-      const res = await net.fetch(apiUrl("/v1/auth/token/refresh"), {
+      res = await net.fetch(apiUrl("/v1/auth/token/refresh"), {
         method: "POST",
         credentials: "omit",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: refresh }),
       });
-      if (!res.ok) return false;
-      const body = (await res.json()) as {
-        access_token?: string;
-        refresh_token?: string;
-        expires_in?: number;
-      };
-      if (!body.access_token || !body.refresh_token) return false;
+    } catch {
+      return "transient";
+    }
+    if (res.status === 401 || res.status === 403) return "auth_dead";
+    if (!res.ok) return "transient";
+    let body: TokenResponse;
+    try {
+      body = (await res.json()) as TokenResponse;
+    } catch {
+      return "transient";
+    }
+    if (!body.access_token || !body.refresh_token) return "transient";
+    try {
       await writeAuthCookies({
         access_token: body.access_token,
         refresh_token: body.refresh_token,
         expires_in: body.expires_in,
+        refresh_expires_in: body.refresh_expires_in ?? undefined,
       });
-      return true;
     } catch {
-      return false;
+      // Server already rotated; local jar write failed — retry later, don't logout.
+      return "transient";
     }
+    return "renewed";
   })().finally(() => {
     refreshInFlight = null;
   });
@@ -180,7 +215,7 @@ export async function bearerPostJson(
   let access = cookies.access_token?.trim();
   if (!access) {
     const refreshed = await refreshAccessToken();
-    if (!refreshed) {
+    if (refreshed !== "renewed") {
       return { ok: false, status: 401, body: { error: "missing_token" } };
     }
     access = (await readAuthCookies()).access_token?.trim();
@@ -192,7 +227,7 @@ export async function bearerPostJson(
   let res = await doFetch(access);
   if (res.status === 401) {
     const refreshed = await refreshAccessToken();
-    if (refreshed) {
+    if (refreshed === "renewed") {
       access = (await readAuthCookies()).access_token?.trim();
       if (access) res = await doFetch(access);
     }

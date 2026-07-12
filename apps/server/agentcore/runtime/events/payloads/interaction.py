@@ -155,13 +155,35 @@ class TeamPreviewWorker(WirePayload):
     debate: bool
 
 
+class TeamPreviewSide(WirePayload):
+    """One debate participant on the debate kickoff card."""
+
+    key: str
+    name: str
+    stance: str
+    is_subject: bool | None = absent()
+
+
 class TeamPreviewRequiredPayload(WirePayload):
-    """开工卡：计划预览 + 能力授权（两卡合一）。``tools`` may be empty under full_auto."""
+    """开工卡：计划预览 + 能力授权（两卡合一）。
+
+    ``primitive`` discriminates ``delegate`` (workers 分工表) vs ``debate``
+    (motion / sides / max_rounds). ``tools`` may be empty under full_auto /
+    always_ask / debate read-only debaters.
+    """
 
     checkpoint_id: str
     conversation_id: str
     workers: list[TeamPreviewWorker]
     tools: list[str] = Field(default_factory=list)
+    primitive: Literal["delegate", "debate"] | None = absent(
+        "编排原语判别；缺省按 delegate（旧 journal / 向量兼容）。"
+    )
+    motion: str | None = absent("辩论辩题；仅 primitive=debate。")
+    form: str | None = absent("辩论形态 debate/red_team/roundtable。")
+    sides: list[TeamPreviewSide] | None = absent("辩论各方立场。")
+    max_rounds: int | None = absent("辩论轮次安全上限（预算展示）。")
+    thorough: bool | None = absent("辩论认真辩透 vs 快速对碰。")
 
 
 class TeamPreviewResolvedPayload(WirePayload):

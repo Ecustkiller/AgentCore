@@ -1,4 +1,3 @@
-import type { DebateSeed } from "@/components/chat/debate/seed";
 import {
   bumpConversationCache,
   getConversations,
@@ -11,7 +10,6 @@ import {
   streamErrorAction,
 } from "@/lib/errors";
 import { notifyInfo } from "@/lib/toast";
-import { loadLatestWindow } from "@/services/messages";
 import { markSidecarUnhealthy, probeSidecar } from "@/services/sidecarHealth";
 import {
   buildSidecarHistory,
@@ -23,11 +21,7 @@ import {
 } from "@/services/streamConversation";
 import { streamConversationViaSidecar } from "@/services/streamConversationViaSidecar";
 import { traceTurnEnd, traceTurnMilestone } from "@/services/turnTrace";
-import {
-  getActiveRuntime,
-  getRuntime,
-  useConversationStore,
-} from "@/stores/conversation";
+import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { isAbort, isTransportDrop } from "./helpers";
 import { rejoinLiveTurn } from "./recovery";
@@ -41,9 +35,6 @@ export interface SendTurnSpec {
    * After `turn_saved` reconciles it, this id is gone — the signal that the
    * turn is persisted and a retry must regenerate rather than resend. */
   optimisticUserId: string;
-  /** 续辩种子（结构化补轮·B / 可逆叫停）：非空 = 本回合从某场收场辩论续辩（debate 续上一场）。
-   *  随回合载荷直传引擎（sidecar 与云链路同形），普通回合缺省。 */
-  debateSeed?: DebateSeed;
 }
 
 /**
@@ -56,8 +47,7 @@ export interface SendTurnSpec {
  * duplicate the user turn, so we regenerate from the saved message instead.
  */
 export async function sendTurn(spec: SendTurnSpec): Promise<void> {
-  const { conversationId, content, attachments, optimisticUserId, debateSeed } =
-    spec;
+  const { conversationId, content, attachments, optimisticUserId } = spec;
   const store = useConversationStore.getState();
   // Every turn write routes to this conversation's slice by id (not the active
   // key), so a turn keeps streaming into its own bubble after the user switches
@@ -141,7 +131,6 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
           content,
           history: buildSidecarHistory(conversationId, optimisticUserId),
           optimisticUserId,
-          debateSeed,
           signal: ac.signal,
         });
       } catch (sidecarErr) {
@@ -169,7 +158,6 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
           conversationId,
           content,
           attachments,
-          debateSeed,
           signal: ac.signal,
         });
       }
@@ -182,7 +170,6 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         conversationId,
         content,
         attachments,
-        debateSeed,
         signal: ac.signal,
       });
     }
@@ -259,50 +246,4 @@ export async function continueTurn(conversationId: string): Promise<void> {
     attachments: [],
     optimisticUserId: userMsgId,
   });
-}
-
-/**
- * 续辩（结构化补轮·B / 可逆叫停，辩论编排设计.md §6.6）：从一张【已收场】的
- * 辩论卡发起「再辩一轮 / 换角度」——往**当前活跃会话**发一个携 `debate_seed` 的新回合（新 turn =
- * 新辩论卡，守事件源 turn 模型、不原地改写上一场）。`content` 是给 CEO 的续辩指令（含原命题 +
- * 可选新角度），`seed` 让本回合的 debate 续上一场（主持人焦点正交于已谈、首轮辩手读到上一场摘要）。
- *
- * 乐观气泡 + {@link sendTurn}、只多带种子（画布/聊天的常规下达指令则走统一 composer 管线
- * `useComposerSend`）；空 `content` / 无活跃会话 / 正在生成 → no-op 返回 false（回合不叠加）。
- */
-export async function sendDebateContinuation(
-  content: string,
-  seed: DebateSeed,
-): Promise<boolean> {
-  const trimmed = content.trim();
-  if (!trimmed) return false;
-  const store = useConversationStore.getState();
-  const conversationId = store.currentConversationId;
-  if (!conversationId) return false;
-  if (getActiveRuntime().isGenerating) return false;
-  // 读历史中（搜索跳转留下更新的消息未加载）：先回到 live head，使续辩落到真正的队尾。
-  if (getActiveRuntime().hasMoreAfter) {
-    try {
-      await loadLatestWindow(conversationId);
-    } catch {
-      /* best-effort: append at the current tail */
-    }
-  }
-  const userMsgId = crypto.randomUUID();
-  store.addMessage({
-    id: userMsgId,
-    role: "user",
-    content: trimmed,
-    createdAt: new Date().toISOString(),
-    executionId: null,
-    isStreaming: false,
-  });
-  await sendTurn({
-    conversationId,
-    content: trimmed,
-    attachments: [],
-    optimisticUserId: userMsgId,
-    debateSeed: seed,
-  });
-  return true;
 }

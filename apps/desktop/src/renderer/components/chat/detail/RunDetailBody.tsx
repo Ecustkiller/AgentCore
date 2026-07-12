@@ -25,10 +25,7 @@ import { Pencil, RotateCcw, Square, Wrench } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import {
-  receivedContextForList,
-  selectRunTaskSection,
-} from "./runTaskSection";
+import { receivedContextForList, selectRunTaskSection } from "./runTaskSection";
 import { RunCausalInjectBlock } from "./sections/RunCausalInject";
 import { DebriefSection } from "./sections/RunDebrief";
 import { DiagnosticSection } from "./sections/RunDiagnostics";
@@ -125,7 +122,7 @@ export function RunDetailBody({
     .filter((r): r is RunNode => r != null);
   const downstream = execution.runs.filter((r) => r.dependsOn.includes(run.id));
   const parent =
-    run.parentRunId != null && run.revisionOf == null
+    run.parentRunId != null && run.continuesRunId == null
       ? (execution.runs.find((r) => r.id === run.parentRunId) ?? null)
       : null;
   const childCount = countDescendants(execution.runs, run.id);
@@ -159,8 +156,8 @@ export function RunDetailBody({
       {agent.status === "working" && (
         <div className="mb-4 space-y-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5 text-xs">
           <p className="text-sm text-foreground">
-            {run.revisionOf != null
-              ? "续写中——带着上一版草稿按新方向改。"
+            {run.continuesRunId != null
+              ? "同一人接续中——带着现场按新指令接着干。"
               : run.replacesRunId != null
                 ? "接手重写——同角色新人按新方向重做。"
                 : "正在实时输出——下方内容会边写边更新。"}

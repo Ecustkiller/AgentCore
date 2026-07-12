@@ -263,8 +263,46 @@ def _team_preview_finalized() -> list[SSEEvent]:
                 },
             ],
             tools=["code_execute", "file_write", "test_run"],
+            primitive="delegate",
         ),
         message_end(FinishReason.PAUSED, input_tokens=1200, output_tokens=80, cost=_COST),
+    ]
+
+
+def _debate_team_preview_finalized() -> list[SSEEvent]:
+    """辩论开工卡：顶层 debate 在主持人循环启动前挂起收口。"""
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来组织一场辩论。"),
+        tool_use_start(
+            "db1",
+            "debate",
+            {
+                "motion": "该不该上四天工作制？",
+                "form": "debate",
+                "sides": [
+                    {"key": "pro", "name": "正方", "stance": "应推广"},
+                    {"key": "con", "name": "反方", "stance": "暂缓"},
+                ],
+                "thorough": True,
+            },
+        ),
+        team_preview_required(
+            checkpoint_id="tp-debate",
+            conversation_id=_CONV,
+            workers=[],
+            tools=[],
+            primitive="debate",
+            motion="该不该上四天工作制？",
+            form="debate",
+            sides=[
+                {"key": "pro", "name": "正方", "stance": "应推广"},
+                {"key": "con", "name": "反方", "stance": "暂缓"},
+            ],
+            max_rounds=5,
+            thorough=True,
+        ),
+        message_end(FinishReason.PAUSED, input_tokens=800, output_tokens=40, cost=_COST),
     ]
 
 
@@ -309,6 +347,7 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "plan_review_finalized": ("结构化挂起：计划复核收口即终止（②，plan_review_required→message_end(paused)，单一冷路 resume）", _plan_review_finalized),
     "team_preview_finalized": ("团队预审：首波前挂起收口（finish_reason=paused）", _team_preview_finalized),
     "team_preview_resolved_continue": ("团队预审：开做后跑完首波", _team_preview_resolved_continue),
+    "debate_team_preview_finalized": ("辩论开工卡：主持人循环前挂起收口", _debate_team_preview_finalized),
     "single_agent_checkpoint": ("单聊：检查点 ask_user(blocking) 在时间线原位落 checkpoint 标记 + 暂停", _single_agent_checkpoint),
     "single_agent_checkpoint_finalized": ("单聊：检查点收口即终止（②，checkpoint_required→message_end(paused)，单一冷路 resume）", _single_agent_checkpoint_finalized),
     "single_agent_checkpoint_resolved": ("单聊：检查点 ask_user(blocking) 经 resume 续跑（checkpoint_resolved 清挂起→跑到 end_turn）", _single_agent_checkpoint_resolved),

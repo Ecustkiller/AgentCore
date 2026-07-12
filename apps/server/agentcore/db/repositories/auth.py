@@ -177,7 +177,13 @@ class RefreshTokenRepository:
         token_family: str,
         expires_at: datetime,
         client_aud: str = "product",
+        client_platform: str | None = None,
+        user_agent: str | None = None,
+        ip: str | None = None,
+        family_started_at: datetime | None = None,
+        last_used_at: datetime | None = None,
     ) -> RefreshToken:
+        now = datetime.now(UTC)
         token = RefreshToken(
             id=new_id(),
             user_id=user_id,
@@ -185,6 +191,11 @@ class RefreshTokenRepository:
             token_family=token_family,
             expires_at=expires_at,
             client_aud=client_aud,
+            client_platform=client_platform,
+            user_agent=user_agent,
+            ip=ip,
+            family_started_at=family_started_at or now,
+            last_used_at=last_used_at or now,
         )
         self._session.add(token)
         await self._session.commit()
@@ -226,6 +237,94 @@ class RefreshTokenRepository:
             .values(revoked_at=datetime.now(UTC))
         )
         await self._session.commit()
+
+    async def revoke_other_families(self, user_id: str, *, keep_family: str) -> int:
+        """Revoke every non-revoked row for ``user_id`` whose family ≠ ``keep_family``.
+
+        Returns the number of families touched (approximate via distinct families
+        among updated rows is unnecessary for callers — we return rows updated).
+        """
+        result = await self._session.execute(
+            update(RefreshToken)
+            .where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.token_family != keep_family,
+                RefreshToken.revoked_at.is_(None),
+            )
+            .values(revoked_at=datetime.now(UTC))
+        )
+        await self._session.commit()
+        return int(result.rowcount or 0)
+
+    async def family_belongs_to_user(self, *, user_id: str, token_family: str) -> bool:
+        result = await self._session.execute(
+            select(RefreshToken.id)
+            .where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.token_family == token_family,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def list_active_session_tips(
+        self, *, user_id: str, now: datetime | None = None
+    ) -> Sequence[RefreshToken]:
+        """Return the live tip row(s) per family for ``user_id``.
+
+        A tip is unrotated, unrevoked, and unexpired. Concurrent refresh grace can
+        briefly leave multiple tips in one family — callers should aggregate.
+        """
+        now = now or datetime.now(UTC)
+        result = await self._session.execute(
+            select(RefreshToken)
+            .where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.rotated_at.is_(None),
+                RefreshToken.expires_at > now,
+            )
+            .order_by(RefreshToken.last_used_at.desc())
+        )
+        return result.scalars().all()
+
+    async def delete_terminal_stale(self, *, before: datetime, limit: int) -> int:
+        """Hard-delete terminal rows whose terminal timestamp is older than ``before``.
+
+        Terminal = revoked / rotated / expired. Active family tips (unrotated,
+        unrevoked, unexpired) never match. Retention of recent rotated rows keeps
+        reuse detection working for the grace + post-grace window.
+        """
+        ids_result = await self._session.execute(
+            select(RefreshToken.id)
+            .where(
+                or_(
+                    and_(
+                        RefreshToken.revoked_at.is_not(None),
+                        RefreshToken.revoked_at < before,
+                    ),
+                    and_(
+                        RefreshToken.revoked_at.is_(None),
+                        RefreshToken.rotated_at.is_not(None),
+                        RefreshToken.rotated_at < before,
+                    ),
+                    and_(
+                        RefreshToken.revoked_at.is_(None),
+                        RefreshToken.rotated_at.is_(None),
+                        RefreshToken.expires_at < before,
+                    ),
+                )
+            )
+            .limit(limit)
+        )
+        ids = list(ids_result.scalars().all())
+        if not ids:
+            return 0
+        result = await self._session.execute(
+            delete(RefreshToken).where(RefreshToken.id.in_(ids))
+        )
+        await self._session.commit()
+        return int(result.rowcount or 0)
 
 
 class InviteRepository:

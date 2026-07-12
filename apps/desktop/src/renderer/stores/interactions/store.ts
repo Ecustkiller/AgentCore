@@ -187,7 +187,6 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
       "approval",
       "delegation_authorization",
       "escalation",
-      "debate_round",
     ];
     set((state) => {
       let changed = false;

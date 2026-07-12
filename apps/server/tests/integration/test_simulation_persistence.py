@@ -29,7 +29,9 @@ def _stay_provider() -> ScriptedProvider:
 @pytest.mark.asyncio
 async def test_pause_blocks_tick(client, make_invite):
     original = settings.simulation_enabled
+    original_scripted = settings.simulation_scripted
     settings.simulation_enabled = True
+    settings.simulation_scripted = False
     try:
         invite = await make_invite("SIM-PAUSE")
         await register_and_login(client, invite, "sim-pause", password=TEST_PASSWORD)
@@ -55,12 +57,15 @@ async def test_pause_blocks_tick(client, make_invite):
         assert resume_res.json()["status"] == "running"
     finally:
         settings.simulation_enabled = original
+        settings.simulation_scripted = original_scripted
 
 
 @pytest.mark.asyncio
 async def test_tick_persists_snapshot_and_agents(client, make_invite):
     original = settings.simulation_enabled
+    original_scripted = settings.simulation_scripted
     settings.simulation_enabled = True
+    settings.simulation_scripted = False
     try:
         invite = await make_invite("SIM-PERSIST")
         await register_and_login(client, invite, "sim-persist", password=TEST_PASSWORD)
@@ -87,13 +92,16 @@ async def test_tick_persists_snapshot_and_agents(client, make_invite):
         assert frame_res.json()["snapshot"]["agents"]["chen"]["location"] in REGION_POSITIONS
     finally:
         settings.simulation_enabled = original
+        settings.simulation_scripted = original_scripted
 
 
 @pytest.mark.asyncio
 async def test_five_ticks_pause_resume_advances_to_tick_six(client, make_invite):
     """BE-11 acceptance: 5 persisted snapshots; resume continues at tick 6."""
     original = settings.simulation_enabled
+    original_scripted = settings.simulation_scripted
     settings.simulation_enabled = True
+    settings.simulation_scripted = False
     try:
         invite = await make_invite("SIM-5TICK")
         await register_and_login(client, invite, "sim-5tick", password=TEST_PASSWORD)
@@ -136,13 +144,16 @@ async def test_five_ticks_pause_resume_advances_to_tick_six(client, make_invite)
         assert frame6.status_code == 200
     finally:
         settings.simulation_enabled = original
+        settings.simulation_scripted = original_scripted
 
 
 @pytest.mark.asyncio
 async def test_social_state_persists_across_ticks(client, make_invite):
     """BE-14 acceptance: mood/relationship deltas survive tick persistence."""
     original = settings.simulation_enabled
+    original_scripted = settings.simulation_scripted
     settings.simulation_enabled = True
+    settings.simulation_scripted = False
     try:
         invite = await make_invite("SIM-SOCIAL")
         await register_and_login(client, invite, "sim-social", password=TEST_PASSWORD)
@@ -172,13 +183,16 @@ async def test_social_state_persists_across_ticks(client, make_invite):
         assert persisted["relationships"]["wang"] == wang_rel_t2
     finally:
         settings.simulation_enabled = original
+        settings.simulation_scripted = original_scripted
 
 
 @pytest.mark.asyncio
 async def test_activate_all_strategy_runs_full_batch(client, make_invite):
     """ActivateAllStrategy still advances all 10 agents."""
     original = settings.simulation_enabled
+    original_scripted = settings.simulation_scripted
     settings.simulation_enabled = True
+    settings.simulation_scripted = False
     try:
         invite = await make_invite("SIM-ALL")
         await register_and_login(client, invite, "sim-all", password=TEST_PASSWORD)
@@ -207,3 +221,4 @@ async def test_activate_all_strategy_runs_full_batch(client, make_invite):
         assert len(tick_res.json()["snapshot"]["agents"]) == 10
     finally:
         settings.simulation_enabled = original
+        settings.simulation_scripted = original_scripted

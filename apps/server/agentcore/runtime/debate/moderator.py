@@ -2,13 +2,15 @@
 
 主持人是「主持 + 裁判 + 书记」三合一的有状态编排角色，不是独立执行引擎：每轮循环四步——
 
-1. **定本轮议题**（:meth:`_frame`）：首轮拆用户问题为争议焦点；后续轮基于上轮未决分歧设焦点。
+1. **定本轮议题**：首轮 :meth:`_frame` 拆用户问题为争议焦点（并产开场白）；后续轮优先采用上轮
+   裁判 ``verdict.next_focus``（assess 兼产、真去重），缺失 / 空串时才回退 :meth:`_frame`；用户掌舵
+   ``focus_override`` 始终最高优先。
 2. **派各方发言**（注入的 :class:`~agentcore.runtime.debate.types.RoundRunner`）：一波并行辩手，
    底层复用 ``build_agent_executor`` / ``continue_run``（辩手跨轮带记忆）——本类不关心怎么派。
 3. **裁判 + 写小结**（:meth:`_judge_and_summarize`）：一次结构化调用同时产出交锋质量与收敛判定
-   （真交锋？还在产生新论点？可收场？）与本轮小结——二者读同一份发言，合并去掉冗余 round-trip
-   （辩论编排设计.md §二：真去重、非节流补丁）。
-4. **决策下一步**（:meth:`run` 循环体）：裁判判收敛 → 出简报收场；否则进下一轮 / 触安全上限兜底。
+   （真交锋？还在产生新论点？可收场？）、本轮小结，以及未收敛时的 ``next_focus``——同读本轮发言，
+   合并去掉冗余 round-trip（辩论编排设计.md §二：真去重、非节流补丁）。
+4. **决策下一步**（:meth:`run` 循环体）：裁判判收敛 → 结辩与简报并行收场；否则进下一轮 / 触安全上限兜底。
 
 裁判 / 小结 / 简报 / 定议题都走 ``provider.complete`` 出结构化 JSON + 坏 JSON 容错（借鉴
 ``evals/judge.py``）；单测注入返回脚本化 JSON 的 fake provider，零成本验证循环 / 收敛 / 双产物。
@@ -25,6 +27,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
@@ -58,7 +61,6 @@ from agentcore.runtime.debate.types import (
     DebateBrief,
     DebateConfig,
     DebateResult,
-    DebateSeed,
     JudgeVerdict,
     RoundDecision,
     RoundResult,
@@ -97,6 +99,8 @@ class Moderator:
         # 折算成主持人节点的一条 ledger 行（与辩手 run 一样计入回合总账）。
         self._usage = TokenUsage()
         self._llm_rounds = 0
+        # 结辩 ∥ 简报并发时两侧都可能走 :meth:`_complete_json`，锁住用量累计防丢失更新。
+        self._usage_lock = asyncio.Lock()
 
     @property
     def usage(self) -> TokenUsage:
@@ -118,7 +122,6 @@ class Moderator:
         on_round_start: RoundStartHook | None = None,
         on_round: RoundHook | None = None,
         on_round_boundary: RoundBoundaryHook | None = None,
-        seed: DebateSeed | None = None,
     ) -> DebateResult:
         """驱动整场辩论到收敛 / 上限，返回双产物（决策简报 + 交锋叙事线）。
 
@@ -127,17 +130,12 @@ class Moderator:
         除非命题空泛），不再靠外部计数。``policy.max_rounds`` 是纯安全上限（裁判持续不收敛时的
         断路器兜底）。每轮成功产出后触发 ``on_round``（emit 事件 / 老板检查点）。
 
-        交互式逐轮（opt-in，辩论编排设计.md §逐轮交互）：当注入 ``on_round_boundary`` 时，每轮
-        判完 + 小结后把决定权交给用户而非直接采信裁判——``CONTINUE`` 再辩一轮（可带「加角度」焦点
-        覆写）、``CONCLUDE`` 立即出结论（即便裁判判收敛也以用户为准；反之用户也可在裁判判收敛时续
-        辩）。钩子返回 ``None``（超时 / 无活跃用户）则回退到裁判自动收敛。未接钩子时循环逐字不变
-        （与 ``checkpoint`` marker 无 hook 即惰性同辙），故非交互辩论零行为变化。``max_rounds`` 始
-        终是硬上限：用户连续 ``CONTINUE`` 也不会越过它。
-
-        结构化补轮（可逆叫停·B，辩论编排设计.md §6.6）：``seed`` 非空时本场是
-        【续辩】——:meth:`_frame` 让焦点正交于上一场已谈焦点（不重复），首个新轮辩手 task 注入上一场
-        摘要（由 ``run_round`` 实现读取，见 ``rounds.first_round``），从「读懂上一场」处接着
-        往深里辩。``None``（全新辩论）时逐字不变。
+        ambient 掌舵（辩论编排设计.md §六）：当注入 ``on_round_boundary`` 时，每轮判完 + 小结后
+        **非阻塞**捞 steer 队列——``CONTINUE`` 再辩一轮（可带「加角度」焦点覆写）、``CONCLUDE``
+        在该边界出结论（即便裁判判收敛也以用户为准；反之用户也可在裁判判收敛时续辩）。钩子返回
+        ``None``（空队列）则回退到裁判自动收敛。未接钩子时循环逐字不变（与 ``checkpoint`` marker
+        无 hook 即惰性同辙）。``max_rounds`` 始终是硬上限：用户连续 ``CONTINUE`` 也不会越过它。
+        钩子**永不 block**——掌舵是 fire-and-forget，conclude 等当前轮跑完再生效。
 
         质询回合（P1，辩论编排设计.md §4-2.1）：注入 ``run_cross_exam`` 且【认真辩透 + 对抗形态】
         （:meth:`_cross_exam_enabled`）时，每轮立论后插入一个【质询 beat】——主持人据立论生成定向各方
@@ -146,11 +144,16 @@ class Moderator:
         循环逐字回退到「立论→裁判」，零行为变化。
 
         结辩收束（P4·阶段化发言角色，辩论编排设计.md §4-2.4）：注入 ``run_closing`` 且【认真辩透 +
-        对抗形态】（:meth:`_closing_enabled`）且本场确有有效发言时，收场（循环结束）后、简报前插入一个
-        【结辩 beat】——各方经 runner 用 ``continue_run`` 在自己 transcript 上做一段收尾陈词（只讲胜负手、
-        不引入新论据、长度收紧），随 :class:`ClosingStatement` 进 ``DebateResult.closings``。这是辩手自己的
-        advocacy 收尾，与裁判中立的 ``brief`` 正交并存（真人辩论：结辩 + 裁决并存）。未注入 / 快速对碰 /
-        圆桌 / 全员失败时跳过，收场后逐字回退到「直接出简报」，零行为变化。
+        对抗形态】（:meth:`_closing_enabled`）且本场确有有效发言时，收场（循环结束）后与决策简报
+        ``asyncio.gather`` 并行——二者互不依赖（简报只读 rounds，不读结辩），结果语义与事件顺序不变
+        （简报仍随 :class:`DebateResult` 在两者完成后返回）。各方经 runner 用 ``continue_run`` 在自己
+        transcript 上做一段收尾陈词（只讲胜负手、不引入新论据、长度收紧），随 :class:`ClosingStatement`
+        进 ``DebateResult.closings``。这是辩手自己的 advocacy 收尾，与裁判中立的 ``brief`` 正交并存
+        （真人辩论：结辩 + 裁决并存）。未注入 / 快速对碰 / 圆桌 / 全员失败时跳过，收场后逐字回退到
+        「直接出简报」，零行为变化。
+
+        下轮焦点优先级：用户掌舵 ``focus_override`` > 上轮 ``verdict.next_focus`` > :meth:`_frame` 兜底。
+        ``_frame`` 保留首轮（开场白 + 首焦点）与 ``next_focus`` 缺失 / 空串时的零风险降级路径。
         """
         rounds: list[RoundResult] = []
         stop_reason = STOP_MAX_ROUNDS  # 循环跑满未 break ⇒ 触上限兜底
@@ -161,13 +164,18 @@ class Moderator:
         # 交互式「追问」：用户在上一轮边界注入、待【本轮】辩手正面回应的问题（消费后清空）。
         pending_interjections: list[UserInterjection] = []
         for round_no in range(1, config.policy.max_rounds + 1):
+            # 焦点优先级：掌舵覆写 > 上轮 assess 兼产的 next_focus > _frame（首轮 / 缺失兜底）。
             if focus_override:
                 focus = focus_override
             else:
-                focus, framed_opening = await self._frame(config, rounds, seed=seed)
-                # 首轮 _frame 顺带产出开场白（后续轮为空）；全场只认第一句，不被后续覆盖。
-                if framed_opening and not opening:
-                    opening = framed_opening
+                prior_focus = (rounds[-1].verdict.next_focus if rounds else "").strip()
+                if prior_focus:
+                    focus = prior_focus
+                else:
+                    focus, framed_opening = await self._frame(config, rounds)
+                    # 首轮 _frame 顺带产出开场白（后续轮为空）；全场只认第一句，不被后续覆盖。
+                    if framed_opening and not opening:
+                        opening = framed_opening
             focus_override = ""
             interjections = pending_interjections
             pending_interjections = []
@@ -242,9 +250,9 @@ class Moderator:
             if on_round is not None:
                 await on_round(rr)
 
-            # 交互式逐轮边界（opt-in）：把「继续辩 / 加角度 / 够了出结论」交给用户；钩子返回 None
-            # （超时 / 无活跃用户）则回退裁判自动收敛。用户选择凌驾裁判——CONCLUDE 即便裁判未收敛
-            # 也收场，CONTINUE 即便裁判已收敛也续辩（focus 非空则覆写下一轮议题=「加角度」）。
+            # ambient 掌舵边界：非阻塞捞 steer；有则折进 focus_override / pending_interjections /
+            # CONCLUDE。钩子返回 None（空队列）则回退裁判自动收敛。用户选择凌驾裁判——CONCLUDE
+            # 即便裁判未收敛也收场，CONTINUE 即便裁判已收敛也续辩（focus 非空则覆写下一轮议题）。
             if on_round_boundary is not None:
                 boundary = await on_round_boundary(
                     round_no=round_no,
@@ -285,16 +293,23 @@ class Moderator:
         # 结辩 beat（结辩收束 P4，opt-in：注入 runner + 认真辩透 + 对抗形态 + 本场确有有效发言才开）：
         # 收场后各方做收尾陈词（只讲胜负手、不引入新论据），随 closings 进 DebateResult。全员失败
         # （STOP_ALL_FAILED）无可收束的立场 ⇒ 跳过。未开启恒空，逐字回退到「直接出简报」。
+        # 结辩与简报互不依赖（简报只读 rounds）→ 可开时 asyncio.gather 并行，双产物仍一并返回。
         closings: list[ClosingStatement] = []
-        if (
+        do_closing = (
             run_closing is not None
             and self._closing_enabled(config)
             and stop_reason != STOP_ALL_FAILED
-            and rounds
-        ):
-            closings = list(await run_closing(sides=config.sides, rounds=rounds))
-
-        brief = await self._brief(config, rounds)
+            and bool(rounds)
+        )
+        if do_closing:
+            assert run_closing is not None  # 收窄 Optional，供类型检查
+            closings_raw, brief = await asyncio.gather(
+                run_closing(sides=config.sides, rounds=rounds),
+                self._brief(config, rounds),
+            )
+            closings = list(closings_raw)
+        else:
+            brief = await self._brief(config, rounds)
         return DebateResult(
             config=config,
             rounds=rounds,
@@ -306,10 +321,10 @@ class Moderator:
 
     # ── 第1步：定本轮议题 ────────────────────────────────────────────────
     async def _frame(
-        self, config: DebateConfig, history: list[RoundResult], seed: DebateSeed | None = None
+        self, config: DebateConfig, history: list[RoundResult]
     ) -> tuple[str, str]:
         """定本轮议题焦点；第 1 轮附带一句主持人【开场白】。"""
-        return await frame_round(self._complete_json, config, history, seed=seed)
+        return await frame_round(self._complete_json, config, history)
 
     # ── 第2.5步：质询回合（质询回合 P1，辩论编排设计.md §4-2.1）──────────────
     @staticmethod
@@ -359,6 +374,7 @@ class Moderator:
             scenario=f"{self._scenario}.{step}",
         )
         response = await self._llm.complete(request)
-        self._usage = self._usage + (response.usage or TokenUsage())
-        self._llm_rounds += 1
+        async with self._usage_lock:
+            self._usage = self._usage + (response.usage or TokenUsage())
+            self._llm_rounds += 1
         return _parse_json_object(response.content or "")

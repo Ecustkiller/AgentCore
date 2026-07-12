@@ -116,9 +116,8 @@ export function handleExecutionEvent(
     // conversation-store gate); journaled, so it replays on reload.
     case "plan_revised":
     case "run_escalation":
-    // Worker 内部路由 Phase 1：Intake / Escalation Gate — 诊断帧；Phase 1 无独立 UI，
-    // 仍走 frame 路径以便 journal 重放时不丢事件（intake 为 DURABLE）。
-    case "run_intake":
+    // Worker 内部路由 Phase 1：Escalation Gate — 诊断帧；Phase 1 无独立 UI，
+    // 仍走 frame 路径以便 journal 重放时不丢事件。
     case "run_escalation_gate":
     // 阻塞式求决策: a worker SUSPENDED on a blocking escalate (escalation_required) then settled
     // (escalation_resolved). Both fold onto the run's escalations via the same frame path
@@ -263,29 +262,6 @@ export function handleExecutionEvent(
           mid,
         );
       }
-      return true;
-    }
-    // 交互式逐轮辩论 (opt-in, §逐轮交互): the Moderator paused at a round boundary for the user
-    // to steer (continue / 加角度 / conclude). Append a `pending` decision card; its resolved
-    // twin settles it. Transport-only (not journaled) — a desktop-live card, like debate_round.
-    case "debate_round_decision_required": {
-      const mid = execMessageId(conversationId);
-      applyInteractionWireEvent(
-        event.type,
-        (event.payload ?? {}) as Record<string, unknown>,
-        conversationId,
-        mid ?? "",
-      );
-      return true;
-    }
-    case "debate_round_decision_resolved": {
-      const mid = execMessageId(conversationId);
-      applyInteractionWireEvent(
-        event.type,
-        (event.payload ?? {}) as Record<string, unknown>,
-        conversationId,
-        mid ?? "",
-      );
       return true;
     }
     default:

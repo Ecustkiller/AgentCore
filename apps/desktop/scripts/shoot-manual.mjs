@@ -10,7 +10,7 @@
 //   node scripts/shoot-manual.mjs faq          # filter by scene id substring
 //   SHOOT_SETTLE_MS=1200 node scripts/shoot-manual.mjs
 
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -25,7 +25,7 @@ const scenesPath = resolve(
 const SHOOT_OUT_DIR = "shoot-out-manual";
 const outDir = resolve(desktopDir, SHOOT_OUT_DIR);
 
-const SETTLE_MS = Number(process.env.SHOOT_SETTLE_MS ?? 1000);
+const SETTLE_MS = Number(process.env.SHOOT_SETTLE_MS ?? 1200);
 const VIEWPORT = {
   width: Number(process.env.SHOOT_WIDTH ?? 1440),
   height: Number(process.env.SHOOT_HEIGHT ?? 900),
@@ -34,9 +34,13 @@ const SCALE = Number(process.env.SHOOT_SCALE ?? 2);
 const THEME = process.env.SHOOT_THEME === "dark" ? "dark" : "light";
 const filter = (process.argv[2] ?? "").toLowerCase();
 
+/** Min PNG size (bytes) — below this is treated as blank / failed capture. */
+const MIN_PNG_BYTES = 8_000;
+
 async function loadScenes() {
   const scenes = JSON.parse(await readFile(scenesPath, "utf8"));
-  if (!Array.isArray(scenes)) throw new Error("manual-scenes.json must be an array");
+  if (!Array.isArray(scenes))
+    throw new Error("manual-scenes.json must be an array");
   return scenes.filter((s) => s?.id && s?.path);
 }
 
@@ -44,6 +48,13 @@ function hashFor(scene) {
   const base = scene.path.startsWith("/") ? scene.path : `/${scene.path}`;
   if (scene.section) return `${base}?s=${encodeURIComponent(scene.section)}`;
   return base;
+}
+
+function previewManualFor(scene) {
+  if (scene.previewManual) return scene.previewManual;
+  // Derive from path: /toolbox/manual/reference → manual-reference
+  const m = String(scene.path).match(/\/toolbox\/manual\/([^/?#]+)/);
+  return m ? `manual-${m[1]}` : "manual-reference";
 }
 
 async function main() {
@@ -110,34 +121,82 @@ async function main() {
   const failures = [];
   for (const [i, scene] of scenes.entries()) {
     const file = `${scene.id}.png`;
+    const outPath = resolve(outDir, file);
     const label = `[${i + 1}/${scenes.length}] ${file}`;
     pageErrors.length = 0;
     let failure = null;
     const section = scene.section ?? "top";
+    const previewManual = previewManualFor(scene);
     try {
       const url = new URL("index.web.html", base);
       url.searchParams.set("shoot-manual", String(i));
       url.hash = hashFor(scene);
       await page.goto(url.href, { waitUntil: "load", timeout: 30_000 });
       await page.waitForSelector(
-        `[data-preview-manual="manual-reference"][data-preview-section="${section}"]`,
+        `[data-preview-manual="${previewManual}"][data-preview-section="${section}"]`,
         { timeout: 15_000 },
       );
+      const embeds = Array.isArray(scene.waitEmbeds) ? scene.waitEmbeds : [];
+      for (const key of embeds) {
+        await page.waitForSelector(`[data-manual-embed="${key}"]`, {
+          timeout: 20_000,
+        });
+        // Lazy chunk + Suspense: wait until pulse fallback is gone inside the embed.
+        await page.waitForFunction(
+          (embedKey) => {
+            const root = document.querySelector(
+              `[data-manual-embed="${embedKey}"]`,
+            );
+            if (!root) return false;
+            return !root.querySelector(".animate-pulse");
+          },
+          key,
+          { timeout: 20_000 },
+        );
+      }
+      // Real graphs (HeroGraph / scenarios): wait for at least one react-flow pane if present.
+      if (embeds.some((k) => k === "HeroGraph" || k === "MechanismScenarios")) {
+        await page
+          .waitForSelector(".react-flow", { timeout: 20_000 })
+          .catch(() => {});
+      }
+      if (scene.section) {
+        await page.evaluate((id) => {
+          document
+            .getElementById(id)
+            ?.scrollIntoView({ behavior: "instant", block: "start" });
+        }, scene.section);
+      }
       await page.evaluate(() => document.fonts?.ready).catch(() => {});
       await page.waitForTimeout(SETTLE_MS);
+      const crashed = await page
+        .locator("text=出了点问题")
+        .count()
+        .catch(() => 0);
+      if (crashed > 0) {
+        failure = "route error boundary visible (出了点问题)";
+      }
     } catch (err) {
       failure = String(err?.message ?? err);
     }
-    await page.screenshot({ path: resolve(outDir, file) }).catch(() => {});
+    await page.screenshot({ path: outPath }).catch(() => {});
+    try {
+      const st = await stat(outPath);
+      if (st.size < MIN_PNG_BYTES) {
+        failure = `${failure ? `${failure}; ` : ""}screenshot too small (${st.size}B < ${MIN_PNG_BYTES}B) — likely blank`;
+      }
+    } catch {
+      failure = `${failure ? `${failure}; ` : ""}screenshot missing`;
+    }
     if (pageErrors.length) {
       failure = `${failure ? `${failure}; ` : ""}page error: ${pageErrors.join(" | ")}`;
     }
     if (failure) {
       failures.push({ name: file, error: failure });
-      console.error(`  \u2717 ${label} — ${failure}`);
+      console.error(`  ✗ ${label} — ${failure}`);
     } else {
       ok += 1;
-      console.log(`  \u2713 ${label}`);
+      console.log(`  ✓ ${label}`);
     }
   }
 

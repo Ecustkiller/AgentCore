@@ -121,6 +121,8 @@ class TokenResponse(BaseModel):
     its body-returning twin for clients whose origin (``capacitor://`` / a new web
     origin) can't rely on SameSite cookies (认证与会话.md §十). ``expires_in`` is the
     access token's lifetime in seconds so the client refreshes before it lapses;
+    ``refresh_expires_in`` is the refresh token's lifetime in seconds (clients that
+    persist the refresh token as a cookie need this for ``expirationDate``);
     ``user`` rides the login response (identity in one round trip) and is omitted on
     refresh.
     """
@@ -129,6 +131,7 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: Literal["bearer"] = "bearer"
     expires_in: int
+    refresh_expires_in: int | None = None
     user: UserResponse | None = None
 
 
@@ -136,6 +139,23 @@ class TokenRefreshRequest(BaseModel):
     """Rotate a bearer client's token pair (refresh token in the body, not a cookie)."""
 
     refresh_token: str = Field(..., min_length=1, max_length=512)
+
+
+class SessionSummary(BaseModel):
+    """One active login device (refresh-token family), owner-scoped."""
+
+    id: str  # token_family
+    platform: str | None = None
+    user_agent: str | None = None
+    ip: str | None = None
+    created_at: datetime
+    last_used_at: datetime
+    current: bool = False
+
+
+class SessionListResponse(BaseModel):
+    data: list[SessionSummary]
+    total: int
 
 
 class TokenRevokeRequest(BaseModel):

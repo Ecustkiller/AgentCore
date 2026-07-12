@@ -64,6 +64,7 @@ export function buildAgentNodePresentation(
   const revisionBadge = buildRevisionBadge({
     isRevision: d.isRevision,
     revision: d.revision,
+    continuationIndex: d.continuationIndex,
     round: d.round,
     isDebate: debate,
     beat: d.debateBeat,
@@ -79,7 +80,7 @@ export function buildAgentNodePresentation(
     d.revised ? `，${revisedBadge(d.revised).label}` : ""
   }${d.replacesRunId ? "，接手" : ""}${
     revisionBadge
-      ? `，${revisionBadge.kind === "debate" ? revisionBadge.label : `修订 ${revisionBadge.label}`}`
+      ? `，${revisionBadge.kind === "debate" ? revisionBadge.label : `接续 ${revisionBadge.label}`}`
       : ""
   }${d.checkpoint ? `，检查点${checkpointBadge(d.checkpoint).label}` : ""}${
     (d.escalationPending ?? 0) > 0
@@ -116,7 +117,7 @@ export function buildAgentNodePresentation(
     peekTags.push(
       revisionBadge.kind === "debate"
         ? revisionBadge.label
-        : `热修修订 ${revisionBadge.label}`,
+        : `接续 ${d.role} 的现场 · ${revisionBadge.label}`,
     );
   }
   if (d.revised) peekTags.push(revisedBadge(d.revised).label);

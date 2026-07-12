@@ -190,10 +190,12 @@ def test_team_preview_finalized(projected):
             "workerIds": ["r1", "r2"],
         }
     ]
-    assert any(
-        s.get("kind") == "team_preview" and s.get("checkpoint_id") == "tp1"
-        for s in p["process"]
-    )
+    # Narrative order: 开工卡 before 协作图 (even though events are run_plan → preview).
+    assert [s["kind"] for s in p["process"]] == [
+        "content",
+        "team_preview",
+        "team",
+    ]
 
 
 def test_team_preview_resolved_continue(projected):
@@ -201,6 +203,12 @@ def test_team_preview_resolved_continue(projected):
     assert p["status"] == "completed"
     assert _pending_gates(p) == []
     assert p["progress"]["completed"] == 2
+    assert [s["kind"] for s in p["process"]] == [
+        "content",
+        "team_preview",
+        "team",
+        "content",
+    ]
 
 
 def test_single_agent_citations(projected):
@@ -314,18 +322,27 @@ def test_multi_agent_debate_multibeat_channels(projected):
 def test_multi_agent_revision_synthesizes_node(projected):
     p = projected["multi_agent_revision"]
     assert p["status"] == "completed"
-    # A revision is born from its run_started frame (not the plan): a new agent cloned
-    # from the original's identity + a 修订 node hung off the original.
+    # A continuation is born from its run_started frame (not the plan): a new agent cloned
+    # from the original's identity + a 续派 node with continuesRunId = session root.
     assert [a["id"] for a in p["agents"]] == ["w1", "w1b"]
     w1b = next(a for a in p["agents"] if a["id"] == "w1b")
     assert w1b["role"] == "撰写员"  # inherited from the original agent
     assert w1b["output"] == "修订稿"
     rev = next(r for r in p["runs"] if r["id"] == "r1v2")
-    assert rev["revisionOf"] == "r1"
-    assert rev["revision"] == 2
-    assert rev["parentRunId"] == "r1"
+    assert rev["continuesRunId"] == "r1"
+    assert rev["parentRunId"] is None
     assert rev["task"] == "起草"  # inherited from the original run
     assert p["progress"] == {"completed": 2, "total": 2}
+
+
+def test_multi_agent_redelegate_continuation_in_plan(projected):
+    p = projected["multi_agent_redelegate_continuation"]
+    assert p["status"] == "completed"
+    by_id = {r["id"]: r for r in p["runs"]}
+    assert by_id["r2"]["continuesRunId"] == "r1"
+    assert by_id["r2"]["parentRunId"] == "cap"
+    assert by_id["r1"]["continuesRunId"] is None
+    assert "continuation" in {b["channel"] for b in by_id["r2"]["receivedContext"]}
 
 
 def test_multi_agent_multi_batch_merges(projected):

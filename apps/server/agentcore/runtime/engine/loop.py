@@ -175,12 +175,12 @@ async def react_loop(
     ``token_budget`` (Worker hard ceiling · loose backstop): a cumulative
     input+output token cap for the whole run, checked at the TOP of each round. Once
     ``total_usage.total_tokens`` reaches it the loop stops and force-finalizes — the
-    backstop against a worker blowing far past its estimate (the 2221→41378
-    pathology). The terminal finalize (this AND ``max_rounds`` exhaustion) is
-    gate-routed by run health (``controller.is_thrashing()``): an on-track run
-    delivers normally; a thrashing worker finishes DEGRADED and emits an observable
-    ``escalation_raised`` signal (no auto re-decompose — the CEO may voluntarily
-    replan). ``0`` (CEO / solo / tests) disables the backstop, leaving the run bounded
+    backstop against a worker blowing past the configured unified ceiling. The
+    terminal finalize (this AND ``max_rounds`` exhaustion) is gate-routed by run
+    health (``controller.is_thrashing()``): an on-track run delivers normally; a
+    thrashing worker finishes DEGRADED and emits an observable ``escalation_raised``
+    signal (no auto re-decompose — the CEO may voluntarily replan). ``0`` (CEO /
+    solo / tests / ceiling disabled) disables the backstop, leaving the run bounded
     only by ``profile.max_rounds``.
     """
     profile = profile or get_profile("chat")

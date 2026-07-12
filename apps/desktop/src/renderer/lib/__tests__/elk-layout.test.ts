@@ -62,7 +62,7 @@ const NH = 110;
 const e = (
   source: string,
   target: string,
-  kind: "dep" | "delegate" | "revision" = "dep",
+  kind: "dep" | "delegate" | "continuation" = "dep",
 ): GraphEdge => ({ id: `${source}->${target}`, source, target, kind });
 
 /** 两节点盒（NW×NH）是否相交。 */
@@ -313,9 +313,9 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("mod", "s_a", "delegate"),
       e("mod", "s_b", "delegate"),
       e("mod", "s_c", "delegate"),
-      e("s_a", "s_a2", "revision"),
-      e("s_b", "s_b2", "revision"),
-      e("s_c", "s_c2", "revision"),
+      e("s_a", "s_a2", "continuation"),
+      e("s_b", "s_b2", "continuation"),
+      e("s_c", "s_c2", "continuation"),
     ];
     const { positions } = await layout(ids, edges, "leftright", {
       source: "__input__",
@@ -354,9 +354,9 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("mod", "s_a", "delegate"),
       e("mod", "s_b", "delegate"),
       e("mod", "s_c", "delegate"),
-      e("s_a", "s_a2", "revision"),
-      e("s_b", "s_b2", "revision"),
-      e("s_c", "s_c2", "revision"),
+      e("s_a", "s_a2", "continuation"),
+      e("s_b", "s_b2", "continuation"),
+      e("s_c", "s_c2", "continuation"),
       e("mod", "cap"),
     ];
     const { positions } = await layout(ids, edges, "leftright", {
@@ -388,9 +388,9 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       e("mod", "s_a", "delegate"),
       e("mod", "s_b", "delegate"),
       e("mod", "s_c", "delegate"),
-      e("s_a", "s_a2", "revision"),
-      e("s_b", "s_b2", "revision"),
-      e("s_c", "s_c2", "revision"),
+      e("s_a", "s_a2", "continuation"),
+      e("s_b", "s_b2", "continuation"),
+      e("s_c", "s_c2", "continuation"),
     ];
     const { positions, groups } = await layout(ids, edges, "leftright", {
       source: "__input__",
@@ -477,8 +477,8 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
       id: `mod_r1_${prefix}`,
       dependsOn: [],
       parentRunId: "mod",
-      revision: 0,
-      revisionOf: null,
+      continuationIndex: 0,
+      continuesRunId: null,
       stance,
     };
     // 后续每一轮都是首轮的续写 revision——真实投影里 revisionOf 恒指向【原始】(r1)，形成星型。
@@ -490,8 +490,8 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
         id: `mod_r${r}_${prefix}`,
         dependsOn: [],
         parentRunId: original.id,
-        revision: r,
-        revisionOf: original.id,
+        continuationIndex: r - 1,
+        continuesRunId: original.id,
         stance,
       });
     }
@@ -511,7 +511,7 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
       new Set(["mod"]),
     );
     const revEdges = rawEdges
-      .filter((e) => e.kind === "revision")
+      .filter((e) => e.kind === "continuation")
       .map((e) => `${e.source}->${e.target}`)
       .sort();
     expect(revEdges).toEqual(
@@ -574,8 +574,8 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
         id: `mod_r1_${prefix}`,
         dependsOn: [],
         parentRunId: "mod",
-        revision: 0,
-        revisionOf: null,
+        continuationIndex: 0,
+        continuesRunId: null,
         stance,
         group: "debate:debate",
         round: 1,
@@ -586,8 +586,8 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
           id: `mod_r1_cx_${prefix}`,
           dependsOn: [],
           parentRunId: original.id,
-          revision: 2,
-          revisionOf: original.id,
+          continuationIndex: 1,
+          continuesRunId: original.id,
           stance,
           group: "debate:debate",
           round: 1,
@@ -597,8 +597,8 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
           id: `mod_closing_${prefix}`,
           dependsOn: [],
           parentRunId: original.id,
-          revision: 3,
-          revisionOf: original.id,
+          continuationIndex: 2,
+          continuesRunId: original.id,
           stance,
           group: "debate:debate",
           round: 1,
@@ -637,7 +637,8 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
     expect(width).toBeGreaterThan(0);
     const g = groups.find((x) => x.groupId === "__group__mod");
     expect(g).toBeDefined();
-    expect(g!.y).toBeGreaterThanOrEqual(24);
+    if (g == null) throw new Error("expected debate group");
+    expect(g.y).toBeGreaterThanOrEqual(24);
   });
 
   it("workerGraphShape 辩论网格：compoundLanes=辩手数，首帧 fit 高度贴近真实布局", async () => {
@@ -654,7 +655,7 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
         id: "mod_r1_pro",
         dependsOn: [],
         parentRunId: "mod",
-        revision: 0,
+        continuationIndex: 0,
         stance: "pro",
         group: "debate:debate",
       },
@@ -662,7 +663,7 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
         id: "mod_r1_con",
         dependsOn: [],
         parentRunId: "mod",
-        revision: 0,
+        continuationIndex: 0,
         stance: "con",
         group: "debate:debate",
       },
@@ -710,7 +711,7 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
         id: "mod_r1_pro",
         dependsOn: [],
         parentRunId: "mod",
-        revision: 0,
+        continuationIndex: 0,
         stance: "pro",
         group: "debate:debate",
         round: 1,
@@ -719,8 +720,8 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
         id: "mod_r1_cx_pro",
         dependsOn: [],
         parentRunId: "mod_r1_pro",
-        revision: 2,
-        revisionOf: "mod_r1_pro",
+        continuationIndex: 1,
+        continuesRunId: "mod_r1_pro",
         stance: "pro",
         group: "debate:debate",
         round: 1,
@@ -730,8 +731,8 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
         id: "mod_r2_pro",
         dependsOn: [],
         parentRunId: "mod_r1_pro",
-        revision: 3,
-        revisionOf: "mod_r1_pro",
+        continuationIndex: 2,
+        continuesRunId: "mod_r1_pro",
         stance: "pro",
         group: "debate:debate",
         round: 2,
@@ -740,7 +741,7 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
         id: "mod_r1_con",
         dependsOn: [],
         parentRunId: "mod",
-        revision: 0,
+        continuationIndex: 0,
         stance: "con",
         group: "debate:debate",
         round: 1,
@@ -749,8 +750,8 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
         id: "mod_r1_cx_con",
         dependsOn: [],
         parentRunId: "mod_r1_con",
-        revision: 2,
-        revisionOf: "mod_r1_con",
+        continuationIndex: 1,
+        continuesRunId: "mod_r1_con",
         stance: "con",
         group: "debate:debate",
         round: 1,
@@ -760,8 +761,8 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
         id: "mod_r2_con",
         dependsOn: [],
         parentRunId: "mod_r1_con",
-        revision: 3,
-        revisionOf: "mod_r1_con",
+        continuationIndex: 2,
+        continuesRunId: "mod_r1_con",
         stance: "con",
         group: "debate:debate",
         round: 2,

@@ -62,6 +62,7 @@ const sidecarApi: SidecarApi = {
   cancel: async () => {},
   respond: async () => ({ resolved: false }),
   runRedirect: async () => {},
+  debateSteer: async () => {},
   resume: async () => {
     throw new Error("sidecar unavailable in web preview");
   },

@@ -130,12 +130,22 @@ function pushPlanReviewMarker(process: ProcessStep[], id: string): void {
   process.push({ kind: "plan_review", checkpoint_id: id });
 }
 
-/** Drop a `team_preview` marker (thin team-preview gate) at its chronological slot. */
+/** Drop a `team_preview` marker (开工卡 gate). Event order is run_plan →
+ * team_preview_required, but product narrative is 开工卡 → 协作图 — if a `team`
+ * marker already exists, insert before the last one; else append. Dedupes by
+ * checkpoint_id. Mirrors backend `EventSink._accumulate_process`. */
 function pushTeamPreviewMarker(process: ProcessStep[], id: string): void {
   if (!id) return;
   if (process.some((s) => s.kind === "team_preview" && s.checkpoint_id === id))
     return;
-  process.push({ kind: "team_preview", checkpoint_id: id });
+  const marker = { kind: "team_preview" as const, checkpoint_id: id };
+  for (let i = process.length - 1; i >= 0; i--) {
+    if (process[i].kind === "team") {
+      process.splice(i, 0, marker);
+      return;
+    }
+  }
+  process.push(marker);
 }
 
 /** Fold one 逐轮叙事 update (`debate_round_started` → focus only, verdict null;
@@ -190,8 +200,7 @@ function runFromPlan(s: RunPlanPayload["runs"][number]): ProjectedRun {
     stance: s.stance ?? null,
     group: s.group ?? null,
     round: s.round ?? 0,
-    revisionOf: null,
-    revision: 0,
+    continuesRunId: null,
     //「计划已调整」轻痕迹 (设计 §7.2): set by the plan_revised event; null until then.
     revised: null,
     replacesRunId: s.replaces_run_id ?? null,
@@ -336,10 +345,10 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         // run_context routes turn-level (the captain node itself comes from run_plan, or
         // is dropped on a non-delegating turn).
         if (p.kind === "captain") captainRunId = p.run_id;
-        const revision = p.revision ?? 0;
+        const continuesRoot = p.continues_run_id ?? null;
         let run = runById(p.run_id);
-        if (!run && revision > 0 && p.parent_run_id) {
-          const original = runById(p.parent_run_id);
+        if (!run && continuesRoot) {
+          const original = runById(continuesRoot);
           if (original) {
             const originAgent = agentById(original.agentId);
             agents.push({
@@ -363,8 +372,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
               }),
               parentRunId: p.parent_run_id,
               kind: p.kind,
-              revisionOf: p.parent_run_id,
-              revision,
+              continuesRunId: continuesRoot,
               // 乙 wire 携 round/stance (单一轮次投影): debate 续写从 wire 读取。
               stance: p.stance ?? null,
               group: p.group ?? null,
@@ -377,6 +385,9 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           run.status = "running";
           run.parentRunId = p.parent_run_id;
           run.kind = p.kind;
+          if (continuesRoot && run.continuesRunId == null) {
+            run.continuesRunId = continuesRoot;
+          }
           // 冷回落接手: mid-flight `_redir` carries replaces_run_id on the wire.
           if (p.replaces_run_id) run.replacesRunId = p.replaces_run_id;
         }
@@ -697,10 +708,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "tool_progress":
       case "tool_use_progress":
       case "batch_metrics":
-      case "run_intake":
       case "run_escalation_gate":
-      case "debate_round_decision_required":
-      case "debate_round_decision_resolved":
       case "delegation_authorization_required":
       case "delegation_authorization_resolved":
       case "interaction_orphaned":

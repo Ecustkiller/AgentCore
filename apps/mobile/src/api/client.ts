@@ -123,26 +123,40 @@ export function authHeader(): Record<string, string> {
 // desktop services/api.ts; reset once settled so the next expiry refreshes anew.
 let refreshInFlight: Promise<boolean> | null = null;
 
-/** Rotate the token pair via the bearer refresh endpoint. Returns true on success;
- *  clears tokens on failure so the caller can route back to login. Single-flight:
- *  concurrent callers share one round-trip (see {@link refreshInFlight}). */
+/** Rotate the token pair via the bearer refresh endpoint. Returns true on success.
+ *  Tokens are cleared ONLY when the server says the session is dead (401/403 —
+ *  revoked/expired/reused), so the route guard drops to login. A transient failure
+ *  (network error, 5xx, 429, backend restart window) keeps the pair: the refresh
+ *  token is still valid and a later retry will succeed — destroying it here would
+ *  force a needless re-login. Single-flight: concurrent callers share one
+ *  round-trip (see {@link refreshInFlight}). */
 export function refreshTokens(): Promise<boolean> {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
     const tokens = getTokens();
     if (!tokens) return false;
-    const res = await fetch(apiUrl("/v1/auth/token/refresh"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: tokens.refresh_token }),
-    });
-    if (!res.ok) {
-      clearTokens();
+    let res: Response;
+    try {
+      res = await fetch(apiUrl("/v1/auth/token/refresh"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: tokens.refresh_token }),
+      });
+    } catch {
+      return false; // transient: offline / backend unreachable — keep tokens
+    }
+    if (res.status === 401 || res.status === 403) {
+      clearTokens(); // session truly dead — route guard drops to login
       return false;
     }
-    const data = (await res.json()) as Tokens;
-    setTokens(data);
-    return true;
+    if (!res.ok) return false; // transient 5xx/429 — keep tokens for retry
+    try {
+      const data = (await res.json()) as Tokens;
+      setTokens(data);
+      return true;
+    } catch {
+      return false; // malformed body (proxy error page) — keep tokens
+    }
   })().finally(() => {
     refreshInFlight = null;
   });

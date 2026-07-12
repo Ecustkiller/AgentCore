@@ -47,8 +47,6 @@ export interface StatusStripProps {
   onToggle: () => void;
   onMaximize: () => void;
   onReplay: () => void;
-  /** Open the first in-flight worker in the side detail panel (中间可见性). */
-  onPeekRunning?: () => void;
   /** 定向唤回「修订 vN」的回合：聊天正文不再内联版本对比大卡，改由状态条「改了 N 版」信号 chip
    *  深链画布放大态统一「对比」视图（前端UX设计.md §4.2/§6.4）。无修订 / 未提供则不出 chip。 */
   onOpenRevisions?: () => void;
@@ -114,10 +112,10 @@ function StripControls({
   const canReplay =
     execution.status === "completed" || execution.status === "cancelled";
   const debate = isDebate(execution);
-  // 「改了 N 版」仅计定向唤回热修；辩论 continue_run（陈词/质询/结辩）不是修订。
-  const revisionCount = debate
+  // 「接续 N 次」仅计同人续派 / 热修；辩论 continue_run（陈词/质询/结辩）不是接续计数。
+  const continuationCount = debate
     ? 0
-    : execution.runs.filter((r) => r.revisionOf != null).length;
+    : execution.runs.filter((r) => r.continuesRunId != null).length;
 
   return (
     <>
@@ -142,15 +140,15 @@ function StripControls({
       />
       {/* 「改了 N 版」信号：本回合有定向唤回续写时，正文不再内联版本对比大卡，改为一枚 chip →
           深链画布放大态统一「对比」视图并排比对（前端UX设计.md §4.2/§6.4）。 */}
-      {revisionCount > 0 && onOpenRevisions && (
-        <SimpleTooltip label="查看各版本并排对比（在画布）">
+      {continuationCount > 0 && onOpenRevisions && (
+        <SimpleTooltip label="查看接续链上各次产出并排对比（在画布）">
           <Button
             variant="ghost"
             className="ml-0.5 shrink-0 text-muted-foreground hover:text-foreground"
             icon={<History size={13} />}
             onClick={onOpenRevisions}
           >
-            改了 {revisionCount} 版
+            接续 {continuationCount} 次
           </Button>
         </SimpleTooltip>
       )}
@@ -182,12 +180,10 @@ function RunningStrip({
   onMaximize,
   onReplay,
   onOpenRevisions,
-  onPeekRunning,
   onOpenTeamNotes,
   collabSummary,
 }: StatusStripProps) {
   const { completed, total } = execution.progress;
-  const runningRuns = execution.runs.filter((r) => r.status === "running");
   const noteCount = execution.teamNotes.length;
 
   return (
@@ -217,18 +213,6 @@ function RunningStrip({
           collabSummary={collabSummary}
         />
       </div>
-      {runningRuns.length > 0 && onPeekRunning && (
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <span>{runningRuns.length} 人正在干活，节点上会实时显示输出预览</span>
-          <Button
-            variant="ghost"
-            className="h-7 shrink-0 px-2 text-primary hover:bg-primary/10"
-            onClick={onPeekRunning}
-          >
-            查看进行中
-          </Button>
-        </div>
-      )}
       {noteCount > 0 && onOpenTeamNotes && (
         <div className="mt-2 flex items-center gap-2">
           <SimpleTooltip label="展开团队便签">
@@ -246,12 +230,17 @@ function RunningStrip({
         </div>
       )}
       <TeamSynthesisPreviewLine />
-      <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full rounded-full bg-primary transition-all duration-300"
-          style={{ width: total > 0 ? `${(completed / total) * 100}%` : "0%" }}
-        />
-      </div>
+      {/* 进度条 = {completed}/{total} 的可视化；辩论走「轮次」语义、数字已隐藏，故条也不出。 */}
+      {!isDebate(execution) && (
+        <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-primary transition-all duration-300"
+            style={{
+              width: total > 0 ? `${(completed / total) * 100}%` : "0%",
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

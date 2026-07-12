@@ -19,19 +19,30 @@ logger = get_logger(__name__)
 
 _BACKGROUND_ROLES = frozenset({"title", "memory"})
 
+# Proxy-forwarded unary calls still emit ``llm.call`` (latency obs) via
+# provider.complete → log_llm_call, but billing must be ``proxy_spend`` only —
+# otherwise one physical upstream call lands two ``cost_calls`` rows.
+PROXY_LLM_SCENARIO = "inference.proxy"
+
 
 def maybe_enqueue_inprocess_call(
     *,
     model: str,
     usage: TokenUsage,
     duration_ms: int = 0,
+    scenario: str | None = None,
 ) -> str | None:
     """Enqueue one ``cost_calls`` row when cloud ledger drain is live.
 
     Skips when: drain not running (sidecar / unit tests), missing user or
-    conversation context, or zero usage. Does **not** materialize ``cost_events``
-    — cloud finalize / handoff still dual-writes the per-run aggregate.
+    conversation context, zero usage, or ``scenario`` is the inference proxy
+    marker (proxy already records via ``proxy_spend``). Does **not** materialize
+    ``cost_events`` — cloud finalize / handoff still dual-writes the per-run
+    aggregate.
     """
+    if scenario == PROXY_LLM_SCENARIO:
+        return None
+
     from agentcore.billing.cost_ledger_queue import get_cost_ledger_queue
 
     queue = get_cost_ledger_queue()
@@ -51,9 +62,7 @@ def maybe_enqueue_inprocess_call(
     message_id = get_log_value("message_id") or None
     trace_id = get_log_value("trace_id") or None
 
-    if cost_role in _BACKGROUND_ROLES:
-        role = cost_role
-    elif cost_role in ("captain", "member", "arena", "vision"):
+    if cost_role in _BACKGROUND_ROLES or cost_role in ("captain", "member", "arena", "vision"):
         role = cost_role
     elif agent_id in ("CEO", "captain"):
         role = ROLE_CAPTAIN

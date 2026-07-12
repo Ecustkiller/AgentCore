@@ -31,7 +31,6 @@ from agentcore.runtime.context import (
     desktop_client_can_bind,
 )
 from agentcore.runtime.costing import RunCost, aggregate_cost, captain_run_cost_from_state
-from agentcore.runtime.debate import DebateSeed
 from agentcore.runtime.events import (
     EventSink,
     FinishReason,
@@ -115,7 +114,6 @@ async def run_chat_pipeline(
     session_loader: SessionLoader | None = None,
     suspension_saver: SuspensionSaver | None = None,
     suspension_deleter: SuspensionDeleter | None = None,
-    debate_seed: dict | None = None,
     llm_supports_tools: bool | None = None,
     message_id: str | None = None,
     x_client_platform: str | None = None,
@@ -391,7 +389,7 @@ async def run_chat_pipeline(
         # about a delegate tool they do not hold) plus this turn's attachment block.
         # message_id + the suspension closures arm durable plan_review pauses (结构化
         # 挂起 2b) on the top-level delegate.
-        delegate_tool, revise_tool, debate_tool, chat_tools = _assemble_ceo_toolset(
+        delegate_tool, debate_tool, chat_tools = _assemble_ceo_toolset(
             llm=llm,
             sink=sink,
             base_system_prompt=worker_base_prompt,
@@ -414,8 +412,6 @@ async def run_chat_pipeline(
             skill_registry=skill_registry,
             memory_enabled=memory_enabled,
             folder_id=folder_id,
-            # 结构化补轮·B：前端从收场卡发起续辩时直传的上一场种子（宽容解析；无实质内容→None）。
-            debate_seed=DebateSeed.from_payload(debate_seed),
             autonomy_policy=autonomy_policy,
             # Same live-user gate as ask_user itself, plus desktop-only: web/mobile omit.
             advertise_bind_local_folder=checkpoint_enabled and desktop_client_can_bind(
@@ -586,15 +582,14 @@ async def run_chat_pipeline(
         rounds = captain_state.rounds
 
         # Turn usage = the captain run's own spend (priced once in the executor onto
-        # captain_state.cost/.usage) + the delegated workers' usage + every 定向唤回
-        # (revise) continuation's usage, both accumulated on their tool instances
-        # across the turn. ``delegate`` / ``revise`` are non-terminal, so the captain
-        # loop never metered their tokens; the cache split rides along so the folded
-        # total stays priceable.
+        # captain_state.cost/.usage) + the delegated workers' usage + every 续派
+        # continuation's usage (folded into delegate via continue_from / redirect),
+        # both accumulated on their tool instances across the turn. ``delegate`` is
+        # non-terminal, so the captain loop never metered their tokens; the cache
+        # split rides along so the folded total stays priceable.
         turn_usage = (
             TokenUsage.from_usage_dict(captain_state.usage)
             + TokenUsage.from_usage_dict(delegate_tool.usage)
-            + TokenUsage.from_usage_dict(revise_tool.usage)
             + TokenUsage.from_usage_dict(debate_tool.usage)
         )
         finish = captain_state.finish_override or (
@@ -612,9 +607,6 @@ async def run_chat_pipeline(
         cost_runs = [
             asdict(captain_cost),
             *(asdict(r) for r in delegate_tool.run_ledger),
-            # Each 定向唤回 (revise) continuation is its own member run row, parented
-            # to the original worker so the version chain is reconstructable (决策②).
-            *(asdict(r) for r in revise_tool.run_ledger),
             # 辩论：主持人一行 + 每个辩手每轮一行（含 continue_run 续写），各自 parented
             # 到上级（辩手→主持人、主持人→captain），与 delegate 同形折账。
             *(asdict(r) for r in debate_tool.run_ledger),
@@ -631,7 +623,6 @@ async def run_chat_pipeline(
         # still surfaces the WHOLE team's research to the user. Mirrors how worker
         # usage/cost are folded back off the delegate tool instance above.
         merge_citations(citations, delegate_tool.citations)
-        merge_citations(citations, revise_tool.citations)
         merge_citations(citations, debate_tool.citations)
 
         # 引用出口自洽：finish_guard 回炉耗尽后正文仍可能带悬空 [n]。先记 warning
@@ -652,7 +643,7 @@ async def run_chat_pipeline(
 
         collab = {
             **delegate_tool.collab,
-            "revises": len(revise_tool.run_ledger),
+            "revises": delegate_tool.continuation_count,
             "audit_drops": audit_recorder.drops,
         }
         sink.emit(

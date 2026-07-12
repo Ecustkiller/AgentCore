@@ -19,7 +19,14 @@
  */
 "use strict";
 
-const { app, BrowserWindow, protocol, net, session, ipcMain } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  protocol,
+  net,
+  session,
+  ipcMain,
+} = require("electron");
 const { join, sep } = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { writeFileSync } = require("node:fs");
@@ -120,7 +127,8 @@ function finish(result) {
     "refresh_token cookie stored": !!refresh,
     "refresh_token Secure": refresh?.secure === true,
     "refresh_token SameSite=None": isNone(refresh),
-    "refresh 200 (refresh cookie resent)": result.steps?.refresh?.status === 200,
+    "refresh 200 (refresh cookie resent)":
+      result.steps?.refresh?.status === 200,
     "authed /me 200 (access cookie resent)": result.steps?.me?.status === 200,
   };
 

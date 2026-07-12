@@ -1,7 +1,6 @@
-"""Worker 内部路由 — Intake / Escalation Gate 的结构化数据。
+"""Worker 内部路由 — Escalation Gate 的结构化数据。
 
-Intake 只产出轻量计划头（复杂度 + 策略 + token 预算），不产出逐步执行计划，
-避免 plan-execution 脱节。Escalation Gate 区分执行层自愈 vs 方案层上报。
+Escalation Gate 区分执行层自愈 vs 方案层上报。
 """
 
 from __future__ import annotations
@@ -10,22 +9,6 @@ from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
-
-
-class Complexity(StrEnum):
-    """任务预估复杂度（Intake 产出）。"""
-
-    SIMPLE = "simple"
-    MODERATE = "moderate"
-    COMPLEX = "complex"
-
-
-class ExecutionStrategy(StrEnum):
-    """Intake 建议的执行策略（Phase 1 仅标记，不触发分裂）。"""
-
-    DIRECT_EXECUTE = "direct_execute"
-    NEEDS_TOOLS = "needs_tools"
-    NEEDS_RESEARCH = "needs_research"
 
 
 class ProblemLayer(StrEnum):
@@ -43,32 +26,6 @@ class EscalationKind(StrEnum):
     DEP = "dep"
     CONTRACT = "contract"  # 需改接口契约 / 权限越界
     CONTRADICTION = "contradiction"  # 需求矛盾
-
-
-class IntakeResult(BaseModel):
-    """Worker 接到任务后的轻量计划头。
-
-    不包含逐步执行步骤——只给复杂度、策略与预算，供 Gate / 治理读取。
-    """
-
-    complexity: Complexity
-    strategy: ExecutionStrategy
-    token_budget: int = Field(ge=0, description="本 run 预估 token 预算（粗估）")
-    rationale: str = Field(default="", description="简短理由（日志 / 诊断用）")
-    signals: list[str] = Field(
-        default_factory=list,
-        description="触发评估的关键词 / 启发式信号（可观测，非用户文案）",
-    )
-
-    def to_event_payload(self) -> dict[str, Any]:
-        """Wire shape for ``run_intake`` (snake_case leaf)."""
-        return {
-            "complexity": self.complexity.value,
-            "strategy": self.strategy.value,
-            "token_budget": self.token_budget,
-            "rationale": self.rationale,
-            "signals": list(self.signals),
-        }
 
 
 class EscalationSignal(BaseModel):

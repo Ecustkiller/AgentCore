@@ -1214,9 +1214,10 @@ button.link {
   border-radius: 999px;
 }
 
-.pill-warn {
-  color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 18%, transparent);
+/* 「需要你」pill（待放行 / 待你拍板）——拍板类不用琥珀（2026-07 拍板），蓝=行动信号。 */
+.pill-act {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .run-task {
@@ -1237,16 +1238,17 @@ button.link {
   color: var(--error);
 }
 
-/* 升级实时可见: a worker's 向上求决策 (escalate), surfaced inline on its run card. */
+/* 升级实时可见: a worker's 向上求决策 (escalate), surfaced inline on its run card.
+   Read-only record → neutral（拍板类不用琥珀，与桌面 RaisedEscalation 同调）。 */
 .run-escalation {
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: 6px 8px;
   font-size: 12px;
-  border: 1px solid var(--warning-border);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
 }
 
 .run-escalation-q {
@@ -1258,11 +1260,13 @@ button.link {
 }
 
 /* 阻塞式求决策「待你拍板」(②): the interactive variant — a worker SUSPENDED on a blocking
-   escalate, answerable on a live turn. Stronger amber + an answer box and 提交/按假设继续. */
+   escalate, answerable on a live turn. 蓝=需要你（对齐桌面 EscalationCard primary）+
+   an answer box and 提交/按假设继续. */
 .run-escalation-live {
   gap: 8px;
   padding: 10px;
-  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .run-escalation-note {
@@ -1856,6 +1860,85 @@ dialog.run-detail::backdrop {
   margin: 1px 0;
 }
 
+.debate-handoffs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.debate-handoffs-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.debate-handoff-value {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
+
+.debate-handoff-value-text {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--fg);
+}
+
+.debate-handoff-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.debate-handoff-fact {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.debate-handoff-fact-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.debate-handoff-action {
+  align-self: flex-start;
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--bg);
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.debate-handoff-action-muted {
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+
+.debate-handoff-footnote {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .debate-narrative > summary {
   font-size: 12px;
   font-weight: 500;
@@ -1952,7 +2035,8 @@ dialog.run-detail::backdrop {
   color: var(--muted);
 }
 
-/* 本轮「你的追问」(交互式逐轮 verbatim 复盘)：向谁问 + 问题原文 + 承接状态，warning 调与桌面同口径。 */
+/* 本轮「你的追问」(交互式逐轮 verbatim 复盘)：向谁问 + 问题原文 + 承接状态。被动复盘记录 →
+   中性调（对齐桌面 UserInterjection：border-border + muted，已承接 = success）。 */
 .debate-asks {
   display: flex;
   flex-direction: column;
@@ -1960,9 +2044,9 @@ dialog.run-detail::backdrop {
   margin: 4px 0 0;
   padding: 6px 8px;
   list-style: none;
-  border: 1px solid var(--warning-border);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
 }
 
 .debate-ask {
@@ -1973,7 +2057,7 @@ dialog.run-detail::backdrop {
 .debate-ask-edge {
   margin-right: 6px;
   font-weight: 600;
-  color: var(--warning);
+  color: var(--muted);
   white-space: nowrap;
 }
 
@@ -2687,7 +2771,8 @@ dialog.dialog::backdrop {
 }
 
 /* Interactive pause card (审批 / 检查点 / plan_review) — the actionable surface for a turn
-   blocked on the user. Amber accent = 待裁决; sits above the composer, always visible. */
+   blocked on the user. 蓝=需要你（拍板类不用琥珀，对齐桌面 ResumePrompt primary）;
+   sits above the composer, always visible. */
 .pause {
   display: flex;
   flex-direction: column;
@@ -2695,8 +2780,8 @@ dialog.dialog::backdrop {
   margin: 0 16px 10px;
   padding: 12px 14px;
   background: var(--panel);
-  border: 1px solid var(--warning-border);
-  border-left: 3px solid var(--warning);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-left: 3px solid var(--accent);
   border-radius: 12px;
 }
 
@@ -2718,7 +2803,7 @@ dialog.dialog::backdrop {
 .pause-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--warning);
+  color: var(--accent);
 }
 
 .pause-question {

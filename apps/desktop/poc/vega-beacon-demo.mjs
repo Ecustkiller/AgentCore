@@ -47,7 +47,10 @@ async function renderOnce(safe) {
   await page.waitForSelector("#demo-done", { timeout: 30_000 }).catch(() => {});
   await page.waitForTimeout(1500);
   await page.screenshot({
-    path: resolve(here, safe ? "vega-beacon-fixed.png" : "vega-beacon-shot.png"),
+    path: resolve(
+      here,
+      safe ? "vega-beacon-fixed.png" : "vega-beacon-shot.png",
+    ),
     fullPage: true,
   });
   const err = await page.evaluate(() => window.__demoError);
@@ -70,9 +73,14 @@ console.log(
 );
 console.log(
   `修复后：信标被打中 ${after.hits.length} 次` +
-    (after.hits.length ? `\n     → ${after.hits.join("\n     → ")}` : "（门卫拦下了，未联网）"),
+    (after.hits.length
+      ? `\n     → ${after.hits.join("\n     → ")}`
+      : "（门卫拦下了，未联网）"),
 );
-console.log("\n" + (before.hits.length > 0 && after.hits.length === 0
-  ? "✅ 修复有效：同一张恶意图表，装门卫后不再替攻击者联网。"
-  : "⚠️ 结果不符合预期，请检查门卫是否正确装上。"));
+console.log(
+  "\n" +
+    (before.hits.length > 0 && after.hits.length === 0
+      ? "✅ 修复有效：同一张恶意图表，装门卫后不再替攻击者联网。"
+      : "⚠️ 结果不符合预期，请检查门卫是否正确装上。"),
+);
 process.exit(0);

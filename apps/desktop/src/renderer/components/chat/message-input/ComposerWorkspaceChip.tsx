@@ -16,10 +16,7 @@ import { hasLocalFiles } from "@/lib/capabilities";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
 import type { FolderMeta } from "@/services/folders";
-import {
-  type DraftWorkspaceIntent,
-  useFoldersStore,
-} from "@/stores/folders";
+import { type DraftWorkspaceIntent, useFoldersStore } from "@/stores/folders";
 import {
   Check,
   Cloud,
@@ -239,9 +236,7 @@ function DraftChip() {
               icon={<FolderOpen size={14} />}
               label={f.name}
               hint={folderLocationHint(f)}
-              selected={
-                intent.kind === "project" && intent.folderId === f.id
-              }
+              selected={intent.kind === "project" && intent.folderId === f.id}
               onClick={() => pickProject(f.id)}
               disabled={busy}
             />

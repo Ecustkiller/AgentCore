@@ -1,3 +1,4 @@
+import { MANUAL_HELP, ManualHelpLink } from "@/components/ManualHelpLink";
 import { Button, DecisionCard } from "@/components/ui";
 import {
   interactiveCheckpointTone,
@@ -206,9 +207,14 @@ export function AskUserCard({
         <div className="flex items-start gap-1.5">
           <HeaderIcon size={14} className={`mt-0.5 shrink-0 ${tone.accent}`} />
           <div className="min-w-0 flex-1">
-            <p className={`text-xs font-medium ${tone.accent}`}>
-              {caption ?? config.activeCaption}
-            </p>
+            <div className="flex items-center gap-1">
+              <p
+                className={`min-w-0 flex-1 text-xs font-medium ${tone.accent}`}
+              >
+                {caption ?? config.activeCaption}
+              </p>
+              <ManualHelpLink to={MANUAL_HELP.checkpoint} />
+            </div>
             <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
               {content.question}
             </p>

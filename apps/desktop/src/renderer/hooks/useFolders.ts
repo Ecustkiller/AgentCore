@@ -104,7 +104,9 @@ export function useDeleteFolder() {
     mutationFn: (id: string) => deleteFolder(id),
     onSuccess: (_data, id) => {
       removeFolderFromCache(id);
-      void queryClient.invalidateQueries({ queryKey: conversationKeys.grouped });
+      void queryClient.invalidateQueries({
+        queryKey: conversationKeys.grouped,
+      });
       void queryClient.invalidateQueries({
         queryKey: conversationKeys.archived,
       });
