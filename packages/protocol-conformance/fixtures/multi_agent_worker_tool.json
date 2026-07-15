@@ -132,7 +132,8 @@
           "cached": 64000,
           "output": 120000,
           "total": 360000,
-          "currency": "USD"
+          "currency": "USD",
+          "pricing_source": "curated"
         }
       },
       "timestamp": "2026-01-01T00:00:00.008Z"
@@ -231,7 +232,8 @@
           "cached": 64000,
           "output": 120000,
           "total": 360000,
-          "currency": "USD"
+          "currency": "USD",
+          "pricing_source": "curated"
         },
         "stance": null,
         "group": null,

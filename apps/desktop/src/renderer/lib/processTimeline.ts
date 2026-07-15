@@ -300,6 +300,44 @@ export function isOrchestrationTool(toolName: string): boolean {
 }
 
 /**
+ * Stable render keys for timeline nodes (时间线一期 · 流式 key 稳定化).
+ *
+ * Index-based keys break under `insertBeforeTeam`: a `team_preview` marker inserted
+ * mid-array shifts every later node's index → React unmounts/remounts them (flicker,
+ * lost disclosure state). Identity-bearing nodes key by their own id; text nodes
+ * (`reasoning`/`content`/`rework`) key by same-kind ordinal — marker insertion never
+ * disturbs the relative order of same-kind text steps, so ordinals stay stable.
+ */
+export function timelineNodeKeys(nodes: TimelineNode[]): string[] {
+  const ordinals = new Map<string, number>();
+  return nodes.map((node) => {
+    switch (node.kind) {
+      case "team":
+        return `team-${node.execution_id}`;
+      case "team_preview":
+        return `tp-${node.checkpoint_id}`;
+      case "checkpoint":
+        return `cp-${node.checkpoint_id}`;
+      case "ask":
+        return `ask-${node.ask_id}`;
+      case "plan_review":
+        return `pr-${node.checkpoint_id}`;
+      case "tool":
+        return `tool-${node.step.id}`;
+      case "tool-group":
+        // A group only ever GROWS by appending adjacent tools; its first tool is
+        // its stable identity.
+        return `tgrp-${node.tools[0]?.id ?? "empty"}`;
+      default: {
+        const n = (ordinals.get(node.kind) ?? 0) + 1;
+        ordinals.set(node.kind, n);
+        return `${node.kind}-${n}`;
+      }
+    }
+  });
+}
+
+/**
  * Coalesce a process timeline's consecutive tool steps into render nodes: a run of
  * ≥2 adjacent `kind:"tool"` steps becomes one `tool-group`, a lone tool stays an
  * inline `tool`, and every non-tool step (`reasoning`/`content` AND the positional

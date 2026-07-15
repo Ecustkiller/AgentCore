@@ -16,8 +16,10 @@ from agentcore.runtime.facts import (
     RoundBoundaryFact,
     ToolCallFact,
     TurnFactLog,
+    TurnPausedFact,
     TurnStartedFact,
     current_fact_log,
+    pre_pause_from_journal,
     snapshot_fact_log,
 )
 from agentcore.runtime.journal import entries_from_runs, runs_from_entries
@@ -152,8 +154,137 @@ def test_execution_only_kinds_match_enum():
         # distinct from the display ``run_plan`` event so the display gate is untouched.
         "plan_snapshot",
         "coordination_snapshot",
+        # 回合态挂起归宿: resumable turn-state snapshot (process / controller / content).
+        "turn_paused",
     } == EXECUTION_ONLY_KINDS
     assert frozenset(k.value for k in FactKind) == EXECUTION_ONLY_KINDS
+
+
+def test_turn_paused_fact_round_trip():
+    # §二契约 payload — serialize via to_fact, rebuild via from_payload / pre_pause.
+    controller = {
+        "post_delegate": True,
+        "delegate_count": 1,
+        "team_gate_fired": True,
+        "audit_gate_fired": False,
+        "first_batch_substantial": True,
+    }
+    process = [{"kind": "reasoning", "text": "想一步"}]
+    run_processes = {"w1": [{"kind": "tool", "name": "search"}]}
+    citations = [{"url": "https://e.com", "title": "来源"}]
+    fact = TurnPausedFact(
+        checkpoint_id="cp-1",
+        suspension_kind="ask_user",
+        content="挂起前正文",
+        reasoning="CEO 思考",
+        process=process,
+        run_processes=run_processes,
+        citations=citations,
+        controller=controller,
+    )
+    entry = fact.to_fact().entry()
+    assert entry["kind"] == "turn_paused"
+    assert entry["payload"] == {
+        "checkpoint_id": "cp-1",
+        "suspension_kind": "ask_user",
+        "content": "挂起前正文",
+        "reasoning": "CEO 思考",
+        "process": process,
+        "run_processes": run_processes,
+        "citations": citations,
+        "controller": controller,
+    }
+    rebuilt = TurnPausedFact.from_payload(entry["payload"])
+    assert rebuilt == fact
+    assert pre_pause_from_journal([entry]) == fact
+
+
+def test_turn_paused_fact_defaults_empty_collections():
+    payload = (
+        TurnPausedFact(checkpoint_id="cp", suspension_kind="plan_review").to_fact().entry()[
+            "payload"
+        ]
+    )
+    assert payload["content"] == ""
+    assert payload["reasoning"] == ""
+    assert payload["process"] == []
+    assert payload["run_processes"] == {}
+    assert payload["citations"] == []
+    assert payload["controller"] == {}
+
+
+def test_pre_pause_from_journal_takes_last_turn_paused():
+    first = (
+        TurnPausedFact(
+            checkpoint_id="cp-1",
+            suspension_kind="ask_user",
+            content="第一段",
+        )
+        .to_fact()
+        .entry()
+    )
+    second = (
+        TurnPausedFact(
+            checkpoint_id="cp-2",
+            suspension_kind="plan_review",
+            content="第二段累积",
+            reasoning="续思考",
+        )
+        .to_fact()
+        .entry()
+    )
+    entries = [
+        TurnStartedFact("sys", "hi", "chat").to_fact().entry(),
+        first,
+        RoundBoundaryFact(0, "captain", "captain").to_fact().entry(),
+        second,
+        {"kind": "turn_end", "payload": {"finish_reason": "paused"}, "ts": None},
+    ]
+    snap = pre_pause_from_journal(entries)
+    assert snap is not None
+    assert snap.checkpoint_id == "cp-2"
+    assert snap.suspension_kind == "plan_review"
+    assert snap.content == "第二段累积"
+    assert snap.reasoning == "续思考"
+
+
+def test_pre_pause_from_journal_missing_returns_none():
+    assert pre_pause_from_journal(None) is None
+    assert pre_pause_from_journal([]) is None
+    # Old journal: execution + display kinds, no turn_paused → legacy fallback path.
+    legacy = [
+        TurnStartedFact("sys", "hi", "chat").to_fact().entry(),
+        RoundBoundaryFact(0, "captain", "captain").to_fact().entry(),
+        LlmCallFact("captain", 0, content="ok").to_fact().entry(),
+        {"kind": "run_plan", "payload": {"execution_id": "e1"}, "ts": "t0"},
+        {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
+    ]
+    assert pre_pause_from_journal(legacy) is None
+
+
+def test_display_projection_skips_turn_paused():
+    # turn_paused is EXECUTION_ONLY — must not leak into runs.events (client fold).
+    # With no process_* lanes, G1 挂起中重载 still projects process from the snapshot.
+    entries = [
+        TurnStartedFact("sys", "hi", "chat").to_fact().entry(),
+        {"kind": "run_plan", "payload": {"execution_id": "e1"}, "ts": "t0"},
+        TurnPausedFact(
+            checkpoint_id="cp",
+            suspension_kind="team_preview",
+            content="正文",
+            process=[{"kind": "content", "text": "步"}],
+        )
+        .to_fact()
+        .entry(),
+        {"kind": "run_completed", "payload": {"run_id": "s1"}, "ts": "t1"},
+        {"kind": "turn_end", "payload": {"finish_reason": "paused"}, "ts": None},
+    ]
+    runs = runs_from_entries(entries)
+    assert runs is not None
+    assert [e["type"] for e in runs["events"]] == ["run_plan", "run_completed"]
+    assert runs["finish_reason"] == "paused"
+    assert runs["process"] == [{"kind": "content", "text": "步"}]
+    assert pre_pause_from_journal(entries).content == "正文"
 
 
 def test_turn_fact_log_records_in_order():

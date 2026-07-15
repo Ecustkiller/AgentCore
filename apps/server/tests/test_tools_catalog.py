@@ -25,6 +25,9 @@ _EXPECTED_NAMES = {
     "file_list",
     "file_delete",
     "file_move",
+    "file_copy",
+    "mkdir",
+    "file_batch",
     "grep",
     "code_search",
     "git",
@@ -51,6 +54,9 @@ _DELEGATED_MUTATION_NAMES = {
     "str_replace",
     "file_delete",
     "file_move",
+    "file_copy",
+    "mkdir",
+    "file_batch",
     "code_execute",
 }
 
@@ -105,6 +111,9 @@ def test_write_and_exec_tools_are_grantable():
     # Destructive / mutating file ops require the same consent as writes.
     assert approvals["file_delete"] is ToolApproval.GRANTABLE
     assert approvals["file_move"] is ToolApproval.GRANTABLE
+    assert approvals["file_copy"] is ToolApproval.GRANTABLE
+    assert approvals["mkdir"] is ToolApproval.GRANTABLE
+    assert approvals["file_batch"] is ToolApproval.GRANTABLE
     # Read-only tools auto-run (no approval prompt).
     assert approvals["file_read"] is ToolApproval.NEVER
     assert approvals["web_search"] is ToolApproval.NEVER
@@ -115,7 +124,16 @@ def test_file_mutation_class_is_grantable_filesystem_without_code_execute():
     # file-edit tools but NOT code_execute (EXECUTION, higher-risk → its own gate).
     # Pinned so a future tool can't silently widen or narrow what one click grants.
     names = file_mutation_tool_names()
-    assert names == {"file_write", "file_append", "str_replace", "file_delete", "file_move"}
+    assert names == {
+        "file_write",
+        "file_append",
+        "str_replace",
+        "file_delete",
+        "file_move",
+        "file_copy",
+        "mkdir",
+        "file_batch",
+    }
     assert "code_execute" not in names
     # Exactly the delegated mutation set minus code_execute (stays in lockstep).
     assert names == _DELEGATED_MUTATION_NAMES - {"code_execute"}

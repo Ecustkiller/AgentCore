@@ -239,8 +239,8 @@ async def resume_message(
 
     Settlement 预写 (D8)：① peek frame → ② live-task drain（不 cancel；仍 live ⇒ 409）→
     ③ ``*_resolved`` 落库成功 → ④ ``claim_paused_turn`` → ⑤ resume pipeline。settlement
-    写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状 404。Pipeline 启动
-    失败走现有 restore 回滚。
+    写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状 404。settlement 落库后
+    pipeline 取消/失败 ⇒ interrupted_after_decision（D1：不复活决策卡）。
 
     ``body.selected`` carries the user's ask_user picks (ignored for plan_review).
     Gated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota

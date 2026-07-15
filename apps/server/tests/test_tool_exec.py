@@ -221,6 +221,60 @@ async def test_multi_terminal_prefers_suspend():
     assert terminal.effect is ToolEffect.SUSPEND
 
 
+async def test_captain_role_strips_run_id_from_sse_but_facts_keep_it(
+    registry: tuple[ToolRegistry, _OkTool],
+):
+    """Display/trace split (CEO 自持工具内联): ``role == "captain"`` self-tools omit
+    ``run_id`` on the SSE ``tool_use_*`` wire so the UI renders them as turn-level inline
+    steps (matching the conformance ``single_agent`` contract — CEO tools have no run_id),
+    while the ``tool_call`` fact still keeps the captain ``run_id`` for §8.3 window fold /
+    audit. Workers keep ``run_id`` on the wire (their tools scope to a team-graph run
+    node). Locks the runtime fix so a later refactor can't silently re-hide CEO retrieval
+    behind '正在思考'."""
+    from agentcore.runtime.facts import TurnFactLog, current_fact_log
+
+    reg, _ok_b = registry
+
+    cap_log = TurnFactLog()
+    token = current_fact_log.set(cap_log)
+    try:
+        cap_sink = EventSink()
+        await execute_tools(
+            [_call("c1", "ok_a")], reg, _ctx(), cap_sink, run_id="cap-run", role="captain"
+        )
+    finally:
+        current_fact_log.reset(token)
+
+    cap_events = [
+        e
+        for e in cap_sink._history  # noqa: SLF001
+        if e.type in (EventType.TOOL_USE_START, EventType.TOOL_USE_END)
+    ]
+    assert cap_events, "captain tool must still emit start/end (only run_id is stripped)"
+    assert all("run_id" not in e.payload for e in cap_events)
+    tool_facts = [f for f in cap_log.segment_entries() if f["kind"] == "tool_call"]
+    assert len(tool_facts) == 1
+    assert tool_facts[0]["payload"]["run_id"] == "cap-run"
+
+    wrk_log = TurnFactLog()
+    token = current_fact_log.set(wrk_log)
+    try:
+        wrk_sink = EventSink()
+        await execute_tools(
+            [_call("w1", "ok_a")], reg, _ctx(), wrk_sink, run_id="w-run", role="worker"
+        )
+    finally:
+        current_fact_log.reset(token)
+
+    wrk_events = [
+        e
+        for e in wrk_sink._history  # noqa: SLF001
+        if e.type in (EventType.TOOL_USE_START, EventType.TOOL_USE_END)
+    ]
+    assert wrk_events
+    assert all(e.payload.get("run_id") == "w-run" for e in wrk_events)
+
+
 async def test_code_execute_maps_sandbox_error_to_failed_result():
     backend = _FakeBackend(raise_sandbox=True)
     result = await CodeExecuteTool().execute(

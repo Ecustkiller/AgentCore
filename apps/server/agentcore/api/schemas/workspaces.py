@@ -41,15 +41,17 @@ class WorkspaceBindingResponse(BaseModel):
 
 
 class GrantExternalReadonlyRequest(BaseModel):
-    """Register a session-scoped read-only desktop root for this conversation.
+    """Register a session-scoped desktop root for this conversation.
 
     Does **not** change workspace binding. ``root_id`` is the desktop-minted handle;
-    absolute paths never appear on the wire.
+    absolute paths never appear on the wire. ``mode`` is ``readonly`` (W3) or
+    ``organize`` (P1: move/copy/mkdir/trash-delete).
     """
 
     root_id: str = Field(..., min_length=1, max_length=200)
     label: str = Field(..., min_length=1, max_length=200)
     alias_hint: str | None = Field(None, max_length=64)
+    mode: Literal["readonly", "organize"] = "readonly"
 
 
 class ExternalGrantItem(BaseModel):
@@ -57,6 +59,7 @@ class ExternalGrantItem(BaseModel):
     root_id: str
     label: str
     namespace: str  # ``external/<alias>``
+    mode: Literal["readonly", "organize"] = "readonly"
 
 
 class ExternalGrantListResponse(BaseModel):

@@ -157,7 +157,7 @@ const toOptions = (raw: unknown): AskOption[] =>
           ...(obj.recommended ? { recommended: true } : {}),
           ...(obj.action === "bind_local_folder" ||
           obj.action === "grant_readonly_folder"
-            ? { action: obj.action as "bind_local_folder" | "grant_readonly_folder" }
+            ? { action: obj.action as "bind_local_folder" | "grant_readonly_folder" | "grant_organize_folder" }
             : {}),
         };
       })

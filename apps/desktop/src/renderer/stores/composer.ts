@@ -98,6 +98,14 @@ interface ComposerDraftState {
   drafts: Record<string, ComposerDraft>;
   /** Monotonic; bumped on every {@link fill} so the mounted composer refocuses. */
   fillToken: number;
+  /**
+   * Monotonic; bumped ONLY when a draft promotes to a brand-new conversation on
+   * first send ({@link armDockFlip}). The composer dock-flip animation (center →
+   * bottom) keys off this instead of the passive centered→bottom transition, so
+   * merely SWITCHING to another (already-persisted) conversation never triggers
+   * the flight animation — that transition looked like "输入框跳动".
+   */
+  dockFlipToken: number;
   setValue: (key: string, action: SetStateAction<string>) => void;
   setAttachments: (
     key: string,
@@ -105,11 +113,14 @@ interface ComposerDraftState {
   ) => void;
   /** 回填 the active conversation's draft with `text` (default: append as a new line). */
   fill: (text: string, mode?: "append" | "replace") => void;
+  /** Arm the one-shot center→bottom dock-flip for the imminent first-send promote. */
+  armDockFlip: () => void;
 }
 
 export const useComposerDraftStore = create<ComposerDraftState>((set) => ({
   drafts: loadDrafts(),
   fillToken: 0,
+  dockFlipToken: 0,
   setValue: (key, action) =>
     set((s) => {
       const prev = s.drafts[key] ?? EMPTY_DRAFT;
@@ -147,6 +158,7 @@ export const useComposerDraftStore = create<ComposerDraftState>((set) => ({
         fillToken: s.fillToken + 1,
       };
     }),
+  armDockFlip: () => set((s) => ({ dockFlipToken: s.dockFlipToken + 1 })),
 }));
 
 // Debounced persistence: setValue fires per keystroke, so batch writes; flush on

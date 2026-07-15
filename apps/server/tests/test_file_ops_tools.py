@@ -10,9 +10,12 @@ from pathlib import Path
 
 from agentcore.tools.builtin.file_ops import (
     FileAppendTool,
+    FileBatchTool,
+    FileCopyTool,
     FileDeleteTool,
     FileMoveTool,
     FileWriteTool,
+    MkdirTool,
 )
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -128,8 +131,15 @@ async def test_delete_file(tmp_path: Path):
     (tmp_path / "f.txt").write_text("bye", encoding="utf-8")
     result = await FileDeleteTool().execute({"path": "f.txt"}, _ctx(tmp_path))
     assert result.success is True
-    assert "已删除 f.txt" in result.output
+    assert "可逆删除" in result.output
     assert not (tmp_path / "f.txt").exists()
+    # Soft-deleted into workspace trash with restore metadata.
+    trash = tmp_path / ".agentcore" / "trash"
+    assert trash.is_dir()
+    entries = list(trash.iterdir())
+    assert len(entries) == 1
+    assert (entries[0] / "meta.json").is_file()
+    assert (entries[0] / "content").read_text(encoding="utf-8") == "bye"
 
 
 async def test_delete_directory_recursive(tmp_path: Path):
@@ -140,6 +150,19 @@ async def test_delete_directory_recursive(tmp_path: Path):
     result = await FileDeleteTool().execute({"path": "pkg"}, _ctx(tmp_path))
     assert result.success is True
     assert not (tmp_path / "pkg").exists()
+    assert (tmp_path / ".agentcore" / "trash").is_dir()
+
+
+async def test_delete_permanent_hard_removes(tmp_path: Path):
+    (tmp_path / "f.txt").write_text("bye", encoding="utf-8")
+    result = await FileDeleteTool().execute(
+        {"path": "f.txt", "permanent": True}, _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert "永久删除" in result.output
+    assert not (tmp_path / "f.txt").exists()
+    trash = tmp_path / ".agentcore" / "trash"
+    assert not trash.exists() or not any(trash.iterdir())
 
 
 async def test_delete_not_found(tmp_path: Path):
@@ -249,3 +272,67 @@ async def test_move_rejects_identical_paths(tmp_path: Path):
     assert result.success is False
     assert "相同" in result.error
     assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "x"
+
+
+# --- file_copy / mkdir / file_batch ---
+
+
+async def test_copy_file_and_tree(tmp_path: Path):
+    (tmp_path / "a.txt").write_text("data", encoding="utf-8")
+    result = await FileCopyTool().execute(
+        {"source": "a.txt", "destination": "b/c.txt"}, _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "data"
+    assert (tmp_path / "b" / "c.txt").read_text(encoding="utf-8") == "data"
+
+    (tmp_path / "tree" / "sub").mkdir(parents=True)
+    (tmp_path / "tree" / "sub" / "x.bin").write_bytes(b"\x00\xff")
+    result = await FileCopyTool().execute(
+        {"source": "tree", "destination": "tree2"}, _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert (tmp_path / "tree2" / "sub" / "x.bin").read_bytes() == b"\x00\xff"
+
+
+async def test_copy_refuses_overwrite(tmp_path: Path):
+    (tmp_path / "a.txt").write_text("from", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("to", encoding="utf-8")
+    result = await FileCopyTool().execute(
+        {"source": "a.txt", "destination": "b.txt"}, _ctx(tmp_path)
+    )
+    assert result.success is False
+    assert "已存在" in result.error
+
+
+async def test_mkdir_creates_and_refuses_existing(tmp_path: Path):
+    result = await MkdirTool().execute({"path": "out/docs"}, _ctx(tmp_path))
+    assert result.success is True
+    assert (tmp_path / "out" / "docs").is_dir()
+    result = await MkdirTool().execute({"path": "out/docs"}, _ctx(tmp_path))
+    assert result.success is False
+    assert "已存在" in result.error
+
+
+async def test_file_batch_partial_failure_continues(tmp_path: Path):
+    (tmp_path / "a.txt").write_text("a", encoding="utf-8")
+    result = await FileBatchTool().execute(
+        {
+            "operations": [
+                {"op": "mkdir", "path": "out"},
+                {"op": "copy", "source": "a.txt", "destination": "out/a.txt"},
+                {"op": "move", "source": "missing.txt", "destination": "out/m.txt"},
+                {"op": "delete", "path": "ghost.txt"},
+                {"op": "mkdir", "path": "out"},  # already exists → skip
+            ]
+        },
+        _ctx(tmp_path),
+    )
+    assert result.success is False  # one hard failure (move missing)
+    assert "本次共 5 项" in result.output
+    assert "成功" in result.output
+    assert "跳过" in result.output
+    assert "失败" in result.output
+    assert (tmp_path / "out" / "a.txt").read_text(encoding="utf-8") == "a"
+    assert result.metadata["ok"] >= 2
+    assert result.metadata["fail"] >= 1

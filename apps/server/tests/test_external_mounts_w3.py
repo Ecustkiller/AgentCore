@@ -64,7 +64,7 @@ async def test_local_workspace_routes_external_read_and_rejects_write():
     ws.attach_external_mounts(
         {
             "reports": ExternalMount(
-                alias="reports", root_id="ext-r1", label="报表", readonly=True
+                alias="reports", root_id="ext-r1", label="报表", mode="readonly"
             )
         }
     )
@@ -114,7 +114,7 @@ async def test_server_workspace_external_readonly(tmp_path: Path):
                 root_id="r",
                 label="ext",
                 abs_path=str(ext),
-                readonly=True,
+                mode="readonly",
             )
         }
     )
@@ -150,7 +150,7 @@ async def test_server_workspace_model_path_no_dotdot_leak(tmp_path: Path):
                 root_id="r",
                 label="ext",
                 abs_path=str(ext),
-                readonly=True,
+                mode="readonly",
             )
         }
     )
@@ -169,3 +169,73 @@ async def test_server_workspace_model_path_no_dotdot_leak(tmp_path: Path):
 def test_external_env_var_name():
     assert external_env_var("my-reports") == "AGENTCORE_EXTERNAL_MY_REPORTS"
     assert external_ns("a", "b/c") == "external/a/b/c"
+
+
+@pytest.mark.asyncio
+async def test_local_organize_allows_move_rejects_write_and_permanent():
+    channel = AsyncMock(spec=WorkspaceChannel)
+    channel.root_id = "primary"
+    channel.conversation_id = "c1"
+    channel.request = AsyncMock(return_value=None)
+    ws = LocalWorkspace(channel)
+    ws.attach_external_mounts(
+        {
+            "desk": ExternalMount(
+                alias="desk", root_id="ext-r1", label="桌面", mode="organize"
+            )
+        }
+    )
+    await ws.mkdir("external/desk/Docs")
+    channel.request.assert_awaited()
+    with pytest.raises(OutsideWorkspace, match="整理授权|不允许"):
+        await ws.write("external/desk/a.txt", "nope")
+    with pytest.raises(OutsideWorkspace, match="永久删除"):
+        await ws.delete("external/desk/a.txt", permanent=True)
+
+
+@pytest.mark.asyncio
+async def test_server_organize_move_and_env_skips_organize(tmp_path: Path):
+    primary = tmp_path / "ws"
+    primary.mkdir()
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    (ext / "a.txt").write_text("hello", encoding="utf-8")
+
+    class _Sandbox:
+        async def execute(self, req):
+            from agentcore.tools.sandbox.protocol import ExecutionResult
+
+            return ExecutionResult(
+                success=True, stdout="", stderr="", exit_code=0, duration_ms=0
+            )
+
+    ws = ServerWorkspace(primary, _Sandbox(), location="local")
+    ws.attach_external_mounts(
+        {
+            "ext": ExternalMount(
+                alias="ext",
+                root_id="r",
+                label="ext",
+                abs_path=str(ext),
+                mode="organize",
+            )
+        }
+    )
+    await ws.mkdir("external/ext/Docs")
+    await ws.move("external/ext/a.txt", "external/ext/Docs/a.txt")
+    assert (ext / "Docs" / "a.txt").read_text(encoding="utf-8") == "hello"
+    from agentcore.workspace.external_mounts import build_external_env
+
+    assert build_external_env(ws._mounts) == {}
+
+
+def test_grant_store_mode_upgrade():
+    m = grant_store.add_grant(
+        "c1", root_id="r1", label="桌面", alias_hint="desk", mode="readonly"
+    )
+    assert m.mode == "readonly"
+    m2 = grant_store.add_grant(
+        "c1", root_id="r1", label="桌面", mode="organize"
+    )
+    assert m2.alias == m.alias
+    assert m2.mode == "organize"

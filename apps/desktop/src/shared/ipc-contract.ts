@@ -12,6 +12,9 @@ export interface FsRoot {
   name: string;
   /** W3 session grant alias under ``external/<alias>/`` (omit for permanent roots). */
   alias?: string;
+  /** Session access mode (readonly | organize). Prefer over ``readonly``. */
+  mode?: "readonly" | "organize";
+  /** @deprecated Prefer ``mode``. */
   readonly?: boolean;
   sessionOnly?: boolean;
 }
@@ -129,6 +132,7 @@ export type WorkspaceOpName =
   | "index_files"
   | "mkdir"
   | "delete"
+  | "copy"
   | "move"
   | "replace"
   | "grep"
@@ -248,9 +252,10 @@ export interface FsApi {
   checkoutArchive(archiveBase64: string): Promise<CheckoutArchiveResult>;
   listRoots(): Promise<FsRoot[]>;
   removeRoot(rootId: string): Promise<void>;
-  /** W3: folder picker → session read-only root bound to conversation. */
+  /** W3/P1: folder picker → session root (readonly | organize) bound to conversation. */
   grantSessionReadonlyRoot(
     conversationId: string,
+    mode?: "readonly" | "organize",
   ): Promise<FsRoot | null>;
   listSessionReadonlyRoots(conversationId: string): Promise<FsRoot[]>;
   revokeSessionReadonlyRoot(

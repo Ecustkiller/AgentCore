@@ -31,9 +31,9 @@ from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
 from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp
 from agentcore.workspace.external_mounts import (
     ExternalMount,
+    external_mutation_allowed,
     external_ns,
     parse_external_path,
-    readonly_write_error,
     route_external,
 )
 from agentcore.workspace.protocol import (
@@ -99,13 +99,18 @@ class LocalWorkspace:
         self._mounts = dict(mounts)
 
     def _route(
-        self, path: str, *, write: bool = False
+        self,
+        path: str,
+        *,
+        write: bool = False,
+        op: str | None = None,
+        permanent: bool = False,
     ) -> tuple[str | None, str, str | None]:
         """Map a model path to ``(override_root_id, desktop_rel, alias)``.
 
         ``override_root_id is None`` → primary workspace binding (apply ``_in``).
-        Unknown ``external/<alias>`` → ``PathNotFound``. Write to a readonly mount
-        → ``OutsideWorkspace`` with a clear message (hard boundary).
+        Unknown ``external/<alias>`` → ``PathNotFound``. Mutations gated by mount
+        ``mode`` (readonly vs organize whitelist; permanent delete always denied).
         """
         parsed = parse_external_path(path)
         if parsed is None:
@@ -113,8 +118,15 @@ class LocalWorkspace:
         routed = route_external(path, self._mounts)
         if routed is None:
             raise PathNotFound(path)
-        if write and routed.mount.readonly:
-            raise OutsideWorkspace(readonly_write_error(path))
+        if write:
+            err = external_mutation_allowed(
+                routed.mount,
+                op or "write",
+                path=path,
+                permanent=permanent,
+            )
+            if err:
+                raise OutsideWorkspace(err)
         rel = routed.rel if routed.rel not in ("", ".") else "."
         return routed.mount.root_id, rel, routed.mount.alias
 
@@ -159,7 +171,7 @@ class LocalWorkspace:
         return str(value)
 
     async def write(self, path: str, content: str) -> int:
-        root_id, rel, _ = self._route(path, write=True)
+        root_id, rel, _ = self._route(path, write=True, op="write")
         value = await self._channel.request(
             WorkspaceOp.WRITE, {"path": rel, "content": content}, root_id=root_id
         )
@@ -167,7 +179,7 @@ class LocalWorkspace:
         return int(value)
 
     async def append(self, path: str, content: str) -> int:
-        root_id, rel, _ = self._route(path, write=True)
+        root_id, rel, _ = self._route(path, write=True, op="append")
         value = await self._channel.request(
             WorkspaceOp.APPEND, {"path": rel, "content": content}, root_id=root_id
         )
@@ -183,7 +195,7 @@ class LocalWorkspace:
         return base64.b64decode(str(value))
 
     async def write_bytes(self, path: str, data: bytes) -> int:
-        root_id, rel, _ = self._route(path, write=True)
+        root_id, rel, _ = self._route(path, write=True, op="write_bytes")
         value = await self._channel.request(
             WorkspaceOp.WRITE_BYTES,
             {"path": rel, "data": base64.b64encode(data).decode("ascii")},
@@ -273,18 +285,34 @@ class LocalWorkspace:
         return paths, bool(value.get("truncated", False))
 
     async def mkdir(self, path: str) -> None:
-        root_id, rel, _ = self._route(path, write=True)
+        root_id, rel, _ = self._route(path, write=True, op="mkdir")
         await self._channel.request(WorkspaceOp.MKDIR, {"path": rel}, root_id=root_id)
         self._dirty = True
 
-    async def delete(self, path: str) -> None:
-        root_id, rel, _ = self._route(path, write=True)
-        await self._channel.request(WorkspaceOp.DELETE, {"path": rel}, root_id=root_id)
+    async def delete(self, path: str, *, permanent: bool = False) -> None:
+        root_id, rel, _ = self._route(
+            path, write=True, op="delete", permanent=permanent
+        )
+        await self._channel.request(
+            WorkspaceOp.DELETE,
+            {"path": rel, "permanent": permanent},
+            root_id=root_id,
+        )
+        self._dirty = True
+
+    async def copy(self, src: str, dst: str) -> None:
+        src_root, src_rel, src_alias = self._route(src, write=False)
+        dst_root, dst_rel, dst_alias = self._route(dst, write=True, op="copy")
+        if src_alias != dst_alias or src_root != dst_root:
+            raise OutsideWorkspace("不能跨会话授权目录与工作区复制文件")
+        await self._channel.request(
+            WorkspaceOp.COPY, {"src": src_rel, "dst": dst_rel}, root_id=src_root
+        )
         self._dirty = True
 
     async def move(self, src: str, dst: str) -> None:
-        src_root, src_rel, src_alias = self._route(src, write=True)
-        dst_root, dst_rel, dst_alias = self._route(dst, write=True)
+        src_root, src_rel, src_alias = self._route(src, write=True, op="move")
+        dst_root, dst_rel, dst_alias = self._route(dst, write=True, op="move")
         if src_alias != dst_alias or src_root != dst_root:
             raise OutsideWorkspace("不能跨会话授权目录与工作区移动文件")
         await self._channel.request(
@@ -293,7 +321,7 @@ class LocalWorkspace:
         self._dirty = True
 
     async def replace(self, path: str, old: str, new: str, *, all_: bool) -> ReplaceOutcome:
-        root_id, rel, _ = self._route(path, write=True)
+        root_id, rel, _ = self._route(path, write=True, op="replace")
         value = await self._channel.request(
             WorkspaceOp.REPLACE,
             {"path": rel, "old": old, "new": new, "all": all_},
@@ -367,7 +395,9 @@ class LocalWorkspace:
         # paths never enter the model prompt.
         self._dirty = True
         external_roots = {
-            alias: m.root_id for alias, m in self._mounts.items() if m.root_id
+            alias: m.root_id
+            for alias, m in self._mounts.items()
+            if m.root_id and m.mode != "organize"
         }
         value: dict[str, Any] = await self._channel.request(
             WorkspaceOp.EXECUTE,

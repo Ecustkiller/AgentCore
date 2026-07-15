@@ -1,3 +1,4 @@
+import { ensureTimelineMarkersFromJournal } from "@/lib/foldMessageLane";
 import { api } from "@/services/api";
 import {
   type MemoryUpdate,
@@ -161,11 +162,20 @@ export function toMessage(m: BackendMessage): Message {
   }
   // steps — now for single-agent AND multi-agent turns (统一团队时间线). Single-agent
   // tool-less turns synthesize one reasoning step from reasoning_content.
-  const process: ProcessStep[] | undefined =
+  const baseProcess: ProcessStep[] | undefined =
     m.runs?.process ??
     (!executionId && m.reasoning_content
       ? [{ kind: "reasoning", text: m.reasoning_content }]
       : undefined);
+  // 补标记（时间线一期）: backfill positional markers the journal implies (`team` /
+  // `team_preview` / `checkpoint` / `ask` / `plan_review`) so the invariant「有交互卡
+  // 必有时间线标记」holds on reload — the bottom-stack fallback is gone, an unmarked
+  // card would silently vanish. Dedup no-ops when the persisted process already
+  // carries them (the normal case).
+  const process: ProcessStep[] | undefined =
+    events.length > 0
+      ? ensureTimelineMarkersFromJournal(baseProcess, events)
+      : baseProcess;
   // On reload the row `id` IS the server message_id. Stamp `serverMessageId` so
   // resume guards (`isClientOnlyResumeKey`) match the live path (message_start stamp)
   // and do not treat a hydrated assistant as client-only.

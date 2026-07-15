@@ -54,3 +54,22 @@ def ask_user_tool_result(response: CheckpointResponse) -> ToolResult:
         success=True,
         output="用户未在时限内回应。请基于目前已掌握的信息，自行决定如何稳妥收尾。",
     )
+
+
+def ask_user_organize_plan_result(
+    response: CheckpointResponse, *, plan_id: str, kept_count: int
+) -> ToolResult:
+    """CONTINUE result for organize_plan — embeds plan_id for file_batch binding."""
+    base = ask_user_tool_result(response)
+    if response.decision is not CheckpointDecision.CONTINUE:
+        return base
+    suffix = (
+        f"\n整理方案已确认：plan_id={plan_id}，保留 {kept_count} 项。"
+        "请用 file_batch(organize_plan_id=该 id, operations=保留项) 分批执行"
+        f"（每批≤50），勿再弹审批。完成后可用 file_batch(organize_undo=true) 撤销。"
+    )
+    return ToolResult(
+        tool_call_id="",
+        success=True,
+        output=(base.output or "") + suffix,
+    )

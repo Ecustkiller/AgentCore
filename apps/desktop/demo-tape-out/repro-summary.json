@@ -1,249 +1,202 @@
 {
   "api": "http://localhost:8020",
-  "speed": 1,
-  "gap": 3000,
+  "mode": "prepare",
+  "speed": 2,
+  "gap": 1500,
   "timeline": [
     {
-      "t": 20,
+      "t": 23,
       "thinking": true,
+      "delegating": false,
       "authorize": false,
       "waitKickoff": false,
       "stop": false,
       "caseBrief": false,
       "debate": false,
-      "textLen": 281
+      "textLen": 242
     },
     {
-      "t": 735,
+      "t": 430,
       "thinking": true,
+      "delegating": false,
       "authorize": false,
       "waitKickoff": false,
       "stop": false,
       "caseBrief": false,
       "debate": false,
-      "textLen": 281
+      "textLen": 242
     },
     {
-      "t": 1437,
+      "t": 834,
       "thinking": true,
+      "delegating": false,
       "authorize": false,
       "waitKickoff": false,
       "stop": false,
       "caseBrief": false,
       "debate": false,
-      "textLen": 281
+      "textLen": 242
     },
     {
-      "t": 2150,
+      "t": 1239,
       "thinking": true,
+      "delegating": false,
       "authorize": false,
       "waitKickoff": false,
       "stop": false,
       "caseBrief": false,
       "debate": false,
-      "textLen": 281
+      "textLen": 369
     },
     {
-      "t": 2861,
+      "t": 1640,
       "thinking": true,
+      "delegating": false,
       "authorize": false,
       "waitKickoff": false,
       "stop": false,
-      "caseBrief": false,
+      "caseBrief": true,
       "debate": false,
-      "textLen": 281
+      "textLen": 1694
     },
     {
-      "t": 3575,
+      "t": 2103,
       "thinking": true,
+      "delegating": false,
       "authorize": false,
       "waitKickoff": false,
       "stop": false,
-      "caseBrief": false,
+      "caseBrief": true,
       "debate": false,
-      "textLen": 281
+      "textLen": 1697
     },
     {
-      "t": 4289,
+      "t": 2518,
       "thinking": true,
+      "delegating": false,
       "authorize": false,
       "waitKickoff": false,
       "stop": false,
-      "caseBrief": false,
+      "caseBrief": true,
       "debate": false,
-      "textLen": 281
+      "textLen": 2933
     },
     {
-      "t": 4999,
+      "t": 2933,
       "thinking": true,
+      "delegating": false,
       "authorize": false,
       "waitKickoff": false,
       "stop": false,
-      "caseBrief": false,
+      "caseBrief": true,
       "debate": false,
-      "textLen": 281
+      "textLen": 2933
     },
     {
-      "t": 5715,
+      "t": 3349,
       "thinking": true,
+      "delegating": false,
       "authorize": false,
       "waitKickoff": false,
       "stop": false,
-      "caseBrief": false,
+      "caseBrief": true,
       "debate": false,
-      "textLen": 281
+      "textLen": 3491
     },
     {
-      "t": 6418,
+      "t": 3765,
       "thinking": true,
+      "delegating": false,
       "authorize": false,
       "waitKickoff": false,
       "stop": false,
-      "caseBrief": false,
+      "caseBrief": true,
       "debate": false,
-      "textLen": 281
+      "textLen": 3491
     },
     {
-      "t": 7130,
+      "t": 4174,
       "thinking": true,
+      "delegating": true,
       "authorize": false,
       "waitKickoff": false,
       "stop": false,
-      "caseBrief": false,
+      "caseBrief": true,
       "debate": false,
-      "textLen": 281
+      "textLen": 623
     },
     {
-      "t": 7845,
+      "t": 4617,
       "thinking": true,
+      "delegating": true,
       "authorize": false,
       "waitKickoff": false,
       "stop": false,
-      "caseBrief": false,
+      "caseBrief": true,
       "debate": false,
-      "textLen": 281
+      "textLen": 623
     },
     {
-      "t": 8560,
+      "t": 5019,
       "thinking": true,
+      "delegating": true,
       "authorize": false,
       "waitKickoff": false,
       "stop": false,
-      "caseBrief": false,
+      "caseBrief": true,
       "debate": false,
-      "textLen": 281
+      "textLen": 623
     },
     {
-      "t": 9275,
-      "thinking": true,
-      "authorize": false,
-      "waitKickoff": false,
-      "stop": false,
-      "caseBrief": false,
-      "debate": false,
-      "textLen": 281
-    },
-    {
-      "t": 9990,
-      "thinking": true,
-      "authorize": false,
-      "waitKickoff": false,
-      "stop": false,
-      "caseBrief": false,
-      "debate": false,
-      "textLen": 281
-    },
-    {
-      "t": 10703,
-      "thinking": true,
-      "authorize": false,
-      "waitKickoff": false,
-      "stop": false,
-      "caseBrief": false,
-      "debate": false,
-      "textLen": 281
-    },
-    {
-      "t": 11416,
-      "thinking": true,
-      "authorize": false,
-      "waitKickoff": false,
-      "stop": false,
-      "caseBrief": false,
-      "debate": false,
-      "textLen": 281
-    },
-    {
-      "t": 12125,
-      "thinking": true,
-      "authorize": false,
-      "waitKickoff": false,
-      "stop": false,
-      "caseBrief": false,
-      "debate": false,
-      "textLen": 281
-    },
-    {
-      "t": 12836,
-      "thinking": true,
-      "authorize": false,
-      "waitKickoff": false,
-      "stop": false,
-      "caseBrief": false,
-      "debate": false,
-      "textLen": 281
-    },
-    {
-      "t": 13550,
-      "thinking": true,
-      "authorize": false,
-      "waitKickoff": false,
-      "stop": false,
-      "caseBrief": false,
-      "debate": false,
-      "textLen": 281
-    },
-    {
-      "t": 14263,
-      "thinking": true,
-      "authorize": false,
-      "waitKickoff": false,
-      "stop": false,
-      "caseBrief": false,
-      "debate": false,
-      "textLen": 281
-    },
-    {
-      "t": 14975,
-      "thinking": true,
-      "authorize": false,
-      "waitKickoff": false,
-      "stop": false,
-      "caseBrief": false,
-      "debate": false,
-      "textLen": 281
-    },
-    {
-      "t": 15678,
+      "t": 5434,
       "thinking": false,
+      "delegating": false,
       "authorize": true,
       "waitKickoff": true,
       "stop": false,
       "caseBrief": true,
       "debate": true,
-      "textLen": 1054
+      "textLen": 1025
+    },
+    {
+      "t": 5573,
+      "phase": "resume",
+      "thinking": true,
+      "delegating": false,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": true,
+      "debate": false,
+      "textLen": 603
+    },
+    {
+      "t": 6279,
+      "phase": "resume",
+      "thinking": true,
+      "delegating": false,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": true,
+      "debate": true,
+      "textLen": 731
     }
   ],
   "marks": {
-    "firstThinkingMs": 20,
-    "lastThinkingMs": 14975,
-    "caseBriefMs": 15678,
-    "authorizeMs": 15678,
+    "firstThinkingMs": 23,
+    "lastThinkingMs": 5019,
+    "caseBriefMs": 1640,
+    "delegatingMs": 4174,
+    "delegatingAppeared": true,
+    "authorizeMs": 5434,
     "authorizeAppeared": true,
-    "finalSnippet": "AgentCore DEV 搜索或运行命令… Ctrl+K 对话 文件 消息 工具箱 LV诉茉莉奶白商标侵权案 LV诉茉莉奶白商标侵权案 LV诉茉莉奶白商标侵权案 LV诉茉莉奶白商标侵权案 LV诉茉莉奶白商标侵权案 LV诉茉莉奶白商标侵权案 LV诉茉莉奶白商标侵权案 tape-http-walk LV诉茉莉奶白商标侵权案 协议风险审查 新对话 工作区文件概览 查看全部对话 D Dev 搜索下最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论 复制 编辑 删除 20:36 案情已经清晰，下面先给你做案件简介，然后立即启动模拟庭审辩论。 LV 诉茉莉奶白商标侵权案 — 案情简介 当事",
+    "debateAfterResumeMs": 707,
+    "debateStreamed": true,
+    "finalSnippet": "AgentCore DEV 搜索或运行命令… Ctrl+K 对话 文件 消息 工具箱 LV诉茉莉奶白商标侵权案 LV诉茉莉奶白商标侵权案 LV诉茉莉奶白商标侵权案 LV诉茉莉奶白商标侵权案 tape-http-walk LV诉茉莉奶白商标侵权案 协议风险审查 新对话 工作区文件概览 查看全部对话 D Dev 搜索下最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论 搜索网页 2 · 读取网页 3 案情已经清晰，下面先给你做案件简介，然后立即启动模拟庭审辩论。 LV 诉茉莉奶白商标侵权案 — 案情简介 当事人与案由 路易威登马利蒂（Louis Vuitton Malletier，即",
     "finalHasStop": false,
-    "finalHasAuthorize": true,
-    "finalWaitKickoff": true
+    "finalHasAuthorize": false,
+    "finalWaitKickoff": false
   },
   "pageErrors": [],
   "ok": true

@@ -43,6 +43,59 @@ describe("session readonly root write refusal", () => {
   );
 });
 
+describe("session organize root mode whitelist", () => {
+  const organizeRoot: StoredRoot = {
+    id: "s2",
+    name: "Desktop",
+    absPath: "C:\\tmp\\desktop",
+    sessionOnly: true,
+    conversationId: "c1",
+    mode: "organize",
+    alias: "desktop",
+  };
+
+  it("mode gate allows move/copy/mkdir/delete under organize", async () => {
+    const { sessionRootAccessError } = await import("../fs/workspace/dispatch");
+    for (const op of ["mkdir", "move", "copy", "delete"] as const) {
+      expect(
+        sessionRootAccessError(
+          organizeRoot,
+          op,
+          op === "mkdir" || op === "delete"
+            ? { path: "Docs" }
+            : { src: "a.txt", dst: "Docs/a.txt" },
+        ),
+      ).toBeNull();
+    }
+  });
+
+  it.each(["write", "execute", "process_start", "archive"] as const)(
+    "rejects %s under organize",
+    async (op) => {
+      const r = await executeWorkspaceOp(organizeRoot, op, {
+        path: "a.txt",
+        content: "x",
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.error.kind).toBe("OutsideWorkspace");
+        expect(r.error.detail).toMatch(/整理授权|不允许/);
+      }
+    },
+  );
+
+  it("rejects permanent delete under organize", async () => {
+    const r = await executeWorkspaceOp(organizeRoot, "delete", {
+      path: "a.txt",
+      permanent: true,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.detail).toContain("永久删除");
+    }
+  });
+});
+
 describe("buildExternalEnvFromRoots conversation ownership", () => {
   const grant: StoredRoot = {
     id: "ext-1",
@@ -72,6 +125,23 @@ describe("buildExternalEnvFromRoots conversation ownership", () => {
       { reports: "ext-1", other: "ext-2", proj: "perm-1" },
       "c1",
       lookup,
+    );
+    expect(env).toEqual({ AGENTCORE_EXTERNAL_REPORTS: "C:\\data\\reports" });
+  });
+
+  it("skips organize-mode session roots from env injection", () => {
+    const organize: StoredRoot = {
+      ...grant,
+      id: "ext-org",
+      mode: "organize",
+      readonly: false,
+    };
+    const orgLookup = (id: string) =>
+      ({ "ext-1": grant, "ext-org": organize })[id];
+    const env = buildExternalEnvFromRoots(
+      { reports: "ext-1", desk: "ext-org" },
+      "c1",
+      orgLookup,
     );
     expect(env).toEqual({ AGENTCORE_EXTERNAL_REPORTS: "C:\\data\\reports" });
   });

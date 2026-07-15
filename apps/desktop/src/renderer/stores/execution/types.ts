@@ -92,6 +92,9 @@ export const TOOL_LABELS: Record<string, string> = {
   str_replace: "编辑文件",
   file_delete: "删除文件",
   file_move: "移动文件",
+  file_copy: "复制文件",
+  mkdir: "创建目录",
+  file_batch: "批量文件操作",
   // CEO captain tools (surfaced by the bubble's tool_progress / process timeline).
   delegate: "委派任务",
   ask_user: "向你确认",

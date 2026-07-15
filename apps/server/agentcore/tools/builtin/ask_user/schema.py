@@ -59,8 +59,27 @@ def normalize_options(
                 opt["recommended"] = True
                 recommended_taken = True
             action = str(it.get("action") or "").strip()
-            if action in ("bind_local_folder", "grant_readonly_folder"):
+            if action in (
+                "bind_local_folder",
+                "grant_readonly_folder",
+                "grant_organize_folder",
+            ):
                 opt["action"] = action
+            # organize_plan structured fields (passed through for plan binding).
+            op = str(it.get("op") or "").strip()
+            if op in ("move", "copy", "delete", "mkdir"):
+                opt["op"] = op
+                if op in ("move", "copy"):
+                    src = str(it.get("source") or "").strip()
+                    dst = str(it.get("destination") or "").strip()
+                    if src:
+                        opt["source"] = src
+                    if dst:
+                        opt["destination"] = dst
+                else:
+                    p = str(it.get("path") or "").strip()
+                    if p:
+                        opt["path"] = p
         out.append(opt)
         if len(out) >= cap:
             break

@@ -13,6 +13,7 @@ import {
   Check,
   CircleHelp,
   Clock,
+  FolderTree,
   Layers,
   Loader2,
   type LucideIcon,
@@ -29,6 +30,7 @@ import {
   type AskUserContent,
   useAskAnswer,
 } from "./ask/AskUserFields";
+import { OrganizePlanBody } from "./ask/OrganizePlanBody";
 import { ProposalPickBody } from "./ask/ProposalPickBody";
 import {
   parseRiskLabel,
@@ -125,6 +127,21 @@ const INTENT_CONFIG = {
       orphaned: { label: "已失效（回合已结束或服务已重启）", tone: "muted" },
     },
   },
+  organize_plan: {
+    icon: FolderTree,
+    activeCaption: "整理方案 · 确认要执行的项",
+    cta: "确认并整理",
+    ctaIcon: FolderTree,
+    showFooterHint: false,
+    resolved: {
+      continue: { label: "已确认整理方案", tone: "success" },
+      per_call: { label: "已确认整理方案", tone: "success" },
+      adjust: { label: "已按你的调整继续", tone: "success" },
+      stop: { label: "已停止本回合", tone: "destructive" },
+      timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
+      orphaned: { label: "已失效（回合已结束或服务已重启）", tone: "muted" },
+    },
+  },
 } as const satisfies Record<
   CheckpointIntent,
   {
@@ -209,7 +226,9 @@ export function AskUserCard({
 }) {
   const config = INTENT_CONFIG[intent];
   const tone = TONE.neutral;
-  const ans = useAskAnswer(content);
+  const ans = useAskAnswer(content, {
+    seedAllMultiple: intent === "organize_plan",
+  });
   const [submitting, setSubmitting] = useState<CheckpointUserDecision | null>(
     null,
   );
@@ -217,7 +236,9 @@ export function AskUserCard({
   const HeaderIcon = config.icon;
   const CtaIcon = config.ctaIcon;
   const carriesSelected =
-    intent === "proposal_pick" || intent === "risk_ack";
+    intent === "proposal_pick" ||
+    intent === "risk_ack" ||
+    intent === "organize_plan";
 
   const send = (decision: CheckpointUserDecision, noteOverride?: string) => {
     if (busy) return;
@@ -302,6 +323,28 @@ export function AskUserCard({
         data-ask-intent="risk_ack"
       >
         <RiskAckBody
+          content={content}
+          answer={ans}
+          busy={busy}
+          submitting={submitting}
+          caption={caption ?? config.activeCaption}
+          cta={config.cta}
+          onContinue={() => send("continue")}
+          onStop={() => send("stop")}
+        />
+      </DecisionCard>
+    );
+  }
+
+  if (intent === "organize_plan") {
+    return (
+      <DecisionCard
+        tone="neutral"
+        animate
+        className="flex max-h-[min(60vh,36rem)] flex-col overflow-hidden p-0"
+        data-ask-intent="organize_plan"
+      >
+        <OrganizePlanBody
           content={content}
           answer={ans}
           busy={busy}

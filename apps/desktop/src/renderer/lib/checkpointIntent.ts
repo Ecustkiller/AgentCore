@@ -6,7 +6,8 @@ export function parseCheckpointIntent(raw: unknown): CheckpointIntent {
     raw === "kickoff" ||
     raw === "decision" ||
     raw === "proposal_pick" ||
-    raw === "risk_ack"
+    raw === "risk_ack" ||
+    raw === "organize_plan"
   ) {
     return raw;
   }

@@ -24,9 +24,20 @@ export function StreamingIndicator() {
       const role = runningRun
         ? execution.agents.find((a) => a.id === runningRun.agentId)?.role
         : null;
-      text = role
-        ? `${execution.taskSummary} · ${role} 正在工作`
-        : execution.taskSummary;
+      // 团队/辩论回合的内嵌协作图卡片已承载辩题与逐 Agent 状态，底部条只留
+      // 「谁在动」的心跳、不再复述辩题（避免与画布三重复述同一句）。单 Agent
+      // 回复无画布，这条是唯一「还活着」信号，仍保留完整任务摘要。
+      if (execution.planType !== "single_agent") {
+        text = role
+          ? `${role} 正在工作`
+          : execution.planType === "debate"
+            ? "辩论进行中"
+            : "团队协作进行中";
+      } else {
+        text = role
+          ? `${execution.taskSummary} · ${role} 正在工作`
+          : execution.taskSummary;
+      }
     }
   }
 

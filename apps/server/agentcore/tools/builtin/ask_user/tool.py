@@ -249,14 +249,17 @@ class AskUserTool:
                     },
                     "card": {
                         "type": "string",
-                        "enum": ["proposal_pick", "risk_ack"],
+                        "enum": ["proposal_pick", "risk_ack", "organize_plan"],
                         "description": (
                             "可选：显式确认卡类型（会覆盖转录推导的 intent，并校验 questions 形状）。"
                             "proposal_pick=方案挑选卡：恰好 1 个 choice 单选问题、options 2–6，"
                             "让用户从候选方案里挑一个。"
                             "risk_ack=风险确认卡：恰好 1 个 choice 多选问题、options 1–10，"
                             "让用户勾选要处理哪些风险/问题。"
-                            "两种 card 都要求 blocking=true（或缺省）；不可与 blocking=false 同用。"
+                            "organize_plan=整理方案卡：恰好 1 个 choice 多选问题、options 1–50，"
+                            "每项带 op/source/destination（或 path），默认全选、取消勾选即剔除；"
+                            "确认后即该批次能力授权（file_batch 带 organize_plan_id 不再二次弹卡）。"
+                            "三种 card 都要求 blocking=true（或缺省）；不可与 blocking=false 同用。"
                         ),
                     },
                 },

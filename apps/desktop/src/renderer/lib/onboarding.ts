@@ -62,6 +62,23 @@ export function resolveDraftEmptyKind(input: DraftEmptyInput): DraftEmptyKind {
 }
 
 /**
+ * 空草稿态是否把对话输入框与引导合成视口中央块。
+ * 仅「草稿态（未落库对话）∧ 无消息 ∧ 已有模型接入」；needs_key 保持底栏输入 + 中央 CTA，
+ * 不居中输入框。
+ *
+ * `isDraft`（`conversationId === null`）是关键闸门：已落库的对话切换时会先经历一个
+ * 「消息尚未异步加载完」的空窗口，若只看 `!hasMessages` 会把它误判为居中欢迎态，
+ * 导致输入框「先弹到中间、加载完再飞回底栏」的跳动。已有对话一律底栏。
+ */
+export function shouldCenterDraftComposer(input: {
+  isDraft: boolean;
+  hasMessages: boolean;
+  hasModelAccess: boolean;
+}): boolean {
+  return input.isDraft && !input.hasMessages && input.hasModelAccess;
+}
+
+/**
  * 账号是否已具备发消息的模型接入。
  * `configured` 覆盖 BYOK；`billing_mode === "platform"` 覆盖平台代付；
  * `free_tier_active` 覆盖无 key 的每月免费档（契约字段，单一状态源）。

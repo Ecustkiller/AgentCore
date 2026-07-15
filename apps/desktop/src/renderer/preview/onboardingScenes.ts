@@ -41,19 +41,19 @@ export const ONBOARDING_PREVIEW_SCENES: readonly OnboardingPreviewScene[] = [
   {
     id: "empty-needs-key",
     title: "空态 · 未配 key",
-    intent: "引导连接模型 + 产品手册",
+    intent: "中央 CTA；输入框仍底栏（不居中）",
     kind: "empty-needs-key",
   },
   {
     id: "empty-starter-chips",
     title: "空态 · 首启任务",
-    intent: "三枚多 Agent 任务 chips",
+    intent: "问候 + chips + 输入框居中成一体",
     kind: "empty-starter-chips",
   },
   {
     id: "empty-returning",
     title: "空态 · 老用户",
-    intent: "单句零噪音",
+    intent: "单句问候 + 输入框居中成一体",
     kind: "empty-returning",
   },
 ];

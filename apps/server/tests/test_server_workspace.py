@@ -25,6 +25,7 @@ from agentcore.workspace.protocol import (
     NotUTF8,
     OutsideWorkspace,
     PathNotFound,
+    WorkspaceIOError,
 )
 from agentcore.workspace.server import ServerWorkspace
 
@@ -326,6 +327,11 @@ async def test_delete_removes_file(tmp_path: Path):
     await ws.delete("f.txt")
     assert not (tmp_path / "f.txt").exists()
     assert ws.dirty is True
+    trash = tmp_path / ".agentcore" / "trash"
+    assert trash.is_dir()
+    entries = list(trash.iterdir())
+    assert len(entries) == 1
+    assert (entries[0] / "content").read_text(encoding="utf-8") == "x"
 
 
 async def test_delete_removes_directory_recursively(tmp_path: Path):
@@ -333,6 +339,15 @@ async def test_delete_removes_directory_recursively(tmp_path: Path):
     (tmp_path / "d" / "sub" / "f.txt").write_text("x", encoding="utf-8")
     await _ws(tmp_path).delete("d")
     assert not (tmp_path / "d").exists()
+    assert (tmp_path / ".agentcore" / "trash").is_dir()
+
+
+async def test_delete_permanent_hard_removes(tmp_path: Path):
+    (tmp_path / "f.txt").write_text("x", encoding="utf-8")
+    await _ws(tmp_path).delete("f.txt", permanent=True)
+    assert not (tmp_path / "f.txt").exists()
+    trash = tmp_path / ".agentcore" / "trash"
+    assert not trash.exists() or not any(trash.iterdir())
 
 
 async def test_delete_missing_raises_path_not_found(tmp_path: Path):
@@ -360,6 +375,34 @@ async def test_failed_delete_does_not_dirty(tmp_path: Path):
     with pytest.raises(PathNotFound):
         await ws.delete("nope.txt")
     assert ws.dirty is False
+
+
+async def test_copy_file_and_tree(tmp_path: Path):
+    (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
+    (tmp_path / "bin.dat").write_bytes(b"\x00\x01\xff")
+    ws = _ws(tmp_path)
+    await ws.copy("a.txt", "nested/b.txt")
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "hello"
+    assert (tmp_path / "nested" / "b.txt").read_text(encoding="utf-8") == "hello"
+    await ws.copy("bin.dat", "nested/bin.dat")
+    assert (tmp_path / "nested" / "bin.dat").read_bytes() == b"\x00\x01\xff"
+
+    (tmp_path / "tree" / "sub").mkdir(parents=True)
+    (tmp_path / "tree" / "sub" / "c.txt").write_text("c", encoding="utf-8")
+    await ws.copy("tree", "tree2")
+    assert (tmp_path / "tree2" / "sub" / "c.txt").read_text(encoding="utf-8") == "c"
+
+
+async def test_copy_refuses_overwrite_and_into_self(tmp_path: Path):
+    (tmp_path / "a.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("y", encoding="utf-8")
+    ws = _ws(tmp_path)
+    with pytest.raises(AlreadyExists):
+        await ws.copy("a.txt", "b.txt")
+    (tmp_path / "d").mkdir()
+    (tmp_path / "d" / "f.txt").write_text("f", encoding="utf-8")
+    with pytest.raises(WorkspaceIOError):
+        await ws.copy("d", "d/nested")
 
 
 async def test_move_renames_file(tmp_path: Path):

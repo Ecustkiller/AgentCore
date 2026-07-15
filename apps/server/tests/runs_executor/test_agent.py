@@ -440,6 +440,9 @@ async def test_worker_system_prompt_grants_structure_ownership():
     sys = provider.system_messages[0]
     assert "专业结构" in sys
     assert "填字" in sys
+    # 对称解锁：task 关注点是起点线索不是答题边界（审查类「指路不代答」的 worker 侧）。
+    assert "起点线索" in sys
+    assert "答题边界" in sys
 
 
 async def test_contract_strict_hard_fails_after_retries():

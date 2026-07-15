@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 from typing import Any
 
 from agentcore.core.logging import get_logger
+from agentcore.runtime.events.chat import content_delta
 from agentcore.runtime.events.journal_config import (
     _HISTORY_COALESCE_RUN,
     _HISTORY_COALESCE_TURN,
@@ -29,6 +31,88 @@ ORCHESTRATION_TOOLS = frozenset({"delegate", "debate"})
 logger = get_logger(__name__)
 
 
+def _step_has_marker(steps: list[dict[str, Any]], kind: str, key: str, value: str) -> bool:
+    return any(s.get("kind") == kind and s.get(key) == value for s in steps)
+
+
+def _insert_marker_step(
+    steps: list[dict[str, Any]],
+    marker: dict[str, Any],
+    *,
+    before_last_team: bool = False,
+) -> None:
+    """Insert a positional marker into ``steps`` (caller owns dedup).
+
+    ``before_last_team`` mirrors team_preview product narrative: 开工卡 sits just
+    before the collaboration-graph ``team`` marker, not after it.
+    """
+    if before_last_team:
+        for i in range(len(steps) - 1, -1, -1):
+            if steps[i].get("kind") == "team":
+                steps.insert(i, marker)
+                return
+    steps.append(marker)
+
+
+def _marker_spec_for_required(
+    event_type: EventType | str,
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], bool] | None:
+    """Build (marker_step, before_last_team) for a ``*_required`` / ask surface event.
+
+    Shared by ``EventSink._accumulate_process`` and suspension capture (G7) so live
+    emit and ``turn_paused`` snapshot stay lockstep. Returns None when the event is
+    not a marker surface or the id is empty.
+    """
+    t = event_type if isinstance(event_type, EventType) else EventType(event_type)
+    if t == EventType.CHECKPOINT_REQUIRED:
+        cid = payload.get("checkpoint_id") or ""
+        if not cid:
+            return None
+        return {"kind": "checkpoint", "checkpoint_id": cid}, False
+    if t == EventType.QUESTION_POSTED:
+        aid = payload.get("ask_id") or ""
+        if not aid:
+            return None
+        return {"kind": "ask", "ask_id": aid}, False
+    if t == EventType.PLAN_REVIEW_REQUIRED:
+        cid = payload.get("checkpoint_id") or ""
+        if not cid:
+            return None
+        return {"kind": "plan_review", "checkpoint_id": cid}, False
+    if t == EventType.TEAM_PREVIEW_REQUIRED:
+        cid = payload.get("checkpoint_id") or ""
+        if not cid:
+            return None
+        return {"kind": "team_preview", "checkpoint_id": cid}, True
+    return None
+
+
+def synthesize_required_marker(
+    steps: list[dict[str, Any]],
+    event_type: EventType | str,
+    payload: dict[str, Any],
+) -> bool:
+    """Synthesize a marker step into ``steps`` from a ``*_required`` event (G7).
+
+    Dedups within ``steps`` (``_has_marker`` semantics on the target list). Returns
+    whether a marker was inserted. Capture side uses this on a seeded⊕live snapshot
+    so the pause-anchor marker lands even though the required event emits *after*
+    ``persist_suspension_capture``.
+    """
+    spec = _marker_spec_for_required(event_type, payload)
+    if spec is None:
+        return False
+    marker, before_last_team = spec
+    kind = marker["kind"]
+    key = next(k for k in marker if k != "kind")
+    value = marker[key]
+    if _step_has_marker(steps, kind, key, value):
+        return False
+    _insert_marker_step(steps, marker, before_last_team=before_last_team)
+    return True
+
+
 class EventSink:
     """Async queue bridging execution (producer) and SSE (consumer)."""
 
@@ -45,6 +129,11 @@ class EventSink:
         self._history: list[SSEEvent] = []
         self._journal: list[dict[str, Any]] = []
         self._process: list[dict[str, Any]] = []
+        # Resume-seeded captain / worker timelines (G1/G7). Deep-copied on seed; never
+        # mixed into live ``_process`` / ``_run_processes``. Persist projection merges
+        # seeded⊕live; streamed_* and content_reset read/mutate live only.
+        self._seeded_process: list[dict[str, Any]] = []
+        self._seeded_run_processes: dict[str, list[dict[str, Any]]] = {}
         # Per-worker-run 思考·正文·工具 timeline (对称 CEO ``_process``). Keyed by run_id;
         # tools tagged with ``run_id`` land here (not on the captain bubble). Persisted as
         # ``runs.run_processes`` so reload matches live interleaving — ``message_final``
@@ -55,6 +144,9 @@ class EventSink:
         self._conversation_id = conversation_id
         self._message_id = message_id
         self._checkpointer: StreamCheckpointer | None = None
+        # G6: after content_reset, display-only reinject this text into history + SSE
+        # (skip process / checkpointer). None = hook unset (status-quo behaviour).
+        self._content_reset_reinjection: str | None = None
         if conversation_id and message_id:
             self._try_start_stream_checkpointer()
 
@@ -78,6 +170,23 @@ class EventSink:
             return
         self._checkpointer = StreamCheckpointer(turn_id=self._message_id)
         self._checkpointer.start()
+
+    def set_content_reset_reinjection(self, text: str | None) -> None:
+        """G6: after each ``content_reset``, display-only reinject ``text`` (or clear hook).
+
+        Resume pipeline sets pre_pause so client bubble reset does not wipe the
+        suspended-turn base. Pass ``None`` to disable (status quo).
+        """
+        self._content_reset_reinjection = text
+
+    def _emit_display_only(self, event: SSEEvent) -> None:
+        """History + SSE only — skip process accumulation, journal, and checkpointer."""
+        if self._closed:
+            return
+        self._record_history(event)
+        if not self._detached:
+            self._queue.put_nowait(event)
+            self._persist_barriers.put_nowait(None)
 
     def emit(self, event: SSEEvent) -> None:
         if not self._closed:
@@ -104,6 +213,14 @@ class EventSink:
             if not self._detached:
                 self._queue.put_nowait(event)
                 self._persist_barriers.put_nowait(persist_future)
+            # G6: reinject after content_reset is fully processed (history + SSE +
+            # checkpointer already saw the reset). Display-only path skips process /
+            # checkpointer so salvage and persist timelines stay unduplicated.
+            if (
+                event.type is EventType.CONTENT_RESET
+                and self._content_reset_reinjection is not None
+            ):
+                self._emit_display_only(content_delta(self._content_reset_reinjection))
 
     def _record_history(self, event: SSEEvent) -> None:
         t = event.type
@@ -163,8 +280,10 @@ class EventSink:
     def _has_marker(self, kind: str, key: str, value: str) -> bool:
         """Whether a positional marker step (team / checkpoint / ask / plan_review) for
         ``value`` is already in the timeline — keeps a replayed / multi-batch event from
-        dropping a duplicate anchor."""
-        return any(s.get("kind") == kind and s.get(key) == value for s in self._process)
+        dropping a duplicate anchor. Scans seeded ⊕ live so resume-seeded anchors dedup."""
+        return _step_has_marker(self._seeded_process, kind, key, value) or _step_has_marker(
+            self._process, kind, key, value
+        )
 
     def _run_process(self, run_id: str) -> list[dict[str, Any]]:
         return self._run_processes.setdefault(run_id, [])
@@ -295,39 +414,62 @@ class EventSink:
                     if display is not None:
                         step["display"] = display
                     break
-        elif t == EventType.CHECKPOINT_REQUIRED:
-            # 检查点时间线落点: a blocking ask_user pauses the CEO HERE — drop a positional
-            # marker so the card replays at its real spot, not stamped at the bottom. The card
-            # body is folded separately (client checkpointsFromEvents), keyed by this id.
-            cid = event.payload.get("checkpoint_id") or ""
-            if cid and not self._has_marker("checkpoint", "checkpoint_id", cid):
-                self._process.append({"kind": "checkpoint", "checkpoint_id": cid})
-        elif t == EventType.QUESTION_POSTED:
-            # 非阻塞发问时间线落点: the CEO surfaced a question and kept working — marker only.
-            aid = event.payload.get("ask_id") or ""
-            if aid and not self._has_marker("ask", "ask_id", aid):
-                self._process.append({"kind": "ask", "ask_id": aid})
-        elif t == EventType.PLAN_REVIEW_REQUIRED:
-            # 计划复核时间线落点: a plan-review gate pauses the turn HERE.
-            cid = event.payload.get("checkpoint_id") or ""
-            if cid and not self._has_marker("plan_review", "checkpoint_id", cid):
-                self._process.append({"kind": "plan_review", "checkpoint_id": cid})
-        elif t == EventType.TEAM_PREVIEW_REQUIRED:
-            # 开工卡时间线落点: thin preview before first wave. Event order is
-            # run_plan → team_preview_required, but product narrative is 开工卡 → 协作图 —
-            # if a team marker already exists, insert before the last one; else append.
-            cid = event.payload.get("checkpoint_id") or ""
-            if cid and not self._has_marker("team_preview", "checkpoint_id", cid):
-                marker = {"kind": "team_preview", "checkpoint_id": cid}
-                for i in range(len(self._process) - 1, -1, -1):
-                    if self._process[i].get("kind") == "team":
-                        self._process.insert(i, marker)
-                        break
-                else:
-                    self._process.append(marker)
+        elif t in (
+            EventType.CHECKPOINT_REQUIRED,
+            EventType.QUESTION_POSTED,
+            EventType.PLAN_REVIEW_REQUIRED,
+            EventType.TEAM_PREVIEW_REQUIRED,
+        ):
+            # Positional card anchors — shared builder with synthesize_required_marker (G7).
+            # Dedup scans seeded⊕live; insert targets live only.
+            spec = _marker_spec_for_required(t, event.payload)
+            if spec is None:
+                return
+            marker, before_last_team = spec
+            kind = marker["kind"]
+            key = next(k for k in marker if k != "kind")
+            if self._has_marker(kind, key, marker[key]):
+                return
+            _insert_marker_step(self._process, marker, before_last_team=before_last_team)
 
     def seed_journal(self, events: list[dict[str, Any]]) -> None:
         self._journal.extend(events)
+
+    def seed_process(self, steps: list[dict[str, Any]]) -> None:
+        """Hydrate resume captain timeline into the seeded zone (G1/G7). Deep-copied."""
+        self._seeded_process = copy.deepcopy(list(steps))
+
+    def seed_run_processes(self, run_map: dict[str, list[dict[str, Any]]]) -> None:
+        """Hydrate resume worker timelines into the seeded zone (G1/G7). Deep-copied."""
+        self._seeded_run_processes = {
+            rid: copy.deepcopy(list(steps)) for rid, steps in run_map.items()
+        }
+
+    def raw_process(self) -> list[dict[str, Any]]:
+        """Seeded ⊕ live captain steps with **no** structural gate (G1 capture).
+
+        Unlike ``process_timeline()``, a pure prose turn still returns its steps —
+        suspension snapshots must not drop pre-pause content/reasoning.
+        """
+        if not self._seeded_process:
+            return list(self._process)
+        return [*self._seeded_process, *self._process]
+
+    def raw_run_processes(self) -> dict[str, list[dict[str, Any]]]:
+        """Seeded ⊕ live worker step maps with **no** empty-map gate (G1 capture)."""
+        return self._merged_run_processes()
+
+    def _merged_run_processes(self) -> dict[str, list[dict[str, Any]]]:
+        out: dict[str, list[dict[str, Any]]] = {}
+        for rid, steps in self._seeded_run_processes.items():
+            if steps:
+                out[rid] = list(steps)
+        for rid, steps in self._run_processes.items():
+            if not steps:
+                continue
+            prior = out.get(rid)
+            out[rid] = [*prior, *steps] if prior else list(steps)
+        return out
 
     def execution_journal(self) -> list[dict[str, Any]] | None:
         has_surface = any(e["type"] in _JOURNAL_SURFACE_TYPES for e in self._journal)
@@ -339,6 +481,12 @@ class EventSink:
         # A pure reasoning/content turn needs none (the content scalar IS the answer, and
         # reasoning rides its own column), matching the fold's "tool-less single-agent turn
         # → no process" so live / reload / golden stay aligned.
+        # Gate scans seeded⊕live; unseeded path returns the live list by reference
+        # (status-quo identity for callers that mutate / compare).
+        if self._seeded_process:
+            merged = [*self._seeded_process, *self._process]
+            structural = any(s.get("kind") not in ("reasoning", "content") for s in merged)
+            return merged if structural else None
         structural = any(s.get("kind") not in ("reasoning", "content") for s in self._process)
         return self._process if structural else None
 
@@ -347,7 +495,11 @@ class EventSink:
 
         Persist any non-empty run timeline so reload keeps true interleaving (tools
         between thinking/output). Empty map → None (no field on the runs payload).
+        When seeded, returns seeded⊕live merge; otherwise the live map only (status quo).
         """
+        if self._seeded_run_processes:
+            out = self._merged_run_processes()
+            return out or None
         out = {rid: steps for rid, steps in self._run_processes.items() if steps}
         return out or None
 
@@ -360,13 +512,15 @@ class EventSink:
         instead of being replaced by a generic「连接中断」note. Empty for a turn that had
         streamed no assistant text yet (e.g. still mid-tool). Accumulates even while
         detached, so a disconnect that later cancels still recovers what streamed.
+
+        Live zone only — seeded pre-pause content must not re-enter salvage joins (G8).
         """
         return "".join(
             step.get("text", "") for step in self._process if step.get("kind") == "content"
         )
 
     def streamed_reasoning(self) -> str:
-        """CEO thinking text accumulated so far (process ``reasoning`` steps)."""
+        """CEO thinking text accumulated so far (live ``reasoning`` steps only)."""
         return "".join(
             step.get("text", "") for step in self._process if step.get("kind") == "reasoning"
         )

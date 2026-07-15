@@ -6,7 +6,11 @@ import {
   ToolLine,
   ToolLineGroup,
 } from "@/components/chat/ToolLine";
-import { type TimelineNode, groupToolRuns } from "@/lib/processTimeline";
+import {
+  type TimelineNode,
+  groupToolRuns,
+  timelineNodeKeys,
+} from "@/lib/processTimeline";
 import type {
   CheckpointDisplay,
   NonBlockingAskDisplay,
@@ -90,7 +94,7 @@ function ProcessRow({
   citations,
   onCitationClick,
   turnKey,
-  rowIndex,
+  rowKey,
 }: {
   step: ProcessStep;
   streaming: boolean;
@@ -98,15 +102,15 @@ function ProcessRow({
   onCitationClick: (n: number) => void;
   /** 回合作用域（= messageId）：给了才持久化本行的折叠态；缺省走会话态。 */
   turnKey?: string;
-  /** 本行在时间线的稳定序号（append-only）——推理行按序号做键，工具行按 step.id。 */
-  rowIndex: number;
+  /** 本行的稳定标识（{@link timelineNodeKeys}）——标记中段插入不再位移它。 */
+  rowKey: string;
 }) {
   if (step.kind === "reasoning") {
     return (
       <InlineReasoning
         text={step.text}
         streaming={streaming}
-        persistKey={turnKey ? `${turnKey}:reason:${rowIndex}` : null}
+        persistKey={turnKey ? `${turnKey}:reason:${rowKey}` : null}
       />
     );
   }
@@ -140,7 +144,6 @@ export function ProcessTimeline({
   onCitationClick,
   composingTool,
   fallbackContent,
-  executionId,
   messageId,
   journal,
   conversationId,
@@ -158,7 +161,6 @@ export function ProcessTimeline({
   onCitationClick: (n: number) => void;
   composingTool: { toolName: string; chars: number } | null;
   fallbackContent: string;
-  executionId?: string | null;
   messageId?: string;
   journal?: ExecutionJournal;
   conversationId: string | null;
@@ -177,9 +179,8 @@ export function ProcessTimeline({
     last.status !== "running";
 
   const nodes = groupToolRuns(process);
-  // The team graph normally rides its inline `team` marker; turns without one fall back
-  // to a bottom-stamped graph.
-  const hasTeamMarker = process.some((s) => s.kind === "team");
+  // 稳定 key（时间线一期）：insertBeforeTeam 中段插入不再位移后续行的 React key。
+  const nodeKeys = timelineNodeKeys(nodes);
 
   const hasProcessSteps = nodes.some(isProcessNode);
   const { reasoningCount, toolCount } = countProcessStats(nodes);
@@ -197,9 +198,10 @@ export function ProcessTimeline({
 
   const renderNode = (node: TimelineNode, i: number) => {
     const live = isStreaming && i === nodes.length - 1;
+    const nodeKey = nodeKeys[i];
     if (node.kind === "team") {
       return messageId ? (
-        <Fragment key={`team-${node.execution_id}`}>
+        <Fragment key={nodeKey}>
           <InlineTeamGraph
             messageId={messageId}
             executionId={node.execution_id}
@@ -229,24 +231,24 @@ export function ProcessTimeline({
     if (node.kind === "tool-group") {
       return (
         <ToolLineGroup
-          key={`tool-group-${messageId}-${i}`}
+          key={nodeKey}
           tools={node.tools}
           isStreaming={live}
           turnKey={messageId}
-          groupIndex={i}
+          groupKey={nodeKey}
         />
       );
     }
     const step: ProcessStep = node.kind === "tool" ? node.step : node;
     return (
       <ProcessRow
-        key={`process-${messageId}-${i}-${step.kind}`}
+        key={nodeKey}
         step={step}
         streaming={live}
         citations={citations}
         onCitationClick={onCitationClick}
         turnKey={messageId}
-        rowIndex={i}
+        rowKey={nodeKey}
       />
     );
   };
@@ -291,13 +293,8 @@ export function ProcessTimeline({
         }
         return renderNode(node, i);
       })}
-      {executionId && messageId && !hasTeamMarker && (
-        <InlineTeamGraph
-          messageId={messageId}
-          executionId={executionId}
-          journal={journal}
-        />
-      )}
+      {/* 无 team 标记的图兜底已移除（时间线一期）：多 Agent 回合必有 `team` 标记
+          （live 盖章 + reload journal 补齐），图只在标记槽渲染。 */}
       {!hasContentStep && fallbackContent && (
         <Markdown
           content={fallbackContent}

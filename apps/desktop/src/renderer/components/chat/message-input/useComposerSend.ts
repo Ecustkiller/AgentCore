@@ -10,6 +10,7 @@ import { loadLatestWindow } from "@/services/messages";
 import { resolveDefaultPermissionPreset } from "@/services/permissionPreset";
 import type { OutgoingAttachment } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
+import { useComposerDraftStore } from "@/stores/composer";
 import { getActiveRuntime, useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
 import { type Dispatch, type SetStateAction, useCallback } from "react";
@@ -98,6 +99,10 @@ export function useComposerSend({
               | "full_trust"
               | undefined) ?? permissionPreset,
         });
+        // 首发落地动画：仅在草稿 promote 成新对话时武装 dock-flip（中间→底栏）。切换到
+        // 已有对话不走这里，故不会误触发动画——这正是修掉「输入框跳动」的关键。必须在
+        // switchConversation 前武装，让 conversationId 翻转的那一帧就带上信号。
+        useComposerDraftStore.getState().armDockFlip();
         useConversationStore.getState().switchConversation(conv.id);
         createdNew = true;
         useFoldersStore.getState().resetDraftWorkspaceIntent();

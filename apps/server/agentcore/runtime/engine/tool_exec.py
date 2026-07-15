@@ -38,6 +38,7 @@ async def execute_tools(
     citation_sink: list[dict[str, Any]] | None = None,
     annotate_citations: bool = True,
     run_id: str = "",
+    role: str = "",
 ) -> tuple[list[LLMMessage], ToolResult | None, list[ToolAttempt]]:
     """Execute tool calls (parallel, capped).
 
@@ -57,7 +58,14 @@ async def execute_tools(
     reproducible. Workers pass ``annotate_citations=False`` — sources are collected
     but the worker text is left un-numbered (its local numbers would be re-ordered
     when merged into the turn card).
+
+    Display/trace split for ``role == "captain"``: SSE tool events omit ``run_id``
+    so the UI renders them as turn-level inline steps (same as captain
+    ``content_delta``); ``ToolCallFact`` and circuit-breaker audit still keep
+    ``run_id`` for §8.3 fold / audit. Workers keep ``run_id`` on SSE too.
     """
+    # Captain self-tools: inline timeline (no run_id on wire); facts/audit keep run_id.
+    event_run_id = "" if role == "captain" else run_id
 
     async def _run_one(
         tc: ToolCall,
@@ -69,13 +77,15 @@ async def execute_tools(
         except json.JSONDecodeError:
             args = {}
 
-        sink.emit(tool_use_start(tc.id, name, args, run_id=run_id))
+        sink.emit(tool_use_start(tc.id, name, args, run_id=event_run_id))
         logger.debug("tool.execute_start", tool=name)
 
         tool = registry.get_optional(name)
         if tool is None:
             error_msg = f"Tool '{name}' not found"
-            sink.emit(tool_use_end(tc.id, name, success=False, output=error_msg, run_id=run_id))
+            sink.emit(
+                tool_use_end(tc.id, name, success=False, output=error_msg, run_id=event_run_id)
+            )
             logger.info("tool.execute_end", tool=name, status="not_found", duration_ms=0)
             return (
                 LLMMessage(role="tool", content=error_msg, tool_call_id=tc.id),
@@ -104,7 +114,9 @@ async def execute_tools(
                 f"工具 '{name}' 被安全熔断拒绝：{breaker.reason}"
                 "请改用其他方案，不要原样重试该路径。"
             )
-            sink.emit(tool_use_end(tc.id, name, success=False, output=denial, run_id=run_id))
+            sink.emit(
+                tool_use_end(tc.id, name, success=False, output=denial, run_id=event_run_id)
+            )
             logger.info(
                 "tool.execute_end",
                 tool=name,
@@ -157,7 +169,9 @@ async def execute_tools(
                     "请改用其他方案。"
                 )
                 sink.emit(
-                    tool_use_end(tc.id, name, success=False, output=denial, run_id=run_id)
+                    tool_use_end(
+                        tc.id, name, success=False, output=denial, run_id=event_run_id
+                    )
                 )
                 logger.info(
                     "tool.execute_end",
@@ -193,7 +207,9 @@ async def execute_tools(
                         "请改用其他方案或询问如何继续，不要再调用此工具。"
                     )
                     sink.emit(
-                        tool_use_end(tc.id, name, success=False, output=denial, run_id=run_id)
+                        tool_use_end(
+                            tc.id, name, success=False, output=denial, run_id=event_run_id
+                        )
                     )
                     logger.info("tool.execute_end", tool=name, status="denied", duration_ms=0)
                     return (
@@ -206,12 +222,12 @@ async def execute_tools(
         # 工具执行阶段进度 (联网搜索前端展示优化): inject a per-call phase callback so a
         # long-running tool (web_search) can report a coarse EXECUTION phase mid-flight. The
         # executor owns event shape (引擎纯化) — the tool passes only a phase token; we close
-        # over this call's id/name/run_id and emit the transport-only ``tool_use_progress``.
+        # over this call's id/name/event_run_id and emit the transport-only ``tool_use_progress``.
         def _emit_phase(phase: str) -> None:
-            sink.emit(tool_use_progress(tc.id, name, phase, run_id=run_id))
+            sink.emit(tool_use_progress(tc.id, name, phase, run_id=event_run_id))
 
         def _emit_progress(phase: str, data: dict[str, Any] | None = None) -> None:
-            sink.emit(tool_use_progress(tc.id, name, phase, run_id=run_id, extra=data))
+            sink.emit(tool_use_progress(tc.id, name, phase, run_id=event_run_id, extra=data))
 
         ctx = replace(context, on_phase=_emit_phase, on_progress=_emit_progress)
 
@@ -233,7 +249,11 @@ async def execute_tools(
                 f"工具 '{name}' 执行超过 {timeout:.0f}s 仍未完成，已中止。"
                 "请改用更快的方式、缩小处理范围，或换一种方案，不要原样重试。"
             )
-            sink.emit(tool_use_end(tc.id, name, success=False, output=timeout_msg, run_id=run_id))
+            sink.emit(
+                tool_use_end(
+                    tc.id, name, success=False, output=timeout_msg, run_id=event_run_id
+                )
+            )
             logger.warning("tool.execute_end", tool=name, status="timeout", duration_ms=duration_ms)
             return (
                 LLMMessage(role="tool", content=timeout_msg, tool_call_id=tc.id),
@@ -251,7 +271,9 @@ async def execute_tools(
                 f"工具 '{name}' 执行时发生内部错误：{e}。"
                 "请调整方案或换一种方式，不要原样重试。"
             )
-            sink.emit(tool_use_end(tc.id, name, success=False, output=error_msg, run_id=run_id))
+            sink.emit(
+                tool_use_end(tc.id, name, success=False, output=error_msg, run_id=event_run_id)
+            )
             logger.exception(
                 "tool.execute_end",
                 tool=name,
@@ -293,7 +315,7 @@ async def execute_tools(
                     success=result.success,
                     output=output,
                     display=result.display,
-                    run_id=run_id,
+                    run_id=event_run_id,
                 )
             )
         logger.info(

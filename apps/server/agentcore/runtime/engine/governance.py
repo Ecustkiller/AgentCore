@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -147,14 +148,18 @@ def maybe_inject_audit_gate(
     return True
 
 
+# Successful returns that enter post-delegate synthesis mode (G5: live/resume symmetric).
+_POST_DELEGATE_TOOLS = frozenset({"delegate", "debate"})
+
+
 def note_delegate_batches(
     controller: LoopController,
     tool_calls: list[ToolCall],
     attempts: list[ToolAttempt],
 ) -> None:
-    """Inform the controller of each successful delegate batch's shape (post-return)."""
+    """Inform the controller of each successful delegate/debate batch's shape (post-return)."""
     for tc, attempt in zip(tool_calls, attempts, strict=False):
-        if attempt.tool_name != "delegate" or not attempt.success:
+        if attempt.tool_name not in _POST_DELEGATE_TOOLS or not attempt.success:
             continue
         nodes = int(attempt.meta.get("batch_nodes") or 0)
         has_deps = bool(attempt.meta.get("batch_has_deps"))
@@ -193,9 +198,17 @@ def classify_investigation_tools(
     return frozenset(investigation_tools)
 
 
-def create_loop_controller(investigation_tools: frozenset[str]) -> LoopController:
-    """Build per-run convergence controller from engine settings."""
-    return LoopController(
+def create_loop_controller(
+    investigation_tools: frozenset[str],
+    *,
+    seed: Mapping[str, Any] | None = None,
+) -> LoopController:
+    """Build per-run convergence controller from engine settings.
+
+    ``seed`` restores the five cross-suspension latches (see
+    :meth:`LoopController.apply_seed`); omit on a fresh turn.
+    """
+    controller = LoopController(
         empty_threshold=settings.engine_empty_response_threshold,
         tool_failure_warn=settings.engine_tool_failure_warn,
         tool_failure_disable=settings.engine_tool_failure_disable,
@@ -206,6 +219,9 @@ def create_loop_controller(investigation_tools: frozenset[str]) -> LoopControlle
         convergence_spin_rounds=settings.engine_convergence_spin_rounds,
         investigation_tools=investigation_tools,
     )
+    if seed:
+        controller.apply_seed(seed)
+    return controller
 
 
 def resolve_openai_tool_defs(

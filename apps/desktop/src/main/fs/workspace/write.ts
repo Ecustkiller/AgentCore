@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import type { WorkspaceOpResult } from "@shared/ipc-contract";
+import { shell } from "electron";
 import { WORKSPACE_READ_MAX } from "../constants";
 import { realInside, resolveLexical, toReason } from "../pathGuard";
 import type { StoredRoot } from "../roots";
@@ -170,9 +171,46 @@ export async function opMkdir(
   return opOk(null);
 }
 
+function isAgentcoreRel(relPath: string): boolean {
+  const p = relPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  return p === ".agentcore" || p.startsWith(".agentcore/");
+}
+
+/** 无系统回收站时：移入工作区 `.agentcore/trash/<id>/` 并写 meta（对齐服务端 soft_delete）。 */
+async function softDeleteToWorkspaceTrash(
+  root: StoredRoot,
+  realPath: string,
+  relPath: string,
+): Promise<WorkspaceOpResult> {
+  const entryId = randomUUID().replace(/-/g, "");
+  const entryDir = join(root.absPath, ".agentcore", "trash", entryId);
+  const dest = join(entryDir, "content");
+  try {
+    const st = await fs.lstat(realPath);
+    await fs.mkdir(entryDir, { recursive: true });
+    await fs.rename(realPath, dest);
+    const meta = {
+      original_path: relPath.replace(/\\/g, "/"),
+      deleted_at: new Date().toISOString(),
+      is_dir: st.isDirectory(),
+      name: basename(realPath),
+    };
+    await fs.writeFile(
+      join(entryDir, "meta.json"),
+      `${JSON.stringify(meta, null, 2)}\n`,
+      "utf-8",
+    );
+    return opOk(null);
+  } catch (e) {
+    await fs.rm(entryDir, { recursive: true, force: true }).catch(() => {});
+    return opErr("WorkspaceIOError", toReason(e));
+  }
+}
+
 export async function opDelete(
   root: StoredRoot,
   relPath: string,
+  permanent = false,
 ): Promise<WorkspaceOpResult> {
   const abs = resolveLexical(root, relPath);
   if (!abs) return opErr("OutsideWorkspace", relPath);
@@ -191,8 +229,70 @@ export async function opDelete(
       ? opErr("OutsideWorkspace", relPath)
       : opErr("PathNotFound", relPath);
   }
+  const hard = permanent || isAgentcoreRel(relPath);
   try {
-    await fs.rm(real.path, { recursive: true, force: false });
+    if (hard) {
+      await fs.rm(real.path, { recursive: true, force: false });
+      return opOk(null);
+    }
+    // 默认可逆：系统回收站；失败则落工作区软删区（无回收站 / 权限拒绝等）。
+    try {
+      await shell.trashItem(real.path);
+      return opOk(null);
+    } catch {
+      return softDeleteToWorkspaceTrash(root, real.path, relPath);
+    }
+  } catch (e) {
+    return opErr("WorkspaceIOError", toReason(e));
+  }
+}
+
+export async function opCopy(
+  root: StoredRoot,
+  src: string,
+  dst: string,
+): Promise<WorkspaceOpResult> {
+  const srcAbs = resolveLexical(root, src);
+  if (!srcAbs) return opErr("OutsideWorkspace", src);
+  if (srcAbs === root.absPath) return opErr("OutsideWorkspace", src);
+  try {
+    await fs.lstat(srcAbs);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+      return opErr("PathNotFound", src);
+    }
+    return opErr("WorkspaceIOError", toReason(e));
+  }
+  const srcReal = await realInside(root, srcAbs);
+  if (!srcReal.ok) {
+    return srcReal.code === "out_of_root"
+      ? opErr("OutsideWorkspace", src)
+      : opErr("PathNotFound", src);
+  }
+
+  const dstTarget = await resolveWritable(root, dst);
+  if (!dstTarget) return opErr("OutsideWorkspace", dst);
+  if (dstTarget === root.absPath) return opErr("OutsideWorkspace", dst);
+
+  // 禁止把目录复制进自身或其子树（否则 fs.cp 会自我递归）。
+  const intoRel = relative(srcReal.path, dstTarget);
+  if (intoRel === "" || (!intoRel.startsWith("..") && !isAbsolute(intoRel))) {
+    return opErr("WorkspaceIOError", "不能复制到自身或其子目录");
+  }
+
+  let dstExists = true;
+  try {
+    await fs.lstat(dstTarget);
+  } catch {
+    dstExists = false;
+  }
+  if (dstExists) return opErr("AlreadyExists", dst);
+  try {
+    await fs.mkdir(dirname(dstTarget), { recursive: true });
+    await fs.cp(srcReal.path, dstTarget, {
+      recursive: true,
+      errorOnExist: true,
+    });
   } catch (e) {
     return opErr("WorkspaceIOError", toReason(e));
   }

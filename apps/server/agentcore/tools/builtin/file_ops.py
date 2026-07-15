@@ -1,4 +1,5 @@
-"""File operations tools (read, write, list, precise str_replace edit, delete, move).
+"""File operations tools (read, write, list, precise str_replace edit, delete,
+move, copy, mkdir, batch).
 
 Thin shells over ``ToolContext.backend``: each tool parses arguments, calls the
 workspace backend, maps typed ``WorkspaceError`` failures back to user-facing
@@ -638,9 +639,11 @@ class FileDeleteTool:
         return ToolSchema(
             name="file_delete",
             description=(
-                "删除一个文件，或一个目录【及其全部内容】（递归）。此操作不可逆，"
-                "请只删除你确定不再需要的路径。工作区根目录本身不可删除。路径必须"
-                "是相对于工作区的相对路径。"
+                "删除一个文件，或一个目录【及其全部内容】（递归）。默认【可逆】："
+                "本地模式移入系统回收站；云端 / 无回收站环境移入工作区软删除区"
+                "（.agentcore/trash，保留还原所需信息）。仅当 permanent=true 时"
+                "才永久删除。工作区根目录本身不可删除。路径必须是相对于工作区的"
+                "相对路径。"
             ),
             parameters={
                 "type": "object",
@@ -648,6 +651,14 @@ class FileDeleteTool:
                     "path": {
                         "type": "string",
                         "description": "要删除的文件或目录的相对路径",
+                    },
+                    "permanent": {
+                        "type": "boolean",
+                        "description": (
+                            "true = 永久删除（不可恢复）；默认 false = 可逆删除"
+                            "（回收站 / 工作区软删区）。"
+                        ),
+                        "default": False,
                     },
                 },
                 "required": ["path"],
@@ -659,9 +670,10 @@ class FileDeleteTool:
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         start = time.monotonic()
         rel_path = arguments.get("path", "")
+        permanent = bool(arguments.get("permanent", False))
 
         try:
-            await context.backend.delete(rel_path)
+            await context.backend.delete(rel_path, permanent=permanent)
         except OutsideWorkspace:
             return _error(f"路径 '{rel_path}' 超出了工作区范围", start)
         except PathNotFound:
@@ -669,10 +681,18 @@ class FileDeleteTool:
         except WorkspaceError as e:
             return _error(f"删除失败：{e}", start)
 
+        if permanent:
+            msg = f"已永久删除 {rel_path}"
+        else:
+            msg = (
+                f"已可逆删除 {rel_path}"
+                "（本地通道→系统回收站；云端/sidecar→工作区 .agentcore/trash）"
+            )
+
         return ToolResult(
             tool_call_id="",
             success=True,
-            output=f"已删除 {rel_path}",
+            output=msg,
             duration_ms=int((time.monotonic() - start) * 1000),
         )
 
@@ -738,3 +758,392 @@ class FileMoveTool:
             output=f"已把 {source} 移动到 {destination}",
             duration_ms=int((time.monotonic() - start) * 1000),
         )
+
+
+class FileCopyTool:
+    """Copy a file or directory tree within the workspace (binary-safe)."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="file_copy",
+            description=(
+                "在工作区内复制文件或【目录树】（含二进制）。目标路径缺失的上级"
+                "目录会自动创建；若目标已存在则失败——【不会覆盖】。不能复制到"
+                "自身或其子目录。两个路径都必须是相对于工作区的相对路径。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "要复制的已有文件 / 目录的相对路径",
+                    },
+                    "destination": {
+                        "type": "string",
+                        "description": "目标相对路径（必须尚不存在）",
+                    },
+                },
+                "required": ["source", "destination"],
+            },
+            category=ToolCategory.FILESYSTEM,
+            approval=ToolApproval.GRANTABLE,
+        )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        start = time.monotonic()
+        source = arguments.get("source", "")
+        destination = arguments.get("destination", "")
+
+        if not source or not destination:
+            return _error("'source' 与 'destination' 均为必填", start)
+        if source == destination:
+            return _error("source 与 destination 相同，无需复制", start)
+
+        try:
+            await context.backend.copy(source, destination)
+        except OutsideWorkspace as e:
+            return _error(f"路径 '{e}' 超出了工作区范围", start)
+        except PathNotFound:
+            return _error(f"源路径不存在：{source}", start)
+        except AlreadyExists:
+            return _error(
+                f"目标已存在：{destination}。请换一个不存在的路径，或先删除它。",
+                start,
+            )
+        except WorkspaceError as e:
+            return _error(f"复制失败：{e}", start)
+
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output=f"已把 {source} 复制到 {destination}",
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
+
+
+class MkdirTool:
+    """Create an empty directory (with parents) within the workspace."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="mkdir",
+            description=(
+                "在工作区内创建空目录（上级目录不存在时一并创建）。若路径已存在"
+                "则失败。路径必须是相对于工作区的相对路径。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "要创建的相对目录路径",
+                    },
+                },
+                "required": ["path"],
+            },
+            category=ToolCategory.FILESYSTEM,
+            approval=ToolApproval.GRANTABLE,
+        )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        start = time.monotonic()
+        rel_path = arguments.get("path", "")
+
+        if not rel_path:
+            return _error("path 不能为空：请提供工作区内的相对目录路径", start)
+
+        try:
+            await context.backend.mkdir(rel_path)
+        except OutsideWorkspace:
+            return _error(f"路径 '{rel_path}' 超出了工作区范围", start)
+        except AlreadyExists:
+            return _error(f"路径已存在：{rel_path}", start)
+        except WorkspaceError as e:
+            return _error(f"创建目录失败：{e}", start)
+
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output=f"已创建目录 {rel_path}",
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
+
+
+_BATCH_OPS = frozenset({"move", "copy", "delete", "mkdir"})
+_BATCH_MAX_OPS = 50
+
+
+def _batch_op_label(item: dict[str, Any]) -> str:
+    op = str(item.get("op", "")).strip()
+    if op == "move":
+        return f"move {item.get('source', '')} → {item.get('destination', '')}"
+    if op == "copy":
+        return f"copy {item.get('source', '')} → {item.get('destination', '')}"
+    if op == "delete":
+        perm = " (永久)" if item.get("permanent") else ""
+        return f"delete {item.get('path', '')}{perm}"
+    if op == "mkdir":
+        return f"mkdir {item.get('path', '')}"
+    return f"? {op}"
+
+
+class FileBatchTool:
+    """Apply multiple move/copy/delete/mkdir ops in one call (partial failure OK)."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="file_batch",
+            description=(
+                "一次提交多条工作区文件操作（move / copy / delete / mkdir）。"
+                f"最多 {_BATCH_MAX_OPS} 项。逐项执行：单项失败不中断整批，回执如实"
+                "列出成功 / 跳过 / 失败。目标同名冲突 = 跳过并入报告。"
+                "整理方案确认后传入 organize_plan_id：仅允许方案内条目，且跳过二次审批。"
+                "删除默认可逆；区外 permanent=true 一律拒绝。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "operations": {
+                        "type": "array",
+                        "description": "按顺序执行的操作列表",
+                        "minItems": 1,
+                        "maxItems": _BATCH_MAX_OPS,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "op": {
+                                    "type": "string",
+                                    "enum": ["move", "copy", "delete", "mkdir"],
+                                    "description": "操作类型",
+                                },
+                                "path": {
+                                    "type": "string",
+                                    "description": "delete / mkdir 的相对路径",
+                                },
+                                "source": {
+                                    "type": "string",
+                                    "description": "move / copy 的源相对路径",
+                                },
+                                "destination": {
+                                    "type": "string",
+                                    "description": "move / copy 的目标相对路径",
+                                },
+                                "permanent": {
+                                    "type": "boolean",
+                                    "description": "仅 delete：true = 永久删除（区外禁止）",
+                                    "default": False,
+                                },
+                            },
+                            "required": ["op"],
+                        },
+                    },
+                    "organize_plan_id": {
+                        "type": "string",
+                        "description": (
+                            "整理方案卡确认后返回的 plan_id。携带时：范围校验仅允许方案内"
+                            "条目，并跳过 GRANTABLE 二次审批；执行成功项写入可撤销日志。"
+                        ),
+                    },
+                    "organize_undo": {
+                        "type": "boolean",
+                        "description": (
+                            "true = 撤销本会话最近一次整理（逆回放 move/mkdir；删除项只提示"
+                            "去回收站）。单次有效。勿与 operations / organize_plan_id 同用。"
+                        ),
+                        "default": False,
+                    },
+                },
+                "required": [],
+            },
+            category=ToolCategory.FILESYSTEM,
+            approval=ToolApproval.GRANTABLE,
+        )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        start = time.monotonic()
+        if bool(arguments.get("organize_undo")):
+            return await self._undo(context, start)
+
+        raw = arguments.get("operations")
+        if not isinstance(raw, list) or not raw:
+            return _error("operations 必须是非空数组（撤销请用 organize_undo=true）", start)
+        if len(raw) > _BATCH_MAX_OPS:
+            return _error(f"operations 最多 {_BATCH_MAX_OPS} 项", start)
+
+        plan_id = str(arguments.get("organize_plan_id") or "").strip()
+        if plan_id:
+            from agentcore.workspace.organize_plan_store import get_plan, ops_within_plan
+
+            plan = get_plan(plan_id)
+            if plan is None or plan.conversation_id != context.conversation_id:
+                return _error(f"整理方案不存在或已失效：{plan_id}", start)
+            scope_err = ops_within_plan(plan, [i for i in raw if isinstance(i, dict)])
+            if scope_err:
+                return _error(scope_err, start)
+
+        lines: list[str] = [f"本次共 {len(raw)} 项："]
+        ok_n = skip_n = fail_n = 0
+        successes: list[dict[str, Any]] = []
+
+        for i, item in enumerate(raw, start=1):
+            if not isinstance(item, dict):
+                fail_n += 1
+                lines.append(f"{i}. 失败 · 条目必须是对象")
+                continue
+            op = str(item.get("op", "")).strip()
+            label = _batch_op_label(item)
+            if op not in _BATCH_OPS:
+                fail_n += 1
+                lines.append(f"{i}. 失败 · {label}：未知 op")
+                continue
+            try:
+                status, detail = await self._run_one(op, item, context)
+            except Exception as e:  # noqa: BLE001 — batch must continue
+                fail_n += 1
+                lines.append(f"{i}. 失败 · {label}：{e}")
+                continue
+            if status == "ok":
+                ok_n += 1
+                lines.append(f"{i}. 成功 · {detail}")
+                successes.append(item)
+            elif status == "skip":
+                skip_n += 1
+                lines.append(f"{i}. 跳过 · {detail}")
+            else:
+                fail_n += 1
+                lines.append(f"{i}. 失败 · {detail}")
+
+        if plan_id and successes:
+            from agentcore.workspace import organize_journal
+
+            organize_journal.record_batch(
+                conversation_id=context.conversation_id,
+                plan_id=plan_id,
+                successes=successes,
+            )
+            lines.append(
+                f"已记录整理日志（plan={plan_id}）。可用 file_batch(organize_undo=true) 撤销"
+                "本次 move/mkdir；删除项请到系统回收站手动恢复。"
+            )
+
+        summary = f"完成：成功 {ok_n}，跳过 {skip_n}，失败 {fail_n}"
+        lines.append(summary)
+        return ToolResult(
+            tool_call_id="",
+            success=fail_n == 0,
+            output="\n".join(lines),
+            error="" if fail_n == 0 else summary,
+            duration_ms=int((time.monotonic() - start) * 1000),
+            metadata={
+                "ok": ok_n,
+                "skip": skip_n,
+                "fail": fail_n,
+                "total": len(raw),
+                "organize_plan_id": plan_id or None,
+            },
+        )
+
+    async def _undo(self, context: ToolContext, start: float) -> ToolResult:
+        from agentcore.workspace import organize_journal
+        from agentcore.workspace.organize_plan_store import deactivate_plan
+
+        journal = organize_journal.get_journal(context.conversation_id)
+        if journal is None:
+            return _error("没有可撤销的整理记录", start)
+        if journal.undone:
+            return _error("本次整理已撤销过（仅单次有效）", start)
+        undo_ops, deletes = organize_journal.build_undo_operations(journal)
+        lines: list[str] = ["撤销本次整理："]
+        ok_n = skip_n = fail_n = 0
+        for i, item in enumerate(undo_ops, start=1):
+            op = str(item.get("op", "")).strip()
+            try:
+                status, detail = await self._run_one(op, item, context)
+            except Exception as e:  # noqa: BLE001
+                fail_n += 1
+                lines.append(f"{i}. 失败 · {e}")
+                continue
+            if status == "ok":
+                ok_n += 1
+                lines.append(f"{i}. 成功 · {detail}")
+            elif status == "skip":
+                skip_n += 1
+                lines.append(f"{i}. 跳过 · {detail}")
+            else:
+                fail_n += 1
+                lines.append(f"{i}. 失败 · {detail}")
+        if deletes:
+            lines.append(
+                "以下删除项未自动还原，请到系统回收站手动恢复：\n"
+                + "\n".join(f"- {p}" for p in deletes)
+            )
+        organize_journal.mark_undone(context.conversation_id)
+        deactivate_plan(journal.plan_id)
+        summary = f"撤销完成：成功 {ok_n}，跳过 {skip_n}，失败 {fail_n}"
+        lines.append(summary)
+        return ToolResult(
+            tool_call_id="",
+            success=fail_n == 0,
+            output="\n".join(lines),
+            error="" if fail_n == 0 else summary,
+            duration_ms=int((time.monotonic() - start) * 1000),
+            metadata={"ok": ok_n, "skip": skip_n, "fail": fail_n, "undo": True},
+        )
+
+    async def _run_one(
+        self, op: str, item: dict[str, Any], context: ToolContext
+    ) -> tuple[str, str]:
+        if op == "mkdir":
+            path = str(item.get("path", "")).strip()
+            if not path:
+                return "fail", "mkdir · path 不能为空"
+            try:
+                await context.backend.mkdir(path)
+            except AlreadyExists:
+                return "skip", f"mkdir {path}（已存在）"
+            except OutsideWorkspace as e:
+                return "fail", f"mkdir {path}：{e}"
+            except WorkspaceError as e:
+                return "fail", f"mkdir {path}：{e}"
+            return "ok", f"mkdir {path}"
+
+        if op == "delete":
+            path = str(item.get("path", "")).strip()
+            if not path:
+                return "fail", "delete · path 不能为空"
+            permanent = bool(item.get("permanent", False))
+            try:
+                await context.backend.delete(path, permanent=permanent)
+            except PathNotFound:
+                return "skip", f"delete {path}（不存在）"
+            except OutsideWorkspace as e:
+                return "fail", f"delete {path}：{e}"
+            except WorkspaceError as e:
+                return "fail", f"delete {path}：{e}"
+            mode = "永久删除" if permanent else "可逆删除"
+            return "ok", f"delete {path}（{mode}）"
+
+        source = str(item.get("source", "")).strip()
+        destination = str(item.get("destination", "")).strip()
+        if not source or not destination:
+            return "fail", f"{op} · source 与 destination 均为必填"
+        if source == destination:
+            return "skip", f"{op} {source}（源与目标相同）"
+        try:
+            if op == "move":
+                await context.backend.move(source, destination)
+            else:
+                await context.backend.copy(source, destination)
+        except PathNotFound:
+            return "fail", f"{op} {source} → {destination}：源不存在"
+        except AlreadyExists:
+            # MVP conflict policy: skip into report (提案钉死).
+            return "skip", f"{op} {source} → {destination}：目标已存在"
+        except OutsideWorkspace as e:
+            return "fail", f"{op} {source} → {destination}：{e}"
+        except WorkspaceError as e:
+            return "fail", f"{op} {source} → {destination}：{e}"
+        return "ok", f"{op} {source} → {destination}"

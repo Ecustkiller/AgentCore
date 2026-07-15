@@ -7,6 +7,7 @@ describe("parseCheckpointIntent", () => {
     expect(parseCheckpointIntent("decision")).toBe("decision");
     expect(parseCheckpointIntent("proposal_pick")).toBe("proposal_pick");
     expect(parseCheckpointIntent("risk_ack")).toBe("risk_ack");
+    expect(parseCheckpointIntent("organize_plan")).toBe("organize_plan");
   });
 
   it("defaults unknown / missing to decision", () => {

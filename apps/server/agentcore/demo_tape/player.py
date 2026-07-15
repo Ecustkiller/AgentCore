@@ -25,6 +25,7 @@ from agentcore.runtime.events import (
     message_end,
     message_start,
     team_preview_resolved,
+    tool_progress,
 )
 from agentcore.runtime.events.types import SSEEvent
 from agentcore.runtime.journal.entries import journal_entries_from_display_runs
@@ -39,6 +40,52 @@ logger = get_logger(__name__)
 # CEO 自持工具事件：运行时会给它们标 captain 自己的 run_id（执行级溯源需要），但渲染契约
 # 要求 CEO 自持工具走 turn-level 内联（见 _captain_run_id 说明），故回放时按 kind 归一。
 _CAPTAIN_TOOL_KINDS = frozenset({"tool_use_start", "tool_use_end", "tool_use_progress"})
+
+# CEO 组队/派单的传输态：前端 `ComposingToolLine` 的「正在生成 委派任务 · N 字」由 captain 编排
+# 工具（delegate/debate）流式组装参数时的 `tool_progress` 心跳驱动。该心跳是 EPHEMERAL（永不落
+# journal / 不进 process 时间线，见 events/disposition.py），导出磁带（源 = turn_journal 的 DURABLE
+# 事件）时天然丢失 → 回放里案情简介之后直接跳「开工卡」，中间「正在委派」空缺、只剩「正在思考」。
+# 回放层按 team_preview 参数合成一段字数递增的 tool_progress 还原真实观感；纯传输态，不碰正文
+# 字节保真、不改协议、不重导磁带（与 captain 工具剥 run_id 同属渲染适配层）。
+_DELEGATE_COMPOSE_TOOL = "delegate"  # 前端 TOOL_META → "委派任务"
+_DELEGATE_COMPOSE_STEPS = 8
+_DELEGATE_COMPOSE_TOTAL_MS = 2400
+
+
+def _delegation_compose_chars(payload: dict[str, Any]) -> int:
+    """Total chars of the delegation/debate arguments the CEO is assembling."""
+    parts: list[str] = [str(payload.get("motion") or "")]
+    for side in payload.get("sides") or []:
+        if isinstance(side, dict):
+            parts.append(str(side.get("name") or ""))
+            parts.append(str(side.get("stance") or ""))
+    for worker in payload.get("workers") or []:
+        if isinstance(worker, dict):
+            parts.append(str(worker.get("role") or ""))
+            parts.append(str(worker.get("task") or ""))
+    return sum(len(p) for p in parts)
+
+
+async def _emit_delegation_composing(
+    sink: EventSink, payload: dict[str, Any], *, speed: float
+) -> None:
+    """Replay-only: synthesize the CEO's「正在生成 委派任务 · N 字」compose heartbeat.
+
+    Runs after the case-brief content and before the team_preview card, so the search →
+    brief → *delegating* → kickoff arc renders faithfully instead of a silent「正在思考」.
+    Chars ramp up to the assembled arguments' length; ``tool_progress`` is EPHEMERAL so
+    none of this reaches the journal (byte-for-byte oracle parity is untouched).
+    """
+    total_chars = _delegation_compose_chars(payload)
+    if total_chars <= 0:
+        return
+    step_ms = _DELEGATE_COMPOSE_TOTAL_MS / _DELEGATE_COMPOSE_STEPS
+    for i in range(1, _DELEGATE_COMPOSE_STEPS + 1):
+        chars = max(1, round(total_chars * i / _DELEGATE_COMPOSE_STEPS))
+        sink.emit(tool_progress(_DELEGATE_COMPOSE_TOOL, chars))
+        delay = step_ms / max(speed, 0.01) / 1000.0
+        if delay > 0:
+            await asyncio.sleep(delay)
 
 
 def _captain_run_id(events: list[dict[str, Any]]) -> str:
@@ -297,6 +344,8 @@ async def play_tape_events(
             if "checkpoint_id" not in payload or not payload.get("checkpoint_id"):
                 payload["checkpoint_id"] = new_id()
             payload["conversation_id"] = conversation_id
+            # 案情简介之后、开工卡之前：还原 CEO 组装委派/辩论方案的「正在生成 委派任务 · N 字」。
+            await _emit_delegation_composing(sink, payload, speed=binding.speed)
             await _emit(sink, kind, payload, ts=ts)
             content = "".join(content_parts)
             reasoning = "".join(reasoning_parts)

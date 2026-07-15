@@ -272,6 +272,28 @@ def _compare_options(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[s
     return tasks, []
 
 
+def _organize_folder(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    """Single file-only worker for desktop organize (scan or apply)."""
+    from agentcore.tools.builtin import file_only_tool_names
+
+    task = _clean_str(args.get("task"))
+    if not task:
+        return [], ["organize_folder 需要 task（扫描或执行整理的具体说明）"]
+    tools = sorted(file_only_tool_names())
+    return (
+        [
+            {
+                "id": "organizer",
+                "role": "文件整理助手",
+                "task": task,
+                "tools": tools,
+                "deliverable": {"form": "prose", "name": "整理结果报告"},
+            }
+        ],
+        [],
+    )
+
+
 PLAYBOOKS: dict[str, Playbook] = {
     "research_report": Playbook(
         name="research_report",
@@ -300,6 +322,12 @@ PLAYBOOKS: dict[str, Playbook] = {
             "criteria(可选,评估维度数组)"
         ),
         build=_compare_options,
+    ),
+    "organize_folder": Playbook(
+        name="organize_folder",
+        summary="桌面整理单 worker：只装配文件工具（无 code_execute/terminal）",
+        slots="task(必填,扫描或执行整理的具体说明)",
+        build=_organize_folder,
     ),
 }
 

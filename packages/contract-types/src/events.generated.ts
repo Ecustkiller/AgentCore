@@ -177,12 +177,19 @@ export interface AskAssumption {
  * `bind_local_folder` renders as a folder picker that binds the conversation workspace
  * to the chosen local directory before resuming the turn;
  * `grant_readonly_folder` renders as a folder picker that grants a session-scoped
- * read-only mount under ``external/<alias>/`` (W3; does not change workspace binding). */
+ * read-only mount under ``external/<alias>/`` (W3; does not change workspace binding);
+ * `grant_organize_folder` is the organize-mode counterpart (move/copy/mkdir/trash-delete).
+ * Structured ``op`` / ``source`` / ``destination`` / ``path`` fields carry organize_plan
+ * items for plan-bound ``file_batch``. */
 export interface AskOption {
   label: string;
   detail?: string;
   recommended?: boolean;
-  action?: "bind_local_folder" | "grant_readonly_folder";
+  action?: "bind_local_folder" | "grant_readonly_folder" | "grant_organize_folder";
+  op?: "move" | "copy" | "delete" | "mkdir";
+  source?: string;
+  destination?: string;
+  path?: string;
 }
 
 export interface AskQuestion {
@@ -203,7 +210,8 @@ export type CheckpointIntent =
   | "kickoff"
   | "decision"
   | "proposal_pick"
-  | "risk_ack";
+  | "risk_ack"
+  | "organize_plan";
 
 /** The CEO paused the turn on an ask_user checkpoint (blocking). */
 export interface CheckpointRequiredPayload {

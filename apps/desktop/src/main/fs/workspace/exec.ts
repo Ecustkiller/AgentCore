@@ -43,6 +43,9 @@ export function buildExternalEnvFromRoots(
     ) {
       continue;
     }
+    // Organize mounts must NOT inject AGENTCORE_EXTERNAL_* (proposal §五).
+    const mode = er.mode ?? (er.readonly ? "readonly" : undefined);
+    if (mode === "organize") continue;
     const safe =
       alias
         .replace(/[^A-Za-z0-9]+/g, "_")

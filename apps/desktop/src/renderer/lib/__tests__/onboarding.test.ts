@@ -7,6 +7,7 @@ import {
   markOnboardingSkipped,
   markTipSeen,
   resolveDraftEmptyKind,
+  shouldCenterDraftComposer,
   shouldShowOnboarding,
   shouldShowTip,
 } from "@/lib/onboarding";
@@ -124,6 +125,51 @@ describe("resolveDraftEmptyKind", () => {
         conversationCount: 0,
       }),
     ).toBe("starter_chips");
+  });
+});
+
+describe("shouldCenterDraftComposer", () => {
+  it("centers when empty draft has model access", () => {
+    expect(
+      shouldCenterDraftComposer({
+        isDraft: true,
+        hasMessages: false,
+        hasModelAccess: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not center needs_key empty draft", () => {
+    expect(
+      shouldCenterDraftComposer({
+        isDraft: true,
+        hasMessages: false,
+        hasModelAccess: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("never centers once messages exist", () => {
+    expect(
+      shouldCenterDraftComposer({
+        isDraft: true,
+        hasMessages: true,
+        hasModelAccess: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("never centers a persisted conversation still loading history", () => {
+    // 回归护栏：切换到已有对话会先出现「有 conversationId(isDraft=false) 但消息尚未
+    // 异步加载完」的空窗口。若在此居中，输入框会「弹到中间、加载完再飞回底栏」= 跳动。
+    // 已落库对话一律底栏。
+    expect(
+      shouldCenterDraftComposer({
+        isDraft: false,
+        hasMessages: false,
+        hasModelAccess: true,
+      }),
+    ).toBe(false);
   });
 });
 

@@ -6,9 +6,15 @@ export interface StoredRoot {
   id: string;
   name: string;
   absPath: string;
-  /** W3: session-only read-only grant — not persisted to fs-roots.json. */
+  /** W3: session-only grant — not persisted to fs-roots.json. */
   sessionOnly?: boolean;
   conversationId?: string;
+  /**
+   * Session access mode. Prefer over legacy ``readonly``.
+   * ``readonly`` = W3 read-only; ``organize`` = move/copy/mkdir/trash-delete.
+   */
+  mode?: "readonly" | "organize";
+  /** @deprecated Prefer ``mode``. Kept for older in-memory session roots. */
   readonly?: boolean;
   /** Model-facing alias under ``external/<alias>/``. */
   alias?: string;

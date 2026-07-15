@@ -68,12 +68,22 @@ class AskOption(WirePayload):
     `bind_local_folder` renders as a folder picker that binds the conversation workspace
     to the chosen local directory before resuming the turn;
     `grant_readonly_folder` renders as a folder picker that grants a session-scoped
-    read-only mount under ``external/<alias>/`` (W3; does not change workspace binding)."""
+    read-only mount under ``external/<alias>/`` (W3; does not change workspace binding);
+    `grant_organize_folder` is the organize-mode counterpart (move/copy/mkdir/trash-delete).
+    Structured ``op`` / ``source`` / ``destination`` / ``path`` fields carry organize_plan
+    items for plan-bound ``file_batch``."""
 
     label: str
     detail: str | None = absent()
     recommended: bool | None = absent()
-    action: Literal["bind_local_folder", "grant_readonly_folder"] | None = absent()
+    action: (
+        Literal["bind_local_folder", "grant_readonly_folder", "grant_organize_folder"]
+        | None
+    ) = absent()
+    op: Literal["move", "copy", "delete", "mkdir"] | None = absent()
+    source: str | None = absent()
+    destination: str | None = absent()
+    path: str | None = absent()
 
 
 class AskQuestion(WirePayload):

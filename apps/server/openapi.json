@@ -3335,7 +3335,7 @@
           "max_gap_ms": {
             "anyOf": [
               {
-                "maximum": 60000.0,
+                "maximum": 600000.0,
                 "minimum": 50.0,
                 "type": "integer"
               },
@@ -3416,7 +3416,7 @@
           "max_gap_ms": {
             "anyOf": [
               {
-                "maximum": 60000.0,
+                "maximum": 600000.0,
                 "minimum": 50.0,
                 "type": "integer"
               },
@@ -3652,6 +3652,15 @@
           },
           "label": {
             "title": "Label",
+            "type": "string"
+          },
+          "mode": {
+            "default": "readonly",
+            "enum": [
+              "readonly",
+              "organize"
+            ],
+            "title": "Mode",
             "type": "string"
           },
           "namespace": {
@@ -3910,7 +3919,7 @@
         "type": "object"
       },
       "GrantExternalReadonlyRequest": {
-        "description": "Register a session-scoped read-only desktop root for this conversation.\n\nDoes **not** change workspace binding. ``root_id`` is the desktop-minted handle;\nabsolute paths never appear on the wire.",
+        "description": "Register a session-scoped desktop root for this conversation.\n\nDoes **not** change workspace binding. ``root_id`` is the desktop-minted handle;\nabsolute paths never appear on the wire. ``mode`` is ``readonly`` (W3) or\n``organize`` (P1: move/copy/mkdir/trash-delete).",
         "properties": {
           "alias_hint": {
             "anyOf": [
@@ -3928,6 +3937,15 @@
             "maxLength": 200,
             "minLength": 1,
             "title": "Label",
+            "type": "string"
+          },
+          "mode": {
+            "default": "readonly",
+            "enum": [
+              "readonly",
+              "organize"
+            ],
+            "title": "Mode",
             "type": "string"
           },
           "root_id": {
@@ -5661,7 +5679,8 @@
                   "kickoff",
                   "decision",
                   "proposal_pick",
-                  "risk_ack"
+                  "risk_ack",
+                  "organize_plan"
                 ],
                 "type": "string"
               },
@@ -18017,8 +18036,8 @@
         ]
       },
       "post": {
-        "description": "Register a session read-only mount after the user confirms via folder picker.",
-        "operationId": "grant_external_readonly_v1_conversations__conversation_id__workspace_external_grants_post",
+        "description": "Register a session mount after the user confirms via folder picker.",
+        "operationId": "grant_external_folder_v1_conversations__conversation_id__workspace_external_grants_post",
         "parameters": [
           {
             "in": "path",
@@ -18094,7 +18113,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Grant External Readonly",
+        "summary": "Grant External Folder",
         "tags": [
           "conversations"
         ]

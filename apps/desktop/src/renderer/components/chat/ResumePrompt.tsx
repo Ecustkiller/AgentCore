@@ -367,15 +367,6 @@ function TeamPreviewWorkers({ turn }: { turn: PendingResume }) {
 }
 
 function TeamPreviewDebateBody({ turn }: { turn: PendingResume }) {
-  const budget =
-    turn.maxRounds > 0
-      ? turn.thorough
-        ? `认真辩透 · 上限 ${turn.maxRounds} 轮`
-        : `快速对碰 · ${turn.maxRounds} 轮`
-      : turn.thorough
-        ? "认真辩透"
-        : "快速对碰";
-
   return (
     <div className="mt-2 space-y-1.5">
       {turn.motion && (
@@ -383,7 +374,6 @@ function TeamPreviewDebateBody({ turn }: { turn: PendingResume }) {
           {turn.motion}
         </p>
       )}
-      <p className="text-xs text-muted-foreground">{budget}</p>
       {turn.sides.map((s) => (
         <div
           key={s.key}
@@ -411,6 +401,15 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
   const { submitting, busy, send } = useColdSubmit(turn);
   const isDebate = turn.primitive === "debate";
   const showCapabilities = !isDebate && turn.tools.length > 0;
+  const debateBudget = isDebate
+    ? turn.maxRounds > 0
+      ? turn.thorough
+        ? `认真辩透 · ${turn.maxRounds} 轮`
+        : `快速对碰 · ${turn.maxRounds} 轮`
+      : turn.thorough
+        ? "认真辩透"
+        : "快速对碰"
+    : null;
 
   const spinnerOr = (
     decision: PlanReviewUserDecision,
@@ -430,6 +429,9 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
         str_replace: "修改文件",
         file_delete: "删除文件",
         file_move: "移动文件",
+        file_copy: "复制文件",
+        mkdir: "创建目录",
+        file_batch: "批量文件操作",
         code_execute: "执行代码",
         test_run: "运行测试",
         git: "Git 写入",
@@ -449,11 +451,17 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
               <Users size={16} />
             </DecisionCardIcon>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-medium text-primary">
-                {isDebate ? "开工卡 · 辩论计划" : "开工卡 · 计划与授权"}
-              </p>
-              <WaitingForDecisionHint />
-              <p className="mt-0.5 text-sm text-foreground">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium text-primary">
+                  {isDebate ? "开工卡 · 辩论计划" : "开工卡 · 计划与授权"}
+                </p>
+                {debateBudget && (
+                  <Badge tone="muted" className="font-normal">
+                    {debateBudget}
+                  </Badge>
+                )}
+              </div>
+              <p className="mt-1 text-sm text-foreground">
                 {isDebate
                   ? "即将开赛的辩题与各方立场，请过目后授权开赛："
                   : "即将上场的队员，请过目后授权开工："}

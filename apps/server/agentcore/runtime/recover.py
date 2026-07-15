@@ -129,6 +129,28 @@ async def _settle_resume(
             option_label(o) for q in suspension.questions for o in q.get("options", [])
         }
         response.selected = [s for s in response.selected if s in allowed]
+        if (
+            suspension.intent == "organize_plan"
+            and response.decision is CheckpointDecision.CONTINUE
+        ):
+            from agentcore.tools.builtin.ask_user.card import option_to_organize_op
+            from agentcore.workspace.organize_plan_store import register_plan
+
+            kept: list[dict] = []
+            for q in suspension.questions:
+                for o in q.get("options") or []:
+                    if not isinstance(o, dict):
+                        continue
+                    if option_label(o) not in response.selected:
+                        continue
+                    op = option_to_organize_op(o)
+                    if op:
+                        kept.append(op)
+            register_plan(
+                plan_id=suspension.checkpoint_id,
+                conversation_id=suspension.conversation_id,
+                operations=kept,
+            )
         sink.emit(
             checkpoint_resolved(
                 checkpoint_id=suspension.checkpoint_id,
@@ -177,7 +199,21 @@ async def _settle_resume(
                 )
             else:
                 set_active_coordination(session)
-        result = ask_user_tool_result(response)
+        from agentcore.tools.builtin.ask_user import ask_user_tool_result
+        from agentcore.tools.builtin.ask_user.result import ask_user_organize_plan_result
+
+        if suspension.intent == "organize_plan":
+            from agentcore.workspace.organize_plan_store import get_plan
+
+            org_plan = get_plan(suspension.checkpoint_id)
+            kept_n = len(org_plan.operations) if org_plan else 0
+            result = ask_user_organize_plan_result(
+                response,
+                plan_id=suspension.checkpoint_id,
+                kept_count=kept_n,
+            )
+        else:
+            result = ask_user_tool_result(response)
         terminal = result.final_text if result.effect is ToolEffect.INTERACT else None
         return SettledSuspension(result.output, terminal)
 

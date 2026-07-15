@@ -91,6 +91,7 @@ async def handle_tool_calls_round(
         citation_sink=citation_sink,
         annotate_citations=annotate_citations,
         run_id=run_id,
+        role=role,
     )
     messages.extend(tool_results)
     if gate_escalation_sink is not None and role == "worker":

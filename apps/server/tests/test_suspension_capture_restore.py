@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -52,7 +53,8 @@ async def test_persist_suspension_capture_snapshots_fact_log_and_saves() -> None
         assert capture.transcript == transcript
         # journal_entries is the sole authoritative carrier; the display ``journal`` derives.
         assert capture.journal_entries[0]["kind"] == "turn_started"
-        assert capture.journal_entries[-1]["kind"] == "checkpoint_required"
+        assert capture.journal_entries[-2]["kind"] == "checkpoint_required"
+        assert capture.journal_entries[-1]["kind"] == "turn_paused"
         return AskUserSuspension(
             message_id="msg-1",
             conversation_id="conv-1",
@@ -78,6 +80,7 @@ async def test_persist_suspension_capture_snapshots_fact_log_and_saves() -> None
             required_event=required,
             build_frame=build_frame,
             saver=saver,
+            suspension_kind="ask_user",
         )
     finally:
         current_fact_log.reset(fl_token)
@@ -105,6 +108,7 @@ async def test_persist_suspension_capture_skips_without_transcript() -> None:
             required_event=required,
             build_frame=lambda _c: _ask_user_suspension(),
             saver=AsyncMock(),
+            suspension_kind="ask_user",
         )
     finally:
         captain_transcript.reset(token)
@@ -133,6 +137,7 @@ async def test_persist_suspension_capture_raises_on_saver_failure() -> None:
                 required_event=required,
                 build_frame=lambda _c: _ask_user_suspension(),
                 saver=boom,
+                suspension_kind="ask_user",
             )
     finally:
         captain_transcript.reset(token)
@@ -215,8 +220,12 @@ async def test_restore_paused_turn_upserts_frame_without_notify() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resume_chat_restores_frame_when_pipeline_returns_error() -> None:
-    """Cloud resume failure must re-upsert the claimed frame so /resume can retry."""
+async def test_resume_chat_does_not_restore_after_settlement_on_error() -> None:
+    """D1: pipeline error after settlement prewrite must not resurrect the decision card.
+
+    The cloud route prewrites settlement + claims the frame before dispatch, so a
+    post-settlement failure is interrupted_after_decision, not a retryable frame restore.
+    """
     from agentcore.conversation import turns as turns_mod
     from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
     from agentcore.runtime.events import EventSink
@@ -271,7 +280,7 @@ async def test_resume_chat_restores_frame_when_pipeline_returns_error() -> None:
             sink=sink,
         )
 
-    restore.assert_awaited_once_with(suspension)
+    restore.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -329,4 +338,63 @@ async def test_resume_chat_does_not_restore_on_success() -> None:
             sink=sink,
         )
 
+    restore.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resume_chat_does_not_restore_after_settlement_on_cancel() -> None:
+    """D1: /stop mid-continuation (CancelledError) must not resurrect the decision card.
+
+    Regression for「授权开赛 → 辩论续播中点停止 → 开工卡复活」: the cloud route prewrites
+    settlement + claims the frame before dispatch, so a cancel after that is
+    interrupted_after_decision, never a frame restore.
+    """
+    from agentcore.conversation import turns as turns_mod
+    from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
+    from agentcore.runtime.events import EventSink
+
+    suspension = _ask_user_suspension()
+    sink = EventSink()
+    conv = MagicMock()
+    conv.folder_id = None
+
+    async def _cancel(**_kwargs: object) -> None:
+        raise asyncio.CancelledError
+
+    with (
+        patch.object(turns_mod, "async_session_factory") as factory,
+        patch.object(turns_mod, "ConversationRepository") as conv_repo_cls,
+        patch.object(turns_mod, "BoardRepository") as board_repo_cls,
+        patch.object(turns_mod, "resolve_local_binding", AsyncMock(return_value=None)),
+        patch.object(turns_mod, "resolve_profile_set", AsyncMock(return_value=None)),
+        patch.object(
+            turns_mod,
+            "resolve_permission_preset",
+            AsyncMock(return_value=__import__("agentcore.core.types", fromlist=["PermissionPreset"]).PermissionPreset.WORKSPACE),
+        ),
+        patch.object(turns_mod, "load_chat_context", AsyncMock(return_value=[])),
+        patch.object(turns_mod, "build_turn_backend", return_value=MagicMock()),
+        patch.object(turns_mod, "session_callbacks", return_value=(AsyncMock(), AsyncMock())),
+        patch.object(turns_mod, "suspension_callbacks", return_value=(AsyncMock(), AsyncMock())),
+        patch.object(turns_mod, "workspace_lock") as lock,
+        patch.object(turns_mod, "resume_chat_pipeline", _cancel),
+        patch.object(turns_mod, "salvage_incomplete_turn", MagicMock()) as salvage,
+        patch.object(turns_mod, "persist_turn_result", AsyncMock()),
+        patch.object(turns_mod, "restore_paused_turn", AsyncMock()) as restore,
+    ):
+        session = AsyncMock()
+        factory.return_value.__aenter__.return_value = session
+        conv_repo_cls.return_value.get_by_id_unscoped = AsyncMock(return_value=conv)
+        board_repo_cls.return_value.get_by_conversation_id = AsyncMock(return_value=None)
+        lock.return_value.__aenter__ = AsyncMock(return_value=None)
+        lock.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with pytest.raises(asyncio.CancelledError):
+            await turns_mod.resume_chat(
+                suspension=suspension,
+                response=CheckpointResponse(decision=CheckpointDecision.CONTINUE),
+                sink=sink,
+            )
+
+    salvage.assert_called_once()
     restore.assert_not_awaited()

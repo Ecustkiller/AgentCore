@@ -39,7 +39,7 @@ CEO 是**管理者**（不是调查员）：它只直接持有「只读 / 检索
 
 ### 协调者工具边界（档2.5）✅ 已确定
 
-**结构边界（档2，不变）**：CEO 的工具面**只保留只读 / 检索**（`web_search`、`read_url`、`file_read`、`file_list`、`grep`、`git` 只读子集 `status`/`diff`/`log`），**生产 / 变更**（`file_write`、`str_replace`、`file_delete`、`file_move`、`git` 写入子集、`code_execute`）从 CEO 手里拿掉、只交给 worker。`git` 为单工具 + `subcommand` 分派：`schema.approval=NEVER` 使 CEO 注册表自动收录只读子集；CEO 调写入子命令时 `execute` 返回「请 delegate 委派给 Worker」。**路由判据（2.5 细化）**：把「自己做还是交团队」从「**交付物 vs 对话**」重画为「**活的规模与结构**」——见下。
+**结构边界（档2，不变）**：CEO 的工具面**只保留只读 / 检索**（`web_search`、`read_url`、`file_read`、`file_list`、`grep`、`git` 只读子集 `status`/`diff`/`log`），**生产 / 变更**（`file_write`、`str_replace`、`file_delete`、`file_move`、`file_copy`、`mkdir`、`file_batch`、`git` 写入子集、`code_execute`）从 CEO 手里拿掉、只交给 worker。`git` 为单工具 + `subcommand` 分派：`schema.approval=NEVER` 使 CEO 注册表自动收录只读子集；CEO 调写入子命令时 `execute` 返回「请 delegate 委派给 Worker」。**路由判据（2.5 细化）**：把「自己做还是交团队」从「**交付物 vs 对话**」重画为「**活的规模与结构**」——见下。
 
 | 切法 | 决策 |
 |------|------|
@@ -53,9 +53,9 @@ CEO 是**管理者**（不是调查员）：它只直接持有「只读 / 检索
 
 > **团队形态判据：实质任务默认组队、判据双向、广度调查归团队 ✅ 已落地**：上面的委派判据定「要不要委派」；这条定「委派后团队多大、调研谁来跑」。**① 实质任务默认组队**：门槛 = **可分解**（多对象 / 多角度 / 多阶段 / 多部件 / 多风格备选）**或质量面敏感**（成篇、构建、决策、对既有材料审查诊断）→ 组队；`finalize=true` 单 worker 直出只留给机械单步（改一句话、转格式）。对比 / 盘点 ≥2 个并列实体 = 广度调查（每实体一员 + 横向汇总员）；用户点名要 N 个风格 / 方案 = 发散挑选（每方案一员——独立人设才出真差异，禁止一人分饰 N 角）。（曾定「默认不拆、单 coherent worker 优先」，后被协作优先重设计推翻：协作是产品第一性，塌缩成单人是偏差而非节俭，协调税由 gate 度量而非预先回避。）**② 判据双向**：拆几个看【活的自然结构】——过度拆碎与塌缩成一个都是偏差；先想形状再拆任务（形状词汇与组合见 `team_orchestration_advanced` skill），拿不准先 `consult_skill`。**③ 广度调查归团队（不限交付级，哪怕只回一段话）**：任何要横扫大量文件 / 来源、可拆多角度的只读调查，都把各角度作为**并行调研 worker** 一次 `delegate`，task 里点明「回报**精炼结论 + 证据指引**、不回贴整段正文」，再由 CEO 综述（需写成篇产物时用 `depends_on` 汇入下游写手）。CEO 的只读工具只用于**开工前轻量探路 + 收尾综述**，不替团队跑调查腿脚活。**注意**：`result_handling`（`pass_through`/`summarize`）只管**上游→下游**注入保真度，**不**影响回到 CEO 的内容——后者由 task 措辞决定。→ 见代码：`runtime/resolve/prompt.py`、`runtime/skills.py`、`runtime/engine/governance.py`（`team_gate_*`）。
 
-> **认知分工判据：约束归 CEO、专业方案归专家 ✅ 已落地**：前两条定「要不要委派」「团队多大」；这条定**委派时 task 里该写什么、不该写什么**。**正确边界**：task 交【需求与约束】（目标、硬指标、关键前提、验收底线），交付物的【专业方案】（章节结构、模块划分、设计布局）默认归专家 worker，除非用户已明确指定结构。`contract`（`required_sections` 等）是**验收契约**而非结构蓝图。→ 见代码：`runtime/resolve/prompt.py`、`runtime/skills.py`、`runtime/delegate/`。
+> **认知分工判据：约束归 CEO、专业方案归专家；派单「指路不代答」 ✅ 已落地**：前两条定「要不要委派」「团队多大」；这条定**委派时 task 里该写什么、不该写什么**。**正确边界**：task 只写【目标·约束·验收】——分工范围（条款 / 模块定位）、案情事实（自包含）、全局立场、硬指标与验收规格；交付物的【专业方案】（章节结构、模块划分、设计布局）与【专业判断】（审查类的风险结论、法条适用、数值评估）默认归专家 worker，除非用户已明确指定结构。`contract`（`required_sections` 等）是**验收契约**而非结构蓝图。**审查 / 评估 / 研究类越界形态**：仅禁「贴代码 / 列实施步骤」打不到这类任务——模型会把编号「重点关注」清单（含风险预判、引导性问题、法条引用 / 数值假设）误当成「约束 / 验收」写进 task，worker 遂退化成 CEO 初审结论的扩写器，产品塌缩回「单 Agent + 子任务派发」。CEO 探路时的初审观察正确去处是 `seed_notes`(kind=heads_up) 便签墙作线索，不写进 task 替 worker 作答。**worker 侧对称**：task 里的关注点 / 重点清单是起点线索不是答题边界，领到范围内的全面审查与自主发现是 worker 职责（与「专业结构只当起点建议」同构）。→ 见代码：`runtime/resolve/prompt.py`、`runtime/runs/executor_identities.py`、`runtime/skills.py`、`tools/builtin/delegate/schema.py`。
 
-> **worker 侧认知分工**：结构所有权、团队拓扑位置、上游落盘许可——→ 见 [`Agent协作模式.md` §二](/docs/03-AI核心/Agent协作模式.md)。
+> **worker 侧其余协作通道**（拓扑位置 / 扇出感知、`escalate` 升级、`handoff` 交接、三档自主度、便签墙）→ 见 [`Agent协作模式.md` §二](/docs/03-AI核心/Agent协作模式.md)。
 
 > **结构跟着证据走：提纲作为可把关的流水线步骤 ✅ 已落地**：对需大量调研的成篇交付，用 `depends_on` + `checkpoint_after` 把「定结构」摆到调研之后——并行调研 worker → 写作 worker 先产出提纲（`checkpoint_after` 让用户改批）→ 据定稿提纲写全文。不新增 schema。→ 见代码：`runtime/skills.py`、`runtime/delegate/`。
 

@@ -140,6 +140,7 @@ uv run python scripts/demo_tape_export.py \
 - **磁带源 = `turn_journal`**（只存 DURABLE 事件；流式 delta 由导出时重切块合成打字观感）。**保真度以原始会话为真值 oracle**：改导出/回放层后，用 `demo-tape-out/` 下保真脚本比对「回放 vs 原始」（正文须逐字节一致、辩论投影结构等价），不要目测。
 - **暂停即真实检查点**：磁带遇 `team_preview` 真暂停、等用户在 UI 点继续——演示中人类拍板环节由录屏者掌控。
 - **节奏坑（已修勿回退）**：磁带 `t_ms` 必须单调；player 的 pacing 时钟不可回拨（曾因导出切块时间回跳 + 时钟回拨双计时，在原速下表现为「正在思考」长卡死，4 倍速+2s 限幅时被掩盖）。
+- **CEO 自持工具内联（已修勿回退）**：CEO 检索阶段的 `web_search`/`read_url` 在运行时带 captain 自己的 `run_id`；前端 `appendToolStep` 与后端 `_accumulate_process` 都把「带 run_id 的工具」当作 worker 工具从内联时间线剔除（本该落协作图节点），但检索阶段协作图尚未出现 → 前 ~15 秒只显示「正在思考」、检索活动全隐藏（正是上一条「3 秒内无首批搜索活动」判据的触发场景）。修法：player 回放时对 `run_id == captain run` 的 `tool_use_*` 事件剥离 `run_id`，使 CEO 自持工具按渲染契约（conformance `single_agent` 向量：CEO 工具无 run_id）走 turn-level 内联。磁带数据保持忠实录制（含 run_id），仅在渲染适配层归一。见 `player.py:_captain_run_id` + 单测 `test_player_inlines_captain_tools_by_stripping_run_id`。**真实产品同源已在 runtime 一并修掉**（旧磁带仍靠 player 层剥离兜底）：`execute_tools`（`runtime/engine/tool_exec.py`）对 `role=="captain"` 走 display/trace 拆分——`tool_use_*` 的 SSE 事件不发 `run_id`（内联渲染），`ToolCallFact`/熔断审计仍保留 captain `run_id`（§8.3 fold/溯源不变）；两处调用点 `tool_round.py`、`directive_apply.py`（coordination 收尾）均已传 `role`。
 
 ## 复用到新场景
 

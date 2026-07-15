@@ -40,6 +40,10 @@ async def permanent_delete_folder(*, folder_id: str, user_id: str) -> bool:
         for conversation_id in conv_ids:
             await share_repo.revoke_all_for_conversation(conversation_id)
             grant_store.clear_conversation(conversation_id)
+            from agentcore.workspace import organize_journal, organize_plan_store
+
+            organize_plan_store.clear_conversation(conversation_id)
+            organize_journal.clear_conversation(conversation_id)
             await conv_repo.hard_delete(conversation_id)
         await session.execute(
             update(Board)

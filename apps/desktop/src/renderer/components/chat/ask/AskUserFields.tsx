@@ -5,6 +5,10 @@ import {
   pickAndBindLocalFolder,
 } from "@/lib/bindLocalFolder";
 import {
+  formatGrantOrganizeFolderAnswer,
+  pickAndGrantOrganizeFolder,
+} from "@/lib/grantOrganizeFolder";
+import {
   formatGrantReadonlyFolderAnswer,
   pickAndGrantReadonlyFolder,
 } from "@/lib/grantReadonlyFolder";
@@ -55,11 +59,19 @@ export type AskTone =
  * the only reader is the CEO / worker, an LLM). Shared so both cards manage answers
  * identically; each card decides what to do with `compose()` in its own footer.
  */
-export function useAskAnswer(content: AskUserContent) {
+export function useAskAnswer(
+  content: AskUserContent,
+  opts?: { seedAllMultiple?: boolean },
+) {
   const [answers, setAnswers] = useState<Record<string, string[]>>(() => {
     const init: Record<string, string[]> = {};
-    for (const q of content.questions)
-      init[q.id] = q.default ? [q.default] : [];
+    for (const q of content.questions) {
+      if (opts?.seedAllMultiple && q.multiple && q.options.length > 0) {
+        init[q.id] = q.options.map((o) => o.label);
+      } else {
+        init[q.id] = q.default ? [q.default] : [];
+      }
+    }
     return init;
   });
   const [otherOn, setOtherOn] = useState<Record<string, boolean>>({});
@@ -201,6 +213,28 @@ export function AskQuestionFields({
         return;
       }
       const value = formatGrantReadonlyFolderAnswer(
+        opt.label,
+        result.root.name,
+        result.namespace,
+      );
+      try {
+        await onBindResolve(answer.composeWithAnswer("decision", q.id, value));
+      } catch {
+        setBindBusyLabel(null);
+      }
+      return;
+    }
+    if (opt.action === "grant_organize_folder") {
+      const result = await pickAndGrantOrganizeFolder(conversationId);
+      if (!result.ok) {
+        if (result.reason === "error") setBindError(result.message);
+        else if (result.reason === "unavailable") {
+          setBindError("整理授权仅桌面本地会话可用");
+        }
+        setBindBusyLabel(null);
+        return;
+      }
+      const value = formatGrantOrganizeFolderAnswer(
         opt.label,
         result.root.name,
         result.namespace,
@@ -447,7 +481,8 @@ function QuestionField({
                 const isBindAction =
                   canBindAction &&
                   (opt.action === "bind_local_folder" ||
-                    opt.action === "grant_readonly_folder");
+                    opt.action === "grant_readonly_folder" ||
+                    opt.action === "grant_organize_folder");
                 const bindBusy = bindBusyLabel === opt.label;
                 return (
                   <div key={opt.label} className="flex w-full flex-col">

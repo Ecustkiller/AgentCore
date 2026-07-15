@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from agentcore.runtime.events import _JOURNAL_SURFACE_TYPES, EventType, FinishReason
-from agentcore.runtime.facts import EXECUTION_ONLY_KINDS, FactKind
+from agentcore.runtime.facts import EXECUTION_ONLY_KINDS, FactKind, pre_pause_from_journal
 from agentcore.runtime.runs.types import RunKind
 
 from .entries import KIND_TURN_END, _PROCESS_PREFIX, _RUN_PROCESS_PREFIX
@@ -98,6 +98,12 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
     deltas 退场: per-token worker deltas are no longer journaled; each agent run's full
     output lives in its ``message_final`` fact, from which :func:`_splice_synthetic_deltas`
     reconstructs one equivalent delta block per run before the terminal event.
+
+    挂起中冷启动重载 (G1): the pause path skips writing ``process_*`` / ``run_process_*``
+    tails, so when those lanes are absent this fold falls back to the last
+    ``turn_paused`` snapshot's ``process`` / ``run_processes`` (via
+    :func:`pre_pause_from_journal`). Completed turns with process entries keep those;
+    old journals without ``turn_paused`` stay empty on the process lanes.
     """
     if not entries:
         return None
@@ -188,6 +194,16 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
                 if isinstance(msg, str) and msg.strip():
                     turn_warning = msg
             events.append({"type": kind, "payload": payload, "timestamp": entry.get("ts")})
+    # G1 挂起中重载: no process_* / run_process_* lanes → use last turn_paused snapshot.
+    if not process and not run_processes:
+        snap = pre_pause_from_journal(entries)
+        if snap is not None:
+            if snap.process:
+                process = list(snap.process)
+            if snap.run_processes:
+                run_processes = {
+                    rid: list(steps) for rid, steps in snap.run_processes.items()
+                }
     if final_outputs:
         events = _splice_synthetic_deltas(events, final_outputs, agent_run_ids)
     # Surface gate (parity with EventSink.execution_journal): idempotent on journals

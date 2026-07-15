@@ -270,6 +270,45 @@ def _risk_ack_checkpoint() -> list[SSEEvent]:
     ]
 
 
+def _organize_plan_checkpoint() -> list[SSEEvent]:
+    """单聊·整理方案卡 (ask_user card=organize_plan)：阻塞挂起，intent=organize_plan，
+    恰好 1 个 choice 多选 + options 1–50（原路径→新路径）。"""
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("请确认整理方案（取消勾选即剔除）："),
+        checkpoint_required(
+            checkpoint_id="cp_org",
+            conversation_id=_CONV,
+            question="按下列方案整理桌面？",
+            context="确认后按方案批量执行，不再二次弹审批。",
+            questions=[
+                {
+                    "id": "q0",
+                    "prompt": "整理项",
+                    "kind": "choice",
+                    "multiple": True,
+                    "default": "",
+                    "options": [
+                        {
+                            "label": "发票.pdf → 财务/发票.pdf",
+                            "op": "move",
+                            "source": "external/desk/发票.pdf",
+                            "destination": "external/desk/财务/发票.pdf",
+                        },
+                        {
+                            "label": "新建 财务/",
+                            "op": "mkdir",
+                            "path": "external/desk/财务",
+                        },
+                    ],
+                }
+            ],
+            intent="organize_plan",
+        ),
+        message_end(FinishReason.PAUSED, input_tokens=1900, output_tokens=140, cost=_COST),
+    ]
+
+
 def _team_preview_finalized() -> list[SSEEvent]:
     """团队预审薄预览【收口即终止】：多 Agent 首委派在 run_plan 后、首波前挂起，以
     ``message_end(finish_reason=paused)`` 收口。``pendingInteraction`` = team_preview，
@@ -468,4 +507,5 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "single_agent_non_blocking_ask": ("单聊：非阻塞发问 question_posted 在时间线原位落 ask 标记、回合照常收尾", _single_agent_non_blocking_ask),
     "proposal_pick_checkpoint": ("单聊：方案挑选卡 ask_user(card=proposal_pick) 挂起（intent=proposal_pick）", _proposal_pick_checkpoint),
     "risk_ack_checkpoint": ("单聊：风险确认卡 ask_user(card=risk_ack) 挂起（intent=risk_ack）", _risk_ack_checkpoint),
+    "organize_plan_checkpoint": ("单聊：整理方案卡 ask_user(card=organize_plan) 挂起（intent=organize_plan）", _organize_plan_checkpoint),
 }

@@ -152,6 +152,11 @@ async def apply_loop_directive(
             if coordination is not None and coordination.kind == "coordination_tools":
                 if coordination.content:
                     final_content = join_segments(final_content, coordination.content)
+                    # Update point 3/3 (G4): mirror before tools may suspend.
+                    if role == "captain":
+                        from agentcore.runtime.engine.loop import sync_captain_loop_mirror
+
+                        sync_captain_loop_mirror(final_content=final_content)
                 if coordination.reasoning:
                     final_reasoning += coordination.reasoning
                 tool_calls = prepare_blocking_ask_user_tool_calls(
@@ -175,6 +180,7 @@ async def apply_loop_directive(
                     citation_sink=citation_sink,
                     annotate_citations=annotate_citations,
                     run_id=run_id,
+                    role=role,
                 )
                 messages.extend(tool_results)
                 if gate_escalation_sink is not None and role == "worker":

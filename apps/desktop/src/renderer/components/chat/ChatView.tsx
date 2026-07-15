@@ -1,12 +1,16 @@
 import { DraftEmptyState } from "@/components/onboarding/DraftEmptyState";
 import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { useComposerDockFlip } from "@/hooks/useComposerDockFlip";
+import { useLlmKey } from "@/hooks/useLlmKey";
+import { hasModelAccess, shouldCenterDraftComposer } from "@/lib/onboarding";
 import { useChatScroll } from "@/lib/useChatScroll";
 import {
   loadLatestWindow,
   loadNewerMessages,
   loadOlderMessages,
 } from "@/services/messages";
+import { useComposerDraftStore } from "@/stores/composer";
 import {
   useActiveGenerating,
   useActiveHasMoreAfter,
@@ -17,7 +21,7 @@ import {
   useConversationStore,
 } from "@/stores/conversation";
 import { ArrowDown, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ConversationDecisionPrompts } from "./ConversationDecisionPrompts";
 import { ConversationOutline } from "./ConversationOutline";
 import { FindBar } from "./FindBar";
@@ -32,6 +36,20 @@ export function ChatView() {
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const isGenerating = useActiveGenerating();
   const hasMessages = messages.length > 0;
+  const { data: llm } = useLlmKey();
+  // 草稿态（未落库对话）才可能进居中欢迎态。已落库对话切换时会先经历一个「历史尚未
+  // 异步加载完」的空窗口，用 isDraft 把它挡在居中判定外，避免输入框「弹到中间再飞回底栏」。
+  const isDraft = conversationId === null;
+  const centerComposer = shouldCenterDraftComposer({
+    isDraft,
+    hasMessages,
+    hasModelAccess: hasModelAccess(llm),
+  });
+  const composerFlipRef = useRef<HTMLDivElement>(null);
+  // 落地动画只由首发信号触发（草稿 promote 成新对话），而非被动的居中→底栏翻转——
+  // 后者在切换对话时也会发生，正是「输入框一直在跳动」的来源。
+  const dockFlipToken = useComposerDraftStore((s) => s.dockFlipToken);
+  useComposerDockFlip(composerFlipRef, centerComposer, dockFlipToken);
   const hasMoreBefore = useActiveHasMoreBefore();
   const hasMoreAfter = useActiveHasMoreAfter();
   const loadingOlder = useActiveLoadingOlder();
@@ -99,7 +117,7 @@ export function ChatView() {
   });
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <div className="relative flex min-w-0 flex-1 flex-col">
       {/* Scrollable message area (scrollbar at container edge, content centered).
           The relative wrapper anchors the floating 回到底部 button to the viewport
           so it stays put instead of scrolling away with the messages. */}
@@ -137,9 +155,15 @@ export function ChatView() {
               )}
             </div>
           ) : (
-            <div className="flex h-full items-center justify-center py-10">
-              <DraftEmptyState />
-            </div>
+            isDraft &&
+            !centerComposer && (
+              <div className="flex h-full items-center justify-center py-10">
+                {/* Draft needs_key only: CTA stays centered; composer remains bottom
+                    bar. A persisted conversation loading its history is NOT a draft,
+                    so it shows no empty-state — just the settled bottom composer. */}
+                <DraftEmptyState />
+              </div>
+            )
           )}
         </div>
         {hasMessages && !atBottom && (
@@ -156,13 +180,38 @@ export function ChatView() {
         )}
       </div>
 
-      {/* Bottom input area */}
-      <div className="mx-auto w-full max-w-3xl">
-        <ConversationDecisionPrompts />
-        <RetryBanner />
-        <FollowupChips followups={followups} />
-        <StreamingIndicator />
-        <MessageInput />
+      {/* Composer dock: empty+model → absolute center block (greeting/chips + input);
+          needs_key / in-session → bottom bar. First send FLIPs input center→bottom. */}
+      <div
+        className={
+          centerComposer
+            ? "absolute inset-0 z-10 flex items-center justify-center overflow-y-auto py-10"
+            : "mx-auto w-full max-w-3xl"
+        }
+        data-composer-dock={centerComposer ? "center" : "bottom"}
+      >
+        <div
+          className={
+            centerComposer
+              ? "mx-auto flex w-full max-w-3xl flex-col"
+              : undefined
+          }
+        >
+          {centerComposer && <DraftEmptyState />}
+          {hasMessages && (
+            <>
+              <ConversationDecisionPrompts />
+              <RetryBanner />
+              <FollowupChips followups={followups} />
+              <StreamingIndicator />
+            </>
+          )}
+          <div ref={composerFlipRef}>
+            <MessageInput
+              className={centerComposer ? "px-4 pb-2 pt-8" : undefined}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );

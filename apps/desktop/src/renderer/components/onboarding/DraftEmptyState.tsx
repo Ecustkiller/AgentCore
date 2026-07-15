@@ -73,7 +73,7 @@ export function DraftEmptyState({
         <p className="mt-2 text-xs text-muted-foreground">
           试试这些会拉起多 Agent 协作的任务——点一下填入输入框，再按发送。
         </p>
-        <div className="mt-6 flex flex-wrap justify-center gap-2">
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
           {STARTER_TASK_CHIPS.map((text) => (
             <Button
               key={text}
@@ -88,7 +88,7 @@ export function DraftEmptyState({
         </div>
         <Link
           to="/toolbox/manual"
-          className="mt-6 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+          className="mt-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
         >
           <BookOpen size={12} />
           产品手册

@@ -1,4 +1,5 @@
 import {
+  ensureTimelineMarkersFromJournal,
   foldCheckpointMarker,
   foldContentDelta,
   foldContentReset,
@@ -117,6 +118,64 @@ describe("foldMessageLane", () => {
     expect(next.process).toEqual([
       { kind: "reasoning", text: "想一下" },
       { kind: "checkpoint", checkpoint_id: "cp_1" },
+    ]);
+  });
+});
+
+// Reload 补标记（时间线一期）: journal → positional markers, invariant「有交互卡必有
+// 时间线标记」without ever eating settled content (absorb is live-only semantics).
+describe("ensureTimelineMarkersFromJournal", () => {
+  const journal = [
+    { type: "message_start", payload: { message_id: "m1" } },
+    { type: "content_delta", payload: { delta: "我来安排团队。" } },
+    { type: "run_plan", payload: { execution_id: "exec1" } },
+    { type: "team_preview_required", payload: { checkpoint_id: "tp1" } },
+    { type: "checkpoint_required", payload: { checkpoint_id: "cp1" } },
+    { type: "question_posted", payload: { ask_id: "ask1" } },
+    { type: "plan_review_required", payload: { checkpoint_id: "pr1" } },
+  ];
+
+  it("backfills every marker a bare persisted process is missing", () => {
+    const process = ensureTimelineMarkersFromJournal(
+      [{ kind: "content", text: "我来安排团队。" }],
+      journal,
+    );
+    expect(process).toEqual([
+      { kind: "content", text: "我来安排团队。" },
+      // team_preview product order: inserted BEFORE the team marker (insertBeforeTeam).
+      { kind: "team_preview", checkpoint_id: "tp1" },
+      { kind: "team", execution_id: "exec1" },
+      { kind: "checkpoint", checkpoint_id: "cp1" },
+      { kind: "ask", ask_id: "ask1" },
+      { kind: "plan_review", checkpoint_id: "pr1" },
+    ]);
+  });
+
+  it("no-ops (dedup) when the persisted process already carries the markers", () => {
+    const persisted = [
+      { kind: "content", text: "我来安排团队。" },
+      { kind: "team_preview", checkpoint_id: "tp1" },
+      { kind: "team", execution_id: "exec1" },
+      { kind: "checkpoint", checkpoint_id: "cp1" },
+      { kind: "ask", ask_id: "ask1" },
+      { kind: "plan_review", checkpoint_id: "pr1" },
+      { kind: "content", text: "收尾。" },
+    ] as const;
+    const process = ensureTimelineMarkersFromJournal(
+      [...persisted] as Parameters<typeof ensureTimelineMarkersFromJournal>[0],
+      journal,
+    );
+    expect(process).toEqual([...persisted]);
+  });
+
+  it("never absorbs settled trailing content (unlike the live checkpoint fold)", () => {
+    const process = ensureTimelineMarkersFromJournal(
+      [{ kind: "content", text: "定稿正文，resolve 后的收尾。" }],
+      [{ type: "checkpoint_required", payload: { checkpoint_id: "cp9" } }],
+    );
+    expect(process).toEqual([
+      { kind: "content", text: "定稿正文，resolve 后的收尾。" },
+      { kind: "checkpoint", checkpoint_id: "cp9" },
     ]);
   });
 });

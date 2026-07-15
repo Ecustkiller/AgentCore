@@ -476,3 +476,206 @@ async def test_player_pauses_and_continues(monkeypatch, tmp_path: Path):
     # Reload path: journal_entries must carry message_final so fold can splice deltas.
     entries = result2.get("journal_entries") or []
     assert any(e.get("kind") == "message_final" for e in entries)
+
+
+def test_captain_run_id_finds_first_captain_run():
+    from agentcore.demo_tape.player import _captain_run_id
+
+    assert (
+        _captain_run_id(
+            [
+                {"kind": "message_start", "payload": {}},
+                {"kind": "run_started", "payload": {"run_id": "cap1", "kind": "captain"}},
+                {"kind": "run_started", "payload": {"run_id": "w1", "kind": "agent"}},
+            ]
+        )
+        == "cap1"
+    )
+    # No captain run → empty (nothing to normalize).
+    assert _captain_run_id([{"kind": "run_started", "payload": {"run_id": "w1"}}]) == ""
+
+
+@pytest.mark.asyncio
+async def test_player_inlines_captain_tools_by_stripping_run_id(monkeypatch):
+    """CEO self-tools (run_id == captain run) replay inline (run_id dropped) so the
+    search phase renders instead of a silent「正在思考」; worker tools keep run_id."""
+    from agentcore.demo_tape import player as player_mod
+    from agentcore.demo_tape.binding import TapeBinding
+    from agentcore.demo_tape.player import play_tape_events
+    from agentcore.runtime.journal.writer import TurnJournalWriter
+
+    async def fake_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(player_mod.asyncio, "sleep", fake_sleep)
+
+    async def noop_flush(self):
+        return None
+
+    monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
+
+    events = [
+        {"kind": "run_started", "payload": {"run_id": "cap1", "kind": "captain"}, "t_ms": 0},
+        {
+            "kind": "tool_use_start",
+            "payload": {"tool_call_id": "t1", "tool_name": "web_search", "arguments": {}, "run_id": "cap1"},
+            "t_ms": 100,
+        },
+        {
+            "kind": "tool_use_end",
+            "payload": {"tool_call_id": "t1", "tool_name": "web_search", "run_id": "cap1"},
+            "t_ms": 200,
+        },
+        {"kind": "run_started", "payload": {"run_id": "w1", "kind": "agent"}, "t_ms": 300},
+        {
+            "kind": "tool_use_start",
+            "payload": {"tool_call_id": "t2", "tool_name": "read_url", "arguments": {}, "run_id": "w1"},
+            "t_ms": 400,
+        },
+        {"kind": "content_delta", "payload": {"delta": "done"}, "t_ms": 500},
+    ]
+    binding = TapeBinding(
+        conversation_id="c", tape_path=Path("unused.json"), speed=1.0, max_gap_ms=50
+    )
+    sink = EventSink(conversation_id="c", message_id="m")
+    writer = TurnJournalWriter(turn_id="m", conversation_id="c", trace_id="t" * 32)
+    await play_tape_events(
+        sink=sink,
+        events=events,
+        start_index=0,
+        binding=binding,
+        message_id="m",
+        conversation_id="c",
+        user_id="u",
+        user_message="go",
+        folder_id=None,
+        journal_writer=writer,
+    )
+    starts = {
+        e.payload.get("tool_name"): e.payload
+        for e in sink._history
+        if e.type is EventType.TOOL_USE_START
+    }
+    # CEO's own web_search: run_id stripped → turn-level inline step.
+    assert "run_id" not in starts["web_search"]
+    # Worker's read_url: run_id preserved → its own run node in the graph.
+    assert starts["read_url"].get("run_id") == "w1"
+    ends = [e.payload for e in sink._history if e.type is EventType.TOOL_USE_END]
+    assert all("run_id" not in p for p in ends if p.get("tool_name") == "web_search")
+    # Rendering outcome: the CEO's web_search is now a turn-level process step.
+    inline_tools = [s for s in sink._process if s.get("kind") == "tool"]
+    assert any(s.get("tool_name") == "web_search" for s in inline_tools)
+    assert all(s.get("tool_name") != "read_url" for s in inline_tools)
+
+
+def test_delegation_compose_chars_counts_debate_arguments():
+    from agentcore.demo_tape.player import _delegation_compose_chars
+
+    payload = {
+        "motion": "abcd",
+        "sides": [
+            {"name": "AA", "stance": "xyz"},
+            {"name": "BB", "stance": "z"},
+        ],
+        "workers": [{"role": "R", "task": "TT"}],
+    }
+    # motion(4) + AA(2)+xyz(3) + BB(2)+z(1) + R(1)+TT(2) = 15
+    assert _delegation_compose_chars(payload) == 15
+    assert _delegation_compose_chars({}) == 0
+
+
+@pytest.mark.asyncio
+async def test_player_injects_delegation_composing_before_team_preview(monkeypatch):
+    """案情简介后、开工卡前，回放合成「正在生成 委派任务 · N 字」传输态（EPHEMERAL）。
+
+    磁带源(turn_journal)只存 DURABLE 事件，CEO 编排工具的 tool_progress 心跳导出时丢失 →
+    回放里派单空缺、只剩「正在思考」。player 层按 team_preview 参数还原字数递增的委派态。
+    """
+    from agentcore.demo_tape import player as player_mod
+    from agentcore.demo_tape.binding import TapeBinding
+    from agentcore.demo_tape.player import play_tape_events
+    from agentcore.runtime.journal.writer import TurnJournalWriter
+
+    async def fake_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(player_mod.asyncio, "sleep", fake_sleep)
+
+    async def noop_flush(self):
+        return None
+
+    monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
+
+    async def fake_save(suspension):
+        return None
+
+    monkeypatch.setattr(player_mod, "save_paused_turn", fake_save)
+
+    events = [
+        {"kind": "run_started", "payload": {"run_id": "cap1", "kind": "captain"}, "t_ms": 0},
+        {"kind": "content_delta", "payload": {"delta": "案情简介"}, "t_ms": 100},
+        {
+            "kind": "team_preview_required",
+            "payload": {
+                "checkpoint_id": "cp1",
+                "form": "debate",
+                "primitive": "debate",
+                "motion": "本案一审判决是否应被维持？",
+                "sides": [
+                    {"key": "lv", "name": "LV方", "stance": "判决正确。" * 10},
+                    {"key": "m", "name": "茉莉奶白方", "stance": "判决值得商榷。" * 10},
+                ],
+                "workers": [],
+                "tools": [],
+                "max_rounds": 4,
+                "thorough": True,
+            },
+            "t_ms": 200,
+        },
+    ]
+    binding = TapeBinding(
+        conversation_id="c", tape_path=Path("unused.json"), speed=1.0, max_gap_ms=50
+    )
+    sink = EventSink(conversation_id="c", message_id="m")
+    # tool_progress is EPHEMERAL (skipped from _history) but rides the live SSE stream —
+    # spy emit() to assert the ticks actually reach the frontend.
+    emitted: list = []
+    real_emit = sink.emit
+
+    def spy_emit(ev):
+        emitted.append(ev)
+        real_emit(ev)
+
+    monkeypatch.setattr(sink, "emit", spy_emit)
+    writer = TurnJournalWriter(turn_id="m", conversation_id="c", trace_id="t" * 32)
+    result = await play_tape_events(
+        sink=sink,
+        events=events,
+        start_index=0,
+        binding=binding,
+        message_id="m",
+        conversation_id="c",
+        user_id="u",
+        user_message="go",
+        folder_id=None,
+        journal_writer=writer,
+    )
+    assert result["finish_reason"] is FinishReason.PAUSED
+
+    progresses = [
+        e.payload for e in emitted if e.type is EventType.TOOL_PROGRESS
+    ]
+    assert progresses, "should synthesize delegation compose ticks"
+    assert all(p["tool_name"] == "delegate" for p in progresses)
+    chars = [p["chars"] for p in progresses]
+    assert chars == sorted(chars) and chars[-1] > chars[0]  # 字数递增
+
+    # 委派态发生在开工卡之前。
+    emitted_types = [e.type for e in emitted]
+    assert emitted_types.index(EventType.TOOL_PROGRESS) < emitted_types.index(
+        EventType.TEAM_PREVIEW_REQUIRED
+    )
+
+    # tool_progress 是传输态：不落 journal（正文字节保真不受影响）。
+    entries = result.get("journal_entries") or []
+    assert all(e.get("kind") != "tool_progress" for e in entries)

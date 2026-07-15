@@ -20,6 +20,9 @@ const PORT = Number(process.env.REPRO_PORT ?? 5174);
 const TAPE = process.env.REPRO_TAPE ?? "lv-molihua-trademark";
 const SPEED = Number(process.env.REPRO_SPEED ?? 1);
 const GAP = Number(process.env.REPRO_GAP ?? 3000);
+// "prepare" = user types opening message (live surfaceResumeFromLiveTurn path);
+// "autostart" = 一键开播 /start then attach → GET /recovery surfaces the card.
+const MODE = process.env.REPRO_MODE ?? "prepare";
 const outDir = resolve(desktopDir, "demo-tape-out");
 process.env.VITE_API_URL = API;
 
@@ -31,6 +34,7 @@ const probe = (page) =>
     const text = (document.body?.innerText ?? "").replace(/\s+/g, " ");
     return {
       thinking: /正在思考|正在回复/.test(text),
+      delegating: /正在生成\s*委派|委派任务/.test(text),
       authorize: /授权开赛/.test(text),
       waitKickoff: /等待开工确认|开工卡/.test(text),
       stop: /停止生成/.test(text),
@@ -44,7 +48,7 @@ const probe = (page) =>
 async function main() {
   process.chdir(desktopDir);
   await mkdir(outDir, { recursive: true });
-  const summary = { api: API, speed: SPEED, gap: GAP, timeline: [], marks: {}, pageErrors: [], ok: false };
+  const summary = { api: API, mode: MODE, speed: SPEED, gap: GAP, timeline: [], marks: {}, pageErrors: [], ok: false };
 
   const server = await createServer({
     configFile: resolve(desktopDir, "vite.webapp.config.ts"),
@@ -79,45 +83,64 @@ async function main() {
     }
     await composer.waitFor({ state: "visible", timeout: 30000 });
 
-    // Prepare via API using browser cookies (mirrors palette「准备」row without click flakiness).
+    // Launch via API using browser cookies (mirrors palette rows without click flakiness).
     const apiBase = API.replace(/\/$/, "");
     const cookies = await page.context().cookies(apiBase);
     const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
-    const res = await fetch(`${apiBase}/v1/demo-tape/prepare`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: cookieHeader,
-        ...(csrf ? { "X-CSRF-Token": csrf } : {}),
-      },
-      body: JSON.stringify({ tape_id: TAPE, speed: SPEED, max_gap_ms: GAP }),
-    });
-    if (!res.ok) throw new Error(`prepare failed ${res.status}: ${await res.text()}`);
-    const body = await res.json();
-    const cid = body.conversation_id;
-    const prompt = body.user_prompt;
-    console.log("prepared", cid, JSON.stringify(prompt));
+    const launch = async (path) => {
+      const res = await fetch(`${apiBase}/v1/demo-tape/${path}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookieHeader,
+          ...(csrf ? { "X-CSRF-Token": csrf } : {}),
+        },
+        body: JSON.stringify({ tape_id: TAPE, speed: SPEED, max_gap_ms: GAP }),
+      });
+      if (!res.ok) throw new Error(`${path} failed ${res.status}: ${await res.text()}`);
+      return res.json();
+    };
 
-    await page.goto(new URL(`index.webapp.html#/conversations/${cid}`, base).href, {
-      waitUntil: "load",
-      timeout: 30000,
-    });
-    await composer.waitFor({ state: "visible", timeout: 20000 });
-    await page.waitForTimeout(500);
-
-    // Type + send the opening message (the real user action).
-    await composer.click();
-    await composer.fill(prompt);
-    const t0 = Date.now();
-    await composer.press("Enter");
-    console.log("sent opening message; polling…");
+    let t0;
+    if (MODE === "autostart") {
+      // 一键开播: /start plays server-side and blocks until the turn pauses; then we
+      // navigate and the card must surface via GET /recovery (not a live stream).
+      const body = await launch("start");
+      const cid = body.conversation_id;
+      console.log("autostarted (paused server-side)", cid);
+      t0 = Date.now();
+      await page.goto(new URL(`index.webapp.html#/conversations/${cid}`, base).href, {
+        waitUntil: "load",
+        timeout: 30000,
+      });
+      console.log("navigated to conversation; polling recovery…");
+    } else {
+      const body = await launch("prepare");
+      const cid = body.conversation_id;
+      const prompt = body.user_prompt;
+      console.log("prepared", cid, JSON.stringify(prompt));
+      await page.goto(new URL(`index.webapp.html#/conversations/${cid}`, base).href, {
+        waitUntil: "load",
+        timeout: 30000,
+      });
+      await composer.waitFor({ state: "visible", timeout: 20000 });
+      await page.waitForTimeout(500);
+      // Type + send the opening message (the real user action).
+      await composer.click();
+      await composer.fill(prompt);
+      t0 = Date.now();
+      await composer.press("Enter");
+      console.log("sent opening message; polling…");
+    }
 
     let firstThinking = null;
     let lastThinking = null;
     let authorizeAt = null;
     let briefAt = null;
+    let delegatingAt = null;
     let shotBrief = false;
-    for (let i = 0; i < 130; i++) {
+    let shotDelegating = false;
+    for (let i = 0; i < 220; i++) {
       const p = await probe(page);
       const t = Date.now() - t0;
       summary.timeline.push({ t, ...p, snippet: undefined });
@@ -132,12 +155,42 @@ async function main() {
           shotBrief = true;
         }
       }
+      // 案情简介之后、开工卡之前的「正在生成 委派任务 · N 字」——本次修复的目标态。
+      if (p.delegating && delegatingAt === null) {
+        delegatingAt = t;
+        if (!shotDelegating) {
+          await shot(page, "repro-015-delegating");
+          shotDelegating = true;
+        }
+      }
       if (p.authorize && authorizeAt === null) {
         authorizeAt = t;
         await shot(page, "repro-02-authorize");
         break;
       }
-      await page.waitForTimeout(700);
+      await page.waitForTimeout(400);
+    }
+
+    // Resume → debate: click 授权开赛 and confirm the debate actually streams (full flow).
+    let debateAt = null;
+    if (authorizeAt !== null) {
+      const btn = page.getByRole("button", { name: "授权开赛" });
+      if (await btn.isVisible().catch(() => false)) {
+        await btn.click();
+        const tResume = Date.now();
+        console.log("clicked 授权开赛; polling debate…");
+        for (let i = 0; i < 70; i++) {
+          const p = await probe(page);
+          const t = Date.now() - t0;
+          summary.timeline.push({ t, phase: "resume", ...p, snippet: undefined });
+          if (p.debate && debateAt === null) {
+            debateAt = Date.now() - tResume;
+            await shot(page, "repro-04-debate");
+            break;
+          }
+          await page.waitForTimeout(700);
+        }
+      }
     }
     // Final state shot even if authorize never appeared.
     await shot(page, "repro-03-final");
@@ -146,8 +199,12 @@ async function main() {
       firstThinkingMs: firstThinking,
       lastThinkingMs: lastThinking,
       caseBriefMs: briefAt,
+      delegatingMs: delegatingAt,
+      delegatingAppeared: delegatingAt !== null,
       authorizeMs: authorizeAt,
       authorizeAppeared: authorizeAt !== null,
+      debateAfterResumeMs: debateAt,
+      debateStreamed: debateAt !== null,
       finalSnippet: pend.snippet,
       finalHasStop: pend.stop,
       finalHasAuthorize: pend.authorize,

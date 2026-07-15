@@ -1,3 +1,4 @@
+import { MessageInput } from "@/components/chat/MessageInput";
 import { DraftEmptyState } from "@/components/onboarding/DraftEmptyState";
 import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
 import { ONBOARDING_PREVIEW_SCENES } from "@/preview/onboardingScenes";
@@ -6,7 +7,10 @@ import { useSearchParams } from "react-router-dom";
 
 /**
  * Hidden preview (`#/preview/onboarding`) for first-run wizard + draft empty states.
- * Deep-link: `#/preview/onboarding?s=onboarding-value` 等。
+ * Deep-link: `#/preview/onboarding?s=onboarding-value` 等.
+ *
+ * Empty scenes mirror ChatView placement: needs_key = CTA center + bottom composer;
+ * starter_chips / returning = greeting (+ chips) + composer as one centered block.
  */
 export function OnboardingPreviewPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -25,7 +29,7 @@ export function OnboardingPreviewPage() {
       <aside className="flex w-80 shrink-0 flex-col border-r border-border">
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
           <FlaskConical size={18} className="shrink-0 text-primary" />
-          <div className="min-w-0 flex-1">
+          <div className="min-h-0 min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold text-foreground">
               首启体验 · 预览
             </h1>
@@ -93,17 +97,35 @@ export function OnboardingPreviewPage() {
             onDismiss={() => undefined}
           />
         )}
-        {current?.kind?.startsWith("empty-") && (
-          <div className="flex h-full items-center justify-center py-10">
-            <DraftEmptyState
-              previewKind={
-                current.kind === "empty-needs-key"
-                  ? "needs_key"
-                  : current.kind === "empty-starter-chips"
+        {current?.kind === "empty-needs-key" && (
+          <div
+            className="relative flex h-full min-h-0 flex-col"
+            data-composer-dock="bottom"
+          >
+            <div className="flex min-h-0 flex-1 items-center justify-center py-10">
+              <DraftEmptyState previewKind="needs_key" />
+            </div>
+            <div className="mx-auto w-full max-w-3xl">
+              <MessageInput />
+            </div>
+          </div>
+        )}
+        {(current?.kind === "empty-starter-chips" ||
+          current?.kind === "empty-returning") && (
+          <div
+            className="absolute inset-0 z-10 flex items-center justify-center overflow-y-auto py-10"
+            data-composer-dock="center"
+          >
+            <div className="mx-auto flex w-full max-w-3xl flex-col">
+              <DraftEmptyState
+                previewKind={
+                  current.kind === "empty-starter-chips"
                     ? "starter_chips"
                     : "returning"
-              }
-            />
+                }
+              />
+              <MessageInput className="px-4 pb-2 pt-4" />
+            </div>
           </div>
         )}
       </div>

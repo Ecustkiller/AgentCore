@@ -247,9 +247,11 @@ export function CommandPanelBody({
   CommandRegionData,
   "message" | "execution" | "conversationId" | "interactive"
 >) {
+  // 统一投影键（时间线一期）：interaction entries key by `serverMessageId ?? id`
+  // (execMessageId)，query must match or the dock's cards silently vanish.
   const { checkpoints, planReviews } = useMessageInteractionCards(
     conversationId,
-    message?.id ?? "",
+    message ? assistantProjectionId(message) : "",
   );
 
   const recoverable = isTurnRecoverable(execution);

@@ -1,4 +1,4 @@
-"""ask_user ``card`` parameter — typed confirmation cards (proposal_pick / risk_ack)."""
+"""ask_user ``card`` parameter — typed confirmation cards."""
 
 from __future__ import annotations
 
@@ -6,15 +6,17 @@ from typing import Any, Literal
 
 from agentcore.runtime.checkpoints import AskCheckpointIntent
 
-AskUserCard = Literal["proposal_pick", "risk_ack"]
+AskUserCard = Literal["proposal_pick", "risk_ack", "organize_plan"]
 
-CARD_KINDS: frozenset[str] = frozenset({"proposal_pick", "risk_ack"})
+CARD_KINDS: frozenset[str] = frozenset({"proposal_pick", "risk_ack", "organize_plan"})
 
 # risk_ack risk-list may be longer than a normal choice question.
 _RISK_ACK_MAX_OPTIONS = 10
 _PROPOSAL_PICK_MIN_OPTIONS = 2
 _PROPOSAL_PICK_MAX_OPTIONS = 6
 _RISK_ACK_MIN_OPTIONS = 1
+_ORGANIZE_PLAN_MIN_OPTIONS = 1
+_ORGANIZE_PLAN_MAX_OPTIONS = 50
 
 
 def parse_card(raw: Any) -> AskUserCard | None | str:
@@ -26,8 +28,8 @@ def parse_card(raw: Any) -> AskUserCard | None | str:
         return None
     if text not in CARD_KINDS:
         return (
-            f"未知 card={text!r}。仅支持 proposal_pick（方案挑选）或 "
-            "risk_ack（风险确认勾选）。"
+            f"未知 card={text!r}。仅支持 proposal_pick（方案挑选）、"
+            "risk_ack（风险确认勾选）或 organize_plan（整理方案清单）。"
         )
     return text  # type: ignore[return-value]
 
@@ -40,6 +42,8 @@ def card_overrides_intent(card: AskUserCard) -> AskCheckpointIntent:
 def card_max_options(card: AskUserCard | None) -> int:
     if card == "risk_ack":
         return _RISK_ACK_MAX_OPTIONS
+    if card == "organize_plan":
+        return _ORGANIZE_PLAN_MAX_OPTIONS
     return _PROPOSAL_PICK_MAX_OPTIONS
 
 
@@ -61,6 +65,11 @@ def validate_card_shape(
             return (
                 "card=proposal_pick 要求恰好 1 个 question（kind=choice、multiple=false、"
                 "options 2–6 个候选方案）。请改成单题单选后再发。"
+            )
+        if card == "organize_plan":
+            return (
+                "card=organize_plan 要求恰好 1 个 question（kind=choice、multiple=true、"
+                "options 1–50 条整理项）。请改成单题多选后再发。"
             )
         return (
             "card=risk_ack 要求恰好 1 个 question（kind=choice、multiple=true、"
@@ -91,6 +100,23 @@ def validate_card_shape(
             )
         return None
 
+    if card == "organize_plan":
+        if kind != "choice":
+            return "card=organize_plan 的 question 必须 kind=choice（勾选要执行的整理项）。"
+        if not multiple:
+            return (
+                "card=organize_plan 必须 multiple=true（默认全选，取消勾选即剔除）。"
+                "MVP 不支持改目标路径。"
+            )
+        n = len(options)
+        if n < _ORGANIZE_PLAN_MIN_OPTIONS or n > _ORGANIZE_PLAN_MAX_OPTIONS:
+            return (
+                f"card=organize_plan 要求 options 数量 {_ORGANIZE_PLAN_MIN_OPTIONS}–"
+                f"{_ORGANIZE_PLAN_MAX_OPTIONS}（当前 {n}）。"
+                "每项为「原路径→新路径」整理条目。"
+            )
+        return None
+
     # risk_ack
     if kind != "choice":
         return "card=risk_ack 的 question 必须 kind=choice（勾选要处理的风险项）。"
@@ -106,4 +132,21 @@ def validate_card_shape(
             f"{_RISK_ACK_MAX_OPTIONS}（当前 {n}）。"
             "用于「问题/风险清单勾选要处理哪些」。"
         )
+    return None
+
+
+def option_to_organize_op(opt: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract a file_batch-shaped op from an organize_plan option; None if malformed."""
+    op = str(opt.get("op") or "").strip()
+    if op in ("move", "copy"):
+        source = str(opt.get("source") or "").strip()
+        destination = str(opt.get("destination") or "").strip()
+        if not source or not destination:
+            return None
+        return {"op": op, "source": source, "destination": destination}
+    if op in ("delete", "mkdir"):
+        path = str(opt.get("path") or "").strip()
+        if not path:
+            return None
+        return {"op": op, "path": path}
     return None

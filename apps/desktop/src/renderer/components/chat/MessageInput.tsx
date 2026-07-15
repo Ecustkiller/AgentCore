@@ -6,9 +6,9 @@ import { TurnComposer } from "./message-input/TurnComposer";
  * ({@link import("../graph/CanvasCommandBar").CanvasCommandBar}) is the SAME core in
  * canvas chrome — one composer, two skins, single draft per conversation.
  */
-export function MessageInput() {
+export function MessageInput({ className }: { className?: string }) {
   return (
-    <div className="px-4 pb-4 pt-2">
+    <div className={className ?? "px-4 pb-4 pt-2"}>
       <TurnComposer />
     </div>
   );

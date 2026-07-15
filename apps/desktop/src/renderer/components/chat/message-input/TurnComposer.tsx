@@ -45,6 +45,11 @@ import { useVoiceInput } from "./useVoiceInput";
 
 const EMPTY_ATTACHMENTS: PendingAttachment[] = [];
 
+// 输入框自增高边界：空/单行草稿也保底 ~2 行高度（text-sm 20px 行高 + pt-3/pb-1 = 56px），
+// 让文字不贴着底部工具栏；上限 200px 后转内部滚动。
+const MIN_COMPOSER_HEIGHT = 56;
+const MAX_COMPOSER_HEIGHT = 200;
+
 /**
  * The ONE turn composer (统一 AI 输入框): the full-featured card — auto-growing
  * textarea, @ 文件引用 + 回形针浏览, drag-drop attachments, 后台云端 toggle, 停止生成,
@@ -183,7 +188,10 @@ export function TurnComposer({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "0";
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    el.style.height = `${Math.min(
+      Math.max(el.scrollHeight, MIN_COMPOSER_HEIGHT),
+      MAX_COMPOSER_HEIGHT,
+    )}px`;
   }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: value is an intentional re-run key
@@ -463,7 +471,7 @@ export function TurnComposer({
             bg ? "描述要交给云端团队后台完成的任务…" : resolvedPlaceholder
           }
           className="w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-          rows={1}
+          rows={2}
         />
       </div>
       <div className="flex items-center justify-between px-4 pb-3">

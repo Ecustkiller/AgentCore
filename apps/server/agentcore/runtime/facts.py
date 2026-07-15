@@ -16,7 +16,7 @@ frame): the captain transcript never enters the stream, ``run_completed`` carrie
 only a summary, and the system prompt / injected nudges are not facts. Resume bridges
 the gap with the旁路 ``paused_turns.frame``.
 
-This module owns the **seven execution-level facts** that close that gap (the new
+This module owns the **execution-level facts** that close that gap (the new
 kinds), making the journal lossless so the window / frame become projections of it
 (执行级事件溯源；as-built 见执行引擎 §8.3):
 
@@ -42,6 +42,10 @@ kinds), making the journal lossless so the window / frame become projections of 
 - :class:`MessageFinalFact` — a run's / the turn's **full** output text (vs the
   ``run_completed`` summary), so resume feeds a worker's product back from facts
   rather than from the frame.
+- :class:`TurnPausedFact` — the resumable turn-state snapshot at a durable pause
+  (display + control state: process / run_processes / citations / controller /
+  deliverable content / reasoning). Resume and salvage read the LAST one via
+  :func:`pre_pause_from_journal`.
 - ``plan_snapshot`` — a delegate's full DAG (``plan_to_json``: every :class:`RunSpec`
   with its minted run_id + accumulated ``steer`` + policy/contract), recorded at plan
   build and after each ``adjust`` steer. Resume folds the LAST one (``plan_from_journal``)
@@ -97,6 +101,9 @@ class FactKind(StrEnum):
     PLAN_SNAPSHOT = "plan_snapshot"
     # CEO 协调模式 Phase 2: draft / completed / budget for ask_user resume.
     COORDINATION_SNAPSHOT = "coordination_snapshot"
+    # 回合态挂起归宿 (P0): the resumable turn-state snapshot recorded at a durable
+    # pause — see :class:`TurnPausedFact`.
+    TURN_PAUSED = "turn_paused"
 
 
 # The execution-only kinds the DISPLAY projection (runs_from_entries) must skip: they
@@ -314,6 +321,68 @@ class MessageFinalFact:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class TurnPausedFact:
+    """Resumable turn-state snapshot recorded at a durable pause.
+
+    The unique fact-source for display + control state across suspend/resume
+    (process timeline, citations, LoopController latches, deliverable content /
+    reasoning). Multi-cycle pauses append a new fact each time; readers take the
+    LAST one (:func:`pre_pause_from_journal`). Contract: 执行引擎架构设计.md §8.3
+    「回合态暂停快照」.
+    """
+
+    checkpoint_id: str
+    suspension_kind: str
+    content: str = ""
+    reasoning: str = ""
+    process: list[dict[str, Any]] | None = None
+    run_processes: dict[str, list[dict[str, Any]]] | None = None
+    citations: list[dict[str, Any]] | None = None
+    controller: dict[str, Any] | None = None
+    kind: ClassVar[FactKind] = FactKind.TURN_PAUSED
+
+    def to_fact(self, ts: str | None = None) -> Fact:
+        return Fact(
+            kind=self.kind.value,
+            payload={
+                "checkpoint_id": self.checkpoint_id,
+                "suspension_kind": self.suspension_kind,
+                "content": self.content,
+                "reasoning": self.reasoning,
+                "process": list(self.process) if self.process else [],
+                "run_processes": {
+                    rid: list(steps) for rid, steps in (self.run_processes or {}).items()
+                },
+                "citations": list(self.citations) if self.citations else [],
+                "controller": dict(self.controller) if self.controller else {},
+            },
+            ts=ts,
+        )
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> TurnPausedFact:
+        """Rebuild from a persisted journal payload (tolerant of missing keys)."""
+        process = payload.get("process")
+        run_processes = payload.get("run_processes")
+        citations = payload.get("citations")
+        controller = payload.get("controller")
+        return cls(
+            checkpoint_id=str(payload.get("checkpoint_id") or ""),
+            suspension_kind=str(payload.get("suspension_kind") or ""),
+            content=str(payload.get("content") or ""),
+            reasoning=str(payload.get("reasoning") or ""),
+            process=list(process) if isinstance(process, list) else [],
+            run_processes=(
+                {str(k): list(v) if isinstance(v, list) else [] for k, v in run_processes.items()}
+                if isinstance(run_processes, dict)
+                else {}
+            ),
+            citations=list(citations) if isinstance(citations, list) else [],
+            controller=dict(controller) if isinstance(controller, dict) else {},
+        )
+
+
 @runtime_checkable
 class FactRecorder(Protocol):
     """The engine-facing write side of the §8.3 Journal (执行级落地 §4).
@@ -426,3 +495,24 @@ def snapshot_fact_log(
     if trailing:
         entries.extend(trailing)
     return entries
+
+
+def pre_pause_from_journal(entries: list[dict[str, Any]] | None) -> TurnPausedFact | None:
+    """Return the last ``turn_paused`` snapshot from a journal stream, or ``None``.
+
+    Unified read entry for resume rehydration and sidecar / cloud salvage: takes a
+    plain entries list and does not depend on runtime objects. Old journals without
+    this kind yield ``None`` (callers keep legacy heuristics).
+    """
+    if not entries:
+        return None
+    last: dict[str, Any] | None = None
+    for entry in entries:
+        if (entry.get("kind") or "") != FactKind.TURN_PAUSED.value:
+            continue
+        payload = entry.get("payload")
+        if isinstance(payload, dict):
+            last = payload
+    if last is None:
+        return None
+    return TurnPausedFact.from_payload(last)

@@ -340,9 +340,15 @@ class TurnExecutionMixin:
             if not settlement_durable and self._paused_store is not None:
                 await self._paused_store.rollback_claim(turn_id)
             if outbox is not None:
+                # G8: streamed_content is live-only; join hang-frame pre_pause.
+                from agentcore.conversation.turn_persistence import compose_salvage_content
+
                 await outbox.salvage(
                     journal=list(sink.execution_journal() or []),
-                    content=sink.streamed_content() or "",
+                    content=compose_salvage_content(
+                        sink.streamed_content() or "",
+                        suspension.journal_entries,
+                    ),
                     conversation_id=conversation_id,
                     trace_id=trace_id,
                     message_id=turn_id,

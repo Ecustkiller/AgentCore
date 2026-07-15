@@ -42,8 +42,14 @@ async def recover_and_rebuild_window(
     debate_tool: Any,
     execution_id: str,
     captain_run_id: str,
+    pre_pause_override: str | None = None,
 ) -> RecoveredResume:
-    """Settle the paused frame and rebuild the CEO message window."""
+    """Settle the paused frame and rebuild the CEO message window.
+
+    ``pre_pause_override`` (from ``turn_paused.content``) replaces the transcript
+    heuristic when the resume path rehydrated a pause snapshot; ``None`` keeps the
+    legacy ``pre_pause_content(transcript)`` path for old frames.
+    """
     # Rebuild the CEO window by FOLDING the turn journal (Phase 2 ④): the captain
     # transcript at pause is a projection of the §8.3 facts, not a stored blob —
     # window_from_journal(journal_entries) + the reloaded history reconstructs the
@@ -86,7 +92,10 @@ async def recover_and_rebuild_window(
     # Carry the CEO's pre-pause reply forward: the resumed loop below starts from a
     # blank content, so without this the persisted content (and the next turn's LLM
     # history) would lose everything written before the pause — parity with live.
-    pre_pause = pre_pause_content(transcript)
+    # ``turn_paused.content`` is authoritative when present (G4); else transcript heuristic.
+    pre_pause = (
+        pre_pause_override if pre_pause_override is not None else pre_pause_content(transcript)
+    )
     append_resumed_tool_results(messages, suspension.tool_call_id, settled.output)
     # Pause skipped ToolCallFact (no phantom). Settlement produced a real result —
     # persist it (+ display tool_use_end) so a same-turn re-pause folds a closed pair.

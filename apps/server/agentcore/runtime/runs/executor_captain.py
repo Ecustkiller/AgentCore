@@ -110,6 +110,7 @@ def build_captain_resumer(
     citation_sink: list[dict],
     approval_gate: ApprovalGate | None = None,
     supports_tools: bool | None = None,
+    controller_seed: dict | None = None,
 ) -> Callable[[RunSpec, list[LLMMessage]], Awaitable[RunState]]:
     """Build the captain executor for a RESUMED turn (结构化挂起 2b).
 
@@ -121,6 +122,10 @@ def build_captain_resumer(
     ``run_*`` lifecycle so the resumed turn's graph has its root 汇聚点 like a normal
     turn; the client dedupes the captain node by id across the original + resumed
     journal segments.
+
+    ``controller_seed`` restores the five cross-suspension LoopController latches from
+    a prior ``turn_paused.controller`` snapshot (G5); omit / ``None`` keeps fresh-turn
+    behaviour.
     """
 
     async def execute(spec: RunSpec, messages: list[LLMMessage]) -> RunState:
@@ -139,6 +144,7 @@ def build_captain_resumer(
             citation_sink=citation_sink,
             approval_gate=approval_gate,
             supports_tools=supports_tools,
+            controller_seed=controller_seed,
         )
 
     return execute
@@ -158,6 +164,7 @@ async def _drive_captain_loop(
     citation_sink: list[dict],
     approval_gate: ApprovalGate | None,
     supports_tools: bool | None = None,
+    controller_seed: dict | None = None,
 ) -> RunState:
     """Run the CEO captain ReAct loop over ``messages`` and fold it into a RunState.
 
@@ -224,6 +231,7 @@ async def _drive_captain_loop(
                 # the live content_delta stream the folds/oracle read is untouched.
                 deliverable_only=True,
                 supports_tools=supports_tools,
+                controller_seed=controller_seed,
             )
         duration_ms = int((time.monotonic() - start) * 1000)
         usage_dict = usage.as_dict()

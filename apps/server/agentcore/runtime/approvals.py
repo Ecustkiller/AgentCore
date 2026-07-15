@@ -42,11 +42,29 @@ def tool_call_requires_approval(
 ) -> bool:
     """Whether a tool call must pass ``ApprovalGate`` before execution.
 
-    GRANTABLE tools always do. ``git`` / ``terminal`` are ``NEVER`` at schema level
-    (so the CEO registry filter keeps read-only subcommands / so read·stop·list stay
-    ungated) but mutating subcommands are gated here on workers — same posture as
-    ``file_write``.
+    GRANTABLE tools always do — except a plan-bound ``file_batch`` whose ops are
+    within a confirmed ``organize_plan`` (方案确认即批次授权，不再二次弹卡).
+    ``git`` / ``terminal`` are ``NEVER`` at schema level but mutating subcommands
+    are gated here on workers — same posture as ``file_write``.
     """
+    if tool_name == "file_batch":
+        plan_id = str(arguments.get("organize_plan_id") or "").strip()
+        if plan_id or bool(arguments.get("organize_undo")):
+            # Undo is a user-initiated reverse of an already-confirmed plan.
+            if bool(arguments.get("organize_undo")):
+                return False
+            from agentcore.workspace.organize_plan_store import get_plan, ops_within_plan
+
+            ops = arguments.get("operations")
+            if isinstance(ops, list):
+                plan = get_plan(plan_id)
+                if (
+                    plan is not None
+                    and plan.active
+                    and ops_within_plan(plan, [o for o in ops if isinstance(o, dict)])
+                    is None
+                ):
+                    return False
     if approval is ToolApproval.GRANTABLE:
         return True
     if tool_name == "git":

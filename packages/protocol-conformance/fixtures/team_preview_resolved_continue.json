@@ -154,7 +154,8 @@
           "cached": 64000,
           "output": 120000,
           "total": 360000,
-          "currency": "USD"
+          "currency": "USD",
+          "pricing_source": "curated"
         }
       },
       "timestamp": "2026-01-01T00:00:00.007Z"
@@ -190,7 +191,8 @@
           "cached": 64000,
           "output": 120000,
           "total": 360000,
-          "currency": "USD"
+          "currency": "USD",
+          "pricing_source": "curated"
         }
       },
       "timestamp": "2026-01-01T00:00:00.009Z"
@@ -228,7 +230,8 @@
           "cached": 64000,
           "output": 120000,
           "total": 360000,
-          "currency": "USD"
+          "currency": "USD",
+          "pricing_source": "curated"
         },
         "rounds": 0
       },
@@ -313,7 +316,8 @@
           "cached": 64000,
           "output": 120000,
           "total": 360000,
-          "currency": "USD"
+          "currency": "USD",
+          "pricing_source": "curated"
         },
         "stance": null,
         "group": null,
@@ -354,7 +358,8 @@
           "cached": 64000,
           "output": 120000,
           "total": 360000,
-          "currency": "USD"
+          "currency": "USD",
+          "pricing_source": "curated"
         },
         "stance": null,
         "group": null,
@@ -388,7 +393,8 @@
       "cached": 64000,
       "output": 120000,
       "total": 360000,
-      "currency": "USD"
+      "currency": "USD",
+      "pricing_source": "curated"
     },
     "debate": null,
     "debateRounds": [],

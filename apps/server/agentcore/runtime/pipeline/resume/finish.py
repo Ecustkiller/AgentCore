@@ -31,6 +31,7 @@ def finish_resume_turn(
     sink: EventSink,
     vision_cost_runs: list | None = None,
     audit_drops: int = 0,
+    pre_pause_reasoning: str = "",
 ) -> dict:
     """Bill + close a resumed turn whose CEO loop ran (plan_review / ask_user continue).
 
@@ -43,9 +44,12 @@ def finish_resume_turn(
     §九.4 Gap ②), collected off the shared ``ToolContext.cost_sink``. Folded into
     ``cost_runs`` like the delegate rows; vision spend has no usage that rolls
     into ``turn_usage`` (a separate model, billed only as its own priced row).
+
+    ``pre_pause_reasoning`` joins ahead of the live captain reasoning (G3) so
+    multi-cycle pauses keep ``join(join(r1, r2), live)`` continuity.
     """
     final_content = join_segments(pre_pause_content, captain_state.content)
-    final_reasoning = captain_state.reasoning
+    final_reasoning = join_segments(pre_pause_reasoning, captain_state.reasoning or "") or None
     rounds = captain_state.rounds
     turn_usage = (
         TokenUsage.from_usage_dict(captain_state.usage)
@@ -116,7 +120,12 @@ def finish_resume_turn(
 
 
 def finish_terminal_resume(
-    *, message_id: str, pre_pause_content: str, closing: str, sink: EventSink
+    *,
+    message_id: str,
+    pre_pause_content: str,
+    closing: str,
+    sink: EventSink,
+    pre_pause_reasoning: str = "",
 ) -> dict:
     """Close a resumed ask_user turn that the user STOPPED (结构化挂起 2b terminal).
 
@@ -126,6 +135,9 @@ def finish_terminal_resume(
     stop runs nothing new, so this turn bills nothing — consistent with the「paused
     before persist = never billed」model. The seeded journal (checkpoint_required) +
     the emitted ``checkpoint_resolved`` persist so a reload replays the settled card.
+
+    ``pre_pause_reasoning`` is preserved as the turn's reasoning (no live segment to
+    join — G3 terminal path).
     """
     finish = FinishReason.END_TURN
     sink.emit(message_end(finish, rounds=0))
@@ -133,7 +145,7 @@ def finish_terminal_resume(
     return {
         "message_id": message_id,
         "content": join_segments(pre_pause_content, closing),
-        "reasoning_content": None,
+        "reasoning_content": pre_pause_reasoning or None,
         "input_tokens": 0,
         "output_tokens": 0,
         "reasoning_tokens": 0,

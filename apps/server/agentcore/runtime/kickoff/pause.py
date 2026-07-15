@@ -107,6 +107,8 @@ async def persist_kickoff(
         required_event=required_event,
         build_frame=build_frame,
         saver=host._suspension_saver,
+        sink=host._sink,
+        suspension_kind="team_preview",
     )
 
 

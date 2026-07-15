@@ -34,6 +34,7 @@ const OP_BY_TOOL: Record<string, FileOp> = {
   str_replace: "edit",
   file_delete: "delete",
   file_move: "move",
+  file_copy: "write",
 };
 
 function basename(path: string): string {

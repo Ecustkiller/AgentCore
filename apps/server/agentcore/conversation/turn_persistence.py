@@ -5,6 +5,8 @@ keeps the historical import paths and host-side helpers (open-pause detection,
 salvage scheduling) stable for turn_runner / turns / tests.
 """
 
+from typing import Any
+
 from agentcore.config import settings
 from agentcore.conversation.background import spawn_background
 from agentcore.conversation.store import (
@@ -16,7 +18,9 @@ from agentcore.conversation.store import (
 )
 from agentcore.core.logging import get_logger
 from agentcore.llm.resolve import LLMCredentials
+from agentcore.runtime.engine import join_segments
 from agentcore.runtime.events import EventSink
+from agentcore.runtime.facts import current_fact_log, pre_pause_from_journal
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
@@ -27,6 +31,7 @@ __all__ = [
     "MESSAGE_STATUS_FAILED",
     "MESSAGE_STATUS_INCOMPLETE",
     "MESSAGE_STATUS_RUNNING",
+    "compose_salvage_content",
     "create_assistant_placeholder",
     "has_open_durable_pause",
     "persist_incomplete_turn",
@@ -118,12 +123,32 @@ async def persist_incomplete_turn(
     )
 
 
+def compose_salvage_content(
+    live: str,
+    journal_entries: list[dict[str, Any]] | None = None,
+) -> str:
+    """Join turn_paused pre_pause with live streamed content for cancel salvage (G8).
+
+    ``journal_entries`` is preferred (hang-frame facts or an explicit snapshot). When
+    omitted, the ambient :data:`current_fact_log` is used. Journals without
+    ``turn_paused`` yield an empty base — same as legacy live-only salvage.
+    """
+    entries = journal_entries
+    if entries is None:
+        log = current_fact_log.get()
+        entries = log.entries() if log is not None else None
+    snap = pre_pause_from_journal(entries)
+    pre = (snap.content if snap is not None else "") or ""
+    return join_segments(pre, live or "")
+
+
 def salvage_incomplete_turn(
     *,
     sink: EventSink,
     conversation_id: str,
     trace_id: str,
     message_id: str | None = None,
+    journal_entries: list[dict[str, Any]] | None = None,
 ) -> None:
     """On a turn cancel, schedule saving its streamed reply + finished work as one message.
 
@@ -131,13 +156,17 @@ def salvage_incomplete_turn(
     streamed some reply text — so a cancelled pure-text answer (no team/tool journal surface)
     is no longer silently dropped. Skips a turn parked at an unresolved durable checkpoint
     (its paused frame is the record).
+
+    ``journal_entries`` (optional): hang-frame §8.3 facts so G8 can prepend
+    ``turn_paused.content`` when the ambient fact log is already unbound (resume
+    pipeline ``finally``). Omit on fresh turns — legacy live-only behaviour.
     """
     if not settings.incomplete_turn_persist_enabled:
         return
     if not message_id:
         return
     journal = sink.execution_journal()
-    content = sink.streamed_content()
+    content = compose_salvage_content(sink.streamed_content(), journal_entries)
     if not journal and not content.strip():
         return
     suspend_frames = settings.structured_suspension_persist_enabled

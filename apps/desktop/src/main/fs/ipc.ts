@@ -154,12 +154,18 @@ export function registerFsIpc(): void {
     await saveRoots();
   });
 
-  // W3: session-scoped read-only root — not persisted; bound to conversationId.
+  // W3/P1: session-scoped root (readonly | organize) — not persisted; bound to conversationId.
   ipcMain.handle(
     FS_CHANNELS.grantSessionReadonlyRoot,
     async (_e, p: unknown): Promise<FsRoot | null> => {
       const args = requireStringFields(p, ["conversationId"]);
       if (!args) return null;
+      const modeRaw =
+        p && typeof p === "object" && "mode" in p
+          ? String((p as { mode?: unknown }).mode ?? "readonly")
+          : "readonly";
+      const mode: "readonly" | "organize" =
+        modeRaw === "organize" ? "organize" : "readonly";
       await ensureReady();
       const win =
         BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
@@ -190,16 +196,22 @@ export function registerFsIpc(): void {
         n += 1;
       }
 
-      // Reuse same-conversation session root for the same abs path.
+      // Same abs path: upgrade/downgrade mode (re-auth card already shown by client).
       const same = listSessionRoots(args.conversationId).find(
         (r) => r.absPath === absPath,
       );
       if (same) {
+        setRoot({
+          ...same,
+          mode,
+          readonly: mode === "readonly",
+        });
         return {
           id: same.id,
           name: same.name,
           alias: same.alias,
-          readonly: true,
+          mode,
+          readonly: mode === "readonly",
           sessionOnly: true,
         };
       }
@@ -211,11 +223,19 @@ export function registerFsIpc(): void {
         absPath,
         sessionOnly: true,
         conversationId: args.conversationId,
-        readonly: true,
+        mode,
+        readonly: mode === "readonly",
         alias,
       });
       // Not persisted — sessionOnly filtered out of saveRoots.
-      return { id, name, alias, readonly: true, sessionOnly: true };
+      return {
+        id,
+        name,
+        alias,
+        mode,
+        readonly: mode === "readonly",
+        sessionOnly: true,
+      };
     },
   );
 
@@ -229,7 +249,8 @@ export function registerFsIpc(): void {
         id: r.id,
         name: r.name,
         alias: r.alias,
-        readonly: true,
+        mode: r.mode ?? (r.readonly ? "readonly" : undefined),
+        readonly: r.readonly ?? r.mode === "readonly",
         sessionOnly: true,
       }));
     },

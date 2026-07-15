@@ -408,15 +408,21 @@ async def resume_chat(
 ) -> None:
     """Continue a turn paused at a plan_review / ask_user checkpoint (结构化挂起 2b resume).
 
-    The route already claimed (DELETE) the ``paused_turns`` row. On resume failure /
-    cancel the frame is re-upserted so the user can retry — sidecar ``rollback_claim``
-    parity for the cloud path. Success and a fresh re-pause (new frame already saved)
-    leave the claim deleted.
+    The route prewrote the ``*_resolved`` settlement AND claimed (DELETE) the
+    ``paused_turns`` row before dispatching here, so settlement is durable on entry.
+    Per D1 (sidecar parity) a durable settlement is never rolled back: cancel / failure
+    after this point projects as interrupted_after_decision, NOT a frame restore —
+    restoring would resurrect the already-authorized decision card (e.g. the team_preview
+    kickoff card reappearing after 停止 lands mid-continuation).
     """
     conversation_id = suspension.conversation_id
     user_id = suspension.user_id
-    # Default: restore the claimed frame. Cleared only on success / re-pause.
-    restore_frame = True
+    # D1 (sidecar parity): the cloud /resume route prewrites the ``*_resolved`` settlement
+    # AND claims the frame BEFORE dispatching here, so settlement is durable on entry. A
+    # durable settlement is never rolled back — cancel / failure after this point is
+    # interrupted_after_decision, not a frame restore (restoring would resurrect the
+    # already-authorized card, e.g. the team_preview kickoff reappearing after 停止 mid-run).
+    settlement_durable = True
     try:
         async with async_session_factory() as session:
             conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
@@ -534,11 +540,14 @@ async def resume_chat(
                                 x_client_platform=x_client_platform,
                             )
                     except asyncio.CancelledError:
+                        # G8: pipeline finally already unbound ambient fact log —
+                        # pass hang-frame entries so salvage can join pre_pause.
                         salvage_incomplete_turn(
                             sink=sink,
                             conversation_id=conversation_id,
                             trace_id=trace_id,
                             message_id=suspension.message_id,
+                            journal_entries=suspension.journal_entries,
                         )
                         raise
                     finish = result.get("finish_reason")
@@ -557,13 +566,6 @@ async def resume_chat(
                         duration_ms=duration_ms,
                         error=result.get("error"),
                     )
-                    # Decide restore BEFORE persist: a successful / re-paused pipeline must
-                    # not re-upsert the old frame even if the post-turn persist raises.
-                    if finish_value == FinishReason.PAUSED.value or (
-                        not result.get("error") and finish_value != FinishReason.ERROR.value
-                    ):
-                        restore_frame = False
-
                     # Persist INSIDE the trace scope (same as run_and_persist) so the
                     # resumed turn's tail (cost.recorded / obs.turn_spans / metrics)
                     # inherits trace_id / turn_id instead of losing the join key.
@@ -602,7 +604,10 @@ async def resume_chat(
             sink.emit(error_event(code, message, context=err_ctx))
             sink.emit(message_end(FinishReason.ERROR))
     finally:
-        if restore_frame:
+        # Pre-settlement failures would re-upsert the frame for retry; the cloud route
+        # guarantees a durable settlement before dispatch (D1), so this stays dormant —
+        # a post-decision cancel/error is interrupted_after_decision, never a frame revive.
+        if not settlement_durable:
             await restore_paused_turn(suspension)
         if not sink._closed:
             sink.close()

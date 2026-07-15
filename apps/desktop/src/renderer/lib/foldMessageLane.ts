@@ -4,7 +4,10 @@
 
 import {
   INTERACTION_BY_KIND,
+  type InteractionKind,
   type TimelineMarkerDef,
+  defFromRequiredEvent,
+  wireFor,
 } from "@/stores/interactions/registry";
 import type {
   Citation,
@@ -169,6 +172,16 @@ function appendMarkerStep(
   }
 }
 
+/** Registry invariant: these fixed-kind fold helpers only exist for kinds that
+ * declare a timeline marker — fail fast if the registry row ever loses it. */
+function requiredTimeline(kind: InteractionKind): TimelineMarkerDef {
+  const def = INTERACTION_BY_KIND[kind].timeline;
+  if (!def) {
+    throw new Error(`interaction kind "${kind}" has no timeline marker def`);
+  }
+  return def;
+}
+
 /** Fold a `checkpoint_required` into the timeline as a positional `checkpoint` marker.
  * Also absorbs same-round CEO prose into the card (mirrors backend ``content_reset`` on
  * a successful blocking ``ask_user``) so streamed text never duplicates the card. */
@@ -178,7 +191,7 @@ export function foldCheckpointMarker(
 ): MessageLaneState {
   return foldInteractionTimelineMarker(
     state,
-    INTERACTION_BY_KIND.ask_user.timeline!,
+    requiredTimeline("ask_user"),
     checkpointId,
   );
 }
@@ -190,7 +203,7 @@ export function foldAskMarker(
 ): MessageLaneState {
   return foldInteractionTimelineMarker(
     state,
-    INTERACTION_BY_KIND.question_posted.timeline!,
+    requiredTimeline("question_posted"),
     askId,
   );
 }
@@ -202,7 +215,7 @@ export function foldPlanReviewMarker(
 ): MessageLaneState {
   return foldInteractionTimelineMarker(
     state,
-    INTERACTION_BY_KIND.plan_review.timeline!,
+    requiredTimeline("plan_review"),
     checkpointId,
   );
 }
@@ -214,7 +227,38 @@ export function foldTeamPreviewMarker(
 ): MessageLaneState {
   return foldInteractionTimelineMarker(
     state,
-    INTERACTION_BY_KIND.team_preview.timeline!,
+    requiredTimeline("team_preview"),
     checkpointId,
   );
+}
+
+/** Reload 补标记（时间线一期）: backfill every positional marker the journal implies
+ * into a persisted `process[]` — `run_plan` → `team`，`*_required` → registry marker
+ * (insertBeforeTeam 语义由 appendTeamPreviewStep 内建)。保证不变量「有交互卡必有时间线
+ * 标记」在重载后成立（底部堆叠回退已废除，缺标记的卡会整段消失）。
+ *
+ * 纯补标记：绝不吞正文 —— absorbTrailingContent 只属于 live 时刻（事件到来时尾部
+ * content 是同回合被吞的草稿）；重载的 process 是终态，resolved 后 CEO 的收尾正文
+ * 必须保留。全部 append* 自带 dedup no-op，后端已写标记时原样返回。 */
+export function ensureTimelineMarkersFromJournal(
+  process: ProcessStep[] | undefined,
+  events: ReadonlyArray<{ type: string; payload?: unknown }>,
+): ProcessStep[] {
+  let steps = process ?? [];
+  for (const ev of events) {
+    const payload = (ev.payload ?? {}) as Record<string, unknown>;
+    if (ev.type === "run_plan") {
+      const executionId = payload.execution_id;
+      if (typeof executionId === "string" && executionId) {
+        steps = appendTeamStep(steps, executionId);
+      }
+      continue;
+    }
+    const def = defFromRequiredEvent(ev.type);
+    if (!def?.timeline) continue;
+    const id = payload[wireFor(def.kind).idField];
+    if (typeof id !== "string" || !id) continue;
+    steps = appendMarkerStep(steps, def.timeline, id);
+  }
+  return steps;
 }

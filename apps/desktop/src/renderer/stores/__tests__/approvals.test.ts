@@ -106,14 +106,17 @@ const card = (over: Partial<ApprovalView> = {}): ApprovalView => ({
 });
 
 describe("autoApproveSiblings (本轮内都允许 batch放行)", () => {
-  it("FILE_OP_TOOLS matches backend approval_class_tool_names (五文件工具 ∪ git)", () => {
+  it("FILE_OP_TOOLS matches backend approval_class_tool_names (文件改动类 ∪ git)", () => {
     expect([...FILE_OP_TOOLS].sort()).toEqual(
       [
         "file_append",
+        "file_batch",
+        "file_copy",
         "file_delete",
         "file_move",
         "file_write",
         "git",
+        "mkdir",
         "str_replace",
       ].sort(),
     );

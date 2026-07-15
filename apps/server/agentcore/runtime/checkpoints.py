@@ -21,7 +21,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal
 
-AskCheckpointIntent = Literal["kickoff", "decision", "proposal_pick", "risk_ack"]
+AskCheckpointIntent = Literal[
+    "kickoff", "decision", "proposal_pick", "risk_ack", "organize_plan"
+]
 
 
 class CheckpointDecision(StrEnum):

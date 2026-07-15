@@ -280,11 +280,24 @@ class WorkspaceBackend(Protocol):
         """
         ...
 
-    async def delete(self, path: str) -> None:
+    async def delete(self, path: str, *, permanent: bool = False) -> None:
         """Delete ``path`` (a file, or a directory and its contents).
 
-        Refuses to delete the workspace root itself. Raises ``OutsideWorkspace``
-        / ``PathNotFound`` / ``WorkspaceIOError``.
+        Default is reversible: local Electron channels move to the OS recycle
+        bin; cloud / sidecar backends move into ``.agentcore/trash/`` with
+        restore metadata. ``permanent=True`` hard-deletes. Refuses to delete
+        the workspace root itself. Raises ``OutsideWorkspace`` /
+        ``PathNotFound`` / ``WorkspaceIOError``.
+        """
+        ...
+
+    async def copy(self, src: str, dst: str) -> None:
+        """Copy file or directory tree ``src`` to ``dst`` (creating parents).
+
+        Supports binary files and recursive directory trees. Refuses to copy
+        the root, overwrite an existing ``dst``, or copy a directory into
+        itself / a descendant. Raises ``OutsideWorkspace`` / ``PathNotFound`` /
+        ``AlreadyExists`` / ``WorkspaceIOError``.
         """
         ...
 

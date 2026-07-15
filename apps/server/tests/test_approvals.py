@@ -267,7 +267,18 @@ async def test_approve_always_files_grants_whole_class():
     call — while code_execute, outside the class, stays separately gated."""
     reg = InteractionRegistry()
     sink = EventSink()
-    file_ops = frozenset({"file_write", "file_append", "str_replace", "file_delete", "file_move"})
+    file_ops = frozenset(
+        {
+            "file_write",
+            "file_append",
+            "str_replace",
+            "file_delete",
+            "file_move",
+            "file_copy",
+            "mkdir",
+            "file_batch",
+        }
+    )
     gate = ApprovalGate(
         sink=sink,
         conversation_id="conv-1",

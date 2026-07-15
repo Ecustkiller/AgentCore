@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import Counter, deque
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -302,6 +303,24 @@ class LoopController:
     def mark_audit_gate_fired(self) -> None:
         """Latch the one-shot audit-gate so it cannot fire again this run."""
         self._audit_gate_fired = True
+
+    def export_seed(self) -> dict[str, bool | int]:
+        """JSON-safe snapshot of the five cross-suspension latches (turn_paused.controller)."""
+        return {
+            "post_delegate": self._post_delegate,
+            "delegate_count": self._delegate_count,
+            "team_gate_fired": self._team_gate_fired,
+            "audit_gate_fired": self._audit_gate_fired,
+            "first_batch_substantial": self._first_batch_substantial,
+        }
+
+    def apply_seed(self, seed: Mapping[str, Any]) -> None:
+        """Restore cross-suspension latches from a prior :meth:`export_seed` snapshot."""
+        self._post_delegate = bool(seed.get("post_delegate", False))
+        self._delegate_count = int(seed.get("delegate_count", 0) or 0)
+        self._team_gate_fired = bool(seed.get("team_gate_fired", False))
+        self._audit_gate_fired = bool(seed.get("audit_gate_fired", False))
+        self._first_batch_substantial = bool(seed.get("first_batch_substantial", False))
 
     def post_delegate_check(self, tool_names: set[str]) -> str | None:
         """Check if CEO is doing investigation work after delegating.

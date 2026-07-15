@@ -1,8 +1,7 @@
-"""W3 session-scoped read-only external directory grants.
+"""W3/P1 session-scoped external directory grants (readonly | organize).
 
 Separate from workspace binding — grants add ``external/<alias>/`` mounts for
-file_list / file_read / grep within one conversation; they never replace the
-bound workspace root.
+file tools within one conversation; they never replace the bound workspace root.
 """
 
 from fastapi import APIRouter, Depends, Query
@@ -25,12 +24,13 @@ from ._helpers import _get_owned_conversation
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
-def _item(alias: str, root_id: str, label: str) -> ExternalGrantItem:
+def _item(m) -> ExternalGrantItem:
     return ExternalGrantItem(
-        alias=alias,
-        root_id=root_id,
-        label=label,
-        namespace=external_ns(alias),
+        alias=m.alias,
+        root_id=m.root_id,
+        label=m.label,
+        namespace=external_ns(m.alias),
+        mode=m.mode,
     )
 
 
@@ -45,10 +45,7 @@ async def list_external_grants(
 ):
     await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     return ExternalGrantListResponse(
-        data=[
-            _item(m.alias, m.root_id, m.label)
-            for m in grant_store.list_grants(conversation_id)
-        ]
+        data=[_item(m) for m in grant_store.list_grants(conversation_id)]
     )
 
 
@@ -57,23 +54,22 @@ async def list_external_grants(
     response_model=ExternalGrantResponse,
     status_code=201,
 )
-async def grant_external_readonly(
+async def grant_external_folder(
     conversation_id: str,
     body: GrantExternalReadonlyRequest,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
 ):
-    """Register a session read-only mount after the user confirms via folder picker."""
+    """Register a session mount after the user confirms via folder picker."""
     await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     mount = grant_store.add_grant(
         conversation_id,
         root_id=body.root_id,
         label=body.label,
         alias_hint=body.alias_hint,
+        mode=body.mode,
     )
-    return ExternalGrantResponse(
-        grant=_item(mount.alias, mount.root_id, mount.label)
-    )
+    return ExternalGrantResponse(grant=_item(mount))
 
 
 @router.delete(

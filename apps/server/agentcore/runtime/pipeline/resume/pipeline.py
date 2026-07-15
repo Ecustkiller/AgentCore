@@ -29,6 +29,10 @@ from agentcore.runtime.facts import TurnFactLog, current_fact_log
 from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
 from agentcore.runtime.pipeline.resume.finish import finish_resume_turn, finish_terminal_resume
 from agentcore.runtime.pipeline.resume.recover_path import recover_and_rebuild_window
+from agentcore.runtime.pipeline.resume.rehydrate import (
+    mark_controller_after_settle,
+    rehydrate_from_turn_paused,
+)
 from agentcore.runtime.pipeline.resume.wire import restamp_workspace_facts, wire_resume_turn
 from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset  # noqa: F401 — wire seam
 from agentcore.runtime.runs import RunKind, RunPhase, RunSpec, build_captain_resumer
@@ -39,6 +43,7 @@ from agentcore.runtime.suspension import (
     SuspensionDeleter,
     SuspensionSaver,
     TurnSuspension,
+    turn_citations,
     turn_history,
 )
 from agentcore.workspace.protocol import WorkspaceBackend
@@ -180,6 +185,8 @@ async def resume_chat_pipeline(
     execution_id_token = None
     bound_execution_id: str | None = None
     pre_pause = ""
+    pre_pause_reasoning = ""
+    citations_token = None
     try:
         wired = await wire_resume_turn(
             suspension=suspension,
@@ -208,6 +215,14 @@ async def resume_chat_pipeline(
         # checkpoint, then settle the pause.
         sink.seed_journal(suspension.journal)
 
+        # G1–G5 single-point rehydration from the last ``turn_paused`` (legacy → no-op).
+        hydrated = rehydrate_from_turn_paused(sink=sink, suspension=suspension)
+        pre_pause_reasoning = hydrated.pre_pause_reasoning
+        citations: list[dict] = list(hydrated.citations)
+        # G2 dual落点: citation_sink list + turn_citations contextvar (same list).
+        citations_token = turn_citations.set(citations)
+        controller_seed = hydrated.controller_seed
+
         recovered = await recover_and_rebuild_window(
             suspension=suspension,
             decision=decision,
@@ -219,10 +234,20 @@ async def resume_chat_pipeline(
             debate_tool=wired.debate_tool,
             execution_id=wired.base_tool_context.execution_id,
             captain_run_id=captain_run_id,
+            pre_pause_override=hydrated.pre_pause_content,
         )
         pre_pause = recovered.pre_pause
         settled = recovered.settled
         messages = recovered.messages
+
+        # G6: resume-segment content_reset must reinject the authoritative pre_pause
+        # into the client bubble (display-only). Engine CEO on_reset stays None.
+        if pre_pause:
+            sink.set_content_reset_reinjection(pre_pause + "\n\n")
+
+        # G5 settle 侧补标: team_preview / plan_review paused before tool return.
+        if hydrated.from_turn_paused:
+            controller_seed = mark_controller_after_settle(controller_seed, suspension)
 
         # ask_user stop: the closing note IS the reply (terminal effect) — finish
         # without another CEO round, mirroring the engine's terminal-effect branch.
@@ -234,6 +259,7 @@ async def resume_chat_pipeline(
                 pre_pause_content=pre_pause,
                 closing=settled.terminal_text,
                 sink=sink,
+                pre_pause_reasoning=pre_pause_reasoning,
             )
             await audit_recorder.flush()
             if roster_writer is not None:
@@ -246,7 +272,6 @@ async def resume_chat_pipeline(
 
         profile = apply_captain_max_rounds(profiles.get("chat"))
         turn_model = profiles.model_for("chat")
-        citations: list[dict] = []
         captain_spec = RunSpec(
             run_id=captain_run_id,
             agent_id=captain_run_id,
@@ -267,6 +292,7 @@ async def resume_chat_pipeline(
             citation_sink=citations,
             approval_gate=wired.approval_gate,
             supports_tools=llm_supports_tools,
+            controller_seed=controller_seed,
         )
         captain_state = await run_captain(captain_spec, messages)
 
@@ -334,6 +360,7 @@ async def resume_chat_pipeline(
             sink=sink,
             vision_cost_runs=wired.vision_cost_sink,
             audit_drops=audit_recorder.drops,
+            pre_pause_reasoning=pre_pause_reasoning,
         )
         # Drain journal → audit projection fully BEFORE 定格 audit_drops (parity with
         # run_chat_pipeline): the finally re-flush would otherwise drop more audit writes
@@ -408,6 +435,8 @@ async def resume_chat_pipeline(
                 await roster_writer.flush()
         current_audit_recorder.reset(audit_token)
         turn_history.reset(history_token)
+        if citations_token is not None:
+            turn_citations.reset(citations_token)
         if execution_id_token is not None:
             from agentcore.runtime.coordination.session import (
                 clear_active_coordination,

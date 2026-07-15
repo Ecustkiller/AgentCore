@@ -82,6 +82,8 @@ async def persist_suspension(
         required_event=required_event,
         build_frame=build_frame,
         saver=tool.suspension_saver,  # type: ignore[arg-type]
+        sink=tool.sink,
+        suspension_kind="ask_user",
     )
 
 

@@ -161,6 +161,106 @@ def test_process_absent_key_not_emitted_on_projection():
     assert projected == runs
 
 
+# --- G1 挂起中冷启动重载：turn_paused process 回退 --------------------------------
+#
+# Pause finalize skips writing process_* / run_process_* tails. On reload while still
+# paused, runs_from_entries falls back to the last turn_paused snapshot's timelines.
+
+
+def test_paused_reload_projects_process_from_turn_paused():
+    # No process_* entries — typical mid-pause journal — but turn_paused carries the
+    # pre-pause timeline + checkpoint marker. Projection must surface both.
+    entries = [
+        {"kind": "turn_started", "payload": {"user_message": "go"}, "ts": None},
+        {
+            "kind": "checkpoint_required",
+            "payload": {"checkpoint_id": "cp-1", "prompt": "确认？"},
+            "ts": "t0",
+        },
+        {
+            "kind": "turn_paused",
+            "payload": {
+                "checkpoint_id": "cp-1",
+                "suspension_kind": "ask_user",
+                "content": "气泡",
+                "reasoning": "想过",
+                "process": [
+                    {"kind": "reasoning", "text": "想过"},
+                    {"kind": "tool", "id": "c1", "tool_name": "read_file", "status": "success"},
+                    {"kind": "checkpoint", "checkpoint_id": "cp-1"},
+                ],
+                "run_processes": {
+                    "w1": [{"kind": "reasoning", "text": "worker 想"}],
+                },
+                "citations": [],
+                "controller": {},
+            },
+            "ts": "t1",
+        },
+        {"kind": "turn_end", "payload": {"finish_reason": "paused"}, "ts": None},
+    ]
+    runs = runs_from_entries(entries)
+    assert runs is not None
+    assert runs["finish_reason"] == "paused"
+    assert [e["type"] for e in runs["events"]] == ["checkpoint_required"]
+    assert runs["process"] == [
+        {"kind": "reasoning", "text": "想过"},
+        {"kind": "tool", "id": "c1", "tool_name": "read_file", "status": "success"},
+        {"kind": "checkpoint", "checkpoint_id": "cp-1"},
+    ]
+    assert runs["run_processes"] == {"w1": [{"kind": "reasoning", "text": "worker 想"}]}
+    # turn_paused itself never leaks into events.
+    assert all(e["type"] != "turn_paused" for e in runs["events"])
+
+
+def test_process_star_entries_prefer_over_turn_paused_fallback():
+    # Completed / resumed turns write process_* — those win; snapshot is ignored.
+    entries = [
+        {
+            "kind": "process_reasoning",
+            "payload": {"kind": "reasoning", "text": "落库时间线"},
+            "ts": None,
+        },
+        {
+            "kind": "run_process_reasoning",
+            "payload": {"run_id": "w1", "kind": "reasoning", "text": "落库 worker"},
+            "ts": None,
+        },
+        {
+            "kind": "turn_paused",
+            "payload": {
+                "checkpoint_id": "cp-old",
+                "suspension_kind": "ask_user",
+                "process": [{"kind": "reasoning", "text": "快照应被忽略"}],
+                "run_processes": {"w1": [{"kind": "reasoning", "text": "快照 worker 忽略"}]},
+            },
+            "ts": "t0",
+        },
+        {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
+    ]
+    runs = runs_from_entries(entries)
+    assert runs["process"] == [{"kind": "reasoning", "text": "落库时间线"}]
+    assert runs["run_processes"] == {"w1": [{"kind": "reasoning", "text": "落库 worker"}]}
+
+
+def test_legacy_paused_journal_without_turn_paused_keeps_empty_process():
+    # Old frames: surface card + paused finish, no turn_paused → no invented timeline.
+    entries = [
+        {
+            "kind": "checkpoint_required",
+            "payload": {"checkpoint_id": "cp-legacy"},
+            "ts": "t0",
+        },
+        {"kind": "turn_end", "payload": {"finish_reason": "paused"}, "ts": None},
+    ]
+    runs = runs_from_entries(entries)
+    assert runs is not None
+    assert runs["finish_reason"] == "paused"
+    assert [e["type"] for e in runs["events"]] == ["checkpoint_required"]
+    assert "process" not in runs
+    assert "run_processes" not in runs
+
+
 # --- Execution-sourced journals (§18.3 fact log) --------------------------------
 #
 # Fact-log journals store the full ungated stream plus execution facts. The surface

@@ -283,6 +283,20 @@ def test_skill_teaches_constraint_vs_solution_boundary():
     skill = _TEAM_ORCHESTRATION_ADVANCED
     assert "专业方案" in skill
     assert "填字员" in skill
+    # 审查 / 评估类「指路不代答」：初审线索走便签，不写进 task 替答。
+    assert "seed_notes" in skill and "heads_up" in skill
+    assert "引导性问题" in skill or "风险预判" in skill
+
+
+def test_core_teaches_delegate_point_dont_answer():
+    # 派单「指路不代答」: 仅禁施工图打不到审查类越界——编号关注清单 / 风险预判 /
+    # 引导性问题 / 专业知识代查会把 worker 降成初审扩写器；线索走 seed_notes heads_up。
+    hint = _CEO_CORE_HINT
+    assert "目标·约束·验收" in hint
+    assert "施工图" in hint and "答题纸" in hint
+    assert "风险结论" in hint or "预判" in hint
+    assert "引导性问题" in hint
+    assert "seed_notes" in hint and "heads_up" in hint
 
 
 def test_core_teaches_execution_and_recall_routing():
@@ -308,6 +322,8 @@ def test_core_guides_out_of_workspace_absolute_paths():
     assert "attachments/" in hint
     assert "回形针" in hint or "@" in hint
     assert "grant_readonly_folder" in hint
+    assert "grant_organize_folder" in hint
+    assert "organize_plan" in hint
     assert "external/" in hint
     assert "只读" in hint
 

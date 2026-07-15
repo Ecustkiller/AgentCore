@@ -29,10 +29,12 @@ skip_if:
 ```
 /conversations/:id（单栏聊天区）
   消息流（多 Agent 回合：助手消息内嵌 InlineTeamGraph）+ ApprovalPrompt（工具审批）
-  └ MessageInput（底部固定）
+  └ MessageInput（空草稿态居中 / 会话中底部固定）
 内嵌图状态条「在画布打开」→ 全屏回合详情页（`TurnDetailPage`，路由 `/conversations/:id/turns/:turnId`：协作图 / 辩论室 / 对比平级 tab）
 点图节点 → 右侧 SidePanel 新开该 run 的详情 tab（被动下钻）；面板是一条扁平 tab 栏——固定首位「工作区」tab（文件/快照）+ 按需的 run 详情 tab。右上「侧面板」开关 / Ctrl+I → 显隐（冷启动落「工作区」tab），Ctrl+J → 直达「工作区」tab
 ```
+
+**对话输入框落点（空态居中 / 会话中底栏 · ✅）**：对齐 ChatGPT/Claude——**仅空草稿态**（无消息 ∧ 已有模型接入）把 `MessageInput` 与空态引导（问候语 / starter chips）合成视口中央一块；发出首条消息后以 FLIP 过渡落到对话底栏，之后会话中永远底栏。`needs_key` 空态不居中输入框（中央只留「先连接你的模型」CTA，底栏输入保持原状，避免给用户一个不能用的居中框）。`TurnComposer` 统一核语义不变；画布 `CanvasCommandBar` 与放大态 `TurnDetailPage` 不受影响。→ 见代码 `components/chat/ChatView.tsx`、`hooks/useComposerDockFlip.ts`、`lib/onboarding.ts`（`shouldCenterDraftComposer`）。
 
 **侧栏对话区（IA · 两区混合「方案 B」）**：分上下两区——
 
@@ -98,7 +100,7 @@ skip_if:
 - **模型接入表单单一真相源 `ModelKeyForm`**：首启第二屏与「设置·模型配置」共用同一组件（厂商预设 / Key / Base URL / 默认模型），禁止第二份配置逻辑。
 - **否决强制配完才能进**（form gate 反模式）：跳过后落草稿页 needs_key 空态，仍可自由浏览产品。
 
-**草稿空态三态 `DraftEmptyState`**：无模型接入（`hasModelAccess`=false，免费档生效不算）→「先连接你的模型」+ 主 CTA（重开接入流程）+ 产品手册副链接；有接入（含免费档）∧ 0 对话 →「今天想解决什么问题？」+ 3 枚**首启任务 chips**（内容设计为天然触发多 Agent 分工的真实任务，点击仅填输入框、不自动发送）；老用户 → 维持单句零噪音。
+**草稿空态三态 `DraftEmptyState`**：无模型接入（`hasModelAccess`=false，免费档生效不算）→「先连接你的模型」+ 主 CTA（重开接入流程）+ 产品手册副链接（输入框**不**居中，仍在底栏）；有接入（含免费档）∧ 0 对话 →「今天想解决什么问题？」+ 3 枚**首启任务 chips**（内容设计为天然触发多 Agent 分工的真实任务，点击仅填入**居中**输入框、不自动发送）+ 输入框与引导合成中央块；老用户 → 单句问候 + 居中输入框。发出首条消息后输入框过渡落底（见 §一「对话输入框落点」）。
 
 **免费额度耗尽（429 `FREE_TIER_EXHAUSTED`）**：转化语义而非「等重置」——错误条展示后端文案（「本月免费额度已用完——接入自己的模型即可不限量继续」，后端 `message` 单一来源）+「去配置」CTA 直达模型配置（`errorActionForCode` 按共享 `KEY_CONFIG_ERROR_CODES` 目录分流，两端一致）；既有 `QUOTA_EXCEEDED`（等窗口重置、不给重试）语义不动。Composer 模型角标 `CurrentModelBadge` 在免费档下显「**免费额度**」（绝不显「未配置」、也不把平台 model id 冒充用户配置）。
 
@@ -177,7 +179,7 @@ skip_if:
 
 → 见代码 `components/chat/PlanReviewCard.tsx`；语义见 [`编排器与CEO主Agent.md` §四](/docs/03-AI核心/编排器与CEO主Agent.md)。
 
-**统一团队时间线 · 卡片落点（✅ 已落地）**：上述「某一时刻发生」的交互卡片——检查点 / 非阻塞发问 / 计划复核 / **队员升级求决策**（`EscalationCard`）——不再统一堆在气泡最底部，而是按真实时序内联在回合时间线（`ProcessTimeline`，§一B）上。CEO 自调的检查点 / 发问 / 复核各在其事件处落一枚零宽 `process` 标记（`checkpoint` / `ask` / `plan_review`），卡片在标记槽位回放；**队员升级是执行级时刻**（worker 在团队执行内 `escalate`，并非 CEO 的某一步），故不另发标记，而是随**团队执行槽**渲染——紧贴协作图（`team` 标记）之下、在 CEO 收尾答案**之前**，与它所属的团队执行同处。两形态都落此槽位：阻塞 `pending` = 可拍板卡，非阻塞 `raised` =「边干边上报」轻提示（无需拍板、不计入待决数），后者补齐「折叠协作图后队员上报仍可见」的「升级实时可见」。仅持久化前、无标记的旧回合回退到底部堆叠（绝不双渲染）。**回合级汇总**（引用来源 `SourceCards`、文件产物 `FileArtifactsCard`）仍留答案下方——它们是整轮的参考书目 / 交付物清单、非某一时刻事件（单次文件写入本身已作为工具步内联）。**记忆更新卡 `MemoryUpdateCard`** 更外一层：消息列表级独立时间线项（「这次对话 AI 记了什么」，与气泡平级），跨对话「最近更新」feed 与共享行组件见 [记忆系统 §1.6](/docs/03-AI核心/Agent记忆与知识系统.md)。→ 见代码 `components/chat/message-bubble/ProcessTimeline.tsx`、`AssistantMessage.tsx`、`lib/processTimeline.ts`。
+**统一团队时间线 · 卡片落点（✅ 已落地）**：上述「某一时刻发生」的交互卡片——检查点 / 非阻塞发问 / 计划复核 / **队员升级求决策**（`EscalationCard`）——不再统一堆在气泡最底部，而是按真实时序内联在回合时间线（`ProcessTimeline`，§一B）上。CEO 自调的检查点 / 发问 / 复核各在其事件处落一枚零宽 `process` 标记（`checkpoint` / `ask` / `plan_review`），卡片在标记槽位回放；**队员升级是执行级时刻**（worker 在团队执行内 `escalate`，并非 CEO 的某一步），故不另发标记，而是随**团队执行槽**渲染——紧贴协作图（`team` 标记）之下、在 CEO 收尾答案**之前**，与它所属的团队执行同处。两形态都落此槽位：阻塞 `pending` = 可拍板卡，非阻塞 `raised` =「边干边上报」轻提示（无需拍板、不计入待决数），后者补齐「折叠协作图后队员上报仍可见」的「升级实时可见」。**时间线契约（✅ 时间线一期 · 2026-07-16）**：① 时间线基准 = **用户可感知的出现时刻**——开工卡（`team_preview`）排在协作图（`team` 标记）**之前**（wire 序为 `run_plan` → `team_preview_required`，产品叙事「授权后才开工」优先，标记插入走 `insertBeforeTeam`）；② 交互卡查询键 = **投影键**（`serverMessageId ?? id`，`assistantProjectionId`），与 SSE / journal 写入键一致——用本地 UUID 查询会静默丢卡；③ 不变量「**有交互卡必有时间线标记**」：live 由 SSE 盖章、reload 由 journal 补标记（`ensureTimelineMarkersFromJournal`，纯补位、绝不吞正文），**底部堆叠回退与无 `team` 标记的图兜底均已废除**（开发期无旧数据兼容负担）；④ 时间线行 React key 与持久化折叠键均为**稳定标识**（标记按自身 id、文本行按同类序数，`timelineNodeKeys`），中段插入不再引发下标位移重挂载。→ 二期（升级卡按各自时刻落标记、热审批/委派授权 resolved 留痕进时间线，需 registry/协议契约扩展）：见 [06-规划/统一时间线二期](/docs/06-规划/统一时间线二期.md)。**回合级汇总**（引用来源 `SourceCards`、文件产物 `FileArtifactsCard`）仍留答案下方——它们是整轮的参考书目 / 交付物清单、非某一时刻事件（单次文件写入本身已作为工具步内联）。**记忆更新卡 `MemoryUpdateCard`** 更外一层：消息列表级独立时间线项（「这次对话 AI 记了什么」，与气泡平级），跨对话「最近更新」feed 与共享行组件见 [记忆系统 §1.6](/docs/03-AI核心/Agent记忆与知识系统.md)。→ 见代码 `components/chat/message-bubble/ProcessTimeline.tsx`、`AssistantMessage.tsx`、`lib/processTimeline.ts`。
 
 **续跑卡片 `ResumePrompt`（✅ 已落地 · 结构化挂起的常规且唯一可操作面，不限断连）**：所有 live 结构化挂起（`ask_user` / `plan_review` / `team_preview`）的可操作面都由它承载，渲染在**输入框上方决策区**（内容同 `PlanReviewCard` / `AskUserCard` / `TeamPreviewCard`）。`plan_review`：**继续 / 调整 / 停止**；开工卡 delegate：**授权并开工（可带嘱咐）/ 停止**；debate：**授权开赛（可带开赛嘱咐）/ 停止**（嘱咐 = CONTINUE+note → 首轮全场插话；旧「调整=改辩题」已撤，换辩题走停止后对 CEO 重说）→ `POST …/messages/{mid}/resume` 走 SSE 续跑（断连 / 重启后同样在此恢复）。
 

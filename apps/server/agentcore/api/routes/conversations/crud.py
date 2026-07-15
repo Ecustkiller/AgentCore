@@ -288,10 +288,12 @@ async def delete_conversation(
     # kill its read-only links so a stale snapshot can't outlive it. Owner already
     # proven by the soft_delete above, so a blanket per-conversation revoke is safe.
     await share_repo.revoke_all_for_conversation(conversation_id)
-    # W3: drop session read-only external grants (in-process; desktop clears roots too).
-    from agentcore.workspace import grant_store
+    # W3/P1: drop session external grants + organize plan/journal.
+    from agentcore.workspace import grant_store, organize_journal, organize_plan_store
 
     grant_store.clear_conversation(conversation_id)
+    organize_plan_store.clear_conversation(conversation_id)
+    organize_journal.clear_conversation(conversation_id)
     return StatusResponse()
 
 

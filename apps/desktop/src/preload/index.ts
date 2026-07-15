@@ -64,9 +64,10 @@ const fsApi: FsApi = {
   listRoots: () => ipcRenderer.invoke(FS_CHANNELS.listRoots),
   removeRoot: (rootId) =>
     ipcRenderer.invoke(FS_CHANNELS.removeRoot, { rootId }),
-  grantSessionReadonlyRoot: (conversationId) =>
+  grantSessionReadonlyRoot: (conversationId, mode) =>
     ipcRenderer.invoke(FS_CHANNELS.grantSessionReadonlyRoot, {
       conversationId,
+      mode: mode ?? "readonly",
     }),
   listSessionReadonlyRoots: (conversationId) =>
     ipcRenderer.invoke(FS_CHANNELS.listSessionReadonlyRoots, {

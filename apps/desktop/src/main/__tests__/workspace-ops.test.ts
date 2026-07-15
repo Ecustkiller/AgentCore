@@ -20,6 +20,11 @@ vi.mock("electron", () => ({
   dialog: {},
   ipcMain: { handle: vi.fn() },
   BrowserWindow: { getFocusedWindow: () => null, getAllWindows: () => [] },
+  shell: {
+    trashItem: async (p: string) => {
+      await rm(p, { recursive: true, force: true });
+    },
+  },
 }));
 
 import type { WorkspaceOpResult } from "@shared/ipc-contract";
@@ -109,6 +114,33 @@ describe("executeWorkspaceOp (本地工作区写类 op，P2b)", () => {
     expect((await run("delete", { path: "d/f.txt" })).ok).toBe(true);
     expect((await run("delete", { path: "d" })).ok).toBe(true);
     expect(errOf(await run("delete", { path: "ghost" })).kind).toBe(
+      "PathNotFound",
+    );
+  });
+
+  it("copy duplicates a file and a directory tree without clobber", async () => {
+    await run("write", { path: "src.txt", content: "data" });
+    expect(
+      (await run("copy", { src: "src.txt", dst: "nested/dst.txt" })).ok,
+    ).toBe(true);
+    expect(await readFile(join(dir, "src.txt"), "utf-8")).toBe("data");
+    expect(await readFile(join(dir, "nested/dst.txt"), "utf-8")).toBe("data");
+    expect(
+      errOf(await run("copy", { src: "src.txt", dst: "nested/dst.txt" })).kind,
+    ).toBe("AlreadyExists");
+
+    await run("mkdir", { path: "tree/a" });
+    await run("write", { path: "tree/a/b.txt", content: "b" });
+    expect((await run("copy", { src: "tree", dst: "tree2" })).ok).toBe(true);
+    expect(await readFile(join(dir, "tree2/a/b.txt"), "utf-8")).toBe("b");
+  });
+
+  it("permanent delete hard-removes; default delete leaves workspace via trash", async () => {
+    await run("write", { path: "hard.txt", content: "x" });
+    expect(
+      (await run("delete", { path: "hard.txt", permanent: true })).ok,
+    ).toBe(true);
+    expect(errOf(await run("read", { path: "hard.txt" })).kind).toBe(
       "PathNotFound",
     );
   });

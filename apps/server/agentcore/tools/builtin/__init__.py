@@ -11,11 +11,14 @@ from agentcore.tools.builtin.desktop_notify import DesktopNotifyTool
 from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.builtin.file_ops import (
     FileAppendTool,
+    FileBatchTool,
+    FileCopyTool,
     FileDeleteTool,
     FileListTool,
     FileMoveTool,
     FileReadTool,
     FileWriteTool,
+    MkdirTool,
     StrReplaceTool,
 )
 from agentcore.tools.builtin.git_ops import GitTool
@@ -82,6 +85,9 @@ def build_builtin_registry(
     registry.register(FileListTool())
     registry.register(FileDeleteTool())
     registry.register(FileMoveTool())
+    registry.register(FileCopyTool())
+    registry.register(MkdirTool())
+    registry.register(FileBatchTool())
     registry.register(GrepTool())
     registry.register(CodeSearchTool())
     registry.register(GitTool())
@@ -152,9 +158,9 @@ def build_ceo_tool_registry() -> ToolRegistry:
     The CEO is a coordinator — it *looks* (web_search, read_url, file_read,
     file_list, grep, code_search) and answers simple requests directly, but it holds NONE of
     the production / mutation tools (file_write, file_append, str_replace, file_delete,
-    file_move, code_execute). Any work that produces or changes an artifact is
-    handed to a worker via ``delegate``; workers carry the FULL toolset
-    (``build_builtin_registry``).
+    file_move, file_copy, mkdir, file_batch, code_execute). Any work that produces or
+    changes an artifact is handed to a worker via ``delegate``; workers carry the FULL
+    toolset (``build_builtin_registry``).
 
     The split is by approval level: a ``GRANTABLE`` tool mutates the environment
     (and is exactly the work that belongs to the team), while a ``NEVER`` tool is
@@ -182,8 +188,9 @@ def approval_class_tool_names() -> frozenset[str]:
 
 
 def file_mutation_tool_names() -> frozenset[str]:
-    """The GRANTABLE file-mutation tools as one class (file_write / str_replace /
-    file_delete / file_move) — what a「本轮内允许所有文件改动」grant covers.
+    """The GRANTABLE file-mutation tools as one class — what a
+    「本轮内允许所有文件改动」grant covers (file_write / str_replace / file_delete /
+    file_move / file_copy / mkdir / file_batch).
 
     Derived from the single builtin registry as ``GRANTABLE ∩ FILESYSTEM`` so a new
     file-edit tool joins the class automatically, while ``code_execute`` (EXECUTION,
@@ -199,12 +206,32 @@ def file_mutation_tool_names() -> frozenset[str]:
     )
 
 
+def file_only_tool_names() -> frozenset[str]:
+    """Tools an organize worker may hold: filesystem read + mutation (no execute/terminal).
+
+    Used by the ``organize_folder`` playbook and as the allow-list the CEO should pass
+    when delegating desktop-organize work (提案 §4.3).
+    """
+    full = build_builtin_registry()
+    names = {
+        schema.name
+        for schema in full.list_all()
+        if schema.category is ToolCategory.FILESYSTEM
+    }
+    # Grep is FILESYSTEM-adjacent but often categorized separately — include if present.
+    for extra in ("grep", "code_search"):
+        if full.get(extra) is not None:
+            names.add(extra)
+    return frozenset(names)
+
+
 def delegation_grantable_tool_names() -> frozenset[str]:
     """Tools covered by a kickoff / per-delegation grant (统一授权白名单).
 
     Same medium-risk set the turn-level grants can cover: file-mutation class
     (``file_write`` / ``file_append`` / ``str_replace`` / ``file_delete`` /
-    ``file_move``) + ``git`` writes + execution class (``code_execute`` /
+    ``file_move`` / ``file_copy`` / ``mkdir`` / ``file_batch``) + ``git`` writes +
+    execution class (``code_execute`` /
     ``test_run`` / ``terminal`` start). After the user chooses grant-and-start on the
     kickoff card, these tools skip per-call approval for the rest of THAT delegation
     (keyed by ``execution_id``). Keep this set aligned with turn-level scopes so

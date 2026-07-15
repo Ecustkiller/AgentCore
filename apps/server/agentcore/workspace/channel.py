@@ -69,6 +69,7 @@ class WorkspaceOp(StrEnum):
     INDEX_FILES = "index_files"
     MKDIR = "mkdir"
     DELETE = "delete"
+    COPY = "copy"
     MOVE = "move"
     REPLACE = "replace"
     GREP = "grep"

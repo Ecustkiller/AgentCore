@@ -1,13 +1,7 @@
-import { CheckpointCard } from "@/components/chat/CheckpointCard";
-import { EscalationCards } from "@/components/chat/EscalationCard";
 import { FileArtifactsCard } from "@/components/chat/FileArtifactsCard";
-import { InlineTeamGraph } from "@/components/chat/InlineTeamGraph";
 import { Markdown } from "@/components/chat/Markdown";
-import { NonBlockingAskCard } from "@/components/chat/NonBlockingAskCard";
-import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
-import { RecoveryActions } from "@/components/chat/StatusStrip";
 import { type CitationFlash, SourceCards } from "@/components/chat/SourceCards";
-import { TeamPreviewCard } from "@/components/chat/TeamPreviewCard";
+import { RecoveryActions } from "@/components/chat/StatusStrip";
 import { TurnWarningBanner } from "@/components/chat/TurnWarningBanner";
 import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
 import { Button, IconButton } from "@/components/ui";
@@ -31,12 +25,8 @@ import {
   fileArtifactsFromProcess,
   mergeArtifacts,
 } from "@/lib/fileArtifacts";
-import {
-  formatDisplayCost,
-  pickCostMoney,
-} from "@/lib/format";
+import { formatDisplayCost, pickCostMoney } from "@/lib/format";
 import { formatMessageExport } from "@/lib/messageExport";
-import { notifyError } from "@/lib/toast";
 import { runRegenerate } from "@/services/turns";
 import {
   type Message,
@@ -45,20 +35,11 @@ import {
   useActiveGenerating,
   useConversationStore,
 } from "@/stores/conversation";
-import {
-  ExecutionScopeContext,
-  useMessageExecution,
-} from "@/stores/execution";
+import { ExecutionScopeContext, useMessageExecution } from "@/stores/execution";
 import { useMessageInteractionCards } from "@/stores/interactions";
 import { useUsageStore } from "@/stores/usage";
 import type { ProcessStep } from "@/types/events";
-import {
-  AlertTriangle,
-  Check,
-  Copy,
-  KeyRound,
-  RefreshCw,
-} from "lucide-react";
+import { AlertTriangle, Check, Copy, KeyRound, RefreshCw } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AssistantMessageFooter } from "./AssistantMessageFooter";
@@ -135,59 +116,17 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     () => referencedCitationNumbers(message.content, citations.length),
     [message.content, citations.length],
   );
+  // Execution / graph slot key = server turn id when stamped (pause/resume share it).
+  // ALSO the interaction lookup key: SSE / journal hydration writes interaction
+  // entries keyed by `serverMessageId ?? id` (execMessageId), so the query MUST use
+  // the same projection key — querying by the local client UUID silently missed
+  // every card (统一投影键, 时间线一期).
+  const projectionId = assistantProjectionId(message);
   const { checkpoints, nonBlockingAsks, planReviews, teamPreviews } =
-    useMessageInteractionCards(conversationId, message.id);
+    useMessageInteractionCards(conversationId, projectionId);
   const hideContentForCheckpoint = checkpoints.some(
     (c) => c.status === "resolved",
   );
-  // 统一团队时间线: cards whose positional marker rides the inline timeline render there;
-  // un-anchored ones (no inline process / markers) still fall back to the bottom stack.
-  const procSteps = message.process ?? [];
-  const markedCheckpoints = useMemo(
-    () =>
-      new Set(
-        procSteps.flatMap((s) =>
-          s.kind === "checkpoint" ? [s.checkpoint_id] : [],
-        ),
-      ),
-    [procSteps],
-  );
-  const markedAsks = useMemo(
-    () =>
-      new Set(procSteps.flatMap((s) => (s.kind === "ask" ? [s.ask_id] : []))),
-    [procSteps],
-  );
-  const markedReviews = useMemo(
-    () =>
-      new Set(
-        procSteps.flatMap((s) =>
-          s.kind === "plan_review" ? [s.checkpoint_id] : [],
-        ),
-      ),
-    [procSteps],
-  );
-  const markedPreviews = useMemo(
-    () =>
-      new Set(
-        procSteps.flatMap((s) =>
-          s.kind === "team_preview" ? [s.checkpoint_id] : [],
-        ),
-      ),
-    [procSteps],
-  );
-  // Escalations ride the team execution's inline slot (next to the graph, in
-  // ProcessTimeline) whenever the turn carries a `team` marker; un-anchored cards
-  // (no inline process / markers) fall back to the bottom stack — never double-render.
-  const hasTeamMarker = useMemo(
-    () => procSteps.some((s) => s.kind === "team"),
-    [procSteps],
-  );
-  const bottomCheckpoints = checkpoints.filter(
-    (c) => !markedCheckpoints.has(c.id),
-  );
-  const bottomAsks = nonBlockingAsks.filter((a) => !markedAsks.has(a.id));
-  const bottomReviews = planReviews.filter((p) => !markedReviews.has(p.id));
-  const bottomPreviews = teamPreviews.filter((p) => !markedPreviews.has(p.id));
   const singleAgentArtifacts = useMemo(
     () =>
       message.executionId === null
@@ -250,9 +189,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     if (userId) void runRegenerate(userId);
   };
 
-  // Execution / graph slot key = server turn id when stamped (pause/resume share it).
-  const projectionId = assistantProjectionId(message);
-
   // 回合正文（时间线或答案）：对话页恒为传统聊天平铺（单 Agent 回合不再退化成 CEO 节点卡——
   // 那条「图主界面化」第一刀已撤，图相关体验只在画布；多 Agent 回合仍在答案上方内嵌
   // 团队协作图）。回合级附件（收到的上下文 / 错误卡 / 产物 / 引用 / 检查点 / 操作行）随后平铺。
@@ -266,7 +202,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         message.executionId === null ? (message.composingTool ?? null) : null
       }
       fallbackContent={hideContentForCheckpoint ? "" : message.content}
-      executionId={message.executionId}
       messageId={projectionId}
       journal={message.runs}
       conversationId={conversationId}
@@ -284,13 +219,9 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           persistKey={`${message.id}:reasoning`}
         />
       )}
-      {message.executionId && (
-        <InlineTeamGraph
-          messageId={projectionId}
-          executionId={message.executionId}
-          journal={message.runs}
-        />
-      )}
+      {/* 不变量（时间线一期）：多 Agent 回合必有 `team` 标记（live 由
+          setLastAssistantExecutionId 盖章，reload 由 journal 补齐）→ hasProcess 恒真、
+          协作图只在 ProcessTimeline 的标记槽渲染；此分支仅剩单 Agent 纯文本回合。 */}
       {/* 长回答折叠 (对话基础功能补齐): while streaming, render full so the user watches
           it grow; once settled, cap a truly long answer to a fade + 展开全文 so it doesn't
           dominate the viewport (短/中答案原样全展). */}
@@ -395,25 +326,8 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           turnKey={projectionId}
         />
       )}
-      {bottomCheckpoints.map((cp) => (
-        <CheckpointCard key={cp.id} checkpoint={cp} />
-      ))}
-      {bottomAsks.map((ask) => (
-        <NonBlockingAskCard key={ask.id} ask={ask} />
-      ))}
-      {bottomReviews.map((pr) => (
-        <PlanReviewCard key={pr.id} review={pr} />
-      ))}
-      {bottomPreviews.map((tp) => (
-        <TeamPreviewCard key={tp.id} preview={tp} />
-      ))}
-      {message.executionId && !hasTeamMarker && (
-        <EscalationCards
-          messageId={projectionId}
-          conversationId={conversationId}
-          interactive={message.isStreaming}
-        />
-      )}
+      {/* 底部堆叠回退已废除（时间线一期）：交互卡只在 ProcessTimeline 标记槽渲染。
+          不变量「有交互卡必有时间线标记」由 live 盖章 + reload journal 补标记保证。 */}
       {message.isStreaming && message.content.length > 0 && (
         <div className="mt-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           {(message.process?.length ?? 0) > 0 ? (

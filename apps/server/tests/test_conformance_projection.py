@@ -642,3 +642,68 @@ def test_process_tool_result_cap_matches_sink():
     oracle_tool = next(s for s in project_turn(events)["process"] if s.get("kind") == "tool")
     assert oracle_tool["result"] == expected
     assert oracle_tool["result"] == sink_tool["result"]
+
+
+def test_resume_content_continuity(projected):
+    """挂起前 content 经 plan_review resume 后与续跑 content 续拼（reload == live）。"""
+    p = projected["resume_content_continuity"]
+    assert p["status"] == "completed"
+    assert p["finishReason"] == "end_turn"
+    assert p["content"] == "阶段成果如下。按复核结论继续交付。"
+    assert _pending_gates(p) == []
+    assert p["interactions"] == [
+        {
+            "kind": "plan_review",
+            "id": "cp1",
+            "status": "resolved",
+            "runIds": ["r1"],
+        }
+    ]
+    assert [s["kind"] for s in p["process"]] == [
+        "content",
+        "team",
+        "plan_review",
+        "content",
+    ]
+    assert p["process"][0]["text"] == "阶段成果如下。"
+    assert p["process"][-1]["text"] == "按复核结论继续交付。"
+    assert p["runs"][0]["checkpoint"] == {"status": "resolved", "decision": "continue"}
+
+
+def test_resume_content_reset_reinject(projected):
+    """G6：content_reset 清标量后重灌 pre_pause delta，再叠重写正文。"""
+    p = projected["resume_content_reset_reinject"]
+    assert p["status"] == "completed"
+    assert p["finishReason"] == "end_turn"
+    assert p["content"] == "阶段成果如下。\n\n重写后的交付正文。"
+    assert _pending_gates(p) == []
+    assert p["interactions"][0]["kind"] == "plan_review"
+    assert p["interactions"][0]["status"] == "resolved"
+    kinds = [s["kind"] for s in p["process"]]
+    assert "rework" in kinds
+    assert kinds.index("plan_review") < kinds.index("rework")
+    # Trailing content after rework is reinject ⊕ rewrite (ordinary deltas).
+    assert p["process"][-1] == {
+        "kind": "content",
+        "text": "阶段成果如下。\n\n重写后的交付正文。",
+    }
+
+
+def test_resume_ask_user_absorb(projected):
+    """ask_user 吸收：气泡基底为空，问句在卡片；续跑只叠 post-resume 正文。"""
+    p = projected["resume_ask_user_absorb"]
+    assert p["status"] == "completed"
+    assert p["finishReason"] == "end_turn"
+    assert p["content"] == "收到，继续推进交付。"
+    assert _pending_gates(p) == []
+    assert p["interactions"] == [
+        {
+            "kind": "ask_user",
+            "id": "cp_absorb",
+            "status": "resolved",
+            "question": "帮你分析一下选项：",
+            "context": "请确认后继续。",
+        }
+    ]
+    assert [s["kind"] for s in p["process"]] == ["checkpoint", "content"]
+    assert p["process"][-1]["text"] == "收到，继续推进交付。"

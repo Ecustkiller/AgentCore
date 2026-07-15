@@ -157,7 +157,11 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
                     root_id=str(m.get("rootId") or m.get("root_id") or ""),
                     label=str(m.get("label") or alias),
                     abs_path=abs_path,
-                    readonly=True,
+                    mode=(
+                        "organize"
+                        if str(m.get("mode") or "").strip().lower() == "organize"
+                        else "readonly"
+                    ),
                 )
             if mounts:
                 backend.attach_external_mounts(mounts)

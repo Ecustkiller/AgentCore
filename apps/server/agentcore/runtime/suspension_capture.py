@@ -2,9 +2,10 @@
 
 The three suspending faces (ask_user / plan_review / team_preview) share one capture
 shape: read the CEO transcript, fold the about-to-emit ``*_required`` into the fact-log
-snapshot (the §8.3 唯一权威载体), then hand the pieces to a kind-specific frame builder +
-saver. The display ``journal`` (resume seed) is NOT captured here — it is a DERIVED
-property of ``journal_entries`` (P0-B Phase 3), so there is no second, drift-prone copy.
+snapshot (the §8.3 唯一权威载体), assemble a ``turn_paused`` trailing snapshot of the
+resumable turn state, then hand the pieces to a kind-specific frame builder + saver.
+The display ``journal`` (resume seed) is NOT captured here — it is a DERIVED property
+of ``journal_entries`` (P0-B Phase 3), so there is no second, drift-prone copy.
 Kind-specific fields and the frame subclass stay at the call site — this module only
 owns the common skeleton so the three faces cannot drift.
 
@@ -44,6 +45,9 @@ class SuspensionCapture:
     journal_entries: list[dict[str, Any]]
     citations: list[dict[str, Any]]
     trace_id: str | None
+    # Deliverable content snapshotted into ``turn_paused`` — same source the paused
+    # message row must persist (G4 暂停收口同源). Empty when assembly was skipped.
+    paused_content: str = ""
 
 
 async def persist_suspension_capture(
@@ -52,12 +56,18 @@ async def persist_suspension_capture(
     required_event: Any,
     build_frame: Callable[[SuspensionCapture], TurnSuspension],
     saver: Callable[[TurnSuspension], Awaitable[None]],
+    sink: Any | None = None,
+    suspension_kind: str,
 ) -> bool:
-    """Capture transcript + the fact-log snapshot, build the kind frame, and save.
+    """Capture transcript + the fact-log snapshot (+ ``turn_paused``), build, and save.
 
     Returns ``True`` iff a durable frame was actually saved. Returns ``False`` when the
     CEO transcript is absent (config / non-prod — a faithful resume is impossible).
     Raises :class:`SuspensionPersistError` when the saver raises (runtime failure).
+
+    ``turn_paused`` assembly is best-effort: mirror / sink gaps yield empty fields;
+    assembly exceptions are logged and the frame still saves without the trailing fact
+    so the durable pause path is never blocked by capture-side gaps.
     """
     from agentcore.core.log_context import get_log_value
     from agentcore.runtime.facts import snapshot_fact_log
@@ -68,15 +78,37 @@ async def persist_suspension_capture(
         logger.info("suspension.no_transcript", checkpoint_id=checkpoint_id)
         return False
 
-    journal_entries = snapshot_fact_log(
-        trailing=[
-            {
-                "kind": required_event.type.value,
-                "payload": required_event.payload,
-                "ts": required_event.timestamp,
-            }
-        ]
-    )
+    required_entry = {
+        "kind": required_event.type.value,
+        "payload": required_event.payload,
+        "ts": required_event.timestamp,
+    }
+    # Snapshot WITHOUT this pause's trailing entries — multi-cycle inheritance reads
+    # the last prior ``turn_paused`` from here (not from a contextvar).
+    base_entries = snapshot_fact_log()
+    trailing: list[dict[str, Any]] = [required_entry]
+    paused_content = ""
+    try:
+        from agentcore.runtime.turn_paused_capture import build_turn_paused_fact
+
+        paused_fact = build_turn_paused_fact(
+            checkpoint_id=checkpoint_id,
+            suspension_kind=suspension_kind,
+            required_event=required_event,
+            journal_entries_before_trailing=base_entries,
+            sink=sink,
+        )
+        trailing.append(paused_fact.to_fact().entry())
+        paused_content = paused_fact.content
+    except Exception:
+        logger.warning(
+            "suspension.turn_paused_capture_failed",
+            checkpoint_id=checkpoint_id,
+            suspension_kind=suspension_kind,
+            exc_info=True,
+        )
+
+    journal_entries = snapshot_fact_log(trailing=trailing)
     capture = SuspensionCapture(
         transcript=list(transcript),
         history=list(turn_history.get() or []),
@@ -86,6 +118,7 @@ async def persist_suspension_capture(
         # real count. Empty outside a wired turn (tests / worker loops).
         citations=list(turn_citations.get() or []),
         trace_id=get_log_value("trace_id"),
+        paused_content=paused_content,
     )
     frame = build_frame(capture)
     try:

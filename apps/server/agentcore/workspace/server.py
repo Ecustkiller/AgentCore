@@ -37,9 +37,9 @@ from agentcore.workspace._paths import (
 from agentcore.workspace.external_mounts import (
     ExternalMount,
     build_external_env,
+    external_mutation_allowed,
     external_ns,
     parse_external_path,
-    readonly_write_error,
     route_external,
 )
 from agentcore.workspace.indexing.manager import IndexManager
@@ -63,6 +63,7 @@ from agentcore.workspace.protocol import (
     TreeResult,
     WorkspaceIOError,
 )
+from agentcore.workspace.trash import is_trash_or_agentcore_path, soft_delete_to_trash
 
 _MAX_LIST_ENTRIES = 100
 _MAX_LINE_LEN = 300  # trim very long matching lines (e.g. minified bundles)
@@ -143,14 +144,28 @@ class ServerWorkspace:
         """The server-side workspace directory (used by the snapshot path)."""
         return self._root
 
-    def _safe(self, rel: str, *, write: bool = False) -> Path:
+    def _safe(
+        self,
+        rel: str,
+        *,
+        write: bool = False,
+        op: str | None = None,
+        permanent: bool = False,
+    ) -> Path:
         parsed = parse_external_path(rel)
         if parsed is not None:
             routed = route_external(rel, self._mounts)
             if routed is None:
                 raise PathNotFound(rel)
-            if write and routed.mount.readonly:
-                raise OutsideWorkspace(readonly_write_error(rel))
+            if write:
+                err = external_mutation_allowed(
+                    routed.mount,
+                    op or "write",
+                    path=rel,
+                    permanent=permanent,
+                )
+                if err:
+                    raise OutsideWorkspace(err)
             if not routed.mount.abs_path:
                 raise WorkspaceIOError("会话授权目录在本机引擎外不可直读")
             mount_root = Path(routed.mount.abs_path)
@@ -214,7 +229,7 @@ class ServerWorkspace:
             raise WorkspaceIOError(str(e)) from e
 
     async def write(self, path: str, content: str) -> int:
-        target = self._safe(path, write=True)
+        target = self._safe(path, write=True, op="write")
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
@@ -224,7 +239,7 @@ class ServerWorkspace:
         return len(content)
 
     async def append(self, path: str, content: str) -> int:
-        target = self._safe(path, write=True)
+        target = self._safe(path, write=True, op="append")
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.exists():
@@ -253,7 +268,7 @@ class ServerWorkspace:
             raise WorkspaceIOError(str(e)) from e
 
     async def write_bytes(self, path: str, data: bytes) -> int:
-        target = self._safe(path, write=True)
+        target = self._safe(path, write=True, op="write_bytes")
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             _atomic_write_bytes(target, data)
@@ -481,11 +496,15 @@ class ServerWorkspace:
         return [p for p, _ in collected], truncated
 
     async def mkdir(self, path: str) -> None:
-        target = self._safe(path, write=True)
+        target = self._safe(path, write=True, op="mkdir")
+        # Refuse mkdir of the primary workspace root itself; external mount roots
+        # are also "already there" as the grant target.
         if target == self._root.resolve():
-            raise OutsideWorkspace(path)  # the root already exists
-        if parse_external_path(path) is not None:
-            raise OutsideWorkspace(readonly_write_error(path))
+            raise OutsideWorkspace(path)
+        routed = route_external(path, self._mounts) if parse_external_path(path) else None
+        if routed and routed.mount.abs_path:
+            if target == Path(routed.mount.abs_path).resolve():
+                raise OutsideWorkspace(path)
         if target.exists():
             raise AlreadyExists(path)
         try:
@@ -494,31 +513,90 @@ class ServerWorkspace:
             raise WorkspaceIOError(str(e)) from e
         self._dirty = True
 
-    async def delete(self, path: str) -> None:
-        target = self._safe(path, write=True)
+    async def delete(self, path: str, *, permanent: bool = False) -> None:
+        target = self._safe(path, write=True, op="delete", permanent=permanent)
         if target == self._root.resolve():
             raise OutsideWorkspace(path)  # never delete the workspace root
-        if parse_external_path(path) is not None:
-            raise OutsideWorkspace(readonly_write_error(path))
+        routed = route_external(path, self._mounts) if parse_external_path(path) else None
+        if routed and routed.mount.abs_path:
+            mount_root = Path(routed.mount.abs_path).resolve()
+            if target == mount_root:
+                raise OutsideWorkspace(path)
+        else:
+            mount_root = self._root.resolve()
         if not target.exists():
             raise PathNotFound(path)
+        # Soft-delete into `.agentcore/trash` cannot nest under itself; treat
+        # anything under `.agentcore` as permanent cleanup.
+        hard = permanent or is_trash_or_agentcore_path(path)
         try:
-            if target.is_dir():
-                shutil.rmtree(target)
+            if hard:
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
             else:
-                target.unlink()
+                trash_rel = (
+                    routed.rel
+                    if routed is not None
+                    else path.replace("\\", "/")
+                )
+                soft_delete_to_trash(
+                    root=mount_root,
+                    target=target,
+                    original_rel=trash_rel or path.replace("\\", "/"),
+                )
+        except OSError as e:
+            raise WorkspaceIOError(str(e)) from e
+        self._dirty = True
+
+    async def copy(self, src: str, dst: str) -> None:
+        source = self._safe(src, write=False)
+        dest = self._safe(dst, write=True, op="copy")
+        src_ext = parse_external_path(src)
+        dst_ext = parse_external_path(dst)
+        if bool(src_ext) != bool(dst_ext):
+            raise OutsideWorkspace("不能跨会话授权目录与工作区复制文件")
+        if src_ext and dst_ext and src_ext[0] != dst_ext[0]:
+            raise OutsideWorkspace("不能跨会话授权目录复制文件")
+        if src_ext is None:
+            root = self._root.resolve()
+            if source == root or dest == root:
+                raise OutsideWorkspace(src if source == root else dst)
+        if not source.exists():
+            raise PathNotFound(src)
+        if dest.exists():
+            raise AlreadyExists(dst)
+        # Refuse copying a directory into itself or a descendant (self-recursion).
+        try:
+            dest.relative_to(source)
+            if source.is_dir():
+                raise WorkspaceIOError("不能复制到自身或其子目录")
+        except ValueError:
+            pass  # dest is not under source — expected
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if source.is_dir():
+                shutil.copytree(source, dest)
+            else:
+                shutil.copy2(source, dest)
         except OSError as e:
             raise WorkspaceIOError(str(e)) from e
         self._dirty = True
 
     async def move(self, src: str, dst: str) -> None:
-        if parse_external_path(src) is not None or parse_external_path(dst) is not None:
-            raise OutsideWorkspace(readonly_write_error(src if parse_external_path(src) else dst))
-        source = self._safe(src, write=True)
-        dest = self._safe(dst, write=True)
-        root = self._root.resolve()
-        if source == root or dest == root:
-            raise OutsideWorkspace(src if source == root else dst)
+        source = self._safe(src, write=True, op="move")
+        dest = self._safe(dst, write=True, op="move")
+        src_ext = parse_external_path(src)
+        dst_ext = parse_external_path(dst)
+        if bool(src_ext) != bool(dst_ext):
+            raise OutsideWorkspace("不能跨会话授权目录与工作区移动文件")
+        if src_ext and dst_ext and src_ext[0] != dst_ext[0]:
+            raise OutsideWorkspace("不能跨会话授权目录移动文件")
+        if src_ext is None:
+            root = self._root.resolve()
+            if source == root or dest == root:
+                raise OutsideWorkspace(src if source == root else dst)
         if not source.exists():
             raise PathNotFound(src)
         if dest.exists():
@@ -531,7 +609,7 @@ class ServerWorkspace:
         self._dirty = True
 
     async def replace(self, path: str, old: str, new: str, *, all_: bool) -> ReplaceOutcome:
-        target = self._safe(path, write=True)
+        target = self._safe(path, write=True, op="replace")
         if not target.exists():
             raise PathNotFound(path)
         if not target.is_file():

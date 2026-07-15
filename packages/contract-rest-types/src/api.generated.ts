@@ -2050,10 +2050,10 @@ export interface paths {
         get: operations["list_external_grants_v1_conversations__conversation_id__workspace_external_grants_get"];
         put?: never;
         /**
-         * Grant External Readonly
-         * @description Register a session read-only mount after the user confirms via folder picker.
+         * Grant External Folder
+         * @description Register a session mount after the user confirms via folder picker.
          */
-        post: operations["grant_external_readonly_v1_conversations__conversation_id__workspace_external_grants_post"];
+        post: operations["grant_external_folder_v1_conversations__conversation_id__workspace_external_grants_post"];
         /**
          * Revoke External Grants
          * @description Revoke one grant (by alias or root_id) or all session grants for the conversation.
@@ -5377,6 +5377,12 @@ export interface components {
             alias: string;
             /** Label */
             label: string;
+            /**
+             * Mode
+             * @default readonly
+             * @enum {string}
+             */
+            mode: "readonly" | "organize";
             /** Namespace */
             namespace: string;
             /** Root Id */
@@ -5474,16 +5480,23 @@ export interface components {
         };
         /**
          * GrantExternalReadonlyRequest
-         * @description Register a session-scoped read-only desktop root for this conversation.
+         * @description Register a session-scoped desktop root for this conversation.
          *
          *     Does **not** change workspace binding. ``root_id`` is the desktop-minted handle;
-         *     absolute paths never appear on the wire.
+         *     absolute paths never appear on the wire. ``mode`` is ``readonly`` (W3) or
+         *     ``organize`` (P1: move/copy/mkdir/trash-delete).
          */
         GrantExternalReadonlyRequest: {
             /** Alias Hint */
             alias_hint?: string | null;
             /** Label */
             label: string;
+            /**
+             * Mode
+             * @default readonly
+             * @enum {string}
+             */
+            mode: "readonly" | "organize";
             /** Root Id */
             root_id: string;
         };
@@ -6242,7 +6255,7 @@ export interface components {
              */
             form: string;
             /** Intent */
-            intent?: ("kickoff" | "decision" | "proposal_pick" | "risk_ack") | null;
+            intent?: ("kickoff" | "decision" | "proposal_pick" | "risk_ack" | "organize_plan") | null;
             kind: components["schemas"]["SuspensionKind"];
             /**
              * Max Rounds
@@ -11921,7 +11934,7 @@ export interface operations {
             };
         };
     };
-    grant_external_readonly_v1_conversations__conversation_id__workspace_external_grants_post: {
+    grant_external_folder_v1_conversations__conversation_id__workspace_external_grants_post: {
         parameters: {
             query?: never;
             header?: {

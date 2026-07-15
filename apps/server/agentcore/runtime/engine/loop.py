@@ -1,6 +1,8 @@
 """ReAct main loop: turn control, LLM rounds, tool execution, governance."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any
 
 from agentcore.core.error_codes import ErrorCode
@@ -16,6 +18,7 @@ from agentcore.runtime.events import (
     content_reset,
     reasoning_delta,
 )
+from agentcore.runtime.loop_controller import LoopController
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 
@@ -42,6 +45,41 @@ from .soft_gates import maybe_soft_gate_no_tool_return
 from .tool_round import handle_tool_calls_round
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class CaptainLoopMirror:
+    """Live captain-loop mirror for suspension capture (G4 turn_paused).
+
+    Published only while ``react_loop(..., role="captain")`` is running. Holds a
+    reference to the run's :class:`LoopController` plus the two content
+    accumulators a suspending face needs (ask_user → ``content_before_round``;
+    delegate / team_preview / plan_review → ``final_content``).
+    """
+
+    controller: LoopController
+    content_before_round: str = ""
+    final_content: str = ""
+
+
+current_captain_loop: ContextVar[CaptainLoopMirror | None] = ContextVar(
+    "current_captain_loop", default=None
+)
+
+
+def sync_captain_loop_mirror(
+    *,
+    content_before_round: str | None = None,
+    final_content: str | None = None,
+) -> None:
+    """Update the published captain mirror in place (no-op when unset / non-captain)."""
+    mirror = current_captain_loop.get()
+    if mirror is None:
+        return
+    if content_before_round is not None:
+        mirror.content_before_round = content_before_round
+    if final_content is not None:
+        mirror.final_content = final_content
 
 
 async def react_loop(
@@ -72,6 +110,7 @@ async def react_loop(
     supports_tools: bool | None = None,
     gate_escalation_sink: list[dict[str, Any]] | None = None,
     token_budget: int = 0,
+    controller_seed: Mapping[str, Any] | None = None,
 ) -> tuple[str, str, TokenUsage, int]:
     """Run the ReAct loop.
 
@@ -172,6 +211,9 @@ async def react_loop(
     signal (no auto re-decompose — the CEO may voluntarily replan). ``0`` (CEO /
     solo / tests / ceiling disabled) disables the backstop, leaving the run bounded
     only by ``profile.max_rounds``.
+
+    ``controller_seed`` (resume path): optional JSON-safe latch snapshot from a prior
+    ``turn_paused.controller``; omitted on a fresh turn (behaviour unchanged).
     """
     profile = profile or get_profile("chat")
     if usage_sink is not None:
@@ -206,204 +248,268 @@ async def react_loop(
         base_model = settings.platform_model
 
     investigation_tools = classify_investigation_tools(tools, allowed_tool_names)
-    controller = create_loop_controller(investigation_tools)
+    controller = create_loop_controller(investigation_tools, seed=controller_seed)
     active_model: str | None = base_model
     finish_guard_reworks = 0
     ceiling_reason = "max_rounds"
     round_idx = 0
 
-    for round_idx in range(profile.max_rounds):
-        # Loose token backstop (Worker 硬顶): stop BEFORE starting a round once the run's
-        # cumulative input+output tokens reach the ceiling, so a runaway overshoots by at
-        # most one round instead of grinding on (根因: 之前没人比对这个累计数). ``total_usage``
-        # is updated at each round's end, so this reflects rounds 0..round_idx-1. 0 =
-        # disabled (CEO / solo / tests → bounded only by max_rounds).
-        if token_budget > 0 and total_usage.total_tokens >= token_budget:
-            ceiling_reason = "token_budget"
-            logger.warning(
-                "engine.token_budget_exhausted",
+    # G4: publish captain live mirror only when role=="captain" — NOT via
+    # deliverable_only (workers / debaters also set that flag and nest under the
+    # captain Task; gating on it would clobber the captain mirror).
+    captain_token = None
+    if role == "captain":
+        captain_token = current_captain_loop.set(CaptainLoopMirror(controller=controller))
+
+    try:
+        for round_idx in range(profile.max_rounds):
+            # Loose token backstop (Worker 硬顶): stop BEFORE starting a round once the run's
+            # cumulative input+output tokens reach the ceiling, so a runaway overshoots by at
+            # most one round instead of grinding on (根因: 之前没人比对这个累计数). ``total_usage``
+            # is updated at each round's end, so this reflects rounds 0..round_idx-1. 0 =
+            # disabled (CEO / solo / tests → bounded only by max_rounds).
+            if token_budget > 0 and total_usage.total_tokens >= token_budget:
+                ceiling_reason = "token_budget"
+                logger.warning(
+                    "engine.token_budget_exhausted",
+                    run_id=run_id,
+                    role=role,
+                    tokens=total_usage.total_tokens,
+                    token_budget=token_budget,
+                    round=round_idx,
+                )
+                break
+            if round_sink is not None:
+                round_sink[:] = [round_idx + 1]
+            logger.debug("react.round_start", round=round_idx, messages=len(messages))
+            record_round_start(round_idx=round_idx, run_id=run_id, role=role)
+            content_before_round = final_content
+            # Update point 1/3: round start (content_before_round + current final_content).
+            # Gated on role — nested worker loops must not mutate the captain mirror.
+            if role == "captain":
+                sync_captain_loop_mirror(
+                    content_before_round=content_before_round,
+                    final_content=final_content,
+                )
+            # 团队便签墙 推增量 (§2.2 通): before each step AFTER the first, inject context that
+            # accrued WHILE this run was working — e.g. teammates' freshly-posted notes — so the
+            # team builds on each other's evolving work instead of each guessing in isolation.
+            # The opening round already carries the run's assembled context, so the hook starts at
+            # round 1 (which also avoids two back-to-back user messages on the very first request).
+            # Generic by design: the engine only appends what the hook returns; the caller owns the
+            # semantics (引擎纯化), mirroring on_content / on_reasoning.
+            if round_idx and on_round_begin is not None:
+                messages.extend(on_round_begin())
+
+            # CEO 协调模式 Phase 2: only the captain consumes team events (workers share
+            # the ContextVar but must not block on the coordination queue).
+            if role == "captain":
+                from agentcore.runtime.coordination.wait import await_coordination_injection
+
+                coord_msgs = await await_coordination_injection(messages)
+                if coord_msgs:
+                    messages.extend(coord_msgs)
+                    # Soft audit-gate (all_completed): remind before synthesis / wrap-up
+                    # while CEO is still in coordination — not only on no-tool Return.
+                    if coordination_injection_has_all_completed(coord_msgs):
+                        maybe_inject_audit_gate(
+                            controller,
+                            messages=messages,
+                            run_id=run_id,
+                            round_idx=round_idx,
+                            role=role,
+                        )
+
+            round_result = await run_llm_round(
+                llm=llm,
+                profile=profile,
+                messages=messages,
+                investigation_tools=investigation_tools,
+                tool_defs=tool_defs,
+                active_model=active_model,
+                emit_content=emit_content,
+                emit_reasoning=emit_reasoning,
+                on_tool_progress=on_tool_progress,
+                round_idx=round_idx,
+                run_id=run_id,
+                raise_on_error=raise_on_error,
+                on_reset=emit_reset,
+            )
+
+            if isinstance(round_result, LlmRoundFailure):
+                # Hard LLM failure (non-raising path): the provider already exhausted its
+                # network retries. End on ERROR/DEGRADED (error surfaced in the Return arm).
+                outcome = RoundOutcome(
+                    content="",
+                    reasoning="",
+                    usage=None,
+                    llm_failed=True,
+                    error_code=round_result.error_code,
+                    error_message=round_result.error_message,
+                    error_context=round_result.error_context,
+                )
+                directive: LoopDirective = decide_llm_failure(final_content=final_content)
+            elif round_result.aborted:
+                # Post-commit disconnect / stall: keep the partial prose and finish
+                # DEGRADED (resume entry stays available via existing infrastructure).
+                usage = round_result.usage
+                if usage:
+                    total_usage = total_usage + usage
+                if usage_sink is not None:
+                    usage_sink[:] = [total_usage]
+                if round_result.content:
+                    final_content = join_segments(final_content, round_result.content)
+                    # Update point 2/3: prose join.
+                    if role == "captain":
+                        sync_captain_loop_mirror(final_content=final_content)
+                if round_result.reasoning:
+                    final_reasoning += round_result.reasoning
+                outcome = RoundOutcome(
+                    content=round_result.content,
+                    reasoning=round_result.reasoning,
+                    usage=usage,
+                    llm_failed=True,
+                    error_code=ErrorCode.LLM_ERROR,
+                    error_message="模型响应中断，已保留已生成内容，可继续。",
+                )
+                directive = decide_llm_failure(final_content=final_content)
+            else:
+                usage = round_result.usage
+                if usage:
+                    total_usage = total_usage + usage
+                if usage_sink is not None:
+                    usage_sink[:] = [total_usage]
+
+                if round_result.content:
+                    final_content = join_segments(final_content, round_result.content)
+                    # Update point 2/3: prose join.
+                    if role == "captain":
+                        sync_captain_loop_mirror(final_content=final_content)
+                if round_result.reasoning:
+                    final_reasoning += round_result.reasoning
+
+                outcome = RoundOutcome(
+                    content=round_result.content,
+                    reasoning=round_result.reasoning,
+                    usage=usage,
+                    tool_calls=round_result.tool_calls,
+                    empty_diagnosis=round_result.empty_diagnosis,
+                    empty_raw_preview=round_result.empty_raw_preview,
+                )
+                controller.note_empty_round(outcome.is_empty)
+
+                if not outcome.has_tool_calls:
+                    directive = decide_no_tool_round(
+                        outcome,
+                        final_content=final_content,
+                        controller=controller,
+                        annotate_citations=annotate_citations,
+                        citation_sink=citation_sink,
+                        finish_guard_reworks=finish_guard_reworks,
+                        tools_offered=tool_defs is not None,
+                        supports_tools=supports_tools,
+                    )
+                    # Soft team-gate (b) / Soft audit-gate: captain wrap-up without
+                    # delegate — discard the draft, inject nudge, continue.
+                    directive, rolled = maybe_soft_gate_no_tool_return(
+                        directive=directive,
+                        outcome=outcome,
+                        controller=controller,
+                        messages=messages,
+                        role=role,
+                        round_idx=round_idx,
+                        run_id=run_id,
+                        content_before_round=content_before_round,
+                        emit_reset=emit_reset,
+                    )
+                    if rolled is not None:
+                        final_content = rolled
+                else:
+                    tool_round = await handle_tool_calls_round(
+                        outcome=outcome,
+                        messages=messages,
+                        tools=tools,
+                        tool_context=tool_context,
+                        sink=sink,
+                        approval_gate=approval_gate,
+                        citation_sink=citation_sink,
+                        annotate_citations=annotate_citations,
+                        run_id=run_id,
+                        role=role,
+                        gate_escalation_sink=gate_escalation_sink,
+                        deliverable_only=deliverable_only,
+                        on_reset=on_reset,
+                        emit_reset=emit_reset,
+                        content_before_round=content_before_round,
+                        final_content=final_content,
+                        round_result_content=round_result.content,
+                        total_usage=total_usage,
+                        controller=controller,
+                        allowed_tool_names=allowed_tool_names,
+                        disabled_tools=disabled_tools,
+                        round_idx=round_idx,
+                    )
+                    outcome = tool_round.outcome
+                    directive = tool_round.directive
+                    final_content = tool_round.final_content
+                    total_usage = tool_round.total_usage
+                    if tool_round.tool_defs_changed:
+                        tool_defs = tool_round.tool_defs
+
+            applied = await apply_loop_directive(
+                directive=directive,
+                outcome=outcome,
+                messages=messages,
+                llm=llm,
+                tools=tools,
+                tool_context=tool_context,
+                sink=sink,
+                profile=profile,
+                active_model=active_model,
+                base_model=base_model,
+                allowed_tool_names=allowed_tool_names,
+                disabled_tools=disabled_tools,
+                emit_content=emit_content,
+                emit_reasoning=emit_reasoning,
+                emit_reset=emit_reset,
+                final_content=final_content,
+                final_reasoning=final_reasoning,
+                total_usage=total_usage,
+                round_idx=round_idx,
                 run_id=run_id,
                 role=role,
-                tokens=total_usage.total_tokens,
-                token_budget=token_budget,
-                round=round_idx,
+                finish_override_sink=finish_override_sink,
+                approval_gate=approval_gate,
+                citation_sink=citation_sink,
+                annotate_citations=annotate_citations,
+                gate_escalation_sink=gate_escalation_sink,
+                controller=controller,
+                content_before_round=content_before_round,
+                finish_guard_reworks=finish_guard_reworks,
             )
-            break
-        if round_sink is not None:
-            round_sink[:] = [round_idx + 1]
-        logger.debug("react.round_start", round=round_idx, messages=len(messages))
-        record_round_start(round_idx=round_idx, run_id=run_id, role=role)
-        content_before_round = final_content
-        # 团队便签墙 推增量 (§2.2 通): before each step AFTER the first, inject context that
-        # accrued WHILE this run was working — e.g. teammates' freshly-posted notes — so the
-        # team builds on each other's evolving work instead of each guessing in isolation.
-        # The opening round already carries the run's assembled context, so the hook starts at
-        # round 1 (which also avoids two back-to-back user messages on the very first request).
-        # Generic by design: the engine only appends what the hook returns; the caller owns the
-        # semantics (引擎纯化), mirroring on_content / on_reasoning.
-        if round_idx and on_round_begin is not None:
-            messages.extend(on_round_begin())
-
-        # CEO 协调模式 Phase 2: only the captain consumes team events (workers share
-        # the ContextVar but must not block on the coordination queue).
-        if role == "captain":
-            from agentcore.runtime.coordination.wait import await_coordination_injection
-
-            coord_msgs = await await_coordination_injection(messages)
-            if coord_msgs:
-                messages.extend(coord_msgs)
-                # Soft audit-gate (all_completed): remind before synthesis / wrap-up
-                # while CEO is still in coordination — not only on no-tool Return.
-                if coordination_injection_has_all_completed(coord_msgs):
-                    maybe_inject_audit_gate(
-                        controller,
-                        messages=messages,
-                        run_id=run_id,
-                        round_idx=round_idx,
-                        role=role,
-                    )
-
-        round_result = await run_llm_round(
-            llm=llm,
-            profile=profile,
-            messages=messages,
-            investigation_tools=investigation_tools,
-            tool_defs=tool_defs,
-            active_model=active_model,
-            emit_content=emit_content,
-            emit_reasoning=emit_reasoning,
-            on_tool_progress=on_tool_progress,
-            round_idx=round_idx,
-            run_id=run_id,
-            raise_on_error=raise_on_error,
-            on_reset=emit_reset,
-        )
-
-        if isinstance(round_result, LlmRoundFailure):
-            # Hard LLM failure (non-raising path): the provider already exhausted its
-            # network retries. End on ERROR/DEGRADED (error surfaced in the Return arm).
-            outcome = RoundOutcome(
-                content="",
-                reasoning="",
-                usage=None,
-                llm_failed=True,
-                error_code=round_result.error_code,
-                error_message=round_result.error_message,
-                error_context=round_result.error_context,
-            )
-            directive: LoopDirective = decide_llm_failure(final_content=final_content)
-        elif round_result.aborted:
-            # Post-commit disconnect / stall: keep the partial prose and finish
-            # DEGRADED (resume entry stays available via existing infrastructure).
-            usage = round_result.usage
-            if usage:
-                total_usage = total_usage + usage
-            if usage_sink is not None:
-                usage_sink[:] = [total_usage]
-            if round_result.content:
-                final_content = join_segments(final_content, round_result.content)
-            if round_result.reasoning:
-                final_reasoning += round_result.reasoning
-            outcome = RoundOutcome(
-                content=round_result.content,
-                reasoning=round_result.reasoning,
-                usage=usage,
-                llm_failed=True,
-                error_code=ErrorCode.LLM_ERROR,
-                error_message="模型响应中断，已保留已生成内容，可继续。",
-            )
-            directive = decide_llm_failure(final_content=final_content)
-        else:
-            usage = round_result.usage
-            if usage:
-                total_usage = total_usage + usage
-            if usage_sink is not None:
-                usage_sink[:] = [total_usage]
-
-            if round_result.content:
-                final_content = join_segments(final_content, round_result.content)
-            if round_result.reasoning:
-                final_reasoning += round_result.reasoning
-
-            outcome = RoundOutcome(
-                content=round_result.content,
-                reasoning=round_result.reasoning,
-                usage=usage,
-                tool_calls=round_result.tool_calls,
-                empty_diagnosis=round_result.empty_diagnosis,
-                empty_raw_preview=round_result.empty_raw_preview,
-            )
-            controller.note_empty_round(outcome.is_empty)
-
-            if not outcome.has_tool_calls:
-                directive = decide_no_tool_round(
-                    outcome,
-                    final_content=final_content,
-                    controller=controller,
-                    annotate_citations=annotate_citations,
-                    citation_sink=citation_sink,
-                    finish_guard_reworks=finish_guard_reworks,
-                    tools_offered=tool_defs is not None,
-                    supports_tools=supports_tools,
+            if applied.action == "return":
+                return (
+                    applied.content,
+                    applied.reasoning,
+                    applied.usage or total_usage,
+                    applied.rounds,
                 )
-                # Soft team-gate (b) / Soft audit-gate: captain wrap-up without
-                # delegate — discard the draft, inject nudge, continue.
-                directive, rolled = maybe_soft_gate_no_tool_return(
-                    directive=directive,
-                    outcome=outcome,
-                    controller=controller,
-                    messages=messages,
-                    role=role,
-                    round_idx=round_idx,
-                    run_id=run_id,
-                    content_before_round=content_before_round,
-                    emit_reset=emit_reset,
-                )
-                if rolled is not None:
-                    final_content = rolled
-            else:
-                tool_round = await handle_tool_calls_round(
-                    outcome=outcome,
-                    messages=messages,
-                    tools=tools,
-                    tool_context=tool_context,
-                    sink=sink,
-                    approval_gate=approval_gate,
-                    citation_sink=citation_sink,
-                    annotate_citations=annotate_citations,
-                    run_id=run_id,
-                    role=role,
-                    gate_escalation_sink=gate_escalation_sink,
-                    deliverable_only=deliverable_only,
-                    on_reset=on_reset,
-                    emit_reset=emit_reset,
-                    content_before_round=content_before_round,
-                    final_content=final_content,
-                    round_result_content=round_result.content,
-                    total_usage=total_usage,
-                    controller=controller,
-                    allowed_tool_names=allowed_tool_names,
-                    disabled_tools=disabled_tools,
-                    round_idx=round_idx,
-                )
-                outcome = tool_round.outcome
-                directive = tool_round.directive
-                final_content = tool_round.final_content
-                total_usage = tool_round.total_usage
-                if tool_round.tool_defs_changed:
-                    tool_defs = tool_round.tool_defs
+            final_content = applied.final_content
+            final_reasoning = applied.final_reasoning
+            if applied.total_usage is not None:
+                total_usage = applied.total_usage
+            finish_guard_reworks = applied.finish_guard_reworks
+            if applied.tool_defs_changed:
+                tool_defs = applied.tool_defs
+            continue
 
-        applied = await apply_loop_directive(
-            directive=directive,
-            outcome=outcome,
+        return await ceiling_finalize(
             messages=messages,
             llm=llm,
-            tools=tools,
-            tool_context=tool_context,
-            sink=sink,
             profile=profile,
             active_model=active_model,
             base_model=base_model,
+            tools=tools,
             allowed_tool_names=allowed_tool_names,
             disabled_tools=disabled_tools,
             emit_content=emit_content,
@@ -412,57 +518,17 @@ async def react_loop(
             final_content=final_content,
             final_reasoning=final_reasoning,
             total_usage=total_usage,
+            ceiling_reason=ceiling_reason,
             round_idx=round_idx,
-            run_id=run_id,
             role=role,
-            finish_override_sink=finish_override_sink,
-            approval_gate=approval_gate,
-            citation_sink=citation_sink,
-            annotate_citations=annotate_citations,
-            gate_escalation_sink=gate_escalation_sink,
+            run_id=run_id,
+            token_budget=token_budget,
             controller=controller,
-            content_before_round=content_before_round,
-            finish_guard_reworks=finish_guard_reworks,
+            tool_context=tool_context,
+            sink=sink,
+            finish_override_sink=finish_override_sink,
+            gate_escalation_sink=gate_escalation_sink,
         )
-        if applied.action == "return":
-            return (
-                applied.content,
-                applied.reasoning,
-                applied.usage or total_usage,
-                applied.rounds,
-            )
-        final_content = applied.final_content
-        final_reasoning = applied.final_reasoning
-        if applied.total_usage is not None:
-            total_usage = applied.total_usage
-        finish_guard_reworks = applied.finish_guard_reworks
-        if applied.tool_defs_changed:
-            tool_defs = applied.tool_defs
-        continue
-
-    return await ceiling_finalize(
-        messages=messages,
-        llm=llm,
-        profile=profile,
-        active_model=active_model,
-        base_model=base_model,
-        tools=tools,
-        allowed_tool_names=allowed_tool_names,
-        disabled_tools=disabled_tools,
-        emit_content=emit_content,
-        emit_reasoning=emit_reasoning,
-        emit_reset=emit_reset,
-        final_content=final_content,
-        final_reasoning=final_reasoning,
-        total_usage=total_usage,
-        ceiling_reason=ceiling_reason,
-        round_idx=round_idx,
-        role=role,
-        run_id=run_id,
-        token_budget=token_budget,
-        controller=controller,
-        tool_context=tool_context,
-        sink=sink,
-        finish_override_sink=finish_override_sink,
-        gate_escalation_sink=gate_escalation_sink,
-    )
+    finally:
+        if captain_token is not None:
+            current_captain_loop.reset(captain_token)

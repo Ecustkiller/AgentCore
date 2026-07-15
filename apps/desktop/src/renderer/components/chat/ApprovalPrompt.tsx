@@ -46,6 +46,9 @@ const TOOL_LABELS: Record<string, string> = {
   str_replace: "修改文件",
   file_delete: "删除文件",
   file_move: "移动文件",
+  file_copy: "复制文件",
+  mkdir: "创建目录",
+  file_batch: "批量文件操作",
   code_execute: "执行代码",
   desktop_notify: "系统通知",
 };
@@ -58,15 +61,40 @@ function toolLabel(name: string): string {
   return TOOL_LABELS[name] ?? name;
 }
 
+function batchOpLine(item: Record<string, unknown>): string {
+  const op = String(item.op ?? "").trim();
+  if (op === "move") return `move ${item.source ?? ""} → ${item.destination ?? ""}`;
+  if (op === "copy") return `copy ${item.source ?? ""} → ${item.destination ?? ""}`;
+  if (op === "delete") {
+    const perm = item.permanent ? " (永久)" : "";
+    return `delete ${item.path ?? ""}${perm}`;
+  }
+  if (op === "mkdir") return `mkdir ${item.path ?? ""}`;
+  return JSON.stringify(item);
+}
+
 function primaryArg(
   toolName: string,
   args: Record<string, unknown>,
 ): string | null {
+  if (toolName === "file_batch") {
+    const ops = args.operations;
+    if (Array.isArray(ops)) return `本次共 ${ops.length} 项`;
+  }
   if (toolName === "code_execute") {
     const purpose = args.purpose;
     if (typeof purpose === "string" && purpose.trim()) return purpose.trim();
   }
-  for (const key of ["path", "file_path", "command", "code", "title", "body"]) {
+  for (const key of [
+    "path",
+    "file_path",
+    "source",
+    "destination",
+    "command",
+    "code",
+    "title",
+    "body",
+  ]) {
     const value = args[key];
     if (typeof value === "string" && value.trim()) return value.trim();
   }
@@ -110,6 +138,7 @@ export function ApprovalCard({
   const [clicked, setClicked] = useState<ApprovalDecision | null>(null);
 
   const isCodeExecute = approval.toolName === "code_execute";
+  const isFileBatch = approval.toolName === "file_batch";
   const headline = primaryArg(approval.toolName, approval.arguments);
   const argEntries = Object.entries(approval.arguments);
   const busy = approval.resolving;
@@ -118,6 +147,16 @@ export function ApprovalCard({
     typeof approval.arguments.circuit_breaker_hint === "string"
       ? approval.arguments.circuit_breaker_hint.trim()
       : "";
+
+  const batchOps = useMemo(() => {
+    if (!isFileBatch) return [];
+    const ops = approval.arguments.operations;
+    if (!Array.isArray(ops)) return [];
+    return ops.filter(
+      (item): item is Record<string, unknown> =>
+        item != null && typeof item === "object" && !Array.isArray(item),
+    );
+  }, [approval.arguments.operations, isFileBatch]);
 
   const codeText =
     isCodeExecute && typeof approval.arguments.code === "string"
@@ -139,12 +178,19 @@ export function ApprovalCard({
   }, [approval.arguments, isCodeExecute]);
   const displayArgs = useMemo(() => {
     if (isCodeExecute) return otherArgs;
+    if (isFileBatch) {
+      return Object.fromEntries(
+        Object.entries(approval.arguments).filter(
+          ([key]) => key !== "circuit_breaker_hint" && key !== "operations",
+        ),
+      );
+    }
     return Object.fromEntries(
       Object.entries(approval.arguments).filter(
         ([key]) => key !== "circuit_breaker_hint",
       ),
     );
-  }, [approval.arguments, isCodeExecute, otherArgs]);
+  }, [approval.arguments, isCodeExecute, isFileBatch, otherArgs]);
 
   const onDecide = (decision: ApprovalDecision) => {
     setClicked(decision);
@@ -196,6 +242,15 @@ export function ApprovalCard({
                 {headline}
               </p>
             </SimpleTooltip>
+          )}
+          {isFileBatch && batchOps.length > 0 && (
+            <ol className="mt-1 max-h-40 list-decimal space-y-0.5 overflow-auto pl-4 font-mono text-xs text-muted-foreground">
+              {batchOps.map((item, idx) => (
+                <li key={`${idx}-${batchOpLine(item)}`} className="break-all">
+                  {batchOpLine(item)}
+                </li>
+              ))}
+            </ol>
           )}
           {isCodeExecute && riskTags.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">
