@@ -109,6 +109,10 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
         Disposition.DURABLE,
         "协调模式团队进展预览——同 key 保最新由前端 fold 保证；刷新后 StatusStrip 可重建（P2）",
     ),
+    EventType.USER_INTERJECTION: (
+        Disposition.DURABLE,
+        "协调中用户插话——同 interjection_id 保最新 status；team 块徽标重放",
+    ),
     # ---- DERIVED：经专用列 / 其它投影持久化，reload 时重建（非 journal allow-list） ----
     EventType.CONTENT_DELTA: (Disposition.DERIVED, "正文流——最终态落 Message.content 列"),
     EventType.REASONING_DELTA: (Disposition.DERIVED, "思考流——最终态落 Message.reasoning_content 列"),
@@ -129,8 +133,8 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     EventType.RUN_OUTPUT_DELTA: (Disposition.DERIVED, "worker 正文流——由 message_final 事实合成重放"),
     EventType.RUN_REASONING_DELTA: (Disposition.DERIVED, "worker 思考流——由 message_final 事实合成重放"),
     EventType.RUN_ESCALATION: (
-        Disposition.DERIVED,
-        "run 级升级实时信号——耐久记录为已落库的 ESCALATION_REQUIRED/RESOLVED + transcript 投影",
+        Disposition.DURABLE,
+        "非阻塞 raised 升级（统一时间线二期 D6）——重放 raised 轻行 + 节点 ⚠️ 徽标 + 时间线标记",
     ),
     EventType.RUN_ESCALATION_GATE: (
         Disposition.DERIVED,

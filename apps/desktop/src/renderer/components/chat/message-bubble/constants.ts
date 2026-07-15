@@ -98,6 +98,11 @@ export function toolGroupSummary(
   tools: Extract<ProcessStep, { kind: "tool" }>[],
 ): string {
   const sameKind = tools.every((t) => t.tool_name === tools[0].tool_name);
+  // read_url args are bare URLs — baseName yields opaque article ids. Prefer a
+  // count title (matches the merged source-collection header).
+  if (sameKind && tools[0]?.tool_name === "read_url") {
+    return `读取网页 · ${tools.length} 个来源`;
+  }
   if (sameKind && tools.length <= 3) {
     const { label } = toolMeta(tools[0].tool_name);
     const names = tools.map((t) => baseName(toolDetail(t.arguments)));

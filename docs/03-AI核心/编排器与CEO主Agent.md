@@ -116,9 +116,9 @@ CEO 在自己的 ReAct 循环里调用单一的 `delegate` 工具把一批子任
 `delegate(tasks=[…])` 的 `tasks` 由 CEO 自定批量：
 
 - **一次塞 N 个** = 全景计划（一批声明完整分工）
-- **后续再调一次** = 动态委派（按进展追加）
+- **同回合再调一次** = 动态追加（合并进【同一张】协作图，同 `execution_id`；协调模式下不必等上一批全部完成）
 
-同一工具 / 同一 schema / 同一调度，CEO 自选委派粒度。并行度由**节点的 `depends_on` 数据声明**（无依赖即同波并行），而非靠模型主动发并行 tool call。
+同一工具 / 同一 schema / 同一调度，CEO 自选委派粒度。**真正的不变量是「一个回合一张协作图」**——不是「一次只能一个 delegate、同步阻塞到全队完成」。并行度由**节点的 `depends_on` 数据声明**（无依赖即同波并行），而非靠模型主动发并行 tool call。
 
 ### 终态语义：非终态，CEO 收尾（D3 + 决策①）
 
@@ -130,14 +130,17 @@ CEO 在自己的 ReAct 循环里调用单一的 `delegate` 工具把一批子任
 
 #### 协调模式（默认开）✅ 已落地
 
-多 worker 且根 CEO（`depth==0`）、非 `finalize` 时，`delegate` **默认**立即返回「团队已启动」，`WaveScheduler` 后台跑；CEO 继续 ReAct，消费团队事件（完成 / 便签 / 升级 / 超时 / 全部完成）并用 `update_synthesis` 渐进合成。传 `coordinate=false` 显式退出到经典阻塞；单 worker、`finalize`、嵌套 lead（`depth>0`）**仍走阻塞语义**。
+多 worker 且根 CEO（`depth==0`）、非 `finalize` 时，`delegate` **默认**立即返回「团队已启动」，`WaveScheduler` 后台跑；CEO 继续 ReAct，消费团队事件（完成 / 便签 / 升级 / 超时 / 全部完成）并用 `update_synthesis` 渐进合成。同回合再调 `delegate` = 往**【同一张】协作图**动态追加 worker（同 `execution_id` 合并），**不必**等上一批全部完成。传 `coordinate=false` 显式退出到经典阻塞；单 worker、`finalize`、嵌套 lead（`depth>0`）、批含 `checkpoint_after` 且把关闸开 **仍走阻塞语义**。
 
 | 约束 | 决策 |
 |---|---|
 | 启用门 | ≥2 worker + 根 only + 非 finalize；显式 `coordinate=false` 退出；**批含 `checkpoint_after` 节点且 checkpoint 闸开 → 不进协调**（B1 解法：把关卡必须 durable 弹给用户，强制经典阻塞路径；闸关如 evals 时不受影响） |
+| 图不变量 | **一回合一张协作图**；同回合多次 `delegate` 追加合并，不是「一次只能一个 delegate」 |
+| 追加队员 | 协调进行中 → 再调 `delegate`；收到『计划已让出』波边界 → `replan(add=…)` |
 | 合成通道 | 草稿走 `team_synthesis_preview`（`in_progress`）；终稿仍 `content_delta` |
 | 挂起 | **`team_preview` 在 coordinate fork 之前**挂起即收口（开做后续跑再臂后台）。协调中 `ask_user` 软挂起即收口；状态入 journal，续跑重建（不保活后台调度器）。`checkpoint_after` 波边界**不** durable `plan_review` 收口——只发 `BOUNDARY_YIELD` 协调事件（正常路径已由启用门排除，仅 replan 中途加把关节点等残留场景走到，注入文案强制 CEO 转 `ask_user` 拍板）；经典阻塞（`coordinate=false`）仍挂起即收口 |
 | Phase 3 | 超时只通知不自动取消；非阻塞 escalate / 便签冲突进事件队列；SCOPE 边界 PROCEED 由 CEO 仲裁；**阻塞 escalate 改 CEO 仲裁**（`resolve_escalation`；偏好/授权/费用类先 ask_user 再 resolve） |
+| 用户插话 | 协调运行中用户新消息进 session 队列（必要决策点，必唤醒）；CEO 智能路由——**相关入图**（`update_synthesis` / 再 `delegate` 追加 / `cancel_worker`），**无关转排队**（`queue_user_message` → 对话级队列，下一回合处理）。经典阻塞路径无协调窗口，消息一律排队（实时改向用既有 `run_redirect`），**否决**「为插话把单 worker 升格协调」（改动大收益小） |
 
 **不变量 B（CEO 仲裁 ⇔ 协调存活）**：`resolve_escalation` **仅**在协调 session 活跃时可用。单 worker / `finalize` / 嵌套 lead / 显式 `coordinate=false` 走经典阻塞——CEO 卡在 `delegate` await 上、波内无活着的 CEO，阻塞 escalate **直挂用户**（`awaiting=user`），**绝不**改挂 CEO（否则 worker↔CEO 死锁，只能靠超时回落）。测 `resolve_escalation` 必须 ≥2 worker 进协调。否决「单人也 awaiting=ceo」除非先改 drive 让单人亦保 CEO 存活（真·A，未做）。
 
@@ -181,7 +184,7 @@ CEO 收尾从「写综述」升级为「**先对账拼图边、再核验原始�
 >
 > **薄封装、共享账目**：`ReplanTool` 持本回合的 `DelegateTool` 并转发 `DelegateTool.replan`——后者持暂停态（`_supervised`）、校验、in-place 再绑定与续跑驱动；故 worker usage / 账目 / 来源累加在**同一个 `DelegateTool` 实例**上、被回合总账折算，`replan` 自身无账目面。
 >
-> **被否决**：① 重载 `delegate`（语义混淆「发起新任务」与「续跑旧计划」）；② 复用带现场续派（那是在 worker transcript 上续写、非计划续跑，见 [`多轮编排与同人续派.md`](/docs/03-AI核心/多轮编排与同人续派.md)）——故 `replan` 独立成工具。`add` 早期曾计划推迟，现已与 binds / steers / stop 一并落地。
+> **被否决**：① **把 `delegate` 重载成「续跑旧计划」入口**（语义混淆「发起 / 追加任务」与「波边界续跑」——后者专属 `replan`；**不**禁止同回合多次调用 `delegate` 往同一张图追加）；② 复用带现场续派（那是在 worker transcript 上续写、非计划续跑，见 [`多轮编排与同人续派.md`](/docs/03-AI核心/多轮编排与同人续派.md)）——故 `replan` 独立成工具。`add` 早期曾计划推迟，现已与 binds / steers / stop 一并落地。
 >
 > → 见代码：`tools/builtin/replan.py`、`runtime/delegate/supervised.py`（`apply_replan` / `finalize_stopped` / 边界简报）、`runtime/runs/builder.py`（`build_added_nodes`）。
 

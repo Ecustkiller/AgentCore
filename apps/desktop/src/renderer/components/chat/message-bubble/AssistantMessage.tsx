@@ -1,6 +1,6 @@
 import { FileArtifactsCard } from "@/components/chat/FileArtifactsCard";
 import { Markdown } from "@/components/chat/Markdown";
-import { type CitationFlash, SourceCards } from "@/components/chat/SourceCards";
+import { SourceCards } from "@/components/chat/SourceCards";
 import { RecoveryActions } from "@/components/chat/StatusStrip";
 import { TurnWarningBanner } from "@/components/chat/TurnWarningBanner";
 import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { FinishReasonChip } from "@/components/ui/finish-reason-chip";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { referencedCitationNumbers } from "@/lib/citations";
+import { buildCitationDisplayMap } from "@/lib/citationDisplayMap";
 import { isEmptyInterruptedAssistant } from "@/lib/composerContinueHint";
 import {
   degradedFinishChipLabel,
@@ -40,7 +40,7 @@ import { useMessageInteractionCards } from "@/stores/interactions";
 import { useUsageStore } from "@/stores/usage";
 import type { ProcessStep } from "@/types/events";
 import { AlertTriangle, Check, Copy, KeyRound, RefreshCw } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { AssistantMessageFooter } from "./AssistantMessageFooter";
 import { ComposingToolLine, ProcessTimeline } from "./ProcessTimeline";
@@ -112,10 +112,24 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const captainContext = message.captainContext ?? [];
   const hasProcess = (message.process?.length ?? 0) > 0;
   const citations = useMemo(() => message.citations ?? [], [message.citations]);
-  const referenced = useMemo(
-    () => referencedCitationNumbers(message.content, citations.length),
-    [message.content, citations.length],
-  );
+  // Display renumbering: append-only across stream frames so assigned numbers
+  // never jump. Reset when the message identity changes (component remounts per
+  // bubble; also guard via message.id in case of reuse).
+  const prevDisplayRef = useRef<Map<number, number>>(new Map());
+  const prevMessageIdRef = useRef(message.id);
+  if (prevMessageIdRef.current !== message.id) {
+    prevMessageIdRef.current = message.id;
+    prevDisplayRef.current = new Map();
+  }
+  const citationDisplay = useMemo(() => {
+    const next = buildCitationDisplayMap(
+      message.content,
+      citations.length,
+      prevDisplayRef.current,
+    );
+    prevDisplayRef.current = next.stableCited;
+    return next;
+  }, [message.content, citations.length]);
   // Execution / graph slot key = server turn id when stamped (pause/resume share it).
   // ALSO the interaction lookup key: SSE / journal hydration writes interaction
   // entries keyed by `serverMessageId ?? id` (execMessageId), so the query MUST use
@@ -158,11 +172,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     }
   };
 
-  const [citeFlash, setCiteFlash] = useState<CitationFlash | null>(null);
-  const onCitationClick = useCallback((n: number) => {
-    setCiteFlash((prev) => ({ index: n, nonce: (prev?.nonce ?? 0) + 1 }));
-  }, []);
-
   // 流式中可复制 (对话基础功能补齐): the full footer is gated until the turn settles (its
   // usage / regenerate actions are meaningless mid-stream), but a long reply is often worth
   // copying before it finishes — so expose a lightweight copy affordance while streaming.
@@ -197,7 +206,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       process={message.process ?? []}
       isStreaming={message.isStreaming}
       citations={citations}
-      onCitationClick={onCitationClick}
+      citationToDisplay={citationDisplay.toDisplay}
       composingTool={
         message.executionId === null ? (message.composingTool ?? null) : null
       }
@@ -229,7 +238,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         <Markdown
           content={message.content}
           citations={citations}
-          onCitationClick={onCitationClick}
+          citationToDisplay={citationDisplay.toDisplay}
           isStreaming={message.isStreaming}
         />
       ) : hideContentForCheckpoint ? null : (
@@ -242,7 +251,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           <Markdown
             content={message.content}
             citations={citations}
-            onCitationClick={onCitationClick}
+            citationToDisplay={citationDisplay.toDisplay}
             isStreaming={false}
           />
         </CollapsibleSpeech>
@@ -321,8 +330,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       {citations.length > 0 && (
         <SourceCards
           citations={citations}
-          flash={citeFlash}
-          referenced={referenced}
+          displayMap={citationDisplay}
           turnKey={projectionId}
         />
       )}

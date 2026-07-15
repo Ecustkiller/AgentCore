@@ -6,16 +6,23 @@ interface MdNode {
   value?: string;
   url?: string;
   children?: MdNode[];
+  data?: {
+    hName?: string;
+    hProperties?: Record<string, string>;
+  };
 }
 
 const cite = (n: number): MdNode => ({
-  type: "link",
-  url: `cite:${n}`,
+  type: "cite",
+  data: {
+    hName: "citemark",
+    hProperties: { dataN: String(n) },
+  },
   children: [{ type: "text", value: String(n) }],
 });
 
 describe("splitCitationText", () => {
-  it("converts in-range markers to cite links and keeps surrounding text", () => {
+  it("converts in-range markers to citemark nodes and keeps surrounding text", () => {
     expect(splitCitationText("see [1] and [2] here", 2)).toEqual([
       { type: "text", value: "see " },
       cite(1),
@@ -47,7 +54,7 @@ describe("remarkCitations attacher", () => {
     return tree;
   };
 
-  it("rewrites markers inside paragraph text", () => {
+  it("rewrites markers inside paragraph text via hProperties", () => {
     const tree: MdNode = {
       type: "root",
       children: [

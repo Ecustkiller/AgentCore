@@ -1,4 +1,6 @@
-"""CEO coordination tools: update_synthesis + cancel_worker + resolve_escalation."""
+"""CEO coordination tools: update_synthesis + cancel_worker + resolve_escalation
++ queue_user_message.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +9,7 @@ from typing import Any
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.runtime.coordination.session import active_coordination
-from agentcore.runtime.events import team_synthesis_preview
+from agentcore.runtime.events import team_synthesis_preview, user_interjection
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 
@@ -113,7 +115,8 @@ class CancelWorkerTool:
             name="cancel_worker",
             description=(
                 "【仅协调模式】终止某个仍在运行的 worker。"
-                "追加新队员请用 replan(add=…)，不要另造原语。"
+                "协调进行中要追加新队员：再调 delegate（合并进同一张协作图），不必等全队完成；"
+                "若刚收到『计划已让出』波边界简报，则用 replan(add=…) 接到当前暂停计划。"
             ),
             parameters={
                 "type": "object",
@@ -308,5 +311,121 @@ class ResolveEscalationTool:
             output=(
                 f"已将裁决回传给 worker {run_id}"
                 f"{'（经用户征询）' if via_user else ''}，队员将据此继续。"
+            ),
+        )
+
+
+class QueueUserMessageTool:
+    """Defer an unrelated mid-flight user interjection to the conversation turn queue."""
+
+    def __init__(self, *, sink: Any) -> None:
+        self._sink = sink
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="queue_user_message",
+            description=(
+                "【仅协调模式】把老板的中途插话转入对话级排队（排到当前回合结束后的下一回合）。"
+                "仅当插话与当前团队任务无关、应独立开新回合时使用。"
+                "相关插话请图内处置（update_synthesis / delegate / cancel_worker），不要调本工具。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "interjection_id": {
+                        "type": "string",
+                        "description": "协调事件里的 interjection_id。",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "可选：为何转入排队（用户可见）。",
+                    },
+                },
+                "required": ["interjection_id"],
+            },
+            category=ToolCategory.ORCHESTRATION,
+            approval=ToolApproval.NEVER,
+        )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        session = active_coordination(context.execution_id)
+        if session is None or not session.active:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error="当前不在协调模式——仅在协调模式启动团队后可用。",
+            )
+        iid = str(arguments.get("interjection_id") or "").strip()
+        if not iid:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error="queue_user_message 需要非空的 interjection_id。",
+            )
+        stashed = session.take_interjection(iid)
+        if stashed is None:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=(
+                    f"找不到插话 {iid}（已转排队、已失效，或 id 有误）。"
+                    "请核对协调事件里的 interjection_id。"
+                ),
+            )
+        reason = str(arguments.get("reason") or "").strip()
+        content = str(stashed.get("content") or "").strip()
+        conversation_id = str(
+            stashed.get("conversation_id") or session.conversation_id or ""
+        ).strip()
+        if not content or not conversation_id:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error="插话缺少 content / conversation_id，无法转入排队。",
+            )
+
+        from agentcore.runtime.turn_queue import new_queued_turn, turn_queue
+
+        status = turn_queue.enqueue(
+            conversation_id,
+            new_queued_turn(
+                content=content,
+                user_id=str(stashed.get("user_id") or ""),
+                attachments=list(stashed.get("attachments") or []),
+                requires_tools=bool(stashed.get("requires_tools")),
+                x_client_platform=stashed.get("x_client_platform"),
+                llm_credentials=stashed.get("llm_credentials"),
+                llm_supports_tools=stashed.get("llm_supports_tools"),
+            ),
+        )
+        note = reason or "与当前团队任务无关，已排到下一回合"
+        self._sink.emit(
+            user_interjection(
+                interjection_id=iid,
+                execution_id=session.execution_id,
+                content=content,
+                status="queued",
+                note=note,
+            )
+        )
+        logger.info(
+            "coordination.user_interjection_queued",
+            execution_id=session.execution_id,
+            interjection_id=iid,
+            queue_id=status.queue_id,
+            position=status.position,
+        )
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output=(
+                f"已将插话转入对话级排队（位置 {status.position}/"
+                f"{status.queue_depth}）。当前回合结束后自动起新回合处理。"
+                "用户可见「已排队」徽标。"
             ),
         )

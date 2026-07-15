@@ -49,6 +49,10 @@
       {
         "kind": "content",
         "text": "我需要运行代码。"
+      },
+      {
+        "kind": "approval",
+        "approval_id": "tc1"
       }
     ],
     "citations": [],
@@ -77,6 +81,7 @@
     "debateOpening": null,
     "teamSynthesisPreview": null,
     "turnWarning": null,
-    "teamNotes": []
+    "teamNotes": [],
+    "userInterjections": []
   }
 }

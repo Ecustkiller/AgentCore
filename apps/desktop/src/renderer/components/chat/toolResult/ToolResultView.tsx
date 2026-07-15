@@ -3,6 +3,7 @@ import { cleanSourceTitle } from "@/lib/citations";
 import type {
   CodeExecDisplay,
   MemoryConsultDisplay,
+  ReadUrlDisplay,
   SkillConsultDisplay,
   ToolDisplay,
   WebSearchDisplay,
@@ -29,6 +30,12 @@ function asString(v: unknown): string | null {
 
 function isWebSearchDisplay(d: unknown): d is WebSearchDisplay {
   return !!d && Array.isArray((d as { results?: unknown }).results);
+}
+
+function isReadUrlDisplay(d: unknown): d is ReadUrlDisplay {
+  if (!d) return false;
+  const x = d as { url?: unknown; content?: unknown };
+  return typeof x.url === "string" && typeof x.content === "string";
 }
 
 function isCodeExecDisplay(d: unknown): d is CodeExecDisplay {
@@ -82,6 +89,13 @@ export function toolResultPeek(d: ToolResultData): string {
   if (isWebSearchDisplay(d.display)) {
     const n = d.display.results.length;
     return n > 0 ? `${n} 条结果` : "无结果";
+  }
+  if (isReadUrlDisplay(d.display)) {
+    const title =
+      cleanSourceTitle(d.display.title) || d.display.site || d.display.url;
+    const site = d.display.site?.trim();
+    if (site && title !== site) return clampLine(`${title} · ${site}`);
+    return clampLine(title);
   }
   if (isCodeExecDisplay(d.display)) {
     const code =
@@ -152,6 +166,52 @@ function WebSearchResult({ display }: { display: WebSearchDisplay }) {
             </span>
           </a>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/** Single-page read card (工具结果富渲染): a source-style header (favicon · title ·
+ * site, opens in the system browser) plus the extracted body preview — mirrors
+ * {@link WebSearchResult} / {@link SourceCards} for the header and the bordered
+ * header+body shell of {@link SkillConsultResult}. */
+function ReadUrlResult({ display }: { display: ReadUrlDisplay }) {
+  const title =
+    cleanSourceTitle(display.title) || display.site || display.url;
+  const body = (display.content ?? "").replace(/\n+$/, "");
+  return (
+    <div className="mt-1 overflow-hidden rounded-lg border border-border">
+      <a
+        href={display.url}
+        target="_blank"
+        rel="noreferrer"
+        className="flex items-start gap-2 border-border/60 border-b bg-muted/40 px-2.5 py-1.5 transition-colors hover:bg-accent"
+      >
+        <Favicon
+          site={display.site}
+          title={display.title}
+          size={16}
+          className="mt-0.5"
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-medium text-foreground">
+            {title}
+          </span>
+          {display.site && (
+            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+              {display.site}
+            </span>
+          )}
+        </span>
+      </a>
+      <div className="max-h-72 overflow-auto bg-muted/30 px-3 py-2 text-xs leading-relaxed">
+        {body ? (
+          <pre className="whitespace-pre-wrap break-words text-foreground/90">
+            {body}
+          </pre>
+        ) : (
+          <span className="text-muted-foreground/60">（无正文）</span>
+        )}
       </div>
     </div>
   );
@@ -391,14 +451,17 @@ function TextResult({
 
 /**
  * Rich rendering of a finished tool call (工具结果富渲染), keyed off the tool name
- * (形状是数据不是模式): web_search → result cards, code_execute → a terminal view,
- * str_replace → a red/green diff, file_write → a content card (the last two from
- * the call args). Anything else — or a tool whose rich data is absent — falls back
- * to the model-facing text result.
+ * (形状是数据不是模式): web_search → result cards, read_url → source card + body,
+ * code_execute → a terminal view, str_replace → a red/green diff, file_write → a
+ * content card (the last two from the call args). Anything else — or a tool whose
+ * rich data is absent — falls back to the model-facing text result.
  */
 export function ToolResultView({ data }: { data: ToolResultData }) {
   if (isWebSearchDisplay(data.display)) {
     return <WebSearchResult display={data.display} />;
+  }
+  if (isReadUrlDisplay(data.display)) {
+    return <ReadUrlResult display={data.display} />;
   }
   if (isCodeExecDisplay(data.display)) {
     return <CodeExecResult display={data.display} />;

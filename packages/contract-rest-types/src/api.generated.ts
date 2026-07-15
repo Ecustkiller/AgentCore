@@ -1470,6 +1470,12 @@ export interface paths {
          *     kills the turn (案例 1: 7-min 断连即丢交付) — it finishes + persists in the
          *     background; an explicit 停止 routes through ``POST .../stop`` instead.
          *
+         *     运行中发消息:
+         *     - **协调模式**（live ``CoordinationSession``）→ 插话进 CEO 事件队列，HTTP 202
+         *       ``delivered``；CEO 图内处置或 ``queue_user_message`` 转对话级排队。
+         *     - **经典阻塞路径**（无协调 session）→ 对话级 FIFO，HTTP 202 ``queued``。
+         *     - **热路 pending**（approval / escalation / …）仍 409（D9）。
+         *
          *     Gated before the stream starts (成本配额与计费.md §一) so a refused turn gets a
          *     clean error instead of a half-opened SSE: per-user rate limit first (sheds a
          *     flooding account before any resource DB work), then ownership, then the
@@ -1633,8 +1639,8 @@ export interface paths {
          *
          *     Settlement 预写 (D8)：① peek frame → ② live-task drain（不 cancel；仍 live ⇒ 409）→
          *     ③ ``*_resolved`` 落库成功 → ④ ``claim_paused_turn`` → ⑤ resume pipeline。settlement
-         *     写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状 404。Pipeline 启动
-         *     失败走现有 restore 回滚。
+         *     写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状 404。settlement 落库后
+         *     pipeline 取消/失败 ⇒ interrupted_after_decision（D1：不复活决策卡）。
          *
          *     ``body.selected`` carries the user's ask_user picks (ignored for plan_review).
          *     Gated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota
@@ -10863,7 +10869,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful Response */
+            /** @description SSE stream for an immediately started turn */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10871,6 +10877,20 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+            /** @description In-flight: coordination → SendMessageInterjectedResponse (delivered); classic → SendMessageQueuedResponse (queued) */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Hot-path pending interaction blocks new messages */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

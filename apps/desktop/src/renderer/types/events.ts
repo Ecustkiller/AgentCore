@@ -23,6 +23,20 @@ export interface WebSearchDisplay {
   results: WebSearchHit[];
 }
 
+/** `read_url` rich result (工具结果富渲染): a single source-style card header
+ * (favicon · title · site) plus the extracted page body for the expandable
+ * preview. Mirrors citation fields so it visually aligns with WebSearchResult /
+ * SourceCards; the client never parses the model-facing JSON `result`. */
+export interface ReadUrlDisplay {
+  url: string;
+  title: string;
+  /** Display host (sans www.), parsed server-side so the card needs no URL work. */
+  site?: string;
+  snippet?: string;
+  /** Extracted main text (may be size-capped on the wire via `_cap_display`). */
+  content: string;
+}
+
 /** `code_execute` rich result: a terminal-style stdout/stderr view + exit code. */
 export interface CodeExecDisplay {
   stdout: string;

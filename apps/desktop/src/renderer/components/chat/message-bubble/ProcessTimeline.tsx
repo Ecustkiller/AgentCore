@@ -1,4 +1,3 @@
-import { EscalationCards } from "@/components/chat/EscalationCard";
 import { InlineTeamGraph } from "@/components/chat/InlineTeamGraph";
 import { Markdown } from "@/components/chat/Markdown";
 import {
@@ -92,14 +91,14 @@ function ProcessRow({
   step,
   streaming,
   citations,
-  onCitationClick,
+  citationToDisplay,
   turnKey,
   rowKey,
 }: {
   step: ProcessStep;
   streaming: boolean;
   citations: Citation[];
-  onCitationClick: (n: number) => void;
+  citationToDisplay?: ReadonlyMap<number, number>;
   /** 回合作用域（= messageId）：给了才持久化本行的折叠态；缺省走会话态。 */
   turnKey?: string;
   /** 本行的稳定标识（{@link timelineNodeKeys}）——标记中段插入不再位移它。 */
@@ -119,7 +118,7 @@ function ProcessRow({
       <Markdown
         content={step.text}
         citations={citations}
-        onCitationClick={onCitationClick}
+        citationToDisplay={citationToDisplay}
         isStreaming={streaming}
       />
     );
@@ -141,7 +140,7 @@ export function ProcessTimeline({
   process,
   isStreaming,
   citations,
-  onCitationClick,
+  citationToDisplay,
   composingTool,
   fallbackContent,
   messageId,
@@ -158,7 +157,7 @@ export function ProcessTimeline({
   process: ProcessStep[];
   isStreaming: boolean;
   citations: Citation[];
-  onCitationClick: (n: number) => void;
+  citationToDisplay?: ReadonlyMap<number, number>;
   composingTool: { toolName: string; chars: number } | null;
   fallbackContent: string;
   messageId?: string;
@@ -201,32 +200,42 @@ export function ProcessTimeline({
     const nodeKey = nodeKeys[i];
     if (node.kind === "team") {
       return messageId ? (
-        <Fragment key={nodeKey}>
-          <InlineTeamGraph
-            messageId={messageId}
-            executionId={node.execution_id}
-            journal={journal}
-          />
-          <EscalationCards
-            messageId={messageId}
-            conversationId={conversationId}
-            interactive={isStreaming}
-          />
-        </Fragment>
+        <InlineTeamGraph
+          key={nodeKey}
+          messageId={messageId}
+          executionId={node.execution_id}
+          journal={journal}
+        />
       ) : null;
     }
     if (
       node.kind === "checkpoint" ||
       node.kind === "ask" ||
       node.kind === "plan_review" ||
-      node.kind === "team_preview"
+      node.kind === "team_preview" ||
+      node.kind === "escalation" ||
+      node.kind === "approval" ||
+      node.kind === "delegation_authorization"
     ) {
-      return renderTimelineInteractionCard(node.kind, node, {
-        checkpoints,
-        nonBlockingAsks,
-        planReviews,
-        teamPreviews,
-      });
+      return (
+        <div key={nodeKey}>
+          {renderTimelineInteractionCard(
+            node.kind,
+            node,
+            {
+              checkpoints,
+              nonBlockingAsks,
+              planReviews,
+              teamPreviews,
+            },
+            {
+              messageId: messageId ?? "",
+              conversationId,
+              interactive: isStreaming,
+            },
+          )}
+        </div>
+      );
     }
     if (node.kind === "tool-group") {
       return (
@@ -246,7 +255,7 @@ export function ProcessTimeline({
         step={step}
         streaming={live}
         citations={citations}
-        onCitationClick={onCitationClick}
+        citationToDisplay={citationToDisplay}
         turnKey={messageId}
         rowKey={nodeKey}
       />
@@ -270,8 +279,8 @@ export function ProcessTimeline({
                   onClick={toggleProcess}
                   className="inline-flex items-center gap-1 text-sm text-muted-foreground"
                 >
-                  <ChevronRight className="size-4 shrink-0" aria-hidden />
                   {processSummary}
+                  <ChevronRight className="size-4 shrink-0" aria-hidden />
                 </button>
               );
             }
@@ -283,8 +292,8 @@ export function ProcessTimeline({
                   onClick={toggleProcess}
                   className="inline-flex items-center gap-1 text-sm text-muted-foreground"
                 >
-                  <ChevronDown className="size-4 shrink-0" aria-hidden />
                   {processSummary}
+                  <ChevronDown className="size-4 shrink-0" aria-hidden />
                 </button>
                 {renderNode(node, i)}
               </Fragment>
@@ -299,7 +308,7 @@ export function ProcessTimeline({
         <Markdown
           content={fallbackContent}
           citations={citations}
-          onCitationClick={onCitationClick}
+          citationToDisplay={citationToDisplay}
           isStreaming={isStreaming}
         />
       )}

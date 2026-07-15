@@ -193,6 +193,16 @@ export interface ProjectedTeamNote {
   source?: "ceo" | "worker" | "inherited";
 }
 
+/** Mid-flight user interjection into a live coordination turn (`user_interjection`).
+ * Same `interjectionId` keeps latest `status` (delivered → queued). */
+export interface ProjectedUserInterjection {
+  interjectionId: string;
+  executionId: string;
+  content: string;
+  status: "delivered" | "queued" | string;
+  note: string | null;
+}
+
 /** Interaction lifecycle status in the projected turn (提问确认统一重构 P3). */
 export type InteractionStatus = "pending" | "resolved" | "orphaned";
 
@@ -324,4 +334,6 @@ export interface ProjectedTurn {
   /** 团队便签墙 (§2.2 通): the notes workers broadcast to their siblings this turn (`team_note_posted`),
    * in post order. Journaled, so it replays on reload. Empty for a turn with no team notes. */
   teamNotes: ProjectedTeamNote[];
+  /** 协调中用户插话（`user_interjection`，同 interjectionId 保最新 status）。Empty when none. */
+  userInterjections: ProjectedUserInterjection[];
 }

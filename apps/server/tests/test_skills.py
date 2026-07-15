@@ -210,6 +210,10 @@ def test_team_orchestration_skill_teaches_delegate_knobs():
     assert "coordinate" in body and "coordinate=false" in body
     assert "depends_on" in body and "同一层" in body
     assert "嵌套委派" in body and "大模块" in body
+    # 纠正「一次只能一个 delegate / 同步阻塞到全队完成」误述：一回合一张图 + 同回合可再追加
+    assert "一回合一张协作图" in body
+    assert "再调" in body and "delegate" in body
+    assert "不必" in body or "不是" in body  # 否定「必须等全队完成」
 
 
 def test_team_orchestration_skill_teaches_constraint_vs_solution_and_outline_step():

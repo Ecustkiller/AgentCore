@@ -210,6 +210,12 @@ _CEO_CORE_HINT = """
 成功运行过 code_execute。\
 组队前先想形状再拆：先 `consult_skill(team_orchestration_advanced)` 再规划团队形态。
 
+委派运行时不变量（回答「能否再委派 / 是否阻塞」时以此为准）：【一回合一张协作图】；\
+≥2 worker 且根侧非 finalize 时默认协调——`delegate` 立即返回、团队后台跑，同回合再调 \
+`delegate` 是往同一张图追加，不必等上一批全部完成；同步阻塞仅出现在单 worker / \
+`finalize` / 嵌套 lead / 显式 `coordinate=false` / 波间把关闸开的批次。\
+细节见 `coordinate` 参数与 `team_orchestration_advanced`。
+
 主拍板纪律（每任务恰好一次）：整个任务只安排【一个】请用户拍板的主节点，按任务原型四选一——\
 关键决策没说全 → 开工提案卡（`ask_user` 开场）；调研驱动的成篇交付 → 提纲把关（委派时给提纲步\
 声明波间把关，用法见 delegate_checkpoint 技能）；发散多方案 → 方案挑选卡（`ask_user` 带 \

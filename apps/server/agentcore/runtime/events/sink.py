@@ -58,11 +58,12 @@ def _marker_spec_for_required(
     event_type: EventType | str,
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], bool] | None:
-    """Build (marker_step, before_last_team) for a ``*_required`` / ask surface event.
+    """Build (marker_step, before_last_team) for a timeline-marker surface event.
 
-    Shared by ``EventSink._accumulate_process`` and suspension capture (G7) so live
-    emit and ``turn_paused`` snapshot stay lockstep. Returns None when the event is
-    not a marker surface or the id is empty.
+    Covers ``*_required`` / ask / raised ``run_escalation`` (统一时间线二期). Shared by
+    ``EventSink._accumulate_process`` and suspension capture (G7) so live emit and
+    ``turn_paused`` snapshot stay lockstep. Returns None when the event is not a
+    marker surface or the id is empty.
     """
     t = event_type if isinstance(event_type, EventType) else EventType(event_type)
     if t == EventType.CHECKPOINT_REQUIRED:
@@ -85,6 +86,24 @@ def _marker_spec_for_required(
         if not cid:
             return None
         return {"kind": "team_preview", "checkpoint_id": cid}, True
+    if t in (EventType.ESCALATION_REQUIRED, EventType.RUN_ESCALATION):
+        eid = payload.get("escalation_id") or ""
+        if not eid:
+            return None
+        return {"kind": "escalation", "escalation_id": eid}, False
+    if t == EventType.APPROVAL_REQUIRED:
+        aid = payload.get("approval_id") or ""
+        if not aid:
+            return None
+        return {"kind": "approval", "approval_id": aid}, False
+    if t == EventType.DELEGATION_AUTHORIZATION_REQUIRED:
+        aid = payload.get("authorization_id") or ""
+        if not aid:
+            return None
+        # 产品修正（统一时间线二期落地后拍板）：委派授权与开工卡同属「放行开工」族，
+        # 统一叙事 授权 → 团队干活 —— 与 team_preview 同锚定，排协作图 team 标记之前。
+        # 仅此一 kind；escalation / approval 维持事件时刻、排图后。
+        return {"kind": "delegation_authorization", "authorization_id": aid}, True
     return None
 
 
@@ -419,9 +438,13 @@ class EventSink:
             EventType.QUESTION_POSTED,
             EventType.PLAN_REVIEW_REQUIRED,
             EventType.TEAM_PREVIEW_REQUIRED,
+            EventType.ESCALATION_REQUIRED,
+            EventType.RUN_ESCALATION,
+            EventType.APPROVAL_REQUIRED,
+            EventType.DELEGATION_AUTHORIZATION_REQUIRED,
         ):
-            # Positional card anchors — shared builder with synthesize_required_marker (G7).
-            # Dedup scans seeded⊕live; insert targets live only.
+            # Positional card / 痕迹 anchors — shared builder with synthesize_required_marker
+            # (G7). Dedup scans seeded⊕live; insert targets live only.
             spec = _marker_spec_for_required(t, event.payload)
             if spec is None:
                 return
@@ -477,7 +500,8 @@ class EventSink:
 
     def process_timeline(self) -> list[dict[str, Any]] | None:
         # Persist the timeline whenever it carries STRUCTURE beyond the CEO's own text —
-        # a tool, the team graph, or an interaction marker (checkpoint / ask / plan_review).
+        # a tool, the team graph, or an interaction / 痕迹 marker (checkpoint / ask /
+        # plan_review / team_preview / escalation / approval / delegation_authorization).
         # A pure reasoning/content turn needs none (the content scalar IS the answer, and
         # reasoning rides its own column), matching the fold's "tool-less single-agent turn
         # → no process" so live / reload / golden stay aligned.

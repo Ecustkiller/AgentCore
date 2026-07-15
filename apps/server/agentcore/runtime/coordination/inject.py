@@ -25,7 +25,10 @@ def format_coordination_events(
     lines.append("")
     lines.append(
         "可用工具：update_synthesis(draft) 更新草稿；cancel_worker(run_id, reason) 终止队员；"
-        "replan(add=…) 追加队员；resolve_escalation(run_id, answer) 兑现阻塞升级裁决；"
+        "delegate 再派（同回合追加进同一张协作图，不必等全队完成）；"
+        "replan(add=…) 仅在『计划已让出』波边界追加；"
+        "resolve_escalation(run_id, answer) 兑现阻塞升级裁决；"
+        "queue_user_message(interjection_id, reason) 把无关插话转入对话级排队（下一回合）；"
         "ask_user 向用户请示（偏好/授权/费用类须先问用户再 resolve）。"
         "全部完成后做最终合成（走 content_delta），然后退出协调。"
     )
@@ -118,6 +121,15 @@ def _format_one(session: CoordinationSession, ev: CoordinationEvent) -> str:
         return (
             f"- boundary_yield（{reason}）：计划在波边界让出——"
             f"{brief or '请用 replan 续跑或收口'}。"
+        )
+    if ev.kind is CoordinationEventKind.USER_INTERJECTION:
+        iid = p.get("interjection_id") or "?"
+        text = (p.get("content") or "").strip()
+        return (
+            f"- user_interjection（id={iid}）：老板中途插话——「{text}」\n"
+            "  相关：图内处置（update_synthesis / delegate 追加队员 / cancel_worker）。\n"
+            "  无关（独立新活）：必须 queue_user_message(interjection_id=…) 转入对话级排队，"
+            "当前回合结束后自动起新回合；勿假装已办、勿丢弃。"
         )
     return f"- {ev.kind.value}：{p}"
 

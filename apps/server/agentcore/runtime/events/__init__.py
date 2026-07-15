@@ -69,6 +69,7 @@ from agentcore.runtime.events.run import (
     run_tool_progress,
     team_note_posted,
     team_synthesis_preview,
+    user_interjection,
 )
 from agentcore.runtime.events.sink import EventSink
 from agentcore.runtime.events.types import EventType, FinishReason, SSEEvent
@@ -134,6 +135,7 @@ __all__ = [
     "run_escalation_gate",
     "team_note_posted",
     "team_synthesis_preview",
+    "user_interjection",
     "run_completed",
     "run_failed",
     "run_cancelled",

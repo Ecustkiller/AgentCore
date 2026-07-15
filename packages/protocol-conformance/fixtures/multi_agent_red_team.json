@@ -969,6 +969,7 @@
     "debateOpening": "红队开场：先压测凭证存储与会话固定。",
     "teamSynthesisPreview": null,
     "turnWarning": null,
-    "teamNotes": []
+    "teamNotes": [],
+    "userInterjections": []
   }
 }

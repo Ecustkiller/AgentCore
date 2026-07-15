@@ -1449,6 +1449,7 @@
     "debateOpening": "这场要定的是该不该上方案 A，先从最要害的成本与收益切入。",
     "teamSynthesisPreview": null,
     "turnWarning": null,
-    "teamNotes": []
+    "teamNotes": [],
+    "userInterjections": []
   }
 }

@@ -1,7 +1,11 @@
 import { DebateView, LiveDebateNarrative } from "@/components/DebateView";
 import { Markdown } from "@/components/Markdown";
 import { NonBlockingAskCard } from "@/components/NonBlockingAskCard";
-import { TeamView } from "@/components/TeamView";
+import {
+  EscalationAnswer,
+  TeamView,
+  escalationDetail,
+} from "@/components/TeamView";
 import {
   CONTEXT_CHANNEL_LABEL,
   toolDetail,
@@ -12,7 +16,12 @@ import {
   copyText,
   formatMessageExport,
 } from "@/lib/messageExport";
-import type { NonBlockingAsk, RunToolCall } from "@/protocol/fold";
+import type {
+  EscalationSlot,
+  HotDecisionTrace,
+  NonBlockingAsk,
+  RunToolCall,
+} from "@/protocol/fold";
 // Rich assistant rendering shared by live turns and history replay (前端技术与架构 §七 ·
 // 富渲染 + 多 Agent 团队视图). One {@link AssistantContent} consumes the same fields whether
 // they come from the live fold (ProjectedTurn) or a persisted message (MessageDetail).
@@ -80,6 +89,8 @@ export function AssistantContent({
   debate,
   debateRounds,
   asks,
+  escalationSlots,
+  hotTraces,
   toolPhases,
   onFill,
 }: {
@@ -100,6 +111,10 @@ export function AssistantContent({
    *  read off raw events via {@link extractAsks} (NOT the ProjectedTurn). The timeline's
    *  `ask` marker resolves to its card here; empty/absent → the marker no-ops. */
   asks?: NonBlockingAsk[];
+  /** 升级时间线槽 (统一时间线二期): escalation_id → card body (extractEscalationSlots). */
+  escalationSlots?: Map<string, EscalationSlot>;
+  /** 热审批/委派授权痕迹 (D3): id → resolved 轻行内容 (extractHotDecisionTraces). */
+  hotTraces?: Map<string, HotDecisionTrace>;
   /** 工具执行阶段进度 (联网搜索前端展示优化): tool_call_id → latest coarse phase for a still-running
    *  tool, from the transport-only live sibling {@link extractToolPhases}. Live turns only; absent
    *  on history replay (the events are never journaled) → tool rows show plain status. */
@@ -117,14 +132,15 @@ export function AssistantContent({
         <LiveDebateNarrative rounds={debateRounds} />
       ) : null}
       {process && process.length > 0 ? (
-        // 统一团队时间线: the team graph rides its inline `team` marker (协作图时间线落点);
-        // the checkpoint·ask·plan_review markers are anchors for desktop cards — mobile owns
-        // those via its PauseCard, so they no-op inline here.
+        // 统一团队时间线: the team graph rides its inline `team` marker; escalation /
+        // approval / delegation markers render at their own slots (二期).
         <ProcessTimeline
           steps={process}
           citations={citations}
           team={hasTeam ? team : undefined}
           asks={asks}
+          escalationSlots={escalationSlots}
+          hotTraces={hotTraces}
           toolPhases={toolPhases}
           onFill={onFill}
         />
@@ -336,6 +352,8 @@ function ProcessTimeline({
   citations,
   team,
   asks,
+  escalationSlots,
+  hotTraces,
   toolPhases,
   onFill,
 }: {
@@ -343,6 +361,8 @@ function ProcessTimeline({
   citations?: Citation[];
   team?: TeamProjection;
   asks?: NonBlockingAsk[];
+  escalationSlots?: Map<string, EscalationSlot>;
+  hotTraces?: Map<string, HotDecisionTrace>;
   toolPhases?: Map<string, ToolPhase>;
   onFill?: (text: string) => void;
 }) {
@@ -373,6 +393,57 @@ function ProcessTimeline({
           return ask && onFill ? (
             <NonBlockingAskCard key={ask.id} ask={ask} onFill={onFill} />
           ) : null;
+        }
+        if (node.kind === "escalation") {
+          const slot = escalationSlots?.get(node.escalation_id);
+          if (!slot) return null;
+          const live =
+            slot.esc.status === "pending" &&
+            team?.escalationsInteractive &&
+            team.conversationId
+              ? slot.id
+              : undefined;
+          if (live && team?.conversationId) {
+            return (
+              <EscalationAnswer
+                key={slot.id}
+                esc={slot.esc}
+                escalationId={live}
+                conversationId={team.conversationId}
+              />
+            );
+          }
+          const detail = escalationDetail(slot.esc);
+          return (
+            <div key={slot.id} className="run-escalation">
+              <span className="run-escalation-q">↑ {slot.esc.question}</span>
+              {detail && <span className="run-escalation-a">{detail}</span>}
+            </div>
+          );
+        }
+        // 热审批 / 委派授权痕迹 (D3): resolved 后在 required 时刻槽显轻状态行；
+        // pending 标记在、行不显（操作面在 PauseCard）。对齐桌面 HotDecisionTrace。
+        if (node.kind === "approval") {
+          const t = hotTraces?.get(node.approval_id);
+          if (!t?.resolved) return null;
+          const tool = t.toolName ? toolLabel(t.toolName) : "工具";
+          return (
+            <div key={`appr-${node.approval_id}`} className="hot-trace">
+              ✓ {t.denied ? `已拒绝 · ${tool}` : `已批准 · ${tool}`}
+            </div>
+          );
+        }
+        if (node.kind === "delegation_authorization") {
+          const t = hotTraces?.get(node.authorization_id);
+          if (!t?.resolved) return null;
+          return (
+            <div
+              key={`dauth-${node.authorization_id}`}
+              className="hot-trace"
+            >
+              ✓ {t.denied ? "已拒绝委派授权" : "已授权开工"}
+            </div>
+          );
         }
         // checkpoint·plan_review markers anchor desktop cards; mobile owns these blocking
         // interactions via its PauseCard surface, so they render nothing inline.

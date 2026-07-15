@@ -11,10 +11,10 @@
  * scores `evidence` / penalizes unverified-passed-as-fact off the same markers —
  * so 辩手标 → 裁判据标记记分 → 前端渲成徽章 read one convention end to end.
  *
- * Unlike {@link import("./remarkCitations").remarkCitations} (which encodes into a
- * `cite:n` link url), this carries its payload on `data.hProperties` — react-markdown's
- * `urlTransform` strips non-safe link schemes, but a custom element's data-props
- * survive. Markers inside code / inline-code / links are left verbatim. No external
+ * Unlike {@link import("./remarkCitations").remarkCitations} (which also carries
+ * its payload on `data.hProperties` as a custom `citemark` element), this keeps
+ * evidence markers off the link/`urlTransform` path so react-markdown never strips
+ * them. Markers inside code / inline-code / links are left verbatim. No external
  * mdast/unist dependency — a small hand-rolled tree walk, mirroring remarkCitations.
  */
 

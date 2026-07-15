@@ -9,6 +9,8 @@
 // @agentcore/contract-types breaks this build until it is handled here.
 
 import type {
+  ApprovalRequiredPayload,
+  ApprovalResolvedPayload,
   AskAssumption,
   AskQuestion,
   AskStyleOption,
@@ -21,6 +23,8 @@ import type {
   DebateResultPayload,
   DebateRoundPayload,
   DebateRoundStartedPayload,
+  DelegationAuthorizationRequiredPayload,
+  DelegationAuthorizationResolvedPayload,
   EscalationRequiredPayload,
   EscalationResolvedPayload,
   FollowupsGeneratedPayload,
@@ -148,6 +152,48 @@ function pushTeamPreviewMarker(process: ProcessStep[], id: string): void {
   process.push(marker);
 }
 
+/** Drop an `escalation` marker (blocking required or non-blocking raised). */
+function pushEscalationMarker(process: ProcessStep[], id: string): void {
+  if (!id) return;
+  if (process.some((s) => s.kind === "escalation" && s.escalation_id === id))
+    return;
+  process.push({ kind: "escalation", escalation_id: id });
+}
+
+/** Drop an `approval` marker (热审批痕迹锚点). */
+function pushApprovalMarker(process: ProcessStep[], id: string): void {
+  if (!id) return;
+  if (process.some((s) => s.kind === "approval" && s.approval_id === id)) return;
+  process.push({ kind: "approval", approval_id: id });
+}
+
+/** Drop a `delegation_authorization` marker (委派授权痕迹锚点). 产品修正：与
+ * team_preview 同锚定（「放行开工」族，授权 → 团队干活）—— insert before the last
+ * `team` marker when one exists; else append. Mirrors the backend oracle. */
+function pushDelegationAuthorizationMarker(
+  process: ProcessStep[],
+  id: string,
+): void {
+  if (!id) return;
+  if (
+    process.some(
+      (s) => s.kind === "delegation_authorization" && s.authorization_id === id,
+    )
+  )
+    return;
+  const marker = {
+    kind: "delegation_authorization" as const,
+    authorization_id: id,
+  };
+  for (let i = process.length - 1; i >= 0; i--) {
+    if (process[i].kind === "team") {
+      process.splice(i, 0, marker);
+      return;
+    }
+  }
+  process.push(marker);
+}
+
 /** Fold one 逐轮叙事 update (`debate_round_started` → focus only, verdict null;
  * `debate_round` → full) into the accumulated list, keyed by `round_no` (a later
  * `debate_round` overwrites the focus-only entry — it carries focus too), kept
@@ -236,6 +282,14 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
   let turnWarning: string | null = null;
   // 团队便签墙 (§2.2 通): notes broadcast to siblings this turn, in post order (deduped by noteId).
   const teamNotes: ProjectedTeamNote[] = [];
+  const userInterjections: {
+    interjectionId: string;
+    executionId: string;
+    content: string;
+    status: string;
+    note: string | null;
+  }[] = [];
+  const userInterjectionIndex = new Map<string, number>();
   let sawError = false;
   const checkpointSteps = new Map<string, string[]>();
 
@@ -574,9 +628,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         break;
       }
       case "run_escalation": {
-        // 升级实时可见 (非阻塞): a worker flagged a decision/blocker for the CEO — append it
-        // to its run so the node carries a ⚠️ signal (mirrors desktop/oracle; conformance
-        // pins them equal). Transport-only; durable copy rides RunState.escalations.
+        // 升级实时可见 (非阻塞): append to run for ⚠️ badge; process marker for timeline slot.
         const p = ev.payload as RunEscalationPayload;
         const run = runById(p.run_id);
         if (run)
@@ -588,11 +640,11 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
             answer: null,
             kind: p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
           });
+        pushEscalationMarker(process, p.escalation_id);
         break;
       }
       case "escalation_required": {
-        // 阻塞式求决策: a worker SUSPENDED on a blocking escalate — append a `pending`
-        // card. awaiting=ceo → 等主管仲裁（不可答）；缺省 → 经典可答。
+        // 阻塞式求决策: pending card on run + positional escalation marker (二期 D1/D2).
         const p = ev.payload as EscalationRequiredPayload;
         const run = runById(p.run_id);
         if (run)
@@ -605,6 +657,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
             kind: p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
             ...(p.awaiting === "ceo" ? { awaiting: "ceo" as const } : {}),
           });
+        pushEscalationMarker(process, p.escalation_id);
         break;
       }
       case "escalation_resolved": {
@@ -697,8 +750,19 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         }
         break;
       }
-      case "approval_required":
+      case "approval_required": {
+        const p = ev.payload as ApprovalRequiredPayload;
+        pushApprovalMarker(process, p.approval_id);
+        break;
+      }
       case "approval_resolved":
+        break;
+      case "delegation_authorization_required": {
+        const p = ev.payload as DelegationAuthorizationRequiredPayload;
+        pushDelegationAuthorizationMarker(process, p.authorization_id);
+        break;
+      }
+      case "delegation_authorization_resolved":
         break;
       case "checkpoint_required": {
         const p = ev.payload as CheckpointRequiredPayload;
@@ -767,8 +831,6 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "tool_use_progress":
       case "batch_metrics":
       case "run_escalation_gate":
-      case "delegation_authorization_required":
-      case "delegation_authorization_resolved":
       case "interaction_orphaned":
       case "workspace_op_required":
       case "handoff_snapshot_done":
@@ -795,6 +857,33 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       }
       case "team_synthesis_preview": {
         teamSynthesisPreview = ev.payload as TeamSynthesisPreviewPayload;
+        break;
+      }
+      case "user_interjection": {
+        const p = ev.payload as {
+          interjection_id?: string;
+          execution_id?: string;
+          content?: string;
+          status?: string;
+          note?: string | null;
+        };
+        const iid = (p.interjection_id || "").trim();
+        if (iid) {
+          const leaf = {
+            interjectionId: iid,
+            executionId: p.execution_id || "",
+            content: p.content || "",
+            status: p.status || "delivered",
+            note: typeof p.note === "string" ? p.note : null,
+          };
+          const idx = userInterjectionIndex.get(iid);
+          if (idx === undefined) {
+            userInterjectionIndex.set(iid, userInterjections.length);
+            userInterjections.push(leaf);
+          } else {
+            userInterjections[idx] = leaf;
+          }
+        }
         break;
       }
       default:
@@ -855,6 +944,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
     teamSynthesisPreview,
     turnWarning,
     teamNotes,
+    userInterjections,
   };
 }
 
@@ -977,6 +1067,127 @@ export function extractAsks(events: SSEEvent[]): NonBlockingAsk[] {
     });
   }
   return order.map((id) => byId.get(id) as NonBlockingAsk);
+}
+
+/** 热审批 / 委派授权痕迹 (统一时间线二期 D3): resolved 后在其 required 时刻的标记槽
+ * 显一条轻状态行；pending 期间标记在、行不显（操作面在 PauseCard）。Transport-only
+ * sibling of {@link fold}, keyed by approval_id / authorization_id. */
+export interface HotDecisionTrace {
+  kind: "approval" | "delegation_authorization";
+  /** 已裁决才渲染行（D3 resolved 门控）。 */
+  resolved: boolean;
+  /** deny → 「已拒绝」形态。 */
+  denied: boolean;
+  /** approval 的工具名（委派授权无）。 */
+  toolName?: string;
+}
+
+export function extractHotDecisionTraces(
+  events: SSEEvent[],
+): Map<string, HotDecisionTrace> {
+  const byId = new Map<string, HotDecisionTrace>();
+  for (const ev of events) {
+    if (ev.type === "approval_required") {
+      const p = ev.payload as ApprovalRequiredPayload;
+      if (!p.approval_id) continue;
+      byId.set(p.approval_id, {
+        kind: "approval",
+        resolved: false,
+        denied: false,
+        toolName: p.tool_name,
+      });
+    } else if (ev.type === "approval_resolved") {
+      const p = ev.payload as ApprovalResolvedPayload;
+      const t = byId.get(p.approval_id);
+      if (t) {
+        t.resolved = true;
+        t.denied = p.decision === "deny";
+      }
+    } else if (ev.type === "delegation_authorization_required") {
+      const p = ev.payload as DelegationAuthorizationRequiredPayload;
+      if (!p.authorization_id) continue;
+      byId.set(p.authorization_id, {
+        kind: "delegation_authorization",
+        resolved: false,
+        denied: false,
+      });
+    } else if (ev.type === "delegation_authorization_resolved") {
+      const p = ev.payload as DelegationAuthorizationResolvedPayload;
+      const t = byId.get(p.authorization_id);
+      if (t) {
+        t.resolved = true;
+        t.denied = p.decision === "deny";
+      }
+    }
+  }
+  return byId;
+}
+
+/** Timeline-slot lookup for escalations (统一时间线二期): id → card body. Transport-only
+ * sibling of {@link fold} — ProjectedTurn.runs[].escalations stays id-less (golden shape). */
+export interface EscalationSlot {
+  id: string;
+  runId: string;
+  esc: import("@agentcore/protocol-conformance").RunEscalation;
+}
+
+export function extractEscalationSlots(
+  events: SSEEvent[],
+): Map<string, EscalationSlot> {
+  const byId = new Map<string, EscalationSlot>();
+  for (const ev of events) {
+    if (ev.type === "run_escalation") {
+      const p = ev.payload as RunEscalationPayload;
+      if (!p.escalation_id) continue;
+      byId.set(p.escalation_id, {
+        id: p.escalation_id,
+        runId: p.run_id,
+        esc: {
+          question: p.question,
+          assumption: p.assumption,
+          blocking: p.blocking,
+          status: "raised",
+          answer: null,
+          kind: p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
+        },
+      });
+    } else if (ev.type === "escalation_required") {
+      const p = ev.payload as EscalationRequiredPayload;
+      if (!p.escalation_id) continue;
+      byId.set(p.escalation_id, {
+        id: p.escalation_id,
+        runId: p.run_id,
+        esc: {
+          question: p.question,
+          assumption: p.assumption,
+          blocking: true,
+          status: "pending",
+          answer: null,
+          kind: p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
+          ...(p.awaiting === "ceo" ? { awaiting: "ceo" as const } : {}),
+        },
+      });
+    } else if (ev.type === "escalation_resolved") {
+      const p = ev.payload as EscalationResolvedPayload;
+      const slot = byId.get(p.escalation_id);
+      if (!slot) continue;
+      if (p.status === "resolved") {
+        slot.esc.status = "resolved";
+        slot.esc.answer = p.answer;
+      } else if (p.status === "assumed") {
+        slot.esc.status = "assumed";
+        slot.esc.answer = null;
+      } else {
+        slot.esc.status = "timed_out";
+        slot.esc.answer = null;
+      }
+      if (p.arbitrated_by === "ceo") {
+        slot.esc.arbitrated_by = "ceo";
+        if (p.via_user != null) slot.esc.via_user = p.via_user;
+      }
+    }
+  }
+  return byId;
 }
 
 /** One tool call a delegated worker made, for its run-detail 工具明细 (RunDetail). Mirrors the

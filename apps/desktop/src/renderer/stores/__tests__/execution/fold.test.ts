@@ -514,6 +514,7 @@ describe("projectExecution (fold)", () => {
         question: "用 Postgres 还是 MySQL?",
         assumption: "暂用 Postgres",
         blocking: true,
+        escalationId: "esc-raised-1",
         escalationKind: "normal",
       },
       {
@@ -532,7 +533,7 @@ describe("projectExecution (fold)", () => {
     // A non-blocking `raised` banner: no resolve target (id null), `raised` status, no answer.
     expect(run1?.escalations).toEqual([
       {
-        id: null,
+        id: "esc-raised-1",
         question: "用 Postgres 还是 MySQL?",
         assumption: "暂用 Postgres",
         blocking: true,
@@ -566,6 +567,7 @@ describe("projectExecution (fold)", () => {
       question: "Q?",
       assumption: "A",
       blocking: false,
+      escalationId: "",
       escalationKind: "normal",
     });
   });

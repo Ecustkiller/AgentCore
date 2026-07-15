@@ -1,12 +1,13 @@
 /**
- * Remark plugin: turn inline citation markers `[n]` into `cite:n` link nodes so
- * the Markdown renderer can render them as clickable chips that map to source
- * cards. Only markers within `1..max` are converted (max = the message's source
- * count), so stray brackets and out-of-range numbers stay literal text.
+ * Remark plugin: turn inline citation markers `[n]` into custom `citemark`
+ * elements so the Markdown renderer can map them to citation chips.
  *
- * Markers inside code / inline-code / existing links are left untouched. No
- * external mdast/unist dependency — a small hand-rolled tree walk keeps the
- * renderer's dependency surface unchanged.
+ * Payload rides on `data.hProperties` (same pattern as {@link ./remarkEvidence}):
+ * react-markdown's default `urlTransform` strips non-http(s) link schemes, so the
+ * older `cite:n` encoding never reached the chip component. Markers outside
+ * `1..max` (max = the message's source count) stay literal text. Markers inside
+ * code / inline-code / existing links are left untouched. No external mdast/unist
+ * dependency — a small hand-rolled tree walk.
  */
 
 interface MdNode {
@@ -14,6 +15,10 @@ interface MdNode {
   value?: string;
   url?: string;
   children?: MdNode[];
+  data?: {
+    hName?: string;
+    hProperties?: Record<string, string>;
+  };
 }
 
 // Subtrees whose text must stay verbatim (don't rewrite [n] inside code/links).
@@ -27,12 +32,24 @@ const SKIP_TYPES = new Set([
 
 const MARKER = /\[(\d+)\]/g;
 
-/** Split a text value into text + `cite:n` link nodes for in-range markers. */
+/** One `citemark` element carrying the canonical 1-based pool index. */
+function citeNode(n: number): MdNode {
+  return {
+    type: "cite",
+    data: {
+      hName: "citemark",
+      hProperties: { dataN: String(n) },
+    },
+    children: [{ type: "text", value: String(n) }],
+  };
+}
+
+/** Split a text value into text + `citemark` nodes for in-range markers. */
 export function splitCitationText(value: string, max: number): MdNode[] {
   const parts: MdNode[] = [];
   let last = 0;
-  let m: RegExpExecArray | null = MARKER.exec(value);
   MARKER.lastIndex = 0;
+  let m: RegExpExecArray | null;
   // biome-ignore lint/suspicious/noAssignInExpressions: idiomatic regex scan
   while ((m = MARKER.exec(value)) !== null) {
     const n = Number(m[1]);
@@ -40,11 +57,7 @@ export function splitCitationText(value: string, max: number): MdNode[] {
     if (m.index > last) {
       parts.push({ type: "text", value: value.slice(last, m.index) });
     }
-    parts.push({
-      type: "link",
-      url: `cite:${n}`,
-      children: [{ type: "text", value: String(n) }],
-    });
+    parts.push(citeNode(n));
     last = m.index + m[0].length;
   }
   if (parts.length === 0) return [{ type: "text", value }];

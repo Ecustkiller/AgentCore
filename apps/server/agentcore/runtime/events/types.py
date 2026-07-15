@@ -99,6 +99,9 @@ class EventType(StrEnum):
     # DURABLE（P2）——落 journal；前端 fold 同 key 保最新，刷新后重建 StatusStrip 预览条。
     # → 见 docs/03-AI核心/编排器与CEO主Agent.md §协调模式（合成通道）
     TEAM_SYNTHESIS_PREVIEW = "team_synthesis_preview"
+    # 协调中用户插话：POST …/messages 在 live CoordinationSession 时注入；status 同 key
+    # 保最新（delivered → queued）。DURABLE——team 块时间线重放徽标。
+    USER_INTERJECTION = "user_interjection"
     DEBATE_RESULT = "debate_result"
     DEBATE_ROUND_STARTED = "debate_round_started"
     DEBATE_ROUND = "debate_round"

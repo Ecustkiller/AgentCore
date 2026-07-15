@@ -17,6 +17,12 @@ describe("normalizeMermaidSource", () => {
     expect(normalizeMermaidSource(input)).toBe(input);
   });
 
+  it("leaves Unicode-id subgraphs with bracket titles unchanged", () => {
+    const input =
+      'flowchart LR\nsubgraph 图["一次 delegate"]\nA["foo-bar"] --> B\nend';
+    expect(normalizeMermaidSource(input)).toBe(input);
+  });
+
   it("expands ampersand target edges", () => {
     const input = "flowchart TD\nL --> H & I & J & K";
     const out = normalizeMermaidSource(input);

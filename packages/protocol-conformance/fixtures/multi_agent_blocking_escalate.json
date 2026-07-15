@@ -222,6 +222,10 @@
         "execution_id": "exec1"
       },
       {
+        "kind": "escalation",
+        "escalation_id": "esc1"
+      },
+      {
         "kind": "content",
         "text": " 团队已完成。"
       }
@@ -386,6 +390,7 @@
     "debateOpening": null,
     "teamSynthesisPreview": null,
     "turnWarning": null,
-    "teamNotes": []
+    "teamNotes": [],
+    "userInterjections": []
   }
 }

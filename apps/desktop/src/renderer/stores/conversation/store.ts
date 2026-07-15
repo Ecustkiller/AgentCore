@@ -5,6 +5,7 @@ import {
   foldCitations,
   foldContentDelta,
   foldContentReset,
+  foldInteractionTimelineMarker,
   foldPlanReviewMarker,
   foldReasoningDelta,
   foldTeamMarker,
@@ -18,6 +19,7 @@ import { notifyError } from "@/lib/toast";
 import { discardAllPendingChunks } from "@/services/sse/contentBuffer";
 import { discardPendingFrames } from "@/services/sse/execFrameBuffer";
 import { stopConversation } from "@/services/stopTurn";
+import type { TimelineMarkerDef } from "@/stores/interactions/registry";
 import { execRuntime, useExecutionStore } from "@/stores/execution";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { useInteractionStore } from "@/stores/interactions";
@@ -161,6 +163,12 @@ export interface ConversationState {
   ) => void;
   stampTeamPreviewMarker: (
     checkpointId: string,
+    conversationId?: string | null,
+  ) => void;
+  /** Registry-driven timeline marker stamp (approval / escalation / …). */
+  stampTimelineMarker: (
+    marker: TimelineMarkerDef,
+    id: string,
     conversationId?: string | null,
   ) => void;
   createAssistantMessage: (conversationId?: string | null) => string;
@@ -616,6 +624,31 @@ export const useConversationStore = create<ConversationState>((set, get) => {
           checkpointId,
         );
         messages[idx] = { ...msg, process: lane.process };
+        return { messages };
+      }),
+
+    stampTimelineMarker: (marker, id, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        let idx = -1;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === "assistant") {
+            idx = i;
+            break;
+          }
+        }
+        if (idx === -1) return null;
+        const msg = messages[idx];
+        const lane = foldInteractionTimelineMarker(
+          messageLaneFromMessage(msg),
+          marker,
+          id,
+        );
+        messages[idx] = {
+          ...msg,
+          content: lane.content,
+          process: lane.process,
+        };
         return { messages };
       }),
 

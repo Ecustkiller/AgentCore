@@ -95,7 +95,7 @@ worker 唯一的向上通道。`blocking=false`（默认）= 上报后按 `assum
 - `kind=scope`：worker 发现自己 / 下游 scope 错了 → 主管在波边界**操舵已有步骤**纠偏（计划漂移）。
 - `kind=dep`：worker 卡在一个**还不存在**的输入 / 依赖（没人产出过、计划也没安排）→ 主管在波边界用 `replan(add)` **追加一个产出它的步骤 / 接一条依赖边**。它是「变·拉取」里「东西不存在」那一支（见 §波内共享上下文：便签墙·拉取）。
 
-worker 全程 non-blocking、照常按假设把能做的做完；简报（`supervised.py::format_scope_boundary`）按 kind 分标「偏离 / 缺输入」并指向对应 `replan` 杠杆，无下游可补时退回收尾路。**度量不串**：`dep` 计入总升级数但**不进** `scope_escalations`，漂移率口径仍纯。执行语义见 [执行引擎 §一·受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)。前端：`EscalationCard` / 节点角标按 kind 分标「普通 / 缺输入 / 职责偏离」（`kind` 已上 wire：`run_escalation` / `escalation_required`）；手机交互层 ✅（fold + 升级应答卡均已移植，`apps/mobile/src/components/TeamView.tsx`、`protocol/parity.ts`）。
+worker 全程 non-blocking、照常按假设把能做的做完；简报（`supervised.py::format_scope_boundary`）按 kind 分标「偏离 / 缺输入」并指向对应 `replan` 杠杆，无下游可补时退回收尾路。**度量不串**：`dep` 计入总升级数但**不进** `scope_escalations`，漂移率口径仍纯。执行语义见 [执行引擎 §一·受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)。前端：`EscalationCard` / 节点角标按 kind 分标「普通 / 缺输入 / 职责偏离」（`kind` 已上 wire：`run_escalation` / `escalation_required`）；手机交互层 ✅（fold + 升级应答卡均已移植；升级卡随统一时间线二期迁出 `TeamView`、按独立标记槽渲染于 `AssistantView`，`protocol/parity.ts`）。
 
 > **schema 姿态（2026-06-30）**：`normal` / `blocking` 克制使用（小事自行假设别升级、blocking 省着用，避「问题墙 / 动辄打断用户」反模式）；**唯独 `dep` 该喊就喊**——真卡在「再猜也是错」的缺口上别硬猜瞎编，主动发 `dep` 强过闷头产一堆作废的东西。
 

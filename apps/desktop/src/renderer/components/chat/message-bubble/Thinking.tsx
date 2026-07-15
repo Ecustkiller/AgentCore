@@ -53,12 +53,12 @@ export function ThinkingHeader({
         </>
       ) : (
         <>
+          <span>{doneLabel}</span>
           {expanded ? (
             <ChevronDown size={14} className="shrink-0" />
           ) : (
             <ChevronRight size={14} className="shrink-0" />
           )}
-          <span>{doneLabel}</span>
         </>
       )}
     </Button>

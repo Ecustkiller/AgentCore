@@ -27,7 +27,9 @@ from agentcore.api.schemas import (
     RecordTurnRequest,
     RecordTurnResponse,
     RunsPayload,
+    SendMessageInterjectedResponse,
     SendMessageRequest,
+    SendMessageQueuedResponse,
     SetMessageFeedbackRequest,
     StatusResponse,
     StopTurnResponse,
@@ -226,7 +228,19 @@ async def set_message_feedback(
     return StatusResponse()
 
 
-@router.post("/{conversation_id}/messages")
+@router.post(
+    "/{conversation_id}/messages",
+    responses={
+        200: {"description": "SSE stream for an immediately started turn"},
+        202: {
+            "description": (
+                "In-flight: coordination → SendMessageInterjectedResponse (delivered); "
+                "classic → SendMessageQueuedResponse (queued)"
+            ),
+        },
+        409: {"description": "Hot-path pending interaction blocks new messages"},
+    },
+)
 async def send_message(
     conversation_id: str,
     body: SendMessageRequest,
@@ -241,6 +255,12 @@ async def send_message(
     to it (``detach_on_disconnect=True``). A client disconnect therefore no longer
     kills the turn (案例 1: 7-min 断连即丢交付) — it finishes + persists in the
     background; an explicit 停止 routes through ``POST .../stop`` instead.
+
+    运行中发消息:
+    - **协调模式**（live ``CoordinationSession``）→ 插话进 CEO 事件队列，HTTP 202
+      ``delivered``；CEO 图内处置或 ``queue_user_message`` 转对话级排队。
+    - **经典阻塞路径**（无协调 session）→ 对话级 FIFO，HTTP 202 ``queued``。
+    - **热路 pending**（approval / escalation / …）仍 409（D9）。
 
     Gated before the stream starts (成本配额与计费.md §一) so a refused turn gets a
     clean error instead of a half-opened SSE: per-user rate limit first (sheds a
@@ -288,6 +308,85 @@ async def send_message(
         conversation_id, user, session, needs_tools=needs_tools
     )
     await release_request_db_before_sse(session)
+
+    # In-flight turn → coordination inject or conversation-level queue.
+    existing = turn_runs.get(conversation_id)
+    if existing is not None and not existing.task.done():
+        from fastapi.responses import JSONResponse
+
+        from agentcore.core.types import new_id
+        from agentcore.runtime.coordination.session import (
+            CoordinationEvent,
+            CoordinationEventKind,
+            active_coordination_for_conversation,
+        )
+        from agentcore.runtime.events import user_interjection
+        from agentcore.runtime.turn_queue import new_queued_turn, turn_queue
+
+        coord = active_coordination_for_conversation(conversation_id)
+        if coord is not None and coord.active:
+            interjection_id = new_id()
+            attachments = [a.model_dump() for a in body.attachments]
+            coord.stash_interjection(
+                interjection_id,
+                {
+                    "content": body.content,
+                    "user_id": user.user_id,
+                    "conversation_id": conversation_id,
+                    "attachments": attachments,
+                    "requires_tools": needs_tools,
+                    "x_client_platform": x_client_platform,
+                    "llm_credentials": preflight.credentials,
+                    "llm_supports_tools": preflight.supports_tools,
+                },
+            )
+            posted = coord.post(
+                CoordinationEvent(
+                    kind=CoordinationEventKind.USER_INTERJECTION,
+                    payload={
+                        "interjection_id": interjection_id,
+                        "content": body.content,
+                    },
+                )
+            )
+            if not posted:
+                # Session closing between lookup and post — fall through to queue.
+                coord.take_interjection(interjection_id)
+            else:
+                existing.sink.emit(
+                    user_interjection(
+                        interjection_id=interjection_id,
+                        execution_id=coord.execution_id,
+                        content=body.content,
+                        status="delivered",
+                    )
+                )
+                delivered = SendMessageInterjectedResponse(
+                    interjection_id=interjection_id,
+                    execution_id=coord.execution_id,
+                    conversation_id=conversation_id,
+                )
+                return JSONResponse(status_code=202, content=delivered.model_dump())
+
+        status = turn_queue.enqueue(
+            conversation_id,
+            new_queued_turn(
+                content=body.content,
+                user_id=user.user_id,
+                attachments=[a.model_dump() for a in body.attachments],
+                requires_tools=needs_tools,
+                x_client_platform=x_client_platform,
+                llm_credentials=preflight.credentials,
+                llm_supports_tools=preflight.supports_tools,
+            ),
+        )
+        payload = SendMessageQueuedResponse(
+            queue_id=status.queue_id,
+            position=status.position,
+            queue_depth=status.queue_depth,
+            conversation_id=conversation_id,
+        )
+        return JSONResponse(status_code=202, content=payload.model_dump())
 
     sink = EventSink()
     emit_preflight_warnings(sink, preflight)

@@ -206,6 +206,29 @@ def _make_snippet(description: str, text: str) -> str:
     return re.sub(r"\s+", " ", source)[:_SNIPPET_MAX].strip()
 
 
+def _make_display(
+    *,
+    url: str,
+    title: str,
+    site: str,
+    snippet: str,
+    content: str,
+) -> dict[str, Any]:
+    """Render-oriented twin of the model-facing JSON output (工具结果富渲染).
+
+    The desktop shows a source-style card header (favicon · title · site) plus a
+    body preview from ``content`` — same display channel as ``web_search``, so the
+    client never parses the JSON ``output`` string.
+    """
+    return {
+        "url": url,
+        "title": title,
+        "site": site,
+        "snippet": snippet,
+        "content": content,
+    }
+
+
 class ReadUrlTool:
     """Fetch a web page and return its extracted main text."""
 
@@ -346,6 +369,13 @@ class ReadUrlTool:
                             "site": cached.site,
                         }
                     ],
+                    display=_make_display(
+                        url=url,
+                        title=cached.title,
+                        site=cached.site,
+                        snippet=cached.snippet,
+                        content=text,
+                    ),
                 )
 
         # PI-002 出网外泄观测：only reached on a cache MISS (a real outbound fetch is about
@@ -449,4 +479,11 @@ class ReadUrlTool:
             output_limit=max_chars + 1024,
             metadata={"title": title, "content_chars": len(text)},
             citations=[{"url": url, "title": title, "snippet": snippet, "site": site}],
+            display=_make_display(
+                url=url,
+                title=title,
+                site=site,
+                snippet=snippet,
+                content=text,
+            ),
         )

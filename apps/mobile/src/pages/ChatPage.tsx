@@ -46,7 +46,9 @@ import { useStickScroll } from "@/lib/useStickScroll";
 import { useVoiceInput } from "@/lib/useVoiceInput";
 import {
   extractAsks,
+  extractEscalationSlots,
   extractFollowups,
+  extractHotDecisionTraces,
   extractRunToolCalls,
   extractToolPhases,
   extractWorkerToolPhases,
@@ -276,6 +278,16 @@ function AssistantBubble({
   );
   // 非阻塞提问卡内容：随时间线 `ask` 标记原位呈现（旁路读原始事件，不入 ProjectedTurn）。
   const asks = useMemo(() => extractAsks(turn.events), [turn.events]);
+  // 升级时间线槽（统一时间线二期）: escalation_id → card body（旁路；golden escalations 不加 id）。
+  const escalationSlots = useMemo(
+    () => extractEscalationSlots(turn.events),
+    [turn.events],
+  );
+  // 热审批/委派授权痕迹 (D3): resolved 轻行内容（旁路读原始事件）。
+  const hotTraces = useMemo(
+    () => extractHotDecisionTraces(turn.events),
+    [turn.events],
+  );
   // 工具执行阶段进度 (联网搜索前端展示优化): tool_call_id→阶段，旁路读原始事件（不入 ProjectedTurn），
   // 让运行中的工具（web_search）显示「正在检索/排队中/改用备用引擎」而非干等。已结束的工具自动清空。
   const toolPhases = useMemo(
@@ -348,6 +360,8 @@ function AssistantBubble({
           debate={p.debate}
           debateRounds={p.debateRounds}
           asks={asks}
+          escalationSlots={escalationSlots}
+          hotTraces={hotTraces}
           toolPhases={toolPhases}
           onFill={onFill}
         />
@@ -425,6 +439,15 @@ function HistoryAssistant({
   );
   // 非阻塞提问卡内容：仅多 Agent 历史持久化 runs.events（单聊为空 → 无卡，与桌面一致）。
   const asks = useMemo(() => extractAsks(m.runs?.events ?? []), [m.runs]);
+  const escalationSlots = useMemo(
+    () => extractEscalationSlots(m.runs?.events ?? []),
+    [m.runs],
+  );
+  // 热审批/委派授权痕迹 (D3): 单聊审批回合的 events 也过 journal surface（二期），故历史可取。
+  const hotTraces = useMemo(
+    () => extractHotDecisionTraces(m.runs?.events ?? []),
+    [m.runs],
+  );
   // P2：优先用 messages.cost 列（平台记账）；缺列或 BYOK 记账为 0 时 lazy-fetch 台账（含 estimated_cost）。
   const columnBilled =
     m.cost && m.cost.total > 0
@@ -472,6 +495,8 @@ function HistoryAssistant({
           debate={debate}
           debateRounds={debateRounds}
           asks={asks}
+          escalationSlots={escalationSlots}
+          hotTraces={hotTraces}
           onFill={onFill}
         />
       )}

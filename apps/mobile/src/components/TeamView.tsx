@@ -108,7 +108,7 @@ function lastLine(text: string | undefined): string | null {
 }
 
 /** The read-only one-liner under an escalation's question, by lifecycle. */
-function escalationDetail(esc: RunEscalation): string | null {
+export function escalationDetail(esc: RunEscalation): string | null {
   if (esc.status === "resolved" && esc.answer) return `已答复：${esc.answer}`;
   if (esc.status === "assumed")
     return esc.assumption ? `按假设继续：${esc.assumption}` : null;
@@ -123,9 +123,9 @@ export function TeamView({
   progress,
   teamNotes = [],
   status,
-  conversationId = null,
-  pendingEscalations,
-  escalationsInteractive = false,
+  conversationId: _conversationId = null,
+  pendingEscalations: _pendingEscalations,
+  escalationsInteractive: _escalationsInteractive = false,
   runToolCalls,
   workerToolPhases,
 }: {
@@ -199,12 +199,6 @@ export function TeamView({
             agent={agents.find((a) => a.id === run.agentId)}
             depth={depthOf(run)}
             continuationIndex={continuationIndexOf(workers, run)}
-            conversationId={conversationId}
-            pendingEscalationId={
-              escalationsInteractive
-                ? pendingEscalations?.get(run.id)
-                : undefined
-            }
             workerToolPhase={workerToolPhases?.get(run.id)}
             onOpen={() => setSelectedRunId(run.id)}
           />
@@ -364,8 +358,6 @@ function RunCard({
   agent,
   depth,
   continuationIndex = 0,
-  conversationId,
-  pendingEscalationId,
   workerToolPhase,
   onOpen,
 }: {
@@ -373,9 +365,6 @@ function RunCard({
   agent: ProjectedAgent | undefined;
   depth: number;
   continuationIndex?: number;
-  conversationId: string | null;
-  /** The run's pending blocking escalation id (set only on a live turn) → answer card. */
-  pendingEscalationId: string | undefined;
   /** Live worker tool EXECUTION phase (transport-only `tool_use_progress` with run_id). */
   workerToolPhase?: { phase: string; toolName: string };
   /** 深度检视 (RunDetail): tap the card summary to open this run's detail panel. */
@@ -419,35 +408,7 @@ function RunCard({
           <div className="run-foot">{formatDuration(run.durationMs)}</div>
         )}
       </button>
-      {/* 升级实时可见 / 阻塞式求决策: the worker's 向上求决策 — its self-contained 问题 + the
-          假设 it proceeds on. A blocking escalate awaiting the user on a LIVE turn becomes an
-          actionable answer card (待你拍板); every other state (非阻塞上报 / 已答复 / 已超时 /
-          history) stays a read-only inline notice. */}
-      {run.escalations.map((esc, i) => {
-        const liveId =
-          esc.status === "pending" && conversationId
-            ? pendingEscalationId
-            : undefined;
-        if (liveId && conversationId) {
-          return (
-            <EscalationAnswer
-              // biome-ignore lint/suspicious/noArrayIndexKey: per-run escalations are append-only with stable order, so the index is a stable identity here
-              key={i}
-              esc={esc}
-              escalationId={liveId}
-              conversationId={conversationId}
-            />
-          );
-        }
-        const detail = escalationDetail(esc);
-        return (
-          // biome-ignore lint/suspicious/noArrayIndexKey: per-run escalations are append-only with stable order, so the index is a stable identity here
-          <div key={i} className="run-escalation">
-            <span className="run-escalation-q">↑ {esc.question}</span>
-            {detail && <span className="run-escalation-a">{detail}</span>}
-          </div>
-        );
-      })}
+      {/* 升级卡已迁独立时间线标记（统一时间线二期 D2）；节点仍保留 上报 pill。 */}
     </div>
   );
 }
@@ -456,8 +417,9 @@ function RunCard({
  *  over the open stream. Free-text answer + 提交 / 按假设继续 (== timeout disposition), mirroring
  *  the mobile PauseCard's reduced surface (structured forks fold to prose). decideEscalation
  *  POSTs to the unified resolve endpoint; the stream's `escalation_resolved` then folds this
- *  run's escalation to resolved/timeout and unmounts the card (so busy stays true on success). */
-function EscalationAnswer({
+ *  run's escalation to resolved/timeout and unmounts the card (so busy stays true on success).
+ *  统一时间线二期: rendered at the escalation process marker (not under TeamView run cards). */
+export function EscalationAnswer({
   esc,
   escalationId,
   conversationId,

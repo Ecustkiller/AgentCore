@@ -101,7 +101,10 @@ export type ProcessStep =
   | { kind: "checkpoint"; checkpoint_id: string }
   | { kind: "ask"; ask_id: string }
   | { kind: "plan_review"; checkpoint_id: string }
-  | { kind: "team_preview"; checkpoint_id: string };
+  | { kind: "team_preview"; checkpoint_id: string }
+  | { kind: "escalation"; escalation_id: string }
+  | { kind: "approval"; approval_id: string }
+  | { kind: "delegation_authorization"; authorization_id: string };
 
 /** The user's settlement of a paused GRANTABLE tool call; mirrors the backend
  * `ApprovalDecision`. */
@@ -417,7 +420,13 @@ export interface RunToolProgressPayload {
 
 export type EscalationKind = "normal" | "scope" | "dep";
 
+/** 升级实时可见 (非阻塞 raised): a worker flagged a decision/blocker and kept working.
+ * 
+ * JOURNALED (DURABLE, 统一时间线二期 D6): ``escalation_id`` keys the raised 轻行's
+ * timeline marker (幂等去重 on attach replay) and lets the raised row + node ⚠️ badge
+ * reload — the event base is now level with ``escalation_required``. */
 export interface RunEscalationPayload {
+  escalation_id: string;
   run_id: string;
   agent_id: string;
   question: string;
@@ -509,6 +518,15 @@ export interface TeamSynthesisPreviewPayload {
   text: string;
   workers: TeamSynthesisWorkerPreview[];
   in_progress: boolean;
+}
+
+/** Mid-flight user message into a live coordination turn (CEO routes). */
+export interface UserInterjectionPayload {
+  interjection_id: string;
+  execution_id: string;
+  content: string;
+  status: "delivered" | "queued";
+  note?: string;
 }
 
 /** Token counts in the ledger short-key form. `cache_hit + cache_miss === input`. */
@@ -1166,6 +1184,7 @@ export type SSEPayloadMap = {
   interaction_orphaned: InteractionOrphanedPayload;
   team_note_posted: TeamNotePostedPayload;
   team_synthesis_preview: TeamSynthesisPreviewPayload;
+  user_interjection: UserInterjectionPayload;
   debate_result: DebateResultPayload;
   debate_round_started: DebateRoundStartedPayload;
   debate_round: DebateRoundPayload;

@@ -25,12 +25,19 @@ import type { ProcessStep } from "@/types/events";
 import { loadFixtures } from "@agentcore/protocol-conformance";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-/** Timeline-kind interactions = the ones whose card rides a process marker. */
+/** Timeline-kind interactions = the ones whose card/痕迹 rides a process marker. */
 const TIMELINE_KINDS: InteractionKind[] = [
   "ask_user",
   "question_posted",
   "plan_review",
   "team_preview",
+  "escalation",
+];
+
+/** Weak-form kinds (D5): marker required; row gated on resolved — not in strong card invariant. */
+const TRACE_KINDS: InteractionKind[] = [
+  "approval",
+  "delegation_authorization",
 ];
 
 /** Marker step id for a timeline interaction entry, per registry wiring. */
@@ -45,7 +52,7 @@ function markerMatches(step: ProcessStep, kind: InteractionKind, id: string) {
 
 const FIXTURES = loadFixtures().filter((fx) =>
   (fx.projected.interactions ?? []).some((i: { kind: string }) =>
-    (TIMELINE_KINDS as string[]).includes(i.kind),
+    [...TIMELINE_KINDS, ...TRACE_KINDS].includes(i.kind as InteractionKind),
   ),
 );
 
@@ -110,6 +117,16 @@ describe("timeline projection key + marker invariant (fixtures)", () => {
         expect(
           process.some((s) => s.kind === "team"),
           "run_plan turn carries a team marker",
+        ).toBe(true);
+      }
+
+      // (4) 弱式不变量（D5）：有 approval/delegation_authorization interaction →
+      // process[] 必有对应 required 时刻标记（行渲染由 resolved 门控，此处只断言锚点）。
+      const traceEntries = listMessageEntries(cid, projectionId, TRACE_KINDS);
+      for (const e of traceEntries) {
+        expect(
+          process.some((s) => markerMatches(s, e.kind, e.id)),
+          `${fx.name}: weak marker for ${e.kind}:${e.id}`,
         ).toBe(true);
       }
     });

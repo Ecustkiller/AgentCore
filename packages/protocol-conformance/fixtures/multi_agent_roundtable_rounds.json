@@ -998,6 +998,7 @@
     "debateOpening": "圆桌开场：先问 AI 治理的风险从何而来。",
     "teamSynthesisPreview": null,
     "turnWarning": null,
-    "teamNotes": []
+    "teamNotes": [],
+    "userInterjections": []
   }
 }

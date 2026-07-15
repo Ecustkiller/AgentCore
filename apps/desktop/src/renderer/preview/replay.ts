@@ -1,6 +1,7 @@
 import { dispatchSSEEvent, flushPendingContent } from "@/services/sse/dispatch";
 import { useConversationStore } from "@/stores/conversation";
 import { enterTurnStreaming } from "@/stores/conversation/turnPhaseActions";
+import { useExecutionStore } from "@/stores/execution";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import type { SSEEvent } from "@/types/events";
 
@@ -20,6 +21,11 @@ function seedSlice(conversationId: string, userPrompt?: string): void {
   // so a re-replay (StrictMode's dev double-invoke, or re-cutting a frame) starts clean
   // instead of stacking a stale resume card from the prior run's assistant message.
   usePausedTurnStore.getState().clear(conversationId);
+  // Execution frames key by the vector's FIXED server message id, so a re-replay
+  // (StrictMode double-invoke) would APPEND a second copy of every frame — doubling
+  // worker output text and escalation cards. The preview page hosts one fixture at a
+  // time, so dropping the whole map is safe and keeps re-replays idempotent.
+  useExecutionStore.setState({ byId: {} });
   store.switchConversation(conversationId);
   if (userPrompt) {
     store.addMessage(

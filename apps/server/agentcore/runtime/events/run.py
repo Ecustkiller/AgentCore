@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentcore.core.types import new_id
 from agentcore.runtime.events.types import EventType, SSEEvent
 
 
@@ -168,10 +169,17 @@ def escalation_raised(
     assumption: str,
     blocking: bool,
     kind: str = "normal",
+    escalation_id: str | None = None,
 ) -> SSEEvent:
+    """非阻塞 raised 升级（DURABLE, 统一时间线二期 D6）。
+
+    ``escalation_id`` 键给 raised 轻行的时间线标记（attach replay 幂等去重）；
+    生产调用点缺省即自动生成，conformance 向量传固定值保 golden 稳定。
+    """
     return SSEEvent(
         type=EventType.RUN_ESCALATION,
         payload={
+            "escalation_id": escalation_id or new_id(),
             "run_id": run_id,
             "agent_id": agent_id,
             "question": question,
@@ -390,6 +398,30 @@ def team_synthesis_preview(
             "in_progress": in_progress,
         },
     )
+
+
+def user_interjection(
+    *,
+    interjection_id: str,
+    execution_id: str,
+    content: str,
+    status: str = "delivered",
+    note: str | None = None,
+) -> SSEEvent:
+    """协调中用户插话（单一输入框 → CEO 智能路由）。
+
+    ``status=delivered`` on inject；CEO ``queue_user_message`` → ``queued``（同
+    ``interjection_id`` 保最新）。DURABLE——team 块时间线徽标重放。
+    """
+    payload: dict[str, Any] = {
+        "interjection_id": interjection_id,
+        "execution_id": execution_id,
+        "content": content,
+        "status": status,
+    }
+    if note is not None and note.strip():
+        payload["note"] = note.strip()
+    return SSEEvent(type=EventType.USER_INTERJECTION, payload=payload)
 
 
 def batch_metrics(*, execution_id: str, metrics: dict[str, Any]) -> SSEEvent:

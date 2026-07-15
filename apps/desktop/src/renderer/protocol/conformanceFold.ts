@@ -135,6 +135,14 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   let debateOpening: string | null = null;
   let teamSynthesisPreview: TeamSynthesisPreviewPayload | null = null;
   let turnWarning: string | null = null;
+  const userInterjections: {
+    interjectionId: string;
+    executionId: string;
+    content: string;
+    status: string;
+    note: string | null;
+  }[] = [];
+  const userInterjectionIndex = new Map<string, number>();
   let sawError = false;
   // 收到的上下文 · CEO 侧 (上下文传递可视化): the captain run id (its kind=captain
   // run_started) + the opening context it was fed, routed turn-level — the CEO is the
@@ -235,13 +243,45 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "run_progress":
       //「计划已调整」轻痕迹 (设计 §7.2): a NON-interrupting trace — folds onto the runs'
       // `revised` via the same frame path (no gate, like the escalate banner).
-      case "plan_revised":
-      case "run_escalation":
-      // 阻塞式求决策: the blocking-escalate pair folds onto the run's escalations via the
-      // same frame path (projectExecution appends pending / flips resolved). The turn does
-      // NOT pause on these (siblings keep running), so unlike the gates they set no pending.
-      case "escalation_required":
-      case "escalation_resolved":
+      case "plan_revised": {
+        const frame = frameFromEvent(ev);
+        if (frame) frames.push(frame);
+        break;
+      }
+      case "run_escalation": {
+        // Frame → run ⚠️ badge; process marker → CEO timeline slot (二期 D1/D6).
+        // Raised is not an interaction required event — stamp via escalation timeline def.
+        const frame = frameFromEvent(ev);
+        if (frame) frames.push(frame);
+        {
+          const eid = (ev.payload as { escalation_id?: string })?.escalation_id;
+          const timeline = defFromRequiredEvent("escalation_required")?.timeline;
+          if (typeof eid === "string" && eid && timeline) {
+            messageLane = foldInteractionTimelineMarker(
+              messageLane,
+              timeline,
+              eid,
+            );
+          }
+        }
+        break;
+      }
+      // 阻塞式求决策: frame folds onto run escalations; process marker at required 时刻.
+      case "escalation_required": {
+        const frame = frameFromEvent(ev);
+        if (frame) frames.push(frame);
+        messageLane = foldLaneFromInteractionEvent(
+          messageLane,
+          ev.type,
+          (ev.payload ?? {}) as Record<string, unknown>,
+        );
+        break;
+      }
+      case "escalation_resolved": {
+        const frame = frameFromEvent(ev);
+        if (frame) frames.push(frame);
+        break;
+      }
       // 团队便签墙 (§2.2 通): a worker broadcast a one-line decision / heads-up to its concurrent
       // siblings — folds turn-level onto Execution.teamNotes via the same frame path (post order,
       // deduped by noteId). Mirrors the backend oracle + mobile fold (conformance pins them equal).
@@ -357,6 +397,33 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "team_synthesis_preview": {
         // 同 key 保最新（后写覆盖）——journal append-only，fold 侧去重。
         teamSynthesisPreview = ev.payload as TeamSynthesisPreviewPayload;
+        break;
+      }
+      case "user_interjection": {
+        const p = ev.payload as {
+          interjection_id?: string;
+          execution_id?: string;
+          content?: string;
+          status?: string;
+          note?: string | null;
+        };
+        const iid = (p.interjection_id || "").trim();
+        if (iid) {
+          const leaf = {
+            interjectionId: iid,
+            executionId: p.execution_id || "",
+            content: p.content || "",
+            status: p.status || "delivered",
+            note: typeof p.note === "string" ? p.note : null,
+          };
+          const idx = userInterjectionIndex.get(iid);
+          if (idx === undefined) {
+            userInterjectionIndex.set(iid, userInterjections.length);
+            userInterjections.push(leaf);
+          } else {
+            userInterjections[idx] = leaf;
+          }
+        }
         break;
       }
       default:
@@ -480,5 +547,6 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       supersedes: n.supersedes,
       ...(n.source ? { source: n.source } : {}),
     })),
+    userInterjections,
   };
 }

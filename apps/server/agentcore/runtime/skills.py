@@ -156,11 +156,15 @@ task 正文只给【被审材料的文件路径或引用】+【本官审查焦�
 该 worker 成功后其产出直接作为你的回复呈现，省掉一轮收尾。只留给机械单步；只要可能要据结果\
 继续委派、或一次派了多个 worker，就别设。
 - 协调模式（默认开）：派【≥2 个】worker 时默认进入协调——`delegate` 立即返回『团队已启动』，\
-你边看边调（`update_synthesis` 渐进合成 / `cancel_worker` 中途终止 / `resolve_escalation` 仲裁\
-阻塞升级）。**`resolve_escalation` 只在协调模式下可用**；单 worker 时阻塞升级直达用户，\
+团队后台跑，你边看边调（`update_synthesis` 渐进合成 / `cancel_worker` 中途终止 / \
+`resolve_escalation` 仲裁阻塞升级）。**【一回合一张协作图】**：同回合再调 `delegate` = 往\
+同一张图动态追加 worker，【不是】「一次只能一个 delegate、必须等这批全完成才能再派」。\
+追加新队员优先再调 `delegate`；`replan(add=…)` 留给收到『计划已让出』波边界简报之后。\
+**`resolve_escalation` 只在协调模式下可用**；单 worker 时阻塞升级直达用户，\
 你无法（也不应尝试）用本工具裁决。只需经典阻塞等待（等全队完成再返回）时传 `coordinate=false`\
-显式退出。单 worker、`finalize`、嵌套 lead 不进协调；含 `checkpoint_after` 把关节点的批\
-也不进协调（走阻塞等待，好让把关卡到点弹给用户）——这是预期，别为进协调而去掉把关点。
+显式退出。同步阻塞只出现在：单 worker、`finalize`、嵌套 lead、显式 `coordinate=false`、\
+含 `checkpoint_after` 把关节点且闸开（走阻塞等待，好让把关卡到点弹给用户）——这是预期，\
+别为进协调而去掉把关点。
 - 交付形态（`deliverable.form`，优先用）：产出给用户【看】（回答 / 分析 / 汇报 / 创意文字 / \
 打招呼）→ `form=prose`（正文交付，引擎不授写文件工具）；给用户【用】（要打开 / 运行 / 编辑 / \
 保存的文件——代码 / 网页 / 配置等）→ `form=files`（隐含 `requires_files`，未落盘自动返工）。\

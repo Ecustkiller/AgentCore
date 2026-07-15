@@ -1,8 +1,8 @@
+import { TurnSecurityLedger } from "@/components/audit/TurnSecurityLedger";
 import { Markdown } from "@/components/chat/Markdown";
 import { ReceivedContextSection } from "@/components/chat/ReceivedContext";
 import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
 import { ProcessTimeline } from "@/components/chat/message-bubble/ProcessTimeline";
-import { TurnSecurityLedger } from "@/components/audit/TurnSecurityLedger";
 import { planCapabilities } from "@/components/graph/planCapabilities";
 import { Button } from "@/components/ui";
 import { useRunLlmWindow } from "@/hooks/useRunLlmWindow";
@@ -373,7 +373,6 @@ export function RunDetailBody({
             process={process}
             isStreaming={agent.status === "working"}
             citations={[]}
-            onCitationClick={() => {}}
             composingTool={
               agent.status === "working" ? agent.toolProgress : null
             }

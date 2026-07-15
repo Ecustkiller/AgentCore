@@ -83,6 +83,44 @@ class SendMessageRequest(BaseModel):
     requires_tools: bool = False
 
 
+class SendMessageQueuedResponse(BaseModel):
+    """``POST …/messages`` accepted but deferred behind an in-flight turn (显式串行).
+
+    Returned with HTTP 202 when the conversation already has a live turn **without**
+    an active coordination session (classic blocking path). The user message is
+    queued FIFO and auto-starts when the current turn finishes. Not a 409
+    rejection — clients may show queue position from these fields.
+    """
+
+    status: Literal["queued"] = "queued"
+    queue_id: str = Field(..., description="Id of this queued turn entry.")
+    position: int = Field(
+        ...,
+        ge=1,
+        description="1-based position in the conversation queue after enqueue.",
+    )
+    queue_depth: int = Field(
+        ...,
+        ge=1,
+        description="Total pending turns for this conversation after enqueue.",
+    )
+    conversation_id: str
+
+
+class SendMessageInterjectedResponse(BaseModel):
+    """``POST …/messages`` accepted as a mid-flight interjection into live coordination.
+
+    Returned with HTTP 202 when the conversation has an active coordination session.
+    The message is posted into the CEO event queue (not a new turn); the user sees
+    a 「已传达给团队」badge until the CEO optionally ``queue_user_message``s it.
+    """
+
+    status: Literal["delivered"] = "delivered"
+    interjection_id: str = Field(..., description="Stable id for fold / CEO queue tool.")
+    execution_id: str = Field(..., description="Live coordination execution_id.")
+    conversation_id: str
+
+
 class RetryFailedRequest(BaseModel):
     """Body for ``POST .../messages/{message_id}/retry-failed``.
 

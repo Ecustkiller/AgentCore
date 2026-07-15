@@ -109,6 +109,7 @@
     {
       "type": "run_escalation",
       "payload": {
+        "escalation_id": "31cec0a1-db9c-40c3-ab5c-d2702fe14149",
         "run_id": "sa",
         "agent_id": "sa",
         "question": "真正要做的是 X 而非初始子计划的 Y，下游写法应随之调整。",
@@ -285,6 +286,10 @@
       {
         "kind": "team",
         "execution_id": "exec1"
+      },
+      {
+        "kind": "escalation",
+        "escalation_id": "31cec0a1-db9c-40c3-ab5c-d2702fe14149"
       },
       {
         "kind": "content",
@@ -492,6 +497,7 @@
     "debateOpening": null,
     "teamSynthesisPreview": null,
     "turnWarning": null,
-    "teamNotes": []
+    "teamNotes": [],
+    "userInterjections": []
   }
 }

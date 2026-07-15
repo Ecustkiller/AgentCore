@@ -133,6 +133,14 @@ class RunToolProgressPayload(WirePayload):
 
 
 class RunEscalationPayload(WirePayload):
+    """升级实时可见 (非阻塞 raised): a worker flagged a decision/blocker and kept working.
+
+    JOURNALED (DURABLE, 统一时间线二期 D6): ``escalation_id`` keys the raised 轻行's
+    timeline marker (幂等去重 on attach replay) and lets the raised row + node ⚠️ badge
+    reload — the event base is now level with ``escalation_required``.
+    """
+
+    escalation_id: str
     run_id: str
     agent_id: str
     question: str
@@ -178,6 +186,16 @@ class TeamSynthesisPreviewPayload(WirePayload):
     text: str
     workers: list[TeamSynthesisWorkerPreview]
     in_progress: bool
+
+
+class UserInterjectionPayload(WirePayload):
+    """Mid-flight user message into a live coordination turn (CEO routes)."""
+
+    interjection_id: str
+    execution_id: str
+    content: str
+    status: Literal["delivered", "queued"]
+    note: str | None = absent()
 
 
 class RunCompletedPayload(WirePayload):

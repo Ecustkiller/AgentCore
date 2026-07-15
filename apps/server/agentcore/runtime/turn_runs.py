@@ -90,6 +90,16 @@ class TurnRunRegistry:
         current = self._runs.get(conversation_id)
         if current is not None and current.run_id == run_id:
             del self._runs[conversation_id]
+            # Explicit serialisation: start the next queued user message, if any.
+            try:
+                from agentcore.runtime.turn_queue import turn_queue
+
+                turn_queue.schedule_drain(conversation_id)
+            except Exception:  # noqa: BLE001 — queue drain must not break done-callback
+                logger.exception(
+                    "turn_run.queue_drain_failed",
+                    conversation_id=conversation_id,
+                )
 
     def get(self, conversation_id: str) -> TurnRun | None:
         """The conversation's active run, or ``None`` if nothing is running."""

@@ -98,7 +98,10 @@ function fixSubgraphLine(line: string, sgCounter: { n: number }): string {
   const trimmed = label.trim();
 
   // Already quoted or bracket-labelled — leave alone.
-  if (/^[a-zA-Z_][a-zA-Z0-9_]*\s*[\["']/.test(trimmed)) return line;
+  // Unicode letters/digits allowed in the id (e.g. subgraph 图["一次 delegate"]).
+  // Bare Unicode labels (no bracket/quote) must NOT early-return here — they still
+  // need wrapping below. Keep the bare-id check ASCII-only for that reason.
+  if (/^[\p{L}_][\p{L}\p{N}_]*\s*[\["']/u.test(trimmed)) return line;
   if (/^["']/.test(trimmed)) return line;
   // Bare ASCII id is valid Mermaid.
   if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(trimmed)) return line;

@@ -139,7 +139,20 @@ async def drive(
 
     # 团队预审：必须在 coordinate fork 之前（CEO 主路径）。挂起 → SUSPEND 收口；
     # 用户开做/调整后续跑再臂后台。后台 drive_coordinated 带 session，跳过本闸。
-    if session is None:
+    # 协调中二次 delegate（合并进同一 session）不再弹开工卡——团队已授权在跑。
+    merging_into_active = False
+    if session is None and seed_completed is None:
+        from agentcore.runtime.coordination.session import active_coordination
+
+        existing_coord = active_coordination(execution_id)
+        merging_into_active = (
+            existing_coord is not None
+            and existing_coord.active
+            and tool._depth == 0
+            and not finalize
+        )
+
+    if session is None and not merging_into_active:
         preview_early = await _team_preview_before_workers(
             tool,
             plan,
@@ -152,7 +165,8 @@ async def drive(
             return preview_early
 
     # CEO 协调模式：默认非阻塞臂（solo / finalize / depth>0 / 显式 false 由 gate 拦下）。
-    if session is None and coordinate:
+    # 已有活跃协调会话时必须走 try_start（内部 merge），即使本批 coordinate=false。
+    if session is None and (coordinate or merging_into_active):
         from agentcore.runtime.coordination.host import try_start_coordination
 
         started = try_start_coordination(

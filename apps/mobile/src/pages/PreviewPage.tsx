@@ -4,6 +4,8 @@ import { fileArtifactsFromEvents } from "@/lib/fileArtifacts";
 import { PREVIEW_FIXTURES } from "@/preview/fixtures";
 import {
   extractAsks,
+  extractEscalationSlots,
+  extractHotDecisionTraces,
   extractRunToolCalls,
   extractToolPhases,
   extractWorkerToolPhases,
@@ -44,6 +46,11 @@ export function PreviewPage() {
 
   const projected = useMemo(() => fold(events), [events]);
   const asks = useMemo(() => extractAsks(events), [events]);
+  const escalationSlots = useMemo(
+    () => extractEscalationSlots(events),
+    [events],
+  );
+  const hotTraces = useMemo(() => extractHotDecisionTraces(events), [events]);
   const toolPhases = useMemo(() => extractToolPhases(events), [events]);
   const workerToolPhases = useMemo(
     () => extractWorkerToolPhases(events),
@@ -150,6 +157,8 @@ export function PreviewPage() {
             debate={projected.debate}
             debateRounds={projected.debateRounds}
             asks={asks}
+            escalationSlots={escalationSlots}
+            hotTraces={hotTraces}
             toolPhases={toolPhases}
           />
           <FileArtifactsCard artifacts={artifacts} conversationId={null} />

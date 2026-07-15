@@ -104,7 +104,7 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   plan_revised: { verdict: "ported", surface: "TeamView · 计划已调整 痕迹" },
   run_escalation: {
     verdict: "ported",
-    surface: "TeamView · 上报提示 (非阻塞)",
+    surface: "AssistantView · escalation 时间线标记 (非阻塞轻行)",
   },
   run_escalation_gate: {
     verdict: "internal",
@@ -113,9 +113,12 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   },
   escalation_required: {
     verdict: "ported",
-    surface: "TeamView · EscalationAnswer 待你拍板卡 (②)",
+    surface: "AssistantView · EscalationAnswer 待你拍板卡 (②)",
   },
-  escalation_resolved: { verdict: "ported", surface: "TeamView · 升级收束" },
+  escalation_resolved: {
+    verdict: "ported",
+    surface: "AssistantView · 升级收束轻行",
+  },
 
   // —— 辩论 ——
   debate_result: { verdict: "ported", surface: "DebateView" },
@@ -130,6 +133,11 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   team_synthesis_preview: {
     verdict: "ported",
     surface: "TeamView · 协调进展预览（fold 对齐 StatusStrip）",
+  },
+  user_interjection: {
+    verdict: "internal",
+    reason:
+      "协调中用户插话：desktop team 块徽标；手机 parity 仅 fold → userInterjections",
   },
 
   // —— 阻塞交互（统一 PauseCard / ResumeCard）——
@@ -262,13 +270,17 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   NonBlockingAskCard: { verdict: "ported", surface: "NonBlockingAskCard (①)" },
   EscalationCard: {
     verdict: "ported",
-    surface: "TeamView · EscalationAnswer (②)",
+    surface: "AssistantView · EscalationAnswer (②)",
   },
   MemoryUpdateCard: { verdict: "ported", surface: "MemoryUpdateCard (③)" },
   CheckpointCard: { verdict: "ported", surface: "PauseCard / ResumeCard" },
   PlanReviewCard: { verdict: "ported", surface: "PauseCard" },
   TeamPreviewCard: { verdict: "ported", surface: "ResumeCard" },
   ApprovalPrompt: { verdict: "ported", surface: "PauseCard" },
+  HotDecisionTrace: {
+    verdict: "ported",
+    surface: "AssistantView · hot-trace 轻状态行（resolved 门控，D3）",
+  },
   ResumePrompt: { verdict: "ported", surface: "ResumeCard" },
   OrphanedInteractionCard: {
     verdict: "ported",
@@ -289,6 +301,11 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     surface: "AssistantView · 收到的上下文",
   },
   TeamNotesPanel: { verdict: "ported", surface: "TeamView · 团队便签" },
+  UserInterjectionsPanel: {
+    verdict: "simplified",
+    reason:
+      "协调插话徽标：desktop team 块渲染；手机本切片仅 fold → userInterjections（parity 最小同步）",
+  },
   SourceCards: { verdict: "ported", surface: "AssistantView · 来源" },
   StatusStrip: { verdict: "ported", surface: "ChatPage · 状态 meta 行" },
   DebateProgressLine: {
@@ -329,6 +346,11 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   SourcePreview: {
     verdict: "simplified",
     reason: "手机来源为纯链接，无悬浮预览（桌面 affordance）",
+  },
+  ReadUrlSourceCollection: {
+    verdict: "simplified",
+    reason:
+      "桌面把 ≥2 条连续 read_url 工具步合并为来源集合（SourceCards 式 favicon pill 行 / 展开来源列表）；手机 AssistantView 工具步逐条呈现 read_url（tool_use_end 已 ported），未做该桌面渲染层聚合",
   },
 
   // —— 物理做不到 ——

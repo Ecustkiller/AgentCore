@@ -40,6 +40,9 @@ DEFAULT_WORKER_TIMEOUT_S = 120.0
 # ``current_execution_id`` is set at turn entry (before gather) so the captain wait
 # path can resolve without threading execution_id through the whole loop.
 _sessions: dict[str, CoordinationSession] = {}
+# Reverse index: conversation_id → execution_id for mid-flight message routing
+# (POST …/messages while a coordination turn is live).
+_by_conversation: dict[str, str] = {}
 current_execution_id: ContextVar[str | None] = ContextVar(
     "current_execution_id", default=None
 )
@@ -52,6 +55,8 @@ class CoordinationEventKind(StrEnum):
     TIMEOUT = "timeout"
     ALL_COMPLETED = "all_completed"
     BOUNDARY_YIELD = "boundary_yield"
+    # Mid-flight user message injected into the live coordination window (CEO routes).
+    USER_INTERJECTION = "user_interjection"
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +71,7 @@ class CoordinationSnapshot:
 
     execution_id: str
     draft: str = ""
+    conversation_id: str = ""
     completed_run_ids: list[str] = field(default_factory=list)
     budget_remaining: int = DEFAULT_COORDINATION_BUDGET
     total_workers: int = 0
@@ -81,6 +87,7 @@ class CoordinationSnapshot:
         return {
             "execution_id": self.execution_id,
             "draft": self.draft,
+            "conversation_id": self.conversation_id,
             "completed_run_ids": list(self.completed_run_ids),
             "budget_remaining": self.budget_remaining,
             "total_workers": self.total_workers,
@@ -101,6 +108,7 @@ class CoordinationSnapshot:
         return cls(
             execution_id=execution_id,
             draft=str(data.get("draft") or ""),
+            conversation_id=str(data.get("conversation_id") or ""),
             completed_run_ids=[str(x) for x in (data.get("completed_run_ids") or [])],
             budget_remaining=int(
                 data.get("budget_remaining", DEFAULT_COORDINATION_BUDGET)
@@ -157,6 +165,7 @@ class CoordinationSession:
     total_workers: int
     budget_remaining: int = DEFAULT_COORDINATION_BUDGET
     draft: str = ""
+    conversation_id: str = ""
     completed_run_ids: set[str] = field(default_factory=set)
     cancel_ids: set[str] = field(default_factory=set)
     active: bool = True
@@ -164,6 +173,9 @@ class CoordinationSession:
     all_completed_injected: bool = False
     # Background WaveScheduler task (owned by drive); None until started.
     drive_task: asyncio.Task[Any] | None = None
+    # Live RunPlan owned by the active drive — mid-coordination secondary
+    # ``delegate`` appends workers here (same graph / same session). Not snapshotted.
+    live_plan: Any | None = field(default=None, repr=False)
     _queue: asyncio.Queue[CoordinationEvent] = field(
         default_factory=asyncio.Queue, repr=False
     )
@@ -185,6 +197,11 @@ class CoordinationSession:
     # Answers stashed when the live Future is gone (ask_user soft-stop cancelled the worker);
     # re-armed workers pick these up on the next escalate(blocking=true).
     resolved_arbitrations: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Mid-flight user interjections awaiting CEO disposition (in-memory only —
+    # credentials must not enter the journal snapshot). Keyed by interjection_id.
+    pending_interjections: dict[str, dict[str, Any]] = field(
+        default_factory=dict, repr=False
+    )
 
     def register_arbitration(
         self,
@@ -357,6 +374,9 @@ class CoordinationSession:
                 return True
             if ev.kind is CoordinationEventKind.ESCALATION:
                 return True
+            if ev.kind is CoordinationEventKind.USER_INTERJECTION:
+                # Boss mid-flight message — always wake; CEO routes in-graph vs queue.
+                return True
             if ev.kind is CoordinationEventKind.TIMEOUT and ev.payload.get("run_id"):
                 # Per-worker timeout is a decision point; idle-wait nudge (no run_id) is not.
                 return True
@@ -368,6 +388,16 @@ class CoordinationSession:
             ):
                 return True
         return False
+
+    def stash_interjection(self, interjection_id: str, payload: dict[str, Any]) -> None:
+        """Hold enqueue material for ``queue_user_message`` (process-local)."""
+        self.pending_interjections[interjection_id] = dict(payload)
+
+    def take_interjection(self, interjection_id: str) -> dict[str, Any] | None:
+        return self.pending_interjections.pop(interjection_id, None)
+
+    def get_interjection(self, interjection_id: str) -> dict[str, Any] | None:
+        return self.pending_interjections.get(interjection_id)
 
     def note_decision_points(self, events: list[CoordinationEvent]) -> None:
         for ev in events:
@@ -469,6 +499,7 @@ class CoordinationSession:
         return CoordinationSnapshot(
             execution_id=self.execution_id,
             draft=self.draft,
+            conversation_id=self.conversation_id,
             completed_run_ids=sorted(self.completed_run_ids),
             budget_remaining=self.budget_remaining,
             total_workers=self.total_workers,
@@ -503,6 +534,7 @@ class CoordinationSession:
             total_workers=snap.total_workers,
             budget_remaining=snap.budget_remaining,
             draft=snap.draft,
+            conversation_id=snap.conversation_id,
             completed_run_ids=set(snap.completed_run_ids),
             cancel_ids=set(snap.cancel_run_ids),
             active=snap.active,
@@ -545,6 +577,26 @@ def active_coordination(execution_id: str | None = None) -> CoordinationSession 
     return _sessions.get(eid)
 
 
+def active_coordination_for_conversation(
+    conversation_id: str,
+) -> CoordinationSession | None:
+    """Live coordination session for ``conversation_id``, or ``None``.
+
+    Used by ``POST …/messages`` to route mid-flight user text into the CEO window
+    instead of the conversation-level turn queue.
+    """
+    cid = (conversation_id or "").strip()
+    if not cid:
+        return None
+    eid = _by_conversation.get(cid)
+    if not eid:
+        return None
+    session = _sessions.get(eid)
+    if session is None or not session.active:
+        return None
+    return session
+
+
 def set_active_coordination(session: CoordinationSession | None) -> None:
     """Register ``session`` under its ``execution_id``, or clear when ``None``.
 
@@ -552,6 +604,10 @@ def set_active_coordination(session: CoordinationSession | None) -> None:
     in the captain task). When ``set_active`` runs inside an ``asyncio.gather`` child
     (delegate tool), that ContextVar write stays in the child copy — the parent CEO
     loop relies on the turn-entry binding set before gather.
+
+    Mid-coordination secondary ``delegate`` must **merge** into the existing session
+    (see :func:`agentcore.runtime.coordination.host.try_start_coordination`) — never
+    call this to silently replace an active session for the same ``execution_id``.
     """
     if session is None:
         clear_active_coordination()
@@ -560,7 +616,26 @@ def set_active_coordination(session: CoordinationSession | None) -> None:
     if not eid:
         logger.warning("coordination.set_active_missing_execution_id")
         return
+    prior = _sessions.get(eid)
+    if (
+        prior is not None
+        and prior is not session
+        and prior.active
+        and prior.drive_task is not None
+        and not prior.drive_task.done()
+    ):
+        # Overwrite while a background drive still owns the old session = event
+        # crosstalk / lost cancel+arbitration. Callers must merge instead.
+        logger.error(
+            "coordination.set_active_overwrite_while_live",
+            execution_id=eid,
+            prior_workers=prior.total_workers,
+            new_workers=session.total_workers,
+        )
     _sessions[eid] = session
+    cid = (session.conversation_id or "").strip()
+    if cid:
+        _by_conversation[cid] = eid
     current_execution_id.set(eid)
 
 
@@ -575,6 +650,16 @@ def clear_active_coordination(
     """
     eid = (execution_id or "").strip()
     if eid:
-        _sessions.pop(eid, None)
+        dropped = _sessions.pop(eid, None)
+        if dropped is not None:
+            cid = (dropped.conversation_id or "").strip()
+            if cid and _by_conversation.get(cid) == eid:
+                _by_conversation.pop(cid, None)
+        else:
+            # Session already gone — still scrub stale conversation index entries.
+            stale = [c for c, e in _by_conversation.items() if e == eid]
+            for c in stale:
+                _by_conversation.pop(c, None)
         return
     _sessions.clear()
+    _by_conversation.clear()

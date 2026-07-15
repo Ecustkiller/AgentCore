@@ -106,7 +106,8 @@ export function OnboardingPreviewPage() {
               <DraftEmptyState previewKind="needs_key" />
             </div>
             <div className="mx-auto w-full max-w-3xl">
-              <MessageInput />
+              {/* Mirror ChatView: needs_key docks bottom → bar chrome. */}
+              <MessageInput variant="bar" />
             </div>
           </div>
         )}

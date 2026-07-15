@@ -107,6 +107,10 @@
       {
         "kind": "team",
         "execution_id": "exec1"
+      },
+      {
+        "kind": "escalation",
+        "escalation_id": "esc1"
       }
     ],
     "citations": [],
@@ -226,6 +230,7 @@
     "debateOpening": null,
     "teamSynthesisPreview": null,
     "turnWarning": null,
-    "teamNotes": []
+    "teamNotes": [],
+    "userInterjections": []
   }
 }

@@ -15448,7 +15448,7 @@
         ]
       },
       "post": {
-        "description": "Send a user message and get a streaming AI response via SSE.\n\n执行与请求解耦 (C1 · slice 1a): the pipeline runs as a *detached* task tracked in\nthe ``TurnRunRegistry`` (keyed by conversation), and the SSE stream only attaches\nto it (``detach_on_disconnect=True``). A client disconnect therefore no longer\nkills the turn (案例 1: 7-min 断连即丢交付) — it finishes + persists in the\nbackground; an explicit 停止 routes through ``POST .../stop`` instead.\n\nGated before the stream starts (成本配额与计费.md §一) so a refused turn gets a\nclean error instead of a half-opened SSE: per-user rate limit first (sheds a\nflooding account before any resource DB work), then ownership, then the\nBYOK/quota billing gate (BYOK mode requires the user's own key; platform mode\nenforces quota). The resolved BYOK credentials thread through the whole turn.\n\nRequest-scoped DB session for preflight only — explicitly closed before the SSE\nstream opens so a long-lived stream never holds a pooled connection (fixes\nGC-termination warnings on abrupt teardown).",
+        "description": "Send a user message and get a streaming AI response via SSE.\n\n执行与请求解耦 (C1 · slice 1a): the pipeline runs as a *detached* task tracked in\nthe ``TurnRunRegistry`` (keyed by conversation), and the SSE stream only attaches\nto it (``detach_on_disconnect=True``). A client disconnect therefore no longer\nkills the turn (案例 1: 7-min 断连即丢交付) — it finishes + persists in the\nbackground; an explicit 停止 routes through ``POST .../stop`` instead.\n\n运行中发消息:\n- **协调模式**（live ``CoordinationSession``）→ 插话进 CEO 事件队列，HTTP 202\n  ``delivered``；CEO 图内处置或 ``queue_user_message`` 转对话级排队。\n- **经典阻塞路径**（无协调 session）→ 对话级 FIFO，HTTP 202 ``queued``。\n- **热路 pending**（approval / escalation / …）仍 409（D9）。\n\nGated before the stream starts (成本配额与计费.md §一) so a refused turn gets a\nclean error instead of a half-opened SSE: per-user rate limit first (sheds a\nflooding account before any resource DB work), then ownership, then the\nBYOK/quota billing gate (BYOK mode requires the user's own key; platform mode\nenforces quota). The resolved BYOK credentials thread through the whole turn.\n\nRequest-scoped DB session for preflight only — explicitly closed before the SSE\nstream opens so a long-lived stream never holds a pooled connection (fixes\nGC-termination warnings on abrupt teardown).",
         "operationId": "send_message_v1_conversations__conversation_id__messages_post",
         "parameters": [
           {
@@ -15526,7 +15526,13 @@
                 "schema": {}
               }
             },
-            "description": "Successful Response"
+            "description": "SSE stream for an immediately started turn"
+          },
+          "202": {
+            "description": "In-flight: coordination → SendMessageInterjectedResponse (delivered); classic → SendMessageQueuedResponse (queued)"
+          },
+          "409": {
+            "description": "Hot-path pending interaction blocks new messages"
           },
           "422": {
             "content": {
@@ -16007,7 +16013,7 @@
     },
     "/v1/conversations/{conversation_id}/messages/{message_id}/resume": {
       "post": {
-        "description": "Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).\n\nThe turn paused at a plan_review / ask_user / team_preview checkpoint and lost its\nlive stream (disconnect / restart); only its persisted frame survived.\n\nSettlement 预写 (D8)：① peek frame → ② live-task drain（不 cancel；仍 live ⇒ 409）→\n③ ``*_resolved`` 落库成功 → ④ ``claim_paused_turn`` → ⑤ resume pipeline。settlement\n写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状 404。Pipeline 启动\n失败走现有 restore 回滚。\n\n``body.selected`` carries the user's ask_user picks (ignored for plan_review).\nGated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota\n— all BEFORE settlement/claim, so a refused turn keeps its resumable frame.",
+        "description": "Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).\n\nThe turn paused at a plan_review / ask_user / team_preview checkpoint and lost its\nlive stream (disconnect / restart); only its persisted frame survived.\n\nSettlement 预写 (D8)：① peek frame → ② live-task drain（不 cancel；仍 live ⇒ 409）→\n③ ``*_resolved`` 落库成功 → ④ ``claim_paused_turn`` → ⑤ resume pipeline。settlement\n写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状 404。settlement 落库后\npipeline 取消/失败 ⇒ interrupted_after_decision（D1：不复活决策卡）。\n\n``body.selected`` carries the user's ask_user picks (ignored for plan_review).\nGated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota\n— all BEFORE settlement/claim, so a refused turn keeps its resumable frame.",
         "operationId": "resume_message_v1_conversations__conversation_id__messages__message_id__resume_post",
         "parameters": [
           {

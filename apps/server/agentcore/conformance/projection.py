@@ -153,6 +153,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     # 团队便签墙 (§2.2 通): the batch's posted notes in chronological order. Journaled, so it
     # replays on reload (unlike transport-only board ops). Deduped by noteId for replay safety.
     team_notes: list[dict[str, Any]] = []
+    # 协调中用户插话（user_interjection）：同 interjection_id 保最新 status。DURABLE。
+    user_interjections: list[dict[str, Any]] = []
+    _user_interjection_by_id: dict[str, int] = {}
     # plan_review_resolved carries only the checkpoint id → remember the gated run ids.
     checkpoint_steps: dict[str, list[str]] = {}
 
@@ -502,9 +505,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         elif etype == "run_escalation":
             # 升级实时可见 (非阻塞): a worker flagged a decision/blocker for the CEO — append
             # it to its run so the node carries a ⚠️ badge (mirrors the desktop/mobile folds,
-            # conformance pins them equal). Transport-only on the wire; the durable copy
-            # rides RunState.escalations → CEO synthesis. Status stays "raised" (the worker
-            # kept working — today's behaviour).
+            # conformance pins them equal). Status stays "raised" (the worker kept working).
+            # 统一时间线二期 D1/D6: also drop an `escalation` process marker keyed by
+            # escalation_id (raised 轻行 slot; ProjectedTurn escalations[] 形状不加 id).
             run = run_by_id(p.get("run_id", ""))
             if run is not None:
                 run["escalations"].append(
@@ -517,12 +520,16 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                         "kind": p.get("kind") or "normal",
                     }
                 )
+            eid = p.get("escalation_id") or ""
+            if eid and not has_marker("escalation", "escalation_id", eid):
+                process.append({"kind": "escalation", "escalation_id": eid})
 
         elif etype == "escalation_required":
             # 阻塞式求决策: a worker SUSPENDED on a blocking escalate — append a "pending"
             # card to its run. The turn does NOT pause (siblings keep running), so unlike
             # the halting gates this sets no `pending` interaction.
             # ``awaiting=ceo`` is projected; classic user path omits (default).
+            # 统一时间线二期 D1/D2: positional `escalation` marker at required 时刻.
             run = run_by_id(p.get("run_id", ""))
             if run is not None:
                 awaiting = p.get("awaiting") or "user"
@@ -539,6 +546,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 if awaiting == "ceo":
                     entry["awaiting"] = "ceo"
                 run["escalations"].append(entry)
+            eid = p.get("escalation_id") or ""
+            if eid and not has_marker("escalation", "escalation_id", eid):
+                process.append({"kind": "escalation", "escalation_id": eid})
 
         elif etype == "escalation_resolved":
             # Settlement: flip this run's pending escalation. Wire status is
@@ -644,15 +654,30 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     )
 
         elif etype == "approval_required":
-            # Gate lifecycle → fold_interactions at end; only turn-status side effects
-            # lived here historically. Process markers N/A for approval.
+            # 统一时间线二期 D3/D5: positional `approval` marker at required 时刻；行渲染由
+            # resolved 门控（pending 标记在、行不显）。Gate lifecycle → fold_interactions.
+            aid = p.get("approval_id") or ""
+            if aid and not has_marker("approval", "approval_id", aid):
+                process.append({"kind": "approval", "approval_id": aid})
+
+        elif etype == "approval_resolved":
             pass
 
-        elif etype in (
-            "approval_resolved",
-            "delegation_authorization_required",
-            "delegation_authorization_resolved",
-        ):
+        elif etype == "delegation_authorization_required":
+            # 统一时间线二期 D3 + 产品修正：「放行开工」族叙事（授权 → 团队干活）——
+            # 与 team_preview 同锚定，插到最后一个 team 标记之前（无 team 则 append）。
+            # Marker at required; light row when resolved. Mirrors EventSink.
+            aid = p.get("authorization_id") or ""
+            if aid and not has_marker("delegation_authorization", "authorization_id", aid):
+                marker = {"kind": "delegation_authorization", "authorization_id": aid}
+                for i in range(len(process) - 1, -1, -1):
+                    if process[i].get("kind") == "team":
+                        process.insert(i, marker)
+                        break
+                else:
+                    process.append(marker)
+
+        elif etype == "delegation_authorization_resolved":
             pass
 
         elif etype == "checkpoint_required":
@@ -730,6 +755,24 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         elif etype == "team_synthesis_preview":
             # 同 key 保最新（后写覆盖）。
             team_synthesis_preview = p
+
+        elif etype == "user_interjection":
+            iid = str(p.get("interjection_id") or "").strip()
+            if not iid:
+                continue
+            leaf = {
+                "interjectionId": iid,
+                "executionId": str(p.get("execution_id") or ""),
+                "content": str(p.get("content") or ""),
+                "status": str(p.get("status") or "delivered"),
+                "note": p.get("note") if isinstance(p.get("note"), str) else None,
+            }
+            idx = _user_interjection_by_id.get(iid)
+            if idx is None:
+                _user_interjection_by_id[iid] = len(user_interjections)
+                user_interjections.append(leaf)
+            else:
+                user_interjections[idx] = leaf
 
         else:
             # message_start / turn_saved / title_generated / followups_generated /
@@ -814,4 +857,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         "turnWarning": turn_warning,
         # 团队便签墙 (§2.2 通): the turn's posted notes (chronological), [] when none.
         "teamNotes": team_notes,
+        # 协调中用户插话：同 interjectionId 保最新，[] when none.
+        "userInterjections": user_interjections,
     }

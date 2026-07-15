@@ -13,6 +13,10 @@ import {
 import type { ProcessStep } from "@/types/events";
 import { Check, ChevronDown, ChevronRight, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import {
+  isReadUrlSourceGroup,
+  ReadUrlSourceCollection,
+} from "./ReadUrlSourceCollection";
 import { ThinkingDots } from "./message-bubble/Thinking";
 import {
   toolDetail,
@@ -32,6 +36,13 @@ const AUTO_EXPAND_ON_DONE = new Set([
   "file_write",
   "str_replace",
 ]);
+
+/** Consult tools (查阅能力 / 查阅记忆) whose collapsed title already names exactly what was
+ * pulled —「查阅能力 <name>」/「查阅记忆 <topic>」— and whose full body is one click away. Their
+ * peek would only repeat the summary shown again inside the expanded card (skill) or the topic
+ * already in the title (memory), so skip the peek line entirely — collapsed rows stay a clean
+ * single line (mirrors how web_search folds its count into the title instead of a peek). */
+const PEEK_SUPPRESSED = new Set(["consult_skill", "consult_memory"]);
 
 /** Live transport line while the model streams tool-call JSON (不持久化). */
 export function ComposingToolLine({
@@ -96,29 +107,49 @@ function WebSearchSkeleton() {
   );
 }
 
-function ToolStatusIcon({
+/** 行尾指示（顶层工具行对齐「读取网页 · N 个来源」）：进行中脉冲点；否则失败打红✗，
+ *  顶层可展开行补一个折叠 chevron（open→ChevronUp / 收起→ChevronDown）明确可开合；
+ *  组内明细子行仍用成功绿✓。顶层成功即只留 chevron，成功由「无红✗」隐含（与 read_url 组一致）。 */
+function ToolRowTail({
   status,
+  nested,
+  hasBody,
+  open,
 }: {
   status: "running" | "success" | "error";
+  nested: boolean;
+  hasBody: boolean;
+  open: boolean;
 }) {
   if (status === "running")
     return (
-      <span className="mt-1.5 size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
+      <span className="ml-1.5 inline-block size-1.5 animate-pulse rounded-full bg-primary align-middle" />
     );
-  // The verdict icon mounts fresh on the running→done edge, so a one-shot pop
-  // marks the state change (设计 §3); reduced-motion skips it.
-  if (status === "error")
-    return (
-      <X
-        size={14}
-        className="mt-0.5 shrink-0 animate-status-pop text-destructive motion-reduce:animate-none"
-      />
-    );
+  // The verdict icon mounts fresh on the running→done edge, so a one-shot pop marks the
+  // state change (设计 §3); reduced-motion skips it. 行尾指示紧跟标题文字（自适应内容右侧、
+  // 不撑到行边缘）：失败红✗；顶层可展开补折叠 chevron；组内明细子行用成功绿✓。
   return (
-    <Check
-      size={14}
-      className="mt-0.5 shrink-0 animate-status-pop text-success motion-reduce:animate-none"
-    />
+    <span className="ml-1 inline-flex items-center gap-1 align-middle">
+      {status === "error" && (
+        <X
+          size={14}
+          className="animate-status-pop text-destructive motion-reduce:animate-none"
+        />
+      )}
+      {nested && status === "success" && (
+        <Check
+          size={14}
+          className="animate-status-pop text-success motion-reduce:animate-none"
+        />
+      )}
+      {!nested &&
+        hasBody &&
+        (open ? (
+          <ChevronDown size={14} className="text-muted-foreground" />
+        ) : (
+          <ChevronRight size={14} className="text-muted-foreground" />
+        ))}
+    </span>
   );
 }
 
@@ -126,11 +157,16 @@ function ToolStatusIcon({
 export function ToolLine({
   step,
   turnKey,
+  nested = false,
 }: {
   step: Extract<ProcessStep, { kind: "tool" }>;
   /** 回合作用域标识（= messageId）：给了才把「结果卡开合」持久化（切对话/刷新后仍在），
    *  按 `${turnKey}:tool:${step.id}` 落 localStorage；缺省（如渲染测试）退化为会话内存态。 */
   turnKey?: string;
+  /** 是否为「工具组展开后的缩进明细子行」。顶层孤立工具行（默认 false）走 header 规格
+   *  （text-xs·灰·不加粗·成功无✓），与思考过程/工具组同级不再突兀；组内子行（true）保留
+   *  明细规格（text-sm·深色·加粗·成功绿✓），靠 pl-3 缩进与父摘要行区分层级。 */
+  nested?: boolean;
 }) {
   const [open, setOpen] = usePersistentDisclosure(
     turnKey ? `${turnKey}:tool:${step.id}` : null,
@@ -149,6 +185,7 @@ export function ToolLine({
   const running = step.status === "running";
   const isWebSearch = step.tool_name === "web_search";
   const autoExpandsOnDone = AUTO_EXPAND_ON_DONE.has(step.tool_name);
+  const suppressesPeek = PEEK_SUPPRESSED.has(step.tool_name);
   const elapsed = useRunningElapsed(running);
 
   // 结果卡自动展开: open the rich result once when an auto-expand tool finishes, so the
@@ -170,6 +207,15 @@ export function ToolLine({
         .filter(Boolean)
         .join(" · ")
     : "";
+  // web_search 的「N 条结果」是元计数（类比 read_url 组的「N 个来源」）：成功时并入标题行、
+  // 不再另起一行 peek——顶层折叠态与「读取网页 · N 个来源」同构（单行 + 行尾 chevron）。
+  const inlineCount =
+    !nested &&
+    step.tool_name === "web_search" &&
+    step.status === "success" &&
+    hasBody
+      ? toolResultPeek(data)
+      : null;
   return (
     <div className="min-w-0">
       <Button
@@ -182,20 +228,37 @@ export function ToolLine({
         <span className="flex w-full items-start gap-2 text-left">
           <Icon size={14} className="mt-0.5 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1">
-            <span className="text-sm text-foreground">
-              <span className="font-medium">{label}</span>
+            <span
+              className={
+                nested
+                  ? "text-sm text-foreground"
+                  : "text-xs text-muted-foreground"
+              }
+            >
+              <span className={nested ? "font-medium" : undefined}>{label}</span>
               {detail && (
                 <span className="ml-1.5 break-all text-muted-foreground">
                   {detail}
                 </span>
               )}
+              {inlineCount && (
+                <span className="ml-1.5 text-muted-foreground/70">
+                  · {inlineCount}
+                </span>
+              )}
+              <ToolRowTail
+                status={step.status}
+                nested={nested}
+                hasBody={hasBody}
+                open={open}
+              />
             </span>
             {runningHint && (
               <span className="block truncate text-xs text-muted-foreground/70">
                 {runningHint}
               </span>
             )}
-            {hasBody && !open && (
+            {hasBody && !open && !inlineCount && !suppressesPeek && (
               <span
                 className={`block truncate text-xs ${
                   step.status === "error"
@@ -207,7 +270,6 @@ export function ToolLine({
               </span>
             )}
           </span>
-          <ToolStatusIcon status={step.status} />
         </span>
       </Button>
       {running && isWebSearch && <WebSearchSkeleton />}
@@ -231,6 +293,40 @@ export function ToolLineGroup({
    *  标记中段插入（insertBeforeTeam）不再位移它。 */
   groupKey?: string;
 }) {
+  // All-read_url groups (≥2) render as a self-folding source collection — no
+  // ToolLineGroup chevron on top (would be double disclosure). Persistence key
+  // stays `${turnKey}:tgrp:${groupKey}` inside ReadUrlSourceCollection.
+  if (isReadUrlSourceGroup(tools)) {
+    return (
+      <ReadUrlSourceCollection
+        tools={tools}
+        isStreaming={isStreaming}
+        turnKey={turnKey}
+        groupKey={groupKey}
+      />
+    );
+  }
+  return (
+    <DefaultToolLineGroup
+      tools={tools}
+      isStreaming={isStreaming}
+      turnKey={turnKey}
+      groupKey={groupKey}
+    />
+  );
+}
+
+function DefaultToolLineGroup({
+  tools,
+  isStreaming,
+  turnKey,
+  groupKey,
+}: {
+  tools: Extract<ProcessStep, { kind: "tool" }>[];
+  isStreaming: boolean;
+  turnKey?: string;
+  groupKey?: string;
+}) {
   // 「直播中自动展开盯着看、收场后按保存值」（Q3）：取代旧的「流式默认展开 + 收场强制收起」，
   // 收场后不再强收，而是回到用户持久化的选择。
   const [expanded, toggleExpanded] = useStreamAwareDisclosure(
@@ -252,26 +348,26 @@ export function ToolLineGroup({
         onClick={toggleExpanded}
         className="h-auto w-full justify-start gap-2 px-0 py-0 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground"
       >
-        <span className="flex w-full items-center gap-2">
-          {running ? (
-            <ThinkingDots />
-          ) : expanded ? (
-            <ChevronDown size={14} className="shrink-0" />
-          ) : (
-            <ChevronRight size={14} className="shrink-0" />
-          )}
-          <span className="min-w-0 flex-1 truncate text-left">{summary}</span>
+        <span className="flex items-center gap-2">
+          {running && <ThinkingDots />}
+          <span className="min-w-0 truncate text-left">{summary}</span>
           {errorCount > 0 && (
             <Badge tone="destructive" className="shrink-0 font-normal">
               {errorCount} 个失败
             </Badge>
           )}
+          {!running &&
+            (expanded ? (
+              <ChevronDown size={14} className="shrink-0" />
+            ) : (
+              <ChevronRight size={14} className="shrink-0" />
+            ))}
         </span>
       </Button>
       {expanded && (
         <div className="mt-1.5 space-y-2 pl-3">
           {tools.map((t) => (
-            <ToolLine key={t.id} step={t} turnKey={turnKey} />
+            <ToolLine key={t.id} step={t} turnKey={turnKey} nested />
           ))}
         </div>
       )}

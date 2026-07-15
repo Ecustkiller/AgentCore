@@ -127,10 +127,12 @@ def _assemble_ceo_toolset(
     # 自身无用量面；恒注册，仅在某次 delegate 让出「计划已让出」简报后才有效，
     # 否则返回友好错误。→ docs/03-AI核心/编排器与CEO主Agent.md §一 replan 原语
     chat_tools.register(ReplanTool(delegate=delegate_tool))
-    # CEO 协调模式：update_synthesis / cancel_worker / resolve_escalation — only
-    # effective while a coordination session is active (tools self-gate otherwise).
+    # CEO 协调模式：update_synthesis / cancel_worker / resolve_escalation /
+    # queue_user_message — only effective while a coordination session is active
+    # (tools self-gate otherwise).
     from agentcore.runtime.coordination.tools import (
         CancelWorkerTool,
+        QueueUserMessageTool,
         ResolveEscalationTool,
         UpdateSynthesisTool,
     )
@@ -138,6 +140,7 @@ def _assemble_ceo_toolset(
     chat_tools.register(UpdateSynthesisTool(sink=sink))
     chat_tools.register(CancelWorkerTool())
     chat_tools.register(ResolveEscalationTool())
+    chat_tools.register(QueueUserMessageTool(sink=sink))
     # debate (辩论编排原语): the CEO's对抗性多视角思考 primitive, sibling to delegate. A
     # Moderator hosts an adaptive多轮 debate内部 and returns双产物 (决策简报 + 交锋叙事线);
     # like delegate它非终结且把辩手/主持人的 usage/ledger/citations累加在实例上，由本回合

@@ -246,6 +246,15 @@ def test_core_teaches_split_criterion_over_count():
     assert "实现+独立验证" in skill  # 构建轻档双人底线
 
 
+def test_core_teaches_delegate_graph_and_coordinate_invariants():
+    # 产品 AI 自述委派机制时曾误称「一次只能一个 delegate、同步阻塞」。
+    # 常驻 core 钉：一回合一张图 + 默认协调非阻塞 + 同回合可再追加。
+    hint = _CEO_CORE_HINT
+    assert "一回合一张协作图" in hint
+    assert "coordinate=false" in hint
+    assert "不必等上一批全部完成" in hint
+    assert "立即返回" in hint
+
 def test_skill_teaches_same_layer_pipeline():
     # A multi-stage pipeline is a DAG within ONE delegate call (depends_on, same
     # layer) — moved to team_orchestration_advanced (P3). The nesting axis

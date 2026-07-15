@@ -268,6 +268,61 @@ export function appendTeamPreviewStep(
   return [...steps, marker];
 }
 
+/** Drop an `escalation` marker (blocking required or non-blocking raised). */
+export function appendEscalationStep(
+  process: ProcessStep[] | undefined,
+  escalationId: string,
+): ProcessStep[] {
+  if (!escalationId) return process ?? [];
+  if (hasMarker(process, "escalation", "escalation_id", escalationId))
+    return process ?? [];
+  return [
+    ...(process ?? []),
+    { kind: "escalation", escalation_id: escalationId },
+  ];
+}
+
+/** Drop an `approval` marker (热审批痕迹锚点；行渲染由 resolved 门控). */
+export function appendApprovalStep(
+  process: ProcessStep[] | undefined,
+  approvalId: string,
+): ProcessStep[] {
+  if (!approvalId) return process ?? [];
+  if (hasMarker(process, "approval", "approval_id", approvalId))
+    return process ?? [];
+  return [...(process ?? []), { kind: "approval", approval_id: approvalId }];
+}
+
+/** Drop a `delegation_authorization` marker (委派授权痕迹锚点). 产品修正：与
+ * team_preview 同锚定 —— 「放行开工」族（授权 → 团队干活），insert before the last
+ * `team` marker when one exists; else append. Mirrors backend `EventSink`. */
+export function appendDelegationAuthorizationStep(
+  process: ProcessStep[] | undefined,
+  authorizationId: string,
+): ProcessStep[] {
+  if (!authorizationId) return process ?? [];
+  if (
+    hasMarker(
+      process,
+      "delegation_authorization",
+      "authorization_id",
+      authorizationId,
+    )
+  )
+    return process ?? [];
+  const steps = process ?? [];
+  const marker: ProcessStep = {
+    kind: "delegation_authorization",
+    authorization_id: authorizationId,
+  };
+  for (let i = steps.length - 1; i >= 0; i--) {
+    if (steps[i].kind === "team") {
+      return [...steps.slice(0, i), marker, ...steps.slice(i)];
+    }
+  }
+  return [...steps, marker];
+}
+
 /** A tool step (narrowed from {@link ProcessStep}). */
 export type ToolStep = Extract<ProcessStep, { kind: "tool" }>;
 
@@ -322,6 +377,12 @@ export function timelineNodeKeys(nodes: TimelineNode[]): string[] {
         return `ask-${node.ask_id}`;
       case "plan_review":
         return `pr-${node.checkpoint_id}`;
+      case "escalation":
+        return `esc-${node.escalation_id}`;
+      case "approval":
+        return `appr-${node.approval_id}`;
+      case "delegation_authorization":
+        return `dauth-${node.authorization_id}`;
       case "tool":
         return `tool-${node.step.id}`;
       case "tool-group":

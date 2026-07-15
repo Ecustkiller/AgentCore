@@ -209,6 +209,7 @@ export function ChatView() {
           <div ref={composerFlipRef}>
             <MessageInput
               className={centerComposer ? "px-4 pb-2 pt-8" : undefined}
+              variant={centerComposer ? "card" : "bar"}
             />
           </div>
         </div>

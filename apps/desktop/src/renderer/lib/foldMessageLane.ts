@@ -18,8 +18,11 @@ import type {
 } from "@/types/events";
 import {
   appendAskStep,
+  appendApprovalStep,
   appendCheckpointStep,
   appendContentStep,
+  appendDelegationAuthorizationStep,
+  appendEscalationStep,
   appendPlanReviewStep,
   appendReasoningStep,
   appendReworkStep,
@@ -169,6 +172,12 @@ function appendMarkerStep(
       return appendPlanReviewStep(process, id);
     case "team_preview":
       return appendTeamPreviewStep(process, id);
+    case "escalation":
+      return appendEscalationStep(process, id);
+    case "approval":
+      return appendApprovalStep(process, id);
+    case "delegation_authorization":
+      return appendDelegationAuthorizationStep(process, id);
   }
 }
 
@@ -251,6 +260,14 @@ export function ensureTimelineMarkersFromJournal(
       const executionId = payload.execution_id;
       if (typeof executionId === "string" && executionId) {
         steps = appendTeamStep(steps, executionId);
+      }
+      continue;
+    }
+    // Raised 非阻塞升级：不走 interaction registry required 路径，仍须补标记（D1/D6）。
+    if (ev.type === "run_escalation") {
+      const eid = payload.escalation_id;
+      if (typeof eid === "string" && eid) {
+        steps = appendEscalationStep(steps, eid);
       }
       continue;
     }

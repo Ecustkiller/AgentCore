@@ -21,7 +21,7 @@ import { UserMenu } from "./UserMenu";
 import { WorkspaceGroups } from "./WorkspaceGroups";
 
 const NAV_ITEMS = [
-  { icon: MessageSquare, label: "对话", route: "/" },
+  { icon: MessageSquare, label: "新对话", route: "/" },
   { icon: Files, label: "文件", route: "/files" },
   { icon: Mail, label: "消息", route: "/messages" },
   { icon: Wrench, label: "工具箱", route: "/toolbox" },

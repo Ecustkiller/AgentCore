@@ -10,6 +10,10 @@ import { loadLatestWindow } from "@/services/messages";
 import { resolveDefaultPermissionPreset } from "@/services/permissionPreset";
 import type { OutgoingAttachment } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
+import {
+  notifyMidFlightResult,
+  sendMidFlightMessage,
+} from "@/services/turns/midFlight";
 import { useComposerDraftStore } from "@/stores/composer";
 import { getActiveRuntime, useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
@@ -47,9 +51,31 @@ export function useComposerSend({
 
   const handleSend = useCallback(async () => {
     const trimmed = value.trim();
-    if (!trimmed || isGenerating) return;
+    if (!trimmed) return;
 
     const activeConvId = useConversationStore.getState().currentConversationId;
+
+    // Mid-flight: inject into live coordination or conversation-level queue.
+    // No new user bubble / SSE — events ride the in-flight sink.
+    if (isGenerating && activeConvId) {
+      if (attachments.length > 0) {
+        notifyError(
+          new Error("回合执行中暂不支持带附件插话，请结束后再发"),
+          "无法发送",
+        );
+        return;
+      }
+      const result = await sendMidFlightMessage(activeConvId, trimmed);
+      if (result.kind === "delivered" || result.kind === "queued") {
+        setValue("");
+        closeMenu();
+        notifyMidFlightResult(result);
+      }
+      return;
+    }
+
+    if (isGenerating) return;
+
     if (backgroundMode && isLocal && activeConvId) {
       dispatchBackgroundTask(activeConvId, trimmed);
       setValue("");

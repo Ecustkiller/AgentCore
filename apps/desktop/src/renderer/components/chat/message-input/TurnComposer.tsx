@@ -1,6 +1,11 @@
 import { DraftWorkspaceAssignPrompt } from "@/components/chat/DraftWorkspaceAssignPrompt";
 import { MentionMenu } from "@/components/chat/MentionMenu";
 import { IconButton } from "@/components/ui";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useFolders } from "@/hooks/useFolders";
 import { useLlmKey } from "@/hooks/useLlmKey";
@@ -16,11 +21,13 @@ import {
   useConversationStore,
 } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
+import { useServerHealthStore } from "@/stores/serverHealth";
 import {
   Cloud,
   CloudUpload,
   Loader2,
   Paperclip,
+  Plus,
   Send,
   Square,
 } from "lucide-react";
@@ -45,10 +52,18 @@ import { useVoiceInput } from "./useVoiceInput";
 
 const EMPTY_ATTACHMENTS: PendingAttachment[] = [];
 
-// 输入框自增高边界：空/单行草稿也保底 ~2 行高度（text-sm 20px 行高 + pt-3/pb-1 = 56px），
-// 让文字不贴着底部工具栏；上限 200px 后转内部滚动。
-const MIN_COMPOSER_HEIGHT = 56;
+// 输入框自增高边界：card 空/单行草稿保底 ~2 行（text-sm 20px 行高 + pt-3/pb-1 = 56px）；
+// bar 默认一行高（20px 行高 + py-2 = 36px）。上限 200px 后转内部滚动。
+const MIN_COMPOSER_HEIGHT_CARD = 56;
+const MIN_COMPOSER_HEIGHT_BAR = 36;
 const MAX_COMPOSER_HEIGHT = 200;
+
+/** Align with backend `MessageCreate.content` max_length. */
+const MESSAGE_CHAR_LIMIT = 32_000;
+/** Show the counter only when the draft is near the limit (bar mode). */
+const CHAR_COUNT_NEAR_LIMIT = 28_000;
+
+export type TurnComposerVariant = "card" | "bar";
 
 /**
  * The ONE turn composer (统一 AI 输入框): the full-featured card — auto-growing
@@ -58,6 +73,9 @@ const MAX_COMPOSER_HEIGHT = 200;
  * 命令栏 {@link import("../../graph/CanvasCommandBar").CanvasCommandBar}. 下达指令 is
  * the same act in both views, so it is the same component; hosts only pick chrome
  * (placeholder, canvas follow hook, whether 后台云端 applies).
+ *
+ * `variant="bar"` is the compact single-row chrome used only by the chat bottom dock;
+ * default `card` keeps the full toolbar layout (center draft + canvas command bar).
  *
  * Draft state (text + attachments) lives in {@link useComposerDraftStore} keyed by
  * conversation, NOT in component state — switching 聊天 ⇄ 画布 swaps the mounted skin
@@ -73,13 +91,23 @@ export function TurnComposer({
   placeholder = "输入消息，@ 引用文件…",
   allowBackground = true,
   onDispatch,
+  variant = "card",
 }: {
   placeholder?: string;
   /** Offer the 后台云端 toggle (still requires a local-mode conversation). */
   allowBackground?: boolean;
   /** Called when a foreground turn is dispatched (canvas uses it to auto-follow). */
   onDispatch?: () => void;
+  /**
+   * `card` = full toolbar under the textarea (default; center draft + canvas).
+   * `bar` = compact single-row input (chat bottom dock only).
+   */
+  variant?: TurnComposerVariant;
 }) {
+  const isBar = variant === "bar";
+  const minComposerHeight = isBar
+    ? MIN_COMPOSER_HEIGHT_BAR
+    : MIN_COMPOSER_HEIGHT_CARD;
   const isGenerating = useActiveGenerating();
   const { data: llmKey } = useLlmKey();
   const toolsGateHint = needsToolsGateHint(llmKey?.supports_tools);
@@ -89,6 +117,8 @@ export function TurnComposer({
     if (!id) return null;
     return s.byId[id]?.messages.at(-1) ?? null;
   });
+  const serverStatus = useServerHealthStore((s) => s.status);
+  const serverUnhealthy = serverStatus === "offline";
   const resolvedPlaceholder = useMemo(() => {
     if (
       !isGenerating &&
@@ -117,6 +147,7 @@ export function TurnComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isLocal, setIsLocal] = useState(false);
   const [backgroundMode, setBackgroundMode] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const folders = useFolders();
   const draftIntent = useFoldersStore((s) => s.draftWorkspaceIntent);
   const pendingFolderId =
@@ -189,10 +220,10 @@ export function TurnComposer({
     if (!el) return;
     el.style.height = "0";
     el.style.height = `${Math.min(
-      Math.max(el.scrollHeight, MIN_COMPOSER_HEIGHT),
+      Math.max(el.scrollHeight, minComposerHeight),
       MAX_COMPOSER_HEIGHT,
     )}px`;
-  }, []);
+  }, [minComposerHeight]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: value is an intentional re-run key
   useEffect(() => {
@@ -369,6 +400,98 @@ export function TurnComposer({
   const menuOpen = mention.menuMode !== null;
   const showBackground = allowBackground && isLocal;
   const bg = showBackground && backgroundMode;
+  const showCharCount = isBar
+    ? charCount >= CHAR_COUNT_NEAR_LIMIT
+    : charCount > 0;
+
+  const backgroundToggle = showBackground ? (
+    <SimpleTooltip
+      label={
+        toolsGateHint
+          ? `${TOOLS_GATE_HINT}。${
+              bg
+                ? "已切到「后台云端」：发送会把任务交给云端团队后台跑"
+                : "切到「后台云端」：把任务交给云端团队后台跑，结果回来再应用"
+            }`
+          : bg
+            ? "已切到「后台云端」：发送会把任务交给云端团队后台跑"
+            : "切到「后台云端」：把任务交给云端团队后台跑，结果回来再应用"
+      }
+    >
+      <IconButton
+        size="md"
+        onClick={() => setBackgroundMode((v) => !v)}
+        disabled={isGenerating}
+        aria-label="切换后台云端任务"
+        aria-pressed={bg}
+        className={
+          bg
+            ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+            : undefined
+        }
+      >
+        <Cloud size={14} />
+      </IconButton>
+    </SimpleTooltip>
+  ) : null;
+
+  const sendControls = isGenerating ? (
+    <IconButton
+      size="md"
+      tone="destructive"
+      onClick={stopGeneration}
+      aria-label="停止生成"
+    >
+      <Square size={14} />
+    </IconButton>
+  ) : (
+    <IconButton
+      size="md"
+      tone="primary"
+      onClick={() => void handleSend()}
+      disabled={!value.trim()}
+      aria-label={bg ? "派发到云端后台" : "发送"}
+    >
+      {bg ? <CloudUpload size={14} /> : <Send size={14} />}
+    </IconButton>
+  );
+
+  const textareaBlock = (
+    <div className="relative min-w-0 flex-1">
+      {voice.isRecording && voice.interimText && (
+        <div
+          aria-hidden
+          className={`pointer-events-none absolute inset-0 overflow-hidden text-sm whitespace-pre-wrap break-words ${
+            isBar ? "px-2 py-2" : "px-4 pt-3 pb-1"
+          }`}
+        >
+          <span className="invisible">{value}</span>
+          <span className="text-foreground/40">{voice.interimText}</span>
+        </div>
+      )}
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        onPaste={drop.handlePaste}
+        onSelect={(e) =>
+          mention.syncMention(
+            e.currentTarget.value,
+            e.currentTarget.selectionStart ?? 0,
+          )
+        }
+        placeholder={
+          bg ? "描述要交给云端团队后台完成的任务…" : resolvedPlaceholder
+        }
+        className={`block w-full resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none ${
+          isBar ? "px-2 py-2" : "px-4 pt-3 pb-1"
+        }`}
+        rows={isBar ? 1 : 2}
+        maxLength={MESSAGE_CHAR_LIMIT}
+      />
+    </div>
+  );
 
   return (
     <div
@@ -380,6 +503,7 @@ export function TurnComposer({
       onDragOver={drop.handleDragOver}
       onDragLeave={drop.handleDragLeave}
       onDrop={drop.handleDrop}
+      data-composer-variant={variant}
     >
       {drop.dragOver && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-card/80 text-sm font-medium text-primary">
@@ -445,109 +569,104 @@ export function TurnComposer({
         <RecordingBar duration={voice.duration} onCancel={voice.cancel} />
       )}
 
-      <div className="relative">
-        {voice.isRecording && voice.interimText && (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 overflow-hidden px-4 pt-3 pb-1 text-sm whitespace-pre-wrap break-words"
-          >
-            <span className="invisible">{value}</span>
-            <span className="text-foreground/40">{voice.interimText}</span>
-          </div>
-        )}
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          onPaste={drop.handlePaste}
-          onSelect={(e) =>
-            mention.syncMention(
-              e.currentTarget.value,
-              e.currentTarget.selectionStart ?? 0,
-            )
-          }
-          placeholder={
-            bg ? "描述要交给云端团队后台完成的任务…" : resolvedPlaceholder
-          }
-          className="w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-          rows={2}
-        />
-      </div>
-      <div className="flex items-center justify-between px-4 pb-3">
-        <div className="flex min-w-0 flex-1 items-center gap-1">
-          <CurrentModelBadge disabled={isGenerating} />
-          <PermissionPresetBadge disabled={isGenerating} />
-          <ComposerWorkspaceChip conversationId={conversationId} />
-          <IconButton
-            size="md"
-            onClick={() => void mention.pickLocalFile()}
-            disabled={isGenerating}
-            aria-label="附加本机文件"
-          >
-            <Paperclip size={16} />
-          </IconButton>
-          {showBackground && (
-            <SimpleTooltip
-              label={
-                toolsGateHint
-                  ? `${TOOLS_GATE_HINT}。${
-                      bg
-                        ? "已切到「后台云端」：发送会把任务交给云端团队后台跑"
-                        : "切到「后台云端」：把任务交给云端团队后台跑，结果回来再应用"
-                    }`
-                  : bg
-                    ? "已切到「后台云端」：发送会把任务交给云端团队后台跑"
-                    : "切到「后台云端」：把任务交给云端团队后台跑，结果回来再应用"
-              }
+      {isBar ? (
+        <div className="flex items-end gap-1 px-2 py-1">
+          <div className="flex shrink-0 items-center gap-0.5 pb-0.5">
+            <Popover open={moreOpen} onOpenChange={setMoreOpen}>
+              <PopoverTrigger asChild>
+                <IconButton
+                  size="md"
+                  aria-label="更多选项"
+                  aria-expanded={moreOpen}
+                  title="更多"
+                  className="relative"
+                >
+                  <Plus size={16} />
+                  {serverUnhealthy && (
+                    <span
+                      aria-hidden
+                      className="absolute top-1 right-1 size-1.5 rounded-full bg-destructive"
+                    />
+                  )}
+                </IconButton>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                side="top"
+                className="w-64 overflow-visible p-2"
+                onInteractOutside={(e) => {
+                  const el = e.target as HTMLElement | null;
+                  // Nested workspace / other portaled popovers live outside this
+                  // content node — keep the more menu open while they are used.
+                  if (el?.closest?.("[data-radix-popper-content-wrapper]")) {
+                    e.preventDefault();
+                  }
+                }}
+              >
+                <div className="flex flex-col gap-1">
+                  <CurrentModelBadge disabled={isGenerating} />
+                  <PermissionPresetBadge disabled={isGenerating} />
+                  <ComposerWorkspaceChip conversationId={conversationId} />
+                  {backgroundToggle}
+                  {serverUnhealthy && <ServerStatusIndicator />}
+                </div>
+              </PopoverContent>
+            </Popover>
+            <IconButton
+              size="md"
+              onClick={() => void mention.pickLocalFile()}
+              disabled={isGenerating}
+              aria-label="附加本机文件"
             >
+              <Paperclip size={16} />
+            </IconButton>
+          </div>
+          {textareaBlock}
+          <div className="flex shrink-0 items-center gap-1 pb-0.5">
+            {voice.isSupported && (
+              <VoiceButton state={voice.state} onClick={voice.toggle} />
+            )}
+            {showCharCount && (
+              <span className="text-xs text-muted-foreground">
+                {charCount}/{MESSAGE_CHAR_LIMIT}
+              </span>
+            )}
+            {sendControls}
+          </div>
+        </div>
+      ) : (
+        <>
+          {textareaBlock}
+          <div className="flex items-center justify-between px-4 pb-3">
+            <div className="flex min-w-0 flex-1 items-center gap-1">
+              <CurrentModelBadge disabled={isGenerating} />
+              <PermissionPresetBadge disabled={isGenerating} />
+              <ComposerWorkspaceChip conversationId={conversationId} />
               <IconButton
                 size="md"
-                onClick={() => setBackgroundMode((v) => !v)}
+                onClick={() => void mention.pickLocalFile()}
                 disabled={isGenerating}
-                aria-label="切换后台云端任务"
-                aria-pressed={bg}
-                className={
-                  bg
-                    ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-                    : undefined
-                }
+                aria-label="附加本机文件"
               >
-                <Cloud size={14} />
+                <Paperclip size={16} />
               </IconButton>
-            </SimpleTooltip>
-          )}
-          <ServerStatusIndicator />
-        </div>
-        <div className="flex items-center gap-3">
-          {voice.isSupported && (
-            <VoiceButton state={voice.state} onClick={voice.toggle} />
-          )}
-          {charCount > 0 && (
-            <span className="text-xs text-muted-foreground">{charCount}字</span>
-          )}
-          {isGenerating ? (
-            <IconButton
-              size="md"
-              tone="destructive"
-              onClick={stopGeneration}
-              aria-label="停止生成"
-            >
-              <Square size={14} />
-            </IconButton>
-          ) : (
-            <IconButton
-              size="md"
-              tone="primary"
-              onClick={() => void handleSend()}
-              disabled={!value.trim()}
-              aria-label={bg ? "派发到云端后台" : "发送"}
-            >
-              {bg ? <CloudUpload size={14} /> : <Send size={14} />}
-            </IconButton>
-          )}
-        </div>
-      </div>
+              {backgroundToggle}
+              <ServerStatusIndicator />
+            </div>
+            <div className="flex items-center gap-3">
+              {voice.isSupported && (
+                <VoiceButton state={voice.state} onClick={voice.toggle} />
+              )}
+              {showCharCount && (
+                <span className="text-xs text-muted-foreground">
+                  {charCount}字
+                </span>
+              )}
+              {sendControls}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -442,13 +442,11 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
     case "run_escalation": {
       // 升级实时可见 (非阻塞): a worker flagged a decision/blocker for the CEO — append it
       // to its run so the node shows a ⚠️ badge and the card raises a live notice the
-      // instant it fires (the durable copy still rides RunState.escalations → CEO
-      // synthesis). A stray frame whose run isn't on this graph is ignored.
+      // instant it fires. escalationId → RunEscalation.id（桌面本地；ProjectedTurn 不加 id）。
       const run = s.runIndex.get(f.runId);
       if (run)
         run.escalations.push({
-          // Non-blocking banner: no resolve target (it never suspended).
-          id: null,
+          id: f.escalationId || null,
           question: f.question,
           assumption: f.assumption,
           blocking: f.blocking,

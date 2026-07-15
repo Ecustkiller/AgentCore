@@ -24,12 +24,20 @@ export type TimelineProcessKind =
   | "checkpoint"
   | "ask"
   | "plan_review"
-  | "team_preview";
+  | "team_preview"
+  | "escalation"
+  | "approval"
+  | "delegation_authorization";
 
 export interface TimelineMarkerDef {
   processKind: TimelineProcessKind;
   /** Id field on the ProcessStep wire shape. */
-  stepIdField: "checkpoint_id" | "ask_id";
+  stepIdField:
+    | "checkpoint_id"
+    | "ask_id"
+    | "escalation_id"
+    | "approval_id"
+    | "authorization_id";
   /** Drop trailing content into the card (blocking ask_user). */
   absorbTrailingContent?: boolean;
   /** Insert before the last `team` marker (team_preview product order). */
@@ -67,15 +75,33 @@ export const INTERACTION_REGISTRY: readonly InteractionKindDef[] = [
   {
     kind: "approval",
     submitPath: "hot",
+    timeline: {
+      processKind: "approval",
+      stepIdField: "approval_id",
+    },
+    // Flush rAF-buffered CEO prose BEFORE stamping so the 痕迹 marker lands after
+    // the same-round lead-in (mirrors the golden's [content, approval] order).
+    sseRequired: { flushBuffers: true },
   },
   {
     kind: "delegation_authorization",
     submitPath: "hot",
+    timeline: {
+      processKind: "delegation_authorization",
+      stepIdField: "authorization_id",
+      // 产品修正：「放行开工」族与开工卡同锚定 —— 排协作图之前（授权 → 团队干活）。
+      insertBeforeTeam: true,
+    },
+    sseRequired: { flushBuffers: true },
   },
   {
     kind: "escalation",
     submitPath: "hot",
     sseVia: "execution",
+    timeline: {
+      processKind: "escalation",
+      stepIdField: "escalation_id",
+    },
   },
   {
     kind: "ask_user",

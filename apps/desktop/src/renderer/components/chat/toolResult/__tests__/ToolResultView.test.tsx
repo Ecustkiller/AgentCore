@@ -54,3 +54,31 @@ describe("ToolResultView · consult_memory", () => {
     expect(screen.getByText("项目背景")).toBeTruthy();
   });
 });
+
+describe("ToolResultView · read_url", () => {
+  it("renders a source-style header + body from display (not JSON result)", () => {
+    render(
+      <ToolResultView
+        data={data({
+          toolName: "read_url",
+          display: {
+            url: "https://weather.example.com/sz",
+            title: "深圳天气",
+            site: "weather.example.com",
+            snippet: "多云转晴",
+            content: "今天气温 20-28 度。",
+          },
+          result:
+            '{"url":"https://weather.example.com/sz","title":"深圳天气","content":"今天气温 20-28 度。"}',
+        })}
+      />,
+    );
+    const link = screen.getByRole("link", { name: /深圳天气/ });
+    expect(link.getAttribute("href")).toBe("https://weather.example.com/sz");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(screen.getByText("weather.example.com")).toBeTruthy();
+    expect(screen.getByText("今天气温 20-28 度。")).toBeTruthy();
+    // Raw JSON must not appear — display is the sole render source.
+    expect(screen.queryByText(/\{"url":/)).toBeNull();
+  });
+});

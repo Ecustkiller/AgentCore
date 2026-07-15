@@ -4,6 +4,7 @@ import {
   applyInteractionWireEvent,
   defFromRequiredEvent,
   defFromResolvedEvent,
+  defFromTimelineProcess,
   interactionChannelEventTypes,
   useInteractionStore,
   wireFor,
@@ -41,6 +42,12 @@ function stampByProcessKind(
   conversationId: string,
 ): void {
   const store = useConversationStore.getState();
+  const def = defFromTimelineProcess(processKind);
+  if (def?.timeline) {
+    store.stampTimelineMarker(def.timeline, id, conversationId);
+    return;
+  }
+  // Fallback for kinds that still expose dedicated stamp helpers in tests.
   switch (processKind) {
     case "checkpoint":
       store.stampCheckpointMarker(id, conversationId);
@@ -53,6 +60,8 @@ function stampByProcessKind(
       break;
     case "team_preview":
       store.stampTeamPreviewMarker(id, conversationId);
+      break;
+    default:
       break;
   }
 }

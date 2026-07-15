@@ -28,6 +28,25 @@ describe("toolResultPeek", () => {
     ).toBe("2 条结果");
   });
 
+  it("summarizes a read_url as「标题 · 域名」", () => {
+    expect(
+      toolResultPeek(
+        data({
+          toolName: "read_url",
+          display: {
+            url: "https://weather.example.com/sz",
+            title: "深圳天气",
+            site: "weather.example.com",
+            snippet: "多云转晴",
+            content: "正文内容…",
+          },
+          // Model-facing JSON must NOT leak into the peek.
+          result: '{"url":"https://weather.example.com/sz","title":"深圳天气","content":"正文内容…"}',
+        }),
+      ),
+    ).toBe("深圳天气 · weather.example.com");
+  });
+
   it("shows the exit code for a failed code_execute", () => {
     expect(
       toolResultPeek(

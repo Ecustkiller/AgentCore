@@ -209,11 +209,10 @@ export interface RunCheckpoint {
 export type EscalationKind = "normal" | "scope" | "dep";
 
 export interface RunEscalation {
-  /** 阻塞式求决策: the `escalation_id` (interaction id) of a BLOCKING escalation — the key the
-   * `EscalationCard` POSTs the user's answer to (`POST …/interactions/{id}`). Set from
-   * `escalation_required`; `null` for a non-blocking `raised` banner (no resolve target).
-   * Desktop-local — STRIPPED from the conformance `ProjectedTurn` (the golden never carries it),
-   * so threading it here does not widen the cross-end contract. */
+  /** Interaction / raised id (`escalation_id` on wire). Blocking cards POST to this id;
+   * raised banners use it as the timeline marker key (统一时间线二期 D6). `null` only for
+   * legacy frames that predate the field. Desktop-local — STRIPPED from the conformance
+   * `ProjectedTurn` (the golden never carries it). */
   id: string | null;
   question: string;
   assumption: string;
@@ -415,6 +414,16 @@ export interface Execution {
    * {@link projectExecution}. Journaled, so it replays on reload (hydrateFromJournal). Empty for
    * a single-agent turn or a multi-agent turn with no notes. */
   teamNotes: TeamNote[];
+}
+
+/** Mid-flight user interjection into live coordination (`user_interjection`).
+ * Same interjectionId keeps latest status (delivered → queued). */
+export interface UserInterjection {
+  interjectionId: string;
+  executionId: string;
+  content: string;
+  status: "delivered" | "queued" | string;
+  note: string | null;
 }
 
 /**

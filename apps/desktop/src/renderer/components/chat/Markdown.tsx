@@ -1,9 +1,9 @@
-import { Button } from "@/components/ui";
 import { remarkCitations } from "@/lib/remarkCitations";
 import { remarkEvidence } from "@/lib/remarkEvidence";
 import type { Citation } from "@/types/events";
 import {
   type ComponentPropsWithoutRef,
+  type ReactNode,
   isValidElement,
   memo,
   useMemo,
@@ -97,34 +97,43 @@ function ChipFavicon({ site }: { site?: string }) {
 }
 
 /**
- * A clickable inline citation marker that maps to a source card. Shows the
- * source's favicon (when it loads) before the number so a reader recognizes the
- * site inline; hovering reveals the full source (favicon + title + domain +
- * snippet), matching the source cards below the reply.
+ * Inline citation marker: display number + optional favicon, linked to the real
+ * source URL (system browser via target=_blank). Hover reuses SourceTooltip.
+ * Props arrive from remark's `citemark` via `data.hProperties` (`data-n`).
  */
 function CitationChip({
-  n,
-  citation,
-  onClick,
+  "data-n": dataN,
+  citations,
+  toDisplay,
 }: {
-  n: number;
-  citation?: Citation;
-  onClick: () => void;
+  "data-n"?: string;
+  children?: ReactNode;
+  citations: Citation[];
+  toDisplay: ReadonlyMap<number, number>;
 }) {
+  const canonical = Number(dataN);
+  if (!Number.isFinite(canonical) || canonical < 1) {
+    return <>{dataN != null ? `[${dataN}]` : null}</>;
+  }
+  const citation = citations[canonical - 1];
+  const display = toDisplay.get(canonical);
+  if (!citation?.url || display == null) {
+    return <>{`[${canonical}]`}</>;
+  }
   const chip = (
-    <Button
-      variant="ghost"
-      onClick={onClick}
-      aria-label={`跳到来源 ${n}`}
-      className="mx-0.5 inline-flex h-auto gap-0.5 rounded-full bg-primary/10 px-1.5 align-super text-xs font-medium leading-none text-primary hover:bg-primary/20"
+    <a
+      href={citation.url}
+      target="_blank"
+      rel="noreferrer"
+      aria-label={`来源 ${display}`}
+      className="mx-0.5 inline-flex h-auto items-center gap-0.5 rounded-full bg-primary/10 px-1.5 align-middle text-xs font-medium leading-none text-primary no-underline hover:bg-primary/20"
     >
-      <ChipFavicon site={citation?.site} />
-      {n}
-    </Button>
+      <ChipFavicon site={citation.site} />
+      {display}
+    </a>
   );
-  if (!citation) return chip;
   return (
-    <SourceTooltip citation={citation} index={n}>
+    <SourceTooltip citation={citation} index={display}>
       {chip}
     </SourceTooltip>
   );
@@ -135,8 +144,11 @@ interface Props {
   /** Web sources for this message; enables `[n]` (1..count) citation chips with
    * a hover preview of each source. */
   citations?: Citation[];
-  /** Invoked with the 1-based source index when a chip is clicked. */
-  onCitationClick?: (n: number) => void;
+  /**
+   * Canonical (1-based) → display number map shared with SourceCards.
+   * When omitted, chips fall back to the canonical pool index.
+   */
+  citationToDisplay?: ReadonlyMap<number, number>;
   /** While true, defer rendering ```mermaid/```markmap blocks (a half-written
    * diagram is a syntax error) — they show source until the turn finishes. */
   isStreaming?: boolean;
@@ -158,12 +170,20 @@ interface Props {
 export const Markdown = memo(function Markdown({
   content,
   citations,
-  onCitationClick,
+  citationToDisplay,
   isStreaming = false,
   muted = false,
   evidence = false,
 }: Props) {
   const citationCount = citations?.length ?? 0;
+  const toDisplay = useMemo(() => {
+    if (citationToDisplay) return citationToDisplay;
+    // Fallback: identity map so chips still render without a parent map.
+    const m = new Map<number, number>();
+    for (let i = 1; i <= citationCount; i++) m.set(i, i);
+    return m;
+  }, [citationToDisplay, citationCount]);
+
   // Only enrich once sources exist (they arrive at end-of-turn), so streaming
   // deltas keep using the stable module-level remark plugins. `evidence` (debate
   // speech) appends remarkEvidence; deps-memoized so it stays a stable ref across deltas.
@@ -237,18 +257,6 @@ export const Markdown = memo(function Markdown({
             pre,
             img,
             a({ href, children, node: _node, ...props }) {
-              const m =
-                typeof href === "string" ? /^cite:(\d+)$/.exec(href) : null;
-              if (m) {
-                const n = Number(m[1]);
-                return (
-                  <CitationChip
-                    n={n}
-                    citation={citations?.[n - 1]}
-                    onClick={() => onCitationClick?.(n)}
-                  />
-                );
-              }
               return (
                 <a href={href} target="_blank" rel="noreferrer" {...props}>
                   {children}
@@ -256,14 +264,30 @@ export const Markdown = memo(function Markdown({
               );
             },
           };
-    // 举证徽章（P3）：remarkEvidence 产出的自定义 `evidencemark` 元素映射到 EvidenceBadge。走
-    // data.hProperties 而非 cite: 那种链接 url——后者会被 react-markdown 的 urlTransform 按非安全
-    // 协议清空（cite:/evi: 同被清空）。仅辩论发言 opt-in（evidence=true），不扰其余 markdown。
+    // Citation chips: remarkCitations emits `citemark` via data.hProperties (not a
+    // cite: link url — urlTransform would strip that). Same seam as evidencemark.
+    if (citationCount > 0 && citations) {
+      const CiteMark = (props: {
+        "data-n"?: string;
+        children?: ReactNode;
+      }) => (
+        <CitationChip
+          data-n={props["data-n"]}
+          citations={citations}
+          toDisplay={toDisplay}
+        >
+          {props.children}
+        </CitationChip>
+      );
+      (base as Record<string, unknown>).citemark = CiteMark;
+    }
+    // 举证徽章（P3）：remarkEvidence 产出的自定义 `evidencemark` 元素映射到 EvidenceBadge。
+    // 仅辩论发言 opt-in（evidence=true），不扰其余 markdown。
     if (evidence) {
       (base as Record<string, unknown>).evidencemark = EvidenceBadge;
     }
     return base;
-  }, [citationCount, citations, onCitationClick, isStreaming, evidence]);
+  }, [citationCount, citations, toDisplay, isStreaming, evidence]);
 
   // While streaming, split into per-block memoized chunks so each finished block
   // parses exactly once (逐块记忆化·Stage 4) — only the live tail re-parses per

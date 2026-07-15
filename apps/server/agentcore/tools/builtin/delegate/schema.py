@@ -112,9 +112,16 @@ DELEGATE_DESCRIPTION = (
     "实质任务默认组队：可分解或质量面敏感就委派；闲聊 / 单点事实 / 追问自己答。"
     "先想任务形状再拆 tasks，勿一律单 worker 或一律套模板。\n"
     "本工具非终结：产出回到你的循环，你据此写一段简短概览（不逐字复述，用户可在界面看"
-    "各成员全文），必要时再次调用继续委派。\n"
+    "各成员全文）。\n"
+    "【一回合一张协作图】：同回合再次调用本工具 = 往【同一张】协作图动态追加 worker"
+    "（同 execution_id 合并），不是另开新团，也【不必】等上一批全部完成。\n"
+    "【协调 vs 阻塞】：≥2 worker 且根 CEO、非 finalize 时默认协调（coordinate 省略即 true）——"
+    "本调用立即返回『团队已启动』，团队后台跑，你在轮间收团队事件并可介入；"
+    "同步阻塞只出现在：单 worker / finalize / 嵌套 lead / 显式 coordinate=false / "
+    "批含 checkpoint_after 且把关闸开。\n"
     "粒度由你定：传入一个 tasks 数组（每个元素一个内联角色，role + task 必填）。"
-    f"单次最多 {MAX_DELEGATION_TASKS} 个节点，超出会被拒绝，请自行分批。\n"
+    f"单次最多 {MAX_DELEGATION_TASKS} 个节点，超出会被拒绝——"
+    "可同回合再调本工具追加，或拆进 depends_on DAG。\n"
     "无依赖且仅 1 个=单兵；无依赖多个=并行；任一任务声明 depends_on（引用其它任务的 id）"
     "=按依赖图分波执行，上游产出自动注入下游。\n"
     "`playbook` 是形状词汇的教学示例（对照学形状，非一键成品）；形态贴合时可与 tasks 二选一"
@@ -132,7 +139,8 @@ DELEGATE_PARAMETERS = {
             "type": "array",
             "description": (
                 f"要委派的子任务列表（每个是一个内联角色 worker）。"
-                f"单次最多 {MAX_DELEGATION_TASKS} 个节点，超出请分批。"
+                f"单次最多 {MAX_DELEGATION_TASKS} 个节点；超出可同回合再调 delegate 追加到"
+                f"同一张协作图，或拆进 depends_on DAG。"
             ),
             "items": {
                 "type": "object",
@@ -282,8 +290,10 @@ DELEGATE_PARAMETERS = {
                 "可选，默认 true（省略即协调）。当本次派【≥2 个】worker 且为根 CEO、"
                 "非 finalize 时：delegate 立即返回『团队已启动』，你进入协调模式，消费"
                 "团队事件并用 update_synthesis / cancel_worker / resolve_escalation 边看边调；"
+                "同回合可再调 delegate 往同一张协作图追加 worker，不必等全队完成。"
                 "全部完成后做最终合成。传 false 显式退出到经典阻塞等待（等全队完成再返回）。"
-                "单 worker、finalize、嵌套 lead 无论本参数如何都不进协调。"
+                "单 worker、finalize、嵌套 lead、含 checkpoint_after（把关闸开）无论本参数"
+                "如何都不进协调。"
             ),
         },
         "playbook": {

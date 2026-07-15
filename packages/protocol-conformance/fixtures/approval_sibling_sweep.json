@@ -126,7 +126,23 @@
     "process": [
       {
         "kind": "content",
-        "text": "需要写几个文件。 三个文件都写好了。"
+        "text": "需要写几个文件。"
+      },
+      {
+        "kind": "approval",
+        "approval_id": "a1"
+      },
+      {
+        "kind": "approval",
+        "approval_id": "a2"
+      },
+      {
+        "kind": "approval",
+        "approval_id": "a3"
+      },
+      {
+        "kind": "content",
+        "text": " 三个文件都写好了。"
       }
     ],
     "citations": [],
@@ -185,6 +201,7 @@
     "debateOpening": null,
     "teamSynthesisPreview": null,
     "turnWarning": null,
-    "teamNotes": []
+    "teamNotes": [],
+    "userInterjections": []
   }
 }

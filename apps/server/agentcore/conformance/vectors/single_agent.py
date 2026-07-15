@@ -112,6 +112,146 @@ def _single_agent_citations() -> list[SSEEvent]:
         message_end(FinishReason.END_TURN, input_tokens=1800, output_tokens=260, cost=_COST),
     ]
 
+def _single_agent_web_read() -> list[SSEEvent]:
+    """单聊·联网检索与深读的富渲染 (工具结果富渲染 · read_url display + 工具组合并)：
+    web_search 出来源卡片列表；单条 read_url 出「来源头 + 正文」卡片（display 携
+    url/title/site/snippet/content）；≥2 条连续 read_url 折叠成来源集合（favicon pill +
+    「读取网页 · N 个来源」/ 展开来源列表，无内联正文）。钉住三端 process fold 对 read_url
+    display 的渲染分流与工具组合并阈值（≥2 全 read_url → tool-group → 来源集合）。"""
+
+    def _hit(title: str, url: str, snippet: str, site: str) -> dict:
+        return {"title": title, "url": url, "snippet": snippet, "site": site}
+
+    def _rd(url: str, title: str, site: str, snippet: str, content: str) -> dict:
+        return {
+            "url": url,
+            "title": title,
+            "site": site,
+            "snippet": snippet,
+            "content": content,
+        }
+
+    return [
+        message_start("m1", conversation_id=_CONV),
+        reasoning_delta("先检索这个案子的背景。"),
+        tool_use_start("tc1", "web_search", {"query": "LV 茉莉奶白 商标 诉讼"}),
+        tool_use_end(
+            "tc1",
+            "web_search",
+            success=True,
+            output="找到 3 条结果。",
+            display={
+                "query": "LV 茉莉奶白 商标 诉讼",
+                "results": [
+                    _hit(
+                        "驴疯了？LV 起诉国家知识产权局！",
+                        "https://www.sohu.com/a/1050596771_121124370",
+                        "路易威登与「茉莉奶白」的商标纠纷再起波澜。",
+                        "sohu.com",
+                    ),
+                    _hit(
+                        "LV 起诉国家知识产权局，7 月开庭",
+                        "https://www.sohu.com/a/1050271277_349248",
+                        "相关商标行政纠纷案将于 7 月 16 日开庭审理。",
+                        "sohu.com",
+                    ),
+                    _hit(
+                        "又涉及茉莉奶白？本案属行政诉讼",
+                        "https://www.sohu.com/a/1050304127_121811866",
+                        "本案属于行政诉讼范畴，被告为国家知识产权局。",
+                        "sohu.com",
+                    ),
+                ],
+            },
+        ),
+        reasoning_delta("摘要不够，深读第一篇看细节。"),
+        tool_use_start(
+            "tc2", "read_url", {"url": "https://www.sohu.com/a/1050596771_121124370"}
+        ),
+        tool_use_end(
+            "tc2",
+            "read_url",
+            success=True,
+            output='{"url": "…", "title": "驴疯了？LV 起诉国家知识产权局！", "content": "…"}',
+            display=_rd(
+                "https://www.sohu.com/a/1050596771_121124370",
+                "驴疯了？LV 起诉国家知识产权局！",
+                "sohu.com",
+                "路易威登针对「茉莉奶白」商标争议将国家知识产权局诉至法院。",
+                "路易威登（LV）近日就「茉莉奶白」商标争议，将国家知识产权局诉至法院。"
+                "该案源于双方在商标近似认定上的分歧，一审将于近期开庭。",
+            ),
+        ),
+        reasoning_delta("再多读几篇核对细节。"),
+        tool_use_start(
+            "tc3", "read_url", {"url": "https://www.sohu.com/a/1050271277_349248"}
+        ),
+        tool_use_end(
+            "tc3",
+            "read_url",
+            success=True,
+            output="正文……",
+            display=_rd(
+                "https://www.sohu.com/a/1050271277_349248",
+                "LV 起诉国家知识产权局，7 月开庭",
+                "sohu.com",
+                "相关商标行政纠纷案将于 7 月 16 日开庭审理。",
+                "相关商标行政纠纷案将于 7 月 16 日在北京知识产权法院开庭审理。",
+            ),
+        ),
+        tool_use_start(
+            "tc4", "read_url", {"url": "https://www.sohu.com/a/1050304127_121811866"}
+        ),
+        tool_use_end(
+            "tc4",
+            "read_url",
+            success=True,
+            output="正文……",
+            display=_rd(
+                "https://www.sohu.com/a/1050304127_121811866",
+                "又涉及茉莉奶白？本案属行政诉讼",
+                "sohu.com",
+                "本案属于行政诉讼范畴，被告为国家知识产权局。",
+                "本案属于行政诉讼范畴，被告为国家知识产权局，原告为路易威登。",
+            ),
+        ),
+        tool_use_start(
+            "tc5", "read_url", {"url": "https://zhuanlan.zhihu.com/p/700123456"}
+        ),
+        tool_use_end(
+            "tc5",
+            "read_url",
+            success=True,
+            output="正文……",
+            display=_rd(
+                "https://zhuanlan.zhihu.com/p/700123456",
+                "如何看待 LV 起诉国家知识产权局",
+                "zhihu.com",
+                "多角度分析该案的法律看点与商标近似认定标准。",
+                "本文从商标近似认定与行政诉讼程序两方面分析该案的看点。",
+            ),
+        ),
+        content_delta("综合多篇报道，"),
+        content_delta("该案为 LV 就「茉莉奶白」商标提起的行政诉讼，将于 7 月开庭。"),
+        citations_event(
+            [
+                _hit(
+                    "驴疯了？LV 起诉国家知识产权局！",
+                    "https://www.sohu.com/a/1050596771_121124370",
+                    "路易威登与「茉莉奶白」的商标纠纷。",
+                    "sohu.com",
+                ),
+                _hit(
+                    "LV 起诉国家知识产权局，7 月开庭",
+                    "https://www.sohu.com/a/1050271277_349248",
+                    "将于 7 月 16 日开庭审理。",
+                    "sohu.com",
+                ),
+            ]
+        ),
+        message_end(FinishReason.END_TURN, input_tokens=2200, output_tokens=320, cost=_COST),
+    ]
+
 def _single_agent_content_reset() -> list[SSEEvent]:
     """单聊·交付前核验回炉 (finish_guard)：CEO 直答先产出带越界角标的违规版正文（仅 1 条来源
     却引了 [2]，复刻真实事故「24 源却写 [25]」），done 轮轻层核验拦下 → content_reset 丢弃这
@@ -231,6 +371,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "single_agent_consult_memory": ("单聊：CEO 翻开记忆主题笔记（consult_memory → 查阅记忆卡片 + 全文）", _single_agent_consult_memory),
     "single_agent_error": ("单聊：正文中途 error 事件 → failed", _single_agent_error),
     "single_agent_citations": ("单聊：思考→工具→正文 + citations 来源卡", _single_agent_citations),
+    "single_agent_web_read": (
+        "单聊：联网检索+深读富渲染（web_search 卡 · 单条 read_url 来源头+正文 · ≥2 read_url 来源集合）",
+        _single_agent_web_read,
+    ),
     "single_agent_content_reset": ("单聊：交付前核验回炉 (finish_guard) content_reset 丢弃违规版正文、重写修正版", _single_agent_content_reset),
     "single_agent_captain_context": ("单聊：CEO 收到的上下文（run_context kind=captain → 回合级 captainContext，system/history/request）", _single_agent_captain_context),
     "reload_turn_warning": (

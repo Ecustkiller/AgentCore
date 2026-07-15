@@ -5,13 +5,18 @@ import {
   planFromRunPlan,
   useExecutionStore,
 } from "@/stores/execution";
-import { applyInteractionWireEvent } from "@/stores/interactions";
+import {
+  INTERACTION_BY_KIND,
+  applyInteractionWireEvent,
+} from "@/stores/interactions";
 import { useToolOutputLiveStore } from "@/stores/toolOutputLive";
 import type {
   DebateResultPayload,
   DebateRoundPayload,
   DebateRoundStartedPayload,
+  EscalationRequiredPayload,
   RunContextPayload,
+  RunEscalationPayload,
   RunPlanPayload,
   RunStartedPayload,
   SSEEvent,
@@ -29,6 +34,21 @@ import { flushPendingContent } from "../contentBuffer";
 import { flushPendingFrames, queueFrame } from "../execFrameBuffer";
 import { execMessageId } from "../helpers";
 import type { DispatchContext } from "../types";
+
+/** Stamp an escalation process marker (required or raised) onto the CEO lane. */
+function stampEscalationTimelineMarker(
+  escalationId: string,
+  conversationId: string,
+): void {
+  const timeline = INTERACTION_BY_KIND.escalation.timeline;
+  if (!timeline || !escalationId) return;
+  // Flush rAF-buffered CEO prose first so the marker lands AFTER any same-round
+  // lead-in text (mirrors the synchronous conformance fold's ordering).
+  flushPendingContent(conversationId);
+  useConversationStore
+    .getState()
+    .stampTimelineMarker(timeline, escalationId, conversationId);
+}
 
 /** A structural (low-frequency) frame: flush any rAF-buffered hot frames FIRST so global
  * frame order is preserved, then append this one immediately. */
@@ -125,6 +145,8 @@ export function handleExecutionEvent(
     // EscalationCard + the node badge. UNLIKE the gates (approval / plan_review) they do NOT pause
     // the turn — siblings keep running — so there is no conversation-store card, just the journaled
     // frame; both are journaled, so the exchange replays inline on reload.
+    // 统一时间线二期: escalation_required / run_escalation 另 stamp CEO 时间线标记（sseVia=execution，
+    // 不经 interaction 盖章路径）。
     case "escalation_required":
     case "escalation_resolved": {
       applyInteractionWireEvent(
@@ -133,6 +155,17 @@ export function handleExecutionEvent(
         conversationId,
         execMessageId(conversationId) ?? "",
       );
+      if (event.type === "escalation_required") {
+        const eid = (event.payload as EscalationRequiredPayload)?.escalation_id;
+        if (typeof eid === "string" && eid) {
+          stampEscalationTimelineMarker(eid, conversationId);
+        }
+      } else if (event.type === "run_escalation") {
+        const eid = (event.payload as RunEscalationPayload)?.escalation_id;
+        if (typeof eid === "string" && eid) {
+          stampEscalationTimelineMarker(eid, conversationId);
+        }
+      }
       recordFrameNow(event, conversationId);
       return true;
     }
@@ -156,6 +189,32 @@ export function handleExecutionEvent(
             event.payload as TeamSynthesisPreviewPayload,
             mid,
           );
+      }
+      return true;
+    }
+    case "user_interjection": {
+      const mid = execMessageId(conversationId);
+      if (mid) {
+        const p = event.payload as {
+          interjection_id?: string;
+          execution_id?: string;
+          content?: string;
+          status?: string;
+          note?: string | null;
+        };
+        const iid = (p.interjection_id || "").trim();
+        if (iid) {
+          useExecutionStore.getState().upsertUserInterjection(
+            {
+              interjectionId: iid,
+              executionId: p.execution_id || "",
+              content: p.content || "",
+              status: p.status || "delivered",
+              note: typeof p.note === "string" ? p.note : null,
+            },
+            mid,
+          );
+        }
       }
       return true;
     }

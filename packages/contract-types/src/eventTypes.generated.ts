@@ -72,4 +72,5 @@ export type SSEEventType =
   | "tool_use_start"
   | "turn_saved"
   | "turn_warning"
+  | "user_interjection"
   | "workspace_op_required";

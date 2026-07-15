@@ -16,7 +16,12 @@ import {
   mergePlanInto,
   planFromRunPlan,
 } from "./plan";
-import type { ExecutionJournal, ExecutionPlan, ExecutionStatus } from "./types";
+import type {
+  ExecutionJournal,
+  ExecutionPlan,
+  ExecutionStatus,
+  UserInterjection,
+} from "./types";
 
 /**
  * The execution state of a single assistant message's turn — plan, frame
@@ -52,6 +57,8 @@ export interface ExecutionRuntime {
    * DURABLE：重载由 hydrateFromJournal 取 journal 中最后一条重建。驱动 StatusStrip
    * 「团队进展」预览行。 */
   teamSynthesisPreview: TeamSynthesisPreviewPayload | null;
+  /** 协调中用户插话（`user_interjection`，同 interjectionId 保最新）。DURABLE。 */
+  userInterjections: UserInterjection[];
 }
 
 /**
@@ -106,6 +113,11 @@ interface ExecutionState {
     preview: TeamSynthesisPreviewPayload,
     messageId: string,
   ) => void;
+  /** Upsert a mid-flight user interjection (`user_interjection`, same id keeps latest). */
+  upsertUserInterjection: (
+    item: UserInterjection,
+    messageId: string,
+  ) => void;
   setStatus: (status: ExecutionStatus, messageId: string) => void;
   setPlayhead: (index: number | null, messageId: string) => void;
   goLive: (messageId: string) => void;
@@ -137,6 +149,7 @@ const EMPTY_EXEC: ExecutionRuntime = {
   workerToolPhases: {},
   runProcesses: null,
   teamSynthesisPreview: null,
+  userInterjections: [],
 };
 
 /** Map a persisted turn's `finish_reason` to the terminal execution status the
@@ -194,6 +207,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         workerToolPhases: {},
         runProcesses: null,
         teamSynthesisPreview: null,
+        userInterjections: [],
       })),
 
     ingestPlan: (plan, messageId) => {
@@ -279,6 +293,18 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         cur.plan ? { teamSynthesisPreview: preview } : null,
       ),
 
+    upsertUserInterjection: (item, messageId) =>
+      patchExec(messageId, (cur) => {
+        if (!cur.plan) return null;
+        const list = [...cur.userInterjections];
+        const idx = list.findIndex(
+          (x) => x.interjectionId === item.interjectionId,
+        );
+        if (idx < 0) list.push(item);
+        else list[idx] = item;
+        return { userInterjections: list };
+      }),
+
     setStatus: (status, messageId) => patchExec(messageId, () => ({ status })),
 
     setPlayhead: (index, messageId) =>
@@ -297,6 +323,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         let crossExamEnabled = false;
         let debateOpening: string | null = null;
         let teamSynthesisPreview: TeamSynthesisPreviewPayload | null = null;
+        const userInterjections: UserInterjection[] = [];
+        const interjectionIndex = new Map<string, number>();
         for (const event of journal.events) {
           if (event.type === "run_plan") {
             const next = planFromRunPlan(event.payload as RunPlanPayload);
@@ -306,6 +334,30 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
           } else if (event.type === "debate_result") {
             // 回合级单事件（非 frame）：直接捕获，回放与直播经同一 slot 渲染辩论视图。
             debate = event.payload as DebateResultPayload;
+          } else if (event.type === "user_interjection") {
+            const p = event.payload as {
+              interjection_id?: string;
+              execution_id?: string;
+              content?: string;
+              status?: string;
+              note?: string | null;
+            };
+            const iid = (p.interjection_id || "").trim();
+            if (!iid) continue;
+            const leaf: UserInterjection = {
+              interjectionId: iid,
+              executionId: p.execution_id || "",
+              content: p.content || "",
+              status: p.status || "delivered",
+              note: typeof p.note === "string" ? p.note : null,
+            };
+            const idx = interjectionIndex.get(iid);
+            if (idx === undefined) {
+              interjectionIndex.set(iid, userInterjections.length);
+              userInterjections.push(leaf);
+            } else {
+              userInterjections[idx] = leaf;
+            }
           } else if (event.type === "debate_round_started") {
             // P2 DURABLE：刷新后从 journal 重建辩论进行态（与 live recordDebateRound 同 fold）。
             const p = event.payload as DebateRoundStartedPayload;
@@ -357,6 +409,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               workerToolPhases: {},
               runProcesses: journal.runProcesses ?? null,
               teamSynthesisPreview,
+              userInterjections,
             },
           },
         };

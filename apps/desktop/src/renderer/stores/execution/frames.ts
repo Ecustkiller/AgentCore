@@ -148,6 +148,8 @@ export type RunFrame =
       question: string;
       assumption: string;
       blocking: boolean;
+      /** 统一时间线二期 D6: raised 轻行幂等键（桌面填入 RunEscalation.id；golden 不加）。 */
+      escalationId: string;
       escalationKind: import("./types").EscalationKind;
     }
   | {
@@ -414,6 +416,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         question: p.question,
         assumption: p.assumption,
         blocking: p.blocking,
+        escalationId: p.escalation_id ?? "",
         escalationKind:
           p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
       };

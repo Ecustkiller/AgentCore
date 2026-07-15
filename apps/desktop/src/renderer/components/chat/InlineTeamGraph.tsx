@@ -1,6 +1,7 @@
 import { DebateProgressLine } from "@/components/chat/DebateProgressLine";
 import { StatusStrip } from "@/components/chat/StatusStrip";
 import { TeamNotesPanel } from "@/components/chat/TeamNotesPanel";
+import { UserInterjectionsPanel } from "@/components/chat/UserInterjectionsPanel";
 import { teamNotesDefaultExpanded } from "@/components/chat/teamNotesDefaults";
 import { GraphView } from "@/components/graph/GraphView";
 import { planCapabilities } from "@/components/graph/planCapabilities";
@@ -20,6 +21,7 @@ import {
 import {
   type Execution,
   type ExecutionJournal,
+  type UserInterjection,
   ExecutionScopeContext,
   isDebate,
   useExecutionStore,
@@ -33,6 +35,8 @@ import { useNavigate } from "react-router-dom";
 
 /** Re-export for canvas 指挥台 and other consumers. */
 export { RecoveryActions } from "@/components/chat/StatusStrip";
+
+const EMPTY_INTERJECTIONS: readonly UserInterjection[] = [];
 
 /**
  * True once the team has actually started work: any run left the never-started
@@ -98,6 +102,9 @@ export function InlineTeamGraph({
   }, [journal, messageId, hydrateFromJournal]);
 
   const execution = useMessageExecution(messageId);
+  const userInterjections = useExecutionStore(
+    (s) => s.byId[messageId]?.userInterjections ?? EMPTY_INTERJECTIONS,
+  );
   const message = useConversationStore((s) => {
     const key = s.currentConversationId ?? "";
     return s.byId[key]?.messages.find(
@@ -192,6 +199,10 @@ export function InlineTeamGraph({
               onMeasure={onMeasure}
             />
           )}
+          {/* 协调中用户插话：轻量徽标「已传达给团队」/「已排队」。 */}
+          <div className="px-3 pb-1">
+            <UserInterjectionsPanel items={userInterjections} />
+          </div>
           {/* 团队便签墙 (§2.2 通): collapsible; stays available when the graph is folded.
               Empty turns render nothing. */}
           <div ref={notesPanelRef}>

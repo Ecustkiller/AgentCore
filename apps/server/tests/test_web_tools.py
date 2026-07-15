@@ -355,6 +355,15 @@ async def test_read_url_emits_citation_snippet_from_description(monkeypatch):
     assert cite["title"] == "深圳天气"
     assert cite["site"] == "weather.example.com"
     assert cite["snippet"] == "今天多云转晴，气温 20-28 度。"
+    # 工具结果富渲染: display carries the same source fields + body so the client
+    # never parses the model-facing JSON output.
+    assert result.display == {
+        "url": "https://weather.example.com/sz",
+        "title": "深圳天气",
+        "site": "weather.example.com",
+        "snippet": "今天多云转晴，气温 20-28 度。",
+        "content": "正文内容",
+    }
 
 
 async def test_read_url_emits_fetching_then_reading_phases(monkeypatch):
@@ -1468,6 +1477,14 @@ async def test_read_url_caches_within_conversation(monkeypatch):
     assert r2.citations[0]["title"] == "缓存页"
     assert r2.citations[0]["snippet"] == "摘要"
     assert r2.citations[0]["site"] == "x.example.com"
+    # cache hit also emits a full display (same shape as a fresh fetch)
+    assert r2.display == {
+        "url": "https://x.example.com/p",
+        "title": "缓存页",
+        "site": "x.example.com",
+        "snippet": "摘要",
+        "content": "正文内容",
+    }
     # same page via trailing slash + fragment normalises to the same cache key
     r3 = await tool.execute({"url": "https://x.example.com/p/#sec"}, ctx)
     assert calls["n"] == 1

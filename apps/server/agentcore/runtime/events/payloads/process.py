@@ -77,6 +77,30 @@ class ProcessTeamPreviewStep(WirePayload):
     checkpoint_id: str
 
 
+class ProcessEscalationStep(WirePayload):
+    """升级卡时间线落点 (统一时间线二期 D1/D2): one escalation's own slot in the CEO
+    timeline — required 系三态落于 ``escalation_required``，非阻塞 raised 落于
+    ``run_escalation``（同一 ``escalation_id`` 键，二者互斥）。"""
+
+    kind: Literal["escalation"]
+    escalation_id: str
+
+
+class ProcessApprovalStep(WirePayload):
+    """热审批痕迹落点 (统一时间线二期 D3): resolved 后在其 required 时刻显轻状态行；
+    pending 期间标记在、行不显（操作面恒在决策区）。"""
+
+    kind: Literal["approval"]
+    approval_id: str
+
+
+class ProcessDelegationAuthorizationStep(WirePayload):
+    """委派级授权痕迹落点 (统一时间线二期 D3): 同 approval，resolved 门控轻状态行。"""
+
+    kind: Literal["delegation_authorization"]
+    authorization_id: str
+
+
 PROCESS_STEP_MEMBERS: tuple[type[WirePayload], ...] = (
     ProcessReasoningStep,
     ProcessContentStep,
@@ -87,4 +111,7 @@ PROCESS_STEP_MEMBERS: tuple[type[WirePayload], ...] = (
     ProcessAskStep,
     ProcessPlanReviewStep,
     ProcessTeamPreviewStep,
+    ProcessEscalationStep,
+    ProcessApprovalStep,
+    ProcessDelegationAuthorizationStep,
 )

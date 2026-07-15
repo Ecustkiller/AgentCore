@@ -236,15 +236,16 @@ class ToolResult:
 
     ``display`` is an OPTIONAL render-oriented payload, distinct from the
     model-facing ``output`` string: a tool that has a richer client rendering than
-    plain text (``web_search`` → result cards, ``code_execute`` → a terminal
-    stdout/stderr view) populates it, and the desktop renders per tool — falling
-    back to the ``output`` text when absent (工具结果富渲染). It rides the
-    ``tool_use_end`` event → the process timeline / journal → the client (size-
-    capped on the way, ``events._cap_display``), so a live turn and its reloaded
-    twin render the same card. 形状是数据不是模式: the frontend keys the renderer off
-    the tool name, so ``display`` is just the data that name's view needs (most
-    tools leave it ``None``; edits like ``str_replace`` need nothing here — the
-    client derives their diff from the call ``arguments`` it already has).
+    plain text (``web_search`` → result cards, ``read_url`` → source card + body
+    preview, ``code_execute`` → a terminal stdout/stderr view) populates it, and
+    the desktop renders per tool — falling back to the ``output`` text when
+    absent (工具结果富渲染). It rides the ``tool_use_end`` event → the process
+    timeline / journal → the client (size-capped on the way,
+    ``events._cap_display``), so a live turn and its reloaded twin render the
+    same card. 形状是数据不是模式: the frontend keys the renderer off the tool
+    name, so ``display`` is just the data that name's view needs (most tools
+    leave it ``None``; edits like ``str_replace`` need nothing here — the client
+    derives their diff from the call ``arguments`` it already has).
     """
 
     tool_call_id: str

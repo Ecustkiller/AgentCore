@@ -108,7 +108,7 @@
   line-height: 1;
   color: var(--accent);
   text-decoration: none;
-  vertical-align: super;
+  vertical-align: middle;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   border-radius: 4px;
 }

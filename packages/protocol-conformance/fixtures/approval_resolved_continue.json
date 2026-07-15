@@ -103,6 +103,10 @@
         "text": "我需要运行代码。"
       },
       {
+        "kind": "approval",
+        "approval_id": "tc1"
+      },
+      {
         "kind": "tool",
         "id": "tc1",
         "tool_name": "code_execute",
@@ -150,6 +154,7 @@
     "debateOpening": null,
     "teamSynthesisPreview": null,
     "turnWarning": null,
-    "teamNotes": []
+    "teamNotes": [],
+    "userInterjections": []
   }
 }

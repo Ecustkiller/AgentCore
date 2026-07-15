@@ -11,6 +11,9 @@ from agentcore.runtime.events.types import EventType
 # 各 DURABLE 事件的落库理由见 disposition.py 的 EVENT_DISPOSITION 注释。
 _JOURNAL_EVENT_TYPES = DURABLE_EVENT_TYPES
 
+# Surface = 「客户端可见 journal 非空」的门槛事件。无 surface → execution_journal /
+# runs_from_entries 对外清空 events（DURABLE 仍落 fact log）。对齐 question_posted
+# 先例：单聊仅有热审批 / 委派授权 / 升级时也必须能过 gate，否则 reload 丢痕迹（D5）。
 _JOURNAL_SURFACE_TYPES = frozenset(
     {
         EventType.RUN_PLAN.value,
@@ -18,6 +21,10 @@ _JOURNAL_SURFACE_TYPES = frozenset(
         EventType.QUESTION_POSTED.value,
         EventType.PLAN_REVIEW_REQUIRED.value,
         EventType.TEAM_PREVIEW_REQUIRED.value,
+        EventType.APPROVAL_REQUIRED.value,
+        EventType.DELEGATION_AUTHORIZATION_REQUIRED.value,
+        EventType.ESCALATION_REQUIRED.value,
+        EventType.RUN_ESCALATION.value,
     }
 )
 
