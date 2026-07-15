@@ -36,6 +36,20 @@ from agentcore.runtime.suspension_persistence import save_paused_turn
 
 logger = get_logger(__name__)
 
+# CEO 自持工具事件：运行时会给它们标 captain 自己的 run_id（执行级溯源需要），但渲染契约
+# 要求 CEO 自持工具走 turn-level 内联（见 _captain_run_id 说明），故回放时按 kind 归一。
+_CAPTAIN_TOOL_KINDS = frozenset({"tool_use_start", "tool_use_end", "tool_use_progress"})
+
+
+def _captain_run_id(events: list[dict[str, Any]]) -> str:
+    """The turn's captain run id (first ``run_started`` with ``kind=captain``), or ``""``."""
+    for ev in events:
+        if str(ev.get("kind") or "") == "run_started":
+            p = ev.get("payload") or {}
+            if p.get("kind") == "captain":
+                return str(p.get("run_id") or "")
+    return ""
+
 
 def _event_type(kind: str) -> EventType | None:
     try:
@@ -247,10 +261,23 @@ async def play_tape_events(
 
     prev_t = None
     i = start_index
+    # CEO 自持工具内联化 (统一团队时间线 = CEO 自身步骤): runtime 给 captain 的 web_search /
+    # read_url 等自持工具标了它自己的 run_id（执行级溯源），但线上/回放渲染契约
+    # (conformance single_agent 向量: captain 工具无 run_id) 要求 CEO 自持工具走 turn-level
+    # 内联渲染，而非落到协作图的 worker 节点。不剥离则 CEO 检索/读网页阶段前端只显示
+    # 「正在思考」、工具活动全隐藏（协作图尚未出现，无处落点）。仅动 captain 自身 run——
+    # worker / 辩手工具保留各自 run_id，照常进对应节点。
+    captain_run_id = _captain_run_id(events)
     while i < len(events):
         ev = events[i]
         kind = str(ev.get("kind") or "")
         payload = dict(ev.get("payload") or {})
+        if (
+            captain_run_id
+            and kind in _CAPTAIN_TOOL_KINDS
+            and payload.get("run_id") == captain_run_id
+        ):
+            payload.pop("run_id", None)
         t_ms = int(ev.get("t_ms") or 0)
         ts = ev.get("ts") if isinstance(ev.get("ts"), str) else None
 
