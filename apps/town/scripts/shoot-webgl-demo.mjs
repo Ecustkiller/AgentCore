@@ -1,9 +1,9 @@
 /**
  * AgentTown WebGL Offline Demo screenshots (no backend / LLM).
  *
- * Serves Builds/WebGL, opens ?demo=1&shoot=1&pack=… for each story pack, waits until
- * Offline Demo is ready on a landmark interaction tick, then writes PNGs under
- * apps/town/shoot-out/.
+ * Serves Builds/WebGL, opens ?demo=1&shoot=1&pack=… for each story pack (plus the
+ * ?episode=3&shoot=1 programme-mode Playback face), waits until the Offline build is
+ * ready on a landmark tick, then writes PNGs under apps/town/shoot-out/.
  *
  * Usage (repo root):
  *   pnpm town:shoot:webgl
@@ -32,14 +32,18 @@ const webglDir = resolve(townRoot, "Builds/WebGL");
 const webglIndex = join(webglDir, "index.html");
 const outDir = resolve(townRoot, "shoot-out");
 
-/** Landmark interaction ticks (图书馆 / 工坊 / 图书馆) — keep in sync with DemoPackIds.ShootLandmarkTick. */
-const PACK_LANDMARK_TICK = {
-  price_surge: 9,
-  festival: 12,
-  town_hall: 6,
-};
-
-const PACKS = ["price_surge", "festival", "town_hall"];
+/**
+ * Shoot scenes: three Offline story packs + the programme-mode Playback face.
+ * Landmark ticks stay in sync with DemoPackIds.ShootLandmarkTick and
+ * TownBootstrap.ShowShootLandmarkTick.
+ */
+const SCENES = [
+  { id: "price_surge", search: "?demo=1&shoot=1&pack=price_surge", tick: 9 },
+  { id: "festival", search: "?demo=1&shoot=1&pack=festival", tick: 12 },
+  { id: "town_hall", search: "?demo=1&shoot=1&pack=town_hall", tick: 6 },
+  // 恋综节目模式（离线第 3 期）— 白天市集 landmark（caption + follow_pair 镜头）
+  { id: "episode_3", search: "?episode=3&shoot=1", tick: 24 },
+];
 const PORT = Number(process.env.SHOOT_PORT || 4179);
 const TIMEOUT_MS = Number(process.env.SHOOT_TIMEOUT_MS || 120_000);
 const SETTLE_MS = Number(process.env.SHOOT_SETTLE_MS || 6_500);
@@ -251,12 +255,12 @@ async function waitOfflineReady(page, packId, timeoutMs) {
 }
 
 /**
- * Wait until the playhead reaches the pack landmark interaction tick
- * (bubbles / trade / banner). Shoot mode seeks there on boot; this covers
- * older builds that only autoplay from tick 3.
+ * Wait until the playhead reaches the scene landmark tick
+ * (bubbles / trade / banner / show caption). Shoot mode seeks there on boot;
+ * this covers older builds that only autoplay from tick 3.
  */
-async function waitInteractionTick(page, packId, timeoutMs) {
-  const target = PACK_LANDMARK_TICK[packId] ?? 9;
+async function waitInteractionTick(page, targetTick, timeoutMs) {
+  const target = targetTick ?? 9;
   const deadline = Date.now() + timeoutMs;
   let lastHint = `waiting for tick>=${target}`;
 
@@ -356,21 +360,21 @@ async function main() {
 
   const failures = [];
   try {
-    for (const [i, pack] of PACKS.entries()) {
-      const url = `${host.baseUrl}/?demo=1&shoot=1&pack=${encodeURIComponent(pack)}`;
-      const outFile = join(outDir, `${pack}.png`);
-      console.log(`[${i + 1}/${PACKS.length}] ${pack} → ${url}`);
+    for (const [i, scene] of SCENES.entries()) {
+      const url = `${host.baseUrl}/${scene.search}`;
+      const outFile = join(outDir, `${scene.id}.png`);
+      console.log(`[${i + 1}/${SCENES.length}] ${scene.id} → ${url}`);
       pageErrors.length = 0;
       try {
         await page.goto(url, {
           waitUntil: "domcontentloaded",
           timeout: Math.min(90_000, TIMEOUT_MS),
         });
-        const ready = await waitOfflineReady(page, pack, TIMEOUT_MS);
+        const ready = await waitOfflineReady(page, scene.id, TIMEOUT_MS);
         console.log(
           `  ready via=${ready.via} tick=${ready.demo?.tick ?? "?"} shoot=${ready.demo?.shoot ?? "?"}`,
         );
-        const ix = await waitInteractionTick(page, pack, Math.min(45_000, TIMEOUT_MS));
+        const ix = await waitInteractionTick(page, scene.tick, Math.min(45_000, TIMEOUT_MS));
         console.log(`  interaction via=${ix.via} tick=${ix.tick ?? "?"} target=${ix.target}`);
         await new Promise((r) => setTimeout(r, SETTLE_MS));
         await page.screenshot({ path: outFile, fullPage: false });
@@ -382,7 +386,7 @@ async function main() {
         const detail = String(e?.message || e);
         const bootErr = pageErrors[0] ? ` pageerror=${pageErrors[0].slice(0, 160)}` : "";
         console.error("  FAIL", detail + bootErr);
-        failures.push(`${pack}: ${detail}`);
+        failures.push(`${scene.id}: ${detail}`);
       }
     }
   } finally {
@@ -392,13 +396,13 @@ async function main() {
 
   if (failures.length > 0) {
     fail(
-      `${failures.length}/${PACKS.length} pack screenshot(s) failed:\n  - ${failures.join("\n  - ")}\n` +
+      `${failures.length}/${SCENES.length} scene screenshot(s) failed:\n  - ${failures.join("\n  - ")}\n` +
         "If Unity boot is slow, raise SHOOT_TIMEOUT_MS / SHOOT_SETTLE_MS. " +
         "If shaders crash, rebuild: pnpm town:build:webgl",
     );
   }
 
-  console.log(`OK wrote ${PACKS.length} PNGs → ${outDir}`);
+  console.log(`OK wrote ${SCENES.length} PNGs → ${outDir}`);
 }
 
 main().catch((e) => fail(String(e?.stack || e)));

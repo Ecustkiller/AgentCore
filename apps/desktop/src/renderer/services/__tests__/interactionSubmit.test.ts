@@ -78,6 +78,82 @@ describe("submitInteraction path table", () => {
     expect(store().get("cp1")?.status).toBe("resolved");
   });
 
+  it("cold path after recovery: no interactions entry still calls runResume (team_preview)", async () => {
+    // Recovery clears cold pending_interactions; pausedTurns is the authority.
+    expect(store().get("tp1")).toBeUndefined();
+    const result = await submitInteraction({
+      id: "tp1",
+      kind: "team_preview",
+      conversationId: "c1",
+      cold: {
+        messageId: "srv-m1",
+        decision: "continue",
+        note: "先做公开竞品",
+      },
+    });
+    expect(result).toBe("ok");
+    expect(resumeMock).toHaveBeenCalledWith(
+      "srv-m1",
+      "continue",
+      "先做公开竞品",
+      undefined,
+    );
+    expect(store().get("tp1")?.status).toBe("resolved");
+  });
+
+  it("cold path after recovery: ask_user without interactions entry still resumes", async () => {
+    expect(store().get("cp-ask")).toBeUndefined();
+    const result = await submitInteraction({
+      id: "cp-ask",
+      kind: "ask_user",
+      conversationId: "c1",
+      cold: {
+        messageId: "srv-ask",
+        decision: "continue",
+        note: "选 A",
+        selected: ["a"],
+      },
+    });
+    expect(result).toBe("ok");
+    expect(resumeMock).toHaveBeenCalledWith("srv-ask", "continue", "选 A", [
+      "a",
+    ]);
+  });
+
+  it("cold path: runResume failure does not markResolved", async () => {
+    resumeMock.mockRejectedValue(new Error("resume blocked: sidecar unavailable"));
+    await expect(
+      submitInteraction({
+        id: "tp1",
+        kind: "team_preview",
+        conversationId: "c1",
+        cold: { messageId: "srv-m1", decision: "continue", note: "" },
+      }),
+    ).rejects.toThrow(/sidecar unavailable/);
+    // Stub from markResolved must not appear — failure left no resolved entry,
+    // or if a prior pending existed it would reopen. Here there was none.
+    expect(store().get("tp1")).toBeUndefined();
+  });
+
+  it("cold path: tracked entry reopens on runResume failure (no fake resolved)", async () => {
+    store().upsertRequired({
+      kind: "plan_review",
+      conversationId: "c1",
+      messageId: "m1",
+      payload: { checkpoint_id: "pr1", steps: [], pending: [] },
+    });
+    resumeMock.mockRejectedValue(new Error("resume blocked: sidecar probe failed"));
+    await expect(
+      submitInteraction({
+        id: "pr1",
+        kind: "plan_review",
+        conversationId: "c1",
+        cold: { messageId: "srv-pr", decision: "continue", note: "" },
+      }),
+    ).rejects.toThrow(/probe failed/);
+    expect(store().get("pr1")?.status).toBe("pending");
+  });
+
   it("410 interaction_orphaned → orphaned status (no reopen)", async () => {
     store().upsertRequired({
       kind: "escalation",
@@ -124,7 +200,7 @@ describe("submitInteraction path table", () => {
     expect(store().get("a1")?.status).toBe("pending");
   });
 
-  it("submitting guard blocks double submit", async () => {
+  it("hot submitting guard blocks double submit", async () => {
     store().upsertRequired({
       kind: "approval",
       conversationId: "c1",
@@ -153,6 +229,34 @@ describe("submitInteraction path table", () => {
     expect(second).toBe("busy");
     release();
     await first;
+  });
+
+  it("cold path does not return busy when interactions entry is absent", async () => {
+    // While a cold submit is in flight, a second call must NOT get "busy"
+    // (dedup is the caller's local submitting state, not interactions.beginSubmit).
+    let resolveFirst!: () => void;
+    const firstGate = new Promise<void>((r) => {
+      resolveFirst = () => r();
+    });
+    resumeMock.mockImplementationOnce(() => firstGate);
+    resumeMock.mockResolvedValueOnce(undefined);
+
+    const first = submitInteraction({
+      id: "tp1",
+      kind: "team_preview",
+      conversationId: "c1",
+      cold: { messageId: "srv-m1", decision: "continue", note: "" },
+    });
+    const second = await submitInteraction({
+      id: "tp1",
+      kind: "team_preview",
+      conversationId: "c1",
+      cold: { messageId: "srv-m1", decision: "continue", note: "" },
+    });
+    expect(second).toBe("ok");
+    expect(resumeMock).toHaveBeenCalledTimes(2);
+    resolveFirst();
+    await expect(first).resolves.toBe("ok");
   });
 });
 

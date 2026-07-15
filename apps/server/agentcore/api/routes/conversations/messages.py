@@ -140,6 +140,10 @@ async def list_messages(
         status = usage.get("status")
         if status is not None:
             detail.status = status
+        # Cold-path pause latch (usage.paused): write keeps status=running; lift so clients
+        # hydrate as paused rather than streaming.
+        if usage.get("paused"):
+            detail.paused = True
         # In-flight overlay: fill content / reasoning from turn_stream_state when running.
         if segments:
             content, reasoning = overlay_message_fields(
@@ -197,9 +201,7 @@ async def delete_message(
     return StatusResponse()
 
 
-@router.patch(
-    "/{conversation_id}/messages/{message_id}/feedback", response_model=StatusResponse
-)
+@router.patch("/{conversation_id}/messages/{message_id}/feedback", response_model=StatusResponse)
 async def set_message_feedback(
     conversation_id: str,
     message_id: str,

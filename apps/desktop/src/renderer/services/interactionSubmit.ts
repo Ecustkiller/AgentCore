@@ -71,6 +71,13 @@ export function isPendingInteractionsAwaitingError(err: unknown): boolean {
 export const PENDING_INTERACTIONS_HINT =
   "有待拍板的确认卡，先处理或停止当前任务";
 
+/** User-visible copy when submitInteraction returns a non-ok status. */
+export function submitInteractionFeedback(
+  result: Exclude<Awaited<ReturnType<typeof submitInteraction>>, "ok">,
+): string {
+  return result === "orphaned" ? "确认已失效" : "请稍候再试";
+}
+
 export type HotSubmitBody = ResolveInteractionBody;
 
 export interface ColdSubmitArgs {
@@ -81,8 +88,13 @@ export interface ColdSubmitArgs {
 }
 
 /**
- * Unified submit path (方案 §3.2): kind → cold | hot | compose, with shared
- * submitting guard, 410 → orphaned 灰态, and failure → reopen.
+ * Unified submit path (方案 §3.2): kind → cold | hot | compose.
+ *
+ * Hot: interactions.beginSubmit gates double-submit.
+ * Cold: authority is pausedTurns (backend recovery keeps cold in `paused`, not
+ * pending_interactions). Do not gate on an interactions entry — after recovery
+ * there often is none. Optional best-effort status flip when an entry exists.
+ * Dedup = caller local submitting + paused frame still present.
  */
 export async function submitInteraction(args: {
   id: string;
@@ -107,10 +119,9 @@ export async function submitInteraction(args: {
     return "ok";
   }
 
-  if (!store.beginSubmit(args.id)) return "busy";
-
-  try {
-    if (path === "hot") {
+  if (path === "hot") {
+    if (!store.beginSubmit(args.id)) return "busy";
+    try {
       if (!args.hotBody) {
         store.reopen(args.id);
         throw new Error("缺少热路提交体");
@@ -125,13 +136,29 @@ export async function submitInteraction(args: {
         resolution: args.hotBody as unknown as Record<string, unknown>,
       });
       return "ok";
-    }
-
-    // cold
-    if (!args.cold) {
+    } catch (err) {
+      if (isInteractionOrphanedError(err)) {
+        store.markOrphaned(args.id);
+        return "orphaned";
+      }
+      // Legacy 404 on hot path: treat as orphaned (假卡) rather than silent remove.
+      if (err instanceof ApiError && err.status === 404) {
+        store.markOrphaned(args.id);
+        return "orphaned";
+      }
       store.reopen(args.id);
-      throw new Error("缺少冷路提交参数");
+      throw err;
     }
+  }
+
+  // cold — never gate on interactions presence
+  if (!args.cold) {
+    throw new Error("缺少冷路提交参数");
+  }
+  const tracked = store.get(args.id)?.status === "pending";
+  if (tracked) store.beginSubmit(args.id);
+
+  try {
     await runResume(
       args.cold.messageId,
       args.cold.decision,
@@ -153,12 +180,7 @@ export async function submitInteraction(args: {
       store.markOrphaned(args.id);
       return "orphaned";
     }
-    // Legacy 404 on hot path: treat as orphaned (假卡) rather than silent remove.
-    if (err instanceof ApiError && err.status === 404 && path === "hot") {
-      store.markOrphaned(args.id);
-      return "orphaned";
-    }
-    store.reopen(args.id);
+    if (tracked) store.reopen(args.id);
     throw err;
   }
 }

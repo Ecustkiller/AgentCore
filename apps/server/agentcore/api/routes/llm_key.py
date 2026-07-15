@@ -43,6 +43,11 @@ def _to_response(status: LlmKeyStatus) -> LlmKeyStatusResponse:
         billing_preference=status.billing_preference,
         platform_available=status.platform_available,
         platform_model=status.platform_model,
+        free_tier_active=status.free_tier_active,
+        price_cache_hit=status.price_cache_hit,
+        price_cache_miss=status.price_cache_miss,
+        price_output=status.price_output,
+        background_model=status.background_model,
     )
 
 
@@ -79,6 +84,10 @@ async def set_llm_key(
         body.api_key,
         base_url=body.base_url,
         default_model=body.default_model,
+        price_cache_hit=body.price_cache_hit,
+        price_cache_miss=body.price_cache_miss,
+        price_output=body.price_output,
+        background_model=body.background_model,
     )
     # Activation funnel: LLM key configured (no key material logged).
     logger.info(

@@ -83,8 +83,17 @@ from .conversations import (
     FolderGroup,
     FolderSummary,
     GroupedConversationsResponse,
+    PermissionPresetUpdate,
     UpdateConversationRequest,
     UpdateFolderRequest,
+)
+from .demo_tape import (
+    DemoTapeCatalogResponse,
+    DemoTapePrepareRequest,
+    DemoTapePrepareResponse,
+    DemoTapeStartRequest,
+    DemoTapeStartResponse,
+    DemoTapeSummary,
 )
 from .devices import DeviceListResponse, DeviceRegistration, DeviceSummary
 from .feedback import (
@@ -188,6 +197,10 @@ from .workspaces import (
     CloneRepoResponse,
     CreateDirRequest,
     CreateSnapshotRequest,
+    ExternalGrantItem,
+    ExternalGrantListResponse,
+    ExternalGrantResponse,
+    GrantExternalReadonlyRequest,
     MoveFileRequest,
     SnapshotListResponse,
     SnapshotSummary,
@@ -259,6 +272,7 @@ __all__ = [
     "ConversationSummary",
     "ConversationListResponse",
     "UpdateConversationRequest",
+    "PermissionPresetUpdate",
     "CreateFolderRequest",
     "UpdateFolderRequest",
     "FolderSummary",
@@ -284,6 +298,10 @@ __all__ = [
     # workspaces
     "BindLocalWorkspaceRequest",
     "WorkspaceBindingResponse",
+    "ExternalGrantItem",
+    "ExternalGrantListResponse",
+    "ExternalGrantResponse",
+    "GrantExternalReadonlyRequest",
     "WorkspaceSummary",
     "WorkspaceListResponse",
     "CreateSnapshotRequest",
@@ -400,6 +418,13 @@ __all__ = [
     # file assist
     "RewriteRequest",
     "RewriteResponse",
+    # demo-tape (dev-only)
+    "DemoTapeSummary",
+    "DemoTapeCatalogResponse",
+    "DemoTapePrepareRequest",
+    "DemoTapePrepareResponse",
+    "DemoTapeStartRequest",
+    "DemoTapeStartResponse",
     # generic
     "StatusResponse",
 ]

@@ -6,23 +6,29 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.text import clip_preview
-from agentcore.core.types import AutonomyPolicy, ToolApproval, ToolCategory, new_id
+from agentcore.core.types import (
+    AutonomyPolicy,
+    ToolApproval,
+    ToolCategory,
+    ToolEffect,
+    new_id,
+)
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
 from agentcore.llm.profiles import default_turn_profiles as default_profile_set
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.runtime.checkpoints import CheckpointDecision
-from agentcore.runtime.events import EventSink, plan_revised
-from agentcore.tools.builtin.delegate.drive import drive
-from agentcore.tools.builtin.delegate.plan_events import plan_event
-from agentcore.tools.builtin.delegate.schema import (
-    DELEGATE_DESCRIPTION,
-    DELEGATE_PARAMETERS,
-)
-from agentcore.tools.builtin.delegate.steer import apply_steer, record_plan_snapshot
-from agentcore.tools.builtin.delegate.supervised import (
+from agentcore.runtime.delegate.drive import drive
+from agentcore.runtime.delegate.plan_events import plan_event
+from agentcore.runtime.delegate.steer import apply_steer, record_plan_snapshot
+from agentcore.runtime.delegate.supervised import (
     SupervisedRun,
     apply_replan,
     finalize_stopped,
+)
+from agentcore.runtime.events import EventSink, plan_revised
+from agentcore.tools.builtin.delegate.schema import (
+    DELEGATE_DESCRIPTION,
+    DELEGATE_PARAMETERS,
 )
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
@@ -156,6 +162,12 @@ class DelegateTool:
         # Last resolved note-wall coordination mode (wall|none); resume/replan reuse it.
         self._coordination: str = "none"
 
+    def spawn_lead_subteam(self, captain_run_id: str, captain_depth: int):
+        """Mint a nested lead handle (阶段2); construction stays in the tools package."""
+        from agentcore.tools.builtin.delegate.nesting import make_lead_subteam
+
+        return make_lead_subteam(self, captain_run_id, captain_depth)
+
     def _kickoff_system_prompt(self) -> str:
         return self._system_prompt
 
@@ -282,10 +294,26 @@ class DelegateTool:
             msg = "委派任务无效：" + "；".join(errors)
             logger.info("delegate.rejected", errors=errors)
             return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+        from agentcore.runtime.delegate.completion import (
+            validate_completion_against_forms,
+        )
+
+        form_conflict = validate_completion_against_forms(
+            arguments.get("completion_criteria"),
+            plan,
+        )
+        if form_conflict:
+            logger.info("delegate.rejected", errors=[form_conflict])
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output=form_conflict,
+                error=form_conflict,
+            )
         if self._depth >= 1:
             self._sub_workers_spawned += len(plan.nodes)
 
-        from agentcore.tools.builtin.delegate.seed_notes import (
+        from agentcore.runtime.delegate.seed_notes import (
             parse_seed_notes,
             parse_team_brief,
             resolve_coordination,
@@ -345,6 +373,28 @@ class DelegateTool:
                 for n in plan.nodes[:_DELEGATE_LOG_AGENTS_CAP]
             ],
         )
+        # Plan-only eval: real plan path done (build + validate + run_plan). Skip drive
+        # so workers / coordination never start; HANDOFF ends the CEO loop immediately.
+        from agentcore.runtime.plan_only import is_plan_only
+
+        if is_plan_only():
+            summary = (
+                f"[plan-only] 已记录计划（{len(plan.nodes)} 节点），跳过执行。"
+            )
+            logger.info("delegate.plan_only", nodes=len(plan.nodes), call=call_idx)
+            from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
+
+            return annotate_batch_meta(
+                ToolResult(
+                    tool_call_id="",
+                    success=True,
+                    output=summary,
+                    effect=ToolEffect.HANDOFF,
+                    final_text=summary,
+                ),
+                node_count=len(plan.nodes),
+                has_deps=any(n.depends_on for n in plan.nodes),
+            )
         # retry-failed: if a retry seed is set (from retry_failed_chat), use it
         # so workers that already succeeded are skipped by the WaveScheduler.
         from agentcore.runtime.retry import retry_failed_targets as _retry_failed_targets_var
@@ -371,7 +421,9 @@ class DelegateTool:
                     error=target.get("error"),
                 )
 
-        return await drive(
+        from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
+
+        result = await drive(
             self,
             plan,
             execution_id=execution_id,
@@ -389,6 +441,11 @@ class DelegateTool:
                 if "coordinate" in arguments
                 else True
             ),
+        )
+        return annotate_batch_meta(
+            result,
+            node_count=len(plan.nodes),
+            has_deps=any(n.depends_on for n in plan.nodes),
         )
 
     async def _drive(
@@ -427,13 +484,19 @@ class DelegateTool:
         if decision is CheckpointDecision.STOP:
             return await finalize_stopped(self, plan, seed_completed)
 
-        if decision is CheckpointDecision.ADJUST and note.strip():
+        # Steer: ADJUST always; kickoff CONTINUE+note ≡ former adjust (嘱咐注入未跑队员).
+        # plan_review CONTINUE+note does not steer (apply_kickoff_grant=False; UI still has 调整).
+        if note.strip() and (
+            decision is CheckpointDecision.ADJUST
+            or (decision is CheckpointDecision.CONTINUE and apply_kickoff_grant)
+        ):
             apply_steer(plan, seed_completed, checkpoint_run_ids, note.strip())
         # Kickoff (开工卡): continue / adjust → grant; per_call → no grant.
+        # PER_CALL kept for historical / API clients; UI no longer offers the entry.
         # apply_kickoff_grant is True only when resuming a team_preview suspension.
         if apply_kickoff_grant and self._approval_gate is not None:
             if decision is CheckpointDecision.PER_CALL:
-                pass  # start with per-call approval
+                pass  # historical: start with per-call approval
             elif decision in (CheckpointDecision.CONTINUE, CheckpointDecision.ADJUST):
                 self._approval_gate.grant_delegation(execution_id)
             elif decision is CheckpointDecision.TIMEOUT:
@@ -452,7 +515,9 @@ class DelegateTool:
         # plan_review：仅经典路径 durable 挂起（协调态波边界只发 BOUNDARY_YIELD），续跑保持
         # coordinate=False。team_preview：挂在 coordinate fork **之前**，开做后续跑须默认
         # 臂后台（coordinate=True）；显式经典由调用方传 coordinate=False。
-        return await drive(
+        from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
+
+        result = await drive(
             self,
             plan,
             execution_id=execution_id,
@@ -460,6 +525,11 @@ class DelegateTool:
             finalize=False,
             coordination=self._coordination,
             coordinate=coordinate,
+        )
+        return annotate_batch_meta(
+            result,
+            node_count=len(plan.nodes),
+            has_deps=any(n.depends_on for n in plan.nodes),
         )
 
     async def replan(self, arguments: dict[str, Any]) -> ToolResult:

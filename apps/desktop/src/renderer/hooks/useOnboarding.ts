@@ -56,6 +56,7 @@ export function useShouldShowOnboardingFlow(): {
 
   const show = shouldShowOnboarding({
     hasModelAccess: hasModelAccess(llm.data),
+    freeTierActive: llm.data?.free_tier_active === true,
     conversationCount: conversations.length,
     skipped: isOnboardingSkipped(),
   });

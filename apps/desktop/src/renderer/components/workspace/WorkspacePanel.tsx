@@ -3,10 +3,13 @@ import { Button } from "@/components/ui";
 import { useConversationFileSource } from "@/hooks/useConversationFileSource";
 import { useConversationWorkspace } from "@/hooks/useWorkspaces";
 import { hasLocalFiles } from "@/lib/capabilities";
-import { notifyActionError } from "@/lib/toast";
-import { exportWorkspaceZip } from "@/services/workspace";
+import { notifyActionError, notifySuccess } from "@/lib/toast";
+import {
+  exportWorkspaceToLocal,
+  exportWorkspaceZip,
+} from "@/services/workspace";
 import { useConversationStore } from "@/stores/conversation";
-import { Download, FolderOpen, History, Loader2, X } from "lucide-react";
+import { Download, FolderDown, FolderOpen, History, Loader2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { FilesSection } from "./FilesSection";
 import { SnapshotsSection } from "./SnapshotsSection";
@@ -67,11 +70,26 @@ export function WorkspaceMode() {
     );
   }
 
-  const handleExportZip = async () => {
+  const handleExport = async () => {
     if (!conversationId || exporting) return;
     setExporting(true);
     try {
-      await exportWorkspaceZip(conversationId);
+      if (fsAvailable) {
+        const result = await exportWorkspaceToLocal(conversationId);
+        if (result.ok) {
+          notifySuccess(
+            `已导出 ${result.fileCount} 个文件到「${result.destName}」`,
+          );
+        } else if (result.reason === "cancelled") {
+          /* user dismissed picker */
+        } else if (result.reason === "unavailable") {
+          await exportWorkspaceZip(conversationId);
+        } else {
+          notifyActionError("导出到本地失败", new Error(result.message));
+        }
+      } else {
+        await exportWorkspaceZip(conversationId);
+      }
     } catch (e) {
       notifyActionError("导出工作区失败", e);
     } finally {
@@ -79,8 +97,9 @@ export function WorkspaceMode() {
     }
   };
 
-  const emptyTreeHint =
-    "工作区暂无文件。若本会话曾委派团队产出，请确认已绑定本地文件夹，或从云端导出 ZIP。";
+  const emptyTreeHint = fsAvailable
+    ? "工作区暂无文件。AI 产物会出现在这里；需要时可用「导出到本地」落到本机目录。"
+    : "工作区暂无文件。AI 产物会出现在这里；需要时可导出 ZIP。";
 
   return (
     <div className="relative flex h-full flex-col">
@@ -97,12 +116,14 @@ export function WorkspaceMode() {
               {source?.caps.snapshots ? (
                 <>
                   <IconButton
-                    title="导出 ZIP"
+                    title={fsAvailable ? "导出到本地" : "导出 ZIP"}
                     disabled={exporting}
-                    onClick={() => void handleExportZip()}
+                    onClick={() => void handleExport()}
                   >
                     {exporting ? (
                       <Loader2 size={14} className="animate-spin" />
+                    ) : fsAvailable ? (
+                      <FolderDown size={14} />
                     ) : (
                       <Download size={14} />
                     )}

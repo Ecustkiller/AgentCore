@@ -1,7 +1,13 @@
 import { startNewConversation } from "@/lib/newConversation";
 import { chord } from "@/lib/shortcuts";
 import { notifyError } from "@/lib/toast";
+import { hasLocalFiles } from "@/lib/capabilities";
 import { exportConversation } from "@/services/conversations";
+import {
+  type DemoTapeSummary,
+  prepareDemoTapeAndOpen,
+  startDemoTapeAndOpen,
+} from "@/services/demoTape";
 import { openCurrentConversationTerminal } from "@/services/terminalActions";
 import { useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
@@ -14,12 +20,13 @@ import {
   Bookmark,
   Bug,
   Building2,
-  Cloud,
+  Clapperboard,
   Cpu,
   Download,
   Files,
   FlaskConical,
   FolderPlus,
+  HardDrive,
   Info,
   Keyboard,
   type LucideIcon,
@@ -77,6 +84,11 @@ export interface CommandContext {
   sidebarCollapsed: boolean;
   /** Switch the open palette to the bookmarks facet (消息收藏列表). */
   openBookmarksInPalette: () => void;
+  /**
+   * Dev-only demo tapes from ``GET /v1/demo-tape`` when the server switch is on.
+   * Absent / empty → no palette entry (zero product surface when replay is off).
+   */
+  demoTapes?: DemoTapeSummary[];
 }
 
 /**
@@ -93,6 +105,7 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
     diagnosticMode,
     sidebarCollapsed,
     openBookmarksInPalette,
+    demoTapes = [],
   } = ctx;
   const go = (path: string) => () => navigate(path);
 
@@ -121,17 +134,72 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
         "xiangmu",
         "gongzuoqu",
       ],
-      run: () => useFoldersStore.getState().openCreateProject(),
+      run: () => useFoldersStore.getState().openCreateFolder(),
     },
-    {
-      // 「云端随手聊」逃生口（决策 #11）：桌面默认本地后，纯云随手问答的显式入口。
-      id: "new-cloud-conversation",
-      title: "云端随手聊",
-      category: "操作",
-      icon: Cloud,
-      keywords: ["cloud", "suishou", "yunduan", "linshi", "new", "chat"],
-      run: () => startNewConversation(navigate, null, { cloud: true }),
-    },
+    ...(hasLocalFiles()
+      ? [
+          {
+            // 显式本机草稿（§八.7：桌面裸聊默认云后，绑本地的逃生口）。
+            id: "new-local-conversation",
+            title: "本机草稿",
+            category: "操作" as const,
+            icon: HardDrive,
+            keywords: [
+              "local",
+              "benji",
+              "bendi",
+              "sidecar",
+              "scratch",
+              "new",
+              "chat",
+            ],
+            run: () => startNewConversation(navigate, null, { local: true }),
+          },
+        ]
+      : []),
+    // Dev-only 磁带回放：仅当服务端 DEMO_TAPE_REPLAY_ENABLED 且目录非空时注入。
+    // 主入口 = 准备模式（空会话，用户亲自发消息开播）；立即开播为备选。
+    ...demoTapes.flatMap((tape) => [
+      {
+        id: `demo-tape-${tape.id}`,
+        title: `演示回放 · ${tape.title}`,
+        category: "操作" as const,
+        icon: Clapperboard,
+        keywords: [
+          "demo",
+          "tape",
+          "replay",
+          "prepare",
+          "yanshi",
+          "huifang",
+          "cidai",
+          "zhunbei",
+          tape.id,
+          tape.title,
+        ],
+        hint: "开发 · 准备",
+        run: () => void prepareDemoTapeAndOpen(tape.id, navigate),
+      },
+      {
+        id: `demo-tape-${tape.id}-autostart`,
+        title: `演示回放 · ${tape.title} · 立即开播`,
+        category: "操作" as const,
+        icon: Clapperboard,
+        keywords: [
+          "demo",
+          "tape",
+          "replay",
+          "autostart",
+          "yanshi",
+          "huifang",
+          "lijikai",
+          tape.id,
+          tape.title,
+        ],
+        hint: "开发 · 一键",
+        run: () => void startDemoTapeAndOpen(tape.id, navigate),
+      },
+    ]),
     {
       id: "toggle-sidebar",
       title: sidebarCollapsed ? "展开侧栏" : "收起侧栏",

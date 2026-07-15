@@ -1,13 +1,10 @@
 """ReAct main loop: turn control, LLM rounds, tool execution, governance."""
 
 from collections.abc import Callable
-from dataclasses import replace
 from typing import Any
 
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.logging import get_logger
-from agentcore.core.types import ToolEffect
-from agentcore.llm.errors import empty_response_event_message
 from agentcore.llm.profiles import ProfileParams, get_profile
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
@@ -17,39 +14,32 @@ from agentcore.runtime.events import (
     FinishReason,
     content_delta,
     content_reset,
-    error_event,
-    escalation_raised,
     reasoning_delta,
-    run_escalation_gate,
 )
-from agentcore.runtime.routing import evaluate_after_tools, signals_as_dicts
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 
-from .ask_user_absorb import (
-    absorb_blocking_ask_user_content,
-    prepare_blocking_ask_user_tool_calls,
-)
-from .directive import Continue, Finalize, LoopDirective, Return, Rework
-from .finalize import force_finalize
+from .ceiling import ceiling_finalize
+from .directive import LoopDirective
+from .directive_apply import apply_loop_directive
 from .governance import (
-    apply_circuit_breaker,
     classify_investigation_tools,
+    coordination_injection_has_all_completed,
     create_loop_controller,
     decide_llm_failure,
-    govern_after_tools,
+    maybe_inject_audit_gate,
     resolve_openai_tool_defs,
 )
 from .outcome import RoundOutcome
 from .round import (
     LlmRoundFailure,
-    apply_finish_guard_rework,
     decide_no_tool_round,
     record_round_start,
     run_llm_round,
 )
 from .segments import join_segments
-from .tool_exec import execute_tools
+from .soft_gates import maybe_soft_gate_no_tool_return
+from .tool_round import handle_tool_calls_round
 
 logger = get_logger(__name__)
 
@@ -262,6 +252,16 @@ async def react_loop(
             coord_msgs = await await_coordination_injection(messages)
             if coord_msgs:
                 messages.extend(coord_msgs)
+                # Soft audit-gate (all_completed): remind before synthesis / wrap-up
+                # while CEO is still in coordination — not only on no-tool Return.
+                if coordination_injection_has_all_completed(coord_msgs):
+                    maybe_inject_audit_gate(
+                        controller,
+                        messages=messages,
+                        run_id=run_id,
+                        round_idx=round_idx,
+                        role=role,
+                    )
 
         round_result = await run_llm_round(
             llm=llm,
@@ -346,397 +346,123 @@ async def react_loop(
                     tools_offered=tool_defs is not None,
                     supports_tools=supports_tools,
                 )
+                # Soft team-gate (b) / Soft audit-gate: captain wrap-up without
+                # delegate — discard the draft, inject nudge, continue.
+                directive, rolled = maybe_soft_gate_no_tool_return(
+                    directive=directive,
+                    outcome=outcome,
+                    controller=controller,
+                    messages=messages,
+                    role=role,
+                    round_idx=round_idx,
+                    run_id=run_id,
+                    content_before_round=content_before_round,
+                    emit_reset=emit_reset,
+                )
+                if rolled is not None:
+                    final_content = rolled
             else:
-                tool_calls = prepare_blocking_ask_user_tool_calls(
-                    outcome.tool_calls,
-                    outcome.content or "",
-                )
-                messages.append(
-                    LLMMessage(
-                        role="assistant",
-                        content=outcome.content or None,
-                        tool_calls=tool_calls,
-                        reasoning_content=outcome.reasoning or None,
-                    )
-                )
-                tool_results, terminal, attempts = await execute_tools(
-                    tool_calls,
-                    tools,
-                    tool_context,
-                    sink,
+                tool_round = await handle_tool_calls_round(
+                    outcome=outcome,
+                    messages=messages,
+                    tools=tools,
+                    tool_context=tool_context,
+                    sink=sink,
                     approval_gate=approval_gate,
                     citation_sink=citation_sink,
                     annotate_citations=annotate_citations,
                     run_id=run_id,
-                )
-                messages.extend(tool_results)
-                if gate_escalation_sink is not None and role == "worker":
-                    _apply_escalation_gate(
-                        attempts=attempts,
-                        tool_results=tool_results,
-                        sink=sink,
-                        run_id=run_id,
-                        agent_id=tool_context.agent_id,
-                        gate_escalation_sink=gate_escalation_sink,
-                    )
-                outcome = replace(
-                    outcome,
-                    tool_results=tool_results,
-                    attempts=attempts,
-                    terminal_handoff=(terminal.final_text or "")
-                    if terminal is not None
-                    else None,
-                )
-
-                if terminal is not None:
-                    if absorb_blocking_ask_user_content(
-                        messages=messages,
-                        tool_calls=tool_calls,
-                        attempts=attempts,
-                        terminal_effect=terminal.effect,
-                        emit_reset=emit_reset,
-                    ):
-                        final_content = content_before_round
-                    usage_meta = terminal.metadata or {}
-                    total_usage = total_usage + TokenUsage(
-                        input_tokens=usage_meta.get("input_tokens", 0),
-                        output_tokens=usage_meta.get("output_tokens", 0),
-                        reasoning_tokens=usage_meta.get("reasoning_tokens", 0),
-                        cache_hit_tokens=usage_meta.get("cache_hit_tokens", 0),
-                        cache_miss_tokens=usage_meta.get("cache_miss_tokens", 0),
-                    )
-                    # 挂起即收口 (②): a SUSPEND terminal ended the turn at a durable
-                    # checkpoint awaiting /resume — NOT because an answer was produced.
-                    # Stamp FinishReason.PAUSED (via finish_override_sink) so the pipeline
-                    # emits a paused message_end and the persist tail parks the turn (the
-                    # frame is its record). INTERACT / HANDOFF carry their final_text and
-                    # finish on the default reason (finish_reason=None).
-                    paused = terminal.effect is ToolEffect.SUSPEND
-                    directive = Return(
-                        finish_reason=FinishReason.PAUSED if paused else None,
-                        extra_content=outcome.terminal_handoff or "",
-                    )
-                else:
-                    # 交付正文只留最终交付、旁白入 journal (Fork-B): this round wrote prose
-                    # and then called a NON-terminal tool, so that prose is process
-                    # narration (a lead-in, or an acknowledgement of an injected
-                    # [系统提示] steer such as「谢谢指正，我重新整理」), not deliverable. Roll it
-                    # back off final_content — it already streamed live + was journaled this
-                    # round (llm_call fact) — mirroring the finish_guard Rework rollback, so
-                    # only the FINAL answer round's text reaches the persisted product.
-                    if deliverable_only and round_result.content:
-                        # A run whose LIVE display shares the deliverable channel (worker /
-                        # debater / revision: on_reset routes run_output_reset, and the card
-                        # replays from the message_final fact) must also clear the streamed
-                        # narration off its card, so 直播 == the rolled-back deliverable ==
-                        # 重载 (合成自 message_final) — the conformance invariant. The CEO
-                        # streams to a SEPARATE process timeline (on_reset is None): its
-                        # narration stays visible there (透明可见), only its persisted content
-                        # (messages.content, 旁路 conformance) is trimmed.
-                        if on_reset is not None:
-                            emit_reset()
-                        final_content = content_before_round
-                    controller.record(outcome.attempts)
-                    # Mark post-delegate mode if delegate was called
-                    if any(a.tool_name == "delegate" for a in outcome.attempts if a.tool_name):
-                        controller.mark_post_delegate()
-                    tool_defs = _resolve_tool_defs()
-                    breaker = apply_circuit_breaker(
-                        controller,
-                        messages=messages,
-                        run_id=run_id,
-                        round_idx=round_idx,
-                        disabled_tools=disabled_tools,
-                    )
-                    if breaker.refresh_tool_defs:
-                        tool_defs = _resolve_tool_defs()
-                    directive = govern_after_tools(
-                        outcome,
-                        controller,
-                        messages=messages,
-                        round_idx=round_idx,
-                        run_id=run_id,
-                        breaker_message=breaker.message,
-                    )
-
-        match directive:
-            case Return(finish_reason=fr, extra_content=extra):
-                if outcome.llm_failed:
-                    sink.emit(
-                        error_event(
-                            outcome.error_code or "",
-                            outcome.error_message or "",
-                            context=outcome.error_context,
-                        )
-                    )
-                elif fr is FinishReason.DEGRADED:
-                    # Only the diagnosis label rides the user-facing error. The raw
-                    # SSE tail stays in the backend log (llm.empty_response) for
-                    # diagnosis — it's noise in the bubble and leaked to the dev UI.
-                    err_ctx = (
-                        {"empty_diagnosis": outcome.empty_diagnosis}
-                        if outcome.empty_diagnosis
-                        else None
-                    )
-                    sink.emit(
-                        error_event(
-                            ErrorCode.LLM_ERROR,
-                            empty_response_event_message(outcome.empty_diagnosis),
-                            context=err_ctx,
-                        )
-                    )
-                if fr is not None and finish_override_sink is not None:
-                    finish_override_sink.append(fr)
-                content = join_segments(final_content, extra) if extra else final_content
-                return content, final_reasoning, total_usage, round_idx + 1
-            case Finalize(reason=reason, finish_reason=fr):
-                if fr is not None and finish_override_sink is not None:
-                    finish_override_sink.append(fr)
-                (
-                    final_content,
-                    final_reasoning,
-                    total_usage,
-                    rounds,
-                    coordination,
-                ) = await force_finalize(
-                    messages=messages,
-                    llm=llm,
-                    profile=profile,
-                    active_model=active_model or base_model,
-                    tools=tools,
+                    role=role,
+                    gate_escalation_sink=gate_escalation_sink,
+                    deliverable_only=deliverable_only,
+                    on_reset=on_reset,
+                    emit_reset=emit_reset,
+                    content_before_round=content_before_round,
+                    final_content=final_content,
+                    round_result_content=round_result.content,
+                    total_usage=total_usage,
+                    controller=controller,
                     allowed_tool_names=allowed_tool_names,
                     disabled_tools=disabled_tools,
-                    emit_content=emit_content,
-                    emit_reasoning=emit_reasoning,
-                    final_content=final_content,
-                    final_reasoning=final_reasoning,
-                    total_usage=total_usage,
-                    rounds=round_idx + 1,
-                    reason=reason,
-                    run_id=run_id,
-                    on_reset=emit_reset,
-                )
-                if coordination is not None and coordination.kind == "coordination_tools":
-                    if coordination.content:
-                        final_content = join_segments(final_content, coordination.content)
-                    if coordination.reasoning:
-                        final_reasoning += coordination.reasoning
-                    tool_calls = prepare_blocking_ask_user_tool_calls(
-                        coordination.tool_calls or [],
-                        coordination.content or "",
-                    )
-                    messages.append(
-                        LLMMessage(
-                            role="assistant",
-                            content=coordination.content or None,
-                            tool_calls=tool_calls,
-                            reasoning_content=coordination.reasoning or None,
-                        )
-                    )
-                    tool_results, terminal, attempts = await execute_tools(
-                        tool_calls,
-                        tools,
-                        tool_context,
-                        sink,
-                        approval_gate=approval_gate,
-                        citation_sink=citation_sink,
-                        annotate_citations=annotate_citations,
-                        run_id=run_id,
-                    )
-                    messages.extend(tool_results)
-                    if gate_escalation_sink is not None and role == "worker":
-                        _apply_escalation_gate(
-                            attempts=attempts,
-                            tool_results=tool_results,
-                            sink=sink,
-                            run_id=run_id,
-                            agent_id=tool_context.agent_id,
-                            gate_escalation_sink=gate_escalation_sink,
-                        )
-                    if terminal is not None:
-                        usage_meta = terminal.metadata or {}
-                        total_usage = total_usage + TokenUsage(
-                            input_tokens=usage_meta.get("input_tokens", 0),
-                            output_tokens=usage_meta.get("output_tokens", 0),
-                            reasoning_tokens=usage_meta.get("reasoning_tokens", 0),
-                            cache_hit_tokens=usage_meta.get("cache_hit_tokens", 0),
-                            cache_miss_tokens=usage_meta.get("cache_miss_tokens", 0),
-                        )
-                        if (
-                            terminal.effect is ToolEffect.SUSPEND
-                            and finish_override_sink is not None
-                        ):
-                            finish_override_sink.append(FinishReason.PAUSED)
-                        return (
-                            join_segments(final_content, terminal.final_text or ""),
-                            final_reasoning,
-                            total_usage,
-                            rounds,
-                        )
-                    controller.record(attempts)
-                    if any(a.tool_name == "delegate" for a in attempts if a.tool_name):
-                        controller.mark_post_delegate()
-                    tool_defs = _resolve_tool_defs()
-                    breaker = apply_circuit_breaker(
-                        controller,
-                        messages=messages,
-                        run_id=run_id,
-                        round_idx=round_idx,
-                        disabled_tools=disabled_tools,
-                    )
-                    if breaker.refresh_tool_defs:
-                        tool_defs = _resolve_tool_defs()
-                    _ = govern_after_tools(
-                        outcome=RoundOutcome(
-                            content=coordination.content,
-                            reasoning=coordination.reasoning,
-                            usage=coordination.usage,
-                            tool_calls=coordination.tool_calls,
-                            tool_results=tool_results,
-                            attempts=attempts,
-                        ),
-                        controller=controller,
-                        messages=messages,
-                        round_idx=round_idx,
-                        run_id=run_id,
-                        breaker_message=breaker.message,
-                    )
-                    continue
-                return final_content, final_reasoning, total_usage, rounds
-            case Rework():
-                final_content, finish_guard_reworks = apply_finish_guard_rework(
-                    messages=messages,
-                    emit_reset=emit_reset,
-                    final_content=final_content,
-                    content_before_round=content_before_round,
                     round_idx=round_idx,
-                    run_id=run_id,
-                    annotate_citations=annotate_citations,
-                    citation_sink=citation_sink,
-                    finish_guard_reworks=finish_guard_reworks,
                 )
-                continue
-            case Continue():
-                continue
+                outcome = tool_round.outcome
+                directive = tool_round.directive
+                final_content = tool_round.final_content
+                total_usage = tool_round.total_usage
+                if tool_round.tool_defs_changed:
+                    tool_defs = tool_round.tool_defs
 
-    # Hard-ceiling termination: the token backstop broke the loop, or max_rounds
-    # exhausted. Always force-finalize (杜绝死循环); route the finish by run health so an
-    # on-track worker delivers its work while a thrashing one is flagged. 据审计: the
-    # signal is SURFACED, not auto-actioned — there is no「升级→CEO 自动重分解」闭环; the
-    # CEO may voluntarily replan off this signal.
-    rounds_done = round_idx if ceiling_reason == "token_budget" else profile.max_rounds
-    thrashing = role == "worker" and controller.is_thrashing()
-    logger.warning(
-        "engine.ceiling_finalize",
-        reason=ceiling_reason,
-        thrashing=thrashing,
-        rounds=rounds_done,
-        tokens=total_usage.total_tokens,
-        token_budget=token_budget,
-        run_id=run_id,
-    )
-    if thrashing:
-        if finish_override_sink is not None:
-            finish_override_sink.append(FinishReason.DEGRADED)
-        ceiling_question = (
-            f"Worker 到达硬顶（{ceiling_reason}）时仍在打转，"
-            "已强制收口并交付当前产出——可能不完整。"
+        applied = await apply_loop_directive(
+            directive=directive,
+            outcome=outcome,
+            messages=messages,
+            llm=llm,
+            tools=tools,
+            tool_context=tool_context,
+            sink=sink,
+            profile=profile,
+            active_model=active_model,
+            base_model=base_model,
+            allowed_tool_names=allowed_tool_names,
+            disabled_tools=disabled_tools,
+            emit_content=emit_content,
+            emit_reasoning=emit_reasoning,
+            emit_reset=emit_reset,
+            final_content=final_content,
+            final_reasoning=final_reasoning,
+            total_usage=total_usage,
+            round_idx=round_idx,
+            run_id=run_id,
+            role=role,
+            finish_override_sink=finish_override_sink,
+            approval_gate=approval_gate,
+            citation_sink=citation_sink,
+            annotate_citations=annotate_citations,
+            gate_escalation_sink=gate_escalation_sink,
+            controller=controller,
+            content_before_round=content_before_round,
+            finish_guard_reworks=finish_guard_reworks,
         )
-        # 结构化落入 RunState.escalations（经 gate_escalation_sink → 执行器 harvest 合并去重），
-        # 让 CEO 的 escalation 聚合真正看得到「到顶打转」这一条、可自愿重规划——不止 UI 横幅
-        # （否则「升级了却没人接」）。kind=normal：纯上浮，不触发 wave 边界自动动作，对齐
-        # 「不自动重分解、CEO 自愿决策」的设计取舍。
-        if gate_escalation_sink is not None:
-            gate_escalation_sink.append(
-                {
-                    "question": ceiling_question,
-                    "assumption": "",
-                    "blocking": False,
-                    "kind": "normal",
-                    "source": "ceiling_backstop",
-                    "gate_kind": "normal",
-                    "evidence": (
-                        f"{ceiling_reason}: tokens={total_usage.total_tokens}, "
-                        f"rounds={rounds_done}"
-                    ),
-                    "tool_name": "",
-                    "layer": "scheme",
-                }
+        if applied.action == "return":
+            return (
+                applied.content,
+                applied.reasoning,
+                applied.usage or total_usage,
+                applied.rounds,
             )
-        sink.emit(
-            escalation_raised(
-                run_id,
-                tool_context.agent_id,
-                question=ceiling_question,
-                assumption="",
-                blocking=False,
-                kind="normal",
-            )
-        )
-    final_content, final_reasoning, total_usage, rounds, _coordination = await force_finalize(
+        final_content = applied.final_content
+        final_reasoning = applied.final_reasoning
+        if applied.total_usage is not None:
+            total_usage = applied.total_usage
+        finish_guard_reworks = applied.finish_guard_reworks
+        if applied.tool_defs_changed:
+            tool_defs = applied.tool_defs
+        continue
+
+    return await ceiling_finalize(
         messages=messages,
         llm=llm,
         profile=profile,
-        active_model=active_model or base_model,
+        active_model=active_model,
+        base_model=base_model,
         tools=tools,
         allowed_tool_names=allowed_tool_names,
         disabled_tools=disabled_tools,
         emit_content=emit_content,
         emit_reasoning=emit_reasoning,
+        emit_reset=emit_reset,
         final_content=final_content,
         final_reasoning=final_reasoning,
         total_usage=total_usage,
-        rounds=rounds_done,
-        reason=ceiling_reason,
+        ceiling_reason=ceiling_reason,
+        round_idx=round_idx,
+        role=role,
         run_id=run_id,
-        on_reset=emit_reset,
+        token_budget=token_budget,
+        controller=controller,
+        tool_context=tool_context,
+        sink=sink,
+        finish_override_sink=finish_override_sink,
+        gate_escalation_sink=gate_escalation_sink,
     )
-    return final_content, final_reasoning, total_usage, rounds
-
-
-def _apply_escalation_gate(
-    *,
-    attempts: list[Any],
-    tool_results: list[LLMMessage],
-    sink: EventSink,
-    run_id: str,
-    agent_id: str,
-    gate_escalation_sink: list[dict[str, Any]],
-) -> None:
-    """Run Escalation Gate after a tool round; emit + accumulate scheme-layer signals."""
-    from agentcore.runtime.loop_controller import ToolAttempt
-
-    typed_attempts = [a for a in attempts if isinstance(a, ToolAttempt)]
-    outputs = [(m.content or "") for m in tool_results]
-    verdict = evaluate_after_tools(
-        attempts=typed_attempts,
-        tool_outputs=outputs,
-        run_id=run_id,
-    )
-    if not verdict.should_escalate:
-        return
-    payloads = signals_as_dicts(verdict.signals)
-    gate_escalation_sink.extend(payloads)
-    sink.emit(
-        run_escalation_gate(
-            run_id,
-            agent_id,
-            layer=verdict.layer.value,
-            action=verdict.action,
-            signals=payloads,
-        )
-    )
-    # Also surface via the existing live escalate banner so the team UI lights up
-    # without a separate Gate card (Phase 1).
-    for payload in payloads:
-        sink.emit(
-            escalation_raised(
-                run_id,
-                agent_id,
-                question=str(payload.get("question", "")),
-                assumption=str(payload.get("assumption", "")),
-                blocking=False,
-                kind=str(payload.get("kind", "normal")),
-            )
-        )
-

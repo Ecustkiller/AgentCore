@@ -50,7 +50,6 @@ async def test_persist_tail_runs_inside_trace_scope(monkeypatch):
         history=[],
         attachments=None,
         backend=_FakeBackend(),  # type: ignore[arg-type]
-        generate_title=False,
         llm_credentials=None,
     )
 

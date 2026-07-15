@@ -45,6 +45,10 @@ export function HowToReadPopover({ form }: { form: DebateForm }) {
                 ))}
               </li>
               <li>
+                <span className="font-medium text-foreground">记分口径</span>
+                ：每轮收尾由裁判读完该轮立论与质询问答后综合打一次分（不按环节分别计分）；结辩只收束陈词、不计分。
+              </li>
+              <li>
                 <span className="font-medium text-foreground">罚分</span>
                 ：谬误、无据硬拗等违规条目；记分牌与裁判札记可展开查看具体犯规。
               </li>

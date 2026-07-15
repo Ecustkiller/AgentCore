@@ -2,7 +2,7 @@
 
 AgentCore 模拟观测客户端：**Unity 6 LTS + URP + C#**。产品名 AgentTown，路径 `apps/town/`。
 
-规格：[AgentTown 客户端规格](../../docs/06-规划/AgentTown客户端规格.md) · MVP 计划：[AI 小镇 MVP 开发计划](../../docs/06-规划/AI小镇MVP开发计划.md) §2.1
+当前架构与产品边界：[AgentTown 客户端](../../docs/04-前端/AgentTown客户端.md) · 后续路线：[多 AI 模拟愿景](../../docs/06-规划/多AI模拟愿景.md)
 
 ## 现状（2026-07-09 观测层）
 
@@ -11,7 +11,8 @@ AgentCore 模拟观测客户端：**Unity 6 LTS + URP + C#**。产品名 AgentTo
 | Unity Phase 0/1 + Offline Demo | ✅ Session / REST / SSE / 建镇 / NPC / HUD / 决策·事件 / 跟踪 / 日夜 |
 | **观测层（可演示）** | ✅ 名牌·热力·交互叠加·日夜·Offline Demo；HUD 为顶栏/底栏/左右轨 chrome（见下） |
 | Kenney / Xbot **真资产** | ✅ sync → Import → `TownMeshCatalog`；无资产时 primitive / 胶囊回退 |
-| Windows / WebGL **可分发构建** | ✅ 可构建；§14 删栈收口 ✅（scripted + WebGL C2 + FPS 顶栏） |
+| Windows / WebGL **可分发构建** | ✅ 可构建；当前验收基线见 [AgentTown 客户端 §14](../../docs/04-前端/AgentTown客户端.md) |
+| **恋综节目模式（离线第 3 期）** | ✅ 左轨「节目」或 `--episode=3` / `?episode=3`；manifest：`StreamingAssets/Fixtures/show/`；代码 `Assets/Scripts/Show/`；服务端节目 API 接入待接（见 [AI 恋综场景提案](../../docs/06-规划/AI恋综场景提案.md)） |
 | CORS / WebGL spike Step A + C2 live | ✅（见 `sim.tick_*`；`webgl-jslib-smoke.mjs` 默认严格） |
 | UE / Desktop R3F | ✅ **已删** |
 | Desktop 启动器 | ✅ `#/simulation/town` 仅 Launcher；失败路径提示；开发期找 `Builds/Windows/AgentTown.exe` |
@@ -62,7 +63,7 @@ Play → 左侧「离线 Demo」后应能看到：
 | `pnpm town:build` | Unity Windows 打包（`build-unity.ps1`） |
 | `pnpm town:build:webgl` | Unity WebGL 打包 |
 | `pnpm town:serve:webgl` | 静态服 `Builds/WebGL` 并打开 `?demo=1` Offline Demo（无需后端） |
-| `pnpm town:shoot:webgl` | 对三 pack Offline Demo 截 PNG → `apps/town/shoot-out/`（须先 `town:build:webgl` + Playwright） |
+| `pnpm town:shoot:webgl` | 对三 pack Offline Demo + 节目模式（`episode_3`）截 PNG → `apps/town/shoot-out/`（须先 `town:build:webgl` + Playwright） |
 | `pnpm town:spike:webgl` | WebGL SSE spike（A=CORS；C2=页内 live `sim.*`） |
 
 Editor 接线核对：[EDITOR-WIRING.md](./EDITOR-WIRING.md)
@@ -109,11 +110,11 @@ WebGL：URL query `?api=&token=&run=`（不读本地 session 文件）；**Offli
 pnpm town:build:webgl
 # 一键静态服 + 浏览器打开 Offline Demo（无需后端 / LLM）
 pnpm town:serve:webgl
-# 三 pack 演示截图（price_surge / festival / town_hall → apps/town/shoot-out/*.png）
+# 渲染门禁截图（price_surge / festival / town_hall + 节目模式 episode_3 → apps/town/shoot-out/*.png）
 # 需已有 WebGL 构建 + Playwright Chromium；缺构建会提示先 town:build:webgl
 pnpm town:shoot:webgl
 
-# §15.2：Step A CORS+SSE →（有 Builds/WebGL）起静态服 + Playwright jslib 冒烟
+# WebGL SSE：Step A CORS+SSE →（有 Builds/WebGL）起静态服 + Playwright jslib 冒烟
 # 默认优先 :8080；被占用（如本机 Sub2API）则回退 :4173（须在 CORS_ALLOW_ORIGINS）
 pnpm town:spike:webgl
 # 仅打印一键 URL 并开浏览器（不跑 headless）：
@@ -141,15 +142,15 @@ powershell -File apps/town/scripts/spike-webgl-sse.ps1 -SkipJslibSmoke -OpenBrow
 
 单一状态机：`SimulationSession`（`Assets/Scripts/Simulation/`）。
 
-## 坐标（§6.2）
+## 坐标
 
-Wire（Y-up 右手）→ Unity（Y-up 左手），**仅**在 `WireCoordinateTransform` / `ApplySnapshot`：
+契约见 [AgentTown 客户端 §6.2](../../docs/04-前端/AgentTown客户端.md)。Wire（Y-up 右手）→ Unity（Y-up 左手），**仅**在 `WireCoordinateTransform` / `ApplySnapshot`：
 
 ```
 unity = (wire.x, wire.y, -wire.z)   // S=1，1 wire 单位 = 1 m
 ```
 
-验收 oracle：`市场` `(24,0,0)` → Unity `(24,0,0)`。EditMode：`WireCoordinateTransformTests`。
+验收 oracle：`市场` `(36,0,0)` → Unity `(36,0,0)`。EditMode：`WireCoordinateTransformTests`。
 
 ## 工程布局
 
@@ -196,7 +197,8 @@ HTTP 后端烟测（不测 3D）：`pnpm -C apps/desktop sim:smoke:e2e`（可加
 
 ## Related
 
-- 任务映射 `UT-*`：MVP 计划 §2.1
+- 当前设计：[AgentTown 客户端](../../docs/04-前端/AgentTown客户端.md)
+- 后续规划：[多 AI 模拟愿景](../../docs/06-规划/多AI模拟愿景.md)
 - Region fixture：`packages/protocol-conformance/fixtures/simulation-region-positions.json`
 - 故事剧本包 SoT：`packages/town-story-packs/`（改完跑 `pnpm gen:story-packs`）
 - Desktop 启动器：`apps/desktop/src/main/agenttown-service.ts`

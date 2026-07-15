@@ -4,7 +4,9 @@ freezing the whole turn (the 辩论回合卡死 root cause).
 Pins ``stream_llm_round``'s per-chunk IDLE ceiling:
 - a post-commit stall (content already streamed) returns ``aborted`` with the partial
   kept — same salvage contract as a mid-stream disconnect;
-- a pre-commit stall (no content / tool_call yet) raises ``LLMTimeoutError``;
+- a pre-commit stall (no content / tool_call yet) is **retryable** (aligned with the
+  provider's pre-commit transparent retry; reasoning does not commit). After retries /
+  wall-clock budget are exhausted it raises ``LLMTimeoutError``;
 - a healthy trickle (gaps < idle) completes normally regardless of TOTAL duration;
 - disabling the gate (0) never trips.
 """
@@ -15,7 +17,13 @@ import pytest
 
 from agentcore.config import settings
 from agentcore.core.errors import LLMTimeoutError
-from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, LLMRequest
+from agentcore.llm.provider.protocol import (
+    MAX_RETRIES,
+    LLMChunk,
+    LLMMessage,
+    LLMRequest,
+)
+from agentcore.runtime.engine import stream as stream_mod
 from agentcore.runtime.engine.stream import stream_llm_round
 
 
@@ -29,12 +37,32 @@ class _StallProvider:
     def __init__(self, pre: list[LLMChunk], stall: float) -> None:
         self._pre = pre
         self._stall = stall
+        self.calls = 0
 
     async def stream(self, request):  # noqa: ANN001 - duck-typed for the loop
+        self.calls += 1
         for chunk in self._pre:
             yield chunk
         await asyncio.sleep(self._stall)  # no further chunk within the idle window
         yield LLMChunk(delta_content="late")
+
+
+class _RecoveringStallProvider:
+    """Stalls pre-commit on early attempts, then succeeds — pins transparent retry."""
+
+    def __init__(self, fail_attempts: int, stall: float) -> None:
+        self._fail_attempts = fail_attempts
+        self._stall = stall
+        self.calls = 0
+
+    async def stream(self, request):  # noqa: ANN001 - duck-typed for the loop
+        self.calls += 1
+        yield LLMChunk(delta_reasoning="thinking…")
+        if self.calls <= self._fail_attempts:
+            await asyncio.sleep(self._stall)
+            yield LLMChunk(delta_content="late")
+            return
+        yield LLMChunk(delta_content="recovered")
 
 
 class _TrickleProvider:
@@ -58,15 +86,54 @@ async def test_committed_stall_returns_aborted_partial(monkeypatch):
     assert result.aborted is True
     assert result.content == "thinking…"
     assert seen == ["thinking…"]
+    assert provider.calls == 1  # post-commit: salvage, no retry
 
 
-async def test_uncommitted_stall_raises_timeout(monkeypatch):
+async def test_uncommitted_stall_retries_then_raises(monkeypatch):
+    """Pre-commit stall retries (aligned with ``MAX_RETRIES``), then raises timeout."""
     monkeypatch.setattr(settings, "engine_llm_stream_idle_timeout_seconds", 0.05)
+    # Generous budget so attempt count (not wall-clock) is what exhausts retries.
+    monkeypatch.setattr(stream_mod, "_STALL_BUDGET_IDLE_MULTIPLIER", 100.0)
+    monkeypatch.setattr(stream_mod, "INITIAL_BACKOFF", 0.0)
+    monkeypatch.setattr(stream_mod, "BACKOFF_MULTIPLIER", 1.0)
     seen: list[str] = []
+    resets: list[int] = []
     provider = _StallProvider([LLMChunk(delta_reasoning="…")], stall=1.0)
     with pytest.raises(LLMTimeoutError):
-        await stream_llm_round(provider, _request(), seen.append, seen.append)
-    assert seen == ["…"]
+        await stream_llm_round(
+            provider,
+            _request(),
+            seen.append,
+            seen.append,
+            on_reset=lambda: resets.append(1),
+        )
+    assert provider.calls == MAX_RETRIES
+    # First attempt emits reasoning; each retry resets live view then re-emits.
+    assert seen == ["…"] * MAX_RETRIES
+    assert len(resets) == MAX_RETRIES - 1
+
+
+async def test_uncommitted_stall_recovers_on_retry(monkeypatch):
+    monkeypatch.setattr(settings, "engine_llm_stream_idle_timeout_seconds", 0.05)
+    monkeypatch.setattr(stream_mod, "_STALL_BUDGET_IDLE_MULTIPLIER", 100.0)
+    monkeypatch.setattr(stream_mod, "INITIAL_BACKOFF", 0.0)
+    monkeypatch.setattr(stream_mod, "BACKOFF_MULTIPLIER", 1.0)
+    content_seen: list[str] = []
+    reasoning_seen: list[str] = []
+    resets: list[int] = []
+    provider = _RecoveringStallProvider(fail_attempts=1, stall=1.0)
+    result = await stream_llm_round(
+        provider,
+        _request(),
+        content_seen.append,
+        reasoning_seen.append,
+        on_reset=lambda: resets.append(1),
+    )
+    assert result.aborted is False
+    assert result.content == "recovered"
+    assert provider.calls == 2
+    assert resets == [1]
+    assert content_seen == ["recovered"]
 
 
 async def test_healthy_trickle_completes(monkeypatch):

@@ -218,6 +218,15 @@ def _open_registration(monkeypatch) -> None:
     monkeypatch.setattr(settings, "registration_open", True)
 
 
+@pytest.fixture(autouse=True)
+def _free_tier_off(monkeypatch) -> None:
+    """Pin the free-tier fallback OFF so a local ``.env`` with
+    ``PLATFORM_FREE_TIER_ENABLED=true`` (a legitimate dev/prod config) can't flip
+    keyless-BYOK tests from 402 to the platform-paid path. Free-tier tests
+    re-patch it to True in-body, which overrides this."""
+    monkeypatch.setattr(settings, "platform_free_tier_enabled", False)
+
+
 @pytest_asyncio.fixture
 async def make_invite(session_factory) -> Callable:
     """Return an async helper that seeds an invite code into the test schema."""

@@ -61,6 +61,22 @@ describe("describeStreamError", () => {
     );
   });
 
+  it("maps turn_in_progress to an explicit zh resume hint", () => {
+    expect(
+      describeStreamError(
+        new StreamError("http", 409, { code: "turn_in_progress" }),
+      ),
+    ).toBe("会话中有正在进行的回合，等它结束后再继续");
+    expect(
+      describeStreamError(
+        new StreamError("http", 409, {
+          code: "turn_in_progress",
+          serverMessage: "后端自定义文案",
+        }),
+      ),
+    ).toBe("后端自定义文案");
+  });
+
   it("phrases network errors and stays silent on auth", () => {
     expect(describeStreamError(new StreamError("network"))).toContain("网络");
     expect(describeStreamError(new StreamError("auth"))).toBeNull();
@@ -96,6 +112,25 @@ describe("errorActionForCode", () => {
       href: "/more/model",
     });
     expect(errorActionForCode("LLM_KEY_INVALID")).toEqual({
+      label: "去配置",
+      href: "/more/model",
+    });
+  });
+
+  it("routes FREE_TIER_EXHAUSTED to model config (conversion CTA)", () => {
+    expect(errorActionForCode("FREE_TIER_EXHAUSTED")).toEqual({
+      label: "去配置",
+      href: "/more/model",
+    });
+    const err = new StreamError("http", 429, {
+      code: "FREE_TIER_EXHAUSTED",
+      serverMessage: "本月免费额度已用完——接入自己的模型即可不限量继续",
+    });
+    expect(describeStreamError(err)).toBe(
+      "本月免费额度已用完——接入自己的模型即可不限量继续",
+    );
+    expect(isRetriableStreamError(err)).toBe(false);
+    expect(streamErrorAction(err)).toEqual({
       label: "去配置",
       href: "/more/model",
     });

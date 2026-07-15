@@ -7,10 +7,11 @@ import time
 from agentcore.config import settings
 from agentcore.conversation.common import (
     preview,
-    resolve_autonomy_policy,
     resolve_local_binding,
     resolve_memory_enabled,
+    resolve_permission_preset,
     resolve_profile_set,
+    schedule_title_generation,
 )
 from agentcore.conversation.history import load_chat_context
 from agentcore.conversation.turn_backend import build_turn_backend
@@ -24,7 +25,7 @@ from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import error_fields_for
 from agentcore.core.log_context import log_context, new_trace_id
 from agentcore.core.logging import get_logger
-from agentcore.core.types import new_id
+from agentcore.core.types import new_id, preset_to_autonomy
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import (
     BoardRepository,
@@ -77,7 +78,8 @@ async def stream_chat(
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
             memory_enabled = await resolve_memory_enabled(session, user_id)
-            autonomy_policy = await resolve_autonomy_policy(session, user_id)
+            permission_preset = await resolve_permission_preset(session, conversation_id)
+            autonomy_policy = preset_to_autonomy(permission_preset)
             # AI 协作白板 (§六 M2): if this conversation is a board's dedicated thread, the
             # turn is a 白板会话 — hand its board id to the pipeline so the CEO gets board_ops.
             board = await BoardRepository(session).get_by_conversation_id(
@@ -111,6 +113,16 @@ async def stream_chat(
 
             sink.emit(turn_saved(user_message_id=user_msg.id))
 
+            # Cloud early title: fire-and-forget in parallel with the turn (user message
+            # only). Skip when the conversation already has a title (manual rename).
+            if not (conv.title and str(conv.title).strip()):
+                schedule_title_generation(
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    user_message=user_message,
+                    sink=sink,
+                )
+
             await run_and_persist(
                 conversation_id=conversation_id,
                 user_message=user_message,
@@ -120,11 +132,11 @@ async def stream_chat(
                 history=history[:-1],
                 attachments=resident_attachments,
                 backend=backend,
-                generate_title=True,
                 llm_credentials=llm_credentials,
                 profile_set=profile_set,
                 memory_enabled=memory_enabled,
                 autonomy_policy=autonomy_policy,
+                permission_preset=permission_preset,
                 board_id=board_id,
                 llm_supports_tools=llm_supports_tools,
                 x_client_platform=x_client_platform,
@@ -184,7 +196,8 @@ async def regenerate_chat(
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
             memory_enabled = await resolve_memory_enabled(session, user_id)
-            autonomy_policy = await resolve_autonomy_policy(session, user_id)
+            permission_preset = await resolve_permission_preset(session, conversation_id)
+            autonomy_policy = preset_to_autonomy(permission_preset)
             board = await BoardRepository(session).get_by_conversation_id(
                 conversation_id, user_id=user_id
             )
@@ -214,11 +227,11 @@ async def regenerate_chat(
                 history=history[:-1],
                 attachments=None,
                 backend=backend,
-                generate_title=False,
                 llm_credentials=llm_credentials,
                 profile_set=profile_set,
                 memory_enabled=memory_enabled,
                 autonomy_policy=autonomy_policy,
+                permission_preset=permission_preset,
                 board_id=board_id,
                 llm_supports_tools=llm_supports_tools,
             )
@@ -323,7 +336,8 @@ async def retry_failed_chat(
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
             memory_enabled = await resolve_memory_enabled(session, user_id)
-            autonomy_policy = await resolve_autonomy_policy(session, user_id)
+            permission_preset = await resolve_permission_preset(session, conversation_id)
+            autonomy_policy = preset_to_autonomy(permission_preset)
             board = await BoardRepository(session).get_by_conversation_id(
                 conversation_id, user_id=user_id
             )
@@ -356,11 +370,11 @@ async def retry_failed_chat(
                     history=history[:-1],
                     attachments=None,
                     backend=backend,
-                    generate_title=False,
                     llm_credentials=llm_credentials,
                     profile_set=profile_set,
                     memory_enabled=memory_enabled,
                     autonomy_policy=autonomy_policy,
+                    permission_preset=permission_preset,
                     board_id=board_id,
                     llm_supports_tools=llm_supports_tools,
                 )
@@ -413,9 +427,10 @@ async def resume_chat(
             folder_id = conv.folder_id
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
-            # The user's CURRENT autonomy posture (not frozen into the frame): a settings
-            # change while the turn sat paused applies to the resumed continuation.
-            autonomy_policy = await resolve_autonomy_policy(session, user_id)
+            # Conversation permission mode (not frozen into the frame): a mid-pause
+            # switch applies to the resumed continuation.
+            permission_preset = await resolve_permission_preset(session, conversation_id)
+            autonomy_policy = preset_to_autonomy(permission_preset)
             history = await load_chat_context(session, conversation_id, max_messages=40)
             # AI 协作白板 (§六 M2): re-derive the board binding (authoritative in the DB, not
             # carried in the frame) so a board turn paused at a checkpoint regains board_ops
@@ -486,25 +501,38 @@ async def resume_chat(
                     )
                 try:
                     try:
-                        result = await resume_chat_pipeline(
+                        from agentcore.demo_tape.hooks import run_tape_resume_if_marked
+
+                        tape_result = await run_tape_resume_if_marked(
                             suspension=suspension,
-                            decision=response.decision,
-                            note=response.note,
-                            selected=response.selected,
+                            response=response,
                             sink=sink,
-                            backend=backend,
-                            history=history[:-1],
-                            board_id=board_id,
-                            llm_credentials=llm_credentials,
-                            profile_set=profile_set,
-                            session_saver=session_saver,
-                            session_loader=session_loader,
-                            suspension_saver=suspension_saver,
-                            suspension_deleter=suspension_deleter,
-                            llm_supports_tools=llm_supports_tools,
-                            autonomy_policy=autonomy_policy,
-                            x_client_platform=x_client_platform,
+                            folder_id=folder_id,
+                            trace_id=trace_id,
                         )
+                        if tape_result is not None:
+                            result = tape_result
+                        else:
+                            result = await resume_chat_pipeline(
+                                suspension=suspension,
+                                decision=response.decision,
+                                note=response.note,
+                                selected=response.selected,
+                                sink=sink,
+                                backend=backend,
+                                history=history[:-1],
+                                board_id=board_id,
+                                llm_credentials=llm_credentials,
+                                profile_set=profile_set,
+                                session_saver=session_saver,
+                                session_loader=session_loader,
+                                suspension_saver=suspension_saver,
+                                suspension_deleter=suspension_deleter,
+                                llm_supports_tools=llm_supports_tools,
+                                autonomy_policy=autonomy_policy,
+                                permission_preset=permission_preset,
+                                x_client_platform=x_client_platform,
+                            )
                     except asyncio.CancelledError:
                         salvage_incomplete_turn(
                             sink=sink,
@@ -547,7 +575,6 @@ async def resume_chat(
                         backend=backend,
                         sink=sink,
                         user_message=suspension.user_message,
-                        generate_title=True,
                         llm_credentials=llm_credentials,
                         trace_id=trace_id,
                         turn_id=turn_id,

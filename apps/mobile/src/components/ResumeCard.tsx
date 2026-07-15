@@ -211,9 +211,9 @@ export function ResumeCard({
         placeholder={
           isTeamPreview &&
           (paused as { primitive?: string }).primitive === "debate"
-            ? "可选 · 调整时填写新辩题后开赛；停止时作为收尾备注"
+            ? "可选 · 开赛嘱咐（如你最关心的争议点），授权开赛时注入"
             : isTeamPreview
-              ? "可选 · 调整时作为对全体队员的指示；停止时作为收尾备注"
+              ? "可选 · 对全体队员的嘱咐（授权开工时注入）"
               : isPlanReview
                 ? "可选 · 调整时作为对下游的指示；停止时作为收尾备注"
                 : "可选 · 你的答复或补充，留空则按上面继续"
@@ -231,10 +231,10 @@ export function ResumeCard({
           (paused as { primitive?: string }).primitive === "debate"
             ? "开赛"
             : isTeamPreview
-              ? "开做"
+              ? "授权并开工"
               : "继续"}
         </button>
-        {showWorkers && (
+        {isPlanReview && (
           <button
             type="button"
             className="pause-btn pause-btn-neutral"

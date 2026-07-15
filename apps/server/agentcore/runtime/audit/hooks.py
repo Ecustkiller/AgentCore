@@ -8,6 +8,7 @@ from agentcore.runtime.audit.projector import (
     project_approval_resolved,
     project_approval_swept,
     project_approval_timeout,
+    project_circuit_breaker,
     project_delegate_plan,
     project_journal_entry,
     project_permission_effective,
@@ -23,7 +24,7 @@ from agentcore.runtime.audit.recorder import AuditRecorder, current_audit_record
 
 def on_journal_fact_appended(entry: dict[str, Any]) -> None:
     recorder = current_audit_recorder.get()
-    if recorder is None or not recorder.delegated:
+    if recorder is None or not recorder.active:
         return
     draft = project_journal_entry(recorder, entry)
     if draft is not None:
@@ -80,7 +81,7 @@ def on_permission_effective(
     depth: int,
 ) -> None:
     recorder = current_audit_recorder.get()
-    if recorder is None or not recorder.delegated:
+    if recorder is None or not recorder.active:
         return
     recorder.schedule(
         project_permission_effective(
@@ -96,6 +97,33 @@ def on_permission_effective(
     )
 
 
+def on_circuit_breaker(
+    *,
+    tool_name: str,
+    tool_call_id: str,
+    rule_id: str,
+    verdict: str,
+    reason: str,
+    run_id: str | None = None,
+) -> None:
+    """Force-schedule safety-breaker hits (incl. solo / full_trust turns)."""
+    recorder = current_audit_recorder.get()
+    if recorder is None:
+        return
+    recorder.schedule(
+        project_circuit_breaker(
+            recorder,
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+            rule_id=rule_id,
+            verdict=verdict,
+            reason=reason,
+            run_id=run_id,
+        ),
+        force=True,
+    )
+
+
 def on_approval_resolved(
     *,
     tool_name: str,
@@ -104,8 +132,9 @@ def on_approval_resolved(
     arguments: dict[str, Any],
     run_id: str | None = None,
 ) -> None:
+    """Always force-schedule — approvals must persist even on non-delegated turns."""
     recorder = current_audit_recorder.get()
-    if recorder is None or not recorder.delegated:
+    if recorder is None:
         return
     recorder.schedule(
         project_approval_resolved(
@@ -115,7 +144,8 @@ def on_approval_resolved(
             decision=decision,
             arguments=arguments,
             run_id=run_id,
-        )
+        ),
+        force=True,
     )
 
 
@@ -126,7 +156,7 @@ def on_approval_timeout(
     run_id: str | None = None,
 ) -> None:
     recorder = current_audit_recorder.get()
-    if recorder is None or not recorder.delegated:
+    if recorder is None:
         return
     recorder.schedule(
         project_approval_timeout(
@@ -134,13 +164,14 @@ def on_approval_timeout(
             tool_name=tool_name,
             tool_call_id=tool_call_id,
             run_id=run_id,
-        )
+        ),
+        force=True,
     )
 
 
 def on_tool_disabled(*, tool_name: str, run_id: str, failure_count: int) -> None:
     recorder = current_audit_recorder.get()
-    if recorder is None or not recorder.delegated:
+    if recorder is None or not recorder.active:
         return
     recorder.schedule(
         project_tool_disabled(
@@ -154,7 +185,7 @@ def on_tool_disabled(*, tool_name: str, run_id: str, failure_count: int) -> None
 
 def on_write_conflict(*, path: str, run_id: str, owner_run_id: str) -> None:
     recorder = current_audit_recorder.get()
-    if recorder is None or not recorder.delegated:
+    if recorder is None or not recorder.active:
         return
     recorder.schedule(
         project_write_conflict(
@@ -168,7 +199,7 @@ def on_write_conflict(*, path: str, run_id: str, owner_run_id: str) -> None:
 
 def on_approval_swept(*, tool_names: list[str], swept: list[dict[str, str]]) -> None:
     recorder = current_audit_recorder.get()
-    if recorder is None or not recorder.delegated:
+    if recorder is None or not recorder.active:
         return
     if not swept:
         return
@@ -177,7 +208,8 @@ def on_approval_swept(*, tool_names: list[str], swept: list[dict[str, str]]) -> 
             recorder,
             tool_names=tool_names,
             swept=swept,
-        )
+        ),
+        force=True,
     )
 
 
@@ -190,7 +222,7 @@ def on_run_retry(
     execution_id: str | None = None,
 ) -> None:
     recorder = current_audit_recorder.get()
-    if recorder is None or not recorder.delegated:
+    if recorder is None or not recorder.active:
         return
     recorder.schedule(
         project_run_retry(
@@ -211,7 +243,7 @@ def on_run_deterministic_failure(
     execution_id: str | None = None,
 ) -> None:
     recorder = current_audit_recorder.get()
-    if recorder is None or not recorder.delegated:
+    if recorder is None or not recorder.active:
         return
     recorder.schedule(
         project_run_deterministic_failure(
@@ -230,7 +262,7 @@ def on_run_redirect_ignored(
     execution_id: str | None = None,
 ) -> None:
     recorder = current_audit_recorder.get()
-    if recorder is None or not recorder.delegated:
+    if recorder is None or not recorder.active:
         return
     recorder.schedule(
         project_run_redirect_ignored(
@@ -250,6 +282,7 @@ def bind_recorder(
     trace_id: str | None,
     captain_run_id: str | None = None,
     delegated: bool = False,
+    permission_preset: str | None = None,
 ) -> tuple[AuditRecorder, Any]:
     recorder = AuditRecorder(
         user_id=user_id,
@@ -258,6 +291,9 @@ def bind_recorder(
         trace_id=trace_id,
         captain_run_id=captain_run_id,
         delegated=delegated,
+        permission_preset=permission_preset,
     )
+    if delegated:
+        recorder.activate()
     token = current_audit_recorder.set(recorder)
     return recorder, token

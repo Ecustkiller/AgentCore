@@ -1,8 +1,9 @@
 /**
- * Agent 行为审计 REST 契约（Phase 1 + Phase 2 第一批）。
+ * Agent 行为审计 REST 契约（Phase 1 + Phase 2 + 会话权限 P2）。
  *
  * 对齐 `apps/server/agentcore/api/schemas/agent_audit.py` 与
  * `GET /v1/conversations/{id}/messages/{mid}/audit`（`include_causal` 可选）、
+ * `GET /v1/conversations/{id}/audit`（会话安全台账）、
  * `GET /v1/conversations/{id}/audit/file?path=…`、
  * `GET /v1/admin/audit/summary`。
  */
@@ -82,12 +83,14 @@ export interface AuditCausalGraph {
 export type AuditPhase2Action =
   | "permission.tool_disabled"
   | "permission.write_conflict"
+  | "permission.preset_changed"
+  | "permission.preset_snapshot"
   | "approval.swept"
   | "checkpoint.paused"
   | "checkpoint.resumed"
   | "run.retry";
 
-/** `GET /v1/conversations/{id}/messages/{mid}/audit` 响应。 */
+/** `GET /v1/conversations/{id}/messages/{mid}/audit` 与会话级 `/audit` 响应。 */
 export interface AgentAuditListResponse {
   data: AgentAuditEvent[];
   total: number;

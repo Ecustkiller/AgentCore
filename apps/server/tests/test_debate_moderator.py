@@ -180,12 +180,13 @@ class _RecordingRunner:
     """假 RoundRunner：记录每次被调的 (round_no, focus, history 长度)，返回各方发言。
 
     ``history_len`` 序列即「辩手跨轮带记忆」的输入证据：第 k 轮应看到前 k-1 轮。``fail_all``
-    模拟某轮全员发言失败（ok=False）。
+    模拟某轮全员发言失败（ok=False）。``fail_keys`` 模拟部分缺席（仅这些 side_key 失败）。
     """
 
-    def __init__(self, *, fail_all=False):  # noqa: ANN001
+    def __init__(self, *, fail_all=False, fail_keys: frozenset[str] | None = None):  # noqa: ANN001
         self.calls = []
         self.fail_all = fail_all
+        self.fail_keys = fail_keys or frozenset()
 
     async def __call__(self, *, round_no, focus, sides, history, interjections=()):  # noqa: ANN001
         self.calls.append(
@@ -201,8 +202,10 @@ class _RecordingRunner:
                 side_key=s.key,
                 side_name=s.name,
                 run_id=f"{s.key}_r{round_no}",
-                content=f"{s.name}就「{focus}」的第{round_no}轮发言",
-                ok=not self.fail_all,
+                content=""
+                if self.fail_all or s.key in self.fail_keys
+                else f"{s.name}就「{focus}」的第{round_no}轮发言",
+                ok=not self.fail_all and s.key not in self.fail_keys,
             )
             for s in sides
         ]
@@ -494,6 +497,85 @@ def test_all_failed_early_stop():
     assert len(result.rounds) == 1
     assert result.stop_reason == STOP_ALL_FAILED
     assert llm.judge_calls == 0  # 无可裁判内容，跳过裁判
+    # 全员失败不标 absent（早停路径，非缺席续赛）。
+    assert all(not t.absent for t in result.rounds[0].turns)
+
+
+def test_absent_round_skips_cx_and_adversarial_scores():
+    """部分失败续赛：缺席方显式标 absent；跳过对其质询；本轮不做对抗记分；赛程不阻断。"""
+    scored = {
+        **_KEEP_GOING,
+        "scores": {
+            "pro": {
+                "argument": 4,
+                "engagement": 3,
+                "evidence": 3,
+                "penalties": [],
+                "note": "出席",
+            },
+            "con": {
+                "argument": 0,
+                "engagement": 0,
+                "evidence": 0,
+                "penalties": ["缺席"],
+                "note": "不应保留",
+            },
+        },
+    }
+    llm = _ScriptedLLM(
+        judge_results=[scored, _CONVERGE],
+        questions={"pro": ["逼问正方"], "con": ["逼问缺席方——不应发出"]},
+    )
+    runner = _PartialAbsentRunner(absent_round=1, absent_key="con")
+    cx = _RecordingCrossExam()
+    result = asyncio.run(
+        Moderator(provider=llm, model="m").run(
+            _config(policy=RoundPolicy(max_rounds=5)),
+            run_round=runner,
+            run_cross_exam=cx,
+        )
+    )
+    assert len(result.rounds) >= 2
+    r1 = result.rounds[0]
+    by_key = {t.side_key: t for t in r1.turns}
+    assert by_key["pro"].ok and not by_key["pro"].absent
+    assert not by_key["con"].ok and by_key["con"].absent
+    # 只质询出席方
+    assert len(cx.calls) >= 1
+    assert set(cx.calls[0]["questions"]) == {"pro"}
+    assert all(e.target != "con" for e in r1.cross_exam)
+    # 缺席轮不做对抗记分（即便裁判 JSON 带回了 scores 也清空）
+    assert r1.verdict.scores == {}
+    payload_sides = {s["key"]: s for s in r1.to_event_payload()["sides"]}
+    assert payload_sides["con"]["absent"] is True
+    assert payload_sides["pro"]["absent"] is False
+    # 赛程继续（未因单方缺席早停）
+    assert result.stop_reason != STOP_ALL_FAILED
+
+
+class _PartialAbsentRunner:
+    """第 ``absent_round`` 轮仅 ``absent_key`` 失败；其余轮全员成功。"""
+
+    def __init__(self, *, absent_round: int, absent_key: str) -> None:
+        self.absent_round = absent_round
+        self.absent_key = absent_key
+        self.calls: list[dict] = []
+
+    async def __call__(self, *, round_no, focus, sides, history, interjections=()):  # noqa: ANN001
+        self.calls.append({"round_no": round_no, "focus": focus})
+        out = []
+        for s in sides:
+            fail = round_no == self.absent_round and s.key == self.absent_key
+            out.append(
+                SideTurn(
+                    side_key=s.key,
+                    side_name=s.name,
+                    run_id=f"{s.key}_r{round_no}",
+                    content="" if fail else f"{s.name}就「{focus}」的第{round_no}轮发言",
+                    ok=not fail,
+                )
+            )
+        return out
 
 
 # --- 双产物 / 呈现 -----------------------------------------------------------
@@ -559,11 +641,11 @@ def test_roundtable_narrative_first():
 
 
 def test_round_hooks_order_start_before_speak_before_round():
-    """逐轮增量回调注入点：每轮 on_round_start(发言【前】, 携本轮焦点) → 辩手发言 → on_round
+    """逐轮增量回调注入点：每轮 on_round_start(发言【前】, 携本轮焦点 + 首轮 opening) → 辩手发言 → on_round
     (裁判 + 小结【后】, 携完整 RoundResult)。DebateTool 据此 emit debate_round_started /
-    debate_round，让前端进行中先亮焦点、再流式发言、收尾叠裁判小结。"""
+    debate_round，让前端进行中先亮焦点/开场白、再流式发言、收尾叠裁判小结。"""
     order: list[str] = []
-    starts: list[tuple[int, str]] = []
+    starts: list[tuple[int, str, str]] = []
     seen: list = []
 
     class _OrderRunner:
@@ -586,9 +668,9 @@ def test_round_hooks_order_start_before_speak_before_round():
 
     runner = _OrderRunner()
 
-    async def on_start(round_no, focus):  # noqa: ANN001
+    async def on_start(round_no, focus, opening):  # noqa: ANN001
         order.append(f"start{round_no}")
-        starts.append((round_no, focus))
+        starts.append((round_no, focus, opening))
 
     async def on_round(rr):  # noqa: ANN001
         order.append(f"round{rr.round_no}")
@@ -608,9 +690,58 @@ def test_round_hooks_order_start_before_speak_before_round():
     # on_round_start 携本轮焦点，与 run_round 收到的一致（同一焦点先报后用）。
     assert [s[0] for s in starts] == [1, 2]
     assert starts[0][1] == runner.calls[0]["focus"]
+    # 默认脚本化 frame 无 opening → 首轮也空；后续轮契约恒空。
+    assert starts[0][2] == ""
+    assert starts[1][2] == ""
     # on_round 携完整 RoundResult（含小结，可直接折算事件 payload）。
     assert all(r.summary for r in seen)
     assert seen[0].to_event_payload()["round_no"] == 1
+
+
+def test_round_start_hook_carries_opening_on_first_round_only():
+    """首轮 on_round_start 携 opening（发言前上车）；后续轮 opening 恒空，不被覆盖。"""
+    starts: list[tuple[int, str, str]] = []
+
+    class _Runner:
+        async def __call__(self, *, round_no, focus, sides, history, interjections=()):  # noqa: ANN001
+            return [
+                SideTurn(
+                    side_key=s.key,
+                    side_name=s.name,
+                    run_id=f"{s.key}_r{round_no}",
+                    content=f"{s.name} r{round_no}",
+                    ok=True,
+                )
+                for s in sides
+            ]
+
+    async def on_start(round_no, focus, opening):  # noqa: ANN001
+        starts.append((round_no, focus, opening))
+
+    class _OpeningLLM(_ScriptedLLM):
+        async def complete(self, request):  # noqa: ANN001
+            step = request.scenario.rsplit(".", 1)[-1]
+            if step == "frame" and self.frame_calls == 0:
+                self.frame_calls += 1
+                self.seen.append((request.messages[0].content, request.messages[1].content))
+                return LLMResponse(
+                    content=json.dumps(
+                        {"focus": "首轮焦点", "opening": "先帮你把最要紧的事说清。"}
+                    )
+                )
+            return await super().complete(request)
+
+    llm = _OpeningLLM(judge_results=[_KEEP_GOING])
+    asyncio.run(
+        Moderator(provider=llm, model="m").run(
+            _config(policy=RoundPolicy(max_rounds=2)),
+            run_round=_Runner(),
+            on_round_start=on_start,
+        )
+    )
+    assert starts[0] == (1, "首轮焦点", "先帮你把最要紧的事说清。")
+    assert starts[1][0] == 2
+    assert starts[1][2] == ""
 
 
 def test_round_to_event_payload_matches_result_round_unit():
@@ -784,6 +915,43 @@ def test_first_round_still_frames_opening():
     assert result.rounds[0].focus == "首轮焦点"
 
 
+def test_kickoff_ask_seeds_round1_interjection():
+    """开赛嘱咐（kickoff_ask）预注入为首轮全场插话：跑进 run_round、verbatim 进 rounds[0]。"""
+    class _KickoffFrameLLM(_ScriptedLLM):
+        async def complete(self, request):  # noqa: ANN001
+            step = request.scenario.rsplit(".", 1)[-1]
+            if step == "frame":
+                self.frame_calls += 1
+                self.seen.append((request.messages[0].content, request.messages[1].content))
+                return LLMResponse(
+                    content=json.dumps({"focus": "成本谁买单", "opening": "先看成本。"})
+                )
+            return await super().complete(request)
+
+    ask = "最关心成本谁买单"
+    cfg = DebateConfig(
+        motion="该不该做 X",
+        form=DebateForm.DEBATE,
+        sides=_two_sides(),
+        policy=RoundPolicy(max_rounds=1),
+        kickoff_ask=ask,
+    )
+    llm = _KickoffFrameLLM(judge_results=[_CONVERGE])
+    runner = _RecordingRunner()
+    result = _run(llm, runner, cfg)
+
+    assert [i.ask for i in runner.calls[0]["interjections"]] == [ask]
+    assert runner.calls[0]["interjections"][0].target_key == ""
+    assert len(result.rounds[0].user_interjections) == 1
+    inter = result.rounds[0].user_interjections[0]
+    assert inter.ask == ask
+    assert inter.target_key == ""
+    assert inter.answered is True
+    # 主持人定首轮焦点时可见嘱咐。
+    assert ask in llm.seen[0][1]
+    assert "用户开赛嘱咐" in llm.seen[0][1]
+
+
 def test_round_boundary_none_falls_back_to_judge_convergence():
     """钩子返回 None（超时 / 无活跃用户）→ 回退裁判自动收敛：裁判判收敛即收场（与非交互同辙）。"""
 
@@ -955,6 +1123,62 @@ def test_cross_exam_questions_parsed_and_filters_hallucinated_sides():
     failed = [SideTurn("pro", "正方", "r1_pro", "", ok=False), SideTurn("con", "反方", "r1_con", "", ok=False)]
     assert asyncio.run(mod._cross_exam_questions(_config(), "焦点", failed)) == {}
     assert llm.cross_exam_calls == 1
+
+
+def test_cross_exam_questions_tolerates_numbered_object_preserving_doc_order():
+    """真实 trace 形态：一方正常数组、另一方编号对象 ``{"1":…,"2":…}`` —— 编号对象方须被解析，
+    且顺序保持文档序（禁止按 key 字典序，避免 ``"10"`` 排到 ``"2"`` 前）。"""
+    # 插入序：先 "2" 再 "10"；若误按 key 排序会变成 ["q10", "q2"]。
+    numbered = {"2": "q2", "10": "q10", "3": "q3"}
+    llm = _ScriptedLLM(questions={"pro": ["正常问1", "正常问2"], "con": numbered})
+    mod = Moderator(provider=llm, model="m")
+    turns = [SideTurn("pro", "正方", "r1_pro", "正方开场"), SideTurn("con", "反方", "r1_con", "反方开场")]
+    qs = asyncio.run(mod._cross_exam_questions(_config(), "焦点", turns))
+    assert qs["pro"] == ["正常问1", "正常问2"]
+    assert qs["con"] == ["q2", "q10", "q3"]
+
+
+def test_cross_exam_side_dropped_warns_when_present_side_unusable(monkeypatch):
+    """出席方 questions 值不可用（空列表 / 非全串 dict）时打 side_dropped 告警，不落正文。"""
+    from agentcore.runtime.debate import moderator_agenda as agenda_mod
+    from tests.conftest import LogSpy
+
+    spy = LogSpy()
+    monkeypatch.setattr(agenda_mod, "logger", spy)
+    # con：空列表；pro：混入非串值的编号对象 → 双方均解析为空并告警。
+    llm = _ScriptedLLM(
+        questions={"pro": {"1": "ok", "2": 2}, "con": []},
+    )
+    mod = Moderator(provider=llm, model="m")
+    turns = [SideTurn("pro", "正方", "r1_pro", "正方开场"), SideTurn("con", "反方", "r1_con", "反方开场")]
+    qs = asyncio.run(mod._cross_exam_questions(_config(), "焦点", turns))
+    assert qs == {}
+    dropped = [kw for name, kw in spy.events if name == "debate.cross_exam.side_dropped"]
+    assert {d["side_key"] for d in dropped} == {"pro", "con"}
+    pro = next(d for d in dropped if d["side_key"] == "pro")
+    assert pro["value_type"] == "dict"
+    assert pro["keys_preview"] == ["1", "2"]
+    con = next(d for d in dropped if d["side_key"] == "con")
+    assert con["value_type"] == "list"
+    assert con["keys_preview"] is None
+
+
+def test_cross_exam_side_dropped_warns_when_present_side_omitted(monkeypatch):
+    """出席方 key 整方省略于 LLM 返回时也打 side_dropped（value_type=missing），且不与值不可用重复告警。"""
+    from agentcore.runtime.debate import moderator_agenda as agenda_mod
+    from tests.conftest import LogSpy
+
+    spy = LogSpy()
+    monkeypatch.setattr(agenda_mod, "logger", spy)
+    # 只写了 pro；con 整方缺失 → missing；ghost 幻觉不影响。
+    llm = _ScriptedLLM(questions={"pro": ["逼问正方"], "ghost": ["x"]})
+    mod = Moderator(provider=llm, model="m")
+    turns = [SideTurn("pro", "正方", "r1_pro", "正方开场"), SideTurn("con", "反方", "r1_con", "反方开场")]
+    qs = asyncio.run(mod._cross_exam_questions(_config(), "焦点", turns))
+    assert qs == {"pro": ["逼问正方"]}
+    dropped = [kw for name, kw in spy.events if name == "debate.cross_exam.side_dropped"]
+    assert len(dropped) == 1
+    assert dropped[0] == {"side_key": "con", "value_type": "missing", "keys_preview": None}
 
 
 def test_cross_exam_beat_populates_round_and_feeds_judge():

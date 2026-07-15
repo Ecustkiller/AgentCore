@@ -75,7 +75,14 @@ export function SpeakerBlock({
     `${sceneKey}:all`,
     false,
   );
-  const arguments_ = !streaming && output ? parseSpeechArguments(output) : [];
+  // 新契约：后端 ``sides[].arguments`` 权威；缺省 / 空 → 旧 journal 启发式回退。
+  const structured = side.arguments;
+  const arguments_: SpeechArgument[] =
+    !streaming && structured && structured.length > 0
+      ? structured.map((a) => ({ id: a.id, title: a.title, body: a.body }))
+      : !streaming && output
+        ? parseSpeechArguments(output)
+        : [];
   const showFullTextToggle = !streaming && !!output && arguments_.length > 0;
 
   const meta = (

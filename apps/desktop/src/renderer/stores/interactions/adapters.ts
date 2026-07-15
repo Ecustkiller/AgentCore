@@ -1,3 +1,4 @@
+import { parseCheckpointIntent } from "@/lib/checkpointIntent";
 import type {
   CheckpointDisplay,
   NonBlockingAskDisplay,
@@ -9,7 +10,6 @@ import type {
   AskQuestion,
   AskStyleOption,
   CheckpointDecision,
-  CheckpointIntent,
   PlanReviewPending,
   PlanReviewStep,
 } from "@/types/events";
@@ -56,7 +56,7 @@ export function entryToCheckpoint(e: InteractionEntry): CheckpointDisplay {
     assumptions: arr<AskAssumption>(p.assumptions),
     questions: arr<AskQuestion>(p.questions),
     styleOptions: arr<AskStyleOption>(p.style_options ?? p.styleOptions),
-    intent: (str(p.intent, "decision") as CheckpointIntent) || "decision",
+    intent: parseCheckpointIntent(p.intent),
     status: resolved ? "resolved" : "pending",
     decision: resolved
       ? ((r.decision as CheckpointDecision | null | undefined) ?? null)

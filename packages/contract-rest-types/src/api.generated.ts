@@ -1134,6 +1134,26 @@ export interface paths {
         patch: operations["update_conversation_v1_conversations__conversation_id__patch"];
         trace?: never;
     };
+    "/v1/conversations/{conversation_id}/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Conversation Audit
+         * @description Conversation-scoped security ledger (owner-scoped); includes preset changes.
+         */
+        get: operations["list_conversation_audit_v1_conversations__conversation_id__audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/conversations/{conversation_id}/audit/file": {
         parameters: {
             query?: never;
@@ -1529,7 +1549,7 @@ export interface paths {
         };
         /**
          * List Turn Audit
-         * @description Delegated-turn audit timeline for one assistant message (owner-scoped).
+         * @description Turn audit timeline for one assistant message (owner-scoped).
          */
         get: operations["list_turn_audit_v1_conversations__conversation_id__messages__message_id__audit_get"];
         put?: never;
@@ -1611,10 +1631,10 @@ export interface paths {
          *     The turn paused at a plan_review / ask_user / team_preview checkpoint and lost its
          *     live stream (disconnect / restart); only its persisted frame survived.
          *
-         *     Settlement 预写 (D8)：① peek frame → ② ``*_resolved`` 落库成功 → ③ ``claim_paused_turn``
-         *     → ④ resume pipeline（内原有 emit 照旧，journal 幂等跳过）。settlement 写失败 ⇒ 5xx、
-         *     不 claim、frame 保留可重试。Claim 竞争失败按现状 404。Pipeline 启动失败走现有
-         *     restore 回滚。
+         *     Settlement 预写 (D8)：① peek frame → ② live-task drain（不 cancel；仍 live ⇒ 409）→
+         *     ③ ``*_resolved`` 落库成功 → ④ ``claim_paused_turn`` → ⑤ resume pipeline。settlement
+         *     写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状 404。Pipeline 启动
+         *     失败走现有 restore 回滚。
          *
          *     ``body.selected`` carries the user's ask_user picks (ignored for plan_review).
          *     Gated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota
@@ -1664,6 +1684,28 @@ export interface paths {
          */
         get: operations["get_run_llm_window_v1_conversations__conversation_id__messages__message_id__runs__run_id__llm_window_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{conversation_id}/permission-preset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Permission Preset
+         * @description Switch the session permission mode (降档/升档确认由客户端负责).
+         *
+         *     Takes effect on the next turn / durable resume (gate is built at turn entry).
+         */
+        put: operations["set_permission_preset_v1_conversations__conversation_id__permission_preset_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1997,6 +2039,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/conversations/{conversation_id}/workspace/external-grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List External Grants */
+        get: operations["list_external_grants_v1_conversations__conversation_id__workspace_external_grants_get"];
+        put?: never;
+        /**
+         * Grant External Readonly
+         * @description Register a session read-only mount after the user confirms via folder picker.
+         */
+        post: operations["grant_external_readonly_v1_conversations__conversation_id__workspace_external_grants_post"];
+        /**
+         * Revoke External Grants
+         * @description Revoke one grant (by alias or root_id) or all session grants for the conversation.
+         */
+        delete: operations["revoke_external_grants_v1_conversations__conversation_id__workspace_external_grants_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/conversations/{conversation_id}/workspace/files": {
         parameters: {
             query?: never;
@@ -2121,6 +2188,70 @@ export interface paths {
          * @description Move/rename a file or directory within the conversation's scratch workspace.
          */
         post: operations["move_workspace_file_v1_conversations__conversation_id__workspace_move_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/demo-tape": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Demo Tape Catalog
+         * @description List available tapes when replay is enabled; 404 when the switch is off.
+         */
+        get: operations["get_demo_tape_catalog_v1_demo_tape_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/demo-tape/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prepare Demo Tape
+         * @description Create cloud session + bind tape; do **not** start a turn.
+         *
+         *     The client navigates into the empty conversation; the next user message
+         *     triggers tape replay (turn_runner divert). ``user_prompt`` is the tape's
+         *     suggested opening line for the operator to type or paste.
+         */
+        post: operations["prepare_demo_tape_v1_demo_tape_prepare_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/demo-tape/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Demo Tape
+         * @description Create cloud session, bind tape, start replay turn (attach via GET …/stream).
+         */
+        post: operations["start_demo_tape_v1_demo_tape_start_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2280,9 +2411,10 @@ export interface paths {
         post?: never;
         /**
          * Delete Folder Permanent
-         * @description 彻底删除项目：移除容器；成员对话保留但解除分组（permanent path）.
+         * @description 彻底删除项目：清盘成员对话 + 云端共享工作区/快照，再移除项目行.
          *
          *     Distinct from ``DELETE /{folder_id}`` (soft-delete + archive members).
+         *     Local-mode OS directories are never touched — only DB + server-side data.
          */
         delete: operations["delete_folder_permanent_v1_folders__folder_id__permanent_delete"];
         options?: never;
@@ -2939,6 +3071,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/simulation/show/episodes/{episode_id}/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Episode Manifest */
+        get: operations["get_episode_manifest_v1_simulation_show_episodes__episode_id__manifest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/simulation/show/episodes/{episode_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Episode Publish
+         * @description 发布态门禁位（draft → review → published）。生产环境应再加 admin 鉴权。
+         */
+        patch: operations["patch_episode_publish_v1_simulation_show_episodes__episode_id__publish_patch"];
+        trace?: never;
+    };
+    "/v1/simulation/show/episodes/{episode_id}/quiz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Episode Quiz */
+        post: operations["post_episode_quiz_v1_simulation_show_episodes__episode_id__quiz_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/simulation/show/seasons/{season_id}/episodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Season Episodes */
+        get: operations["list_season_episodes_v1_simulation_show_seasons__season_id__episodes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/usage/summary": {
         parameters: {
             query?: never;
@@ -2957,6 +3160,11 @@ export interface paths {
          *     ``recent_daily_cost`` is the last ``_TREND_DAYS`` UTC days (zero-filled,
          *     oldest-first) for the sparkline. Also carries ``cny_per_usd`` so the client
          *     formats money from the single server-owned rate.
+         *
+         *     ``quota`` mirrors what ``enforce_quota`` will actually apply to this user
+         *     (D7): per-user override columns first, else free-tier defaults on a byok
+         *     deployment's platform-paid path (keyless free-tier riders), else global
+         *     ``quota_*`` — so the meters never show a cap the gate wouldn't enforce.
          */
         get: operations["get_usage_summary_v1_usage_summary_get"];
         put?: never;
@@ -4222,6 +4430,7 @@ export interface components {
             cost: components["schemas"]["CostBreakdown"];
             /** Duration Ms */
             duration_ms: number;
+            estimated_cost?: components["schemas"]["CostBreakdown"] | null;
             /** Model */
             model: string;
             /** Role */
@@ -4283,19 +4492,19 @@ export interface components {
         };
         /**
          * AutonomyPolicy
-         * @description User-global kickoff / capability-authorization posture.
+         * @description User-global *default* for new conversations (maps to :class:`PermissionPreset`).
          *
-         *     - ``always_ask`` — every GRANTABLE call prompts; kickoff has no grant shortcut
-         *     - ``first_grant`` — kickoff once authorizes the grantable set for the delegation
-         *       (default; continuous with the prior delegation-authorization card)
-         *     - ``full_auto`` — skip the kickoff card entirely (plan + capability); silent
-         *       auto-grant of GRANTABLE tools for the delegation
+         *     Runtime gates no longer read this directly — the conversation's
+         *     ``permission_preset`` is the single source of truth. This enum remains the
+         *     stored shape of ``users.autonomy_policy`` (设置页「新会话默认权限模式」).
+         *
+         *     Mapping: ``always_ask``→observe, ``first_grant``→workspace, ``full_auto``→full_trust.
          * @enum {string}
          */
         AutonomyPolicy: "always_ask" | "first_grant" | "full_auto";
         /** AutonomyUpdate */
         AutonomyUpdate: {
-            /** @description always_ask | first_grant | full_auto */
+            /** @description New-session default: always_ask→observe | first_grant→workspace | full_auto→full_trust */
             policy: components["schemas"]["AutonomyPolicy"];
         };
         /** AutonomyView */
@@ -4340,12 +4549,11 @@ export interface components {
         };
         /**
          * BindLocalWorkspaceRequest
-         * @description Bind a conversation's workspace to a desktop FS root (switch to local mode).
+         * @description Bind a 裸聊's scratch workspace to a desktop FS root (switch to local mode).
          *
          *     ``root_id`` is the desktop-minted handle for an authorized local directory
-         *     (from the desktop ``addRoot`` flow). Binding writes at the governing scope: the
-         *     folder for a foldered conversation (shared by its siblings), the conversation
-         *     itself when ungrouped.
+         *     (from the desktop ``addRoot`` flow). Only ungrouped conversations may rebind —
+         *     project chats inherit an immutable project binding (``PUT`` returns 409).
          */
         BindLocalWorkspaceRequest: {
             /** Root Id */
@@ -4720,9 +4928,13 @@ export interface components {
          * @description How the user (or a timeout / orphan) settled a checkpoint the CEO raised.
          *
          *     ``CONTINUE`` / ``ADJUST`` / ``STOP`` are shared by ask_user / plan_review /
-         *     team_preview (开工卡). On the kickoff card, ``CONTINUE`` means grant-all-needed
-         *     capabilities and start; ``PER_CALL`` means start with per-call approval (no
-         *     delegation grant). ``PER_CALL`` is kickoff-only — ask_user / plan_review ignore it.
+         *     team_preview (开工卡). On the kickoff card, ``CONTINUE`` means grant + start
+         *     (non-empty ``note`` steers all unrun workers — former adjust semantics);
+         *     ``PER_CALL`` means start with per-call approval (no delegation grant) — enum
+         *     retained for historical timelines / API clients; the kickoff UI no longer
+         *     offers it. ``PER_CALL`` is kickoff-only — ask_user / plan_review ignore it.
+         *     ``ADJUST`` remains for debate kickoff (rewrite motion) and plan_review steer,
+         *     plus historical non-debate kickoff resolves.
          * @enum {string}
          */
         CheckpointDecision: "continue" | "per_call" | "adjust" | "stop" | "timeout" | "orphaned";
@@ -4775,6 +4987,7 @@ export interface components {
             /** Conversation Id */
             conversation_id: string;
             cost: components["schemas"]["CostBreakdown"];
+            estimated_cost?: components["schemas"]["CostBreakdown"] | null;
             /** Turns */
             turns: number;
             usage: components["schemas"]["UsageBreakdown"];
@@ -4813,6 +5026,8 @@ export interface components {
              * @default 0
              */
             message_count: number;
+            /** @default workspace */
+            permission_preset: components["schemas"]["PermissionPreset"];
             /**
              * Pinned
              * @default false
@@ -4844,6 +5059,11 @@ export interface components {
             input: number;
             /** Output */
             output: number;
+            /**
+             * Pricing Source
+             * @default curated
+             */
+            pricing_source: string;
             /** Total */
             total: number;
         };
@@ -4867,6 +5087,7 @@ export interface components {
             folder_id?: string | null;
             /** Local Container Root Id */
             local_container_root_id?: string | null;
+            permission_preset?: components["schemas"]["PermissionPreset"] | null;
             /** Title */
             title?: string | null;
         };
@@ -4996,6 +5217,95 @@ export interface components {
             /** Password */
             password: string;
         };
+        /**
+         * DemoTapeCatalogResponse
+         * @description List + enable flag (404 when replay is off — this body is only for enabled).
+         */
+        DemoTapeCatalogResponse: {
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Tapes */
+            tapes: components["schemas"]["DemoTapeSummary"][];
+        };
+        /**
+         * DemoTapePrepareRequest
+         * @description Prepare a bound cloud session without starting the tape turn.
+         */
+        DemoTapePrepareRequest: {
+            /** Max Gap Ms */
+            max_gap_ms?: number | null;
+            /** Speed */
+            speed?: number | null;
+            /** Tape Id */
+            tape_id: string;
+        };
+        /**
+         * DemoTapePrepareResponse
+         * @description Cloud conversation bound; user sends any message to trigger replay.
+         */
+        DemoTapePrepareResponse: {
+            /** Conversation Id */
+            conversation_id: string;
+            /** Max Gap Ms */
+            max_gap_ms: number;
+            /** Speed */
+            speed: number;
+            /** Tape Id */
+            tape_id: string;
+            /** Title */
+            title: string;
+            /** User Prompt */
+            user_prompt: string;
+        };
+        /**
+         * DemoTapeStartRequest
+         * @description Auto-start one-click replay for a tape id (filename stem).
+         */
+        DemoTapeStartRequest: {
+            /** Max Gap Ms */
+            max_gap_ms?: number | null;
+            /** Speed */
+            speed?: number | null;
+            /** Tape Id */
+            tape_id: string;
+        };
+        /**
+         * DemoTapeStartResponse
+         * @description Cloud conversation already bound + turn running (attach via GET …/stream).
+         */
+        DemoTapeStartResponse: {
+            /** Conversation Id */
+            conversation_id: string;
+            /** Max Gap Ms */
+            max_gap_ms: number;
+            /** Speed */
+            speed: number;
+            /** Tape Id */
+            tape_id: string;
+            /** Title */
+            title: string;
+            /** User Prompt */
+            user_prompt: string;
+        };
+        /**
+         * DemoTapeSummary
+         * @description One available tape under ``demos/tapes/``.
+         */
+        DemoTapeSummary: {
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Event Count */
+            event_count?: number | null;
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** User Prompt */
+            user_prompt: string;
+        };
         /** DeviceListResponse */
         DeviceListResponse: {
             /** Data */
@@ -5060,6 +5370,26 @@ export interface components {
         DispatchHandoffRequest: {
             /** Task */
             task: string;
+        };
+        /** ExternalGrantItem */
+        ExternalGrantItem: {
+            /** Alias */
+            alias: string;
+            /** Label */
+            label: string;
+            /** Namespace */
+            namespace: string;
+            /** Root Id */
+            root_id: string;
+        };
+        /** ExternalGrantListResponse */
+        ExternalGrantListResponse: {
+            /** Data */
+            data: components["schemas"]["ExternalGrantItem"][];
+        };
+        /** ExternalGrantResponse */
+        ExternalGrantResponse: {
+            grant: components["schemas"]["ExternalGrantItem"];
         };
         /** FeedbackListResponse */
         FeedbackListResponse: {
@@ -5141,6 +5471,21 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * GrantExternalReadonlyRequest
+         * @description Register a session-scoped read-only desktop root for this conversation.
+         *
+         *     Does **not** change workspace binding. ``root_id`` is the desktop-minted handle;
+         *     absolute paths never appear on the wire.
+         */
+        GrantExternalReadonlyRequest: {
+            /** Alias Hint */
+            alias_hint?: string | null;
+            /** Label */
+            label: string;
+            /** Root Id */
+            root_id: string;
         };
         /** GroupedConversationsResponse */
         GroupedConversationsResponse: {
@@ -5378,6 +5723,8 @@ export interface components {
          * @description Settings view of a user's BYOK config — never the plaintext key.
          */
         LlmKeyStatusResponse: {
+            /** Background Model */
+            background_model?: string | null;
             /** Base Url */
             base_url?: string | null;
             /**
@@ -5401,6 +5748,12 @@ export interface components {
             configured: boolean;
             /** Default Model */
             default_model?: string | null;
+            /**
+             * Free Tier Active
+             * @description True when this user has no BYOK key, free tier is enabled, and platform credentials are available (keyless users can chat on free quota)
+             * @default false
+             */
+            free_tier_active: boolean;
             /** Masked Key */
             masked_key?: string | null;
             /** Message */
@@ -5416,6 +5769,12 @@ export interface components {
              * @description Operator-configured model when billing_mode is platform
              */
             platform_model?: string | null;
+            /** Price Cache Hit */
+            price_cache_hit?: string | null;
+            /** Price Cache Miss */
+            price_cache_miss?: string | null;
+            /** Price Output */
+            price_output?: string | null;
             /** Status */
             status: string;
             /** Supports Tools */
@@ -5670,13 +6029,22 @@ export interface components {
          * MessageAttachment
          * @description A piece of context the user referenced (@-mention or paperclip).
          *
-         *     Text is extracted/materialized client-side; this MVP carries only
-         *     text-extractable sources (images are out of scope until a vision model).
-         *     ``kind="conversation"`` references another of the user's conversations: its
-         *     recent messages are materialized into ``text`` client-side (same as a file's
-         *     body), and ``conversation_id`` records which one (for the chip + later jump).
+         *     Text files carry client-extracted ``text`` (images stay out of scope until a
+         *     vision model). Binary files are **resident-first** (引用即驻留): the desktop
+         *     copies raw bytes into the conversation workspace ``attachments/`` and sends
+         *     ``workspace_path`` + ``binary=True`` with empty ``text``. Server-side分流预解析
+         *     then extracts text for docx/pdf/pptx/txt 等 (markitdown → ``*.md`` copy); xlsx/csv
+         *     stay path-only so workers can ``code_execute``. ``kind="conversation"`` references
+         *     another of the user's conversations: recent messages are materialized into
+         *     ``text`` client-side, and ``conversation_id`` records which one (for the chip +
+         *     later jump).
          */
         MessageAttachment: {
+            /**
+             * Binary
+             * @default false
+             */
+            binary: boolean;
             /** Conversation Id */
             conversation_id?: string | null;
             /**
@@ -5689,13 +6057,18 @@ export interface components {
             name: string;
             /** Path */
             path: string;
-            /** Text */
+            /**
+             * Text
+             * @default
+             */
             text: string;
             /**
              * Truncated
              * @default false
              */
             truncated: boolean;
+            /** Workspace Path */
+            workspace_path?: string | null;
         };
         /** MessageDetail */
         MessageDetail: {
@@ -5720,6 +6093,8 @@ export interface components {
             followups?: string[];
             /** Id */
             id: string;
+            /** Paused */
+            paused?: boolean | null;
             /** Reasoning Content */
             reasoning_content?: string | null;
             /** Role */
@@ -5804,6 +6179,14 @@ export interface components {
             /** Src */
             src: string;
         };
+        /** PatchShowEpisodePublishRequest */
+        PatchShowEpisodePublishRequest: {
+            /**
+             * Publish Status
+             * @enum {string}
+             */
+            publish_status: "draft" | "review" | "published" | "archived";
+        };
         /** PatchSimulationAgentRequest */
         PatchSimulationAgentRequest: {
             /** Goal */
@@ -5826,7 +6209,10 @@ export interface components {
          * @description A turn awaiting resume after a durable plan_review / ask_user / kickoff pause.
          *
          *     Surfaced on conversation reopen so the client can re-render the right resume card
-         *     by ``kind`` and offer continue / per_call / adjust / stop → the resume endpoint.
+         *     by ``kind`` and offer the kind-appropriate actions → the resume endpoint
+         *     (kickoff delegate: continue[+嘱咐] / stop; debate: continue / adjust / stop;
+         *     plan_review: continue / adjust / stop; ``per_call`` retained for historical
+         *     resolves only).
          *     ``message_id`` is both the pause key and the id the resumed assistant message will
          *     reuse, so an optimistic bubble reconciles cleanly.
          *
@@ -5856,7 +6242,7 @@ export interface components {
              */
             form: string;
             /** Intent */
-            intent?: ("kickoff" | "decision") | null;
+            intent?: ("kickoff" | "decision" | "proposal_pick" | "risk_ack") | null;
             kind: components["schemas"]["SuspensionKind"];
             /**
              * Max Rounds
@@ -5943,6 +6329,25 @@ export interface components {
             payload?: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * PermissionPreset
+         * @description Conversation-level permission mode (会话级权限模式 · 运行时单一真相源).
+         *
+         *     - ``observe`` — no execution tools; GRANTABLE (writes) always prompt; kickoff
+         *       does not pre-authorize write capabilities (≈ always_ask + withhold execution)
+         *     - ``workspace`` — kickoff once authorizes grantable set (≈ first_grant; default)
+         *     - ``full_trust`` — skip kickoff; silent auto-grant including local execution
+         *       (≈ full_auto; UI must warn that AI runs commands with user-equivalent power)
+         * @enum {string}
+         */
+        PermissionPreset: "observe" | "workspace" | "full_trust";
+        /**
+         * PermissionPresetUpdate
+         * @description Switch the conversation's permission mode mid-session.
+         */
+        PermissionPresetUpdate: {
+            permission_preset: components["schemas"]["PermissionPreset"];
         };
         /**
          * QuotaStatus
@@ -6306,6 +6711,11 @@ export interface components {
          *     the summary's single ``cny_per_usd`` (no per-row re-pricing here).
          */
         RoleCostLine: {
+            /**
+             * Cost Estimated Total
+             * @default 0
+             */
+            cost_estimated_total: number;
             /** Cost Total */
             cost_total: number;
             /** Role */
@@ -6393,12 +6803,15 @@ export interface components {
          *     graph exactly on reload (empty ``[]`` for a single-agent turn). ``process`` is
          *     a single-agent turn's 思考+工具 timeline (ordered reasoning/tool steps) the
          *     client replays into the inline process panel; ``null`` unless the turn used a
-         *     tool. ``captain_context`` is the CEO captain's received context (上下文传递可视化
-         *     通道①: ``system`` / ``history`` / ``request``), turn-level so it replays on the
-         *     CEO bubble even for a pure-chat turn (where ``events`` is empty); ``null`` unless
-         *     the captain shipped context. ``error`` is a 报错回合's terminal error, replaying the
-         *     inline error card on reload (``null`` for a clean turn). ``null`` whole payload on
-         *     messages with none of these.
+         *     tool. ``run_processes`` is the per-worker-run ProcessStep[] map (对称 CEO
+         *     ``process``) so run-detail timelines reopen with the same interleaving as live;
+         *     ``null`` when no worker produced a timeline. ``captain_context`` is the CEO
+         *     captain's received context (上下文传递可视化 通道①: ``system`` / ``history`` /
+         *     ``request``), turn-level so it replays on the CEO bubble even for a pure-chat
+         *     turn (where ``events`` is empty); ``null`` unless the captain shipped context.
+         *     ``error`` is a 报错回合's terminal error, replaying the inline error card on
+         *     reload (``null`` for a clean turn). ``null`` whole payload on messages with
+         *     none of these.
          */
         RunsPayload: {
             /** Captain Context */
@@ -6416,6 +6829,12 @@ export interface components {
             process?: {
                 [key: string]: unknown;
             }[] | null;
+            /** Run Processes */
+            run_processes?: {
+                [key: string]: {
+                    [key: string]: unknown;
+                }[];
+            } | null;
             /** Turn Warning */
             turn_warning?: string | null;
         };
@@ -6557,9 +6976,14 @@ export interface components {
             /** Api Key */
             api_key: string;
             /**
+             * Background Model
+             * @description Optional cheaper model for title/memory/compaction/followups
+             */
+            background_model?: string | null;
+            /**
              * Base Url
              * @description OpenAI-compatible endpoint including version prefix
-             * @example http://localhost:9090/v1
+             * @example https://api.deepseek.com
              */
             base_url?: string | null;
             /**
@@ -6568,6 +6992,21 @@ export interface components {
              * @example deepseek-v4-flash
              */
             default_model?: string | null;
+            /**
+             * Price Cache Hit
+             * @description Optional user-defined USD per 1M cache-hit tokens (decimal string)
+             */
+            price_cache_hit?: string | null;
+            /**
+             * Price Cache Miss
+             * @description Optional user-defined USD per 1M cache-miss tokens (decimal string)
+             */
+            price_cache_miss?: string | null;
+            /**
+             * Price Output
+             * @description Optional user-defined USD per 1M output tokens (decimal string)
+             */
+            price_output?: string | null;
         };
         /**
          * SetMessageFeedbackRequest
@@ -6611,6 +7050,62 @@ export interface components {
             title: string;
             /** Url */
             url: string;
+        };
+        /** ShowEpisodeListResponse */
+        ShowEpisodeListResponse: {
+            /** Data */
+            data: components["schemas"]["ShowEpisodeSummary"][];
+            /** Total */
+            total: number;
+        };
+        /** ShowEpisodeSummary */
+        ShowEpisodeSummary: {
+            /** Episode Id */
+            episode_id: string;
+            /** Episode No */
+            episode_no: number;
+            /**
+             * Publish Status
+             * @enum {string}
+             */
+            publish_status: "draft" | "review" | "published" | "archived";
+            /** Quiz Focus */
+            quiz_focus?: string | null;
+            /** Run Id */
+            run_id: string;
+            /** Season Id */
+            season_id: string;
+            /** Tagline */
+            tagline?: string | null;
+            /** Tick End */
+            tick_end: number;
+            /** Tick Start */
+            tick_start: number;
+            /** Title */
+            title: string;
+        };
+        /**
+         * ShowManifestResponse
+         * @description EpisodeManifest JSON — shape mirrors contract-types episodeManifest.
+         */
+        ShowManifestResponse: {
+            /** Manifest */
+            manifest: {
+                [key: string]: unknown;
+            };
+        };
+        /** ShowQuizSettlementResponse */
+        ShowQuizSettlementResponse: {
+            /** Answer */
+            answer: string;
+            /** Correct */
+            correct: boolean;
+            /** Guess */
+            guess: string;
+            /** Monologue */
+            monologue?: string | null;
+            /** Monologue Who */
+            monologue_who?: string | null;
         };
         /**
          * SimAgentState
@@ -6818,11 +7313,16 @@ export interface components {
          * @description Persisted attachment display metadata (no extracted text).
          *
          *     ``workspace_path`` is set when the attachment was written into the durable
-         *     project space (附件驻留): a workspace-relative path under ``attachments/`` that
-         *     the file-download API can serve. ``None`` for directory / conversation chips
-         *     (nothing is written as a workspace file).
+         *     project space (附件驻留 / 引用即驻留): a workspace-relative path under
+         *     ``attachments/`` that the file-download API can serve. ``None`` for directory /
+         *     conversation chips (nothing is written as a workspace file).
          */
         StoredAttachment: {
+            /**
+             * Binary
+             * @default false
+             */
+            binary: boolean;
             /** Conversation Id */
             conversation_id?: string | null;
             /**
@@ -6921,6 +7421,11 @@ export interface components {
              * @description Pending redirect count for this execution after enqueue.
              */
             queued: number;
+        };
+        /** SubmitShowQuizRequest */
+        SubmitShowQuizRequest: {
+            /** Guess */
+            guess: string;
         };
         /**
          * SuspensionKind
@@ -7098,6 +7603,7 @@ export interface components {
             /** Agents */
             agents: components["schemas"]["AgentCostLine"][];
             cost: components["schemas"]["CostBreakdown"];
+            estimated_cost?: components["schemas"]["CostBreakdown"] | null;
             /** Message Id */
             message_id: string;
             /** Rounds */
@@ -7345,6 +7851,7 @@ export interface components {
          */
         UsageWindow: {
             cost: components["schemas"]["CostBreakdown"];
+            estimated_cost?: components["schemas"]["CostBreakdown"] | null;
             /** Requests */
             requests: number;
             usage: components["schemas"]["UsageBreakdown"];
@@ -9834,6 +10341,45 @@ export interface operations {
             };
         };
     };
+    list_conversation_audit_v1_conversations__conversation_id__audit_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                /** @description Optional category filter */
+                category?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentAuditListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_file_audit_v1_conversations__conversation_id__audit_file_get: {
         parameters: {
             query: {
@@ -10637,6 +11183,45 @@ export interface operations {
             };
         };
     };
+    set_permission_preset_v1_conversations__conversation_id__permission_preset_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PermissionPresetUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_conversation_recovery_v1_conversations__conversation_id__recovery_get: {
         parameters: {
             query?: never;
@@ -11301,6 +11886,118 @@ export interface operations {
             };
         };
     };
+    list_external_grants_v1_conversations__conversation_id__workspace_external_grants_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalGrantListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grant_external_readonly_v1_conversations__conversation_id__workspace_external_grants_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GrantExternalReadonlyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalGrantResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_external_grants_v1_conversations__conversation_id__workspace_external_grants_delete: {
+        parameters: {
+            query?: {
+                alias?: string | null;
+                root_id?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_workspace_files_v1_conversations__conversation_id__workspace_files_get: {
         parameters: {
             query?: {
@@ -11546,6 +12243,114 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_demo_tape_catalog_v1_demo_tape_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoTapeCatalogResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prepare_demo_tape_v1_demo_tape_prepare_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DemoTapePrepareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoTapePrepareResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_demo_tape_v1_demo_tape_start_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Client-Platform"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DemoTapeStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoTapeStartResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13237,6 +14042,159 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SimTickFrameResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_episode_manifest_v1_simulation_show_episodes__episode_id__manifest_get: {
+        parameters: {
+            query?: {
+                /** @description 草稿预览（跳过发布门禁） */
+                preview?: boolean;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                episode_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShowManifestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_episode_publish_v1_simulation_show_episodes__episode_id__publish_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                episode_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchShowEpisodePublishRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShowEpisodeSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_episode_quiz_v1_simulation_show_episodes__episode_id__quiz_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                episode_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitShowQuizRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShowQuizSettlementResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_season_episodes_v1_simulation_show_seasons__season_id__episodes_get: {
+        parameters: {
+            query?: {
+                include_unpublished?: boolean;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                season_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShowEpisodeListResponse"];
                 };
             };
             /** @description Validation Error */

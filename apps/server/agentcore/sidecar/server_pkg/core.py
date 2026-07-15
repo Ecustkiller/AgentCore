@@ -10,7 +10,7 @@ from typing import Any
 
 from agentcore.conversation.store.outbox import OutboxStore
 from agentcore.core.logging import get_logger
-from agentcore.core.types import AutonomyPolicy
+from agentcore.core.types import AutonomyPolicy, PermissionPreset
 from agentcore.llm.credentials import (
     INFERENCE_CONVERSATION_HEADER,
     INFERENCE_TRACE_HEADER,
@@ -38,9 +38,9 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         self._root: Path | None = None
         self._creds: LLMCredentials | None = None
         self._approvals_enabled = True
-        # The user's capability-authorization posture (安全权限与治理 §三). The sidecar has
-        # no users DB — the desktop sends it on initialize and refreshes it per turn/resume
-        # (the policy can change mid-session; an initialize snapshot would go stale).
+        # Conversation permission mode (会话级权限模式). Sidecar has no conversation DB —
+        # the desktop sends ``permissionPreset`` on initialize and refreshes it per turn.
+        self._permission_preset: PermissionPreset = PermissionPreset.WORKSPACE
         self._autonomy_policy: AutonomyPolicy = AutonomyPolicy.FIRST_GRANT
         # The local durable-pause store (§8.6 paused-turn port, local impl), set from
         # ``initialize``'s ``dataDir``. ``None`` ⇒ no data dir ⇒ pauses stay in-memory.
@@ -95,6 +95,8 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
             await self._on_respond(request_id, params)
         elif method == "resume":
             await self._on_resume(request_id, params)
+        elif method == "continueAfterDecision":
+            await self._on_continue_after_decision(request_id, params)
         elif method == "listPaused":
             await self._on_list_paused(request_id, params)
         elif method == "cancel":
@@ -113,7 +115,9 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
                 )
             )
 
-    def _make_backend(self) -> ServerWorkspace:
+    def _make_backend(
+        self, *, external_mounts: list | dict | None = None
+    ) -> ServerWorkspace:
         """Build the local-disk workspace backend for a turn / resume.
 
         The sidecar runs ON the user's machine and this root IS their real disk →
@@ -121,14 +125,43 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         tools (file_write / code_execute) behind the user's consent, just like cloud
         local mode. Without this the gate stays off (workers un-gated) even with
         approvals enabled, since the default backend reports "server".
+
+        ``external_mounts`` (W3) are session read-only dirs under ``external/<alias>/``.
         """
         assert self._root is not None  # guarded by callers
-        return ServerWorkspace(
+        backend = ServerWorkspace(
             root=self._root,
             sandbox=SubprocessSandbox(),
             root_label=self._root.name or "workspace",
             location="local",
         )
+        if external_mounts:
+            from agentcore.workspace.external_mounts import ExternalMount
+
+            items: list[dict] = []
+            if isinstance(external_mounts, list):
+                items = [m for m in external_mounts if isinstance(m, dict)]
+            elif isinstance(external_mounts, dict):
+                items = [
+                    {"alias": a, **m} if isinstance(m, dict) else {"alias": a}
+                    for a, m in external_mounts.items()
+                ]
+            mounts: dict[str, ExternalMount] = {}
+            for m in items:
+                alias = str(m.get("alias") or "").strip()
+                abs_path = str(m.get("absPath") or m.get("abs_path") or "").strip()
+                if not alias or not abs_path:
+                    continue
+                mounts[alias] = ExternalMount(
+                    alias=alias,
+                    root_id=str(m.get("rootId") or m.get("root_id") or ""),
+                    label=str(m.get("label") or alias),
+                    abs_path=abs_path,
+                    readonly=True,
+                )
+            if mounts:
+                backend.attach_external_mounts(mounts)
+        return backend
 
     def _suspension_hooks(
         self,

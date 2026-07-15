@@ -204,6 +204,72 @@ def _single_agent_non_blocking_ask() -> list[SSEEvent]:
     ]
 
 
+def _proposal_pick_checkpoint() -> list[SSEEvent]:
+    """单聊·方案挑选卡 (ask_user card=proposal_pick)：阻塞挂起，intent=proposal_pick，
+    恰好 1 个 choice 单选 + options 2–6。"""
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("有三条可行路线，请挑一条："),
+        checkpoint_required(
+            checkpoint_id="cp_pick",
+            conversation_id=_CONV,
+            question="选哪条方案推进？",
+            context="三条路线成本与风险不同。",
+            questions=[
+                {
+                    "id": "q0",
+                    "prompt": "选哪条方案？",
+                    "kind": "choice",
+                    "multiple": False,
+                    "default": "",
+                    "options": [
+                        {"label": "方案 A：快速原型", "detail": "一周内可验证"},
+                        {"label": "方案 B：稳妥重构", "detail": "两周，债务更少"},
+                        {"label": "方案 C：外包试点", "recommended": True},
+                    ],
+                }
+            ],
+            intent="proposal_pick",
+        ),
+        message_end(FinishReason.PAUSED, input_tokens=1800, output_tokens=120, cost=_COST),
+    ]
+
+
+def _risk_ack_checkpoint() -> list[SSEEvent]:
+    """单聊·风险确认卡 (ask_user card=risk_ack)：阻塞挂起，intent=risk_ack，
+    恰好 1 个 choice 多选 + options 1–10。"""
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("落地前请勾选要一并处理的风险："),
+        checkpoint_required(
+            checkpoint_id="cp_risk",
+            conversation_id=_CONV,
+            question="哪些风险要在本轮处理？",
+            context="未勾选的项将记入后续 backlog。",
+            questions=[
+                {
+                    "id": "q0",
+                    "prompt": "勾选要处理的风险",
+                    "kind": "choice",
+                    "multiple": True,
+                    "default": "",
+                    "options": [
+                        {
+                            "label": "[高] 密钥轮换",
+                            "detail": "生产密钥仍是默认值，泄露即全库失守",
+                            "recommended": True,
+                        },
+                        {"label": "[中] 备份校验", "detail": "近 30 天备份未做恢复演练"},
+                        {"label": "回滚演练"},
+                    ],
+                }
+            ],
+            intent="risk_ack",
+        ),
+        message_end(FinishReason.PAUSED, input_tokens=1900, output_tokens=140, cost=_COST),
+    ]
+
+
 def _team_preview_finalized() -> list[SSEEvent]:
     """团队预审薄预览【收口即终止】：多 Agent 首委派在 run_plan 后、首波前挂起，以
     ``message_end(finish_reason=paused)`` 收口。``pendingInteraction`` = team_preview，
@@ -339,6 +405,46 @@ def _team_preview_resolved_continue() -> list[SSEEvent]:
     ]
 
 
+def _decision_then_kill() -> list[SSEEvent]:
+    """决策后杀进程：settlement 已落、无终态 → fold 无 pending gate，status=running。
+
+    验收（回合恢复状态机收口）：重启投影不得出现待授权卡；对应 UI「已授权 · 执行中断」。
+    """
+    return [
+        *_team_preview_finalized()[:-1],
+        team_preview_resolved(checkpoint_id="tp1", decision="continue"),
+        run_started("r1", "w1"),
+        # 杀进程：无 message_end / 无新 gate
+    ]
+
+
+def _decision_then_second_gate_then_kill() -> list[SSEEvent]:
+    """决策后执行中二次挂起再杀：只投影新决策卡，旧 settlement 不产生中断态双显。"""
+    return [
+        *_team_preview_finalized()[:-1],
+        team_preview_resolved(checkpoint_id="tp1", decision="continue"),
+        run_started("r1", "w1"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="调研完成",
+            duration_ms=900,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        checkpoint_required(
+            checkpoint_id="cp-second",
+            conversation_id=_CONV,
+            question="调研结论你认吗？",
+            context="二次挂起",
+            intent="decision",
+        ),
+        message_end(FinishReason.PAUSED, input_tokens=2200, output_tokens=180, cost=_COST),
+    ]
+
+
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "approval_paused": ("审批：approval_required 暂停（无 message_end）", _approval_paused),
     "approval_resolved_continue": ("审批：通过后继续到 end_turn", _approval_resolved_continue),
@@ -347,9 +453,19 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "plan_review_finalized": ("结构化挂起：计划复核收口即终止（②，plan_review_required→message_end(paused)，单一冷路 resume）", _plan_review_finalized),
     "team_preview_finalized": ("团队预审：首波前挂起收口（finish_reason=paused）", _team_preview_finalized),
     "team_preview_resolved_continue": ("团队预审：开做后跑完首波", _team_preview_resolved_continue),
+    "decision_then_kill": (
+        "恢复收口：决策后杀进程 → fold 无待授权、status=running（已授权·执行中断）",
+        _decision_then_kill,
+    ),
+    "decision_then_second_gate_then_kill": (
+        "恢复收口：决策后二次挂起再杀 → 仅新决策卡 pending，无中断态双显",
+        _decision_then_second_gate_then_kill,
+    ),
     "debate_team_preview_finalized": ("辩论开工卡：主持人循环前挂起收口", _debate_team_preview_finalized),
     "single_agent_checkpoint": ("单聊：检查点 ask_user(blocking) 在时间线原位落 checkpoint 标记 + 暂停", _single_agent_checkpoint),
     "single_agent_checkpoint_finalized": ("单聊：检查点收口即终止（②，checkpoint_required→message_end(paused)，单一冷路 resume）", _single_agent_checkpoint_finalized),
     "single_agent_checkpoint_resolved": ("单聊：检查点 ask_user(blocking) 经 resume 续跑（checkpoint_resolved 清挂起→跑到 end_turn）", _single_agent_checkpoint_resolved),
     "single_agent_non_blocking_ask": ("单聊：非阻塞发问 question_posted 在时间线原位落 ask 标记、回合照常收尾", _single_agent_non_blocking_ask),
+    "proposal_pick_checkpoint": ("单聊：方案挑选卡 ask_user(card=proposal_pick) 挂起（intent=proposal_pick）", _proposal_pick_checkpoint),
+    "risk_ack_checkpoint": ("单聊：风险确认卡 ask_user(card=risk_ack) 挂起（intent=risk_ack）", _risk_ack_checkpoint),
 }

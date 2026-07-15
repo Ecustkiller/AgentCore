@@ -4,8 +4,10 @@ import {
 } from "@/hooks/useConversations";
 import { notifyError } from "@/lib/toast";
 import { api } from "@/services/api";
+import { provisionalConversationTitle } from "@/services/conversations";
 import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
 import { loadLatestWindow } from "@/services/messages";
+import { resolveDefaultPermissionPreset } from "@/services/permissionPreset";
 import type { OutgoingAttachment } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
 import { getActiveRuntime, useConversationStore } from "@/stores/conversation";
@@ -14,6 +16,7 @@ import { type Dispatch, type SetStateAction, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import type { PendingAttachment } from "./composerAttachments";
 import { dispatchBackgroundTask } from "./dispatchBackgroundTask";
+import { ensureAttachmentResident } from "./resideAttachment";
 
 export function useComposerSend({
   value,
@@ -63,26 +66,37 @@ export function useComposerSend({
       const intent = useFoldersStore.getState().draftWorkspaceIntent;
       const targetFolderId = intent.kind === "project" ? intent.folderId : null;
       // Project chats inherit workspace — never write session-level local_*.
-      // Quick cloud → null container. Quick local → default container root.
+      // Quick cloud (default) → null container. Quick local → default container root.
       let localContainerRootId: string | null = null;
       if (intent.kind === "quick_local") {
         localContainerRootId = await ensureDefaultContainerRoot();
       }
       try {
-        const conv = await api.post<{ id: string }>("/v1/conversations", {
+        const permissionPreset = await resolveDefaultPermissionPreset();
+        const conv = await api.post<{
+          id: string;
+          permission_preset?: string;
+        }>("/v1/conversations", {
           title: null,
           folder_id: targetFolderId,
           local_container_root_id: localContainerRootId,
+          permission_preset: permissionPreset,
         });
         conversationId = conv.id;
         upsertConversationFront({
           id: conv.id,
-          title: "新对话",
+          title: provisionalConversationTitle(trimmed),
           updatedAt: new Date().toISOString(),
           messageCount: 0,
           lastMessagePreview: null,
           folderId: targetFolderId,
           localContainerRootId,
+          permissionPreset:
+            (conv.permission_preset as
+              | "observe"
+              | "workspace"
+              | "full_trust"
+              | undefined) ?? permissionPreset,
         });
         useConversationStore.getState().switchConversation(conv.id);
         createdNew = true;
@@ -101,6 +115,38 @@ export function useComposerSend({
       }
     }
 
+    // 引用即驻留：在乐观气泡之前完成落盘/上传，失败则保留草稿附件。
+    const outgoing: OutgoingAttachment[] = [];
+    for (const a of pending) {
+      if (a.kind === "file" && (a.stagingId || a.workspacePath || a.binary)) {
+        const resided = await ensureAttachmentResident(conversationId, a);
+        if (!resided.ok) {
+          notifyError(new Error(resided.reason), "附件驻留失败");
+          return;
+        }
+        outgoing.push({
+          name: resided.name,
+          path: resided.workspacePath || a.path,
+          text: resided.binary ? "" : resided.text,
+          truncated: resided.truncated,
+          kind: "file",
+          binary: resided.binary,
+          workspace_path: resided.workspacePath || undefined,
+        });
+      } else {
+        outgoing.push({
+          name: a.name,
+          path: a.path,
+          text: a.text,
+          truncated: a.truncated,
+          kind: a.kind,
+          conversation_id: a.conversationId,
+          binary: a.binary,
+          workspace_path: a.workspacePath,
+        });
+      }
+    }
+
     const userMsgId = crypto.randomUUID();
     addMessage({
       id: userMsgId,
@@ -110,13 +156,14 @@ export function useComposerSend({
       executionId: null,
       isStreaming: false,
       attachments: pending.length
-        ? pending.map((a) => ({
+        ? pending.map((a, i) => ({
             id: a.id,
-            name: a.name,
-            path: a.path,
+            name: outgoing[i]?.name ?? a.name,
+            path: outgoing[i]?.path ?? a.path,
             truncated: a.truncated,
             kind: a.kind,
             conversationId: a.conversationId,
+            workspacePath: outgoing[i]?.workspace_path,
           }))
         : undefined,
     });
@@ -125,8 +172,9 @@ export function useComposerSend({
     closeMenu();
 
     if (isFirstMessage) {
-      const title = trimmed.length > 20 ? `${trimmed.slice(0, 20)}…` : trimmed;
-      patchConversationCache(conversationId, { title });
+      patchConversationCache(conversationId, {
+        title: provisionalConversationTitle(trimmed),
+      });
     }
 
     if (createdNew) {
@@ -136,15 +184,6 @@ export function useComposerSend({
     // Same React batch as the optimistic bubble above, so a canvas follow effect
     // armed here sees the new turn land.
     onDispatch?.();
-
-    const outgoing: OutgoingAttachment[] = pending.map((a) => ({
-      name: a.name,
-      path: a.path,
-      text: a.text,
-      truncated: a.truncated,
-      kind: a.kind,
-      conversation_id: a.conversationId,
-    }));
 
     await sendTurn({
       conversationId,

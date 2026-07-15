@@ -494,14 +494,14 @@ async def aclose_search_backend() -> None:
 
 
 async def probe_search_backend() -> tuple[bool, str] | None:
-    """Best-effort SearXNG reachability check, logged ✓/✗ for a startup line.
+    """Best-effort SearXNG reachability check (success → debug, failure → warning).
 
     Returns ``(ok, detail)``, or ``None`` when the active backend isn't SearXNG
     (nothing to probe). **Never raises** — a down search dependency must not break
-    app startup (``web_search`` just degrades). Surfaced at boot so a not-started /
-    unreachable SearXNG is visible immediately instead of only later as a (now
-    honest) breaker message mid-run. Uses a throwaway client against ``/healthz``
-    with the short connect deadline so the check itself can't hang startup.
+    app startup (``web_search`` just degrades). Unreachable / not-started SearXNG is
+    logged at warning so it stays visible at boot; the reachable success path is
+    debug-only (probe noise). Uses a throwaway client against ``/healthz`` with the
+    short connect deadline so the check itself can't hang startup.
     """
     backend = get_search_backend()
     if isinstance(backend, FallbackSearchBackend):
@@ -520,7 +520,7 @@ async def probe_search_backend() -> tuple[bool, str] | None:
         ok = False
         detail = f"{base} ({type(exc).__name__})"
     if ok:
-        logger.info("searxng.reachable", url=detail)
+        logger.debug("searxng.reachable", url=detail)
     else:
         logger.warning(
             "searxng.unreachable",
@@ -538,7 +538,7 @@ _SEARCH_CANARY_QUERY = "新闻"
 
 
 async def probe_search_results() -> tuple[bool, int] | None:
-    """Best-effort real-search canary, logged ✓/✗ for a startup line.
+    """Best-effort real-search canary (success → debug, failure → warning).
 
     Stronger than :func:`probe_search_backend` (which only checks ``/healthz``
     reachability): runs ONE real query and reports whether the engine pool actually
@@ -557,7 +557,7 @@ async def probe_search_results() -> tuple[bool, int] | None:
         return None
     ok = len(results) > 0
     if ok:
-        logger.info("searxng.canary_ok", result_count=len(results))
+        logger.debug("searxng.canary_ok", result_count=len(results))
     else:
         logger.warning(
             "searxng.canary_empty",

@@ -121,7 +121,7 @@ def is_deepseek_upstream(base_url: str) -> bool:
 
 
 def sim_native_tools(base_url: str) -> bool:
-    """DeepSeek supports native tool calling; Codex proxy needs text-JSON fallback."""
+    """DeepSeek supports native tool calling; other upstreams use text-JSON fallback."""
     return is_deepseek_upstream(base_url)
 
 

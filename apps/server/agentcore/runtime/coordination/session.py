@@ -6,6 +6,7 @@ Root-CEO only (Phase 2+). Lead nesting stays on the blocking path.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -20,6 +21,12 @@ logger = get_logger(__name__)
 # all_completed synthesis). Necessary decision points always get a slot; middle
 # independent completions may merge into one injection without an LLM call.
 DEFAULT_COORDINATION_BUDGET = 8
+MAX_COORDINATION_BUDGET = 16
+
+
+def coordination_budget_for_batch(node_count: int) -> int:
+    """Scale inject budget with batch size: ``max(8, nodes+4)``, capped at 16."""
+    return min(MAX_COORDINATION_BUDGET, max(DEFAULT_COORDINATION_BUDGET, node_count + 4))
 
 # Default per-worker wall-clock before a timeout *notification* (CEO decides; no auto-cancel).
 # Overridden by plan node ``timeout_ms`` → ``RunPolicy.timeout_s`` when present.
@@ -113,12 +120,18 @@ def should_enter_coordination(
     worker_count: int,
     finalize: bool,
     depth: int,
+    has_checkpoint: bool = False,
+    checkpoint_enabled: bool = False,
 ) -> bool:
     """Gate: ≥2 workers + root CEO + not finalize; opt out with ``coordinate=False``.
 
     Callers default ``coordinate`` to True when the LLM omits the arg; only an
     explicit false falls back to classic blocking. Solo / nested lead / finalize
     still never enter.
+
+    When the batch contains ``checkpoint_after`` nodes **and** the turn's checkpoint
+    gate is open, stay on classic blocking drive so durable plan_review cards fire.
+    Gate-off (evals / ``approvals_enabled=False``) leaves coordination unchanged.
 
     **Invariant B**: CEO arbitration (``resolve_escalation`` / ``awaiting=ceo``)
     is available iff a coordination session is active. Solo blocking escalate
@@ -130,6 +143,8 @@ def should_enter_coordination(
     if depth != 0:
         return False
     if finalize:
+        return False
+    if has_checkpoint and checkpoint_enabled:
         return False
     return worker_count >= 2
 
@@ -154,6 +169,9 @@ class CoordinationSession:
     )
     # Events already drained but not yet consumed by an LLM round (merge buffer).
     _pending: list[CoordinationEvent] = field(default_factory=list, repr=False)
+    # Wakes ``wait_events`` when snapshot/drain moves queue items into ``_pending``
+    # (otherwise a blocked ``queue.get`` would miss them until timeout).
+    _wake: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
     # First worker completion always forces a decision point.
     _saw_first_completion: bool = False
     # Per-worker wall-clock timers (notify-only; never auto-cancel).
@@ -362,32 +380,76 @@ class CoordinationSession:
         timeout: float | None = None,
         merge_idle: float = 0.05,
     ) -> list[CoordinationEvent]:
-        """Wait for at least one event; briefly coalesce follow-ups (cost merge)."""
-        if self._pending:
-            batch = self._pending
-            self._pending = []
-            return batch
+        """Wait for at least one event; briefly coalesce follow-ups (cost merge).
 
-        try:
-            first = await asyncio.wait_for(self._queue.get(), timeout=timeout)
-        except TimeoutError:
-            return []
+        Also consumes ``_pending`` (events drained by ``snapshot`` while this wait
+        was blocked). Drain sets ``_wake`` so we do not sit on an empty queue until
+        the full timeout.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = None if timeout is None else loop.time() + timeout
 
-        batch = [first]
-        # Short coalesce window so independent mid-wave completions can merge.
-        deadline = asyncio.get_running_loop().time() + merge_idle
         while True:
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                break
-            try:
-                nxt = await asyncio.wait_for(self._queue.get(), timeout=remaining)
-            except TimeoutError:
-                break
-            batch.append(nxt)
-            if nxt.kind is CoordinationEventKind.ALL_COMPLETED:
-                break
-        return batch
+            if self._pending:
+                batch = self._pending
+                self._pending = []
+                return batch
+
+            remaining = None if deadline is None else deadline - loop.time()
+            if remaining is not None and remaining <= 0:
+                return []
+
+            # Clear-then-recheck: avoid losing a wake that lands between clear and wait.
+            self._wake.clear()
+            if self._pending:
+                batch = self._pending
+                self._pending = []
+                return batch
+
+            get_task = asyncio.create_task(self._queue.get())
+            wake_task = asyncio.create_task(self._wake.wait())
+            done, pending_tasks = await asyncio.wait(
+                {get_task, wake_task},
+                timeout=remaining,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending_tasks:
+                task.cancel()
+            for task in pending_tasks:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+
+            if get_task in done and not get_task.cancelled():
+                try:
+                    first = get_task.result()
+                except (asyncio.CancelledError, Exception):
+                    first = None
+                if first is not None:
+                    batch = [first]
+                    if self._pending:
+                        batch.extend(self._pending)
+                        self._pending = []
+                    # Short coalesce window so independent mid-wave completions can merge.
+                    coalesce_deadline = loop.time() + merge_idle
+                    while True:
+                        left = coalesce_deadline - loop.time()
+                        if left <= 0:
+                            break
+                        try:
+                            nxt = await asyncio.wait_for(self._queue.get(), timeout=left)
+                        except TimeoutError:
+                            break
+                        batch.append(nxt)
+                        if nxt.kind is CoordinationEventKind.ALL_COMPLETED:
+                            break
+                    if self._pending:
+                        batch.extend(self._pending)
+                        self._pending = []
+                    return batch
+
+            # Woken by drain → loop and take ``_pending``. Pure timeout → empty.
+            if wake_task not in done and not self._pending:
+                return []
 
     def drain_nowait(self) -> list[CoordinationEvent]:
         batch = list(self._pending)
@@ -422,7 +484,7 @@ class CoordinationSession:
         )
 
     def _drain_queue_copy(self) -> list[CoordinationEvent]:
-        """Non-destructive peek is unavailable on Queue — drain into pending."""
+        """Non-destructive peek is unavailable on Queue — drain into pending + wake."""
         drained: list[CoordinationEvent] = []
         while True:
             try:
@@ -430,6 +492,8 @@ class CoordinationSession:
             except asyncio.QueueEmpty:
                 break
         self._pending.extend(drained)
+        if drained:
+            self._wake.set()
         return list(drained)
 
     @classmethod

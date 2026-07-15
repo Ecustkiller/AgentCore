@@ -43,6 +43,7 @@
                     <ui:Label class="section-title" text="运行" />
                     <ui:VisualElement class="row">
                         <ui:Button name="demo-button" class="btn accent grow" text="离线 Demo" />
+                        <ui:Button name="show-button" class="btn grow" text="节目" />
                         <ui:Button name="create-run-button" class="btn primary grow" text="新建" />
                     </ui:VisualElement>
                     <ui:Label class="section-subtitle" text="剧本包" />
@@ -142,6 +143,62 @@
         <!-- Boot / bake overlay (hidden after Offline demo or Live resume). -->
         <ui:VisualElement name="boot-overlay" class="boot-overlay">
             <ui:Label name="boot-status-label" class="boot-status" text="正在加载小镇…" />
+        </ui:VisualElement>
+
+        <!-- Programme mode chrome (five faces). Hidden until 节目入口 / ?episode=. -->
+        <ui:VisualElement name="show-hud" class="show-hud hidden" picking-mode="Ignore">
+            <ui:VisualElement name="show-face-landing" class="show-face show-face-landing hidden">
+                <ui:Label name="landing-season" class="landing-season" text="" />
+                <ui:Label name="landing-title" class="landing-title" text="" />
+                <ui:Label name="landing-tagline" class="landing-tagline" text="" />
+                <ui:Button name="landing-continue" class="show-btn primary" text="继续观看" />
+                <ui:Button name="landing-exit" class="show-btn ghost" text="退出节目" />
+            </ui:VisualElement>
+            <ui:VisualElement name="show-face-playback" class="show-face show-face-playback hidden" picking-mode="Ignore">
+                <ui:VisualElement class="playback-top" picking-mode="Ignore">
+                    <ui:Label name="playback-segment" class="playback-segment" text="" />
+                    <ui:Label name="playback-rule" class="playback-rule" text="" />
+                </ui:VisualElement>
+                <ui:Label name="playback-caption" class="playback-caption" text="" picking-mode="Ignore" />
+                <ui:VisualElement class="playback-bottom">
+                    <ui:VisualElement class="monologue-row">
+                        <ui:Label name="monologue-who" class="monologue-who" text="" />
+                        <ui:Label name="monologue-text" class="monologue-text" text="" />
+                        <ui:Button name="monologue-cycle" class="show-btn tiny" text="切换独白" />
+                    </ui:VisualElement>
+                    <ui:Label name="relation-bar" class="relation-bar" text="" />
+                    <ui:VisualElement class="playback-controls">
+                        <ui:Button name="playback-pause" class="show-btn" text="暂停" />
+                        <ui:Button name="playback-speed" class="show-btn" text="1×" />
+                        <ui:Button name="playback-free" class="show-btn" text="自由机位" />
+                        <ui:Button name="playback-director" class="show-btn" text="回导播" />
+                        <ui:Button name="playback-exit" class="show-btn ghost" text="退出" />
+                    </ui:VisualElement>
+                </ui:VisualElement>
+            </ui:VisualElement>
+            <ui:VisualElement name="show-face-quiz" class="show-face show-face-quiz hidden">
+                <ui:Label name="quiz-focus" class="quiz-focus" text="" />
+                <ui:Label name="quiz-question" class="quiz-question" text="" />
+                <ui:Label name="quiz-hint" class="quiz-hint" text="" />
+                <ui:VisualElement name="quiz-options" class="quiz-options" />
+            </ui:VisualElement>
+            <ui:VisualElement name="show-face-episode-end" class="show-face show-face-episode-end hidden">
+                <ui:Label name="end-title" class="end-title" text="本期结束" />
+                <ui:Label name="end-quiz-result" class="end-quiz-result" text="" />
+                <ui:Label name="end-monologue" class="end-monologue" text="" />
+                <ui:Label class="end-highlights-label" text="本集高光" />
+                <ui:VisualElement name="end-highlights" class="end-highlights" />
+                <ui:Label name="end-teaser" class="end-teaser" text="" />
+                <ui:VisualElement class="end-actions">
+                    <ui:Button name="end-season" class="show-btn ghost" text="季末（占位）" />
+                    <ui:Button name="end-exit" class="show-btn" text="退出节目" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+            <ui:VisualElement name="show-face-season-end" class="show-face show-face-season-end hidden">
+                <ui:Label class="season-end-title" text="季末" />
+                <ui:Label class="season-end-body" text="本季高光片 · 同分叉 · 下季预告 — 第一季占位" />
+                <ui:Button name="season-back" class="show-btn primary" text="返回期结" />
+            </ui:VisualElement>
         </ui:VisualElement>
     </ui:VisualElement>
 </ui:UXML>

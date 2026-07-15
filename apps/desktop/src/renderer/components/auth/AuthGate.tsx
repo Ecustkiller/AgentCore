@@ -82,9 +82,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     };
   }, [runBootstrap]);
 
-  // 认证成功后预热桌面默认本地容器根（决策 #11 / 工作区对称化 D1a），使首个裸聊首发即可
-  // 携带容器根、由服务端懒建本地文件夹——此刻只授权 `~/Documents/AgentCore`、不建 Folder。
-  // 非桌面 / 失败时 no-op，不阻断渲染。
+  // 认证成功后预热桌面默认本地容器根（§八.7：仅服务显式本机草稿 / 本地项目创建），
+  // 摊薄用户点「本机草稿」时的授权等待。非桌面 / 失败时 no-op，不阻断渲染。
   useEffect(() => {
     if (status === "authenticated") void ensureDefaultContainerRoot();
   }, [status]);

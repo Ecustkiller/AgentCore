@@ -11,7 +11,12 @@ import type { components } from "@/types/api.generated";
 
 type Schemas = components["schemas"];
 
-/** The settings view of the user's key (status dot + last-4); never the plaintext. */
+/**
+ * The settings view of the user's key (status dot + last-4); never the plaintext.
+ *
+ * `free_tier_active`（§每月免费额度）: true when the user has no BYOK key ∧ platform
+ * free tier is on ∧ platform credentials exist — keyless users can chat on free quota.
+ */
 export type LlmKeyStatus = Schemas["LlmKeyStatusResponse"];
 
 export type SetLlmKeyInput = Schemas["SetLlmKeyRequest"];

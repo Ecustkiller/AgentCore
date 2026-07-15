@@ -24,8 +24,10 @@ alwaysApply: false
 uv run python scripts/log_timeline.py <conversation_id>
 uv run python scripts/log_timeline.py --trace <trace_id>
 uv run python scripts/log_timeline.py --recent
-uv run python scripts/log_stats.py
+uv run python scripts/log_stats.py        # 默认近 7 天 + 排除 eval/test 合成流量；--all 全量、--since 24h 窗口
 ```
+
+日志按 20MB 轮转（`dev.jsonl.1…5`）；脚本默认合并读备份，直接 rg 主文件可能漏旧数据。
 
 → 字段详解 / 调试技巧 / 生产同步：见 [对话日志分析指南](/docs/05-平台与运维/对话日志分析指南.md)
 

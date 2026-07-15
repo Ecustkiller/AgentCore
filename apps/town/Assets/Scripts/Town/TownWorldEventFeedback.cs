@@ -223,8 +223,7 @@ namespace AgentTown.Town
             bgRt.offsetMin = Vector2.zero;
             bgRt.offsetMax = Vector2.zero;
 
-            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
-                ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
+            Font font = TownFonts.UiFont;
 
             var titleGo = new GameObject("Title");
             titleGo.transform.SetParent(go.transform, false);

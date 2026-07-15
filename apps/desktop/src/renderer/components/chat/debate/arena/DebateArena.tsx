@@ -78,6 +78,7 @@ export function DebateArena({
             closings={model.closings}
             execution={execution}
             messageId={messageId}
+            layoutMode={effectiveLayout}
           />
         )}
         {model.settled && (

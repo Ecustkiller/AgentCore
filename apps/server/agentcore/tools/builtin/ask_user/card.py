@@ -1,0 +1,109 @@
+"""ask_user ``card`` parameter — typed confirmation cards (proposal_pick / risk_ack)."""
+
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from agentcore.runtime.checkpoints import AskCheckpointIntent
+
+AskUserCard = Literal["proposal_pick", "risk_ack"]
+
+CARD_KINDS: frozenset[str] = frozenset({"proposal_pick", "risk_ack"})
+
+# risk_ack risk-list may be longer than a normal choice question.
+_RISK_ACK_MAX_OPTIONS = 10
+_PROPOSAL_PICK_MIN_OPTIONS = 2
+_PROPOSAL_PICK_MAX_OPTIONS = 6
+_RISK_ACK_MIN_OPTIONS = 1
+
+
+def parse_card(raw: Any) -> AskUserCard | None | str:
+    """Return a known card, ``None`` when omitted/blank, or an error string when unknown."""
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    if text not in CARD_KINDS:
+        return (
+            f"未知 card={text!r}。仅支持 proposal_pick（方案挑选）或 "
+            "risk_ack（风险确认勾选）。"
+        )
+    return text  # type: ignore[return-value]
+
+
+def card_overrides_intent(card: AskUserCard) -> AskCheckpointIntent:
+    """Explicit ``card`` becomes the checkpoint intent (overrides transcript derivation)."""
+    return card
+
+
+def card_max_options(card: AskUserCard | None) -> int:
+    if card == "risk_ack":
+        return _RISK_ACK_MAX_OPTIONS
+    return _PROPOSAL_PICK_MAX_OPTIONS
+
+
+def validate_card_shape(
+    card: AskUserCard,
+    *,
+    blocking: bool,
+    questions: list[dict[str, Any]],
+) -> str | None:
+    """Return a model-facing error when ``card`` + questions are non-compliant; else None."""
+    if not blocking:
+        return (
+            f"card={card} 仅支持阻塞发问（blocking=true 或缺省）。"
+            "非阻塞路径（blocking=false）请去掉 card，或改用 blocking=true。"
+        )
+
+    if len(questions) != 1:
+        if card == "proposal_pick":
+            return (
+                "card=proposal_pick 要求恰好 1 个 question（kind=choice、multiple=false、"
+                "options 2–6 个候选方案）。请改成单题单选后再发。"
+            )
+        return (
+            "card=risk_ack 要求恰好 1 个 question（kind=choice、multiple=true、"
+            "options 1–10 条风险项）。请改成单题多选后再发。"
+        )
+
+    q = questions[0]
+    kind = str(q.get("kind") or "").strip() or "choice"
+    options = q.get("options") if isinstance(q.get("options"), list) else []
+    multiple = bool(q.get("multiple") or False)
+
+    if card == "proposal_pick":
+        if kind != "choice":
+            return (
+                "card=proposal_pick 的 question 必须 kind=choice（从候选方案里挑一个）。"
+            )
+        if multiple:
+            return (
+                "card=proposal_pick 必须 multiple=false（单选一个方案）。"
+                "若要勾选多项风险，请改用 card=risk_ack。"
+            )
+        n = len(options)
+        if n < _PROPOSAL_PICK_MIN_OPTIONS or n > _PROPOSAL_PICK_MAX_OPTIONS:
+            return (
+                f"card=proposal_pick 要求 options 数量 {_PROPOSAL_PICK_MIN_OPTIONS}–"
+                f"{_PROPOSAL_PICK_MAX_OPTIONS}（当前 {n}）。"
+                "用于「N 个候选方案挑一个」。"
+            )
+        return None
+
+    # risk_ack
+    if kind != "choice":
+        return "card=risk_ack 的 question 必须 kind=choice（勾选要处理的风险项）。"
+    if not multiple:
+        return (
+            "card=risk_ack 必须 multiple=true（多选勾选风险清单）。"
+            "若要单选一个方案，请改用 card=proposal_pick。"
+        )
+    n = len(options)
+    if n < _RISK_ACK_MIN_OPTIONS or n > _RISK_ACK_MAX_OPTIONS:
+        return (
+            f"card=risk_ack 要求 options 数量 {_RISK_ACK_MIN_OPTIONS}–"
+            f"{_RISK_ACK_MAX_OPTIONS}（当前 {n}）。"
+            "用于「问题/风险清单勾选要处理哪些」。"
+        )
+    return None

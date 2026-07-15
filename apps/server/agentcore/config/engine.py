@@ -21,6 +21,11 @@ class EngineSettings(BaseModel):
     engine_convergence_spin_rounds: int = 3
     engine_finish_guard_max_reworks: int = 2
 
+    # Captain (CEO) ReAct ceiling — higher than chat default (16) because coordination
+    # mode (team events, synthesis, follow-up delegate for audit/revision) burns rounds.
+    # Workers keep agent.fast/strong profiles; 0 = inherit chat profile unchanged.
+    engine_captain_max_rounds: int = 24
+
     engine_tool_clear_keep_recent: int = 4
     engine_tool_clear_min_chars: int = 2000
 

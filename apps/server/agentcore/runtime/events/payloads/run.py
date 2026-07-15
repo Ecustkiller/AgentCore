@@ -62,6 +62,8 @@ class RunStartedPayload(WirePayload):
     stance: Stance | None = absent()
     group: str | None = absent()
     round: int | None = absent()
+    # 辩论续写语义方 key（质询 / 结辩 / 续轮）；缺字段（老 journal）→ 前端按 stance / sides 回退。
+    side_key: str | None = absent()
     replaces_run_id: str | None = absent()
 
 

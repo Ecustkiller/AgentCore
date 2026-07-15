@@ -143,6 +143,7 @@ class WorkspaceChannel:
         args: dict[str, Any],
         *,
         timeout: float | None = None,
+        root_id: str | None = None,
     ) -> Any:
         """Emit the op, await the desktop's result, and return it (or raise).
 
@@ -155,22 +156,27 @@ class WorkspaceChannel:
         A long-running ``execute`` passes its own (code timeout + slack) so the
         desktop's execution limit stays authoritative and a legal long run is not
         cut off by the flat file-op deadline (双模式工作区 P2d 执行门).
+
+        ``root_id`` overrides the channel's bound root for this one op (W3 session
+        read-only mounts under ``external/<alias>/``); omit to use the workspace
+        binding root. Does not change the conversation workspace binding contract.
         """
         op_name = str(op)
         request_id = new_id()
         deadline = self.timeout_seconds if timeout is None else timeout
+        rid = self.root_id if root_id is None else root_id
         try:
             result = await self.registry.suspend(
                 request_id,
                 self.conversation_id,
                 kind=InteractionKind.CLIENT_TOOL,
-                payload={"root_id": self.root_id, "op": op_name, "args": args},
+                payload={"root_id": rid, "op": op_name, "args": args},
                 timeout=deadline,
                 on_suspended=lambda: self.sink.emit(
                     workspace_op_required(
                         request_id=request_id,
                         conversation_id=self.conversation_id,
-                        root_id=self.root_id,
+                        root_id=rid,
                         op=op_name,
                         args=args,
                     )

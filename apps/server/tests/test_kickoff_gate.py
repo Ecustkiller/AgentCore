@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from agentcore.core.types import AutonomyPolicy, ToolEffect
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.checkpoints import CheckpointDecision
+from agentcore.runtime.delegate.preview import should_kickoff as delegate_should_kickoff
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.facts import TurnFactLog, current_fact_log
 from agentcore.runtime.interaction import InteractionRegistry
@@ -20,7 +21,6 @@ from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunSpec
 from agentcore.runtime.suspension import TeamPreviewSuspension, captain_transcript
 from agentcore.tools.builtin.debate import DebateTool
-from agentcore.tools.builtin.delegate.preview import should_kickoff as delegate_should_kickoff
 from agentcore.tools.registry import ToolRegistry
 from tests.delegate.conftest import Provider, ctx, tool_durable
 
@@ -85,6 +85,45 @@ def test_delegate_trigger_rules_unchanged():
         )
         is True
     )  # capability half only
+
+
+def test_checkpoint_after_yields_plan_preview_half():
+    """B2: checkpoint_after in batch → plan half off; capability half independent."""
+    with_cp = _plan(
+        RunSpec(run_id="r1", task="提纲", role="写作", checkpoint_after=True),
+        RunSpec(run_id="r2", task="全文", role="写作", depends_on=["r1"]),
+    )
+    assert should_preview_delegate_plan(with_cp, finalize=False) is False
+    # Capability auth still drives kickoff when local gate is on.
+    assert (
+        should_kickoff(
+            plan_preview=False,
+            local_gate=True,
+            autonomy=AutonomyPolicy.FIRST_GRANT,
+        )
+        is True
+    )
+    assert (
+        delegate_should_kickoff(
+            with_cp, finalize=False, local_gate=True, autonomy=AutonomyPolicy.FIRST_GRANT
+        )
+        is True
+    )
+    # No local gate + checkpoint batch → no kickoff card at all.
+    assert (
+        delegate_should_kickoff(
+            with_cp, finalize=False, local_gate=False, autonomy=AutonomyPolicy.FIRST_GRANT
+        )
+        is False
+    )
+    # Debate-marked node without checkpoint still previews.
+    debate_only = _plan(RunSpec(run_id="r1", task="辩", role="正方", stance="应推广"))
+    assert should_preview_delegate_plan(debate_only, finalize=False) is True
+    # Debate-marked + checkpoint_after → plan half still yields.
+    debate_cp = _plan(
+        RunSpec(run_id="r1", task="辩", role="正方", stance="应推广", checkpoint_after=True)
+    )
+    assert should_preview_delegate_plan(debate_cp, finalize=False) is False
 
 
 def test_debate_kickoff_summary_shape():
@@ -290,12 +329,24 @@ async def test_debate_resume_stop_continue_adjust():
     assert cont.output == "ran"
     assert captured[-1]["skip_kickoff"] is True
     assert captured[-1]["arguments"]["motion"] == "原命题"
+    assert "_kickoff_ask" not in captured[-1]["arguments"]
 
+    cont_note = await tool.resume_after_kickoff(
+        decision=CheckpointDecision.CONTINUE,
+        note="最关心成本谁买单",
+        arguments=args,
+    )
+    assert cont_note.output == "ran"
+    assert captured[-1]["arguments"]["motion"] == "原命题"
+    assert captured[-1]["arguments"]["_kickoff_ask"] == "最关心成本谁买单"
+
+    # ADJUST 历史语义：与 CONTINUE+note 同构（嘱咐注入），不再覆写 motion。
     adj = await tool.resume_after_kickoff(
         decision=CheckpointDecision.ADJUST, note="改成新命题", arguments=args
     )
     assert adj.output == "ran"
-    assert captured[-1]["arguments"]["motion"] == "改成新命题"
+    assert captured[-1]["arguments"]["motion"] == "原命题"
+    assert captured[-1]["arguments"]["_kickoff_ask"] == "改成新命题"
 
 
 async def test_delegate_full_auto_multi_skips_card():

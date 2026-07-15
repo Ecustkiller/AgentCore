@@ -137,15 +137,15 @@ async def maintain_user_memory(
     today: str = "",
     section_cap: int | None = None,
     max_topic_files: int | None = None,
-    project_id: str | None = None,
+    folder_id: str | None = None,
     collect_items: list[MemoryUpdateItem] | None = None,
 ) -> bool:
     """Consolidate durable knowledge from `messages` into the user's memory folders.
 
     `messages` is the recent conversation window (reconciled against existing memory).
     `today` (ISO date) enables temporal refresh; `section_cap` bounds bullets per section;
-    `max_topic_files` caps on-demand topic notes per scope. `project_id` is the
-    conversation's folder (None for a bare chat): it unlocks the PROJECT scope so a fact
+    `max_topic_files` caps on-demand topic notes per scope. `folder_id` is the
+    conversation's project (None for a bare chat): it unlocks the PROJECT scope so a fact
     true only in this project lands in the project layer instead of polluting global memory
     (Agent记忆与知识系统 §1.5).
 
@@ -167,18 +167,18 @@ async def maintain_user_memory(
         global_topics = {m.path for m in await store.list(user_id) if is_topic_path(m.path)}
         project_topics: set[str] = set()
         project_profile = ""
-        if project_id:
+        if folder_id:
             project_topics = {
-                m.path for m in await store.list(user_id, scope=project_id) if is_topic_path(m.path)
+                m.path for m in await store.list(user_id, scope=folder_id) if is_topic_path(m.path)
             }
-            project_profile = await store.load(user_id, CORE_MEMORY_FILE, scope=project_id)
+            project_profile = await store.load(user_id, CORE_MEMORY_FILE, scope=folder_id)
         current_profile = await store.load(user_id, CORE_MEMORY_FILE)
         current_preferences = await store.load(user_id, PREFERENCES_MEMORY_FILE)
         extract_input = MemoryExtractInput(
             user_id=user_id,
             current_profile=current_profile,
             current_preferences=current_preferences,
-            project_id=project_id,
+            folder_id=folder_id,
             current_project_memory=project_profile,
             messages=messages,
             today=today,
@@ -203,8 +203,8 @@ async def maintain_user_memory(
         # Existing topics per scope for the cap. Only add the project key when there IS a
         # project — otherwise ``{None: ..., None: ...}`` would collapse and lose the global set.
         existing_by_scope: dict[MemoryScope, set[str]] = {None: global_topics}
-        if project_id:
-            existing_by_scope[project_id] = project_topics
+        if folder_id:
+            existing_by_scope[folder_id] = project_topics
         ops = _enforce_topic_cap(ops, existing_by_scope, max_topic_files)
         # Group by the (scope, file) target so each note is loaded/applied/saved once and a
         # per-file CAS only fires for notes that actually moved.

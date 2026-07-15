@@ -2,6 +2,7 @@ import {
   hasParallelTimeline,
   parallelTimelineMetricsSummary,
 } from "@/components/chat/ParallelTimeline";
+import { captainSynthesisPreviewText } from "@/components/chat/teamSynthesisPhase";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { useTurnAudit } from "@/hooks/useTurnAudit";
 import { buildInjectGraphOverlay } from "@/lib/causalInject";
@@ -224,6 +225,14 @@ export function GraphView({
     [execution, captainRun],
   );
 
+  const teamSynthesisPreview = useActiveExecField(
+    (rt) => rt.teamSynthesisPreview,
+  );
+  const captainSynthesisPreview = useMemo(() => {
+    if (finalAnswer || captainStatus !== "running") return "";
+    return captainSynthesisPreviewText(teamSynthesisPreview);
+  }, [finalAnswer, captainStatus, teamSynthesisPreview]);
+
   const injectOverlay = useMemo(
     () =>
       caps.auditInject
@@ -264,6 +273,7 @@ export function GraphView({
             captainRun,
             captainStatus,
             finalAnswer,
+            captainSynthesisPreview,
             taskMessage,
             activateNode,
             groups,
@@ -285,6 +295,7 @@ export function GraphView({
       captainRun,
       captainStatus,
       finalAnswer,
+      captainSynthesisPreview,
       taskMessage,
       activateNode,
       groups,

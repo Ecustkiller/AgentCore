@@ -12,9 +12,9 @@ Single-source discipline:
     member here (guarded by ``tests/test_error_codes.py``).
   - The SSE emitters (pipeline / conversation service / engine / handoff) pass
     members here to ``error_event`` rather than literals.
-  - Frontend mirror: ``packages/contract-types/src/errorCodes.ts`` lists the same
-    codes for both desktop and mobile (hand-kept in sync — there is no codegen
-    for this yet; keep the two files aligned when adding a code).
+  - Frontend catalog: ``pnpm gen:types`` dumps this enum into
+    ``packages/contract-types/src/errorCodes.generated.ts`` (policy overlays such
+    as key-config / non-retriable stay hand-written in ``errorCodes.ts``).
 
 Grouping below is by ORIGIN, not HTTP status.
 """
@@ -49,6 +49,7 @@ class ErrorCode(StrEnum):
     MFA_SETUP_REQUIRED = "MFA_SETUP_REQUIRED"
     RATE_LIMITED = "RATE_LIMITED"
     QUOTA_EXCEEDED = "QUOTA_EXCEEDED"
+    FREE_TIER_EXHAUSTED = "FREE_TIER_EXHAUSTED"  # monthly free tier spent (429 + BYOK CTA)
 
     # ── LLM provider (DeepSeek / BYOK) ───────────────────────────────────
     LLM_ERROR = "LLM_ERROR"

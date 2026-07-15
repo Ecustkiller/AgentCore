@@ -157,77 +157,15 @@ skip_if:
 
 引擎已定（**G1 ✅ 自研**）。**通用画布层**够用即止（§五.2），**AgentCore 差异层**是护城河（`agentNode` / `artifactCard` 原生一等形状，非挂 `customData`）；`schemaVersion` 是 scene 迁移后悔药（§七）。**brief 不做原生形状**——= 当前选区或 `frame`（§九）。
 
-### 6.1 分层与模块地图
+### 6.1 分层与模块
 
-引擎按「**纯核心 → 有状态编排 → DOM 浮层 → React 壳 → 宿主页 → AI 通道**」分层；越靠上越纯、越好测。
+引擎按「**纯核心 → 有状态编排 → DOM 浮层 → React 壳 → 宿主页 → AI 通道**」分层，越靠下越纯、越好测；模块清单与各自职责 → 见代码 `apps/desktop/src/renderer/whiteboard/` + `services/board*.ts`（文件名即职责）。单文件读不出的要点：
 
-```mermaid
-flowchart TD
-  subgraph host["宿主层 (pages / services)"]
-    Page["WhiteboardCanvasPage.tsx<br/>加载/防抖autosave/AI命令栏/M3贴源·crystallize"]
-    Appliers["services/boardOps.ts<br/>AI applier 注册表"]
-    Turn["services/boardTurn.ts<br/>发起回合/选区·实现·迭代 prompt"]
-    Prog["services/boardProgress.ts<br/>活run树→瞬时浮层(纯投影)"]
-    Cryst["services/boardCrystallize.ts<br/>终态run→持久卡(纯投影)"]
-  end
-  subgraph shell["React 壳"]
-    Canvas["WhiteboardCanvas.tsx<br/>工具栏/样式面板/右键菜单/生命周期"]
-  end
-  subgraph engine["有状态编排"]
-    Eng["engine.ts WhiteboardEngine<br/>场景/视口/指针状态机/历史/重绘调度"]
-    Txt["textEditor.ts<br/>文本浮层 (DOM textarea)"]
-  end
-  subgraph pure["纯核心 (无副作用 / 可单测)"]
-    Ops["ops.ts applyBoardOps<br/>AI BoardOp→场景"]
-    Sel["selectionOps.ts<br/>编组/层级/对齐分布/样式/锁定/微移/复制"]
-    Snap["snap.ts<br/>拖拽边·中线吸附 + 参考线"]
-    Lay["layout.ts<br/>网格自动布局"]
-    Free["freedrawSmooth.ts<br/>perfect-freehand 手绘平滑"]
-    Geo["geometry.ts<br/>坐标变换/命中(含旋转)/bbox/相交"]
-    Render["render.ts renderScene<br/>Canvas2D 绘制(旋转/透明度/锁标) + 选择装饰"]
-    Clone["clone.ts<br/>深拷贝"]
-    Hist["history.ts<br/>快照式撤销/重做"]
-    Scene["scene.ts<br/>序列化/解析"]
-    Colors["colors.ts<br/>主题 token→调色板/色板"]
-    Types["types.ts 场景模型 + 常量"]
-  end
-  Page --> Canvas --> Eng
-  Page --> Appliers
-  Page --> Turn
-  Page --> Prog & Cryst
-  Prog -.setOverlay.-> Eng
-  Cryst -.addElements.-> Eng
-  Eng --> Txt
-  Eng --> Ops & Sel & Geo & Render & Clone & Hist & Snap & Lay & Free
-  Page --> Scene
-  Appliers -.board_op_required.-> Page
-```
-
-| 模块 | 层 | 职责 | 关键点（代码外信息） |
-|---|---|---|---|
-| `types.ts` | 纯 | `SceneElement` 场景模型（含 `rotation` / `opacity` / `locked` / `textAlign`；M3 原生形状字段 `runStatus` / `runId` / `role` / `artifactKind` / `ref` / `title`）、`RunVisualStatus`、`Viewport`、`Tool`、`WhiteboardApi`、缩放/版本常量 | `SceneElement` 是**单一接口按 `type` 判别**（非严格联合），MVP 取紧凑；`schemaVersion` 是每元素迁移后悔药；M3 字段对通用形状是可选噪音、仅 `agentNode`/`artifactCard` 读 |
-| `geometry.ts` | 纯 | world↔screen 变换、`elementBox`、`hitTestElement`、`boxesIntersect`、`unionBox`、`arrowEndpoints`、`isLinear` | 命中容差按 `1/zoom` 缩放；旋转元素命中**反旋**回正交框再测；箭头/直线（linear）端点由绑定元素**实时**算并**裁到框边**（非中心）|
-| `clone.ts` | 纯 | `cloneElement` / `cloneElements` 深拷贝 | 深拷可变嵌套字段（`points` / `groupIds` / `start` / `end`），杜绝历史与实时场景**别名共享** |
-| `history.ts` | 纯 | 快照栈 `History`（undo/redo，limit 100） | **整数组快照**（非逆操作）；push/undo/redo 各自再 `cloneElements`，快照永不被后续 mutate 污染 |
-| `ops.ts` | 纯 | `applyBoardOps`：AI 的 `add_node/connect/move/set_text/delete/group` → 场景 | 批内 `ref→id` 解析；删元素**连带删**悬空箭头；不 mutate 入参 |
-| `selectionOps.ts` | 纯 | `withGroup/reorder/reorderStep/align/distribute/applyStyle/setGroup/clearGroup/setLocked/unlockAll/nudge/copyWithOffset` | 全是 `(elements, selected, …)→新数组`；动过的元素深拷，未动的保留引用（配合 `History` 深拷不别名）；`align`(≥2)/`distribute`(≥3) 按选区整体 bbox 对齐/匀距，平移复用 `shift`（箭头绝对点一并移）；`applyStyle` 走 `StylePatch`（颜色/线宽/线型/文本对齐/透明度，`null` 清回默认）|
-| `snap.ts` | 纯 | `computeMoveSnap`：拖拽时选区 bbox 的边/中线吸附到邻近未选元素 | 阈值 8 世界单位；返回吸附后的 `dx/dy` + 参考线段（引擎据此画 guides，松手即清）|
-| `layout.ts` | 纯 | `layoutGrid`：选区按左→右、上→下网格重排（锚定选区左上、保尺寸）| 宿主侧布局助手（§七「AI 只产结构、宿主算坐标」）；列数缺省 `⌈√n⌉`，箭头绝对点一并移 |
-| `freedrawSmooth.ts` | 纯 | `smoothFreedraw`：手绘落点→`perfect-freehand` 平滑轮廓多边形（就地改 `points` + bbox）| §五.2「借库不重造」**已落地**（dep `perfect-freehand`）；落笔结束时调用，极短笔画跳过 |
-| `render.ts` | 纯 | `renderScene`（视口变换下重绘 + 屏幕空间选择装饰 / 吸附参考线）、`handlePositions`、`selectionHandlesScreen`、`drawArtifactCard` | 元素在 world 变换下画，选择框/手柄在 screen 空间画求 1px 锐利；非线性元素按 `rotation` 绕中心旋转 + `opacity` 整体透明（一层 save/restore 包裹），`locked` 画锁标；`text` 按 `textAlign` 排版；网格点 `step<8` 不画；描边按 `strokeWidth`/`strokeStyle`（虚线步长随宽缩放、箭头头部恒实线），元素循环外层 save/restore 兜底 dash 不漏给选择框；旋转元素的选择框/手柄随之旋转；**M3 原生形状**：`agentNode` 按 `runStatus` 取强调色 + 状态点画**角色状态卡**，`artifactCard` 走 `drawArtifactCard` 画**产物卡**（标题 + `clampLine` 截断的正文），二者复用同一 `RunVisualStatus`→调色板映射（与浮层一致） |
-| `colors.ts` | 纯 | `readPalette` / `readSwatches`：从 DOM 读语义 token | 全程用 `@agentcore/design-tokens`，无硬编码色；SSR/无 DOM 有 fallback |
-| `images.ts` | DOM | `ImageCache`（异步解码缓存，供 render 拉解码后 `<img>`）+ `loadImageForImport`（粘贴 / 拖入 / 工具栏选图 → 限尺寸 data URL） | `image` 元素的像素归宿：渲染同步、解码异步（未就绪画占位 + onLoad 触发重绘）；导入按 `MAX_IMAGE_DIM` 降采样限库内体积 |
-| `scene.ts` | 纯 | `serializeScene` / `parseScene` 持久化格式 | 解析做**字段级 normalize**（含 image `src`、`strokeWidth`/`strokeStyle`、`rotation`/`opacity`/`locked`/`textAlign`，非法枚举值丢弃）；未知/旧格式（含旧 Excalidraw blob）→**空画布**，dev 期不做兼容迁移 |
-| `textEditor.ts` | DOM | `TextEditor`：文本编辑浮层（隐藏 `<textarea>`） | 自给自足的 DOM 关注点，通过 `TextEditHost` 接口回调；**不**碰 elements/history，commit 把文本交还引擎 |
-| `engine.ts` | 编排 | `WhiteboardEngine`：场景/视口/选中/指针状态机/键盘/历史/重绘调度 + 橡皮 / 图片导入(粘贴·拖入·选图) / 锁定 / 网格布局 / `rasterizeElements`，向纯核心**委托**；**M3**：`setOverlay` / `addElements` / `getSelectionBounds` / `hasSelectedType` | 唯一持有可变 `elements`+`history` 的地方；`commit()` 统一「快照→换场景→通知」；移动选区时调 `snap` 吸附、落笔结束调 `smoothFreedraw`；Alt 拖拽=就地复制再拖；单选缩放手柄按 Shift 锁宽高比（角柄锚对角、边柄按中心），多选缩放按选区并集框等比缩放；**M3 浮层**：`setOverlay` 存一组**瞬时** `SceneElement` 画在主场景之上（不入 `elements`/历史/序列化/命中），`addElements` 把 crystallize 产物作**一次历史步**追加进场景（可撤销），`getSelectionBounds`/`hasSelectedType` 供宿主取锚框 / 判断选中产物卡 |
-| `transform.ts` / `gestures.ts` / `keymap.ts` / `layoutDagre.ts` | 纯 | 从 `engine` 抽出的无状态子模块：手柄缩放 / 多选等比缩放 / 旋转拖拽（`transform`）、框选 / 拖创 / 箭头端点拖拽（`gestures`）、快捷键 dispatch 表（`keymap`）、DAG 自动布局（`layoutDagre`，箭头 = 边，`@dagrejs/dagre`）| 引擎只调用、不持状态；与 snap / selectionOps 同族纯模块 |
-| `WhiteboardCanvas.tsx` | React 壳 | 工具栏（含橡皮 / 区域框 / 「插入图片」选图）/缩放（含缩放至选区）/样式面板（描边/填充/线宽/线型/文本对齐/透明度）/右键菜单（复制粘贴再制/层级/**对齐分布**/编组/网格布局/导出选区 PNG/锁定·解锁·解锁全部）/选区浮动条（整理选区 + **让团队实现** + **迭代** + 网格布局 + 导出 PNG）/swatch；引擎生命周期与回调桥（含 `getSelectionBounds`/`setOverlay`/`addElements`）| 薄壳，`key={boardId}` 重挂换板；引擎初始化 effect 是 init-only；图片选取经隐藏 `<input type=file>` → `engine.insertImageFiles`；对齐/分布/网格在菜单内以图标行/项呈现（对齐≥2、分布≥3、网格≥2 才可点）；浮动条「让团队实现」→ `onImplementSelection`、「迭代」→ `onIterateArtifact`（仅选中含 `artifactCard` 时显示，`hasSelectedType` 判定）|
-| `WhiteboardCanvasPage.tsx` | 宿主页 | 加载 scene、防抖 autosave（CAS）、AI 命令栏、注册 applier；**M3**：捕获选区锚框、`onConversation` 解析会话、订阅活 run（`setOverlay`）、终态 `addElements` crystallize | 见 §6.3；冲突暂停不覆盖；M3 用 `crystallizedExecRef` 保幂等、`briefAnchorRef` 存锚框、仅**非终态**才 `setOverlay`、终态一次性固化后清浮层 |
-| `services/boardTurn.ts` | AI 通道 | 发起回合 + 组 prompt：`organizeSelectionPrompt`（整理）/ `implementSelectionPrompt`（让团队实现）/ `iterateArtifactPrompt`（迭代回喂）；`sendBoardTurn(opts)` 带 `onConversation` 早解析会话 id | 选区按类型走混合 payload（结构 JSON、手绘/截图 `board_read`，§九）；迭代把选中 `artifactCard` 正文 + 批注回喂 CEO |
-| `services/boardProgress.ts` | AI 通道 | `buildProgressOverlay`：活 run 树（`Execution`）→ 一组**瞬时浮层** `SceneElement`（`agentNode` 状态卡 + 指回 brief 箭头），贴锚框旁 | 纯投影、无副作用、可单测；导出 `runVisualStatus`/`runStatusLabel` 供 crystallize 复用，浮层与持久卡**同一视觉映射** |
-| `services/boardCrystallize.ts` | AI 通道 | `buildCrystallizedElements`：**终态** run → 持久 `agentNode` + `artifactCard` + 连线（指回 brief）；`crystallizedRunIds` 收集已存 id 去重 | 纯投影、可单测；`isWorkerRun`/`isCrystallizable` 过滤；产物正文取 worker `outputSummary`（v1 文本，`ref`/`artifactKind` 字段已留待文件信号）；按 `runId` 幂等，迭代新版按新 `runId` **贴旁留旧** |
-| `services/boardOps.ts` | AI 通道 | `board_op_required` 桌面半边：applier 注册表 + 回执 | 按 board id 注册，只在画布打开时可用；通道**必答**（否则服务端只能等超时） |
-| `index.ts` | — | 公共出口 | 只导出 `WhiteboardCanvas` + `parse/serializeScene` + 类型 + `RunVisualStatus`/`SCENE_SCHEMA_VERSION` |
+- `SceneElement` 是**单一接口按 `type` 判别**（非严格联合，MVP 取紧凑）；`schemaVersion` 是每元素迁移后悔药；M3 字段（`runStatus` / `runId` / `ref` …）对通用形状是可选噪音、仅 `agentNode`/`artifactCard` 读。
+- 命中容差按 `1/zoom` 缩放；历史是**整数组快照**（非逆操作），push/undo/redo 各自深拷。
+- `render.ts`：元素在 world 变换下画、选择装饰在 screen 空间画（求 1px 锐利）；`agentNode` / `artifactCard` 与 M3 进度浮层复用**同一** `RunVisualStatus`→调色板映射。
+- `boardProgress` / `boardCrystallize` 是**纯投影函数**（run 树 → 元素），是 M3 的测试主战场。
+- 布局助手（`layout.ts` 网格 / `layoutDagre.ts` DAG）在宿主侧算坐标——对应 §七「AI 只产结构、宿主算坐标」。
 
 ### 6.2 坐标系与视口
 
@@ -237,43 +175,7 @@ flowchart TD
 
 ### 6.3 数据流
 
-```mermaid
-sequenceDiagram
-  participant U as 用户
-  participant C as WhiteboardCanvas
-  participant E as WhiteboardEngine
-  participant P as WhiteboardCanvasPage
-  participant S as 后端 /v1/boards
-
-  Note over P,S: 加载
-  P->>S: getBoard(id)
-  S-->>P: scene blob + version
-  P->>E: loadScene(parseScene(blob))
-
-  Note over U,S: 编辑 → 防抖 autosave
-  U->>E: 指针/键盘
-  E->>E: mutate elements → history.push → emitChange
-  E-->>P: onChange(elements, viewport)
-  P->>P: latestRef=snap; 1.5s 防抖
-  P->>S: saveBoardScene(serialize, baseline=version)
-  S-->>P: {version} 或 {conflict}
-  Note right of P: conflict → 暂停 autosave、提示重载（不覆盖）
-
-  Note over U,S: AI 作画
-  U->>P: 命令栏/整理选区 → sendBoardTurn
-  S-->>P: SSE board_op_required(ops)
-  P->>E: applyOps(ops) (applyBoardOps)
-  P->>S: CAS 保存 → 回执版本
-  P-->>S: resolveInteraction(client_tool)
-
-  Note over U,S: AI 团队照白板（M3）
-  U->>P: 选区→「让团队实现」→ sendBoardTurn(pipeline)
-  P->>P: 订阅活 run 树 (useBoardExecution)
-  P->>E: setOverlay(buildProgressOverlay) 逐帧贴源
-  Note right of E: 浮层瞬时·不入 scene/历史/序列化
-  P->>E: 终态 addElements(buildCrystallizedElements)
-  P->>S: CAS 保存(持久卡) → 回执版本
-```
+四条主流（细节见代码 `WhiteboardCanvasPage.tsx`）：**加载**（getBoard → `parseScene` → `loadScene`）；**编辑 → 防抖 autosave**（`onChange` → 1.5s 防抖 → CAS 保存，conflict 暂停不覆盖）；**AI 作画**（`sendBoardTurn` → SSE `board_op_required` → `applyOps` → CAS 保存 → resolve 回执）；**M3 团队照白板**（订阅活 run 树 → `setOverlay` 瞬时浮层 → 终态 `addElements` crystallize → 一次 CAS 落库）。
 
 - **重绘循环**：所有改动调 `scheduleRender()`，单帧 `requestAnimationFrame` 合并；`render()` 整帧重画（无脏矩形，MVP 够用）。
 - **autosave 触发面**：仅 `onChange`（元素提交）触发；**pan/zoom 不触发 onChange**——导航不写库。`savedSceneRef` 对序列化结果去重，跳过 no-op 保存。
@@ -297,28 +199,13 @@ sequenceDiagram
 
 ### 6.5 引擎对外 API（`WhiteboardApi`）
 
-宿主只通过这个命令式句柄驱动引擎（`WhiteboardCanvas` 经 `ref` 暴露）：
-
-| 方法 | 用途 |
-|---|---|
-| `getScene()` / `getViewport()` / `getSelectedIds()` | 读实时场景/视口/选中（AI 读图：结构走 JSON，手绘/截图才栅格化，§九） |
-| `rasterizeElements(ids)→{pngBase64,w,h}` | 离屏重绘选区子集为 PNG（≤1024px 长边，无选择装饰），供读图 G6 喂视觉模型 / 导出（§九.2） |
-| `applyOps(ops)→{created}` | 落 AI 的 `BoardOp` 批，返回本批新建 id（供回执） |
-| `getSelectionBounds()→Box\|null` | 取当前选区世界包围盒，M3 发起时存为 brief 锚框（浮层/产物贴其旁） |
-| `setOverlay(elements)` | 设一组**瞬时**浮层元素（run 进度），画在主场景之上、不入 scene/历史/序列化/命中；传空清除 |
-| `addElements(elements)` | 把 crystallize 产物作**一次历史步**追加进场景（可撤销、触发 autosave） |
-| `hasSelectedType(type)→bool` | 当前选区是否含某类元素（M3 判是否显示「迭代」：选中 `artifactCard`）|
-| `undo()` / `redo()` | 撤销/重做 |
-| `deleteSelected()` / `zoomIn/Out/toFit/toSelection/resetZoom` / `exportSelectionPng()` | 编辑与导航 / 导出选区 PNG |
-
-> 引擎内部还有样式/编组/剪贴板/层级等公开方法（供 React 壳的面板与右键菜单、键盘快捷键调用），不在 `WhiteboardApi` 宿主契约里。
+宿主只通过这个命令式句柄驱动引擎（`WhiteboardCanvas` 经 `ref` 暴露）；方法清单 → 见代码 `whiteboard/types.ts`（`WhiteboardApi`）。契约要点：`setOverlay` 为**瞬时**浮层（不入 scene/历史/序列化/命中）、`addElements` 为**一次历史步**（可撤销、触发 autosave）、`rasterizeElements` 离屏重绘 ≤1024px 无选择装饰（读图 §九.2）。引擎内部另有样式/编组/剪贴板/层级公开方法（供 React 壳调用），不在宿主契约里。
 
 ### 6.6 测试与门禁
 
-- **单测**（`whiteboard/__tests__/`，vitest）：`clone`（深拷不别名）、`ops`（AI 批语义/箭头剪除/编组）、`selectionOps`（编组/层级/对齐/分布/样式/微移/复制纯变换）、`scene`（序列化/解析 normalize）、`snap`（吸附与参考线）、`layout`（网格重排）。纯核心是测试主战场；引擎状态机靠类型 + 前端预览回归。
-- **M3 投影单测**（`services/__tests__/`）：`boardProgress`（活 run→浮层投影）、`boardCrystallize`（终态→持久卡：空结果 / 全图连线 / 按 `runId` 去重 / 失败 worker / 无产物摘要）、`boardTurn`（`iterateArtifactPrompt` 回喂产物正文 + 批注）。投影器都是纯函数，是 M3 的测试主战场（浮层/crystallize 视觉靠 `#/preview` 回归）。
-- **门禁**：`pnpm typecheck`（tsc）、`pnpm lint`（biome check + `check-ui-tokens`）。
-- **自检渲染**：离线看渲染/流式态用 `#/preview` 回放 + `pnpm shoot` 无头截图（见 [frontend-preview](/.cursor/rules/frontend-preview.mdc)），别靠跑真实 AI 看前端。
+- **单测主战场 = 纯核心与纯投影**（`whiteboard/__tests__/` + `services/__tests__/`，vitest）；引擎状态机靠类型 + 前端预览回归，浮层/crystallize 视觉靠 `#/preview` 回归。
+- **门禁**：`pnpm typecheck`、`pnpm lint`（biome + `check-ui-tokens`）。
+- **自检渲染**：`#/preview` 回放 + `pnpm shoot` 无头截图（见 [frontend-preview](/.cursor/rules/frontend-preview.mdc)），别靠跑真实 AI 看前端。
 
 ---
 

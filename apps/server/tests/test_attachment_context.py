@@ -42,6 +42,29 @@ def test_resident_file_uses_workspace_path_and_hint():
     assert "edit them with the file tools" in out
 
 
+def test_binary_resident_has_no_inline_body():
+    out = _build_attachment_context(
+        [
+            {
+                "name": "report.xlsx",
+                "path": "attachments/report.xlsx",
+                "text": "",
+                "binary": True,
+                "workspace_path": "attachments/report.xlsx",
+            }
+        ]
+    )
+    assert out is not None
+    assert "--- File: report.xlsx (attachments/report.xlsx) [binary] ---" in out
+    assert "code_execute" in out
+    assert "Do NOT use an OS absolute path" in out
+    assert "Never hard-read an OS absolute path" in out
+    assert "saved into your workspace" in out
+    # Prompt must not leak a client OS absolute path for binary residents.
+    assert "C:\\" not in out
+    assert "/Users/" not in out
+
+
 def test_truncated_note_and_directory_listing():
     out = _build_attachment_context(
         [

@@ -1,4 +1,5 @@
 import { isWebPreview } from "@/lib/preview";
+import { ApiError } from "@/services/api";
 import { type AgentAuditListResponse, fetchTurnAudit } from "@/services/audit";
 import { useEffect, useSyncExternalStore } from "react";
 
@@ -48,8 +49,15 @@ function ensureLoad(conversationId: string, messageId: string): void {
       entries.set(key, { data, loading: false, error: null });
       notify(key);
     })
-    .catch(() => {
-      entries.set(key, { data: null, loading: false, error: "加载失败" });
+    .catch((e) => {
+      // 404 = no audit rows yet (observe/workspace solo turns) — empty, not error.
+      const empty = e instanceof ApiError && e.status === 404;
+      entries.set(
+        key,
+        empty
+          ? { data: { data: [], total: 0 }, loading: false, error: null }
+          : { data: null, loading: false, error: "加载失败" },
+      );
       notify(key);
     })
     .finally(() => {

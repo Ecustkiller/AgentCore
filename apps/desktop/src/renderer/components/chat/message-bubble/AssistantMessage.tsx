@@ -5,6 +5,7 @@ import { InlineTeamGraph } from "@/components/chat/InlineTeamGraph";
 import { Markdown } from "@/components/chat/Markdown";
 import { NonBlockingAskCard } from "@/components/chat/NonBlockingAskCard";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
+import { RecoveryActions } from "@/components/chat/StatusStrip";
 import { type CitationFlash, SourceCards } from "@/components/chat/SourceCards";
 import { TeamPreviewCard } from "@/components/chat/TeamPreviewCard";
 import { TurnWarningBanner } from "@/components/chat/TurnWarningBanner";
@@ -19,6 +20,7 @@ import {
 import { FinishReasonChip } from "@/components/ui/finish-reason-chip";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { referencedCitationNumbers } from "@/lib/citations";
+import { isEmptyInterruptedAssistant } from "@/lib/composerContinueHint";
 import {
   degradedFinishChipLabel,
   errorActionForCode,
@@ -29,10 +31,13 @@ import {
   fileArtifactsFromProcess,
   mergeArtifacts,
 } from "@/lib/fileArtifacts";
-import { formatCost } from "@/lib/format";
+import {
+  formatDisplayCost,
+  pickCostMoney,
+} from "@/lib/format";
 import { formatMessageExport } from "@/lib/messageExport";
 import { notifyError } from "@/lib/toast";
-import { continueTurn, runRegenerate } from "@/services/turns";
+import { runRegenerate } from "@/services/turns";
 import {
   type Message,
   assistantProjectionId,
@@ -40,7 +45,10 @@ import {
   useActiveGenerating,
   useConversationStore,
 } from "@/stores/conversation";
-import { useMessageExecution } from "@/stores/execution";
+import {
+  ExecutionScopeContext,
+  useMessageExecution,
+} from "@/stores/execution";
 import { useMessageInteractionCards } from "@/stores/interactions";
 import { useUsageStore } from "@/stores/usage";
 import type { ProcessStep } from "@/types/events";
@@ -50,7 +58,6 @@ import {
   Copy,
   KeyRound,
   RefreshCw,
-  StepForward,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -88,82 +95,24 @@ function MultiAgentFileArtifacts({
 }
 
 /**
- * 续写被截断的回答 (对话基础功能补齐) — when the *latest* reply ended early (用户叫停 =
- * `cancelled`, crash salvage = `interrupted`, or the agent hit its round budget =
- * `max_rounds`), offer a one-click 「继续生成」. It sends a minimal「继续」turn so the
- * model resumes from the transcript. Only the last turn is resumable (continuing a
- * mid-history turn would fork the thread), and never while a turn is already streaming.
+ * Empty interrupted salvage: no body to continue via「继续」— surface the same
+ * inline 救火「重试」(regenerate) as StatusStrip RecoveryActions. Continuable
+ * truncations (cancelled / interrupted-with-body / max_rounds) use the composer
+ * placeholder instead of a button.
  */
-function ContinueTurnButton({
-  message,
-  finishReason,
-}: {
-  message: Message;
-  finishReason: string | undefined;
-}) {
-  const conversationId = useConversationStore((s) => s.currentConversationId);
+function EmptyInterruptedRecovery({ message }: { message: Message }) {
   const isGenerating = useActiveGenerating();
   const isLast = useConversationStore((s) => {
     const rt = s.currentConversationId ? s.byId[s.currentConversationId] : null;
     return rt?.messages.at(-1)?.id === message.id;
   });
-  const [busy, setBusy] = useState(false);
-  const eligible =
-    finishReason === "cancelled" ||
-    finishReason === "interrupted" ||
-    finishReason === "max_rounds";
-  if (!conversationId || !isLast || isGenerating || !eligible) {
+  if (!isLast || isGenerating || !isEmptyInterruptedAssistant(message)) {
     return null;
   }
-  // Interrupted salvage may have no body — still offer regenerate (P4).
-  if (finishReason !== "interrupted" && message.content.length === 0) {
-    return null;
-  }
-  const useRegenerate =
-    finishReason === "interrupted" && message.content.length === 0;
-  const onContinue = async () => {
-    setBusy(true);
-    try {
-      if (useRegenerate) {
-        const msgs = getActiveRuntime().messages;
-        const idx = msgs.findIndex((m) => m.id === message.id);
-        let userId: string | null = null;
-        for (let i = idx - 1; i >= 0; i--) {
-          if (msgs[i].role === "user") {
-            userId = msgs[i].id;
-            break;
-          }
-        }
-        if (userId) await runRegenerate(userId);
-      } else {
-        await continueTurn(conversationId);
-      }
-    } catch (err) {
-      notifyError(err, useRegenerate ? "重试失败" : "继续生成失败");
-    } finally {
-      setBusy(false);
-    }
-  };
   return (
-    <div className="mt-2">
-      <Button
-        variant="neutral"
-        className="border-border/70"
-        icon={
-          useRegenerate ? <RefreshCw size={13} /> : <StepForward size={13} />
-        }
-        disabled={busy}
-        onClick={() => void onContinue()}
-      >
-        {busy
-          ? useRegenerate
-            ? "重试中…"
-            : "继续中…"
-          : useRegenerate
-            ? "重试"
-            : "继续生成"}
-      </Button>
-    </div>
+    <ExecutionScopeContext.Provider value={assistantProjectionId(message)}>
+      <RecoveryActions />
+    </ExecutionScopeContext.Provider>
   );
 }
 
@@ -171,9 +120,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const isGenerating = useActiveGenerating();
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
   const loadMessageCost = useUsageStore((s) => s.loadMessageCost);
-  const cachedTotal = useUsageStore(
-    (s) => s.messageCosts[message.id]?.cost.total ?? null,
-  );
+  const cachedTurn = useUsageStore((s) => s.messageCosts[message.id] ?? null);
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const navigate = useNavigate();
   const errorAction = message.error
@@ -251,10 +198,19 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const finishReason = !message.isStreaming
     ? (message.finishReason ?? message.runs?.finishReason)
     : undefined;
-  const turnTotal = message.cost?.total ?? cachedTotal;
+  const money =
+    pickCostMoney(message.cost) ??
+    (cachedTurn
+      ? pickCostMoney({
+          total: cachedTurn.cost.total,
+          estimated_total: cachedTurn.estimated_cost?.total ?? null,
+        })
+      : null);
   const costText =
-    message.executionId === null && turnTotal != null && turnTotal > 0
-      ? formatCost(turnTotal, cnyPerUsd)
+    message.executionId === null && money != null && money.nano > 0
+      ? `${formatDisplayCost(money.nano, cnyPerUsd, money.estimated)}${
+          money.estimated ? " 估算" : ""
+        }`
       : null;
 
   const onPeekCost = () => {
@@ -390,7 +346,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         <TurnWarningBanner message={message.turnWarning} />
       )}
       {turnBody}
-      <ContinueTurnButton message={message} finishReason={finishReason} />
+      <EmptyInterruptedRecovery message={message} />
       {message.error && (
         <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />

@@ -18,6 +18,10 @@ vi.mock("electron", () => ({
   BrowserWindow: { getAllWindows: () => [] },
 }));
 
+vi.mock("../log-service", () => ({
+  logDesktop: vi.fn(),
+}));
+
 import { SidecarManager } from "../sidecar-service";
 
 const pausedDir = join(h.dir, "sidecar", "paused");
@@ -58,7 +62,7 @@ function frameRecord(
   };
 }
 
-describe("SidecarManager.listPaused (local frame file read, no spawn)", () => {
+describe("SidecarManager.recovery paused[] (local frame file read, no spawn)", () => {
   afterAll(() => rmSync(h.dir, { recursive: true, force: true }));
 
   it("lists a conversation's frames oldest-first, scoped, tolerating junk", async () => {
@@ -70,28 +74,26 @@ describe("SidecarManager.listPaused (local frame file read, no spawn)", () => {
     mkdirSync(pausedDir, { recursive: true });
     writeFileSync(join(pausedDir, "garbage.json"), "}{ not json", "utf-8");
 
-    // A spawn here would be a bug — listing is a pure file read.
+    // A spawn here would be a bug — listing is a pure file read via recovery.
     const manager = new SidecarManager(() => {
-      throw new Error("listPaused must not spawn the sidecar");
+      throw new Error("recovery must not spawn the sidecar");
     });
-    const data = await manager.listPaused({
-      rootId: "r1",
-      conversationId: "c1",
-    });
+    const data = await manager.recovery({ conversationId: "c1" });
 
-    expect(data.map((d) => d.message_id)).toEqual(["m_old", "m_new"]); // oldest-first
-    expect(data.every((d) => d.kind === "ask_user")).toBe(true);
-    expect(data[0].question).toBe("要继续吗？");
+    expect(data.paused.map((d) => d.message_id)).toEqual(["m_old", "m_new"]); // oldest-first
+    expect(data.paused.every((d) => d.kind === "ask_user")).toBe(true);
+    expect(data.paused[0].question).toBe("要继续吗？");
+    expect(data.liveRunning).toBe(false);
+    expect(data.unsynced).toEqual([]);
   });
 
-  it("returns [] when no frames directory exists yet", async () => {
+  it("returns paused=[] when no frames directory exists yet", async () => {
     const manager = new SidecarManager(() => {
       throw new Error("must not spawn");
     });
-    const data = await manager.listPaused({
-      rootId: "r1",
+    const data = await manager.recovery({
       conversationId: "never-paused",
     });
-    expect(data).toEqual([]);
+    expect(data.paused).toEqual([]);
   });
 });

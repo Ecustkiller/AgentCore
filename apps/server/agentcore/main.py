@@ -17,6 +17,7 @@ from agentcore.api.routes import (
     bookmarks,
     capabilities,
     conversations,
+    demo_tape,
     devices,
     favicon,
     feedback,
@@ -310,6 +311,7 @@ app.include_router(boards.router, prefix="/v1")
 app.include_router(bookmarks.router, prefix="/v1")
 app.include_router(capabilities.router, prefix="/v1")
 app.include_router(conversations.router, prefix="/v1")
+app.include_router(demo_tape.router, prefix="/v1")
 app.include_router(devices.router, prefix="/v1")
 app.include_router(favicon.router, prefix="/v1")
 app.include_router(feedback.router, prefix="/v1")

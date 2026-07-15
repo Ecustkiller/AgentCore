@@ -26,9 +26,9 @@ def test_town_has_ten_residents():
 
 
 def test_region_map_matches_m1_contract():
-    assert len(TOWN_REGIONS) == 10
+    assert len(TOWN_REGIONS) == 11
     assert TOWN_REGION_POSITIONS == REGION_POSITIONS
-    for name in ("图书馆", "工坊", "码头"):
+    for name in ("图书馆", "工坊", "码头", "心动营地"):
         assert name in TOWN_REGIONS
 
 

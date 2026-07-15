@@ -6,7 +6,7 @@ import { FolderOpen, Terminal } from "lucide-react";
 
 /**
  * 对话工作区侧栏的桌面 Client Tools 快捷入口（最小集）：
- * - 打开文件夹（本地绑定工作区）
+ * - 打开此对话文件夹（本地绑定工作区 / 裸聊 scratch）
  * - 在终端打开（cd 到工作区根，无命令确认门）
  *
  * Agent 经 `workspace_op` / `code_execute` 的执行链与此正交；这里是用户一键入口。
@@ -35,7 +35,7 @@ export function WorkspaceClientTools({
   return (
     <>
       {canReveal && (
-        <IconButton title="打开文件夹" onClick={() => void openFolder()}>
+        <IconButton title="打开此对话文件夹" onClick={() => void openFolder()}>
           <FolderOpen size={14} />
         </IconButton>
       )}

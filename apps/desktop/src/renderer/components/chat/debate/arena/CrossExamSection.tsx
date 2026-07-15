@@ -9,7 +9,7 @@ import type {
   DebateCrossExamView,
 } from "../model";
 import { ModeratorIdentity } from "./ModeratorIdentity";
-import type { DebateArenaLayout } from "./debateLayoutPreference";
+import { type DebateArenaLayout, partitionSides } from "./debateLayoutPreference";
 import { summarizeText } from "./parseSpeechArguments";
 
 const ANSWER_PREVIEW_LEN = 48;
@@ -77,10 +77,10 @@ function SplitCrossExamColumns({
   messageId: string;
   sceneKey: string;
 }) {
-  const pro = exchanges.find((cx) => cx.targetKey === "pro");
-  const con = exchanges.find((cx) => cx.targetKey === "con");
-  const others = exchanges.filter(
-    (cx) => cx.targetKey !== "pro" && cx.targetKey !== "con",
+  const { pro, con, others } = partitionSides(
+    exchanges,
+    (cx) => cx.targetKey,
+    (cx) => cx.stance,
   );
 
   return (

@@ -7,7 +7,7 @@ import { create } from "zustand";
  * 的 `default_model`）。
  *
  * 为什么需要它：云回合恒用账号模型（徽章读账号配置就已正确），唯一会分叉的是本机 sidecar 的
- * dev 回退——取不到云推理令牌时回合会静默跑在本机 `.env` 平台模型（如 gpt-5.5）而非账号模型
+ * dev 回退——取不到云推理令牌时回合会静默跑在本机 `.env` 平台模型（如 gpt-4o）而非账号模型
  * （如 deepseek-…）。sidecar 回合结果里带回它真正解析出的模型（`SidecarTurnResult.model` =
  * 引擎内 `resolve_turn_model`），本 store 按会话记下，徽章据此显示真实模型。
  *

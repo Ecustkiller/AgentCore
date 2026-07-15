@@ -4,6 +4,7 @@ import {
   type RunNode,
   STANCE_META,
   type Stance,
+  debateBeatFromContext,
   debateGroups,
   debateLiveRounds,
 } from "@/stores/execution";
@@ -15,6 +16,7 @@ import type {
   DebateResultPayload,
   DebateRoundScore,
   DebateRoundSide,
+  DebateSpeechArgument,
 } from "@/types/events";
 import { parseCrossExamResponse } from "./crossExamParse";
 import { debateSideColorVar } from "./labels";
@@ -28,20 +30,10 @@ import type {
   DebateRoundModel,
   DebateScoreView,
   DebateSideModel,
+  DebateSpeechArgumentView,
 } from "./types";
 
-/** 质询作答 run id 后缀：``{moderator}_r{round}_cx_{side_key}``（与 DebateTool 同策）。 */
-const CX_RUN_ID_RE = /_r(\d+)_cx_(.+)$/;
-
-function parseCrossExamRunId(
-  runId: string,
-): { roundNo: number; targetKey: string } | null {
-  const m = runId.match(CX_RUN_ID_RE);
-  if (!m) return null;
-  return { roundNo: Number(m[1]), targetKey: m[2] };
-}
-
-/** 从质询作答 run 的 ``run_context`` 块解析主持人发出的必答问题列表。 */
+/** 从质询作答 run 的 ``run_context`` 块解析主持人发出的必答问题列表（无结构化载荷时的回退）。 */
 function crossExamQuestionsFromRun(run: RunNode): string[] {
   const block = run.receivedContext.find((b) => b.channel === "cross_exam");
   if (!block?.body.trim()) return [];
@@ -51,22 +43,39 @@ function crossExamQuestionsFromRun(run: RunNode): string[] {
     .filter(Boolean);
 }
 
-/** 进行中：从执行图里的 ``_cx_`` 作答 run 重建本轮质询载荷（问题来自 run_context，作答来自
- * outputChunks 经 {@link parseCrossExamResponse} 解析）。``debate_round.cross_exam`` 未到时
- * 这是 live 质询区的唯一数据源——收场后改走结构化 ``exchanges[]``。 */
+/** 质询作答 run 的语义方 key：wire ``side_key`` → stance → narr.sides 经 continues 根反查。 */
+function crossExamTargetKey(
+  run: RunNode,
+  narr: DebateNarrativeRound | null,
+): string | null {
+  if (run.sideKey) return run.sideKey;
+  if (run.stance) return run.stance;
+  const root = run.continuesRunId;
+  if (!root) return null;
+  for (const s of narr?.sides ?? []) {
+    if (s.run_id === root) return s.key;
+  }
+  return null;
+}
+
+/** 进行中：从 ``channel=cross_exam`` 作答 run 重建本轮质询（无 ``debate_round.cross_exam`` 时）。
+ * 识别靠 beat + ``side_key``，不再解析 run_id。 */
 function liveCrossExamPayload(
   execution: Execution,
   roundNo: number,
+  narr: DebateNarrativeRound | null,
 ): DebateCrossExam[] {
   const out: DebateCrossExam[] = [];
   for (const run of execution.runs) {
-    const parsed = parseCrossExamRunId(run.id);
-    if (!parsed || parsed.roundNo !== roundNo) continue;
+    if (run.round !== roundNo) continue;
+    if (debateBeatFromContext(run.receivedContext) !== "cross_exam") continue;
+    const target = crossExamTargetKey(run, narr);
+    if (!target) continue;
     const questions = crossExamQuestionsFromRun(run);
     if (questions.length === 0) continue;
     const blob = runOutputText(execution, run);
     out.push({
-      target: parsed.targetKey,
+      target,
       questioner: "",
       exchanges: parseCrossExamResponse(questions, blob),
       answer_run_id: run.id,
@@ -95,12 +104,13 @@ function roundSidesForCrossExam(
     });
   }
   for (const run of execution.runs) {
-    const parsed = parseCrossExamRunId(run.id);
-    if (!parsed || byKey.has(parsed.targetKey)) continue;
+    if (debateBeatFromContext(run.receivedContext) !== "cross_exam") continue;
+    const target = crossExamTargetKey(run, narr);
+    if (!target || byKey.has(target)) continue;
     const agent = execution.agents.find((a) => a.id === run.agentId);
-    byKey.set(parsed.targetKey, {
-      key: parsed.targetKey,
-      name: agent?.role ?? parsed.targetKey,
+    byKey.set(target, {
+      key: target,
+      name: agent?.role ?? target,
       run_id: run.id,
       ok: run.status === "completed",
     });
@@ -108,7 +118,7 @@ function roundSidesForCrossExam(
   return [...byKey.values()];
 }
 
-/** 进行中质询投影：``debate_round.cross_exam`` 权威优先；质询 beat 进行中则从 ``_cx_`` run 重建。 */
+/** 进行中质询投影：优先 ``debate_round.cross_exam``；否则从质询 beat run 重建。 */
 function resolveLiveCrossExam(
   execution: Execution,
   roundNo: number,
@@ -119,8 +129,15 @@ function resolveLiveCrossExam(
   const payload =
     narr && narr.cross_exam.length > 0
       ? narr.cross_exam
-      : liveCrossExamPayload(execution, roundNo);
+      : liveCrossExamPayload(execution, roundNo, narr);
   return resolveCrossExam(payload, sides, execution);
+}
+
+function mapArguments(
+  raw: readonly DebateSpeechArgument[] | undefined,
+): DebateSpeechArgumentView[] | undefined {
+  if (!raw || raw.length === 0) return undefined;
+  return raw.map((a) => ({ id: a.id, title: a.title, body: a.body }));
 }
 
 function runOutputText(execution: Execution, run: RunNode | null): string {
@@ -167,6 +184,7 @@ function settledModel(
         colorVar: debateSideColorVar(side.key, side.name),
         model: run?.model ?? "",
         run,
+        arguments: mapArguments(side.arguments),
       };
     }),
   }));
@@ -182,6 +200,7 @@ function settledModel(
     closings: resolveClosings(debate.closings, execution),
     opening: debate.opening || null,
     settled: true,
+    crossExamEnabled: execution.crossExamEnabled,
   };
 }
 
@@ -205,8 +224,9 @@ function liveModel(execution: Execution): DebateModel | null {
     sides: null,
     // 进行中无结辩（结辩是收场后一次性 beat，无 live 孪生）；收场由 settledModel 接管。
     closings: [],
-    opening: null,
+    opening: execution.debateOpening,
     settled: false,
+    crossExamEnabled: execution.crossExamEnabled,
   };
 }
 
@@ -249,14 +269,21 @@ function liveTwoSideRounds(
     const keyByRunId = new Map(
       (narr?.sides ?? []).map((s) => [s.run_id, s.key]),
     );
+    const argsByKey = new Map(
+      (narr?.sides ?? []).map((s) => [s.key, mapArguments(s.arguments)]),
+    );
     const sides: DebateSideModel[] = [];
     for (const group of groups) {
       const bucket = group.rounds.find((b) => b.round === roundNo);
       if (!bucket) continue;
-      for (const run of bucket.pro)
-        sides.push(twoSide(run, "pro", keyByRunId.get(run.id)));
-      for (const run of bucket.con)
-        sides.push(twoSide(run, "con", keyByRunId.get(run.id)));
+      for (const run of bucket.pro) {
+        const sk = keyByRunId.get(run.id);
+        sides.push(twoSide(run, "pro", sk, argsByKey.get(sk || "pro")));
+      }
+      for (const run of bucket.con) {
+        const sk = keyByRunId.get(run.id);
+        sides.push(twoSide(run, "con", sk, argsByKey.get(sk || "con")));
+      }
     }
     rounds.push({
       roundNo,
@@ -279,6 +306,7 @@ function twoSide(
   run: RunNode,
   stance: Stance,
   realKey?: string,
+  arguments_?: DebateSpeechArgumentView[],
 ): DebateSideModel {
   const name = STANCE_META[stance].label;
   // sideKey 取后端真实 side.key（掌舵定向 ask_target 与裁判 clash from/to key 都按它匹配），
@@ -293,6 +321,7 @@ function twoSide(
     colorVar: debateSideColorVar(stance, name),
     model: run.model ?? "",
     run,
+    arguments: arguments_,
   };
 }
 
@@ -313,9 +342,13 @@ function liveMultiSideRounds(execution: Execution): DebateRoundModel[] {
     const keyByRunId = new Map(
       (narr?.sides ?? []).map((s) => [s.run_id, s.key]),
     );
-    const sideModels = runs.map((run) =>
-      multiSide(run, execution, keyByRunId.get(run.id) ?? ""),
+    const argsByKey = new Map(
+      (narr?.sides ?? []).map((s) => [s.key, mapArguments(s.arguments)]),
     );
+    const sideModels = runs.map((run) => {
+      const sk = keyByRunId.get(run.id) ?? "";
+      return multiSide(run, execution, sk, argsByKey.get(sk));
+    });
     rounds.push({
       roundNo,
       focus: narr?.focus ?? "",
@@ -337,6 +370,7 @@ function multiSide(
   run: RunNode,
   execution: Execution,
   sideKey: string,
+  arguments_?: DebateSpeechArgumentView[],
 ): DebateSideModel {
   const role =
     execution.agents.find((a) => a.id === run.agentId)?.role ?? run.agentId;
@@ -348,6 +382,7 @@ function multiSide(
     colorVar: debateSideColorVar(sideKey, role),
     model: run.model ?? "",
     run,
+    arguments: arguments_,
   };
 }
 
@@ -379,8 +414,10 @@ function resolveClashes(
 }
 
 /** 把契约的 {@link DebateCrossExam}（语义 key + `answer_run_id` 引用）据本轮 `sides` 解析成可渲染的
- * {@link DebateCrossExamView}（被质询方名字 + 身份色 + 逐条 Q↔A + 作答 run）。引用不到 side 的交换
- * （防御性）丢弃。权威路径直接消费 ``exchanges[]``；live 流式在 answer 未落盘时从 run blob 补全 JSON 作答。 */
+ * {@link DebateCrossExamView}。引用不到 side 的交换（防御性）丢弃。
+ *
+ * 新契约：载荷 ``exchanges[].answer`` 为权威（后端已 parse）。仅当载荷答案全空且有 run
+ * 输出时（live 流式 / 老 journal）才回退 {@link parseCrossExamResponse}。 */
 function resolveCrossExam(
   cross: readonly DebateCrossExam[] | undefined,
   sides: readonly DebateRoundSide[],
@@ -395,22 +432,23 @@ function resolveCrossExam(
     const answerRun =
       execution.runs.find((r) => r.id === cx.answer_run_id) ?? null;
     const blob = runOutputText(execution, answerRun);
-    const streaming = answerRun?.status === "running";
 
     let exchanges = cx.exchanges ?? [];
-    if (streaming && blob && exchanges.some((ex) => !ex.answer.trim())) {
-      // live 流式：契约已有问题列表但 answer 尚未落盘，从 run blob 补全。
-      const parsed = parseCrossExamResponse(
+    const payloadHasAnswers = exchanges.some((ex) => ex.answer.trim());
+    if (
+      !payloadHasAnswers &&
+      blob.trim() &&
+      exchanges.some((ex) => ex.question.trim())
+    ) {
+      exchanges = parseCrossExamResponse(
         exchanges.map((e) => e.question),
         blob,
-      );
-      exchanges = exchanges.map((ex, i) =>
-        ex.answer.trim() ? ex : (parsed[i] ?? ex),
       );
     }
 
     out.push({
       targetKey: cx.target,
+      stance: answerRun?.stance ?? null,
       targetName,
       targetColorVar: debateSideColorVar(cx.target, targetName),
       exchanges: exchanges.map((ex) => ({
@@ -457,13 +495,17 @@ function resolveClosings(
   execution: Execution,
 ): DebateClosingView[] {
   if (!closings || closings.length === 0) return [];
-  return closings.map((c) => ({
-    sideKey: c.key,
-    name: c.name,
-    colorVar: debateSideColorVar(c.key, c.name),
-    run: execution.runs.find((r) => r.id === c.run_id) ?? null,
-    ok: c.ok,
-  }));
+  return closings.map((c) => {
+    const run = execution.runs.find((r) => r.id === c.run_id) ?? null;
+    return {
+      sideKey: c.key,
+      stance: run?.stance ?? null,
+      name: c.name,
+      colorVar: debateSideColorVar(c.key, c.name),
+      run,
+      ok: c.ok,
+    };
+  });
 }
 
 /**

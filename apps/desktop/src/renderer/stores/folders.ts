@@ -1,4 +1,3 @@
-import { hasLocalFiles } from "@/lib/capabilities";
 import { createZustandUiStorage } from "@/lib/uiStorage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -10,7 +9,7 @@ const uiPersistStorage = createJSONStorage(() => createZustandUiStorage());
 
 /**
  * Draft-time「在哪工作」intent — single discriminant union.
- * Desktop default = quick local scratch; web (no fsApi) = quick cloud.
+ * Default = quick cloud scratch（桌面裸聊默认切云 §八.7）；显式本机草稿 = quick_local。
  */
 export type DraftWorkspaceIntent =
   | { kind: "quick_local" }
@@ -18,7 +17,7 @@ export type DraftWorkspaceIntent =
   | { kind: "project"; folderId: string };
 
 export function defaultDraftWorkspaceIntent(): DraftWorkspaceIntent {
-  return hasLocalFiles() ? { kind: "quick_local" } : { kind: "quick_cloud" };
+  return { kind: "quick_cloud" };
 }
 
 /**
@@ -35,13 +34,13 @@ interface FoldersUiState {
   /** User-pinned folders shown at the top of workspace pickers. */
   pinnedFolderIds: string[];
   /** Canonical「新建项目」dialog (command palette, etc.). */
-  createProjectOpen: boolean;
+  createFolderOpen: boolean;
 
   setPendingRename: (id: string | null) => void;
   setDraftWorkspaceIntent: (intent: DraftWorkspaceIntent) => void;
   resetDraftWorkspaceIntent: () => void;
-  openCreateProject: () => void;
-  closeCreateProject: () => void;
+  openCreateFolder: () => void;
+  closeCreateFolder: () => void;
   togglePinFolder: (id: string) => void;
 }
 
@@ -51,14 +50,14 @@ export const useFoldersStore = create<FoldersUiState>()(
       pendingRenameId: null,
       draftWorkspaceIntent: defaultDraftWorkspaceIntent(),
       pinnedFolderIds: [],
-      createProjectOpen: false,
+      createFolderOpen: false,
       setPendingRename: (id) => set({ pendingRenameId: id }),
       setDraftWorkspaceIntent: (intent) =>
         set({ draftWorkspaceIntent: intent }),
       resetDraftWorkspaceIntent: () =>
         set({ draftWorkspaceIntent: defaultDraftWorkspaceIntent() }),
-      openCreateProject: () => set({ createProjectOpen: true }),
-      closeCreateProject: () => set({ createProjectOpen: false }),
+      openCreateFolder: () => set({ createFolderOpen: true }),
+      closeCreateFolder: () => set({ createFolderOpen: false }),
       togglePinFolder: (id) =>
         set((s) => ({
           pinnedFolderIds: s.pinnedFolderIds.includes(id)

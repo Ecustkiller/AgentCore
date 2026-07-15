@@ -2,7 +2,10 @@
 
 import { NODE_HEIGHT, NODE_WIDTH } from "@/lib/elk-layout";
 import type { DebateBeat, Execution, RunStatus } from "@/stores/execution";
-import { debateBeatFromContext } from "@/stores/execution";
+import {
+  debateBeatFromContext,
+  isDebateStatementBeat,
+} from "@/stores/execution";
 import type { GraphEdge, GraphLayout } from "@/stores/graph";
 import type { EdgeHandoff } from "./StepEdge";
 
@@ -245,18 +248,18 @@ function bandFromMembers(
 const STAGE_PAD = 16;
 
 /**
- * 辩论阶段分区带（协作图）：把每一"阶段"的节点用一个柔和框圈起——
- * 第 1 轮（含主持人开场）/ 第 N 轮 / 结辩。质询折进轮节点，不单独成段。
- * 坐标同 {@link WaveBand}（flow 坐标，经 ViewportPortal 渲染）；标签锚点取框顶居中。
+ * 辩论阶段标签（协作图）：为每一阶段（第 N 轮 / 结辩）算一枚标签锚点。
+ * 只含辩手可见列（陈词/结辩）；主持人开场不参与锚点，避免第 1 轮标签悬在主持与辩手之间。
+ * 质询折进轮节点，不单独成段。无阶段填充框——仅标签。
+ * 坐标同 {@link WaveBand}（flow 坐标，经 ViewportPortal 渲染）；标签锚点取辩手列顶居中。
  * 非辩论 / 无坐标 → 空数组（调用方不渲染）。
  */
 export function computeDebateStageBands(
   execution: Execution,
   positions: Record<string, { x: number; y: number }>,
-  captainId: string | null,
+  _captainId: string | null,
 ): WaveBand[] {
   const runs = execution.runs;
-  const modId = debateModeratorId(runs, captainId);
   const CLOSING_ORDER = Number.MAX_SAFE_INTEGER;
   const stages = new Map<number, { label: string; ids: string[] }>();
   const ensure = (order: number, label: string) => {
@@ -279,9 +282,6 @@ export function computeDebateStageBands(
     ensure(round, `第 ${round} 轮`).ids.push(r.id);
   }
   if (stages.size === 0) return [];
-  // 主持人开场并入第 1 轮段。
-  const first = stages.get(1);
-  if (modId && first) first.ids.push(modId);
 
   const bands: WaveBand[] = [];
   for (const order of [...stages.keys()].sort((a, b) => a - b)) {
@@ -418,9 +418,14 @@ export function isDebateParticipantRun(r: GraphRunLike): boolean {
   );
 }
 
-/** 协作图可见列用的 beat：质询折进同轮陈词，结辩仍独立。 */
+/** 协作图可见列用的 beat：质询折进同轮陈词，结辩仍独立。与 arena 分桶共用 {@link debateBeatFromContext}。 */
 export function graphDebateBeat(r: GraphRunLike): DebateBeat {
   return debateBeatFromContext(r.receivedContext);
+}
+
+/** 陈词宿主 / 发言列：与 {@link isDebateStatementBeat} 同口径。 */
+export function isDebateStatementRun(r: GraphRunLike): boolean {
+  return isDebateParticipantRun(r) && isDebateStatementBeat(r.receivedContext);
 }
 
 /** 质询作答：同辩手同轮的 continue_run，协作图不独立成列。 */

@@ -26,8 +26,9 @@ from agentcore.runtime.events import (
     debate_round_started,
     run_started,
 )
-from agentcore.tools.builtin.debate.events import account_moderator, moderator_plan_event
-from agentcore.tools.builtin.debate.rounds import (
+from agentcore.runtime.plan_only import PlanOnlyAbortError
+from agentcore.runtime.debate.events import account_moderator, moderator_plan_event
+from agentcore.runtime.debate.rounds import (
     make_closing_runner,
     make_cross_exam_runner,
     make_round_runner,
@@ -171,12 +172,15 @@ class DebateTool:
         if not isinstance(thorough, bool):
             thorough = True
         policy = RoundPolicy.for_form(form, thorough=thorough)
+        # `_kickoff_ask` 为 resume 注入的内部键（非 schema / 非 wire），开赛嘱咐进首轮插话管道。
+        kickoff_ask = str(arguments.get("_kickoff_ask") or "").strip()
         config = DebateConfig(
             motion=motion,
             form=form,
             sides=sides,
             policy=policy,
             background=parse_background(arguments.get("background")),
+            kickoff_ask=kickoff_ask,
         )
 
         if not skip_kickoff:
@@ -193,7 +197,11 @@ class DebateTool:
         note: str,
         arguments: dict[str, Any],
     ) -> ToolResult:
-        """Settle a debate kickoff: STOP → cancel; CONTINUE/ADJUST → run moderator."""
+        """Settle a debate kickoff: STOP → cancel; CONTINUE/ADJUST → run moderator.
+
+        CONTINUE/ADJUST + note → 开赛嘱咐（首轮全场插话），不覆写 motion / 不改 sides。
+        ADJUST 枚举保留供历史挂起帧 / API；语义与 CONTINUE+note 同构。
+        """
 
         if decision is CheckpointDecision.STOP:
             closing = (note or "").strip() or "用户停止了辩论，未开赛。"
@@ -205,9 +213,12 @@ class DebateTool:
             )
 
         args = dict(arguments)
-        if decision is CheckpointDecision.ADJUST and (note or "").strip():
-            # 调整 = 用户改写辩题后开赛（立场保留；备注覆盖 motion）。
-            args["motion"] = note.strip()
+        note_text = (note or "").strip()
+        if note_text and decision in (
+            CheckpointDecision.CONTINUE,
+            CheckpointDecision.ADJUST,
+        ):
+            args["_kickoff_ask"] = note_text
 
         return await self.execute(args, self._base_tool_context, skip_kickoff=True)
 
@@ -290,18 +301,29 @@ class DebateTool:
             motion=config.motion[:80],
         )
 
-        moderator = Moderator(provider=self._llm, model=moderator_model)
+        moderator = Moderator(
+            provider=self._llm,
+            model=moderator_model,
+            run_id=moderator_run_id,
+            parent_run_id=self._captain_run_id,
+        )
         runner = make_round_runner(self, execution_id, moderator_run_id, config)
         cross_exam_runner = make_cross_exam_runner(self, execution_id, moderator_run_id, config)
         closing_runner = make_closing_runner(self, execution_id, moderator_run_id, config)
 
-        async def _emit_round_start(round_no: int, focus: str) -> None:
+        from agentcore.runtime.debate.moderator_agenda import cross_exam_enabled
+
+        cx_enabled = cross_exam_enabled(config)
+
+        async def _emit_round_start(round_no: int, focus: str, opening: str) -> None:
             self._sink.emit(
                 debate_round_started(
                     execution_id=execution_id,
                     moderator_run_id=moderator_run_id,
                     round_no=round_no,
                     focus=focus,
+                    cross_exam_enabled=cx_enabled,
+                    opening=opening,
                 )
             )
 
@@ -339,6 +361,17 @@ class DebateTool:
                 on_round_start=_emit_round_start,
                 on_round=_emit_round,
                 on_round_boundary=_round_boundary if self._ambient_armed else None,
+            )
+        except PlanOnlyAbortError:
+            # First-round run_plan already emitted; end the CEO turn without debaters.
+            summary = "[plan-only] 已记录辩论计划，跳过辩手执行。"
+            logger.info("debate.plan_only_done", motion=config.motion[:80])
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output=summary,
+                effect=ToolEffect.HANDOFF,
+                final_text=summary,
             )
         except Exception as exc:  # noqa: BLE001 — 辩论崩溃降级为工具失败，让 CEO 回落
             logger.exception("debate.failed", motion=config.motion[:80])

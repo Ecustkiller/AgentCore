@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from agentcore.core.errors import SandboxError
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.runtime.context.project_profile import ProjectProfile, detect_project_profile
+from agentcore.runtime.context.workspace_profile import WorkspaceProfile, detect_workspace_profile
 from agentcore.tools.builtin.test_parsers import (
     TestRunResult,
     parse_generic_output,
@@ -44,7 +44,7 @@ TEST_RUN_PARAMETERS: dict[str, Any] = {
             "type": "string",
             "enum": ["pytest", "vitest", "jest", "auto"],
             "default": "auto",
-            "description": "测试框架。auto 时从 ProjectProfile 自动检测。",
+            "description": "测试框架。auto 时从 WorkspaceProfile 自动检测。",
         },
         "filter": {
             "type": "string",
@@ -135,7 +135,7 @@ async def _file_exists(backend: WorkspaceBackend, path: str) -> bool:
 
 async def _detect_framework(
     backend: WorkspaceBackend,
-    profile: ProjectProfile,
+    profile: WorkspaceProfile,
     framework_arg: str,
 ) -> Framework | None:
     if framework_arg in ("pytest", "vitest", "jest"):
@@ -167,7 +167,7 @@ async def _detect_framework(
     return None
 
 
-def _base_command(framework: Framework, profile: ProjectProfile) -> list[str]:
+def _base_command(framework: Framework, profile: WorkspaceProfile) -> list[str]:
     if framework == "pytest":
         if "uv" in profile.package_managers:
             return ["uv", "run", "pytest", "--tb=short", "-q"]
@@ -355,7 +355,7 @@ class TestRunTool:
                 duration_ms=0,
             )
 
-        profile = await detect_project_profile(context.backend)
+        profile = await detect_workspace_profile(context.backend)
         framework = await _detect_framework(context.backend, profile, framework_arg)
         if framework is None:
             return ToolResult(
@@ -397,6 +397,11 @@ class TestRunTool:
             language="bash",
             timeout_seconds=_DEFAULT_TIMEOUT,
             on_output=_make_output_callback(context),
+            network_mode=(
+                "restricted"
+                if context.permission_preset == "full_trust"
+                else "none"
+            ),
         )
 
         if context.on_phase:

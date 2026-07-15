@@ -1,7 +1,12 @@
 import { describeStreamError, streamErrorAction } from "@/lib/errors";
 import { loadLatestWindow } from "@/services/messages";
+import {
+  type ConversationRecovery,
+  loadRecovery,
+} from "@/services/resume";
 import { attachConversation } from "@/services/streamConversation";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
+import { beginTurnPreflight } from "@/stores/conversation/turnPhaseActions";
 import { useExecutionStore } from "@/stores/execution";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import {
@@ -64,6 +69,7 @@ export async function rejoinLiveTurn(conversationId: string): Promise<boolean> {
 
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
+  beginTurnPreflight(conversationId);
   try {
     const outcome = await attachConversation(conversationId, ac.signal);
     if (outcome === "attached") return true;
@@ -126,6 +132,39 @@ export function markGhostInterrupted(conversationId: string): void {
 }
 
 /**
+ * Cloud-path settle for a last assistant with ``status===running``.
+ *
+ * Open-time hydrate races ``loadRecovery`` against ``fetchMessageWindow``;
+ * recovery often finishes first. A cold pause that lands in between leaves a
+ * stale empty snapshot (``!cloudLive ∧ pausedCount===0``) while the message
+ * window still shows ``running`` — marking ghost then would wipe the pause
+ * latch. Re-fetch once when the snapshot looks empty (sidecarAttach
+ * ``attached:false`` precedent), then decide on the fresh facts:
+ *
+ * - live ∧ paused=0 → rejoin
+ * - paused≥1 → leave alone (``loadRecovery`` already hydrated pause store)
+ * - still !live ∧ paused=0 → real dead-lease / TTL degrade → ghost
+ */
+export async function settleCloudRunningAssistant(
+  conversationId: string,
+  recovery: ConversationRecovery,
+): Promise<"rejoin" | "ghost" | "hold"> {
+  let snap = recovery;
+  if (!snap.cloudLive && snap.pausedCount === 0) {
+    snap = await loadRecovery(conversationId);
+  }
+  if (snap.cloudLive && snap.pausedCount === 0) {
+    void rejoinLiveTurn(conversationId);
+    return "rejoin";
+  }
+  if (!snap.cloudLive && snap.pausedCount === 0) {
+    markGhostInterrupted(conversationId);
+    return "ghost";
+  }
+  return "hold";
+}
+
+/**
  * On opening a conversation, rejoin a live run or surface interrupted affordance
  * (P4 unified hydrate · 实时重连续看 C1 · slice 1b).
  *
@@ -140,6 +179,7 @@ export async function attachOnOpen(conversationId: string): Promise<void> {
 
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
+  beginTurnPreflight(conversationId);
   try {
     await attachConversation(conversationId, ac.signal);
   } catch (err) {

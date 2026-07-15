@@ -28,7 +28,7 @@
             "id": "rt_mod1",
             "role": "主持人",
             "model_preference": "strong",
-            "thinking": true,
+            "thinking": false,
             "reasoning_effort": "high"
           }
         ],
@@ -60,7 +60,9 @@
         "execution_id": "exec1",
         "moderator_run_id": "rt_mod1",
         "round_no": 1,
-        "focus": "AI 治理的第一性问题：风险从何而来"
+        "focus": "AI 治理的第一性问题：风险从何而来",
+        "cross_exam_enabled": false,
+        "opening": "圆桌开场：先问 AI 治理的风险从何而来。"
       },
       "timestamp": "2026-01-01T00:00:00.004Z"
     },
@@ -280,19 +282,25 @@
             "key": "a",
             "name": "技术视角",
             "run_id": "rt_mod1_r1_a",
-            "ok": true
+            "ok": true,
+            "absent": false,
+            "arguments": []
           },
           {
             "key": "b",
             "name": "监管视角",
             "run_id": "rt_mod1_r1_b",
-            "ok": true
+            "ok": true,
+            "absent": false,
+            "arguments": []
           },
           {
             "key": "c",
             "name": "产业视角",
             "run_id": "rt_mod1_r1_c",
-            "ok": true
+            "ok": true,
+            "absent": false,
+            "arguments": []
           }
         ],
         "clashes": [
@@ -316,7 +324,9 @@
         "execution_id": "exec1",
         "moderator_run_id": "rt_mod1",
         "round_no": 2,
-        "focus": "第二轮：三方就『问责机制』正面交锋"
+        "focus": "第二轮：三方就『问责机制』正面交锋",
+        "cross_exam_enabled": false,
+        "opening": ""
       },
       "timestamp": "2026-01-01T00:00:00.016Z"
     },
@@ -517,7 +527,7 @@
         "id": "rt_mod1",
         "role": "主持人",
         "modelPreference": "strong",
-        "thinking": true,
+        "thinking": false,
         "reasoningEffort": "high",
         "status": "cancelled",
         "currentRunId": "rt_mod1",
@@ -611,7 +621,8 @@
         "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [],
-        "escalations": []
+        "escalations": [],
+        "process": []
       },
       {
         "id": "rt_mod1_r1_a",
@@ -649,7 +660,13 @@
         "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "技术视角：能力外溢是根因。"
+          }
+        ]
       },
       {
         "id": "rt_mod1_r1_b",
@@ -687,7 +704,13 @@
         "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "监管视角：问责缺位才是关键。"
+          }
+        ]
       },
       {
         "id": "rt_mod1_r1_c",
@@ -725,7 +748,13 @@
         "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "产业视角：别忽视落地成本。"
+          }
+        ]
       },
       {
         "id": "rt_mod1_r2_a",
@@ -796,7 +825,13 @@
             "files": []
           }
         ],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "技术视角续：问责需可观测性支撑。"
+          }
+        ]
       },
       {
         "id": "rt_mod1_r2_b",
@@ -867,7 +902,13 @@
             "files": []
           }
         ],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "监管视角续：可观测性应立法强制。"
+          }
+        ]
       }
     ],
     "progress": {
@@ -900,19 +941,25 @@
             "key": "a",
             "name": "技术视角",
             "run_id": "rt_mod1_r1_a",
-            "ok": true
+            "ok": true,
+            "absent": false,
+            "arguments": []
           },
           {
             "key": "b",
             "name": "监管视角",
             "run_id": "rt_mod1_r1_b",
-            "ok": true
+            "ok": true,
+            "absent": false,
+            "arguments": []
           },
           {
             "key": "c",
             "name": "产业视角",
             "run_id": "rt_mod1_r1_c",
-            "ok": true
+            "ok": true,
+            "absent": false,
+            "arguments": []
           }
         ],
         "clashes": [
@@ -939,6 +986,8 @@
         "cross_exam": []
       }
     ],
+    "crossExamEnabled": false,
+    "debateOpening": "圆桌开场：先问 AI 治理的风险从何而来。",
     "teamSynthesisPreview": null,
     "turnWarning": null,
     "teamNotes": []

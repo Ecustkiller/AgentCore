@@ -1,13 +1,13 @@
 """CEO 协调模式 Phase 1：确定性团队进展摘要单元测试。"""
 
-from agentcore.runtime.events import EventSink, EventType
-from agentcore.runtime.runs.plan import RunPlan
-from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
-from agentcore.tools.builtin.delegate.team_synthesis import (
+from agentcore.runtime.delegate.team_synthesis import (
     build_team_synthesis_preview,
     maybe_emit_team_synthesis_preview,
     worker_output_blurb,
 )
+from agentcore.runtime.events import EventSink, EventType
+from agentcore.runtime.runs.plan import RunPlan
+from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 
 
 def test_solo_worker_returns_none():

@@ -15,7 +15,7 @@ from tests.delegate.conftest import (
 async def test_workers_gated_in_local_mode(monkeypatch):
     # Skip kickoff so the executor path runs (gate forwarding is what we assert).
     monkeypatch.setattr(
-        "agentcore.tools.builtin.delegate.preview.should_kickoff",
+        "agentcore.runtime.delegate.preview.should_kickoff",
         lambda *a, **k: False,
     )
     captured = capture_gate(monkeypatch)

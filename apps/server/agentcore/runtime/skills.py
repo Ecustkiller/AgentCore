@@ -14,6 +14,10 @@
 ``requires_tools`` 把现有的 live-user 门（ask_user 仅在有活跃用户时装配）一般化：一个
 Skill 只在它依赖的工具全部装配时才进目录，故提示词永不广告 CEO 手里没有的能力（沿用
 现有不变量）。
+
+维护约定（防双源漂移）：各 Skill 的 ``body`` 是**面向模型的 HOW 操作指引**的单一真相源；
+``docs/03-AI核心`` 各专题只写设计意图与约束（What/Why），不逐字复述 body。改动编排行为时
+两处同步：行为语义以设计文档为准，喂给模型的措辞以本文件为准。
 """
 
 from __future__ import annotations
@@ -22,8 +26,7 @@ from dataclasses import dataclass
 
 from agentcore.runtime.runs.playbooks import available_playbooks
 
-# 拆·playbook 固化 (§2.1): the固化形状 listing embedded in the team-orchestration skill, sourced
-# from the registry so the skill never drifts from the actual set / their summaries.
+# playbook 降级为形状词汇教学示例（协作优先重设计阶段 2）：listing 仍嵌进 skill，口径改为对照学形状。
 _PLAYBOOK_LISTING = available_playbooks()
 
 
@@ -81,9 +84,32 @@ class SkillRegistry:
 
 _TEAM_ORCHESTRATION_ADVANCED = """\
 <team_orchestration_advanced>
-进阶档位建立在一个前提上：你已确认需要多 worker。但多数任务一个 worker 端到端完成更高效——\
-只有当并行 / 专业化收益明显超出协调成本时，才动用下面的进阶档位。先问自己：一个 coherent worker \
-能做完吗？能就不拆。
+实质任务默认组队。先想形状再拆任务——教的是【词汇 + 组合】，不是成品模板。\
+自检：换个主题，形状还一模一样吗？还一样就错了。
+
+形状词汇（按任务结构选、可组合）：
+- 并列对象分组：每对象一员（重档升 lead 内拆维度），尾挂横向汇总
+- 角度扇出：N 角度并行调研 / 产出，汇入下游
+- 证据驱动流水线：调研 → 结构定稿（主拍板）→ 产出
+- 独立审查：审查者 ≠ 作者，产出结构化问题清单
+- 有界返工环：审查发现 → 原作者带现场续派修订 → 复核，≤2 轮，到限交代缺口
+- 契约共享面：wall + seed_notes 播种口径 / 接口 / 约束，decision 便签广播
+- 独立多透镜诊断：对既有材料 N 透镜并审 → 风险分级汇总 → 风险确认卡\
+（`ask_user` 带 `card="risk_ack"`）让用户勾选要处理项 → 定向修订
+- 部件一致性对账：并行部件起草 → 对账节点专查接缝 → 定向修订
+- 对抗辩论：Moderator 驱动交锋；其他原型真冲突才开局部辩（勿默认冲突即辩）
+- 发散挑选：N 风格并行 →（轻量互评）→ 方案挑选卡（`ask_user` 带 `card="proposal_pick"`）\
+让用户挑一个 → 中选深化
+
+组合：多对象+成篇 → 分组×流水线；构建+并行模块 → 契约共享面+独立验证；\
+审查要改 → 接有界返工环；结论真冲突 → 局部辩论。
+
+三档：默认中档。轻=保底（构建类轻档也要「实现+独立验证」双人）；\
+重=任务规模大或用户点名才上。控税靠选档，不靠默认单干。
+
+教学示例形状（playbook）：下列是词汇表的可实例化示例——对照学形状，勿「是就直接套」。\
+形态贴合时可设 `playbook` + `playbook_args` 生成骨架（与手写 tasks 二选一）；否则按词汇手写。\
+可用：""" + _PLAYBOOK_LISTING + """。槽位见 `delegate` 的 playbook_args。
 
 按需用好 `delegate` 的进阶档位（不必都填）：
 
@@ -92,16 +118,23 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 勿依赖其调节推理强度。
 - 质量契约：对产出有硬性要求（须含某些小标题 / 关键词、限定格式或字数）时用 `deliverable` \
 声明——未达标会带着具体差距自动返工一次；返工后仍不达标默认仅附质检提醒（软），\
-`deliverable.strict=true` 则判该 worker 失败（硬退）。`deliverable.name` 描述想要的产出形态。
+`deliverable.strict=true` 则判该 worker 失败（硬退）。`deliverable.name` 描述想要的产出形态。\
+格式要求【只写在 deliverable】，task 正文不要再复述「输出 JSON / 必含章节」等格式条款。
 - 审查类任务的统一契约（派【审查 / 质检 / 评审】worker 时【必设 deliverable】）：无论并行扇出\
-还是 `depends_on` 链下游，每个审查官 task 都必须带 `deliverable` 锁定统一输出格式——否则各审查官\
-各说各的、打分维度各异，你收工时无法自动合并，`revise` 也无法字段级操作。推荐 JSON 模板\
-（多路并行时各审查官 deliverable 完全一致，只换 role 与审查侧重；在 task 里写明该官负责的维度\
-与打分锚点）：\
-`deliverable: { "output_format": "json", "name": "JSON 对象，必含三顶层字段：problems（问题数组，每项含 severity/description/evidence）、\
-suggestions（修改建议数组）、score（0–10 整数，该维度打分）。只输出 JSON，不要附带说明文字。" }`\
-纯文字备选：`required_sections: ["问题", "建议", "评分"]`（优先 JSON，便于机械合并）。审查是中间\
-产物、注入下游或供你汇总，不设 `requires_files`。
+还是 `depends_on` 链下游，每个审查官 task 都必须带 `deliverable` 锁定统一输出形态——否则各审查官\
+各说各的、打分维度各异，你收工时难对齐。**【默认 prose】**（多路并行时各官 deliverable 完全一致，\
+只换 role 与审查侧重）：\
+`deliverable: { "form": "prose", "required_sections": ["问题", "建议", "评分"], \
+"name": "审查意见（含问题 / 建议 / 评分）" }`。\
+task 正文只给【被审材料的文件路径或引用】+【本官审查焦点】，【不要】把协议 / 原文全文复制进多个\
+并行 task，也【不要】在 task 里再写一遍格式要求。审查 / 分析类优先依据已有原文材料，确有必要才\
+`web_search`。审查默认是中间产物、注入下游或供你汇总：prose 批不设 `requires_files`。
+- 结构化交付走文件通道（仅当下游真需字段级机械合并时才用 JSON）：worker 把 JSON 写入工作区文件，\
+契约验「文件存在 + 可解析」。形态示例：\
+`deliverable: { "form": "files", "output_format": "json", "artifacts": ["reviews/legal.json"], \
+"name": "JSON 对象，必含 problems（含 severity/description/evidence）/ suggestions / score（0–10）" }`\
+——`artifacts` 对账路径存在，`output_format=json` 校验该文件可解析；聊天正文不必再贴一份 JSON。\
+【禁止】把 `output_format=json` 与 `required_sections` 混用（后者是 Markdown 小标题语义，混用会假失败）。
 - 依赖流水线：多阶段（设计 → 实现 → 审查）用【同一次 `delegate`】里的 `depends_on` 串成\
 依赖图——这些 worker 都在你下面【同一层】，上游产出自动注入下游；`depends_on` 只定先后、\
 不加层级。DAG 模式下每个 task 必须显式声明 `depends_on`（即使为空列表 `[]`）。如果 task \
@@ -120,23 +153,30 @@ suggestions（修改建议数组）、score（0–10 整数，该维度打分）
 4 个 sub-worker）、其子成员不能继续委派。几个扁平的并行小活（如查三个不相干话题）直接一次 \
 `delegate` 扇出即可，别为它再套一层 lead——那是纯开销。
 - 轻量直出：当只派【一个】worker、且这次委派就是整件事的最终交付时，设 `finalize=true`：\
-该 worker 成功后其产出直接作为你的回复呈现，省掉一轮收尾。只在确定看到结果后无需再做\
-别的事时才用；只要可能要据结果继续委派、或一次派了多个 worker，就别设。
+该 worker 成功后其产出直接作为你的回复呈现，省掉一轮收尾。只留给机械单步；只要可能要据结果\
+继续委派、或一次派了多个 worker，就别设。
 - 协调模式（默认开）：派【≥2 个】worker 时默认进入协调——`delegate` 立即返回『团队已启动』，\
 你边看边调（`update_synthesis` 渐进合成 / `cancel_worker` 中途终止 / `resolve_escalation` 仲裁\
 阻塞升级）。**`resolve_escalation` 只在协调模式下可用**；单 worker 时阻塞升级直达用户，\
 你无法（也不应尝试）用本工具裁决。只需经典阻塞等待（等全队完成再返回）时传 `coordinate=false`\
-显式退出。单 worker、`finalize`、嵌套 lead 不进协调。
-- 交付物落盘：当产出是用户要【打开 / 运行 / 编辑 / 保存 / 复用】的实质交付物——可运行代码 / \
-网页 / 应用、脚本、配置，以及成篇的报告 / 分析稿 / 方案 / 文档（成篇文字交付写成 .md）——\
-给该 task 设 `deliverable.requires_files=true`：worker 未调用 file_write 落盘即判未达标、自动\
-返工，从结构上杜绝把整份内容粘在回复正文、工作区却空着。再在 task 里点明「产出物是文件，\
-请用文件工具写进工作区」、必要时用 `deliverable.name` 写清期望文件，双保险。只有【中间产物】\
-（要注入下游 worker、并非最终交付）才留作文字、不设此契约。
+显式退出。单 worker、`finalize`、嵌套 lead 不进协调；含 `checkpoint_after` 把关节点的批\
+也不进协调（走阻塞等待，好让把关卡到点弹给用户）——这是预期，别为进协调而去掉把关点。
+- 交付形态（`deliverable.form`，优先用）：产出给用户【看】（回答 / 分析 / 汇报 / 创意文字 / \
+打招呼）→ `form=prose`（正文交付，引擎不授写文件工具）；给用户【用】（要打开 / 运行 / 编辑 / \
+保存的文件——代码 / 网页 / 配置等）→ `form=files`（隐含 `requires_files`，未落盘自动返工）。\
+省略 = worker 自行判断（兼容旧行为）。不要对 prose 批设 `completion_criteria=files_written`\
+（契约矛盾，会被拒绝）。
+- 交付物落盘（遗留开关）：未用 `form` 时仍可用 `deliverable.requires_files=true` 强制落盘验收。\
+`form=files` 或 `artifacts` 已隐含，不必再设。再在 task 里点明「产出物是文件，请用文件工具写进\
+工作区」、必要时用 `deliverable.name` 写清期望文件，双保险。只有【中间产物】（要注入下游 worker、\
+并非最终交付）才留作文字、不设此契约。
 - 完成验收（`completion_criteria`）：用户要【安装 / 运行 / 打开软件、联调集成、跑通测试】才算交付的\
 任务——设 `completion_criteria=code_verified`，引擎校验 worker 是否用 `code_execute` / `test_run`\
-在工作区实际跑通；纯写文件 / 成篇文档 / 报告、只需阅读编辑不必启动进程的——`files_written`（常配合 \
-`deliverable.requires_files` 确保落盘）。别混用：能跑才算完的活别只验「写了文件」。
+在工作区实际跑通；纯写文件、只需阅读编辑不必启动进程的——`files_written`（常配合 \
+`deliverable.form=files`）。别混用：能跑才算完的活别只验「写了文件」；全员 prose 的批次别设 \
+`files_written`。`type=custom`【不被引擎验证】——设了也不会机械验收，却可能误导你以为已加闸；\
+需要可验证完成条件时用 `files_written` / `code_verified`，或在各 worker 的 \
+`deliverable.artifacts` / `form=files` 上声明。
 - 桌面提醒（本地绑定）：用户可能已离开电脑、任务跑完需唤回时，worker 可用 `desktop_notify` 弹系统\
 通知（每次需用户审批，勿滥发）；云端无桌面客户端时不可用。
 - 约束 vs 方案（写 task 的根本分寸）：task 里交【需求与约束】——目标、硬指标、关键前提、\
@@ -153,8 +193,8 @@ suggestions（修改建议数组）、score（0–10 整数，该维度打分）
 查——既慢，又把大量正文堆进你当前上下文。把调查按几个【独立角度】拆开（按模块 / 子系统 / 来源 / \
 对比维度），【一次 `delegate`】并行派出调研 worker（它们同持检索工具）；在每个 task 里点明「回报\
 【精炼结论 + 关键证据指引（文件:行 / 链接）】，不要回贴整段文件正文」——回到你手里的便是 N 份短\
-摘要而非 N 份原文，你据此综述成给用户的答复。这类纯调查通常【无交付物、不必落盘】，别给它们设\
-`deliverable.requires_files`；它和下一条「调研驱动的大型交付」的差别只在末端有没有成篇产物。
+摘要而非 N 份原文，你据此综述成给用户的答复。这类纯调查通常【无交付物、不必落盘】，设 \
+`deliverable.form=prose`；它和下一条「调研驱动的大型交付」的差别只在末端有没有成篇产物。
 - 调研驱动的大型交付，让结构跟着证据走：对需大量调研的成篇交付（论文 / 研究报告 / 方案），别在\
 调研回来前就把结构定死。把「定结构」做成证据驱动、可被用户把关的显式一步——并行调研 worker →\
 （写作 worker 先据调研产出【提纲】，给该提纲步骤设 `checkpoint_after=true` 让用户改 / 批）→ 同一\
@@ -168,27 +208,23 @@ worker 据定稿提纲写全文，用 `depends_on` 串起。提纲由专家据�
 与上一条 `checkpoint_after` 的分别：checkpoint_after 是【让用户把关】中途结果，bind_after_deps 是\
 【你自己据证据再定下游职责】、不打扰用户。克制使用——只在『此刻写死下游 spec 很可能跑偏』时设；\
 上游已定、下游此刻就能写清的步骤别设（徒增一次回合）。
-- 固化形状（playbook）：少数高频形状已固化成可一键实例化的确定性骨架——设 `playbook` + \
-`playbook_args` 即生成整支团队（与手写 tasks 二选一），免每次手搓。可用：""" + _PLAYBOOK_LISTING + """。\
-开工前先对一下：本次的活是不是正好是这些形状之一？是就直接套（省去手搓、还自带依赖编排与便签墙\
-对齐等最佳实践），别再一片片手搭；只有形态确实特殊时才手写 tasks。各形状的槽位见 `delegate` 的 \
-playbook_args 参数说明。
 - 团队便签墙（并行兄弟对齐）：同一批无 `depends_on`、同时开跑的 worker 可共享一面便签墙\
 （`post_note` / `read_notes` / `amend_note`）。**墙的存在性由你在 `delegate` 上显式声明**\
 `coordination`（缺省 `none`）：子任务间存在需要边干边对齐的共享面（共建接口 / 字段 / 文件、\
 结论互相影响、互相审查）→ `coordination="wall"`；各写各的、互不依赖的正交扇出 → 保持缺省\
 `none`（不建墙、不授便签三件套，省开销与 UI 噪音）。传了非空 `seed_notes` / `team_brief` 会\
-隐含升级为 wall；`complexity_hint=light` 隐含 none。`build_feature` playbook 默认 wall（接口\
+隐含升级为 wall；`complexity_hint=light` 隐含 none。`build_feature` 教学示例默认 wall（接口\
 契约经便签对齐）。**主 Agent 可在 `delegate` 上预置共识**：`seed_notes`（`[{kind,text}]` \
 写入便签墙，首波并行 worker 开局即见）与 `team_brief`（回合级「团队共识」块注入每个 worker 开局上下文，\
 跨多波 `delegate` 仍沿用直至覆盖）——brief 写总述、seed 钉关键决定，减少在各 task 里重复粘贴同一段背景。\
 当你一次派出【多路并行审查 / 质检 / 多角度审同一份上游产物】时：\
-① 设 `coordination="wall"`；② 每个审查 task 必设统一 `deliverable`（见上「审查类任务的统一契约」）；\
-③ 各 task 写清共享验收维度（受众 / 风格 / 方向底线），但不必给每个审查官复制粘贴同一大段背景——\
+① 设 `coordination="wall"`；② 每个审查 task 必设统一 `deliverable`（见上「审查类任务的统一契约」，\
+默认 prose + required_sections；勿在 task 正文双写格式）；③ 各 task 写清【材料路径 + 本官焦点】与\
+共享验收维度（受众 / 风格 / 方向底线），【不要】给每个审查官复制粘贴同一大段协议 / 原文——\
 横向重大信号靠便签补齐；④ 在各 task 里明确要求：谁先发现【整体方向错了 / 致命问题 / 继续抠细节已无意义】，\
 必须【立刻】`post_note`（kind=heads_up）广播一行警示，【再】写详细意见，免得并行队友还在无关细节上\
-白费（简介流水线类任务尤甚）；⑤ `build_feature` 等 playbook 已把接口契约类决定写成「我定了」\
-便签——手搓并行审查时照此照办。收工时读概览里的【团队便签】核对是否与各人产出一致。
+白费（简介流水线类任务尤甚）；⑤ 契约共享面类任务把接口契约写成「我定了」便签——手搓并行审查时照此照办。\
+收工时读概览里的【团队便签】核对是否与各人产出一致。
 </team_orchestration_advanced>"""
 
 _DEBATE_AND_REVIEW = """\
@@ -218,6 +254,11 @@ _DEBATE_AND_REVIEW = """\
 `thorough=false`（单轮快速对碰，对**含圆桌在内的所有形态**生效）用于【用户只想轻量看看】：明说\
 「快速对碰一下」，或意图明显轻量（如「测试下这个功能」「简单一点就好」「随便聊聊 / 看个大概」）\
 ——这类不该被强制跑满多轮、产出冗余的「修订 v2」；其余默认 `thorough=true`（圆桌多轮、正反/红队辩透）。
+
+赛前底料（`background`，可选）：具体案件 / 真实事件 / 有客观事实基础的命题，建议开辩前先快速检索\
+3–5 条已核实客观事实（时间线、金额、案号、程序节点等非观点信息，尽量带出处）传入——首轮由主持人\
+以「双方共享底料」名义喂双方，避免各方重复检索同一批基础事实；只放客观事实，不放观点 / 评价 / \
+立场分析。纯价值观或开放式命题不必传。
 
 开辩前先对齐用户原意（提炼命题是把争议【磨锋利】，不是把用户已给的框【改窄或偷换】）：`motion` / \
 `sides` 是你替用户框定这场辩论，两条铁律——① 忠于用户点名的【对立极】：ta 若已给出争议轴或具体两极\
@@ -309,6 +350,18 @@ _ASK_USER_MIDTASK = """\
 
 辩论 / 交叉审查跑完后，若要在对立结论之间取舍，正适合用 ask_user 把选择交给用户：在 `questions` 里给出\
 「采纳正方 / 采纳反方 / 都要 / 补充论证」这类具体选项让 ta 拍板。
+
+【两种专用拍板卡（`card` 参数）】两类高频主拍板有专用卡片形态，用 `card` 声明（都要求 blocking，\
+恰好 1 个 choice 问题）：
+- 方案挑选卡 `card="proposal_pick"`（发散挑选型）：N 风格 / N 方案并行产出完成后，把候选摊给用户\
+挑一个再深化。单选、options 2–6 项：每项 `label`=方案名、`detail`=一行卖点与取舍（产物落盘的写明\
+文件名），把你最看好的一项标 `recommended`；`message` 里概述各方案差异轴。用户挑中后，用 \
+`continue_from_run_id` 唤回中选方案的原作者定向深化；未选中的不再推进。
+- 风险确认卡 `card="risk_ack"`（审查诊断型）：审查 / 诊断汇总出问题清单后，让用户勾选【要处理哪些】。\
+`multiple=true`、options 1–10 项：每项 `label` 以严重度开头（如「[高] 退款条款缺违约金上限」）、\
+`detail`=一行影响与修法建议；高危项可标 `recommended`。用户勾选后，把选中项转成定向修订委派\
+（唤回原作者，衔接有界返工环）；未勾选项在收尾里注明「已知、按用户决定未处理」。
+两种卡都是主拍板（每任务恰好一张，见主拍板纪律）——用了就不再叠开工提案或提纲把关。
 </ask_user_midtask>"""
 
 _VERIFY_AND_FIX = """\
@@ -367,6 +420,10 @@ _DELEGATE_CHECKPOINT = """\
 由调度器在波间强制执行的结构挂起——正用于「单个 delegate 跨多步、你拿不到中途控制权」的场景。只在确实\
 值得让用户在继续前把关的关键节点设；单步委派、或只给末步设都不会触发（其后已无下游可把关，那种取舍改用 \
 ask_user_midtask）。克制使用，别给每个步骤都设。
+
+含把关节点的批会走【阻塞等待】而非协调模式（把关卡要把回合完整暂停交给用户）——这是预期行为，\
+别为了进协调模式去掉把关点。提纲把关本身就是一张主拍板卡（每任务恰好一张，四选一），设了它就\
+不再叠开工提案 / 方案挑选 / 风险确认卡。
 </delegate_checkpoint>"""
 
 
@@ -376,7 +433,7 @@ ask_user_midtask）。克制使用，别给每个步骤都设。
 _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="team_orchestration_advanced",
-        summary="多 worker 并行 / 依赖流水线 / 模型档位 / 契约 / 嵌套委派 / 轻量直出的进阶用法",
+        summary="形状词汇组队 / 多 worker 流水线 / 契约 / 嵌套委派 / 协调墙的进阶用法",
         body=_TEAM_ORCHESTRATION_ADVANCED,
     ),
     SystemSkill(

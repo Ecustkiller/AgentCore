@@ -291,6 +291,14 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   TeamNotesPanel: { verdict: "ported", surface: "TeamView · 团队便签" },
   SourceCards: { verdict: "ported", surface: "AssistantView · 来源" },
   StatusStrip: { verdict: "ported", surface: "ChatPage · 状态 meta 行" },
+  DebateProgressLine: {
+    verdict: "ported",
+    surface: "TeamView · 辩论进展预览（fold 对齐 StatusStrip）",
+  },
+  TeamSynthesisPreviewLine: {
+    verdict: "ported",
+    surface: "TeamView · 协调进展预览（fold 对齐 StatusStrip）",
+  },
   StreamingIndicator: {
     verdict: "ported",
     surface: "ChatPage · 流式状态条",

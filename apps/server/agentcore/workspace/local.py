@@ -29,12 +29,21 @@ from typing import Any
 
 from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
 from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp
+from agentcore.workspace.external_mounts import (
+    ExternalMount,
+    external_ns,
+    parse_external_path,
+    readonly_write_error,
+    route_external,
+)
 from agentcore.workspace.protocol import (
     CodeSearchResult,
     DirEntry,
     GrepHit,
     GrepQuery,
     GrepResult,
+    OutsideWorkspace,
+    PathNotFound,
     ReadLinesResult,
     ReplaceOutcome,
     TreeEntry,
@@ -77,10 +86,42 @@ class LocalWorkspace:
         # workspaces a turn actually changed (see WorkspaceBackend.dirty). For
         # local mode the snapshot is the 本地→云 handoff bridge (§四 / P2e).
         self._dirty = False
+        # W3 session read-only mounts (``external/<alias>/…``). Empty by default;
+        # ``attach_external_mounts`` wires grants at turn start.
+        self._mounts: dict[str, ExternalMount] = {}
 
     @property
     def dirty(self) -> bool:
         return self._dirty
+
+    def attach_external_mounts(self, mounts: dict[str, ExternalMount]) -> None:
+        """Attach session-scoped read-only mounts for this turn (W3)."""
+        self._mounts = dict(mounts)
+
+    def _route(
+        self, path: str, *, write: bool = False
+    ) -> tuple[str | None, str, str | None]:
+        """Map a model path to ``(override_root_id, desktop_rel, alias)``.
+
+        ``override_root_id is None`` → primary workspace binding (apply ``_in``).
+        Unknown ``external/<alias>`` → ``PathNotFound``. Write to a readonly mount
+        → ``OutsideWorkspace`` with a clear message (hard boundary).
+        """
+        parsed = parse_external_path(path)
+        if parsed is None:
+            return None, self._in(path), None
+        routed = route_external(path, self._mounts)
+        if routed is None:
+            raise PathNotFound(path)
+        if write and routed.mount.readonly:
+            raise OutsideWorkspace(readonly_write_error(path))
+        rel = routed.rel if routed.rel not in ("", ".") else "."
+        return routed.mount.root_id, rel, routed.mount.alias
+
+    def _out_routed(self, path: str, alias: str | None) -> str:
+        if alias is None:
+            return self._out(path)
+        return external_ns(alias, path)
 
     def _in(self, path: str) -> str:
         """Workspace-relative path → container-relative (prefix the subpath base).
@@ -111,51 +152,67 @@ class LocalWorkspace:
         return path[len(prefix) :] if path.startswith(prefix) else path
 
     async def read(self, path: str) -> str:
-        value = await self._channel.request(WorkspaceOp.READ, {"path": self._in(path)})
+        root_id, rel, _ = self._route(path)
+        value = await self._channel.request(
+            WorkspaceOp.READ, {"path": rel}, root_id=root_id
+        )
         return str(value)
 
     async def write(self, path: str, content: str) -> int:
+        root_id, rel, _ = self._route(path, write=True)
         value = await self._channel.request(
-            WorkspaceOp.WRITE, {"path": self._in(path), "content": content}
+            WorkspaceOp.WRITE, {"path": rel, "content": content}, root_id=root_id
         )
         self._dirty = True
         return int(value)
 
     async def append(self, path: str, content: str) -> int:
+        root_id, rel, _ = self._route(path, write=True)
         value = await self._channel.request(
-            WorkspaceOp.APPEND, {"path": self._in(path), "content": content}
+            WorkspaceOp.APPEND, {"path": rel, "content": content}, root_id=root_id
         )
         self._dirty = True
         return int(value)
 
     async def read_bytes(self, path: str) -> bytes:
         # The desktop returns base64 (JSON has no byte type); decode back to raw.
-        value = await self._channel.request(WorkspaceOp.READ_BYTES, {"path": self._in(path)})
+        root_id, rel, _ = self._route(path)
+        value = await self._channel.request(
+            WorkspaceOp.READ_BYTES, {"path": rel}, root_id=root_id
+        )
         return base64.b64decode(str(value))
 
     async def write_bytes(self, path: str, data: bytes) -> int:
+        root_id, rel, _ = self._route(path, write=True)
         value = await self._channel.request(
             WorkspaceOp.WRITE_BYTES,
-            {"path": self._in(path), "data": base64.b64encode(data).decode("ascii")},
+            {"path": rel, "data": base64.b64encode(data).decode("ascii")},
+            root_id=root_id,
         )
         self._dirty = True
         return int(value)
 
     async def list(self, directory: str, pattern: str) -> list[DirEntry]:
+        root_id, rel, alias = self._route(directory)
         value = await self._channel.request(
-            WorkspaceOp.LIST, {"directory": self._in(directory), "pattern": pattern}
+            WorkspaceOp.LIST, {"directory": rel, "pattern": pattern}, root_id=root_id
         )
         return [
-            DirEntry(path=self._out(str(e["path"])), is_dir=bool(e["is_dir"]))
+            DirEntry(
+                path=self._out_routed(str(e["path"]), alias),
+                is_dir=bool(e["is_dir"]),
+            )
             for e in (value or [])
         ]
 
     async def read_lines(
         self, path: str, *, offset: int = 1, limit: int | None = None
     ) -> ReadLinesResult:
+        root_id, rel, _ = self._route(path)
         value = await self._channel.request(
             WorkspaceOp.READ_LINES,
-            {"path": self._in(path), "offset": offset, "limit": limit},
+            {"path": rel, "offset": offset, "limit": limit},
+            root_id=root_id,
         )
         value = value or {}
         return ReadLinesResult(
@@ -173,20 +230,22 @@ class LocalWorkspace:
         max_depth: int = 3,
         max_entries: int = 200,
     ) -> TreeResult:
+        root_id, rel, alias = self._route(directory)
         value = await self._channel.request(
             WorkspaceOp.LIST_TREE,
             {
-                "directory": self._in(directory),
+                "directory": rel,
                 "pattern": pattern,
                 "max_depth": max_depth,
                 "max_entries": max_entries,
             },
+            root_id=root_id,
         )
         value = value or {}
         return TreeResult(
             entries=[
                 TreeEntry(
-                    path=self._out(str(e["path"])),
+                    path=self._out_routed(str(e["path"]), alias),
                     is_dir=bool(e["is_dir"]),
                     depth=int(e["depth"]),
                 )
@@ -214,21 +273,31 @@ class LocalWorkspace:
         return paths, bool(value.get("truncated", False))
 
     async def mkdir(self, path: str) -> None:
-        await self._channel.request(WorkspaceOp.MKDIR, {"path": self._in(path)})
+        root_id, rel, _ = self._route(path, write=True)
+        await self._channel.request(WorkspaceOp.MKDIR, {"path": rel}, root_id=root_id)
         self._dirty = True
 
     async def delete(self, path: str) -> None:
-        await self._channel.request(WorkspaceOp.DELETE, {"path": self._in(path)})
+        root_id, rel, _ = self._route(path, write=True)
+        await self._channel.request(WorkspaceOp.DELETE, {"path": rel}, root_id=root_id)
         self._dirty = True
 
     async def move(self, src: str, dst: str) -> None:
-        await self._channel.request(WorkspaceOp.MOVE, {"src": self._in(src), "dst": self._in(dst)})
+        src_root, src_rel, src_alias = self._route(src, write=True)
+        dst_root, dst_rel, dst_alias = self._route(dst, write=True)
+        if src_alias != dst_alias or src_root != dst_root:
+            raise OutsideWorkspace("不能跨会话授权目录与工作区移动文件")
+        await self._channel.request(
+            WorkspaceOp.MOVE, {"src": src_rel, "dst": dst_rel}, root_id=src_root
+        )
         self._dirty = True
 
     async def replace(self, path: str, old: str, new: str, *, all_: bool) -> ReplaceOutcome:
+        root_id, rel, _ = self._route(path, write=True)
         value = await self._channel.request(
             WorkspaceOp.REPLACE,
-            {"path": self._in(path), "old": old, "new": new, "all": all_},
+            {"path": rel, "old": old, "new": new, "all": all_},
+            root_id=root_id,
         )
         self._dirty = True
         first_line = value.get("first_line")
@@ -255,28 +324,31 @@ class LocalWorkspace:
         return False
 
     async def grep(self, query: GrepQuery) -> GrepResult:
+        root_id, rel, alias = self._route(query.directory)
         value = await self._channel.request(
             WorkspaceOp.GREP,
             {
                 "pattern": query.pattern,
-                "directory": self._in(query.directory),
+                "directory": rel,
                 "glob": query.glob,
                 "case_insensitive": query.case_insensitive,
                 "files_only": query.files_only,
                 "max_results": query.max_results,
             },
+            root_id=root_id,
         )
         return GrepResult(
             hits=[
                 GrepHit(
-                    path=self._out(str(h["path"])),
+                    path=self._out_routed(str(h["path"]), alias),
                     line_no=int(h["line_no"]),
                     text=str(h["text"]),
                 )
                 for h in value.get("hits", [])
             ],
             file_counts=[
-                (self._out(str(fc[0])), int(fc[1])) for fc in value.get("file_counts", [])
+                (self._out_routed(str(fc[0]), alias), int(fc[1]))
+                for fc in value.get("file_counts", [])
             ],
             total_matches=int(value.get("total_matches", 0)),
             truncated=bool(value.get("truncated", False)),
@@ -289,7 +361,14 @@ class LocalWorkspace:
         # shared container root; empty = the root (current behavior). Marked dirty
         # conservatively — executed code commonly writes artifacts and the backend
         # cannot introspect what ran (mirrors ServerWorkspace.execute).
+        #
+        # W3: pass conversation_id + external root_ids so the desktop injects
+        # ``AGENTCORE_EXTERNAL_<ALIAS>`` abs paths into the subprocess env — absolute
+        # paths never enter the model prompt.
         self._dirty = True
+        external_roots = {
+            alias: m.root_id for alias, m in self._mounts.items() if m.root_id
+        }
         value: dict[str, Any] = await self._channel.request(
             WorkspaceOp.EXECUTE,
             {
@@ -299,6 +378,8 @@ class LocalWorkspace:
                 "memory_limit_mb": req.memory_limit_mb,
                 "stdin": req.stdin,
                 "cwd": self._base,
+                "conversation_id": self._channel.conversation_id,
+                "external_roots": external_roots,
             },
             # Outlive the desktop's own execution timeout (the authoritative kill)
             # by the slack, so a long but legal run is not cut off by the flat

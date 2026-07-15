@@ -1,5 +1,6 @@
 import { bumpConversationCache } from "@/hooks/useConversations";
 import {
+  StreamError,
   describeStreamError,
   isRetriableStreamError,
   streamErrorAction,
@@ -7,10 +8,7 @@ import {
 import type { PlanReviewUserDecision } from "@/services/planReview";
 import { isClientOnlyResumeKey } from "@/services/resume";
 import { clearSidecarHealth, probeSidecar } from "@/services/sidecarHealth";
-import {
-  type SidecarTarget,
-  resolveSidecarRoot,
-} from "@/services/sidecarRouting";
+import { resolveSidecarRoot } from "@/services/sidecarRouting";
 import {
   regenerateConversation,
   resumeConversation,
@@ -18,19 +16,30 @@ import {
 } from "@/services/streamConversation";
 import { resumeConversationViaSidecar } from "@/services/streamConversationViaSidecar";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
+import { beginTurnPreflight } from "@/stores/conversation/turnPhaseActions";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import type { PendingResume } from "@/stores/pausedTurns";
 import { isAbort, isTransportDrop } from "./helpers";
 import { rejoinLiveTurn } from "./recovery";
 
-/** Whether a durable resume should route to the local sidecar engine. */
-function shouldResumeViaSidecar(
-  pending: PendingResume | undefined,
-  sidecarTarget: SidecarTarget | null,
-): boolean {
-  if (!pending || !sidecarTarget) return false;
-  return pending.origin === "sidecar";
+/** Durable resume routes to the local sidecar engine when the frame lives there. */
+function shouldResumeViaSidecar(pending: PendingResume | undefined): boolean {
+  return pending?.origin === "sidecar";
+}
+
+/**
+ * Resume request was refused before any SSE opened (404/409/410/5xx, or sidecar
+ * never started). Caller should restore the optimistic-removed resume card.
+ * Mid-stream drops / user abort are NOT refusals — the turn may already be running.
+ */
+function isResumeRequestRefused(err: unknown): boolean {
+  if (!(err instanceof StreamError)) return false;
+  if (err.kind === "http" && err.status != null) {
+    const s = err.status;
+    return s === 404 || s === 409 || s === 410 || s >= 500;
+  }
+  return err.kind === "sidecar" && err.recoverable === true;
 }
 
 /**
@@ -60,6 +69,7 @@ export async function runRegenerate(
 
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
+  beginTurnPreflight(conversationId);
   try {
     await regenerateConversation({
       conversationId,
@@ -110,6 +120,7 @@ export async function runRetryFailed(userMessageId: string): Promise<void> {
 
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
+  beginTurnPreflight(conversationId);
   try {
     await retryFailedConversation({
       conversationId,
@@ -144,9 +155,16 @@ export async function runRetryFailed(userMessageId: string): Promise<void> {
  * adjust / stop) — plus any ask_user option `selected` — is POSTed to the resume
  * endpoint, which claims the frame and drives the rest of the turn on a fresh SSE.
  * No new user message — resume reuses the paused assistant bubble (same turn id /
- * projection key). The resume card is dropped optimistically (the server claim is
- * atomic, so a stale / second attempt simply 404s); a transport failure raises the
- * usual retry banner.
+ * projection key).
+ *
+ * Card lifecycle: remove the resume card as soon as the request is about to fire;
+ * restore it only when the request is refused before any stream opens (404/409/410/
+ * 5xx / sidecar never started). Mid-stream interrupt and user abort leave the card
+ * gone (the turn is already running — reconnect / banner paths handle that).
+ *
+ * Sidecar frames never degrade to cloud resume (双模式工作区 §10.4 — cloud has no
+ * local frame → guaranteed 404). Missing sidecar target or failed probe keeps the
+ * card and raises a retry banner.
  */
 export async function runResume(
   messageId: string,
@@ -174,51 +192,61 @@ export async function runResume(
   store.clearError(conversationId);
   bumpConversationCache(conversationId);
 
-  // Route durable resume the same way as a send: a conversation bound to a present
-  // local root resumes on the sidecar engine (双模式工作区 §一.1); else the cloud.
-  // Capture the pending frame BEFORE removing it — the sidecar path needs its
-  // original user message text and the pinned user bubble id for write-back.
+  // Capture the pending frame BEFORE removing it — sidecar path needs its
+  // original user message text / pinned user bubble id; refuse path restores it.
   const sidecarTarget = await resolveSidecarRoot(conversationId);
   const pending = usePausedTurnStore
     .getState()
     .pending.find((p) => p.messageId === messageId);
-  const sidecarResume = shouldResumeViaSidecar(pending, sidecarTarget);
+  const viaSidecar = shouldResumeViaSidecar(pending);
 
-  // A paused sidecar frame lives ONLY on this machine and can only be continued by
-  // the local engine — the cloud has no such frame, so (unlike a fresh send) resume
-  // must NOT degrade to cloud. Probe first: if the env can't start, keep the resume
-  // card (don't remove the pending frame) and raise a retry banner, so the user can
-  // fix the env and retry — never a guaranteed-404 cloud resume. (probeSidecar has
-  // marked the root bad, so subsequent fresh sends silently go cloud.)
-  if (sidecarResume && sidecarTarget) {
+  /** Banner「重试」：错误已在 runResume 内 setError；吞掉 rejection 避免未处理 Promise。 */
+  const retryResume = () => {
+    void runResume(messageId, decision, note, selected).catch(() => {});
+  };
+
+  const raiseSidecarUnavailable = (detail: string | null) => {
+    store.setError(
+      detail
+        ? `${detail}，本地引擎暂不可用，无法继续这次暂停的回合，请稍后重试`
+        : "本地引擎暂不可用，无法继续这次暂停的回合，请稍后重试",
+      // 手动重试 = 用户「我修好环境了，再试一次」——先清会话级健康缓存强制重探，
+      // 否则重试必命中刚记下的 bad 缓存、变成死按钮。
+      () => {
+        clearSidecarHealth();
+        retryResume();
+      },
+      conversationId,
+      null,
+    );
+  };
+
+  // A paused sidecar frame lives ONLY on this machine — never degrade to cloud
+  // (cloud has no such frame → guaranteed 404). No local target → keep card + banner.
+  // Throw so callers (submitInteraction) do not markResolved on a silent early exit.
+  if (viaSidecar && !sidecarTarget) {
+    raiseSidecarUnavailable(null);
+    throw new Error("resume blocked: sidecar unavailable");
+  }
+
+  // Probe first: if the env can't start, keep the resume card and raise a retry
+  // banner — never a guaranteed-404 cloud resume.
+  if (viaSidecar && sidecarTarget) {
     const probe = await probeSidecar(sidecarTarget);
     if (!probe.healthy) {
-      store.setError(
-        probe.detail
-          ? `${probe.detail}，本地引擎暂不可用，无法继续这次暂停的回合，请稍后重试`
-          : "本地引擎暂不可用，无法继续这次暂停的回合，请稍后重试",
-        // 手动重试 = 用户「我修好环境了，再试一次」的明确信号——先清会话级健康缓存强制重探，
-        // 否则重试必命中刚记下的 bad 缓存、变成死按钮（与「请稍后重试」矛盾）。清空是全局的，
-        // 但这正合「重新评估本地引擎」之意（环境修复通常是全局的：关杀软 / 修 venv）。
-        () => {
-          clearSidecarHealth();
-          void runResume(messageId, decision, note, selected);
-        },
-        conversationId,
-        null,
-      );
-      return;
+      raiseSidecarUnavailable(probe.detail);
+      throw new Error("resume blocked: sidecar probe failed");
     }
   }
 
   if (isClientOnlyResumeKey(conversationId, messageId)) {
     store.setError(
       "续跑键无效（缺少服务端消息 ID），无法继续这次暂停的回合，请稍后重试",
-      () => void runResume(messageId, decision, note, selected),
+      retryResume,
       conversationId,
       null,
     );
-    return;
+    throw new Error("resume blocked: client-only message id");
   }
 
   // Same-turn continuation: flip the paused assistant back to streaming.
@@ -229,12 +257,17 @@ export async function runResume(
     store.setServerMessageIdOnLastMessage(messageId, conversationId);
   }
 
+  // Optimistic: drop the card as the request fires. Restore only on pre-stream refusal.
+  const pendingSnapshot = pending;
+  usePausedTurnStore.getState().remove(messageId);
+
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
+  beginTurnPreflight(conversationId);
   try {
-    if (sidecarResume && pending && sidecarTarget) {
+    if (viaSidecar && pendingSnapshot && sidecarTarget) {
       const userMessageId =
-        pending.userMessageId ||
+        pendingSnapshot.userMessageId ||
         [...getRuntime(conversationId).messages]
           .reverse()
           .find((m) => m.role === "user")?.id ||
@@ -247,11 +280,10 @@ export async function runResume(
         decision,
         note,
         selected,
-        userMessage: pending.userMessage,
+        userMessage: pendingSnapshot.userMessage,
         userMessageId,
         signal: ac.signal,
       });
-      usePausedTurnStore.getState().remove(messageId);
     } else {
       await resumeConversation({
         conversationId,
@@ -261,7 +293,6 @@ export async function runResume(
         selected,
         signal: ac.signal,
       });
-      usePausedTurnStore.getState().remove(messageId);
     }
   } catch (err) {
     if (isAbort(err)) {
@@ -269,8 +300,13 @@ export async function runResume(
     }
     // A mid-stream drop no longer means the turn died (1a: it runs detached) —
     // rejoin it live (1b) rather than re-resuming, which would double-run it.
+    // Do NOT restore the resume card — the turn is already running server-side.
     if (isTransportDrop(err) && (await rejoinLiveTurn(conversationId))) {
       return;
+    }
+    // Request refused before any stream opened → put the card back for retry.
+    if (isResumeRequestRefused(err) && pendingSnapshot) {
+      usePausedTurnStore.getState().addLiveResume(pendingSnapshot);
     }
     const s = useConversationStore.getState();
     if (getRuntime(conversationId).isGenerating) {
@@ -281,11 +317,11 @@ export async function runResume(
     clearInteractionPrompts(conversationId);
     const msg = describeStreamError(err);
     if (msg) {
-      const retry = isRetriableStreamError(err)
-        ? () => void runResume(messageId, decision, note, selected)
-        : null;
+      const retry = isRetriableStreamError(err) ? retryResume : null;
       s.setError(msg, retry, conversationId, streamErrorAction(err));
     }
+    // Re-throw so submitInteraction does not markResolved (假成功).
+    throw err;
   } finally {
     useConversationStore.getState().setAbort(null, conversationId);
   }

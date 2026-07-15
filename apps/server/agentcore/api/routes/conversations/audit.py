@@ -29,6 +29,33 @@ def _to_causal_graph(raw: dict) -> AuditCausalGraph:
 
 
 @router.get(
+    "/{conversation_id}/audit",
+    response_model=AgentAuditListResponse,
+)
+async def list_conversation_audit(
+    conversation_id: str,
+    user: AuthUser,
+    limit: int = Query(default=200, ge=1, le=500),
+    category: str | None = Query(default=None, description="Optional category filter"),
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    audit_repo: AgentAuditEventRepository = Depends(get_agent_audit_repo),
+) -> AgentAuditListResponse:
+    """Conversation-scoped security ledger (owner-scoped); includes preset changes."""
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    rows = await audit_repo.list_for_conversation(
+        conversation_id=conversation_id,
+        limit=limit,
+        category=category,
+    )
+    if not rows:
+        raise NotFoundError("该对话暂无审计记录")
+    return AgentAuditListResponse(
+        data=[AgentAuditEventLine.model_validate(row) for row in rows],
+        total=len(rows),
+    )
+
+
+@router.get(
     "/{conversation_id}/messages/{message_id}/audit",
     response_model=AgentAuditListResponse,
 )
@@ -40,7 +67,7 @@ async def list_turn_audit(
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     audit_repo: AgentAuditEventRepository = Depends(get_agent_audit_repo),
 ) -> AgentAuditListResponse:
-    """Delegated-turn audit timeline for one assistant message (owner-scoped)."""
+    """Turn audit timeline for one assistant message (owner-scoped)."""
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
     rows = await audit_repo.list_for_turn(conversation_id=conversation_id, turn_id=message_id)
     if not rows:

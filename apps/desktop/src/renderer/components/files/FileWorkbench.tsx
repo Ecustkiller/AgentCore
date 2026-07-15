@@ -52,12 +52,12 @@ const MEMORY_WS = "__memory__";
  * the swap-style {@link FileBrowser} used in narrow side panels).
  *
  * Workspace lifecycle (new file·folder / upload / reveal in OS / open chat /
- * clear files / delete conversation / rename) lives on each root's **right-click
- * menu** to keep the rail clean; page-level "new folder / add local" sit in the
- * rail header, with a **name filter** below it (real-time, case-insensitive
- * substring over workspace names; session-only, not persisted — it's a search,
- * not a preference). Reuses {@link FileTree} in its headerless `chrome={false}`
- * form so per-source CRUD / drag / fold all come for free.
+ * clear files / delete conversation or delete project / rename) lives on each
+ * root's **right-click menu** to keep the rail clean; the rail header is a
+ * **name filter** only (real-time, case-insensitive substring over workspace
+ * names; session-only, not persisted — it's a search, not a preference).
+ * Reuses {@link FileTree} in its headerless `chrome={false}` form so per-source
+ * CRUD / drag / fold all come for free.
  *
  * No longer the lens onto a *single* project's home — that page (`/folders/:id`) is
  * gone (双模式工作区 决策 #9, 端态 I): this is purely the file lens, and chats live
@@ -281,10 +281,8 @@ export function FileWorkbench({
         style={{ width: railWidth }}
         className="flex shrink-0 flex-col border-r border-border"
       >
-        {/* First row merges the workspace name-filter with the page's create actions: the
-            rail is too narrow (~288px) for a separate「文件」title + a usable search + buttons,
-            so the search owns the row (its placeholder labels the panel) and 新建/添加本地 sit
-            inline to its right (always present so the first workspace can be created). */}
+        {/* Rail header: workspace name filter only (新建项目走命令面板 / 侧栏；
+            段级 CRUD 在各 WorkspaceSection 右键菜单). */}
         <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
           <SearchField
             value={filter}

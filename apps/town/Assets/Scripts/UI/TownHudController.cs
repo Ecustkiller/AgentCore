@@ -45,6 +45,7 @@ namespace AgentTown.UI
         private Label clockLabel;
         private readonly FpsSampler fpsSampler = new FpsSampler();
         private Button demoButton;
+        private Button showButton;
         private DropdownField packDropdown;
         private string selectedPackId = DemoPackIds.PriceSurge;
         private bool packDropdownWiring;
@@ -195,6 +196,15 @@ namespace AgentTown.UI
                 root.styleSheets.Add(styleSheet);
             }
 
+            // WebGL panels have no OS font fallback — pin the bundled CJK subset on the
+            // panel root so every label (HUD, nameplates, show faces) inherits it.
+            Font uiFont = TownFonts.UiFont;
+            if (uiFont != null)
+            {
+                root.style.unityFontDefinition =
+                    new StyleFontDefinition(FontDefinition.FromFont(uiFont));
+            }
+
             statusLabel = root.Q<Label>("status-label");
             modeBadge = root.Q<Label>("mode-badge");
             tickLabel = root.Q<Label>("tick-label");
@@ -202,6 +212,7 @@ namespace AgentTown.UI
             streamLabel = root.Q<Label>("stream-label");
             clockLabel = root.Q<Label>("clock-label");
             demoButton = root.Q<Button>("demo-button");
+            showButton = root.Q<Button>("show-button");
             packDropdown = root.Q<DropdownField>("pack-dropdown");
             resumeRunButton = root.Q<Button>("resume-run-button");
             runIdField = root.Q<TextField>("run-id-field");
@@ -257,6 +268,11 @@ namespace AgentTown.UI
             if (demoButton != null)
             {
                 demoButton.clicked += StartOfflineDemo;
+            }
+
+            if (showButton != null)
+            {
+                showButton.clicked += StartShowMode;
             }
 
             WirePackDropdown();
@@ -427,6 +443,49 @@ namespace AgentTown.UI
 
             session.SetPlaying(true);
             ShowPackIntro(packId);
+        }
+
+        private void StartShowMode()
+        {
+            TownBootstrap bootstrap = FindFirstObjectByType<TownBootstrap>();
+            if (bootstrap != null)
+            {
+                bootstrap.StartShowEpisode3();
+                return;
+            }
+
+            AgentTown.Show.ShowModeController show = FindFirstObjectByType<AgentTown.Show.ShowModeController>();
+            if (show != null)
+            {
+                _ = show.EnterEpisode3Async();
+            }
+        }
+
+        /// <summary>
+        /// Programme mode hides observatory chrome (rails / metrics / timeline / god).
+        /// Exit restores visibility.
+        /// </summary>
+        public void SetObservatoryChromeVisible(bool visible)
+        {
+            if (!bound)
+            {
+                TryBind();
+            }
+
+            VisualElement root = document != null ? document.rootVisualElement : null;
+            if (root == null)
+            {
+                return;
+            }
+
+            SetDisplay(root.Q("top-bar"), visible);
+            SetDisplay(root.Q("bottom-bar"), visible);
+            SetDisplay(root.Q("control-panel"), visible);
+            SetDisplay(root.Q("residents-panel"), visible);
+            if (!visible)
+            {
+                HidePackIntro();
+            }
         }
 
         /// <summary>Called by <see cref="TownBootstrap"/> after Offline bake so the intro card appears.</summary>

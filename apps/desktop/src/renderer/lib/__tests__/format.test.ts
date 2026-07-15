@@ -2,9 +2,12 @@ import {
   formatCompact,
   formatCost,
   formatDateDivider,
+  formatDisplayCost,
+  formatDisplayUsd,
   formatMessageTime,
   formatMessageTimeOfDay,
   formatUsd,
+  pickCostMoney,
 } from "@/lib/format";
 import { describe, expect, it, vi } from "vitest";
 
@@ -48,6 +51,28 @@ describe("formatUsd", () => {
   it("shows「<$0.0001」for a positive cost below the display floor", () => {
     // 1000 nano = 1e-6 USD < 0.0001
     expect(formatUsd(1000)).toBe("<$0.0001");
+  });
+});
+
+describe("formatDisplayCost / pickCostMoney (BYOK ≈)", () => {
+  it("prefixes ≈ only for estimates; billed stays plain ¥", () => {
+    expect(formatDisplayCost(USD, 7.2, false)).toBe("¥7.20");
+    expect(formatDisplayCost(USD, 7.2, true)).toBe("≈¥7.20");
+    expect(formatDisplayCost(0, 7.2, true)).toBe("—");
+    expect(formatDisplayUsd(USD, true)).toBe("≈$1.0000");
+  });
+
+  it("picks billed total over estimated_total", () => {
+    expect(
+      pickCostMoney({ total: 100, estimated_total: 999 }),
+    ).toEqual({ nano: 100, estimated: false });
+    expect(
+      pickCostMoney({ total: 0, estimated_total: 999 }),
+    ).toEqual({ nano: 999, estimated: true });
+    expect(pickCostMoney({ total: 0 })).toEqual({
+      nano: 0,
+      estimated: false,
+    });
   });
 });
 

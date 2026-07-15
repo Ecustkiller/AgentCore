@@ -101,3 +101,60 @@ describe("ResumeCard · plan_review", () => {
     expect(onResume).toHaveBeenCalledWith("adjust", "换个方向");
   });
 });
+
+describe("ResumeCard · team_preview", () => {
+  const teamPreview = (
+    over: Partial<PausedTurnSummary> = {},
+  ): PausedTurnSummary =>
+    summary({
+      kind: "team_preview",
+      checkpoint_id: "tp1",
+      question: "",
+      context: "",
+      workers: [{ role: "调研", task: "做A" }],
+      tools: ["file_write"],
+      primitive: "delegate",
+      ...over,
+    });
+
+  it("非 debate 仅授权并开工 + 停止，无调整 / 逐次审批", () => {
+    render(<ResumeCard paused={teamPreview()} onResume={vi.fn()} />);
+    expect(screen.getByText("授权并开工")).toBeTruthy();
+    expect(screen.getByText("停止")).toBeTruthy();
+    expect(screen.queryByText("调整")).toBeNull();
+    expect(screen.queryByText("逐次审批开工")).toBeNull();
+  });
+
+  it("主按钮带嘱咐发 continue", () => {
+    const onResume = vi.fn();
+    render(<ResumeCard paused={teamPreview()} onResume={onResume} />);
+    fireEvent.change(screen.getByPlaceholderText(/对全体队员的嘱咐/), {
+      target: { value: "更简洁" },
+    });
+    fireEvent.click(screen.getByText("授权并开工"));
+    expect(onResume).toHaveBeenCalledWith("continue", "更简洁");
+  });
+
+  it("debate 仅开赛 + 停止；嘱咐走 continue", () => {
+    const onResume = vi.fn();
+    render(
+      <ResumeCard
+        paused={teamPreview({
+          primitive: "debate",
+          workers: [],
+          motion: "辩题",
+          sides: [{ name: "正方", stance: "赞成" }],
+        })}
+        onResume={onResume}
+      />,
+    );
+    expect(screen.getByText("开赛")).toBeTruthy();
+    expect(screen.getByText("停止")).toBeTruthy();
+    expect(screen.queryByText("调整")).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText(/开赛嘱咐/), {
+      target: { value: "最关心成本谁买单" },
+    });
+    fireEvent.click(screen.getByText("开赛"));
+    expect(onResume).toHaveBeenCalledWith("continue", "最关心成本谁买单");
+  });
+});

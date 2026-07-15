@@ -10,9 +10,22 @@ export {
   INTERACTION_ID_FIELD,
   idFromRequiredPayload,
   idFromResolvedPayload,
+  isAwaitingUserEntry,
   kindFromRequiredEvent,
   kindFromResolvedEvent,
 } from "./types";
+export {
+  INTERACTION_REGISTRY,
+  INTERACTION_BY_KIND,
+  defFromRequiredEvent,
+  defFromResolvedEvent,
+  defFromTimelineProcess,
+  interactionChannelEventTypes,
+  wireFor,
+  type InteractionKindDef,
+  type TimelineProcessKind,
+  type TimelineMarkerDef,
+} from "./registry";
 export {
   type ApprovalView,
   type DelegationAuthView,

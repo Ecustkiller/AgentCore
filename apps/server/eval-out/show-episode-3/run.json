@@ -1,0 +1,432 @@
+{
+  "run_id": "show-episode-3-seed42",
+  "seed": 42,
+  "scenario": "show",
+  "episode_no": 3,
+  "current_tick": 119,
+  "events": [
+    {
+      "type": "sim.show.episode_gate",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 0,
+        "gate": "recap",
+        "phase": "recap"
+      }
+    },
+    {
+      "type": "sim.show.episode_gate",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 15,
+        "gate": "day",
+        "phase": "day"
+      }
+    },
+    {
+      "type": "sim.show.episode_gate",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 50,
+        "gate": "night",
+        "phase": "night"
+      }
+    },
+    {
+      "type": "sim.show.episode_gate",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 75,
+        "gate": "quiz",
+        "phase": "quiz"
+      }
+    },
+    {
+      "type": "sim.show.episode_gate",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 80,
+        "gate": "ceremony",
+        "phase": "ceremony"
+      }
+    },
+    {
+      "type": "sim.show.episode_gate",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 85,
+        "gate": "reveal",
+        "phase": "reveal"
+      }
+    },
+    {
+      "type": "sim.show.episode_gate",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 105,
+        "gate": "epilogue",
+        "phase": "epilogue"
+      }
+    },
+    {
+      "type": "sim.show.heart_pick",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 80,
+        "from_agent_id": "luye",
+        "to_agent_id": "shenwan",
+        "public": false
+      }
+    },
+    {
+      "type": "sim.show.heart_pick",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 80,
+        "from_agent_id": "shenwan",
+        "to_agent_id": "xieheng",
+        "public": false
+      }
+    },
+    {
+      "type": "sim.show.heart_pick",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 80,
+        "from_agent_id": "xuanan",
+        "to_agent_id": "xieheng",
+        "public": false
+      }
+    },
+    {
+      "type": "sim.show.heart_pick",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 80,
+        "from_agent_id": "jiangyu",
+        "to_agent_id": "xuanan",
+        "public": false
+      }
+    },
+    {
+      "type": "sim.show.heart_pick",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 80,
+        "from_agent_id": "zhouke",
+        "to_agent_id": "jiangyu",
+        "public": false
+      }
+    },
+    {
+      "type": "sim.show.heart_pick",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 80,
+        "from_agent_id": "xieheng",
+        "to_agent_id": "zhouke",
+        "public": false
+      }
+    },
+    {
+      "type": "sim.show.reveal",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 85,
+        "who_agent_id": "luye",
+        "pick_agent_id": "shenwan"
+      }
+    },
+    {
+      "type": "sim.show.heart_pick",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 85,
+        "from_agent_id": "luye",
+        "to_agent_id": "shenwan",
+        "public": true
+      }
+    },
+    {
+      "type": "sim.show.reveal",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 86,
+        "who_agent_id": "shenwan",
+        "pick_agent_id": "xieheng"
+      }
+    },
+    {
+      "type": "sim.show.heart_pick",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 86,
+        "from_agent_id": "shenwan",
+        "to_agent_id": "xieheng",
+        "public": true
+      }
+    },
+    {
+      "type": "sim.show.reveal",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 87,
+        "who_agent_id": "xuanan",
+        "pick_agent_id": "xieheng"
+      }
+    },
+    {
+      "type": "sim.show.heart_pick",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 87,
+        "from_agent_id": "xuanan",
+        "to_agent_id": "xieheng",
+        "public": true
+      }
+    },
+    {
+      "type": "sim.show.reveal",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 88,
+        "who_agent_id": "jiangyu",
+        "pick_agent_id": "xuanan"
+      }
+    },
+    {
+      "type": "sim.show.heart_pick",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 88,
+        "from_agent_id": "jiangyu",
+        "to_agent_id": "xuanan",
+        "public": true
+      }
+    },
+    {
+      "type": "sim.show.reveal",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 89,
+        "who_agent_id": "zhouke",
+        "pick_agent_id": "jiangyu"
+      }
+    },
+    {
+      "type": "sim.show.heart_pick",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 89,
+        "from_agent_id": "zhouke",
+        "to_agent_id": "jiangyu",
+        "public": true
+      }
+    },
+    {
+      "type": "sim.show.reveal",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 90,
+        "who_agent_id": "xieheng",
+        "pick_agent_id": "zhouke"
+      }
+    },
+    {
+      "type": "sim.show.heart_pick",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 90,
+        "from_agent_id": "xieheng",
+        "to_agent_id": "zhouke",
+        "public": true
+      }
+    },
+    {
+      "type": "sim.show.zero_vote_alert",
+      "payload": {
+        "run_id": "show-episode-3-seed42",
+        "tick": 85,
+        "agent_id": "luye",
+        "streak": 1
+      }
+    }
+  ],
+  "season": {
+    "season_id": "心动小镇",
+    "season_title": "心动小镇",
+    "current_episode": 4,
+    "active_agent_ids": [
+      "shenwan",
+      "luye",
+      "xuanan",
+      "jiangyu",
+      "zhouke",
+      "xieheng"
+    ],
+    "zero_vote_streak": {
+      "shenwan": 0,
+      "luye": 1,
+      "xuanan": 0,
+      "jiangyu": 0,
+      "zhouke": 0,
+      "xieheng": 0
+    },
+    "pairs": [],
+    "departed": [],
+    "episodes": [
+      {
+        "episode_no": 1,
+        "picks": [
+          {
+            "from_agent_id": "luye",
+            "to_agent_id": "shenwan",
+            "public": true,
+            "episode_no": 1
+          },
+          {
+            "from_agent_id": "shenwan",
+            "to_agent_id": "zhouke",
+            "public": true,
+            "episode_no": 1
+          },
+          {
+            "from_agent_id": "xuanan",
+            "to_agent_id": "luye",
+            "public": true,
+            "episode_no": 1
+          },
+          {
+            "from_agent_id": "jiangyu",
+            "to_agent_id": "xuanan",
+            "public": true,
+            "episode_no": 1
+          },
+          {
+            "from_agent_id": "zhouke",
+            "to_agent_id": "xieheng",
+            "public": true,
+            "episode_no": 1
+          },
+          {
+            "from_agent_id": "xieheng",
+            "to_agent_id": "jiangyu",
+            "public": true,
+            "episode_no": 1
+          }
+        ],
+        "pairs_formed": [],
+        "zero_vote_agents": [],
+        "departed": [],
+        "awkward_kind": null,
+        "quiz_focus": "luye",
+        "tick_span_start": 0,
+        "tick_span_end": 119
+      },
+      {
+        "episode_no": 2,
+        "picks": [
+          {
+            "from_agent_id": "luye",
+            "to_agent_id": "shenwan",
+            "public": true,
+            "episode_no": 2
+          },
+          {
+            "from_agent_id": "shenwan",
+            "to_agent_id": "zhouke",
+            "public": true,
+            "episode_no": 2
+          },
+          {
+            "from_agent_id": "xuanan",
+            "to_agent_id": "luye",
+            "public": true,
+            "episode_no": 2
+          },
+          {
+            "from_agent_id": "jiangyu",
+            "to_agent_id": "luye",
+            "public": true,
+            "episode_no": 2
+          },
+          {
+            "from_agent_id": "zhouke",
+            "to_agent_id": "jiangyu",
+            "public": true,
+            "episode_no": 2
+          },
+          {
+            "from_agent_id": "xieheng",
+            "to_agent_id": "zhouke",
+            "public": true,
+            "episode_no": 2
+          }
+        ],
+        "pairs_formed": [],
+        "zero_vote_agents": [
+          "xuanan",
+          "xieheng"
+        ],
+        "departed": [],
+        "awkward_kind": null,
+        "quiz_focus": "shenwan",
+        "tick_span_start": 120,
+        "tick_span_end": 239
+      },
+      {
+        "episode_no": 3,
+        "picks": [
+          {
+            "from_agent_id": "luye",
+            "to_agent_id": "shenwan",
+            "public": true,
+            "episode_no": 3
+          },
+          {
+            "from_agent_id": "shenwan",
+            "to_agent_id": "xieheng",
+            "public": true,
+            "episode_no": 3
+          },
+          {
+            "from_agent_id": "xuanan",
+            "to_agent_id": "xieheng",
+            "public": true,
+            "episode_no": 3
+          },
+          {
+            "from_agent_id": "jiangyu",
+            "to_agent_id": "xuanan",
+            "public": true,
+            "episode_no": 3
+          },
+          {
+            "from_agent_id": "zhouke",
+            "to_agent_id": "jiangyu",
+            "public": true,
+            "episode_no": 3
+          },
+          {
+            "from_agent_id": "xieheng",
+            "to_agent_id": "zhouke",
+            "public": true,
+            "episode_no": 3
+          }
+        ],
+        "pairs_formed": [],
+        "zero_vote_agents": [
+          "luye"
+        ],
+        "departed": [],
+        "awkward_kind": "misunderstanding",
+        "quiz_focus": "xuanan",
+        "tick_span_start": 0,
+        "tick_span_end": 119
+      }
+    ],
+    "sealed_picks": [],
+    "seed": 42,
+    "run_id": "show-episode-3-seed42"
+  }
+}

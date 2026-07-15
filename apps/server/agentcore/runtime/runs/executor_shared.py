@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict
+from typing import Any
 
+from agentcore.core.logging import get_logger
 from agentcore.llm.pricing import calculate_cost
 from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, TokenUsage
@@ -12,14 +14,25 @@ from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import (
     EventSink,
+    FinishReason,
     run_output_delta,
     run_output_reset,
     run_reasoning_delta,
     run_tool_progress,
 )
+from agentcore.runtime.runs.contract import synthesize_debrief
 from agentcore.runtime.runs.types import Deliverable, RunPhase, RunState
 from agentcore.tools.protocol import Tool, ToolContext
 from agentcore.tools.registry import ToolRegistry
+
+logger = get_logger(__name__)
+
+# LLM 流在收尾轮被掐断（post-commit disconnect / hard LLM failure → Return ERROR|DEGRADED）
+# 时写入 RunState.warnings，供 CEO collect_worker_gaps 暴露。
+_FINISH_INTERRUPT_REASONS = frozenset({FinishReason.ERROR, FinishReason.DEGRADED})
+FINISH_INTERRUPT_WARNING = (
+    "LLM 流在收尾时中断：产物可能已落盘，但交接简报缺失或不完整"
+)
 
 
 def _registry_with(base: ToolRegistry, *extra: Tool) -> ToolRegistry:
@@ -101,6 +114,42 @@ def _is_hard_failure(content: str, deliverable: Deliverable | None) -> bool:
     return deliverable is not None and deliverable.strict
 
 
+def _apply_finish_interrupt(
+    finish_override: list[FinishReason],
+    *,
+    warnings: list[str],
+    debrief: dict[str, Any] | None,
+    content: str,
+    files_touched: list[str],
+    run_id: str = "",
+) -> tuple[list[str], dict[str, Any] | None]:
+    """Annotate COMPLETED workers whose accepted react pass ended ERROR/DEGRADED.
+
+    Clean ``Return()`` leaves ``finish_override`` empty — no warning. Other
+    FinishReasons (UNPRODUCTIVE / PAUSED / …) are out of scope here.
+    """
+    if not finish_override:
+        return warnings, debrief
+    fr = finish_override[-1]
+    if fr not in _FINISH_INTERRUPT_REASONS:
+        return warnings, debrief
+    out_warnings = list(warnings)
+    if FINISH_INTERRUPT_WARNING not in out_warnings:
+        out_warnings.append(FINISH_INTERRUPT_WARNING)
+    out_debrief = debrief
+    synthesized = False
+    if out_debrief is None:
+        out_debrief = synthesize_debrief(content, files_touched)
+        synthesized = True
+    logger.warning(
+        "run.finish_interrupted",
+        run_id=run_id,
+        finish_reason=fr.value,
+        debrief_synthesized=synthesized,
+    )
+    return out_warnings, out_debrief
+
+
 async def _react_and_capture(
     messages: list[LLMMessage],
     *,
@@ -121,6 +170,7 @@ async def _react_and_capture(
     streamed_content: list[str] | None = None,
     gate_escalation_sink: list[dict] | None = None,
     token_budget: int = 0,
+    finish_override_sink: list[FinishReason] | None = None,
 ) -> tuple[str, str, TokenUsage, int]:
     """Run one ReAct pass over ``messages`` (mutated in place — the loop appends
     each assistant tool-call turn + tool results), then append the final assistant
@@ -144,6 +194,11 @@ async def _react_and_capture(
     ``streamed_content`` (run_redirect 热续写): when given, each ``run_output_delta``
     chunk is also appended here so a mid-flight cancel can salvage the draft the
     user already saw even before the final assistant turn is appended to ``messages``.
+
+    ``finish_override_sink`` mirrors the captain path: when the loop ends on a
+    non-default terminal (ERROR / DEGRADED from an aborted LLM stream, …) the
+    reason is appended so the worker executor can surface a soft warning instead of
+    silently treating the run as a clean COMPLETED.
     """
     def _on_content(delta: str) -> None:
         sink.emit(run_output_delta(run_id, agent_id, delta))
@@ -183,6 +238,7 @@ async def _react_and_capture(
         deliverable_only=True,
         gate_escalation_sink=gate_escalation_sink,
         token_budget=token_budget,
+        finish_override_sink=finish_override_sink,
     )
     messages.append(LLMMessage(role="assistant", content=content))
     return content, reasoning, usage, rounds

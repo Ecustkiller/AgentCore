@@ -6,7 +6,19 @@
  *
  * Money is integer nano-USD throughout (1 USD = 1e9). This never re-prices; it
  * only sums already-priced run totals (§7.2：合计以各 run 已定价之和为准).
+ * BYOK: billed `total` stays 0; `estimated_total` may carry a community/user estimate.
  */
+
+export type CostLeaf = {
+  total: number;
+  estimated_total?: number | null;
+};
+
+export type DisplayMoney = {
+  nano: number;
+  /** True when showing BYOK estimate (≈), not platform ledger ¥. */
+  estimated: boolean;
+};
 
 /**
  * The turn cost to display (§7.3A): prefer the authoritative `turnTotal` from
@@ -24,4 +36,31 @@ export function resolveTurnCost(
 ): number | null {
   const runTotal = runCosts.reduce((n, c) => n + c, 0);
   return turnTotal ?? (runTotal > 0 ? runTotal : null);
+}
+
+/**
+ * Turn display money with BYOK estimate awareness: billed total wins; else
+ * `estimated_total`; else sum finished runs the same way. Null = nothing to show.
+ */
+export function resolveTurnDisplayMoney(
+  turnCost: CostLeaf | null | undefined,
+  runCosts: Array<CostLeaf | null | undefined>,
+): DisplayMoney | null {
+  if (turnCost) {
+    if (turnCost.total > 0) return { nano: turnCost.total, estimated: false };
+    const est = turnCost.estimated_total;
+    if (est != null && est > 0) return { nano: est, estimated: true };
+    // Known zero (platform free / unpriced) — caller gates on nano > 0.
+    return { nano: 0, estimated: false };
+  }
+  let billed = 0;
+  let estimated = 0;
+  for (const c of runCosts) {
+    if (!c) continue;
+    billed += c.total ?? 0;
+    estimated += c.estimated_total ?? 0;
+  }
+  if (billed > 0) return { nano: billed, estimated: false };
+  if (estimated > 0) return { nano: estimated, estimated: true };
+  return null;
 }

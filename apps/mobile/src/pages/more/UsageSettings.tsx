@@ -19,8 +19,11 @@ const ROLE_LABELS: Record<string, string> = {
   vision: "视觉读图",
 };
 
-function cny(nanoUsd: number, rate: number): string {
-  return `¥${((nanoUsd / 1e9) * rate).toFixed(2)}`;
+function cny(nanoUsd: number, rate: number, estimated = false): string {
+  if (nanoUsd <= 0) return "—";
+  const yuan = (nanoUsd / 1e9) * rate;
+  const body = yuan < 0.01 ? "<¥0.01" : `¥${yuan.toFixed(2)}`;
+  return estimated ? `≈${body}` : body;
 }
 
 function compact(n: number): string {
@@ -96,13 +99,18 @@ function Dashboard({ summary }: { summary: UsageSummary }) {
   const { today, month, quota } = summary;
   const monthLimit = quota.monthly_cost_nano;
   const monthUsed = month.cost.total;
+  const hasRoleEstimate = summary.month_by_role.some(
+    (l) => l.cost_estimated_total > 0,
+  );
+  const todayEst = today.estimated_cost?.total ?? 0;
+  const monthEst = month.estimated_cost?.total ?? 0;
 
   return (
     <>
       {byok ? (
         <p className="section-note" style={{ marginBottom: 18 }}>
-          当前为「自带 Key」模式：平台不限额，下方以 token
-          用量为主（平台不代为计价）。
+          当前为「自带 Key」模式：平台不限额。有估算价时显示
+          ≈¥（非上游账单），并以 token 用量为主。
         </p>
       ) : (
         <Meter
@@ -173,14 +181,44 @@ function Dashboard({ summary }: { summary: UsageSummary }) {
               </span>
             </div>
           )}
+          {byok && (todayEst > 0 || monthEst > 0) && (
+            <>
+              <div
+                className="payroll-row"
+                style={{
+                  padding: 0,
+                  borderTop: "1px solid var(--border)",
+                  paddingTop: 12,
+                }}
+              >
+                <span>今日估算</span>
+                <span className="payroll-cost">{cny(todayEst, rate, true)}</span>
+              </div>
+              <div
+                className="payroll-row"
+                style={{
+                  padding: 0,
+                  borderTop: "1px solid var(--border)",
+                  paddingTop: 12,
+                }}
+              >
+                <span>本月估算</span>
+                <span className="payroll-cost">{cny(monthEst, rate, true)}</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
-      {summary.month_by_role.length > 0 && !byok && (
+      {summary.month_by_role.length > 0 && (!byok || hasRoleEstimate) && (
         <div className="section">
-          <h2 className="section-title">本月各角色花销</h2>
+          <h2 className="section-title">
+            {byok ? "本月各角色估算" : "本月各角色花销"}
+          </h2>
           <p className="section-note">
-            多 Agent 团队按角色拆分的花销，竞品的单 Agent 做不到。
+            {byok
+              ? "按社区价目/自填单价估算，非上游账单。"
+              : "多 Agent 团队按角色拆分的花销，竞品的单 Agent 做不到。"}
           </p>
           <div className="payroll">
             {summary.month_by_role.map((line) => (
@@ -190,7 +228,11 @@ function Dashboard({ summary }: { summary: UsageSummary }) {
                   <span className="payroll-turns">{line.turns} 回合</span>
                 </span>
                 <span className="payroll-cost">
-                  {cny(line.cost_total, rate)}
+                  {cny(
+                    byok ? line.cost_estimated_total : line.cost_total,
+                    rate,
+                    byok,
+                  )}
                 </span>
               </div>
             ))}
@@ -198,7 +240,7 @@ function Dashboard({ summary }: { summary: UsageSummary }) {
         </div>
       )}
 
-      {summary.recent_daily_cost.some((p) => p.cost_total > 0) && (
+      {summary.recent_daily_cost.some((p) => p.cost_total > 0) && !byok && (
         <CostTrend points={summary.recent_daily_cost} rate={rate} />
       )}
     </>

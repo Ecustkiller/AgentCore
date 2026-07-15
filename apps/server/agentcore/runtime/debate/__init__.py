@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from agentcore.runtime.debate.moderator import Moderator
+from agentcore.runtime.debate.speech_parse import SpeechArgument, parse_speech_arguments
 from agentcore.runtime.debate.types import (
     DEFAULT_MAX_ROUNDS,
     DEFAULT_MAX_ROUNDS_QUICK,
@@ -48,6 +49,8 @@ from agentcore.runtime.debate.types import (
 
 __all__ = [
     "Moderator",
+    "SpeechArgument",
+    "parse_speech_arguments",
     "DebateForm",
     "DebateSide",
     "DebateConfig",

@@ -92,6 +92,26 @@ function upsertPlanReview(messageId = "client-uuid"): void {
   });
 }
 
+function upsertTeamPreview(messageId = "client-uuid"): void {
+  ix().upsertRequired({
+    kind: "team_preview",
+    conversationId: CID,
+    messageId,
+    payload: {
+      checkpoint_id: "tp1",
+      conversation_id: CID,
+      primitive: "delegate",
+      workers: [{ run_id: "r1", role: "调研", task: "做调研", depends_on: [] }],
+      tools: ["file_write"],
+      motion: "",
+      form: "",
+      sides: [],
+      max_rounds: 0,
+      thorough: true,
+    },
+  });
+}
+
 describe("surfaceResumeFromLiveTurn", () => {
   it("surfaces one ask_user resume entry keyed by the SERVER message_id", () => {
     seedTurn("m-server-1");
@@ -131,6 +151,21 @@ describe("surfaceResumeFromLiveTurn", () => {
       { run_id: "r1", role: "调研", summary: "方案就绪" },
     ]);
     expect(entries[0].pending).toEqual([{ run_id: "r2", role: "执行" }]);
+  });
+
+  it("surfaces team_preview with intent=kickoff (not decision)", () => {
+    seedTurn("m-server-tp");
+    upsertTeamPreview();
+
+    surfaceResumeFromLiveTurn(CID, "server");
+
+    expect(paused().pending).toHaveLength(1);
+    expect(paused().pending[0]).toMatchObject({
+      messageId: "m-server-tp",
+      checkpointId: "tp1",
+      kind: "team_preview",
+      intent: "kickoff",
+    });
   });
 
   it("does not surface when no server id was stamped", () => {

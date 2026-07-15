@@ -22,8 +22,11 @@ class ExecutionRequest:
     on_output: Callable[[str, str], None] | None = None
     # Resource / isolation knobs (optional; defaults preserve subprocess behaviour).
     env: dict[str, str] | None = None
-    # Reserved: NOT honored by GVisorSandbox today — network is always off via the
-    # ``--network=none`` runsc flag; "restricted" is a future hook (05 P3-4).
+    # Reserved historically; GVisorSandbox now honors this (P2):
+    # - ``none`` → ``--network=none`` (observe / workspace)
+    # - ``restricted`` → host networking with network namespace; outbound still
+    #   subject to OS / SSRF policy for app-level fetches (``core/net.py``).
+    #   Intended for ``full_trust`` cloud gVisor only — not SubprocessSandbox.
     network_mode: Literal["none", "restricted"] = "none"
     cpu_limit: float = 1.0
     pids_limit: int = 128

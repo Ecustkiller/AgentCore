@@ -1,0 +1,257 @@
+"""Resume Phase 1: re-wire channels, tool context, and CEO toolset."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+from agentcore.board.channel import BoardChannel
+from agentcore.config import settings
+from agentcore.core.types import AutonomyPolicy, PermissionPreset, new_id
+from agentcore.desktop.channel import DesktopClientChannel
+from agentcore.llm.profiles import TurnProfiles
+from agentcore.runtime.context import build_workspace_context, desktop_client_can_bind
+from agentcore.runtime.costing import RunCost
+from agentcore.runtime.events import EventSink
+from agentcore.runtime.interaction import default_interaction_registry
+from agentcore.runtime.resolve.prepare import _wire_worker_memory_tools
+from agentcore.runtime.sessions import SessionLoader, SessionSaver, default_session_registry
+from agentcore.runtime.skills import build_system_skill_registry
+from agentcore.runtime.suspension import SuspensionDeleter, SuspensionSaver, TurnSuspension
+from agentcore.tools.builtin import (
+    approval_class_tool_names,
+    build_worker_registry,
+    delegation_grantable_tool_names,
+    per_call_tool_names,
+)
+from agentcore.tools.builtin.board_ops import BoardOpsTool
+from agentcore.tools.builtin.board_read import BoardReadTool
+from agentcore.tools.protocol import ToolContext
+from agentcore.tools.registry import ToolRegistry
+from agentcore.vision import build_vision_reader
+from agentcore.workspace.locate import workspace_channel_for_tools
+from agentcore.workspace.protocol import WorkspaceBackend
+
+if TYPE_CHECKING:
+    from agentcore.runtime.approvals import ApprovalGate
+
+# ApprovalGate / _assemble_ceo_toolset are resolved via ``resume.pipeline`` so
+# ``test_resume_autonomy`` can monkeypatch ``resume_pipeline_mod.ApprovalGate``.
+
+_WORKSPACE_CONTEXT_RE = re.compile(
+    r"<workspace_context>.*?</workspace_context>\n?",
+    re.DOTALL,
+)
+
+
+def restamp_workspace_facts(prompt: str, facts: str) -> str:
+    """Replace/append ``<workspace_context>`` for post-bind resume workers."""
+    stripped = _WORKSPACE_CONTEXT_RE.sub("", prompt or "").rstrip()
+    if not facts:
+        return stripped
+    marker = "</runtime_context>"
+    idx = stripped.find(marker)
+    if idx >= 0:
+        insert_at = idx + len(marker)
+        return stripped[:insert_at] + "\n" + facts + stripped[insert_at:]
+    return stripped + "\n" + facts
+
+
+@dataclass
+class ResumedWiring:
+    """Re-wired resume turn: tools, channels, and ambient execution binding."""
+
+    base_tool_context: ToolContext
+    vision_cost_sink: list[RunCost]
+    approval_gate: ApprovalGate | None
+    delegate_tool: Any
+    debate_tool: Any
+    chat_tools: ToolRegistry
+    bound_execution_id: str
+    execution_id_token: object
+    board_channel: BoardChannel | None
+
+
+async def wire_resume_turn(
+    *,
+    suspension: TurnSuspension,
+    llm: Any,
+    sink: EventSink,
+    backend: WorkspaceBackend,
+    board_id: str | None,
+    conversation_id: str,
+    message_id: str,
+    captain_run_id: str,
+    profiles: TurnProfiles,
+    autonomy_policy: AutonomyPolicy,
+    permission_preset: PermissionPreset | None,
+    session_saver: SessionSaver | None,
+    session_loader: SessionLoader | None,
+    suspension_saver: SuspensionSaver | None,
+    suspension_deleter: SuspensionDeleter | None,
+    x_client_platform: str | None,
+) -> ResumedWiring:
+    """Rebuild worker tools, channels, approval gate, and CEO toolset for resume."""
+    from agentcore.runtime.pipeline.resume import pipeline as resume_pipeline_mod
+
+    worker_tools = build_worker_registry(
+        backend=backend, permission_preset=permission_preset
+    )
+    _wire_worker_memory_tools(
+        worker_tools,
+        memory_enabled=suspension.memory_enabled,
+        folder_id=suspension.folder_id,
+    )
+    # Same system-skill registry as a fresh turn so the resumed CEO loop can
+    # still consult_skill (提示词瘦身 P2), including the legal vertical skill when
+    # enabled. The CEO prompt itself is replayed from the stored transcript
+    # (already slim + 能力目录), so no directory re-render.
+    skill_registry = build_system_skill_registry(include_legal=settings.legal_vertical_enabled)
+    # AI 协作白板 (§六 M2): a board-bound turn that paused at a checkpoint regains its
+    # BoardChannel on resume, so the continued CEO loop can still reach the user's open
+    # canvas via ``board_ops``. Rebuilt fresh (channels aren't serializable) from the
+    # caller's re-derived ``board_id`` + this resume's sink, bound on the SAME shared
+    # interaction bridge the ops-resolve endpoint settles. ``None`` ⇒ ordinary chat,
+    # tool unwired below — symmetric with the fresh-turn path (run.py).
+    board_channel = (
+        BoardChannel(
+            sink=sink,
+            conversation_id=conversation_id,
+            board_id=board_id,
+            registry=default_interaction_registry(),
+            timeout_seconds=settings.board_op_timeout_seconds,
+        )
+        if board_id
+        else None
+    )
+    desktop_channel = (
+        DesktopClientChannel(
+            sink=sink,
+            conversation_id=conversation_id,
+            registry=default_interaction_registry(),
+            timeout_seconds=settings.board_op_timeout_seconds,
+        )
+        if backend.location == "local"
+        else None
+    )
+    workspace_channel = workspace_channel_for_tools(
+        backend,
+        sink=sink,
+        conversation_id=conversation_id,
+    )
+    # AI 协作白板 §九.4 Gap ②: the resumed turn's vision cost sink, shared by reference
+    # across derived run contexts — symmetric with the fresh-turn path (run.py). A
+    # board_read after the checkpoint bills its 读图 row here; folded into cost_runs below.
+    vision_cost_sink: list[RunCost] = []
+    from agentcore.runtime.journal import execution_id_from_journal
+
+    # Resume = 同一回合续写：execution_id 取自 journal 末张 run_plan；无则才铸新。
+    resume_execution_id = (
+        execution_id_from_journal(
+            suspension.journal_entries,
+            suspension.journal,
+        )
+        or new_id()
+    )
+    base_tool_context = ToolContext(
+        execution_id=resume_execution_id,
+        run_id=new_id(),
+        agent_id="default",
+        backend=backend,
+        user_id=suspension.user_id,
+        conversation_id=conversation_id,
+        permission_preset=(
+            permission_preset.value if permission_preset is not None else None
+        ),
+        board_channel=board_channel,
+        desktop_channel=desktop_channel,
+        workspace_channel=workspace_channel,
+        # §九.4: vision provider (QwenVL) — set VISION_API_KEY to enable; None ⇒
+        # board_read returns a clean「读图能力未配置」error (「插上即用」).
+        vision_reader=build_vision_reader(),
+        cost_sink=vision_cost_sink,
+        shared_workspace=suspension.folder_id is not None,
+    )
+    from agentcore.runtime.coordination.session import current_execution_id
+
+    bound_execution_id = base_tool_context.execution_id
+    execution_id_token = current_execution_id.set(bound_execution_id)
+    approval_gate = (
+        resume_pipeline_mod.ApprovalGate(
+            sink=sink,
+            conversation_id=conversation_id,
+            registry=default_interaction_registry(),
+            timeout_seconds=settings.approval_timeout_seconds,
+            timeout_overrides=settings.approval_timeout_overrides,
+            file_op_tools=approval_class_tool_names(),
+            per_call_tools=per_call_tool_names(),
+            delegation_grantable_tools=delegation_grantable_tool_names(),
+            autonomy_policy=autonomy_policy,
+        )
+        if settings.approval_gate_enabled
+        else None
+    )
+    session_store = default_session_registry().get_or_create(conversation_id)
+    checkpoint_enabled = settings.checkpoint_gate_enabled
+    # Re-stamp environment facts onto the stored worker base: resume rebuilds the
+    # backend from the CURRENT binding (bind-during-ask_user → local), so workers
+    # delegated after resume must not inherit a stale cloud ``<workspace_context>``.
+    desktop_online = (
+        desktop_client_can_bind(x_client_platform) or backend.location == "local"
+    )
+    refreshed_base = restamp_workspace_facts(
+        suspension.base_system_prompt,
+        build_workspace_context(backend, desktop_online=desktop_online),
+    )
+    # Look up via ``resume.pipeline`` so any module-level monkeypatch on that
+    # submodule (parity with fresh-turn ``pipeline.run`` seams) is honoured.
+    assemble = resume_pipeline_mod._assemble_ceo_toolset
+    delegate_tool, debate_tool, chat_tools = assemble(
+        llm=llm,
+        sink=sink,
+        base_system_prompt=refreshed_base,
+        user_message=suspension.user_message,
+        history=[],
+        worker_tools=worker_tools,
+        base_tool_context=base_tool_context,
+        profiles=profiles,
+        approval_gate=approval_gate,
+        session_store=session_store,
+        session_saver=session_saver,
+        session_loader=session_loader,
+        conversation_id=conversation_id,
+        captain_run_id=captain_run_id,
+        checkpoint_enabled=checkpoint_enabled,
+        message_id=message_id,
+        suspension_saver=suspension_saver,
+        suspension_deleter=suspension_deleter,
+        backend_location=backend.location,
+        skill_registry=skill_registry,
+        folder_id=suspension.folder_id,
+        memory_enabled=suspension.memory_enabled,
+        autonomy_policy=autonomy_policy,
+        advertise_bind_local_folder=checkpoint_enabled
+        and desktop_client_can_bind(x_client_platform),
+    )
+
+    # AI 协作白板: re-give the resumed CEO the board tools (``board_ops`` §六 M2 +
+    # ``board_read`` §九) so it can keep drawing / reading after the checkpoint. Registered
+    # into the assembled toolset BEFORE the loop runs, so they join this resume's LLM
+    # function catalog (the replayed system prompt is the stored slim one — the catalog,
+    # not the prompt, is what makes a tool callable). Only in a 白板会话.
+    if board_channel is not None:
+        chat_tools.register(BoardOpsTool())
+        chat_tools.register(BoardReadTool())
+
+    return ResumedWiring(
+        base_tool_context=base_tool_context,
+        vision_cost_sink=vision_cost_sink,
+        approval_gate=approval_gate,
+        delegate_tool=delegate_tool,
+        debate_tool=debate_tool,
+        chat_tools=chat_tools,
+        bound_execution_id=bound_execution_id,
+        execution_id_token=execution_id_token,
+        board_channel=board_channel,
+    )

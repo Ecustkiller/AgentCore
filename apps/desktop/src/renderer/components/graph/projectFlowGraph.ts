@@ -1,3 +1,7 @@
+import {
+  challengePreviewFromContext,
+  debateFacePrimaryFromContext,
+} from "@/components/chat/debate/debateFaceCopy";
 import type { InjectGraphOverlay } from "@/lib/causalInject";
 import { NODE_HEIGHT, NODE_WIDTH } from "@/lib/elk-layout";
 import type { GroupLayout } from "@/lib/elk-layout";
@@ -8,6 +12,7 @@ import { debateBeatFromContext } from "@/stores/execution";
 import type { GraphEdge } from "@/stores/graph";
 import type { Edge, Node } from "@xyflow/react";
 import {
+  isDebateAgentNode,
   pickEscalationKind,
   revisionFeedbackSummary,
 } from "./agentNode/shared";
@@ -39,6 +44,8 @@ export interface FlowGraphProjectionInput {
   captainRun: { id: string } | null;
   captainStatus: RunStatus | null;
   finalAnswer: { id: string; content: string } | null;
+  /** CEO 汇总空窗：无终稿气泡时挂 `team_synthesis_preview` 片段（非 content_delta）。 */
+  captainSynthesisPreview?: string;
   taskMessage: { id: string } | null;
   activateNode: (id: string) => void;
   groups: GroupLayout[];
@@ -213,6 +220,7 @@ export function projectFlowNodes({
   captainRun,
   captainStatus,
   finalAnswer,
+  captainSynthesisPreview,
   taskMessage,
   activateNode,
   groups,
@@ -407,6 +415,18 @@ export function projectFlowNodes({
         isAnimating: aggregatedStatus === "running",
         task: run.task,
         outputPreview: tailText(output),
+        debateFacePrimary: isDebateAgentNode({
+          stance: run.stance,
+          group: run.group,
+        })
+          ? debateFacePrimaryFromContext(run.receivedContext)
+          : null,
+        challengePreview: isDebateAgentNode({
+          stance: run.stance,
+          group: run.group,
+        })
+          ? challengePreviewFromContext(run.receivedContext)
+          : null,
         reasoningPreview: tailText(reasoning),
         toolProgress: agent?.toolProgress ?? null,
         toolExecutionLive: agent?.toolExecutionLive ?? null,
@@ -491,6 +511,13 @@ export function projectFlowNodes({
     if (captainRun && captainStatus) {
       const captainPos = placed(captainRun.id);
       if (captainPos) {
+        const answerPreview = finalAnswer
+          ? headText(finalAnswer.content)
+          : "";
+        const synthPreview =
+          !answerPreview && captainStatus === "running"
+            ? (captainSynthesisPreview ?? "").trim()
+            : "";
         nodes.push({
           id: captainRun.id,
           type: "captain",
@@ -499,7 +526,7 @@ export function projectFlowNodes({
             variant: "captain",
             status: captainStatus,
             label: "",
-            preview: finalAnswer ? headText(finalAnswer.content) : "",
+            preview: answerPreview || synthPreview,
             handleDirection,
             enterIndex: workerRuns.length + 1,
             focused: !!finalAnswer && litEndpointMessageId === finalAnswer.id,

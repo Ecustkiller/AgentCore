@@ -237,10 +237,10 @@ async def resume_message(
     The turn paused at a plan_review / ask_user / team_preview checkpoint and lost its
     live stream (disconnect / restart); only its persisted frame survived.
 
-    Settlement 预写 (D8)：① peek frame → ② ``*_resolved`` 落库成功 → ③ ``claim_paused_turn``
-    → ④ resume pipeline（内原有 emit 照旧，journal 幂等跳过）。settlement 写失败 ⇒ 5xx、
-    不 claim、frame 保留可重试。Claim 竞争失败按现状 404。Pipeline 启动失败走现有
-    restore 回滚。
+    Settlement 预写 (D8)：① peek frame → ② live-task drain（不 cancel；仍 live ⇒ 409）→
+    ③ ``*_resolved`` 落库成功 → ④ ``claim_paused_turn`` → ⑤ resume pipeline。settlement
+    写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状 404。Pipeline 启动
+    失败走现有 restore 回滚。
 
     ``body.selected`` carries the user's ask_user picks (ignored for plan_review).
     Gated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota
@@ -254,6 +254,17 @@ async def resume_message(
     peeked = await load_paused_turn(message_id, conversation_id=conversation_id)
     if peeked is None:
         raise NotFoundError("挂起的回合不存在或已处理")
+
+    # D9: paused 不占锁，会话可另开新回合。Resume 不得 cancel 在跑回合——只等已收口残余
+    # 解栈；仍 live ⇒ 409 且不 claim（帧保留可重试）。
+    if not await turn_runs.drain(conversation_id):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "turn_in_progress",
+                "message": "会话有正在进行的回合，先等它结束或显式停止",
+            },
+        )
 
     decision = body.decision.value if hasattr(body.decision, "value") else str(body.decision)
     try:
@@ -277,15 +288,6 @@ async def resume_message(
     suspension = await claim_paused_turn(message_id, conversation_id=conversation_id)
     if suspension is None:
         raise NotFoundError("挂起的回合不存在或已处理")
-
-    # The durable frame is now ours (claim succeeded ⇒ this really is a paused turn). 挂起即收口
-    # (②): the normal finalized turn's run has already ENDED, so this is usually a no-op — keep it
-    # as a safety drain. If any prior run for this conversation is still alive (a not-yet-torn-down
-    # finalize, an in-flight attach/reconnect, or the rare §六-1 thin-net backend wait parked on its
-    # interaction holding the folder workspace_lock), tear it down BEFORE the resume run takes that
-    # same lock — else they could deadlock on it, or the old run later double-continue the turn.
-    # Cancel leaves the (already-claimed) frame alone.
-    await turn_runs.stop_and_drain(conversation_id)
 
     sink = EventSink()
     emit_preflight_warnings(sink, preflight)

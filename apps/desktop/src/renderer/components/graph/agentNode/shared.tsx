@@ -23,6 +23,13 @@ export interface AgentNodeData {
   isAnimating: boolean;
   task: string;
   outputPreview: string;
+  /**
+   * 辩论续轮卡片主文：`round_focus` / 升格 task 块首句。
+   * 完成态优先 {@link outputPreview}；无产出时用此替代开团 role 模板。
+   */
+  debateFacePrimary?: string | null;
+  /** 被驳命门一行副标题（`channel=challenge`）。 */
+  challengePreview?: string | null;
   reasoningPreview?: string;
   toolProgress?: { toolName: string; chars: number } | null;
   /** Worker tool EXECUTION phase (transport-only `tool_use_progress` with run_id). */

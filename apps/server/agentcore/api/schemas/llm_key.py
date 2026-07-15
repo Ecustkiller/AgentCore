@@ -28,6 +28,26 @@ class SetLlmKeyRequest(BaseModel):
         description="Default model name for all turns",
         examples=[DEEPSEEK_V4_FLASH],
     )
+    price_cache_hit: str | None = Field(
+        default=None,
+        max_length=40,
+        description="Optional user-defined USD per 1M cache-hit tokens (decimal string)",
+    )
+    price_cache_miss: str | None = Field(
+        default=None,
+        max_length=40,
+        description="Optional user-defined USD per 1M cache-miss tokens (decimal string)",
+    )
+    price_output: str | None = Field(
+        default=None,
+        max_length=40,
+        description="Optional user-defined USD per 1M output tokens (decimal string)",
+    )
+    background_model: str | None = Field(
+        default=None,
+        max_length=200,
+        description="Optional cheaper model for title/memory/compaction/followups",
+    )
 
 
 class LlmKeyStatusResponse(BaseModel):
@@ -65,3 +85,14 @@ class LlmKeyStatusResponse(BaseModel):
         default=None,
         description="Operator-configured model when billing_mode is platform",
     )
+    free_tier_active: bool = Field(
+        default=False,
+        description=(
+            "True when this user has no BYOK key, free tier is enabled, and "
+            "platform credentials are available (keyless users can chat on free quota)"
+        ),
+    )
+    price_cache_hit: str | None = None
+    price_cache_miss: str | None = None
+    price_output: str | None = None
+    background_model: str | None = None

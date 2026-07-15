@@ -21,12 +21,12 @@ CORS headers, so we re-raise and let the stream tear down exactly as before.
 
 from __future__ import annotations
 
-import logging
-
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-logger = logging.getLogger(__name__)
+from agentcore.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class JSONErrorMiddleware:
@@ -53,7 +53,7 @@ class JSONErrorMiddleware:
         except Exception:
             method = scope.get("method", "?")
             path = scope.get("path", "?")
-            logger.exception("unhandled error on %s %s", method, path)
+            logger.exception("http.unhandled_error", method=method, path=path)
             # Headers already flushed (e.g. a live SSE turn) — we can no longer
             # swap the response, so let it propagate and tear the stream down.
             if response_started:

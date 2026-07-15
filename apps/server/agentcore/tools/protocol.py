@@ -103,6 +103,9 @@ class ToolContext:
     # to "" for unscoped call sites (tests / evals) — a tool simply skips its
     # conversation-scoped optimisation when this is empty.
     conversation_id: str = ""
+    # Session permission mode (observe / workspace / full_trust). Used by sandbox
+    # network grading (P2: full_trust → restricted egress on cloud gVisor).
+    permission_preset: str | None = None
     # Intra-batch write-conflict guard (并行写隔离·硬约束). Set per delegated-worker
     # node by ``build_agent_executor``; ``None`` for the CEO / tests (no concurrent
     # siblings to coordinate, so ``file_write`` skips the check). ``write_ancestors`` is
@@ -175,6 +178,11 @@ class ToolContext:
     # shared by every derived run via ``replace`` (a plain list, shared by reference); only
     # ``board_read`` writes it, only in a 白板会话. ``None`` everywhere else (tests / no board).
     cost_sink: list[RunCost] | None = None
+    # 项目共享工作区 (folder 绑定): True ⇒ CEO overview / worker manifest 用稀疏清单
+    # (附件 + 少量最近触达 + 「另有 N 个」)；False ⇒ 裸聊 scratch，非附件文件照常列入。
+    # Set on the pipeline base context from ``folder_id``; inherited by workers via
+    # ``dataclasses.replace``. Defaults False for tests / evals / 裸聊.
+    shared_workspace: bool = False
     # 工具执行阶段进度 (联网搜索前端展示优化): a narrow callback a long-running tool fires to report
     # a coarse EXECUTION phase (web_search → "querying" 正在检索 / "queued" 排队中 / "fallback"
     # 改用备用引擎) so the waiting UI shows a live, honest state instead of a dead spinner. Called

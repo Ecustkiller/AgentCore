@@ -147,6 +147,13 @@ namespace AgentTown.Town
         private static readonly Color Sidewalk = new(0.58f, 0.58f, 0.56f);
 
         /// <summary>
+        /// Zone lots blend toward the grass base so districts read as tinted ground,
+        /// not a saturated debug color board next to the roads.
+        /// </summary>
+        private static Color ZoneTint(float r, float g, float b, float towardGrass = 0.4f)
+            => Color.Lerp(new Color(r, g, b), TownPalette.Grass, towardGrass);
+
+        /// <summary>
         /// Colour-slab roads / paths spanning the built town (always built).
         /// Main arteries + branches; mesh overlays in <see cref="RoadTiles"/> when catalog has roads.
         /// </summary>
@@ -251,19 +258,22 @@ namespace AgentTown.Town
         /// <summary>Per-region ground lots (one per gameplay region).</summary>
         public static readonly GroundPatchDef[] Zones =
         {
-            Patch(0, 0, 14, 14, new Color(0.72f, 0.77f, 0.81f)),
-            Patch(36, 0, 16, 14, new Color(0.77f, 0.72f, 0.66f)),
-            Patch(52, 20, 14, 12, new Color(0.83f, 0.77f, 0.69f)),
-            Patch(36, -22, 14, 12, new Color(0.69f, 0.72f, 0.75f)),
-            Patch(18, 38, 18, 16, new Color(0.66f, 0.77f, 0.63f)),
-            Patch(-22, -20, 16, 14, new Color(0.69f, 0.72f, 0.78f)),
-            Patch(-32, 12, 18, 14, new Color(0.42f, 0.68f, 0.42f)),
-            Patch(-40, -8, 14, 12, new Color(0.58f, 0.62f, 0.78f)),
-            Patch(48, -36, 14, 12, new Color(0.72f, 0.62f, 0.52f)),
-            Patch(-8, 40, 16, 12, new Color(0.48f, 0.62f, 0.72f)),
+            Patch(0, 0, 14, 14, ZoneTint(0.72f, 0.77f, 0.81f)),
+            Patch(36, 0, 16, 14, ZoneTint(0.77f, 0.72f, 0.66f)),
+            Patch(52, 20, 14, 12, ZoneTint(0.83f, 0.77f, 0.69f)),
+            Patch(36, -22, 14, 12, ZoneTint(0.69f, 0.72f, 0.75f)),
+            Patch(18, 38, 18, 16, ZoneTint(0.66f, 0.77f, 0.63f)),
+            Patch(-22, -20, 16, 14, ZoneTint(0.69f, 0.72f, 0.78f)),
+            Patch(-32, 12, 18, 14, ZoneTint(0.42f, 0.68f, 0.42f)),
+            Patch(-40, -8, 14, 12, ZoneTint(0.58f, 0.62f, 0.78f)),
+            Patch(48, -36, 14, 12, ZoneTint(0.72f, 0.62f, 0.52f)),
+            Patch(-8, 40, 16, 12, ZoneTint(0.48f, 0.62f, 0.72f)),
+            // 心动营地 — night ritual stage (decision #28); keep darker for the fire ring,
+            // just soften the hard edge against grass.
+            Patch(-56, 36, 18, 16, ZoneTint(0.28f, 0.36f, 0.28f, 0.25f)),
         };
 
-        /// <summary>The 10 authoritative gameplay regions with denser placeholder clusters (§6.3).</summary>
+        /// <summary>Gameplay regions with denser placeholder clusters (§6.3) + 心动营地.</summary>
         public static readonly RegionVisualDef[] Regions =
         {
             new("广场", new Color(0.61f, 0.64f, 0.68f), new[]
@@ -353,6 +363,22 @@ namespace AgentTown.Town
                 P(-2, 1.5, 0f, 0.85f, PlaceholderShape.FlatProp), P(2, 1.5, 0f, 0.85f, PlaceholderShape.FlatProp),
                 P(0, 2.5, 0.4f, 0.8f, PlaceholderShape.Disc), P(-3, -4, 1.0f, 0.85f, PlaceholderShape.FlatProp),
                 P(3, -4, -1.0f, 0.85f, PlaceholderShape.FlatProp), P(0, -4.5, Pi, 0.95f, PlaceholderShape.FlatProp),
+            }),
+            // Campfire centre + seat ring + reveal platform (primitive fallbacks OK).
+            new("心动营地", new Color(0.92f, 0.48f, 0.18f), new[]
+            {
+                P(0, 0, 0f, 0.55f, PlaceholderShape.Disc), // campfire
+                P(0, 0, 0f, 0.35f, PlaceholderShape.Tower), // flame column
+                P(4.2, 0, Pi / 2f, 0.55f, PlaceholderShape.Disc),
+                P(2.1, 3.6, Pi / 6f, 0.55f, PlaceholderShape.Disc),
+                P(-2.1, 3.6, -Pi / 6f, 0.55f, PlaceholderShape.Disc),
+                P(-4.2, 0, -Pi / 2f, 0.55f, PlaceholderShape.Disc),
+                P(-2.1, -3.6, Pi, 0.55f, PlaceholderShape.Disc),
+                P(2.1, -3.6, Pi, 0.55f, PlaceholderShape.Disc),
+                P(0, 6.5, 0f, 1.1f, PlaceholderShape.FlatProp), // reveal board
+                P(-1.5, 6.5, 0f, 0.7f, PlaceholderShape.FlatProp),
+                P(1.5, 6.5, 0f, 0.7f, PlaceholderShape.FlatProp),
+                P(0, -6, Pi, 0.85f, PlaceholderShape.FlatProp),
             }),
         };
 

@@ -31,6 +31,7 @@ function llmKey(
         platform_model?: string;
         configured?: boolean;
         billing_mode?: string;
+        free_tier_active?: boolean;
       }
     | undefined,
   isLoading = false,
@@ -71,11 +72,11 @@ describe("CurrentModelBadge", () => {
     // back to the platform model — the badge must reflect what actually ran.
     llmKey({ default_model: "deepseek-account", configured: true });
     useConversationStore.setState({ currentConversationId: "c1", byId: {} });
-    useTurnModelStore.setState({ byConversation: { c1: "gpt-5.5" } });
+    useTurnModelStore.setState({ byConversation: { c1: "gpt-4o" } });
 
     renderBadge();
 
-    expect(screen.getByText("gpt-5.5")).toBeTruthy();
+    expect(screen.getByText("gpt-4o")).toBeTruthy();
     expect(screen.queryByText("deepseek-account")).toBeNull();
   });
 
@@ -83,17 +84,30 @@ describe("CurrentModelBadge", () => {
     llmKey({ default_model: "deepseek-account", configured: true });
     // A different conversation ran on the fallback; the active one has no record.
     useConversationStore.setState({ currentConversationId: "c2", byId: {} });
-    useTurnModelStore.setState({ byConversation: { c1: "gpt-5.5" } });
+    useTurnModelStore.setState({ byConversation: { c1: "gpt-4o" } });
 
     renderBadge();
 
     expect(screen.getByText("deepseek-account")).toBeTruthy();
-    expect(screen.queryByText("gpt-5.5")).toBeNull();
+    expect(screen.queryByText("gpt-4o")).toBeNull();
   });
 
   it("makes the 未配置 badge a button that links to model settings", () => {
     llmKey({ configured: false, billing_mode: "byok" });
     renderBadge();
     expect(screen.getByRole("button", { name: /未配置模型/ })).toBeTruthy();
+  });
+
+  it("shows 免费额度 when free tier is active without a key", () => {
+    llmKey({
+      configured: false,
+      billing_mode: "byok",
+      free_tier_active: true,
+    });
+    renderBadge();
+    expect(screen.getByText("免费额度")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /当前模型：免费额度/ }),
+    ).toBeTruthy();
   });
 });

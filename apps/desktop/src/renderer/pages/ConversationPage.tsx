@@ -3,15 +3,22 @@ import { ConversationCanvas } from "@/components/graph/ConversationCanvas";
 import { SidePanel } from "@/components/layout/SidePanel";
 import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { fetchMessageWindow, jumpToMessage } from "@/services/messages";
-import { loadRecovery } from "@/services/resume";
+import { logEvent } from "@/lib/log";
+import {
+  fetchMessageWindow,
+  jumpToMessage,
+  shouldSetGeneratingOnHydrate,
+} from "@/services/messages";
+import { loadRecovery, shouldHydrateLocalRecovery } from "@/services/resume";
 import {
   attachOnOpen,
-  markGhostInterrupted,
-  rejoinLiveTurn,
+  attachSidecarTurn,
+  projectUnsyncedTurns,
+  settleCloudRunningAssistant,
 } from "@/services/turns";
 import { useBookmarkStore } from "@/stores/bookmarks";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
+import { useInterruptedAfterDecisionStore } from "@/stores/interruptedAfterDecision";
 import { WORKSPACE_TAB_ID, useSidePanelStore } from "@/stores/sidePanel";
 import { useUIStore } from "@/stores/ui";
 import { MessageSquare, Network, PanelRight } from "lucide-react";
@@ -37,7 +44,7 @@ export function ConversationPage() {
     // 索引路由 `/` = 新草稿：丢弃上一条已打开的会话，渲染空白对话。这样无论从哪个
     // 入口落到 `/`（导航「对话」、Ctrl/Cmd+N、刷新直达），看到的都是新对话，而不是
     // store 里残留的上次对话。draftWorkspaceIntent 不在这里碰——那是「新建对话」入口
-    // 设置的落库目标（见 startNewConversation），清掉会破坏「全部对话」按文件夹新建。
+    // 设置的落库目标（见 startNewConversation），清掉会破坏「全部对话」按项目新建。
     if (!id) {
       if (store.currentConversationId !== null) store.switchConversation(null);
       return;
@@ -80,32 +87,55 @@ export function ConversationPage() {
             // returned with the latest window, so they replay on open.
             s.setMemoryUpdates(win.memoryUpdates, id);
             // P4: running overlay partial paints with stream chrome until attach/ghost settles.
-            if (win.messages.at(-1)?.isStreaming) {
+            // Cold paused (status=running + paused) → toMessage sets isStreaming=false.
+            if (shouldSetGeneratingOnHydrate(win.messages)) {
               s.setGenerating(true, id);
             }
             // P4 unified hydrate: messages (overlay partial) + recovery + attach.
-            // - ends on user + live → bare attach
-            // - ends on running assistant + live → clear-then-fold rejoin
-            // - ends on running assistant, no live/pause → ghost → interrupted
-            const last = win.messages.at(-1);
-            if (last) {
-              const recovery = await recoveryLoaded;
-              if (cancelled) return;
-              const canAttach =
-                recovery.liveRunning && recovery.pausedCount === 0;
-              if (last.role === "user" && canAttach) {
-                void attachOnOpen(id);
-              } else if (
-                last.role === "assistant" &&
-                last.status === "running"
+            // Branch on main-process facts (D6 二次修订) — never resolveSidecarRoot
+            // (routing intent / React Query cache; empty on refresh cold start).
+            const recovery = await recoveryLoaded;
+            if (cancelled) return;
+            const useLocal = shouldHydrateLocalRecovery(recovery);
+            logEvent("info", "conversation.hydrate", {
+              conversation_id: id,
+              sidecar_live: recovery.sidecarLive,
+              cloud_live: recovery.cloudLive,
+              unsynced_count: recovery.unsynced.length,
+              paused_count: recovery.pausedCount,
+              branch: useLocal ? "local" : "cloud",
+            });
+            if (useLocal) {
+              // Order: project unsynced → interrupted_after_decision → attach live.
+              projectUnsyncedTurns(id, recovery.unsynced);
+              useInterruptedAfterDecisionStore
+                .getState()
+                .setForConversation(id, recovery.interruptedAfterDecision);
+              if (
+                recovery.sidecarLive &&
+                recovery.pausedCount === 0 &&
+                recovery.interruptedAfterDecision.length === 0
               ) {
-                if (canAttach) {
-                  void rejoinLiveTurn(id);
+                void attachSidecarTurn(id);
+              }
+            } else {
+              useInterruptedAfterDecisionStore
+                .getState()
+                .setForConversation(id, []);
+              // Cloud session: P4 hydrate — refresh before ghost when empty
+              // (stale recovery vs cold-pause race · settleCloudRunningAssistant).
+              const last = win.messages.at(-1);
+              if (last) {
+                const canAttach =
+                  recovery.cloudLive && recovery.pausedCount === 0;
+                if (last.role === "user" && canAttach) {
+                  void attachOnOpen(id);
                 } else if (
-                  !recovery.liveRunning &&
-                  recovery.pausedCount === 0
+                  last.role === "assistant" &&
+                  last.status === "running"
                 ) {
-                  markGhostInterrupted(id);
+                  await settleCloudRunningAssistant(id, recovery);
+                  if (cancelled) return;
                 }
               }
             }

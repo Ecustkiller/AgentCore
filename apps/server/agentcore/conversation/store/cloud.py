@@ -40,7 +40,6 @@ from agentcore.runtime.events import (
     EventSink,
     FinishReason,
     followups_generated,
-    title_generated,
 )
 from agentcore.runtime.journal import journal_entries_from_display_runs, persist_turn_journal
 from agentcore.workspace.protocol import WorkspaceBackend
@@ -291,7 +290,6 @@ class CloudStore:
         backend: WorkspaceBackend,
         sink: EventSink,
         user_message: str,
-        generate_title: bool,
         llm_credentials: LLMCredentials | None,
         trace_id: str,
         turn_id: str,
@@ -372,7 +370,6 @@ class CloudStore:
 
         async with async_session_factory() as session:
             msg_repo = MessageRepository(session)
-            conv_repo = ConversationRepository(session)
 
             if message_id:
                 await msg_repo.upsert_assistant(
@@ -481,9 +478,6 @@ class CloudStore:
                     error=str(e),
                 )
 
-            conv = await conv_repo.get_by_id_unscoped(conversation_id)
-            needs_title = bool(generate_title and conv and not conv.title)
-
         # 时序不变量: terminal snapshot (above) landed → drop in-flight segments.
         if message_id:
             with contextlib.suppress(Exception):
@@ -493,54 +487,34 @@ class CloudStore:
             finish_value == FinishReason.END_TURN.value and bool(assistant_reply.strip())
         )
 
-        if needs_title or wants_followups:
+        if wants_followups:
             async with async_session_factory() as session:
                 bg_credentials = await resolve_credentials(session, user_id, "platform_internal")
             model = resolve_user_model(bg_credentials)
             provider = build_provider(bg_credentials, purpose="platform_internal")
             try:
-                if needs_title:
-                    minted = await mint_title(
-                        provider=provider,
-                        conversation_id=conversation_id,
-                        user_message=user_message,
-                        assistant_reply=assistant_reply,
-                        model=model,
-                    )
-                    if minted.title:
-                        async with async_session_factory() as session:
-                            await ConversationRepository(session).update_title_unscoped(
-                                conversation_id, minted.title
-                            )
-                        sink.emit(
-                            title_generated(
-                                minted.title,
-                                conversation_id=conversation_id,
-                            )
+                followups = await mint_followups(
+                    provider=provider,
+                    conversation_id=conversation_id,
+                    user_message=user_message,
+                    assistant_reply=assistant_reply,
+                    model=model,
+                )
+                message_id = result.get("message_id")
+                if followups and message_id:
+                    async with async_session_factory() as session:
+                        await MessageRepository(session).set_followups(
+                            message_id,
+                            conversation_id=conversation_id,
+                            followups=followups,
                         )
-                if wants_followups:
-                    followups = await mint_followups(
-                        provider=provider,
-                        conversation_id=conversation_id,
-                        user_message=user_message,
-                        assistant_reply=assistant_reply,
-                        model=model,
-                    )
-                    message_id = result.get("message_id")
-                    if followups and message_id:
-                        async with async_session_factory() as session:
-                            await MessageRepository(session).set_followups(
-                                message_id,
-                                conversation_id=conversation_id,
-                                followups=followups,
-                            )
-                        sink.emit(
-                            followups_generated(
-                                followups,
-                                conversation_id=conversation_id,
-                                message_id=message_id,
-                            )
+                    sink.emit(
+                        followups_generated(
+                            followups,
+                            conversation_id=conversation_id,
+                            message_id=message_id,
                         )
+                    )
             finally:
                 await provider.close()
 
@@ -683,9 +657,6 @@ class CloudStore:
                 )
                 existing_usage = (existing.usage if existing else None) or {}
                 merged_usage = merge_usage_status(existing_usage, usage_metadata)
-                # Clear stale pause flag once a non-paused finalize lands.
-                if not is_paused:
-                    merged_usage.pop("paused", None)
                 content = pick_merged_content(
                     existing.content if existing else None,
                     content_to_write,

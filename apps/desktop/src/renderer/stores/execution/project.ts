@@ -1,4 +1,10 @@
 import type { DebateNarrativeRound, DebateResultPayload } from "@/types/events";
+import {
+  appendContentStep,
+  appendReasoningStep,
+  appendReworkStep,
+  dropTrailingContentSteps,
+} from "@/lib/processTimeline";
 import type { RunFrame } from "./frames";
 import {
   type AgentState,
@@ -84,6 +90,7 @@ function runFromPlan(plan: ExecutionPlan, id: string): RunNode | null {
     stance: spec.stance ?? null,
     group: spec.group ?? null,
     round: spec.round ?? 0,
+    sideKey: null,
     continuesRunId: null,
     continuationIndex: 0,
     revised: null,
@@ -92,6 +99,7 @@ function runFromPlan(plan: ExecutionPlan, id: string): RunNode | null {
     checkpoint: null,
     receivedContext: [],
     escalations: [],
+    process: [],
   };
 }
 
@@ -193,10 +201,11 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
             model: null,
             usage: null,
             cost: null,
-            // 乙 wire 携 round/stance (单一轮次投影): debate 续写从 frame wire 读取。
+            // 乙 wire 携 round/stance/side_key (单一轮次投影): debate 续写从 frame wire 读取。
             stance: f.stance ?? null,
             group: f.group ?? null,
             round: f.round ?? 0,
+            sideKey: f.sideKey ?? null,
             continuesRunId: continuesRoot,
             continuationIndex: maxIdx + 1,
             revised: null,
@@ -204,6 +213,7 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
             checkpoint: null,
             receivedContext: [],
             escalations: [],
+            process: [],
           };
           addRun(s, run);
         }
@@ -231,6 +241,7 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
         }
         // 冷回落接手: mid-flight `_redir` carries replaces_run_id on the wire.
         if (f.replacesRunId) run.replacesRunId = f.replacesRunId;
+        if (f.sideKey) run.sideKey = f.sideKey;
       }
       const agent = s.agentIndex.get(f.agentId);
       if (agent) {
@@ -252,6 +263,11 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
     case "run_output_delta": {
       const agent = s.agentIndex.get(f.agentId);
       if (agent) agent.outputChunks.push(f.delta);
+      const runId = f.runId || agent?.currentRunId;
+      const run = runId ? s.runIndex.get(runId) : undefined;
+      if (run && f.delta) {
+        run.process = appendContentStep(run.process, f.delta);
+      }
       break;
     }
     case "run_output_reset": {
@@ -264,11 +280,21 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
         agent.outputChunks = [];
         agent.didRework = true;
       }
+      const runId = f.runId || agent?.currentRunId;
+      const run = runId ? s.runIndex.get(runId) : undefined;
+      if (run) {
+        run.process = appendReworkStep(dropTrailingContentSteps(run.process));
+      }
       break;
     }
     case "run_reasoning_delta": {
       const agent = s.agentIndex.get(f.agentId);
       if (agent) agent.reasoningChunks.push(f.delta);
+      const runId = f.runId || agent?.currentRunId;
+      const run = runId ? s.runIndex.get(runId) : undefined;
+      if (run && f.delta) {
+        run.process = appendReasoningStep(run.process, f.delta);
+      }
       break;
     }
     case "run_tool_progress": {
@@ -498,6 +524,23 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
         // the「正在生成」progress line gives way to this real tool-call row.
         agent.toolProgress = null;
       }
+      // Worker tool → per-run process timeline (not CEO bubble).
+      if (f.runId) {
+        const run = s.runIndex.get(f.runId);
+        if (run) {
+          run.process = [
+            ...run.process,
+            {
+              kind: "tool",
+              id: f.toolCallId,
+              tool_name: f.toolName,
+              arguments: f.arguments ?? {},
+              result: null,
+              status: "running",
+            },
+          ];
+        }
+      }
       break;
     }
     case "tool_use_end": {
@@ -508,6 +551,25 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
           tc.display = f.display ?? null;
           tc.status = f.status;
           break;
+        }
+      }
+      // Resolve the matching worker tool step (frame has no runId — search by call id).
+      for (const run of s.runs) {
+        for (let i = run.process.length - 1; i >= 0; i--) {
+          const step = run.process[i];
+          if (step.kind === "tool" && step.id === f.toolCallId) {
+            run.process = [
+              ...run.process.slice(0, i),
+              {
+                ...step,
+                result: f.result,
+                status: f.status,
+                ...(f.display != null ? { display: f.display } : {}),
+              },
+              ...run.process.slice(i + 1),
+            ];
+            break;
+          }
         }
       }
       break;
@@ -530,6 +592,8 @@ export function finalizeFold(
   status: ExecutionStatus,
   debate: DebateResultPayload | null = null,
   debateRounds: DebateNarrativeRound[] = [],
+  crossExamEnabled = false,
+  debateOpening: string | null = null,
 ): Execution {
   // Plan-declared nodes not yet touched by frames stay visible as pending/idle
   // (replay playhead before their run_started) — appended after started nodes so
@@ -597,6 +661,8 @@ export function finalizeFold(
     batches: s.batches,
     debate,
     debateRounds,
+    crossExamEnabled,
+    debateOpening,
     teamNotes: s.teamNotes,
   };
 }
@@ -615,10 +681,19 @@ export function projectExecution(
   status: ExecutionStatus,
   debate: DebateResultPayload | null = null,
   debateRounds: DebateNarrativeRound[] = [],
+  crossExamEnabled = false,
+  debateOpening: string | null = null,
 ): Execution {
   const state = initFold(plan);
   for (const f of frames) applyFrame(state, f);
-  return finalizeFold(state, status, debate, debateRounds);
+  return finalizeFold(
+    state,
+    status,
+    debate,
+    debateRounds,
+    crossExamEnabled,
+    debateOpening,
+  );
 }
 
 /** Human-readable label for a frame, used by the timeline scrubber. */

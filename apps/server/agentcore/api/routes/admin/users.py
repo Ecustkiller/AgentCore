@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agentcore.admin import AdminService
 from agentcore.admin.audit import record_admin_audit
 from agentcore.api.account_cleanup import cleanup_account_resources
-from agentcore.api.cost_view import cost_breakdown, usage_breakdown
+from agentcore.api.cost_view import cost_breakdown, estimated_cost_breakdown, usage_breakdown
 from agentcore.api.dependencies import (
     AdminUser,
     get_admin_service,
@@ -321,17 +321,20 @@ async def user_detail(
         today=UsageWindow(
             usage=usage_breakdown(today["usage"]),
             cost=cost_breakdown(today["cost"]),
+            estimated_cost=estimated_cost_breakdown(cost=today.get("estimated_cost") or {}),
             requests=today["turns"],
         ),
         month=UsageWindow(
             usage=usage_breakdown(month["usage"]),
             cost=cost_breakdown(month["cost"]),
+            estimated_cost=estimated_cost_breakdown(cost=month.get("estimated_cost") or {}),
             requests=month["turns"],
         ),
         month_by_role=[
             RoleCostLine(
                 role=row["role"],
                 cost_total=int(row["cost_total"]),
+                cost_estimated_total=int(row.get("cost_estimated_total", 0) or 0),
                 turns=int(row["turns"]),
             )
             for row in month_by_role

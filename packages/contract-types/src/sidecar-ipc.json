@@ -32,7 +32,7 @@
       "subpath",
       "selected",
       "inference",
-      "autonomyPolicy"
+      "permissionPreset"
     ],
     "required": [
       "rootId",
@@ -52,7 +52,7 @@
       "note",
       "selected",
       "inference",
-      "autonomyPolicy"
+      "permissionPreset"
     ],
     "required": [
       "messageId",

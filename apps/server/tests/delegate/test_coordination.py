@@ -15,6 +15,7 @@ from agentcore.runtime.coordination.session import (
     CoordinationSnapshot,
     active_coordination,
     clear_active_coordination,
+    coordination_budget_for_batch,
     should_enter_coordination,
 )
 from agentcore.runtime.coordination.tools import CancelWorkerTool, UpdateSynthesisTool
@@ -40,6 +41,33 @@ def test_should_enter_coordination_gate():
     )
     assert not should_enter_coordination(
         coordinate=True, worker_count=2, finalize=False, depth=1
+    )
+    # B1: checkpoint_after batch + gate open → classic blocking (durable plan_review).
+    assert not should_enter_coordination(
+        coordinate=True,
+        worker_count=2,
+        finalize=False,
+        depth=0,
+        has_checkpoint=True,
+        checkpoint_enabled=True,
+    )
+    # Gate off (evals): checkpoint nodes do not block coordination.
+    assert should_enter_coordination(
+        coordinate=True,
+        worker_count=2,
+        finalize=False,
+        depth=0,
+        has_checkpoint=True,
+        checkpoint_enabled=False,
+    )
+    # Gate open but no checkpoint nodes → still enter.
+    assert should_enter_coordination(
+        coordinate=True,
+        worker_count=2,
+        finalize=False,
+        depth=0,
+        has_checkpoint=False,
+        checkpoint_enabled=True,
     )
 
 
@@ -187,6 +215,57 @@ async def test_coordinate_returns_immediately_and_posts_events():
     clear_active_coordination("e")
 
 
+async def test_coord_drive_session_saver_does_not_shadow_coordination_session():
+    """Regression: ``for session in registered`` must not rebind the coordination session.
+
+    With ``_session_store`` + ``_session_saver``, the post-wave saver loop iterates
+    RunSessions. A prior bug rebound the outer ``session`` parameter so
+    ``session.post(ALL_COMPLETED)`` raised ``AttributeError: 'RunSession' object
+    has no attribute 'post'``.
+    """
+    from agentcore.runtime.sessions import SessionStore
+    from agentcore.tools.builtin.delegate import DelegateTool
+    from agentcore.tools.registry import ToolRegistry
+
+    clear_active_coordination()
+    store = SessionStore()
+    saved: list = []
+
+    async def _saver(run_session) -> None:
+        saved.append(run_session)
+
+    t = DelegateTool(
+        llm=Provider(["AOUT", "BOUT"]),
+        sink=EventSink(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        history=[],
+        tools=ToolRegistry(),
+        base_tool_context=ctx(),
+        session_store=store,
+        session_saver=_saver,
+    )
+    result = await t.execute(
+        {
+            "tasks": [{"role": "研究员", "task": "做A"}, {"role": "写手", "task": "做B"}],
+            "coordinate": True,
+        },
+        ctx(),
+    )
+    assert result.success is True
+    session = active_coordination("e")
+    assert session is not None
+    assert session.drive_task is not None
+    await asyncio.wait_for(session.drive_task, timeout=10)
+    events = session.drain_nowait()
+    kinds = [e.kind for e in events]
+    assert CoordinationEventKind.ALL_COMPLETED in kinds, (
+        f"coordination post must succeed after session_saver; kinds={kinds}"
+    )
+    assert saved, "trigger path requires register_sessions → session_saver"
+    clear_active_coordination("e")
+
+
 async def test_update_synthesis_emits_preview():
     clear_active_coordination()
     sink = EventSink()
@@ -229,6 +308,23 @@ async def test_coord_tools_reject_outside_session():
     cancel = CancelWorkerTool()
     bad2 = await cancel.execute({"run_id": "w1"}, ctx())
     assert bad2.success is False
+
+
+async def test_update_synthesis_soft_tip_when_session_closed():
+    """Team finished (session still registered, active=False) → soft success tip."""
+    clear_active_coordination()
+    session = CoordinationSession(execution_id="e", total_workers=2)
+    from agentcore.runtime.coordination.session import set_active_coordination
+
+    set_active_coordination(session)
+    session.close()
+    assert session.active is False
+    syn = UpdateSynthesisTool(sink=EventSink())
+    result = await syn.execute({"draft": "终稿草稿"}, ctx())
+    assert result.success is True
+    assert "全部完成" in (result.output or "")
+    assert "content_delta" in (result.output or "")
+    clear_active_coordination()
 
 
 async def test_budget_exhaustion_still_injects_template():
@@ -595,13 +691,15 @@ async def test_concurrent_sessions_isolated_by_execution_id():
     clear_active_coordination()
 
 
-async def test_coordination_checkpoint_yields_without_durable_pause(monkeypatch):
-    """选项 1：协调态 + checkpoint_after → BOUNDARY_YIELD，不 persist / 不 seal / 不收口。"""
-    from agentcore.runtime.suspension import TurnSuspension
+async def test_checkpoint_batch_skips_coordination_for_durable_plan_review(monkeypatch):
+    """B1：含 checkpoint_after 且闸开 → 不进协调，回落经典 durable plan_review。"""
+    from agentcore.core.types import ToolEffect
+    from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
+    from agentcore.runtime.suspension import TurnSuspension, captain_transcript
     from tests.delegate.conftest import CKPT_DAG, tool_durable
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.delegate.preview.should_kickoff",
+        "agentcore.runtime.delegate.preview.should_kickoff",
         lambda *a, **k: False,
     )
     clear_active_coordination()
@@ -616,27 +714,89 @@ async def test_coordination_checkpoint_yields_without_durable_pause(monkeypatch)
         pass
 
     t = tool_durable(Provider(["S1OUT", "S2OUT"]), sink, registry, _save, _drop)
-    result = await t.execute({"tasks": CKPT_DAG}, ctx())
-    assert result.success is True
-    assert "团队已启动" in result.output
+    transcript = [
+        LLMMessage(role="user", content="原始请求"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="call_del",
+                    function=ToolCallFunction(name="delegate", arguments="{}"),
+                )
+            ],
+        ),
+    ]
+    token = captain_transcript.set(transcript)
+    try:
+        # Default coordinate=True would enter coordination without B1; gate must skip.
+        result = await t.execute({"tasks": CKPT_DAG}, ctx())
+    finally:
+        captain_transcript.reset(token)
 
-    session = active_coordination("e")
-    assert session is not None and session.drive_task is not None
+    assert result.effect is ToolEffect.SUSPEND
+    assert "团队已启动" not in (result.output or "")
+    assert active_coordination("e") is None
+    assert len(saved) == 1
+    assert any(e.type is EventType.PLAN_REVIEW_REQUIRED for e in sink._history)
+
+
+async def test_coordination_mid_checkpoint_still_boundary_yields(monkeypatch):
+    """防御：已在协调态时（如 replan 中途加把关）checkpoint 仍 BOUNDARY_YIELD。"""
+    from agentcore.runtime.coordination.host import try_start_coordination
+    from agentcore.runtime.coordination.session import (
+        CoordinationSession,
+        set_active_coordination,
+    )
+    from agentcore.runtime.runs import build_run_plan
+    from agentcore.runtime.suspension import TurnSuspension
+    from tests.delegate.conftest import CKPT_DAG, tool_durable
+
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.preview.should_kickoff",
+        lambda *a, **k: False,
+    )
+    clear_active_coordination()
+    registry = InteractionRegistry()
+    sink = EventSink()
+    saved: list[TurnSuspension] = []
+
+    async def _save(frame):
+        saved.append(frame)
+
+    async def _drop(_mid):
+        pass
+
+    t = tool_durable(Provider(["S1OUT", "S2OUT"]), sink, registry, _save, _drop)
+    plan, errors = build_run_plan(CKPT_DAG, id_prefix="del_mid_", parent_run_id="CEO", depth=1)
+    assert not errors
+    # Already-active session bypasses the entry gate (resume / mid-batch defense).
+    session = CoordinationSession(execution_id="e", total_workers=len(plan.nodes))
+    set_active_coordination(session)
+    started = try_start_coordination(
+        t,
+        plan,
+        execution_id="e",
+        seed_completed=None,
+        finalize=False,
+        seed_notes=None,
+        complexity_hint="standard",
+        call_idx=1,
+        completion_criteria=None,
+        coordinate=True,
+        session=session,
+    )
+    assert started is not None
+    assert "团队已启动" in started.output
+    assert session.drive_task is not None
     await asyncio.wait_for(session.drive_task, timeout=10)
 
     assert saved == [], "协调态 checkpoint 不得 persist TurnSuspension"
-    assert t._pending_pause is False
-    assert t._pending_boundary is None
-
     events = session.drain_nowait()
     kinds = [e.kind for e in events]
     assert CoordinationEventKind.BOUNDARY_YIELD in kinds
     byield = next(e for e in events if e.kind is CoordinationEventKind.BOUNDARY_YIELD)
     assert byield.payload.get("reason") == "checkpoint"
-    brief = byield.payload.get("brief") or ""
-    assert "checkpoint" in brief.lower() or "检查点" in brief
-
-    # No plan_review_required as turn-closure card (协调态不发收口事件).
     assert not any(e.type is EventType.PLAN_REVIEW_REQUIRED for e in sink._history)
     clear_active_coordination("e")
 
@@ -649,7 +809,7 @@ async def test_classic_checkpoint_still_durable_when_not_coordinating(monkeypatc
     from tests.delegate.conftest import CKPT_DAG, tool_durable
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.delegate.preview.should_kickoff",
+        "agentcore.runtime.delegate.preview.should_kickoff",
         lambda *a, **k: False,
     )
     clear_active_coordination()
@@ -686,3 +846,97 @@ async def test_classic_checkpoint_still_durable_when_not_coordinating(monkeypatc
     assert result.effect is ToolEffect.SUSPEND
     assert len(saved) == 1
     assert any(e.type is EventType.PLAN_REVIEW_REQUIRED for e in sink._history)
+
+
+def test_coordination_budget_scales_with_batch_size():
+    assert coordination_budget_for_batch(2) == 8  # small → floor 8
+    assert coordination_budget_for_batch(4) == 8  # 4+4=8
+    assert coordination_budget_for_batch(5) == 9  # nodes+4
+    assert coordination_budget_for_batch(12) == 16  # 12+4=16
+    assert coordination_budget_for_batch(20) == 16  # cap
+
+
+def test_all_completed_inject_carries_output_and_audit_hint():
+    from agentcore.runtime.coordination.inject import format_coordination_events
+
+    session = CoordinationSession(execution_id="e", total_workers=3)
+    product = "【队员成品】调研报告正文……"
+    text = format_coordination_events(
+        session,
+        [
+            CoordinationEvent(
+                kind=CoordinationEventKind.ALL_COMPLETED,
+                payload={"completed": 3, "total": 3, "output": product},
+            )
+        ],
+    )
+    assert product in text
+    assert "团队成品" in text
+    assert "独立审计" in text
+    assert "先派审计再收尾" in text
+
+
+def test_all_completed_inject_without_output_still_has_audit_hint():
+    from agentcore.runtime.coordination.inject import format_coordination_events
+
+    session = CoordinationSession(execution_id="e", total_workers=2)
+    text = format_coordination_events(
+        session,
+        [
+            CoordinationEvent(
+                kind=CoordinationEventKind.ALL_COMPLETED,
+                payload={"completed": 2, "total": 2},
+            )
+        ],
+    )
+    assert "团队已全部结束" in text
+    assert "独立审计" in text
+    assert "团队成品" not in text
+
+
+def test_checkpoint_boundary_yield_instructs_ask_user():
+    from agentcore.runtime.coordination.inject import format_coordination_events
+
+    session = CoordinationSession(execution_id="e", total_workers=2)
+    text = format_coordination_events(
+        session,
+        [
+            CoordinationEvent(
+                kind=CoordinationEventKind.BOUNDARY_YIELD,
+                payload={"reason": "checkpoint", "brief": "提纲已出"},
+            )
+        ],
+    )
+    assert "boundary_yield（checkpoint）" in text
+    assert "ask_user" in text
+    assert "不得自行替用户决定" in text
+    assert "提纲已出" in text
+
+
+async def test_snapshot_drain_wakes_waiter_with_all_completed():
+    """drive finally snapshot must not leave CEO wait_events hanging until timeout.
+
+    Race: waiter blocked on ``queue.get``; host ``record_coordination_snapshot`` drains
+    ALL_COMPLETED into ``_pending``. Drain must wake the waiter so the event is
+    delivered promptly (not after ``_COORD_WAIT_TIMEOUT_S``).
+    """
+    clear_active_coordination()
+    session = CoordinationSession(execution_id="exec-snap-wake", total_workers=4)
+    wait_task = asyncio.create_task(session.wait_events(timeout=120.0))
+    # Let the waiter park on queue.get before we post + snapshot-drain.
+    await asyncio.sleep(0.05)
+    assert not wait_task.done()
+
+    session.post(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={"completed": 4, "total": 4},
+        )
+    )
+    # Same path as host.py finally → record_coordination_snapshot → session.snapshot().
+    snap = session.snapshot()
+    assert any(e.get("kind") == "all_completed" for e in snap.pending_events)
+
+    events = await asyncio.wait_for(wait_task, timeout=1.0)
+    assert any(e.kind is CoordinationEventKind.ALL_COMPLETED for e in events)
+    clear_active_coordination()

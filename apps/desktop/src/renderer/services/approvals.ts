@@ -1,7 +1,9 @@
 import { ApiError } from "@/services/api";
+import { notifyError } from "@/lib/toast";
 import {
   isInteractionOrphanedError,
   submitInteraction,
+  submitInteractionFeedback,
 } from "@/services/interactionSubmit";
 import {
   type ApprovalView,
@@ -128,7 +130,9 @@ async function settleOne(
       conversationId: approval.conversationId,
       hotBody: { kind: "approval", decision },
     });
-    if (result === "busy") return;
+    if (result !== "ok") {
+      notifyError(submitInteractionFeedback(result));
+    }
   } catch (err) {
     if (isInteractionOrphanedError(err)) {
       useInteractionStore.getState().markOrphaned(approval.approvalId);

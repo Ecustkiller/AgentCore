@@ -1,2 +1,2 @@
-# Town.unity (empty scene + runtime town generation) goes here once the Editor is available.
-# Left intentionally empty this batch — no hand-written .unity assets (see AgentTown客户端规格 §3).
+# Reserved for Unity scene assets.
+# Scene setup and verification: apps/town/README.md and EDITOR-WIRING.md.

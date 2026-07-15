@@ -2,16 +2,33 @@
 
 Auto-skips (via the shared ``client`` fixture) when no PostgreSQL is reachable.
 Covers create modes, birth-time membership, soft-delete archives (no ungroup),
-absence of PATCH …/folder, and IDOR isolation.
+permanent wipe (conversations + cloud space), absence of PATCH …/folder, and IDOR isolation.
 """
 
+from pathlib import Path
+
 import httpx
+import pytest
 
 import agentcore.folders.permanent_delete as permanent_delete_mod
+from agentcore.config import settings
 from agentcore.db.repositories import MessageRepository
+from agentcore.storage.factory import build_storage_provider
+from agentcore.workspace.locate import workspace_root_path
 from tests.integration.conftest import register_and_login
 
 _ROOT = "11111111-2222-3333-4444-555555555555"
+
+
+@pytest.fixture
+def _fs_data_dir(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    monkeypatch.setattr(settings, "storage_backend", "filesystem")
+    build_storage_provider.cache_clear()
+    try:
+        yield tmp_path
+    finally:
+        build_storage_provider.cache_clear()
 
 
 async def _new_conversation(client: httpx.AsyncClient, title: str) -> str:
@@ -233,25 +250,95 @@ async def test_delete_folder_archives_conversations(client, make_invite):
     assert detail["archived"] is True
 
 
-async def test_permanent_delete_folder_ungroups_conversations(
-    client, make_invite, session_factory, monkeypatch
+async def test_soft_delete_folder_hides_workspace_from_hub(
+    client, make_invite, _fs_data_dir
 ):
+    """Soft-deleted ``folder:<id>`` must not appear in list or resolve via locate."""
+    code = await make_invite("INV-F-SOFT-WS")
+    await register_and_login(client, code, "foldersoftws")
+    folder_id = await _create_cloud_folder(client, "SoftGone")
+    ws = f"folder:{folder_id}"
+    await client.put(f"/v1/workspaces/{ws}/files/keep.txt", content=b"x")
+
+    assert (await client.delete(f"/v1/folders/{folder_id}")).status_code == 200
+
+    listed = (await client.get("/v1/workspaces")).json()["data"]
+    assert ws not in {w["ws_id"] for w in listed}
+    assert (await client.get(f"/v1/workspaces/{ws}/files")).status_code == 404
+
+
+async def test_permanent_delete_folder_wipes_conversations_and_cloud_space(
+    client, make_invite, session_factory, monkeypatch, _fs_data_dir
+):
+    """彻底删除: member chats gone, shared cloud files + snapshots purged."""
     monkeypatch.setattr(permanent_delete_mod, "async_session_factory", session_factory)
     code = await make_invite("INV-F7P")
-    await register_and_login(client, code, "folderuser7p")
+    user_id = await register_and_login(client, code, "folderuser7p")
     folder_id = await _create_cloud_folder(client, "Gone")
     r = await client.post(
-        "/v1/conversations", json={"title": "keep me", "folder_id": folder_id}
+        "/v1/conversations", json={"title": "wipe me", "folder_id": folder_id}
     )
     conv = r.json()["id"]
+    await _seed_message(session_factory, conv)
+
+    ws = f"folder:{folder_id}"
+    assert (
+        await client.put(f"/v1/workspaces/{ws}/files/docs/a.txt", content=b"payload")
+    ).status_code == 200
+    snap = await client.post(f"/v1/workspaces/{ws}/snapshots", json={"label": "pre"})
+    assert snap.status_code == 201, snap.text
 
     r = await client.delete(f"/v1/folders/{folder_id}/permanent")
     assert r.status_code == 200, r.text
 
     body = (await client.get("/v1/conversations/grouped")).json()
     assert body["folders"] == []
-    assert [c["id"] for c in body["ungrouped"]] == [conv]
-    assert (await client.get(f"/v1/conversations/{conv}")).status_code == 200
+    assert body["ungrouped"] == []
+    assert (await client.get(f"/v1/conversations/{conv}")).status_code == 404
+    assert (await client.get("/v1/folders")).json() == []
+    assert (await client.get(f"/v1/workspaces/{ws}/files")).status_code == 404
+    assert not workspace_root_path(
+        user_id=user_id, folder_id=folder_id, conversation_id=""
+    ).exists()
+
+
+async def test_permanent_delete_local_folder_keeps_os_sentinel(
+    client, make_invite, session_factory, monkeypatch, _fs_data_dir, tmp_path: Path
+):
+    """Local project wipe clears DB/server data only — never the user's OS directory."""
+    monkeypatch.setattr(permanent_delete_mod, "async_session_factory", session_factory)
+    # Sentinel stands in for the user's real project directory (desktop root handle
+    # is opaque; the server must not rm anything outside data_dir).
+    os_sentinel = tmp_path / "user-os-project"
+    os_sentinel.mkdir()
+    (os_sentinel / "important.txt").write_text("do-not-touch", encoding="utf-8")
+
+    code = await make_invite("INV-F7L")
+    await register_and_login(client, code, "folderuser7l")
+    r = await client.post(
+        "/v1/folders",
+        json={
+            "name": "LocalGone",
+            "mode": "local",
+            "local_root_id": _ROOT,
+            "local_subpath": "apps",
+        },
+    )
+    assert r.status_code == 201, r.text
+    folder_id = r.json()["id"]
+    r = await client.post(
+        "/v1/conversations", json={"title": "local wipe", "folder_id": folder_id}
+    )
+    conv = r.json()["id"]
+
+    assert (
+        await client.delete(f"/v1/folders/{folder_id}/permanent")
+    ).status_code == 200
+
+    assert (await client.get(f"/v1/conversations/{conv}")).status_code == 404
+    assert (await client.get("/v1/folders")).json() == []
+    assert os_sentinel.exists()
+    assert (os_sentinel / "important.txt").read_text(encoding="utf-8") == "do-not-touch"
 
 
 async def test_folder_isolation_between_users(client, make_invite, new_client):

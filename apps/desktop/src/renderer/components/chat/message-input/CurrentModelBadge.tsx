@@ -11,7 +11,7 @@ import { useNavigate } from "react-router-dom";
  * Shows the model **this conversation's last turn actually ran on** when known — the
  * local (sidecar) turn result reports its real model ({@link useTurnModelStore}), which
  * is the ONLY place a turn can diverge from the account config: a dev fallback runs on
- * the local platform model (e.g. gpt-5.5) instead of the account model (e.g. deepseek-…).
+ * the local platform model (e.g. gpt-4o) instead of the account model (e.g. deepseek-…).
  * With no per-turn signal yet (a fresh conversation, or a cloud conversation — cloud
  * always uses the account model, so the config label is already correct) it falls back
  * to the account config (`default_model` from `GET /v1/users/me/llm-key`).
@@ -33,17 +33,23 @@ export function CurrentModelBadge({ disabled }: { disabled?: boolean }) {
     );
   }
 
-  const configured = !!data?.configured || data?.billing_mode === "platform";
+  const freeTierActive = data?.free_tier_active === true;
+  const hasAccess =
+    !!data?.configured || data?.billing_mode === "platform" || freeTierActive;
+  // Free tier (no BYOK key): always the「免费额度」semantic — never「未配置」,
+  // and don't surface a raw platform model id as if the user configured it.
   const accountLabel =
-    data?.default_model?.trim() ||
-    data?.platform_model?.trim() ||
-    (data?.billing_mode === "platform"
-      ? "平台模型"
-      : data?.configured
-        ? "已配置模型"
-        : "未配置");
+    freeTierActive && !data?.configured
+      ? "免费额度"
+      : data?.default_model?.trim() ||
+        data?.platform_model?.trim() ||
+        (data?.billing_mode === "platform"
+          ? "平台模型"
+          : data?.configured
+            ? "已配置模型"
+            : "未配置");
   const label = lastTurnModel ?? accountLabel;
-  const unconfigured = !configured && !lastTurnModel;
+  const unconfigured = !hasAccess && !lastTurnModel;
 
   const goConfigure = () => {
     if (disabled) return;

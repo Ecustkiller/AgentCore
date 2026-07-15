@@ -92,6 +92,17 @@ captain_transcript: ContextVar[list[LLMMessage] | None] = ContextVar(
 # ``None`` outside a turn (tests / standalone) → the face captures no history.
 turn_history: ContextVar[list[dict[str, Any]] | None] = ContextVar("turn_history", default=None)
 
+# The turn's live web-source pool (the CEO loop's ``citation_sink``), bound by the pipeline
+# right after it creates the list — same pattern as :data:`turn_history`. A suspending face
+# snapshots it into the durable frame so a resume re-seeds the pool instead of starting
+# empty: the pre-pause [n] markers in the CEO's prose keep resolving to the same source
+# cards, and finish_guard's citation_count reflects the sources actually consulted (引用池
+# 单一权威 — without this a resumed wrap-up was serially reworked as「编造引用」).
+# ``None`` outside a turn → the face captures no citations.
+turn_citations: ContextVar[list[dict[str, Any]] | None] = ContextVar(
+    "turn_citations", default=None
+)
+
 
 # InteractionKind members that persist to ``paused_turns`` (设计 §4.7). Single source
 # for the durable set — :class:`SuspensionKind` values are taken from these members
@@ -185,6 +196,14 @@ class TurnSuspension:
     # checks this to surface a clear error instead of silently rebuilding an empty CEO
     # window (the frame alone is not enough without the journal facts).
     journal_degraded: bool = False
+    # The turn's web-source pool at pause (the CEO loop's ``citation_sink`` snapshot,
+    # captured off :data:`turn_citations`). Serialized into the frame — unlike the
+    # window it is NOT rebuildable from the journal (the source dicts live on
+    # ``ToolResult.citations``, not in the folded tool text) — so a resume re-seeds
+    # the pool: pre-pause [n] markers keep resolving to the same cards and
+    # finish_guard sees the real citation_count (引用池单一权威). Legacy frames
+    # lack the key → empty list (the pre-fix behavior, degraded but valid).
+    citations: list[dict[str, Any]] = field(default_factory=list)
     trace_id: str | None = None
 
     @property
@@ -222,7 +241,9 @@ class TurnSuspension:
             # ``window_from_journal`` from the turn_journal facts (§8.3) + reloaded history, so
             # the frame holds only resume CONTROL metadata. The display ``journal`` is a derived
             # property (never stored). See the module docstring + ``runtime/journal.py``.
+            # ``citations`` IS serialized: the source dicts are not journal-rebuildable.
             "journal_degraded": self.journal_degraded,
+            "citations": list(self.citations),
             "trace_id": self.trace_id,
         }
 
@@ -258,6 +279,8 @@ class TurnSuspension:
             # derived property (never stored). The Sidecar's local record carries journal_entries
             # + history separately (it has no DB).
             "journal_degraded": bool(data.get("journal_degraded")),
+            # Legacy frames (pre-field) lack the key → empty pool (pre-fix behavior).
+            "citations": list(data.get("citations") or []),
             "trace_id": data.get("trace_id"),
         }
 
@@ -313,7 +336,7 @@ class TeamPreviewSuspension(TurnSuspension):
     completed: dict[str, RunState] = field(default_factory=dict)
     # Upcoming workers the user is confirming ({run_id, role, task, depends_on, debate}).
     workers: list[dict[str, Any]] = field(default_factory=list)
-    # GRANTABLE tools the kickoff grant would cover (统一授权白名单).
+    # GRANTABLE whitelist the kickoff grant would cover（将授权的能力范围；非按计划推算）.
     tools: list[str] = field(default_factory=list)
     # Orchestration primitive discriminant (delegate | debate).
     primitive: str = "delegate"

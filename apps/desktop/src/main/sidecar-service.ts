@@ -21,12 +21,16 @@ import { mkdir, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   SIDECAR_CHANNELS,
+  type SidecarAttachRequest,
+  type SidecarAttachResponse,
   type SidecarCancelRequest,
+  type SidecarContinueAfterDecisionRequest,
   type SidecarDebateSteerRequest,
   type SidecarInference,
-  type SidecarListPausedRequest,
   type SidecarPausedTurn,
   type SidecarProbeRequest,
+  type SidecarRecoveryRequest,
+  type SidecarRecoveryResponse,
   type SidecarRespondRequest,
   type SidecarResumeRequest,
   type SidecarRunRedirectRequest,
@@ -37,8 +41,15 @@ import {
 } from "@shared/sidecar-contract";
 import { BrowserWindow, type WebContents, app, ipcMain } from "electron";
 import { getStoredRoot } from "./fs-service";
+import { listSessionRoots } from "./fs/roots";
 import { assertShape } from "./ipc-validate";
-import { sidecarDataDir } from "./outbox-writeback";
+import { logDesktop } from "./log-service";
+import {
+  listInterruptedAfterDecision,
+  listUnsyncedSummaries,
+  sidecarDataDir,
+} from "./outbox-writeback";
+import { SidecarEventBuffer } from "./sidecar-event-buffer";
 
 // 本地回合的审批门（双模式工作区 / 远期规划 §一）。开启后，sidecar 引擎对 worker 的「碰真实
 // 机器」工具（file_write / code_execute 等 GRANTABLE）挂起审批，与云端 local 模式同语义——
@@ -56,6 +67,7 @@ const SIDECAR_APPROVALS_ENABLED = true;
  * `conversation_id` / `created_at` 与已投影好的 `summary`（= 服务端 `PausedTurnSummary` 形状）。
  * 这里只读这几个顶层字段、按会话过滤、按时间排序，返回 `summary` 原样——与 Python 的
  * `listPaused` RPC 同源（summary 在落盘时算好存入），但读列表这一步无需引擎在跑。
+ * 经 `recovery` IPC 的 `paused[]` 返回（原独立 listPaused 通道已退役）。
  * 尽力而为：任何读/解析失败都降级为「无待续跑」，绝不阻塞重开会话。
  */
 async function readLocalPausedSummaries(
@@ -396,6 +408,20 @@ interface SidecarEntry {
 interface ActiveTurn {
   wc: WebContents;
   conversationId: string;
+  rootId: string;
+  subpath: string;
+  kind: "start" | "resume";
+  traceId: string;
+  /** startTurn：用户行 id；resume：挂起时落库的 user 行 id（可缺省）。 */
+  userMessageId?: string;
+  userMessage?: string;
+  /** resume 登记键 = assistant message_id；startTurn 亦可在 finalize 前未知。 */
+  messageId?: string;
+  buffer: SidecarEventBuffer;
+  /** 本回合是否曾被 attach 重绑过（合成终止事件的门闩）。 */
+  hasAttached: boolean;
+  /** attach 零 await 段内为 true：只入缓冲、不转发（互斥不重不漏）。 */
+  attaching: boolean;
 }
 
 /**
@@ -513,8 +539,29 @@ export class SidecarManager {
     );
     await entry.ready; // 初始化失败则在此抛出 → renderer 据此降级
 
-    this.turns.set(req.turnId, { wc, conversationId: req.conversationId });
+    this.turns.set(req.turnId, {
+      wc,
+      conversationId: req.conversationId,
+      rootId: req.rootId,
+      subpath: req.subpath ?? "",
+      kind: "start",
+      traceId: req.traceId,
+      userMessageId: req.userMessageId,
+      userMessage: req.userMessage,
+      buffer: new SidecarEventBuffer(),
+      hasAttached: false,
+      attaching: false,
+    });
     try {
+      const sessionRoots = listSessionRoots(req.conversationId);
+      const externalMounts = sessionRoots
+        .filter((r) => r.alias && r.absPath)
+        .map((r) => ({
+          alias: r.alias as string,
+          rootId: r.id,
+          label: r.name,
+          absPath: r.absPath,
+        }));
       const result = await entry.client.request("startTurn", {
         turnId: req.turnId,
         conversationId: req.conversationId,
@@ -523,14 +570,22 @@ export class SidecarManager {
         // Outbox idempotency anchor (as-built: 双模式工作区 §10.3).
         userMessageId: req.userMessageId,
         history: req.history ?? [],
+        // W3: session read-only mounts (abs paths stay in main → sidecar only).
+        ...(externalMounts.length > 0 ? { externalMounts } : {}),
         // Re-send the current cloud-proxy token every turn: the sidecar is long-lived
         // but the token rotates (12h TTL), so the engine adopts the fresh one per turn
         // (initialize-time creds would otherwise 401 after expiry).
         ...(req.inference ? { inference: req.inference } : {}),
-        // 自主度按回合随送（同 inference 的刷新姿态）：设置中途改，下一回合即生效。
-        ...(req.autonomyPolicy ? { autonomyPolicy: req.autonomyPolicy } : {}),
+        // 会话权限模式按回合随送：中途切换后下一回合即生效。
+        ...(req.permissionPreset
+          ? { permissionPreset: req.permissionPreset }
+          : {}),
       });
+      this.emitSyntheticTerminalIfNeeded(req.turnId, "message_end");
       return result as SidecarTurnResult;
+    } catch (err) {
+      this.emitSyntheticTerminalIfNeeded(req.turnId, "error", err);
+      throw err;
     } finally {
       this.turns.delete(req.turnId);
     }
@@ -573,28 +628,202 @@ export class SidecarManager {
     );
     await entry.ready;
 
-    this.turns.set(req.messageId, { wc, conversationId: req.conversationId });
+    this.turns.set(req.messageId, {
+      wc,
+      conversationId: req.conversationId,
+      rootId: req.rootId,
+      subpath: req.subpath ?? "",
+      kind: "resume",
+      traceId: req.traceId,
+      userMessageId: req.userMessageId,
+      messageId: req.messageId,
+      buffer: new SidecarEventBuffer(),
+      hasAttached: false,
+      attaching: false,
+    });
     try {
-      const result = await entry.client.request(
-        "resume",
-        buildSidecarResumeRpcParams(req, inference),
-      );
+      const sessionRoots = listSessionRoots(req.conversationId);
+      const externalMounts = sessionRoots
+        .filter((r) => r.alias && r.absPath)
+        .map((r) => ({
+          alias: r.alias as string,
+          rootId: r.id,
+          label: r.name,
+          absPath: r.absPath,
+        }));
+      const result = await entry.client.request("resume", {
+        ...buildSidecarResumeRpcParams(req, inference),
+        ...(externalMounts.length > 0 ? { externalMounts } : {}),
+      });
+      this.emitSyntheticTerminalIfNeeded(req.messageId, "message_end");
       return result as SidecarTurnResult;
+    } catch (err) {
+      this.emitSyntheticTerminalIfNeeded(req.messageId, "error", err);
+      throw err;
     } finally {
       this.turns.delete(req.messageId);
     }
   }
 
   /**
-   * 列出某会话在本机待续跑的持久挂起帧（重开会话时调）。
-   *
-   * **不拉起 Python**：只读帧文件（`readLocalPausedSummaries`）——只读列表无需引擎，避免每次
-   * 重开都付出冷启动 / 误触发拉起失败横幅。真正续跑（`resume`）才拉起引擎。
+   * Local recovery query: live turn + outbox unsynced + paused frames +
+   * interrupted_after_decision (D2 journal fold). Zero spawn.
    */
-  async listPaused(
-    req: SidecarListPausedRequest,
-  ): Promise<SidecarPausedTurn[]> {
-    return readLocalPausedSummaries(req.conversationId);
+  async recovery(
+    req: SidecarRecoveryRequest,
+  ): Promise<SidecarRecoveryResponse> {
+    const live = this.findLiveTurn(req.conversationId);
+    const liveMessageId =
+      live?.turn.kind === "resume"
+        ? live.turn.messageId
+        : live?.turnId ?? null;
+    const [unsynced, paused, interruptedAfterDecision] = await Promise.all([
+      listUnsyncedSummaries(req.conversationId),
+      readLocalPausedSummaries(req.conversationId),
+      listInterruptedAfterDecision(req.conversationId, liveMessageId),
+    ]);
+    // Exclude the live turn's open row — D5 projects ready + dead-open only;
+    // live content comes from attach replay.
+    const filtered = live
+      ? unsynced.filter((u) => {
+          if (live.turn.kind === "start" && live.turn.userMessageId) {
+            return u.user_message_id !== live.turn.userMessageId;
+          }
+          if (live.turn.kind === "resume" && live.turn.messageId) {
+            return u.message_id !== live.turn.messageId;
+          }
+          return true;
+        })
+      : unsynced;
+    logDesktop({
+      level: "info",
+      event: "sidecar.recovery",
+      fields: {
+        conversation_id: req.conversationId,
+        live_running: live !== null,
+        unsynced_count: filtered.length,
+        paused_count: paused.length,
+        interrupted_after_decision_count: interruptedAfterDecision.length,
+      },
+    });
+    return {
+      liveRunning: live !== null,
+      ...(live ? { turnId: live.turnId } : {}),
+      unsynced: filtered,
+      paused,
+      interruptedAfterDecision,
+    };
+  }
+
+  /**
+   * Frameless continue after settlement (D2 · 方案 A). Same event routing as resume.
+   */
+  async continueAfterDecision(
+    wc: WebContents,
+    req: SidecarContinueAfterDecisionRequest,
+    workspaceRoot: string,
+    inference: SidecarInference | undefined,
+  ): Promise<SidecarTurnResult> {
+    const entry = this.ensure(
+      req.rootId,
+      req.subpath ?? "",
+      workspaceRoot,
+      inference,
+    );
+    await entry.ready;
+
+    this.turns.set(req.messageId, {
+      wc,
+      conversationId: req.conversationId,
+      rootId: req.rootId,
+      subpath: req.subpath ?? "",
+      kind: "resume",
+      traceId: req.traceId,
+      userMessageId: req.userMessageId,
+      messageId: req.messageId,
+      buffer: new SidecarEventBuffer(),
+      hasAttached: false,
+      attaching: false,
+    });
+    try {
+      const sessionRoots = listSessionRoots(req.conversationId);
+      const externalMounts = sessionRoots
+        .filter((r) => r.alias && r.absPath)
+        .map((r) => ({
+          alias: r.alias as string,
+          rootId: r.id,
+          label: r.name,
+          absPath: r.absPath,
+        }));
+      const result = await entry.client.request("continueAfterDecision", {
+        conversationId: req.conversationId,
+        messageId: req.messageId,
+        userMessageId: req.userMessageId,
+        traceId: req.traceId,
+        permissionPreset: req.permissionPreset,
+        ...(inference ? { inference } : {}),
+        ...(externalMounts.length > 0 ? { externalMounts } : {}),
+      });
+      this.emitSyntheticTerminalIfNeeded(req.messageId, "message_end");
+      return result as SidecarTurnResult;
+    } catch (err) {
+      this.emitSyntheticTerminalIfNeeded(req.messageId, "error", err);
+      throw err;
+    } finally {
+      this.turns.delete(req.messageId);
+    }
+  }
+
+  /**
+   * Rebind the live turn's WebContents and snapshot the event buffer (D4).
+   *
+   * **Zero-await hard constraint** between rebind and snapshot: every event is
+   * either in the returned snapshot or forwarded to the new wc — never both,
+   * never lost. Callers must not insert awaits in this method.
+   */
+  attach(wc: WebContents, req: SidecarAttachRequest): SidecarAttachResponse {
+    const live = this.findLiveTurn(req.conversationId);
+    if (!live) {
+      logDesktop({
+        level: "info",
+        event: "sidecar.attach",
+        fields: {
+          conversation_id: req.conversationId,
+          attached: false,
+          buffer_length: 0,
+        },
+      });
+      return { attached: false };
+    }
+    // --- zero-await section (do not await) ---
+    live.turn.attaching = true;
+    live.turn.wc = wc;
+    live.turn.hasAttached = true;
+    const events = live.turn.buffer.snapshot();
+    live.turn.attaching = false;
+    // --- end zero-await section ---
+    logDesktop({
+      level: "info",
+      event: "sidecar.attach",
+      fields: {
+        conversation_id: req.conversationId,
+        attached: true,
+        turn_id: live.turnId,
+        buffer_length: events.length,
+      },
+    });
+    return {
+      attached: true,
+      turnId: live.turnId,
+      rootId: live.turn.rootId,
+      subpath: live.turn.subpath,
+      userMessageId: live.turn.userMessageId,
+      userMessage: live.turn.userMessage,
+      traceId: live.turn.traceId,
+      messageId: live.turn.messageId,
+      kind: live.turn.kind,
+      events,
+    };
   }
 
   /** 取消一个在跑的回合（尽力而为；无对应 sidecar 则静默）。 */
@@ -675,12 +904,87 @@ export class SidecarManager {
     if (method !== "turn/event") return;
     const turnId = String(params.turnId ?? "");
     const turn = this.turns.get(turnId);
-    if (!turn || turn.wc.isDestroyed()) return;
+    if (!turn) return;
+
+    const raw = params.event;
+    const event =
+      raw && typeof raw === "object"
+        ? (raw as {
+            type?: string;
+            timestamp?: string;
+            payload?: unknown;
+          })
+        : null;
+    if (!event?.type) return;
+
+    const buffered = {
+      type: String(event.type),
+      timestamp:
+        typeof event.timestamp === "string"
+          ? event.timestamp
+          : new Date().toISOString(),
+      payload: event.payload,
+    };
+    // Buffer first (even when wc is destroyed) so refresh attach can replay.
+    turn.buffer.record(buffered);
+
+    // During attach's zero-await window: buffer only — snapshot owns those events.
+    if (turn.attaching || turn.wc.isDestroyed()) return;
     turn.wc.send(SIDECAR_CHANNELS.event, {
       conversationId: turn.conversationId,
       turnId,
-      event: params.event,
+      event: buffered,
     });
+  }
+
+  /**
+   * Before `turns.delete`: if an attached window never saw a terminal event,
+   * synthesize one so the bubble cannot hang on「生成中」(D4 收尾必达).
+   */
+  private emitSyntheticTerminalIfNeeded(
+    turnId: string,
+    kind: "message_end" | "error",
+    err?: unknown,
+  ): void {
+    const turn = this.turns.get(turnId);
+    if (!turn || !turn.hasAttached) return;
+    if (turn.buffer.hasTerminal()) return;
+
+    const event = {
+      type: kind,
+      timestamp: new Date().toISOString(),
+      payload:
+        kind === "error"
+          ? {
+              code: "sidecar_turn_ended",
+              message:
+                err instanceof Error
+                  ? err.message
+                  : err
+                    ? String(err)
+                    : "本地回合异常结束",
+            }
+          : {},
+    };
+    turn.buffer.record(event);
+    if (!turn.wc.isDestroyed()) {
+      turn.wc.send(SIDECAR_CHANNELS.event, {
+        conversationId: turn.conversationId,
+        turnId,
+        event,
+      });
+    }
+  }
+
+  private findLiveTurn(
+    conversationId: string,
+  ): { turnId: string; turn: ActiveTurn } | null {
+    for (const [turnId, turn] of this.turns) {
+      if (turn.conversationId === conversationId) {
+        return { turnId, turn };
+      }
+    }
+    return null;
   }
 
   private pushStatus(push: SidecarStatusPush): void {
@@ -714,7 +1018,7 @@ export function registerSidecarIpc(): void {
           "userMessage",
           "userMessageId",
         ],
-        ["subpath", "autonomyPolicy"],
+        ["subpath", "permissionPreset"],
       );
       const root = await getStoredRoot(req.rootId);
       if (!root) throw new Error("本地目录未授权或已移除");
@@ -786,7 +1090,7 @@ export function registerSidecarIpc(): void {
           "decision",
           "note",
         ],
-        ["subpath", "userMessageId", "autonomyPolicy"],
+        ["subpath", "userMessageId", "permissionPreset"],
       );
       const root = await getStoredRoot(req.rootId);
       if (!root) throw new Error("本地目录未授权或已移除");
@@ -799,13 +1103,29 @@ export function registerSidecarIpc(): void {
   );
 
   ipcMain.handle(
-    SIDECAR_CHANNELS.listPaused,
-    (_e, req: SidecarListPausedRequest): Promise<SidecarPausedTurn[]> => {
-      assertShape(SIDECAR_CHANNELS.listPaused, req, [
-        "rootId",
-        "conversationId",
-      ]);
-      return manager.listPaused(req);
+    SIDECAR_CHANNELS.continueAfterDecision,
+    async (
+      e,
+      req: SidecarContinueAfterDecisionRequest,
+    ): Promise<SidecarTurnResult> => {
+      assertShape(
+        SIDECAR_CHANNELS.continueAfterDecision,
+        req,
+        ["rootId", "conversationId", "messageId"],
+        ["subpath", "userMessageId", "traceId", "permissionPreset"],
+      );
+      const root = await getStoredRoot(req.rootId);
+      if (!root) throw new Error("本地目录未授权或已移除");
+      const workspaceRoot = await resolveWorkspaceRoot(
+        root.absPath,
+        req.subpath,
+      );
+      return manager.continueAfterDecision(
+        e.sender,
+        req,
+        workspaceRoot,
+        req.inference,
+      );
     },
   );
 
@@ -820,6 +1140,22 @@ export function registerSidecarIpc(): void {
         req.subpath,
       );
       await manager.probe(req.rootId, req.subpath ?? "", workspaceRoot);
+    },
+  );
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.recovery,
+    (_e, req: SidecarRecoveryRequest): Promise<SidecarRecoveryResponse> => {
+      assertShape(SIDECAR_CHANNELS.recovery, req, ["conversationId"]);
+      return manager.recovery(req);
+    },
+  );
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.attach,
+    (e, req: SidecarAttachRequest): SidecarAttachResponse => {
+      assertShape(SIDECAR_CHANNELS.attach, req, ["conversationId"]);
+      return manager.attach(e.sender, req);
     },
   );
 

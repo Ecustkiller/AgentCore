@@ -126,7 +126,7 @@ def test_parse_section_overrides_mislabeled_core_file():
 
 def test_parse_scope_defaults_to_global():
     raw = '{"ops": [{"action": "add", "section": "技术栈与工具", "content": "用 Python"}]}'
-    ops = parse_memory_ops(raw, project_id="F1")
+    ops = parse_memory_ops(raw, folder_id="F1")
     assert ops[0].scope is None
 
 
@@ -135,14 +135,14 @@ def test_parse_project_scope_resolves_to_folder_id():
         '{"ops": [{"action": "add", "scope": "project", "section": "技术栈与工具",'
         ' "content": "本项目用 Rust"}]}'
     )
-    ops = parse_memory_ops(raw, project_id="F1")
+    ops = parse_memory_ops(raw, folder_id="F1")
     assert ops[0].scope == "F1"
 
 
 def test_parse_project_scope_without_project_falls_back_to_global():
     # "project" with no current project (bare chat) degrades to global, not dropped.
     raw = '{"ops": [{"action": "add", "scope": "project", "section": "关于用户的事实", "content": "x"}]}'
-    ops = parse_memory_ops(raw, project_id=None)
+    ops = parse_memory_ops(raw, folder_id=None)
     assert ops[0].scope is None
 
 
@@ -152,7 +152,7 @@ def test_parse_preferences_are_always_global_even_in_project():
         '{"ops": [{"action": "add", "scope": "project", "section": "工作习惯",'
         ' "content": "小步快跑"}]}'
     )
-    ops = parse_memory_ops(raw, project_id="F1")
+    ops = parse_memory_ops(raw, folder_id="F1")
     assert ops[0].file == "偏好.md"
     assert ops[0].scope is None
 
@@ -162,7 +162,7 @@ def test_parse_topic_op_can_be_project_scoped():
         '{"ops": [{"action": "add", "scope": "project", "file": "主题/部署.md",'
         ' "content": "本项目部署走 X"}]}'
     )
-    ops = parse_memory_ops(raw, project_id="F1")
+    ops = parse_memory_ops(raw, folder_id="F1")
     assert ops[0].file == "主题/部署.md"
     assert ops[0].scope == "F1"
 
@@ -282,7 +282,7 @@ async def test_extractor_prompt_includes_preferences_and_project_layer():
             user_id="u1",
             current_profile="## 技术栈与工具\n- 用 Python",
             current_preferences="## 沟通偏好\n- 用中文",
-            project_id="F1",
+            folder_id="F1",
             current_project_memory="## 关于用户的事实\n- 本项目客户是 X",
             messages=[{"role": "user", "content": "hi"}],
             project_topic_files=["部署"],

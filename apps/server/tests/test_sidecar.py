@@ -406,17 +406,17 @@ def test_sidecar_binds_local_backend_with_approvals(tmp_path, monkeypatch):
     assert captured["approvals_enabled"] is True
 
 
-def test_sidecar_threads_autonomy_policy_per_turn(tmp_path, monkeypatch):
-    """The user's autonomy posture reaches the local engine (安全权限与治理 §三): initialize
-    seeds it, a per-turn ``autonomyPolicy`` refreshes it (a mid-session settings change
-    applies to the NEXT turn), and an absent param keeps the current value — never a
-    silent reset to the default."""
-    from agentcore.core.types import AutonomyPolicy
+def test_sidecar_threads_permission_preset_per_turn(tmp_path, monkeypatch):
+    """Conversation permission mode reaches the local engine: initialize seeds it,
+    a per-turn ``permissionPreset`` refreshes it, and an absent param keeps the
+    current value — never a silent reset to the default.
+    """
+    from agentcore.core.types import AutonomyPolicy, PermissionPreset
 
-    captured: list[AutonomyPolicy] = []
+    captured: list[tuple[AutonomyPolicy, PermissionPreset]] = []
 
     async def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
-        captured.append(kwargs["autonomy_policy"])
+        captured.append((kwargs["autonomy_policy"], kwargs["permission_preset"]))
         kwargs["sink"].close()
         return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}
 
@@ -453,20 +453,20 @@ def test_sidecar_threads_autonomy_policy_per_turn(tmp_path, monkeypatch):
                     "params": {
                         "userId": "u",
                         "workspaceRoot": str(tmp_path),
-                        "autonomyPolicy": "full_auto",
+                        "permissionPreset": "full_trust",
                     },
                 }
             )
         )
         await start_turn("t1", {})  # no per-turn value → the initialize seed applies
-        await start_turn("t2", {"autonomyPolicy": "always_ask"})  # per-turn refresh
+        await start_turn("t2", {"permissionPreset": "observe"})  # per-turn refresh
         await start_turn("t3", {})  # absent again → keeps the refreshed value
 
     asyncio.run(drive())
     assert captured == [
-        AutonomyPolicy.FULL_AUTO,
-        AutonomyPolicy.ALWAYS_ASK,
-        AutonomyPolicy.ALWAYS_ASK,
+        (AutonomyPolicy.FULL_AUTO, PermissionPreset.FULL_TRUST),
+        (AutonomyPolicy.ALWAYS_ASK, PermissionPreset.OBSERVE),
+        (AutonomyPolicy.ALWAYS_ASK, PermissionPreset.OBSERVE),
     ]
 
 

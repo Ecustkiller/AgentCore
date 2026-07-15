@@ -84,6 +84,8 @@ def log_llm_call(
     content: str | None = None,
     reasoning: str | None = None,
     tool_names: list[str] | None = None,
+    credential_source: str | None = None,
+    provider_name: str | None = None,
 ) -> None:
     """Emit one ``llm.call`` metrics line (+ optional bodies when enabled).
 
@@ -91,6 +93,23 @@ def log_llm_call(
     ``depth`` from contextvars, so calls attribute to their turn and worker.
     """
     u = usage or TokenUsage()
+    # Lazy import: observability sits under provider → profiles; pricing imports
+    # profiles, so a top-level import would cycle. calculate_cost itself is sync
+    # and DB-free — the single billing price source (不变量 #2).
+    from agentcore.llm.pricing import calculate_cost, resolve_credential_source
+
+    explicit_source = (
+        credential_source if credential_source in ("user", "platform", "vendor") else None
+    )
+    source = resolve_credential_source(
+        credential_source=explicit_source,
+        provider_name=provider_name,
+        model=model,
+    )
+    priced = calculate_cost(model, u, credential_source=source)
+    # cost_nano = platform/vendor billed nano (quota-facing); user estimates stay separate.
+    cost_nano = 0 if priced.credential_source == "user" else priced.total
+    cost_estimated_nano = priced.total if priced.credential_source == "user" else 0
     extra: dict[str, Any] = {}
     if tool_names:
         extra["tool_names"] = tool_names
@@ -106,6 +125,9 @@ def log_llm_call(
         reasoning_tokens=u.reasoning_tokens,
         cache_hit_tokens=u.cache_hit_tokens,
         cache_miss_tokens=u.cache_miss_tokens,
+        cost_nano=cost_nano,
+        cost_estimated_nano=cost_estimated_nano,
+        pricing_source=priced.pricing_source,
         **extra,
     )
 
@@ -123,6 +145,7 @@ def log_llm_call(
                 usage=usage,
                 duration_ms=latency_ms,
                 scenario=scenario,
+                credential_source=source,
             )
         except Exception:  # noqa: BLE001 — metering must never break the LLM path
             pass

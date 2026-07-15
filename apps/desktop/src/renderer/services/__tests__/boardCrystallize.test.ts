@@ -60,6 +60,7 @@ const run = (
   checkpoint: null,
   receivedContext: [],
   escalations: [],
+  process: [],
   ...over,
 });
 
@@ -74,6 +75,8 @@ const execution = (over: Partial<Execution>): Execution => ({
   batches: [],
   debate: null,
   debateRounds: [],
+  crossExamEnabled: false,
+  debateOpening: null,
   teamNotes: [],
   ...over,
 });

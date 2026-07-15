@@ -14,31 +14,43 @@ from agentcore.runtime.suspension import SuspensionKind
 class MessageAttachment(BaseModel):
     """A piece of context the user referenced (@-mention or paperclip).
 
-    Text is extracted/materialized client-side; this MVP carries only
-    text-extractable sources (images are out of scope until a vision model).
-    ``kind="conversation"`` references another of the user's conversations: its
-    recent messages are materialized into ``text`` client-side (same as a file's
-    body), and ``conversation_id`` records which one (for the chip + later jump).
+    Text files carry client-extracted ``text`` (images stay out of scope until a
+    vision model). Binary files are **resident-first** (引用即驻留): the desktop
+    copies raw bytes into the conversation workspace ``attachments/`` and sends
+    ``workspace_path`` + ``binary=True`` with empty ``text``. Server-side分流预解析
+    then extracts text for docx/pdf/pptx/txt 等 (markitdown → ``*.md`` copy); xlsx/csv
+    stay path-only so workers can ``code_execute``. ``kind="conversation"`` references
+    another of the user's conversations: recent messages are materialized into
+    ``text`` client-side, and ``conversation_id`` records which one (for the chip +
+    later jump).
     """
 
     name: str = Field(..., min_length=1, max_length=500)
     path: str = Field(..., max_length=4000)
-    # File: extracted text. Directory: a recursive file listing (paths only, no
-    # file bodies). Conversation: its recent messages, formatted client-side.
-    text: str = Field(..., max_length=300_000)
+    # File: extracted text (empty when ``binary`` and not yet pre-parsed). Directory:
+    # recursive listing. Conversation: recent messages. Optional so binary residents
+    # need not invent a placeholder body (backward compatible).
+    text: str = Field(default="", max_length=300_000)
     truncated: bool = False
     kind: Literal["file", "dir", "conversation"] = "file"
     # Set only for kind="conversation": the referenced conversation's id.
     conversation_id: str | None = None
+    # True when the attachment is a non-UTF-8 blob already (or about to be) resident
+    # under ``workspace_path``. Text-like binaries may still gain server-side
+    # ``text`` after分流预解析; spreadsheets remain path-only for ``code_execute``.
+    binary: bool = False
+    # Client-pre-resident path under ``attachments/`` (引用即驻留). When set,
+    # ``persist_attachments`` skips rewriting and keeps this path.
+    workspace_path: str | None = None
 
 
 class StoredAttachment(BaseModel):
     """Persisted attachment display metadata (no extracted text).
 
     ``workspace_path`` is set when the attachment was written into the durable
-    project space (附件驻留): a workspace-relative path under ``attachments/`` that
-    the file-download API can serve. ``None`` for directory / conversation chips
-    (nothing is written as a workspace file).
+    project space (附件驻留 / 引用即驻留): a workspace-relative path under
+    ``attachments/`` that the file-download API can serve. ``None`` for directory /
+    conversation chips (nothing is written as a workspace file).
     """
 
     name: str
@@ -56,17 +68,18 @@ class StoredAttachment(BaseModel):
     # attachment (Stage 4 富消息); the bubble inlines this instead of the full
     # original. None when no thumbnail was generated.
     thumb_path: str | None = None
+    # True when the resident file is a binary blob. Text-like binaries may still
+    # have been pre-parsed into a sibling ``*.md`` in the workspace (not stored here).
+    binary: bool = False
 
 
 class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=32000)
     attachments: list[MessageAttachment] = Field(default_factory=list, max_length=20)
-    # NOTE: a turn no longer carries the local container root — locality is now
-    # conversation state (``Conversation.local_container_root_id``, set at creation and
-    # read by every promotion path), so a 裸聊 promotes to the same place whether the
-    # turn or a panel write lands first (工作区对称化 D1a).
     # Soft gate: set when this turn is expected to call orchestration tools (delegate/debate).
     # Triggers a preflight warning (not a block) when probe recorded supports_tools=false.
+    # Locality is conversation/project state (birth-time bind), not a per-turn field —
+    # auto-promote is vetoed (双模式工作区).
     requires_tools: bool = False
 
 
@@ -176,7 +189,6 @@ class ResolveEscalationInteraction(BaseModel):
     kind: Literal["escalation"] = "escalation"
     answer: str = Field("", max_length=4000)
     use_assumption: bool = False
-
 
 
 # Discriminated union body for the unified resolve endpoint.
@@ -336,7 +348,10 @@ class PausedTurnSummary(BaseModel):
     """A turn awaiting resume after a durable plan_review / ask_user / kickoff pause.
 
     Surfaced on conversation reopen so the client can re-render the right resume card
-    by ``kind`` and offer continue / per_call / adjust / stop → the resume endpoint.
+    by ``kind`` and offer the kind-appropriate actions → the resume endpoint
+    (kickoff delegate: continue[+嘱咐] / stop; debate: continue / adjust / stop;
+    plan_review: continue / adjust / stop; ``per_call`` retained for historical
+    resolves only).
     ``message_id`` is both the pause key and the id the resumed assistant message will
     reuse, so an optimistic bubble reconciles cleanly.
 
@@ -427,17 +442,24 @@ class RunsPayload(BaseModel):
     graph exactly on reload (empty ``[]`` for a single-agent turn). ``process`` is
     a single-agent turn's 思考+工具 timeline (ordered reasoning/tool steps) the
     client replays into the inline process panel; ``null`` unless the turn used a
-    tool. ``captain_context`` is the CEO captain's received context (上下文传递可视化
-    通道①: ``system`` / ``history`` / ``request``), turn-level so it replays on the
-    CEO bubble even for a pure-chat turn (where ``events`` is empty); ``null`` unless
-    the captain shipped context. ``error`` is a 报错回合's terminal error, replaying the
-    inline error card on reload (``null`` for a clean turn). ``null`` whole payload on
-    messages with none of these.
+    tool. ``run_processes`` is the per-worker-run ProcessStep[] map (对称 CEO
+    ``process``) so run-detail timelines reopen with the same interleaving as live;
+    ``null`` when no worker produced a timeline. ``captain_context`` is the CEO
+    captain's received context (上下文传递可视化 通道①: ``system`` / ``history`` /
+    ``request``), turn-level so it replays on the CEO bubble even for a pure-chat
+    turn (where ``events`` is empty); ``null`` unless the captain shipped context.
+    ``error`` is a 报错回合's terminal error, replaying the inline error card on
+    reload (``null`` for a clean turn). ``null`` whole payload on messages with
+    none of these.
     """
 
     events: list[dict[str, Any]] = Field(default_factory=list)
     finish_reason: str | None = None
     process: list[dict[str, Any]] | None = None
+    # Per-worker-run 思考·正文·工具 timeline (run_id → ProcessStep[]). Symmetric to
+    # turn-level ``process`` for the CEO bubble; reload seeds each run's detail panel
+    # so live / reopen interleaving match. null when no worker produced a timeline.
+    run_processes: dict[str, list[dict[str, Any]]] | None = None
     captain_context: list[dict[str, Any]] | None = None
     error: RunError | None = None
     # 预检警告（P2 DURABLE）：journaled ``turn_warning`` lifted like captain_context so a
@@ -493,6 +515,10 @@ class MessageDetail(BaseModel):
     # In-flight turns carry ``running`` + may hold partial content/reasoning (P1 overlay
     # fills those from turn_stream_state). null for user / pre-feature rows.
     status: Literal["running", "complete", "incomplete", "failed"] | None = None
+    # Cold-path pause latch (messages.usage.paused): write side keeps ``status=running`` +
+    # ``paused:true`` so overlay/promotion still treat the row as the live latch; read
+    # lifts the flag so clients hydrate as paused (not streaming). null/false otherwise.
+    paused: bool | None = None
     # 协作质量 (学·度量 §2.5, 诊断模式): orchestration signals nested in the usage column;
     # projected on read like ``rounds``. null for single-agent / pre-feature rows.
     collab: TurnCollabMetrics | None = None

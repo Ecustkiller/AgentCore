@@ -174,6 +174,59 @@ async def test_worker_identities_carry_tool_safety_caution():
     assert "<tool_safety>" in captain_sys
 
 
+async def test_handoff_prompt_splits_by_topology():
+    """Identity handoff wording tracks DAG dependents (接力契约 + 增量交代).
+
+    Upstream (has_dependents) gets the imperative「必须调用」; a leaf gets the
+    conditional「有增量才写 / 不必为交而交」— same semantics as the engine gate
+    and the handoff tool description, without fighting either.
+    """
+    from agentcore.runtime.runs.executor_identities import build_worker_identity
+    from agentcore.tools.builtin.handoff import HandoffTool
+
+    upstream = build_worker_identity(has_dependents=True, captain=False)
+    leaf = build_worker_identity(has_dependents=False, captain=False)
+    assert "必须调用 handoff" in upstream
+    assert "接力契约 + 增量交代" in upstream
+    assert "不必为交而交" not in upstream
+
+    assert "不必为交而交" in leaf
+    assert "接力契约 + 增量交代" in leaf
+    assert "必须调用 handoff" not in leaf
+
+    # Executor wires topology into the live system prompt (not just the helper).
+    plan, _ = build_run_plan(
+        [
+            {"id": "arch", "role": "调研", "task": "查资料", "can_delegate": False},
+            {
+                "id": "impl",
+                "role": "写手",
+                "task": "成文",
+                "depends_on": ["arch"],
+                "can_delegate": False,
+            },
+        ],
+        id_prefix="t",
+    )
+    up_provider = _ContentProvider(["UP"])
+    leaf_provider = _ContentProvider(["LEAF"])
+    await _nesting_executor(plan, up_provider, lambda rid, d: _stub_subteam())(
+        plan.by_id("t_arch"), {}
+    )
+    await _nesting_executor(plan, leaf_provider, lambda rid, d: _stub_subteam())(
+        plan.by_id("t_impl"), {}
+    )
+    assert "必须调用 handoff" in up_provider.system_messages[0]
+    assert "不必为交而交" in leaf_provider.system_messages[0]
+    assert "必须调用 handoff" not in leaf_provider.system_messages[0]
+
+    # Tool description covers both branches so it never fights either prompt.
+    desc = HandoffTool().schema.description
+    assert "接力契约 + 增量交代" in desc
+    assert "必须" in desc
+    assert "不必为交而交" in desc
+
+
 async def test_worker_escalation_is_harvested_and_nonblocking():
     plan, _ = build_run_plan([{"role": "调研", "task": "查不清楚的事"}], id_prefix="t")
     reg = ToolRegistry()

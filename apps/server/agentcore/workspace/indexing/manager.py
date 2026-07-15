@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 _INDEX_DB_NAME = "code_search.db"
 _MAX_INDEX_FILES = 5000
-_SKIP_DIRS = IGNORED_DIRS | {".agentcore"}
+_SKIP_DIRS = IGNORED_DIRS  # includes ``.agentcore`` (index lives under it)
 
 
 class IndexManager:

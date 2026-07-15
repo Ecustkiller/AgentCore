@@ -76,6 +76,11 @@ def _credentials_from_config(cfg: ModelConfig, *, conversation_id: str | None, t
         base_url=cfg.base_url,
         default_model=cfg.model,
         extra_headers=extra or None,
+        source="platform" if cfg.source == "platform" else "user",
+        price_cache_hit=cfg.price_cache_hit,
+        price_cache_miss=cfg.price_cache_miss,
+        price_output=cfg.price_output,
+        background_model=cfg.background_model,
     )
 
 
@@ -98,6 +103,10 @@ async def _resolve_inference_credentials(
             api_key=credentials.api_key,
             source="byok",
             purpose="chat",
+            price_cache_hit=credentials.price_cache_hit,
+            price_cache_miss=credentials.price_cache_miss,
+            price_output=credentials.price_output,
+            background_model=credentials.background_model,
         )
     platform = platform_llm_credentials()
     assert platform is not None  # preflight already verified platform availability
@@ -124,6 +133,7 @@ async def _record_proxy_spend(
     role: str | None = None,
     persona: str | None = None,
     call_id: str | None = None,
+    credential_source: str | None = None,
 ) -> None:
     """Enqueue a per-call detail (+ materialize per-run) — never touches primary DB.
 
@@ -148,6 +158,7 @@ async def _record_proxy_spend(
             role=role or default_role_for_agent(agent_id=agent_id, run_id=run_id),
             persona=persona,
             call_id=call_id,
+            credential_source=credential_source,
         )
 
 
@@ -212,7 +223,7 @@ def _llm_request_from_payload(payload: dict, cfg: ModelConfig) -> LLMRequest:
     return LLMRequest(
         messages=messages,
         # Server-resolved model is authoritative: the sidecar may still send
-        # settings.platform_model (e.g. gpt-5.5) while BYOK routes to DeepSeek.
+        # settings.platform_model (e.g. gpt-4o) while BYOK routes to DeepSeek.
         model=cfg.model,
         temperature=float(payload.get("temperature", 0.7)),
         max_tokens=payload.get("max_tokens"),
@@ -248,19 +259,44 @@ async def inference_chat_completions(
 
     attribution = parse_attribution_headers(request.headers)
 
-    with log_context(trace_id=trace_id, conversation_id=conversation_id, user_id=user.user_id):
+    with log_context(
+        trace_id=trace_id,
+        conversation_id=conversation_id,
+        user_id=user.user_id,
+        # Stamp proxy-side llm.call with the sidecar worker tree (same keys the
+        # provider already sent as attribution headers). Empty values are dropped.
+        run_id=attribution.get("run_id"),
+        parent_run_id=attribution.get("parent_run_id"),
+        agent_id=attribution.get("agent_id"),
+        cost_role=attribution.get("role"),
+        persona=attribution.get("persona"),
+    ):
         # Outer rate fence (成本配额与计费.md §一): once per sidecar turn via
         # message_id, reusing the cloud user-message limiter — not per LLM call.
         await enforce_inference_proxy_rate_limit(user.user_id, message_id=message_id)
 
         try:
             cfg = await _resolve_inference_credentials(session, cost_repo, user)
-        except (QuotaExceededError, BYOKKeyMissingError) as e:
+        except BYOKKeyMissingError as e:
             return JSONResponse(
                 status_code=402, content={"error": {"code": e.code, "message": e.message}}
             )
+        except QuotaExceededError as e:
+            return JSONResponse(
+                status_code=429, content={"error": {"code": e.code, "message": e.message}}
+            )
 
         creds = _credentials_from_config(cfg, conversation_id=conversation_id, trace_id=trace_id)
+        from agentcore.core.log_context import bind_log_context
+
+        bind_kwargs: dict = {"credential_source": creds.source}
+        if getattr(creds, "price_cache_hit", None):
+            bind_kwargs["user_price_cache_hit"] = creds.price_cache_hit
+        if getattr(creds, "price_cache_miss", None):
+            bind_kwargs["user_price_cache_miss"] = creds.price_cache_miss
+        if getattr(creds, "price_output", None):
+            bind_kwargs["user_price_output"] = creds.price_output
+        bind_log_context(**bind_kwargs)
         provider = build_provider(creds)
         llm_request = _llm_request_from_payload(payload, cfg)
 
@@ -273,6 +309,7 @@ async def inference_chat_completions(
                 trace_id=trace_id,
                 message_id=message_id,
                 attribution=attribution,
+                credential_source=creds.source,
             )
         return await _forward_unary(
             provider,
@@ -282,6 +319,7 @@ async def inference_chat_completions(
             trace_id=trace_id,
             message_id=message_id,
             attribution=attribution,
+            credential_source=creds.source,
         )
 
 
@@ -294,6 +332,7 @@ async def _forward_unary(
     trace_id: str | None = None,
     message_id: str | None = None,
     attribution: dict | None = None,
+    credential_source: str | None = None,
 ) -> Response:
     try:
         response = await provider.complete(request)
@@ -349,6 +388,7 @@ async def _forward_unary(
         role=attr.get("role"),
         persona=attr.get("persona"),
         call_id=attr.get("call_id"),
+        credential_source=credential_source,
     )
     return Response(content=body, status_code=200, media_type="application/json")
 
@@ -388,6 +428,7 @@ async def _forward_stream(
     trace_id: str | None = None,
     message_id: str | None = None,
     attribution: dict | None = None,
+    credential_source: str | None = None,
 ) -> Response:
     captured: dict = {}
     attr = attribution or {}
@@ -470,6 +511,7 @@ async def _forward_stream(
                     role=attr.get("role"),
                     persona=attr.get("persona"),
                     call_id=attr.get("call_id"),
+                    credential_source=credential_source,
                 )
 
     return StreamingResponse(relay(), media_type="text/event-stream")

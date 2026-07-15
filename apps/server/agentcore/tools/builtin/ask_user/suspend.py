@@ -73,6 +73,7 @@ async def persist_suspension(
             style_options=style_options,
             intent=intent,
             journal_entries=capture.journal_entries,
+            citations=capture.citations,
             trace_id=capture.trace_id,
         )
 

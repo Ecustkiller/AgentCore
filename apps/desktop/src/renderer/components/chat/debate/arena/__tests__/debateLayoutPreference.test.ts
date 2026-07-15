@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
-import type { DebateModel, DebateSideModel } from "../../model";
+import type { DebateModel } from "../../model";
 import {
   canUseSplitLayout,
   loadDebateArenaLayout,
-  partitionProCon,
+  partitionSides,
   saveDebateArenaLayout,
 } from "../debateLayoutPreference";
 
@@ -47,6 +47,7 @@ describe("debateLayoutPreference", () => {
       closings: [],
       opening: null,
       settled: false,
+      crossExamEnabled: false,
     };
     expect(canUseSplitLayout(base)).toBe(true);
 
@@ -83,19 +84,28 @@ describe("debateLayoutPreference", () => {
     ).toBe(true);
   });
 
-  it("partitionProCon maps by stance or sideKey", () => {
-    const pro = {
-      key: "1",
-      sideKey: "pro",
-      name: "正",
-      stance: null,
-    } as DebateSideModel;
-    const con = {
-      key: "2",
-      sideKey: "con",
-      name: "反",
-      stance: null,
-    } as DebateSideModel;
-    expect(partitionProCon([con, pro])).toEqual({ pro, con });
+  it("partitionSides maps by stance or key", () => {
+    const pro = { key: "1", sideKey: "pro", name: "正", stance: null as const };
+    const con = { key: "2", sideKey: "con", name: "反", stance: null as const };
+    expect(
+      partitionSides(
+        [con, pro],
+        (s) => s.sideKey,
+        (s) => s.stance,
+      ),
+    ).toEqual({ pro, con, others: [] });
+
+    // 后端自定 key（非 pro/con）靠 stance 分列——「结辩/质询只认 key 会堆叠」的根因回归；
+    // 多方第三方落 others。
+    const p2 = { sideKey: "卖方", stance: "pro" as const };
+    const c2 = { sideKey: "买方", stance: "con" as const };
+    const third = { sideKey: "mid", stance: null };
+    expect(
+      partitionSides(
+        [c2, third, p2],
+        (s) => s.sideKey,
+        (s) => s.stance,
+      ),
+    ).toEqual({ pro: p2, con: c2, others: [third] });
   });
 });

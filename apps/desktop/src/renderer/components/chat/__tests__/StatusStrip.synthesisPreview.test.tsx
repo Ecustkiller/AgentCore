@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { conversationKeys } from "@/lib/queryKeys";
 import {
   type ExecutionPlan,
+  type RunFrame,
   ExecutionScopeContext,
   projectExecution,
   useExecutionStore,
 } from "@/stores/execution";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { StatusStrip } from "../StatusStrip";
@@ -26,19 +29,65 @@ const plan: ExecutionPlan = {
   ],
 };
 
+const bothWorkersDone: RunFrame[] = [
+  {
+    t: 1,
+    kind: "run_started",
+    runId: "r1",
+    agentId: "w1",
+    parentRunId: null,
+    runKind: "agent",
+    continuesRunId: null,
+  },
+  {
+    t: 2,
+    kind: "run_started",
+    runId: "r2",
+    agentId: "w2",
+    parentRunId: null,
+    runKind: "agent",
+    continuesRunId: null,
+  },
+  {
+    t: 3,
+    kind: "run_completed",
+    runId: "r1",
+    agentId: "w1",
+    outputSummary: "调研完成",
+    durationMs: 100,
+  },
+  {
+    t: 4,
+    kind: "run_completed",
+    runId: "r2",
+    agentId: "w2",
+    outputSummary: "撰写完成",
+    durationMs: 120,
+  },
+];
+
 function renderStrip(execution: ReturnType<typeof projectExecution>) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+  });
+  client.setQueryData(conversationKeys.grouped, {
+    folders: [],
+    conversations: [],
+  });
   return render(
-    <TooltipProvider>
-      <ExecutionScopeContext.Provider value={MID}>
-        <StatusStrip
-          execution={execution}
-          expanded
-          onToggle={() => {}}
-          onMaximize={() => {}}
-          onReplay={() => {}}
-        />
-      </ExecutionScopeContext.Provider>
-    </TooltipProvider>,
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <ExecutionScopeContext.Provider value={MID}>
+          <StatusStrip
+            execution={execution}
+            expanded
+            onToggle={() => {}}
+            onMaximize={() => {}}
+            onReplay={() => {}}
+          />
+        </ExecutionScopeContext.Provider>
+      </TooltipProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -107,6 +156,73 @@ describe("StatusStrip · team_synthesis_preview draft", () => {
     renderStrip(projectExecution(plan, [], "running"));
 
     expect(screen.getByText(/研究员：调研结论/)).toBeTruthy();
+    expect(screen.queryByTestId("team-synthesis-draft")).toBeNull();
+  });
+
+  it("汇总空窗：工人全完成仍 running 时显示确定性进度 + 活性指示", () => {
+    useExecutionStore.getState().startExecution(plan, MID);
+    // 空窗期常见：最后一条 preview 仍停在 1/2，无新事件。
+    useExecutionStore.getState().setTeamSynthesisPreview(
+      {
+        execution_id: "exec-1",
+        completed: 1,
+        total: 2,
+        headline: "已完成 1/2：✅ 研究员 ⏳ 撰写员",
+        text: "已完成 1/2：✅ 研究员 ⏳ 撰写员\n· 研究员：调研结论",
+        workers: [
+          {
+            run_id: "r1",
+            role: "研究员",
+            status: "completed",
+            summary: "调研结论",
+          },
+          {
+            run_id: "r2",
+            role: "撰写员",
+            status: "pending",
+            summary: "",
+          },
+        ],
+        in_progress: true,
+      },
+      MID,
+    );
+
+    const execution = projectExecution(plan, bothWorkersDone, "running");
+    expect(execution.progress).toEqual({ completed: 2, total: 2 });
+
+    renderStrip(execution);
+
+    expect(screen.getByTestId("status-strip-synthesizing")).toBeTruthy();
+    expect(screen.getByTestId("status-strip-running-title").textContent).toBe(
+      "2/2 已完成，正在生成汇总",
+    );
+    expect(screen.getByTestId("team-synthesis-preview").dataset.synthesizing).toBe(
+      "true",
+    );
+    expect(screen.getByText("生成汇总")).toBeTruthy();
+    expect(screen.getByTestId("team-synthesis-headline").textContent).toBe(
+      "2/2 已完成，正在生成汇总",
+    );
+    expect(screen.getByTestId("team-synthesis-pulse")).toBeTruthy();
+    // 空窗用 execution 完成态补全 blurbs（不依赖过期 preview 的 1/2 workers）。
+    expect(screen.getByText(/研究员：调研完成/)).toBeTruthy();
+    expect(screen.getByText(/撰写员：撰写完成/)).toBeTruthy();
+  });
+
+  it("汇总空窗：无 preview 事件时仍显示确定性进度（不注入 CEO 气泡）", () => {
+    useExecutionStore.getState().startExecution(plan, MID);
+    const execution = projectExecution(plan, bothWorkersDone, "running");
+
+    renderStrip(execution);
+
+    expect(screen.getByTestId("status-strip-synthesizing")).toBeTruthy();
+    expect(screen.getByTestId("status-strip-running-title").textContent).toBe(
+      "2/2 已完成，正在生成汇总",
+    );
+    expect(screen.getByTestId("team-synthesis-preview").dataset.synthesizing).toBe(
+      "true",
+    );
     expect(screen.queryByTestId("team-synthesis-draft")).toBeNull();
   });
 });

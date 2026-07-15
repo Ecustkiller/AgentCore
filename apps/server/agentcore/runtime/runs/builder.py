@@ -368,6 +368,17 @@ def _inline_spec(
         role=role,
         objective=item.get("objective", "") or "",
         system_prompt_supplement=item.get("system_prompt_supplement") or None,
+        research_then_draft=bool(item.get("research_then_draft")),
+        draft_brief=(
+            item["draft_brief"].strip()
+            if isinstance(item.get("draft_brief"), str)
+            else ""
+        ),
+        draft_system=(
+            item["draft_system"].strip()
+            if isinstance(item.get("draft_system"), str)
+            else ""
+        ),
         tools=_tools(item.get("tools"), valid_tools),
         model_preference=pref if pref in _VALID_TIERS else "strong",
         # Explicit model override (真·多模型辩手)：宽松解析（仅收非空字符串，否则空=按 tier
@@ -535,6 +546,9 @@ def _parse_deliverable(item: dict[str, Any]) -> Deliverable | None:
     return deliverable if _deliverable_has_content(deliverable) else None
 
 
+_VALID_DELIVERABLE_FORMS = frozenset({"prose", "files"})
+
+
 def _deliverable_from_dict(raw: dict[str, Any], *, name: str = "") -> Deliverable:
     required_sections = _str_list(raw.get("required_sections"))
     must_contain = _str_list(raw.get("must_contain"))
@@ -545,9 +559,18 @@ def _deliverable_from_dict(raw: dict[str, Any], *, name: str = "") -> Deliverabl
     max_length = max_length if isinstance(max_length, int) and max_length > 0 else 0
     fmt = raw.get("output_format")
     output_format = fmt if fmt in _VALID_OUTPUT_FORMATS else "text"
-    # Declaring concrete artifact paths implies a file deliverable — path
-    # reconciliation is stricter than a bare requires_files count check.
-    requires_files = bool(raw.get("requires_files", False)) or bool(artifacts)
+    form_raw = raw.get("form")
+    form = form_raw if form_raw in _VALID_DELIVERABLE_FORMS else None
+    # Declaring concrete artifact paths or form=files implies a file deliverable —
+    # path reconciliation is stricter than a bare requires_files count check.
+    # form=prose wins: never imply requires_files (even if CEO also set the flag).
+    if form == "prose":
+        requires_files = False
+        artifacts = []  # path reconciliation meaningless for prose delivery
+    else:
+        requires_files = (
+            bool(raw.get("requires_files", False)) or bool(artifacts) or form == "files"
+        )
     return Deliverable(
         name=name,
         output_format=output_format,
@@ -555,6 +578,7 @@ def _deliverable_from_dict(raw: dict[str, Any], *, name: str = "") -> Deliverabl
         must_contain=must_contain,
         min_length=min_length,
         max_length=max_length,
+        form=form,  # type: ignore[arg-type]
         requires_files=requires_files,
         artifacts=artifacts,
         strict=bool(raw.get("strict", False)),
@@ -564,6 +588,7 @@ def _deliverable_from_dict(raw: dict[str, Any], *, name: str = "") -> Deliverabl
 def _deliverable_has_content(deliverable: Deliverable) -> bool:
     return bool(
         deliverable.name.strip()
+        or deliverable.form
         or deliverable.required_sections
         or deliverable.must_contain
         or deliverable.min_length

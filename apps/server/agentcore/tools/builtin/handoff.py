@@ -1,8 +1,15 @@
 """handoff — a worker's structured 交接简报 + finish signal (完工交接简报单一源).
 
-Worker-only, terminal. A delegated worker (leaf / debater / revision) ends its run by calling
+Worker-only, terminal. Semantics: 简报 = 【接力契约 + 增量交代】. A delegated worker calls
 ``handoff`` ONCE, in the SAME turn as its finished deliverable, to submit a STRUCTURED brief
-(给主管 / 下游队员看的交接): 结论 / 关键要点 / 关键假设 / 建议下一步.
+(给主管 / 下游队员看): 结论 / 关键要点 / 关键假设 / 建议下一步.
+
+Topology (prompt + this description say the same thing; engine gate unchanged):
+- Nodes with downstream dependents **must** handoff — downstream relays on the brief
+  (executor injects one correction shot; still missing → degraded synth).
+- Leaf nodes (no dependents): call only when there is incremental briefing beyond the
+  body (assumptions / risks / next steps / files list); a short self-evident deliverable
+  may finish with a plain no-tool answer — no debrief, deliverable stands alone.
 
 Why a tool, not a「## 交接简报」markdown section (its former form): the brief is structured DATA
 for READERS (下游依赖注入 / CEO 综述 / run-detail 卡), so it travels in a structured channel and is
@@ -17,12 +24,6 @@ Terminal by design (``ToolEffect.HANDOFF``): the worker writes its deliverable a
 before a NON-terminal tool is rolled back as narration, Fork-B) — so ``content`` == the deliverable
 and the brief rides the tool args. ``final_text`` is empty: the deliverable is already the streamed
 content, so nothing is appended to it.
-
-Optional for leaf workers (no downstream dependents): a worker may finish with a plain no-tool
-answer (no ``handoff``) — then there is simply no debrief and the deliverable stands alone.
-Nodes that feed downstream dependents **must** handoff (executor injects one correction shot;
-still missing → engine synthesizes a degraded brief). Never pad a short leaf product with a
-redundant restatement of itself.
 
 Wired into the delegated worker toolset (``build_worker_registry``) and NOT into
 ``build_builtin_registry`` — so it never reaches the CEO's own toolset (``build_ceo_tool_registry``
@@ -54,9 +55,13 @@ class HandoffTool:
         return ToolSchema(
             name=HANDOFF_TOOL_NAME,
             description=(
-                "完成本次任务后调用它【收尾并提交交接简报】——这是给主管 / 下游队员看的结构化交接，"
-                "不是正文复述。用法：先把【交付正文】正常写出来（或用 file_write 落盘），然后在"
-                "【同一轮】调用 handoff 收尾；调用它即代表你这次的活【已完成】，之后不再继续。\n"
+                "提交交接简报并收尾。简报 =【接力契约 + 增量交代】（给主管 / 下游队员看的结构化"
+                "交接，不是正文复述）。\n"
+                "· 有下游队员依赖你的产出时：完成后【必须】调用——下游靠简报接力。\n"
+                "· 无下游（叶节点）时：仅当正文之外有值得交代的增量（关键假设 / 风险 / 建议下一步 / "
+                "落盘文件清单）才调用；简短自明的交付写完正文直接结束即可，不必为交而交。\n"
+                "用法：先把【交付正文】写完（或用 file_write 落盘），再在【同一轮】调用；调用即代表"
+                "本次任务【已完成】，之后不再继续。\n"
                 "简报只需几句、精炼具体：summary 一句话核心结论（必填）；key_points 下游 / 主管"
                 "最该知道的 2-4 条（具体数字 / 文件路径 / 关键决定，别空泛）；assumptions 信息不足"
                 "时你采用的关键假设（没有就省略）；next_steps 顺带给主管的后续建议（没有就省略——"

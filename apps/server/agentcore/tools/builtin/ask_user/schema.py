@@ -26,9 +26,14 @@ def option_label(opt: Any) -> str:
     return str(opt).strip()
 
 
-def normalize_options(raw: Any) -> list[dict[str, Any]]:
-    """Cap (≤6) the choice options, accepting either bare strings or rich objects.
+def normalize_options(
+    raw: Any,
+    *,
+    max_options: int = _MAX_OPTIONS,
+) -> list[dict[str, Any]]:
+    """Cap choice options, accepting either bare strings or rich objects.
 
+    Default cap is 6 (ordinary choice). ``card=risk_ack`` may raise the cap to 10.
     A bare ``"Postgres"`` becomes ``{"label": "Postgres"}``; an object may add a one-line
     ``detail`` (the trade-off shown under the label), ``recommended`` (the asker's
     advised option — advisory only, never a pre-selection), and ``action`` (a desktop
@@ -37,6 +42,7 @@ def normalize_options(raw: Any) -> list[dict[str, Any]]:
     ``recommended`` survives (至多一个推荐项), so the card shows one clear「推荐」without
     a wall of badges.
     """
+    cap = max(1, int(max_options))
     items = raw if isinstance(raw, list) else []
     out: list[dict[str, Any]] = []
     recommended_taken = False
@@ -53,10 +59,10 @@ def normalize_options(raw: Any) -> list[dict[str, Any]]:
                 opt["recommended"] = True
                 recommended_taken = True
             action = str(it.get("action") or "").strip()
-            if action == "bind_local_folder":
-                opt["action"] = "bind_local_folder"
+            if action in ("bind_local_folder", "grant_readonly_folder"):
+                opt["action"] = action
         out.append(opt)
-        if len(out) >= _MAX_OPTIONS:
+        if len(out) >= cap:
             break
     return out
 
@@ -75,12 +81,17 @@ def normalize_assumptions(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
-def normalize_questions(raw: Any) -> list[dict[str, Any]]:
+def normalize_questions(
+    raw: Any,
+    *,
+    max_options: int = _MAX_OPTIONS,
+) -> list[dict[str, Any]]:
     """Cap (≤5) + id the questions, normalizing kind/options/multiple/default.
 
     ``default`` is optional here (unlike the old kickoff): an opening question should
     pre-fill one, but a mid-task fork usually wants the user to actively choose, so it
-    is left empty when the CEO omits it.
+    is left empty when the CEO omits it. ``max_options`` forwards to
+    :func:`normalize_options` (raised for ``card=risk_ack``).
     """
     items = raw if isinstance(raw, list) else []
     out: list[dict[str, Any]] = []
@@ -92,7 +103,7 @@ def normalize_questions(raw: Any) -> list[dict[str, Any]]:
             continue
         kind = "text" if str(it.get("kind") or "").strip() == "text" else "choice"
         if kind == "choice":
-            options = normalize_options(it.get("options"))
+            options = normalize_options(it.get("options"), max_options=max_options)
             multiple = bool(it.get("multiple") or False)
         else:
             options = []

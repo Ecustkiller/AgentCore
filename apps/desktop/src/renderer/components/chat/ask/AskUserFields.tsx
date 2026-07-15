@@ -4,6 +4,10 @@ import {
   formatBindLocalFolderAnswer,
   pickAndBindLocalFolder,
 } from "@/lib/bindLocalFolder";
+import {
+  formatGrantReadonlyFolderAnswer,
+  pickAndGrantReadonlyFolder,
+} from "@/lib/grantReadonlyFolder";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import type {
@@ -186,6 +190,28 @@ export function AskQuestionFields({
     if (!conversationId || !onBindResolve || disabled || bindBusyLabel) return;
     setBindBusyLabel(opt.label);
     setBindError(null);
+    if (opt.action === "grant_readonly_folder") {
+      const result = await pickAndGrantReadonlyFolder(conversationId);
+      if (!result.ok) {
+        if (result.reason === "error") setBindError(result.message);
+        else if (result.reason === "unavailable") {
+          setBindError("区外目录授权仅桌面本地会话可用");
+        }
+        setBindBusyLabel(null);
+        return;
+      }
+      const value = formatGrantReadonlyFolderAnswer(
+        opt.label,
+        result.root.name,
+        result.namespace,
+      );
+      try {
+        await onBindResolve(answer.composeWithAnswer("decision", q.id, value));
+      } catch {
+        setBindBusyLabel(null);
+      }
+      return;
+    }
     const result = await pickAndBindLocalFolder(conversationId);
     if (!result.ok) {
       if (result.reason === "error") setBindError(result.message);
@@ -419,7 +445,9 @@ function QuestionField({
                 const isDefault =
                   !!question.default && opt.label === question.default;
                 const isBindAction =
-                  canBindAction && opt.action === "bind_local_folder";
+                  canBindAction &&
+                  (opt.action === "bind_local_folder" ||
+                    opt.action === "grant_readonly_folder");
                 const bindBusy = bindBusyLabel === opt.label;
                 return (
                   <div key={opt.label} className="flex w-full flex-col">

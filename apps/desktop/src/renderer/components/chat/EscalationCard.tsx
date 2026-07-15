@@ -7,6 +7,7 @@ import {
   type EscalationUserDecision,
   decideEscalation,
 } from "@/services/escalation";
+import { submitInteractionFeedback } from "@/services/interactionSubmit";
 import { type RunEscalation, useMessageExecution } from "@/stores/execution";
 import { useInteractionStore } from "@/stores/interactions";
 import {
@@ -110,6 +111,7 @@ function PendingEscalation({
     decideEscalation(conversationId, escalation.id, decision)
       .then((result) => {
         if (result === "orphaned" || result === "busy") {
+          notifyError(submitInteractionFeedback(result));
           setSubmitting(null);
         }
         // ok: SSE escalation_resolved settles the card

@@ -11,6 +11,10 @@ export interface SetLlmKeyInput {
   api_key: string;
   base_url?: string | null;
   default_model?: string | null;
+  price_cache_hit?: string | null;
+  price_cache_miss?: string | null;
+  price_output?: string | null;
+  background_model?: string | null;
 }
 
 async function readStatus(

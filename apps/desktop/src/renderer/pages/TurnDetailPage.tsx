@@ -4,12 +4,14 @@ import { GraphView } from "@/components/graph/GraphView";
 import { SidePanel } from "@/components/layout/SidePanel";
 import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { fetchMessageWindow } from "@/services/messages";
+import {
+  fetchMessageWindow,
+  shouldSetGeneratingOnHydrate,
+} from "@/services/messages";
 import { loadRecovery } from "@/services/resume";
 import {
   attachOnOpen,
-  markGhostInterrupted,
-  rejoinLiveTurn,
+  settleCloudRunningAssistant,
 } from "@/services/turns";
 import {
   getRuntime,
@@ -89,7 +91,7 @@ export function TurnDetailPage() {
               conversationId,
             );
             s.setMemoryUpdates(win.memoryUpdates, conversationId);
-            if (win.messages.at(-1)?.isStreaming) {
+            if (shouldSetGeneratingOnHydrate(win.messages)) {
               s.setGenerating(true, conversationId);
             }
             const last = win.messages.at(-1);
@@ -97,21 +99,15 @@ export function TurnDetailPage() {
               const recovery = await recoveryLoaded;
               if (cancelled) return;
               const canAttach =
-                recovery.liveRunning && recovery.pausedCount === 0;
+                recovery.cloudLive && recovery.pausedCount === 0;
               if (last.role === "user" && canAttach) {
                 void attachOnOpen(conversationId);
               } else if (
                 last.role === "assistant" &&
                 last.status === "running"
               ) {
-                if (canAttach) {
-                  void rejoinLiveTurn(conversationId);
-                } else if (
-                  !recovery.liveRunning &&
-                  recovery.pausedCount === 0
-                ) {
-                  markGhostInterrupted(conversationId);
-                }
+                await settleCloudRunningAssistant(conversationId, recovery);
+                if (cancelled) return;
               }
             }
           }

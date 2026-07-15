@@ -230,7 +230,8 @@ export function handleExecutionEvent(
       const mid = execMessageId(conversationId);
       if (mid) {
         const p = event.payload as DebateRoundStartedPayload;
-        useExecutionStore.getState().recordDebateRound(
+        const store = useExecutionStore.getState();
+        store.recordDebateRound(
           {
             round_no: p.round_no,
             focus: p.focus,
@@ -242,6 +243,13 @@ export function handleExecutionEvent(
           },
           mid,
         );
+        if (p.cross_exam_enabled === true) {
+          store.recordCrossExamEnabled(true, mid);
+        }
+        const rawOpening = (p.opening ?? "").trim();
+        if (rawOpening) {
+          store.recordDebateOpening(rawOpening, mid);
+        }
       }
       return true;
     }

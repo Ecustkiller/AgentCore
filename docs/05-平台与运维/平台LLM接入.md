@@ -10,9 +10,9 @@ skip_if:
 
 # 平台 LLM 接入
 
-> **状态**：✅ 现状 = **BYOK 默认** + 多厂商 provider 路由 + sidecar 推理代理；`platform` / codex 为**可选休眠上游**（`config/platform.py` 的 `billing_mode` 默认 `"byok"`）。
+> **状态**：✅ 现状 = **BYOK 默认** + 多厂商 provider 路由 + sidecar 推理代理 + **平台凭据作免费档代付上游**（无 key 用户 fallback，`PLATFORM_FREE_TIER_ENABLED`；上游 DeepSeek 官方 flash）。
 >
-> 本文只记「代码看不出来的」上游接入事实（各厂商接入坑、BYOK key 去向、codex 遗留 runbook）。计费 / 配额口径见 [`成本配额与计费.md`](/docs/05-平台与运维/成本配额与计费.md)。
+> 本文只记「代码看不出来的」上游接入事实（各厂商接入坑、BYOK key 去向）。计费 / 配额口径见 [`成本配额与计费.md`](/docs/05-平台与运维/成本配额与计费.md)。
 
 ---
 
@@ -24,9 +24,11 @@ skip_if:
 |---|---|---|
 | **BYOK 直连**（默认主路） | 用户在「设置 · 模型配置」配了 OpenAI 兼容 key | 用户自带端点（典型 DeepSeek `deepseek-v4-pro/flash`） |
 | **多厂商 provider 路由** | model 串带 `厂商/` 前缀 | 豆包 / Moonshot / 智谱 等（见 §四） |
-| **platform / codex（休眠）** | `billing_mode=platform` 且配了 `PLATFORM_API_KEY` | 外部 `codex_chat_proxy` → ChatGPT Codex（见 §五，默认关） |
+| **platform 平台凭据** | 免费档 fallback（无 key 用户 ∧ `PLATFORM_FREE_TIER_ENABLED`）/ 用户显式偏好 platform / `billing_mode=platform` 全员代付 | `PLATFORM_*` 三项（免费档 = DeepSeek 官方 `deepseek-v4-flash`） |
 
-> **BYOK key 去向**（曾反复踩坑）：每用户自带、**AES-256-GCM 加密存 Postgres**，按 turn 解密注入（`llm/resolve.py::resolve_user_llm_credentials` + `security/keys.py`），**不在 `.env`**。BYOK 模式下 `chat` 回合无用户 key、又无 platform 回退时返 `402 LLM_KEY_REQUIRED`——新开的 `uv run` / 离线脚本 / `dev` 账号都够不到用户 key，须先给账号设 BYOK key（`PUT /v1/users/me/llm-key` 或桌面「设置 · 模型配置」）。
+> **BYOK key 去向**（曾反复踩坑）：每用户自带、**AES-256-GCM 加密存 Postgres**，按 turn 解密注入（`llm/resolve.py::resolve_user_llm_credentials` + `security/keys.py`），**不在 `.env`**。BYOK 模式下 `chat` 回合无用户 key、又无 platform 回退（免费档关闭或平台凭据未配）时返 `402 LLM_KEY_REQUIRED`——新开的 `uv run` / 离线脚本 / `dev` 账号都够不到用户 key，须先给账号设 BYOK key（`PUT /v1/users/me/llm-key` 或桌面「设置 · 模型配置」）。
+>
+> 计费口径（per-user `billing_preference`、免费档 gate fallback、call 级凭据来源算价）→ [`成本配额与计费.md` §〇·五](/docs/05-平台与运维/成本配额与计费.md)。
 
 ---
 
@@ -34,9 +36,11 @@ skip_if:
 
 `llm/resolve.py` 是所有调用点的单一解析入口：
 
-- **`resolve_model_config(purpose)`**：按 `billing_mode` + `purpose` 决定用 BYOK 还是 platform 凭据。
-  - `billing_mode=platform` → 一律 platform（`settings.platform_model`）。
-  - `billing_mode=byok`（默认）→ 后台档 purpose（`title` / `memory` / `compaction` / `followups`）在有 platform 时优先走 platform 省钱；`chat` 等用户向回合走用户 BYOK key，无 key 再回退 platform（都无 → `None` → 402）。
+- **`resolve_model_config(purpose)`**：按该用户有效计费模式 + `purpose` 决定用 BYOK 还是 platform 凭据。
+  - `platform`（用户偏好或全员代付部署）→ 一律 platform（`settings.platform_model`）。
+  - `byok`（默认）→ **一切 purpose 都用户 key 优先**（含后台档 `title` / `memory` / `compaction` / `followups`），无 key 才落 platform 凭据（免费档用户的后台调用因此按来源真实入账、吃免费档额度；都无 → `None` → 402）。**2026-07-13 反转**：原「后台档有 platform 时无条件优先 platform 省钱」在无平台 key 的部署下从未生效过（死代码），而免费档一配平台 key 即激活——BYOK 用户后台调用会翻到平台烧钱、且有 key 跳配额 = 白嫖不设限，并破坏「有 key 用户零变化」承诺，故反转为用户 key 优先。
+  - **后台模型降档（✅ 2026-07-15）**：后台档的**模型名**解析优先 `background_model`（用户级，`/users/me/llm-key`）→ `platform_background_model`（部署级，默认空=跟随）→ chat 模型（`_model_for_purpose`）。只降模型不换凭据——凭据优先级维持上条 D6 语义。动机：BYOK 用户把 `default_model` 配成贵模型时，标题/记忆等后台调用会跟着烧贵模型。
+  - **BYOK 价卡贯穿**：用户自填单价（`price_cache_hit/miss/output`）与 `background_model` 随 `LLMCredentials` 解析、经 log context 贯穿到 `calculate_cost` 全部计价点（云管线 `prepare.py` 与推理代理 `proxy.py` 同路），供 BYOK 估算金额（见 [成本配额与计费 §〇·五](/docs/05-平台与运维/成本配额与计费.md)）。
 - **平台模型常量**：`deepseek-v4-flash` / `deepseek-v4-pro`（`llm/profiles.py`）；`settings.platform_model` 默认 `gpt-4o`，仅在 platform 模式作上游模型名。
 - **`resolve_turn_model` / `resolve_user_chat_model`**：解析该 turn 的上游 model（BYOK `default_model` → 否则 `platform_model` → 兜底 `deepseek-v4-flash`）。
 
@@ -47,8 +51,8 @@ skip_if:
 桌面「本地 sidecar 引擎」在用户机上跑回合，但**不把 BYOK key 下发到客户端**——经服务端推理代理出网，由服务端解析真实凭据与模型：
 
 - **`POST /v1/inference/token`**：用 cookie 会话换一枚 **scoped inference token**（限流铸发），响应带 `token` + `expires_in_sec` + **服务端解析出的 `model`**（`resolve_user_chat_model`）。
-- **`POST /v1/inference/v1/chat/completions`**：sidecar 用 `Authorization: Bearer <inference-token>` 调用。服务端 `inference_user` 解析用户 → `preflight_llm_credentials`（配额 + BYOK 检查）→ 有 BYOK 用 BYOK、否则用 platform → `build_provider` 转发（unary / SSE）→ 落账 `cost_events`。
-- **模型服务端权威**：sidecar 可能仍发 `settings.platform_model`（如 `gpt-5.5`），但 BYOK 会覆盖、路由到 DeepSeek——以服务端解析为准（`proxy.py::_llm_request_from_payload`）。
+- **`POST /v1/inference/v1/chat/completions`**：sidecar 用 `Authorization: Bearer <inference-token>` 调用。服务端 `inference_user` 解析用户 → `preflight_llm_credentials`（同一道计费闸：BYOK 有 key 直通、无 key 走免费档 fallback + **per-call** `enforce_quota`，耗尽返 429 `FREE_TIER_EXHAUSTED`）→ `build_provider` 转发（unary / SSE）→ 按 call 级凭据来源落账 `cost_calls` / `cost_events`。
+- **模型服务端权威**：sidecar 可能仍发 `settings.platform_model`（如 `gpt-4o`），但 BYOK 会覆盖、路由到 DeepSeek——以服务端解析为准（`proxy.py::_llm_request_from_payload`）。
 
 → 见代码：`api/routes/inference/`（`token.py` 铸发 + `proxy.py` 转发）。sidecar 整体见 [`双模式工作区.md`](/docs/02-架构/双模式工作区.md)。
 
@@ -76,45 +80,14 @@ skip_if:
 1. 后端 + 桌面 dev 在跑（`:8000` `readyz` 200）。
 2. seed dev 账号：`uv run python scripts/seed_dev_user.py`（`dev` / `devpassword`）。
 3. **dev 账号需先有 BYOK DeepSeek key**（见 §一），否则发回合即 `402 LLM_KEY_REQUIRED`。
-4. 抓 SSE：`uv run python scripts/probe_turn.py "<诱导 CEO 发起多模型辩论、正方指定 doubao/doubao-seed-2-1-turbo-260628、反方 deepseek-v4-pro 的消息>"` → 事件存 `logs/probe_<ts>.json` 复盘（CEO 是否照传 model 串有不确定性，消息里明确写出各方模型更稳）。
+4. 抓 SSE：`uv run python scripts/probe_turn.py "<诱导 CEO 发起多模型辩论、正方指定 doubao/doubao-seed-2-1-turbo-260628、反方 deepseek-v4-pro 的消息>"` → 事件存 `logs/probes/probe_<ts>.json` 复盘（CEO 是否照传 model 串有不确定性，消息里明确写出各方模型更稳）。
 
 ---
 
-## 五、platform / codex 休眠上游（opt-in 遗留）
+## 五、platform 模式与故障排查
 
-> **仅当 `billing_mode=platform`** 时启用；内测默认关。以下为该模式的 runbook，保留备用。
+`billing_mode=platform` 时全员走 `PLATFORM_*` 三项（OpenAI 兼容端点）；免费档同三项但默认 DeepSeek 官方 flash。改 `PLATFORM_MODEL` / `PLATFORM_BASE_URL` / `PLATFORM_API_KEY` 须重启后端。
 
-**架构**：`billing_mode=platform` 时经外部 `scripts/codex_chat_proxy.py`（localhost:9090）把标准 OpenAI chat/completions 翻译为 Codex Responses API、连 ChatGPT Codex 后端（`https://chatgpt.com/backend-api/codex/responses`）。
+**Sub2API（可选诊断）**：配 `SUB2API_ADMIN_*` 后，platform 模式 503 时可自动探测账号状态（`sub2api_probe.py`），**非当前上游**。
 
-**可用模型（仅 codex 模式）**：K-12 Codex 账号仅 `gpt-5.4` / `gpt-5.5`（通用模型名 `gpt-4o` 等会被 Codex 后端拒）。**注意**：这只约束 codex 上游，与 BYOK / 多厂商各自的模型无关。
-
-**配置（`.env`）**：
-
-```env
-BILLING_MODE=platform            # 默认 byok；仅切平台模式才设 platform
-PLATFORM_API_KEY=sk-xxx          # 任意非空（代理不校验）
-PLATFORM_BASE_URL=http://localhost:9090/v1
-PLATFORM_MODEL=gpt-5.5
-```
-
-凭证 `config/codex-credentials.json`：代理启动时读 `access_token`（JWT，约 10 天过期）向 ChatGPT 后端认证；过期用 CPA 工具重取并重启代理。
-
-**启动**：`python scripts/codex_chat_proxy.py --port 9090` 后再起 AgentCore。
-
-**Sub2API（遗留诊断探针）**：早期用 Sub2API 网关，因账号 K-12（`chatgpt_plan_type: k12`）被拒 chat/completions，改直连 codex。现 Sub2API 仅作 platform 模式 503 时的账号状态诊断（`sub2api_probe.py`，配 `SUB2API_ADMIN_*`），**非当前上游**。
-
-**故障排查**：
-
-| 症状 | 原因 | 解决 |
-|------|------|------|
-| 代理返回 502 upstream_error | Token 过期或上游故障 | 刷新 token |
-| 400 "model not supported when using Codex" | 用了非 Codex 模型名 | 改用 `gpt-5.4` / `gpt-5.5` |
-| AgentCore 503「平台服务端错误」 | 代理未启动 | 启动 `codex_chat_proxy.py` |
-| 连接被拒 | 代理未启动或端口不对 | 检查 9090 端口 |
-
----
-
-## 六、未来演进
-
-- codex token 自动刷新（当前手动）、多账号轮转 / 负载均衡。
-- 获非 K-12 账号后可直连 OpenAI API、去掉代理层。
+进一步定位：curl 直连 OpenAI 兼容端点（`POST {PLATFORM_BASE_URL}/chat/completions` + Bearer）分辨代理层 vs 上游；查日志关键字 `inference.proxy_upstream_error` / `llm.` 上游错误。

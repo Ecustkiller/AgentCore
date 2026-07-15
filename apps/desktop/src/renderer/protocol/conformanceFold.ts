@@ -17,15 +17,12 @@
 import { assertNever } from "@/lib/assertNever";
 import {
   type MessageLaneState,
-  foldAskMarker,
-  foldCheckpointMarker,
   foldCitations,
   foldContentDelta,
   foldContentReset,
-  foldPlanReviewMarker,
+  foldInteractionTimelineMarker,
   foldReasoningDelta,
   foldTeamMarker,
-  foldTeamPreviewMarker,
   foldToolUseEnd,
   foldToolUseStart,
 } from "@/lib/foldMessageLane";
@@ -39,8 +36,12 @@ import {
   projectExecution,
   upsertDebateRound,
 } from "@/stores/execution";
+import {
+  defFromRequiredEvent,
+  defFromResolvedEvent,
+  wireFor,
+} from "@/stores/interactions";
 import type {
-  CheckpointRequiredPayload,
   CitationsPayload,
   ContentDeltaPayload,
   ContextBlockWire,
@@ -49,14 +50,11 @@ import type {
   DebateRoundPayload,
   DebateRoundStartedPayload,
   MessageEndPayload,
-  PlanReviewRequiredPayload,
-  QuestionPostedPayload,
   ReasoningDeltaPayload,
   RunContextPayload,
   RunPlanPayload,
   RunStartedPayload,
   SSEEvent,
-  TeamPreviewRequiredPayload,
   TeamSynthesisPreviewPayload,
   ToolUseEndPayload,
   ToolUseStartPayload,
@@ -90,6 +88,37 @@ const FINISH_TO_STATUS: Record<string, TurnStatus> = {
   paused: "paused",
 };
 
+/** Registry-driven message-lane marker fold for `*_required` / question_posted. */
+function foldLaneFromInteractionEvent(
+  lane: MessageLaneState,
+  eventType: string,
+  payload: Record<string, unknown>,
+): MessageLaneState {
+  const def = defFromRequiredEvent(eventType);
+  if (!def?.timeline) return lane;
+  const id = payload[wireFor(def.kind).idField];
+  if (typeof id !== "string" || !id) return lane;
+  return foldInteractionTimelineMarker(lane, def.timeline, id);
+}
+
+function maybeRecordInteractionFrame(
+  eventType: string,
+  ev: SSEEvent,
+  frames: RunFrame[],
+): void {
+  const required = defFromRequiredEvent(eventType);
+  if (required?.sseRequired?.recordExecFrame) {
+    const frame = frameFromEvent(ev);
+    if (frame) frames.push(frame);
+    return;
+  }
+  const resolved = defFromResolvedEvent(eventType);
+  if (resolved?.sseResolved?.recordExecFrame) {
+    const frame = frameFromEvent(ev);
+    if (frame) frames.push(frame);
+  }
+}
+
 /** Desktop's fold → ProjectedTurn (the conformance snapshot). */
 export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   let messageLane: MessageLaneState = {
@@ -102,6 +131,8 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   let cost: CostBreakdown | null = null;
   let debate: DebateResultPayload | null = null;
   let debateRounds: DebateNarrativeRound[] = [];
+  let crossExamEnabled = false;
+  let debateOpening: string | null = null;
   let teamSynthesisPreview: TeamSynthesisPreviewPayload | null = null;
   let turnWarning: string | null = null;
   let sawError = false;
@@ -228,6 +259,9 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       // fold 一致。round_started 先给焦点（verdict=null=进行中），round 补 summary/verdict/sides。
       case "debate_round_started": {
         const p = ev.payload as DebateRoundStartedPayload;
+        if (p.cross_exam_enabled === true) crossExamEnabled = true;
+        const rawOpening = (p.opening ?? "").trim();
+        if (rawOpening && !debateOpening) debateOpening = rawOpening;
         debateRounds = upsertDebateRound(debateRounds, {
           round_no: p.round_no,
           focus: p.focus,
@@ -252,38 +286,26 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         });
         break;
       }
-      case "plan_review_required": {
-        const frame = frameFromEvent(ev);
-        if (frame) frames.push(frame);
-        const p = ev.payload as PlanReviewRequiredPayload;
-        messageLane = foldPlanReviewMarker(messageLane, p.checkpoint_id);
-        break;
-      }
-      case "plan_review_resolved": {
-        const frame = frameFromEvent(ev);
-        if (frame) frames.push(frame);
-        break;
-      }
-      case "team_preview_required": {
-        const p = ev.payload as TeamPreviewRequiredPayload;
-        messageLane = foldTeamPreviewMarker(messageLane, p.checkpoint_id);
-        break;
-      }
-      case "team_preview_resolved":
-        break;
+      case "plan_review_required":
+      case "team_preview_required":
+      case "checkpoint_required":
+      case "question_posted":
       case "approval_required":
-      case "approval_resolved":
-        break;
-      case "checkpoint_required": {
-        const p = ev.payload as CheckpointRequiredPayload;
-        messageLane = foldCheckpointMarker(messageLane, p.checkpoint_id);
+      case "delegation_authorization_required": {
+        maybeRecordInteractionFrame(ev.type, ev, frames);
+        messageLane = foldLaneFromInteractionEvent(
+          messageLane,
+          ev.type,
+          (ev.payload ?? {}) as Record<string, unknown>,
+        );
         break;
       }
+      case "plan_review_resolved":
+      case "team_preview_resolved":
       case "checkpoint_resolved":
-        break;
-      case "question_posted": {
-        const p = ev.payload as QuestionPostedPayload;
-        messageLane = foldAskMarker(messageLane, p.ask_id);
+      case "approval_resolved":
+      case "delegation_authorization_resolved": {
+        maybeRecordInteractionFrame(ev.type, ev, frames);
         break;
       }
       case "error":
@@ -308,8 +330,6 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "tool_use_progress":
       case "batch_metrics":
       case "run_escalation_gate":
-      case "delegation_authorization_required":
-      case "delegation_authorization_resolved":
       case "interaction_orphaned":
       case "workspace_op_required":
       case "handoff_snapshot_done":
@@ -322,6 +342,13 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "sim.tick_ended":
       case "sim.tick_frame":
       case "sim.world_event":
+      case "sim.show.affection_shift":
+      case "sim.show.departure":
+      case "sim.show.episode_gate":
+      case "sim.show.heart_pick":
+      case "sim.show.pair_formed":
+      case "sim.show.reveal":
+      case "sim.show.zero_vote_alert":
         break;
       case "turn_warning": {
         turnWarning = (ev.payload as TurnWarningPayload).message;
@@ -351,7 +378,15 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
 
   const execStatus: ExecutionStatus = status === "running" ? "running" : status;
   const execution = plan
-    ? projectExecution(plan, frames, execStatus, debate, debateRounds)
+    ? projectExecution(
+        plan,
+        frames,
+        execStatus,
+        debate,
+        debateRounds,
+        crossExamEnabled,
+        debateOpening,
+      )
     : null;
 
   const agents: ProjectedAgent[] = (execution?.agents ?? []).map((a) => ({
@@ -409,6 +444,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
           }
         : {}),
     })),
+    process: r.process,
   }));
 
   return {
@@ -426,6 +462,8 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     cost,
     debate,
     debateRounds,
+    crossExamEnabled,
+    debateOpening,
     teamSynthesisPreview,
     turnWarning,
     // 团队便签墙 (§2.2 通): single source = projectExecution's frame fold (above), mapped to the

@@ -52,6 +52,7 @@ const run = (id: string, agentId: string, status: RunStatus): RunNode => ({
   checkpoint: null,
   receivedContext: [],
   escalations: [],
+  process: [],
 });
 
 const execution = (over: Partial<Execution>): Execution => ({
@@ -65,6 +66,8 @@ const execution = (over: Partial<Execution>): Execution => ({
   batches: [],
   debate: null,
   debateRounds: [],
+  crossExamEnabled: false,
+  debateOpening: null,
   teamNotes: [],
   ...over,
 });

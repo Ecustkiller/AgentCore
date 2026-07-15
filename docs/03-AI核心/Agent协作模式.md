@@ -103,12 +103,16 @@ worker 全程 non-blocking、照常按假设把能做的做完；简报（`super
 
 ### worker `handoff` 交接简报 ✅ 已落地（质量门禁 ✅）
 
-worker 收尾的结构化向上通道（与 `escalate` 的「途中上报」对偶）：终态工具 `handoff`，字段 `summary`（必填）+ `key_points` / `assumptions` / `next_steps`（可选），产出 `debrief` 注入下游节点（「上游交接结论」头）与 CEO 汇总。
+worker 收尾的结构化向上通道（与 `escalate` 的「途中上报」对偶）。唯一语义：**简报 = 接力契约 + 增量交代**（不是正文复述）。终态工具 `handoff`，字段 `summary`（必填）+ `key_points` / `assumptions` / `next_steps`（可选），产出 `debrief` 注入下游节点（「上游交接结论」头）与 CEO 汇总。
 
-- **有下游依赖的节点强制 handoff**：未调用或信息量不足（summary 少于 50 字且 key_points 少于 2 条）时，收尾护栏注入矫正指令逼出一次；仍缺则引擎从正文 + `files_touched` 合成降级 debrief（标 `degraded=true`），并进入 CEO 汇总「契约缺口」段。
-- **无下游依赖的节点保持可选**：短 / 自明交付不必为交而交；缺失时下游退回正文 + `files_touched` 指针（合法降级分支，conformance 有向量）。
+worker prompt 按 DAG 拓扑分化（`build_worker_identity(has_dependents=…)`，身份构建时拓扑已知）：
 
-→ 见代码：`tools/builtin/handoff.py`、`runtime/runs/contract.py`（门禁阈值 / 合成）、`runtime/runs/serialize.py`、`runtime/runs/executor_agent.py`。
+- **有下游依赖**：祈使必须调 `handoff`——下游队员靠简报接力；未调用或信息量不足（summary 少于 50 字且 key_points 少于 2 条）时，收尾护栏注入矫正指令逼出一次；仍缺则引擎从正文 + `files_touched` 合成降级 debrief（标 `degraded=true`），并进入 CEO 汇总「契约缺口」段。
+- **叶节点（无下游）**：仅当正文之外有值得交代的增量（关键假设 / 风险 / 建议下一步 / 落盘文件清单）才写；简短自明的交付写完正文直接结束即可。缺失时下游退回正文 + `files_touched` 指针（合法降级分支，conformance 有向量）。
+
+工具 description 与上述语义一致。引擎门禁 / 矫正轮 / 降级合成保持拓扑规则，不因叶节点「有增量才写」而放宽有下游节点的强制。
+
+→ 见代码：`tools/builtin/handoff.py`、`runtime/runs/executor_identities.py`、`runtime/runs/contract.py`（门禁阈值 / 合成）、`runtime/runs/serialize.py`、`runtime/runs/executor_agent.py`。
 
 ### Worker 问题处理：三档自主度 ✅ 已落地
 
@@ -219,8 +223,9 @@ CEO 主 Agent、`delegate` 按需委派与 DAG 波次调度——→ 见 [`编�
 
 **薄预览（✅ 已落地）**：开干前否决权——编排层公共 kickoff gate（`runtime/kickoff`）供
 `delegate` / `debate` 共用。delegate：首波前展示即将上场的团队（角色 / 任务摘要 / 依赖 /
-是否辩论）；debate：主持人循环前展示辩题 / 立场 / 轮次预算。开工卡动作：授权开工/开赛 /
-逐次审批（仅 delegate）/ 调整 / 停止（合并能力授权征询；受用户自治三档影响，见
+是否辩论）与将授权的能力范围；debate：主持人循环前展示辩题 / 立场 / 轮次预算。开工卡动作：
+delegate **授权并开工（可带嘱咐）** / **停止**；debate **授权开赛（可带开赛嘱咐）** /
+**停止**（能力授权合并进卡；受用户自治三档影响，见
 [安全权限与治理 §三](/docs/05-平台与运维/安全权限与治理.md)）。挂起条件、跳过规则、与
 `plan_review` / `ask_user` 边界见 [`编排器与CEO主Agent.md` §五](/docs/03-AI核心/编排器与CEO主Agent.md)。
 Interaction kind = `team_preview`（payload ``primitive`` 判别）；事件 `team_preview_required` /

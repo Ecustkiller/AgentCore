@@ -2,6 +2,8 @@
 
 import asyncio
 
+import pytest
+
 from agentcore.core.types import ToolEffect
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.checkpoints import CheckpointDecision
@@ -40,7 +42,7 @@ async def test_durable_pause_persists_frame_on_finalize(monkeypatch):
 
     # Skip team_preview so this fixture reaches plan_review (wave-boundary durable pause).
     monkeypatch.setattr(
-        "agentcore.tools.builtin.delegate.preview.should_kickoff",
+        "agentcore.runtime.delegate.preview.should_kickoff",
         lambda *a, **k: False,
     )
 
@@ -143,7 +145,7 @@ async def test_durable_pause_captures_resume_scope():
 
 
 async def test_durable_capture_skipped_without_transcript():
-    """无 transcript ⇒ persist 返回 False ⇒ 跳过挂起放行（D11 删窄兜底）。"""
+    """无 transcript ⇒ persist 返回 False ⇒ 跳过挂起放行（配置态不可用，D11）。"""
     registry = InteractionRegistry()
     saved: list = []
 
@@ -161,6 +163,52 @@ async def test_durable_capture_skipped_without_transcript():
     assert "S2OUT" in result.output
 
 
+async def test_durable_saver_runtime_failure_terminates(monkeypatch):
+    """saver 抛异常（运行态失败）⇒ 显式报错终止，不得 PROCEED 继续烧钱。"""
+    from agentcore.runtime.facts import TurnFactLog, current_fact_log
+    from agentcore.runtime.suspension import captain_transcript
+    from agentcore.runtime.suspension_capture import SuspensionPersistError
+
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.preview.should_kickoff",
+        lambda *a, **k: False,
+    )
+
+    registry = InteractionRegistry()
+
+    async def _save(_frame):
+        raise RuntimeError("db down")
+
+    async def _drop(_mid):
+        pass
+
+    t = tool_durable(Provider(["S1OUT", "S2OUT"]), EventSink(), registry, _save, _drop)
+    transcript = [
+        LLMMessage(role="user", content="原始请求"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="call_del",
+                    function=ToolCallFunction(name="delegate", arguments="{}"),
+                )
+            ],
+        ),
+    ]
+    log = TurnFactLog()
+    fl_token = current_fact_log.set(log)
+    ct_token = captain_transcript.set(transcript)
+    try:
+        with pytest.raises(SuspensionPersistError, match="db down"):
+            await t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx())
+    finally:
+        captain_transcript.reset(ct_token)
+        current_fact_log.reset(fl_token)
+
+    assert registry.list_pending("conv1") == []
+
+
 async def test_durable_resume_drives_tail_from_journal_not_frame(monkeypatch):
     from agentcore.runtime.facts import TurnFactLog, current_fact_log
     from agentcore.runtime.journal import completed_from_journal, plan_from_journal
@@ -172,7 +220,7 @@ async def test_durable_resume_drives_tail_from_journal_not_frame(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.delegate.preview.should_kickoff",
+        "agentcore.runtime.delegate.preview.should_kickoff",
         lambda *a, **k: False,
     )
 
@@ -244,9 +292,8 @@ async def test_durable_resume_drives_tail_from_journal_not_frame(monkeypatch):
 async def test_settle_resume_reuses_journal_execution_id():
     """Resume settle recovers the pause execution_id from journal run_plan.
 
-    The pipeline mints a fresh base_tool_context.execution_id on resume; re-emitting
-    run_plan under that new id would make the frontend ingestPlan startExecution and
-    wipe remounted plan_review frames. Prefer the id already in the pause journal.
+    Pipeline prefers journal-projected execution_id (identity invariant); settle must
+    also keep that id when re-emitting run_plan so ingestPlan does not remount frames.
     """
     from agentcore.runtime.pipeline.resume import settle_resumed_suspension
     from agentcore.runtime.suspension import PlanReviewSuspension
@@ -348,3 +395,53 @@ async def test_resume_plan_adjust_steers_the_tail():
         if m.role == "user" and "撰写" in (m.content or "")
     )
     assert "把重点放在风险上" in s2_user
+
+
+async def test_resume_plan_kickoff_continue_with_note_steers_all_unrun():
+    """Kickoff CONTINUE + non-empty note ≡ former adjust (steer all unrun workers)."""
+    plan = resume_plan()
+    seed = {plan.nodes[0].run_id: RunState(phase=RunPhase.COMPLETED, content="S1OUT")}
+    provider = Provider(["S2OUT"])
+    t = tool(provider)
+    result = await t.resume_plan(
+        plan,
+        seed,
+        decision=CheckpointDecision.CONTINUE,
+        note="把重点放在风险上",
+        checkpoint_run_ids={plan.nodes[0].run_id},
+        execution_id="e",
+        apply_kickoff_grant=True,
+    )
+    assert "S2OUT" in result.output
+    s2_user = next(
+        m.content
+        for req in provider.requests
+        for m in req.messages
+        if m.role == "user" and "撰写" in (m.content or "")
+    )
+    assert "把重点放在风险上" in s2_user
+
+
+async def test_resume_plan_continue_with_note_without_kickoff_does_not_steer():
+    """plan_review CONTINUE+note must not steer (UI still has a separate 调整)."""
+    plan = resume_plan()
+    seed = {plan.nodes[0].run_id: RunState(phase=RunPhase.COMPLETED, content="S1OUT")}
+    provider = Provider(["S2OUT"])
+    t = tool(provider)
+    await t.resume_plan(
+        plan,
+        seed,
+        decision=CheckpointDecision.CONTINUE,
+        note="不应注入",
+        checkpoint_run_ids={plan.nodes[0].run_id},
+        execution_id="e",
+        apply_kickoff_grant=False,
+    )
+    s2_user = next(
+        m.content
+        for req in provider.requests
+        for m in req.messages
+        if m.role == "user" and "撰写" in (m.content or "")
+    )
+    assert "不应注入" not in s2_user
+    assert plan.by_id(plan.nodes[1].run_id).steer in (None, "")

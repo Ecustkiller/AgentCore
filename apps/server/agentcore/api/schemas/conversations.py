@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from agentcore.core.types import PermissionPreset
+
 
 class CreateConversationRequest(BaseModel):
     title: str | None = None
@@ -15,6 +17,9 @@ class CreateConversationRequest(BaseModel):
     # Recorded only when ``folder_id`` is None; project chats inherit the project's
     # binding instead.
     local_container_root_id: str | None = Field(None, max_length=200)
+    # Session permission mode. Omit → seed from the user's autonomy default
+    # (always_ask→observe / first_grant→workspace / full_auto→full_trust).
+    permission_preset: PermissionPreset | None = None
 
 
 class ConversationSummary(BaseModel):
@@ -29,6 +34,8 @@ class ConversationSummary(BaseModel):
     local_container_root_id: str | None = None
     pinned: bool = False
     archived: bool = False
+    # Session permission mode (运行时单一真相源).
+    permission_preset: PermissionPreset = PermissionPreset.WORKSPACE
 
     model_config = {"from_attributes": True}
 
@@ -44,6 +51,12 @@ class UpdateConversationRequest(BaseModel):
     title: str | None = None
     pinned: bool | None = None
     archived: bool | None = None
+
+
+class PermissionPresetUpdate(BaseModel):
+    """Switch the conversation's permission mode mid-session."""
+
+    permission_preset: PermissionPreset
 
 
 class CreateFolderRequest(BaseModel):

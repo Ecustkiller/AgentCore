@@ -6,6 +6,7 @@ import type { WorkspaceOpResult } from "@shared/ipc-contract";
 import { EXEC_CAPTURE_CAP, EXEC_LANGS, EXEC_TIMEOUT_CAP_S } from "../constants";
 import { realInside, resolveLexical, toReason } from "../pathGuard";
 import type { StoredRoot } from "../roots";
+import { getRoot } from "../roots";
 import { opErr, opOk } from "./result";
 
 /** ExecutionResult 形状的成功信封（success 可为 false——执行「跑完了但非 0 退出」）。 */
@@ -17,6 +18,39 @@ function execResult(value: {
   duration_ms: number;
 }): WorkspaceOpResult {
   return opOk(value);
+}
+
+/**
+ * W3: build ``AGENTCORE_EXTERNAL_<ALIAS>`` env map from ``external_roots``.
+ * Only injects roots that are sessionOnly grants bound to ``conversationId``.
+ */
+export function buildExternalEnvFromRoots(
+  externalRoots: Record<string, unknown> | null | undefined,
+  conversationId: string,
+  lookup: (rootId: string) => StoredRoot | undefined = getRoot,
+): Record<string, string> {
+  const envExtra: Record<string, string> = {};
+  if (!externalRoots || typeof externalRoots !== "object" || !conversationId) {
+    return envExtra;
+  }
+  for (const [alias, rootId] of Object.entries(externalRoots)) {
+    const rid = String(rootId ?? "");
+    const er = rid ? lookup(rid) : undefined;
+    if (
+      !er?.absPath ||
+      !er.sessionOnly ||
+      er.conversationId !== conversationId
+    ) {
+      continue;
+    }
+    const safe =
+      alias
+        .replace(/[^A-Za-z0-9]+/g, "_")
+        .replace(/^_|_$/g, "")
+        .toUpperCase() || "FOLDER";
+    envExtra[`AGENTCORE_EXTERNAL_${safe}`] = er.absPath;
+  }
+  return envExtra;
 }
 
 /**
@@ -32,12 +66,14 @@ function runSubprocess(
   stdin: string | null,
   timeoutSeconds: number,
   startedMs: number,
+  envExtra?: Record<string, string>,
 ): Promise<WorkspaceOpResult> {
   return new Promise((resolve) => {
     const [bin, ...preArgs] = cmd;
     const child = spawn(bin, [...preArgs, scriptFile], {
       cwd,
       stdio: ["pipe", "pipe", "pipe"],
+      env: envExtra ? { ...process.env, ...envExtra } : undefined,
     });
     let stdout = "";
     let stderr = "";
@@ -151,6 +187,13 @@ export async function opExecute(
   try {
     const scriptFile = join(tmpDir, `main${lang.ext}`);
     await fs.writeFile(scriptFile, code, "utf-8");
+    // W3: inject AGENTCORE_EXTERNAL_<ALIAS>=absPath so code_execute can open
+    // session-authorized dirs without absolute paths entering the model prompt.
+    // Only roots owned by this conversation's session grants are injected.
+    const envExtra = buildExternalEnvFromRoots(
+      args.external_roots as Record<string, unknown> | undefined,
+      String(args.conversation_id ?? ""),
+    );
     return await runSubprocess(
       lang.cmd,
       scriptFile,
@@ -158,6 +201,7 @@ export async function opExecute(
       stdin,
       timeoutSeconds,
       startedMs,
+      Object.keys(envExtra).length > 0 ? envExtra : undefined,
     );
   } catch (e) {
     return opErr("WorkspaceIOError", toReason(e));

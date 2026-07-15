@@ -10,10 +10,15 @@ from agentcore.core.logging import get_logger
 from agentcore.llm.pricing import calculate_cost
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
 from agentcore.llm.profiles import default_turn_profiles as default_profile_set
-from agentcore.llm.provider.protocol import LLMProvider, TokenUsage
+from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
+from agentcore.runtime.debate.speech_pipeline import (
+    research_continuation_message,
+    research_then_draft,
+)
 from agentcore.runtime.events import (
     EventSink,
+    FinishReason,
     run_completed,
     run_context,
     run_failed,
@@ -21,8 +26,13 @@ from agentcore.runtime.events import (
 )
 from agentcore.runtime.facts import MessageFinalFact, record_turn_fact
 from agentcore.runtime.runs.contract import check_contract
-from agentcore.runtime.runs.executor_context import _context_block_payloads
+from agentcore.runtime.runs.executor_context import (
+    _context_block_payloads,
+    _load_artifact_contents,
+    _safe_index_files,
+)
 from agentcore.runtime.runs.executor_shared import (
+    _apply_finish_interrupt,
     _continuation_message,
     _priced_failure,
     _react_and_capture,
@@ -34,6 +44,25 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
+
+
+def _strip_historical_reasoning(transcript: list[LLMMessage]) -> list[LLMMessage]:
+    """Drop prior-beat ``reasoning_content`` before continue_run replays transcript.
+
+    DeepSeek ignores historical reasoning across turns; keeping it only wastes input
+    tokens. Copies via ``replace`` so the stored session transcript is untouched until
+    the continuation result is committed. Within this beat, ``react_loop`` still
+    records reasoning on new tool-call turns; ``openai_compatible`` echoes those (or
+    pads ``""`` when omitted) — historical tool-call turns with ``None`` after strip
+    get the same empty-string pad at payload time.
+    """
+    out: list[LLMMessage] = []
+    for m in transcript:
+        if m.role == "assistant" and m.reasoning_content is not None:
+            out.append(replace(m, reasoning_content=None))
+        else:
+            out.append(m)
+    return out
 
 
 async def continue_run(
@@ -49,18 +78,25 @@ async def continue_run(
     profile_set: ProfileSet | None = None,
     approval_gate: ApprovalGate | None = None,
     round_no: int = 0,
+    side_key: str | None = None,
     context_blocks: list[ContextBlock] | None = None,
     parent_run_id: str | None = None,
+    draft_brief: str | None = None,
+    draft_system: str | None = None,
+    allow_research: bool | None = None,
 ) -> RunState:
     """续写 a saved worker session under the continuation's log scope.
 
     ``continues_run_id`` on the wire is always the session root (``session.run_id``);
     ``parent_run_id`` is the true delegation parent (captain / moderator), not the
-    continued run. ``round_no`` (辩论逐轮, 0 = ordinary 续干) rides ``run_started``
-    so every fold reads 第几轮 from the wire.
+    continued run. ``round_no`` / ``side_key`` (辩论逐轮) ride ``run_started`` so
+    every fold reads 第几轮/哪一方 from the wire (no run_id regex).
 
     ``context_blocks`` surface on ``run_context`` (用户看到的 == 结构化展示)；LLM 侧
     吃的是 ``feedback`` 经统一续干模板追加进 transcript 的内容。
+
+    辩手两阶段：当 ``session.spec.research_then_draft`` 且提供 ``draft_brief`` 时走
+    检索→成稿；``allow_research=False``（结辩）退化为单次成稿。
     """
     with log_context(
         run_id=continuation_run_id,
@@ -86,8 +122,12 @@ async def continue_run(
             profile_set=profile_set,
             approval_gate=approval_gate,
             round_no=round_no,
+            side_key=side_key,
             context_blocks=context_blocks,
             parent_run_id=parent_run_id,
+            draft_brief=draft_brief,
+            draft_system=draft_system,
+            allow_research=allow_research,
         )
 
 
@@ -104,8 +144,12 @@ async def _continue_run_scoped(
     profile_set: ProfileSet | None = None,
     approval_gate: ApprovalGate | None = None,
     round_no: int = 0,
+    side_key: str | None = None,
     context_blocks: list[ContextBlock] | None = None,
     parent_run_id: str | None = None,
+    draft_brief: str | None = None,
+    draft_system: str | None = None,
+    allow_research: bool | None = None,
 ) -> RunState:
     """续写 a saved worker session: same author, extended transcript, new run id."""
     profiles = profile_set or default_profile_set()
@@ -125,6 +169,7 @@ async def _continue_run_scoped(
             stance=spec.stance or None,
             group=spec.group or None,
             round_no=round_no,
+            side_key=side_key,
         )
     )
     if context_blocks:
@@ -148,34 +193,95 @@ async def _continue_run_scoped(
             agent_id=agent_id,
             execution_id=execution_id,
         )
-        messages = list(session.transcript)
-        messages.append(_continuation_message(feedback))
+        messages = _strip_historical_reasoning(session.transcript)
         citations: list[dict] = []
-        content, reasoning, round_usage, round_rounds = await _react_and_capture(
-            messages,
-            llm=llm,
-            tools=tools,
-            sink=sink,
-            tool_ctx=tool_ctx,
-            profile=profile,
-            turn_model=priced_model,
-            allowed_tools=spec.tools,
-            run_id=continuation_run_id,
-            agent_id=agent_id,
-            citation_sink=citations,
-            approval_gate=approval_gate,
-            usage_sink=inflight,
+        worker_tools = tools
+        allowed_tools = spec.tools
+        if spec.deliverable is not None and spec.deliverable.form == "prose":
+            from agentcore.runtime.runs.executor_identities import (
+                PROSE_WITHHELD_WRITE_TOOLS,
+            )
+            from agentcore.runtime.runs.executor_shared import _registry_without
+
+            worker_tools = _registry_without(tools, *PROSE_WITHHELD_WRITE_TOOLS)
+            if allowed_tools is not None:
+                withheld = set(PROSE_WITHHELD_WRITE_TOOLS)
+                allowed_tools = [t for t in allowed_tools if t not in withheld]
+        finish_override: list[FinishReason] = []
+        use_two_phase = bool(
+            spec.research_then_draft and (draft_brief or "").strip()
         )
+        if use_two_phase:
+            do_research = True if allow_research is None else bool(allow_research)
+            if do_research:
+                messages.append(research_continuation_message(feedback))
+            else:
+                # 结辩等无检索 beat：transcript 仍记任务，成稿走干净上下文。
+                messages.append(LLMMessage(role="user", content=feedback))
+            content, reasoning, round_usage, round_rounds = await research_then_draft(
+                messages,
+                llm=llm,
+                tools=worker_tools,
+                sink=sink,
+                tool_ctx=tool_ctx,
+                profile=profile,
+                turn_model=priced_model,
+                allowed_tools=allowed_tools if do_research else [],
+                run_id=continuation_run_id,
+                agent_id=agent_id,
+                citation_sink=citations,
+                approval_gate=approval_gate,
+                draft_system=(
+                    (draft_system or "").strip()
+                    or (spec.draft_system or "").strip()
+                    or (spec.system_prompt_supplement or "")
+                ),
+                draft_brief=(draft_brief or "").strip(),
+                allow_research=do_research,
+                usage_sink=inflight,
+                finish_override_sink=finish_override,
+            )
+        else:
+            messages.append(_continuation_message(feedback))
+            content, reasoning, round_usage, round_rounds = await _react_and_capture(
+                messages,
+                llm=llm,
+                tools=worker_tools,
+                sink=sink,
+                tool_ctx=tool_ctx,
+                profile=profile,
+                turn_model=priced_model,
+                allowed_tools=allowed_tools,
+                run_id=continuation_run_id,
+                agent_id=agent_id,
+                citation_sink=citations,
+                approval_gate=approval_gate,
+                usage_sink=inflight,
+                finish_override_sink=finish_override,
+            )
         duration_ms = int((time.monotonic() - start) * 1000)
         usage = round_usage.as_dict()
         cost = asdict(calculate_cost(priced_model, round_usage))
         touched_for_gate = files_touched_from_transcript(messages)
+        deliverable = spec.deliverable
+        artifact_contents = None
+        workspace_paths = list(touched_for_gate)
+        if deliverable and deliverable.artifacts:
+            live_index = await _safe_index_files(tool_ctx.backend)
+            workspace_paths = list(dict.fromkeys([*live_index, *touched_for_gate]))
+            if deliverable.output_format == "json":
+                artifact_contents = await _load_artifact_contents(
+                    tool_ctx.backend,
+                    deliverable.artifacts,
+                    workspace_paths,
+                )
         verdict = check_contract(
             content,
-            spec.deliverable,
+            deliverable,
             files_written=len(touched_for_gate),
             debrief=debrief_from_transcript(messages),
-            workspace_paths=touched_for_gate,
+            workspace_paths=workspace_paths,
+            artifact_contents=artifact_contents,
         )
         record_turn_fact(
             MessageFinalFact(
@@ -184,6 +290,15 @@ async def _continue_run_scoped(
         )
         debrief = debrief_from_transcript(messages)
         touched = files_touched_from_transcript(messages)
+        warnings = [] if verdict.ok else list(verdict.failures)
+        warnings, debrief = _apply_finish_interrupt(
+            finish_override,
+            warnings=warnings,
+            debrief=debrief,
+            content=content,
+            files_touched=touched,
+            run_id=continuation_run_id,
+        )
         sink.emit(
             run_completed(
                 continuation_run_id,
@@ -202,7 +317,7 @@ async def _continue_run_scoped(
             phase=RunPhase.COMPLETED,
             content=content,
             reasoning=reasoning,
-            warnings=[] if verdict.ok else list(verdict.failures),
+            warnings=warnings,
             citations=citations,
             model=priced_model,
             duration_ms=duration_ms,

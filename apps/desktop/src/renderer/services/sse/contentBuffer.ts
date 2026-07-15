@@ -1,4 +1,6 @@
 import { getRuntime, useConversationStore } from "@/stores/conversation";
+import { allowsStreamingMutations, blocksStreamOpen } from "@/stores/conversation/turnPhase";
+import { getTurnPhase } from "@/stores/conversation/turnPhaseActions";
 
 /**
  * Ensure the streamed conversation's last message is a streaming assistant
@@ -8,8 +10,10 @@ import { getRuntime, useConversationStore } from "@/stores/conversation";
  * defensive so a stray `content_delta` never lands on the user bubble. Targets
  * the turn's conversation by id so a background turn opens its bubble on its own
  * slice, not whatever conversation is on screen.
+ * Only allowed while turnPhase === streaming (停止后迟到事件不得重建气泡).
  */
 export function ensureStreamingAssistant(conversationId: string): void {
+  if (!allowsStreamingMutations(getTurnPhase(conversationId))) return;
   const messages = getRuntime(conversationId).messages;
   const last = messages[messages.length - 1];
   if (!last || last.role !== "assistant" || !last.isStreaming) {
@@ -67,12 +71,14 @@ function enqueueChunk(
   scheduleFlush(conversationId);
 }
 
-/** 立即写出某会话已缓冲的正文+思考（按到达顺序），并取消其挂起的 frame。无缓冲时为 no-op。 */
+/** 立即写出某会话已缓冲的正文+思考（按到达顺序），并取消其挂起的 frame。无缓冲时为 no-op。
+ * stopping/terminal 态丢弃缓冲（不 append），避免停止后迟到 rAF 把 UI 拉回生成态。 */
 export function flushPendingContent(conversationId: string): void {
   cancelFrame(conversationId);
   const q = pendingChunks.get(conversationId);
   if (!q?.length) return;
   pendingChunks.delete(conversationId);
+  if (blocksStreamOpen(getTurnPhase(conversationId))) return;
   const store = useConversationStore.getState();
   for (const chunk of q) {
     if (chunk.kind === "content") {
@@ -81,6 +87,12 @@ export function flushPendingContent(conversationId: string): void {
       store.appendReasoningToLastMessage(chunk.text, conversationId);
     }
   }
+}
+
+/** 丢弃某会话全部未写出缓冲（正文+思考），取消挂起 frame。停止生成时用。 */
+export function discardAllPendingChunks(conversationId: string): void {
+  cancelFrame(conversationId);
+  pendingChunks.delete(conversationId);
 }
 
 /** 丢弃某会话已缓冲但未写出的**正文**（取消挂起 frame，且不 append）。`content_reset` 用：

@@ -62,7 +62,7 @@ Radix overlay（dialog / popover / tooltip 等）仍在 `components/ui/`，与 p
 
 | 层级 | 用户词 | 入口 | 组件 | 范围 |
 |---|---|---|---|---|
-| **全局发现** | 搜索 | `Ctrl/Cmd+K`；TitleBar / 侧栏 `SearchTrigger` | `SearchTrigger` → `CommandPalette` | 对话 / 消息 / 文件夹 + 命令 |
+| **全局发现** | 搜索 | `Ctrl/Cmd+K`；TitleBar / 侧栏 `SearchTrigger` | `SearchTrigger` → `CommandPalette` | 对话 / 消息 / 项目 + 命令 |
 | **页内缩小** | 筛选 | 当前列表或树上的输入框 | `SearchField` `variant="field"` | 仅当前视图已加载项（客户端子串） |
 | **就地定位** | 查找 | `Ctrl/Cmd+F`（`FindBar`） | 专用浮条（非 `SearchField`） | 仅当前会话**已加载**消息 |
 

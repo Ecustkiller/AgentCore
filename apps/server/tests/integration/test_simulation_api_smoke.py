@@ -31,7 +31,7 @@ def _move_to_market_provider(*, rounds: int = 12) -> ScriptedProvider:
 
 @pytest.mark.asyncio
 async def test_simulation_api_smoke_mock_llm(client, make_invite):
-    """REST closed loop with mock LLM — no real Codex proxy required."""
+    """REST closed loop with mock LLM — no real upstream required."""
     original = settings.simulation_enabled
     original_scripted = settings.simulation_scripted
     settings.simulation_enabled = True

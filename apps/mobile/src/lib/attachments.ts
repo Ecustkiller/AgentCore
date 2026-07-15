@@ -46,7 +46,7 @@ export async function readTextAttachment(
   const head = await file.slice(0, TEXT_PREVIEW_CAP + 1).arrayBuffer();
   const bytes = new Uint8Array(head);
   if (bytes.includes(0)) {
-    return { ok: false, reason: "二进制文件无法作为文本附件" };
+    return { ok: false, reason: "二进制文件请在桌面端附加（将驻留到工作区）" };
   }
   const text = new TextDecoder("utf-8").decode(
     bytes.subarray(0, Math.min(bytes.length, TEXT_PREVIEW_CAP)),

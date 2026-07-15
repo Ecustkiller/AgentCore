@@ -1,7 +1,11 @@
 import { MANUAL_HELP, ManualHelpLink } from "@/components/ManualHelpLink";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import { api } from "@/services/api";
-import { setCachedAutonomyPolicy } from "@/services/autonomyPolicy";
+import {
+  PERMISSION_PRESET_LABELS,
+  autonomyToPreset,
+  setCachedDefaultPermissionPreset,
+} from "@/services/permissionPreset";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { SettingsHeader } from "./SettingsHeader";
@@ -17,24 +21,24 @@ interface AutonomyOption {
 const OPTIONS: AutonomyOption[] = [
   {
     value: "always_ask",
-    label: "每次询问",
-    description: "每个可授权工具调用都弹出审批，不在开工卡一次放行。",
+    label: PERMISSION_PRESET_LABELS.observe.short,
+    description: `新会话默认「${PERMISSION_PRESET_LABELS.observe.short}」：${PERMISSION_PRESET_LABELS.observe.description}`,
   },
   {
     value: "first_grant",
-    label: "开工一次授权（推荐）",
-    description: "开工卡一次授权本委派所需能力，之后同委派内免逐次弹窗。",
+    label: `${PERMISSION_PRESET_LABELS.workspace.short}（推荐）`,
+    description: `新会话默认「${PERMISSION_PRESET_LABELS.workspace.short}」：${PERMISSION_PRESET_LABELS.workspace.description}`,
   },
   {
     value: "full_auto",
-    label: "全自动授权",
-    description: "完全放权：不弹开工卡，能力与计划确认一并跳过。",
+    label: PERMISSION_PRESET_LABELS.full_trust.short,
+    description: `新会话默认「${PERMISSION_PRESET_LABELS.full_trust.short}」：${PERMISSION_PRESET_LABELS.full_trust.description}`,
   },
 ];
 
 /**
- * 自主度设置（/more/autonomy）— AutonomyPolicy 三档（安全权限与治理 §三）。
- * full_auto 放行开工卡计划半边 + 能力半边；first_grant / always_ask 能力语义不变。
+ * 新会话默认权限模式（/more/autonomy）— 用户级 AutonomyPolicy 映射到
+ * observe / workspace / full_trust，仅影响新建会话的初始 permission_preset。
  */
 export function AutonomySettings() {
   const [policy, setPolicy] = useState<AutonomyPolicy | null>(null);
@@ -47,11 +51,11 @@ export function AutonomySettings() {
       .then((d) => {
         if (!alive) return;
         setPolicy(d.policy);
-        setCachedAutonomyPolicy(d.policy);
+        setCachedDefaultPermissionPreset(d.policy);
       })
       .catch((e) => {
         if (!alive) return;
-        notifyError(e, "加载自主度设置失败");
+        notifyError(e, "加载默认权限模式失败");
         setPolicy("first_grant");
       });
     return () => {
@@ -61,6 +65,14 @@ export function AutonomySettings() {
 
   const onSelect = async (next: AutonomyPolicy) => {
     if (next === policy || pending) return;
+    if (
+      next === "full_auto" &&
+      !window.confirm(
+        "将「完全信任」设为新会话默认后，新对话中 AI 将与你同权执行命令。确定？",
+      )
+    ) {
+      return;
+    }
     setPending(true);
     try {
       const d = await api.put<{ policy: AutonomyPolicy }>(
@@ -68,9 +80,10 @@ export function AutonomySettings() {
         { policy: next },
       );
       setPolicy(d.policy);
-      // 同步进本地缓存：下一个 sidecar 本地回合立即用上新档位（无需重启应用）。
-      setCachedAutonomyPolicy(d.policy);
-      notifySuccess("已更新自主度");
+      setCachedDefaultPermissionPreset(d.policy);
+      notifySuccess(
+        `新会话将默认「${PERMISSION_PRESET_LABELS[autonomyToPreset(d.policy)].short}」`,
+      );
     } catch (e) {
       notifyError(e, "设置失败");
     } finally {
@@ -81,8 +94,8 @@ export function AutonomySettings() {
   return (
     <div>
       <SettingsHeader
-        title="自主度"
-        description="控制团队开工时能力授权的节奏。只影响写文件 / 跑代码等可授权工具，不影响计划确认与检查点。"
+        title="新会话默认权限模式"
+        description="只影响之后新建的对话。已有会话请在对话内的权限徽章或状态条切换。"
         action={<ManualHelpLink to={MANUAL_HELP.autonomy} />}
       />
 

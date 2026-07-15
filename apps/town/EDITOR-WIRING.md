@@ -44,7 +44,7 @@ pnpm town:verify
 
 Bootstrap 运行时自建 `UIDocument` + `TownHudController` 并绑定。Inspector 上 `Hud Uxml` / `Hud Panel Settings` / `Hud Style Sheet` 应已填；空则补绑或重跑 Setup。
 
-**布局（2026-07-09）**：顶栏状态 · 底栏时间轴 · 左轨运行/上帝 · 右轨居民/决策/事件 Tab · 中央 3D。改 chrome 只动 UXML/USS + `TownHudController` 绑定名；元素 `name` 是绑定契约。详见规格 §7「观测 chrome 布局」。
+**布局（2026-07-09）**：顶栏状态 · 底栏时间轴 · 左轨运行/上帝 · 右轨居民/决策/事件 Tab · 中央 3D。改 chrome 只动 UXML/USS + `TownHudController` 绑定名；元素 `name` 是绑定契约。产品边界见 [AgentTown 客户端 §7](../../docs/04-前端/AgentTown客户端.md)。
 
 ## 4. 真资产（Kenney / Xbot）
 
@@ -60,13 +60,13 @@ Bootstrap 运行时自建 `UIDocument` + `TownHudController` 并绑定。Inspect
 
 - 桌面：`AgentTown.exe --api <url> --token <token> [--run-id <id>]`；或 `%APPDATA%/AgentCore/session.json`
 - WebGL：`?api=&token=&run=`；Offline Demo：`?demo=1`（`pnpm town:serve:webgl`）；StreamingAssets 走 `UnityWebRequest`
-- WebGL SSE：`Plugins/WebGL/AgentTownSse.jslib`；需后端 CORS 含 Web 宿主源（规格 §15.2）
+- WebGL SSE：`Plugins/WebGL/AgentTownSse.jslib`；需后端 CORS 含 Web 宿主源（见 [AgentTown 客户端 §15.2](../../docs/04-前端/AgentTown客户端.md)）
 
 ## 7. 测试
 
 - EditMode：`WireCoordinateTransformTests`、`SimulationSessionTests`、`TownVisualLayoutTests`、`TownPersonaTests`、`AgentTownLaunchConfigTests`、`TownMeshCatalogTests`
 - `pnpm town:verify` = setup + EditMode + Play smoke
-- 打包 smoke（Windows + WebGL）按规格 §12 — ⏳ 待补构建脚本
+- Windows / WebGL 构建命令见 README；自动 CI 门禁仍待补
 
 ## 8. 构建目标
 
@@ -76,4 +76,4 @@ Bootstrap 运行时自建 `UIDocument` + `TownHudController` 并绑定。Inspect
 ## Related
 
 - [apps/town/README.md](./README.md)
-- [AgentTown 客户端规格](../../docs/06-规划/AgentTown客户端规格.md)
+- [AgentTown 客户端](../../docs/04-前端/AgentTown客户端.md)

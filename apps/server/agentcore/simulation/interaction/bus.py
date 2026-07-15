@@ -17,10 +17,12 @@ from agentcore.simulation.interaction.models import (
 )
 from agentcore.simulation.interaction.trade import TradeContext, run_trade
 from agentcore.simulation.interaction.vote import VoteContext, run_vote
+from agentcore.simulation.show.heart_pick import HeartPickContext, run_heart_pick
 from agentcore.simulation.world.state import WorldState
 
 if TYPE_CHECKING:
     from agentcore.simulation.agents.tick_runner import AgentTickOutcome
+    from agentcore.simulation.show.models import ShowSeasonState
 
 OnInteractionDone = Callable[[InteractionResult], Awaitable[None]]
 
@@ -34,6 +36,8 @@ class InteractionTickContext:
     run_id: str
     tick: int
     on_result: OnInteractionDone | None = None
+    show_season: ShowSeasonState | None = None
+    show_episode_no: int | None = None
 
 
 class InteractionBus:
@@ -173,6 +177,27 @@ class InteractionBus:
                     ),
                     request,
                 )
+            elif request.kind == "heart_pick":
+                if ctx.show_season is None or ctx.show_episode_no is None:
+                    result = InteractionResult(
+                        request_id=request.request_id,
+                        kind="heart_pick",
+                        status="failed",
+                        initiator_id=request.initiator_id,
+                        target_id=request.target_id,
+                        summary="heart_pick 缺少赛制状态",
+                        detail="missing_show_season",
+                    )
+                else:
+                    result = await run_heart_pick(
+                        HeartPickContext(
+                            world=ctx.world,
+                            season=ctx.show_season,
+                            episode_no=ctx.show_episode_no,
+                            tick=ctx.tick,
+                        ),
+                        request,
+                    )
             else:
                 result = InteractionResult(
                     request_id=request.request_id,

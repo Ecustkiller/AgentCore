@@ -1,6 +1,12 @@
 import { surfaceResumeFromLiveTurn } from "@/services/resume";
 import { traceTurnEnd } from "@/services/sseTrace";
-import { getRuntime, useConversationStore } from "@/stores/conversation";
+import {
+  completeTurnPhase,
+  getRuntime,
+  getTurnPhase,
+  isTerminalPhase,
+  useConversationStore,
+} from "@/stores/conversation";
 import { execRuntime, useExecutionStore } from "@/stores/execution";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import type {
@@ -160,6 +166,16 @@ export function handleMessageStreamEvent(
       conv.releaseBackgroundSlice(conversationId);
       finalizeTurnTrace(conversationId);
       if (paused) surfaceResumeFromLiveTurn(conversationId, ctx.source);
+      // 正常完成 / 停止确认：推进生命周期。stopping → stopped；其余 → completed。
+      // 超时已进 terminal 则不覆盖（避免 stopped 被迟到 message_end 改成 completed）。
+      if (!isTerminalPhase(getTurnPhase(conversationId))) {
+        completeTurnPhase(
+          conversationId,
+          getTurnPhase(conversationId) === "stopping"
+            ? "stopped"
+            : "completed",
+        );
+      }
       return true;
     }
     case "error": {
@@ -184,6 +200,12 @@ export function handleMessageStreamEvent(
       }
       store.releaseBackgroundSlice(conversationId);
       finalizeTurnTrace(conversationId);
+      if (!isTerminalPhase(getTurnPhase(conversationId))) {
+        completeTurnPhase(
+          conversationId,
+          getTurnPhase(conversationId) === "stopping" ? "stopped" : "failed",
+        );
+      }
       return true;
     }
     default:

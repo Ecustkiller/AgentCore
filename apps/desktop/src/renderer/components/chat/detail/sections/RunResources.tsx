@@ -1,5 +1,12 @@
 import { Button } from "@/components/ui";
-import { formatCompact, formatCost, formatUsd } from "@/lib/format";
+import { SimpleTooltip } from "@/components/ui/tooltip";
+import {
+  COST_ESTIMATE_HINT,
+  formatCompact,
+  formatDisplayCost,
+  formatDisplayUsd,
+  pickCostMoney,
+} from "@/lib/format";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import {
   type AgentState,
@@ -13,7 +20,7 @@ import { MetricRow } from "./shared";
 /**
  * Per-run resource ledger (§7.3B power detail) — the single place a run's full
  * raw token + cost breakdown lives. Defaults expanded. All-zero cost renders as
- * 「—」(§7.5), not「¥0.00」.
+ * 「—」(§7.5), not「¥0.00」. BYOK with estimate shows ≈¥ + 估算标注.
  */
 export function ResourceSection({
   run,
@@ -33,6 +40,11 @@ export function ResourceSection({
     defaultExpanded,
   );
   const { usage, cost, model } = run;
+  const money = pickCostMoney(cost);
+  const costLabel =
+    money != null
+      ? formatDisplayCost(money.nano, cnyPerUsd, money.estimated)
+      : null;
   const cacheRate =
     usage && usage.input > 0
       ? Math.round((usage.cache_hit / usage.input) * 100)
@@ -57,9 +69,15 @@ export function ResourceSection({
           <span className="flex-1 text-left text-xs font-medium text-muted-foreground">
             资源消耗
           </span>
-          {cost && (
-            <span className="text-xs tabular-nums text-muted-foreground">
-              {formatCost(cost.total, cnyPerUsd)}
+          {costLabel && (
+            <span
+              className="text-xs tabular-nums text-muted-foreground"
+              title={money?.estimated ? COST_ESTIMATE_HINT : undefined}
+            >
+              {costLabel}
+              {money?.estimated ? (
+                <span className="ml-1 text-muted-foreground/80">估算</span>
+              ) : null}
             </span>
           )}
         </span>
@@ -77,16 +95,27 @@ export function ResourceSection({
           />
           {model && <MetricRow label="模型" value={model} mono />}
 
-          {cost && (
+          {money && (
             <div>
               <MetricRow
-                label="成本"
-                value={`${formatCost(cost.total, cnyPerUsd)} · ${formatUsd(cost.total)}`}
+                label={money.estimated ? "成本（估算）" : "成本"}
+                value={`${formatDisplayCost(money.nano, cnyPerUsd, money.estimated)} · ${formatDisplayUsd(money.nano, money.estimated)}`}
               />
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                输入 {formatUsd(cost.input)} · 输出 {formatUsd(cost.output)}
-                {cost.cached > 0 && <> · 缓存省 {formatUsd(cost.cached)}</>}
-              </p>
+              {money.estimated ? (
+                <SimpleTooltip label={COST_ESTIMATE_HINT}>
+                  <p className="mt-0.5 cursor-default text-xs text-muted-foreground">
+                    {COST_ESTIMATE_HINT}
+                  </p>
+                </SimpleTooltip>
+              ) : cost ? (
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  输入 {formatDisplayUsd(cost.input)} · 输出{" "}
+                  {formatDisplayUsd(cost.output)}
+                  {cost.cached > 0 && (
+                    <> · 缓存省 {formatDisplayUsd(cost.cached)}</>
+                  )}
+                </p>
+              ) : null}
             </div>
           )}
 

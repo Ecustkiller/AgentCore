@@ -1,6 +1,8 @@
+import { notifyError } from "@/lib/toast";
 import {
   isInteractionOrphanedError,
   submitInteraction,
+  submitInteractionFeedback,
 } from "@/services/interactionSubmit";
 import {
   type DelegationAuthView,
@@ -54,7 +56,9 @@ export async function decideDelegationAuthorization(
       conversationId: authorization.conversationId,
       hotBody: { kind: "delegation_authorization", decision },
     });
-    if (result === "busy") return;
+    if (result !== "ok") {
+      notifyError(submitInteractionFeedback(result));
+    }
   } catch (err) {
     if (isInteractionOrphanedError(err)) {
       useInteractionStore

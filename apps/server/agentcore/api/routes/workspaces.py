@@ -51,6 +51,7 @@ from agentcore.api.schemas import (
     WorkspaceWriteResult,
 )
 from agentcore.config import settings
+from agentcore.conversation.scratch import bare_chat_local_subpath
 from agentcore.core.errors import ConflictError, NotFoundError, ValidationError
 from agentcore.db.repositories import ConversationRepository, FolderRepository
 from agentcore.storage import SnapshotNotFound
@@ -207,7 +208,8 @@ async def list_workspaces(
     for conv in conversations:
         if conv.folder_id is not None:
             continue  # covered by project entry above
-        local = conv.local_root_id is not None
+        root_id = conv.local_root_id or conv.local_container_root_id
+        local = root_id is not None
         has_files = (
             True
             if local
@@ -222,8 +224,10 @@ async def list_workspaces(
                 ws_id=f"conv:{conv.id}",
                 name=conv.title or "未命名对话",
                 location="local" if local else "cloud",
-                root_id=conv.local_root_id,
-                subpath=conv.local_subpath,
+                root_id=root_id,
+                subpath=(
+                    (conv.local_subpath or bare_chat_local_subpath(conv.id)) if local else None
+                ),
                 has_files=has_files,
             )
         )

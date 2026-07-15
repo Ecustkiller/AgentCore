@@ -5,6 +5,7 @@ import { EscalationCards } from "@/components/chat/EscalationCard";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
 import { RetryBanner } from "@/components/chat/RetryBanner";
 import { RecoveryActions } from "@/components/chat/StatusStrip";
+import { isTurnRecoverable } from "@/lib/turnRecoverable";
 import {
   useBackgroundTasks,
   useWorkspaceRootId,
@@ -33,6 +34,9 @@ import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import { AlertTriangle } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
+
+/** Re-export for canvas consumers that historically imported from this module. */
+export { isTurnRecoverable };
 
 /**
  * 画布「图上指挥」指挥台 (前端UX设计.md §6.2). The boss powers散落在聊天流里
@@ -105,22 +109,6 @@ export function countPendingDecisions(
     void convId;
   }
   return n;
-}
-
-/** Whether the focused turn has terminal trouble the boss can 救火 — mirror of the
- * chat 救火行 gate (`InlineTeamGraph`): a turn-level crash (`failed`), a stopped turn
- * (`cancelled`), or a partial failure (`completed` with ≥1 failed run). A running /
- * planning / paused turn is in-flight, not yet recoverable. */
-export function isTurnRecoverable(
-  execution: Execution | null | undefined,
-): boolean {
-  if (!execution) return false;
-  if (execution.status === "failed" || execution.status === "cancelled")
-    return true;
-  return (
-    execution.status === "completed" &&
-    execution.runs.some((r) => r.status === "failed")
-  );
 }
 
 /** Everything the 指挥台 tab renders / badges, derived live by {@link useCommandRegion}. */
@@ -269,18 +257,16 @@ export function CommandPanelBody({
     execution?.runs.filter((r) => r.status === "failed").length ?? 0;
   const recoveryNotice =
     execution?.status === "cancelled"
-      ? "本回合已停止。可重试或忽略。"
+      ? "本回合已停止。"
       : failedCount > 0
-        ? `${failedCount} 个子任务失败。可重试或忽略。`
-        : "本回合执行失败。可重试或忽略。";
+        ? `${failedCount} 个子任务失败。`
+        : "本回合执行失败。";
 
   return (
     <div className="h-full overflow-y-auto py-3">
-      {/* 救火 (firefighting): a conversation-level transport error (send / resume /
-          regenerate drop) + the focused turn's whole-turn recovery row (重试 /
-          忽略). RetryBanner is self-contained; RecoveryActions retries from the last
-          user message but its 忽略 clears THIS turn's slot, so it runs under the
-          focused turn's ExecutionScope. */}
+      {/* 救火 (firefighting): conversation-level transport error + focused turn's
+          inline recovery link (retry-failed XOR regenerate). 「忽略」is implicit on
+          the next user turn. RecoveryActions retries under this turn's ExecutionScope. */}
       <RetryBanner />
       {recoverable && message && (
         <ExecutionScopeContext.Provider value={assistantProjectionId(message)}>
@@ -290,7 +276,6 @@ export function CommandPanelBody({
               <span>{recoveryNotice}</span>
             </div>
             <RecoveryActions
-              abandonLabel="忽略"
               hasFailedRuns={
                 execution?.status === "completed" &&
                 execution.runs.some((r) => r.status === "failed")

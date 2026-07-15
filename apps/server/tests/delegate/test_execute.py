@@ -25,13 +25,16 @@ async def test_parallel_delegate_returns_products_non_terminal():
     assert "BOUT" in result.output
     assert "研究员" in result.output
     assert "写手" in result.output
-    assert set(result.metadata) == {
+    usage_keys = {
         "input_tokens",
         "output_tokens",
         "reasoning_tokens",
         "cache_hit_tokens",
         "cache_miss_tokens",
     }
+    assert usage_keys <= set(result.metadata)
+    assert result.metadata.get("batch_nodes") == 2
+    assert result.metadata.get("batch_has_deps") is False
 
 
 async def test_dag_delegate_completes_with_both_products():

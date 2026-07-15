@@ -22,9 +22,9 @@ export interface SidecarInference {
   model: string;
 }
 
-/** 自主度三档（安全权限与治理 §三）——与服务端 `AutonomyPolicy` 枚举逐字对齐。
- *  sidecar 无用户库，桌面按回合把当前设置随参数送达本地引擎（中途改设置下一回合即生效）。 */
-export type SidecarAutonomyPolicy = "always_ask" | "first_grant" | "full_auto";
+/** 会话权限模式三档（安全权限与治理 · 会话级权限模式）——与服务端 `PermissionPreset` 枚举逐字对齐。
+ *  sidecar 无会话库，桌面按回合把当前会话模式随参数送达本地引擎。 */
+export type SidecarPermissionPreset = "observe" | "workspace" | "full_trust";
 
 /** renderer 发起一次本地回合所需的入参（主进程据此驱动对应 root 的 sidecar）。 */
 export interface SidecarStartTurnRequest {
@@ -56,8 +56,8 @@ export interface SidecarStartTurnRequest {
   history?: SidecarHistoryEntry[];
   /** 云代理凭据；缺省则 sidecar 回退到其自身 server 配置（dev 便利，非生产姿态）。 */
   inference?: SidecarInference;
-  /** 用户当前自主度（能力授权三档）。缺省 = sidecar 沿用当前值（初始默认 first_grant）。 */
-  autonomyPolicy?: SidecarAutonomyPolicy;
+  /** 本会话当前权限模式。缺省 = sidecar 沿用当前值（初始默认 workspace）。 */
+  permissionPreset?: SidecarPermissionPreset;
 }
 
 /** 一条历史消息（与引擎 `run_chat_pipeline` 的 history 形状对齐）。 */
@@ -76,12 +76,14 @@ export interface SidecarCitation {
 }
 
 /** 回合回放载荷（**严格**对齐服务端 `RunsPayload` schema：多 Agent 团队图事件 + 单 Agent
- *  思考·工具时间线）。主进程 writebacker **原样**写入云端落库，renderer 自身不解读；
- *  字段可选性与生成类型一致。 */
+ *  思考·工具时间线 + per-run worker process）。主进程 writebacker **原样**写入云端落库，
+ *  renderer 自身不解读；字段可选性与生成类型一致。 */
 export interface SidecarRunsPayload {
   events?: Record<string, unknown>[];
   finish_reason?: string | null;
   process?: Record<string, unknown>[] | null;
+  /** Per-run ProcessStep[] map (run_id → steps); mirrors RunsPayload.run_processes. */
+  run_processes?: Record<string, Record<string, unknown>[]> | null;
 }
 
 /** 一次回合的最终结果（startTurn 的延迟响应——流式细节已由 `turn/event` 给过）。 */
@@ -152,16 +154,19 @@ export interface SidecarResumeRequest {
   traceId: string;
   /** 挂起时已落库的原始 user 气泡 id —— outbox 幂等锚（同 startTurn.userMessageId）。 */
   userMessageId?: string;
-  /** continue（授权并开工）/ per_call（逐次审批开工）/ adjust（注入 note 转向后续跑）/ stop（就此结束）。 */
+  /** continue（授权并开工）/ per_call（历史·逐次审批开工）/ adjust（注入 note 转向后续跑）/ stop（就此结束）。 */
   decision: "continue" | "per_call" | "adjust" | "stop";
-  /** adjust 的转向说明 / stop 的收尾语；continue 忽略。 */
+  /**
+   * continue：可选开工嘱咐（非空则注入未跑队员，与 checkpoints CONTINUE+note 对齐）；
+   * adjust：转向说明；stop：收尾语。
+   */
   note: string;
   /** ask_user 的选项选择；plan_review 忽略。 */
   selected?: string[];
   /** 云代理凭据（同 `startTurn`）——续跑要跑 LLM；重启后续跑会新拉起引擎，故须随带。 */
   inference?: SidecarInference;
-  /** 用户当前自主度（同 `startTurn.autonomyPolicy`）——续跑期间的能力授权同样按当前设置。 */
-  autonomyPolicy?: SidecarAutonomyPolicy;
+  /** 本会话当前权限模式（同 `startTurn.permissionPreset`）。 */
+  permissionPreset?: SidecarPermissionPreset;
 }
 
 /**
@@ -180,7 +185,7 @@ export function buildSidecarResumeRpcParams(
     | "note"
     | "selected"
     | "userMessageId"
-    | "autonomyPolicy"
+    | "permissionPreset"
   >,
   inference?: SidecarInference,
 ): Record<string, unknown> {
@@ -193,14 +198,8 @@ export function buildSidecarResumeRpcParams(
     selected: req.selected ?? [],
     ...(req.userMessageId ? { userMessageId: req.userMessageId } : {}),
     ...(inference ? { inference } : {}),
-    ...(req.autonomyPolicy ? { autonomyPolicy: req.autonomyPolicy } : {}),
+    ...(req.permissionPreset ? { permissionPreset: req.permissionPreset } : {}),
   };
-}
-
-/** 列出某会话在本机待续跑的持久挂起帧（重开会话时调，主进程直接读盘）。 */
-export interface SidecarListPausedRequest {
-  rootId: string;
-  conversationId: string;
 }
 
 /** 探活一个 `root + subpath` 的 sidecar：拉起进程并完成 initialize 握手即返回（不跑回合），
@@ -280,6 +279,92 @@ export interface SidecarDebateSteerRequest {
   askTarget?: string;
 }
 
+/** 本机 outbox 未同步回合的投影自足摘要（recovery → renderer D5，不透传 journal）。 */
+export interface SidecarUnsyncedTurnSummary {
+  user_message_id: string;
+  user_message: string;
+  message_id: string | null;
+  trace_id: string;
+  phase: "open" | "ready";
+  updated_at: number;
+  content: string;
+  reasoning_content: string | null;
+  citations: SidecarCitation[];
+  runs: SidecarRunsPayload | null;
+  finish_reason: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  cache_hit_tokens: number;
+  cache_miss_tokens: number;
+}
+
+/** 查询某会话的本地恢复面（活回合 + 未同步 outbox 摘要 + 挂起帧）。 */
+export interface SidecarRecoveryRequest {
+  conversationId: string;
+}
+
+/** 已授权 · 执行中断（D2：journal fold 无 pending + 未终态 + 无活执行）。 */
+export interface SidecarInterruptedAfterDecision {
+  messageId: string;
+  userMessageId: string;
+  conversationId: string;
+  settledKind: "ask_user" | "plan_review" | "team_preview";
+  checkpointId: string;
+}
+
+export interface SidecarRecoveryResponse {
+  liveRunning: boolean;
+  /** 活回合键（startTurn=`turnId`，resume=`messageId`）。 */
+  turnId?: string;
+  unsynced: SidecarUnsyncedTurnSummary[];
+  /** 本机冷路挂起帧（与原 listPaused 同源；一次 IPC 拿全本地事实）。 */
+  paused: SidecarPausedTurn[];
+  /**
+   * Journal-fold 派生的「已授权 · 执行中断」列表（不得用 unsynced 非空作前提）。
+   * 二次挂起时 fold 有新 pending → 本列表为空，只显示新决策卡。
+   */
+  interruptedAfterDecision: SidecarInterruptedAfterDecision[];
+}
+
+/** 无帧续跑（D2）：按 outbox settlement / resume_frame 从决策点重跑。 */
+export interface SidecarContinueAfterDecisionRequest {
+  rootId: string;
+  subpath?: string;
+  conversationId: string;
+  messageId: string;
+  userMessageId?: string;
+  traceId?: string;
+  inference?: SidecarInference;
+  permissionPreset?: string;
+}
+
+/** 重绑本窗口并取回缓冲事件快照（零 await 段在主进程 handler 内）。 */
+export interface SidecarAttachRequest {
+  conversationId: string;
+}
+
+export interface SidecarAttachResponse {
+  attached: boolean;
+  turnId?: string;
+  rootId?: string;
+  subpath?: string;
+  /** startTurn 登记；resume 类可能缺省。 */
+  userMessageId?: string;
+  userMessage?: string;
+  traceId?: string;
+  /** resume 类活回合的助手行锚（= 登记键 messageId）。 */
+  messageId?: string;
+  /** `"start"` | `"resume"` —— renderer 据此选择 clear-then-fold vs 增量 fold。 */
+  kind?: "start" | "resume";
+  /** 裸 SSE 事件（与 `dispatchSSEEvent` 同形）；非 `SidecarEventPush` 信封。 */
+  events?: Array<{
+    type: string;
+    timestamp: string;
+    payload: unknown;
+  }>;
+}
+
 /** IPC 通道名 —— 主进程与 preload 共用，避免硬编码漂移。 */
 export const SIDECAR_CHANNELS = {
   startTurn: "sidecar:startTurn",
@@ -288,8 +373,10 @@ export const SIDECAR_CHANNELS = {
   runRedirect: "sidecar:runRedirect",
   debateSteer: "sidecar:debateSteer",
   resume: "sidecar:resume",
-  listPaused: "sidecar:listPaused",
+  continueAfterDecision: "sidecar:continueAfterDecision",
   probe: "sidecar:probe",
+  recovery: "sidecar:recovery",
+  attach: "sidecar:attach",
   event: "sidecar:event",
   status: "sidecar:status",
 } as const;
@@ -310,11 +397,17 @@ export interface SidecarApi {
   /** 续跑一个持久挂起的本地回合；Promise 在续跑结束时 resolve（同 `startTurn` 携最终结果，
    * 过程事件经 `onEvent` 推来）。 */
   resume(req: SidecarResumeRequest): Promise<SidecarTurnResult>;
-  /** 列出某会话在本机待续跑的持久挂起帧（重开会话时拉取，渲染续跑卡）。 */
-  listPaused(req: SidecarListPausedRequest): Promise<SidecarPausedTurn[]>;
+  /** 无帧续跑：已决策执行中断后的一键继续（方案 A · 从决策点重跑）。 */
+  continueAfterDecision(
+    req: SidecarContinueAfterDecisionRequest,
+  ): Promise<SidecarTurnResult>;
   /** 探活一个 root 的 sidecar（拉起 + initialize 握手即返回，不跑回合）。成功 = 本机环境能起
    * 本地引擎（握手成功的进程留存、被首个回合复用）；失败 reject（诊断经 `onStatus` 推送）。 */
   probe(req: SidecarProbeRequest): Promise<void>;
+  /** 查询本地恢复面（活回合 + 未同步 outbox + 挂起帧 + interruptedAfterDecision）；零 spawn。 */
+  recovery(req: SidecarRecoveryRequest): Promise<SidecarRecoveryResponse>;
+  /** 重绑本窗口并取回缓冲事件快照 + 续流；`attached:false` 时走投影/ghost 降级。 */
+  attach(req: SidecarAttachRequest): Promise<SidecarAttachResponse>;
   /** 订阅本回合事件流；返回取消订阅函数。 */
   onEvent(cb: (e: SidecarEventPush) => void): () => void;
   /** 订阅 sidecar 生命周期/诊断事件；返回取消订阅函数。 */

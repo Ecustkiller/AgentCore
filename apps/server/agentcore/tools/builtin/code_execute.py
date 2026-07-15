@@ -17,7 +17,10 @@ _USAGE_TAIL = (
     "\n用法要点：① 优先用 language=python 或 javascript 直接运行内联代码，"
     "少用 bash 外壳——bash 在部分主机（如 Windows）可能不可用。② 代码的"
     "工作目录就是工作区根目录，访问工作区文件请用相对路径（如 fib.py），"
-    "不要假设 /workspace 之类的绝对路径。③ 抓取网页或调用公开 HTTP API "
+    "不要假设 /workspace 之类的绝对路径。会话授权的区外目录以 "
+    "`external/<别名>/…` 走文件工具；若代码需真实 OS 路径，读环境变量 "
+    "`AGENTCORE_EXTERNAL_<别名大写>`（由执行环境注入，勿把绝对路径写进回复）。"
+    "③ 抓取网页或调用公开 HTTP API "
     "优先用 read_url / web_search 工具，不要在代码里发网络请求。"
 )
 
@@ -120,6 +123,11 @@ class CodeExecuteTool:
             language=language,
             timeout_seconds=timeout,
             on_output=_make_output_callback(context),
+            network_mode=(
+                "restricted"
+                if context.permission_preset == "full_trust"
+                else "none"
+            ),
         )
 
         # 工具执行阶段进度 (联网前端展示优化): the sandbox run is the slow blocking leg —

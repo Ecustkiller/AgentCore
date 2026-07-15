@@ -35,6 +35,11 @@ export type ModelKeyFormProps = {
   configured: boolean;
   initialBaseUrl: string;
   initialModel: string;
+  /** Round-trip existing price card / background model on PUT (整表替换). */
+  initialPriceCacheHit?: string | null;
+  initialPriceCacheMiss?: string | null;
+  initialPriceOutput?: string | null;
+  initialBackgroundModel?: string | null;
   onSaved: (s: LlmKeyStatus) => void;
   onCancel?: () => void;
   /** Override primary CTA label (defaults: 保存 / 连接并继续). */
@@ -53,6 +58,10 @@ export function ModelKeyForm({
   configured,
   initialBaseUrl,
   initialModel,
+  initialPriceCacheHit = null,
+  initialPriceCacheMiss = null,
+  initialPriceOutput = null,
+  initialBackgroundModel = null,
   onSaved,
   onCancel,
   submitLabel,
@@ -72,6 +81,18 @@ export function ModelKeyForm({
     if (initialModel.trim()) return initialModel;
     return getByokProviderPreset(DEFAULT_BYOK_PROVIDER_ID).defaultModel;
   });
+  const [priceCacheMiss, setPriceCacheMiss] = useState(
+    () => initialPriceCacheMiss?.trim() ?? "",
+  );
+  const [priceOutput, setPriceOutput] = useState(
+    () => initialPriceOutput?.trim() ?? "",
+  );
+  const [priceCacheHit, setPriceCacheHit] = useState(
+    () => initialPriceCacheHit?.trim() ?? "",
+  );
+  const [backgroundModel, setBackgroundModel] = useState(
+    () => initialBackgroundModel?.trim() ?? "",
+  );
   const [reveal, setReveal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -99,11 +120,20 @@ export function ModelKeyForm({
     setSaving(true);
     setError(null);
     try {
+      const miss = priceCacheMiss.trim();
+      const out = priceOutput.trim();
+      const hit = priceCacheHit.trim();
+      // 输入+输出成对；全空=清除价卡。只填一侧时仍原样提交，由后端校验报错。
+      const pricesEmpty = !miss && !out && !hit;
       onSaved(
         await setLlmKey({
           api_key: apiKey.trim(),
           base_url: baseUrl.trim() || null,
           default_model: defaultModel.trim() || null,
+          price_cache_miss: pricesEmpty ? null : miss || null,
+          price_output: pricesEmpty ? null : out || null,
+          price_cache_hit: pricesEmpty ? null : hit || null,
+          background_model: backgroundModel.trim() || null,
         }),
       );
     } catch (e) {
@@ -200,6 +230,71 @@ export function ModelKeyForm({
               ))}
             </datalist>
           )}
+        </label>
+        <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+          <p className="text-xs font-medium text-foreground">单价卡（可选）</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            USD / 1M tokens。输入与输出成对填写后，用量页与回合成本可显示
+            ≈¥ 估算；全空则清除价卡。
+          </p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            <label className="block">
+              <span className="text-xs text-muted-foreground">输入价</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={priceCacheMiss}
+                onChange={(e) => setPriceCacheMiss(e.target.value)}
+                placeholder="如 0.28"
+                autoComplete="off"
+                spellCheck={false}
+                className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-muted-foreground">输出价</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={priceOutput}
+                onChange={(e) => setPriceOutput(e.target.value)}
+                placeholder="如 0.42"
+                autoComplete="off"
+                spellCheck={false}
+                className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-muted-foreground">
+                缓存命中价（可选）
+              </span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={priceCacheHit}
+                onChange={(e) => setPriceCacheHit(e.target.value)}
+                placeholder="缺省=输入价"
+                autoComplete="off"
+                spellCheck={false}
+                className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
+              />
+            </label>
+          </div>
+        </div>
+        <label className="block">
+          <span className="text-xs text-muted-foreground">后台模型（可选）</span>
+          <input
+            type="text"
+            value={backgroundModel}
+            onChange={(e) => setBackgroundModel(e.target.value)}
+            placeholder="留空跟随默认模型"
+            autoComplete="off"
+            spellCheck={false}
+            className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            用于标题、记忆等后台任务的便宜模型，留空跟随默认模型
+          </p>
         </label>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">

@@ -44,13 +44,24 @@ class UpdateSynthesisTool:
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         session = active_coordination(context.execution_id)
-        if session is None or not session.active:
+        if session is None:
             return ToolResult(
                 tool_call_id="",
                 success=False,
                 output="",
                 error="当前不在协调模式——仅在协调模式启动团队后可用（≥2 worker 默认；"
                 "显式 coordinate=false 为阻塞路径）。",
+            )
+        if not session.active:
+            # Team finished and session closed — soft tip, not error (avoids burning a
+            # CEO retry round). Distinct from「从未开团」(session is None above).
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output=(
+                    "团队已全部完成，协调会话已收口。请直接用正文写出最终合成"
+                    "（content_delta），不必再调 update_synthesis。"
+                ),
             )
         draft = str(arguments.get("draft") or "").strip()
         if not draft:

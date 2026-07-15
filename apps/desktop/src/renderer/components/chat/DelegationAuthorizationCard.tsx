@@ -83,11 +83,7 @@ function DelegationAuthorizationCard({
     );
 
   return (
-    <DecisionCard
-      tone="primary"
-      animate
-      className="mx-0 border-primary/45 bg-primary/10 ring-1 ring-primary/25"
-    >
+    <DecisionCard tone="primary" animate className="mx-0">
       <div className="flex items-start gap-2">
         <DecisionCardIcon tone="primary">
           <ShieldAlert size={16} />
@@ -134,7 +130,7 @@ function DelegationAuthorizationCard({
         </div>
       </div>
 
-      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5 pl-6">
         <Button
           variant="primary"
           icon={spinnerOr("grant_delegation", <CheckCheck size={13} />)}

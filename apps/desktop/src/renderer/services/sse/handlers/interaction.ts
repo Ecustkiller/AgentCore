@@ -2,19 +2,15 @@ import { useConversationStore } from "@/stores/conversation";
 import { frameFromEvent, useExecutionStore } from "@/stores/execution";
 import {
   applyInteractionWireEvent,
+  defFromRequiredEvent,
+  defFromResolvedEvent,
+  interactionChannelEventTypes,
   useInteractionStore,
+  wireFor,
+  type TimelineProcessKind,
 } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
-import type {
-  CheckpointRequiredPayload,
-  CheckpointResolvedPayload,
-  PlanReviewRequiredPayload,
-  PlanReviewResolvedPayload,
-  QuestionPostedPayload,
-  SSEEvent,
-  TeamPreviewRequiredPayload,
-  TeamPreviewResolvedPayload,
-} from "@/types/events";
+import type { SSEEvent } from "@/types/events";
 import {
   type InteractionOrphanedPayload,
   isInteractionOrphanedEvent,
@@ -23,6 +19,8 @@ import { flushPendingContent } from "../contentBuffer";
 import { flushPendingFrames } from "../execFrameBuffer";
 import { execMessageId } from "../helpers";
 import type { DispatchContext } from "../types";
+
+const INTERACTION_SSE_TYPES = interactionChannelEventTypes();
 
 function wireIntoInteractionStore(
   event: SSEEvent,
@@ -37,6 +35,28 @@ function wireIntoInteractionStore(
   );
 }
 
+function stampByProcessKind(
+  processKind: TimelineProcessKind,
+  id: string,
+  conversationId: string,
+): void {
+  const store = useConversationStore.getState();
+  switch (processKind) {
+    case "checkpoint":
+      store.stampCheckpointMarker(id, conversationId);
+      break;
+    case "ask":
+      store.stampAskMarker(id, conversationId);
+      break;
+    case "plan_review":
+      store.stampPlanReviewMarker(id, conversationId);
+      break;
+    case "team_preview":
+      store.stampTeamPreviewMarker(id, conversationId);
+      break;
+  }
+}
+
 export function handleInteractionEvent(
   event: SSEEvent,
   ctx: DispatchContext,
@@ -49,92 +69,63 @@ export function handleInteractionEvent(
     return true;
   }
 
-  switch (event.type) {
-    case "approval_required":
-    case "approval_resolved":
-    case "delegation_authorization_required":
-    case "delegation_authorization_resolved": {
-      wireIntoInteractionStore(event, conversationId);
-      return true;
-    }
-    case "checkpoint_required": {
-      flushPendingContent(conversationId);
-      flushPendingFrames(conversationId);
-      wireIntoInteractionStore(event, conversationId);
-      useConversationStore
-        .getState()
-        .stampCheckpointMarker(
-          (event.payload as CheckpointRequiredPayload).checkpoint_id,
-          conversationId,
-        );
-      return true;
-    }
-    case "checkpoint_resolved": {
-      wireIntoInteractionStore(event, conversationId);
-      const p = event.payload as CheckpointResolvedPayload;
-      usePausedTurnStore.getState().removeByCheckpoint(p.checkpoint_id);
-      return true;
-    }
-    case "question_posted": {
-      flushPendingContent(conversationId);
-      flushPendingFrames(conversationId);
-      wireIntoInteractionStore(event, conversationId);
-      useConversationStore
-        .getState()
-        .stampAskMarker(
-          (event.payload as QuestionPostedPayload).ask_id,
-          conversationId,
-        );
-      return true;
-    }
-    case "plan_review_required": {
-      flushPendingContent(conversationId);
-      flushPendingFrames(conversationId);
-      wireIntoInteractionStore(event, conversationId);
-      useConversationStore
-        .getState()
-        .stampPlanReviewMarker(
-          (event.payload as PlanReviewRequiredPayload).checkpoint_id,
-          conversationId,
-        );
-      {
-        const mid = execMessageId(conversationId);
-        const frame = frameFromEvent(event);
-        if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
-      }
-      return true;
-    }
-    case "plan_review_resolved": {
-      wireIntoInteractionStore(event, conversationId);
-      const p = event.payload as PlanReviewResolvedPayload;
-      usePausedTurnStore.getState().removeByCheckpoint(p.checkpoint_id);
-      flushPendingFrames(conversationId);
-      {
-        const mid = execMessageId(conversationId);
-        const frame = frameFromEvent(event);
-        if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
-      }
-      return true;
-    }
-    case "team_preview_required": {
-      flushPendingContent(conversationId);
-      flushPendingFrames(conversationId);
-      wireIntoInteractionStore(event, conversationId);
-      useConversationStore
-        .getState()
-        .stampTeamPreviewMarker(
-          (event.payload as TeamPreviewRequiredPayload).checkpoint_id,
-          conversationId,
-        );
-      return true;
-    }
-    case "team_preview_resolved": {
-      wireIntoInteractionStore(event, conversationId);
-      const p = event.payload as TeamPreviewResolvedPayload;
-      usePausedTurnStore.getState().removeByCheckpoint(p.checkpoint_id);
-      return true;
-    }
-    default:
-      return false;
+  if (!INTERACTION_SSE_TYPES.has(event.type)) {
+    return false;
   }
+
+  const requiredDef = defFromRequiredEvent(event.type);
+  if (requiredDef) {
+    const effects = requiredDef.sseRequired;
+    if (effects?.flushBuffers) {
+      flushPendingContent(conversationId);
+      flushPendingFrames(conversationId);
+    }
+    wireIntoInteractionStore(event, conversationId);
+
+    if (requiredDef.timeline) {
+      const wire = wireFor(requiredDef.kind);
+      const id = (event.payload as Record<string, unknown>)?.[wire.idField];
+      if (typeof id === "string" && id.length > 0) {
+        stampByProcessKind(
+          requiredDef.timeline.processKind,
+          id,
+          conversationId,
+        );
+      }
+    }
+
+    if (effects?.recordExecFrame) {
+      const mid = execMessageId(conversationId);
+      const frame = frameFromEvent(event);
+      if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
+    }
+    return true;
+  }
+
+  const resolvedDef = defFromResolvedEvent(event.type);
+  if (resolvedDef) {
+    wireIntoInteractionStore(event, conversationId);
+    const effects = resolvedDef.sseResolved;
+    const wire = wireFor(resolvedDef.kind);
+    const id = (event.payload as Record<string, unknown>)?.[wire.idField];
+
+    if (
+      effects?.removePausedTurn &&
+      typeof id === "string" &&
+      id.length > 0
+    ) {
+      usePausedTurnStore.getState().removeByCheckpoint(id);
+    }
+    if (effects?.flushFrames) {
+      flushPendingFrames(conversationId);
+    }
+    if (effects?.recordExecFrame) {
+      const mid = execMessageId(conversationId);
+      const frame = frameFromEvent(event);
+      if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
+    }
+    return true;
+  }
+
+  return false;
 }

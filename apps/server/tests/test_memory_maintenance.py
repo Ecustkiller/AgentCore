@@ -314,7 +314,7 @@ async def test_maintain_routes_project_scoped_op_to_project_layer(tmp_path):
         ]
     )
     changed = await maintain_user_memory(
-        user_id="u1", messages=_turn(), extractor=extractor, store=store, project_id="F1"
+        user_id="u1", messages=_turn(), extractor=extractor, store=store, folder_id="F1"
     )
     assert changed is True
     assert "本项目用 Rust" in await store.load("u1", CORE_MEMORY_FILE, scope="F1")
@@ -336,7 +336,7 @@ async def test_maintain_routes_global_and_project_in_one_pass(tmp_path):
         ]
     )
     changed = await maintain_user_memory(
-        user_id="u1", messages=_turn(), extractor=extractor, store=store, project_id="F1"
+        user_id="u1", messages=_turn(), extractor=extractor, store=store, folder_id="F1"
     )
     assert changed is True
     assert "全局 Python" in await store.load("u1", CORE_MEMORY_FILE)
@@ -368,10 +368,10 @@ async def test_maintain_surfaces_project_layer_to_extractor(tmp_path):
     await store.save("u1", "主题/部署.md", "## 要点\n- x\n", scope="F1")
     extractor = _FakeExtractor([])
     await maintain_user_memory(
-        user_id="u1", messages=_turn(), extractor=extractor, store=store, project_id="F1"
+        user_id="u1", messages=_turn(), extractor=extractor, store=store, folder_id="F1"
     )
     data = extractor.inputs[0]
-    assert data.project_id == "F1"
+    assert data.folder_id == "F1"
     assert "本项目事实" in data.current_project_memory
     assert "部署" in data.project_topic_files
 
@@ -388,7 +388,7 @@ async def test_maintain_topic_cap_is_per_scope(tmp_path):
         messages=_turn(),
         extractor=extractor,
         store=store,
-        project_id="F1",
+        folder_id="F1",
         max_topic_files=1,
     )
     assert changed is True

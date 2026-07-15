@@ -5,7 +5,7 @@ namespace AgentTown.Simulation
     /// <summary>
     /// Single transform point converting wire world coordinates (Y-up right-handed,
     /// <c>+x</c> east / <c>+z</c> south) into Unity world space (Y-up left-handed).
-    /// See AgentTown客户端规格 §6.2.
+    /// See <c>docs/04-前端/AgentTown客户端.md §6.2</c>.
     ///
     /// <para>Wire and Unity are both Y-up, so the up axis (<c>y</c>) passes through
     /// untouched. They differ in handedness (wire right-handed, Unity left-handed),

@@ -1,6 +1,10 @@
 import { DecisionCard, DecisionCardIcon } from "@/components/ui";
+import { useConversations } from "@/hooks/useConversations";
+import { PERMISSION_PRESET_LABELS } from "@/services/permissionPreset";
 import type { TeamPreviewDisplay } from "@/stores/conversation";
+import { useConversationStore } from "@/stores/conversation";
 import { usePersistentDisclosure } from "@/stores/disclosure";
+import type { SidecarPermissionPreset } from "@shared/sidecar-contract";
 import {
   Ban,
   Check,
@@ -10,6 +14,7 @@ import {
   OctagonX,
   Pencil,
   Scale,
+  Shield,
   Users,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -32,10 +37,6 @@ export function TeamPreviewCard({ preview }: { preview: TeamPreviewDisplay }) {
 
 const RESOLVED_META_DELEGATE = {
   continue: { icon: <Check size={14} />, label: "已授权开工 · 首波已放行" },
-  per_call: {
-    icon: <Check size={14} />,
-    label: "已开工 · 将逐次审批能力调用",
-  },
   adjust: {
     icon: <Pencil size={14} />,
     label: "已调整 · 备注已注入队员并开做",
@@ -48,12 +49,19 @@ const RESOLVED_META_DELEGATE = {
   },
 } as const;
 
+const RESOLVED_CONTINUE_WITH_NOTE = {
+  icon: <Check size={14} />,
+  label: "已授权开工 · 嘱咐已注入队员",
+} as const;
+
+const RESOLVED_DEBATE_CONTINUE_WITH_NOTE = {
+  icon: <Check size={14} />,
+  label: "已授权开赛 · 嘱咐已注入",
+} as const;
+
 const RESOLVED_META_DEBATE = {
   continue: { icon: <Check size={14} />, label: "已授权开赛 · 辩论已放行" },
-  per_call: {
-    icon: <Check size={14} />,
-    label: "已开赛",
-  },
+  // 历史 adjust 消息保留原渲染文案（旧「改辩题」语义）；新路径不再发 adjust。
   adjust: {
     icon: <Pencil size={14} />,
     label: "已调整辩题 · 开赛",
@@ -190,6 +198,12 @@ function CollapsibleBody({
 function DormantTeamPreview({ preview }: { preview: TeamPreviewDisplay }) {
   const summary = `等待开工确认 · ${summarySuffix(preview)}`;
   const Icon = isDebate(preview) ? Scale : Users;
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const conversations = useConversations();
+  const permissionPreset: SidecarPermissionPreset = conversationId
+    ? (conversations.find((c) => c.id === conversationId)?.permissionPreset ??
+      "workspace")
+    : "workspace";
 
   return (
     <DecisionCard tone="neutral">
@@ -201,6 +215,13 @@ function DormantTeamPreview({ preview }: { preview: TeamPreviewDisplay }) {
           disclosureKey={`team-preview:${preview.id}`}
           summary={summary}
         >
+          <p className="mb-2 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+            <Shield size={11} />
+            当前权限：{PERMISSION_PRESET_LABELS[permissionPreset].short}
+            {permissionPreset === "full_trust"
+              ? "（AI 将与你同权执行命令）"
+              : ""}
+          </p>
           {isDebate(preview) ? (
             <DebateBody preview={preview} />
           ) : (
@@ -213,10 +234,19 @@ function DormantTeamPreview({ preview }: { preview: TeamPreviewDisplay }) {
 }
 
 function ResolvedTeamPreview({ preview }: { preview: TeamPreviewDisplay }) {
+  const decision = preview.decision ?? "timeout";
   const metaTable = isDebate(preview)
     ? RESOLVED_META_DEBATE
     : RESOLVED_META_DELEGATE;
-  const meta = metaTable[preview.decision ?? "timeout"];
+  // Historical `per_call` resolves collapse to continue copy (UI no longer offers it).
+  const resolvedKey = decision === "per_call" ? "continue" : decision;
+  const meta =
+    decision === "continue" && Boolean(preview.note?.trim())
+      ? isDebate(preview)
+        ? RESOLVED_DEBATE_CONTINUE_WITH_NOTE
+        : RESOLVED_CONTINUE_WITH_NOTE
+      : (metaTable[resolvedKey as keyof typeof metaTable] ??
+        metaTable.continue);
   const summary = `${meta.label} · ${summarySuffix(preview)}`;
 
   return (

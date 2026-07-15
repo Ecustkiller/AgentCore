@@ -9,7 +9,7 @@ at-least-once durability.
 from collections.abc import Sequence
 from datetime import datetime
 
-from sqlalchemy import distinct, func, select
+from sqlalchemy import case, distinct, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -44,6 +44,7 @@ def _run_row_values(
             "tokens": r.get("tokens") or {},
             "cost": r.get("cost") or {},
             "cost_total_nano": int(r.get("cost_total_nano", 0)),
+            "cost_estimated_nano": int(r.get("cost_estimated_nano", 0)),
             "currency": r.get("currency", "USD"),
             "rounds": int(r.get("rounds", 0)),
             "duration_ms": int(r.get("duration_ms", 0)),
@@ -127,6 +128,7 @@ class CostEventRepository:
                 "tokens": c.get("tokens") or {},
                 "cost": c.get("cost") or {},
                 "cost_total_nano": int(c.get("cost_total_nano", 0)),
+                "cost_estimated_nano": int(c.get("cost_estimated_nano", 0)),
                 "currency": c.get("currency", "USD"),
                 "duration_ms": int(c.get("duration_ms", 0)),
                 "trace_id": trace_id,
@@ -189,6 +191,7 @@ class CostEventRepository:
                     "tokens": r.tokens or {},
                     "cost": r.cost or {},
                     "cost_total_nano": int(r.cost_total_nano or 0),
+                    "cost_estimated_nano": int(getattr(r, "cost_estimated_nano", 0) or 0),
                     "currency": r.currency or "USD",
                     "duration_ms": int(r.duration_ms or 0),
                 }
@@ -208,6 +211,7 @@ class CostEventRepository:
                     "tokens": agg.tokens,
                     "cost": agg.cost,
                     "cost_total_nano": agg.cost_total_nano,
+                    "cost_estimated_nano": agg.cost_estimated_nano,
                     "currency": agg.currency,
                     "rounds": agg.rounds,
                     "duration_ms": agg.duration_ms,
@@ -234,6 +238,7 @@ class CostEventRepository:
                 "tokens": insert_stmt.excluded.tokens,
                 "cost": insert_stmt.excluded.cost,
                 "cost_total_nano": insert_stmt.excluded.cost_total_nano,
+                "cost_estimated_nano": insert_stmt.excluded.cost_estimated_nano,
                 "currency": insert_stmt.excluded.currency,
                 "rounds": insert_stmt.excluded.rounds,
                 "duration_ms": insert_stmt.excluded.duration_ms,
@@ -266,16 +271,34 @@ class CostEventRepository:
         index-friendly for the account window). ``turns`` counts distinct
         ``message_id`` — the「请求/回合」proxy for the conversation total + quota.
         """
+        billed = CostEvent.cost_total_nano > 0
+        estimated = CostEvent.cost_estimated_nano > 0
         stmt = select(
             _sum_int(_json_int(CostEvent.tokens, "input")).label("t_input"),
             _sum_int(_json_int(CostEvent.tokens, "output")).label("t_output"),
             _sum_int(_json_int(CostEvent.tokens, "reasoning")).label("t_reasoning"),
             _sum_int(_json_int(CostEvent.tokens, "cache_hit")).label("t_cache_hit"),
             _sum_int(_json_int(CostEvent.tokens, "cache_miss")).label("t_cache_miss"),
-            _sum_int(_json_int(CostEvent.cost, "input")).label("c_input"),
-            _sum_int(_json_int(CostEvent.cost, "cached")).label("c_cached"),
-            _sum_int(_json_int(CostEvent.cost, "output")).label("c_output"),
+            _sum_int(
+                case((billed, _json_int(CostEvent.cost, "input")), else_=0)
+            ).label("c_input"),
+            _sum_int(
+                case((billed, _json_int(CostEvent.cost, "cached")), else_=0)
+            ).label("c_cached"),
+            _sum_int(
+                case((billed, _json_int(CostEvent.cost, "output")), else_=0)
+            ).label("c_output"),
             _sum_int(CostEvent.cost_total_nano).label("c_total"),
+            _sum_int(
+                case((estimated, _json_int(CostEvent.cost, "input")), else_=0)
+            ).label("e_input"),
+            _sum_int(
+                case((estimated, _json_int(CostEvent.cost, "cached")), else_=0)
+            ).label("e_cached"),
+            _sum_int(
+                case((estimated, _json_int(CostEvent.cost, "output")), else_=0)
+            ).label("e_output"),
+            _sum_int(CostEvent.cost_estimated_nano).label("c_estimated"),
             _sum_int(CostEvent.rounds).label("rounds"),
             func.count(distinct(CostEvent.message_id)).label("turns"),
         ).where(*conditions)
@@ -293,6 +316,14 @@ class CostEventRepository:
                 "cached": int(row.c_cached),
                 "output": int(row.c_output),
                 "total": int(row.c_total),
+                "pricing_source": "curated",
+            },
+            "estimated_cost": {
+                "input": int(row.e_input),
+                "cached": int(row.e_cached),
+                "output": int(row.e_output),
+                "total": int(row.c_estimated),
+                "pricing_source": "estimated",
             },
             "rounds": int(row.rounds),
             "turns": int(row.turns),
@@ -326,6 +357,7 @@ class CostEventRepository:
         """
         bucket = func.coalesce(CostEvent.persona, CostEvent.role)
         total = _sum_int(CostEvent.cost_total_nano)
+        estimated = _sum_int(CostEvent.cost_estimated_nano)
         conditions: list[ColumnElement] = [CostEvent.created_at >= since]
         if user_id is not None:
             conditions.append(CostEvent.user_id == user_id)
@@ -333,16 +365,22 @@ class CostEventRepository:
             select(
                 bucket.label("role"),
                 total.label("c_total"),
+                estimated.label("c_estimated"),
                 func.count(distinct(CostEvent.message_id)).label("turns"),
             )
             .where(*conditions)
             .group_by(bucket)
-            .having(total > 0)
-            .order_by(total.desc())
+            .having((total > 0) | (estimated > 0))
+            .order_by(total.desc(), estimated.desc())
         )
         rows = (await self._session.execute(stmt)).all()
         return [
-            {"role": row.role, "cost_total": int(row.c_total), "turns": int(row.turns)}
+            {
+                "role": row.role,
+                "cost_total": int(row.c_total),
+                "cost_estimated_total": int(row.c_estimated),
+                "turns": int(row.turns),
+            }
             for row in rows
         ]
 

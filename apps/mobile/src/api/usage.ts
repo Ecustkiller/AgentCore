@@ -13,19 +13,31 @@ type Schemas = components["schemas"];
 type TurnCost = Schemas["TurnCost"];
 
 /**
- * A turn's persisted cost total in integer nano-USD (0 when unmetered / unknown / not
- * owned — the backend never leaks existence). Returns 0 rather than throwing on a non-2xx
- * so a missing payroll just leaves the row without a cost caption.
+ * A turn's persisted display money in integer nano-USD. Prefers ledger `cost.total`;
+ * falls back to `estimated_cost.total` for BYOK. Returns null when neither is >0.
  */
-export async function getMessageCostTotal(messageId: string): Promise<number> {
+export async function getMessageCostDisplay(
+  messageId: string,
+): Promise<{ nano: number; estimated: boolean } | null> {
   try {
     const res = await apiFetch(`/v1/messages/${messageId}/cost`);
-    if (!res.ok) return 0;
+    if (!res.ok) return null;
     const data = (await res.json()) as TurnCost;
-    return data.cost?.total ?? 0;
+    if ((data.cost?.total ?? 0) > 0) {
+      return { nano: data.cost.total, estimated: false };
+    }
+    const est = data.estimated_cost?.total ?? 0;
+    if (est > 0) return { nano: est, estimated: true };
+    return null;
   } catch {
-    return 0;
+    return null;
   }
+}
+
+/** @deprecated Prefer {@link getMessageCostDisplay}; kept for callers that only need billed total. */
+export async function getMessageCostTotal(messageId: string): Promise<number> {
+  const d = await getMessageCostDisplay(messageId);
+  return d && !d.estimated ? d.nano : 0;
 }
 
 // --- Account dashboard (设置·用量) ---

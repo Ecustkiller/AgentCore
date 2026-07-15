@@ -48,7 +48,7 @@ class KickoffSummary:
 
 def worker_rows(plan: RunPlan) -> list[dict[str, Any]]:
     """Delegate card rows: role / task excerpt / depends_on / debate flag."""
-    from agentcore.tools.builtin.delegate.schema import PLAN_REVIEW_SUMMARY_CHARS
+    from agentcore.runtime.runs.constants import PLAN_REVIEW_SUMMARY_CHARS
 
     limit = PLAN_REVIEW_SUMMARY_CHARS
     rows: list[dict[str, Any]] = []

@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
 
-from agentcore.api.cost_view import cost_breakdown, usage_breakdown
+from agentcore.api.cost_view import cost_breakdown, estimated_cost_breakdown, usage_breakdown
 from agentcore.api.dependencies import AdminUser, get_cost_event_repo
 from agentcore.api.routes.admin._shared import _TREND_DAYS
 from agentcore.api.schemas import (
@@ -62,11 +62,13 @@ async def usage_summary(
         today=UsageWindow(
             usage=usage_breakdown(today["usage"]),
             cost=cost_breakdown(today["cost"]),
+            estimated_cost=estimated_cost_breakdown(cost=today.get("estimated_cost") or {}),
             requests=today["turns"],
         ),
         month=UsageWindow(
             usage=usage_breakdown(month["usage"]),
             cost=cost_breakdown(month["cost"]),
+            estimated_cost=estimated_cost_breakdown(cost=month.get("estimated_cost") or {}),
             requests=month["turns"],
         ),
         month_by_user=[
@@ -83,6 +85,7 @@ async def usage_summary(
             RoleCostLine(
                 role=row["role"],
                 cost_total=int(row["cost_total"]),
+                cost_estimated_total=int(row.get("cost_estimated_total", 0) or 0),
                 turns=int(row["turns"]),
             )
             for row in month_by_role

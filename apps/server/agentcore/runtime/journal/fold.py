@@ -8,7 +8,7 @@ from agentcore.runtime.events import _JOURNAL_SURFACE_TYPES, EventType, FinishRe
 from agentcore.runtime.facts import EXECUTION_ONLY_KINDS, FactKind
 from agentcore.runtime.runs.types import RunKind
 
-from .entries import _PROCESS_PREFIX, KIND_TURN_END
+from .entries import KIND_TURN_END, _PROCESS_PREFIX, _RUN_PROCESS_PREFIX
 
 if TYPE_CHECKING:
     from agentcore.llm.provider.protocol import LLMMessage
@@ -103,6 +103,7 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
         return None
     events: list[dict[str, Any]] = []
     process: list[dict[str, Any]] = []
+    run_processes: dict[str, list[dict[str, Any]]] = {}
     finish_reason: str | None = None
     # The 报错回合 outcome (code + message) carried on turn_end, projected back so the
     # bubble rebuilds its inline error card on reload (Tier 2 a). None for a clean turn.
@@ -147,6 +148,14 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
             continue
         elif kind.startswith(_PROCESS_PREFIX):
             process.append(payload)
+        elif kind.startswith(_RUN_PROCESS_PREFIX):
+            # Per-run worker timeline (对称 CEO process_ lane). Payload carries run_id
+            # plus the ProcessStep fields; strip run_id so the restored step matches
+            # the live wire shape (ProcessStep has no run_id).
+            rid = payload.get("run_id")
+            if rid:
+                step = {k: v for k, v in payload.items() if k != "run_id"}
+                run_processes.setdefault(rid, []).append(step)
         else:
             # Remember each agent (worker / revision) run's agent_id so the synthetic
             # delta block can be attributed (the captain run_started is kind=captain →
@@ -191,6 +200,7 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
     if (
         not events
         and not process
+        and not run_processes
         and not captain_context
         and not turn_error
         and not turn_warning
@@ -200,6 +210,8 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
     runs: dict[str, Any] = {"events": events, "finish_reason": finish_reason}
     if process:
         runs["process"] = process
+    if run_processes:
+        runs["run_processes"] = run_processes
     if captain_context is not None:
         runs["captain_context"] = captain_context
     if turn_error is not None:

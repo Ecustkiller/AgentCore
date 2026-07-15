@@ -32,6 +32,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
+from agentcore.core.log_context import log_context
 from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, LLMRequest, TokenUsage
 from agentcore.runtime.debate.moderator_agenda import (
     _CROSS_EXAM_SYSTEM,
@@ -90,11 +91,21 @@ class Moderator:
     """
 
     def __init__(
-        self, *, provider: LLMProvider, model: str, scenario_prefix: str = "debate"
+        self,
+        *,
+        provider: LLMProvider,
+        model: str,
+        scenario_prefix: str = "debate",
+        run_id: str | None = None,
+        parent_run_id: str | None = None,
     ) -> None:
         self._llm = provider
         self._model = model
         self._scenario = scenario_prefix
+        # 与辩手 executor 同辙：绑定 run 上下文后，unary complete → attribution 头透传到
+        # inference proxy，成本明细才能挂到主持人 run_id（否则 proxy 侧 mint 随机 UUID）。
+        self._run_id = run_id
+        self._parent_run_id = parent_run_id
         # 主持人自身 LLM 调用（议题 / 裁判 / 小结 / 简报）的累计用量与轮数，供 DebateTool
         # 折算成主持人节点的一条 ledger 行（与辩手 run 一样计入回合总账）。
         self._usage = TokenUsage()
@@ -162,7 +173,11 @@ class Moderator:
         # 交互式「加角度」：用户在上一轮边界给的下一轮焦点覆写（空=主持人自动定焦点）。
         focus_override = ""
         # 交互式「追问」：用户在上一轮边界注入、待【本轮】辩手正面回应的问题（消费后清空）。
+        # 开赛嘱咐（config.kickoff_ask）预注入为首轮全场定向插话——与中途追问同管道。
         pending_interjections: list[UserInterjection] = []
+        kickoff_ask = (config.kickoff_ask or "").strip()
+        if kickoff_ask:
+            pending_interjections = [UserInterjection(ask=kickoff_ask, target_key="")]
         for round_no in range(1, config.policy.max_rounds + 1):
             # 焦点优先级：掌舵覆写 > 上轮 assess 兼产的 next_focus > _frame（首轮 / 缺失兜底）。
             if focus_override:
@@ -179,9 +194,10 @@ class Moderator:
             focus_override = ""
             interjections = pending_interjections
             pending_interjections = []
-            # 焦点既定、发言之前先报本轮开场（前端据此亮出焦点头，再流式各方发言）。
+            # 焦点既定、发言之前先报本轮开场（前端据此亮出焦点头 + 首轮开场白，再流式各方发言）。
+            # opening 仅首轮上车（后续轮 ""）；前端 sticky 取第一个非空。
             if on_round_start is not None:
-                await on_round_start(round_no, focus)
+                await on_round_start(round_no, focus, opening if round_no == 1 else "")
             turns = list(
                 await run_round(
                     round_no=round_no,
@@ -216,11 +232,27 @@ class Moderator:
                 stop_reason = STOP_ALL_FAILED
                 break
 
+            # 缺席轮一等语义：部分失败续赛 → 失败方显式标缺席；跳过对其质询与对抗记分。
+            turns = [replace(t, absent=True) if not t.ok else t for t in turns]
+            absent_keys = {t.side_key for t in turns if t.absent}
+            present_turns = [t for t in turns if t.ok]
+
             # 质询 beat（质询回合 P1，opt-in：注入 runner + 认真辩透 + 对抗形态才开）：主持人据本轮
-            # 立论生成定向各方的必答质询，被质询方 continue_run 正面作答，喂进下方裁判记分。未开启恒空。
+            # 立论生成定向【出席各方】的必答质询，被质询方 continue_run 正面作答，喂进下方裁判记分。
+            # 缺席方无立论 → 不质询。未开启恒空。
             cross_exam: list[CrossExamExchange] = []
-            if run_cross_exam is not None and self._cross_exam_enabled(config):
-                questions = await self._cross_exam_questions(config, focus, turns)
+            if (
+                run_cross_exam is not None
+                and self._cross_exam_enabled(config)
+                and present_turns
+            ):
+                questions = await self._cross_exam_questions(
+                    config, focus, present_turns
+                )
+                # Belt: drop any hallucinated keys targeting absent sides.
+                questions = {
+                    k: qs for k, qs in questions.items() if k not in absent_keys
+                }
                 if questions:
                     cross_exam = list(
                         await run_cross_exam(
@@ -237,6 +269,14 @@ class Moderator:
             verdict, summary = await self._judge_and_summarize(
                 config, focus, turns, rounds, cross_exam=cross_exam
             )
+            if absent_keys:
+                # 不做对抗性记分：缺席方不入分；有缺席则本轮清空 scores（无公平对照）。
+                verdict.scores = {}
+                verdict.clashes = [
+                    c
+                    for c in verdict.clashes
+                    if c.from_key not in absent_keys and c.to_key not in absent_keys
+                ]
             rr = RoundResult(
                 round_no,
                 focus,
@@ -373,8 +413,23 @@ class Moderator:
             stream=False,
             scenario=f"{self._scenario}.{step}",
         )
-        response = await self._llm.complete(request)
-        async with self._usage_lock:
-            self._usage = self._usage + (response.usage or TokenUsage())
-            self._llm_rounds += 1
-        return _parse_json_object(response.content or "")
+
+        async def _call() -> dict[str, Any]:
+            response = await self._llm.complete(request)
+            async with self._usage_lock:
+                self._usage = self._usage + (response.usage or TokenUsage())
+                self._llm_rounds += 1
+            return _parse_json_object(response.content or "")
+
+        if not self._run_id:
+            return await _call()
+        # cost_role=member + persona=主持人：与 account_moderator → member_run_cost 落账口径对齐，
+        # 便于 proxy cost_calls 与回合 run 聚合按同一 run_id 对上（不改金额，只修血缘）。
+        with log_context(
+            run_id=self._run_id,
+            agent_id=self._run_id,
+            cost_role="member",
+            persona="主持人",
+            parent_run_id=self._parent_run_id,
+        ):
+            return await _call()

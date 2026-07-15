@@ -8,12 +8,13 @@ local (desktop) workspace.
 """
 
 import time
-from posixpath import splitext
+from posixpath import basename, splitext
 from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
+from agentcore.workspace._paths import is_ai_noise_file_name
 from agentcore.workspace.protocol import (
     AlreadyExists,
     AmbiguousMatch,
@@ -490,7 +491,13 @@ class FileListTool:
                     directory, pattern=pattern, max_depth=max_depth
                 )
             else:
-                entries = await context.backend.list(directory, pattern)
+                # ``list`` is shared with user UI (system-noise only); strip AI
+                # noise here so media/archives don't pollute the agent view.
+                entries = [
+                    e
+                    for e in await context.backend.list(directory, pattern)
+                    if e.is_dir or not is_ai_noise_file_name(basename(e.path))
+                ]
         except OutsideWorkspace:
             return _error(f"路径 '{directory}' 超出了工作区范围", start)
         except NotADirectory:

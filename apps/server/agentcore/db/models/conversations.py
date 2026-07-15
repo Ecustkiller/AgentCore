@@ -4,6 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Index,
     Integer,
@@ -25,6 +26,12 @@ from ._helpers import _new_uuid
 
 class Conversation(Base):
     __tablename__ = "conversations"
+    __table_args__ = (
+        CheckConstraint(
+            "permission_preset in ('observe', 'workspace', 'full_trust')",
+            name="ck_conversations_permission_preset",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
@@ -42,22 +49,25 @@ class Conversation(Base):
     pinned: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     archived: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     mode: Mapped[str] = mapped_column(String(20), default="chat", server_default=text("'chat'"))
-    # User folder this conversation lives in; NULL = ungrouped. App-level FK
-    # (no DB constraint, per repo convention); cleared back to NULL when the
-    # folder is deleted so the conversation survives as ungrouped.
+    # Session permission mode (会话级权限模式 · 安全权限与治理): observe | workspace
+    # (default) | full_trust. Runtime gates read THIS column — not users.autonomy_policy
+    # (which only seeds new conversations). Existing rows backfill to workspace.
+    permission_preset: Mapped[str] = mapped_column(
+        String(20), default="workspace", server_default=text("'workspace'")
+    )
+    # Project this conversation was born into; NULL = 裸聊 (ungrouped). App-level FK
+    # (no DB constraint, per repo convention). Soft-deleting a project archives members
+    # in place (keeps ``folder_id``); permanent wipe hard-deletes member rows.
     folder_id: Mapped[str | None] = mapped_column(PG_UUID(as_uuid=False), index=True, nullable=True)
-    # Desktop's intended local container root (工作区对称化 D1a), captured at creation
-    # from the desktop client (NULL = cloud intent: web / mobile /「云端临时对话」). When
-    # a 裸聊 first produces a file — by an Agent turn OR a panel write — it is lazily
-    # promoted into a *local* workspace under this container root instead of a cloud
-    # folder, so BOTH promotion paths agree on locality regardless of which writes first
-    # (previously whichever wrote first — turn vs panel — decided cloud-vs-local). Read
-    # by every promotion path; ignored once the conversation already has a folder.
+    # Desktop's intended local container root for a 裸聊, captured at creation
+    # (NULL = cloud intent: web / mobile /「云端临时对话」). Used when resolving
+    # effective local binding for ungrouped chats; ignored once ``folder_id`` is set
+    # (project chats inherit the project's immutable binding). Auto-promote is vetoed —
+    # locality is birth-time / explicit bind only (双模式工作区).
     local_container_root_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    # Conversation-level scratch workspace binding (Folder 重构: 纯分组 + 对话级
-    # 文件空间). The desktop FS root handle for THIS conversation's local scratch
-    # space. NULL = cloud. Replaces the old folder-level binding — each conversation
-    # now owns its own file space independently of folder grouping.
+    # 裸聊 scratch workspace binding (per-conversation ``conv:<id>``). The desktop FS
+    # root handle for THIS conversation's local scratch. NULL = cloud. Project chats
+    # inherit binding from the Folder row instead — this column stays NULL for them.
     local_root_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # Sub-path within ``local_root_id`` for the conversation's scratch workspace.
     # "" = the root itself (an explicitly-bound directory). A non-empty segment scopes

@@ -86,6 +86,10 @@ class Deliverable:
     must_contain: list[str] = field(default_factory=list)
     min_length: int = 0
     max_length: int = 0
+    # Structured deliverable form: ``prose`` = text body only (no write tools);
+    # ``files`` = must land via file_write (implies ``requires_files``). Omit =
+    # worker follows the legacy two-way identity guidance and decides itself.
+    form: Literal["prose", "files"] | None = None
     # Deliverable-landed postcondition: when True, the run must have called a
     # file-writing tool (file_write / str_replace / file_move) at least once, or the
     # contract gate fails it and auto-reworks. Turns the soft「文件交付物必须落盘、别
@@ -159,6 +163,12 @@ class RunSpec:
     role: str = ""
     objective: str = ""
     system_prompt_supplement: str | None = None
+    # 辩手两阶段发言（辩论编排设计 §4-2.5）：True → ReAct 检索产证据笔记（不进卡片正文），
+    # 再以 draft_system + draft_brief + 笔记做无工具干净成稿（流式进 run_output_delta）。
+    # 普通 worker 默认 False；执行器读取此执行策略字段（非 display-only 的 stance/group）。
+    research_then_draft: bool = False
+    draft_brief: str = ""
+    draft_system: str = ""
     # Allowed-tools restriction for this worker, or ``None`` = no restriction (the
     # worker is offered ALL team tools). ``None`` is the fail-safe default: a task
     # that omits ``tools`` must not be silently stranded tool-less. The engine reads
@@ -300,9 +310,9 @@ class RunState:
     # deterministic failure — a non-retryable upstream error (prompt 超长 / 400 客户端
     # 拒绝 / 401 鉴权 / 402 余额, all ``AgentCoreError.retryable=False``) — sets this
     # False so the WaveScheduler skips its ``on_failure="retry"`` re-run: re-running an
-    # identical over-long prompt just re-fails and burns tokens. True (the default) for a
-    # transient failure (5xx / timeout / rate-limit), for a contract-quality miss (worth a
-    # fresh attempt), and for any COMPLETED run — so ordinary retry behaviour is unchanged.
+    # identical over-long prompt just re-fails and burns tokens. Contract hard-fails
+    # (retries already exhausted inside the executor) also set False. True (the default)
+    # for a transient failure (5xx / timeout / rate-limit) and for any COMPLETED run.
     error_retryable: bool = True
     content: str = ""
     # The run's thinking text (the last attempt's, parallel to ``content``). Carried

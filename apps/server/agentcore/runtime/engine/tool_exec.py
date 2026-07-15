@@ -84,19 +84,106 @@ async def execute_tools(
                 [],
             )
 
-        if approval_gate is not None and tool_call_requires_approval(
-            name, tool.schema.approval, args
-        ):
+        # P3 safety circuit breaker — last-line heuristic (not a security boundary).
+        # full_trust / kickoff / turn grants never override FORCE_APPROVAL or DENY.
+        from agentcore.runtime.safety_breaker import BreakerVerdict, evaluate_tool_call
+
+        breaker = evaluate_tool_call(name, args)
+        if breaker is not None and breaker.verdict is BreakerVerdict.DENY:
+            from agentcore.runtime.audit.hooks import on_circuit_breaker
+
+            on_circuit_breaker(
+                tool_name=name,
+                tool_call_id=tc.id,
+                rule_id=breaker.rule_id,
+                verdict=breaker.verdict.value,
+                reason=breaker.reason,
+                run_id=run_id or None,
+            )
+            denial = (
+                f"工具 '{name}' 被安全熔断拒绝：{breaker.reason}"
+                "请改用其他方案，不要原样重试该路径。"
+            )
+            sink.emit(tool_use_end(tc.id, name, success=False, output=denial, run_id=run_id))
+            logger.info(
+                "tool.execute_end",
+                tool=name,
+                status="circuit_breaker_deny",
+                rule_id=breaker.rule_id,
+                duration_ms=0,
+            )
+            return (
+                LLMMessage(role="tool", content=denial, tool_call_id=tc.id),
+                None,
+                ToolAttempt(fingerprint, name, success=False, policy_failure=True),
+                [],
+            )
+
+        force_breaker = (
+            breaker is not None and breaker.verdict is BreakerVerdict.FORCE_APPROVAL
+        )
+        if force_breaker:
+            from agentcore.runtime.audit.hooks import on_circuit_breaker
+
+            on_circuit_breaker(
+                tool_name=name,
+                tool_call_id=tc.id,
+                rule_id=breaker.rule_id,
+                verdict=breaker.verdict.value,
+                reason=breaker.reason,
+                run_id=run_id or None,
+            )
+            # Surface a preview-only hint on the approval card (arguments are already
+            # truncated for SSE; tools execute the original ``args`` unchanged).
+            args_for_gate = {
+                **args,
+                "circuit_breaker_hint": breaker.reason,
+            }
+        else:
+            args_for_gate = args
+
+        needs_approval = force_breaker or (
+            approval_gate is not None
+            and tool_call_requires_approval(name, tool.schema.approval, args)
+        )
+        if needs_approval:
             from agentcore.runtime.sandbox_approval import execution_tool_auto_passes
 
-            if execution_tool_auto_passes(context.backend, name):
+            if approval_gate is None:
+                # Forced destructive shape but no human gate available — fail closed.
+                denial = (
+                    f"工具 '{name}' 触发安全熔断且当前路径无法人工确认，已拒绝执行。"
+                    f"{breaker.reason if breaker else ''}"
+                    "请改用其他方案。"
+                )
+                sink.emit(
+                    tool_use_end(tc.id, name, success=False, output=denial, run_id=run_id)
+                )
+                logger.info(
+                    "tool.execute_end",
+                    tool=name,
+                    status="circuit_breaker_no_gate",
+                    duration_ms=0,
+                )
+                return (
+                    LLMMessage(role="tool", content=denial, tool_call_id=tc.id),
+                    None,
+                    ToolAttempt(fingerprint, name, success=False, policy_failure=True),
+                    [],
+                )
+
+            auto_pass = (not force_breaker) and execution_tool_auto_passes(
+                context.backend, name, autonomy_policy=approval_gate.autonomy_policy
+            )
+            if auto_pass:
                 logger.info("approval.sandbox_auto_pass", tool=name)
             else:
                 decision = await approval_gate.authorize(
                     tool_name=name,
                     tool_call_id=tc.id,
-                    arguments=args,
+                    arguments=args_for_gate,
                     execution_id=context.execution_id,
+                    force=force_breaker,
                 )
                 if decision is ApprovalDecision.DENY:
                     # Denial is a governance signal (user refuse / timeout), not an execution
@@ -222,7 +309,13 @@ async def execute_tools(
         return (
             message,
             (result if result.is_terminal else None),
-            ToolAttempt(fingerprint, name, success=result.success, policy_failure=policy_failure),
+            ToolAttempt(
+                fingerprint,
+                name,
+                success=result.success,
+                policy_failure=policy_failure,
+                meta=dict(result.metadata) if result.metadata else {},
+            ),
             citations,
         )
 

@@ -203,9 +203,9 @@ async def test_grep_wait_for_timeout_fires_while_scan_runs(tmp_path: Path, monke
     ws = _ws(tmp_path)
     real = ServerWorkspace._grep_sync
 
-    def slow(self: ServerWorkspace, base: Path, query: GrepQuery):
+    def slow(self: ServerWorkspace, base: Path, query: GrepQuery, logical_dir: str):
         time.sleep(1.0)
-        return real(self, base, query)
+        return real(self, base, query, logical_dir)
 
     monkeypatch.setattr(ServerWorkspace, "_grep_sync", slow)
 

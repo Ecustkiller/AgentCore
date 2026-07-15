@@ -12,12 +12,14 @@ def test_normalize_options_preserves_bind_local_folder_action():
             {"label": "绑定本地文件夹", "action": "bind_local_folder", "recommended": True},
             {"label": "继续用云端", "detail": "无法打开本机应用"},
             {"label": "坏动作", "action": "hack_the_planet"},
+            {"label": "授权只读目录", "action": "grant_readonly_folder"},
         ]
     )
     assert out[0]["action"] == "bind_local_folder"
     assert out[0]["recommended"] is True
     assert "action" not in out[1]
     assert "action" not in out[2]  # unknown actions drop
+    assert out[3]["action"] == "grant_readonly_folder"
 
 
 def test_normalize_questions_passthrough_to_checkpoint_shape():
@@ -56,5 +58,6 @@ def test_ask_user_schema_advertises_action_only_when_flagged():
     props2 = advertised.schema.parameters["properties"]["questions"]["items"]["properties"][
         "options"
     ]["items"]["properties"]
-    assert props2["action"]["enum"] == ["bind_local_folder"]
+    assert props2["action"]["enum"] == ["bind_local_folder", "grant_readonly_folder"]
     assert "bind_local_folder" in advertised.schema.description
+    assert "grant_readonly_folder" in advertised.schema.description

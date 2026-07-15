@@ -20,7 +20,7 @@ import { create } from "zustand";
  * are session-only by design — their payloads are full file contents (up to 256KB
  * each, quota hazard) that go stale on disk anyway; re-attaching is cheap.
  *
- * 回填 channel: a non-blocking ask card ({@link NonBlockingAskCard}) or a 下一步推荐
+ * 回填 channel: follow-up chips / 下一步推荐 (non-blocking ask no longer writes chips)
  * chip ({@link FollowupChips}) drops its pick into the ACTIVE conversation's draft via
  * {@link fill}. `append` (the default) adds the text as a new line after any existing
  * draft so a user can stack answers to several questions; `replace` overwrites.

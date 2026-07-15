@@ -768,3 +768,275 @@
 .npc-nameplate.nameplate--selected {
     background-color: rgba(40, 100, 200, 0.88);
 }
+.show-hud {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    flex-grow: 1;
+}
+
+.show-hud.hidden,
+.show-face.hidden {
+    display: none;
+}
+
+.show-face {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    padding: 28px 36px;
+}
+
+.show-face-landing,
+.show-face-quiz,
+.show-face-episode-end,
+.show-face-season-end {
+    background-color: rgba(8, 12, 18, 0.82);
+    align-items: center;
+    justify-content: center;
+}
+
+.landing-season {
+    font-size: 14px;
+    color: rgb(180, 190, 200);
+    margin-bottom: 8px;
+}
+
+.landing-title {
+    font-size: 32px;
+    color: rgb(245, 242, 235);
+    -unity-font-style: bold;
+    margin-bottom: 12px;
+}
+
+.landing-tagline {
+    font-size: 15px;
+    color: rgb(200, 205, 210);
+    white-space: normal;
+    max-width: 520px;
+    -unity-text-align: middle-center;
+    margin-bottom: 28px;
+}
+
+.show-btn {
+    min-height: 36px;
+    padding: 8px 18px;
+    margin: 6px;
+    background-color: rgb(42, 52, 64);
+    color: rgb(235, 238, 242);
+    border-width: 0;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.show-btn.primary {
+    background-color: rgb(196, 92, 78);
+}
+
+.show-btn.ghost {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.show-btn.tiny {
+    min-height: 28px;
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
+.show-face-playback {
+    justify-content: space-between;
+}
+
+.playback-top {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.playback-segment {
+    font-size: 16px;
+    color: rgb(245, 242, 235);
+    background-color: rgba(0, 0, 0, 0.35);
+    padding: 6px 12px;
+    border-radius: 4px;
+}
+
+.playback-rule {
+    font-size: 12px;
+    color: rgb(210, 215, 220);
+    background-color: rgba(0, 0, 0, 0.35);
+    padding: 6px 12px;
+    border-radius: 4px;
+    max-width: 420px;
+    white-space: normal;
+    -unity-text-align: middle-right;
+}
+
+.playback-caption {
+    align-self: center;
+    max-width: 640px;
+    font-size: 18px;
+    color: rgb(250, 248, 242);
+    background-color: rgba(0, 0, 0, 0.45);
+    padding: 10px 18px;
+    border-radius: 6px;
+    white-space: normal;
+    -unity-text-align: middle-center;
+    margin-top: 40px;
+}
+
+.playback-bottom {
+    background-color: rgba(6, 10, 16, 0.55);
+    padding: 12px 16px;
+    border-radius: 8px;
+}
+
+.monologue-row {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.monologue-who {
+    font-size: 13px;
+    color: rgb(255, 196, 140);
+    margin-right: 10px;
+    min-width: 64px;
+}
+
+.monologue-text {
+    flex-grow: 1;
+    font-size: 14px;
+    color: rgb(230, 232, 236);
+    white-space: normal;
+}
+
+.relation-bar {
+    font-size: 12px;
+    color: rgb(180, 190, 200);
+    margin-bottom: 10px;
+    white-space: normal;
+}
+
+.playback-controls {
+    flex-direction: row;
+    align-items: center;
+}
+
+.quiz-focus {
+    font-size: 14px;
+    color: rgb(200, 205, 210);
+    margin-bottom: 8px;
+}
+
+.quiz-question {
+    font-size: 28px;
+    color: rgb(245, 242, 235);
+    -unity-font-style: bold;
+    margin-bottom: 12px;
+    white-space: normal;
+    -unity-text-align: middle-center;
+    max-width: 560px;
+}
+
+.quiz-hint {
+    font-size: 14px;
+    color: rgb(170, 180, 190);
+    margin-bottom: 24px;
+    white-space: normal;
+    max-width: 480px;
+    -unity-text-align: middle-center;
+}
+
+.quiz-options {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 640px;
+}
+
+.quiz-option {
+    min-width: 140px;
+    min-height: 48px;
+    margin: 8px;
+    font-size: 16px;
+    background-color: rgb(54, 68, 86);
+    color: rgb(245, 242, 235);
+    border-radius: 8px;
+    border-width: 0;
+}
+
+.end-title {
+    font-size: 28px;
+    color: rgb(245, 242, 235);
+    margin-bottom: 16px;
+}
+
+.end-quiz-result {
+    font-size: 16px;
+    color: rgb(220, 230, 200);
+    margin-bottom: 10px;
+}
+
+.end-monologue {
+    font-size: 14px;
+    color: rgb(200, 205, 210);
+    white-space: normal;
+    max-width: 520px;
+    -unity-text-align: middle-center;
+    margin-bottom: 20px;
+}
+
+.end-highlights-label {
+    font-size: 13px;
+    color: rgb(180, 190, 200);
+    margin-bottom: 8px;
+}
+
+.end-highlights {
+    flex-direction: column;
+    align-items: stretch;
+    max-width: 520px;
+    margin-bottom: 16px;
+}
+
+.highlight-btn {
+    margin: 4px 0;
+    padding: 10px 14px;
+    background-color: rgba(255, 255, 255, 0.08);
+    color: rgb(235, 238, 242);
+    border-width: 0;
+    border-radius: 6px;
+    white-space: normal;
+    -unity-text-align: middle-left;
+}
+
+.end-teaser {
+    font-size: 13px;
+    color: rgb(170, 180, 190);
+    white-space: normal;
+    max-width: 480px;
+    -unity-text-align: middle-center;
+    margin-bottom: 16px;
+}
+
+.end-actions {
+    flex-direction: row;
+}
+
+.season-end-title {
+    font-size: 28px;
+    color: rgb(245, 242, 235);
+    margin-bottom: 12px;
+}
+
+.season-end-body {
+    font-size: 15px;
+    color: rgb(190, 200, 210);
+    margin-bottom: 24px;
+}
+

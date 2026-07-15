@@ -145,6 +145,36 @@ async def test_set_key_key_only_uses_defaults(client, make_invite, byok):
     assert body["default_model"] == "deepseek-v4-flash"
 
 
+async def test_llm_key_price_card_and_background_model_roundtrip(client, make_invite, byok):
+    code = await make_invite("INV-KEY-PRICE")
+    await register_and_login(client, code, "keyuser-price")
+
+    r = await client.put(
+        "/v1/users/me/llm-key",
+        json={
+            "api_key": "sk-price-card-abcd",
+            "base_url": "https://api.openai.com/v1",
+            "default_model": "gpt-4o",
+            "price_cache_hit": "0.5",
+            "price_cache_miss": "1.0",
+            "price_output": "2.0",
+            "background_model": "gpt-4o-mini",
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["price_cache_hit"] == "0.5"
+    assert body["price_cache_miss"] == "1.0"
+    assert body["price_output"] == "2.0"
+    assert body["background_model"] == "gpt-4o-mini"
+
+    again = (await client.get("/v1/users/me/llm-key")).json()
+    assert again["price_cache_hit"] == "0.5"
+    assert again["price_cache_miss"] == "1.0"
+    assert again["price_output"] == "2.0"
+    assert again["background_model"] == "gpt-4o-mini"
+
+
 async def test_set_key_refused_without_master_key(client, make_invite, monkeypatch):
     monkeypatch.setattr(settings, "billing_mode", "byok")
     monkeypatch.setattr(settings, "encryption_key", "")  # no master key → can't store

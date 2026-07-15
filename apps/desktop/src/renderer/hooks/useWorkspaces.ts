@@ -2,6 +2,7 @@ import { getConversations } from "@/hooks/useConversations";
 import { getFolders } from "@/hooks/useFolders";
 import { queryClient } from "@/lib/queryClient";
 import { workspaceKeys } from "@/lib/queryKeys";
+import { bareConversationScratchSubpath } from "@/services/bareScratchPath";
 import { type WorkspaceInfo, listWorkspaces } from "@/services/workspaces";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
@@ -58,7 +59,23 @@ export function useConversationWorkspace(
       };
     }
     const wsId = `conv:${conversationId}`;
-    return workspaces?.find((w) => w.wsId === wsId) ?? null;
+    const listed = workspaces?.find((w) => w.wsId === wsId) ?? null;
+    if (!listed) return null;
+    // 服务端尚未写回隔离 subpath、或列表仍空串时，容器根裸聊补齐契约路径。
+    const sub = (listed.subpath ?? "").replace(/^\/+|\/+$/g, "");
+    if (
+      !sub &&
+      listed.location === "local" &&
+      listed.rootId &&
+      conv?.localContainerRootId &&
+      listed.rootId === conv.localContainerRootId
+    ) {
+      return {
+        ...listed,
+        subpath: bareConversationScratchSubpath(conversationId),
+      };
+    }
+    return listed;
   }, [conversationId, workspaces]);
 }
 

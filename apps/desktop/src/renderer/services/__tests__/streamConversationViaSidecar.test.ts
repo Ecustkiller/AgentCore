@@ -127,7 +127,6 @@ beforeEach(() => {
       resume: resumeMock,
       startTurn: vi.fn(),
       respond: vi.fn(),
-      listPaused: vi.fn(),
     },
     outboxApi: {
       flushTurn: flushTurnMock,
@@ -225,16 +224,16 @@ describe("resumeConversationViaSidecar", () => {
     });
     seedOriginalUserBubble("c1", "u-orig", "原始问题");
     // The sidecar reports the model it actually ran on — here the local platform model.
-    resumeMock.mockResolvedValue({ ...turnResult(), model: "gpt-5.5" });
+    resumeMock.mockResolvedValue({ ...turnResult(), model: "gpt-4o" });
 
     await resumeConversationViaSidecar(baseRequest);
 
-    // The badge store now knows this conversation's last turn actually ran on gpt-5.5.
-    expect(useTurnModelStore.getState().byConversation.c1).toBe("gpt-5.5");
+    // The badge store now knows this conversation's last turn actually ran on gpt-4o.
+    expect(useTurnModelStore.getState().byConversation.c1).toBe("gpt-4o");
     // Non-blocking heads-up was raised, naming the fallback model.
     expect(notifyWarningMock).toHaveBeenCalledTimes(1);
     expect(notifyWarningMock.mock.calls[0]?.[1]?.description).toContain(
-      "gpt-5.5",
+      "gpt-4o",
     );
   });
 
@@ -324,6 +323,19 @@ describe("resumeConversationViaSidecar", () => {
     expect((err as StreamError).serverMessage).toBe(
       "找不到 Python，无法启动本地引擎",
     );
+  });
+
+  it("does not invoke when signal is already aborted (H1 pre-aborted gate)", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const err = await resumeConversationViaSidecar({
+      ...baseRequest,
+      signal: ac.signal,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(DOMException);
+    expect((err as DOMException).name).toBe("AbortError");
+    expect(resumeMock).not.toHaveBeenCalled();
+    expect(cancelMock).not.toHaveBeenCalled();
   });
 
   it("surfaces a user stop as AbortError and cancels the engine", async () => {

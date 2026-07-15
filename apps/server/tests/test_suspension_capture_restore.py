@@ -112,6 +112,82 @@ async def test_persist_suspension_capture_skips_without_transcript() -> None:
 
 
 @pytest.mark.asyncio
+async def test_persist_suspension_capture_raises_on_saver_failure() -> None:
+    from agentcore.runtime.suspension_capture import SuspensionPersistError
+
+    required = SimpleNamespace(
+        type=SimpleNamespace(value="checkpoint_required"),
+        payload={},
+        timestamp=None,
+    )
+    transcript = [LLMMessage(role="user", content="hi")]
+    token = captain_transcript.set(transcript)
+
+    async def boom(_frame: AskUserSuspension) -> None:
+        raise RuntimeError("disk full")
+
+    try:
+        with pytest.raises(SuspensionPersistError, match="disk full"):
+            await persist_suspension_capture(
+                checkpoint_id="cp-1",
+                required_event=required,
+                build_frame=lambda _c: _ask_user_suspension(),
+                saver=boom,
+            )
+    finally:
+        captain_transcript.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_claim_paused_turn_restores_frame_on_hydrate_failure() -> None:
+    """Claim succeeded but hydrate fails ⇒ restore frame + raise (not silent None/404)."""
+    from agentcore.runtime import suspension_persistence as persist_mod
+
+    frame = {
+        "kind": "ask_user",
+        "message_id": "msg-1",
+        "conversation_id": "conv-1",
+        "user_id": "user-1",
+        "captain_run_id": "run-1",
+        "checkpoint_id": "cp-1",
+        "tool_call_id": "tc-1",
+        "base_system_prompt": "sys",
+        "user_message": "hello",
+        "question": "q",
+    }
+    row = SimpleNamespace(
+        message_id="msg-1",
+        conversation_id="conv-1",
+        user_id="user-1",
+        frame=frame,
+        trace_id="trace-1",
+    )
+
+    with (
+        patch.object(persist_mod, "async_session_factory") as factory,
+        patch.object(persist_mod, "PausedTurnRepository") as repo_cls,
+        patch.object(persist_mod, "TurnJournalRepository") as journal_cls,
+        patch.object(
+            persist_mod,
+            "suspension_from_json",
+            side_effect=ValueError("bad frame"),
+        ),
+        patch.object(persist_mod, "_upsert_paused_frame", AsyncMock()) as upsert,
+    ):
+        session = AsyncMock()
+        factory.return_value.__aenter__.return_value = session
+        repo_cls.return_value.claim = AsyncMock(return_value=row)
+        journal_cls.return_value.load = AsyncMock(return_value=[])
+
+        with pytest.raises(ValueError, match="bad frame"):
+            await persist_mod.claim_paused_turn("msg-1", conversation_id="conv-1")
+
+    upsert.assert_awaited_once()
+    assert upsert.await_args.kwargs["message_id"] == "msg-1"
+    assert upsert.await_args.kwargs["frame"] == frame
+
+
+@pytest.mark.asyncio
 async def test_restore_paused_turn_upserts_frame_without_notify() -> None:
     suspension = _ask_user_suspension()
     with patch(
@@ -156,7 +232,11 @@ async def test_resume_chat_restores_frame_when_pipeline_returns_error() -> None:
         patch.object(turns_mod, "BoardRepository") as board_repo_cls,
         patch.object(turns_mod, "resolve_local_binding", AsyncMock(return_value=None)),
         patch.object(turns_mod, "resolve_profile_set", AsyncMock(return_value=None)),
-        patch.object(turns_mod, "resolve_autonomy_policy", AsyncMock(return_value=None)),
+        patch.object(
+            turns_mod,
+            "resolve_permission_preset",
+            AsyncMock(return_value=__import__("agentcore.core.types", fromlist=["PermissionPreset"]).PermissionPreset.WORKSPACE),
+        ),
         patch.object(turns_mod, "load_chat_context", AsyncMock(return_value=[])),
         patch.object(turns_mod, "build_turn_backend", return_value=MagicMock()),
         patch.object(turns_mod, "session_callbacks", return_value=(AsyncMock(), AsyncMock())),
@@ -211,7 +291,11 @@ async def test_resume_chat_does_not_restore_on_success() -> None:
         patch.object(turns_mod, "BoardRepository") as board_repo_cls,
         patch.object(turns_mod, "resolve_local_binding", AsyncMock(return_value=None)),
         patch.object(turns_mod, "resolve_profile_set", AsyncMock(return_value=None)),
-        patch.object(turns_mod, "resolve_autonomy_policy", AsyncMock(return_value=None)),
+        patch.object(
+            turns_mod,
+            "resolve_permission_preset",
+            AsyncMock(return_value=__import__("agentcore.core.types", fromlist=["PermissionPreset"]).PermissionPreset.WORKSPACE),
+        ),
         patch.object(turns_mod, "load_chat_context", AsyncMock(return_value=[])),
         patch.object(turns_mod, "build_turn_backend", return_value=MagicMock()),
         patch.object(turns_mod, "session_callbacks", return_value=(AsyncMock(), AsyncMock())),

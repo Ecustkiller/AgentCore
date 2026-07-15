@@ -209,6 +209,7 @@ function runFromPlan(s: RunPlanPayload["runs"][number]): ProjectedRun {
     receivedContext: [],
     // 升级实时可见: appended by the run_escalation event; empty until a worker escalates.
     escalations: [],
+    process: [],
   };
 }
 
@@ -229,6 +230,8 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
   let cost: CostBreakdown | null = null;
   let debate: DebateResultPayload | null = null;
   let debateRounds: DebateNarrativeRound[] = [];
+  let crossExamEnabled = false;
+  let debateOpening: string | null = null;
   let teamSynthesisPreview: TeamSynthesisPreviewPayload | null = null;
   let turnWarning: string | null = null;
   // 团队便签墙 (§2.2 通): notes broadcast to siblings this turn, in post order (deduped by noteId).
@@ -279,12 +282,23 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       }
       case "tool_use_start": {
         const p = ev.payload as ToolUseStartPayload;
-        // A delegated worker's call (run-scoped) belongs to its run node, not the
-        // captain's inline timeline — keep it out of `process` (统一团队时间线 = the
-        // CEO's OWN steps); still clear the run's live toolProgress below. An
-        // orchestration tool (delegate/debate) is likewise skipped: its `team` marker
-        // (dropped at run_plan) stands in for it.
-        if (!p.run_id && !ORCHESTRATION_TOOLS.has(p.tool_name)) {
+        // A delegated worker's call (run-scoped) belongs to its run node's process,
+        // not the captain's inline timeline (统一团队时间线 = the CEO's OWN steps).
+        // An orchestration tool (delegate/debate) is skipped from both: its `team`
+        // marker (dropped at run_plan) stands in for it on the captain bubble.
+        if (p.run_id) {
+          const run = runById(p.run_id);
+          if (run) {
+            run.process.push({
+              kind: "tool",
+              id: p.tool_call_id,
+              tool_name: p.tool_name,
+              arguments: p.arguments ?? {},
+              result: null,
+              status: "running",
+            });
+          }
+        } else if (!ORCHESTRATION_TOOLS.has(p.tool_name)) {
           process.push({
             kind: "tool",
             id: p.tool_call_id,
@@ -303,7 +317,20 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       }
       case "tool_use_end": {
         const p = ev.payload as ToolUseEndPayload;
-        if (!p.run_id && !ORCHESTRATION_TOOLS.has(p.tool_name)) {
+        if (p.run_id) {
+          const run = runById(p.run_id);
+          if (run) {
+            for (let i = run.process.length - 1; i >= 0; i--) {
+              const step = run.process[i];
+              if (step.kind === "tool" && step.id === p.tool_call_id) {
+                step.result = p.result;
+                step.status = p.status;
+                if (p.display != null) step.display = p.display;
+                break;
+              }
+            }
+          }
+        } else if (!ORCHESTRATION_TOOLS.has(p.tool_name)) {
           for (let i = process.length - 1; i >= 0; i--) {
             const step = process[i];
             if (step.kind === "tool" && step.id === p.tool_call_id) {
@@ -419,6 +446,15 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         const p = ev.payload as RunOutputDeltaPayload;
         const ag = agentById(p.agent_id);
         if (ag) ag.output += p.delta || "";
+        const run = runById(p.run_id);
+        if (run) {
+          const d = p.delta || "";
+          if (d) {
+            const last = run.process[run.process.length - 1];
+            if (last && last.kind === "content") last.text += d;
+            else run.process.push({ kind: "content", text: d });
+          }
+        }
         break;
       }
       // 交付前核验回炉 (finish_guard) 的 worker 对偶（content_reset 之于 CEO）：worker done 轮
@@ -429,12 +465,31 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         const p = ev.payload as RunOutputResetPayload;
         const ag = agentById(p.agent_id);
         if (ag) ag.output = "";
+        const run = runById(p.run_id);
+        if (run) {
+          while (
+            run.process.length > 0 &&
+            run.process[run.process.length - 1].kind === "content"
+          ) {
+            run.process.pop();
+          }
+          run.process.push({ kind: "rework" });
+        }
         break;
       }
       case "run_reasoning_delta": {
         const p = ev.payload as RunReasoningDeltaPayload;
         const ag = agentById(p.agent_id);
         if (ag) ag.reasoning += p.delta || "";
+        const run = runById(p.run_id);
+        if (run) {
+          const d = p.delta || "";
+          if (d) {
+            const last = run.process[run.process.length - 1];
+            if (last && last.kind === "reasoning") last.text += d;
+            else run.process.push({ kind: "reasoning", text: d });
+          }
+        }
         break;
       }
       case "run_tool_progress": {
@@ -585,6 +640,9 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       // fold 一致。round_started 先给焦点（verdict=null=进行中），round 补 summary/verdict/sides。
       case "debate_round_started": {
         const p = ev.payload as DebateRoundStartedPayload;
+        if (p.cross_exam_enabled === true) crossExamEnabled = true;
+        const rawOpening = (p.opening ?? "").trim();
+        if (rawOpening && !debateOpening) debateOpening = rawOpening;
         debateRounds = upsertNarrativeRound(debateRounds, {
           round_no: p.round_no,
           focus: p.focus,
@@ -723,6 +781,13 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "sim.tick_ended":
       case "sim.tick_frame":
       case "sim.world_event":
+      case "sim.show.affection_shift":
+      case "sim.show.departure":
+      case "sim.show.episode_gate":
+      case "sim.show.heart_pick":
+      case "sim.show.pair_formed":
+      case "sim.show.reveal":
+      case "sim.show.zero_vote_alert":
         break;
       case "turn_warning": {
         turnWarning = (ev.payload as TurnWarningPayload).message;
@@ -785,6 +850,8 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
     cost,
     debate,
     debateRounds,
+    crossExamEnabled,
+    debateOpening,
     teamSynthesisPreview,
     turnWarning,
     teamNotes,

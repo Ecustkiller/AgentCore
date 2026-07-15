@@ -3,6 +3,7 @@ import {
   modelConfigApiErrorMessage,
 } from "@/components/llm/ModelKeyForm";
 import { Button } from "@/components/ui";
+import { useLlmKey } from "@/hooks/useLlmKey";
 import { notifyOnboardingSkipChanged } from "@/hooks/useOnboarding";
 import { markOnboardingSkipped } from "@/lib/onboarding";
 import { llmKeyKeys } from "@/lib/queryKeys";
@@ -48,15 +49,19 @@ const CAPABILITY_SLIDES = [
 
 /**
  * 一次性首启全页流程：价值一屏 → 模型接入（复用 ModelKeyForm）→ 测连通时展示能力介绍。
+ * 免费档生效时接入屏额外提供「先用免费额度开始」路径（跳过配 key）。
  */
 export function OnboardingFlow({
   onDismiss,
   previewStep,
+  previewFreeTier = false,
   embedded = false,
 }: {
   onDismiss?: () => void;
   /** Offline preview: pin a step without live data. */
   previewStep?: Step;
+  /** Offline preview: show the free-tier CTA on the connect screen. */
+  previewFreeTier?: boolean;
   /** Use absolute fill of parent (preview pane) instead of viewport-fixed. */
   embedded?: boolean;
 }) {
@@ -65,6 +70,9 @@ export function OnboardingFlow({
   const [slide, setSlide] = useState(0);
   const queryClient = useQueryClient();
   const closeForced = useOnboardingUiStore((s) => s.closeOnboarding);
+  const { data: llmStatus } = useLlmKey();
+  const freeTierActive =
+    previewFreeTier || llmStatus?.free_tier_active === true;
 
   const finish = () => {
     closeForced();
@@ -72,6 +80,13 @@ export function OnboardingFlow({
   };
 
   const skip = () => {
+    markOnboardingSkipped();
+    notifyOnboardingSkipChanged();
+    finish();
+  };
+
+  /** Skip key setup and enter chat on the monthly free tier. */
+  const startWithFreeTier = () => {
     markOnboardingSkipped();
     notifyOnboardingSkipChanged();
     finish();
@@ -112,6 +127,7 @@ export function OnboardingFlow({
       aria-modal={!embedded}
       aria-label="欢迎使用 AgentCore"
       data-onboarding-step={active}
+      data-free-tier={freeTierActive ? "true" : "false"}
       className={`${
         embedded ? "relative h-full w-full" : "fixed inset-0"
       } z-50 flex flex-col bg-background`}
@@ -145,8 +161,10 @@ export function OnboardingFlow({
         )}
         {active === "connect" && (
           <ConnectScreen
+            freeTierActive={freeTierActive}
             probeError={probeError}
             onSaved={(s) => void afterSaved(s)}
+            onStartFreeTier={startWithFreeTier}
           />
         )}
         {active === "probing" && <ProbingScreen slideIndex={slide} />}
@@ -209,9 +227,13 @@ function ValueScreen({ onContinue }: { onContinue: () => void }) {
 function ConnectScreen({
   onSaved,
   probeError,
+  freeTierActive,
+  onStartFreeTier,
 }: {
   onSaved: (s: LlmKeyStatus) => void;
   probeError: string | null;
+  freeTierActive: boolean;
+  onStartFreeTier: () => void;
 }) {
   return (
     <div className="mx-auto w-full max-w-md">
@@ -221,9 +243,20 @@ function ConnectScreen({
         </div>
         <h2 className="text-2xl font-semibold text-foreground">连接你的模型</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          选择厂商、填入 API Key，我们会帮你测通后再开始第一场协作。
+          {freeTierActive
+            ? "可先用每月免费额度开聊；也可接入自己的 API Key，不限量继续。"
+            : "选择厂商、填入 API Key，我们会帮你测通后再开始第一场协作。"}
         </p>
       </div>
+      {freeTierActive && (
+        <div className="mb-6 flex flex-col items-center gap-2">
+          <Button size="md" className="w-full" onClick={onStartFreeTier}>
+            先用免费额度开始
+            <ArrowRight size={16} />
+          </Button>
+          <p className="text-xs text-muted-foreground">或接入自己的模型</p>
+        </div>
+      )}
       {probeError && (
         <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           {probeError}

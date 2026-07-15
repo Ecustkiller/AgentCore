@@ -22,6 +22,33 @@ _MAX_RESULTS_CAP = 12
 # Structured JSON results stay readable up to ~12 hits; lift the default 4000
 # model-facing budget so a full result set is never truncated into invalid JSON.
 _OUTPUT_LIMIT = 8000
+# Empty-result honesty: queries with more than this many whitespace-separated
+# tokens get an explicit "trim to 2–4 core words" tip (mirrors debate SEARCH_QUERY_RULE).
+_VERBOSE_QUERY_WORD_THRESHOLD = 4
+
+
+def _query_word_count(query: str) -> int:
+    """Count whitespace-separated tokens in a search query (no NLP / rewrite)."""
+    return len(query.split())
+
+
+def _empty_result_note(query: str) -> str:
+    """Honest, actionable note when a live/cached search returned zero hits.
+
+    Does not rewrite the query or re-search — feedback only, at the failure site.
+    """
+    base = (
+        "本次搜索未返回任何结果。可能是查询过于具体/生僻，或搜索引擎暂时受限"
+        "（如被限流）。不要据此断定该信息不存在。"
+    )
+    if _query_word_count(query) > _VERBOSE_QUERY_WORD_THRESHOLD:
+        tip = (
+            "当前查询词明显过多——建议删去最具体的限定词（如案号/机构名/年份/金额），"
+            "改用 2–4 个核心词重试。"
+        )
+    else:
+        tip = "建议换用更通用或同义的关键词重试，或改用其他信息来源。"
+    return f"{base}{tip}"
 
 
 class WebSearchTool:
@@ -176,11 +203,9 @@ class WebSearchTool:
             # CAPTCHA-suspended engine returns HTTP 200 + zero results just the same. Give
             # an explicit, actionable note so the model rephrases / tries another source
             # instead of fabricating an answer or asserting the information is absent.
-            payload["note"] = (
-                "本次搜索未返回任何结果。可能是查询过于具体/生僻，或搜索引擎暂时受限"
-                "（如被限流）。建议换用更通用的关键词重试，或改用其他信息来源；"
-                "不要据此断定该信息不存在。"
-            )
+            # Verbose queries (>4 tokens) get a trim-to-2–4 tip at the failure site
+            # (system-prompt SEARCH_QUERY_RULE is too far from the empty hit to act on).
+            payload["note"] = _empty_result_note(query)
         output = json.dumps(payload, ensure_ascii=False)
         citations = [
             {"url": r.url, "title": r.title, "snippet": r.snippet, "site": site_of(r.url)}

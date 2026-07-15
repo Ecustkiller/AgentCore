@@ -3,6 +3,7 @@ import {
   type MemoryUpdate,
   type MessageDetail,
   createConversation,
+  getConversation,
   getMessages,
 } from "@/api/conversations";
 import { getLlmKey } from "@/api/model";
@@ -19,7 +20,7 @@ import {
   getRecovery,
   stopConversation,
 } from "@/api/turn";
-import { getMessageCostTotal } from "@/api/usage";
+import { getMessageCostDisplay } from "@/api/usage";
 import { AssistantContent } from "@/components/AssistantView";
 import { ConversationDrawer } from "@/components/ConversationDrawer";
 import { DelegationAuthorizationCard } from "@/components/DelegationAuthorizationCard";
@@ -128,34 +129,44 @@ function isAbort(err: unknown): boolean {
 }
 
 /** Format an integer nano-USD cost as a money caption (1 USD = 1e9). Returns null for
- *  0 / unknown so a free turn shows nothing, never「$0.00」(§7.5). */
-function formatCost(nanoUsd: number | null | undefined): string | null {
+ *  0 / unknown so a free turn shows nothing, never「$0.00」(§7.5). BYOK estimates get ≈. */
+function formatCost(
+  nanoUsd: number | null | undefined,
+  estimated = false,
+): string | null {
   if (!nanoUsd || nanoUsd <= 0) return null;
   const usd = nanoUsd / 1e9;
-  if (usd < 0.0001) return "<$0.0001";
-  return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
+  const body =
+    usd < 0.0001
+      ? "<$0.0001"
+      : usd < 0.01
+        ? `$${usd.toFixed(4)}`
+        : `$${usd.toFixed(2)}`;
+  return estimated ? `≈${body} 估算` : body;
 }
+
+type CachedDisplayMoney = { nano: number; estimated: boolean };
 
 // A reloaded turn carries no cost in its MessageDetail (the ledger is the truth source);
 // fetch it lazily per message, cached module-wide so re-renders / re-opens don't refetch.
-const costCache = new Map<string, number>();
+const costCache = new Map<string, CachedDisplayMoney>();
 const costInflight = new Set<string>();
 
 /** Lazily fetch a persisted turn's cost when its bubble scrolls into view (Intersection
  *  Observer — avoids an open-time request storm over a whole window). Returns the cached
- *  total; supplementary, so a failure just leaves the row uncosted. */
+ *  display money; supplementary, so a failure just leaves the row uncosted. */
 function useLazyMessageCost(messageId: string): {
   ref: React.RefObject<HTMLDivElement | null>;
-  total: number | null;
+  money: CachedDisplayMoney | null;
 } {
   const ref = useRef<HTMLDivElement>(null);
-  const [total, setTotal] = useState<number | null>(
+  const [money, setMoney] = useState<CachedDisplayMoney | null>(
     () => costCache.get(messageId) ?? null,
   );
   useEffect(() => {
     if (!messageId) return;
     if (costCache.has(messageId)) {
-      setTotal(costCache.get(messageId) ?? null);
+      setMoney(costCache.get(messageId) ?? null);
       return;
     }
     const el = ref.current;
@@ -164,22 +175,23 @@ function useLazyMessageCost(messageId: string): {
       if (!entries.some((e) => e.isIntersecting)) return;
       obs.disconnect();
       if (costCache.has(messageId)) {
-        setTotal(costCache.get(messageId) ?? null);
+        setMoney(costCache.get(messageId) ?? null);
         return;
       }
       if (costInflight.has(messageId)) return;
       costInflight.add(messageId);
-      getMessageCostTotal(messageId)
+      getMessageCostDisplay(messageId)
         .then((t) => {
+          if (!t) return;
           costCache.set(messageId, t);
-          setTotal(t);
+          setMoney(t);
         })
         .finally(() => costInflight.delete(messageId));
     });
     obs.observe(el);
     return () => obs.disconnect();
   }, [messageId]);
-  return { ref, total };
+  return { ref, money };
 }
 
 function recoveredApprovalPending(
@@ -309,7 +321,16 @@ function AssistantBubble({
   const empty =
     !isMulti && p.process.length === 0 && !p.content && !p.reasoning;
   // 回合总账 — populated by message_end (null while streaming, so it appears on finish).
-  const cost = formatCost(p.cost?.total);
+  // BYOK: billed total is 0; estimated_total may carry a community/user estimate.
+  const turnMoney =
+    p.cost && p.cost.total > 0
+      ? { nano: p.cost.total, estimated: false }
+      : p.cost?.estimated_total && p.cost.estimated_total > 0
+        ? { nano: p.cost.estimated_total, estimated: true }
+        : null;
+  const cost = turnMoney
+    ? formatCost(turnMoney.nano, turnMoney.estimated)
+    : null;
   const turnWarning = p.turnWarning;
   return (
     <div className="bubble assistant">
@@ -404,13 +425,17 @@ function HistoryAssistant({
   );
   // 非阻塞提问卡内容：仅多 Agent 历史持久化 runs.events（单聊为空 → 无卡，与桌面一致）。
   const asks = useMemo(() => extractAsks(m.runs?.events ?? []), [m.runs]);
-  // P2：优先用 messages.cost 列；缺列时仍 lazy-fetch 台账（旧行 / 未回写）。
-  const columnTotal = m.cost?.total ?? null;
-  const { ref, total: lazyTotal } = useLazyMessageCost(
-    columnTotal == null ? m.id : "",
+  // P2：优先用 messages.cost 列（平台记账）；缺列或 BYOK 记账为 0 时 lazy-fetch 台账（含 estimated_cost）。
+  const columnBilled =
+    m.cost && m.cost.total > 0
+      ? { nano: m.cost.total, estimated: false as const }
+      : null;
+  const { ref, money: lazyMoney } = useLazyMessageCost(
+    columnBilled == null ? m.id : "",
   );
-  const cost = formatCost(columnTotal ?? lazyTotal);
-  const streaming = m.status === "running";
+  const money = columnBilled ?? lazyMoney;
+  const cost = money ? formatCost(money.nano, money.estimated) : null;
+  const streaming = m.status === "running" && !m.paused;
   const interrupted =
     m.status === "incomplete" || m.runs?.finish_reason === "interrupted";
 
@@ -430,7 +455,7 @@ function HistoryAssistant({
   return (
     <div
       className="bubble assistant"
-      ref={columnTotal == null ? ref : undefined}
+      ref={columnBilled == null ? ref : undefined}
     >
       {turnWarning && <div className="turn-warning">{turnWarning}</div>}
       {interrupted && <div className="finish-chip muted">已中断，可重试</div>}
@@ -474,6 +499,8 @@ export function ChatPage() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<ChatError | null>(null);
+  /** Session permission mode label (只观察 / 开工授权 / 完全信任). */
+  const [permissionLabel, setPermissionLabel] = useState<string | null>(null);
   // BYOK key presence for the empty-chat gate (null = still loading / unknown).
   const [keyConfigured, setKeyConfigured] = useState<boolean | null>(null);
   // Files staged for the next send: their text rides the body (composer 附件). A pick that
@@ -608,6 +635,7 @@ export function ChatPage() {
       setPaused([]);
       setHasMoreBefore(false);
       setMemoryUpdates([]);
+      setPermissionLabel(null);
       return;
     }
     setHistory(null);
@@ -618,7 +646,23 @@ export function ChatPage() {
     setRecoveredInteractions([]);
     setHasMoreBefore(false);
     setMemoryUpdates([]);
+    setPermissionLabel(null);
     let cancelled = false;
+    void getConversation(conversationId)
+      .then((c) => {
+        if (cancelled) return;
+        const preset = c.permission_preset ?? "workspace";
+        setPermissionLabel(
+          preset === "observe"
+            ? "只观察"
+            : preset === "full_trust"
+              ? "完全信任"
+              : "开工授权",
+        );
+      })
+      .catch(() => {
+        /* best-effort */
+      });
     // 统一恢复态快照（recovery 统一, 对称 §18.2）：一次属主校验读，既给出「待恢复」卡要用的挂起帧
     // （结构化挂起 2b），又给出「是否还有 detached live run 可续看」(slice 1b)。尽力而为，永不阻塞
     // 打开会话（失败 = 空快照，回合下次重开仍可恢复）。保留为 promise，让下方 attach 决策对齐同一
@@ -1164,7 +1208,14 @@ export function ChatPage() {
         >
           <Menu size={20} />
         </button>
-        <span className="bar-title">{conversationId ? "对话" : "新对话"}</span>
+        <span className="bar-title">
+          {conversationId ? "对话" : "新对话"}
+          {permissionLabel ? (
+            <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
+              · {permissionLabel}
+            </span>
+          ) : null}
+        </span>
         <div className="bar-right">
           {conversationId && (
             <button

@@ -2,11 +2,11 @@
 
 from textwrap import dedent
 
-from agentcore.runtime.context.project_profile import (
+from agentcore.runtime.context.workspace_profile import (
     _PROFILE_MAX_COMMANDS,
-    ProjectProfile,
-    detect_project_profile,
-    render_project_profile,
+    WorkspaceProfile,
+    detect_workspace_profile,
+    render_workspace_profile,
 )
 
 
@@ -35,7 +35,7 @@ async def test_detects_npm_start_and_dev_scripts():
 }"""
         }
     )
-    profile = await detect_project_profile(backend)
+    profile = await detect_workspace_profile(backend)
     assert profile.run_commands == ["npm run start", "npm run dev"]
     assert "npm" in profile.package_managers
 
@@ -53,7 +53,7 @@ async def test_detects_pnpm_run_commands():
 }"""
         }
     )
-    profile = await detect_project_profile(backend)
+    profile = await detect_workspace_profile(backend)
     assert profile.run_commands == ["pnpm run start", "pnpm run dev"]
     assert "pnpm" in profile.package_managers
 
@@ -70,7 +70,7 @@ async def test_detects_yarn_run_commands():
 }"""
         }
     )
-    profile = await detect_project_profile(backend)
+    profile = await detect_workspace_profile(backend)
     assert profile.run_commands == ["yarn dev"]
     assert "yarn" in profile.package_managers
 
@@ -91,7 +91,7 @@ async def test_detects_uv_console_script_from_pyproject():
             ),
         }
     )
-    profile = await detect_project_profile(backend)
+    profile = await detect_workspace_profile(backend)
     assert profile.run_commands == ["uv run agentcore"]
     assert "uv" in profile.package_managers
 
@@ -110,19 +110,19 @@ async def test_detects_pip_console_script_from_pyproject():
             ),
         }
     )
-    profile = await detect_project_profile(backend)
+    profile = await detect_workspace_profile(backend)
     assert profile.run_commands == ["pip run demo-cli"]
     assert "pip" in profile.package_managers
 
 
 async def test_render_includes_run_commands_under_common_commands():
-    profile = ProjectProfile(
+    profile = WorkspaceProfile(
         languages=["javascript"],
         test_commands=["npm test"],
         build_commands=["npm run build"],
         run_commands=["npm run start", "npm run dev"],
     )
-    rendered = render_project_profile(profile)
+    rendered = render_workspace_profile(profile)
     assert "常用命令：" in rendered
     assert "npm test" in rendered
     assert "npm run build" in rendered
@@ -131,13 +131,13 @@ async def test_render_includes_run_commands_under_common_commands():
 
 
 def test_render_caps_total_commands_shown():
-    profile = ProjectProfile(
+    profile = WorkspaceProfile(
         languages=["python"],
         test_commands=["pytest", "npm test"],
         build_commands=["npm run build"],
         run_commands=["npm run start", "npm run dev", "uv run app"],
     )
-    rendered = render_project_profile(profile)
+    rendered = render_workspace_profile(profile)
     command_line = next(line for line in rendered.splitlines() if "常用命令：" in line)
     shown = command_line.removeprefix("- 常用命令：").split(" · ")
     assert len(shown) == _PROFILE_MAX_COMMANDS

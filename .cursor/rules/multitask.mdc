@@ -7,7 +7,7 @@ alwaysApply: true
 
 ## 模型约束
 
-子代理（Task tool）**必须**指定 `model: "grok-4.5-fast-xhigh"`（Cursor Grok 4.5 high fast）。无例外。
+子代理（Task tool）**必须**指定 `model: "cursor-grok-4.5-high-fast"`（Cursor Grok 4.5 high fast）。无例外。
 
 ## 核心理念
 
@@ -69,6 +69,7 @@ prompt 只写**决策层信息**，不写实施细节：
 - 同时在飞子代理 ≤ 4 个
 - 并行子代理的 prompt 须标明文件互不交叉
 - 全部完成后，主 Agent 统一审查
+- **要立即消费报告的委派优先前台跑**（不设 `run_in_background`；并行 = 同一消息发多个 Task）——结果同回合内联返回，不走不可靠的通知信道。后台仅用于 fire-and-forget，或 Multitask 模式强制后台时（此时按禁止项的转录自救路径收报告）
 
 ## 子代理自主度
 
@@ -83,3 +84,4 @@ prompt 只写**决策层信息**，不写实施细节：
 - **禁止子代理嵌套子代理**：层级只允许 主Agent → 子代理
 - **禁止子代理做架构/方案选择**：遇岔路口回报主 Agent
 - **禁止主 Agent 代写实现**：prompt 中不贴代码块、不写逐步改法
+- **禁止用 AwaitShell 等子代理**：完成通知只在回合**干净结束**后投递，且可能成批滞后数分钟以上；AwaitShell 阻塞期间、工具调用间隙、被中止的回合一律收不到，子代理中途崩溃（账单/认证错误）则永远不发通知（多场会话实证：干等失联、要用户手动解围）。启动后并行干活或直接结束回合；等不到通知或用户说已完成时，直接读 `agent-transcripts/{会话id}/subagents/*.jsonl` 收报告

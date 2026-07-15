@@ -1,5 +1,6 @@
 import { BASE_URL, api } from "@/services/api";
 import { type FolderMeta, toFolder } from "@/services/folders";
+import { trashBareConversationScratch } from "@/services/trashBareScratch";
 import { authedFetch, saveBlob } from "@/services/workspaceHttp";
 import type { Conversation } from "@/stores/conversation";
 import type { components } from "@/types/api.generated";
@@ -18,6 +19,18 @@ type GroupedConversationsResponse = Schemas["GroupedConversationsResponse"];
 /** Placeholder shown until the backend generates a title (or for empty ones). */
 const UNTITLED = "新对话";
 
+/** Align with backend ``TITLE_MAX_CHARS`` (conversation title mint / fallback). */
+export const TITLE_MAX_CHARS = 30;
+
+/** Sidebar provisional title from the first user message (before ``title_generated``). */
+export function provisionalConversationTitle(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return UNTITLED;
+  return trimmed.length > TITLE_MAX_CHARS
+    ? `${trimmed.slice(0, TITLE_MAX_CHARS)}…`
+    : trimmed;
+}
+
 function toConversation(c: BackendConversation): Conversation {
   return {
     id: c.id,
@@ -30,6 +43,9 @@ function toConversation(c: BackendConversation): Conversation {
     localContainerRootId: c.local_container_root_id ?? null,
     pinned: c.pinned ?? false,
     archived: c.archived ?? false,
+    permissionPreset:
+      (c as { permission_preset?: Conversation["permissionPreset"] })
+        .permission_preset ?? "workspace",
   };
 }
 
@@ -79,6 +95,10 @@ export async function listGrouped(): Promise<{
 /** Soft-delete a conversation server-side. */
 export async function deleteConversation(id: string): Promise<void> {
   await api.delete(`/v1/conversations/${id}`);
+  // 裸聊本地 scratch → 系统回收站（软删）；项目共享目录不动。
+  void trashBareConversationScratch(id);
+  // W3: drop session read-only roots on this device (server grant store cleared too).
+  void window.fsApi?.clearSessionReadonlyRoots?.(id);
 }
 
 /** Persist a new conversation title. */

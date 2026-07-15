@@ -5,9 +5,7 @@
 
 from __future__ import annotations
 
-from agentcore.tools.builtin.delegate.schema import (
-    DELEGATE_OUTPUT_LIMIT,
-)
+from agentcore.runtime.runs.constants import DELEGATE_OUTPUT_LIMIT
 from agentcore.tools.builtin.delegate.tool import DelegateTool
 
 __all__ = [

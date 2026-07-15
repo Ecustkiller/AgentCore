@@ -5,21 +5,14 @@ from __future__ import annotations
 from agentcore.runtime.runs.constants import MAX_DELEGATION_TASKS
 from agentcore.runtime.runs.playbooks import PLAYBOOKS, available_playbooks
 
-# The CEO's synthesis reads the aggregated worker products as this tool's output;
-# raise the model-facing truncation budget well above the 4000 default so a
-# multi-worker batch isn't clipped before the CEO can integrate it. ``format_for_ceo``
-# now does the STRUCTURED bounding (per-product fidelity + a shared prose budget,
-# CEO 综述输入瘦身) so the aggregate fits comfortably under this; the cap stays only as
-# a last-resort net (the old behaviour: a blunt head-chop that dropped late workers).
-DELEGATE_OUTPUT_LIMIT = 16000
-
 # Shared task-level deliverable shape (delegate tasks + replan binds/add).
 TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
     "type": "object",
     "description": (
-        "可选：该 worker 的交付物规格——描述性（name）与验收底线（required_sections / "
-        "must_contain / 篇幅 / 格式 / requires_files / artifacts / strict）合一。"
-        "name 描述期望产出形态；其余字段声明产出必须满足的硬性兜底（非事前结构蓝图）。"
+        "可选：该 worker 的交付物规格——描述性（name）与验收底线（form / "
+        "required_sections / must_contain / 篇幅 / 格式 / requires_files / artifacts / "
+        "strict）合一。name 描述期望产出形态；form 声明交付形态（prose=纯文字 / "
+        "files=落盘文件）；其余字段声明产出必须满足的硬性兜底（非事前结构蓝图）。"
         "不达标会带着具体差距自动返工一次；返工后仍不达标时，默认仅附质检提醒（软），"
         "strict=true 则判该 worker 失败（硬退）。"
     ),
@@ -28,13 +21,25 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
             "type": "string",
             "description": "期望产出的形态 / 要点。",
         },
+        "form": {
+            "type": "string",
+            "enum": ["prose", "files"],
+            "description": (
+                "交付形态（结构化契约，优先于措辞）："
+                "prose = 产出给用户【看】（回答 / 分析 / 汇报 / 创意文字）——内容直接作"
+                "为正文交付，不授写文件工具；files = 产出给用户【用】（要打开 / 运行 / "
+                "编辑 / 保存的文件）——必须 file_write 落盘，并隐含 requires_files 验收。"
+                "省略 = 由 worker 按身份提示自行判断（兼容旧行为）。"
+            ),
+        },
         "required_sections": {
             "type": "array",
             "items": {"type": "string"},
             "description": (
-                "验收底线：产出必须覆盖的少数关键部分（按小标题校验是否在场），"
-                "如『结论』『风险』。用于兜底「别漏掉关键内容」，不是用来替专家"
+                "验收底线：产出必须覆盖的少数关键部分（按 Markdown 小标题校验是否在场），"
+                "如『问题』『建议』『评分』。用于兜底「别漏掉关键内容」，不是用来替专家"
                 "规定完整章节骨架——交付物的结构由 worker 设计。"
+                "勿与 output_format=json 混用（JSON 字段名不是小标题，混用会假失败）。"
             ),
         },
         "must_contain": {
@@ -56,7 +61,11 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
         "output_format": {
             "type": "string",
             "enum": ["text", "json"],
-            "description": "要求的产出格式；json 会校验能否解析。",
+            "description": (
+                "要求的产出格式。json：无 artifacts 时校验聊天正文可解析为 JSON；"
+                "与 artifacts 同用时改为校验工作区文件可解析（结构化文件通道），"
+                "聊天正文不必再贴 JSON。勿与 required_sections 混用。"
+            ),
         },
         "requires_files": {
             "type": "boolean",
@@ -65,7 +74,8 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
                 "数据文件等用户要打开 / 运行 / 保存的东西）时设 true：未调用"
                 " file_write 把产物写进工作区即判未达标、自动返工，杜绝把整份"
                 "文件内容粘在回复正文、工作区却空着。纯文字交付（分析 / 说明 /"
-                " 问答）不要设。若已用 artifacts 声明具体路径则不必再设（自动隐含）。"
+                " 问答）不要设。form=files 或已用 artifacts 声明具体路径时不必再设"
+                "（自动隐含）。优先用 form=files / form=prose 表达形态。"
             ),
         },
         "artifacts": {
@@ -75,6 +85,7 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
                 "声明式交付物路径清单（相对工作区）：具体文件、目录（以 / 结尾）或通配"
                 "（如 `src/**/*.py`、`examples/*`）。收尾时对工作区做存在性对账，缺漏"
                 "自动返工一次；非 strict 时矫正后仍缺则软接受并在汇总里结构化标缺口。"
+                "与 output_format=json 同用 = 结构化文件通道（验文件存在 + JSON 可解析）。"
                 "声明即启用对应完工验收；省略 = 不强制路径对账。"
             ),
         },
@@ -89,10 +100,6 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
     },
 }
 
-# Per-step product excerpt cap in a plan_review card (结构化挂起 2a): enough for the
-# user to recognise what just finished without shipping the whole product over SSE.
-PLAN_REVIEW_SUMMARY_CHARS = 280
-
 # Tool-doc layer (提示词瘦身 §三去重)：only the delegate MECHANICS live here — what the
 # tool does, how the tasks array maps to single/parallel/DAG, and that it is
 # non-terminal. The routing JUDGMENT (何时委派 / 怎么扇出) is owned ONCE by the CEO core
@@ -102,18 +109,20 @@ PLAN_REVIEW_SUMMARY_CHARS = 280
 # re-teaching the criterion the core already states every turn (was a ~2x duplication).
 DELEGATE_DESCRIPTION = (
     "把当前任务拆给一支由你（主 Agent）指挥的临时团队执行，并把各队员的产出返回给你。"
+    "实质任务默认组队：可分解或质量面敏感就委派；闲聊 / 单点事实 / 追问自己答。"
+    "先想任务形状再拆 tasks，勿一律单 worker 或一律套模板。\n"
     "本工具非终结：产出回到你的循环，你据此写一段简短概览（不逐字复述，用户可在界面看"
     "各成员全文），必要时再次调用继续委派。\n"
     "粒度由你定：传入一个 tasks 数组（每个元素一个内联角色，role + task 必填）。"
     f"单次最多 {MAX_DELEGATION_TASKS} 个节点，超出会被拒绝，请自行分批。\n"
     "无依赖且仅 1 个=单兵；无依赖多个=并行；任一任务声明 depends_on（引用其它任务的 id）"
     "=按依赖图分波执行，上游产出自动注入下游。\n"
-    "若本次的活正好是几个高频形状之一（调研报告 / 接口＋页面＋测试 / 多选项对比），可改用 "
-    "`playbook` 一键实例化整支团队、免手搓 tasks（与 tasks 二选一，槽位见 playbook / playbook_args 说明）。\n"
-    "简单问答 / 闲聊 / 检索自己答；交付物（要产出或改动产物的活——写 / 改文件、删除 / 移动、"
-    "运行代码，这些工具只 worker 持有）才用本工具，哪怕只派一个。其余进阶档位（finalize / "
-    "can_delegate / deliverable / 模型档位 / 流水线等）见对应参数说明与 "
-    "consult_skill(team_orchestration_advanced)。"
+    "`playbook` 是形状词汇的教学示例（对照学形状，非一键成品）；形态贴合时可与 tasks 二选一"
+    "实例化骨架，槽位见 playbook / playbook_args。\n"
+    "写改删移与执行类工具只 worker 持有——含纯文字分析 / 创意，也含写文件、改工程、跑代码。"
+    "派单时用 deliverable.form 声明形态：给用户【看】→ prose；给用户【用】→ files。"
+    "其余进阶档位（finalize / can_delegate / deliverable / 模型档位 / 流水线等）见对应参数"
+    "说明与 consult_skill(team_orchestration_advanced)。"
 )
 
 DELEGATE_PARAMETERS = {
@@ -279,9 +288,10 @@ DELEGATE_PARAMETERS = {
             "type": "string",
             "enum": sorted(PLAYBOOKS),
             "description": (
-                "可选：用一个【固化形状】一键实例化整支团队，替代手搓 tasks（与 tasks 二选一）。"
-                "设了 playbook 就把槽位放进 playbook_args、不要再传 tasks。可用：" + available_playbooks()
-                + "。仅当你的活正好是这些高频形状之一时用；形态特殊就照常手写 tasks 数组。"
+                "可选：教学示例形状——对照学形状后，若贴合可实例化整支团队（与 tasks 二选一），"
+                "非「是就直接套」。设了 playbook 就把槽位放进 playbook_args、不要再传 tasks。"
+                "可用：" + available_playbooks()
+                + "。需组合词汇或形态特殊时手写 tasks。"
             ),
         },
         "playbook_args": {
@@ -352,8 +362,11 @@ DELEGATE_PARAMETERS = {
                 "可选：本次委派的完成条件（引擎在全部 worker 结束后机械校验，未满足则"
                 "阻止你直接收尾）。显式传入时默认 files_written（至少一名 worker 落盘文件）。"
                 "代码型任务建议设 code_verified（需 code_execute / test_run 成功）。"
-                "若省略且 task 含运行/打开/安装类验收语义，引擎自动推断 code_verified。"
-                "custom 可附结构化描述，当前仅作提示。"
+                "若省略且 task 含运行/打开/安装类验收语义，引擎自动推断 code_verified；"
+                "任一 worker 声明 artifacts 或 form=files 时自动推断 files_written。"
+                "全员 form=prose 时不要设 files_written（契约矛盾，会被拒绝）。"
+                "custom【不被引擎验证】——勿依赖；需要可验证条件时用 files_written / "
+                "code_verified 或 deliverable.artifacts。"
             ),
             "oneOf": [
                 {
@@ -366,7 +379,10 @@ DELEGATE_PARAMETERS = {
                         "type": {"type": "string", "enum": ["custom"]},
                         "description": {
                             "type": "string",
-                            "description": "自定义完成条件的文字描述。",
+                            "description": (
+                                "自定义完成条件文字。引擎不校验——仅兼容旧调用；"
+                                "请改用 files_written / code_verified / artifacts。"
+                            ),
                         },
                     },
                     "required": ["type"],

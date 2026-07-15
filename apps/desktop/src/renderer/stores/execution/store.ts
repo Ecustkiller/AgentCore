@@ -3,6 +3,7 @@ import type {
   DebateResultPayload,
   DebateRoundPayload,
   DebateRoundStartedPayload,
+  ProcessStep,
   RunPlanPayload,
   TeamSynthesisPreviewPayload,
   ToolUseProgressPayload,
@@ -37,9 +38,16 @@ export interface ExecutionRuntime {
    * 折叠累积于此，{@link projectExecution} 透传到 {@link Execution.debateRounds}。`[]` =
    * 非辩论/无逐轮事件。P2 起事件 DURABLE：重载由 hydrateFromJournal 以同一 fold 重建。 */
   debateRounds: DebateNarrativeRound[];
+  /** 本场是否开启质询（`debate_round_started.cross_exam_enabled`，sticky OR）。缺字段 → false。 */
+  crossExamEnabled: boolean;
+  /** 主持人开场白（`debate_round_started.opening`，sticky 首个非空）。缺字段 → null。 */
+  debateOpening: string | null;
   /** Worker-scoped `tool_use_progress` (run_id present), keyed by run id. Transport-only —
    * merged onto agents at projection time; never journaled or replayed. */
   workerToolPhases: Record<string, { phase: string; toolName: string }>;
+  /** Per-run ProcessStep[] from journal reload (`runs.run_processes`). Overlay replaces
+   * splice-derived process so reopen matches live interleaving. null while live. */
+  runProcesses: Record<string, ProcessStep[]> | null;
   /** CEO 协调模式 Phase 1：`team_synthesis_preview` 最新快照（同 key 保最新）。P2 起
    * DURABLE：重载由 hydrateFromJournal 取 journal 中最后一条重建。驱动 StatusStrip
    * 「团队进展」预览行。 */
@@ -80,6 +88,10 @@ interface ExecutionState {
    * upsertDebateRound}; a no-plan slot ignores it. Drives the进行中 per-round overlay
    * before {@link recordDebateResult}'s 收场 product lands. */
   recordDebateRound: (round: DebateNarrativeRound, messageId: string) => void;
+  /** Sticky-OR 本场质询开关（`debate_round_started.cross_exam_enabled`）。 */
+  recordCrossExamEnabled: (enabled: boolean, messageId: string) => void;
+  /** Sticky 首个非空主持人开场白（`debate_round_started.opening`）；后续空串不覆盖。 */
+  recordDebateOpening: (opening: string, messageId: string) => void;
   /** Stamp a delegated worker's running-tool EXECUTION phase (`tool_use_progress` with
    * `run_id`). Transport-only — not a frame. */
   setWorkerToolPhase: (
@@ -120,7 +132,10 @@ const EMPTY_EXEC: ExecutionRuntime = {
   status: "planning",
   debate: null,
   debateRounds: [],
+  crossExamEnabled: false,
+  debateOpening: null,
   workerToolPhases: {},
+  runProcesses: null,
   teamSynthesisPreview: null,
 };
 
@@ -174,7 +189,10 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         status: "running",
         debate: null,
         debateRounds: [],
+        crossExamEnabled: false,
+        debateOpening: null,
         workerToolPhases: {},
+        runProcesses: null,
         teamSynthesisPreview: null,
       })),
 
@@ -220,6 +238,22 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
           : null,
       ),
 
+    /** Sticky-OR the场级质询开关（来自 debate_round_started.cross_exam_enabled）。 */
+    recordCrossExamEnabled: (enabled, messageId) =>
+      patchExec(messageId, (cur) =>
+        cur.plan && enabled && !cur.crossExamEnabled
+          ? { crossExamEnabled: true }
+          : null,
+      ),
+
+    /** Sticky 首个非空主持人开场白（来自 debate_round_started.opening）；后续空串不覆盖。 */
+    recordDebateOpening: (opening, messageId) =>
+      patchExec(messageId, (cur) => {
+        const trimmed = opening.trim();
+        if (!cur.plan || !trimmed || cur.debateOpening) return null;
+        return { debateOpening: trimmed };
+      }),
+
     setWorkerToolPhase: (payload, messageId) => {
       if (!payload.run_id) return;
       patchExec(messageId, (cur) => ({
@@ -260,6 +294,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         const frames: RunFrame[] = [];
         let debate: DebateResultPayload | null = null;
         let debateRounds: DebateNarrativeRound[] = [];
+        let crossExamEnabled = false;
+        let debateOpening: string | null = null;
         let teamSynthesisPreview: TeamSynthesisPreviewPayload | null = null;
         for (const event of journal.events) {
           if (event.type === "run_plan") {
@@ -273,6 +309,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
           } else if (event.type === "debate_round_started") {
             // P2 DURABLE：刷新后从 journal 重建辩论进行态（与 live recordDebateRound 同 fold）。
             const p = event.payload as DebateRoundStartedPayload;
+            if (p.cross_exam_enabled === true) crossExamEnabled = true;
+            const rawOpening = (p.opening ?? "").trim();
+            if (rawOpening && !debateOpening) debateOpening = rawOpening;
             debateRounds = upsertDebateRound(debateRounds, {
               round_no: p.round_no,
               focus: p.focus,
@@ -313,7 +352,10 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               status: statusFromFinish(journal.finishReason),
               debate,
               debateRounds,
+              crossExamEnabled,
+              debateOpening,
               workerToolPhases: {},
+              runProcesses: journal.runProcesses ?? null,
               teamSynthesisPreview,
             },
           },

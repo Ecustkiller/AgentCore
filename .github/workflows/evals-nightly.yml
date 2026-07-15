@@ -76,6 +76,7 @@ jobs:
           uv run python -m agentcore.evals --suite "$SUITE" --lint-only
           uv run python -m agentcore.evals --suite mast --lint-only
           uv run python -m agentcore.evals --suite probe --lint-only
+          uv run python -m agentcore.evals --suite collab_shapes --lint-only
           uv run python -m agentcore.evals --routing --lint-only
           uv run python -m agentcore.evals --compare --lint-only
 

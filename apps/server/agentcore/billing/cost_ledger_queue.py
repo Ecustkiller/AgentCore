@@ -207,7 +207,7 @@ class CostLedgerQueue:
             return
         self._task = loop.create_task(self._drain_loop(), name="cost_ledger_drain")
         self._wake.set()  # pick up leftover files from a prior process exit
-        logger.info("cost.ledger_drainer_started", queue_dir=str(_queue_dir()))
+        logger.debug("cost.ledger_drainer_started", queue_dir=str(_queue_dir()))
 
     async def stop(self) -> None:
         """Drain remaining files once, then cancel the loop (app shutdown)."""
@@ -223,7 +223,7 @@ class CostLedgerQueue:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
-            logger.info("cost.ledger_drainer_stopped")
+            logger.debug("cost.ledger_drainer_stopped")
 
     def _pending_paths(self) -> list[Path]:
         paths: list[Path] = []

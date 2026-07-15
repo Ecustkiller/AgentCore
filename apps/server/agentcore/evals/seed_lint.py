@@ -16,6 +16,20 @@ _CATEGORIES = {"qa", "retrieval", "team", "tool_use", "no_fabrication", "routing
 _PATHS = {"single", "team"}
 _TOOLSETS = {"ceo", "worker"}
 _REQUIRED = ("id", "category", "user_message")
+_EXPECTED_SHAPE_KEYS = frozenset(
+    {
+        "min_workers",
+        "max_workers",
+        "parallel_fanout_min",
+        "has_join",
+        "pipeline_depth_min",
+        "pipeline_edges_min",
+        "independent_reviewer",
+        "has_nested",
+        "min_roles",
+        "plan_types",
+    }
+)
 
 
 def _lint_milestones(cid: str, raw: dict[str, Any]) -> list[str]:
@@ -131,6 +145,21 @@ def lint_case(raw: dict[str, Any]) -> list[str]:
     mast = raw.get("mast")
     if mast is not None and mast not in MAST_CODES:
         errors.append(f"[{cid}] mast={mast!r} 非法（须属 MAST 14 类 {sorted(MAST_CODES)}）")
+
+    # 协作形状（阶段 1）：expected_shape 可选；声明了则键须属已知集合。
+    shape = raw.get("expected_shape")
+    if shape is not None:
+        if not isinstance(shape, dict):
+            errors.append(f"[{cid}] expected_shape 须为对象")
+        else:
+            unknown = set(shape) - _EXPECTED_SHAPE_KEYS
+            if unknown:
+                errors.append(
+                    f"[{cid}] expected_shape 含未知键 {sorted(unknown)}"
+                    f"（须属 {sorted(_EXPECTED_SHAPE_KEYS)}）"
+                )
+            if "plan_types" in shape and not isinstance(shape["plan_types"], list):
+                errors.append(f"[{cid}] expected_shape.plan_types 须为列表")
 
     return errors
 

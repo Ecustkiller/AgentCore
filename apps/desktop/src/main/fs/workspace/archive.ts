@@ -22,8 +22,9 @@ import { opErr, opOk } from "./result";
 /** 载入忽略规则：默认跳过集 + 根 `.gitignore`（缺失则仅默认集）。 */
 async function loadIgnore(rootAbs: string): Promise<Ignore> {
   const ig = ignore();
-  // 默认跳过集按目录规则加入（"name/" 匹配整棵子树）。
+  // 默认跳过集按目录规则加入（"name/" 匹配整棵子树）+ *.db。
   ig.add([...LIST_FILES_SKIP_DIRS].map((d) => `${d}/`));
+  ig.add(["*.db"]);
   try {
     ig.add(await fs.readFile(join(rootAbs, ".gitignore"), "utf-8"));
   } catch {

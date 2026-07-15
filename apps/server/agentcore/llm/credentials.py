@@ -8,6 +8,7 @@ rows and per-run aggregates stay isomorphic with in-process cloud turns.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from agentcore.llm.profiles import PLATFORM_MODEL_FLASH
 
@@ -21,6 +22,8 @@ INFERENCE_ROLE_HEADER = "X-AgentCore-Role"
 INFERENCE_PERSONA_HEADER = "X-AgentCore-Persona"
 INFERENCE_CALL_HEADER = "X-AgentCore-Call"
 
+CredentialOrigin = Literal["user", "platform"]
+
 
 @dataclass(frozen=True)
 class LLMCredentials:
@@ -28,3 +31,12 @@ class LLMCredentials:
     base_url: str
     default_model: str = field(default=PLATFORM_MODEL_FLASH)
     extra_headers: dict[str, str] | None = None
+    # Call-level origin for pricing: user BYOK → estimated ledger; platform → billed.
+    source: CredentialOrigin = "user"
+    # Optional user-defined USD-per-1M unit card (decimal strings).
+    price_cache_hit: str | None = None
+    price_cache_miss: str | None = None
+    price_output: str | None = None
+    # Optional cheaper model for background purposes.
+    background_model: str | None = None
+

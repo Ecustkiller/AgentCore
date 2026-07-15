@@ -10,7 +10,7 @@ import {
   fetchWithTimeout,
   tryRefresh,
 } from "@/services/api";
-import { clearAutonomyPolicyCache } from "@/services/autonomyPolicy";
+import { clearDefaultPermissionPresetCache } from "@/services/permissionPreset";
 import { clearSidecarInference } from "@/services/inferenceToken";
 import type { AuthUser } from "@/stores/auth";
 import type { components } from "@/types/api.generated";
@@ -69,7 +69,7 @@ export async function login(
   // Fresh session → drop any inference token cached for a previous user, so the
   // sidecar never mints under one user then bills another (token is user-scoped).
   clearSidecarInference();
-  clearAutonomyPolicyCache(); // 自主度同为按用户的设置，换人重取
+  clearDefaultPermissionPresetCache(); // 自主度同为按用户的设置，换人重取
   return user;
 }
 
@@ -88,7 +88,7 @@ export async function register(input: RegisterInput): Promise<AuthUser> {
     }),
   );
   clearSidecarInference(); // fresh session → drop any prior-user token (see login)
-  clearAutonomyPolicyCache();
+  clearDefaultPermissionPresetCache();
   return user;
 }
 
@@ -96,7 +96,7 @@ export async function logout(): Promise<void> {
   await api.post("/v1/auth/logout");
   clearCsrfToken();
   clearSidecarInference(); // session ended → next login re-mints
-  clearAutonomyPolicyCache();
+  clearDefaultPermissionPresetCache();
   void clearAgentTownSession();
 }
 
@@ -193,7 +193,7 @@ export async function deleteAvatar(): Promise<AuthUser> {
 export async function deleteAccount(password: string): Promise<void> {
   await api.delete("/v1/auth/me", { password });
   clearSidecarInference(); // account gone → drop any cached inference token
-  clearAutonomyPolicyCache();
+  clearDefaultPermissionPresetCache();
 }
 
 /**
@@ -270,7 +270,7 @@ async function devAutoLogin(): Promise<DevLoginResult> {
     }
     const user = toUser(body.user);
     clearSidecarInference();
-    clearAutonomyPolicyCache();
+    clearDefaultPermissionPresetCache();
     return { kind: "ok", user };
   } catch (err) {
     if (isOutage(err)) {

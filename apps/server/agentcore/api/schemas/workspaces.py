@@ -9,12 +9,11 @@ from pydantic import BaseModel, Field
 
 
 class BindLocalWorkspaceRequest(BaseModel):
-    """Bind a conversation's workspace to a desktop FS root (switch to local mode).
+    """Bind a 裸聊's scratch workspace to a desktop FS root (switch to local mode).
 
     ``root_id`` is the desktop-minted handle for an authorized local directory
-    (from the desktop ``addRoot`` flow). Binding writes at the governing scope: the
-    folder for a foldered conversation (shared by its siblings), the conversation
-    itself when ungrouped.
+    (from the desktop ``addRoot`` flow). Only ungrouped conversations may rebind —
+    project chats inherit an immutable project binding (``PUT`` returns 409).
     """
 
     root_id: str = Field(..., min_length=1, max_length=200)
@@ -36,6 +35,36 @@ class WorkspaceBindingResponse(BaseModel):
     root_id: str | None = None
     # How the effective local root was chosen. Absent/None when cloud.
     source: Literal["explicit", "container"] | None = None
+
+
+# --- W3 session read-only external directory grants ---
+
+
+class GrantExternalReadonlyRequest(BaseModel):
+    """Register a session-scoped read-only desktop root for this conversation.
+
+    Does **not** change workspace binding. ``root_id`` is the desktop-minted handle;
+    absolute paths never appear on the wire.
+    """
+
+    root_id: str = Field(..., min_length=1, max_length=200)
+    label: str = Field(..., min_length=1, max_length=200)
+    alias_hint: str | None = Field(None, max_length=64)
+
+
+class ExternalGrantItem(BaseModel):
+    alias: str
+    root_id: str
+    label: str
+    namespace: str  # ``external/<alias>``
+
+
+class ExternalGrantListResponse(BaseModel):
+    data: list[ExternalGrantItem]
+
+
+class ExternalGrantResponse(BaseModel):
+    grant: ExternalGrantItem
 
 
 class WorkspaceSummary(BaseModel):

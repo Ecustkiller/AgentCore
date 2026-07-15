@@ -175,12 +175,14 @@ export interface AskAssumption {
  * (NOT a pre-selection). `action` marks an option that the desktop client fulfils with a
  * native client action instead of a plain text answer (unknown/absent → plain option):
  * `bind_local_folder` renders as a folder picker that binds the conversation workspace
- * to the chosen local directory before resuming the turn. */
+ * to the chosen local directory before resuming the turn;
+ * `grant_readonly_folder` renders as a folder picker that grants a session-scoped
+ * read-only mount under ``external/<alias>/`` (W3; does not change workspace binding). */
 export interface AskOption {
   label: string;
   detail?: string;
   recommended?: boolean;
-  action?: "bind_local_folder";
+  action?: "bind_local_folder" | "grant_readonly_folder";
 }
 
 export interface AskQuestion {
@@ -197,7 +199,11 @@ export interface AskStyleOption {
   label: string;
 }
 
-export type CheckpointIntent = "kickoff" | "decision";
+export type CheckpointIntent =
+  | "kickoff"
+  | "decision"
+  | "proposal_pick"
+  | "risk_ack";
 
 /** The CEO paused the turn on an ask_user checkpoint (blocking). */
 export interface CheckpointRequiredPayload {
@@ -355,6 +361,7 @@ export interface RunStartedPayload {
   stance?: Stance;
   group?: string;
   round?: number;
+  side_key?: string;
   replaces_run_id?: string;
 }
 
@@ -512,6 +519,8 @@ export interface CostBreakdown {
   output: number;
   total: number;
   currency: string;
+  pricing_source?: string;
+  estimated_total?: number;
 }
 
 /** 完工交接简报 — every field optional; absent when the worker did not call `handoff`. */
@@ -595,11 +604,20 @@ export interface DebateSideInfo {
   model?: string;
 }
 
+/** 辩手发言的一条结构化论点（后端 speech_parse 产出）。 */
+export interface DebateSpeechArgument {
+  id: string;
+  title: string;
+  body: string;
+}
+
 export interface DebateRoundSide {
   key: string;
   name: string;
   run_id: string;
   ok: boolean;
+  absent?: boolean;
+  arguments?: DebateSpeechArgument[];
 }
 
 export interface DebateVerdict {
@@ -708,6 +726,8 @@ export interface DebateRoundStartedPayload {
   moderator_run_id: string;
   round_no: number;
   focus: string;
+  cross_exam_enabled?: boolean;
+  opening?: string;
 }
 
 export interface DebateRoundPayload extends DebateRoundInfo {
@@ -873,7 +893,7 @@ export interface InteractionStateChange {
 
 export interface InteractionResult {
   request_id: string;
-  kind: "conversation" | "trade" | "vote";
+  kind: "conversation" | "trade" | "vote" | "heart_pick";
   status: "completed" | "rejected" | "failed" | "cancelled";
   initiator_id: string;
   target_id?: string | null;
@@ -917,6 +937,73 @@ export interface SimWorldEventPayload {
   tick: number;
   event: WorldEventWire;
   modifiers: WorldModifiersWire;
+}
+
+/** 恋综心动选票（密封或已揭晓） on `sim.show.heart_pick`. */
+export interface SimShowHeartPickPayload {
+  run_id: string;
+  tick: number;
+  from_agent_id: string;
+  to_agent_id: string;
+  public: boolean;
+  meta?: Record<string, unknown> | null;
+}
+
+/** 恋综互选配对 on `sim.show.pair_formed`. */
+export interface SimShowPairFormedPayload {
+  run_id: string;
+  tick: number;
+  agent_a_id: string;
+  agent_b_id: string;
+  meta?: Record<string, unknown> | null;
+}
+
+/** 恋综移情标记 on `sim.show.affection_shift`. */
+export interface SimShowAffectionShiftPayload {
+  run_id: string;
+  tick: number;
+  from_agent_id: string;
+  to_agent_id: string;
+  kind?: string | null;
+  note?: string | null;
+  meta?: Record<string, unknown> | null;
+}
+
+/** 恋综零票告急 on `sim.show.zero_vote_alert`. */
+export interface SimShowZeroVoteAlertPayload {
+  run_id: string;
+  tick: number;
+  agent_id: string;
+  streak?: number | null;
+  meta?: Record<string, unknown> | null;
+}
+
+/** 恋综角色离场 on `sim.show.departure`. */
+export interface SimShowDeparturePayload {
+  run_id: string;
+  tick: number;
+  agent_id: string;
+  reason?: string | null;
+  meta?: Record<string, unknown> | null;
+}
+
+/** 恋综心动揭晓一步 on `sim.show.reveal`. */
+export interface SimShowRevealPayload {
+  run_id: string;
+  tick: number;
+  who_agent_id: string;
+  pick_agent_id: string;
+  note?: string | null;
+  meta?: Record<string, unknown> | null;
+}
+
+/** 恋综期分段 / 仪式门 on `sim.show.episode_gate`. */
+export interface SimShowEpisodeGatePayload {
+  run_id: string;
+  tick: number;
+  gate: string;
+  phase?: string | null;
+  meta?: Record<string, unknown> | null;
 }
 
 /** CEO→用户「下一步推荐」: 2-4 quick-reply chips for the just-finished turn, emitted
@@ -1085,6 +1172,13 @@ export type SSEPayloadMap = {
   "sim.agent_state": SimAgentStatePayload;
   "sim.interaction": SimInteractionPayload;
   "sim.world_event": SimWorldEventPayload;
+  "sim.show.heart_pick": SimShowHeartPickPayload;
+  "sim.show.pair_formed": SimShowPairFormedPayload;
+  "sim.show.affection_shift": SimShowAffectionShiftPayload;
+  "sim.show.zero_vote_alert": SimShowZeroVoteAlertPayload;
+  "sim.show.departure": SimShowDeparturePayload;
+  "sim.show.reveal": SimShowRevealPayload;
+  "sim.show.episode_gate": SimShowEpisodeGatePayload;
   followups_generated: FollowupsGeneratedPayload;
   turn_saved: TurnSavedPayload;
   citations: CitationsPayload;

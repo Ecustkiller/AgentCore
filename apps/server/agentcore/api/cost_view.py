@@ -24,6 +24,28 @@ def cost_breakdown(cost: dict) -> CostBreakdown:
         total=total,
         currency=str(cost.get("currency", "USD")),
         cny_total=nano_usd_to_cny(total, settings.cny_per_usd),
+        pricing_source=str(cost.get("pricing_source") or "curated"),
+    )
+
+
+def estimated_cost_breakdown(
+    *,
+    estimated_nano: int = 0,
+    cost: dict | None = None,
+) -> CostBreakdown | None:
+    """BYOK estimate breakdown, or ``None`` when there is nothing to show."""
+    body = cost or {}
+    total = int(estimated_nano or body.get("total", 0) or 0)
+    if total <= 0 and not any(int(body.get(k, 0) or 0) for k in ("input", "cached", "output")):
+        return None
+    return CostBreakdown(
+        input=int(body.get("input", 0)),
+        cached=int(body.get("cached", 0)),
+        output=int(body.get("output", 0)),
+        total=total,
+        currency=str(body.get("currency", "USD")),
+        cny_total=nano_usd_to_cny(total, settings.cny_per_usd),
+        pricing_source=str(body.get("pricing_source") or "estimated"),
     )
 
 

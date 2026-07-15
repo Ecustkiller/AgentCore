@@ -17,7 +17,7 @@ namespace AgentTown.Tests
         private static readonly string[] ExpectedRegions =
         {
             "广场", "市场", "餐厅", "面包店", "公园", "住宅区", "镇政厅",
-            "图书馆", "工坊", "码头",
+            "图书馆", "工坊", "码头", "心动营地",
         };
 
         [Test]

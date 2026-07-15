@@ -48,13 +48,13 @@ _CONSULT_OUTPUT_LIMIT = 8000
 class ConsultMemoryTool:
     """The CEO's on-demand memory-recall tool: topic name → note body, fed back.
 
-    ``project_id`` is the conversation's project (None for a bare/global chat): when set, a
+    ``folder_id`` is the conversation's project (None for a bare/global chat): when set, a
     topic name is resolved in the PROJECT scope first (more specific) then GLOBAL, and the
     "available topics" hint merges both scopes (Agent记忆与知识系统 §二).
     """
 
     store: MemoryStore
-    project_id: str | None = None
+    folder_id: str | None = None
 
     @property
     def schema(self) -> ToolSchema:
@@ -92,10 +92,10 @@ class ConsultMemoryTool:
         names = {
             topic_slug(m.path) for m in await self.store.list(user_id) if is_topic_path(m.path)
         }
-        if self.project_id:
+        if self.folder_id:
             names |= {
                 topic_slug(m.path)
-                for m in await self.store.list(user_id, scope=self.project_id)
+                for m in await self.store.list(user_id, scope=self.folder_id)
                 if is_topic_path(m.path)
             }
         return sorted(names)
@@ -115,9 +115,9 @@ class ConsultMemoryTool:
         if slug:
             # The current project's note is more specific → try it first, then fall back to
             # the global note of the same name (Agent记忆与知识系统 §二).
-            if self.project_id:
+            if self.folder_id:
                 body = await self.store.load(
-                    context.user_id, topic_path(slug), scope=self.project_id
+                    context.user_id, topic_path(slug), scope=self.folder_id
                 )
                 if body.strip():
                     hit_scope = "project"
@@ -129,7 +129,7 @@ class ConsultMemoryTool:
             available = "、".join(await self._available_topics(context.user_id))
             head = f"没有名为 '{raw}' 的记忆主题。" if raw else "缺少 name 参数。"
             tail = f" 可查阅的主题：{available}。" if available else " 当前没有任何记忆主题。"
-            logger.info("consult_memory.miss", name=raw, project_id=self.project_id)
+            logger.info("consult_memory.miss", name=raw, folder_id=self.folder_id)
             return ToolResult(tool_call_id="", success=False, output=head + tail, error=head + tail)
 
         logger.info("consult_memory.hit", name=slug, scope=hit_scope)

@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.checkpoints import CheckpointDecision
-from agentcore.runtime.events import EventSink
+from agentcore.runtime.events import EventSink, tool_use_end
+from agentcore.runtime.facts import ToolCallFact, record_turn_fact
 from agentcore.runtime.recover import SettledSuspension
 from agentcore.runtime.suspension import TurnSuspension
 from agentcore.runtime.turn_state import TurnState
@@ -18,8 +19,11 @@ from agentcore.tools.builtin.delegate import DelegateTool
 __all__ = [
     "SettledSuspension",
     "append_resumed_tool_results",
+    "persist_resumed_tool_results",
     "settle_resumed_suspension",
 ]
+
+_SIBLING_SKIPPED = "（该并行工具调用在本回合暂停时未保留结果，已跳过。）"
 
 
 def append_resumed_tool_results(
@@ -47,10 +51,65 @@ def append_resumed_tool_results(
             messages.append(
                 LLMMessage(
                     role="tool",
-                    content="（该并行工具调用在本回合暂停时未保留结果，已跳过。）",
+                    content=_SIBLING_SKIPPED,
                     tool_call_id=tc.id,
                 )
             )
+
+
+def persist_resumed_tool_results(
+    transcript: list[LLMMessage],
+    *,
+    tool_call_id: str,
+    output: str,
+    run_id: str,
+    sink: EventSink,
+    tool_name: str = "",
+) -> None:
+    """Persist settled tool results into the turn journal after resume settle.
+
+    Pause deliberately skips ``ToolCallFact`` / ``tool_use_end`` (no phantom result).
+    Once the user answers, the result is real — record it so a later same-turn re-pause
+    folds a closed assistant→tool pair via ``window_from_journal``.
+    """
+    last = transcript[-1] if transcript else None
+    if last is None or last.role != "assistant" or not last.tool_calls:
+        name = tool_name or "tool"
+        tcid = tool_call_id or ""
+        if not tcid:
+            return
+        record_turn_fact(
+            ToolCallFact(
+                run_id=run_id,
+                tool_call_id=tcid,
+                name=name,
+                arguments="",
+                result=output,
+                success=True,
+            ).to_fact()
+        )
+        sink.emit(tool_use_end(tcid, name, success=True, output=output, run_id=run_id))
+        return
+
+    target = tool_call_id or (last.tool_calls[0].id if last.tool_calls else "")
+    for tc in last.tool_calls:
+        name = tc.function.name or tool_name or "tool"
+        args = tc.function.arguments or ""
+        if tc.id == target:
+            result = output
+        else:
+            result = _SIBLING_SKIPPED
+        record_turn_fact(
+            ToolCallFact(
+                run_id=run_id,
+                tool_call_id=tc.id,
+                name=name,
+                arguments=args,
+                result=result,
+                success=True,
+            ).to_fact()
+        )
+        sink.emit(tool_use_end(tc.id, name, success=True, output=result, run_id=run_id))
 
 
 async def settle_resumed_suspension(

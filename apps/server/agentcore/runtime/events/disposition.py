@@ -182,6 +182,34 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
         Disposition.EPHEMERAL,
         "模拟 tick 快照帧——仅回放 SSE 推送，不落 sim_event",
     ),
+    EventType.SIM_SHOW_HEART_PICK: (
+        Disposition.EPHEMERAL,
+        "恋综心动选票——持久化走 sim_event，不进 turn_journal",
+    ),
+    EventType.SIM_SHOW_PAIR_FORMED: (
+        Disposition.EPHEMERAL,
+        "恋综互选配对——持久化走 sim_event，不进 turn_journal",
+    ),
+    EventType.SIM_SHOW_AFFECTION_SHIFT: (
+        Disposition.EPHEMERAL,
+        "恋综移情标记——持久化走 sim_event，不进 turn_journal",
+    ),
+    EventType.SIM_SHOW_ZERO_VOTE_ALERT: (
+        Disposition.EPHEMERAL,
+        "恋综零票告急——持久化走 sim_event，不进 turn_journal",
+    ),
+    EventType.SIM_SHOW_DEPARTURE: (
+        Disposition.EPHEMERAL,
+        "恋综角色离场——持久化走 sim_event，不进 turn_journal",
+    ),
+    EventType.SIM_SHOW_REVEAL: (
+        Disposition.EPHEMERAL,
+        "恋综心动揭晓——持久化走 sim_event，不进 turn_journal",
+    ),
+    EventType.SIM_SHOW_EPISODE_GATE: (
+        Disposition.EPHEMERAL,
+        "恋综期分段门闸——持久化走 sim_event，不进 turn_journal",
+    ),
 }
 
 

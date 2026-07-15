@@ -3,6 +3,7 @@ import { getFolders } from "@/hooks/useFolders";
 import { hasLocalEngine } from "@/lib/capabilities";
 import { queryClient } from "@/lib/queryClient";
 import { workspaceKeys } from "@/lib/queryKeys";
+import { bareConversationScratchSubpath } from "@/services/bareScratchPath";
 import type { WorkspaceInfo } from "@/services/workspaces";
 import { getRuntime } from "@/stores/conversation";
 import { useUIStore } from "@/stores/ui";
@@ -33,27 +34,43 @@ export interface SidecarTarget {
 }
 
 /**
- * 当前正经 sidecar 跑回合的会话 → 其 sidecar 目标（root + subpath）的映射。
+ * 当前正经 sidecar 跑回合的会话 → 其 sidecar 目标（root + subpath + turnId）的映射。
  *
  * 一个挂起的交互（审批 / ask_user / plan_review）由统一入口 `resolveInteraction` 结算；
  * 它据此判断「本会话此刻是不是 sidecar 回合」——是则把结算改走 `window.sidecarApi.respond`
  * 回这条 stdio 链路（够到 sidecar 进程内的 `InteractionRegistry`），而非云端 HTTP（够不到）。
  * 子路径随目标一并记下，使 respond 能寻址到正确的（按 root+subpath 起的）sidecar 进程。
- * 由 `streamConversationViaSidecar` 在回合起止时登记 / 注销。
+ * 由 `streamConversationViaSidecar` / sidecar attach 在回合起止时登记 / 注销。
  */
-const activeSidecarTurns = new Map<string, SidecarTarget>();
+interface ActiveSidecarTurn extends SidecarTarget {
+  /** 活回合键（startTurn=`turnId`，resume=`messageId`）；多窗口后 attach 者赢时防双清。 */
+  turnId?: string;
+}
 
-/** 登记：该会话此刻在某 sidecar 目标（root + subpath）上跑回合（回合开始时调）。 */
+const activeSidecarTurns = new Map<string, ActiveSidecarTurn>();
+
+/** 登记：该会话此刻在某 sidecar 目标（root + subpath）上跑回合（回合开始 / attach 时调）。 */
 export function setActiveSidecarTurn(
   conversationId: string,
   rootId: string,
   subpath = "",
+  turnId?: string,
 ): void {
-  activeSidecarTurns.set(conversationId, { rootId, subpath });
+  activeSidecarTurns.set(conversationId, { rootId, subpath, turnId });
 }
 
-/** 注销：该会话的 sidecar 回合已结束（回合 finally 调）。 */
-export function clearActiveSidecarTurn(conversationId: string): void {
+/**
+ * 注销：该会话的 sidecar 回合已结束。
+ * 若传入 `turnId`，仅当登记键匹配时才清——避免多窗口后 attach 者被前窗口 finally 误清。
+ */
+export function clearActiveSidecarTurn(
+  conversationId: string,
+  turnId?: string,
+): void {
+  if (turnId) {
+    const cur = activeSidecarTurns.get(conversationId);
+    if (cur?.turnId && cur.turnId !== turnId) return;
+  }
   activeSidecarTurns.delete(conversationId);
 }
 
@@ -92,7 +109,7 @@ function scratchFromWorkspaceCache(
  * 解析会话的本地工作区目标（容器根 + scratch / 项目子路径），与 sidecar 寻址同构。
  *
  * 项目会话：继承 Folder 的 `local_root_id` + `local_subpath`。
- * 裸聊：workspace rail 缓存或 `localContainerRootId` 意向。
+ * 裸聊：容器根下 `conversations/<id>`（跨端契约）；显式绑定到非容器根时保留服务端子路径。
  * 根不在本机 → null（§八 降级走云）。
  */
 export async function resolveConversationLocalTarget(
@@ -114,8 +131,17 @@ export async function resolveConversationLocalTarget(
 
   const cached = scratchFromWorkspaceCache(conversationId, null);
   const rootId = cached?.rootId ?? conv.localContainerRootId ?? null;
-  const subpath = cached?.subpath ?? "";
   if (!rootId) return null;
+
+  const cachedSub = (cached?.subpath ?? "").replace(/^\/+|\/+$/g, "");
+  const containerId = conv.localContainerRootId ?? null;
+  // 非空服务端子路径优先；空子路径且落在容器根 → 隔离契约路径；显式他根 → 根自身。
+  let subpath = cachedSub;
+  if (!subpath) {
+    if (!containerId || rootId === containerId) {
+      subpath = bareConversationScratchSubpath(conversationId);
+    }
+  }
 
   const roots = await window.fsApi.listRoots();
   if (!roots.some((r) => r.id === rootId)) return null;

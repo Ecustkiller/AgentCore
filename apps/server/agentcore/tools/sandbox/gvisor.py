@@ -75,7 +75,7 @@ class GVisorSandbox:
     def capabilities(self) -> SandboxCapabilities:
         return SandboxCapabilities(
             isolation="gvisor",
-            supports_network=False,
+            supports_network=True,  # restricted mode can enable; default still none
             max_memory_mb=256,
             max_timeout_seconds=90,
         )
@@ -143,11 +143,17 @@ class GVisorSandbox:
                 self._runsc,
                 "run",
                 "--rootless",
-                "--network=none",
-                f"--root={self._runtime_root}",
-                f"--bundle={bundle_dir}",
-                container_id,
             ]
+            # P2: full_trust → restricted egress; observe/workspace stay offline.
+            if request.network_mode != "restricted":
+                cmd.append("--network=none")
+            cmd.extend(
+                [
+                    f"--root={self._runtime_root}",
+                    f"--bundle={bundle_dir}",
+                    container_id,
+                ]
+            )
 
             try:
                 process = await asyncio.create_subprocess_exec(
@@ -266,11 +272,14 @@ class GVisorSandbox:
             {"type": "uts"},
             {"type": "mount"},
         ]
-        # No network namespace: networking is unconditionally disabled by the
-        # ``--network=none`` runsc flag (see the run cmd), matching the "云端默认禁网"
-        # posture (安全权限与治理 §5). ``request.network_mode`` is reserved and NOT honored
-        # today — a future "restricted" mode needs BOTH a network namespace here AND
-        # dropping that flag (05 P3-4).
+        # P2: restricted mode adds a network namespace so the process can reach
+        # the public internet (runsc without ``--network=none``). observe /
+        # workspace keep the offline posture (no network ns + ``--network=none``).
+        # Application-level SSRF for product HTTP tools remains ``core/net.py``;
+        # in-sandbox raw sockets are OS-egress only (no private-IP filter inside
+        # runsc — multi-tenant hardening is still gVisor's isolation boundary).
+        if request.network_mode == "restricted":
+            namespaces.append({"type": "network"})
 
         mounts = [
             {

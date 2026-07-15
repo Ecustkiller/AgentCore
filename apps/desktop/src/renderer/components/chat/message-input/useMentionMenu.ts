@@ -5,6 +5,7 @@ import {
   loadFileIndex,
 } from "@/lib/fileIndex";
 import type { FileSource } from "@/lib/fileSource";
+import { hasLocalFiles } from "@/lib/capabilities";
 import { fetchMessageWindow } from "@/services/messages";
 import { searchAll } from "@/services/search";
 import {
@@ -26,6 +27,10 @@ import {
   formatConversationContext,
 } from "./composerAttachments";
 import { resolveFolderFromIndexedEntry } from "./resolveAttachmentFolder";
+import {
+  pickLocalFileAttachment,
+  stageRootFileAttachment,
+} from "./resideAttachment";
 import type { MenuMode } from "./types";
 
 export type AttachmentProjectHint = {
@@ -238,37 +243,69 @@ export function useMentionMenu({
           kind: "dir",
         };
       } else {
-        const source = sourcesRef.current.get(entry.sourceId);
-        if (!source) {
-          setMenuError("文件来源已失效，请重试");
-          return;
-        }
-        let res: Awaited<ReturnType<FileSource["read"]>>;
-        try {
-          res = await source.read(entry.relPath);
-        } catch {
-          setMenuError("读取文件失败");
-          return;
-        }
-        if (res.kind !== "text") {
-          setMenuError(
-            res.kind === "image"
-              ? "暂不支持图片附件（模型尚无视觉能力）"
-              : res.kind === "too-large"
-                ? "文件过大，无法作为附件"
-                : "二进制文件无法作为文本附件",
+        // 文件：引用即驻留——主进程复制进工作区 attachments/（含二进制 xlsx）。
+        // 本地根 sourceId = ``local:<rootId>`` 或 ``local:<rootId>:<subpath>``。
+        const localMatch = /^local:([^:]+)(?::(.*))?$/.exec(entry.sourceId);
+        if (localMatch && hasLocalFiles()) {
+          const rootId = localMatch[1];
+          const subBase = (localMatch[2] || "").replace(/^\/+|\/+$/g, "");
+          const containerRel = subBase
+            ? `${subBase}/${entry.relPath}`.replace(/\/+/g, "/")
+            : entry.relPath;
+          const staged = await stageRootFileAttachment(
+            conversationId,
+            rootId,
+            containerRel,
           );
-          return;
+          if (!staged.ok) {
+            setMenuError(staged.reason);
+            return;
+          }
+          next = {
+            id: crypto.randomUUID(),
+            key,
+            name: staged.name,
+            path: staged.path,
+            text: staged.text,
+            truncated: staged.truncated,
+            kind: "file",
+            workspacePath: staged.workspacePath,
+            stagingId: staged.stagingId,
+            binary: staged.binary,
+          };
+        } else {
+          const source = sourcesRef.current.get(entry.sourceId);
+          if (!source) {
+            setMenuError("文件来源已失效，请重试");
+            return;
+          }
+          let res: Awaited<ReturnType<FileSource["read"]>>;
+          try {
+            res = await source.read(entry.relPath);
+          } catch {
+            setMenuError("读取文件失败");
+            return;
+          }
+          if (res.kind !== "text") {
+            setMenuError(
+              res.kind === "image"
+                ? "暂不支持图片附件（模型尚无视觉能力）"
+                : res.kind === "too-large"
+                  ? "文件过大，无法作为附件"
+                  : "二进制文件请用回形针从本机选择（将驻留到工作区）",
+            );
+            return;
+          }
+          next = {
+            id: crypto.randomUUID(),
+            key,
+            name: entry.name,
+            path: entry.display,
+            text: res.text,
+            truncated: res.truncated,
+            kind: "file",
+          };
         }
-        next = {
-          id: crypto.randomUUID(),
-          key,
-          name: entry.name,
-          path: entry.display,
-          text: res.text,
-          truncated: res.truncated,
-          kind: "file",
-        };
       }
 
       const attachment = next;
@@ -315,6 +352,51 @@ export function useMentionMenu({
     indexLoadedRef.current = false;
     await ensureIndex();
   }, [ensureIndex]);
+
+  /** 回形针 / 菜单：从本机任选文件（含工作区外），主进程驻留。 */
+  const pickLocalFile = useCallback(async () => {
+    setMenuError(null);
+    const res = await pickLocalFileAttachment(conversationId);
+    if (res === null) return;
+    if (!res.ok) {
+      setMenuError(res.reason);
+      // 回形针直开选择器时菜单可能未开——仍把错误挂在 menuError，并确保 browse 可见。
+      if (!menuMode) {
+        setMenuMode("browse");
+        mentionRangeRef.current = null;
+      }
+      return;
+    }
+    const key = `picked:${res.name}:${res.workspacePath ?? res.stagingId ?? res.name}`;
+    if (attachments.some((a) => a.key === key)) {
+      closeMenu();
+      return;
+    }
+    setAttachments((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        key,
+        name: res.name,
+        path: res.path,
+        text: res.text,
+        truncated: res.truncated,
+        kind: "file",
+        workspacePath: res.workspacePath,
+        stagingId: res.stagingId,
+        binary: res.binary,
+      },
+    ]);
+    closeMenu();
+    textareaRef.current?.focus();
+  }, [
+    attachments,
+    closeMenu,
+    conversationId,
+    menuMode,
+    setAttachments,
+    textareaRef,
+  ]);
 
   const handleMenuNavKey = useCallback(
     (e: KeyboardEvent): boolean => {
@@ -372,5 +454,6 @@ export function useMentionMenu({
     closeMenu,
     handleMenuNavKey,
     handleAddRoot,
+    pickLocalFile,
   };
 }

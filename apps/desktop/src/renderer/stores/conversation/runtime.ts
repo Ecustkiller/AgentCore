@@ -7,6 +7,7 @@ export const EMPTY_RUNTIME: ConversationRuntime = {
   messages: [],
   memoryUpdates: [],
   isGenerating: false,
+  turnPhase: "idle",
   abort: null,
   error: null,
   retry: null,

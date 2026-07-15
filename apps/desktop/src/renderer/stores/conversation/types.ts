@@ -14,6 +14,7 @@ import type {
   ProcessStep,
   UsageBreakdown,
 } from "@/types/events";
+import type { TurnPhase } from "./turnPhase";
 
 export interface CheckpointDisplay {
   id: string;
@@ -91,6 +92,8 @@ export interface Conversation {
   localContainerRootId?: string | null;
   pinned?: boolean;
   archived?: boolean;
+  /** Session permission mode (observe | workspace | full_trust). */
+  permissionPreset?: "observe" | "workspace" | "full_trust";
 }
 
 export interface MessageAttachmentMeta {
@@ -198,6 +201,12 @@ export interface ConversationRuntime {
    * the latest window + appended live from the firehose. */
   memoryUpdates: MemoryUpdate[];
   isGenerating: boolean;
+  /**
+   * 回合停止生命周期（键随本切片 = conversationId）。
+   * idle → preflight → streaming → stopping → stopped|completed|failed。
+   * Abort 只断流；开流门禁与迟到事件过滤以本字段为准。
+   */
+  turnPhase: TurnPhase;
   abort: AbortController | null;
   error: string | null;
   retry: (() => void) | null;

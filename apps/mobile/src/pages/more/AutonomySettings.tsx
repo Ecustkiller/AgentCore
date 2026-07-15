@@ -17,18 +17,18 @@ interface AutonomyOption {
 const OPTIONS: AutonomyOption[] = [
   {
     value: "always_ask",
-    label: "每次询问",
-    description: "每个可授权工具调用都弹出审批，不在开工卡一次放行。",
+    label: "只观察",
+    description: "新会话默认：不跑代码/终端；写文件逐次审批。",
   },
   {
     value: "first_grant",
-    label: "开工一次授权（推荐）",
-    description: "开工卡一次授权本委派所需能力，之后同委派内免逐次弹窗。",
+    label: "开工授权（推荐）",
+    description: "新会话默认：开工卡一次授权本委派所需能力。",
   },
   {
     value: "full_auto",
-    label: "全自动授权",
-    description: "完全放权：不弹开工卡，能力与计划确认一并跳过。",
+    label: "完全信任",
+    description: "新会话默认：AI 将与你同权执行命令；跳过开工卡。",
   },
 ];
 
@@ -83,14 +83,13 @@ export function AutonomySettings() {
         >
           ← 设置
         </button>
-        <span>自主度</span>
+        <span>新会话默认权限</span>
         <span style={{ width: 44 }} />
       </header>
 
       <div className="settings-body">
         <p className="settings-desc">
-          控制团队开工时能力授权的节奏。只影响写文件 /
-          跑代码等可授权工具，不影响计划确认与检查点。
+          只影响之后新建的对话。已有会话的权限模式在对话详情中查看。
         </p>
 
         {policy === null && !loadError ? (

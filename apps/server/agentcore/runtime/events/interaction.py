@@ -184,7 +184,8 @@ def team_preview_required(
 
     ``primitive`` 判别 ``delegate`` / ``debate``。delegate：``workers`` = 角色 /
     任务摘要 / 依赖；debate：``motion`` / ``sides`` / ``max_rounds`` / ``thorough``。
-    ``tools`` = GRANTABLE 能力清单（debate 辩手只读 → 常空；full_auto / always_ask 亦可空）。
+    ``tools`` = 将授权的能力范围（GRANTABLE 白名单全集；debate 辩手只读 → 常空；
+    full_auto / always_ask 亦可空）。
     """
     return SSEEvent(
         type=EventType.TEAM_PREVIEW_REQUIRED,

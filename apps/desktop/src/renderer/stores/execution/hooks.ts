@@ -48,7 +48,8 @@ const liveFolds = new WeakMap<
   { count: number; state: FoldState }
 >();
 
-/** Merge transport-only worker `tool_use_progress` (keyed by run_id) onto agents. */
+/** Merge transport-only worker `tool_use_progress` (keyed by run_id) onto agents
+ * and the matching running tool step in that run's process timeline. */
 function overlayWorkerToolPhases(
   exec: Execution,
   rt: ExecutionRuntime,
@@ -67,7 +68,45 @@ function overlayWorkerToolPhases(
       toolExecutionLive: { toolName: live.toolName, phase: live.phase },
     };
   });
-  return changed ? { ...exec, agents } : exec;
+  const runs = exec.runs.map((r) => {
+    const live = phases[r.id];
+    if (!live) return r;
+    const idx = [...r.process]
+      .map((s, i) => ({ s, i }))
+      .reverse()
+      .find(
+        ({ s }) =>
+          s.kind === "tool" &&
+          s.status === "running" &&
+          s.tool_name === live.toolName,
+      )?.i;
+    if (idx == null) return r;
+    const step = r.process[idx];
+    if (step.kind !== "tool" || step.phase === live.phase) return r;
+    changed = true;
+    const next = [...r.process];
+    next[idx] = { ...step, phase: live.phase as typeof step.phase };
+    return { ...r, process: next };
+  });
+  if (!changed) return exec;
+  return { ...exec, agents, runs };
+}
+
+/** Overlay journaled per-run process[] so reload interleaving matches live. */
+function overlayRunProcesses(
+  exec: Execution,
+  rt: ExecutionRuntime,
+): Execution {
+  const map = rt.runProcesses;
+  if (!map || Object.keys(map).length === 0) return exec;
+  let changed = false;
+  const runs = exec.runs.map((r) => {
+    const process = map[r.id];
+    if (!process) return r;
+    changed = true;
+    return { ...r, process };
+  });
+  return changed ? { ...exec, runs } : exec;
 }
 
 /**
@@ -88,7 +127,7 @@ export function projectRuntime(rt: ExecutionRuntime): Execution | null {
       projectionCache.set(rt, exec);
       return exec;
     })();
-  return overlayWorkerToolPhases(base, rt);
+  return overlayRunProcesses(overlayWorkerToolPhases(base, rt), rt);
 }
 
 function computeProjection(
@@ -106,6 +145,8 @@ function computeProjection(
       rt.status,
       rt.debate,
       rt.debateRounds,
+      rt.crossExamEnabled,
+      rt.debateOpening,
     );
   }
   // Live tail: advance the incremental accumulator to the current frame count, applying
@@ -114,7 +155,14 @@ function computeProjection(
   for (let i = fold.count; i < upto; i++) applyFrame(fold.state, rt.frames[i]);
   fold.count = upto;
   liveFolds.set(plan, fold);
-  return finalizeFold(fold.state, rt.status, rt.debate, rt.debateRounds);
+  return finalizeFold(
+    fold.state,
+    rt.status,
+    rt.debate,
+    rt.debateRounds,
+    rt.crossExamEnabled,
+    rt.debateOpening,
+  );
 }
 
 /** Project a specific message's execution at its current playhead — live tail

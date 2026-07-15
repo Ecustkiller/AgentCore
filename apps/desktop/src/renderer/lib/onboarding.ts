@@ -11,7 +11,7 @@ import { uiGet, uiSet } from "@/lib/uiStorage";
 export const ONBOARDING_SKIPPED_KEY = "onboarding:skipped";
 
 /** 情境提示 id（总量 ≤3，各只出现一次）。 */
-export type ContextualTipId = "inline_team_graph" | "decision_card";
+export type ContextualTipId = "inline_team_graph";
 
 const TIP_KEY_PREFIX = "onboarding:tip:";
 
@@ -23,8 +23,13 @@ export function tipStorageKey(id: ContextualTipId): string {
 export type DraftEmptyKind = "needs_key" | "starter_chips" | "returning";
 
 export type OnboardingEligibilityInput = {
-  /** BYOK / 平台模型已可用（`LlmKeyStatus.configured` 或 billing_mode=platform）。 */
+  /** BYOK / 平台代付 / 免费档已可用（见 {@link hasModelAccess}）。 */
   hasModelAccess: boolean;
+  /**
+   * 免费档生效时仍展示首启一次，以便接入屏提供「先用免费额度开始」；
+   * 点该 CTA 或「跳过」会写 skipped，之后不再自动出现。
+   */
+  freeTierActive?: boolean;
   conversationCount: number;
   skipped: boolean;
 };
@@ -32,13 +37,15 @@ export type OnboardingEligibilityInput = {
 /**
  * 是否自动展示整页首启流程。
  * 配完 key / 已有对话 / 已跳过 → 永不再自动出现。
+ * 免费档用户例外：在 skipped 之前仍进首启（价值屏 → 接入屏免费路径）。
  */
 export function shouldShowOnboarding(
   input: OnboardingEligibilityInput,
 ): boolean {
   if (input.skipped) return false;
-  if (input.hasModelAccess) return false;
   if (input.conversationCount > 0) return false;
+  if (input.freeTierActive) return true;
+  if (input.hasModelAccess) return false;
   return true;
 }
 
@@ -56,21 +63,23 @@ export function resolveDraftEmptyKind(input: DraftEmptyInput): DraftEmptyKind {
 
 /**
  * 账号是否已具备发消息的模型接入。
- * `configured` 覆盖 BYOK；`billing_mode === "platform"` 覆盖平台代付路径
- *（本产品主路是 BYOK，但状态机仍尊重已有 platform 模式以免误拦）。
+ * `configured` 覆盖 BYOK；`billing_mode === "platform"` 覆盖平台代付；
+ * `free_tier_active` 覆盖无 key 的每月免费档（契约字段，单一状态源）。
  */
 export function hasModelAccess(
   status:
     | {
         configured?: boolean;
         billing_mode?: string | null;
+        free_tier_active?: boolean;
       }
     | null
     | undefined,
 ): boolean {
   if (!status) return false;
   if (status.configured) return true;
-  return status.billing_mode === "platform";
+  if (status.billing_mode === "platform") return true;
+  return status.free_tier_active === true;
 }
 
 /** 首启任务建议 — 天然触发多 Agent 分工；点击仅填入输入框。 */

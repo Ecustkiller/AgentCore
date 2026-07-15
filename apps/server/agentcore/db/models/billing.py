@@ -71,6 +71,10 @@ class CostEvent(Base):
     # Redundant scalar total so window SUMs run on an integer column (precise +
     # index-friendly), instead of digging into the JSONB each time.
     cost_total_nano: Mapped[int] = mapped_column(BigInteger, default=0, server_default=text("0"))
+    # BYOK / user-credential estimates — never summed into enforce_quota.
+    cost_estimated_nano: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default=text("0")
+    )
     currency: Mapped[str] = mapped_column(String(8), default="USD", server_default=text("'USD'"))
     rounds: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     duration_ms: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
@@ -112,6 +116,9 @@ class CostCall(Base):
     tokens: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
     cost: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
     cost_total_nano: Mapped[int] = mapped_column(BigInteger, default=0, server_default=text("0"))
+    cost_estimated_nano: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default=text("0")
+    )
     currency: Mapped[str] = mapped_column(String(8), default="USD", server_default=text("'USD'"))
     duration_ms: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)

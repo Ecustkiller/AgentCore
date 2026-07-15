@@ -126,7 +126,7 @@ async def test_consult_memory_is_per_user(tmp_path):
 async def test_consult_memory_resolves_project_topic(tmp_path):
     store = FileMemoryStore(tmp_path)
     await store.save("u", topic_path("部署流程"), "本项目部署笔记", scope="F1")
-    tool = ConsultMemoryTool(store=store, project_id="F1")
+    tool = ConsultMemoryTool(store=store, folder_id="F1")
     result = await tool.execute({"name": "部署流程"}, _ctx())
     assert result.success
     assert result.output == "本项目部署笔记"
@@ -136,7 +136,7 @@ async def test_consult_memory_prefers_project_over_global_same_name(tmp_path):
     store = FileMemoryStore(tmp_path)
     await store.save("u", topic_path("部署流程"), "全局部署笔记")
     await store.save("u", topic_path("部署流程"), "本项目部署笔记", scope="F1")
-    tool = ConsultMemoryTool(store=store, project_id="F1")
+    tool = ConsultMemoryTool(store=store, folder_id="F1")
     result = await tool.execute({"name": "部署流程"}, _ctx())
     assert result.output == "本项目部署笔记"  # project (more specific) wins
 
@@ -144,7 +144,7 @@ async def test_consult_memory_prefers_project_over_global_same_name(tmp_path):
 async def test_consult_memory_falls_back_to_global_in_project(tmp_path):
     store = FileMemoryStore(tmp_path)
     await store.save("u", topic_path("全局主题"), "全局笔记")
-    tool = ConsultMemoryTool(store=store, project_id="F1")  # no such project topic
+    tool = ConsultMemoryTool(store=store, folder_id="F1")  # no such project topic
     result = await tool.execute({"name": "全局主题"}, _ctx())
     assert result.success
     assert result.output == "全局笔记"
@@ -154,7 +154,7 @@ async def test_consult_memory_miss_lists_both_scopes(tmp_path):
     store = FileMemoryStore(tmp_path)
     await store.save("u", topic_path("全局主题"), "g")
     await store.save("u", topic_path("项目主题"), "p", scope="F1")
-    tool = ConsultMemoryTool(store=store, project_id="F1")
+    tool = ConsultMemoryTool(store=store, folder_id="F1")
     result = await tool.execute({"name": "不存在"}, _ctx())
     assert not result.success
     assert "全局主题" in result.output
@@ -249,13 +249,13 @@ def _assemble_chat_tools(*, folder_id: str | None, memory_enabled: bool = True):
 def test_assemble_wires_consult_memory_to_folder_scope():
     cm = _assemble_chat_tools(folder_id="F1").get_optional("consult_memory")
     assert cm is not None
-    assert cm.project_id == "F1"  # resume recalls THIS project's 主题 first
+    assert cm.folder_id == "F1"  # resume recalls THIS project's 主题 first
 
 
 def test_assemble_consult_memory_is_global_without_folder():
     cm = _assemble_chat_tools(folder_id=None).get_optional("consult_memory")
     assert cm is not None
-    assert cm.project_id is None  # 裸聊 / local: global-only, as before
+    assert cm.folder_id is None  # 裸聊 / local: global-only, as before
 
 
 def test_assemble_omits_consult_memory_when_memory_off():
@@ -301,7 +301,7 @@ def test_worker_registry_wires_consult_memory_when_memory_on():
     _wire_worker_memory_tools(worker_tools, memory_enabled=True, folder_id="F1")
     cm = worker_tools.get_optional("consult_memory")
     assert cm is not None
-    assert cm.project_id == "F1"
+    assert cm.folder_id == "F1"
 
 
 def test_worker_registry_omits_consult_memory_when_memory_off():

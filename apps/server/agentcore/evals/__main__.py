@@ -26,6 +26,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
+from agentcore.core.log_context import bind_log_context
 from agentcore.evals.calibration import (
     calibrate,
     calibration_to_dict,
@@ -46,6 +47,34 @@ from agentcore.evals.debate_converge import (
     format_debate_converge_report,
     lint_scenarios,
     run_debate_converge,
+)
+from agentcore.evals.debate_speech_format import (
+    SAMPLES as SPEECH_FORMAT_SAMPLES,
+)
+from agentcore.evals.debate_speech_format import (
+    _debate_provider_and_model as _speech_format_provider_and_model,
+)
+from agentcore.evals.debate_speech_format import (
+    debate_speech_format_to_dict,
+    format_debate_speech_format_report,
+    run_debate_speech_format,
+)
+from agentcore.evals.debate_speech_format import (
+    lint_samples as lint_speech_format_samples,
+)
+from agentcore.evals.deliverable_form import (
+    SAMPLES as DELIVERABLE_FORM_SAMPLES,
+)
+from agentcore.evals.deliverable_form import (
+    _form_provider_and_model as _deliverable_form_provider_and_model,
+)
+from agentcore.evals.deliverable_form import (
+    deliverable_form_to_dict,
+    format_deliverable_form_report,
+    run_deliverable_form,
+)
+from agentcore.evals.deliverable_form import (
+    lint_samples as lint_deliverable_form_samples,
 )
 from agentcore.evals.judge import build_default_judge, build_default_milestone_judge
 from agentcore.evals.report import baseline_regression, format_report, report_to_dict
@@ -116,6 +145,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="只做用例静态校验、不跑模型（零 LLM，per-PR 硬门禁）",
     )
     p.add_argument(
+        "--plan-only",
+        action="store_true",
+        help=(
+            "只规划不执行：真实 CEO 规划路径采 run_plan 后立刻收束（跳过 worker/辩论执行）；"
+            "报告只看形状分；内容 Check/裁判标 n/a。与 --suite 组合（如 collab_shapes）"
+        ),
+    )
+    p.add_argument(
+        "--samples",
+        type=int,
+        default=None,
+        help="覆盖所有用例的 samples（多采样取形状均值；缺省用用例 JSON 声明）",
+    )
+    p.add_argument(
         "--compare",
         action="store_true",
         help="对比评估（团队 vs 单体）：跑 cases/comparison/，成对裁判 + 三轴报告（nightly）",
@@ -139,6 +182,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--debate-converge",
         action="store_true",
         help="辩论收敛校准：合成场景过生产 _judge，量『裁判是否系统性过保守』（§三·诊断，不卡门）",
+    )
+    p.add_argument(
+        "--debate-speech-format",
+        action="store_true",
+        help="辩手发言格式合规：直连 complete 量论点骨架纪律（无前言/无总标题/无加粗伪标题）",
+    )
+    p.add_argument(
+        "--deliverable-form",
+        action="store_true",
+        help="交付形态 form=prose|files：直连 complete 量 CEO 看/用分流与落盘指示",
     )
     p.add_argument(
         "--gold-set",
@@ -298,7 +351,70 @@ async def _run_debate_converge(args: argparse.Namespace) -> int:
     return 0  # 诊断信号，不以过保守率卡退出码（先量化再调，见 §三）
 
 
+async def _run_debate_speech_format(args: argparse.Namespace) -> int:
+    """辩手发言格式合规：成稿形态 draft_system + draft_brief → complete → 检查骨架。
+
+    诊断性（与 ``--debate-converge`` 同）：``--lint-only`` 零 LLM；真跑出合规率与失败样例。
+    """
+    from agentcore.evals.debate_speech_format import (
+        NOTES_DRAFT_SAMPLES,
+        lint_notes_draft_samples,
+    )
+
+    lint_speech_format_samples(SPEECH_FORMAT_SAMPLES)
+    lint_notes_draft_samples(NOTES_DRAFT_SAMPLES)
+    if args.lint_only:
+        print(
+            f"[lint] OK — {len(SPEECH_FORMAT_SAMPLES)} 个成稿样本 + "
+            f"{len(NOTES_DRAFT_SAMPLES)} 个合成笔记→成稿样本结构合法"
+        )
+        return 0
+
+    provider, model = _speech_format_provider_and_model(args.judge_mode)
+    result = await run_debate_speech_format(provider, model, SPEECH_FORMAT_SAMPLES)
+    print(format_debate_speech_format_report(result))
+
+    if args.out:
+        out = Path(args.out)
+        out.write_text(
+            json.dumps(debate_speech_format_to_dict(result), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"\n[report] 已写出 JSON -> {out}")
+
+    return 0
+
+
+async def _run_deliverable_form(args: argparse.Namespace) -> int:
+    """交付形态 form 分流：classifier system + 用户请求 → complete → 查 form / 落盘指示。
+
+    诊断性：``--lint-only`` 零 LLM（含生产契约静态门禁）；真跑需 eval key。
+    """
+    lint_deliverable_form_samples(DELIVERABLE_FORM_SAMPLES)
+    if args.lint_only:
+        print(f"[lint] OK — {len(DELIVERABLE_FORM_SAMPLES)} 个交付形态样本 + 生产契约合法")
+        return 0
+
+    provider, model = _deliverable_form_provider_and_model(args.judge_mode)
+    result = await run_deliverable_form(provider, model, DELIVERABLE_FORM_SAMPLES)
+    print(format_deliverable_form_report(result))
+
+    if args.out:
+        out = Path(args.out)
+        out.write_text(
+            json.dumps(deliverable_form_to_dict(result), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"\n[report] 已写出 JSON -> {out}")
+
+    return 0
+
+
 async def _run(args: argparse.Namespace) -> int:
+    if args.deliverable_form:
+        return await _run_deliverable_form(args)
+    if args.debate_speech_format:
+        return await _run_debate_speech_format(args)
     if args.debate_converge:
         return await _run_debate_converge(args)
     if args.calibrate:
@@ -313,18 +429,40 @@ async def _run(args: argparse.Namespace) -> int:
     cases = load_cases(args.cases_dir, suite=args.suite)
     if args.mode:
         cases = [replace(c, mode=args.mode) for c in cases]
+    if args.samples is not None:
+        if args.samples < 1:
+            raise EvalConfigError("--samples 须 >= 1")
+        cases = [replace(c, samples=args.samples) for c in cases]
 
     if args.lint_only:
         print(f"[lint] OK — {len(cases)} 个用例结构合法（suite={args.suite}）")
         return 0
 
+    plan_only = bool(args.plan_only)
     # L1 主轴：layer>=2 时构造两类裁判（默认 Pro 评 Flash）——绝对分裁判按 case.rubric 给 1–5 分、
     # milestone 裁判按 case.milestones 判交付物覆盖；用例声明哪个就跑哪个，均计入判定。
-    judge = build_default_judge(mode=args.judge_mode) if args.layer >= 2 else None
-    milestone_judge = (
-        build_default_milestone_judge(mode=args.judge_mode) if args.layer >= 2 else None
+    # plan-only 跳过内容裁判（形状才有意义）。
+    judge = (
+        None
+        if plan_only
+        else (build_default_judge(mode=args.judge_mode) if args.layer >= 2 else None)
     )
-    report = await run_suite(cases, judge=judge, milestone_judge=milestone_judge, layer=args.layer)
+    milestone_judge = (
+        None
+        if plan_only
+        else (
+            build_default_milestone_judge(mode=args.judge_mode) if args.layer >= 2 else None
+        )
+    )
+    report = await run_suite(
+        cases,
+        judge=judge,
+        milestone_judge=milestone_judge,
+        layer=1 if plan_only else args.layer,
+        plan_only=plan_only,
+    )
+    if plan_only:
+        print("[plan-only] 形状评测（内容 Check / 裁判均为 n/a）")
     print(format_report(report))
 
     if args.out:
@@ -361,6 +499,8 @@ async def _run(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Synthetic batch traffic — filterable in logs/dev.jsonl (absence of ``traffic`` = real).
+    bind_log_context(traffic="eval")
     args = _build_parser().parse_args(argv)
     try:
         return asyncio.run(_run(args))

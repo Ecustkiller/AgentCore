@@ -17,13 +17,13 @@ authoritative fact-log stream, incl. the trailing ``*_required`` card) into
 ``turn_journal`` so a cold resume can rebuild the CEO window even when the append-on-emit
 writer lagged or degraded. :func:`claim_paused_turn` re-hydrates from that table.
 
-Saves are best-effort: a persistence failure logs and degrades to 2a in-memory
-behaviour (the live resolve still works; only the durable backstop is lost) rather
-than breaking the user's turn. The save MUST happen before the suspend ``await`` so a
-disconnect/crash during the wait still leaves a resumable frame.
+D11: save failures raise (no silent degrade). Claim competition → ``None`` (route 404);
+claim-then-hydrate failure restores the frame and raises (route 5xx, retryable).
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from agentcore.core.log_context import get_log_value
 from agentcore.core.logging import get_logger
@@ -41,13 +41,14 @@ logger = get_logger(__name__)
 
 
 async def save_paused_turn(suspension: TurnSuspension) -> None:
-    """Persist one paused-turn frame, keyed by its ``message_id`` (best-effort).
+    """Persist one paused-turn frame, keyed by its ``message_id``.
 
     Stamps the ambient turn ``trace_id`` (this runs inside the pipeline's trace
     scope) so the persisted pause links back to its originating turn's logs.
     Upsert: re-pausing the same turn (resume → pause again) overwrites in place.
     The journal-so-far is NOT in the frame — it is written to ``turn_journal`` here
     (唯一事实源, §8.3) from the suspending face's ``journal_entries`` snapshot.
+    Raises on persistence failure (D11 — no fake saved).
     """
     trace_id = suspension.trace_id or get_log_value("trace_id") or None
     writer = current_journal_writer.get()
@@ -134,6 +135,32 @@ async def delete_paused_turn(message_id: str) -> None:
         logger.warning("suspension.delete_failed", message_id=message_id, error=str(e))
 
 
+async def _upsert_paused_frame(
+    *,
+    message_id: str,
+    conversation_id: str,
+    user_id: str,
+    frame: dict[str, Any],
+    trace_id: str | None,
+) -> None:
+    """Re-upsert a raw paused frame (restore / claim-hydrate rollback). Best-effort."""
+    try:
+        async with async_session_factory() as db:
+            await PausedTurnRepository(db).upsert(
+                message_id=message_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                frame=frame,
+                trace_id=trace_id,
+            )
+    except Exception as e:  # noqa: BLE001 — restore must never break the error path
+        logger.warning(
+            "suspension.restore_failed",
+            message_id=message_id,
+            error=str(e),
+        )
+
+
 async def restore_paused_turn(suspension: TurnSuspension) -> None:
     """Re-upsert a claimed frame after a failed cloud resume so the user can retry.
 
@@ -144,21 +171,13 @@ async def restore_paused_turn(suspension: TurnSuspension) -> None:
     already got the original pause notification) and does NOT rewrite
     ``turn_journal`` (claim left those rows in place). Best-effort; never raises.
     """
-    try:
-        async with async_session_factory() as db:
-            await PausedTurnRepository(db).upsert(
-                message_id=suspension.message_id,
-                conversation_id=suspension.conversation_id,
-                user_id=suspension.user_id,
-                frame=suspension.to_json(),
-                trace_id=suspension.trace_id,
-            )
-    except Exception as e:  # noqa: BLE001 — restore must never break the error path
-        logger.warning(
-            "suspension.restore_failed",
-            message_id=suspension.message_id,
-            error=str(e),
-        )
+    await _upsert_paused_frame(
+        message_id=suspension.message_id,
+        conversation_id=suspension.conversation_id,
+        user_id=suspension.user_id,
+        frame=suspension.to_json(),
+        trace_id=suspension.trace_id,
+    )
 
 
 async def load_paused_turn(
@@ -187,13 +206,16 @@ async def claim_paused_turn(
     message_id: str, *, conversation_id: str | None = None
 ) -> TurnSuspension | None:
     """Atomically read-and-delete a paused turn for resume; ``None`` if already
-    claimed / absent / unreadable.
+    claimed / absent.
 
     The atomic claim (DELETE ... RETURNING) means two racing ``/resume`` calls can't
     both continue the same turn — the loser gets ``None`` (→ 404 at the route). Pass
     ``conversation_id`` (the one the route verified the caller owns) so a frame is only
-    claimed within that conversation (IDOR-safe). A load error degrades to ``None``
-    (the route reports「已处理或不存在」) rather than raising.
+    claimed within that conversation (IDOR-safe).
+
+    Claim competition / missing row → ``None``. After a successful claim, frame parse
+    or journal load failure restores the row and **raises** (route 5xx, frame kept for
+    retry) — never silently drop a claimed frame.
 
     The journal-so-far is re-hydrated from ``turn_journal`` (唯一事实源, it is not in the
     frame) onto :attr:`TurnSuspension.journal_entries` (the §8.3 fact-log stream, incl. the
@@ -206,19 +228,45 @@ async def claim_paused_turn(
     stored rows are left in place: the resumed turn re-records them wholesale on completion (or
     the TTL sweep clears them if the turn is abandoned).
     """
+    claimed: dict[str, Any] | None = None
     try:
         async with async_session_factory() as db:
             row = await PausedTurnRepository(db).claim(message_id, conversation_id=conversation_id)
             if row is None:
                 return None
-            suspension = suspension_from_json(row.frame)
-            entries = await TurnJournalRepository(db).load(message_id)
-    except Exception as e:  # noqa: BLE001 — a claim failure reads as "not resumable"
+            # Materialize before the session closes (expire_on_commit).
+            claimed = {
+                "message_id": row.message_id,
+                "conversation_id": row.conversation_id,
+                "user_id": row.user_id,
+                "frame": dict(row.frame) if isinstance(row.frame, dict) else row.frame,
+                "trace_id": row.trace_id,
+            }
+    except Exception as e:  # noqa: BLE001 — claim competition / DB fault → not resumable
         logger.warning("suspension.claim_failed", message_id=message_id, error=str(e))
         return None
-    # Re-hydrate the 唯一权威载体 (execution facts + display) for the Phase 2 window rebuild;
-    # the display ``journal`` resume seed is a DERIVED property of these entries (P0-B Phase 3).
-    suspension.journal_entries = list(entries or [])
+
+    assert claimed is not None
+    try:
+        async with async_session_factory() as db:
+            entries = await TurnJournalRepository(db).load(message_id)
+        suspension = suspension_from_json(claimed["frame"])
+        suspension.journal_entries = list(entries or [])
+    except Exception as e:
+        logger.error(
+            "suspension.claim_hydrate_failed",
+            message_id=message_id,
+            error=str(e),
+        )
+        await _upsert_paused_frame(
+            message_id=claimed["message_id"],
+            conversation_id=claimed["conversation_id"],
+            user_id=claimed["user_id"],
+            frame=claimed["frame"],
+            trace_id=claimed["trace_id"],
+        )
+        raise
+
     if suspension.journal_degraded and not suspension.journal_entries:
         logger.warning(
             "suspension.claim_journal_degraded",

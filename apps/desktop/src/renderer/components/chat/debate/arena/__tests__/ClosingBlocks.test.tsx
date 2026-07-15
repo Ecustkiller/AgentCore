@@ -49,6 +49,7 @@ function closingView(
 ): DebateClosingView {
   return {
     sideKey: "pro",
+    stance: "pro",
     name: "支持方",
     colorVar: "var(--debate-pro)",
     run: closingRun(),
@@ -107,5 +108,73 @@ describe("ClosingBlocks 钻取惯例", () => {
     expect(screen.queryByRole("button", { name: /支持方/ })).toBeNull();
     expect(screen.getByText("未产出")).toBeTruthy();
     expect(screen.getByText("未产出结辩。")).toBeTruthy();
+  });
+});
+
+describe("ClosingBlocks 布局", () => {
+  it("split 时正反两方结辩左右对开（两列并排），两方均渲染", () => {
+    useSidePanelStore.setState({ showRunDetail: vi.fn() });
+    const execution = executionWith([
+      { id: "mod_closing_pro", outputChunks: ["支持方结辩。"] },
+      { id: "mod_closing_con", outputChunks: ["反对方结辩。"] },
+    ]);
+    const { container } = render(
+      <ClosingBlocks
+        closings={[
+          closingView(),
+          closingView({
+            sideKey: "con",
+            name: "反对方",
+            colorVar: "var(--debate-con)",
+            run: closingRun("mod_closing_con"),
+          }),
+        ]}
+        execution={execution}
+        messageId="m1"
+        layoutMode="split"
+      />,
+    );
+
+    expect(container.querySelector(".grid.grid-cols-2")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /支持方/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /反对方/ })).toBeTruthy();
+  });
+
+  it("stack（默认）时不产生两列容器", () => {
+    const { container } = renderClosings(closingView(), executionWith([]));
+    expect(container.querySelector(".grid.grid-cols-2")).toBeNull();
+  });
+
+  it("split 时 key 非 pro/con 也按 stance 分列并排（自定 key 回归）", () => {
+    useSidePanelStore.setState({ showRunDetail: vi.fn() });
+    const execution = executionWith([
+      { id: "c_plaintiff", outputChunks: ["原告结辩。"] },
+      { id: "c_defendant", outputChunks: ["被告结辩。"] },
+    ]);
+    const { container } = render(
+      <ClosingBlocks
+        closings={[
+          closingView({
+            sideKey: "原告方",
+            name: "原告方",
+            stance: "pro",
+            run: closingRun("c_plaintiff"),
+          }),
+          closingView({
+            sideKey: "被告方",
+            name: "被告方",
+            stance: "con",
+            run: closingRun("c_defendant"),
+          }),
+        ]}
+        execution={execution}
+        messageId="m1"
+        layoutMode="split"
+      />,
+    );
+
+    expect(container.querySelector(".grid.grid-cols-2")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /原告方/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /被告方/ })).toBeTruthy();
   });
 });

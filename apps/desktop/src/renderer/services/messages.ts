@@ -59,12 +59,15 @@ export interface BackendMessage {
   /** Persisted turn replay payload. `events` is a multi-agent turn's ordered
    * run/tool SSE events (replayed through the same fold as the live stream to
    * rebuild the team graph on reload, §9.3); `process` is a single-agent turn's
-   * 思考·正文·工具 inline timeline (前端UX设计.md §一B). null for user / plain turns. (Opaque JSON
+   * 思考·正文·工具 inline timeline (前端UX设计.md §一B). `run_processes` is the
+   * per-worker-run timeline map (对称 CEO process). null for user / plain turns. (Opaque JSON
    * in the OpenAPI — SSE/event payloads are exempt from the generated-types rule.) */
   runs?: {
     events: SSEEvent[];
     finish_reason: string | null;
     process?: ProcessStep[] | null;
+    /** Per-run ProcessStep[] (run_id → steps); reload seeds run detail timelines. */
+    run_processes?: Record<string, ProcessStep[]> | null;
     /** 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): the captain's `run_context` blocks,
      * persisted turn-level (the captain is the bubble above the graph, present even in pure
      * chat where `events` is empty). Replayed onto `message.captainContext` on reload. */
@@ -86,6 +89,9 @@ export interface BackendMessage {
    * criterion — ``running`` hydrates as streaming partial; ``incomplete`` as
    * interrupted. */
   status?: "running" | "complete" | "incomplete" | "failed" | null;
+  /** Cold-path pause latch (``usage.paused``). Write keeps ``status=running``;
+   * when true, hydrate as paused (not streaming) — finishReason=paused. */
+  paused?: boolean | null;
   /** 回合轮次 (Tier 2 重载持久化): ReAct rounds the turn ran, projected from the same column.
    * Replayed onto `message.rounds`; the bubble surfaces「N 轮」only when > 1. null for
    * user / pre-feature rows. */
@@ -165,12 +171,16 @@ export function toMessage(m: BackendMessage): Message {
   // and do not treat a hydrated assistant as client-only.
   const role = m.role === "assistant" ? "assistant" : "user";
   // P4: running → stream-style partial; incomplete / interrupted finish → interrupted chip.
+  // Cold-path pause latch: write keeps status=running + paused=true; hydrate as paused
+  // (not streaming) so reopen does not setGenerating / spinner forever.
   const status = m.status ?? null;
-  const finishReason =
-    m.runs?.finish_reason ??
-    (status === "incomplete" ? "interrupted" : undefined) ??
-    undefined;
-  const isStreaming = role === "assistant" && status === "running";
+  const paused = Boolean(m.paused);
+  const finishReason = paused
+    ? "paused"
+    : (m.runs?.finish_reason ??
+      (status === "incomplete" ? "interrupted" : undefined) ??
+      undefined);
+  const isStreaming = role === "assistant" && status === "running" && !paused;
   return {
     id: m.id,
     ...(role === "assistant" ? { serverMessageId: m.id } : {}),
@@ -186,7 +196,11 @@ export function toMessage(m: BackendMessage): Message {
     // below lets that graph replay the turn (both null for non-team turns).
     executionId,
     runs: executionId
-      ? { events, finishReason: finishReason ?? "stop" }
+      ? {
+          events,
+          finishReason: finishReason ?? "stop",
+          runProcesses: m.runs?.run_processes ?? null,
+        }
       : undefined,
     // 结束原因 chip (Tier 2 c): surface the persisted finish_reason turn-level so a
     // single-agent abnormal turn (max_rounds / degraded / unproductive) replays its
@@ -237,6 +251,17 @@ export function toMessage(m: BackendMessage): Message {
       : undefined,
     citations: m.citations?.length ? m.citations : undefined,
   };
+}
+
+/**
+ * Whether a freshly loaded message window should paint live generating chrome.
+ * Driven solely by {@link Message.isStreaming} (toMessage already maps cold-path
+ * ``paused`` out of streaming). Ghost interrupted remains a separate recovery branch.
+ */
+export function shouldSetGeneratingOnHydrate(
+  messages: { isStreaming?: boolean }[],
+): boolean {
+  return messages.at(-1)?.isStreaming === true;
 }
 
 /** How to window a conversation's messages — mutually exclusive (the backend

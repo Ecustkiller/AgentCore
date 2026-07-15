@@ -1,4 +1,7 @@
-"""Nested sub-team delegate tools."""
+"""Nested sub-team delegate tool construction (thin tools-side adapter).
+
+Drive-layer roll-up (``absorb_children``) lives in ``runtime.delegate.nesting``.
+"""
 
 from __future__ import annotations
 
@@ -74,10 +77,3 @@ def make_lead_subteam(
         tool_names=(child.schema.name, replan.schema.name),
         dispose=_dispose,
     )
-
-
-def absorb_children(tool: DelegateTool) -> None:
-    """Fold every nested sub-team spawned this call into the turn totals."""
-    for child in tool._children:
-        tool._acc.merge(child._acc)
-    tool._children.clear()

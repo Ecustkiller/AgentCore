@@ -1,7 +1,7 @@
 """Curated conformance vectors — representative SSE event sequences (前端技术与架构 §十二).
 
 Built with the REAL event builders (:mod:`agentcore.runtime.events`). Split by scenario
-under this package (``single_agent`` / ``gates`` / ``multi_agent`` / ``debate`` / ``legal``
+under this package (``single_agent`` / ``gates`` / ``multi_agent/`` / ``debate/`` / ``legal``
 / ``board`` / ``memory``); protocol vectors aggregate here as ``VECTORS``. Memory
 consolidation vectors live separately in ``MEMORY_VECTORS`` (extraction prompt regression,
 not protocol fold). Export protocol goldens via ``python -m agentcore.conformance.export``.

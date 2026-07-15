@@ -21,20 +21,24 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal
 
-AskCheckpointIntent = Literal["kickoff", "decision"]
+AskCheckpointIntent = Literal["kickoff", "decision", "proposal_pick", "risk_ack"]
 
 
 class CheckpointDecision(StrEnum):
     """How the user (or a timeout / orphan) settled a checkpoint the CEO raised.
 
     ``CONTINUE`` / ``ADJUST`` / ``STOP`` are shared by ask_user / plan_review /
-    team_preview (开工卡). On the kickoff card, ``CONTINUE`` means grant-all-needed
-    capabilities and start; ``PER_CALL`` means start with per-call approval (no
-    delegation grant). ``PER_CALL`` is kickoff-only — ask_user / plan_review ignore it.
+    team_preview (开工卡). On the kickoff card, ``CONTINUE`` means grant + start
+    (non-empty ``note`` steers all unrun workers — former adjust semantics);
+    ``PER_CALL`` means start with per-call approval (no delegation grant) — enum
+    retained for historical timelines / API clients; the kickoff UI no longer
+    offers it. ``PER_CALL`` is kickoff-only — ask_user / plan_review ignore it.
+    ``ADJUST`` remains for debate kickoff (rewrite motion) and plan_review steer,
+    plus historical non-debate kickoff resolves.
     """
 
-    CONTINUE = "continue"  # proceed (kickoff: grant + start)
-    PER_CALL = "per_call"  # kickoff only: start without a delegation grant
+    CONTINUE = "continue"  # proceed (kickoff: grant + start; note → steer)
+    PER_CALL = "per_call"  # kickoff only (historical/API): start without a grant
     ADJUST = "adjust"  # steer with a note, then continue (kickoff: also grants)
     STOP = "stop"  # end this turn gracefully
     TIMEOUT = "timeout"  # no answer within the deadline (engine-set, never user-set)
@@ -45,12 +49,13 @@ class CheckpointDecision(StrEnum):
 class CheckpointResponse:
     """The settled outcome of a checkpoint: a decision + an optional note + picks.
 
-    ``note`` carries the user's steer for ``ADJUST`` (and an optional closing
-    remark for ``STOP``); it is empty for ``CONTINUE`` / ``TIMEOUT``. ``selected``
-    holds the option(s) the user picked from the CEO's ``options`` menu — one for a
-    single-select ask, several when the ask is ``multiple`` — and is a first-class
-    part of the answer (no longer folded into ``note``), so ``CONTINUE`` carries the
-    pick too. Empty when the ask offered no options or the user chose none.
+    ``note`` carries the user's steer for ``ADJUST``, an optional 嘱咐 on kickoff
+    ``CONTINUE`` (steers unrun workers), and an optional closing remark for
+    ``STOP``; it is empty for ``TIMEOUT``. ``selected`` holds the option(s) the
+    user picked from the CEO's ``options`` menu — one for a single-select ask,
+    several when the ask is ``multiple`` — and is a first-class part of the
+    answer (no longer folded into ``note``), so ``CONTINUE`` carries the pick
+    too. Empty when the ask offered no options or the user chose none.
     """
 
     decision: CheckpointDecision

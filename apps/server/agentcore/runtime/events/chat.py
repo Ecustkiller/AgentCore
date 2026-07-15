@@ -136,6 +136,22 @@ def tool_use_end(
     return SSEEvent(type=EventType.TOOL_USE_END, payload=payload)
 
 
+def _wire_cost(cost: dict[str, Any] | None) -> dict[str, Any] | None:
+    if cost is None:
+        return None
+    out: dict[str, Any] = {
+        "input": int(cost.get("input", 0) or 0),
+        "cached": int(cost.get("cached", 0) or 0),
+        "output": int(cost.get("output", 0) or 0),
+        "total": int(cost.get("total", 0) or 0),
+        "currency": str(cost.get("currency") or "USD"),
+        "pricing_source": str(cost.get("pricing_source") or "curated"),
+    }
+    if cost.get("estimated_total") is not None:
+        out["estimated_total"] = int(cost["estimated_total"])
+    return out
+
+
 def message_end(
     finish_reason: FinishReason,
     *,
@@ -157,7 +173,7 @@ def message_end(
             "cache_hit_tokens": cache_hit_tokens,
             "cache_miss_tokens": cache_miss_tokens,
         },
-        "cost": cost,
+        "cost": _wire_cost(cost),
         "rounds": rounds,
     }
     if collab is not None:

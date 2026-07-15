@@ -51,6 +51,19 @@ def mast_breakdown(report: EvalReport) -> dict[str, dict[str, dict[str, float]]]
     return {"by_group": by_group, "by_mode": by_mode}
 
 
+def shape_means_by_case(report: EvalReport) -> dict[str, float]:
+    """按 case_id 聚合形状分均值（samples>1 时同 case 多条取平均；无形状分的跳过）。"""
+    buckets: dict[str, list[float]] = {}
+    for c in report.cases:
+        if c.shape_score is None:
+            continue
+        buckets.setdefault(c.case_id, []).append(c.shape_score)
+    return {
+        case_id: round(sum(scores) / len(scores), 4)
+        for case_id, scores in sorted(buckets.items())
+    }
+
+
 def _case_to_dict(c: CaseReport) -> dict:
     o = c.outcome
     return {
@@ -58,6 +71,7 @@ def _case_to_dict(c: CaseReport) -> dict:
         "category": c.category,
         "mast": c.mast,
         "passed": c.passed,
+        "shape_score": c.shape_score,
         "checks": [
             {"name": ck.name, "passed": ck.passed, "detail": ck.detail, "gating": ck.gating}
             for ck in c.checks
@@ -90,6 +104,9 @@ def _case_to_dict(c: CaseReport) -> dict:
             "rounds": o.rounds,
             "delegated": o.delegated,
             "roster": o.roster,
+            "plan_runs": o.plan_runs,
+            "plan_type": o.plan_type,
+            "collab_interactions": o.collab_interactions,
             "tool_calls": [name for name, _ in o.tool_calls],
             "citations": len(o.citations),
             "usage": o.usage,
@@ -104,6 +121,8 @@ def _case_to_dict(c: CaseReport) -> dict:
 def report_to_dict(report: EvalReport) -> dict:
     """整套报告 → JSON-able dict（汇总 + 逐例）。落盘为 baseline、供 P2 回归对比。"""
     total_cost = round(sum(c.outcome.cost_usd for c in report.cases), 6)
+    shape_scores = [c.shape_score for c in report.cases if c.shape_score is not None]
+    shape_by_case = shape_means_by_case(report)
     return {
         "summary": {
             "total": report.total,
@@ -112,6 +131,10 @@ def report_to_dict(report: EvalReport) -> dict:
             "cost_usd": total_cost,
             "by_category": category_breakdown(report),
             "by_mast": mast_breakdown(report),
+            "shape_score_mean": (
+                round(sum(shape_scores) / len(shape_scores), 4) if shape_scores else None
+            ),
+            "shape_score_by_case": shape_by_case or None,
         },
         "cases": [_case_to_dict(c) for c in report.cases],
     }
@@ -137,6 +160,12 @@ def format_report(report: EvalReport) -> str:
             thr = c.milestone.threshold * 100
             miss = [it.id for it in c.milestone.items if not it.covered]
             lines.append(f"    {mk} Milestone 覆盖 {cov:.0f}% (阈 {thr:.0f}%) 缺={miss}")
+        if c.shape_score is not None:
+            lines.append(f"    [~] ShapeScore: {c.shape_score:.2f} (诊断)")
+        interactions = c.outcome.collab_interactions
+        if interactions:
+            bits = ", ".join(f"{k}={v}" for k, v in sorted(interactions.items()))
+            lines.append(f"    [~] CollabInteractions: {bits} (诊断)")
         if c.outcome.error:
             lines.append(f"    !!! error: {c.outcome.error}")
     lines.append("-" * 64)
@@ -165,6 +194,15 @@ def format_report(report: EvalReport) -> str:
     total_cost = sum(c.outcome.cost_usd for c in report.cases)
     pct = report.pass_rate * 100
     lines.append(f"总计: {report.passed}/{report.total} 通过 ({pct:.0f}%)   成本 ${total_cost:.4f}")
+    shape_by_case = shape_means_by_case(report)
+    if shape_by_case:
+        overall = [
+            c.shape_score for c in report.cases if c.shape_score is not None
+        ]
+        mean = sum(overall) / len(overall) if overall else 0.0
+        lines.append(f"形状均分: {mean:.2f}")
+        for case_id, score in shape_by_case.items():
+            lines.append(f"  shape@{case_id}: {score:.2f}")
     lines.append("=" * 64)
     return "\n".join(lines)
 

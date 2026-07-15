@@ -52,7 +52,7 @@ describe("WorkspaceClientTools", () => {
         openShellAtPath: openShell,
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "打开文件夹" }));
+    fireEvent.click(screen.getByRole("button", { name: "打开此对话文件夹" }));
     fireEvent.click(screen.getByRole("button", { name: "在终端打开" }));
     expect(reveal).toHaveBeenCalledWith("");
     expect(openShell).toHaveBeenCalledWith(".");

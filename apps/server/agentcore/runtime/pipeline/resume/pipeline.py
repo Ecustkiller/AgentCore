@@ -3,26 +3,20 @@
 from __future__ import annotations
 
 import contextlib
-import re
 from dataclasses import asdict
 
 import agentcore.runtime.pipeline as pipeline_pkg
-from agentcore.board.channel import BoardChannel
-from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import error_fields_for
 from agentcore.core.logging import get_logger
-from agentcore.core.types import AutonomyPolicy, new_id
-from agentcore.desktop.channel import DesktopClientChannel
+from agentcore.core.types import AutonomyPolicy, PermissionPreset, new_id, preset_to_autonomy
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
 from agentcore.llm.profiles import turn_profiles_for_turn
-from agentcore.llm.provider.protocol import LLMMessage
-from agentcore.runtime.approvals import ApprovalGate
+from agentcore.runtime.approvals import ApprovalGate  # noqa: F401 — test seam
 from agentcore.runtime.audit.hooks import bind_recorder
 from agentcore.runtime.checkpoints import CheckpointDecision
-from agentcore.runtime.context import build_workspace_context, desktop_client_can_bind
-from agentcore.runtime.costing import RunCost, captain_run_cost_from_state
+from agentcore.runtime.costing import captain_run_cost_from_state
 from agentcore.runtime.events import (
     EventSink,
     FinishReason,
@@ -32,58 +26,27 @@ from agentcore.runtime.events import (
     message_start,
 )
 from agentcore.runtime.facts import TurnFactLog, current_fact_log
-from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
 from agentcore.runtime.pipeline.resume.finish import finish_resume_turn, finish_terminal_resume
-from agentcore.runtime.pipeline.resume.settle import append_resumed_tool_results
-from agentcore.runtime.pipeline.resume.window import pre_pause_content, resumed_captain_window
-from agentcore.runtime.recover import recover_turn
-from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset, _wire_worker_memory_tools
+from agentcore.runtime.pipeline.resume.recover_path import recover_and_rebuild_window
+from agentcore.runtime.pipeline.resume.wire import restamp_workspace_facts, wire_resume_turn
+from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset  # noqa: F401 — wire seam
 from agentcore.runtime.runs import RunKind, RunPhase, RunSpec, build_captain_resumer
 from agentcore.runtime.session_persistence import SessionRosterWriter
-from agentcore.runtime.sessions import SessionLoader, SessionSaver, default_session_registry
+from agentcore.runtime.sessions import SessionLoader, SessionSaver
 from agentcore.runtime.settlement import seed_settlement_dedupe_from_entries
-from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.runtime.suspension import (
     SuspensionDeleter,
     SuspensionSaver,
     TurnSuspension,
-    captain_transcript,
     turn_history,
 )
-from agentcore.runtime.turn_state import TurnState
-from agentcore.tools.builtin import (
-    approval_class_tool_names,
-    build_worker_registry,
-    delegation_grantable_tool_names,
-    per_call_tool_names,
-)
-from agentcore.tools.builtin.board_ops import BoardOpsTool
-from agentcore.tools.builtin.board_read import BoardReadTool
-from agentcore.tools.protocol import ToolContext
-from agentcore.vision import build_vision_reader
-from agentcore.workspace.locate import workspace_channel_for_tools
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
 
-_WORKSPACE_CONTEXT_RE = re.compile(
-    r"<workspace_context>.*?</workspace_context>\n?",
-    re.DOTALL,
-)
-
-
-def _restamp_workspace_facts(prompt: str, facts: str) -> str:
-    """Replace (or append) ``<workspace_context>`` so post-bind resume workers see the new location."""
-    stripped = _WORKSPACE_CONTEXT_RE.sub("", prompt or "").rstrip()
-    if not facts:
-        return stripped
-    marker = "</runtime_context>"
-    idx = stripped.find(marker)
-    if idx >= 0:
-        insert_at = idx + len(marker)
-        return stripped[:insert_at] + "\n" + facts + stripped[insert_at:]
-    return stripped + "\n" + facts
+# Compat: tests import the private name from this module.
+_restamp_workspace_facts = restamp_workspace_facts
 
 
 async def resume_chat_pipeline(
@@ -104,6 +67,7 @@ async def resume_chat_pipeline(
     suspension_deleter: SuspensionDeleter | None = None,
     llm_supports_tools: bool | None = None,
     autonomy_policy: AutonomyPolicy | None = None,
+    permission_preset: PermissionPreset | None = None,
     x_client_platform: str | None = None,
 ) -> dict:
     """Continue a turn paused at a plan_review / ask_user checkpoint (结构化挂起 2b resume).
@@ -130,12 +94,14 @@ async def resume_chat_pipeline(
     for every ordinary chat — then ``board_ops`` is neither wired nor reachable, exactly as
     on the fresh-turn path.
 
-    ``autonomy_policy`` mirrors :func:`run_chat_pipeline`: the user's CURRENT
-    capability-authorization posture (安全权限与治理 §三), resolved by the caller at
-    resume time — not frozen into the frame, so a mid-pause settings change applies.
-    ``None`` falls back to ``first_grant``.
+    ``permission_preset`` / ``autonomy_policy`` mirror :func:`run_chat_pipeline`: the
+    conversation's CURRENT permission mode (安全权限与治理 · 会话级权限模式), resolved
+    by the caller at resume time — not frozen into the frame. ``None`` falls back to
+    workspace / first_grant.
     """
-    if autonomy_policy is None:
+    if permission_preset is not None:
+        autonomy_policy = preset_to_autonomy(permission_preset)
+    elif autonomy_policy is None:
         autonomy_policy = AutonomyPolicy.FIRST_GRANT
     profiles = turn_profiles_for_turn(profile_set, llm_credentials)
     message_id = suspension.message_id
@@ -198,7 +164,13 @@ async def resume_chat_pipeline(
         turn_id=message_id,
         trace_id=suspension.trace_id or get_log_value("trace_id"),
         captain_run_id=captain_run_id,
-        delegated=bool(getattr(suspension, "plan", None) and getattr(suspension.plan, "nodes", None)),
+        delegated=bool(
+            (getattr(suspension, "plan", None) and getattr(suspension.plan, "nodes", None))
+            or permission_preset is PermissionPreset.FULL_TRUST
+        ),
+        permission_preset=(
+            permission_preset.value if permission_preset is not None else None
+        ),
     )
     # Session roster write-through (as-built: 成本配额 §三): fire-and-forget + turn-end flush (parity with run).
     roster_writer = SessionRosterWriter.wrap(session_saver)
@@ -207,136 +179,28 @@ async def resume_chat_pipeline(
     fact_log_token = current_fact_log.set(fact_log)
     execution_id_token = None
     bound_execution_id: str | None = None
+    pre_pause = ""
     try:
-        worker_tools = build_worker_registry(backend=backend)
-        _wire_worker_memory_tools(
-            worker_tools,
-            memory_enabled=suspension.memory_enabled,
-            folder_id=suspension.folder_id,
-        )
-        # Same system-skill registry as a fresh turn so the resumed CEO loop can
-        # still consult_skill (提示词瘦身 P2), including the legal vertical skill when
-        # enabled. The CEO prompt itself is replayed from the stored transcript
-        # (already slim + 能力目录), so no directory re-render.
-        skill_registry = build_system_skill_registry(include_legal=settings.legal_vertical_enabled)
-        # AI 协作白板 (§六 M2): a board-bound turn that paused at a checkpoint regains its
-        # BoardChannel on resume, so the continued CEO loop can still reach the user's open
-        # canvas via ``board_ops``. Rebuilt fresh (channels aren't serializable) from the
-        # caller's re-derived ``board_id`` + this resume's sink, bound on the SAME shared
-        # interaction bridge the ops-resolve endpoint settles. ``None`` ⇒ ordinary chat,
-        # tool unwired below — symmetric with the fresh-turn path (run.py).
-        board_channel = (
-            BoardChannel(
-                sink=sink,
-                conversation_id=conversation_id,
-                board_id=board_id,
-                registry=default_interaction_registry(),
-                timeout_seconds=settings.board_op_timeout_seconds,
-            )
-            if board_id
-            else None
-        )
-        desktop_channel = (
-            DesktopClientChannel(
-                sink=sink,
-                conversation_id=conversation_id,
-                registry=default_interaction_registry(),
-                timeout_seconds=settings.board_op_timeout_seconds,
-            )
-            if backend.location == "local"
-            else None
-        )
-        workspace_channel = workspace_channel_for_tools(
-            backend,
-            sink=sink,
-            conversation_id=conversation_id,
-        )
-        # AI 协作白板 §九.4 Gap ②: the resumed turn's vision cost sink, shared by reference
-        # across derived run contexts — symmetric with the fresh-turn path (run.py). A
-        # board_read after the checkpoint bills its 读图 row here; folded into cost_runs below.
-        vision_cost_sink: list[RunCost] = []
-        base_tool_context = ToolContext(
-            execution_id=new_id(),
-            run_id=new_id(),
-            agent_id="default",
-            backend=backend,
-            user_id=suspension.user_id,
-            conversation_id=conversation_id,
-            board_channel=board_channel,
-            desktop_channel=desktop_channel,
-            workspace_channel=workspace_channel,
-            # §九.4: vision provider (QwenVL) — set VISION_API_KEY to enable; None ⇒
-            # board_read returns a clean「读图能力未配置」error (「插上即用」).
-            vision_reader=build_vision_reader(),
-            cost_sink=vision_cost_sink,
-        )
-        from agentcore.runtime.coordination.session import current_execution_id
-
-        bound_execution_id = base_tool_context.execution_id
-        execution_id_token = current_execution_id.set(bound_execution_id)
-        approval_gate = (
-            ApprovalGate(
-                sink=sink,
-                conversation_id=conversation_id,
-                registry=default_interaction_registry(),
-                timeout_seconds=settings.approval_timeout_seconds,
-                timeout_overrides=settings.approval_timeout_overrides,
-                file_op_tools=approval_class_tool_names(),
-                per_call_tools=per_call_tool_names(),
-                delegation_grantable_tools=delegation_grantable_tool_names(),
-                autonomy_policy=autonomy_policy,
-            )
-            if settings.approval_gate_enabled
-            else None
-        )
-        session_store = default_session_registry().get_or_create(conversation_id)
-        checkpoint_enabled = settings.checkpoint_gate_enabled
-        # Re-stamp environment facts onto the stored worker base: resume rebuilds the
-        # backend from the CURRENT binding (bind-during-ask_user → local), so workers
-        # delegated after resume must not inherit a stale cloud ``<workspace_context>``.
-        desktop_online = (
-            desktop_client_can_bind(x_client_platform) or backend.location == "local"
-        )
-        refreshed_base = _restamp_workspace_facts(
-            suspension.base_system_prompt,
-            build_workspace_context(backend, desktop_online=desktop_online),
-        )
-        delegate_tool, debate_tool, chat_tools = _assemble_ceo_toolset(
+        wired = await wire_resume_turn(
+            suspension=suspension,
             llm=llm,
             sink=sink,
-            base_system_prompt=refreshed_base,
-            user_message=suspension.user_message,
-            history=[],
-            worker_tools=worker_tools,
-            base_tool_context=base_tool_context,
+            backend=backend,
+            board_id=board_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            captain_run_id=captain_run_id,
             profiles=profiles,
-            approval_gate=approval_gate,
-            session_store=session_store,
+            autonomy_policy=autonomy_policy,
+            permission_preset=permission_preset,
             session_saver=session_saver,
             session_loader=session_loader,
-            conversation_id=conversation_id,
-            captain_run_id=captain_run_id,
-            checkpoint_enabled=checkpoint_enabled,
-            message_id=message_id,
             suspension_saver=suspension_saver,
             suspension_deleter=suspension_deleter,
-            backend_location=backend.location,
-            skill_registry=skill_registry,
-            folder_id=suspension.folder_id,
-            memory_enabled=suspension.memory_enabled,
-            autonomy_policy=autonomy_policy,
-            advertise_bind_local_folder=checkpoint_enabled
-            and desktop_client_can_bind(x_client_platform),
+            x_client_platform=x_client_platform,
         )
-
-        # AI 协作白板: re-give the resumed CEO the board tools (``board_ops`` §六 M2 +
-        # ``board_read`` §九) so it can keep drawing / reading after the checkpoint. Registered
-        # into the assembled toolset BEFORE the loop runs, so they join this resume's LLM
-        # function catalog (the replayed system prompt is the stored slim one — the catalog,
-        # not the prompt, is what makes a tool callable). Only in a 白板会话.
-        if board_channel is not None:
-            chat_tools.register(BoardOpsTool())
-            chat_tools.register(BoardReadTool())
+        bound_execution_id = wired.bound_execution_id
+        execution_id_token = wired.execution_id_token
 
         sink.emit(message_start(message_id, conversation_id=conversation_id))
         # Continue the pre-pause exchange: seed the journal so the persisted turn
@@ -344,68 +208,21 @@ async def resume_chat_pipeline(
         # checkpoint, then settle the pause.
         sink.seed_journal(suspension.journal)
 
-        # Rebuild the CEO window by FOLDING the turn journal (Phase 2 ④): the captain
-        # transcript at pause is a projection of the §8.3 facts, not a stored blob —
-        # window_from_journal(journal_entries) + the reloaded history reconstructs the
-        # exact messages the CEO suspended on (the conformance golden gates this ==).
-        transcript = resumed_captain_window(suspension, history)
-
-        # Publish the pre-pause CEO transcript so a re-pause DURING the settle (a
-        # second downstream checkpoint while resume_plan runs) captures the same
-        # transcript the CEO is still suspended on — symmetric with the original pause.
-        token = captain_transcript.set(transcript)
-        try:
-            # Single recover primitive: journal projection → seed WaveScheduler / settle.
-            turn_state = TurnState.from_journal(
-                suspension.journal_entries,
-                display_journal=suspension.journal,
-            )
-            settled = await recover_turn(
-                state=turn_state,
-                sink=sink,
-                delegate_tool=delegate_tool,
-                debate_tool=debate_tool,
-                execution_id=base_tool_context.execution_id,
-                suspension=suspension,
-                decision=decision,
-                note=note,
-                selected=selected or [],
-            )
-            logger.info(
-                "pipeline.resume_settled",
-                checkpoint_id=suspension.checkpoint_id,
-                decision=decision.value,
-                kind=suspension.kind.value,
-            )
-        finally:
-            captain_transcript.reset(token)
-
-        # Rebuild the CEO transcript: the folded window (ending at the assistant
-        # suspended call) + that call's settled tool result.
-        messages = list(transcript)
-        # Carry the CEO's pre-pause reply forward: the resumed loop below starts from a
-        # blank content, so without this the persisted content (and the next turn's LLM
-        # history) would lose everything written before the pause — parity with live.
-        pre_pause = pre_pause_content(transcript)
-        append_resumed_tool_results(messages, suspension.tool_call_id, settled.output)
-
-        # 终稿多段衔接: when the pause kept deliverable prose, steer the resumed answer
-        # round to continue it (join_segments alone can't invent transitions). Skip when
-        # the user STOPPED (terminal_text path finishes without another CEO round).
-        if pre_pause.strip() and settled.terminal_text is None:
-            from agentcore.runtime.engine import deliverable_continuity_instruction
-            from agentcore.runtime.facts import NoteFact, record_turn_fact
-
-            continuity = deliverable_continuity_instruction(prior_deliverable=pre_pause)
-            messages.append(LLMMessage(role="user", content=continuity))
-            record_turn_fact(
-                NoteFact(
-                    role="user",
-                    content=continuity,
-                    reason="continuity",
-                    run_id=captain_run_id,
-                ).to_fact()
-            )
+        recovered = await recover_and_rebuild_window(
+            suspension=suspension,
+            decision=decision,
+            note=note,
+            selected=selected,
+            history=history,
+            sink=sink,
+            delegate_tool=wired.delegate_tool,
+            debate_tool=wired.debate_tool,
+            execution_id=wired.base_tool_context.execution_id,
+            captain_run_id=captain_run_id,
+        )
+        pre_pause = recovered.pre_pause
+        settled = recovered.settled
+        messages = recovered.messages
 
         # ask_user stop: the closing note IS the reply (terminal effect) — finish
         # without another CEO round, mirroring the engine's terminal-effect branch.
@@ -425,7 +242,9 @@ async def resume_chat_pipeline(
             return result
 
         # Otherwise run the CEO loop to its reply (it may delegate / ask again).
-        profile = profiles.get("chat")
+        from agentcore.runtime.captain_profile import apply_captain_max_rounds
+
+        profile = apply_captain_max_rounds(profiles.get("chat"))
         turn_model = profiles.model_for("chat")
         citations: list[dict] = []
         captain_spec = RunSpec(
@@ -440,13 +259,13 @@ async def resume_chat_pipeline(
         )
         run_captain = build_captain_resumer(
             llm=llm,
-            tools=chat_tools,
+            tools=wired.chat_tools,
             sink=sink,
-            base_tool_context=base_tool_context,
+            base_tool_context=wired.base_tool_context,
             profile=profile,
             turn_model=turn_model,
             citation_sink=citations,
-            approval_gate=approval_gate,
+            approval_gate=wired.approval_gate,
             supports_tools=llm_supports_tools,
         )
         captain_state = await run_captain(captain_spec, messages)
@@ -487,7 +306,7 @@ async def resume_chat_pipeline(
                 ),
                 # A board_read after the checkpoint may have billed before the captain
                 # died (§九.4 Gap ②): carry those vision rows so the spend isn't lost.
-                *(asdict(r) for r in vision_cost_sink),
+                *(asdict(r) for r in wired.vision_cost_sink),
             ]
             await audit_recorder.flush()
             if roster_writer is not None:
@@ -508,12 +327,12 @@ async def resume_chat_pipeline(
             captain_run_id=captain_run_id,
             captain_state=captain_state,
             pre_pause_content=pre_pause,
-            delegate_tool=delegate_tool,
-            debate_tool=debate_tool,
+            delegate_tool=wired.delegate_tool,
+            debate_tool=wired.debate_tool,
             profile=profile,
             citations=citations,
             sink=sink,
-            vision_cost_runs=vision_cost_sink,
+            vision_cost_runs=wired.vision_cost_sink,
             audit_drops=audit_recorder.drops,
         )
         # Drain journal → audit projection fully BEFORE 定格 audit_drops (parity with
@@ -550,8 +369,7 @@ async def resume_chat_pipeline(
         mem = sink.stream_memory_snapshot()
         post = pick_longest(mem.get(CHANNEL_CAPTAIN_CONTENT), sink.streamed_content())
         # pre_pause may be unbound if the crash was before it was computed.
-        prior = locals().get("pre_pause") or ""
-        salvaged_content = join_segments(prior, post) if prior or post else ""
+        salvaged_content = join_segments(pre_pause, post) if pre_pause or post else ""
         salvaged_reasoning = pick_longest(
             mem.get(CHANNEL_CAPTAIN_REASONING),
             sink.streamed_reasoning(),
@@ -573,9 +391,7 @@ async def resume_chat_pipeline(
         with contextlib.suppress(Exception):
             from agentcore.runtime.interaction_orphan import orphan_registry_pending
 
-            await orphan_registry_pending(
-                conversation_id, turn_id=message_id
-            )
+            await orphan_registry_pending(conversation_id, turn_id=message_id)
         current_fact_log.reset(fact_log_token)
         # Drain the append-on-emit journal BEFORE dropping the writer: an abandoned in-flight
         # write leaves a checked-out DB connection for the GC to terminate (asyncpg

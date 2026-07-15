@@ -6,6 +6,7 @@ import type {
   DebateNarrativeRound,
   DebateResultPayload,
   PlanRevisionKind,
+  ProcessStep,
   RunDebrief,
   RunKind,
   SSEEvent,
@@ -301,6 +302,8 @@ export interface RunNode {
   stance: Stance | null;
   group: string | null;
   round: number;
+  /** 辩论续写语义方 key（质询 / 结辩 / 续轮）；缺字段（老 journal）→ null，投影回退 stance / sides。 */
+  sideKey: string | null;
   /** 同人接续（续派 / 热修 / 辩论续写）：现场根 run id（星型），null = 冷开局。
    * 未进 plan 的续写由 `run_started` 合成；计划内续派节点亦在 started 时写入本字段。 */
   continuesRunId: string | null;
@@ -332,6 +335,10 @@ export interface RunNode {
    * the common case; non-empty drives the node's ⚠️ badge + the card's live notice.
    * Appended on each `run_escalation` frame. */
   escalations: RunEscalation[];
+  /** Per-run 思考·正文·工具 timeline (对称 CEO ``message.process``). Live-folded from
+   * ``run_reasoning_delta`` / ``run_output_delta`` / worker ``tool_use_*``; reload overlays
+   * ``runs.run_processes[runId]`` so interleaving matches live (not ``message_final`` splice). */
+  process: ProcessStep[];
 }
 
 /** 多任务并行调度 (batch_metrics): one dispatched node's occupancy window, folded (snake→camel) from a
@@ -395,6 +402,11 @@ export interface Execution {
    * 出主持人逐轮焦点 / 小结 / 裁判，而非干等 {@link debate} 收场。P2 DURABLE——落 journal，
    * 刷新后 hydrateFromJournal 重建；收场后全量叙事线亦在 {@link debate}。非辩论恒 `[]`。 */
   debateRounds: DebateNarrativeRound[];
+  /** 本场是否开启质询（`debate_round_started.cross_exam_enabled`）。缺字段 → false。 */
+  crossExamEnabled: boolean;
+  /** 主持人开场白（`debate_round_started.opening`）：仅首轮携带；sticky 取第一个非空。
+   * 收场 {@link debate}.opening 仍是权威。缺字段 / 老 journal → null。 */
+  debateOpening: string | null;
   /** 团队便签墙 (§2.2 通): the notes workers broadcast to their concurrent siblings this turn
    * (`team_note_posted`), in post order, deduped by noteId — folded from the frame stream by
    * {@link projectExecution}. Journaled, so it replays on reload (hydrateFromJournal). Empty for
@@ -459,4 +471,6 @@ export interface ExecutionPlan {
 export interface ExecutionJournal {
   events: SSEEvent[];
   finishReason: string;
+  /** Per-run ProcessStep[] from journal (reload overlay). Absent on older journals. */
+  runProcesses?: Record<string, ProcessStep[]> | null;
 }

@@ -178,6 +178,28 @@ def _body(name: str) -> str:
     return build_system_skill_registry().get(name).body
 
 
+def test_team_orchestration_skill_teaches_shape_vocabulary():
+    # 协作优先重设计阶段 2：skill 教形状词汇表 + 组合规则 + 三档，playbook 降为教学示例。
+    body = _body("team_orchestration_advanced")
+    for term in (
+        "并列对象分组",
+        "角度扇出",
+        "证据驱动流水线",
+        "独立审查",
+        "有界返工环",
+        "契约共享面",
+        "独立多透镜诊断",
+        "部件一致性对账",
+        "对抗辩论",
+        "发散挑选",
+    ):
+        assert term in body, term
+    assert "默认中档" in body
+    assert "教学示例形状" in body and "对照学形状" in body
+    assert "免手搓" not in body  # 旧广告口径已撤
+    assert "research_report" in body  # listing still present as teaching examples
+
+
 def test_team_orchestration_skill_teaches_delegate_knobs():
     # Relocated from the old always-on hint: cost tier, quality contract, output
     # shaping, finalize, the DAG-vs-nesting distinction.
@@ -213,14 +235,20 @@ def test_team_orchestration_skill_teaches_parallel_review_notewall():
 
 
 def test_team_orchestration_skill_teaches_review_contract_template():
-    # CEO 须给审查 worker 预设统一契约，使产出共享 problems/suggestions/score 字段、
-    # 便于机械合并 + revise。该范式由 team_orchestration_advanced skill 教学（本测试即钉之）。
+    # 审查默认 prose + 中文 required_sections；结构化 JSON 仅走文件通道（artifacts）。
+    # 钉：格式只在 deliverable、task 不双写、勿混用 json+required_sections、web_search 软引导。
     body = _body("team_orchestration_advanced")
     assert "审查类任务的统一契约" in body
-    assert "output_format" in body and "json" in body
-    assert "problems" in body and "suggestions" in body and "score" in body
+    assert "默认 prose" in body
+    assert 'required_sections": ["问题", "建议", "评分"]' in body
+    assert "结构化交付走文件通道" in body
+    assert "artifacts" in body and "output_format" in body and "json" in body
+    assert "禁止" in body  # 混用防御
+    assert "web_search" in body
+    assert "全文" in body or "复制" in body
     assert "deliverable" in body
-    assert "required_sections" in body  # markdown fallback
+    assert "custom" in body and "不被引擎验证" in body
+    assert "problems" in body and "suggestions" in body and "score" in body
 
 
 def test_team_orchestration_skill_teaches_seed_notes_and_team_brief():
@@ -267,6 +295,16 @@ def test_debate_skill_teaches_intent_alignment_before_opening():
     # ② 关键指代模糊先澄清，用 ask_user 确认，而非自挑一解开辩
     assert "先澄清" in body
     assert "ask_user" in body
+
+
+def test_debate_skill_teaches_background_for_concrete_cases():
+    # 赛前底料引导：具体案件 / 真实事件类命题建议传 background（3–5 条客观事实），
+    # 纯价值观命题不必——避免双方重复检索同一批底料。Pins the引导措辞。
+    body = _body("debate_and_review")
+    assert "background" in body
+    assert "具体案件" in body or "真实事件" in body
+    assert "客观事实" in body
+    assert "不必传" in body or "不必" in body
 
 
 def test_revise_skill_teaches_recall_and_delegate_fallback():

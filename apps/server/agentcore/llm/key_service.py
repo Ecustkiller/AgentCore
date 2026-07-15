@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.billing.preference import (
+    is_free_tier_active,
     is_platform_available,
     resolve_effective_billing_mode,
     validate_billing_preference,
@@ -51,6 +52,11 @@ class LlmKeyStatus:
     billing_preference: str = "byok"
     platform_available: bool = False
     platform_model: str | None = None
+    free_tier_active: bool = False
+    price_cache_hit: str | None = None
+    price_cache_miss: str | None = None
+    price_output: str | None = None
+    background_model: str | None = None
 
 
 def _mask_key(api_key: str) -> str:
@@ -67,6 +73,10 @@ def _status_from_row(row) -> LlmKeyStatus:
         base_url=row.base_url,
         default_model=row.default_model,
         supports_tools=row.supports_tools,
+        price_cache_hit=getattr(row, "price_cache_hit", None),
+        price_cache_miss=getattr(row, "price_cache_miss", None),
+        price_output=getattr(row, "price_output", None),
+        background_model=getattr(row, "background_model", None),
     )
 
 
@@ -117,7 +127,9 @@ class LlmKeyService:
             self._billing_context(user)
         )
         row = await self._repo.get_by_user_id(user_id)
-        if row is None or not row.api_key_enc:
+        has_key = row is not None and bool(row.api_key_enc)
+        free_tier = is_free_tier_active(has_user_key=has_key)
+        if not has_key:
             if billing_mode == "platform":
                 return LlmKeyStatus(
                     configured=False,
@@ -129,6 +141,7 @@ class LlmKeyService:
                     billing_preference=billing_preference,
                     platform_available=platform_available,
                     platform_model=platform_model,
+                    free_tier_active=free_tier,
                 )
             return LlmKeyStatus(
                 configured=False,
@@ -136,6 +149,7 @@ class LlmKeyService:
                 billing_mode=billing_mode,
                 billing_preference=billing_preference,
                 platform_available=platform_available,
+                free_tier_active=free_tier,
             )
         masked: str | None = None
         enc = self._encryptor()
@@ -159,6 +173,11 @@ class LlmKeyService:
             billing_preference=billing_preference,
             platform_available=platform_available,
             platform_model=platform_model,
+            free_tier_active=False,
+            price_cache_hit=base.price_cache_hit,
+            price_cache_miss=base.price_cache_miss,
+            price_output=base.price_output,
+            background_model=base.background_model,
         )
 
     async def set_billing_preference(self, user_id: str, preference: str) -> LlmKeyStatus:
@@ -183,6 +202,10 @@ class LlmKeyService:
         *,
         base_url: str | None = None,
         default_model: str | None = None,
+        price_cache_hit: str | None = None,
+        price_cache_miss: str | None = None,
+        price_output: str | None = None,
+        background_model: str | None = None,
     ) -> LlmKeyStatus:
         """Encrypt + store the user's LLM config, resetting status to 'unchecked'.
 
@@ -201,6 +224,19 @@ class LlmKeyService:
         resolved_model = (default_model or DEEPSEEK_V4_FLASH).strip()
         if not resolved_model:
             raise ValidationError("模型名称不能为空")
+        from agentcore.llm.pricing import parse_user_prices
+
+        # Unit card: input (cache_miss) + output are the required pair; cache_hit
+        # is optional (pricing defaults it to the input price — no cache
+        # discount). Leaving every field empty clears the card.
+        price_fields = (price_cache_hit, price_cache_miss, price_output)
+        has_core = all(p and str(p).strip() for p in (price_cache_miss, price_output))
+        if any(price_fields) and not has_core:
+            raise ValidationError("单价须至少填写输入与输出两项（缓存命中价可选），或全部留空")
+        if has_core and parse_user_prices(
+            cache_hit=price_cache_hit, cache_miss=price_cache_miss, output=price_output
+        ) is None:
+            raise ValidationError("单价须为非负十进制数字（USD per 1M tokens）")
         enc = self._encryptor()
         if enc is None:
             raise KeyStorageUnavailableError(
@@ -212,15 +248,12 @@ class LlmKeyService:
             api_key_enc=ciphertext,
             base_url=resolved_base_url,
             default_model=resolved_model,
+            price_cache_hit=(price_cache_hit.strip() if price_cache_hit else None),
+            price_cache_miss=(price_cache_miss.strip() if price_cache_miss else None),
+            price_output=(price_output.strip() if price_output else None),
+            background_model=(background_model.strip() if background_model else None),
         )
-        return LlmKeyStatus(
-            configured=True,
-            status=row.status,
-            masked_key=_mask_key(api_key),
-            base_url=row.base_url,
-            default_model=row.default_model,
-            supports_tools=row.supports_tools,
-        )
+        return await self.get_status(user_id)
 
     async def clear_key(self, user_id: str) -> None:
         """Delete the user's config (idempotent — no error if there was none)."""

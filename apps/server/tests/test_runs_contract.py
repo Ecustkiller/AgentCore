@@ -141,10 +141,11 @@ def test_describe_deliverable_renders_rules():
             required_sections=["结论"], must_contain=["风险"], min_length=200, output_format="json"
         )
     )
-    assert "结论" in desc
+    # json + required_sections: describe only surfaces JSON (Markdown sections skipped)
+    assert "JSON" in desc
     assert "风险" in desc
     assert "200" in desc
-    assert "JSON" in desc
+    assert "小标题" not in desc
 
 
 def test_describe_deliverable_none_is_empty():
@@ -154,6 +155,81 @@ def test_describe_deliverable_none_is_empty():
 def test_describe_deliverable_renders_name():
     desc = describe_deliverable(Deliverable(name="方向③-案例卡.html"))
     assert desc == "交付物：方向③-案例卡.html"
+
+
+def test_describe_deliverable_json_file_channel():
+    desc = describe_deliverable(
+        Deliverable(
+            form="files",
+            output_format="json",
+            artifacts=["reviews/legal.json"],
+            name="结构化审查",
+        )
+    )
+    assert "JSON" in desc
+    assert "reviews/legal.json" in desc
+    assert "文件存在" in desc or "可解析" in desc
+
+
+# --- Mix defense: output_format=json vs required_sections (Markdown) -------------
+
+
+def test_json_skips_required_sections_mix():
+    # JSON field names stuffed into required_sections must not cause false failure.
+    contract = RunContract(
+        output_format="json",
+        required_sections=["problems", "suggestions", "score"],
+    )
+    v = check_contract('{"problems": [], "suggestions": [], "score": 8}', contract)
+    assert v.ok
+    assert v.failures == []
+
+
+def test_json_file_channel_accepts_prose_chat_when_file_valid():
+    contract = RunContract(
+        output_format="json",
+        artifacts=["review.json"],
+        requires_files=True,
+    )
+    v = check_contract(
+        "已写入审查结果",
+        contract,
+        files_written=1,
+        workspace_paths=["review.json"],
+        artifact_contents={"review.json": '{"problems": [], "score": 7}'},
+    )
+    assert v.ok
+
+
+def test_json_file_channel_fails_when_file_not_json():
+    contract = RunContract(
+        output_format="json",
+        artifacts=["review.json"],
+        requires_files=True,
+    )
+    v = check_contract(
+        "已写入",
+        contract,
+        files_written=1,
+        workspace_paths=["review.json"],
+        artifact_contents={"review.json": "这不是 JSON"},
+    )
+    assert not v.ok
+    assert any("JSON" in f for f in v.failures)
+
+
+def test_json_file_channel_without_contents_still_checks_existence():
+    # Callers that only have a path index still get existence failures.
+    contract = RunContract(output_format="json", artifacts=["review.json"], requires_files=True)
+    v = check_contract(
+        "贴了",
+        contract,
+        files_written=1,
+        workspace_paths=[],
+        artifact_contents=None,
+    )
+    assert not v.ok
+    assert any("review.json" in f for f in v.failures)
 
 
 # --- requires_files: the deliverable-landed gate over files_written -------------

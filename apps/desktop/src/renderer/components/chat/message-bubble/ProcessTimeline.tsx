@@ -1,10 +1,6 @@
-import { CheckpointCard } from "@/components/chat/CheckpointCard";
 import { EscalationCards } from "@/components/chat/EscalationCard";
 import { InlineTeamGraph } from "@/components/chat/InlineTeamGraph";
 import { Markdown } from "@/components/chat/Markdown";
-import { NonBlockingAskCard } from "@/components/chat/NonBlockingAskCard";
-import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
-import { TeamPreviewCard } from "@/components/chat/TeamPreviewCard";
 import {
   ComposingToolLine,
   ToolLine,
@@ -19,6 +15,7 @@ import type {
 } from "@/stores/conversation";
 import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import type { ExecutionJournal } from "@/stores/execution";
+import { renderTimelineInteractionCard } from "@/stores/interactions/registryUi";
 import type { Citation, ProcessStep } from "@/types/events";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Fragment } from "react";
@@ -151,6 +148,9 @@ export function ProcessTimeline({
   nonBlockingAsks,
   planReviews,
   teamPreviews,
+  /** When false, never collapse reasoning/tool rows into a summary (run-detail panel).
+   * Default true keeps CEO bubble chrome. */
+  collapseProcessSteps = true,
 }: {
   process: ProcessStep[];
   isStreaming: boolean;
@@ -166,6 +166,7 @@ export function ProcessTimeline({
   nonBlockingAsks: NonBlockingAskDisplay[];
   planReviews: PlanReviewDisplay[];
   teamPreviews: TeamPreviewDisplay[];
+  collapseProcessSteps?: boolean;
 }) {
   const last = process[process.length - 1];
   const hasContentStep = process.some((s) => s.kind === "content");
@@ -183,6 +184,7 @@ export function ProcessTimeline({
   const hasProcessSteps = nodes.some(isProcessNode);
   const { reasoningCount, toolCount } = countProcessStats(nodes);
   const shouldCollapseProcess =
+    collapseProcessSteps &&
     !isStreaming &&
     hasProcessSteps &&
     !(reasoningCount === 1 && toolCount === 0);
@@ -211,21 +213,18 @@ export function ProcessTimeline({
         </Fragment>
       ) : null;
     }
-    if (node.kind === "checkpoint") {
-      const cp = checkpoints.find((c) => c.id === node.checkpoint_id);
-      return cp ? <CheckpointCard key={cp.id} checkpoint={cp} /> : null;
-    }
-    if (node.kind === "ask") {
-      const ask = nonBlockingAsks.find((a) => a.id === node.ask_id);
-      return ask ? <NonBlockingAskCard key={ask.id} ask={ask} /> : null;
-    }
-    if (node.kind === "plan_review") {
-      const pr = planReviews.find((p) => p.id === node.checkpoint_id);
-      return pr ? <PlanReviewCard key={pr.id} review={pr} /> : null;
-    }
-    if (node.kind === "team_preview") {
-      const tp = teamPreviews.find((p) => p.id === node.checkpoint_id);
-      return tp ? <TeamPreviewCard key={tp.id} preview={tp} /> : null;
+    if (
+      node.kind === "checkpoint" ||
+      node.kind === "ask" ||
+      node.kind === "plan_review" ||
+      node.kind === "team_preview"
+    ) {
+      return renderTimelineInteractionCard(node.kind, node, {
+        checkpoints,
+        nonBlockingAsks,
+        planReviews,
+        teamPreviews,
+      });
     }
     if (node.kind === "tool-group") {
       return (

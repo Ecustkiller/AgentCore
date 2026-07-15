@@ -27,7 +27,7 @@ const conv = (
   pinned: opts.pinned,
 });
 
-describe("buildWorkspaceGroups (方案B 工作区分组)", () => {
+describe("buildWorkspaceGroups (方案B 项目分组)", () => {
   it("groups foldered chats by folder and excludes 裸聊", () => {
     const groups = buildWorkspaceGroups(
       [

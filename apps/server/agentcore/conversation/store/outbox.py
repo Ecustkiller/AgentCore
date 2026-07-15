@@ -247,6 +247,82 @@ class OutboxStore:
         await self._mutate(user_message_id, mutate)
         return allocated[0]
 
+    async def append_journal_durable(
+        self,
+        *,
+        turn_id: str,
+        conversation_id: str,
+        trace_id: str | None,
+        entry: dict[str, Any],
+        user_message_id: str,
+    ) -> int:
+        """Settlement prewrite: append one journal entry and **raise** on failure.
+
+        Unlike :meth:`append_journal` (best-effort, never breaks the turn), D1
+        settlement must be durable before the paused frame is consumed — a silent
+        swallow would leave「已授权」without a journal fact.
+        """
+        if not _is_safe_id(user_message_id):
+            raise ValueError(f"unsafe outbox user_message_id: {user_message_id!r}")
+        allocated: list[int] = [-1]
+
+        def mutate(record: dict[str, Any]) -> None:
+            # Settlement may land while phase is still open; also allow a ready
+            # record that is being continued (idempotent re-prewrite no-ops via seq).
+            record["conversation_id"] = conversation_id or record.get("conversation_id")
+            record["message_id"] = turn_id or record.get("message_id")
+            if trace_id:
+                record["trace_id"] = trace_id
+            if not record.get("user_message_id"):
+                record["user_message_id"] = user_message_id
+            journal = record.setdefault("journal", {})
+            existing = [int(k) for k in journal if str(k).lstrip("-").isdigit()]
+            next_seq = (max(existing) + 1) if existing else 0
+            # Dedupe by settlement identity (kind + checkpoint_id) so retries don't fan out.
+            kind = str(entry.get("kind") or "")
+            payload = dict(entry.get("payload") or {})
+            cid = str(payload.get("checkpoint_id") or "")
+            if kind and cid:
+                for existing_entry in journal.values():
+                    if not isinstance(existing_entry, dict):
+                        continue
+                    if str(existing_entry.get("kind") or "") != kind:
+                        continue
+                    ep = dict(existing_entry.get("payload") or {})
+                    if str(ep.get("checkpoint_id") or "") == cid:
+                        allocated[0] = next(
+                            (
+                                int(k)
+                                for k, v in journal.items()
+                                if v is existing_entry and str(k).lstrip("-").isdigit()
+                            ),
+                            next_seq,
+                        )
+                        return
+            key = str(next_seq)
+            journal[key] = entry
+            allocated[0] = next_seq
+            ops = record.setdefault("ops", [])
+            if "journal_append" not in ops:
+                ops.append("journal_append")
+            if "settlement_prewrite" not in ops:
+                ops.append("settlement_prewrite")
+
+        async with self._lock_for(user_message_id):
+            await asyncio.to_thread(self._mutate_sync, user_message_id, mutate)
+        if allocated[0] < 0:
+            raise RuntimeError("settlement prewrite did not allocate a journal seq")
+        return allocated[0]
+
+    def find_record_by_message_id(self, message_id: str) -> dict[str, Any] | None:
+        """Read-only lookup of an outbox record by assistant ``message_id``."""
+        if not message_id:
+            return None
+        for record in list_outbox_records(self._base):
+            if str(record.get("message_id") or "") == message_id:
+                return record
+        return None
+
     async def finalize(
         self,
         *,
@@ -347,6 +423,24 @@ class OutboxStore:
                 key = str(entry.get("seq", i))
                 if key not in journal_map:
                     journal_map[key] = entry
+            # D2: settlement prewrite without a terminal finish → keep open so
+            # frameless continue still has local journal + resume_frame.
+            retain_open = False
+            for existing_entry in journal_map.values():
+                if not isinstance(existing_entry, dict):
+                    continue
+                kind = str(existing_entry.get("kind") or existing_entry.get("type") or "")
+                if not kind.endswith("_resolved"):
+                    continue
+                payload = existing_entry.get("payload")
+                if isinstance(payload, dict) and isinstance(payload.get("resume_frame"), dict):
+                    retain_open = True
+                    break
+            if retain_open:
+                ops = record.setdefault("ops", [])
+                if "salvage_retain_open" not in ops:
+                    ops.append("salvage_retain_open")
+                return
             # Align with CloudStore.salvage: cancelled + incomplete (not failed/error).
             record["finish_reason"] = "cancelled"
             record["phase"] = PHASE_READY

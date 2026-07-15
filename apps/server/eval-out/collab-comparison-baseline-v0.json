@@ -1,0 +1,130 @@
+{
+  "summary": {
+    "total_cases": 3,
+    "by_archetype": {
+      "parallel_research": {
+        "avg_win_rate": 0.375,
+        "avg_cost_ratio": 2.3024,
+        "cases": 2
+      },
+      "cross_domain": {
+        "avg_win_rate": 0.0,
+        "avg_cost_ratio": 4.106,
+        "cases": 1
+      }
+    }
+  },
+  "cases": [
+    {
+      "case_id": "par_collab_p1_ai_labs",
+      "archetype": "parallel_research",
+      "baseline_arm": "single",
+      "arms": {
+        "single": {
+          "samples": 2,
+          "errors": 0,
+          "passk": true,
+          "cost_usd_median": 0.012195433499999998,
+          "latency_ms_median": 72507.5,
+          "tokens_median": 140077.5,
+          "thinking_tokens_median": 1688.5
+        },
+        "team": {
+          "samples": 2,
+          "errors": 0,
+          "passk": false,
+          "cost_usd_median": 0.007078624,
+          "latency_ms_median": 52953.0,
+          "tokens_median": 163972.0,
+          "thinking_tokens_median": 1165.0
+        }
+      },
+      "comparisons": {
+        "team": {
+          "n": 2,
+          "wins": 1,
+          "ties": 1,
+          "losses": 0,
+          "win_rate": 0.75,
+          "cost_ratio": 0.5804,
+          "latency_ratio": 0.7303,
+          "thinking_token_ratio": 0.69
+        }
+      }
+    },
+    {
+      "case_id": "par_collab_p2_remote_work",
+      "archetype": "cross_domain",
+      "baseline_arm": "single",
+      "arms": {
+        "single": {
+          "samples": 2,
+          "errors": 0,
+          "passk": false,
+          "cost_usd_median": 0.009713508,
+          "latency_ms_median": 131778.0,
+          "tokens_median": 109684.0,
+          "thinking_tokens_median": 1412.5
+        },
+        "team": {
+          "samples": 2,
+          "errors": 0,
+          "passk": false,
+          "cost_usd_median": 0.039883686999999994,
+          "latency_ms_median": 259842.0,
+          "tokens_median": 780138.5,
+          "thinking_tokens_median": 6745.0
+        }
+      },
+      "comparisons": {
+        "team": {
+          "n": 2,
+          "wins": 0,
+          "ties": 0,
+          "losses": 2,
+          "win_rate": 0.0,
+          "cost_ratio": 4.106,
+          "latency_ratio": 1.9718,
+          "thinking_token_ratio": 4.7752
+        }
+      }
+    },
+    {
+      "case_id": "par_collab_p7_creator_plan",
+      "archetype": "parallel_research",
+      "baseline_arm": "single",
+      "arms": {
+        "single": {
+          "samples": 2,
+          "errors": 0,
+          "passk": true,
+          "cost_usd_median": 0.002766795,
+          "latency_ms_median": 65004.0,
+          "tokens_median": 33794.5,
+          "thinking_tokens_median": 736.5
+        },
+        "team": {
+          "samples": 2,
+          "errors": 0,
+          "passk": false,
+          "cost_usd_median": 0.0111343485,
+          "latency_ms_median": 159412.0,
+          "tokens_median": 287314.5,
+          "thinking_tokens_median": 3763.0
+        }
+      },
+      "comparisons": {
+        "team": {
+          "n": 2,
+          "wins": 0,
+          "ties": 0,
+          "losses": 2,
+          "win_rate": 0.0,
+          "cost_ratio": 4.0243,
+          "latency_ratio": 2.4523,
+          "thinking_token_ratio": 5.1093
+        }
+      }
+    }
+  ]
+}

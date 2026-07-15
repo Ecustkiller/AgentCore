@@ -5,6 +5,11 @@ export function conversationIdOf(wsId: string): string | null {
   return wsId.startsWith("conv:") ? wsId.slice("conv:".length) : null;
 }
 
+/** `ws_id = folder:<folderId>` → its folder id (project shared workspace). */
+export function folderIdOf(wsId: string): string | null {
+  return wsId.startsWith("folder:") ? wsId.slice("folder:".length) : null;
+}
+
 const RAIL_KEY = "files-rail-width";
 const RAIL_MIN = 200;
 const RAIL_MAX = 600;
@@ -37,7 +42,7 @@ function saveStringSet(key: string, set: Set<string>): void {
   uiSet(key, [...set]);
 }
 
-// 工作区段默认折叠（只露根「文件夹」标题），展开过的记进这个 set 持久化，下次进页面沿用
+// 工作区段默认折叠（只露根标题），展开过的记进这个 set 持久化，下次进页面沿用
 // （与 FileTree 内部 per-source 目录折叠态各管一层：这一层管「整个工作区段是否展开」）。
 const WS_EXPANDED_KEY = "files-ws-expanded";
 

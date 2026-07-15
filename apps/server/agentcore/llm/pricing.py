@@ -11,19 +11,35 @@ returned as integer **nano-USD** (1 USD = 1e9 nano) — the canonical unit store
 in the ``cost_events`` ledger and carried over the API. Only the display layer
 converts to CNY (via the single configured rate), so rounding never accretes
 across a month of aggregation.
+
+Pricing layers (call-level ``credential_source``):
+
+1. User-defined unit card (highest; only when ``credential_source=user``)
+2. In-repo community estimate table
+3. Curated ``_PRICING`` (platform/vendor ledger authority)
+
+User path never falls back to Flash — unknown → ``unpriced`` (0). Platform/vendor
+keep Flash fallback + warning (quota must not go blank).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from typing import Literal
 
-from agentcore.config import settings
 from agentcore.core.logging import get_logger
+from agentcore.llm.community_prices import community_pricing_for
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO
 from agentcore.llm.provider.protocol import TokenUsage
 
 logger = get_logger(__name__)
+
+# Call-level credential origin for pricing (replaces deployment ``billing_mode``).
+# user = BYOK; platform = operator main key; vendor = doubao/kimi/zhipu extras.
+CredentialSource = Literal["user", "platform", "vendor"]
+PricingSource = Literal["curated", "estimated", "user_defined", "unpriced"]
+_VENDOR_PREFIXES = frozenset({"doubao", "kimi", "zhipu"})
 
 # 1 USD expressed in nano-USD. The ledger and API speak integer nano-USD.
 NANO_PER_USD = 1_000_000_000
@@ -42,13 +58,9 @@ DOUBAO_SEED_TURBO = "doubao/doubao-seed-2-1-turbo-260628"
 # a logged warning until added — same posture as any unpriced model.
 QWEN_VL_MAX = "qwen-vl-max"
 
-# Platform upstream models (OpenAI / codex proxy). Codex has no public per-token invoice —
-# prices below are conservative internal estimates for ledger/quota, NOT upstream invoice rates.
+# Platform upstream reference model (OpenAI-compatible). Prices below are for ledger/quota.
 # gpt-4o: OpenAI API list price (2025-04) as the platform reference tier.
 PLATFORM_GPT_4O = "gpt-4o"
-# gpt-5.4 / gpt-5.5: ChatGPT Codex backend models (平台LLM接入.md §五); no vendor price card.
-PLATFORM_GPT_5_4 = "gpt-5.4"
-PLATFORM_GPT_5_5 = "gpt-5.5"
 
 # USD per 1M tokens. DeepSeek: docs/03-AI核心/DeepSeek-V4-API参考.md §三 (authoritative);
 # cache_hit is ~50× cheaper than cache_miss — splitting input by hit/miss is what keeps
@@ -90,30 +102,16 @@ _PRICING: dict[str, dict[str, Decimal]] = {
     },
     # Platform upstream — OpenAI gpt-4o (config/platform.py default platform_model).
     # Source: OpenAI API pricing (input $2.50/1M, cached input $1.25/1M, output $10/1M).
-    # platform 内部估算，非上游发票价（Codex 代理无公开按 token 价目时同理）。
     PLATFORM_GPT_4O: {
         "cache_hit": Decimal("1.25"),
         "cache_miss": Decimal("2.50"),
         "output": Decimal("10.00"),
     },
-    # Platform upstream — ChatGPT Codex gpt-5.4 (K-12 codex 可用模型之一).
-    # platform 内部估算，非上游发票价：按 gpt-4o 约 3× 保守高估 input/output，防配额低估。
-    PLATFORM_GPT_5_4: {
-        "cache_hit": Decimal("3.75"),
-        "cache_miss": Decimal("7.50"),
-        "output": Decimal("30.00"),
-    },
-    # Platform upstream — ChatGPT Codex gpt-5.5 (codex 档 PLATFORM_MODEL 常用值).
-    # platform 内部估算，非上游发票价：略高于 5.4，仍保守（真实发票不可见）。
-    PLATFORM_GPT_5_5: {
-        "cache_hit": Decimal("5.00"),
-        "cache_miss": Decimal("10.00"),
-        "output": Decimal("40.00"),
-    },
 }
 
 # Unknown / unset model falls back to the cheaper Flash tier rather than failing:
 # a missing price must never crash a turn (the bill degrades, the chat does not).
+# Platform/vendor only — user path stays unpriced instead.
 _DEFAULT_MODEL = DEEPSEEK_V4_FLASH
 
 # tokens × (USD / 1M tokens) → nano-USD  ==  tokens × usd_per_million × 1000.
@@ -128,6 +126,9 @@ class Cost:
     just the cache-hit portion so the UI can show「省了多少」without re-pricing.
     ``output`` already includes reasoning tokens (reasoning is a billed subset of
     completion, not a separate line). ``total == input + output``.
+
+    ``pricing_source`` records which price layer produced the numbers.
+    ``credential_source`` rides along for ledger routing (user → estimated column).
     """
 
     input: int
@@ -135,6 +136,8 @@ class Cost:
     output: int
     total: int
     currency: str = "USD"
+    pricing_source: PricingSource = "curated"
+    credential_source: CredentialSource = "platform"
 
 
 def _nano(tokens: int, price_per_million: Decimal) -> int:
@@ -145,32 +148,155 @@ def _nano(tokens: int, price_per_million: Decimal) -> int:
     return int(value.quantize(Decimal(1), rounding=ROUND_HALF_UP))
 
 
+def resolve_credential_source(
+    *,
+    credential_source: CredentialSource | None = None,
+    billing_mode: str | None = None,
+    provider_name: str | None = None,
+    model: str | None = None,
+) -> CredentialSource:
+    """Resolve call-level pricing source (never reads deployment ``billing_mode``).
+
+    Precedence: explicit ``credential_source`` → provider name → model vendor
+    prefix → legacy ``billing_mode`` alias (byok→user, else platform) → ambient
+    log-context ``credential_source`` → ``platform`` (charge).
+    """
+    if credential_source is not None:
+        return credential_source
+    if provider_name in _VENDOR_PREFIXES:
+        return "vendor"
+    if provider_name == "user":
+        return "user"
+    if provider_name == "platform":
+        return "platform"
+    if model and "/" in model:
+        prefix, _, _rest = model.partition("/")
+        if prefix in _VENDOR_PREFIXES:
+            return "vendor"
+    if billing_mode is not None:
+        return "user" if billing_mode == "byok" else "platform"
+    try:
+        from agentcore.core.log_context import get_log_value
+
+        ambient = get_log_value("credential_source")
+        if ambient in ("user", "platform", "vendor"):
+            return ambient  # type: ignore[return-value]
+    except Exception:  # noqa: BLE001 — pricing must never depend on log plumbing
+        pass
+    return "platform"
+
+
+def parse_user_prices(
+    *,
+    cache_hit: str | None = None,
+    cache_miss: str | None = None,
+    output: str | None = None,
+) -> dict[str, Decimal] | None:
+    """Parse optional USD-per-1M decimal strings into a price card, or ``None``.
+
+    Only input (cache_miss) + output are required — most vendors publish just
+    those two. ``cache_hit`` defaults to the input price (no cache discount),
+    which over- rather than under-estimates.
+    """
+    if not (cache_miss and output):
+        return None
+    try:
+        card = {
+            "cache_hit": Decimal(str(cache_hit).strip() if cache_hit else str(cache_miss).strip()),
+            "cache_miss": Decimal(str(cache_miss).strip()),
+            "output": Decimal(str(output).strip()),
+        }
+    except (InvalidOperation, ValueError):
+        return None
+    if any(v < 0 for v in card.values()):
+        return None
+    return card
+
+
+def _ambient_user_prices() -> dict[str, Decimal] | None:
+    try:
+        from agentcore.core.log_context import get_log_value
+
+        return parse_user_prices(
+            cache_hit=get_log_value("user_price_cache_hit") or None,
+            cache_miss=get_log_value("user_price_cache_miss") or None,
+            output=get_log_value("user_price_output") or None,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def resolve_price_card(
+    model: str,
+    *,
+    credential_source: CredentialSource,
+    user_prices: dict[str, Decimal] | None = None,
+) -> tuple[dict[str, Decimal] | None, PricingSource, bool]:
+    """Resolve ``(card, pricing_source, used_flash_fallback)`` for one call.
+
+    User: user_defined → community → unpriced (never Flash).
+    Platform/vendor: curated → community → Flash fallback.
+    """
+    if credential_source == "user":
+        card = user_prices or _ambient_user_prices()
+        if card is not None:
+            return card, "user_defined", False
+        community = community_pricing_for(model)
+        if community is not None:
+            return community, "estimated", False
+        return None, "unpriced", False
+
+    curated = _PRICING.get(model)
+    if curated is not None:
+        return curated, "curated", False
+    community = community_pricing_for(model)
+    if community is not None:
+        return community, "estimated", False
+    return _PRICING[_DEFAULT_MODEL], "curated", True
+
+
 def pricing_for(model: str) -> dict[str, Decimal]:
     """The price card for a model, falling back to the default (Flash) tier."""
-    return pricing_for_model(model, billing_mode="platform")
+    card, _src, _fb = resolve_price_card(model, credential_source="platform")
+    assert card is not None
+    return card
 
 
 def pricing_for_model(
-    model: str, *, billing_mode: str | None = None
+    model: str,
+    *,
+    credential_source: CredentialSource | None = None,
+    billing_mode: str | None = None,
+    user_prices: dict[str, Decimal] | None = None,
 ) -> dict[str, Decimal] | None:
-    """Price card for ``model``, or ``None`` when billing skips cost (BYOK).
-
-    BYOK: the user pays their own provider — the platform ledger records token usage
-    with zero nano-USD. Platform mode keeps the existing vendor table.
-    """
-    if (billing_mode or settings.billing_mode) == "byok":
+    """Price card for ``model``, or ``None`` when user path is unpriced."""
+    source = resolve_credential_source(
+        credential_source=credential_source, billing_mode=billing_mode, model=model
+    )
+    card, pricing_source, _fb = resolve_price_card(
+        model, credential_source=source, user_prices=user_prices
+    )
+    if pricing_source == "unpriced":
         return None
-    return _PRICING.get(model) or _PRICING[_DEFAULT_MODEL]
+    return card
 
 
-_ZERO_COST = Cost(input=0, cached=0, output=0, total=0)
-
-
-def calculate_cost(model: str, usage: TokenUsage, *, billing_mode: str | None = None) -> Cost:
+def calculate_cost(
+    model: str,
+    usage: TokenUsage,
+    *,
+    credential_source: CredentialSource | None = None,
+    billing_mode: str | None = None,
+    provider_name: str | None = None,
+    user_prices: dict[str, Decimal] | None = None,
+) -> Cost:
     """Convert a run's token usage into money — the only place this happens.
 
     Input is split by cache hit/miss (DeepSeek pre-splits the counts); output is
     priced whole (reasoning already included). Returns integer nano-USD.
+
+    Pricing follows **call-level credential source** and the three-layer card
+    resolve, not deployment ``settings.billing_mode``.
 
     Two guards keep the bill honest when upstream usage is imperfect:
 
@@ -182,18 +308,29 @@ def calculate_cost(model: str, usage: TokenUsage, *, billing_mode: str | None = 
       ``max(input_tokens − cache_hit, cache_miss)``: on the native DeepSeek path
       (``hit + miss == prompt``) this is a no-op, and when the split is missing
       the whole prompt is priced as a cache miss instead of vanishing.
-    - **Fallback visibility**: an unknown/unset ``model`` degrades to the Flash
-      tier (a missing price must never crash a turn), but that can undercount a
-      Pro run ~3×, so the degrade is logged (``cost.pricing_fallback``) instead of
-      happening silently.
+    - **Fallback visibility** (platform/vendor only): an unknown/unset ``model``
+      degrades to the Flash tier, logged as ``cost.pricing_fallback``.
     """
-    mode = billing_mode or settings.billing_mode
-    if mode == "byok":
-        return _ZERO_COST
+    source = resolve_credential_source(
+        credential_source=credential_source,
+        billing_mode=billing_mode,
+        provider_name=provider_name,
+        model=model,
+    )
+    card, pricing_source, used_fallback = resolve_price_card(
+        model, credential_source=source, user_prices=user_prices
+    )
+    if card is None:
+        return Cost(
+            input=0,
+            cached=0,
+            output=0,
+            total=0,
+            pricing_source="unpriced",
+            credential_source=source,
+        )
 
-    p = pricing_for_model(model, billing_mode=mode)
-    assert p is not None  # platform branch always resolves a card
-    if model not in _PRICING and (usage.input_tokens or usage.output_tokens):
+    if used_fallback and (usage.input_tokens or usage.output_tokens):
         logger.warning(
             "cost.pricing_fallback",
             model=model or "(unset)",
@@ -201,28 +338,41 @@ def calculate_cost(model: str, usage: TokenUsage, *, billing_mode: str | None = 
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
         )
+
     cache_miss_tokens = max(usage.input_tokens - usage.cache_hit_tokens, usage.cache_miss_tokens)
-    cached = _nano(usage.cache_hit_tokens, p["cache_hit"])
-    uncached = _nano(cache_miss_tokens, p["cache_miss"])
-    output = _nano(usage.output_tokens, p["output"])
+    cached = _nano(usage.cache_hit_tokens, card["cache_hit"])
+    uncached = _nano(cache_miss_tokens, card["cache_miss"])
+    output = _nano(usage.output_tokens, card["output"])
     input_total = cached + uncached
     return Cost(
         input=input_total,
         cached=cached,
         output=output,
         total=input_total + output,
+        pricing_source=pricing_source,
+        credential_source=source,
     )
 
 
 def cache_savings(
-    model: str, usage: TokenUsage, *, billing_mode: str | None = None
+    model: str,
+    usage: TokenUsage,
+    *,
+    credential_source: CredentialSource | None = None,
+    billing_mode: str | None = None,
+    user_prices: dict[str, Decimal] | None = None,
 ) -> int:
     """Nano-USD saved by prefix-cache hits this run vs. paying the miss price.
 
     ``cache_hit_tokens × (miss_price − hit_price)`` — powers the「前缀缓存替你省了
     ¥X」彩蛋 (§七E). Zero when nothing hit the cache.
     """
-    p = pricing_for_model(model, billing_mode=billing_mode)
+    p = pricing_for_model(
+        model,
+        credential_source=credential_source,
+        billing_mode=billing_mode,
+        user_prices=user_prices,
+    )
     if p is None:
         return 0
     full = _nano(usage.cache_hit_tokens, p["cache_miss"])

@@ -1,0 +1,427 @@
+{
+  "summary": {
+    "total": 4,
+    "passed": 4,
+    "pass_rate": 1.0,
+    "cost_usd": 0.05236,
+    "by_category": {
+      "team": {
+        "total": 4,
+        "passed": 4,
+        "pass_rate": 1.0
+      }
+    },
+    "by_mast": {
+      "by_group": {
+        "FC2": {
+          "total": 2,
+          "passed": 2,
+          "pass_rate": 1.0
+        },
+        "FC1": {
+          "total": 1,
+          "passed": 1,
+          "pass_rate": 1.0
+        },
+        "FC3": {
+          "total": 1,
+          "passed": 1,
+          "pass_rate": 1.0
+        }
+      },
+      "by_mode": {
+        "2.5": {
+          "total": 2,
+          "passed": 2,
+          "pass_rate": 1.0
+        },
+        "1.2": {
+          "total": 1,
+          "passed": 1,
+          "pass_rate": 1.0
+        },
+        "3.2": {
+          "total": 1,
+          "passed": 1,
+          "pass_rate": 1.0
+        }
+      }
+    },
+    "shape_score_mean": 0.5
+  },
+  "cases": [
+    {
+      "case_id": "collab_p1_multi_object_compare",
+      "category": "team",
+      "mast": "2.5",
+      "passed": true,
+      "shape_score": 0.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "Delegated",
+          "passed": false,
+          "detail": "delegated=False",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": false,
+          "detail": "score=0.00 (阈 0.60); has_join=0.00, min_roles=0.00, min_workers=0.00, parallel_fanout_min=0.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=2652 (min 80)",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 5,
+        "delegated": false,
+        "roster": [],
+        "plan_runs": [],
+        "plan_type": null,
+        "collab_interactions": {},
+        "tool_calls": [
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "read_url"
+        ],
+        "citations": 24,
+        "usage": {
+          "input": 104248,
+          "output": 3099,
+          "reasoning": 843
+        },
+        "cost_usd": 0.006137,
+        "latency_ms": 44276,
+        "error": null,
+        "content_preview": "信息基本充足，直接产出最终回答。\n\n---\n\n## 四家大模型公司横向对比\n\n### 一、各自定位速览\n\n**OpenAI** —— 市场先行者，走「AGI 先发 + 闭源生态」路线。以 ChatGPT 建立消费级品牌，靠 API 与微软生态铺企业市场，模型迭代节奏最快、产品线最广。\n\n**Google (DeepMind)** —— 全栈内循环路线，把 Gemini 深度嵌入搜索、安卓、Work"
+      }
+    },
+    {
+      "case_id": "collab_p5_creative_options",
+      "category": "team",
+      "mast": "1.2",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); min_roles=1.00, min_workers=1.00, parallel_fanout_min=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=1721 (min 60)",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 6,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "品牌文案（稳重专业方向）",
+          "品牌文案（轻快亲和方向）",
+          "品牌文案（科技未来方向）",
+          "品牌文案（人文温度方向）"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_72a9de1c-2d8c-432f-a73f-e2b8f66f7fbe_1",
+            "role": "品牌文案（稳重专业方向）",
+            "task": "为一款面向普通人的多 Agent 协作工作台起中文名并配 slogan。\n\n产品背景：这是一款让普通用户也能方便地组建和使用多个 AI Agent 团队协作完成复杂任务的工作台产品，用户不需要任何技术背景。\n\n你的任务方向：【稳重专业风格】——适合企业采购、商务场景，给人可靠、高效、值得信赖的感觉。名字偏正式、有分量。\n\n请产出：\n1. 一个中文产品名（2-4字）\n2. 一句 slogan（中文，15字以内）\n3. 简短说明：取名思路 + slogan 逻辑（各50字左右）\n\n直接给出你的方案即可，不需要与其他风格对比。",
+            "depends_on": [],
+            "parent_run_id": "00a502e0-46b7-477a-980f-9670a2209ed1"
+          },
+          {
+            "id": "del_72a9de1c-2d8c-432f-a73f-e2b8f66f7fbe_2",
+            "role": "品牌文案（轻快亲和方向）",
+            "task": "为一款面向普通人的多 Agent 协作工作台起中文名并配 slogan。\n\n产品背景：这是一款让普通用户也能方便地组建和使用多个 AI Agent 团队协作完成复杂任务的工作台产品，用户不需要任何技术背景。\n\n你的任务方向：【轻快亲和风格】——适合 C 端传播、年轻用户，给人轻松、好玩、容易上手的感觉。名字活泼好记、有网感。\n\n请产出：\n1. 一个中文产品名（2-4字）\n2. 一句 slogan（中文，15字以内）\n3. 简短说明：取名思路 + slogan 逻辑（各50字左右）\n\n直接给出你的方案即可，不需要与其他风格对比。",
+            "depends_on": [],
+            "parent_run_id": "00a502e0-46b7-477a-980f-9670a2209ed1"
+          },
+          {
+            "id": "del_72a9de1c-2d8c-432f-a73f-e2b8f66f7fbe_3",
+            "role": "品牌文案（科技未来方向）",
+            "task": "为一款面向普通人的多 Agent 协作工作台起中文名并配 slogan。\n\n产品背景：这是一款让普通用户也能方便地组建和使用多个 AI Agent 团队协作完成复杂任务的工作台产品，用户不需要任何技术背景。\n\n你的任务方向：【科技未来风格】——适合极客、技术社区、先锋用户，突出 AI 前沿感、智能、酷炫。名字有科幻感、概念感。\n\n请产出：\n1. 一个中文产品名（2-4字）\n2. 一句 slogan（中文，15字以内）\n3. 简短说明：取名思路 + slogan 逻辑（各50字左右）\n\n直接给出你的方案即可，不需要与其他风格对比。",
+            "depends_on": [],
+            "parent_run_id": "00a502e0-46b7-477a-980f-9670a2209ed1"
+          },
+          {
+            "id": "del_72a9de1c-2d8c-432f-a73f-e2b8f66f7fbe_4",
+            "role": "品牌文案（人文温度方向）",
+            "task": "为一款面向普通人的多 Agent 协作工作台起中文名并配 slogan。\n\n产品背景：这是一款让普通用户也能方便地组建和使用多个 AI Agent 团队协作完成复杂任务的工作台产品，用户不需要任何技术背景。\n\n你的任务方向：【人文温度风格】——适合品牌故事、社区运营，突出人与人/人与AI的协作感、陪伴感、有温度。名字有诗意、有故事感。\n\n请产出：\n1. 一个中文产品名（2-4字）\n2. 一句 slogan（中文，15字以内）\n3. 简短说明：取名思路 + slogan 逻辑（各50字左右）\n\n直接给出你的方案即可，不需要与其他风格对比。",
+            "depends_on": [],
+            "parent_run_id": "00a502e0-46b7-477a-980f-9670a2209ed1"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "delegate",
+          "update_synthesis",
+          "update_synthesis",
+          "update_synthesis",
+          "file_list"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 150762,
+          "output": 13502,
+          "reasoning": 10392
+        },
+        "cost_usd": 0.010943,
+        "latency_ms": 102637,
+        "error": null,
+        "content_preview": "4 位队员全部完成。我根据各方案进行交叉短评，产出最终方案墙。\n\n---\n\n## 多 Agent 协作工作台 · 命名方案墙\n\n以下是 4 个方向的完整方案，每个附交叉短评，最后汇总成墙。\n\n---\n\n### 方案一 · 稳重专业型\n\n**产品名：聚智台**\n**Slogan：群智协作，一步到位**\n\n> 取名思路：\"聚\"强调多 Agent 汇聚协作，\"智\"点明 AI 智能，\"台\"体现工作台的产品"
+      }
+    },
+    {
+      "case_id": "collab_p6_review_diagnose",
+      "category": "team",
+      "mast": "3.2",
+      "passed": true,
+      "shape_score": 0.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "Delegated",
+          "passed": false,
+          "detail": "delegated=False",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": false,
+          "detail": "score=0.00 (阈 0.60); has_join=0.00, min_roles=0.00, min_workers=0.00, parallel_fanout_min=0.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=1106 (min 60)",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "plan_runs": [],
+        "plan_type": null,
+        "collab_interactions": {},
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 13799,
+          "output": 1077,
+          "reasoning": 442
+        },
+        "cost_usd": 0.000354,
+        "latency_ms": 17901,
+        "error": null,
+        "content_preview": "## 诊断清单\n\n### 🔴 严重（必须改）\n\n| # | 坑点 | 为什么危险 |\n|---|------|-----------|\n| 1 | **承诺「满意答复」** | 在未了解问题全貌前，擅自给用户预设了「对你的答复会满意」的心理预期。一旦最终方案用户不买账，等于你亲口定性了「你们不满意就是你们没做到位」，直接升级矛盾、丧失谈判余地。 |\n| 2 | **借问题回复夹带新产品推广** |"
+      }
+    },
+    {
+      "case_id": "collab_p7_composite_plan",
+      "category": "team",
+      "mast": "2.5",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); has_join=1.00, independent_reviewer=1.00, min_roles=1.00, min_workers=1.00, parallel_fanout_min=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=354 (min 100)",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 9,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "自媒体定位分析师",
+          "内容策略规划师",
+          "自媒体变现分析师",
+          "方案整合与一致性审查官",
+          "自媒体启动方案撰稿人"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_842d1bcd-4c5d-49b6-8f83-258be2b043bf_positioning",
+            "role": "自媒体定位分析师",
+            "task": "起草「定位与受众」部分，作为个人知识向自媒体启动方案的一个部件。\n\n硬约束（必须严格遵守，不得突破）：\n- 每月总预算不超过 800 元人民币（含工具订阅、素材、推广等）\n- 每周可投入约 8 小时（含制作、运营、学习等所有环节）\n- 知识向定位，面向中文互联网用户\n\n请覆盖以下内容：\n1. 明确的领域定位（建议一个具体的垂直知识方向，论证为什么这个方向适合低预算+低时间投入的启动阶段）\n2. 目标受众画像（年龄、痛点、内容消费习惯）\n3. 差异化价值主张（为什么用户要看你的而不是已有的）\n4. 建议的媒介形式（图文/短视频/播客等，须符合 8 小时/周的产能限制）\n5. 人设与风格基调\n\n产出是一段可独立阅读的方案文本，约 600–900 字。",
+            "depends_on": [],
+            "parent_run_id": "a7fff190-ae80-4c91-85d3-cb99c783714e"
+          },
+          {
+            "id": "del_842d1bcd-4c5d-49b6-8f83-258be2b043bf_topics",
+            "role": "内容策略规划师",
+            "task": "起草「选题与更新节奏」部分，作为个人知识向自媒体启动方案的一个部件。\n\n硬约束（必须严格遵守，不得突破）：\n- 每月总预算不超过 800 元人民币（含工具订阅、素材、推广等）\n- 每周可投入约 8 小时（含制作、运营、学习等所有环节）\n- 知识向定位，面向中文互联网用户\n\n请覆盖以下内容：\n1. 更新频率（基于 8 小时/周产能，给出合理的发布频率建议，如每周几更、每更什么形式）\n2. 选题来源与方法论（如何持续找到好选题，不依赖外部投稿）\n3. 内容形式与制作流程（把 8 小时分配到选题→素材→制作→发布→互动的各环节）\n4. 初期 4 周的内容日历示例（具体到周的选题方向）\n5. 与预算匹配的工具/资源清单（哪些付费工具值得花预算，哪些用免费替代）\n\n产出是一段可独立阅读的方案文本，约 600–900 字。\n\n注意：时间分配和预算安排需要与定位方案中建议的媒介形式兼容——你可以在文中假设定位部分会建议某种形式，留出弹性。",
+            "depends_on": [],
+            "parent_run_id": "a7fff190-ae80-4c91-85d3-cb99c783714e"
+          },
+          {
+            "id": "del_842d1bcd-4c5d-49b6-8f83-258be2b043bf_monetization",
+            "role": "自媒体变现分析师",
+            "task": "起草「变现路径」部分，作为个人知识向自媒体启动方案的一个部件。\n\n硬约束（必须严格遵守，不得突破）：\n- 每月总预算不超过 800 元人民币（含工具订阅、素材、推广等）\n- 每周可投入约 8 小时（含制作、运营、学习等所有环节）\n- 知识向定位，面向中文互联网用户\n- 这是一个启动阶段方案（前 3–6 个月），变现预期应合理\n\n请覆盖以下内容：\n1. 分阶段的变现路径（初期 0–3 个月、中期 3–6 个月、远期 6 个月+）\n2. 每个阶段的预期收入来源（平台激励、付费内容、咨询服务、知识付费产品等）\n3. 每种变现方式所需的前置条件（粉丝量、内容积累、技术门槛）\n4. 变现与定位的一致性论证（所选变现路径如何与知识领域定位互相增强）\n5. 投入产出估算（在 800 元/月和 8 小时/周约束下，合理预期能到什么量级）\n\n产出是一段可独立阅读的方案文本，约 600–900 字。\n\n注意：变现路径需要与定位方案中的领域和受众匹配，也需要与选题方案中的更新节奏兼容——你可以在文中做合理假设。",
+            "depends_on": [],
+            "parent_run_id": "a7fff190-ae80-4c91-85d3-cb99c783714e"
+          },
+          {
+            "id": "del_842d1bcd-4c5d-49b6-8f83-258be2b043bf_audit",
+            "role": "方案整合与一致性审查官",
+            "task": "你有三项上游产出：定位与受众草案、选题与更新节奏草案、变现路径草案。你的任务是：\n\n1. **一致性对账**：逐项检查三个部件之间是否存在矛盾或冲突，至少检查以下维度：\n   - 预算分配：各部件的建议加起来是否超过 800 元/月？\n   - 时间分配：建议的活动加起来是否超过 8 小时/周？\n   - 定位与变现是否一致：变现路径是否匹配目标受众的付费能力和意愿？\n   - 内容节奏与变现是否有冲突：所需的额外投入（如回复评论、私域运营）是否在 8 小时预算内？\n   - 各部件之间的假设是否兼容（媒介形式、受众画像、领域方向）\n\n2. **整合产出**：基于三份草案，修正发现的不一致之处，产出一份**完整、自洽的最终方案**。方案结构如下：\n   - 第一部分：定位与受众（约 400–600 字）\n   - 第二部分：选题与更新节奏（附工具清单与四周内容日历示例，约 400–600 字）\n   - 第三部分：变现路径（分阶段，约 400–600 字）\n   - 一致性对账说明：列出你发现并修正的不一致之处（如有），确认最终方案在 800 元/月和 8 小时/周双重约束下是自洽的\n\n注意：如果上游草案之间有冲突（如定位建议短视频而时间分配只够写图文），**以硬约束（800 元/月、8 小时/周）为优先级最高裁决标准**，选择最可行的路径。\n\n产出是完整的最终方案文本，约 1500–2000 字。",
+            "depends_on": [
+              "del_842d1bcd-4c5d-49b6-8f83-258be2b043bf_positioning",
+              "del_842d1bcd-4c5d-49b6-8f83-258be2b043bf_topics",
+              "del_842d1bcd-4c5d-49b6-8f83-258be2b043bf_monetization"
+            ],
+            "parent_run_id": "a7fff190-ae80-4c91-85d3-cb99c783714e"
+          },
+          {
+            "id": "del_675edfbd-dec0-4de1-a99a-257934d96a9d_1",
+            "role": "自媒体启动方案撰稿人",
+            "task": "产出一份完整的个人知识向自媒体启动方案，名为《个人知识向自媒体启动方案：「读立思考」》。\n\n## 已知基础信息（必须遵守）\n\n### 定位方向\n- 品牌名：「读立思考」\n- 定位：以阅读拆解 + 认知工具（思维模型/决策框架）为核心的知识垂直方向\n- 目标受众：有自我提升需求的职场人/学生（25-35岁），渴望高效获取知识但时间碎片化\n- 差异化：不做书评搬运，而是每本书/每个话题都提炼出**一个可立即使用的思维模型或决策框架**，让读者「读完就能用」\n- 人设：一个持续阅读、独立思考的知识工作者，理性、接地气，不做「人生导师」\n- 媒介形式：图文为主（公众号/知乎/小红书）+ 轻量化音频延伸（小宇宙/喜马拉雅），暂不做短视频（产能不足）\n\n### 硬约束\n- 每月总预算 ≤ 800 元（书费 50-80 元/月，首月简易录制设备约 150 元一次性，工具订阅控制在 50 元/月以内，余量机动）\n- 每周可投入 ≤ 8 小时\n\n### 变现方向（已有草案，可参考）\n分三阶段：0-3月零收入专注于内容沉淀与粉丝积累；3-6月尝试小额变现（付费专栏/平台激励）；6月+知识产品化（付费课程/社群/咨询）\n\n## 产出要求\n\n产出一份完整自洽方案，包含以下三部分 + 对账说明：\n\n### 一、定位与受众（约 400-600 字）\n- 领域定位与理由\n- 目标受众画像\n- 差异化价值主张\n- 人设与风格\n\n### 二、选题与更新节奏（约 400-600 字）\n- 更新频率建议（须在 8 小时/周内可完成）\n- 选题方法论\n- 8 小时的每周时间分配表（具体到各个环节的小时数）\n- 初期 4 周内容日历示例\n- 工具清单（控制在 800 元/月预算内）\n\n### 三、变现路径（约 400-600 字）\n- 三阶段分步变现路径\n- 各阶段前置条件\n- 变现与定位的一致性论证\n\n### 四、一致性对账说明（约 200-300 字）\n- 确认预算未超 800 元/月\n- 确认时间未超 8 小时/周\n- 确认三部件之间没有逻辑冲突\n\n全文约 1500-2000 字。用 Markdown 格式呈现。\n\n交付物是方案文本，用 file_write 写入工作区文件 `knowledge_creator_plan.md`。",
+            "depends_on": [],
+            "parent_run_id": "a7fff190-ae80-4c91-85d3-cb99c783714e"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {
+          "note": 1
+        },
+        "tool_calls": [
+          "consult_skill",
+          "delegate",
+          "handoff",
+          "handoff",
+          "handoff",
+          "read_notes",
+          "web_search",
+          "web_search",
+          "read_url",
+          "read_url",
+          "read_url",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "read_url",
+          "post_note",
+          "handoff",
+          "handoff",
+          "update_synthesis",
+          "handoff",
+          "file_list",
+          "read_notes",
+          "grep",
+          "file_list",
+          "replan",
+          "cancel_worker",
+          "update_synthesis",
+          "update_synthesis",
+          "update_synthesis",
+          "delegate",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "file_write",
+          "file_read",
+          "handoff",
+          "file_read",
+          "file_delete",
+          "file_write",
+          "file_read"
+        ],
+        "citations": 24,
+        "usage": {
+          "input": 844421,
+          "output": 43342,
+          "reasoning": 15713
+        },
+        "cost_usd": 0.034925,
+        "latency_ms": 696718,
+        "error": null,
+        "content_preview": "文件 `knowledge_creator_plan.md` 已写入工作区（4517 字节），包含完整的四部分方案：\n\n1. **定位与受众** — 「读立思考」品牌，阅读拆解 + 认知工具垂直方向，25-35岁职场人/学生，差异化主张\"一本书只取一个模型，读完就能用\"\n2. **选题与更新节奏** — 每周2图文+1音频（总计8小时），含详细时间分配表、4周内容日历示例、工具清单（首月275元，"
+      }
+    }
+  ]
+}

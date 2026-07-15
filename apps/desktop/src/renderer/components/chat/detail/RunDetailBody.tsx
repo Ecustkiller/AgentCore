@@ -1,13 +1,13 @@
 import { Markdown } from "@/components/chat/Markdown";
 import { ReceivedContextSection } from "@/components/chat/ReceivedContext";
 import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
-import { toolPhaseText } from "@/components/chat/message-bubble/constants";
+import { ProcessTimeline } from "@/components/chat/message-bubble/ProcessTimeline";
+import { TurnSecurityLedger } from "@/components/audit/TurnSecurityLedger";
 import { planCapabilities } from "@/components/graph/planCapabilities";
 import { Button } from "@/components/ui";
 import { useRunLlmWindow } from "@/hooks/useRunLlmWindow";
 import { useTurnAudit } from "@/hooks/useTurnAudit";
 import { filterInjectInEdges } from "@/lib/causalInject";
-import { formatCompact } from "@/lib/format";
 import { detectReviewConcern } from "@/lib/reviewConcern";
 import { submitRunRedirect } from "@/services/runRedirect";
 import { useComposerDraftStore } from "@/stores/composer";
@@ -15,22 +15,27 @@ import { activeRuntime, useConversationStore } from "@/stores/conversation";
 import {
   type RunNode,
   revisionChains,
-  toolLabel,
   useMessageExecution,
 } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import { turnDetailPath, useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
-import { Pencil, RotateCcw, Square, Wrench } from "lucide-react";
+import { Pencil, RotateCcw, Square } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import {
+  buildModeratorLedger,
+  isDebateModeratorRun,
+  isThinkingLivePlaceholder,
+} from "./debateModerator";
 import { receivedContextForList, selectRunTaskSection } from "./runTaskSection";
 import { RunCausalInjectBlock } from "./sections/RunCausalInject";
 import { DebriefSection } from "./sections/RunDebrief";
 import { DiagnosticSection } from "./sections/RunDiagnostics";
 import { EscalationSection } from "./sections/RunEscalations";
 import { LlmWindowSection } from "./sections/RunLlmWindow";
+import { RunModeratorLedger } from "./sections/RunModeratorLedger";
 import { RunOutcomeAcceptSection } from "./sections/RunOutcomeAccept";
 import {
   RunRefGroup,
@@ -42,15 +47,15 @@ import {
   RevisionChainSection,
   revisionComparePair,
 } from "./sections/RunRevisionChain";
-import { ThinkingSection } from "./sections/RunThinking";
-import { ToolCallsSection } from "./sections/RunToolCalls";
 import { Section, StatusBadge } from "./sections/shared";
 
 export { SchedulingDiag, CollabDiag } from "./sections/RunDiagnostics";
 
 /**
- * Single-run detail content (task / status / model+reasoning / tools / output /
- * summary), read from the live-or-replayed execution projection by run id.
+ * Single-run detail content — hybrid layout aligned with the CEO bubble timeline:
+ * header anchors (role / status / live banner / task / moderator / revision /
+ * escalation / context) → interleaved ProcessTimeline body → footer (debrief /
+ * relations / resources / diagnostics).
  *
  * Bound to a specific message's execution slot (§9.3) via `messageId`, so the
  * conversation's right-side detail panel can pin a run from any turn (live or
@@ -96,8 +101,8 @@ export function RunDetailBody({
     : null;
   const caps = planCapabilities(execution?.planType);
   const turnAudit = useTurnAudit(
-    caps.auditInject && conversationId != null ? conversationId : null,
-    caps.auditInject ? messageId : null,
+    conversationId != null ? conversationId : null,
+    messageId,
   );
   const llmWindow = useRunLlmWindow(
     conversationId,
@@ -109,14 +114,14 @@ export function RunDetailBody({
   if (!execution || !run || !agent) return null;
 
   const output = agent.outputChunks.join("");
-  const reasoning = agent.reasoningChunks.join("");
   const canRedirect =
     turnInteractive &&
     agent.status === "working" &&
     caps.runRedirect &&
     conversationId != null;
-  const thinkingLive =
-    agent.status === "working" && output.length === 0 && !agent.toolProgress;
+  const thinkingLive = isThinkingLivePlaceholder(agent);
+  const isModerator = isDebateModeratorRun(execution, run.id);
+  const moderatorLedger = isModerator ? buildModeratorLedger(execution) : null;
   const upstream = run.dependsOn
     .map((id) => execution.runs.find((r) => r.id === id))
     .filter((r): r is RunNode => r != null);
@@ -139,6 +144,13 @@ export function RunDetailBody({
     taskSection.promotedTask,
   );
 
+  const process = run.process;
+  const showTimeline =
+    process.length > 0 ||
+    thinkingLive ||
+    (agent.toolProgress != null && agent.status === "working") ||
+    (agent.status === "working" && !isModerator);
+
   return (
     <div className="p-4">
       <div className="mb-4 flex items-center gap-2">
@@ -160,7 +172,9 @@ export function RunDetailBody({
               ? "同一人接续中——带着现场按新指令接着干。"
               : run.replacesRunId != null
                 ? "接手重写——同角色新人按新方向重做。"
-                : "正在实时输出——下方内容会边写边更新。"}
+                : isModerator
+                  ? "辩论主持中——下方台账会随轮次更新焦点与小结。"
+                  : "正在实时输出——下方内容会边写边更新。"}
           </p>
           <div className="flex flex-wrap gap-2">
             {canRedirect && (
@@ -260,6 +274,19 @@ export function RunDetailBody({
         </CollapsibleSpeech>
       </Section>
 
+      {moderatorLedger && (
+        <RunModeratorLedger
+          ledger={moderatorLedger}
+          onOpenDebateRoom={
+            conversationId
+              ? () => {
+                  navigate(turnDetailPath(conversationId, messageId, "debate"));
+                }
+              : undefined
+          }
+        />
+      )}
+
       {chain && (
         <RevisionChainSection
           chain={chain}
@@ -309,14 +336,6 @@ export function RunDetailBody({
         />
       )}
 
-      {(reasoning || thinkingLive) && (
-        <ThinkingSection
-          reasoning={reasoning}
-          live={thinkingLive}
-          keyBase={`run:${runId}`}
-        />
-      )}
-
       {diagnosticMode && conversationId != null && (
         <LlmWindowSection
           messages={llmWindow.data?.messages ?? []}
@@ -348,57 +367,26 @@ export function RunDetailBody({
           />
         )}
 
-      {agent.toolProgress && agent.status === "working" && (
-        <Section title="正在生成">
-          <div className="flex items-center gap-2 rounded-lg bg-primary/5 px-2.5 py-1.5 text-xs">
-            <Wrench size={12} className="shrink-0 text-primary" />
-            <span className="flex-1 truncate text-foreground">
-              {toolLabel(agent.toolProgress.toolName)}
-            </span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">
-              {agent.toolProgress.chars > 0
-                ? `${formatCompact(agent.toolProgress.chars)} 字`
-                : "…"}
-            </span>
-            <span className="inline-block animate-pulse text-primary">▋</span>
-          </div>
-        </Section>
-      )}
-
-      {agent.toolExecutionLive && agent.status === "working" && (
-        <Section
-          title={toolPhaseText(agent.toolExecutionLive.phase) ?? "处理中"}
-        >
-          <div className="flex items-center gap-2 rounded-lg bg-primary/5 px-2.5 py-1.5 text-xs">
-            <Wrench size={12} className="shrink-0 text-primary" />
-            <span className="flex-1 truncate text-foreground">
-              {toolLabel(agent.toolExecutionLive.toolName)}
-            </span>
-            <span className="inline-block animate-pulse text-primary">▋</span>
-          </div>
-        </Section>
-      )}
-
-      {agent.toolCalls.length > 0 && (
-        <ToolCallsSection
-          toolCalls={agent.toolCalls}
-          live={
-            run.status === "running" &&
-            agent.toolCalls.some((t) => t.status === "running")
-          }
-          keyBase={`run:${runId}`}
-        />
-      )}
-
-      {output && (
-        <Section title="输出">
-          <div className="rounded-lg bg-muted p-3">
-            <Markdown
-              content={output}
-              isStreaming={agent.status === "working"}
-            />
-          </div>
-        </Section>
+      {showTimeline && (
+        <div className="mb-4">
+          <ProcessTimeline
+            process={process}
+            isStreaming={agent.status === "working"}
+            citations={[]}
+            onCitationClick={() => {}}
+            composingTool={
+              agent.status === "working" ? agent.toolProgress : null
+            }
+            fallbackContent=""
+            messageId={`${messageId}:${runId}`}
+            conversationId={conversationId}
+            checkpoints={[]}
+            nonBlockingAsks={[]}
+            planReviews={[]}
+            teamPreviews={[]}
+            collapseProcessSteps={false}
+          />
+        </div>
       )}
 
       {run.debrief ? (
@@ -477,6 +465,10 @@ export function RunDetailBody({
           keyBase={`run:${runId}`}
         />
       )}
+
+      <Section title="安全台账">
+        <TurnSecurityLedger state={turnAudit} compact />
+      </Section>
 
       {diagnosticMode && (
         <DiagnosticSection

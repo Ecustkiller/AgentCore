@@ -516,6 +516,7 @@ def project_approval_resolved(
     else:
         action, outcome = f"approval.{decision}", "ok"
     target_ref = _file_target_from_arguments(tool_name, arguments)
+    # actor_kind stays captain/member/system (DB check); 「谁批」lives in detail.
     return AuditDraft(
         category="approval",
         action=action,
@@ -528,6 +529,7 @@ def project_approval_resolved(
             "tool_name": tool_name,
             "tool_call_id": tool_call_id,
             "decision": decision,
+            "decided_by": "user",
         },
     )
 
@@ -547,5 +549,78 @@ def project_approval_timeout(
         run_id=run_id,
         target_type="tool",
         target_ref=tool_call_id,
-        detail={"tool_name": tool_name, "tool_call_id": tool_call_id},
+        detail={
+            "tool_name": tool_name,
+            "tool_call_id": tool_call_id,
+            "decided_by": "timeout",
+        },
+    )
+
+
+def project_circuit_breaker(
+    recorder: AuditRecorder,
+    *,
+    tool_name: str,
+    tool_call_id: str,
+    rule_id: str,
+    verdict: str,
+    reason: str,
+    run_id: str | None = None,
+) -> AuditDraft:
+    """Safety circuit-breaker hit (heuristic last line — not a security boundary)."""
+    outcome = "denied" if verdict == "deny" else "escalated"
+    return AuditDraft(
+        category="permission",
+        action="permission.circuit_breaker",
+        actor_kind=_actor_kind(recorder, run_id),
+        outcome=outcome,
+        run_id=run_id,
+        target_type="tool",
+        target_ref=tool_call_id,
+        detail={
+            "tool_name": tool_name,
+            "tool_call_id": tool_call_id,
+            "rule_id": rule_id,
+            "verdict": verdict,
+            "reason": reason[:400],
+        },
+    )
+
+
+def project_permission_preset_changed(
+    *,
+    previous: str,
+    next_preset: str,
+) -> AuditDraft:
+    """Session-level mode switch (outside a turn recorder — written via repo)."""
+    return AuditDraft(
+        category="permission",
+        action="permission.preset_changed",
+        actor_kind="system",
+        outcome="ok",
+        target_type="interaction",
+        target_ref="permission_preset",
+        detail={
+            "previous": previous,
+            "permission_preset": next_preset,
+            "decided_by": "user",
+        },
+    )
+
+
+def project_permission_preset_snapshot(
+    recorder: AuditRecorder,
+    *,
+    permission_preset: str,
+) -> AuditDraft:
+    """Turn-entry snapshot so the security ledger knows the mode in force."""
+    return AuditDraft(
+        category="permission",
+        action="permission.preset_snapshot",
+        actor_kind="system",
+        outcome="ok",
+        run_id=recorder.captain_run_id,
+        target_type="interaction",
+        target_ref="permission_preset",
+        detail={"permission_preset": permission_preset},
     )

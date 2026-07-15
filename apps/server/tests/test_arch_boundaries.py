@@ -137,3 +137,53 @@ def test_leaf_web_tools_do_not_import_runtime_or_llm() -> None:
     """
     files = _py_files("tools/builtin/web")
     assert _violations(files, ("agentcore.runtime", "agentcore.llm")) == {}
+
+
+def test_runtime_drive_and_coordination_do_not_import_tools_delegate() -> None:
+    """Delegate drive / coordination sit in runtime — no tools.builtin.delegate edge.
+
+    Composition roots (pipeline / resolve / recover) may still construct
+    ``DelegateTool``; the forbidden cycle was ``coordination.host`` ↔
+    ``tools.builtin.delegate.drive``. After the lift, ``runtime.delegate`` and
+    ``runtime.coordination`` must not import the tools-side package at all.
+    """
+    files = _py_files("runtime/delegate", "runtime/coordination")
+    assert _violations(files, ("agentcore.tools.builtin.delegate",)) == {}
+
+
+def test_delegate_tools_package_is_thin_adapter() -> None:
+    """``tools.builtin.delegate`` hosts schema + thin execute + nesting mint only."""
+    allowed = {"__init__.py", "schema.py", "tool.py", "nesting.py"}
+    present = {p.name for p in _py_files("tools/builtin/delegate")}
+    assert present <= allowed, f"unexpected delegate tool modules: {present - allowed}"
+
+
+def test_debate_tools_package_is_thin_adapter() -> None:
+    """``tools.builtin.debate`` hosts schema + thin execute only；域逻辑在 runtime.debate。"""
+    allowed = {"__init__.py", "schema.py", "tool.py"}
+    present = {p.name for p in _py_files("tools/builtin/debate")}
+    assert present <= allowed, f"unexpected debate tool modules: {present - allowed}"
+    # 域驱动不得回留在 tools 包（rounds/prompt/events 已上收 runtime.debate）。
+    assert not (present & {"rounds.py", "prompt.py", "events.py"})
+
+
+def test_engine_stream_uses_public_retry_constants() -> None:
+    """``engine.stream`` takes retry/backoff from ``llm.provider.protocol``, not privates."""
+    stream = _PKG_ROOT / "runtime" / "engine" / "stream.py"
+    imports = _module_imports(stream)
+    assert "agentcore.llm.provider.protocol" in imports
+    tree = ast.parse(stream.read_text(encoding="utf-8"), filename=str(stream))
+    private_hits: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module == "agentcore.llm.provider.openai_compatible"
+        ):
+            for alias in node.names:
+                if alias.name.startswith("_"):
+                    private_hits.add(alias.name)
+    assert private_hits == set(), f"stream imports provider privates: {private_hits}"
+    src = stream.read_text(encoding="utf-8")
+    assert "MAX_RETRIES" in src
+    assert "INITIAL_BACKOFF" in src
+    assert "BACKOFF_MULTIPLIER" in src

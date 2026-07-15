@@ -4,10 +4,11 @@ import json
 import re
 
 from agentcore.llm.provider.protocol import LLMChunk, TokenUsage, ToolCallDelta
+from agentcore.runtime.delegate.accumulate import collect_citations
+from agentcore.runtime.delegate.nesting import absorb_children
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.runs.types import RunPhase, RunState
-from agentcore.tools.builtin.delegate.accumulate import collect_citations
-from agentcore.tools.builtin.delegate.nesting import absorb_children, make_lead_subteam
+from agentcore.tools.builtin.delegate.nesting import make_lead_subteam
 from agentcore.tools.builtin.delegate.tool import DelegateTool
 from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.builtin.replan import ReplanTool
@@ -81,8 +82,8 @@ async def test_finalize_stopped_absorbs_nested_children_usage():
     )
     assert parent.usage.get("input", 0) == 0
 
+    from agentcore.runtime.delegate.supervised import finalize_stopped
     from agentcore.runtime.runs.plan import RunPlan
-    from agentcore.tools.builtin.delegate.supervised import finalize_stopped
 
     await finalize_stopped(parent, RunPlan(nodes=[]), {})
     assert parent.usage.get("input") == 100

@@ -1,5 +1,9 @@
 import { FileTree, type FileTreeHandle } from "@/components/files/FileTree";
 import { IconButton } from "@/components/files/parts";
+import {
+  DeleteFolderDialog,
+  archiveConversationsBeforeDelete,
+} from "@/components/folders/DeleteFolderDialog";
 import { Button } from "@/components/ui";
 import {
   ContextMenu,
@@ -9,10 +13,18 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
+  getConversations,
+  useArchiveConversation,
   useDeleteConversation,
   useRenameConversation,
 } from "@/hooks/useConversations";
+import {
+  getFolders,
+  useDeleteFolder,
+  usePermanentDeleteFolder,
+} from "@/hooks/useFolders";
 import { removeConversationScratch } from "@/hooks/useWorkspaces";
+import { deriveGroupWorkspaceIsLocal } from "@/lib/conversationWorkspaceMode";
 import type { FileSource } from "@/lib/fileSource";
 import { queryClient } from "@/lib/queryClient";
 import { workspaceKeys } from "@/lib/queryKeys";
@@ -40,14 +52,15 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { conversationIdOf } from "./storage";
+import { conversationIdOf, folderIdOf } from "./storage";
 
 /**
- * One conversation scratch workspace = a **flat, collapsible section**: a header
- * (chevron + conversation title + cloud/local badge + create buttons) with its file
- * tree shown beneath **only when expanded**. Lifecycle is decoupled from sidebar
- * folders — the context menu opens the owning conversation, clears files, deletes
- * or renames the conversation; file CRUD stays on the tree.
+ * One workspace root = a **flat, collapsible section**: a header (chevron + name +
+ * cloud/local badge + create buttons) with its file tree shown beneath **only when
+ * expanded**.
+ *
+ * - `conv:<id>` scratch：右键可打开/重命名/删除对话、清空文件。
+ * - `folder:<id>` 项目共享空间：右键可「删除项目」（与侧栏 {@link WorkspaceGroupHeader} 同构）。
  */
 export function WorkspaceSection({
   ws,
@@ -67,6 +80,7 @@ export function WorkspaceSection({
   flashing: boolean;
 }) {
   const conversationId = conversationIdOf(ws.wsId);
+  const folderId = folderIdOf(ws.wsId);
   const isLocal = ws.location === "local";
   const localUnavailable = isLocal && !source;
   const navigate = useNavigate();
@@ -79,15 +93,27 @@ export function WorkspaceSection({
     "file" | "dir" | "upload" | null
   >(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteFolderOpen, setDeleteFolderOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(ws.name);
 
   const deleteMutation = useDeleteConversation();
   const renameMutation = useRenameConversation();
+  const archiveMutation = useArchiveConversation();
+  const deleteFolderMutation = useDeleteFolder();
+  const permanentDeleteMutation = usePermanentDeleteFolder();
   const currentId = useConversationStore((s) => s.currentConversationId);
   const dropConversationRuntime = useConversationStore(
     (s) => s.dropConversationRuntime,
   );
+
+  const folder = folderId
+    ? (getFolders().find((f) => f.id === folderId) ?? null)
+    : null;
+  const folderIsLocal = folder ? deriveGroupWorkspaceIsLocal(folder) : isLocal;
+
+  const liveFolderConvs = () =>
+    folderId ? getConversations().filter((c) => c.folderId === folderId) : [];
 
   const deleteConfirmLabel = isLocal
     ? "确认永久删除（本地磁盘文件会保留）"
@@ -174,6 +200,39 @@ export function WorkspaceSection({
     }
     dropConversationRuntime(conversationId);
     if (wasActive) navigate("/");
+  };
+
+  const confirmDeleteFolder = async () => {
+    if (!folderId) return;
+    const convs = liveFolderConvs();
+    if (convs.length > 0) {
+      const ok = await archiveConversationsBeforeDelete(convs, {
+        archive: (id) => archiveMutation.mutateAsync(id),
+        dropRuntime: dropConversationRuntime,
+        currentId,
+        onLeaveActive: () => navigate("/"),
+      });
+      if (!ok) {
+        notifyError("归档失败，项目未删除");
+        return;
+      }
+    }
+    deleteFolderMutation.mutate(folderId, {
+      onSuccess: () => setDeleteFolderOpen(false),
+      onError: (err) => notifyError(err, "删除项目失败"),
+    });
+  };
+
+  const confirmPermanentDeleteFolder = () => {
+    if (!folderId) return;
+    for (const { id } of liveFolderConvs()) {
+      dropConversationRuntime(id);
+      if (id === currentId) navigate("/");
+    }
+    permanentDeleteMutation.mutate(folderId, {
+      onSuccess: () => setDeleteFolderOpen(false),
+      onError: (err) => notifyError(err, "彻底删除失败"),
+    });
   };
 
   /** Enumerate top-level entries and delete each — root itself is not deletable. */
@@ -394,10 +453,33 @@ export function WorkspaceSection({
                 </ContextMenuItem>
               </>
             )}
+            {folderId && (
+              <>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  variant="danger"
+                  onSelect={() => setDeleteFolderOpen(true)}
+                >
+                  <Trash2 size={14} className="shrink-0" />
+                  <span className="flex-1 truncate">删除项目…</span>
+                </ContextMenuItem>
+              </>
+            )}
           </ContextMenuContent>
         </ContextMenu>
       )}
       {expanded && tree}
+      {folderId && (
+        <DeleteFolderDialog
+          open={deleteFolderOpen}
+          onOpenChange={setDeleteFolderOpen}
+          name={folder?.name ?? ws.name}
+          liveConvCount={liveFolderConvs().length}
+          isLocal={folderIsLocal}
+          onConfirm={() => void confirmDeleteFolder()}
+          onPermanentConfirm={confirmPermanentDeleteFolder}
+        />
+      )}
     </div>
   );
 }

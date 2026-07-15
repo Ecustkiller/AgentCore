@@ -74,6 +74,36 @@ def test_d7_merge_usage_status_keeps_terminal():
     assert merged["input_tokens"] == 12
 
 
+def test_d7_merge_usage_clears_paused_on_terminal():
+    """终态必非暂停：二次 merge 不得从 existing 复活 paused latch。"""
+    paused_running = {
+        "status": MESSAGE_STATUS_RUNNING,
+        "paused": True,
+        "input_tokens": 1,
+    }
+    terminal = {
+        "status": MESSAGE_STATUS_COMPLETE,
+        "input_tokens": 2,
+        "rounds": 4,
+    }
+    # First merge (finalize) + second merge (upsert_assistant merge=True) both clear.
+    once = merge_usage_status(paused_running, terminal)
+    assert once["status"] == MESSAGE_STATUS_COMPLETE
+    assert "paused" not in once
+    twice = merge_usage_status(paused_running, once)
+    assert twice["status"] == MESSAGE_STATUS_COMPLETE
+    assert "paused" not in twice
+
+
+def test_d7_merge_usage_keeps_paused_while_running():
+    merged = merge_usage_status(
+        {"status": MESSAGE_STATUS_RUNNING},
+        {"status": MESSAGE_STATUS_RUNNING, "paused": True},
+    )
+    assert merged["status"] == MESSAGE_STATUS_RUNNING
+    assert merged["paused"] is True
+
+
 def test_d7_pick_monotonic_content_prefers_longer():
     assert pick_monotonic_content("short", "much longer text") == "much longer text"
     assert pick_monotonic_content("already long enough", "short") == "already long enough"

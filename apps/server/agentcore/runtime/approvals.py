@@ -85,8 +85,9 @@ class DelegationGrant:
 
 
 # Kept as an alias for resume / settlement that still speak the old card dialect
-# (grant_delegation / per_call / deny). Kickoff maps continue→grant, per_call→per_call,
-# stop→deny. Hot-path ``request_delegation_authorization`` was retired.
+# (grant_delegation / per_call / deny). Kickoff maps continue→grant; historical
+# per_call→per_call (UI entry removed); stop→deny. Hot-path
+# ``request_delegation_authorization`` was retired.
 class DelegationAuthorizationDecision(StrEnum):
     """Settlement dialect for kickoff capability-authorization choices."""
 
@@ -196,6 +197,7 @@ class ApprovalGate:
         tool_call_id: str,
         arguments: dict[str, Any],
         execution_id: str = "",
+        force: bool = False,
     ) -> ApprovalDecision:
         """Block until the user authorizes (or denies) this tool call.
 
@@ -205,8 +207,13 @@ class ApprovalGate:
         ``APPROVE_ALWAYS`` also whitelists ``tool_name`` for the rest of the turn;
         ``APPROVE_ALWAYS_FILES`` whitelists the whole ``file_op_tools`` class.
         A prior ``DENY`` for ``tool_name`` this turn short-circuits without re-prompting.
+
+        ``force=True`` (safety circuit breaker): skip kickoff / turn grants so
+        catastrophic shapes still require a human click even under ``full_trust``.
+        Turn-wide grants from a forced card are refused (one-shot only) so a single
+        click cannot silently clear sibling destructive prompts.
         """
-        if self._delegation_covers(execution_id, tool_name):
+        if not force and self._delegation_covers(execution_id, tool_name):
             logger.debug(
                 "approval.delegation_grant",
                 tool=tool_name,
@@ -214,7 +221,7 @@ class ApprovalGate:
             )
             return ApprovalDecision.APPROVE
 
-        if tool_name in self._granted:
+        if not force and tool_name in self._granted:
             return ApprovalDecision.APPROVE
 
         # Prior deny (user click or timeout) for this tool this turn: do not re-prompt.
@@ -256,25 +263,36 @@ class ApprovalGate:
         if decision is ApprovalDecision.DENY:
             self._denied.add(tool_name)
         elif decision is ApprovalDecision.APPROVE_ALWAYS:
-            if tool_name in self.per_call_tools and not self._delegation_covers(
-                execution_id, tool_name
-            ):
-                # When tool_name ∈ per_call_tools, refuse the turn-wide grant and
-                # authorize THIS call only (defense in depth). Default set is empty
-                # (Cursor-aligned: code_execute / test_run may take APPROVE_ALWAYS).
+            refuse_turn_grant = force or (
+                tool_name in self.per_call_tools
+                and not self._delegation_covers(execution_id, tool_name)
+            )
+            if refuse_turn_grant:
+                # force / per_call_tools: authorize THIS call only (defense in depth).
                 logger.info(
-                    "approval.turn_grant_refused", tool=tool_name, approval_id=approval_id
+                    "approval.turn_grant_refused",
+                    tool=tool_name,
+                    approval_id=approval_id,
+                    force=force,
                 )
                 decision = ApprovalDecision.APPROVE
             else:
                 self._granted.add(tool_name)
                 self._sweep_pending_tools(frozenset({tool_name}))
         elif decision is ApprovalDecision.APPROVE_ALWAYS_FILES:
-            # Grant the whole file-mutation class for the turn, and sweep every
-            # already-suspended file-op call — so one click clears writes, edits,
-            # deletes and moves together (code_execute is not in the class).
-            self._granted.update(self.file_op_tools)
-            self._sweep_pending_tools(self.file_op_tools)
+            if force:
+                logger.info(
+                    "approval.file_grant_refused",
+                    tool=tool_name,
+                    approval_id=approval_id,
+                )
+                decision = ApprovalDecision.APPROVE
+            else:
+                # Grant the whole file-mutation class for the turn, and sweep every
+                # already-suspended file-op call — so one click clears writes, edits,
+                # deletes and moves together (code_execute is not in the class).
+                self._granted.update(self.file_op_tools)
+                self._sweep_pending_tools(self.file_op_tools)
         self.sink.emit(
             approval_resolved(
                 approval_id=approval_id,

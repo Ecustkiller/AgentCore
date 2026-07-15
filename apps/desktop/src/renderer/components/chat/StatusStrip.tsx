@@ -1,18 +1,35 @@
 import { debatePreviewSubtitle } from "@/components/chat/debate/debateEntryCopy";
+import { PermissionPresetChip } from "@/components/chat/message-input/PermissionPresetBadge";
+import { TeamSynthesisPreviewLine } from "@/components/chat/TeamSynthesisPreviewLine";
+import {
+  isTeamSynthesizing,
+  teamSynthesisPhaseLabel,
+  workerProgress,
+} from "@/components/chat/teamSynthesisPhase";
 import { Badge, Button, IconButton as UiIconButton } from "@/components/ui";
+import { textLinkPrimary } from "@/components/ui/tone-presets";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { resolveTurnCost } from "@/lib/cost";
-import { formatCost, formatDuration } from "@/lib/format";
-import { acceptRunOutcome } from "@/services/runRedirect";
+import {
+  patchConversationCache,
+  useConversations,
+} from "@/hooks/useConversations";
+import { resolveTurnDisplayMoney } from "@/lib/cost";
+import { formatDisplayCost, formatDuration } from "@/lib/format";
+import { notifyError, notifySuccess } from "@/lib/toast";
+import {
+  PERMISSION_PRESET_LABELS,
+  isPermissionDowngrade,
+  setConversationPermissionPreset,
+} from "@/services/permissionPreset";
 import {
   lastUserMessageId,
   runRegenerate,
   runRetryFailed,
 } from "@/services/turns";
+import type { SidecarPermissionPreset } from "@shared/sidecar-contract";
 import {
   activeRuntime,
   getActiveRuntime,
-  selectLastAssistantCostTotal,
   useActiveGenerating,
   useConversationStore,
 } from "@/stores/conversation";
@@ -22,12 +39,10 @@ import {
   isDebate,
   useActiveExecField,
   useExecutionScope,
-  useExecutionStore,
 } from "@/stores/execution";
 import { useUsageStore } from "@/stores/usage";
 import {
   AlertTriangle,
-  Ban,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -35,8 +50,8 @@ import {
   Loader2,
   Maximize2,
   MessagesSquare,
+  Pause,
   Play,
-  RotateCw,
   Square,
 } from "lucide-react";
 
@@ -58,7 +73,7 @@ export interface StatusStripProps {
 
 /**
  * Lifecycle header row above the collaboration graph (前端UX设计.md §三).
- * Dispatches to running / completed / cancelled / failed variants.
+ * Dispatches to running / paused / completed / cancelled / failed variants.
  */
 export function StatusStrip(props: StatusStripProps) {
   switch (props.execution.status) {
@@ -68,6 +83,8 @@ export function StatusStrip(props: StatusStripProps) {
       return <CompletedStrip {...props} stopped />;
     case "failed":
       return <FailureStrip {...props} />;
+    case "paused":
+      return <PausedStrip {...props} />;
     default:
       return <RunningStrip {...props} />;
   }
@@ -116,9 +133,40 @@ function StripControls({
   const continuationCount = debate
     ? 0
     : execution.runs.filter((r) => r.continuesRunId != null).length;
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const conversations = useConversations();
+  const permissionPreset: SidecarPermissionPreset = conversationId
+    ? (conversations.find((c) => c.id === conversationId)?.permissionPreset ??
+      "workspace")
+    : "workspace";
+
+  const switchPreset = async (next: SidecarPermissionPreset) => {
+    if (!conversationId || next === permissionPreset) return;
+    if (
+      !isPermissionDowngrade(permissionPreset, next) &&
+      !window.confirm(
+        next === "full_trust"
+          ? "升档到「完全信任」：AI 将与你同权执行命令。确定继续？"
+          : `升档到「${PERMISSION_PRESET_LABELS[next].short}」。确定继续？`,
+      )
+    ) {
+      return;
+    }
+    try {
+      const saved = await setConversationPermissionPreset(conversationId, next);
+      patchConversationCache(conversationId, { permissionPreset: saved });
+      notifySuccess(`已切换为「${PERMISSION_PRESET_LABELS[saved].short}」`);
+    } catch (e) {
+      notifyError(e, "切换权限模式失败");
+    }
+  };
 
   return (
     <>
+      <PermissionPresetChip
+        preset={permissionPreset}
+        onSwitch={(next) => void switchPreset(next)}
+      />
       {isRunning && (
         <StripIconButton
           icon={<Square size={15} />}
@@ -184,19 +232,124 @@ function RunningStrip({
   collabSummary,
 }: StatusStripProps) {
   const { completed, total } = execution.progress;
+  const workers = workerProgress(execution);
+  const synthesizing =
+    !isDebate(execution) && isTeamSynthesizing(execution);
+  const noteCount = execution.teamNotes.length;
+  const runningTitle = isDebate(execution)
+    ? debatePreviewSubtitle(execution)
+    : synthesizing
+      ? teamSynthesisPhaseLabel(execution)
+      : execution.taskSummary;
+  const progressLabel = synthesizing
+    ? `${workers.completed}/${workers.total}`
+    : `${completed}/${total}`;
+  const barCompleted = synthesizing ? workers.completed : completed;
+  const barTotal = synthesizing ? workers.total : total;
+
+  return (
+    <div
+      className="px-4 py-3"
+      data-testid={synthesizing ? "status-strip-synthesizing" : undefined}
+    >
+      <div className="flex items-center gap-2">
+        <Loader2 size={15} className="shrink-0 animate-spin text-primary" />
+        <span
+          className={`flex flex-1 items-center truncate text-sm font-medium ${
+            synthesizing ? "text-primary" : "text-foreground"
+          }`}
+        >
+          {isDebate(execution) && <DebateTag />}
+          <span className="truncate" data-testid="status-strip-running-title">
+            {runningTitle}
+          </span>
+          {synthesizing ? (
+            <span
+              className="ml-2 size-1.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none"
+              aria-hidden
+            />
+          ) : null}
+        </span>
+        {!isDebate(execution) && (
+          <span
+            className={`shrink-0 text-xs ${
+              synthesizing
+                ? "font-medium text-primary"
+                : "text-muted-foreground"
+            }`}
+          >
+            {progressLabel}
+          </span>
+        )}
+        <StripControls
+          execution={execution}
+          expanded={expanded}
+          onToggle={onToggle}
+          onMaximize={onMaximize}
+          onReplay={onReplay}
+          onOpenRevisions={onOpenRevisions}
+          collabSummary={collabSummary}
+        />
+      </div>
+      {noteCount > 0 && onOpenTeamNotes && (
+        <div className="mt-2 flex items-center gap-2">
+          <SimpleTooltip label="展开团队便签">
+            <button
+              type="button"
+              className="inline-flex"
+              onClick={onOpenTeamNotes}
+              aria-label={`展开团队便签，共 ${noteCount} 条`}
+            >
+              <Badge tone="primary" pill className="font-medium">
+                团队便签 {noteCount}
+              </Badge>
+            </button>
+          </SimpleTooltip>
+        </div>
+      )}
+      <TeamSynthesisPreviewLine execution={execution} />
+      {/* 进度条 = {completed}/{total} 的可视化；辩论走「轮次」语义、数字已隐藏，故条也不出。 */}
+      {!isDebate(execution) && (
+        <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            className={`h-full rounded-full transition-all duration-300 ${
+              synthesizing ? "animate-pulse bg-primary" : "bg-primary"
+            }`}
+            style={{
+              width:
+                barTotal > 0 ? `${(barCompleted / barTotal) * 100}%` : "0%",
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Mid-turn pause (e.g. plan_review between waves) while the graph stays visible.
+ * Static — no spinner — so「等你拍板」is not painted as「正在协作」.
+ */
+function PausedStrip({
+  execution,
+  expanded,
+  onToggle,
+  onMaximize,
+  onReplay,
+  onOpenRevisions,
+  onOpenTeamNotes,
+  collabSummary,
+}: StatusStripProps) {
+  const { completed, total } = execution.progress;
   const noteCount = execution.teamNotes.length;
 
   return (
-    <div className="px-4 py-3">
+    <div className="px-4 py-3" data-testid="status-strip-paused">
       <div className="flex items-center gap-2">
-        <Loader2 size={15} className="shrink-0 animate-spin text-primary" />
-        <span className="flex flex-1 items-center truncate text-sm font-medium text-foreground">
+        <Pause size={15} className="shrink-0 text-primary" aria-hidden />
+        <span className="flex flex-1 items-center truncate text-sm text-foreground">
           {isDebate(execution) && <DebateTag />}
-          <span className="truncate">
-            {isDebate(execution)
-              ? debatePreviewSubtitle(execution)
-              : execution.taskSummary}
-          </span>
+          <span className="truncate font-medium">已暂停 · 等你拍板</span>
         </span>
         {!isDebate(execution) && (
           <span className="shrink-0 text-xs text-muted-foreground">
@@ -229,8 +382,6 @@ function RunningStrip({
           </SimpleTooltip>
         </div>
       )}
-      <TeamSynthesisPreviewLine />
-      {/* 进度条 = {completed}/{total} 的可视化；辩论走「轮次」语义、数字已隐藏，故条也不出。 */}
       {!isDebate(execution) && (
         <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-muted">
           <div
@@ -240,55 +391,6 @@ function RunningStrip({
             }}
           />
         </div>
-      )}
-    </div>
-  );
-}
-
-/** CEO 协调模式：多 worker 进展 / 合成草稿预览（transport-only，运行中可见）。 */
-function TeamSynthesisPreviewLine() {
-  const preview = useActiveExecField((rt) => rt.teamSynthesisPreview);
-  if (!preview) return null;
-  const blurbs = preview.workers.filter(
-    (w) => w.status !== "pending" && w.summary,
-  );
-  // update_synthesis 路径：workers=[]、text=草稿正文；确定性进度路径：text≈headline+blurbs。
-  // 有 worker 摘要时用列表；否则把 text 当草稿正文渲染（避免只见 headline、不见草稿）。
-  const draftBody =
-    blurbs.length === 0 &&
-    preview.text.trim() &&
-    preview.text.trim() !== preview.headline.trim()
-      ? preview.text.trim()
-      : null;
-  return (
-    <div
-      className="mt-2 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground"
-      data-testid="team-synthesis-preview"
-    >
-      <div className="flex items-center gap-2">
-        <Badge tone="primary" pill className="font-medium">
-          {preview.in_progress ? "进展中" : "团队进展"}
-        </Badge>
-        <span className="truncate font-medium text-foreground">
-          {preview.headline}
-        </span>
-      </div>
-      {blurbs.length > 0 && (
-        <ul className="mt-1.5 space-y-0.5 pl-0.5">
-          {blurbs.map((w) => (
-            <li key={w.run_id} className="truncate">
-              · {w.role}：{w.summary}
-            </li>
-          ))}
-        </ul>
-      )}
-      {draftBody && (
-        <p
-          className="mt-1.5 whitespace-pre-wrap text-foreground/80"
-          data-testid="team-synthesis-draft"
-        >
-          {draftBody}
-        </p>
       )}
     </div>
   );
@@ -315,20 +417,26 @@ function CompletedStrip({
     .filter((r): r is string => Boolean(r));
   const failedRolesText =
     failedRoles.length > 0 ? `：${failedRoles.join("、")}` : "";
-  const failureNotice = `${failedRuns.length} 个子任务失败${failedRolesText}，可重试或忽略。`;
+  const failureNotice = `${failedRuns.length} 个子任务失败${failedRolesText}。`;
   const showRecovery = stopped || failedRuns.length > 0;
 
-  const turnCostTotal = useConversationStore((s) =>
-    selectLastAssistantCostTotal(activeRuntime(s).messages),
-  );
+  const lastAssistantCost = useConversationStore((s) => {
+    const messages = activeRuntime(s).messages;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "assistant") return messages[i].cost ?? null;
+    }
+    return null;
+  });
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
-  const costTotal = resolveTurnCost(
-    turnCostTotal,
-    execution.runs.map((r) => r.cost?.total ?? 0),
+  const money = resolveTurnDisplayMoney(
+    lastAssistantCost,
+    execution.runs.map((r) => r.cost),
   );
   const costSegment =
-    costTotal && costTotal > 0
-      ? ` · ${stopped ? "已花 " : ""}${formatCost(costTotal, cnyPerUsd)}`
+    money && money.nano > 0
+      ? ` · ${stopped ? "已花 " : ""}${formatDisplayCost(money.nano, cnyPerUsd, money.estimated)}${
+          money.estimated ? " 估算" : ""
+        }`
       : "";
 
   return (
@@ -375,10 +483,7 @@ function CompletedStrip({
               <span>{failureNotice}</span>
             </div>
           )}
-          <RecoveryActions
-            abandonLabel="忽略"
-            hasFailedRuns={failedRuns.length > 0}
-          />
+          <RecoveryActions hasFailedRuns={failedRuns.length > 0} />
         </>
       )}
     </div>
@@ -401,11 +506,16 @@ function FailureStrip({
     ? (execution.agents.find((a) => a.id === failedRun.agentId) ?? null)
     : null;
 
-  const spent = resolveTurnCost(
+  const money = resolveTurnDisplayMoney(
     null,
-    execution.runs.map((r) => r.cost?.total ?? 0),
+    execution.runs.map((r) => r.cost),
   );
-  const spentText = spent != null ? formatCost(spent, cnyPerUsd) : null;
+  const spentText =
+    money != null && money.nano > 0
+      ? `${formatDisplayCost(money.nano, cnyPerUsd, money.estimated)}${
+          money.estimated ? " 估算" : ""
+        }`
+      : null;
 
   return (
     <div className="px-4 py-3">
@@ -442,7 +552,7 @@ function FailureStrip({
           <p className="text-foreground">执行过程中出现错误</p>
         )}
         <p className="mt-1 whitespace-pre-wrap break-words text-xs text-destructive">
-          {failedRun?.error ?? "未获取到具体错误信息，可重试或忽略。"}
+          {failedRun?.error ?? "未获取到具体错误信息。"}
         </p>
       </div>
 
@@ -469,21 +579,20 @@ function userMessageIdForAssistant(
 }
 
 /**
- * Shared failure-recovery row: 重试 / 放弃. Reused by failure and partial-failure
- * strips, and by the canvas 指挥台 ({@link CanvasDecisionPanel}).
+ * Shared failure-recovery row: inline text links (retry-failed XOR regenerate).
+ * 「忽略」is implicit — starting a new turn dismisses recoverable projections.
+ * Reused by failure / partial-failure / stopped strips, empty-interrupted salvage,
+ * and the canvas 指挥台 ({@link CanvasDecisionPanel}).
  */
 export function RecoveryActions({
-  abandonLabel = "放弃",
   hasFailedRuns = false,
 }: {
-  abandonLabel?: string;
-  /** When true, show "重试失败项" (retry-failed) as the primary action;
-   *  otherwise fall back to "重试" (full regenerate). */
+  /** When true, show only "重试失败项" (retry-failed); otherwise only "重试"
+   * (full regenerate). Never stack both. */
   hasFailedRuns?: boolean;
 }) {
   const isGenerating = useActiveGenerating();
   const messageId = useExecutionScope();
-  const conversationId = useConversationStore((s) => s.currentConversationId);
 
   const onRetryFailed = () => {
     const id = userMessageIdForAssistant(messageId);
@@ -495,56 +604,27 @@ export function RecoveryActions({
     if (id) void runRegenerate(id);
   };
 
-  const onAbandon = () => {
-    if (!messageId) return;
-    // 忽略可审计：best-effort 记一条 recovery_ignored（turn 级），再清本地投影。
-    if (conversationId) {
-      void acceptRunOutcome(conversationId, {
-        messageId,
-        runId: messageId,
-        reason: "recovery_ignored",
-        note: "用户在救火行选择忽略",
-      }).catch(() => {
-        /* local clear still proceeds */
-      });
-    }
-    useExecutionStore.getState().clearExecution(messageId);
-  };
-
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
       {hasFailedRuns ? (
-        <>
-          <Button
-            variant="primary"
-            icon={<RotateCw size={13} />}
-            disabled={isGenerating}
-            onClick={onRetryFailed}
-          >
-            重试失败项
-          </Button>
-          <Button
-            variant="neutral"
-            icon={<RotateCw size={13} />}
-            disabled={isGenerating}
-            onClick={onRegenerate}
-          >
-            全部重新生成
-          </Button>
-        </>
+        <button
+          type="button"
+          className={textLinkPrimary}
+          disabled={isGenerating}
+          onClick={onRetryFailed}
+        >
+          重试失败项
+        </button>
       ) : (
-        <Button
-          variant="primary"
-          icon={<RotateCw size={13} />}
+        <button
+          type="button"
+          className={textLinkPrimary}
           disabled={isGenerating}
           onClick={onRegenerate}
         >
           重试
-        </Button>
+        </button>
       )}
-      <Button variant="neutral" icon={<Ban size={13} />} onClick={onAbandon}>
-        {abandonLabel}
-      </Button>
     </div>
   );
 }

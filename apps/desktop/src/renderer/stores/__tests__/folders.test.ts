@@ -39,6 +39,12 @@ describe("pending markers", () => {
     });
 
     store().resetDraftWorkspaceIntent();
-    expect(store().draftWorkspaceIntent.kind).toMatch(/quick_/);
+    expect(store().draftWorkspaceIntent).toEqual({ kind: "quick_cloud" });
+  });
+});
+
+describe("defaultDraftWorkspaceIntent", () => {
+  it("defaults to quick_cloud (桌面裸聊默认切云)", () => {
+    expect(defaultDraftWorkspaceIntent()).toEqual({ kind: "quick_cloud" });
   });
 });

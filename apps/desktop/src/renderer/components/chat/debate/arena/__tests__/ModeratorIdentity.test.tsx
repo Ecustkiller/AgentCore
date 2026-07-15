@@ -81,6 +81,17 @@ describe("JudgeNote 完成态身份", () => {
     expect(screen.getByText("主持人")).toBeTruthy();
     expect(screen.getByText("正在小结…")).toBeTruthy();
   });
+
+  it("拟质询 pending 文案", () => {
+    render(<JudgeNote text="" pending pendingKind="cross_exam" />);
+    expect(screen.getByText("主持人正在拟质询…")).toBeTruthy();
+    expect(screen.queryByText("正在小结…")).toBeNull();
+  });
+
+  it("小结 pending 文案（显式 summary）", () => {
+    render(<JudgeNote text="" pending pendingKind="summary" />);
+    expect(screen.getByText("正在小结…")).toBeTruthy();
+  });
 });
 
 describe("CrossExamSection 质询报幕", () => {

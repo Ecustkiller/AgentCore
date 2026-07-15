@@ -6,6 +6,7 @@ from agentcore.config.approval import ApprovalSettings
 from agentcore.config.auth import AuthSettings
 from agentcore.config.checkpoint import CheckpointSettings
 from agentcore.config.database import DatabaseSettings
+from agentcore.config.demo_tape import DemoTapeSettings
 from agentcore.config.engine import EngineSettings
 from agentcore.config.features import FeatureSettings
 from agentcore.config.paths import ENV_FILE
@@ -32,6 +33,7 @@ class Settings(
     ServerSettings,
     SimulationSettings,
     WorkspaceSettings,
+    DemoTapeSettings,
     BaseSettings,
 ):
     """Flat settings object — fields grouped by domain mixin, env-loaded as one unit."""

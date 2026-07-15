@@ -1,0 +1,250 @@
+{
+  "api": "http://localhost:8020",
+  "speed": 1,
+  "gap": 3000,
+  "timeline": [
+    {
+      "t": 20,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 735,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 1437,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 2150,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 2861,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 3575,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 4289,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 4999,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 5715,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 6418,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 7130,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 7845,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 8560,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 9275,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 9990,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 10703,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 11416,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 12125,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 12836,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 13550,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 14263,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 14975,
+      "thinking": true,
+      "authorize": false,
+      "waitKickoff": false,
+      "stop": false,
+      "caseBrief": false,
+      "debate": false,
+      "textLen": 281
+    },
+    {
+      "t": 15678,
+      "thinking": false,
+      "authorize": true,
+      "waitKickoff": true,
+      "stop": false,
+      "caseBrief": true,
+      "debate": true,
+      "textLen": 1054
+    }
+  ],
+  "marks": {
+    "firstThinkingMs": 20,
+    "lastThinkingMs": 14975,
+    "caseBriefMs": 15678,
+    "authorizeMs": 15678,
+    "authorizeAppeared": true,
+    "finalSnippet": "AgentCore DEV 搜索或运行命令… Ctrl+K 对话 文件 消息 工具箱 LV诉茉莉奶白商标侵权案 LV诉茉莉奶白商标侵权案 LV诉茉莉奶白商标侵权案 LV诉茉莉奶白商标侵权案 LV诉茉莉奶白商标侵权案 LV诉茉莉奶白商标侵权案 LV诉茉莉奶白商标侵权案 tape-http-walk LV诉茉莉奶白商标侵权案 协议风险审查 新对话 工作区文件概览 查看全部对话 D Dev 搜索下最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论 复制 编辑 删除 20:36 案情已经清晰，下面先给你做案件简介，然后立即启动模拟庭审辩论。 LV 诉茉莉奶白商标侵权案 — 案情简介 当事",
+    "finalHasStop": false,
+    "finalHasAuthorize": true,
+    "finalWaitKickoff": true
+  },
+  "pageErrors": [],
+  "ok": true
+}

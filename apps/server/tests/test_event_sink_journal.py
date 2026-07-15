@@ -263,6 +263,59 @@ def test_content_only_turn_persists_no_process():
     assert sink.process_timeline() is None
 
 
+def test_run_process_timelines_interleave_worker_steps():
+    # Worker per-run process (对称 CEO): reasoning → tool → content stays ordered so
+    # run-detail reload matches live (not message_final splice).
+    from agentcore.runtime.events import (
+        run_output_delta,
+        run_reasoning_delta,
+        run_started,
+        tool_use_end,
+        tool_use_start,
+    )
+
+    sink = EventSink()
+    sink.emit(run_started("r1", "w1"))
+    sink.emit(run_reasoning_delta("r1", "w1", "think"))
+    sink.emit(tool_use_start("t1", "web_search", {"query": "x"}, run_id="r1"))
+    sink.emit(tool_use_end("t1", "web_search", success=True, output="ok", run_id="r1"))
+    sink.emit(run_output_delta("r1", "w1", "answer"))
+
+    timelines = sink.run_process_timelines()
+    assert timelines is not None
+    assert list(timelines) == ["r1"]
+    assert [s["kind"] for s in timelines["r1"]] == ["reasoning", "tool", "content"]
+    # Worker tools must NOT land on the captain process timeline.
+    assert sink.process_timeline() is None
+
+
+def test_run_process_round_trips_via_journal_entries():
+    from agentcore.runtime.events import (
+        run_output_delta,
+        run_reasoning_delta,
+        run_started,
+        tool_use_end,
+        tool_use_start,
+    )
+    from agentcore.runtime.journal.entries import entries_from_runs
+    from agentcore.runtime.journal.fold import runs_from_entries
+
+    sink = EventSink()
+    sink.emit(run_started("r1", "w1"))
+    sink.emit(run_reasoning_delta("r1", "w1", "t"))
+    sink.emit(tool_use_start("t1", "grep", {"pattern": "x"}, run_id="r1"))
+    sink.emit(tool_use_end("t1", "grep", success=True, output="hit", run_id="r1"))
+    sink.emit(run_output_delta("r1", "w1", "out"))
+    payload = {
+        "events": sink.execution_journal() or [],
+        "finish_reason": "end_turn",
+        "run_processes": sink.run_process_timelines(),
+    }
+    restored = runs_from_entries(entries_from_runs(payload))
+    assert restored is not None
+    assert restored["run_processes"]["r1"] == sink.run_process_timelines()["r1"]
+
+
 async def test_emit_updates_in_memory_journal_when_writer_sealed(monkeypatch) -> None:
     """Post-pause emit must still update EventSink display journal; sealed writer no-ops DB."""
     from agentcore.runtime.events import team_preview_required

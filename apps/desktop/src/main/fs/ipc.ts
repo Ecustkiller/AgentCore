@@ -16,21 +16,45 @@ import {
   grantSessionRun,
   requiresOpenConfirm,
 } from "./execGate";
+import { checkoutArchive } from "./checkout";
 import { readFile, readTextFile, writeTextFile } from "./preview";
 import {
+  clearSessionRoots,
   deleteRoot,
   ensureReady,
   findRootByAbsPath,
   getAllRoots,
   initRoots,
+  listSessionRoots,
+  revokeSessionRoot,
   saveRoots,
   setRoot,
 } from "./roots";
-import { copyPath, openWithDefaultApp, reveal } from "./shell";
+import { copyPath, openWithDefaultApp, reveal, trashPath } from "./shell";
+import {
+  consumeStagedBytes,
+  finalizeStagedAttachment,
+  pickAndStageAttachment,
+  stageFromAbsPath,
+  stageFromRoot,
+  type StageDest,
+} from "./stageAttachment";
 import { copy, create, listDir, listFiles, move, remove, rename } from "./tree";
 import { closeWatchersForRoot, unwatchDir, watchDir } from "./watch";
 import { workspaceOp } from "./workspace/dispatch";
 import { opErr } from "./workspace/result";
+
+function parseStageDest(p: unknown): StageDest | undefined {
+  if (!isRecord(p)) return undefined;
+  const dest = p.dest;
+  if (!isRecord(dest) || typeof dest.rootId !== "string" || !dest.rootId) {
+    return undefined;
+  }
+  return {
+    rootId: dest.rootId,
+    subpath: typeof dest.subpath === "string" ? dest.subpath : undefined,
+  };
+}
 
 // IPC-004（第五轮 IPC 权限面审计）：边界结构校验失败时回给 renderer 的统一信封。畸形入参
 // 仅可能来自被攻破的 renderer——正常 renderer 由共享 TS 契约保证形状。各句柄按其契约回应：
@@ -68,7 +92,8 @@ export function registerFsIpc(): void {
     }
 
     const existing = findRootByAbsPath(absPath);
-    if (existing) return { id: existing.id, name: existing.name };
+    if (existing && !existing.sessionOnly)
+      return { id: existing.id, name: existing.name };
 
     const id = randomUUID();
     const name = basename(absPath) || absPath;
@@ -77,9 +102,8 @@ export function registerFsIpc(): void {
     return { id, name };
   });
 
-  // 桌面 local-first 地基（双模式工作区 决策 #11）：取得默认本地工作区根，必要时自动
-  // 创建 ~/Documents/AgentCore 并登记为授权根——无需用户走目录选择器，给新对话一个
-  // 开箱即用的本地落地处。幂等：已存在同路径的根则复用（不重复登记）。
+  // 桌面默认本地容器根（双模式工作区 §八.7）：显式「本机草稿」裸聊与本地项目创建
+  // 复用；新建裸聊默认已切云，不再自动调用。幂等：已存在同路径的根则复用。
   ipcMain.handle(FS_CHANNELS.ensureDefaultRoot, async (): Promise<FsRoot> => {
     await ensureReady();
     const base = join(app.getPath("documents"), "AgentCore");
@@ -91,7 +115,8 @@ export function registerFsIpc(): void {
       absPath = base;
     }
     const existing = findRootByAbsPath(absPath);
-    if (existing) return { id: existing.id, name: existing.name };
+    if (existing && !existing.sessionOnly)
+      return { id: existing.id, name: existing.name };
 
     const id = randomUUID();
     const name = basename(absPath) || absPath;
@@ -99,6 +124,21 @@ export function registerFsIpc(): void {
     await saveRoots();
     return { id, name };
   });
+
+  // 云 scratch → 本地单向 checkout（§八.7）：弹目录 + 解压 zip，不登记根。
+  ipcMain.handle(
+    FS_CHANNELS.checkoutArchive,
+    async (_e, p: unknown) => {
+      if (!isRecord(p) || typeof p.archiveBase64 !== "string") {
+        return {
+          ok: false as const,
+          reason: "error" as const,
+          message: INVALID_ARGS,
+        };
+      }
+      return checkoutArchive(p.archiveBase64);
+    },
+  );
 
   ipcMain.handle(FS_CHANNELS.listRoots, async (): Promise<FsRoot[]> => {
     await ensureReady();
@@ -113,6 +153,110 @@ export function registerFsIpc(): void {
     deleteRoot(args.rootId);
     await saveRoots();
   });
+
+  // W3: session-scoped read-only root — not persisted; bound to conversationId.
+  ipcMain.handle(
+    FS_CHANNELS.grantSessionReadonlyRoot,
+    async (_e, p: unknown): Promise<FsRoot | null> => {
+      const args = requireStringFields(p, ["conversationId"]);
+      if (!args) return null;
+      await ensureReady();
+      const win =
+        BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+      const result = win
+        ? await dialog.showOpenDialog(win, { properties: ["openDirectory"] })
+        : await dialog.showOpenDialog({ properties: ["openDirectory"] });
+      if (result.canceled || result.filePaths.length === 0) return null;
+
+      let absPath: string;
+      try {
+        absPath = await fs.realpath(result.filePaths[0]);
+      } catch {
+        absPath = result.filePaths[0];
+      }
+
+      const name = basename(absPath) || absPath;
+      const aliasBase =
+        name.replace(/[^\w.-]+/g, "_").replace(/^[^A-Za-z]/, "d_") || "folder";
+      const taken = new Set(
+        listSessionRoots(args.conversationId)
+          .map((r) => r.alias)
+          .filter(Boolean) as string[],
+      );
+      let alias = aliasBase.slice(0, 64);
+      let n = 2;
+      while (taken.has(alias)) {
+        alias = `${aliasBase.slice(0, 60)}_${n}`;
+        n += 1;
+      }
+
+      // Reuse same-conversation session root for the same abs path.
+      const same = listSessionRoots(args.conversationId).find(
+        (r) => r.absPath === absPath,
+      );
+      if (same) {
+        return {
+          id: same.id,
+          name: same.name,
+          alias: same.alias,
+          readonly: true,
+          sessionOnly: true,
+        };
+      }
+
+      const id = randomUUID();
+      setRoot({
+        id,
+        name,
+        absPath,
+        sessionOnly: true,
+        conversationId: args.conversationId,
+        readonly: true,
+        alias,
+      });
+      // Not persisted — sessionOnly filtered out of saveRoots.
+      return { id, name, alias, readonly: true, sessionOnly: true };
+    },
+  );
+
+  ipcMain.handle(
+    FS_CHANNELS.listSessionReadonlyRoots,
+    async (_e, p: unknown): Promise<FsRoot[]> => {
+      const args = requireStringFields(p, ["conversationId"]);
+      if (!args) return [];
+      await ensureReady();
+      return listSessionRoots(args.conversationId).map((r) => ({
+        id: r.id,
+        name: r.name,
+        alias: r.alias,
+        readonly: true,
+        sessionOnly: true,
+      }));
+    },
+  );
+
+  ipcMain.handle(
+    FS_CHANNELS.revokeSessionReadonlyRoot,
+    async (_e, p: unknown): Promise<boolean> => {
+      const args = requireStringFields(p, ["conversationId", "rootId"]);
+      if (!args) return false;
+      await ensureReady();
+      closeWatchersForRoot(args.rootId);
+      return revokeSessionRoot(args.conversationId, args.rootId);
+    },
+  );
+
+  ipcMain.handle(
+    FS_CHANNELS.clearSessionReadonlyRoots,
+    async (_e, p: unknown): Promise<void> => {
+      const args = requireStringFields(p, ["conversationId"]);
+      if (!args) return;
+      await ensureReady();
+      for (const id of clearSessionRoots(args.conversationId)) {
+        closeWatchersForRoot(id);
+      }
+    },
+  );
 
   ipcMain.handle(FS_CHANNELS.listDir, (_e, p: unknown) => {
     const args = requireStringFields(p, ["rootId", "relPath"]);
@@ -255,5 +399,41 @@ export function registerFsIpc(): void {
     const args = requireStringFields(p, ["rootId", "relPath"]);
     if (!args) return invalidFsResult();
     return copyPath(args.rootId, args.relPath);
+  });
+
+  ipcMain.handle(FS_CHANNELS.trashPath, (_e, p: unknown) => {
+    const args = requireStringFields(p, ["rootId", "relPath"]);
+    if (!args) return invalidFsResult();
+    return trashPath(args.rootId, args.relPath);
+  });
+
+  ipcMain.handle(FS_CHANNELS.pickAndStageAttachment, (_e, p: unknown) => {
+    return pickAndStageAttachment(parseStageDest(p));
+  });
+
+  ipcMain.handle(FS_CHANNELS.stageFromRoot, (_e, p: unknown) => {
+    const args = requireStringFields(p, ["rootId", "relPath"]);
+    if (!args) return invalidFsResult();
+    return stageFromRoot(args.rootId, args.relPath, parseStageDest(p));
+  });
+
+  ipcMain.handle(FS_CHANNELS.stageFromAbsPath, (_e, p: unknown) => {
+    const args = requireStringFields(p, ["absPath"]);
+    if (!args) return invalidFsResult();
+    return stageFromAbsPath(args.absPath, parseStageDest(p));
+  });
+
+  ipcMain.handle(FS_CHANNELS.finalizeStagedAttachment, (_e, p: unknown) => {
+    const args = requireStringFields(p, ["stagingId"]);
+    if (!args) return invalidFsResult();
+    const dest = parseStageDest(p);
+    if (!dest) return invalidFsResult();
+    return finalizeStagedAttachment(args.stagingId, dest);
+  });
+
+  ipcMain.handle(FS_CHANNELS.consumeStagedBytes, async (_e, p: unknown) => {
+    const args = requireStringFields(p, ["stagingId"]);
+    if (!args) return invalidFsResult();
+    return consumeStagedBytes(args.stagingId);
   });
 }

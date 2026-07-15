@@ -6,7 +6,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
+from agentcore.core.logging import get_logger
 from agentcore.runtime.debate.moderator_common import (
     _SUMMARY_CLIP,
     CompleteJson,
@@ -22,6 +24,8 @@ from agentcore.runtime.debate.types import (
     RoundResult,
     SideTurn,
 )
+
+logger = get_logger(__name__)
 
 # 第 1 轮【开场白】规格（喂给 :func:`frame_round` 的首轮分支）：主持人面向普通观众的一句人话
 # 开场，供前端顶部「会说话的主持人」气泡定调。空 / 解析失败时前端回落到模板开场白，故它是【锦上
@@ -114,9 +118,16 @@ async def frame_round(
     依赖）。后续轮恒 ``""``（换轮点题由前端模板承担）。
     """
     if not history:
+        kickoff = (config.kickoff_ask or "").strip()
+        kickoff_block = (
+            f"\n用户开赛嘱咐（定首轮焦点时优先呼应其关心的争议点；勿覆写命题本身）：\n{kickoff}\n"
+            if kickoff
+            else ""
+        )
         user = (
             f"辩论命题：{config.motion}\n\n参与方：\n{_sides_block(config)}\n\n"
-            f"{_frame_form_hint(config.form)}\n\n"
+            f"{_frame_form_hint(config.form)}\n"
+            f"{kickoff_block}\n"
             "请把命题拆成【第一轮】各方应集中交锋的一个最核心争议焦点——挑命题里【最承重】的"
             "那个争议点开场（分量最大、最能带出后续交锋的），别开在边角枝节上。"
             "焦点必须是【一句短语、不超过 30 字】、像一个小标题，聚焦【单一】具体可辩的争议点——"
@@ -162,20 +173,22 @@ async def cross_exam_questions(
     focus: str,
     turns: Sequence[SideTurn],
 ) -> dict[str, list[str]]:
-    """主持人代表交锋，据本轮立论为【每一方】生成 2–3 个必须正面回答的尖锐质询。
+    """主持人代表交锋，据本轮立论为【出席各方】生成 2–3 个必须正面回答的尖锐质询。
 
     质询直指该方【最站不住 / 最缺证据 / 涉嫌谬误】的点（循环论证、拿未定论当已成立的论据、给不出
     出处的具体数字、回避对方命门），逼其正面回应——「让交锋当面发生」的落点。返回 ``{side_key:
     [问题, ...]}``，只保留命中真实 side_key 且非空的方，每方至多 3 问；坏 JSON / 全空返回 {}
-    （循环据此跳过质询、零副作用）。用 ``scenario=…​.cross_exam`` 单列，与裁判 / 简报调用分开计费。
+    （循环据此跳过质询、零副作用）。调用方应只传入出席（``ok``）发言——缺席方无立论，不质询。
+    用 ``scenario=…​.cross_exam`` 单列，与裁判 / 简报调用分开计费。
     """
-    if not any(t.ok for t in turns):
+    present = [t for t in turns if t.ok]
+    if not present:
         return {}
-    valid_keys = {s.key for s in config.sides}
+    valid_keys = {t.side_key for t in present}
     user = (
         f"辩论命题：{config.motion}\n本轮焦点：{focus}\n{_form_guidance(config.form)}\n\n"
-        f"本轮各方发言：\n{_turns_block(turns)}\n\n"
-        "你是主持人，现在进入【质询环节】：代表交锋，为【每一方】拟 2–3 个【必须正面回答】的"
+        f"本轮出席各方发言：\n{_turns_block(present)}\n\n"
+        "你是主持人，现在进入【质询环节】：代表交锋，为【出席的每一方】拟 2–3 个【必须正面回答】的"
         "尖锐质询，直指该方本轮【最站不住脚 / 最缺证据 / 涉嫌逻辑谬误】的点——例如循环论证、拿"
         "尚无定论的东西当已成立的论据、给不出出处的具体数字 / 事实、回避了对方的命门。"
         "【举证责任】要盯紧：凡该方标了【待核实】却当决定性论据用、或给了具体数字/案号却【未标证据状态】"
@@ -191,10 +204,37 @@ async def cross_exam_questions(
     if not isinstance(raw, dict):
         return {}
     out: dict[str, list[str]] = {}
+    seen_valid: set[str] = set()
     for key, qs in raw.items():
         k = str(key)
-        if k in valid_keys:
-            questions = _as_str_list(qs)[:3]
-            if questions:
-                out[k] = questions
+        if k not in valid_keys:
+            continue
+        seen_valid.add(k)
+        questions = _as_str_list(qs)[:3]
+        if questions:
+            out[k] = questions
+        else:
+            # 出席方被 LLM 写了却解析为空（如编号对象含非串、空列表）→ 该方整段质询静默丢失；
+            # 只记类型/键概要，不落完整正文。
+            logger.warning(
+                "debate.cross_exam.side_dropped",
+                side_key=k,
+                value_type=type(qs).__name__,
+                keys_preview=_keys_preview(qs),
+            )
+    # 出席方 key 整方省略：同样丢失质询，用 value_type="missing" 与「值不可用」区分；每方至多告警一次。
+    for k in valid_keys - seen_valid:
+        logger.warning(
+            "debate.cross_exam.side_dropped",
+            side_key=k,
+            value_type="missing",
+            keys_preview=None,
+        )
     return out
+
+
+def _keys_preview(value: Any) -> list[str] | None:
+    """dict 键概要（至多 8 个），供 side_dropped 告警；非 dict 返回 None。"""
+    if not isinstance(value, dict):
+        return None
+    return [str(k) for k in list(value.keys())[:8]]

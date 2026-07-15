@@ -2,6 +2,10 @@
 // 生产 store（conversation.ts）与协议巡检（conformanceFold.ts）共用，与
 // processTimeline.ts 一起保证 live / reload / golden 三路径同源。
 
+import {
+  INTERACTION_BY_KIND,
+  type TimelineMarkerDef,
+} from "@/stores/interactions/registry";
 import type {
   Citation,
   ProcessStep,
@@ -126,6 +130,45 @@ export function foldTeamMarker(
   return process === state.process ? state : { ...state, process };
 }
 
+/** Fold any registered interaction timeline marker (registry-driven). */
+export function foldInteractionTimelineMarker(
+  state: MessageLaneState,
+  marker: TimelineMarkerDef,
+  id: string,
+): MessageLaneState {
+  if (marker.absorbTrailingContent) {
+    const clearedProcess = dropTrailingContentSteps(state.process);
+    const process = appendMarkerStep(clearedProcess, marker, id);
+    if (
+      process === state.process &&
+      clearedProcess === state.process &&
+      !state.content
+    ) {
+      return state;
+    }
+    return { ...state, content: "", process };
+  }
+  const process = appendMarkerStep(state.process, marker, id);
+  return process === state.process ? state : { ...state, process };
+}
+
+function appendMarkerStep(
+  process: ProcessStep[] | undefined,
+  marker: TimelineMarkerDef,
+  id: string,
+): ProcessStep[] {
+  switch (marker.processKind) {
+    case "checkpoint":
+      return appendCheckpointStep(process, id);
+    case "ask":
+      return appendAskStep(process, id);
+    case "plan_review":
+      return appendPlanReviewStep(process, id);
+    case "team_preview":
+      return appendTeamPreviewStep(process, id);
+  }
+}
+
 /** Fold a `checkpoint_required` into the timeline as a positional `checkpoint` marker.
  * Also absorbs same-round CEO prose into the card (mirrors backend ``content_reset`` on
  * a successful blocking ``ask_user``) so streamed text never duplicates the card. */
@@ -133,20 +176,11 @@ export function foldCheckpointMarker(
   state: MessageLaneState,
   checkpointId: string,
 ): MessageLaneState {
-  const clearedProcess = dropTrailingContentSteps(state.process);
-  const process = appendCheckpointStep(clearedProcess, checkpointId);
-  if (
-    process === state.process &&
-    clearedProcess === state.process &&
-    !state.content
-  ) {
-    return state;
-  }
-  return {
-    ...state,
-    content: "",
-    process,
-  };
+  return foldInteractionTimelineMarker(
+    state,
+    INTERACTION_BY_KIND.ask_user.timeline!,
+    checkpointId,
+  );
 }
 
 /** Fold a `question_posted` into the timeline as a positional `ask` marker. */
@@ -154,8 +188,11 @@ export function foldAskMarker(
   state: MessageLaneState,
   askId: string,
 ): MessageLaneState {
-  const process = appendAskStep(state.process, askId);
-  return process === state.process ? state : { ...state, process };
+  return foldInteractionTimelineMarker(
+    state,
+    INTERACTION_BY_KIND.question_posted.timeline!,
+    askId,
+  );
 }
 
 /** Fold a `plan_review_required` into the timeline as a positional `plan_review` marker. */
@@ -163,8 +200,11 @@ export function foldPlanReviewMarker(
   state: MessageLaneState,
   checkpointId: string,
 ): MessageLaneState {
-  const process = appendPlanReviewStep(state.process, checkpointId);
-  return process === state.process ? state : { ...state, process };
+  return foldInteractionTimelineMarker(
+    state,
+    INTERACTION_BY_KIND.plan_review.timeline!,
+    checkpointId,
+  );
 }
 
 /** Fold a `team_preview_required` into the timeline as a positional `team_preview` marker. */
@@ -172,6 +212,9 @@ export function foldTeamPreviewMarker(
   state: MessageLaneState,
   checkpointId: string,
 ): MessageLaneState {
-  const process = appendTeamPreviewStep(state.process, checkpointId);
-  return process === state.process ? state : { ...state, process };
+  return foldInteractionTimelineMarker(
+    state,
+    INTERACTION_BY_KIND.team_preview.timeline!,
+    checkpointId,
+  );
 }

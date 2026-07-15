@@ -237,7 +237,14 @@ namespace AgentTown.Town
 
             var npc = go.AddComponent<TownNpc>();
             npc.Initialize(agentId, sharedMaterial);
-            npc.ApplyTint(TownPalette.NpcColor(ColorIndexFor(agentId)));
+            if (AgentTown.Show.ShowCast.TryGetColor(agentId, out Color castColor))
+            {
+                npc.ApplyTint(castColor);
+            }
+            else
+            {
+                npc.ApplyTint(TownPalette.NpcColor(ColorIndexFor(agentId)));
+            }
 
             npcs[agentId] = npc;
             return npc;

@@ -161,6 +161,19 @@ def test_store_confirm_claim_drops_frame(tmp_path):
     assert asyncio.run(drive()) == []
 
 
+def test_store_save_raises_on_write_failure(tmp_path, monkeypatch):
+    """D11：sidecar save 失败必须抛错（消灭假 saved），不得吞异常。"""
+    store = LocalPausedTurnStore(tmp_path / "paused")
+
+    def boom(_message_id: str, _record: dict) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(store, "_write_sync", boom)
+
+    with pytest.raises(OSError, match="disk full"):
+        asyncio.run(store.save(_suspension("m1", "c1")))
+
+
 def test_store_recovers_stale_claims_on_init(tmp_path):
     """A sidecar crash mid-resume leaves ``.claimed`` orphans; startup rolls them back."""
     paused_dir = tmp_path / "paused"
@@ -345,8 +358,9 @@ def test_resume_claims_frame_and_drives_resume_pipeline(tmp_path, monkeypatch):
         captured["saver"] = kwargs.get("suspension_saver")
         # The Sidecar has no DB → history must come from the claimed local frame record.
         captured["history"] = kwargs.get("history")
-        # The user's CURRENT autonomy posture rides the resume params (安全权限与治理 §三).
+        # The conversation's CURRENT permission mode rides the resume params.
         captured["autonomy"] = kwargs.get("autonomy_policy")
+        captured["permission_preset"] = kwargs.get("permission_preset")
         kwargs["sink"].close()
         return {
             "finish_reason": "end_turn",
@@ -377,7 +391,7 @@ def test_resume_claims_frame_and_drives_resume_pipeline(tmp_path, monkeypatch):
                         "conversationId": "c1",
                         "decision": "adjust",
                         "note": "换个方向",
-                        "autonomyPolicy": "always_ask",
+                        "permissionPreset": "observe",
                     },
                 }
             )
@@ -393,18 +407,20 @@ def test_resume_claims_frame_and_drives_resume_pipeline(tmp_path, monkeypatch):
     assert captured["decision"] == "adjust"
     assert captured["note"] == "换个方向"
     assert captured["saver"] is not None
-    # A non-default per-resume autonomy posture reached the pipeline (not reset to default).
+    # A non-default per-resume permission mode reached the pipeline (not reset to default).
     from agentcore.core.types import AutonomyPolicy
 
     assert captured["autonomy"] is AutonomyPolicy.ALWAYS_ASK
+    assert captured.get("permission_preset") is not None or captured["autonomy"] is AutonomyPolicy.ALWAYS_ASK
     # the reloaded history (from the local frame) is threaded into the resume pipeline so
     # window_from_journal can splice it ahead of the folded rounds (Phase 2 ⑤).
     assert captured["history"] == history
     assert remaining == []  # the frame was claimed (one-shot), so nothing is left
 
 
-def test_resume_failure_rolls_back_frame_for_retry(tmp_path, monkeypatch):
-    """A resume crash after claim restores the frame so the desktop can retry."""
+def test_resume_failure_after_settlement_does_not_restore_frame(tmp_path, monkeypatch):
+    """D1: pipeline crash after settlement prewrite must not resurrect the decision card."""
+
     async def fake_resume(**kwargs: Any) -> dict[str, Any]:
         raise RuntimeError("simulated resume crash")
 
@@ -412,11 +428,12 @@ def test_resume_failure_rolls_back_frame_for_retry(tmp_path, monkeypatch):
 
     sent, write_line = _recorder()
     server = SidecarServer(write_line)
-    store = LocalPausedTurnStore(tmp_path / "data" / "paused")
+    data = tmp_path / "data"
 
     async def drive() -> tuple[list[Any], dict[str, Any]]:
-        await _initialize(server, tmp_path, data_dir=str(tmp_path / "data"))
-        await store.save(_suspension("m1", "c1"))
+        await _initialize(server, tmp_path, data_dir=str(data))
+        assert server._paused_store is not None
+        await server._paused_store.save(_suspension("m1", "c1"))
         await server.handle_line(
             json.dumps(
                 {
@@ -428,18 +445,19 @@ def test_resume_failure_rolls_back_frame_for_retry(tmp_path, monkeypatch):
                         "conversationId": "c1",
                         "decision": "adjust",
                         "note": "retry me",
+                        "userMessageId": "u1",
+                        "traceId": "a" * 32,
                     },
                 }
             )
         )
         await asyncio.gather(*list(server._turns.values()))
-        remaining = await store.list_pending("c1")
+        remaining = await server._paused_store.list_pending("c1")
         return remaining, _response(sent, 9)
 
     remaining, err = asyncio.run(drive())
-    assert len(remaining) == 1
-    assert remaining[0].message_id == "m1"
-    assert err["error"]["code"] == protocol.RESUME_RETRYABLE
+    assert remaining == []
+    assert err["error"]["code"] == protocol.INTERNAL_ERROR
 
 
 def test_resume_missing_frame_reports_not_found(tmp_path):

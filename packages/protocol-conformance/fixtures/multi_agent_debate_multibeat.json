@@ -28,7 +28,7 @@
             "id": "debate_mb_mod1",
             "role": "主持人",
             "model_preference": "strong",
-            "thinking": true,
+            "thinking": false,
             "reasoning_effort": "high"
           }
         ],
@@ -53,6 +53,18 @@
         "kind": "agent"
       },
       "timestamp": "2026-01-01T00:00:00.003Z"
+    },
+    {
+      "type": "debate_round_started",
+      "payload": {
+        "execution_id": "exec1",
+        "moderator_run_id": "debate_mb_mod1",
+        "round_no": 1,
+        "focus": "收益与风险敞口",
+        "cross_exam_enabled": true,
+        "opening": "多轮对抗开场：先把收益与风险敞口摆上台面。"
+      },
+      "timestamp": "2026-01-01T00:00:00.004Z"
     },
     {
       "type": "run_plan",
@@ -99,7 +111,7 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:00.004Z"
+      "timestamp": "2026-01-01T00:00:00.005Z"
     },
     {
       "type": "run_started",
@@ -109,7 +121,7 @@
         "parent_run_id": "debate_mb_mod1",
         "kind": "agent"
       },
-      "timestamp": "2026-01-01T00:00:00.005Z"
+      "timestamp": "2026-01-01T00:00:00.006Z"
     },
     {
       "type": "run_output_delta",
@@ -118,7 +130,7 @@
         "agent_id": "d_pro",
         "delta": "支持：收益可量化【已核实·审计】。"
       },
-      "timestamp": "2026-01-01T00:00:00.006Z"
+      "timestamp": "2026-01-01T00:00:00.007Z"
     },
     {
       "type": "run_completed",
@@ -144,7 +156,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.007Z"
+      "timestamp": "2026-01-01T00:00:00.008Z"
     },
     {
       "type": "run_started",
@@ -154,7 +166,7 @@
         "parent_run_id": "debate_mb_mod1",
         "kind": "agent"
       },
-      "timestamp": "2026-01-01T00:00:00.008Z"
+      "timestamp": "2026-01-01T00:00:00.009Z"
     },
     {
       "type": "run_output_delta",
@@ -163,7 +175,7 @@
         "agent_id": "d_con",
         "delta": "反对：风险缺兜底【已核实·复盘】。"
       },
-      "timestamp": "2026-01-01T00:00:00.009Z"
+      "timestamp": "2026-01-01T00:00:00.010Z"
     },
     {
       "type": "run_completed",
@@ -189,7 +201,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.010Z"
+      "timestamp": "2026-01-01T00:00:00.011Z"
     },
     {
       "type": "run_started",
@@ -201,9 +213,10 @@
         "continues_run_id": "debate_mb_mod1_r1_pro",
         "stance": "pro",
         "group": "debate:debate",
-        "round": 1
+        "round": 1,
+        "side_key": "pro"
       },
-      "timestamp": "2026-01-01T00:00:00.011Z"
+      "timestamp": "2026-01-01T00:00:00.012Z"
     },
     {
       "type": "run_context",
@@ -214,8 +227,8 @@
           {
             "channel": "task",
             "heading": "质询环节",
-            "body": "## 第 1 轮 · 质询环节\n请逐条正面回答质询。\n1. 质询题",
-            "chars": 33,
+            "body": "## 第 1 轮 · 质询环节\n请按 ### 质询一 标题逐条正面作答。\n1. 质询题",
+            "chars": 43,
             "truncated": false,
             "source_role": "",
             "source_run_id": "",
@@ -235,16 +248,16 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:00.012Z"
+      "timestamp": "2026-01-01T00:00:00.013Z"
     },
     {
       "type": "run_output_delta",
       "payload": {
         "run_id": "debate_mb_mod1_r1_cx_pro",
         "agent_id": "debate_mb_mod1_r1_cx_pro",
-        "delta": "作答：未含尾部【待核实·推断】。"
+        "delta": "### 质询一\n未含尾部【待核实·推断】。"
       },
-      "timestamp": "2026-01-01T00:00:00.013Z"
+      "timestamp": "2026-01-01T00:00:00.014Z"
     },
     {
       "type": "run_completed",
@@ -270,7 +283,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.014Z"
+      "timestamp": "2026-01-01T00:00:00.015Z"
     },
     {
       "type": "run_started",
@@ -282,9 +295,10 @@
         "continues_run_id": "debate_mb_mod1_r1_con",
         "stance": "con",
         "group": "debate:debate",
-        "round": 1
+        "round": 1,
+        "side_key": "con"
       },
-      "timestamp": "2026-01-01T00:00:00.015Z"
+      "timestamp": "2026-01-01T00:00:00.016Z"
     },
     {
       "type": "run_context",
@@ -295,8 +309,8 @@
           {
             "channel": "task",
             "heading": "质询环节",
-            "body": "## 第 1 轮 · 质询环节\n请逐条正面回答质询。\n1. 质询题",
-            "chars": 33,
+            "body": "## 第 1 轮 · 质询环节\n请按 ### 质询一 标题逐条正面作答。\n1. 质询题",
+            "chars": 43,
             "truncated": false,
             "source_role": "",
             "source_run_id": "",
@@ -316,16 +330,16 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:00.016Z"
+      "timestamp": "2026-01-01T00:00:00.017Z"
     },
     {
       "type": "run_output_delta",
       "payload": {
         "run_id": "debate_mb_mod1_r1_cx_con",
         "agent_id": "debate_mb_mod1_r1_cx_con",
-        "delta": "作答：暂无故障率【待核实·推断】。"
+        "delta": "### 质询一\n暂无故障率【待核实·推断】。"
       },
-      "timestamp": "2026-01-01T00:00:00.017Z"
+      "timestamp": "2026-01-01T00:00:00.018Z"
     },
     {
       "type": "run_completed",
@@ -351,7 +365,19 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.018Z"
+      "timestamp": "2026-01-01T00:00:00.019Z"
+    },
+    {
+      "type": "debate_round_started",
+      "payload": {
+        "execution_id": "exec1",
+        "moderator_run_id": "debate_mb_mod1",
+        "round_no": 2,
+        "focus": "灰度与回滚兜底",
+        "cross_exam_enabled": true,
+        "opening": ""
+      },
+      "timestamp": "2026-01-01T00:00:00.020Z"
     },
     {
       "type": "run_started",
@@ -363,9 +389,10 @@
         "continues_run_id": "debate_mb_mod1_r1_pro",
         "stance": "pro",
         "group": "debate:debate",
-        "round": 2
+        "round": 2,
+        "side_key": "pro"
       },
-      "timestamp": "2026-01-01T00:00:00.019Z"
+      "timestamp": "2026-01-01T00:00:00.021Z"
     },
     {
       "type": "run_context",
@@ -408,7 +435,7 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:00.020Z"
+      "timestamp": "2026-01-01T00:00:00.022Z"
     },
     {
       "type": "run_output_delta",
@@ -417,7 +444,7 @@
         "agent_id": "debate_mb_mod1_r2_pro",
         "delta": "续辩：灰度熔断可兜底【已核实·预案】。"
       },
-      "timestamp": "2026-01-01T00:00:00.021Z"
+      "timestamp": "2026-01-01T00:00:00.023Z"
     },
     {
       "type": "run_completed",
@@ -443,7 +470,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.022Z"
+      "timestamp": "2026-01-01T00:00:00.024Z"
     },
     {
       "type": "run_started",
@@ -455,9 +482,10 @@
         "continues_run_id": "debate_mb_mod1_r1_con",
         "stance": "con",
         "group": "debate:debate",
-        "round": 2
+        "round": 2,
+        "side_key": "con"
       },
-      "timestamp": "2026-01-01T00:00:00.023Z"
+      "timestamp": "2026-01-01T00:00:00.025Z"
     },
     {
       "type": "run_context",
@@ -500,7 +528,7 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:00.024Z"
+      "timestamp": "2026-01-01T00:00:00.026Z"
     },
     {
       "type": "run_output_delta",
@@ -509,7 +537,7 @@
         "agent_id": "debate_mb_mod1_r2_con",
         "delta": "续辩：双写窗口仍未解【已核实·复盘】。"
       },
-      "timestamp": "2026-01-01T00:00:00.025Z"
+      "timestamp": "2026-01-01T00:00:00.027Z"
     },
     {
       "type": "run_completed",
@@ -535,7 +563,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.026Z"
+      "timestamp": "2026-01-01T00:00:00.028Z"
     },
     {
       "type": "run_started",
@@ -547,9 +575,10 @@
         "continues_run_id": "debate_mb_mod1_r1_pro",
         "stance": "pro",
         "group": "debate:debate",
-        "round": 2
+        "round": 2,
+        "side_key": "pro"
       },
-      "timestamp": "2026-01-01T00:00:00.027Z"
+      "timestamp": "2026-01-01T00:00:00.029Z"
     },
     {
       "type": "run_context",
@@ -560,8 +589,8 @@
           {
             "channel": "task",
             "heading": "质询环节",
-            "body": "## 第 2 轮 · 质询环节\n请逐条正面回答质询。\n1. 质询题",
-            "chars": 33,
+            "body": "## 第 2 轮 · 质询环节\n请按 ### 质询一 标题逐条正面作答。\n1. 质询题",
+            "chars": 43,
             "truncated": false,
             "source_role": "",
             "source_run_id": "",
@@ -581,16 +610,16 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:00.028Z"
+      "timestamp": "2026-01-01T00:00:00.030Z"
     },
     {
       "type": "run_output_delta",
       "payload": {
         "run_id": "debate_mb_mod1_r2_cx_pro",
         "agent_id": "debate_mb_mod1_r2_cx_pro",
-        "delta": "作答：预算池买单【已核实·预案】。"
+        "delta": "### 质询一\n预算池买单【已核实·预案】。"
       },
-      "timestamp": "2026-01-01T00:00:00.029Z"
+      "timestamp": "2026-01-01T00:00:00.031Z"
     },
     {
       "type": "run_completed",
@@ -616,7 +645,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.030Z"
+      "timestamp": "2026-01-01T00:00:00.032Z"
     },
     {
       "type": "run_started",
@@ -628,9 +657,10 @@
         "continues_run_id": "debate_mb_mod1_r1_con",
         "stance": "con",
         "group": "debate:debate",
-        "round": 2
+        "round": 2,
+        "side_key": "con"
       },
-      "timestamp": "2026-01-01T00:00:00.031Z"
+      "timestamp": "2026-01-01T00:00:00.033Z"
     },
     {
       "type": "run_context",
@@ -641,8 +671,8 @@
           {
             "channel": "task",
             "heading": "质询环节",
-            "body": "## 第 2 轮 · 质询环节\n请逐条正面回答质询。\n1. 质询题",
-            "chars": 33,
+            "body": "## 第 2 轮 · 质询环节\n请按 ### 质询一 标题逐条正面作答。\n1. 质询题",
+            "chars": 43,
             "truncated": false,
             "source_role": "",
             "source_run_id": "",
@@ -662,16 +692,16 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:00.032Z"
+      "timestamp": "2026-01-01T00:00:00.034Z"
     },
     {
       "type": "run_output_delta",
       "payload": {
         "run_id": "debate_mb_mod1_r2_cx_con",
         "agent_id": "debate_mb_mod1_r2_cx_con",
-        "delta": "作答：须有一致性 SLA【待核实·推断】。"
+        "delta": "### 质询一\n须有一致性 SLA【待核实·推断】。"
       },
-      "timestamp": "2026-01-01T00:00:00.033Z"
+      "timestamp": "2026-01-01T00:00:00.035Z"
     },
     {
       "type": "run_completed",
@@ -697,7 +727,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.034Z"
+      "timestamp": "2026-01-01T00:00:00.036Z"
     },
     {
       "type": "run_started",
@@ -709,9 +739,10 @@
         "continues_run_id": "debate_mb_mod1_r1_pro",
         "stance": "pro",
         "group": "debate:debate",
-        "round": 2
+        "round": 2,
+        "side_key": "pro"
       },
-      "timestamp": "2026-01-01T00:00:00.035Z"
+      "timestamp": "2026-01-01T00:00:00.037Z"
     },
     {
       "type": "run_context",
@@ -743,7 +774,7 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:00.036Z"
+      "timestamp": "2026-01-01T00:00:00.038Z"
     },
     {
       "type": "run_output_delta",
@@ -752,7 +783,7 @@
         "agent_id": "debate_mb_mod1_closing_pro",
         "delta": "结辩：收益确定、风险有解，应有条件采用。"
       },
-      "timestamp": "2026-01-01T00:00:00.037Z"
+      "timestamp": "2026-01-01T00:00:00.039Z"
     },
     {
       "type": "run_completed",
@@ -778,7 +809,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.038Z"
+      "timestamp": "2026-01-01T00:00:00.040Z"
     },
     {
       "type": "run_started",
@@ -790,9 +821,10 @@
         "continues_run_id": "debate_mb_mod1_r1_con",
         "stance": "con",
         "group": "debate:debate",
-        "round": 2
+        "round": 2,
+        "side_key": "con"
       },
-      "timestamp": "2026-01-01T00:00:00.039Z"
+      "timestamp": "2026-01-01T00:00:00.041Z"
     },
     {
       "type": "run_context",
@@ -824,7 +856,7 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:00.040Z"
+      "timestamp": "2026-01-01T00:00:00.042Z"
     },
     {
       "type": "run_output_delta",
@@ -833,7 +865,7 @@
         "agent_id": "debate_mb_mod1_closing_con",
         "delta": "结辩：风险未对冲前不宜全量。"
       },
-      "timestamp": "2026-01-01T00:00:00.041Z"
+      "timestamp": "2026-01-01T00:00:00.043Z"
     },
     {
       "type": "run_completed",
@@ -859,7 +891,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.042Z"
+      "timestamp": "2026-01-01T00:00:00.044Z"
     },
     {
       "type": "run_completed",
@@ -885,7 +917,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.043Z"
+      "timestamp": "2026-01-01T00:00:00.045Z"
     },
     {
       "type": "debate_result",
@@ -927,13 +959,17 @@
                 "key": "pro",
                 "name": "支持方",
                 "run_id": "debate_mb_mod1_r1_pro",
-                "ok": true
+                "ok": true,
+                "absent": false,
+                "arguments": []
               },
               {
                 "key": "con",
                 "name": "反对方",
                 "run_id": "debate_mb_mod1_r1_con",
-                "ok": true
+                "ok": true,
+                "absent": false,
+                "arguments": []
               }
             ],
             "clashes": [],
@@ -996,13 +1032,17 @@
                 "key": "pro",
                 "name": "支持方",
                 "run_id": "debate_mb_mod1_r2_pro",
-                "ok": true
+                "ok": true,
+                "absent": false,
+                "arguments": []
               },
               {
                 "key": "con",
                 "name": "反对方",
                 "run_id": "debate_mb_mod1_r2_con",
-                "ok": true
+                "ok": true,
+                "absent": false,
+                "arguments": []
               }
             ],
             "clashes": [],
@@ -1077,7 +1117,7 @@
           "recommendation": "先灰度再全量。"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.044Z"
+      "timestamp": "2026-01-01T00:00:00.046Z"
     },
     {
       "type": "message_end",
@@ -1099,7 +1139,7 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:00.045Z"
+      "timestamp": "2026-01-01T00:00:00.047Z"
     }
   ],
   "projected": {
@@ -1124,7 +1164,7 @@
         "id": "debate_mb_mod1",
         "role": "主持人",
         "modelPreference": "strong",
-        "thinking": true,
+        "thinking": false,
         "reasoningEffort": "high",
         "status": "completed",
         "currentRunId": null,
@@ -1164,7 +1204,7 @@
         "reasoningEffort": "high",
         "status": "completed",
         "currentRunId": null,
-        "output": "作答：未含尾部【待核实·推断】。",
+        "output": "### 质询一\n未含尾部【待核实·推断】。",
         "reasoning": "",
         "toolProgress": null
       },
@@ -1176,7 +1216,7 @@
         "reasoningEffort": "high",
         "status": "completed",
         "currentRunId": null,
-        "output": "作答：暂无故障率【待核实·推断】。",
+        "output": "### 质询一\n暂无故障率【待核实·推断】。",
         "reasoning": "",
         "toolProgress": null
       },
@@ -1212,7 +1252,7 @@
         "reasoningEffort": "high",
         "status": "completed",
         "currentRunId": null,
-        "output": "作答：预算池买单【已核实·预案】。",
+        "output": "### 质询一\n预算池买单【已核实·预案】。",
         "reasoning": "",
         "toolProgress": null
       },
@@ -1224,7 +1264,7 @@
         "reasoningEffort": "high",
         "status": "completed",
         "currentRunId": null,
-        "output": "作答：须有一致性 SLA【待核实·推断】。",
+        "output": "### 质询一\n须有一致性 SLA【待核实·推断】。",
         "reasoning": "",
         "toolProgress": null
       },
@@ -1290,7 +1330,8 @@
         "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [],
-        "escalations": []
+        "escalations": [],
+        "process": []
       },
       {
         "id": "debate_mb_mod1_r1_pro",
@@ -1328,7 +1369,13 @@
         "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "支持：收益可量化【已核实·审计】。"
+          }
+        ]
       },
       {
         "id": "debate_mb_mod1_r1_con",
@@ -1366,7 +1413,13 @@
         "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "反对：风险缺兜底【已核实·复盘】。"
+          }
+        ]
       },
       {
         "id": "debate_mb_mod1_r1_cx_pro",
@@ -1407,8 +1460,8 @@
           {
             "channel": "task",
             "heading": "质询环节",
-            "body": "## 第 1 轮 · 质询环节\n请逐条正面回答质询。\n1. 质询题",
-            "chars": 33,
+            "body": "## 第 1 轮 · 质询环节\n请按 ### 质询一 标题逐条正面作答。\n1. 质询题",
+            "chars": 43,
             "truncated": false,
             "source_role": "",
             "source_run_id": "",
@@ -1427,7 +1480,13 @@
             "files": []
           }
         ],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "### 质询一\n未含尾部【待核实·推断】。"
+          }
+        ]
       },
       {
         "id": "debate_mb_mod1_r1_cx_con",
@@ -1468,8 +1527,8 @@
           {
             "channel": "task",
             "heading": "质询环节",
-            "body": "## 第 1 轮 · 质询环节\n请逐条正面回答质询。\n1. 质询题",
-            "chars": 33,
+            "body": "## 第 1 轮 · 质询环节\n请按 ### 质询一 标题逐条正面作答。\n1. 质询题",
+            "chars": 43,
             "truncated": false,
             "source_role": "",
             "source_run_id": "",
@@ -1488,7 +1547,13 @@
             "files": []
           }
         ],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "### 质询一\n暂无故障率【待核实·推断】。"
+          }
+        ]
       },
       {
         "id": "debate_mb_mod1_r2_pro",
@@ -1560,7 +1625,13 @@
             "files": []
           }
         ],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "续辩：灰度熔断可兜底【已核实·预案】。"
+          }
+        ]
       },
       {
         "id": "debate_mb_mod1_r2_con",
@@ -1632,7 +1703,13 @@
             "files": []
           }
         ],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "续辩：双写窗口仍未解【已核实·复盘】。"
+          }
+        ]
       },
       {
         "id": "debate_mb_mod1_r2_cx_pro",
@@ -1673,8 +1750,8 @@
           {
             "channel": "task",
             "heading": "质询环节",
-            "body": "## 第 2 轮 · 质询环节\n请逐条正面回答质询。\n1. 质询题",
-            "chars": 33,
+            "body": "## 第 2 轮 · 质询环节\n请按 ### 质询一 标题逐条正面作答。\n1. 质询题",
+            "chars": 43,
             "truncated": false,
             "source_role": "",
             "source_run_id": "",
@@ -1693,7 +1770,13 @@
             "files": []
           }
         ],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "### 质询一\n预算池买单【已核实·预案】。"
+          }
+        ]
       },
       {
         "id": "debate_mb_mod1_r2_cx_con",
@@ -1734,8 +1817,8 @@
           {
             "channel": "task",
             "heading": "质询环节",
-            "body": "## 第 2 轮 · 质询环节\n请逐条正面回答质询。\n1. 质询题",
-            "chars": 33,
+            "body": "## 第 2 轮 · 质询环节\n请按 ### 质询一 标题逐条正面作答。\n1. 质询题",
+            "chars": 43,
             "truncated": false,
             "source_role": "",
             "source_run_id": "",
@@ -1754,7 +1837,13 @@
             "files": []
           }
         ],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "### 质询一\n须有一致性 SLA【待核实·推断】。"
+          }
+        ]
       },
       {
         "id": "debate_mb_mod1_closing_pro",
@@ -1815,7 +1904,13 @@
             "files": []
           }
         ],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "结辩：收益确定、风险有解，应有条件采用。"
+          }
+        ]
       },
       {
         "id": "debate_mb_mod1_closing_con",
@@ -1876,7 +1971,13 @@
             "files": []
           }
         ],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "结辩：风险未对冲前不宜全量。"
+          }
+        ]
       }
     ],
     "progress": {
@@ -1929,13 +2030,17 @@
               "key": "pro",
               "name": "支持方",
               "run_id": "debate_mb_mod1_r1_pro",
-              "ok": true
+              "ok": true,
+              "absent": false,
+              "arguments": []
             },
             {
               "key": "con",
               "name": "反对方",
               "run_id": "debate_mb_mod1_r1_con",
-              "ok": true
+              "ok": true,
+              "absent": false,
+              "arguments": []
             }
           ],
           "clashes": [],
@@ -1998,13 +2103,17 @@
               "key": "pro",
               "name": "支持方",
               "run_id": "debate_mb_mod1_r2_pro",
-              "ok": true
+              "ok": true,
+              "absent": false,
+              "arguments": []
             },
             {
               "key": "con",
               "name": "反对方",
               "run_id": "debate_mb_mod1_r2_con",
-              "ok": true
+              "ok": true,
+              "absent": false,
+              "arguments": []
             }
           ],
           "clashes": [],
@@ -2079,7 +2188,28 @@
         "recommendation": "先灰度再全量。"
       }
     },
-    "debateRounds": [],
+    "debateRounds": [
+      {
+        "round_no": 1,
+        "focus": "收益与风险敞口",
+        "summary": "",
+        "verdict": null,
+        "sides": [],
+        "clashes": [],
+        "cross_exam": []
+      },
+      {
+        "round_no": 2,
+        "focus": "灰度与回滚兜底",
+        "summary": "",
+        "verdict": null,
+        "sides": [],
+        "clashes": [],
+        "cross_exam": []
+      }
+    ],
+    "crossExamEnabled": true,
+    "debateOpening": "多轮对抗开场：先把收益与风险敞口摆上台面。",
     "teamSynthesisPreview": null,
     "turnWarning": null,
     "teamNotes": []

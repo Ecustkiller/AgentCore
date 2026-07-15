@@ -27,14 +27,17 @@ from agentcore.api.schemas import (
     CreateConversationRequest,
     FolderGroup,
     GroupedConversationsResponse,
+    PermissionPresetUpdate,
     StatusResponse,
     UpdateConversationRequest,
 )
+from agentcore.conversation.common import default_permission_preset_for_user
 from agentcore.conversation.export import (
     conversation_to_json,
     conversation_to_markdown,
 )
 from agentcore.core.errors import NotFoundError
+from agentcore.core.logging import get_logger
 from agentcore.db.models import Conversation
 from agentcore.db.repositories import (
     ConversationRepository,
@@ -45,6 +48,8 @@ from agentcore.db.repositories import (
 )
 
 from ._helpers import _get_owned_conversation
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -75,6 +80,11 @@ async def create_conversation(
         folder = await folder_repo.get_by_id(body.folder_id, user_id=user.user_id)
         if not folder:
             raise NotFoundError("文件夹不存在")
+    # Session permission mode: explicit body wins; else seed from user autonomy default.
+    if body.permission_preset is not None:
+        preset = body.permission_preset.value
+    else:
+        preset = (await default_permission_preset_for_user(repo._session, user.user_id)).value
     conv = await repo.create(
         user_id=user.user_id,
         title=body.title,
@@ -82,6 +92,7 @@ async def create_conversation(
         # Project chats inherit the project's workspace — never write session-level
         # local_* / container columns. 裸聊 keeps desktop local-first intent.
         local_container_root_id=(body.local_container_root_id if body.folder_id is None else None),
+        permission_preset=preset,
     )
     return ConversationSummary.model_validate(conv)
 
@@ -112,6 +123,7 @@ async def duplicate_conversation(
         title=title,
         folder_id=src.folder_id,
         local_container_root_id=src.local_container_root_id,
+        permission_preset=src.permission_preset,
     )
     count = await msg_repo.copy_all(conversation_id, new_conv.id)
     summary = ConversationSummary.model_validate(new_conv)
@@ -196,6 +208,48 @@ async def get_conversation(
     return ConversationSummary.model_validate(conv)
 
 
+@router.put("/{conversation_id}/permission-preset", response_model=ConversationSummary)
+async def set_permission_preset(
+    conversation_id: str,
+    body: PermissionPresetUpdate,
+    user: AuthUser,
+    repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Switch the session permission mode (降档/升档确认由客户端负责).
+
+    Takes effect on the next turn / durable resume (gate is built at turn entry).
+    """
+    conv = await repo.get_by_id(conversation_id, user_id=user.user_id)
+    if not conv:
+        raise NotFoundError("对话不存在")
+    previous = conv.permission_preset
+    next_preset = body.permission_preset.value
+    if previous != next_preset:
+        updated = await repo.set_permission_preset(
+            conversation_id, user_id=user.user_id, permission_preset=next_preset
+        )
+        if not updated:
+            raise NotFoundError("对话不存在")
+        conv = updated
+        logger.info(
+            "conversation.permission_preset_changed",
+            conversation_id=conversation_id,
+            previous=previous,
+            permission_preset=next_preset,
+        )
+        from agentcore.runtime.audit.permission_events import (
+            record_permission_preset_change,
+        )
+
+        await record_permission_preset_change(
+            user_id=user.user_id,
+            conversation_id=conversation_id,
+            previous=previous,
+            next_preset=next_preset,
+        )
+    return ConversationSummary.model_validate(conv)
+
+
 @router.patch("/{conversation_id}", response_model=ConversationSummary)
 async def update_conversation(
     conversation_id: str,
@@ -234,6 +288,10 @@ async def delete_conversation(
     # kill its read-only links so a stale snapshot can't outlive it. Owner already
     # proven by the soft_delete above, so a blanket per-conversation revoke is safe.
     await share_repo.revoke_all_for_conversation(conversation_id)
+    # W3: drop session read-only external grants (in-process; desktop clears roots too).
+    from agentcore.workspace import grant_store
+
+    grant_store.clear_conversation(conversation_id)
     return StatusResponse()
 
 

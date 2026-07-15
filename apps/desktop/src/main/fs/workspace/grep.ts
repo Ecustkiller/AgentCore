@@ -1,13 +1,10 @@
 import { promises as fs } from "node:fs";
 import { join, relative } from "node:path";
 import type { WorkspaceOpResult } from "@shared/ipc-contract";
-import {
-  GREP_MAX_FILES,
-  GREP_MAX_RESULTS_CAP,
-  LIST_FILES_SKIP_DIRS,
-} from "../constants";
+import { GREP_MAX_FILES, GREP_MAX_RESULTS_CAP } from "../constants";
 import { realInside, resolveLexical, toReason } from "../pathGuard";
 import type { StoredRoot } from "../roots";
+import { shouldSkipWorkspaceEntry } from "../workspaceIgnore";
 import {
   globToRegExp,
   opErr,
@@ -122,6 +119,7 @@ export async function opGrep(
     for (const d of dirents) {
       if (stop) break;
       if (!d.isFile()) continue;
+      if (shouldSkipWorkspaceEntry(d.name, false)) continue;
       if (nameRe && !nameRe.test(d.name)) continue;
       filesScanned++;
       if (filesScanned > GREP_MAX_FILES) {
@@ -135,7 +133,7 @@ export async function opGrep(
     if (stop) return;
     for (const d of dirents) {
       if (stop) break;
-      if (d.isDirectory() && !LIST_FILES_SKIP_DIRS.has(d.name)) {
+      if (d.isDirectory() && !shouldSkipWorkspaceEntry(d.name, true)) {
         await walk(join(absDir, d.name));
       }
     }

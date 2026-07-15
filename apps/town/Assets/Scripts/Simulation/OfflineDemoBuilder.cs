@@ -1701,6 +1701,7 @@ namespace AgentTown.Simulation
                 anchors["图书馆"] = new WireVec3(-40, 0, -8);
                 anchors["工坊"] = new WireVec3(48, 0, -36);
                 anchors["码头"] = new WireVec3(-8, 0, 40);
+                anchors["心动营地"] = new WireVec3(-56, 0, 36);
             }
 
             return anchors;

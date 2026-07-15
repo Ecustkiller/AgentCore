@@ -1,6 +1,8 @@
 import { assertNever } from "@/lib/assertNever";
 import { traceSSEEvent } from "@/services/sseTrace";
 import { traceTurnFirstSSE } from "@/services/turnTrace";
+import { allowsSseEvent } from "@/stores/conversation/turnPhase";
+import { getTurnPhase } from "@/stores/conversation/turnPhaseActions";
 import type { SSEEvent } from "@/types/events";
 import { handleBoardEvent } from "./handlers/board";
 import { handleDesktopEvent } from "./handlers/desktop";
@@ -42,6 +44,9 @@ const HANDLERS = [
  * backend starts emitting them, with zero further frontend wiring.
  */
 export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
+  // 停止生命周期事件门：stopping/terminal 丢弃内容/工具/执行帧，只放行终态确认。
+  if (!allowsSseEvent(getTurnPhase(ctx.conversationId), event.type)) return;
+
   // Dev-only 时序探针（默认关；DevTools 执行 __sseTrace() 开）：记每个事件的到达顺序，
   // 回合末把到达序与气泡 process[] 并排对账。no-op when disabled / in prod.
   traceTurnFirstSSE(ctx.conversationId, event.type);

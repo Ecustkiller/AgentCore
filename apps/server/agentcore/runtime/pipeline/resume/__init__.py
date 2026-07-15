@@ -5,6 +5,7 @@ from agentcore.runtime.pipeline.resume.pipeline import resume_chat_pipeline
 from agentcore.runtime.pipeline.resume.settle import (
     SettledSuspension,
     append_resumed_tool_results,
+    persist_resumed_tool_results,
     settle_resumed_suspension,
 )
 from agentcore.runtime.pipeline.resume.window import pre_pause_content, resumed_captain_window
@@ -14,6 +15,7 @@ __all__ = [
     "append_resumed_tool_results",
     "finish_resume_turn",
     "finish_terminal_resume",
+    "persist_resumed_tool_results",
     "pre_pause_content",
     "resume_chat_pipeline",
     "resumed_captain_window",

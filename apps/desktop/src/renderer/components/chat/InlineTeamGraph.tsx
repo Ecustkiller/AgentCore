@@ -1,3 +1,4 @@
+import { DebateProgressLine } from "@/components/chat/DebateProgressLine";
 import { StatusStrip } from "@/components/chat/StatusStrip";
 import { TeamNotesPanel } from "@/components/chat/TeamNotesPanel";
 import { teamNotesDefaultExpanded } from "@/components/chat/teamNotesDefaults";
@@ -20,6 +21,7 @@ import {
   type Execution,
   type ExecutionJournal,
   ExecutionScopeContext,
+  isDebate,
   useExecutionStore,
   useMessageExecution,
 } from "@/stores/execution";
@@ -31,6 +33,18 @@ import { useNavigate } from "react-router-dom";
 
 /** Re-export for canvas 指挥台 and other consumers. */
 export { RecoveryActions } from "@/components/chat/StatusStrip";
+
+/**
+ * True once the team has actually started work: any run left the never-started
+ * states (`pending`, or terminal `skipped` from finalize before a start).
+ * Gates the inline graph so team_preview hang / stop-before-start stay graph-less;
+ * plan_review mid-wave pause (completed nodes exist) still shows the graph.
+ */
+export function teamHasStartedRuns(
+  runs: readonly { status: string }[],
+): boolean {
+  return runs.some((r) => r.status !== "pending" && r.status !== "skipped");
+}
 
 /**
  * The multi-agent turn's primary surface, embedded in the assistant message
@@ -136,7 +150,12 @@ export function InlineTeamGraph({
     });
   }, [setNotesExpanded]);
 
-  if (!execution || execution.id !== executionId || !caps.showsTeamGraph) {
+  if (
+    !execution ||
+    execution.id !== executionId ||
+    !caps.showsTeamGraph ||
+    !teamHasStartedRuns(execution.runs)
+  ) {
     return null;
   }
 
@@ -159,6 +178,12 @@ export function InlineTeamGraph({
             onOpenTeamNotes={openTeamNotes}
             collabSummary={collabSummary}
           />
+          {isDebate(execution) && (
+            <DebateProgressLine
+              execution={execution}
+              disclosureKey={`${messageId}:debate-progress`}
+            />
+          )}
           {expanded && (
             <GraphArea
               execution={execution}

@@ -489,5 +489,5 @@ def build_default_pairwise_judge(mode: str = "quality") -> LLMPairwiseJudge:
         # Resolve against the FULL eval catalog ceiling (not the user ceiling, which
         # 内测 locked to Flash) so the default ``quality`` judge stays on Pro (§十一).
         profiles = resolve_profile_set(mode, custom_modes={}, ceiling=_EVAL_CEILING)
-        model = profiles.get("chat").model
+        model = profiles.model_for("chat")
     return LLMPairwiseJudge(provider, model)

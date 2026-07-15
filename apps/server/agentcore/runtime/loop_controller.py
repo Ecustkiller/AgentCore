@@ -23,8 +23,9 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import Counter, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 DEFAULT_WINDOW = 8
 DEFAULT_THRESHOLD = 3
@@ -97,6 +98,8 @@ class ToolAttempt:
     # honest tool failures for the model but must not trip the run-scoped circuit
     # breaker — the tool itself is fine; the call was refused upstream.
     policy_failure: bool = False
+    # Optional tool-result metadata forwarded for governance (e.g. delegate batch shape).
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -248,11 +251,57 @@ class LoopController:
         # from repeating investigation work the team already did.
         self._post_delegate: bool = False
         self._post_delegate_investigation_count: int = 0
+        # Soft team-gate nudge (协作优先阶段 3): at most once per run, captain-only.
+        self._team_gate_fired: bool = False
+        # Soft audit-gate nudge (协作优先阶段 3 返工环): at most once per run, captain-only.
+        self._audit_gate_fired: bool = False
+        self._delegate_count: int = 0
+        self._first_batch_substantial: bool = False
 
-    def mark_post_delegate(self) -> None:
-        """Mark that a delegate call just returned — CEO is now in synthesis mode."""
+    def mark_post_delegate(self, *, node_count: int = 0, has_deps: bool = False) -> None:
+        """Mark that a delegate call just returned — CEO is now in synthesis mode.
+
+        ``node_count`` / ``has_deps`` describe this batch so the audit gate can tell
+        a substantial first batch (nodes ≥3 or any depends_on) from a light one.
+        """
         self._post_delegate = True
         self._post_delegate_investigation_count = 0
+        self._delegate_count += 1
+        if self._delegate_count == 1:
+            self._first_batch_substantial = node_count >= 3 or has_deps
+
+    @property
+    def has_delegated(self) -> bool:
+        """True once a ``delegate`` call has returned in this run."""
+        return self._post_delegate
+
+    @property
+    def delegate_count(self) -> int:
+        """How many successful ``delegate`` returns this run has seen."""
+        return self._delegate_count
+
+    @property
+    def first_batch_substantial(self) -> bool:
+        """True if the first delegate batch was substantial (nodes ≥3 or has deps)."""
+        return self._first_batch_substantial
+
+    @property
+    def team_gate_fired(self) -> bool:
+        """True after the soft team-gate nudge has been injected (latched)."""
+        return self._team_gate_fired
+
+    def mark_team_gate_fired(self) -> None:
+        """Latch the one-shot team-gate so it cannot fire again this run."""
+        self._team_gate_fired = True
+
+    @property
+    def audit_gate_fired(self) -> bool:
+        """True after the soft audit-gate nudge has been injected (latched)."""
+        return self._audit_gate_fired
+
+    def mark_audit_gate_fired(self) -> None:
+        """Latch the one-shot audit-gate so it cannot fire again this run."""
+        self._audit_gate_fired = True
 
     def post_delegate_check(self, tool_names: set[str]) -> str | None:
         """Check if CEO is doing investigation work after delegating.

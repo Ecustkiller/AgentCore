@@ -28,6 +28,19 @@ def is_platform_available() -> bool:
     return bool(settings.platform_api_key.strip())
 
 
+def is_free_tier_enabled() -> bool:
+    """Deployment switch for keyless → platform-paid free tier fallback."""
+    return bool(settings.platform_free_tier_enabled)
+
+
+def is_free_tier_active(*, has_user_key: bool) -> bool:
+    """Whether this user currently rides the free tier (signal for llm-key status).
+
+    True iff: no BYOK key ∧ free tier switch on ∧ platform credentials available.
+    """
+    return (not has_user_key) and is_free_tier_enabled() and is_platform_available()
+
+
 def resolve_effective_billing_mode(user: _BillingUser | None) -> BillingMode:
     """User preference when set; otherwise the deployment default."""
     if user is None:

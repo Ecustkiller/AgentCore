@@ -1,5 +1,6 @@
+import type { Stance } from "@/stores/execution";
 import { uiGet, uiSet } from "@/lib/uiStorage";
-import type { DebateModel, DebateSideModel } from "../model";
+import type { DebateModel } from "../model";
 
 /** 辩论室剧本主列布局：并排对照 vs 上下单栏（长文阅读）。 */
 export type DebateArenaLayout = "split" | "stack";
@@ -32,11 +33,21 @@ export function canUseSplitLayout(model: DebateModel): boolean {
   );
 }
 
-export function partitionProCon(sides: DebateSideModel[]): {
-  pro: DebateSideModel | undefined;
-  con: DebateSideModel | undefined;
-} {
-  const pro = sides.find((s) => s.stance === "pro" || s.sideKey === "pro");
-  const con = sides.find((s) => s.stance === "con" || s.sideKey === "con");
-  return { pro, con };
+/**
+ * 单一「按阵营分左右」判据：**stance 优先、key 兜底**。辩论室三处并排渲染（立论 / 质询 / 结辩）
+ * 共用此判据以消除判据漂移——后端各方的语义 key 是主持人自定、未必是字面 `pro`/`con`，唯有
+ * `stance` 恒为 `pro`/`con`；若只认 key，「自定 key」的辩论会分不出正反、退化成上下堆叠。
+ * `others` 收纳既非 pro 也非 con 的方（多方场景），由调用方顺次堆叠。
+ */
+export function partitionSides<T>(
+  items: readonly T[],
+  keyOf: (item: T) => string,
+  stanceOf?: (item: T) => Stance | null,
+): { pro: T | undefined; con: T | undefined; others: T[] } {
+  const isPro = (s: T) => stanceOf?.(s) === "pro" || keyOf(s) === "pro";
+  const isCon = (s: T) => stanceOf?.(s) === "con" || keyOf(s) === "con";
+  const pro = items.find(isPro);
+  const con = items.find((s) => s !== pro && isCon(s));
+  const others = items.filter((s) => s !== pro && s !== con);
+  return { pro, con, others };
 }

@@ -1,6 +1,7 @@
 """Pick a turn's workspace backend (cloud / local)."""
 
 from agentcore.runtime.events import EventSink
+from agentcore.workspace import grant_store
 from agentcore.workspace.locate import LocalBinding, build_workspace
 from agentcore.workspace.protocol import WorkspaceBackend
 
@@ -17,11 +18,18 @@ def build_turn_backend(
 
     Project conversations pass ``folder_id`` so cloud mode shares ``folder:<id>``;
     裸聊 passes ``folder_id=None`` for per-conversation ``conv:<id>`` scratch.
+
+    Attaches W3 session read-only mounts (``external/<alias>/``) when grants exist.
     """
-    return build_workspace(
+    backend = build_workspace(
         user_id=user_id,
         folder_id=folder_id,
         conversation_id=conversation_id,
         sink=sink,
         local_binding=local_binding,
     )
+    mounts = grant_store.grants_as_dict(conversation_id)
+    attach = getattr(backend, "attach_external_mounts", None)
+    if mounts and callable(attach):
+        attach(mounts)
+    return backend

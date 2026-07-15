@@ -8,7 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { ConversationItem } from "./ConversationItem";
 
 /** How many 裸聊 the「快速对话」zone shows before deferring to /conversations.
- * Adaptive: with no「工作区」groups the zone owns the whole rail ({@link BARE_LIMIT_SOLO});
+ * Adaptive: with no「项目」groups the zone owns the whole rail ({@link BARE_LIMIT_SOLO});
  * once groups sit above it the cap relaxes to {@link BARE_LIMIT_WITH_GROUPS} because
  * workspaces already occupy the priority fold. Overflow exits via「查看全部对话」. */
 const BARE_LIMIT_SOLO = 15;
@@ -60,7 +60,7 @@ export function RecentConversations() {
     );
   }
 
-  // Every chat is foldered → no 裸聊 to show; the「工作区」zone carries the rail.
+  // Every chat is foldered → no 裸聊 to show; the「项目」zone carries the rail.
   if (recent.length === 0) return null;
 
   // 置顶浮顶后，用一条 hairline 把置顶与普通裸聊分成两区（两组都非空时才出现）。
@@ -95,7 +95,7 @@ export function RecentConversations() {
 
 /**
  * The「查看全部对话」entry into the full management page (/conversations). Lives at the
- * very bottom of the rail's conversation area — after「工作区」+「快速对话」— so it's
+ * very bottom of the rail's conversation area — after「项目」+「快速对话」— so it's
  * the single overflow exit for everything (older 裸聊, extra workspaces, per-group
  * overflow). Hidden when there are no conversations at all.
  */

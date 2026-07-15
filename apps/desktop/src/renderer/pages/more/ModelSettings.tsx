@@ -91,6 +91,10 @@ export function ModelSettings() {
               configured={!!status.configured}
               initialBaseUrl={status.base_url ?? ""}
               initialModel={status.default_model ?? ""}
+              initialPriceCacheHit={status.price_cache_hit}
+              initialPriceCacheMiss={status.price_cache_miss}
+              initialPriceOutput={status.price_output}
+              initialBackgroundModel={status.background_model}
               onSaved={(s) => {
                 syncStatus(s);
                 setEditing(false);
@@ -129,7 +133,7 @@ function StatusBadge({ status }: { status: LlmKeyStatus }) {
 
 /**
  * 模型来源切换（自带 Key / 平台模型）—— 暴露既有的 `billing-preference` 后端能力：
- * platform ⇒ 用运营方平台模型（如 gpt-5.5）、byok ⇒ 用下方配置的自带 Key（如 deepseek-…）。
+ * platform ⇒ 用运营方平台模型（如 gpt-4o）、byok ⇒ 用下方配置的自带 Key（如 deepseek-…）。
  * 只在平台可用时出现（否则无「另一个」可切）。切换后 `onChanged` 刷新状态缓存，输入框徽标随之更新。
  */
 function ModelSourceToggle({
@@ -282,6 +286,13 @@ function ConfiguredCard({
         billing_mode: status.billing_mode,
         billing_preference: status.billing_preference,
         platform_available: status.platform_available,
+        // Key removed: the server re-derives free-tier eligibility on next fetch;
+        // optimistic value mirrors the gate rule (no key ⇒ free tier when platform up).
+        free_tier_active: status.platform_available,
+        price_cache_hit: null,
+        price_cache_miss: null,
+        price_output: null,
+        background_model: null,
       });
     } catch (e) {
       setActionError(modelConfigApiErrorMessage(e, "删除失败，请重试"));
@@ -305,6 +316,21 @@ function ConfiguredCard({
           {status.byok_model && (
             <p className="font-mono text-xs text-foreground">
               模型 {status.byok_model}
+            </p>
+          )}
+          {status.background_model && (
+            <p className="font-mono text-xs text-muted-foreground">
+              后台模型 {status.background_model}
+            </p>
+          )}
+          {(status.price_cache_miss || status.price_output) && (
+            <p className="text-xs text-muted-foreground">
+              单价 输入 {status.price_cache_miss ?? "—"} / 输出{" "}
+              {status.price_output ?? "—"}
+              {status.price_cache_hit
+                ? ` / 缓存 ${status.price_cache_hit}`
+                : ""}{" "}
+              USD/1M
             </p>
           )}
           <div className="flex flex-wrap items-center gap-3 pt-1">

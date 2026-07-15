@@ -1,17 +1,14 @@
 /**
  * Desktop interaction-store kinds beyond the hot-path recovery summary.
- * Hot-path recovery shapes live in `@agentcore/contract-rest-types` (generated).
+ * Kind union + wire table: backend InteractionKind / INTERACTION_KIND_SPECS →
+ * `@agentcore/contract-types` (`pnpm gen:types`). Store kinds = user-facing
+ * subset (excludes bridge-only `client_tool`).
  */
 
-/** Wire kinds that participate in the unified InteractionStore (方案 §3.2). */
-export type InteractionKind =
-  | "approval"
-  | "delegation_authorization"
-  | "escalation"
-  | "ask_user"
-  | "plan_review"
-  | "team_preview"
-  | "question_posted";
+export type {
+  UserInteractionKind as InteractionKind,
+  InteractionKind as BridgeInteractionKind,
+} from "@agentcore/contract-types";
 
 export type InteractionStatus =
   | "pending"
@@ -22,7 +19,7 @@ export type InteractionStatus =
 /** New SSE fact: a pending interaction is no longer answerable. */
 export interface InteractionOrphanedPayload {
   interaction_id: string;
-  kind: InteractionKind;
+  kind: import("@agentcore/contract-types").UserInteractionKind;
 }
 
 export const INTERACTION_ORPHANED_EVENT = "interaction_orphaned" as const;

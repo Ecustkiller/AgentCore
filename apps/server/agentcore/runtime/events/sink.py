@@ -45,6 +45,11 @@ class EventSink:
         self._history: list[SSEEvent] = []
         self._journal: list[dict[str, Any]] = []
         self._process: list[dict[str, Any]] = []
+        # Per-worker-run 思考·正文·工具 timeline (对称 CEO ``_process``). Keyed by run_id;
+        # tools tagged with ``run_id`` land here (not on the captain bubble). Persisted as
+        # ``runs.run_processes`` so reload matches live interleaving — ``message_final``
+        # splice is NOT the worker timeline source.
+        self._run_processes: dict[str, list[dict[str, Any]]] = {}
         self._has_run_plan = False
         self._has_tool = False
         self._conversation_id = conversation_id
@@ -161,7 +166,74 @@ class EventSink:
         dropping a duplicate anchor."""
         return any(s.get("kind") == kind and s.get(key) == value for s in self._process)
 
+    def _run_process(self, run_id: str) -> list[dict[str, Any]]:
+        return self._run_processes.setdefault(run_id, [])
+
+    def _accumulate_run_process(self, event: SSEEvent) -> None:
+        """Accumulate a worker run's ProcessStep[] (mirrors captain ``_accumulate_process``)."""
+        t = event.type
+        payload = event.payload
+        if t == EventType.RUN_REASONING_DELTA:
+            run_id = payload.get("run_id") or ""
+            delta = payload.get("delta") or ""
+            if not run_id or not delta:
+                return
+            steps = self._run_process(run_id)
+            if steps and steps[-1].get("kind") == "reasoning":
+                steps[-1]["text"] += delta
+            else:
+                steps.append({"kind": "reasoning", "text": delta})
+        elif t == EventType.RUN_OUTPUT_DELTA:
+            run_id = payload.get("run_id") or ""
+            delta = payload.get("delta") or ""
+            if not run_id or not delta:
+                return
+            steps = self._run_process(run_id)
+            if steps and steps[-1].get("kind") == "content":
+                steps[-1]["text"] += delta
+            else:
+                steps.append({"kind": "content", "text": delta})
+        elif t == EventType.RUN_OUTPUT_RESET:
+            run_id = payload.get("run_id") or ""
+            if not run_id:
+                return
+            steps = self._run_process(run_id)
+            while steps and steps[-1].get("kind") == "content":
+                steps.pop()
+            steps.append({"kind": "rework"})
+        elif t == EventType.TOOL_USE_START:
+            run_id = payload.get("run_id") or ""
+            if not run_id:
+                return
+            self._run_process(run_id).append(
+                {
+                    "kind": "tool",
+                    "id": payload.get("tool_call_id", ""),
+                    "tool_name": payload.get("tool_name", ""),
+                    "arguments": payload.get("arguments") or {},
+                    "result": None,
+                    "status": "running",
+                }
+            )
+        elif t == EventType.TOOL_USE_END:
+            run_id = payload.get("run_id") or ""
+            if not run_id:
+                return
+            call_id = payload.get("tool_call_id", "")
+            result = cap_process_result(payload.get("result"))
+            display = payload.get("display")
+            for step in reversed(self._run_process(run_id)):
+                if step.get("kind") == "tool" and step.get("id") == call_id:
+                    step["result"] = result
+                    step["status"] = payload.get("status", "success")
+                    if display is not None:
+                        step["display"] = display
+                    break
+
     def _accumulate_process(self, event: SSEEvent) -> None:
+        # Worker-scoped deltas / tools accumulate on the per-run lane first (then the
+        # captain branch no-ops them via run_id / event-type guards below).
+        self._accumulate_run_process(event)
         t = event.type
         if t == EventType.RUN_PLAN:
             self._has_run_plan = True
@@ -269,6 +341,15 @@ class EventSink:
         # → no process" so live / reload / golden stay aligned.
         structural = any(s.get("kind") not in ("reasoning", "content") for s in self._process)
         return self._process if structural else None
+
+    def run_process_timelines(self) -> dict[str, list[dict[str, Any]]] | None:
+        """Per-run ProcessStep[] maps for worker detail timelines (对称 CEO process).
+
+        Persist any non-empty run timeline so reload keeps true interleaving (tools
+        between thinking/output). Empty map → None (no field on the runs payload).
+        """
+        out = {rid: steps for rid, steps in self._run_processes.items() if steps}
+        return out or None
 
     def streamed_content(self) -> str:
         """The CEO bubble's currently-streamed text — concatenated ``content``-kind

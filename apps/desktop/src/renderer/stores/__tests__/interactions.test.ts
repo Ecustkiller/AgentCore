@@ -1,6 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  type InteractionEntry,
   applyInteractionWireEvent,
+  entryToCheckpoint,
+  entryToNonBlockingAsk,
+  entryToPlanReview,
+  hydrateInteractionsFromJournal,
+  isAwaitingUserEntry,
+  messageCheckpoints,
+  messageNonBlockingAsks,
+  messagePlanReviews,
   useInteractionStore,
 } from "../interactions";
 
@@ -157,6 +166,54 @@ describe("InteractionStore", () => {
   });
 });
 
+describe("isAwaitingUserEntry (侧栏「等你」灯判定)", () => {
+  const entry = (over: Partial<InteractionEntry>): InteractionEntry => ({
+    id: "x1",
+    kind: "approval",
+    status: "pending",
+    conversationId: "c1",
+    messageId: "m1",
+    payload: {},
+    ...over,
+  });
+
+  it("counts hot blocking kinds while pending / submitting", () => {
+    expect(isAwaitingUserEntry(entry({ kind: "approval" }))).toBe(true);
+    expect(
+      isAwaitingUserEntry(entry({ kind: "approval", status: "submitting" })),
+    ).toBe(true);
+    expect(
+      isAwaitingUserEntry(entry({ kind: "delegation_authorization" })),
+    ).toBe(true);
+    expect(
+      isAwaitingUserEntry(
+        entry({ kind: "escalation", payload: { awaiting: "user" } }),
+      ),
+    ).toBe(true);
+    expect(isAwaitingUserEntry(entry({ kind: "escalation" }))).toBe(true);
+  });
+
+  it("excludes CEO-arbitrated escalations (user has nothing to do)", () => {
+    expect(
+      isAwaitingUserEntry(
+        entry({ kind: "escalation", payload: { awaiting: "ceo" } }),
+      ),
+    ).toBe(false);
+  });
+
+  it("excludes settled entries", () => {
+    expect(isAwaitingUserEntry(entry({ status: "resolved" }))).toBe(false);
+    expect(isAwaitingUserEntry(entry({ status: "orphaned" }))).toBe(false);
+  });
+
+  it("excludes cold kinds (pausedTurns 帧是权威) and non-blocking asks", () => {
+    expect(isAwaitingUserEntry(entry({ kind: "ask_user" }))).toBe(false);
+    expect(isAwaitingUserEntry(entry({ kind: "plan_review" }))).toBe(false);
+    expect(isAwaitingUserEntry(entry({ kind: "team_preview" }))).toBe(false);
+    expect(isAwaitingUserEntry(entry({ kind: "question_posted" }))).toBe(false);
+  });
+});
+
 describe("escalation_resolved id matching (project frame)", () => {
   it("is covered by InteractionStore markResolved by escalation_id", () => {
     // The project.ts fix matches by f.escalationId; store path uses the same id field.
@@ -180,6 +237,226 @@ describe("escalation_resolved id matching (project frame)", () => {
     );
     expect(store().get("esc-a")?.status).toBe("resolved");
     expect(store().get("esc-b")?.status).toBe("pending");
+  });
+});
+
+// Journal reload path (replaces retired conversation/projections *FromEvents helpers).
+describe("hydrateInteractionsFromJournal (history replay)", () => {
+  describe("plan_review", () => {
+    it("folds a required→resolved pair into one resolved card", () => {
+      hydrateInteractionsFromJournal("a", "m1", [
+        {
+          type: "plan_review_required",
+          payload: {
+            checkpoint_id: "c1",
+            steps: [{ run_id: "run-1", role: "角色 run-1", summary: "产出" }],
+            pending: [{ run_id: "next", role: "下游" }],
+          },
+        },
+        {
+          type: "plan_review_resolved",
+          payload: { checkpoint_id: "c1", decision: "continue", note: "放行" },
+        },
+      ]);
+      const cards = messagePlanReviews("a", "m1");
+      expect(cards).toHaveLength(1);
+      expect(cards[0]).toMatchObject({
+        id: "c1",
+        status: "resolved",
+        decision: "continue",
+        note: "放行",
+      });
+      expect(cards[0].steps.map((s) => s.run_id)).toEqual(["run-1"]);
+      expect(cards[0].pending.map((p) => p.run_id)).toEqual(["next"]);
+    });
+
+    it("keeps an unresolved required as a pending card", () => {
+      hydrateInteractionsFromJournal("a", "m1", [
+        {
+          type: "plan_review_required",
+          payload: {
+            checkpoint_id: "c1",
+            steps: [{ run_id: "run-1", role: "R", summary: "s" }],
+            pending: [],
+          },
+        },
+      ]);
+      expect(entryToPlanReview(store().get("c1")!)).toMatchObject({
+        status: "pending",
+        decision: null,
+      });
+    });
+
+    it("preserves raise order across multiple checkpoints", () => {
+      hydrateInteractionsFromJournal("a", "m1", [
+        {
+          type: "plan_review_required",
+          payload: {
+            checkpoint_id: "c1",
+            steps: [{ run_id: "run-1", role: "R", summary: "s" }],
+            pending: [],
+          },
+        },
+        {
+          type: "plan_review_required",
+          payload: {
+            checkpoint_id: "c2",
+            steps: [{ run_id: "run-2", role: "R", summary: "s" }],
+            pending: [],
+          },
+        },
+        {
+          type: "plan_review_resolved",
+          payload: { checkpoint_id: "c1", decision: "stop", note: "" },
+        },
+      ]);
+      const cards = messagePlanReviews("a", "m1");
+      expect(cards.map((c) => c.id)).toEqual(["c1", "c2"]);
+      expect(cards[0].status).toBe("resolved");
+      expect(cards[1].status).toBe("pending");
+    });
+  });
+
+  describe("ask_user", () => {
+    const richPayload = {
+      checkpoint_id: "c1",
+      question: "我先按这个方案做这个落地页，对吗？",
+      assumptions: [{ id: "a0", label: "部署", value: "纯静态" }],
+      questions: [
+        {
+          id: "q0",
+          prompt: "主要给谁看？",
+          kind: "choice",
+          options: [
+            { label: "潜在客户", detail: "偏转化导向", recommended: true },
+            { label: "投资人" },
+          ],
+          multiple: false,
+          default: "潜在客户",
+        },
+      ],
+      style_options: [{ id: "s0", label: "深色科技" }],
+    };
+
+    it("folds a required event into one pending card (rich opening fields)", () => {
+      hydrateInteractionsFromJournal("a", "m1", [
+        { type: "checkpoint_required", payload: richPayload },
+      ]);
+      const cards = messageCheckpoints("a", "m1");
+      expect(cards).toHaveLength(1);
+      expect(entryToCheckpoint(store().get("c1")!)).toMatchObject({
+        id: "c1",
+        status: "pending",
+        decision: null,
+        assumptions: [{ id: "a0", label: "部署", value: "纯静态" }],
+        styleOptions: [{ id: "s0", label: "深色科技" }],
+      });
+      expect(cards[0].questions[0].default).toBe("潜在客户");
+    });
+
+    it("folds a required→resolved pair into one settled card", () => {
+      hydrateInteractionsFromJournal("a", "m1", [
+        { type: "checkpoint_required", payload: richPayload },
+        {
+          type: "checkpoint_resolved",
+          payload: {
+            checkpoint_id: "c1",
+            decision: "continue",
+            note: "就按这个开做",
+            selected: ["潜在客户"],
+          },
+        },
+      ]);
+      const cards = messageCheckpoints("a", "m1");
+      expect(cards).toHaveLength(1);
+      expect(cards[0]).toMatchObject({
+        id: "c1",
+        status: "resolved",
+        decision: "continue",
+        note: "就按这个开做",
+        selected: ["潜在客户"],
+      });
+    });
+
+    it("preserves raise order across multiple checkpoints", () => {
+      hydrateInteractionsFromJournal("a", "m1", [
+        {
+          type: "checkpoint_required",
+          payload: { checkpoint_id: "c1", question: "q1" },
+        },
+        {
+          type: "checkpoint_required",
+          payload: { checkpoint_id: "c2", question: "q2" },
+        },
+        {
+          type: "checkpoint_resolved",
+          payload: { checkpoint_id: "c1", decision: "stop", note: "" },
+        },
+      ]);
+      const cards = messageCheckpoints("a", "m1");
+      expect(cards.map((c) => c.id)).toEqual(["c1", "c2"]);
+      expect(cards[0].status).toBe("resolved");
+      expect(cards[1].status).toBe("pending");
+    });
+
+    it("is empty when the journal has no checkpoint", () => {
+      hydrateInteractionsFromJournal("a", "m1", []);
+      expect(messageCheckpoints("a", "m1")).toEqual([]);
+    });
+  });
+
+  describe("question_posted", () => {
+    const postedPayload = {
+      ask_id: "n1",
+      question: "我先按响应式单页做，可以吗？",
+      assumptions: [{ id: "a0", label: "部署", value: "纯静态" }],
+      questions: [
+        {
+          id: "q0",
+          prompt: "要不要双语？",
+          kind: "choice",
+          options: [{ label: "要" }, { label: "不要" }],
+          multiple: false,
+          default: "不要",
+        },
+      ],
+      style_options: [],
+    };
+
+    it("folds a question_posted event into one card (rich fields)", () => {
+      hydrateInteractionsFromJournal("a", "m1", [
+        { type: "question_posted", payload: postedPayload },
+      ]);
+      const cards = messageNonBlockingAsks("a", "m1");
+      expect(cards).toHaveLength(1);
+      expect(cards[0]).toMatchObject({
+        id: "n1",
+        question: "我先按响应式单页做，可以吗？",
+        assumptions: [{ id: "a0", label: "部署", value: "纯静态" }],
+      });
+      expect(cards[0].questions[0].default).toBe("不要");
+      expect(entryToNonBlockingAsk(store().get("n1")!).id).toBe("n1");
+    });
+
+    it("dedupes a re-delivered event and preserves post order", () => {
+      hydrateInteractionsFromJournal("a", "m1", [
+        { type: "question_posted", payload: postedPayload },
+        {
+          type: "question_posted",
+          payload: { ...postedPayload, ask_id: "n2", question: "q2" },
+        },
+        { type: "question_posted", payload: postedPayload },
+      ]);
+      expect(messageNonBlockingAsks("a", "m1").map((c) => c.id)).toEqual([
+        "n1",
+        "n2",
+      ]);
+    });
+
+    it("is empty when the journal has no non-blocking ask", () => {
+      hydrateInteractionsFromJournal("a", "m1", []);
+      expect(messageNonBlockingAsks("a", "m1")).toEqual([]);
+    });
   });
 });
 

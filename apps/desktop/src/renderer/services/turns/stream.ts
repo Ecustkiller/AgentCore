@@ -22,7 +22,13 @@ import {
 import { streamConversationViaSidecar } from "@/services/streamConversationViaSidecar";
 import { traceTurnEnd, traceTurnMilestone } from "@/services/turnTrace";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
+import {
+  beginTurnPreflight,
+  enterTurnStreaming,
+  throwIfCannotOpenStream,
+} from "@/stores/conversation/turnPhaseActions";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
+import { dismissRecoverableExecutions } from "./dismissRecovery";
 import { isAbort, isTransportDrop } from "./helpers";
 import { rejoinLiveTurn } from "./recovery";
 import { runRegenerate } from "./regenerate";
@@ -53,6 +59,10 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
   // key), so a turn keeps streaming into its own bubble after the user switches
   // away to another conversation.
   store.clearError(conversationId);
+
+  // Implicit「忽略」: a new turn closes any recoverable 救火 projection
+  // (audit + clearExecution) without an explicit abandon click.
+  dismissRecoverableExecutions(conversationId);
 
   // Snapshot the pre-bump position so we can undo the optimistic bump if the
   // send fails before the server ever persisted the turn.
@@ -89,6 +99,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
 
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
+  beginTurnPreflight(conversationId);
   try {
     traceTurnMilestone(conversationId, "send_start");
     // 路由（双模式工作区 §一.1）：开关开（默认开）+ 会话绑定本机本地根 + 无附件 → 走本地
@@ -98,6 +109,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
       attachments.length === 0
         ? await resolveSidecarRoot(conversationId)
         : null;
+    throwIfCannotOpenStream(conversationId, ac.signal);
     traceTurnMilestone(conversationId, "sidecar_resolve", {
       target: sidecarTarget
         ? { rootId: sidecarTarget.rootId, subpath: sidecarTarget.subpath }
@@ -108,6 +120,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
     // （probed:false）→ 静默走云、不再打扰。故只在**首探失败**（probed）时提示一次。已探明 ok
     // 的根命中缓存直接复用、不重探。
     const probe = sidecarTarget ? await probeSidecar(sidecarTarget) : null;
+    throwIfCannotOpenStream(conversationId, ac.signal);
     if (probe) {
       traceTurnMilestone(conversationId, "sidecar_probe", {
         healthy: probe.healthy,
@@ -124,6 +137,8 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
     if (sidecarTarget && probe?.healthy) {
       traceTurnMilestone(conversationId, "stream_path", { via: "sidecar" });
       try {
+        throwIfCannotOpenStream(conversationId, ac.signal);
+        enterTurnStreaming(conversationId);
         await streamConversationViaSidecar({
           conversationId,
           rootId: sidecarTarget.rootId,
@@ -150,10 +165,13 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         notifyInfo("本地引擎未能启动，已自动用云端完成这次对话");
         store.truncateAfter(optimisticUserId, conversationId);
         store.createAssistantMessage(conversationId);
+        beginTurnPreflight(conversationId);
+        throwIfCannotOpenStream(conversationId, ac.signal);
         traceTurnMilestone(conversationId, "stream_path", {
           via: "cloud",
           reason: "sidecar_fallback",
         });
+        enterTurnStreaming(conversationId);
         await streamConversation({
           conversationId,
           content,
@@ -166,6 +184,8 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
       // 云链路（默认，含探活失败的 fallthrough）。本地意向已是会话状态
       // （Conversation.local_container_root_id，建会话时定型，工作区对称化 D1a），
       // 服务端据此在裸聊首次产文件时懒建本地 / 云端文件夹——回合不再携带容器根。
+      throwIfCannotOpenStream(conversationId, ac.signal);
+      enterTurnStreaming(conversationId);
       await streamConversation({
         conversationId,
         content,

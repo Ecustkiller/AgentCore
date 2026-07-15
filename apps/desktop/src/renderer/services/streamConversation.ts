@@ -13,6 +13,10 @@ import {
 } from "@/services/sse/dispatch";
 import { traceTurnMilestone } from "@/services/turnTrace";
 import { getRuntime } from "@/stores/conversation";
+import {
+  enterTurnStreaming,
+  throwIfCannotOpenStream,
+} from "@/stores/conversation/turnPhaseActions";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import type { SSEEvent } from "@/types/events";
 
@@ -24,11 +28,15 @@ function isAbortError(err: unknown): boolean {
   return err instanceof DOMException && err.name === "AbortError";
 }
 
-/** `fetch` with a connect-phase ceiling; user `signal` abort still propagates as AbortError. */
+/** `fetch` with a connect-phase ceiling; user `signal` abort still propagates as AbortError.
+ * 同步拒绝已 abort 的 signal，避免连接超时窗口内仍发出请求。 */
 async function fetchWithConnectTimeout(
   init: (signal: AbortSignal) => Promise<Response>,
   userSignal?: AbortSignal,
 ): Promise<Response> {
+  if (userSignal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
   const fetchAc = new AbortController();
   const timer = setTimeout(() => fetchAc.abort(), CONNECT_TIMEOUT_MS);
   const onUserAbort = () => fetchAc.abort();
@@ -187,6 +195,9 @@ export async function attachConversation(
   conversationId: string,
   signal?: AbortSignal,
 ): Promise<AttachOutcome> {
+  throwIfCannotOpenStream(conversationId, signal);
+  enterTurnStreaming(conversationId);
+
   const doFetch = (signal: AbortSignal) => {
     const headers: Record<string, string> = { Accept: "text/event-stream" };
     // Always present → journal-backed full replay (header value observational).
@@ -247,6 +258,8 @@ async function runMessageStream(
   signal?: AbortSignal,
 ): Promise<void> {
   clearInteractionPrompts(conversationId);
+  throwIfCannotOpenStream(conversationId, signal);
+  enterTurnStreaming(conversationId);
 
   const doFetch = (signal: AbortSignal) =>
     fetch(`${BASE_URL}${path}`, {
@@ -303,7 +316,7 @@ async function runMessageStream(
   }
 }
 
-/** 发送给后端的附件载荷（含提取出的正文）。 */
+/** 发送给后端的附件载荷（含提取出的正文 / 引用即驻留元数据）。 */
 export interface OutgoingAttachment {
   name: string;
   path: string;
@@ -311,6 +324,10 @@ export interface OutgoingAttachment {
   truncated: boolean;
   kind?: "file" | "dir" | "conversation";
   conversation_id?: string;
+  /** 二进制驻留：无 UTF-8 正文。 */
+  binary?: boolean;
+  /** 客户端已写入工作区时的相对路径（``attachments/…``）。 */
+  workspace_path?: string;
 }
 
 export interface StreamConversationOptions {

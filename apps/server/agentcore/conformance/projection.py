@@ -113,6 +113,8 @@ def _run_from_plan(s: dict[str, Any]) -> dict[str, Any]:
         "receivedContext": [],
         # 升级实时可见: appended by the run_escalation fact; empty until a worker escalates.
         "escalations": [],
+        # Per-run 思考·正文·工具 timeline (对称 CEO process); empty until deltas/tools fold in.
+        "process": [],
     }
 
 
@@ -136,6 +138,11 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     # 辩论编排收场产物（debate_result）：整段 payload verbatim 折入，与 run_plan 的辩手
     # 节点互补（图承载执行/发言全文，本字段承载决策简报 + 交锋叙事线）。None=本回合无辩论。
     debate: dict[str, Any] | None = None
+    # 本场是否开启质询（debate_round_started.cross_exam_enabled）：首轮开场即达；缺字段→False。
+    cross_exam_enabled = False
+    # 主持人开场白（debate_round_started.opening）：仅首轮携带；sticky 取第一个非空，不被后续覆盖。
+    # 收场 debate.opening 仍是权威。缺字段 / 老 journal → None。
+    debate_opening: str | None = None
     # 辩论逐轮叙事（debate_round_started / debate_round）：进行中实时叠加，折叠累积按 round_no
     # 升序。P2 DURABLE——落 journal，刷新后 hydrate/fold 重建；收场后全量叙事线亦在 debate。
     debate_rounds: list[dict[str, Any]] = []
@@ -210,7 +217,21 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             # represented by the `team` marker (dropped at run_plan), not a tool step.
             # Either way it creates no captain step (统一团队时间线 = the CEO's OWN steps);
             # still clear the run's live toolProgress below.
-            if not p.get("run_id") and p.get("tool_name") not in ORCHESTRATION_TOOLS:
+            rid = p.get("run_id") or ""
+            if rid:
+                run = run_by_id(rid)
+                if run is not None:
+                    run["process"].append(
+                        {
+                            "kind": "tool",
+                            "id": p.get("tool_call_id", ""),
+                            "tool_name": p.get("tool_name", ""),
+                            "arguments": p.get("arguments") or {},
+                            "result": None,
+                            "status": "running",
+                        }
+                    )
+            elif p.get("tool_name") not in ORCHESTRATION_TOOLS:
                 step: dict[str, Any] = {
                     "kind": "tool",
                     "id": p.get("tool_call_id", ""),
@@ -230,11 +251,23 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     ag["toolProgress"] = None
 
         elif etype == "tool_use_end":
-            if p.get("run_id") or p.get("tool_name") in ORCHESTRATION_TOOLS:
-                continue
+            rid = p.get("run_id") or ""
             call_id = p.get("tool_call_id", "")
             result = cap_process_result(p.get("result"))
             display = p.get("display")
+            if rid:
+                run = run_by_id(rid)
+                if run is not None:
+                    for step in reversed(run["process"]):
+                        if step.get("kind") == "tool" and step.get("id") == call_id:
+                            step["result"] = result
+                            step["status"] = p.get("status", "success")
+                            if display is not None:
+                                step["display"] = display
+                            break
+                continue
+            if p.get("tool_name") in ORCHESTRATION_TOOLS:
+                continue
             for step in reversed(process):
                 if step.get("kind") == "tool" and step.get("id") == call_id:
                     step["result"] = result
@@ -349,6 +382,15 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             ag = agent_by_id(p.get("agent_id", ""))
             if ag:
                 ag["output"] += p.get("delta") or ""
+            run = run_by_id(p.get("run_id", ""))
+            if run is not None:
+                delta = p.get("delta") or ""
+                if delta:
+                    steps = run["process"]
+                    if steps and steps[-1].get("kind") == "content":
+                        steps[-1]["text"] += delta
+                    else:
+                        steps.append({"kind": "content", "text": delta})
 
         elif etype == "run_output_reset":
             # 交付前核验回炉 (finish_guard) 的 worker 对偶（content_reset 之于 CEO）：worker done
@@ -359,11 +401,26 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             ag = agent_by_id(p.get("agent_id", ""))
             if ag:
                 ag["output"] = ""
+            run = run_by_id(p.get("run_id", ""))
+            if run is not None:
+                steps = run["process"]
+                while steps and steps[-1].get("kind") == "content":
+                    steps.pop()
+                steps.append({"kind": "rework"})
 
         elif etype == "run_reasoning_delta":
             ag = agent_by_id(p.get("agent_id", ""))
             if ag:
                 ag["reasoning"] += p.get("delta") or ""
+            run = run_by_id(p.get("run_id", ""))
+            if run is not None:
+                delta = p.get("delta") or ""
+                if delta:
+                    steps = run["process"]
+                    if steps and steps[-1].get("kind") == "reasoning":
+                        steps[-1]["text"] += delta
+                    else:
+                        steps.append({"kind": "reasoning", "text": delta})
 
         elif etype == "run_tool_progress":
             ag = agent_by_id(p.get("agent_id", ""))
@@ -517,6 +574,13 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         elif etype == "debate_round_started":
             # 一轮开场（发言前）：先给焦点，verdict=None 表示该轮进行中（仅定焦点未裁判，
             # clashes 恒空——交锋边由裁判步产出；cross_exam 恒空——质询 beat 尚未开始）。
+            # 同事件权威声明本场是否开质询（缺字段→保持 False，向后兼容老 journal）。
+            # opening 仅首轮非空：sticky 取第一个非空，不被后续轮空串覆盖。
+            if p.get("cross_exam_enabled") is True:
+                cross_exam_enabled = True
+            raw_opening = (p.get("opening") or "").strip()
+            if raw_opening and not debate_opening:
+                debate_opening = raw_opening
             upsert_round(
                 {
                     "round_no": p.get("round_no", 0),
@@ -744,6 +808,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         "cost": cost,
         "debate": debate,
         "debateRounds": debate_rounds,
+        "crossExamEnabled": cross_exam_enabled,
+        "debateOpening": debate_opening,
         "teamSynthesisPreview": team_synthesis_preview,
         "turnWarning": turn_warning,
         # 团队便签墙 (§2.2 通): the turn's posted notes (chronological), [] when none.

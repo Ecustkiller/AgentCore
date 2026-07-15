@@ -68,6 +68,12 @@ class UserLlmKey(Base):
     default_model: Mapped[str] = mapped_column(
         String(200), server_default=text("'deepseek-v4-flash'")
     )
+    # Optional user-defined USD-per-1M unit card (plaintext decimals; not sensitive).
+    price_cache_hit: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    price_cache_miss: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    price_output: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Optional cheaper model for background purposes (title/memory/compaction/followups).
+    background_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # Probe hint: whether the endpoint returned tool_calls on a dummy-tool completion.
     supports_tools: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Last connectivity-test outcome surfaced in 设置·模型配置 ('测试连接'):

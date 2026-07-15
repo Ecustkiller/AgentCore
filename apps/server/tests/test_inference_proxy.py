@@ -385,7 +385,7 @@ async def test_llm_request_from_payload_uses_server_resolved_model():
 
     req = inference.proxy._llm_request_from_payload(
         {
-            "model": "gpt-5.5",
+            "model": "gpt-4o",
             "messages": [{"role": "user", "content": "hi"}],
         },
         ModelConfig(
@@ -735,7 +735,7 @@ def test_llm_request_from_payload_preserves_tool_call_messages():
     field set — tool_calls (as ToolCall/ToolCallFunction), tool_call_id,
     reasoning_content — not just role+content."""
     payload = {
-        "model": "gpt-5.5",
+        "model": "gpt-4o",
         "messages": [
             {"role": "user", "content": "search AgentCore"},
             {
@@ -838,7 +838,7 @@ async def test_forward_unary_round2_delivers_full_tool_shape_upstream(monkeypatc
         )
 
     payload = {
-        "model": "gpt-5.5",
+        "model": "gpt-4o",
         "messages": [
             {"role": "user", "content": "search"},
             {

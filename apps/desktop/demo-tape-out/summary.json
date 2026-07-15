@@ -1,0 +1,28 @@
+{
+  "api": "http://localhost:8020",
+  "tape": "lv-molihua-trademark",
+  "beats": {
+    "1_enter_stream": false,
+    "2_inline_graph": false,
+    "2_canvas_graph": false,
+    "3_team_preview_pause": false,
+    "3_resume_continue": false,
+    "4_debate_room": false,
+    "5_ceo_wrap": false,
+    "6_navigate_back": false
+  },
+  "shots": {
+    "authed": "C:\\Project\\AgentCore\\apps\\desktop\\demo-tape-out\\00-authed.png",
+    "palette": "C:\\Project\\AgentCore\\apps\\desktop\\demo-tape-out\\00b-palette.png"
+  },
+  "pageErrors": [],
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "Failed to load resource: the server responded with a status of 422 (Unprocessable Content)"
+  ],
+  "probeLog": [],
+  "ok": false,
+  "fatal": "page.waitForFunction: Timeout 45000ms exceeded.\n    at main (C:\\Project\\AgentCore\\apps\\desktop\\scripts\\smoke-demo-tape.mjs:221:16)"
+}

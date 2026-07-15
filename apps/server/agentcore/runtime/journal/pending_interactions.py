@@ -17,21 +17,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from agentcore.runtime.interaction import INTERACTION_KIND_SPECS
+
 InteractionStatus = Literal["pending", "resolved", "orphaned"]
 
 # kind → required event / resolved event / payload 自有 id 字段
+# Single source: ``INTERACTION_KIND_SPECS`` (also dumped by ``pnpm gen:types``).
 _KIND_SPEC: dict[str, tuple[str, str | None, str]] = {
-    "approval": ("approval_required", "approval_resolved", "approval_id"),
-    "delegation_authorization": (
-        "delegation_authorization_required",
-        "delegation_authorization_resolved",
-        "authorization_id",
-    ),
-    "escalation": ("escalation_required", "escalation_resolved", "escalation_id"),
-    "ask_user": ("checkpoint_required", "checkpoint_resolved", "checkpoint_id"),
-    "plan_review": ("plan_review_required", "plan_review_resolved", "checkpoint_id"),
-    "team_preview": ("team_preview_required", "team_preview_resolved", "checkpoint_id"),
-    "question_posted": ("question_posted", None, "ask_id"),
+    kind.value: (spec.required_event, spec.resolved_event, spec.id_field)
+    for kind, spec in INTERACTION_KIND_SPECS.items()
 }
 
 _HOT_KINDS = frozenset(

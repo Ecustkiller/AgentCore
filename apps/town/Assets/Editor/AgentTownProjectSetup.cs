@@ -24,6 +24,8 @@ namespace AgentTown.Editor
         private const string RendererPath = SettingsDir + "/URP-Renderer.asset";
         private const string PanelSettingsPath = UiDir + "/TownHudPanelSettings.asset";
         private const string TownScenePath = ScenesDir + "/Town.unity";
+        private const string MaterialsDir = "Assets/Resources/Town/Materials";
+        private const string RegionHeatMaterialPath = MaterialsDir + "/RegionHeatOverlay.mat";
 
         [MenuItem("AgentTown/Setup Project")]
         public static void SetupFromMenu() => Setup();
@@ -50,6 +52,7 @@ namespace AgentTown.Editor
 
             CreateOrUpdateTownScene(uxml, panelSettings, uss);
             SetBuildScenes();
+            EnsureRegionHeatMaterial();
 
             // Refresh + scan TownAssets → Resources/Town/TownMeshCatalog (empty = primitive fallback).
             try
@@ -162,6 +165,59 @@ namespace AgentTown.Editor
             if (!EditorSceneManager.SaveScene(scene, TownScenePath))
             {
                 throw new IOException($"Failed to save scene at {TownScenePath}");
+            }
+        }
+
+        /// <summary>
+        /// Editor-authored transparent overlay material for the region heatmap.
+        /// Runtime `_Surface=1` alone never flips URP Unlit blend state, and a
+        /// variant that no serialized material uses gets stripped from players —
+        /// so the transparent keyword + blend modes must be baked into an asset.
+        /// </summary>
+        private static void EnsureRegionHeatMaterial()
+        {
+            EnsureFolder(MaterialsDir);
+
+            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (shader == null)
+            {
+                Debug.LogWarning("[AgentTown] URP Unlit shader missing — heatmap material skipped");
+                return;
+            }
+
+            Material mat = AssetDatabase.LoadAssetAtPath<Material>(RegionHeatMaterialPath);
+            bool created = mat == null;
+            if (created)
+            {
+                mat = new Material(shader) { name = "RegionHeatOverlay" };
+            }
+            else if (mat.shader != shader)
+            {
+                mat.shader = shader;
+            }
+
+            mat.SetFloat("_Surface", 1f);           // Transparent
+            mat.SetFloat("_Blend", 0f);             // Alpha blend
+            mat.SetFloat("_AlphaClip", 0f);
+            mat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            mat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            mat.SetFloat("_SrcBlendAlpha", (float)UnityEngine.Rendering.BlendMode.One);
+            mat.SetFloat("_DstBlendAlpha", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            mat.SetFloat("_ZWrite", 0f);
+            mat.SetOverrideTag("RenderType", "Transparent");
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.DisableKeyword("_ALPHATEST_ON");
+            mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            mat.SetColor("_BaseColor", new Color(1f, 1f, 1f, 0.05f));
+
+            if (created)
+            {
+                AssetDatabase.CreateAsset(mat, RegionHeatMaterialPath);
+            }
+            else
+            {
+                EditorUtility.SetDirty(mat);
             }
         }
 

@@ -19,7 +19,7 @@ export interface SearchOptions {
   types?: SearchSectionType[];
   /** 时间过滤: only hits updated at/after this ISO 8601 instant. */
   updatedAfter?: string;
-  /** 工作区过滤: scope conversation/message hits to one folder (drops the folder
+  /** 项目过滤: scope conversation/message hits to one folder (drops the folder
    *  section server-side). */
   folderId?: string;
 }
@@ -33,7 +33,7 @@ export interface SearchOptions {
  * keeps the request count low).
  *
  * {@link SearchOptions.updatedAfter} / {@link SearchOptions.folderId} are the
- * 搜索结果过滤 facets (时间 / 工作区): applied server-side so the per-section cap is
+ * 搜索结果过滤 facets (时间 / 项目): applied server-side so the per-section cap is
  * spent on matching rows rather than filtered-away ones.
  */
 export async function searchAll(

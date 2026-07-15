@@ -37,6 +37,100 @@ async def test_persist_writes_file_and_sets_workspace_path(tmp_path: Path):
     assert out[0]["text"] == "# hi\n"
 
 
+async def test_persist_keeps_client_pre_resident_path(tmp_path: Path):
+    """引用即驻留：客户端已写入 attachments/ 时跳过 rewrite，保留 workspace_path。"""
+    ws = _ws(tmp_path)
+    (tmp_path / "attachments").mkdir()
+    (tmp_path / "attachments" / "report.xlsx").write_bytes(b"PK\x03\x04")
+    out = await persist_attachments(
+        ws,
+        [
+            {
+                "name": "report.xlsx",
+                "path": "attachments/report.xlsx",
+                "text": "",
+                "binary": True,
+                "workspace_path": "attachments/report.xlsx",
+            }
+        ],
+    )
+    assert out[0]["workspace_path"] == "attachments/report.xlsx"
+    assert out[0]["binary"] is True
+    # Must not overwrite binary with empty text write.
+    assert (tmp_path / "attachments" / "report.xlsx").read_bytes() == b"PK\x03\x04"
+
+
+async def test_persist_rejects_traversal_in_client_workspace_path(tmp_path: Path):
+    ws = _ws(tmp_path)
+    out = await persist_attachments(
+        ws,
+        [
+            {
+                "name": "x",
+                "path": "x",
+                "text": "",
+                "binary": True,
+                "workspace_path": "attachments/../evil.bin",
+            }
+        ],
+    )
+    assert "workspace_path" not in out[0] or out[0].get("workspace_path") is None
+
+
+async def test_persist_rejects_workspace_path_outside_attachments(tmp_path: Path):
+    """Client workspace_path must be a single segment under attachments/."""
+    ws = _ws(tmp_path)
+    cases = [
+        "src/notes.md",
+        "attachments/sub/nested.md",
+        "attachments/",
+        "..\\attachments\\x.md",
+        "evil/attachments/x.md",
+    ]
+    for raw in cases:
+        out = await persist_attachments(
+            ws,
+            [
+                {
+                    "name": "x",
+                    "path": "x",
+                    "text": "",
+                    "binary": True,
+                    "workspace_path": raw,
+                }
+            ],
+        )
+        assert out[0].get("workspace_path") is None, raw
+
+
+async def test_persist_binary_without_workspace_path_stays_unresident(tmp_path: Path):
+    ws = _ws(tmp_path)
+    out = await persist_attachments(
+        ws,
+        [
+            {
+                "name": "report.xlsx",
+                "path": "/local/report.xlsx",
+                "text": "",
+                "binary": True,
+            }
+        ],
+    )
+    assert out[0].get("workspace_path") is None
+    assert not (tmp_path / ATTACHMENTS_DIR).exists()
+
+
+def test_normalize_client_workspace_path():
+    from agentcore.workspace.attachments import _normalize_client_workspace_path
+
+    assert _normalize_client_workspace_path("attachments/a.xlsx") == "attachments/a.xlsx"
+    assert _normalize_client_workspace_path("attachments\\b.txt") == "attachments/b.txt"
+    assert _normalize_client_workspace_path("attachments/../evil") is None
+    assert _normalize_client_workspace_path("attachments/foo/bar") is None
+    assert _normalize_client_workspace_path("notes.md") is None
+    assert _normalize_client_workspace_path(None) is None
+
+
 async def test_persist_skips_directory(tmp_path: Path):
     ws = _ws(tmp_path)
     out = await persist_attachments(
@@ -144,6 +238,7 @@ def test_to_stored_metadata_drops_text_keeps_path():
             "kind": "file",
             "workspace_path": "attachments/a.py",
             "conversation_id": None,
+            "binary": False,
         }
     ]
     assert "text" not in stored[0]

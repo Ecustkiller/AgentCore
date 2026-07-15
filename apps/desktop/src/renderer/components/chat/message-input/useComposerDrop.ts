@@ -1,3 +1,4 @@
+import { hasLocalFiles } from "@/lib/capabilities";
 import {
   type Dispatch,
   type SetStateAction,
@@ -6,11 +7,13 @@ import {
   useState,
 } from "react";
 import { type PendingAttachment, readDroppedFile } from "./composerAttachments";
+import { stageDroppedFileAttachment } from "./resideAttachment";
 
 export function useComposerDrop(
   isGenerating: boolean,
   attachments: PendingAttachment[],
   setAttachments: Dispatch<SetStateAction<PendingAttachment[]>>,
+  conversationId: string | null = null,
 ) {
   const [dragOver, setDragOver] = useState(false);
   const [dropError, setDropError] = useState<string | null>(null);
@@ -26,6 +29,32 @@ export function useComposerDrop(
     async (file: File) => {
       const key = `dropped:${file.name}:${file.size}`;
       if (attachments.some((a) => a.key === key)) return;
+
+      // 桌面 Electron：主进程驻留（含二进制 / 区外路径）；绝对路径不进 renderer 状态。
+      if (hasLocalFiles()) {
+        const res = await stageDroppedFileAttachment(conversationId, file);
+        if (!res.ok) {
+          flashDropError(res.reason);
+          return;
+        }
+        setAttachments((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            key,
+            name: res.name,
+            path: res.path,
+            text: res.text,
+            truncated: res.truncated,
+            kind: "file",
+            workspacePath: res.workspacePath,
+            stagingId: res.stagingId,
+            binary: res.binary,
+          },
+        ]);
+        return;
+      }
+
       const res = await readDroppedFile(file);
       if (!res.ok) {
         flashDropError(res.reason);
@@ -44,7 +73,7 @@ export function useComposerDrop(
         },
       ]);
     },
-    [attachments, flashDropError, setAttachments],
+    [attachments, conversationId, flashDropError, setAttachments],
   );
 
   const handleDragOver = useCallback(
@@ -61,10 +90,7 @@ export function useComposerDrop(
     setDragOver(false);
   }, []);
 
-  // 粘贴入框 (对话基础功能补齐): Ctrl/Cmd+V of a file (or a screenshot) attaches it via
-  // the SAME path as drop — so a clipboard image hits the same「暂不支持图片附件」guard,
-  // one attachment pipeline, no second policy. Plain-text paste carries no files, so we
-  // never intercept it — the textarea inserts the text as usual.
+  // 粘贴入框: Ctrl/Cmd+V of a file (or a screenshot) attaches via the SAME path as drop.
   const handlePaste = useCallback(
     (e: React.ClipboardEvent) => {
       if (isGenerating) return;

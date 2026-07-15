@@ -7,7 +7,7 @@ namespace AgentTown.Tests
 {
     /// <summary>
     /// EditMode checks for the static town layout data (§6.3, §15.2 step 4). Guards that the
-    /// runtime builder covers exactly the 10 authoritative regions from the fixture and that every
+    /// runtime builder covers the authoritative regions from the fixture (incl. 心动营地) and that every
     /// region / road / zone table is populated.
     /// </summary>
     public sealed class TownVisualLayoutTests
@@ -15,11 +15,11 @@ namespace AgentTown.Tests
         private static readonly string[] ExpectedRegions =
         {
             "广场", "市场", "餐厅", "面包店", "公园", "住宅区", "镇政厅",
-            "图书馆", "工坊", "码头",
+            "图书馆", "工坊", "码头", "心动营地",
         };
 
         [Test]
-        public void Regions_CoverAllTenAnchors()
+        public void Regions_CoverAllElevenAnchors()
         {
             Assert.AreEqual(ExpectedRegions.Length, TownVisualLayout.Regions.Length, "region count");
 

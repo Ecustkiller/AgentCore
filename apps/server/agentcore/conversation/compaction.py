@@ -198,8 +198,9 @@ async def compact_conversation(
             credentials = await resolve_credentials(session, conv.user_id, "platform_internal")
 
         # BYOK with no usable key: skip WITHOUT advancing the watermark, so it retries
-        # once a key is configured (platform mode keeps None = global key).
-        if settings.billing_mode == "byok" and credentials is None:
+        # once a key is configured. Platform mode keeps None = global key via
+        # build_provider(None); free-tier users resolve to platform credentials above.
+        if credentials is None and settings.billing_mode == "byok":
             return False
 
         model = resolve_user_model(credentials)

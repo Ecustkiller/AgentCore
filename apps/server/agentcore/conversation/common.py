@@ -1,12 +1,19 @@
 """Shared helpers for conversation turn orchestration."""
 
+from __future__ import annotations
+
+import asyncio
+import contextlib
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.logging import get_logger
 from agentcore.core.text import clip_preview
+from agentcore.db.base import async_session_factory
 from agentcore.db.models import Conversation
-from agentcore.db.repositories import UserRepository
+from agentcore.db.repositories import ConversationRepository, UserRepository
 from agentcore.llm.credentials import LLMCredentials
+from agentcore.llm.factory import build_provider
 from agentcore.llm.profiles import TurnProfiles, default_turn_profiles
 from agentcore.llm.provider.protocol import LLMProvider
 from agentcore.llm.resolve import resolve_credentials, resolve_turn_model
@@ -19,9 +26,15 @@ from agentcore.memory import (
     TitleInput,
     TitleResult,
 )
+from agentcore.runtime.events import EventSink, title_generated
 from agentcore.workspace.locate import LocalBinding
 
 logger = get_logger(__name__)
+
+# Fire-and-forget early title mint (cloud SSE). In-process like schedule_compaction:
+# ``_inflight`` dedupes a burst; ``_tasks`` holds refs so a pass is not GC'd mid-flight.
+_title_inflight: set[str] = set()
+_title_tasks: set[asyncio.Task] = set()
 
 
 def log_cost_recorded(conversation_id: str, message_id: str | None, cost_runs: list[dict]) -> None:
@@ -62,10 +75,15 @@ async def resolve_local_binding(session: AsyncSession, conv: Conversation) -> Lo
     - **Project chat** (``folder_id`` set): inherit the project's ``local_root_id`` /
       ``local_subpath``. Cloud projects (both NULL) → ``None``.
     - **裸聊**: ``local_root_id`` (explicit) or ``local_container_root_id`` (desktop
-      local-first intent). Cloud SSE turns honor both so sidecar-written files stay
-      visible when the turn falls back from sidecar to cloud.
+      local-first intent). Empty ``local_subpath`` resolves to
+      ``conversations/<conversation_id>`` under the container (per-对话隔离；懒建).
+      Cloud SSE turns honor both so sidecar-written files stay visible when the
+      turn falls back from sidecar to cloud.
     """
-    from agentcore.conversation.scratch import resolve_conversation_local_binding
+    from agentcore.conversation.scratch import (
+        bare_chat_local_subpath,
+        resolve_conversation_local_binding,
+    )
     from agentcore.db.repositories import FolderRepository
 
     if conv.folder_id:
@@ -78,9 +96,11 @@ async def resolve_local_binding(session: AsyncSession, conv: Conversation) -> Lo
             label=folder.name or "workspace",
         )
 
+    root_id = conv.local_root_id or conv.local_container_root_id
+    subpath = conv.local_subpath or (bare_chat_local_subpath(conv.id) if root_id else None)
     return resolve_conversation_local_binding(
-        local_root_id=conv.local_root_id or conv.local_container_root_id,
-        local_subpath=conv.local_subpath,
+        local_root_id=root_id,
+        local_subpath=subpath,
         label="workspace",
     )
 
@@ -116,6 +136,90 @@ async def generate_title(
     except Exception as e:
         logger.warning("chat.title_failed", conversation_id=conversation_id, error=str(e))
         return TitleResult(title=fallback)
+
+
+async def _mint_title_background(
+    *,
+    conversation_id: str,
+    user_id: str,
+    user_message: str,
+    sink: EventSink,
+) -> None:
+    """Cloud early-title runner: user-message-only LLM mint → conditional write → SSE.
+
+    Never raises. Skips when the conversation already has a title (user rename race).
+    Emit is best-effort — a closed sink (short-lived / failed turn) must not undo a
+    successful DB write.
+    """
+    try:
+        async with async_session_factory() as session:
+            conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
+            if conv is None or (conv.title and str(conv.title).strip()):
+                return
+
+        async with async_session_factory() as session:
+            credentials = await resolve_credentials(session, user_id, "platform_internal")
+        model = resolve_turn_model(credentials)
+        provider = build_provider(credentials, purpose="platform_internal")
+        try:
+            # Cloud early path: first user message only — do not wait for assistant reply.
+            minted = await generate_title(
+                provider=provider,
+                conversation_id=conversation_id,
+                user_message=user_message,
+                assistant_reply="",
+                model=model,
+            )
+        finally:
+            await provider.close()
+
+        if not minted.title:
+            return
+
+        async with async_session_factory() as session:
+            updated = await ConversationRepository(session).update_title_if_empty(
+                conversation_id, minted.title
+            )
+        if updated is None:
+            return
+
+        with contextlib.suppress(Exception):
+            sink.emit(title_generated(minted.title, conversation_id=conversation_id))
+    except Exception as e:
+        logger.warning(
+            "chat.title_schedule_failed",
+            conversation_id=conversation_id,
+            error=str(e),
+        )
+    finally:
+        _title_inflight.discard(conversation_id)
+
+
+def schedule_title_generation(
+    *,
+    conversation_id: str,
+    user_id: str,
+    user_message: str,
+    sink: EventSink,
+) -> None:
+    """Fire-and-forget early title mint for a cloud SSE turn (sync schedule only).
+
+    Call after the first user message is persisted (``turn_saved``), in parallel with
+    the turn pipeline. No-op when a mint for this conversation is already in flight.
+    """
+    if conversation_id in _title_inflight:
+        return
+    _title_inflight.add(conversation_id)
+    task = asyncio.ensure_future(
+        _mint_title_background(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            user_message=user_message,
+            sink=sink,
+        )
+    )
+    _title_tasks.add(task)
+    task.add_done_callback(_title_tasks.discard)
 
 
 async def generate_followups(
@@ -176,10 +280,10 @@ async def resolve_memory_enabled(session: AsyncSession, user_id: str) -> bool:
 
 
 async def resolve_autonomy_policy(session: AsyncSession, user_id: str):
-    """This turn's capability-authorization posture (安全权限与治理 §三).
+    """User-global *default* AutonomyPolicy (seeds new conversations only).
 
-    Defaults to ``first_grant`` (kickoff once authorizes) — continuous with the
-    prior delegation-authorization card default.
+    Runtime gates must use :func:`resolve_permission_preset` / the conversation
+    column — not this. Kept for settings API and create-time seeding.
     """
     from agentcore.core.types import AutonomyPolicy
 
@@ -189,3 +293,28 @@ async def resolve_autonomy_policy(session: AsyncSession, user_id: str):
         return AutonomyPolicy(raw)
     except ValueError:
         return AutonomyPolicy.FIRST_GRANT
+
+
+def parse_permission_preset(raw: str | None):
+    """Coerce a stored / wire permission_preset string; unknown → workspace."""
+    from agentcore.core.types import PermissionPreset
+
+    try:
+        return PermissionPreset(raw or PermissionPreset.WORKSPACE.value)
+    except ValueError:
+        return PermissionPreset.WORKSPACE
+
+
+async def resolve_permission_preset(session: AsyncSession, conversation_id: str):
+    """This turn's permission mode — conversation column is the single source of truth."""
+    from agentcore.db.repositories import ConversationRepository
+
+    conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
+    return parse_permission_preset(conv.permission_preset if conv else None)
+
+
+async def default_permission_preset_for_user(session: AsyncSession, user_id: str):
+    """Map the user's autonomy preference → PermissionPreset for a new conversation."""
+    from agentcore.core.types import autonomy_to_preset
+
+    return autonomy_to_preset(await resolve_autonomy_policy(session, user_id))

@@ -236,9 +236,9 @@ async def test_test_run_maps_sandbox_error_to_failed_result(monkeypatch: pytest.
     backend = _FakeBackend(raise_sandbox=True)
 
     async def _profile(_backend):
-        from agentcore.runtime.context.project_profile import ProjectProfile
+        from agentcore.runtime.context.workspace_profile import WorkspaceProfile
 
-        return ProjectProfile(
+        return WorkspaceProfile(
             languages=["python"],
             frameworks=[],
             package_managers=[],
@@ -249,7 +249,7 @@ async def test_test_run_maps_sandbox_error_to_failed_result(monkeypatch: pytest.
         return "pytest"
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.test_run.detect_project_profile",
+        "agentcore.tools.builtin.test_run.detect_workspace_profile",
         _profile,
     )
     monkeypatch.setattr(

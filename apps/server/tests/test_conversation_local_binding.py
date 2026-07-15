@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentcore.conversation.common import resolve_local_binding
+from agentcore.conversation.scratch import bare_chat_local_subpath
 from agentcore.db.models import Conversation, Folder
 
 
@@ -30,11 +31,25 @@ async def test_resolve_local_binding_prefers_explicit_root():
     binding = await resolve_local_binding(None, conv)  # type: ignore[arg-type]
     assert binding is not None
     assert binding.root_id == "explicit"
+    assert binding.subpath == bare_chat_local_subpath(conv.id)
 
 
 @pytest.mark.asyncio
-async def test_resolve_local_binding_falls_back_to_container_root():
-    conv = _conv(local_root_id=None, local_container_root_id="container-abc", local_subpath="proj")
+async def test_bare_chat_empty_subpath_becomes_conversations_id():
+    conv = _conv(local_root_id=None, local_container_root_id="container-abc", local_subpath=None)
+    binding = await resolve_local_binding(None, conv)  # type: ignore[arg-type]
+    assert binding is not None
+    assert binding.root_id == "container-abc"
+    assert binding.subpath == f"conversations/{conv.id}"
+
+
+@pytest.mark.asyncio
+async def test_bare_chat_explicit_subpath_preserved():
+    conv = _conv(
+        local_root_id=None,
+        local_container_root_id="container-abc",
+        local_subpath="proj",
+    )
     binding = await resolve_local_binding(None, conv)  # type: ignore[arg-type]
     assert binding is not None
     assert binding.root_id == "container-abc"
@@ -64,6 +79,8 @@ async def test_resolve_local_binding_inherits_project_local(monkeypatch):
     assert binding.root_id == "folder-root"
     assert binding.subpath == "src"
     assert binding.root_label == "Proj"
+    # Project binding must NOT inject conversations/<id>.
+    assert not binding.subpath.startswith("conversations/")
 
 
 @pytest.mark.asyncio

@@ -42,7 +42,10 @@ import {
   useConversationGenerating,
   useConversationStore,
 } from "@/stores/conversation";
-import { useInteractionStore } from "@/stores/interactions";
+import {
+  isAwaitingUserEntry,
+  useInteractionStore,
+} from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { useShareStore } from "@/stores/share";
 import {
@@ -154,18 +157,15 @@ export function ConversationItem({ conversation, groupIsLocal }: Props) {
   const unarchiveMutation = useUnarchiveConversation();
   const folders = useFolders();
   const isGenerating = useConversationGenerating(conversation.id);
-  const awaitingApproval = useInteractionStore((s) =>
+  // 「等你」灯（前端UX设计.md §对话列表状态点）：热阻塞交互（审批 / 授权 / 升级拍板，
+  // CEO 仲裁除外）+ 任意 kind 的暂停帧（开工确认 / 途中提问 / 计划复核）都算等用户。
+  const awaitingInteraction = useInteractionStore((s) =>
     [...s.byId.values()].some(
-      (e) =>
-        e.conversationId === conversation.id &&
-        e.kind === "approval" &&
-        (e.status === "pending" || e.status === "submitting"),
+      (e) => e.conversationId === conversation.id && isAwaitingUserEntry(e),
     ),
   );
-  const awaitingKickoff = usePausedTurnStore((s) =>
-    s.pending.some(
-      (p) => p.conversationId === conversation.id && p.kind === "team_preview",
-    ),
+  const awaitingResume = usePausedTurnStore((s) =>
+    s.pending.some((p) => p.conversationId === conversation.id),
   );
   const navigate = useNavigate();
   const isActive = conversation.id === currentId;
@@ -176,7 +176,7 @@ export function ConversationItem({ conversation, groupIsLocal }: Props) {
     : "确认永久删除（无法恢复）";
 
   const status: "running" | "awaiting" | null =
-    awaitingApproval || awaitingKickoff
+    awaitingInteraction || awaitingResume
       ? "awaiting"
       : isGenerating
         ? "running"
@@ -444,14 +444,14 @@ export function ConversationItem({ conversation, groupIsLocal }: Props) {
               >
                 {status && (
                   <SimpleTooltip
-                    label={status === "running" ? "执行中" : "待审批"}
+                    label={status === "running" ? "执行中" : "等你决策"}
                   >
                     <span
-                      aria-label={status === "running" ? "执行中" : "待审批"}
+                      aria-label={status === "running" ? "执行中" : "等你决策"}
                       className={`size-1.5 shrink-0 rounded-full ${
                         status === "running"
                           ? "animate-pulse bg-primary"
-                          : "bg-primary"
+                          : "bg-primary ring-2 ring-primary/25"
                       }`}
                     />
                   </SimpleTooltip>

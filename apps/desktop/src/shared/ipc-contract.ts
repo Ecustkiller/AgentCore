@@ -10,6 +10,10 @@
 export interface FsRoot {
   id: string;
   name: string;
+  /** W3 session grant alias under ``external/<alias>/`` (omit for permanent roots). */
+  alias?: string;
+  readonly?: boolean;
+  sessionOnly?: boolean;
 }
 
 /** 目录项（懒加载的单层子项）。 */
@@ -156,6 +160,11 @@ export const FS_CHANNELS = {
   ensureDefaultRoot: "fs:ensureDefaultRoot",
   listRoots: "fs:listRoots",
   removeRoot: "fs:removeRoot",
+  /** W3: session-scoped read-only root for one conversation. */
+  grantSessionReadonlyRoot: "fs:grantSessionReadonlyRoot",
+  listSessionReadonlyRoots: "fs:listSessionReadonlyRoots",
+  revokeSessionReadonlyRoot: "fs:revokeSessionReadonlyRoot",
+  clearSessionReadonlyRoots: "fs:clearSessionReadonlyRoots",
   listDir: "fs:listDir",
   listFiles: "fs:listFiles",
   readFile: "fs:readFile",
@@ -174,7 +183,50 @@ export const FS_CHANNELS = {
   reveal: "fs:reveal",
   openPath: "fs:openPath",
   copyPath: "fs:copyPath",
+  /** 将根内相对路径移入系统回收站（软删）。 */
+  trashPath: "fs:trashPath",
+  /** 引用即驻留：系统文件选择器 → 写入工作区 attachments/ 或暂存。 */
+  pickAndStageAttachment: "fs:pickAndStageAttachment",
+  /** 从已授权根相对路径驻留。 */
+  stageFromRoot: "fs:stageFromRoot",
+  /** 拖拽绝对路径驻留（仅 preload 调用，不下发 renderer）。 */
+  stageFromAbsPath: "fs:stageFromAbsPath",
+  /** 草稿暂存 → 本地工作区 attachments/。 */
+  finalizeStagedAttachment: "fs:finalizeStagedAttachment",
+  /** 云端：取出暂存字节后清除。 */
+  consumeStagedBytes: "fs:consumeStagedBytes",
+  /**
+   * 云 scratch 产物单向导出：弹目录选择器，把 zip（base64）解压落地。
+   * 不登记授权根、不改工作区绑定（双模式工作区 §八.7）。
+   */
+  checkoutArchive: "fs:checkoutArchive",
 } as const;
+
+/** {@link FsApi.checkoutArchive} 结果。 */
+export type CheckoutArchiveResult =
+  | { ok: true; destName: string; fileCount: number }
+  | { ok: false; reason: "cancelled" }
+  | { ok: false; reason: "error"; message: string };
+
+/** 引用即驻留：落盘到对话工作区 attachments/ 的目标。 */
+export interface StageAttachmentDest {
+  rootId: string;
+  subpath?: string;
+}
+
+/**
+ * 引用即驻留结果。``workspacePath`` 已写入对话工作区；``stagingId`` 仍在主进程暂存
+ * （草稿尚无会话 / 云端待上传）。绝对路径永不出现在此结构中。
+ */
+export interface StagedAttachment {
+  name: string;
+  workspacePath?: string;
+  stagingId?: string;
+  binary: boolean;
+  text: string;
+  truncated: boolean;
+  sizeBytes: number;
+}
 
 /**
  * 暴露在 `window.fsApi` 上的 renderer 端 API 面。
@@ -184,14 +236,28 @@ export const FS_CHANNELS = {
 export interface FsApi {
   addRoot(): Promise<FsRoot | null>;
   /**
-   * 取得（必要时自动创建 + 授权）默认本地工作区根（`~/Documents/AgentCore`）。
+   * 取得（必要时自动创建 + 授权）默认本地容器根（`~/Documents/AgentCore`）。
    *
-   * 桌面 local-first（双模式工作区 决策 #11）的地基：让新对话/新项目无需用户走目录
-   * 选择器就有一个开箱即用的本地落地处。幂等——已存在同路径的授权根则原样复用。
+   * 供显式「本机草稿」裸聊与本地项目创建复用；桌面裸聊默认已切云（§八.7），
+   * 新建裸聊不再自动调用。幂等——已存在同路径的授权根则原样复用。
    */
   ensureDefaultRoot(): Promise<FsRoot>;
+  /**
+   * 云 scratch → 本地单向 checkout：选目录并解压 zip。取消 → `{ reason:"cancelled" }`。
+   */
+  checkoutArchive(archiveBase64: string): Promise<CheckoutArchiveResult>;
   listRoots(): Promise<FsRoot[]>;
   removeRoot(rootId: string): Promise<void>;
+  /** W3: folder picker → session read-only root bound to conversation. */
+  grantSessionReadonlyRoot(
+    conversationId: string,
+  ): Promise<FsRoot | null>;
+  listSessionReadonlyRoots(conversationId: string): Promise<FsRoot[]>;
+  revokeSessionReadonlyRoot(
+    conversationId: string,
+    rootId: string,
+  ): Promise<boolean>;
+  clearSessionReadonlyRoots(conversationId: string): Promise<void>;
   listDir(rootId: string, relPath: string): Promise<FsResult<FsEntry[]>>;
   /** 递归列出根内的全部文件（用于 @ 提及检索；忽略常见无关目录，有数量上限）。 */
   listFiles(rootId: string): Promise<FsResult<FsFileRef[]>>;
@@ -273,4 +339,41 @@ export interface FsApi {
    * 故绝对路径不进 renderer。仅本地源有意义。
    */
   copyPath(rootId: string, relPath: string): Promise<FsResult>;
+  /**
+   * 将根内相对路径移入系统回收站（`shell.trashItem`，软删）。空 `relPath`（根自身）拒绝。
+   * 路径尚不存在（懒建 scratch 未物化）视为成功。仅本地源有意义。
+   */
+  trashPath(rootId: string, relPath: string): Promise<FsResult>;
+  /**
+   * 引用即驻留：打开系统文件选择器，复制进对话工作区 ``attachments/``（有 dest）
+   * 或主进程暂存（无 dest）。取消选择返回 ``null``。
+   */
+  pickAndStageAttachment(
+    dest?: StageAttachmentDest,
+  ): Promise<FsResult<StagedAttachment> | null>;
+  /** 从已授权根内相对路径驻留（@ 菜单选中的文件，含二进制）。 */
+  stageFromRoot(
+    rootId: string,
+    relPath: string,
+    dest?: StageAttachmentDest,
+  ): Promise<FsResult<StagedAttachment>>;
+  /**
+   * 拖拽/粘贴文件：preload 用 ``webUtils.getPathForFile`` 取绝对路径后调用。
+   * 绝对路径不进入 renderer 业务状态。
+   */
+  stageDroppedFile(
+    file: File,
+    dest?: StageAttachmentDest,
+  ): Promise<FsResult<StagedAttachment>>;
+  /** 把暂存附件写入本地工作区 ``attachments/``。 */
+  finalizeStagedAttachment(
+    stagingId: string,
+    dest: StageAttachmentDest,
+  ): Promise<FsResult<StagedAttachment>>;
+  /** 取出暂存字节供云端 ``PUT …/workspace/files``（取出后清除暂存）。 */
+  consumeStagedBytes(
+    stagingId: string,
+  ): Promise<
+    FsResult<{ name: string; data: Uint8Array; binary: boolean }>
+  >;
 }

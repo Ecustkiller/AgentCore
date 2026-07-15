@@ -1,7 +1,7 @@
 import {
-  DeleteProjectDialog,
+  DeleteFolderDialog,
   archiveConversationsBeforeDelete,
-} from "@/components/folders/DeleteProjectDialog";
+} from "@/components/folders/DeleteFolderDialog";
 import { IconButton, SurfaceRow } from "@/components/ui";
 import {
   ContextMenu,
@@ -47,7 +47,7 @@ interface Props {
 }
 
 /**
- * Sidebar「工作区」group header: expand/collapse + cloud/local icon + project
+ * Sidebar「项目」group header: expand/collapse + cloud/local icon + project
  * actions (view / browse / archive-all / delete). Right-click and hover「⋯」
  * share the same menu;「归档全部对话」maps to batch conversation archive (no
  * `Folder.archived`).
@@ -80,11 +80,7 @@ export function WorkspaceGroupHeader({
   };
 
   const browseFiles = () => {
-    const convId = convs[0]?.id;
-    navigate(
-      "/files",
-      convId ? { state: { focusWsId: `conv:${convId}` } } : undefined,
-    );
+    navigate("/files", { state: { focusWsId: `folder:${folder.id}` } });
   };
 
   const newChatInProject = () => {
@@ -110,7 +106,7 @@ export function WorkspaceGroupHeader({
     });
   };
 
-  const confirmDeleteProject = async () => {
+  const confirmDeleteFolder = async () => {
     if (convs.length > 0) {
       const ok = await archiveConversationsBeforeDelete(convs, {
         archive: (id) => archiveMutation.mutateAsync(id),
@@ -274,13 +270,13 @@ export function WorkspaceGroupHeader({
           {menuItems}
         </ContextMenuContent>
       </ContextMenu>
-      <DeleteProjectDialog
+      <DeleteFolderDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         name={folder.name}
         liveConvCount={liveConvCount}
         isLocal={groupIsLocal}
-        onConfirm={() => void confirmDeleteProject()}
+        onConfirm={() => void confirmDeleteFolder()}
         onPermanentConfirm={confirmPermanentDelete}
       />
     </>

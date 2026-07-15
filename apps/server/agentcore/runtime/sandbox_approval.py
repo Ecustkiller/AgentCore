@@ -47,8 +47,21 @@ def worker_gate_applies(backend: WorkspaceBackend | None) -> bool:
     return backend is not None and backend.location == "local"
 
 
-def execution_tool_auto_passes(backend: WorkspaceBackend | None, tool_name: str) -> bool:
-    """True when an execution-class tool should skip the approval prompt."""
+def execution_tool_auto_passes(
+    backend: WorkspaceBackend | None,
+    tool_name: str,
+    *,
+    autonomy_policy: "AutonomyPolicy | None" = None,
+) -> bool:
+    """True when an execution-class tool should skip the approval prompt.
+
+    Cloud gVisor → auto-pass (sandbox isolation). ``full_trust`` (AutonomyPolicy.FULL_AUTO)
+    → auto-pass even on local/sidecar — AI runs with user-equivalent power for exec tools.
+    """
+    from agentcore.core.types import AutonomyPolicy
+
     if tool_name not in ("code_execute", "test_run"):
         return False
+    if autonomy_policy is AutonomyPolicy.FULL_AUTO:
+        return True
     return execution_approval_posture(backend) is ExecutionApprovalPosture.AUTO_PASS

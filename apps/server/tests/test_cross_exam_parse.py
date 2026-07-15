@@ -1,6 +1,4 @@
-"""质询作答解析单测（JSON 主路径 + 启发式降级）。"""
-
-import json
+"""质询作答解析单测（markdown 标题主路径 + 挂第一题降级）。"""
 
 from agentcore.runtime.debate.cross_exam_parse import (
     build_cross_exam_exchanges,
@@ -8,22 +6,18 @@ from agentcore.runtime.debate.cross_exam_parse import (
 )
 
 
-def test_parse_cross_exam_response_json_array():
+def test_parse_cross_exam_response_heading_sections():
     qs = [
         "收益量化口径是否计入了尾部风险？请是/否直接回答。",
         "若熔断触发、灰度止损，已投入成本由谁承担？",
     ]
-    payload = [
-        {
-            "question_index": 1,
-            "answer": "否，量化口径未含尾部风险【待核实·推断】。",
-        },
-        {
-            "question_index": 2,
-            "answer": "成本由灰度预算池兜底、触发熔断即回滚【已核实·灰度预案v2】",
-        },
-    ]
-    got = parse_cross_exam_response(qs, json.dumps(payload, ensure_ascii=False))
+    ans = (
+        "### 质询一\n"
+        "否，量化口径未含尾部风险【待核实·推断】。\n\n"
+        "### 质询二\n"
+        "成本由灰度预算池兜底、触发熔断即回滚【已核实·灰度预案v2】"
+    )
+    got = parse_cross_exam_response(qs, ans)
     assert len(got) == 2
     assert got[0].question == qs[0]
     assert "尾部" in got[0].answer
@@ -31,72 +25,40 @@ def test_parse_cross_exam_response_json_array():
     assert "灰度" in got[1].answer
 
 
-def test_parse_cross_exam_response_json_in_fence():
+def test_parse_discards_preamble_before_first_heading():
     qs = ["你这条有出处吗？"]
-    raw = (
-        "说明：以下是我的回答\n```json\n"
-        + json.dumps(
-            [{"question_index": 1, "answer": "暂无统一出处【待核实·推断】"}],
-            ensure_ascii=False,
-        )
-        + "\n```"
-    )
+    raw = "好的，我已掌握材料，现在作答：\n### 质询一\n暂无统一出处【待核实·推断】"
     got = parse_cross_exam_response(qs, raw)
     assert len(got) == 1
     assert "出处" in got[0].answer
+    assert "好的" not in got[0].answer
 
 
-def test_parse_cross_exam_response_missing_item_leaves_empty_answer():
+def test_parse_pads_missing_section_with_empty_answer():
     qs = ["Q1", "Q2"]
-    payload = [{"question_index": 1, "answer": "只答了第一条"}]
-    got = parse_cross_exam_response(qs, json.dumps(payload))
+    ans = "### 质询一\n只答了第一条"
+    got = parse_cross_exam_response(qs, ans)
     assert got[0].answer == "只答了第一条"
     assert got[1].answer == ""
 
 
-def test_parse_cross_exam_response_scalar_string_array():
-    """辩手少包一层 wrapper：``["答一","答二"]`` 按位置映射，不静默丢答。"""
+def test_parse_does_not_treat_json_as_structured_path():
+    """JSON 路径已退役：无标题的 JSON 碎片整段挂第一题，不按数组项映射。"""
     qs = ["收益是否计入尾部风险？", "熔断成本由谁承担？"]
-    payload = [
-        "否，量化口径未含尾部风险【待核实·推断】。",
-        "成本由灰度预算池兜底【已核实·灰度预案v2】",
-    ]
-    got = parse_cross_exam_response(qs, json.dumps(payload, ensure_ascii=False))
+    raw = '[{"question_index": 1, "answer": "答一"}, {"question_index": 2, "answer": "答二"}]'
+    got = parse_cross_exam_response(qs, raw, side_key="pro")
+    assert len(got) == 2
+    assert "question_index" in got[0].answer  # 全文挂首题
+    assert got[1].answer == ""
+
+
+def test_parse_hangs_whole_blob_on_first_when_no_headings():
+    qs = ["收益是否计入尾部风险？", "熔断成本由谁承担？"]
+    ans = "作答：否，口径未含尾部【待核实·推断】。"
+    got = parse_cross_exam_response(qs, ans, side_key="con")
     assert len(got) == 2
     assert "尾部" in got[0].answer
-    assert "灰度" in got[1].answer
-
-
-def test_parse_cross_exam_response_scalar_array_in_prose():
-    """prose 中夹可解析标量数组时走 JSON 路径并按位置映射。"""
-    qs = ["Q1", "Q2"]
-    raw = '作答如下：\n["答一内容", "答二内容"]\n以上。'
-    got = parse_cross_exam_response(qs, raw)
-    assert got[0].answer == "答一内容"
-    assert got[1].answer == "答二内容"
-
-
-def test_parse_cross_exam_response_falls_back_to_heuristic():
-    qs = ["收益是否计入尾部风险？"]
-    ans = "作答：否，口径未含尾部【待核实·推断】。"
-    got = parse_cross_exam_response(qs, ans)
-    assert len(got) == 1
-    assert "尾部" in got[0].answer
-
-
-def test_parse_ignores_legacy_directly_addressed():
-    """历史 ``directly_addressed`` / ``ok`` 字段被忽略，只取 answer。"""
-    qs = ["Q1"]
-    payload = [
-        {
-            "question_index": 1,
-            "answer": "我承认没有数据支持【待核实·推断】",
-            "directly_addressed": False,
-            "ok": False,
-        }
-    ]
-    got = parse_cross_exam_response(qs, json.dumps(payload, ensure_ascii=False))
-    assert got[0].answer.startswith("我承认")
+    assert got[1].answer == ""
 
 
 def test_build_cross_exam_exchanges_single_question():
@@ -106,21 +68,6 @@ def test_build_cross_exam_exchanges_single_question():
     assert len(got) == 1
     assert got[0].question == qs[0]
     assert "尾部" in got[0].answer
-
-
-def test_build_cross_exam_exchanges_splits_by_semicolon():
-    qs = [
-        "收益量化口径是否计入了尾部风险？请是/否直接回答。",
-        "若熔断触发、灰度止损，已投入成本由谁承担？",
-    ]
-    ans = (
-        "量化口径未含尾部风险【待核实·推断】；"
-        "成本由灰度预算池兜底、触发熔断即回滚【已核实·灰度预案v2】"
-    )
-    got = build_cross_exam_exchanges(qs, ans)
-    assert len(got) == 2
-    assert "尾部" in got[0].answer
-    assert "灰度" in got[1].answer
 
 
 def test_build_cross_exam_exchanges_empty_answer():
@@ -149,5 +96,5 @@ def test_section_split_does_not_treat_lone_decimal_as_section_marker():
     ans = "3.5 倍杠杆下尾部风险被低估【待核实·推断】；另一点是熔断成本归属未定。"
     got = build_cross_exam_exchanges(qs, ans)
     assert len(got) == 2
-    # 无合法「1. / 2.」标题 → 分号切或全文挂首条，不应把「3.5」当第 3 段丢内容
-    assert any("3.5" in ex.answer for ex in got)
+    assert "3.5" in got[0].answer
+    assert got[1].answer == ""

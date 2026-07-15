@@ -4,27 +4,8 @@ export const EDIT_READ_MAX = 5 * 1024 * 1024; // 「读以编辑」整文入内�
 
 export const LIST_FILES_CAP = 5000; // @ 提及检索：单根最多返回文件数
 export const LIST_FILES_MAX_DEPTH = 12; // 递归最大深度，防极深目录
-// 递归列举时跳过的目录（依赖/构建产物/VCS 等，与 @ 提及无关）。
-export const LIST_FILES_SKIP_DIRS = new Set([
-  "node_modules",
-  ".git",
-  ".svn",
-  ".hg",
-  "dist",
-  "build",
-  "out",
-  ".next",
-  ".nuxt",
-  ".venv",
-  "venv",
-  "__pycache__",
-  ".turbo",
-  ".cache",
-  "coverage",
-  ".idea",
-  ".vscode",
-  "target",
-]);
+// 递归列举跳过集：权威定义在 workspaceIgnore.ts（与服务端 IGNORED_DIRS 对齐）。
+export { LIST_FILES_SKIP_DIRS } from "./workspaceIgnore";
 
 // --- 本地工作区 op（双模式工作区 P2）执行边界 ---
 // 整文读取上限：服务端 ServerWorkspace.read 不设上限（随后由工具层截断模型可见输出），

@@ -1,19 +1,31 @@
-"""Immediate permanent folder deletion (彻底删除文件夹).
+"""Immediate permanent project wipe (彻底删除项目).
 
-Distinct from ``FolderRepository.soft_delete`` (recoverable container delete with
-a retention grace period). This path ungroups every live conversation in the
-folder, then removes the folder record — conversations and their scratch spaces
-are retained.
+Hard-deletes every member conversation (cascade messages / runs / journal / …),
+purges the shared cloud ``folder:<id>`` workspace directory + server snapshots,
+unbinds boards (same soft-delete rule: boards fall back to ungrouped, not deleted),
+then removes the folder row.
+
+Local-mode projects bind a user OS directory: this path never touches that
+directory — only DB rows and server-side workspace data are cleared.
 """
 
 from __future__ import annotations
 
+from sqlalchemy import update
+
 from agentcore.db.base import async_session_factory
-from agentcore.db.repositories import ConversationRepository, FolderRepository
+from agentcore.db.models import Board
+from agentcore.db.repositories import (
+    ConversationRepository,
+    ConversationShareRepository,
+    FolderRepository,
+)
+from agentcore.workspace import grant_store
+from agentcore.workspace.retention import purge_folder_space
 
 
 async def permanent_delete_folder(*, folder_id: str, user_id: str) -> bool:
-    """Physically remove a folder after ungrouping its member conversations."""
+    """Wipe a live project: member chats, cloud space/snapshots, then the folder row."""
     async with async_session_factory() as session:
         folder_repo = FolderRepository(session)
         conv_repo = ConversationRepository(session)
@@ -24,8 +36,22 @@ async def permanent_delete_folder(*, folder_id: str, user_id: str) -> bool:
 
     async with async_session_factory() as session:
         conv_repo = ConversationRepository(session)
-        folder_repo = FolderRepository(session)
+        share_repo = ConversationShareRepository(session)
         for conversation_id in conv_ids:
-            await conv_repo.set_folder(conversation_id, None, user_id=user_id)
-        await folder_repo.hard_delete(folder_id)
+            await share_repo.revoke_all_for_conversation(conversation_id)
+            grant_store.clear_conversation(conversation_id)
+            await conv_repo.hard_delete(conversation_id)
+        await session.execute(
+            update(Board)
+            .where(Board.user_id == user_id, Board.folder_id == folder_id)
+            .values(folder_id=None)
+        )
+        await session.commit()
+
+    # Server-side cloud root + snapshots (also clears any residual server mirror for
+    # local projects). Never the user's OS directory behind ``local_root_id``.
+    await purge_folder_space(user_id=user_id, folder_id=folder_id)
+
+    async with async_session_factory() as session:
+        await FolderRepository(session).hard_delete(folder_id)
     return True

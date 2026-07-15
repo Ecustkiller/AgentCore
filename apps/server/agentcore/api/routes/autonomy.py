@@ -1,4 +1,4 @@
-"""User autonomy-policy preference (能力授权三档)."""
+"""User autonomy-policy preference — seeds new-conversation PermissionPreset only."""
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -15,8 +15,10 @@ class AutonomyView(BaseModel):
 
 
 class AutonomyUpdate(BaseModel):
-    policy: AutonomyPolicy = Field(..., description="always_ask | first_grant | full_auto")
-
+    policy: AutonomyPolicy = Field(
+        ...,
+        description="New-session default: always_ask→observe | first_grant→workspace | full_auto→full_trust",
+    )
 
 @router.get("", response_model=AutonomyView)
 async def get_autonomy(

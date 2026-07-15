@@ -8,7 +8,7 @@
 1. 按**到达顺序**打印每个 SSE 事件 (delta 默认合批成段，`--raw` 则逐个打)；
 2. 按后端 ``EventSink._accumulate_process`` 同款规则折出「思考·正文·工具」时间线——
    一眼判断是「后端发射就乱」还是「前端 fold 才乱」；
-3. 把完整原始事件序列 (带 ``t_ms`` 到达时刻) 另存 ``logs/probe_<ts>.json``，供后续 AI 用
+3. 把完整原始事件序列 (带 ``t_ms`` 到达时刻) 另存 ``logs/probes/probe_<ts>.json``，供后续 AI 用
    Read 直接读分析。
 
 从 ``apps/server`` 跑::
@@ -35,7 +35,7 @@ from typing import Any
 import httpx
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-OUT_DIR = REPO_ROOT / "logs"
+OUT_DIR = REPO_ROOT / "logs" / "probes"
 
 DEFAULT_BASE_URL = os.environ.get("PROBE_BASE_URL", "http://localhost:8000")
 DEFAULT_USERNAME = os.environ.get("DEV_USERNAME", "dev")

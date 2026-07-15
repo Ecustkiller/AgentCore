@@ -48,6 +48,26 @@ export async function executeWorkspaceOp(
   args: Record<string, unknown>,
 ): Promise<WorkspaceOpResult> {
   try {
+    const writeOps = new Set([
+      "write",
+      "append",
+      "write_bytes",
+      "mkdir",
+      "delete",
+      "move",
+      "replace",
+      // W3: readonly roots must refuse exec / process spawn / archive even if the
+      // engine never routes these to external mounts today (defense in depth).
+      "execute",
+      "process_start",
+      "archive",
+    ]);
+    if (root.readonly && writeOps.has(op)) {
+      return opErr(
+        "OutsideWorkspace",
+        "会话授权目录为只读，不能写入；请把产出写到对话工作区",
+      );
+    }
     switch (op) {
       case "read":
         return await opRead(root, String(args.path ?? ""));

@@ -13,20 +13,21 @@ from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolEffect
 from agentcore.runtime.coordination.journal import record_coordination_snapshot
 from agentcore.runtime.coordination.session import (
-    DEFAULT_COORDINATION_BUDGET,
     CoordinationEvent,
     CoordinationEventKind,
     CoordinationSession,
+    coordination_budget_for_batch,
     set_active_coordination,
     should_enter_coordination,
 )
-from agentcore.tools.builtin.delegate.team_synthesis import worker_output_blurb
+from agentcore.runtime.delegate.team_synthesis import worker_output_blurb
 from agentcore.tools.protocol import ToolResult
 
 if TYPE_CHECKING:
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.types import RunState
-    from agentcore.tools.builtin.delegate.tool import DelegateTool
+
+DelegateTool = Any
 
 logger = get_logger(__name__)
 
@@ -51,19 +52,31 @@ def try_start_coordination(
     Returns ``None`` when the caller should fall through to blocking ``drive``.
     Pass an existing ``session`` on ask_user resume to preserve draft / budget.
     """
+    has_checkpoint = any(bool(n.checkpoint_after) for n in plan.nodes)
+    checkpoint_enabled = bool(getattr(tool, "_checkpoint_enabled", False))
     if session is None and not should_enter_coordination(
         coordinate=coordinate,
         worker_count=len(plan.nodes),
         finalize=finalize,
         depth=tool._depth,
+        has_checkpoint=has_checkpoint,
+        checkpoint_enabled=checkpoint_enabled,
     ):
+        if has_checkpoint and checkpoint_enabled:
+            logger.info(
+                "coordination.skipped",
+                reason="checkpoint_after_in_batch",
+                execution_id=execution_id,
+                nodes=len(plan.nodes),
+                checkpoint_nodes=sum(1 for n in plan.nodes if n.checkpoint_after),
+            )
         return None
 
     if session is None:
         session = CoordinationSession(
             execution_id=execution_id,
             total_workers=len(plan.nodes),
-            budget_remaining=DEFAULT_COORDINATION_BUDGET,
+            budget_remaining=coordination_budget_for_batch(len(plan.nodes)),
         )
         set_active_coordination(session)
         record_coordination_snapshot(session)
@@ -97,17 +110,23 @@ def try_start_coordination(
         call=call_idx,
         resumed=seed_completed is not None,
     )
-    return ToolResult(
-        tool_call_id="",
-        success=True,
-        output=(
-            f"【团队已启动·协调模式】已派出 {len(plan.nodes)} 名队员（{roster}）。\n"
-            "调度在后台继续；你将收到团队事件（worker_completed / note / escalation / "
-            "all_completed）。请用 update_synthesis 更新合成草稿；"
-            "全部完成后做最终合成并收口。"
-            "单 worker / finalize / 嵌套 lead / 显式 coordinate=false 仍走阻塞等待。"
+    from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
+
+    return annotate_batch_meta(
+        ToolResult(
+            tool_call_id="",
+            success=True,
+            output=(
+                f"【团队已启动·协调模式】已派出 {len(plan.nodes)} 名队员（{roster}）。\n"
+                "调度在后台继续；你将收到团队事件（worker_completed / note / escalation / "
+                "all_completed）。请用 update_synthesis 更新合成草稿；"
+                "全部完成后做最终合成并收口。"
+                "单 worker / finalize / 嵌套 lead / 显式 coordinate=false 仍走阻塞等待。"
+            ),
+            effect=ToolEffect.CONTINUE,
         ),
-        effect=ToolEffect.CONTINUE,
+        node_count=len(plan.nodes),
+        has_deps=any(n.depends_on for n in plan.nodes),
     )
 
 
@@ -126,7 +145,7 @@ async def _background_drive(
     coordination: str = "none",
 ) -> None:
     """Run blocking drive semantics, posting coordination events along the way."""
-    from agentcore.tools.builtin.delegate.drive import drive_coordinated
+    from agentcore.runtime.delegate.drive import drive_coordinated
 
     try:
         result = await drive_coordinated(
@@ -155,7 +174,7 @@ async def _background_drive(
         elif tool._pending_boundary is not None:
             reason, nodes = tool._pending_boundary
             tool._pending_boundary = None
-            from agentcore.tools.builtin.delegate.supervised import format_boundary_for_ceo
+            from agentcore.runtime.delegate.supervised import format_boundary_for_ceo
 
             # Prefer the brief drive already formatted (includes completed worker output);
             # fall back to a fresh format when drive returned empty.

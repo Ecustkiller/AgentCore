@@ -7,8 +7,46 @@ import { CollapsibleSpeech } from "../CollapsibleSpeech";
 import type { DebateClosingView } from "../model";
 import { SectionHeader } from "./SectionHeader";
 import { closingAnchorId } from "./anchors";
+import { type DebateArenaLayout, partitionSides } from "./debateLayoutPreference";
 
 export function ClosingBlocks({
+  closings,
+  execution,
+  messageId,
+  layoutMode = "stack",
+}: {
+  closings: DebateClosingView[];
+  execution: Execution;
+  messageId: string;
+  layoutMode?: DebateArenaLayout;
+}) {
+  return (
+    <div>
+      <SectionHeader id={closingAnchorId()} label="结辩" />
+      {layoutMode === "split" ? (
+        <SplitClosingColumns
+          closings={closings}
+          execution={execution}
+          messageId={messageId}
+        />
+      ) : (
+        <div className="space-y-4">
+          {closings.map((c) => (
+            <ClosingBlock
+              key={c.sideKey}
+              closing={c}
+              execution={execution}
+              messageId={messageId}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** split 布局：正反两方结辩左右对开（对齐立论 / 质询的列布局），其余方顺次堆叠。 */
+function SplitClosingColumns({
   closings,
   execution,
   messageId,
@@ -17,19 +55,42 @@ export function ClosingBlocks({
   execution: Execution;
   messageId: string;
 }) {
+  const { pro, con, others } = partitionSides(
+    closings,
+    (c) => c.sideKey,
+    (c) => c.stance,
+  );
+
   return (
-    <div>
-      <SectionHeader id={closingAnchorId()} label="结辩" />
-      <div className="space-y-4">
-        {closings.map((c) => (
-          <ClosingBlock
-            key={c.sideKey}
-            closing={c}
-            execution={execution}
-            messageId={messageId}
-          />
-        ))}
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 items-start gap-4">
+        <div className="min-w-0">
+          {pro && (
+            <ClosingBlock
+              closing={pro}
+              execution={execution}
+              messageId={messageId}
+            />
+          )}
+        </div>
+        <div className="min-w-0">
+          {con && (
+            <ClosingBlock
+              closing={con}
+              execution={execution}
+              messageId={messageId}
+            />
+          )}
+        </div>
       </div>
+      {others.map((c) => (
+        <ClosingBlock
+          key={c.sideKey}
+          closing={c}
+          execution={execution}
+          messageId={messageId}
+        />
+      ))}
     </div>
   );
 }

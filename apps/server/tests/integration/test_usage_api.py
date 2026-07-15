@@ -183,6 +183,26 @@ async def test_usage_summary_windows_and_quota(client, make_invite, session_fact
     assert body["cny_per_usd"] == 7.2
 
 
+async def test_usage_summary_quota_shows_free_tier_limits(client, make_invite, monkeypatch):
+    # A keyless free-tier rider must see the free_tier_* caps the gate actually
+    # enforces (D7) — not the global quota_* defaults (every meter would lie 36x).
+    from agentcore.config import settings
+
+    code = await make_invite("INV-SUMMARY-FT")
+    await register_and_login(client, code, "summaryfreetier")
+
+    monkeypatch.setattr(settings, "platform_free_tier_enabled", True)
+    monkeypatch.setattr(settings, "platform_api_key", "sk-platform-test")
+    monkeypatch.setattr(settings, "billing_mode", "byok")
+    r = await client.get("/v1/usage/summary")
+
+    assert r.status_code == 200, r.text
+    quota = r.json()["quota"]
+    assert quota["daily_tokens"] == settings.free_tier_daily_tokens
+    assert quota["monthly_cost_nano"] == int(settings.free_tier_monthly_cost_usd * 1_000_000_000)
+    assert quota["daily_requests"] == settings.free_tier_daily_requests
+
+
 async def test_usage_summary_groups_month_by_role(client, make_invite, session_factory):
     # 本月各角色花销 (团队工资单 by role): the month window groups by the ledger role
     # and ranks by spend desc; only roles that actually spent (>0) appear.

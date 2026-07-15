@@ -8,18 +8,21 @@ import type { DebateScoreView } from "../model";
 import { ModeratorIdentity } from "./ModeratorIdentity";
 import { ScoreBreakdownTip, formatNetTotal } from "./ScoreBreakdown";
 
-/** 裁判札记横带：逐轮小结 / 小结空窗。身份壳与开场入场、质询报幕一致。 */
+/** 裁判札记横带：逐轮小结 / 小结空窗 / 拟质询空窗。身份壳与开场入场、质询报幕一致。 */
 export function JudgeNote({
   text,
   round,
   form,
   pending,
+  pendingKind = "summary",
   model,
 }: {
   text: string;
   round?: DebateRoundModel;
   form?: DebateForm;
   pending?: boolean;
+  /** pending 文案分流：拟质询空窗 vs 小结空窗。缺省小结（向后兼容）。 */
+  pendingKind?: "cross_exam" | "summary";
   /** 主持人模型；直播态 null → 身份行无徽章。 */
   model?: string | null;
 }) {
@@ -28,7 +31,11 @@ export function JudgeNote({
       <div className="flex items-center gap-2 border-y border-border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
         <ModeratorIdentity model={model} gavelSize={13} className="text-xs" />
         <Loader2 size={13} className="animate-spin shrink-0" />
-        <span>正在小结…</span>
+        <span>
+          {pendingKind === "cross_exam"
+            ? "主持人正在拟质询…"
+            : "正在小结…"}
+        </span>
       </div>
     );
   }
@@ -60,9 +67,16 @@ export function JudgeNote({
   );
 }
 
+/** 逐轮净分行：前缀「本轮记分」点明归属——分是整轮综合分（立论 + 质询一起判），非质询专属。 */
 function RoundScoreInline({ scores }: { scores: DebateScoreView[] }) {
   return (
     <span className="tabular-nums text-foreground">
+      <span
+        className="mr-1 text-muted-foreground"
+        title="裁判读完本轮全部发言（立论与质询问答）综合评出"
+      >
+        本轮记分
+      </span>
       {scores.map((s, i) => (
         <span key={s.sideKey}>
           {i > 0 && " · "}

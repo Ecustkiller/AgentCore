@@ -168,12 +168,12 @@ export function OptionButton({
   const badges = (
     <>
       {recommended && (
-        <span className="shrink-0 text-xs font-normal text-muted-foreground">
+        <span className="shrink-0 rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
           推荐
         </span>
       )}
       {isDefault && !recommended && (
-        <span className="shrink-0 text-xs font-normal text-muted-foreground/70">
+        <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground/70">
           默认
         </span>
       )}
@@ -345,7 +345,9 @@ export function ChoiceQuestion({
             >
               {question.options.map((opt) => {
                 const isBindAction =
-                  canBindAction && opt.action === "bind_local_folder";
+                  canBindAction &&
+                  (opt.action === "bind_local_folder" ||
+                    opt.action === "grant_readonly_folder");
                 const bindBusy = bindBusyLabel === opt.label;
                 return (
                   <OptionButton

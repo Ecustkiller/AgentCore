@@ -1,4 +1,4 @@
-"""续写 beat 的 run_context 必须补发 channel=task，且 body 与 feedback 逐字相等。
+﻿"""续写 beat 的 run_context 必须补发 channel=task，且 body 与 feedback 逐字相等。
 
 首轮辩手走新建 run（RunSpec.task → executor 发 task 块）；第 2+ 轮陈词 / 质询 / 结辩走
 continue_run，真实指令只在 feedback 字符串里。本契约钉死：context_blocks 首块为 task，
@@ -15,7 +15,7 @@ from agentcore.runtime.debate import (
     SideTurn,
     UserInterjection,
 )
-from agentcore.tools.builtin.debate.prompt import (
+from agentcore.runtime.debate.prompt import (
     closing_context_blocks,
     closing_task,
     cx_answer_feedback,

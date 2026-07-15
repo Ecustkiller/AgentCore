@@ -237,7 +237,7 @@ class PausedTurnRepository:
         """Atomically read-and-delete one paused turn for resume.
 
         DELETE ... RETURNING means only ONE caller wins the row (a second concurrent
-        ``/resume`` gets ``None`` → 409), so a paused turn is never resumed twice.
+        ``/resume`` gets ``None`` → 404), so a paused turn is never resumed twice.
         Scoped to ``conversation_id`` when given so a frame is only ever claimed
         within the conversation the caller has already proven it owns (IDOR-safe — a
         guessed ``message_id`` from another conversation won't match, so it is neither

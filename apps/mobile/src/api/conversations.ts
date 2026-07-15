@@ -54,6 +54,8 @@ export interface MessageDetail {
   attachments?: AttachmentMeta[];
   /** Progressive assistant-row lifecycle (``usage.status`` · P4 hydrate). */
   status?: "running" | "complete" | "incomplete" | "failed" | null;
+  /** Cold-path pause latch (``usage.paused``): hydrate as paused, not streaming. */
+  paused?: boolean | null;
   /** 回合 ¥ 成本 (P2 DERIVED)：messages.cost 列；重载 footer 直接用。 */
   cost?: Schemas["CostBreakdown"] | null;
   /** CEO→用户「下一步」chips (DERIVED · messages.followups)；重载重现. */
@@ -72,6 +74,17 @@ export async function listConversations(
   if (!res.ok) throw new Error(`加载会话列表失败 (${res.status})`);
   const data = (await res.json()) as Schemas["ConversationListResponse"];
   return data.data;
+}
+
+/** Fetch one conversation (owner-scoped). Includes ``permission_preset``. */
+export async function getConversation(
+  id: string,
+): Promise<ConversationSummary & { permission_preset?: string }> {
+  const res = await apiFetch(`/v1/conversations/${id}`);
+  if (!res.ok) throw new Error(`加载会话失败 (${res.status})`);
+  return (await res.json()) as ConversationSummary & {
+    permission_preset?: string;
+  };
 }
 
 /** Rename a conversation (对话管理 · 重命名). Returns the updated summary. */
@@ -156,8 +169,12 @@ export interface MessageWindow {
 function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
   const runs = row.runs;
   const status = row.status ?? null;
-  const finish =
-    runs?.finish_reason ?? (status === "incomplete" ? "interrupted" : null);
+  // Cold-path pause latch: write keeps status=running + paused=true; hydrate as
+  // paused (finish_reason=paused) so reopen does not paint forever-streaming chrome.
+  const paused = Boolean(row.paused);
+  const finish = paused
+    ? "paused"
+    : (runs?.finish_reason ?? (status === "incomplete" ? "interrupted" : null));
   return {
     id: row.id,
     role: row.role,
@@ -174,14 +191,21 @@ function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
             | null,
           turn_warning: runs.turn_warning ?? null,
         }
-      : status === "incomplete"
+      : paused
         ? {
             events: [],
-            finish_reason: "interrupted",
+            finish_reason: "paused",
             process: null,
           }
-        : null,
+        : status === "incomplete"
+          ? {
+              events: [],
+              finish_reason: "interrupted",
+              process: null,
+            }
+          : null,
     status,
+    paused: paused || null,
     attachments: row.attachments?.map((a) => ({
       name: a.name,
       truncated: a.truncated,

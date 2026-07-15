@@ -28,7 +28,7 @@
             "id": "rts_mod1",
             "role": "主持人",
             "model_preference": "strong",
-            "thinking": true,
+            "thinking": false,
             "reasoning_effort": "high"
           }
         ],
@@ -53,6 +53,18 @@
         "kind": "agent"
       },
       "timestamp": "2026-01-01T00:00:00.003Z"
+    },
+    {
+      "type": "debate_round_started",
+      "payload": {
+        "execution_id": "exec1",
+        "moderator_run_id": "rts_mod1",
+        "round_no": 1,
+        "focus": "AI 治理的主轴：先管能力还是先管问责",
+        "cross_exam_enabled": false,
+        "opening": "圆桌收场前开场：先定治理主轴——能力还是问责。"
+      },
+      "timestamp": "2026-01-01T00:00:00.004Z"
     },
     {
       "type": "run_plan",
@@ -113,7 +125,7 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:00.004Z"
+      "timestamp": "2026-01-01T00:00:00.005Z"
     },
     {
       "type": "run_started",
@@ -123,7 +135,7 @@
         "parent_run_id": "rts_mod1",
         "kind": "agent"
       },
-      "timestamp": "2026-01-01T00:00:00.005Z"
+      "timestamp": "2026-01-01T00:00:00.006Z"
     },
     {
       "type": "run_output_delta",
@@ -132,7 +144,7 @@
         "agent_id": "rt_a",
         "delta": "技术视角：能力外溢是根因，需可观测与熔断。"
       },
-      "timestamp": "2026-01-01T00:00:00.006Z"
+      "timestamp": "2026-01-01T00:00:00.007Z"
     },
     {
       "type": "run_completed",
@@ -158,7 +170,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.007Z"
+      "timestamp": "2026-01-01T00:00:00.008Z"
     },
     {
       "type": "run_started",
@@ -168,7 +180,7 @@
         "parent_run_id": "rts_mod1",
         "kind": "agent"
       },
-      "timestamp": "2026-01-01T00:00:00.008Z"
+      "timestamp": "2026-01-01T00:00:00.009Z"
     },
     {
       "type": "run_output_delta",
@@ -177,7 +189,7 @@
         "agent_id": "rt_b",
         "delta": "监管视角：问责缺位才是关键，须立法明确。"
       },
-      "timestamp": "2026-01-01T00:00:00.009Z"
+      "timestamp": "2026-01-01T00:00:00.010Z"
     },
     {
       "type": "run_completed",
@@ -203,7 +215,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.010Z"
+      "timestamp": "2026-01-01T00:00:00.011Z"
     },
     {
       "type": "run_started",
@@ -213,7 +225,7 @@
         "parent_run_id": "rts_mod1",
         "kind": "agent"
       },
-      "timestamp": "2026-01-01T00:00:00.011Z"
+      "timestamp": "2026-01-01T00:00:00.012Z"
     },
     {
       "type": "run_output_delta",
@@ -222,7 +234,7 @@
         "agent_id": "rt_c",
         "delta": "产业视角：别忽视落地成本，应分级分场景。"
       },
-      "timestamp": "2026-01-01T00:00:00.012Z"
+      "timestamp": "2026-01-01T00:00:00.013Z"
     },
     {
       "type": "run_completed",
@@ -248,7 +260,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.013Z"
+      "timestamp": "2026-01-01T00:00:00.014Z"
     },
     {
       "type": "run_completed",
@@ -274,7 +286,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.014Z"
+      "timestamp": "2026-01-01T00:00:00.015Z"
     },
     {
       "type": "debate_result",
@@ -325,19 +337,25 @@
                 "key": "a",
                 "name": "技术视角",
                 "run_id": "rts_mod1_r1_a",
-                "ok": true
+                "ok": true,
+                "absent": false,
+                "arguments": []
               },
               {
                 "key": "b",
                 "name": "监管视角",
                 "run_id": "rts_mod1_r1_b",
-                "ok": true
+                "ok": true,
+                "absent": false,
+                "arguments": []
               },
               {
                 "key": "c",
                 "name": "产业视角",
                 "run_id": "rts_mod1_r1_c",
-                "ok": true
+                "ok": true,
+                "absent": false,
+                "arguments": []
               }
             ],
             "clashes": [
@@ -380,7 +398,7 @@
           "recommendation": "按能力分级，先强制高风险场景的可观测与熔断，再补问责立法。"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.015Z"
+      "timestamp": "2026-01-01T00:00:00.016Z"
     },
     {
       "type": "message_end",
@@ -402,7 +420,7 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:00.016Z"
+      "timestamp": "2026-01-01T00:00:00.017Z"
     }
   ],
   "projected": {
@@ -427,7 +445,7 @@
         "id": "rts_mod1",
         "role": "主持人",
         "modelPreference": "strong",
-        "thinking": true,
+        "thinking": false,
         "reasoningEffort": "high",
         "status": "completed",
         "currentRunId": null,
@@ -509,7 +527,8 @@
         "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [],
-        "escalations": []
+        "escalations": [],
+        "process": []
       },
       {
         "id": "rts_mod1_r1_a",
@@ -547,7 +566,13 @@
         "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "技术视角：能力外溢是根因，需可观测与熔断。"
+          }
+        ]
       },
       {
         "id": "rts_mod1_r1_b",
@@ -585,7 +610,13 @@
         "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "监管视角：问责缺位才是关键，须立法明确。"
+          }
+        ]
       },
       {
         "id": "rts_mod1_r1_c",
@@ -623,7 +654,13 @@
         "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [],
-        "escalations": []
+        "escalations": [],
+        "process": [
+          {
+            "kind": "content",
+            "text": "产业视角：别忽视落地成本，应分级分场景。"
+          }
+        ]
       }
     ],
     "progress": {
@@ -685,19 +722,25 @@
               "key": "a",
               "name": "技术视角",
               "run_id": "rts_mod1_r1_a",
-              "ok": true
+              "ok": true,
+              "absent": false,
+              "arguments": []
             },
             {
               "key": "b",
               "name": "监管视角",
               "run_id": "rts_mod1_r1_b",
-              "ok": true
+              "ok": true,
+              "absent": false,
+              "arguments": []
             },
             {
               "key": "c",
               "name": "产业视角",
               "run_id": "rts_mod1_r1_c",
-              "ok": true
+              "ok": true,
+              "absent": false,
+              "arguments": []
             }
           ],
           "clashes": [
@@ -740,7 +783,19 @@
         "recommendation": "按能力分级，先强制高风险场景的可观测与熔断，再补问责立法。"
       }
     },
-    "debateRounds": [],
+    "debateRounds": [
+      {
+        "round_no": 1,
+        "focus": "AI 治理的主轴：先管能力还是先管问责",
+        "summary": "",
+        "verdict": null,
+        "sides": [],
+        "clashes": [],
+        "cross_exam": []
+      }
+    ],
+    "crossExamEnabled": false,
+    "debateOpening": "圆桌收场前开场：先定治理主轴——能力还是问责。",
     "teamSynthesisPreview": null,
     "turnWarning": null,
     "teamNotes": []

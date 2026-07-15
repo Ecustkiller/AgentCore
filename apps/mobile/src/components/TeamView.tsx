@@ -546,12 +546,18 @@ function formatCompact(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
-/** Integer nano-USD (1 USD = 1e9) → money caption; all-zero renders「—」(§7.5), never「$0.00」. */
-function formatCostUsd(nanoUsd: number): string {
+/** Integer nano-USD (1 USD = 1e9) → money caption; all-zero renders「—」(§7.5), never「$0.00」.
+ *  BYOK estimates use ≈ prefix. */
+function formatCostUsd(nanoUsd: number, estimated = false): string {
   const usd = nanoUsd / 1e9;
   if (usd <= 0) return "—";
-  if (usd < 0.0001) return "<$0.0001";
-  return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
+  const body =
+    usd < 0.0001
+      ? "<$0.0001"
+      : usd < 0.01
+        ? `$${usd.toFixed(4)}`
+        : `$${usd.toFixed(2)}`;
+  return estimated ? `≈${body}` : body;
 }
 
 interface RevisionVersion {
@@ -1018,6 +1024,14 @@ function ResourceBlock({
   agent: ProjectedAgent | undefined;
 }) {
   const { usage, cost, model } = run;
+  const money =
+    cost && cost.total > 0
+      ? { nano: cost.total, estimated: false }
+      : cost?.estimated_total && cost.estimated_total > 0
+        ? { nano: cost.estimated_total, estimated: true }
+        : cost
+          ? { nano: 0, estimated: false }
+          : null;
   const cacheRate =
     usage && usage.input > 0
       ? Math.round((usage.cache_hit / usage.input) * 100)
@@ -1038,7 +1052,12 @@ function ResourceBlock({
           />
         )}
         {model && <MetricRow label="模型" value={model} mono />}
-        {cost && <MetricRow label="成本" value={formatCostUsd(cost.total)} />}
+        {money && (
+          <MetricRow
+            label={money.estimated ? "成本（估算）" : "成本"}
+            value={formatCostUsd(money.nano, money.estimated)}
+          />
+        )}
         {usage && (
           <>
             <MetricRow label="输入 token" value={formatCompact(usage.input)} />

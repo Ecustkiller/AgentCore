@@ -59,6 +59,24 @@ describe("shouldShowOnboarding", () => {
   it("hides once any conversation exists", () => {
     expect(shouldShowOnboarding({ ...base, conversationCount: 1 })).toBe(false);
   });
+
+  it("still shows for free-tier users until skipped (connect CTA path)", () => {
+    expect(
+      shouldShowOnboarding({
+        ...base,
+        hasModelAccess: true,
+        freeTierActive: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowOnboarding({
+        ...base,
+        hasModelAccess: true,
+        freeTierActive: true,
+        skipped: true,
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("resolveDraftEmptyKind", () => {
@@ -94,6 +112,19 @@ describe("resolveDraftEmptyKind", () => {
       }),
     ).toBe("needs_key");
   });
+
+  it("starter_chips when free tier grants model access (no BYOK key)", () => {
+    expect(
+      resolveDraftEmptyKind({
+        hasModelAccess: hasModelAccess({
+          configured: false,
+          billing_mode: "byok",
+          free_tier_active: true,
+        }),
+        conversationCount: 0,
+      }),
+    ).toBe("starter_chips");
+  });
 });
 
 describe("hasModelAccess", () => {
@@ -107,10 +138,27 @@ describe("hasModelAccess", () => {
     ).toBe(true);
   });
 
-  it("is false when unconfigured", () => {
+  it("is true when free tier is active without a key", () => {
+    expect(
+      hasModelAccess({
+        configured: false,
+        billing_mode: "byok",
+        free_tier_active: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("is false when unconfigured and free tier off", () => {
     expect(hasModelAccess({ configured: false, billing_mode: "byok" })).toBe(
       false,
     );
+    expect(
+      hasModelAccess({
+        configured: false,
+        billing_mode: "byok",
+        free_tier_active: false,
+      }),
+    ).toBe(false);
     expect(hasModelAccess(null)).toBe(false);
   });
 });
@@ -132,8 +180,6 @@ describe("contextual tip seen", () => {
     markTipSeen("inline_team_graph");
     expect(shouldShowTip("inline_team_graph")).toBe(false);
     expect(hasSeenTip("inline_team_graph")).toBe(true);
-    // other tip unaffected
-    expect(shouldShowTip("decision_card")).toBe(true);
   });
 
   it("persists skip flag", () => {

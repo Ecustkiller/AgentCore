@@ -54,8 +54,12 @@ def test_member_run_cost_reads_state_without_repricing():
     }
     # Cost read straight off the state (no recompute); total mirrored to the
     # redundant scalar the account-window SUM runs on.
-    assert row.cost == {"input": 999, "cached": 111, "output": 222, "total": 1221}
+    assert row.cost["input"] == 999
+    assert row.cost["cached"] == 111
+    assert row.cost["output"] == 222
+    assert row.cost["total"] == 1221
     assert row.cost_total_nano == 1221
+    assert row.cost_estimated_nano == 0
     assert row.rounds == 2
     assert row.duration_ms == 1234
     assert row.currency == "USD"
@@ -103,12 +107,11 @@ def test_captain_run_cost_from_state_reads_priced_state():
     assert row.agent_id is None
     assert row.model == DEEPSEEK_V4_FLASH
     assert row.tokens == usage.as_dict()
-    assert row.cost == {
-        "input": priced.input,
-        "cached": priced.cached,
-        "output": priced.output,
-        "total": priced.total,
-    }
+    assert row.cost["input"] == priced.input
+    assert row.cost["cached"] == priced.cached
+    assert row.cost["output"] == priced.output
+    assert row.cost["total"] == priced.total
+    assert row.cost["pricing_source"] == "curated"
     assert row.cost_total_nano == priced.total
     # Concrete nano-USD (Flash tier): cache_hit 2.8e6 + cache_miss 1.4e8 = input,
     # output 2.8e8 — pins both the split pricing and the int coercion.
@@ -133,7 +136,7 @@ def test_captain_cost_values_are_integers():
 
     row = captain_run_cost_from_state("c", state)
 
-    assert all(isinstance(v, int) for v in row.cost.values())
+    assert all(isinstance(v, int) for k, v in row.cost.items() if k in ("input", "cached", "output", "total"))
     assert isinstance(row.cost_total_nano, int)
 
 
@@ -155,12 +158,10 @@ def test_vision_run_cost_prices_subcall_under_vision_role():
     assert row.rounds == 1
     assert row.duration_ms == 210
     assert row.tokens == usage.as_dict()
-    assert row.cost == {
-        "input": priced.input,
-        "cached": priced.cached,
-        "output": priced.output,
-        "total": priced.total,
-    }
+    assert row.cost["input"] == priced.input
+    assert row.cost["cached"] == priced.cached
+    assert row.cost["output"] == priced.output
+    assert row.cost["total"] == priced.total
     assert row.cost_total_nano == priced.total
     # qwen-vl-max: input billed as a miss (no cache split) 1200×$0.80/1M = 960_000 nano;
     # output 40×$3.20/1M = 128_000 — pins the price table + miss reconciliation.
@@ -168,7 +169,9 @@ def test_vision_run_cost_prices_subcall_under_vision_role():
     assert row.cost["cached"] == 0
     assert row.cost["output"] == 128_000
     assert row.cost["total"] == 1_088_000
-    assert all(isinstance(v, int) for v in row.cost.values())
+    assert all(
+        isinstance(v, int) for k, v in row.cost.items() if k in ("input", "cached", "output", "total")
+    )
 
 
 def test_aggregate_cost_sums_priced_rows_across_tiers():
@@ -221,7 +224,9 @@ def test_aggregate_cost_empty_is_zero():
         "cached": 0,
         "output": 0,
         "total": 0,
+        "estimated_total": 0,
         "currency": "USD",
+        "pricing_source": "curated",
     }
 
 

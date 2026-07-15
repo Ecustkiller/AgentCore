@@ -1,0 +1,411 @@
+{
+  "summary": {
+    "total": 1,
+    "passed": 1,
+    "pass_rate": 1.0,
+    "cost_usd": 0.121222,
+    "by_category": {
+      "team": {
+        "total": 1,
+        "passed": 1,
+        "pass_rate": 1.0
+      }
+    },
+    "by_mast": {
+      "by_group": {
+        "FC3": {
+          "total": 1,
+          "passed": 1,
+          "pass_rate": 1.0
+        }
+      },
+      "by_mode": {
+        "3.2": {
+          "total": 1,
+          "passed": 1,
+          "pass_rate": 1.0
+        }
+      }
+    },
+    "shape_score_mean": 1.0,
+    "shape_score_by_case": {
+      "collab_p2_depth_writing": 1.0
+    }
+  },
+  "cases": [
+    {
+      "case_id": "collab_p2_depth_writing",
+      "category": "team",
+      "mast": "3.2",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); independent_reviewer=1.00, min_roles=1.00, min_workers=1.00, parallel_fanout_min=1.00, pipeline_depth_min=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=957 (min 120)",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 16,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "调研员·晋升与薪酬",
+          "调研员·技能与人脉",
+          "调研员·满意度与长期轨迹",
+          "报告写作者",
+          "独立审校",
+          "修订编辑"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_fceecb3b-bb85-4b9a-bc27-16caef5c8248_research_promo",
+            "role": "调研员·晋升与薪酬",
+            "task": "调研远程办公对员工**晋升速度、薪资增长、绩效评估**的长期影响。\n\n重点方向：\n- proximity bias（亲临现场偏见）：远程员工在晋升和加薪中是否处于劣势\n- 绩效评估差异：远程 vs 线下员工的评分对比研究\n- 晋升概率与频率的量化数据\n- 管理层对远程员工的隐性偏见\n- 典型案例和权威研究（如 Stanford/NBER 的研究、Microsoft Work Trend Index 等）\n\n要求回报【精炼结论 + 每项结论对应的证据来源（链接/研究名称+年份）】，不要大段粘贴原文。用中文撰写。",
+            "depends_on": [],
+            "parent_run_id": "965ba9eb-97d8-4a70-abbd-502e8c91a285"
+          },
+          {
+            "id": "del_fceecb3b-bb85-4b9a-bc27-16caef5c8248_research_skillnet",
+            "role": "调研员·技能与人脉",
+            "task": "调研远程办公对**技能发展、人脉网络、导师关系（mentorship）**的长期影响。\n\n重点方向：\n- 远程工作中 informal learning（非正式学习/茶水间学习）的减少对技能成长的影响\n- 弱关系网络（weak ties）构建机会的减少\n- 远程新人的 onboarding 和 mentor 获取难度\n- 跨部门协作与 visibility 的变化\n- 长期看对职业天花板的影响\n- 权威研究数据（如 Harvard Business Review、 Buffer State of Remote Work 等报告）\n\n要求回报【精炼结论 + 每项结论对应的证据来源（链接/研究名称+年份）】，不要大段粘贴原文。用中文撰写。",
+            "depends_on": [],
+            "parent_run_id": "965ba9eb-97d8-4a70-abbd-502e8c91a285"
+          },
+          {
+            "id": "del_fceecb3b-bb85-4b9a-bc27-16caef5c8248_research_wellbeing",
+            "role": "调研员·满意度与长期轨迹",
+            "task": "调研远程办公对**工作满意度、职业倦怠、工作生活平衡、长期职业轨迹切换**的影响。\n\n重点方向：\n- 远程工作对工作满意度的长期变化趋势（是否有蜜月期效应）\n- 远程带来的职业倦怠（burnout）数据：\"数字永不停机\"效应\n- 工作生活边界模糊对职业可持续性的影响\n- 远程是否改变职业选择：更多人转向自由职业/创业？\n- 不同人生阶段（新手期 vs 资深期）受影响的差异\n- 权威研究数据\n\n要求回报【精炼结论 + 每项结论对应的证据来源（链接/研究名称+年份）】，不要大段粘贴原文。用中文撰写。",
+            "depends_on": [],
+            "parent_run_id": "965ba9eb-97d8-4a70-abbd-502e8c91a285"
+          },
+          {
+            "id": "del_fceecb3b-bb85-4b9a-bc27-16caef5c8248_writer",
+            "role": "报告写作者",
+            "task": "基于上游三位调研员的研究发现，撰写一篇面向大众读者的深度报告：**远程办公对个人职业发展的长期影响**。\n\n要求：\n1. **受众**：普通职场人士（非学术读者），语言通俗但有深度\n2. **篇幅**：3000-5000字\n3. **风格**：客观中立，以证据说话，避免空洞观点\n4. **结构**：你自己根据调研证据设计最合适的章节结构——这是你的专业判断，让证据驱动结构\n5. **证据**：报告中必须引用调研员提供的具体研究数据、出处，用方括号角标标注 [1][2] 等形式\n6. **平衡视角**：既要呈现负面发现（如晋升瓶颈），也要呈现正面发现（如灵活性优势），避免偏颇\n7. **可操作性**：结尾给出对读者的实用建议\n8. **格式**：Markdown 格式（.md），用标题层级、引用、列表等提高可读性\n\n把报告写入工作区文件 `remote-work-career-impact.md`。",
+            "depends_on": [
+              "del_fceecb3b-bb85-4b9a-bc27-16caef5c8248_research_promo",
+              "del_fceecb3b-bb85-4b9a-bc27-16caef5c8248_research_skillnet",
+              "del_fceecb3b-bb85-4b9a-bc27-16caef5c8248_research_wellbeing"
+            ],
+            "parent_run_id": "965ba9eb-97d8-4a70-abbd-502e8c91a285"
+          },
+          {
+            "id": "del_fceecb3b-bb85-4b9a-bc27-16caef5c8248_reviewer",
+            "role": "独立审校",
+            "task": "对上游写作者产出的报告 `remote-work-career-impact.md` 进行独立审校。\n\n审校检查维度：\n1. **论据充分性**：每个核心主张是否有可靠研究/数据支撑，还是空泛断言\n2. **逻辑连贯性**：论证链条是否完整，有无跳跃或自相矛盾\n3. **结构合理性**：章节安排是否流畅，信息层次是否清晰\n4. **证据准确性**：数据和研究引用是否可信，有无过度解读\n5. **平衡性**：是否片面偏向某一立场，有无忽略重要反方证据\n6. **可读性**：面向大众的文风是否到位，有无过多术语未解释\n\n产出格式：JSON 对象（只输出 JSON，不要附带说明文字），必含三个顶层字段：\n- problems（问题数组）：每项含 severity（high/medium/low）、description（问题描述）、evidence（对应的原文位置或引用）\n- suggestions（修改建议数组）：具体可操作的修改建议\n- score（0-10 整数）：总体评分",
+            "depends_on": [
+              "del_fceecb3b-bb85-4b9a-bc27-16caef5c8248_writer"
+            ],
+            "parent_run_id": "965ba9eb-97d8-4a70-abbd-502e8c91a285"
+          },
+          {
+            "id": "del_fceecb3b-bb85-4b9a-bc27-16caef5c8248_reviser",
+            "role": "修订编辑",
+            "task": "根据上游审校者提供的审校报告（JSON，含 problems 数组和 suggestions 数组），对 `remote-work-career-impact.md` 逐条修订完善。\n\n要求：\n1. 逐条处理审校报告中的每个问题和建议\n2. 不要改动未在审校报告中指出的核心内容和观点\n3. 修订后保持原文整体风格和结构（除非审校明确要求重构）\n4. 修订完成后更新文件 `remote-work-career-impact.md`\n5. 同时在文件末尾新增一个「修订说明」小节，简要列出根据审校意见做了哪些修改",
+            "depends_on": [
+              "del_fceecb3b-bb85-4b9a-bc27-16caef5c8248_reviewer"
+            ],
+            "parent_run_id": "965ba9eb-97d8-4a70-abbd-502e8c91a285"
+          },
+          {
+            "id": "del_1ecf3b34-89b8-4f8d-b685-01b5b4ed63a0_r1",
+            "role": "调研员·晋升与薪酬",
+            "task": "调研远程办公对员工**晋升速度、薪资增长、绩效评估**的长期影响。\n\n你必须搜索互联网获取真实研究数据，然后严格按以下三部分输出，每部分都必须有实际内容（不允许空章节）：\n\n**1️⃣ 核心发现**（3-5条）\n每条用一两句话概括一个核心发现。\n\n**2️⃣ 关键数据**（每条核心发现配至少一条具体数据）\n- 例如：「Stanford 2022 年研究显示，远程员工晋升概率比线下低约 50%（NBER 论文）」「Microsoft 2023 Work Trend Index 报告指出…」\n- 必须含具体数字、研究名称、年份\n\n**3️⃣ 来源清单**\n- 每条数据对应的网页链接或研究报告名称\n\n用中文写。",
+            "depends_on": [],
+            "parent_run_id": "965ba9eb-97d8-4a70-abbd-502e8c91a285"
+          },
+          {
+            "id": "del_1ecf3b34-89b8-4f8d-b685-01b5b4ed63a0_r2",
+            "role": "调研员·技能与人脉",
+            "task": "调研远程办公对**技能发展、人脉网络、导师关系（mentorship）**的长期影响。\n\n你必须搜索互联网获取真实研究数据，然后严格按以下三部分输出，每部分都必须有实际内容（不允许空章节）：\n\n**1️⃣ 核心发现**（3-5条）\n每条用一两句话概括一个核心发现。\n\n**2️⃣ 关键数据**（每条核心发现配至少一条具体数据）\n- 例如：「HBR 2021 文章指出远程员工弱关系网络缩减约 30%」「Buffer 2024 State of Remote Work 报告显示 20% 受访者担心职业孤立」\n- 必须含具体数字、研究名称、年份\n\n**3️⃣ 来源清单**\n- 每条数据对应的网页链接或研究报告名称\n\n用中文写。",
+            "depends_on": [],
+            "parent_run_id": "965ba9eb-97d8-4a70-abbd-502e8c91a285"
+          },
+          {
+            "id": "del_1ecf3b34-89b8-4f8d-b685-01b5b4ed63a0_r3",
+            "role": "调研员·满意度与长期轨迹",
+            "task": "调研远程办公对**工作满意度、职业倦怠、工作生活平衡、长期职业轨迹切换**的影响。\n\n你必须搜索互联网获取真实研究数据，然后严格按以下三部分输出，每部分都必须有实际内容（不允许空章节）：\n\n**1️⃣ 核心发现**（3-5条）\n每条用一两句话概括一个核心发现。\n\n**2️⃣ 关键数据**（每条核心发现配至少一条具体数据）\n- 例如：「Buffer 2024 报告显示 22% 远程员工最大的困扰是 loneliness」「多篇元分析表明远程工作初期满意度上升但 1-2 年后回归基线」\n- 必须含具体数字、研究名称、年份\n\n**3️⃣ 来源清单**\n- 每条数据对应的网页链接或研究报告名称\n\n用中文写。",
+            "depends_on": [],
+            "parent_run_id": "965ba9eb-97d8-4a70-abbd-502e8c91a285"
+          },
+          {
+            "id": "del_1ecf3b34-89b8-4f8d-b685-01b5b4ed63a0_w",
+            "role": "报告写作者",
+            "task": "基于上游三位调研员的研究发现，撰写一篇面向大众读者的深度报告：**远程办公对个人职业发展的长期影响**。\n\n要求：\n1. **受众**：普通职场人士（非学术读者），语言通俗但有深度\n2. **篇幅**：3000-5000字\n3. **风格**：客观中立，以证据说话，避免空洞观点\n4. **结构**：你自己根据调研证据设计最合适的章节结构\n5. **证据**：报告中必须引用调研员提供的具体研究数据、出处，用方括号角标标注 [1][2] 等形式\n6. **平衡视角**：既要呈现负面发现（如晋升瓶颈），也要呈现正面发现（如灵活性优势）\n7. **可操作性**：结尾给出对读者的实用建议\n8. **格式**：Markdown，写入工作区文件 `remote-work-career-impact.md`",
+            "depends_on": [
+              "del_1ecf3b34-89b8-4f8d-b685-01b5b4ed63a0_r1",
+              "del_1ecf3b34-89b8-4f8d-b685-01b5b4ed63a0_r2",
+              "del_1ecf3b34-89b8-4f8d-b685-01b5b4ed63a0_r3"
+            ],
+            "parent_run_id": "965ba9eb-97d8-4a70-abbd-502e8c91a285"
+          },
+          {
+            "id": "del_1ecf3b34-89b8-4f8d-b685-01b5b4ed63a0_rv",
+            "role": "独立审校",
+            "task": "对上游写作者产出的 `remote-work-career-impact.md` 进行独立审校。\n\n审校检查维度：\n1. 论据充分性：每个核心主张是否有可靠研究/数据支撑\n2. 逻辑连贯性：论证链条是否完整\n3. 结构合理性：章节安排是否流畅\n4. 证据准确性：数据和研究引用是否可信\n5. 平衡性：是否片面偏向某一立场\n6. 可读性：面向大众的文风是否到位\n\n产出严格的 JSON 格式（只输出 JSON，不要其他文字）：\n{\n  \"score\": 0-10,\n  \"problems\": [\n    {\"severity\": \"high|medium|low\", \"description\": \"问题描述\", \"evidence\": \"原文位置或引用\"}\n  ],\n  \"suggestions\": [\n    \"具体可操作的修改建议\"\n  ]\n}\n\n你必须输出可解析的 JSON。",
+            "depends_on": [
+              "del_1ecf3b34-89b8-4f8d-b685-01b5b4ed63a0_w"
+            ],
+            "parent_run_id": "965ba9eb-97d8-4a70-abbd-502e8c91a285"
+          },
+          {
+            "id": "del_1ecf3b34-89b8-4f8d-b685-01b5b4ed63a0_re",
+            "role": "修订编辑",
+            "task": "根据上游审校者提供的审校报告（JSON），对 `remote-work-career-impact.md` 逐条修订。\n\n要求：\n1. 逐条处理审校报告中的每个 problems 和 suggestions\n2. 不要改动未在审校报告中指出的核心内容\n3. 修订后保持原文整体风格\n4. 更新 `remote-work-career-impact.md`\n5. 在文件末尾新增「修订说明」小节，列出根据审校意见做了哪些修改",
+            "depends_on": [
+              "del_1ecf3b34-89b8-4f8d-b685-01b5b4ed63a0_rv"
+            ],
+            "parent_run_id": "965ba9eb-97d8-4a70-abbd-502e8c91a285"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {
+          "escalate": 1
+        },
+        "tool_calls": [
+          "web_search",
+          "web_search",
+          "consult_skill",
+          "delegate",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "read_url",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "read_url",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "read_url",
+          "web_search",
+          "web_search",
+          "handoff",
+          "handoff",
+          "replan",
+          "file_list",
+          "delegate",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "read_url",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "file_write",
+          "handoff",
+          "web_search",
+          "web_search",
+          "web_search",
+          "file_read",
+          "file_read",
+          "file_read",
+          "read_url",
+          "read_url",
+          "read_url",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "read_url",
+          "read_url",
+          "read_url",
+          "read_url",
+          "read_url",
+          "read_url",
+          "web_search",
+          "web_search",
+          "handoff",
+          "read_url",
+          "web_search",
+          "web_search",
+          "update_synthesis",
+          "replan",
+          "web_search",
+          "web_search",
+          "read_url",
+          "file_list",
+          "grep",
+          "file_read",
+          "handoff",
+          "update_synthesis",
+          "grep",
+          "file_read",
+          "file_read",
+          "file_read",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "file_read",
+          "file_read",
+          "file_write",
+          "handoff",
+          "file_read",
+          "file_read",
+          "file_read",
+          "file_read",
+          "update_synthesis",
+          "file_write",
+          "handoff",
+          "file_read",
+          "update_synthesis",
+          "file_read",
+          "file_read",
+          "file_read",
+          "file_read",
+          "file_read",
+          "file_read",
+          "file_read",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "file_list",
+          "file_read",
+          "file_read",
+          "file_read",
+          "update_synthesis"
+        ],
+        "citations": 24,
+        "usage": {
+          "input": 2375151,
+          "output": 86875,
+          "reasoning": 32563
+        },
+        "cost_usd": 0.121222,
+        "latency_ms": 649698,
+        "error": null,
+        "content_preview": "报告已完成，成品在工作区。以下是本次团队工作的综述：\n\n---\n\n## 交付成果\n\n**文件**：[`remote-work-career-impact.md`](./remote-work-career-impact.md)（约 4500 字，Markdown 格式）\n\n### 团队工作流程\n\n| 阶段 | 角色 | 状态 |\n|------|------|------|\n| 调研 | 3 位调"
+      }
+    }
+  ]
+}

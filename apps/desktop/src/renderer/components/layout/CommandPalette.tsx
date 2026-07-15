@@ -24,6 +24,7 @@ import {
   type BookmarkItem,
   listBookmarks,
 } from "@/services/bookmarks";
+import { fetchDemoTapeCatalog } from "@/services/demoTape";
 import { jumpToMessage } from "@/services/messages";
 import {
   type SearchItem,
@@ -83,7 +84,7 @@ interface RenderGroup {
 const SECTION_LABEL: Record<SearchSectionType, string> = {
   conversation: "对话",
   message: "消息",
-  folder: "文件夹",
+  folder: "项目",
 };
 
 const SECTION_ICON: Record<SearchSectionType, typeof MessageSquare> = {
@@ -183,14 +184,14 @@ function PaletteFilterBar({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  aria-label="按工作区过滤"
+                  aria-label="按项目过滤"
                   className={`ml-auto flex max-w-[12rem] items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors hover:bg-accent ${
                     activeFolder ? "text-foreground" : "text-muted-foreground"
                   }`}
                 >
                   <Folder size={13} className="shrink-0" />
                   <span className="min-w-0 truncate">
-                    {activeFolder ? activeFolder.name : "全部工作区"}
+                    {activeFolder ? activeFolder.name : "全部项目"}
                   </span>
                   <ChevronDown size={13} className="shrink-0 opacity-60" />
                 </button>
@@ -200,7 +201,7 @@ function PaletteFilterBar({
                 className="max-h-72 overflow-y-auto"
               >
                 <DropdownMenuItem onSelect={() => onFolderId(null)}>
-                  <span className="min-w-0 flex-1 truncate">全部工作区</span>
+                  <span className="min-w-0 flex-1 truncate">全部项目</span>
                   {folderId === null && (
                     <Check size={14} className="shrink-0" />
                   )}
@@ -234,7 +235,7 @@ function PaletteFilterBar({
  *
  * Two result kinds share one list. **Commands** (新建对话 / 跳转页面 / 切换主题
  * 等) are matched client-side from a static registry, so they appear instantly
- * with no round-trip. **Entities** (对话 / 消息 / 文件夹) come from the debounced
+ * with no round-trip. **Entities** (对话 / 消息 / 项目) come from the debounced
  * backend keyword search (Tier 1) for a non-empty query, or the recent
  * conversations list (client-side, 决策④) for an empty one. **Bookmarks** (消息收藏)
  * live in a dedicated facet + a「最近收藏」teaser on empty query — no `/bookmarks` page.
@@ -288,6 +289,16 @@ export function CommandPalette() {
     staleTime: 30_000,
     enabled: open && (bookmarksMode || query.trim().length === 0),
   });
+
+  // Dev-only 磁带回放目录：服务端开关关闭时 404 → null → 命令面板零可见。
+  const { data: demoTapeCatalog } = useQuery({
+    queryKey: ["demo-tape-catalog"],
+    queryFn: fetchDemoTapeCatalog,
+    staleTime: 60_000,
+    retry: false,
+    enabled: open,
+  });
+  const demoTapes = demoTapeCatalog?.tapes;
 
   // Each open adopts an optional prefilled query (e.g. FindBar → global search);
   // otherwise starts empty. Filters reset each open so a session starts unscoped.
@@ -387,8 +398,16 @@ export function CommandPalette() {
         diagnosticMode,
         sidebarCollapsed,
         openBookmarksInPalette,
+        demoTapes,
       }),
-    [navigate, theme, diagnosticMode, sidebarCollapsed, openBookmarksInPalette],
+    [
+      navigate,
+      theme,
+      diagnosticMode,
+      sidebarCollapsed,
+      openBookmarksInPalette,
+      demoTapes,
+    ],
   );
   const matchedCommands = useMemo(
     () => commands.filter((c) => commandMatches(c, query)),

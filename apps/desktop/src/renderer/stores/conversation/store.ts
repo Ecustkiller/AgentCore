@@ -14,6 +14,9 @@ import {
   foldToolUseStart,
   messageLaneFromMessage,
 } from "@/lib/foldMessageLane";
+import { notifyError } from "@/lib/toast";
+import { discardAllPendingChunks } from "@/services/sse/contentBuffer";
+import { discardPendingFrames } from "@/services/sse/execFrameBuffer";
 import { stopConversation } from "@/services/stopTurn";
 import { execRuntime, useExecutionStore } from "@/stores/execution";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
@@ -35,6 +38,8 @@ import {
   lastAssistantProjectionId,
 } from "./runtime";
 import type { ConversationRuntime, MemoryUpdate, Message } from "./types";
+import type { TurnPhase } from "./turnPhase";
+import { armStopConfirmTimeout, isTerminalPhase } from "./turnPhase";
 
 export interface ConversationState {
   currentConversationId: string | null;
@@ -186,6 +191,10 @@ export interface ConversationState {
   switchConversation: (id: string | null) => void;
   releaseBackgroundSlice: (conversationId: string) => void;
   setAbort: (a: AbortController | null, conversationId?: string | null) => void;
+  setTurnPhase: (
+    phase: TurnPhase,
+    conversationId?: string | null,
+  ) => void;
   stopGeneration: () => void;
   setError: (
     message: string,
@@ -785,13 +794,33 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     setAbort: (a, conversationId) =>
       patchConversation(conversationId, () => ({ abort: a })),
 
+    setTurnPhase: (phase, conversationId) =>
+      patchConversation(conversationId, () => ({ turnPhase: phase })),
+
     stopGeneration: () => {
       const conversationId = get().currentConversationId;
+      const key = conversationId ?? DRAFT_KEY;
+      const phase = activeRuntime(get()).turnPhase;
+      if (phase !== "stopping" && !isTerminalPhase(phase)) {
+        get().setTurnPhase("stopping", conversationId);
+        armStopConfirmTimeout(key, () => {
+          const rt = get().byId[key] ?? EMPTY_RUNTIME;
+          if (rt.turnPhase === "stopping") {
+            get().setTurnPhase("stopped", conversationId);
+          }
+        });
+      }
       activeRuntime(get()).abort?.abort();
-      if (conversationId) void stopConversation(conversationId);
+      discardAllPendingChunks(key);
+      discardPendingFrames(key);
+      if (conversationId) {
+        void stopConversation(conversationId).catch(() => {
+          notifyError("停止请求失败，引擎可能仍在后台运行");
+        });
+      }
       patchActive(() => ({ abort: null }));
       get().finalizeLastMessage();
-      clearInteractionPrompts(get().currentConversationId ?? DRAFT_KEY);
+      clearInteractionPrompts(key);
       const mid = lastAssistantProjectionId(activeRuntime(get()).messages);
       if (mid) {
         const exec = useExecutionStore.getState();

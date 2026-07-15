@@ -90,11 +90,10 @@ async def consolidate_conversation(
                 synced = conv.memory_synced_at
                 if synced is not None and latest <= synced:
                     return False  # nothing new since the last pass
-                # Manual folder grouping (folder_id) → memory project scope (D4 方案 1,
-                # folder-refactor-design §8): facts true only in this group route to its
-                # project layer, not global (Agent记忆与知识系统 §1.5). None for a bare chat
-                # (folder_id=NULL). Auto-promote folders are removed by migration (their
-                # memory merged to global), so any truthy folder_id is a user-created group.
+                # Project membership (folder_id) → memory project scope: facts true only
+                # in this project route to its layer, not global (Agent记忆与知识系统 §1.5).
+                # None for a bare chat (folder_id=NULL). Auto-promote is vetoed — any
+                # truthy folder_id is a user-created project.
                 folder_id = conv.folder_id
                 window = await load_recent_history(
                     session,
@@ -105,10 +104,9 @@ async def consolidate_conversation(
                 # conversation owner's BYOK row (see byok.resolve_credentials).
                 credentials = await resolve_credentials(session, user_id, "platform_internal")
 
-            # BYOK with no usable key: skip this pass WITHOUT advancing the watermark,
-            # so it retries once a key is configured — rather than making a doomed LLM
-            # call on an empty platform key. (Platform mode keeps None = global key.)
-            if window and settings.billing_mode == "byok" and credentials is None:
+            # BYOK with no usable key: skip WITHOUT advancing the watermark.
+            # Platform mode keeps None = global key via build_provider(None).
+            if window and credentials is None and settings.billing_mode == "byok":
                 return False
 
             changed = False
@@ -127,7 +125,7 @@ async def consolidate_conversation(
                         today=datetime.now(UTC).date().isoformat(),
                         section_cap=settings.memory_section_bullet_cap,
                         max_topic_files=settings.memory_max_topic_files,
-                        project_id=folder_id,
+                        folder_id=folder_id,
                         collect_items=collected,
                     )
                 finally:

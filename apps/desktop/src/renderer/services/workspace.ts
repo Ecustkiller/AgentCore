@@ -1,3 +1,4 @@
+import { hasLocalFiles } from "@/lib/capabilities";
 import { BASE_URL, api } from "@/services/api";
 import {
   type FilePreview,
@@ -213,10 +214,45 @@ export async function downloadSnapshot(
   saveBlob(await res.blob(), `workspace-${snapshotId}.zip`);
 }
 
-/** Snapshot current cloud workspace files and download as a zip (产物导出). */
+/** Snapshot current cloud workspace files and download as a zip (产物导出 · web / 兜底). */
 export async function exportWorkspaceZip(
   conversationId: string,
 ): Promise<void> {
   const snap = await createSnapshot(conversationId, "导出");
   await downloadSnapshot(conversationId, snap.snapshotId);
+}
+
+/** blob → base64（分块，避免大文件撑爆调用栈）。 */
+async function blobToBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+export type ExportWorkspaceToLocalResult =
+  | { ok: true; destName: string; fileCount: number }
+  | { ok: false; reason: "cancelled" }
+  | { ok: false; reason: "unavailable" }
+  | { ok: false; reason: "error"; message: string };
+
+/**
+ * 云 scratch → 本地单向 checkout（§八.7）：快照 → 用户选目录 → 解压落地。
+ * 预览仍走既有云工作区浏览面；本函数只负责落地。非桌面 → unavailable。
+ */
+export async function exportWorkspaceToLocal(
+  conversationId: string,
+): Promise<ExportWorkspaceToLocalResult> {
+  if (!hasLocalFiles() || !window.fsApi?.checkoutArchive) {
+    return { ok: false, reason: "unavailable" };
+  }
+  const snap = await createSnapshot(conversationId, "导出到本地");
+  const res = await authedFetch(
+    `${BASE_URL}/v1/conversations/${conversationId}/snapshots/${snap.snapshotId}/download`,
+  );
+  const archiveBase64 = await blobToBase64(await res.blob());
+  return window.fsApi.checkoutArchive(archiveBase64);
 }

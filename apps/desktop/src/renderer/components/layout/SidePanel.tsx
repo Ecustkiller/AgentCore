@@ -1,5 +1,6 @@
 import { Markdown } from "@/components/chat/Markdown";
 import { RunDetailBody } from "@/components/chat/detail/RunDetailBody";
+import { TurnSecurityLedger } from "@/components/audit/TurnSecurityLedger";
 import {
   CommandPanelBody,
   useCommandRegion,
@@ -11,7 +12,8 @@ import {
 import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { WorkspaceMode } from "@/components/workspace/WorkspacePanel";
-import { useActiveMessageContent } from "@/stores/conversation";
+import { useTurnAudit } from "@/hooks/useTurnAudit";
+import { useActiveMessageContent, useConversationStore } from "@/stores/conversation";
 import {
   type ExecutionRuntime,
   projectRuntime,
@@ -264,6 +266,11 @@ export function SidePanel() {
                 }
               />
             </section>
+            {simpleAnswerId && (
+              <section className="mt-6 space-y-2 border-t border-border pt-6">
+                <SimpleTurnSecurityLedger messageId={simpleAnswerId} />
+              </section>
+            )}
           </div>
         )}
       </div>
@@ -402,5 +409,24 @@ export function RunTabChip({
         <X size={12} />
       </IconButton>
     </div>
+  );
+}
+
+/** Simple-turn dock: show security ledger when full_trust / approvals left a trail. */
+function SimpleTurnSecurityLedger({ messageId }: { messageId: string }) {
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const turnAudit = useTurnAudit(conversationId, messageId);
+  if (
+    !turnAudit.loading &&
+    !turnAudit.error &&
+    (turnAudit.data?.data.length ?? 0) === 0
+  ) {
+    return null;
+  }
+  return (
+    <>
+      <h3 className="text-xs font-medium text-muted-foreground">安全台账</h3>
+      <TurnSecurityLedger state={turnAudit} />
+    </>
   );
 }

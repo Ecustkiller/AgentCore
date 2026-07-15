@@ -12,22 +12,22 @@ import { ChevronDown, TriangleAlert } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import type { DebateScoreView } from "../model";
 
-/** 三维维度（中性量）：标签短、描述完整。配色只用 muted/border/foreground，绝不用褒贬色。 */
+/** 三维维度（中性量）：标签短、描述点明各维主看的环节。配色只用 muted/border/foreground，绝不用褒贬色。 */
 export const SCORE_DIMENSIONS = [
   {
     key: "argument" as const,
     label: "论点",
-    description: "论点强度",
+    description: "论点强度（立论与续辩的论证质量）",
   },
   {
     key: "engagement" as const,
     label: "回应",
-    description: "回应完整度（含是否回避质询）",
+    description: "回应完整度（是否正面回应对方命门与质询）",
   },
   {
     key: "evidence" as const,
     label: "证据",
-    description: "证据充分度",
+    description: "证据充分度（举证标记与来源等级）",
   },
 ] as const;
 

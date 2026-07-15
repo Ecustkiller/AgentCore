@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import { FileBrowser } from "./FileBrowser";
 
 /**
- * 对话工作区的文件面板 = 共用 {@link FileBrowser} 的 n=1 实例（文件夹即工作区）：
- * 树构建 / 增删改 / 拖拽 / 上传 / 预览全部下沉到 FileBrowser，与文件夹总览页共用。
+ * 对话工作区的文件面板 = 共用 {@link FileBrowser} 的 n=1 实例（项目即工作区）：
+ * 树构建 / 增删改 / 拖拽 / 上传 / 预览全部下沉到 FileBrowser，与文件中枢页共用。
  * 「按对话选源」上移到 {@link WorkspaceMode}（经 `useConversationWorkspace` +
  * `resolveWorkspaceSource`，与文件中枢同一份数据/解析器，故云端/本地一致不漂移），这里只
  * 直透已解析的 `source`。`leading` / `trailing` 直透给 FileBrowser 的单行工具栏（云端选择器 /

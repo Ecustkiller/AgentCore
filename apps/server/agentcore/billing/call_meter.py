@@ -31,6 +31,7 @@ def maybe_enqueue_inprocess_call(
     usage: TokenUsage,
     duration_ms: int = 0,
     scenario: str | None = None,
+    credential_source: str | None = None,
 ) -> str | None:
     """Enqueue one ``cost_calls`` row when cloud ledger drain is live.
 
@@ -44,6 +45,7 @@ def maybe_enqueue_inprocess_call(
         return None
 
     from agentcore.billing.cost_ledger_queue import get_cost_ledger_queue
+    from agentcore.llm.pricing import CredentialSource, resolve_credential_source
 
     queue = get_cost_ledger_queue()
     if not queue.running:
@@ -73,6 +75,10 @@ def maybe_enqueue_inprocess_call(
         # only when nothing else is known — callers that know better bind cost_role.
         role = ROLE_CAPTAIN
 
+    explicit: CredentialSource | None = (
+        credential_source if credential_source in ("user", "platform", "vendor") else None
+    )
+    source = resolve_credential_source(credential_source=explicit, model=model)
     call = priced_call_cost(
         model=model,
         usage=usage,
@@ -82,6 +88,7 @@ def maybe_enqueue_inprocess_call(
         agent_id=agent_id,
         persona=persona,
         duration_ms=duration_ms,
+        credential_source=source,
     )
     record_id = queue.enqueue_calls(
         user_id=user_id,

@@ -24,14 +24,21 @@ otherwise the only key).
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
 
 class InteractionKind(StrEnum):
-    """The kinds of suspend point that share the bridge."""
+    """The kinds of suspend point that share the bridge.
+
+    User-facing decision-card kinds (approval / ask / checkpoint / …) also appear in
+    :data:`INTERACTION_KIND_SPECS` — that table is the wire-contract single source
+    dumped by ``scripts/dump_interaction_kinds.py`` (``pnpm gen:types``).
+    ``CLIENT_TOOL`` is bridge-only (workspace / board ops) and is intentionally
+    absent from the user-facing wire table.
+    """
 
     APPROVAL = "approval"  # GRANTABLE tool gate → result: ApprovalDecision
     ASK_USER = "ask_user"  # CEO checkpoint → result: CheckpointResponse
@@ -54,6 +61,52 @@ class InteractionKind(StrEnum):
     # start so the user can grant medium-risk tools for the whole delegation in one
     # click → result: DelegationAuthorizationDecision (grant_delegation / per_call / deny).
     DELEGATION_AUTHORIZATION = "delegation_authorization"
+    # Non-blocking ask card (ask_user tool with blocking=false). Not awaited on the
+    # bridge Future — journal / InteractionStore still track it as a first-class kind
+    # so reload re-renders the card. Wire event is ``question_posted`` (no resolve).
+    QUESTION_POSTED = "question_posted"
+
+
+@dataclass(frozen=True, slots=True)
+class InteractionKindSpec:
+    """Wire metadata for one user-facing interaction kind.
+
+    ``required_event`` / ``resolved_event`` / ``id_field`` must stay aligned with
+    ``EventType`` + payload models — journal fold, recovery, and frontend codegen
+    all read this table (no parallel hand-copied maps).
+    """
+
+    required_event: str
+    resolved_event: str | None
+    id_field: str
+
+
+# User-facing decision / ask kinds → SSE wire shape. ``CLIENT_TOOL`` excluded.
+INTERACTION_KIND_SPECS: Mapping[InteractionKind, InteractionKindSpec] = {
+    InteractionKind.APPROVAL: InteractionKindSpec(
+        "approval_required", "approval_resolved", "approval_id"
+    ),
+    InteractionKind.DELEGATION_AUTHORIZATION: InteractionKindSpec(
+        "delegation_authorization_required",
+        "delegation_authorization_resolved",
+        "authorization_id",
+    ),
+    InteractionKind.ESCALATION: InteractionKindSpec(
+        "escalation_required", "escalation_resolved", "escalation_id"
+    ),
+    InteractionKind.ASK_USER: InteractionKindSpec(
+        "checkpoint_required", "checkpoint_resolved", "checkpoint_id"
+    ),
+    InteractionKind.PLAN_REVIEW: InteractionKindSpec(
+        "plan_review_required", "plan_review_resolved", "checkpoint_id"
+    ),
+    InteractionKind.TEAM_PREVIEW: InteractionKindSpec(
+        "team_preview_required", "team_preview_resolved", "checkpoint_id"
+    ),
+    InteractionKind.QUESTION_POSTED: InteractionKindSpec(
+        "question_posted", None, "ask_id"
+    ),
+}
 
 
 @dataclass

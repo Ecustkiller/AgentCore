@@ -447,19 +447,35 @@ async def test_contract_strict_hard_fails_after_retries():
         [{"role": "A", "task": "做A", "deliverable": {"min_length": 50, "strict": True}}],
         id_prefix="t",
     )
-    # Flat batches ignore task-level on_failure/max_retries — pin policy so a strict
-    # contract miss is not re-dispatched by the wave scheduler (only contract retries).
-    plan.nodes[0].policy.on_failure = "abort"
-    plan.nodes[0].policy.max_retries = 0
+    # Default on_failure=retry must NOT cold-start the node after contract retries
+    # are exhausted (W2 hard stop: error_retryable=False).
+    assert plan.nodes[0].policy.on_failure == "retry"
     sink = EventSink()
-    provider = _ContentProvider(["短", "还是短"])
+    # Extra scripted replies would be consumed if wave cold-retried; pin that they aren't.
+    provider = _ContentProvider(["短", "还是短", "第三次冷启不应发生"])
     res = await WaveScheduler().run(plan, _executor(plan, provider, sink))
     sink.close()
-    assert provider.calls == 2
+    assert provider.calls == 2  # contract attempts only — no third cold opening
     assert res["t_1"].phase is RunPhase.FAILED
+    assert res["t_1"].error_retryable is False
     assert "少于" in res["t_1"].error
     types = [e.type async for e in sink]
     assert EventType.RUN_FAILED in types
+
+
+async def test_contract_empty_hard_fail_not_wave_retried():
+    # Empty product is always a hard fail; after in-executor contract retries the
+    # wave must not re-dispatch (failures=['产出为空'] burned tokens twice already).
+    # Use whitespace (not "") so the fake provider still yields a stop chunk that
+    # ends the react round in one call — "" can leave the loop taking an extra round.
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    assert plan.nodes[0].policy.on_failure == "retry"
+    provider = _ContentProvider(["   ", "\n\t", "第三次冷启不应发生"])
+    res = await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
+    assert provider.calls == 2
+    assert res["t_1"].phase is RunPhase.FAILED
+    assert res["t_1"].error_retryable is False
+    assert "空" in res["t_1"].error
 
 
 async def test_contract_soft_accepts_with_warning():

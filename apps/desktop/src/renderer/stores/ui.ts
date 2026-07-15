@@ -100,7 +100,7 @@ interface UIState {
   conversationViews: Record<string, "chat" | "canvas">;
   /** 本地引擎（sidecar）**有效**开关（双模式工作区 §一.1）：= `resolveSidecarEnabled(偏好)`，
    * 消费方（路由）只读这个 boolean。开启后，绑定本机本地文件夹的对话由用户机器上的
-   * `python -m agentcore.sidecar` 跑（直连本地盘），而非云端引擎遥控桌面；裸聊 / 云端文件夹 /
+   * `python -m agentcore.sidecar` 跑（直连本地盘），而非云端引擎遥控桌面；裸聊 / 云端项目 /
    * 带附件的回合仍走云。**默认开**、可关闭——启动失败自动降级回云端（故默认开安全）；但 sidecar
    * 暂非真离线（LLM 仍经云推理代理），断网时不可用。 */
   sidecarEnabled: boolean;
@@ -166,7 +166,10 @@ export const useUIStore = create<UIState>((set) => ({
   sidecarPreference: loadSidecarPreference(),
   sidecarEnabled: loadSidecarEnabled(),
 
-  openSearch: (initialQuery, opts) =>
+  // Default "" is required: Sidebar/TitleBar call openSearch() with no args.
+  // Without it, searchInitialQuery becomes undefined and CommandPalette crashes
+  // on query.trim() (regressed in 1ee81cee when the default was dropped).
+  openSearch: (initialQuery = "", opts) =>
     set({
       searchOpen: true,
       searchInitialQuery: initialQuery,

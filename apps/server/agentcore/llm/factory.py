@@ -21,21 +21,24 @@ def build_provider(
     *,
     purpose: ProviderPurpose = "user_facing",
 ) -> OpenAICompatibleProvider:
+    """Build an upstream provider from resolved credentials.
+
+    ``purpose`` is retained for call-site clarity; credentials are authoritative.
+    D6: background callers resolve user-key-first via ``resolve_credentials`` /
+    ``resolve_model_config`` — this factory must not override a user key with the
+    platform key. Missing credentials still fall back to the platform key when
+    configured (free-tier / platform-preference paths).
+
+    Callers that need ambient call-level pricing should bind
+    ``credential_source`` in log context (pipeline / proxy) from ``creds.source``.
+    """
+    _ = purpose  # call-site documentation only (D6: no force-platform override)
     creds = credentials
-    used_platform = False
-    if purpose == "platform_internal":
-        platform = platform_llm_credentials()
-        if platform is not None:
-            creds = platform
-            used_platform = True
     if creds is None:
-        platform = platform_llm_credentials()
-        if platform is not None:
-            creds = platform
-            used_platform = True
+        creds = platform_llm_credentials()
     if creds is not None:
         return OpenAICompatibleProvider(
-            name="platform" if used_platform else "user",
+            name=creds.source,
             api_key=creds.api_key,
             base_url=creds.base_url,
             extra_headers=creds.extra_headers,

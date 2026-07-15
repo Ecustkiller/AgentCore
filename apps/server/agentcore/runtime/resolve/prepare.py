@@ -31,6 +31,7 @@ from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.builtin.replan import ReplanTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
+from agentcore.workspace.attachment_parse import truncate_for_prompt
 
 logger = get_logger(__name__)
 
@@ -49,7 +50,7 @@ def _wire_worker_memory_tools(
     """
     if memory_enabled:
         worker_tools.register(
-            ConsultMemoryTool(store=default_memory_store(), project_id=folder_id)
+            ConsultMemoryTool(store=default_memory_store(), folder_id=folder_id)
         )
 
 
@@ -176,7 +177,7 @@ def _assemble_ceo_toolset(
     if memory_enabled:
         # ``folder_id`` lets consult_memory resolve a topic name across BOTH scopes — the
         # current project's 主题 first, then global (Agent记忆与知识系统 §二).
-        chat_tools.register(ConsultMemoryTool(store=default_memory_store(), project_id=folder_id))
+        chat_tools.register(ConsultMemoryTool(store=default_memory_store(), folder_id=folder_id))
     if checkpoint_enabled:
         # 结构化挂起 2b: arm the ask_user pause with the SAME durable closures as the
         # delegate plan_review — message_id keys the frame, the turn-level constants
@@ -207,42 +208,89 @@ def _assemble_ceo_toolset(
 def _build_attachment_context(attachments: list[dict] | None) -> str | None:
     """Render user-referenced files / dirs / conversations into a prompt block.
 
-    Files carry pre-extracted text; directories carry a recursive file listing
-    (paths only, no file bodies); conversations carry their recent messages
-    (materialized client-side). All are truncated client-side. A file with a
-    ``workspace_path`` was persisted into the workspace (附件驻留), so the header
-    points the agent at that durable path — it can re-read or edit the file with
-    the file tools instead of relying only on the inlined (possibly truncated)
-    copy. Returns None when there is nothing to inject so the base prompt stays
-    unchanged.
+    Text files carry pre-extracted text; pre-parsed binaries (docx/pdf/…) carry
+    inline text (context-capped) plus a pointer to the ``*.md`` workspace copy;
+    unscanned spreadsheet binaries carry only a workspace path (引用即驻留 —
+    model must parse via ``code_execute``). Directories carry a recursive file
+    listing (paths only); conversations carry recent messages. A file with a
+    ``workspace_path`` was persisted into the workspace, so the header points
+    the agent at that durable path. Returns None when there is nothing to inject
+    so the base prompt stays unchanged.
     """
     if not attachments:
         return None
 
     blocks: list[str] = []
     resident = False
+    has_binary = False
+    has_preparsed = False
     for att in attachments:
-        text = (att.get("text") or "").strip()
-        if not text:
-            continue
         name = att.get("name") or "untitled"
-        if att.get("kind") == "dir":
+        kind = att.get("kind") or "file"
+        text = (att.get("text") or "").strip()
+        binary = bool(att.get("binary"))
+        ws_path = att.get("workspace_path")
+        parse_status = att.get("parse_status")
+        parsed_path = att.get("parsed_workspace_path")
+
+        if kind == "dir":
+            if not text:
+                continue
             path = att.get("path") or name
             note = " (partial listing)" if att.get("truncated") else ""
             blocks.append(
                 f"--- Directory: {name} ({path}){note} ---\n"
                 f"File paths (contents not included):\n{text}"
             )
-        elif att.get("kind") == "conversation":
-            # A referenced past conversation: its recent messages, materialized
-            # client-side into `text`. Nothing is written to the workspace;
-            # truncated => only the most recent slice was carried.
+        elif kind == "conversation":
+            if not text:
+                continue
             note = " (recent messages only)" if att.get("truncated") else ""
             blocks.append(f"--- Conversation: {name}{note} ---\n{text}")
-        else:
-            # Prefer the durable in-workspace path so the model can act on the
-            # real file; fall back to the original (local) path when un-resident.
-            ws_path = att.get("workspace_path")
+        elif parse_status == "scanned" and text:
+            path = ws_path or att.get("path") or name
+            if ws_path:
+                resident = True
+            has_preparsed = True
+            copy_note = f" [scan note → {parsed_path}]" if parsed_path else ""
+            blocks.append(
+                f"--- File: {name} ({path}) [scanned / no text layer]{copy_note} ---\n{text}"
+            )
+        elif parse_status == "ok" and text:
+            path = ws_path or att.get("path") or name
+            if ws_path:
+                resident = True
+            has_preparsed = True
+            body, clipped = truncate_for_prompt(text)
+            client_trunc = bool(att.get("truncated"))
+            flags: list[str] = []
+            if parsed_path and parsed_path != path:
+                flags.append(f"pre-parsed → {parsed_path}")
+            if clipped or client_trunc:
+                flags.append("truncated")
+            flag_s = f" [{'; '.join(flags)}]" if flags else ""
+            block = f"--- File: {name} ({path}){flag_s} ---\n{body}"
+            if clipped and parsed_path:
+                block += (
+                    f"\n\n… [truncated at {len(body)} chars for context; "
+                    f"full extracted text is at {parsed_path}]"
+                )
+            elif clipped:
+                block += f"\n\n… [truncated at {len(body)} chars for context]"
+            blocks.append(block)
+        elif binary or (ws_path and not text):
+            # Binary (or empty-body resident / preparse failed): path only.
+            path = ws_path or att.get("path") or name
+            if ws_path:
+                resident = True
+            has_binary = True
+            blocks.append(
+                f"--- File: {name} ({path}) [binary] ---\n"
+                "This is a binary file saved in the workspace (no text inline). "
+                "Open and parse it with code_execute using the workspace-relative "
+                "path above (e.g. openpyxl for .xlsx). Do NOT use an OS absolute path."
+            )
+        elif text:
             path = ws_path or att.get("path") or name
             if ws_path:
                 resident = True
@@ -260,6 +308,20 @@ def _build_attachment_context(attachments: list[dict] | None) -> str | None:
         if resident
         else ""
     )
+    binary_note = (
+        " Binary attachments have no inline body: use code_execute on the "
+        "workspace-relative path. Never hard-read an OS absolute path outside "
+        "the workspace (it will fail or hang)."
+        if has_binary
+        else ""
+    )
+    preparsed_note = (
+        " Some office/PDF attachments were pre-parsed at upload: inline text may "
+        "be truncated — use the ``*.md`` workspace copy (or the original path) "
+        "with file tools for the full extract."
+        if has_preparsed
+        else ""
+    )
     return (
         "<attached_files>\n"
         "The user attached the following files, directories and past "
@@ -267,7 +329,7 @@ def _build_attachment_context(attachments: list[dict] | None) -> str | None:
         "material the user provided; cite them by name when relevant. Directory "
         "entries list file paths only (file contents are not included); a "
         "Conversation block holds that conversation's recent messages."
-        f"{resident_note}\n\n"
+        f"{resident_note}{binary_note}{preparsed_note}\n\n"
         f"{body}\n"
         "</attached_files>"
     )

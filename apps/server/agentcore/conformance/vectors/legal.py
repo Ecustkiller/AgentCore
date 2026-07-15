@@ -98,7 +98,7 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
             "id": mod,
             "role": "主持人",
             "model_preference": "strong",
-            "thinking": True,
+            "thinking": False,
             "reasoning_effort": "high",
         },
     ]
@@ -492,7 +492,7 @@ def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
             "id": mod,
             "role": "主持人",
             "model_preference": "strong",
-            "thinking": True,
+            "thinking": False,
             "reasoning_effort": "high",
         },
     ]
@@ -872,7 +872,7 @@ def _multi_agent_legal_case_analysis() -> list[SSEEvent]:
             "id": mod,
             "role": "主持人",
             "model_preference": "strong",
-            "thinking": True,
+            "thinking": False,
             "reasoning_effort": "high",
         },
     ]

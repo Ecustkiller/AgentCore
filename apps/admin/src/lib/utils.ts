@@ -16,6 +16,16 @@ export function fmtCny(yuan: number): string {
   return `¥${yuan.toFixed(2)}`;
 }
 
+/** BYOK estimate caption — always ≈-prefixed; 0 →「—」. */
+export const COST_ESTIMATE_HINT =
+  "按社区价目/自填单价估算，非上游账单";
+
+export function fmtEstimatedCny(yuan: number): string {
+  if (yuan <= 0) return "—";
+  const body = fmtCny(yuan);
+  return `≈${body}`;
+}
+
 const COMPACT = new Intl.NumberFormat("zh-CN", {
   notation: "compact",
   maximumFractionDigits: 1,
@@ -60,6 +70,17 @@ const NANO_PER_USD = 1_000_000_000;
  */
 export function nanoUsdToCny(nano: number, cnyPerUsd: number): number {
   return (nano / NANO_PER_USD) * cnyPerUsd;
+}
+
+/** nano-USD → display CNY string; `estimated` adds ≈ prefix. */
+export function fmtNanoCny(
+  nano: number,
+  cnyPerUsd: number,
+  estimated = false,
+): string {
+  if (nano <= 0) return "—";
+  const yuan = nanoUsdToCny(nano, cnyPerUsd);
+  return estimated ? fmtEstimatedCny(yuan) : fmtCny(yuan);
 }
 
 /** Integer nano-USD → USD (the unit global quota thresholds are configured in). */

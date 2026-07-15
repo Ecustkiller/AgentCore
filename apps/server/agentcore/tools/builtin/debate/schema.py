@@ -1,46 +1,34 @@
-"""debate tool schema, constants, and argument parsing."""
+"""debate tool schema + argument parsing（薄适配层；域常量见 runtime.debate.constants）。"""
 
 from __future__ import annotations
 
 from typing import Any
 
 from agentcore.runtime.debate import DebateForm, DebateSide
+from agentcore.runtime.debate.constants import (
+    CLOSING_LENGTH_HINT,
+    DEBATE_OUTPUT_LIMIT,
+    DEBATER_TOOLS,
+    FORM_LABELS,
+    LENGTH_HINT,
+    QUICK_DEBATER_HINT,
+)
 from agentcore.tools.protocol import ToolResult
 
-DEBATE_OUTPUT_LIMIT = 16000
-
-# 辩手最小权限工具集（least-privilege）：只给取证类工具（查资料 / 读网页），不给文件 / 代码 /
-# 委派 / 提问等副作用工具——辩手职责是论证而非动手改东西，收窄可防跑偏、降多余开销。首轮经
-# task 的 tools 字段成为 allow-list，后续轮经 session.spec 自动沿用。
-DEBATER_TOOLS = ("web_search", "read_url")
-
-# 辩手发言长度指引：旧观测里单方动辄数千 token（一条就几十秒），既拖慢又稀释论点。引导「宁深
-# 勿长」——聚焦最有力的少数论点，显著降低每轮墙钟与 token。首轮立论与后续轮续写都注入。
-LENGTH_HINT = (
-    "聚焦你最有力的 2–3 个论点、约 400–600 字讲透，宁深勿长——不堆砌、不面面俱到。"
-)
-
-# 结辩陈词长度预算（阶段化发言角色 P4）：结辩是收束不是新立论，比逐轮发言更短——只留最能定胜负的
-# 话。显著收紧长度是「阶段化长度预算」的落点（立论 400–600 字 → 结辩 150–250 字），避免结辩变成
-# 又一轮长篇复述。仅结辩环节（:func:`~agentcore.tools.builtin.debate.prompt.closing_task`）注入。
-CLOSING_LENGTH_HINT = (
-    "结辩要【短而有力】：约 150–250 字收束，只留最能定胜负的话，删掉一切铺垫、复述与新枝节。"
-)
-
-# 「快速对碰」(thorough=False，主持人单轮即收) 的辩手附加约束。观测：即便是 trivial 命题，快速辩
-# 论的辩手仍各刷十余次 web_search、跑近十轮 ReAct（自停于内容、远未触及安全上限），墙钟与成本几乎
-# 全耗在这。轮数上限不是有效杠杆（辩手自停在上限内），真正的杠杆是【告诉辩手这是轻量交锋】——直接
-# 压「检索次数」与「论点广度」。仅快速模式注入；认真辩透（thorough=True）不加，保留深挖取证。
-QUICK_DEBATER_HINT = (
-    "【快速对碰】这是一次轻量单轮交锋：以你的常识与推理直接立论，能不检索就不检索"
-    "（至多 1 次必要取证），只把你【最有力的 1 个论点】讲透即可——不深挖、不多角度铺开。"
-)
-
-FORM_LABELS = {
-    DebateForm.DEBATE: "正反辩论",
-    DebateForm.RED_TEAM: "红队挑刺",
-    DebateForm.ROUNDTABLE: "多方圆桌",
-}
+__all__ = [
+    "DEBATE_OUTPUT_LIMIT",
+    "DEBATER_TOOLS",
+    "LENGTH_HINT",
+    "CLOSING_LENGTH_HINT",
+    "QUICK_DEBATER_HINT",
+    "FORM_LABELS",
+    "DEBATE_DESCRIPTION",
+    "DEBATE_PARAMETERS",
+    "err",
+    "parse_form",
+    "parse_background",
+    "parse_sides",
+]
 
 DEBATE_DESCRIPTION = (
     "对需要【对抗性多视角思考】的问题发起一场结构化辩论 / 交叉审查：由一个主持人逐轮派各方"
@@ -48,7 +36,8 @@ DEBATE_DESCRIPTION = (
     "的循环，你据此为用户收尾（先给结论与建议，点出仅剩需用户拍板的点）。\n"
     "三形态：debate=正反辩论（选 A 还是 B / 该不该做 X）；red_team=红队挑刺（压力测试某个方案，"
     "把被审方案那一方标 is_subject）；roundtable=多方圆桌（学懂一个有争议话题的观点光谱）。\n"
-    "你只需定【参与方与立场】：传 motion（命题）+ form（形态）+ sides（各方，≥2；圆桌建议 ≥3）。"
+    "你只需定【参与方与立场】：传 motion（命题）+ form（形态）+ sides（各方，≥2；圆桌建议 ≥3）；"
+    "具体案件 / 真实事件类命题建议另传 background（已核实客观事实清单，见参数说明），避免各方重复检索底料。"
     "轮数与收敛由主持人自调，你和用户都不设轮数。简单事实问答 / 无对立面的任务不要用本工具。"
 )
 
@@ -123,10 +112,11 @@ DEBATE_PARAMETERS = {
         "background": {
             "type": "string",
             "description": (
-                "（可选）案件底料：发起前若你已调研，把已核实的【客观事实清单】整理传入，"
-                "首轮由主持人以「双方共享底料」名义喂给全部辩手，避免各方重复检索同一批基础事实。"
-                "只放已核实的客观事实（主体 / 时间线 / 金额 / 程序节点等，尽量带出处）；"
-                "不放观点、评价、立场分析。不传则辩手自行取证，行为与现网一致。"
+                "（可选）赛前底料：具体案件 / 真实事件 / 有客观事实基础的命题，建议开辩前先快速检索"
+                " 3–5 条已核实客观事实（时间线、金额、案号、程序节点等非观点信息，尽量带出处）传入——"
+                "首轮由主持人以「双方共享底料」名义喂全部辩手，避免各方重复检索同一批基础事实。"
+                "只放客观事实，不放观点 / 评价 / 立场分析。纯价值观或开放式命题不必传；"
+                "不传则辩手自行取证。"
             ),
         },
     },

@@ -27,10 +27,20 @@ from agentcore.tools.sandbox.protocol import (
     SandboxProvider,
 )
 from agentcore.workspace._paths import (
-    IGNORED_DIRS,
+    is_ignored_dir_name,
+    is_ignored_file_name,
+    is_system_ignored_file_name,
     normalize_glob,
     read_text_file,
     resolve_safe_path,
+)
+from agentcore.workspace.external_mounts import (
+    ExternalMount,
+    build_external_env,
+    external_ns,
+    parse_external_path,
+    readonly_write_error,
+    route_external,
 )
 from agentcore.workspace.indexing.manager import IndexManager
 from agentcore.workspace.protocol import (
@@ -116,21 +126,76 @@ class ServerWorkspace:
         # workspaces a turn actually changed (see WorkspaceBackend.dirty).
         self._dirty = False
         self._index_manager: IndexManager | None = None
+        # W3 session read-only mounts (``external/<alias>/…``). Sidecar attaches
+        # abs_path mounts; cloud ServerWorkspace typically leaves this empty.
+        self._mounts: dict[str, ExternalMount] = {}
 
     @property
     def dirty(self) -> bool:
         return self._dirty
+
+    def attach_external_mounts(self, mounts: dict[str, ExternalMount]) -> None:
+        """Attach session-scoped read-only mounts for this turn (W3)."""
+        self._mounts = dict(mounts)
 
     @property
     def root(self) -> Path:
         """The server-side workspace directory (used by the snapshot path)."""
         return self._root
 
-    def _safe(self, rel: str) -> Path:
+    def _safe(self, rel: str, *, write: bool = False) -> Path:
+        parsed = parse_external_path(rel)
+        if parsed is not None:
+            routed = route_external(rel, self._mounts)
+            if routed is None:
+                raise PathNotFound(rel)
+            if write and routed.mount.readonly:
+                raise OutsideWorkspace(readonly_write_error(rel))
+            if not routed.mount.abs_path:
+                raise WorkspaceIOError("会话授权目录在本机引擎外不可直读")
+            mount_root = Path(routed.mount.abs_path)
+            mount_rel = routed.rel if routed.rel not in ("", ".") else "."
+            # Same guard algorithm — separate root, not a weakened boundary.
+            resolved = resolve_safe_path(mount_root, mount_rel if mount_rel != "." else ".")
+            if resolved is None:
+                # ``"."`` against root: resolve_safe_path(workspace, ".") → workspace
+                if mount_rel in ("", "."):
+                    return mount_root.resolve()
+                raise OutsideWorkspace(rel)
+            return resolved
         resolved = resolve_safe_path(self._root, rel)
         if resolved is None:
             raise OutsideWorkspace(rel)
         return resolved
+
+    def _model_path(self, abs_path: Path, *, logical: str | None = None) -> str:
+        """Map an absolute path back to a model-facing relative path.
+
+        Prefer the caller's logical ``external/<alias>/…`` namespace; if that fails
+        (or is absent), reverse-lookup ``self._mounts`` by abs containment so a
+        mount file never falls through to ``relpath(…, primary_root)`` which would
+        leak ``../``-shaped paths into model-visible list/grep output.
+        """
+        resolved = abs_path.resolve()
+        if logical and parse_external_path(logical) is not None:
+            routed = route_external(logical, self._mounts)
+            if routed and routed.mount.abs_path:
+                mount_root = Path(routed.mount.abs_path).resolve()
+                try:
+                    rel = resolved.relative_to(mount_root)
+                    return external_ns(routed.mount.alias, _posix(str(rel)))
+                except ValueError:
+                    pass
+        for mount in self._mounts.values():
+            if not mount.abs_path:
+                continue
+            mount_root = Path(mount.abs_path).resolve()
+            try:
+                rel = resolved.relative_to(mount_root)
+                return external_ns(mount.alias, _posix(str(rel)))
+            except ValueError:
+                continue
+        return _posix(os.path.relpath(resolved, self._root.resolve()))
 
     def _get_index_manager(self) -> IndexManager:
         if self._index_manager is None:
@@ -149,7 +214,7 @@ class ServerWorkspace:
             raise WorkspaceIOError(str(e)) from e
 
     async def write(self, path: str, content: str) -> int:
-        target = self._safe(path)
+        target = self._safe(path, write=True)
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
@@ -159,7 +224,7 @@ class ServerWorkspace:
         return len(content)
 
     async def append(self, path: str, content: str) -> int:
-        target = self._safe(path)
+        target = self._safe(path, write=True)
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.exists():
@@ -188,7 +253,7 @@ class ServerWorkspace:
             raise WorkspaceIOError(str(e)) from e
 
     async def write_bytes(self, path: str, data: bytes) -> int:
-        target = self._safe(path)
+        target = self._safe(path, write=True)
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             _atomic_write_bytes(target, data)
@@ -276,10 +341,16 @@ class ServerWorkspace:
             entries = sorted(base.glob(pattern))[:_MAX_LIST_ENTRIES]
             return [
                 DirEntry(
-                    path=_posix(os.path.relpath(entry, self._root)),
+                    path=self._model_path(entry, logical=directory),
                     is_dir=entry.is_dir(),
                 )
                 for entry in entries
+                if not (
+                    (entry.is_dir() and is_ignored_dir_name(entry.name))
+                    # UI REST shares ``list`` — only system noise; AI ``file_list``
+                    # applies AI-noise filtering in the tool layer.
+                    or (entry.is_file() and is_system_ignored_file_name(entry.name))
+                )
             ]
         except OSError as e:
             raise WorkspaceIOError(str(e)) from e
@@ -344,10 +415,12 @@ class ServerWorkspace:
                 raise WorkspaceIOError(str(e)) from e
 
             for child in children:
-                if child.name in IGNORED_DIRS:
+                if is_ignored_dir_name(child.name):
+                    continue
+                if child.is_file() and is_ignored_file_name(child.name):
                     continue
 
-                rel = _posix(os.path.relpath(child, self._root))
+                rel = self._model_path(child, logical=directory)
                 is_dir = child.is_dir() and not child.is_symlink()
 
                 if not is_dir and not fnmatch.fnmatch(child.name, name_filter):
@@ -376,8 +449,9 @@ class ServerWorkspace:
         and the worker manifest behave the same whether a workspace is cloud or local.
         ``order="path"`` (default) = alphabetical (the @ view); ``order="recent"`` =
         newest-first by mtime (one extra stat/file) for the manifest's relevance budget.
-        Binary/oversized files are *not* filtered here (mirroring local): the read
-        step applies that when a file is actually attached.
+        Noise dirs (``.agentcore`` / ``.git`` / ``node_modules`` / …) and AI-tier
+        suffixes (``*.db`` / media / binaries) are pruned — same rule set as
+        desktop ``collectWorkspaceFiles`` / ``opIndexFiles``.
         """
         cap = cap or _MAX_INDEX_FILES
         recent = order == "recent"
@@ -386,8 +460,10 @@ class ServerWorkspace:
         truncated = False
         for dirpath, dirnames, filenames in os.walk(root):
             # Prune noise dirs in place so os.walk never descends into them.
-            dirnames[:] = sorted(d for d in dirnames if d not in IGNORED_DIRS)
+            dirnames[:] = sorted(d for d in dirnames if not is_ignored_dir_name(d))
             for fname in sorted(filenames):
+                if is_ignored_file_name(fname):
+                    continue
                 full = Path(dirpath) / fname
                 if full.is_symlink() or not full.is_file():
                     continue
@@ -405,9 +481,11 @@ class ServerWorkspace:
         return [p for p, _ in collected], truncated
 
     async def mkdir(self, path: str) -> None:
-        target = self._safe(path)
+        target = self._safe(path, write=True)
         if target == self._root.resolve():
             raise OutsideWorkspace(path)  # the root already exists
+        if parse_external_path(path) is not None:
+            raise OutsideWorkspace(readonly_write_error(path))
         if target.exists():
             raise AlreadyExists(path)
         try:
@@ -417,9 +495,11 @@ class ServerWorkspace:
         self._dirty = True
 
     async def delete(self, path: str) -> None:
-        target = self._safe(path)
+        target = self._safe(path, write=True)
         if target == self._root.resolve():
             raise OutsideWorkspace(path)  # never delete the workspace root
+        if parse_external_path(path) is not None:
+            raise OutsideWorkspace(readonly_write_error(path))
         if not target.exists():
             raise PathNotFound(path)
         try:
@@ -432,8 +512,10 @@ class ServerWorkspace:
         self._dirty = True
 
     async def move(self, src: str, dst: str) -> None:
-        source = self._safe(src)
-        dest = self._safe(dst)
+        if parse_external_path(src) is not None or parse_external_path(dst) is not None:
+            raise OutsideWorkspace(readonly_write_error(src if parse_external_path(src) else dst))
+        source = self._safe(src, write=True)
+        dest = self._safe(dst, write=True)
         root = self._root.resolve()
         if source == root or dest == root:
             raise OutsideWorkspace(src if source == root else dst)
@@ -449,7 +531,7 @@ class ServerWorkspace:
         self._dirty = True
 
     async def replace(self, path: str, old: str, new: str, *, all_: bool) -> ReplaceOutcome:
-        target = self._safe(path)
+        target = self._safe(path, write=True)
         if not target.exists():
             raise PathNotFound(path)
         if not target.is_file():
@@ -495,9 +577,11 @@ class ServerWorkspace:
         base = self._safe(query.directory)
         if not base.exists():
             raise PathNotFound(query.directory)
-        return await asyncio.to_thread(self._grep_sync, base, query)
+        return await asyncio.to_thread(
+            self._grep_sync, base, query, query.directory
+        )
 
-    def _grep_sync(self, base: Path, query: GrepQuery) -> GrepResult:
+    def _grep_sync(self, base: Path, query: GrepQuery, logical_dir: str) -> GrepResult:
         flags = re.IGNORECASE if query.case_insensitive else 0
         regex = re.compile(query.pattern, flags)
         max_results = max(1, min(query.max_results, _MAX_RESULTS_CAP))
@@ -507,7 +591,12 @@ class ServerWorkspace:
         # scan just that file, no walk. ``glob`` is moot — the file is pinpointed.
         if base.is_file():
             self._grep_one_file(
-                base, regex, result, files_only=query.files_only, max_results=max_results
+                base,
+                regex,
+                result,
+                files_only=query.files_only,
+                max_results=max_results,
+                logical_dir=logical_dir,
             )
             return result
 
@@ -516,8 +605,10 @@ class ServerWorkspace:
         stop = False
         for dirpath, dirnames, filenames in os.walk(base):
             # Prune noise dirs in place so os.walk never descends into them.
-            dirnames[:] = sorted(d for d in dirnames if d not in IGNORED_DIRS)
+            dirnames[:] = sorted(d for d in dirnames if not is_ignored_dir_name(d))
             for fname in sorted(filenames):
+                if is_ignored_file_name(fname):
+                    continue
                 if name_filter and not fnmatch.fnmatch(fname, name_filter):
                     continue
 
@@ -533,6 +624,7 @@ class ServerWorkspace:
                     result,
                     files_only=query.files_only,
                     max_results=max_results,
+                    logical_dir=logical_dir,
                 ):
                     stop = True
                     break
@@ -549,6 +641,7 @@ class ServerWorkspace:
         *,
         files_only: bool,
         max_results: int,
+        logical_dir: str = ".",
     ) -> bool:
         """Scan one file's lines into ``result``; return True if a result cap hit.
 
@@ -559,7 +652,7 @@ class ServerWorkspace:
         if text is None:  # binary / too large / unreadable — skip
             return False
 
-        rel = _posix(os.path.relpath(abs_path, self._root))
+        rel = self._model_path(abs_path, logical=logical_dir)
         file_count = 0
         stop = False
         for lineno, line in enumerate(text.splitlines(), start=1):
@@ -612,4 +705,8 @@ class ServerWorkspace:
         # the alternative — silently missing code-generated files — is worse for
         # a backup feature. Read-only file ops still never set this.
         self._dirty = True
-        return await self._sandbox.execute(replace(req, cwd=str(self._root.resolve())))
+        env = dict(req.env or {})
+        env.update(build_external_env(self._mounts))
+        return await self._sandbox.execute(
+            replace(req, cwd=str(self._root.resolve()), env=env or None)
+        )

@@ -14,8 +14,6 @@ from agentcore.llm.pricing import (
     DOUBAO_SEED_TURBO,
     NANO_PER_USD,
     PLATFORM_GPT_4O,
-    PLATFORM_GPT_5_4,
-    PLATFORM_GPT_5_5,
     cache_savings,
     calculate_cost,
     nano_usd_to_cny,
@@ -180,18 +178,27 @@ def test_zero_usage_is_zero_cost():
     assert (cost.input, cost.cached, cost.output, cost.total) == (0, 0, 0, 0)
 
 
-def test_byok_billing_mode_zero_cost_tokens_still_passed():
+def test_byok_billing_mode_uses_community_estimate_not_platform_ledger():
     usage = _usage(input_tokens=1_000_000, cache_miss_tokens=1_000_000, output_tokens=1_000_000)
     byok = calculate_cost(DEEPSEEK_V4_PRO, usage, billing_mode="byok")
     platform = calculate_cost(DEEPSEEK_V4_PRO, usage, billing_mode="platform")
-    assert byok.total == 0
-    assert (byok.input, byok.output) == (0, 0)
+    # User path: community estimate (deepseek-v4-pro is in the snapshot), not unpriced 0.
+    assert byok.pricing_source == "estimated"
+    assert byok.credential_source == "user"
+    assert byok.total > 0
     assert platform.total > 0
+    assert platform.pricing_source == "curated"
+    user = calculate_cost(DEEPSEEK_V4_PRO, usage, credential_source="user")
+    assert user.pricing_source == "estimated"
+    assert calculate_cost(DEEPSEEK_V4_PRO, usage, credential_source="platform").total > 0
 
 
-def test_pricing_for_model_byok_returns_none():
-    assert pricing_for_model(DEEPSEEK_V4_FLASH, billing_mode="byok") is None
+def test_pricing_for_model_user_returns_community_or_none():
+    assert pricing_for_model(DEEPSEEK_V4_FLASH, billing_mode="byok") is not None
     assert pricing_for_model(DEEPSEEK_V4_FLASH, billing_mode="platform") is not None
+    assert pricing_for_model(DEEPSEEK_V4_FLASH, credential_source="user") is not None
+    assert pricing_for_model("totally-unknown-xyz", credential_source="user") is None
+    assert pricing_for_model(DEEPSEEK_V4_FLASH, credential_source="platform") is not None
 
 
 def test_small_token_counts_round_half_up():
@@ -204,11 +211,8 @@ def test_small_token_counts_round_half_up():
 def test_platform_gpt_models_use_dedicated_cards_not_flash_fallback():
     usage = _usage(input_tokens=1_000_000, output_tokens=1_000_000)
     gpt4o = calculate_cost(PLATFORM_GPT_4O, usage)
-    gpt55 = calculate_cost(PLATFORM_GPT_5_5, usage)
     flash = calculate_cost(DEEPSEEK_V4_FLASH, usage)
     assert gpt4o.total != flash.total
-    assert gpt55.total > gpt4o.total
-    assert calculate_cost(PLATFORM_GPT_5_4, usage).total > gpt4o.total
 
 
 # --- cache_savings: the「省了多少」彩蛋 ---

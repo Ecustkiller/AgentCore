@@ -46,6 +46,22 @@ def resolve_code_version() -> str | None:
         return None
 
 
+def _default_personas(scenario: str) -> tuple[SimPersona, ...]:
+    if scenario == "show":
+        from agentcore.simulation.scenarios.show.config import SHOW_PERSONAS
+
+        return SHOW_PERSONAS
+    return TOWN_PERSONAS
+
+
+def _default_regions(scenario: str) -> tuple[str, ...]:
+    if scenario == "show":
+        from agentcore.simulation.scenarios.show.config import SHOW_CONFIG
+
+        return SHOW_CONFIG.regions
+    return TOWN_CONFIG.regions
+
+
 def build_run_manifest(
     *,
     scenario: str,
@@ -61,8 +77,8 @@ def build_run_manifest(
     return RunManifest(
         scenario=scenario,
         seed=seed,
-        personas=list(personas or TOWN_PERSONAS),
-        regions=list(regions or TOWN_CONFIG.regions),
+        personas=list(personas or _default_personas(scenario)),
+        regions=list(regions or _default_regions(scenario)),
         model_routing=model_routing,
         temperature=temperature,
         scripted=scripted,

@@ -1,9 +1,7 @@
 """Unit tests for delegate completion_criteria verification."""
 
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
-from agentcore.runtime.runs.plan import RunPlan
-from agentcore.runtime.runs.types import Deliverable, RunPhase, RunSpec, RunState
-from agentcore.tools.builtin.delegate.completion import (
+from agentcore.runtime.delegate.completion import (
     check_delegate_completion,
     collect_worker_gaps,
     format_completion_gap_message,
@@ -12,6 +10,8 @@ from agentcore.tools.builtin.delegate.completion import (
     plan_suggests_code_verification,
     resolve_completion_criteria,
 )
+from agentcore.runtime.runs.plan import RunPlan
+from agentcore.runtime.runs.types import Deliverable, RunPhase, RunSpec, RunState
 
 
 def _run(*, files: list[str] | None = None, transcript: list[LLMMessage] | None = None):
@@ -31,6 +31,19 @@ def test_parse_defaults_to_no_enforcement_when_omitted():
 def test_omitted_criteria_is_backward_compatible():
     criteria = parse_completion_criteria(None)
     ok, gaps = check_delegate_completion(criteria, {"a": _run()})
+    assert ok
+    assert gaps == []
+
+
+def test_custom_criteria_does_not_block_completion():
+    # custom is not engine-verified — must not mark successful delegates unfinished.
+    criteria = parse_completion_criteria({"type": "custom", "description": "用户满意即可"})
+    ok, gaps = check_delegate_completion(criteria, {"a": _run()})
+    assert ok
+    assert gaps == []
+
+    criteria_bare = parse_completion_criteria("custom")
+    ok, gaps = check_delegate_completion(criteria_bare, {"a": _run()})
     assert ok
     assert gaps == []
 
@@ -109,6 +122,34 @@ def test_resolve_enables_files_written_when_artifacts_declared():
     criteria = resolve_completion_criteria(None, plan)
     assert criteria is not None
     assert criteria.kind == "files_written"
+
+
+def test_resolve_enables_files_written_when_form_files():
+    plan = RunPlan(
+        nodes=[
+            RunSpec(
+                run_id="w1",
+                task="建页面",
+                deliverable=Deliverable(form="files", requires_files=True),
+            )
+        ]
+    )
+    criteria = resolve_completion_criteria(None, plan)
+    assert criteria is not None
+    assert criteria.kind == "files_written"
+
+
+def test_resolve_skips_files_written_when_all_prose():
+    plan = RunPlan(
+        nodes=[
+            RunSpec(
+                run_id="w1",
+                task="打招呼",
+                deliverable=Deliverable(form="prose"),
+            )
+        ]
+    )
+    assert resolve_completion_criteria(None, plan) is None
 
 
 def test_collect_worker_gaps_surfaces_warnings_and_degraded_handoff():

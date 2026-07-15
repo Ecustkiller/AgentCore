@@ -3,13 +3,13 @@ import { join, relative } from "node:path";
 import type { WorkspaceOpResult } from "@shared/ipc-contract";
 import {
   LIST_FILES_MAX_DEPTH,
-  LIST_FILES_SKIP_DIRS,
   WORKSPACE_LIST_MAX,
   WORKSPACE_READ_MAX,
 } from "../constants";
 import { realInside, resolveLexical, toReason } from "../pathGuard";
 import type { StoredRoot } from "../roots";
 import { collectWorkspaceFiles } from "../tree";
+import { shouldSkipWorkspaceEntry } from "../workspaceIgnore";
 import { globToRegExp, opErr, opOk, toPosix } from "./result";
 
 export async function opRead(
@@ -89,20 +89,16 @@ export async function opList(
     dirents.sort((a, b) => a.name.localeCompare(b.name));
     for (const d of dirents) {
       if (results.length >= WORKSPACE_LIST_MAX) break;
-      const childRel = relFromBase ? `${relFromBase}/${d.name}` : d.name;
       const isDir = d.isDirectory();
+      if (shouldSkipWorkspaceEntry(d.name, isDir)) continue;
+      const childRel = relFromBase ? `${relFromBase}/${d.name}` : d.name;
       if (re.test(childRel)) {
         results.push({
           path: toPosix(relative(root.absPath, join(absDir, d.name))),
           is_dir: isDir,
         });
       }
-      if (
-        recursive &&
-        isDir &&
-        !LIST_FILES_SKIP_DIRS.has(d.name) &&
-        depth + 1 <= LIST_FILES_MAX_DEPTH
-      ) {
+      if (recursive && isDir && depth + 1 <= LIST_FILES_MAX_DEPTH) {
         await walk(join(absDir, d.name), childRel, depth + 1);
       }
     }
@@ -217,9 +213,9 @@ export async function opListTree(
       a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
     );
     for (const d of dirents) {
-      if (LIST_FILES_SKIP_DIRS.has(d.name)) continue;
-      const childAbs = join(absDir, d.name);
       const isDir = d.isDirectory() && !d.isSymbolicLink();
+      if (shouldSkipWorkspaceEntry(d.name, isDir)) continue;
+      const childAbs = join(absDir, d.name);
       if (!matchName(d.name, isDir)) continue;
       if (entries.length >= maxEntries) {
         truncated = true;

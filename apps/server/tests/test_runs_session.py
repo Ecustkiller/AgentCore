@@ -8,7 +8,14 @@ events with ``continues_run_id`` = session root and ``parent_run_id`` = true par
 
 from pathlib import Path
 
-from agentcore.llm.provider.protocol import LLMChunk
+from agentcore.core.types import ToolCategory
+from agentcore.llm.provider.protocol import (
+    LLMChunk,
+    LLMMessage,
+    ToolCall,
+    ToolCallDelta,
+    ToolCallFunction,
+)
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.runs import (
     RunPhase,
@@ -20,7 +27,7 @@ from agentcore.runtime.runs import (
 )
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.sessions import SessionStore
-from agentcore.tools.protocol import ToolContext
+from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
@@ -39,6 +46,40 @@ class _ContentProvider:
         text = self._contents[self.calls] if self.calls < len(self._contents) else "done"
         self.calls += 1
         yield LLMChunk(delta_content=text)
+
+
+class _RecordingProvider:
+    """Fake LLM that keeps full ``LLMMessage`` lists so reasoning strip can be asserted."""
+
+    def __init__(self, rounds: list[list[LLMChunk]]) -> None:
+        self._rounds = rounds
+        self.calls = 0
+        self.requests: list[list[LLMMessage]] = []
+
+    async def stream(self, request):  # noqa: ANN001
+        self.requests.append(list(request.messages))
+        chunks = (
+            self._rounds[self.calls]
+            if self.calls < len(self._rounds)
+            else [LLMChunk(delta_content="done")]
+        )
+        self.calls += 1
+        for chunk in chunks:
+            yield chunk
+
+
+class _StubSearchTool:
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="search",
+            description="stub",
+            parameters={"type": "object", "properties": {}},
+            category=ToolCategory.SEARCH,
+        )
+
+    async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
+        return ToolResult(tool_call_id="", success=True, output="ok")
 
 
 def _ctx() -> ToolContext:
@@ -81,6 +122,37 @@ async def _make_session(provider: _ContentProvider, *, run_id: str = "t_1") -> R
     )
 
 
+def _session_with_reasoning(*, run_id: str = "t_1") -> RunSession:
+    """Hand-built session whose prior-beat assistants still carry reasoning drafts."""
+    transcript = [
+        LLMMessage(role="system", content="SYS"),
+        LLMMessage(role="user", content="做A"),
+        LLMMessage(
+            role="assistant",
+            content="",
+            reasoning_content="历史 beat 工具链思考",
+            tool_calls=[
+                ToolCall(
+                    id="tc_hist",
+                    function=ToolCallFunction(name="search", arguments="{}"),
+                )
+            ],
+        ),
+        LLMMessage(role="tool", content="ok", tool_call_id="tc_hist"),
+        LLMMessage(
+            role="assistant",
+            content="第一版产出",
+            reasoning_content="历史 beat 终稿思考草稿",
+        ),
+    ]
+    return RunSession(
+        run_id=run_id,
+        spec=RunSpec(run_id=run_id, agent_id=run_id, role="A", task="做A"),
+        transcript=transcript,
+        content="第一版产出",
+    )
+
+
 def test_session_store_put_get_and_miss():
     store = SessionStore()
     assert store.get("nope") is None
@@ -117,6 +189,88 @@ async def test_continue_run_revises_from_transcript_and_extends_it():
     assert len(state.transcript) > original_len
     assert state.transcript[-1].role == "assistant"
     assert state.transcript[-1].content == "修订版"
+
+
+async def test_continue_run_strips_historical_reasoning_but_keeps_current_beat_echo():
+    """跨 beat 续写：历史上行不含 reasoning；本 beat 工具链仍回传思考。"""
+    session = _session_with_reasoning()
+    hist_before = [
+        (m.role, m.content, m.reasoning_content)
+        for m in session.transcript
+        if m.role == "assistant"
+    ]
+    assert any(r for _, _, r in hist_before)
+
+    tools = ToolRegistry()
+    tools.register(_StubSearchTool())
+    provider = _RecordingProvider(
+        [
+            [
+                LLMChunk(delta_reasoning="本 beat 工具思考"),
+                LLMChunk(
+                    delta_tool_calls=[
+                        ToolCallDelta(
+                            index=0,
+                            id="tc_now",
+                            function_name="search",
+                            arguments_delta="{}",
+                        )
+                    ]
+                ),
+            ],
+            [LLMChunk(delta_content="续写终稿")],
+        ]
+    )
+
+    state = await continue_run(
+        session=session,
+        feedback="下一 beat 继续",
+        continuation_run_id="t_1_b2",
+        llm=provider,
+        tools=tools,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        execution_id="e",
+    )
+
+    assert state.phase is RunPhase.COMPLETED
+    assert state.content == "续写终稿"
+    assert len(provider.requests) == 2
+
+    # First uplink: every prior-beat assistant has reasoning stripped.
+    for m in provider.requests[0]:
+        if m.role == "assistant":
+            assert m.reasoning_content is None
+
+    # Stored session unchanged until commit (strip copies, does not mutate).
+    assert [
+        (m.role, m.content, m.reasoning_content)
+        for m in session.transcript
+        if m.role == "assistant"
+    ] == hist_before
+
+    # Second uplink (same beat after tool): historical still stripped; this beat's
+    # tool-call turn keeps its reasoning for DeepSeek echo.
+    hist_contents = {"", "第一版产出"}
+    for m in provider.requests[1]:
+        if m.role != "assistant":
+            continue
+        if m.content in hist_contents or (
+            m.tool_calls and m.tool_calls[0].id == "tc_hist"
+        ):
+            assert m.reasoning_content is None
+        elif m.tool_calls and m.tool_calls[0].id == "tc_now":
+            assert m.reasoning_content == "本 beat 工具思考"
+
+    # Continuation transcript written for session commit has history stripped.
+    hist_in_result = [
+        m
+        for m in state.transcript
+        if m.role == "assistant"
+        and (m.content in hist_contents or (m.tool_calls and m.tool_calls[0].id == "tc_hist"))
+    ]
+    assert hist_in_result
+    assert all(m.reasoning_content is None for m in hist_in_result)
 
 
 async def test_continue_run_does_not_mutate_stored_transcript_until_committed():

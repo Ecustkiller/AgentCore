@@ -1553,6 +1553,16 @@
             "title": "Duration Ms",
             "type": "integer"
           },
+          "estimated_cost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CostBreakdown"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "model": {
             "title": "Model",
             "type": "string"
@@ -1709,7 +1719,7 @@
         "type": "object"
       },
       "AutonomyPolicy": {
-        "description": "User-global kickoff / capability-authorization posture.\n\n- ``always_ask`` — every GRANTABLE call prompts; kickoff has no grant shortcut\n- ``first_grant`` — kickoff once authorizes the grantable set for the delegation\n  (default; continuous with the prior delegation-authorization card)\n- ``full_auto`` — skip the kickoff card entirely (plan + capability); silent\n  auto-grant of GRANTABLE tools for the delegation",
+        "description": "User-global *default* for new conversations (maps to :class:`PermissionPreset`).\n\nRuntime gates no longer read this directly — the conversation's\n``permission_preset`` is the single source of truth. This enum remains the\nstored shape of ``users.autonomy_policy`` (设置页「新会话默认权限模式」).\n\nMapping: ``always_ask``→observe, ``first_grant``→workspace, ``full_auto``→full_trust.",
         "enum": [
           "always_ask",
           "first_grant",
@@ -1722,7 +1732,7 @@
         "properties": {
           "policy": {
             "$ref": "#/components/schemas/AutonomyPolicy",
-            "description": "always_ask | first_grant | full_auto"
+            "description": "New-session default: always_ask→observe | first_grant→workspace | full_auto→full_trust"
           }
         },
         "required": [
@@ -1811,7 +1821,7 @@
         "type": "object"
       },
       "BindLocalWorkspaceRequest": {
-        "description": "Bind a conversation's workspace to a desktop FS root (switch to local mode).\n\n``root_id`` is the desktop-minted handle for an authorized local directory\n(from the desktop ``addRoot`` flow). Binding writes at the governing scope: the\nfolder for a foldered conversation (shared by its siblings), the conversation\nitself when ungrouped.",
+        "description": "Bind a 裸聊's scratch workspace to a desktop FS root (switch to local mode).\n\n``root_id`` is the desktop-minted handle for an authorized local directory\n(from the desktop ``addRoot`` flow). Only ungrouped conversations may rebind —\nproject chats inherit an immutable project binding (``PUT`` returns 409).",
         "properties": {
           "root_id": {
             "maxLength": 200,
@@ -2656,7 +2666,7 @@
         "type": "object"
       },
       "CheckpointDecision": {
-        "description": "How the user (or a timeout / orphan) settled a checkpoint the CEO raised.\n\n``CONTINUE`` / ``ADJUST`` / ``STOP`` are shared by ask_user / plan_review /\nteam_preview (开工卡). On the kickoff card, ``CONTINUE`` means grant-all-needed\ncapabilities and start; ``PER_CALL`` means start with per-call approval (no\ndelegation grant). ``PER_CALL`` is kickoff-only — ask_user / plan_review ignore it.",
+        "description": "How the user (or a timeout / orphan) settled a checkpoint the CEO raised.\n\n``CONTINUE`` / ``ADJUST`` / ``STOP`` are shared by ask_user / plan_review /\nteam_preview (开工卡). On the kickoff card, ``CONTINUE`` means grant + start\n(non-empty ``note`` steers all unrun workers — former adjust semantics);\n``PER_CALL`` means start with per-call approval (no delegation grant) — enum\nretained for historical timelines / API clients; the kickoff UI no longer\noffers it. ``PER_CALL`` is kickoff-only — ask_user / plan_review ignore it.\n``ADJUST`` remains for debate kickoff (rewrite motion) and plan_review steer,\nplus historical non-debate kickoff resolves.",
         "enum": [
           "continue",
           "per_call",
@@ -2749,6 +2759,16 @@
           "cost": {
             "$ref": "#/components/schemas/CostBreakdown"
           },
+          "estimated_cost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CostBreakdown"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "turns": {
             "title": "Turns",
             "type": "integer"
@@ -2840,6 +2860,10 @@
             "title": "Message Count",
             "type": "integer"
           },
+          "permission_preset": {
+            "$ref": "#/components/schemas/PermissionPreset",
+            "default": "workspace"
+          },
           "pinned": {
             "default": false,
             "title": "Pinned",
@@ -2894,6 +2918,11 @@
           "output": {
             "title": "Output",
             "type": "integer"
+          },
+          "pricing_source": {
+            "default": "curated",
+            "title": "Pricing Source",
+            "type": "string"
           },
           "total": {
             "title": "Total",
@@ -2980,6 +3009,16 @@
               }
             ],
             "title": "Local Container Root Id"
+          },
+          "permission_preset": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PermissionPreset"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "title": {
             "anyOf": [
@@ -3268,6 +3307,236 @@
         "title": "DeleteAccountRequest",
         "type": "object"
       },
+      "DemoTapeCatalogResponse": {
+        "description": "List + enable flag (404 when replay is off — this body is only for enabled).",
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "tapes": {
+            "items": {
+              "$ref": "#/components/schemas/DemoTapeSummary"
+            },
+            "title": "Tapes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tapes"
+        ],
+        "title": "DemoTapeCatalogResponse",
+        "type": "object"
+      },
+      "DemoTapePrepareRequest": {
+        "description": "Prepare a bound cloud session without starting the tape turn.",
+        "properties": {
+          "max_gap_ms": {
+            "anyOf": [
+              {
+                "maximum": 60000.0,
+                "minimum": 50.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Gap Ms"
+          },
+          "speed": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.1,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed"
+          },
+          "tape_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Tape Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tape_id"
+        ],
+        "title": "DemoTapePrepareRequest",
+        "type": "object"
+      },
+      "DemoTapePrepareResponse": {
+        "description": "Cloud conversation bound; user sends any message to trigger replay.",
+        "properties": {
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "max_gap_ms": {
+            "title": "Max Gap Ms",
+            "type": "integer"
+          },
+          "speed": {
+            "title": "Speed",
+            "type": "number"
+          },
+          "tape_id": {
+            "title": "Tape Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "user_prompt": {
+            "title": "User Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "tape_id",
+          "title",
+          "user_prompt",
+          "speed",
+          "max_gap_ms"
+        ],
+        "title": "DemoTapePrepareResponse",
+        "type": "object"
+      },
+      "DemoTapeStartRequest": {
+        "description": "Auto-start one-click replay for a tape id (filename stem).",
+        "properties": {
+          "max_gap_ms": {
+            "anyOf": [
+              {
+                "maximum": 60000.0,
+                "minimum": 50.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Gap Ms"
+          },
+          "speed": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.1,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed"
+          },
+          "tape_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Tape Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tape_id"
+        ],
+        "title": "DemoTapeStartRequest",
+        "type": "object"
+      },
+      "DemoTapeStartResponse": {
+        "description": "Cloud conversation already bound + turn running (attach via GET …/stream).",
+        "properties": {
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "max_gap_ms": {
+            "title": "Max Gap Ms",
+            "type": "integer"
+          },
+          "speed": {
+            "title": "Speed",
+            "type": "number"
+          },
+          "tape_id": {
+            "title": "Tape Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "user_prompt": {
+            "title": "User Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "tape_id",
+          "title",
+          "user_prompt",
+          "speed",
+          "max_gap_ms"
+        ],
+        "title": "DemoTapeStartResponse",
+        "type": "object"
+      },
+      "DemoTapeSummary": {
+        "description": "One available tape under ``demos/tapes/``.",
+        "properties": {
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "event_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Count"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "user_prompt": {
+            "title": "User Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "user_prompt"
+        ],
+        "title": "DemoTapeSummary",
+        "type": "object"
+      },
       "DeviceListResponse": {
         "properties": {
           "data": {
@@ -3373,6 +3642,62 @@
           "task"
         ],
         "title": "DispatchHandoffRequest",
+        "type": "object"
+      },
+      "ExternalGrantItem": {
+        "properties": {
+          "alias": {
+            "title": "Alias",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "root_id": {
+            "title": "Root Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "alias",
+          "root_id",
+          "label",
+          "namespace"
+        ],
+        "title": "ExternalGrantItem",
+        "type": "object"
+      },
+      "ExternalGrantListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalGrantItem"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ExternalGrantListResponse",
+        "type": "object"
+      },
+      "ExternalGrantResponse": {
+        "properties": {
+          "grant": {
+            "$ref": "#/components/schemas/ExternalGrantItem"
+          }
+        },
+        "required": [
+          "grant"
+        ],
+        "title": "ExternalGrantResponse",
         "type": "object"
       },
       "FeedbackListResponse": {
@@ -3582,6 +3907,41 @@
           "updated_at"
         ],
         "title": "FolderSummary",
+        "type": "object"
+      },
+      "GrantExternalReadonlyRequest": {
+        "description": "Register a session-scoped read-only desktop root for this conversation.\n\nDoes **not** change workspace binding. ``root_id`` is the desktop-minted handle;\nabsolute paths never appear on the wire.",
+        "properties": {
+          "alias_hint": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alias Hint"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "root_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Root Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "root_id",
+          "label"
+        ],
+        "title": "GrantExternalReadonlyRequest",
         "type": "object"
       },
       "GroupedConversationsResponse": {
@@ -4167,6 +4527,17 @@
       "LlmKeyStatusResponse": {
         "description": "Settings view of a user's BYOK config — never the plaintext key.",
         "properties": {
+          "background_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Background Model"
+          },
           "base_url": {
             "anyOf": [
               {
@@ -4217,6 +4588,12 @@
             ],
             "title": "Default Model"
           },
+          "free_tier_active": {
+            "default": false,
+            "description": "True when this user has no BYOK key, free tier is enabled, and platform credentials are available (keyless users can chat on free quota)",
+            "title": "Free Tier Active",
+            "type": "boolean"
+          },
           "masked_key": {
             "anyOf": [
               {
@@ -4256,6 +4633,39 @@
             ],
             "description": "Operator-configured model when billing_mode is platform",
             "title": "Platform Model"
+          },
+          "price_cache_hit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Cache Hit"
+          },
+          "price_cache_miss": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Cache Miss"
+          },
+          "price_output": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Output"
           },
           "status": {
             "title": "Status",
@@ -4767,8 +5177,13 @@
         "type": "object"
       },
       "MessageAttachment": {
-        "description": "A piece of context the user referenced (@-mention or paperclip).\n\nText is extracted/materialized client-side; this MVP carries only\ntext-extractable sources (images are out of scope until a vision model).\n``kind=\"conversation\"`` references another of the user's conversations: its\nrecent messages are materialized into ``text`` client-side (same as a file's\nbody), and ``conversation_id`` records which one (for the chip + later jump).",
+        "description": "A piece of context the user referenced (@-mention or paperclip).\n\nText files carry client-extracted ``text`` (images stay out of scope until a\nvision model). Binary files are **resident-first** (引用即驻留): the desktop\ncopies raw bytes into the conversation workspace ``attachments/`` and sends\n``workspace_path`` + ``binary=True`` with empty ``text``. Server-side分流预解析\nthen extracts text for docx/pdf/pptx/txt 等 (markitdown → ``*.md`` copy); xlsx/csv\nstay path-only so workers can ``code_execute``. ``kind=\"conversation\"`` references\nanother of the user's conversations: recent messages are materialized into\n``text`` client-side, and ``conversation_id`` records which one (for the chip +\nlater jump).",
         "properties": {
+          "binary": {
+            "default": false,
+            "title": "Binary",
+            "type": "boolean"
+          },
           "conversation_id": {
             "anyOf": [
               {
@@ -4802,6 +5217,7 @@
             "type": "string"
           },
           "text": {
+            "default": "",
             "maxLength": 300000,
             "title": "Text",
             "type": "string"
@@ -4810,12 +5226,22 @@
             "default": false,
             "title": "Truncated",
             "type": "boolean"
+          },
+          "workspace_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Path"
           }
         },
         "required": [
           "name",
-          "path",
-          "text"
+          "path"
         ],
         "title": "MessageAttachment",
         "type": "object"
@@ -4897,6 +5323,17 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "paused": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused"
           },
           "reasoning_content": {
             "anyOf": [
@@ -5112,6 +5549,25 @@
         "title": "MoveFileRequest",
         "type": "object"
       },
+      "PatchShowEpisodePublishRequest": {
+        "properties": {
+          "publish_status": {
+            "enum": [
+              "draft",
+              "review",
+              "published",
+              "archived"
+            ],
+            "title": "Publish Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "publish_status"
+        ],
+        "title": "PatchShowEpisodePublishRequest",
+        "type": "object"
+      },
       "PatchSimulationAgentRequest": {
         "properties": {
           "goal": {
@@ -5174,7 +5630,7 @@
         "type": "object"
       },
       "PausedTurnSummary": {
-        "description": "A turn awaiting resume after a durable plan_review / ask_user / kickoff pause.\n\nSurfaced on conversation reopen so the client can re-render the right resume card\nby ``kind`` and offer continue / per_call / adjust / stop → the resume endpoint.\n``message_id`` is both the pause key and the id the resumed assistant message will\nreuse, so an optimistic bubble reconciles cleanly.\n\nplan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the\ngated downstream); team_preview (开工卡) carries ``primitive`` (``delegate`` /\n``debate``) + ``workers`` / ``tools`` (delegate) or ``motion`` / ``sides`` /\n``max_rounds`` / ``thorough`` (debate); ask_user carries the unified card payload\n``question`` (the framing / opening line) + ``context`` + the optional opening\ncontent ``assumptions`` / ``questions`` / ``style_options`` (empty for a compact\nmid-task fork). The unused set is empty for the other kinds.",
+        "description": "A turn awaiting resume after a durable plan_review / ask_user / kickoff pause.\n\nSurfaced on conversation reopen so the client can re-render the right resume card\nby ``kind`` and offer the kind-appropriate actions → the resume endpoint\n(kickoff delegate: continue[+嘱咐] / stop; debate: continue / adjust / stop;\nplan_review: continue / adjust / stop; ``per_call`` retained for historical\nresolves only).\n``message_id`` is both the pause key and the id the resumed assistant message will\nreuse, so an optimistic bubble reconciles cleanly.\n\nplan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the\ngated downstream); team_preview (开工卡) carries ``primitive`` (``delegate`` /\n``debate``) + ``workers`` / ``tools`` (delegate) or ``motion`` / ``sides`` /\n``max_rounds`` / ``thorough`` (debate); ask_user carries the unified card payload\n``question`` (the framing / opening line) + ``context`` + the optional opening\ncontent ``assumptions`` / ``questions`` / ``style_options`` (empty for a compact\nmid-task fork). The unused set is empty for the other kinds.",
         "properties": {
           "assumptions": {
             "items": {
@@ -5203,7 +5659,9 @@
               {
                 "enum": [
                   "kickoff",
-                  "decision"
+                  "decision",
+                  "proposal_pick",
+                  "risk_ack"
                 ],
                 "type": "string"
               },
@@ -5351,6 +5809,29 @@
           "message_id"
         ],
         "title": "PendingInteractionSummary",
+        "type": "object"
+      },
+      "PermissionPreset": {
+        "description": "Conversation-level permission mode (会话级权限模式 · 运行时单一真相源).\n\n- ``observe`` — no execution tools; GRANTABLE (writes) always prompt; kickoff\n  does not pre-authorize write capabilities (≈ always_ask + withhold execution)\n- ``workspace`` — kickoff once authorizes grantable set (≈ first_grant; default)\n- ``full_trust`` — skip kickoff; silent auto-grant including local execution\n  (≈ full_auto; UI must warn that AI runs commands with user-equivalent power)",
+        "enum": [
+          "observe",
+          "workspace",
+          "full_trust"
+        ],
+        "title": "PermissionPreset",
+        "type": "string"
+      },
+      "PermissionPresetUpdate": {
+        "description": "Switch the conversation's permission mode mid-session.",
+        "properties": {
+          "permission_preset": {
+            "$ref": "#/components/schemas/PermissionPreset"
+          }
+        },
+        "required": [
+          "permission_preset"
+        ],
+        "title": "PermissionPresetUpdate",
         "type": "object"
       },
       "QuotaStatus": {
@@ -6066,6 +6547,11 @@
       "RoleCostLine": {
         "description": "One persona/role's spend over a window — the team payroll grouped by label.\n\nThe account dashboard's product differentiator (§7.3D): multi-agent spend\nsplits by ``COALESCE(persona, role)`` (调研员 / CEO / …, falling back to the\nstructural captain/member bucket for legacy rows), which a single-agent\ncompetitor can't show. Money is integer nano-USD; the client formats ¥ from\nthe summary's single ``cny_per_usd`` (no per-row re-pricing here).",
         "properties": {
+          "cost_estimated_total": {
+            "default": 0,
+            "title": "Cost Estimated Total",
+            "type": "integer"
+          },
           "cost_total": {
             "title": "Cost Total",
             "type": "integer"
@@ -6213,7 +6699,7 @@
         "type": "object"
       },
       "RunsPayload": {
-        "description": "Persisted turn replay payload for an assistant message.\n\n``events`` is a multi-agent turn's ordered run/tool SSE events; the client\nreplays them through the same fold as the live stream to reproduce the team\ngraph exactly on reload (empty ``[]`` for a single-agent turn). ``process`` is\na single-agent turn's 思考+工具 timeline (ordered reasoning/tool steps) the\nclient replays into the inline process panel; ``null`` unless the turn used a\ntool. ``captain_context`` is the CEO captain's received context (上下文传递可视化\n通道①: ``system`` / ``history`` / ``request``), turn-level so it replays on the\nCEO bubble even for a pure-chat turn (where ``events`` is empty); ``null`` unless\nthe captain shipped context. ``error`` is a 报错回合's terminal error, replaying the\ninline error card on reload (``null`` for a clean turn). ``null`` whole payload on\nmessages with none of these.",
+        "description": "Persisted turn replay payload for an assistant message.\n\n``events`` is a multi-agent turn's ordered run/tool SSE events; the client\nreplays them through the same fold as the live stream to reproduce the team\ngraph exactly on reload (empty ``[]`` for a single-agent turn). ``process`` is\na single-agent turn's 思考+工具 timeline (ordered reasoning/tool steps) the\nclient replays into the inline process panel; ``null`` unless the turn used a\ntool. ``run_processes`` is the per-worker-run ProcessStep[] map (对称 CEO\n``process``) so run-detail timelines reopen with the same interleaving as live;\n``null`` when no worker produced a timeline. ``captain_context`` is the CEO\ncaptain's received context (上下文传递可视化 通道①: ``system`` / ``history`` /\n``request``), turn-level so it replays on the CEO bubble even for a pure-chat\nturn (where ``events`` is empty); ``null`` unless the captain shipped context.\n``error`` is a 报错回合's terminal error, replaying the inline error card on\nreload (``null`` for a clean turn). ``null`` whole payload on messages with\nnone of these.",
         "properties": {
           "captain_context": {
             "anyOf": [
@@ -6273,6 +6759,24 @@
               }
             ],
             "title": "Process"
+          },
+          "run_processes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Processes"
           },
           "turn_warning": {
             "anyOf": [
@@ -6627,6 +7131,19 @@
             "title": "Api Key",
             "type": "string"
           },
+          "background_model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional cheaper model for title/memory/compaction/followups",
+            "title": "Background Model"
+          },
           "base_url": {
             "anyOf": [
               {
@@ -6639,7 +7156,7 @@
             ],
             "description": "OpenAI-compatible endpoint including version prefix",
             "examples": [
-              "http://localhost:9090/v1"
+              "https://api.deepseek.com"
             ],
             "title": "Base Url"
           },
@@ -6658,6 +7175,45 @@
               "deepseek-v4-flash"
             ],
             "title": "Default Model"
+          },
+          "price_cache_hit": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional user-defined USD per 1M cache-hit tokens (decimal string)",
+            "title": "Price Cache Hit"
+          },
+          "price_cache_miss": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional user-defined USD per 1M cache-miss tokens (decimal string)",
+            "title": "Price Cache Miss"
+          },
+          "price_output": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional user-defined USD per 1M output tokens (decimal string)",
+            "title": "Price Output"
           }
         },
         "required": [
@@ -6749,6 +7305,163 @@
           "created_at"
         ],
         "title": "ShareSummary",
+        "type": "object"
+      },
+      "ShowEpisodeListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ShowEpisodeSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total"
+        ],
+        "title": "ShowEpisodeListResponse",
+        "type": "object"
+      },
+      "ShowEpisodeSummary": {
+        "properties": {
+          "episode_id": {
+            "title": "Episode Id",
+            "type": "string"
+          },
+          "episode_no": {
+            "title": "Episode No",
+            "type": "integer"
+          },
+          "publish_status": {
+            "enum": [
+              "draft",
+              "review",
+              "published",
+              "archived"
+            ],
+            "title": "Publish Status",
+            "type": "string"
+          },
+          "quiz_focus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quiz Focus"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "season_id": {
+            "title": "Season Id",
+            "type": "string"
+          },
+          "tagline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tagline"
+          },
+          "tick_end": {
+            "title": "Tick End",
+            "type": "integer"
+          },
+          "tick_start": {
+            "title": "Tick Start",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "episode_id",
+          "season_id",
+          "episode_no",
+          "title",
+          "run_id",
+          "tick_start",
+          "tick_end",
+          "publish_status"
+        ],
+        "title": "ShowEpisodeSummary",
+        "type": "object"
+      },
+      "ShowManifestResponse": {
+        "description": "EpisodeManifest JSON — shape mirrors contract-types episodeManifest.",
+        "properties": {
+          "manifest": {
+            "additionalProperties": true,
+            "title": "Manifest",
+            "type": "object"
+          }
+        },
+        "required": [
+          "manifest"
+        ],
+        "title": "ShowManifestResponse",
+        "type": "object"
+      },
+      "ShowQuizSettlementResponse": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "correct": {
+            "title": "Correct",
+            "type": "boolean"
+          },
+          "guess": {
+            "title": "Guess",
+            "type": "string"
+          },
+          "monologue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monologue"
+          },
+          "monologue_who": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monologue Who"
+          }
+        },
+        "required": [
+          "correct",
+          "guess",
+          "answer"
+        ],
+        "title": "ShowQuizSettlementResponse",
         "type": "object"
       },
       "SimAgentState": {
@@ -7171,8 +7884,13 @@
         "type": "object"
       },
       "StoredAttachment": {
-        "description": "Persisted attachment display metadata (no extracted text).\n\n``workspace_path`` is set when the attachment was written into the durable\nproject space (附件驻留): a workspace-relative path under ``attachments/`` that\nthe file-download API can serve. ``None`` for directory / conversation chips\n(nothing is written as a workspace file).",
+        "description": "Persisted attachment display metadata (no extracted text).\n\n``workspace_path`` is set when the attachment was written into the durable\nproject space (附件驻留 / 引用即驻留): a workspace-relative path under\n``attachments/`` that the file-download API can serve. ``None`` for directory /\nconversation chips (nothing is written as a workspace file).",
         "properties": {
+          "binary": {
+            "default": false,
+            "title": "Binary",
+            "type": "boolean"
+          },
           "conversation_id": {
             "anyOf": [
               {
@@ -7357,6 +8075,20 @@
           "queued"
         ],
         "title": "SubmitRunRedirectResponse",
+        "type": "object"
+      },
+      "SubmitShowQuizRequest": {
+        "properties": {
+          "guess": {
+            "minLength": 1,
+            "title": "Guess",
+            "type": "string"
+          }
+        },
+        "required": [
+          "guess"
+        ],
+        "title": "SubmitShowQuizRequest",
         "type": "object"
       },
       "SuspensionKind": {
@@ -7614,6 +8346,16 @@
           },
           "cost": {
             "$ref": "#/components/schemas/CostBreakdown"
+          },
+          "estimated_cost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CostBreakdown"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "message_id": {
             "title": "Message Id",
@@ -8174,6 +8916,16 @@
         "properties": {
           "cost": {
             "$ref": "#/components/schemas/CostBreakdown"
+          },
+          "estimated_cost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CostBreakdown"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "requests": {
             "title": "Requests",
@@ -13492,6 +14244,111 @@
         ]
       }
     },
+    "/v1/conversations/{conversation_id}/audit": {
+      "get": {
+        "description": "Conversation-scoped security ledger (owner-scoped); includes preset changes.",
+        "operationId": "list_conversation_audit_v1_conversations__conversation_id__audit_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Optional category filter",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional category filter",
+              "title": "Category"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentAuditListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Conversation Audit",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/v1/conversations/{conversation_id}/audit/file": {
       "get": {
         "description": "File-attribution audit timeline for one workspace path (owner-scoped).",
@@ -14849,7 +15706,7 @@
     },
     "/v1/conversations/{conversation_id}/messages/{message_id}/audit": {
       "get": {
-        "description": "Delegated-turn audit timeline for one assistant message (owner-scoped).",
+        "description": "Turn audit timeline for one assistant message (owner-scoped).",
         "operationId": "list_turn_audit_v1_conversations__conversation_id__messages__message_id__audit_get",
         "parameters": [
           {
@@ -15131,7 +15988,7 @@
     },
     "/v1/conversations/{conversation_id}/messages/{message_id}/resume": {
       "post": {
-        "description": "Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).\n\nThe turn paused at a plan_review / ask_user / team_preview checkpoint and lost its\nlive stream (disconnect / restart); only its persisted frame survived.\n\nSettlement 预写 (D8)：① peek frame → ② ``*_resolved`` 落库成功 → ③ ``claim_paused_turn``\n→ ④ resume pipeline（内原有 emit 照旧，journal 幂等跳过）。settlement 写失败 ⇒ 5xx、\n不 claim、frame 保留可重试。Claim 竞争失败按现状 404。Pipeline 启动失败走现有\nrestore 回滚。\n\n``body.selected`` carries the user's ask_user picks (ignored for plan_review).\nGated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota\n— all BEFORE settlement/claim, so a refused turn keeps its resumable frame.",
+        "description": "Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).\n\nThe turn paused at a plan_review / ask_user / team_preview checkpoint and lost its\nlive stream (disconnect / restart); only its persisted frame survived.\n\nSettlement 预写 (D8)：① peek frame → ② live-task drain（不 cancel；仍 live ⇒ 409）→\n③ ``*_resolved`` 落库成功 → ④ ``claim_paused_turn`` → ⑤ resume pipeline。settlement\n写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状 404。Pipeline 启动\n失败走现有 restore 回滚。\n\n``body.selected`` carries the user's ask_user picks (ignored for plan_review).\nGated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota\n— all BEFORE settlement/claim, so a refused turn keeps its resumable frame.",
         "operationId": "resume_message_v1_conversations__conversation_id__messages__message_id__resume_post",
         "parameters": [
           {
@@ -15417,6 +16274,91 @@
           }
         },
         "summary": "Get Run Llm Window",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/permission-preset": {
+      "put": {
+        "description": "Switch the session permission mode (降档/升档确认由客户端负责).\n\nTakes effect on the next turn / durable resume (gate is built at turn entry).",
+        "operationId": "set_permission_preset_v1_conversations__conversation_id__permission_preset_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermissionPresetUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Permission Preset",
         "tags": [
           "conversations"
         ]
@@ -16896,6 +17838,268 @@
         ]
       }
     },
+    "/v1/conversations/{conversation_id}/workspace/external-grants": {
+      "delete": {
+        "description": "Revoke one grant (by alias or root_id) or all session grants for the conversation.",
+        "operationId": "revoke_external_grants_v1_conversations__conversation_id__workspace_external_grants_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "alias",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Alias"
+            }
+          },
+          {
+            "in": "query",
+            "name": "root_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Root Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke External Grants",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "get": {
+        "operationId": "list_external_grants_v1_conversations__conversation_id__workspace_external_grants_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalGrantListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List External Grants",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "post": {
+        "description": "Register a session read-only mount after the user confirms via folder picker.",
+        "operationId": "grant_external_readonly_v1_conversations__conversation_id__workspace_external_grants_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantExternalReadonlyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalGrantResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Grant External Readonly",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/v1/conversations/{conversation_id}/workspace/files": {
       "get": {
         "description": "List the files in the conversation's scratch workspace (top level or recursive).",
@@ -17465,6 +18669,240 @@
         "summary": "Move Workspace File",
         "tags": [
           "conversations"
+        ]
+      }
+    },
+    "/v1/demo-tape": {
+      "get": {
+        "description": "List available tapes when replay is enabled; 404 when the switch is off.",
+        "operationId": "get_demo_tape_catalog_v1_demo_tape_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoTapeCatalogResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Demo Tape Catalog",
+        "tags": [
+          "demo-tape"
+        ]
+      }
+    },
+    "/v1/demo-tape/prepare": {
+      "post": {
+        "description": "Create cloud session + bind tape; do **not** start a turn.\n\nThe client navigates into the empty conversation; the next user message\ntriggers tape replay (turn_runner divert). ``user_prompt`` is the tape's\nsuggested opening line for the operator to type or paste.",
+        "operationId": "prepare_demo_tape_v1_demo_tape_prepare_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemoTapePrepareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoTapePrepareResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prepare Demo Tape",
+        "tags": [
+          "demo-tape"
+        ]
+      }
+    },
+    "/v1/demo-tape/start": {
+      "post": {
+        "description": "Create cloud session, bind tape, start replay turn (attach via GET …/stream).",
+        "operationId": "start_demo_tape_v1_demo_tape_start_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Client-Platform",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Client-Platform"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemoTapeStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoTapeStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Demo Tape",
+        "tags": [
+          "demo-tape"
         ]
       }
     },
@@ -18260,7 +19698,7 @@
     },
     "/v1/folders/{folder_id}/permanent": {
       "delete": {
-        "description": "彻底删除项目：移除容器；成员对话保留但解除分组（permanent path）.\n\nDistinct from ``DELETE /{folder_id}`` (soft-delete + archive members).",
+        "description": "彻底删除项目：清盘成员对话 + 云端共享工作区/快照，再移除项目行.\n\nDistinct from ``DELETE /{folder_id}`` (soft-delete + archive members).\nLocal-mode OS directories are never touched — only DB + server-side data.",
         "operationId": "delete_folder_permanent_v1_folders__folder_id__permanent_delete",
         "parameters": [
           {
@@ -21110,9 +22548,348 @@
         ]
       }
     },
+    "/v1/simulation/show/episodes/{episode_id}/manifest": {
+      "get": {
+        "operationId": "get_episode_manifest_v1_simulation_show_episodes__episode_id__manifest_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episode_id",
+            "required": true,
+            "schema": {
+              "title": "Episode Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "草稿预览（跳过发布门禁）",
+            "in": "query",
+            "name": "preview",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "草稿预览（跳过发布门禁）",
+              "title": "Preview",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShowManifestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Episode Manifest",
+        "tags": [
+          "simulation-show"
+        ]
+      }
+    },
+    "/v1/simulation/show/episodes/{episode_id}/publish": {
+      "patch": {
+        "description": "发布态门禁位（draft → review → published）。生产环境应再加 admin 鉴权。",
+        "operationId": "patch_episode_publish_v1_simulation_show_episodes__episode_id__publish_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episode_id",
+            "required": true,
+            "schema": {
+              "title": "Episode Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchShowEpisodePublishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShowEpisodeSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Episode Publish",
+        "tags": [
+          "simulation-show"
+        ]
+      }
+    },
+    "/v1/simulation/show/episodes/{episode_id}/quiz": {
+      "post": {
+        "operationId": "post_episode_quiz_v1_simulation_show_episodes__episode_id__quiz_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episode_id",
+            "required": true,
+            "schema": {
+              "title": "Episode Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitShowQuizRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShowQuizSettlementResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Episode Quiz",
+        "tags": [
+          "simulation-show"
+        ]
+      }
+    },
+    "/v1/simulation/show/seasons/{season_id}/episodes": {
+      "get": {
+        "operationId": "list_season_episodes_v1_simulation_show_seasons__season_id__episodes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "season_id",
+            "required": true,
+            "schema": {
+              "title": "Season Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_unpublished",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Unpublished",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShowEpisodeListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Season Episodes",
+        "tags": [
+          "simulation-show"
+        ]
+      }
+    },
     "/v1/usage/summary": {
       "get": {
-        "description": "Account dashboard: today's tokens/cost, the month's cost + per-role payroll,\nthe recent daily-cost trend, and the quota.\n\nWindows are bounded at the current UTC day / month start (MVP — a per-user\ntimezone is a later refinement). ``month_by_role`` splits this month's spend by\nrole (团队工资单, spend-desc) — the multi-agent differentiator;\n``recent_daily_cost`` is the last ``_TREND_DAYS`` UTC days (zero-filled,\noldest-first) for the sparkline. Also carries ``cny_per_usd`` so the client\nformats money from the single server-owned rate.",
+        "description": "Account dashboard: today's tokens/cost, the month's cost + per-role payroll,\nthe recent daily-cost trend, and the quota.\n\nWindows are bounded at the current UTC day / month start (MVP — a per-user\ntimezone is a later refinement). ``month_by_role`` splits this month's spend by\nrole (团队工资单, spend-desc) — the multi-agent differentiator;\n``recent_daily_cost`` is the last ``_TREND_DAYS`` UTC days (zero-filled,\noldest-first) for the sparkline. Also carries ``cny_per_usd`` so the client\nformats money from the single server-owned rate.\n\n``quota`` mirrors what ``enforce_quota`` will actually apply to this user\n(D7): per-user override columns first, else free-tier defaults on a byok\ndeployment's platform-paid path (keyless free-tier riders), else global\n``quota_*`` — so the meters never show a cap the gate wouldn't enforce.",
         "operationId": "get_usage_summary_v1_usage_summary_get",
         "parameters": [
           {

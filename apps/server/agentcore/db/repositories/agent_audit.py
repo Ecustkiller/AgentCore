@@ -88,6 +88,34 @@ class AgentAuditEventRepository:
         )
         return list(result.scalars().all())
 
+    async def next_seq_for_turn(self, *, turn_id: str) -> int:
+        """Next seq for ``(turn_id, seq)`` uniqueness (meta / out-of-turn rows)."""
+        result = await self._session.execute(
+            select(func.coalesce(func.max(AgentAuditEvent.seq), -1)).where(
+                AgentAuditEvent.turn_id == turn_id
+            )
+        )
+        return int(result.scalar_one()) + 1
+
+    async def list_for_conversation(
+        self,
+        *,
+        conversation_id: str,
+        limit: int = 200,
+        category: str | None = None,
+    ) -> list[AgentAuditEvent]:
+        """Recent conversation-scoped audit trail (security ledger / preset history)."""
+        stmt = select(AgentAuditEvent).where(
+            AgentAuditEvent.conversation_id == conversation_id
+        )
+        if category:
+            stmt = stmt.where(AgentAuditEvent.category == category)
+        stmt = stmt.order_by(AgentAuditEvent.created_at.desc()).limit(limit)
+        result = await self._session.execute(stmt)
+        rows = list(result.scalars().all())
+        rows.reverse()  # chronological for the ledger UI
+        return rows
+
     async def list_for_file(
         self,
         *,

@@ -12,7 +12,7 @@ import { UserInterjection } from "./UserInterjection";
 import { roundAnchorId, speakerAnchorId } from "./anchors";
 import {
   type DebateArenaLayout,
-  partitionProCon,
+  partitionSides,
 } from "./debateLayoutPreference";
 import { openingText } from "./openingText";
 
@@ -97,6 +97,17 @@ export function Transcript({
           round.sides.length > 0 &&
           round.sides.every((s) => s.run && s.run.status !== "running");
         const showModeratorPending = round.inFlight && allDone;
+        const crossExamRunning = round.crossExam.some(
+          (cx) => cx.answerRun?.status === "running",
+        );
+        // 拟质询窗口：本场开质询 + 立论已完 + 质询问答尚未出现。
+        // 小结窗口：质询作答已结束，或本场未开质询（快速对碰 / 圆桌 / 老事件缺字段）。
+        const pendingKind =
+          model.crossExamEnabled &&
+          round.crossExam.length === 0 &&
+          !crossExamRunning
+            ? "cross_exam"
+            : "summary";
         const focusText =
           round.focus && round.focus !== topicMotion ? round.focus : "";
 
@@ -121,7 +132,11 @@ export function Transcript({
             {useSplit ? (
               <div className="grid grid-cols-2 items-start gap-4">
                 {(() => {
-                  const { pro, con } = partitionProCon(round.sides);
+                  const { pro, con } = partitionSides(
+                    round.sides,
+                    (s) => s.sideKey,
+                    (s) => s.stance,
+                  );
                   return (
                     <>
                       <div className="min-w-0">
@@ -156,9 +171,15 @@ export function Transcript({
                 model={moderatorModel}
               />
             ) : (
-              showModeratorPending && (
-                <JudgeNote text="" pending model={moderatorModel} />
-              )
+              showModeratorPending &&
+                !crossExamRunning && (
+                  <JudgeNote
+                    text=""
+                    pending
+                    pendingKind={pendingKind}
+                    model={moderatorModel}
+                  />
+                )
             )}
           </div>
         );

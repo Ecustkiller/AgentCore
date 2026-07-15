@@ -16,6 +16,7 @@ import sys
 import time
 from pathlib import Path
 
+from agentcore.core.log_context import bind_log_context
 from agentcore.db.base import async_session_factory
 from agentcore.simulation.llm import SimLlmNotConfigured, resolve_text_mode
 
@@ -263,6 +264,8 @@ async def cmd_spike02() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Synthetic batch traffic — filterable in logs/dev.jsonl (absence of ``traffic`` = real).
+    bind_log_context(traffic="eval")
     parser = argparse.ArgumentParser(description="AI Town MVP spikes")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("spike03", help="SPIKE-03 mock smoke")

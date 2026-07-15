@@ -195,6 +195,17 @@ namespace AgentTown.Town
                 return;
             }
 
+            // Editor-authored transparent URP Unlit (AgentTownProjectSetup.EnsureRegionHeatMaterial):
+            // blend state + _SURFACE_TYPE_TRANSPARENT are serialized, so the variant ships in
+            // players. Runtime `_Surface=1` alone leaves the opaque blend state → the old
+            // solid "green wall" slabs on WebGL.
+            sharedMaterial = Resources.Load<Material>("Town/Materials/RegionHeatOverlay");
+            if (sharedMaterial != null)
+            {
+                return;
+            }
+
+            Debug.LogWarning("[AgentTown] RegionHeatOverlay.mat missing — building runtime fallback");
             Shader shader =
                 Shader.Find("Universal Render Pipeline/Unlit")
                 ?? Shader.Find("Unlit/Color")
@@ -210,14 +221,17 @@ namespace AgentTown.Town
             if (sharedMaterial.HasProperty("_Surface"))
             {
                 sharedMaterial.SetFloat("_Surface", 1f); // Transparent
+                sharedMaterial.SetFloat("_Blend", 0f);   // Alpha
+                sharedMaterial.SetFloat(
+                    "_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                sharedMaterial.SetFloat(
+                    "_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                sharedMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                sharedMaterial.SetOverrideTag("RenderType", "Transparent");
             }
 
             sharedMaterial.SetFloat("_ZWrite", 0f);
             sharedMaterial.renderQueue = 3000;
-#if UNITY_WEBGL && !UNITY_EDITOR
-            // Slightly cheaper transparent pass: keep mood tint but avoid overdraw spikes.
-            sharedMaterial.SetFloat("_QueueOffset", -10f);
-#endif
         }
 
         private static void SetColor(Renderer renderer, Color color)

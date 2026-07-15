@@ -80,9 +80,10 @@ async def delete_folder_permanent(
     folder_id: str,
     user: AuthUser,
 ):
-    """彻底删除项目：移除容器；成员对话保留但解除分组（permanent path）.
+    """彻底删除项目：清盘成员对话 + 云端共享工作区/快照，再移除项目行.
 
     Distinct from ``DELETE /{folder_id}`` (soft-delete + archive members).
+    Local-mode OS directories are never touched — only DB + server-side data.
     """
     deleted = await permanent_delete_folder(folder_id=folder_id, user_id=user.user_id)
     if not deleted:

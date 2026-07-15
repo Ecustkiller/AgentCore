@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.runtime.context.project_profile import ProjectProfile
+from agentcore.runtime.context.workspace_profile import WorkspaceProfile
 from agentcore.tools.builtin.test_run import (
     _ALLOWED_PREFIXES,
     TestRunTool,
@@ -59,7 +59,7 @@ def _ctx(backend: _FakeBackend) -> ToolContext:
     )
 
 
-def _make_profile(**kwargs: Any) -> ProjectProfile:
+def _make_profile(**kwargs: Any) -> WorkspaceProfile:
     defaults: dict[str, Any] = {
         "languages": [],
         "frameworks": [],
@@ -67,7 +67,7 @@ def _make_profile(**kwargs: Any) -> ProjectProfile:
         "test_commands": [],
     }
     defaults.update(kwargs)
-    return ProjectProfile(**defaults)
+    return WorkspaceProfile(**defaults)
 
 
 # --- approval posture (thin nail; full gate coverage lives in test_approvals) ---
@@ -159,7 +159,7 @@ async def test_execute_rejects_when_command_leaves_whitelist(
         return "pytest"
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.test_run.detect_project_profile",
+        "agentcore.tools.builtin.test_run.detect_workspace_profile",
         _fake_profile,
     )
     monkeypatch.setattr(
@@ -249,7 +249,7 @@ async def test_execute_fails_cleanly_when_framework_undetectable(
         return _make_profile()
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.test_run.detect_project_profile",
+        "agentcore.tools.builtin.test_run.detect_workspace_profile",
         _empty_profile,
     )
 

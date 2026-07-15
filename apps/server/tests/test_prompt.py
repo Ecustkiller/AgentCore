@@ -229,18 +229,21 @@ def test_core_states_coordinator_tool_boundary():
 
 
 def test_core_teaches_split_criterion_over_count():
-    # 拆分判据 = 活儿的自然结构（子任务是否真正独立可并行 / 需不同专长），NOT 任务数量.
-    # The criterion is BIDIRECTIONAL: both over-splitting and collapsing a naturally
-    # multi-part deliverable into one worker are deviations. The always-on core keeps
-    # the forward spine; the reverse guards (don't over-split / don't under-team) moved
-    # to team_orchestration_advanced (P3) — so a refactor can't quietly revert to a
-    # single-direction「别拆碎」brake.
+    # 协作优先重设计阶段 2：组队门槛 = 可分解或质量面；形状从任务自然结构推导。
+    # 判据仍是结构（独立可并行 / 专长 / 多部件），NOT 任务数量；旧「能就不拆」已推翻。
     hint = _CEO_CORE_HINT
     assert "独立" in hint and "并行" in hint and "专长" in hint
-    assert "不是数量本身" in hint
+    assert "不是你能不能写" in hint  # 判据=结构，「我自己写更快」不构成直答理由
+    assert "拿不准也组队" in hint
+    assert "可分解" in hint and "质量面" in hint
+    assert "finalize=true" in hint and "机械单步" in hint
     skill = _TEAM_ORCHESTRATION_ADVANCED
-    assert "能就不拆" in skill  # over-splitting guard
-    assert "你已确认需要多 worker" in skill  # under-teaming guard
+    assert "形状词汇" in skill
+    assert "实质任务默认组队" in skill
+    assert "教学示例形状" in skill and "对照学形状" in skill
+    assert "免手搓" not in skill  # 旧「是就直接套 / 免手搓」广告口径已撤
+    assert "并列对象分组" in skill and "独立多透镜诊断" in skill
+    assert "实现+独立验证" in skill  # 构建轻档双人底线
 
 
 def test_skill_teaches_same_layer_pipeline():
@@ -294,6 +297,19 @@ def test_core_teaches_execution_and_recall_routing():
     assert "【回忆 / 核实产出】" in hint
     assert "file_list" in hint
     assert "口头拒绝" in hint
+
+
+def test_core_guides_out_of_workspace_absolute_paths():
+    # 引用即驻留 + W3 目录授权：CEO 见区外路径时按单文件/目录分流。
+    hint = _CEO_CORE_HINT
+    assert "【工作区外路径 / 本机绝对路径】" in hint
+    assert "不要" in hint and "硬读" in hint
+    assert "ask_user" in hint
+    assert "attachments/" in hint
+    assert "回形针" in hint or "@" in hint
+    assert "grant_readonly_folder" in hint
+    assert "external/" in hint
+    assert "只读" in hint
 
 
 def test_core_points_to_consult_skill_and_directory():

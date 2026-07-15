@@ -25,6 +25,16 @@ import {
   type OutboxStatusSnapshot,
   type OutboxSyncedPayload,
 } from "@shared/outbox-contract";
+import {
+  deriveInterruptedAfterDecision,
+  shouldRetainOpenForContinue,
+} from "@shared/recoveryFold";
+import type {
+  SidecarCitation,
+  SidecarInterruptedAfterDecision,
+  SidecarRunsPayload,
+  SidecarUnsyncedTurnSummary,
+} from "@shared/sidecar-contract";
 import { BrowserWindow, app, ipcMain } from "electron";
 import { bearerPostJson, refreshAccessToken } from "./auth-client";
 
@@ -33,6 +43,10 @@ const PHASE_OPEN = "open";
 
 const CHANNEL_CAPTAIN_CONTENT = "captain:content";
 const CHANNEL_CAPTAIN_REASONING = "captain:reasoning";
+
+/** Per-record writeback backoff: base 2s, double each failure, cap 5 min + jitter. */
+const BACKOFF_BASE_MS = 2_000;
+const BACKOFF_MAX_MS = 5 * 60_000;
 
 export function sidecarDataDir(): string {
   return join(app.getPath("userData"), "sidecar");
@@ -46,7 +60,11 @@ export function pausedDir(): string {
   return join(sidecarDataDir(), "paused");
 }
 
-interface OutboxRecord {
+export function deadLetterDir(): string {
+  return join(sidecarDataDir(), "dead-letter");
+}
+
+export interface OutboxRecord {
   schema_version?: number;
   user_message_id: string;
   conversation_id: string;
@@ -73,6 +91,34 @@ interface OutboxRecord {
   finish_reason?: string | null;
   phase?: string;
   updated_at?: number;
+  /**
+   * Desktop-owned retry bookkeeping (optional). Absent on fresh sidecar files;
+   * written by writebacker after transient failures.
+   */
+  retry_count?: number;
+  /** Epoch ms — skip POST until this time (unless flushTurn bypasses). */
+  next_attempt_at?: number;
+}
+
+/**
+ * HTTP 4xx except 401/408/429 → permanent (dead-letter).
+ * 401/408/429/5xx/network (status 0) → transient (backoff retry).
+ */
+export function isPermanentHttpFailure(status: number): boolean {
+  if (status < 400 || status >= 500) return false;
+  return status !== 401 && status !== 408 && status !== 429;
+}
+
+/** Delay after `retryCount` failures (1-based). Caps at 5 min; adds up to 25% jitter. */
+export function computeBackoffDelayMs(
+  retryCount: number,
+  random: () => number = Math.random,
+): number {
+  const failures = Math.max(1, retryCount);
+  const exp = Math.min(failures - 1, 20);
+  const base = Math.min(BACKOFF_BASE_MS * 2 ** exp, BACKOFF_MAX_MS);
+  const jitter = Math.floor(random() * base * 0.25);
+  return base + jitter;
 }
 
 function journalEntriesFromMap(
@@ -94,7 +140,7 @@ function journalEntriesFromMap(
  * content / reasoning_content (incomplete salvage). Returns true when the
  * record has any salvageable body after this fill.
  */
-function fillFromCaptainStreamSegments(record: OutboxRecord): boolean {
+export function fillFromCaptainStreamSegments(record: OutboxRecord): boolean {
   const segs = record.stream_segments;
   if (!segs || typeof segs !== "object") {
     return (
@@ -193,6 +239,46 @@ async function deleteRecord(userMessageId: string): Promise<void> {
   }
 }
 
+/** Move outbox record to dead-letter/ (keep body for forensics; stop polling). */
+async function moveToDeadLetter(
+  record: OutboxRecord,
+  status: number,
+): Promise<void> {
+  console.error(
+    "[outbox] permanent failure → dead-letter",
+    record.user_message_id,
+    status,
+  );
+  const destDir = deadLetterDir();
+  await mkdir(destDir, { recursive: true });
+  const src = join(outboxDir(), `${record.user_message_id}.json`);
+  const dest = join(destDir, `${record.user_message_id}.json`);
+  try {
+    await rename(src, dest);
+  } catch (err) {
+    console.error(
+      "[outbox] dead-letter move failed",
+      record.user_message_id,
+      err,
+    );
+  }
+}
+
+async function recordTransientFailure(record: OutboxRecord): Promise<void> {
+  const count = (record.retry_count ?? 0) + 1;
+  record.retry_count = count;
+  record.next_attempt_at = Date.now() + computeBackoffDelayMs(count);
+  try {
+    await writeRecord(record);
+  } catch (err) {
+    console.error(
+      "[outbox] retry state write failed",
+      record.user_message_id,
+      err,
+    );
+  }
+}
+
 /** Recent successful writebacks — fills synthetic flushTurn ack when the file is already gone. */
 const recentSyncedConversation = new Map<string, string>();
 
@@ -213,12 +299,19 @@ export async function drainOutbox(): Promise<OutboxStatusSnapshot> {
 async function drainOutboxDetailed(opts?: {
   /** Promote abandoned open records (app-restart salvage). Never use while turns may still run. */
   salvageOpen?: boolean;
+  /** User-initiated flushTurn: ignore next_attempt_at and try immediately. */
+  bypassBackoff?: boolean;
 }): Promise<{
   status: OutboxStatusSnapshot;
   synced: OutboxSyncedPayload[];
 }> {
-  if (drainInFlight) return drainInFlight;
   const salvageOpen = opts?.salvageOpen === true;
+  const bypassBackoff = opts?.bypassBackoff === true;
+  // Coalesce regular polls only; salvage / flushTurn wait then run their own pass.
+  if (drainInFlight) {
+    if (!salvageOpen && !bypassBackoff) return drainInFlight;
+    await drainInFlight;
+  }
   drainInFlight = (async () => {
     const synced: OutboxSyncedPayload[] = [];
     const records = await readOutboxRecords();
@@ -227,6 +320,16 @@ async function drainOutboxDetailed(opts?: {
       // Body may come from content, or (D6 hard-kill) captain stream_segments when
       // content was never checkpointed. Regular polling must NOT promote open rows.
       if (salvageOpen && record.phase === PHASE_OPEN) {
+        // D2: settled-but-unterminated turns keep open so frameless continue still
+        // has local journal + resume_frame (do not salvage→ready→sync-delete).
+        if (
+          shouldRetainOpenForContinue({
+            finishReason: record.finish_reason,
+            journal: record.journal as Record<string, unknown> | undefined,
+          })
+        ) {
+          continue;
+        }
         const salvageable = fillFromCaptainStreamSegments(record);
         if (salvageable) {
           record.phase = PHASE_READY;
@@ -248,9 +351,27 @@ async function drainOutboxDetailed(opts?: {
       ) {
         continue;
       }
+      if (
+        !bypassBackoff &&
+        typeof record.next_attempt_at === "number" &&
+        record.next_attempt_at > Date.now()
+      ) {
+        continue;
+      }
 
       const path = `/v1/conversations/${record.conversation_id}/local-turns`;
-      const result = await bearerPostJson(path, toRecordTurnBody(record));
+      let result: { ok: boolean; status: number; body: unknown };
+      try {
+        result = await bearerPostJson(path, toRecordTurnBody(record));
+      } catch (err) {
+        console.error(
+          "[outbox] writeback network error",
+          record.user_message_id,
+          err,
+        );
+        await recordTransientFailure(record);
+        continue;
+      }
       if (!result.ok) {
         console.error(
           "[outbox] writeback failed",
@@ -258,6 +379,11 @@ async function drainOutboxDetailed(opts?: {
           result.status,
           result.body,
         );
+        if (isPermanentHttpFailure(result.status)) {
+          await moveToDeadLetter(record, result.status);
+        } else {
+          await recordTransientFailure(record);
+        }
         continue;
       }
       const body = result.body as {
@@ -302,6 +428,75 @@ export async function statusSnapshot(): Promise<OutboxStatusSnapshot> {
   return { pending };
 }
 
+/**
+ * Project outbox records for a conversation into recovery summaries (D3/D5).
+ *
+ * Fills empty open-phase bodies from captain stream_segments. Does **not**
+ * promote open→ready (that stays in startup salvage). Caller filters out the
+ * live turn's open row when attaching.
+ */
+/**
+ * Journal-fold projection of interrupted_after_decision for a conversation (D2).
+ * Uses outbox journal facts — not ``unsynced.length``.
+ */
+export async function listInterruptedAfterDecision(
+  conversationId: string,
+  liveMessageId?: string | null,
+): Promise<SidecarInterruptedAfterDecision[]> {
+  const records = await readOutboxRecords();
+  const out: SidecarInterruptedAfterDecision[] = [];
+  for (const record of records) {
+    if (record.conversation_id !== conversationId) continue;
+    const hit = deriveInterruptedAfterDecision({
+      conversationId,
+      userMessageId: record.user_message_id,
+      messageId: record.message_id,
+      finishReason: record.finish_reason,
+      journal: record.journal as Record<string, unknown> | undefined,
+      liveMessageId,
+    });
+    if (hit) out.push(hit);
+  }
+  return out;
+}
+
+export async function listUnsyncedSummaries(
+  conversationId: string,
+): Promise<SidecarUnsyncedTurnSummary[]> {
+  const records = await readOutboxRecords();
+  const out: SidecarUnsyncedTurnSummary[] = [];
+  for (const record of records) {
+    if (record.conversation_id !== conversationId) continue;
+    if (record.phase !== PHASE_OPEN && record.phase !== PHASE_READY) continue;
+    // Mutate a shallow copy so we don't rewrite the on-disk open record here.
+    const view: OutboxRecord = {
+      ...record,
+      stream_segments: record.stream_segments,
+    };
+    fillFromCaptainStreamSegments(view);
+    out.push({
+      user_message_id: view.user_message_id,
+      user_message: view.user_message || "",
+      message_id: view.message_id ?? null,
+      trace_id: view.trace_id || "",
+      phase: view.phase === PHASE_READY ? "ready" : "open",
+      updated_at: view.updated_at ?? 0,
+      content: view.content || "",
+      reasoning_content: view.reasoning_content ?? null,
+      citations: (view.citations as SidecarCitation[]) || [],
+      runs: (view.runs as SidecarRunsPayload) ?? null,
+      finish_reason: view.finish_reason ?? null,
+      input_tokens: view.input_tokens ?? 0,
+      output_tokens: view.output_tokens ?? 0,
+      reasoning_tokens: view.reasoning_tokens ?? 0,
+      cache_hit_tokens: view.cache_hit_tokens ?? 0,
+      cache_miss_tokens: view.cache_miss_tokens ?? 0,
+    });
+  }
+  out.sort((a, b) => a.updated_at - b.updated_at);
+  return out;
+}
+
 export async function flushTurn(
   userMessageId: string,
 ): Promise<OutboxFlushTurnResult> {
@@ -309,7 +504,8 @@ export async function flushTurn(
   const deadline = Date.now() + 15_000;
   let lastConversationId = "";
   while (Date.now() < deadline) {
-    const { synced } = await drainOutboxDetailed();
+    // Bypass backoff so an explicit user wait is not stuck behind next_attempt_at.
+    const { synced } = await drainOutboxDetailed({ bypassBackoff: true });
     const hit = synced.find((s) => s.userMessageId === userMessageId);
     if (hit) return { ok: true, synced: hit };
 

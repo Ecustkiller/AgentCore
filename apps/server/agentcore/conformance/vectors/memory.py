@@ -37,7 +37,7 @@ class MemoryConsolidationVector:
     require_cold_start_banner: bool = False
 
     def parsed_ops(self) -> list:
-        return parse_memory_ops(self.golden_raw, project_id=self.input.project_id)
+        return parse_memory_ops(self.golden_raw, folder_id=self.input.folder_id)
 
     def validate(self) -> None:
         """Assert golden parses and meets this vector's hand-verified expectations."""

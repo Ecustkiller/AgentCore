@@ -8,6 +8,10 @@ import {
 } from "@/hooks/useConversations";
 import { queryClient } from "@/lib/queryClient";
 import { conversationKeys } from "@/lib/queryKeys";
+import {
+  TITLE_MAX_CHARS,
+  provisionalConversationTitle,
+} from "@/services/conversations";
 import type { Conversation } from "@/stores/conversation";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -112,5 +116,22 @@ describe("conversation list cache helpers", () => {
       expect(getConversations().map((x) => x.id)).toEqual(["a", "b", "c"]);
       expect(getConversations()[2].updatedAt).toBe("2020-01-01T00:00:00.000Z");
     });
+  });
+});
+
+describe("provisionalConversationTitle", () => {
+  it("returns the trimmed message when within TITLE_MAX_CHARS", () => {
+    expect(provisionalConversationTitle("  帮我写周报  ")).toBe("帮我写周报");
+  });
+
+  it("truncates to TITLE_MAX_CHARS with ellipsis", () => {
+    const long = "题".repeat(TITLE_MAX_CHARS + 8);
+    expect(provisionalConversationTitle(long)).toBe(
+      `${"题".repeat(TITLE_MAX_CHARS)}…`,
+    );
+  });
+
+  it("falls back to 新对话 for blank input", () => {
+    expect(provisionalConversationTitle("   ")).toBe("新对话");
   });
 });

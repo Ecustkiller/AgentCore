@@ -87,6 +87,7 @@ function mkRun(
     checkpoint: null,
     receivedContext: [],
     escalations: [],
+    process: [],
     ...over,
   };
 }
@@ -103,6 +104,8 @@ function mkExec(over: Partial<Execution>): Execution {
     batches: [],
     debate: null,
     debateRounds: [],
+    crossExamEnabled: false,
+    debateOpening: null,
     teamNotes: [],
     ...over,
   };

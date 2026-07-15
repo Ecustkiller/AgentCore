@@ -1,4 +1,4 @@
-"""举证责任·证据状态铁律（P3，辩论编排设计.md §4-2.3 契约②）自测（per-PR 零 LLM）。
+﻿"""举证责任·证据状态铁律（P3，辩论编排设计.md §4-2.3 契约②）自测（per-PR 零 LLM）。
 
 方案 A（内联标记）的验收面是【prompt 契约】：辩手被要求给关键事实主张标 `【已核实·出处】`/
 `【待核实·推断】`，主持人质询盯 `待核实` 当决定性论据、裁判据标记记分与罚分（诚实标注不罚、
@@ -30,11 +30,19 @@ from agentcore.runtime.debate.moderator import (
     _CROSS_EXAM_SYSTEM,
 )
 from agentcore.runtime.debate.moderator_brief import _as_handoffs
-from agentcore.tools.builtin.debate.prompt import (
+from agentcore.runtime.debate.prompt import (
+    ARGUMENT_SKELETON_RULE,
+    EVIDENCE_NOTES_SPEC,
     EVIDENCE_RULE,
+    NO_PREAMBLE_RULE,
     SEARCH_QUERY_RULE,
+    closing_task,
     cx_answer_feedback,
+    cx_draft_brief,
     debater_task,
+    draft_system,
+    opening_draft_brief,
+    round_draft_brief,
     round_feedback,
     side_system,
 )
@@ -114,6 +122,63 @@ def test_side_system_carries_search_query_rule():
     assert "空结果" in text and "再搜一次" in text  # 空→删词重搜，别当「不存在」
 
 
+def test_side_system_omits_preamble_and_skeleton():
+    """检索侧 side_system 不含前言/骨架（二者迁入成稿 draft_system）。"""
+    text = side_system(_config(), _two_sides()[0])
+    assert NO_PREAMBLE_RULE not in text
+    assert ARGUMENT_SKELETON_RULE not in text
+    assert EVIDENCE_RULE in text and SEARCH_QUERY_RULE in text
+
+
+def test_draft_system_carries_no_preamble_and_opening_skeleton():
+    """成稿 draft_system：全 beat 禁前言；立论/续辩另挂论点骨架。"""
+    cfg, side = _config(), _two_sides()[0]
+    opening = draft_system(cfg, side, beat="opening")
+    cont = draft_system(cfg, side, beat="continue")
+    cx = draft_system(cfg, side, beat="cross_exam")
+    closing = draft_system(cfg, side, beat="closing")
+    assert NO_PREAMBLE_RULE in opening
+    assert ARGUMENT_SKELETON_RULE in opening
+    assert ARGUMENT_SKELETON_RULE in cont
+    assert ARGUMENT_SKELETON_RULE not in cx
+    assert ARGUMENT_SKELETON_RULE not in closing
+    assert "### 质询一" in NO_PREAMBLE_RULE
+
+
+def test_research_tasks_ask_for_evidence_notes_not_speech():
+    """检索阶段交付物 = 证据笔记；成稿 brief 才是发言任务。"""
+    cfg, sides = _config(), _two_sides()
+    task_payload = debater_task(cfg, sides[0], 0, round_no=1, focus="成本")
+    assert task_payload["research_then_draft"] is True
+    assert EVIDENCE_NOTES_SPEC in task_payload["task"]
+    assert ARGUMENT_SKELETON_RULE not in task_payload["task"]
+    assert ARGUMENT_SKELETON_RULE in task_payload["draft_system"]
+    assert "开场立论" in task_payload["draft_brief"] or "立论" in task_payload["draft_brief"]
+
+    fb = round_feedback(cfg, sides[0], 2, "风险", _last_round())
+    assert EVIDENCE_NOTES_SPEC in fb
+    assert ARGUMENT_SKELETON_RULE not in fb
+    brief = round_draft_brief(cfg, sides[0], 2, "风险", _last_round())
+    assert "完整发言" in brief
+    assert EVIDENCE_NOTES_SPEC not in brief
+
+
+def test_debater_task_and_round_feedback_carry_argument_skeleton():
+    """论点骨架只进立论/续辩成稿 draft_system；质询/结辩不套立论骨架。"""
+    cfg, sides = _config(), _two_sides()
+    assert "### " in ARGUMENT_SKELETON_RULE
+    assert "X方立论" in ARGUMENT_SKELETON_RULE or "开场立论" in ARGUMENT_SKELETON_RULE
+    assert ARGUMENT_SKELETON_RULE in draft_system(cfg, sides[0], beat="opening")
+    assert ARGUMENT_SKELETON_RULE in draft_system(cfg, sides[0], beat="continue")
+
+    cx = cx_answer_feedback(cfg, sides[0], 1, "成本", ["出处？"])
+    closing = closing_task(cfg, sides[0])
+    assert ARGUMENT_SKELETON_RULE not in cx
+    assert ARGUMENT_SKELETON_RULE not in closing
+    assert ARGUMENT_SKELETON_RULE not in draft_system(cfg, sides[0], beat="cross_exam")
+    assert ARGUMENT_SKELETON_RULE not in draft_system(cfg, sides[0], beat="closing")
+
+
 def test_debater_task_reminds_evidence_markers():
     """首轮立论 task 提醒按证据状态标注（系统提示扛全量、task 只轻提醒）。"""
     task = debater_task(_config(), _two_sides()[0], 0, round_no=1, focus="成本")["task"]
@@ -127,16 +192,30 @@ def test_round_feedback_reminds_evidence_markers():
 
 
 def test_cx_answer_feedback_uses_canonical_markers():
-    """质询作答 feedback 要求结构化 JSON，并保留证据状态铁律标记。"""
-    fb = cx_answer_feedback(_config(), _two_sides()[0], 1, "成本", ["你这条有出处吗？"])
-    assert "【已核实" in fb and "【待核实" in fb
-    assert "JSON" in fb
-    assert "question_index" in fb
-    assert "directly_addressed" not in fb
-    # 取证预算：优先既有材料，确需补证至多 1–2 次检索，拿不出出处诚实标待核实
-    assert "优先基于已有调研与辩论材料作答" in fb
-    assert "至多 1–2 次检索" in fb
-    assert "【证据状态铁律】" in fb
+    """质询检索 feedback 要笔记；成稿 brief 要求 markdown 标题体 + 证据标记。"""
+    cfg, side = _config(), _two_sides()[0]
+    qs = ["你这条有出处吗？"]
+    research = cx_answer_feedback(cfg, side, 1, "成本", qs)
+    assert EVIDENCE_NOTES_SPEC in research
+    assert "需要补证就查" in research
+    assert "别反复空搜" in research
+    assert "至多 1–2 次检索" not in research
+
+    brief = cx_draft_brief(cfg, side, 1, "成本", qs)
+    assert "【已核实" in brief and "【待核实" in brief
+    assert "### 质询一" in brief
+    assert "question_index" not in brief
+    assert "JSON" not in brief or "不要输出 JSON" in brief
+    assert "directly_addressed" not in brief
+    assert "【证据状态铁律】" in brief
+
+
+def test_opening_draft_brief_is_speech_not_notes():
+    """首轮成稿 brief 是发言任务，不含证据笔记规格。"""
+    brief = opening_draft_brief(_config(), _two_sides()[0], focus="成本")
+    assert EVIDENCE_NOTES_SPEC not in brief
+    assert "立论" in brief
+    assert "【已核实" in brief
 
 
 # --- 主持人侧：质询盯待核实、裁判据标记记分/罚且诚实不罚 ---------------------

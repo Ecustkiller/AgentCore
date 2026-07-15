@@ -1,3 +1,4 @@
+import { NODE_WIDTH } from "@/lib/elk-layout";
 import type { Execution } from "@/stores/execution";
 import { debateBeatLabel } from "@/stores/execution";
 import { describe, expect, it } from "vitest";
@@ -203,16 +204,15 @@ describe("computeDebateStageBands", () => {
     expect(bands[1]?.x).toBeLessThan(bands[2]?.x ?? 0);
   });
 
-  it("folds the moderator opening into the 第1轮 band (widest stage)", () => {
+  it("anchors 第1轮 label on the debater column (ignores moderator x)", () => {
     const exec = debateStageExecution(debateMultibeatRuns());
     const bands = computeDebateStageBands(exec, positions, "captain");
     const first = bands[0];
-    // 第1轮 spans moderator(x=0) → round-1 column, wider than a single-column stage.
-    expect(first?.x).toBeLessThanOrEqual(0);
-    expect(first?.w ?? 0).toBeGreaterThan(bands[1]?.w ?? 0);
-    // label anchored centered inside its own band.
-    expect(first?.labelX ?? 0).toBeGreaterThan(first?.x ?? 0);
-    expect(first?.labelX ?? 0).toBeLessThan((first?.x ?? 0) + (first?.w ?? 0));
+    const second = bands[1];
+    // 第1轮只含辩手列 x=260，与第2轮同宽；标签居中于辩手列，不因主持(x=0)左偏。
+    expect(first?.w).toBe(second?.w);
+    expect(first?.labelX).toBe(260 + NODE_WIDTH / 2);
+    expect(second?.labelX).toBe(520 + NODE_WIDTH / 2);
   });
 
   it("never turns cross-exam into its own stage (3 stages only)", () => {

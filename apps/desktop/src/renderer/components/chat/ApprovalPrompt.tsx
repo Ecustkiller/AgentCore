@@ -114,6 +114,10 @@ export function ApprovalCard({
   const argEntries = Object.entries(approval.arguments);
   const busy = approval.resolving;
   const isFileOp = isFileOpTool(approval.toolName);
+  const circuitBreakerHint =
+    typeof approval.arguments.circuit_breaker_hint === "string"
+      ? approval.arguments.circuit_breaker_hint.trim()
+      : "";
 
   const codeText =
     isCodeExecute && typeof approval.arguments.code === "string"
@@ -128,10 +132,19 @@ export function ApprovalCard({
     if (!isCodeExecute) return approval.arguments;
     return Object.fromEntries(
       Object.entries(approval.arguments).filter(
-        ([key]) => key !== "code" && key !== "purpose",
+        ([key]) =>
+          key !== "code" && key !== "purpose" && key !== "circuit_breaker_hint",
       ),
     );
   }, [approval.arguments, isCodeExecute]);
+  const displayArgs = useMemo(() => {
+    if (isCodeExecute) return otherArgs;
+    return Object.fromEntries(
+      Object.entries(approval.arguments).filter(
+        ([key]) => key !== "circuit_breaker_hint",
+      ),
+    );
+  }, [approval.arguments, isCodeExecute, otherArgs]);
 
   const onDecide = (decision: ApprovalDecision) => {
     setClicked(decision);
@@ -193,6 +206,11 @@ export function ApprovalCard({
               ))}
             </div>
           )}
+          {circuitBreakerHint && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              安全熔断升格审批（启发式兜底，并非完整拦截）：{circuitBreakerHint}
+            </p>
+          )}
           {argEntries.length > 0 && (
             <Button
               variant="ghost"
@@ -225,15 +243,15 @@ export function ApprovalCard({
               {JSON.stringify(otherArgs, null, 2)}
             </pre>
           )}
-          {expanded && !isCodeExecute && argEntries.length > 0 && (
+          {expanded && !isCodeExecute && Object.keys(displayArgs).length > 0 && (
             <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-card/70 p-2 font-mono text-xs text-foreground">
-              {JSON.stringify(approval.arguments, null, 2)}
+              {JSON.stringify(displayArgs, null, 2)}
             </pre>
           )}
         </div>
       </div>
 
-      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5 pl-6">
         <Button
           variant="primary"
           icon={spinnerOr("approve", <Check size={13} />)}

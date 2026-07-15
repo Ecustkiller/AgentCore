@@ -72,8 +72,7 @@ apps/desktop/build/*
 !.env.*.example
 # Intentionally tracked: public API URL only (no secrets)
 !apps/desktop/.env.production
-# Local dev API credentials (probe scripts only)
-config/codex-credentials.json
+# Local probe script outputs
 apps/server/.pytest-result.txt
 apps/server/_pytest*.txt
 apps/server/_pf*.txt
@@ -135,3 +134,7 @@ data/
 
 # Cursor 对话存档（PChat 生成的上下文归档，不应进入代码仓库）
 杂项/
+
+# Dev-only demo tape session bindings (local conversation_id → tape map)
+demos/bindings.json
+demos/tapes/_*.json

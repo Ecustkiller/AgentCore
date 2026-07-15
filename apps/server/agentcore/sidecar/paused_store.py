@@ -20,9 +20,11 @@ Layout is FLAT — ``<base>/<message_id>.json`` — so :meth:`delete` (which the
 calls with only a ``message_id``) is a direct unlink; ``conversation_id`` is stored
 inside and filtered in :meth:`list_pending`. A user's pending set is tiny, so the
 scan is cheap. Writes are atomic (temp + ``os.replace``); a claim renames-then-reads
-so a turn is never resumed twice. Every method is best-effort: a persistence failure
-logs and degrades to the in-memory (process-lifetime) pause rather than breaking the
-turn — same posture as the cloud saver.
+so a turn is never resumed twice.
+
+D11: :meth:`save` raises on persistence failure (same posture as cloud
+``save_paused_turn``) so callers never treat a failed write as ``saved=True``.
+Delete / claim / list remain best-effort where noted.
 """
 
 from __future__ import annotations
@@ -59,10 +61,12 @@ def _is_safe_message_id(message_id: str) -> bool:
 class LocalPausedTurnStore:
     """A flat-file store of durably-paused Sidecar turns (one JSON file per turn)."""
 
-    def __init__(self, base: Path) -> None:
+    def __init__(self, base: Path, *, outbox_base: Path | None = None) -> None:
         # ``base`` is the desktop-provided sidecar data dir (e.g.
         # ``<userData>/sidecar/paused``); created lazily on first save.
         self._base = base
+        # Sibling outbox dir for D3 journal adjudication (settlement prewrite lives there).
+        self._outbox_base = outbox_base if outbox_base is not None else base.parent / "outbox"
         recovered = self.recover_stale_claims()
         if recovered:
             logger.info("sidecar.paused_stale_claims_recovered", count=recovered)
@@ -74,25 +78,59 @@ class LocalPausedTurnStore:
         return self._path(message_id).with_suffix(".json.claimed")
 
     def recover_stale_claims(self) -> int:
-        """Rollback orphan ``.claimed`` files left by a crashed mid-resume.
+        """Adjudicate orphan ``.claimed`` files left by a crashed mid-resume (D3).
 
-        A claim renames ``<id>.json`` → ``<id>.json.claimed``; if the sidecar dies
-        before ``confirm_claim`` / ``rollback_claim``, the frame is invisible to
-        ``list_pending`` and ``claim``. On startup, restore each orphan back to
-        ``.json`` so the user can retry resume.
+        A claim renames ``<id>.json`` → ``<id>.json.claimed``. On startup:
+
+        - No matching settlement in the outbox journal (crash before D1 prewrite) →
+          restore ``.json`` so the user can re-authorize (prior behaviour).
+        - Settlement already durable (crash after prewrite, before/during confirm) →
+          drop the ``.claimed`` file (idempotent consume); projection becomes
+          ``interrupted_after_decision``, not a resurrected decision card.
         """
         if not self._base.is_dir():
             return 0
+        from agentcore.sidecar.settlement_prewrite import outbox_has_settlement_for_frame
+
         recovered = 0
         for claimed in self._base.glob("*.json.claimed"):
             target = claimed.with_name(claimed.name.removesuffix(".claimed"))
+            message_id = target.stem
             try:
-                os.replace(claimed, target)
-                recovered += 1
-                logger.info(
-                    "sidecar.paused_stale_claim_recovered",
-                    message_id=target.stem,
+                record = json.loads(claimed.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                logger.warning(
+                    "sidecar.paused_stale_claim_unreadable",
+                    path=str(claimed),
                 )
+                continue
+            frame = record.get("frame") if isinstance(record, dict) else None
+            frame = frame if isinstance(frame, dict) else {}
+            checkpoint_id = str(frame.get("checkpoint_id") or "")
+            suspension_kind = str(frame.get("kind") or "")
+            has_settlement = outbox_has_settlement_for_frame(
+                self._outbox_base,
+                message_id=str(record.get("message_id") or message_id),
+                checkpoint_id=checkpoint_id,
+                suspension_kind=suspension_kind,
+            )
+            try:
+                if has_settlement:
+                    claimed.unlink(missing_ok=True)
+                    recovered += 1
+                    logger.info(
+                        "sidecar.paused_stale_claim_consumed",
+                        message_id=message_id,
+                        reason="settlement_present",
+                    )
+                else:
+                    os.replace(claimed, target)
+                    recovered += 1
+                    logger.info(
+                        "sidecar.paused_stale_claim_recovered",
+                        message_id=message_id,
+                        reason="no_settlement",
+                    )
             except OSError as e:
                 logger.warning(
                     "sidecar.paused_stale_claim_recover_failed",
@@ -104,7 +142,7 @@ class LocalPausedTurnStore:
     # --- engine-facing closures (suspension_saver / suspension_deleter) --------
 
     async def save(self, suspension: TurnSuspension) -> None:
-        """Persist one paused-turn frame + its journal/history-so-far (best-effort, atomic).
+        """Persist one paused-turn frame + its journal/history-so-far (atomic).
 
         Upsert: re-pausing the same turn (resume → pause again) overwrites in place. The
         frame is ``TurnSuspension.to_json()`` (resume CONTROL metadata only — it omits the
@@ -119,9 +157,10 @@ class LocalPausedTurnStore:
           * ``history`` — the window's prior-turn prefix the resume splices ahead of the
             folded rounds (the journal stores only its length; the cloud reloads it from the
             message DB — the Sidecar from here).
+        Raises on write failure (D11 — aligns with cloud ``save_paused_turn``).
         """
         if not _is_safe_message_id(suspension.message_id):
-            return
+            raise ValueError(f"unsafe paused-turn message_id: {suspension.message_id!r}")
         # Local turns still bind an in-process TurnJournalWriter (append-on-emit). Flush
         # it before the file write so the inline journal_entries snapshot is complete;
         # seal after a successful write so post-save emits cannot diverge the in-proc
@@ -153,14 +192,14 @@ class LocalPausedTurnStore:
         }
         try:
             await asyncio.to_thread(self._write_sync, suspension.message_id, record)
-        except Exception as e:  # noqa: BLE001 — persistence must never break the turn
+        except Exception as e:
             logger.error(
                 "sidecar.paused_save_failed",
                 message_id=suspension.message_id,
                 conversation_id=suspension.conversation_id,
                 error=str(e),
             )
-            return
+            raise
         if writer is not None:
             await writer.seal()
 
@@ -199,11 +238,12 @@ class LocalPausedTurnStore:
 
         Renames ``<id>.json`` → ``<id>.json.claimed`` FIRST (atomic ``os.replace``) so a
         second / racing resume of the same turn gets ``None`` — a turn is never resumed
-        twice. The ``.claimed`` file is kept until :meth:`confirm_claim` (resume succeeded)
-        or :meth:`rollback_claim` (resume failed and the frame must be retried). Pass
-        ``conversation_id`` (the one the caller is scoped to) so a frame is only claimed
-        within its conversation. The journal-so-far is rehydrated onto
-        :attr:`TurnSuspension.journal` so the resume replays the pre-pause graph.
+        twice. After D1, :meth:`confirm_claim` runs once settlement is durable (not when
+        the whole pipeline finishes); :meth:`rollback_claim` only applies when prewrite
+        fails before confirm. Pass ``conversation_id`` (the one the caller is scoped to)
+        so a frame is only claimed within its conversation. The journal-so-far is
+        rehydrated onto :attr:`TurnSuspension.journal` so the resume replays the
+        pre-pause graph.
         """
         if not _is_safe_message_id(message_id):
             return None
@@ -241,7 +281,7 @@ class LocalPausedTurnStore:
         return record
 
     async def confirm_claim(self, message_id: str) -> None:
-        """Drop a successfully-resumed frame's ``.claimed`` file (best-effort)."""
+        """Drop the ``.claimed`` file after settlement is durable (D1; best-effort)."""
         if not _is_safe_message_id(message_id):
             return
         try:
@@ -252,7 +292,11 @@ class LocalPausedTurnStore:
             )
 
     async def rollback_claim(self, message_id: str) -> None:
-        """Restore a failed resume's frame: rename ``.claimed`` back to ``.json`` (best-effort)."""
+        """Restore frame only when settlement was NOT durable (prewrite failure).
+
+        After D1 confirm, pipeline failures must NOT call this — the decision is a
+        fact; projection becomes interrupted_after_decision instead.
+        """
         if not _is_safe_message_id(message_id):
             return
         try:

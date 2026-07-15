@@ -1,4 +1,4 @@
-"""DebateTool 集成自测（辩论编排设计.md · per-PR 零 LLM 硬门禁）。
+﻿"""DebateTool 集成自测（辩论编排设计.md · per-PR 零 LLM 硬门禁）。
 
 与 ``test_debate_moderator`` 互补：那个用假 RoundRunner 只验证主持人循环本身；这个走【真实
 RoundRunner】——首轮 ``build_agent_executor`` + ``WaveScheduler`` 派并行辩手、后续轮
@@ -30,7 +30,7 @@ from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.runs.types import RunPhase, RunState
 from agentcore.tools.builtin.debate import DebateTool
-from agentcore.tools.builtin.debate.prompt import debater_task, round_feedback
+from agentcore.runtime.debate.prompt import debater_task, round_feedback
 from agentcore.tools.builtin.debate.schema import parse_background, parse_sides
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
@@ -69,8 +69,8 @@ class _DebateLLM:
     次辩手调用的 LLMRequest，供断言跨轮 feedback 注入与形态角色指引。
 
     质询（opt-in）：``questions`` 非空时 ``cross_exam`` 步回定向质询；``stream`` 若看到质询
-    feedback（含「质询环节」）则按 ``cx_answer_style`` 产 JSON 作答（``wrapper`` = 带
-    question_index 的对象数组；``scalar`` = 纯字符串数组按位置映射，回归 06 F2）。
+    feedback（含「质询环节」）则按 ``cx_answer_style`` 产 markdown 标题体作答（``headings`` =
+    ``### 质询一`` 切段；``prose`` = 无标题散文，驱动挂第一题降级）。
     ``cx_fail_sides`` 内的方对质询回空内容，驱动 runner 失败兜底（exchanges answer 空）。
     """
 
@@ -80,7 +80,7 @@ class _DebateLLM:
         converge_at: int = 1,
         brief: dict | None = None,
         questions: dict[str, list[str]] | None = None,
-        cx_answer_style: str = "wrapper",
+        cx_answer_style: str = "headings",
         cx_fail_sides: frozenset[str] | None = None,
     ) -> None:
         self.converge_at = converge_at
@@ -121,34 +121,27 @@ class _DebateLLM:
         return LLMResponse(content="{}", usage=_USAGE)
 
     def _cx_answer_content(self, joined: str) -> str:
-        """按 feedback 里出现的质询题匹配 side，产出作答 JSON（或空串触发失败兜底）。"""
+        """按 feedback 里出现的质询题匹配 side，产出标题体作答（或空串触发失败兜底）。"""
+        _ords = "一二三四五六七八九十"
         for key, qs in (self.questions or {}).items():
             if not qs or qs[0] not in joined:
                 continue
             if key in self.cx_fail_sides:
                 return ""
-            if self.cx_answer_style == "scalar":
-                return json.dumps(
-                    [f"标量答·{key}·{i + 1}【待核实·推断】" for i in range(len(qs))],
-                    ensure_ascii=False,
-                )
-            return json.dumps(
-                [
-                    {
-                        "question_index": i + 1,
-                        "answer": f"正面答·{key}·{i + 1}【待核实·推断】",
-                    }
-                    for i in range(len(qs))
-                ],
-                ensure_ascii=False,
-            )
-        return "[]"
+            if self.cx_answer_style == "prose":
+                return f"散文答·{key}【待核实·推断】"
+            parts: list[str] = []
+            for i in range(len(qs)):
+                label = _ords[i] if i < len(_ords) else str(i + 1)
+                parts.append(f"### 质询{label}\n正面答·{key}·{i + 1}【待核实·推断】")
+            return "\n\n".join(parts)
+        return ""
 
     async def stream(self, request):  # noqa: ANN001
         self.stream_calls += 1
         self.stream_requests.append(request)
         joined = "\n".join(getattr(m, "content", "") or "" for m in request.messages)
-        # 质询 continue_run：feedback 含「质询环节」——回结构化 JSON，驱动真实 runner 解析落库。
+        # 质询 continue_run：feedback 含「质询环节」——回 markdown 标题体，驱动真实 runner 解析落库。
         if "质询环节" in joined:
             content = self._cx_answer_content(joined)
             if content:
@@ -341,10 +334,9 @@ async def test_cross_exam_real_runner_lands_exchanges():
     assert any("_r1_cx_con" in rid for rid in ledger_ids)
 
 
-async def test_cross_exam_real_runner_scalar_array_maps_by_position():
-    """端到端回归 06 F2：辩手少包一层 ``["答一","答二"]`` 时，真实 runner 仍按位置映射进
-    exchanges，不静默丢答。"""
-    llm = _DebateLLM(converge_at=1, questions=_CX_QUESTIONS, cx_answer_style="scalar")
+async def test_cross_exam_real_runner_prose_hangs_on_first():
+    """无标题散文作答 → 优雅降级：整段挂第一题，其余空答。"""
+    llm = _DebateLLM(converge_at=1, questions=_CX_QUESTIONS, cx_answer_style="prose")
     sink = EventSink()
     tool = _tool(llm, sink=sink)
     result = await tool.execute(
@@ -356,10 +348,10 @@ async def test_cross_exam_real_runner_scalar_array_maps_by_position():
     cx = events[0].payload["rounds"][0]["cross_exam"]
     pro = next(c for c in cx if c["target"] == "pro")
     assert len(pro["exchanges"]) == 2
-    assert "标量答·pro·1" in pro["exchanges"][0]["answer"]
-    assert "标量答·pro·2" in pro["exchanges"][1]["answer"]
+    assert "散文答·pro" in pro["exchanges"][0]["answer"]
+    assert pro["exchanges"][1]["answer"] == ""
     con = next(c for c in cx if c["target"] == "con")
-    assert "标量答·con·1" in con["exchanges"][0]["answer"]
+    assert "散文答·con" in con["exchanges"][0]["answer"]
 
 
 async def test_cross_exam_real_runner_failed_answer_leaves_empty():
@@ -455,7 +447,12 @@ def test_round_feedback_demands_new_args_and_no_self_restate():
     assert "第 2 轮" in fb and "第二轮焦点" in fb
     assert "反方上轮论点内容" in fb  # 注入【对方】上轮论点
     assert "正方上轮论点内容" not in fb  # 不注入【自己】上轮（自己 transcript 已有）
-    assert "只补" in fb and "不要重述你上一轮" in fb
+    # 检索 feedback：只记新素材；成稿 brief 才说「只补」发言
+    assert "只记" in fb and "不要重述你上一轮" in fb
+    from agentcore.runtime.debate.prompt import round_draft_brief
+
+    brief = round_draft_brief(config, config.sides[0], 2, "第二轮焦点", last)
+    assert "只补" in brief and "不要重述你上一轮" in brief
     assert "用户在本轮追问" not in fb  # 无追问时不出现追问块（零行为变化）
 
 
@@ -612,6 +609,21 @@ def test_debater_task_omits_background_when_empty():
     assert "双方共享" not in task
 
 
+def test_debater_task_injects_kickoff_interjection():
+    """开赛嘱咐：首轮 task 注入追问块（全场定向，双方可见）。"""
+    from agentcore.runtime.debate import UserInterjection
+
+    sides = [DebateSide("pro", "正方", "支持"), DebateSide("con", "反方", "反对")]
+    cfg = DebateConfig(motion="该不该做 X", form=DebateForm.DEBATE, sides=sides)
+    asks = (UserInterjection(ask="最关心成本谁买单", target_key=""),)
+    for i, side in enumerate(sides):
+        task = debater_task(
+            cfg, side, i, round_no=1, focus="成本", interjections=asks
+        )["task"]
+        assert "用户在本轮追问" in task
+        assert "最关心成本谁买单" in task
+
+
 def test_debater_task_injects_background_block():
     """有底料：首轮 task 注入「主持人整理的案件底料·双方共享」+ 事实正文 + 独立检索 / 出处沿用口径。"""
     sides = [DebateSide("pro", "正方", "支持"), DebateSide("con", "反方", "反对")]
@@ -629,7 +641,7 @@ def test_debater_task_injects_background_block():
 
 def test_debater_task_clips_oversized_background():
     """超长底料进 prompt 前头尾裁剪（与 _clip 同思路），防撑爆首轮。"""
-    from agentcore.tools.builtin.debate.prompt import _BG_CLIP, _clip
+    from agentcore.runtime.debate.prompt import _BG_CLIP, _clip
 
     sides = [DebateSide("pro", "正方", "支持"), DebateSide("con", "反方", "反对")]
     head = "HEAD_MARKER_" + ("甲" * 100)

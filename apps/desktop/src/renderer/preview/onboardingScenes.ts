@@ -6,6 +6,7 @@ export type OnboardingPreviewScene = {
   kind:
     | "onboarding-value"
     | "onboarding-connect"
+    | "onboarding-connect-free-tier"
     | "onboarding-probing"
     | "empty-needs-key"
     | "empty-starter-chips"
@@ -24,6 +25,12 @@ export const ONBOARDING_PREVIEW_SCENES: readonly OnboardingPreviewScene[] = [
     title: "首启 · 模型接入",
     intent: "厂商预设 + Key 表单（共享 ModelKeyForm）",
     kind: "onboarding-connect",
+  },
+  {
+    id: "onboarding-connect-free-tier",
+    title: "首启 · 免费额度路径",
+    intent: "free_tier_active：先用免费额度 CTA + 配 key 主路",
+    kind: "onboarding-connect-free-tier",
   },
   {
     id: "onboarding-probing",

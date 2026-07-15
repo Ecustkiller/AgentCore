@@ -20,6 +20,10 @@ from agentcore.runtime.runs.executor_identities import (
 from agentcore.runtime.runs.fidelity import allocate, pointer_body, truncate_head_tail
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import ContextBlock, Deliverable, RunSpec, RunState
+from agentcore.workspace.sparse_listing import (
+    format_remaining_summary,
+    partition_sparse_paths,
+)
 
 logger = get_logger(__name__)
 
@@ -58,6 +62,7 @@ def _build_messages(
     index_paths: list[str] | None = None,
     blocks_sink: list[ContextBlock] | None = None,
     team_brief: str | None = None,
+    shared_workspace: bool = False,
 ) -> list[LLMMessage]:
     """Assemble the worker's OPENING (system, user) messages from its inline role,
     the original request, its upstream dependency products, and its task.
@@ -82,7 +87,14 @@ def _build_messages(
     system_content = "\n\n".join(p for p in sys_parts if p)
 
     blocks = _build_context_blocks(
-        plan, spec, completed, user_message, deliverable, index_paths or [], team_brief
+        plan,
+        spec,
+        completed,
+        user_message,
+        deliverable,
+        index_paths or [],
+        team_brief,
+        shared_workspace=shared_workspace,
     )
     if blocks_sink is not None:
         blocks_sink.extend(blocks)
@@ -101,6 +113,8 @@ def _build_context_blocks(
     deliverable: Deliverable | None,
     index_paths: list[str],
     team_brief: str | None = None,
+    *,
+    shared_workspace: bool = False,
 ) -> list[ContextBlock]:
     """The ordered :class:`ContextBlock` list a worker's opening user message is rendered
     FROM — the structured single source behind both the prompt and the ``run_context``
@@ -141,10 +155,15 @@ def _build_context_blocks(
                 body=team_brief,
             )
         )
-    # 工作区产物清单: surface files in the shared workspace this worker can file_read —
-    # peer products (role-attributed) + pre-existing files (uploads / prior turns) —
-    # beyond its own deps (which got the richer block above). Omitted when empty.
-    manifest = _workspace_manifest(plan, completed, index_paths, set(spec.depends_on))
+    # 工作区产物清单: peer products (role-attributed) + sparse pre-existing paths
+    # (attachments / 裸聊 scratch; project shared trees summarized). Omitted when empty.
+    manifest = _workspace_manifest(
+        plan,
+        completed,
+        index_paths,
+        set(spec.depends_on),
+        shared_workspace=shared_workspace,
+    )
     if manifest:
         blocks.append(
             ContextBlock(
@@ -432,34 +451,55 @@ async def _safe_index_files(backend: object) -> list[str]:
         return []
 
 
+async def _load_artifact_contents(
+    backend: object,
+    patterns: list[str],
+    workspace_paths: list[str],
+) -> dict[str, str]:
+    """Best-effort read of workspace texts matching artifact patterns (JSON file gate).
+
+    Used when ``output_format=json`` + ``artifacts`` so the contract can verify
+    parseability of landed files. Missing / unreadable paths are omitted; the
+    contract reports unread failures when no readable match parses.
+    """
+    from agentcore.runtime.runs.contract import matching_artifact_paths
+
+    read = getattr(backend, "read", None)
+    if read is None:
+        return {}
+    out: dict[str, str] = {}
+    for pattern in patterns:
+        for path in matching_artifact_paths(pattern, workspace_paths):
+            if path in out:
+                continue
+            try:
+                out[path] = await read(path)
+            except Exception as e:  # noqa: BLE001 — contents are best-effort
+                logger.debug("workspace.artifact_read_failed", path=path, error=str(e))
+    return out
+
+
 def _workspace_manifest(
     plan: RunPlan,
     completed: Mapping[str, RunState],
     index_paths: list[str],
     exclude_runs: set[str],
+    *,
+    shared_workspace: bool = False,
 ) -> str:
     """A compact manifest of files in the shared workspace this worker can ``file_read``.
 
-    Two sources, de-duped by path (a file is listed once, with the most specific label):
+    Sources, de-duped by path (most specific label wins):
 
-    1. **Peer products** — every COMPLETED teammate's ``files_touched`` (role-attributed),
-       minus this worker's own deps (``exclude_runs``), which already got the richer
-       pointer / product block. Listed first, in completion order.
-    2. **Pre-existing files** — the rest of ``index_paths`` (the live workspace index:
-       uploads, prior-turn outputs, indirectly-written artifacts), tagged「工作区已有」.
-       Fed newest-first (``index_files(order="recent")``) so a big tree spends the
-       budget on the most-likely-relevant files, not whatever sorts alphabetically first.
+    1. **Peer products** — COMPLETED teammates' ``files_touched`` (role-attributed),
+       minus this worker's own deps (``exclude_runs``). Listed first.
+    2. **Sparse pre-existing** — attachments + 裸聊 scratch (or a few project
+       「最近触达」); project shared remainder collapses to one summary line
+       (:func:`~agentcore.workspace.sparse_listing.partition_sparse_paths`).
 
-    Turns the shared workspace into a discoverable common context: a worker sees what is
-    on disk and can pull it, instead of staying blind outside its dep chain (or re-
-    creating something a peer / past turn already produced). Peer attribution comes from
-    the completion map the scheduler hands the executor; the pre-existing set comes from a
-    best-effort backend index (:func:`_safe_index_files`), so a backend without indexing
-    still yields the peer-products manifest. Bounded by BOTH a file count
-    (``WORKSPACE_MANIFEST_MAX_FILES``) and a char budget
-    (``WORKSPACE_MANIFEST_CHAR_BUDGET``) — whichever binds first, so long paths can't
-    bloat the prompt even under the count — with an elision line when more remain.
-    Returns "" when nothing qualifies (the caller omits the block)."""
+    Bounded by BOTH a file count (``WORKSPACE_MANIFEST_MAX_FILES``) and a char budget
+    (``WORKSPACE_MANIFEST_CHAR_BUDGET``). Returns "" when nothing qualifies.
+    """
     # Deps' own files are surfaced in their dep block — keep them out of the manifest.
     dep_files = {
         p
@@ -500,10 +540,19 @@ def _workspace_manifest(
             if not _add(path, label):
                 stop = True
                 break
+
+    sparse_rows, remaining = partition_sparse_paths(
+        index_paths, shared_workspace=shared_workspace
+    )
     if not stop:
-        for path in index_paths:  # newest-first; take what the budget allows
-            if not _add(path, "工作区已有"):
+        for path, label in sparse_rows:
+            if not _add(path, label):
+                # Cap hit — fold unlisted sparse rows into the remaining summary.
+                remaining += sum(1 for p, _ in sparse_rows if p not in listed)
                 break
-    if truncated and lines:
-        lines.append("……（工作区还有更多文件，需要可用 `file_list` 查看）")
+
+    if remaining > 0:
+        lines.append(format_remaining_summary(remaining))
+    elif truncated and lines:
+        lines.append("……（工作区还有更多文件，需要时用 file_list / grep）")
     return "\n".join(lines)

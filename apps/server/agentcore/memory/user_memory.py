@@ -126,7 +126,7 @@ class MemoryExtractInput:
     current_preferences: str = ""
     # Manual sidebar group (folder_id), or None for a bare chat (D4 方案 1). Enables the
     # PROJECT scope: facts true only in this group route to its project layer, not global.
-    project_id: str | None = None
+    folder_id: str | None = None
     # Full markdown of the PROJECT PROFILE (画像.md under this project) — "" if none / no project.
     current_project_memory: str = ""
     # Today's date (ISO, e.g. "2026-06-15") for temporal refresh: the LLM compares
@@ -587,7 +587,7 @@ def _render_extract_prompt(data: MemoryExtractInput) -> str:
         f"# Existing GLOBAL topic notes (add to one of these when it fits)\n"
         f"{_render_topics(data.topic_files)}",
     ]
-    if data.project_id:
+    if data.folder_id:
         # The conversation is inside a project: show its layer so the model can dedup
         # against it and route project-specific facts here (scope "project").
         project_profile = data.current_project_memory.strip() or "(empty)"
@@ -654,19 +654,19 @@ def _coerce_topic_file(raw: object) -> str | None:
     return topic_path(slug)
 
 
-def _resolve_scope(raw: object, project_id: str | None) -> MemoryScope:
+def _resolve_scope(raw: object, folder_id: str | None) -> MemoryScope:
     """Map a model "scope" token to a real MemoryScope.
 
-    "project" routes to the conversation's ``project_id`` (when there is one); anything
+    "project" routes to the conversation's ``folder_id`` (when there is one); anything
     else — "global", missing, or "project" with no current project — is global (None).
     """
     token = _clean_str(raw)
-    if token and token.lower() == "project" and project_id:
-        return project_id
+    if token and token.lower() == "project" and folder_id:
+        return folder_id
     return None
 
 
-def _coerce_op(item: object, project_id: str | None = None) -> MemoryOp | None:
+def _coerce_op(item: object, folder_id: str | None = None) -> MemoryOp | None:
     if not isinstance(item, dict):
         return None
     try:
@@ -692,7 +692,7 @@ def _coerce_op(item: object, project_id: str | None = None) -> MemoryOp | None:
             content=content,
             match=match,
             file=topic,
-            scope=_resolve_scope(item.get("scope"), project_id),
+            scope=_resolve_scope(item.get("scope"), folder_id),
         )
     # Core op: a stated file (if any) must be a known core file — reject anything else
     # (e.g. "../secret.md") rather than silently rerouting it. The fixed SECTION is what
@@ -706,11 +706,11 @@ def _coerce_op(item: object, project_id: str | None = None) -> MemoryOp | None:
     if file == PREFERENCES_MEMORY_FILE or section in _GLOBAL_ONLY_PROFILE_SECTIONS:
         scope = None
     elif section in _PROJECT_ONLY_PROFILE_SECTIONS:
-        if not project_id:
+        if not folder_id:
             return None
-        scope = project_id
+        scope = folder_id
     else:
-        scope = _resolve_scope(item.get("scope"), project_id)
+        scope = _resolve_scope(item.get("scope"), folder_id)
     return MemoryOp(
         action=action, section=section, content=content, match=match, file=file, scope=scope
     )
@@ -822,12 +822,12 @@ class MemoryParseResult:
 
 
 def parse_memory_ops(
-    raw: str, project_id: str | None = None
+    raw: str, folder_id: str | None = None
 ) -> list[MemoryOp]:
     """Parse an LLM response into validated MemoryOps. Returns [] on any failure.
 
-    ``project_id`` resolves an op's "project" scope token to the conversation's manual
-    group folder_id (None for a bare chat → everything stays global).
+    ``folder_id`` resolves an op's "project" scope token to the conversation's project
+    (None for a bare chat → everything stays global).
 
     A coerced ADD/UPDATE whose ``content`` reads as an injected instruction (override /
     persona / exec / tool-call / exfil) is DROPPED and logged — the deterministic second
@@ -835,11 +835,11 @@ def parse_memory_ops(
     LLM crystallization path runs through here; the user's own memory edits do not, so a
     principal's legitimate wording is never filtered.
     """
-    return parse_memory_ops_detailed(raw, project_id=project_id).ops
+    return parse_memory_ops_detailed(raw, folder_id=folder_id).ops
 
 
 def parse_memory_ops_detailed(
-    raw: str, project_id: str | None = None
+    raw: str, folder_id: str | None = None
 ) -> MemoryParseResult:
     """Like ``parse_memory_ops`` but also returns parse stats for observability."""
     result = MemoryParseResult(ops=[])
@@ -850,7 +850,7 @@ def parse_memory_ops_detailed(
     raw_ops: list[object] = payload["ops"]
     result.raw_ops_count = len(raw_ops)
     for item in raw_ops:
-        op = _coerce_op(item, project_id)
+        op = _coerce_op(item, folder_id)
         if op is None:
             result.coercion_dropped += 1
             continue
@@ -934,7 +934,7 @@ class LLMMemoryExtractor:
         self.last_usage = response.usage
         self.last_model = response.model or self._model or ""
         raw = response.content or ""
-        result = parse_memory_ops_detailed(raw, project_id=data.project_id)
+        result = parse_memory_ops_detailed(raw, folder_id=data.folder_id)
         self.last_parse_result = result
         memory_empty = _is_cold_start(data)
         logger.info(

@@ -43,18 +43,56 @@ class ToolApproval(StrEnum):
 
 
 class AutonomyPolicy(StrEnum):
-    """User-global kickoff / capability-authorization posture.
+    """User-global *default* for new conversations (maps to :class:`PermissionPreset`).
 
-    - ``always_ask`` — every GRANTABLE call prompts; kickoff has no grant shortcut
-    - ``first_grant`` — kickoff once authorizes the grantable set for the delegation
-      (default; continuous with the prior delegation-authorization card)
-    - ``full_auto`` — skip the kickoff card entirely (plan + capability); silent
-      auto-grant of GRANTABLE tools for the delegation
+    Runtime gates no longer read this directly — the conversation's
+    ``permission_preset`` is the single source of truth. This enum remains the
+    stored shape of ``users.autonomy_policy`` (设置页「新会话默认权限模式」).
+
+    Mapping: ``always_ask``→observe, ``first_grant``→workspace, ``full_auto``→full_trust.
     """
 
     ALWAYS_ASK = "always_ask"
     FIRST_GRANT = "first_grant"
     FULL_AUTO = "full_auto"
+
+
+class PermissionPreset(StrEnum):
+    """Conversation-level permission mode (会话级权限模式 · 运行时单一真相源).
+
+    - ``observe`` — no execution tools; GRANTABLE (writes) always prompt; kickoff
+      does not pre-authorize write capabilities (≈ always_ask + withhold execution)
+    - ``workspace`` — kickoff once authorizes grantable set (≈ first_grant; default)
+    - ``full_trust`` — skip kickoff; silent auto-grant including local execution
+      (≈ full_auto; UI must warn that AI runs commands with user-equivalent power)
+    """
+
+    OBSERVE = "observe"
+    WORKSPACE = "workspace"
+    FULL_TRUST = "full_trust"
+
+
+_AUTONOMY_TO_PRESET: dict[AutonomyPolicy, PermissionPreset] = {
+    AutonomyPolicy.ALWAYS_ASK: PermissionPreset.OBSERVE,
+    AutonomyPolicy.FIRST_GRANT: PermissionPreset.WORKSPACE,
+    AutonomyPolicy.FULL_AUTO: PermissionPreset.FULL_TRUST,
+}
+
+_PRESET_TO_AUTONOMY: dict[PermissionPreset, AutonomyPolicy] = {
+    PermissionPreset.OBSERVE: AutonomyPolicy.ALWAYS_ASK,
+    PermissionPreset.WORKSPACE: AutonomyPolicy.FIRST_GRANT,
+    PermissionPreset.FULL_TRUST: AutonomyPolicy.FULL_AUTO,
+}
+
+
+def autonomy_to_preset(policy: AutonomyPolicy) -> PermissionPreset:
+    """Map user-default AutonomyPolicy → conversation PermissionPreset."""
+    return _AUTONOMY_TO_PRESET.get(policy, PermissionPreset.WORKSPACE)
+
+
+def preset_to_autonomy(preset: PermissionPreset) -> AutonomyPolicy:
+    """Map conversation PermissionPreset → AutonomyPolicy for kickoff / ApprovalGate."""
+    return _PRESET_TO_AUTONOMY.get(preset, AutonomyPolicy.FIRST_GRANT)
 
 
 class ToolCategory(StrEnum):
@@ -102,5 +140,5 @@ class ToolEffect(StrEnum):
     # yet) and the suspended tool_call is left PENDING (no tool result recorded), so the
     # resumed window ends exactly at the assistant. The engine maps it to
     # FinishReason.PAUSED. Returned by any durable checkpoint whose frame was persisted
-    # (§六-1 narrow fallback: an un-persistable pause parks on the in-memory wait instead).
+    # (D11: un-persistable runtime failure terminates the turn — no in-memory wait).
     SUSPEND = "suspend"

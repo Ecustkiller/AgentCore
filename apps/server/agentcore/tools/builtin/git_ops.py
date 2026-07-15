@@ -18,6 +18,11 @@ from agentcore.core.text import truncate_head_tail
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 
+from agentcore.runtime.safety_breaker import (
+    git_forbidden_subcommands,
+    git_protected_branches,
+)
+
 _ALLOWED_SUBCOMMANDS = frozenset(
     {"status", "diff", "log", "add", "commit", "branch", "checkout"}
 )
@@ -27,8 +32,11 @@ _WRITE_SUBCOMMANDS = frozenset({"add", "commit", "branch", "checkout"})
 def git_write_subcommands() -> frozenset[str]:
     """Git subcommands that mutate repo state and require user approval on workers."""
     return _WRITE_SUBCOMMANDS
-_FORBIDDEN_PATTERNS = frozenset({"push", "reset", "rebase", "merge", "clean", "stash"})
-_PROTECTED_BRANCHES = frozenset({"main", "master"})
+
+
+# Hard-ban list lives in ``runtime.safety_breaker`` (P3 unified circuit breaker).
+_FORBIDDEN_PATTERNS = git_forbidden_subcommands()
+_PROTECTED_BRANCHES = git_protected_branches()
 _DIFF_OUTPUT_LIMIT = 16000
 _GIT_TIMEOUT = 25.0
 

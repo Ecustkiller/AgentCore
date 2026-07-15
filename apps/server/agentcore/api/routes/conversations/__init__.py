@@ -17,6 +17,7 @@ from . import (
     binding,
     crud,
     debate_steer,
+    external_grants,
     files,
     handoff,
     interactions,
@@ -41,6 +42,7 @@ router.include_router(interactions.router)
 router.include_router(run_redirect.router)
 router.include_router(debate_steer.router)
 router.include_router(binding.router)
+router.include_router(external_grants.router)
 router.include_router(handoff.router)
 router.include_router(turns.router)
 router.include_router(snapshots.router)

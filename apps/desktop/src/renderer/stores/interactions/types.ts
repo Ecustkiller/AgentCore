@@ -1,7 +1,22 @@
-import type {
-  InteractionKind,
-  InteractionStatus,
-} from "@/types/interactionExt";
+import type { InteractionStatus } from "@/types/interactionExt";
+import {
+  INTERACTION_ID_FIELD,
+  INTERACTION_SUBMIT_PATH,
+  type InteractionKind,
+  type InteractionSubmitPath,
+  kindFromRequiredEvent,
+  kindFromResolvedEvent,
+} from "./registry";
+
+// Re-export registry surface so existing `@/stores/interactions` imports keep working.
+export {
+  INTERACTION_ID_FIELD,
+  INTERACTION_SUBMIT_PATH,
+  kindFromRequiredEvent,
+  kindFromResolvedEvent,
+  type InteractionKind,
+  type InteractionSubmitPath,
+};
 
 /** One user-facing interaction card in the unified store (方案 §3.2). */
 export interface InteractionEntry {
@@ -16,32 +31,25 @@ export interface InteractionEntry {
   resolution?: Record<string, unknown>;
 }
 
-export type InteractionSubmitPath = "cold" | "hot" | "compose";
-
-/** Declarative kind → how the answer continues the turn. */
-export const INTERACTION_SUBMIT_PATH: Record<
-  InteractionKind,
-  InteractionSubmitPath
-> = {
-  ask_user: "cold",
-  plan_review: "cold",
-  team_preview: "cold",
-  approval: "hot",
-  delegation_authorization: "hot",
-  escalation: "hot",
-  question_posted: "compose",
-};
-
-/** Kind → id field on the `*_required` wire payload. */
-export const INTERACTION_ID_FIELD: Record<InteractionKind, string> = {
-  approval: "approval_id",
-  delegation_authorization: "authorization_id",
-  escalation: "escalation_id",
-  ask_user: "checkpoint_id",
-  plan_review: "checkpoint_id",
-  team_preview: "checkpoint_id",
-  question_posted: "ask_id",
-};
+/**
+ * 「等你」判定（侧栏灯 / 全局提醒共用语义）：这条交互是否正把执行阻塞在用户身上。
+ *
+ * - 热阻塞 kind（approval / delegation_authorization / escalation）pending 或
+ *   submitting 时为真——live turn 挂在卡上等答复。
+ * - escalation 例外：`awaiting === "ceo"` 由 CEO 仲裁，用户无需行动 → 不算。
+ * - 冷 kind（ask_user / plan_review / team_preview）恒为假：暂停的权威事实是
+ *   pausedTurns store 的 durable 帧（journal 重放可能留下无帧的 pending 残影，
+ *   不能拿来点灯），由调用方另行订阅。
+ * - question_posted（非阻塞提问）团队没停 → 不算。
+ */
+export function isAwaitingUserEntry(entry: InteractionEntry): boolean {
+  if (entry.status !== "pending" && entry.status !== "submitting") return false;
+  if (INTERACTION_SUBMIT_PATH[entry.kind] !== "hot") return false;
+  if (entry.kind === "escalation" && entry.payload.awaiting === "ceo") {
+    return false;
+  }
+  return true;
+}
 
 export function idFromRequiredPayload(
   kind: InteractionKind,
@@ -50,50 +58,6 @@ export function idFromRequiredPayload(
   const field = INTERACTION_ID_FIELD[kind];
   const raw = payload[field];
   return typeof raw === "string" && raw.length > 0 ? raw : null;
-}
-
-export function kindFromRequiredEvent(
-  eventType: string,
-): InteractionKind | null {
-  switch (eventType) {
-    case "approval_required":
-      return "approval";
-    case "delegation_authorization_required":
-      return "delegation_authorization";
-    case "escalation_required":
-      return "escalation";
-    case "checkpoint_required":
-      return "ask_user";
-    case "plan_review_required":
-      return "plan_review";
-    case "team_preview_required":
-      return "team_preview";
-    case "question_posted":
-      return "question_posted";
-    default:
-      return null;
-  }
-}
-
-export function kindFromResolvedEvent(
-  eventType: string,
-): InteractionKind | null {
-  switch (eventType) {
-    case "approval_resolved":
-      return "approval";
-    case "delegation_authorization_resolved":
-      return "delegation_authorization";
-    case "escalation_resolved":
-      return "escalation";
-    case "checkpoint_resolved":
-      return "ask_user";
-    case "plan_review_resolved":
-      return "plan_review";
-    case "team_preview_resolved":
-      return "team_preview";
-    default:
-      return null;
-  }
 }
 
 export function idFromResolvedPayload(

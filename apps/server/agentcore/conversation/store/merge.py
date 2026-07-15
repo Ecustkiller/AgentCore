@@ -7,6 +7,9 @@ Four invariants under outbox reorder / retry:
 2. **status gate** — completion status only advances (never ``complete`` → ``running``).
 3. **journal seq idempotent** — duplicate appends dedupe on ``(turn_id, seq)``.
 4. **finalize full journal** — finalize upserts the full fact list by seq to fill holes.
+5. **terminal ⇒ not paused** — ``merge_usage_status`` is the single authority that clears
+   the pause latch whenever merged ``status`` is terminal (prevents ``paused:true``
+   resurrecting across a second ``{**existing, **incoming}`` merge).
 """
 
 from __future__ import annotations
@@ -56,6 +59,12 @@ def merge_usage_status(existing: dict[str, Any] | None, incoming: dict[str, Any]
 
     Non-status keys from ``incoming`` win (finalize / checkpoint payload is fresher);
     ``status`` only moves forward.
+
+    **Pause latch invariant** (single authority): a terminal ``status`` is never paused.
+    ``paused`` is only meaningful while ``status=running``; once the merged status is
+    terminal, the latch is cleared here — callers must not re-implement pop/clear
+    around a second ``{**existing, **incoming}`` merge (that resurrects stale
+    ``paused:true`` when incoming omits the key).
     """
     base = dict(existing or {})
     nxt = dict(incoming or {})
@@ -67,6 +76,11 @@ def merge_usage_status(existing: dict[str, Any] | None, incoming: dict[str, Any]
             merged["status"] = existing_status
         elif "status" in merged and incoming_status is None:
             merged.pop("status", None)
+    # 终态必非暂停：terminal status wins over any residual paused latch.
+    if is_terminal_status(merged.get("status")):
+        merged.pop("paused", None)
+    elif nxt.get("paused") is False:
+        merged.pop("paused", None)
     return merged
 
 

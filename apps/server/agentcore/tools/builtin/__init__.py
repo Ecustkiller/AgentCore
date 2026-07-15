@@ -91,7 +91,11 @@ def build_builtin_registry(
     return registry
 
 
-def build_worker_registry(*, backend: WorkspaceBackend | None = None) -> ToolRegistry:
+def build_worker_registry(
+    *,
+    backend: WorkspaceBackend | None = None,
+    permission_preset: "PermissionPreset | None" = None,
+) -> ToolRegistry:
     """The delegated worker's toolset: the platform built-ins PLUS the worker-only
     ``escalate`` upward channel.
 
@@ -102,10 +106,18 @@ def build_worker_registry(*, backend: WorkspaceBackend | None = None) -> ToolReg
     worker that re-delegates passes this registry on, so its sub-workers inherit
     ``escalate`` too (a sub-worker escalates to its captain worker, which can re-escalate
     to the CEO).
+
+    ``permission_preset=observe`` withholds the entire execution class
+    (``code_execute`` / ``test_run`` / ``terminal``) — read-only retrieval stays on.
     """
+    from agentcore.core.types import PermissionPreset
+
     location = backend.location if backend is not None else None
+    include_execution = code_execution_enabled_for(backend)
+    if permission_preset is PermissionPreset.OBSERVE:
+        include_execution = False
     registry = build_builtin_registry(
-        include_execution_tools=code_execution_enabled_for(backend),
+        include_execution_tools=include_execution,
         location=location,
     )
     registry.register(EscalateTool())
@@ -127,8 +139,9 @@ def build_worker_registry(*, backend: WorkspaceBackend | None = None) -> ToolReg
     registry.register(DesktopNotifyTool())
     # terminal (后台进程): local-only — processes are held by the desktop main process
     # over workspace_op_required. Kept out of build_builtin_registry so NEVER does not
-    # leak into the CEO read-only filter (工具与能力系统 terminal 行).
-    if backend is not None and backend.location == "local":
+    # leak into the CEO read-only filter (工具与能力系统 terminal 行). Withheld under
+    # observe together with the rest of the execution class.
+    if include_execution and backend is not None and backend.location == "local":
         registry.register(TerminalTool())
     return registry
 

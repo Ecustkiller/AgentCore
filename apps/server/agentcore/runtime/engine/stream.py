@@ -10,11 +10,25 @@ from agentcore.core.errors import LLMTimeoutError
 from agentcore.core.logging import get_logger
 from agentcore.llm.observability import log_llm_call
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
-from agentcore.llm.provider.protocol import LLMRequest, TokenUsage, ToolCall, ToolCallFunction
+from agentcore.llm.provider.protocol import (
+    BACKOFF_MULTIPLIER,
+    INITIAL_BACKOFF,
+    MAX_RETRIES,
+    LLMRequest,
+    TokenUsage,
+    ToolCall,
+    ToolCallFunction,
+)
 
 from .constants import TOOL_PROGRESS_STEP
 
 logger = get_logger(__name__)
+
+# Wall-clock cap for pre-commit stall retries: without this, a true stall costs
+# ``idle × MAX_RETRIES`` (+ backoff). Factor 2 keeps production (idle≈100s) under
+# ~200s worst case while still allowing full ``MAX_RETRIES`` when idle is short
+# (unit tests). Attempt count still aligns with provider ``MAX_RETRIES``.
+_STALL_BUDGET_IDLE_MULTIPLIER = 2.0
 
 
 @dataclass(frozen=True)
@@ -44,19 +58,27 @@ async def stream_llm_round(
     - ``stream_reset`` — clear local accumulators and reset the live view (CEO
       ``content_reset`` / worker ``run_output_reset`` via ``on_reset``).
     - ``aborted`` — keep the partial and return normally (no raise).
+
+    Pre-commit idle stall (no content / tool_call yet; reasoning does not commit)
+    is retryable at this layer — aligned with the provider's pre-commit transparent
+    retry philosophy. Post-commit stall salvages the partial via ``aborted``.
     """
+
+    idle = settings.engine_llm_stream_idle_timeout_seconds
+    start = time.monotonic()
+    budget = (idle * _STALL_BUDGET_IDLE_MULTIPLIER) if idle > 0 else None
+    backoff = INITIAL_BACKOFF
+    last_stall_error: LLMTimeoutError | None = None
 
     content_parts: list[str] = []
     reasoning_parts: list[str] = []
     tc_accumulators: dict[int, dict] = {}
-    # Last arg length per tool-call index we emitted progress for (throttling).
     tc_progress_at: dict[int, int] = {}
     usage: TokenUsage | None = None
     finish_reason: str | None = None
     empty_diagnosis: str | None = None
     empty_raw_preview: str | None = None
     aborted = False
-    start = time.monotonic()
 
     def _clear_accumulators() -> None:
         content_parts.clear()
@@ -64,97 +86,144 @@ async def stream_llm_round(
         tc_accumulators.clear()
         tc_progress_at.clear()
 
-    # 流式停滞闸 (卡死根因): consume the stream under a per-chunk IDLE ceiling. The
-    # deadline is reset on EVERY chunk, so a healthy long generation (which keeps
-    # streaming reasoning/content) never trips it, but a genuine stall (no bytes for
-    # ``idle`` seconds) raises promptly and observably — instead of the provider's
-    # silent 120s×3 read-timeout ladder freezing the whole turn for ~6 min. ``0``
-    # disables the gate (``asyncio.timeout(None)`` = no ceiling). Post-commit stall
-    # salvages the partial via the same aborted contract as a mid-stream disconnect;
-    # pre-commit stall still surfaces as LLMTimeoutError.
-    idle = settings.engine_llm_stream_idle_timeout_seconds
+    def _reset_attempt_state() -> None:
+        _clear_accumulators()
+        nonlocal usage, finish_reason, empty_diagnosis, empty_raw_preview, aborted
+        usage = None
+        finish_reason = None
+        empty_diagnosis = None
+        empty_raw_preview = None
+        aborted = False
+        if on_reset is not None:
+            on_reset()
+
     loop = asyncio.get_running_loop()
-    try:
-        async with asyncio.timeout(idle if idle > 0 else None) as cm:
-            async for chunk in llm.stream(request):
-                if idle > 0:
-                    cm.reschedule(loop.time() + idle)
 
-                if chunk.stream_reset:
-                    _clear_accumulators()
-                    usage = None
-                    finish_reason = None
-                    empty_diagnosis = None
-                    empty_raw_preview = None
-                    if on_reset is not None:
-                        on_reset()
-                    continue
+    for attempt in range(MAX_RETRIES):
+        if budget is not None and (time.monotonic() - start) >= budget:
+            if last_stall_error is not None:
+                raise last_stall_error
+            break
+        if attempt > 0:
+            _reset_attempt_state()
 
-                if chunk.aborted:
-                    aborted = True
-                    break
+        try:
+            # 流式停滞闸 (卡死根因): consume the stream under a per-chunk IDLE ceiling. The
+            # deadline is reset on EVERY chunk, so a healthy long generation (which keeps
+            # streaming reasoning/content) never trips it, but a genuine stall (no bytes for
+            # ``idle`` seconds) raises promptly. ``0`` disables the gate. Post-commit stall
+            # salvages the partial; pre-commit stall retries (below) then raises.
+            async with asyncio.timeout(idle if idle > 0 else None) as cm:
+                async for chunk in llm.stream(request):
+                    if idle > 0:
+                        cm.reschedule(loop.time() + idle)
 
-                if chunk.empty_diagnosis:
-                    empty_diagnosis = chunk.empty_diagnosis
-                if chunk.empty_raw_preview:
-                    empty_raw_preview = chunk.empty_raw_preview
+                    if chunk.stream_reset:
+                        _clear_accumulators()
+                        usage = None
+                        finish_reason = None
+                        empty_diagnosis = None
+                        empty_raw_preview = None
+                        if on_reset is not None:
+                            on_reset()
+                        continue
 
-                if chunk.delta_content:
-                    content_parts.append(chunk.delta_content)
-                    emit_content(chunk.delta_content)
+                    if chunk.aborted:
+                        aborted = True
+                        break
 
-                if chunk.delta_reasoning:
-                    reasoning_parts.append(chunk.delta_reasoning)
-                    emit_reasoning(chunk.delta_reasoning)
+                    if chunk.empty_diagnosis:
+                        empty_diagnosis = chunk.empty_diagnosis
+                    if chunk.empty_raw_preview:
+                        empty_raw_preview = chunk.empty_raw_preview
 
-                if chunk.finish_reason:
-                    finish_reason = chunk.finish_reason
+                    if chunk.delta_content:
+                        content_parts.append(chunk.delta_content)
+                        emit_content(chunk.delta_content)
 
-                if chunk.delta_tool_calls:
-                    for tc_delta in chunk.delta_tool_calls:
-                        idx = tc_delta.index
-                        if idx not in tc_accumulators:
-                            tc_accumulators[idx] = {
-                                "id": tc_delta.id or "",
-                                "name": tc_delta.function_name or "",
-                                "arguments": "",
-                            }
-                        else:
-                            if tc_delta.id:
-                                tc_accumulators[idx]["id"] = tc_delta.id
-                            if tc_delta.function_name:
-                                tc_accumulators[idx]["name"] = tc_delta.function_name
-                        if tc_delta.arguments_delta:
-                            tc_accumulators[idx]["arguments"] += tc_delta.arguments_delta
-                        # Surface the (throttled) argument-streaming progress so a worker
-                        # writing a long file isn't invisible until tool_use_start. Fires
-                        # once the tool name is known, then every +TOOL_PROGRESS_STEP chars.
-                        if on_tool_progress is not None:
-                            name = tc_accumulators[idx]["name"]
-                            chars = len(tc_accumulators[idx]["arguments"])
-                            last = tc_progress_at.get(idx)
-                            if name and (last is None or chars - last >= TOOL_PROGRESS_STEP):
-                                tc_progress_at[idx] = chars
-                                on_tool_progress(name, chars)
+                    if chunk.delta_reasoning:
+                        reasoning_parts.append(chunk.delta_reasoning)
+                        emit_reasoning(chunk.delta_reasoning)
 
-                if chunk.usage:
-                    usage = chunk.usage
-    except TimeoutError:
-        committed = bool(content_parts) or bool(tc_accumulators)
-        logger.warning(
-            "llm.stream_stalled",
-            scenario=request.scenario,
-            model=request.model,
-            idle_seconds=idle,
-            elapsed_ms=int((time.monotonic() - start) * 1000),
-            content_chars=sum(len(p) for p in content_parts),
-            reasoning_chars=sum(len(p) for p in reasoning_parts),
-            committed=committed,
-        )
-        if committed:
-            aborted = True
-        else:
-            raise LLMTimeoutError("模型流式响应停滞（长时间无输出），请稍后重试") from None
+                    if chunk.finish_reason:
+                        finish_reason = chunk.finish_reason
+
+                    if chunk.delta_tool_calls:
+                        for tc_delta in chunk.delta_tool_calls:
+                            idx = tc_delta.index
+                            if idx not in tc_accumulators:
+                                tc_accumulators[idx] = {
+                                    "id": tc_delta.id or "",
+                                    "name": tc_delta.function_name or "",
+                                    "arguments": "",
+                                }
+                            else:
+                                if tc_delta.id:
+                                    tc_accumulators[idx]["id"] = tc_delta.id
+                                if tc_delta.function_name:
+                                    tc_accumulators[idx]["name"] = tc_delta.function_name
+                            if tc_delta.arguments_delta:
+                                tc_accumulators[idx]["arguments"] += tc_delta.arguments_delta
+                            if on_tool_progress is not None:
+                                name = tc_accumulators[idx]["name"]
+                                chars = len(tc_accumulators[idx]["arguments"])
+                                last = tc_progress_at.get(idx)
+                                if name and (last is None or chars - last >= TOOL_PROGRESS_STEP):
+                                    tc_progress_at[idx] = chars
+                                    on_tool_progress(name, chars)
+
+                    if chunk.usage:
+                        usage = chunk.usage
+        except TimeoutError:
+            committed = bool(content_parts) or bool(tc_accumulators)
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            logger.warning(
+                "llm.stream_stalled",
+                scenario=request.scenario,
+                model=request.model,
+                idle_seconds=idle,
+                elapsed_ms=elapsed_ms,
+                content_chars=sum(len(p) for p in content_parts),
+                reasoning_chars=sum(len(p) for p in reasoning_parts),
+                committed=committed,
+                attempt=attempt + 1,
+                max_attempts=MAX_RETRIES,
+            )
+            if committed:
+                aborted = True
+                break
+
+            last_stall_error = LLMTimeoutError(
+                "模型流式响应停滞（长时间无输出），请稍后重试"
+            )
+            can_retry = attempt < MAX_RETRIES - 1
+            if budget is not None:
+                # Need room for another idle window; otherwise raise now.
+                remaining = budget - (time.monotonic() - start)
+                if remaining < idle:
+                    can_retry = False
+            if not can_retry:
+                raise last_stall_error from None
+
+            logger.info(
+                "llm.call_retried",
+                provider=getattr(llm, "_name", "llm"),
+                attempt=attempt + 1,
+                max_attempts=MAX_RETRIES,
+                wait_sec=backoff,
+                stream=True,
+                reason="stream_stall",
+            )
+            await asyncio.sleep(backoff)
+            backoff *= BACKOFF_MULTIPLIER
+            continue
+
+        # Stream finished normally (or aborted mid-stream) — leave the retry loop.
+        break
+    else:
+        # Exhausted attempts without a normal break (budget / retries).
+        if last_stall_error is not None:
+            raise last_stall_error
 
     content = "".join(content_parts)
     reasoning = "".join(reasoning_parts)

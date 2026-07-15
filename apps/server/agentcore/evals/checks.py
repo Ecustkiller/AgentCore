@@ -156,6 +156,31 @@ class RosterMatchesCheck:
 
 
 @dataclass
+class ShapeMatchesCheck:
+    """规划 DAG 相对期望形状的匹配分（报告/诊断，不进 L0 门禁）.
+
+    读 ``case.expected_shape``（或 ``args`` 覆盖）+ ``outcome.plan_runs``，经
+    ``shape_score.score_shape`` 得 0~1。``passed`` = 分数 ≥ ``threshold``（默认 0.6），但本
+    Check 在 ``DIAGNOSTIC_CHECKS`` 中，不计入用例 pass/fail。
+    """
+
+    threshold: float = 0.6
+    name: str = "ShapeMatches"
+
+    def run(self, case: EvalCase, outcome: TurnOutcome) -> CheckOutcome:
+        from agentcore.evals.shape_score import score_shape
+
+        expected = case.expected_shape
+        result = score_shape(outcome.plan_runs, expected, plan_type=outcome.plan_type)
+        ok = result.score >= self.threshold
+        return CheckOutcome(
+            self.name,
+            ok,
+            f"score={result.score:.2f} (阈 {self.threshold:.2f}); {result.summary}",
+        )
+
+
+@dataclass
 class MaxRoundsCheck:
     """轮数不超过预算（探测空转 / 收敛差）。"""
 
@@ -275,6 +300,7 @@ _REGISTRY: dict[str, Callable[[dict[str, Any]], Any]] = {
     "Delegated": lambda a: DelegatedCheck(),
     "NotDelegated": lambda a: NotDelegatedCheck(),
     "RosterMatches": lambda a: RosterMatchesCheck(expected=list(a.get("expected", []))),
+    "ShapeMatches": lambda a: ShapeMatchesCheck(threshold=float(a.get("threshold", 0.6))),
     "MaxRounds": lambda a: MaxRoundsCheck(budget=int(a.get("budget", 16))),
     "MaxToolCalls": lambda a: MaxToolCallsCheck(budget=int(a.get("budget", 24))),
     "NoFabricationMarker": lambda a: NoFabricationMarkerCheck(
@@ -294,7 +320,12 @@ CHECK_NAMES: frozenset[str] = frozenset(_REGISTRY)
 # 「派没派 / roster 对不对」是编排手段，不是任务结果——把它当 golden 标签会变成回归测试作者的
 # 编排理论（「实现冒充需求」）。过度编排改由「个体贡献=0 + L0 成本预算」度量，期望角色改由 L1
 # milestone 覆盖度量。``runner.apply_checks`` 据此集合把对应 CheckOutcome 标为 gating=False。
-DIAGNOSTIC_CHECKS: frozenset[str] = frozenset({"Delegated", "NotDelegated", "RosterMatches"})
+DIAGNOSTIC_CHECKS: frozenset[str] = frozenset(
+    {"Delegated", "NotDelegated", "RosterMatches", "ShapeMatches"}
+)
+
+# plan-only 模式下仍有意义的 Check（形状 / 委派）；其余内容类标 n/a、绝不 gating。
+PLAN_ONLY_SHAPE_CHECKS: frozenset[str] = frozenset(DIAGNOSTIC_CHECKS)
 
 
 def build_check(spec: dict[str, Any]) -> Any:

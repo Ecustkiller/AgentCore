@@ -82,7 +82,7 @@ class SimulationService:
     ):
         self._repo = repo
         self._streams = stream_registry or default_sim_stream_registry
-        # None = auto: native tools on DeepSeek, text-JSON fallback on Codex proxy.
+        # None = auto: native tools on DeepSeek, text-JSON fallback on other upstreams.
         self._text_mode = text_mode
         self._activation = activation_strategy or default_activation_strategy()
         self._tick_db_lock: asyncio.Lock | None = None
@@ -163,7 +163,19 @@ class SimulationService:
         run = await self._repo.create_run(
             user_id=user_id, scenario=scenario, seed=seed, config=config
         )
-        world = seed_town_world(personas)
+        if scenario == "show":
+            from agentcore.simulation.scenarios.show.config import seed_show_world
+
+            world = seed_show_world(personas)
+            from agentcore.simulation.show.rules import new_season_state
+
+            config["show"] = new_season_state(
+                seed=seed, run_id=run.id, season_id="心动小镇"
+            ).model_dump(mode="json")
+            await self._repo.update_run_config(run.id, config)
+            run.config = config
+        else:
+            world = seed_town_world(personas)
         for persona in personas:
             agent = world.agents[persona.agent_id]
             await self._repo.add_agent(run.id, persona, agent.to_state())
@@ -198,7 +210,7 @@ class SimulationService:
             raise ValidationError("模拟已暂停，请先恢复后再推进 tick")
         ensure_under_max_ticks(run.current_tick, max_ticks=settings.max_ticks)
         sink = await self._streams.get_or_create(run_id)
-        world = await self._load_world(run_id, run.current_tick)
+        world = await self._load_world(run_id, run.current_tick, scenario=run.scenario)
         engine = WorldEngine(world=world, seed=run.seed)
         next_tick = world.tick + 1
         next_hour = (8 + next_tick) % 24
@@ -410,7 +422,7 @@ class SimulationService:
         manifest = cfg.get("manifest") or {}
         return bool(manifest.get("scripted"))
 
-    async def _load_world(self, run_id: str, current_tick: int):
+    async def _load_world(self, run_id: str, current_tick: int, *, scenario: str = "town"):
         last_tick = await self._repo.get_tick(run_id, current_tick) if current_tick else None
         if current_tick > 0 and (not last_tick or not last_tick.snapshot):
             raise ValidationError(
@@ -418,10 +430,10 @@ class SimulationService:
             )
         if last_tick and last_tick.snapshot:
             snap = SimTickSnapshot.model_validate(last_tick.snapshot)
-            world = seed_town_world()
+            world = self._seed_world(scenario)
             world.load_snapshot(snap)
         else:
-            world = seed_town_world()
+            world = self._seed_world(scenario)
         agents = await self._repo.list_agents(run_id)
         for row in agents:
             state = SimulationRepository.agent_state_from_row(row)
@@ -431,6 +443,14 @@ class SimulationService:
                 agent.goal = state.goal
                 agent.money = state.money
         return world
+
+    @staticmethod
+    def _seed_world(scenario: str):
+        if scenario == "show":
+            from agentcore.simulation.scenarios.show.config import seed_show_world
+
+            return seed_show_world()
+        return seed_town_world()
 
     async def inject_event(
         self,

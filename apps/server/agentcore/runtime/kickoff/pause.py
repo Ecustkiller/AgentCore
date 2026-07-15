@@ -36,7 +36,10 @@ class KickoffHost(Protocol):
 
 
 def kickoff_tools(*, show_capabilities: bool) -> list[str]:
-    """Tools listed on the kickoff card (empty when AutonomyPolicy hides them)."""
+    """GRANTABLE whitelist shown on the kickoff card as「将授权的能力范围」.
+
+    Empty when AutonomyPolicy hides the capability half (not plan-derived).
+    """
     if not show_capabilities:
         return []
     return sorted(delegation_grantable_tool_names())
@@ -95,6 +98,7 @@ async def persist_kickoff(
             max_rounds=summary.max_rounds,
             thorough=summary.thorough,
             debate_arguments=dict(summary.debate_arguments),
+            citations=capture.citations,
             trace_id=capture.trace_id,
         )
 
@@ -115,7 +119,8 @@ async def await_kickoff(
     """Pause before fan-out / moderator start; return decision, or None when suspended.
 
     On durable save: sets ``host._pending_pause`` and returns ``None`` so the caller
-    ends with SUSPEND. When persist is unavailable: CONTINUE (non-production fallback).
+    ends with SUSPEND. Config unavailable (no transcript): CONTINUE. Runtime saver
+    failure raises (D11 — no silent continue).
     """
     registry = host._registry
     conversation_id = host._conversation_id
@@ -138,9 +143,18 @@ async def await_kickoff(
         max_rounds=card["max_rounds"],
         thorough=card["thorough"],
     )
-    saved = await persist_kickoff(
-        host, checkpoint_id, summary, required, plan=plan
-    )
+    try:
+        saved = await persist_kickoff(
+            host, checkpoint_id, summary, required, plan=plan
+        )
+    except Exception:
+        # D11：运行态落帧失败（saver 抛错）⇒ 显式终止，不许静默 CONTINUE 开工。
+        logger.exception(
+            "team_preview.persist_failed",
+            checkpoint_id=checkpoint_id,
+            primitive=summary.primitive,
+        )
+        raise
     if saved:
         host._sink.emit(required)
         host._pending_pause = True
@@ -153,6 +167,7 @@ async def await_kickoff(
         )
         return None
 
+    # 配置态不可用（无 transcript 等非生产场景）⇒ CONTINUE。
     logger.warning(
         "team_preview.persist_unavailable",
         checkpoint_id=checkpoint_id,

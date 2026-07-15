@@ -115,6 +115,10 @@ class UserLlmKeyRepository:
         api_key_enc: bytes,
         base_url: str | None = None,
         default_model: str | None = None,
+        price_cache_hit: str | None = None,
+        price_cache_miss: str | None = None,
+        price_output: str | None = None,
+        background_model: str | None = None,
     ) -> UserLlmKey:
         """Insert or replace the user's config, resetting status to 'unchecked'.
 
@@ -128,6 +132,10 @@ class UserLlmKeyRepository:
             row.api_key_enc = api_key_enc
             row.base_url = resolved_base_url
             row.default_model = resolved_model
+            row.price_cache_hit = price_cache_hit
+            row.price_cache_miss = price_cache_miss
+            row.price_output = price_output
+            row.background_model = background_model
             row.status = "unchecked"
             row.supports_tools = None
             await self._session.commit()
@@ -138,6 +146,10 @@ class UserLlmKeyRepository:
             api_key_enc=api_key_enc,
             base_url=resolved_base_url,
             default_model=resolved_model,
+            price_cache_hit=price_cache_hit,
+            price_cache_miss=price_cache_miss,
+            price_output=price_output,
+            background_model=background_model,
             status="unchecked",
             supports_tools=None,
         )

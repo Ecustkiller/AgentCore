@@ -50,10 +50,11 @@ export type RunFrame =
       runKind: RunKind;
       /** 同人接续现场根；undefined/null = 冷开局。 */
       continuesRunId?: string | null;
-      // 乙 wire 携 round/stance (单一轮次投影): undefined on ordinary / hot-fix starts.
+      // 乙 wire 携 round/stance/side_key (单一轮次投影): undefined on ordinary / hot-fix starts.
       stance?: Stance;
       group?: string;
       round?: number;
+      sideKey?: string;
       // 冷回落接手: mid-flight `_redir` spawn; undefined/null on ordinary / continuation starts.
       replacesRunId?: string | null;
     }
@@ -64,11 +65,23 @@ export type RunFrame =
       // 收到的上下文 (上下文传递可视化): the wire ContextBlocks this run was fed.
       blocks: ContextBlockWire[];
     }
-  | { t: number; kind: "run_output_delta"; agentId: string; delta: string }
+  | {
+      t: number;
+      kind: "run_output_delta";
+      runId: string;
+      agentId: string;
+      delta: string;
+    }
   // 交付前核验回炉 (finish_guard) 的 worker 对偶（content_reset 之于 CEO）：清这个 worker
   // 已累积的草稿产出，重写版从干净态重累积（reasoning 保留）。
-  | { t: number; kind: "run_output_reset"; agentId: string }
-  | { t: number; kind: "run_reasoning_delta"; agentId: string; delta: string }
+  | { t: number; kind: "run_output_reset"; runId: string; agentId: string }
+  | {
+      t: number;
+      kind: "run_reasoning_delta";
+      runId: string;
+      agentId: string;
+      delta: string;
+    }
   | {
       t: number;
       kind: "run_tool_progress";
@@ -253,6 +266,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         stance: p.stance,
         group: p.group,
         round: p.round,
+        sideKey: p.side_key,
         replacesRunId: p.replaces_run_id ?? null,
       };
     }
@@ -270,6 +284,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
       return {
         t,
         kind: "run_output_delta",
+        runId: p.run_id,
         agentId: p.agent_id,
         delta: p.delta,
       };
@@ -279,6 +294,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
       return {
         t,
         kind: "run_output_reset",
+        runId: p.run_id,
         agentId: p.agent_id,
       };
     }
@@ -287,6 +303,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
       return {
         t,
         kind: "run_reasoning_delta",
+        runId: p.run_id,
         agentId: p.agent_id,
         delta: p.delta,
       };

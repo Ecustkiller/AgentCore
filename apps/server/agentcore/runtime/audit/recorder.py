@@ -1,4 +1,4 @@
-"""AuditRecorder — best-effort append-only audit writes for delegated turns."""
+"""AuditRecorder — best-effort append-only audit writes for active turns."""
 
 from __future__ import annotations
 
@@ -32,7 +32,12 @@ class AuditDraft:
 
 
 class AuditRecorder:
-    """Per-turn audit writer — active only after the first delegate in the turn."""
+    """Per-turn audit writer.
+
+    Active when the turn has delegated (multi-agent) **or** the session is
+    ``full_trust`` (P2: power → fuller trail). Approvals may also force-schedule
+    even before activation so「谁批了什么」is never lost on solo turns.
+    """
 
     def __init__(
         self,
@@ -43,13 +48,16 @@ class AuditRecorder:
         trace_id: str | None,
         captain_run_id: str | None = None,
         delegated: bool = False,
+        permission_preset: str | None = None,
     ) -> None:
         self.user_id = user_id
         self.conversation_id = conversation_id
         self.turn_id = turn_id
         self.trace_id = trace_id
         self.captain_run_id = captain_run_id
-        self._delegated = delegated
+        self.permission_preset = permission_preset
+        self._active = delegated
+        self._preset_snapshotted = False
         self._next_seq = 0
         self._drops = 0
         self._pending: list[asyncio.Task[None]] = []
@@ -61,10 +69,32 @@ class AuditRecorder:
 
     @property
     def delegated(self) -> bool:
-        return self._delegated
+        """True when audit collection is active for this turn (legacy name)."""
+        return self._active
+
+    @property
+    def active(self) -> bool:
+        return self._active
 
     def activate_delegation(self) -> None:
-        self._delegated = True
+        self._active = True
+        self._maybe_snapshot_preset()
+
+    def activate(self) -> None:
+        self._active = True
+        self._maybe_snapshot_preset()
+
+    def _maybe_snapshot_preset(self) -> None:
+        if self._preset_snapshotted or not self.permission_preset or not self._active:
+            return
+        from agentcore.runtime.audit.projector import project_permission_preset_snapshot
+
+        self._preset_snapshotted = True
+        self.schedule(
+            project_permission_preset_snapshot(
+                self, permission_preset=self.permission_preset
+            )
+        )
 
     def remember_tool_args(self, tool_call_id: str, arguments: dict[str, Any]) -> None:
         if tool_call_id:
@@ -73,8 +103,8 @@ class AuditRecorder:
     def pop_tool_args(self, tool_call_id: str) -> dict[str, Any]:
         return self._tool_args.pop(tool_call_id, {})
 
-    def schedule(self, draft: AuditDraft) -> None:
-        if not self._delegated:
+    def schedule(self, draft: AuditDraft, *, force: bool = False) -> None:
+        if not self._active and not force:
             return
         try:
             loop = asyncio.get_running_loop()

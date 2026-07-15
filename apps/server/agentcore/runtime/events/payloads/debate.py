@@ -19,11 +19,23 @@ class DebateSideInfo(WirePayload):
     )
 
 
+class DebateSpeechArgument(WirePayload):
+    """辩手发言的一条结构化论点（后端 speech_parse 产出）。"""
+
+    id: str
+    title: str
+    body: str
+
+
 class DebateRoundSide(WirePayload):
     key: str
     name: str
     run_id: str
     ok: bool
+    # 部分失败续赛时该方缺席（无立论）；跳过对其质询与对抗记分。缺字段（老事件）→ false。
+    absent: bool = False
+    # 结构化论点大纲；缺字段 / 空列表（老 journal）→ 前端启发式回退 parseSpeechArguments。
+    arguments: list[DebateSpeechArgument] = Field(default_factory=list)
 
 
 class DebateVerdict(WirePayload):
@@ -133,6 +145,12 @@ class DebateRoundStartedPayload(WirePayload):
     moderator_run_id: str
     round_no: int
     focus: str
+    # 本场是否开启质询（与 cross_exam_enabled(config) 同源）。每轮开场重复声明同一场常量；
+    # 缺字段（老事件）→ 前端回退「正在小结…」。optional+default 保持向后兼容。
+    cross_exam_enabled: bool = False
+    # 主持人开场白：仅首轮携带（后续轮空/缺省）。前端 sticky 取第一个非空，不被后续覆盖；
+    # 收场 debate_result.opening 仍是权威。缺字段（老 journal）→ ""。
+    opening: str = ""
 
 
 class DebateRoundPayload(DebateRoundInfo):

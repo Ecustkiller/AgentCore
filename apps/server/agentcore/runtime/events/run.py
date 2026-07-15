@@ -7,6 +7,30 @@ from typing import Any
 from agentcore.runtime.events.types import EventType, SSEEvent
 
 
+def _wire_cost(cost: dict[str, Any] | None) -> dict[str, Any]:
+    """SSE cost object: money keys + pricing_source; strip ledger-only fields."""
+    if cost is None:
+        return {
+            "input": 0,
+            "cached": 0,
+            "output": 0,
+            "total": 0,
+            "currency": "USD",
+            "pricing_source": "curated",
+        }
+    out: dict[str, Any] = {
+        "input": int(cost.get("input", 0) or 0),
+        "cached": int(cost.get("cached", 0) or 0),
+        "output": int(cost.get("output", 0) or 0),
+        "total": int(cost.get("total", 0) or 0),
+        "currency": str(cost.get("currency") or "USD"),
+        "pricing_source": str(cost.get("pricing_source") or "curated"),
+    }
+    if cost.get("estimated_total") is not None:
+        out["estimated_total"] = int(cost["estimated_total"])
+    return out
+
+
 def run_plan(
     *,
     execution_id: str,
@@ -57,13 +81,15 @@ def run_started(
     stance: str | None = None,
     group: str | None = None,
     round_no: int = 0,
+    side_key: str | None = None,
     replaces_run_id: str | None = None,
 ) -> SSEEvent:
     """A run began. A 续写 (CEO 续派 / redirect 热修 / 辩手后续轮) carries
     ``continues_run_id`` pointing at the session root (星型), while ``parent_run_id``
     stays the true delegation parent (captain / moderator). Debate continuations
-    additionally carry ``stance``/``group`` + TRUE ``round`` so every fold projects
-    第几轮/哪一方 from the wire. Optional fields ride the payload ONLY when set.
+    additionally carry ``stance``/``group`` + TRUE ``round`` + ``side_key`` so every
+    fold projects 第几轮/哪一方 from the wire (no run_id regex). Optional fields
+    ride the payload ONLY when set.
 
     ``replaces_run_id`` (冷回落接手): a mid-flight ``_redir`` spawn that takes over a
     redirected worker — orthogonal to continuation."""
@@ -81,6 +107,8 @@ def run_started(
         payload["group"] = group
     if round_no:
         payload["round"] = round_no
+    if side_key:
+        payload["side_key"] = side_key
     if replaces_run_id:
         payload["replaces_run_id"] = replaces_run_id
     return SSEEvent(type=EventType.RUN_STARTED, payload=payload)
@@ -247,9 +275,7 @@ def run_completed(
         "usage": usage
         if usage is not None
         else {"input": 0, "output": 0, "reasoning": 0, "cache_hit": 0, "cache_miss": 0},
-        "cost": cost
-        if cost is not None
-        else {"input": 0, "cached": 0, "output": 0, "total": 0, "currency": "USD"},
+        "cost": _wire_cost(cost),
     }
     # 完工交接简报 (surfacing): the worker's authored 交接简报 — {summary(结论) / key_points /
     # assumptions / next_steps}, each present only when non-empty — carried VERBATIM so the
@@ -404,6 +430,8 @@ def debate_round_started(
     moderator_run_id: str,
     round_no: int,
     focus: str,
+    cross_exam_enabled: bool = False,
+    opening: str = "",
 ) -> SSEEvent:
     return SSEEvent(
         type=EventType.DEBATE_ROUND_STARTED,
@@ -412,6 +440,8 @@ def debate_round_started(
             "moderator_run_id": moderator_run_id,
             "round_no": round_no,
             "focus": focus,
+            "cross_exam_enabled": cross_exam_enabled,
+            "opening": opening,
         },
     )
 

@@ -1,7 +1,8 @@
 import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { useLlmKey } from "@/hooks/useLlmKey";
 import { agentColorVar } from "@/lib/agentIdentity";
-import { formatCompact, formatCost, formatUsd } from "@/lib/format";
+import { formatCompact, formatCost, formatDisplayCost, formatUsd } from "@/lib/format";
 import { useUsageStore } from "@/stores/usage";
 import { KeyRound, Loader2, RefreshCw } from "lucide-react";
 import { useEffect } from "react";
@@ -14,6 +15,8 @@ import { SettingsHeader } from "./SettingsHeader";
  * reads「还剩多少」at a glance without big raw numbers. Token / cost breakdown and
  * run-detail「资源消耗」default-expand are always on. All numbers come from
  * `GET /usage/summary` via the usage store; money formats off the single server FX rate.
+ * Free-tier users (`free_tier_active`) relabel the monthly meter; BYOK-with-key shows
+ * token meters + ≈¥ estimates when `estimated_cost` / `cost_estimated_total` is present.
  */
 export function UsageSettings() {
   const summary = useUsageStore((s) => s.summary);
@@ -21,6 +24,8 @@ export function UsageSettings() {
   const error = useUsageStore((s) => s.error);
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
   const fetchSummary = useUsageStore((s) => s.fetchSummary);
+  const { data: llm } = useLlmKey();
+  const freeTierActive = llm?.free_tier_active === true;
 
   // Refresh on open: the bootstrap snapshot may be stale by the time the user
   // lands here. Best-effort (the store keeps the last value + a soft error).
@@ -29,9 +34,9 @@ export function UsageSettings() {
   }, [fetchSummary]);
 
   const refresh = () => void fetchSummary();
-  // BYOK: platform quota is dormant (the turn runs on the user's own key), so the
-  // page reframes额度 as「自带 Key 不限额」and presents cost as the user's own spend.
-  const byok = summary?.billing_mode === "byok";
+  // BYOK with a configured key: platform quota is dormant. Free-tier (no key)
+  // must NOT take this branch — they see platform meters with a free-tier label.
+  const byok = summary?.billing_mode === "byok" && !freeTierActive;
 
   return (
     <div>
@@ -39,8 +44,10 @@ export function UsageSettings() {
         title="用量"
         description={
           byok
-            ? "自带 Key 模式：平台不限额，下方以 token 用量为主（平台不代为计价）。"
-            : "本月额度与今日用量。成本按团队角色拆分，以人民币展示。"
+            ? "自带 Key 模式：平台不限额。有估算价时显示 ≈¥（非上游账单），并以 token 用量为主。"
+            : freeTierActive
+              ? "本月免费额度与今日用量。额度用完可接入自己的模型继续。"
+              : "本月额度与今日用量。成本按团队角色拆分，以人民币展示。"
         }
         action={
           // Manual refresh once data exists — numbers go stale after running tasks
@@ -68,7 +75,12 @@ export function UsageSettings() {
       {summary ? (
         <>
           {error && <RefreshErrorBanner message={error} onRetry={refresh} />}
-          <Dashboard summary={summary} cnyPerUsd={cnyPerUsd} byok={byok} />
+          <Dashboard
+            summary={summary}
+            cnyPerUsd={cnyPerUsd}
+            byok={byok}
+            freeTierActive={freeTierActive}
+          />
         </>
       ) : error ? (
         <ErrorState message={error} onRetry={refresh} />
@@ -130,10 +142,12 @@ function Dashboard({
   summary,
   cnyPerUsd,
   byok,
+  freeTierActive,
 }: {
   summary: Summary;
   cnyPerUsd: number;
   byok: boolean;
+  freeTierActive: boolean;
 }) {
   const { today, month, quota } = summary;
   const monthLimit = quota.monthly_cost_nano;
@@ -143,6 +157,7 @@ function Dashboard({
   const dayReqLimit = quota.daily_requests;
   const dayReqUsed = today.requests;
   const monthNear = monthLimit > 0 && monthUsed / monthLimit >= 0.8;
+  const monthLabel = freeTierActive ? "本月免费额度" : "本月额度";
 
   // Reset captions derive from the backend's UTC window boundaries (usage.py /
   // quota.py) rendered in local time — see resetTexts() for why.
@@ -176,14 +191,16 @@ function Dashboard({
       ) : (
         <>
           <QuotaMeter
-            label="本月额度"
+            label={monthLabel}
             used={monthUsed}
             limit={monthLimit}
             caption={moneyCaption}
           />
           {monthNear && (
             <p className="-mt-3 text-xs text-destructive">
-              接近本月额度，超出将暂停服务。
+              {freeTierActive
+                ? "接近本月免费额度，用完后请接入自己的模型继续。"
+                : "接近本月额度，超出将暂停服务。"}
             </p>
           )}
           <QuotaMeter
@@ -207,11 +224,17 @@ function Dashboard({
         <CostTrend points={summary.recent_daily_cost} cnyPerUsd={cnyPerUsd} />
       )}
 
-      {/* 本月各角色花销 (§7.3D, 团队工资单 by role) — ¥ is 大众-visible (§7.1),
-          so this lands for everyone, not just Power. Empty until the month has spend. */}
-      {summary.month_by_role.length > 0 && !byok && (
-        <RolePayroll lines={summary.month_by_role} cnyPerUsd={cnyPerUsd} />
-      )}
+      {/* 本月各角色花销 (§7.3D, 团队工资单 by role) — platform ¥ always;
+          BYOK shows ≈¥ when cost_estimated_total > 0. */}
+      {summary.month_by_role.length > 0 &&
+        (!byok ||
+          summary.month_by_role.some((l) => l.cost_estimated_total > 0)) && (
+          <RolePayroll
+            lines={summary.month_by_role}
+            cnyPerUsd={cnyPerUsd}
+            estimated={byok}
+          />
+        )}
 
       <UsageDetail summary={summary} cnyPerUsd={cnyPerUsd} byok={byok} />
     </div>
@@ -233,7 +256,7 @@ function ByokNote() {
       <KeyRound size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
       <p className="text-xs text-muted-foreground">
         当前为「自带 Key」模式：对话走你配置的模型与端点，平台不设上限。下方以
-        token 用量为主；费用金额由你的服务商账单为准，此处不展示平台计价。
+        token 为主；有估算价时显示 ≈¥（按社区价目/自填单价，非上游账单）。
       </p>
     </div>
   );
@@ -376,48 +399,56 @@ function roleLabel(role: string): string {
 /**
  * 本月各角色花销 (§7.3D) — the team payroll grouped by role, the multi-agent
  * differentiator a single-agent tool can't show. ¥ per role is 大众-visible
- * (money is never gated, §7.1); rows arrive spend-desc from the server.
+ * (money is never gated, §7.1); BYOK rows use ≈¥ from cost_estimated_total.
  */
 function RolePayroll({
   lines,
   cnyPerUsd,
+  estimated = false,
 }: {
   lines: Summary["month_by_role"];
   cnyPerUsd: number;
+  estimated?: boolean;
 }) {
   return (
     <div>
-      <p className="text-sm text-foreground">本月各角色花销</p>
+      <p className="text-sm text-foreground">
+        {estimated ? "本月各角色估算" : "本月各角色花销"}
+      </p>
       <p className="mt-0.5 text-xs text-muted-foreground">
-        多 Agent 团队按角色拆分的花销，竞品的单 Agent 做不到。
+        {estimated
+          ? "按社区价目/自填单价估算，非上游账单。多 Agent 按角色拆分。"
+          : "多 Agent 团队按角色拆分的花销，竞品的单 Agent 做不到。"}
       </p>
       <div className="mt-3 rounded-xl border border-border bg-card">
-        {lines.map((line, i) => (
-          <div
-            key={line.role}
-            className={`flex items-center justify-between px-4 py-2.5 text-sm ${
-              i > 0 ? "border-t border-border" : ""
-            }`}
-          >
-            <span className="flex items-center gap-2 text-foreground">
-              {/* 角色身份色圆点 (color-tokens.mdc 角色身份 --agent-N)：让 vision/各角色花销一眼可辨，身份≠状态。 */}
-              <span
-                className="size-2 shrink-0 rounded-full"
-                style={{ backgroundColor: agentColorVar(line.role) }}
-                aria-hidden
-              />
-              <span>
-                {roleLabel(line.role)}
-                <span className="ml-2 text-xs text-muted-foreground">
-                  {line.turns} 回合
+        {lines.map((line, i) => {
+          const nano = estimated ? line.cost_estimated_total : line.cost_total;
+          return (
+            <div
+              key={line.role}
+              className={`flex items-center justify-between px-4 py-2.5 text-sm ${
+                i > 0 ? "border-t border-border" : ""
+              }`}
+            >
+              <span className="flex items-center gap-2 text-foreground">
+                <span
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: agentColorVar(line.role) }}
+                  aria-hidden
+                />
+                <span>
+                  {roleLabel(line.role)}
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {line.turns} 回合
+                  </span>
                 </span>
               </span>
-            </span>
-            <span className="tabular-nums text-foreground">
-              {formatCost(line.cost_total, cnyPerUsd)}
-            </span>
-          </div>
-        ))}
+              <span className="tabular-nums text-foreground">
+                {formatDisplayCost(nano, cnyPerUsd, estimated)}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -461,6 +492,20 @@ function UsageDetail({
       label: "本月 tokens",
       value: `输入 ${formatCompact(month.usage.input)} · 输出 ${formatCompact(month.usage.output)}`,
     });
+    const todayEst = today.estimated_cost?.total ?? 0;
+    const monthEst = month.estimated_cost?.total ?? 0;
+    if (todayEst > 0 || monthEst > 0) {
+      rows.push(
+        {
+          label: "今日估算",
+          value: formatDisplayCost(todayEst, cnyPerUsd, true),
+        },
+        {
+          label: "本月估算",
+          value: formatDisplayCost(monthEst, cnyPerUsd, true),
+        },
+      );
+    }
   }
   rows.push({
     label: "请求数",

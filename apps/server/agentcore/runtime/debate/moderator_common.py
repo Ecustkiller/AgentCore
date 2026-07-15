@@ -29,8 +29,8 @@ _LEDGER_CLASHES_PER_ROUND = 4
 # 每轮完成后的回调（DebateTool 在此 emit 逐轮小结 SSE 事件 / 触发老板检查点；测试可省）。
 RoundHook = Callable[[RoundResult], Awaitable[None]]
 # 本轮焦点既定、辩手发言【前】的回调（DebateTool 据此 emit debate_round_started，让焦点先于
-# 发言亮出）；入参 (round_no, focus)。测试可省。
-RoundStartHook = Callable[[int, str], Awaitable[None]]
+# 发言亮出）；入参 (round_no, focus, opening)。opening 仅首轮非空（后续轮 ""）。测试可省。
+RoundStartHook = Callable[[int, str, str], Awaitable[None]]
 # 交互式逐轮边界回调（opt-in，辩论编排设计.md §逐轮交互）：每轮判完 + 小结后，把「继续辩 / 加角
 # 度 / 够了出结论」的决定权交给用户。入参 (round_no, result, converged, max_rounds)；返回
 # :class:`RoundBoundary` 驱动循环，或 ``None`` 表示「交回裁判自动收敛」（DebateTool 在超时 / 无活
@@ -66,9 +66,19 @@ def _as_str(value: Any) -> str:
 
 
 def _as_str_list(value: Any) -> list[str]:
-    """把 LLM 返回的列表字段规整为去空的字符串列表（容忍标量 / 混入非串元素）。"""
+    """把 LLM 返回的列表字段规整为去空的字符串列表（容忍标量 / 混入非串元素）。
+
+    亦容忍「编号对象」dict（如 ``{"1": "q1", "2": "q2"}``）：仅当全部值为非空字符串时，
+    按插入序（文档序）取 values——禁止按 key 排序（字典序会把 ``"10"`` 排到 ``"2"`` 前）。
+    其他 dict 形态回落为 []。
+    """
     if isinstance(value, str):
         return [value.strip()] if value.strip() else []
+    if isinstance(value, dict):
+        values = list(value.values())
+        if values and all(isinstance(v, str) and v.strip() for v in values):
+            return [v.strip() for v in values]
+        return []
     if not isinstance(value, list):
         return []
     out: list[str] = []
@@ -104,7 +114,8 @@ def _turns_block(turns: Sequence[SideTurn], *, clip: int = _TURN_CLIP) -> str:
     blocks = []
     for t in turns:
         if not t.ok:
-            blocks.append(f"### {t.side_name}[{t.side_key}]\n（本轮未产出有效发言）")
+            label = "本轮缺席（无有效发言）" if t.absent else "本轮未产出有效发言"
+            blocks.append(f"### {t.side_name}[{t.side_key}]\n（{label}）")
             continue
         blocks.append(f"### {t.side_name}[{t.side_key}]\n{_clip(t.content, clip)}")
     return "\n\n".join(blocks)

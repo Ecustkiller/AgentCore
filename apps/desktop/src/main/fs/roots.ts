@@ -6,6 +6,12 @@ export interface StoredRoot {
   id: string;
   name: string;
   absPath: string;
+  /** W3: session-only read-only grant — not persisted to fs-roots.json. */
+  sessionOnly?: boolean;
+  conversationId?: string;
+  readonly?: boolean;
+  /** Model-facing alias under ``external/<alias>/``. */
+  alias?: string;
 }
 
 let roots = new Map<string, StoredRoot>();
@@ -19,16 +25,21 @@ async function loadRoots(): Promise<void> {
   try {
     const raw = await fs.readFile(storeFilePath(), "utf-8");
     const arr = JSON.parse(raw) as StoredRoot[];
-    roots = new Map(arr.map((r) => [r.id, r]));
+    // Drop any accidentally persisted session roots.
+    roots = new Map(
+      arr
+        .filter((r) => !r.sessionOnly)
+        .map((r) => [r.id, { id: r.id, name: r.name, absPath: r.absPath }]),
+    );
   } catch {
     roots = new Map();
   }
 }
 
-export async function saveRoots(): Promise<void> {
-  const arr = [...roots.values()];
+async function saveRoots(): Promise<void> {
+  const arr = [...roots.values()].filter((r) => !r.sessionOnly);
   try {
-    await fs.writeFile(storeFilePath(), JSON.stringify(arr, null, 2), "utf-8");
+    await fs.writeFile(storeFilePath(), JSON.stringify(arr, null, 2));
   } catch (e) {
     console.error("[fs-service] 持久化授权根失败:", e);
   }
@@ -54,12 +65,40 @@ export function deleteRoot(id: string): boolean {
   return roots.delete(id);
 }
 
+/** Permanent (non-session) roots for settings / project binding. */
 export function getAllRoots(): StoredRoot[] {
-  return [...roots.values()];
+  return [...roots.values()].filter((r) => !r.sessionOnly);
 }
 
 export function findRootByAbsPath(absPath: string): StoredRoot | undefined {
   return [...roots.values()].find((r) => r.absPath === absPath);
+}
+
+export function listSessionRoots(conversationId: string): StoredRoot[] {
+  return [...roots.values()].filter(
+    (r) => r.sessionOnly && r.conversationId === conversationId,
+  );
+}
+
+export function clearSessionRoots(conversationId: string): string[] {
+  const removed: string[] = [];
+  for (const [id, r] of roots) {
+    if (r.sessionOnly && r.conversationId === conversationId) {
+      roots.delete(id);
+      removed.push(id);
+    }
+  }
+  return removed;
+}
+
+export function revokeSessionRoot(
+  conversationId: string,
+  rootId: string,
+): boolean {
+  const r = roots.get(rootId);
+  if (!r?.sessionOnly || r.conversationId !== conversationId) return false;
+  roots.delete(rootId);
+  return true;
 }
 
 /**
@@ -74,3 +113,5 @@ export async function getStoredRoot(
   await ensureReady();
   return roots.get(rootId) ?? null;
 }
+
+export { saveRoots };

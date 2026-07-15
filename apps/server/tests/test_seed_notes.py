@@ -1,8 +1,6 @@
 """CEO seed_notes + team_brief (共享便签 Phase 2)."""
 
-from agentcore.runtime.events import EventSink, EventType
-from agentcore.runtime.runs.notewall import NOTE_KIND_DECISION, NOTE_KIND_HEADS_UP, NoteWall
-from agentcore.tools.builtin.delegate.seed_notes import (
+from agentcore.runtime.delegate.seed_notes import (
     CEO_SEED_RUN_ID,
     MAX_SEED_NOTES,
     MAX_TEAM_BRIEF_CHARS,
@@ -11,6 +9,8 @@ from agentcore.tools.builtin.delegate.seed_notes import (
     resolve_coordination,
     seed_note_wall,
 )
+from agentcore.runtime.events import EventSink, EventType
+from agentcore.runtime.runs.notewall import NOTE_KIND_DECISION, NOTE_KIND_HEADS_UP, NoteWall
 
 
 def test_parse_seed_notes_accepts_valid_items():

@@ -14,11 +14,12 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
 
-from agentcore.api.cost_view import cost_breakdown, usage_breakdown
+from agentcore.api.cost_view import cost_breakdown, estimated_cost_breakdown, usage_breakdown
 from agentcore.api.dependencies import (
     AuthUser,
     get_conversation_repo,
     get_cost_event_repo,
+    get_user_llm_key_repo,
     get_user_repo,
 )
 from agentcore.api.schemas import (
@@ -31,12 +32,17 @@ from agentcore.api.schemas import (
     UsageSummary,
     UsageWindow,
 )
-from agentcore.billing.preference import resolve_effective_billing_mode
+from agentcore.billing.preference import is_free_tier_active, resolve_effective_billing_mode
 from agentcore.config import settings
+from agentcore.conversation.quota import QuotaLimits
 from agentcore.core.errors import NotFoundError
 from agentcore.db.models import CostEvent
-from agentcore.db.repositories import ConversationRepository, CostEventRepository, UserRepository
-from agentcore.llm.pricing import NANO_PER_USD
+from agentcore.db.repositories import (
+    ConversationRepository,
+    CostEventRepository,
+    UserLlmKeyRepository,
+    UserRepository,
+)
 
 router = APIRouter(tags=["usage"])
 
@@ -45,25 +51,40 @@ router = APIRouter(tags=["usage"])
 _TREND_DAYS = 7
 
 
-def _sum_rows(rows: list[CostEvent]) -> tuple[dict, dict, int]:
-    """Roll up a turn's payroll rows into (usage, cost, rounds) totals.
+def _sum_rows(rows: list[CostEvent]) -> tuple[dict, dict, dict, int]:
+    """Roll up a turn's payroll rows into (usage, cost, estimated_cost, rounds).
 
     Summed in Python from the rows already fetched for the payroll (no second
-    query). The turn total is the SUM of the per-run prices (workers may differ
-    in model tier, so the rows are never re-priced).
+    query). Billed and estimated stay on their scalar columns (never re-priced).
     """
     usage = {"input": 0, "output": 0, "reasoning": 0, "cache_hit": 0, "cache_miss": 0}
-    cost = {"input": 0, "cached": 0, "output": 0, "total": 0}
+    cost = {"input": 0, "cached": 0, "output": 0, "total": 0, "pricing_source": "curated"}
+    estimated = {
+        "input": 0,
+        "cached": 0,
+        "output": 0,
+        "total": 0,
+        "pricing_source": "estimated",
+    }
     rounds = 0
     for row in rows:
         for key in usage:
             usage[key] += int((row.tokens or {}).get(key, 0))
         row_cost = row.cost or {}
-        for key in ("input", "cached", "output"):
-            cost[key] += int(row_cost.get(key, 0))
-        cost["total"] += int(row.cost_total_nano or 0)
+        billed_nano = int(row.cost_total_nano or 0)
+        estimated_nano = int(getattr(row, "cost_estimated_nano", 0) or 0)
+        if billed_nano:
+            for key in ("input", "cached", "output"):
+                cost[key] += int(row_cost.get(key, 0))
+            cost["total"] += billed_nano
+        if estimated_nano:
+            for key in ("input", "cached", "output"):
+                estimated[key] += int(row_cost.get(key, 0))
+            estimated["total"] += estimated_nano
+            if row_cost.get("pricing_source"):
+                estimated["pricing_source"] = str(row_cost["pricing_source"])
         rounds += int(row.rounds or 0)
-    return usage, cost, rounds
+    return usage, cost, estimated, rounds
 
 
 @router.get("/messages/{message_id}/cost", response_model=TurnCost)
@@ -79,23 +100,41 @@ async def get_message_cost(
     + an empty roster rather than 404 — it never leaks whether the id exists.
     """
     rows = list(await repo.list_for_message(message_id, user_id=user.user_id))
-    agents = [
-        AgentCostLine(
-            run_id=row.run_id,
-            agent_id=row.agent_id,
-            role=row.persona or row.role,
-            model=row.model,
-            usage=usage_breakdown(row.tokens or {}),
-            cost=cost_breakdown(row.cost or {}),
-            duration_ms=int(row.duration_ms or 0),
+    agents = []
+    for row in rows:
+        row_cost = row.cost or {}
+        billed = int(row.cost_total_nano or 0)
+        estimated_nano = int(getattr(row, "cost_estimated_nano", 0) or 0)
+        agents.append(
+            AgentCostLine(
+                run_id=row.run_id,
+                agent_id=row.agent_id,
+                role=row.persona or row.role,
+                model=row.model,
+                usage=usage_breakdown(row.tokens or {}),
+                cost=cost_breakdown(
+                    {
+                        **({} if estimated_nano and not billed else row_cost),
+                        "total": billed,
+                        "input": int(row_cost.get("input", 0)) if billed else 0,
+                        "cached": int(row_cost.get("cached", 0)) if billed else 0,
+                        "output": int(row_cost.get("output", 0)) if billed else 0,
+                        "pricing_source": str(row_cost.get("pricing_source") or "curated"),
+                    }
+                ),
+                estimated_cost=estimated_cost_breakdown(
+                    estimated_nano=estimated_nano,
+                    cost=row_cost if estimated_nano else None,
+                ),
+                duration_ms=int(row.duration_ms or 0),
+            )
         )
-        for row in rows
-    ]
-    usage, cost, rounds = _sum_rows(rows)
+    usage, cost, estimated, rounds = _sum_rows(rows)
     return TurnCost(
         message_id=message_id,
         usage=usage_breakdown(usage),
         cost=cost_breakdown(cost),
+        estimated_cost=estimated_cost_breakdown(cost=estimated),
         rounds=rounds,
         agents=agents,
     )
@@ -120,6 +159,7 @@ async def get_conversation_cost(
         conversation_id=conversation_id,
         usage=usage_breakdown(agg["usage"]),
         cost=cost_breakdown(agg["cost"]),
+        estimated_cost=estimated_cost_breakdown(cost=agg.get("estimated_cost") or {}),
         turns=agg["turns"],
     )
 
@@ -129,6 +169,7 @@ async def get_usage_summary(
     user: AuthUser,
     repo: CostEventRepository = Depends(get_cost_event_repo),
     user_repo: UserRepository = Depends(get_user_repo),
+    key_repo: UserLlmKeyRepository = Depends(get_user_llm_key_repo),
 ) -> UsageSummary:
     """Account dashboard: today's tokens/cost, the month's cost + per-role payroll,
     the recent daily-cost trend, and the quota.
@@ -139,6 +180,11 @@ async def get_usage_summary(
     ``recent_daily_cost`` is the last ``_TREND_DAYS`` UTC days (zero-filled,
     oldest-first) for the sparkline. Also carries ``cny_per_usd`` so the client
     formats money from the single server-owned rate.
+
+    ``quota`` mirrors what ``enforce_quota`` will actually apply to this user
+    (D7): per-user override columns first, else free-tier defaults on a byok
+    deployment's platform-paid path (keyless free-tier riders), else global
+    ``quota_*`` — so the meters never show a cap the gate wouldn't enforce.
     """
     now = datetime.now(UTC)
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -160,30 +206,47 @@ async def get_usage_summary(
     account = await user_repo.get_by_id(user.user_id)
     billing_mode = resolve_effective_billing_mode(account)
 
+    # Mirror the gate's limit resolution (billing/gate.py): platform-paid paths on
+    # a byok deployment (free-tier riders + explicit platform preference) get the
+    # free_tier_* defaults; everything else keeps global quota_*. Per-user
+    # override columns win in both cases (QuotaLimits.for_user).
+    key_row = await key_repo.get_by_user_id(user.user_id)
+    has_key = key_row is not None and bool(key_row.api_key_enc)
+    platform_paid = billing_mode == "platform" or is_free_tier_active(has_user_key=has_key)
+    use_free_tier_defaults = platform_paid and settings.billing_mode == "byok"
+    limits = (
+        QuotaLimits.for_user(account, use_free_tier_defaults=use_free_tier_defaults)
+        if account is not None
+        else QuotaLimits.from_settings(use_free_tier_defaults=use_free_tier_defaults)
+    )
+
     return UsageSummary(
         today=UsageWindow(
             usage=usage_breakdown(today["usage"]),
             cost=cost_breakdown(today["cost"]),
+            estimated_cost=estimated_cost_breakdown(cost=today.get("estimated_cost") or {}),
             requests=today["turns"],
         ),
         month=UsageWindow(
             usage=usage_breakdown(month["usage"]),
             cost=cost_breakdown(month["cost"]),
+            estimated_cost=estimated_cost_breakdown(cost=month.get("estimated_cost") or {}),
             requests=month["turns"],
         ),
         month_by_role=[
             RoleCostLine(
                 role=row["role"],
                 cost_total=int(row["cost_total"]),
+                cost_estimated_total=int(row.get("cost_estimated_total", 0) or 0),
                 turns=int(row["turns"]),
             )
             for row in month_by_role
         ],
         recent_daily_cost=recent_daily_cost,
         quota=QuotaStatus(
-            daily_tokens=settings.quota_daily_tokens,
-            monthly_cost_nano=int(settings.quota_monthly_cost_usd * NANO_PER_USD),
-            daily_requests=settings.quota_daily_requests,
+            daily_tokens=limits.daily_tokens,
+            monthly_cost_nano=limits.monthly_cost_nano,
+            daily_requests=limits.daily_requests,
         ),
         cny_per_usd=settings.cny_per_usd,
         billing_mode=billing_mode,

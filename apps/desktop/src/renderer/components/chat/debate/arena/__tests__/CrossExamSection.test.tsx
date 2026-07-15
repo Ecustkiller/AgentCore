@@ -41,6 +41,7 @@ function cxView(
 ): DebateCrossExamView {
   return {
     targetKey: "pro",
+    stance: "pro",
     targetName: "支持方",
     targetColorVar: "var(--debate-pro)",
     exchanges: [
@@ -198,5 +199,33 @@ describe("CrossExamSection 审计清单", () => {
     const row = screen.getByRole("button", { expanded: false });
     expect(row.textContent).toMatch(/已核实：灰度预案/);
     expect(row.textContent).not.toContain("**已核实**");
+  });
+
+  it("split 时 target key 非 pro/con 也按 stance 分列并排（自定 key 回归）", () => {
+    const { container } = render(
+      <CrossExamSection
+        exchanges={[
+          cxView({
+            targetKey: "原告",
+            targetName: "原告",
+            stance: "pro",
+            answerRun: answerRun("cx_plaintiff"),
+          }),
+          cxView({
+            targetKey: "被告",
+            targetName: "被告",
+            stance: "con",
+            answerRun: answerRun("cx_defendant"),
+          }),
+        ]}
+        messageId="m1"
+        sceneKey="m1:cx:r1"
+        layoutMode="split"
+      />,
+    );
+
+    expect(container.querySelector(".grid.grid-cols-2")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /原告/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /被告/ })).toBeTruthy();
   });
 });

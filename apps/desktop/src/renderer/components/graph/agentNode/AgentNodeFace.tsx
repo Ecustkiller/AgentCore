@@ -1,3 +1,4 @@
+import { pickAgentNodeIdlePrimary } from "@/components/chat/debate/debateFaceCopy";
 import { toolPhaseText } from "@/components/chat/message-bubble/constants";
 import {
   graphBadgeMuted,
@@ -22,6 +23,7 @@ import {
   type AgentNodePresentation,
   FACE_ARTIFACT_CAP,
   basename,
+  isDebateAgentNode,
   statusFaceLabel,
 } from "./shared";
 
@@ -90,7 +92,6 @@ export function AgentNodeCardFace({
         identityColor={identityColor}
         identityGlyph={identityGlyph}
       />
-      <AgentNodeStatusLine d={d} p={p} />
       <AgentNodeActivity d={d} p={p} showIdleTask />
       {p.artifacts.length > 0 && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
@@ -149,75 +150,98 @@ function AgentNodeHeader({
   identityGlyph: string;
 }) {
   return (
-    <div className="flex items-start gap-2.5">
-      <div className="relative shrink-0">
-        <div
-          className="flex size-7 items-center justify-center rounded-full text-sm font-semibold"
-          style={{
-            backgroundColor: `color-mix(in oklab, ${identityColor} 18%, transparent)`,
-            color: identityColor,
-          }}
-        >
-          {identityGlyph}
+    <>
+      <div className="flex items-center gap-2.5">
+        <div className="relative shrink-0">
+          <div
+            className="flex size-7 items-center justify-center rounded-full text-sm font-semibold"
+            style={{
+              backgroundColor: `color-mix(in oklab, ${identityColor} 18%, transparent)`,
+              color: identityColor,
+            }}
+          >
+            {identityGlyph}
+          </div>
+          <span
+            className={`absolute -bottom-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full ring-2 ring-card ${p.presence.cls}`}
+          >
+            {p.presence.icon}
+          </span>
         </div>
-        <span
-          className={`absolute -bottom-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full ring-2 ring-card ${p.presence.cls}`}
-        >
-          {p.presence.icon}
+        <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+          {d.role}
+        </p>
+      </div>
+      <AgentNodeMeta d={d} p={p} />
+    </>
+  );
+}
+
+/**
+ * Meta 行：左侧身份 chip（立场 / 含质询 / 复核 / 检查点 / 待拍板，`flex-wrap`
+ * 整块换行、每个 chip `whitespace-nowrap`），右侧状态（`ml-auto` 右靠、保留右
+ * 边缘扫读锚点）。状态挪出标题行 → 标题独占整行不再被截断（长角色名如「LV方
+ * （原告）」）。chip 多到放不下时状态整块换行、仍右对齐。
+ */
+function AgentNodeMeta({
+  d,
+  p,
+}: {
+  d: AgentNodeData;
+  p: AgentNodePresentation;
+}) {
+  const showEscalationPending = (d.escalationPending ?? 0) > 0;
+  const showCrossExam =
+    d.debateCrossExamMark?.mode === "suffix" && d.onActivateCrossExam != null;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+      {d.stance && (
+        <span className={`${graphBadgeMutedPlain} whitespace-nowrap`}>
+          {STANCE_META[d.stance].label}
         </span>
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-foreground">{d.role}</p>
-        {(d.stance ||
-          p.checkpointFace ||
-          p.reviewConcernFace ||
-          (d.escalationPending ?? 0) > 0) && (
-          <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-            {d.stance && (
-              <span className={graphBadgeMutedPlain}>
-                {STANCE_META[d.stance].label}
-              </span>
-            )}
-            {p.reviewConcernFace && (
-              <span
-                className={`flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 font-medium ${p.reviewConcernFace.cls}`}
-              >
-                <AlertTriangle size={10} />
-                {p.reviewConcernFace.label}
-              </span>
-            )}
-            {p.checkpointFace && (
-              <span
-                className={`flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 font-medium ${p.checkpointFace.cls}`}
-              >
-                <Pause size={10} />
-                {p.checkpointFace.label}
-              </span>
-            )}
-            {(d.escalationPending ?? 0) > 0 && (
-              <span className={graphBadgePrimary}>
-                <ArrowUp size={10} />
-                待你拍板
-                {d.escalationKind && d.escalationKind !== "normal"
-                  ? ` · ${d.escalationKind === "scope" ? "职责偏离" : "缺输入"}`
-                  : ""}
-                {(d.escalationPending ?? 0) > 1
-                  ? ` ${d.escalationPending}`
-                  : ""}
-              </span>
-            )}
-            {(d.escalationPending ?? 0) === 0 &&
-              (d.escalationRaised ?? 0) > 0 &&
-              d.escalationKind &&
-              d.escalationKind !== "normal" && (
-                <span className={graphBadgeMutedPlain}>
-                  <ArrowUp size={10} />
-                  {d.escalationKind === "scope" ? "职责偏离" : "缺输入"}
-                </span>
-              )}
-          </p>
+      )}
+      {showCrossExam && d.debateCrossExamMark && d.onActivateCrossExam && (
+        <CrossExamMarkButton
+          mark={d.debateCrossExamMark}
+          onActivate={d.onActivateCrossExam}
+        />
+      )}
+      {p.reviewConcernFace && (
+        <span
+          className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 py-0.5 font-medium ${p.reviewConcernFace.cls}`}
+        >
+          <AlertTriangle size={10} />
+          {p.reviewConcernFace.label}
+        </span>
+      )}
+      {p.checkpointFace && (
+        <span
+          className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 py-0.5 font-medium ${p.checkpointFace.cls}`}
+        >
+          <Pause size={10} />
+          {p.checkpointFace.label}
+        </span>
+      )}
+      {showEscalationPending && (
+        <span className={`${graphBadgePrimary} whitespace-nowrap`}>
+          <ArrowUp size={10} />
+          待你拍板
+          {d.escalationKind && d.escalationKind !== "normal"
+            ? ` · ${d.escalationKind === "scope" ? "职责偏离" : "缺输入"}`
+            : ""}
+          {(d.escalationPending ?? 0) > 1 ? ` ${d.escalationPending}` : ""}
+        </span>
+      )}
+      {(d.escalationPending ?? 0) === 0 &&
+        (d.escalationRaised ?? 0) > 0 &&
+        d.escalationKind &&
+        d.escalationKind !== "normal" && (
+          <span className={`${graphBadgeMutedPlain} whitespace-nowrap`}>
+            <ArrowUp size={10} />
+            {d.escalationKind === "scope" ? "职责偏离" : "缺输入"}
+          </span>
         )}
-      </div>
+      <AgentNodeStatusLine d={d} p={p} />
     </div>
   );
 }
@@ -239,6 +263,38 @@ function useRunningElapsed(running: boolean): number {
   return elapsed;
 }
 
+/** 质询标记：可点直达该轮质询 run。suffix「含质询」走链接色、replace「质询作答失败」走告警色。 */
+function CrossExamMarkButton({
+  mark,
+  onActivate,
+}: {
+  mark: { label: string; mode: "suffix" | "replace" };
+  onActivate: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={
+        mark.mode === "replace"
+          ? "shrink-0 whitespace-nowrap text-destructive hover:underline focus-visible:underline focus-visible:outline-none"
+          : "shrink-0 whitespace-nowrap text-primary hover:underline focus-visible:underline focus-visible:outline-none"
+      }
+      aria-label={
+        mark.mode === "replace" ? "查看质询作答详情" : "查看本轮质询作答详情"
+      }
+      onClick={(e) => {
+        e.stopPropagation();
+        onActivate();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+      }}
+    >
+      {mark.label}
+    </button>
+  );
+}
+
 function AgentNodeStatusLine({
   d,
   p,
@@ -254,49 +310,24 @@ function AgentNodeStatusLine({
     d.debateRoundPhase,
   );
   const mark = d.debateCrossExamMark;
-  const activateCx = d.onActivateCrossExam;
 
-  const markButton =
-    mark && activateCx ? (
-      <button
-        type="button"
-        className={
-          mark.mode === "replace"
-            ? "text-destructive hover:underline focus-visible:underline focus-visible:outline-none"
-            : "text-primary hover:underline focus-visible:underline focus-visible:outline-none"
-        }
-        aria-label={
-          mark.mode === "replace" ? "查看质询作答详情" : "查看本轮质询作答详情"
-        }
-        onClick={(e) => {
-          e.stopPropagation();
-          activateCx();
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") e.stopPropagation();
-        }}
-      >
-        {mark.label}
-      </button>
-    ) : null;
-
-  if (mark?.mode === "replace" && markButton) {
+  // replace 态（质询作答失败）整行归因、可点直达质询 run；
+  // suffix「含质询」已移到头部第二行（立场后），状态行不再拼后缀。
+  if (mark?.mode === "replace" && d.onActivateCrossExam) {
     return (
-      <p className={`mt-1 text-xs tabular-nums leading-snug ${face.cls}`}>
-        {markButton}
+      <p
+        className={`ml-auto shrink-0 whitespace-nowrap text-xs tabular-nums leading-snug ${face.cls}`}
+      >
+        <CrossExamMarkButton mark={mark} onActivate={d.onActivateCrossExam} />
       </p>
     );
   }
 
   return (
-    <p className={`mt-1 text-xs tabular-nums leading-snug ${face.cls}`}>
+    <p
+      className={`ml-auto shrink-0 whitespace-nowrap text-xs tabular-nums leading-snug ${face.cls}`}
+    >
       {face.text}
-      {mark?.mode === "suffix" && markButton && (
-        <>
-          {" · "}
-          {markButton}
-        </>
-      )}
     </p>
   );
 }
@@ -364,12 +395,30 @@ function AgentNodeActivity({
       </p>
     );
   }
-  if (showIdleTask && d.task) {
-    return (
-      <p className="mt-2 line-clamp-2 text-xs leading-snug text-muted-foreground/70">
-        {d.task}
-      </p>
-    );
-  }
-  return null;
+  if (!showIdleTask) return null;
+
+  const primary = pickAgentNodeIdlePrimary({
+    status: d.status,
+    outputPreview: d.outputPreview,
+    task: d.task,
+    isDebate: isDebateAgentNode(d),
+    debateFacePrimary: d.debateFacePrimary,
+  });
+  const challenge = d.challengePreview?.trim() || null;
+  if (!primary && !challenge) return null;
+
+  return (
+    <div className="mt-2 space-y-0.5">
+      {primary && (
+        <p className="line-clamp-2 text-xs leading-snug text-muted-foreground/70">
+          {primary}
+        </p>
+      )}
+      {challenge && (
+        <p className="line-clamp-1 text-xs leading-snug text-muted-foreground/55">
+          被盯 · {challenge}
+        </p>
+      )}
+    </div>
+  );
 }

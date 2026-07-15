@@ -253,7 +253,8 @@ namespace AgentTown.Town
             }
 
             bool ok = InteractionModel.Succeeded(ix.Status);
-            string label = $"💰 {InteractionModel.TradeBriefLabel(ix)}\n{(ok ? "成交" : "未成交")}";
+            // Text prefix (not emoji): the bundled CJK subset has no astral glyphs.
+            string label = $"交易 {InteractionModel.TradeBriefLabel(ix)}\n{(ok ? "成交" : "未成交")}";
             Color bg = ok
                 ? new Color(0.2f, 0.75f, 0.4f, 0.92f)
                 : new Color(0.85f, 0.3f, 0.3f, 0.92f);
@@ -376,8 +377,7 @@ namespace AgentTown.Town
             var textGo = new GameObject("Text");
             textGo.transform.SetParent(go.transform, false);
             Text label = textGo.AddComponent<Text>();
-            label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
-                ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
+            label.font = TownFonts.UiFont;
             label.fontSize = BubbleFontSize;
             label.alignment = TextAnchor.MiddleCenter;
             label.color = Color.white;

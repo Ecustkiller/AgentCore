@@ -11,7 +11,7 @@ from pydantic import Field, TypeAdapter, ValidationError
 from agentcore.api.schemas.messages import ResolveInteractionRequest, interaction_result_from_body
 from agentcore.conversation.store.outbox import OutboxStore
 from agentcore.core.logging import get_logger
-from agentcore.core.types import AutonomyPolicy
+from agentcore.core.types import PermissionPreset, preset_to_autonomy
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import PLATFORM_MODEL_FLASH
 from agentcore.runtime.interaction import default_interaction_registry
@@ -44,9 +44,11 @@ class HandlerMixin:
         self._root = root.resolve()
         self._creds = self._parse_inference(params.get("inference"))
         self._approvals_enabled = bool(params.get("approvalsEnabled", True))
-        self._autonomy_policy = (
-            self._parse_autonomy(params.get("autonomyPolicy")) or AutonomyPolicy.FIRST_GRANT
+        self._permission_preset = (
+            self._parse_permission_preset(params.get("permissionPreset"))
+            or PermissionPreset.WORKSPACE
         )
+        self._autonomy_policy = preset_to_autonomy(self._permission_preset)
         data_dir = str(params.get("dataDir") or "").strip()
         self._paused_store = self._build_paused_store(data_dir)
         self._outbox_store = self._build_outbox_store(data_dir)
@@ -63,7 +65,7 @@ class HandlerMixin:
             root_label=self._root.name,
             inference="cloud-proxy" if self._creds else "platform-fallback",
             approvals=self._approvals_enabled,
-            autonomy=self._autonomy_policy.value,
+            permission_preset=self._permission_preset.value,
             durable_pause=self._paused_store is not None,
             outbox=self._outbox_store is not None,
         )
@@ -91,10 +93,12 @@ class HandlerMixin:
         ``dataDir`` is the desktop's per-app data dir (e.g. ``<userData>/sidecar``);
         frames land under ``<dataDir>/paused``. Absent / blank ⇒ ``None`` ⇒ pauses
         stay in-memory (process-lifetime), the pre-durable behaviour.
+        ``outbox_base`` is wired so D3 stale-claim recovery can adjudicate by journal.
         """
         if not data_dir:
             return None
-        return LocalPausedTurnStore(Path(data_dir) / "paused")
+        root = Path(data_dir)
+        return LocalPausedTurnStore(root / "paused", outbox_base=root / "outbox")
 
     @staticmethod
     def _build_outbox_store(data_dir: str) -> OutboxStore | None:
@@ -144,24 +148,24 @@ class HandlerMixin:
             self._creds = self._parse_inference(params.get("inference"))
 
     @staticmethod
-    def _parse_autonomy(raw: Any) -> AutonomyPolicy | None:
-        """Coerce the desktop's autonomy string; unknown / missing ⇒ ``None`` (keep current)."""
+    def _parse_permission_preset(raw: Any) -> PermissionPreset | None:
+        """Coerce the desktop's permissionPreset string; unknown / missing ⇒ ``None``."""
         try:
-            return AutonomyPolicy(str(raw or "").strip())
+            return PermissionPreset(str(raw or "").strip())
         except ValueError:
             return None
 
-    def _refresh_autonomy(self, params: dict[str, Any]) -> None:
-        """Adopt the user's CURRENT autonomy posture from per-turn params when present.
+    def _refresh_permission_preset(self, params: dict[str, Any]) -> None:
+        """Adopt the conversation's CURRENT permission mode from per-turn params.
 
-        Same rationale as :meth:`_refresh_creds`: the sidecar is long-lived while the
-        setting lives in the cloud (`PUT /v1/users/me/autonomy`) — the desktop re-sends
-        it on every startTurn / resume so a mid-session change applies to the next turn.
+        Sidecar has no conversation DB — the desktop re-sends ``permissionPreset`` on
+        every startTurn / resume so a mid-session switch applies to the next turn.
         Absent / invalid ⇒ keep the current value.
         """
-        parsed = self._parse_autonomy(params.get("autonomyPolicy"))
+        parsed = self._parse_permission_preset(params.get("permissionPreset"))
         if parsed is not None:
-            self._autonomy_policy = parsed
+            self._permission_preset = parsed
+            self._autonomy_policy = preset_to_autonomy(parsed)
 
     async def _on_start_turn(self, request_id: Any, params: dict[str, Any]) -> None:
         if not self._initialized or self._root is None:
@@ -187,7 +191,7 @@ class HandlerMixin:
 
         # Adopt this turn's cloud-proxy token before it runs (refreshes a rotated TTL).
         self._refresh_creds(params)
-        self._refresh_autonomy(params)
+        self._refresh_permission_preset(params)
 
         # The response to startTurn is DEFERRED until the turn completes (it carries
         # the final result); the live events flow as ``turn/event`` notifications in
@@ -289,7 +293,7 @@ class HandlerMixin:
         user_message_id = str(params.get("userMessageId") or "").strip()
         # Adopt this turn's cloud-proxy token before it runs (refreshes a rotated TTL).
         self._refresh_creds(params)
-        self._refresh_autonomy(params)
+        self._refresh_permission_preset(params)
         task = asyncio.create_task(
             self._run_resume(
                 request_id,
@@ -299,6 +303,133 @@ class HandlerMixin:
                 selected,
                 trace_id,
                 user_message_id,
+                params.get("externalMounts"),
+            )
+        )
+        self._turns[message_id] = task
+
+    async def _on_continue_after_decision(
+        self, request_id: Any, params: dict[str, Any]
+    ) -> None:
+        """Frameless continue after settlement (D2 · 方案 A：从决策点重跑).
+
+        Rebuilds the suspension from the outbox journal's ``resume_frame`` (embedded
+        at D1 settlement prewrite) and enters the same resume pipeline. Idempotent
+        with claim-level mutual exclusion via ``self._turns``.
+        """
+        if not self._initialized or self._root is None:
+            await self._send(
+                protocol.make_error(request_id, protocol.NOT_INITIALIZED, "not initialized")
+            )
+            return
+        message_id = str(params.get("messageId") or "").strip()
+        conversation_id = str(params.get("conversationId") or "").strip()
+        if not message_id or not conversation_id:
+            await self._send(
+                protocol.make_error(
+                    request_id,
+                    protocol.INVALID_PARAMS,
+                    "messageId and conversationId are required",
+                )
+            )
+            return
+        if message_id in self._turns:
+            await self._send(
+                protocol.make_error(
+                    request_id, protocol.INVALID_PARAMS, f"turn already running: {message_id}"
+                )
+            )
+            return
+        outbox = self._outbox_store
+        if outbox is None:
+            await self._send(
+                protocol.make_error(
+                    request_id, protocol.INVALID_PARAMS, "outbox is not enabled"
+                )
+            )
+            return
+
+        from agentcore.conversation.store.outbox import journal_entries_from_map
+        from agentcore.runtime.checkpoints import CheckpointDecision
+        from agentcore.runtime.suspension import suspension_from_json
+        from agentcore.sidecar.settlement_prewrite import extract_resume_frame_from_entries
+
+        record = outbox.find_record_by_message_id(message_id)
+        if record is None or str(record.get("conversation_id") or "") != conversation_id:
+            await self._send(
+                protocol.make_error(
+                    request_id,
+                    protocol.PAUSED_TURN_NOT_FOUND,
+                    "无帧续跑上下文不存在（outbox 中无该回合的 settlement）",
+                )
+            )
+            return
+        entries = journal_entries_from_map(record.get("journal")) or []
+        blob = extract_resume_frame_from_entries(entries)
+        if blob is None:
+            await self._send(
+                protocol.make_error(
+                    request_id,
+                    protocol.PAUSED_TURN_NOT_FOUND,
+                    "无帧续跑缺少 resume_frame（settlement 未预写）",
+                )
+            )
+            return
+
+        frame = blob.get("frame") if isinstance(blob.get("frame"), dict) else {}
+        suspension = suspension_from_json(frame)
+        suspension.history = list(blob.get("history") or [])
+        # Prefer full outbox journal (includes settlement + any post-decision facts).
+        base_entries = list(blob.get("journal_entries") or [])
+        # Ensure settlement rows from outbox are present for dedupe seeding.
+        seen = {
+            (
+                str(e.get("kind") or e.get("type") or ""),
+                str((e.get("payload") or {}).get("checkpoint_id") or ""),
+            )
+            for e in base_entries
+            if isinstance(e, dict)
+        }
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            key = (
+                str(e.get("kind") or e.get("type") or ""),
+                str((e.get("payload") or {}).get("checkpoint_id") or ""),
+            )
+            if key not in seen:
+                base_entries.append(e)
+                seen.add(key)
+        suspension.journal_entries = base_entries
+
+        decision_raw = str(blob.get("decision") or "continue")
+        try:
+            decision = CheckpointDecision(decision_raw)
+        except ValueError:
+            decision = parse_decision(decision_raw)
+        note = str(blob.get("note") or "")
+        selected = [str(s) for s in (blob.get("selected") or [])]
+        trace_id = str(params.get("traceId") or record.get("trace_id") or "")
+        user_message_id = str(
+            params.get("userMessageId")
+            or blob.get("user_message_id")
+            or record.get("user_message_id")
+            or ""
+        ).strip()
+
+        self._refresh_creds(params)
+        self._refresh_permission_preset(params)
+        task = asyncio.create_task(
+            self._run_resume(
+                request_id,
+                suspension,
+                decision,
+                note,
+                selected,
+                trace_id,
+                user_message_id,
+                params.get("externalMounts"),
+                frame_claimed=False,
             )
         )
         self._turns[message_id] = task

@@ -10,12 +10,19 @@ export interface PendingAttachment {
   /** kind:sourceId:relPath，用于去重。 */
   key: string;
   name: string;
+  /** 展示路径：优先工作区相对 ``attachments/…``，绝不含 OS 绝对路径。 */
   path: string;
   text: string;
   truncated: boolean;
   kind: EntryKind;
   /** 仅 kind=conversation：被引用对话的 id。 */
   conversationId?: string;
+  /** 引用即驻留：已写入对话工作区时的相对路径。 */
+  workspacePath?: string;
+  /** 主进程暂存 id（草稿 / 待云端上传）；发送前 finalize / consume。 */
+  stagingId?: string;
+  /** 二进制驻留：无 UTF-8 正文内联。 */
+  binary?: boolean;
 }
 
 export const TEXT_PREVIEW_CAP = 256 * 1024;
@@ -34,7 +41,10 @@ export async function readDroppedFile(
   const head = await file.slice(0, TEXT_PREVIEW_CAP + 1).arrayBuffer();
   const bytes = new Uint8Array(head);
   if (bytes.includes(0)) {
-    return { ok: false, reason: "二进制文件无法作为文本附件" };
+    return {
+      ok: false,
+      reason: "二进制文件请在桌面端附加（将驻留到工作区）",
+    };
   }
   const text = new TextDecoder("utf-8").decode(
     bytes.subarray(0, Math.min(bytes.length, TEXT_PREVIEW_CAP)),

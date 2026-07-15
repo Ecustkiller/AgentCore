@@ -39,8 +39,8 @@ def test_trim_result_keys_match_contract():
 
 def test_trim_result_always_surfaces_model_string():
     """``model`` is required on the wire — never omitted/null (badge + fallback warning)."""
-    out = trim_result("t1", {"finish_reason": "stop"}, model="gpt-5.5")
-    assert out["model"] == "gpt-5.5"
+    out = trim_result("t1", {"finish_reason": "stop"}, model="gpt-4o")
+    assert out["model"] == "gpt-4o"
     assert isinstance(out["model"], str)
 
 
@@ -54,7 +54,7 @@ def test_resume_rpc_contract_documents_python_consumer_keys():
         "note",
         "selected",
         "inference",
-        "autonomyPolicy",
+        "permissionPreset",
     }
     assert set(resume_rpc_param_keys()) == expected
     assert set(resume_rpc_required_keys()) == {

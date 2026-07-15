@@ -63,16 +63,16 @@ async def run_and_persist(
     history: list[dict],
     attachments: list[dict] | None,
     backend: WorkspaceBackend,
-    generate_title: bool,
     llm_credentials: LLMCredentials | None,
     profile_set: ProfileSet | None = None,
     memory_enabled: bool = True,
     autonomy_policy=None,
+    permission_preset=None,
     board_id: str | None = None,
     llm_supports_tools: bool | None = None,
     x_client_platform: str | None = None,
 ) -> None:
-    """Run the pipeline, persist the assistant reply, then title + memory.
+    """Run the pipeline, then persist the assistant reply (+ followups / derived).
     """
     session_saver, session_loader = session_callbacks(conversation_id)
     suspension_saver, suspension_deleter = suspension_callbacks()
@@ -111,6 +111,47 @@ async def run_and_persist(
             conversation_id=conversation_id,
             message_id=message_id,
         )
+        # Dev-only demo tape: divert before the real pipeline when this conversation
+        # is bound under DEMO_TAPE_REPLAY_ENABLED.
+        from agentcore.demo_tape.hooks import run_tape_turn_if_bound
+
+        tape_result = await run_tape_turn_if_bound(
+            conversation_id=conversation_id,
+            sink=sink,
+            message_id=message_id,
+            user_id=user_id,
+            user_message=user_message,
+            folder_id=folder_id,
+            trace_id=trace_id,
+        )
+        if tape_result is not None:
+            duration_ms = int((time.monotonic() - started) * 1000)
+            logger.info(
+                "demo_tape.turn_complete",
+                finish_reason=getattr(
+                    tape_result.get("finish_reason"),
+                    "value",
+                    tape_result.get("finish_reason"),
+                ),
+                duration_ms=duration_ms,
+                message_id=message_id,
+            )
+            await persist_turn_result(
+                result=tape_result,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                folder_id=folder_id,
+                backend=backend,
+                sink=sink,
+                user_message=user_message,
+                llm_credentials=llm_credentials,
+                trace_id=trace_id,
+                turn_id=turn_id,
+                duration_ms=duration_ms,
+                kind="turn",
+            )
+            return
+
         if settings.turn_lease_enabled:
             owner_id = await acquire_turn_lease(
                 message_id=message_id,
@@ -143,6 +184,7 @@ async def run_and_persist(
                     llm_credentials=llm_credentials,
                     memory_enabled=memory_enabled,
                     autonomy_policy=autonomy_policy,
+                    permission_preset=permission_preset,
                     profile_set=profile_set,
                     session_saver=session_saver,
                     session_loader=session_loader,
@@ -198,7 +240,6 @@ async def run_and_persist(
                 backend=backend,
                 sink=sink,
                 user_message=user_message,
-                generate_title=generate_title,
                 llm_credentials=llm_credentials,
                 trace_id=trace_id,
                 turn_id=turn_id,

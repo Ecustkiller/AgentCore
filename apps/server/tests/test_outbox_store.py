@@ -9,6 +9,7 @@ import pytest
 
 from agentcore.conversation.store import reset_conversation_store_for_tests
 from agentcore.conversation.store.outbox import (
+    PHASE_OPEN,
     PHASE_READY,
     OutboxStore,
     captain_text_from_stream_segments,
@@ -145,6 +146,104 @@ def test_begin_turn_idempotent(tmp_path):
 
     record = _drive(run())
     assert record["ops"].count("begin_turn") == 1
+
+
+def test_salvage_retains_open_when_settlement_has_resume_frame(tmp_path):
+    """D2 retain-open: settled but non-terminal → do not salvage→ready."""
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="hi",
+        message_id="m1",
+        trace_id="f" * 32,
+    )
+
+    async def run() -> dict:
+        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="f" * 32)
+        await store.append_journal(
+            turn_id="m1",
+            seq=0,
+            conversation_id="c1",
+            trace_id="f" * 32,
+            entry={
+                "kind": "team_preview_resolved",
+                "payload": {
+                    "checkpoint_id": "tp1",
+                    "decision": "continue",
+                    "resume_frame": {"frame": {"kind": "team_preview"}},
+                },
+                "ts": None,
+            },
+        )
+        await store.checkpoint(conversation_id="c1", message_id="m1", content="partial")
+        await store.salvage(
+            journal=[],
+            content="partial+",
+            conversation_id="c1",
+            trace_id="f" * 32,
+            message_id="m1",
+        )
+        return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+
+    record = _drive(run())
+    assert record["phase"] == PHASE_OPEN
+    assert "salvage_retain_open" in record["ops"]
+    assert "salvage" not in record["ops"]
+    assert record.get("finish_reason") in (None, "")
+
+
+def test_salvage_retains_open_even_when_later_gate_pending(tmp_path):
+    """Conservative retain: settlement wins even if a later cold gate is pending."""
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="hi",
+        message_id="m1",
+        trace_id="h" * 32,
+    )
+
+    async def run() -> dict:
+        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="h" * 32)
+        await store.append_journal(
+            turn_id="m1",
+            seq=0,
+            conversation_id="c1",
+            trace_id="h" * 32,
+            entry={
+                "kind": "team_preview_resolved",
+                "payload": {
+                    "checkpoint_id": "tp1",
+                    "decision": "continue",
+                    "resume_frame": {"frame": {"kind": "team_preview"}},
+                },
+                "ts": None,
+            },
+        )
+        await store.append_journal(
+            turn_id="m1",
+            seq=1,
+            conversation_id="c1",
+            trace_id="h" * 32,
+            entry={
+                "kind": "checkpoint_required",
+                "payload": {"checkpoint_id": "cp2"},
+                "ts": None,
+            },
+        )
+        await store.salvage(
+            journal=[],
+            content="partial",
+            conversation_id="c1",
+            trace_id="h" * 32,
+            message_id="m1",
+        )
+        return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+
+    record = _drive(run())
+    assert record["phase"] == PHASE_OPEN
+    assert "salvage_retain_open" in record["ops"]
 
 
 def test_salvage_marks_ready(tmp_path):

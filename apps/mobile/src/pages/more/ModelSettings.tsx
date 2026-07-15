@@ -78,6 +78,10 @@ export function ModelSettings() {
                 configured={!!status?.configured}
                 initialBaseUrl={status?.base_url ?? ""}
                 initialModel={status?.default_model ?? ""}
+                initialPriceCacheHit={status?.price_cache_hit ?? ""}
+                initialPriceCacheMiss={status?.price_cache_miss ?? ""}
+                initialPriceOutput={status?.price_output ?? ""}
+                initialBackgroundModel={status?.background_model ?? ""}
                 onSaved={(s) => {
                   setStatus(s);
                   setEditing(false);
@@ -147,6 +151,13 @@ function ConfiguredCard({
         billing_mode: status.billing_mode,
         billing_preference: status.billing_preference,
         platform_available: status.platform_available,
+        // Key removed: the server re-derives free-tier eligibility on next fetch;
+        // optimistic value mirrors the gate rule (no key ⇒ free tier when platform up).
+        free_tier_active: status.platform_available,
+        price_cache_hit: null,
+        price_cache_miss: null,
+        price_output: null,
+        background_model: null,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "删除失败，请重试");
@@ -167,6 +178,19 @@ function ConfiguredCard({
         {status.default_model && (
           <p style={{ marginTop: 4, fontSize: 12 }}>
             模型 {status.default_model}
+          </p>
+        )}
+        {status.background_model && (
+          <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+            后台模型 {status.background_model}
+          </p>
+        )}
+        {(status.price_cache_miss || status.price_output) && (
+          <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+            单价 输入 {status.price_cache_miss ?? "—"} / 输出{" "}
+            {status.price_output ?? "—"}
+            {status.price_cache_hit ? ` / 缓存 ${status.price_cache_hit}` : ""}{" "}
+            USD/1M
           </p>
         )}
         <div style={{ marginTop: 6 }}>
@@ -211,18 +235,32 @@ function KeyForm({
   configured,
   initialBaseUrl,
   initialModel,
+  initialPriceCacheHit,
+  initialPriceCacheMiss,
+  initialPriceOutput,
+  initialBackgroundModel,
   onSaved,
   onCancel,
 }: {
   configured: boolean;
   initialBaseUrl: string;
   initialModel: string;
+  initialPriceCacheHit: string;
+  initialPriceCacheMiss: string;
+  initialPriceOutput: string;
+  initialBackgroundModel: string;
   onSaved: (s: LlmKeyStatus) => void;
   onCancel?: () => void;
 }) {
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
   const [defaultModel, setDefaultModel] = useState(initialModel);
+  const [priceCacheMiss, setPriceCacheMiss] = useState(initialPriceCacheMiss);
+  const [priceOutput, setPriceOutput] = useState(initialPriceOutput);
+  const [priceCacheHit, setPriceCacheHit] = useState(initialPriceCacheHit);
+  const [backgroundModel, setBackgroundModel] = useState(
+    initialBackgroundModel,
+  );
   const [reveal, setReveal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -233,11 +271,19 @@ function KeyForm({
     setSaving(true);
     setError(null);
     try {
+      const miss = priceCacheMiss.trim();
+      const out = priceOutput.trim();
+      const hit = priceCacheHit.trim();
+      const pricesEmpty = !miss && !out && !hit;
       onSaved(
         await setLlmKey({
           api_key: apiKey.trim(),
           base_url: baseUrl.trim() || null,
           default_model: defaultModel.trim() || null,
+          price_cache_miss: pricesEmpty ? null : miss || null,
+          price_output: pricesEmpty ? null : out || null,
+          price_cache_hit: pricesEmpty ? null : hit || null,
+          background_model: backgroundModel.trim() || null,
         }),
       );
     } catch (e) {
@@ -307,6 +353,82 @@ function KeyForm({
         spellCheck={false}
         className="text-input"
       />
+      <p className="field-label" style={{ marginTop: 12 }}>
+        单价卡（可选，USD / 1M）
+      </p>
+      <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+        输入与输出成对填写后可显示 ≈¥ 估算；全空清除价卡。
+      </p>
+      <label className="field-label" htmlFor="llm-price-miss">
+        输入价
+      </label>
+      <input
+        id="llm-price-miss"
+        type="text"
+        inputMode="decimal"
+        value={priceCacheMiss}
+        onChange={(e) => setPriceCacheMiss(e.target.value)}
+        placeholder="如 0.28"
+        autoComplete="off"
+        spellCheck={false}
+        className="text-input"
+      />
+      <label
+        className="field-label"
+        htmlFor="llm-price-out"
+        style={{ marginTop: 8 }}
+      >
+        输出价
+      </label>
+      <input
+        id="llm-price-out"
+        type="text"
+        inputMode="decimal"
+        value={priceOutput}
+        onChange={(e) => setPriceOutput(e.target.value)}
+        placeholder="如 0.42"
+        autoComplete="off"
+        spellCheck={false}
+        className="text-input"
+      />
+      <label
+        className="field-label"
+        htmlFor="llm-price-hit"
+        style={{ marginTop: 8 }}
+      >
+        缓存命中价（可选）
+      </label>
+      <input
+        id="llm-price-hit"
+        type="text"
+        inputMode="decimal"
+        value={priceCacheHit}
+        onChange={(e) => setPriceCacheHit(e.target.value)}
+        placeholder="缺省=输入价"
+        autoComplete="off"
+        spellCheck={false}
+        className="text-input"
+      />
+      <label
+        className="field-label"
+        htmlFor="llm-bg-model"
+        style={{ marginTop: 12 }}
+      >
+        后台模型（可选）
+      </label>
+      <input
+        id="llm-bg-model"
+        type="text"
+        value={backgroundModel}
+        onChange={(e) => setBackgroundModel(e.target.value)}
+        placeholder="留空跟随默认模型"
+        autoComplete="off"
+        spellCheck={false}
+        className="text-input"
+      />
+      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+        用于标题、记忆等后台任务的便宜模型，留空跟随默认模型
+      </p>
       <div className="field-actions">
         {onCancel && (
           <button

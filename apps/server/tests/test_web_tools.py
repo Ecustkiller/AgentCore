@@ -1219,7 +1219,45 @@ async def test_web_search_empty_result_is_honest(monkeypatch):
     payload = json.loads(result.output)
     assert payload["results"] == []
     assert payload.get("note")  # an actionable, non-empty hint for the model
+    assert "未返回任何结果" in payload["note"]
     assert result.citations is None  # nothing to cite
+
+
+async def test_web_search_empty_short_query_does_not_flag_verbose(monkeypatch):
+    """Short empty query: honest miss + general tip; must NOT claim the query is too long."""
+
+    class _Backend:
+        async def search(self, query, max_results=5, on_phase=None):
+            return []
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
+    result = await WebSearchTool().execute({"query": "茉莉奶白 LV 商标"}, _ctx())
+
+    assert result.success is True
+    note = json.loads(result.output)["note"]
+    assert "未返回任何结果" in note
+    assert "查询词明显过多" not in note
+    assert "2–4 个核心词" not in note
+    assert "更通用" in note or "同义" in note
+
+
+async def test_web_search_empty_long_query_suggests_trim_to_core_words(monkeypatch):
+    """Long empty query (>4 tokens): explicitly tip trim-to-2–4 core words at the miss site."""
+
+    class _Backend:
+        async def search(self, query, max_results=5, on_phase=None):
+            return []
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
+    long_q = "茉莉奶白 四叶花卉 商标申请 驳回 国家知识产权局 案号 LV 近似"
+    result = await WebSearchTool().execute({"query": long_q}, _ctx())
+
+    assert result.success is True
+    note = json.loads(result.output)["note"]
+    assert "未返回任何结果" in note
+    assert "查询词明显过多" in note
+    assert "删去最具体的限定词" in note
+    assert "2–4 个核心词" in note
 
 
 async def test_web_search_cache_refetches_when_more_results_needed(monkeypatch):

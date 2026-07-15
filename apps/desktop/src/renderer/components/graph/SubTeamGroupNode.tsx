@@ -18,7 +18,7 @@ export function SubTeamGroupNode({ data }: NodeProps) {
       ? `辩论 · ${d.memberCount} 辩手 run`
       : `${d.parentRole} 子队 · ${d.memberCount} 人`;
 
-  // 辩论整场外框不画（改由每阶段的 DebateStageBands 分区表达）；仅保留布局与 Handle。
+  // 辩论整场外框不画（阶段只挂 DebateStageBands 轮次/结辩标签，无阶段填充）；仅保留布局与 Handle。
   const isDebate = d.variant === "debate";
   const boxClass = isDebate
     ? ""

@@ -78,6 +78,24 @@ namespace AgentTown.Tests
         }
 
         [Test]
+        public void ParseQuery_EpisodeParam()
+        {
+            Dictionary<string, string> query =
+                AgentTownLaunchConfig.ParseQuery("https://town.example/app?episode=3");
+            Assert.AreEqual("3", query["episode"]);
+        }
+
+        [Test]
+        public void LaunchConfig_EpisodeDisablesAutoOffline()
+        {
+            var show = new AgentTownLaunchConfig(
+                "http://localhost:8000", "", "", demo: false, packId: null, shoot: false, episode: 3);
+            Assert.AreEqual(3, show.Episode);
+            Assert.IsTrue(show.ShouldAutoShowEpisode);
+            Assert.IsFalse(show.ShouldAutoOfflineDemo);
+        }
+
+        [Test]
         public void LaunchConfig_ShootFlag()
         {
             var shoot = new AgentTownLaunchConfig("http://localhost:8000", "", "", true, "price_surge", shoot: true);

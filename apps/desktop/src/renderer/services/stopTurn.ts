@@ -8,21 +8,15 @@ import { api } from "@/services/api";
  * The 停止 button therefore must explicitly ask the server to cancel the detached
  * run; aborting the local fetch alone would leave it running and billing.
  *
- * Best-effort: the UI has already aborted the local stream and settled the bubble,
- * so a failed stop call is swallowed — the worst case is the turn finishing
- * server-side and being saved, never a stuck UI. Returns whether a live run was
- * actually signalled (false when nothing was running, e.g. a sidecar/local turn or
- * an already-finished one). The caller need not await it.
+ * Returns whether a live run was actually signalled (false when nothing was
+ * running, e.g. a sidecar/local turn or an already-finished one). Failures
+ * propagate to the caller so the UI can surface a visible toast (不再静默吞掉).
  */
 export async function stopConversation(
   conversationId: string,
 ): Promise<boolean> {
-  try {
-    const res = await api.post<{ stopped: boolean }>(
-      `/v1/conversations/${conversationId}/stop`,
-    );
-    return res.stopped;
-  } catch {
-    return false;
-  }
+  const res = await api.post<{ stopped: boolean }>(
+    `/v1/conversations/${conversationId}/stop`,
+  );
+  return res.stopped;
 }

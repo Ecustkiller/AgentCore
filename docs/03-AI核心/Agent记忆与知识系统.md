@@ -49,7 +49,9 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 
 生成走 `title` profile（小 token 上限 + **强制关思考**——曾实证 reasoning 吃光 max_tokens 致正文为空）；空响应重试一次、超时不重试，最终回退为截断的用户首句。→ 见代码：`memory/conversation_title.py`、`llm/profiles.py`。
 
-> **对话自动标签已同路退役**（2026-07）：`memory/conversation_tag.py` 与 `conversations.tag` 列整体移除（迁移 `d2e8f1a4c7b9` drop 列），对话归组走文件夹 + 搜索——勿从旧迁移文件反推该功能仍在。
+**生成时机（2026-07 提前，对齐行业实践）**：云 SSE 回合在**用户首条消息落库后**（`turn_saved`）fire-and-forget 与回合并行铸题，**只用首条用户消息**、不等 AI 回复——多 Agent 回合可跑数分钟，等收尾才铸题会让侧栏「新对话」挂到回合结束（首轮挂检查点时更是等到用户决策后）。写库条件化（仅 title 仍空才写，`update_title_if_empty`），关死与用户手动改名的竞态；`title_generated` SSE 可能出现在流中间，sink 已关时放弃 emit、DB 写入不回滚。**本地 sidecar 回写链路维持原时机**（回合结束回写时生成，输入含 AI 回复）——离线辨识由前端乐观占位（截断首条用户消息，替代「新对话」）兜住。**否决**「首轮结束后用完整交换再补铸一刀」：收益小、引入二次覆盖复杂度。
+
+> **对话自动标签已同路退役**（2026-07）：`memory/conversation_tag.py` 与 `conversations.tag` 列整体移除（迁移 `d2e8f1a4c7b9` drop 列），对话归组走项目（Folder）+ 搜索——勿从旧迁移文件反推该功能仍在。
 
 ### 1.4 用户长期记忆（AI 维护的记忆文件夹）
 
@@ -127,7 +129,7 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 
 ## 三、记忆生命周期
 
-**触发点**：会话开始加载 `ai_maintained` 记忆 → 进行中累积工作记忆 → 会话结束可选生成标题 + flash 维护记忆 ops。→ 见代码：`memory/`、`runtime/pipeline/`。
+**触发点**：会话开始加载 `ai_maintained` 记忆 → 进行中累积工作记忆（云回合首条用户消息落库时并行铸标题，§1.3）→ 会话结束 flash 维护记忆 ops。→ 见代码：`memory/`、`runtime/pipeline/`。
 
 ---
 
@@ -208,7 +210,7 @@ BASE 100 → RUNTIME_CONTEXT 200 → MEMORY 300 → CEO_CORE 400
 
 > **决策：常驻源统一为 contributor 插件、顺序声明化。** 理由：① 新增常驻源只需声明一个 `order` 即落位，无需在某个拼接点插队、改动多处调用；② 渲染序与贡献次序解耦——各调用点本就按升序贡献，稳定排序复现原内联顺序、原 `\n` 拼接，**与统一前逐字节一致**（稳定前缀不变，DeepSeek 前缀缓存不破）；③ 稳定前缀（base + hints）在前、概览 / 附件置尾，护前缀缓存（概览 / 附件都空时与原 CEO 提示词逐字节一致）；④ `budget` 字段为「扳机 B」（预算 / 裁剪 / 降级）预留**唯一读取点**——今天不强制裁剪，按需才长（触发条件见 [上下文工程](/docs/03-AI核心/上下文工程.md) 扳机 B）。→ 见代码：`runtime/context/`（`contributor.py` 定义形状 + `assembler.py` 收集排序）。
 
-**Workspace Context（CEO）= 实时工作区概览 + 项目画像** ✅：每回合 `build_workspace_overview(backend)` 先 best-effort 检测项目画像（`detect_project_profile`：语言/框架/包管理器/monorepo 工具/VCS 分支/常用命令/`AGENTS.md` 摘录；**只读清单文件、不执行命令**；画像 ≤600 字符；失败不阻塞），再拉「最近更新在前」的文件清单（文件数 + 字符预算双重封顶），一并注入 `<workspace_file_index>`（`WORKSPACE_OVERVIEW` 档）。**项目感知是上下文注入增强、不是新工具**；延续 agentic 检索路线，不上向量 RAG。worker 不走此块——它们已有更丰富的逐运行 manifest。→ 见代码：`runtime/context/workspace_overview.py`、`runtime/context/project_profile.py`。
+**Workspace Context（CEO）= 实时工作区概览 + 工作区画像** ✅：每回合 `build_workspace_overview(backend)` 先 best-effort 检测工作区画像（`detect_workspace_profile`：语言/框架/包管理器/monorepo 工具/VCS 分支/常用命令/`AGENTS.md` 摘录；**只读清单文件、不执行命令**；画像 ≤600 字符；失败不阻塞），再拉「最近更新在前」的文件清单（文件数 + 字符预算双重封顶），一并注入 `<workspace_file_index>`（`WORKSPACE_OVERVIEW` 档）。**工作区感知是上下文注入增强、不是新工具**；延续 agentic 检索路线，不上向量 RAG。worker 不走此块——它们已有更丰富的逐运行 manifest。→ 见代码：`runtime/context/workspace_overview.py`、`runtime/context/workspace_profile.py`。
 
 ⏳ **Marketplace Rules**：市场 Rules 绑定待能力域落地后接入装配链。
 
@@ -219,7 +221,7 @@ BASE 100 → RUNTIME_CONTEXT 200 → MEMORY 300 → CEO_CORE 400
 | 机制 | 范围 | 限制手段 |
 |---|---|---|
 | `rule` 注入（规则 + 记忆） | 仅关联文件夹的 **direct children** | `MAX_INSTRUCTION_DOCS` / `MAX_INSTRUCTION_CHARS` |
-| 工作区概览（`<workspace_file_index>`） | 项目画像 + 关联文件夹文件清单（**整棵子树**，最近更新在前） | 画像 ≤600 字符；文件数 + 字符预算双重封顶；只列路径与元数据、正文不进概览 |
+| 工作区概览（`<workspace_file_index>`） | 工作区画像 + 关联文件夹文件清单（**整棵子树**，最近更新在前） | 画像 ≤600 字符；文件数 + 字符预算双重封顶；只列路径与元数据、正文不进概览 |
 | Agentic 检索（`file_read` / `grep` / `file_list` / `git`） | **整棵子树**（`file_list` 递归树有 `max_depth`/条目上限） | Agent 自取正文；`file_read` 支持 `offset`/`limit` 行号范围；单次工具输出截断 |
 
 `rule` 不递归是因为规则按层级生效（子文件夹有自己的规则）；工作区不限深度是因为用户心智是"文件夹里的东西 AI 都能看到"——但**不预建向量索引**：概览给方位、Agent 用文件工具取正文（agentic 检索为主路）。

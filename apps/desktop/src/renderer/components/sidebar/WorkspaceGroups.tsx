@@ -14,7 +14,7 @@ import { WorkspaceGroupHeader } from "./WorkspaceGroupHeader";
 const MAX_PER_GROUP = 5;
 
 /**
- * The sidebar's「工作区」zone (前端UX §一 方案B): collapsible per-folder groups at the
+ * The sidebar's「项目」zone (前端UX §一 方案B): collapsible per-folder groups at the
  * top of the conversation rail, fed by {@link useWorkspaceGroups}. Foldered chats live
  * ONLY here (裸聊 stay in「快速对话」below), so a folder group is the single home for its
  * conversations. Empty folders are hidden; the zone renders nothing when no group

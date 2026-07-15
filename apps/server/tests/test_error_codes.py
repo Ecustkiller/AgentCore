@@ -32,7 +32,7 @@ def test_every_error_class_code_is_catalogued():
     for cls in _all_error_classes():
         assert cls.code in catalog, (
             f"{cls.__name__}.code={cls.code!r} is not in the ErrorCode catalog — "
-            "add it to core/error_codes.py (and the contract-types mirror)."
+            "add it to core/error_codes.py then run `pnpm gen:types`."
         )
 
 

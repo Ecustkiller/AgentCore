@@ -131,6 +131,10 @@ class DebateConfig:
     # 可选案件底料（CEO 发起前已核实的客观事实清单）。空串 = 未传，首轮 debater_task
     # 零行为变化；非空时仅首轮以主持人名义喂给全部辩手（后续轮靠 session 记忆，不重复注入）。
     background: str = ""
+    # 开赛嘱咐（开工卡 CONTINUE/ADJUST+note）——内部字段，非 wire。非空时作首轮全场定向
+    # 用户插话：主持人定首轮焦点可见、首轮辩手 prompt 可见、verbatim 进 rounds[0].user_interjections。
+    # 不覆写 motion / 不改 sides。
+    kickoff_ask: str = ""
 
     @property
     def subject_side(self) -> DebateSide | None:
@@ -143,8 +147,11 @@ class SideTurn:
     """某方在某一轮的发言产物 —— 叙事线 L3「论点级全文」的承载单元。
 
     ``ok`` 标记该方本轮是否成功产出（辩手 run 失败 / 空产出时 False）：裁判与小结基于成功
-    发言进行，全员失败则主持人提前终止（出降级简报）。``run_id`` 让前端把发言挂到图节点、
-    并供跨轮续写定位同一辩手。
+    发言进行，全员失败则主持人提前终止（出降级简报）。``absent`` 是部分失败时的一等语义：
+    网关重试耗尽仍无发言、但同轮仍有他方成功 → 该方标缺席（跳过对其质询与对抗记分），
+    赛程继续；全员失败走 ``all_failed`` 早停，不标 ``absent``。``run_id`` 让前端把发言挂到
+    图节点、并供跨轮续写定位同一辩手。``arguments`` 为后端解析的论点大纲（进 SSE 载荷；
+    全文仍随 run 事件走）。
     """
 
     side_key: str
@@ -152,6 +159,9 @@ class SideTurn:
     run_id: str
     content: str
     ok: bool = True
+    absent: bool = False
+    # 结构化论点大纲 ``[{id, title, body}]``；失败 / 空产出恒空。缺字段（老 journal）→ 前端回退。
+    arguments: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -392,6 +402,11 @@ class RoundResult:
                     "name": t.side_name,
                     "run_id": t.run_id,
                     "ok": t.ok,
+                    # 缺席轮一等语义：仅部分失败续赛时为 true；全员失败 / 成功方恒 false。
+                    # 缺字段（老 journal）→ 前端按 false。
+                    "absent": t.absent,
+                    # 结构化论点大纲（后端 speech_parse）；缺字段（老 journal）→ 前端启发式回退。
+                    "arguments": list(t.arguments or []),
                 }
                 for t in self.turns
             ],

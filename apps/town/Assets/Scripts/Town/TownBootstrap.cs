@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using AgentTown.Show;
 using AgentTown.Simulation;
 using AgentTown.UI;
 using UnityEngine;
@@ -28,6 +29,15 @@ namespace AgentTown.Town
 
         [Tooltip("Optional: TownHud.uss, applied if the UXML does not link it.")]
         [SerializeField] private StyleSheet hudStyleSheet;
+
+        /// <summary>Bridge pack id for programme-mode shoots (`?episode=3&amp;shoot=1`).</summary>
+        public const string ShowEpisodePackId = "episode_3";
+
+        /// <summary>
+        /// Programme shoot landmark: day-market 「香料摊」 beat (caption + follow_pair shot).
+        /// Keep in sync with the episode_3 entry in scripts/shoot-webgl-demo.mjs.
+        /// </summary>
+        public const int ShowShootLandmarkTick = 24;
 
         private SimulationSession session;
         private string launchPackId = DemoPackIds.PriceSurge;
@@ -115,9 +125,14 @@ namespace AgentTown.Town
             EnsureObservationLayers();
             FrameCamera();
             WireHud();
+            EnsureShowMode();
             SetBootStatus("正在烘焙演示…");
 
-            if (config.ShouldAutoOfflineDemo)
+            if (config.ShouldAutoShowEpisode)
+            {
+                await StartShowEpisodeAsync(config.Episode);
+            }
+            else if (config.ShouldAutoOfflineDemo)
             {
                 await StartOfflineDemoAsync(config.PackId);
             }
@@ -264,6 +279,7 @@ namespace AgentTown.Town
 
                 TownHudController controller = uiGo.AddComponent<TownHudController>();
                 TownNameplateHud nameplates = uiGo.AddComponent<TownNameplateHud>();
+                uiGo.AddComponent<ShowHudController>();
                 uiGo.SetActive(true);
                 controller.Bind(session);
                 nameplates.Bind(session);
@@ -292,6 +308,74 @@ namespace AgentTown.Town
         public void StartOfflineDemo(string packId = null)
         {
             _ = StartOfflineDemoAsync(packId);
+        }
+
+        /// <summary>Left-rail「节目」/ deep link entry for episode 3 offline programme mode.</summary>
+        public void StartShowEpisode3()
+        {
+            _ = StartShowEpisodeAsync(3);
+        }
+
+        public async Task StartShowEpisodeAsync(int episodeNo)
+        {
+            EnsureShowMode();
+            ShowModeController show = GetComponent<ShowModeController>()
+                ?? FindFirstObjectByType<ShowModeController>();
+            if (show == null)
+            {
+                Debug.LogWarning("[AgentTown] ShowModeController missing");
+                return;
+            }
+
+            SetBootStatus($"正在载入第 {episodeNo} 期…");
+            if (episodeNo == 3)
+            {
+                await show.EnterEpisode3Async();
+            }
+            else
+            {
+                Debug.LogWarning($"[AgentTown] Episode {episodeNo} not bundled yet — only episode 3 offline");
+                await show.EnterEpisode3Async();
+            }
+
+            if (shootMode)
+            {
+                show.EnterShootFrame(ShowShootLandmarkTick);
+            }
+
+            HideBootOverlay();
+
+            // Same Playwright probe contract as Offline packs (shoot gate + serve smoke).
+            AgentTownDemoBridge.SetOfflineReady(
+                ShowEpisodePackId,
+                show.Manifest?.Title ?? $"第 {episodeNo} 期");
+            PublishDemoTickIfNeeded(force: true);
+        }
+
+        private void EnsureShowMode()
+        {
+            ShowModeController show = GetComponent<ShowModeController>();
+            if (show == null)
+            {
+                show = gameObject.AddComponent<ShowModeController>();
+            }
+
+            CinematicDirector director = GetComponent<CinematicDirector>();
+            if (director == null)
+            {
+                director = gameObject.AddComponent<CinematicDirector>();
+            }
+
+            TownHudController townHud = FindFirstObjectByType<TownHudController>();
+            ShowHudController showHud = townHud != null
+                ? townHud.GetComponent<ShowHudController>()
+                : FindFirstObjectByType<ShowHudController>();
+            if (townHud != null && showHud == null)
+            {
+                showHud = townHud.gameObject.AddComponent<ShowHudController>();
+            }
+
+            show.Bind(session, showHud, townHud, director);
         }
 
         /// <summary>Async Offline entry — ensures JSON story SoT is loaded before baking frames.</summary>

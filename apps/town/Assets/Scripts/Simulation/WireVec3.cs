@@ -5,7 +5,8 @@ namespace AgentTown.Simulation
     /// <summary>
     /// A position in wire space: <b>Y-up right-handed</b> (<c>+x</c> east, <c>+z</c> south,
     /// <c>+y</c> up). This is the backend / fixture authority (see
-    /// <c>agentcore.simulation.vec3.Vec3</c> and AgentTown客户端规格 §6.2).
+    /// <c>agentcore.simulation.vec3.Vec3</c> and
+    /// <c>docs/04-前端/AgentTown客户端.md §6.2</c>).
     /// The engine-side transform lives in <see cref="WireCoordinateTransform"/>.
     ///
     /// <para>Newtonsoft maps the lowercase wire fields via <see cref="JsonPropertyAttribute"/>;

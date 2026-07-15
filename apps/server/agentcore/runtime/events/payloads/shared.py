@@ -25,6 +25,10 @@ class CostBreakdown(WirePayload):
     output: int
     total: int
     currency: str
+    # Additive: missing on legacy vectors → default curated (compat).
+    pricing_source: str = "curated"
+    # BYOK estimate total when billed total is 0; absent on platform-only rows.
+    estimated_total: int | None = absent()
 
 
 class RunDebrief(WirePayload):

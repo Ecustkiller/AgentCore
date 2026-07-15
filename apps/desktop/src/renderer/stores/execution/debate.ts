@@ -37,6 +37,17 @@ export function debateBeatFromContext(
 }
 
 /**
+ * 陈词 beat：计入发言格 / 正反分桶 / 多方直播行。
+ * 质询与结辩另渠（辩论室 CrossExamSection / ClosingBlocks；协作图折叠同口径）。
+ * 桌面 renderer 内 beat 判定的单一源——图 helpers 与 arena 分桶都读这里。
+ */
+export function isDebateStatementBeat(
+  blocks: ReadonlyArray<{ channel: string }> | null | undefined,
+): boolean {
+  return debateBeatFromContext(blocks) === "statement";
+}
+
+/**
  * 辩论续写节点可见文案：首轮陈词无角标（由调用方跳过）；续轮陈词「第 N 轮」；
  * 质询「第 N 轮·质询」；结辩「结辩」（不挂轮次，避免与末轮陈词撞文）。
  */
@@ -81,9 +92,11 @@ export function debateSides(execution: Execution): {
   pro: RunNode[];
   con: RunNode[];
 } {
+  const speech = (r: RunNode) =>
+    r.stance != null && isDebateStatementBeat(r.receivedContext);
   return {
-    pro: execution.runs.filter((r) => r.stance === "pro"),
-    con: execution.runs.filter((r) => r.stance === "con"),
+    pro: execution.runs.filter((r) => speech(r) && r.stance === "pro"),
+    con: execution.runs.filter((r) => speech(r) && r.stance === "con"),
   };
 }
 
@@ -114,11 +127,16 @@ export interface DebateGroup {
  * (真·多轮辩论) in ascending turn order. The card lays a multi-round group out 逐轮
  * and a single-round one (all round 0) as a flat 正/反 pair, both off this one
  * projection — no second source of truth.
+ *
+ * 只收 {@link isDebateStatementBeat} 陈词；质询/结辩 continue_run 虽继承 stance，
+ * 另渠呈现（与协作图 beat 折叠同口径）。
  */
 export function debateGroups(execution: Execution): DebateGroup[] {
   const groups: DebateGroup[] = [];
   for (const run of execution.runs) {
     if (run.stance == null) continue;
+    // 质询/结辩 continue_run 继承 stance，不得混入发言格（与协作图 beat 折叠同口径）。
+    if (!isDebateStatementBeat(run.receivedContext)) continue;
     const key = run.group ?? "";
     let group = groups.find((g) => g.key === key);
     if (!group) {
@@ -169,6 +187,8 @@ export function debateLiveRounds(execution: Execution): DebateLiveRound[] {
   const revisionsByOriginal = new Map<string, RunNode[]>();
   for (const run of execution.runs) {
     if (run.continuesRunId == null) continue;
+    // 质询/结辩续写不进多方发言行（与 debateGroups / 协作图折叠同口径）。
+    if (!isDebateStatementBeat(run.receivedContext)) continue;
     const list = revisionsByOriginal.get(run.continuesRunId) ?? [];
     list.push(run);
     revisionsByOriginal.set(run.continuesRunId, list);

@@ -1,5 +1,4 @@
 export * from "./types";
-export * from "./projections";
 export {
   DRAFT_KEY,
   selectLastAssistantCostTotal,
@@ -27,3 +26,21 @@ export {
   getActiveRuntime,
   getRuntime,
 } from "./selectors";
+export {
+  type TurnPhase,
+  type TurnTerminalOutcome,
+  STOP_CONFIRM_TIMEOUT_MS,
+  allowsSseEvent,
+  allowsStreamingMutations,
+  blocksStreamOpen,
+  isTerminalPhase,
+  resetTurnPhaseTimers,
+} from "./turnPhase";
+export {
+  beginTurnPreflight,
+  beginTurnStopping,
+  completeTurnPhase,
+  enterTurnStreaming,
+  getTurnPhase,
+  throwIfCannotOpenStream,
+} from "./turnPhaseActions";

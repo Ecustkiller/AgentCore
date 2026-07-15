@@ -110,6 +110,34 @@ async def test_stop_and_drain_unknown_conversation_is_false():
     assert await reg.stop_and_drain("missing") is False
 
 
+async def test_drain_waits_without_cancelling():
+    """Resume preflight: drain must not cancel a live (e.g. D9 new-turn) task."""
+    reg = TurnRunRegistry()
+    gate = asyncio.Event()
+
+    async def _finishes_when_released() -> None:
+        await gate.wait()
+
+    task = asyncio.create_task(_finishes_when_released())
+    reg.register(conversation_id="c1", task=task, sink=EventSink())
+    await asyncio.sleep(0)
+
+    # Still running within a short timeout → False (caller should 409).
+    assert await reg.drain("c1", timeout=0.05) is False
+    assert not task.done()
+    assert not task.cancelled()
+
+    gate.set()
+    assert await reg.drain("c1", timeout=1.0) is True
+    await asyncio.sleep(0)
+    assert reg.get("c1") is None
+
+
+async def test_drain_idle_conversation_is_true():
+    reg = TurnRunRegistry()
+    assert await reg.drain("missing") is True
+
+
 async def test_stop_and_drain_frees_workspace_lock_for_resumer():
     # The exact deadlock this fixes: a suspended in-process run sits on its interaction holding
     # the folder ``workspace_lock``; durable ``/resume`` then takes that SAME lock. Without

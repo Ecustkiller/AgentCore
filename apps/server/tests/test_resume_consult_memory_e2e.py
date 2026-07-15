@@ -6,7 +6,7 @@ Where the unit tests pin the pieces in isolation —
 - ``consult_memory`` resolves project-then-global (``test_consult_memory``),
 - the durable frame carries ``folder_id`` + ``memory_enabled`` (``test_durable`` /
   ``test_sidecar_paused``),
-- ``_assemble_ceo_toolset`` maps ``folder_id`` → ``consult_memory.project_id`` and leaves
+- ``_assemble_ceo_toolset`` maps ``folder_id`` → ``consult_memory.folder_id`` and leaves
   it UNwired when memory is off (``test_consult_memory``) —
 this drives the REAL :func:`resume_chat_pipeline` (the same entry the cloud
 ``POST .../resume`` route and the Sidecar both call) end to end, folding the whole chain

@@ -14,7 +14,7 @@ import { useUsageStore } from "@/stores/usage";
 import { useEffect, useRef } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { ShareConversationDialog } from "../conversation/ShareConversationDialog";
-import { CreateProjectDialog } from "../folders/CreateProjectDialog";
+import { CreateFolderDialog } from "../folders/CreateFolderDialog";
 import { Sidebar } from "../sidebar/Sidebar";
 import { CommandPalette } from "./CommandPalette";
 import { TitleBar } from "./TitleBar";
@@ -122,7 +122,7 @@ export function AppShell() {
 
       <CommandPalette />
       <ShareConversationDialog />
-      <CreateProjectDialog />
+      <CreateFolderDialog />
       <OnboardingGate />
     </div>
   );

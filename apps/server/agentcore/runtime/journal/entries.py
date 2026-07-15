@@ -9,17 +9,21 @@ from typing import Any
 # steps are prefixed so the two lanes are distinguishable in the table.
 KIND_TURN_END = "turn_end"
 _PROCESS_PREFIX = "process_"
+# Per-worker-run process lane (对称 CEO ``process_``): kind carries the step kind;
+# ``payload.run_id`` scopes the step to its run node.
+_RUN_PROCESS_PREFIX = "run_process_"
 
 
 def entries_from_runs(runs: dict[str, Any] | None) -> list[dict[str, Any]]:
     """Flatten an in-memory ``runs`` replay payload into ordered journal entries.
 
-    ``runs`` is the sink-built ``{events, finish_reason, process?}`` payload (see
-    ``runtime/pipeline._build_runs_payload``). Each entry is ``{kind, payload, ts}``
-    in emission order: the team-graph ``events`` first (each keeping its SSE event
-    type as ``kind`` + original ``timestamp`` as ``ts``), then any single-agent
-    ``process`` steps (kind-prefixed), then a closing ``turn_end`` carrying the
-    finish reason. Returns ``[]`` for an empty / absent payload.
+    ``runs`` is the sink-built ``{events, finish_reason, process?, run_processes?}``
+    payload (see ``runtime/pipeline._build_runs_payload``). Each entry is
+    ``{kind, payload, ts}`` in emission order: the team-graph ``events`` first (each
+    keeping its SSE event type as ``kind`` + original ``timestamp`` as ``ts``), then
+    any single-agent ``process`` steps (kind-prefixed), then per-run worker process
+    steps, then a closing ``turn_end`` carrying the finish reason. Returns ``[]`` for
+    an empty / absent payload.
     """
     if not runs:
         return []
@@ -40,6 +44,15 @@ def entries_from_runs(runs: dict[str, Any] | None) -> list[dict[str, Any]]:
                 "ts": None,
             }
         )
+    for run_id, steps in (runs.get("run_processes") or {}).items():
+        for step in steps or []:
+            entries.append(
+                {
+                    "kind": f"{_RUN_PROCESS_PREFIX}{step.get('kind') or 'step'}",
+                    "payload": {**step, "run_id": run_id},
+                    "ts": None,
+                }
+            )
     # turn_end (the per-turn outcome fact): finish_reason + an optional error. A 报错回合
     # carries its error here so the inline error card replays on reload (Tier 2 a) — the
     # live error rides a transport-only ``error`` SSE event (never journaled), so this

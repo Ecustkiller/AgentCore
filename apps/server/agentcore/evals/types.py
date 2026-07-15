@@ -54,6 +54,9 @@ class EvalCase:
     # None=不挂 MAST 标签（非 MAST 套件如 core/routing）；非 None 时 report 据此按 MAST 组/类
     # 聚合通过率，使「某类失败被压低没有」可逐类对照 baseline。seed_lint 校验码已注册。
     mast: str | None = None
+    # 协作形状评测（阶段 1）：声明式期望 DAG 形状，由 ``shape_score`` 打 0~1 匹配分（报告指标，
+    # 非 L0 硬门）。键集见 ``evals/shape_score.py``；缺省 None=不打形状分。
+    expected_shape: dict[str, Any] | None = None
 
 
 @dataclass
@@ -64,6 +67,8 @@ class TurnOutcome:
     终态（``degraded`` / ``unproductive``），无则按轮数推导（``end_turn`` / ``max_rounds``）；
     ``roster`` 取自 ``run_plan.agents[*].role``（team 路径）；``cost_usd`` 单 Agent 现算、
     team 读 ``cost_runs``。
+    ``plan_runs`` / ``plan_type`` / ``collab_interactions`` 来自 ``RecordingSink`` 对 SSE 的截获
+    （形状与互动辅指标；禁止从 logs/dev.jsonl 反推）。
     """
 
     content: str
@@ -77,6 +82,11 @@ class TurnOutcome:
     cost_usd: float = 0.0
     latency_ms: int = 0
     error: str | None = None
+    # 过滤 captain/CEO 后的计划图节点：id / role / task / depends_on / parent_run_id。
+    plan_runs: list[dict[str, Any]] = field(default_factory=list)
+    plan_type: str | None = None
+    # 协作互动事件计数（便签 / 升级 / replan / 续派 …），键为短标签、值为次数。
+    collab_interactions: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -142,6 +152,8 @@ class CaseReport:
     milestone: MilestoneVerdict | None = None
     # 学·度量 §2.5：从 ``EvalCase.mast`` 透传的失败模式码（report 按 MAST 组/类聚合用）。
     mast: str | None = None
+    # 协作形状匹配分 0~1（报告指标；None=本例未声明 expected_shape）。不进 pass/fail。
+    shape_score: float | None = None
 
     @property
     def checks_passed(self) -> bool:

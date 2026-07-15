@@ -164,6 +164,8 @@ export interface ProjectedRun {
    * events). Empty for the common case; non-empty drives every end's node ⚠️ badge + live
    * notice. Transport-only on the wire — the durable copy rides RunState.escalations. */
   escalations: RunEscalation[];
+  /** Per-run 思考·正文·工具 timeline (对称 CEO ``process``). Empty until deltas/tools fold. */
+  process: ProcessStep[];
 }
 
 /** 团队便签墙 (§2.2 通): one note a worker broadcast to its CONCURRENT siblings (`team_note_posted`),
@@ -309,6 +311,12 @@ export interface ProjectedTurn {
    * 就叠出主持人逐轮焦点 / 小结 / 裁判，而非干等 {@link debate} 收场。P2 DURABLE——落 journal，
    * 刷新后 hydrate/fold 重建；收场后全量叙事线亦在 {@link debate}。非辩论恒 `[]`。 */
   debateRounds: DebateNarrativeRound[];
+  /** 本场是否开启质询（`debate_round_started.cross_exam_enabled`）：首轮开场即达。缺字段 /
+   * 老 journal → `false`（UI 回退「正在小结…」）。 */
+  crossExamEnabled: boolean;
+  /** 主持人开场白（`debate_round_started.opening`）：仅首轮携带；sticky 取第一个非空，不被后续
+   * 覆盖。收场 {@link debate}.opening 仍是权威。缺字段 / 老 journal → `null`。 */
+  debateOpening: string | null;
   /** 协调模式团队进展预览（`team_synthesis_preview`，同 key 保最新）：P2 DURABLE。null 当无。 */
   teamSynthesisPreview: TeamSynthesisPreviewPayload | null;
   /** 预检警告（`turn_warning`）：P2 DURABLE；刷新后横幅重建。null 当无。 */

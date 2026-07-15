@@ -54,6 +54,7 @@ class ProxySpendQueue:
         role: str | None = None,
         persona: str | None = None,
         call_id: str | None = None,
+        credential_source: str | None = None,
     ) -> str | None:
         """Price one inference call and enqueue a detail row (+ materialize run)."""
         if not conversation_id:
@@ -64,6 +65,12 @@ class ProxySpendQueue:
             )
             return None
 
+        from agentcore.llm.pricing import CredentialSource, resolve_credential_source
+
+        explicit: CredentialSource | None = (
+            credential_source if credential_source in ("user", "platform", "vendor") else None
+        )
+        source = resolve_credential_source(credential_source=explicit, model=model)
         call = priced_call_cost(
             model=model or "",
             usage=usage,
@@ -73,6 +80,7 @@ class ProxySpendQueue:
             agent_id=agent_id,
             persona=persona,
             call_id=call_id,
+            credential_source=source,
         )
         record_id = self._ledger.enqueue_calls(
             user_id=user_id,

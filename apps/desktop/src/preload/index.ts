@@ -6,6 +6,9 @@ import {
   FS_CHANNELS,
   type FsApi,
   type FsChangedEvent,
+  type FsResult,
+  type StageAttachmentDest,
+  type StagedAttachment,
 } from "@shared/ipc-contract";
 import { LOG_CHANNELS, type LogApi } from "@shared/log-contract";
 import {
@@ -44,7 +47,7 @@ import {
   type WindowApi,
   type WindowFramePreset,
 } from "@shared/window-contract";
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 const agentTownApi: AgentTownApi = {
   writeSession: (input) =>
@@ -56,9 +59,28 @@ const agentTownApi: AgentTownApi = {
 const fsApi: FsApi = {
   addRoot: () => ipcRenderer.invoke(FS_CHANNELS.addRoot),
   ensureDefaultRoot: () => ipcRenderer.invoke(FS_CHANNELS.ensureDefaultRoot),
+  checkoutArchive: (archiveBase64) =>
+    ipcRenderer.invoke(FS_CHANNELS.checkoutArchive, { archiveBase64 }),
   listRoots: () => ipcRenderer.invoke(FS_CHANNELS.listRoots),
   removeRoot: (rootId) =>
     ipcRenderer.invoke(FS_CHANNELS.removeRoot, { rootId }),
+  grantSessionReadonlyRoot: (conversationId) =>
+    ipcRenderer.invoke(FS_CHANNELS.grantSessionReadonlyRoot, {
+      conversationId,
+    }),
+  listSessionReadonlyRoots: (conversationId) =>
+    ipcRenderer.invoke(FS_CHANNELS.listSessionReadonlyRoots, {
+      conversationId,
+    }),
+  revokeSessionReadonlyRoot: (conversationId, rootId) =>
+    ipcRenderer.invoke(FS_CHANNELS.revokeSessionReadonlyRoot, {
+      conversationId,
+      rootId,
+    }),
+  clearSessionReadonlyRoots: (conversationId) =>
+    ipcRenderer.invoke(FS_CHANNELS.clearSessionReadonlyRoots, {
+      conversationId,
+    }),
   listDir: (rootId, relPath) =>
     ipcRenderer.invoke(FS_CHANNELS.listDir, { rootId, relPath }),
   listFiles: (rootId) => ipcRenderer.invoke(FS_CHANNELS.listFiles, { rootId }),
@@ -96,6 +118,42 @@ const fsApi: FsApi = {
     ipcRenderer.invoke(FS_CHANNELS.openPath, { rootId, relPath }),
   copyPath: (rootId, relPath) =>
     ipcRenderer.invoke(FS_CHANNELS.copyPath, { rootId, relPath }),
+  trashPath: (rootId, relPath) =>
+    ipcRenderer.invoke(FS_CHANNELS.trashPath, { rootId, relPath }),
+  pickAndStageAttachment: (dest) =>
+    ipcRenderer.invoke(FS_CHANNELS.pickAndStageAttachment, { dest }),
+  stageFromRoot: (rootId, relPath, dest) =>
+    ipcRenderer.invoke(FS_CHANNELS.stageFromRoot, { rootId, relPath, dest }),
+  stageDroppedFile: (file, dest) => {
+    let absPath: string;
+    try {
+      absPath = webUtils.getPathForFile(file);
+    } catch {
+      return Promise.resolve({
+        ok: false as const,
+        reason: "无法解析拖入文件的本机路径",
+        code: "invalid" as const,
+      } satisfies FsResult<StagedAttachment>);
+    }
+    if (!absPath) {
+      return Promise.resolve({
+        ok: false as const,
+        reason: "无法解析拖入文件的本机路径",
+        code: "invalid" as const,
+      } satisfies FsResult<StagedAttachment>);
+    }
+    return ipcRenderer.invoke(FS_CHANNELS.stageFromAbsPath, {
+      absPath,
+      dest,
+    }) as Promise<FsResult<StagedAttachment>>;
+  },
+  finalizeStagedAttachment: (stagingId, dest: StageAttachmentDest) =>
+    ipcRenderer.invoke(FS_CHANNELS.finalizeStagedAttachment, {
+      stagingId,
+      dest,
+    }),
+  consumeStagedBytes: (stagingId) =>
+    ipcRenderer.invoke(FS_CHANNELS.consumeStagedBytes, { stagingId }),
 };
 
 const sidecarApi: SidecarApi = {
@@ -105,8 +163,11 @@ const sidecarApi: SidecarApi = {
   runRedirect: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.runRedirect, req),
   debateSteer: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.debateSteer, req),
   resume: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.resume, req),
-  listPaused: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.listPaused, req),
+  continueAfterDecision: (req) =>
+    ipcRenderer.invoke(SIDECAR_CHANNELS.continueAfterDecision, req),
   probe: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.probe, req),
+  recovery: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.recovery, req),
+  attach: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.attach, req),
   onEvent: (cb) => {
     const listener = (_e: unknown, payload: SidecarEventPush) => cb(payload);
     ipcRenderer.on(SIDECAR_CHANNELS.event, listener);

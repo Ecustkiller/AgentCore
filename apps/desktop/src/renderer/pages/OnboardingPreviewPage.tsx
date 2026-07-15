@@ -78,6 +78,14 @@ export function OnboardingPreviewPage() {
             onDismiss={() => undefined}
           />
         )}
+        {current?.kind === "onboarding-connect-free-tier" && (
+          <OnboardingFlow
+            embedded
+            previewStep="connect"
+            previewFreeTier
+            onDismiss={() => undefined}
+          />
+        )}
         {current?.kind === "onboarding-probing" && (
           <OnboardingFlow
             embedded

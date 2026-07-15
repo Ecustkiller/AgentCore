@@ -1,0 +1,133 @@
+// @vitest-environment jsdom
+/**
+ * 辩论 L0 可见性：真实 multi_agent_debate 向量折叠后，推进线 / 结论钩子 / 图门可消费。
+ */
+import { buildModeratorLedger } from "@/components/chat/detail/debateModerator";
+import {
+  debateConclusionHook,
+  debatePreviewSubtitle,
+} from "@/components/chat/debate/debateEntryCopy";
+import {
+  challengePreviewFromContext,
+  debateFacePrimaryFromContext,
+  pickAgentNodeIdlePrimary,
+} from "@/components/chat/debate/debateFaceCopy";
+import { teamHasStartedRuns } from "@/components/chat/InlineTeamGraph";
+import { planCapabilities } from "@/components/graph/planCapabilities";
+import { foldToProjectedTurn } from "@/protocol/conformanceFold";
+import type { Execution, RunNode } from "@/stores/execution";
+import { loadFixtures } from "@agentcore/protocol-conformance";
+import { describe, expect, it } from "vitest";
+
+function toExecution(name: string): Execution {
+  const fixture = loadFixtures().find((f) => f.name === name);
+  if (!fixture) throw new Error(`missing fixture ${name}`);
+  const p = foldToProjectedTurn(fixture.events);
+  const runs: RunNode[] = p.runs.map((r) => ({
+    id: r.id,
+    agentId: r.agentId,
+    status: r.status,
+    task: r.task,
+    dependsOn: r.dependsOn,
+    parentRunId: r.parentRunId ?? null,
+    kind: r.kind ?? "agent",
+    role: r.role ?? null,
+    model: r.model ?? "",
+    usage: r.usage ?? null,
+    cost: r.cost ?? null,
+    error: r.error,
+    outputSummary: r.outputSummary,
+    outputFiles: r.outputFiles ?? [],
+    debrief: r.debrief,
+    durationMs: r.durationMs,
+    stance: r.stance ?? null,
+    group: r.group ?? null,
+    round: r.round ?? 0,
+    continuesRunId: r.continuesRunId ?? null,
+    continuationIndex: r.continuationIndex ?? 0,
+    replacesRunId: r.replacesRunId ?? null,
+    revised: r.revised ?? null,
+    checkpoint: r.checkpoint ?? null,
+    receivedContext: r.receivedContext ?? [],
+    escalations: r.escalations ?? [],
+    process: r.process ?? [],
+  }));
+  return {
+    id: "exec1",
+    planType: "debate",
+    taskSummary: "正反辩论",
+    status: p.status === "running" ? "running" : p.status,
+    agents: p.agents.map((a) => ({
+      id: a.id,
+      role: a.role,
+      modelPreference: a.modelPreference,
+      thinking: a.thinking,
+      reasoningEffort: a.reasoningEffort,
+      status: a.status,
+      currentRunId: a.currentRunId,
+      outputChunks: a.output ? [a.output] : [],
+      reasoningChunks: a.reasoning ? [a.reasoning] : [],
+      toolCalls: [],
+      toolProgress: a.toolProgress,
+      toolExecutionLive: null,
+    })),
+    runs,
+    progress: p.progress,
+    batches: [],
+    debate: p.debate,
+    debateRounds: p.debateRounds,
+    crossExamEnabled: p.crossExamEnabled,
+    debateOpening: p.debateOpening,
+    teamNotes: [],
+  };
+}
+
+describe("debate L0 visibility · multi_agent_debate fixture", () => {
+  it("ledger + brief CTA + graph gate ready for chat default surface", () => {
+    const execution = toExecution("multi_agent_debate");
+
+    expect(planCapabilities(execution.planType).showsTeamGraph).toBe(true);
+    expect(teamHasStartedRuns(execution.runs)).toBe(true);
+
+    const ledger = buildModeratorLedger(execution);
+    expect(ledger).not.toBeNull();
+    expect(ledger!.rounds.length).toBeGreaterThan(0);
+    expect(ledger!.rounds.some((r) => r.focus || r.summary)).toBe(true);
+    expect(JSON.stringify(ledger)).not.toMatch(/score|比分|记分/i);
+
+    expect(debatePreviewSubtitle(execution)).toMatch(/置信/);
+    const hook = debateConclusionHook(execution);
+    expect(hook?.leaning).toBeTruthy();
+  });
+
+  it("continuation run_context drives face primary / challenge over role template", () => {
+    const execution = toExecution("multi_agent_debate");
+    const cont = execution.runs.find(
+      (r) =>
+        r.continuesRunId != null &&
+        (r.receivedContext?.some((b) => b.channel === "round_focus") ||
+          r.receivedContext?.some((b) => b.channel === "task") ||
+          r.receivedContext?.some((b) => b.channel === "challenge")),
+    );
+    expect(cont, "expected a continue_run with context blocks").toBeTruthy();
+    if (!cont) return;
+
+    const primary = debateFacePrimaryFromContext(cont.receivedContext);
+    const challenge = challengePreviewFromContext(cont.receivedContext);
+    const agent = execution.agents.find((a) => a.id === cont.agentId);
+    const outputPreview = (agent?.outputChunks ?? []).join("").slice(-80);
+
+    const idle = pickAgentNodeIdlePrimary({
+      status: cont.status,
+      outputPreview,
+      task: cont.task,
+      isDebate: true,
+      debateFacePrimary: primary,
+    });
+    expect(idle).toBeTruthy();
+    expect(idle).not.toMatch(/你在一场正反辩论中代表/);
+    if (challenge) {
+      expect(challenge.length).toBeGreaterThan(0);
+    }
+  });
+});

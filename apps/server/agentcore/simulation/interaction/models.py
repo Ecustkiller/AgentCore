@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-InteractionKind = Literal["conversation", "trade", "vote"]
+InteractionKind = Literal["conversation", "trade", "vote", "heart_pick"]
 InteractionStatus = Literal["completed", "rejected", "failed", "cancelled"]
 
 

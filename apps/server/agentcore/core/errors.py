@@ -240,6 +240,39 @@ class QuotaExceededError(AgentCoreError):
         super().__init__(message, dimension=dimension, used=used, limit=limit, **kwargs)
 
 
+_FREE_TIER_EXHAUSTED_MESSAGE = (
+    "本月免费额度已用完——接入自己的模型即可不限量继续"
+)
+
+
+class FreeTierExhaustedError(QuotaExceededError):
+    """Free-tier monthly (or daily) cap reached — conversion CTA, not wait-for-reset.
+
+    Same HTTP 429 / dimension payload as :class:`QuotaExceededError`, but a
+    dedicated code so the client can route to BYOK settings instead of the
+    generic quota-wait UX. Message is the single backend source for the CTA copy.
+    """
+
+    code = ErrorCode.FREE_TIER_EXHAUSTED
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        dimension: str = "",
+        used: int = 0,
+        limit: int = 0,
+        **kwargs,
+    ):
+        super().__init__(
+            message or _FREE_TIER_EXHAUSTED_MESSAGE,
+            dimension=dimension,
+            used=used,
+            limit=limit,
+            **kwargs,
+        )
+
+
 class BYOKKeyMissingError(AgentCoreError):
     """No usable BYOK LLM key is configured, so a turn cannot start.
 

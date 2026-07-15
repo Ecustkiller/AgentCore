@@ -45,7 +45,7 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
       | "decision"
       | "note"
       | "selected"
-      | "autonomyPolicy"
+      | "permissionPreset"
     > = {
       messageId: "m-asst",
       conversationId: "c1",
@@ -53,7 +53,7 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
       decision: "continue",
       note: "",
       selected: ["a"],
-      autonomyPolicy: "always_ask",
+      permissionPreset: "observe",
     };
     const withInference = buildSidecarResumeRpcParams(req, {
       baseUrl: "https://x/v1/inference/v1",
@@ -67,14 +67,14 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
       ...sidecarIpc.resumeRpcParams.keys.filter((k) => k !== "inference"),
     ]);
     expect(withoutInference.selected).toEqual(["a"]);
-    expect(withoutInference.autonomyPolicy).toBe("always_ask");
+    expect(withoutInference.permissionPreset).toBe("observe");
 
-    // 自主度缺省（离线 / 取不到设置）⇒ 键不出现，sidecar 沿用当前值。
-    const withoutAutonomy = buildSidecarResumeRpcParams({
+    // 权限模式缺省 ⇒ 键不出现，sidecar 沿用当前值。
+    const withoutPreset = buildSidecarResumeRpcParams({
       ...req,
-      autonomyPolicy: undefined,
+      permissionPreset: undefined,
     });
-    expect("autonomyPolicy" in withoutAutonomy).toBe(false);
+    expect("permissionPreset" in withoutPreset).toBe(false);
   });
 
   it("resume IPC request required fields are a superset of renderer routing keys", () => {

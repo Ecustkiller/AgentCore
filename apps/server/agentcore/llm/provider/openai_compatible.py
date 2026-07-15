@@ -32,6 +32,9 @@ from agentcore.llm.errors import (
 )
 from agentcore.llm.observability import log_llm_call
 from agentcore.llm.provider.protocol import (
+    BACKOFF_MULTIPLIER,
+    INITIAL_BACKOFF,
+    MAX_RETRIES,
     LLMChunk,
     LLMRequest,
     LLMResponse,
@@ -58,9 +61,10 @@ def _request_attribution_headers() -> dict[str, str]:
     except Exception:  # noqa: BLE001 — never let billing headers break LLM I/O
         return {}
 
-_MAX_RETRIES = 3
-_INITIAL_BACKOFF = 2.0
-_BACKOFF_MULTIPLIER = 2.0
+# Local aliases keep call sites readable; values live on the public protocol layer.
+_MAX_RETRIES = MAX_RETRIES
+_INITIAL_BACKOFF = INITIAL_BACKOFF
+_BACKOFF_MULTIPLIER = BACKOFF_MULTIPLIER
 # Unary completions can run 150s+ for long-form writing; streaming read timeout is
 # per-chunk idle, so a generous ceiling avoids false positives on slow generations.
 _REQUEST_TIMEOUT = 300.0
@@ -229,6 +233,7 @@ class OpenAICompatibleProvider:
             tool_names=[tc.function.name for tc in response.tool_calls]
             if response.tool_calls
             else None,
+            provider_name=self._name,
         )
         return response
 

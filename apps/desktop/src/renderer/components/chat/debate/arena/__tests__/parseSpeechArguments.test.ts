@@ -69,43 +69,37 @@ describe("parseSpeechArguments", () => {
     expect(args[0].title).toContain("反对理由");
   });
 
-  it("strips clear opening preamble before real arguments", () => {
+  it("keeps first block as an argument (no preamble stripping)", () => {
+    // 前端不再剥除过程句——两阶段成稿契约保证发言正文干净；若正文含引导句则如实切段。
     const args = parseSpeechArguments(
       "以下是正方的立论。\n\n成本可控，回收周期短。\n\n风险有明确兜底。",
     );
-    expect(args).toHaveLength(2);
-    expect(args[0].body).toContain("成本可控");
-    expect(args.every((a) => !a.body.includes("以下是"))).toBe(true);
+    expect(args).toHaveLength(3);
+    expect(args[0].body).toContain("以下是");
   });
 
-  it("strips meta info-ready preamble", () => {
-    const args = parseSpeechArguments(
-      "现在我已有足够信息来构建论点。\n\n收益可量化。\n\n迁移路径清晰。",
-    );
-    expect(args).toHaveLength(2);
-    expect(args[0].body).toContain("收益");
-  });
-
-  it("strips catalog-style preamble", () => {
-    const args = parseSpeechArguments(
-      "接下来我将从以下几个方面阐述。\n\n第一点：成本。\n\n第二点：风险。",
-    );
-    expect(args).toHaveLength(2);
-    expect(args[0].body).toContain("成本");
-  });
-
-  it("keeps ambiguous first block that looks like a real argument", () => {
-    const args = parseSpeechArguments(
-      "首先成本是可控的，因为规模效应明显。\n\n其次风险有兜底。",
-    );
-    expect(args).toHaveLength(2);
-    expect(args[0].body).toContain("成本是可控的");
-  });
-
-  it("falls back when preamble is the only block", () => {
-    const text = "以下是正方的立论。";
-    const args = parseSpeechArguments(text);
-    expect(args).toHaveLength(1);
-    expect(args[0].body).toBe(text);
+  it("pins skeleton-compliant speech: ### titles without body title echo", () => {
+    // 产出端骨架契约样本（首行即 ###、无总标题/加粗伪标题）——钉住接缝两端：
+    // prompt 纪律 ↔ parseSpeechArguments 切段。
+    const speech = [
+      "### 成本可控可回收",
+      "首年可降本约 18%【已核实·内部测算】，回收周期约两个季度。",
+      "",
+      "### 风险有明确兜底",
+      "迁移期双写窗口设熔断，尾部故障率有上限【待核实·推断】。",
+      "",
+      "### 收益可量化对比",
+      "与维持现状相比，净现值在三年内转正。",
+    ].join("\n");
+    const args = parseSpeechArguments(speech);
+    expect(args).toHaveLength(3);
+    expect(args[0].title).toBe("成本可控可回收");
+    expect(args[1].title).toBe("风险有明确兜底");
+    expect(args[2].title).toBe("收益可量化对比");
+    // 展开正文不含标题重复（titleFromHeaderBlock 剥掉 ### 行）
+    expect(args[0].body).not.toContain("###");
+    expect(args[0].body).not.toMatch(/^成本可控可回收/);
+    expect(args[0].body).toContain("首年可降本");
+    expect(args[1].body).toContain("熔断");
   });
 });

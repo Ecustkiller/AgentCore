@@ -49,6 +49,7 @@ function usageWindow(cnyTotal: number, requests: number): UsageWindow {
       input: 0,
       output: 0,
       total: 0,
+      pricing_source: "curated",
     },
     usage: { cache_hit: 0, cache_miss: 0, input: 0, output: 0, reasoning: 0 },
     requests,

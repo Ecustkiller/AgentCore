@@ -28,11 +28,19 @@ namespace AgentTown.Town
         private bool hasBirdPose;
         private string prevTracked;
         private float birdDistance = TownVisualLayout.BirdZoomDefaultDistance;
+        /// <summary>When true, <see cref="AgentTown.Show.CinematicDirector"/> owns the transform.</summary>
+        private bool externalDrive;
 
         public void Bind(SimulationSession target)
         {
             session = target;
             Frame();
+        }
+
+        /// <summary>Programme mode: director drives the camera; free-look clears this.</summary>
+        public void SetExternalDrive(bool enabled)
+        {
+            externalDrive = enabled;
         }
 
         private void Start()
@@ -46,7 +54,7 @@ namespace AgentTown.Town
 
         private void Update()
         {
-            if (session == null)
+            if (session == null || externalDrive)
             {
                 return;
             }
@@ -65,7 +73,7 @@ namespace AgentTown.Town
 
         private void LateUpdate()
         {
-            if (session == null)
+            if (session == null || externalDrive)
             {
                 return;
             }

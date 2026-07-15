@@ -134,14 +134,15 @@ export interface DescribedError {
 /**
  * Map a backend error `code` to a config remedy. The set of codes whose remedy is
  * the model-config page comes from the shared {@link KEY_CONFIG_ERROR_CODES} catalog
- * (contract-types), so desktop and mobile offer the "去配置" route on exactly the
- * same codes, and adding a code is a one-line change in one shared place.
+ * (contract-types — includes `FREE_TIER_EXHAUSTED`), so desktop and mobile offer
+ * the "去配置" route on exactly the same codes.
  */
 export function errorActionForCode(
   code: string | undefined,
 ): ErrorAction | null {
   // No key configured (preflight 402) / a configured key rejected mid-stream
-  // (401/403): both are fixed in 设置·模型配置.
+  // (401/403) / monthly free tier spent (429): all fixed in 设置·模型配置.
+  // QUOTA_EXCEEDED stays null (wait for window reset; no config CTA).
   if (
     code !== undefined &&
     (KEY_CONFIG_ERROR_CODES as readonly string[]).includes(code)
@@ -202,6 +203,9 @@ function resolveMessage(f: ErrorFacts): string {
   }
   if (f.code === "pending_interactions_awaiting") {
     return f.serverMessage ?? "有待拍板的确认卡，先处理或停止当前任务";
+  }
+  if (f.code === "turn_in_progress") {
+    return f.serverMessage ?? "会话中有正在进行的回合，等它结束后再继续";
   }
   // A 402 LLM_KEY_REQUIRED is a deliberate BYOK refusal (no DeepSeek key yet);
   // surface the backend's actionable message (or a config hint), never a
@@ -267,8 +271,8 @@ export function describeError(err: unknown): DescribedError | null {
     message: resolveMessage(f),
     action: errorActionForCode(f.code),
     // Suppress retry on refusals that an immediate re-send can't fix (quota used /
-    // key missing-or-invalid / wallet empty / server key-storage down). Sourced from
-    // the shared catalog so the desktop no longer只认 2 码 and mobile stays in lockstep.
+    // key missing-or-invalid / wallet empty / server key-storage down / free tier
+    // exhausted). The shared contract-types catalog is the single source.
     retriable: !(
       f.code !== undefined &&
       (NON_RETRIABLE_ERROR_CODES as readonly string[]).includes(f.code)

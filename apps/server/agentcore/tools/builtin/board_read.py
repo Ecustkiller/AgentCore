@@ -157,6 +157,7 @@ class BoardReadTool:
                     reading.model,
                     reading.usage,
                     parent_run_id=context.run_id,
+                    credential_source="platform",
                 )
             )
         except Exception:  # noqa: BLE001 — billing must never break a successful read

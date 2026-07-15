@@ -1,3 +1,7 @@
+import {
+  isTeamSynthesizing,
+  teamSynthesisPhaseLabel,
+} from "@/components/chat/teamSynthesisPhase";
 import { useActiveGenerating, useActiveMessages } from "@/stores/conversation";
 import { useMessageExecution } from "@/stores/execution";
 
@@ -12,14 +16,18 @@ export function StreamingIndicator() {
   if (!isGenerating || !isStreaming) return null;
 
   let text = "正在回复…";
-  if (executionId && execution && execution.status === "running") {
-    const runningRun = execution.runs.find((r) => r.status === "running");
-    const role = runningRun
-      ? execution.agents.find((a) => a.id === runningRun.agentId)?.role
-      : null;
-    text = role
-      ? `${execution.taskSummary} · ${role} 正在工作`
-      : execution.taskSummary;
+  if (execution && execution.status === "running") {
+    if (isTeamSynthesizing(execution)) {
+      text = teamSynthesisPhaseLabel(execution);
+    } else if (executionId) {
+      const runningRun = execution.runs.find((r) => r.status === "running");
+      const role = runningRun
+        ? execution.agents.find((a) => a.id === runningRun.agentId)?.role
+        : null;
+      text = role
+        ? `${execution.taskSummary} · ${role} 正在工作`
+        : execution.taskSummary;
+    }
   }
 
   return (

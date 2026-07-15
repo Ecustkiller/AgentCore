@@ -8,13 +8,14 @@ Run from apps/server:
                                                              # full log chain
                                                              # (log-only: trace_id
                                                              # is not persisted)
+    uv run python scripts/log_timeline.py --since 24h --trace <trace_id>
 
     # Offline mode (production export, no DB):
     uv run python scripts/log_timeline.py --export-dir ../../logs/prod-export --recent
     uv run python scripts/log_timeline.py --export-dir ../../logs/prod-export <conv_id>
     uv run python scripts/log_timeline.py --export-dir ../../logs/prod-export --trace <trace_id>
 
-    # Custom event log file:
+    # Custom event log file (also reads RotatingFileHandler backups when present):
     uv run python scripts/log_timeline.py --file ../../logs/prod-export/events.jsonl <conv_id>
 
 Message bodies live in Postgres (conversations / messages); the per-turn run trace
@@ -27,9 +28,13 @@ top-to-bottom; the CEO/captain loop stays on the chronological spine and bracket
 the workers it delegates to. See .cursor/rules/conversation-logs.mdc.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
+import re
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +43,68 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 LOG_FILE = _REPO_ROOT / "logs" / "dev.jsonl"
 # Make the agentcore package importable when run as a bare script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+
+def _parse_since(spec: str, *, now: datetime | None = None) -> datetime:
+    """Parse ``24h`` / ``7d`` / ISO date-or-datetime into an aware UTC cutoff."""
+    now = now or datetime.now(UTC)
+    s = spec.strip()
+    m = re.fullmatch(r"(\d+)\s*([hdw])", s, re.I)
+    if m:
+        n, unit = int(m.group(1)), m.group(2).lower()
+        delta = {"h": timedelta(hours=n), "d": timedelta(days=n), "w": timedelta(weeks=n)}[unit]
+        return now - delta
+    raw = s[:-1] + "+00:00" if s.endswith("Z") else s
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError as e:
+        raise SystemExit(
+            f"Invalid --since {spec!r}: use 24h / 7d / 2w or an ISO date (YYYY-MM-DD[THH:MM…])"
+        ) from e
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+def _parse_timestamp(raw: object) -> datetime | None:
+    if not raw or not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+def _discover_log_files(primary: Path) -> list[Path]:
+    """Primary file plus RotatingFileHandler backups, oldest → newest."""
+    primary = primary.resolve()
+    parent = primary.parent
+    name = primary.name
+    backups: list[tuple[int, Path]] = []
+    for p in parent.glob(name + ".*"):
+        suffix = p.name[len(name) + 1 :]
+        if suffix.isdigit():
+            backups.append((int(suffix), p))
+    backups.sort(key=lambda t: t[0], reverse=True)
+    files = [p for _, p in backups]
+    if primary.exists():
+        files.append(primary)
+    return files
+
+
+def _in_since_window(obj: dict, since: datetime | None) -> bool:
+    if since is None:
+        return True
+    ts = _parse_timestamp(obj.get("timestamp"))
+    return ts is not None and ts >= since
 
 
 def _create_engine():
@@ -113,22 +180,31 @@ _LOG_NOISE_KEYS = ("type", "timestamp", "event", "level", "logger", "request_id"
 
 
 def load_log_events(
-    value: str, field: str = "conversation_id", log_file: Path = LOG_FILE
+    value: str,
+    field: str = "conversation_id",
+    log_file: Path = LOG_FILE,
+    since: datetime | None = None,
 ) -> list[dict]:
-    """Load log lines whose ``field`` equals ``value`` (conversation_id or trace_id)."""
-    if not log_file.exists():
-        return []
+    """Load log lines whose ``field`` equals ``value`` (conversation_id or trace_id).
+
+    Reads rotating backups alongside ``log_file``. Optional ``since`` filters by
+    line timestamp. Synthetic ``traffic`` rows are kept (timeline is for full replay).
+    """
     events = []
-    with open(log_file, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if obj.get(field) == value:
+    for path in _discover_log_files(log_file):
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if obj.get(field) != value:
+                    continue
+                if not _in_since_window(obj, since):
+                    continue
                 events.append(
                     {
                         "type": "log",
@@ -209,9 +285,12 @@ def _load_export_messages(export_dir: Path, conv_id: str) -> list[dict]:
     return messages
 
 
-def _parse_cli_args(argv: list[str]) -> tuple[Path, Path | None, list[str]]:
+def _parse_cli_args(
+    argv: list[str],
+) -> tuple[Path, Path | None, datetime | None, list[str]]:
     log_file = LOG_FILE
     export_dir: Path | None = None
+    since: datetime | None = None
     positional: list[str] = []
     i = 0
     while i < len(argv):
@@ -222,10 +301,13 @@ def _parse_cli_args(argv: list[str]) -> tuple[Path, Path | None, list[str]]:
         elif arg == "--export-dir" and i + 1 < len(argv):
             export_dir = Path(argv[i + 1])
             i += 2
+        elif arg == "--since" and i + 1 < len(argv):
+            since = _parse_since(argv[i + 1])
+            i += 2
         else:
             positional.append(arg)
             i += 1
-    return log_file, export_dir, positional
+    return log_file, export_dir, since, positional
 
 
 def _fmt_log_line(item: dict, indent: str = "  ", hide: tuple[str, ...] = ()) -> str:
@@ -361,34 +443,39 @@ def _fmt_worker_group(grp: dict) -> list[str]:
 _TURN_SPINE_EVENTS = frozenset({"chat.turn_start", "chat.turn_complete"})
 
 
-def load_conversation_spine_events(conversation_id: str, log_file: Path = LOG_FILE) -> list[dict]:
+def load_conversation_spine_events(
+    conversation_id: str,
+    log_file: Path = LOG_FILE,
+    since: datetime | None = None,
+) -> list[dict]:
     """Load chat.turn_start / chat.turn_complete events for a conversation."""
-    if not log_file.exists():
-        return []
     events: list[dict] = []
-    with open(log_file, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if obj.get("conversation_id") != conversation_id:
-                continue
-            event = obj.get("event", "")
-            if event not in _TURN_SPINE_EVENTS:
-                continue
-            events.append(
-                {
-                    "timestamp": obj.get("timestamp", ""),
-                    "event": event,
-                    "trace_id": obj.get("trace_id", ""),
-                    "preview": obj.get("preview", ""),
-                    "delegated": obj.get("delegated"),
-                }
-            )
+    for path in _discover_log_files(log_file):
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if obj.get("conversation_id") != conversation_id:
+                    continue
+                if not _in_since_window(obj, since):
+                    continue
+                event = obj.get("event", "")
+                if event not in _TURN_SPINE_EVENTS:
+                    continue
+                events.append(
+                    {
+                        "timestamp": obj.get("timestamp", ""),
+                        "event": event,
+                        "trace_id": obj.get("trace_id", ""),
+                        "preview": obj.get("preview", ""),
+                        "delegated": obj.get("delegated"),
+                    }
+                )
     return events
 
 
@@ -468,7 +555,12 @@ def format_conversation_context(
     return "\n".join(lines)
 
 
-def format_trace(trace_id: str, log_events: list[dict], log_file: Path = LOG_FILE) -> str:
+def format_trace(
+    trace_id: str,
+    log_events: list[dict],
+    log_file: Path = LOG_FILE,
+    since: datetime | None = None,
+) -> str:
     lines = [
         "=" * 70,
         f"  Trace: {trace_id}",
@@ -485,7 +577,7 @@ def format_trace(trace_id: str, log_events: list[dict], log_file: Path = LOG_FIL
     output = "\n".join(lines)
     conv_id = _extract_conversation_id(log_events)
     if conv_id:
-        spine = load_conversation_spine_events(conv_id, log_file=log_file)
+        spine = load_conversation_spine_events(conv_id, log_file=log_file, since=since)
         output += format_conversation_context(conv_id, spine, trace_id)
     return output
 
@@ -562,7 +654,7 @@ async def list_recent(n: int = 5, export_dir: Path | None = None) -> None:
 
 
 async def main() -> None:
-    log_file, export_dir, args = _parse_cli_args(sys.argv[1:])
+    log_file, export_dir, since, args = _parse_cli_args(sys.argv[1:])
     if export_dir:
         log_file = export_dir / "events.jsonl"
 
@@ -576,7 +668,8 @@ async def main() -> None:
         if len(args) < 2:
             print("usage: log_timeline.py --trace <trace_id>")
             return
-        print(format_trace(args[1], load_log_events(args[1], field="trace_id", log_file=log_file), log_file=log_file))
+        log_events = load_log_events(args[1], field="trace_id", log_file=log_file, since=since)
+        print(format_trace(args[1], log_events, log_file=log_file, since=since))
         return
 
     conv_id = args[0]
@@ -586,7 +679,7 @@ async def main() -> None:
             print(f"Conversation '{conv_id}' not found in export.")
             return
         messages = _load_export_messages(export_dir, conv_id)
-        log_events = load_log_events(conv_id, log_file=log_file)
+        log_events = load_log_events(conv_id, log_file=log_file, since=since)
         print(format_timeline(conv, messages, log_events))
         return
 
@@ -598,7 +691,7 @@ async def main() -> None:
             await engine.dispose()
             return
         messages = await fetch_messages(conn, conv_id)
-    log_events = load_log_events(conv_id, log_file=log_file)
+    log_events = load_log_events(conv_id, log_file=log_file, since=since)
     print(format_timeline(conv, messages, log_events))
     await engine.dispose()
 

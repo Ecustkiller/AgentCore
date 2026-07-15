@@ -232,7 +232,7 @@ async def _finalize_plan_review(monkeypatch) -> tuple[PlanReviewSuspension, list
     + persisted journal. Producer must end on PAUSED with the bridge never parked."""
     # Skip team_preview so this fixture reaches plan_review (wave-boundary durable pause).
     monkeypatch.setattr(
-        "agentcore.tools.builtin.delegate.preview.should_kickoff",
+        "agentcore.runtime.delegate.preview.should_kickoff",
         lambda *a, **k: False,
     )
     system_prompt = "你是 CEO。"

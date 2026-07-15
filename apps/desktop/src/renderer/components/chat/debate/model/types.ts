@@ -15,6 +15,13 @@ export type DebateForm = DebateResultPayload["form"];
  * 直取，进行中当前轮由 run 树标签匹配；都解析到同一辩手节点 (发言全文在其
  * `agent.outputChunks`)。`stance` 仅 2 方对称攻防有值 (驱动左右对开)，多方为 null。
  */
+/** 结构化论点大纲（契约 ``DebateSpeechArgument``；缺省时 SpeakerBlock 启发式回退）。 */
+export interface DebateSpeechArgumentView {
+  id: string;
+  title: string;
+  body: string;
+}
+
 export interface DebateSideModel {
   key: string;
   /** 语义 side key (`pro`/`con`/`a`…，= 契约 `DebateRoundSide.key`)，区别于 `key` (run_id，
@@ -28,6 +35,8 @@ export interface DebateSideModel {
    *  映射成友好厂商名供发言格标；空则不显徽章。 */
   model: string;
   run: RunNode | null;
+  /** 后端解析的论点大纲；空 / 缺省 → SpeakerBlock 回退 parseSpeechArguments。 */
+  arguments?: DebateSpeechArgumentView[];
 }
 
 /**
@@ -64,6 +73,9 @@ export interface DebateCrossExamExchangeView {
 export interface DebateCrossExamView {
   /** 被质询方语义 key（匹配 {@link DebateSideModel.sideKey}）。 */
   targetKey: string;
+  /** 被质询方阵营（取自作答 run 的 `stance`）——split 按阵营分列时的权威判据（后端 key 是主持人
+   *  自定、未必 `pro`/`con`，唯 `stance` 恒 `pro`/`con`）；多方 / 无作答 run ⇒ null。 */
+  stance: Stance | null;
   targetName: string;
   targetColorVar: string;
   exchanges: DebateCrossExamExchangeView[];
@@ -98,6 +110,9 @@ export interface DebateScoreView {
  */
 export interface DebateClosingView {
   sideKey: string;
+  /** 结辩方阵营（取自结辩 run 的 `stance`）——split 按阵营分列时的权威判据（后端 key 是主持人
+   *  自定、未必 `pro`/`con`，唯 `stance` 恒 `pro`/`con`）；多方 / 无结辩 run ⇒ null。 */
+  stance: Stance | null;
   name: string;
   colorVar: string;
   /** 结辩辩手 run（`run_id` 解析）——陈词全文在其 `agent.outputChunks`；未解析到（失败无 run）为 null。 */
@@ -148,10 +163,14 @@ export interface DebateModel {
    *  解析陈词 run；进行中恒空（结辩是收场后一次性 beat，live 无孪生）。空=未开启结辩（快速对碰 / 圆桌），
    *  前端不渲染结辩区。 */
   closings: DebateClosingView[];
-  /** 主持人开场白（收场权威产出）：顶部「会说话的主持人」入场气泡。空（进行中、未产出、旧数据）
-   *  ⇒ 前端不渲染入场（不再拼模板假冒开口），开场由第 1 轮焦点标题承担。 */
+  /** 主持人开场白：顶部「会说话的主持人」入场气泡。live 自首轮 `debate_round_started.opening`
+   * sticky 折入；收场以 `debate_result.opening` 为权威。空（未产出、旧数据）⇒ 不渲染入场，
+   * 开场由第 1 轮焦点标题承担。 */
   opening: string | null;
   settled: boolean;
+  /** 本场是否开启质询（`debate_round_started.cross_exam_enabled`）。缺字段 / 老会话 → false，
+   *  pending 文案回退「正在小结…」。 */
+  crossExamEnabled: boolean;
 }
 
 /** 参辩名册的一方：语义 `sideKey` + 展示名 + 身份色——站队 / 拍板按 `sideKey` 记录用户取舍。 */

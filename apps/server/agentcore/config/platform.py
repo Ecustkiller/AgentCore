@@ -7,6 +7,8 @@ class PlatformSettings(BaseModel):
     platform_api_key: str = ""
     platform_base_url: str = "https://api.openai.com/v1"
     platform_model: str = "gpt-4o"
+    # Background purposes (title/memory/compaction/followups); empty = follow platform_model.
+    platform_background_model: str = ""
 
     # --- 多厂商 provider（OpenAI 兼容，经 ProviderRouter 按 provider/model 前缀路由） ---
     moonshot_api_key: str = ""
@@ -24,6 +26,8 @@ class PlatformSettings(BaseModel):
 
     # --- 计费模式 ---
     billing_mode: str = "byok"
+    # BYOK 部署下：无用户 key 时是否允许 fallback 到平台代付免费档（默认关）。
+    platform_free_tier_enabled: bool = False
 
     # Sub2API 管理 API（可选）。配置后 platform 模式 503 时自动探测账号状态生成诊断。
     sub2api_admin_url: str = ""

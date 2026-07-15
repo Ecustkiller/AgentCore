@@ -1,5 +1,6 @@
 import { dispatchSSEEvent, flushPendingContent } from "@/services/sse/dispatch";
 import { useConversationStore } from "@/stores/conversation";
+import { enterTurnStreaming } from "@/stores/conversation/turnPhaseActions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import type { SSEEvent } from "@/types/events";
 
@@ -33,6 +34,9 @@ function seedSlice(conversationId: string, userPrompt?: string): void {
       conversationId,
     );
   }
+  // 离线回放无真实开流门闩：把 phase 推到 streaming，否则 ensureStreamingAssistant
+  // / 内容合批在 idle 下拒建助手气泡（turnPhase 门禁）。message_end 仍会 completeTurnPhase。
+  enterTurnStreaming(conversationId);
 }
 
 /** Replay the whole stream at once → the turn's terminal AI state. */

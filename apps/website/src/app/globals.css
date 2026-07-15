@@ -195,6 +195,48 @@ body {
   background: color-mix(in oklab, var(--card), transparent 10%);
 }
 
+/* ── 3D 沉浸宇宙（/preview/universe）───────────────────────── */
+
+.uv-panel {
+  border: 1px solid color-mix(in oklab, var(--border), transparent 30%);
+  border-radius: 1.25rem;
+  padding: 2rem 2.25rem;
+  background: color-mix(in oklab, var(--background), transparent 38%);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.uv-panel-finale {
+  padding: 2.75rem 3rem;
+  border-color: color-mix(in oklab, var(--primary), transparent 55%);
+  box-shadow: 0 30px 80px -40px var(--primary);
+  background: color-mix(in oklab, var(--background), transparent 16%);
+}
+
+@keyframes uv-scroll-dot {
+  0% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  70% {
+    transform: translateY(9px);
+    opacity: 0.2;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+}
+.uv-scroll-dot {
+  animation: uv-scroll-dot 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .uv-scroll-dot {
+    animation: none;
+  }
+}
+
 /* ── 滚动入场动画 ─────────────────────────────────────────── */
 
 .reveal {

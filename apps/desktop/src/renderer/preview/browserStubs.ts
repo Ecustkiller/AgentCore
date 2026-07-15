@@ -28,6 +28,10 @@ const fsApi: FsApi = {
   ensureDefaultRoot: async () => ({ id: "web-preview", name: "Web 预览" }),
   listRoots: async () => [],
   removeRoot: async () => {},
+  grantSessionReadonlyRoot: async () => null,
+  listSessionReadonlyRoots: async () => [],
+  revokeSessionReadonlyRoot: async () => false,
+  clearSessionReadonlyRoots: async () => {},
   listDir: async () => ({ ok: true, data: [] }),
   listFiles: async () => ({ ok: true, data: [] }),
   readFile: async () => fail(),
@@ -53,6 +57,12 @@ const fsApi: FsApi = {
   reveal: async () => fail(),
   openPath: async () => fail(),
   copyPath: async () => fail(),
+  trashPath: async () => fail(),
+  pickAndStageAttachment: async () => null,
+  stageFromRoot: async () => fail(),
+  stageDroppedFile: async () => fail(),
+  finalizeStagedAttachment: async () => fail(),
+  consumeStagedBytes: async () => fail(),
 };
 
 const sidecarApi: SidecarApi = {
@@ -66,8 +76,17 @@ const sidecarApi: SidecarApi = {
   resume: async () => {
     throw new Error("sidecar unavailable in web preview");
   },
-  listPaused: async () => [],
   probe: async () => {},
+  recovery: async () => ({
+    liveRunning: false,
+    unsynced: [],
+    paused: [],
+    interruptedAfterDecision: [],
+  }),
+  continueAfterDecision: async () => {
+    throw new Error("preview: continueAfterDecision unavailable");
+  },
+  attach: async () => ({ attached: false }),
   onEvent: () => noop,
   onStatus: () => noop,
 };

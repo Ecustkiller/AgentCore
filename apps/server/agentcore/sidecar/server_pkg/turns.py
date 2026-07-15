@@ -46,7 +46,7 @@ class TurnExecutionMixin:
         turn_creds = self._creds_for(conversation_id, trace_id, message_id)
 
         sink = EventSink()
-        backend = self._make_backend()
+        backend = self._make_backend(external_mounts=params.get("externalMounts"))
         saver, deleter = self._suspension_hooks()
         outbox = self._outbox_store
         if outbox is not None:
@@ -89,6 +89,7 @@ class TurnExecutionMixin:
                         backend=backend,
                         approvals_enabled=self._approvals_enabled,
                         autonomy_policy=self._autonomy_policy,
+                        permission_preset=self._permission_preset,
                         llm_credentials=turn_creds,
                         suspension_saver=saver,
                         suspension_deleter=deleter,
@@ -193,15 +194,20 @@ class TurnExecutionMixin:
         selected: list[str],
         trace_id: str = "",
         user_message_id: str = "",
+        external_mounts: list | dict | None = None,
+        *,
+        frame_claimed: bool = True,
     ) -> None:
         """Rebuild + finish a durably-paused turn; stream events; reply when done.
 
-        The frame was already claimed (atomic rename to ``.claimed``) by ``_on_resume``;
-        this runs ``resume_chat_pipeline`` and, on success, :meth:`confirm_claim` drops
-        the ``.claimed`` file. On failure it :meth:`rollback_claim` restores the frame so
-        the desktop can retry. The message_id is the event-routing turn id.
+        D1: settlement is prewritten to the local outbox journal **before** the
+        pipeline; on success the claimed frame is consumed immediately
+        (:meth:`confirm_claim`). Pipeline failure after that does **not** restore
+        the frame — projection becomes interrupted_after_decision (D2).
+        ``frame_claimed=False`` is the frameless continue path (D2): settlement +
+        resume_frame already live in the outbox journal.
         """
-        assert self._root is not None  # guarded by _on_resume
+        assert self._root is not None  # guarded by _on_resume / continueAfterDecision
         turn_id = suspension.message_id
         conversation_id = suspension.conversation_id
         user_message = suspension.user_message or ""
@@ -209,12 +215,14 @@ class TurnExecutionMixin:
         umid = (user_message_id or getattr(suspension, "user_message_id", None) or "").strip()
         if not umid:
             umid = f"resume-{turn_id}"
+        decision_value = decision.value if hasattr(decision, "value") else str(decision)
         # Resolved once so the pipeline runs on it AND the reply surfaces the same model.
         resume_creds = self._creds_for(conversation_id, trace_id, turn_id)
         sink = EventSink()
-        backend = self._make_backend()
+        backend = self._make_backend(external_mounts=external_mounts)
         saver, deleter = self._suspension_hooks()
         outbox = self._outbox_store
+        settlement_durable = not frame_claimed  # frameless path already settled
         if outbox is not None:
             outbox.bind_turn(
                 conversation_id=conversation_id,
@@ -232,6 +240,49 @@ class TurnExecutionMixin:
                 conversation_id=conversation_id,
                 message_id=turn_id,
             )
+
+        # D1: prewrite settlement → confirm_claim before any pipeline work.
+        if frame_claimed and outbox is not None:
+            try:
+                from agentcore.sidecar.settlement_prewrite import (
+                    prewrite_sidecar_resume_settlement,
+                )
+
+                await prewrite_sidecar_resume_settlement(
+                    outbox,
+                    suspension,
+                    decision=decision_value,
+                    note=note,
+                    selected=selected,
+                    user_message_id=umid,
+                    trace_id=trace_id,
+                )
+            except Exception as e:
+                if self._paused_store is not None:
+                    await self._paused_store.rollback_claim(turn_id)
+                if outbox is not None:
+                    outbox.clear_turn()
+                self._turns.pop(turn_id, None)
+                logger.warning(
+                    "sidecar.resume_settlement_prewrite_failed",
+                    turn_id=turn_id,
+                    error=str(e),
+                )
+                await self._send(
+                    protocol.make_error(
+                        request_id,
+                        protocol.RESUME_RETRYABLE,
+                        f"settlement prewrite failed: {e}",
+                    )
+                )
+                return
+            if self._paused_store is not None:
+                await self._paused_store.confirm_claim(turn_id)
+            settlement_durable = True
+        elif frame_claimed and outbox is None:
+            # No outbox ⇒ cannot durable-prewrite; keep legacy confirm-on-success.
+            settlement_durable = False
+
         pump = asyncio.create_task(self._pump(turn_id, sink))
         try:
             try:
@@ -259,6 +310,7 @@ class TurnExecutionMixin:
                         suspension_saver=saver,
                         suspension_deleter=deleter,
                         autonomy_policy=self._autonomy_policy,
+                        permission_preset=self._permission_preset,
                     )
             finally:
                 # The pipeline no longer closes the sink (its owner does); the sidecar owns
@@ -284,7 +336,8 @@ class TurnExecutionMixin:
                 )
             )
         except asyncio.CancelledError:
-            if self._paused_store is not None:
+            # Settlement already durable ⇒ do not restore the decision card.
+            if not settlement_durable and self._paused_store is not None:
                 await self._paused_store.rollback_claim(turn_id)
             if outbox is not None:
                 await outbox.salvage(
@@ -301,7 +354,7 @@ class TurnExecutionMixin:
             )
             raise
         except Exception as e:
-            if self._paused_store is not None:
+            if not settlement_durable and self._paused_store is not None:
                 await self._paused_store.rollback_claim(turn_id)
             if outbox is not None:
                 await outbox.salvage(
@@ -314,15 +367,19 @@ class TurnExecutionMixin:
             with contextlib.suppress(Exception):
                 await pump
             logger.error("sidecar.resume_failed", turn_id=turn_id, error=str(e), exc_info=True)
+            # After settlement, failure is interrupted_after_decision — not a frame retry.
+            err_code = (
+                protocol.INTERNAL_ERROR if settlement_durable else protocol.RESUME_RETRYABLE
+            )
             await self._send(
                 protocol.make_error(
                     request_id,
-                    protocol.RESUME_RETRYABLE,
+                    err_code,
                     str(e),
                 )
             )
         else:
-            if self._paused_store is not None:
+            if not settlement_durable and self._paused_store is not None:
                 await self._paused_store.confirm_claim(turn_id)
         finally:
             if outbox is not None:

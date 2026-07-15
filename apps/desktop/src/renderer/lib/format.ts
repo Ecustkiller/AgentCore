@@ -119,6 +119,13 @@ export function formatDuration(ms: number): string {
 const NANO_PER_USD = 1_000_000_000;
 
 /**
+ * BYOK 估算金额的轻量说明（tooltip / title）——与平台记账 ¥ 视觉分离，
+ * 明确「非上游账单」。
+ */
+export const COST_ESTIMATE_HINT =
+  "按社区价目/自填单价估算，非上游账单";
+
+/**
  * 把整数 nano-USD 成本折算成人民币展示串（大众面，§7.2）。
  *
  * 钱一律以整数 nano-USD 流转（1 USD = 1e9），绝不用 float；汇率 `cnyPerUsd` 由
@@ -142,4 +149,42 @@ export function formatUsd(nanoUsd: number): string {
   const usd = nanoUsd / NANO_PER_USD;
   if (usd < 0.0001) return "<$0.0001";
   return `$${usd.toFixed(4)}`;
+}
+
+/**
+ * 展示金额：平台记账走 {@link formatCost}；估算金额一律带「≈」前缀，
+ * 不得与记账 ¥ 混淆。0 / 无值仍显「—」（`pricing_source=unpriced` 同此）。
+ */
+export function formatDisplayCost(
+  nanoUsd: number,
+  cnyPerUsd: number,
+  estimated = false,
+): string {
+  const base = formatCost(nanoUsd, cnyPerUsd);
+  if (base === "—" || !estimated) return base;
+  return `≈${base}`;
+}
+
+/** 同 {@link formatDisplayCost} 的 USD 面。 */
+export function formatDisplayUsd(nanoUsd: number, estimated = false): string {
+  const base = formatUsd(nanoUsd);
+  if (base === "—" || !estimated) return base;
+  return `≈${base}`;
+}
+
+/** SSE / fold `CostBreakdown` 叶子上挑「记账 total vs 估算 estimated_total」。 */
+export function pickCostMoney(
+  cost:
+    | {
+        total: number;
+        estimated_total?: number | null;
+      }
+    | null
+    | undefined,
+): { nano: number; estimated: boolean } | null {
+  if (!cost) return null;
+  if (cost.total > 0) return { nano: cost.total, estimated: false };
+  const est = cost.estimated_total;
+  if (est != null && est > 0) return { nano: est, estimated: true };
+  return { nano: 0, estimated: false };
 }

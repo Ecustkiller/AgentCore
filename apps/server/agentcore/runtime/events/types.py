@@ -116,6 +116,14 @@ class EventType(StrEnum):
     SIM_INTERACTION = "sim.interaction"
     SIM_WORLD_EVENT = "sim.world_event"
     SIM_TICK_FRAME = "sim.tick_frame"
+    # AI 恋综 / 节目模式 overlays（录播生产 → AgentTown 节目壳）
+    SIM_SHOW_HEART_PICK = "sim.show.heart_pick"
+    SIM_SHOW_PAIR_FORMED = "sim.show.pair_formed"
+    SIM_SHOW_AFFECTION_SHIFT = "sim.show.affection_shift"
+    SIM_SHOW_ZERO_VOTE_ALERT = "sim.show.zero_vote_alert"
+    SIM_SHOW_DEPARTURE = "sim.show.departure"
+    SIM_SHOW_REVEAL = "sim.show.reveal"
+    SIM_SHOW_EPISODE_GATE = "sim.show.episode_gate"
 
 
 class FinishReason(StrEnum):

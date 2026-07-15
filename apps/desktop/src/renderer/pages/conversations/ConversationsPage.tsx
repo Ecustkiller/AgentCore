@@ -96,7 +96,7 @@ export function ConversationsPage() {
         <header className="shrink-0">
           <h1 className="text-xl font-semibold text-foreground">全部对话</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            按文件夹管理你的对话，点击任意对话即可打开
+            按项目管理你的对话，点击任意对话即可打开
           </p>
         </header>
 
@@ -126,7 +126,7 @@ export function ConversationsPage() {
               />
               {folders.length > 0 && (
                 <div className="px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground/70">
-                  文件夹
+                  项目
                 </div>
               )}
               {folders.map((f) => (
@@ -149,7 +149,7 @@ export function ConversationsPage() {
               className="mt-2 shrink-0 justify-start gap-2 border border-dashed border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"
             >
               <FolderOpen size={16} className="shrink-0" />
-              管理文件夹
+              管理项目
             </SurfaceRowButton>
           </aside>
 
@@ -218,7 +218,10 @@ export function ConversationsPage() {
               <SurfaceRowButton
                 variant="default"
                 onClick={() =>
-                  navigate("/files", filesFocusState(folderFocusConvId))
+                  navigate(
+                    "/files",
+                    filesFocusState(folderFocusConvId, selected),
+                  )
                 }
                 className="mt-3 w-full shrink-0 justify-start gap-2 border border-border bg-muted/30 px-3 py-2 text-foreground hover:border-foreground/30 hover:bg-accent/60"
               >
@@ -243,7 +246,10 @@ export function ConversationsPage() {
                   variant="ghost"
                   className="inline h-auto p-0 text-foreground underline-offset-2 hover:underline"
                   onClick={() =>
-                    navigate("/files", filesFocusState(folderFocusConvId))
+                    navigate(
+                      "/files",
+                      filesFocusState(folderFocusConvId, selected),
+                    )
                   }
                 >
                   文件页
@@ -268,7 +274,7 @@ export function ConversationsPage() {
                           ? "暂无已归档对话"
                           : conversations.length === 0
                             ? "暂无对话"
-                            : "此文件夹暂无对话"}
+                            : "此项目暂无对话"}
                   </p>
                 </div>
               ) : (
@@ -449,8 +455,10 @@ function FolderFilterRow({
       {hovered ? (
         <SimpleTooltip label="浏览文件">
           <IconButton
-            aria-label="浏览此文件夹的文件"
-            onClick={() => navigate("/files", filesFocusState(firstConvId))}
+            aria-label="浏览此项目的文件"
+            onClick={() =>
+              navigate("/files", filesFocusState(firstConvId, folder.id))
+            }
             className="size-6 shrink-0"
           >
             <FolderOpen size={13} />

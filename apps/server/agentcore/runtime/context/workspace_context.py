@@ -64,17 +64,36 @@ def build_workspace_context(
     if desktop_online:
         if is_local:
             desktop_line = "客户端通道：桌面端在线（本机执行通道可用）。"
+            grant_line = (
+                "区外目录：可用 ask_user 选项 `action=grant_readonly_folder` 请求"
+                "会话级只读授权；确认后以 `external/<别名>/…` 访问（只读、仅本次对话、可撤销）。"
+            )
         else:
             desktop_line = (
                 "客户端通道：桌面端在线——可用 ask_user 选项 "
                 "`action=bind_local_folder` 引导用户绑定本地文件夹，"
                 "以获得本机执行能力；绑定完成前不要委派本机任务。"
             )
+            grant_line = (
+                "区外目录授权需先处在本地工作区；当前为云端时先绑定本地文件夹，"
+                "或如实说明云端无法直接授权本机区外路径。"
+            )
     else:
         desktop_line = (
             "客户端通道：桌面端不在线（当前为 Web / 移动端等非桌面会话）——"
             "无法发起本机文件夹绑定；需要本机能力时如实说明限制。"
         )
+        grant_line = "区外目录只读授权仅桌面本地会话可用；当前客户端无法履行。"
+
+    mounts = getattr(backend, "_mounts", None) or {}
+    if mounts:
+        parts = [
+            f"`external/{a}/`（{getattr(m, 'label', a)}，只读）"
+            for a, m in mounts.items()
+        ]
+        mounts_line = "本对话已授权区外目录：" + "；".join(parts) + "。"
+    else:
+        mounts_line = "本对话尚无会话级区外目录授权。"
 
     exec_on = code_execute_enabled
     if exec_on is None:
@@ -93,6 +112,8 @@ def build_workspace_context(
             identity_line,
             reach_line,
             desktop_line,
+            grant_line,
+            mounts_line,
             capability_line,
         ]
     )

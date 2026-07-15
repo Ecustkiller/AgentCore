@@ -25,6 +25,19 @@ _TMP_PREFIX = "agentcore_pytest_"
 _TMP_REAP_AGE_S = 6 * 3600
 
 
+@pytest.fixture(autouse=True)
+def _mark_test_traffic():
+    """Tag all pytest log lines as synthetic (``traffic=test``); restore on teardown.
+
+    Real user traffic never binds ``traffic`` — absence means production. Scoped via
+    ``log_context`` so the key cannot leak into a later test's assertions.
+    """
+    from agentcore.core.log_context import log_context
+
+    with log_context(traffic="test"):
+        yield
+
+
 def _rmtree_quiet(path: Path) -> None:
     """Recursively delete ``path``; NEVER raise.
 

@@ -73,6 +73,15 @@ DEFAULT_ROSTER_MAX_CONVERSATIONS = 256
 # not head-only, so trailing details survive.
 DEP_CONTEXT_BUDGET = 16000
 
+# The CEO's synthesis reads the aggregated worker products as the delegate tool's
+# output; raise the model-facing truncation budget well above the 4000 default so a
+# multi-worker batch isn't clipped before the CEO can integrate it.
+DELEGATE_OUTPUT_LIMIT = 16000
+
+# Per-step product excerpt cap in a plan_review card: enough for the user to
+# recognise what just finished without shipping the whole product over SSE.
+PLAN_REVIEW_SUMMARY_CHARS = 280
+
 # Chars a summarize-policy dep (result_handling="summarize") is compressed to — a
 # tight digest for the large-fan-in token-saving case, independent of (and far
 # smaller than) the pass_through budget above.
@@ -99,22 +108,14 @@ DEP_POINTER_MAX_FILES = 20
 # (防幻觉铁律 / 收尾指引 at the tail now survive — ToolResult keeps head+tail — but a
 # worker silently vanishing from the synthesis input is still wrong). File-producers
 # (digested — their full product is on disk + shown in the UI) don't draw on this pool.
-# Sized BELOW DEP_CONTEXT_BUDGET / _DELEGATE_OUTPUT_LIMIT (16000) so digests + per-worker
+# Sized BELOW DEP_CONTEXT_BUDGET / DELEGATE_OUTPUT_LIMIT (16000) so digests + per-worker
 # boilerplate + the closing instructions all fit under the output_limit net, i.e. it
 # effectively never fires for a normal (≤10-worker) batch.
 CEO_SYNTHESIS_BUDGET = 10000
 
-# 工作区产物清单: every worker opens with a compact manifest of files in the shared
-# workspace it can ``file_read`` — its ALREADY-FINISHED teammates' products this turn
-# (from their ``files_touched``, role-attributed) PLUS the pre-existing files on disk
-# (uploads / prior turns, via ``backend.index_files``), minus its own direct deps
-# (those get the richer pointer block). So the workspace is a discoverable common
-# context, not a passive store a worker must ``file_list`` to find — and it won't
-# re-create an artifact a peer (or a past turn) already landed. Capped so a big team /
-# large workspace can't bloat the prompt: a FILE-COUNT cap plus a CHAR budget (long
-# paths can't blow up the prompt even under the count cap, whichever binds first), and
-# the pre-existing files are fed newest-first (``index_files(order="recent")``) so the
-# budget spends on what's most likely relevant, not whatever sorts alphabetically first.
+# 工作区产物清单: peer products (role-attributed) + sparse pre-existing paths
+# (attachments / 裸聊 scratch; project shared trees → 「另有 N 个」summary). See
+# ``workspace.sparse_listing`` + ``executor_context._workspace_manifest``.
 WORKSPACE_MANIFEST_MAX_FILES = 40
 WORKSPACE_MANIFEST_CHAR_BUDGET = 1800
 

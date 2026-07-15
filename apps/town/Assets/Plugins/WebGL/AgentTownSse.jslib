@@ -5,8 +5,8 @@
 // blank lines (\n\n), and forward each frame's concatenated `data:` lines back to C#.
 //
 // Consumed by WebGlSseTransport.cs via [DllImport("__Internal")]. This is the WebGL
-// connectivity path the AgentTown客户端规格 §15.2 spike depends on (UnityWebRequest cannot
-// read SSE incrementally in the browser).
+// connectivity path documented in docs/04-前端/AgentTown客户端.md §15.2
+// (UnityWebRequest cannot read SSE incrementally in the browser).
 
 mergeInto(LibraryManager.library, {
   AgentTownSseOpen: function (urlPtr, tokenPtr, onEvent, onStatus) {

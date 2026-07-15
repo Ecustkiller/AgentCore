@@ -7,6 +7,7 @@ import {
   hasParallelTimeline,
   parallelTimelineMetricsSummary,
 } from "@/components/chat/ParallelTimeline";
+import { captainSynthesisPreviewText } from "@/components/chat/teamSynthesisPhase";
 import { useTurnAudit } from "@/hooks/useTurnAudit";
 import { buildInjectGraphOverlay } from "@/lib/causalInject";
 import { resolveEffectiveGraphLayout } from "@/lib/graph-layout-utils";
@@ -14,6 +15,7 @@ import { useConversationStore } from "@/stores/conversation";
 import {
   type Execution,
   type RunStatus,
+  useExecutionStore,
   useMessageExecution,
 } from "@/stores/execution";
 import { useConversationFold, useGraphStore } from "@/stores/graph";
@@ -374,6 +376,8 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
     [conversationId, navigate],
   );
 
+  const execById = useExecutionStore((s) => s.byId);
+
   // Project DAG nodes/edges per expanded turn.
   const projectedByTurn = useMemo(() => {
     const out = new Map<
@@ -396,6 +400,13 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
         ? deriveCaptainStatus(execution, captain.id)
         : null;
       const isFocus = turnId === effectiveFocus;
+      const focusAnswer = isFocus ? finalAnswer : null;
+      const synthPreview =
+        !focusAnswer && capStatus === "running"
+          ? captainSynthesisPreviewText(
+              execById[turnId]?.teamSynthesisPreview ?? null,
+            )
+          : "";
       const base = {
         execution,
         positions: slice.positions,
@@ -407,7 +418,8 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
         litEndpointMessageId: isFocus ? litEndpointMessageId : null,
         captainRun: captain,
         captainStatus: capStatus,
-        finalAnswer: isFocus ? finalAnswer : null,
+        finalAnswer: focusAnswer,
+        captainSynthesisPreview: synthPreview,
         taskMessage: isFocus ? taskMessage : null,
         activateNode: isFocus ? activateNode : () => undefined,
         groups: slice.groups,
@@ -442,6 +454,7 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
     onToggleUnitExpand,
     edgePathType,
     injectOverlay,
+    execById,
   ]);
 
   // Morphing: brief CSS transition when layout structure changes.

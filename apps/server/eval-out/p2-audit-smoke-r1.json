@@ -1,0 +1,305 @@
+{
+  "summary": {
+    "total": 1,
+    "passed": 0,
+    "pass_rate": 0.0,
+    "cost_usd": 0.06661,
+    "by_category": {
+      "team": {
+        "total": 1,
+        "passed": 0,
+        "pass_rate": 0.0
+      }
+    },
+    "by_mast": {
+      "by_group": {
+        "FC3": {
+          "total": 1,
+          "passed": 0,
+          "pass_rate": 0.0
+        }
+      },
+      "by_mode": {
+        "3.2": {
+          "total": 1,
+          "passed": 0,
+          "pass_rate": 0.0
+        }
+      }
+    },
+    "shape_score_mean": 0.8,
+    "shape_score_by_case": {
+      "collab_p2_depth_writing": 0.8
+    }
+  },
+  "cases": [
+    {
+      "case_id": "collab_p2_depth_writing",
+      "category": "team",
+      "mast": "3.2",
+      "passed": false,
+      "shape_score": 0.8,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": false,
+          "detail": "finish_reason='max_rounds'",
+          "gating": true
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=0.80 (阈 0.60); independent_reviewer=1.00, min_roles=1.00, min_workers=1.00, parallel_fanout_min=1.00, pipeline_depth_min=0.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=338 (min 120)",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "max_rounds",
+        "rounds": 16,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "调研员A - 晋升与薪酬维度",
+          "调研员B - 社交资本与人脉维度",
+          "调研员C - 技能发展与工作安全感维度",
+          "报告主笔",
+          "独立审校官",
+          "修订专员"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_1882fa6b-9327-40c0-824e-04bf15643a68_1",
+            "role": "调研员A - 晋升与薪酬维度",
+            "task": "搜索远程办公对员工晋升速度、薪酬增长、绩效评价的长期影响。重点关注：①有无「出勤偏见」（presenteeism bias）导致远程员工晋升更慢的证据；②远程员工薪酬增速是否低于同岗位办公室员工；③绩效评价体系在远程场景下是否公平。提供关键发现总结，每条结论附来源链接。",
+            "depends_on": [],
+            "parent_run_id": "6780d0cf-563e-41d8-82ec-d0d1c8c26e7b"
+          },
+          {
+            "id": "del_1882fa6b-9327-40c0-824e-04bf15643a68_2",
+            "role": "调研员B - 社交资本与人脉维度",
+            "task": "搜索远程办公对职场关系网络、mentorship（导师指导）、非正式学习、visibility（可见度）的长期影响。重点关注：①远程员工是否在「弱连接」和人脉积累上处于劣势；②跨代际 mentorship 在远程环境下的变化；③哪些职业更依赖非正式社交互动来获取发展机会。提供关键发现总结，每条结论附来源链接。",
+            "depends_on": [],
+            "parent_run_id": "6780d0cf-563e-41d8-82ec-d0d1c8c26e7b"
+          },
+          {
+            "id": "del_1882fa6b-9327-40c0-824e-04bf15643a68_3",
+            "role": "调研员C - 技能发展与工作安全感维度",
+            "task": "搜索远程办公对个人技能积累、工作效率、职业安全感与职业流动性的长期影响。重点关注：①远程环境对 junior 员工（新人）技能成长速度的影响（是否存在「经验鸿沟」）；②远程员工的工作效率究竟是升还是降（长期 vs 短期差异）；③远程经历对求职竞争力（resume 吸引力）和职业转换能力的影响。提供关键发现总结，每条结论附来源链接。",
+            "depends_on": [],
+            "parent_run_id": "6780d0cf-563e-41d8-82ec-d0d1c8c26e7b"
+          },
+          {
+            "id": "del_1882fa6b-9327-40c0-824e-04bf15643a68_4",
+            "role": "报告主笔",
+            "task": "基于三位调研员的产出（通过 depends_on 自动注入你上下文），撰写一篇面向大众的深度报告「远程办公对个人职业发展的长期影响」。要求：\n- 受众：对远程办公感兴趣的职场人士（非学术读者），语言通俗但不失严谨\n- 深度：有证据支撑、数据引用、研究引用，避免空泛观点\n- 结构清晰，建议包含：现状背景 → 多维度分析（晋升薪酬 / 人脉社交 / 技能成长 / 行业差异）→ 不同群体的差异化影响 → 结论与建议\n- 篇幅：2500-4000字\n- 用研究数据和真实案例支撑论点，在关键数字处标注来源角标（用 [1] 等格式）\n- 语言为简体中文\n- 文件落盘为 remote-work-report.md",
+            "depends_on": [],
+            "parent_run_id": "6780d0cf-563e-41d8-82ec-d0d1c8c26e7b"
+          },
+          {
+            "id": "del_1882fa6b-9327-40c0-824e-04bf15643a68_5",
+            "role": "独立审校官",
+            "task": "审校报告主笔完成的「remote-work-report.md」文件（通过 depends_on 自动注入）。\n你的任务是独立、批判性地审查这份报告，找出：\n1. 事实/数据问题：引用或数据是否合理、有无过时或误导\n2. 论证逻辑问题：论点有无跳跃、因果混淆或遗漏重要反面证据\n3. 结构/表达问题：是否清晰、是否有重要维度缺失\n4. 中立性问题：是否对不同观点给予了公平对待\n以 JSON 输出（不要附带任何说明文字），格式如下：\n{\n  \"score\": 整体评分0-10,\n  \"problems\": [{\"severity\": \"critical\"|\"major\"|\"minor\", \"description\": \"问题描述\", \"evidence\": \"在哪段/什么位置\"}],\n  \"suggestions\": [\"每一条具体修改建议\"]\n}",
+            "depends_on": [],
+            "parent_run_id": "6780d0cf-563e-41d8-82ec-d0d1c8c26e7b"
+          },
+          {
+            "id": "del_1882fa6b-9327-40c0-824e-04bf15643a68_6",
+            "role": "修订专员",
+            "task": "基于独立审校官的 JSON 审校报告（通过 depends_on 自动注入），对「remote-work-report.md」进行修订。\n审校报告中每个 problems 和 suggestions 都需要处理：\n- 对合理的批评：按要求修改\n- 对可能误判的：在修改后的报告中以脚注/注释说明为什么维持原样\n- 输出修订后的完整报告，覆盖原文件\n请用 file_read 读取原文件，修改后用 file_write 写回 remote-work-report.md",
+            "depends_on": [],
+            "parent_run_id": "6780d0cf-563e-41d8-82ec-d0d1c8c26e7b"
+          },
+          {
+            "id": "del_18d5b342-f29c-429b-b294-9431eaa421d1_1",
+            "role": "独立审校官",
+            "task": "审校工作区中的远程办公深度报告初稿「remote-work-report-draft.md」。请用 file_read 读取该文件，然后独立、批判性地审查。要求覆盖：\n1. 事实/数据问题：引用是否合理、有无过时或误导\n2. 论证逻辑：论点有无跳跃、遗漏反面证据\n3. 结构/表达：是否清晰、有无重要维度缺失\n4. 中立性：是否对不同观点公平对待\n\n以 JSON 输出（只输出JSON，不要附带任何说明文字），格式：\n{\n  \"score\": 整体评分0-10,\n  \"problems\": [{\"severity\": \"critical\"|\"major\"|\"minor\", \"description\": \"问题描述\", \"evidence\": \"在哪段/什么位置\"}],\n  \"suggestions\": [\"每一条具体修改建议\"]\n}",
+            "depends_on": [],
+            "parent_run_id": "6780d0cf-563e-41d8-82ec-d0d1c8c26e7b"
+          },
+          {
+            "id": "del_18d5b342-f29c-429b-b294-9431eaa421d1_2",
+            "role": "修订专员",
+            "task": "基于独立审校官的 JSON 审校报告（通过 depends_on 自动注入上下文），对「remote-work-report-draft.md」进行修订。\n请用 file_read 读取原文件和审校报告。审校报告中每个 problems 和 suggestions 都需要处理：合理的批评→修改文件；你认为审校有误判的→在修改后的报告中以脚注形式说明为什么维持原样。\n修订完成后用 file_write 将最终版写入「remote-work-report.md」（覆盖该文件），确保这是可交付的完整版本。",
+            "depends_on": [],
+            "parent_run_id": "6780d0cf-563e-41d8-82ec-d0d1c8c26e7b"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {
+          "escalate": 2
+        },
+        "tool_calls": [
+          "consult_skill",
+          "web_search",
+          "web_search",
+          "delegate",
+          "delegate",
+          "delegate",
+          "file_list",
+          "file_list",
+          "web_search",
+          "web_search",
+          "web_search",
+          "file_list",
+          "web_search",
+          "web_search",
+          "web_search",
+          "file_list",
+          "file_list",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "file_list",
+          "consult_memory",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "escalate",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "escalate",
+          "web_search",
+          "web_search",
+          "file_list",
+          "file_list",
+          "file_list",
+          "read_url",
+          "read_url",
+          "read_url",
+          "read_url",
+          "read_url",
+          "web_search",
+          "file_list",
+          "grep",
+          "grep",
+          "grep",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "handoff",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "read_url",
+          "read_url",
+          "file_list",
+          "file_list",
+          "file_list",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "file_list",
+          "handoff",
+          "web_search",
+          "web_search",
+          "web_search",
+          "file_list",
+          "file_list",
+          "file_list",
+          "web_search",
+          "web_search",
+          "read_url",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "file_list",
+          "web_search",
+          "web_search",
+          "read_url",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "web_search",
+          "web_search",
+          "file_write",
+          "read_url",
+          "read_url",
+          "read_url",
+          "resolve_escalation",
+          "resolve_escalation",
+          "handoff",
+          "file_list",
+          "read_url",
+          "web_search",
+          "file_read",
+          "read_url",
+          "read_url",
+          "read_url",
+          "web_search",
+          "web_search",
+          "web_search",
+          "update_synthesis",
+          "update_synthesis",
+          "file_read",
+          "update_synthesis",
+          "file_write",
+          "file_list",
+          "file_write",
+          "file_move",
+          "file_read",
+          "file_read",
+          "update_synthesis",
+          "replan",
+          "delegate",
+          "file_read",
+          "file_read",
+          "file_read",
+          "file_read",
+          "file_read",
+          "file_read"
+        ],
+        "citations": 24,
+        "usage": {
+          "input": 1242189,
+          "output": 46368,
+          "reasoning": 15859
+        },
+        "cost_usd": 0.06661,
+        "latency_ms": 374824,
+        "error": null,
+        "content_preview": "审校与修订团队已启动。等待他们完成后再向您汇报最终成品。\n\n<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"update_synthesis\">\n<｜｜DSML｜｜parameter name=\"draft\" string=\"true\">## 进度\n\n已重新派出审校官和修订专员处理第二轮：\n- 审校官：审校 `remote-work-report-draft."
+      }
+    }
+  ]
+}

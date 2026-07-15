@@ -4,8 +4,17 @@
  * resolved / pending 摘要文案与各 decision label 对齐。
  */
 
+import { conversationKeys } from "@/lib/queryKeys";
 import type { TeamPreviewDisplay } from "@/stores/conversation";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  type RenderResult,
+} from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TeamPreviewCard } from "../TeamPreviewCard";
 
@@ -51,6 +60,19 @@ function makePreview(
   };
 }
 
+function renderCard(ui: ReactElement): RenderResult {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+  });
+  client.setQueryData(conversationKeys.grouped, {
+    folders: [],
+    conversations: [],
+  });
+  return render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
+}
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -58,7 +80,7 @@ afterEach(() => {
 
 describe("TeamPreviewCard", () => {
   it("resolved 默认收起为一行结论，不含队员任务全文", () => {
-    render(<TeamPreviewCard preview={makePreview()} />);
+    renderCard(<TeamPreviewCard preview={makePreview()} />);
 
     const toggle = screen.getByRole("button", {
       name: /已授权开工 · 首波已放行 · 2 名队员/,
@@ -69,7 +91,7 @@ describe("TeamPreviewCard", () => {
   });
 
   it("点击展开后显示队员角色、任务、依赖与辩论标记", () => {
-    render(<TeamPreviewCard preview={makePreview()} />);
+    renderCard(<TeamPreviewCard preview={makePreview()} />);
 
     fireEvent.click(
       screen.getByRole("button", {
@@ -93,7 +115,7 @@ describe("TeamPreviewCard", () => {
   });
 
   it("resolved 展开后显示备注 note", () => {
-    render(
+    renderCard(
       <TeamPreviewCard
         preview={makePreview({ note: "先做公开竞品，不做内部访谈" })}
       />,
@@ -101,14 +123,14 @@ describe("TeamPreviewCard", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: /已授权开工 · 首波已放行 · 2 名队员/,
+        name: /已授权开工 · 嘱咐已注入队员 · 2 名队员/,
       }),
     );
     expect(screen.getByText("先做公开竞品，不做内部访谈")).toBeTruthy();
   });
 
   it("pending 默认收起为等待开工确认摘要，且无操作 CTA", () => {
-    render(
+    renderCard(
       <TeamPreviewCard
         preview={makePreview({ status: "pending", decision: null })}
       />,
@@ -124,7 +146,7 @@ describe("TeamPreviewCard", () => {
   });
 
   it("pending 点击可展开队员明细", () => {
-    render(
+    renderCard(
       <TeamPreviewCard
         preview={makePreview({ status: "pending", decision: null })}
       />,
@@ -138,18 +160,96 @@ describe("TeamPreviewCard", () => {
   });
 
   it.each([
-    ["per_call", "已开工 · 将逐次审批能力调用 · 2 名队员"],
     ["adjust", "已调整 · 备注已注入队员并开做 · 2 名队员"],
     ["stop", "已停止 · 团队未启动 · 2 名队员"],
     ["timeout", "未及时回应，已自动开做 · 2 名队员"],
     ["orphaned", "已失效（回合已结束或服务已重启） · 2 名队员"],
   ] as const)("resolved decision=%s 保留既有 label 文案", (decision, label) => {
-    render(<TeamPreviewCard preview={makePreview({ decision })} />);
+    renderCard(<TeamPreviewCard preview={makePreview({ decision })} />);
     expect(screen.getByRole("button", { name: label })).toBeTruthy();
   });
 
+  it("historical per_call resolves collapse to continue label", () => {
+    renderCard(
+      <TeamPreviewCard preview={makePreview({ decision: "per_call" })} />,
+    );
+    expect(
+      screen.getByRole("button", {
+        name: /已授权开工 · 首波已放行 · 2 名队员/,
+      }),
+    ).toBeTruthy();
+  });
+
+  it("resolved continue + note 显示嘱咐已注入", () => {
+    renderCard(
+      <TeamPreviewCard
+        preview={makePreview({
+          decision: "continue",
+          note: "先做公开竞品",
+        })}
+      />,
+    );
+    expect(
+      screen.getByRole("button", {
+        name: /已授权开工 · 嘱咐已注入队员 · 2 名队员/,
+      }),
+    ).toBeTruthy();
+  });
+
+  it("debate resolved continue + note 显示嘱咐已注入", () => {
+    renderCard(
+      <TeamPreviewCard
+        preview={makePreview({
+          primitive: "debate",
+          workers: [],
+          decision: "continue",
+          note: "最关心成本谁买单",
+          motion: "该不该上四天工作制？",
+          form: "debate",
+          sides: [
+            { key: "pro", name: "正方", stance: "应推广" },
+            { key: "con", name: "反方", stance: "暂缓" },
+          ],
+          maxRounds: 5,
+          thorough: true,
+        })}
+      />,
+    );
+    expect(
+      screen.getByRole("button", {
+        name: /已授权开赛 · 嘱咐已注入 · 2 方/,
+      }),
+    ).toBeTruthy();
+  });
+
+  it("debate 历史 adjust 仍渲染「已调整辩题」", () => {
+    renderCard(
+      <TeamPreviewCard
+        preview={makePreview({
+          primitive: "debate",
+          workers: [],
+          decision: "adjust",
+          note: "旧路径改辩题",
+          motion: "原辩题",
+          form: "debate",
+          sides: [
+            { key: "pro", name: "正方", stance: "应推广" },
+            { key: "con", name: "反方", stance: "暂缓" },
+          ],
+          maxRounds: 5,
+          thorough: true,
+        })}
+      />,
+    );
+    expect(
+      screen.getByRole("button", {
+        name: /已调整辩题 · 开赛 · 2 方/,
+      }),
+    ).toBeTruthy();
+  });
+
   it("debate pending 显示辩题与各方立场", () => {
-    render(
+    renderCard(
       <TeamPreviewCard
         preview={makePreview({
           primitive: "debate",

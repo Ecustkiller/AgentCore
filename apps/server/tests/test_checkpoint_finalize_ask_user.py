@@ -322,7 +322,6 @@ async def test_persist_tail_writes_pause_snapshot(monkeypatch):
         backend=object(),  # type: ignore[arg-type] - never touched on the parked path
         sink=EventSink(),
         user_message="A 还是 B?",
-        generate_title=True,
         llm_credentials=None,
         trace_id="t",
         turn_id="tn",

@@ -527,8 +527,7 @@ namespace AgentTown.Town
             var textGo = new GameObject("Text");
             textGo.transform.SetParent(go.transform, false);
             Text text = textGo.AddComponent<Text>();
-            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
-                ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
+            text.font = TownFonts.UiFont;
             text.fontSize = 28;
             text.fontStyle = FontStyle.Bold;
             text.alignment = TextAnchor.MiddleCenter;

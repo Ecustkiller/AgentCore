@@ -82,11 +82,11 @@ function draftLabel(
   intent: DraftWorkspaceIntent,
   folders: FolderMeta[],
 ): { icon: "local" | "cloud" | "project"; text: string } {
-  if (intent.kind === "quick_local") {
-    return { icon: "local", text: "快速对话" };
-  }
   if (intent.kind === "quick_cloud") {
-    return { icon: "cloud", text: "云端草稿" };
+    return { icon: "cloud", text: "快速对话" };
+  }
+  if (intent.kind === "quick_local") {
+    return { icon: "local", text: "本机草稿" };
   }
   const folder = folders.find((f) => f.id === intent.folderId);
   if (!folder) return { icon: "project", text: "项目" };
@@ -108,7 +108,7 @@ function DraftChip() {
   const [query, setQuery] = useState("");
   const intent = useFoldersStore((s) => s.draftWorkspaceIntent);
   const setIntent = useFoldersStore((s) => s.setDraftWorkspaceIntent);
-  const openCreate = useFoldersStore((s) => s.openCreateProject);
+  const openCreate = useFoldersStore((s) => s.openCreateFolder);
   const createFolder = useCreateFolder();
   const isDesktop = hasLocalFiles();
 
@@ -193,29 +193,29 @@ function DraftChip() {
           <div className="text-xs font-medium text-foreground">在哪工作</div>
           <div className="text-xs text-muted-foreground">
             {isDesktop
-              ? "快速对话默认落本机；项目继承其工作区"
+              ? "你的文件在哪，AI 就在哪干活；没给文件，就在云上干"
               : "Web 默认云端草稿；仅云项目可选"}
           </div>
         </div>
         <div className="max-h-[360px] overflow-y-auto p-1.5">
+          <DraftRow
+            icon={<Cloud size={14} />}
+            label="快速对话"
+            hint="云端草稿（默认）"
+            selected={intent.kind === "quick_cloud"}
+            onClick={pickQuickCloud}
+            disabled={busy}
+          />
           {isDesktop ? (
             <DraftRow
               icon={<HardDrive size={14} />}
-              label="快速对话"
-              hint="本地草稿（默认）"
+              label="本机草稿"
+              hint="落本机容器，走本地引擎"
               selected={intent.kind === "quick_local"}
               onClick={pickQuickLocal}
               disabled={busy}
             />
           ) : null}
-          <DraftRow
-            icon={<Cloud size={14} />}
-            label={isDesktop ? "云端草稿" : "云端草稿（默认）"}
-            hint="文件只存云端"
-            selected={intent.kind === "quick_cloud"}
-            onClick={pickQuickCloud}
-            disabled={busy}
-          />
 
           <div className="my-1 border-t border-border" />
           <div className="px-2.5 pt-1 pb-1 text-xs text-muted-foreground">

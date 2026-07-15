@@ -1,7 +1,7 @@
 import { patchConversationCache } from "@/hooks/useConversations";
 import { StreamError } from "@/lib/errors";
 import { notifyWarning } from "@/lib/toast";
-import { resolveAutonomyPolicy } from "@/services/autonomyPolicy";
+import { resolveConversationPermissionPreset } from "@/services/permissionPreset";
 import { resolveSidecarInference } from "@/services/inferenceToken";
 import {
   clearActiveSidecarTurn,
@@ -14,6 +14,10 @@ import {
   flushPendingFrames,
 } from "@/services/streamConversation";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
+import {
+  enterTurnStreaming,
+  throwIfCannotOpenStream,
+} from "@/stores/conversation/turnPhaseActions";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { useTurnModelStore } from "@/stores/turnModel";
 import type { SSEEvent } from "@/types/events";
@@ -128,8 +132,10 @@ export async function streamConversationViaSidecar({
   // 云推理凭据（平台 key 不下放本机，走云端代理鉴权——Slice 4a）。取不到则带 undefined：
   // dev 下 sidecar 回退其自身配置，生产则以可重试的引擎错误失败（胜过静默跑成无计费回合）。
   const inference = (await resolveSidecarInference()) ?? undefined;
-  // 当前自主度（能力授权三档）随回合送达本地引擎；取不到则 sidecar 沿用其当前值。
-  const autonomyPolicy = await resolveAutonomyPolicy();
+  // 本会话权限模式随回合送达本地引擎；取不到则 sidecar 沿用其当前值。
+  const permissionPreset =
+    await resolveConversationPermissionPreset(conversationId);
+  throwIfCannotOpenStream(conversationId, signal);
   return runSidecarTurn({
     conversationId,
     rootId,
@@ -150,7 +156,7 @@ export async function streamConversationViaSidecar({
         userMessageId: optimisticUserId,
         history,
         inference,
-        autonomyPolicy,
+        permissionPreset,
       }),
     writeBack: () => persistAndReconcile(conversationId, optimisticUserId),
   });
@@ -159,11 +165,57 @@ export async function streamConversationViaSidecar({
 /**
  * 续跑一个持久挂起的本地回合（结构化挂起 2b resume）—— `streamConversationViaSidecar` 的对偶。
  *
- * sidecar 回合暂停后应用关闭、帧落本机文件；重开会话经 `listPaused` 重现续跑卡，用户的决定经
+ * sidecar 回合暂停后应用关闭、帧落本机文件；重开会话经 recovery.paused 重现续跑卡，用户的决定经
  * 此函数下发到 sidecar 的 `resume`（claim 帧并跑 `resume_chat_pipeline`），过程事件与最终结果
  * 形态与一次普通本地回合完全一致，故复用同一套事件分发与回写。事件路由 / cancel 键用
  * message_id（一回合至多一个持久挂起）。
  */
+/**
+ * 无帧续跑（D2 · 方案 A）：outbox settlement 已 durable、paused 帧已消费后的一键继续。
+ */
+export async function continueAfterDecisionViaSidecar({
+  conversationId,
+  rootId,
+  subpath,
+  messageId,
+  userMessageId,
+  signal,
+}: {
+  conversationId: string;
+  rootId: string;
+  subpath?: string;
+  messageId: string;
+  userMessageId?: string;
+  signal?: AbortSignal;
+}): Promise<SidecarTurnResult> {
+  const inference = (await resolveSidecarInference()) ?? undefined;
+  const permissionPreset =
+    await resolveConversationPermissionPreset(conversationId);
+  const traceId = newTraceId();
+  throwIfCannotOpenStream(conversationId, signal);
+  return runSidecarTurn({
+    conversationId,
+    rootId,
+    subpath,
+    turnId: messageId,
+    signal,
+    usedFallback: inference === undefined,
+    failMessage: "本地引擎未能从决策点继续，请重试",
+    invoke: () =>
+      window.sidecarApi.continueAfterDecision({
+        rootId,
+        subpath,
+        conversationId,
+        messageId,
+        traceId,
+        userMessageId,
+        inference,
+        permissionPreset,
+      }),
+    writeBack: () => persistAndReconcile(conversationId, userMessageId ?? ""),
+  });
+}
+
 export async function resumeConversationViaSidecar({
   conversationId,
   rootId,
@@ -180,10 +232,12 @@ export async function resumeConversationViaSidecar({
   );
   // 续跑同样要跑 LLM（重启后会新拉起引擎），故随带当前云推理凭据（同 startTurn）。
   const inference = (await resolveSidecarInference()) ?? undefined;
-  // 当前自主度（同 startTurn）：续跑期间的能力授权同样按用户当前设置。
-  const autonomyPolicy = await resolveAutonomyPolicy();
+  // 本会话权限模式（同 startTurn）：续跑期间的能力授权按会话当前模式。
+  const permissionPreset =
+    await resolveConversationPermissionPreset(conversationId);
   // 本次续跑的 trace_id（同 startTurn）：贯穿续跑的推理调用 + 回写落库。
   const traceId = newTraceId();
+  throwIfCannotOpenStream(conversationId, signal);
   try {
     const result = await runSidecarTurn({
       conversationId,
@@ -206,7 +260,7 @@ export async function resumeConversationViaSidecar({
           note,
           selected,
           inference,
-          autonomyPolicy,
+          permissionPreset,
         }),
       writeBack: () => persistAndReconcile(conversationId, userMessageId),
     });
@@ -265,7 +319,7 @@ async function runSidecarTurn({
   // 登记「本会话此刻是 sidecar 回合」（连同 root+subpath），使本回合内挂起的审批 / 交互结算
   // （统一入口 `resolveInteraction`）改走 `window.sidecarApi.respond` 回这条 stdio 链路（寻址到
   // 按 root+subpath 起的同一进程），而非云端 HTTP。
-  setActiveSidecarTurn(conversationId, rootId, subpath);
+  setActiveSidecarTurn(conversationId, rootId, subpath, turnId);
 
   // 只消费本会话的事件；主进程已按 turnId 路由到本窗口，这里再按 conversationId 过滤，
   // 防一个 sidecar 服务多个会话时串台。
@@ -284,12 +338,15 @@ async function runSidecarTurn({
   const onAbort = (): void => {
     void window.sidecarApi.cancel({ rootId, subpath, turnId });
   };
-  if (signal) {
-    if (signal.aborted) onAbort();
-    else signal.addEventListener("abort", onAbort, { once: true });
-  }
 
   try {
+    // 开流门禁：已 abort / stopping|terminal → 不 invoke（H1）。Abort 只负责断流；权威是 phase。
+    throwIfCannotOpenStream(conversationId, signal);
+    enterTurnStreaming(conversationId);
+    if (signal) {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+
     const result = await invoke();
     // 记下本回合真正跑的模型（引擎侧 resolve_turn_model），供输入框徽章如实展示；纯云会话
     // 无此信号、徽章回退账号配置。回退回合（无令牌）额外弹一条非阻断提示，点破「用了本机平台
@@ -305,6 +362,10 @@ async function runSidecarTurn({
     // 用户停止：与云链路一致地抛 AbortError（调用方据此不出错误横幅）。
     if (signal?.aborted) {
       throw new DOMException("Aborted", "AbortError");
+    }
+    // 开流门禁抛出的 AbortError（phase 阻断、尚未 invoke）直接上抛。
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw err;
     }
     // 这条链路的失败**全部来自本地引擎**（拉不起 / 初始化失败 / 引擎异常 / 进程退出），从不是
     // 真正的「网络」。优先用 onStatus 记下的生命周期诊断（uv/venv 找不到、退出码…）换出针对性
@@ -324,7 +385,7 @@ async function runSidecarTurn({
     // rAF-buffered content + worker frames so a partial answer keeps its last tokens.
     flushPendingContent(conversationId);
     flushPendingFrames(conversationId);
-    clearActiveSidecarTurn(conversationId);
+    clearActiveSidecarTurn(conversationId, turnId);
     unsubscribe();
     signal?.removeEventListener("abort", onAbort);
   }

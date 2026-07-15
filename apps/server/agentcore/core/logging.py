@@ -9,9 +9,11 @@ handler picks its own renderer:
 
 The file handler is ALWAYS JSON Lines (one JSON object per line, no ANSI),
 regardless of env — that is what lets tooling/agents parse ``logs/dev.jsonl``
-line-by-line (scripts/log_*.py, the conversation-logs rule). Foreign records
-(uvicorn / sqlalchemy / …) flow through the same ``foreign_pre_chain`` so every
-line — app or library — renders as a consistent event dict.
+line-by-line (scripts/log_*.py, the conversation-logs rule). It uses a
+``RotatingFileHandler`` (20 MB × 5 backups) so a long-lived process cannot grow
+the file without bound. Foreign records (uvicorn / sqlalchemy / …) flow through
+the same ``foreign_pre_chain`` so every line — app or library — renders as a
+consistent event dict.
 
 Correlation ids (trace_id / conversation_id / turn_id / …) are merged into
 every line from ``structlog.contextvars`` (bound via ``core/log_context.py``).
@@ -19,6 +21,7 @@ every line from ``structlog.contextvars`` (bound via ``core/log_context.py``).
 
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import cast
 
@@ -104,12 +107,20 @@ def setup_logging() -> None:
 
     # LOG_FILE is ALWAYS JSON Lines (no ANSI), regardless of env: this is what
     # lets tooling/agents parse logs/dev.jsonl line-by-line.
+    # RotatingFileHandler: 20 MB × 5 backups. On Windows, if rollover fails because
+    # another process still holds the file open, the logging framework swallows the
+    # error and keeps writing the primary file — acceptable self-heal, no extra handling.
     if settings.log_file:
         log_path = Path(settings.log_file)
         if not log_path.is_absolute():
             log_path = PROJECT_ROOT / log_path
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_path, encoding="utf-8")
+        file_handler = RotatingFileHandler(
+            log_path,
+            maxBytes=20 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
         file_handler.setFormatter(_formatter(structlog.processors.JSONRenderer()))
         root_logger.addHandler(file_handler)
 

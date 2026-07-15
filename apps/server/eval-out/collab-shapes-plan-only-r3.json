@@ -1,0 +1,1941 @@
+{
+  "summary": {
+    "total": 21,
+    "passed": 21,
+    "pass_rate": 1.0,
+    "cost_usd": 0.029921,
+    "by_category": {
+      "team": {
+        "total": 21,
+        "passed": 21,
+        "pass_rate": 1.0
+      }
+    },
+    "by_mast": {
+      "by_group": {
+        "FC2": {
+          "total": 9,
+          "passed": 9,
+          "pass_rate": 1.0
+        },
+        "FC3": {
+          "total": 9,
+          "passed": 9,
+          "pass_rate": 1.0
+        },
+        "FC1": {
+          "total": 3,
+          "passed": 3,
+          "pass_rate": 1.0
+        }
+      },
+      "by_mode": {
+        "2.5": {
+          "total": 6,
+          "passed": 6,
+          "pass_rate": 1.0
+        },
+        "3.2": {
+          "total": 9,
+          "passed": 9,
+          "pass_rate": 1.0
+        },
+        "2.3": {
+          "total": 3,
+          "passed": 3,
+          "pass_rate": 1.0
+        },
+        "1.2": {
+          "total": 3,
+          "passed": 3,
+          "pass_rate": 1.0
+        }
+      }
+    },
+    "shape_score_mean": 0.7738,
+    "shape_score_by_case": {
+      "collab_p1_multi_object_compare": 0.9167,
+      "collab_p2_depth_writing": 0.6667,
+      "collab_p3_build_tool": 1.0,
+      "collab_p4_open_decision": 1.0,
+      "collab_p5_creative_options": 0.3333,
+      "collab_p6_review_diagnose": 0.5555,
+      "collab_p7_composite_plan": 0.9444
+    }
+  },
+  "cases": [
+    {
+      "case_id": "collab_p1_multi_object_compare",
+      "category": "team",
+      "mast": "2.5",
+      "passed": true,
+      "shape_score": 0.75,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=0.75 (阈 0.60); has_join=0.00, min_roles=1.00, min_workers=1.00, parallel_fanout_min=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 3,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "OpenAI 研究员",
+          "Google 研究员",
+          "Anthropic 研究员",
+          "Meta 研究员",
+          "汇总分析员"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_72f731bf-f7a3-41cb-b8f8-1a62c8cced74_1",
+            "role": "OpenAI 研究员",
+            "task": "调研 OpenAI 在大模型领域的现状。需要覆盖：1）公司定位/战略方向（如 AGI 路线、商业 vs 研究导向）；2）核心大模型产品线（如 GPT-4o、o3、GPT-Rosalind 等最新模型，ChatGPT 产品）；3）开放程度（闭源/API 开放策略、开源情况、开发者生态）。请基于 web_search 获取最新信息并给出客观、结构化描述。",
+            "depends_on": [],
+            "parent_run_id": "e20ddaf5-2c1a-47de-88f6-a66a9439f272"
+          },
+          {
+            "id": "del_72f731bf-f7a3-41cb-b8f8-1a62c8cced74_2",
+            "role": "Google 研究员",
+            "task": "调研 Google (DeepMind) 在大模型领域的现状。需要覆盖：1）公司定位/战略方向（如 AI-first、搜索结合、多模态）；2）核心大模型产品线（如 Gemini 系列模型、Gemini 应用、Google AI 生态整合）；3）开放程度（闭源/API、开源情况如 Gemma 系列、开发者生态）。请基于 web_search 获取最新信息并给出客观、结构化描述。",
+            "depends_on": [],
+            "parent_run_id": "e20ddaf5-2c1a-47de-88f6-a66a9439f272"
+          },
+          {
+            "id": "del_72f731bf-f7a3-41cb-b8f8-1a62c8cced74_3",
+            "role": "Anthropic 研究员",
+            "task": "调研 Anthropic 在大模型领域的现状。需要覆盖：1）公司定位/战略方向（如 AI 安全、可解释性、有益 AI）；2）核心大模型产品线（如 Claude 系列各代模型、Claude 应用产品）；3）开放程度（闭源/API 策略、安全研究透明度、是否有开源组件）。请基于 web_search 获取最新信息并给出客观、结构化描述。",
+            "depends_on": [],
+            "parent_run_id": "e20ddaf5-2c1a-47de-88f6-a66a9439f272"
+          },
+          {
+            "id": "del_72f731bf-f7a3-41cb-b8f8-1a62c8cced74_4",
+            "role": "Meta 研究员",
+            "task": "调研 Meta (Facebook) 在大模型领域的现状。需要覆盖：1）公司定位/战略方向（如开源领先、AI 研究、元宇宙/AI 结合）；2）核心大模型产品线（如 Llama 系列开源模型、Meta AI 应用）；3）开放程度（开源核心策略、许可证模式、开发者社区生态）。请基于 web_search 获取最新信息并给出客观、结构化描述。",
+            "depends_on": [],
+            "parent_run_id": "e20ddaf5-2c1a-47de-88f6-a66a9439f272"
+          },
+          {
+            "id": "del_72f731bf-f7a3-41cb-b8f8-1a62c8cced74_5",
+            "role": "汇总分析员",
+            "task": "汇总前面四位调研员的产出（OpenAI / Google / Anthropic / Meta），完成以下交付：\n1. 一张横向对比表，维度包括：公司定位/战略、核心模型产品、主要面向的客户/场景、开放程度（开源 vs API 等）、开发者生态策略。\n2. 指出每家最明显的差异亮点（1-2 条），即与其他三家形成最大区分度的特征。\n3. 整体呈现为条理清晰、可直接阅读的报告。\n注意：不要逐字重复各调研员的全文，而是提炼对比。",
+            "depends_on": [],
+            "parent_run_id": "e20ddaf5-2c1a-47de-88f6-a66a9439f272"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "delegate"
+        ],
+        "citations": 24,
+        "usage": {
+          "input": 49612,
+          "output": 2171,
+          "reasoning": 600
+        },
+        "cost_usd": 0.00304,
+        "latency_ms": 24951,
+        "error": null,
+        "content_preview": "信息已够用。这是一个标准的广度调查任务——4 家公司可并行调研，我来组队执行。\n\n[plan-only] 已记录计划（5 节点），跳过执行。"
+      }
+    },
+    {
+      "case_id": "collab_p1_multi_object_compare",
+      "category": "team",
+      "mast": "2.5",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); has_join=1.00, min_roles=1.00, min_workers=1.00, parallel_fanout_min=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "OpenAI 研究员",
+          "Google 研究员",
+          "Anthropic 研究员",
+          "Meta 研究员",
+          "汇总对比员"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_84d627ce-96f8-44da-85bc-e7e548b76439_openai",
+            "role": "OpenAI 研究员",
+            "task": "调研 OpenAI 在大模型领域的核心产品、定位与开放程度。需要覆盖：最新旗舰模型（GPT-4o 系列等）、API 产品体系、定价模式、开源/闭源策略、生态布局（如 ChatGPT 第三方应用/插件/Agent）。产出应包含关键事实与数据，引用可靠来源。",
+            "depends_on": [],
+            "parent_run_id": "fa16be52-5642-4abf-88ee-c003746781ca"
+          },
+          {
+            "id": "del_84d627ce-96f8-44da-85bc-e7e548b76439_google",
+            "role": "Google 研究员",
+            "task": "调研 Google/DeepMind 在大模型领域的核心产品、定位与开放程度。需要覆盖：Gemini 系列模型（Gemini 2.5 Pro/Flash 等）、Google AI Studio、Vertex AI 平台、开放策略（模型权重、研究论文）、与 Android/搜索等生态的整合。产出应包含关键事实与数据，引用可靠来源。",
+            "depends_on": [],
+            "parent_run_id": "fa16be52-5642-4abf-88ee-c003746781ca"
+          },
+          {
+            "id": "del_84d627ce-96f8-44da-85bc-e7e548b76439_anthropic",
+            "role": "Anthropic 研究员",
+            "task": "调研 Anthropic 在大模型领域的核心产品、定位与开放程度。需要覆盖：Claude 系列模型（Claude 3.5 Sonnet/Haiku/Opus、Claude 4 等最新进展）、API 产品、安全与对齐策略、企业级功能（Claude Code、Projects）、是否开源。产出应包含关键事实与数据，引用可靠来源。",
+            "depends_on": [],
+            "parent_run_id": "fa16be52-5642-4abf-88ee-c003746781ca"
+          },
+          {
+            "id": "del_84d627ce-96f8-44da-85bc-e7e548b76439_meta",
+            "role": "Meta 研究员",
+            "task": "调研 Meta 在大模型领域的核心产品、定位与开放程度。需要覆盖：Llama 系列（Llama 3/4 等最新进展）、开源 vs 开放权重策略、Research 导向 vs 产品化、与 Meta 社交生态的整合（如 Meta AI 助手）。产出应包含关键事实与数据，引用可靠来源。",
+            "depends_on": [],
+            "parent_run_id": "fa16be52-5642-4abf-88ee-c003746781ca"
+          },
+          {
+            "id": "del_84d627ce-96f8-44da-85bc-e7e548b76439_run_4",
+            "role": "汇总对比员",
+            "task": "将四位调研员各自的产出整合成一份横向可比的对照表。需要：\n1. 先列出每家分别的定位、核心产品、开放程度（各一段）\n2. 再输出一个 Markdown 表格，横轴为四家公司，纵轴为对比维度（定位、旗舰模型、API 开放度、开源策略、生态布局、差异化亮点等）\n3. 最后指出各自最明显的差异亮点（每家用一两句话概括）\n\n确保内容中的事实数据与各调研员的产出一致，不要编造数据。",
+            "depends_on": [
+              "del_84d627ce-96f8-44da-85bc-e7e548b76439_openai",
+              "del_84d627ce-96f8-44da-85bc-e7e548b76439_google",
+              "del_84d627ce-96f8-44da-85bc-e7e548b76439_anthropic",
+              "del_84d627ce-96f8-44da-85bc-e7e548b76439_meta"
+            ],
+            "parent_run_id": "fa16be52-5642-4abf-88ee-c003746781ca"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "delegate"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 13911,
+          "output": 1253,
+          "reasoning": 440
+        },
+        "cost_usd": 0.000402,
+        "latency_ms": 15243,
+        "error": null,
+        "content_preview": "[plan-only] 已记录计划（5 节点），跳过执行。"
+      }
+    },
+    {
+      "case_id": "collab_p1_multi_object_compare",
+      "category": "team",
+      "mast": "2.5",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); has_join=1.00, min_roles=1.00, min_workers=1.00, parallel_fanout_min=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "调研员 - OpenAI",
+          "调研员 - Google/DeepMind",
+          "调研员 - Anthropic",
+          "调研员 - Meta",
+          "汇总分析师"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_263a61c8-e3e1-4fe3-b143-c0a2bf97125d_openai",
+            "role": "调研员 - OpenAI",
+            "task": "调研 OpenAI 在大模型产品上的最新情况，涵盖以下维度：\n1. **定位**：公司对自身在大模型领域的定位是什么？（如 AGI 路线、平台型 vs 模型提供商等）\n2. **核心产品**：列出主力大模型（GPT-4o, o1/o3 等推理模型、DALL·E、Sora 等）及关键产品（ChatGPT 订阅层、API 等）。注意区分已发布产品和在研/预告产品。\n3. **开放程度**：闭源/开源策略（如是否开源模型权重、API 可访问性、是否有开源生态等）。\n4. **近半年重要动态**（2026 年 1 月至今）。\n\n请基于公开可查来源，给出明确事实和引用。",
+            "depends_on": [],
+            "parent_run_id": "e9b1e924-a0a7-49ce-a2fb-fc0499d4edd8"
+          },
+          {
+            "id": "del_263a61c8-e3e1-4fe3-b143-c0a2bf97125d_google",
+            "role": "调研员 - Google/DeepMind",
+            "task": "调研 Google（含 DeepMind）在大模型产品上的最新情况，涵盖以下维度：\n1. **定位**：公司对自身在大模型领域的定位是什么？（如搜索+AI 整合、多模态路线、AI 基础设施等）\n2. **核心产品**：列出主力大模型（Gemini 系列、PaLM 演化、Gemma 等）及关键产品（Google AI Studio、Vertex AI、搜索整合等）。注意区分已发布产品和在研/预告产品。\n3. **开放程度**：闭源/开源策略（如 Gemma 开源系列、Gemini 闭源、API 访问等）。\n4. **近半年重要动态**（2026 年 1 月至今）。\n\n请基于公开可查来源，给出明确事实和引用。",
+            "depends_on": [],
+            "parent_run_id": "e9b1e924-a0a7-49ce-a2fb-fc0499d4edd8"
+          },
+          {
+            "id": "del_263a61c8-e3e1-4fe3-b143-c0a2bf97125d_anthropic",
+            "role": "调研员 - Anthropic",
+            "task": "调研 Anthropic 在大模型产品上的最新情况，涵盖以下维度：\n1. **定位**：公司对自身在大模型领域的定位是什么？（如 AI 安全、可解释性、Claude 系列等）\n2. **核心产品**：列出主力大模型（Claude 3.5/4/Opus/Sonnet/Haiku 等）及关键产品（Claude 订阅、API、Claude Code 等）。注意区分已发布产品和在研/预告产品。\n3. **开放程度**：闭源/开源策略（是否开源、API 可访问性、安全研究透明性等）。\n4. **近半年重要动态**（2026 年 1 月至今）。\n\n请基于公开可查来源，给出明确事实和引用。",
+            "depends_on": [],
+            "parent_run_id": "e9b1e924-a0a7-49ce-a2fb-fc0499d4edd8"
+          },
+          {
+            "id": "del_263a61c8-e3e1-4fe3-b143-c0a2bf97125d_meta",
+            "role": "调研员 - Meta",
+            "task": "调研 Meta（Facebook）在大模型产品上的最新情况，涵盖以下维度：\n1. **定位**：公司对自身在大模型领域的定位是什么？（如开源路线、研究导向、AI 与社会等）\n2. **核心产品**：列出主力大模型（Llama 系列，含 Llama 4 等）及关键产品/平台。注意区分已发布产品和在研/预告产品。\n3. **开放程度**：开源/闭源策略（Llama 的开源定义分歧、许可协议限制、社区生态等）。\n4. **近半年重要动态**（2026 年 1 月至今）。\n\n请基于公开可查来源，给出明确事实和引用。",
+            "depends_on": [],
+            "parent_run_id": "e9b1e924-a0a7-49ce-a2fb-fc0499d4edd8"
+          },
+          {
+            "id": "del_263a61c8-e3e1-4fe3-b143-c0a2bf97125d_summarizer",
+            "role": "汇总分析师",
+            "task": "根据以下 4 份调研员产出（openai, google, anthropic, meta），完成以下交付：\n1. 做一张**横向可比的对照表**，覆盖四家公司在「定位」「核心产品线」「开放程度」「差异化亮点」等维度。\n2. 在对照表下方，用一段话分别指出**每家最明显的差异亮点**（即与另外三家最不同的关键特征）。\n3. 文件落盘为 `llm_landscape_comparison.md`，格式为 GitHub 风格 Markdown，清晰美观。\n\n对照表结构参考：\n| 维度 | OpenAI | Google | Anthropic | Meta |\n|------|--------|--------|-----------|------|\n\n确保数据准确，基于调研员的实际产出，不要编造。",
+            "depends_on": [
+              "del_263a61c8-e3e1-4fe3-b143-c0a2bf97125d_openai",
+              "del_263a61c8-e3e1-4fe3-b143-c0a2bf97125d_google",
+              "del_263a61c8-e3e1-4fe3-b143-c0a2bf97125d_anthropic",
+              "del_263a61c8-e3e1-4fe3-b143-c0a2bf97125d_meta"
+            ],
+            "parent_run_id": "e9b1e924-a0a7-49ce-a2fb-fc0499d4edd8"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "delegate"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 13911,
+          "output": 1822,
+          "reasoning": 479
+        },
+        "cost_usd": 0.000561,
+        "latency_ms": 19338,
+        "error": null,
+        "content_preview": "[plan-only] 已记录计划（5 节点），跳过执行。"
+      }
+    },
+    {
+      "case_id": "collab_p2_depth_writing",
+      "category": "team",
+      "mast": "3.2",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); independent_reviewer=1.00, min_roles=1.00, min_workers=1.00, parallel_fanout_min=1.00, pipeline_depth_min=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 2,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "调研员",
+          "提纲编辑",
+          "撰稿人",
+          "学术审校员"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_d3c58610-c0cb-4d51-aca9-9b817710d7f8_research_0",
+            "role": "调研员",
+            "task": "围绕主题【远程办公对个人职业发展的长期影响】，专门调研这一个子方向：薪资与晋升路径的变化。给出该子方向的关键事实 / 现状 / 证据，附来源（文件:行 或 链接）；聚焦本子方向、回报精炼结论而非整段原文，别铺开到其它角度。开始本子方向前先 read_notes 检查队友是否已覆盖；发现重要结论或关键数据点时用 post_note(kind=decision) 或 post_note(kind=heads_up) 分享给团队，避免重复劳动。",
+            "depends_on": [],
+            "parent_run_id": "689aa22b-997d-4e1c-9af4-2d875c9eb6b6"
+          },
+          {
+            "id": "del_d3c58610-c0cb-4d51-aca9-9b817710d7f8_research_1",
+            "role": "调研员",
+            "task": "围绕主题【远程办公对个人职业发展的长期影响】，专门调研这一个子方向：人脉网络与社交资本的积累。给出该子方向的关键事实 / 现状 / 证据，附来源（文件:行 或 链接）；聚焦本子方向、回报精炼结论而非整段原文，别铺开到其它角度。开始本子方向前先 read_notes 检查队友是否已覆盖；发现重要结论或关键数据点时用 post_note(kind=decision) 或 post_note(kind=heads_up) 分享给团队，避免重复劳动。",
+            "depends_on": [],
+            "parent_run_id": "689aa22b-997d-4e1c-9af4-2d875c9eb6b6"
+          },
+          {
+            "id": "del_d3c58610-c0cb-4d51-aca9-9b817710d7f8_research_2",
+            "role": "调研员",
+            "task": "围绕主题【远程办公对个人职业发展的长期影响】，专门调研这一个子方向：技能发展与自主学习效率。给出该子方向的关键事实 / 现状 / 证据，附来源（文件:行 或 链接）；聚焦本子方向、回报精炼结论而非整段原文，别铺开到其它角度。开始本子方向前先 read_notes 检查队友是否已覆盖；发现重要结论或关键数据点时用 post_note(kind=decision) 或 post_note(kind=heads_up) 分享给团队，避免重复劳动。",
+            "depends_on": [],
+            "parent_run_id": "689aa22b-997d-4e1c-9af4-2d875c9eb6b6"
+          },
+          {
+            "id": "del_d3c58610-c0cb-4d51-aca9-9b817710d7f8_research_3",
+            "role": "调研员",
+            "task": "围绕主题【远程办公对个人职业发展的长期影响】，专门调研这一个子方向：工作稳定性、倦怠与工作-生活边界。给出该子方向的关键事实 / 现状 / 证据，附来源（文件:行 或 链接）；聚焦本子方向、回报精炼结论而非整段原文，别铺开到其它角度。开始本子方向前先 read_notes 检查队友是否已覆盖；发现重要结论或关键数据点时用 post_note(kind=decision) 或 post_note(kind=heads_up) 分享给团队，避免重复劳动。",
+            "depends_on": [],
+            "parent_run_id": "689aa22b-997d-4e1c-9af4-2d875c9eb6b6"
+          },
+          {
+            "id": "del_d3c58610-c0cb-4d51-aca9-9b817710d7f8_research_4",
+            "role": "调研员",
+            "task": "围绕主题【远程办公对个人职业发展的长期影响】，专门调研这一个子方向：长期职业竞争力与行业趋势。给出该子方向的关键事实 / 现状 / 证据，附来源（文件:行 或 链接）；聚焦本子方向、回报精炼结论而非整段原文，别铺开到其它角度。开始本子方向前先 read_notes 检查队友是否已覆盖；发现重要结论或关键数据点时用 post_note(kind=decision) 或 post_note(kind=heads_up) 分享给团队，避免重复劳动。",
+            "depends_on": [],
+            "parent_run_id": "689aa22b-997d-4e1c-9af4-2d875c9eb6b6"
+          },
+          {
+            "id": "del_d3c58610-c0cb-4d51-aca9-9b817710d7f8_outline",
+            "role": "提纲编辑",
+            "task": "综合上游各路调研，为主题【远程办公对个人职业发展的长期影响】拟一份报告提纲，面向读者：大众读者（非学术背景，关注自身职业发展的人群）：列出章节结构与每节要点。据证据定结构（别凭空先写死），确保覆盖各调研方向、无重复无缺口。",
+            "depends_on": [
+              "del_d3c58610-c0cb-4d51-aca9-9b817710d7f8_research_0",
+              "del_d3c58610-c0cb-4d51-aca9-9b817710d7f8_research_1",
+              "del_d3c58610-c0cb-4d51-aca9-9b817710d7f8_research_2",
+              "del_d3c58610-c0cb-4d51-aca9-9b817710d7f8_research_3",
+              "del_d3c58610-c0cb-4d51-aca9-9b817710d7f8_research_4"
+            ],
+            "parent_run_id": "689aa22b-997d-4e1c-9af4-2d875c9eb6b6"
+          },
+          {
+            "id": "del_d3c58610-c0cb-4d51-aca9-9b817710d7f8_write",
+            "role": "撰稿人",
+            "task": "严格按上游定稿的提纲、结合各路调研，写成files。忠于调研事实与来源、不杜撰；成篇文字交付写成 .md 并用 file_write 落盘工作区。",
+            "depends_on": [
+              "del_d3c58610-c0cb-4d51-aca9-9b817710d7f8_outline"
+            ],
+            "parent_run_id": "689aa22b-997d-4e1c-9af4-2d875c9eb6b6"
+          },
+          {
+            "id": "del_d3c58610-c0cb-4d51-aca9-9b817710d7f8_review",
+            "role": "学术审校员",
+            "task": "对上游成稿做学术审校（files）：核查学术准确性、逻辑完整性与引用规范；指出具体问题并给出可操作的修改建议，不重写全文。",
+            "depends_on": [
+              "del_d3c58610-c0cb-4d51-aca9-9b817710d7f8_write"
+            ],
+            "parent_run_id": "689aa22b-997d-4e1c-9af4-2d875c9eb6b6"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "consult_skill",
+          "delegate"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 32689,
+          "output": 2263,
+          "reasoning": 2019
+        },
+        "cost_usd": 0.001241,
+        "latency_ms": 26860,
+        "error": null,
+        "content_preview": "[plan-only] 已记录计划（8 节点），跳过执行。"
+      }
+    },
+    {
+      "case_id": "collab_p2_depth_writing",
+      "category": "team",
+      "mast": "3.2",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); independent_reviewer=1.00, min_roles=1.00, min_workers=1.00, parallel_fanout_min=1.00, pipeline_depth_min=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "max_rounds",
+        "rounds": 4,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "调研员 - 薪资与晋升方向",
+          "调研员 - 人脉与社交资本方向",
+          "调研员 - 技能发展与职业流动性方向",
+          "调研员 - 工作安全与心理健康方向",
+          "深度报告撰稿人",
+          "独立审校编辑",
+          "报告修订专员"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_dbe8b718-b248-41f8-a82c-3a9e2ddb27be_research1",
+            "role": "调研员 - 薪资与晋升方向",
+            "task": "搜索国内外关于远程办公对薪资、晋升、绩效评估影响的权威研究与数据。重点关注：远程员工 vs 办公室员工的晋升率差异、薪资增长差距、绩效评估偏见（ proximity bias ）、以及不同行业/职级的差异化影响。请找到至少 5 个可信来源（学术论文、权威机构报告、大型调查数据），给出每条发现的精炼结论 + 来源链接。交付为中文。",
+            "depends_on": [],
+            "parent_run_id": "b93baaa8-dffe-41d5-a4c2-0e88c102231d"
+          },
+          {
+            "id": "del_dbe8b718-b248-41f8-a82c-3a9e2ddb27be_research2",
+            "role": "调研员 - 人脉与社交资本方向",
+            "task": "搜索远程办公对职场人脉、社交资本、导师关系（mentorship）、信息获取渠道影响的权威研究。重点关注：远程工作如何影响弱连接与强连接的建立、跨部门可见度、非正式学习（watercooler effect）、以及职场政治参与度。找到至少 5 个可信来源（学术论文、权威机构报告、调查数据），给出每条发现的精炼结论 + 来源链接。交付为中文。",
+            "depends_on": [],
+            "parent_run_id": "b93baaa8-dffe-41d5-a4c2-0e88c102231d"
+          },
+          {
+            "id": "del_dbe8b718-b248-41f8-a82c-3a9e2ddb27be_research3",
+            "role": "调研员 - 技能发展与职业流动性方向",
+            "task": "搜索远程办公对个人技能发展、学习机会、工作自主性以及职业流动性的影响。重点关注：远程员工获取新技能的机会是否受限、跨职能学习的渠道变化、远程工作对跳槽/转型的影响、以及自主性提升带来的正面职业效应。找到至少 5 个可信来源（学术论文、权威机构报告、调查数据），给出每条发现的精炼结论 + 来源链接。交付为中文。",
+            "depends_on": [],
+            "parent_run_id": "b93baaa8-dffe-41d5-a4c2-0e88c102231d"
+          },
+          {
+            "id": "del_dbe8b718-b248-41f8-a82c-3a9e2ddb27be_research4",
+            "role": "调研员 - 工作安全与心理健康方向",
+            "task": "搜索远程办公对工作安全感、职业倦怠、心理健康以及工作生活边界的影响。重点关注：远程员工是否更容易被裁员、归属感变化、孤独感对职业动力的影响、以及远程与混合模式对长期职业可持续性的作用。找到至少 5 个可信来源（学术论文、权威机构报告、调查数据），给出每条发现的精炼结论 + 来源链接。交付为中文。",
+            "depends_on": [],
+            "parent_run_id": "b93baaa8-dffe-41d5-a4c2-0e88c102231d"
+          },
+          {
+            "id": "del_dbe8b718-b248-41f8-a82c-3a9e2ddb27be_writer",
+            "role": "深度报告撰稿人",
+            "task": "基于调研员的发现，撰写一篇面向大众的深度报告：《远程办公对个人职业发展的长期影响》。\n\n写作要求：\n1. 受众：普通职场人士（非学术读者），语言深入浅出、有叙事感\n2. 必须有证据支撑——在文中恰当引用调研发现，标注来源\n3. 结构清晰，建议包含但不限于：薪资与晋升的现实差距、人脉与可见度的隐性成本、技能发展与职业流动性的双面性、工作安全感的微妙变化、如何主动管理远程职业发展（行动建议）\n4. 保持客观平衡——既呈现风险也呈现机遇，不偏激\n5. 篇幅：3000-5000 字中文\n6. 报告文件存为 remote_work_career_report.md，Markdown 格式，文件头加标题和摘要\n\n你需要先读工作区中调研员们的交付内容（它们会作为上游产出注入到你的上下文中），据此写作。",
+            "depends_on": [
+              "del_dbe8b718-b248-41f8-a82c-3a9e2ddb27be_research1",
+              "del_dbe8b718-b248-41f8-a82c-3a9e2ddb27be_research2",
+              "del_dbe8b718-b248-41f8-a82c-3a9e2ddb27be_research3",
+              "del_dbe8b718-b248-41f8-a82c-3a9e2ddb27be_research4"
+            ],
+            "parent_run_id": "b93baaa8-dffe-41d5-a4c2-0e88c102231d"
+          },
+          {
+            "id": "del_dbe8b718-b248-41f8-a82c-3a9e2ddb27be_reviewer",
+            "role": "独立审校编辑",
+            "task": "审校远程办公职业影响深度报告（remote_work_career_report.md）。\n\n审校维度：\n- 证据质量：断言是否有可靠来源支撑？来源标注是否充分？\n- 逻辑一致性：论点之间是否自洽？有没有自相矛盾处？\n- 结构清晰度：章节安排是否合理？段落过渡是否自然？\n- 语言与可读性：是否适合大众读者？有无表述不清或学术化过重处？\n- 覆盖完整性：是否遗漏了重要维度？\n\n输出格式严格遵循 JSON，只输出 JSON 对象，不附带任何说明文字：\n{\n  \"score\": <0-10 整数，综合评分>,\n  \"problems\": [\n    {\"severity\": \"high|medium|low\", \"description\": \"具体问题描述\", \"evidence\": \"问题所在位置（可引用原文或段落）\"}\n  ],\n  \"suggestions\": [\n    {\"description\": \"具体修改建议\"}\n  ]\n}\n\n你需要先读工作区中的 remote_work_career_report.md 文件再审查。",
+            "depends_on": [
+              "del_dbe8b718-b248-41f8-a82c-3a9e2ddb27be_writer"
+            ],
+            "parent_run_id": "b93baaa8-dffe-41d5-a4c2-0e88c102231d"
+          },
+          {
+            "id": "del_dbe8b718-b248-41f8-a82c-3a9e2ddb27be_reviser",
+            "role": "报告修订专员",
+            "task": "根据独立审校编辑的审查意见，修订远程办公职业影响深度报告（remote_work_career_report.md）。\n\n审校员的 JSON 审查报告会作为上游产出注入到你的上下文中。\n\n修订要求：\n1. 读取工作区中的 remote_work_career_report.md\n2. 读取审校意见（已注入到你的上下文）\n3. 逐一回应每个 problem 和 suggestion，修改报告中对应内容\n4. 在文件末尾添加一段「修订说明」，用表格形式列出：问题摘要 | 如何修改 | 修改位置\n5. 再次写回 remote_work_career_report.md，覆盖原文件\n\n注意：保持原文的整体结构和风格，只改进有问题的部分。",
+            "depends_on": [
+              "del_dbe8b718-b248-41f8-a82c-3a9e2ddb27be_reviewer"
+            ],
+            "parent_run_id": "b93baaa8-dffe-41d5-a4c2-0e88c102231d"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "consult_skill",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "delegate"
+        ],
+        "citations": 18,
+        "usage": {
+          "input": 75801,
+          "output": 5295,
+          "reasoning": 3425
+        },
+        "cost_usd": 0.002805,
+        "latency_ms": 67907,
+        "error": null,
+        "content_preview": "好，调研方向清楚了——相关研究需要深度检索，这正是团队该干的活。现在组队。\n\n采用**证据驱动流水线**：4 路并行调研 → 综合写作 → 独立审校 → 原作者修订，一次委派全部串通。\n\n[plan-only] 已记录计划（7 节点），跳过执行。"
+      }
+    },
+    {
+      "case_id": "collab_p2_depth_writing",
+      "category": "team",
+      "mast": "3.2",
+      "passed": true,
+      "shape_score": 0.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": false,
+          "detail": "delegated=False",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": false,
+          "detail": "score=0.00 (阈 0.60); no plan (delegated=False)",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "max_rounds",
+        "rounds": 4,
+        "delegated": false,
+        "roster": [],
+        "plan_runs": [],
+        "plan_type": null,
+        "collab_interactions": {},
+        "tool_calls": [
+          "consult_skill",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "delegate"
+        ],
+        "citations": 24,
+        "usage": {
+          "input": 92246,
+          "output": 7049,
+          "reasoning": 3440
+        },
+        "cost_usd": 0.005651,
+        "latency_ms": 87533,
+        "error": null,
+        "content_preview": ""
+      }
+    },
+    {
+      "case_id": "collab_p3_build_tool",
+      "category": "team",
+      "mast": "3.2",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); independent_reviewer=1.00, min_roles=1.00, min_workers=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 2,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "Python 开发者",
+          "独立验证者"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_79ef67ce-90a9-4444-8720-c9342483b6f8_dev",
+            "role": "Python 开发者",
+            "task": "编写一个可运行的 Python 脚本 `chinese_text_stats.py`，实现中文文本统计功能。\n\n**功能需求：**\n1. 统计总字符数（含空格和标点）\n2. 统计汉字数（仅中文字符，不含标点、空格、英文字母、数字）\n3. 统计总句数（按句号「。」问号「？」感叹号「！」省略号「……」「...」以及换行分割）\n4. 使用 jieba 分词，统计词频，输出出现次数最多的 10 个词（过滤掉停用词和单字词，仅保留长度 ≥ 2 的词）\n\n**使用方式（至少支持一种）：**\n- 从命令行参数读取文本：`python chinese_text_stats.py \"待统计的文本\"`\n- 或从文件读取：`python chinese_text_stats.py -f input.txt`\n\n**输出格式示例：**\n```\n===== 统计结果 =====\n总字符数：128\n汉字数：85\n总句数：6\n\n词频 TOP10：\n  1. 我们 (5次)\n  2. 数据 (4次)\n  ...\n```\n\n**技术要求：**\n- 在脚本开头自动检测并安装 jieba（`pip install jieba -q`），确保用户拿到就能直接跑\n- 有 `if __name__ == \"__main__\":` 入口\n- 代码加中文注释\n- 脚本应附带一段测试用的示例文本（在代码里作为常量或注释给出）\n\n**交付：** 文件写入工作区根目录 `chinese_text_stats.py`",
+            "depends_on": [],
+            "parent_run_id": "201b66a8-d35a-432d-b9c5-8a87cff86d98"
+          },
+          {
+            "id": "del_79ef67ce-90a9-4444-8720-c9342483b6f8_verify",
+            "role": "独立验证者",
+            "task": "验证 `chinese_text_stats.py` 能否正确运行。\n\n**验证步骤：**\n1. 读取 `chinese_text_stats.py` 了解其用法\n2. 创建一个测试文本文件（包含多种句子和词汇的中文文本，至少 5 句）\n3. 用 jieba 分词库运行该脚本（支持 -f 文件模式和直接传入字符串两种方式）\n4. 检查输出是否包含：总字符数、汉字数、总句数、词频 TOP10\n5. 手动验算其中至少一项（如句数或TOP1的词频）确认统计正确\n6. 记录验证结论\n\n**约束：** 如果脚本运行出错，先尝试修复（安装缺少的依赖等），记录遇到的问题；实在无法修复时详细说明错误。",
+            "depends_on": [
+              "del_79ef67ce-90a9-4444-8720-c9342483b6f8_dev"
+            ],
+            "parent_run_id": "201b66a8-d35a-432d-b9c5-8a87cff86d98"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "consult_skill",
+          "delegate"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 32910,
+          "output": 2648,
+          "reasoning": 1788
+        },
+        "cost_usd": 0.001345,
+        "latency_ms": 32233,
+        "error": null,
+        "content_preview": "任务很清晰：一个 Python 中文文本统计脚本，需要**独立验证者真跑通**再交付。按「开发 → 独立验证」流水线组队。\n\n[plan-only] 已记录计划（2 节点），跳过执行。"
+      }
+    },
+    {
+      "case_id": "collab_p3_build_tool",
+      "category": "team",
+      "mast": "3.2",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); independent_reviewer=1.00, min_roles=1.00, min_workers=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 2,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "Python 开发者",
+          "独立验证者"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_890c657f-ee55-4394-b0e5-c50c9afedd9c_dev",
+            "role": "Python 开发者",
+            "task": "写一个中文文本统计命令行工具脚本 text_stats.py，交付物为文件。\n\n## 功能要求\n接受两种输入方式：\n1. 无参数运行时，使用内置演示文本\n2. 从命令行参数传入文本（如 `python text_stats.py \"待统计的中文文本\"`）或从标准输入读取\n\n对文本输出以下三项统计：\n- **字数统计**：分别输出「总字符数」（含标点、空格、换行）和「汉字数」（仅中文字符，Unicode \\u4e00-\\u9fff 范围）\n- **句数统计**：以句号（。）、问号（？）、感叹号（！）、省略号（……）、分号（；）作为句子结束标志（连续多个结束符只计一句），输出总句数\n- **词频 TOP 10**：使用 jieba 分词，过滤掉常用停用词（如 的、了、是、在、我、有、和、就、不、人、都、一、一个、上、也、很、到、说、要、去、你、会、着、没有、看、好、自己、这、他、她、它、们 等冠词/代词/介词/连词/助词），列出出现频率最高的 10 个词及其频次，按频次降序排列\n\n## 技术约束\n- 使用 Python 3，仅依赖标准库 + jieba（`pip install jieba`）\n- 脚本开头加上 `#!/usr/bin/env python3` shebang\n- 输出格式清晰，用 --- 分隔不同统计区块，中文展示\n- 内置一段至少 200 字的演示文本（任意中文段落）\n- 内置一个简单的停用词列表（硬编码在脚本中，至少包含上述示例停用词）\n\n## 交付\n- 文件写入工作区根目录：text_stats.py\n- 确保脚本可直接运行",
+            "depends_on": [],
+            "parent_run_id": "adce5f2b-afe8-493e-a53c-dc8b5ca49264"
+          },
+          {
+            "id": "del_890c657f-ee55-4394-b0e5-c50c9afedd9c_verifier",
+            "role": "独立验证者",
+            "task": "验证 text_stats.py 能否正确运行并输出合理结果。depends_on dev 的产出。\n\n## 验证步骤\n1. 先运行 `pip install jieba` 确保依赖已安装\n2. 运行 `python text_stats.py`（无参数，使用内置演示文本），检查输出\n3. 运行 `python text_stats.py \"今天天气真好，我们去公园散步吧。你吃饭了吗？\"`（命令行传参），检查输出\n4. 运行 `echo \"你好！今天是个好日子。祝你开心。\" | python text_stats.py`（标准输入），检查输出\n\n## 核验要点\n- 字数统计是否合理（汉字数应 ≤ 总字符数）\n- 句数是否准确（根据句号、问号、感叹号计数）\n- TOP 10 词频是否按降序排列、频次是否合理\n- 停用词（如 的、了、是、在 等）不应出现在 TOP 10 中\n- 三种输入方式均正常工作\n\n## 若发现问题\n直接修改 text_stats.py 修复问题，然后重新运行验证。\n\n## 交付\n- 在回复中输出验证报告，说明每项测试的结果（通过/失败/修复）\n- 最终工作区中的 text_stats.py 必须是经过验证、可正常运行的版本",
+            "depends_on": [
+              "del_890c657f-ee55-4394-b0e5-c50c9afedd9c_dev"
+            ],
+            "parent_run_id": "adce5f2b-afe8-493e-a53c-dc8b5ca49264"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "delegate",
+          "delegate"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 29697,
+          "output": 3705,
+          "reasoning": 1807
+        },
+        "cost_usd": 0.001402,
+        "latency_ms": 42297,
+        "error": null,
+        "content_preview": "[plan-only] 已记录计划（2 节点），跳过执行。"
+      }
+    },
+    {
+      "case_id": "collab_p3_build_tool",
+      "category": "team",
+      "mast": "3.2",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); independent_reviewer=1.00, min_roles=1.00, min_workers=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "Python 开发者",
+          "QA 验证者"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_447f2207-decd-4bfc-ae7f-4107d54b943e_dev",
+            "role": "Python 开发者",
+            "task": "写一个可运行的 Python 脚本 `count_words.py`，功能如下：\n\n1. 从命令行参数指定的文件读取中文文本；若无参数则从 stdin 读取（提示用户输入）\n2. 统计并输出：\n   - 中文字数（仅汉字字符，不含标点、空格、数字、英文字母）\n   - 句子数（以句号、问号、感叹号、省略号结尾的句子，支持中英文标点）\n   - 出现频率最高的 10 个词（需用 jieba 分词，过滤掉纯标点符号的词，按频次降序排列）\n3. 如果 jieba 未安装，自动提示用户 `pip install jieba` 后退出\n4. 输出格式清晰友好\n\n验收标准：\n- 文件名为 count_words.py，写入工作区根目录\n- 脚本语法无误，import 结构完整\n- 交付前自行用一段 200 字以上中文文本测试一次",
+            "depends_on": [],
+            "parent_run_id": "9863a09d-9498-48ad-be28-96aa97ef05ee"
+          },
+          {
+            "id": "del_447f2207-decd-4bfc-ae7f-4107d54b943e_val",
+            "role": "QA 验证者",
+            "task": "验证 `count_words.py` 可以真正运行并产出正确结果。\n\n验证步骤：\n1. 确认 count_words.py 已存在于工作区\n2. 若 jieba 未安装，先运行 `pip install jieba`\n3. 准备一段 300 字左右的中文测试文本（从新闻/文章中截取），写入临时文件 test_input.txt\n4. 运行 `python count_words.py test_input.txt`，确认：\n   - 程序无报错退出\n   - 输出了中文字数、句数、Top 10 词\n5. 人工核验结果合理性（字数大致匹配、句数合理、Top 10 词无纯标点）\n6. 如果发现 bug，直接修复脚本并注明修复了什么\n7. 输出验证报告（写在回复正文中，无需写文件），内容包括：测试文本来源、各统计结果、是否有修改、结论",
+            "depends_on": [
+              "del_447f2207-decd-4bfc-ae7f-4107d54b943e_dev"
+            ],
+            "parent_run_id": "9863a09d-9498-48ad-be28-96aa97ef05ee"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "delegate"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 13914,
+          "output": 2269,
+          "reasoning": 1636
+        },
+        "cost_usd": 0.000687,
+        "latency_ms": 22299,
+        "error": null,
+        "content_preview": "[plan-only] 已记录计划（2 节点），跳过执行。"
+      }
+    },
+    {
+      "case_id": "collab_p4_open_decision",
+      "category": "team",
+      "mast": "2.3",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); min_roles=1.00, min_workers=1.00, plan_types=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": true,
+        "roster": [
+          "主持人",
+          "Offer A 支持方",
+          "Offer B 支持方"
+        ],
+        "plan_runs": [
+          {
+            "id": "debate_73459479-e153-41bb-80b7-bcc1233247b9",
+            "role": "主持人",
+            "task": "主持正反辩论：面临两个职业Offer——大厂基础架构岗（A：薪资更高、加班多、平台大）与成长型公司AI应用岗（B：薪资略低、贴近兴趣、",
+            "depends_on": [],
+            "parent_run_id": "06ff4738-6a7c-4253-9911-43c3f6adb142"
+          },
+          {
+            "id": "debate_73459479-e153-41bb-80b7-bcc1233247b9_r1_offer_a",
+            "role": "Offer A 支持方",
+            "task": "你在一场【正反辩论】中代表「Offer A 支持方」。\n辩论命题：面临两个职业Offer——大厂基础架构岗（A：薪资更高、加班多、平台大）与成长型公司AI应用岗（B：薪资略低、贴近兴趣、发展空间大）——应当选择大厂基础架构岗（Offer A）\n你的立场 / 视角：支持选择大厂基础架构岗：强调大平台带来的职业背书、系统性技术训练、更高薪酬的复利效应、以及基础架构岗位在长期职业纵深上的不可替代性。加班虽多但早年积累的性价比最高。\n本轮议题：大平台积累 vs 兴趣赛道爆发\n（这是正反辩论：直接攻防，针锋相对地回应对方最强论点。）\n\n请就本轮议题给出有力、具体、有论据的论证（这是你的开场立论）：聚焦你最能站住的论点，用具体证据 / 例子 / 推理链支撑（必要时用 web_search / read_url 取证）；关键事实主张按【证据状态铁律】标注【已核实·出处】/【待核实·推断】。聚焦你最有力的 2–3 个论点、约 400–600 字讲透，宁深勿长——不堆砌、不面面俱到。\n【输出纪律·论点骨架】发言必须直接以第一个论点的 `### ` 短标题行开头（标题 ≤16 字、一句话点破主张）；【已核实/待核实】证据标记只放正文、不放标题。禁止「X方立论 / 开场立论」类总标题（界面已渲染方名与阶段）；禁止用加粗行（如 `**标题**`）冒充小节标题。按上文「2–3 个」论点口径展开，每个论点一块：`### 标题` + 正文。",
+            "depends_on": [],
+            "parent_run_id": "debate_73459479-e153-41bb-80b7-bcc1233247b9"
+          },
+          {
+            "id": "debate_73459479-e153-41bb-80b7-bcc1233247b9_r1_offer_b",
+            "role": "Offer B 支持方",
+            "task": "你在一场【正反辩论】中代表「Offer B 支持方」。\n辩论命题：面临两个职业Offer——大厂基础架构岗（A：薪资更高、加班多、平台大）与成长型公司AI应用岗（B：薪资略低、贴近兴趣、发展空间大）——应当选择大厂基础架构岗（Offer A）\n你的立场 / 视角：支持选择成长型公司AI应用岗：强调兴趣驱动下的自驱力溢价、AI赛道当前的高速增长窗口、成长型公司中个人影响力更大且晋升曲线更陡、薪资差距在股权增值和早期加入的窗口红利下可能被抹平甚至反超。\n本轮议题：大平台积累 vs 兴趣赛道爆发\n（这是正反辩论：直接攻防，针锋相对地回应对方最强论点。）\n\n请就本轮议题给出有力、具体、有论据的论证（这是你的开场立论）：聚焦你最能站住的论点，用具体证据 / 例子 / 推理链支撑（必要时用 web_search / read_url 取证）；关键事实主张按【证据状态铁律】标注【已核实·出处】/【待核实·推断】。聚焦你最有力的 2–3 个论点、约 400–600 字讲透，宁深勿长——不堆砌、不面面俱到。\n【输出纪律·论点骨架】发言必须直接以第一个论点的 `### ` 短标题行开头（标题 ≤16 字、一句话点破主张）；【已核实/待核实】证据标记只放正文、不放标题。禁止「X方立论 / 开场立论」类总标题（界面已渲染方名与阶段）；禁止用加粗行（如 `**标题**`）冒充小节标题。按上文「2–3 个」论点口径展开，每个论点一块：`### 标题` + 正文。",
+            "depends_on": [],
+            "parent_run_id": "debate_73459479-e153-41bb-80b7-bcc1233247b9"
+          }
+        ],
+        "plan_type": "debate",
+        "collab_interactions": {},
+        "tool_calls": [
+          "debate"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 13928,
+          "output": 757,
+          "reasoning": 473
+        },
+        "cost_usd": 0.000265,
+        "latency_ms": 13973,
+        "error": null,
+        "content_preview": "[plan-only] 已记录辩论计划，跳过辩手执行。"
+      }
+    },
+    {
+      "case_id": "collab_p4_open_decision",
+      "category": "team",
+      "mast": "2.3",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); min_roles=1.00, min_workers=1.00, plan_types=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": true,
+        "roster": [
+          "主持人",
+          "选 A - 大厂基础架构",
+          "选 B - AI 应用岗"
+        ],
+        "plan_runs": [
+          {
+            "id": "debate_1300d425-8018-481c-b4d6-be4f9dea806e",
+            "role": "主持人",
+            "task": "主持正反辩论：两个 offer 之间选哪个：A 一线大厂基础架构岗（薪资更高、加班多）vs B 成长型公司 AI 应用岗（薪资略低、更",
+            "depends_on": [],
+            "parent_run_id": "54f28d74-bc04-4dcb-9820-2d25a459ebac"
+          },
+          {
+            "id": "debate_1300d425-8018-481c-b4d6-be4f9dea806e_r1_pro_a",
+            "role": "选 A - 大厂基础架构",
+            "task": "你在一场【正反辩论】中代表「选 A - 大厂基础架构」。\n辩论命题：两个 offer 之间选哪个：A 一线大厂基础架构岗（薪资更高、加班多）vs B 成长型公司 AI 应用岗（薪资略低、更贴近兴趣）\n你的立场 / 视角：大厂基础架构岗虽然加班多，但薪资更高、平台资源强、技术壁垒深、履历背书扎实，长期回报与职业下限有保障。加班多正是高速成长的代价，反而是年轻时候积累资本的最佳窗口。兴趣可以在业余时间探索，但职业选择应该优先考虑平台和薪资的确定性。\n本轮议题：兴趣 vs 平台，哪个是更好起点？\n（这是正反辩论：直接攻防，针锋相对地回应对方最强论点。）\n\n请就本轮议题给出有力、具体、有论据的论证（这是你的开场立论）：聚焦你最能站住的论点，用具体证据 / 例子 / 推理链支撑（必要时用 web_search / read_url 取证）；关键事实主张按【证据状态铁律】标注【已核实·出处】/【待核实·推断】。聚焦你最有力的 2–3 个论点、约 400–600 字讲透，宁深勿长——不堆砌、不面面俱到。\n【输出纪律·论点骨架】发言必须直接以第一个论点的 `### ` 短标题行开头（标题 ≤16 字、一句话点破主张）；【已核实/待核实】证据标记只放正文、不放标题。禁止「X方立论 / 开场立论」类总标题（界面已渲染方名与阶段）；禁止用加粗行（如 `**标题**`）冒充小节标题。按上文「2–3 个」论点口径展开，每个论点一块：`### 标题` + 正文。",
+            "depends_on": [],
+            "parent_run_id": "debate_1300d425-8018-481c-b4d6-be4f9dea806e"
+          },
+          {
+            "id": "debate_1300d425-8018-481c-b4d6-be4f9dea806e_r1_con_b",
+            "role": "选 B - AI 应用岗",
+            "task": "你在一场【正反辩论】中代表「选 B - AI 应用岗」。\n辩论命题：两个 offer 之间选哪个：A 一线大厂基础架构岗（薪资更高、加班多）vs B 成长型公司 AI 应用岗（薪资略低、更贴近兴趣）\n你的立场 / 视角：兴趣驱动的职业路径才能走得远、走得稳。AI 应用现在是技术变革最剧烈的前沿，成长型公司意味着更早承担关键角色、更全面的技能锻炼。薪资的短期差距放在整个职业生涯里微不足道，而错失 AI 应用这一波浪潮的机会成本才是最大的。加班多的基础架构岗可能让你没有精力去发展真正的兴趣方向。\n本轮议题：兴趣 vs 平台，哪个是更好起点？\n（这是正反辩论：直接攻防，针锋相对地回应对方最强论点。）\n\n请就本轮议题给出有力、具体、有论据的论证（这是你的开场立论）：聚焦你最能站住的论点，用具体证据 / 例子 / 推理链支撑（必要时用 web_search / read_url 取证）；关键事实主张按【证据状态铁律】标注【已核实·出处】/【待核实·推断】。聚焦你最有力的 2–3 个论点、约 400–600 字讲透，宁深勿长——不堆砌、不面面俱到。\n【输出纪律·论点骨架】发言必须直接以第一个论点的 `### ` 短标题行开头（标题 ≤16 字、一句话点破主张）；【已核实/待核实】证据标记只放正文、不放标题。禁止「X方立论 / 开场立论」类总标题（界面已渲染方名与阶段）；禁止用加粗行（如 `**标题**`）冒充小节标题。按上文「2–3 个」论点口径展开，每个论点一块：`### 标题` + 正文。",
+            "depends_on": [],
+            "parent_run_id": "debate_1300d425-8018-481c-b4d6-be4f9dea806e"
+          }
+        ],
+        "plan_type": "debate",
+        "collab_interactions": {},
+        "tool_calls": [
+          "debate"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 13928,
+          "output": 516,
+          "reasoning": 149
+        },
+        "cost_usd": 0.000198,
+        "latency_ms": 14276,
+        "error": null,
+        "content_preview": "这是一个典型的职业决策难题，涉及大厂 vs 成长型、基础架构 vs AI 应用、高薪 vs 兴趣的多维取舍。我来发起一场结构化辩论帮你理清。\n\n[plan-only] 已记录辩论计划，跳过辩手执行。"
+      }
+    },
+    {
+      "case_id": "collab_p4_open_decision",
+      "category": "team",
+      "mast": "2.3",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); min_roles=1.00, min_workers=1.00, plan_types=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 2,
+        "delegated": true,
+        "roster": [
+          "主持人",
+          "选大厂 A（正方）",
+          "选成长型公司 B（反方）"
+        ],
+        "plan_runs": [
+          {
+            "id": "debate_c10e0c15-b567-49a7-8eda-d6f2fb4800ff",
+            "role": "主持人",
+            "task": "主持正反辩论：面对两个 offer——一线大厂基础架构岗（A，薪资更高但加班多）vs 成长型公司 AI 应用岗（B，薪资略低但贴近兴趣",
+            "depends_on": [],
+            "parent_run_id": "595bfbe4-66b8-40df-bdc1-3b0f1cda30d7"
+          },
+          {
+            "id": "debate_c10e0c15-b567-49a7-8eda-d6f2fb4800ff_r1_pro_A",
+            "role": "选大厂 A（正方）",
+            "task": "你在一场【正反辩论】中代表「选大厂 A（正方）」。\n辩论命题：面对两个 offer——一线大厂基础架构岗（A，薪资更高但加班多）vs 成长型公司 AI 应用岗（B，薪资略低但贴近兴趣），应该选择哪个？\n你的立场 / 视角：一线大厂基础架构岗拥有顶级平台背书、成熟技术体系、系统设计深度和长期职业安全感。在职业生涯早期先在大厂建立扎实的底层能力根基、积累人脉和品牌溢价，未来跳槽或转型时筹码更足。高薪资带来财务积累速度优势，对后续决策空间（创业、买房、深造）是实打实的弹药。\n本轮议题：大厂练功底 vs AI风口练应用\n（这是正反辩论：直接攻防，针锋相对地回应对方最强论点。）\n\n请就本轮议题给出有力、具体、有论据的论证（这是你的开场立论）：聚焦你最能站住的论点，用具体证据 / 例子 / 推理链支撑（必要时用 web_search / read_url 取证）；关键事实主张按【证据状态铁律】标注【已核实·出处】/【待核实·推断】。聚焦你最有力的 2–3 个论点、约 400–600 字讲透，宁深勿长——不堆砌、不面面俱到。\n【输出纪律·论点骨架】发言必须直接以第一个论点的 `### ` 短标题行开头（标题 ≤16 字、一句话点破主张）；【已核实/待核实】证据标记只放正文、不放标题。禁止「X方立论 / 开场立论」类总标题（界面已渲染方名与阶段）；禁止用加粗行（如 `**标题**`）冒充小节标题。按上文「2–3 个」论点口径展开，每个论点一块：`### 标题` + 正文。",
+            "depends_on": [],
+            "parent_run_id": "debate_c10e0c15-b567-49a7-8eda-d6f2fb4800ff"
+          },
+          {
+            "id": "debate_c10e0c15-b567-49a7-8eda-d6f2fb4800ff_r1_con_B",
+            "role": "选成长型公司 B（反方）",
+            "task": "你在一场【正反辩论】中代表「选成长型公司 B（反方）」。\n辩论命题：面对两个 offer——一线大厂基础架构岗（A，薪资更高但加班多）vs 成长型公司 AI 应用岗（B，薪资略低但贴近兴趣），应该选择哪个？\n你的立场 / 视角：AI 应用是当前和未来几年最大的技术风口，在成长型公司做 AI 应用岗能更早切入实际业务落地、拥有更大的职责范围和自主权，个人成长曲线更陡。贴近兴趣的工作意味着更高的投入度和创造力产出，长期来看兴趣驱动的专精路线反而可能跑赢被动吃苦的路径。期权价值和早期员工身份也值得纳入考量。\n本轮议题：大厂练功底 vs AI风口练应用\n（这是正反辩论：直接攻防，针锋相对地回应对方最强论点。）\n\n请就本轮议题给出有力、具体、有论据的论证（这是你的开场立论）：聚焦你最能站住的论点，用具体证据 / 例子 / 推理链支撑（必要时用 web_search / read_url 取证）；关键事实主张按【证据状态铁律】标注【已核实·出处】/【待核实·推断】。聚焦你最有力的 2–3 个论点、约 400–600 字讲透，宁深勿长——不堆砌、不面面俱到。\n【输出纪律·论点骨架】发言必须直接以第一个论点的 `### ` 短标题行开头（标题 ≤16 字、一句话点破主张）；【已核实/待核实】证据标记只放正文、不放标题。禁止「X方立论 / 开场立论」类总标题（界面已渲染方名与阶段）；禁止用加粗行（如 `**标题**`）冒充小节标题。按上文「2–3 个」论点口径展开，每个论点一块：`### 标题` + 正文。",
+            "depends_on": [],
+            "parent_run_id": "debate_c10e0c15-b567-49a7-8eda-d6f2fb4800ff"
+          }
+        ],
+        "plan_type": "debate",
+        "collab_interactions": {},
+        "tool_calls": [
+          "web_search",
+          "web_search",
+          "web_search",
+          "debate"
+        ],
+        "citations": 24,
+        "usage": {
+          "input": 31241,
+          "output": 1116,
+          "reasoning": 505
+        },
+        "cost_usd": 0.000823,
+        "latency_ms": 25668,
+        "error": null,
+        "content_preview": "搜索没返回有效对比数据，不过这恰好说明你面对的是一个高度个人化的选择——没有标准答案，正适合通过辩论梳理利弊。直接开始。\n\n[plan-only] 已记录辩论计划，跳过辩手执行。"
+      }
+    },
+    {
+      "case_id": "collab_p5_creative_options",
+      "category": "team",
+      "mast": "1.2",
+      "passed": true,
+      "shape_score": 0.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": false,
+          "detail": "delegated=False",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": false,
+          "detail": "score=0.00 (阈 0.60); no plan (delegated=False)",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "plan_runs": [],
+        "plan_type": null,
+        "collab_interactions": {},
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 13929,
+          "output": 2413,
+          "reasoning": 1532
+        },
+        "cost_usd": 0.000729,
+        "latency_ms": 31130,
+        "error": null,
+        "content_preview": "这四个方案分别从工具力、关系力、想象力、人文力四个原点出发，触及产品不同侧的价值。\n\n---\n\n## 四个方案\n\n### 方案一 · 稳重专业「集智台」\n\n> **集结多元智能，驱动专业协作**\n\n「集」强调汇聚多个 Agent 的动作和结果，「智」点明智能体本质，「台」是工作台/操作台。三字组合自带工程产品的克制感，不浮夸、不自嗨，适合官网、PR 稿、产品文档等严肃场景。同类类比：飞书、钉钉、语"
+      }
+    },
+    {
+      "case_id": "collab_p5_creative_options",
+      "category": "team",
+      "mast": "1.2",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); max_workers=1.00, min_roles=1.00, min_workers=1.00, parallel_fanout_min=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "命名创意师 - 稳重专业风",
+          "命名创意师 - 轻快亲和风",
+          "命名创意师 - 科技未来风",
+          "命名创意师 - 人文温度风"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_df081752-38a2-4165-9e01-6dac3f00b490_1",
+            "role": "命名创意师 - 稳重专业风",
+            "task": "为「多 Agent 协作工作台」（面向普通用户，让非技术人员也能编排 AI 团队协作完成任务的产品）起一个中文名，并配一句 slogan。\n\n要求：\n- 风格定位：稳重、专业、可信赖。名字听起来像企业级工具，给人「靠谱、能干活」的感觉。\n- 名称：2-4 个字的中文名，易于记忆和传播。\n- slogan：一句话（8-15 字），点明多 Agent 协作的价值。\n- 额外输出 100 字以内的设计理念说明：解释为什么这个名字能传递稳重专业的感觉。\n- 产出为纯文字（prose），直接输出结果，不要写文件。",
+            "depends_on": [],
+            "parent_run_id": "994949bd-9a68-4ff4-a2d2-3b49a53b7eac"
+          },
+          {
+            "id": "del_df081752-38a2-4165-9e01-6dac3f00b490_2",
+            "role": "命名创意师 - 轻快亲和风",
+            "task": "为「多 Agent 协作工作台」（面向普通用户，让非技术人员也能编排 AI 团队协作完成任务的产品）起一个中文名，并配一句 slogan。\n\n要求：\n- 风格定位：轻快、亲和、有趣。名字听起来亲切好记，让人觉得「好玩、容易上手」。\n- 名称：2-4 个字的中文名，口语化、有亲和力。\n- slogan：一句话（8-15 字），轻松有趣。\n- 额外输出 100 字以内的设计理念说明。\n- 产出为纯文字（prose），直接输出结果，不要写文件。",
+            "depends_on": [],
+            "parent_run_id": "994949bd-9a68-4ff4-a2d2-3b49a53b7eac"
+          },
+          {
+            "id": "del_df081752-38a2-4165-9e01-6dac3f00b490_3",
+            "role": "命名创意师 - 科技未来风",
+            "task": "为「多 Agent 协作工作台」（面向普通用户，让非技术人员也能编排 AI 团队协作完成任务的产品）起一个中文名，并配一句 slogan。\n\n要求：\n- 风格定位：科技感、未来感、先锋。名字让人联想到智能、前沿、下一代生产力。\n- 名称：2-4 个字的中文名，有科技意象。\n- slogan：一句话（8-15 字），有未来感和想象力。\n- 额外输出 100 字以内的设计理念说明。\n- 产出为纯文字（prose），直接输出结果，不要写文件。",
+            "depends_on": [],
+            "parent_run_id": "994949bd-9a68-4ff4-a2d2-3b49a53b7eac"
+          },
+          {
+            "id": "del_df081752-38a2-4165-9e01-6dac3f00b490_4",
+            "role": "命名创意师 - 人文温度风",
+            "task": "为「多 Agent 协作工作台」（面向普通用户，让非技术人员也能编排 AI 团队协作完成任务的产品）起一个中文名，并配一句 slogan。\n\n要求：\n- 风格定位：人文、温度、故事感。名字唤起人与人、人与 AI 之间的协作关系，有情感共鸣。\n- 名称：2-4 个字的中文名，有诗意或温暖的感觉。\n- slogan：一句话（8-15 字），打动人心。\n- 额外输出 100 字以内的设计理念说明。\n- 产出为纯文字（prose），直接输出结果，不要写文件。",
+            "depends_on": [],
+            "parent_run_id": "994949bd-9a68-4ff4-a2d2-3b49a53b7eac"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "delegate"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 13929,
+          "output": 1338,
+          "reasoning": 472
+        },
+        "cost_usd": 0.000428,
+        "latency_ms": 16315,
+        "error": null,
+        "content_preview": "[plan-only] 已记录计划（4 节点），跳过执行。"
+      }
+    },
+    {
+      "case_id": "collab_p5_creative_options",
+      "category": "team",
+      "mast": "1.2",
+      "passed": true,
+      "shape_score": 0.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": false,
+          "detail": "delegated=False",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": false,
+          "detail": "score=0.00 (阈 0.60); no plan (delegated=False)",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 2,
+        "delegated": false,
+        "roster": [],
+        "plan_runs": [],
+        "plan_type": null,
+        "collab_interactions": {},
+        "tool_calls": [
+          "web_search",
+          "web_search"
+        ],
+        "citations": 16,
+        "usage": {
+          "input": 31990,
+          "output": 3571,
+          "reasoning": 2139
+        },
+        "cost_usd": 0.001422,
+        "latency_ms": 47788,
+        "error": null,
+        "content_preview": "搜索词没有直接命中同类产品的中文命名（搜索结果偏了），但这正好说明这个领域的中文命名还没有形成定势——我们来做一套有辨识度的方案。\n\n以下是基于产品核心定位（**多Agent协作工作台·面向普通人**）构思的4套方案。\n\n---\n\n## 方案一 · 稳重专业\n\n**名：智汇台**\n**slogan：汇聚AI专家智慧，驱动高效协作**\n\n取名逻辑： 「智」是智能体，「汇」是汇聚与协作——多Agent"
+      }
+    },
+    {
+      "case_id": "collab_p6_review_diagnose",
+      "category": "team",
+      "mast": "3.2",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); has_join=1.00, min_roles=1.00, min_workers=1.00, parallel_fanout_min=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "客户关系专家",
+          "法务与合规审查员",
+          "品牌与公关策略师",
+          "汇总分析师"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_36b1b5a4-e646-4c4a-a2f5-6c875dd11e04_cr",
+            "role": "客户关系专家",
+            "task": "审查以下对外回复，从客户关系管理（CRM）和客户体验（CX）角度找出坑点，按严重度（致命/严重/一般/轻微）分级，给出可行动建议。\n\n待审查回复：「您好！非常感谢您的反馈。我们会尽快处理您的问题，预计本周内给您满意答复。另外我们的新产品即将上线，欢迎关注。」\n\n重点关注的维度：承诺的清晰度与可实现性、客户心理预期管理、情绪安抚效果、语气、信任建设。不要重写全文，只要诊断清单。输出格式为结构化分级清单。",
+            "depends_on": [],
+            "parent_run_id": "7f67ddfd-b954-4d1b-84e7-5483bedb5f07"
+          },
+          {
+            "id": "del_36b1b5a4-e646-4c4a-a2f5-6c875dd11e04_legal",
+            "role": "法务与合规审查员",
+            "task": "审查以下对外回复，从法律风险与合规角度找出坑点，按严重度（致命/严重/一般/轻微）分级，给出可行动建议。\n\n待审查回复：「您好！非常感谢您的反馈。我们会尽快处理您的问题，预计本周内给您满意答复。另外我们的新产品即将上线，欢迎关注。」\n\n重点关注的维度：是否构成承诺性声明或保证、模糊措辞带来的潜在纠纷风险、消费者权益相关合规问题（如中国《消费者权益保护法》）、未经审核的新品宣传合规风险。不要重写全文，只要诊断清单。输出格式为结构化分级清单。",
+            "depends_on": [],
+            "parent_run_id": "7f67ddfd-b954-4d1b-84e7-5483bedb5f07"
+          },
+          {
+            "id": "del_36b1b5a4-e646-4c4a-a2f5-6c875dd11e04_brand",
+            "role": "品牌与公关策略师",
+            "task": "审查以下对外回复，从品牌声誉与公关策略角度找出坑点，按严重度（致命/严重/一般/轻微）分级，给出可行动建议。\n\n待审查回复：「您好！非常感谢您的反馈。我们会尽快处理您的问题，预计本周内给您满意答复。另外我们的新产品即将上线，欢迎关注。」\n\n重点关注的维度：品牌调性一致性、公关敏感度（在投诉场景中推销是否合适）、利益相关方感知、跨文化沟通风险、企业形象建设。不要重写全文，只要诊断清单。输出格式为结构化分级清单。",
+            "depends_on": [],
+            "parent_run_id": "7f67ddfd-b954-4d1b-84e7-5483bedb5f07"
+          },
+          {
+            "id": "del_36b1b5a4-e646-4c4a-a2f5-6c875dd11e04_summary",
+            "role": "汇总分析师",
+            "task": "你会收到来自三个专家的审查结果：客户关系专家(CR)、法务合规审查员(legal)、品牌公关策略师(brand)。你的任务是：\n1. 合并三份清单，去重、归并同类型问题\n2. 按最高分级的严重度统一呈现（只要一个视角标为严重，归并后即标严重）\n3. 按严重度从高到低排列\n4. 每条问题标注来自哪些视角（如[客户关系][法务][品牌]）\n5. 对每条问题给出可行动建议\n6. 末尾总结：最应优先处理的前3条问题是什么\n\n不要重写全文。输出格式为结构化分级清单（含严重度分级、问题描述、来源视角、可行动建议），末尾附「优先处理 Top 3」。",
+            "depends_on": [
+              "del_36b1b5a4-e646-4c4a-a2f5-6c875dd11e04_cr",
+              "del_36b1b5a4-e646-4c4a-a2f5-6c875dd11e04_legal",
+              "del_36b1b5a4-e646-4c4a-a2f5-6c875dd11e04_brand"
+            ],
+            "parent_run_id": "7f67ddfd-b954-4d1b-84e7-5483bedb5f07"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "delegate"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 13925,
+          "output": 1307,
+          "reasoning": 327
+        },
+        "cost_usd": 0.000419,
+        "latency_ms": 14713,
+        "error": null,
+        "content_preview": "这段审查需要从多个专业角度交叉诊断，我组一个团队来做。\n\n[plan-only] 已记录计划（4 节点），跳过执行。"
+      }
+    },
+    {
+      "case_id": "collab_p6_review_diagnose",
+      "category": "team",
+      "mast": "3.2",
+      "passed": true,
+      "shape_score": 0.3333,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": false,
+          "detail": "score=0.33 (阈 0.60); has_join=0.00, min_roles=0.50, min_workers=0.33, parallel_fanout_min=0.50",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "客户沟通审查专家"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_077208d8-b6d8-45cc-beba-b399ca079d7a_1",
+            "role": "客户沟通审查专家",
+            "task": "审查以下对外回复文本，找出所有潜在问题（坑点），按严重度（高/中/低）分级，给出可行动建议。产出形式：诊断清单，不要重写全文。\n\n待审文本：\n「您好！非常感谢您的反馈。我们会尽快处理您的问题，预计本周内给您满意答复。另外我们的新产品即将上线，欢迎关注。」\n\n审查角度包括但不限于：承诺风险、法律合规、客户期望管理、语气与温度、上下文适用性、品牌形象等。每一项坑点请按【严重度】【具体问题】【可行动建议】三栏列出。",
+            "depends_on": [],
+            "parent_run_id": "dd97415c-2e99-4554-b332-be4fab3abcce"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "delegate"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 13925,
+          "output": 583,
+          "reasoning": 329
+        },
+        "cost_usd": 0.000216,
+        "latency_ms": 9114,
+        "error": null,
+        "content_preview": "[plan-only] 已记录计划（1 节点），跳过执行。"
+      }
+    },
+    {
+      "case_id": "collab_p6_review_diagnose",
+      "category": "team",
+      "mast": "3.2",
+      "passed": true,
+      "shape_score": 0.3333,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": false,
+          "detail": "score=0.33 (阈 0.60); has_join=0.00, min_roles=0.50, min_workers=0.33, parallel_fanout_min=0.50",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "客服沟通审查专家"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_1727bfe6-f2c4-485b-9459-ea894e4743a0_1",
+            "role": "客服沟通审查专家",
+            "task": "审查以下这段对外回复文本，找出其中的坑点（风险、不当之处、潜在负面影响），按严重度（严重 / 中等 / 轻微）分级，并为每个坑点给出可行动建议。不要重写全文，只需输出诊断清单。\n\n待审查的回复：\n「您好！非常感谢您的反馈。我们会尽快处理您的问题，预计本周内给您满意答复。另外我们的新产品即将上线，欢迎关注。」\n\n分析维度包括但不限于：承诺风险、语气与情境匹配度、信息清晰度、客户预期管理、商业伦理/时机恰当性等。每个坑点格式：\n- 坑点描述\n- 严重度（严重/中等/轻微）\n- 可行动建议",
+            "depends_on": [],
+            "parent_run_id": "5a29bd21-3748-4c38-a315-82c077fa74e5"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "delegate"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 13925,
+          "output": 673,
+          "reasoning": 408
+        },
+        "cost_usd": 0.000241,
+        "latency_ms": 9682,
+        "error": null,
+        "content_preview": "[plan-only] 已记录计划（1 节点），跳过执行。"
+      }
+    },
+    {
+      "case_id": "collab_p7_composite_plan",
+      "category": "team",
+      "mast": "2.5",
+      "passed": true,
+      "shape_score": 0.8333,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=0.83 (阈 0.60); has_join=1.00, independent_reviewer=0.00, max_workers=1.00, min_roles=1.00, min_workers=1.00, parallel_fanout_min=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 2,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "自媒体定位分析师",
+          "内容策略师",
+          "自媒体变现分析师",
+          "方案整合编辑"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_dcb817ba-097c-43be-8df3-a6184bf0d4a2_positioning",
+            "role": "自媒体定位分析师",
+            "task": "为「AI 工具实用技巧」个人知识自媒体起草「定位与受众」部分。\n\n核心约束（与其它队员共享，见团队共识）：\n- 领域：AI 工具实用技巧，教普通人/职场人用 AI 提效\n- 预算上限：800元/月\n- 时间预算：8小时/周\n- 面向非技术背景的普通人\n\n你需要产出以下内容（文字即可）：\n1. 账号定位与差异化策略（在同类账号中如何脱颖而出）\n2. 目标受众画像（1-2个典型人群，含痛点、场景、信息获取习惯）\n3. 账号人格化设定（人设、语气、视觉风格建议）\n4. 核心价值主张（一句话说清为什么关注你）\n5. 推荐起步平台（1-2个，基于时间预算和受众特征）\n\n注意：所有建议必须符合 800元/月 和 8小时/周的硬约束。不要建议超出预算的设备或工具。",
+            "depends_on": [],
+            "parent_run_id": "d2354966-e9ef-4966-ade7-1d94b05c729e"
+          },
+          {
+            "id": "del_dcb817ba-097c-43be-8df3-a6184bf0d4a2_content",
+            "role": "内容策略师",
+            "task": "为「AI 工具实用技巧」个人知识自媒体起草「选题与更新节奏」部分。\n\n核心约束（与其它队员共享，见团队共识）：\n- 领域：AI 工具实用技巧，教普通人/职场人用 AI 提效\n- 预算上限：800元/月\n- 时间预算：8小时/周\n- 面向非技术背景的普通人\n\n你需要产出以下内容（文字即可）：\n1. 内容矩阵：建议3-4个选题方向/系列，说明每个系列解决什么痛点\n2. 更新节奏：具体的发布频率和周计划表（精确到如何用8小时/周完成）\n3. 内容形式建议：图文/短视频/长视频的理由与占比\n4. 生产流程：从选题到发布的标准化流程，标注每步耗时\n5. 素材/工具建议：推荐免费或低成本工具（总成本不能超过800元/月预算）\n\n注意：更新频率必须与8小时/周一致，工具支出必须与800元/月一致。给出数字时要可验证。",
+            "depends_on": [],
+            "parent_run_id": "d2354966-e9ef-4966-ade7-1d94b05c729e"
+          },
+          {
+            "id": "del_dcb817ba-097c-43be-8df3-a6184bf0d4a2_monetization",
+            "role": "自媒体变现分析师",
+            "task": "为「AI 工具实用技巧」个人知识自媒体起草「变现路径」部分。\n\n核心约束（与其它队员共享，见团队共识）：\n- 领域：AI 工具实用技巧，教普通人/职场人用 AI 提效\n- 预算上限：800元/月\n- 时间预算：8小时/周\n- 面向非技术背景的普通人\n\n你需要产出以下内容（文字即可）：\n1. 短期（0-3月）变现可能：哪些方式在启动期就能尝试\n2. 中期（3-6月）变现路径：随着粉丝积累可开启的方式\n3. 长期（6月+）变现模式：可持续的收入来源\n4. 每个变现方式所需的时间投入估算（必须与8小时/周可协调）\n5. 收入预期：给出保守/中性/乐观三档月收入预期及依据\n\n注意：变现路径必须与「AI 工具实用技巧」定位一致，不能偏离到不适合该领域的方向。时间投入不能挤压内容生产的核心时间。",
+            "depends_on": [],
+            "parent_run_id": "d2354966-e9ef-4966-ade7-1d94b05c729e"
+          },
+          {
+            "id": "del_dcb817ba-097c-43be-8df3-a6184bf0d4a2_integration",
+            "role": "方案整合编辑",
+            "task": "将三个起草方向（定位与受众、选题与更新节奏、变现路径）的产出整合为一份完整的启动方案文件，落盘到工作区。\n\n阅读前三位的产出，完成以下工作：\n\n1. **合并成文**：将三部分整合为一份结构清晰、语言一致的完整方案文档\n2. **一致性对账**：逐项核查以下一致性，发现冲突时标记并调整：\n   - 预算一致性：所有建议的支出加起来 ≤ 800元/月\n   - 时间一致性：所有建议的工作量加起来 ≤ 8小时/周\n   - 受众一致性：定位、选题、变现三部分说的是同一群人\n   - 路径一致性：从定位→选题→变现的逻辑链完整、不自相矛盾\n3. **冲突处理**：发现冲突时，以「预算≤800元/月」和「时间≤8小时/周」为硬约束进行裁剪调整，并在文档中标注调整说明\n4. **定稿输出**：写成一个完整的 Markdown 文件，包含：\n   - 封面/标题\n   - 三部分正文\n   - 一致性对账表（预算、时间、受众、路径的检查结果）\n   - 执行优先级建议\n\n格式要求：Markdown，文件名 `AI工具实用技巧_自媒体启动方案.md`",
+            "depends_on": [
+              "del_dcb817ba-097c-43be-8df3-a6184bf0d4a2_positioning",
+              "del_dcb817ba-097c-43be-8df3-a6184bf0d4a2_content",
+              "del_dcb817ba-097c-43be-8df3-a6184bf0d4a2_monetization"
+            ],
+            "parent_run_id": "d2354966-e9ef-4966-ade7-1d94b05c729e"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "delegate",
+          "delegate"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 31908,
+          "output": 6980,
+          "reasoning": 3928
+        },
+        "cost_usd": 0.002628,
+        "latency_ms": 65170,
+        "error": null,
+        "content_preview": "[plan-only] 已记录计划（4 节点），跳过执行。"
+      }
+    },
+    {
+      "case_id": "collab_p7_composite_plan",
+      "category": "team",
+      "mast": "2.5",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); has_join=1.00, independent_reviewer=1.00, max_workers=1.00, min_roles=1.00, min_workers=1.00, parallel_fanout_min=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 3,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "自媒体策略分析师",
+          "内容运营策划",
+          "商业变现顾问",
+          "一致性审查官",
+          "自媒体方案撰稿人"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_3c416486-f6bd-4396-9d0f-3f6088823f01_positioning",
+            "role": "自媒体策略分析师",
+            "task": "用户想做个人知识向自媒体，领域为「AI 工具实用技巧」（教普通人用 AI 提效）。\n\n请起草【定位与受众】部分，要求：\n1. 目标受众画像（年龄、职业、痛点、当前 AI 技能水平、内容消费习惯）\n2. 内容定位与差异化（同赛道已有账号很多，怎么做出区分度）\n3. 账号人设建议（身份、语言风格、视觉调性）\n4. 给出 1–2 个对标参考账号\n\n【硬约束】——这三个部件会由其他队友同步起草选题节奏与变现路径，你必须确保你的方案在逻辑上与之兼容：\n- 月预算 ≤ 800 元（意味着不能依赖付费投流，主要靠自然流量）\n- 周可投入 ≤ 8 小时（内容形式必须轻量、制作成本低）\n- 面向「普通人」（不是开发者/从业者，是办公室白领/自由职业者/学生）\n\n产出形式：详细的文字分析，供后续一致性审查和定稿使用。",
+            "depends_on": [],
+            "parent_run_id": "ca17a336-0e3e-416c-8958-bfb7a875beda"
+          },
+          {
+            "id": "del_3c416486-f6bd-4396-9d0f-3f6088823f01_content_plan",
+            "role": "内容运营策划",
+            "task": "用户想做个人知识向自媒体，领域为「AI 工具实用技巧」（教普通人用 AI 提效）。\n\n请起草【选题与更新节奏】部分，要求：\n1. 内容形式建议（图文 / 短视频 / 播客 / 长文？）并说明选择理由\n2. 更新频率与具体排期（周几、几点、发什么类型）\n3. 单期内容的生产流程与各环节耗时估算（选题→素材→制作→发布→互动）\n4. 给出前 4 周的具体选题示例\n5. 内容生产工具建议（免费或低成本的优先）\n\n【硬约束】——必须严格符合：\n- 每周可投入 **≤ 8 小时**（你的排期安排不能超过这个总量）\n- 月预算 **≤ 800 元**（工具/素材成本需在预算内）\n- 领域是「AI 工具实用技巧」\n\n不要设计日更方案——这会和其他队友的规划打架。\n\n产出形式：详细的文字分析，供后续一致性审查和定稿使用。",
+            "depends_on": [],
+            "parent_run_id": "ca17a336-0e3e-416c-8958-bfb7a875beda"
+          },
+          {
+            "id": "del_3c416486-f6bd-4396-9d0f-3f6088823f01_monetization",
+            "role": "商业变现顾问",
+            "task": "用户想做个人知识向自媒体，领域为「AI 工具实用技巧」（教普通人用 AI 提效）。\n\n请起草【变现路径】部分，要求：\n1. 按阶段（0–3 月 / 3–6 月 / 6–12 月）列出可行的变现方式\n2. 每种变现方式的收入预期（保守/乐观）与启动条件\n3. 各阶段需要的投入估算（时间、资金）\n4. 变现路径与内容形态的匹配建议\n\n【硬约束】——你制定的变现方案必须与以下条件一致：\n- 月预算 **≤ 800 元**（不能规划需要大量付费投流或高制作成本的变现路线）\n- 周投入 **≤ 8 小时**（变现活动不能超过这个时间预算）\n- 受众是「普通人学 AI 工具提效」，不是技术从业者\n- 前期粉丝少时自然流量为主\n- 变现节奏要合理，不承诺短期内高收入\n\n产出形式：详细的文字分析，供后续一致性审查和定稿使用。",
+            "depends_on": [],
+            "parent_run_id": "ca17a336-0e3e-416c-8958-bfb7a875beda"
+          },
+          {
+            "id": "del_3c416486-f6bd-4396-9d0f-3f6088823f01_consistency_check",
+            "role": "一致性审查官",
+            "task": "你收到三个上游队员的产出：\n1. 【定位与受众】\n2. 【选题与更新节奏】\n3. 【变现路径】\n\n请做一次严格的【一致性对账】，检查以下维度是否有冲突或不一致：\n\n【时间对账】\n- 内容制作排期总耗时是否 ≤ 8 小时/周？逐一加总各环节时间\n- 变现活动是否额外占用了时间但没被计入？\n\n【预算对账】\n- 各部件提及的所有费用（工具订阅、素材、推广等）加总是否 ≤ 800 元/月？\n- 如有未列明价格的项目，标注为「待确认」\n\n【受众一致性】\n- 定位中描述的受众，与选题的难度、变现产品的定价是否匹配？\n- 选题示例的难易度是否符合「普通人」的技能水平？\n\n【逻辑自洽性】\n- 变现路径依赖的内容形态，是否与选题节奏产出的内容形式一致？\n- 更新节奏是否能支撑变现所需的流量/信任积累？\n\n产出格式：\n- 先列出所有【冲突】和【风险点】（每个带严重程度：高/中/低）\n- 然后为每个问题给出【修正建议】\n- 最后给出总体一致性评分（A/B/C/D）\n\n只做审查和问题清单，不要自行改写方案。",
+            "depends_on": [
+              "del_3c416486-f6bd-4396-9d0f-3f6088823f01_positioning",
+              "del_3c416486-f6bd-4396-9d0f-3f6088823f01_content_plan",
+              "del_3c416486-f6bd-4396-9d0f-3f6088823f01_monetization"
+            ],
+            "parent_run_id": "ca17a336-0e3e-416c-8958-bfb7a875beda"
+          },
+          {
+            "id": "del_3c416486-f6bd-4396-9d0f-3f6088823f01_final_draft",
+            "role": "自媒体方案撰稿人",
+            "task": "你收到：\n1. 【定位与受众】方案\n2. 【选题与更新节奏】方案\n3. 【变现路径】方案\n4. 【一致性审查官】的对账结果（含冲突清单与修正建议）\n\n请基于上游所有产出，写出一份完整的、一致性修复后的自媒体启动方案，输出到一个 Markdown 文件中。\n\n要求：\n- 标题：AI 工具实用技巧 · 个人自媒体启动方案\n- 文件路径：AI工具实用技巧_自媒体启动方案.md\n- 包含 3 个正文部分：① 定位与受众 ② 选题与更新节奏 ③ 变现路径\n- 每个部分都要体现对一致性审查中发现的冲突的修复\n- 在文末增加一个「一致性对账表」（总结：周时间消耗、月预算消耗、受众一致性校验结论）\n- 整体风格务实、可执行，符合个人博主的启动阶段现实\n- 篇幅控制在 2000–3000 字\n\n请用 file_write 将方案写入工作区。",
+            "depends_on": [
+              "del_3c416486-f6bd-4396-9d0f-3f6088823f01_consistency_check"
+            ],
+            "parent_run_id": "ca17a336-0e3e-416c-8958-bfb7a875beda"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "consult_skill",
+          "delegate",
+          "delegate"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 51869,
+          "output": 6311,
+          "reasoning": 2447
+        },
+        "cost_usd": 0.002742,
+        "latency_ms": 79442,
+        "error": null,
+        "content_preview": "[plan-only] 已记录计划（5 节点），跳过执行。"
+      }
+    },
+    {
+      "case_id": "collab_p7_composite_plan",
+      "category": "team",
+      "mast": "2.5",
+      "passed": true,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); has_join=1.00, independent_reviewer=1.00, max_workers=1.00, min_roles=1.00, min_workers=1.00, parallel_fanout_min=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "n/a (plan-only)",
+          "gating": false
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "max_rounds",
+        "rounds": 4,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "自媒体策略分析师",
+          "内容策略师",
+          "变现策略师",
+          "一致性审校官"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_53b08a3c-1560-4763-9a3c-3a95e509c389_positioning",
+            "role": "自媒体策略分析师",
+            "task": "起草「定位与受众」部分。目标受众画像（年龄、职业、痛点、信息消费习惯）；创作者的定位、人设、差异化策略；主攻平台选择与理由；竞品/对标分析（目前AI工具教学赛道的头部账号特点与缺口）。必须紧扣预算800元/月和时间8小时/周的现实约束。输出要详细、可执行，约800-1200字。产出格式：prose（给用户看的文字，不要落盘文件，内容直接作为本 task 的结果交付）。",
+            "depends_on": [],
+            "parent_run_id": "70ae2c43-82b7-41fd-a28e-35b35c92ccd5"
+          },
+          {
+            "id": "del_53b08a3c-1560-4763-9a3c-3a95e509c389_topics",
+            "role": "内容策略师",
+            "task": "起草「选题与更新节奏」部分。基于每周8小时、月预算800元的现实约束，给出：①内容矩阵（哪些选题方向，每类选题占总内容的比例）；②更新节奏（每周几篇、什么形式、各平台如何分发）；③每篇内容的生产流程和时间预算（选题→素材收集→撰写→编辑→发布）；④系列化/栏目化规划；⑤初期（0-3月）和成长期（3-6月）的内容策略差异。必须与定位和变现路径保持一致——内容要能支撑后续变现，时间预算不能超8小时/周。输出约800-1200字。",
+            "depends_on": [],
+            "parent_run_id": "70ae2c43-82b7-41fd-a28e-35b35c92ccd5"
+          },
+          {
+            "id": "del_53b08a3c-1560-4763-9a3c-3a95e509c389_monetization",
+            "role": "变现策略师",
+            "task": "起草「变现路径」部分。基于预算≤800元/月、时间≤8小时/周、受众为非技术普通人，设计务实的变现路线图：①分阶段变现规划（0-3月→3-6月→6-12月→12月+），每阶段写明核心动作、预期收入范围和前提条件；②变现形式（接商单、知识星球/付费社群、模板/教程付费专栏、课程、AI工具分销等），分析各形式的可行性和匹配度；③必须与定位和内容策略匹配——变现方式不能违背「教普通人用AI」的定位，不能要求投入超出8小时/周的运营精力。注意：初期不要设不切实际的收入预期。输出约800-1200字。",
+            "depends_on": [],
+            "parent_run_id": "70ae2c43-82b7-41fd-a28e-35b35c92ccd5"
+          },
+          {
+            "id": "del_53b08a3c-1560-4763-9a3c-3a95e509c389_review",
+            "role": "一致性审校官",
+            "task": "你收到以上3位同事产出的三个部件（定位与受众、选题与更新节奏、变现路径）。请做严格的一致性对账，逐项检查以下接缝：①预算时间不打架（各部件的资源消耗加起来是否超出800元/月、8小时/周）；②时间线一致（三个部件的0-3月/3-6月/6-12月阶段划分是否对齐）；③定位与变现不矛盾（变现方式是否违背「教普通人用AI」的定位）；④内容能否支撑变现（选题方向是否能自然过渡到变现产品，比如模板、社群、课程）；⑤人设一致性（各部件对创作者人设的表述是否统一）。逐条列出发现的冲突或风险。然后，将三个部件整合成一份完整的启动方案（约2000-3000字），并在整合过程中修正所有不一致之处。最终产出落盘为一个markdown文件 `AI工具自媒体启动方案.md`。",
+            "depends_on": [
+              "del_53b08a3c-1560-4763-9a3c-3a95e509c389_positioning",
+              "del_53b08a3c-1560-4763-9a3c-3a95e509c389_topics",
+              "del_53b08a3c-1560-4763-9a3c-3a95e509c389_monetization"
+            ],
+            "parent_run_id": "70ae2c43-82b7-41fd-a28e-35b35c92ccd5"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "consult_skill",
+          "delegate"
+        ],
+        "citations": 24,
+        "usage": {
+          "input": 76359,
+          "output": 4499,
+          "reasoning": 2749
+        },
+        "cost_usd": 0.002677,
+        "latency_ms": 61859,
+        "error": null,
+        "content_preview": "信息够用，直接组队启动。我安排了三个方向的专家并行起草，再让一名审校做一致性对账并合成最终方案。\n\n[plan-only] 已记录计划（4 节点），跳过执行。"
+      }
+    }
+  ]
+}

@@ -4,6 +4,10 @@ import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useFolders } from "@/hooks/useFolders";
 import { useLlmKey } from "@/hooks/useLlmKey";
+import {
+  COMPOSER_CONTINUE_PLACEHOLDER,
+  isContinuableAssistant,
+} from "@/lib/composerContinueHint";
 import { TOOLS_GATE_HINT, needsToolsGateHint } from "@/lib/llmToolsGate";
 import { useBackgroundTasksStore } from "@/stores/backgroundTasks";
 import { draftKeyFor, useComposerDraftStore } from "@/stores/composer";
@@ -21,10 +25,11 @@ import {
   Square,
 } from "lucide-react";
 import type { SetStateAction } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AttachmentChips } from "./AttachmentChips";
 import { ComposerWorkspaceChip } from "./ComposerWorkspaceChip";
 import { CurrentModelBadge } from "./CurrentModelBadge";
+import { PermissionPresetBadge } from "./PermissionPresetBadge";
 import { RecordingBar } from "./RecordingBar";
 import {
   ComposerConnectionNotice,
@@ -74,6 +79,20 @@ export function TurnComposer({
   const { data: llmKey } = useLlmKey();
   const toolsGateHint = needsToolsGateHint(llmKey?.supports_tools);
   const conversationId = useConversationStore((s) => s.currentConversationId);
+  const lastMessage = useConversationStore((s) => {
+    const id = s.currentConversationId;
+    if (!id) return null;
+    return s.byId[id]?.messages.at(-1) ?? null;
+  });
+  const resolvedPlaceholder = useMemo(() => {
+    if (
+      !isGenerating &&
+      isContinuableAssistant(lastMessage)
+    ) {
+      return COMPOSER_CONTINUE_PLACEHOLDER;
+    }
+    return placeholder;
+  }, [isGenerating, lastMessage, placeholder]);
   const draftKey = draftKeyFor(conversationId);
   const value = useComposerDraftStore((s) => s.drafts[draftKey]?.value ?? "");
   const attachments = useComposerDraftStore(
@@ -132,7 +151,12 @@ export function TurnComposer({
       : handleAttachmentProjectHint,
   });
 
-  const drop = useComposerDrop(isGenerating, attachments, setAttachments);
+  const drop = useComposerDrop(
+    isGenerating,
+    attachments,
+    setAttachments,
+    conversationId,
+  );
 
   const voice = useVoiceInput({
     onTranscript: useCallback(
@@ -435,7 +459,9 @@ export function TurnComposer({
               e.currentTarget.selectionStart ?? 0,
             )
           }
-          placeholder={bg ? "描述要交给云端团队后台完成的任务…" : placeholder}
+          placeholder={
+            bg ? "描述要交给云端团队后台完成的任务…" : resolvedPlaceholder
+          }
           className="w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
           rows={1}
         />
@@ -443,17 +469,13 @@ export function TurnComposer({
       <div className="flex items-center justify-between px-4 pb-3">
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <CurrentModelBadge disabled={isGenerating} />
+          <PermissionPresetBadge disabled={isGenerating} />
           <ComposerWorkspaceChip conversationId={conversationId} />
           <IconButton
             size="md"
-            onClick={mention.openBrowse}
+            onClick={() => void mention.pickLocalFile()}
             disabled={isGenerating}
-            aria-label="附加文件"
-            className={
-              mention.menuMode === "browse"
-                ? "bg-accent text-accent-foreground hover:bg-accent hover:text-accent-foreground"
-                : undefined
-            }
+            aria-label="附加本机文件"
           >
             <Paperclip size={16} />
           </IconButton>

@@ -13,6 +13,13 @@ from agentcore.runtime.events import (
     question_posted,
 )
 from agentcore.runtime.ports import ClientRequestBridge
+from agentcore.tools.builtin.ask_user.card import (
+    CARD_KINDS,
+    card_max_options,
+    card_overrides_intent,
+    parse_card,
+    validate_card_shape,
+)
 from agentcore.tools.builtin.ask_user.intent import resolve_ask_checkpoint_intent
 from agentcore.tools.builtin.ask_user.schema import (
     normalize_assumptions,
@@ -63,8 +70,8 @@ class AskUserTool:
     # The memory master switch, captured so resume re-wires consult_memory as this turn did
     # (off ⇒ stays off). Capture-only; defaults True (always-on).
     memory_enabled: bool = True
-    # Advertise ``action=bind_local_folder`` on choice options only when the desktop client
-    # can fulfil it (same live-user gate family as ask_user itself — cloud web/mobile omit).
+    # Advertise desktop-only ask_user option actions (bind_local_folder /
+    # grant_readonly_folder) when the desktop client can fulfil them.
     advertise_bind_local_folder: bool = False
 
     @property
@@ -109,19 +116,23 @@ class AskUserTool:
         if self.advertise_bind_local_folder:
             option_properties["action"] = {
                 "type": "string",
-                "enum": ["bind_local_folder"],
+                "enum": ["bind_local_folder", "grant_readonly_folder"],
                 "description": (
-                    "可选。设为 bind_local_folder 时：桌面端把该选项渲染为「选择本地文件夹」"
-                    "动作——用户点选后绑定本对话工作区到所选目录再 resume，而不是回传纯文本。"
-                    "仅当 `<workspace_context>` 显示执行位置=云端且任务需要本机时使用。"
+                    "可选。bind_local_folder：桌面端把该选项渲染为「选择本地文件夹」并绑定本对话"
+                    "工作区（任务需本机而执行位置仍是云端时用）。"
+                    "grant_readonly_folder：授权一个区外目录在**本次对话内只读**可用"
+                    "（分析整文件夹；卡片须说明只读/仅本次对话/可撤销；不改变工作区绑定）。"
                 ),
             }
             questions_desc += (
                 " 当任务需要用户本机而执行位置仍是云端时，给 choice 选项加 "
                 "action=bind_local_folder，引导绑定本地文件夹（不要先空跑委派）。"
+                " 当用户要分析工作区外的整个目录时，加 action=grant_readonly_folder"
+                "（只读、仅本次对话、可撤销）。"
             )
             tool_desc += (
-                " 本回合桌面端在线：choice 选项可标 action=bind_local_folder 发起绑定。"
+                " 本回合桌面端在线：choice 选项可标 action=bind_local_folder 或 "
+                "grant_readonly_folder。"
             )
 
         return ToolSchema(
@@ -236,6 +247,18 @@ class AskUserTool:
                             "question 的 default 里写明你将先采用的默认，否则该调用会被拒。"
                         ),
                     },
+                    "card": {
+                        "type": "string",
+                        "enum": ["proposal_pick", "risk_ack"],
+                        "description": (
+                            "可选：显式确认卡类型（会覆盖转录推导的 intent，并校验 questions 形状）。"
+                            "proposal_pick=方案挑选卡：恰好 1 个 choice 单选问题、options 2–6，"
+                            "让用户从候选方案里挑一个。"
+                            "risk_ack=风险确认卡：恰好 1 个 choice 多选问题、options 1–10，"
+                            "让用户勾选要处理哪些风险/问题。"
+                            "两种 card 都要求 blocking=true（或缺省）；不可与 blocking=false 同用。"
+                        ),
+                    },
                 },
                 "required": ["message"],
             },
@@ -252,9 +275,27 @@ class AskUserTool:
                 output="",
                 error="ask_user 需要非空的 message 参数（向用户说明你在问什么）。",
             )
+        card_parsed = parse_card(arguments.get("card"))
+        # Success returns a known card literal (also a str); errors return a Chinese
+        # guidance string not in CARD_KINDS.
+        if card_parsed is None:
+            card = None
+        elif card_parsed in CARD_KINDS:
+            card = card_parsed  # type: ignore[assignment]
+        else:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=str(card_parsed),
+            )
+
         ctx_text = str(arguments.get("context") or "")
         assumptions = normalize_assumptions(arguments.get("assumptions"))
-        questions = normalize_questions(arguments.get("questions"))
+        questions = normalize_questions(
+            arguments.get("questions"),
+            max_options=card_max_options(card),
+        )
         style_options = normalize_style_options(arguments.get("style_options"))
         if not self.advertise_bind_local_folder:
             for q in questions:
@@ -266,13 +307,28 @@ class AskUserTool:
         # any suspend / durable-frame machinery — it shares none of it.
         blocking_arg = arguments.get("blocking")
         blocking = True if blocking_arg is None else bool(blocking_arg)
+
+        if card is not None:
+            card_err = validate_card_shape(card, blocking=blocking, questions=questions)
+            if card_err:
+                return ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output="",
+                    error=card_err,
+                )
+
         if not blocking:
             return self._post_nonblocking(message, ctx_text, assumptions, questions, style_options)
 
         checkpoint_id = new_id()
         from agentcore.runtime.suspension import captain_transcript
 
-        intent = resolve_ask_checkpoint_intent(captain_transcript.get())
+        intent = (
+            card_overrides_intent(card)
+            if card is not None
+            else resolve_ask_checkpoint_intent(captain_transcript.get())
+        )
         required = checkpoint_required(
             checkpoint_id=checkpoint_id,
             conversation_id=self.conversation_id,
@@ -298,23 +354,40 @@ class AskUserTool:
             # from the journal seed. Cancelling avoids orphan tasks after turn end.
             if coord.drive_task is not None and not coord.drive_task.done():
                 coord.drive_task.cancel()
-        saved = await persist_suspension(
-            self,
-            checkpoint_id=checkpoint_id,
-            context=context,
-            message=message,
-            ctx_text=ctx_text,
-            assumptions=assumptions,
-            questions=questions,
-            style_options=style_options,
-            required_event=required,
-            intent=intent,
-        )
+        try:
+            saved = await persist_suspension(
+                self,
+                checkpoint_id=checkpoint_id,
+                context=context,
+                message=message,
+                ctx_text=ctx_text,
+                assumptions=assumptions,
+                questions=questions,
+                style_options=style_options,
+                required_event=required,
+                intent=intent,
+            )
+        except Exception:
+            # D11：运行态落帧失败 ⇒ 显式失败终止回合（与配置态不可用同文案）。
+            logger.exception(
+                "checkpoint.persist_failed",
+                checkpoint_id=checkpoint_id,
+            )
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="无法持久化检查点，回合已终止。请重试。",
+            )
         # 挂起即收口 (②): once the durable frame is saved, END the turn in place.
         # D11：删窄兜底——无法落盘则显式失败终止回合（不再假等待）。
         if saved:
             self.sink.emit(required)
-            logger.info("checkpoint.finalized", checkpoint_id=checkpoint_id)
+            logger.info(
+                "checkpoint.finalized",
+                checkpoint_id=checkpoint_id,
+                intent=intent,
+                card=card,
+            )
             return ToolResult(tool_call_id="", success=True, output="", effect=ToolEffect.SUSPEND)
         logger.error(
             "checkpoint.persist_unavailable",

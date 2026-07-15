@@ -152,23 +152,32 @@ export function EndpointNode({ data }: NodeProps) {
                   {isInput ? "你的任务" : "CEO 汇总"}
                 </p>
                 {/* 端点副标题是描述/汇聚状态（非冗余状态文字）：输入端「对话发起」恒显，
-                  CEO 汇总端保留「汇总中…/已汇总」叙事（前端UX设计 §五约定的例外）。
+                  CEO 汇总端保留「正在生成汇总…/已汇总」叙事（前端UX设计 §五约定的例外）。
                   与 AgentNode 第二行同节奏（mt-0.5）。 */}
-                <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                <p
+                  className={`mt-0.5 truncate text-xs ${
+                    running ? "text-primary" : "text-muted-foreground"
+                  }`}
+                  data-testid={isInput ? undefined : "captain-sink-label"}
+                >
                   {isInput ? "对话发起" : sinkLabel(d.status)}
                 </p>
               </div>
             </div>
 
             {/* 预览取向与 AgentNode 对齐：输入端=任务摘要（task 语义，/70）、CEO 汇总端=
-              答案开头（output 语义，/80；headText 取开头，见 GraphView）。 */}
+              答案开头或合成预览（output 语义，/80；headText 取开头，见 GraphView）。
+              汇总空窗无 content_delta 时挂 team_synthesis_preview 片段，保持节点活性。 */}
             {preview && (
               <p
                 className={`mt-2 line-clamp-2 text-xs leading-snug ${
                   isInput
                     ? "text-muted-foreground/70"
-                    : "text-muted-foreground/80"
+                    : running
+                      ? "text-foreground/80"
+                      : "text-muted-foreground/80"
                 }`}
+                data-testid={isInput ? undefined : "captain-sink-preview"}
               >
                 {preview}
               </p>
@@ -188,7 +197,7 @@ export function EndpointNode({ data }: NodeProps) {
 function sinkLabel(status: RunStatus): string {
   const labels: Record<RunStatus, string> = {
     pending: "待汇总",
-    running: "汇总中…",
+    running: "正在生成汇总…",
     completed: "已汇总",
     failed: "失败",
     cancelled: "已停止",

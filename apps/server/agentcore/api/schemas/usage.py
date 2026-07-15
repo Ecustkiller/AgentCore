@@ -21,6 +21,8 @@ class CostBreakdown(BaseModel):
     # Display-only CNY value (元), converted server-side via the single
     # CNY_PER_USD rate so the client shows money without re-pricing.
     cny_total: float
+    # Which price layer produced these numbers (缺省 curated 兼容旧数据).
+    pricing_source: str = "curated"
 
 
 class UsageBreakdown(BaseModel):
@@ -42,6 +44,7 @@ class AgentCostLine(BaseModel):
     model: str
     usage: UsageBreakdown
     cost: CostBreakdown
+    estimated_cost: CostBreakdown | None = None
     duration_ms: int
 
 
@@ -56,6 +59,7 @@ class TurnCost(BaseModel):
     message_id: str
     usage: UsageBreakdown
     cost: CostBreakdown
+    estimated_cost: CostBreakdown | None = None
     rounds: int
     agents: list[AgentCostLine]
 
@@ -66,6 +70,7 @@ class ConversationCost(BaseModel):
     conversation_id: str
     usage: UsageBreakdown
     cost: CostBreakdown
+    estimated_cost: CostBreakdown | None = None
     turns: int
 
 
@@ -74,6 +79,7 @@ class UsageWindow(BaseModel):
 
     usage: UsageBreakdown
     cost: CostBreakdown
+    estimated_cost: CostBreakdown | None = None
     # Distinct assistant turns in the window (the quota's「请求」proxy).
     requests: int
 
@@ -98,6 +104,7 @@ class RoleCostLine(BaseModel):
 
     role: str
     cost_total: int
+    cost_estimated_total: int = 0
     # Distinct assistant turns this role took part in over the window.
     turns: int
 

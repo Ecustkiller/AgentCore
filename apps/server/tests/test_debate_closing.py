@@ -1,4 +1,4 @@
-"""结辩收束（P4·阶段化发言角色，辩论编排设计.md §4-2.4「方案甲」）prompt 契约自测（per-PR 零 LLM）。
+﻿"""结辩收束（P4·阶段化发言角色，辩论编排设计.md §4-2.4「方案甲」）prompt 契约自测（per-PR 零 LLM）。
 
 方案甲的验收面是【prompt 契约】：结辩环节喂给辩手的 feedback 必须把「结辩」这个阶段角色讲清楚——
 只讲胜负手（本方最强论点 + 为何对方反驳不成立）、【禁止引入新论据 / 新事实】、且长度显著收紧（阶段化
@@ -7,7 +7,7 @@
 """
 
 from agentcore.runtime.debate import DebateConfig, DebateForm, DebateSide, RoundPolicy
-from agentcore.tools.builtin.debate.prompt import closing_context_blocks, closing_task
+from agentcore.runtime.debate.prompt import closing_context_blocks, closing_task
 from agentcore.tools.builtin.debate.schema import CLOSING_LENGTH_HINT, LENGTH_HINT
 
 

@@ -11,10 +11,6 @@ const TIP_COPY: Record<ContextualTipId, { title: string; body: string }> = {
     title: "协作图",
     body: "点节点可看每个 Agent 的实时工作。",
   },
-  decision_card: {
-    title: "需要你拍板",
-    body: "检查点与审批会出现在这里——确认后团队才会继续。",
-  },
 };
 
 /**
@@ -62,68 +58,27 @@ export function ContextualTip({
   );
 }
 
-/** Compact banner above decision prompts (no relative wrapper needed for layout). */
-export function ContextualTipBanner({
-  tipId,
-  active,
-}: {
-  tipId: ContextualTipId;
-  active: boolean;
-}) {
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    if (active && shouldShowTip(tipId)) setVisible(true);
-    if (!active) setVisible(false);
-  }, [tipId, active]);
-
-  if (!visible) return null;
-
-  const copy = TIP_COPY[tipId];
-  return (
-    <div className="mx-4 mb-2">
-      <TipBubble
-        tipId={tipId}
-        title={copy.title}
-        body={copy.body}
-        placement="bottom"
-        onDismiss={() => {
-          markTipSeen(tipId);
-          setVisible(false);
-        }}
-        inline
-      />
-    </div>
-  );
-}
-
 function TipBubble({
   tipId,
   title,
   body,
   placement,
   onDismiss,
-  inline = false,
 }: {
   tipId: ContextualTipId;
   title: string;
   body: string;
   placement: "top" | "bottom";
   onDismiss: () => void;
-  inline?: boolean;
 }) {
   return (
     // biome-ignore lint/a11y/useSemanticElements: 内嵌真 <button>（关闭），<output> 语义不符——保留 aria-live 容器。
     <div
       role="status"
       data-contextual-tip={tipId}
-      className={
-        inline
-          ? "rounded-xl border border-primary/30 bg-primary/5 px-3 py-2.5"
-          : `absolute left-1/2 z-20 w-64 -translate-x-1/2 rounded-xl border border-border bg-popover px-3 py-2.5 shadow-lg ${
-              placement === "top" ? "bottom-full mb-2" : "top-full mt-2"
-            }`
-      }
+      className={`absolute left-1/2 z-20 w-64 -translate-x-1/2 rounded-xl border border-border bg-popover px-3 py-2.5 shadow-lg ${
+        placement === "top" ? "bottom-full mb-2" : "top-full mt-2"
+      }`}
     >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">

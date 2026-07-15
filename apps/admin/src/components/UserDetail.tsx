@@ -7,12 +7,14 @@ import { Spinner } from "@/components/ui/Spinner";
 import {
   agentColorVar,
   cn,
+  COST_ESTIMATE_HINT,
   fmtCny,
   fmtCompact,
+  fmtEstimatedCny,
   fmtInt,
   fmtMs,
+  fmtNanoCny,
   fmtTime,
-  nanoUsdToCny,
   roleLabel,
 } from "@/lib/utils";
 import { errorMessage } from "@/services/api";
@@ -161,13 +163,14 @@ export function UserDetail({
 
           {byok && (
             <div className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-muted-foreground text-xs">
-              BYOK 模式：以下成本为该用户在自己 DeepSeek Key 上的花费，并非平台垫付。
+              BYOK 模式：记账成本恒为 0；「估算」列为按社区价目/自填单价的 ≈¥，
+              非上游账单。
             </div>
           )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <WindowCard label="今日" window={data.today} />
-            <WindowCard label="本月" window={data.month} />
+            <WindowCard label="今日" window={data.today} byok={byok} />
+            <WindowCard label="本月" window={data.month} byok={byok} />
           </div>
 
           <section className="rounded-xl border border-border bg-card p-5">
@@ -188,6 +191,7 @@ export function UserDetail({
                 </h2>
                 <p className="mt-0.5 text-muted-foreground text-xs">
                   多 Agent 团队工资单（按成本降序）
+                  {byok ? ` · ${COST_ESTIMATE_HINT}` : ""}
                 </p>
               </div>
               <table className="w-full text-sm">
@@ -195,6 +199,7 @@ export function UserDetail({
                   <tr className="border-border border-b bg-muted/40 text-left text-xs text-muted-foreground">
                     <th className="px-5 py-2.5 font-medium">角色</th>
                     <th className="px-5 py-2.5 text-right font-medium">成本</th>
+                    <th className="px-5 py-2.5 text-right font-medium">估算</th>
                     <th className="px-5 py-2.5 text-right font-medium">回合数</th>
                   </tr>
                 </thead>
@@ -206,7 +211,6 @@ export function UserDetail({
                     >
                       <td className="px-5 py-3 text-foreground">
                         <span className="inline-flex items-center gap-2">
-                          {/* 角色身份色圆点 (color-tokens.mdc 角色身份 --agent-N)：vision/各角色一眼可辨。 */}
                           <span
                             className="size-2 shrink-0 rounded-full"
                             style={{ backgroundColor: agentColorVar(row.role) }}
@@ -216,7 +220,21 @@ export function UserDetail({
                         </span>
                       </td>
                       <td className="px-5 py-3 text-right font-medium text-foreground tabular-nums">
-                        {fmtCny(nanoUsdToCny(row.cost_total, data.cny_per_usd))}
+                        {fmtNanoCny(row.cost_total, data.cny_per_usd)}
+                      </td>
+                      <td
+                        className="px-5 py-3 text-right text-muted-foreground tabular-nums"
+                        title={
+                          row.cost_estimated_total > 0
+                            ? COST_ESTIMATE_HINT
+                            : undefined
+                        }
+                      >
+                        {fmtNanoCny(
+                          row.cost_estimated_total,
+                          data.cny_per_usd,
+                          true,
+                        )}
                       </td>
                       <td className="px-5 py-3 text-right text-muted-foreground tabular-nums">
                         {fmtInt(row.turns)}
@@ -261,12 +279,28 @@ export function UserDetail({
   );
 }
 
-function WindowCard({ label, window }: { label: string; window: UsageWindow }) {
+function WindowCard({
+  label,
+  window,
+  byok,
+}: {
+  label: string;
+  window: UsageWindow;
+  byok: boolean;
+}) {
+  const est = window.estimated_cost;
   return (
     <div className="rounded-xl border border-border bg-card p-5">
-      <div className="text-muted-foreground text-sm">{label}总成本</div>
-      <div className="mt-1 text-2xl font-semibold text-foreground tabular-nums">
-        {fmtCny(window.cost.cny_total)}
+      <div className="text-muted-foreground text-sm">
+        {byok ? `${label}估算` : `${label}总成本`}
+      </div>
+      <div
+        className="mt-1 text-2xl font-semibold text-foreground tabular-nums"
+        title={byok && est ? COST_ESTIMATE_HINT : undefined}
+      >
+        {byok
+          ? fmtEstimatedCny(est?.cny_total ?? 0)
+          : fmtCny(window.cost.cny_total)}
       </div>
       <div className="mt-4 flex items-center gap-6 text-sm">
         <Stat

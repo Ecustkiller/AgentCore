@@ -6,13 +6,13 @@ import type {
   FsFileRef,
   FsResult,
 } from "@shared/ipc-contract";
-import {
-  LIST_FILES_CAP,
-  LIST_FILES_MAX_DEPTH,
-  LIST_FILES_SKIP_DIRS,
-} from "./constants";
+import { LIST_FILES_CAP, LIST_FILES_MAX_DEPTH } from "./constants";
 import { fromErrno, fsErr, locate, realFail, realInside } from "./pathGuard";
 import { ensureReady } from "./roots";
+import {
+  shouldSkipSystemWorkspaceEntry,
+  shouldSkipWorkspaceEntry,
+} from "./workspaceIgnore";
 import { resolveWritable } from "./workspace/write";
 
 /**
@@ -51,9 +51,7 @@ export async function collectWorkspaceFiles(
       if (d.isSymbolicLink()) continue;
       const childRel = cur.rel ? `${cur.rel}/${d.name}` : d.name;
       if (d.isDirectory()) {
-        if (LIST_FILES_SKIP_DIRS.has(d.name) || d.name.startsWith(".git")) {
-          continue;
-        }
+        if (shouldSkipWorkspaceEntry(d.name, true)) continue;
         if (cur.depth + 1 <= LIST_FILES_MAX_DEPTH) {
           stack.push({
             abs: join(cur.abs, d.name),
@@ -62,6 +60,7 @@ export async function collectWorkspaceFiles(
           });
         }
       } else if (d.isFile()) {
+        if (shouldSkipWorkspaceEntry(d.name, false)) continue;
         let mtimeMs = 0;
         if (recent) {
           try {
@@ -99,8 +98,10 @@ export async function listDir(
     const dirents = await fs.readdir(real.path, { withFileTypes: true });
     const entries: FsEntry[] = [];
     for (const d of dirents) {
-      const childRel = relPath ? `${relPath}/${d.name}` : d.name;
       const isDir = d.isDirectory();
+      // 文件 UI：仅系统噪音；媒体/压缩包等 AI 噪音仍可见（交付物）。
+      if (shouldSkipSystemWorkspaceEntry(d.name, isDir)) continue;
+      const childRel = relPath ? `${relPath}/${d.name}` : d.name;
       let size: number | null = null;
       let modifiedMs: number | null = null;
       try {

@@ -2,11 +2,11 @@
 
 from structlog.testing import capture_logs
 
+from agentcore.runtime.delegate.ceo_format import direct_result, format_for_ceo
 from agentcore.runtime.runs.notewall import NOTE_KIND_CLAIM, NOTE_KIND_DECISION, NoteWall
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 from agentcore.tools.builtin.delegate import DELEGATE_OUTPUT_LIMIT
-from agentcore.tools.builtin.delegate.ceo_format import direct_result, format_for_ceo
 from tests.delegate.conftest import Provider, tool
 
 

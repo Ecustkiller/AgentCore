@@ -11,6 +11,11 @@
 （在现有 ``EventSink`` 上挂钩）截获。
 真实 DeepSeek key 经 :func:`_eval_credentials` 从 eval 专用环境变量读（BYOK 下平台 key 为空，
 见 §十三）；单测注入脚本化假 provider（``EvalHarness(provider=...)``），零成本验证 harness 本身。
+
+``plan_only=True``：经 :func:`~agentcore.runtime.plan_only.use_plan_only` 打开默认关闭的
+delegate/debate 干跑开关——真实规划路径照走，首个 ``run_plan`` 后 HANDOFF 收束；CEO
+``max_rounds`` 压到 :data:`~agentcore.runtime.plan_only.PLAN_ONLY_CEO_MAX_ROUNDS` 防 solo
+搜网页空转。
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ from __future__ import annotations
 import os
 import tempfile
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from agentcore.config import settings
@@ -30,13 +36,14 @@ from agentcore.evals.recording_sink import RecordingSink
 from agentcore.evals.types import EvalCase, EvalConfigError, TurnOutcome
 from agentcore.llm.factory import build_provider
 from agentcore.llm.pricing import NANO_PER_USD, calculate_cost
-from agentcore.llm.profiles import ProfileParams
+from agentcore.llm.profiles import ProfileParams, TurnProfiles
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 from agentcore.llm.resolve import LLMCredentials
 from agentcore.runtime.costing import aggregate_cost
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.pipeline import run_chat_pipeline
+from agentcore.runtime.plan_only import PLAN_ONLY_CEO_MAX_ROUNDS, use_plan_only
 from agentcore.runtime.prompt_profile import use_profile
 from agentcore.tools.builtin import build_ceo_tool_registry, build_worker_registry
 from agentcore.tools.protocol import ToolContext
@@ -54,6 +61,19 @@ _EVAL_CEILING = frozenset(KNOWN_MODELS)
 # fixture 或临时目录提供。
 _EVAL_USER_ID = "eval"
 _DEFAULT_FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def _clamp_ceo_rounds(profiles: TurnProfiles, max_rounds: int) -> TurnProfiles:
+    """Return a TurnProfiles duck that caps the CEO (``chat``) max_rounds only."""
+
+    class _Clamped(TurnProfiles):  # type: ignore[misc,valid-type]
+        def get(self, name: str) -> ProfileParams:  # noqa: A003
+            p = TurnProfiles.get(self, name)
+            if name == "chat":
+                return replace(p, max_rounds=max_rounds)
+            return p
+
+    return _Clamped(model=profiles.model, model_overrides=dict(profiles.model_overrides))
 
 
 def _eval_credentials() -> LLMCredentials | None:
@@ -120,6 +140,9 @@ def single_outcome(
         usage=usage.as_dict(),
         cost_usd=cost_nano / NANO_PER_USD,
         latency_ms=latency_ms,
+        plan_runs=list(sink.plan_runs),
+        plan_type=sink.plan_type,
+        collab_interactions=dict(sink.collab_interactions),
     )
 
 
@@ -154,6 +177,9 @@ def team_outcome(result: dict, sink: RecordingSink, *, latency_ms: int) -> TurnO
         cost_usd=cost_nano / NANO_PER_USD,
         latency_ms=latency_ms,
         error=result.get("error"),
+        plan_runs=list(sink.plan_runs),
+        plan_type=sink.plan_type,
+        collab_interactions=dict(sink.collab_interactions),
     )
 
 
@@ -164,16 +190,27 @@ class EvalHarness:
     用脚本化假 provider 零成本验证 harness。team 路径走 ``run_chat_pipeline``，其内部自建
     provider（无注入缝，遵守零侵入），故 team 的零 LLM 自测改为直测 ``RecordingSink`` 事件
     还原 + :func:`team_outcome` 纯映射（见 tests/test_evals_smoke.py），真模型留给 nightly。
+
+    ``plan_only``：只评 CEO 规划形状——打开 runtime plan-only 开关并压紧 CEO 轮次预算。
     """
 
-    def __init__(self, *, provider=None, fixtures_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        provider=None,
+        fixtures_dir: Path | None = None,
+        plan_only: bool = False,
+    ) -> None:
         self._provider = provider
         self._fixtures_dir = fixtures_dir or _DEFAULT_FIXTURES_DIR
+        self._plan_only = plan_only
 
     async def run_case(self, case: EvalCase) -> TurnOutcome:
         sink = RecordingSink()
         backend = ServerWorkspace(root=self._fixture_root(case), sandbox=SubprocessSandbox())
         profiles = resolve_profile_set(case.mode, custom_modes={}, ceiling=_EVAL_CEILING)
+        if self._plan_only:
+            profiles = _clamp_ceo_rounds(profiles, PLAN_ONLY_CEO_MAX_ROUNDS)
         # 方向①：在本例运行期激活声明的 prompt 变体（None=基线/恒等）。装配函数（深在
         # run_chat_pipeline 内）经 contextvar 就地咨询，故无需改 pipeline / engine 签名；退出
         # use_profile 必复位，变体不泄漏到本例之外。
@@ -189,6 +226,7 @@ class EvalHarness:
         with (
             log_context(trace_id=new_trace_id(), user_id=_EVAL_USER_ID, case=case.id),
             use_profile(prompt_profile),
+            use_plan_only(self._plan_only),
         ):
             try:
                 if case.path == "single":
@@ -203,6 +241,9 @@ class EvalHarness:
                     tool_calls=list(sink.tool_calls),
                     latency_ms=_ms(t0),
                     error=str(e),
+                    plan_runs=list(sink.plan_runs),
+                    plan_type=sink.plan_type,
+                    collab_interactions=dict(sink.collab_interactions),
                 )
 
     async def _run_single(self, case, backend, profiles, sink, t0) -> TurnOutcome:

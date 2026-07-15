@@ -35,6 +35,7 @@ class ConversationRepository:
         folder_id: str | None = None,
         mode: str = "chat",
         local_container_root_id: str | None = None,
+        permission_preset: str | None = None,
     ) -> Conversation:
         # Omit title when not provided so the DB server_default ('') applies.
         # The live `conversations.title` column is NOT NULL; passing an explicit
@@ -56,13 +57,26 @@ class ConversationRepository:
             conv.folder_id = folder_id
         if mode != "chat":
             conv.mode = mode
-        # Desktop local-first lazy-promotion hint (工作区对称化 D1a): the container root
-        # under which a 裸聊's first file write mints a *local* workspace. NULL = cloud
-        # intent. Captured once here at creation so every promotion path (turn / panel)
-        # decides locality the same way, not by whichever writes first.
+        # Desktop local-container hint for 裸聊: effective bind may fall back to this
+        # when ``local_root_id`` is unset (双模式工作区). NULL = cloud intent. Project
+        # chats ignore it (inherit the folder's immutable binding). Auto-promote is vetoed.
         if local_container_root_id is not None:
             conv.local_container_root_id = local_container_root_id
+        if permission_preset is not None:
+            conv.permission_preset = permission_preset
         self._session.add(conv)
+        await self._session.commit()
+        await self._session.refresh(conv)
+        return conv
+
+    async def set_permission_preset(
+        self, conversation_id: str, *, user_id: str, permission_preset: str
+    ) -> Conversation | None:
+        """Owner-scoped update of the session permission mode. Returns None if missing."""
+        conv = await self.get_by_id(conversation_id, user_id=user_id)
+        if not conv:
+            return None
+        conv.permission_preset = permission_preset
         await self._session.commit()
         await self._session.refresh(conv)
         return conv
@@ -282,6 +296,19 @@ class ConversationRepository:
         conv = await self.get_by_id_unscoped(conversation_id)
         return await self._write_title(conv, title)
 
+    async def update_title_if_empty(
+        self, conversation_id: str, title: str
+    ) -> Conversation | None:
+        """Auto-mint write: only when the conversation title is still empty.
+
+        Closes the race with a user rename that lands between schedule and LLM return.
+        Returns ``None`` when the row is missing or already titled (no write).
+        """
+        conv = await self.get_by_id_unscoped(conversation_id)
+        if conv is None or (conv.title and str(conv.title).strip()):
+            return None
+        return await self._write_title(conv, title)
+
     async def _write_title(
         self,
         conv: Conversation | None,
@@ -382,16 +409,15 @@ class ConversationRepository:
         return result.scalars().all()
 
     async def list_ids_by_folder(self, folder_id: str, *, user_id: str) -> list[str]:
-        """Every non-deleted conversation filed in ``folder_id`` (incl. archived).
+        """Every conversation filed in ``folder_id`` (live, archived, or soft-deleted).
 
-        Used by permanent project delete to cascade hard-delete all member chats.
+        Used by permanent project wipe to cascade hard-delete all member chats.
         Handoff-host conversations are excluded (hidden infra rows).
         """
         result = await self._session.execute(
             select(Conversation.id).where(
                 Conversation.user_id == user_id,
                 Conversation.folder_id == folder_id,
-                Conversation.deleted_at.is_(None),
                 Conversation.mode != "handoff",
             )
         )

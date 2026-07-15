@@ -29,6 +29,8 @@ namespace AgentTown.Town
         /// and expose playhead via <see cref="AgentTownDemoBridge"/>.
         /// </summary>
         public readonly bool Shoot;
+        /// <summary>When &gt; 0, boot into programme mode for that episode (e.g. <c>?episode=3</c>).</summary>
+        public readonly int Episode;
 
         public AgentTownLaunchConfig(
             string apiBase,
@@ -36,7 +38,8 @@ namespace AgentTown.Town
             string runId,
             bool demo = false,
             string packId = null,
-            bool shoot = false)
+            bool shoot = false,
+            int episode = 0)
         {
             ApiBase = apiBase;
             AccessToken = accessToken;
@@ -44,6 +47,7 @@ namespace AgentTown.Town
             Demo = demo;
             PackId = DemoPackIds.Normalize(packId);
             Shoot = shoot;
+            Episode = episode;
         }
 
         /// <summary>
@@ -51,7 +55,10 @@ namespace AgentTown.Town
         /// or no live credentials (empty token and run) so the watch surface is never blank.
         /// </summary>
         public bool ShouldAutoOfflineDemo =>
-            Demo || (string.IsNullOrEmpty(AccessToken) && string.IsNullOrEmpty(RunId));
+            Episode <= 0
+            && (Demo || (string.IsNullOrEmpty(AccessToken) && string.IsNullOrEmpty(RunId)));
+
+        public bool ShouldAutoShowEpisode => Episode > 0;
 
         public static AgentTownLaunchConfig Load()
         {
@@ -61,12 +68,13 @@ namespace AgentTown.Town
             bool demo = false;
             string packId = DemoPackIds.PriceSurge;
             bool shoot = false;
+            int episode = 0;
 
             ApplySessionJson(ref apiBase, ref token);
-            ApplyCommandLine(ref apiBase, ref token, ref runId, ref demo, ref packId, ref shoot);
-            ApplyUrlQuery(ref apiBase, ref token, ref runId, ref demo, ref packId, ref shoot);
+            ApplyCommandLine(ref apiBase, ref token, ref runId, ref demo, ref packId, ref shoot, ref episode);
+            ApplyUrlQuery(ref apiBase, ref token, ref runId, ref demo, ref packId, ref shoot, ref episode);
 
-            return new AgentTownLaunchConfig(apiBase, token, runId, demo, packId, shoot);
+            return new AgentTownLaunchConfig(apiBase, token, runId, demo, packId, shoot, episode);
         }
 
         private static void ApplyCommandLine(
@@ -75,7 +83,8 @@ namespace AgentTown.Town
             ref string runId,
             ref bool demo,
             ref string packId,
-            ref bool shoot)
+            ref bool shoot,
+            ref int episode)
         {
 #if !UNITY_WEBGL || UNITY_EDITOR
             Dictionary<string, string> args = ParseCommandLine(Environment.GetCommandLineArgs());
@@ -116,6 +125,11 @@ namespace AgentTown.Town
             {
                 packId = DemoPackIds.Normalize(pack2);
             }
+
+            if (args.TryGetValue("episode", out string ep) && int.TryParse(ep, out int epNo))
+            {
+                episode = epNo;
+            }
 #endif
         }
 
@@ -125,7 +139,8 @@ namespace AgentTown.Town
             ref string runId,
             ref bool demo,
             ref string packId,
-            ref bool shoot)
+            ref bool shoot,
+            ref int episode)
         {
             string url = Application.absoluteURL;
             if (string.IsNullOrEmpty(url) || !url.Contains("?"))
@@ -166,6 +181,11 @@ namespace AgentTown.Town
             if (query.TryGetValue("pack", out string pack) && !string.IsNullOrEmpty(pack))
             {
                 packId = DemoPackIds.Normalize(pack);
+            }
+
+            if (query.TryGetValue("episode", out string ep) && int.TryParse(ep, out int epNo))
+            {
+                episode = epNo;
             }
         }
 

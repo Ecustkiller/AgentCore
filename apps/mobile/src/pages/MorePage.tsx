@@ -58,7 +58,7 @@ export function MorePage() {
 
         <div className="more-group">
           <NavRow label="模型配置" onClick={() => navigate("/more/model")} />
-          <NavRow label="自主度" onClick={() => navigate("/more/autonomy")} />
+          <NavRow label="新会话默认权限" onClick={() => navigate("/more/autonomy")} />
           <NavRow label="账户设置" onClick={() => navigate("/more/account")} />
           <NavRow label="用量" onClick={() => navigate("/more/usage")} />
           <NavRow label="关于" onClick={() => navigate("/more/about")} />

@@ -458,7 +458,6 @@ async def test_cloud_clear_after_pause_snapshot(monkeypatch):
         backend=MagicMock(),
         sink=EventSink(),
         user_message="hi",
-        generate_title=False,
         llm_credentials=None,
         trace_id="tr",
         turn_id="m-pause",

@@ -1,0 +1,238 @@
+{
+  "summary": {
+    "total": 1,
+    "passed": 0,
+    "pass_rate": 0.0,
+    "cost_usd": 0.003196,
+    "by_category": {
+      "team": {
+        "total": 1,
+        "passed": 0,
+        "pass_rate": 0.0
+      }
+    },
+    "by_mast": {
+      "by_group": {
+        "FC3": {
+          "total": 1,
+          "passed": 0,
+          "pass_rate": 0.0
+        }
+      },
+      "by_mode": {
+        "3.2": {
+          "total": 1,
+          "passed": 0,
+          "pass_rate": 0.0
+        }
+      }
+    },
+    "shape_score_mean": 1.0,
+    "shape_score_by_case": {
+      "collab_p2_depth_writing": 1.0
+    }
+  },
+  "cases": [
+    {
+      "case_id": "collab_p2_depth_writing",
+      "category": "team",
+      "mast": "3.2",
+      "passed": false,
+      "shape_score": 1.0,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": false,
+          "detail": "finish_reason='error'",
+          "gating": true
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True",
+          "gating": false
+        },
+        {
+          "name": "ShapeMatches",
+          "passed": true,
+          "detail": "score=1.00 (阈 0.60); independent_reviewer=1.00, min_roles=1.00, min_workers=1.00, parallel_fanout_min=1.00, pipeline_depth_min=1.00",
+          "gating": false
+        },
+        {
+          "name": "NonEmpty",
+          "passed": false,
+          "detail": "len=0 (min 120)",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "error",
+        "rounds": 5,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "研究员（薪资与职业发展）",
+          "研究员（社交资本与人脉）",
+          "研究员（技能成长与可持续性）",
+          "报告写作者",
+          "独立审校官",
+          "修订写手"
+        ],
+        "plan_runs": [
+          {
+            "id": "del_90946e10-d9a3-4560-b0a4-4e4d348206be_research_salary",
+            "role": "研究员（薪资与职业发展）",
+            "task": "搜索关于远程办公对个人薪资、晋升、职业流动性长期影响的最新权威研究与数据。重点关注：① 远程 vs 坐班的薪资差异（行业/职级细分）；② 晋升速度与频率的实证数据；③ 职业中断率与跳槽频率；④ 长期收入轨迹差异。\n\n搜索时可参考的关键来源方向：Stanford/NBER 远程办公研究、Buffer/Remote 年度报告、FlexJobs 劳动力数据、劳工统计等。\n\n产出要求：精炼结论（300-500字）+ 关键证据指引（每条附来源标题与 URL）。不要贴整段原文。",
+            "depends_on": [],
+            "parent_run_id": "b0d12226-896f-4152-85ea-ff81c74d2880"
+          },
+          {
+            "id": "del_90946e10-d9a3-4560-b0a4-4e4d348206be_research_network",
+            "role": "研究员（社交资本与人脉）",
+            "task": "搜索关于远程办公对个人社交资本、人脉网络、导师关系、组织内 visibility 影响的权威研究。重点关注：① 弱连接数量与机会获取变化；②  mentorship 质量与频次变化的数据；③ 跨部门协作与组织内曝光度；④ 长期职业网络建设的影响。\n\n搜索时可参考的关键来源方向：Harvard Business Review、MIT 混合办公研究、Microsoft Work Trend Index、学术期刊（如 JPE、ASQ）等。\n\n产出要求：精炼结论（300-500字）+ 关键证据指引（每条附来源标题与 URL）。不要贴整段原文。",
+            "depends_on": [],
+            "parent_run_id": "b0d12226-896f-4152-85ea-ff81c74d2880"
+          },
+          {
+            "id": "del_90946e10-d9a3-4560-b0a4-4e4d348206be_research_skills",
+            "role": "研究员（技能成长与可持续性）",
+            "task": "搜索关于远程办公对个人技能发展、学习曲线、自我管理能力、工作效率、职业倦怠与可持续性影响的权威研究。重点关注：① 技能习得速度与深度（尤其 junior vs senior 差异）；② 自我管理与元认知能力成长；③ 远程工作效率的长期趋势（非短期疫情效应）；④ 职业倦怠率、工作生活边界模糊问题。\n\n搜索时可参考的关键来源方向：Owl Labs 报告、GitLab 远程手册与调研、科学期刊（如 Nature Human Behaviour、JAP）、World Economic Forum 报告等。\n\n产出要求：精炼结论（300-500字）+ 关键证据指引（每条附来源标题与 URL）。不要贴整段原文。",
+            "depends_on": [],
+            "parent_run_id": "b0d12226-896f-4152-85ea-ff81c74d2880"
+          },
+          {
+            "id": "del_90946e10-d9a3-4560-b0a4-4e4d348206be_writer",
+            "role": "报告写作者",
+            "task": "综合三位调研员的研究成果，撰写一篇面向大众的深度报告《远程办公对个人职业发展的长期影响》。\n\n要求：\n- 受众：普通职场人士/大学生，语言通俗但不失严谨\n- 篇幅：约4000-6000字，markdown 格式\n- 证据支撑：所有关键论断需引用调研中给出的研究/数据\n- 结构自定，建议覆盖薪资与晋升、社交资本与人脉、技能成长与效率、心理健康与可持续性等多维度\n- 视角平衡：既呈现积极影响也列出风险与代价\n- 结尾应有实用的个人策略建议\n\n将报告写入文件「远程办公职业发展报告.md」到工作区根目录。",
+            "depends_on": [
+              "del_90946e10-d9a3-4560-b0a4-4e4d348206be_research_salary",
+              "del_90946e10-d9a3-4560-b0a4-4e4d348206be_research_network",
+              "del_90946e10-d9a3-4560-b0a4-4e4d348206be_research_skills"
+            ],
+            "parent_run_id": "b0d12226-896f-4152-85ea-ff81c74d2880"
+          },
+          {
+            "id": "del_90946e10-d9a3-4560-b0a4-4e4d348206be_reviewer",
+            "role": "独立审校官",
+            "task": "对写作者产出的报告《远程办公职业发展报告.md》进行独立审校。检查以下维度：① 论证逻辑的完整性（是否有跳步/未支持的主张）；② 证据引用的准确性（是否与研究来源一致）；③ 受众适配度（语言是否对大众友好，有无不必要的术语堆砌）；④ 结构流畅度（是否自然推进）；⑤ 视角平衡性（是否客观展示正反两面）。\n\n审校结束后，仅输出一个纯 JSON 对象（不要附带任何说明文字），严格遵循以下结构：\n{\n  \"problems\": [\n    {\"severity\": \"high/medium/low\", \"description\": \"具体问题描述\", \"evidence\": \"相关问题在报告中大致位置或具体例句\"}\n  ],\n  \"suggestions\": [\"建议1\", \"建议2\", ...],\n  \"score\": 8\n}\n\nscore 为 0-10 的整数，10 为完美。problems 至少包含 2-5 条，suggestions 至少 2-5 条。",
+            "depends_on": [
+              "del_90946e10-d9a3-4560-b0a4-4e4d348206be_writer"
+            ],
+            "parent_run_id": "b0d12226-896f-4152-85ea-ff81c74d2880"
+          },
+          {
+            "id": "del_90946e10-d9a3-4560-b0a4-4e4d348206be_reviser",
+            "role": "修订写手",
+            "task": "根据审校官的结构化 JSON 反馈，对「远程办公职业发展报告.md」进行修订。\n\n要求：\n- 采纳审校中列出的合理问题与建议，逐一对应修改\n- 保留原文的亮点与核心结构\n- 修订后内容覆盖原文件「远程办公职业发展报告.md」\n- 在文件末尾以「> 📝 修订说明」段落列出你对每条审校反馈的处理（哪些采纳、如何改、哪些未采纳及理由）",
+            "depends_on": [
+              "del_90946e10-d9a3-4560-b0a4-4e4d348206be_reviewer"
+            ],
+            "parent_run_id": "b0d12226-896f-4152-85ea-ff81c74d2880"
+          }
+        ],
+        "plan_type": "multi_agent",
+        "collab_interactions": {},
+        "tool_calls": [
+          "consult_skill",
+          "delegate",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "read_url",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "read_url",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "handoff",
+          "update_synthesis",
+          "handoff",
+          "update_synthesis",
+          "handoff",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "read_url",
+          "read_url",
+          "read_url",
+          "read_url",
+          "web_search",
+          "handoff",
+          "delegate"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 78786,
+          "output": 5890,
+          "reasoning": 4019
+        },
+        "cost_usd": 0.003196,
+        "latency_ms": 196491,
+        "error": null,
+        "content_preview": ""
+      }
+    }
+  ]
+}

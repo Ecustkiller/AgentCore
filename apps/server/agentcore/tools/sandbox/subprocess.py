@@ -178,6 +178,11 @@ class SubprocessSandbox:
                     # Run in the caller's workspace when given (so code sees the
                     # same files as the file tools); else the throwaway temp dir.
                     cwd=request.cwd or tmpdir,
+                    env=(
+                        {**os.environ, **request.env}
+                        if request.env
+                        else None
+                    ),
                     **_new_group_kwargs(),
                 )
                 # Capture the pid up front: after a clean exit asyncio reaps the child

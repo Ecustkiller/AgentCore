@@ -2,15 +2,11 @@ import type {
   CheckpointRequiredPayload,
   PlanReviewRequiredPayload,
   QuestionPostedPayload,
-  SSEEvent,
 } from "@/types/events";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  checkpointsFromEvents,
   getActiveRuntime,
   getRuntime,
-  nonBlockingAsksFromEvents,
-  planReviewsFromEvents,
   useConversationStore,
 } from "../conversation";
 import { execRuntime, useExecutionStore } from "../execution";
@@ -540,8 +536,8 @@ describe("conversation store", () => {
 });
 
 // 结构化挂起 2a (7.1): a plan_review card lives on the assistant message it paused —
-// set live (addPlanReview/settlePlanReview) and rebuilt from the journal on reload
-// (planReviewsFromEvents), exactly like an ask_user checkpoint.
+// set live via InteractionStore; journal reload hydrates through
+// hydrateInteractionsFromJournal (see interactions.test.ts).
 describe("plan_review cards (结构化挂起 2a)", () => {
   const reqPayload = (
     id: string,
@@ -555,54 +551,6 @@ describe("plan_review cards (结构化挂起 2a)", () => {
       summary: "产出",
     })),
     pending: [{ run_id: "next", role: "下游" }],
-  });
-  const reqEvent = (id: string, runIds: string[]): SSEEvent => ({
-    type: "plan_review_required",
-    timestamp: "",
-    payload: reqPayload(id, runIds),
-  });
-  const resEvent = (
-    id: string,
-    decision: "continue" | "stop",
-    note = "",
-  ): SSEEvent => ({
-    type: "plan_review_resolved",
-    timestamp: "",
-    payload: { checkpoint_id: id, decision, note },
-  });
-
-  describe("planReviewsFromEvents (history replay)", () => {
-    it("folds a required→resolved pair into one resolved card", () => {
-      const cards = planReviewsFromEvents([
-        reqEvent("c1", ["run-1"]),
-        resEvent("c1", "continue", "放行"),
-      ]);
-      expect(cards).toHaveLength(1);
-      expect(cards[0]).toMatchObject({
-        id: "c1",
-        status: "resolved",
-        decision: "continue",
-        note: "放行",
-      });
-      expect(cards[0].steps.map((s) => s.run_id)).toEqual(["run-1"]);
-      expect(cards[0].pending.map((p) => p.run_id)).toEqual(["next"]);
-    });
-
-    it("keeps an unresolved required as a pending card", () => {
-      const cards = planReviewsFromEvents([reqEvent("c1", ["run-1"])]);
-      expect(cards[0]).toMatchObject({ status: "pending", decision: null });
-    });
-
-    it("preserves raise order across multiple checkpoints", () => {
-      const cards = planReviewsFromEvents([
-        reqEvent("c1", ["run-1"]),
-        reqEvent("c2", ["run-2"]),
-        resEvent("c1", "stop"),
-      ]);
-      expect(cards.map((c) => c.id)).toEqual(["c1", "c2"]);
-      expect(cards[0].status).toBe("resolved");
-      expect(cards[1].status).toBe("pending");
-    });
   });
 
   describe("InteractionStore plan_review + process stamp (live)", () => {
@@ -705,10 +653,10 @@ describe("plan_review cards (结构化挂起 2a)", () => {
 });
 
 // ask_user: the one asking surface (统一开场引导 + 途中拍板). A card lives on the
-// assistant message it paused — set live (addCheckpoint) and rebuilt from the
-// journal on reload (checkpointsFromEvents), then flipped to its settled twin on
-// resolve (settleCheckpoint / checkpoint_resolved). The opening flavor carries the
-// rich content the former kickoff did (assumptions / questions / style_options).
+// assistant message it paused — set live via InteractionStore, flipped on resolve;
+// journal reload hydrates through hydrateInteractionsFromJournal
+// (see interactions.test.ts). The opening flavor carries the rich content the
+// former kickoff did (assumptions / questions / style_options).
 describe("ask_user cards (统一开场引导 + 途中拍板)", () => {
   const reqPayload = (id: string): CheckpointRequiredPayload => ({
     checkpoint_id: id,
@@ -730,66 +678,6 @@ describe("ask_user cards (统一开场引导 + 途中拍板)", () => {
       },
     ],
     style_options: [{ id: "s0", label: "深色科技" }],
-  });
-  const reqEvent = (id: string): SSEEvent => ({
-    type: "checkpoint_required",
-    timestamp: "",
-    payload: reqPayload(id),
-  });
-  const resEvent = (
-    id: string,
-    decision: "continue" | "stop",
-    note = "",
-    selected: string[] = [],
-  ): SSEEvent => ({
-    type: "checkpoint_resolved",
-    timestamp: "",
-    payload: { checkpoint_id: id, decision, note, selected },
-  });
-
-  describe("checkpointsFromEvents (history replay)", () => {
-    it("folds a required event into one pending card (rich opening fields)", () => {
-      const cards = checkpointsFromEvents([reqEvent("c1")]);
-      expect(cards).toHaveLength(1);
-      expect(cards[0]).toMatchObject({
-        id: "c1",
-        status: "pending",
-        decision: null,
-        assumptions: [{ id: "a0", label: "部署", value: "纯静态" }],
-        styleOptions: [{ id: "s0", label: "深色科技" }],
-      });
-      expect(cards[0].questions[0].default).toBe("潜在客户");
-    });
-
-    it("folds a required→resolved pair into one settled card", () => {
-      const cards = checkpointsFromEvents([
-        reqEvent("c1"),
-        resEvent("c1", "continue", "就按这个开做", ["潜在客户"]),
-      ]);
-      expect(cards).toHaveLength(1);
-      expect(cards[0]).toMatchObject({
-        id: "c1",
-        status: "resolved",
-        decision: "continue",
-        note: "就按这个开做",
-        selected: ["潜在客户"],
-      });
-    });
-
-    it("preserves raise order across multiple checkpoints", () => {
-      const cards = checkpointsFromEvents([
-        reqEvent("c1"),
-        reqEvent("c2"),
-        resEvent("c1", "stop"),
-      ]);
-      expect(cards.map((c) => c.id)).toEqual(["c1", "c2"]);
-      expect(cards[0].status).toBe("resolved");
-      expect(cards[1].status).toBe("pending");
-    });
-
-    it("is empty when the journal has no checkpoint", () => {
-      expect(checkpointsFromEvents([])).toEqual([]);
-    });
   });
 
   describe("InteractionStore ask_user + process stamp (live)", () => {
@@ -872,10 +760,10 @@ describe("ask_user cards (统一开场引导 + 途中拍板)", () => {
 });
 
 // 非阻塞发问 (ask_user blocking=false, Cursor 式): a non-gating card lives on the
-// assistant message that posted it — set live (addNonBlockingAsk) and rebuilt from the
-// journal on reload (nonBlockingAsksFromEvents). Unlike a checkpoint it has no
-// status/decision (never pending) and no settle — the user's answer rides a next-turn
-// message; the card's chips just 回填 the composer.
+// assistant message that posted it — set live via InteractionStore; journal reload
+// hydrates through hydrateInteractionsFromJournal (see interactions.test.ts).
+// Unlike a checkpoint it has no status/decision (never pending) and no settle —
+// the user's answer rides a next-turn message; the card's chips just 回填 the composer.
 describe("non-blocking ask cards (ask_user blocking=false)", () => {
   const postedPayload = (id: string): QuestionPostedPayload => ({
     ask_id: id,
@@ -894,37 +782,6 @@ describe("non-blocking ask cards (ask_user blocking=false)", () => {
       },
     ],
     style_options: [],
-  });
-  const postedEvent = (id: string): SSEEvent => ({
-    type: "question_posted",
-    timestamp: "",
-    payload: postedPayload(id),
-  });
-
-  describe("nonBlockingAsksFromEvents (history replay)", () => {
-    it("folds a question_posted event into one card (rich fields)", () => {
-      const cards = nonBlockingAsksFromEvents([postedEvent("n1")]);
-      expect(cards).toHaveLength(1);
-      expect(cards[0]).toMatchObject({
-        id: "n1",
-        question: "我先按响应式单页做，可以吗？",
-        assumptions: [{ id: "a0", label: "部署", value: "纯静态" }],
-      });
-      expect(cards[0].questions[0].default).toBe("不要");
-    });
-
-    it("dedupes a re-delivered event and preserves post order", () => {
-      const cards = nonBlockingAsksFromEvents([
-        postedEvent("n1"),
-        postedEvent("n2"),
-        postedEvent("n1"),
-      ]);
-      expect(cards.map((c) => c.id)).toEqual(["n1", "n2"]);
-    });
-
-    it("is empty when the journal has no non-blocking ask", () => {
-      expect(nonBlockingAsksFromEvents([])).toEqual([]);
-    });
   });
 
   describe("InteractionStore question_posted + process stamp (live)", () => {

@@ -1,3 +1,4 @@
+import { parseCheckpointIntent } from "@/lib/checkpointIntent";
 import type { components } from "@/types/api.generated";
 import type {
   AskAssumption,
@@ -154,8 +155,9 @@ const toOptions = (raw: unknown): AskOption[] =>
           label: String(obj.label ?? ""),
           ...(obj.detail ? { detail: String(obj.detail) } : {}),
           ...(obj.recommended ? { recommended: true } : {}),
-          ...(obj.action === "bind_local_folder"
-            ? { action: "bind_local_folder" as const }
+          ...(obj.action === "bind_local_folder" ||
+          obj.action === "grant_readonly_folder"
+            ? { action: obj.action as "bind_local_folder" | "grant_readonly_folder" }
             : {}),
         };
       })
@@ -172,7 +174,7 @@ const toQuestions = (raw: PausedTurnSummary["questions"]): AskQuestion[] =>
   }));
 
 const toIntent = (raw: unknown): CheckpointIntent =>
-  raw === "kickoff" ? "kickoff" : "decision";
+  parseCheckpointIntent(raw);
 
 const toStyleOptions = (
   raw: PausedTurnSummary["style_options"],
@@ -182,14 +184,20 @@ const toStyleOptions = (
     label: String(s.label ?? ""),
   }));
 
+/** One recovery-frame summary tagged with where its durable frame lives. */
+export type PausedTurnEntry = {
+  summary: PausedTurnSummary;
+  origin: ResumeOrigin;
+};
+
 interface PausedTurnState {
   pending: PendingResume[];
   /** Replace one conversation's pending resumes (from the recovery snapshot on reopen),
-   * leaving other conversations' entries untouched. */
+   * leaving other conversations' entries untouched. Each entry carries its own
+   * {@link ResumeOrigin} so a mixed cloud+sidecar session routes resume correctly. */
   setForConversation: (
     conversationId: string,
-    summaries: PausedTurnSummary[],
-    origin: ResumeOrigin,
+    entries: PausedTurnEntry[],
   ) => void;
   /** 挂起即收口 (②): add/replace ONE turn's resume entry the moment its LIVE stream ENDS
    * at a checkpoint (message_end finish_reason=paused). Built from the *_required payload
@@ -214,11 +222,11 @@ interface PausedTurnState {
 export const usePausedTurnStore = create<PausedTurnState>((set) => ({
   pending: [],
 
-  setForConversation: (conversationId, summaries, origin) =>
+  setForConversation: (conversationId, entries) =>
     set((state) => ({
       pending: [
         ...state.pending.filter((p) => p.conversationId !== conversationId),
-        ...summaries.map((s) => ({
+        ...entries.map(({ summary: s, origin }) => ({
           messageId: s.message_id,
           conversationId,
           checkpointId: s.checkpoint_id,

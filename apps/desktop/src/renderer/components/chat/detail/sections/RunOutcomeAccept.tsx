@@ -27,7 +27,7 @@ const COPY: Record<RunOutcomeReason, { heading: string; body: string }> = {
   },
   recovery_ignored: {
     heading: "已忽略这次救火",
-    body: "你在状态条上选择了忽略——该步骤保持失败态收尾。可接受此结果，或在对话里让 CEO 重新安排。",
+    body: "你发起了新回合，上次救火已隐式收口——该步骤保持失败态收尾。可接受此结果，或在对话里让 CEO 重新安排。",
   },
 };
 

@@ -85,9 +85,33 @@ def test_inflight_partial_message_detail_shape():
         }
     )
     assert d.status == "running"
+    assert d.paused is None
     assert d.content and d.content.startswith("正在生成")
     assert d.reasoning_content and "想" in d.reasoning_content
     assert d.usage is None  # mid-stream often has no token snapshot yet
+
+
+def test_paused_latch_projects_on_message_detail():
+    """Cold-path pause latch (挂起即收口): status=running + paused=true is valid wire.
+
+    Write side keeps ``status=running`` (overlay/promotion latch); read lifts ``paused``
+    so clients do not hydrate as streaming. Tokens may be present or absent.
+    """
+    d = MessageDetail.model_validate(
+        {
+            "id": "m-paused",
+            "conversation_id": "c1",
+            "role": "assistant",
+            "content": "检查点前已生成的正文",
+            "status": "running",
+            "paused": True,
+            "created_at": datetime.now(UTC),
+            "usage": None,
+        }
+    )
+    assert d.status == "running"
+    assert d.paused is True
+    assert d.content and "检查点" in d.content
 
 
 def test_inflight_fixture_validates_against_message_detail():

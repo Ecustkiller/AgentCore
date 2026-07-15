@@ -8,7 +8,7 @@ using UnityEngine;
 namespace AgentTown.Simulation
 {
     /// <summary>
-    /// Loads <c>simulation-region-positions.json</c> — the single source for the 10 town
+    /// Loads <c>simulation-region-positions.json</c> — the single source for town
     /// region anchors (§6.3). Values are wire-space; convert with
     /// <see cref="WireCoordinateTransform.ToUnity(WireVec3)"/> at render time.
     ///

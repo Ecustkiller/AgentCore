@@ -133,7 +133,7 @@ def _eval_provider_and_model(mode: str) -> tuple[LLMProvider, str]:
     model = os.environ.get("EVAL_JUDGE_MODEL", "").strip()
     if not model:
         profiles = resolve_profile_set(mode, custom_modes={}, ceiling=_EVAL_CEILING)
-        model = profiles.get("chat").model
+        model = profiles.model_for("chat")
     return provider, model
 
 

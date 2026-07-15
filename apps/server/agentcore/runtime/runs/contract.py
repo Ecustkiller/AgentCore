@@ -4,7 +4,11 @@ A worker's product is accepted only if it satisfies its node's delivery spec
 (:class:`Deliverable`). 阶段2 第一刀做「机械校验」——看产出的*形*而非*质*：非空（系统
 兜底，始终生效）、最短/最长长度、必含关键词、必备小标题、（声明
 ``output_format="json"`` 时）能否解析为 JSON、以及声明式 ``artifacts`` 路径清单相对
-工作区的存在性对账。判「写得好不好」的语义裁判（额外一次 LLM 调用）留作后续增强。
+工作区的存在性对账。当 ``output_format=json`` 与 ``artifacts`` 同用时，JSON 可解析性
+改验工作区文件（结构化文件通道），不再要求聊天正文是 JSON。``output_format=json`` 与
+``required_sections``（Markdown 小标题语义）混用时跳过章节校验，避免自相矛盾的假失败。
+
+判「写得好不好」的语义裁判（额外一次 LLM 调用）留作后续增强。
 
 校验的后续处置（带反馈返工 / 按 ``strict`` 决定硬退或软提醒）在执行器里，本模块只产出结论
 （:class:`ContractVerdict`）、给模型的修正说明与产出要求描述，保持纯函数、可独立单测。
@@ -41,6 +45,7 @@ def check_contract(
     files_written: int = 0,
     debrief: dict[str, Any] | None = None,
     workspace_paths: list[str] | None = None,
+    artifact_contents: dict[str, str] | None = None,
 ) -> ContractVerdict:
     """Check ``content`` against ``deliverable``; return a verdict + human reasons.
 
@@ -59,6 +64,11 @@ def check_contract(
     patterns (exact / directory prefix / glob). Callers pass the live workspace
     listing unioned with this run's ``files_touched``; ``None`` / empty means the
     workspace looks empty for matching purposes.
+
+    ``artifact_contents`` maps workspace paths → file text. When ``output_format=json``
+    pairs with ``artifacts``, the JSON gate reads these texts (file channel) instead of
+    requiring the chat body to be JSON. Callers that cannot supply contents still get
+    existence checks via ``artifacts``; parseability is enforced when contents are given.
 
     Workers often finish with ``file_write`` + ``handoff`` and no streamed prose
     (``deliverable_only`` rolls back narration before non-terminal tools). The
@@ -86,11 +96,23 @@ def check_contract(
         for keyword in deliverable.must_contain:
             if keyword and keyword.casefold() not in haystack:
                 failures.append(f"缺少必须包含的内容：{keyword}")
-    for section in deliverable.required_sections:
-        if section and not _has_section(content, section):
-            failures.append(f"缺少必备章节：{section}")
-    if deliverable.output_format == "json" and not _is_json(content):
-        failures.append("产出不是可解析的 JSON")
+    # required_sections = Markdown heading semantics. Skip when output_format=json to
+    # avoid false failures from JSON field names stuffed into required_sections.
+    if deliverable.output_format != "json":
+        for section in deliverable.required_sections:
+            if section and not _has_section(content, section):
+                failures.append(f"缺少必备章节：{section}")
+    if deliverable.output_format == "json":
+        if deliverable.artifacts:
+            failures.extend(
+                _json_artifact_failures(
+                    deliverable.artifacts,
+                    workspace_paths or [],
+                    artifact_contents,
+                )
+            )
+        elif not _is_json(content):
+            failures.append("产出不是可解析的 JSON")
     if deliverable.requires_files and files_written <= 0:
         failures.append("未把产物写入工作区：交付物须用 file_write 落盘，而非粘在回复正文里")
     if deliverable.artifacts:
@@ -108,20 +130,73 @@ def missing_artifacts(patterns: list[str], workspace_paths: list[str]) -> list[s
 
 def artifact_present(pattern: str, workspace_paths: list[str]) -> bool:
     """Whether ``pattern`` (exact path / directory / glob) hits any workspace path."""
+    return bool(matching_artifact_paths(pattern, workspace_paths))
+
+
+def matching_artifact_paths(pattern: str, workspace_paths: list[str]) -> list[str]:
+    """Workspace paths matching ``pattern`` (exact / directory prefix / glob), stable order."""
     pat = pattern.replace("\\", "/").strip().lstrip("./")
     if not pat:
-        return True
+        return []
     normalized = [p.replace("\\", "/").lstrip("./") for p in workspace_paths if p]
-    if pat.endswith("/"):
-        prefix = pat
-        bare = pat.rstrip("/")
-        return any(p == bare or p.startswith(prefix) for p in normalized)
-    if any(ch in pat for ch in "*?["):
-        return any(
-            fnmatch.fnmatch(p, pat) or fnmatch.fnmatch(p.rsplit("/", 1)[-1], pat)
-            for p in normalized
-        )
-    return any(p == pat or p.endswith("/" + pat) for p in normalized)
+    hits: list[str] = []
+    for p in normalized:
+        if pat.endswith("/"):
+            prefix = pat
+            bare = pat.rstrip("/")
+            if p == bare or p.startswith(prefix):
+                hits.append(p)
+        elif any(ch in pat for ch in "*?["):
+            if fnmatch.fnmatch(p, pat) or fnmatch.fnmatch(p.rsplit("/", 1)[-1], pat):
+                hits.append(p)
+        elif p == pat or p.endswith("/" + pat):
+            hits.append(p)
+    return hits
+
+
+def _json_artifact_failures(
+    patterns: list[str],
+    workspace_paths: list[str],
+    artifact_contents: dict[str, str] | None,
+) -> list[str]:
+    """Failures when structured JSON must land in artifact files (not chat).
+
+    Existence is reported separately by ``missing_artifacts``. When contents are
+    supplied, each present pattern must have at least one matching path whose text
+    parses as JSON. When contents are omitted, parseability is not checked here
+    (caller may only have a path index).
+    """
+    if artifact_contents is None:
+        return []
+    failures: list[str] = []
+    # Normalize content keys the same way as path matching.
+    by_norm = {k.replace("\\", "/").lstrip("./"): v for k, v in artifact_contents.items() if k}
+    for pattern in patterns:
+        if not pattern:
+            continue
+        matches = matching_artifact_paths(pattern, workspace_paths)
+        if not matches:
+            continue  # missing_artifacts already covers absence
+        parsed_ok = False
+        unread: list[str] = []
+        bad: list[str] = []
+        for path in matches:
+            if path not in by_norm:
+                unread.append(path)
+                continue
+            if _is_json(by_norm[path]):
+                parsed_ok = True
+                break
+            bad.append(path)
+        if parsed_ok:
+            continue
+        if bad:
+            listed = "、".join(f"`{p}`" for p in bad[:3])
+            failures.append(f"交付物文件不是可解析的 JSON：{listed}")
+        elif unread:
+            listed = "、".join(f"`{p}`" for p in unread[:3])
+            failures.append(f"交付物文件无法读取以校验 JSON：{listed}")
+    return failures
 
 
 def format_feedback(verdict: ContractVerdict) -> str:
@@ -148,7 +223,20 @@ def describe_deliverable(deliverable: Deliverable | None) -> str:
     lines: list[str] = []
     if deliverable.name:
         lines.append(f"交付物：{deliverable.name}")
-    if deliverable.required_sections:
+    if deliverable.form == "prose":
+        lines.append("- 交付形态：纯文字（正文直接交付，不要落盘）")
+    elif deliverable.form == "files":
+        lines.append("- 交付形态：落盘文件（必须 file_write 写入工作区）")
+    # Markdown section headings and JSON are mutually exclusive acceptance shapes.
+    if deliverable.output_format == "json":
+        if deliverable.artifacts and deliverable.form != "prose":
+            lines.append(
+                "- 产出必须是可解析的 JSON，写入声明的交付物路径"
+                "（不要只贴在回复正文；契约验文件存在 + 可解析）"
+            )
+        else:
+            lines.append("- 产出必须是可解析的 JSON")
+    elif deliverable.required_sections:
         lines.append("- 必须包含这些章节（用小标题）：" + "、".join(deliverable.required_sections))
     if deliverable.must_contain:
         lines.append("- 必须涉及：" + "、".join(deliverable.must_contain))
@@ -156,15 +244,15 @@ def describe_deliverable(deliverable: Deliverable | None) -> str:
         lines.append(f"- 篇幅不少于 {deliverable.min_length} 字")
     if deliverable.max_length:
         lines.append(f"- 篇幅不超过 {deliverable.max_length} 字")
-    if deliverable.output_format == "json":
-        lines.append("- 产出必须是可解析的 JSON")
-    if deliverable.artifacts:
-        listed = "、".join(f"`{p}`" for p in deliverable.artifacts)
-        lines.append(f"- 必须把以下交付物路径写入工作区（可用目录或通配）：{listed}")
-    elif deliverable.requires_files:
-        lines.append(
-            "- 必须调用 file_write 把产物写进工作区（成品是落盘文件，不能只贴在回复正文里）"
-        )
+    # prose form never surfaces file-landing requirements (even if a stale flag slipped in).
+    if deliverable.form != "prose":
+        if deliverable.artifacts:
+            listed = "、".join(f"`{p}`" for p in deliverable.artifacts)
+            lines.append(f"- 必须把以下交付物路径写入工作区（可用目录或通配）：{listed}")
+        elif deliverable.requires_files:
+            lines.append(
+                "- 必须调用 file_write 把产物写进工作区（成品是落盘文件，不能只贴在回复正文里）"
+            )
     return "\n".join(lines)
 
 

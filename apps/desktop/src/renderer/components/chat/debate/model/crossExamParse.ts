@@ -1,16 +1,17 @@
-/** 质询作答 blob → 逐条 Q↔A 解析（JSON 数组，与后端 `cross_exam_parse.py` 对齐）。
+/** 质询作答 blob → 逐条 Q↔A 解析（markdown 标题体，与后端 `cross_exam_parse.py` 对齐）。
  *
- * 权威路径是结构化 ``cross_exam[].exchanges[]``（收场后由后端解析下发）；本模块仅在 live
- * 流式阶段、从 ``_cx_`` run 的 ``outputChunks`` 重建作答时调用。dict 项按 ``question_index``；
- * 标量字符串/数字数组按位置映射。非 JSON 作答在结构化事件到达前保持空 answer。
- * 只对齐问↔答；是否正面回应由裁判裁定，本模块不产出二元褒贬字段。 */
+ * 新契约：后端解析产物进 ``cross_exam[].exchanges``，投影层优先读载荷。本模块仅作
+ * **旧 journal / live 流式尚无答案**时的兼容回退。主路径按 ``### 质询一`` / ``质询1`` /
+ * ``Q1`` / ``1.`` 切段；切不出段 → 整段挂第一题。 */
 
 export interface CrossExamQaView {
   question: string;
   answer: string;
 }
 
-const JSON_ARRAY_FENCE_RE = /```(?:json)?\s*(\[.*?\])\s*```/s;
+/** 数字分段要求分隔符后非数字，避免「3.5 倍…」被误当第 3 段。可选 `### ` 前缀。 */
+const SECTION_RE =
+  /(?:^|\n)\s*(?:#{1,6}\s*)?(?:质询[一二三四五六七八九十\d]+|[Qq]\s*\d+|\d+[.、)](?!\d))\s*[:：.]?\s*/gm;
 
 /** 从辩手质询作答构造与 `questions` 等长的逐条交换。 */
 export function parseCrossExamResponse(
@@ -20,87 +21,48 @@ export function parseCrossExamResponse(
   const qs = questions.map((q) => q.trim()).filter(Boolean);
   if (qs.length === 0) return [];
 
-  const items = extractJsonArray(content);
-  if (items !== null) {
-    return exchangesFromJsonItems(qs, items);
-  }
-
-  return qs.map((question) => ({ question, answer: "" }));
-}
-
-function extractJsonArray(content: string): unknown[] | null {
   const text = (content ?? "").trim();
-  if (!text) return null;
-
-  const fence = JSON_ARRAY_FENCE_RE.exec(text);
-  let jsonText: string;
-  if (fence) {
-    jsonText = fence[1].trim();
-  } else {
-    const start = text.indexOf("[");
-    const end = text.lastIndexOf("]");
-    if (start === -1 || end <= start) return null;
-    jsonText = text.slice(start, end + 1);
+  if (!text) {
+    return qs.map((question) => ({ question, answer: "" }));
   }
 
-  try {
-    const data: unknown = JSON.parse(jsonText);
-    if (!Array.isArray(data) || data.length === 0) return null;
-    return data;
-  } catch {
-    return null;
+  const sections = splitSections(text);
+  if (sections.length > 0) {
+    const aligned =
+      sections.length > qs.length
+        ? sections.slice(0, qs.length)
+        : sections.length < qs.length
+          ? [...sections, ...Array(qs.length - sections.length).fill("")]
+          : sections;
+    return qs.map((question, i) => ({
+      question,
+      answer: aligned[i] ?? "",
+    }));
   }
+
+  // 切不出段：全文挂第一条，其余空。
+  if (qs.length === 1) {
+    return [{ question: qs[0], answer: text }];
+  }
+  return [
+    { question: qs[0], answer: text },
+    ...qs.slice(1).map((question) => ({ question, answer: "" })),
+  ];
 }
 
-function exchangesFromJsonItems(
-  questions: readonly string[],
-  items: readonly unknown[],
-): CrossExamQaView[] {
-  const out: CrossExamQaView[] = questions.map((question) => ({
-    question,
-    answer: "",
-  }));
-  items.forEach((raw, pos) => {
-    // dict 项：按 question_index / 位置取 answer
-    if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
-      const item = raw as Record<string, unknown>;
-      const idx = resolveQuestionIndex(item.question_index, pos);
-      if (idx === null || idx < 0 || idx >= out.length) return;
-      const answer = asAnswerText(item.answer);
-      out[idx] = { question: questions[idx], answer };
-      return;
-    }
-    // 标量数组：按位置映射为 answer（兼容少包一层 wrapper 的 ["答一","答二"]）
-    if (pos >= out.length) return;
-    if (typeof raw !== "string" && typeof raw !== "number") return;
-    const answer = asAnswerText(raw);
-    out[pos] = {
-      question: questions[pos],
-      answer,
-    };
-  });
-  return out;
-}
-
-function resolveQuestionIndex(value: unknown, position: number): number | null {
-  if (typeof value === "boolean") return null;
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const n = Math.trunc(value);
-    return n >= 1 ? n - 1 : n;
+function splitSections(text: string): string[] {
+  const re = new RegExp(SECTION_RE.source, SECTION_RE.flags);
+  const matches = [...text.matchAll(re)];
+  if (matches.length === 0) return [];
+  const sections: string[] = [];
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i];
+    const start = (m.index ?? 0) + m[0].length;
+    const end =
+      i + 1 < matches.length
+        ? (matches[i + 1].index ?? text.length)
+        : text.length;
+    sections.push(text.slice(start, end).trim());
   }
-  if (
-    typeof value === "string" &&
-    value.trim().length > 0 &&
-    /^\d+$/.test(value.trim())
-  ) {
-    const n = Number(value.trim());
-    return n >= 1 ? n - 1 : n;
-  }
-  return position;
-}
-
-function asAnswerText(value: unknown): string {
-  if (typeof value === "string") return value.trim();
-  if (value == null) return "";
-  return String(value).trim();
+  return sections;
 }

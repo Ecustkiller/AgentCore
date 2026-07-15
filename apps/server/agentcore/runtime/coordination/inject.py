@@ -8,7 +8,7 @@ from agentcore.runtime.coordination.session import (
     CoordinationEventKind,
     CoordinationSession,
 )
-from agentcore.tools.builtin.delegate.team_synthesis import worker_output_blurb
+from agentcore.runtime.delegate.team_synthesis import worker_output_blurb
 
 
 def format_coordination_events(
@@ -94,14 +94,30 @@ def _format_one(session: CoordinationSession, ev: CoordinationEvent) -> str:
             )
         return f"- timeout【{role}】：{reason}"
     if ev.kind is CoordinationEventKind.ALL_COMPLETED:
-        return (
+        lines = [
             f"- all_completed：团队已全部结束（{p.get('completed', 0)}/"
             f"{p.get('total', session.total_workers)}）。请做最终合成并收口。"
+        ]
+        output = p.get("output")
+        if isinstance(output, str) and output.strip():
+            lines.append(f"团队成品：\n{output.strip()}")
+        lines.append(
+            "质量面敏感成品（成篇/构建/审查类）若未经独立审计，先派审计再收尾。"
         )
+        return "\n".join(lines)
     if ev.kind is CoordinationEventKind.BOUNDARY_YIELD:
+        reason = p.get("reason") or "?"
+        brief = p.get("brief") or ""
+        if reason == "checkpoint":
+            detail = f" 已完成摘要：{brief}" if brief.strip() else ""
+            return (
+                f"- boundary_yield（checkpoint）：这些节点要求用户把关，"
+                "必须立即用 ask_user（blocking）把关键内容交用户拍板，"
+                f"不得自行替用户决定。{detail}"
+            )
         return (
-            f"- boundary_yield（{p.get('reason') or '?'}）：计划在波边界让出——"
-            f"{p.get('brief') or '请用 replan 续跑或收口'}。"
+            f"- boundary_yield（{reason}）：计划在波边界让出——"
+            f"{brief or '请用 replan 续跑或收口'}。"
         )
     return f"- {ev.kind.value}：{p}"
 

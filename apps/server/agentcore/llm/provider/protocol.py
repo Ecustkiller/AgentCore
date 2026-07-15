@@ -4,6 +4,12 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
+# Shared retry / backoff knobs for provider I/O and engine stream consumers.
+# Public so runtime.engine.stream (and tests) never touch provider privates.
+MAX_RETRIES = 3
+INITIAL_BACKOFF = 2.0
+BACKOFF_MULTIPLIER = 2.0
+
 
 @dataclass
 class ToolCallFunction:

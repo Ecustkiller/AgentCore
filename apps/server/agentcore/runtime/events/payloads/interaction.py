@@ -66,12 +66,14 @@ class AskOption(WirePayload):
     (NOT a pre-selection). `action` marks an option that the desktop client fulfils with a
     native client action instead of a plain text answer (unknown/absent → plain option):
     `bind_local_folder` renders as a folder picker that binds the conversation workspace
-    to the chosen local directory before resuming the turn."""
+    to the chosen local directory before resuming the turn;
+    `grant_readonly_folder` renders as a folder picker that grants a session-scoped
+    read-only mount under ``external/<alias>/`` (W3; does not change workspace binding)."""
 
     label: str
     detail: str | None = absent()
     recommended: bool | None = absent()
-    action: Literal["bind_local_folder"] | None = absent()
+    action: Literal["bind_local_folder", "grant_readonly_folder"] | None = absent()
 
 
 class AskQuestion(WirePayload):
@@ -188,7 +190,7 @@ class TeamPreviewRequiredPayload(WirePayload):
 
 class TeamPreviewResolvedPayload(WirePayload):
     checkpoint_id: str
-    decision: CheckpointDecision  # continue(=grant) / per_call / adjust / stop / …
+    decision: CheckpointDecision  # continue(=grant[+steer]) / per_call / adjust / stop / …
     note: str
 
 

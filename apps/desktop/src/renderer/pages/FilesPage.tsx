@@ -6,13 +6,14 @@ import { useLocation } from "react-router-dom";
 
 /**
  * The 文件 hub (跨工作区文件总览) — one place to browse files across every
- * conversation scratch workspace (cloud + local) without first opening a
- * conversation. Layout is VSCode 式左树右详情: the left rail stacks each scratch
- * as a flat, collapsible section over its own {@link FileSource}.
+ * workspace root (`folder:<id>` 项目共享空间 + `conv:<id>` 裸聊 scratch，云 + 本地)
+ * without first opening a conversation. Layout is VSCode 式左树右详情: the left
+ * rail stacks each root as a flat, collapsible section over its own
+ * {@link FileSource}.
  *
- * Folder lifecycle (sidebar grouping) lives on `/conversations`; this page is purely
- * the file lens. `/conversations`「浏览文件」jumps here with `focusWsId`
- * (`conv:<conversationId>`) so the target section expands + highlights.
+ * 项目（Folder）生命周期删除入口在本页各 `folder:` 根的右键菜单；对话列表页
+ * `/conversations` 只做归档与引导。`/conversations`「浏览文件」jumps here with
+ * `focusWsId`（`folder:<id>` 或 `conv:<id>`）so the target section expands + highlights.
  */
 export function FilesPage() {
   const location = useLocation();

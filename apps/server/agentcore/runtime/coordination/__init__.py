@@ -9,12 +9,14 @@ from __future__ import annotations
 from agentcore.runtime.coordination.session import (
     DEFAULT_COORDINATION_BUDGET,
     DEFAULT_WORKER_TIMEOUT_S,
+    MAX_COORDINATION_BUDGET,
     CoordinationEvent,
     CoordinationEventKind,
     CoordinationSession,
     CoordinationSnapshot,
     active_coordination,
     clear_active_coordination,
+    coordination_budget_for_batch,
     current_execution_id,
     set_active_coordination,
     should_enter_coordination,
@@ -22,6 +24,7 @@ from agentcore.runtime.coordination.session import (
 
 __all__ = [
     "DEFAULT_COORDINATION_BUDGET",
+    "MAX_COORDINATION_BUDGET",
     "DEFAULT_WORKER_TIMEOUT_S",
     "CoordinationEvent",
     "CoordinationEventKind",
@@ -29,6 +32,7 @@ __all__ = [
     "CoordinationSnapshot",
     "active_coordination",
     "clear_active_coordination",
+    "coordination_budget_for_batch",
     "current_execution_id",
     "set_active_coordination",
     "should_enter_coordination",

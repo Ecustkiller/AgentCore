@@ -1,7 +1,10 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Literal
 
 from agentcore.tools.protocol import Tool
+
+DeliverableForm = Literal["prose", "files"]
 
 
 @dataclass(frozen=True)
@@ -43,16 +46,16 @@ DelegateFactory = Callable[[str, int], LeadSubteam]
 # wave's width being parked on the user. Tunable; start conservative.
 ESCALATION_CONCURRENCY_CAP = 3
 
-# The deliverable-form policy shared by every delegated worker (leaf + captain).
-# It is the hinge that decides whether a product is PROSE (written as the text
-# answer) or a FILE ARTIFACT (persisted to the workspace via file_write). The
-# earlier identity only said "your text output is shown to the user", which steered
-# workers to PASTE file deliverables — runnable code, whole HTML apps, docs — inline
-# as one giant chat message and call no tools, so a "build a runnable HTML file"
-# task produced a 46k-char reply and ZERO files on disk (nothing for the user to
-# open / run, and nothing the workspace snapshot / FileBrowser could surface). The
-# split is stated explicitly so a file deliverable actually lands in the workspace.
-_WORKER_DELIVERABLE_POLICY = """\
+# Write tools withheld from ``form=prose`` workers — they deliver as text body only.
+PROSE_WITHHELD_WRITE_TOOLS: tuple[str, ...] = (
+    "file_write",
+    "file_append",
+    "str_replace",
+)
+
+# Legacy two-way form policy (form omitted): worker judges prose vs files itself.
+# Kept as the default so omitting form preserves prior behaviour.
+_WORKER_DELIVERABLE_FORM = """\
 分清你的交付【形态】，用对的方式交付：
 - 交付物是【可独立阅读的文字】（分析、审查意见、设计 / 调研说明、解释、问答）时，直接\
 作为你的文字产出写出来，自包含、完整准确。
@@ -73,10 +76,44 @@ file_write 把它真正写进工作区，而不是把整份内容粘在回复正
 这份交付物的【专业结构】由你这位专家定夺：task 或预期产出里若带了章节 / 模块 / 布局骨架，\
 除非【原始用户请求】中用户亲口指定要照此结构，否则只当起点建议——按你的专业判断去重组、\
 增删、优化，而不是照它填字。硬指标（篇幅 / 格式 / 范围 / 受众 / 必含要点 / 验收项）仍须\
-逐条满足；但「这份交付物怎么搭骨架、怎么展开」正是你最核心的专业产出。
+逐条满足；但「这份交付物怎么搭骨架、怎么展开」正是你最核心的专业产出。"""
 
-完成后，调用 handoff 工具【收尾并提交交接简报】（这是给主管/下游队员看的交接，不是正文复述，\
-几句话即可）——先把交付正文写完（或用 file_write 落盘），再在【同一轮】调用 handoff 收尾：
+# form=prose: text body only — no file_write landing guidance at all.
+_WORKER_DELIVERABLE_FORM_PROSE = """\
+你的交付形态是【纯文字】（form=prose）：把完整内容直接作为正文交付，自包含、准确、可独立阅读。\
+不要落盘、不要调用写文件工具；成品就是你的文字产出本身（回答 / 分析 / 汇报 / 创意文字等）。
+
+直接以产出本身开头，别写「我来为你生成…」「我是一个 agent」之类开场白或元叙述。你的文字\
+产出会直接展示给用户、也回流给主 Agent 整合；任务附带产出要求就逐条满足。
+
+这份交付物的【专业结构】由你这位专家定夺：task 或预期产出里若带了章节 / 模块 / 布局骨架，\
+除非【原始用户请求】中用户亲口指定要照此结构，否则只当起点建议——按你的专业判断去重组、\
+增删、优化，而不是照它填字。硬指标（篇幅 / 格式 / 范围 / 受众 / 必含要点 / 验收项）仍须\
+逐条满足；但「这份交付物怎么搭骨架、怎么展开」正是你最核心的专业产出。"""
+
+# form=files: heavy landing guidance (must not weaken the 46k-HTML-in-chat defence).
+_WORKER_DELIVERABLE_FORM_FILES = """\
+你的交付形态是【落盘文件】（form=files）：你【必须】调用 file_write 把产物真正写进工作区，\
+而不是把整份内容粘在回复正文里。可运行代码 / 网页 / 应用、脚本、配置、数据文件、多文件工程，\
+或任何用户要打开 / 运行 / 编辑 / 保存的东西，都以工作区文件为准——只贴在聊天里的代码不算交付。
+
+正文只简短交代：改了哪些文件（给路径）、怎么运行、关键取舍，不要再整份粘贴文件内容。
+
+写文件类工具（file_write / file_append / str_replace）返回成功即代表已落盘，且回执里已带上改动\
+后的结果（file_write 是你提交的全文，file_append 回显文件末尾，str_replace 回显落点上下文）——\
+【不要】为「确认写对没」再 read 一遍刚写过的文件，那一轮读不到新信息、纯属空转；只有当你确实要\
+基于合并后的完整内容继续加工（如通读全文再改一处）时才读。
+
+直接以产出本身开头，别写「我来为你生成…」「我是一个 agent」之类开场白或元叙述。
+
+这份交付物的【专业结构】由你这位专家定夺：task 或预期产出里若带了章节 / 模块 / 布局骨架，\
+除非【原始用户请求】中用户亲口指定要照此结构，否则只当起点建议——按你的专业判断去重组、\
+增删、优化，而不是照它填字。硬指标（篇幅 / 格式 / 范围 / 受众 / 必含要点 / 验收项）仍须\
+逐条满足；但「这份交付物怎么搭骨架、怎么展开」正是你最核心的专业产出。"""
+
+# Shared handoff field checklist (appended after the topology-specific opener).
+_HANDOFF_FIELD_GUIDE = """\
+先把交付正文写完（或用 file_write 落盘），再在【同一轮】调用 handoff：
 - summary（结论）：一句话说清你这次做出了什么 / 核心结论。
 - key_points（关键要点）：下游或主管最该知道的 2-4 条（具体数字 / 文件路径 / 关键决定，别空泛）。
 - assumptions（关键假设）：信息不足时你采用的关键假设（没有就省略此条）。
@@ -85,6 +122,78 @@ file_write 把它真正写进工作区，而不是把整份内容粘在回复正
 escalate 是「缺了它整件事会走偏、需要现在有人拍板」，交接简报里的建议是「我已做完、\
 提示个后续方向」。
 调用 handoff 即代表你这次的活已完成；别把简报重复写进交付正文，也别在还没产出交付时就调它。"""
+
+_HANDOFF_FIELD_GUIDE_PROSE = """\
+先把交付正文写完，再在【同一轮】调用 handoff：
+- summary（结论）：一句话说清你这次做出了什么 / 核心结论。
+- key_points（关键要点）：下游或主管最该知道的 2-4 条（具体数字 / 关键决定，别空泛）。
+- assumptions（关键假设）：信息不足时你采用的关键假设（没有就省略此条）。
+- next_steps（建议下一步）：基于你这一环的发现，团队 / 用户接下来值得考虑做什么（没有就省略）。\
+这只是顺带给主管的建议、供其与用户定夺，不替谁拍板、也不是停工理由——它与 escalate 不同：\
+escalate 是「缺了它整件事会走偏、需要现在有人拍板」，交接简报里的建议是「我已做完、\
+提示个后续方向」。
+调用 handoff 即代表你这次的活已完成；别把简报重复写进交付正文，也别在还没产出交付时就调它。"""
+
+_HANDOFF_FIELD_GUIDE_FILES = """\
+先用 file_write 把产物落盘，再在【同一轮】调用 handoff：
+- summary（结论）：一句话说清你这次做出了什么 / 核心结论。
+- key_points（关键要点）：下游或主管最该知道的 2-4 条（具体路径 / 怎么运行 / 关键决定，别空泛）。
+- assumptions（关键假设）：信息不足时你采用的关键假设（没有就省略此条）。
+- next_steps（建议下一步）：基于你这一环的发现，团队 / 用户接下来值得考虑做什么（没有就省略）。\
+这只是顺带给主管的建议、供其与用户定夺，不替谁拍板、也不是停工理由——它与 escalate 不同：\
+escalate 是「缺了它整件事会走偏、需要现在有人拍板」，交接简报里的建议是「我已做完、\
+提示个后续方向」。
+调用 handoff 即代表你这次的活已完成；别把简报重复写进交付正文，也别在还没产出交付时就调它。"""
+
+
+def _handoff_field_guide(form: DeliverableForm | None) -> str:
+    if form == "prose":
+        return _HANDOFF_FIELD_GUIDE_PROSE
+    if form == "files":
+        return _HANDOFF_FIELD_GUIDE_FILES
+    return _HANDOFF_FIELD_GUIDE
+
+
+def _handoff_policy_with_dependents(form: DeliverableForm | None) -> str:
+    return (
+        "完成后，必须调用 handoff 工具【收尾并提交交接简报】——简报是给下游队员的【接力契约 + 增量交代】"
+        "（不是正文复述，几句话即可）：下游靠你的简报接力继续干，缺了他们会丢关键信息。\n"
+        f"{_handoff_field_guide(form)}"
+    )
+
+
+def _handoff_policy_leaf(form: DeliverableForm | None) -> str:
+    incremental = (
+        "关键假设 / 风险 / 建议下一步"
+        if form == "prose"
+        else "关键假设 / 风险 / 建议下一步 / 落盘文件清单"
+    )
+    return (
+        "简报是【接力契约 + 增量交代】（给主管看，不是正文复述）：仅当正文之外还有值得交代的增量"
+        f"（{incremental}）时，才调用 handoff 提交；简短自明的交付写完"
+        "正文直接结束即可，不必为交而交。若调用：\n"
+        f"{_handoff_field_guide(form)}"
+    )
+
+
+def _form_block(form: DeliverableForm | None) -> str:
+    if form == "prose":
+        return _WORKER_DELIVERABLE_FORM_PROSE
+    if form == "files":
+        return _WORKER_DELIVERABLE_FORM_FILES
+    return _WORKER_DELIVERABLE_FORM
+
+
+def _deliverable_policy(
+    *, has_dependents: bool, form: DeliverableForm | None = None
+) -> str:
+    """Compose form policy + topology-split handoff wording."""
+    handoff = (
+        _handoff_policy_with_dependents(form)
+        if has_dependents
+        else _handoff_policy_leaf(form)
+    )
+    return f"{_form_block(form)}\n\n{handoff}"
 
 # Shared by every delegated worker (leaf + captain): how to use the team note wall
 # (§2.2 通·便签墙 + §2.4 变·worker 的「拉」). Workers run in parallel silos; without this they
@@ -152,28 +261,19 @@ escalate 不会打断你——上报后仍按你当下最合理的假设把任�
 结构化 questions（把候选写进 options），让拍板者一键选定、不必读你的散文再手敲；没有明确候选的\
 开放问题则照常用一句话问、不必硬凑选项。"""
 
-# Prepended to every delegated worker's system prompt (right after the shared
-# base). A leaf worker runs in an isolated context with one scoped task, no chance
-# to ask follow-ups, and no `delegate` tool — stated explicitly so it makes a
-# reasonable assumption and delivers, instead of punting with a clarifying
-# question it can never get answered. The shared deliverable policy then pins
-# prose-vs-file so a file deliverable lands in the workspace, not in the chat.
-_WORKER_IDENTITY = f"""\
+# Leaf-worker intro (no nested delegate). A leaf runs in an isolated context with
+# one scoped task, no chance to ask follow-ups, and no `delegate` tool — stated
+# explicitly so it makes a reasonable assumption and delivers, instead of punting
+# with a clarifying question it can never get answered.
+_WORKER_LEAF_INTRO = f"""\
 你是团队中的一名专家 worker。你只负责一个划定好的任务，外加完成它所需的上下文；\
-你不能再向下委派。{_WORKER_PROBLEM_HANDLING}
+你不能再向下委派。{_WORKER_PROBLEM_HANDLING}"""
 
-{_WORKER_TEAM_NOTE_POLICY}
-
-{_WORKER_DELIVERABLE_POLICY}
-
-{_WORKER_TOOL_SAFETY_POLICY}"""
-
-# Captain identity for workers above the depth cap with delegation enabled
+# Captain intro for workers above the depth cap with delegation enabled
 # (``can_delegate`` true by default). They MAY call ``delegate`` to split across a
 # small sub-team — only when complexity or parallelism warrants it; depth-2
-# sub-workers cannot delegate further (executor withholds the tool). Same
-# deliverable policy: whatever it ultimately produces follows the prose-vs-file split.
-_WORKER_CAPTAIN_IDENTITY = f"""\
+# sub-workers cannot delegate further (executor withholds the tool).
+_WORKER_CAPTAIN_INTRO = f"""\
 你是团队中的一名专家 worker，启动即拥有再向下委派一层子团队的能力。你负责一个划定\
 好的任务，外加完成它所需的上下文；你够不到用户、不会有人实时答疑。
 
@@ -188,10 +288,32 @@ _WORKER_CAPTAIN_IDENTITY = f"""\
 产出后由你整合。你带的子队若声明了 bind_after_deps（依赖完成后再定稿）的步骤、或子队员用 \
 escalate kind=scope 报告了职责偏离，控制权会在波边界交回你（子队输出『计划已让出』）——\
 这时用 replan 据上游产出把待定稿步骤定稿 / 操舵尚未运行的步骤，续跑【同一张】子计划；确认\
-无需改动可直接续跑、确无需继续则 replan(stop=true) 收口。{_WORKER_PROBLEM_HANDLING}
+无需改动可直接续跑、确无需继续则 replan(stop=true) 收口。{_WORKER_PROBLEM_HANDLING}"""
 
-{_WORKER_TEAM_NOTE_POLICY}
 
-{_WORKER_DELIVERABLE_POLICY}
+def build_worker_identity(
+    *,
+    has_dependents: bool,
+    captain: bool = False,
+    form: DeliverableForm | None = None,
+) -> str:
+    """Assemble a worker's identity preamble (topology-split handoff + leaf/captain).
 
-{_WORKER_TOOL_SAFETY_POLICY}"""
+    ``has_dependents`` comes from the DAG at identity-build time (``node_has_dependents``):
+    upstream nodes get the imperative handoff relay; leaves get the conditional
+   「有增量才写」wording. ``captain`` selects the nested-delegation intro.
+    ``form`` selects the deliverable-form block (omit = legacy two-way guidance).
+    """
+    intro = _WORKER_CAPTAIN_INTRO if captain else _WORKER_LEAF_INTRO
+    return (
+        f"{intro}\n\n"
+        f"{_WORKER_TEAM_NOTE_POLICY}\n\n"
+        f"{_deliverable_policy(has_dependents=has_dependents, form=form)}\n\n"
+        f"{_WORKER_TOOL_SAFETY_POLICY}"
+    )
+
+
+# Defaults for callers that don't yet know topology (solo / leaf assumption).
+# Prefer :func:`build_worker_identity` at the executor so handoff wording matches the DAG.
+_WORKER_IDENTITY = build_worker_identity(has_dependents=False, captain=False)
+_WORKER_CAPTAIN_IDENTITY = build_worker_identity(has_dependents=False, captain=True)

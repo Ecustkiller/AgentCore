@@ -42,6 +42,30 @@ def test_workspace_manifest_lists_preexisting_files():
     assert "工作区已有" in manifest
 
 
+def test_workspace_manifest_lists_attachments_with_label():
+    plan = _plan(RunSpec(run_id="a", agent_id="a", role="队友A", task="x"))
+    manifest = _workspace_manifest(
+        plan, {}, ["attachments/brief.pdf", "notes.md"], exclude_runs=set()
+    )
+    assert "attachments/brief.pdf（附件）" in manifest
+    assert "notes.md（工作区已有）" in manifest
+
+
+def test_workspace_manifest_project_summarizes_shared_files():
+    plan = _plan(RunSpec(run_id="a", agent_id="a", role="队友A", task="x"))
+    completed = {"a": _state(files=["peer_out.py"])}
+    index = ["attachments/in.md", *[f"src/f{i}.py" for i in range(10)]]
+    manifest = _workspace_manifest(
+        plan, completed, index, exclude_runs=set(), shared_workspace=True
+    )
+    assert "peer_out.py" in manifest and "队友A" in manifest
+    assert "attachments/in.md（附件）" in manifest
+    assert "最近触达" in manifest
+    assert "另有 5 个文件，需要时用 file_list / grep" in manifest
+    # Shared tree is not fully enumerated.
+    assert manifest.count("src/f") <= 5
+
+
 def test_workspace_manifest_dedupes_dep_and_peer_files_from_index():
     plan = _plan(
         RunSpec(run_id="dep", agent_id="dep", role="前置", task="x"),
@@ -77,7 +101,7 @@ def test_workspace_manifest_caps_total_files():
     manifest = _workspace_manifest(plan, completed, index, exclude_runs=set())
     entries = [ln for ln in manifest.splitlines() if ln.startswith("- ")]
     assert len(entries) == 40  # WORKSPACE_MANIFEST_MAX_FILES
-    assert manifest.splitlines()[-1].startswith("……")  # more-remain elision marker
+    assert "另有" in manifest.splitlines()[-1] or manifest.splitlines()[-1].startswith("……")
 
 
 def test_workspace_manifest_char_budget_binds_before_count():
@@ -89,7 +113,7 @@ def test_workspace_manifest_char_budget_binds_before_count():
     entries = [ln for ln in manifest.splitlines() if ln.startswith("- ")]
     assert 0 < len(entries) < 40  # stopped by the char budget, not the count cap
     assert len(manifest) <= 2200  # ~CHAR_BUDGET + the elision line, not 40×200
-    assert manifest.splitlines()[-1].startswith("……")
+    assert "另有" in manifest.splitlines()[-1] or manifest.splitlines()[-1].startswith("……")
 
 
 def test_build_messages_injects_workspace_manifest():
