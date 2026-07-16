@@ -316,22 +316,6 @@ export function TurnComposer({
     useConversationStore.getState().stopGeneration();
   }, []);
 
-  // 生成中「回车想发送」的即时反馈：文案不变，短暂转 warning 强调——解释为什么没发出去。
-  const [sendNudge, setSendNudge] = useState(false);
-  const nudgeTimer = useRef<number | null>(null);
-  const nudgeSend = useCallback(() => {
-    setSendNudge(true);
-    if (nudgeTimer.current) window.clearTimeout(nudgeTimer.current);
-    nudgeTimer.current = window.setTimeout(() => setSendNudge(false), 1200);
-  }, []);
-  // 独立的仅卸载清理——不能挂进下面 [drop] 那个 effect：drop 每次渲染换新引用，其
-  // cleanup 每轮渲染都跑，会把还没到点的 nudge 定时器掐掉（琥珀色提示永不复位）。
-  useEffect(() => {
-    return () => {
-      if (nudgeTimer.current) window.clearTimeout(nudgeTimer.current);
-    };
-  }, []);
-
   useEffect(() => {
     if (voice.isRecording) mention.closeMenu();
   }, [voice.isRecording, mention.closeMenu]);
@@ -388,10 +372,7 @@ export function TurnComposer({
 
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (isGenerating) {
-        if (value.trim()) nudgeSend();
-        return;
-      }
+      // 生成中也发送：handleSend 内部走 mid-flight 插话分支。
       void handleSend();
     }
   };
@@ -435,15 +416,29 @@ export function TurnComposer({
     </SimpleTooltip>
   ) : null;
 
+  // 生成中：发送=插话（送给正在工作的团队 / 排到下一回合），与停止并存；
+  // 停止键始终可用以打断回合。
+  const interjectDisabled = !value.trim();
   const sendControls = isGenerating ? (
-    <IconButton
-      size="md"
-      tone="destructive"
-      onClick={stopGeneration}
-      aria-label="停止生成"
-    >
-      <Square size={14} />
-    </IconButton>
+    <>
+      <IconButton
+        size="md"
+        tone="primary"
+        onClick={() => void handleSend()}
+        disabled={interjectDisabled}
+        aria-label="发送插话"
+      >
+        <Send size={14} />
+      </IconButton>
+      <IconButton
+        size="md"
+        tone="destructive"
+        onClick={stopGeneration}
+        aria-label="停止生成"
+      >
+        <Square size={14} />
+      </IconButton>
+    </>
   ) : (
     <IconButton
       size="md"
@@ -549,19 +544,14 @@ export function TurnComposer({
       {/* 断连提示：仅在心跳判定服务器不可达时出现，主动告知「发送前」状态。 */}
       <ComposerConnectionNotice />
 
-      {/* 生成中排队提示：可打字、暂不可发。平时低调说明；按了 Enter 想发时短暂转
-          warning 强调（sendNudge），解释「为什么没发出去 + 草稿不会丢」。 */}
+      {/* 生成中插话提示：发送=插话，交给正在工作的团队（无关内容排到下一回合）。 */}
       {isGenerating && value.trim() && (
         <div
           aria-live="polite"
-          className={`flex items-center gap-1.5 px-4 pt-2 text-xs ${
-            sendNudge ? "font-medium text-warning" : "text-muted-foreground"
-          }`}
+          className="flex items-center gap-1.5 px-4 pt-2 text-xs text-muted-foreground"
         >
           <Loader2 size={12} className="shrink-0 animate-spin" />
-          {sendNudge
-            ? "回合还在执行，暂不能发送——这条指令已留在草稿"
-            : "回合执行中，可先写下一条指令，结束后发送"}
+          发送将作为插话交给正在工作的团队；无关内容会排到下一回合
         </div>
       )}
 

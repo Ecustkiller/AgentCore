@@ -188,6 +188,14 @@ class TeamSynthesisPreviewPayload(WirePayload):
     in_progress: bool
 
 
+class UserInterjectionAttachment(WirePayload):
+    """Attachment metadata on a mid-flight interjection (no inline text body)."""
+
+    name: str
+    workspace_path: str | None = absent()
+    binary: bool = False
+
+
 class UserInterjectionPayload(WirePayload):
     """Mid-flight user message into a live coordination turn (CEO routes)."""
 
@@ -196,6 +204,7 @@ class UserInterjectionPayload(WirePayload):
     content: str
     status: Literal["delivered", "queued"]
     note: str | None = absent()
+    attachments: list[UserInterjectionAttachment] | None = absent()
 
 
 class RunCompletedPayload(WirePayload):

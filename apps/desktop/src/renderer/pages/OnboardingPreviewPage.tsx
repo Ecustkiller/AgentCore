@@ -4,6 +4,9 @@ import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
 import { ONBOARDING_PREVIEW_SCENES } from "@/preview/onboardingScenes";
 import { FlaskConical } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
+import { useEffect } from "react";
+import { draftKeyFor, useComposerDraftStore } from "@/stores/composer";
+import { useConversationStore } from "@/stores/conversation";
 
 /**
  * Hidden preview (`#/preview/onboarding`) for first-run wizard + draft empty states.
@@ -20,6 +23,28 @@ export function OnboardingPreviewPage() {
   const selected = current?.id ?? null;
 
   const select = (id: string) => setSearchParams({ s: id }, { replace: true });
+
+  const genVariant =
+    current?.kind === "composer-generating-bar"
+      ? "bar"
+      : current?.kind === "composer-generating-card"
+        ? "card"
+        : null;
+
+  // 生成中插话态：让 activeRuntime.isGenerating=true 并塞一条草稿，展示「发送=插话
+  // + 停止并存 + 提示行」。切走/卸载时复位，不污染其它预览场景。
+  useEffect(() => {
+    if (!genVariant) return;
+    const key = draftKeyFor(null);
+    const draft = useComposerDraftStore.getState();
+    const conv = useConversationStore.getState();
+    draft.setValue(key, "顺便把上周的预算表也一起产出");
+    conv.setGenerating(true, null);
+    return () => {
+      draft.setValue(key, "");
+      conv.setGenerating(false, null);
+    };
+  }, [genVariant]);
 
   return (
     <div
@@ -126,6 +151,32 @@ export function OnboardingPreviewPage() {
                 }
               />
               <MessageInput className="px-4 pb-2 pt-4" />
+            </div>
+          </div>
+        )}
+        {genVariant === "bar" && (
+          <div
+            className="relative flex h-full min-h-0 flex-col"
+            data-composer-dock="bottom"
+          >
+            <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-10 text-center text-sm text-muted-foreground">
+              回合执行中：下方输入框「发送 = 插话」，停止键并存
+            </div>
+            <div className="mx-auto w-full max-w-3xl">
+              <MessageInput variant="bar" />
+            </div>
+          </div>
+        )}
+        {genVariant === "card" && (
+          <div
+            className="absolute inset-0 z-10 flex items-center justify-center overflow-y-auto py-10"
+            data-composer-dock="center"
+          >
+            <div className="mx-auto flex w-full max-w-3xl flex-col">
+              <div className="px-4 pb-2 text-center text-sm text-muted-foreground">
+                回合执行中：画布命令栏（card）同样可插话
+              </div>
+              <MessageInput className="px-4 pb-2 pt-4" variant="card" />
             </div>
           </div>
         )}

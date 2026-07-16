@@ -1,6 +1,6 @@
 {
-  "name": "multi_agent_escalation",
-  "description": "多 Agent：worker 升级实时可见（run_escalation 折到节点 escalations，非阻塞）",
+  "name": "multi_agent_user_interjection_with_attachments",
+  "description": "协调带附件插话：user_interjection(delivered) 携带 attachments 元数据 → userInterjections",
   "events": [
     {
       "type": "message_start",
@@ -13,16 +13,34 @@
     {
       "type": "content_delta",
       "payload": {
-        "delta": "我来安排团队。"
+        "delta": "我来安排团队并行推进。"
       },
       "timestamp": "2026-01-01T00:00:00.001Z"
+    },
+    {
+      "type": "tool_use_start",
+      "payload": {
+        "tool_call_id": "dc1",
+        "tool_name": "delegate",
+        "arguments": {
+          "tasks": [
+            {
+              "role": "研究员"
+            },
+            {
+              "role": "撰写员"
+            }
+          ]
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.002Z"
     },
     {
       "type": "run_plan",
       "payload": {
         "execution_id": "exec1",
         "plan_type": "multi_agent",
-        "task_summary": "选型并给建议",
+        "task_summary": "并行调研 + 撰写",
         "agents": [
           {
             "id": "w1",
@@ -43,20 +61,18 @@
           {
             "id": "r1",
             "agent_id": "w1",
-            "task": "调研选型",
+            "task": "调研",
             "depends_on": []
           },
           {
             "id": "r2",
             "agent_id": "w2",
-            "task": "撰写建议",
-            "depends_on": [
-              "r1"
-            ]
+            "task": "撰写",
+            "depends_on": []
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:00.002Z"
+      "timestamp": "2026-01-01T00:00:00.003Z"
     },
     {
       "type": "run_started",
@@ -66,36 +82,80 @@
         "parent_run_id": null,
         "kind": "agent"
       },
-      "timestamp": "2026-01-01T00:00:00.003Z"
-    },
-    {
-      "type": "run_escalation",
-      "payload": {
-        "escalation_id": "beabeb13-0b06-4d17-b121-cf7e5683bcc4",
-        "run_id": "r1",
-        "agent_id": "w1",
-        "question": "数据库选 Postgres 还是 MySQL？这关系到后续所有选型。",
-        "assumption": "暂按 Postgres 推进",
-        "blocking": true,
-        "kind": "normal"
-      },
       "timestamp": "2026-01-01T00:00:00.004Z"
     },
     {
-      "type": "run_output_delta",
+      "type": "run_started",
       "payload": {
-        "run_id": "r1",
-        "agent_id": "w1",
-        "delta": "已按 Postgres 完成选型调研"
+        "run_id": "r2",
+        "agent_id": "w2",
+        "parent_run_id": null,
+        "kind": "agent"
       },
       "timestamp": "2026-01-01T00:00:00.005Z"
+    },
+    {
+      "type": "user_interjection",
+      "payload": {
+        "interjection_id": "inj-att",
+        "execution_id": "exec1",
+        "content": "请对照附件里的成本表再核一遍。",
+        "status": "delivered",
+        "attachments": [
+          {
+            "name": "成本表.xlsx",
+            "workspace_path": "attachments/成本表.xlsx",
+            "binary": true
+          },
+          {
+            "name": "补充说明.md",
+            "workspace_path": "attachments/补充说明.md",
+            "binary": false
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:00.006Z"
+    },
+    {
+      "type": "tool_use_start",
+      "payload": {
+        "tool_call_id": "syn1",
+        "tool_name": "update_synthesis",
+        "arguments": {
+          "draft": "已收到附件补充：会对照成本表核验。"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.007Z"
+    },
+    {
+      "type": "tool_use_end",
+      "payload": {
+        "tool_call_id": "syn1",
+        "tool_name": "update_synthesis",
+        "status": "success",
+        "result": "已更新合成草稿，用户可见「进展中」预览。"
+      },
+      "timestamp": "2026-01-01T00:00:00.008Z"
+    },
+    {
+      "type": "team_synthesis_preview",
+      "payload": {
+        "execution_id": "exec1",
+        "completed": 0,
+        "total": 2,
+        "headline": "合成草稿更新 · 已完成 0/2",
+        "text": "已收到附件补充：会对照成本表核验。",
+        "workers": [],
+        "in_progress": true
+      },
+      "timestamp": "2026-01-01T00:00:00.009Z"
     },
     {
       "type": "run_completed",
       "payload": {
         "run_id": "r1",
         "agent_id": "w1",
-        "output_summary": "完成选型调研（含 1 条升级）",
+        "output_summary": "完成调研",
         "duration_ms": 1000,
         "role": "member",
         "model": "deepseek-v4-flash",
@@ -115,34 +175,15 @@
           "pricing_source": "curated"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.006Z"
-    },
-    {
-      "type": "run_started",
-      "payload": {
-        "run_id": "r2",
-        "agent_id": "w2",
-        "parent_run_id": null,
-        "kind": "agent"
-      },
-      "timestamp": "2026-01-01T00:00:00.007Z"
-    },
-    {
-      "type": "run_output_delta",
-      "payload": {
-        "run_id": "r2",
-        "agent_id": "w2",
-        "delta": "基于选型给出建议"
-      },
-      "timestamp": "2026-01-01T00:00:00.008Z"
+      "timestamp": "2026-01-01T00:00:00.010Z"
     },
     {
       "type": "run_completed",
       "payload": {
         "run_id": "r2",
         "agent_id": "w2",
-        "output_summary": "完成建议",
-        "duration_ms": 1200,
+        "output_summary": "完成撰写",
+        "duration_ms": 800,
         "role": "member",
         "model": "deepseek-v4-flash",
         "usage": {
@@ -161,22 +202,32 @@
           "pricing_source": "curated"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.009Z"
+      "timestamp": "2026-01-01T00:00:00.011Z"
+    },
+    {
+      "type": "tool_use_end",
+      "payload": {
+        "tool_call_id": "dc1",
+        "tool_name": "delegate",
+        "status": "success",
+        "result": "团队已完成。"
+      },
+      "timestamp": "2026-01-01T00:00:00.012Z"
     },
     {
       "type": "content_delta",
       "payload": {
-        "delta": " 团队已完成（有 1 条待你拍板的升级）。"
+        "delta": "团队已按附件补充交稿。"
       },
-      "timestamp": "2026-01-01T00:00:00.010Z"
+      "timestamp": "2026-01-01T00:00:00.013Z"
     },
     {
       "type": "message_end",
       "payload": {
         "finish_reason": "end_turn",
         "usage": {
-          "input_tokens": 4200,
-          "output_tokens": 820,
+          "input_tokens": 2000,
+          "output_tokens": 400,
           "reasoning_tokens": 0,
           "cache_hit_tokens": 0,
           "cache_miss_tokens": 0
@@ -191,31 +242,37 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:00.011Z"
+      "timestamp": "2026-01-01T00:00:00.014Z"
     }
   ],
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
-    "content": "我来安排团队。 团队已完成（有 1 条待你拍板的升级）。",
+    "content": "我来安排团队并行推进。团队已按附件补充交稿。",
     "reasoning": "",
     "captainContext": [],
     "process": [
       {
         "kind": "content",
-        "text": "我来安排团队。"
+        "text": "我来安排团队并行推进。"
       },
       {
         "kind": "team",
         "execution_id": "exec1"
       },
       {
-        "kind": "escalation",
-        "escalation_id": "beabeb13-0b06-4d17-b121-cf7e5683bcc4"
+        "kind": "tool",
+        "id": "syn1",
+        "tool_name": "update_synthesis",
+        "arguments": {
+          "draft": "已收到附件补充：会对照成本表核验。"
+        },
+        "result": "已更新合成草稿，用户可见「进展中」预览。",
+        "status": "success"
       },
       {
         "kind": "content",
-        "text": " 团队已完成（有 1 条待你拍板的升级）。"
+        "text": "团队已按附件补充交稿。"
       }
     ],
     "citations": [],
@@ -228,7 +285,7 @@
         "reasoningEffort": "high",
         "status": "completed",
         "currentRunId": null,
-        "output": "已按 Postgres 完成选型调研",
+        "output": "",
         "reasoning": "",
         "toolProgress": null
       },
@@ -240,7 +297,7 @@
         "reasoningEffort": "high",
         "status": "completed",
         "currentRunId": null,
-        "output": "基于选型给出建议",
+        "output": "",
         "reasoning": "",
         "toolProgress": null
       }
@@ -249,10 +306,10 @@
       {
         "id": "r1",
         "agentId": "w1",
-        "task": "调研选型",
+        "task": "调研",
         "status": "completed",
         "dependsOn": [],
-        "outputSummary": "完成选型调研（含 1 条升级）",
+        "outputSummary": "完成调研",
         "debrief": null,
         "durationMs": 1000,
         "error": null,
@@ -283,34 +340,18 @@
         "replacesRunId": null,
         "checkpoint": null,
         "receivedContext": [],
-        "escalations": [
-          {
-            "question": "数据库选 Postgres 还是 MySQL？这关系到后续所有选型。",
-            "assumption": "暂按 Postgres 推进",
-            "blocking": true,
-            "status": "raised",
-            "answer": null,
-            "kind": "normal"
-          }
-        ],
-        "process": [
-          {
-            "kind": "content",
-            "text": "已按 Postgres 完成选型调研"
-          }
-        ]
+        "escalations": [],
+        "process": []
       },
       {
         "id": "r2",
         "agentId": "w2",
-        "task": "撰写建议",
+        "task": "撰写",
         "status": "completed",
-        "dependsOn": [
-          "r1"
-        ],
-        "outputSummary": "完成建议",
+        "dependsOn": [],
+        "outputSummary": "完成撰写",
         "debrief": null,
-        "durationMs": 1200,
+        "durationMs": 800,
         "error": null,
         "parentRunId": null,
         "kind": "agent",
@@ -340,12 +381,7 @@
         "checkpoint": null,
         "receivedContext": [],
         "escalations": [],
-        "process": [
-          {
-            "kind": "content",
-            "text": "基于选型给出建议"
-          }
-        ]
+        "process": []
       }
     ],
     "progress": {
@@ -365,9 +401,37 @@
     "debateRounds": [],
     "crossExamEnabled": false,
     "debateOpening": null,
-    "teamSynthesisPreview": null,
+    "teamSynthesisPreview": {
+      "execution_id": "exec1",
+      "completed": 0,
+      "total": 2,
+      "headline": "合成草稿更新 · 已完成 0/2",
+      "text": "已收到附件补充：会对照成本表核验。",
+      "workers": [],
+      "in_progress": true
+    },
     "turnWarning": null,
     "teamNotes": [],
-    "userInterjections": []
+    "userInterjections": [
+      {
+        "interjectionId": "inj-att",
+        "executionId": "exec1",
+        "content": "请对照附件里的成本表再核一遍。",
+        "status": "delivered",
+        "note": null,
+        "attachments": [
+          {
+            "name": "成本表.xlsx",
+            "binary": true,
+            "workspacePath": "attachments/成本表.xlsx"
+          },
+          {
+            "name": "补充说明.md",
+            "binary": false,
+            "workspacePath": "attachments/补充说明.md"
+          }
+        ]
+      }
+    ]
   }
 }

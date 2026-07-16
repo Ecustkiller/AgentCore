@@ -288,6 +288,11 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
     content: string;
     status: string;
     note: string | null;
+    attachments?: {
+      name: string;
+      workspacePath?: string;
+      binary?: boolean;
+    }[];
   }[] = [];
   const userInterjectionIndex = new Map<string, number>();
   let sawError = false;
@@ -866,15 +871,31 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           content?: string;
           status?: string;
           note?: string | null;
+          attachments?: Array<{
+            name?: string;
+            workspace_path?: string;
+            binary?: boolean;
+          }>;
         };
         const iid = (p.interjection_id || "").trim();
         if (iid) {
+          const attachments = (p.attachments ?? [])
+            .filter((a) => typeof a?.name === "string" && a.name.trim())
+            .map((a) => ({
+              name: a.name!.trim(),
+              workspacePath:
+                typeof a.workspace_path === "string" && a.workspace_path.trim()
+                  ? a.workspace_path
+                  : undefined,
+              binary: Boolean(a.binary),
+            }));
           const leaf = {
             interjectionId: iid,
             executionId: p.execution_id || "",
             content: p.content || "",
             status: p.status || "delivered",
             note: typeof p.note === "string" ? p.note : null,
+            ...(attachments.length > 0 ? { attachments } : {}),
           };
           const idx = userInterjectionIndex.get(iid);
           if (idx === undefined) {

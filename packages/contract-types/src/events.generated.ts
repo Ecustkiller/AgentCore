@@ -520,6 +520,13 @@ export interface TeamSynthesisPreviewPayload {
   in_progress: boolean;
 }
 
+/** Attachment metadata on a mid-flight interjection (no inline text body). */
+export interface UserInterjectionAttachment {
+  name: string;
+  workspace_path?: string;
+  binary?: boolean;
+}
+
 /** Mid-flight user message into a live coordination turn (CEO routes). */
 export interface UserInterjectionPayload {
   interjection_id: string;
@@ -527,6 +534,7 @@ export interface UserInterjectionPayload {
   content: string;
   status: "delivered" | "queued";
   note?: string;
+  attachments?: UserInterjectionAttachment[];
 }
 
 /** Token counts in the ledger short-key form. `cache_hit + cache_miss === input`. */

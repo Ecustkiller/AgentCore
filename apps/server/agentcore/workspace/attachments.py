@@ -178,3 +178,23 @@ def to_stored_metadata(attachments: list[dict]) -> list[dict]:
         }
         for a in attachments
     ]
+
+
+def interjection_attachment_meta(attachments: list[dict]) -> list[dict]:
+    """Project enriched attachments for SSE / coordination briefs (no inline text).
+
+    Carries display name, durable ``workspace_path`` when present, and the binary
+    flag so the CEO brief and team-block chips can surface path-only references.
+    """
+    out: list[dict] = []
+    for a in attachments:
+        name = a.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        leaf: dict = {"name": name, "binary": bool(a.get("binary"))}
+        wp = a.get("workspace_path")
+        if isinstance(wp, str) and wp.strip():
+            leaf["workspace_path"] = wp
+        out.append(leaf)
+    return out
+

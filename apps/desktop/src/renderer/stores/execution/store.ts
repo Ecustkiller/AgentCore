@@ -341,15 +341,31 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               content?: string;
               status?: string;
               note?: string | null;
+              attachments?: Array<{
+                name?: string;
+                workspace_path?: string;
+                binary?: boolean;
+              }>;
             };
             const iid = (p.interjection_id || "").trim();
             if (!iid) continue;
+            const attachments = (p.attachments ?? [])
+              .filter((a) => typeof a?.name === "string" && a.name.trim())
+              .map((a) => ({
+                name: a.name!.trim(),
+                workspacePath:
+                  typeof a.workspace_path === "string" && a.workspace_path.trim()
+                    ? a.workspace_path
+                    : undefined,
+                binary: Boolean(a.binary),
+              }));
             const leaf: UserInterjection = {
               interjectionId: iid,
               executionId: p.execution_id || "",
               content: p.content || "",
               status: p.status || "delivered",
               note: typeof p.note === "string" ? p.note : null,
+              ...(attachments.length > 0 ? { attachments } : {}),
             };
             const idx = interjectionIndex.get(iid);
             if (idx === undefined) {

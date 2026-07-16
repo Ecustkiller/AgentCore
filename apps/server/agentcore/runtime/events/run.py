@@ -407,11 +407,13 @@ def user_interjection(
     content: str,
     status: str = "delivered",
     note: str | None = None,
+    attachments: list[dict[str, Any]] | None = None,
 ) -> SSEEvent:
     """协调中用户插话（单一输入框 → CEO 智能路由）。
 
     ``status=delivered`` on inject；CEO ``queue_user_message`` → ``queued``（同
     ``interjection_id`` 保最新）。DURABLE——team 块时间线徽标重放。
+    ``attachments`` 为名字 + 工作区路径 + 二进制标记（无内联正文）。
     """
     payload: dict[str, Any] = {
         "interjection_id": interjection_id,
@@ -421,7 +423,10 @@ def user_interjection(
     }
     if note is not None and note.strip():
         payload["note"] = note.strip()
+    if attachments:
+        payload["attachments"] = attachments
     return SSEEvent(type=EventType.USER_INTERJECTION, payload=payload)
+
 
 
 def batch_metrics(*, execution_id: str, metrics: dict[str, Any]) -> SSEEvent:

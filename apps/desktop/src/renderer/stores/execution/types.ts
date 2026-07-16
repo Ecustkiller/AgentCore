@@ -418,12 +418,19 @@ export interface Execution {
 
 /** Mid-flight user interjection into live coordination (`user_interjection`).
  * Same interjectionId keeps latest status (delivered → queued). */
+export interface UserInterjectionAttachment {
+  name: string;
+  workspacePath?: string;
+  binary?: boolean;
+}
+
 export interface UserInterjection {
   interjectionId: string;
   executionId: string;
   content: string;
   status: "delivered" | "queued" | string;
   note: string | null;
+  attachments?: UserInterjectionAttachment[];
 }
 
 /**

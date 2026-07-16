@@ -89,6 +89,15 @@ vi.mock("@/components/chat/message-input/useMentionMenu", () => ({
   }),
 }));
 
+// isGenerating 来自 activeRuntime().isGenerating（非顶层字段），构造完整 runtime 太脆，
+// 直接 mock 这个 hook；其余 store 行为（setState / getState）保留真实实现。
+const genMock = vi.hoisted(() => ({ value: false }));
+vi.mock("@/stores/conversation", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/stores/conversation")>();
+  return { ...actual, useActiveGenerating: () => genMock.value };
+});
+
 import { useConversationStore } from "@/stores/conversation";
 import { useServerHealthStore } from "@/stores/serverHealth";
 import { TurnComposer } from "../TurnComposer";
@@ -104,10 +113,10 @@ function renderComposer(variant?: "card" | "bar") {
 }
 
 beforeEach(() => {
+  genMock.value = false;
   useConversationStore.setState({
     currentConversationId: null,
     byId: {},
-    activeGenerating: false,
   } as never);
   useServerHealthStore.setState({
     status: "online",
@@ -160,5 +169,26 @@ describe("TurnComposer variants", () => {
     renderComposer("bar");
     const more = screen.getByRole("button", { name: "更多选项" });
     expect(more.querySelector(".bg-destructive")).toBeTruthy();
+  });
+
+  it("generating: bar exposes 发送插话 + 停止生成 side by side", () => {
+    genMock.value = true;
+    renderComposer("bar");
+    expect(screen.getByRole("button", { name: "发送插话" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
+  });
+
+  it("generating: canvas card also allows 插话 (发送插话 + 停止生成)", () => {
+    genMock.value = true;
+    renderComposer();
+    expect(screen.getByRole("button", { name: "发送插话" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
+  });
+
+  it("idle: single 发送, no 插话 / 停止", () => {
+    renderComposer("bar");
+    expect(screen.queryByRole("button", { name: "发送插话" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "停止生成" })).toBeNull();
+    expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
   });
 });

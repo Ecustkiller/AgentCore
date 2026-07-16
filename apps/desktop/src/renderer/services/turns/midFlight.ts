@@ -1,5 +1,6 @@
 import { ApiError, api } from "@/services/api";
 import { notifyError, notifyInfo } from "@/lib/toast";
+import type { OutgoingAttachment } from "@/services/streamConversation";
 
 export type MidFlightSendResult =
   | { kind: "delivered"; interjectionId: string }
@@ -11,19 +12,24 @@ export type MidFlightSendResult =
  * POST a user message while a turn is already streaming.
  * Coordination → 202 delivered (SSE `user_interjection` on the live sink);
  * classic → 202 queued; hot pending → 409.
+ * Attachments reuse the same OutgoingAttachment shape as a normal send.
  */
 export async function sendMidFlightMessage(
   conversationId: string,
   content: string,
+  attachments?: OutgoingAttachment[],
 ): Promise<MidFlightSendResult> {
   try {
+    const body: Record<string, unknown> = { content };
+    if (attachments && attachments.length > 0) body.attachments = attachments;
+
     const res = await api.post<{
       status?: string;
       interjection_id?: string;
       queue_id?: string;
       position?: number;
       queue_depth?: number;
-    }>(`/v1/conversations/${conversationId}/messages`, { content });
+    }>(`/v1/conversations/${conversationId}/messages`, body);
 
     if (res.status === "delivered" && res.interjection_id) {
       return { kind: "delivered", interjectionId: res.interjection_id };

@@ -760,13 +760,32 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             iid = str(p.get("interjection_id") or "").strip()
             if not iid:
                 continue
-            leaf = {
+            leaf: dict[str, Any] = {
                 "interjectionId": iid,
                 "executionId": str(p.get("execution_id") or ""),
                 "content": str(p.get("content") or ""),
                 "status": str(p.get("status") or "delivered"),
                 "note": p.get("note") if isinstance(p.get("note"), str) else None,
             }
+            raw_atts = p.get("attachments")
+            if isinstance(raw_atts, list) and raw_atts:
+                atts_out: list[dict[str, Any]] = []
+                for a in raw_atts:
+                    if not isinstance(a, dict):
+                        continue
+                    name = a.get("name")
+                    if not isinstance(name, str) or not name.strip():
+                        continue
+                    entry: dict[str, Any] = {
+                        "name": name,
+                        "binary": bool(a.get("binary")),
+                    }
+                    wp = a.get("workspace_path")
+                    if isinstance(wp, str) and wp.strip():
+                        entry["workspacePath"] = wp
+                    atts_out.append(entry)
+                if atts_out:
+                    leaf["attachments"] = atts_out
             idx = _user_interjection_by_id.get(iid)
             if idx is None:
                 _user_interjection_by_id[iid] = len(user_interjections)

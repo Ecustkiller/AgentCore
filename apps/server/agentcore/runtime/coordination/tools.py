@@ -390,13 +390,15 @@ class QueueUserMessageTool:
             )
 
         from agentcore.runtime.turn_queue import new_queued_turn, turn_queue
+        from agentcore.workspace.attachments import interjection_attachment_meta
 
+        stashed_attachments = list(stashed.get("attachments") or [])
         status = turn_queue.enqueue(
             conversation_id,
             new_queued_turn(
                 content=content,
                 user_id=str(stashed.get("user_id") or ""),
-                attachments=list(stashed.get("attachments") or []),
+                attachments=stashed_attachments,
                 requires_tools=bool(stashed.get("requires_tools")),
                 x_client_platform=stashed.get("x_client_platform"),
                 llm_credentials=stashed.get("llm_credentials"),
@@ -404,6 +406,7 @@ class QueueUserMessageTool:
             ),
         )
         note = reason or "与当前团队任务无关，已排到下一回合"
+        att_meta = interjection_attachment_meta(stashed_attachments)
         self._sink.emit(
             user_interjection(
                 interjection_id=iid,
@@ -411,6 +414,7 @@ class QueueUserMessageTool:
                 content=content,
                 status="queued",
                 note=note,
+                attachments=att_meta or None,
             )
         )
         logger.info(

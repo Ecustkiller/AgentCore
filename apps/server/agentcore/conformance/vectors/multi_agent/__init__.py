@@ -46,6 +46,7 @@ from .run_control import (
 from .interjection import (
     _multi_agent_user_interjection_handled,
     _multi_agent_user_interjection_queued,
+    _multi_agent_user_interjection_with_attachments,
 )
 from .team_notes import (
     _multi_agent_coordinate,
@@ -62,6 +63,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_user_interjection_queued": (
         "协调插话转排队：user_interjection delivered→queued（同 id 保最新）+ queue_user_message",
         _multi_agent_user_interjection_queued,
+    ),
+    "multi_agent_user_interjection_with_attachments": (
+        "协调带附件插话：user_interjection(delivered) 携带 attachments 元数据 → userInterjections",
+        _multi_agent_user_interjection_with_attachments,
     ),
     "multi_agent_delegate": ("多 Agent：委派 2 队员，runs 树 + 进度 + 总账", _multi_agent_delegate),
     "multi_agent_coordinate": (

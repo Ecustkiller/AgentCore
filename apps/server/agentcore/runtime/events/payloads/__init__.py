@@ -140,7 +140,9 @@ TS_EXPORTS: tuple[TsExport, ...] = (
     TsInterface(run.TeamNotePostedPayload),
     TsInterface(run.TeamSynthesisWorkerPreview),
     TsInterface(run.TeamSynthesisPreviewPayload),
+    TsInterface(run.UserInterjectionAttachment),
     TsInterface(run.UserInterjectionPayload),
+
     TsInterface(run.UsageBreakdown),
     TsInterface(run.CostBreakdown),
     TsInterface(run.RunDebrief),

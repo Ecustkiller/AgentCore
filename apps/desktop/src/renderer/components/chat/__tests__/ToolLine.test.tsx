@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 /**
- * Render test for ToolLine 结果卡自动展开 (联网前端展示优化): tools whose output IS the payload
- * the user was waiting on — web_search's hits and code_execute's terminal output — auto-open
- * their result card once on the running→done edge, while every other tool stays collapsed by
- * default. The block comment detaches the @vitest-environment directive from the import block
- * so organizeImports keeps it file-leading.
+ * Render test for ToolLine 过程工具默认折叠: every process tool (web_search / code_execute /
+ * file_write / str_replace / …) stays collapsed on the running→done edge — aligned with
+ * Cursor/Claude「过程收敛、答案突出」. Folded rows keep inlineCount / peek; expand is a click
+ * away. Failures also stay collapsed (red ✗ + red peek). The block comment detaches the
+ * @vitest-environment directive from the import block so organizeImports keeps it file-leading.
  */
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -63,8 +63,8 @@ function readUrlStep(
   });
 }
 
-describe("ToolLine · 结果卡自动展开", () => {
-  it("auto-expands code_execute's terminal on the running→done edge", () => {
+describe("ToolLine · 过程工具默认折叠", () => {
+  it("keeps code_execute's terminal collapsed on the running→done edge", () => {
     const { rerender } = render(
       <ToolLine
         step={step({
@@ -93,12 +93,15 @@ describe("ToolLine · 结果卡自动展开", () => {
         })}
       />,
     );
-    // Done: the terminal auto-opened without a click — its 退出码 0 badge (expanded-only,
-    // the collapsed peek reads the stdout line) is now shown.
+    // Done: stays collapsed — 退出码 badge is expanded-only; peek shows stdout.
+    expect(screen.queryByText(/退出码 0/)).toBeNull();
+    expect(screen.getByText(/hello world/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText("执行代码"));
     expect(screen.getByText(/退出码 0/)).toBeTruthy();
   });
 
-  it("still auto-expands web_search results (regression)", () => {
+  it("keeps web_search results collapsed on completion", () => {
     const { rerender } = render(
       <ToolLine
         step={step({
@@ -132,7 +135,9 @@ describe("ToolLine · 结果卡自动展开", () => {
         })}
       />,
     );
-    // Expanded: the result card's title is visible.
+    // Collapsed: hit title hidden; click reveals the result card.
+    expect(screen.queryByText("深圳天气预报")).toBeNull();
+    fireEvent.click(screen.getByText("搜索网页"));
     expect(screen.getByText("深圳天气预报")).toBeTruthy();
   });
 
@@ -167,15 +172,13 @@ describe("ToolLine · 结果卡自动展开", () => {
         })}
       />,
     );
-    // web_search auto-expands on done — collapse it back to inspect the folded row.
-    fireEvent.click(screen.getByText("搜索网页"));
-    // 计数并入标题行（对齐 read_url 组的「· N 个来源」），不再另起一行 peek。
+    // Already collapsed by default — 计数并入标题行（对齐 read_url 组的「· N 个来源」），
+    // 不再另起一行 peek；结果卡标题隐藏。
     expect(screen.getByText(/1 条结果/)).toBeTruthy();
-    // 折叠后结果卡标题隐藏。
     expect(screen.queryByText("深圳天气预报")).toBeNull();
   });
 
-  it("auto-expands str_replace diff on the running→done edge", () => {
+  it("keeps str_replace diff collapsed on the running→done edge", () => {
     const { rerender } = render(
       <ToolLine
         step={step({
@@ -206,11 +209,15 @@ describe("ToolLine · 结果卡自动展开", () => {
         })}
       />,
     );
+    expect(screen.queryByText("+1")).toBeNull();
+    expect(screen.queryByText("-1")).toBeNull();
+
+    fireEvent.click(screen.getByText("编辑文件"));
     expect(screen.getByText("+1")).toBeTruthy();
     expect(screen.getByText("-1")).toBeTruthy();
   });
 
-  it("auto-expands file_write content card on the running→done edge", () => {
+  it("keeps file_write content card collapsed on the running→done edge", () => {
     const { rerender } = render(
       <ToolLine
         step={step({
@@ -233,6 +240,9 @@ describe("ToolLine · 结果卡自动展开", () => {
         })}
       />,
     );
+    expect(screen.queryByText(/1 行 ·/)).toBeNull();
+
+    fireEvent.click(screen.getByText("写入文件"));
     expect(screen.getByText(/1 行 ·/)).toBeTruthy();
   });
 
@@ -286,7 +296,7 @@ describe("ToolLine · 结果卡自动展开", () => {
     ).toBeNull();
   });
 
-  it("leaves read_url collapsed on completion (batch reads must not flood)", () => {
+  it("leaves read_url collapsed on completion (same default as every other tool)", () => {
     const { rerender } = render(
       <ToolLine
         step={step({

@@ -62,7 +62,7 @@ skip_if:
 
 ### 一B、单 Agent「思考·正文·工具」内联时间线 `ProcessTimeline` ✅ 已落地
 
-单 Agent 回合 CEO 直接调工具（联网搜索 / 读网页 / 检索代码 / 执行）时，气泡把 CEO 的**思考、回复正文、工具调用**按**真实发生顺序**交织成**一条内联时间线**（Cursor 式全内联）：思考段＝灰色**可逐段折叠**小块（流式中展开看它边想、完成自动收起＝零噪音），正文段＝正常富文本（含行内引用角标 chip：显示号按首次出现顺序连续重编、悬停预览来源、点击经系统浏览器打开），工具＝一行（图标 · 中文名 · 参数 · 状态，默认收起、可点开看完整结果；部分慢工具直播完成时自动展开，见下）；**时间上连续的 ≥2 个工具自动 coalesce 成一个可展开组**（`ProcessToolGroup`：摘要头＝分类计数「读取文件 6 · 编辑文件 2」或单类别 ≤3 时直列文件名 · 任一失败显「N 个失败」· 运行中脉冲点；**完成默认收起、流式中尾部活动组展开看它干活**，展开即原样列出各工具行、逐行仍可点开看结果），单个工具维持一行平铺。**末尾那段正文即最终答案**——不再有独立的「底部答案区」，时间线本身就是回复；流式时尾段自带光标 /「正在思考…」。多 Agent run 详情侧栏主体复用同一 `ProcessTimeline`（per-run `ProcessStep[]`，§十 run-detail）。
+单 Agent 回合 CEO 直接调工具（联网搜索 / 读网页 / 检索代码 / 执行）时，气泡把 CEO 的**思考、回复正文、工具调用**按**真实发生顺序**交织成**一条内联时间线**（Cursor 式全内联）：思考段＝灰色**可逐段折叠**小块（流式中展开看它边想、完成自动收起＝零噪音），正文段＝正常富文本（含行内引用角标 chip：显示号按首次出现顺序连续重编、悬停预览来源、点击经系统浏览器打开），工具＝一行（图标 · 中文名 · 参数 · 状态，**完成一律默认折叠成单行**、点开才看详情——无交付物型特例，失败也折叠、靠红✗ + 红 peek 醒目）；**时间上连续的 ≥2 个工具自动 coalesce 成一个可展开组**（`ProcessToolGroup`：摘要头＝分类计数「读取文件 6 · 编辑文件 2」或单类别 ≤3 时直列文件名 · 任一失败显「N 个失败」· 运行中脉冲点；**完成默认收起、流式中尾部活动组展开看它干活**，展开即原样列出各工具行、逐行仍可点开看结果），单个工具维持一行平铺。**末尾那段正文即最终答案**——不再有独立的「底部答案区」，时间线本身就是回复；流式时尾段自带光标 /「正在思考…」。多 Agent run 详情侧栏主体复用同一 `ProcessTimeline`（per-run `ProcessStep[]`，§十 run-detail）。
 
 - **决策与理由（为何全内联）**：单 Agent 回合每轮 `思考→正文→工具` 交替（ReAct），**忠实时序优先**——正文回归它在思考/工具间的真实位置；噪音改用「思考逐段折叠」兜。仍被否决的是**常驻、打碎正文的吵闹工具卡**。
 - **决策与理由（连续工具折叠 `ProcessToolGroup`）**：对齐 Cursor「Read N files」的行业做法——时间上连续（被思考/正文打断即断组）的 ≥2 个工具并成「动词＋计数」可折叠摘要，**保序**（否决「按类别全回合归桶」的碎序方案）。纯**渲染层 fold**（`lib/processTimeline.ts::groupToolRuns`），`process[]` 形状不变 → **不动后端 / `turn_journal` / conformance**；**末段正文（最终答案）永不进组**。手机端 `AssistantView` 另一套实现、不含分组（分组是 chrome、非协议 fold）。
@@ -70,7 +70,7 @@ skip_if:
 - **复制两档 ✅**：持久化 `content` 只留交付（deliverable_only，[多轮编排 §八](/docs/03-AI核心/多轮编排与同人续派.md)），故复制提供「仅交付（默认）/ 含过程」（后者按 `process[]` 时序拼）；搜索与下轮 history 仍只用交付。→ 见代码 `lib/messageExport.ts`。
 - **本地回合同步态 `synced_pending` ✅**：sidecar 回合按「**静默成功、显式失败**」显示同步态——宽限期（~5s）内不渲染提示，超期未获云确认才挂「待同步」。**纯本机指示、不进 SSE / 跨端契约**。→ 见代码 `message-bubble/SyncStatusHint.tsx`；回写链路见 [双模式 §10.3](/docs/02-架构/双模式工作区.md)。
 - **保序持久化**：时间线随回合落 `turn_journal`、读取投影为 `runs.process`，刷新可回放。
-- **实时行与等待态 ✅**：`ComposingToolLine`（「正在生成 {工具} · N 字」补 `tool_use_start` 前空白）与慢工具**诚实阶段**文案（消费 `tool_use_progress`）均为 **transport-only、不进 journal**，重载不保留；交付物型工具（搜索 / 执行 / 写文件）直播完成边**自动展开**结果卡（`AUTO_EXPAND_ON_DONE`，仅桌面直播）。→ 见代码 `ToolLine.tsx`。
+- **实时行与等待态 ✅**：`ComposingToolLine`（「正在生成 {工具} · N 字」补 `tool_use_start` 前空白）与慢工具**诚实阶段**文案（消费 `tool_use_progress`）均为 **transport-only、不进 journal**，重载不保留；过程工具完成后**统一默认折叠**（折叠态保留 inlineCount / peek / 运行中骨架；手动开合仍走 `usePersistentDisclosure`）。→ 见代码 `ToolLine.tsx`。
 - **回合结束原因 chip ✅**：非正常收尾（`max_rounds` / `degraded` / `unproductive` / `cancelled` / `interrupted`）在气泡顶挂中性灰 chip（事后记录非警报；原「降级琥珀」已废除）；`end_turn` 不显、`error` 归错误卡。**回放接缝**：多 Agent 从 `runs.finishReason`、单 Agent 从 `turn_end` 回落——非正常收尾即便无图/无进程也由后端补写最小 `turn_end` 兜底；`interrupted` 提供「重试」（复用 regenerate）。
 - **回合内联错误卡 ✅**：直播走纯传输 `error` SSE；**重载**从 `turn_end.error` 投影回放同一张卡（空正文报错回合后端补写空正文行 + 最小 journal，空正文被 history 过滤）；`code` 走 `lib/errors.ts` 单点翻译。
 
@@ -461,7 +461,7 @@ skip_if:
 
 **审批 UX（写操作）**：只读时尝试写引导开启；可写时写前弹审批（可「本轮内都允许」按同名工具、或「本轮内允许所有文件改动」按整类一次放行——类成员单源 = 后端 `approval_class_tool_names()`（文件改动五工具 ∪ `git` 写入），依赖工具审批两态的 `grantable` 级别，避免 N 次写/改/删 = N 次弹窗）。
 
-**对话落点表达（✅ 项目=工作区 · 单一「在哪工作」入口）**：草稿输入框工具行只挂一个 `ComposerWorkspaceChip`。菜单：快速对话（本地草稿·桌面默认）/ 云端草稿（web 默认）/ 项目列表（名称+位置副文）/ 新建项目… / 打开本地文件夹…（= 以该文件夹创建项目，1:1）。选定后 chip 显示单一事实（如「快速对话」/「项目名 · 本地」）。草稿意向为判别联合 `draftWorkspaceIntent`（quick_local / quick_cloud / project）。**新建项目**必选位置（本地文件夹 / 默认 `~/Documents/AgentCore/<名>` / 云端）。已建会话只读展示工作区；无会话级「绑定/断开」；「在项目中继续」从会话菜单开新草稿并携带摘要。**B4** 附件提示 `DraftWorkspaceAssignPrompt` 仍适配新 store。→ 见代码 `ComposerWorkspaceChip.tsx`、`CreateFolderDialog.tsx`、`DraftWorkspaceAssignPrompt.tsx`、`stores/folders.ts`。
+**对话落点表达（✅ 项目=工作区 · 单一「在哪工作」入口）**：草稿输入框工具行只挂一个 `ComposerWorkspaceChip`。菜单：快速对话（= 云端草稿·桌面/web 默认）/ 本机草稿（桌面显式·落本机容器走本地引擎）/ 项目列表（名称+位置副文）/ 新建项目… / 打开本地文件夹…（= 以该文件夹创建项目，1:1）。选定后 chip 显示单一事实（如「快速对话」/「项目名 · 本地」）。草稿意向为判别联合 `draftWorkspaceIntent`（quick_local / quick_cloud / project）。**新建项目**必选位置（本地文件夹 / 默认 `~/Documents/AgentCore/<名>` / 云端）。已建会话只读展示工作区；无会话级「绑定/断开」；「在项目中继续」从会话菜单开新草稿并携带摘要。**B4** 附件提示 `DraftWorkspaceAssignPrompt` 仍适配新 store。→ 见代码 `ComposerWorkspaceChip.tsx`、`CreateFolderDialog.tsx`、`DraftWorkspaceAssignPrompt.tsx`、`stores/folders.ts`。
 
 **隐私承诺**：默认不留存（未备份内容不进云）；在途可用（读文件时正文临时发给模型）；备份/分享 = 显式上传（不自动同步，操作前明示）。
 

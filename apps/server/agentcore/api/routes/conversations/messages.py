@@ -65,6 +65,50 @@ from ._helpers import (
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
+async def _persist_delivered_interjection_attachments(
+    *,
+    conversation_id: str,
+    user_id: str,
+    attachments: list[dict],
+    sink: EventSink,
+) -> list[dict]:
+    """Persist mid-flight interjection attachments into the conversation workspace.
+
+    Same ``persist_attachments`` path as a normal turn. Returns enriched dicts
+    (``workspace_path`` set, inline ``text`` retained) for stash / later drain.
+    """
+    if not attachments:
+        return []
+
+    from agentcore.conversation.common import resolve_local_binding
+    from agentcore.conversation.turn_backend import build_turn_backend
+    from agentcore.db import async_session_factory
+    from agentcore.workspace.attachments import persist_attachments
+    from agentcore.workspace.locate import workspace_storage_key
+    from agentcore.workspace.locks import workspace_lock
+
+    async with async_session_factory() as session:
+        conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
+        if not conv:
+            return attachments
+        folder_id = conv.folder_id
+        local_binding = await resolve_local_binding(session, conv)
+
+    backend = build_turn_backend(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        folder_id=folder_id,
+        sink=sink,
+        local_binding=local_binding,
+    )
+    async with workspace_lock(
+        workspace_storage_key(
+            user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+        )
+    ):
+        return await persist_attachments(backend, attachments)
+
+
 @router.get("/{conversation_id}/messages", response_model=MessageListResponse)
 async def list_messages(
     conversation_id: str,
@@ -326,7 +370,18 @@ async def send_message(
         coord = active_coordination_for_conversation(conversation_id)
         if coord is not None and coord.active:
             interjection_id = new_id()
-            attachments = [a.model_dump() for a in body.attachments]
+            raw_attachments = [a.model_dump() for a in body.attachments]
+            # Delivered path: persist now so CEO / queue_user_message see workspace_path.
+            # Stash keeps inline text; a later drain re-pass is idempotent (path set → skip write).
+            from agentcore.workspace.attachments import interjection_attachment_meta
+
+            attachments = await _persist_delivered_interjection_attachments(
+                conversation_id=conversation_id,
+                user_id=user.user_id,
+                attachments=raw_attachments,
+                sink=existing.sink,
+            )
+            att_meta = interjection_attachment_meta(attachments)
             coord.stash_interjection(
                 interjection_id,
                 {
@@ -346,6 +401,7 @@ async def send_message(
                     payload={
                         "interjection_id": interjection_id,
                         "content": body.content,
+                        **({"attachments": att_meta} if att_meta else {}),
                     },
                 )
             )
@@ -359,6 +415,7 @@ async def send_message(
                         execution_id=coord.execution_id,
                         content=body.content,
                         status="delivered",
+                        attachments=att_meta or None,
                     )
                 )
                 delivered = SendMessageInterjectedResponse(

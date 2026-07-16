@@ -125,12 +125,26 @@ def _format_one(session: CoordinationSession, ev: CoordinationEvent) -> str:
     if ev.kind is CoordinationEventKind.USER_INTERJECTION:
         iid = p.get("interjection_id") or "?"
         text = (p.get("content") or "").strip()
-        return (
-            f"- user_interjection（id={iid}）：老板中途插话——「{text}」\n"
-            "  相关：图内处置（update_synthesis / delegate 追加队员 / cancel_worker）。\n"
+        lines = [f"- user_interjection（id={iid}）：老板中途插话——「{text}」"]
+        atts = p.get("attachments")
+        if isinstance(atts, list):
+            for a in atts:
+                if not isinstance(a, dict):
+                    continue
+                name = a.get("name") or "?"
+                wp = a.get("workspace_path") or ""
+                binary = bool(a.get("binary"))
+                path_bit = f" → {wp}" if isinstance(wp, str) and wp.strip() else ""
+                mark = "（二进制）" if binary else ""
+                lines.append(f"  附件：{name}{path_bit}{mark}")
+        lines.append(
+            "  相关：图内处置（update_synthesis / delegate 追加队员 / cancel_worker）。"
+        )
+        lines.append(
             "  无关（独立新活）：必须 queue_user_message(interjection_id=…) 转入对话级排队，"
             "当前回合结束后自动起新回合；勿假装已办、勿丢弃。"
         )
+        return "\n".join(lines)
     return f"- {ev.kind.value}：{p}"
 
 

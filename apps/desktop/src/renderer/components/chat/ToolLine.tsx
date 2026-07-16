@@ -12,7 +12,7 @@ import {
 } from "@/stores/disclosure";
 import type { ProcessStep } from "@/types/events";
 import { Check, ChevronDown, ChevronRight, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   isReadUrlSourceGroup,
   ReadUrlSourceCollection,
@@ -24,18 +24,6 @@ import {
   toolMeta,
   toolPhaseText,
 } from "./message-bubble/constants";
-
-/** Tools whose rich result card auto-opens once when they finish (结果卡自动展开): the output
- * IS the payload the user was waiting on — web_search's hits, code_execute's terminal output
- * (incl. a failing run's stderr), file_write/str_replace's diff — so hiding it behind a click
- * is pure friction. Every other tool keeps the collapsed default; a later manual collapse on
- * these still sticks. */
-const AUTO_EXPAND_ON_DONE = new Set([
-  "web_search",
-  "code_execute",
-  "file_write",
-  "str_replace",
-]);
 
 /** Consult tools (查阅能力 / 查阅记忆) whose collapsed title already names exactly what was
  * pulled —「查阅能力 <name>」/「查阅记忆 <topic>」— and whose full body is one click away. Their
@@ -55,11 +43,11 @@ export function ComposingToolLine({
     <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
       <Icon size={14} className="shrink-0 text-primary" />
       <span>
-        正在生成 {label}
+        Composing {label}
         {tool.chars > 0 && (
           <span className="text-muted-foreground/70">
             {" · "}
-            {formatCompact(tool.chars)} 字
+            {formatCompact(tool.chars)} chars
           </span>
         )}
       </span>
@@ -184,20 +172,8 @@ export function ToolLine({
   const hasBody = hasToolResultBody(data);
   const running = step.status === "running";
   const isWebSearch = step.tool_name === "web_search";
-  const autoExpandsOnDone = AUTO_EXPAND_ON_DONE.has(step.tool_name);
   const suppressesPeek = PEEK_SUPPRESSED.has(step.tool_name);
   const elapsed = useRunningElapsed(running);
-
-  // 结果卡自动展开: open the rich result once when an auto-expand tool finishes, so the
-  // user sees the payload without a click — web_search hits, code_execute terminal,
-  // file_write/str_replace diff. One-shot on the running→done edge — a later manual
-  // collapse sticks; other tools keep the collapsed default.
-  const prevRunning = useRef(running);
-  useEffect(() => {
-    if (prevRunning.current && !running && autoExpandsOnDone && hasBody)
-      setOpen(true);
-    prevRunning.current = running;
-  }, [running, autoExpandsOnDone, hasBody, setOpen]);
 
   // Waiting-state hint (联网搜索前端展示优化): coarse phase (正在检索 / 排队中 / 改用备用引擎)
   // plus a live elapsed timer, replacing the dead spinner. Empty at the very first instant

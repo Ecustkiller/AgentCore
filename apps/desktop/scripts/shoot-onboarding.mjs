@@ -32,7 +32,7 @@ const filter = (process.argv[2] ?? "").toLowerCase();
 async function loadSceneIds() {
   const src = await readFile(scenesPath, "utf8");
   const ids = [];
-  const re = /id:\s*"(onboarding-[^"]+|empty-[^"]+)"/g;
+  const re = /id:\s*"(onboarding-[^"]+|empty-[^"]+|composer-[^"]+)"/g;
   let m = re.exec(src);
   while (m !== null) {
     if (!ids.includes(m[1])) ids.push(m[1]);

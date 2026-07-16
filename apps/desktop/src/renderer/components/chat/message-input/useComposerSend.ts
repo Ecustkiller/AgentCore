@@ -58,16 +58,46 @@ export function useComposerSend({
     // Mid-flight: inject into live coordination or conversation-level queue.
     // No new user bubble / SSE — events ride the in-flight sink.
     if (isGenerating && activeConvId) {
-      if (attachments.length > 0) {
-        notifyError(
-          new Error("回合执行中暂不支持带附件插话，请结束后再发"),
-          "无法发送",
-        );
-        return;
+      const pending = attachments;
+      const outgoing: OutgoingAttachment[] = [];
+      for (const a of pending) {
+        if (a.kind === "file" && (a.stagingId || a.workspacePath || a.binary)) {
+          const resided = await ensureAttachmentResident(activeConvId, a);
+          if (!resided.ok) {
+            notifyError(new Error(resided.reason), "附件驻留失败");
+            return;
+          }
+          outgoing.push({
+            name: resided.name,
+            path: resided.workspacePath || a.path,
+            text: resided.binary ? "" : resided.text,
+            truncated: resided.truncated,
+            kind: "file",
+            binary: resided.binary,
+            workspace_path: resided.workspacePath || undefined,
+          });
+        } else {
+          outgoing.push({
+            name: a.name,
+            path: a.path,
+            text: a.text,
+            truncated: a.truncated,
+            kind: a.kind,
+            conversation_id: a.conversationId,
+            binary: a.binary,
+            workspace_path: a.workspacePath,
+          });
+        }
       }
-      const result = await sendMidFlightMessage(activeConvId, trimmed);
+
+      const result = await sendMidFlightMessage(
+        activeConvId,
+        trimmed,
+        outgoing.length > 0 ? outgoing : undefined,
+      );
       if (result.kind === "delivered" || result.kind === "queued") {
         setValue("");
+        setAttachments([]);
         closeMenu();
         notifyMidFlightResult(result);
       }

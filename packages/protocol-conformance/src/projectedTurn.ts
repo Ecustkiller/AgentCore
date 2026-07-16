@@ -195,12 +195,19 @@ export interface ProjectedTeamNote {
 
 /** Mid-flight user interjection into a live coordination turn (`user_interjection`).
  * Same `interjectionId` keeps latest `status` (delivered → queued). */
+export interface ProjectedUserInterjectionAttachment {
+  name: string;
+  workspacePath?: string;
+  binary?: boolean;
+}
+
 export interface ProjectedUserInterjection {
   interjectionId: string;
   executionId: string;
   content: string;
   status: "delivered" | "queued" | string;
   note: string | null;
+  attachments?: ProjectedUserInterjectionAttachment[];
 }
 
 /** Interaction lifecycle status in the projected turn (提问确认统一重构 P3). */
