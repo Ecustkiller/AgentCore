@@ -89,6 +89,7 @@ function mkRun(
     escalations: [],
     process: [],
     ...over,
+    sideKey: over.sideKey ?? null,
   };
 }
 

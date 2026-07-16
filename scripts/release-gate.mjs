@@ -3,7 +3,13 @@
  * Local release gate — isomorphic with `.github/workflows/ci.yml`, plus desktop
  * gaps (typecheck + conformance) that CI historically omitted.
  *
- *   pnpm release:gate
+ *   pnpm release:gate                    # full run（发布验证必须全量）
+ *   pnpm release:gate --from desktop     # 断点续跑：从 desktop 段开始
+ *   pnpm release:gate --only backend     # 只跑单段（修复迭代用）
+ *
+ * Sections (in order): backend, contracts, desktop, mobile, admin.
+ * `--from`/`--only` are local iteration aids — a release still requires one
+ * uninterrupted full pass.
  *
  * Any non-zero step fails the whole gate. Backend uses unit pytest
  * (`--ignore=tests/integration`) for local runnability; CI still runs full
@@ -165,55 +171,103 @@ async function assertContractIdempotent() {
   }
 }
 
-async function main() {
-  console.log("release:gate — local CI isomorphic gate");
+const SECTION_ORDER = ["backend", "contracts", "desktop", "mobile", "admin"];
 
-  section("backend");
-  run("ruff check", "uv", ["run", "ruff", "check", "."], { cwd: SERVER });
-  runLogged(
-    "pytest (unit)",
-    "uv",
-    ["run", "pytest", "--ignore=tests/integration", "--tb=short", "-q"],
-    {
-      cwd: SERVER,
-      env: { LOG_LEVEL: "WARNING" },
-    },
+function parseSectionArgs(argv) {
+  let from = null;
+  let only = null;
+  for (let i = 2; i < argv.length; i++) {
+    if (argv[i] === "--from" && argv[i + 1]) from = argv[++i];
+    else if (argv[i] === "--only" && argv[i + 1]) only = argv[++i];
+  }
+  for (const [flag, value] of [["--from", from], ["--only", only]]) {
+    if (value && !SECTION_ORDER.includes(value)) {
+      console.error(`${flag} ${value}: unknown section (${SECTION_ORDER.join(", ")})`);
+      process.exit(2);
+    }
+  }
+  if (from && only) {
+    console.error("--from and --only are mutually exclusive");
+    process.exit(2);
+  }
+  return { from, only };
+}
+
+function sectionEnabled(name, { from, only }) {
+  if (only) return name === only;
+  if (from) return SECTION_ORDER.indexOf(name) >= SECTION_ORDER.indexOf(from);
+  return true;
+}
+
+async function main() {
+  const filter = parseSectionArgs(process.argv);
+  const partial = filter.from || filter.only;
+  console.log(
+    `release:gate — local CI isomorphic gate${
+      partial ? ` (PARTIAL: ${filter.only ? `only ${filter.only}` : `from ${filter.from}`} — 发布仍需全量绿)` : ""
+    }`,
   );
 
-  section("contracts");
-  regenContracts();
-  run("story-packs check", "pnpm", ["gen:story-packs:check"]);
-  await assertContractIdempotent();
+  if (sectionEnabled("backend", filter)) {
+    section("backend");
+    run("ruff check", "uv", ["run", "ruff", "check", "."], { cwd: SERVER });
+    runLogged(
+      "pytest (unit)",
+      "uv",
+      ["run", "pytest", "--ignore=tests/integration", "--tb=short", "-q"],
+      {
+        cwd: SERVER,
+        env: { LOG_LEVEL: "WARNING" },
+      },
+    );
+  }
 
-  section("desktop");
-  run("desktop lint", "pnpm", ["--filter", "agentcore-desktop", "lint"]);
-  run("desktop typecheck", "pnpm", ["--filter", "agentcore-desktop", "typecheck"]);
-  run("desktop test", "pnpm", [
-    "--filter",
-    "agentcore-desktop",
-    "exec",
-    "vitest",
-    "run",
-  ]);
-  run("desktop conformance", "pnpm", ["--filter", "agentcore-desktop", "conformance"]);
-  run("desktop shoot", "pnpm", ["--filter", "agentcore-desktop", "shoot"], {
-    env: { SHOOT_FRAMES: "3" },
-  });
-  run("desktop smoke:webapp:ci", "pnpm", [
-    "--filter",
-    "agentcore-desktop",
-    "smoke:webapp:ci",
-  ]);
+  if (sectionEnabled("contracts", filter)) {
+    section("contracts");
+    regenContracts();
+    run("story-packs check", "pnpm", ["gen:story-packs:check"]);
+    await assertContractIdempotent();
+  }
 
-  section("mobile");
-  run("mobile lint", "pnpm", ["--filter", "agentcore-mobile", "lint"]);
-  run("mobile typecheck", "pnpm", ["--filter", "agentcore-mobile", "typecheck"]);
-  run("mobile conformance", "pnpm", ["--filter", "agentcore-mobile", "conformance"]);
+  if (sectionEnabled("desktop", filter)) {
+    section("desktop");
+    run("desktop lint", "pnpm", ["--filter", "agentcore-desktop", "lint"]);
+    run("desktop typecheck", "pnpm", ["--filter", "agentcore-desktop", "typecheck"]);
+    run("desktop test", "pnpm", [
+      "--filter",
+      "agentcore-desktop",
+      "exec",
+      "vitest",
+      "run",
+    ]);
+    run("desktop conformance", "pnpm", ["--filter", "agentcore-desktop", "conformance"]);
+    run("desktop shoot", "pnpm", ["--filter", "agentcore-desktop", "shoot"], {
+      env: { SHOOT_FRAMES: "3" },
+    });
+    run("desktop smoke:webapp:ci", "pnpm", [
+      "--filter",
+      "agentcore-desktop",
+      "smoke:webapp:ci",
+    ]);
+  }
 
-  section("admin");
-  run("admin typecheck", "pnpm", ["--filter", "agentcore-admin", "typecheck"]);
+  if (sectionEnabled("mobile", filter)) {
+    section("mobile");
+    run("mobile lint", "pnpm", ["--filter", "agentcore-mobile", "lint"]);
+    run("mobile typecheck", "pnpm", ["--filter", "agentcore-mobile", "typecheck"]);
+    run("mobile conformance", "pnpm", ["--filter", "agentcore-mobile", "conformance"]);
+  }
 
-  console.log("\n✓ release:gate passed");
+  if (sectionEnabled("admin", filter)) {
+    section("admin");
+    run("admin typecheck", "pnpm", ["--filter", "agentcore-admin", "typecheck"]);
+  }
+
+  console.log(
+    partial
+      ? `\n✓ release:gate PARTIAL passed (${filter.only ? `only ${filter.only}` : `from ${filter.from}`}) — 发布前仍需完整 pnpm release:gate`
+      : "\n✓ release:gate passed",
+  );
 }
 
 main().catch((err) => {

@@ -1,12 +1,12 @@
 import { getRuntime } from "./selectors";
 import { useConversationStore } from "./store";
 import {
+  type TurnPhase,
+  type TurnTerminalOutcome,
   armStopConfirmTimeout,
   blocksStreamOpen,
   clearStopConfirmTimeout,
   isTerminalPhase,
-  type TurnPhase,
-  type TurnTerminalOutcome,
 } from "./turnPhase";
 
 export function getTurnPhase(conversationId: string): TurnPhase {

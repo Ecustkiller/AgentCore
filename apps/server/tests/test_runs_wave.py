@@ -139,6 +139,41 @@ async def test_retry_then_succeeds():
     assert calls["n"] == 2
 
 
+async def test_retry_merges_billing_including_string_annotations():
+    """B-deep 失败计费 survives retries: numeric usage/cost fields from attempt 1 are
+    summed into the returned state, while string annotations (currency / pricing_source /
+    credential_source) must pass through untouched — regression for the int() crash."""
+    plan = RunPlan()
+    plan.add(_spec("a", on_failure="retry", max_retries=1))
+    plan.nodes[0].policy.retry_delay_ms = 0
+    calls = {"n": 0}
+
+    async def ex(_spec: RunSpec, _completed) -> RunState:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return RunState(
+                phase=RunPhase.FAILED,
+                error="transient",
+                usage={"input_tokens": 10, "output_tokens": 5},
+                cost={"total_microusd": 700, "currency": "USD", "pricing_source": "curated"},
+            )
+        return RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            usage={"input_tokens": 20, "output_tokens": 8},
+            cost={"total_microusd": 1300, "currency": "USD", "pricing_source": "curated"},
+        )
+
+    res = await WaveScheduler().run(plan, ex)
+    assert res["a"].phase is RunPhase.COMPLETED
+    assert res["a"].usage == {"input_tokens": 30, "output_tokens": 13}
+    assert res["a"].cost == {
+        "total_microusd": 2000,
+        "currency": "USD",
+        "pricing_source": "curated",
+    }
+
+
 async def test_deterministic_failure_skips_retry():
     """确定性失败区分 (BL-6): a FAILED state flagged ``error_retryable=False`` (prompt 超长 /
     鉴权 / 余额) is NOT re-run even under ``on_failure="retry"`` — re-running just re-fails."""

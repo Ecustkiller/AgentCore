@@ -78,7 +78,7 @@ async def _read_until(
 
 def _is_paused(collected: list[tuple[int, str, dict]]) -> bool:
     return any(
-        et == "message_end" and str((p.get("finish_reason") or "")).lower() == "paused"
+        et == "message_end" and str(p.get("finish_reason") or "").lower() == "paused"
         for _t, et, p in collected
     )
 
@@ -235,15 +235,18 @@ async def walk(args: argparse.Namespace) -> None:
 
         # Opening segment should include search / case-brief style content before pause.
         early_types = {et for _t, et, _p in collected}
-        if "team_preview_required" not in early_types and collected:
-            # Still assert we got some assistant activity before pause/complete.
-            if not any(
+        # Still assert we got some assistant activity before pause/complete.
+        if (
+            "team_preview_required" not in early_types
+            and collected
+            and not any(
                 et in {"text_delta", "tool_call_started", "thinking_delta", "run_started"}
                 for et in early_types
-            ):
-                print(
-                    f"warn: unusual early event set before pause: {sorted(early_types)[:20]}"
-                )
+            )
+        ):
+            print(
+                f"warn: unusual early event set before pause: {sorted(early_types)[:20]}"
+            )
 
         paused = _is_paused(collected)
         r = await client.get(f"{base}/v1/conversations/{conv}/recovery", headers=headers)

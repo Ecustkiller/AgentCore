@@ -95,10 +95,7 @@ def persist_resumed_tool_results(
     for tc in last.tool_calls:
         name = tc.function.name or tool_name or "tool"
         args = tc.function.arguments or ""
-        if tc.id == target:
-            result = output
-        else:
-            result = _SIBLING_SKIPPED
+        result = output if tc.id == target else _SIBLING_SKIPPED
         record_turn_fact(
             ToolCallFact(
                 run_id=run_id,

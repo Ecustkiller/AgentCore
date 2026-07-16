@@ -140,7 +140,7 @@ CEO 在自己的 ReAct 循环里调用单一的 `delegate` 工具把一批子任
 | 合成通道 | 草稿走 `team_synthesis_preview`（`in_progress`）；终稿仍 `content_delta` |
 | 挂起 | **`team_preview` 在 coordinate fork 之前**挂起即收口（开做后续跑再臂后台）。协调中 `ask_user` 软挂起即收口；状态入 journal，续跑重建（不保活后台调度器）。`checkpoint_after` 波边界**不** durable `plan_review` 收口——只发 `BOUNDARY_YIELD` 协调事件（正常路径已由启用门排除，仅 replan 中途加把关节点等残留场景走到，注入文案强制 CEO 转 `ask_user` 拍板）；经典阻塞（`coordinate=false`）仍挂起即收口 |
 | Phase 3 | 超时只通知不自动取消；非阻塞 escalate / 便签冲突进事件队列；SCOPE 边界 PROCEED 由 CEO 仲裁；**阻塞 escalate 改 CEO 仲裁**（`resolve_escalation`；偏好/授权/费用类先 ask_user 再 resolve） |
-| 用户插话 | 协调运行中用户新消息进 session 队列（必要决策点，必唤醒）；CEO 智能路由——**相关入图**（`update_synthesis` / 再 `delegate` 追加 / `cancel_worker`），**无关转排队**（`queue_user_message` → 对话级队列，下一回合处理）。经典阻塞路径无协调窗口，消息一律排队（实时改向用既有 `run_redirect`），**否决**「为插话把单 worker 升格协调」（改动大收益小） |
+| 用户插话 | 协调运行中用户新消息进 session 队列（必要决策点，必唤醒）；CEO 智能路由——**相关入图**（`update_synthesis` / 再 `delegate` 追加 / `cancel_worker`），**无关转排队**（`queue_user_message` → 对话级队列，下一回合处理）。插话可带附件：到达即落盘工作区，简报只给「名字 + 路径 + 二进制标记」，CEO 自己 `file_read` 或把路径写进 steer 指令递给队员。经典阻塞路径无协调窗口，消息一律排队（实时改向用既有 `run_redirect`），**否决**「为插话把单 worker 升格协调」（改动大收益小） |
 
 **不变量 B（CEO 仲裁 ⇔ 协调存活）**：`resolve_escalation` **仅**在协调 session 活跃时可用。单 worker / `finalize` / 嵌套 lead / 显式 `coordinate=false` 走经典阻塞——CEO 卡在 `delegate` await 上、波内无活着的 CEO，阻塞 escalate **直挂用户**（`awaiting=user`），**绝不**改挂 CEO（否则 worker↔CEO 死锁，只能靠超时回落）。测 `resolve_escalation` 必须 ≥2 worker 进协调。否决「单人也 awaiting=ceo」除非先改 drive 让单人亦保 CEO 存活（真·A，未做）。
 

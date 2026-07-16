@@ -818,7 +818,14 @@ button.link {
 }
 
 /* 连续工具折叠组 (前端UX设计.md §一B): same <details> fold idiom as 思考 (.reasoning) in a
-   .tool-style bordered shell; expands to the per-tool cards. */
+   .tool-style bordered shell; expands to the per-tool cards. Pure web_search runs skip the
+   shell and render as a flat stack (parity with desktop ToolLineGroup). */
+.tool-group-flat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .tool-group {
   overflow: hidden;
   border: 1px solid var(--border);

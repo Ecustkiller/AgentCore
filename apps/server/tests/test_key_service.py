@@ -40,6 +40,8 @@ def service():
 
 @pytest.mark.asyncio
 async def test_set_key_applies_defaults(service):
+    # set_key 落库后经 get_status 复读——repo 需返回已写入的行。
+    service._repo.get_by_user_id = AsyncMock(return_value=_row(api_key_enc=b"cipher"))
     with patch.object(service, "_encryptor") as enc_mock:
         enc_mock.return_value.encrypt.return_value = b"cipher"
         status = await service.set_key("u1", "sk-test-key-1234")
@@ -49,6 +51,11 @@ async def test_set_key_applies_defaults(service):
         api_key_enc=b"cipher",
         base_url=settings.platform_base_url,
         default_model=DEEPSEEK_V4_FLASH,
+        # 未填单价卡 / 后台模型时显式置空（清除旧值），而非省略参数。
+        price_cache_hit=None,
+        price_cache_miss=None,
+        price_output=None,
+        background_model=None,
     )
     assert status.configured is True
     assert status.base_url == settings.platform_base_url

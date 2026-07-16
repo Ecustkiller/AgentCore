@@ -248,7 +248,9 @@ describe("drainOutbox", () => {
           payload: {
             checkpoint_id: "tp1",
             decision: "continue",
-            resume_frame: { frame: { kind: "team_preview", checkpoint_id: "tp1" } },
+            resume_frame: {
+              frame: { kind: "team_preview", checkpoint_id: "tp1" },
+            },
           },
         },
       },

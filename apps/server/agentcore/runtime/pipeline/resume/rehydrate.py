@@ -1,8 +1,9 @@
 """Single-point turn-state rehydration from ``turn_paused`` (batch 5).
 
 Resume reads the last ``turn_paused`` in the frame's journal and rehydrates
-display + control state in one place. Old frames without the fact keep legacy
-heuristics (empty timeline seed, transcript pre_pause, frame.citations only).
+display + control state in one place. Process timelines prefer progressive
+``process_*`` / ``run_process_*`` journal rows; legacy frames without those fall
+back to ``turn_paused.process`` / ``run_processes``.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from typing import Any
 from agentcore.core.logging import get_logger
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.facts import TurnPausedFact, pre_pause_from_journal
+from agentcore.runtime.journal.entries import _PROCESS_PREFIX, _RUN_PROCESS_PREFIX
 from agentcore.runtime.loop_controller import LoopController
 from agentcore.runtime.suspension import (
     PlanReviewSuspension,
@@ -21,6 +23,27 @@ from agentcore.runtime.suspension import (
 )
 
 logger = get_logger(__name__)
+
+
+def _process_lanes_from_journal(
+    entries: list[dict[str, Any]] | None,
+) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+    """Project captain / worker process steps from progressive journal kinds."""
+    process: list[dict[str, Any]] = []
+    run_processes: dict[str, list[dict[str, Any]]] = {}
+    if not entries:
+        return process, run_processes
+    for entry in entries:
+        kind = str(entry.get("kind") or "")
+        payload = dict(entry.get("payload") or {})
+        if kind.startswith(_PROCESS_PREFIX):
+            process.append(payload)
+        elif kind.startswith(_RUN_PROCESS_PREFIX):
+            rid = payload.get("run_id")
+            if rid:
+                step = {k: v for k, v in payload.items() if k != "run_id"}
+                run_processes.setdefault(str(rid), []).append(step)
+    return process, run_processes
 
 
 @dataclass
@@ -56,10 +79,16 @@ def rehydrate_from_turn_paused(
             from_turn_paused=False,
         )
 
-    if fact.process:
-        sink.seed_process(list(fact.process))
-    if fact.run_processes:
-        sink.seed_run_processes(dict(fact.run_processes))
+    process, run_processes = _process_lanes_from_journal(suspension.journal_entries)
+    # Prefer progressive process_* ; legacy turn_paused snapshot is read-only fallback.
+    if not process and fact.process:
+        process = list(fact.process)
+    if not run_processes and fact.run_processes:
+        run_processes = dict(fact.run_processes)
+    if process:
+        sink.seed_process(process)
+    if run_processes:
+        sink.seed_run_processes(run_processes)
 
     # G2: fact is authoritative; frame.citations is the fallback.
     citations = list(fact.citations or suspension.citations or [])
@@ -69,8 +98,8 @@ def rehydrate_from_turn_paused(
         "pipeline.resume_rehydrated",
         checkpoint_id=fact.checkpoint_id,
         suspension_kind=fact.suspension_kind,
-        process_steps=len(fact.process or []),
-        run_process_keys=len(fact.run_processes or {}),
+        process_steps=len(process),
+        run_process_keys=len(run_processes),
         citations=len(citations),
         has_controller=bool(controller),
     )

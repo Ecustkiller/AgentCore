@@ -109,9 +109,7 @@ def should_audit_gate(controller: LoopController, *, role: str) -> bool:
     """Whether the soft audit gate should fire (wrap-up or all_completed path)."""
     if role != "captain" or controller.audit_gate_fired:
         return False
-    if controller.delegate_count != 1 or not controller.first_batch_substantial:
-        return False
-    return True
+    return controller.delegate_count == 1 and controller.first_batch_substantial
 
 
 def coordination_injection_has_all_completed(messages: list[LLMMessage]) -> bool:

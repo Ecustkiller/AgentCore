@@ -1,7 +1,12 @@
 import { DebateProgressLine } from "@/components/chat/DebateProgressLine";
 import { StatusStrip } from "@/components/chat/StatusStrip";
 import { TeamNotesPanel } from "@/components/chat/TeamNotesPanel";
+import { GraphTeamPreview } from "@/components/chat/TeamPreviewCard";
 import { UserInterjectionsPanel } from "@/components/chat/UserInterjectionsPanel";
+import {
+  shouldHostPreviewInGraph,
+  teamHasStartedRuns,
+} from "@/components/chat/debatePreviewPlacement";
 import { teamNotesDefaultExpanded } from "@/components/chat/teamNotesDefaults";
 import { GraphView } from "@/components/graph/GraphView";
 import { planCapabilities } from "@/components/graph/planCapabilities";
@@ -21,13 +26,14 @@ import {
 import {
   type Execution,
   type ExecutionJournal,
-  type UserInterjection,
   ExecutionScopeContext,
+  type UserInterjection,
   isDebate,
   useExecutionStore,
   useMessageExecution,
 } from "@/stores/execution";
 import { useGraphStore } from "@/stores/graph";
+import { useMessageInteractionCards } from "@/stores/interactions";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import { turnDetailPath } from "@/stores/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -35,20 +41,10 @@ import { useNavigate } from "react-router-dom";
 
 /** Re-export for canvas 指挥台 and other consumers. */
 export { RecoveryActions } from "@/components/chat/StatusStrip";
+/** Re-export gate used by fixture tests and graph consumers. */
+export { teamHasStartedRuns } from "@/components/chat/debatePreviewPlacement";
 
 const EMPTY_INTERJECTIONS: readonly UserInterjection[] = [];
-
-/**
- * True once the team has actually started work: any run left the never-started
- * states (`pending`, or terminal `skipped` from finalize before a start).
- * Gates the inline graph so team_preview hang / stop-before-start stay graph-less;
- * plan_review mid-wave pause (completed nodes exist) still shows the graph.
- */
-export function teamHasStartedRuns(
-  runs: readonly { status: string }[],
-): boolean {
-  return runs.some((r) => r.status !== "pending" && r.status !== "skipped");
-}
 
 /**
  * The multi-agent turn's primary surface, embedded in the assistant message
@@ -104,6 +100,14 @@ export function InlineTeamGraph({
   const execution = useMessageExecution(messageId);
   const userInterjections = useExecutionStore(
     (s) => s.byId[messageId]?.userInterjections ?? EMPTY_INTERJECTIONS,
+  );
+  const { teamPreviews } = useMessageInteractionCards(
+    conversationId,
+    messageId,
+  );
+  const resolvedPreview = useMemo(
+    () => teamPreviews.find((p) => p.status === "resolved") ?? null,
+    [teamPreviews],
   );
   const message = useConversationStore((s) => {
     const key = s.currentConversationId ?? "";
@@ -167,6 +171,7 @@ export function InlineTeamGraph({
   }
 
   const graphHeight = measured?.height ?? fallbackHeight;
+  const hostPreview = shouldHostPreviewInGraph(resolvedPreview, execution.runs);
 
   return (
     <ExecutionScopeContext.Provider value={messageId}>
@@ -185,6 +190,9 @@ export function InlineTeamGraph({
             onOpenTeamNotes={openTeamNotes}
             collabSummary={collabSummary}
           />
+          {hostPreview && resolvedPreview && (
+            <GraphTeamPreview preview={resolvedPreview} />
+          )}
           {isDebate(execution) && (
             <DebateProgressLine
               execution={execution}

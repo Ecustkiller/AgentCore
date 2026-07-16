@@ -174,7 +174,7 @@ export interface AgentState {
   /** Coarse EXECUTION phase for this worker's currently-running tool (`tool_use_progress`
    * with `run_id`). Transport-only — never folded from frames/journal; overlaid live from
    * {@link ExecutionRuntime.workerToolPhases} keyed by {@link currentRunId}. Cleared when
-   * the tool ends. Drives the node/detail honest waiting line (排队中/正在检索/…). */
+   * the tool ends. Drives the node/detail honest waiting line (Queued/Searching/…). */
   toolExecutionLive: { toolName: string; phase: string } | null;
   /** 交付前核验回炉：本 worker 曾发过 `run_output_reset`（节点轻 chip）。 */
   didRework?: boolean;

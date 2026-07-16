@@ -28,8 +28,8 @@ from agentcore.api.schemas import (
     RecordTurnResponse,
     RunsPayload,
     SendMessageInterjectedResponse,
-    SendMessageRequest,
     SendMessageQueuedResponse,
+    SendMessageRequest,
     SetMessageFeedbackRequest,
     StatusResponse,
     StopTurnResponse,
@@ -53,6 +53,7 @@ from agentcore.db.repositories import (
 from agentcore.llm.resolve import resolve_user_llm_credentials
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.journal import runs_from_entries_cached
+from agentcore.runtime.journal.entries import _PROCESS_PREFIX
 from agentcore.runtime.turn_runs import turn_runs
 
 from ._helpers import (
@@ -191,12 +192,21 @@ async def list_messages(
         if usage.get("paused"):
             detail.paused = True
         # In-flight overlay: fill content / reasoning from turn_stream_state when running.
+        # When journal already has process_content, skip captain:content → messages.content
+        # (deliverable_only: narration lives on the process lane, not the content column).
         if segments:
+            journal_rows = journal_map.get(m.id) or []
+            from agentcore.runtime.events.attach_replay import journal_is_structured
+
+            skip_cap_content = any(
+                (e.get("kind") or "") == f"{_PROCESS_PREFIX}content" for e in journal_rows
+            ) or journal_is_structured(journal_rows)
             content, reasoning = overlay_message_fields(
                 content=detail.content,
                 reasoning_content=detail.reasoning_content,
                 segments=segments,
                 usage=usage,
+                skip_captain_content=skip_cap_content,
             )
             detail.content = content or ""
             detail.reasoning_content = reasoning

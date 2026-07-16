@@ -281,7 +281,10 @@ describe("hydrateInteractionsFromJournal (history replay)", () => {
           },
         },
       ]);
-      expect(entryToPlanReview(store().get("c1")!)).toMatchObject({
+      const planEntry = store().get("c1");
+      expect(planEntry).toBeDefined();
+      if (!planEntry) return;
+      expect(entryToPlanReview(planEntry)).toMatchObject({
         status: "pending",
         decision: null,
       });
@@ -344,7 +347,10 @@ describe("hydrateInteractionsFromJournal (history replay)", () => {
       ]);
       const cards = messageCheckpoints("a", "m1");
       expect(cards).toHaveLength(1);
-      expect(entryToCheckpoint(store().get("c1")!)).toMatchObject({
+      const checkpointEntry = store().get("c1");
+      expect(checkpointEntry).toBeDefined();
+      if (!checkpointEntry) return;
+      expect(entryToCheckpoint(checkpointEntry)).toMatchObject({
         id: "c1",
         status: "pending",
         decision: null,
@@ -435,7 +441,10 @@ describe("hydrateInteractionsFromJournal (history replay)", () => {
         assumptions: [{ id: "a0", label: "部署", value: "纯静态" }],
       });
       expect(cards[0].questions[0].default).toBe("不要");
-      expect(entryToNonBlockingAsk(store().get("n1")!).id).toBe("n1");
+      const askEntry = store().get("n1");
+      expect(askEntry).toBeDefined();
+      if (!askEntry) return;
+      expect(entryToNonBlockingAsk(askEntry).id).toBe("n1");
     });
 
     it("dedupes a re-delivered event and preserves post order", () => {

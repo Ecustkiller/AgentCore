@@ -434,3 +434,57 @@ def test_stream_segments_monotonic_and_ready_sealed(tmp_path):
     assert record["stream_segments"]["captain:content"]["text"] == "hello world"
     assert record["phase"] == PHASE_READY
 
+
+def test_outbox_process_journal_visible_at_semantic_boundary(tmp_path):
+    """Local mid-run: process_* lands in outbox before finalize (D6 / attach isomorphic)."""
+    from agentcore.conversation.store import set_conversation_store
+    from agentcore.conversation.store.outbox import journal_entries_from_map
+    from agentcore.runtime.events import EventSink, content_delta, tool_use_start
+    from agentcore.runtime.facts import TurnFactLog, current_fact_log
+    from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
+
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="hi",
+        message_id="m1",
+        trace_id="j" * 32,
+    )
+    set_conversation_store(store)
+
+    async def run() -> None:
+        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="j" * 32)
+        log = TurnFactLog()
+        fl = current_fact_log.set(log)
+        writer = TurnJournalWriter(
+            turn_id="m1", conversation_id="c1", trace_id="j" * 32
+        )
+        wt = current_journal_writer.set(writer)
+        sink = EventSink()
+        try:
+            sink.emit(content_delta("## 旁白\n本地可见。"))
+            sink.emit(tool_use_start("tc1", "web_search", {"query": "q"}))
+            # Drain SSE barriers so journal writes complete before we read the file.
+            while True:
+                ev = await sink.get()
+                if ev is None:
+                    break
+                if ev.type.value == "tool_use_start":
+                    sink.close()
+            await writer.flush()
+        finally:
+            current_journal_writer.reset(wt)
+            current_fact_log.reset(fl)
+
+        record = store.find_record_by_message_id("m1")
+        assert record is not None
+        assert record["phase"] == "open"
+        entries = journal_entries_from_map(record.get("journal")) or []
+        kinds = [e.get("kind") for e in entries]
+        assert "process_content" in kinds
+        assert "tool_use_start" in kinds
+        assert kinds.index("process_content") < kinds.index("tool_use_start")
+
+    _drive(run())
+

@@ -63,12 +63,14 @@ describe("formatDisplayCost / pickCostMoney (BYOK ≈)", () => {
   });
 
   it("picks billed total over estimated_total", () => {
-    expect(
-      pickCostMoney({ total: 100, estimated_total: 999 }),
-    ).toEqual({ nano: 100, estimated: false });
-    expect(
-      pickCostMoney({ total: 0, estimated_total: 999 }),
-    ).toEqual({ nano: 999, estimated: true });
+    expect(pickCostMoney({ total: 100, estimated_total: 999 })).toEqual({
+      nano: 100,
+      estimated: false,
+    });
+    expect(pickCostMoney({ total: 0, estimated_total: 999 })).toEqual({
+      nano: 999,
+      estimated: true,
+    });
     expect(pickCostMoney({ total: 0 })).toEqual({
       nano: 0,
       estimated: false,

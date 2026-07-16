@@ -39,6 +39,7 @@ function run(
     escalations: [],
     process: [],
     ...partial,
+    sideKey: partial.sideKey ?? null,
   };
 }
 
@@ -92,6 +93,7 @@ describe("DebateProgressLine", () => {
             converged: false,
             rationale: "",
             new_arguments: true,
+            stop_reason: "",
           },
           sides: [],
           clashes: [],

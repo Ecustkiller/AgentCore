@@ -24,6 +24,8 @@ const INTERACTION_TTL_MS: Record<InteractionKind, number> = {
   conversation: 4000,
   trade: 3000,
   vote: 5000,
+  // 心动选票密封/揭晓：与 vote 同量级，留足舞台读秒。
+  heart_pick: 5000,
 };
 
 export function interactionExpiresAt(

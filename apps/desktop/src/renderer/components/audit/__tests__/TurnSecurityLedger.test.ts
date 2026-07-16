@@ -3,7 +3,8 @@ import type { AgentAuditEvent } from "@/services/audit";
 import { describe, expect, it } from "vitest";
 
 function ev(
-  partial: Partial<AgentAuditEvent> & Pick<AgentAuditEvent, "id" | "action" | "category">,
+  partial: Partial<AgentAuditEvent> &
+    Pick<AgentAuditEvent, "id" | "action" | "category">,
 ): AgentAuditEvent {
   return {
     turn_id: "t1",

@@ -237,21 +237,20 @@ def try_start_coordination(
     # dual-drive; opt-out is only meaningful for the *first* arm.
     if session is None:
         existing = active_coordination(execution_id)
-        if existing is not None and existing.active:
-            if tool._depth == 0 and not finalize:
-                return _merge_into_active_coordination(
-                    tool,
-                    plan,
-                    existing,
-                    execution_id=execution_id,
-                    seed_completed=seed_completed,
-                    finalize=finalize,
-                    seed_notes=seed_notes,
-                    complexity_hint=complexity_hint,
-                    call_idx=call_idx,
-                    completion_criteria=completion_criteria,
-                    coordination=coordination,
-                )
+        if existing is not None and existing.active and tool._depth == 0 and not finalize:
+            return _merge_into_active_coordination(
+                tool,
+                plan,
+                existing,
+                execution_id=execution_id,
+                seed_completed=seed_completed,
+                finalize=finalize,
+                seed_notes=seed_notes,
+                complexity_hint=complexity_hint,
+                call_idx=call_idx,
+                completion_criteria=completion_criteria,
+                coordination=coordination,
+            )
 
     has_checkpoint = any(bool(n.checkpoint_after) for n in plan.nodes)
     checkpoint_enabled = bool(getattr(tool, "_checkpoint_enabled", False))

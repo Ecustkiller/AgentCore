@@ -109,7 +109,7 @@
     {
       "type": "run_escalation",
       "payload": {
-        "escalation_id": "b02f8652-bb30-4e70-bce6-16eaa513d878",
+        "escalation_id": "esc-scope1",
         "run_id": "sa",
         "agent_id": "sa",
         "question": "真正要做的是 X 而非初始子计划的 Y，下游写法应随之调整。",
@@ -289,7 +289,7 @@
       },
       {
         "kind": "escalation",
-        "escalation_id": "b02f8652-bb30-4e70-bce6-16eaa513d878"
+        "escalation_id": "esc-scope1"
       },
       {
         "kind": "content",

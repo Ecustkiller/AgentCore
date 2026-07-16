@@ -1,5 +1,5 @@
-import type { Stance } from "@/stores/execution";
 import { uiGet, uiSet } from "@/lib/uiStorage";
+import type { Stance } from "@/stores/execution";
 import type { DebateModel } from "../model";
 
 /** 辩论室剧本主列布局：并排对照 vs 上下单栏（长文阅读）。 */

@@ -121,7 +121,9 @@ describe("submitInteraction path table", () => {
   });
 
   it("cold path: runResume failure does not markResolved", async () => {
-    resumeMock.mockRejectedValue(new Error("resume blocked: sidecar unavailable"));
+    resumeMock.mockRejectedValue(
+      new Error("resume blocked: sidecar unavailable"),
+    );
     await expect(
       submitInteraction({
         id: "tp1",
@@ -142,7 +144,9 @@ describe("submitInteraction path table", () => {
       messageId: "m1",
       payload: { checkpoint_id: "pr1", steps: [], pending: [] },
     });
-    resumeMock.mockRejectedValue(new Error("resume blocked: sidecar probe failed"));
+    resumeMock.mockRejectedValue(
+      new Error("resume blocked: sidecar probe failed"),
+    );
     await expect(
       submitInteraction({
         id: "pr1",

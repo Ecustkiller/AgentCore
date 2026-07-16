@@ -79,6 +79,9 @@ def _report_variance(label: str, values: list[float]) -> float:
 
 
 @pytest.mark.asyncio
+# 600 agent-tick × 3 轮 + 每 tick 真实 Postgres 持久化——全局 60s 兜底在共享 DB
+# 有并行负载时会误杀（真实跑 40–90s 波动），单测放宽而非改全局。
+@pytest.mark.timeout(240)
 async def test_mvp_acceptance_ten_agents_twenty_ticks_three_runs(client, make_invite, session_factory):
     """10 residents × 20 ticks × 3 manifest-aligned runs; report macro variance (no threshold gate)."""
     original = settings.simulation_enabled

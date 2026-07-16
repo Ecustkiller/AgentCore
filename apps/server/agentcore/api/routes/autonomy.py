@@ -17,7 +17,10 @@ class AutonomyView(BaseModel):
 class AutonomyUpdate(BaseModel):
     policy: AutonomyPolicy = Field(
         ...,
-        description="New-session default: always_ask→observe | first_grant→workspace | full_auto→full_trust",
+        description=(
+            "New-session default: always_ask→observe | first_grant→workspace | "
+            "full_auto→full_trust"
+        ),
     )
 
 @router.get("", response_model=AutonomyView)

@@ -13,7 +13,14 @@ import {
   projectExecution,
   revisionChains,
 } from "../../execution";
-import { MID, plan, resetExecutionStore, revised, started, store } from "./fixtures";
+import {
+  MID,
+  plan,
+  resetExecutionStore,
+  revised,
+  started,
+  store,
+} from "./fixtures";
 
 beforeEach(() => {
   resetExecutionStore();
@@ -531,8 +538,20 @@ describe("定向唤回 版本链 (乙 热修 P4)", () => {
       started("agent-1", "run-1"),
       completed("run-1", "agent-1", 2),
       revised("run-1_rev1", "run-1", 2, 3),
-      { t: 4, kind: "run_output_delta", agentId: "run-1_rev1", delta: "改后" },
-      { t: 5, kind: "run_output_delta", agentId: "run-1_rev1", delta: "内容" },
+      {
+        t: 4,
+        kind: "run_output_delta",
+        runId: "run-1_rev1",
+        agentId: "run-1_rev1",
+        delta: "改后",
+      },
+      {
+        t: 5,
+        kind: "run_output_delta",
+        runId: "run-1_rev1",
+        agentId: "run-1_rev1",
+        delta: "内容",
+      },
       completed("run-1_rev1", "run-1_rev1", 6),
     ];
     const exec = projectExecution(plan, frames, "completed");

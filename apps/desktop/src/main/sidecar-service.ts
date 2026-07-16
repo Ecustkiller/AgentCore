@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 /**
  * Sidecar 服务（主进程）—— 拉起并驱动本机 Python 引擎进程。
  *
@@ -15,7 +16,7 @@
  * 经 `sidecar:event` 推给 renderer，renderer 再喂给同一个 `dispatchSSEEvent`——云 / 本地
  * 两条链路共用一套事件处理。
  */
-import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -676,7 +677,7 @@ export class SidecarManager {
     const liveMessageId =
       live?.turn.kind === "resume"
         ? live.turn.messageId
-        : live?.turnId ?? null;
+        : (live?.turnId ?? null);
     const [unsynced, paused, interruptedAfterDecision] = await Promise.all([
       listUnsyncedSummaries(req.conversationId),
       readLocalPausedSummaries(req.conversationId),
@@ -732,13 +733,17 @@ export class SidecarManager {
     );
     await entry.ready;
 
+    // 与 renderer `continueAfterDecisionViaSidecar` 对齐：续跑也跑 LLM，须有 trace；
+    // 契约上可选，缺省时主进程兜底生成，保证 ActiveTurn / RPC / attach 同源。
+    const traceId = req.traceId ?? randomUUID().replace(/-/g, "");
+
     this.turns.set(req.messageId, {
       wc,
       conversationId: req.conversationId,
       rootId: req.rootId,
       subpath: req.subpath ?? "",
       kind: "resume",
-      traceId: req.traceId,
+      traceId,
       userMessageId: req.userMessageId,
       messageId: req.messageId,
       buffer: new SidecarEventBuffer(),
@@ -759,7 +764,7 @@ export class SidecarManager {
         conversationId: req.conversationId,
         messageId: req.messageId,
         userMessageId: req.userMessageId,
-        traceId: req.traceId,
+        traceId,
         permissionPreset: req.permissionPreset,
         ...(inference ? { inference } : {}),
         ...(externalMounts.length > 0 ? { externalMounts } : {}),

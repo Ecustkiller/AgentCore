@@ -14,9 +14,9 @@ vi.mock("@/services/workspace", () => ({
   uploadWorkspaceFile: vi.fn(),
 }));
 
-import { getWorkspaceBinding } from "@/services/workspaceBinding";
 import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import { uploadWorkspaceFile } from "@/services/workspace";
+import { getWorkspaceBinding } from "@/services/workspaceBinding";
 import { ensureAttachmentResident } from "../resideAttachment";
 
 const getBinding = vi.mocked(getWorkspaceBinding);

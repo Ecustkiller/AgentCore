@@ -37,6 +37,7 @@ function run(
     escalations: [],
     process: [],
     ...partial,
+    sideKey: partial.sideKey ?? null,
   };
 }
 

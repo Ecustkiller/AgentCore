@@ -26,6 +26,11 @@ from dataclasses import dataclass, field
 
 from agentcore.evals.types import EvalConfigError
 from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, LLMRequest
+from agentcore.runtime.debate.prompt import (
+    draft_system,
+    opening_draft_brief,
+    round_draft_brief,
+)
 from agentcore.runtime.debate.speech_pipeline import build_draft_user
 from agentcore.runtime.debate.types import (
     DebateConfig,
@@ -35,11 +40,6 @@ from agentcore.runtime.debate.types import (
     RoundPolicy,
     RoundResult,
     SideTurn,
-)
-from agentcore.runtime.debate.prompt import (
-    draft_system,
-    opening_draft_brief,
-    round_draft_brief,
 )
 
 # 合规：标题字符上限（展示层 ARGUMENT_TITLE_MAX=30；产出端 prompt 更严 ≤16，度量用展示上限）

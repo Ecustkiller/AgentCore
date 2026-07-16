@@ -39,15 +39,18 @@ _LANDING_HINT = re.compile(
     re.IGNORECASE,
 )
 
-_CLASSIFIER_SYSTEM = """\
-你是 CEO Agent，正在决定如何委派一条子任务。根据用户请求，输出【且仅输出】一个 JSON 对象：
-{"form":"prose"|"files","task":"<交给 worker 的任务描述>"}
-
-分流（抓本质）：
-- 产出给用户【看】（回答 / 分析 / 汇报 / 创意文字 / 打招呼）→ form=prose；task 写清用正文交付，不要要求落盘。
-- 产出给用户【用】（要打开 / 运行 / 编辑 / 保存的文件）→ form=files；task 必须点明用 file_write 把产物写进工作区。
-
-不要输出其它文字、不要 markdown 代码围栏。"""
+_CLASSIFIER_SYSTEM = (
+    "你是 CEO Agent，正在决定如何委派一条子任务。根据用户请求，输出【且仅输出】一个 JSON 对象：\n"
+    '{"form":"prose"|"files","task":"<交给 worker 的任务描述>"}\n'
+    "\n"
+    "分流（抓本质）：\n"
+    "- 产出给用户【看】（回答 / 分析 / 汇报 / 创意文字 / 打招呼）→ form=prose；"
+    "task 写清用正文交付，不要要求落盘。\n"
+    "- 产出给用户【用】（要打开 / 运行 / 编辑 / 保存的文件）→ form=files；"
+    "task 必须点明用 file_write 把产物写进工作区。\n"
+    "\n"
+    "不要输出其它文字、不要 markdown 代码围栏。"
+)
 
 
 @dataclass(frozen=True)

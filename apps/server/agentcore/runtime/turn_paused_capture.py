@@ -11,7 +11,6 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.runtime.engine.segments import join_segments
-from agentcore.runtime.events.sink import synthesize_required_marker
 from agentcore.runtime.facts import TurnPausedFact, pre_pause_from_journal
 
 logger = get_logger(__name__)
@@ -42,9 +41,24 @@ def build_turn_paused_fact(
     content = join_segments(prior_content, segment_content)
 
     live_reasoning = ""
+    # Process / run_processes: progressive ``process_*`` / ``run_process_*`` are the
+    # sole write path (flushed below). ``turn_paused`` no longer dual-writes the
+    # timeline — read side still accepts legacy frames via fold / rehydrate fallback.
     process: list[dict[str, Any]] = []
     run_processes: dict[str, list[dict[str, Any]]] = {}
     if sink is not None:
+        # Close open text into journal, then synthesize the pause-anchor marker onto
+        # the live lane and flush again (required SSE emits after this capture).
+        flush = getattr(sink, "flush_process_to_journal", None)
+        if callable(flush):
+            try:
+                flush()
+            except Exception:
+                logger.warning(
+                    "turn_paused.process_flush_failed",
+                    checkpoint_id=checkpoint_id,
+                    exc_info=True,
+                )
         try:
             live_reasoning = sink.streamed_reasoning() or ""
         except Exception:
@@ -54,30 +68,17 @@ def build_turn_paused_fact(
                 exc_info=True,
             )
         try:
-            process = list(sink.raw_process() or [])
             event_type = _event_type(required_event)
             payload = dict(getattr(required_event, "payload", None) or {})
-            if event_type is not None:
-                synthesize_required_marker(process, event_type, payload)
+            persist_marker = getattr(sink, "persist_required_marker", None)
+            if event_type is not None and callable(persist_marker):
+                persist_marker(event_type, payload)
         except Exception:
             logger.warning(
-                "turn_paused.process_capture_failed",
+                "turn_paused.process_marker_failed",
                 checkpoint_id=checkpoint_id,
                 exc_info=True,
             )
-            process = []
-        try:
-            raw_runs = sink.raw_run_processes() or {}
-            run_processes = {
-                str(rid): list(steps) for rid, steps in raw_runs.items() if steps
-            }
-        except Exception:
-            logger.warning(
-                "turn_paused.run_processes_failed",
-                checkpoint_id=checkpoint_id,
-                exc_info=True,
-            )
-            run_processes = {}
 
     reasoning = join_segments(prior_reasoning, live_reasoning)
 

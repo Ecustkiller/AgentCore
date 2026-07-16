@@ -2,9 +2,10 @@
 
 Builds a clear-then-fold replay segment: **full** durable journal facts from the
 turn start (header value is observational only — clients clear-then-fold, so a
-``> cursor`` tail would drop pre-cursor tool/team structure) + single-block
-deltas synthesized from in-flight stream channels (overlay / ``message_final``
-splice isomorphic). No ``id:`` on synthetic deltas — they attach after the
+``> cursor`` tail would drop pre-cursor tool/team structure) + process-lane
+synthetic deltas interleaved in journal order + single-block deltas for any
+still-open stream channels not already covered by ``process_*`` /
+``run_process_*``. No ``id:`` on synthetic deltas — they attach after the
 nearest durable seq.
 """
 
@@ -20,15 +21,112 @@ from agentcore.runtime.events.stream_checkpointer import (
 )
 from agentcore.runtime.events.types import EventType, SSEEvent
 from agentcore.runtime.facts import EXECUTION_ONLY_KINDS, FactKind
-from agentcore.runtime.journal.entries import _PROCESS_PREFIX
+from agentcore.runtime.journal.entries import _PROCESS_PREFIX, _RUN_PROCESS_PREFIX
 from agentcore.runtime.runs.types import RunKind
 
 _DURABLE_KIND_VALUES = frozenset(t.value for t in DURABLE_EVENT_TYPES)
 _RUN_TERMINAL = frozenset({EventType.RUN_COMPLETED.value, EventType.RUN_FAILED.value})
 
+# process_* / run_process_* kinds that mirror DURABLE tool / marker events — attach
+# skips them and lets the DURABLE event rebuild the step via client fold.
+_PROCESS_STRUCTURAL_SUFFIXES = frozenset(
+    {
+        "tool",
+        "team",
+        "checkpoint",
+        "ask",
+        "plan_review",
+        "team_preview",
+        "escalation",
+        "approval",
+        "delegation_authorization",
+    }
+)
+
+
+def _process_step_to_sse(
+    kind: str,
+    payload: dict[str, Any],
+    *,
+    seq: int | None,
+    ts: str,
+) -> SSEEvent | None:
+    """Translate a journaled process / run_process text step into a foldable delta."""
+    if kind.startswith(_RUN_PROCESS_PREFIX):
+        suffix = kind[len(_RUN_PROCESS_PREFIX) :]
+        if suffix in _PROCESS_STRUCTURAL_SUFFIXES:
+            return None
+        run_id = payload.get("run_id") or ""
+        agent_id = payload.get("agent_id") or ""
+        if suffix == "reasoning":
+            text = payload.get("text") or ""
+            if not run_id or not text:
+                return None
+            return SSEEvent(
+                type=EventType.RUN_REASONING_DELTA,
+                payload={"run_id": run_id, "agent_id": agent_id, "delta": text},
+                timestamp=ts,
+                seq=seq,
+            )
+        if suffix == "content":
+            text = payload.get("text") or ""
+            if not run_id or not text:
+                return None
+            return SSEEvent(
+                type=EventType.RUN_OUTPUT_DELTA,
+                payload={"run_id": run_id, "agent_id": agent_id, "delta": text},
+                timestamp=ts,
+                seq=seq,
+            )
+        if suffix == "rework":
+            if not run_id:
+                return None
+            return SSEEvent(
+                type=EventType.RUN_OUTPUT_RESET,
+                payload={"run_id": run_id},
+                timestamp=ts,
+                seq=seq,
+            )
+        return None
+
+    if kind.startswith(_PROCESS_PREFIX):
+        suffix = kind[len(_PROCESS_PREFIX) :]
+        if suffix in _PROCESS_STRUCTURAL_SUFFIXES:
+            return None
+        if suffix == "reasoning":
+            text = payload.get("text") or ""
+            if not text:
+                return None
+            return SSEEvent(
+                type=EventType.REASONING_DELTA,
+                payload={"delta": text},
+                timestamp=ts,
+                seq=seq,
+            )
+        if suffix == "content":
+            text = payload.get("text") or ""
+            if not text:
+                return None
+            return SSEEvent(
+                type=EventType.CONTENT_DELTA,
+                payload={"delta": text},
+                timestamp=ts,
+                seq=seq,
+            )
+        if suffix == "rework":
+            return SSEEvent(type=EventType.CONTENT_RESET, payload={}, timestamp=ts, seq=seq)
+        return None
+
+    return None
+
 
 def journal_rows_to_sse(rows: list[dict[str, Any]]) -> list[SSEEvent]:
-    """Convert ``load_after`` rows into live-shaped SSE events (with ``seq`` on DURABLE)."""
+    """Convert ``load_after`` rows into live-shaped SSE events (with ``seq`` on DURABLE).
+
+    Process-lane facts are emitted as synthetic deltas **in journal order**, interleaved
+    with tool/team DURABLE events so clear-then-fold rebuilds the CEO / worker timelines
+    with correct interleaving (process progressive persistence invariant).
+    """
     final_outputs: dict[str, dict[str, str]] = {}
     agent_run_ids: dict[str, str] = {}
     for row in rows:
@@ -56,8 +154,21 @@ def journal_rows_to_sse(rows: list[dict[str, Any]]) -> list[SSEEvent]:
 
         if kind == FactKind.MESSAGE_FINAL.value:
             continue
-        if kind in EXECUTION_ONLY_KINDS or kind.startswith(_PROCESS_PREFIX):
+        if kind in EXECUTION_ONLY_KINDS:
             continue
+
+        # Progressive process lane — fold as deltas in order (skip structural mirrors).
+        if kind.startswith(_PROCESS_PREFIX) or kind.startswith(_RUN_PROCESS_PREFIX):
+            # Fill agent_id on run_process text steps when the payload omitted it.
+            if kind.startswith(_RUN_PROCESS_PREFIX) and not payload.get("agent_id"):
+                rid = payload.get("run_id")
+                if rid and str(rid) in agent_run_ids:
+                    payload = {**payload, "agent_id": agent_run_ids[str(rid)]}
+            synthetic = _process_step_to_sse(kind, payload, seq=seq_i, ts=ts)
+            if synthetic is not None:
+                out.append(synthetic)
+            continue
+
         if kind not in _DURABLE_KIND_VALUES:
             continue
 
@@ -104,19 +215,79 @@ def journal_rows_to_sse(rows: list[dict[str, Any]]) -> list[SSEEvent]:
     return out
 
 
+def _journal_covers_captain_channels(rows: list[dict[str, Any]]) -> tuple[bool, bool]:
+    """Whether journal process_* already carries captain content / reasoning text."""
+    has_content = False
+    has_reasoning = False
+    for row in rows:
+        kind = str(row.get("kind") or "")
+        if kind == f"{_PROCESS_PREFIX}content":
+            has_content = True
+        elif kind == f"{_PROCESS_PREFIX}reasoning":
+            has_reasoning = True
+    return has_content, has_reasoning
+
+
+def journal_is_structured(rows: list[dict[str, Any]]) -> bool:
+    """True when the turn has (or will have) a process lane — not prose-only.
+
+    Structured turns must not stitch CEO 旁白 from flat ``captain:content`` segments
+    (journal ``process_*`` is the sole narration source). Prose-only turns keep the
+    segment accelerate path.
+    """
+    for row in rows:
+        kind = str(row.get("kind") or "")
+        if kind.startswith(_PROCESS_PREFIX) or kind.startswith(_RUN_PROCESS_PREFIX):
+            return True
+        if kind in (
+            EventType.TOOL_USE_START.value,
+            EventType.TOOL_USE_END.value,
+            EventType.RUN_PLAN.value,
+            EventType.RUN_STARTED.value,
+            EventType.CHECKPOINT_REQUIRED.value,
+            EventType.QUESTION_POSTED.value,
+            EventType.PLAN_REVIEW_REQUIRED.value,
+            EventType.TEAM_PREVIEW_REQUIRED.value,
+        ):
+            return True
+    return False
+
+
+def _journal_covered_run_ids(rows: list[dict[str, Any]]) -> set[str]:
+    """Run ids that already have run_process_* text steps in the journal."""
+    covered: set[str] = set()
+    for row in rows:
+        kind = str(row.get("kind") or "")
+        if not kind.startswith(_RUN_PROCESS_PREFIX):
+            continue
+        suffix = kind[len(_RUN_PROCESS_PREFIX) :]
+        if suffix not in ("content", "reasoning"):
+            continue
+        rid = (row.get("payload") or {}).get("run_id")
+        if rid:
+            covered.add(str(rid))
+    return covered
+
+
 def synthesize_segment_deltas(
     *,
     by_channel: dict[str, str],
     agent_run_ids: dict[str, str],
     covered_run_ids: set[str],
+    skip_captain_content: bool = False,
+    skip_captain_reasoning: bool = False,
 ) -> list[SSEEvent]:
-    """Single-block deltas from stream_state / memory (P1 overlay isomorphic)."""
+    """Single-block deltas from stream_state / memory (P1 overlay isomorphic).
+
+    When journal already has ``process_*`` / ``run_process_*`` text, skip the matching
+    flat channels so mid-run refresh does not duplicate or reorder narration.
+    """
     extra: list[SSEEvent] = []
     cap_reasoning = by_channel.get(CHANNEL_CAPTAIN_REASONING) or ""
     cap_content = by_channel.get(CHANNEL_CAPTAIN_CONTENT) or ""
-    if cap_reasoning:
+    if cap_reasoning and not skip_captain_reasoning:
         extra.append(SSEEvent(type=EventType.REASONING_DELTA, payload={"delta": cap_reasoning}))
-    if cap_content:
+    if cap_content and not skip_captain_content:
         extra.append(SSEEvent(type=EventType.CONTENT_DELTA, payload={"delta": cap_content}))
 
     partial: dict[str, dict[str, str]] = {}
@@ -172,7 +343,8 @@ async def build_cursor_replay(
     ``after_seq`` is the client's ``Last-Event-ID`` — kept for observability /
     future cross-process cursors, but **not** used to filter rows. Clients reset
     local process/execution before folding, so the replay must include
-    pre-cursor structure (tools / team graph), not only ``seq > after_seq``.
+    pre-cursor structure (tools / team graph / process narration), not only
+    ``seq > after_seq``.
     """
     from agentcore.conversation.store import get_conversation_store
     from agentcore.core.logging import get_logger
@@ -190,9 +362,15 @@ async def build_cursor_replay(
         rows = await TurnJournalRepository(db).load_after(turn_id, -1)
 
     events = journal_rows_to_sse(rows)
+    skip_cap_content, skip_cap_reasoning = _journal_covers_captain_channels(rows)
+    # Structured turns: never stitch 旁白 from flat segments (process_* is the source).
+    # Prose-only keeps segment accelerate for captain content / reasoning.
+    if journal_is_structured(rows):
+        skip_cap_content = True
+    process_covered_runs = _journal_covered_run_ids(rows)
 
     agent_ids = dict(memory_agent_ids)
-    covered: set[str] = set()
+    covered: set[str] = set(process_covered_runs)
     for ev in events:
         if ev.type == EventType.RUN_STARTED and ev.payload.get("kind") == RunKind.AGENT.value:
             rid = ev.payload.get("run_id")
@@ -218,6 +396,8 @@ async def build_cursor_replay(
             by_channel=by_channel,
             agent_run_ids=agent_ids,
             covered_run_ids=covered,
+            skip_captain_content=skip_cap_content,
+            skip_captain_reasoning=skip_cap_reasoning,
         )
     )
     return events

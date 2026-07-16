@@ -1,5 +1,5 @@
-import { ApiError } from "@/services/api";
 import { notifyError } from "@/lib/toast";
+import { ApiError } from "@/services/api";
 import {
   isInteractionOrphanedError,
   submitInteraction,

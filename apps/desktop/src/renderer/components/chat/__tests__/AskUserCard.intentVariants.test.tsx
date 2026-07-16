@@ -91,11 +91,7 @@ describe("AskUserCard intent variants", () => {
     expect((adopt as HTMLButtonElement).disabled).toBe(false);
 
     fireEvent.click(adopt);
-    expect(onSubmit).toHaveBeenCalledWith(
-      "continue",
-      "",
-      ["方案 C：外包试点"],
-    );
+    expect(onSubmit).toHaveBeenCalledWith("continue", "", ["方案 C：外包试点"]);
   });
 
   it("risk_ack 渲染勾选清单、严重度与建议处理，多选提交带 selected", async () => {
@@ -120,12 +116,7 @@ describe("AskUserCard intent variants", () => {
 
   it("collectAskSelected 扁平化多题 picks", () => {
     expect(
-      collectAskSelected(
-        proposalContent,
-        { q0: ["方案 A：快速原型"] },
-        {},
-        {},
-      ),
+      collectAskSelected(proposalContent, { q0: ["方案 A：快速原型"] }, {}, {}),
     ).toEqual(["方案 A：快速原型"]);
   });
 });

@@ -120,7 +120,5 @@ export function shouldSkipSystemWorkspaceEntry(
   name: string,
   isDirectory: boolean,
 ): boolean {
-  return isDirectory
-    ? shouldSkipDirName(name)
-    : shouldSkipSystemFileName(name);
+  return isDirectory ? shouldSkipDirName(name) : shouldSkipSystemFileName(name);
 }

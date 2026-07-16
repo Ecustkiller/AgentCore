@@ -1,6 +1,7 @@
 import { useConversationStore } from "@/stores/conversation";
 import { frameFromEvent, useExecutionStore } from "@/stores/execution";
 import {
+  type TimelineProcessKind,
   applyInteractionWireEvent,
   defFromRequiredEvent,
   defFromResolvedEvent,
@@ -8,7 +9,6 @@ import {
   interactionChannelEventTypes,
   useInteractionStore,
   wireFor,
-  type TimelineProcessKind,
 } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import type { SSEEvent } from "@/types/events";
@@ -118,11 +118,7 @@ export function handleInteractionEvent(
     const wire = wireFor(resolvedDef.kind);
     const id = (event.payload as Record<string, unknown>)?.[wire.idField];
 
-    if (
-      effects?.removePausedTurn &&
-      typeof id === "string" &&
-      id.length > 0
-    ) {
+    if (effects?.removePausedTurn && typeof id === "string" && id.length > 0) {
       usePausedTurnStore.getState().removeByCheckpoint(id);
     }
     if (effects?.flushFrames) {

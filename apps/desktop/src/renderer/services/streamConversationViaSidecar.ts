@@ -1,8 +1,8 @@
 import { patchConversationCache } from "@/hooks/useConversations";
 import { StreamError } from "@/lib/errors";
 import { notifyWarning } from "@/lib/toast";
-import { resolveConversationPermissionPreset } from "@/services/permissionPreset";
 import { resolveSidecarInference } from "@/services/inferenceToken";
+import { resolveConversationPermissionPreset } from "@/services/permissionPreset";
 import {
   clearActiveSidecarTurn,
   setActiveSidecarTurn,

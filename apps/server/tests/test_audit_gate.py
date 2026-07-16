@@ -12,15 +12,14 @@ from pathlib import Path
 import pytest
 
 from agentcore.core.types import ToolCategory, ToolEffect
+from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
-from agentcore.runtime.engine import react_loop
 from agentcore.runtime.captain_profile import apply_captain_max_rounds
+from agentcore.runtime.engine import react_loop
 from agentcore.runtime.engine.governance import (
     audit_gate_nudge_prompt,
     coordination_injection_has_all_completed,
 )
-from agentcore.llm.provider.protocol import LLMMessage
-from agentcore.llm.profiles import ProfileParams
 from agentcore.runtime.events import EventSink
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry

@@ -7,7 +7,10 @@ import { CollapsibleSpeech } from "../CollapsibleSpeech";
 import type { DebateClosingView } from "../model";
 import { SectionHeader } from "./SectionHeader";
 import { closingAnchorId } from "./anchors";
-import { type DebateArenaLayout, partitionSides } from "./debateLayoutPreference";
+import {
+  type DebateArenaLayout,
+  partitionSides,
+} from "./debateLayoutPreference";
 
 export function ClosingBlocks({
   closings,

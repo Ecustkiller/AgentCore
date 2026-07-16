@@ -27,9 +27,9 @@ from agentcore.runtime.debate import (
     RoundResult,
     SideTurn,
 )
-from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 from agentcore.runtime.debate import rounds as rounds_mod
 from agentcore.runtime.debate.rounds import _log_gather_batch, next_round
+from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 from tests.conftest import LogSpy
 
 

@@ -85,8 +85,8 @@ describe("debateLayoutPreference", () => {
   });
 
   it("partitionSides maps by stance or key", () => {
-    const pro = { key: "1", sideKey: "pro", name: "正", stance: null as const };
-    const con = { key: "2", sideKey: "con", name: "反", stance: null as const };
+    const pro = { key: "1", sideKey: "pro", name: "正", stance: null };
+    const con = { key: "2", sideKey: "con", name: "反", stance: null };
     expect(
       partitionSides(
         [con, pro],

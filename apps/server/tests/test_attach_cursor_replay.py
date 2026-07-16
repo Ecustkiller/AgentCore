@@ -155,10 +155,10 @@ async def test_ephemeral_delta_has_no_id_line():
 
 
 async def test_attach_cursor_path_replays_full_journal_then_segments(monkeypatch):
-    """Last-Event-ID path: full-turn durable journal + segments; no _history content.
+    """Last-Event-ID path: full-turn journal (incl. process_*) ; no _history content.
 
-    Header value is observational — load_after is called with -1 (turn start), so
-    pre-cursor structure (tools) is present for clear-then-fold clients.
+    Structured turns do not stitch 旁白 from flat segments. Header value is
+    observational — load_after is called with -1 (turn start).
     """
     sink = EventSink()
     sink._message_id = "m1"
@@ -167,6 +167,12 @@ async def test_attach_cursor_path_replays_full_journal_then_segments(monkeypatch
     sink.detach()
 
     rows = [
+        {
+            "seq": 1,
+            "kind": "process_content",
+            "payload": {"kind": "content", "text": "FROM_PROCESS"},
+            "ts": "t0",
+        },
         {
             "seq": 2,
             "kind": "tool_use_start",
@@ -210,26 +216,27 @@ async def test_attach_cursor_path_replays_full_journal_then_segments(monkeypatch
         "agentcore.db.repositories.runs.TurnJournalRepository", Repo
     )
 
+    # Flat segment must NOT become a content_delta on structured turns.
     sink.stream_memory_snapshot = (  # type: ignore[method-assign]
         lambda: {CHANNEL_CAPTAIN_CONTENT: "FROM_SEGMENT"}
     )
 
     gen = sse._attach_generator(sink, last_event_id=4)
+    frames: list[str] = []
     try:
-        first = await asyncio.wait_for(gen.__anext__(), timeout=2.0)
-        second = await asyncio.wait_for(gen.__anext__(), timeout=2.0)
-        third = await asyncio.wait_for(gen.__anext__(), timeout=2.0)
+        for _ in range(3):
+            frames.append(await asyncio.wait_for(gen.__anext__(), timeout=2.0))
     finally:
         await gen.aclose()
 
-    joined = first + second + third
+    joined = "".join(frames)
     assert loaded_after == [-1]
     assert "FROM_HISTORY" not in joined
+    assert "FROM_SEGMENT" not in joined
+    assert "FROM_PROCESS" in joined
     # Pre-cursor structure must be present (full replay, not > cursor tail).
     assert "tool_use_start" in joined
     assert "tool_use_end" in joined
+    assert "\nid: 1\n" in joined
     assert "\nid: 2\n" in joined
     assert "\nid: 5\n" in joined
-    assert "FROM_SEGMENT" in joined
-    content_frames = [f for f in (first, second, third) if "content_delta" in f]
-    assert content_frames and all("\nid: " not in f for f in content_frames)

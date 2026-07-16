@@ -169,10 +169,10 @@ export const useUIStore = create<UIState>((set) => ({
   // Default "" is required: Sidebar/TitleBar call openSearch() with no args.
   // Without it, searchInitialQuery becomes undefined and CommandPalette crashes
   // on query.trim() (regressed in 1ee81cee when the default was dropped).
-  openSearch: (initialQuery = "", opts) =>
+  openSearch: (initialQuery, opts) =>
     set({
       searchOpen: true,
-      searchInitialQuery: initialQuery,
+      searchInitialQuery: initialQuery ?? "",
       searchInitialBookmarks: opts?.bookmarks ?? false,
     }),
   closeSearch: () =>

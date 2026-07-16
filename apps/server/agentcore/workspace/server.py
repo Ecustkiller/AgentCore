@@ -502,9 +502,12 @@ class ServerWorkspace:
         if target == self._root.resolve():
             raise OutsideWorkspace(path)
         routed = route_external(path, self._mounts) if parse_external_path(path) else None
-        if routed and routed.mount.abs_path:
-            if target == Path(routed.mount.abs_path).resolve():
-                raise OutsideWorkspace(path)
+        if (
+            routed
+            and routed.mount.abs_path
+            and target == Path(routed.mount.abs_path).resolve()
+        ):
+            raise OutsideWorkspace(path)
         if target.exists():
             raise AlreadyExists(path)
         try:

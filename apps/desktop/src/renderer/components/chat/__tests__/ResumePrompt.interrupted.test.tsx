@@ -3,7 +3,13 @@
  * D2「已授权 · 执行中断」卡：渲染条件 + 一键继续绑定 continueAfterDecision。
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ResumePrompt } from "../ResumePrompt";
 
@@ -23,8 +29,9 @@ vi.mock("@/services/turns", () => ({
 }));
 
 vi.mock("@/stores/conversation", () => ({
-  useConversationStore: (sel: (s: { currentConversationId: string }) => unknown) =>
-    sel({ currentConversationId: "c1" }),
+  useConversationStore: (
+    sel: (s: { currentConversationId: string }) => unknown,
+  ) => sel({ currentConversationId: "c1" }),
 }));
 
 vi.mock("@/stores/pausedTurns", () => ({

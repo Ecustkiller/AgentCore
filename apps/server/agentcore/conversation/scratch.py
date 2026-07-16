@@ -43,8 +43,3 @@ def resolve_conversation_local_binding(
 def conversation_workspace_folder_id(conv: Conversation) -> str | None:
     """Effective folder_id for path/key resolution (project share vs conv scratch)."""
     return conv.folder_id
-
-
-def conversation_workspace_folder_id(conv: Conversation) -> str | None:
-    """Effective folder_id for path/key resolution (project share vs conv scratch)."""
-    return conv.folder_id

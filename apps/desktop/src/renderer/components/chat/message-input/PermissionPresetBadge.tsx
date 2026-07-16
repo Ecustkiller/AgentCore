@@ -75,7 +75,9 @@ export function PermissionPresetBadge({ disabled }: { disabled?: boolean }) {
       !isPermissionDowngrade(preset, next) &&
       next === "workspace" &&
       preset === "observe" &&
-      !window.confirm("升档到「开工授权」后，开工卡可一次授权写文件等能力。确定继续？")
+      !window.confirm(
+        "升档到「开工授权」后，开工卡可一次授权写文件等能力。确定继续？",
+      )
     ) {
       return;
     }
@@ -117,16 +119,12 @@ export function PermissionPresetBadge({ disabled }: { disabled?: boolean }) {
         </button>
       </SimpleTooltip>
       {open && (
-        <div
-          role="listbox"
-          className="absolute bottom-full left-0 z-50 mb-1 w-56 rounded-xl border border-border bg-popover p-1 shadow-lg"
-        >
+        <div className="absolute bottom-full left-0 z-50 mb-1 w-56 rounded-xl border border-border bg-popover p-1 shadow-lg">
           {OPTIONS.map((opt) => (
             <button
               key={opt}
               type="button"
-              role="option"
-              aria-selected={opt === preset}
+              aria-current={opt === preset ? "true" : undefined}
               onClick={() => void apply(opt)}
               className={
                 opt === preset
@@ -137,83 +135,7 @@ export function PermissionPresetBadge({ disabled }: { disabled?: boolean }) {
               <span className="text-sm font-medium text-foreground">
                 {PERMISSION_PRESET_LABELS[opt].short}
               </span>
-              <span className="mt-0.5 text-[11px] text-muted-foreground">
-                {PERMISSION_PRESET_LABELS[opt].description}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Read-only chip for StatusStrip / 开工卡. */
-export function PermissionPresetChip({
-  preset,
-  onSwitch,
-}: {
-  preset: SidecarPermissionPreset;
-  onSwitch?: (next: SidecarPermissionPreset) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-
-  const body = (
-    <span className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground">
-      <Shield size={11} />
-      {PERMISSION_PRESET_LABELS[preset].short}
-    </span>
-  );
-
-  if (!onSwitch) {
-    return <SimpleTooltip label={PERMISSION_PRESET_LABELS[preset].description}>{body}</SimpleTooltip>;
-  }
-
-  return (
-    <div ref={rootRef} className="relative shrink-0">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-label={`权限模式：${PERMISSION_PRESET_LABELS[preset].short}`}
-        className="hover:opacity-80"
-      >
-        {body}
-      </button>
-      {open && (
-        <div
-          role="listbox"
-          className="absolute top-full left-0 z-50 mt-1 w-52 rounded-xl border border-border bg-popover p-1 shadow-lg"
-        >
-          {OPTIONS.map((opt) => (
-            <button
-              key={opt}
-              type="button"
-              role="option"
-              aria-selected={opt === preset}
-              onClick={() => {
-                setOpen(false);
-                onSwitch(opt);
-              }}
-              className={
-                opt === preset
-                  ? "flex w-full flex-col rounded-lg bg-primary/10 px-3 py-2 text-left text-xs"
-                  : "flex w-full flex-col rounded-lg px-3 py-2 text-left text-xs hover:bg-accent/50"
-              }
-            >
-              <span className="font-medium text-foreground">
-                {PERMISSION_PRESET_LABELS[opt].short}
-              </span>
-              <span className="mt-0.5 text-[11px] text-muted-foreground">
+              <span className="mt-0.5 text-xs text-muted-foreground">
                 {PERMISSION_PRESET_LABELS[opt].description}
               </span>
             </button>

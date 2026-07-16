@@ -91,9 +91,7 @@ async def research_then_draft(
 
     # 无可用取证工具 → 退化为单次成稿（结辩 allow_research=False / 空 allow-list /
     # 注册表未挂 web_search 等）。``allowed_tools is None`` = 不限制，以注册表是否非空为准。
-    if not allow_research:
-        tools_available = False
-    elif allowed_tools is not None and len(allowed_tools) == 0:
+    if not allow_research or allowed_tools is not None and len(allowed_tools) == 0:
         tools_available = False
     elif allowed_tools is None:
         tools_available = any(True for _ in tools.list_all())

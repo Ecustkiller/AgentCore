@@ -7,6 +7,7 @@ import {
   startDm,
   unblockUser,
 } from "@/api/messaging";
+import { ImAvatar, userAvatarPath } from "@/pages/im/ImAvatar";
 // 找人 (/im/new) — exact-match people search to start a DM, plus 黑名单 management.
 //
 // Search is server-visibility-filtered (任意搜人 护栏: a user who isn't discoverable, or
@@ -124,9 +125,10 @@ export function NewDmPage() {
                 disabled={starting}
                 onClick={() => void open(u.id)}
               >
-                <span className="im-avatar">
-                  {(u.display_name || u.username).charAt(0).toUpperCase()}
-                </span>
+                <ImAvatar
+                  name={u.display_name || u.username}
+                  url={userAvatarPath(u.id)}
+                />
                 <span className="im-result-text">
                   <span className="im-name">
                     {u.display_name || u.username}
@@ -142,9 +144,10 @@ export function NewDmPage() {
               <div className="im-section-title">黑名单</div>
               {blocks.map((b) => (
                 <div key={b.id} className="im-search-result">
-                  <span className="im-avatar">
-                    {(b.display_name || b.username).charAt(0).toUpperCase()}
-                  </span>
+                  <ImAvatar
+                    name={b.display_name || b.username}
+                    url={userAvatarPath(b.id)}
+                  />
                   <span className="im-result-text">
                     <span className="im-name">
                       {b.display_name || b.username}

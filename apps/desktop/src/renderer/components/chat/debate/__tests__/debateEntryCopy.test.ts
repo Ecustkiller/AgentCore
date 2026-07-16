@@ -36,6 +36,7 @@ function run(
     escalations: [],
     process: [],
     ...partial,
+    sideKey: partial.sideKey ?? null,
   };
 }
 
@@ -90,10 +91,11 @@ const settledDebate: DebateResultPayload = {
         converged: true,
         rationale: "",
         new_arguments: false,
+        stop_reason: "converged",
       },
       user_interjections: [],
       cross_exam: [],
-      scores: [],
+      scores: {},
     },
   ],
   brief: {

@@ -26,9 +26,7 @@ export const STOP_CONFIRM_TIMEOUT_MS = 8_000;
 const stopTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
 export function isTerminalPhase(phase: TurnPhase): boolean {
-  return (
-    phase === "stopped" || phase === "completed" || phase === "failed"
-  );
+  return phase === "stopped" || phase === "completed" || phase === "failed";
 }
 
 /** stopping / terminal：禁止新开流（探活恢复点、sidecar invoke、云 fetch）。 */
@@ -45,11 +43,7 @@ export function allowsStreamingMutations(phase: TurnPhase): boolean {
  * stopping/terminal 下只放行终态确认（+ 无害 meta 回执）；内容/工具/执行帧一律丢弃。
  */
 export function allowsSseEvent(phase: TurnPhase, eventType: string): boolean {
-  if (
-    phase === "idle" ||
-    phase === "preflight" ||
-    phase === "streaming"
-  ) {
+  if (phase === "idle" || phase === "preflight" || phase === "streaming") {
     return true;
   }
   return (

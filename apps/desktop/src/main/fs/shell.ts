@@ -1,6 +1,6 @@
+import { promises as fs } from "node:fs";
 import type { FsResult } from "@shared/ipc-contract";
 import { clipboard, shell } from "electron";
-import { promises as fs } from "node:fs";
 import { fsErr, locate, realFail, realInside } from "./pathGuard";
 import { ensureReady } from "./roots";
 

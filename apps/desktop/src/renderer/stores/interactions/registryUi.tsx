@@ -71,7 +71,9 @@ export function renderTimelineInteractionCard(
     }
     case "team_preview": {
       const tp = bags.teamPreviews.find((p) => p.id === node.checkpoint_id);
-      return tp ? <TeamPreviewCard key={tp.id} preview={tp} /> : null;
+      return tp ? (
+        <TeamPreviewCard key={tp.id} preview={tp} messageId={ctx?.messageId} />
+      ) : null;
     }
     case "escalation": {
       if (!ctx?.messageId || !node.escalation_id) return null;
@@ -87,7 +89,9 @@ export function renderTimelineInteractionCard(
     }
     case "approval": {
       if (!node.approval_id) return null;
-      return <ApprovalTrace key={node.approval_id} approvalId={node.approval_id} />;
+      return (
+        <ApprovalTrace key={node.approval_id} approvalId={node.approval_id} />
+      );
     }
     case "delegation_authorization": {
       if (!node.authorization_id) return null;

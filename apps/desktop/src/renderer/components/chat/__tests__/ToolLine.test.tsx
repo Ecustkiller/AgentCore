@@ -12,8 +12,8 @@ import type { ProcessStep } from "@/types/events";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { toolGroupSummary } from "../message-bubble/constants";
 import { ToolLine, ToolLineGroup } from "../ToolLine";
+import { toolGroupSummary } from "../message-bubble/constants";
 
 afterEach(cleanup);
 
@@ -119,7 +119,7 @@ describe("ToolLine · 过程工具默认折叠", () => {
         step={step({
           tool_name: "web_search",
           arguments: { query: "深圳天气" },
-          result: "1 条结果",
+          result: "1 result",
           display: {
             query: "深圳天气",
             results: [
@@ -156,7 +156,7 @@ describe("ToolLine · 过程工具默认折叠", () => {
         step={step({
           tool_name: "web_search",
           arguments: { query: "深圳天气" },
-          result: "1 条结果",
+          result: "1 result",
           display: {
             query: "深圳天气",
             results: [
@@ -172,9 +172,9 @@ describe("ToolLine · 过程工具默认折叠", () => {
         })}
       />,
     );
-    // Already collapsed by default — 计数并入标题行（对齐 read_url 组的「· N 个来源」），
+    // Already collapsed by default — 计数并入标题行（对齐 read_url 组的「· N sources」），
     // 不再另起一行 peek；结果卡标题隐藏。
-    expect(screen.getByText(/1 条结果/)).toBeTruthy();
+    expect(screen.getByText(/1 result/)).toBeTruthy();
     expect(screen.queryByText("深圳天气预报")).toBeNull();
   });
 
@@ -347,7 +347,7 @@ describe("ToolLineGroup · read_url 来源集合", () => {
 
   it("merges ≥2 read_url into a count-title header without collapsed pills", () => {
     renderWithTooltip(<ToolLineGroup tools={sources} isStreaming={false} />);
-    expect(screen.getByText("读取网页 · 2 个来源")).toBeTruthy();
+    expect(screen.getByText("Read page · 2 sources")).toBeTruthy();
     // 折叠态收敛为纯标题行（对齐工具组 / 思考过程）——来源 pills 移到展开态，不再平铺。
     expect(screen.queryByText("zhuanlan.zhihu.com")).toBeNull();
     expect(screen.queryByText("baike.baidu.com")).toBeNull();
@@ -357,7 +357,7 @@ describe("ToolLineGroup · read_url 来源集合", () => {
 
   it("expands to a SourceCards-style list without body content", () => {
     renderWithTooltip(<ToolLineGroup tools={sources} isStreaming={false} />);
-    fireEvent.click(screen.getByText("读取网页 · 2 个来源"));
+    fireEvent.click(screen.getByText("Read page · 2 sources"));
     expect(screen.getByText("相对论入门")).toBeTruthy();
     expect(screen.getByText("相对论")).toBeTruthy(); // cleanSourceTitle strips _百度百科
     expect(screen.getByText("时空弯曲简介")).toBeTruthy();
@@ -383,8 +383,73 @@ describe("ToolLineGroup · read_url 来源集合", () => {
       />,
     );
     // Default group summary (not the source-collection header).
-    expect(screen.queryByText("读取网页 · 2 个来源")).toBeNull();
-    expect(screen.getByText(/读取网页 1 · 搜索网页 1/)).toBeTruthy();
+    expect(screen.queryByText("Read page · 2 sources")).toBeNull();
+    expect(screen.getByText(/Read page 1 · Search web 1/)).toBeTruthy();
+  });
+});
+
+describe("ToolLineGroup · web_search 平铺", () => {
+  function searchStep(
+    id: string,
+    query: string,
+    resultCount: number,
+  ): ToolStep {
+    return step({
+      id,
+      tool_name: "web_search",
+      arguments: { query },
+      result: `${resultCount} results`,
+      display: {
+        query,
+        results: Array.from({ length: resultCount }, (_, i) => ({
+          title: `${query} hit ${i + 1}`,
+          url: `https://example.com/${id}/${i}`,
+          site: "example.com",
+          snippet: "snippet",
+        })),
+      },
+      status: "success",
+    });
+  }
+
+  it("flattens ≥2 web_search into top-level rows without an outer group shell", () => {
+    render(
+      <ToolLineGroup
+        tools={[
+          searchStep("s1", "AgentCore 架构", 10),
+          searchStep("s2", "Multi-Agent 协作", 10),
+        ]}
+        isStreaming={false}
+      />,
+    );
+    // No concatenated outer summary (the old「Search web A · B」shell).
+    expect(
+      screen.queryByText(/Search web AgentCore 架构 · Multi-Agent 协作/),
+    ).toBeNull();
+    // Each search is a top-level row with its own query.
+    expect(screen.getByText("AgentCore 架构")).toBeTruthy();
+    expect(screen.getByText("Multi-Agent 协作")).toBeTruthy();
+    // Result cards stay collapsed until the individual row is opened.
+    expect(screen.queryByText("AgentCore 架构 hit 1")).toBeNull();
+  });
+
+  it("keeps a mixed search+other group on the default chevron path", () => {
+    render(
+      <ToolLineGroup
+        tools={[
+          searchStep("s1", "天气", 3),
+          step({
+            id: "c1",
+            tool_name: "code_execute",
+            arguments: { code: "1+1" },
+            result: "2",
+            status: "success",
+          }),
+        ]}
+        isStreaming={false}
+      />,
+    );
+    expect(screen.getByText(/Search web 1 · Run code 1/)).toBeTruthy();
   });
 });
 
@@ -404,7 +469,7 @@ describe("toolGroupSummary · read_url", () => {
         arguments: { url: "https://baike.baidu.com/item/相对论" },
       }),
     ];
-    expect(toolGroupSummary(tools)).toBe("读取网页 · 2 个来源");
+    expect(toolGroupSummary(tools)).toBe("Read page · 2 sources");
     expect(toolGroupSummary(tools)).not.toMatch(/1050596771/);
   });
 
@@ -421,6 +486,6 @@ describe("toolGroupSummary · read_url", () => {
         arguments: { path: "src/bar.ts" },
       }),
     ];
-    expect(toolGroupSummary(tools)).toBe("读取文件 foo.ts · bar.ts");
+    expect(toolGroupSummary(tools)).toBe("Read file foo.ts · bar.ts");
   });
 });

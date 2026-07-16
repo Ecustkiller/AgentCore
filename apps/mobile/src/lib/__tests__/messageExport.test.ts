@@ -26,7 +26,7 @@ describe("formatMessageExport (mobile)", () => {
   it("includes process without duplicating trailing deliverable", () => {
     const text = formatMessageExport("最终方案如下。", steps, "with_process");
     expect(text.startsWith("【过程】")).toBe(true);
-    expect(text).toContain("搜索网页");
+    expect(text).toContain("Search web");
     expect(text).not.toContain("【交付】");
   });
 

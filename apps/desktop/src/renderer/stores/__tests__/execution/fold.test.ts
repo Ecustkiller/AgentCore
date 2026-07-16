@@ -53,8 +53,20 @@ describe("projectExecution (fold)", () => {
   it("accumulates streamed output deltas per agent", () => {
     const frames: RunFrame[] = [
       started("agent-1", "run-1"),
-      { t: 2, kind: "run_output_delta", agentId: "agent-1", delta: "Hello " },
-      { t: 3, kind: "run_output_delta", agentId: "agent-1", delta: "world" },
+      {
+        t: 2,
+        kind: "run_output_delta",
+        runId: "run-1",
+        agentId: "agent-1",
+        delta: "Hello ",
+      },
+      {
+        t: 3,
+        kind: "run_output_delta",
+        runId: "run-1",
+        agentId: "agent-1",
+        delta: "world",
+      },
     ];
     const exec = projectExecution(plan, frames, "running");
     const agent = exec.agents.find((a) => a.id === "agent-1");
@@ -67,17 +79,25 @@ describe("projectExecution (fold)", () => {
       {
         t: 2,
         kind: "run_reasoning_delta",
+        runId: "run-1",
         agentId: "agent-1",
         delta: "先拆解",
       },
       {
         t: 3,
         kind: "run_reasoning_delta",
+        runId: "run-1",
         agentId: "agent-1",
         delta: "再对比",
       },
       // Reasoning is its own channel — it must not leak into the output text.
-      { t: 4, kind: "run_output_delta", agentId: "agent-1", delta: "结论" },
+      {
+        t: 4,
+        kind: "run_output_delta",
+        runId: "run-1",
+        agentId: "agent-1",
+        delta: "结论",
+      },
     ];
     const exec = projectExecution(plan, frames, "running");
     const agent = exec.agents.find((a) => a.id === "agent-1");
@@ -478,7 +498,13 @@ describe("projectExecution (fold)", () => {
   it("is a pure prefix fold — replaying an earlier playhead drops later facts", () => {
     const frames: RunFrame[] = [
       started("agent-1", "run-1"),
-      { t: 2, kind: "run_output_delta", agentId: "agent-1", delta: "draft" },
+      {
+        t: 2,
+        kind: "run_output_delta",
+        runId: "run-1",
+        agentId: "agent-1",
+        delta: "draft",
+      },
       {
         t: 3,
         kind: "run_completed",

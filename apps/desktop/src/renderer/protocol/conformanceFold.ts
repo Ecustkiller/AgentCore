@@ -260,7 +260,9 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         if (frame) frames.push(frame);
         {
           const eid = (ev.payload as { escalation_id?: string })?.escalation_id;
-          const timeline = defFromRequiredEvent("escalation_required")?.timeline;
+          const timeline = defFromRequiredEvent(
+            "escalation_required",
+          )?.timeline;
           if (typeof eid === "string" && eid && timeline) {
             messageLane = foldInteractionTimelineMarker(
               messageLane,
@@ -420,9 +422,17 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         const iid = (p.interjection_id || "").trim();
         if (iid) {
           const attachments = (p.attachments ?? [])
-            .filter((a) => typeof a?.name === "string" && a.name.trim())
+            .filter(
+              (
+                a,
+              ): a is {
+                name: string;
+                workspace_path?: string;
+                binary?: boolean;
+              } => typeof a.name === "string" && Boolean(a.name.trim()),
+            )
             .map((a) => ({
-              name: a.name!.trim(),
+              name: a.name.trim(),
               workspacePath:
                 typeof a.workspace_path === "string" && a.workspace_path.trim()
                   ? a.workspace_path

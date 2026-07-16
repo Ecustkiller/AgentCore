@@ -25,10 +25,7 @@ export function formatGrantOrganizeFolderAnswer(
   folderName: string,
   namespace: string,
 ): string {
-  return (
-    `${optionLabel}（${folderName} → ${namespace}；` +
-    "可移动/重命名/复制/删除进回收站、仅本次对话、可撤销）"
-  );
+  return `${optionLabel}（${folderName} → ${namespace}；可移动/重命名/复制/删除进回收站、仅本次对话、可撤销）`;
 }
 
 /**

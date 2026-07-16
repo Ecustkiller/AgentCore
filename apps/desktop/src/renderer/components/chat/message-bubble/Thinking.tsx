@@ -44,7 +44,7 @@ export function ThinkingHeader({
     <Button
       variant="ghost"
       onClick={onToggle}
-      className="h-auto w-full justify-start gap-2 px-0 py-0 text-xs font-normal text-muted-foreground hover:text-foreground"
+      className="h-auto w-full justify-start gap-2 px-0 py-0 text-sm font-normal text-muted-foreground hover:text-foreground"
     >
       {isStreaming ? (
         <>

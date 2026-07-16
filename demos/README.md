@@ -6,11 +6,11 @@
 
 | 项 | 值 |
 |---|---|
-| conversation_id | `33d84eca-b3ef-43e0-aa86-84241a97eb32` |
-| message_id | `3654bda5-e84b-4d41-a75c-092f454bf012` |
-| trace_id | `83eb3ee9a0a54acaa34c8c38ed2ea520` |
+| conversation_id | `5d8bee05-d37f-4ddf-bfb1-4d6665a3d7db` |
+| message_id | `714e38da-f5c8-4c75-b676-4a771e813462` |
+| trace_id | `7174a9ad9fef45afaf81817143e132ea` |
 
-- 完整可回放事实在**云 Postgres `turn_journal`**（665 行，覆盖 CEO 接单 → `team_preview` → 4 轮辩论 → 结辩/裁决 → CEO 汇总）。
+- 完整可回放事实在**云 Postgres `turn_journal`**（1054 行，覆盖 CEO 接单 → 检索/案情简介 → `team_preview` → 5 轮辩论 → 结辩/裁决 → CEO 汇总）。
 - 日志尾部有 `chat.local_turn_recorded`（本机 sidecar 跑完后 Outbox 回写），但 journal 已合并进云库，**不必再读本地 outbox**。
 
 ## 桌面端主路径：准备模式（录屏推荐）
@@ -114,7 +114,7 @@ uv run python scripts/demo_tape_bind.py --latest \
 ```bash
 cd apps/server
 uv run python scripts/demo_tape_export.py \
-  --message-id 3654bda5-e84b-4d41-a75c-092f454bf012 \
+  --message-id 714e38da-f5c8-4c75-b676-4a771e813462 \
   --out ../../demos/tapes/lv-molihua-trademark.json
 ```
 
@@ -137,7 +137,7 @@ uv run python scripts/demo_tape_export.py \
 ## 设计决策（为什么长这样）
 
 - **服务端磁带回放，而非前端注入**：重开会话/切页靠 REST 消息窗 + journal 水合，纯前端灌事件在用户切页时必穿帮；服务端回放落真实 DB 记录，一切页面行为天然成立。被否方案②：ScriptedProvider 重跑真实引擎——无 LLM 延迟导致节奏失真、prompt 漂移会对不上、工具副作用重复执行。
-- **磁带源 = `turn_journal`**（只存 DURABLE 事件；流式 delta 由导出时重切块合成打字观感）。**保真度以原始会话为真值 oracle**：改导出/回放层后，用 `demo-tape-out/` 下保真脚本比对「回放 vs 原始」（正文须逐字节一致、辩论投影结构等价），不要目测。
+- **磁带源 = `turn_journal`**（只存 DURABLE 事件；流式 delta 由导出时重切块合成打字观感）。CEO 的**思考(reasoning)/正文(content)按 process timeline 逐段定位**——检索/分析/组队思考锚到各自的工具与案情简介之前、汇总思考锚到辩论之后；案情简介按真实段边界完整落在开工卡前（不再被 `_split_captain_text` 启发式腰斩）。**保真度以原始会话为真值 oracle**：改导出/回放层后，用 `demo-tape-out/` 下保真脚本比对「回放 vs 原始」（正文与思考均须逐字节一致、辩论投影结构等价），不要目测。reasoning 真值 = captain `process_reasoning` 段拼接（与 `messages.reasoning_content` 仅差暂停边界的 `\n\n` 连接符）。
 - **暂停即真实检查点**：磁带遇 `team_preview` 真暂停、等用户在 UI 点继续——演示中人类拍板环节由录屏者掌控。
 - **节奏坑（已修勿回退）**：磁带 `t_ms` 必须单调；player 的 pacing 时钟不可回拨（曾因导出切块时间回跳 + 时钟回拨双计时，在原速下表现为「正在思考」长卡死，4 倍速+2s 限幅时被掩盖）。
 - **CEO 自持工具内联（已修勿回退）**：CEO 检索阶段的 `web_search`/`read_url` 在运行时带 captain 自己的 `run_id`；前端 `appendToolStep` 与后端 `_accumulate_process` 都把「带 run_id 的工具」当作 worker 工具从内联时间线剔除（本该落协作图节点），但检索阶段协作图尚未出现 → 前 ~15 秒只显示「正在思考」、检索活动全隐藏（正是上一条「3 秒内无首批搜索活动」判据的触发场景）。修法：player 回放时对 `run_id == captain run` 的 `tool_use_*` 事件剥离 `run_id`，使 CEO 自持工具按渲染契约（conformance `single_agent` 向量：CEO 工具无 run_id）走 turn-level 内联。磁带数据保持忠实录制（含 run_id），仅在渲染适配层归一。见 `player.py:_captain_run_id` + 单测 `test_player_inlines_captain_tools_by_stripping_run_id`。**真实产品同源已在 runtime 一并修掉**（旧磁带仍靠 player 层剥离兜底）：`execute_tools`（`runtime/engine/tool_exec.py`）对 `role=="captain"` 走 display/trace 拆分——`tool_use_*` 的 SSE 事件不发 `run_id`（内联渲染），`ToolCallFact`/熔断审计仍保留 captain `run_id`（§8.3 fold/溯源不变）；两处调用点 `tool_round.py`、`directive_apply.py`（coordination 收尾）均已传 `role`。

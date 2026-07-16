@@ -17,6 +17,10 @@ from agentcore.runtime.events.journal_config import (
     _JOURNAL_SURFACE_TYPES,
     cap_process_result,
 )
+from agentcore.runtime.events.process_persist import (
+    ProcessPersistCursor,
+    should_persist_on_close,
+)
 from agentcore.runtime.events.stream_checkpointer import StreamCheckpointer
 from agentcore.runtime.events.types import EventType, SSEEvent
 from agentcore.runtime.facts import Fact, record_turn_fact
@@ -115,9 +119,9 @@ def synthesize_required_marker(
     """Synthesize a marker step into ``steps`` from a ``*_required`` event (G7).
 
     Dedups within ``steps`` (``_has_marker`` semantics on the target list). Returns
-    whether a marker was inserted. Capture side uses this on a seeded⊕live snapshot
-    so the pause-anchor marker lands even though the required event emits *after*
-    ``persist_suspension_capture``.
+    whether a marker was inserted. Capture side uses this on the live process lane
+    (then flushes to journal) so the pause-anchor marker lands even though the
+    required event emits *after* ``persist_suspension_capture``.
     """
     spec = _marker_spec_for_required(event_type, payload)
     if spec is None:
@@ -158,6 +162,8 @@ class EventSink:
         # ``runs.run_processes`` so reload matches live interleaving — ``message_final``
         # splice is NOT the worker timeline source.
         self._run_processes: dict[str, list[dict[str, Any]]] = {}
+        # Progressive process_* / run_process_* journal cursor (ordinal idempotent).
+        self._process_cursor = ProcessPersistCursor()
         self._has_run_plan = False
         self._has_tool = False
         self._conversation_id = conversation_id
@@ -207,8 +213,48 @@ class EventSink:
             self._queue.put_nowait(event)
             self._persist_barriers.put_nowait(None)
 
+    @staticmethod
+    def _combine_persist_barriers(
+        futures: list[asyncio.Future[int | None] | None],
+    ) -> asyncio.Future[int | None] | None:
+        """One SSE barrier that awaits every scheduled journal write for this event.
+
+        Process-lane facts must land before (or with) the closing DURABLE so mid-run
+        refresh can fold journal alone — invariant: live-visible process ⇒ journal.
+        """
+        pending = [f for f in futures if f is not None]
+        if not pending:
+            return None
+        if len(pending) == 1:
+            return pending[0]
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return pending[-1]
+        combined: asyncio.Future[int | None] = loop.create_future()
+
+        async def _wait() -> None:
+            seq: int | None = None
+            for fut in pending:
+                try:
+                    allocated = await fut
+                except Exception as exc:  # noqa: BLE001 — barrier must not hang SSE
+                    if not combined.done():
+                        combined.set_exception(exc)
+                    return
+                if allocated is not None:
+                    seq = allocated
+            if not combined.done():
+                combined.set_result(seq)
+
+        loop.create_task(_wait())
+        return combined
+
     def emit(self, event: SSEEvent) -> None:
         if not self._closed:
+            # Accumulate FIRST: closed process_* / run_process_* schedule before the
+            # DURABLE fact that closed them (journal interleave == live timeline).
+            process_futures = self._accumulate_process(event)
             persist_future: asyncio.Future[int | None] | None = None
             if event.type in _JOURNAL_EVENT_TYPES:
                 self._journal.append(
@@ -225,13 +271,14 @@ class EventSink:
                         ts=event.timestamp,
                     )
                 )
-            self._accumulate_process(event)
             self._record_history(event)
             if self._checkpointer is not None:
                 self._checkpointer.observe(event)
             if not self._detached:
                 self._queue.put_nowait(event)
-                self._persist_barriers.put_nowait(persist_future)
+                self._persist_barriers.put_nowait(
+                    self._combine_persist_barriers([*process_futures, persist_future])
+                )
             # G6: reinject after content_reset is fully processed (history + SSE +
             # checkpointer already saw the reset). Display-only path skips process /
             # checkpointer so salvage and persist timelines stay unduplicated.
@@ -307,42 +354,97 @@ class EventSink:
     def _run_process(self, run_id: str) -> list[dict[str, Any]]:
         return self._run_processes.setdefault(run_id, [])
 
-    def _accumulate_run_process(self, event: SSEEvent) -> None:
+    def _persist_closed_captain_text(self) -> list[Any]:
+        """Journal the open captain text step that a boundary is about to close."""
+        merged = self.raw_process()
+        if not merged or not should_persist_on_close(merged[-1]):
+            return []
+        return self._process_cursor.persist_captain_range(merged, start=0, end=len(merged))
+
+    def _persist_closed_run_text(self, run_id: str) -> list[Any]:
+        steps = self._run_process(run_id)
+        seeded = self._seeded_run_processes.get(run_id) or []
+        merged = [*seeded, *steps] if seeded else list(steps)
+        if not merged or not should_persist_on_close(merged[-1]):
+            return []
+        return self._process_cursor.persist_run_range(run_id, merged, start=0, end=len(merged))
+
+    def flush_process_to_journal(self) -> None:
+        """Persist every not-yet-journaled process / run_process step (finalize / pause).
+
+        Call at semantic turn boundaries so open trailing text steps and markers land
+        before ``turn_end`` / ``turn_paused``. Idempotent via the ordinal cursor.
+        """
+        self._process_cursor.persist_new_captain_tail(self.raw_process())
+        for rid, steps in self._merged_run_processes().items():
+            self._process_cursor.persist_new_run_tail(rid, steps)
+
+    def persist_required_marker(self, event_type: Any, payload: dict[str, Any]) -> None:
+        """Insert a pause-anchor marker into the live captain lane and journal it.
+
+        The ``*_required`` SSE is emitted *after* suspension capture, so the capture
+        path must synthesize the marker itself for process_* progressive persistence.
+        ``before_last_team`` may insert *before* the ordinal cursor — schedule the
+        marker fact directly rather than relying on append-only range persist.
+        """
+        from agentcore.runtime.events.process_persist import schedule_process_step
+
+        if not synthesize_required_marker(self._process, event_type, payload):
+            return
+        spec = _marker_spec_for_required(event_type, payload)
+        if spec is None:
+            return
+        marker, _before_last_team = spec
+        schedule_process_step(marker)
+        # Cursor past the full merged lane so a later flush does not rewrite steps.
+        self._process_cursor.seed_captain(len(self.raw_process()))
+
+    def _accumulate_run_process(self, event: SSEEvent) -> list[Any]:
         """Accumulate a worker run's ProcessStep[] (mirrors captain ``_accumulate_process``)."""
+        futures: list[Any] = []
         t = event.type
         payload = event.payload
         if t == EventType.RUN_REASONING_DELTA:
             run_id = payload.get("run_id") or ""
             delta = payload.get("delta") or ""
             if not run_id or not delta:
-                return
+                return futures
             steps = self._run_process(run_id)
             if steps and steps[-1].get("kind") == "reasoning":
                 steps[-1]["text"] += delta
             else:
+                if steps and should_persist_on_close(steps[-1]):
+                    futures.extend(self._persist_closed_run_text(run_id))
                 steps.append({"kind": "reasoning", "text": delta})
         elif t == EventType.RUN_OUTPUT_DELTA:
             run_id = payload.get("run_id") or ""
             delta = payload.get("delta") or ""
             if not run_id or not delta:
-                return
+                return futures
             steps = self._run_process(run_id)
             if steps and steps[-1].get("kind") == "content":
                 steps[-1]["text"] += delta
             else:
+                if steps and should_persist_on_close(steps[-1]):
+                    futures.extend(self._persist_closed_run_text(run_id))
                 steps.append({"kind": "content", "text": delta})
         elif t == EventType.RUN_OUTPUT_RESET:
             run_id = payload.get("run_id") or ""
             if not run_id:
-                return
+                return futures
             steps = self._run_process(run_id)
+            # Discard open (unpersisted) trailing content — do not journal it.
             while steps and steps[-1].get("kind") == "content":
                 steps.pop()
             steps.append({"kind": "rework"})
+            seeded = self._seeded_run_processes.get(run_id) or []
+            merged = [*seeded, *steps] if seeded else list(steps)
+            futures.extend(self._process_cursor.persist_new_run_tail(run_id, merged))
         elif t == EventType.TOOL_USE_START:
             run_id = payload.get("run_id") or ""
             if not run_id:
-                return
+                return futures
+            futures.extend(self._persist_closed_run_text(run_id))
             self._run_process(run_id).append(
                 {
                     "kind": "tool",
@@ -356,7 +458,7 @@ class EventSink:
         elif t == EventType.TOOL_USE_END:
             run_id = payload.get("run_id") or ""
             if not run_id:
-                return
+                return futures
             call_id = payload.get("tool_call_id", "")
             result = cap_process_result(payload.get("result"))
             display = payload.get("display")
@@ -367,11 +469,16 @@ class EventSink:
                     if display is not None:
                         step["display"] = display
                     break
+            seeded = self._seeded_run_processes.get(run_id) or []
+            live = self._run_process(run_id)
+            merged = [*seeded, *live] if seeded else list(live)
+            futures.extend(self._process_cursor.persist_new_run_tail(run_id, merged))
+        return futures
 
-    def _accumulate_process(self, event: SSEEvent) -> None:
+    def _accumulate_process(self, event: SSEEvent) -> list[Any]:
         # Worker-scoped deltas / tools accumulate on the per-run lane first (then the
         # captain branch no-ops them via run_id / event-type guards below).
-        self._accumulate_run_process(event)
+        futures = self._accumulate_run_process(event)
         t = event.type
         if t == EventType.RUN_PLAN:
             self._has_run_plan = True
@@ -381,24 +488,30 @@ class EventSink:
             # same graph — one marker per execution.
             execution_id = event.payload.get("execution_id") or ""
             if execution_id and not self._has_marker("team", "execution_id", execution_id):
+                futures.extend(self._persist_closed_captain_text())
                 self._process.append({"kind": "team", "execution_id": execution_id})
         elif t == EventType.REASONING_DELTA:
             delta = event.payload.get("delta") or ""
             if not delta:
-                return
+                return futures
             if self._process and self._process[-1].get("kind") == "reasoning":
                 self._process[-1]["text"] += delta
             else:
+                if self._process and should_persist_on_close(self._process[-1]):
+                    futures.extend(self._persist_closed_captain_text())
                 self._process.append({"kind": "reasoning", "text": delta})
         elif t == EventType.CONTENT_DELTA:
             delta = event.payload.get("delta") or ""
             if not delta:
-                return
+                return futures
             if self._process and self._process[-1].get("kind") == "content":
                 self._process[-1]["text"] += delta
             else:
+                if self._process and should_persist_on_close(self._process[-1]):
+                    futures.extend(self._persist_closed_captain_text())
                 self._process.append({"kind": "content", "text": delta})
         elif t == EventType.CONTENT_RESET:
+            # Discard open (unpersisted) trailing content — do not journal discarded prose.
             while self._process and self._process[-1].get("kind") == "content":
                 self._process.pop()
         elif t == EventType.TOOL_USE_START:
@@ -407,7 +520,8 @@ class EventSink:
             # captain timeline) and an orchestration call (delegate/debate — the `team` marker
             # stands in its place). Neither becomes a captain tool step.
             if payload.get("run_id") or payload.get("tool_name") in ORCHESTRATION_TOOLS:
-                return
+                return futures
+            futures.extend(self._persist_closed_captain_text())
             self._has_tool = True
             self._process.append(
                 {
@@ -422,7 +536,7 @@ class EventSink:
         elif t == EventType.TOOL_USE_END:
             payload = event.payload
             if payload.get("run_id") or payload.get("tool_name") in ORCHESTRATION_TOOLS:
-                return
+                return futures
             call_id = payload.get("tool_call_id", "")
             result = cap_process_result(payload.get("result"))
             display = payload.get("display")
@@ -433,6 +547,7 @@ class EventSink:
                     if display is not None:
                         step["display"] = display
                     break
+            futures.extend(self._process_cursor.persist_new_captain_tail(self.raw_process()))
         elif t in (
             EventType.CHECKPOINT_REQUIRED,
             EventType.QUESTION_POSTED,
@@ -447,13 +562,18 @@ class EventSink:
             # (G7). Dedup scans seeded⊕live; insert targets live only.
             spec = _marker_spec_for_required(t, event.payload)
             if spec is None:
-                return
+                return futures
             marker, before_last_team = spec
             kind = marker["kind"]
             key = next(k for k in marker if k != "kind")
             if self._has_marker(kind, key, marker[key]):
-                return
+                return futures
+            futures.extend(self._persist_closed_captain_text())
             _insert_marker_step(self._process, marker, before_last_team=before_last_team)
+            # Middle-insert (before_last_team) breaks pure append ordinals — flush the
+            # full tail so the new marker and any shifted steps are journaled once.
+            futures.extend(self._process_cursor.persist_new_captain_tail(self.raw_process()))
+        return futures
 
     def seed_journal(self, events: list[dict[str, Any]]) -> None:
         self._journal.extend(events)
@@ -461,12 +581,16 @@ class EventSink:
     def seed_process(self, steps: list[dict[str, Any]]) -> None:
         """Hydrate resume captain timeline into the seeded zone (G1/G7). Deep-copied."""
         self._seeded_process = copy.deepcopy(list(steps))
+        # Seeded steps already lived in journal — skip re-append on flush.
+        self._process_cursor.seed_captain(len(self._seeded_process))
 
     def seed_run_processes(self, run_map: dict[str, list[dict[str, Any]]]) -> None:
         """Hydrate resume worker timelines into the seeded zone (G1/G7). Deep-copied."""
         self._seeded_run_processes = {
             rid: copy.deepcopy(list(steps)) for rid, steps in run_map.items()
         }
+        for rid, steps in self._seeded_run_processes.items():
+            self._process_cursor.seed_run(rid, len(steps))
 
     def raw_process(self) -> list[dict[str, Any]]:
         """Seeded ⊕ live captain steps with **no** structural gate (G1 capture).

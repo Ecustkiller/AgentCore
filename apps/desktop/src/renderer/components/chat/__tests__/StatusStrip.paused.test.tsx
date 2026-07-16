@@ -3,8 +3,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { conversationKeys } from "@/lib/queryKeys";
 import {
   type ExecutionPlan,
-  type RunFrame,
   ExecutionScopeContext,
+  type RunFrame,
   projectExecution,
 } from "@/stores/execution";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -50,7 +50,9 @@ const waveDoneFrames: RunFrame[] = [
 
 function renderStrip(execution: ReturnType<typeof projectExecution>) {
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    defaultOptions: {
+      queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
+    },
   });
   client.setQueryData(conversationKeys.grouped, {
     folders: [],

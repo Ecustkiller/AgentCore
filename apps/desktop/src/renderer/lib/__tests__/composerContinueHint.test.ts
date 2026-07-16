@@ -1,12 +1,14 @@
+import type { Message } from "@/stores/conversation";
 import { describe, expect, it } from "vitest";
 import {
   COMPOSER_CONTINUE_PLACEHOLDER,
   isContinuableAssistant,
   isEmptyInterruptedAssistant,
 } from "../composerContinueHint";
-import type { Message } from "@/stores/conversation";
 
-function msg(partial: Partial<Message> & Pick<Message, "finishReason">): Message {
+function msg(
+  partial: Partial<Message> & Pick<Message, "finishReason">,
+): Message {
   return {
     id: "a1",
     role: "assistant",
@@ -37,9 +39,7 @@ describe("composerContinueHint", () => {
 
   it("rejects empty interrupted for continue (goes to regenerate salvage)", () => {
     expect(
-      isContinuableAssistant(
-        msg({ finishReason: "interrupted", content: "" }),
-      ),
+      isContinuableAssistant(msg({ finishReason: "interrupted", content: "" })),
     ).toBe(false);
     expect(
       isEmptyInterruptedAssistant(
@@ -49,11 +49,13 @@ describe("composerContinueHint", () => {
   });
 
   it("rejects streaming / end_turn / non-assistant", () => {
+    expect(isContinuableAssistant(msg({ finishReason: "end_turn" }))).toBe(
+      false,
+    );
     expect(
-      isContinuableAssistant(msg({ finishReason: "end_turn" })),
-    ).toBe(false);
-    expect(
-      isContinuableAssistant(msg({ finishReason: "cancelled", isStreaming: true })),
+      isContinuableAssistant(
+        msg({ finishReason: "cancelled", isStreaming: true }),
+      ),
     ).toBe(false);
     expect(
       isContinuableAssistant({

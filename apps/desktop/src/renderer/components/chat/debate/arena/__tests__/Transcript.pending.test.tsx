@@ -99,6 +99,7 @@ describe("Transcript moderator pending", () => {
   it("质询作答完成后 → 小结文案", () => {
     const cx: DebateCrossExamView = {
       targetKey: "pro",
+      stance: "pro",
       targetName: "支持方",
       targetColorVar: "var(--debate-side-pro)",
       exchanges: [{ question: "Q?", answer: "A" }],

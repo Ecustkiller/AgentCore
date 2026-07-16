@@ -3,6 +3,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { RouteError } from "@/components/layout/RouteError";
 import { AskCommencePreviewPage } from "@/pages/AskCommencePreviewPage";
 import { ConversationsPage } from "@/pages/ConversationsPage";
+import { ConversationsPreviewPage } from "@/pages/ConversationsPreviewPage";
 import { ExplorePage } from "@/pages/ExplorePage";
 import { FilesPage } from "@/pages/FilesPage";
 import { MessagesPage } from "@/pages/MessagesPage";
@@ -85,6 +86,8 @@ export const router = createHashRouter([
       { path: "preview/ask-commence", element: <AskCommencePreviewPage /> },
       // Preview 首启体验（价值一屏 / 模型接入 / 空态三态）.
       { path: "preview/onboarding", element: <OnboardingPreviewPage /> },
+      // Preview 全部对话管理页（时间线列表 · mock 数据离线自检）.
+      { path: "preview/conversations", element: <ConversationsPreviewPage /> },
       // DT-01: Desktop launcher only (spawn AgentTown.exe + session.json).
       { path: "simulation/town", element: <TownLauncherPage /> },
       {

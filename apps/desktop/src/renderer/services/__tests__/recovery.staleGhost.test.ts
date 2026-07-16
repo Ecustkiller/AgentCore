@@ -34,8 +34,8 @@ const emptyRecovery = {
   sidecarLive: false,
   cloudLive: false,
   pausedCount: 0,
-  unsynced: [] as const,
-  interruptedAfterDecision: [] as const,
+  unsynced: [],
+  interruptedAfterDecision: [],
 };
 
 function seedRunningAssistant(): void {
@@ -108,14 +108,10 @@ describe("settleCloudRunningAssistant (stale recovery race)", () => {
 
     expect(outcome).toBe("hold");
     expect(apiGet).toHaveBeenCalledTimes(1);
-    expect(apiGet).toHaveBeenCalledWith(
-      `/v1/conversations/${CID}/recovery`,
-    );
+    expect(apiGet).toHaveBeenCalledWith(`/v1/conversations/${CID}/recovery`);
     expect(assistant()?.status).toBe("running");
     expect(assistant()?.finishReason).not.toBe("interrupted");
-    expect(
-      useConversationStore.getState().byId[CID].isGenerating,
-    ).toBe(true);
+    expect(useConversationStore.getState().byId[CID].isGenerating).toBe(true);
     const pending = usePausedTurnStore.getState().pending;
     expect(pending).toHaveLength(1);
     expect(pending[0]?.messageId).toBe(ASSISTANT_ID);
@@ -139,9 +135,7 @@ describe("settleCloudRunningAssistant (stale recovery race)", () => {
     expect(assistant()?.status).toBe("incomplete");
     expect(assistant()?.finishReason).toBe("interrupted");
     expect(assistant()?.isStreaming).toBe(false);
-    expect(
-      useConversationStore.getState().byId[CID].isGenerating,
-    ).toBe(false);
+    expect(useConversationStore.getState().byId[CID].isGenerating).toBe(false);
     expect(usePausedTurnStore.getState().pending).toHaveLength(0);
   });
 

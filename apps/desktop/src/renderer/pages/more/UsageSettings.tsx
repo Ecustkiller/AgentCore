@@ -2,7 +2,12 @@ import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useLlmKey } from "@/hooks/useLlmKey";
 import { agentColorVar } from "@/lib/agentIdentity";
-import { formatCompact, formatCost, formatDisplayCost, formatUsd } from "@/lib/format";
+import {
+  formatCompact,
+  formatCost,
+  formatDisplayCost,
+  formatUsd,
+} from "@/lib/format";
 import { useUsageStore } from "@/stores/usage";
 import { KeyRound, Loader2, RefreshCw } from "lucide-react";
 import { useEffect } from "react";

@@ -64,9 +64,7 @@ export function DebateProgressLine({
                 <span className="font-medium text-foreground">
                   {round.roundNo > 0 ? `第 ${round.roundNo} 轮` : "本场"}
                 </span>
-                {round.inFlight && (
-                  <span className="text-primary">进行中</span>
-                )}
+                {round.inFlight && <span className="text-primary">进行中</span>}
               </div>
               {round.focus ? (
                 <p className="text-foreground">

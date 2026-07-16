@@ -12,14 +12,17 @@ platform/vendor → ``cost_total_nano`` (quota / admin); user → ``cost_estimat
 (``cost_total_nano`` stays 0 so BYOK estimates never pollute ``enforce_quota``).
 """
 from __future__ import annotations
+
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
+
 from agentcore.core.types import new_id
 from agentcore.llm.pricing import CredentialSource, calculate_cost
 from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.citations import merge_citations
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
+
 # Structural role categories (mirror the DB CheckConstraint). A turn's run tree
 # produces captain + member; ``title`` / ``memory`` tag the off-turn background
 # LLM calls (标题生成 / 记忆整合) so their spend rolls into account/conversation

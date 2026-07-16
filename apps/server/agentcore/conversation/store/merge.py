@@ -77,9 +77,7 @@ def merge_usage_status(existing: dict[str, Any] | None, incoming: dict[str, Any]
         elif "status" in merged and incoming_status is None:
             merged.pop("status", None)
     # 终态必非暂停：terminal status wins over any residual paused latch.
-    if is_terminal_status(merged.get("status")):
-        merged.pop("paused", None)
-    elif nxt.get("paused") is False:
+    if is_terminal_status(merged.get("status")) or nxt.get("paused") is False:
         merged.pop("paused", None)
     return merged
 

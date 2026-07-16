@@ -18,7 +18,9 @@ describe("live opening from first debate_round_started (fixture)", () => {
     );
     expect(firstStarted).toBeGreaterThanOrEqual(0);
     // 含首轮 debate_round_started，尚无辩手 run_started
-    const early = foldToProjectedTurn(fixture.events.slice(0, firstStarted + 1));
+    const early = foldToProjectedTurn(
+      fixture.events.slice(0, firstStarted + 1),
+    );
     expect(early.debateOpening).toBe("圆桌开场：先问 AI 治理的风险从何而来。");
 
     const mid = foldToProjectedTurn(fixture.events.slice(0, firstStarted + 12));

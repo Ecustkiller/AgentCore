@@ -3,8 +3,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { conversationKeys } from "@/lib/queryKeys";
 import {
   type ExecutionPlan,
-  type RunFrame,
   ExecutionScopeContext,
+  type RunFrame,
   projectExecution,
   useExecutionStore,
 } from "@/stores/execution";
@@ -68,7 +68,9 @@ const bothWorkersDone: RunFrame[] = [
 
 function renderStrip(execution: ReturnType<typeof projectExecution>) {
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    defaultOptions: {
+      queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
+    },
   });
   client.setQueryData(conversationKeys.grouped, {
     folders: [],
@@ -197,9 +199,9 @@ describe("StatusStrip · team_synthesis_preview draft", () => {
     expect(screen.getByTestId("status-strip-running-title").textContent).toBe(
       "2/2 已完成，正在生成汇总",
     );
-    expect(screen.getByTestId("team-synthesis-preview").dataset.synthesizing).toBe(
-      "true",
-    );
+    expect(
+      screen.getByTestId("team-synthesis-preview").dataset.synthesizing,
+    ).toBe("true");
     expect(screen.getByText("生成汇总")).toBeTruthy();
     expect(screen.getByTestId("team-synthesis-headline").textContent).toBe(
       "2/2 已完成，正在生成汇总",
@@ -220,9 +222,9 @@ describe("StatusStrip · team_synthesis_preview draft", () => {
     expect(screen.getByTestId("status-strip-running-title").textContent).toBe(
       "2/2 已完成，正在生成汇总",
     );
-    expect(screen.getByTestId("team-synthesis-preview").dataset.synthesizing).toBe(
-      "true",
-    );
+    expect(
+      screen.getByTestId("team-synthesis-preview").dataset.synthesizing,
+    ).toBe("true");
     expect(screen.queryByTestId("team-synthesis-draft")).toBeNull();
   });
 });

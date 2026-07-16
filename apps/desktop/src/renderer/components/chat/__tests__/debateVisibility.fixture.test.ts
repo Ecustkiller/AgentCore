@@ -1,8 +1,4 @@
-// @vitest-environment jsdom
-/**
- * 辩论 L0 可见性：真实 multi_agent_debate 向量折叠后，推进线 / 结论钩子 / 图门可消费。
- */
-import { buildModeratorLedger } from "@/components/chat/detail/debateModerator";
+import { teamHasStartedRuns } from "@/components/chat/InlineTeamGraph";
 import {
   debateConclusionHook,
   debatePreviewSubtitle,
@@ -12,7 +8,11 @@ import {
   debateFacePrimaryFromContext,
   pickAgentNodeIdlePrimary,
 } from "@/components/chat/debate/debateFaceCopy";
-import { teamHasStartedRuns } from "@/components/chat/InlineTeamGraph";
+// @vitest-environment jsdom
+/**
+ * 辩论 L0 可见性：真实 multi_agent_debate 向量折叠后，推进线 / 结论钩子 / 图门可消费。
+ */
+import { buildModeratorLedger } from "@/components/chat/detail/debateModerator";
 import { planCapabilities } from "@/components/graph/planCapabilities";
 import { foldToProjectedTurn } from "@/protocol/conformanceFold";
 import type { Execution, RunNode } from "@/stores/execution";
@@ -37,19 +37,37 @@ function toExecution(name: string): Execution {
     cost: r.cost ?? null,
     error: r.error,
     outputSummary: r.outputSummary,
-    outputFiles: r.outputFiles ?? [],
+    outputFiles: [],
     debrief: r.debrief,
     durationMs: r.durationMs,
     stance: r.stance ?? null,
     group: r.group ?? null,
     round: r.round ?? 0,
+    sideKey: null,
     continuesRunId: r.continuesRunId ?? null,
-    continuationIndex: r.continuationIndex ?? 0,
+    continuationIndex: 0,
     replacesRunId: r.replacesRunId ?? null,
     revised: r.revised ?? null,
     checkpoint: r.checkpoint ?? null,
     receivedContext: r.receivedContext ?? [],
-    escalations: r.escalations ?? [],
+    // Desktop RunEscalation 多 id/questions（本机交互态）；golden ProjectedRun 无这两字段。
+    escalations: (r.escalations ?? []).map((e) => ({
+      id: null,
+      question: e.question,
+      assumption: e.assumption,
+      blocking: e.blocking,
+      status: e.status,
+      answer: e.answer,
+      kind: e.kind ?? "normal",
+      questions: [],
+      ...(e.awaiting === "ceo" ? { awaiting: "ceo" as const } : {}),
+      ...(e.arbitrated_by === "ceo"
+        ? {
+            arbitrated_by: "ceo" as const,
+            ...(e.via_user != null ? { via_user: e.via_user } : {}),
+          }
+        : {}),
+    })),
     process: r.process ?? [],
   }));
   return {
@@ -91,8 +109,9 @@ describe("debate L0 visibility · multi_agent_debate fixture", () => {
 
     const ledger = buildModeratorLedger(execution);
     expect(ledger).not.toBeNull();
-    expect(ledger!.rounds.length).toBeGreaterThan(0);
-    expect(ledger!.rounds.some((r) => r.focus || r.summary)).toBe(true);
+    if (!ledger) return;
+    expect(ledger.rounds.length).toBeGreaterThan(0);
+    expect(ledger.rounds.some((r) => r.focus || r.summary)).toBe(true);
     expect(JSON.stringify(ledger)).not.toMatch(/score|比分|记分/i);
 
     expect(debatePreviewSubtitle(execution)).toMatch(/置信/);

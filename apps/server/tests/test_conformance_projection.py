@@ -211,6 +211,17 @@ def test_team_preview_resolved_continue(projected):
     ]
 
 
+def test_debate_team_preview_resolved_continue(projected):
+    p = projected["debate_team_preview_resolved_continue"]
+    assert p["status"] == "running"
+    assert _pending_gates(p) == []
+    assert any(
+        i["kind"] == "team_preview" and i["status"] == "resolved" for i in p["interactions"]
+    )
+    assert len(p["runs"]) >= 1
+    assert "team" in [s["kind"] for s in p["process"]]
+
+
 def test_single_agent_citations(projected):
     p = projected["single_agent_citations"]
     assert p["status"] == "completed"

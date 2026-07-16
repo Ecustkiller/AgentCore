@@ -168,12 +168,12 @@ export function OptionButton({
   const badges = (
     <>
       {recommended && (
-        <span className="shrink-0 rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
+        <span className="shrink-0 rounded-lg bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
           推荐
         </span>
       )}
       {isDefault && !recommended && (
-        <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground/70">
+        <span className="shrink-0 rounded-lg bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground/70">
           默认
         </span>
       )}

@@ -163,7 +163,8 @@ function pushEscalationMarker(process: ProcessStep[], id: string): void {
 /** Drop an `approval` marker (热审批痕迹锚点). */
 function pushApprovalMarker(process: ProcessStep[], id: string): void {
   if (!id) return;
-  if (process.some((s) => s.kind === "approval" && s.approval_id === id)) return;
+  if (process.some((s) => s.kind === "approval" && s.approval_id === id))
+    return;
   process.push({ kind: "approval", approval_id: id });
 }
 
@@ -880,9 +881,17 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         const iid = (p.interjection_id || "").trim();
         if (iid) {
           const attachments = (p.attachments ?? [])
-            .filter((a) => typeof a?.name === "string" && a.name.trim())
+            .filter(
+              (
+                a,
+              ): a is {
+                name: string;
+                workspace_path?: string;
+                binary?: boolean;
+              } => typeof a?.name === "string" && Boolean(a.name.trim()),
+            )
             .map((a) => ({
-              name: a.name!.trim(),
+              name: a.name.trim(),
               workspacePath:
                 typeof a.workspace_path === "string" && a.workspace_path.trim()
                   ? a.workspace_path

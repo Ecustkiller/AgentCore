@@ -99,7 +99,7 @@ export function buildAgentNodePresentation(
       }
     : liveToolExec
       ? {
-          heading: toolPhaseText(liveToolExec.phase) ?? "处理中",
+          heading: toolPhaseText(liveToolExec.phase) ?? "Working",
           text: toolLabel(liveToolExec.toolName),
         }
       : livePreview

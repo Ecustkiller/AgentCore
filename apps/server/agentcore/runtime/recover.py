@@ -32,7 +32,6 @@ from agentcore.runtime.suspension import (
     TurnSuspension,
 )
 from agentcore.runtime.turn_state import TurnState
-from agentcore.tools.builtin.ask_user import ask_user_tool_result
 from agentcore.tools.builtin.ask_user.schema import option_label
 
 if TYPE_CHECKING:

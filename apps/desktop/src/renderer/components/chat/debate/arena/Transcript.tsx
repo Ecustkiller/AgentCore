@@ -172,14 +172,14 @@ export function Transcript({
               />
             ) : (
               showModeratorPending &&
-                !crossExamRunning && (
-                  <JudgeNote
-                    text=""
-                    pending
-                    pendingKind={pendingKind}
-                    model={moderatorModel}
-                  />
-                )
+              !crossExamRunning && (
+                <JudgeNote
+                  text=""
+                  pending
+                  pendingKind={pendingKind}
+                  model={moderatorModel}
+                />
+              )
             )}
           </div>
         );

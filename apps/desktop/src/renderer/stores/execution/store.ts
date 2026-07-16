@@ -114,10 +114,7 @@ interface ExecutionState {
     messageId: string,
   ) => void;
   /** Upsert a mid-flight user interjection (`user_interjection`, same id keeps latest). */
-  upsertUserInterjection: (
-    item: UserInterjection,
-    messageId: string,
-  ) => void;
+  upsertUserInterjection: (item: UserInterjection, messageId: string) => void;
   setStatus: (status: ExecutionStatus, messageId: string) => void;
   setPlayhead: (index: number | null, messageId: string) => void;
   goLive: (messageId: string) => void;
@@ -350,11 +347,20 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
             const iid = (p.interjection_id || "").trim();
             if (!iid) continue;
             const attachments = (p.attachments ?? [])
-              .filter((a) => typeof a?.name === "string" && a.name.trim())
+              .filter(
+                (
+                  a,
+                ): a is {
+                  name: string;
+                  workspace_path?: string;
+                  binary?: boolean;
+                } => typeof a.name === "string" && Boolean(a.name.trim()),
+              )
               .map((a) => ({
-                name: a.name!.trim(),
+                name: a.name.trim(),
                 workspacePath:
-                  typeof a.workspace_path === "string" && a.workspace_path.trim()
+                  typeof a.workspace_path === "string" &&
+                  a.workspace_path.trim()
                     ? a.workspace_path
                     : undefined,
                 binary: Boolean(a.binary),

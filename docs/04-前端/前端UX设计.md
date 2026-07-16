@@ -62,14 +62,14 @@ skip_if:
 
 ### 一B、单 Agent「思考·正文·工具」内联时间线 `ProcessTimeline` ✅ 已落地
 
-单 Agent 回合 CEO 直接调工具（联网搜索 / 读网页 / 检索代码 / 执行）时，气泡把 CEO 的**思考、回复正文、工具调用**按**真实发生顺序**交织成**一条内联时间线**（Cursor 式全内联）：思考段＝灰色**可逐段折叠**小块（流式中展开看它边想、完成自动收起＝零噪音），正文段＝正常富文本（含行内引用角标 chip：显示号按首次出现顺序连续重编、悬停预览来源、点击经系统浏览器打开），工具＝一行（图标 · 中文名 · 参数 · 状态，**完成一律默认折叠成单行**、点开才看详情——无交付物型特例，失败也折叠、靠红✗ + 红 peek 醒目）；**时间上连续的 ≥2 个工具自动 coalesce 成一个可展开组**（`ProcessToolGroup`：摘要头＝分类计数「读取文件 6 · 编辑文件 2」或单类别 ≤3 时直列文件名 · 任一失败显「N 个失败」· 运行中脉冲点；**完成默认收起、流式中尾部活动组展开看它干活**，展开即原样列出各工具行、逐行仍可点开看结果），单个工具维持一行平铺。**末尾那段正文即最终答案**——不再有独立的「底部答案区」，时间线本身就是回复；流式时尾段自带光标 /「正在思考…」。多 Agent run 详情侧栏主体复用同一 `ProcessTimeline`（per-run `ProcessStep[]`，§十 run-detail）。
+单 Agent 回合 CEO 直接调工具（联网搜索 / 读网页 / 检索代码 / 执行）时，气泡把 CEO 的**思考、回复正文、工具调用**按**真实发生顺序**交织成**一条内联时间线**（Cursor 式全内联）：思考段＝灰色**可逐段折叠**小块（流式中展开看它边想、完成自动收起＝零噪音），正文段＝正常富文本（含行内引用角标 chip：显示号按首次出现顺序连续重编、悬停预览来源、点击经系统浏览器打开），工具＝一行（图标 · 英文名 · 参数 · 状态，**完成一律默认折叠成单行**、点开才看详情——无交付物型特例，失败也折叠、靠红✗ + 红 peek 醒目）；**时间上连续的 ≥2 个工具自动 coalesce 成一个可展开组**（`ProcessToolGroup`：摘要头＝分类计数「Read file 6 · Edit file 2」或单类别 ≤3 时直列文件名 · 任一失败显「N failed」· 运行中脉冲点；**完成默认收起、流式中尾部活动组展开看它干活**，展开即原样列出各工具行、逐行仍可点开看结果），单个工具维持一行平铺。**末尾那段正文即最终答案**——不再有独立的「底部答案区」，时间线本身就是回复；流式时尾段自带光标 /「正在思考…」。多 Agent run 详情侧栏主体复用同一 `ProcessTimeline`（per-run `ProcessStep[]`，§十 run-detail）。
 
 - **决策与理由（为何全内联）**：单 Agent 回合每轮 `思考→正文→工具` 交替（ReAct），**忠实时序优先**——正文回归它在思考/工具间的真实位置；噪音改用「思考逐段折叠」兜。仍被否决的是**常驻、打碎正文的吵闹工具卡**。
 - **决策与理由（连续工具折叠 `ProcessToolGroup`）**：对齐 Cursor「Read N files」的行业做法——时间上连续（被思考/正文打断即断组）的 ≥2 个工具并成「动词＋计数」可折叠摘要，**保序**（否决「按类别全回合归桶」的碎序方案）。纯**渲染层 fold**（`lib/processTimeline.ts::groupToolRuns`），`process[]` 形状不变 → **不动后端 / `turn_journal` / conformance**；**末段正文（最终答案）永不进组**。手机端 `AssistantView` 另一套实现、不含分组（分组是 chrome、非协议 fold）。
-- **完成态整段过程折叠 ✅**：回合收场后所有过程节点再收进一行摘要「思考了 N 步 · 调用了 M 个工具」；**可见节点**（正文 / 团队图 / 决策卡）绝不入折；流式中全展开，收场收起按 `messageId` 持久化。与「思考逐段折叠」叠加＝完成态默认只见「摘要行 + 最终答案」。→ 见代码 `ProcessTimeline.tsx`。
+- **完成态整段过程折叠 ✅**：回合收场后所有过程节点再收进一行摘要「Thought N steps · Used M tools」（与展开态 `Thought` / 工具英文标签同语种）；**可见节点**（正文 / 团队图 / 决策卡）绝不入折；流式中全展开，收场收起按 `messageId` 持久化。与「思考逐段折叠」叠加＝完成态默认只见「摘要行 + 最终答案」。→ 见代码 `ProcessTimeline.tsx`。
 - **复制两档 ✅**：持久化 `content` 只留交付（deliverable_only，[多轮编排 §八](/docs/03-AI核心/多轮编排与同人续派.md)），故复制提供「仅交付（默认）/ 含过程」（后者按 `process[]` 时序拼）；搜索与下轮 history 仍只用交付。→ 见代码 `lib/messageExport.ts`。
 - **本地回合同步态 `synced_pending` ✅**：sidecar 回合按「**静默成功、显式失败**」显示同步态——宽限期（~5s）内不渲染提示，超期未获云确认才挂「待同步」。**纯本机指示、不进 SSE / 跨端契约**。→ 见代码 `message-bubble/SyncStatusHint.tsx`；回写链路见 [双模式 §10.3](/docs/02-架构/双模式工作区.md)。
-- **保序持久化**：时间线随回合落 `turn_journal`、读取投影为 `runs.process`，刷新可回放。
+- **保序持久化**：时间线在语义边界渐进落 `turn_journal`（`process_*` / `run_process_*`），读取投影为 `runs.process` / `run_processes`；**运行中刷新与终态重载**均 fold journal（+ live tail）保序回放——见 [执行引擎 §8.3](/docs/03-AI核心/执行引擎架构设计.md)。纯散文回合（无 process 车道）不扩展 `process_*`，仍走 `turn_stream_state` / 本地 segment 加速。
 - **实时行与等待态 ✅**：`ComposingToolLine`（「正在生成 {工具} · N 字」补 `tool_use_start` 前空白）与慢工具**诚实阶段**文案（消费 `tool_use_progress`）均为 **transport-only、不进 journal**，重载不保留；过程工具完成后**统一默认折叠**（折叠态保留 inlineCount / peek / 运行中骨架；手动开合仍走 `usePersistentDisclosure`）。→ 见代码 `ToolLine.tsx`。
 - **回合结束原因 chip ✅**：非正常收尾（`max_rounds` / `degraded` / `unproductive` / `cancelled` / `interrupted`）在气泡顶挂中性灰 chip（事后记录非警报；原「降级琥珀」已废除）；`end_turn` 不显、`error` 归错误卡。**回放接缝**：多 Agent 从 `runs.finishReason`、单 Agent 从 `turn_end` 回落——非正常收尾即便无图/无进程也由后端补写最小 `turn_end` 兜底；`interrupted` 提供「重试」（复用 regenerate）。
 - **回合内联错误卡 ✅**：直播走纯传输 `error` SSE；**重载**从 `turn_end.error` 投影回放同一张卡（空正文报错回合后端补写空正文行 + 最小 journal，空正文被 history 过滤）；`code` 走 `lib/errors.ts` 单点翻译。
@@ -125,7 +125,7 @@ skip_if:
 
 多 Agent 回合的团队界面是内嵌进助手消息的协作图（`InlineTeamGraph`，→ 见代码 `components/chat/InlineTeamGraph.tsx`）：图顶一条**状态条**按 `execution.status` 分四态渲染，下方是可折叠的协作图（`GraphView` 内嵌形态），状态条「在画布打开」进入全屏回合详情（`TurnDetailPage`，就地放大该回合）。状态条吃下了原任务卡片的全部职责（AgentCore 聊天界面与普通对话 AI 的核心视觉差异点）：
 
-- **执行中**（`RunningStrip`）：转圈 + 任务摘要 + 进度 `completed/total` + 进度条；尾部控件（停止 / 折叠图 / 在画布打开）。Agent 状态/工具/输出在下方图节点上呈现；**慢工具诚实阶段（✅ 已落地）**：并行 worker 执行 `web_search` 等阻塞工具时，节点除「运行中」外显示 transport-only 阶段文案（排队中 / 正在检索 / 改用备用引擎…，与 CEO `ToolLine` 同源 `TOOL_PHASE_TEXT`），重载后不保留。
+- **执行中**（`RunningStrip`）：转圈 + 任务摘要 + 进度 `completed/total` + 进度条；尾部控件（停止 / 折叠图 / 在画布打开）。Agent 状态/工具/输出在下方图节点上呈现；**慢工具诚实阶段（✅ 已落地）**：并行 worker 执行 `web_search` 等阻塞工具时，节点除「运行中」外显示 transport-only 阶段文案（Queued / Searching / Trying fallback…，与 CEO `ToolLine` 同源 `TOOL_PHASE_TEXT`），重载后不保留。
 - **已完成**（`CompletedStrip`）：一行战绩「团队完成 · N 个 Agent · M/M 子任务 · 用时 · ¥合计」（用时取帧流挂钟跨度 `elapsedMs`，¥ 取 `message_end` 回合合计 §7.3A）。**部分失败**（CEO 完成但有 worker 失败）额外显示 `destructive` 红调「N 个子任务失败」横幅 + 救火行。
 - **已停止**（`status=cancelled`）：同战绩形态，「已停止」标题，在跑节点冻结为 cancelled（不再转圈），救火行显示「已花 ¥」。
 - **失败**（整轮崩溃，`FailureStrip`）：高亮失败 Agent / run + `run_failed` 错误原因 + 救火行。
@@ -156,7 +156,7 @@ skip_if:
 | 任务完成 | 状态条**收缩**为一行战绩摘要 |
 | 用户停止任务 | 状态条转「已停止」，在跑节点冻结，提供重试 |
 | 用户发新消息 / 刷新 | 每条回答各持自己的执行槽（按 `messageId` §9.3），历史图保留，刷新后从 `message.runs` 回放 |
-| 用户运行中打字（插话 ✅） | composer **不禁发**（废除 `isGenerating` 一刀切拦截）：单一输入框，系统按后端路由回执呈现——协调 turn 内消息以插话形态渲染进 team 块时间线（`UserInterjectionsPanel`），徽标「已传达给团队」；CEO 判定无关转排队后同条目翻转为「已排队」+ 处置说明；经典路径 / 单 Agent 运行中则直接「已排队」（对话级队列，当前回合结束自动开跑）。热路挂起仍走决策区，不可绕过 |
+| 用户运行中打字（插话 ✅） | composer **不禁发**（废除 `isGenerating` 一刀切拦截）：单一输入框，生成中发送键（「发送插话」）与停止键并存，Enter 即插话；系统按后端路由回执呈现——协调 turn 内消息以插话形态渲染进 team 块时间线（`UserInterjectionsPanel`），徽标「已传达给团队」；CEO 判定无关转排队后同条目翻转为「已排队」+ 处置说明；经典路径 / 单 Agent 运行中则直接「已排队」（对话级队列，当前回合结束自动开跑）。**插话可带附件 ✅**：复用正常发送的驻留 + `OutgoingAttachment` 序列化，徽标下附件名 chips（路径只在线上供团队自取，UI 不展示）。热路挂起仍走决策区，不可绕过 |
 
 **为何无「规划中」态**（决策）：CEO + `delegate` 架构下 `run_plan` 同步到达，无独立规划空窗；「系统在思考」由 CEO reasoning 气泡覆盖；`tool_use_start(delegate)` 前无法预知是否组团，故状态条不设「规划中」态。→ 见代码 `runtime/delegate/`、`runtime/engine/`。
 

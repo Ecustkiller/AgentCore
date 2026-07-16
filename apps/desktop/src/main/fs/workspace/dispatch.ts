@@ -55,8 +55,7 @@ const ORGANIZE_DENIED_OPS = new Set<WorkspaceOpName>([
   "archive",
 ]);
 
-const READONLY_MSG =
-  "会话授权目录为只读，不能写入；请把产出写到对话工作区";
+const READONLY_MSG = "会话授权目录为只读，不能写入；请把产出写到对话工作区";
 const ORGANIZE_DENY_MSG =
   "整理授权不允许此操作（仅 list/read/grep/stat + move/copy/mkdir + 回收站删除）";
 const PERMANENT_EXTERNAL_MSG =

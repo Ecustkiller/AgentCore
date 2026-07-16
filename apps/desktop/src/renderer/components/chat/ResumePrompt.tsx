@@ -17,8 +17,8 @@ import {
 import type { PlanReviewUserDecision } from "@/services/planReview";
 import { runContinueAfterDecision } from "@/services/turns";
 import { useConversationStore } from "@/stores/conversation";
-import { useInterruptedAfterDecisionStore } from "@/stores/interruptedAfterDecision";
 import { useInteractionStore } from "@/stores/interactions";
+import { useInterruptedAfterDecisionStore } from "@/stores/interruptedAfterDecision";
 import { type PendingResume, usePausedTurnStore } from "@/stores/pausedTurns";
 import type { InteractionKind } from "@/types/interactionExt";
 import type { SidecarInterruptedAfterDecision } from "@shared/sidecar-contract";
@@ -99,7 +99,11 @@ function InterruptedAfterDecisionCard({
         <Button
           variant="primary"
           icon={
-            busy ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />
+            busy ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <Play size={13} />
+            )
           }
           disabled={busy}
           onClick={() => {
@@ -330,9 +334,7 @@ function TeamPreviewWorkers({ turn }: { turn: PendingResume }) {
               type="button"
               onClick={() => toggle(w.run_id)}
               aria-expanded={open}
-              aria-label={
-                open ? `收起 ${w.role} 任务` : `展开 ${w.role} 任务`
-              }
+              aria-label={open ? `收起 ${w.role} 任务` : `展开 ${w.role} 任务`}
               className="w-full text-left"
             >
               <div className="flex items-start gap-1.5">

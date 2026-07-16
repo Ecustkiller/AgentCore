@@ -9,11 +9,11 @@ import type {
 import { LIST_FILES_CAP, LIST_FILES_MAX_DEPTH } from "./constants";
 import { fromErrno, fsErr, locate, realFail, realInside } from "./pathGuard";
 import { ensureReady } from "./roots";
+import { resolveWritable } from "./workspace/write";
 import {
   shouldSkipSystemWorkspaceEntry,
   shouldSkipWorkspaceEntry,
 } from "./workspaceIgnore";
-import { resolveWritable } from "./workspace/write";
 
 /**
  * 工作区扁平文件索引（共享走法）：广度优先逐层展开 `real` 根，受深度（`LIST_FILES_MAX_DEPTH`）

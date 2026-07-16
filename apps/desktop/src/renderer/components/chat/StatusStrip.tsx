@@ -1,6 +1,5 @@
-import { debatePreviewSubtitle } from "@/components/chat/debate/debateEntryCopy";
-import { PermissionPresetChip } from "@/components/chat/message-input/PermissionPresetBadge";
 import { TeamSynthesisPreviewLine } from "@/components/chat/TeamSynthesisPreviewLine";
+import { debatePreviewSubtitle } from "@/components/chat/debate/debateEntryCopy";
 import {
   isTeamSynthesizing,
   teamSynthesisPhaseLabel,
@@ -9,24 +8,13 @@ import {
 import { Badge, Button, IconButton as UiIconButton } from "@/components/ui";
 import { textLinkPrimary } from "@/components/ui/tone-presets";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import {
-  patchConversationCache,
-  useConversations,
-} from "@/hooks/useConversations";
 import { resolveTurnDisplayMoney } from "@/lib/cost";
 import { formatDisplayCost, formatDuration } from "@/lib/format";
-import { notifyError, notifySuccess } from "@/lib/toast";
-import {
-  PERMISSION_PRESET_LABELS,
-  isPermissionDowngrade,
-  setConversationPermissionPreset,
-} from "@/services/permissionPreset";
 import {
   lastUserMessageId,
   runRegenerate,
   runRetryFailed,
 } from "@/services/turns";
-import type { SidecarPermissionPreset } from "@shared/sidecar-contract";
 import {
   activeRuntime,
   getActiveRuntime,
@@ -133,40 +121,9 @@ function StripControls({
   const continuationCount = debate
     ? 0
     : execution.runs.filter((r) => r.continuesRunId != null).length;
-  const conversationId = useConversationStore((s) => s.currentConversationId);
-  const conversations = useConversations();
-  const permissionPreset: SidecarPermissionPreset = conversationId
-    ? (conversations.find((c) => c.id === conversationId)?.permissionPreset ??
-      "workspace")
-    : "workspace";
-
-  const switchPreset = async (next: SidecarPermissionPreset) => {
-    if (!conversationId || next === permissionPreset) return;
-    if (
-      !isPermissionDowngrade(permissionPreset, next) &&
-      !window.confirm(
-        next === "full_trust"
-          ? "升档到「完全信任」：AI 将与你同权执行命令。确定继续？"
-          : `升档到「${PERMISSION_PRESET_LABELS[next].short}」。确定继续？`,
-      )
-    ) {
-      return;
-    }
-    try {
-      const saved = await setConversationPermissionPreset(conversationId, next);
-      patchConversationCache(conversationId, { permissionPreset: saved });
-      notifySuccess(`已切换为「${PERMISSION_PRESET_LABELS[saved].short}」`);
-    } catch (e) {
-      notifyError(e, "切换权限模式失败");
-    }
-  };
 
   return (
     <>
-      <PermissionPresetChip
-        preset={permissionPreset}
-        onSwitch={(next) => void switchPreset(next)}
-      />
       {isRunning && (
         <StripIconButton
           icon={<Square size={15} />}
@@ -233,8 +190,7 @@ function RunningStrip({
 }: StatusStripProps) {
   const { completed, total } = execution.progress;
   const workers = workerProgress(execution);
-  const synthesizing =
-    !isDebate(execution) && isTeamSynthesizing(execution);
+  const synthesizing = !isDebate(execution) && isTeamSynthesizing(execution);
   const noteCount = execution.teamNotes.length;
   const runningTitle = isDebate(execution)
     ? debatePreviewSubtitle(execution)

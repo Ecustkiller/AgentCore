@@ -1,3 +1,4 @@
+import { hasLocalFiles } from "@/lib/capabilities";
 import {
   type IndexedEntry,
   buildDirListing,
@@ -5,7 +6,6 @@ import {
   loadFileIndex,
 } from "@/lib/fileIndex";
 import type { FileSource } from "@/lib/fileSource";
-import { hasLocalFiles } from "@/lib/capabilities";
 import { fetchMessageWindow } from "@/services/messages";
 import { searchAll } from "@/services/search";
 import {
@@ -26,11 +26,11 @@ import {
   detectMention,
   formatConversationContext,
 } from "./composerAttachments";
-import { resolveFolderFromIndexedEntry } from "./resolveAttachmentFolder";
 import {
   pickLocalFileAttachment,
   stageRootFileAttachment,
 } from "./resideAttachment";
+import { resolveFolderFromIndexedEntry } from "./resolveAttachmentFolder";
 import type { MenuMode } from "./types";
 
 export type AttachmentProjectHint = {

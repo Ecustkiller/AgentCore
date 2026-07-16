@@ -98,6 +98,7 @@ describe("CrossExamSection 质询报幕", () => {
   it("报幕含法槌身份壳 + 必答质询文案", () => {
     const cx: DebateCrossExamView = {
       targetKey: "pro",
+      stance: null,
       targetName: "支持方",
       targetColorVar: "var(--debate-pro)",
       exchanges: [],

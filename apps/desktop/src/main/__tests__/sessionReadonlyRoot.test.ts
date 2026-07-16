@@ -3,9 +3,9 @@
  * @vitest-environment node
  */
 import { describe, expect, it } from "vitest";
+import type { StoredRoot } from "../fs/roots";
 import { executeWorkspaceOp } from "../fs/workspace/dispatch";
 import { buildExternalEnvFromRoots } from "../fs/workspace/exec";
-import type { StoredRoot } from "../fs/roots";
 
 const readonlyRoot: StoredRoot = {
   id: "s1",

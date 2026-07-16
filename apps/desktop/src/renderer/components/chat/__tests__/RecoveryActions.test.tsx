@@ -20,8 +20,9 @@ vi.mock("@/stores/conversation", async () => {
   return {
     ...actual,
     useActiveGenerating: () => false,
-    useConversationStore: (sel: (s: { currentConversationId: string }) => unknown) =>
-      sel({ currentConversationId: "conv-1" }),
+    useConversationStore: (
+      sel: (s: { currentConversationId: string }) => unknown,
+    ) => sel({ currentConversationId: "conv-1" }),
     getActiveRuntime: () => ({
       messages: [
         {

@@ -8,13 +8,12 @@ from pathlib import Path
 import pytest
 
 from agentcore.demo_tape.binding import conversation_is_cloud, write_binding
-from agentcore.demo_tape.export import build_tape_events, build_tape_document, write_tape, load_tape
+from agentcore.demo_tape.export import build_tape_document, build_tape_events, load_tape, write_tape
 from agentcore.demo_tape.pacing import sleep_ms_for_gap
 from agentcore.demo_tape.schema import DEMO_TAPE_FRAME_KEY, is_demo_tape_frame, should_export_kind
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import EventSink, EventType, FinishReason
 from agentcore.runtime.suspension import TeamPreviewSuspension
-from agentcore.runtime.runs.plan import RunPlan
 from scripts.demo_tape_bind import build_parser
 
 
@@ -192,6 +191,166 @@ def test_export_intro_stays_after_prior_event():
         assert e["t_ms"] >= events[tool_i]["t_ms"]
     gaps = [events[i]["t_ms"] - events[i - 1]["t_ms"] for i in range(1, len(events))]
     assert all(g >= 0 for g in gaps)
+
+
+def test_export_places_reasoning_along_process_timeline():
+    """Captain reasoning bursts anchor to the process timeline: pre-pause thinking lands
+    before its tool / the case brief; wrap-up thinking lands after debate_result. Content
+    splits on the true段 boundary so the case brief stays whole before the card."""
+    rows = [
+        {
+            "seq": 0,
+            "kind": "run_started",
+            "payload": {"run_id": "cap", "kind": "captain"},
+            "ts": "2026-07-15T02:20:42.000Z",
+        },
+        {
+            "seq": 1,
+            "kind": "tool_use_start",
+            "payload": {"tool_call_id": "t1", "tool_name": "web_search", "run_id": "cap"},
+            "ts": "2026-07-15T02:20:43.000Z",
+        },
+        {
+            "seq": 2,
+            "kind": "tool_use_end",
+            "payload": {"tool_call_id": "t1", "tool_name": "web_search", "run_id": "cap"},
+            "ts": "2026-07-15T02:20:44.000Z",
+        },
+        {
+            "seq": 3,
+            "kind": "team_preview_required",
+            "payload": {
+                "checkpoint_id": "cp",
+                "form": "debate",
+                "sides": [{"key": "a"}],
+                "workers": [],
+            },
+            "ts": "2026-07-15T02:20:45.000Z",
+        },
+        {
+            "seq": 4,
+            "kind": "debate_round_started",
+            "payload": {"round": 1},
+            "ts": "2026-07-15T02:20:46.000Z",
+        },
+        {
+            "seq": 5,
+            "kind": "debate_result",
+            "payload": {"rounds": 1},
+            "ts": "2026-07-15T02:20:47.000Z",
+        },
+        # turn-level process timeline drives reasoning placement + content split
+        {
+            "seq": 10,
+            "kind": "process_reasoning",
+            "payload": {"kind": "reasoning", "text": "先搜索案件"},
+            "ts": None,
+        },
+        {
+            "seq": 11,
+            "kind": "process_tool",
+            "payload": {"kind": "tool", "tool_name": "web_search"},
+            "ts": None,
+        },
+        {
+            "seq": 12,
+            "kind": "process_reasoning",
+            "payload": {"kind": "reasoning", "text": "该不该组队辩论"},
+            "ts": None,
+        },
+        {
+            "seq": 13,
+            "kind": "process_content",
+            "payload": {"kind": "content", "text": "案情简介正文"},
+            "ts": None,
+        },
+        {
+            "seq": 14,
+            "kind": "process_team_preview",
+            "payload": {"kind": "team_preview"},
+            "ts": None,
+        },
+        {
+            "seq": 15,
+            "kind": "process_reasoning",
+            "payload": {"kind": "reasoning", "text": "辩论已收敛"},
+            "ts": None,
+        },
+        {
+            "seq": 16,
+            "kind": "process_content",
+            "payload": {"kind": "content", "text": "最终汇总正文"},
+            "ts": None,
+        },
+    ]
+    content = "案情简介正文" + "\n\n" + "最终汇总正文"
+    events = build_tape_events(
+        rows,
+        captain_content=content,
+        captain_reasoning="unused-fallback",
+        chunk_size=64,
+        chunk_gap_ms=10,
+    )
+
+    def concat(kind: str) -> str:
+        return "".join(
+            (e["payload"].get("delta") or "") for e in events if e["kind"] == kind
+        )
+
+    # Reasoning byte fidelity == process_reasoning concat, positioned (not one blob).
+    assert concat("reasoning_delta") == "先搜索案件该不该组队辩论辩论已收敛"
+    # Content split on the true boundary is lossless (intro = the whole case brief).
+    assert concat("content_delta") == content
+
+    kinds = [e["kind"] for e in events]
+    web_i = kinds.index("tool_use_start")
+    preview_i = kinds.index("team_preview_required")
+    debate_i = kinds.index("debate_result")
+    intro_i = kinds.index("content_delta")
+
+    def first_reasoning(needle: str) -> int:
+        return next(
+            i
+            for i, e in enumerate(events)
+            if e["kind"] == "reasoning_delta" and needle in (e["payload"].get("delta") or "")
+        )
+
+    # 检索思考在工具前；组队思考+案情简介在开工卡前；汇总思考在辩论结果之后。
+    assert first_reasoning("先搜索") < web_i
+    assert first_reasoning("组队") < intro_i < preview_i
+    assert first_reasoning("收敛") > debate_i
+
+
+def test_export_reasoning_fallback_without_process_timeline():
+    """No process_reasoning in the journal → captain_reasoning replays as one block
+    after debate_result (legacy behaviour, keeps old tapes exportable)."""
+    rows = [
+        {
+            "seq": 0,
+            "kind": "run_started",
+            "payload": {"run_id": "cap", "kind": "captain"},
+            "ts": "2026-07-15T02:20:42.000Z",
+        },
+        {
+            "seq": 1,
+            "kind": "debate_result",
+            "payload": {"rounds": 1},
+            "ts": "2026-07-15T02:20:47.000Z",
+        },
+    ]
+    events = build_tape_events(
+        rows, captain_reasoning="整段思考", chunk_size=64, chunk_gap_ms=10
+    )
+    kinds = [e["kind"] for e in events]
+    assert kinds.index("reasoning_delta") > kinds.index("debate_result")
+    assert (
+        "".join(
+            (e["payload"].get("delta") or "")
+            for e in events
+            if e["kind"] == "reasoning_delta"
+        )
+        == "整段思考"
+    )
 
 
 @pytest.mark.asyncio

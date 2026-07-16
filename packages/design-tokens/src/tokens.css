@@ -1,6 +1,10 @@
 /*
  * AgentCore semantic OKLCH tokens — single source for desktop (+ mobile mirrors
  * light values in mobile-light.css). Hue 255 = brand blue.
+ *
+ * Brand migration (方案 3 · 分步)：
+ * - Step 0 ✅ sidebar cool gray (hue 250)
+ * - Step 1–2 ↩ reverted — surfaces + primary back to pre-migration
  */
 :root {
   --background: oklch(1 0 0);
@@ -30,18 +34,19 @@
   --scrollbar-thumb: oklch(0.8 0.012 255 / 0.8);
   --scrollbar-thumb-hover: oklch(0.62 0.02 255 / 0.9);
 
-  --sidebar: oklch(0.98 0.013 255);
-  --sidebar-foreground: oklch(0.15 0.01 255);
+  /* Sidebar chrome: cool gray (hue 250, low chroma) — distinct from brand blue 255. */
+  --sidebar: oklch(0.97 0.004 250);
+  --sidebar-foreground: oklch(0.18 0.006 250);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: oklch(0.945 0.03 255);
+  --sidebar-accent: oklch(0.93 0.006 250);
   --sidebar-accent-foreground: oklch(0.5 0.17 255);
-  --sidebar-border: oklch(0.93 0.02 255);
+  --sidebar-border: oklch(0.9 0.005 250);
   --sidebar-ring: var(--primary);
   --sidebar-gradient: linear-gradient(
     180deg,
-    oklch(0.975 0.02 255),
-    oklch(0.998 0.003 255)
+    oklch(0.965 0.005 250),
+    oklch(0.985 0.002 255)
   );
 
   --syntax-keyword: oklch(0.5 0.18 300);
@@ -121,18 +126,19 @@
   --scrollbar-thumb: oklch(0.42 0.015 255 / 0.75);
   --scrollbar-thumb-hover: oklch(0.58 0.02 255 / 0.9);
 
-  --sidebar: oklch(0.17 0.013 255);
-  --sidebar-foreground: oklch(0.98 0.005 255);
+  /* Sidebar chrome: cool gray (matches light; hue 250). */
+  --sidebar: oklch(0.17 0.004 250);
+  --sidebar-foreground: oklch(0.96 0.003 250);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: oklch(0.24 0.03 255);
+  --sidebar-accent: oklch(0.24 0.006 250);
   --sidebar-accent-foreground: oklch(0.78 0.13 255);
-  --sidebar-border: oklch(0.25 0.02 255);
+  --sidebar-border: oklch(0.25 0.004 250);
   --sidebar-ring: var(--primary);
   --sidebar-gradient: linear-gradient(
     180deg,
-    oklch(0.17 0.02 255),
-    oklch(0.15 0.01 255)
+    oklch(0.175 0.005 250),
+    oklch(0.15 0.003 255)
   );
 
   --syntax-keyword: oklch(0.78 0.13 300);

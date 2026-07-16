@@ -1,7 +1,4 @@
-import {
-  type ExecutionPlan,
-  projectExecution,
-} from "@/stores/execution";
+import { type ExecutionPlan, projectExecution } from "@/stores/execution";
 import type { RunFrame } from "@/stores/execution";
 import { describe, expect, it } from "vitest";
 

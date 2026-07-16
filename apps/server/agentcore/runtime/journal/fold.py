@@ -8,7 +8,7 @@ from agentcore.runtime.events import _JOURNAL_SURFACE_TYPES, EventType, FinishRe
 from agentcore.runtime.facts import EXECUTION_ONLY_KINDS, FactKind, pre_pause_from_journal
 from agentcore.runtime.runs.types import RunKind
 
-from .entries import KIND_TURN_END, _PROCESS_PREFIX, _RUN_PROCESS_PREFIX
+from .entries import _PROCESS_PREFIX, _RUN_PROCESS_PREFIX, KIND_TURN_END
 
 if TYPE_CHECKING:
     from agentcore.llm.provider.protocol import LLMMessage
@@ -99,11 +99,12 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
     output lives in its ``message_final`` fact, from which :func:`_splice_synthetic_deltas`
     reconstructs one equivalent delta block per run before the terminal event.
 
-    挂起中冷启动重载 (G1): the pause path skips writing ``process_*`` / ``run_process_*``
-    tails, so when those lanes are absent this fold falls back to the last
+    挂起中冷启动重载 (G1): when progressive ``process_*`` / ``run_process_*`` are
+    absent (legacy pause frames), this fold falls back to the last
     ``turn_paused`` snapshot's ``process`` / ``run_processes`` (via
-    :func:`pre_pause_from_journal`). Completed turns with process entries keep those;
-    old journals without ``turn_paused`` stay empty on the process lanes.
+    :func:`pre_pause_from_journal`). New pauses flush process_* and leave those
+    snapshot fields empty; old journals without ``turn_paused`` stay empty
+    on the process lanes.
     """
     if not entries:
         return None

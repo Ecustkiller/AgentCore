@@ -8,8 +8,8 @@ import { resolveSidecarRoot } from "@/services/sidecarRouting";
 import { continueAfterDecisionViaSidecar } from "@/services/streamConversationViaSidecar";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { beginTurnPreflight } from "@/stores/conversation/turnPhaseActions";
-import { useInterruptedAfterDecisionStore } from "@/stores/interruptedAfterDecision";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
+import { useInterruptedAfterDecisionStore } from "@/stores/interruptedAfterDecision";
 import { isAbort, isTransportDrop } from "./helpers";
 import { rejoinLiveTurn } from "./recovery";
 
@@ -71,9 +71,7 @@ export async function runContinueAfterDecision(
   }
 
   store.clearError(conversationId);
-  useInterruptedAfterDecisionStore
-    .getState()
-    .remove(conversationId, messageId);
+  useInterruptedAfterDecisionStore.getState().remove(conversationId, messageId);
 
   const resumed = store.resumePausedAssistant(messageId, conversationId);
   if (!resumed) {

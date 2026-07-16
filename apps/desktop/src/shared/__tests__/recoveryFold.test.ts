@@ -1,9 +1,9 @@
+import { describe, expect, it } from "vitest";
 import {
   deriveInterruptedAfterDecision,
   hasColdGatePending,
   shouldRetainOpenForContinue,
 } from "../recoveryFold";
-import { describe, expect, it } from "vitest";
 
 describe("recoveryFold (D2)", () => {
   it("hasColdGatePending is true until matching resolved", () => {
@@ -90,9 +90,9 @@ describe("recoveryFold (D2)", () => {
     ).toBeNull();
     // Conservative retain: settlement + non-terminal → keep local journal even
     // when a later cold gate is pending (align Python OutboxStore.salvage).
-    expect(shouldRetainOpenForContinue({ finishReason: "paused", journal })).toBe(
-      true,
-    );
+    expect(
+      shouldRetainOpenForContinue({ finishReason: "paused", journal }),
+    ).toBe(true);
   });
 
   it("shouldRetainOpenForContinue is true for settled non-terminal, false when terminal", () => {
@@ -106,9 +106,9 @@ describe("recoveryFold (D2)", () => {
         },
       },
     };
-    expect(
-      shouldRetainOpenForContinue({ finishReason: null, journal }),
-    ).toBe(true);
+    expect(shouldRetainOpenForContinue({ finishReason: null, journal })).toBe(
+      true,
+    );
     expect(
       shouldRetainOpenForContinue({ finishReason: "paused", journal }),
     ).toBe(true);

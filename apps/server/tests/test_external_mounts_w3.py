@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agentcore.workspace import grant_store
 from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp
 from agentcore.workspace.external_mounts import (
     ExternalMount,
@@ -16,7 +17,6 @@ from agentcore.workspace.external_mounts import (
     sanitize_alias,
     uniquify_alias,
 )
-from agentcore.workspace import grant_store
 from agentcore.workspace.local import LocalWorkspace
 from agentcore.workspace.protocol import OutsideWorkspace, PathNotFound
 from agentcore.workspace.server import ServerWorkspace
@@ -37,7 +37,7 @@ def test_parse_external_path():
 
 
 def test_sanitize_and_uniquify_alias():
-    assert sanitize_alias("6月报表") 
+    assert sanitize_alias("6月报表")
     a = uniquify_alias("reports", {"reports"})
     assert a == "reports_2"
 

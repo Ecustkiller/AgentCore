@@ -18,6 +18,12 @@ from agentcore.runtime.debate import (
     RoundPolicy,
     RoundResult,
 )
+from agentcore.runtime.debate.events import account_moderator, moderator_plan_event
+from agentcore.runtime.debate.rounds import (
+    make_closing_runner,
+    make_cross_exam_runner,
+    make_round_runner,
+)
 from agentcore.runtime.debate.steer_queue import fold_steers, take_steers
 from agentcore.runtime.events import (
     EventSink,
@@ -27,12 +33,6 @@ from agentcore.runtime.events import (
     run_started,
 )
 from agentcore.runtime.plan_only import PlanOnlyAbortError
-from agentcore.runtime.debate.events import account_moderator, moderator_plan_event
-from agentcore.runtime.debate.rounds import (
-    make_closing_runner,
-    make_cross_exam_runner,
-    make_round_runner,
-)
 from agentcore.tools.builtin.debate.schema import (
     DEBATE_DESCRIPTION,
     DEBATE_OUTPUT_LIMIT,

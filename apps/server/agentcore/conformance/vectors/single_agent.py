@@ -365,6 +365,25 @@ def _reload_cursor_structure() -> list[SSEEvent]:
     ]
 
 
+def _mid_run_refresh_ceo_narration() -> list[SSEEvent]:
+    """运行中刷新（process 渐进持久化）：CEO 旁白→工具→旁白→交付，保序交织。
+
+    Attach / clear-then-fold 回放须还原同一 process 序；``messages.content`` 在交付轮
+    才累加终稿（向量里末段 content 即交付，前段旁白也在 content_delta 里——与 live 同构，
+    deliverable_only 裁剪是服务端 finalize 契约，不在本 fold 向量里模拟）。
+    """
+    return [
+        message_start("m1", conversation_id=_CONV),
+        reasoning_delta("先摸清案情。"),
+        content_delta("## 案情简介\nLV 诉茉莉奶白。"),
+        tool_use_start("tc1", "web_search", {"query": "LV 茉莉奶白"}),
+        tool_use_end("tc1", "web_search", success=True, output="找到关键报道。"),
+        content_delta("检索完毕，下面给出结论。"),
+        content_delta("\n\n## 结论\n建议启动辩论。"),
+        message_end(FinishReason.END_TURN, input_tokens=1800, output_tokens=400, cost=_COST),
+    ]
+
+
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "single_agent_text": ("单聊：思考+正文+总账，end_turn 完成", _single_agent_text),
     "single_agent_tool": ("单聊：思考→工具→正文（process 时间线）", _single_agent_tool),
@@ -388,5 +407,9 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "reload_cursor_structure": (
         "游标重连结构完整（P3）：全量 journal 回放 → 工具行+正文同在、无叠字",
         _reload_cursor_structure,
+    ),
+    "mid_run_refresh_ceo_narration": (
+        "运行中刷新：CEO 旁白→工具→旁白→交付 process 保序（process 渐进持久化）",
+        _mid_run_refresh_ceo_narration,
     ),
 }

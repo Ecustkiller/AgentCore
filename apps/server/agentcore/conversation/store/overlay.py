@@ -43,8 +43,16 @@ def overlay_message_fields(
     reasoning_content: str | None,
     segments: list[dict[str, Any]],
     usage: dict[str, Any] | None,
+    skip_captain_content: bool = False,
 ) -> tuple[str | None, str | None]:
-    """Return ``(content, reasoning)`` after applying captain channel overlays."""
+    """Return ``(content, reasoning)`` after applying captain channel overlays.
+
+    ``skip_captain_content``: when the journal already has ``process_*`` narration
+    **or** the turn is structured (tools / team / process lane), do **not** pour
+    ``captain:content`` into ``messages.content`` (deliverable_only — mid-run
+    refresh restores process from journal, not the content column). Prose-only
+    turns keep the segment accelerate / salvage path.
+    """
     if not should_overlay_stream_state(usage) or not segments:
         return content, reasoning_content
     by_ch = segments_by_channel(segments)
@@ -52,7 +60,7 @@ def overlay_message_fields(
     cap_reasoning = by_ch.get(CHANNEL_CAPTAIN_REASONING)
     out_content = content
     out_reasoning = reasoning_content
-    if cap_content:
+    if cap_content and not skip_captain_content:
         out_content = pick_monotonic_content(content, cap_content)
     if cap_reasoning:
         out_reasoning = pick_monotonic_content(reasoning_content, cap_reasoning)

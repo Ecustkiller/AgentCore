@@ -1,5 +1,8 @@
 import { getRuntime, useConversationStore } from "@/stores/conversation";
-import { allowsStreamingMutations, blocksStreamOpen } from "@/stores/conversation/turnPhase";
+import {
+  allowsStreamingMutations,
+  blocksStreamOpen,
+} from "@/stores/conversation/turnPhase";
 import { getTurnPhase } from "@/stores/conversation/turnPhaseActions";
 
 /**

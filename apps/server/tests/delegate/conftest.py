@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from agentcore.llm.provider.protocol import LLMChunk, TokenUsage, ToolCallDelta
 from agentcore.runtime.approvals import ApprovalGate, DelegationAuthorizationDecision
 from agentcore.runtime.events import EventSink
@@ -17,6 +19,20 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+
+
+@pytest.fixture(autouse=True)
+def _isolate_coordination_registry():
+    """The coordination session registry is module-global and tests share
+    execution_id="e" — a leaked active session makes later delegates silently
+    MERGE into it (队员追加) instead of starting fresh. Clear on both sides.
+    """
+    from agentcore.runtime.coordination.session import clear_active_coordination
+
+    clear_active_coordination()
+    yield
+    clear_active_coordination()
+
 
 CKPT_DAG = [
     {"id": "s1", "role": "研究员", "task": "调研", "checkpoint_after": True},

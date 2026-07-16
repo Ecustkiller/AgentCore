@@ -6,17 +6,18 @@
 
 import { conversationKeys } from "@/lib/queryKeys";
 import type { TeamPreviewDisplay } from "@/stores/conversation";
+import { type ExecutionPlan, useExecutionStore } from "@/stores/execution";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  type RenderResult,
   cleanup,
   fireEvent,
   render,
   screen,
-  type RenderResult,
 } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TeamPreviewCard } from "../TeamPreviewCard";
+import { GraphTeamPreview, TeamPreviewCard } from "../TeamPreviewCard";
 
 vi.mock("@/stores/disclosure", () => ({
   usePersistentDisclosure: (_key: string | null, initial: boolean) => {
@@ -62,7 +63,9 @@ function makePreview(
 
 function renderCard(ui: ReactElement): RenderResult {
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    defaultOptions: {
+      queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
+    },
   });
   client.setQueryData(conversationKeys.grouped, {
     folders: [],
@@ -73,8 +76,46 @@ function renderCard(ui: ReactElement): RenderResult {
   );
 }
 
+const MID = "msg-tp-debate-host";
+
+const debatePlan: ExecutionPlan = {
+  id: "exec-debate-host",
+  planType: "multi_agent",
+  taskSummary: "辩论",
+  agents: [
+    { id: "a", role: "正方", modelPreference: "strong" },
+    { id: "b", role: "反方", modelPreference: "strong" },
+  ],
+  runs: [
+    { id: "r1", agentId: "a", task: "立论", dependsOn: [] },
+    { id: "r2", agentId: "b", task: "反驳", dependsOn: [] },
+  ],
+};
+
+function makeDebatePreview(
+  overrides: Partial<TeamPreviewDisplay> = {},
+): TeamPreviewDisplay {
+  return makePreview({
+    primitive: "debate",
+    workers: [],
+    motion: "该不该上四天工作制？",
+    form: "debate",
+    sides: [
+      { key: "pro", name: "正方", stance: "应推广" },
+      { key: "con", name: "反方", stance: "暂缓" },
+    ],
+    maxRounds: 5,
+    thorough: true,
+    status: "resolved",
+    decision: "continue",
+    note: "",
+    ...overrides,
+  });
+}
+
 afterEach(() => {
   cleanup();
+  useExecutionStore.setState({ byId: {} });
   vi.restoreAllMocks();
 });
 
@@ -276,5 +317,110 @@ describe("TeamPreviewCard", () => {
     expect(screen.getByText("正方")).toBeTruthy();
     expect(screen.getByText("应推广")).toBeTruthy();
     expect(screen.getByText(/认真辩透 · 上限 5 轮/)).toBeTruthy();
+  });
+
+  it("debate resolved 但协作图未出现时独立卡仍兜底显示", () => {
+    useExecutionStore.getState().startExecution(debatePlan, MID);
+    // No run_started → all pending → teamHasStartedRuns false
+    renderCard(
+      <TeamPreviewCard preview={makeDebatePreview()} messageId={MID} />,
+    );
+    expect(
+      screen.getByRole("button", {
+        name: /已授权开赛 · 辩论已放行 · 2 方/,
+      }),
+    ).toBeTruthy();
+  });
+
+  it("debate resolved + 协作图已出现时独立卡隐藏", () => {
+    useExecutionStore.getState().startExecution(debatePlan, MID);
+    useExecutionStore.getState().recordFrame(
+      {
+        t: 1,
+        kind: "run_started",
+        runId: "r1",
+        agentId: "a",
+        parentRunId: null,
+        runKind: "agent",
+        continuesRunId: null,
+      },
+      MID,
+    );
+    const { container } = renderCard(
+      <TeamPreviewCard preview={makeDebatePreview()} messageId={MID} />,
+    );
+    expect(container.textContent).toBe("");
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("delegate resolved + 协作图已出现时独立卡隐藏", () => {
+    useExecutionStore.getState().startExecution(debatePlan, MID);
+    useExecutionStore.getState().recordFrame(
+      {
+        t: 1,
+        kind: "run_started",
+        runId: "r1",
+        agentId: "a",
+        parentRunId: null,
+        runKind: "agent",
+        continuesRunId: null,
+      },
+      MID,
+    );
+    const { container } = renderCard(
+      <TeamPreviewCard preview={makePreview()} messageId={MID} />,
+    );
+    expect(container.textContent).toBe("");
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("delegate resolved 但协作图未出现时独立卡仍兜底显示", () => {
+    useExecutionStore.getState().startExecution(debatePlan, MID);
+    renderCard(<TeamPreviewCard preview={makePreview()} messageId={MID} />);
+    expect(
+      screen.getByRole("button", {
+        name: /已授权开工 · 首波已放行 · 2 名队员/,
+      }),
+    ).toBeTruthy();
+  });
+});
+
+describe("GraphTeamPreview", () => {
+  it("debate：默认折叠，展开后显示辩题/轮次/双方/嘱咐", () => {
+    renderCard(
+      <GraphTeamPreview
+        preview={makeDebatePreview({ note: "最关心成本谁买单" })}
+      />,
+    );
+    const toggle = screen.getByRole("button", { name: /辩题 · 2 方/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("该不该上四天工作制？")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("该不该上四天工作制？")).toBeTruthy();
+    expect(screen.getByText(/认真辩透 · 上限 5 轮/)).toBeTruthy();
+    expect(screen.getByText("正方")).toBeTruthy();
+    expect(screen.getByText("应推广")).toBeTruthy();
+    expect(screen.getByText("反方")).toBeTruthy();
+    expect(screen.getByText("暂缓")).toBeTruthy();
+    expect(screen.getByText("最关心成本谁买单")).toBeTruthy();
+  });
+
+  it("delegate：默认折叠，展开后显示队员分工/嘱咐", () => {
+    renderCard(
+      <GraphTeamPreview preview={makePreview({ note: "先出竞品对照表" })} />,
+    );
+    const toggle = screen.getByRole("button", { name: /分工 · 2 名队员/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("研究员")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("研究员")).toBeTruthy();
+    expect(screen.getByText("调研竞品定价策略与公开资料")).toBeTruthy();
+    expect(screen.getByText("撰写员")).toBeTruthy();
+    expect(screen.getByText("基于调研写定价建议")).toBeTruthy();
+    expect(screen.getByText("先出竞品对照表")).toBeTruthy();
   });
 });

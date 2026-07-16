@@ -3,9 +3,9 @@
  * 云端 PUT），返回可塞进 PendingAttachment 的字段。绝对路径不进本模块状态。
  */
 
-import { getWorkspaceBinding } from "@/services/workspaceBinding";
 import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import { uploadWorkspaceFile } from "@/services/workspace";
+import { getWorkspaceBinding } from "@/services/workspaceBinding";
 import type {
   StageAttachmentDest,
   StagedAttachment,
@@ -162,9 +162,13 @@ export async function ensureAttachmentResident(
       dest,
     );
     if (!res.ok) return { ok: false, reason: res.reason };
+    const workspacePath = res.data.workspacePath;
+    if (typeof workspacePath !== "string") {
+      return { ok: false, reason: "附件落盘未返回工作区路径" };
+    }
     return {
       ok: true,
-      workspacePath: res.data.workspacePath!,
+      workspacePath,
       name: res.data.name,
       binary: res.data.binary,
       text: res.data.text,

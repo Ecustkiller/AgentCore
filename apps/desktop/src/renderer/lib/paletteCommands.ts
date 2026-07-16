@@ -1,7 +1,7 @@
+import { hasLocalFiles } from "@/lib/capabilities";
 import { startNewConversation } from "@/lib/newConversation";
 import { chord } from "@/lib/shortcuts";
 import { notifyError } from "@/lib/toast";
-import { hasLocalFiles } from "@/lib/capabilities";
 import { exportConversation } from "@/services/conversations";
 import {
   type DemoTapeSummary,

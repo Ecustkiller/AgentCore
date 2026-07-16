@@ -9,10 +9,7 @@ import {
   shouldSetGeneratingOnHydrate,
 } from "@/services/messages";
 import { loadRecovery } from "@/services/resume";
-import {
-  attachOnOpen,
-  settleCloudRunningAssistant,
-} from "@/services/turns";
+import { attachOnOpen, settleCloudRunningAssistant } from "@/services/turns";
 import {
   getRuntime,
   useActiveMessages,

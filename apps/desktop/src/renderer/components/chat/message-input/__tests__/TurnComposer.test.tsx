@@ -93,8 +93,7 @@ vi.mock("@/components/chat/message-input/useMentionMenu", () => ({
 // 直接 mock 这个 hook；其余 store 行为（setState / getState）保留真实实现。
 const genMock = vi.hoisted(() => ({ value: false }));
 vi.mock("@/stores/conversation", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/stores/conversation")>();
+  const actual = await importOriginal<typeof import("@/stores/conversation")>();
   return { ...actual, useActiveGenerating: () => genMock.value };
 });
 

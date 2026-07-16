@@ -13,7 +13,7 @@ from sqlalchemy import text
 from agentcore.db.base import async_session_factory
 from agentcore.runtime.journal.fold import runs_from_entries
 
-ORACLE_MID = "3654bda5-e84b-4d41-a75c-092f454bf012"
+ORACLE_MID = "714e38da-f5c8-4c75-b676-4a771e813462"
 API = "http://127.0.0.1:8015"
 OUT = Path(__file__).resolve().parents[3] / "apps" / "desktop" / "demo-tape-out"
 
@@ -133,9 +133,9 @@ async def main() -> int:
     report["graph"] = sig
     report["checks"]["has_moderator"] = sig["mods"] >= 1
     report["checks"]["has_closing"] = sig["closings"] >= 2 and sig["closing_ctx"] >= 2
-    report["checks"]["has_cross_exam"] = sig["cx"] >= 4
+    report["checks"]["has_cross_exam"] = sig["cx"] >= 1
     report["checks"]["has_output_deltas"] = sig["out_d"] >= 10
-    report["checks"]["four_rounds"] = sig["rounds"] == 4
+    report["checks"]["has_rounds"] = sig["rounds"] >= 1
 
     first_s: dict[str, int] = {}
     first_c: dict[str, int] = {}

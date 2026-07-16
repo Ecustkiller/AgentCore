@@ -1,9 +1,6 @@
 import { describeStreamError, streamErrorAction } from "@/lib/errors";
 import { loadLatestWindow } from "@/services/messages";
-import {
-  type ConversationRecovery,
-  loadRecovery,
-} from "@/services/resume";
+import { type ConversationRecovery, loadRecovery } from "@/services/resume";
 import { attachConversation } from "@/services/streamConversation";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { beginTurnPreflight } from "@/stores/conversation/turnPhaseActions";

@@ -62,6 +62,7 @@ const run = (
   escalations: [],
   process: [],
   ...over,
+  sideKey: over.sideKey ?? null,
 });
 
 const execution = (over: Partial<Execution>): Execution => ({

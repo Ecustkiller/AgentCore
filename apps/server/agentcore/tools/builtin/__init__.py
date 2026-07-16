@@ -3,7 +3,7 @@
 from typing import Literal
 
 from agentcore.config import settings
-from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.core.types import PermissionPreset, ToolApproval, ToolCategory
 from agentcore.tools.builtin.amend_note import AmendNoteTool
 from agentcore.tools.builtin.code_execute import CodeExecuteTool
 from agentcore.tools.builtin.code_search import CodeSearchTool
@@ -116,8 +116,6 @@ def build_worker_registry(
     ``permission_preset=observe`` withholds the entire execution class
     (``code_execute`` / ``test_run`` / ``terminal``) — read-only retrieval stays on.
     """
-    from agentcore.core.types import PermissionPreset
-
     location = backend.location if backend is not None else None
     include_execution = code_execution_enabled_for(backend)
     if permission_preset is PermissionPreset.OBSERVE:

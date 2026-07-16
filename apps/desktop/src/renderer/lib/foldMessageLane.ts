@@ -17,8 +17,8 @@ import type {
   ToolUseStartPayload,
 } from "@/types/events";
 import {
-  appendAskStep,
   appendApprovalStep,
+  appendAskStep,
   appendCheckpointStep,
   appendContentStep,
   appendDelegationAuthorizationStep,

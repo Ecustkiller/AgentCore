@@ -32,11 +32,8 @@ import {
 } from "./ask/AskUserFields";
 import { OrganizePlanBody } from "./ask/OrganizePlanBody";
 import { ProposalPickBody } from "./ask/ProposalPickBody";
-import {
-  parseRiskLabel,
-  RISK_SEVERITY_META,
-} from "./ask/parseRiskLabel";
 import { RiskAckBody } from "./ask/RiskAckBody";
+import { RISK_SEVERITY_META, parseRiskLabel } from "./ask/parseRiskLabel";
 
 /**
  * Inline ask_user card — the CEO paused the turn to ask the user. This is the ONE
@@ -245,12 +242,7 @@ export function AskUserCard({
     setSubmitting(decision);
     const selected =
       decision === "continue" && carriesSelected
-        ? collectAskSelected(
-            content,
-            ans.answers,
-            ans.otherOn,
-            ans.otherText,
-          )
+        ? collectAskSelected(content, ans.answers, ans.otherOn, ans.otherText)
         : [];
     const composed =
       noteOverride !== undefined

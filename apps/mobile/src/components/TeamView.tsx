@@ -377,9 +377,9 @@ function RunCard({
   const preview =
     run.status === "running"
       ? agent?.toolProgress
-        ? `生成 ${toolLabel(agent.toolProgress.toolName)}…`
+        ? `Composing ${toolLabel(agent.toolProgress.toolName)}…`
         : workerToolPhase
-          ? `${toolPhaseText(workerToolPhase.phase) ?? "处理中"} · ${toolLabel(workerToolPhase.toolName)}`
+          ? `${toolPhaseText(workerToolPhase.phase) ?? "Working"} · ${toolLabel(workerToolPhase.toolName)}`
           : lastLine(agent?.output)
       : run.outputSummary;
 
@@ -876,10 +876,10 @@ function RunToolRow({ call }: { call: RunToolCall }) {
   const detail = toolDetail(call.arguments);
   const status =
     call.status === "running"
-      ? "进行中"
+      ? "Running"
       : call.status === "error"
-        ? "失败"
-        : "完成";
+        ? "Failed"
+        : "Done";
   const hasBody = !!args || (call.result != null && call.result !== "");
   return (
     <div className={`tool tool-${call.status}`}>

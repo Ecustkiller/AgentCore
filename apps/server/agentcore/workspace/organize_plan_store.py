@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 _lock = threading.Lock()
-_plans: dict[str, "OrganizePlan"] = {}
+_plans: dict[str, OrganizePlan] = {}
 
 
 @dataclass

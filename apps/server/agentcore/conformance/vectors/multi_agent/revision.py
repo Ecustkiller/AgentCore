@@ -679,6 +679,8 @@ def _multi_agent_lead_subplan_scope_steer() -> list[SSEEvent]:
             assumption="暂按 X 推进",
             blocking=False,
             kind="scope",
+            # 固定 id 保 golden 稳定（缺省会随机 uuid，导出不幂等）。
+            escalation_id="esc-scope1",
         ),
         run_output_delta("sa", "sa", "已按 X 完成子调研"),
         run_completed(

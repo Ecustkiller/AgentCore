@@ -1,64 +1,24 @@
 /**
  * Trust-on-first-use for local project directories (P2 optional).
  *
- * User-level persistence in localStorage. When a local folder path has never
- * been trusted and is not a git working tree, callers may suggest ``observe``
- * or prompt once:「信任此目录？」.
+ * User-level persistence via the unified uiStorage layer (`agentcore:` 命名空间，
+ * preview 自动切内存后端). When a local folder path has never been trusted and
+ * is not a git working tree, callers may suggest ``observe`` or prompt once:
+ * 「信任此目录？」.
  */
 
-const STORAGE_KEY = "agentcore.trustedWorkspaceRoots.v1";
+import { uiGet, uiRemove, uiSet } from "@/lib/uiStorage";
 
-/** In-memory fallback for vitest / non-DOM hosts. */
-const memoryStore = new Map<string, string>();
-
-function storageGet(key: string): string | null {
-  try {
-    if (typeof localStorage !== "undefined") {
-      return localStorage.getItem(key);
-    }
-  } catch {
-    /* ignore */
-  }
-  return memoryStore.get(key) ?? null;
-}
-
-function storageSet(key: string, value: string): void {
-  try {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(key, value);
-      return;
-    }
-  } catch {
-    /* fall through */
-  }
-  memoryStore.set(key, value);
-}
-
-function storageRemove(key: string): void {
-  try {
-    if (typeof localStorage !== "undefined") {
-      localStorage.removeItem(key);
-    }
-  } catch {
-    /* ignore */
-  }
-  memoryStore.delete(key);
-}
+const STORAGE_KEY = "trustedWorkspaceRoots.v1";
 
 function readRoots(): string[] {
-  try {
-    const raw = storageGet(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((x): x is string => typeof x === "string");
-  } catch {
-    return [];
-  }
+  const parsed = uiGet<unknown>(STORAGE_KEY);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((x): x is string => typeof x === "string");
 }
 
 function writeRoots(roots: string[]): void {
-  storageSet(STORAGE_KEY, JSON.stringify([...new Set(roots)]));
+  uiSet(STORAGE_KEY, [...new Set(roots)]);
 }
 
 function normalizeRoot(path: string): string {
@@ -93,7 +53,7 @@ export function suggestObserveForUntrustedLocal(opts: {
 export function confirmTrustLocalDirectory(path: string): boolean {
   if (isWorkspaceRootTrusted(path)) return true;
   const ok = window.confirm(
-    `此本地目录尚未标记为可信。\n\n信任后，新会话可使用「开工授权」权限模式；否则建议保持「只观察」。\n\n信任此目录？`,
+    "此本地目录尚未标记为可信。\n\n信任后，新会话可使用「开工授权」权限模式；否则建议保持「只观察」。\n\n信任此目录？",
   );
   if (ok) trustWorkspaceRoot(path);
   return ok;
@@ -101,5 +61,5 @@ export function confirmTrustLocalDirectory(path: string): boolean {
 
 /** Test helper. */
 export function clearTrustedWorkspaceRootsForTests(): void {
-  storageRemove(STORAGE_KEY);
+  uiRemove(STORAGE_KEY);
 }

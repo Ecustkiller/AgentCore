@@ -135,8 +135,12 @@ async def test_ask_user_capture_assembles_turn_paused_with_checkpoint_marker() -
     assert snap.suspension_kind == "ask_user"
     assert snap.content == "气泡基底"
     assert snap.reasoning == "想A"
+    # Process timeline is journaled as process_* — not dual-written into turn_paused.
+    assert snap.process == []
     assert any(
-        s.get("kind") == "checkpoint" and s.get("checkpoint_id") == "cp-ask" for s in snap.process
+        e.get("kind") == "process_checkpoint"
+        and (e.get("payload") or {}).get("checkpoint_id") == "cp-ask"
+        for e in frame.journal_entries
     )
     assert snap.citations == [{"url": "https://a.example", "title": "A"}]
     assert snap.controller.get("post_delegate") is True
@@ -209,9 +213,14 @@ async def test_team_preview_capture_uses_final_content_and_marker_before_team() 
     assert snap.suspension_kind == "team_preview"
     assert snap.content == "开工前交付正文"
     assert paused_content == snap.content
-    kinds = [s.get("kind") for s in snap.process]
-    assert "team_preview" in kinds
-    assert kinds.index("team_preview") < kinds.index("team")
+    assert snap.process == []
+    assert any(e.get("kind") == "process_team_preview" for e in frame.journal_entries)
+    # Live lane still inserts before_last_team for in-memory order; journal appends
+    # the marker at pause time (after prior process_* facts).
+    assert any(
+        s.get("kind") == "team_preview" and s.get("checkpoint_id") == "cp-team"
+        for s in (sink.raw_process() or [])
+    )
 
 
 @pytest.mark.asyncio
@@ -241,10 +250,17 @@ async def test_plan_review_capture_includes_run_processes() -> None:
     snap = _last_turn_paused(frame)
     assert snap.suspension_kind == "plan_review"
     assert snap.content == "计划复核前正文"
-    assert snap.run_processes["w1"][0]["name"] == "search"
+    assert snap.run_processes == {}
+    assert snap.process == []
     assert any(
-        s.get("kind") == "plan_review" and s.get("checkpoint_id") == "cp-plan"
-        for s in snap.process
+        e.get("kind") == "run_process_tool"
+        and (e.get("payload") or {}).get("run_id") == "w1"
+        for e in frame.journal_entries
+    )
+    assert any(
+        e.get("kind") == "process_plan_review"
+        and (e.get("payload") or {}).get("checkpoint_id") == "cp-plan"
+        for e in frame.journal_entries
     )
 
 
@@ -274,13 +290,17 @@ async def test_multi_cycle_capture_joins_content_reasoning_and_process() -> None
     first = _last_turn_paused(frame1)
     assert first.content == "第一段正文"
     assert first.reasoning == "第一段思考"
+    assert first.process == []
 
-    # Simulate resume: inherit journal + seed prior process (batch-5 rehydration).
+    # Simulate resume: inherit journal + seed prior process from process_* (not turn_paused).
     inherited = list(frame1.journal_entries)
     log2 = TurnFactLog(inherited_entries=inherited)
     fl2 = current_fact_log.set(log2)
     sink2 = EventSink()
-    sink2.seed_process(list(first.process or []))
+    from agentcore.runtime.pipeline.resume.rehydrate import _process_lanes_from_journal
+
+    prior_process, _ = _process_lanes_from_journal(inherited)
+    sink2.seed_process(prior_process)
     sink2._process.append({"kind": "reasoning", "text": "第二段思考"})
     sink2._process.append({"kind": "content", "text": "第二段过程"})
     mirror2 = CaptainLoopMirror(
@@ -306,11 +326,17 @@ async def test_multi_cycle_capture_joins_content_reasoning_and_process() -> None
     # streamed_reasoning is live-only; prior reasoning comes from journal join.
     assert second.reasoning == join_segments("第一段思考", "第二段思考")
     assert paused_content == second.content
-    texts = [s.get("text") for s in second.process]
+    assert second.process == []
+    process_payloads = [
+        e.get("payload") or {}
+        for e in frame2.journal_entries
+        if str(e.get("kind") or "").startswith("process_")
+    ]
+    texts = [s.get("text") for s in process_payloads]
     assert "第一段过程" in texts
     assert "第二段过程" in texts
-    assert any(s.get("checkpoint_id") == "cp-1" for s in second.process)
-    assert any(s.get("checkpoint_id") == "cp-2" for s in second.process)
+    assert any(s.get("checkpoint_id") == "cp-1" for s in process_payloads)
+    assert any(s.get("checkpoint_id") == "cp-2" for s in process_payloads)
 
 
 @pytest.mark.asyncio
@@ -367,7 +393,7 @@ def test_build_turn_paused_fact_direct_ask_user_vs_other() -> None:
 
 
 @pytest.mark.asyncio
-async def test_paused_message_content_同源_with_prior_cycle() -> None:
+async def test_paused_message_content_same_origin_with_prior_cycle() -> None:
     """Paused message content (capture.paused_content) matches turn_paused across cycles."""
     fl_token = _bind_fact_log()
     prior = TurnPausedFact(

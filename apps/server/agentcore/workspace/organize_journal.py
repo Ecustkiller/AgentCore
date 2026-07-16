@@ -15,7 +15,7 @@ from typing import Any, Literal
 JournalOp = Literal["move", "mkdir", "delete"]
 
 _lock = threading.Lock()
-_journals: dict[str, "OrganizeJournal"] = {}
+_journals: dict[str, OrganizeJournal] = {}
 
 
 @dataclass

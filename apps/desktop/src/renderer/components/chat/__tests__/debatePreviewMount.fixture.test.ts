@@ -7,10 +7,7 @@ import {
   getRuntime,
   useConversationStore,
 } from "@/stores/conversation";
-import {
-  projectRuntime,
-  useExecutionStore,
-} from "@/stores/execution";
+import { projectRuntime, useExecutionStore } from "@/stores/execution";
 import { loadFixtures } from "@agentcore/protocol-conformance";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -35,7 +32,9 @@ describe("preview replay · InlineTeamGraph prerequisites", () => {
       expect.arrayContaining([expect.stringMatching(/^assistant:/)]),
     );
 
-    const assistant = [...rt.messages].reverse().find((m) => m.role === "assistant");
+    const assistant = [...rt.messages]
+      .reverse()
+      .find((m) => m.role === "assistant");
     expect(assistant).toBeTruthy();
     if (!assistant) return;
 
@@ -45,8 +44,9 @@ describe("preview replay · InlineTeamGraph prerequisites", () => {
       execRt,
       `execution.byId missing key=${key}; have=${Object.keys(useExecutionStore.getState().byId).join(",")}`,
     ).toBeTruthy();
+    if (!execRt) return;
 
-    const execution = projectRuntime(execRt!);
+    const execution = projectRuntime(execRt);
     expect(execution).toBeTruthy();
     if (!execution) return;
     expect(planCapabilities(execution.planType).showsTeamGraph).toBe(true);

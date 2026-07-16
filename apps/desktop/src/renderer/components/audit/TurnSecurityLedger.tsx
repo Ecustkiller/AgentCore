@@ -38,7 +38,9 @@ function actionLabel(event: AgentAuditEvent): string {
     return `${who}批准了 ${tool}`;
   }
   if (event.action === "permission.preset_changed") {
-    const from = presetLabel(event.detail?.previous) ?? String(event.detail?.previous ?? "?");
+    const from =
+      presetLabel(event.detail?.previous) ??
+      String(event.detail?.previous ?? "?");
     const to =
       presetLabel(event.detail?.permission_preset) ??
       String(event.detail?.permission_preset ?? "?");
@@ -50,7 +52,11 @@ function actionLabel(event: AgentAuditEvent): string {
       String(event.detail?.permission_preset ?? "?");
     return `本回合模式 · ${p}`;
   }
-  if (event.category === "tool" && event.target_type === "file" && event.target_ref) {
+  if (
+    event.category === "tool" &&
+    event.target_type === "file" &&
+    event.target_ref
+  ) {
     return `写入 ${event.target_ref}`;
   }
   if (event.action.startsWith("tool.")) {
@@ -98,7 +104,10 @@ export function bucketSecurityLedger(
         e.action === "tool.terminal"
       ) {
         runs.push(e);
-      } else if (e.target_type === "file" || e.action.startsWith("tool.file_")) {
+      } else if (
+        e.target_type === "file" ||
+        e.action.startsWith("tool.file_")
+      ) {
         writes.push(e);
       } else if (e.action === "tool.git" || e.action === "tool.str_replace") {
         writes.push(e);
@@ -121,7 +130,7 @@ function LedgerGroup({
   if (events.length === 0) return null;
   return (
     <div className="space-y-1.5">
-      <p className="text-[11px] font-medium text-muted-foreground">{title}</p>
+      <p className="text-xs font-medium text-muted-foreground">{title}</p>
       <ul className="space-y-1">
         {events.map((e) => {
           const outcome = OUTCOME_META[e.outcome] ?? OUTCOME_META.ok;

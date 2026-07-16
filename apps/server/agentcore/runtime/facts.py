@@ -401,8 +401,9 @@ class TurnFactLog:
 
     Append-only in emission order (insertion order == the journal ``seq``). During a
     turn each fact is also durably appended via :class:`~agentcore.runtime.journal.writer.TurnJournalWriter`
-    (emit-on-write); this log is the in-process read cache. At turn end only the
-    process / ``turn_end`` tail is appended separately.
+    (emit-on-write); this log is the in-process read cache. Process / run_process steps
+    are journaled progressively at semantic boundaries; at turn end only still-open
+    trailing steps + ``turn_end`` are appended (no full process dump).
     """
 
     def __init__(self, inherited_entries: list[dict] | None = None) -> None:

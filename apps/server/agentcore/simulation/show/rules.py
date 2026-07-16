@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from agentcore.core.types import new_id
-from agentcore.simulation.scenarios.show.cast import SHOW_AGENT_IDS
 from agentcore.simulation.scenarios.show.beats import beat_for
+from agentcore.simulation.scenarios.show.cast import SHOW_AGENT_IDS
 from agentcore.simulation.show.models import (
     EpisodeRecord,
     HeartPick,
@@ -127,7 +127,6 @@ def resolve_ceremony(
     # Affection shift: paired agent picks someone else.
     affection_events: list[tuple[str, str]] = []
     for p in picks:
-        partner = paired_partner(state, p.from_agent_id)
         # Partner check uses pairs *including* just-formed this night — affection only
         # if they were already paired *before* tonight's mutual (pre-existing bond).
         pre_existing = None
@@ -163,10 +162,9 @@ def resolve_ceremony(
                 state.zero_vote_streak[aid] = state.zero_vote_streak.get(aid, 0) + 1
             else:
                 state.zero_vote_streak[aid] = 0
-            if state.zero_vote_streak.get(aid, 0) >= 2:
-                if aid not in state.departed:
-                    state.departed.append(aid)
-                    departed_now.append(aid)
+            if state.zero_vote_streak.get(aid, 0) >= 2 and aid not in state.departed:
+                state.departed.append(aid)
+                departed_now.append(aid)
     else:
         for aid in cast:
             if aid not in zero_agents:

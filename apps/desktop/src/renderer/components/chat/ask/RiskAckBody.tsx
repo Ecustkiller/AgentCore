@@ -8,7 +8,7 @@ import type { AskOption } from "@/types/events";
 import { Check, Loader2, OctagonX, ShieldAlert } from "lucide-react";
 import type { AskUserContent } from "./AskUserFields";
 import type { useAskAnswer } from "./AskUserFields";
-import { parseRiskLabel, RISK_SEVERITY_META } from "./parseRiskLabel";
+import { RISK_SEVERITY_META, parseRiskLabel } from "./parseRiskLabel";
 
 export function RiskAckBody({
   content,

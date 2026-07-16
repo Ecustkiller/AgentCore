@@ -8,7 +8,6 @@ client walk against a running server see ``scripts/demo_tape_http_walk.py``.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 

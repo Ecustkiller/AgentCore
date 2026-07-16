@@ -1,6 +1,6 @@
+import { TurnSecurityLedger } from "@/components/audit/TurnSecurityLedger";
 import { Markdown } from "@/components/chat/Markdown";
 import { RunDetailBody } from "@/components/chat/detail/RunDetailBody";
-import { TurnSecurityLedger } from "@/components/audit/TurnSecurityLedger";
 import {
   CommandPanelBody,
   useCommandRegion,
@@ -13,7 +13,10 @@ import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { WorkspaceMode } from "@/components/workspace/WorkspacePanel";
 import { useTurnAudit } from "@/hooks/useTurnAudit";
-import { useActiveMessageContent, useConversationStore } from "@/stores/conversation";
+import {
+  useActiveMessageContent,
+  useConversationStore,
+} from "@/stores/conversation";
 import {
   type ExecutionRuntime,
   projectRuntime,

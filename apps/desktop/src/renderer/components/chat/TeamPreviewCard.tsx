@@ -1,9 +1,11 @@
+import { shouldHostPreviewInGraph } from "@/components/chat/debatePreviewPlacement";
 import { DecisionCard, DecisionCardIcon } from "@/components/ui";
 import { useConversations } from "@/hooks/useConversations";
 import { PERMISSION_PRESET_LABELS } from "@/services/permissionPreset";
 import type { TeamPreviewDisplay } from "@/stores/conversation";
 import { useConversationStore } from "@/stores/conversation";
 import { usePersistentDisclosure } from "@/stores/disclosure";
+import { useMessageExecution } from "@/stores/execution";
 import type { SidecarPermissionPreset } from "@shared/sidecar-contract";
 import {
   Ban,
@@ -27,8 +29,23 @@ import type { ReactNode } from "react";
  *
  * Defaults collapsed to a one-line conclusion; expand for plan details + note.
  * Branches on ``primitive``: delegate = 队员分工表; debate = 辩题 / 立场 / 轮次预算.
+ *
+ * Resolved + team already started: content hosts in {@link GraphTeamPreview}
+ * inside InlineTeamGraph (see {@link shouldHostPreviewInGraph}); this card
+ * returns null so the timeline does not keep a spare card slot.
  */
-export function TeamPreviewCard({ preview }: { preview: TeamPreviewDisplay }) {
+export function TeamPreviewCard({
+  preview,
+  messageId,
+}: {
+  preview: TeamPreviewDisplay;
+  /** Assistant message id — used to gate resolved embed into the graph. */
+  messageId?: string;
+}) {
+  const execution = useMessageExecution(messageId ?? null);
+  if (shouldHostPreviewInGraph(preview, execution?.runs)) {
+    return null;
+  }
   if (preview.status === "resolved") {
     return <ResolvedTeamPreview preview={preview} />;
   }
@@ -86,7 +103,7 @@ function summarySuffix(preview: TeamPreviewDisplay): string {
   return `${preview.workers.length} 名队员`;
 }
 
-function WorkerRows({ preview }: { preview: TeamPreviewDisplay }) {
+export function WorkerRows({ preview }: { preview: TeamPreviewDisplay }) {
   return (
     <div className="mt-2 space-y-1.5">
       {preview.workers.map((w) => (
@@ -116,7 +133,8 @@ function WorkerRows({ preview }: { preview: TeamPreviewDisplay }) {
   );
 }
 
-function DebateBody({ preview }: { preview: TeamPreviewDisplay }) {
+/** Debate motion / round budget / sides — shared by standalone card and graph header. */
+export function DebateBody({ preview }: { preview: TeamPreviewDisplay }) {
   const budget =
     preview.maxRounds > 0
       ? preview.thorough
@@ -152,6 +170,69 @@ function DebateBody({ preview }: { preview: TeamPreviewDisplay }) {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+function graphPreviewSummary(preview: TeamPreviewDisplay): string {
+  if (isDebate(preview)) {
+    const n = preview.sides.length;
+    return n > 0 ? `辩题 · ${n} 方` : "辩题";
+  }
+  const n = preview.workers.length;
+  return n > 0 ? `分工 · ${n} 名队员` : "分工";
+}
+
+/**
+ * Light collapsible block for InlineTeamGraph header — no DecisionCard shell.
+ * Debate → 辩题 / DebateBody; delegate → 分工 / WorkerRows. Default collapsed;
+ * expand reveals body + resolved note.
+ */
+export function GraphTeamPreview({
+  preview,
+}: {
+  preview: TeamPreviewDisplay;
+}) {
+  const [open, setOpen] = usePersistentDisclosure(
+    `team-preview-graph:${preview.id}`,
+    false,
+  );
+  const summary = graphPreviewSummary(preview);
+
+  return (
+    <div
+      className="border-t border-border px-4 py-2"
+      data-testid="graph-team-preview"
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-1.5 text-left"
+      >
+        <span className="min-w-0 flex-1 text-xs font-medium text-muted-foreground">
+          {summary}
+        </span>
+        {open ? (
+          <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
+        )}
+      </button>
+      {open && (
+        <>
+          {isDebate(preview) ? (
+            <DebateBody preview={preview} />
+          ) : (
+            <WorkerRows preview={preview} />
+          )}
+          {preview.note && (
+            <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-muted/50 px-2.5 py-1.5 text-xs text-foreground">
+              {preview.note}
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -215,7 +296,7 @@ function DormantTeamPreview({ preview }: { preview: TeamPreviewDisplay }) {
           disclosureKey={`team-preview:${preview.id}`}
           summary={summary}
         >
-          <p className="mb-2 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+          <p className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
             <Shield size={11} />
             当前权限：{PERMISSION_PRESET_LABELS[permissionPreset].short}
             {permissionPreset === "full_trust"

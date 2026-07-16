@@ -1,5 +1,5 @@
-import { dispatchSSEEvent } from "@/services/sse/dispatch";
 import { ensureStreamingAssistant } from "@/services/sse/contentBuffer";
+import { dispatchSSEEvent } from "@/services/sse/dispatch";
 import { stopConversation } from "@/services/stopTurn";
 import {
   beginTurnPreflight,
@@ -25,8 +25,8 @@ vi.mock("@/lib/toast", () => ({
   notifySuccess: vi.fn(),
 }));
 
-import { api } from "@/services/api";
 import { notifyError } from "@/lib/toast";
+import { api } from "@/services/api";
 
 const CID = "conv-turn-phase";
 const apiPost = vi.mocked(api.post);

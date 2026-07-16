@@ -15,7 +15,10 @@ export type CheckoutArchiveResult =
   | { ok: false; reason: "error"; message: string };
 
 /** 拒绝 zip 内含 `..` / 绝对路径的条目，防止写出目标目录外。 */
-export function safeJoinUnder(destAbs: string, entryPath: string): string | null {
+export function safeJoinUnder(
+  destAbs: string,
+  entryPath: string,
+): string | null {
   const normalized = entryPath.replace(/\\/g, "/").replace(/^\/+/, "");
   if (!normalized || normalized.includes("\0")) return null;
   const parts = normalized.split("/").filter((p) => p && p !== ".");

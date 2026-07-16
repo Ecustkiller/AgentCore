@@ -124,27 +124,7 @@ def build_tape_events(
         (i for i, e in enumerate(events) if e["kind"] == "debate_result"),
         None,
     )
-    intro, wrap = _split_captain_text(captain_content)
-
-    if captain_reasoning:
-        anchor_ms = (
-            int(events[debate_idx]["t_ms"])
-            if debate_idx is not None
-            else (int(events[-1]["t_ms"]) if events else 0)
-        )
-        reasoning_events = _delta_events(
-            "reasoning_delta",
-            captain_reasoning,
-            base_ms=anchor_ms + 50,
-            chunk_size=chunk_size,
-            chunk_gap_ms=chunk_gap_ms,
-        )
-        insert_at = (debate_idx + 1) if debate_idx is not None else len(events)
-        events[insert_at:insert_at] = reasoning_events
-        if preview_idx is not None and preview_idx >= insert_at:
-            preview_idx += len(reasoning_events)
-        if debate_idx is not None and debate_idx >= insert_at:
-            debate_idx += len(reasoning_events)
+    intro, wrap = _split_captain_content(captain_content, rows)
 
     if intro and preview_idx is not None:
         preview_ms = int(events[preview_idx]["t_ms"])
@@ -188,6 +168,17 @@ def build_tape_events(
         )
         insert_at = (debate_idx + 1) if debate_idx is not None else len(events)
         events[insert_at:insert_at] = wrap_events
+
+    # Captain reasoning (DERIVED): place each thinking burst at the timeline position
+    # it actually occurred, using the process timeline. Falls back to a single
+    # post-debate block for tapes without process reasoning.
+    events = _place_captain_reasoning(
+        events,
+        rows,
+        fallback_reasoning=captain_reasoning,
+        chunk_size=chunk_size,
+        chunk_gap_ms=chunk_gap_ms,
+    )
 
     _clamp_monotonic_t_ms(events)
     return events
@@ -257,6 +248,222 @@ def _split_captain_text(content: str) -> tuple[str, str]:
     if len(text) > 500:
         return text[:400], text[400:]
     return "", text
+
+
+_CAPTAIN_PROCESS_KINDS = (
+    "process_reasoning",
+    "process_content",
+    "process_tool",
+    "process_team_preview",
+    "process_team",
+)
+
+
+def _captain_content_split_point(rows: list[dict[str, Any]]) -> int | None:
+    """Character offset splitting pre-pause prose from post-debate prose.
+
+    Uses the process timeline: the total length of ``process_content`` seen before the
+    ``process_team_preview`` card is exactly where the pre-pause captain prose (e.g. the
+    case brief) ends in ``messages.content``. Returns ``None`` when there is no team
+    preview (nothing to split on) so callers fall back to the heuristic split.
+    """
+    steps = sorted(
+        (
+            {
+                "seq": r.get("seq") or 0,
+                "kind": str(r.get("kind") or ""),
+                "payload": dict(r.get("payload") or {}),
+            }
+            for r in rows
+            if str(r.get("kind") or "") in _CAPTAIN_PROCESS_KINDS
+        ),
+        key=lambda s: s["seq"],
+    )
+    total = 0
+    for step in steps:
+        if step["kind"] == "process_team_preview":
+            return total
+        if step["kind"] == "process_content":
+            total += len(str(step["payload"].get("text") or ""))
+    return None
+
+
+def _split_captain_content(content: str, rows: list[dict[str, Any]]) -> tuple[str, str]:
+    """Split captain prose into (intro before card, wrap after debate).
+
+    Prefers the exact process-timeline boundary (lossless: ``intro + wrap == content``);
+    falls back to :func:`_split_captain_text` when the timeline has no team preview.
+    """
+    text = content or ""
+    if not text:
+        return "", ""
+    point = _captain_content_split_point(rows)
+    if point is not None and 0 < point < len(text):
+        return text[:point], text[point:]
+    return _split_captain_text(text)
+
+
+def _captain_reasoning_segments(
+    rows: list[dict[str, Any]],
+) -> list[tuple[str, tuple[str, ...]]]:
+    """Ordered captain reasoning bursts + where each belongs, from the process timeline.
+
+    The turn-level process timeline (``process_*`` rows, no ``run_`` prefix) records the
+    captain's narrative in causal order — reasoning, tool, prose, team-preview card. Each
+    reasoning burst is anchored to whatever visible step immediately follows it:
+
+      ``("tool", <tool_name>)`` — reasoning that precedes a captain tool call
+      ``("intro",)``            — reasoning that precedes the pre-pause captain prose
+      ``("preview",)``          — reasoning that directly precedes the team-preview card
+      ``("wrap",)``             — reasoning produced after the pause (debate wrap-up)
+      ``("end",)``              — trailing reasoning with no following anchor
+    """
+    steps = [
+        {
+            "seq": r.get("seq") or 0,
+            "kind": str(r.get("kind") or ""),
+            "payload": dict(r.get("payload") or {}),
+        }
+        for r in rows
+        if str(r.get("kind") or "") in _CAPTAIN_PROCESS_KINDS
+    ]
+    steps.sort(key=lambda s: s["seq"])
+
+    segments: list[tuple[str, tuple[str, ...]]] = []
+    passed_preview = False
+    for i, step in enumerate(steps):
+        kind = step["kind"]
+        if kind == "process_team_preview":
+            passed_preview = True
+            continue
+        if kind != "process_reasoning":
+            continue
+        text = str(step["payload"].get("text") or "")
+        if not text:
+            continue
+        if passed_preview:
+            segments.append((text, ("wrap",)))
+            continue
+        anchor: tuple[str, ...] = ("end",)
+        for nxt in steps[i + 1 :]:
+            nk = nxt["kind"]
+            if nk == "process_reasoning":
+                continue
+            if nk == "process_tool":
+                anchor = ("tool", str(nxt["payload"].get("tool_name") or ""))
+            elif nk == "process_content":
+                anchor = ("intro",)
+            elif nk == "process_team_preview":
+                anchor = ("preview",)
+            else:
+                anchor = ("intro",)
+            break
+        segments.append((text, anchor))
+    return segments
+
+
+def _place_captain_reasoning(
+    events: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+    *,
+    fallback_reasoning: str,
+    chunk_size: int,
+    chunk_gap_ms: int,
+) -> list[dict[str, Any]]:
+    """Insert captain ``reasoning_delta`` at the timeline position each burst occurred.
+
+    Anchors come from :func:`_captain_reasoning_segments`. When the journal carries no
+    process reasoning (legacy tapes), falls back to a single block after ``debate_result``.
+    """
+    segments = _captain_reasoning_segments(rows)
+
+    preview_idx = next(
+        (i for i, e in enumerate(events) if e["kind"] == "team_preview_required"),
+        None,
+    )
+    debate_idx = next(
+        (i for i, e in enumerate(events) if e["kind"] == "debate_result"),
+        None,
+    )
+
+    if not segments:
+        if not fallback_reasoning:
+            return events
+        anchor_ms = (
+            int(events[debate_idx]["t_ms"])
+            if debate_idx is not None
+            else (int(events[-1]["t_ms"]) if events else 0)
+        )
+        block = _delta_events(
+            "reasoning_delta",
+            fallback_reasoning,
+            base_ms=anchor_ms + 50,
+            chunk_size=chunk_size,
+            chunk_gap_ms=chunk_gap_ms,
+        )
+        insert_at = (debate_idx + 1) if debate_idx is not None else len(events)
+        events[insert_at:insert_at] = block
+        return events
+
+    pre_limit = preview_idx if preview_idx is not None else len(events)
+    wrap_start_default = (debate_idx + 1) if debate_idx is not None else len(events)
+
+    def _first_content(lo: int, hi: int) -> int | None:
+        return next(
+            (i for i in range(lo, min(hi, len(events))) if events[i]["kind"] == "content_delta"),
+            None,
+        )
+
+    inserts: dict[int, list[dict[str, Any]]] = {}
+    cursor = 0
+    for text, anchor in segments:
+        if anchor[0] == "tool":
+            name = anchor[1]
+            idx = next(
+                (
+                    i
+                    for i in range(cursor, pre_limit)
+                    if events[i]["kind"] == "tool_use_start"
+                    and str((events[i]["payload"] or {}).get("tool_name") or "") == name
+                ),
+                None,
+            )
+            if idx is None:
+                idx = pre_limit
+        elif anchor[0] == "intro":
+            idx = _first_content(cursor, pre_limit)
+            if idx is None:
+                idx = pre_limit
+        elif anchor[0] == "preview":
+            idx = pre_limit
+        elif anchor[0] == "wrap":
+            idx = _first_content(wrap_start_default, len(events))
+            if idx is None:
+                idx = wrap_start_default
+        else:  # end
+            idx = len(events)
+        cursor = min(max(cursor, idx + 1), len(events))
+        if idx < len(events):
+            base_ms = int(events[idx - 1]["t_ms"]) if idx > 0 else int(events[idx]["t_ms"])
+        elif events:
+            base_ms = int(events[-1]["t_ms"])
+        else:
+            base_ms = 0
+        seg_events = _delta_events(
+            "reasoning_delta",
+            text,
+            base_ms=base_ms,
+            chunk_size=chunk_size,
+            chunk_gap_ms=chunk_gap_ms,
+        )
+        inserts.setdefault(idx, []).extend(seg_events)
+
+    rebuilt: list[dict[str, Any]] = []
+    for i in range(len(events)):
+        rebuilt.extend(inserts.get(i, []))
+        rebuilt.append(events[i])
+    rebuilt.extend(inserts.get(len(events), []))
+    return rebuilt
 
 
 def build_tape_document(

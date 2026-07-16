@@ -93,10 +93,7 @@ function overlayWorkerToolPhases(
 }
 
 /** Overlay journaled per-run process[] so reload interleaving matches live. */
-function overlayRunProcesses(
-  exec: Execution,
-  rt: ExecutionRuntime,
-): Execution {
+function overlayRunProcesses(exec: Execution, rt: ExecutionRuntime): Execution {
   const map = rt.runProcesses;
   if (!map || Object.keys(map).length === 0) return exec;
   let changed = false;

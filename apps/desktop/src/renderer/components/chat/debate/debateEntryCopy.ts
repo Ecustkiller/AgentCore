@@ -1,7 +1,4 @@
-import {
-  confidenceLabel,
-  confidencePill,
-} from "@/components/ui/tone-presets";
+import { confidenceLabel, confidencePill } from "@/components/ui/tone-presets";
 import type { Execution } from "@/stores/execution";
 import { tallyScores, toDebateModel } from "./model";
 

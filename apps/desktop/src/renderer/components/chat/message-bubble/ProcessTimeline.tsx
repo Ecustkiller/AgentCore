@@ -48,8 +48,14 @@ function formatProcessSummary(
   toolCount: number,
 ): string {
   const parts: string[] = [];
-  if (reasoningCount > 0) parts.push(`思考了 ${reasoningCount} 步`);
-  if (toolCount > 0) parts.push(`调用了 ${toolCount} 个工具`);
+  if (reasoningCount > 0) {
+    parts.push(
+      `Thought ${reasoningCount} step${reasoningCount === 1 ? "" : "s"}`,
+    );
+  }
+  if (toolCount > 0) {
+    parts.push(`Used ${toolCount} tool${toolCount === 1 ? "" : "s"}`);
+  }
   return parts.join(" · ");
 }
 
@@ -277,7 +283,7 @@ export function ProcessTimeline({
                   key="process-summary"
                   type="button"
                   onClick={toggleProcess}
-                  className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+                  className="inline-flex items-center gap-1 text-sm text-muted-foreground"
                 >
                   {processSummary}
                   <ChevronRight className="size-4 shrink-0" aria-hidden />
@@ -290,7 +296,7 @@ export function ProcessTimeline({
                 <button
                   type="button"
                   onClick={toggleProcess}
-                  className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+                  className="inline-flex items-center gap-1 text-sm text-muted-foreground"
                 >
                   {processSummary}
                   <ChevronDown className="size-4 shrink-0" aria-hidden />

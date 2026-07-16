@@ -148,9 +148,14 @@ def test_expand_rejects_non_object_args():
     assert errors and "playbook_args" in errors[0]
 
 
-def test_available_playbooks_lists_all_three():
+def test_available_playbooks_lists_all_registered():
     listing = available_playbooks()
-    assert set(PLAYBOOKS) == {"research_report", "build_feature", "compare_options"}
+    assert set(PLAYBOOKS) == {
+        "research_report",
+        "build_feature",
+        "compare_options",
+        "organize_folder",
+    }
     for name in PLAYBOOKS:
         assert name in listing
 
@@ -163,8 +168,15 @@ def test_every_playbook_expansion_builds_a_valid_run_plan():
         "research_report": {"topic": "T", "angles": ["a", "b"], "checkpoint": True},
         "build_feature": {"feature": "F", "stack": "S"},
         "compare_options": {"question": "Q", "options": ["A", "B", "C"]},
+        "organize_folder": {"task": "扫描下载文件夹并给出整理方案"},
     }
-    expected_nodes = {"research_report": 5, "build_feature": 3, "compare_options": 4}
+    expected_nodes = {
+        "research_report": 5,
+        "build_feature": 3,
+        "compare_options": 4,
+        "organize_folder": 1,
+    }
+    assert set(samples) == set(PLAYBOOKS)  # 名副其实的 every：新增 playbook 必须补样本
     for name, args in samples.items():
         tasks, errors = expand_playbook(name, args)
         assert errors == [], name

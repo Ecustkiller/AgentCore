@@ -7,6 +7,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agentcore.runtime.events.payloads.show import (
+    SimShowAffectionShiftPayload,
+    SimShowDeparturePayload,
+    SimShowEpisodeGatePayload,
+    SimShowHeartPickPayload,
+    SimShowPairFormedPayload,
+    SimShowRevealPayload,
+    SimShowZeroVoteAlertPayload,
+)
 from agentcore.simulation.scenarios.show.cast import (
     JIANGYU,
     LUYE,
@@ -26,15 +35,6 @@ from agentcore.simulation.show.orchestrator import (
     apply_day_positions,
     apply_night_positions,
     plan_episode,
-)
-from agentcore.runtime.events.payloads.show import (
-    SimShowAffectionShiftPayload,
-    SimShowDeparturePayload,
-    SimShowEpisodeGatePayload,
-    SimShowHeartPickPayload,
-    SimShowPairFormedPayload,
-    SimShowRevealPayload,
-    SimShowZeroVoteAlertPayload,
 )
 from agentcore.simulation.show.rules import (
     apply_scripted_picks,

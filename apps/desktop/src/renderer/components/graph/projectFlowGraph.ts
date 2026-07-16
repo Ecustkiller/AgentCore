@@ -511,9 +511,7 @@ export function projectFlowNodes({
     if (captainRun && captainStatus) {
       const captainPos = placed(captainRun.id);
       if (captainPos) {
-        const answerPreview = finalAnswer
-          ? headText(finalAnswer.content)
-          : "";
+        const answerPreview = finalAnswer ? headText(finalAnswer.content) : "";
         const synthPreview =
           !answerPreview && captainStatus === "running"
             ? (captainSynthesisPreview ?? "").trim()

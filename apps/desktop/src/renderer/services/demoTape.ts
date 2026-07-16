@@ -30,8 +30,12 @@ export async function fetchDemoTapeCatalog(): Promise<DemoTapeCatalog | null> {
 }
 
 /** Prepare: create cloud session + bind tape; do not start a turn. */
-export async function prepareDemoTape(tapeId: string): Promise<DemoTapePrepare> {
-  return api.post<DemoTapePrepare>("/v1/demo-tape/prepare", { tape_id: tapeId });
+export async function prepareDemoTape(
+  tapeId: string,
+): Promise<DemoTapePrepare> {
+  return api.post<DemoTapePrepare>("/v1/demo-tape/prepare", {
+    tape_id: tapeId,
+  });
 }
 
 /** Auto-start: create cloud session + bind + begin tape turn. */

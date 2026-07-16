@@ -8,7 +8,6 @@ from agentcore.simulation.scenarios.show.beats import (
     awkward_kind_for_seed,
     beat_for,
 )
-from agentcore.simulation.scenarios.show.cast import SHOW_AGENT_IDS
 from agentcore.simulation.scenarios.show.config import (
     SHOW_CONFIG,
     SHOW_DAY_REGIONS,
@@ -16,7 +15,6 @@ from agentcore.simulation.scenarios.show.config import (
 )
 from agentcore.simulation.show.models import EpisodeTickPlan, GatePhase, ShowSeasonState
 from agentcore.simulation.show.rules import active_cast, allowed_targets
-
 
 # Fixed phase fractions within one episode tick window (inclusive end).
 _GATE_ORDER: tuple[GatePhase, ...] = (

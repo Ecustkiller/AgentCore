@@ -171,9 +171,7 @@ export function handleMessageStreamEvent(
       if (!isTerminalPhase(getTurnPhase(conversationId))) {
         completeTurnPhase(
           conversationId,
-          getTurnPhase(conversationId) === "stopping"
-            ? "stopped"
-            : "completed",
+          getTurnPhase(conversationId) === "stopping" ? "stopped" : "completed",
         );
       }
       return true;

@@ -63,6 +63,11 @@ const fsApi: FsApi = {
   stageDroppedFile: async () => fail(),
   finalizeStagedAttachment: async () => fail(),
   consumeStagedBytes: async () => fail(),
+  checkoutArchive: async () => ({
+    ok: false,
+    reason: "error",
+    message: "web-preview",
+  }),
 };
 
 const sidecarApi: SidecarApi = {

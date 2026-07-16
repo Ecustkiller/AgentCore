@@ -9,7 +9,14 @@ import {
   exportWorkspaceZip,
 } from "@/services/workspace";
 import { useConversationStore } from "@/stores/conversation";
-import { Download, FolderDown, FolderOpen, History, Loader2, X } from "lucide-react";
+import {
+  Download,
+  FolderDown,
+  FolderOpen,
+  History,
+  Loader2,
+  X,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { FilesSection } from "./FilesSection";
 import { SnapshotsSection } from "./SnapshotsSection";

@@ -1,4 +1,4 @@
-import { me } from "@/api/auth";
+import { type User, me } from "@/api/auth";
 import { getTokens } from "@/api/client";
 import {
   type ChatMessageDetail,
@@ -22,6 +22,7 @@ import { shareOrDownloadFile } from "@/lib/share";
 import { clock } from "@/lib/time";
 import { usePolling } from "@/lib/usePolling";
 import { useStickScroll } from "@/lib/useStickScroll";
+import { ImAvatar, userAvatarPath } from "@/pages/im/ImAvatar";
 import { ArrowDown } from "lucide-react";
 // 消息线程 (/im/c/:chatId) — one human↔human thread. REST + polling (no SSE): the open
 // thread refetches the most-recent page every 4s and merges by id, so sends from the peer
@@ -59,7 +60,7 @@ export function ChatThreadPage() {
     (location.state as { chat?: ChatSummary } | null)?.chat ?? null;
 
   const [chat, setChat] = useState<ChatSummary | null>(initialChat);
-  const [myId, setMyId] = useState<string | null>(null);
+  const [meUser, setMeUser] = useState<User | null>(null);
   const [members, setMembers] = useState<Map<string, ChatParticipant>>(
     new Map(),
   );
@@ -88,14 +89,16 @@ export function ChatThreadPage() {
     chatId ?? null,
   );
 
-  // My identity (mine vs theirs alignment).
+  // My identity (mine vs theirs alignment + own avatar on sent bubbles).
   useEffect(() => {
     me()
-      .then((u) => setMyId(u.id))
+      .then((u) => setMeUser(u))
       .catch(() => {
         if (!getTokens()) navigate("/login", { replace: true });
       });
   }, [navigate]);
+
+  const myId = meUser?.id ?? null;
 
   // Chat summary fallback when opened via a deep link (no router state).
   useEffect(() => {
@@ -208,6 +211,8 @@ export function ChatThreadPage() {
               name: file.name,
               path: file.name,
               kind: "file",
+              // IM 上传路径只存 blob，不内联正文 —— 一律 binary（与桌面端语义一致）。
+              binary: true,
               truncated: false,
               workspace_path: res.path,
               size_bytes: res.size_bytes,
@@ -264,6 +269,10 @@ export function ChatThreadPage() {
 
   const title = chat ? chatTitle(chat) : "对话";
   const isDm = chat?.type === "dm";
+  const peerAvatarUrl =
+    chat?.avatar_url ?? (chat?.peer?.id ? userAvatarPath(chat.peer.id) : null);
+  const myAvatarUrl = meUser?.avatar_url ?? null;
+  const myAvatarName = meUser?.display_name || meUser?.username || "?";
 
   return (
     <div className="screen">
@@ -296,20 +305,39 @@ export function ChatThreadPage() {
           {loaded && messages.length === 0 && !error && (
             <p className="muted hint">还没有消息，发送第一条吧。</p>
           )}
-          {messages.map((m) => (
-            <MessageRow
-              key={m.id}
-              message={m}
-              mine={!!myId && m.sender_user_id === myId}
-              chatId={chatId ?? ""}
-              isGroup={!isDm}
-              senderName={
-                m.sender_user_id
-                  ? members.get(m.sender_user_id)?.display_name
-                  : undefined
-              }
-            />
-          ))}
+          {messages.map((m) => {
+            const mine = !!myId && m.sender_user_id === myId;
+            const member = m.sender_user_id
+              ? members.get(m.sender_user_id)
+              : undefined;
+            const senderName = member
+              ? member.display_name || member.username
+              : undefined;
+            const avatarName = mine
+              ? myAvatarName
+              : isDm
+                ? title
+                : (senderName ?? "?");
+            const avatarUrl = mine
+              ? myAvatarUrl
+              : isDm
+                ? peerAvatarUrl
+                : m.sender_user_id
+                  ? userAvatarPath(m.sender_user_id)
+                  : null;
+            return (
+              <MessageRow
+                key={m.id}
+                message={m}
+                mine={mine}
+                chatId={chatId ?? ""}
+                isGroup={!isDm}
+                senderName={senderName}
+                avatarName={avatarName}
+                avatarUrl={avatarUrl}
+              />
+            );
+          })}
         </div>
         {!atBottom && messages.length > 0 ? (
           <button
@@ -429,12 +457,16 @@ function MessageRow({
   chatId,
   isGroup,
   senderName,
+  avatarName,
+  avatarUrl,
 }: {
   message: ChatMessageDetail;
   mine: boolean;
   chatId: string;
   isGroup: boolean;
   senderName?: string;
+  avatarName: string;
+  avatarUrl?: string | null;
 }) {
   // Server-minted official notices / system cards render centered, not as a bubble.
   if (
@@ -447,24 +479,33 @@ function MessageRow({
   const attachments = message.attachments ?? [];
   return (
     <div className={`im-msg ${mine ? "mine" : "theirs"}`}>
-      {!mine && isGroup && senderName && (
-        <span className="im-sender">{senderName}</span>
-      )}
-      <div className="im-bubble">
-        {message.content}
-        {attachments.length > 0 && (
-          <div className="im-attachments">
-            {attachments.map((a, i) => (
-              <Attachment
-                key={a.workspace_path ?? `${a.name}-${i}`}
-                chatId={chatId}
-                attachment={a}
-              />
-            ))}
+      <div className="im-msg-row">
+        <ImAvatar
+          name={avatarName}
+          url={avatarUrl}
+          className="im-avatar im-msg-avatar"
+        />
+        <div className="im-msg-body">
+          {!mine && isGroup && senderName && (
+            <span className="im-sender">{senderName}</span>
+          )}
+          <div className="im-bubble">
+            {message.content}
+            {attachments.length > 0 && (
+              <div className="im-attachments">
+                {attachments.map((a, i) => (
+                  <Attachment
+                    key={a.workspace_path ?? `${a.name}-${i}`}
+                    chatId={chatId}
+                    attachment={a}
+                  />
+                ))}
+              </div>
+            )}
           </div>
-        )}
+          <span className="im-msg-time">{clock(message.created_at)}</span>
+        </div>
       </div>
-      <span className="im-msg-time">{clock(message.created_at)}</span>
     </div>
   );
 }

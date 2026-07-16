@@ -117,7 +117,8 @@ _DESTRUCTIVE_RULES: tuple[tuple[str, re.Pattern[str], str], ...] = (
             r"git\s+push\b[^\n;|&]*\b(?:main|master)\b[^\n;|&]*"
             r"(?:--force(?:-with-lease)?\b|(?<![-\w])-f(?![-\w]))"
         ),
-        "检测到疑似向 main/master 强制推送的命令（启发式兜底，并非完整拦截）。需人工确认后才能执行。",
+        "检测到疑似向 main/master 强制推送的命令（启发式兜底，并非完整拦截）。"
+        "需人工确认后才能执行。",
     ),
     (
         "destructive.shutdown",

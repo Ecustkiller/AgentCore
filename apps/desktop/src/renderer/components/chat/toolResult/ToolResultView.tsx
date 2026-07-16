@@ -84,11 +84,11 @@ function isFileWrite(d: ToolResultData): boolean {
 }
 
 /** A compact one-line peek for the collapsed row — display-aware so it reads as
- * 「3 条结果」/「退出码 1」rather than the first line of a JSON / "stdout:" blob. */
+ * 「3 results」/「exit 1」rather than the first line of a JSON / "stdout:" blob. */
 export function toolResultPeek(d: ToolResultData): string {
   if (isWebSearchDisplay(d.display)) {
     const n = d.display.results.length;
-    return n > 0 ? `${n} 条结果` : "无结果";
+    return n > 0 ? `${n} result${n === 1 ? "" : "s"}` : "No results";
   }
   if (isReadUrlDisplay(d.display)) {
     const title =
@@ -176,8 +176,7 @@ function WebSearchResult({ display }: { display: WebSearchDisplay }) {
  * {@link WebSearchResult} / {@link SourceCards} for the header and the bordered
  * header+body shell of {@link SkillConsultResult}. */
 function ReadUrlResult({ display }: { display: ReadUrlDisplay }) {
-  const title =
-    cleanSourceTitle(display.title) || display.site || display.url;
+  const title = cleanSourceTitle(display.title) || display.site || display.url;
   const body = (display.content ?? "").replace(/\n+$/, "");
   return (
     <div className="mt-1 overflow-hidden rounded-lg border border-border">

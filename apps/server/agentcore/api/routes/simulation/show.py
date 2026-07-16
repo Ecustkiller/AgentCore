@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 
 from agentcore.api.dependencies import AuthUser
 from agentcore.api.schemas.show import (

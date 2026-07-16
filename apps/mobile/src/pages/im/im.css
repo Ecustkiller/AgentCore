@@ -33,6 +33,7 @@
   color: var(--muted);
   background: var(--border);
   border-radius: 999px;
+  object-fit: cover;
 }
 
 .im-avatar.official {
@@ -117,7 +118,7 @@
 .im-msg {
   display: flex;
   flex-direction: column;
-  max-width: 85%;
+  max-width: 92%;
 }
 
 .im-msg.mine {
@@ -127,6 +128,37 @@
 
 .im-msg.theirs {
   align-self: flex-start;
+  align-items: flex-start;
+}
+
+.im-msg-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.im-msg.mine .im-msg-row {
+  flex-direction: row-reverse;
+}
+
+.im-msg-avatar {
+  width: 32px;
+  height: 32px;
+  font-size: 13px;
+  object-fit: cover;
+}
+
+.im-msg-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.im-msg.mine .im-msg-body {
+  align-items: flex-end;
+}
+
+.im-msg.theirs .im-msg-body {
   align-items: flex-start;
 }
 

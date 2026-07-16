@@ -259,6 +259,34 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     verdict: "impossible",
     reason: "同上 · 世界事件",
   },
+  "sim.show.affection_shift": {
+    verdict: "impossible",
+    reason: "AI 恋综观测仅桌面/Unity 客户端，手机无模拟面 (fold no-op)",
+  },
+  "sim.show.departure": {
+    verdict: "impossible",
+    reason: "同上 · 零票离场",
+  },
+  "sim.show.episode_gate": {
+    verdict: "impossible",
+    reason: "同上 · 期节点门",
+  },
+  "sim.show.heart_pick": {
+    verdict: "impossible",
+    reason: "同上 · 心动投票",
+  },
+  "sim.show.pair_formed": {
+    verdict: "impossible",
+    reason: "同上 · 互选配对",
+  },
+  "sim.show.reveal": {
+    verdict: "impossible",
+    reason: "同上 · 公布环节",
+  },
+  "sim.show.zero_vote_alert": {
+    verdict: "impossible",
+    reason: "同上 · 零票预警",
+  },
 };
 
 /** 锚 B · 桌面交互面（apps/desktop/src/renderer/components/chat 下每个 .tsx）→ 手机对等裁决。
@@ -562,6 +590,19 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   AskCommencePreviewPage: {
     verdict: "internal",
     reason: "桌面 ask commence 离线预览（开发自检），非用户产品面",
+  },
+  ConversationsPreviewPage: {
+    verdict: "internal",
+    reason:
+      "桌面会话管理页离线预览（#/preview/conversations 开发自检），非用户产品面",
+  },
+  "conversations/ConversationManageRow": {
+    verdict: "internal",
+    reason: "会话管理列表行渲染叶（ConversationsPage 拆件，非独立面）",
+  },
+  "conversations/ArchivedConversationManageRow": {
+    verdict: "internal",
+    reason: "已归档会话列表行渲染叶（ConversationsPage 拆件，非独立面）",
   },
   TurnDetailPage: {
     verdict: "simplified",

@@ -243,7 +243,7 @@ class LlmKeyService:
                 "服务端未配置加密主密钥，暂时无法保存 API Key，请联系管理员"
             )
         ciphertext = enc.encrypt(api_key.encode())
-        row = await self._repo.upsert(
+        await self._repo.upsert(
             user_id=user_id,
             api_key_enc=ciphertext,
             base_url=resolved_base_url,

@@ -10,8 +10,8 @@ import {
   fetchWithTimeout,
   tryRefresh,
 } from "@/services/api";
-import { clearDefaultPermissionPresetCache } from "@/services/permissionPreset";
 import { clearSidecarInference } from "@/services/inferenceToken";
+import { clearDefaultPermissionPresetCache } from "@/services/permissionPreset";
 import type { AuthUser } from "@/stores/auth";
 import type { components } from "@/types/api.generated";
 

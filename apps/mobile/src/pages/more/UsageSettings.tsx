@@ -192,7 +192,9 @@ function Dashboard({ summary }: { summary: UsageSummary }) {
                 }}
               >
                 <span>今日估算</span>
-                <span className="payroll-cost">{cny(todayEst, rate, true)}</span>
+                <span className="payroll-cost">
+                  {cny(todayEst, rate, true)}
+                </span>
               </div>
               <div
                 className="payroll-row"
@@ -203,7 +205,9 @@ function Dashboard({ summary }: { summary: UsageSummary }) {
                 }}
               >
                 <span>本月估算</span>
-                <span className="payroll-cost">{cny(monthEst, rate, true)}</span>
+                <span className="payroll-cost">
+                  {cny(monthEst, rate, true)}
+                </span>
               </div>
             </>
           )}

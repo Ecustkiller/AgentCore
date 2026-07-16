@@ -33,17 +33,13 @@ export function TeamSynthesisPreviewLine({
         )
         .map((r) => ({
           run_id: r.id,
-          role:
-            execution.agents.find((a) => a.id === r.agentId)?.role ?? r.id,
+          role: execution.agents.find((a) => a.id === r.agentId)?.role ?? r.id,
           summary: r.outputSummary as string,
         }))
-    : (preview?.workers.filter(
-        (w) => w.status !== "pending" && w.summary,
-      ) ?? []);
+    : (preview?.workers.filter((w) => w.status !== "pending" && w.summary) ??
+      []);
   const phaseLabel = synthesizing ? teamSynthesisPhaseLabel(execution) : "";
-  const headline = synthesizing
-    ? phaseLabel
-    : (preview?.headline ?? "");
+  const headline = synthesizing ? phaseLabel : (preview?.headline ?? "");
   const badge = synthesizing
     ? "生成汇总"
     : preview?.in_progress
@@ -74,9 +70,7 @@ export function TeamSynthesisPreviewLine({
   return (
     <div
       className={`mt-2 rounded-lg px-3 py-2 text-xs text-muted-foreground ${
-        synthesizing
-          ? "border border-primary/25 bg-primary/5"
-          : "bg-muted/60"
+        synthesizing ? "border border-primary/25 bg-primary/5" : "bg-muted/60"
       }`}
       data-testid="team-synthesis-preview"
       data-synthesizing={synthesizing ? "true" : "false"}

@@ -26,11 +26,11 @@ from agentcore.runtime.debate import (
     SideTurn,
     UserInterjection,
 )
+from agentcore.runtime.debate.prompt import debater_task, round_feedback
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.runs.types import RunPhase, RunState
 from agentcore.tools.builtin.debate import DebateTool
-from agentcore.runtime.debate.prompt import debater_task, round_feedback
 from agentcore.tools.builtin.debate.schema import parse_background, parse_sides
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry

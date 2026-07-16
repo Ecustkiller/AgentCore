@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,8 +12,8 @@ vi.mock("electron", () => ({
   clipboard: { writeText: vi.fn() },
 }));
 
-import { shell } from "electron";
 import type { WorkspaceOpResult } from "@shared/ipc-contract";
+import { shell } from "electron";
 import { type StoredRoot, executeWorkspaceOp } from "../fs-service";
 import { setRoot } from "../fs/roots";
 import { trashPath } from "../fs/shell";
@@ -45,9 +45,9 @@ describe("workspace listing hide system files", () => {
     await mkdir(join(dir, ".agentcore", "index"), { recursive: true });
     await writeFile(join(dir, ".agentcore", "index", "code_search.db"), "x");
     await writeFile(join(dir, "local.db"), "x");
-    const res = valOf(
-      await executeWorkspaceOp(root, "index_files", {}),
-    ) as { paths: string[] };
+    const res = valOf(await executeWorkspaceOp(root, "index_files", {})) as {
+      paths: string[];
+    };
     expect(res.paths).toEqual(["notes.md"]);
   });
 

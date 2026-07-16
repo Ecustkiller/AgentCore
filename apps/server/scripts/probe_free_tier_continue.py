@@ -228,7 +228,6 @@ async def _proxy(client: httpx.AsyncClient, token: str, prompt: str) -> dict[str
 
 
 async def main() -> int:
-    env = _load_dotenv()
     byok_uid = await _user_id(BYOK_USER)
     free_uid = await _user_id(FREE_USER)
     # Ensure free user override cleared

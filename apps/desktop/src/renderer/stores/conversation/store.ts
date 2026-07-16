@@ -19,10 +19,10 @@ import { notifyError } from "@/lib/toast";
 import { discardAllPendingChunks } from "@/services/sse/contentBuffer";
 import { discardPendingFrames } from "@/services/sse/execFrameBuffer";
 import { stopConversation } from "@/services/stopTurn";
-import type { TimelineMarkerDef } from "@/stores/interactions/registry";
 import { execRuntime, useExecutionStore } from "@/stores/execution";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { useInteractionStore } from "@/stores/interactions";
+import type { TimelineMarkerDef } from "@/stores/interactions/registry";
 import type {
   Citation,
   ContextBlockWire,
@@ -39,9 +39,9 @@ import {
   activeRuntime,
   lastAssistantProjectionId,
 } from "./runtime";
-import type { ConversationRuntime, MemoryUpdate, Message } from "./types";
 import type { TurnPhase } from "./turnPhase";
 import { armStopConfirmTimeout, isTerminalPhase } from "./turnPhase";
+import type { ConversationRuntime, MemoryUpdate, Message } from "./types";
 
 export interface ConversationState {
   currentConversationId: string | null;
@@ -199,10 +199,7 @@ export interface ConversationState {
   switchConversation: (id: string | null) => void;
   releaseBackgroundSlice: (conversationId: string) => void;
   setAbort: (a: AbortController | null, conversationId?: string | null) => void;
-  setTurnPhase: (
-    phase: TurnPhase,
-    conversationId?: string | null,
-  ) => void;
+  setTurnPhase: (phase: TurnPhase, conversationId?: string | null) => void;
   stopGeneration: () => void;
   setError: (
     message: string,

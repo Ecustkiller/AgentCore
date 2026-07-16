@@ -5,18 +5,18 @@
  * 云占位（OneDrive 按需下载等）在复制前检测，复制本身带短超时，避免 hydration 挂死。
  */
 
-import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { createReadStream, createWriteStream, promises as fs } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { promises as fs, createReadStream, createWriteStream } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
-import { BrowserWindow, app, dialog } from "electron";
 import type { FsResult } from "@shared/ipc-contract";
+import { BrowserWindow, app, dialog } from "electron";
 import { IMAGE_MIME, TEXT_PREVIEW_CAP } from "./constants";
 import { locate, realInside } from "./pathGuard";
-import { ensureReady, getRoot } from "./roots";
 import { sniffBinary } from "./preview";
+import { ensureReady, getRoot } from "./roots";
 
 const execFileAsync = promisify(execFile);
 
@@ -75,9 +75,7 @@ function dedupName(name: string, used: Set<string>): string {
     used.add(name);
     return name;
   }
-  const root = name.includes(".")
-    ? name.slice(0, name.lastIndexOf("."))
-    : name;
+  const root = name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : name;
   const ext = name.includes(".") ? name.slice(name.lastIndexOf(".")) : "";
   let i = 2;
   let candidate = `${root} (${i})${ext}`;
@@ -139,16 +137,17 @@ export async function isCloudPlaceholder(absPath: string): Promise<boolean> {
   }
 }
 
-async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+async function withTimeout<T>(
+  p: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       p,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`${label}_TIMEOUT`)),
-          ms,
-        );
+        timer = setTimeout(() => reject(new Error(`${label}_TIMEOUT`)), ms);
       }),
     ]);
   } finally {
@@ -177,18 +176,22 @@ async function resolveDestAbs(
   await ensureReady();
   const root = getRoot(dest.rootId);
   if (!root) {
-    return { ok: false, reason: "本地目录未授权或已移除", code: "unauthorized" };
+    return {
+      ok: false,
+      reason: "本地目录未授权或已移除",
+      code: "unauthorized",
+    };
   }
-  const sub = (dest.subpath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  const sub = (dest.subpath || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+|\/+$/g, "");
   const rel = sub
     ? `${sub}/${ATTACHMENTS_DIR}/${fileName}`
     : `${ATTACHMENTS_DIR}/${fileName}`;
   const loc = locate(dest.rootId, rel);
   if ("error" in loc) return loc.error;
   // 目标可能尚不存在——用词法路径 + 父目录 realInside 校验。
-  const parentRel = rel.includes("/")
-    ? rel.slice(0, rel.lastIndexOf("/"))
-    : "";
+  const parentRel = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
   if (parentRel) {
     const parentLoc = locate(dest.rootId, parentRel);
     if ("error" in parentLoc) return parentLoc.error;
@@ -314,7 +317,10 @@ async function writeToDest(
   entry: StagingEntry,
   dest: StageDest,
 ): Promise<FsResult<StagedAttachmentData>> {
-  const used = await listExistingAttachmentNames(dest.rootId, dest.subpath || "");
+  const used = await listExistingAttachmentNames(
+    dest.rootId,
+    dest.subpath || "",
+  );
   const fileName = dedupName(entry.name, used);
   const destRes = await resolveDestAbs(dest, fileName);
   if (!destRes.ok) return destRes;
@@ -455,7 +461,11 @@ export async function finalizeStagedAttachment(
 ): Promise<FsResult<StagedAttachmentData>> {
   const entry = staging.get(stagingId);
   if (!entry) {
-    return { ok: false, reason: "附件暂存已失效，请重新附加", code: "not_found" };
+    return {
+      ok: false,
+      reason: "附件暂存已失效，请重新附加",
+      code: "not_found",
+    };
   }
   const out = await writeToDest(entry, dest);
   if (out.ok) {
@@ -478,7 +488,11 @@ export async function consumeStagedBytes(
 ): Promise<FsResult<{ name: string; data: Uint8Array; binary: boolean }>> {
   const entry = staging.get(stagingId);
   if (!entry) {
-    return { ok: false, reason: "附件暂存已失效，请重新附加", code: "not_found" };
+    return {
+      ok: false,
+      reason: "附件暂存已失效，请重新附加",
+      code: "not_found",
+    };
   }
   try {
     const buf = await withTimeout(

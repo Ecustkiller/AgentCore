@@ -181,10 +181,7 @@ export const INTERACTION_ID_FIELD: Record<InteractionKind, string> =
 
 const REQUIRED_EVENT_TO_KIND = new Map<string, InteractionKind>();
 const RESOLVED_EVENT_TO_KIND = new Map<string, InteractionKind>();
-const TIMELINE_BY_PROCESS = new Map<
-  TimelineProcessKind,
-  InteractionKindDef
->();
+const TIMELINE_BY_PROCESS = new Map<TimelineProcessKind, InteractionKindDef>();
 
 for (const def of INTERACTION_REGISTRY) {
   const wire = INTERACTION_KIND_WIRE[def.kind];

@@ -83,10 +83,15 @@ def _merge_retry_billing(prior: RunState, current: RunState) -> RunState:
         merged_usage[key] = merged_usage.get(key, 0) + value
     merged_cost = dict(current.cost)
     for key, value in prior.cost.items():
-        if key == "currency":
+        # String annotations (currency / pricing_source / credential_source) are not
+        # summable — keep current's value, fall back to prior's when absent.
+        if isinstance(value, str):
             merged_cost.setdefault(key, value)
         else:
-            merged_cost[key] = merged_cost.get(key, 0) + int(value)
+            existing = merged_cost.get(key, 0)
+            if isinstance(existing, str):
+                continue
+            merged_cost[key] = int(existing) + int(value)
     return replace(current, usage=merged_usage, cost=merged_cost)
 
 

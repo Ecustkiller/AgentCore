@@ -15,6 +15,7 @@ from agentcore.runtime.events import (
     checkpoint_required,
     checkpoint_resolved,
     content_delta,
+    debate_round_started,
     message_end,
     message_start,
     plan_review_required,
@@ -22,6 +23,7 @@ from agentcore.runtime.events import (
     question_posted,
     reasoning_delta,
     run_completed,
+    run_output_delta,
     run_plan,
     run_started,
     team_preview_required,
@@ -31,6 +33,11 @@ from agentcore.runtime.events import (
 )
 
 from ._common import _CONV, _COST, _USAGE
+from .debate._builders import (
+    _moderator_agents_runs,
+    _pro_con_debater_agents,
+    _pro_con_debater_runs,
+)
 
 
 def _approval_paused() -> list[SSEEvent]:
@@ -411,6 +418,67 @@ def _debate_team_preview_finalized() -> list[SSEEvent]:
     ]
 
 
+def _debate_team_preview_resolved_continue() -> list[SSEEvent]:
+    """辩论开工卡放行后主持人循环已开赛（team_preview resolved + 协作图有 runs）。
+
+    对照 ``debate_team_preview_finalized``（pending）与 ``team_preview_resolved_continue``
+    （delegate resolved+started）：本向量停在首轮正反陈述进行中，不收场——前端可离线预览
+    「已开赛」协作图态。
+    """
+    cap, mod = "captain1", "debate_mod1"
+    pro_run, con_run = f"{mod}_r1_pro", f"{mod}_r1_con"
+    motion = "该不该上四天工作制？"
+    mod_agents, mod_runs = _moderator_agents_runs(mod, cap, f"主持正反辩论：{motion}")
+    debater_agents = _pro_con_debater_agents()
+    debater_runs = _pro_con_debater_runs(
+        mod,
+        pro_run,
+        con_run,
+        pro_task="论证应推广四天工作制",
+        con_task="论证暂缓推行四天工作制",
+    )
+    return [
+        *_debate_team_preview_finalized()[:-1],
+        team_preview_resolved(checkpoint_id="tp-debate", decision="continue"),
+        run_plan(
+            execution_id="exec1",
+            plan_type="debate",
+            task_summary=f"正反辩论：{motion}",
+            agents=mod_agents,
+            runs=mod_runs,
+        ),
+        run_started(mod, mod, parent_run_id=cap),
+        debate_round_started(
+            execution_id="exec1",
+            moderator_run_id=mod,
+            round_no=1,
+            focus="生产力与员工福祉的取舍",
+            cross_exam_enabled=True,
+            opening="这场要定的是该不该上四天工作制，先从产出与休息的权衡切入。",
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="debate",
+            task_summary="",
+            agents=debater_agents,
+            runs=debater_runs,
+        ),
+        run_started(pro_run, "d_pro", parent_run_id=mod),
+        run_output_delta(
+            pro_run,
+            "d_pro",
+            "正方：四天制可降低倦怠、提升专注产出，试点企业已有可量化对照。",
+        ),
+        run_started(con_run, "d_con", parent_run_id=mod),
+        run_output_delta(
+            con_run,
+            "d_con",
+            "反方：服务业与协作密集岗位难以压缩工时，仓促推广会抬高成本与排班摩擦。",
+        ),
+        # 无 message_end：回合仍在辩论中（status=running），协作图可见主持人+正反双方。
+    ]
+
+
 def _team_preview_resolved_continue() -> list[SSEEvent]:
     """团队预审放行后首波开跑到 end_turn。"""
     return [
@@ -501,6 +569,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         _decision_then_second_gate_then_kill,
     ),
     "debate_team_preview_finalized": ("辩论开工卡：主持人循环前挂起收口", _debate_team_preview_finalized),
+    "debate_team_preview_resolved_continue": (
+        "辩论开工卡：开赛后主持人+正反已 start（协作图可见）",
+        _debate_team_preview_resolved_continue,
+    ),
     "single_agent_checkpoint": ("单聊：检查点 ask_user(blocking) 在时间线原位落 checkpoint 标记 + 暂停", _single_agent_checkpoint),
     "single_agent_checkpoint_finalized": ("单聊：检查点收口即终止（②，checkpoint_required→message_end(paused)，单一冷路 resume）", _single_agent_checkpoint_finalized),
     "single_agent_checkpoint_resolved": ("单聊：检查点 ask_user(blocking) 经 resume 续跑（checkpoint_resolved 清挂起→跑到 end_turn）", _single_agent_checkpoint_resolved),

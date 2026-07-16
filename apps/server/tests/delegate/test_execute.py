@@ -513,7 +513,12 @@ def test_schema_exposes_playbook_params_and_relaxes_required():
     t = tool(Provider([]))
     params = t.schema.parameters
     props = params["properties"]
-    assert set(props["playbook"]["enum"]) == {"research_report", "build_feature", "compare_options"}
+    assert set(props["playbook"]["enum"]) == {
+        "research_report",
+        "build_feature",
+        "compare_options",
+        "organize_folder",
+    }
     assert "playbook_args" in props
     # tasks is no longer HARD-required (playbook is an alternative entry); runtime enforces XOR.
     assert "tasks" not in params.get("required", [])

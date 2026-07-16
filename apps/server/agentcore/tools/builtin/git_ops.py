@@ -16,12 +16,11 @@ from typing import Any
 
 from agentcore.core.text import truncate_head_tail
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
-
 from agentcore.runtime.safety_breaker import (
     git_forbidden_subcommands,
     git_protected_branches,
 )
+from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 
 _ALLOWED_SUBCOMMANDS = frozenset(
     {"status", "diff", "log", "add", "commit", "branch", "checkout"}

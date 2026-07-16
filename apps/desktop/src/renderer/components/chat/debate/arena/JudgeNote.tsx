@@ -32,9 +32,7 @@ export function JudgeNote({
         <ModeratorIdentity model={model} gavelSize={13} className="text-xs" />
         <Loader2 size={13} className="animate-spin shrink-0" />
         <span>
-          {pendingKind === "cross_exam"
-            ? "主持人正在拟质询…"
-            : "正在小结…"}
+          {pendingKind === "cross_exam" ? "主持人正在拟质询…" : "正在小结…"}
         </span>
       </div>
     );

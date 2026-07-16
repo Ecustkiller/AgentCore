@@ -358,7 +358,7 @@ function AgentNodeActivity({
     );
   }
   if (p.liveToolExec) {
-    const phaseLabel = toolPhaseText(p.liveToolExec.phase) ?? "处理中";
+    const phaseLabel = toolPhaseText(p.liveToolExec.phase) ?? "Working";
     return (
       <p className="mt-2 line-clamp-2 text-xs leading-snug text-primary/90">
         {phaseLabel} · {toolLabel(p.liveToolExec.toolName)}

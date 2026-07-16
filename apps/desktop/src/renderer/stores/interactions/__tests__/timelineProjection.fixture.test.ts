@@ -35,10 +35,7 @@ const TIMELINE_KINDS: InteractionKind[] = [
 ];
 
 /** Weak-form kinds (D5): marker required; row gated on resolved — not in strong card invariant. */
-const TRACE_KINDS: InteractionKind[] = [
-  "approval",
-  "delegation_authorization",
-];
+const TRACE_KINDS: InteractionKind[] = ["approval", "delegation_authorization"];
 
 /** Marker step id for a timeline interaction entry, per registry wiring. */
 function markerMatches(step: ProcessStep, kind: InteractionKind, id: string) {

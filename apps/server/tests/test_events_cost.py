@@ -39,7 +39,8 @@ def test_message_end_exposes_cache_split_and_cost():
     assert usage["cache_hit_tokens"] == 1_000_000
     assert usage["cache_miss_tokens"] == 1_000_000
     assert usage["input_tokens"] == 2_000_000
-    assert ev.payload["cost"] == cost
+    # Wire cost is normalized additively: pricing_source rides along (default curated).
+    assert ev.payload["cost"] == {**cost, "pricing_source": "curated"}
     assert ev.payload["rounds"] == 3
 
 
@@ -85,7 +86,7 @@ def test_run_completed_carries_role_model_usage_cost():
     assert ev.payload["role"] == "member"
     assert ev.payload["model"] == "deepseek-v4-pro"
     assert ev.payload["usage"] == usage
-    assert ev.payload["cost"] == cost
+    assert ev.payload["cost"] == {**cost, "pricing_source": "curated"}
 
 
 def test_run_completed_defaults_to_full_zeroed_shapes():
@@ -108,6 +109,7 @@ def test_run_completed_defaults_to_full_zeroed_shapes():
         "output": 0,
         "total": 0,
         "currency": "USD",
+        "pricing_source": "curated",
     }
 
 

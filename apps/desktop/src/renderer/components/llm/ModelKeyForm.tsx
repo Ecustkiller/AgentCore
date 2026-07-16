@@ -234,8 +234,8 @@ export function ModelKeyForm({
         <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
           <p className="text-xs font-medium text-foreground">单价卡（可选）</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            USD / 1M tokens。输入与输出成对填写后，用量页与回合成本可显示
-            ≈¥ 估算；全空则清除价卡。
+            USD / 1M tokens。输入与输出成对填写后，用量页与回合成本可显示 ≈¥
+            估算；全空则清除价卡。
           </p>
           <div className="mt-2 grid gap-2 sm:grid-cols-3">
             <label className="block">
@@ -282,7 +282,9 @@ export function ModelKeyForm({
           </div>
         </div>
         <label className="block">
-          <span className="text-xs text-muted-foreground">后台模型（可选）</span>
+          <span className="text-xs text-muted-foreground">
+            后台模型（可选）
+          </span>
           <input
             type="text"
             value={backgroundModel}

@@ -106,6 +106,7 @@ export const DEMO_DEBATE_MODEL: DebateModel = {
   stopReason: "converged",
   moderatorRunId: "moderator",
   narrativeFirst: true,
+  crossExamEnabled: false,
   rounds: DEMO_ROUNDS,
   brief: {
     leaning: "倾向加速派",

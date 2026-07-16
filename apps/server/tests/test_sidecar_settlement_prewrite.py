@@ -158,7 +158,7 @@ def test_recover_stale_claims_restores_without_settlement(tmp_path) -> None:
         "created_at": 0.0,
     }
     (paused / "m1.json.claimed").write_text(json.dumps(record), encoding="utf-8")
-    store = LocalPausedTurnStore(paused, outbox_base=outbox_dir)
+    LocalPausedTurnStore(paused, outbox_base=outbox_dir)
     assert (paused / "m1.json").is_file()
     assert not outbox_has_settlement_for_frame(
         outbox_dir,

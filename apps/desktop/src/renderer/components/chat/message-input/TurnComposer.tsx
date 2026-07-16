@@ -120,10 +120,7 @@ export function TurnComposer({
   const serverStatus = useServerHealthStore((s) => s.status);
   const serverUnhealthy = serverStatus === "offline";
   const resolvedPlaceholder = useMemo(() => {
-    if (
-      !isGenerating &&
-      isContinuableAssistant(lastMessage)
-    ) {
+    if (!isGenerating && isContinuableAssistant(lastMessage)) {
       return COMPOSER_CONTINUE_PLACEHOLDER;
     }
     return placeholder;

@@ -4,6 +4,7 @@ import {
   formatBindLocalFolderAnswer,
   pickAndBindLocalFolder,
 } from "@/lib/bindLocalFolder";
+import { hasLocalFiles } from "@/lib/capabilities";
 import {
   formatGrantOrganizeFolderAnswer,
   pickAndGrantOrganizeFolder,
@@ -12,7 +13,6 @@ import {
   formatGrantReadonlyFolderAnswer,
   pickAndGrantReadonlyFolder,
 } from "@/lib/grantReadonlyFolder";
-import { hasLocalFiles } from "@/lib/capabilities";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import type {
   AskAssumption,

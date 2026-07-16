@@ -14,8 +14,8 @@ import type { ProcessStep } from "@/types/events";
 import { Check, ChevronDown, ChevronRight, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
-  isReadUrlSourceGroup,
   ReadUrlSourceCollection,
+  isReadUrlSourceGroup,
 } from "./ReadUrlSourceCollection";
 import { ThinkingDots } from "./message-bubble/Thinking";
 import {
@@ -95,7 +95,7 @@ function WebSearchSkeleton() {
   );
 }
 
-/** 行尾指示（顶层工具行对齐「读取网页 · N 个来源」）：进行中脉冲点；否则失败打红✗，
+/** 行尾指示（顶层工具行对齐「Read page · N sources」）：进行中脉冲点；否则失败打红✗，
  *  顶层可展开行补一个折叠 chevron（open→ChevronUp / 收起→ChevronDown）明确可开合；
  *  组内明细子行仍用成功绿✓。顶层成功即只留 chevron，成功由「无红✗」隐含（与 read_url 组一致）。 */
 function ToolRowTail({
@@ -152,7 +152,7 @@ export function ToolLine({
    *  按 `${turnKey}:tool:${step.id}` 落 localStorage；缺省（如渲染测试）退化为会话内存态。 */
   turnKey?: string;
   /** 是否为「工具组展开后的缩进明细子行」。顶层孤立工具行（默认 false）走 header 规格
-   *  （text-xs·灰·不加粗·成功无✓），与思考过程/工具组同级不再突兀；组内子行（true）保留
+   *  （text-sm·灰·不加粗·成功无✓），与思考过程/工具组/过程摘要同级；组内子行（true）保留
    *  明细规格（text-sm·深色·加粗·成功绿✓），靠 pl-3 缩进与父摘要行区分层级。 */
   nested?: boolean;
 }) {
@@ -175,7 +175,7 @@ export function ToolLine({
   const suppressesPeek = PEEK_SUPPRESSED.has(step.tool_name);
   const elapsed = useRunningElapsed(running);
 
-  // Waiting-state hint (联网搜索前端展示优化): coarse phase (正在检索 / 排队中 / 改用备用引擎)
+  // Waiting-state hint (network search UX): coarse phase (Searching / Queued / Trying fallback)
   // plus a live elapsed timer, replacing the dead spinner. Empty at the very first instant
   // (no phase yet, <1s) — the pulsing dot + skeleton still convey life.
   const runningHint = running
@@ -183,8 +183,8 @@ export function ToolLine({
         .filter(Boolean)
         .join(" · ")
     : "";
-  // web_search 的「N 条结果」是元计数（类比 read_url 组的「N 个来源」）：成功时并入标题行、
-  // 不再另起一行 peek——顶层折叠态与「读取网页 · N 个来源」同构（单行 + 行尾 chevron）。
+  // web_search 的「N results」是元计数（类比 read_url 组的「N sources」）：成功时并入标题行、
+  // 不再另起一行 peek——顶层折叠态与「Read page · N sources」同构（单行 + 行尾 chevron）。
   const inlineCount =
     !nested &&
     step.tool_name === "web_search" &&
@@ -208,10 +208,12 @@ export function ToolLine({
               className={
                 nested
                   ? "text-sm text-foreground"
-                  : "text-xs text-muted-foreground"
+                  : "text-sm text-muted-foreground"
               }
             >
-              <span className={nested ? "font-medium" : undefined}>{label}</span>
+              <span className={nested ? "font-medium" : undefined}>
+                {label}
+              </span>
               {detail && (
                 <span className="ml-1.5 break-all text-muted-foreground">
                   {detail}
@@ -254,6 +256,16 @@ export function ToolLine({
   );
 }
 
+/** ≥2 consecutive `web_search` — flatten to top-level ToolLines (no outer group
+ * shell). Each search already carries query + result count on its own row; wrapping
+ * them in「Search web A · B」only adds a redundant disclosure layer (unlike
+ * read_url, which merges into one source collection). */
+function isWebSearchFlatGroup(
+  tools: Extract<ProcessStep, { kind: "tool" }>[],
+): boolean {
+  return tools.length >= 2 && tools.every((t) => t.tool_name === "web_search");
+}
+
 /** Collapsible group of consecutive tool lines (ProcessToolGroup pattern). */
 export function ToolLineGroup({
   tools,
@@ -280,6 +292,17 @@ export function ToolLineGroup({
         turnKey={turnKey}
         groupKey={groupKey}
       />
+    );
+  }
+  // Pure web_search runs: skip the outer group shell — each call is already a
+  // self-explanatory top-level row (query + inline result count).
+  if (isWebSearchFlatGroup(tools)) {
+    return (
+      <div className="space-y-2">
+        {tools.map((t) => (
+          <ToolLine key={t.id} step={t} turnKey={turnKey} />
+        ))}
+      </div>
     );
   }
   return (
@@ -322,14 +345,14 @@ function DefaultToolLineGroup({
       <Button
         variant="ghost"
         onClick={toggleExpanded}
-        className="h-auto w-full justify-start gap-2 px-0 py-0 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground"
+        className="h-auto w-full justify-start gap-2 px-0 py-0 text-sm text-muted-foreground hover:bg-transparent hover:text-foreground"
       >
         <span className="flex items-center gap-2">
           {running && <ThinkingDots />}
           <span className="min-w-0 truncate text-left">{summary}</span>
           {errorCount > 0 && (
             <Badge tone="destructive" className="shrink-0 font-normal">
-              {errorCount} 个失败
+              {errorCount} failed
             </Badge>
           )}
           {!running &&

@@ -27,6 +27,11 @@ from .escalation import (
     _multi_agent_ceo_arbitrate_escalate_via_user,
     _multi_agent_escalation,
 )
+from .interjection import (
+    _multi_agent_user_interjection_handled,
+    _multi_agent_user_interjection_queued,
+    _multi_agent_user_interjection_with_attachments,
+)
 from .revision import (
     _multi_agent_lead_subplan_bind_replan,
     _multi_agent_lead_subplan_scope_steer,
@@ -42,11 +47,6 @@ from .run_control import (
     _multi_agent_run_redirect_ignored,
     _multi_agent_run_skipped_cascade,
     _multi_agent_run_stop_cancels_workers,
-)
-from .interjection import (
-    _multi_agent_user_interjection_handled,
-    _multi_agent_user_interjection_queued,
-    _multi_agent_user_interjection_with_attachments,
 )
 from .team_notes import (
     _multi_agent_coordinate,

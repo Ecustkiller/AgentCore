@@ -60,9 +60,7 @@ def should_export_kind(kind: str) -> bool:
         return False
     if kind.startswith(_SKIP_KIND_PREFIXES):
         return False
-    if kind in PAUSE_RESOLVED_KINDS:
-        return False
-    return True
+    return kind not in PAUSE_RESOLVED_KINDS
 
 
 def parse_iso_ms(ts: str | None) -> int | None:

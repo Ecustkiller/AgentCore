@@ -2,6 +2,7 @@ import { getTokens } from "@/api/client";
 import { type ChatSummary, chatTitle, listChats } from "@/api/messaging";
 import { relativeTime } from "@/lib/time";
 import { usePolling } from "@/lib/usePolling";
+import { ImAvatar, userAvatarPath } from "@/pages/im/ImAvatar";
 // 消息 list (人际 IM 会话列表) — the human↔human inbox, separate from the AI 对话 home.
 //
 // messages.py is REST-only, so the list POLLS (every 10s + on regaining visibility) for
@@ -63,13 +64,16 @@ export function MessagesPage() {
 function ChatRow({ chat, onOpen }: { chat: ChatSummary; onOpen: () => void }) {
   const title = chatTitle(chat);
   const unread = chat.unread ?? 0;
+  const avatarUrl =
+    chat.avatar_url ??
+    (chat.type === "dm" && chat.peer?.id ? userAvatarPath(chat.peer.id) : null);
   return (
     <button type="button" className="im-row" onClick={onOpen}>
-      <span
-        className={`im-avatar${chat.type === "official" ? " official" : ""}`}
-      >
-        {chat.type === "official" ? "📣" : title.charAt(0).toUpperCase()}
-      </span>
+      {chat.type === "official" ? (
+        <span className="im-avatar official">📣</span>
+      ) : (
+        <ImAvatar name={title} url={avatarUrl} />
+      )}
       <span className="im-row-main">
         <span className="im-row-top">
           <span className="im-name">{title}</span>

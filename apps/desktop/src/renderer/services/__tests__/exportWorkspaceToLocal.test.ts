@@ -59,10 +59,9 @@ describe("exportWorkspaceToLocal", () => {
 
     const result = await exportWorkspaceToLocal("c1");
 
-    expect(apiPost).toHaveBeenCalledWith(
-      "/v1/conversations/c1/snapshots",
-      { label: "导出到本地" },
-    );
+    expect(apiPost).toHaveBeenCalledWith("/v1/conversations/c1/snapshots", {
+      label: "导出到本地",
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://test/v1/conversations/c1/snapshots/snap-1/download",
     );
@@ -92,9 +91,9 @@ describe("exportWorkspaceToLocal", () => {
     fetchMock.mockResolvedValue({
       blob: async () => new Blob([new Uint8Array([1])]),
     });
-    (window.fsApi.checkoutArchive as ReturnType<typeof vi.fn>).mockResolvedValue(
-      { ok: false, reason: "cancelled" },
-    );
+    (
+      window.fsApi.checkoutArchive as ReturnType<typeof vi.fn>
+    ).mockResolvedValue({ ok: false, reason: "cancelled" });
 
     const result = await exportWorkspaceToLocal("c1");
     expect(result).toEqual({ ok: false, reason: "cancelled" });

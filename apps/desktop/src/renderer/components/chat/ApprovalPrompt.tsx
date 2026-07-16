@@ -63,8 +63,10 @@ function toolLabel(name: string): string {
 
 function batchOpLine(item: Record<string, unknown>): string {
   const op = String(item.op ?? "").trim();
-  if (op === "move") return `move ${item.source ?? ""} → ${item.destination ?? ""}`;
-  if (op === "copy") return `copy ${item.source ?? ""} → ${item.destination ?? ""}`;
+  if (op === "move")
+    return `move ${item.source ?? ""} → ${item.destination ?? ""}`;
+  if (op === "copy")
+    return `copy ${item.source ?? ""} → ${item.destination ?? ""}`;
   if (op === "delete") {
     const perm = item.permanent ? " (永久)" : "";
     return `delete ${item.path ?? ""}${perm}`;
@@ -298,11 +300,13 @@ export function ApprovalCard({
               {JSON.stringify(otherArgs, null, 2)}
             </pre>
           )}
-          {expanded && !isCodeExecute && Object.keys(displayArgs).length > 0 && (
-            <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-card/70 p-2 font-mono text-xs text-foreground">
-              {JSON.stringify(displayArgs, null, 2)}
-            </pre>
-          )}
+          {expanded &&
+            !isCodeExecute &&
+            Object.keys(displayArgs).length > 0 && (
+              <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-card/70 p-2 font-mono text-xs text-foreground">
+                {JSON.stringify(displayArgs, null, 2)}
+              </pre>
+            )}
         </div>
       </div>
 

@@ -245,22 +245,21 @@ function ReceivedContext({ blocks }: { blocks: ContextBlockWire[] }) {
   );
 }
 
-/** 工具执行阶段进度 → 等待态文案 (联网前端展示优化): a running tool's coarse phase (from a
- *  transport-only `tool_use_progress` event, read live via extractToolPhases) as user-facing
- *  text — so a waiting slow tool reads「正在检索 / 正在抓取网页 / 正在执行」rather than a bare
- *「进行中」. Mirrors the desktop labels (各端全新建; chrome, not shared logic). Unknown phase →
- *  generic「处理中」. */
+/** Tool execution phase → waiting-state chrome (transport-only `tool_use_progress`,
+ *  read live via extractToolPhases) — so a slow tool reads「Searching / Fetching page /
+ *  Running」rather than a bare「Running」status. Mirrors desktop (各端全新建; chrome, not
+ *  shared logic). Unknown phase → generic「Working」. */
 const TOOL_PHASE_TEXT: Record<ToolPhase, string> = {
-  queued: "排队中",
-  querying: "正在检索",
-  fallback: "改用备用引擎",
-  fetching: "正在抓取网页",
-  reading: "正在提取正文",
-  executing: "正在执行",
-  blocked: "出网受限",
+  queued: "Queued",
+  querying: "Searching",
+  fallback: "Trying fallback",
+  fetching: "Fetching page",
+  reading: "Extracting",
+  executing: "Running",
+  blocked: "Network blocked",
 };
 const toolPhaseText = (phase: ToolPhase | undefined): string | null =>
-  phase ? (TOOL_PHASE_TEXT[phase] ?? "处理中") : null;
+  phase ? (TOOL_PHASE_TEXT[phase] ?? "Working") : null;
 
 /** Seconds a tool has been running, ticking client-side from when this row first saw `running`
  *  (≈ the tool_use_start instant) — a liveliness cue for a BLOCKING tool (web_search) whose
@@ -324,7 +323,7 @@ function groupToolRuns(steps: ProcessStep[]): TimelineNode[] {
 }
 
 /** Header summary for a folded tool group: per-category counts in first-seen order
- *  (「读取文件 6 · 编辑文件 2」), or each call's 名/查询 when a single-category run is ≤3. */
+ *  (「Read file 6 · Edit file 2」), or each call's name/query when a single-category run is ≤3. */
 function toolGroupSummary(tools: ToolStepData[]): string {
   const sameKind = tools.every((t) => t.tool_name === tools[0].tool_name);
   if (sameKind && tools.length <= 3) {
@@ -437,10 +436,7 @@ function ProcessTimeline({
           const t = hotTraces?.get(node.authorization_id);
           if (!t?.resolved) return null;
           return (
-            <div
-              key={`dauth-${node.authorization_id}`}
-              className="hot-trace"
-            >
+            <div key={`dauth-${node.authorization_id}`} className="hot-trace">
               ✓ {t.denied ? "已拒绝委派授权" : "已授权开工"}
             </div>
           );
@@ -491,11 +487,17 @@ function Reasoning({ text }: { text: string }) {
   );
 }
 
+/** ≥2 consecutive `web_search` — flatten (no outer <details>). Each search row already
+ *  shows query + count; mirroring desktop ToolLineGroup's web_search flat path. */
+function isWebSearchFlatGroup(tools: ToolStepData[]): boolean {
+  return tools.length >= 2 && tools.every((t) => t.tool_name === "web_search");
+}
+
 /** A folded run of ≥2 consecutive tool calls (前端UX设计.md §一B; the mobile mirror of the
  *  desktop ProcessToolGroup). A collapsed-by-default <details> — the same fold idiom as 思考
  *  (mobile has no streaming-aware auto-expand for either) — whose summary is the per-category
  *  count / file names plus any 失败 count; expands to the unchanged per-tool {@link ToolStep}
- *  rows, each still openable to its own result. */
+ *  rows, each still openable to its own result. Pure web_search runs skip the shell. */
 function ToolGroup({
   tools,
   toolPhases,
@@ -503,6 +505,15 @@ function ToolGroup({
   tools: ToolStepData[];
   toolPhases?: Map<string, ToolPhase>;
 }) {
+  if (isWebSearchFlatGroup(tools)) {
+    return (
+      <div className="tool-group-flat">
+        {tools.map((t) => (
+          <ToolStep key={t.id} step={t} phase={toolPhases?.get(t.id)} />
+        ))}
+      </div>
+    );
+  }
   const errorCount = tools.reduce(
     (n, t) => n + (t.status === "error" ? 1 : 0),
     0,
@@ -512,7 +523,7 @@ function ToolGroup({
       <summary>
         <span className="tool-group-summary">{toolGroupSummary(tools)}</span>
         {errorCount > 0 && (
-          <span className="tool-group-error">{errorCount} 个失败</span>
+          <span className="tool-group-error">{errorCount} failed</span>
         )}
       </summary>
       <div className="tool-group-body">
@@ -525,14 +536,14 @@ function ToolGroup({
 }
 
 const TOOL_STATUS: Record<ToolStepData["status"], string> = {
-  running: "进行中",
-  success: "完成",
-  error: "失败",
+  running: "Running",
+  success: "Done",
+  error: "Failed",
 };
 
-/** A tool call: 中文名 (+ its 参数 detail) · status, expandable to its full arguments and
- *  result. While running, the status shows the coarse 执行阶段 (正在检索 / 排队中 / 改用备用引擎,
- *  from the live `phase`) + an elapsed timer — a live waiting cue instead of a static「进行中」. */
+/** A tool call: English name (+ its arg detail) · status, expandable to its full arguments and
+ *  result. While running, the status shows the coarse phase (Searching / Queued / Trying fallback,
+ *  from the live `phase`) + an elapsed timer — a live waiting cue instead of a static「Running」. */
 function ToolStep({
   step,
   phase,

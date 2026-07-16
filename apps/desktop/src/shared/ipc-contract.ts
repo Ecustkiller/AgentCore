@@ -378,7 +378,5 @@ export interface FsApi {
   /** 取出暂存字节供云端 ``PUT …/workspace/files``（取出后清除暂存）。 */
   consumeStagedBytes(
     stagingId: string,
-  ): Promise<
-    FsResult<{ name: string; data: Uint8Array; binary: boolean }>
-  >;
+  ): Promise<FsResult<{ name: string; data: Uint8Array; binary: boolean }>>;
 }

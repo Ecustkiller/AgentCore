@@ -36,7 +36,7 @@ def test_mutual_pick_forms_pair():
 
 def test_zero_vote_streak_departure():
     state = new_season_state(seed=2)
-    # Ep1: everyone picks LUYE except LUYE picks SHENWAN → all but LUYE get votes? 
+    # Ep1: everyone picks LUYE except LUYE picks SHENWAN → all but LUYE get votes?
     # Simpler: two episodes where XIEHENG receives zero.
     apply_scripted_picks(
         state,

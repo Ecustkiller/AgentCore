@@ -9,7 +9,10 @@ import type {
   DebateCrossExamView,
 } from "../model";
 import { ModeratorIdentity } from "./ModeratorIdentity";
-import { type DebateArenaLayout, partitionSides } from "./debateLayoutPreference";
+import {
+  type DebateArenaLayout,
+  partitionSides,
+} from "./debateLayoutPreference";
 import { summarizeText } from "./parseSpeechArguments";
 
 const ANSWER_PREVIEW_LEN = 48;

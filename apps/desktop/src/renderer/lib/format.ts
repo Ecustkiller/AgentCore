@@ -62,6 +62,20 @@ function sameCalendarDay(a: Date, b: Date): boolean {
   );
 }
 
+/** 相对时间：「刚刚」/「N 分钟前」/「N 小时前」/「N 天前」。非法输入返回空串。 */
+export function timeAgo(date: string | Date): string {
+  const t = new Date(date).getTime();
+  if (Number.isNaN(t)) return "";
+  const ms = Date.now() - t;
+  const min = Math.floor(ms / 60_000);
+  if (min < 1) return "刚刚";
+  if (min < 60) return `${min} 分钟前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} 小时前`;
+  const d = Math.floor(hr / 24);
+  return `${d} 天前`;
+}
+
 /** 消息时刻 "HH:MM"（线程内日期由分隔条承担）。非法输入返回空串。 */
 export function formatMessageTimeOfDay(iso: string): string {
   const d = new Date(iso);
@@ -122,8 +136,7 @@ const NANO_PER_USD = 1_000_000_000;
  * BYOK 估算金额的轻量说明（tooltip / title）——与平台记账 ¥ 视觉分离，
  * 明确「非上游账单」。
  */
-export const COST_ESTIMATE_HINT =
-  "按社区价目/自填单价估算，非上游账单";
+export const COST_ESTIMATE_HINT = "按社区价目/自填单价估算，非上游账单";
 
 /**
  * 把整数 nano-USD 成本折算成人民币展示串（大众面，§7.2）。

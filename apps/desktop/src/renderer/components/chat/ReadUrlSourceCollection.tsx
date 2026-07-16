@@ -37,7 +37,7 @@ function sourcesFromTools(tools: ToolStep[]): Citation[] {
 
 /**
  * Merged view for a tool-group of ≥2 consecutive `read_url` calls: collapses to a bare
- *「读取网页 · N 个来源」header row (对齐工具组 / 思考过程的折叠态——折叠即收起细节，不再
+ *「Read page · N sources」header row (对齐工具组 / 思考过程的折叠态——折叠即收起细节，不再
  * 平铺来源 pills), expands into a SourceCards-aligned vertical list (index · favicon ·
  * title · domain · snippet). No inline page body — that stays on the single-`read_url`
  * card. Replaces ToolLineGroup's chevron so there is only one disclosure layer;
@@ -66,7 +66,7 @@ export function ReadUrlSourceCollection({
   );
   const running = tools.some((t) => t.status === "running");
   const count = tools.length;
-  const title = `读取网页 · ${count} 个来源`;
+  const title = `Read page · ${count} source${count === 1 ? "" : "s"}`;
 
   return (
     <div>
@@ -74,7 +74,7 @@ export function ReadUrlSourceCollection({
         variant="ghost"
         onClick={toggleExpanded}
         aria-expanded={expanded}
-        className="mb-1.5 h-auto w-full justify-start gap-1.5 px-0 py-0 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground"
+        className="mb-1.5 h-auto w-full justify-start gap-1.5 px-0 py-0 text-sm text-muted-foreground hover:bg-transparent hover:text-foreground"
       >
         <span className="flex items-center gap-1.5">
           {running ? (
@@ -85,7 +85,7 @@ export function ReadUrlSourceCollection({
           <span className="min-w-0 truncate text-left">{title}</span>
           {errorCount > 0 && (
             <Badge tone="destructive" className="shrink-0 font-normal">
-              {errorCount} 个失败
+              {errorCount} failed
             </Badge>
           )}
           {expanded ? (

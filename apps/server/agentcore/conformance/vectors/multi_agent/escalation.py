@@ -65,6 +65,8 @@ def _multi_agent_escalation() -> list[SSEEvent]:
             question="数据库选 Postgres 还是 MySQL？这关系到后续所有选型。",
             assumption="暂按 Postgres 推进",
             blocking=True,
+            # 固定 id 保 golden 稳定（缺省会随机 uuid，导出不幂等）。
+            escalation_id="esc1",
         ),
         run_output_delta("r1", "w1", "已按 Postgres 完成选型调研"),
         run_completed(

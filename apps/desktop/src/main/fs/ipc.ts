@@ -11,12 +11,12 @@ import {
 } from "@shared/ipc-contract";
 import { BrowserWindow, app, dialog, ipcMain } from "electron";
 import { isRecord, requireStringFields } from "../ipc-validate";
+import { checkoutArchive } from "./checkout";
 import {
   confirmOpenPath,
   grantSessionRun,
   requiresOpenConfirm,
 } from "./execGate";
-import { checkoutArchive } from "./checkout";
 import { readFile, readTextFile, writeTextFile } from "./preview";
 import {
   clearSessionRoots,
@@ -32,12 +32,12 @@ import {
 } from "./roots";
 import { copyPath, openWithDefaultApp, reveal, trashPath } from "./shell";
 import {
+  type StageDest,
   consumeStagedBytes,
   finalizeStagedAttachment,
   pickAndStageAttachment,
   stageFromAbsPath,
   stageFromRoot,
-  type StageDest,
 } from "./stageAttachment";
 import { copy, create, listDir, listFiles, move, remove, rename } from "./tree";
 import { closeWatchersForRoot, unwatchDir, watchDir } from "./watch";
@@ -126,19 +126,16 @@ export function registerFsIpc(): void {
   });
 
   // 云 scratch → 本地单向 checkout（§八.7）：弹目录 + 解压 zip，不登记根。
-  ipcMain.handle(
-    FS_CHANNELS.checkoutArchive,
-    async (_e, p: unknown) => {
-      if (!isRecord(p) || typeof p.archiveBase64 !== "string") {
-        return {
-          ok: false as const,
-          reason: "error" as const,
-          message: INVALID_ARGS,
-        };
-      }
-      return checkoutArchive(p.archiveBase64);
-    },
-  );
+  ipcMain.handle(FS_CHANNELS.checkoutArchive, async (_e, p: unknown) => {
+    if (!isRecord(p) || typeof p.archiveBase64 !== "string") {
+      return {
+        ok: false as const,
+        reason: "error" as const,
+        message: INVALID_ARGS,
+      };
+    }
+    return checkoutArchive(p.archiveBase64);
+  });
 
   ipcMain.handle(FS_CHANNELS.listRoots, async (): Promise<FsRoot[]> => {
     await ensureReady();

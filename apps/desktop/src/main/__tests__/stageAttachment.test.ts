@@ -1,7 +1,7 @@
 /**
  * 引用即驻留：主进程占位检测 + 二进制驻留 + 暂存/finalize（纯逻辑，不碰真实 OneDrive）。
  */
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,8 +12,7 @@ const { execFileMock, cloudAttrs } = vi.hoisted(() => {
   const cloudAttrs = { stdout: "Archive" };
   const custom = Symbol.for("nodejs.util.promisify.custom");
   const execFileMock = Object.assign(vi.fn(), {
-    [custom]: () =>
-      Promise.resolve({ stdout: cloudAttrs.stdout, stderr: "" }),
+    [custom]: () => Promise.resolve({ stdout: cloudAttrs.stdout, stderr: "" }),
   });
   return { execFileMock, cloudAttrs };
 });
@@ -32,6 +31,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
+import { type StoredRoot, setRoot } from "../fs/roots";
 import {
   ATTACH_MAX_BYTES,
   consumeStagedBytes,
@@ -39,7 +39,6 @@ import {
   isCloudPlaceholder,
   stageFromAbsPath,
 } from "../fs/stageAttachment";
-import { type StoredRoot, setRoot } from "../fs/roots";
 
 describe("stageAttachment", () => {
   let dir: string;
@@ -101,7 +100,9 @@ describe("stageAttachment", () => {
       expect(res.data.binary).toBe(true);
       expect(res.data.text).toBe("");
       expect(res.data.workspacePath).toBe("attachments/report.xlsx");
-      const onDisk = await readFile(join(destDir, "attachments", "report.xlsx"));
+      const onDisk = await readFile(
+        join(destDir, "attachments", "report.xlsx"),
+      );
       expect(Buffer.compare(onDisk, bytes)).toBe(0);
     } finally {
       await rm(destDir, { recursive: true, force: true });
@@ -160,12 +161,14 @@ describe("stageAttachment", () => {
     const staged = await stageFromAbsPath(src);
     expect(staged.ok).toBe(true);
     if (!staged.ok) return;
-    expect(staged.data.stagingId).toBeTruthy();
+    const stagingId = staged.data.stagingId;
+    expect(stagingId).toBeTruthy();
+    if (!stagingId) return;
 
     const destDir = await mkdtemp(join(tmpdir(), "stage-fin-"));
     setRoot({ id: "fin-root", name: "fin", absPath: destDir });
     try {
-      const fin = await finalizeStagedAttachment(staged.data.stagingId!, {
+      const fin = await finalizeStagedAttachment(stagingId, {
         rootId: "fin-root",
       });
       expect(fin.ok).toBe(true);
@@ -187,8 +190,11 @@ describe("stageAttachment", () => {
     const staged = await stageFromAbsPath(src);
     expect(staged.ok).toBe(true);
     if (!staged.ok) return;
+    const stagingId = staged.data.stagingId;
+    expect(stagingId).toBeTruthy();
+    if (!stagingId) return;
 
-    const consumed = await consumeStagedBytes(staged.data.stagingId!);
+    const consumed = await consumeStagedBytes(stagingId);
     expect(consumed.ok).toBe(true);
     if (!consumed.ok) return;
     expect(consumed.data.name).toBe("cloud.xlsx");
@@ -196,7 +202,7 @@ describe("stageAttachment", () => {
     expect(Buffer.from(consumed.data.data)).toEqual(bytes);
 
     // Second consume fails — staging cleared.
-    const again = await consumeStagedBytes(staged.data.stagingId!);
+    const again = await consumeStagedBytes(stagingId);
     expect(again.ok).toBe(false);
   });
 

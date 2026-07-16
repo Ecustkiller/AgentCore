@@ -285,6 +285,8 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
               name: file.name,
               path: file.name,
               kind: "file",
+              // IM 上传路径只存 blob，不内联正文 —— 一律 binary（与 AI 对话驻留语义一致）。
+              binary: true,
               truncated: false,
               workspace_path: res.path,
               size_bytes: res.size_bytes,

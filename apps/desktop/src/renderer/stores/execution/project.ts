@@ -1,10 +1,10 @@
-import type { DebateNarrativeRound, DebateResultPayload } from "@/types/events";
 import {
   appendContentStep,
   appendReasoningStep,
   appendReworkStep,
   dropTrailingContentSteps,
 } from "@/lib/processTimeline";
+import type { DebateNarrativeRound, DebateResultPayload } from "@/types/events";
 import type { RunFrame } from "./frames";
 import {
   type AgentState,

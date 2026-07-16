@@ -2,11 +2,11 @@ import { MessageInput } from "@/components/chat/MessageInput";
 import { DraftEmptyState } from "@/components/onboarding/DraftEmptyState";
 import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
 import { ONBOARDING_PREVIEW_SCENES } from "@/preview/onboardingScenes";
-import { FlaskConical } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
-import { useEffect } from "react";
 import { draftKeyFor, useComposerDraftStore } from "@/stores/composer";
 import { useConversationStore } from "@/stores/conversation";
+import { FlaskConical } from "lucide-react";
+import { useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 
 /**
  * Hidden preview (`#/preview/onboarding`) for first-run wizard + draft empty states.

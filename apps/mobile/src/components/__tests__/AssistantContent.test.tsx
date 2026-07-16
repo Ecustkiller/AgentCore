@@ -77,6 +77,7 @@ function makeRun(p: Partial<ProjectedRun> & { id: string }): ProjectedRun {
     checkpoint: null,
     receivedContext: [],
     escalations: [],
+    process: [],
     ...p,
   };
 }
@@ -127,7 +128,7 @@ describe("AssistantContent", () => {
     expect(screen.getByTestId("debate")).toBeTruthy();
   });
 
-  it("renders an inline tool step with its 中文 label, detail and status", () => {
+  it("renders an inline tool step with its English label, detail and status", () => {
     const process: ProcessStep[] = [
       {
         kind: "tool",
@@ -139,13 +140,13 @@ describe("AssistantContent", () => {
       },
     ];
     render(<AssistantContent content="" process={process} />);
-    expect(screen.getByText("搜索网页")).toBeTruthy();
+    expect(screen.getByText("Search web")).toBeTruthy();
     expect(screen.getByText("openai 新闻")).toBeTruthy();
-    expect(screen.getByText("完成")).toBeTruthy();
+    expect(screen.getByText("Done")).toBeTruthy();
   });
 
-  // 工具执行阶段进度 (联网搜索前端展示优化)
-  it("shows the live 执行阶段 text for a running web_search tool", () => {
+  // Tool execution phase (network search UX)
+  it("shows the live phase text for a running web_search tool", () => {
     const process: ProcessStep[] = [
       {
         kind: "tool",
@@ -163,12 +164,12 @@ describe("AssistantContent", () => {
         toolPhases={new Map([["t1", "querying"]])}
       />,
     );
-    // Phase text replaces the bare「进行中」(a timer may be appended once ≥1s elapses).
-    expect(screen.getByText(/正在检索/)).toBeTruthy();
-    expect(screen.queryByText("进行中")).toBeNull();
+    // Phase text replaces the bare "Running" (a timer may be appended once ≥1s elapses).
+    expect(screen.getByText(/Searching/)).toBeTruthy();
+    expect(screen.queryByText("Running")).toBeNull();
   });
 
-  it("falls back to 进行中 for a running tool with no known phase", () => {
+  it("falls back to Running for a running tool with no known phase", () => {
     const process: ProcessStep[] = [
       {
         kind: "tool",
@@ -180,7 +181,7 @@ describe("AssistantContent", () => {
       },
     ];
     render(<AssistantContent content="" process={process} />);
-    expect(screen.getByText("进行中")).toBeTruthy();
+    expect(screen.getByText("Running")).toBeTruthy();
   });
 
   it("renders the team graph for a multi-agent turn", () => {

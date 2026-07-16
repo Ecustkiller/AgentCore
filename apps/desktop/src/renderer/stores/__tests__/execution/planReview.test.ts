@@ -1,6 +1,10 @@
 import type { SSEEvent } from "@/types/events";
 import { describe, expect, it } from "vitest";
-import { type RunFrame, frameFromEvent, projectExecution } from "../../execution";
+import {
+  type RunFrame,
+  frameFromEvent,
+  projectExecution,
+} from "../../execution";
 import { plan, started } from "./fixtures";
 
 // 结构化挂起 2a (7.2A): a `checkpoint_after` pause folds into the graph as

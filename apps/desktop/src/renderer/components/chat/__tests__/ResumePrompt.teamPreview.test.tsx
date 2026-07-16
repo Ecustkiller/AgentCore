@@ -4,7 +4,13 @@
  * continue + 非空备注 = 嘱咐注入；debate 无「调整」；无 per_call 入口。
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ResumePrompt } from "../ResumePrompt";
 
@@ -24,8 +30,9 @@ vi.mock("@/lib/toast", () => ({
 const pendingRef: { current: unknown[] } = { current: [] };
 
 vi.mock("@/stores/conversation", () => ({
-  useConversationStore: (sel: (s: { currentConversationId: string }) => unknown) =>
-    sel({ currentConversationId: "c1" }),
+  useConversationStore: (
+    sel: (s: { currentConversationId: string }) => unknown,
+  ) => sel({ currentConversationId: "c1" }),
 }));
 
 vi.mock("@/stores/pausedTurns", () => ({
@@ -110,10 +117,9 @@ describe("ResumePrompt · team_preview delegate", () => {
 
   it("主按钮带非空备注发 continue（非 adjust）", () => {
     render(<ResumePrompt />);
-    fireEvent.change(
-      screen.getByPlaceholderText(/对全体队员的嘱咐/),
-      { target: { value: "  先做公开竞品  " } },
-    );
+    fireEvent.change(screen.getByPlaceholderText(/对全体队员的嘱咐/), {
+      target: { value: "  先做公开竞品  " },
+    });
     fireEvent.click(screen.getByText("授权并开工"));
     expect(submitInteraction).toHaveBeenCalledWith(
       expect.objectContaining({

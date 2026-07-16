@@ -45,6 +45,7 @@ const run = (id: string, agentId: string, status: RunStatus): RunNode => ({
   stance: null,
   group: null,
   round: 0,
+  sideKey: null,
   continuesRunId: null,
   continuationIndex: 0,
   revised: null,
