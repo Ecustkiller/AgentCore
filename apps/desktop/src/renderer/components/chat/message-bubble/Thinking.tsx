@@ -90,8 +90,8 @@ export function ThinkingPanel({
       <ThinkingHeader
         isStreaming={isStreaming}
         expanded={expanded}
-        streamingLabel="正在思考…"
-        doneLabel="思考过程"
+        streamingLabel="Thinking…"
+        doneLabel="Thought"
         onToggle={toggle}
       />
       {expanded && (

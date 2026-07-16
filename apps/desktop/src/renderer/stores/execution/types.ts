@@ -76,32 +76,32 @@ export const STANCE_META: Record<Stance, { label: string; short: string }> = {
   con: { label: "反方", short: "反" },
 };
 
-/** Tool name → 中文 label, shared by the team graph's live「正在生成」progress line
+/** Tool name → English action label, shared by the team graph's live「正在生成」progress line
  * (AgentNode) and the run-detail tool rows. A label-only twin of MessageBubble's
  * TOOL_META (which also couples a lucide icon, so it can't live in the store); keep
  * the two in sync. An unknown tool falls back to its raw name. */
 export const TOOL_LABELS: Record<string, string> = {
-  web_search: "搜索网页",
-  read_url: "读取网页",
-  grep: "检索代码",
-  code_execute: "执行代码",
-  file_read: "读取文件",
-  file_write: "写入文件",
-  file_append: "追加文件",
-  file_list: "列出目录",
-  str_replace: "编辑文件",
-  file_delete: "删除文件",
-  file_move: "移动文件",
-  file_copy: "复制文件",
-  mkdir: "创建目录",
-  file_batch: "批量文件操作",
+  web_search: "Search web",
+  read_url: "Read page",
+  grep: "Grep code",
+  code_execute: "Run code",
+  file_read: "Read file",
+  file_write: "Write file",
+  file_append: "Append file",
+  file_list: "List dir",
+  str_replace: "Edit file",
+  file_delete: "Delete file",
+  file_move: "Move file",
+  file_copy: "Copy file",
+  mkdir: "Make dir",
+  file_batch: "Batch files",
   // CEO captain tools (surfaced by the bubble's tool_progress / process timeline).
-  delegate: "委派任务",
-  ask_user: "向你确认",
-  consult_skill: "查阅能力",
-  consult_memory: "查阅记忆",
+  delegate: "Delegate",
+  ask_user: "Ask you",
+  consult_skill: "Consult skill",
+  consult_memory: "Consult memory",
   // Worker-only upward channel (build_worker_registry); surfaces in run detail.
-  escalate: "上报问题",
+  escalate: "Escalate",
   // 团队便签墙 (workers broadcast to concurrent siblings) + AI 协作白板 (board-bound turns).
   post_note: "发布便签",
   read_notes: "查看便签",

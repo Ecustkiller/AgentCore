@@ -18,29 +18,56 @@ import {
   Wrench,
 } from "lucide-react";
 
-/** Icon + 中文标签 for a builtin tool, by its backend name. */
+/** Icon + English action label for a builtin tool, by its backend name. */
 export const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
-  web_search: { Icon: Search, label: "搜索网页" },
-  read_url: { Icon: Globe, label: "读取网页" },
-  grep: { Icon: Code2, label: "检索代码" },
-  code_execute: { Icon: Terminal, label: "执行代码" },
-  file_read: { Icon: FileText, label: "读取文件" },
-  file_write: { Icon: FileText, label: "写入文件" },
-  file_append: { Icon: FileText, label: "追加文件" },
-  file_list: { Icon: Folder, label: "列出目录" },
-  str_replace: { Icon: Pencil, label: "编辑文件" },
-  file_delete: { Icon: Trash2, label: "删除文件" },
-  file_move: { Icon: FileText, label: "移动文件" },
-  file_copy: { Icon: FileText, label: "复制文件" },
-  mkdir: { Icon: FileText, label: "创建目录" },
-  file_batch: { Icon: FileText, label: "批量文件操作" },
-  delegate: { Icon: Users, label: "委派任务" },
-  ask_user: { Icon: HelpCircle, label: "向你确认" },
-  consult_skill: { Icon: BookOpen, label: "查阅能力" },
-  consult_memory: { Icon: Brain, label: "查阅记忆" },
-  revise: { Icon: PenLine, label: "修订产物" },
-  escalate: { Icon: ArrowUp, label: "上报问题" },
+  web_search: { Icon: Search, label: "Search web" },
+  read_url: { Icon: Globe, label: "Read page" },
+  grep: { Icon: Code2, label: "Grep code" },
+  code_execute: { Icon: Terminal, label: "Run code" },
+  file_read: { Icon: FileText, label: "Read file" },
+  file_write: { Icon: FileText, label: "Write file" },
+  file_append: { Icon: FileText, label: "Append file" },
+  file_list: { Icon: Folder, label: "List dir" },
+  str_replace: { Icon: Pencil, label: "Edit file" },
+  file_delete: { Icon: Trash2, label: "Delete file" },
+  file_move: { Icon: FileText, label: "Move file" },
+  file_copy: { Icon: FileText, label: "Copy file" },
+  mkdir: { Icon: FileText, label: "Make dir" },
+  file_batch: { Icon: FileText, label: "Batch files" },
+  delegate: { Icon: Users, label: "Delegate" },
+  ask_user: { Icon: HelpCircle, label: "Ask you" },
+  consult_skill: { Icon: BookOpen, label: "Consult skill" },
+  consult_memory: { Icon: Brain, label: "Consult memory" },
+  revise: { Icon: PenLine, label: "Revise" },
+  escalate: { Icon: ArrowUp, label: "Escalate" },
 };
+
+/** Chinese labels for tool-group collapse summaries (描述性/计数类 — stay Chinese). */
+const TOOL_SUMMARY_LABEL: Record<string, string> = {
+  web_search: "搜索网页",
+  read_url: "读取网页",
+  grep: "检索代码",
+  code_execute: "执行代码",
+  file_read: "读取文件",
+  file_write: "写入文件",
+  file_append: "追加文件",
+  file_list: "列出目录",
+  str_replace: "编辑文件",
+  file_delete: "删除文件",
+  file_move: "移动文件",
+  file_copy: "复制文件",
+  mkdir: "创建目录",
+  file_batch: "批量文件操作",
+  delegate: "委派任务",
+  ask_user: "向你确认",
+  consult_skill: "查阅能力",
+  consult_memory: "查阅记忆",
+  revise: "修订产物",
+  escalate: "上报问题",
+};
+
+const toolSummaryLabel = (name: string): string =>
+  TOOL_SUMMARY_LABEL[name] ?? name;
 
 export const toolMeta = (name: string): { Icon: LucideIcon; label: string } =>
   TOOL_META[name] ?? { Icon: Wrench, label: name };
@@ -104,14 +131,14 @@ export function toolGroupSummary(
     return `读取网页 · ${tools.length} 个来源`;
   }
   if (sameKind && tools.length <= 3) {
-    const { label } = toolMeta(tools[0].tool_name);
+    const label = toolSummaryLabel(tools[0].tool_name);
     const names = tools.map((t) => baseName(toolDetail(t.arguments)));
     if (names.every(Boolean)) return `${label} ${names.join(" · ")}`;
   }
   const order: string[] = [];
   const counts = new Map<string, number>();
   for (const t of tools) {
-    const { label } = toolMeta(t.tool_name);
+    const label = toolSummaryLabel(t.tool_name);
     if (!counts.has(label)) order.push(label);
     counts.set(label, (counts.get(label) ?? 0) + 1);
   }

@@ -21,7 +21,7 @@ describe("formatProcessExport", () => {
     const text = formatProcessExport(steps);
     expect(text).toContain("【思考】");
     expect(text).toContain("先查资料");
-    expect(text).toContain("搜索网页");
+    expect(text).toContain("Search web");
     expect(text).toContain("AgentCore");
     expect(text).toContain("我先看一下。");
     expect(text).toContain("最终方案如下。");

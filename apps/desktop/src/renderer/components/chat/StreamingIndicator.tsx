@@ -15,7 +15,7 @@ export function StreamingIndicator() {
 
   if (!isGenerating || !isStreaming) return null;
 
-  let text = "正在回复…";
+  let text = "Replying…";
   if (execution && execution.status === "running") {
     if (isTeamSynthesizing(execution)) {
       text = teamSynthesisPhaseLabel(execution);

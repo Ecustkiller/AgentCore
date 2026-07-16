@@ -157,7 +157,7 @@ describe("RunDetailBody process timeline", () => {
     expect(screen.getByText("调研员")).toBeTruthy();
     expect(screen.getByText("调研竞品")).toBeTruthy();
     // Timeline body: reasoning headers + content + tool labels (CEO ProcessTimeline).
-    expect(screen.getAllByText("思考过程").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Thought").length).toBeGreaterThan(0);
     expect(screen.getByText(/初步结论/)).toBeTruthy();
     expect(screen.getByText(/最终建议/)).toBeTruthy();
     // Footer conclusion kept.

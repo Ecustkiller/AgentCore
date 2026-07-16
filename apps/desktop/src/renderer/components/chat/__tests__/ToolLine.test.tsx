@@ -97,7 +97,7 @@ describe("ToolLine · 过程工具默认折叠", () => {
     expect(screen.queryByText(/退出码 0/)).toBeNull();
     expect(screen.getByText(/hello world/)).toBeTruthy();
 
-    fireEvent.click(screen.getByText("执行代码"));
+    fireEvent.click(screen.getByText("Run code"));
     expect(screen.getByText(/退出码 0/)).toBeTruthy();
   });
 
@@ -137,7 +137,7 @@ describe("ToolLine · 过程工具默认折叠", () => {
     );
     // Collapsed: hit title hidden; click reveals the result card.
     expect(screen.queryByText("深圳天气预报")).toBeNull();
-    fireEvent.click(screen.getByText("搜索网页"));
+    fireEvent.click(screen.getByText("Search web"));
     expect(screen.getByText("深圳天气预报")).toBeTruthy();
   });
 
@@ -212,7 +212,7 @@ describe("ToolLine · 过程工具默认折叠", () => {
     expect(screen.queryByText("+1")).toBeNull();
     expect(screen.queryByText("-1")).toBeNull();
 
-    fireEvent.click(screen.getByText("编辑文件"));
+    fireEvent.click(screen.getByText("Edit file"));
     expect(screen.getByText("+1")).toBeTruthy();
     expect(screen.getByText("-1")).toBeTruthy();
   });
@@ -242,7 +242,7 @@ describe("ToolLine · 过程工具默认折叠", () => {
     );
     expect(screen.queryByText(/1 行 ·/)).toBeNull();
 
-    fireEvent.click(screen.getByText("写入文件"));
+    fireEvent.click(screen.getByText("Write file"));
     expect(screen.getByText(/1 行 ·/)).toBeTruthy();
   });
 

@@ -74,8 +74,8 @@ function InlineReasoning({
       <ThinkingHeader
         isStreaming={streaming}
         expanded={expanded}
-        streamingLabel="正在思考…"
-        doneLabel="思考过程"
+        streamingLabel="Thinking…"
+        doneLabel="Thought"
         onToggle={toggle}
       />
       {expanded && (
@@ -277,7 +277,7 @@ export function ProcessTimeline({
                   key="process-summary"
                   type="button"
                   onClick={toggleProcess}
-                  className="inline-flex items-center gap-1 text-sm text-muted-foreground"
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground"
                 >
                   {processSummary}
                   <ChevronRight className="size-4 shrink-0" aria-hidden />
@@ -290,7 +290,7 @@ export function ProcessTimeline({
                 <button
                   type="button"
                   onClick={toggleProcess}
-                  className="inline-flex items-center gap-1 text-sm text-muted-foreground"
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground"
                 >
                   {processSummary}
                   <ChevronDown className="size-4 shrink-0" aria-hidden />
@@ -318,7 +318,7 @@ export function ProcessTimeline({
       {showThinkingTail && (
         <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
           <ThinkingDots />
-          正在思考…
+          Thinking…
         </span>
       )}
     </div>

@@ -33,8 +33,8 @@ const probe = (page) =>
   page.evaluate(() => {
     const text = (document.body?.innerText ?? "").replace(/\s+/g, " ");
     return {
-      thinking: /正在思考|正在回复/.test(text),
-      delegating: /正在生成\s*委派|委派任务/.test(text),
+      thinking: /Thinking…|Replying…/.test(text),
+      delegating: /Composing\s*Delegate|Delegate/.test(text),
       authorize: /授权开赛/.test(text),
       waitKickoff: /等待开工确认|开工卡/.test(text),
       stop: /停止生成/.test(text),

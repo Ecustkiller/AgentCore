@@ -262,7 +262,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         ) : message.content.length === 0 && !hasReasoning ? (
           <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
             <ThinkingDots />
-            正在思考…
+            Thinking…
           </span>
         ) : (
           <span

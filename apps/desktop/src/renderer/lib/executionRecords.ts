@@ -86,7 +86,7 @@ export function executionRecordSummary(
   if (firstLine) {
     return firstLine.length > 56 ? `${firstLine.slice(0, 56)}…` : firstLine;
   }
-  return toolName === "code_execute" ? "执行代码" : toolName;
+  return toolName === "code_execute" ? "Run code" : toolName;
 }
 
 export function outputFromDisplay(display?: ToolDisplay | null): {
