@@ -43,7 +43,7 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   content_delta: { verdict: "ported", surface: "AssistantView 时间线 · 正文" },
   content_reset: {
     verdict: "ported",
-    surface: "fold · finish_guard 回炉清正文",
+    surface: "fold · 清正文（仅 reason=finish_guard 折 rework chip）",
   },
   reasoning_delta: { verdict: "ported", surface: "AssistantView · 思考块" },
   tool_use_start: {
@@ -77,7 +77,7 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   },
   run_output_reset: {
     verdict: "ported",
-    surface: "fold · worker finish_guard 回炉",
+    surface: "fold · 清 worker 草稿（仅 reason=finish_guard 折 rework 步）",
   },
   run_reasoning_delta: {
     verdict: "ported",

@@ -14,6 +14,15 @@ from agentcore.demo_tape.schema import (
     should_export_kind,
 )
 
+# Synthetic typing beat gaps: fill the real journal window when possible, but never
+# machine-gun faster than ~15ms or drag a single gap past ~1.2s.
+MIN_CHUNK_GAP_MS = 15
+MAX_CHUNK_GAP_MS = 1200
+
+# CEO「正在生成 委派任务 · N 字」heartbeat ticks (EPHEMERAL tool_progress on tape).
+_DELEGATE_COMPOSE_STEPS = 8
+_ORCH_TOOL_NAMES = frozenset({"debate", "delegate"})
+
 
 def build_tape_events(
     rows: list[dict[str, Any]],
@@ -26,9 +35,11 @@ def build_tape_events(
     """Flatten journal rows into timed live-shaped tape events.
 
     - Skips process / execution-only / recorded ``*_resolved`` rows.
-    - Re-chunks full-text deltas into typing-sized pieces with synthetic ``t_ms``.
+    - Re-chunks / synthesizes deltas so typing fills each real time window.
+    - Rebuilds worker ``run_*_delta`` from ``message_final`` + ``run_process_*``.
+    - Emits EPHEMERAL ``tool_progress`` compose ticks before the orchestration tool.
     - Appends captain ``content_delta`` / ``reasoning_delta`` from the message body
-      near the end (journal does not store DERIVED captain deltas).
+      (journal does not store DERIVED captain deltas).
 
     Causal order follows journal ``seq`` (re-chunked pieces stay contiguous). Events are
     **not** re-sorted by ``(t_ms, kind)`` — that previously put ``run_context`` before
@@ -87,13 +98,12 @@ def build_tape_events(
                 continue
             base = int(ev["t_ms"])
             next_t = int(raw[idx + 1]["t_ms"]) if idx + 1 < len(raw) else None
-            step = _chunk_step_ms(
-                base_ms=base,
+            times = _spread_times(
+                lo_ms=base,
+                hi_ms=next_t if next_t is not None else base + len(parts) * chunk_gap_ms,
                 n_parts=len(parts),
-                chunk_gap_ms=chunk_gap_ms,
-                next_t_ms=next_t,
             )
-            for i, part in enumerate(parts):
+            for part, t in zip(parts, times, strict=True):
                 chunk_payload = dict(payload)
                 chunk_payload["delta"] = part
                 events.append(
@@ -101,7 +111,7 @@ def build_tape_events(
                         "kind": kind,
                         "payload": chunk_payload,
                         "ts": ev["ts"],
-                        "t_ms": base + i * step,
+                        "t_ms": t,
                     }
                 )
             continue
@@ -114,68 +124,39 @@ def build_tape_events(
             }
         )
 
-    # Captain bubble (DERIVED): insert intro before team_preview, wrap after debate_result.
-    # Keep list order — never sort by kind.
-    preview_idx = next(
-        (i for i, e in enumerate(events) if e["kind"] == "team_preview_required"),
-        None,
+    events = _inject_worker_run_deltas(
+        events,
+        rows,
+        chunk_size=chunk_size,
+        chunk_gap_ms=chunk_gap_ms,
     )
-    debate_idx = next(
-        (i for i, e in enumerate(events) if e["kind"] == "debate_result"),
-        None,
-    )
+
     intro, wrap = _split_captain_content(captain_content, rows)
 
-    if intro and preview_idx is not None:
-        preview_ms = int(events[preview_idx]["t_ms"])
-        prev_ms = int(events[preview_idx - 1]["t_ms"]) if preview_idx > 0 else 0
-        n_parts = max(1, len(chunk_text(intro, size=chunk_size)))
-        # Fit intro into (prev_ms, preview_ms] — never before the prior event.
-        span = max(0, preview_ms - prev_ms)
-        if n_parts <= 1 or span <= 0:
-            cursor = preview_ms
-            step = 0
-        else:
-            step = min(chunk_gap_ms, max(1, span // n_parts))
-            cursor = max(prev_ms, preview_ms - step * (n_parts - 1))
-        intro_events = _delta_events(
-            "content_delta",
-            intro,
-            base_ms=cursor,
-            chunk_size=chunk_size,
-            chunk_gap_ms=step if step > 0 else chunk_gap_ms,
-        )
-        if step == 0:
-            for ev in intro_events:
-                ev["t_ms"] = preview_ms
-        events[preview_idx:preview_idx] = intro_events
-        if debate_idx is not None and debate_idx >= preview_idx:
-            debate_idx += len(intro_events)
-
-    rest = wrap if intro else captain_content
-    if rest:
-        anchor_ms = (
-            int(events[debate_idx]["t_ms"])
-            if debate_idx is not None
-            else (int(events[-1]["t_ms"]) if events else 0)
-        )
-        wrap_events = _delta_events(
-            "content_delta",
-            rest,
-            base_ms=anchor_ms + 200,
-            chunk_size=chunk_size,
-            chunk_gap_ms=chunk_gap_ms,
-        )
-        insert_at = (debate_idx + 1) if debate_idx is not None else len(events)
-        events[insert_at:insert_at] = wrap_events
-
-    # Captain reasoning (DERIVED): place each thinking burst at the timeline position
-    # it actually occurred, using the process timeline. Falls back to a single
-    # post-debate block for tapes without process reasoning.
-    events = _place_captain_reasoning(
+    # Tool / preview / end reasoning in their own windows. Intro + wrap bursts are
+    # deferred so they share real journal windows with their prose (reasoning first).
+    events, intro_reasoning, wrap_reasoning = _place_captain_reasoning(
         events,
         rows,
         fallback_reasoning=captain_reasoning,
+        chunk_size=chunk_size,
+        chunk_gap_ms=chunk_gap_ms,
+    )
+
+    events = _inject_pre_orch_synthetics(
+        events,
+        intro_text=intro,
+        intro_reasoning=intro_reasoning,
+        chunk_size=chunk_size,
+        chunk_gap_ms=chunk_gap_ms,
+    )
+
+    # Closing window: last orch tool_use_end → run_completed (reasoning then content).
+    rest = wrap if intro else captain_content
+    events = _inject_closing_synthetics(
+        events,
+        wrap_text=rest,
+        wrap_reasoning=wrap_reasoning,
         chunk_size=chunk_size,
         chunk_gap_ms=chunk_gap_ms,
     )
@@ -184,24 +165,110 @@ def build_tape_events(
     return events
 
 
-def _chunk_step_ms(
+def _spread_times(
     *,
-    base_ms: int,
+    lo_ms: int,
+    hi_ms: int,
     n_parts: int,
-    chunk_gap_ms: int,
-    next_t_ms: int | None,
-) -> int:
-    """Typing step that stays strictly before the next journal anchor when possible."""
-    if n_parts <= 1:
-        return 0
-    if next_t_ms is None:
-        return max(0, int(chunk_gap_ms))
-    room = int(next_t_ms) - int(base_ms)
-    if room <= 0:
-        return 0
-    # base + (n-1)*step < next_t  ⇒  step <= (room - 1) / (n - 1) when room > 0
-    max_step = max(0, (room - 1) // (n_parts - 1)) if n_parts > 1 else 0
-    return min(max(0, int(chunk_gap_ms)), max_step)
+    min_gap: int = MIN_CHUNK_GAP_MS,
+    max_gap: int = MAX_CHUNK_GAP_MS,
+    prefer_gap_ms: int | None = None,
+    align_end: bool = False,
+) -> list[int]:
+    """Timestamps for ``n_parts`` beats in ``[lo_ms, hi_ms)``, filling the window.
+
+    - Tiny / inverted window → every beat at ``lo_ms`` (no overshoot, no rewind).
+    - Otherwise step = clamp(floor fit of full window, min_gap..max_gap); place from
+      ``lo_ms`` forward so long think windows are occupied instead of end-packed.
+    - ``prefer_gap_ms`` (legacy trailing wrap) caps the ideal when no real ``hi`` exists.
+    - ``align_end``: when max_gap clamp leaves unused tail, shift the block so the last
+      beat hugs ``hi`` (worker final gap → run_completed; avoids a dead node tail).
+    """
+    lo = int(lo_ms)
+    hi = int(hi_ms)
+    n = int(n_parts)
+    if n <= 0:
+        return []
+    if n == 1:
+        return [hi - 1 if align_end and hi > lo else lo]
+    span = hi - lo
+    if span <= 0:
+        return [lo] * n
+    # Last beat strictly before hi when possible.
+    max_fit = max(0, (span - 1) // (n - 1))
+    if max_fit <= 0:
+        return [lo] * n
+    ideal = (
+        min(max_fit, max(0, int(prefer_gap_ms)))
+        if prefer_gap_ms is not None
+        else max_fit
+    )
+    if max_fit >= min_gap:
+        step = min(max_gap, max(min_gap, ideal))
+        step = min(step, max_fit)
+    else:
+        # Window too small for min_gap — still differentiate when max_fit > 0.
+        step = max_fit
+    times = [lo + i * step for i in range(n)]
+    if align_end and times[-1] < hi - 1:
+        shift = (hi - 1) - times[-1]
+        times = [t + shift for t in times]
+    return times
+
+
+def _split_window_by_beats(
+    lo_ms: int,
+    hi_ms: int,
+    beat_counts: list[int],
+) -> list[tuple[int, int]]:
+    """Proportionally partition ``[lo, hi)`` across segments by beat count."""
+    total = sum(max(0, int(n)) for n in beat_counts)
+    if not beat_counts:
+        return []
+    lo, hi = int(lo_ms), int(hi_ms)
+    if total <= 0 or hi <= lo:
+        return [(lo, lo) for _ in beat_counts]
+    span = hi - lo
+    out: list[tuple[int, int]] = []
+    cursor = lo
+    for i, n in enumerate(beat_counts):
+        n = max(0, int(n))
+        if i == len(beat_counts) - 1:
+            out.append((cursor, hi))
+            break
+        seg = (span * n) // total if total else 0
+        out.append((cursor, cursor + seg))
+        cursor += seg
+    return out
+
+
+def _delta_events_in_window(
+    kind: str,
+    text: str,
+    *,
+    lo_ms: int,
+    hi_ms: int,
+    chunk_size: int,
+    payload_base: dict[str, Any],
+    prefer_gap_ms: int | None = None,
+    align_end: bool = False,
+) -> list[dict[str, Any]]:
+    parts = chunk_text(text, size=chunk_size)
+    if not parts:
+        return []
+    times = _spread_times(
+        lo_ms=lo_ms,
+        hi_ms=hi_ms,
+        n_parts=len(parts),
+        prefer_gap_ms=prefer_gap_ms,
+        align_end=align_end,
+    )
+    out: list[dict[str, Any]] = []
+    for part, t in zip(parts, times, strict=True):
+        payload = dict(payload_base)
+        payload["delta"] = part
+        out.append({"kind": kind, "payload": payload, "ts": None, "t_ms": t})
+    return out
 
 
 def _clamp_monotonic_t_ms(events: list[dict[str, Any]]) -> None:
@@ -221,18 +288,290 @@ def _delta_events(
     chunk_size: int,
     chunk_gap_ms: int,
 ) -> list[dict[str, Any]]:
-    parts = chunk_text(text, size=chunk_size)
-    out: list[dict[str, Any]] = []
-    for i, part in enumerate(parts):
-        out.append(
-            {
-                "kind": kind,
-                "payload": {"delta": part},
-                "ts": None,
-                "t_ms": int(base_ms) + i * chunk_gap_ms,
-            }
+    """Legacy helper: fixed-gap chunks from ``base_ms`` (tests / simple fallbacks)."""
+    return _delta_events_in_window(
+        kind,
+        text,
+        lo_ms=base_ms,
+        hi_ms=int(base_ms)
+        + max(int(chunk_gap_ms), MIN_CHUNK_GAP_MS)
+        * max(1, len(chunk_text(text, size=chunk_size))),
+        chunk_size=chunk_size,
+        payload_base={},
+        prefer_gap_ms=chunk_gap_ms,
+    )
+
+
+def delegation_compose_chars(payload: dict[str, Any]) -> int:
+    """Total chars of the delegation/debate arguments the CEO is assembling."""
+    parts: list[str] = [str(payload.get("motion") or "")]
+    for side in payload.get("sides") or []:
+        if isinstance(side, dict):
+            parts.append(str(side.get("name") or ""))
+            parts.append(str(side.get("stance") or ""))
+    for worker in payload.get("workers") or []:
+        if isinstance(worker, dict):
+            parts.append(str(worker.get("role") or ""))
+            parts.append(str(worker.get("task") or ""))
+    return sum(len(p) for p in parts)
+
+
+# Back-compat alias used by older call sites / tests.
+_delegation_compose_chars = delegation_compose_chars
+
+
+def _orchestration_tool_index(
+    events: list[dict[str, Any]],
+    *,
+    before: int | None,
+) -> int | None:
+    """Index of captain orchestration ``tool_use_start`` (debate/delegate, no run_id)."""
+    hi = before if before is not None else len(events)
+    for i in range(hi):
+        ev = events[i]
+        if ev["kind"] != "tool_use_start":
+            continue
+        p = ev.get("payload") or {}
+        if p.get("run_id"):
+            continue
+        name = str(p.get("tool_name") or p.get("name") or "")
+        if name in _ORCH_TOOL_NAMES:
+            return i
+    return None
+
+
+def _orch_tool_name(
+    events: list[dict[str, Any]],
+    *,
+    orch_idx: int | None,
+    preview_payload: dict[str, Any],
+) -> str:
+    if orch_idx is not None:
+        op = events[orch_idx].get("payload") or {}
+        name = str(op.get("tool_name") or op.get("name") or "")
+        if name in _ORCH_TOOL_NAMES:
+            return name
+    prim = str(preview_payload.get("primitive") or preview_payload.get("form") or "")
+    if prim in _ORCH_TOOL_NAMES:
+        return prim
+    return "debate" if "debate" in prim else "delegate"
+
+
+def _inject_pre_orch_synthetics(
+    events: list[dict[str, Any]],
+    *,
+    intro_text: str,
+    intro_reasoning: list[str],
+    chunk_size: int,
+    chunk_gap_ms: int,
+) -> list[dict[str, Any]]:
+    """Insert intro-anchored reasoning + case brief + compose ticks before orch / card.
+
+    All three share the real journal window (prior anchor → orch tool or team_preview),
+    split by beat count so a long think gap is filled instead of end-packed.
+    """
+    preview_idx = next(
+        (i for i, e in enumerate(events) if e["kind"] == "team_preview_required"),
+        None,
+    )
+    if preview_idx is None and not intro_text and not intro_reasoning:
+        return events
+
+    orch_idx = _orchestration_tool_index(
+        events, before=preview_idx if preview_idx is not None else len(events)
+    )
+    end_idx = orch_idx if orch_idx is not None else preview_idx
+    if end_idx is None:
+        return events
+
+    preview_payload = (
+        dict(events[preview_idx].get("payload") or {}) if preview_idx is not None else {}
+    )
+    tool_name = _orch_tool_name(
+        events, orch_idx=orch_idx, preview_payload=preview_payload
+    )
+    total_chars = delegation_compose_chars(preview_payload)
+
+    # Segment list in causal order: deferred reasoning → intro → compose ticks.
+    segments: list[tuple[str, str, dict[str, Any]]] = []
+    for text in intro_reasoning:
+        if text:
+            segments.append(("reasoning_delta", text, {}))
+    if intro_text:
+        segments.append(("content_delta", intro_text, {}))
+
+    compose_n = 0
+    if total_chars > 0:
+        compose_n = _DELEGATE_COMPOSE_STEPS
+        # Placeholder text length only for beat budgeting; real payloads set below.
+        segments.append(("tool_progress", "x" * compose_n, {}))
+
+    if not segments:
+        return events
+
+    lo_ms = int(events[end_idx - 1]["t_ms"]) if end_idx > 0 else 0
+    hi_ms = int(events[end_idx]["t_ms"])
+
+    beat_counts: list[int] = []
+    for kind, text, _ in segments:
+        if kind == "tool_progress":
+            beat_counts.append(compose_n)
+        else:
+            beat_counts.append(max(1, len(chunk_text(text, size=chunk_size))))
+    windows = _split_window_by_beats(lo_ms, hi_ms, beat_counts)
+
+    bundled: list[dict[str, Any]] = []
+    for (kind, text, _), (w_lo, w_hi), n_beats in zip(
+        segments, windows, beat_counts, strict=True
+    ):
+        if kind == "tool_progress":
+            times = _spread_times(
+                lo_ms=w_lo,
+                hi_ms=w_hi,
+                n_parts=n_beats,
+                prefer_gap_ms=chunk_gap_ms if w_hi <= w_lo else None,
+            )
+            for i, t in enumerate(times):
+                chars = max(1, round(total_chars * (i + 1) / n_beats))
+                bundled.append(
+                    {
+                        "kind": "tool_progress",
+                        "payload": {"tool_name": tool_name, "chars": chars},
+                        "ts": None,
+                        "t_ms": t,
+                    }
+                )
+            continue
+        bundled.extend(
+            _delta_events_in_window(
+                kind,
+                text,
+                lo_ms=w_lo,
+                hi_ms=w_hi,
+                chunk_size=chunk_size,
+                payload_base={},
+            )
         )
-    return out
+
+    events[end_idx:end_idx] = bundled
+    return events
+
+
+def _find_closing_window(
+    events: list[dict[str, Any]],
+) -> tuple[int, int, int] | None:
+    """Locate the captain closing window: last orch tool end → run_completed.
+
+    Returns ``(lo_ms, insert_at, hi_ms)`` where deltas insert at ``insert_at``
+    (before ``run_completed``) and fill ``[lo_ms, hi_ms)``.
+
+    Prefer the last debate/delegate ``tool_use_end`` and the following
+    ``run_completed``. Fall back to ``debate_result`` → following ``run_completed``
+    (or end of tape) when the orch tool end is missing.
+    """
+    orch_end: int | None = None
+    for i, ev in enumerate(events):
+        if ev["kind"] != "tool_use_end":
+            continue
+        p = ev.get("payload") or {}
+        name = str(p.get("tool_name") or p.get("name") or "")
+        if name in _ORCH_TOOL_NAMES:
+            orch_end = i
+
+    anchor = orch_end
+    if anchor is None:
+        anchor = next(
+            (i for i, e in enumerate(events) if e["kind"] == "debate_result"),
+            None,
+        )
+    if anchor is None:
+        return None
+
+    completed = next(
+        (
+            j
+            for j in range(anchor + 1, len(events))
+            if events[j]["kind"] == "run_completed"
+        ),
+        None,
+    )
+    lo_ms = int(events[anchor]["t_ms"])
+    if completed is not None:
+        return lo_ms, completed, int(events[completed]["t_ms"])
+    # No run_completed after the anchor — append at end; synthetic hi from last beat.
+    hi_ms = int(events[-1]["t_ms"]) + 1 if events else lo_ms + 1
+    return lo_ms, len(events), hi_ms
+
+
+def _inject_closing_synthetics(
+    events: list[dict[str, Any]],
+    *,
+    wrap_text: str,
+    wrap_reasoning: list[str],
+    chunk_size: int,
+    chunk_gap_ms: int,
+) -> list[dict[str, Any]]:
+    """Insert post-pause captain reasoning + wrap prose into the closing window.
+
+    Causal order is always reasoning → content. Beats fill the real journal span
+    (last orch ``tool_use_end`` → ``run_completed``); the final segment uses
+    ``align_end`` so the last delta hugs ``run_completed``.
+    """
+    segments: list[tuple[str, str]] = []
+    for text in wrap_reasoning:
+        if text:
+            segments.append(("reasoning_delta", text))
+    if wrap_text:
+        segments.append(("content_delta", wrap_text))
+    if not segments:
+        return events
+
+    window = _find_closing_window(events)
+    if window is None:
+        # No debate / orch anchor — append after the last event with prefer_gap.
+        base = int(events[-1]["t_ms"]) if events else 0
+        bundled: list[dict[str, Any]] = []
+        cursor = base
+        for kind, text in segments:
+            block = _delta_events(
+                kind,
+                text,
+                base_ms=cursor,
+                chunk_size=chunk_size,
+                chunk_gap_ms=chunk_gap_ms,
+            )
+            bundled.extend(block)
+            if block:
+                cursor = int(block[-1]["t_ms"]) + max(chunk_gap_ms, MIN_CHUNK_GAP_MS)
+        events.extend(bundled)
+        return events
+
+    lo_ms, insert_at, hi_ms = window
+    beat_counts = [
+        max(1, len(chunk_text(text, size=chunk_size))) for _, text in segments
+    ]
+    windows = _split_window_by_beats(lo_ms, hi_ms, beat_counts)
+
+    bundled: list[dict[str, Any]] = []
+    last_i = len(segments) - 1
+    for i, ((kind, text), (w_lo, w_hi)) in enumerate(
+        zip(segments, windows, strict=True)
+    ):
+        bundled.extend(
+            _delta_events_in_window(
+                kind,
+                text,
+                lo_ms=w_lo,
+                hi_ms=w_hi,
+                chunk_size=chunk_size,
+                payload_base={},
+                prefer_gap_ms=chunk_gap_ms if w_hi <= w_lo else None,
+                align_end=(i == last_i),
+            )
+        )
+
+    events[insert_at:insert_at] = bundled
+    return events
 
 
 def _split_captain_text(content: str) -> tuple[str, str]:
@@ -298,7 +637,8 @@ def _split_captain_content(content: str, rows: list[dict[str, Any]]) -> tuple[st
     if not text:
         return "", ""
     point = _captain_content_split_point(rows)
-    if point is not None and 0 < point < len(text):
+    # point == len(text) → all prose is pre-pause (intro only, no wrap).
+    if point is not None and 0 <= point <= len(text):
         return text[:point], text[point:]
     return _split_captain_text(text)
 
@@ -368,55 +708,48 @@ def _place_captain_reasoning(
     *,
     fallback_reasoning: str,
     chunk_size: int,
-    chunk_gap_ms: int,
-) -> list[dict[str, Any]]:
+    chunk_gap_ms: int = 35,
+) -> tuple[list[dict[str, Any]], list[str], list[str]]:
     """Insert captain ``reasoning_delta`` at the timeline position each burst occurred.
 
-    Anchors come from :func:`_captain_reasoning_segments`. When the journal carries no
-    process reasoning (legacy tapes), falls back to a single block after ``debate_result``.
+    Anchors come from :func:`_captain_reasoning_segments`. Tool / preview / end bursts
+    are inserted here into their (prev → anchor) windows. Intro and wrap bursts are
+    *deferred* — returned so :func:`_inject_pre_orch_synthetics` /
+    :func:`_inject_closing_synthetics` can share those windows with prose (reasoning
+    always before content).
+
+    When the journal carries no process reasoning (legacy tapes), ``fallback_reasoning``
+    is returned as a single wrap burst for the closing window.
+
+    ``chunk_gap_ms`` is accepted for call-site symmetry; tool/preview windows use the
+    real journal span (no prefer-gap packing).
     """
+    del chunk_gap_ms  # window packing uses real journal span only
     segments = _captain_reasoning_segments(rows)
+    intro_deferred: list[str] = []
+    wrap_deferred: list[str] = []
 
     preview_idx = next(
         (i for i, e in enumerate(events) if e["kind"] == "team_preview_required"),
         None,
     )
-    debate_idx = next(
-        (i for i, e in enumerate(events) if e["kind"] == "debate_result"),
-        None,
-    )
 
     if not segments:
-        if not fallback_reasoning:
-            return events
-        anchor_ms = (
-            int(events[debate_idx]["t_ms"])
-            if debate_idx is not None
-            else (int(events[-1]["t_ms"]) if events else 0)
-        )
-        block = _delta_events(
-            "reasoning_delta",
-            fallback_reasoning,
-            base_ms=anchor_ms + 50,
-            chunk_size=chunk_size,
-            chunk_gap_ms=chunk_gap_ms,
-        )
-        insert_at = (debate_idx + 1) if debate_idx is not None else len(events)
-        events[insert_at:insert_at] = block
-        return events
+        if fallback_reasoning:
+            wrap_deferred.append(fallback_reasoning)
+        return events, intro_deferred, wrap_deferred
 
     pre_limit = preview_idx if preview_idx is not None else len(events)
-    wrap_start_default = (debate_idx + 1) if debate_idx is not None else len(events)
 
-    def _first_content(lo: int, hi: int) -> int | None:
-        return next(
-            (i for i in range(lo, min(hi, len(events))) if events[i]["kind"] == "content_delta"),
-            None,
-        )
-
-    inserts: dict[int, list[dict[str, Any]]] = {}
+    plans: list[tuple[int, str]] = []
     cursor = 0
     for text, anchor in segments:
+        if anchor[0] == "intro":
+            intro_deferred.append(text)
+            continue
+        if anchor[0] == "wrap":
+            wrap_deferred.append(text)
+            continue
         if anchor[0] == "tool":
             name = anchor[1]
             idx = next(
@@ -430,40 +763,362 @@ def _place_captain_reasoning(
             )
             if idx is None:
                 idx = pre_limit
-        elif anchor[0] == "intro":
-            idx = _first_content(cursor, pre_limit)
-            if idx is None:
-                idx = pre_limit
         elif anchor[0] == "preview":
             idx = pre_limit
-        elif anchor[0] == "wrap":
-            idx = _first_content(wrap_start_default, len(events))
-            if idx is None:
-                idx = wrap_start_default
         else:  # end
             idx = len(events)
-        cursor = min(max(cursor, idx + 1), len(events))
-        if idx < len(events):
-            base_ms = int(events[idx - 1]["t_ms"]) if idx > 0 else int(events[idx]["t_ms"])
-        elif events:
-            base_ms = int(events[-1]["t_ms"])
-        else:
-            base_ms = 0
-        seg_events = _delta_events(
-            "reasoning_delta",
-            text,
-            base_ms=base_ms,
-            chunk_size=chunk_size,
-            chunk_gap_ms=chunk_gap_ms,
+        cursor = min(max(cursor, idx), len(events))
+        plans.append((idx, text))
+
+    by_idx: dict[int, list[str]] = {}
+    for idx, text in plans:
+        by_idx.setdefault(idx, []).append(text)
+
+    inserts: dict[int, list[dict[str, Any]]] = {}
+    for idx, texts in by_idx.items():
+        hi_ms = (
+            int(events[idx]["t_ms"])
+            if idx < len(events)
+            else (int(events[-1]["t_ms"]) + 1 if events else 1)
         )
-        inserts.setdefault(idx, []).extend(seg_events)
+        lo_ms = int(events[idx - 1]["t_ms"]) if idx > 0 else 0
+        beat_counts = [max(1, len(chunk_text(t, size=chunk_size))) for t in texts]
+        windows = _split_window_by_beats(lo_ms, hi_ms, beat_counts)
+        bundled: list[dict[str, Any]] = []
+        for text, (w_lo, w_hi) in zip(texts, windows, strict=True):
+            bundled.extend(
+                _delta_events_in_window(
+                    "reasoning_delta",
+                    text,
+                    lo_ms=w_lo,
+                    hi_ms=w_hi,
+                    chunk_size=chunk_size,
+                    payload_base={},
+                )
+            )
+        inserts[idx] = bundled
 
     rebuilt: list[dict[str, Any]] = []
     for i in range(len(events)):
         rebuilt.extend(inserts.get(i, []))
         rebuilt.append(events[i])
     rebuilt.extend(inserts.get(len(events), []))
-    return rebuilt
+    return rebuilt, intro_deferred, wrap_deferred
+
+
+def _message_finals_by_run(rows: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
+    """run_id → {content, reasoning} from journal ``message_final`` facts."""
+    out: dict[str, dict[str, str]] = {}
+    for r in rows:
+        if str(r.get("kind") or "") != "message_final":
+            continue
+        p = dict(r.get("payload") or {})
+        run_id = p.get("run_id")
+        if not run_id:
+            continue
+        out[str(run_id)] = {
+            "content": str(p.get("content") or ""),
+            "reasoning": str(p.get("reasoning") or ""),
+        }
+    return out
+
+
+def _run_process_steps_by_run(
+    rows: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """run_id → ordered run_process_* steps (payload without needing kind prefix)."""
+    steps: list[tuple[int, str, dict[str, Any]]] = []
+    for r in rows:
+        kind = str(r.get("kind") or "")
+        if not kind.startswith("run_process_"):
+            continue
+        p = dict(r.get("payload") or {})
+        run_id = p.get("run_id")
+        if not run_id:
+            continue
+        suffix = kind[len("run_process_") :]
+        step = {k: v for k, v in p.items() if k != "run_id"}
+        step.setdefault("kind", suffix)
+        steps.append((int(r.get("seq") or 0), str(run_id), step))
+    steps.sort(key=lambda x: x[0])
+    out: dict[str, list[dict[str, Any]]] = {}
+    for _, run_id, step in steps:
+        out.setdefault(run_id, []).append(step)
+    return out
+
+
+def _agent_run_ids(events: list[dict[str, Any]]) -> dict[str, str]:
+    """run_id → agent_id for kind=agent runs (captain excluded)."""
+    out: dict[str, str] = {}
+    for ev in events:
+        if ev["kind"] != "run_started":
+            continue
+        p = ev.get("payload") or {}
+        if p.get("kind") != "agent":
+            continue
+        run_id = p.get("run_id")
+        if run_id:
+            out[str(run_id)] = str(p.get("agent_id") or "")
+    return out
+
+
+def _run_text_segments(
+    process_steps: list[dict[str, Any]],
+    *,
+    final_content: str,
+    final_reasoning: str,
+) -> list[tuple[str, str]]:
+    """Ordered (channel, text) segments for one run; channel is reasoning|content|tool.
+
+    Prefers process-timeline segmentation when step texts are a prefix-partition of the
+    ``message_final`` fields (byte fidelity). Otherwise: reasoning then content.
+    """
+    r_buf = final_reasoning
+    c_buf = final_content
+    segs: list[tuple[str, str]] = []
+    ok = True
+    for step in process_steps:
+        sk = str(step.get("kind") or "")
+        if sk == "tool":
+            segs.append(("tool", str(step.get("tool_name") or "")))
+            continue
+        if sk == "reasoning":
+            t = str(step.get("text") or "")
+            if not t:
+                continue
+            if r_buf.startswith(t):
+                segs.append(("reasoning", t))
+                r_buf = r_buf[len(t) :]
+            else:
+                ok = False
+                break
+        elif sk == "content":
+            t = str(step.get("text") or "")
+            if not t:
+                continue
+            if c_buf.startswith(t):
+                segs.append(("content", t))
+                c_buf = c_buf[len(t) :]
+            else:
+                ok = False
+                break
+    if ok:
+        if r_buf:
+            segs.append(("reasoning", r_buf))
+        if c_buf:
+            segs.append(("content", c_buf))
+        # Drop pure-tool-only if no text left anywhere.
+        if any(ch in ("reasoning", "content") for ch, _ in segs):
+            return segs
+
+    # Fallback: single reasoning block then content (no process / mismatch).
+    fallback: list[tuple[str, str]] = []
+    if final_reasoning:
+        fallback.append(("reasoning", final_reasoning))
+    if final_content:
+        fallback.append(("content", final_content))
+    return fallback
+
+
+def _assign_beats_to_gaps(
+    beats: list[tuple[int, str, str]],
+    capacities: list[int],
+) -> list[list[tuple[str, str]]]:
+    """Assign ordered text beats to gaps by capacity budget, cursor only moves forward.
+
+    Each beat carries ``min_gap`` (process-cursor floor). Beats are placed earliest-first
+    into positive-capacity gaps, consuming a proportional capacity token so wider gaps
+    absorb more beats. The write cursor never rewinds — later process beats cannot land
+    in an earlier gap than earlier beats (list-order == process-order). Zero-capacity
+    (same-ms concurrent tool) gaps are skipped whenever a later positive gap exists.
+    """
+    n_gaps = len(capacities)
+    buckets: list[list[tuple[str, str]]] = [[] for _ in range(n_gaps)]
+    if not beats or n_gaps == 0:
+        return buckets
+
+    total_cap = sum(max(0, int(c)) for c in capacities)
+    if total_cap <= 0:
+        buckets[-1].extend((ch, part) for _, ch, part in beats)
+        return buckets
+
+    token = total_cap / len(beats)
+    budget = [float(max(0, int(c))) for c in capacities]
+    cursor = 0  # earliest gap still writable; monotonic forward
+
+    for min_g, ch, part in beats:
+        min_g = max(0, min(int(min_g), n_gaps - 1))
+        start = max(cursor, min_g)
+        pick: int | None = None
+        for g in range(start, n_gaps):
+            if capacities[g] <= 0:
+                continue
+            if budget[g] > 0:
+                pick = g
+                break
+        if pick is None:
+            # Budgets exhausted from start — overflow into last positive-capacity gap.
+            for g in range(n_gaps - 1, start - 1, -1):
+                if capacities[g] > 0:
+                    pick = g
+                    break
+            if pick is None:
+                pick = start
+        buckets[pick].append((ch, part))
+        budget[pick] -= token
+        cursor = pick
+    return buckets
+
+
+def _inject_worker_run_deltas(
+    events: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+    *,
+    chunk_size: int,
+    chunk_gap_ms: int,
+) -> list[dict[str, Any]]:
+    """Rebuild ``run_output_delta`` / ``run_reasoning_delta`` inside each agent run window.
+
+    Text beats fill the run's tool-anchored gaps by **capacity proportion** (not
+    per-tool hard flush). Process order sets each beat's earliest gap; overflow may
+    slide into later wider gaps so zero-width concurrent tool anchors never clump
+    hundreds of beats onto one millisecond while the final tool→completed window
+    stays empty.
+
+    Concurrent debate runs interleave in the event list — started/completed indices
+    are re-resolved before every inject so a prior insert cannot leave a stale hi
+    anchor pointing at a foreign delta (negative-capacity gap → one-ms clump).
+    """
+    finals = _message_finals_by_run(rows)
+    processes = _run_process_steps_by_run(rows)
+    agent_ids = _agent_run_ids(events)
+    if not finals or not agent_ids:
+        return events
+
+    remaining = set(agent_ids) & set(finals)
+    while remaining:
+        windows_now: list[tuple[str, int, int]] = []
+        for i, ev in enumerate(events):
+            if ev["kind"] != "run_started":
+                continue
+            p = ev.get("payload") or {}
+            run_id = str(p.get("run_id") or "")
+            if run_id not in remaining:
+                continue
+            completed = next(
+                (
+                    j
+                    for j in range(i + 1, len(events))
+                    if events[j]["kind"]
+                    in ("run_completed", "run_failed", "run_cancelled")
+                    and str((events[j].get("payload") or {}).get("run_id") or "")
+                    == run_id
+                ),
+                None,
+            )
+            if completed is None:
+                remaining.discard(run_id)
+                continue
+            windows_now.append((run_id, i, completed))
+        if not windows_now:
+            break
+
+        # Highest completed index first — inserts below it leave earlier windows intact
+        # for the next re-scan; still re-scan because concurrent peers may interleave.
+        run_id, started_i, completed_i = max(windows_now, key=lambda w: w[2])
+        remaining.discard(run_id)
+
+        agent_id = agent_ids.get(run_id) or ""
+        final = finals[run_id]
+        segs = _run_text_segments(
+            processes.get(run_id) or [],
+            final_content=final["content"],
+            final_reasoning=final["reasoning"],
+        )
+        if not segs:
+            continue
+
+        tool_starts: list[tuple[int, str]] = []
+        for j in range(started_i + 1, completed_i):
+            if events[j]["kind"] != "tool_use_start":
+                continue
+            p = events[j].get("payload") or {}
+            if str(p.get("run_id") or "") != run_id:
+                continue
+            tool_starts.append((j, str(p.get("tool_name") or p.get("name") or "")))
+
+        anchor_idxs = [started_i] + [t[0] for t in tool_starts] + [completed_i]
+        gap_metas: list[tuple[int, int, int, int]] = []
+        capacities: list[int] = []
+        for a in range(len(anchor_idxs) - 1):
+            lo_i = anchor_idxs[a]
+            hi_i = anchor_idxs[a + 1]
+            lo_ms = int(events[lo_i]["t_ms"])
+            hi_ms = int(events[hi_i]["t_ms"])
+            gap_metas.append((lo_i, hi_i, lo_ms, hi_ms))
+            capacities.append(max(0, hi_ms - lo_ms))
+
+        beats: list[tuple[int, str, str]] = []
+        min_gap = 0
+        tool_cursor = 0
+        for ch, text in segs:
+            if ch == "tool":
+                matched = None
+                for k in range(tool_cursor, len(tool_starts)):
+                    if not text or tool_starts[k][1] == text or not tool_starts[k][1]:
+                        matched = k
+                        break
+                if matched is None and tool_cursor < len(tool_starts):
+                    matched = tool_cursor
+                if matched is not None:
+                    tool_cursor = matched + 1
+                    min_gap = matched + 1
+                continue
+            for part in chunk_text(text, size=chunk_size):
+                beats.append((min_gap, ch, part))
+
+        if not beats:
+            continue
+
+        buckets = _assign_beats_to_gaps(beats, capacities)
+        batch: list[tuple[int, list[dict[str, Any]]]] = []
+        last_gap = len(gap_metas) - 1
+        for gap_i, bucket in enumerate(buckets):
+            if not bucket:
+                continue
+            _lo_i, hi_i, lo_ms, hi_ms = gap_metas[gap_i]
+            times = _spread_times(
+                lo_ms=lo_ms,
+                hi_ms=hi_ms,
+                n_parts=len(bucket),
+                prefer_gap_ms=chunk_gap_ms if hi_ms <= lo_ms else None,
+                align_end=(gap_i == last_gap),
+            )
+            bundled: list[dict[str, Any]] = []
+            for (ch, part), t in zip(bucket, times, strict=True):
+                kind = (
+                    "run_reasoning_delta" if ch == "reasoning" else "run_output_delta"
+                )
+                bundled.append(
+                    {
+                        "kind": kind,
+                        "payload": {
+                            "run_id": run_id,
+                            "agent_id": agent_id,
+                            "delta": part,
+                        },
+                        "ts": None,
+                        "t_ms": t,
+                    }
+                )
+            batch.append((hi_i, bundled))
+
+        for hi_i, bundled in sorted(batch, key=lambda x: x[0], reverse=True):
+            if not bundled:
+                continue
+            events[hi_i:hi_i] = bundled
+
+    return events
 
 
 def build_tape_document(

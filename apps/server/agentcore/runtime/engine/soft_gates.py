@@ -27,7 +27,7 @@ def maybe_soft_gate_no_tool_return(
     round_idx: int,
     run_id: str,
     content_before_round: str,
-    emit_reset: Callable[[], None],
+    emit_reset: Callable[[str], None],
 ) -> tuple[LoopDirective, str | None]:
     """Possibly discard a captain wrap-up draft and inject a soft gate.
 
@@ -53,7 +53,7 @@ def maybe_soft_gate_no_tool_return(
             trigger="long_content",
         )
     ):
-        emit_reset()
+        emit_reset("soft_gate")
         return Continue(), content_before_round
     if (
         isinstance(directive, Return)
@@ -67,6 +67,6 @@ def maybe_soft_gate_no_tool_return(
             role=role,
         )
     ):
-        emit_reset()
+        emit_reset("soft_gate")
         return Continue(), content_before_round
     return directive, None

@@ -417,9 +417,12 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       });
     }, [onChromeState, uploading, expanded, rootStatus]);
 
+    const canMutate = source.caps.edit;
+    const canUpload = source.caps.transfer && canMutate;
+
     const onDragOverRoot = (e: React.DragEvent) => {
       if (e.dataTransfer.types.includes(DRAG_MIME)) setDropTarget(null);
-      else if (source.caps.transfer) {
+      else if (canUpload) {
         e.preventDefault();
         setDragOver(true);
       }
@@ -430,18 +433,19 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       const raw = e.dataTransfer.getData(DRAG_MIME);
       if (raw) {
         e.preventDefault();
+        if (!canMutate) return;
         const p = parseDragPayload(raw);
         if (p && p.sourceId === source.id) void moveInto(p.path, "");
         return;
       }
-      if (source.caps.transfer && e.dataTransfer.files.length > 0) {
+      if (canUpload && e.dataTransfer.files.length > 0) {
         e.preventDefault();
         void upload(e.dataTransfer.files, "");
       }
     };
 
     // 隐藏的上传 input 始终渲染（即使无工具栏的嵌入模式也要能经 triggerUpload 触发）。
-    const uploadInput = source.caps.transfer ? (
+    const uploadInput = canUpload ? (
       <input
         ref={uploadRef}
         type="file"
@@ -493,9 +497,11 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
         icon={<FileText size={22} className="text-muted-foreground/40" />}
         title="暂无文件"
         hint={
-          source.caps.transfer
+          canUpload
             ? "拖拽文件到此处，或点「上传」「新建」开始。"
-            : "点「新建」开始，或在此文件夹放入文件。"
+            : canMutate
+              ? "点「新建」开始，或在此文件夹放入文件。"
+              : "此工作区为只读。"
         }
       />
     ) : (
@@ -588,7 +594,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
         {uploadInput}
         {!hideToolbar && (
           <div className="flex shrink-0 items-center gap-1 px-3 py-2">
-            {source.caps.transfer && (
+            {canUpload && (
               <Button
                 className="disabled:opacity-60"
                 disabled={uploading}
@@ -604,22 +610,26 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
                 上传
               </Button>
             )}
-            <SimpleTooltip label="新建文件">
-              <IconButton
-                onClick={() => openCreate("", "file")}
-                aria-label="新建文件"
-              >
-                <FilePlus size={14} />
-              </IconButton>
-            </SimpleTooltip>
-            <SimpleTooltip label="新建文件夹">
-              <IconButton
-                onClick={() => openCreate("", "dir")}
-                aria-label="新建文件夹"
-              >
-                <FolderPlus size={14} />
-              </IconButton>
-            </SimpleTooltip>
+            {canMutate && (
+              <>
+                <SimpleTooltip label="新建文件">
+                  <IconButton
+                    onClick={() => openCreate("", "file")}
+                    aria-label="新建文件"
+                  >
+                    <FilePlus size={14} />
+                  </IconButton>
+                </SimpleTooltip>
+                <SimpleTooltip label="新建文件夹">
+                  <IconButton
+                    onClick={() => openCreate("", "dir")}
+                    aria-label="新建文件夹"
+                  >
+                    <FolderPlus size={14} />
+                  </IconButton>
+                </SimpleTooltip>
+              </>
+            )}
             <div className="flex-1" />
             {expanded.size > 0 && (
               <SimpleTooltip label="全部折叠">
@@ -645,7 +655,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
           </div>
         )}
 
-        {dragOver && source.caps.transfer && (
+        {dragOver && canUpload && (
           <div className="mx-3 mb-2 shrink-0 rounded-lg border border-dashed border-primary bg-primary/5 px-3 py-4 text-center text-xs text-primary">
             松开以上传到此处
           </div>

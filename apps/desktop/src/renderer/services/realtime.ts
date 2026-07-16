@@ -1,3 +1,4 @@
+import { invalidateAllSharedSpaces } from "@/hooks/useSharedSpaces";
 import { queryClient } from "@/lib/queryClient";
 import { notifyInfo } from "@/lib/toast";
 import { BASE_URL, notifyUnauthorized, tryRefresh } from "@/services/api";
@@ -35,6 +36,17 @@ interface ChatMessageEvent {
   type: "chat_message";
   chat_id: string;
   message: ChatMessageDetail;
+}
+
+/** 多人共享空间：someone invited me (`shared_space_invite`) or a member / their
+ * agent changed a space I'm in (`shared_space_changed`). Firehose is a nudge
+ * only — the durable paths are `GET /v1/shared-spaces/invites/pending` (loaded
+ * with the files rail) and the space event ledger, so handling = invalidate the
+ * shared-space queries (+ a heads-up toast for invites). */
+interface SharedSpaceInviteEvent {
+  type: "shared_space_invite";
+  space_id: string;
+  space_name?: string;
 }
 
 /** 记忆更新对话内可见 (§1.6): one offline-consolidation pass that changed a memory
@@ -101,6 +113,18 @@ function handleFrame(frame: string): void {
       if (!cardShown) {
         notifyInfo("AI 刚刚更新了你的记忆");
       }
+    } else if (event.type === "shared_space_invite") {
+      const e = event as SharedSpaceInviteEvent;
+      invalidateAllSharedSpaces();
+      notifyInfo(
+        e.space_name
+          ? `你被邀请加入共享空间「${e.space_name}」`
+          : "你有新的共享空间邀请",
+      );
+    } else if (event.type === "shared_space_changed") {
+      // Refetch space lists / events / mounted trees; the ledger dialog and the
+      // files rail pick the change up via their invalidated queries.
+      invalidateAllSharedSpaces();
     }
     // "ready" and any other event types: no-op here.
   } catch {

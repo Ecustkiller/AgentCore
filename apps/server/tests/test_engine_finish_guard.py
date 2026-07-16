@@ -100,8 +100,9 @@ async def test_out_of_range_citation_reworks_then_clean_finish():
     steers = [m for m in messages if m.role == "user" and m.content and "核验未通过" in m.content]
     assert len(steers) == 1
     assert "[1]" in steers[0].content
-    # 发出了一次 content_reset（清空已流式到气泡的违规正文）。
-    assert len(_resets(sink)) == 1
+    # 发出了一次 content_reset（清空已流式到气泡的违规正文），且 reason=finish_guard
+    # （唯一折出「已按交付规范重写」chip 的 reason）。
+    assert [e.payload.get("reason") for e in _resets(sink)] == ["finish_guard"]
 
 
 async def test_clean_citation_finishes_without_rework():
@@ -158,7 +159,7 @@ async def test_ceo_structural_defect_reworks():
 async def test_worker_structural_defect_reworks_via_on_reset():
     # 统一底线·worker 路径：结构缺陷照样回炉，但重置走 on_reset（run_output_reset），
     # 而非 content_reset；引用查仍跳过。
-    resets: list[bool] = []
+    resets: list[str] = []
     provider = _ScriptedProvider(
         [
             [_content_chunk("草稿：\n```json\n```")],  # 声明 json 却空体
@@ -169,9 +170,10 @@ async def test_worker_structural_defect_reworks_via_on_reset():
         provider,
         citation_sink=[],
         annotate_citations=False,
-        on_reset=lambda: resets.append(True),
+        on_reset=resets.append,
     )
     assert rounds == 2
     assert content == "修正后的产出，无代码块。"
-    assert len(resets) == 1  # worker 的重置回调被触发
+    # worker 的重置回调被触发，且 reason=finish_guard（唯一折出 rework chip 的 reason）。
+    assert resets == ["finish_guard"]
     assert _resets(sink) == []  # 没有走 CEO 的 content_reset

@@ -58,8 +58,8 @@ async def handle_tool_calls_round(
     role: str,
     gate_escalation_sink: list[dict[str, Any]] | None,
     deliverable_only: bool,
-    on_reset: Callable[[], None] | None,
-    emit_reset: Callable[[], None],
+    on_reset: Callable[[str], None] | None,
+    emit_reset: Callable[[str], None],
     content_before_round: str,
     final_content: str,
     round_result_content: str,
@@ -162,7 +162,7 @@ async def handle_tool_calls_round(
         # narration stays visible there (透明可见), only its persisted content
         # (messages.content, 旁路 conformance) is trimmed.
         if on_reset is not None:
-            emit_reset()
+            emit_reset("narration")
         final_content = content_before_round
     controller.record(outcome.attempts)
     # Mark post-delegate mode if delegate was called

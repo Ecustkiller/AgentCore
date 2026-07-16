@@ -260,19 +260,32 @@ describe("conversation store", () => {
       expect(msg.process).toEqual([{ kind: "content", text: "答案" }]);
     });
 
-    // 交付前核验回炉（content_reset）：done 轮草稿未过轻层核验（如编造引用），清空已流式的
-    // 正文 + 弹掉尾部 content 步，保留思考步，并追加 rework chip——让重写版替换草稿而非追加拼接。
+    // 交付前核验回炉（content_reset reason=finish_guard）：done 轮草稿未过轻层核验（如编造
+    // 引用），清空已流式的正文 + 弹掉尾部 content 步，保留思考步，并追加 rework chip——让重写
+    // 版替换草稿而非追加拼接。
     it("resetStreamingContent clears content + trailing content step, keeps reasoning", () => {
       store().createAssistantMessage();
       store().appendReasoningToLastMessage("先想一下");
       store().appendToLastMessage("草稿 [9]");
-      store().resetStreamingContent();
+      store().resetStreamingContent("finish_guard");
       const msg = rt().messages[0];
       expect(msg.content).toBe("");
       expect(msg.process).toEqual([
         { kind: "reasoning", text: "先想一下" },
         { kind: "rework" },
       ]);
+    });
+
+    // 非 finish_guard 的 reset（如 LLM 流式透明重试）：清正文照旧，但【不】折 rework chip
+    // ——基础设施重试不是「按交付规范重写」（误报根治）。
+    it("resetStreamingContent with reason=retry leaves no rework chip", () => {
+      store().createAssistantMessage();
+      store().appendReasoningToLastMessage("先想一下");
+      store().appendToLastMessage("临时输出");
+      store().resetStreamingContent("retry");
+      const msg = rt().messages[0];
+      expect(msg.content).toBe("");
+      expect(msg.process).toEqual([{ kind: "reasoning", text: "先想一下" }]);
     });
 
     it("resetStreamingContent no-ops when the last message is not assistant", () => {
@@ -284,7 +297,7 @@ describe("conversation store", () => {
         executionId: null,
         isStreaming: false,
       });
-      store().resetStreamingContent();
+      store().resetStreamingContent("finish_guard");
       expect(rt().messages[0].content).toBe("用户问题");
     });
   });

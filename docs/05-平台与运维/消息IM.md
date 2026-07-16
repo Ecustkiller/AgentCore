@@ -65,7 +65,7 @@ skip_if:
 | 防遍历 | 搜索按**精确**用户名 / ID，不做模糊枚举 |
 | 隐私自决 | `discoverable`（可否被搜到）/ `who_can_dm`（anyone / contacts），默认开放 |
 | 防骚扰 | 陌生人首条进「消息请求」（`chat_members.state=pending`），对方回信前受限 |
-| 拉黑 | `user_blocks` 对称，断 DM + 互隐搜索 |
+| 拉黑 | `user_blocks` 对称，断 DM + 互隐搜索；共享空间联动：挡新邀请 + 自动拒双方 pending（不自动移除已有成员，见 [双模式工作区 §十一](/docs/02-架构/双模式工作区.md)） |
 | 限流 | 发消息复用按用户限流（`conversation/rate_limit.py`） |
 | IDOR | → 见 [`认证与会话.md` §八](/docs/05-平台与运维/认证与会话.md) |
 

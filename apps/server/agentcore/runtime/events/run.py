@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentcore.core.types import new_id
 from agentcore.runtime.events.types import EventType, SSEEvent
+
+if TYPE_CHECKING:
+    from agentcore.runtime.events.payloads.chat import ResetReason
 
 
 def _wire_cost(cost: dict[str, Any] | None) -> dict[str, Any]:
@@ -129,16 +132,18 @@ def run_output_delta(run_id: str, agent_id: str, delta: str) -> SSEEvent:
     )
 
 
-def run_output_reset(run_id: str, agent_id: str) -> SSEEvent:
-    """交付前核验回炉时清掉这个 worker 卡片已流式累积的草稿正文。
+def run_output_reset(run_id: str, agent_id: str, reason: ResetReason) -> SSEEvent:
+    """清掉这个 worker 卡片已流式累积的草稿正文（``content_reset`` 的 worker 对偶）。
 
-    ``content_reset`` 的 worker 对偶：done 轮正文已逐 token 经 ``run_output_delta`` emit 到
-    run 节点，无法「收回」，故 finish_guard 命中回炉时发本事件——前端清该 agent 的
-    ``outputChunks``，重写版重新流式，呈现为「违规版 → 修正版」一次干净替换而非追加。
-    transport-only、不进 journal（重载时 worker 产出由 ``message_final`` fact 重建）。"""
+    done 轮正文已逐 token 经 ``run_output_delta`` emit 到 run 节点，无法「收回」，故引擎
+    丢弃草稿时发本事件——前端清该 agent 的 ``outputChunks``，重写版重新流式，呈现为一次
+    干净替换而非追加。``reason`` 必填（见 payloads.chat.ResetReason）：仅 ``finish_guard``
+    （交付前核验回炉）折出「已按交付规范重写」痕迹（didRework），其余 reason（retry /
+    narration / …）只清正文、不留 chip。transport-only、不进 journal（重载时 worker 产出由
+    ``message_final`` fact 重建；rework 痕迹经 run_process_* 的 rework 步持久化）。"""
     return SSEEvent(
         type=EventType.RUN_OUTPUT_RESET,
-        payload={"run_id": run_id, "agent_id": agent_id},
+        payload={"run_id": run_id, "agent_id": agent_id, "reason": reason},
     )
 
 

@@ -20,6 +20,18 @@ export const workspaceKeys = {
   list: ["workspaces", "list"] as const,
 };
 
+/** 多人共享空间（`/v1/shared-spaces`）— 列表 / 邀请 / 成员 / 流水 / 会话挂载. */
+export const sharedSpaceKeys = {
+  all: ["shared-spaces"] as const,
+  list: ["shared-spaces", "list"] as const,
+  pendingInvites: ["shared-spaces", "pending-invites"] as const,
+  detail: (spaceId: string) => ["shared-spaces", "detail", spaceId] as const,
+  members: (spaceId: string) => ["shared-spaces", "members", spaceId] as const,
+  events: (spaceId: string) => ["shared-spaces", "events", spaceId] as const,
+  mounts: (conversationId: string) =>
+    ["shared-spaces", "mounts", conversationId] as const,
+};
+
 export const llmKeyKeys = {
   all: ["llm-key"] as const,
   status: ["llm-key", "status"] as const,

@@ -12,6 +12,7 @@ import {
 import type {
   Citation,
   ProcessStep,
+  ResetReason,
   ToolUseEndPayload,
   ToolUseProgressPayload,
   ToolUseStartPayload,
@@ -68,11 +69,19 @@ export function foldContentDelta(
   };
 }
 
-export function foldContentReset(state: MessageLaneState): MessageLaneState {
+/** 草稿丢弃（`content_reset`）：清正文标量 + 弹掉尾部 content 步。仅
+ * `reason === "finish_guard"`（交付前核验回炉）折出「已按交付规范重写」rework chip；
+ * 其余 reason（retry / soft_gate / ask_user / …）只清正文、不留痕——LLM 网络重试、
+ * 软门控打回等基础设施信号不是「按交付规范重写」（误报根治，镜像后端 oracle）。 */
+export function foldContentReset(
+  state: MessageLaneState,
+  reason: ResetReason,
+): MessageLaneState {
+  const cleared = dropTrailingContentSteps(state.process);
   return {
     ...state,
     content: "",
-    process: appendReworkStep(dropTrailingContentSteps(state.process)),
+    process: reason === "finish_guard" ? appendReworkStep(cleared) : cleared,
   };
 }
 

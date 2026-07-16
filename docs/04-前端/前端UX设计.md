@@ -469,6 +469,8 @@ skip_if:
 
 **回合内文件呈现（✅ 已落地）**：**文件产物内联卡**——回合若写了文件，答复正文下方挂一张 `FileArtifactsCard` 列出本回合产物，点行经 `useSidePanelStore` 在工作区面板预览（单 Agent 取 `process`、多 Agent 取 execution 投影，去重合并）。原「工作区升级提示」（`workspace_promoted` 内联轻提示）已随 auto-promote 链路整体移除。→ 见代码 `components/chat/FileArtifactsCard.tsx`、`components/chat/message-bubble/AssistantMessage.tsx`。
 
+**共享空间（✅ 2026-07-16 · 多人云端共享盘）**：`/files` 左栏新增「共享空间」分区，与项目、裸聊 scratch 并列——树复用同一 `FileTree`（按 `shared:<space_id>` 寻址），差异全在分区头与右键：新建空间、待处理邀请（接受/拒绝，`PendingSharedInvites`）、成员管理（邀请走 IM 精确搜人 + 角色三档 + 移除/改角色/退出，`SharedSpaceMembersDialog`）、变更流水（「谁（或谁的 Agent）改的」，`SharedSpaceEventsDialog`）。**会话侧挂载**：云执行对话的工作区面板挂 `SharedMountsSection`——挂载/卸载空间（角色映射读写面），本地会话不显示。**实时**：firehose `shared_space_invite`（toast + 失效 pending 查询）/ `shared_space_changed`（失效空间列表/流水/挂载树查询），见 `services/realtime.ts`。产品决策与机制 → [双模式工作区 §十一](/docs/02-架构/双模式工作区.md)。→ 见代码 `components/files/sharedSpaces/`、`components/workspace/SharedMountsSection.tsx`、`hooks/useSharedSpaces.ts`、`services/sharedSpaces.ts`。
+
 ---
 
 ## 十、详情面板与委派展示 ✅ 已确定

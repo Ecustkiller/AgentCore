@@ -208,7 +208,7 @@ async def test_resume_sets_reinjection_and_reset_skips_process_timeline(monkeypa
 
     # Absorb / rework / soft-gate: content_reset after resume wiring.
     sink.emit(content_delta("将被吸收的同轮问句"))
-    sink.emit(content_reset())
+    sink.emit(content_reset("ask_user"))
 
     # Client stream: reinjected delta restores pre_pause base.
     history_types = [e.type for e in sink._history]

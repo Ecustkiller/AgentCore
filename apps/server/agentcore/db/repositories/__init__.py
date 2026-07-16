@@ -46,6 +46,7 @@ from .runs import (
     TurnMetricsRepository,
 )
 from .simulation import SimulationRepository
+from .shared_spaces import SharedSpaceRepository
 from .stream_state import TurnStreamStateRepository
 from .users import (
     UserBlockRepository,
@@ -76,6 +77,7 @@ __all__ = [
     "PushDeviceRepository",
     "RefreshTokenRepository",
     "RunSessionRepository",
+    "SharedSpaceRepository",
     "SimulationRepository",
     "TurnJournalRepository",
     "TurnLeaseRepository",

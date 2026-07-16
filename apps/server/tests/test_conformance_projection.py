@@ -681,6 +681,39 @@ def test_resume_content_continuity(projected):
     assert p["runs"][0]["checkpoint"] == {"status": "resolved", "decision": "continue"}
 
 
+def test_single_agent_content_reset_finish_guard_leaves_rework_chip(projected):
+    """finish_guard 回炉：弃稿弹掉尾部 content 步 + 折出 rework chip（唯一留痕的 reason）。"""
+    p = projected["single_agent_content_reset"]
+    assert p["content"] == "依据 [1] 可知……"
+    assert [s["kind"] for s in p["process"]] == ["reasoning", "tool", "rework", "content"]
+    assert p["process"][-1]["text"] == "依据 [1] 可知……"
+
+
+def test_single_agent_retry_reset_leaves_no_trace(projected):
+    """reason=retry（LLM 流式透明重试）：清正文照旧，但【不】折 rework chip——
+    基础设施重试不是「按交付规范重写」（误报根治）。"""
+    p = projected["single_agent_retry_reset"]
+    assert p["content"] == "答案：42。"
+    assert p["process"] == [
+        {"kind": "reasoning", "text": "直接作答。"},
+        {"kind": "content", "text": "答案：42。"},
+    ]
+
+
+def test_worker_deliverable_reset_narration_leaves_no_trace(projected):
+    """worker 旁白回滚（reason=narration）：清卡片草稿照旧，但节点时间线【无】rework 步。"""
+    p = projected["multi_agent_worker_deliverable_reset"]
+    run = p["runs"][0]
+    assert "rework" not in [s["kind"] for s in run["process"]]
+
+
+def test_worker_output_reset_finish_guard_keeps_rework_chip(projected):
+    """worker finish_guard 回炉（统一底线）：节点时间线保留 rework 步。"""
+    p = projected["multi_agent_worker_output_reset"]
+    run = p["runs"][0]
+    assert "rework" in [s["kind"] for s in run["process"]]
+
+
 def test_resume_content_reset_reinject(projected):
     """G6：content_reset 清标量后重灌 pre_pause delta，再叠重写正文。"""
     p = projected["resume_content_reset_reinject"]

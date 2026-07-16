@@ -259,7 +259,7 @@ def test_content_reset_does_not_journal_discarded_open_content():
         sink.emit(content_delta("将被丢弃"))
         # Still open — not persisted yet.
         assert log.entries() == []
-        sink.emit(content_reset())
+        sink.emit(content_reset("finish_guard"))
         sink.flush_process_to_journal()
         assert log.entries() == []
     finally:

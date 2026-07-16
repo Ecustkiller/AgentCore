@@ -44,6 +44,7 @@ import {
 import type {
   CitationsPayload,
   ContentDeltaPayload,
+  ContentResetPayload,
   ContextBlockWire,
   DebateNarrativeRound,
   DebateResultPayload,
@@ -169,7 +170,10 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         );
         break;
       case "content_reset":
-        messageLane = foldContentReset(messageLane);
+        messageLane = foldContentReset(
+          messageLane,
+          (ev.payload as ContentResetPayload).reason,
+        );
         break;
       case "reasoning_delta":
         messageLane = foldReasoningDelta(

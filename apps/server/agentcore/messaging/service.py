@@ -117,12 +117,16 @@ class MessagingService:
         blocks: UserBlockRepository,
         directory: UserDirectoryRepository,
         events: ChatEventPublisher | None = None,
+        shared_spaces: Any | None = None,
     ) -> None:
         self._users = users
         self._chats = chats
         self._blocks = blocks
         self._directory = directory
         self._events: ChatEventPublisher = events or NullChatEventPublisher()
+        # Optional SharedSpaceRepository — when set, blocking auto-rejects
+        # pending shared-space invites between the pair (D3); does not kick members.
+        self._shared_spaces = shared_spaces
 
     # --- People search (任意搜人 + 护栏) ---
 
@@ -541,6 +545,8 @@ class MessagingService:
         if target is None:
             raise NotFoundError("用户不存在")
         await self._blocks.block(user_id, target_id)
+        if self._shared_spaces is not None:
+            await self._shared_spaces.delete_pending_between(user_id, target_id)
         logger.info("dm.user_blocked", user=user_id, target=target_id)
 
     async def unblock_user(self, *, user_id: str, target_id: str) -> None:

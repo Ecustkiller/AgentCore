@@ -23,6 +23,13 @@ Concurrency: a per-user lock (memory/locks.py) serializes passes for one user, a
 double-trigger idempotent — the second pass sees nothing new and no-ops. The
 scheduler state (timers, turn counts) is in-process, matching the single-server MVP
 posture; multi-process scaling moves it behind the same seam.
+
+Open-turn deferral: a conversation that is MID-TURN — durably paused at a checkpoint
+(e.g. the team_preview 开工卡, which can legitimately sit idle for minutes) or holding
+a fresh RUNNING lease — is skipped WITHOUT advancing the watermark. Its message window
+contains a partial assistant snapshot; consolidating it would surface a premature
+「记忆已更新」card mid-turn and memorize half-finished prose. The turn's own finalize
+re-arms consolidation once it truly ends.
 """
 
 from __future__ import annotations
@@ -42,6 +49,8 @@ from agentcore.db.repositories import (
     ConversationRepository,
     MemoryUpdateRepository,
     MessageRepository,
+    PausedTurnRepository,
+    TurnLeaseRepository,
     UserRepository,
 )
 from agentcore.llm.factory import build_provider
@@ -54,6 +63,22 @@ from agentcore.memory.user_memory import LLMMemoryExtractor
 from agentcore.messaging.hub import default_chat_hub
 
 logger = get_logger(__name__)
+
+
+async def conversation_turn_open(session, conversation_id: str) -> bool:
+    """True when the conversation is MID-TURN: durably paused or live-running.
+
+    Paused = a ``paused_turns`` frame exists (team_preview / plan_review / ask_user —
+    these legitimately sit idle for minutes waiting on the user). Live = a turn lease
+    with a heartbeat fresher than ``turn_lease_ttl_seconds`` (a stale lease is a crash
+    leftover and must not block consolidation forever).
+    """
+    if await PausedTurnRepository(session).exists_for_conversation(conversation_id):
+        return True
+    fresh_after = datetime.now(UTC) - timedelta(seconds=settings.turn_lease_ttl_seconds)
+    return await TurnLeaseRepository(session).exists_fresh_for_conversation(
+        conversation_id, after=fresh_after
+    )
 
 
 async def consolidate_conversation(
@@ -76,6 +101,15 @@ async def consolidate_conversation(
                 latest = await MessageRepository(session).latest_created_at(conversation_id)
                 conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
                 if conv is None or latest is None:
+                    return False
+                # Open-turn deferral (see module docstring): a paused / live turn means
+                # the window holds a partial assistant snapshot — skip WITHOUT advancing
+                # the watermark; finalize re-arms consolidation when the turn ends.
+                if await conversation_turn_open(session, conversation_id):
+                    logger.info(
+                        "memory.consolidation_deferred_open_turn",
+                        conversation_id=conversation_id,
+                    )
                     return False
                 # Master switch off (Agent记忆与知识系统 §一): don't grow memory. Advance
                 # the watermark past these messages so re-enabling later won't

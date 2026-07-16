@@ -55,6 +55,14 @@ const CLOUD_CAPS = {
   snapshots: true,
 } as const;
 
+/** Viewer / readonly shared-space: browse + download, no mutate / in-panel edit. */
+const CLOUD_READONLY_CAPS = {
+  watch: false,
+  transfer: true,
+  edit: false,
+  snapshots: false,
+} as const;
+
 /**
  * The addressing-agnostic REST surface a cloud {@link FileSource} needs. The two
  * cloud sources differ only in *how they address* their workspace (conversation id
@@ -89,6 +97,7 @@ function makeCloudSource(
   key: string,
   label: string,
   client: CloudFileClient,
+  caps: typeof CLOUD_CAPS | typeof CLOUD_READONLY_CAPS = CLOUD_CAPS,
 ): FileSource {
   const listTree = async (): Promise<FileNode[]> => {
     const files = await client.listFiles(true);
@@ -103,7 +112,7 @@ function makeCloudSource(
   return {
     id: `workspace:${key}`,
     label,
-    caps: CLOUD_CAPS,
+    caps,
     listTree,
     listDir: (dir) => oneLevel(listTree, dir),
     // Feeds the @ index (文件中枢统一 F4) — flat, files-only, server-pruned/capped.
@@ -171,19 +180,26 @@ export function createWorkspaceSource(
 export function createCloudWorkspaceSource(
   wsId: string,
   label = "工作区",
+  opts?: { readonly?: boolean },
 ): FileSource {
-  return makeCloudSource(wsId, label, {
-    listFiles: (recursive) => wsListFiles(wsId, recursive),
-    read: (path) => wsReadFile(wsId, path),
-    readForEdit: (path) => wsReadFileForEdit(wsId, path),
-    writeText: (path, input) => wsWriteFileText(wsId, path, input),
-    upload: (path, body) => wsUploadFile(wsId, path, body),
-    createDir: (path) => wsCreateDir(wsId, path),
-    move: (src, dst) => wsMoveFile(wsId, src, dst),
-    delete: (path) => wsDeleteFile(wsId, path),
-    download: (path, filename) => wsDownloadFile(wsId, path, filename),
-    listFileIndex: () => wsListFileIndex(wsId),
-  });
+  const readonly = !!opts?.readonly;
+  return makeCloudSource(
+    wsId,
+    label,
+    {
+      listFiles: (recursive) => wsListFiles(wsId, recursive),
+      read: (path) => wsReadFile(wsId, path),
+      readForEdit: (path) => wsReadFileForEdit(wsId, path),
+      writeText: (path, input) => wsWriteFileText(wsId, path, input),
+      upload: (path, body) => wsUploadFile(wsId, path, body),
+      createDir: (path) => wsCreateDir(wsId, path),
+      move: (src, dst) => wsMoveFile(wsId, src, dst),
+      delete: (path) => wsDeleteFile(wsId, path),
+      download: (path, filename) => wsDownloadFile(wsId, path, filename),
+      listFileIndex: () => wsListFileIndex(wsId),
+    },
+    readonly ? CLOUD_READONLY_CAPS : CLOUD_CAPS,
+  );
 }
 
 /** Derive a single directory level from a source's recursive `listTree`

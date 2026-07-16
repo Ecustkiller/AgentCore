@@ -91,6 +91,24 @@ class TurnLeaseRepository:
         )
         return result.scalar_one_or_none()
 
+    async def exists_fresh_for_conversation(
+        self, conversation_id: str, *, after: datetime
+    ) -> bool:
+        """Whether the conversation has a live turn (lease heartbeat newer than ``after``).
+
+        Stale leases (owner presumed dead, heartbeat past the TTL) do not count — a
+        crashed turn must not keep read-side probes reporting "running" forever.
+        """
+        result = await self._session.execute(
+            select(TurnLeaseRow.message_id)
+            .where(
+                TurnLeaseRow.conversation_id == conversation_id,
+                TurnLeaseRow.heartbeat_at >= after,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def list_expired(self, *, before: datetime, limit: int) -> Sequence[TurnLeaseRow]:
         """Leases whose heartbeat is older than ``before`` (owner presumed dead)."""
         result = await self._session.execute(

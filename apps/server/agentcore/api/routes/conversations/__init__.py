@@ -24,6 +24,7 @@ from . import (
     llm_window,
     messages,
     run_redirect,
+    shared_mounts,
     snapshots,
     turns,
 )
@@ -43,6 +44,7 @@ router.include_router(run_redirect.router)
 router.include_router(debate_steer.router)
 router.include_router(binding.router)
 router.include_router(external_grants.router)
+router.include_router(shared_mounts.router)
 router.include_router(handoff.router)
 router.include_router(turns.router)
 router.include_router(snapshots.router)

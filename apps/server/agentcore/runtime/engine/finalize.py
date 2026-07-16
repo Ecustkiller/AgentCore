@@ -73,7 +73,7 @@ async def run_finalize_round(
     run_id: str = "",
     hard_tool_free: bool = False,
     inject_instruction: bool = True,
-    on_reset: Callable[[], None] | None = None,
+    on_reset: Callable[[str], None] | None = None,
     prior_deliverable: str = "",
 ) -> FinalizeRoundResult:
     """One finalize LLM round: coordination tools only, or tool-free when ``hard_tool_free``."""
@@ -158,7 +158,7 @@ async def force_finalize(
     rounds: int,
     reason: str,
     run_id: str = "",
-    on_reset: Callable[[], None] | None = None,
+    on_reset: Callable[[str], None] | None = None,
 ) -> tuple[str, str, TokenUsage, int, FinalizeRoundResult | None]:
     """Attempt a coordination-tool finalize round, then fall back to tool-free.
 

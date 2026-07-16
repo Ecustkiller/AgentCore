@@ -45,9 +45,11 @@ from agentcore.db.repositories import (
     UserLlmKeyRepository,
     UserRepository,
 )
+from agentcore.db.repositories.shared_spaces import SharedSpaceRepository
 from agentcore.messaging import MessagingService
 from agentcore.messaging.hub import HubChatEventPublisher, default_chat_hub
 from agentcore.security.tokens import decode_access_token_claims, decode_access_token_family
+from agentcore.shared_spaces.service import SharedSpaceService
 from agentcore.storage.assets import AssetStorage, build_asset_storage
 
 # Cookie name carrying the access JWT (set by the auth routes).
@@ -221,6 +223,26 @@ def get_messaging_service(
     return MessagingService(
         users=UserRepository(session),
         chats=ChatRepository(session),
+        blocks=UserBlockRepository(session),
+        directory=UserDirectoryRepository(session),
+        events=HubChatEventPublisher(default_chat_hub()),
+        shared_spaces=SharedSpaceRepository(session),
+    )
+
+
+def get_shared_space_repo(
+    session: AsyncSession = Depends(get_db),
+) -> SharedSpaceRepository:
+    return SharedSpaceRepository(session)
+
+
+def get_shared_space_service(
+    session: AsyncSession = Depends(get_db),
+) -> SharedSpaceService:
+    """Build SharedSpaceService (多人共享空间) on the request session."""
+    return SharedSpaceService(
+        spaces=SharedSpaceRepository(session),
+        users=UserRepository(session),
         blocks=UserBlockRepository(session),
         directory=UserDirectoryRepository(session),
         events=HubChatEventPublisher(default_chat_hub()),

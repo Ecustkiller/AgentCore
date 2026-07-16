@@ -14,6 +14,7 @@ from agentcore.db.repositories import (
     ConversationShareRepository,
     UserLlmKeyRepository,
 )
+from agentcore.shared_spaces.service import SharedSpaceService
 from agentcore.storage.assets import AssetStorage
 
 
@@ -25,19 +26,24 @@ async def cleanup_account_resources(
     shares: ConversationShareRepository,
     llm_keys: UserLlmKeyRepository,
     assets: AssetStorage,
+    shared_spaces: SharedSpaceService | None = None,
 ) -> None:
     """Reclaim everything a 注销 account owns outside the auth domain.
 
     Soft-deletes the user's conversations (the retention sweeper later reclaims their
     workspaces), revokes every public share link the user created (no shared snapshot
-    outlives the account), drops the BYOK key (no ciphertext outlives it), and removes
-    the avatar object. ``avatar_key`` must be captured by the caller *before* the user
-    row is anonymized (soft-delete nulls it). Each step is independently idempotent, so
-    re-running on an already-注销 account is harmless. The append-only cost ledger
-    (不变量①) is intentionally untouched.
+    outlives the account), drops the BYOK key (no ciphertext outlives it), removes
+    the avatar object, and cascades shared-space ownership / membership (owner →
+    delete spaces + disk; member → drop membership rows + pending invites).
+    ``avatar_key`` must be captured by the caller *before* the user row is anonymized
+    (soft-delete nulls it). Each step is independently idempotent, so re-running on
+    an already-注销 account is harmless. The append-only cost ledger (不变量①) is
+    intentionally untouched.
     """
     await conversations.soft_delete_all_for_user(user_id)
     await shares.revoke_all_for_user(user_id)
     await llm_keys.delete(user_id)
     if avatar_key:
         await assets.delete(avatar_key)
+    if shared_spaces is not None:
+        await shared_spaces.cleanup_for_deleted_user(user_id)

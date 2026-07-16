@@ -253,7 +253,7 @@ def decide_no_tool_round(
 def apply_finish_guard_rework(
     *,
     messages: list[LLMMessage],
-    emit_reset: Callable[[], None],
+    emit_reset: Callable[[str], None],
     final_content: str,
     content_before_round: str,
     round_idx: int,
@@ -266,7 +266,8 @@ def apply_finish_guard_rework(
 
     ``emit_reset`` clears the producer's already-streamed draft on the right surface —
     ``content_reset`` for the CEO bubble, ``run_output_reset`` for a worker card — so the
-    rewrite presents as a clean「违规版 → 修正版」replacement, not an append (统一底线)."""
+    rewrite presents as a clean「违规版 → 修正版」replacement, not an append (统一底线).
+    reason=``finish_guard`` is the ONLY reset that folds into the「已按交付规范重写」chip."""
     reworks = finish_guard(
         final_content,
         citation_count=len(citation_sink or []),
@@ -279,7 +280,7 @@ def apply_finish_guard_rework(
         attempt=finish_guard_reworks + 1,
         issues=len(reworks),
     )
-    emit_reset()
+    emit_reset("finish_guard")
     messages.append(LLMMessage(role="user", content=steer))
     record_turn_fact(
         NoteFact(

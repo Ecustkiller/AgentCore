@@ -2200,6 +2200,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/conversations/{conversation_id}/workspace/shared-mounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Shared Mounts */
+        get: operations["list_shared_mounts_v1_conversations__conversation_id__workspace_shared_mounts_get"];
+        put?: never;
+        /**
+         * Mount Shared Space
+         * @description Mount a shared space into a **cloud** conversation (D2).
+         *
+         *     Local-bound conversations (sidecar) cannot mount — no cross-runtime dual root.
+         */
+        post: operations["mount_shared_space_v1_conversations__conversation_id__workspace_shared_mounts_post"];
+        /** Revoke Shared Mounts */
+        delete: operations["revoke_shared_mounts_v1_conversations__conversation_id__workspace_shared_mounts_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/demo-tape": {
         parameters: {
             query?: never;
@@ -2890,6 +2914,166 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/shared-spaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Shared Spaces */
+        get: operations["list_shared_spaces_v1_shared_spaces_get"];
+        put?: never;
+        /** Create Shared Space */
+        post: operations["create_shared_space_v1_shared_spaces_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/shared-spaces/invites/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Pending Invites */
+        get: operations["list_pending_invites_v1_shared_spaces_invites_pending_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/shared-spaces/{space_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Shared Space */
+        get: operations["get_shared_space_v1_shared_spaces__space_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Shared Space */
+        delete: operations["delete_shared_space_v1_shared_spaces__space_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Shared Space */
+        patch: operations["update_shared_space_v1_shared_spaces__space_id__patch"];
+        trace?: never;
+    };
+    "/v1/shared-spaces/{space_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Events */
+        get: operations["list_events_v1_shared_spaces__space_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/shared-spaces/{space_id}/invites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Invite Member */
+        post: operations["invite_member_v1_shared_spaces__space_id__invites_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/shared-spaces/{space_id}/invites/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept Invite */
+        post: operations["accept_invite_v1_shared_spaces__space_id__invites_accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/shared-spaces/{space_id}/invites/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Invite */
+        post: operations["reject_invite_v1_shared_spaces__space_id__invites_reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/shared-spaces/{space_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Members */
+        get: operations["list_members_v1_shared_spaces__space_id__members_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/shared-spaces/{space_id}/members/{member_user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Or Leave Member
+         * @description Owner removes ``member_user_id``, or a member leaves when targeting self.
+         */
+        delete: operations["remove_or_leave_member_v1_shared_spaces__space_id__members__member_user_id__delete"];
+        options?: never;
+        head?: never;
+        /** Change Member Role */
+        patch: operations["change_member_role_v1_shared_spaces__space_id__members__member_user_id__patch"];
+        trace?: never;
+    };
     "/v1/simulation/runs": {
         parameters: {
             query?: never;
@@ -3512,7 +3696,7 @@ export interface paths {
         };
         /**
          * List Workspaces
-         * @description Enumerate project workspaces + bare-chat scratches that have files or a local bind.
+         * @description Enumerate project workspaces + bare-chat scratches + shared spaces.
          */
         get: operations["list_workspaces_v1_workspaces_get"];
         put?: never;
@@ -5156,6 +5340,11 @@ export interface components {
              */
             expires_in_days: (7 | 30) | null;
         };
+        /** CreateSharedSpaceRequest */
+        CreateSharedSpaceRequest: {
+            /** Name */
+            name: string;
+        };
         /** CreateSimulationRunRequest */
         CreateSimulationRunRequest: {
             manifest?: components["schemas"]["RunManifest"] | null;
@@ -5724,6 +5913,17 @@ export interface components {
             /** Used By Username */
             used_by_username?: string | null;
         };
+        /** InviteSharedSpaceMemberRequest */
+        InviteSharedSpaceMemberRequest: {
+            /**
+             * Role
+             * @default editor
+             * @enum {string}
+             */
+            role: "editor" | "viewer";
+            /** User Id */
+            user_id: string;
+        };
         /** InviteStatsResponse */
         InviteStatsResponse: {
             /** Active */
@@ -6187,6 +6387,16 @@ export interface components {
              * @default true
              */
             required: boolean;
+        };
+        /**
+         * MountSharedSpaceRequest
+         * @description Mount a shared space into a cloud conversation as ``shared/<alias>/``.
+         */
+        MountSharedSpaceRequest: {
+            /** Alias Hint */
+            alias_hint?: string | null;
+            /** Space Id */
+            space_id: string;
         };
         /**
          * MoveFileRequest
@@ -7070,6 +7280,128 @@ export interface components {
             /** Url */
             url: string;
         };
+        /** SharedMountItem */
+        SharedMountItem: {
+            /** Alias */
+            alias: string;
+            /** Label */
+            label: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "readonly" | "write";
+            /** Namespace */
+            namespace: string;
+            /** Space Id */
+            space_id: string;
+            /** Ws Id */
+            ws_id: string;
+        };
+        /** SharedMountListResponse */
+        SharedMountListResponse: {
+            /** Data */
+            data: components["schemas"]["SharedMountItem"][];
+        };
+        /** SharedMountResponse */
+        SharedMountResponse: {
+            mount: components["schemas"]["SharedMountItem"];
+        };
+        /** SharedSpaceEventListResponse */
+        SharedSpaceEventListResponse: {
+            /** Data */
+            data: components["schemas"]["SharedSpaceEventSummary"][];
+            /** Total */
+            total: number;
+        };
+        /** SharedSpaceEventSummary */
+        SharedSpaceEventSummary: {
+            /** Action */
+            action: string;
+            /** Actor User Id */
+            actor_user_id: string | null;
+            /**
+             * Actor Via
+             * @enum {string}
+             */
+            actor_via: "user" | "agent";
+            /** Created At */
+            created_at?: string | null;
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            } | null;
+            /** Id */
+            id: string;
+            /** Path */
+            path?: string | null;
+            /** Space Id */
+            space_id: string;
+        };
+        /** SharedSpaceListResponse */
+        SharedSpaceListResponse: {
+            /** Data */
+            data: components["schemas"]["SharedSpaceSummary"][];
+            /** Total */
+            total: number;
+        };
+        /** SharedSpaceMemberListResponse */
+        SharedSpaceMemberListResponse: {
+            /** Data */
+            data: components["schemas"]["SharedSpaceMemberSummary"][];
+            /** Total */
+            total: number;
+        };
+        /** SharedSpaceMemberSummary */
+        SharedSpaceMemberSummary: {
+            /** Display Name */
+            display_name?: string | null;
+            /** Invited By */
+            invited_by?: string | null;
+            /** Joined At */
+            joined_at?: string | null;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "owner" | "editor" | "viewer";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "accepted" | "pending";
+            /** User Id */
+            user_id: string;
+            /** Username */
+            username?: string | null;
+        };
+        /** SharedSpaceSummary */
+        SharedSpaceSummary: {
+            /** Created At */
+            created_at?: string | null;
+            /** Id */
+            id: string;
+            /** Member Count */
+            member_count: number;
+            /**
+             * My Role
+             * @enum {string}
+             */
+            my_role: "owner" | "editor" | "viewer";
+            /**
+             * My State
+             * @enum {string}
+             */
+            my_state: "accepted" | "pending";
+            /** Name */
+            name: string;
+            /** Owner User Id */
+            owner_user_id: string;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Ws Id */
+            ws_id: string;
+        };
         /** ShowEpisodeListResponse */
         ShowEpisodeListResponse: {
             /** Data */
@@ -7817,6 +8149,19 @@ export interface components {
             display_name?: string | null;
             /** Email */
             email?: string | null;
+        };
+        /** UpdateSharedSpaceMemberRequest */
+        UpdateSharedSpaceMemberRequest: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "editor" | "viewer";
+        };
+        /** UpdateSharedSpaceRequest */
+        UpdateSharedSpaceRequest: {
+            /** Name */
+            name?: string | null;
         };
         /**
          * UploadFileResponse
@@ -12289,6 +12634,118 @@ export interface operations {
             };
         };
     };
+    list_shared_mounts_v1_conversations__conversation_id__workspace_shared_mounts_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedMountListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mount_shared_space_v1_conversations__conversation_id__workspace_shared_mounts_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MountSharedSpaceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedMountResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_shared_mounts_v1_conversations__conversation_id__workspace_shared_mounts_delete: {
+        parameters: {
+            query?: {
+                alias?: string | null;
+                space_id?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_demo_tape_catalog_v1_demo_tape_get: {
         parameters: {
             query?: never;
@@ -13675,6 +14132,476 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_shared_spaces_v1_shared_spaces_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedSpaceListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_shared_space_v1_shared_spaces_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSharedSpaceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedSpaceSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_pending_invites_v1_shared_spaces_invites_pending_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedSpaceListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_shared_space_v1_shared_spaces__space_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                space_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedSpaceSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_shared_space_v1_shared_spaces__space_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                space_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_shared_space_v1_shared_spaces__space_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                space_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSharedSpaceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedSpaceSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_events_v1_shared_spaces__space_id__events_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                before_id?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                space_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedSpaceEventListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    invite_member_v1_shared_spaces__space_id__invites_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                space_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InviteSharedSpaceMemberRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedSpaceMemberSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_invite_v1_shared_spaces__space_id__invites_accept_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                space_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedSpaceSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_invite_v1_shared_spaces__space_id__invites_reject_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                space_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_members_v1_shared_spaces__space_id__members_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                space_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedSpaceMemberListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_or_leave_member_v1_shared_spaces__space_id__members__member_user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                space_id: string;
+                member_user_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_member_role_v1_shared_spaces__space_id__members__member_user_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                space_id: string;
+                member_user_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSharedSpaceMemberRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedSpaceMemberSummary"];
                 };
             };
             /** @description Validation Error */

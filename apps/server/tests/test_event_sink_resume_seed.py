@@ -85,7 +85,7 @@ def test_content_reset_pops_live_only():
     )
     sink.emit(content_delta("live body"))
     assert sink.streamed_content() == "live body"
-    sink.emit(content_reset())
+    sink.emit(content_reset("finish_guard"))
     assert sink.streamed_content() == ""
     # Seeded content step survives; structural marker keeps process_timeline alive.
     timeline = sink.process_timeline()
@@ -233,7 +233,7 @@ def test_content_reset_reinjection_history_and_sse_skip_process_and_checkpointer
 
     sink.emit(content_delta("draft"))
     assert sink.streamed_content() == "draft"
-    sink.emit(content_reset())
+    sink.emit(content_reset("finish_guard"))
 
     # Live process: reset popped draft; reinjected delta did NOT re-enter process.
     assert sink.streamed_content() == ""
@@ -273,7 +273,7 @@ def test_content_reset_reinjection_history_and_sse_skip_process_and_checkpointer
 def test_reinjection_hook_unset_is_status_quo():
     sink = EventSink()
     sink.emit(content_delta("draft"))
-    sink.emit(content_reset())
+    sink.emit(content_reset("finish_guard"))
     assert sink.streamed_content() == ""
     # No extra content delta after reset in history.
     after_reset = False

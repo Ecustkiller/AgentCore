@@ -95,7 +95,7 @@ async def react_loop(
     on_content: Callable[[str], None] | None = None,
     on_reasoning: Callable[[str], None] | None = None,
     on_tool_progress: Callable[[str, int], None] | None = None,
-    on_reset: Callable[[], None] | None = None,
+    on_reset: Callable[[str], None] | None = None,
     on_round_begin: Callable[[], list[LLMMessage]] | None = None,
     round_sink: list[int] | None = None,
     raise_on_error: bool = False,
@@ -129,10 +129,12 @@ async def react_loop(
     ``on_tool_progress`` to surface a worker's tool-call ARGUMENT streaming
     (``(tool_name, cumulative_chars)``, throttled) — the only live signal during a
     long file write, which is neither content nor reasoning.
-    ``on_reset`` mirrors that redirection for the finish_guard rework reset: the
+    ``on_reset`` mirrors that redirection for every draft-discard reset: the
     default clears the CEO bubble (``content_reset``); a worker passes ``on_reset``
     to clear its run card (``run_output_reset``) instead — so the rewrite replaces
-    the discarded draft cleanly on whichever surface streamed it (统一底线).
+    the discarded draft cleanly on whichever surface streamed it (统一底线). It takes
+    the ``ResetReason`` (finish_guard / retry / soft_gate / narration / ask_user) —
+    each emit site states WHY, and folds render the rework chip only for finish_guard.
     ``on_round_begin`` (when provided) is called at the top of every round AFTER the
     first; the messages it returns are appended to the window before that round's LLM
     call. A generic「inject context that accrued while the run was working」hook — a
@@ -230,7 +232,7 @@ async def react_loop(
 
     emit_content = on_content or (lambda delta: sink.emit(content_delta(delta)))
     emit_reasoning = on_reasoning or (lambda delta: sink.emit(reasoning_delta(delta)))
-    emit_reset = on_reset or (lambda: sink.emit(content_reset()))
+    emit_reset = on_reset or (lambda reason: sink.emit(content_reset(reason)))
 
     total_usage = TokenUsage()
     final_content = ""

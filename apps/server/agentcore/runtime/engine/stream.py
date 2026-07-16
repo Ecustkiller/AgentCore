@@ -50,7 +50,7 @@ async def stream_llm_round(
     emit_content: Callable[[str], None],
     emit_reasoning: Callable[[str], None],
     on_tool_progress: Callable[[str, int], None] | None = None,
-    on_reset: Callable[[], None] | None = None,
+    on_reset: Callable[[str], None] | None = None,
 ) -> StreamRoundResult:
     """Stream one LLM call. Returns accumulated text plus an optional aborted flag.
 
@@ -95,7 +95,7 @@ async def stream_llm_round(
         empty_raw_preview = None
         aborted = False
         if on_reset is not None:
-            on_reset()
+            on_reset("retry")
 
     loop = asyncio.get_running_loop()
 
@@ -125,7 +125,7 @@ async def stream_llm_round(
                         empty_diagnosis = None
                         empty_raw_preview = None
                         if on_reset is not None:
-                            on_reset()
+                            on_reset("retry")
                         continue
 
                     if chunk.aborted:

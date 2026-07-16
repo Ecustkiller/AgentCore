@@ -97,6 +97,7 @@ export const TOOL_LABELS: Record<string, string> = {
   file_batch: "Batch files",
   // CEO captain tools (surfaced by the bubble's tool_progress / process timeline).
   delegate: "Delegate",
+  debate: "Debate",
   ask_user: "Ask you",
   consult_skill: "Consult skill",
   consult_memory: "Consult memory",
@@ -176,7 +177,8 @@ export interface AgentState {
    * {@link ExecutionRuntime.workerToolPhases} keyed by {@link currentRunId}. Cleared when
    * the tool ends. Drives the node/detail honest waiting line (Queued/Searching/…). */
   toolExecutionLive: { toolName: string; phase: string } | null;
-  /** 交付前核验回炉：本 worker 曾发过 `run_output_reset`（节点轻 chip）。 */
+  /** 交付前核验回炉：本 worker 曾发过 reason=finish_guard 的 `run_output_reset`
+   * （节点轻 chip「已按交付规范重写」）。retry / narration 等 reset 不置位。 */
   didRework?: boolean;
 }
 

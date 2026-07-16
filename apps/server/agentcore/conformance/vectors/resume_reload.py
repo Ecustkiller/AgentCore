@@ -109,7 +109,7 @@ def _resume_content_reset_reinject() -> list[SSEEvent]:
     return [
         *_through_plan_review_resolved(),
         content_delta(_DRAFT_DISCARDED),
-        content_reset(),
+        content_reset("finish_guard"),
         # G6 display-only reinject encoded as ordinary content_delta (oracle 零改动).
         content_delta(_PRE_PAUSE + "\n\n"),
         content_delta(_REWRITE),

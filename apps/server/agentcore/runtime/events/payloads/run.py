@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from pydantic import Field
+
 from agentcore.runtime.events.payloads._base import WirePayload, absent
+from agentcore.runtime.events.payloads.chat import ResetReason
 from agentcore.runtime.events.payloads.shared import CostBreakdown, RunDebrief, UsageBreakdown
 from agentcore.runtime.runs.types import RunKind
 
@@ -117,6 +120,8 @@ class RunOutputDeltaPayload(WirePayload):
 class RunOutputResetPayload(WirePayload):
     run_id: str
     agent_id: str
+    # 与 ContentResetPayload.reason 同一枚举：仅 finish_guard 折出 rework 痕迹（didRework）。
+    reason: ResetReason = Field(json_schema_extra={"ts_type": "ResetReason"})
 
 
 class RunReasoningDeltaPayload(WirePayload):

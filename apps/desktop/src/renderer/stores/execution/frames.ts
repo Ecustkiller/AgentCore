@@ -9,6 +9,7 @@ import type {
   PlanReviewResolvedPayload,
   PlanRevisedPayload,
   PlanRevisionKind,
+  ResetReason,
   RunCancelledPayload,
   RunCompletedPayload,
   RunContextPayload,
@@ -72,9 +73,16 @@ export type RunFrame =
       agentId: string;
       delta: string;
     }
-  // 交付前核验回炉 (finish_guard) 的 worker 对偶（content_reset 之于 CEO）：清这个 worker
-  // 已累积的草稿产出，重写版从干净态重累积（reasoning 保留）。
-  | { t: number; kind: "run_output_reset"; runId: string; agentId: string }
+  // 草稿丢弃的 worker 对偶（content_reset 之于 CEO）：清这个 worker 已累积的草稿产出，
+  // 重写版从干净态重累积（reasoning 保留）。reason 决定是否留痕：仅 finish_guard
+  // （交付前核验回炉）折 rework chip / didRework，retry / narration 等不留痕。
+  | {
+      t: number;
+      kind: "run_output_reset";
+      runId: string;
+      agentId: string;
+      reason: ResetReason;
+    }
   | {
       t: number;
       kind: "run_reasoning_delta";
@@ -298,6 +306,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         kind: "run_output_reset",
         runId: p.run_id,
         agentId: p.agent_id,
+        reason: p.reason,
       };
     }
     case "run_reasoning_delta": {

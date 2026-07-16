@@ -260,6 +260,15 @@ class PausedTurnRepository:
         )
         return result.scalars().all()
 
+    async def exists_for_conversation(self, conversation_id: str) -> bool:
+        """Whether the conversation holds ANY durably-paused turn (open-turn probe)."""
+        result = await self._session.execute(
+            select(PausedTurnRow.message_id)
+            .where(PausedTurnRow.conversation_id == conversation_id)
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def delete(self, message_id: str) -> None:
         """Drop a paused turn (live in-process resolve / timeout settled it instead)."""
         await self._session.execute(

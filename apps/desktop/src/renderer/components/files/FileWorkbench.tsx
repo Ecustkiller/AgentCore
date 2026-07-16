@@ -14,17 +14,31 @@ import {
   tabKey,
 } from "@/components/files/fileWorkbench/storage";
 import { EmptyHint, InlineError } from "@/components/files/parts";
+import { PendingSharedInvites } from "@/components/files/sharedSpaces/PendingSharedInvites";
+import {
+  SharedSpaceSection,
+  SharedSpacesRailHeader,
+} from "@/components/files/sharedSpaces/SharedSpaceSection";
 import { SearchField } from "@/components/ui";
 import { getFolders } from "@/hooks/useFolders";
+import { useSharedSpaces } from "@/hooks/useSharedSpaces";
 import type { FileSource } from "@/lib/fileSource";
 import { cn } from "@/lib/utils";
 import { listMemoryProjects } from "@/services/memory";
+import {
+  type SharedSpaceSummary,
+  canWriteSharedSpace,
+  sharedWsId,
+} from "@/services/sharedSpaces";
 import {
   MEMORY_UPDATES_PATH,
   createMemorySource,
   parseProjectProfilePath,
 } from "@/services/sources/memorySource";
-import { resolveWorkspaceSource } from "@/services/sources/workspaceSource";
+import {
+  createCloudWorkspaceSource,
+  resolveWorkspaceSource,
+} from "@/services/sources/workspaceSource";
 import type { WorkspaceInfo } from "@/services/workspaces";
 import { useQuery } from "@tanstack/react-query";
 import { FileText, FolderOpen, Loader2 } from "lucide-react";
@@ -109,6 +123,18 @@ export function FileWorkbench({
   const appliedFocusRef = useRef<string | null>(null);
   const appliedMemoryLeafRef = useRef<string | null>(null);
 
+  const sharedQuery = useSharedSpaces();
+  const sharedSpaces = useMemo(
+    () => sharedQuery.data ?? [],
+    [sharedQuery.data],
+  );
+
+  /** Project + bare scratch only — `shared:` rows come from {@link useSharedSpaces}. */
+  const personalWorkspaces = useMemo(
+    () => workspaces.filter((w) => !w.wsId.startsWith("shared:")),
+    [workspaces],
+  );
+
   const toggleWs = useCallback((wsId: string) => {
     setExpandedWs((prev) => {
       const next = new Set(prev);
@@ -161,17 +187,21 @@ export function FileWorkbench({
   };
 
   // 工作区被删/消失 → 关掉它名下的标签页，并修正激活项。记忆 tab（合成 ws）不属任何工作区，
-  // 故豁免，否则它会被立刻清掉。
+  // 故豁免，否则它会被立刻清掉。共享空间以 `shared:` ws_id 计。
   useEffect(() => {
+    const liveWsIds = new Set([
+      ...personalWorkspaces.map((w) => w.wsId),
+      ...sharedSpaces.map((s) => s.ws_id || sharedWsId(s.id)),
+    ]);
     const live = tabs.filter(
-      (t) => t.wsId === MEMORY_WS || workspaces.some((w) => w.wsId === t.wsId),
+      (t) => t.wsId === MEMORY_WS || liveWsIds.has(t.wsId),
     );
     if (live.length === tabs.length) return;
     setTabs(live);
     if (activeKey && !live.some((t) => tabKey(t.wsId, t.path) === activeKey)) {
       setActiveKey(live.length ? tabKey(live[0].wsId, live[0].path) : null);
     }
-  }, [workspaces, tabs, activeKey]);
+  }, [personalWorkspaces, sharedSpaces, tabs, activeKey]);
 
   // 从 /conversations「浏览文件」跳来：自动展开 + 高亮 + 滚入目标工作区（段默认折叠，故这里
   // 主动展开那一个）。每个 focusKey（导航键）只应用一次，但等到工作区列表就绪后才生效（冷进入
@@ -179,14 +209,17 @@ export function FileWorkbench({
   useEffect(() => {
     if (!focusWsId || !focusKey) return;
     if (appliedFocusRef.current === focusKey) return;
-    if (!workspaces.some((w) => w.wsId === focusWsId)) return;
+    const known =
+      personalWorkspaces.some((w) => w.wsId === focusWsId) ||
+      sharedSpaces.some((s) => (s.ws_id || sharedWsId(s.id)) === focusWsId);
+    if (!known) return;
     appliedFocusRef.current = focusKey;
     setFilter(""); // 清掉过滤，避免目标工作区被筛掉而看不到
     expandWs(focusWsId);
     setFlashWsId(focusWsId);
     const t = setTimeout(() => setFlashWsId(null), 1500);
     return () => clearTimeout(t);
-  }, [focusWsId, focusKey, workspaces, expandWs]);
+  }, [focusWsId, focusKey, personalWorkspaces, sharedSpaces, expandWs]);
 
   // 对话页「记忆已更新」卡片深链跳来：打开目标记忆叶子的 tab（记忆更新对话内可见 §1.6）。每个
   // focusKey（导航键）只应用一次。记忆源与工作区列表无关，故无需等 workspaces 就绪即可打开；
@@ -209,10 +242,19 @@ export function FileWorkbench({
   // 每个工作区一个稳定的 FileSource（树与详情共用，按 ws 复用，避免重复构建/反复重载）。
   const sourceByWs = useMemo(() => {
     const m = new Map<string, FileSource | null>();
-    for (const w of workspaces)
+    for (const w of personalWorkspaces)
       m.set(w.wsId, resolveWorkspaceSource(w, fsAvailable));
+    for (const s of sharedSpaces) {
+      const wsId = s.ws_id || sharedWsId(s.id);
+      m.set(
+        wsId,
+        createCloudWorkspaceSource(wsId, s.name, {
+          readonly: !canWriteSharedSpace(s.my_role),
+        }),
+      );
+    }
     return m;
-  }, [workspaces, fsAvailable]);
+  }, [personalWorkspaces, sharedSpaces, fsAvailable]);
 
   // 记忆叶子的路径感知单一源（所有记忆叶子共用一例，按 tab path 解析作用域；与工作区源同构，
   // 故复用 FileDetail/编辑器）。
@@ -227,11 +269,31 @@ export function FileWorkbench({
   });
 
   // 过滤只按工作区名（大小写不敏感子串）——本次只做工作区级筛选，不下探文件名。
-  const visibleWorkspaces = useMemo(() => {
+  const visiblePersonal = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return workspaces;
-    return workspaces.filter((w) => w.name.toLowerCase().includes(q));
-  }, [workspaces, filter]);
+    if (!q) return personalWorkspaces;
+    return personalWorkspaces.filter((w) => w.name.toLowerCase().includes(q));
+  }, [personalWorkspaces, filter]);
+
+  const visibleShared = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return sharedSpaces;
+    return sharedSpaces.filter((s) => s.name.toLowerCase().includes(q));
+  }, [sharedSpaces, filter]);
+
+  const projects = useMemo(
+    () => visiblePersonal.filter((w) => w.wsId.startsWith("folder:")),
+    [visiblePersonal],
+  );
+  const scratches = useMemo(
+    () => visiblePersonal.filter((w) => w.wsId.startsWith("conv:")),
+    [visiblePersonal],
+  );
+
+  const railEmpty =
+    personalWorkspaces.length === 0 &&
+    sharedSpaces.length === 0 &&
+    !sharedQuery.isLoading;
 
   const activeTab = useMemo(
     () => tabs.find((t) => tabKey(t.wsId, t.path) === activeKey) ?? null,
@@ -312,46 +374,134 @@ export function FileWorkbench({
           </div>
         )}
 
-        {isLoading ? (
+        <PendingSharedInvites
+          onAccepted={(space: SharedSpaceSummary) => {
+            const wsId = space.ws_id || sharedWsId(space.id);
+            expandWs(wsId);
+            setFlashWsId(wsId);
+            window.setTimeout(() => setFlashWsId(null), 1500);
+          }}
+        />
+
+        {isLoading || sharedQuery.isLoading ? (
           <div className="flex flex-1 items-center justify-center">
             <Loader2
               size={18}
               className="animate-spin text-muted-foreground/50"
             />
           </div>
-        ) : isError ? (
-          <InlineError onRetry={onRetry} />
-        ) : workspaces.length === 0 ? (
+        ) : isError && sharedQuery.isError ? (
+          <InlineError
+            onRetry={() => {
+              onRetry();
+              void sharedQuery.refetch();
+            }}
+          />
+        ) : railEmpty ? (
           <EmptyHint
             icon={<FolderOpen size={24} className="text-muted-foreground/40" />}
-            title="还没有对话工作区"
-            hint="在对话里产生文件或绑定本地目录后，对应的工作区会出现在这里。"
+            title="还没有工作区"
+            hint="新建共享空间，或在对话里产生文件后，对应条目会出现在这里。"
           />
         ) : (
-          <>
-            <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 py-1">
-              {visibleWorkspaces.length === 0 ? (
-                <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-                  没有名称匹配「{filter.trim()}」的工作区
-                </p>
-              ) : (
-                visibleWorkspaces.map((ws) => (
-                  <WorkspaceSection
-                    key={ws.wsId}
-                    ws={ws}
-                    source={sourceByWs.get(ws.wsId) ?? null}
-                    activePath={
-                      activeTab?.wsId === ws.wsId ? activeTab.path : null
-                    }
-                    expanded={expandedWs.has(ws.wsId)}
-                    onToggle={() => toggleWs(ws.wsId)}
-                    onOpenFile={(path, name) => openFile(ws.wsId, path, name)}
-                    flashing={ws.wsId === flashWsId}
-                  />
-                ))
-              )}
-            </div>
-          </>
+          <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 py-1">
+            {filter.trim() &&
+            visibleShared.length === 0 &&
+            projects.length === 0 &&
+            scratches.length === 0 ? (
+              <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+                没有名称匹配「{filter.trim()}」的工作区
+              </p>
+            ) : (
+              <>
+                <SharedSpacesRailHeader
+                  onCreated={(spaceId) => {
+                    const wsId = sharedWsId(spaceId);
+                    expandWs(wsId);
+                    setFlashWsId(wsId);
+                    window.setTimeout(() => setFlashWsId(null), 1500);
+                  }}
+                />
+                {visibleShared.length === 0 ? (
+                  <p className="px-2 py-2 text-xs text-muted-foreground/70">
+                    {filter.trim()
+                      ? "无匹配的共享空间"
+                      : "还没有共享空间——点上方 + 创建，或接受邀请"}
+                  </p>
+                ) : (
+                  visibleShared.map((space) => {
+                    const wsId = space.ws_id || sharedWsId(space.id);
+                    return (
+                      <SharedSpaceSection
+                        key={space.id}
+                        space={space}
+                        source={sourceByWs.get(wsId) ?? null}
+                        activePath={
+                          activeTab?.wsId === wsId ? activeTab.path : null
+                        }
+                        expanded={expandedWs.has(wsId)}
+                        onToggle={() => toggleWs(wsId)}
+                        onOpenFile={(path, name) => openFile(wsId, path, name)}
+                        flashing={wsId === flashWsId}
+                      />
+                    );
+                  })
+                )}
+
+                {(projects.length > 0 || !filter.trim()) && (
+                  <div className="px-2 pb-0.5 pt-3 text-xs font-medium text-muted-foreground">
+                    项目
+                  </div>
+                )}
+                {projects.length === 0 && !filter.trim() ? (
+                  <p className="px-2 py-2 text-xs text-muted-foreground/70">
+                    还没有项目工作区
+                  </p>
+                ) : (
+                  projects.map((ws) => (
+                    <WorkspaceSection
+                      key={ws.wsId}
+                      ws={ws}
+                      source={sourceByWs.get(ws.wsId) ?? null}
+                      activePath={
+                        activeTab?.wsId === ws.wsId ? activeTab.path : null
+                      }
+                      expanded={expandedWs.has(ws.wsId)}
+                      onToggle={() => toggleWs(ws.wsId)}
+                      onOpenFile={(path, name) => openFile(ws.wsId, path, name)}
+                      flashing={ws.wsId === flashWsId}
+                    />
+                  ))
+                )}
+
+                {(scratches.length > 0 || !filter.trim()) && (
+                  <div className="px-2 pb-0.5 pt-3 text-xs font-medium text-muted-foreground">
+                    对话工作区
+                  </div>
+                )}
+                {scratches.length === 0 && !filter.trim() ? (
+                  <p className="px-2 py-2 text-xs text-muted-foreground/70">
+                    裸聊产生文件后会出现在这里
+                  </p>
+                ) : (
+                  scratches.map((ws) => (
+                    <WorkspaceSection
+                      key={ws.wsId}
+                      ws={ws}
+                      source={sourceByWs.get(ws.wsId) ?? null}
+                      activePath={
+                        activeTab?.wsId === ws.wsId ? activeTab.path : null
+                      }
+                      expanded={expandedWs.has(ws.wsId)}
+                      onToggle={() => toggleWs(ws.wsId)}
+                      onOpenFile={(path, name) => openFile(ws.wsId, path, name)}
+                      flashing={ws.wsId === flashWsId}
+                    />
+                  ))
+                )}
+              </>
+            )}
+          </div>
         )}
       </aside>
 

@@ -24,9 +24,24 @@ export interface ContentDeltaPayload {
   delta: string;
 }
 
-/** 交付前核验回炉（finish_guard）：引擎丢弃自报 done 的违规正文、回炉重写。Payload-less
- * 信号——客户端清空当前流式气泡已累积的正文，再接收重写版 `content_delta`。Transport-only。 */
-export type ContentResetPayload = Record<string, never>;
+/** Why a `content_reset` / `run_output_reset` fired. Folds render the
+ * 「已按交付规范重写」rework chip ONLY for `finish_guard`（交付前核验回炉）；
+ * every other reason still clears the streamed draft but leaves no trace:
+ * `retry`（LLM 流式透明重试）· `soft_gate`（captain 软门控打回）·
+ * `narration`（worker 旁白回滚）· `ask_user`（blocking ask_user 吸收）. */
+export type ResetReason =
+  | "finish_guard"
+  | "retry"
+  | "soft_gate"
+  | "narration"
+  | "ask_user";
+
+/** 清空当前流式气泡已累积正文的信号——客户端清正文后再接收重写版 `content_delta`。
+ * ``reason`` 表明本次 reset 的语义（见 `ResetReason`）；仅 ``finish_guard``（交付前核验
+ * 回炉）折出「已按交付规范重写」痕迹，其余 reason 只清正文、不留 chip。Transport-only。 */
+export interface ContentResetPayload {
+  reason: ResetReason;
+}
 
 export interface ReasoningDeltaPayload {
   delta: string;
@@ -403,6 +418,7 @@ export interface RunOutputDeltaPayload {
 export interface RunOutputResetPayload {
   run_id: string;
   agent_id: string;
+  reason: ResetReason;
 }
 
 export interface RunReasoningDeltaPayload {

@@ -11,6 +11,7 @@ import { execRuntime, useExecutionStore } from "@/stores/execution";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import type {
   ContentDeltaPayload,
+  ContentResetPayload,
   ErrorPayload,
   MessageEndPayload,
   MessageStartPayload,
@@ -94,7 +95,12 @@ export function handleMessageStreamEvent(
     }
     case "content_reset": {
       discardPendingContent(conversationId);
-      useConversationStore.getState().resetStreamingContent(conversationId);
+      useConversationStore
+        .getState()
+        .resetStreamingContent(
+          (event.payload as ContentResetPayload).reason,
+          conversationId,
+        );
       return true;
     }
     case "reasoning_delta": {

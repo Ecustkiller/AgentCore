@@ -473,7 +473,7 @@ async def test_deliverable_only_drops_steer_acknowledgement_after_rework():
 async def test_worker_deliverable_only_resets_card_on_narration_rollback():
     # worker 路径（on_reset→run_output_reset，卡片=数据同一通道）：写旁白 + 调非终止工具 →
     # 回退交付正文时【必须】发一次 reset 清掉卡片已流式草稿，使 直播==重载(合成自 message_final)。
-    resets: list[bool] = []
+    resets: list[str] = []
     provider = _ScriptedProvider(
         [
             [_content_chunk("我先查一下资料。"), _tool_chunk("search", '{"q": "x"}')],
@@ -485,11 +485,12 @@ async def test_worker_deliverable_only_resets_card_on_narration_rollback():
         _StubTool(),
         max_rounds=20,
         deliverable_only=True,
-        on_reset=lambda: resets.append(True),
+        on_reset=resets.append,
     )
     assert content == "最终结论：一二三。"
     assert "我先查一下" not in content
-    assert len(resets) == 1  # 恰好清一次卡片（那一轮旁白）
+    # 恰好清一次卡片（那一轮旁白），reason=narration（正常流程，不折 rework chip）。
+    assert resets == ["narration"]
 
 
 async def test_captain_deliverable_only_keeps_timeline_no_reset():
@@ -525,7 +526,7 @@ async def test_captain_deliverable_only_keeps_timeline_no_reset():
 async def test_worker_deliverable_only_no_reset_when_no_pre_tool_content():
     # worker 只在末轮给产出、工具轮无正文（既有向量的常态）→ 无旁白可回退 → 不发 reset，
     # 逐字等价今日行为（保证既有 multi_agent 向量不被这次改动改动）。
-    resets: list[bool] = []
+    resets: list[str] = []
     provider = _ScriptedProvider(
         [
             [_tool_chunk("search", '{"q": "x"}')],  # 工具轮无正文
@@ -537,7 +538,7 @@ async def test_worker_deliverable_only_no_reset_when_no_pre_tool_content():
         _StubTool(),
         max_rounds=20,
         deliverable_only=True,
-        on_reset=lambda: resets.append(True),
+        on_reset=resets.append,
     )
     assert content == "成稿"
     assert resets == []  # 没有旁白 → 不清卡片

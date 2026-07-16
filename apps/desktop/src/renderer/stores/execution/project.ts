@@ -271,19 +271,22 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
       break;
     }
     case "run_output_reset": {
-      // 交付前核验回炉 (finish_guard) 的 worker 对偶（content_reset 之于 CEO）：worker done
-      // 轮草稿未过轻层核验（统一底线·结构完整性），引擎丢弃这一版、发 run_output_reset、回炉
-      // 重写。清这个 agent 已累积的产出（重写版从干净态重累积），reasoning 是真实过程、保留
-      // ——镜像后端 oracle 与 mobile fold（conformance pins them equal）。
+      // 草稿丢弃的 worker 对偶（content_reset 之于 CEO）：引擎丢弃卡片已流式的草稿。清这个
+      // agent 已累积的产出（重写版从干净态重累积），reasoning 是真实过程、保留。仅
+      // reason=finish_guard（交付前核验回炉）折 rework chip + didRework；retry / narration
+      // 等基础设施/正常流程信号不留痕（误报根治）——镜像后端 oracle 与 mobile fold
+      // （conformance pins them equal）。
       const agent = s.agentIndex.get(f.agentId);
+      const isFinishGuard = f.reason === "finish_guard";
       if (agent) {
         agent.outputChunks = [];
-        agent.didRework = true;
+        if (isFinishGuard) agent.didRework = true;
       }
       const runId = f.runId || agent?.currentRunId;
       const run = runId ? s.runIndex.get(runId) : undefined;
       if (run) {
-        run.process = appendReworkStep(dropTrailingContentSteps(run.process));
+        const cleared = dropTrailingContentSteps(run.process);
+        run.process = isFinishGuard ? appendReworkStep(cleared) : cleared;
       }
       break;
     }
@@ -709,7 +712,10 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
     case "run_output_delta":
       return `${role(frame.agentId)} 输出中…`;
     case "run_output_reset":
-      return `${role(frame.agentId)} 重写产出…`;
+      // 仅核验回炉念「重写产出」；retry / narration 等清稿说「整理草稿」，不谎称重写。
+      return frame.reason === "finish_guard"
+        ? `${role(frame.agentId)} 重写产出…`
+        : `${role(frame.agentId)} 整理草稿…`;
     case "run_reasoning_delta":
       return `${role(frame.agentId)} 思考中…`;
     case "run_tool_progress":

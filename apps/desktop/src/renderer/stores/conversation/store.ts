@@ -27,6 +27,7 @@ import type {
   Citation,
   ContextBlockWire,
   CostBreakdown,
+  ResetReason,
   ToolUseEndPayload,
   ToolUseProgressPayload,
   ToolUseStartPayload,
@@ -78,7 +79,10 @@ export interface ConversationState {
   ) => void;
   addMessage: (message: Message, conversationId?: string | null) => void;
   appendToLastMessage: (chunk: string, conversationId?: string | null) => void;
-  resetStreamingContent: (conversationId?: string | null) => void;
+  resetStreamingContent: (
+    reason: ResetReason,
+    conversationId?: string | null,
+  ) => void;
   appendReasoningToLastMessage: (
     chunk: string,
     conversationId?: string | null,
@@ -325,12 +329,12 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         return { messages };
       }),
 
-    resetStreamingContent: (conversationId) =>
+    resetStreamingContent: (reason, conversationId) =>
       patchConversation(conversationId, (rt) => {
         const messages = [...rt.messages];
         const last = messages[messages.length - 1];
         if (!last || last.role !== "assistant") return null;
-        const lane = foldContentReset(messageLaneFromMessage(last));
+        const lane = foldContentReset(messageLaneFromMessage(last), reason);
         messages[messages.length - 1] = {
           ...last,
           content: lane.content,

@@ -195,8 +195,9 @@ def test_export_intro_stays_after_prior_event():
 
 def test_export_places_reasoning_along_process_timeline():
     """Captain reasoning bursts anchor to the process timeline: pre-pause thinking lands
-    before its tool / the case brief; wrap-up thinking lands after debate_result. Content
-    splits on the true段 boundary so the case brief stays whole before the card."""
+    before its tool / the case brief; wrap-up thinking lands in the closing window
+    (orch tool_use_end → run_completed), reasoning before content. Content splits on the
+    true段 boundary so the case brief stays whole before the card."""
     rows = [
         {
             "seq": 0,
@@ -238,6 +239,18 @@ def test_export_places_reasoning_along_process_timeline():
             "kind": "debate_result",
             "payload": {"rounds": 1},
             "ts": "2026-07-15T02:20:47.000Z",
+        },
+        {
+            "seq": 6,
+            "kind": "tool_use_end",
+            "payload": {"tool_call_id": "td", "tool_name": "debate", "run_id": "cap"},
+            "ts": "2026-07-15T02:20:48.000Z",
+        },
+        {
+            "seq": 7,
+            "kind": "run_completed",
+            "payload": {"run_id": "cap"},
+            "ts": "2026-07-15T02:20:58.000Z",
         },
         # turn-level process timeline drives reasoning placement + content split
         {
@@ -305,7 +318,13 @@ def test_export_places_reasoning_along_process_timeline():
     kinds = [e["kind"] for e in events]
     web_i = kinds.index("tool_use_start")
     preview_i = kinds.index("team_preview_required")
-    debate_i = kinds.index("debate_result")
+    debate_end_i = next(
+        i
+        for i, e in enumerate(events)
+        if e["kind"] == "tool_use_end"
+        and (e["payload"] or {}).get("tool_name") == "debate"
+    )
+    done_i = kinds.index("run_completed")
     intro_i = kinds.index("content_delta")
 
     def first_reasoning(needle: str) -> int:
@@ -315,15 +334,28 @@ def test_export_places_reasoning_along_process_timeline():
             if e["kind"] == "reasoning_delta" and needle in (e["payload"].get("delta") or "")
         )
 
-    # 检索思考在工具前；组队思考+案情简介在开工卡前；汇总思考在辩论结果之后。
+    def first_wrap_content() -> int:
+        return next(
+            i
+            for i, e in enumerate(events)
+            if e["kind"] == "content_delta"
+            and "最终汇总" in (e["payload"].get("delta") or "")
+        )
+
+    # 检索思考在工具前；组队思考+案情简介在开工卡前；汇总在辩论 tool 结束后、完成前。
     assert first_reasoning("先搜索") < web_i
     assert first_reasoning("组队") < intro_i < preview_i
-    assert first_reasoning("收敛") > debate_i
+    wrap_r = first_reasoning("收敛")
+    wrap_c = first_wrap_content()
+    assert debate_end_i < wrap_r < wrap_c < done_i
+    # Closing window is filled (not clumped on the tool_use_end ms).
+    assert int(events[wrap_r]["t_ms"]) >= int(events[debate_end_i]["t_ms"])
+    assert int(events[wrap_c]["t_ms"]) < int(events[done_i]["t_ms"])
 
 
 def test_export_reasoning_fallback_without_process_timeline():
-    """No process_reasoning in the journal → captain_reasoning replays as one block
-    after debate_result (legacy behaviour, keeps old tapes exportable)."""
+    """No process_reasoning in the journal → captain_reasoning replays in the closing
+    window after debate_result (legacy behaviour, keeps old tapes exportable)."""
     rows = [
         {
             "seq": 0,
@@ -337,12 +369,20 @@ def test_export_reasoning_fallback_without_process_timeline():
             "payload": {"rounds": 1},
             "ts": "2026-07-15T02:20:47.000Z",
         },
+        {
+            "seq": 2,
+            "kind": "run_completed",
+            "payload": {"run_id": "cap"},
+            "ts": "2026-07-15T02:20:57.000Z",
+        },
     ]
     events = build_tape_events(
         rows, captain_reasoning="整段思考", chunk_size=64, chunk_gap_ms=10
     )
     kinds = [e["kind"] for e in events]
-    assert kinds.index("reasoning_delta") > kinds.index("debate_result")
+    assert kinds.index("debate_result") < kinds.index("reasoning_delta") < kinds.index(
+        "run_completed"
+    )
     assert (
         "".join(
             (e["payload"].get("delta") or "")
@@ -637,6 +677,162 @@ async def test_player_pauses_and_continues(monkeypatch, tmp_path: Path):
     assert any(e.get("kind") == "message_final" for e in entries)
 
 
+@pytest.mark.asyncio
+async def test_replaying_same_tape_twice_remints_distinct_checkpoints(
+    monkeypatch, tmp_path: Path
+):
+    """同一磁带连放两次：开工卡两次都发出，且 checkpoint 身份互不相同、均非录制 id。
+
+    桌面 InteractionStore 以 interaction id 为跨会话全局键（已 resolved 不复活、pending
+    首见保留）——若回放复用录制 id，同一桌面进程内第二次回放的开工卡会被静默吞掉。
+    挂起帧与 resume 结算必须与发出的卡片共用同一铸造 id。
+    """
+    from agentcore.demo_tape import player as player_mod
+    from agentcore.demo_tape.binding import TapeBinding
+    from agentcore.demo_tape.player import (
+        continue_tape_turn,
+        play_tape_events,
+        replay_checkpoint_id,
+    )
+    from agentcore.runtime.journal.writer import TurnJournalWriter
+
+    saved: list = []
+
+    async def fake_save(suspension):
+        saved.append(suspension)
+
+    monkeypatch.setattr(player_mod, "save_paused_turn", fake_save)
+
+    async def noop_flush(self):
+        return None
+
+    monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
+
+    events = [
+        {"kind": "run_started", "payload": {"run_id": "c1", "kind": "captain"}, "t_ms": 0},
+        {
+            "kind": "team_preview_required",
+            "payload": {
+                "checkpoint_id": "cp-recorded",
+                "form": "debate",
+                "sides": [{"key": "lv", "name": "LV"}],
+                "workers": [],
+                "tools": [],
+                "primitive": "debate",
+                "motion": "m",
+                "max_rounds": 4,
+                "thorough": True,
+            },
+            "t_ms": 100,
+        },
+        {"kind": "content_delta", "payload": {"delta": "wrap"}, "t_ms": 200},
+    ]
+    tape_path = tmp_path / "twice.json"
+    tape_path.write_text(
+        json.dumps({"version": 1, "meta": {}, "events": events}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    emitted: list[str] = []
+    for i, message_id in enumerate(("msg-a", "msg-b")):
+        conversation_id = f"conv-{i}"
+        binding = TapeBinding(
+            conversation_id=conversation_id,
+            tape_path=tape_path,
+            speed=100.0,
+            max_gap_ms=50,
+        )
+        sink = EventSink(conversation_id=conversation_id, message_id=message_id)
+        writer = TurnJournalWriter(
+            turn_id=message_id, conversation_id=conversation_id, trace_id="t" * 32
+        )
+        result = await play_tape_events(
+            sink=sink,
+            events=events,
+            start_index=0,
+            binding=binding,
+            message_id=message_id,
+            conversation_id=conversation_id,
+            user_id="u",
+            user_message="go",
+            folder_id=None,
+            journal_writer=writer,
+        )
+        assert result["finish_reason"] is FinishReason.PAUSED
+        card = next(
+            e for e in sink._history if e.type is EventType.TEAM_PREVIEW_REQUIRED
+        )
+        emitted.append(str(card.payload["checkpoint_id"]))
+
+    # 两次都出卡；身份互不相同、不等于录制 id；确定性铸造（同回合可重导出）。
+    assert len(emitted) == 2
+    assert emitted[0] != emitted[1]
+    assert "cp-recorded" not in emitted
+    assert emitted[0] == replay_checkpoint_id("cp-recorded", message_id="msg-a")
+    assert emitted[1] == replay_checkpoint_id("cp-recorded", message_id="msg-b")
+
+    # 挂起帧与卡片同 id；resume 结算沿用同一 id（不回落到录制 id）。
+    assert [s.checkpoint_id for s in saved] == emitted
+    sink2 = EventSink(conversation_id="conv-0", message_id="msg-a")
+    result2 = await continue_tape_turn(
+        suspension=saved[0],
+        response=CheckpointResponse(decision=CheckpointDecision.CONTINUE, note=""),
+        sink=sink2,
+        folder_id=None,
+        trace_id="t" * 32,
+    )
+    assert result2["finish_reason"] is FinishReason.END_TURN
+    resolved = next(
+        e for e in sink2._history if e.type is EventType.TEAM_PREVIEW_RESOLVED
+    )
+    assert resolved.payload["checkpoint_id"] == emitted[0]
+
+
+@pytest.mark.asyncio
+async def test_tape_cancel_salvages_incomplete_turn(monkeypatch):
+    """磁带回放中途被取消（断流/停服）走 salvage 收口，不留 status=running 僵尸行。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    from agentcore.conversation import turn_runner
+    from agentcore.demo_tape import hooks as tape_hooks
+
+    salvaged: list[dict] = []
+
+    async def fake_placeholder(**kwargs):
+        return None
+
+    def fake_salvage(**kwargs):
+        salvaged.append(kwargs)
+
+    async def cancelled_tape(**kwargs):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(turn_runner, "create_assistant_placeholder", fake_placeholder)
+    monkeypatch.setattr(turn_runner, "salvage_incomplete_turn", fake_salvage)
+    monkeypatch.setattr(tape_hooks, "run_tape_turn_if_bound", cancelled_tape)
+
+    sink = EventSink()
+    monkeypatch.setattr(
+        sink, "bind_content_checkpoint", lambda **kw: None, raising=False
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await turn_runner.run_and_persist(
+            conversation_id="conv-x",
+            user_message="go",
+            user_id="u1",
+            folder_id=None,
+            sink=sink,
+            history=[],
+            attachments=None,
+            backend=SimpleNamespace(location="server"),
+            llm_credentials=None,
+        )
+    assert len(salvaged) == 1
+    assert salvaged[0]["conversation_id"] == "conv-x"
+    assert salvaged[0]["message_id"]
+
+
 def test_captain_run_id_finds_first_captain_run():
     from agentcore.demo_tape.player import _captain_run_id
 
@@ -728,7 +924,7 @@ async def test_player_inlines_captain_tools_by_stripping_run_id(monkeypatch):
 
 
 def test_delegation_compose_chars_counts_debate_arguments():
-    from agentcore.demo_tape.player import _delegation_compose_chars
+    from agentcore.demo_tape.export import delegation_compose_chars
 
     payload = {
         "motion": "abcd",
@@ -739,24 +935,363 @@ def test_delegation_compose_chars_counts_debate_arguments():
         "workers": [{"role": "R", "task": "TT"}],
     }
     # motion(4) + AA(2)+xyz(3) + BB(2)+z(1) + R(1)+TT(2) = 15
-    assert _delegation_compose_chars(payload) == 15
-    assert _delegation_compose_chars({}) == 0
+    assert delegation_compose_chars(payload) == 15
+    assert delegation_compose_chars({}) == 0
+
+
+def test_export_spreads_synthetic_deltas_across_window():
+    """合成 delta 在前锚→后锚窗口内均匀铺开，不再挤到同一毫秒或末尾 35ms 连打。"""
+    rows = [
+        {
+            "seq": 0,
+            "kind": "tool_use_end",
+            "payload": {"tool_call_id": "t1", "tool_name": "read_url"},
+            "ts": "2026-07-15T02:20:42.000Z",
+        },
+        {
+            "seq": 1,
+            "kind": "tool_use_start",
+            "payload": {"tool_call_id": "t2", "tool_name": "debate"},
+            "ts": "2026-07-15T02:21:05.000Z",  # +23s
+        },
+        {
+            "seq": 2,
+            "kind": "team_preview_required",
+            "payload": {
+                "checkpoint_id": "cp",
+                "form": "debate",
+                "primitive": "debate",
+                "motion": "议题" * 20,
+                "sides": [{"key": "a", "name": "A", "stance": "站" * 20}],
+                "workers": [],
+            },
+            "ts": "2026-07-15T02:21:07.000Z",
+        },
+        {
+            "seq": 10,
+            "kind": "process_reasoning",
+            "payload": {"kind": "reasoning", "text": "该不该组队" * 30},
+            "ts": None,
+        },
+        {
+            "seq": 11,
+            "kind": "process_content",
+            "payload": {"kind": "content", "text": "案情简介正文" * 20},
+            "ts": None,
+        },
+        {
+            "seq": 12,
+            "kind": "process_team_preview",
+            "payload": {"kind": "team_preview"},
+            "ts": None,
+        },
+    ]
+    content = "案情简介正文" * 20
+    events = build_tape_events(
+        rows, captain_content=content, chunk_size=12, chunk_gap_ms=35
+    )
+    orch_i = next(
+        i
+        for i, e in enumerate(events)
+        if e["kind"] == "tool_use_start"
+        and (e["payload"] or {}).get("tool_name") == "debate"
+    )
+    end_t = int(events[orch_i]["t_ms"])
+    start_t = 0  # tool_use_end at origin
+    assert end_t == 23_000
+
+    reasoning = [e for e in events[:orch_i] if e["kind"] == "reasoning_delta"]
+    intro = [e for e in events[:orch_i] if e["kind"] == "content_delta"]
+    progress = [e for e in events[:orch_i] if e["kind"] == "tool_progress"]
+    assert reasoning and intro and progress
+
+    r_ts = [int(e["t_ms"]) for e in reasoning]
+    i_ts = [int(e["t_ms"]) for e in intro]
+    p_ts = [int(e["t_ms"]) for e in progress]
+    # Spread across the 23s window — not clamped to one millisecond.
+    assert max(r_ts) - min(r_ts) > 1000
+    assert max(i_ts) - min(i_ts) > 200 or len(intro) == 1
+    assert min(r_ts) >= start_t
+    assert max(p_ts) <= end_t
+    # Causal order: reasoning → intro → compose → orch tool.
+    assert max(r_ts) <= min(i_ts)
+    assert max(i_ts) <= min(p_ts)
+    assert max(p_ts) <= end_t
+    assert all(progress[0]["payload"]["tool_name"] == "debate" for _ in [0])
+    chars = [p["payload"]["chars"] for p in progress]
+    assert chars == sorted(chars) and chars[-1] > chars[0]
+    # Byte fidelity.
+    assert "".join(e["payload"]["delta"] for e in reasoning) == "该不该组队" * 30
+    assert "".join(e["payload"]["delta"] for e in intro) == content
+
+
+def test_export_rebuilds_worker_run_deltas_from_final_and_process():
+    """message_final + run_process_* → run_*_delta，字节保真且落在 run 窗口内。"""
+    rows = [
+        {
+            "seq": 0,
+            "kind": "run_started",
+            "payload": {
+                "run_id": "w1",
+                "agent_id": "agent-w1",
+                "kind": "agent",
+            },
+            "ts": "2026-07-15T02:20:42.000Z",
+        },
+        {
+            "seq": 1,
+            "kind": "tool_use_start",
+            "payload": {
+                "tool_call_id": "tc1",
+                "tool_name": "web_search",
+                "run_id": "w1",
+            },
+            "ts": "2026-07-15T02:20:50.000Z",
+        },
+        {
+            "seq": 2,
+            "kind": "tool_use_end",
+            "payload": {
+                "tool_call_id": "tc1",
+                "tool_name": "web_search",
+                "run_id": "w1",
+            },
+            "ts": "2026-07-15T02:20:52.000Z",
+        },
+        {
+            "seq": 3,
+            "kind": "run_completed",
+            "payload": {"run_id": "w1", "agent_id": "agent-w1"},
+            "ts": "2026-07-15T02:21:42.000Z",  # +60s from start
+        },
+        {
+            "seq": 20,
+            "kind": "run_process_reasoning",
+            "payload": {"run_id": "w1", "kind": "reasoning", "text": "先想清楚"},
+            "ts": None,
+        },
+        {
+            "seq": 21,
+            "kind": "run_process_tool",
+            "payload": {"run_id": "w1", "kind": "tool", "tool_name": "web_search"},
+            "ts": None,
+        },
+        {
+            "seq": 22,
+            "kind": "run_process_content",
+            "payload": {"run_id": "w1", "kind": "content", "text": "最终意见陈述"},
+            "ts": None,
+        },
+        {
+            "seq": 30,
+            "kind": "message_final",
+            "payload": {
+                "run_id": "w1",
+                "content": "最终意见陈述",
+                "reasoning": "先想清楚",
+                "phase": "completed",
+            },
+            "ts": None,
+        },
+    ]
+    events = build_tape_events(rows, chunk_size=4, chunk_gap_ms=35)
+    kinds = [e["kind"] for e in events]
+    assert "run_reasoning_delta" in kinds
+    assert "run_output_delta" in kinds
+
+    started = next(i for i, e in enumerate(events) if e["kind"] == "run_started")
+    tool_i = next(i for i, e in enumerate(events) if e["kind"] == "tool_use_start")
+    completed = next(i for i, e in enumerate(events) if e["kind"] == "run_completed")
+    run_slice = events[started : completed + 1]
+
+    reasoning = [e for e in run_slice if e["kind"] == "run_reasoning_delta"]
+    output = [e for e in run_slice if e["kind"] == "run_output_delta"]
+    assert reasoning and output
+    assert "".join(e["payload"]["delta"] for e in reasoning) == "先想清楚"
+    assert "".join(e["payload"]["delta"] for e in output) == "最终意见陈述"
+    for e in reasoning + output:
+        assert e["payload"]["run_id"] == "w1"
+        assert e["payload"]["agent_id"] == "agent-w1"
+        assert int(events[started]["t_ms"]) <= int(e["t_ms"]) <= int(
+            events[completed]["t_ms"]
+        )
+    # Process order: reasoning beats are eligible from gap0; content only after the tool.
+    # Capacity packing may overflow some reasoning into later gaps, but content must not
+    # precede the tool anchor in wall-clock time.
+    assert min(int(e["t_ms"]) for e in output) >= int(events[tool_i]["t_ms"])
+
+
+def test_export_worker_deltas_pack_by_gap_capacity_not_zero_width_flush():
+    """文本在 process 中部、工具堆尾：不硬塞零宽并发锚，末段大窗要吃满文本拍。"""
+    # Window: start@0 → early tool@10s → three concurrent tools@20s → last tool@30s → done@90s
+    # Process: small reasoning → early tool → BIG mid text → trailing tools.
+    # Old hard-flush dumped the mid text into the zero-width concurrent gaps.
+    base = "2026-07-15T02:20:42.000Z"
+    mid_reasoning = ("深度思考段落。" * 40)  # many chunks
+    mid_content = ("正式意见正文。" * 15)
+    late_reasoning = ("补充推理收尾。" * 40)
+    rows = [
+        {
+            "seq": 0,
+            "kind": "run_started",
+            "payload": {"run_id": "w1", "agent_id": "a1", "kind": "agent"},
+            "ts": base,
+        },
+        {
+            "seq": 1,
+            "kind": "tool_use_start",
+            "payload": {"tool_call_id": "t0", "tool_name": "web_search", "run_id": "w1"},
+            "ts": "2026-07-15T02:20:52.000Z",  # +10s
+        },
+        {
+            "seq": 2,
+            "kind": "tool_use_end",
+            "payload": {"tool_call_id": "t0", "tool_name": "web_search", "run_id": "w1"},
+            "ts": "2026-07-15T02:20:53.000Z",
+        },
+        # Concurrent same-ms tool pile (zero-width gaps).
+        {
+            "seq": 3,
+            "kind": "tool_use_start",
+            "payload": {"tool_call_id": "t1", "tool_name": "read_url", "run_id": "w1"},
+            "ts": "2026-07-15T02:21:02.000Z",  # +20s
+        },
+        {
+            "seq": 4,
+            "kind": "tool_use_start",
+            "payload": {"tool_call_id": "t2", "tool_name": "read_url", "run_id": "w1"},
+            "ts": "2026-07-15T02:21:02.000Z",
+        },
+        {
+            "seq": 5,
+            "kind": "tool_use_start",
+            "payload": {"tool_call_id": "t3", "tool_name": "read_url", "run_id": "w1"},
+            "ts": "2026-07-15T02:21:02.000Z",
+        },
+        {
+            "seq": 6,
+            "kind": "tool_use_start",
+            "payload": {"tool_call_id": "t4", "tool_name": "read_url", "run_id": "w1"},
+            "ts": "2026-07-15T02:21:12.000Z",  # +30s last tool
+        },
+        {
+            "seq": 7,
+            "kind": "run_completed",
+            "payload": {"run_id": "w1", "agent_id": "a1"},
+            "ts": "2026-07-15T02:22:12.000Z",  # +90s (60s after last tool)
+        },
+        {
+            "seq": 20,
+            "kind": "run_process_reasoning",
+            "payload": {"run_id": "w1", "kind": "reasoning", "text": "先搜一下"},
+            "ts": None,
+        },
+        {
+            "seq": 21,
+            "kind": "run_process_tool",
+            "payload": {"run_id": "w1", "kind": "tool", "tool_name": "web_search"},
+            "ts": None,
+        },
+        {
+            "seq": 22,
+            "kind": "run_process_reasoning",
+            "payload": {"run_id": "w1", "kind": "reasoning", "text": mid_reasoning},
+            "ts": None,
+        },
+        {
+            "seq": 23,
+            "kind": "run_process_content",
+            "payload": {"run_id": "w1", "kind": "content", "text": mid_content},
+            "ts": None,
+        },
+        {
+            "seq": 24,
+            "kind": "run_process_reasoning",
+            "payload": {"run_id": "w1", "kind": "reasoning", "text": late_reasoning},
+            "ts": None,
+        },
+        {
+            "seq": 25,
+            "kind": "run_process_tool",
+            "payload": {"run_id": "w1", "kind": "tool", "tool_name": "read_url"},
+            "ts": None,
+        },
+        {
+            "seq": 26,
+            "kind": "run_process_tool",
+            "payload": {"run_id": "w1", "kind": "tool", "tool_name": "read_url"},
+            "ts": None,
+        },
+        {
+            "seq": 27,
+            "kind": "run_process_tool",
+            "payload": {"run_id": "w1", "kind": "tool", "tool_name": "read_url"},
+            "ts": None,
+        },
+        {
+            "seq": 28,
+            "kind": "run_process_tool",
+            "payload": {"run_id": "w1", "kind": "tool", "tool_name": "read_url"},
+            "ts": None,
+        },
+        {
+            "seq": 30,
+            "kind": "message_final",
+            "payload": {
+                "run_id": "w1",
+                "content": mid_content,
+                "reasoning": "先搜一下" + mid_reasoning + late_reasoning,
+                "phase": "completed",
+            },
+            "ts": None,
+        },
+    ]
+    events = build_tape_events(rows, chunk_size=12, chunk_gap_ms=35)
+    started = next(e for e in events if e["kind"] == "run_started")
+    completed = next(e for e in events if e["kind"] == "run_completed")
+    deltas = [
+        e
+        for e in events
+        if e["kind"] in ("run_output_delta", "run_reasoning_delta")
+        and (e["payload"] or {}).get("run_id") == "w1"
+    ]
+    assert deltas
+    # Byte fidelity.
+    assert "".join(
+        e["payload"]["delta"] for e in deltas if e["kind"] == "run_reasoning_delta"
+    ) == ("先搜一下" + mid_reasoning + late_reasoning)
+    assert "".join(
+        e["payload"]["delta"] for e in deltas if e["kind"] == "run_output_delta"
+    ) == mid_content
+
+    ts = [int(e["t_ms"]) for e in deltas]
+    from collections import Counter
+
+    clump = max(Counter(ts).values())
+    assert clump / len(ts) <= 0.30, f"clumped {clump}/{len(ts)} beats on one t_ms"
+
+    start_t = int(started["t_ms"])
+    end_t = int(completed["t_ms"])
+    span = end_t - start_t
+    tail_dead = end_t - max(ts)
+    assert tail_dead <= max(5_000, span * 0.10), (
+        f"dead tail {tail_dead}ms exceeds budget (span={span}ms)"
+    )
+    assert min(ts) >= start_t and max(ts) <= end_t
 
 
 @pytest.mark.asyncio
-async def test_player_injects_delegation_composing_before_team_preview(monkeypatch):
-    """案情简介后、开工卡前，回放合成「正在生成 委派任务 · N 字」传输态（EPHEMERAL）。
-
-    磁带源(turn_journal)只存 DURABLE 事件，CEO 编排工具的 tool_progress 心跳导出时丢失 →
-    回放里派单空缺、只剩「正在思考」。player 层按 team_preview 参数还原字数递增的委派态。
-    """
+async def test_player_skip_kinds_do_not_advance_pacing_clock(monkeypatch):
+    """resume 后 turn_paused / resolved 等 skip 事件不睡、不推进时钟 → 首拍 sleep=0。"""
     from agentcore.demo_tape import player as player_mod
     from agentcore.demo_tape.binding import TapeBinding
     from agentcore.demo_tape.player import play_tape_events
     from agentcore.runtime.journal.writer import TurnJournalWriter
 
-    async def fake_sleep(_seconds: float) -> None:
-        return None
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
 
     monkeypatch.setattr(player_mod.asyncio, "sleep", fake_sleep)
 
@@ -765,15 +1300,70 @@ async def test_player_injects_delegation_composing_before_team_preview(monkeypat
 
     monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
 
-    async def fake_save(suspension):
-        return None
-
-    monkeypatch.setattr(player_mod, "save_paused_turn", fake_save)
-
+    # Simulate post-pause resume: skip events carry the recorder's hesitation gap,
+    # then the first real event is 11s later on the tape clock.
     events = [
-        {"kind": "run_started", "payload": {"run_id": "cap1", "kind": "captain"}, "t_ms": 0},
-        {"kind": "content_delta", "payload": {"delta": "案情简介"}, "t_ms": 100},
+        {"kind": "turn_paused", "payload": {"checkpoint_id": "cp"}, "t_ms": 34_000},
         {
+            "kind": "team_preview_resolved",
+            "payload": {"decision": "continue"},
+            "t_ms": 34_000,
+        },
+        {
+            "kind": "run_started",
+            "payload": {"run_id": "w1", "kind": "agent"},
+            "t_ms": 45_000,
+        },
+        {
+            "kind": "run_output_delta",
+            "payload": {"run_id": "w1", "agent_id": "w1", "delta": "hi"},
+            "t_ms": 45_100,
+        },
+    ]
+    binding = TapeBinding(
+        conversation_id="c",
+        tape_path=Path("unused.json"),
+        speed=1.0,
+        max_gap_ms=600_000,
+    )
+    sink = EventSink(conversation_id="c", message_id="m")
+    writer = TurnJournalWriter(turn_id="m", conversation_id="c", trace_id="t" * 32)
+    await play_tape_events(
+        sink=sink,
+        events=events,
+        start_index=0,
+        binding=binding,
+        message_id="m",
+        conversation_id="c",
+        user_id="u",
+        user_message="go",
+        folder_id=None,
+        journal_writer=writer,
+        emit_message_start=False,
+    )
+    # Skip + first real event: no sleep (prev_t stays None → gap 0, delay not awaited).
+    # Only the 100ms gap between the two real events is slept.
+    assert sleeps == [pytest.approx(0.1)]
+    assert sum(sleeps) == pytest.approx(0.1)
+
+
+def test_export_injects_delegation_composing_before_orch_tool():
+    """委派 tool_progress 落在简介之后、编排工具 start 之前（导出层，非 player）。"""
+    rows = [
+        {
+            "seq": 0,
+            "kind": "run_started",
+            "payload": {"run_id": "cap", "kind": "captain"},
+            "ts": "2026-07-15T02:20:42.000Z",
+        },
+        {
+            "seq": 1,
+            "kind": "tool_use_start",
+            "payload": {"tool_call_id": "td", "tool_name": "debate"},
+            "ts": "2026-07-15T02:21:00.000Z",
+        },
+        {
+            "seq": 2,
             "kind": "team_preview_required",
             "payload": {
                 "checkpoint_id": "cp1",
@@ -789,52 +1379,30 @@ async def test_player_injects_delegation_composing_before_team_preview(monkeypat
                 "max_rounds": 4,
                 "thorough": True,
             },
-            "t_ms": 200,
+            "ts": "2026-07-15T02:21:02.000Z",
+        },
+        {
+            "seq": 10,
+            "kind": "process_content",
+            "payload": {"kind": "content", "text": "案情简介全文"},
+            "ts": None,
+        },
+        {
+            "seq": 11,
+            "kind": "process_team_preview",
+            "payload": {"kind": "team_preview"},
+            "ts": None,
         },
     ]
-    binding = TapeBinding(
-        conversation_id="c", tape_path=Path("unused.json"), speed=1.0, max_gap_ms=50
+    events = build_tape_events(
+        rows, captain_content="案情简介全文", chunk_size=8, chunk_gap_ms=35
     )
-    sink = EventSink(conversation_id="c", message_id="m")
-    # tool_progress is EPHEMERAL (skipped from _history) but rides the live SSE stream —
-    # spy emit() to assert the ticks actually reach the frontend.
-    emitted: list = []
-    real_emit = sink.emit
-
-    def spy_emit(ev):
-        emitted.append(ev)
-        real_emit(ev)
-
-    monkeypatch.setattr(sink, "emit", spy_emit)
-    writer = TurnJournalWriter(turn_id="m", conversation_id="c", trace_id="t" * 32)
-    result = await play_tape_events(
-        sink=sink,
-        events=events,
-        start_index=0,
-        binding=binding,
-        message_id="m",
-        conversation_id="c",
-        user_id="u",
-        user_message="go",
-        folder_id=None,
-        journal_writer=writer,
-    )
-    assert result["finish_reason"] is FinishReason.PAUSED
-
-    progresses = [
-        e.payload for e in emitted if e.type is EventType.TOOL_PROGRESS
-    ]
-    assert progresses, "should synthesize delegation compose ticks"
-    assert all(p["tool_name"] == "delegate" for p in progresses)
-    chars = [p["chars"] for p in progresses]
-    assert chars == sorted(chars) and chars[-1] > chars[0]  # 字数递增
-
-    # 委派态发生在开工卡之前。
-    emitted_types = [e.type for e in emitted]
-    assert emitted_types.index(EventType.TOOL_PROGRESS) < emitted_types.index(
-        EventType.TEAM_PREVIEW_REQUIRED
-    )
-
-    # tool_progress 是传输态：不落 journal（正文字节保真不受影响）。
-    entries = result.get("journal_entries") or []
-    assert all(e.get("kind") != "tool_progress" for e in entries)
+    kinds = [e["kind"] for e in events]
+    assert "tool_progress" in kinds
+    assert kinds.index("content_delta") < kinds.index("tool_progress")
+    assert kinds.index("tool_progress") < kinds.index("tool_use_start")
+    assert kinds.index("tool_use_start") < kinds.index("team_preview_required")
+    progresses = [e for e in events if e["kind"] == "tool_progress"]
+    assert all(p["payload"]["tool_name"] == "debate" for p in progresses)
+    chars = [p["payload"]["chars"] for p in progresses]
+    assert chars == sorted(chars) and chars[-1] > chars[0]

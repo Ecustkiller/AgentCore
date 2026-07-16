@@ -86,19 +86,26 @@ export function FileTreeRowMenu({
   // Groups separated systematically (a leading separator only when both sides are
   // non-empty) so no group ever yields a double rule. The primary group (dir →
   // 新建; file → 打开/下载) is always present, so 系统集成 / 编辑 just prefix a rule.
+  // `caps.edit === false` (e.g. shared-space viewer) hides mutate actions; download
+  // still rides on `caps.transfer`.
+  const canMutate = source.caps.edit;
   return (
     <ContextMenuContent className="min-w-36">
       {node.isDir ? (
-        <>
-          <ContextMenuItem onSelect={() => onContextCreate(node.path, "file")}>
-            <FilePlus size={14} className="shrink-0" />
-            <span className="flex-1 truncate">新建文件</span>
-          </ContextMenuItem>
-          <ContextMenuItem onSelect={() => onContextCreate(node.path, "dir")}>
-            <FolderPlus size={14} className="shrink-0" />
-            <span className="flex-1 truncate">新建文件夹</span>
-          </ContextMenuItem>
-        </>
+        canMutate ? (
+          <>
+            <ContextMenuItem
+              onSelect={() => onContextCreate(node.path, "file")}
+            >
+              <FilePlus size={14} className="shrink-0" />
+              <span className="flex-1 truncate">新建文件</span>
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => onContextCreate(node.path, "dir")}>
+              <FolderPlus size={14} className="shrink-0" />
+              <span className="flex-1 truncate">新建文件夹</span>
+            </ContextMenuItem>
+          </>
+        ) : null
       ) : (
         <>
           {source.caps.transfer && source.download && (
@@ -144,32 +151,39 @@ export function FileTreeRowMenu({
           )}
         </>
       )}
-      <ContextMenuSeparator />
-      {canCopy && (
-        <ContextMenuItem onSelect={() => onCopy(node.path)}>
-          <Copy size={14} className="shrink-0" />
-          <span className="flex-1 truncate">复制</span>
-        </ContextMenuItem>
+      {canMutate && (
+        <>
+          <ContextMenuSeparator />
+          {canCopy && (
+            <ContextMenuItem onSelect={() => onCopy(node.path)}>
+              <Copy size={14} className="shrink-0" />
+              <span className="flex-1 truncate">复制</span>
+            </ContextMenuItem>
+          )}
+          <ContextMenuItem onSelect={() => onCut(node.path)}>
+            <Scissors size={14} className="shrink-0" />
+            <span className="flex-1 truncate">剪切</span>
+          </ContextMenuItem>
+          {node.isDir && hasClipboard && (
+            <ContextMenuItem onSelect={() => onPaste(node.path)}>
+              <ClipboardPaste size={14} className="shrink-0" />
+              <span className="flex-1 truncate">粘贴到此文件夹</span>
+            </ContextMenuItem>
+          )}
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => onStartRename(node.path)}>
+            <Pencil size={14} className="shrink-0" />
+            <span className="flex-1 truncate">重命名</span>
+          </ContextMenuItem>
+          <ContextMenuItem
+            variant="danger"
+            onSelect={() => void onDelete(node)}
+          >
+            <Trash2 size={14} className="shrink-0" />
+            <span className="flex-1 truncate">删除</span>
+          </ContextMenuItem>
+        </>
       )}
-      <ContextMenuItem onSelect={() => onCut(node.path)}>
-        <Scissors size={14} className="shrink-0" />
-        <span className="flex-1 truncate">剪切</span>
-      </ContextMenuItem>
-      {node.isDir && hasClipboard && (
-        <ContextMenuItem onSelect={() => onPaste(node.path)}>
-          <ClipboardPaste size={14} className="shrink-0" />
-          <span className="flex-1 truncate">粘贴到此文件夹</span>
-        </ContextMenuItem>
-      )}
-      <ContextMenuSeparator />
-      <ContextMenuItem onSelect={() => onStartRename(node.path)}>
-        <Pencil size={14} className="shrink-0" />
-        <span className="flex-1 truncate">重命名</span>
-      </ContextMenuItem>
-      <ContextMenuItem variant="danger" onSelect={() => void onDelete(node)}>
-        <Trash2 size={14} className="shrink-0" />
-        <span className="flex-1 truncate">删除</span>
-      </ContextMenuItem>
     </ContextMenuContent>
   );
 }

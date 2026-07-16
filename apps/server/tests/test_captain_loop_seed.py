@@ -247,7 +247,7 @@ async def test_worker_nested_loop_does_not_clobber_captain_mirror():
             turn_model="m",
             role="worker",
             deliverable_only=True,  # same flag as captain — must NOT gate the mirror
-            on_reset=lambda: None,
+            on_reset=lambda _reason: None,
         )
 
         after = current_captain_loop.get()

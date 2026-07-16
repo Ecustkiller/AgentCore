@@ -17,6 +17,7 @@ import type {
   CheckpointRequiredPayload,
   CitationsPayload,
   ContentDeltaPayload,
+  ContentResetPayload,
   ContextBlockWire,
   CostBreakdown,
   DebateNarrativeRound,
@@ -315,10 +316,11 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         }
         break;
       }
-      // 交付前核验回炉（finish_guard）：done 轮草稿未过轻层核验，引擎丢弃这一版、发
-      // content_reset、回炉重写。该事件进 _history（重连回放会重发），故 fold 必须镜像后端
-      // _accumulate_process 与 desktop fold：清正文标量 + 弹掉 process 尾部连续 content 步
-      // （reasoning/tool 是真实过程，保留），让重写版从干净态重累积。
+      // 草稿丢弃信号：引擎丢弃已流式的这一版正文、发 content_reset（reason 说明为何）。该事件
+      // 进 _history（重连回放会重发），故 fold 必须镜像后端 oracle 与 desktop fold：清正文标量 +
+      // 弹掉 process 尾部连续 content 步（reasoning/tool 是真实过程，保留），让重写版从干净态重
+      // 累积。仅 reason=finish_guard（交付前核验回炉）折出「已按交付规范重写」rework chip；
+      // retry / soft_gate / ask_user 等只清正文、不留痕（误报根治）。
       case "content_reset": {
         content = "";
         while (
@@ -327,7 +329,9 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         ) {
           process.pop();
         }
-        process.push({ kind: "rework" });
+        if ((ev.payload as ContentResetPayload).reason === "finish_guard") {
+          process.push({ kind: "rework" });
+        }
         break;
       }
       case "reasoning_delta": {
@@ -517,10 +521,11 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         }
         break;
       }
-      // 交付前核验回炉 (finish_guard) 的 worker 对偶（content_reset 之于 CEO）：worker done 轮
-      // 草稿未过轻层核验（统一底线·结构完整性），引擎丢弃这一版、发 run_output_reset、回炉重写。
-      // 只清该 agent 的 output（重写版从干净态重累积），reasoning 是真实过程、保留——镜像后端
-      // oracle 与 desktop fold（conformance pins them equal）。transport-only（不进 journal）。
+      // 草稿丢弃信号的 worker 对偶（content_reset 之于 CEO）：引擎丢弃 worker 卡片已流式的这
+      // 一版草稿、发 run_output_reset（reason 说明为何）。只清该 agent 的 output（重写版从干净
+      // 态重累积），reasoning 是真实过程、保留——镜像后端 oracle 与 desktop fold（conformance
+      // pins them equal）。仅 reason=finish_guard 折 rework 步；narration / retry 等不留痕。
+      // transport-only（不进 journal）。
       case "run_output_reset": {
         const p = ev.payload as RunOutputResetPayload;
         const ag = agentById(p.agent_id);
@@ -533,7 +538,9 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           ) {
             run.process.pop();
           }
-          run.process.push({ kind: "rework" });
+          if (p.reason === "finish_guard") {
+            run.process.push({ kind: "rework" });
+          }
         }
         break;
       }

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentcore.core.log_context import get_log_value
 from agentcore.runtime.events.types import EventType, FinishReason, SSEEvent
+
+if TYPE_CHECKING:
+    from agentcore.runtime.events.payloads.chat import ResetReason
 
 _DISPLAY_STR_CAP = 6000
 _DISPLAY_LIST_CAP = 50
@@ -33,8 +36,10 @@ def content_delta(delta: str) -> SSEEvent:
     return SSEEvent(type=EventType.CONTENT_DELTA, payload={"delta": delta})
 
 
-def content_reset() -> SSEEvent:
-    return SSEEvent(type=EventType.CONTENT_RESET)
+def content_reset(reason: ResetReason) -> SSEEvent:
+    """清空 CEO 气泡已流式正文。``reason`` 必填（见 payloads.chat.ResetReason）：客户端仅对
+    ``finish_guard`` 折出「已按交付规范重写」痕迹，其余 reason 只清正文、不留 chip。"""
+    return SSEEvent(type=EventType.CONTENT_RESET, payload={"reason": reason})
 
 
 def reasoning_delta(delta: str) -> SSEEvent:

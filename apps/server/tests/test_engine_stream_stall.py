@@ -97,7 +97,7 @@ async def test_uncommitted_stall_retries_then_raises(monkeypatch):
     monkeypatch.setattr(stream_mod, "INITIAL_BACKOFF", 0.0)
     monkeypatch.setattr(stream_mod, "BACKOFF_MULTIPLIER", 1.0)
     seen: list[str] = []
-    resets: list[int] = []
+    resets: list[str] = []
     provider = _StallProvider([LLMChunk(delta_reasoning="…")], stall=1.0)
     with pytest.raises(LLMTimeoutError):
         await stream_llm_round(
@@ -105,12 +105,13 @@ async def test_uncommitted_stall_retries_then_raises(monkeypatch):
             _request(),
             seen.append,
             seen.append,
-            on_reset=lambda: resets.append(1),
+            on_reset=resets.append,
         )
     assert provider.calls == MAX_RETRIES
     # First attempt emits reasoning; each retry resets live view then re-emits.
     assert seen == ["…"] * MAX_RETRIES
-    assert len(resets) == MAX_RETRIES - 1
+    # Stream-layer resets carry reason=retry — the fold must NOT leave a rework chip.
+    assert resets == ["retry"] * (MAX_RETRIES - 1)
 
 
 async def test_uncommitted_stall_recovers_on_retry(monkeypatch):
@@ -120,19 +121,19 @@ async def test_uncommitted_stall_recovers_on_retry(monkeypatch):
     monkeypatch.setattr(stream_mod, "BACKOFF_MULTIPLIER", 1.0)
     content_seen: list[str] = []
     reasoning_seen: list[str] = []
-    resets: list[int] = []
+    resets: list[str] = []
     provider = _RecoveringStallProvider(fail_attempts=1, stall=1.0)
     result = await stream_llm_round(
         provider,
         _request(),
         content_seen.append,
         reasoning_seen.append,
-        on_reset=lambda: resets.append(1),
+        on_reset=resets.append,
     )
     assert result.aborted is False
     assert result.content == "recovered"
     assert provider.calls == 2
-    assert resets == [1]
+    assert resets == ["retry"]
     assert content_seen == ["recovered"]
 
 
@@ -172,16 +173,16 @@ async def test_stream_reset_clears_ephemeral_and_live_view(monkeypatch):
     monkeypatch.setattr(settings, "engine_llm_stream_idle_timeout_seconds", 0.0)
     content_seen: list[str] = []
     reasoning_seen: list[str] = []
-    resets: list[int] = []
+    resets: list[str] = []
     result = await stream_llm_round(
         _ResetThenContentProvider(),
         _request(),
         content_seen.append,
         reasoning_seen.append,
-        on_reset=lambda: resets.append(1),
+        on_reset=resets.append,
     )
     assert reasoning_seen == ["stale"]
     assert content_seen == ["kept"]
     assert result.content == "kept"
     assert result.reasoning == ""
-    assert resets == [1]
+    assert resets == ["retry"]

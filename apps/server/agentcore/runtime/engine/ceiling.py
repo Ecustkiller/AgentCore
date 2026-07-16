@@ -31,7 +31,7 @@ async def ceiling_finalize(
     disabled_tools: set[str],
     emit_content: Callable[[str], None],
     emit_reasoning: Callable[[str], None],
-    emit_reset: Callable[[], None],
+    emit_reset: Callable[[str], None],
     final_content: str,
     final_reasoning: str,
     total_usage: TokenUsage,

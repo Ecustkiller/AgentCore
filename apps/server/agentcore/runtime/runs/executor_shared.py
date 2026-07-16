@@ -219,7 +219,7 @@ async def _react_and_capture(
         on_tool_progress=lambda tool, chars: sink.emit(
             run_tool_progress(run_id, agent_id, tool, chars)
         ),
-        on_reset=lambda: sink.emit(run_output_reset(run_id, agent_id)),
+        on_reset=lambda reason: sink.emit(run_output_reset(run_id, agent_id, reason)),
         raise_on_error=True,
         citation_sink=citation_sink,
         annotate_citations=False,

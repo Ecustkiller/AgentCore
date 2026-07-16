@@ -195,15 +195,17 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     process.append({"kind": "content", "text": delta})
 
         elif etype == "content_reset":
-            # 交付前核验回炉 (finish_guard)：done 轮草稿未过轻层核验，引擎丢弃这一版、发
-            # content_reset、回炉重写。该事件进 _history（重连回放重发），故 oracle 必须与三端
-            # fold 一致：清正文标量 + 弹掉 process 尾部连续 content 步（reasoning/tool 是真实
-            # 过程，保留），让重写版从干净态重累积——否则会把「违规版+修正版」拼在一起。
+            # 草稿丢弃信号：引擎丢弃已流式的这一版正文、发 content_reset（reason 说明为何）。
+            # 该事件进 _history（重连回放重发），故 oracle 必须与三端 fold 一致：清正文标量 +
+            # 弹掉 process 尾部连续 content 步（reasoning/tool 是真实过程，保留），让重写版从
+            # 干净态重累积——否则会把「违规版+修正版」拼在一起。
             content = ""
             while process and process[-1].get("kind") == "content":
                 process.pop()
-            # 核验回炉轻 chip：大众可见痕迹，不堆被弃全文。
-            process.append({"kind": "rework"})
+            # 仅交付前核验回炉 (reason=finish_guard) 折出「已按交付规范重写」轻 chip；
+            # 其余 reason（retry / soft_gate / ask_user / …）只清正文、不留痕。
+            if p.get("reason") == "finish_guard":
+                process.append({"kind": "rework"})
 
         elif etype == "reasoning_delta":
             delta = p.get("delta") or ""
@@ -396,11 +398,10 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                         steps.append({"kind": "content", "text": delta})
 
         elif etype == "run_output_reset":
-            # 交付前核验回炉 (finish_guard) 的 worker 对偶（content_reset 之于 CEO）：worker done
-            # 轮草稿未过轻层核验（统一底线·结构完整性），引擎丢弃这一版、发 run_output_reset、回炉
-            # 重写。清该 agent 的 output 标量（重写版从干净态重累积），reasoning 是真实过程、保留
-            # ——否则会把「违规版+修正版」拼在一起。transport-only（不进 journal），
-            # 与三端 fold 一致。
+            # 草稿丢弃信号的 worker 对偶（content_reset 之于 CEO）：引擎丢弃 worker 卡片已流式
+            # 的这一版草稿、发 run_output_reset（reason 说明为何）。清该 agent 的 output 标量
+            # （重写版从干净态重累积），reasoning 是真实过程、保留——否则会把「违规版+修正版」
+            # 拼在一起。transport-only（不进 journal），与三端 fold 一致。
             ag = agent_by_id(p.get("agent_id", ""))
             if ag:
                 ag["output"] = ""
@@ -409,7 +410,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 steps = run["process"]
                 while steps and steps[-1].get("kind") == "content":
                     steps.pop()
-                steps.append({"kind": "rework"})
+                # 仅 finish_guard（交付前核验回炉）留「已按交付规范重写」痕迹。
+                if p.get("reason") == "finish_guard":
+                    steps.append({"kind": "rework"})
 
         elif etype == "run_reasoning_delta":
             ag = agent_by_id(p.get("agent_id", ""))

@@ -436,10 +436,13 @@ class EventSink:
             # Discard open (unpersisted) trailing content — do not journal it.
             while steps and steps[-1].get("kind") == "content":
                 steps.pop()
-            steps.append({"kind": "rework"})
-            seeded = self._seeded_run_processes.get(run_id) or []
-            merged = [*seeded, *steps] if seeded else list(steps)
-            futures.extend(self._process_cursor.persist_new_run_tail(run_id, merged))
+            # Only 交付前核验回炉 leaves the persisted「已按交付规范重写」trace; every
+            # other reason (retry / narration / …) clears the draft without a chip.
+            if payload.get("reason") == "finish_guard":
+                steps.append({"kind": "rework"})
+                seeded = self._seeded_run_processes.get(run_id) or []
+                merged = [*seeded, *steps] if seeded else list(steps)
+                futures.extend(self._process_cursor.persist_new_run_tail(run_id, merged))
         elif t == EventType.TOOL_USE_START:
             run_id = payload.get("run_id") or ""
             if not run_id:

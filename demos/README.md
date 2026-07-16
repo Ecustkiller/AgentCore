@@ -137,9 +137,14 @@ uv run python scripts/demo_tape_export.py \
 ## 设计决策（为什么长这样）
 
 - **服务端磁带回放，而非前端注入**：重开会话/切页靠 REST 消息窗 + journal 水合，纯前端灌事件在用户切页时必穿帮；服务端回放落真实 DB 记录，一切页面行为天然成立。被否方案②：ScriptedProvider 重跑真实引擎——无 LLM 延迟导致节奏失真、prompt 漂移会对不上、工具副作用重复执行。
-- **磁带源 = `turn_journal`**（只存 DURABLE 事件；流式 delta 由导出时重切块合成打字观感）。CEO 的**思考(reasoning)/正文(content)按 process timeline 逐段定位**——检索/分析/组队思考锚到各自的工具与案情简介之前、汇总思考锚到辩论之后；案情简介按真实段边界完整落在开工卡前（不再被 `_split_captain_text` 启发式腰斩）。**保真度以原始会话为真值 oracle**：改导出/回放层后，用 `demo-tape-out/` 下保真脚本比对「回放 vs 原始」（正文与思考均须逐字节一致、辩论投影结构等价），不要目测。reasoning 真值 = captain `process_reasoning` 段拼接（与 `messages.reasoning_content` 仅差暂停边界的 `\n\n` 连接符）。
+- **磁带源 = `turn_journal`**（只存 DURABLE 事件；流式 delta 由导出时重切块合成打字观感）。CEO 的**思考(reasoning)/正文(content)按 process timeline 逐段定位**——检索/分析/组队思考锚到各自的工具与案情简介之前、汇总思考锚到辩论之后；案情简介按真实段边界完整落在开工卡前（不再被 `_split_captain_text` 启发式腰斩）。**保真度以原始会话为真值 oracle**：改导出/回放层后，跑 `apps/server/scripts/demo_tape_fidelity_check.py` 比对「回放 vs 原始」（正文与思考均须逐字节一致、辩论投影结构等价），不要目测。reasoning 真值 = captain `process_reasoning` 段拼接（与 `messages.reasoning_content` 仅差暂停边界的 `\n\n` 连接符）。
 - **暂停即真实检查点**：磁带遇 `team_preview` 真暂停、等用户在 UI 点继续——演示中人类拍板环节由录屏者掌控。
 - **节奏坑（已修勿回退）**：磁带 `t_ms` 必须单调；player 的 pacing 时钟不可回拨（曾因导出切块时间回跳 + 时钟回拨双计时，在原速下表现为「正在思考」长卡死，4 倍速+2s 限幅时被掩盖）。
+- **时间窗铺满 + 直播感重建（已修勿回退）**：journal 只存 DURABLE 事实，照搬时间戳会导致「文字一坨闪现 + 长死窗」。导出层负责重建直播观感，不变量（`demo-tape-out/_check_pacing.py` 一键验收）：
+  - **船长 reasoning/content 铺满真实锚点窗**：按 process timeline 定位归属窗口（如「上一锚点 → 编排工具」「最后编排 `tool_use_end` → `run_completed`」收尾窗），窗内按拍数比例均匀铺开（切片间隔 15ms~1.2s），顺序恒为 reasoning 先、content 后；末拍贴住窗尾。曾坏过两次：所有切片挤在同一毫秒；收尾总结插错窗（content 在 debate `tool_use_end` 之前 + 尾部 9.7s 空洞）。
+  - **worker 流式重建**：`run_output_delta`/`run_reasoning_delta` 是 EPHEMERAL（journal 不存），由 `message_final` + `run_process_*` 反推，按**间隙容量比例装箱**铺满该 run 的 `run_started→run_completed` 窗口（勿用「逐工具锚定+硬冲刷」——并发 run 交错时会把整段文本压进零宽窗，留下大段辩手静默）。
+  - **组队前的「委派中」心跳**：CEO 编排工具（`delegate`/`debate`）流式组装参数期间前端靠 `tool_progress`（EPHEMERAL）显示「Composing …」。导出时在（简介结束 → 开工卡）窗内合成递增 `chars` 的心跳序列，桌面 `TOOL_META` 已有 `debate` 条目。否则开工卡前是纯白屏。
+  - **player 跳过不可发射事件再计步**：`turn_paused` 等非 SSE 事实必须在 pacing 计算**之前**跳过，否则它们推进节奏时钟——曾表现为点「授权开赛」后 11 秒静默（resume 首拍应即时发出）。
 - **CEO 自持工具内联（已修勿回退）**：CEO 检索阶段的 `web_search`/`read_url` 在运行时带 captain 自己的 `run_id`；前端 `appendToolStep` 与后端 `_accumulate_process` 都把「带 run_id 的工具」当作 worker 工具从内联时间线剔除（本该落协作图节点），但检索阶段协作图尚未出现 → 前 ~15 秒只显示「正在思考」、检索活动全隐藏（正是上一条「3 秒内无首批搜索活动」判据的触发场景）。修法：player 回放时对 `run_id == captain run` 的 `tool_use_*` 事件剥离 `run_id`，使 CEO 自持工具按渲染契约（conformance `single_agent` 向量：CEO 工具无 run_id）走 turn-level 内联。磁带数据保持忠实录制（含 run_id），仅在渲染适配层归一。见 `player.py:_captain_run_id` + 单测 `test_player_inlines_captain_tools_by_stripping_run_id`。**真实产品同源已在 runtime 一并修掉**（旧磁带仍靠 player 层剥离兜底）：`execute_tools`（`runtime/engine/tool_exec.py`）对 `role=="captain"` 走 display/trace 拆分——`tool_use_*` 的 SSE 事件不发 `run_id`（内联渲染），`ToolCallFact`/熔断审计仍保留 captain `run_id`（§8.3 fold/溯源不变）；两处调用点 `tool_round.py`、`directive_apply.py`（coordination 收尾）均已传 `role`。
 
 ## 复用到新场景

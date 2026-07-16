@@ -119,5 +119,5 @@ def absorb_blocking_ask_user_content(
 
     messages[-1] = replace(messages[-1], content=None)
     _amend_last_llm_call(content="", tool_calls=tool_calls)
-    emit_reset()
+    emit_reset("ask_user")
     return True

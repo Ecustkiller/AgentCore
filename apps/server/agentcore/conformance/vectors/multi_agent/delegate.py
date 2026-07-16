@@ -295,7 +295,7 @@ def _multi_agent_worker_output_reset() -> list[SSEEvent]:
         run_started("r1", "w1"),
         run_reasoning_delta("r1", "w1", "先起草 JSON 结构。"),
         run_output_delta("r1", "w1", "草稿：\n```json\n```"),
-        run_output_reset("r1", "w1"),
+        run_output_reset("r1", "w1", "finish_guard"),
         run_output_delta("r1", "w1", "修正后的产出：{\"status\":\"ok\"}"),
         run_completed(
             "r1",
@@ -318,10 +318,11 @@ def _multi_agent_worker_deliverable_reset() -> list[SSEEvent]:
     前写了一段旁白（"我先看下现状。"），引擎判定这是过程旁白而非交付 → 回退交付正文并发一次
     ``run_output_reset`` 清掉卡片已流式的旁白 → 工具后重累积【最终交付】。
 
-    与 ``worker_output_reset``（finish_guard 结构缺陷回炉）同用 ``run_output_reset`` 机制，但落点不同：
-    这里 reset 落在【worker 工具调用之后】、旁白与最终交付之间。三端 fold + oracle 必须一致：清 agent
-    output 标量（重累积最终交付），reasoning 是真实过程、保留；旁白只活在 journal 的 llm_call fact 里，
-    不进 message_final / 卡片重载 / CEO 综述输入。故 r1 的 ``output`` 末态只剩「结论：应采用方案 A。」。"""
+    与 ``worker_output_reset``（finish_guard 结构缺陷回炉）同用 ``run_output_reset`` 机制，但
+    reason=``narration``（非 finish_guard）：三端 fold + oracle 必须一致地【不】折 rework 步——
+    旁白归档是正常流程，不该给节点打「已按交付规范重写」痕迹。清 agent output 标量（重累积最终
+    交付），reasoning 是真实过程、保留；旁白只活在 journal 的 llm_call fact 里，不进
+    message_final / 卡片重载 / CEO 综述输入。故 r1 的 ``output`` 末态只剩「结论：应采用方案 A。」。"""
     agents = [
         {
             "id": "w1",
@@ -349,7 +350,8 @@ def _multi_agent_worker_deliverable_reset() -> list[SSEEvent]:
         tool_use_start("tc1", "grep", {"pattern": "x"}, run_id="r1"),
         tool_use_end("tc1", "grep", success=True, output="命中 3 处", run_id="r1"),
         # 引擎回退交付正文、发 run_output_reset 清卡片旁白（直播==重载==最终交付）。
-        run_output_reset("r1", "w1"),
+        # reason=narration：正常旁白归档，fold 不折 rework 步（无「已按交付规范重写」痕迹）。
+        run_output_reset("r1", "w1", "narration"),
         run_output_delta("r1", "w1", "结论：应采用方案 A。"),  # 最终交付
         run_completed(
             "r1",

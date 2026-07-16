@@ -30,6 +30,7 @@ from agentcore.api.dependencies import (
     get_credentials_repo,
     get_db,
     get_messaging_service,
+    get_shared_space_service,
     get_user_llm_key_repo,
     get_user_repo,
 )
@@ -76,6 +77,7 @@ from agentcore.db.repositories import (
 from agentcore.messaging import MessagingService
 from agentcore.middleware.csrf import clear_csrf_token, issue_csrf_token
 from agentcore.security.tokens import decode_access_token_claims
+from agentcore.shared_spaces.service import SharedSpaceService
 from agentcore.storage.assets import AssetStorage
 
 logger = get_logger(__name__)
@@ -531,6 +533,7 @@ async def delete_account(
     shares: ConversationShareRepository = Depends(get_conversation_share_repo),
     llm_keys: UserLlmKeyRepository = Depends(get_user_llm_key_repo),
     assets: AssetStorage = Depends(get_asset_storage),
+    shared_space_svc: SharedSpaceService = Depends(get_shared_space_service),
 ):
     """Self-service account deletion (注销账户). Verifies the password, then soft-deletes
     + anonymizes the account and revokes all sessions. Cross-domain cleanup lives here
@@ -547,6 +550,7 @@ async def delete_account(
         shares=shares,
         llm_keys=llm_keys,
         assets=assets,
+        shared_spaces=shared_space_svc,
     )
     _clear_auth_cookies(response, user_id=user.user_id)
     return StatusResponse()

@@ -95,7 +95,7 @@ async def test_checkpointer_generation_bump_on_content_reset(monkeypatch):
     )
     ck = StreamCheckpointer(turn_id="t1")
     ck.observe(content_delta("old"))
-    ck.observe(content_reset())
+    ck.observe(content_reset("retry"))
     await ck.flush()
     # After reset, generation=1 and text empty (dirty).
     snap = ck.memory_snapshot()

@@ -41,6 +41,7 @@ from .runs import (
     TurnStreamStateRow,
 )
 from .simulation import SimAgent, SimEvent, SimTick, SimulationRun
+from .shared_spaces import SharedSpace, SharedSpaceEvent, SharedSpaceMember
 from .users import User, UserBlock, UserDirectorySettings
 
 __all__ = [
@@ -67,6 +68,9 @@ __all__ = [
     "PushDeviceRow",
     "RefreshToken",
     "RunSessionRow",
+    "SharedSpace",
+    "SharedSpaceEvent",
+    "SharedSpaceMember",
     "SimAgent",
     "SimEvent",
     "SimTick",

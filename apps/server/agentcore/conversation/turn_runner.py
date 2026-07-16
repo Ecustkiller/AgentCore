@@ -115,15 +115,26 @@ async def run_and_persist(
         # is bound under DEMO_TAPE_REPLAY_ENABLED.
         from agentcore.demo_tape.hooks import run_tape_turn_if_bound
 
-        tape_result = await run_tape_turn_if_bound(
-            conversation_id=conversation_id,
-            sink=sink,
-            message_id=message_id,
-            user_id=user_id,
-            user_message=user_message,
-            folder_id=folder_id,
-            trace_id=trace_id,
-        )
+        try:
+            tape_result = await run_tape_turn_if_bound(
+                conversation_id=conversation_id,
+                sink=sink,
+                message_id=message_id,
+                user_id=user_id,
+                user_message=user_message,
+                folder_id=folder_id,
+                trace_id=trace_id,
+            )
+        except asyncio.CancelledError:
+            # Same 收口 as the real pipeline below: a mid-replay disconnect / shutdown
+            # must not leave a zombie RUNNING assistant row — salvage the streamed part.
+            salvage_incomplete_turn(
+                sink=sink,
+                conversation_id=conversation_id,
+                trace_id=trace_id,
+                message_id=message_id,
+            )
+            raise
         if tape_result is not None:
             duration_ms = int((time.monotonic() - started) * 1000)
             logger.info(

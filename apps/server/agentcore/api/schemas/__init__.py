@@ -174,6 +174,22 @@ from .messaging import (
     UserSearchResult,
 )
 from .search import SearchItem, SearchResponse, SearchSection
+from .shared_spaces import (
+    CreateSharedSpaceRequest,
+    InviteSharedSpaceMemberRequest,
+    MountSharedSpaceRequest,
+    SharedMountItem,
+    SharedMountListResponse,
+    SharedMountResponse,
+    SharedSpaceEventListResponse,
+    SharedSpaceEventSummary,
+    SharedSpaceListResponse,
+    SharedSpaceMemberListResponse,
+    SharedSpaceMemberSummary,
+    SharedSpaceSummary,
+    UpdateSharedSpaceMemberRequest,
+    UpdateSharedSpaceRequest,
+)
 from .sharing import CreateShareRequest, ShareListResponse, ShareSummary
 from .tools import (
     CapabilitiesResponse,
@@ -320,6 +336,21 @@ __all__ = [
     "CreateDirRequest",
     "CloneRepoRequest",
     "CloneRepoResponse",
+    # shared spaces
+    "CreateSharedSpaceRequest",
+    "UpdateSharedSpaceRequest",
+    "SharedSpaceSummary",
+    "SharedSpaceListResponse",
+    "InviteSharedSpaceMemberRequest",
+    "UpdateSharedSpaceMemberRequest",
+    "SharedSpaceMemberSummary",
+    "SharedSpaceMemberListResponse",
+    "SharedSpaceEventSummary",
+    "SharedSpaceEventListResponse",
+    "MountSharedSpaceRequest",
+    "SharedMountItem",
+    "SharedMountListResponse",
+    "SharedMountResponse",
     # messages + interactions + turns
     "MessageAttachment",
     "StoredAttachment",

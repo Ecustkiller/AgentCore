@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,6 @@ from agentcore.runtime.events import (
     message_end,
     message_start,
     team_preview_resolved,
-    tool_progress,
 )
 from agentcore.runtime.events.types import SSEEvent
 from agentcore.runtime.journal.entries import journal_entries_from_display_runs
@@ -41,51 +41,18 @@ logger = get_logger(__name__)
 # 要求 CEO 自持工具走 turn-level 内联（见 _captain_run_id 说明），故回放时按 kind 归一。
 _CAPTAIN_TOOL_KINDS = frozenset({"tool_use_start", "tool_use_end", "tool_use_progress"})
 
-# CEO 组队/派单的传输态：前端 `ComposingToolLine` 的「正在生成 委派任务 · N 字」由 captain 编排
-# 工具（delegate/debate）流式组装参数时的 `tool_progress` 心跳驱动。该心跳是 EPHEMERAL（永不落
-# journal / 不进 process 时间线，见 events/disposition.py），导出磁带（源 = turn_journal 的 DURABLE
-# 事件）时天然丢失 → 回放里案情简介之后直接跳「开工卡」，中间「正在委派」空缺、只剩「正在思考」。
-# 回放层按 team_preview 参数合成一段字数递增的 tool_progress 还原真实观感；纯传输态，不碰正文
-# 字节保真、不改协议、不重导磁带（与 captain 工具剥 run_id 同属渲染适配层）。
-_DELEGATE_COMPOSE_TOOL = "delegate"  # 前端 TOOL_META → "委派任务"
-_DELEGATE_COMPOSE_STEPS = 8
-_DELEGATE_COMPOSE_TOTAL_MS = 2400
+# 回放身份 ≠ 录制身份：磁带忠实保留原始 checkpoint_id，但每次回放都是一次新执行。桌面
+# InteractionStore 以 interaction id 为跨会话全局键（已 resolved 的 id 不复活、pending 的
+# id 保留首个 payload），若复用录制 id，同一桌面进程内的第二次回放会把 team_preview_required
+# 静默吞掉——开工卡永不出现、无法授权、协作图无从渲染。故对回放中的 *_required 检查点按
+# (本回合 message_id, 录制 id) 确定性铸造回放专用 id：同一回合的 send/resume 两段一致，
+# 不同回合（哪怕同一磁带、同一录制 id）互不相同。
+_REPLAY_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "agentcore:demo-tape:replay-identity")
 
 
-def _delegation_compose_chars(payload: dict[str, Any]) -> int:
-    """Total chars of the delegation/debate arguments the CEO is assembling."""
-    parts: list[str] = [str(payload.get("motion") or "")]
-    for side in payload.get("sides") or []:
-        if isinstance(side, dict):
-            parts.append(str(side.get("name") or ""))
-            parts.append(str(side.get("stance") or ""))
-    for worker in payload.get("workers") or []:
-        if isinstance(worker, dict):
-            parts.append(str(worker.get("role") or ""))
-            parts.append(str(worker.get("task") or ""))
-    return sum(len(p) for p in parts)
-
-
-async def _emit_delegation_composing(
-    sink: EventSink, payload: dict[str, Any], *, speed: float
-) -> None:
-    """Replay-only: synthesize the CEO's「正在生成 委派任务 · N 字」compose heartbeat.
-
-    Runs after the case-brief content and before the team_preview card, so the search →
-    brief → *delegating* → kickoff arc renders faithfully instead of a silent「正在思考」.
-    Chars ramp up to the assembled arguments' length; ``tool_progress`` is EPHEMERAL so
-    none of this reaches the journal (byte-for-byte oracle parity is untouched).
-    """
-    total_chars = _delegation_compose_chars(payload)
-    if total_chars <= 0:
-        return
-    step_ms = _DELEGATE_COMPOSE_TOTAL_MS / _DELEGATE_COMPOSE_STEPS
-    for i in range(1, _DELEGATE_COMPOSE_STEPS + 1):
-        chars = max(1, round(total_chars * i / _DELEGATE_COMPOSE_STEPS))
-        sink.emit(tool_progress(_DELEGATE_COMPOSE_TOOL, chars))
-        delay = step_ms / max(speed, 0.01) / 1000.0
-        if delay > 0:
-            await asyncio.sleep(delay)
+def replay_checkpoint_id(recorded_id: str, *, message_id: str) -> str:
+    """This replay's checkpoint id for a recorded one (deterministic per turn)."""
+    return str(uuid.uuid5(_REPLAY_ID_NAMESPACE, f"{message_id}:{recorded_id}"))
 
 
 def _captain_run_id(events: list[dict[str, Any]]) -> str:
@@ -211,7 +178,8 @@ async def _pause_team_preview(
     journal_writer: TurnJournalWriter,
 ) -> dict[str, Any]:
     checkpoint_id = str(payload.get("checkpoint_id") or new_id())
-    # Ensure the emitted card + frame share the same id (tape may already carry one).
+    # The caller already reminted this replay's checkpoint id; the frame must reuse it
+    # so the emitted card, the suspension and the resume settlement share one identity.
     payload = {**payload, "checkpoint_id": checkpoint_id, "conversation_id": conversation_id}
 
     await journal_writer.flush()
@@ -328,7 +296,10 @@ async def play_tape_events(
         t_ms = int(ev.get("t_ms") or 0)
         ts = ev.get("ts") if isinstance(ev.get("ts"), str) else None
 
-        if kind in PAUSE_RESOLVED_KINDS:
+        # Skip non-emitted kinds *before* pacing so recorded pause/hesitation gaps
+        # (turn_paused, *_resolved, …) do not sleep or advance the clock — resume's
+        # first live event then fires immediately (prev_t still None → gap 0).
+        if kind in PAUSE_RESOLVED_KINDS or _event_type(kind) is None:
             i += 1
             continue
 
@@ -340,12 +311,13 @@ async def play_tape_events(
             await asyncio.sleep(delay)
 
         if kind == "team_preview_required":
-            # Emit the required card, then durable-pause.
-            if "checkpoint_id" not in payload or not payload.get("checkpoint_id"):
-                payload["checkpoint_id"] = new_id()
+            # Emit the required card, then durable-pause. Always remint the checkpoint
+            # identity for THIS replay (see _REPLAY_ID_NAMESPACE) — recorded ids repeat
+            # across replays and collide in id-keyed client state.
+            payload["checkpoint_id"] = replay_checkpoint_id(
+                str(payload.get("checkpoint_id") or ""), message_id=message_id
+            )
             payload["conversation_id"] = conversation_id
-            # 案情简介之后、开工卡之前：还原 CEO 组装委派/辩论方案的「正在生成 委派任务 · N 字」。
-            await _emit_delegation_composing(sink, payload, speed=binding.speed)
             await _emit(sink, kind, payload, ts=ts)
             content = "".join(content_parts)
             reasoning = "".join(reasoning_parts)
@@ -367,6 +339,11 @@ async def play_tape_events(
         if kind in PAUSE_REQUIRED_KINDS:
             # Other durable pause cards (plan_review / ask_user) are not yet wired for
             # tape frames — emit for visibility then continue (dev tape should avoid them).
+            # Same replay-identity rule as team_preview: never re-emit a recorded id.
+            if "checkpoint_id" in payload:
+                payload["checkpoint_id"] = replay_checkpoint_id(
+                    str(payload.get("checkpoint_id") or ""), message_id=message_id
+                )
             logger.warning("demo_tape.unhandled_pause_kind", kind=kind)
             await _emit(sink, kind, payload, ts=ts)
             i += 1

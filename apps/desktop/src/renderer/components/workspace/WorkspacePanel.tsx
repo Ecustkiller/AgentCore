@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { FilesSection } from "./FilesSection";
+import { SharedMountsSection } from "./SharedMountsSection";
 import { SnapshotsSection } from "./SnapshotsSection";
 import { WorkspaceClientTools } from "./WorkspaceClientTools";
 import { WorkspaceModeBar } from "./WorkspaceModeBar";
@@ -108,6 +109,10 @@ export function WorkspaceMode() {
     ? "工作区暂无文件。AI 产物会出现在这里；需要时可用「导出到本地」落到本机目录。"
     : "工作区暂无文件。AI 产物会出现在这里；需要时可导出 ZIP。";
 
+  // D2: shared-space mounts are cloud-execution only (local-bound chats have no
+  // cross-runtime dual root).
+  const isCloudWorkspace = ws?.location === "cloud";
+
   return (
     <div className="relative flex h-full flex-col">
       {/* 单行面板头：云端选择器（leading）+ 文件操作 + 快照（trailing）合到 FilesSection
@@ -147,6 +152,10 @@ export function WorkspaceMode() {
           }
         />
       </div>
+
+      {isCloudWorkspace ? (
+        <SharedMountsSection conversationId={conversationId} />
+      ) : null}
 
       {/* 快照：从常驻 tab 降级为按需 slide-over（低频 / 恢复型操作）。 */}
       {snapshotsOpen && (

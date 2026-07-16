@@ -42,7 +42,18 @@ from agentcore.runtime.events.types import EventType
 TS_EXPORTS: tuple[TsExport, ...] = (
     TsInterface(chat.MessageStartPayload),
     TsInterface(chat.ContentDeltaPayload),
-    TsInterface(chat.ContentResetPayload, render_raw="Record<string, never>"),
+    TsAlias(
+        "ResetReason",
+        chat.ResetReason,
+        doc=(
+            "Why a `content_reset` / `run_output_reset` fired. Folds render the\n"
+            "「已按交付规范重写」rework chip ONLY for `finish_guard`（交付前核验回炉）；\n"
+            "every other reason still clears the streamed draft but leaves no trace:\n"
+            "`retry`（LLM 流式透明重试）· `soft_gate`（captain 软门控打回）·\n"
+            "`narration`（worker 旁白回滚）· `ask_user`（blocking ask_user 吸收）."
+        ),
+    ),
+    TsInterface(chat.ContentResetPayload),
     TsInterface(chat.ReasoningDeltaPayload),
     TsInterface(chat.ToolProgressPayload),
     TsAlias(
