@@ -150,6 +150,12 @@ function git(args) {
   return { ok: r.status === 0, out: (r.stdout ?? "").trim() };
 }
 
+/** True when `sha` (full or short) resolves to a local commit object. */
+function isLocalCommit(sha) {
+  const r = git(["cat-file", "-t", sha]);
+  return r.ok && r.out === "commit";
+}
+
 /**
  * Deploy-time guard against 前后端版本漂移 — a FRONTEND deployed AHEAD of the backend.
  * A newer client calls endpoints the older *deployed* backend lacks → 404 (e.g. the
@@ -200,9 +206,12 @@ export async function assertBackendContractSatisfied({ apiBaseUrl, force = false
   }
 
   // Ancestry needs the backend sha in local history; fetch once if it's missing.
-  if (!git(["cat-file", "-e", `${backendSha}^{commit}`]).ok) {
+  // Use `cat-file -t` (not `sha^{commit}`): on Windows `git()` runs with `shell:true`,
+  // and cmd.exe treats `^` as an escape — so `bafda4f9^{commit}` becomes
+  // `bafda4f9{commit}` and a short sha that IS HEAD falsely "isn't in history".
+  if (!isLocalCommit(backendSha)) {
     git(["fetch", "--quiet", "origin"]);
-    if (!git(["cat-file", "-e", `${backendSha}^{commit}`]).ok) {
+    if (!isLocalCommit(backendSha)) {
       console.warn(
         `⚠ 契约门禁：后端 sha ${backendSha} 不在本地 git 历史里（先 git fetch）— 跳过校验`,
       );

@@ -142,3 +142,7 @@ testpaths = ["tests"]
 # ``@pytest.mark.timeout(N)``.
 timeout = 60
 timeout_method = "thread"
+markers = [
+    # Opt-in: integration/conftest disables CSRF unless this mark (or test_csrf*) is present.
+    "csrf: exercise CSRF synchronizer-token enforcement on cookie-session flows",
+]
