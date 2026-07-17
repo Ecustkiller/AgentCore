@@ -38,6 +38,33 @@ def _mark_test_traffic():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _disarm_demo_tape_recorder():
+    """Clear the process-wide EventSink emit tap after every test.
+
+    Sidecar ``initialize`` arms the recorder when ``DEMO_TAPE_RECORD_ENABLED`` is
+    set (including via ``apps/server/.env``); without teardown the tap leaks into
+    later demo_tape / pipeline tests and can hang the session.
+    """
+    yield
+    from agentcore.demo_tape.recorder import uninstall_recorder
+
+    uninstall_recorder()
+
+
+@pytest.fixture(autouse=True)
+def _reset_conversation_store():
+    """Restore CloudStore after sidecar tests swap in a local OutboxStore.
+
+    A leaked OutboxStore makes later EventSink checkpointers busy-loop under
+    demo_tape's ``asyncio.sleep`` monkeypatch (flush never settles).
+    """
+    yield
+    from agentcore.conversation.store import reset_conversation_store_for_tests
+
+    reset_conversation_store_for_tests()
+
+
 def _rmtree_quiet(path: Path) -> None:
     """Recursively delete ``path``; NEVER raise.
 

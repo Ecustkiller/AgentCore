@@ -20,7 +20,9 @@ Pipeline (pure offline read → artifact; no runtime semantics — 提案 §3.3 
 3. **timestamp stabilization** — stamps are reassigned deterministically (same scheme
    as :mod:`agentcore.conformance.export`), so re-cutting the same recording is
    byte-identical (golden 可复现; the projection ignores timestamps).
-4. **oracle projection** — ``projected = project_turn(events)``.
+4. **ingest sanitize + scan** — shared with tape export (``demo_tape/sanitize.py``):
+   strip long-term user memory from ``run_context`` system bodies; refuse residue.
+5. **oracle projection** — ``projected = project_turn(events)``.
 
 Coexistence with the hand-authored VECTORS builders (two sources, one judge): cut
 fixtures are named ``recorded_*.json`` and live in the SAME top-level fixtures dir —

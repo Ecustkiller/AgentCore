@@ -314,3 +314,54 @@ def test_hand_vectors_never_use_recorded_prefix():
 
     offenders = [n for n in VECTORS if n.startswith(RECORDED_FIXTURE_PREFIX)]
     assert offenders == []
+
+
+# ---------------------------------------------------------------------------
+# 入库脱敏（与 tape export 共用 sanitize.py）
+# ---------------------------------------------------------------------------
+
+
+def test_cut_sanitizes_run_context_memory_and_passes_scan():
+    from agentcore.demo_tape.sanitize import (
+        DEMO_MEMORY_PLACEHOLDER,
+        assert_ingest_clean,
+    )
+
+    memory = (
+        "<rules>\n"
+        "以下是关于当前用户的长期记忆（由 AI 自动维护，属软性偏好）。请在不与用户当前\n"
+        "指令冲突的前提下遵循；如有冲突，以用户的显式指令为准。\n\n"
+        "## 沟通偏好\n"
+        "- 真偏好 <!-- ts:2026-07-13 -->\n"
+        "</rules>"
+    )
+    recording = {
+        "version": 2,
+        "meta": {"conversation_id": "c", "message_id": "m"},
+        "segments": [
+            {
+                "events": [
+                    _e("message_start", {"message_id": "m", "conversation_id": "c"}, 0),
+                    _e(
+                        "run_context",
+                        {
+                            "run_id": "r1",
+                            "blocks": [{"channel": "system", "body": memory}],
+                        },
+                        5,
+                    ),
+                    _e("content_delta", {"delta": "正文"}, 10),
+                    _e(
+                        "message_end",
+                        {"finish_reason": "end_turn", "usage": _USAGE, "cost": _COST},
+                        20,
+                    ),
+                ]
+            }
+        ],
+    }
+    fx = cut_recording_to_fixture(recording, name="sanitized_ctx")
+    body = fx["events"][1]["payload"]["blocks"][0]["body"]
+    assert DEMO_MEMORY_PLACEHOLDER in body
+    assert "真偏好" not in body
+    assert_ingest_clean(fx["events"])

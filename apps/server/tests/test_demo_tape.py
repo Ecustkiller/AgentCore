@@ -8,18 +8,35 @@ from pathlib import Path
 import pytest
 
 from agentcore.demo_tape.binding import conversation_is_cloud, write_binding
-from agentcore.demo_tape.export import build_tape_from_recording, load_tape, write_tape
+from agentcore.demo_tape.export import (
+    TapeExportRefusedError,
+    assert_export_allowed,
+    build_tape_from_recording,
+    load_tape,
+    write_tape,
+)
 from agentcore.demo_tape.identity import (
     INTERACTION_ID_KEYS,
     remint_interaction_ids,
     replay_interaction_id,
 )
 from agentcore.demo_tape.pacing import sleep_ms_for_gap
+from agentcore.demo_tape.sanitize import (
+    DEMO_MEMORY_PLACEHOLDER,
+    SYNTHETIC_MEMORY_RULES,
+    IngestScanError,
+    assert_ingest_clean,
+    sanitize_and_scan_events,
+    sanitize_memory_in_text,
+    scan_events_for_ingest_residue,
+)
 from agentcore.demo_tape.schema import (
+    CLIENT_TOOL_REQUIRED_KINDS,
     DEMO_TAPE_FRAME_KEY,
     RECORDING_FORMAT_VERSION,
     TAPE_EXCLUDED_KINDS,
     TAPE_FORMAT_VERSION,
+    TAPE_UNWIRED_PAUSE_KINDS,
     event_timestamp,
     event_type,
     is_demo_tape_frame,
@@ -1745,3 +1762,187 @@ async def test_resume_folds_team_preview_into_resolved(monkeypatch, tmp_path: Pa
         for e in (*sink._history, *sink2._history)
     ]
     assert _team_preview(project_turn(live_wire))["status"] == "resolved"
+
+
+# ── 入库脱敏双防线 + 导出门禁 + 客户端工具断言 ─────────────────────────────
+
+
+_REAL_MEMORY_RULES = """<rules>
+以下是关于当前用户的长期记忆（由 AI 自动维护，属软性偏好）。请在不与用户当前
+指令冲突的前提下遵循；如有冲突，以用户的显式指令为准。
+
+## 沟通偏好
+- 倾向用中文交流 <!-- ts:2026-07-13 -->
+
+## 关于用户的事实
+- 正在测试秘密功能 <!-- ts:2026-07-16 -->
+</rules>"""
+
+
+def test_sanitize_memory_keeps_rules_block_structure():
+    prompt = f"前置\n{_REAL_MEMORY_RULES}\n<role>\n你是 CEO\n</role>"
+    out = sanitize_memory_in_text(prompt)
+    assert DEMO_MEMORY_PLACEHOLDER in out
+    assert "<!-- ts:" not in out
+    assert "正在测试秘密功能" not in out
+    assert out.startswith("前置\n")
+    assert "<role>\n你是 CEO\n</role>" in out
+    assert SYNTHETIC_MEMORY_RULES in out
+
+
+def test_sanitize_and_scan_run_context_clears_memory():
+    events = [
+        {
+            "type": "run_context",
+            "payload": {
+                "run_id": "r1",
+                "blocks": [
+                    {"channel": "system", "body": f"head\n{_REAL_MEMORY_RULES}\ntail"},
+                    {"channel": "request", "body": "用户问题"},
+                ],
+            },
+            "timestamp": None,
+            "t_ms": 0,
+        }
+    ]
+    cleaned = sanitize_and_scan_events(events)
+    body = cleaned[0]["payload"]["blocks"][0]["body"]
+    assert DEMO_MEMORY_PLACEHOLDER in body
+    assert "秘密功能" not in body
+    assert cleaned[0]["payload"]["blocks"][1]["body"] == "用户问题"
+    assert_ingest_clean(cleaned)
+
+
+def test_ingest_scan_rejects_unsanitized_memory_and_system_contacts():
+    dirty = [
+        {
+            "type": "run_context",
+            "payload": {
+                "blocks": [
+                    {
+                        "channel": "system",
+                        "body": (
+                            "x\n## 沟通偏好\n- 真偏好 <!-- ts:2026-01-01 -->\n"
+                            "mail me@example.com phone 13812345678"
+                        ),
+                    }
+                ]
+            },
+        }
+    ]
+    hits = scan_events_for_ingest_residue(dirty)
+    assert any("timestamp marker" in h or "沟通偏好" in h for h in hits)
+    with pytest.raises(IngestScanError):
+        assert_ingest_clean(dirty)
+
+    # Public contacts in tool results must NOT trip the gate (demo web search noise).
+    toolish = [
+        {
+            "type": "tool_use_end",
+            "payload": {
+                "result": "见 https://www.sohu.com/a/1050304127_121811866 ipc@court.gov.cn"
+            },
+        }
+    ]
+    assert scan_events_for_ingest_residue(toolish) == []
+
+
+def test_export_refuses_unwired_pause_and_approval_unless_forced():
+    assert "checkpoint_required" in TAPE_UNWIRED_PAUSE_KINDS
+    recording = {
+        "meta": {"conversation_id": "c", "message_id": "m"},
+        "segments": [
+            {
+                "events": [
+                    {
+                        "type": "content_delta",
+                        "payload": {"delta": "hi"},
+                        "timestamp": None,
+                        "t_ms": 0,
+                    },
+                    {
+                        "type": "checkpoint_required",
+                        "payload": {"checkpoint_id": "cp1"},
+                        "timestamp": None,
+                        "t_ms": 10,
+                    },
+                ]
+            }
+        ],
+    }
+    with pytest.raises(TapeExportRefusedError) as ei:
+        build_tape_from_recording(recording, user_prompt="p")
+    assert any("checkpoint_required" in r for r in ei.value.reasons)
+
+    doc = build_tape_from_recording(recording, user_prompt="p", force=True)
+    assert [e["type"] for e in doc["events"]] == ["content_delta", "checkpoint_required"]
+
+    approval_rec = {
+        "meta": {},
+        "segments": [
+            {
+                "events": [
+                    {
+                        "type": "approval_required",
+                        "payload": {"approval_id": "a1"},
+                        "timestamp": None,
+                        "t_ms": 0,
+                    }
+                ]
+            }
+        ],
+    }
+    with pytest.raises(TapeExportRefusedError):
+        build_tape_from_recording(approval_rec, user_prompt="p")
+    build_tape_from_recording(approval_rec, user_prompt="p", force=True)
+
+
+def test_export_asserts_client_tool_required_not_forceable():
+    # Defense beyond the cut table: if a client-tool event slips into the cut
+    # result, export must refuse even with force=True.
+    leaked = [
+        {
+            "type": "workspace_op_required",
+            "payload": {"op_id": "op1"},
+            "timestamp": None,
+            "t_ms": 0,
+        }
+    ]
+    with pytest.raises(TapeExportRefusedError) as ei:
+        assert_export_allowed(leaked, force=True)
+    assert any("client-tool" in r for r in ei.value.reasons)
+    assert CLIENT_TOOL_REQUIRED_KINDS <= TAPE_EXCLUDED_KINDS
+
+
+def test_build_tape_sanitizes_run_context_memory():
+    recording = {
+        "meta": {"conversation_id": "c", "message_id": "m"},
+        "segments": [
+            {
+                "events": [
+                    {
+                        "type": "run_context",
+                        "payload": {
+                            "run_id": "r1",
+                            "blocks": [
+                                {"channel": "system", "body": _REAL_MEMORY_RULES},
+                            ],
+                        },
+                        "timestamp": None,
+                        "t_ms": 0,
+                    },
+                    {
+                        "type": "content_delta",
+                        "payload": {"delta": "ok"},
+                        "timestamp": None,
+                        "t_ms": 5,
+                    },
+                ]
+            }
+        ],
+    }
+    doc = build_tape_from_recording(recording, user_prompt="p")
+    body = doc["events"][0]["payload"]["blocks"][0]["body"]
+    assert DEMO_MEMORY_PLACEHOLDER in body
+    assert "<!-- ts:" not in body
+    assert_ingest_clean(doc["events"])

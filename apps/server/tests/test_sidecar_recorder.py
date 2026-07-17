@@ -7,8 +7,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from agentcore.demo_tape.schema import RECORDING_FORMAT_VERSION
 from agentcore.runtime.events import (
     EventSink,
@@ -44,15 +42,6 @@ async def _initialize(
     await server.handle_line(
         json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": params})
     )
-
-
-@pytest.fixture(autouse=True)
-def _disarm_recorder():
-    """Keep the process-wide emit tap from leaking across tests."""
-    yield
-    from agentcore.demo_tape.recorder import uninstall_recorder
-
-    uninstall_recorder()
 
 
 def test_sidecar_initialize_installs_recorder_when_enabled(monkeypatch, tmp_path):
