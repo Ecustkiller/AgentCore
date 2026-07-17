@@ -22,7 +22,7 @@ function moderatorRun(id = "moderator"): RunNode {
     agentId: id,
     status: "completed",
     kind: "agent",
-    model: "deepseek/deepseek-chat",
+    model: "deepseek/deepseek-v4-flash",
     parentRunId: null,
     continuesRunId: null,
     receivedContext: [],

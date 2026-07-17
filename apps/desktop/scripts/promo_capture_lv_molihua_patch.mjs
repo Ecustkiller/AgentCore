@@ -6,6 +6,7 @@
  *
  *   $env:PROMO_API='http://localhost:8015'
  *   node apps/desktop/scripts/promo_capture_lv_molihua_patch.mjs
+ *   node apps/desktop/scripts/promo_capture_lv_molihua_patch.mjs --tape <id>
  */
 
 import { mkdir, writeFile, readFile } from "node:fs/promises";
@@ -17,7 +18,31 @@ import { createServer } from "vite";
 const here = dirname(fileURLToPath(import.meta.url));
 const desktopDir = resolve(here, "..");
 const root = resolve(desktopDir, "../..");
-const outRoot = resolve(root, "apps/promo/assets/lv-molihua");
+const DEFAULT_TAPE = "lv-molihua-trademark";
+const DEFAULT_OUT_REL = "apps/promo/assets/lv-molihua";
+
+function parsePromoArgs(argv) {
+  const out = { tape: undefined, out: undefined };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--tape") out.tape = argv[++i];
+    else if (a?.startsWith("--tape=")) out.tape = a.slice("--tape=".length);
+    else if (a === "--out") out.out = argv[++i];
+    else if (a?.startsWith("--out=")) out.out = a.slice("--out=".length);
+    else if (a === "--help" || a === "-h") {
+      console.log("Usage: --tape <id> --out <rel-or-abs>");
+      process.exit(0);
+    } else throw new Error(`Unknown arg: ${a}`);
+  }
+  return out;
+}
+const cli = parsePromoArgs(process.argv.slice(2));
+const TAPE = cli.tape || process.env.PROMO_TAPE || DEFAULT_TAPE;
+const outRel =
+  cli.out ||
+  process.env.PROMO_OUT ||
+  (TAPE === DEFAULT_TAPE ? DEFAULT_OUT_REL : `apps/promo/assets/${TAPE}`);
+const outRoot = resolve(root, outRel);
 const stillsDir = resolve(outRoot, "stills");
 const sequencesDir = resolve(outRoot, "sequences");
 
@@ -25,7 +50,6 @@ const USER = process.env.PROMO_USER ?? "dev";
 const PASS = process.env.PROMO_PASS ?? "devpassword";
 const API = (process.env.PROMO_API ?? "http://localhost:8015").replace(/\/$/, "");
 const PORT = Number(process.env.PROMO_PORT ?? 5175);
-const TAPE = process.env.PROMO_TAPE ?? "lv-molihua-trademark";
 const SPEED = Number(process.env.PROMO_SPEED ?? 20);
 const GAP = Number(process.env.PROMO_GAP ?? 400);
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -36,39 +60,39 @@ const TARGETS = [
   {
     id: "04-r2-diamond-square",
     chapter: /第\s*2\s*轮|第2轮/,
-    need: (t) => /菱形/.test(t) && /正方形/.test(t),
-    label: "第2轮 LV「拿菱形论证正方形」",
-    tapeHint: "r2_lv @ t_ms≈432000",
+    need: (t) => /偷换概念|具体设计|公共纹样|四叶草不能用|中心菱形/.test(t),
+    label: "第2轮 LV「公共纹样 vs 具体设计」",
+    tapeHint: "r2 @ t_ms≈495918",
   },
   {
     id: "05-r3-logo-swap",
     chapter: /第\s*3\s*轮|第3轮/,
-    need: (t) => /更换Logo|换标|诉讼期间/.test(t) && /混淆|恶意|门店/.test(t),
-    label: "第3轮 诉讼期换标攻防",
-    tapeHint: "r3_lv @ t_ms≈657000",
+    need: (t) => /惩罚性赔偿|驳回后|更近似|故意/.test(t),
+    label: "第3轮 驳回后换更近似 Logo",
+    tapeHint: "r3 @ t_ms≈495918–714497",
   },
   {
     id: "05b-r4-logo-defense",
     chapter: /第\s*4\s*轮|第4轮/,
-    need: (t) => /小程序/.test(t) && /客服头像/.test(t),
-    label: "第4轮 换标抗辩（小程序/客服头像）",
-    tapeHint: "r4_molij @ t_ms≈825000",
+    need: (t) => /贡献率|举证责任|量化证据/.test(t),
+    label: "第4轮 贡献率 / 举证责任",
+    tapeHint: "r4 @ t_ms≈714497–878121",
   },
   {
     id: "06-r5-burden",
-    chapter: /第\s*5\s*轮|第5轮/,
-    need: (t) => /举证|间接证据|实际混淆|定量调查/.test(t),
-    label: "第5轮 举证责任决胜",
-    tapeHint: "r5 @ t_ms≈1058000",
+    chapter: /第\s*4\s*轮|第4轮|终审/,
+    need: (t) => /贡献率|举证责任|量化|合理信赖/.test(t),
+    label: "第4轮终局 · 贡献率举证决胜",
+    tapeHint: "r4 debate_round @ t_ms≈878121（本盘仅 4 轮）",
   },
   {
     id: "08-final-verdict",
     chapter: /终审/,
-    // UI shows「置信 中」pill + leaning line; CEO wrap may also say 65%.
     need: (t) =>
-      /倾向茉莉奶白/.test(t) && (/置信/.test(t) || /65\s*%|65%/.test(t) || /决策简报/.test(t)),
-    label: "最终裁决（倾向茉莉奶白 · 65%）",
-    tapeHint: "debate_result @ t_ms≈1118000",
+      (/倾向支持一审|支持一审判决|LV 方胜出/.test(t)) &&
+      (/置信/.test(t) || /70\s*%|70%/.test(t) || /决策简报/.test(t)),
+    label: "最终裁决（倾向支持一审 · 70%）",
+    tapeHint: "debate_result @ t_ms≈907528",
   },
 ];
 
@@ -226,17 +250,17 @@ async function main() {
       label: "流式打字中的辩论发言",
     });
 
-    // Wait until finale / round 5 chapter exists (debate far enough)
+    // Wait until finale / round 4 chapter exists (debate far enough; tape is 4 rounds)
     console.log("waiting for late chapters…");
     let ready = false;
     for (let i = 0; i < 240; i++) {
       const t = await mainText(page);
       const hasFinale =
         (await page.getByRole("button", { name: /终审/ }).isVisible().catch(() => false)) ||
-        /终审|倾向茉莉奶白|决策简报/.test(t);
-      const hasR5 = await page.getByRole("button", { name: /第\s*5\s*轮|第5轮/ }).isVisible().catch(() => false);
-      if (i % 20 === 0) console.log("wait", i, { hasFinale, hasR5, len: t.length });
-      if (hasFinale || (hasR5 && /倾向茉莉奶白|已收敛|决策简报/.test(t))) {
+        /终审|倾向支持一审|支持一审判决|决策简报/.test(t);
+      const hasR4 = await page.getByRole("button", { name: /第\s*4\s*轮|第4轮/ }).isVisible().catch(() => false);
+      if (i % 20 === 0) console.log("wait", i, { hasFinale, hasR4, len: t.length });
+      if (hasFinale || (hasR4 && /倾向支持一审|已收敛|决策简报|70\s*%/.test(t))) {
         ready = true;
         break;
       }
@@ -282,7 +306,7 @@ async function main() {
             path,
             label: target.label,
             tapeHint: target.tapeHint,
-            snippet: t.match(/.{0,50}(?:菱形|正方形|换标|小程序|举证|倾向茉莉|置信度|证据缺口).{0,50}/)?.[0],
+            snippet: t.match(/.{0,50}(?:偷换概念|四叶草|换标|贡献率|举证|倾向支持一审|置信度|证据缺口|惩罚性).{0,50}/)?.[0],
           });
           console.log("PATCHED", target.id);
           hit = true;

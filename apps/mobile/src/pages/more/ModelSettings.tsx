@@ -9,8 +9,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "@/pages/more/more.css";
 
-const DEFAULT_BASE_URL = "https://api.openai.com/v1";
-const DEFAULT_MODEL = "gpt-4o";
+const DEFAULT_BASE_URL = "https://api.deepseek.com";
+const DEFAULT_MODEL = "deepseek-v4-flash";
 
 function capabilityLabel(supportsTools: boolean | null | undefined): string {
   if (supportsTools === true) return "支持工具调用";

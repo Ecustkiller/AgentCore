@@ -29,8 +29,8 @@
       ],
       "regions": ["广场", "市场", "餐厅", "面包店", "公园", "住宅区", "镇政厅"],
       "model_routing": {
-        "routine_model": "deepseek-chat",
-        "critical_model": "deepseek-chat"
+        "routine_model": "deepseek-v4-flash",
+        "critical_model": "deepseek-v4-flash"
       },
       "temperature": 0.8,
       "created_at": "2026-01-01T00:00:00Z",

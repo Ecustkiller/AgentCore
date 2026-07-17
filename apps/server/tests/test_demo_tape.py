@@ -7,7 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from agentcore.demo_tape.binding import conversation_is_cloud, write_binding
+from agentcore.demo_tape.binding import (
+    LOCAL_SESSION_BOUND_MSG,
+    conversation_is_cloud,
+    peek_binding,
+    resolve_binding,
+    write_binding,
+)
 from agentcore.demo_tape.export import (
     TapeExportRefusedError,
     assert_export_allowed,
@@ -21,6 +27,11 @@ from agentcore.demo_tape.identity import (
     replay_interaction_id,
 )
 from agentcore.demo_tape.pacing import sleep_ms_for_gap
+from agentcore.demo_tape.recordings_index import (
+    format_recording_table,
+    list_recordings,
+    summarize_recording,
+)
 from agentcore.demo_tape.sanitize import (
     DEMO_MEMORY_PLACEHOLDER,
     SYNTHETIC_MEMORY_RULES,
@@ -37,6 +48,7 @@ from agentcore.demo_tape.schema import (
     TAPE_EXCLUDED_KINDS,
     TAPE_FORMAT_VERSION,
     TAPE_UNWIRED_PAUSE_KINDS,
+    TAPE_WIRED_PAUSE_KINDS,
     event_timestamp,
     event_type,
     is_demo_tape_frame,
@@ -45,7 +57,11 @@ from agentcore.demo_tape.schema import (
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import EventSink, EventType, FinishReason
 from agentcore.runtime.events.types import SSEEvent
-from agentcore.runtime.suspension import TeamPreviewSuspension
+from agentcore.runtime.suspension import (
+    AskUserSuspension,
+    PlanReviewSuspension,
+    TeamPreviewSuspension,
+)
 from scripts.demo_tape_bind import build_parser
 
 
@@ -58,6 +74,7 @@ def test_tape_excluded_kinds_cut_lifecycle_settlements_and_client_ops():
     assert "message_start" in TAPE_EXCLUDED_KINDS
     assert "message_end" in TAPE_EXCLUDED_KINDS
     assert "team_preview_resolved" in TAPE_EXCLUDED_KINDS
+    assert "approval_resolved" in TAPE_EXCLUDED_KINDS
     # followups_generated stays cut — chips ride meta.followups, not the event stream.
     assert "followups_generated" in TAPE_EXCLUDED_KINDS
     # Client-tool requests must never replay (real side effects on the desktop).
@@ -67,6 +84,7 @@ def test_tape_excluded_kinds_cut_lifecycle_settlements_and_client_ops():
     assert "content_delta" not in TAPE_EXCLUDED_KINDS
     assert "tool_progress" not in TAPE_EXCLUDED_KINDS
     assert "team_preview_required" not in TAPE_EXCLUDED_KINDS
+    assert "approval_required" not in TAPE_EXCLUDED_KINDS
 
 
 def test_conversation_is_cloud_mirrors_desktop_routing():
@@ -109,7 +127,12 @@ def test_write_binding_and_bind_parser(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(binding_mod, "bindings_path", lambda: tmp_path / "bindings.json")
     path = write_binding("cid-1", tape="demos/tapes/x.json", speed=4.0, max_gap_ms=2000)
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["cid-1"] == {"tape": "demos/tapes/x.json", "speed": 4.0, "max_gap_ms": 2000}
+    assert data["cid-1"] == {
+        "tape": "demos/tapes/x.json",
+        "turn_index": 0,
+        "speed": 4.0,
+        "max_gap_ms": 2000,
+    }
 
     p = build_parser()
     args = p.parse_args(
@@ -122,6 +145,126 @@ def test_write_binding_and_bind_parser(tmp_path: Path, monkeypatch):
     args2 = p.parse_args(["abc-uuid", "--tape", "demos/tapes/x.json", "--include-local"])
     assert args2.conversation_id == "abc-uuid"
     assert args2.include_local is True
+
+
+def test_peek_binding_ignores_replay_flag(tmp_path: Path, monkeypatch):
+    from agentcore.config import settings
+    from agentcore.demo_tape import binding as binding_mod
+
+    monkeypatch.setattr(binding_mod, "bindings_path", lambda: tmp_path / "bindings.json")
+    write_binding("cid-local", tape="demos/tapes/x.json")
+    monkeypatch.setattr(settings, "demo_tape_replay_enabled", False)
+    assert peek_binding("cid-local") is not None
+    assert resolve_binding("cid-local") is None
+    monkeypatch.setattr(settings, "demo_tape_replay_enabled", True)
+    bound = resolve_binding("cid-local")
+    assert bound is not None
+    assert bound.tape_path.name == "x.json"
+    assert "sidecar" in LOCAL_SESSION_BOUND_MSG
+
+
+def test_list_recordings_indexes_meta_and_snippet(tmp_path: Path):
+    rec = {
+        "version": RECORDING_FORMAT_VERSION,
+        "kind": "demo_tape_recording",
+        "meta": {
+            "conversation_id": "conv-abc",
+            "message_id": "msg-xyz",
+            "recorded_at": "2026-07-17T01:02:03Z",
+        },
+        "segments": [
+            {
+                "wall_t0_ms": 1000,
+                "events": [
+                    {
+                        "type": "content_delta",
+                        "payload": {"delta": "搜索下最新的LV起诉茉莉奶白"},
+                        "timestamp": None,
+                        "t_ms": 50,
+                    },
+                    {
+                        "type": "content_delta",
+                        "payload": {"delta": "更多"},
+                        "timestamp": None,
+                        "t_ms": 1200,
+                    },
+                ],
+            }
+        ],
+    }
+    path = tmp_path / "msg-xyz.json"
+    path.write_text(json.dumps(rec), encoding="utf-8")
+
+    summary = summarize_recording(path)
+    assert summary is not None
+    assert summary.conversation_id == "conv-abc"
+    assert summary.message_id == "msg-xyz"
+    assert summary.events == 2
+    assert summary.duration_ms == 1200
+    assert "茉莉" in summary.snippet
+
+    rows = list_recordings(directory=tmp_path, query="茉莉")
+    assert len(rows) == 1
+    assert "msg-xyz" in format_recording_table(rows)
+    assert list_recordings(directory=tmp_path, query="no-such") == []
+
+
+@pytest.mark.asyncio
+async def test_sidecar_rejects_tape_bound_local_session(tmp_path: Path, monkeypatch):
+    """Misbound local session must not silently become a normal AI turn."""
+    import asyncio
+    import json as _json
+    from typing import Any
+
+    from agentcore.config import settings
+    from agentcore.demo_tape import binding as binding_mod
+    from agentcore.sidecar.server import SidecarServer
+
+    monkeypatch.setattr(binding_mod, "bindings_path", lambda: tmp_path / "bindings.json")
+    monkeypatch.setattr(settings, "demo_tape_replay_enabled", True)
+    write_binding("conv-bound", tape="demos/tapes/x.json")
+
+    sent: list[dict[str, Any]] = []
+
+    async def write_line(line: str) -> None:
+        sent.append(_json.loads(line))
+
+    server = SidecarServer(write_line)
+    await server.handle_line(
+        _json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "userId": "u",
+                    "workspaceRoot": str(tmp_path),
+                    "approvalsEnabled": True,
+                    "dataDir": str(tmp_path / "data"),
+                },
+            }
+        )
+    )
+    await server.handle_line(
+        _json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "startTurn",
+                "params": {
+                    "turnId": "t1",
+                    "conversationId": "conv-bound",
+                    "userMessage": "hello",
+                },
+            }
+        )
+    )
+    # Let the error reply land.
+    await asyncio.sleep(0)
+    err = next((m for m in sent if m.get("id") == 2 and "error" in m), None)
+    assert err is not None
+    assert "sidecar" in err["error"]["message"]
+    assert "x.json" in err["error"]["message"]
 
 
 def test_pacing_speed_and_cap():
@@ -1847,8 +1990,13 @@ def test_ingest_scan_rejects_unsanitized_memory_and_system_contacts():
     assert scan_events_for_ingest_residue(toolish) == []
 
 
-def test_export_refuses_unwired_pause_and_approval_unless_forced():
-    assert "checkpoint_required" in TAPE_UNWIRED_PAUSE_KINDS
+def test_export_allows_wired_cold_and_hot_approval_pauses():
+    assert "checkpoint_required" in TAPE_WIRED_PAUSE_KINDS
+    assert "plan_review_required" in TAPE_WIRED_PAUSE_KINDS
+    assert "checkpoint_required" not in TAPE_UNWIRED_PAUSE_KINDS
+    from agentcore.demo_tape.schema import TAPE_HOT_PAUSE_KINDS
+
+    assert "approval_required" in TAPE_HOT_PAUSE_KINDS
     recording = {
         "meta": {"conversation_id": "c", "message_id": "m"},
         "segments": [
@@ -1862,20 +2010,30 @@ def test_export_refuses_unwired_pause_and_approval_unless_forced():
                     },
                     {
                         "type": "checkpoint_required",
-                        "payload": {"checkpoint_id": "cp1"},
+                        "payload": {"checkpoint_id": "cp1", "question": "ok?"},
                         "timestamp": None,
                         "t_ms": 10,
+                    },
+                    {
+                        "type": "plan_review_required",
+                        "payload": {
+                            "checkpoint_id": "pr1",
+                            "steps": [{"run_id": "r1"}],
+                            "pending": [],
+                        },
+                        "timestamp": None,
+                        "t_ms": 20,
                     },
                 ]
             }
         ],
     }
-    with pytest.raises(TapeExportRefusedError) as ei:
-        build_tape_from_recording(recording, user_prompt="p")
-    assert any("checkpoint_required" in r for r in ei.value.reasons)
-
-    doc = build_tape_from_recording(recording, user_prompt="p", force=True)
-    assert [e["type"] for e in doc["events"]] == ["content_delta", "checkpoint_required"]
+    doc = build_tape_from_recording(recording, user_prompt="p")
+    assert [e["type"] for e in doc["events"]] == [
+        "content_delta",
+        "checkpoint_required",
+        "plan_review_required",
+    ]
 
     approval_rec = {
         "meta": {},
@@ -1884,17 +2042,41 @@ def test_export_refuses_unwired_pause_and_approval_unless_forced():
                 "events": [
                     {
                         "type": "approval_required",
-                        "payload": {"approval_id": "a1"},
+                        "payload": {
+                            "approval_id": "a1",
+                            "tool_call_id": "tc1",
+                            "tool_name": "file_write",
+                            "arguments": {"path": "x"},
+                        },
                         "timestamp": None,
                         "t_ms": 0,
-                    }
+                    },
+                    {
+                        "type": "approval_resolved",
+                        "payload": {
+                            "approval_id": "a1",
+                            "tool_call_id": "tc1",
+                            "decision": "approve",
+                        },
+                        "timestamp": None,
+                        "t_ms": 50,
+                    },
+                    {
+                        "type": "content_delta",
+                        "payload": {"delta": "after"},
+                        "timestamp": None,
+                        "t_ms": 100,
+                    },
                 ]
             }
         ],
     }
-    with pytest.raises(TapeExportRefusedError):
-        build_tape_from_recording(approval_rec, user_prompt="p")
-    build_tape_from_recording(approval_rec, user_prompt="p", force=True)
+    # Hot approval is wired — export allows; recorded resolve is cut.
+    approval_doc = build_tape_from_recording(approval_rec, user_prompt="p")
+    assert [e["type"] for e in approval_doc["events"]] == [
+        "approval_required",
+        "content_delta",
+    ]
 
 
 def test_export_asserts_client_tool_required_not_forceable():
@@ -1946,3 +2128,1088 @@ def test_build_tape_sanitizes_run_context_memory():
     assert DEMO_MEMORY_PLACEHOLDER in body
     assert "<!-- ts:" not in body
     assert_ingest_clean(doc["events"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("required_kind", "resolved_kind", "payload", "suspension_cls", "event_required", "event_resolved"),
+    [
+        (
+            "checkpoint_required",
+            "checkpoint_resolved",
+            {
+                "checkpoint_id": "cp-ask",
+                "question": "要继续吗？",
+                "context": "",
+                "assumptions": [],
+                "questions": [{"id": "q1", "prompt": "选一项"}],
+                "style_options": [],
+                "intent": "decision",
+            },
+            AskUserSuspension,
+            EventType.CHECKPOINT_REQUIRED,
+            EventType.CHECKPOINT_RESOLVED,
+        ),
+        (
+            "plan_review_required",
+            "plan_review_resolved",
+            {
+                "checkpoint_id": "cp-plan",
+                "steps": [{"run_id": "r1", "role": "researcher", "summary": "done"}],
+                "pending": [{"run_id": "r2", "role": "writer"}],
+            },
+            PlanReviewSuspension,
+            EventType.PLAN_REVIEW_REQUIRED,
+            EventType.PLAN_REVIEW_RESOLVED,
+        ),
+    ],
+)
+async def test_player_pauses_and_continues_cold_path_kinds(
+    monkeypatch,
+    tmp_path: Path,
+    required_kind: str,
+    resolved_kind: str,
+    payload: dict,
+    suspension_cls: type,
+    event_required: EventType,
+    event_resolved: EventType,
+):
+    """checkpoint / plan_review: 挂起 → 用户提交 → 现场重发 resolved → 续播闭环。"""
+    from agentcore.demo_tape import player as player_mod
+    from agentcore.demo_tape.binding import TapeBinding
+    from agentcore.demo_tape.player import continue_tape_turn, play_tape_events
+    from agentcore.runtime.journal.writer import TurnJournalWriter
+
+    saved: list = []
+
+    async def fake_save(suspension):
+        saved.append(suspension)
+
+    monkeypatch.setattr(player_mod, "save_paused_turn", fake_save)
+
+    async def noop_flush(self):
+        return None
+
+    monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
+
+    events = [
+        {"kind": "run_started", "payload": {"run_id": "c1", "kind": "captain"}, "t_ms": 0},
+        {"kind": required_kind, "payload": payload, "t_ms": 100},
+        {"kind": resolved_kind, "payload": {"decision": "continue"}, "t_ms": 200},
+        {"kind": "content_delta", "payload": {"delta": "after"}, "t_ms": 300},
+    ]
+    tape_path = tmp_path / f"{required_kind}.json"
+    tape_path.write_text(
+        json.dumps({"version": 1, "meta": {}, "events": events}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    binding = TapeBinding(
+        conversation_id="conv1",
+        tape_path=tape_path,
+        speed=100.0,
+        max_gap_ms=50,
+    )
+    sink = EventSink(conversation_id="conv1", message_id="msg1")
+    writer = TurnJournalWriter(turn_id="msg1", conversation_id="conv1", trace_id="t" * 32)
+
+    result = await play_tape_events(
+        sink=sink,
+        events=events,
+        start_index=0,
+        binding=binding,
+        message_id="msg1",
+        conversation_id="conv1",
+        user_id="user1",
+        user_message="go",
+        folder_id=None,
+        journal_writer=writer,
+    )
+    assert result["finish_reason"] is FinishReason.PAUSED
+    assert len(saved) == 1
+    assert isinstance(saved[0], suspension_cls)
+    assert is_demo_tape_frame(saved[0])
+    types = [e.type for e in sink._history]
+    assert event_required in types
+
+    # selected / adjust must not fork the recorded stream — still end with "after".
+    resume_decision = (
+        CheckpointDecision.ADJUST
+        if required_kind == "plan_review_required"
+        else CheckpointDecision.CONTINUE
+    )
+    selected = ["q1"] if required_kind == "checkpoint_required" else []
+    sink2 = EventSink(conversation_id="conv1", message_id="msg1")
+    result2 = await continue_tape_turn(
+        suspension=saved[0],
+        response=CheckpointResponse(
+            decision=resume_decision, note="steer-ignored", selected=selected
+        ),
+        sink=sink2,
+        folder_id=None,
+        trace_id="t" * 32,
+    )
+    assert result2["finish_reason"] is FinishReason.END_TURN
+    assert result2.get("content") == "after"
+    types2 = [e.type for e in sink2._history]
+    assert event_resolved in types2
+    assert types2.count(event_resolved) == 1
+    resolved = next(e for e in sink2._history if e.type is event_resolved)
+    assert resolved.payload["checkpoint_id"] == saved[0].checkpoint_id
+    assert resolved.payload["decision"] == resume_decision.value
+    if selected:
+        assert resolved.payload.get("selected") == selected
+
+
+@pytest.mark.asyncio
+async def test_cold_path_kinds_remint_distinct_across_replays(monkeypatch, tmp_path: Path):
+    """二次回放 remint 不串卡：checkpoint / plan_review 与 team_preview 同语义。"""
+    from agentcore.demo_tape import player as player_mod
+    from agentcore.demo_tape.binding import TapeBinding
+    from agentcore.demo_tape.player import play_tape_events
+    from agentcore.runtime.journal.writer import TurnJournalWriter
+
+    saved: list = []
+
+    async def fake_save(suspension):
+        saved.append(suspension)
+
+    monkeypatch.setattr(player_mod, "save_paused_turn", fake_save)
+
+    async def noop_flush(self):
+        return None
+
+    monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
+
+    events = [
+        {
+            "kind": "checkpoint_required",
+            "payload": {"checkpoint_id": "cp-recorded", "question": "q"},
+            "t_ms": 0,
+        },
+        {
+            "kind": "plan_review_required",
+            "payload": {
+                "checkpoint_id": "pr-recorded",
+                "steps": [{"run_id": "r1"}],
+                "pending": [],
+            },
+            "t_ms": 50,
+        },
+    ]
+    tape_path = tmp_path / "remint-cold.json"
+    tape_path.write_text(
+        json.dumps({"version": 1, "meta": {}, "events": events}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    emitted: list[str] = []
+    for message_id in ("msg-a", "msg-b"):
+        binding = TapeBinding(
+            conversation_id=f"c-{message_id}",
+            tape_path=tape_path,
+            speed=100.0,
+            max_gap_ms=50,
+        )
+        sink = EventSink(conversation_id=f"c-{message_id}", message_id=message_id)
+        writer = TurnJournalWriter(
+            turn_id=message_id, conversation_id=f"c-{message_id}", trace_id="t" * 32
+        )
+        result = await play_tape_events(
+            sink=sink,
+            events=events,
+            start_index=0,
+            binding=binding,
+            message_id=message_id,
+            conversation_id=f"c-{message_id}",
+            user_id="u",
+            user_message="go",
+            folder_id=None,
+            journal_writer=writer,
+        )
+        # First wired pause stops playback.
+        assert result["finish_reason"] is FinishReason.PAUSED
+        card = next(
+            e for e in sink._history if e.type is EventType.CHECKPOINT_REQUIRED
+        )
+        emitted.append(str(card.payload["checkpoint_id"]))
+
+    assert emitted[0] != emitted[1]
+    assert "cp-recorded" not in emitted
+    assert emitted[0] == replay_interaction_id("cp-recorded", message_id="msg-a")
+    assert emitted[1] == replay_interaction_id("cp-recorded", message_id="msg-b")
+    assert [s.checkpoint_id for s in saved] == emitted
+
+@pytest.mark.asyncio
+async def test_player_hot_approval_awaits_resolve_and_continues(monkeypatch, tmp_path: Path):
+    """approval 挂起 → 热 resolve → 现场重发 resolved → 续播闭环（回合不收口）。"""
+    import asyncio
+
+    from agentcore.demo_tape.binding import TapeBinding
+    from agentcore.demo_tape.player import play_tape_events
+    from agentcore.demo_tape.transport import PlaybackState, PlaybackTransport
+    from agentcore.runtime.approvals import ApprovalDecision
+    from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
+    from agentcore.runtime.journal.writer import TurnJournalWriter
+
+    async def noop_flush(self):
+        return None
+
+    monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
+
+    events = [
+        {"kind": "content_delta", "payload": {"delta": "before"}, "t_ms": 0},
+        {
+            "kind": "approval_required",
+            "payload": {
+                "approval_id": "ap-src",
+                "tool_call_id": "tc-src",
+                "tool_name": "file_write",
+                "arguments": {"path": "a.txt"},
+            },
+            "t_ms": 100,
+        },
+        {
+            "kind": "approval_resolved",
+            "payload": {
+                "approval_id": "ap-src",
+                "tool_call_id": "tc-src",
+                "decision": "approve",
+            },
+            "t_ms": 5000,
+        },
+        {"kind": "content_delta", "payload": {"delta": "after"}, "t_ms": 5100},
+    ]
+    tape_path = tmp_path / "hot-approval.json"
+    tape_path.write_text(
+        json.dumps({"version": 1, "meta": {}, "events": events}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    binding = TapeBinding(
+        conversation_id="conv-hot",
+        tape_path=tape_path,
+        speed=100.0,
+        max_gap_ms=50,
+    )
+    transport = PlaybackTransport(
+        conversation_id="conv-hot",
+        tape_path=tape_path,
+        speed=100.0,
+        max_gap_ms=50,
+        event_count=len(events),
+        duration_ms=5100,
+    )
+    sink = EventSink(conversation_id="conv-hot", message_id="msg-hot")
+    writer = TurnJournalWriter(
+        turn_id="msg-hot", conversation_id="conv-hot", trace_id="t" * 32
+    )
+    registry = default_interaction_registry()
+
+    async def resolve_soon() -> None:
+        for _ in range(200):
+            pending = [
+                r
+                for r in registry.list_pending("conv-hot")
+                if r.kind is InteractionKind.APPROVAL
+            ]
+            if pending:
+                assert transport.state is PlaybackState.AWAITING_INTERACTION
+                ok = registry.resolve(
+                    pending[0].id,
+                    ApprovalDecision.DENY,
+                    conversation_id="conv-hot",
+                )
+                assert ok
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError("approval never registered")
+
+    resolver = asyncio.create_task(resolve_soon())
+    result = await play_tape_events(
+        sink=sink,
+        events=events,
+        start_index=0,
+        binding=binding,
+        message_id="msg-hot",
+        conversation_id="conv-hot",
+        user_id="u",
+        user_message="go",
+        folder_id=None,
+        journal_writer=writer,
+        transport=transport,
+    )
+    await resolver
+    assert result["finish_reason"] is FinishReason.END_TURN
+    assert result.get("content") == "beforeafter"
+    types = [e.type for e in sink._history]
+    assert EventType.APPROVAL_REQUIRED in types
+    assert EventType.APPROVAL_RESOLVED in types
+    assert types.count(EventType.APPROVAL_RESOLVED) == 1
+    resolved = next(e for e in sink._history if e.type is EventType.APPROVAL_RESOLVED)
+    required = next(e for e in sink._history if e.type is EventType.APPROVAL_REQUIRED)
+    assert required.payload["approval_id"] != "ap-src"
+    assert resolved.payload["approval_id"] == required.payload["approval_id"]
+    assert resolved.payload["decision"] == ApprovalDecision.DENY.value
+    # Recorded resolve skipped — only the live re-emit.
+    assert registry.list_pending("conv-hot") == []
+    assert transport.state is PlaybackState.FINISHED
+
+
+@pytest.mark.asyncio
+async def test_hot_approval_remint_distinct_across_replays(monkeypatch, tmp_path: Path):
+    """二次回放 remint 不串卡：approval_id 按 message_id 重铸。"""
+    import asyncio
+
+    from agentcore.demo_tape.binding import TapeBinding
+    from agentcore.demo_tape.player import play_tape_events
+    from agentcore.runtime.approvals import ApprovalDecision
+    from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
+    from agentcore.runtime.journal.writer import TurnJournalWriter
+
+    async def noop_flush(self):
+        return None
+
+    monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
+
+    events = [
+        {
+            "kind": "approval_required",
+            "payload": {
+                "approval_id": "ap-recorded",
+                "tool_call_id": "tc-recorded",
+                "tool_name": "file_write",
+                "arguments": {},
+            },
+            "t_ms": 0,
+        },
+        {"kind": "content_delta", "payload": {"delta": "x"}, "t_ms": 10},
+    ]
+    tape_path = tmp_path / "remint-hot.json"
+    tape_path.write_text(
+        json.dumps({"version": 1, "meta": {}, "events": events}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    registry = default_interaction_registry()
+    minted: list[str] = []
+
+    for message_id in ("msg-a", "msg-b"):
+        cid = f"c-{message_id}"
+        binding = TapeBinding(
+            conversation_id=cid, tape_path=tape_path, speed=100.0, max_gap_ms=50
+        )
+        sink = EventSink(conversation_id=cid, message_id=message_id)
+        writer = TurnJournalWriter(
+            turn_id=message_id, conversation_id=cid, trace_id="t" * 32
+        )
+
+        async def resolve_soon(conv_id: str = cid) -> None:
+            for _ in range(200):
+                pending = [
+                    r
+                    for r in registry.list_pending(conv_id)
+                    if r.kind is InteractionKind.APPROVAL
+                ]
+                if pending:
+                    registry.resolve(
+                        pending[0].id,
+                        ApprovalDecision.APPROVE,
+                        conversation_id=conv_id,
+                    )
+                    return
+                await asyncio.sleep(0.01)
+            raise AssertionError("approval never registered")
+
+        task = asyncio.create_task(resolve_soon())
+        result = await play_tape_events(
+            sink=sink,
+            events=events,
+            start_index=0,
+            binding=binding,
+            message_id=message_id,
+            conversation_id=cid,
+            user_id="u",
+            user_message="go",
+            folder_id=None,
+            journal_writer=writer,
+        )
+        await task
+        assert result["finish_reason"] is FinishReason.END_TURN
+        card = next(e for e in sink._history if e.type is EventType.APPROVAL_REQUIRED)
+        minted.append(str(card.payload["approval_id"]))
+
+    assert minted[0] != minted[1]
+    assert "ap-recorded" not in minted
+    assert minted[0] == replay_interaction_id("ap-recorded", message_id="msg-a")
+    assert minted[1] == replay_interaction_id("ap-recorded", message_id="msg-b")
+
+
+@pytest.mark.asyncio
+async def test_hot_approval_wait_does_not_drift_pacing(monkeypatch, tmp_path: Path):
+    """等待期不计入节奏：resolve 后下一拍按录制间隔（首拍 gap=0，不重睡决策空窗）。"""
+    import asyncio
+
+    from agentcore.demo_tape import player as player_mod
+    from agentcore.demo_tape.binding import TapeBinding
+    from agentcore.demo_tape.player import play_tape_events
+    from agentcore.runtime.approvals import ApprovalDecision
+    from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
+    from agentcore.runtime.journal.writer import TurnJournalWriter
+
+    pacing_delays: list[float] = []
+    _real_sleep = asyncio.sleep
+    _orig_gap = player_mod.sleep_ms_for_gap
+
+    def track_gap(**kwargs):  # noqa: ANN003
+        delay = _orig_gap(**kwargs)
+        if delay > 0:
+            pacing_delays.append(delay)
+        return delay
+
+    monkeypatch.setattr(player_mod, "sleep_ms_for_gap", track_gap)
+
+    async def no_sleep(seconds: float) -> None:
+        await _real_sleep(0)
+
+    monkeypatch.setattr(player_mod.asyncio, "sleep", no_sleep)
+
+    async def noop_flush(self):
+        return None
+
+    monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
+
+    # Large recorded gap between approval and next event (= human decision window).
+    events = [
+        {"kind": "content_delta", "payload": {"delta": "a"}, "t_ms": 0},
+        {
+            "kind": "approval_required",
+            "payload": {
+                "approval_id": "ap1",
+                "tool_call_id": "tc1",
+                "tool_name": "file_write",
+                "arguments": {},
+            },
+            "t_ms": 100,
+        },
+        {"kind": "content_delta", "payload": {"delta": "b"}, "t_ms": 50_100},
+        {"kind": "content_delta", "payload": {"delta": "c"}, "t_ms": 50_200},
+    ]
+    tape_path = tmp_path / "pacing-hot.json"
+    tape_path.write_text(
+        json.dumps({"version": 1, "meta": {}, "events": events}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    binding = TapeBinding(
+        conversation_id="conv-pace",
+        tape_path=tape_path,
+        speed=1.0,
+        max_gap_ms=60_000,
+    )
+    sink = EventSink(conversation_id="conv-pace", message_id="msg-pace")
+    writer = TurnJournalWriter(
+        turn_id="msg-pace", conversation_id="conv-pace", trace_id="t" * 32
+    )
+    registry = default_interaction_registry()
+
+    async def resolve_soon() -> None:
+        for _ in range(200):
+            pending = [
+                r
+                for r in registry.list_pending("conv-pace")
+                if r.kind is InteractionKind.APPROVAL
+            ]
+            if pending:
+                registry.resolve(
+                    pending[0].id,
+                    ApprovalDecision.APPROVE_ALWAYS,
+                    conversation_id="conv-pace",
+                )
+                return
+            await _real_sleep(0.01)
+        raise AssertionError("approval never registered")
+
+    task = asyncio.create_task(resolve_soon())
+    result = await play_tape_events(
+        sink=sink,
+        events=events,
+        start_index=0,
+        binding=binding,
+        message_id="msg-pace",
+        conversation_id="conv-pace",
+        user_id="u",
+        user_message="go",
+        folder_id=None,
+        journal_writer=writer,
+    )
+    await task
+    assert result["finish_reason"] is FinishReason.END_TURN
+    assert result.get("content") == "abc"
+    # After hot resolve prev_t resets → first post-approval beat gap=0 (not 50s).
+    # Pacing delays: ~0.1s (a→approval) then ~0.1s (b→c). Never the 50s decision window.
+    assert pacing_delays == pytest.approx([0.1, 0.1], abs=0.02), pacing_delays
+
+
+@pytest.mark.asyncio
+async def test_hot_approval_cancel_clears_registry(monkeypatch, tmp_path: Path):
+    """取消回合：等待中的热路登记须被 orphan/cancel 清理。"""
+    import asyncio
+
+    from agentcore.demo_tape.binding import TapeBinding
+    from agentcore.demo_tape.player import play_tape_events
+    from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
+    from agentcore.runtime.interaction_orphan import orphan_registry_pending
+    from agentcore.runtime.journal.writer import TurnJournalWriter
+
+    async def noop_flush(self):
+        return None
+
+    monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
+
+    events = [
+        {
+            "kind": "approval_required",
+            "payload": {
+                "approval_id": "ap-cancel",
+                "tool_call_id": "tc-cancel",
+                "tool_name": "file_write",
+                "arguments": {},
+            },
+            "t_ms": 0,
+        },
+        {"kind": "content_delta", "payload": {"delta": "never"}, "t_ms": 10},
+    ]
+    tape_path = tmp_path / "cancel-hot.json"
+    tape_path.write_text(
+        json.dumps({"version": 1, "meta": {}, "events": events}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    binding = TapeBinding(
+        conversation_id="conv-cancel",
+        tape_path=tape_path,
+        speed=100.0,
+        max_gap_ms=50,
+    )
+    sink = EventSink(conversation_id="conv-cancel", message_id="msg-cancel")
+    writer = TurnJournalWriter(
+        turn_id="msg-cancel", conversation_id="conv-cancel", trace_id="t" * 32
+    )
+    registry = default_interaction_registry()
+
+    play_task = asyncio.create_task(
+        play_tape_events(
+            sink=sink,
+            events=events,
+            start_index=0,
+            binding=binding,
+            message_id="msg-cancel",
+            conversation_id="conv-cancel",
+            user_id="u",
+            user_message="go",
+            folder_id=None,
+            journal_writer=writer,
+        )
+    )
+    for _ in range(200):
+        pending = [
+            r
+            for r in registry.list_pending("conv-cancel")
+            if r.kind is InteractionKind.APPROVAL
+        ]
+        if pending:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        play_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await play_task
+        raise AssertionError("approval never registered")
+
+    await orphan_registry_pending("conv-cancel", turn_id="msg-cancel")
+    assert registry.list_pending("conv-cancel") == []
+    with pytest.raises(asyncio.CancelledError):
+        await play_task
+
+
+# ── multi-act (turns[]) scripts ─────────────────────────────────────────────
+
+
+def _act_doc(prompt: str, *deltas: str, followups: list[str] | None = None) -> dict:
+    events = [
+        {
+            "type": "run_started",
+            "payload": {"run_id": "c1", "kind": "captain"},
+            "timestamp": None,
+            "t_ms": 0,
+        },
+    ]
+    t = 10
+    for d in deltas:
+        events.append(
+            {
+                "type": "content_delta",
+                "payload": {"delta": d},
+                "timestamp": None,
+                "t_ms": t,
+            }
+        )
+        t += 10
+    meta: dict = {"user_prompt": prompt, "event_count": len(events), "duration_ms": t - 10}
+    if followups:
+        meta["followups"] = list(followups)
+    return {"version": 2, "meta": meta, "events": events}
+
+
+def test_load_tape_normalizes_stock_single_act_to_one_turn(tmp_path: Path):
+    path = tmp_path / "stock.json"
+    on_disk = {
+        "version": 2,
+        "meta": {"user_prompt": "开场", "followups": ["下一步A"], "title": "t"},
+        "events": [
+            {
+                "type": "content_delta",
+                "payload": {"delta": "hi"},
+                "timestamp": None,
+                "t_ms": 0,
+            }
+        ],
+    }
+    path.write_text(json.dumps(on_disk, ensure_ascii=False), encoding="utf-8")
+    loaded = load_tape(path)
+    assert loaded["meta"]["turn_count"] == 1
+    assert len(loaded["turns"]) == 1
+    assert loaded["turns"][0]["user_prompt"] == "开场"
+    assert loaded["turns"][0]["followups"] == ["下一步A"]
+    assert loaded["events"][0]["type"] == "content_delta"
+    # Disk untouched.
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    assert "turns" not in raw
+    assert "events" in raw
+
+
+def test_load_tape_multi_act_and_assemble(tmp_path: Path):
+    from agentcore.demo_tape.export import assemble_multi_turn_tape, tape_turns
+
+    a = _act_doc("第一幕", "act1", followups=["f1"])
+    b = _act_doc("第二幕", "act2")
+    multi = assemble_multi_turn_tape([a, b], meta={"title": "剧本"})
+    assert multi["meta"]["turn_count"] == 2
+    assert multi["meta"]["user_prompt"] == "第一幕"
+    assert "events" not in multi
+    path = tmp_path / "multi.json"
+    write_tape(path, multi)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    assert "turns" in raw and "events" not in raw
+
+    loaded = load_tape(path)
+    acts = tape_turns(loaded)
+    assert len(acts) == 2
+    assert acts[0]["user_prompt"] == "第一幕"
+    assert acts[0]["followups"] == ["f1"]
+    assert acts[1]["user_prompt"] == "第二幕"
+    assert "".join(
+        e["payload"]["delta"] for e in acts[0]["events"] if e["type"] == "content_delta"
+    ) == "act1"
+
+
+def test_assemble_runs_per_act_gates_independently():
+    """Each act is cut+gated before assemble; a clean act is not poisoned by another."""
+    from agentcore.demo_tape.export import (
+        TapeExportRefusedError,
+        assert_export_allowed,
+        build_tape_from_recording,
+    )
+
+    clean = build_tape_from_recording(
+        {
+            "meta": {"conversation_id": "c", "message_id": "m1"},
+            "segments": [
+                {
+                    "wall_t0_ms": 0,
+                    "events": [
+                        {
+                            "type": "content_delta",
+                            "payload": {"delta": "ok"},
+                            "timestamp": None,
+                            "t_ms": 0,
+                        }
+                    ],
+                }
+            ],
+        },
+        user_prompt="p1",
+    )
+    dirty_events = [
+        {
+            "type": "workspace_op_required",
+            "payload": {"op_id": "x"},
+            "timestamp": None,
+            "t_ms": 0,
+        }
+    ]
+    with pytest.raises(TapeExportRefusedError):
+        assert_export_allowed(dirty_events)
+    # Clean single-act export still succeeds on its own.
+    assert_export_allowed(clean["events"])
+
+
+def test_catalog_exposes_turn_count_and_first_act_prompt(tmp_path: Path, monkeypatch):
+    from agentcore.demo_tape import catalog as catalog_mod
+    from agentcore.demo_tape.catalog import list_tapes
+
+    tapes = tmp_path / "demos" / "tapes"
+    tapes.mkdir(parents=True)
+    (tapes / "multi.json").write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "meta": {"title": "多幕"},
+                "turns": [
+                    {
+                        "user_prompt": "幕一首句",
+                        "events": [{"type": "run_started", "payload": {}, "t_ms": 0}],
+                    },
+                    {
+                        "user_prompt": "幕二",
+                        "events": [{"type": "run_started", "payload": {}, "t_ms": 0}],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (tapes / "single.json").write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "meta": {"title": "单幕", "user_prompt": "只有一句"},
+                "events": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(catalog_mod, "PROJECT_ROOT", tmp_path)
+    found = {t.id: t for t in list_tapes()}
+    assert found["multi"].turn_count == 2
+    assert found["multi"].user_prompt == "幕一首句"
+    assert found["single"].turn_count == 1
+    assert found["single"].user_prompt == "只有一句"
+
+
+@pytest.mark.asyncio
+async def test_multi_act_advances_cursor_and_unbinds_on_last(
+    tmp_path: Path, monkeypatch
+):
+    from agentcore.demo_tape import binding as binding_mod
+    from agentcore.demo_tape.binding import (
+        TapeBinding,
+        peek_binding,
+        write_binding,
+    )
+    from agentcore.demo_tape.player import play_tape_turn
+    from agentcore.runtime.journal.writer import TurnJournalWriter
+
+    monkeypatch.setattr(binding_mod, "bindings_path", lambda: tmp_path / "bindings.json")
+    monkeypatch.setattr(binding_mod.settings, "demo_tape_replay_enabled", True)
+
+    async def noop_flush(self):
+        return None
+
+    monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
+
+    tape_path = tmp_path / "script.json"
+    write_tape(
+        tape_path,
+        {
+            "version": 2,
+            "meta": {"title": "两幕", "user_prompt": "一"},
+            "turns": [
+                {
+                    "user_prompt": "一",
+                    "events": [
+                        {
+                            "type": "content_delta",
+                            "payload": {"delta": "A"},
+                            "timestamp": None,
+                            "t_ms": 0,
+                        }
+                    ],
+                    "followups": ["chip-a"],
+                },
+                {
+                    "user_prompt": "二",
+                    "events": [
+                        {
+                            "type": "content_delta",
+                            "payload": {"delta": "B"},
+                            "timestamp": None,
+                            "t_ms": 0,
+                        }
+                    ],
+                },
+            ],
+        },
+    )
+    write_binding("conv-multi", tape=str(tape_path), speed=100.0, max_gap_ms=0)
+    assert peek_binding("conv-multi").turn_index == 0
+
+    b0 = peek_binding("conv-multi")
+    assert b0 is not None
+    r0 = await play_tape_turn(
+        binding=b0,
+        sink=EventSink(conversation_id="conv-multi", message_id="m0"),
+        message_id="m0",
+        conversation_id="conv-multi",
+        user_id="u",
+        user_message="anything",
+        folder_id=None,
+        trace_id="a" * 32,
+    )
+    assert r0["finish_reason"] is FinishReason.END_TURN
+    assert r0["content"] == "A"
+    assert r0["followups"] == ["chip-a"]
+    mid = peek_binding("conv-multi")
+    assert mid is not None and mid.turn_index == 1
+
+    r1 = await play_tape_turn(
+        binding=mid,
+        sink=EventSink(conversation_id="conv-multi", message_id="m1"),
+        message_id="m1",
+        conversation_id="conv-multi",
+        user_id="u",
+        user_message="next",
+        folder_id=None,
+        trace_id="b" * 32,
+    )
+    assert r1["finish_reason"] is FinishReason.END_TURN
+    assert r1["content"] == "B"
+    assert peek_binding("conv-multi") is None
+
+
+@pytest.mark.asyncio
+async def test_prepare_resets_turn_cursor(tmp_path: Path, monkeypatch):
+    from agentcore.demo_tape import binding as binding_mod
+    from agentcore.demo_tape.binding import (
+        peek_binding,
+        set_binding_turn_index,
+        write_binding,
+    )
+
+    monkeypatch.setattr(binding_mod, "bindings_path", lambda: tmp_path / "bindings.json")
+    write_binding("cid", tape="demos/tapes/x.json")
+    set_binding_turn_index("cid", 2)
+    assert peek_binding("cid").turn_index == 2
+    write_binding("cid", tape="demos/tapes/x.json", speed=4.0)
+    assert peek_binding("cid").turn_index == 0
+
+
+@pytest.mark.asyncio
+async def test_multi_act_cold_pause_and_resume_keeps_act_cursor(
+    tmp_path: Path, monkeypatch
+):
+    """幕内冷路暂停：帧游标推进，幕游标不变；resume 后 END_TURN 才推进幕。"""
+    from agentcore.demo_tape import binding as binding_mod
+    from agentcore.demo_tape import player as player_mod
+    from agentcore.demo_tape.binding import peek_binding, write_binding
+    from agentcore.demo_tape.player import continue_tape_turn, play_tape_turn
+    from agentcore.demo_tape.schema import tape_frame_meta
+    from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
+    from agentcore.runtime.journal.writer import TurnJournalWriter
+
+    monkeypatch.setattr(binding_mod, "bindings_path", lambda: tmp_path / "bindings.json")
+    monkeypatch.setattr(binding_mod.settings, "demo_tape_replay_enabled", True)
+
+    async def noop_flush(self):
+        return None
+
+    monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
+    saved: list = []
+
+    async def fake_save(suspension):
+        saved.append(suspension)
+        return True
+
+    monkeypatch.setattr(player_mod, "save_paused_turn", fake_save)
+
+    tape_path = tmp_path / "pause-multi.json"
+    write_tape(
+        tape_path,
+        {
+            "version": 2,
+            "meta": {"title": "pause-script"},
+            "turns": [
+                {
+                    "user_prompt": "幕一",
+                    "events": [
+                        {
+                            "type": "content_delta",
+                            "payload": {"delta": "brief"},
+                            "timestamp": None,
+                            "t_ms": 0,
+                        },
+                        {
+                            "type": "team_preview_required",
+                            "payload": {
+                                "checkpoint_id": "cp-m",
+                                "motion": "m",
+                                "workers": [],
+                                "tools": [],
+                            },
+                            "timestamp": None,
+                            "t_ms": 100,
+                        },
+                        {
+                            "type": "content_delta",
+                            "payload": {"delta": "after"},
+                            "timestamp": None,
+                            "t_ms": 200,
+                        },
+                    ],
+                },
+                {
+                    "user_prompt": "幕二",
+                    "events": [
+                        {
+                            "type": "content_delta",
+                            "payload": {"delta": "second"},
+                            "timestamp": None,
+                            "t_ms": 0,
+                        }
+                    ],
+                },
+            ],
+        },
+    )
+    write_binding("conv-pause-m", tape=str(tape_path), speed=100.0, max_gap_ms=0)
+    binding = peek_binding("conv-pause-m")
+    assert binding is not None and binding.turn_index == 0
+
+    result = await play_tape_turn(
+        binding=binding,
+        sink=EventSink(conversation_id="conv-pause-m", message_id="msg-p"),
+        message_id="msg-p",
+        conversation_id="conv-pause-m",
+        user_id="u",
+        user_message="幕一",
+        folder_id=None,
+        trace_id="c" * 32,
+    )
+    assert result["finish_reason"] is FinishReason.PAUSED
+    assert peek_binding("conv-pause-m").turn_index == 0  # 幕游标未动
+    assert len(saved) == 1
+    meta = tape_frame_meta(saved[0])
+    assert meta.get("turn_index") == 0
+    assert meta.get("next_index") == 2
+
+    result2 = await continue_tape_turn(
+        suspension=saved[0],
+        response=CheckpointResponse(decision=CheckpointDecision.CONTINUE, note=""),
+        sink=EventSink(conversation_id="conv-pause-m", message_id="msg-p"),
+        folder_id=None,
+        trace_id="c" * 32,
+    )
+    assert result2["finish_reason"] is FinishReason.END_TURN
+    assert "after" in (result2.get("content") or "")
+    assert peek_binding("conv-pause-m").turn_index == 1
+
+
+@pytest.mark.asyncio
+async def test_multi_act_hot_approval_within_act(tmp_path: Path, monkeypatch):
+    """幕内热路 approval：挂起等待 resolve，幕游标不变直至 END_TURN。"""
+    import asyncio
+
+    from agentcore.demo_tape import binding as binding_mod
+    from agentcore.demo_tape.binding import peek_binding, write_binding
+    from agentcore.demo_tape.player import play_tape_turn
+    from agentcore.runtime.approvals import ApprovalDecision
+    from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
+    from agentcore.runtime.journal.writer import TurnJournalWriter
+
+    monkeypatch.setattr(binding_mod, "bindings_path", lambda: tmp_path / "bindings.json")
+    monkeypatch.setattr(binding_mod.settings, "demo_tape_replay_enabled", True)
+
+    async def noop_flush(self):
+        return None
+
+    monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
+
+    tape_path = tmp_path / "hot-multi.json"
+    write_tape(
+        tape_path,
+        {
+            "version": 2,
+            "meta": {"title": "hot-script"},
+            "turns": [
+                {
+                    "user_prompt": "幕一",
+                    "events": [
+                        {
+                            "type": "approval_required",
+                            "payload": {
+                                "approval_id": "ap-m",
+                                "tool_call_id": "tc-m",
+                                "tool_name": "file_write",
+                                "arguments": {},
+                            },
+                            "timestamp": None,
+                            "t_ms": 0,
+                        },
+                        {
+                            "type": "content_delta",
+                            "payload": {"delta": "done"},
+                            "timestamp": None,
+                            "t_ms": 10,
+                        },
+                    ],
+                },
+                {
+                    "user_prompt": "幕二",
+                    "events": [
+                        {
+                            "type": "content_delta",
+                            "payload": {"delta": "x"},
+                            "timestamp": None,
+                            "t_ms": 0,
+                        }
+                    ],
+                },
+            ],
+        },
+    )
+    write_binding("conv-hot-m", tape=str(tape_path), speed=100.0, max_gap_ms=0)
+    binding = peek_binding("conv-hot-m")
+    assert binding is not None
+    registry = default_interaction_registry()
+
+    async def resolve_soon() -> None:
+        for _ in range(200):
+            pending = [
+                r
+                for r in registry.list_pending("conv-hot-m")
+                if r.kind is InteractionKind.APPROVAL
+            ]
+            if pending:
+                assert peek_binding("conv-hot-m").turn_index == 0
+                registry.resolve(
+                    pending[0].id,
+                    ApprovalDecision.APPROVE,
+                    conversation_id="conv-hot-m",
+                )
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError("approval never registered")
+
+    resolve_task = asyncio.create_task(resolve_soon())
+    result = await play_tape_turn(
+        binding=binding,
+        sink=EventSink(conversation_id="conv-hot-m", message_id="msg-hm"),
+        message_id="msg-hm",
+        conversation_id="conv-hot-m",
+        user_id="u",
+        user_message="幕一",
+        folder_id=None,
+        trace_id="d" * 32,
+    )
+    await resolve_task
+    assert result["finish_reason"] is FinishReason.END_TURN
+    assert result["content"] == "done"
+    assert peek_binding("conv-hot-m").turn_index == 1

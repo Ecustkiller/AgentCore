@@ -223,7 +223,7 @@ def _llm_request_from_payload(payload: dict, cfg: ModelConfig) -> LLMRequest:
     return LLMRequest(
         messages=messages,
         # Server-resolved model is authoritative: the sidecar may still send
-        # settings.platform_model (e.g. gpt-4o) while BYOK routes to DeepSeek.
+        # settings.platform_model (e.g. deepseek-v4-flash) while BYOK routes to the user's endpoint.
         model=cfg.model,
         temperature=float(payload.get("temperature", 0.7)),
         max_tokens=payload.get("max_tokens"),

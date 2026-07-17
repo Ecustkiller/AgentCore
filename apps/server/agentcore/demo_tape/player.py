@@ -8,14 +8,19 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
-from agentcore.demo_tape.binding import TapeBinding
-from agentcore.demo_tape.export import load_tape
+from agentcore.demo_tape.binding import (
+    TapeBinding,
+    advance_after_act_complete,
+)
+from agentcore.demo_tape.export import load_tape, tape_turns
 from agentcore.demo_tape.identity import replay_interaction_id
 from agentcore.demo_tape.pacing import pacing_step, sleep_ms_for_gap
 from agentcore.demo_tape.schema import (
     DEMO_TAPE_FRAME_KEY,
     PAUSE_REQUIRED_KINDS,
     PAUSE_RESOLVED_KINDS,
+    TAPE_HOT_PAUSE_KINDS,
+    TAPE_WIRED_PAUSE_KINDS,
     event_timestamp,
     event_type,
     is_demo_tape_frame,
@@ -28,16 +33,24 @@ from agentcore.replay import (
     assert_sink_consumer,
     prepare_replay_source,
 )
+from agentcore.runtime.approvals import ApprovalDecision
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import (
     EventSink,
     EventType,
     FinishReason,
+    approval_required,
+    approval_resolved,
+    checkpoint_required,
+    checkpoint_resolved,
     message_end,
     message_start,
+    plan_review_required,
+    plan_review_resolved,
     team_preview_required,
     team_preview_resolved,
 )
+from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
 from agentcore.runtime.events.types import SSEEvent
 from agentcore.runtime.facts import TurnFactLog, current_fact_log, pre_pause_from_journal
 from agentcore.runtime.journal.entries import journal_entries_from_display_runs
@@ -48,9 +61,22 @@ from agentcore.runtime.pipeline.resume.rehydrate import (
     bootstrap_resume_display,
 )
 from agentcore.runtime.runs.plan import RunPlan
-from agentcore.runtime.suspension import TeamPreviewSuspension, captain_transcript
+from agentcore.runtime.suspension import (
+    AskUserSuspension,
+    PlanReviewSuspension,
+    TeamPreviewSuspension,
+    TurnSuspension,
+    captain_transcript,
+)
 from agentcore.runtime.suspension_capture import SuspensionPersistError, persist_suspension_capture
 from agentcore.runtime.suspension_persistence import save_paused_turn
+
+# Event type → (suspension_kind, resolved emitter name for logs).
+_WIRED_PAUSE_BY_EVENT: dict[str, str] = {
+    "team_preview_required": "team_preview",
+    "checkpoint_required": "ask_user",
+    "plan_review_required": "plan_review",
+}
 
 logger = get_logger(__name__)
 
@@ -160,16 +186,19 @@ def _result_from_sink(
     }
 
 
-def _attach_tape_followups(result: dict[str, Any], tape: dict[str, Any]) -> dict[str, Any]:
-    """On END_TURN, surface ``meta.followups`` on the pipeline result (persist emits).
+def _attach_turn_followups(
+    result: dict[str, Any], act: dict[str, Any]
+) -> dict[str, Any]:
+    """On END_TURN, surface this act's ``followups`` on the pipeline result.
 
     Player itself never emits ``followups_generated`` — cloud ``persist_turn_result``
     uses this list to set_followups + emit with the *current* turn message_id.
-    Paused / cancelled results are left unchanged.
+    Paused / cancelled results are left unchanged. Multi-act: each act carries its
+    own chips (aligned with stock ``meta.followups`` for single-act tapes).
     """
     if result.get("finish_reason") is not FinishReason.END_TURN:
         return result
-    raw = (tape.get("meta") or {}).get("followups")
+    raw = act.get("followups")
     if not isinstance(raw, list) or not raw:
         return result
     followups = [str(x) for x in raw if str(x).strip()]
@@ -179,7 +208,137 @@ def _attach_tape_followups(result: dict[str, Any], tape: dict[str, Any]) -> dict
     return result
 
 
-async def _emit_auto_resolved_team_preview(
+def _finalize_act_cursor(
+    result: dict[str, Any],
+    *,
+    conversation_id: str,
+    turn_index: int,
+    turn_count: int,
+) -> dict[str, Any]:
+    """After a completed act, advance the binding cursor or unbind on the last act."""
+    if result.get("finish_reason") is not FinishReason.END_TURN:
+        return result
+    advance_after_act_complete(
+        conversation_id, turn_index=turn_index, turn_count=turn_count
+    )
+    return result
+
+
+def _ensure_checkpoint_id(payload: dict[str, Any], *, message_id: str) -> str:
+    cid = str(payload.get("checkpoint_id") or "")
+    if not cid:
+        cid = replay_interaction_id("", message_id=message_id)
+        payload["checkpoint_id"] = cid
+    return cid
+
+
+def _build_required_event(
+    et_name: str,
+    payload: dict[str, Any],
+    *,
+    conversation_id: str,
+    message_id: str,
+    ts: str | None,
+) -> SSEEvent:
+    """Build a live ``*_required`` SSEEvent from tape payload (minimal seed)."""
+    checkpoint_id = _ensure_checkpoint_id(payload, message_id=message_id)
+    payload["conversation_id"] = conversation_id
+    if et_name == "team_preview_required":
+        required = team_preview_required(
+            checkpoint_id=checkpoint_id,
+            conversation_id=conversation_id,
+            workers=list(payload.get("workers") or []),
+            tools=list(payload.get("tools") or []),
+            primitive=str(payload.get("primitive") or "debate"),
+            motion=str(payload.get("motion") or ""),
+            form=str(payload.get("form") or ""),
+            sides=list(payload.get("sides") or []),
+            max_rounds=int(payload.get("max_rounds") or 0),
+            thorough=bool(payload.get("thorough", True)),
+        )
+    elif et_name == "checkpoint_required":
+        intent = payload.get("intent")
+        required = checkpoint_required(
+            checkpoint_id=checkpoint_id,
+            conversation_id=conversation_id,
+            question=str(payload.get("question") or ""),
+            context=str(payload.get("context") or ""),
+            assumptions=list(payload.get("assumptions") or []),
+            questions=list(payload.get("questions") or []),
+            style_options=list(payload.get("style_options") or []),
+            intent=intent if isinstance(intent, str) else None,
+        )
+    elif et_name == "plan_review_required":
+        required = plan_review_required(
+            checkpoint_id=checkpoint_id,
+            conversation_id=conversation_id,
+            steps=list(payload.get("steps") or []),
+            pending=list(payload.get("pending") or []),
+        )
+    else:
+        raise ValueError(f"not a wired pause event: {et_name}")
+    if ts:
+        return SSEEvent(type=required.type, payload=required.payload, timestamp=ts)
+    return required
+
+
+def _emit_resolved_for_kind(
+    sink: EventSink,
+    *,
+    kind: str,
+    checkpoint_id: str,
+    decision: str,
+    note: str = "",
+    selected: list[str] | None = None,
+) -> None:
+    if kind == "team_preview":
+        sink.emit(
+            team_preview_resolved(
+                checkpoint_id=checkpoint_id, decision=decision, note=note
+            )
+        )
+    elif kind == "ask_user":
+        sink.emit(
+            checkpoint_resolved(
+                checkpoint_id=checkpoint_id,
+                decision=decision,
+                note=note,
+                selected=list(selected or []),
+            )
+        )
+    elif kind == "plan_review":
+        sink.emit(
+            plan_review_resolved(
+                checkpoint_id=checkpoint_id, decision=decision, note=note
+            )
+        )
+    else:
+        raise ValueError(f"unknown suspension kind for resolve: {kind}")
+
+
+def _suspension_kind_of(suspension: TurnSuspension) -> str:
+    if isinstance(suspension, TeamPreviewSuspension):
+        return "team_preview"
+    if isinstance(suspension, AskUserSuspension):
+        return "ask_user"
+    if isinstance(suspension, PlanReviewSuspension):
+        return "plan_review"
+    raise TypeError(f"unsupported tape suspension: {type(suspension).__name__}")
+
+
+def _ensure_approval_id(payload: dict[str, Any], *, message_id: str) -> str:
+    aid = str(payload.get("approval_id") or "")
+    if not aid:
+        aid = replay_interaction_id("", message_id=message_id)
+        payload["approval_id"] = aid
+    return aid
+
+
+def _decision_value(decision: Any) -> str:
+    return decision.value if hasattr(decision, "value") else str(decision)
+
+
+async def _emit_auto_resolved_approval(
     *,
     sink: EventSink,
     conversation_id: str,
@@ -187,44 +346,235 @@ async def _emit_auto_resolved_team_preview(
     payload: dict[str, Any],
     ts: str | None,
 ) -> None:
-    """Emit required + resolved without durable pause (director seek past the card)."""
-    checkpoint_id = str(
-        payload.get("checkpoint_id")
-        or replay_interaction_id("", message_id=message_id)
-    )
-    required = team_preview_required(
-        checkpoint_id=checkpoint_id,
+    """Emit approval required+resolved without awaiting (director seek past the card)."""
+    approval_id = _ensure_approval_id(payload, message_id=message_id)
+    tool_call_id = str(payload.get("tool_call_id") or approval_id)
+    tool_name = str(payload.get("tool_name") or "unknown")
+    arguments = payload.get("arguments")
+    if not isinstance(arguments, dict):
+        arguments = {}
+    required = approval_required(
+        approval_id=approval_id,
         conversation_id=conversation_id,
-        workers=list(payload.get("workers") or []),
-        tools=list(payload.get("tools") or []),
-        primitive=str(payload.get("primitive") or "debate"),
-        motion=str(payload.get("motion") or ""),
-        form=str(payload.get("form") or ""),
-        sides=list(payload.get("sides") or []),
-        max_rounds=int(payload.get("max_rounds") or 0),
-        thorough=bool(payload.get("thorough", True)),
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        arguments=arguments,
     )
     if ts:
-        required = SSEEvent(
-            type=required.type, payload=required.payload, timestamp=ts
-        )
+        required = SSEEvent(type=required.type, payload=required.payload, timestamp=ts)
     sink.emit(required)
     sink.emit(
-        team_preview_resolved(
-            checkpoint_id=checkpoint_id,
-            decision=CheckpointDecision.CONTINUE.value,
-            note="demo_tape.director_auto_resolve",
+        approval_resolved(
+            approval_id=approval_id,
+            tool_call_id=tool_call_id,
+            decision=ApprovalDecision.APPROVE.value,
         )
     )
     logger.info(
-        "demo_tape.auto_resolved_team_preview",
+        "demo_tape.auto_resolved_approval",
         conversation_id=conversation_id,
-        checkpoint_id=checkpoint_id,
+        approval_id=approval_id,
+        tool_name=tool_name,
     )
 
 
-async def _pause_team_preview(
+async def _await_hot_approval(
     *,
+    sink: EventSink,
+    conversation_id: str,
+    message_id: str,
+    payload: dict[str, Any],
+    ts: str | None,
+    transport: PlaybackTransport | None,
+    event_index: int,
+    t_ms: int,
+) -> None:
+    """Register reminted approval into InteractionRegistry and await hot resolve.
+
+    Keeps the turn running (no paused frame). Live ``POST …/interactions/{id}``
+    settles the Future; we then re-emit ``approval_resolved`` (recorded resolve
+    was cut at export). APPROVE / DENY / ALWAYS all continue the tape stream.
+    """
+    approval_id = _ensure_approval_id(payload, message_id=message_id)
+    tool_call_id = str(payload.get("tool_call_id") or approval_id)
+    tool_name = str(payload.get("tool_name") or "unknown")
+    arguments = payload.get("arguments")
+    if not isinstance(arguments, dict):
+        arguments = {}
+    registry = default_interaction_registry()
+    if transport is not None:
+        transport.mark_awaiting_interaction(event_index=event_index, t_ms=t_ms)
+
+    def _on_suspended() -> None:
+        required = approval_required(
+            approval_id=approval_id,
+            conversation_id=conversation_id,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            arguments=arguments,
+        )
+        if ts:
+            required = SSEEvent(
+                type=required.type, payload=required.payload, timestamp=ts
+            )
+        sink.emit(required)
+
+    try:
+        decision = await registry.suspend(
+            approval_id,
+            conversation_id,
+            kind=InteractionKind.APPROVAL,
+            payload={
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "arguments": arguments,
+                "approval_id": approval_id,
+                "conversation_id": conversation_id,
+            },
+            timeout=None,
+            on_suspended=_on_suspended,
+        )
+    except asyncio.CancelledError:
+        # Stop / orphan cancels the Future; registry.suspend finally discards.
+        if transport is not None:
+            transport.clear_awaiting_interaction()
+        raise
+    if transport is not None:
+        transport.clear_awaiting_interaction()
+
+    decision_str = _decision_value(decision)
+    logger.info(
+        "demo_tape.approval_hot_resolved",
+        conversation_id=conversation_id,
+        message_id=message_id,
+        approval_id=approval_id,
+        tool_name=tool_name,
+        decision=decision_str,
+    )
+    # Decision does not fork the recorded stream — only logged (cold-path parity).
+    sink.emit(
+        approval_resolved(
+            approval_id=approval_id,
+            tool_call_id=tool_call_id,
+            decision=decision_str,
+        )
+    )
+
+
+async def _emit_auto_resolved_pause(
+    *,
+    sink: EventSink,
+    et_name: str,
+    conversation_id: str,
+    message_id: str,
+    payload: dict[str, Any],
+    ts: str | None,
+) -> None:
+    """Emit required + resolved without durable pause (director seek past the card)."""
+    kind = _WIRED_PAUSE_BY_EVENT[et_name]
+    required = _build_required_event(
+        et_name,
+        payload,
+        conversation_id=conversation_id,
+        message_id=message_id,
+        ts=ts,
+    )
+    sink.emit(required)
+    _emit_resolved_for_kind(
+        sink,
+        kind=kind,
+        checkpoint_id=str(required.payload["checkpoint_id"]),
+        decision=CheckpointDecision.CONTINUE.value,
+        note="demo_tape.director_auto_resolve",
+    )
+    logger.info(
+        "demo_tape.auto_resolved_pause",
+        kind=kind,
+        conversation_id=conversation_id,
+        checkpoint_id=required.payload.get("checkpoint_id"),
+    )
+
+
+def _build_tape_frame(
+    *,
+    kind: str,
+    capture: Any,
+    message_id: str,
+    conversation_id: str,
+    user_id: str,
+    user_message: str,
+    folder_id: str | None,
+    checkpoint_id: str,
+    payload: dict[str, Any],
+    tape_meta: dict[str, Any],
+) -> TurnSuspension:
+    """Minimal suspension seed from tape payload (shared capture skeleton)."""
+    common = dict(
+        message_id=message_id,
+        conversation_id=conversation_id,
+        user_id=user_id,
+        captain_run_id=message_id,
+        checkpoint_id=checkpoint_id,
+        base_system_prompt="__demo_tape__",
+        user_message=user_message,
+        folder_id=folder_id,
+        memory_enabled=False,
+        transcript=list(capture.transcript),
+        history=list(capture.history),
+        journal_entries=capture.journal_entries,
+        citations=capture.citations,
+        trace_id=capture.trace_id,
+    )
+    if kind == "team_preview":
+        return TeamPreviewSuspension(
+            **common,
+            tool_call_id=f"tape_debate_{checkpoint_id[:8]}",
+            plan=RunPlan(),
+            completed={},
+            workers=list(payload.get("workers") or []),
+            tools=list(payload.get("tools") or []),
+            primitive=str(payload.get("primitive") or "debate"),
+            motion=str(payload.get("motion") or ""),
+            form=str(payload.get("form") or ""),
+            sides=list(payload.get("sides") or []),
+            max_rounds=int(payload.get("max_rounds") or 0),
+            thorough=bool(payload.get("thorough", True)),
+            # Divert marker mirror — content lives on turn_paused; cursor also on extras.
+            debate_arguments={
+                DEMO_TAPE_FRAME_KEY: dict(tape_meta),
+                "motion": payload.get("motion") or "",
+                "form": payload.get("form") or "",
+                "sides": list(payload.get("sides") or []),
+                "thorough": bool(payload.get("thorough", True)),
+            },
+        )
+    if kind == "ask_user":
+        intent = payload.get("intent") or "decision"
+        return AskUserSuspension(
+            **common,
+            tool_call_id=f"tape_ask_user_{checkpoint_id[:8]}",
+            question=str(payload.get("question") or ""),
+            context=str(payload.get("context") or ""),
+            assumptions=list(payload.get("assumptions") or []),
+            questions=list(payload.get("questions") or []),
+            style_options=list(payload.get("style_options") or []),
+            intent=intent if isinstance(intent, str) else "decision",
+        )
+    if kind == "plan_review":
+        return PlanReviewSuspension(
+            **common,
+            tool_call_id=f"tape_plan_review_{checkpoint_id[:8]}",
+            plan=RunPlan(),
+            completed={},
+            steps=list(payload.get("steps") or []),
+            pending=list(payload.get("pending") or []),
+        )
+    raise ValueError(f"unknown tape pause kind: {kind}")
+
+
+async def _pause_durable(
+    *,
+    et_name: str,
     sink: EventSink,
     binding: TapeBinding,
     message_id: str,
@@ -236,8 +586,10 @@ async def _pause_team_preview(
     next_index: int,
     journal_writer: TurnJournalWriter,
     transport: PlaybackTransport | None = None,
+    turn_index: int = 0,
 ) -> dict[str, Any]:
     """Durable pause via the live suspension-capture skeleton (no tape content channel)."""
+    kind = _WIRED_PAUSE_BY_EVENT[et_name]
     checkpoint_id = str(required.payload.get("checkpoint_id") or new_id())
     payload = dict(required.payload)
     payload["checkpoint_id"] = checkpoint_id
@@ -249,9 +601,12 @@ async def _pause_team_preview(
     )
 
     speed = transport.speed if transport is not None else binding.speed
+    # Frame cursor = event index within the current act; turn_index freezes which
+    # act (binding cursor stays put until END_TURN — no conflict with DEMO_TAPE_FRAME_KEY).
     tape_meta = {
         "tape": str(binding.tape_path),
         "next_index": next_index,
+        "turn_index": int(turn_index),
         "speed": speed,
         "max_gap_ms": binding.max_gap_ms,
     }
@@ -263,41 +618,17 @@ async def _pause_team_preview(
         paused_content = capture.paused_content
         fact = pre_pause_from_journal(capture.journal_entries)
         paused_reasoning = fact.reasoning if fact is not None else ""
-        return TeamPreviewSuspension(
+        return _build_tape_frame(
+            kind=kind,
+            capture=capture,
             message_id=message_id,
             conversation_id=conversation_id,
             user_id=user_id,
-            captain_run_id=message_id,
-            checkpoint_id=checkpoint_id,
-            tool_call_id=f"tape_debate_{checkpoint_id[:8]}",
-            base_system_prompt="__demo_tape__",
             user_message=user_message,
             folder_id=folder_id,
-            memory_enabled=False,
-            transcript=list(capture.transcript),
-            history=list(capture.history),
-            plan=RunPlan(),
-            completed={},
-            journal_entries=capture.journal_entries,
-            workers=list(payload.get("workers") or []),
-            tools=list(payload.get("tools") or []),
-            primitive=str(payload.get("primitive") or "debate"),
-            motion=str(payload.get("motion") or ""),
-            form=str(payload.get("form") or ""),
-            sides=list(payload.get("sides") or []),
-            max_rounds=int(payload.get("max_rounds") or 0),
-            thorough=bool(payload.get("thorough", True)),
-            # Divert marker only — content/reasoning live on turn_paused; cursor also
-            # rides turn_paused.extras (same meta) via turn_paused_extras below.
-            debate_arguments={
-                DEMO_TAPE_FRAME_KEY: dict(tape_meta),
-                "motion": payload.get("motion") or "",
-                "form": payload.get("form") or "",
-                "sides": list(payload.get("sides") or []),
-                "thorough": bool(payload.get("thorough", True)),
-            },
-            citations=capture.citations,
-            trace_id=capture.trace_id,
+            checkpoint_id=checkpoint_id,
+            payload=payload,
+            tape_meta=tape_meta,
         )
 
     await journal_writer.flush()
@@ -311,12 +642,13 @@ async def _pause_team_preview(
             build_frame=build_frame,
             saver=save_paused_turn,
             sink=sink,
-            suspension_kind="team_preview",
+            suspension_kind=kind,
             turn_paused_extras={DEMO_TAPE_FRAME_KEY: dict(tape_meta)},
         )
     except SuspensionPersistError:
         logger.exception(
             "demo_tape.pause_persist_failed",
+            kind=kind,
             message_id=message_id,
             checkpoint_id=checkpoint_id,
         )
@@ -338,6 +670,7 @@ async def _pause_team_preview(
         paused_reasoning = sink.streamed_reasoning() or ""
     logger.info(
         "demo_tape.paused",
+        kind=kind,
         message_id=message_id,
         checkpoint_id=checkpoint_id,
         next_index=next_index,
@@ -350,6 +683,11 @@ async def _pause_team_preview(
         content=paused_content,
         reasoning=paused_reasoning,
     )
+
+
+# Back-compat alias for director tests that patch ``_pause_team_preview``.
+async def _pause_team_preview(**kwargs: Any) -> dict[str, Any]:
+    return await _pause_durable(et_name="team_preview_required", **kwargs)
 
 
 async def play_tape_events(
@@ -369,14 +707,17 @@ async def play_tape_events(
     emit_message_start: bool = True,
     trace_id: str | None = None,
     transport: PlaybackTransport | None = None,
+    turn_index: int = 0,
 ) -> dict[str, Any]:
     """Play events from ``start_index``; pause on the next required card.
 
     Event prep (normalize / remint / legacy captain ``run_id`` strip) is the shared
     SINK source adapter (:mod:`agentcore.replay`). This player keeps demo-tape
-    application decoration: pacing, team_preview pause wiring, message lifecycle
-    alignment with shared bootstrap. When ``transport`` is set (director console),
-    speed / pause / burst-seek are read live from that metronome.
+    application decoration: pacing, wired durable-pause cards (team_preview /
+    ask_user / plan_review), hot-path approval await via InteractionRegistry,
+    message lifecycle alignment with shared bootstrap. When ``transport`` is set
+    (director console), speed / pause / burst-seek are read live from that metronome.
+    ``turn_index`` is frozen into pause-frame meta so resume continues the same act.
     """
     source = prepare_replay_source(
         {"events": events},
@@ -430,16 +771,43 @@ async def play_tape_events(
             if delay > 0:
                 await asyncio.sleep(delay)
 
-        if et_name == "team_preview_required":
+        if et_name in TAPE_HOT_PAUSE_KINDS:
+            # Hot-path approval: register + await live interactions resolve; turn
+            # stays running. Director seek past the card: emit required+resolved.
+            if transport is not None and transport.should_auto_resolve_at(i):
+                await _emit_auto_resolved_approval(
+                    sink=sink,
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    payload=payload,
+                    ts=ts,
+                )
+                # Skip recorded human-decision gap (same as cold-path resume).
+                prev_t = None
+                i += 1
+                continue
+
+            await _await_hot_approval(
+                sink=sink,
+                conversation_id=conversation_id,
+                message_id=message_id,
+                payload=payload,
+                ts=ts,
+                transport=transport,
+                event_index=i,
+                t_ms=t_ms,
+            )
+            # Wall-clock wait must not re-sleep the recorded decision gap.
+            prev_t = None
+            i += 1
+            continue
+
+        if et_name in TAPE_WIRED_PAUSE_KINDS:
             # Director seek past this card: emit required+resolved, keep injecting.
             if transport is not None and transport.should_auto_resolve_at(i):
-                if not payload.get("checkpoint_id"):
-                    payload["checkpoint_id"] = replay_interaction_id(
-                        "", message_id=message_id
-                    )
-                payload["conversation_id"] = conversation_id
-                await _emit_auto_resolved_team_preview(
+                await _emit_auto_resolved_pause(
                     sink=sink,
+                    et_name=et_name,
                     conversation_id=conversation_id,
                     message_id=message_id,
                     payload=payload,
@@ -449,28 +817,15 @@ async def play_tape_events(
                 continue
 
             # Live order: capture+persist first, then emit the card. Remint id here.
-            if not payload.get("checkpoint_id"):
-                payload["checkpoint_id"] = replay_interaction_id(
-                    "", message_id=message_id
-                )
-            payload["conversation_id"] = conversation_id
-            required = team_preview_required(
-                checkpoint_id=str(payload["checkpoint_id"]),
+            required = _build_required_event(
+                et_name,
+                payload,
                 conversation_id=conversation_id,
-                workers=list(payload.get("workers") or []),
-                tools=list(payload.get("tools") or []),
-                primitive=str(payload.get("primitive") or "debate"),
-                motion=str(payload.get("motion") or ""),
-                form=str(payload.get("form") or ""),
-                sides=list(payload.get("sides") or []),
-                max_rounds=int(payload.get("max_rounds") or 0),
-                thorough=bool(payload.get("thorough", True)),
+                message_id=message_id,
+                ts=ts,
             )
-            if ts:
-                required = SSEEvent(
-                    type=required.type, payload=required.payload, timestamp=ts
-                )
-            result = await _pause_team_preview(
+            result = await _pause_durable(
+                et_name=et_name,
                 sink=sink,
                 binding=binding,
                 message_id=message_id,
@@ -482,15 +837,14 @@ async def play_tape_events(
                 next_index=i + 1,
                 journal_writer=journal_writer,
                 transport=transport,
+                turn_index=turn_index,
             )
             if transport is not None:
                 transport.mark_awaiting_interaction(event_index=i, t_ms=t_ms)
             return result
 
         if et_name in PAUSE_REQUIRED_KINDS:
-            # Other durable pause cards (plan_review / ask_user) are not yet wired for
-            # tape frames — emit for visibility then continue (dev tape should avoid
-            # them). Their ids were reminted at load like every interaction id.
+            # Unwired durable pause (none today among PAUSE_REQUIRED; kept as safety).
             logger.warning("demo_tape.unhandled_pause_type", type=et_name)
             await _emit(sink, et_name, payload, ts=ts)
             i += 1
@@ -536,8 +890,35 @@ async def play_tape_turn(
     trace_id: str | None,
 ) -> dict[str, Any]:
     tape = load_tape(binding.tape_path)
-    events = list(tape.get("events") or [])
+    acts = tape_turns(tape)
+    turn_count = len(acts)
+    turn_index = int(binding.turn_index or 0)
+    if turn_index < 0 or turn_index >= turn_count:
+        logger.error(
+            "demo_tape.turn_index_out_of_range",
+            conversation_id=conversation_id,
+            turn_index=turn_index,
+            turn_count=turn_count,
+            tape=str(binding.tape_path),
+        )
+        raise RuntimeError(
+            f"demo tape turn_index {turn_index} out of range for {turn_count} acts"
+        )
+    act = acts[turn_index]
+    events = list(act.get("events") or [])
     duration_ms = max((int(ev.get("t_ms") or 0) for ev in events), default=0)
+    logger.info(
+        "demo_tape.play_start",
+        conversation_id=conversation_id,
+        message_id=message_id,
+        tape=str(binding.tape_path),
+        turn_index=turn_index,
+        turn_count=turn_count,
+        events=len(events),
+        duration_ms=duration_ms,
+        speed=binding.speed,
+        max_gap_ms=binding.max_gap_ms,
+    )
     transport = transport_registry.attach(
         conversation_id=conversation_id,
         tape_path=binding.tape_path,
@@ -569,9 +950,16 @@ async def play_tape_turn(
             journal_writer=writer,
             trace_id=trace_id,
             transport=transport,
+            turn_index=turn_index,
         )
         await writer.flush()
-        return _attach_tape_followups(result, tape)
+        result = _attach_turn_followups(result, act)
+        return _finalize_act_cursor(
+            result,
+            conversation_id=conversation_id,
+            turn_index=turn_index,
+            turn_count=turn_count,
+        )
     except Exception as e:
         transport.mark_error(str(e))
         raise
@@ -582,26 +970,29 @@ async def play_tape_turn(
 
 async def continue_tape_turn(
     *,
-    suspension: TeamPreviewSuspension,
+    suspension: TurnSuspension,
     response: CheckpointResponse,
     sink: EventSink,
     folder_id: str | None,
     trace_id: str | None,
 ) -> dict[str, Any]:
-    """Resume a tape paused at team_preview after a real frontend resolve.
+    """Resume a tape paused at a wired durable card after a real frontend resolve.
 
     Display open goes through the shared resume bootstrap (message_start +
     turn_paused rehydrate + G6 arm). Tape only answers which event index to
-    continue from — no private content channel.
+    continue from — no private content channel. ``selected`` / ``adjust`` notes
+    are logged but do not rewrite the recorded event stream.
     """
     if not is_demo_tape_frame(suspension):
         raise RuntimeError("continue_tape_turn called on non-tape suspension")
 
+    kind = _suspension_kind_of(suspension)
     meta = tape_frame_meta(suspension)
     if not meta.get("tape"):
         raise RuntimeError("demo tape frame missing tape path in turn_paused extras")
     tape_path = Path(str(meta["tape"]))
     next_index = int(meta.get("next_index") or 0)
+    turn_index = int(meta.get("turn_index") or 0)
     speed = float(meta.get("speed") or 1.0)
     max_gap_ms = int(meta.get("max_gap_ms") or 3000)
 
@@ -614,9 +1005,17 @@ async def continue_tape_turn(
         tape_path=tape_path,
         speed=speed,
         max_gap_ms=max_gap_ms,
+        turn_index=turn_index,
     )
     tape = load_tape(tape_path)
-    events = list(tape.get("events") or [])
+    acts = tape_turns(tape)
+    turn_count = len(acts)
+    if turn_index < 0 or turn_index >= turn_count:
+        raise RuntimeError(
+            f"demo tape frame turn_index {turn_index} out of range for {turn_count} acts"
+        )
+    act = acts[turn_index]
+    events = list(act.get("events") or [])
     duration_ms = max((int(ev.get("t_ms") or 0) for ev in events), default=0)
     transport = transport_registry.attach(
         conversation_id=suspension.conversation_id,
@@ -640,12 +1039,13 @@ async def continue_tape_turn(
 
     decision = response.decision
     if decision is CheckpointDecision.STOP:
-        sink.emit(
-            team_preview_resolved(
-                checkpoint_id=suspension.checkpoint_id,
-                decision=decision.value,
-                note=response.note or "",
-            )
+        _emit_resolved_for_kind(
+            sink,
+            kind=kind,
+            checkpoint_id=suspension.checkpoint_id,
+            decision=decision.value,
+            note=response.note or "",
+            selected=list(response.selected or []),
         )
         sink.emit(message_end(FinishReason.CANCELLED))
         transport.mark_finished()
@@ -657,12 +1057,24 @@ async def continue_tape_turn(
             reasoning=reasoning_seed,
         )
 
-    sink.emit(
-        team_preview_resolved(
-            checkpoint_id=suspension.checkpoint_id,
-            decision=CheckpointDecision.CONTINUE.value,
-            note=response.note or "",
+    # Tape continue: inject by recorded stream only. selected / adjust do not fork.
+    if decision is CheckpointDecision.ADJUST or response.selected:
+        logger.info(
+            "demo_tape.resume_decision_ignored_for_stream",
+            kind=kind,
+            decision=decision.value,
+            selected=list(response.selected or []),
+            note_chars=len(response.note or ""),
+            message_id=suspension.message_id,
         )
+
+    _emit_resolved_for_kind(
+        sink,
+        kind=kind,
+        checkpoint_id=suspension.checkpoint_id,
+        decision=decision.value,
+        note=response.note or "",
+        selected=list(response.selected or []),
     )
 
     # Writer continues after sealed pause — new writer with seq after prior facts.
@@ -693,9 +1105,16 @@ async def continue_tape_turn(
             emit_message_start=False,  # bootstrap already emitted message_start
             trace_id=trace_id,
             transport=transport,
+            turn_index=turn_index,
         )
         await writer.flush()
-        return _attach_tape_followups(result, tape)
+        result = _attach_turn_followups(result, act)
+        return _finalize_act_cursor(
+            result,
+            conversation_id=suspension.conversation_id,
+            turn_index=turn_index,
+            turn_count=turn_count,
+        )
     except Exception as e:
         transport.mark_error(str(e))
         raise

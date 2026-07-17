@@ -5,8 +5,8 @@ from pydantic import BaseModel
 
 class PlatformSettings(BaseModel):
     platform_api_key: str = ""
-    platform_base_url: str = "https://api.openai.com/v1"
-    platform_model: str = "gpt-4o"
+    platform_base_url: str = "https://api.deepseek.com"
+    platform_model: str = "deepseek-v4-flash"
     # Background purposes (title/memory/compaction/followups); empty = follow platform_model.
     platform_background_model: str = ""
 

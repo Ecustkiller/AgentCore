@@ -42,7 +42,7 @@ from agentcore.runtime.debate.types import (
     SideTurn,
 )
 
-# 合规：标题字符上限（展示层 ARGUMENT_TITLE_MAX=30；产出端 prompt 更严 ≤16，度量用展示上限）
+# 合规：产出端 prompt 纪律更严（≤16）；度量放宽到 30（与展示无关——title 已完整入库）
 _TITLE_MAX = 30
 
 # 「X方立论 / 开场立论」类总标题（UI 已渲染方名与阶段，发言里再写会多切一块空壳）

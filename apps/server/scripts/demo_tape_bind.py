@@ -32,6 +32,12 @@ from agentcore.demo_tape.binding import conversation_is_cloud, write_binding
 
 DEFAULT_USERNAME = os.environ.get("DEV_USERNAME", "dev")
 
+_LOCAL_BIND_HINT = (
+    "this conversation routes to desktop sidecar and bypasses server tape replay "
+    "(would silently become a normal AI reply). Prefer「云端草稿」/「云端随手聊」 "
+    "or command-palette「演示回放」. Pass --include-local to bind anyway."
+)
+
 
 @dataclass(frozen=True)
 class LatestConversation:
@@ -39,6 +45,44 @@ class LatestConversation:
     title: str
     is_cloud: bool
     reason: str
+
+
+async def fetch_conversation_cloud_status(
+    session: AsyncSession,
+    conversation_id: str,
+) -> LatestConversation | None:
+    stmt = (
+        select(
+            Conversation.id,
+            Conversation.title,
+            Conversation.local_container_root_id,
+            Conversation.local_root_id,
+            Conversation.folder_id,
+            Folder.local_root_id,
+        )
+        .outerjoin(Folder, Folder.id == Conversation.folder_id)
+        .where(
+            Conversation.id == conversation_id,
+            Conversation.deleted_at.is_(None),
+        )
+        .limit(1)
+    )
+    row = (await session.execute(stmt)).first()
+    if row is None:
+        return None
+    cid, title, container, local_root, folder_id, folder_local = row
+    is_cloud, reason = conversation_is_cloud(
+        local_container_root_id=container,
+        local_root_id=local_root,
+        folder_local_root_id=folder_local,
+        folder_id=folder_id,
+    )
+    return LatestConversation(
+        id=str(cid),
+        title=str(title or ""),
+        is_cloud=is_cloud,
+        reason=reason,
+    )
 
 
 async def fetch_latest_conversation(
@@ -122,7 +166,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--include-local",
         action="store_true",
-        help="With --latest, allow local/sidecar conversations (not recommended for desktop replay)",
+        help=(
+            "Allow binding a local/sidecar conversation (not recommended). "
+            "With --latest, also search local sessions. Without this flag, "
+            "binding a local session is refused."
+        ),
     )
     p.add_argument("--tape", required=True, help="Repo-relative or absolute tape path")
     p.add_argument("--speed", type=float, default=None)
@@ -130,41 +178,59 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-async def _resolve_conversation_id(args: argparse.Namespace) -> str:
+async def _resolve_conversation(args: argparse.Namespace) -> LatestConversation:
     if args.latest and args.conversation_id:
         raise SystemExit("pass either <conversation_id> or --latest, not both")
     if not args.latest and not args.conversation_id:
         raise SystemExit("provide <conversation_id> or --latest")
-    if not args.latest:
-        return str(args.conversation_id)
 
     async with async_session_factory() as session:
-        latest = await fetch_latest_conversation(
-            session,
-            username=args.username,
-            cloud_only=not args.include_local,
-        )
-    label = latest.title.strip() or "(untitled)"
-    mode = "cloud" if latest.is_cloud else "LOCAL/sidecar"
-    print(f"--latest → {latest.id}  [{mode}]  {label}  ({latest.reason})")
-    if not latest.is_cloud:
-        print(
-            "WARNING: this conversation will likely route to desktop sidecar and "
-            "bypass server tape replay. Prefer「云端草稿」/「云端随手聊」.",
-            file=sys.stderr,
-        )
-    return latest.id
+        if args.latest:
+            latest = await fetch_latest_conversation(
+                session,
+                username=args.username,
+                cloud_only=not args.include_local,
+            )
+            label = latest.title.strip() or "(untitled)"
+            mode = "cloud" if latest.is_cloud else "LOCAL/sidecar"
+            print(f"--latest → {latest.id}  [{mode}]  {label}  ({latest.reason})")
+            return latest
+
+        cid = str(args.conversation_id)
+        status = await fetch_conversation_cloud_status(session, cid)
+        if status is None:
+            # Unknown / other DB — still allow bind (file-only workflow) but warn.
+            print(
+                f"warn: conversation {cid} not found in DB; binding without cloud check",
+                file=sys.stderr,
+            )
+            return LatestConversation(
+                id=cid, title="", is_cloud=True, reason="not found in DB"
+            )
+        return status
 
 
 async def _amain(args: argparse.Namespace) -> None:
-    conversation_id = await _resolve_conversation_id(args)
+    target = await _resolve_conversation(args)
+    if not target.is_cloud:
+        if not args.include_local:
+            raise SystemExit(
+                f"refusing to bind LOCAL/sidecar conversation {target.id}: "
+                f"{target.reason}. {_LOCAL_BIND_HINT}"
+            )
+        print(
+            f"WARNING: binding LOCAL/sidecar conversation ({target.reason}) — "
+            f"{_LOCAL_BIND_HINT}",
+            file=sys.stderr,
+        )
+
     path = write_binding(
-        conversation_id,
+        target.id,
         tape=args.tape,
         speed=args.speed,
         max_gap_ms=args.max_gap_ms,
     )
-    print(f"bound {conversation_id} → {args.tape} in {path}")
+    print(f"bound {target.id} → {args.tape} in {path}")
 
 
 def main() -> None:

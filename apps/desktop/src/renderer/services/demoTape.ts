@@ -25,6 +25,9 @@ export async function fetchDemoTapeCatalog(): Promise<DemoTapeCatalog | null> {
     return await api.get<DemoTapeCatalog>("/v1/demo-tape");
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return null;
+    // Non-404: keep palette clean, but surface the break for local debugging
+    // (silent null historically made "replay switch on but catalog broken" invisible).
+    console.warn("[demo-tape] catalog fetch failed", err);
     return null;
   }
 }

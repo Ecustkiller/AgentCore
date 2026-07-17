@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.factory import build_provider
-from agentcore.llm.profiles import PLATFORM_MODEL_FLASH
+from agentcore.llm.profiles import PLATFORM_MODEL_FLASH, PLATFORM_MODEL_PRO
 from agentcore.llm.provider.protocol import LLMProvider
 from agentcore.llm.resolve import (
     ModelConfig,
@@ -37,8 +37,8 @@ class SimDecisionKind(StrEnum):
 # Known "upgrade" pairs: a fast routine model → a stronger model for critical decisions.
 # When the resolved base model is not a known upgradable id (BYOK / proxy), critical safely
 # aliases the base so we never emit an invalid model name.
-SIM_ROUTINE_MODEL = "deepseek-chat"
-SIM_CRITICAL_MODEL = "deepseek-reasoner"
+SIM_ROUTINE_MODEL = PLATFORM_MODEL_FLASH
+SIM_CRITICAL_MODEL = PLATFORM_MODEL_PRO
 _CRITICAL_UPGRADES: dict[str, str] = {SIM_ROUTINE_MODEL: SIM_CRITICAL_MODEL}
 
 # The routing strategy: which decisions warrant the critical tier, and why (explainable).
@@ -69,7 +69,7 @@ class SimModelRoutingConfig(BaseModel):
 
 def default_routing_config(base_model: str) -> SimModelRoutingConfig:
     """Routine tier uses the resolved base model; critical tier upgrades to a stronger
-    model when a known mapping exists (e.g. deepseek-chat → deepseek-reasoner)."""
+    model when a known mapping exists (e.g. deepseek-v4-flash → deepseek-v4-pro)."""
     critical = _CRITICAL_UPGRADES.get(base_model, base_model)
     return SimModelRoutingConfig(routine_model=base_model, critical_model=critical)
 

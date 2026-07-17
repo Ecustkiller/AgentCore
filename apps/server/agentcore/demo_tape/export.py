@@ -8,16 +8,26 @@ window-filling / re-chunking / delta-rebuilding heuristics have no object left.
 
 On-disk tape schema (v2)::
 
-    {version: 2, meta, events[{type, payload, timestamp, t_ms}]}
+    Single-act (stock / single ``--message-id`` export)::
 
-Legacy v1 tapes (``kind``/``ts``, e.g. ``lv-molihua-trademark``) are read with
-alias compatibility and never rewritten for format migration. Content governance
-(sanitize) may rewrite event bodies in place while keeping the on-disk dialect.
+        {version: 2, meta, events[{type, payload, timestamp, t_ms}]}
+
+    Multi-act (assembled from multiple recordings)::
+
+        {version: 2, meta, turns:[{user_prompt, events, followups?}]}
+
+Readers always normalize in memory to a ``turns[]`` document (legacy top-level
+``events`` → one act). Stock single-act files are never rewritten for this.
+
+Legacy v1 tapes (``kind``/``ts``) are read with alias compatibility and never
+rewritten for format migration. Content governance (sanitize) may rewrite event
+bodies in place while keeping the on-disk dialect.
 
 Export gates (offline, before write):
 
 - sanitize + ingest scan (shared with recording_cut) — memory / PII residue;
-- refuse unwired pause kinds + ``approval_*`` (``--force`` escape hatch);
+- refuse unwired pause kinds (empty today — cold + hot approval are wired;
+  ``--force`` escape hatch);
 - assert no client-tool required kinds remain (cut-table defense-in-depth).
 """
 
@@ -39,13 +49,13 @@ from agentcore.demo_tape.schema import (
 
 
 class TapeExportRefusedError(ValueError):
-    """Tape export refused by an offline gate (pause / approval / client-tool)."""
+    """Tape export refused by an offline gate (unwired pause / client-tool)."""
 
     def __init__(self, reasons: list[str]) -> None:
         self.reasons = reasons
         super().__init__(
             "tape export refused:\n  - " + "\n  - ".join(reasons)
-            + "\nPass force=True / --force to override pause/approval gates only "
+            + "\nPass force=True / --force to override unwired-pause gates only "
             "(client-tool + ingest scan remain hard)."
         )
 
@@ -72,13 +82,14 @@ def _followups_from_recording(recording: dict[str, Any]) -> list[str] | None:
 
 
 def collect_export_gate_reasons(events: list[dict[str, Any]]) -> list[str]:
-    """Pause/approval + client-tool gate reasons (empty ⇒ pass).
+    """Unwired-pause + client-tool gate reasons (empty ⇒ pass).
 
-    Pause/approval reasons are force-overrideable; client-tool reasons are not.
+    Unwired-pause reasons are force-overrideable; client-tool reasons are not.
+    Hot-path ``approval_*`` is wired (required kept; resolved cut via
+    ``PAUSE_RESOLVED_KINDS``) and is not refused here.
     """
     reasons: list[str] = []
     seen_pause: set[str] = set()
-    seen_approval: set[str] = set()
     seen_client: set[str] = set()
     for ev in events:
         if not isinstance(ev, dict):
@@ -89,13 +100,7 @@ def collect_export_gate_reasons(events: list[dict[str, Any]]) -> list[str]:
         if et in TAPE_UNWIRED_PAUSE_KINDS and et not in seen_pause:
             seen_pause.add(et)
             reasons.append(
-                f"unwired pause kind {et!r} — player only suspends team_preview; "
-                "export refused (use --force to override)"
-            )
-        if et.startswith("approval_") and et not in seen_approval:
-            seen_approval.add(et)
-            reasons.append(
-                f"approval event {et!r} — not wired for tape replay; "
+                f"unwired pause kind {et!r} — not wired for tape-frame suspend; "
                 "export refused (use --force to override)"
             )
         if et in CLIENT_TOOL_REQUIRED_KINDS and et not in seen_client:
@@ -112,8 +117,8 @@ def assert_export_allowed(
 ) -> None:
     """Raise :class:`TapeExportRefusedError` when export gates fire.
 
-    ``force`` only bypasses unwired-pause / approval refusals. Client-tool
-    presence always refuses (sanitize/scan is a separate hard gate).
+    ``force`` only bypasses unwired-pause refusals. Client-tool presence always
+    refuses (sanitize/scan is a separate hard gate).
     """
     reasons = collect_export_gate_reasons(events)
     if force:
@@ -140,7 +145,7 @@ def build_tape_from_recording(
     settlements, per-turn meta chrome, client-tool requests) are cut.
 
     After the cut: memory sanitize + ingest scan (shared with recording_cut), then
-    export gates (unwired pause / approval / client-tool assertion).
+    export gates (unwired pause / client-tool assertion).
 
     Recorded ``followups_generated`` chips are lifted into ``meta.followups`` (still
     cut from ``events``). Caller ``meta`` may override (e.g. ``--followups``).
@@ -213,15 +218,176 @@ def write_tape(path: Path, document: dict[str, Any]) -> None:
     path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def load_tape(path: Path) -> dict[str, Any]:
-    """Load a tape; normalize event elements to ``type``/``timestamp`` in memory.
+def _turn_duration_ms(events: list[dict[str, Any]]) -> int:
+    if not events:
+        return 0
+    return max(int(ev.get("t_ms") or 0) for ev in events)
 
-    Does not rewrite the on-disk file (legacy v1 ``kind``/``ts`` stays as stored).
+
+def _normalize_turn(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError(f"tape turn must be an object, got {type(raw).__name__}")
+    events = raw.get("events") or []
+    if not isinstance(events, list):
+        raise ValueError("tape turn events must be a list")
+    turn: dict[str, Any] = {
+        k: v for k, v in raw.items() if k not in ("events", "user_prompt", "followups")
+    }
+    turn["user_prompt"] = str(raw.get("user_prompt") or "").strip()
+    turn["events"] = normalize_tape_events(events)
+    followups = raw.get("followups")
+    if isinstance(followups, list) and followups:
+        cleaned = [str(x) for x in followups if str(x).strip()]
+        if cleaned:
+            turn["followups"] = cleaned
+    return turn
+
+
+def normalize_tape_document(data: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a tape dict in memory to always expose ``turns[]``.
+
+    - Multi-act disk shape (``turns``) → each turn's events alias-normalized.
+    - Stock single-act (top-level ``events``) → one synthetic turn; disk untouched.
+    - Catalog fields (``meta.user_prompt`` / ``turn_count`` / counts) filled when absent.
+
+    Never mutates the caller's dict in place beyond returning a shallow-copied envelope.
+    """
+    meta_in = data.get("meta")
+    meta: dict[str, Any] = dict(meta_in) if isinstance(meta_in, dict) else {}
+
+    raw_turns = data.get("turns")
+    if isinstance(raw_turns, list) and raw_turns:
+        turns = [_normalize_turn(t) for t in raw_turns]
+        if not str(meta.get("user_prompt") or "").strip():
+            meta["user_prompt"] = turns[0]["user_prompt"]
+        meta["turn_count"] = len(turns)
+        if not isinstance(meta.get("event_count"), int):
+            meta["event_count"] = sum(len(t["events"]) for t in turns)
+        if not isinstance(meta.get("duration_ms"), int):
+            meta["duration_ms"] = sum(_turn_duration_ms(t["events"]) for t in turns)
+        out: dict[str, Any] = {**data, "meta": meta, "turns": turns}
+        # Single-act ``turns`` file: mirror first act onto top-level ``events`` so
+        # older readers that only look at ``events`` keep working in memory.
+        if len(turns) == 1:
+            out["events"] = turns[0]["events"]
+            if "followups" not in meta and turns[0].get("followups"):
+                meta["followups"] = list(turns[0]["followups"])
+                out["meta"] = meta
+        return out
+
+    events_raw = data.get("events")
+    if not isinstance(events_raw, list):
+        raise ValueError("invalid tape: need non-empty turns[] or events[]")
+    events = normalize_tape_events(events_raw)
+    turn: dict[str, Any] = {
+        "user_prompt": str(meta.get("user_prompt") or "").strip(),
+        "events": events,
+    }
+    followups = meta.get("followups")
+    if isinstance(followups, list) and followups:
+        cleaned = [str(x) for x in followups if str(x).strip()]
+        if cleaned:
+            turn["followups"] = cleaned
+    meta = {**meta, "turn_count": 1}
+    if not isinstance(meta.get("event_count"), int):
+        meta["event_count"] = len(events)
+    if not isinstance(meta.get("duration_ms"), int):
+        meta["duration_ms"] = _turn_duration_ms(events)
+    return {**data, "meta": meta, "events": events, "turns": [turn]}
+
+
+def tape_turns(document: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return act list (document should already be :func:`normalize_tape_document`)."""
+    turns = document.get("turns")
+    if isinstance(turns, list) and turns:
+        return list(turns)
+    return normalize_tape_document(document)["turns"]
+
+
+def assemble_multi_turn_tape(
+    turn_docs: list[dict[str, Any]],
+    *,
+    meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Stitch already-cut single-act tape docs into one multi-act document.
+
+    Each ``turn_docs`` entry is a full single-act tape (as from
+    :func:`build_tape_from_recording`). Per-act cut + gates must already have passed.
+    """
+    if not turn_docs:
+        raise ValueError("assemble_multi_turn_tape requires at least one turn")
+    turns: list[dict[str, Any]] = []
+    source_ids: list[str] = []
+    for doc in turn_docs:
+        if not isinstance(doc, dict):
+            raise ValueError("each turn doc must be an object")
+        t_meta = doc.get("meta") if isinstance(doc.get("meta"), dict) else {}
+        events = doc.get("events")
+        if not isinstance(events, list):
+            # Allow passing an already-normalized single-act doc.
+            norm = normalize_tape_document(doc)
+            act = tape_turns(norm)[0]
+            turns.append(
+                {
+                    "user_prompt": act["user_prompt"],
+                    "events": list(act["events"]),
+                    **(
+                        {"followups": list(act["followups"])}
+                        if act.get("followups")
+                        else {}
+                    ),
+                }
+            )
+            mid = (norm.get("meta") or {}).get("source_message_id")
+            if mid:
+                source_ids.append(str(mid))
+            continue
+        turn: dict[str, Any] = {
+            "user_prompt": str(t_meta.get("user_prompt") or "").strip(),
+            "events": list(events),
+        }
+        fus = t_meta.get("followups")
+        if isinstance(fus, list) and fus:
+            cleaned = [str(x) for x in fus if str(x).strip()]
+            if cleaned:
+                turn["followups"] = cleaned
+        turns.append(turn)
+        mid = t_meta.get("source_message_id")
+        if mid:
+            source_ids.append(str(mid))
+
+    total_events = sum(len(t["events"]) for t in turns)
+    total_dur = sum(_turn_duration_ms(t["events"]) for t in turns)
+    doc_meta: dict[str, Any] = {
+        **(meta or {}),
+        "user_prompt": turns[0]["user_prompt"],
+        "duration_ms": total_dur,
+        "event_count": total_events,
+        "turn_count": len(turns),
+    }
+    if source_ids:
+        doc_meta["source_message_ids"] = source_ids
+    return {
+        "version": TAPE_FORMAT_VERSION,
+        "meta": doc_meta,
+        "turns": turns,
+    }
+
+
+def load_tape(path: Path) -> dict[str, Any]:
+    """Load a tape; normalize events + acts in memory.
+
+    Does not rewrite the on-disk file (legacy v1 ``kind``/``ts`` and stock
+    single-act top-level ``events`` stay as stored).
     """
     data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or "events" not in data:
+    if not isinstance(data, dict):
         raise ValueError(f"invalid tape file: {path}")
-    events = data.get("events") or []
-    if not isinstance(events, list):
-        raise ValueError(f"invalid tape events: {path}")
-    return {**data, "events": normalize_tape_events(events)}
+    has_turns = isinstance(data.get("turns"), list) and bool(data.get("turns"))
+    has_events = isinstance(data.get("events"), list)
+    if not has_turns and not has_events:
+        raise ValueError(f"invalid tape file (need events or turns): {path}")
+    try:
+        return normalize_tape_document(data)
+    except ValueError as e:
+        raise ValueError(f"invalid tape file: {path}: {e}") from e

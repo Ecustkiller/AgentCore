@@ -1,7 +1,6 @@
 import { DebateProgressLine } from "@/components/chat/DebateProgressLine";
 import { StatusStrip } from "@/components/chat/StatusStrip";
 import { TeamNotesPanel } from "@/components/chat/TeamNotesPanel";
-import { GraphTeamPreview } from "@/components/chat/TeamPreviewCard";
 import { UserInterjectionsPanel } from "@/components/chat/UserInterjectionsPanel";
 import {
   shouldHostPreviewInGraph,
@@ -189,10 +188,8 @@ export function InlineTeamGraph({
             onOpenRevisions={openRevisionsInCanvas}
             onOpenTeamNotes={openTeamNotes}
             collabSummary={collabSummary}
+            teamPreview={hostPreview ? resolvedPreview : null}
           />
-          {hostPreview && resolvedPreview && (
-            <GraphTeamPreview preview={resolvedPreview} />
-          )}
           {isDebate(execution) && (
             <DebateProgressLine
               execution={execution}

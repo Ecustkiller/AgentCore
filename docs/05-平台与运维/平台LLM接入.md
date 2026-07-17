@@ -41,7 +41,7 @@ skip_if:
   - `byok`（默认）→ **一切 purpose 都用户 key 优先**（含后台档 `title` / `memory` / `compaction` / `followups`），无 key 才落 platform 凭据（免费档用户的后台调用因此按来源真实入账、吃免费档额度；都无 → `None` → 402）。**2026-07-13 反转**：原「后台档有 platform 时无条件优先 platform 省钱」在无平台 key 的部署下从未生效过（死代码），而免费档一配平台 key 即激活——BYOK 用户后台调用会翻到平台烧钱、且有 key 跳配额 = 白嫖不设限，并破坏「有 key 用户零变化」承诺，故反转为用户 key 优先。
   - **后台模型降档（✅ 2026-07-15）**：后台档的**模型名**解析优先 `background_model`（用户级，`/users/me/llm-key`）→ `platform_background_model`（部署级，默认空=跟随）→ chat 模型（`_model_for_purpose`）。只降模型不换凭据——凭据优先级维持上条 D6 语义。动机：BYOK 用户把 `default_model` 配成贵模型时，标题/记忆等后台调用会跟着烧贵模型。
   - **BYOK 价卡贯穿**：用户自填单价（`price_cache_hit/miss/output`）与 `background_model` 随 `LLMCredentials` 解析、经 log context 贯穿到 `calculate_cost` 全部计价点（云管线 `prepare.py` 与推理代理 `proxy.py` 同路），供 BYOK 估算金额（见 [成本配额与计费 §〇·五](/docs/05-平台与运维/成本配额与计费.md)）。
-- **平台模型常量**：`deepseek-v4-flash` / `deepseek-v4-pro`（`llm/profiles.py`）；`settings.platform_model` 默认 `gpt-4o`，仅在 platform 模式作上游模型名。
+- **平台模型常量**：`deepseek-v4-flash` / `deepseek-v4-pro`（`llm/profiles.py`）；`settings.platform_model` 默认 `deepseek-v4-flash`，仅在 platform 模式作上游模型名（GPT/gpt-4o 平台档已废弃）。
 - **`resolve_turn_model` / `resolve_user_chat_model`**：解析该 turn 的上游 model（BYOK `default_model` → 否则 `platform_model` → 兜底 `deepseek-v4-flash`）。
 
 ---
@@ -52,7 +52,7 @@ skip_if:
 
 - **`POST /v1/inference/token`**：用 cookie 会话换一枚 **scoped inference token**（限流铸发），响应带 `token` + `expires_in_sec` + **服务端解析出的 `model`**（`resolve_user_chat_model`）。
 - **`POST /v1/inference/v1/chat/completions`**：sidecar 用 `Authorization: Bearer <inference-token>` 调用。服务端 `inference_user` 解析用户 → `preflight_llm_credentials`（同一道计费闸：BYOK 有 key 直通、无 key 走免费档 fallback + **per-call** `enforce_quota`，耗尽返 429 `FREE_TIER_EXHAUSTED`）→ `build_provider` 转发（unary / SSE）→ 按 call 级凭据来源落账 `cost_calls` / `cost_events`。
-- **模型服务端权威**：sidecar 可能仍发 `settings.platform_model`（如 `gpt-4o`），但 BYOK 会覆盖、路由到 DeepSeek——以服务端解析为准（`proxy.py::_llm_request_from_payload`）。
+- **模型服务端权威**：sidecar 可能仍发 `settings.platform_model`（如 `deepseek-v4-flash`），但 BYOK 会覆盖为用户自己的 `default_model`——以服务端解析为准（`proxy.py::_llm_request_from_payload`）。
 
 → 见代码：`api/routes/inference/`（`token.py` 铸发 + `proxy.py` 转发）。sidecar 整体见 [`双模式工作区.md`](/docs/02-架构/双模式工作区.md)。
 

@@ -59,7 +59,8 @@ import { SidecarEventBuffer } from "./sidecar-event-buffer";
 const SIDECAR_APPROVALS_ENABLED = true;
 
 // sidecar 的本机数据目录（app 私有）：持久挂起帧落 `<dataDir>/paused/<message_id>.json`，
-// 渐进 outbox 落 `<dataDir>/outbox/`（D8 分处理器，同目录根）。主进程在 initialize 时下发。
+// 渐进 outbox 落 `<dataDir>/outbox/`，录制（DEMO_TAPE_RECORD_ENABLED）落 `<dataDir>/recordings/`
+// （D8 分处理器，同目录根）。主进程在 initialize 时下发 dataDir。
 
 /**
  * 直接读本机帧文件，列出某会话待续跑的持久挂起帧（不拉起 sidecar 进程）。

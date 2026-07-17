@@ -17,7 +17,8 @@ TAPE_FORMAT_VERSION = 2
 RECORDING_FORMAT_VERSION = 2
 LEGACY_TAPE_FORMAT_VERSION = 1
 
-# Live pause cards — player stops here and waits for a real frontend resolve.
+# Cold-path durable pause cards — player stops, persists a tape frame, ends the
+# turn as PAUSED, and waits for ``POST …/resume``.
 PAUSE_REQUIRED_KINDS = frozenset(
     {
         "team_preview_required",
@@ -26,11 +27,24 @@ PAUSE_REQUIRED_KINDS = frozenset(
     }
 )
 
-# Only ``team_preview`` is wired for true tape-frame suspend today. Export refuses
-# the rest (and any ``approval_*``) unless ``--force`` — move "won't play well" from
-# play-time warning to export-time gate. True-pause expansion is postponed.
-TAPE_WIRED_PAUSE_KINDS = frozenset({"team_preview_required"})
+# Cold-path durable pauses wired for true tape-frame suspend + live resume.
+TAPE_WIRED_PAUSE_KINDS = frozenset(
+    {
+        "team_preview_required",
+        "checkpoint_required",
+        "plan_review_required",
+    }
+)
 TAPE_UNWIRED_PAUSE_KINDS = PAUSE_REQUIRED_KINDS - TAPE_WIRED_PAUSE_KINDS
+
+# Hot-path tool approval — player registers into InteractionRegistry, awaits the
+# live ``POST …/interactions/{id}`` resolve, keeps the turn running (no paused
+# frame / no cold resume). Same decision-logging rule as cold path: any decision
+# continues the recorded stream (no fork).
+TAPE_HOT_PAUSE_KINDS = frozenset({"approval_required"})
+
+# Director seek / burst: any interactive stop that may need auto-confirm when crossed.
+TAPE_INTERACTIVE_PAUSE_KINDS = TAPE_WIRED_PAUSE_KINDS | TAPE_HOT_PAUSE_KINDS
 
 # Recorded resolve events are skipped; the live resolve is emitted fresh.
 PAUSE_RESOLVED_KINDS = frozenset(
@@ -38,6 +52,7 @@ PAUSE_RESOLVED_KINDS = frozenset(
         "team_preview_resolved",
         "checkpoint_resolved",
         "plan_review_resolved",
+        "approval_resolved",
     }
 )
 

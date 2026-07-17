@@ -34,7 +34,7 @@ const CHAPTERS = [
   { id: "verdict", label: "终审", t_ms: 1118000, event_index: 5455 },
 ];
 
-const CID = "5d8bee05-d37f-4ddf-bfb1-4d6665a3d7db";
+const CID = "c63a1188-20ac-48d4-9c0a-9ede68bc17f3";
 
 let status = {
   conversation_id: CID,

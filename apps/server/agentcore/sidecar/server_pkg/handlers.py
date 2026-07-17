@@ -215,6 +215,13 @@ class HandlerMixin:
             )
             return
 
+        # Tape bindings live on the cloud process. A local/sidecar turn never sees
+        # them — historically this silently became a normal AI reply. When replay
+        # is armed, refuse so the operator gets an explicit error instead.
+        conversation_id = str(params.get("conversationId") or turn_id)
+        if await self._reject_if_tape_bound_local(request_id, conversation_id):
+            return
+
         # Adopt this turn's cloud-proxy token before it runs (refreshes a rotated TTL).
         self._refresh_creds(params)
         self._refresh_permission_preset(params)
@@ -225,6 +232,30 @@ class HandlerMixin:
         # the read loop while the turn runs.
         task = asyncio.create_task(self._run_turn(request_id, turn_id, params))
         self._turns[turn_id] = task
+
+    async def _reject_if_tape_bound_local(
+        self, request_id: Any, conversation_id: str
+    ) -> bool:
+        """Return True when the startTurn RPC was rejected (caller must return)."""
+        from agentcore.demo_tape.binding import LOCAL_SESSION_BOUND_MSG, resolve_binding
+
+        binding = resolve_binding(conversation_id)
+        if binding is None:
+            return False
+        logger.error(
+            "demo_tape.sidecar_local_session_bound",
+            conversation_id=conversation_id,
+            tape=str(binding.tape_path),
+            speed=binding.speed,
+        )
+        await self._send(
+            protocol.make_error(
+                request_id,
+                protocol.INVALID_PARAMS,
+                f"{LOCAL_SESSION_BOUND_MSG} tape={binding.tape_path.name}",
+            )
+        )
+        return True
 
     async def _on_respond(self, request_id: Any, params: dict[str, Any]) -> None:
         interaction_id = str(params.get("requestId") or "")

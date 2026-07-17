@@ -1,7 +1,7 @@
 """Director-console control operations (dev-only).
 
 Pause / speed are in-process transport mutations. Forward seek arms a burst on
-the live metronome (and auto-resumes a durable team_preview when crossing it).
+the live metronome (and auto-resumes a durable wired pause when crossing it).
 Backward seek is restart-style: stop the turn, clear transcript, re-run the
 tape from the top with burst armed to the target.
 
@@ -28,19 +28,29 @@ from agentcore.demo_tape.chapters import (
     chapter_by_id,
     snap_to_event_index,
 )
-from agentcore.demo_tape.export import load_tape
+from agentcore.demo_tape.export import load_tape, tape_turns
 from agentcore.demo_tape.launch import require_replay_enabled
-from agentcore.demo_tape.schema import event_type, is_demo_tape_frame
+from agentcore.demo_tape.schema import (
+    TAPE_INTERACTIVE_PAUSE_KINDS,
+    event_type,
+    is_demo_tape_frame,
+)
 from agentcore.demo_tape.transport import (
     PlaybackState,
     PlaybackTransport,
     transport_registry,
 )
 from agentcore.llm.resolve import LLMCredentials
+from agentcore.runtime.approvals import ApprovalDecision
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import EventSink
+from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
 from agentcore.runtime.settlement import prewrite_cold_resume_settlement
-from agentcore.runtime.suspension import TeamPreviewSuspension
+from agentcore.runtime.suspension import (
+    AskUserSuspension,
+    PlanReviewSuspension,
+    TeamPreviewSuspension,
+)
 from agentcore.runtime.suspension_persistence import (
     claim_paused_turn,
     delete_paused_turn,
@@ -53,14 +63,33 @@ logger = get_logger(__name__)
 
 SinkSetup = Callable[[EventSink], None]
 
+_TAPE_DURABLE_KINDS = (TeamPreviewSuspension, AskUserSuspension, PlanReviewSuspension)
+
 
 def _tape_id_for(path: Path) -> str:
     return path.stem
 
 
-def _load_events(tape_path: Path) -> list[dict[str, Any]]:
+def _load_act_events(tape_path: Path, turn_index: int = 0) -> list[dict[str, Any]]:
+    """Events for one act (director stays within the current act this period)."""
     doc = load_tape(tape_path)
-    return list(doc.get("events") or [])
+    acts = tape_turns(doc)
+    if not acts:
+        return []
+    idx = max(0, min(int(turn_index), len(acts) - 1))
+    return list(acts[idx].get("events") or [])
+
+
+def _act_user_prompt(tape_path: Path, turn_index: int = 0) -> str:
+    doc = load_tape(tape_path)
+    acts = tape_turns(doc)
+    if acts:
+        idx = max(0, min(int(turn_index), len(acts) - 1))
+        prompt = str(acts[idx].get("user_prompt") or "").strip()
+        if prompt:
+            return prompt
+    meta = doc.get("meta") if isinstance(doc.get("meta"), dict) else {}
+    return str(meta.get("user_prompt") or "").strip()
 
 
 def _duration_ms(events: list[dict[str, Any]]) -> int:
@@ -78,7 +107,7 @@ def ensure_transport(conversation_id: str) -> PlaybackTransport:
     binding = resolve_binding(conversation_id)
     if binding is None:
         raise NotFoundError("会话未绑定演示磁带或回放未开启")
-    events = _load_events(binding.tape_path)
+    events = _load_act_events(binding.tape_path, binding.turn_index)
     return transport_registry.attach(
         conversation_id=conversation_id,
         tape_path=binding.tape_path,
@@ -92,13 +121,17 @@ def ensure_transport(conversation_id: str) -> PlaybackTransport:
 
 def chapters_for_conversation(conversation_id: str) -> list[TapeChapter]:
     transport = ensure_transport(conversation_id)
-    return build_chapters(_load_events(transport.tape_path))
+    binding = resolve_binding(conversation_id)
+    turn_index = binding.turn_index if binding is not None else 0
+    return build_chapters(_load_act_events(transport.tape_path, turn_index))
 
 
 def status_for_conversation(conversation_id: str) -> dict[str, Any]:
     transport = ensure_transport(conversation_id)
     snap = transport.snapshot()
-    chapters = build_chapters(_load_events(transport.tape_path))
+    binding = resolve_binding(conversation_id)
+    turn_index = binding.turn_index if binding is not None else 0
+    chapters = build_chapters(_load_act_events(transport.tape_path, turn_index))
     current_label = ""
     for ch in chapters:
         if ch.event_index <= transport.event_index:
@@ -131,14 +164,14 @@ def pause(conversation_id: str) -> dict[str, Any]:
 
 
 def resume_soft(conversation_id: str) -> dict[str, Any]:
-    """Resume director soft-pause only (does not settle team_preview)."""
+    """Resume director soft-pause only (does not settle a durable pause card)."""
     transport = ensure_transport(conversation_id)
     transport.resume()
     logger.info("demo_tape.director_resume", conversation_id=conversation_id)
     return status_for_conversation(conversation_id)
 
 
-async def _auto_resume_team_preview(
+async def _auto_resume_durable_pause(
     *,
     conversation_id: str,
     user_id: str,
@@ -148,11 +181,11 @@ async def _auto_resume_team_preview(
 ) -> bool:
     """If a durable tape pause is waiting, claim + continue with CONTINUE."""
     frames = await list_paused_turns(conversation_id)
-    tape_frames = [f for f in frames if isinstance(f, TeamPreviewSuspension)]
-    if not tape_frames:
+    candidates = [f for f in frames if isinstance(f, _TAPE_DURABLE_KINDS)]
+    if not candidates:
         return False
 
-    frame = next((f for f in tape_frames if is_demo_tape_frame(f)), tape_frames[0])
+    frame = next((f for f in candidates if is_demo_tape_frame(f)), candidates[0])
     peeked = await load_paused_turn(frame.message_id, conversation_id=conversation_id)
     if peeked is None:
         return False
@@ -192,9 +225,37 @@ async def _auto_resume_team_preview(
         "demo_tape.director_auto_resume",
         conversation_id=conversation_id,
         message_id=frame.message_id,
+        kind=getattr(frame, "kind", None),
         user_id=user_id,
     )
     return True
+
+
+# Back-compat alias (tests / older call sites).
+_auto_resume_team_preview = _auto_resume_durable_pause
+
+
+def _auto_resolve_hot_approvals(conversation_id: str) -> bool:
+    """Settle pending hot-path approvals so a seek-past can wake the player.
+
+    Same decision semantics as burst auto-confirm: APPROVE, then the player
+    re-emits ``approval_resolved`` and continues the recorded stream.
+    """
+    registry = default_interaction_registry()
+    settled = False
+    for req in list(registry.list_pending(conversation_id)):
+        if req.kind is not InteractionKind.APPROVAL:
+            continue
+        if registry.resolve(
+            req.id, ApprovalDecision.APPROVE, conversation_id=conversation_id
+        ):
+            settled = True
+            logger.info(
+                "demo_tape.director_auto_resolve_approval",
+                conversation_id=conversation_id,
+                approval_id=req.id,
+            )
+    return settled
 
 
 async def _rewind_and_burst(
@@ -231,11 +292,11 @@ async def _rewind_and_burst(
                 msg.id, conversation_id=conversation_id
             )
 
-    tape = load_tape(binding.tape_path)
-    meta = tape.get("meta") if isinstance(tape.get("meta"), dict) else {}
-    user_prompt = str(meta.get("user_prompt") or "（导演倒带）重开磁带回放").strip()
+    user_prompt = _act_user_prompt(binding.tape_path, binding.turn_index) or (
+        "（导演倒带）重开磁带回放"
+    )
 
-    events = _load_events(binding.tape_path)
+    events = _load_act_events(binding.tape_path, binding.turn_index)
     transport_registry.attach(
         conversation_id=conversation_id,
         tape_path=binding.tape_path,
@@ -276,7 +337,7 @@ def _has_pause_before(
     events: list[dict[str, Any]], start: int, target: int
 ) -> bool:
     for i in range(max(0, start), min(target, len(events))):
-        if event_type(events[i]) == "team_preview_required":
+        if event_type(events[i]) in TAPE_INTERACTIVE_PAUSE_KINDS:
             return True
     return False
 
@@ -294,7 +355,9 @@ async def seek(
 ) -> dict[str, Any]:
     """Seek to a snapped event index (forward burst or restart rewind)."""
     transport = ensure_transport(conversation_id)
-    events = _load_events(transport.tape_path)
+    binding = resolve_binding(conversation_id)
+    turn_index = binding.turn_index if binding is not None else 0
+    events = _load_act_events(transport.tape_path, turn_index)
     if not events:
         raise ValidationError("磁带无事件")
 
@@ -333,13 +396,16 @@ async def seek(
     transport.resume()
 
     if was_awaiting and target > current:
-        await _auto_resume_team_preview(
-            conversation_id=conversation_id,
-            user_id=user_id,
-            llm_credentials=llm_credentials,
-            llm_supports_tools=llm_supports_tools,
-            setup_sink=setup_sink,
-        )
+        # Hot approval keeps the turn running — wake via registry. Cold durable
+        # cards need claim+resume. Try hot first; fall through to cold.
+        if not _auto_resolve_hot_approvals(conversation_id):
+            await _auto_resume_durable_pause(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                llm_credentials=llm_credentials,
+                llm_supports_tools=llm_supports_tools,
+                setup_sink=setup_sink,
+            )
 
     logger.info(
         "demo_tape.director_seek",

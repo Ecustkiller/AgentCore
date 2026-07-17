@@ -93,7 +93,7 @@ _recordings: dict[str, _Recording] = {}
 # One segment per EventSink instance (per stream leg). Weak keys: a leaked sink
 # never pins recorder state.
 _segments: weakref.WeakKeyDictionary[EventSink, _Segment] = weakref.WeakKeyDictionary()
-# Optional absolute/relative override from ``install_recorder(recordings_dir=…)``
+# Optional absolute/relative override from ``install_recorder(path=…)``
 # (sidecar lands under ``<userData>/sidecar/recordings``). When set, wins over
 # ``settings.demo_tape_recordings_dir`` and the cloud repo default.
 _recordings_dir_override: Path | None = None

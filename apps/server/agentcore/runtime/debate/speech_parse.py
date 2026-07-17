@@ -2,14 +2,14 @@
 
 与桌面 ``parseSpeechArguments`` 同口径：markdown 标题 / 有序·无序列表 / 空行分段；
 单段则整段为一个论点。产出进 ``debate_round`` / ``debate_result`` 的 ``sides[*].arguments``。
+
+``title`` 存完整标题（不在数据层截断）；折叠态由前端 CSS 截断展示。
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-
-ARGUMENT_TITLE_MAX = 30
 
 _HEADER_SPLIT = re.compile(r"(?=^#{1,3}\s+)", re.MULTILINE)
 _NUMBERED_LINE = re.compile(r"^\d+\.\s+")
@@ -27,7 +27,7 @@ class SpeechArgument:
 
 
 def summarize_text(text: str, max_len: int) -> str:
-    """截断为一行摘要：优先在句读处断开。"""
+    """截断为一行摘要：优先在句读处断开（质询预览等；论点 title 路径勿用）。"""
     trimmed = re.sub(r"\s+", " ", (text or "").strip())
     if not trimmed:
         return ""
@@ -46,8 +46,13 @@ def summarize_text(text: str, max_len: int) -> str:
     return f"{slice_}…"
 
 
+def _normalize_title(text: str) -> str:
+    """折叠空白，不截断。"""
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
 def argument_title(body: str) -> str:
-    """从一段发言正文中提取论点标题（首句 / 冒号标签 / 首行）。"""
+    """从一段发言正文中提取论点标题（首句 / 冒号标签 / 首行）；完整文案入库。"""
     trimmed = (body or "").strip()
     if not trimmed:
         return ""
@@ -57,11 +62,11 @@ def argument_title(body: str) -> str:
         after = trimmed[colon_match.end() :]
         clause = re.split(r"[。；—–-]", after, maxsplit=1)[0].strip()
         if clause:
-            return summarize_text(f"{label}：{clause}", ARGUMENT_TITLE_MAX)
-        return summarize_text(label, ARGUMENT_TITLE_MAX)
+            return _normalize_title(f"{label}：{clause}")
+        return _normalize_title(label)
     first_line = trimmed.split("\n", 1)[0]
     first_sentence = re.split(r"[。；]", first_line, maxsplit=1)[0].strip() or first_line.strip()
-    return summarize_text(first_sentence, ARGUMENT_TITLE_MAX)
+    return _normalize_title(first_sentence)
 
 
 def parse_speech_arguments(text: str) -> list[SpeechArgument]:
@@ -102,7 +107,7 @@ def _title_from_header_block(block: str) -> tuple[str, str]:
     lines = block.split("\n")
     head = re.sub(r"^#{1,3}\s+", "", lines[0] or "").strip()
     body = "\n".join(lines[1:]).strip() or head
-    return summarize_text(head, ARGUMENT_TITLE_MAX), body or block
+    return _normalize_title(head), body or block
 
 
 def _strip_list_marker(line: str) -> str:

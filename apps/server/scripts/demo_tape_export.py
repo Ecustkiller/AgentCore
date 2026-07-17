@@ -4,13 +4,23 @@ The journal-reconstruction exporter is retired — tapes are cut from recordings
 Record the run first (``DEMO_TAPE_RECORD_ENABLED=true`` in apps/server/.env →
 ``demos/recordings/<message_id>.json``), then, from apps/server::
 
+    # Single act (unchanged)
     uv run python scripts/demo_tape_export.py \\
         --message-id <assistant message id> \\
         --title "我的演示" \\
         --out ../../demos/tapes/my-demo.json
 
+    # Multi-act script: repeat --message-id (or --recording) in play order
+    uv run python scripts/demo_tape_export.py \\
+        --message-id <act1-msg-id> \\
+        --message-id <act2-msg-id> \\
+        --title "多幕演示" \\
+        --out ../../demos/tapes/my-multi.json
+
 ``--user-prompt`` overrides the DB lookup of the triggering user message (needed
-when exporting on a box without the source conversation).
+when exporting on a box without the source conversation). For multi-act exports
+it applies only when a single act is being cut with one shared override is not
+enough — prefer per-recording DB lookup, or pass one prompt only for single-act.
 """
 
 from __future__ import annotations
@@ -27,6 +37,7 @@ from sqlalchemy import text
 from agentcore.db.base import async_session_factory
 from agentcore.demo_tape.export import (
     TapeExportRefusedError,
+    assemble_multi_turn_tape,
     build_tape_from_recording,
     write_tape,
 )
@@ -60,75 +71,155 @@ async def _lookup_user_prompt(conversation_id: str, message_id: str) -> str:
         return ""
 
 
-async def _main(args: argparse.Namespace) -> None:
-    rec_path = Path(args.recording) if args.recording else recording_path(args.message_id)
-    if not rec_path.exists():
-        raise SystemExit(
-            f"recording not found: {rec_path}\n"
-            "Record the run first: set DEMO_TAPE_RECORD_ENABLED=true, restart the "
-            "backend, run the turn, then re-export."
-        )
+async def _cut_one(
+    *,
+    rec_path: Path,
+    message_id_hint: str,
+    title: str,
+    user_prompt_override: str,
+    followups: list[str] | None,
+    force: bool,
+) -> dict:
+    print(f"demo_tape.export_start recording={rec_path}")
     recording = load_recording(rec_path)
     rec_meta = recording.get("meta") or {}
     conversation_id = str(rec_meta.get("conversation_id") or "")
-    message_id = str(rec_meta.get("message_id") or args.message_id or "")
+    message_id = str(rec_meta.get("message_id") or message_id_hint or "")
+    segs = len(recording.get("segments") or [])
+    print(
+        f"demo_tape.export_meta conversation_id={conversation_id or '-'} "
+        f"message_id={message_id or '-'} segments={segs} "
+        f"recorded_at={rec_meta.get('recorded_at') or '-'}"
+    )
 
-    user_prompt = args.user_prompt or ""
+    user_prompt = user_prompt_override or ""
     if not user_prompt and conversation_id:
         user_prompt = await _lookup_user_prompt(conversation_id, message_id)
     if not user_prompt:
-        raise SystemExit("no user prompt (DB lookup empty) — pass --user-prompt")
+        raise SystemExit(
+            f"no user prompt for {rec_path} (DB lookup empty) — pass --user-prompt"
+        )
 
-    tape_meta: dict = {"title": args.title or Path(args.out).stem}
-    if args.followups:
-        tape_meta["followups"] = list(args.followups)
+    tape_meta: dict = {"title": title or Path(rec_path).stem}
+    if followups:
+        tape_meta["followups"] = list(followups)
     try:
-        doc = build_tape_from_recording(
+        return build_tape_from_recording(
             recording,
             meta=tape_meta,
             user_prompt=user_prompt,
-            force=bool(args.force),
+            force=force,
         )
     except (TapeExportRefusedError, IngestScanError) as e:
-        raise SystemExit(str(e)) from e
+        raise SystemExit(f"demo_tape.export_refused: {e}") from e
+
+
+async def _main(args: argparse.Namespace) -> None:
+    message_ids: list[str] = list(args.message_id or [])
+    recordings: list[str] = list(args.recording or [])
+    if message_ids and recordings:
+        raise SystemExit("use either repeated --message-id or repeated --recording, not both")
+    if not message_ids and not recordings:
+        raise SystemExit("provide --message-id or --recording (repeat for multi-act)")
+
+    sources: list[tuple[str, str]] = (
+        [("id", mid) for mid in message_ids]
+        if message_ids
+        else [("path", p) for p in recordings]
+    )
+
+    title = args.title or Path(args.out).stem
+    turn_docs: list[dict] = []
+    for kind, spec in sources:
+        if kind == "id":
+            rec_path = recording_path(spec)
+            mid_hint = spec
+        else:
+            rec_path = Path(spec)
+            mid_hint = ""
+        if not rec_path.exists():
+            raise SystemExit(
+                f"recording not found: {rec_path}\n"
+                "Record the run first: set DEMO_TAPE_RECORD_ENABLED=true, restart the "
+                "backend, run the turn, then re-export.\n"
+                "List takes: uv run python scripts/demo_tape_recordings.py"
+            )
+        # Single-act: --user-prompt / --followups apply. Multi-act: only title is
+        # shared; each act keeps its own prompt/followups from recording/DB.
+        prompt_override = args.user_prompt if len(sources) == 1 else ""
+        followups = args.followups if len(sources) == 1 else None
+        doc = await _cut_one(
+            rec_path=rec_path,
+            message_id_hint=mid_hint,
+            title=title,
+            user_prompt_override=prompt_override,
+            followups=followups,
+            force=bool(args.force),
+        )
+        turn_docs.append(doc)
+
+    if len(turn_docs) == 1:
+        doc = turn_docs[0]
+    else:
+        doc = assemble_multi_turn_tape(turn_docs, meta={"title": title})
+
     out = Path(args.out)
     write_tape(out, doc)
-    chips = doc["meta"].get("followups") or []
-    print(
-        f"wrote {out} events={doc['meta']['event_count']} "
-        f"duration_ms={doc['meta']['duration_ms']} "
-        f"followups={len(chips)}"
-    )
+    if "turns" in doc and len(doc["turns"]) > 1:
+        print(
+            f"demo_tape.export_done wrote={out} turns={len(doc['turns'])} "
+            f"events={doc['meta']['event_count']} "
+            f"duration_ms={doc['meta']['duration_ms']}"
+        )
+    else:
+        chips = doc["meta"].get("followups") or []
+        print(
+            f"demo_tape.export_done wrote={out} events={doc['meta']['event_count']} "
+            f"duration_ms={doc['meta']['duration_ms']} "
+            f"followups={len(chips)}"
+        )
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--message-id", help="Assistant message id (locates the recording)")
+    p.add_argument(
+        "--message-id",
+        action="append",
+        default=[],
+        help="Assistant message id (repeat in play order for multi-act)",
+    )
     p.add_argument(
         "--recording",
-        help="Explicit recording file path (overrides --message-id lookup)",
+        action="append",
+        default=[],
+        help="Explicit recording file path (repeat in play order; overrides id lookup)",
     )
     p.add_argument("--title", default="", help="Tape title (command palette entry)")
-    p.add_argument("--user-prompt", default="", help="Override the DB user-prompt lookup")
+    p.add_argument(
+        "--user-prompt",
+        default="",
+        help="Override the DB user-prompt lookup (single-act only)",
+    )
     p.add_argument(
         "--followups",
         nargs="+",
         default=None,
-        help="Override meta.followups (otherwise lifted from recorded followups_generated)",
+        help=(
+            "Override meta.followups for a single-act export "
+            "(otherwise lifted from recorded followups_generated)"
+        ),
     )
     p.add_argument("--out", required=True, help="Output tape path (relative to cwd)")
     p.add_argument(
         "--force",
         action="store_true",
         help=(
-            "Override export refusal for unwired pause kinds "
-            "(checkpoint_required / plan_review_required) and approval_* events. "
-            "Does not bypass client-tool assertion or ingest memory/PII scan."
+            "Override export refusal for unwired pause kinds (none among cold-path "
+            "today) and approval_* events. Does not bypass client-tool assertion "
+            "or ingest memory/PII scan."
         ),
     )
     args = p.parse_args()
-    if not args.message_id and not args.recording:
-        raise SystemExit("provide --message-id or --recording")
     asyncio.run(_main(args))
 
 

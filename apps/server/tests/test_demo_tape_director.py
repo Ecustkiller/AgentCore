@@ -10,6 +10,7 @@ import pytest
 from agentcore.demo_tape.chapters import build_chapters, snap_to_event_index
 from agentcore.demo_tape.pacing import sleep_ms_for_gap
 from agentcore.demo_tape.transport import PlaybackState, PlaybackTransport, TransportRegistry
+from agentcore.runtime.events import EventType
 
 
 def _ev(et: str, t_ms: int, **payload: object) -> dict:
@@ -279,7 +280,7 @@ async def test_player_lands_on_team_preview_without_auto_resolve(monkeypatch):
             "audit_drops": 0,
         }
 
-    monkeypatch.setattr(player_mod, "_pause_team_preview", fake_pause)
+    monkeypatch.setattr(player_mod, "_pause_durable", fake_pause)
 
     events = [
         {"type": "content_delta", "payload": {"delta": "开场"}, "t_ms": 0},
@@ -319,6 +320,178 @@ async def test_player_lands_on_team_preview_without_auto_resolve(monkeypatch):
     )
     assert result["finish_reason"] is FinishReason.PAUSED
     assert transport.state is PlaybackState.AWAITING_INTERACTION
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("required_type", "resolved_type"),
+    [
+        ("checkpoint_required", EventType.CHECKPOINT_RESOLVED),
+        ("plan_review_required", EventType.PLAN_REVIEW_RESOLVED),
+    ],
+)
+async def test_player_burst_auto_resolves_cold_path_pauses(
+    monkeypatch, required_type: str, resolved_type: EventType
+):
+    """Seek past checkpoint / plan_review emits required+resolved (same as team_preview)."""
+    from agentcore.demo_tape import player as player_mod
+    from agentcore.demo_tape.binding import TapeBinding
+    from agentcore.demo_tape.player import play_tape_events
+    from agentcore.demo_tape.transport import PlaybackTransport
+    from agentcore.runtime.events import EventSink, FinishReason
+    from agentcore.runtime.journal.writer import TurnJournalWriter
+
+    async def fake_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(player_mod.asyncio, "sleep", fake_sleep)
+
+    async def noop_flush(self):  # noqa: ANN001
+        return None
+
+    monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
+
+    payload: dict
+    if required_type == "checkpoint_required":
+        payload = {"checkpoint_id": "cp-src", "question": "继续？"}
+        required_et = EventType.CHECKPOINT_REQUIRED
+    else:
+        payload = {
+            "checkpoint_id": "pr-src",
+            "steps": [{"run_id": "r1"}],
+            "pending": [],
+        }
+        required_et = EventType.PLAN_REVIEW_REQUIRED
+
+    events = [
+        {"type": "content_delta", "payload": {"delta": "开场"}, "t_ms": 0},
+        {"type": required_type, "payload": payload, "t_ms": 100},
+        {"type": "content_delta", "payload": {"delta": "后续"}, "t_ms": 200},
+    ]
+    binding = TapeBinding(
+        conversation_id="c", tape_path=Path("unused.json"), speed=1.0, max_gap_ms=50
+    )
+    transport = PlaybackTransport(
+        conversation_id="c",
+        tape_path=Path("unused.json"),
+        speed=4.0,
+        max_gap_ms=50,
+        event_count=3,
+        duration_ms=200,
+    )
+    transport.arm_burst(2, auto_resolve=True)
+
+    sink = EventSink(conversation_id="c", message_id="m")
+    writer = TurnJournalWriter(turn_id="m", conversation_id="c", trace_id="t" * 32)
+    result = await play_tape_events(
+        sink=sink,
+        events=events,
+        start_index=0,
+        binding=binding,
+        message_id="m",
+        conversation_id="c",
+        user_id="u",
+        user_message="go",
+        folder_id=None,
+        journal_writer=writer,
+        transport=transport,
+    )
+    assert result["finish_reason"] is FinishReason.END_TURN
+    assert result["content"] == "开场后续"
+    types = [e.type for e in sink._history]
+    assert required_et in types
+    assert resolved_type in types
+    assert types.count(EventType.CONTENT_DELTA) == 2
+    assert transport.state is PlaybackState.FINISHED
+
+
+def test_has_pause_before_covers_all_wired_kinds():
+    from agentcore.demo_tape.director import _has_pause_before
+
+    events = [
+        {"type": "content_delta", "t_ms": 0},
+        {"type": "checkpoint_required", "t_ms": 10},
+        {"type": "content_delta", "t_ms": 20},
+        {"type": "plan_review_required", "t_ms": 30},
+        {"type": "team_preview_required", "t_ms": 40},
+        {"type": "approval_required", "t_ms": 50},
+    ]
+    assert _has_pause_before(events, 0, 2) is True
+    assert _has_pause_before(events, 2, 4) is True
+    assert _has_pause_before(events, 0, 1) is False
+    assert _has_pause_before(events, 4, 5) is True
+    assert _has_pause_before(events, 5, 6) is True
+
+
+@pytest.mark.asyncio
+async def test_player_burst_auto_resolves_approval(monkeypatch):
+    """Seek past approval_required emits required+resolved and continues (no hang)."""
+    from agentcore.demo_tape import player as player_mod
+    from agentcore.demo_tape.binding import TapeBinding
+    from agentcore.demo_tape.player import play_tape_events
+    from agentcore.demo_tape.transport import PlaybackTransport
+    from agentcore.runtime.events import EventSink, EventType, FinishReason
+    from agentcore.runtime.journal.writer import TurnJournalWriter
+
+    async def fake_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(player_mod.asyncio, "sleep", fake_sleep)
+
+    async def noop_flush(self):  # noqa: ANN001
+        return None
+
+    monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
+
+    events = [
+        {"type": "content_delta", "payload": {"delta": "开场"}, "t_ms": 0},
+        {
+            "type": "approval_required",
+            "payload": {
+                "approval_id": "ap-src",
+                "tool_call_id": "tc-src",
+                "tool_name": "file_write",
+                "arguments": {"path": "x"},
+            },
+            "t_ms": 100,
+        },
+        {"type": "content_delta", "payload": {"delta": "后续"}, "t_ms": 200},
+    ]
+    binding = TapeBinding(
+        conversation_id="c-ap", tape_path=Path("unused.json"), speed=1.0, max_gap_ms=50
+    )
+    transport = PlaybackTransport(
+        conversation_id="c-ap",
+        tape_path=Path("unused.json"),
+        speed=4.0,
+        max_gap_ms=50,
+        event_count=3,
+        duration_ms=200,
+    )
+    transport.arm_burst(2, auto_resolve=True)
+
+    sink = EventSink(conversation_id="c-ap", message_id="m")
+    writer = TurnJournalWriter(turn_id="m", conversation_id="c-ap", trace_id="t" * 32)
+    result = await play_tape_events(
+        sink=sink,
+        events=events,
+        start_index=0,
+        binding=binding,
+        message_id="m",
+        conversation_id="c-ap",
+        user_id="u",
+        user_message="go",
+        folder_id=None,
+        journal_writer=writer,
+        transport=transport,
+    )
+    assert result["finish_reason"] is FinishReason.END_TURN
+    assert result["content"] == "开场后续"
+    types = [e.type for e in sink._history]
+    assert EventType.APPROVAL_REQUIRED in types
+    assert EventType.APPROVAL_RESOLVED in types
+    assert types.count(EventType.CONTENT_DELTA) == 2
+    assert transport.state is PlaybackState.FINISHED
 
 
 def test_real_tape_chapters_lv_molihua():

@@ -25,7 +25,7 @@ describe("ModeratorIdentity", () => {
   });
 
   it("有 model 时附带厂商徽章", () => {
-    render(<ModeratorIdentity model="deepseek/deepseek-chat" />);
+    render(<ModeratorIdentity model="deepseek/deepseek-v4-flash" />);
     expect(screen.getByText("主持人")).toBeTruthy();
     expect(screen.getByText("DeepSeek")).toBeTruthy();
   });
@@ -41,11 +41,11 @@ describe("resolveModeratorModel", () => {
   it("收场后从 execution.runs 取 model", () => {
     const run = {
       id: "moderator",
-      model: "deepseek/deepseek-chat",
+      model: "deepseek/deepseek-v4-flash",
     } as unknown as RunNode;
     expect(
       resolveModeratorModel({ moderatorRunId: "moderator" }, { runs: [run] }),
-    ).toBe("deepseek/deepseek-chat");
+    ).toBe("deepseek/deepseek-v4-flash");
   });
 });
 
@@ -61,7 +61,7 @@ describe("OpeningNote 主持人入场", () => {
     render(
       <OpeningNote
         text="今天我们讨论方案 A。"
-        model="deepseek/deepseek-chat"
+        model="deepseek/deepseek-v4-flash"
       />,
     );
     expect(screen.getByText("DeepSeek")).toBeTruthy();
@@ -109,7 +109,7 @@ describe("CrossExamSection 质询报幕", () => {
         exchanges={[cx]}
         messageId="m1"
         sceneKey="m1:cx"
-        moderatorModel="deepseek/deepseek-chat"
+        moderatorModel="deepseek/deepseek-v4-flash"
       />,
     );
 

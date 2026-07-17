@@ -1,13 +1,10 @@
-/** 论点标题截断上限（展示层）。 */
-export const ARGUMENT_TITLE_MAX = 30;
-
 export interface SpeechArgument {
   id: string;
   title: string;
   body: string;
 }
 
-/** 截断为一行摘要：优先在句读处断开。 */
+/** 截断为一行摘要：优先在句读处断开（质询预览等；论点 title 路径勿用）。 */
 export function summarizeText(text: string, maxLen: number): string {
   const trimmed = text.trim().replace(/\s+/g, " ");
   if (!trimmed) return "";
@@ -25,7 +22,12 @@ export function summarizeText(text: string, maxLen: number): string {
   return `${slice}…`;
 }
 
-/** 从一段发言正文中提取论点标题（首句 / 冒号标签 / 首行）。 */
+/** 折叠空白，不截断。 */
+function normalizeTitle(text: string): string {
+  return text.trim().replace(/\s+/g, " ");
+}
+
+/** 从一段发言正文中提取论点标题（首句 / 冒号标签 / 首行）；完整文案入库。 */
 export function argumentTitle(body: string): string {
   const trimmed = body.trim();
   if (!trimmed) return "";
@@ -35,14 +37,14 @@ export function argumentTitle(body: string): string {
     const label = colonMatch[1].replace(/[：:]$/, "");
     const after = trimmed.slice(colonMatch[0].length);
     const clause = after.split(/[。；—–-]/)[0]?.trim();
-    if (clause) return summarizeText(`${label}：${clause}`, ARGUMENT_TITLE_MAX);
-    return summarizeText(label, ARGUMENT_TITLE_MAX);
+    if (clause) return normalizeTitle(`${label}：${clause}`);
+    return normalizeTitle(label);
   }
 
   const firstLine = trimmed.split("\n")[0] ?? "";
   const firstSentence =
     firstLine.split(/[。；]/)[0]?.trim() || firstLine.trim();
-  return summarizeText(firstSentence, ARGUMENT_TITLE_MAX);
+  return normalizeTitle(firstSentence);
 }
 
 const HEADER_SPLIT = /(?=^#{1,3}\s+)/m;
@@ -87,7 +89,7 @@ function titleFromHeaderBlock(block: string): { title: string; body: string } {
   const head = lines[0]?.replace(/^#{1,3}\s+/, "").trim() ?? "";
   const body = lines.slice(1).join("\n").trim() || head;
   return {
-    title: summarizeText(head, ARGUMENT_TITLE_MAX),
+    title: normalizeTitle(head),
     body: body || block,
   };
 }
@@ -114,9 +116,35 @@ function blockToArgument(block: string, i: number): SpeechArgument {
  * 把辩手发言拆成论点列表（展示层启发式）。
  * 新契约：后端 ``sides[].arguments`` 为权威；本函数仅缺结构化字段时回退。
  * 识别 markdown 标题、有序 / 无序列表、空行分段；单段则整段为一个论点。
+ * ``title`` 为完整标题（不在数据层截断）；折叠态由 CSS 截断展示。
  */
 export function parseSpeechArguments(text: string): SpeechArgument[] {
   const blocks = splitBlocks(text);
   if (blocks.length === 0) return [];
   return blocks.map((block, i) => blockToArgument(block, i));
+}
+
+/**
+ * 展示层标题重水合：结构化 ``arguments`` 权威保留 id/body，用成稿 ``output``
+ * 解析出的完整 title 按稳定 id（优先）或 index 盖回。
+ * 旧 journal / 磁带里 title 曾被截断；成稿仍含完整 ``###`` 标题时可修复大纲显示。
+ */
+export function rehydrateArgumentTitles(
+  structured: SpeechArgument[],
+  output: string,
+): SpeechArgument[] {
+  if (structured.length === 0) return structured;
+  const trimmed = output.trim();
+  if (!trimmed) return structured;
+
+  const parsed = parseSpeechArguments(trimmed);
+  if (parsed.length === 0) return structured;
+
+  const byId = new Map(parsed.map((a) => [a.id, a]));
+  return structured.map((arg, i) => {
+    const match = byId.get(arg.id) ?? parsed[i];
+    const fullTitle = match?.title?.trim();
+    if (!fullTitle || fullTitle === arg.title) return arg;
+    return { id: arg.id, title: fullTitle, body: arg.body };
+  });
 }

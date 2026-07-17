@@ -23,25 +23,25 @@ const JOBS = [
   {
     id: "04-r2-diamond-square",
     round: 2,
-    needles: ["菱形", "正方形"],
-    anyOf: false,
+    needles: ["偷换概念", "具体设计", "公共纹样", "四叶草"],
+    anyOf: true,
   },
   {
     id: "05-r3-logo-swap",
     round: 3,
-    needles: ["更换Logo", "换标", "诉讼期间"],
+    needles: ["惩罚性赔偿", "驳回后", "更近似", "故意"],
     anyOf: true,
   },
   {
     id: "05b-r4-logo-defense",
     round: 4,
-    needles: ["小程序", "客服头像"],
-    anyOf: false,
+    needles: ["贡献率", "举证责任", "量化"],
+    anyOf: true,
   },
   {
     id: "06-r5-burden",
-    round: 5,
-    needles: ["举证责任", "间接证据", "实际混淆"],
+    round: 4,
+    needles: ["贡献率", "举证责任", "合理信赖"],
     anyOf: true,
   },
 ];
@@ -115,14 +115,14 @@ async function main() {
     }
     await page.getByRole("button", { name: /^辩论室$/ }).click().catch(() => {});
 
-    // Wait until round-5 chapter chip exists (debate settled enough)
+    // Wait until round-4 chapter chip exists (debate settled enough; tape is 4 rounds)
     for (let i = 0; i < 180; i++) {
-      const r5 = page.getByRole("button", { name: "第5轮", exact: true });
-      if (await r5.isVisible().catch(() => false)) {
-        console.log("r5 chip visible at", i);
+      const r4 = page.getByRole("button", { name: "第4轮", exact: true });
+      if (await r4.isVisible().catch(() => false)) {
+        console.log("r4 chip visible at", i);
         break;
       }
-      if (i % 15 === 0) console.log("waiting r5 chip", i);
+      if (i % 15 === 0) console.log("waiting r4 chip", i);
       await page.waitForTimeout(1500);
     }
     await page.waitForTimeout(2000);

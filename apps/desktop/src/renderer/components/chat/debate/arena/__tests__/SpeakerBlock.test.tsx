@@ -165,3 +165,86 @@ describe("SpeakerBlock 展开全文", () => {
     expect(screen.queryByRole("button", { name: "收起" })).toBeNull();
   });
 });
+
+describe("SpeakerBlock 论点行标题", () => {
+  const LONG_TITLE =
+    "论点一：四叶花卉是公共元素，但LV的Monogram是独创作品";
+  const LONG_SPEECH = [
+    `### ${LONG_TITLE}`,
+    "正文说明公共元素与独创作品的界限。",
+  ].join("\n");
+
+  it("收起态 CSS truncate；展开后标题可换行显示全文", () => {
+    renderBlock(LONG_SPEECH);
+
+    const row = screen.getByRole("button", {
+      name: new RegExp(LONG_TITLE.slice(0, 8)),
+      expanded: false,
+    });
+    const titleSpan = row.querySelector("span.min-w-0");
+    expect(titleSpan?.textContent).toBe(LONG_TITLE);
+    expect(titleSpan?.className).toContain("truncate");
+    expect(titleSpan?.className).not.toContain("whitespace-normal");
+
+    fireEvent.click(row);
+
+    const openRow = screen.getByRole("button", {
+      name: new RegExp(LONG_TITLE.slice(0, 8)),
+      expanded: true,
+    });
+    const openSpan = openRow.querySelector("span.min-w-0");
+    expect(openSpan?.textContent).toBe(LONG_TITLE);
+    expect(openSpan?.className).toContain("whitespace-normal");
+    expect(openSpan?.className).not.toContain("truncate");
+  });
+
+  it("结构化 title 已截断时，用 output 重水合大纲完整标题", () => {
+    const full1 =
+      "论点一：四叶花卉是公共元素，但LV的Monogram是独创作品";
+    const full2 =
+      "论点二：LV四叶花图案经长期使用已获得“第二含义”";
+    const output = [
+      `### ${full1}`,
+      "正文甲。",
+      "",
+      `### ${full2}`,
+      "正文乙。",
+    ].join("\n");
+    const side = sideModel({
+      arguments: [
+        {
+          id: "a1",
+          title: "论点一：四叶花卉是公共元素，但LV的Monogram是…",
+          body: "落盘正文甲",
+        },
+        {
+          id: "a2",
+          title: "论点二：LV四叶花图案经长期使用已获得…",
+          body: "落盘正文乙",
+        },
+      ],
+    });
+    const execution = executionWith([
+      { id: "mod_r1_pro", outputChunks: [output] },
+    ]);
+    render(
+      <SpeakerBlock
+        side={side}
+        round={roundModel([side])}
+        execution={execution}
+        messageId="m1"
+        stage="立论"
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /独创作品/, expanded: false }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /第二含义/, expanded: false }),
+    ).toBeTruthy();
+    // 大纲按钮文案含完整标题，而非落盘截断态
+    expect(screen.queryByRole("button", { name: /Monogram是…$/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "展开全文" })).toBeTruthy();
+  });
+});

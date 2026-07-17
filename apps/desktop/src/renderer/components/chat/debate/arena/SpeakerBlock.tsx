@@ -16,6 +16,7 @@ import { speakerAnchorId } from "./anchors";
 import {
   type SpeechArgument,
   parseSpeechArguments,
+  rehydrateArgumentTitles,
 } from "./parseSpeechArguments";
 import { speechPlaceholder } from "./speechPlaceholder";
 import { speechStageLabel } from "./stageLabel";
@@ -76,10 +77,14 @@ export function SpeakerBlock({
     false,
   );
   // 新契约：后端 ``sides[].arguments`` 权威；缺省 / 空 → 旧 journal 启发式回退。
+  // 有成稿 output 时按解析结果重水合 title（修复旧截断磁带），id/body 仍用结构化载荷。
   const structured = side.arguments;
   const arguments_: SpeechArgument[] =
     !streaming && structured && structured.length > 0
-      ? structured.map((a) => ({ id: a.id, title: a.title, body: a.body }))
+      ? rehydrateArgumentTitles(
+          structured.map((a) => ({ id: a.id, title: a.title, body: a.body })),
+          output,
+        )
       : !streaming && output
         ? parseSpeechArguments(output)
         : [];
@@ -244,7 +249,11 @@ function ArgumentRow({
             className="mt-0.5 shrink-0 text-muted-foreground"
           />
         )}
-        <span className="min-w-0 flex-1 text-sm leading-snug text-foreground">
+        <span
+          className={`min-w-0 flex-1 text-sm leading-snug text-foreground ${
+            open ? "whitespace-normal break-words" : "truncate"
+          }`}
+        >
           {argument.title}
         </span>
       </button>

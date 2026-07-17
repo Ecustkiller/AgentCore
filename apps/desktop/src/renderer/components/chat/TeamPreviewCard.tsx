@@ -1,5 +1,10 @@
 import { shouldHostPreviewInGraph } from "@/components/chat/debatePreviewPlacement";
-import { DecisionCard, DecisionCardIcon } from "@/components/ui";
+import { Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { useConversations } from "@/hooks/useConversations";
 import { PERMISSION_PRESET_LABELS } from "@/services/permissionPreset";
 import type { TeamPreviewDisplay } from "@/stores/conversation";
@@ -31,7 +36,7 @@ import type { ReactNode } from "react";
  * Branches on ``primitive``: delegate = 队员分工表; debate = 辩题 / 立场 / 轮次预算.
  *
  * Resolved + team already started: content hosts in {@link GraphTeamPreview}
- * inside InlineTeamGraph (see {@link shouldHostPreviewInGraph}); this card
+ * on the inline StatusStrip (see {@link shouldHostPreviewInGraph}); this card
  * returns null so the timeline does not keep a spare card slot.
  */
 export function TeamPreviewCard({
@@ -184,56 +189,44 @@ function graphPreviewSummary(preview: TeamPreviewDisplay): string {
 }
 
 /**
- * Light collapsible block for InlineTeamGraph header — no DecisionCard shell.
- * Debate → 辩题 / DebateBody; delegate → 分工 / WorkerRows. Default collapsed;
- * expand reveals body + resolved note.
+ * Secondary ghost control for StatusStrip — Popover hosts 辩题 / 分工 details
+ * (DebateBody / WorkerRows + optional note). No DecisionCard shell; does not
+ * navigate to the debate room. Mounted only on the inline StatusStrip path.
  */
 export function GraphTeamPreview({
   preview,
 }: {
   preview: TeamPreviewDisplay;
 }) {
-  const [open, setOpen] = usePersistentDisclosure(
-    `team-preview-graph:${preview.id}`,
-    false,
-  );
   const summary = graphPreviewSummary(preview);
 
   return (
-    <div
-      className="border-t border-border px-4 py-2"
-      data-testid="graph-team-preview"
-    >
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-1.5 text-left"
-      >
-        <span className="min-w-0 flex-1 text-xs font-medium text-muted-foreground">
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          className="ml-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+          data-testid="graph-team-preview"
+        >
           {summary}
-        </span>
-        {open ? (
-          <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        className="w-80 p-3 [&>*:first-child]:mt-0"
+      >
+        {isDebate(preview) ? (
+          <DebateBody preview={preview} />
         ) : (
-          <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
+          <WorkerRows preview={preview} />
         )}
-      </button>
-      {open && (
-        <>
-          {isDebate(preview) ? (
-            <DebateBody preview={preview} />
-          ) : (
-            <WorkerRows preview={preview} />
-          )}
-          {preview.note && (
-            <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-muted/50 px-2.5 py-1.5 text-xs text-foreground">
-              {preview.note}
-            </p>
-          )}
-        </>
-      )}
-    </div>
+        {preview.note && (
+          <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-muted/50 px-2.5 py-1.5 text-xs text-foreground">
+            {preview.note}
+          </p>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 

@@ -33,6 +33,19 @@ def main() -> None:
         settings.demo_tape_record_enabled or settings.demo_tape_replay_enabled
     )
     reload = settings.debug and not demo_tape_busy
+    if demo_tape_busy and settings.debug:
+        reasons: list[str] = []
+        if settings.demo_tape_record_enabled:
+            reasons.append("DEMO_TAPE_RECORD_ENABLED")
+        if settings.demo_tape_replay_enabled:
+            reasons.append("DEMO_TAPE_REPLAY_ENABLED")
+        print(
+            "WatchFiles reload disabled ("
+            + " + ".join(reasons)
+            + "): long demo-tape SSE would be killed by "
+            "timeout_graceful_shutdown=2. Restart the backend after code changes.",
+            flush=True,
+        )
 
     uvicorn.run(
         "agentcore.main:app",

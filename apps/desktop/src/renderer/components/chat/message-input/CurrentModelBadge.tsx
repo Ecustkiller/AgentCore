@@ -11,7 +11,7 @@ import { useNavigate } from "react-router-dom";
  * Shows the model **this conversation's last turn actually ran on** when known — the
  * local (sidecar) turn result reports its real model ({@link useTurnModelStore}), which
  * is the ONLY place a turn can diverge from the account config: a dev fallback runs on
- * the local platform model (e.g. gpt-4o) instead of the account model (e.g. deepseek-…).
+ * the local platform model (e.g. deepseek-v4-flash) instead of the account model (e.g. deepseek-v4-pro).
  * With no per-turn signal yet (a fresh conversation, or a cloud conversation — cloud
  * always uses the account model, so the config label is already correct) it falls back
  * to the account config (`default_model` from `GET /v1/users/me/llm-key`).

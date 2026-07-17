@@ -6,12 +6,12 @@
 
 | 项 | 值 |
 |---|---|
-| conversation_id | `5d8bee05-d37f-4ddf-bfb1-4d6665a3d7db` |
-| message_id | `714e38da-f5c8-4c75-b676-4a771e813462` |
-| trace_id | `7174a9ad9fef45afaf81817143e132ea` |
+| conversation_id | `c63a1188-20ac-48d4-9c0a-9ede68bc17f3` |
+| message_id | `69262466-c868-4f53-a6a2-6d626c5c0c19` |
+| trace_id | `c01f5fc0dcdd4ac7a320e3928347f865` |
 
-- 完整可回放事实在**云 Postgres `turn_journal`**（1054 行，覆盖 CEO 接单 → 检索/案情简介 → `team_preview` → 5 轮辩论 → 结辩/裁决 → CEO 汇总）。
-- 日志尾部有 `chat.local_turn_recorded`（本机 sidecar 跑完后 Outbox 回写），但 journal 已合并进云库，**不必再读本地 outbox**。
+- 磁带源 = 直播流录制导出（`demos/recordings/<message_id>.json` → `demo_tape_export.py`）；约 4.7 万事件、时长约 15.3 分钟，覆盖 CEO 接单 → 检索/案情简介 → `team_preview` → **4 轮**辩论收敛 → 结辩/决策简报 → CEO 汇总。
+- 辩题：一审判决认定侵权成立并判赔 1030 万元是否合理；终局倾向 **支持一审判决方向（约 70%）**，并把惩罚性赔偿 / 跨类使用等价值判断留给用户。
 
 ## 桌面端主路径：准备模式（录屏推荐）
 
@@ -55,9 +55,9 @@ pnpm dev
 1. **Ctrl/Cmd+K** 打开命令面板。
 2. 搜「演示回放」或磁带标题（如「茉莉」）→ 选 **「演示回放 · …」**（hint：开发 · 准备）。
 3. 桌面新建**云端**空会话并绑定磁带，**不**自动开回合；建议开场词已复制到剪贴板。
-4. 在输入框粘贴/照磁带原话打字，发送任意消息 → 磁带接管推流。
+4. 在输入框粘贴/照磁带原话打字，发送任意消息 → 磁带接管推流（多幕盘播**当前幕**；该幕结束后再发下一条消息推进下一幕）。
 5. 看到 **开工卡 / team_preview** 时，在真实 UI 点「授权开赛」。
-6. 辩论按磁带节奏推流；协作图在授权后出现。结束后 CEO 汇总落库。切走再切回侧栏详情应正常。
+6. 辩论按磁带节奏推流；协作图在授权后出现。结束后 CEO 汇总落库。切走再切回侧栏详情应正常。多幕盘：末幕播完自动解绑；命令面板仍只有「准备 / 立即开播」两条（列表暴露幕数与首幕开场词）。
 
 开关关闭或后端未开回放时，该命令**不会出现**（`GET /v1/demo-tape` → 404）。
 
@@ -105,7 +105,7 @@ uv run python scripts/demo_tape_bind.py --latest \
 
 3. 在该会话再发一条任意消息（内容会被忽略，磁带接管）。
 
-`--latest` 默认只挑云端会话；强绑本地加 `--include-local`（桌面通常回放不到）。
+`--latest` 默认只挑云端会话。绑定本地会话默认**拒绝**；强绑需显式 `--include-local`（桌面通常回放不到；`DEMO_TAPE_REPLAY_ENABLED` 开启时 sidecar 也会对已绑定会话直接报错，不再静默降级成普通 AI）。
 
 ---
 
@@ -114,6 +114,15 @@ uv run python scripts/demo_tape_bind.py --latest \
 磁带源 = **直播流录制**（不再从 journal 反推）。两步：
 
 1. **录制**：`apps/server/.env` 加 `DEMO_TAPE_RECORD_ENABLED=true` 并重启后端（sidecar 子进程读同一 `.env`，桌面需重启或重拉 sidecar 才生效）。之后每个真实回合的 SSE 流被原样录下（send / resume 各一段；真实节奏、含 EPHEMERAL 打字与心跳事件；可能含真实对话内容）——**云端**落 `demos/recordings/<assistant message_id>.json`（gitignored）；**sidecar 本地回合**落 `<userData>/sidecar/recordings/`（与 paused/outbox 邻居，打包用户不写仓库）。跑一次满意的真实回合即得素材。
+
+   原片按 `message_id` 命名，列表/检索：
+
+```bash
+cd apps/server
+uv run python scripts/demo_tape_recordings.py
+uv run python scripts/demo_tape_recordings.py --query <conversation_id或关键词>
+```
+
 2. **导出**：
 
 ```bash
@@ -122,13 +131,20 @@ uv run python scripts/demo_tape_export.py \
   --message-id <assistant message id> \
   --title "我的演示" \
   --out ../../demos/tapes/my-demo.json
+
+# 多幕剧本：按播放顺序重复 --message-id（或 --recording）；每幕独立剪辑+门禁
+uv run python scripts/demo_tape_export.py \
+  --message-id <act1-id> \
+  --message-id <act2-id> \
+  --title "多幕演示" \
+  --out ../../demos/tapes/my-multi.json
 ```
 
-导出即剪辑 + 门禁：按 `TAPE_EXCLUDED_KINDS` 剪掉回合生命周期（message_start/end）、录到的暂停结算（`*_resolved`，回放时现场重发）、回合元信息（turn_saved/标题/citations）与客户端工具请求（workspace/board/desktop notify——回放不得触发真实副作用），其余逐字节保留；随后跑入库脱敏双防线（剥 `run_context` system 内用户长期记忆 `<rules>` → 合成占位，保留块结构；再扫描记忆标记 / system 体内邮箱·手机，命中即拒绝——与 conformance `recording_cut` 共用 `demo_tape/sanitize.py`）。导出期另拒：未接线 pause（`checkpoint_required` / `plan_review_required`）与 `approval_*`（「磁带播不好」前移到导出；`--force` 可越过这两类，**不能**越过客户端工具断言与脱敏扫描）。成品磁带断言不得含四类 `*_op_required` / `desktop_notify_required`（剪辑表之上的验证层）。**「下一步」followups 例外**：从录制的 `followups_generated` 提取进 `meta.followups`（事件本身仍剪），回放到回合结束由 `persist_turn_result` 用**当前回合 message_id** 重发并落库（survive reload）；录制源缺失时可用 `--followups` 手填。`--user-prompt` 可覆盖 DB 查询（异机导出用）。磁带放仓库根 `demos/tapes/*.json`；命令面板按文件名 stem 列出。
+导出即剪辑 + 门禁：按 `TAPE_EXCLUDED_KINDS` 剪掉回合生命周期（message_start/end）、录到的暂停结算（冷路 `*_resolved` + 热路 `approval_resolved`，回放时现场重发）、回合元信息（turn_saved/标题/citations）与客户端工具请求（workspace/board/desktop notify——回放不得触发真实副作用），其余逐字节保留；随后跑入库脱敏双防线（剥 `run_context` system 内用户长期记忆 `<rules>` → 合成占位，保留块结构；再扫描记忆标记 / system 体内邮箱·手机，命中即拒绝——与 conformance `recording_cut` 共用 `demo_tape/sanitize.py`）。导出期另拒：未接线 pause（当前无——冷路 `team_preview` / `checkpoint` / `plan_review` 与热路 `approval_*` 均已接线；`--force` 可越过未接线类，**不能**越过客户端工具断言与脱敏扫描）。成品磁带断言不得含四类 `*_op_required` / `desktop_notify_required`（剪辑表之上的验证层）。**「下一步」followups 例外**：从录制的 `followups_generated` 提取进 `meta.followups`（事件本身仍剪），回放到回合结束由 `persist_turn_result` 用**当前回合 message_id** 重发并落库（survive reload）；录制源缺失时可用 `--followups` 手填。`--user-prompt` 可覆盖 DB 查询（异机导出用）。磁带放仓库根 `demos/tapes/*.json`；命令面板按文件名 stem 列出。
 
 ## 导演控制台（第二屏 · OBS 录屏用）
 
-回放开关打开时，后端另提供一个**不上镜、零美化**的本地控件页，像播放器一样遥控正在注入的磁带（暂停 / 0.5–8× 倍速 / 章节跳 / 时间轴 seek）。控制通道长在服务端 player 的注入节拍器上，**产品前端一行不改**。
+回放开关打开时，后端另提供一个**不上镜的浅色控制室**页（OBS 第二屏遥控台），像播放器一样遥控正在注入的磁带（暂停 / 0.5–8× 倍速 / 章节跳 / 时间轴 seek）。控制通道长在服务端 player 的注入节拍器上，**产品前端一行不改**。回放模式下 uvicorn WatchFiles 关闭，控制室页会按 `director_page.py` 的 mtime 热读并自动刷新标签页，改 UI 无需重启后端。
 
 ### 启动
 
@@ -156,7 +172,7 @@ http://localhost:8000/v1/demo-tape/director
 | `POST` | `/v1/demo-tape/director/{cid}/speed` | body `{ "speed": 0.5..8 }`，瞬时生效 |
 | `POST` | `/v1/demo-tape/director/{cid}/seek` | body `{ "t_ms" }` 或 `{ "event_index" }` 或 `{ "chapter_id" }` |
 
-Seek 语义：目标点之前的事件去延时爆发注入；向后 seek = 重启式倒带。跨过 `team_preview` 等真交互点时自动代确认；落点在交互点上则停在该卡（不代点）。进度条 `t_ms` 吸附最近事件边界。
+Seek 语义：目标点之前的事件去延时爆发注入；向后 seek = 重启式倒带。跨过 `team_preview` / `checkpoint` / `plan_review` / `approval_*` 等真交互点时自动代确认；落点在交互点上则停在该卡（不代点）。进度条 `t_ms` 吸附最近事件边界。
 
 ### 章节表生成规则
 
@@ -182,17 +198,17 @@ Seek 语义：目标点之前的事件去延时爆发注入；向后 seek = 重�
 
 ## 倍速实操备忘
 
-- 原速 = `SPEED=1` + `MAX_GAP_MS` 抬到碰不着（如 `600000`）。本盘磁带回放总时长约 19.7 分钟，**真实最大间隔约 45 秒**（辩手 LLM 深度思考）——原速下的长静默是真实节奏，不是卡死。判断卡死的标准：发消息后 **3 秒内**连首批搜索活动都不出现。
+- 原速 = `SPEED=1` + `MAX_GAP_MS` 抬到碰不着（如 `600000`）。本盘磁带回放总时长约 **15.3 分钟**，辩手深度思考时仍可能出现数十秒级静默——原速下的长静默是真实节奏，不是卡死。判断卡死的标准：发消息后 **3 秒内**连首批搜索活动都不出现。
 - 录屏想压掉极端长等待：`MAX_GAP_MS=10000~15000`，其余节奏仍为真实。
 - `DEMO_TAPE_RECORD_ENABLED` / `DEMO_TAPE_REPLAY_ENABLED` 开启时 `__main__.py` **自动关 WatchFiles**：原速 SSE 可达十几分钟，热重载的 `timeout_graceful_shutdown=2` 会硬杀 worker（桌面表现为「无法连接后端」、无 Traceback）。改代码后需手动重启后端。
 
 ## 设计决策（为什么长这样）
 
 - **服务端磁带回放，而非前端注入**：重开会话/切页靠 REST 消息窗 + journal 水合，纯前端灌事件在用户切页时必穿帮；服务端回放落真实 DB 记录，一切页面行为天然成立。被否方案②：ScriptedProvider 重跑真实引擎——无 LLM 延迟导致节奏失真、prompt 漂移会对不上、工具副作用重复执行。
-- **磁带源 = 直播流录制（EventSink dev tap），journal 反推层已退役（2026-07）**：`DEMO_TAPE_RECORD_ENABLED` 下 `demo_tape/recorder.py` 在 `runtime/events/sink.py` 的 emit tap 上把每个回合**实际发出的 SSE 流**原样录下——真实节奏 + journal 从不存的 EPHEMERAL 直播感（打字 delta、`tool_progress` 委派心跳、工具相位）天然在录制里；导出（`export.py: build_tape_from_recording`）按 `TAPE_EXCLUDED_KINDS` 剪辑，再跑脱敏/扫描/导出门禁（见上），**不做节奏或正文合成**。曾经的 journal 反推启发式层（时间窗铺满、worker 流式重建、委派心跳合成、正文/思考锚定切分，约 1100 行）连同其全部「已修勿回退」条目一并退役——录制流天然满足那些不变量。**事件字段与线上 SSE 契约对齐**（`type`/`timestamp` + pacing 超集 `t_ms`；格式版本 2）；存量 v1 磁带（`kind`/`ts`，如 `lv-molihua-trademark`）读时别名兼容、**不做格式迁移**（内容治理脱敏可就地改 body）。被否方案：继续修 journal 反推——补丁史（同层 6+ 处已修勿回退、坏过两次的铺窗）证明该缝会持续出补丁。
+- **磁带源 = 直播流录制（EventSink dev tap），journal 反推层已退役（2026-07）**：`DEMO_TAPE_RECORD_ENABLED` 下 `demo_tape/recorder.py` 在 `runtime/events/sink.py` 的 emit tap 上把每个回合**实际发出的 SSE 流**原样录下——真实节奏 + journal 从不存的 EPHEMERAL 直播感（打字 delta、`tool_progress` 委派心跳、工具相位）天然在录制里；导出（`export.py: build_tape_from_recording`）按 `TAPE_EXCLUDED_KINDS` 剪辑，再跑脱敏/扫描/导出门禁（见上），**不做节奏或正文合成**。曾经的 journal 反推启发式层（时间窗铺满、worker 流式重建、委派心跳合成、正文/思考锚定切分，约 1100 行）连同其全部「已修勿回退」条目一并退役——录制流天然满足那些不变量。**事件字段与线上 SSE 契约对齐**（`type`/`timestamp` + pacing 超集 `t_ms`；格式版本 2）；存量 v1 磁带（`kind`/`ts`）读时别名兼容、**不做格式迁移**（内容治理脱敏可就地改 body）。被否方案：继续修 journal 反推——补丁史（同层 6+ 处已修勿回退、坏过两次的铺窗）证明该缝会持续出补丁。
 - **回放身份 ≠ 录制身份（已修勿回退）**：磁带忠实保留录制时的 id，但桌面 InteractionStore 以 interaction id 为**跨会话全局键**（resolved 墓碑不复活、pending 首见保留），`pausedTurns.removeByCheckpoint` 也按裸 id 匹配——复用录制 checkpoint_id 时，同一桌面进程内**第二次回放**的 `team_preview_required` 被静默吞掉（历史事故：简介说完永久卡住、开工卡/协作图不出现、只等来「记忆已更新」卡）。修法：player 回放前按 `(本回合 message_id, 录制 id)` 确定性重铸**全部交互 id**（`demo_tape/identity.py`；send/resume 两段一致）。`run_id`/`execution_id`/`tool_call_id` 有意保持录制原值——各端按 message 域隔离、且字符串携带辩论结构（`debate_<exec>_r1_<side>`），重铸零收益反破坏投影。验收：`test_replaying_same_tape_twice_remints_distinct_checkpoints` + `test_real_tape_double_replay_mints_distinct_checkpoints`。
 - **「下一步」followups 保真回放（走 meta，非事件流）**：followups 是 `message_end` 之后的 post-turn tail、落库在 `Message.followups`（**survive reload**，与 citations 不同）。若像普通事件那样留在磁带事件流回放，会带**录制时的旧 message_id** → 前端 `attachFollowups` 按 message_id 匹配落空、chips 不显示。故 followups 不进事件流：export 从录制的 `followups_generated` 提取进 `meta.followups`（`recorder.py` 为此在 terminal `message_end` flush+pop 后仍接住 post-turn tail 再 flush；录制源缺失时 `--followups` 手填），player 在 END_TURN 把 `meta.followups` 挂到 result，由 `persist_turn_result` 用**当前回合 message_id** 落库 + 重发 `followups_generated`。被否方案：磁带回放照走 `mint_followups`——需真实 LLM（破坏离线/零 token）、demo 环境无凭据则光秃秃、有凭据则每次生成随机几条而非录制那几条。验收：`demo_tape_fidelity_check.py` 的 `replay_followups_match_meta`。
-- **暂停即真实检查点**：磁带遇 `team_preview` 真暂停、等用户在 UI 点继续——演示中人类拍板环节由录屏者掌控。挂起等待期间记忆 sweeper 会跳过该会话（`memory/consolidation.py` open-turn deferral，产品级修复）——不再出现「等授权时先弹记忆已更新卡」。
+- **暂停即真实检查点**：磁带遇 `team_preview` / `checkpoint`（ask_user）/ `plan_review` 走冷路真暂停（落帧 + `POST …/resume`）；遇 `approval_*` 走热路真挂起（登记 `InteractionRegistry`、回合保持 running、`POST …/interactions/{id}` 热 resolve 后续播）——演示中人类拍板环节由录屏者掌控。挂起等待期间记忆 sweeper 会跳过该会话（`memory/consolidation.py` open-turn deferral，产品级修复）——不再出现「等授权时先弹记忆已更新卡」。冷路 `selected` / `adjust` 与热路 APPROVE/DENY/ALWAYS 均不改写后续磁带事件流（只记日志）；`stop` 走既有停止/salvage 路径并清理等待中的热路登记。
 - **节奏坑（已修勿回退）**：磁带 `t_ms` 必须单调（`build_tape_from_recording` 对墙钟抖动做单调夹紧）；player 的 pacing 时钟不可回拨（曾在原速下表现为「正在思考」长卡死，4 倍速+2s 限幅时被掩盖）。
 - **player 跳过不可发射事件再计步（已修勿回退）**：`turn_paused` 等非 SSE 事实必须在 pacing 计算**之前**跳过，否则它们推进节奏时钟——曾表现为点「授权开赛」后 11 秒静默（resume 首拍应即时发出）。
 - **回放中断收口**：tape 分支与真实管线同样走 `CancelledError` salvage（`turn_runner.py`）——断流/停服不再留 `status=running` 僵尸行。
@@ -201,14 +217,29 @@ Seek 语义：目标点之前的事件去延时爆发注入；向后 seek = 重�
 
 ## 复用到新场景
 
-开 `DEMO_TAPE_RECORD_ENABLED=true` 跑任何满意的真实回合 → 云端落 `demos/recordings/`、sidecar 本地落 `<userData>/sidecar/recordings/` → `demo_tape_export.py --message-id <id> --title … --out ../../demos/tapes/<新名字>.json`（sidecar 录制加 `--recording <绝对路径>`）→ 命令面板自动多出该磁带的准备/立即两条入口。查 message_id：`uv run python scripts/log_timeline.py <conversation_id>`（或直接看 recordings 目录文件名）。
+开 `DEMO_TAPE_RECORD_ENABLED=true` 跑任何满意的真实回合 → 云端落 `demos/recordings/`、sidecar 本地落 `<userData>/sidecar/recordings/` → `demo_tape_recordings.py` 定位原片 → `demo_tape_export.py --message-id <id> --title … --out ../../demos/tapes/<新名字>.json`（sidecar 录制加 `--recording <绝对路径>`）→ 命令面板自动多出该磁带的准备/立即两条入口。也可：`uv run python scripts/log_timeline.py <conversation_id>`。
+
+Promo 截图脚本（默认仍是茉莉花盘；新盘可直接换 tape）：
+
+```bash
+# 默认 = lv-molihua-trademark → apps/promo/assets/lv-molihua/
+node apps/desktop/scripts/promo_capture_lv_molihua.mjs
+node apps/desktop/scripts/promo_capture_lv_molihua_director.mjs
+
+# 新盘（输出默认 apps/promo/assets/<tape-id>/；可用 --out 覆盖）
+node apps/desktop/scripts/promo_capture_lv_molihua.mjs --tape <新磁带stem>
+node apps/desktop/scripts/promo_capture_lv_molihua_director.mjs --tape <新磁带stem> --out apps/promo/assets/my-demo
+```
+
+也可用环境变量 `PROMO_TAPE` / `PROMO_OUT`。SHOT_MARKERS 仍偏茉莉花辩题文案——题材相近可复用，差异大时需改脚本内正则。
 
 ## 边界
 
 - **不改** SSE / 协议契约、**不动**产品默认 UI（仅命令面板在开关开启时多准备/立即两条入口）。录制 tap 是纯观测缝（`sink.emit` 处理完后调用、异常只记警告不进回合），默认关闭。
 - `demos/recordings/` 已 gitignore（原样录制、可能含真实对话内容）；入库素材只放剪辑后的 `demos/tapes/`。
 - 回放 `cost_runs=[]`，尽量不写成本账本。
-- 仅支持磁带中的 `team_preview` 暂停；`checkpoint` / `plan_review` / `approval_*` 未接线——**导出默认拒绝**（`--force` 逃生；真暂停扩面推迟）。
-- 一盘磁带 = 一个回合；多回合演示剧本需扩展（磁带分段、逐条消息续播）。
-- 桌面误绑本地会话 → 发消息走 sidecar，服务端绑定无效（表象：普通 AI 回复，无磁带节奏）——一键入口已避免此坑。
+- 磁带交互点均已接线：冷路 `team_preview` / `checkpoint`（ask_user）/ `plan_review`（落帧 + resume）；热路 `approval_*`（InteractionRegistry + 热 resolve，回合不收口）。决策均按录制内容续播，不分支。
+- 一盘磁带可含多幕（`turns[]`）：演示者逐条消息推进下一幕；`start` 只自动发第一幕；末幕播完自动解绑。存量单幕盘（顶层 `events`）读时归一为单幕，不改写文件。导出可按序传多个 `--message-id` / `--recording` 拼幕；单 id 用法与产物不变。导演台幕内 seek/章节照常，跨幕导航与 promo 多幕本期不做。
+- 桌面误绑本地会话 → 发消息走 sidecar，服务端绑定无效。防护：`demo_tape_bind.py` 默认拒绑本地；回放开关开启时 sidecar 对已绑定会话返回显式错误（日志 `demo_tape.sidecar_local_session_bound`）；一键「演示回放」入口本身只建云端会话。
+- `DEMO_TAPE_RECORD_ENABLED` / `DEMO_TAPE_REPLAY_ENABLED` 开启时启动日志会明示 **WatchFiles reload 已关闭**及原因；改代码后需手动重启后端。
 - 入库素材须过脱敏扫描（用户记忆不进 `demos/tapes/`）；不建工具替身层——将来全链路回放若短路有副作用工具，落点在 `execute_tools`（按 `tool_call_id` 用录制 I/O），见执行引擎 §二边界。

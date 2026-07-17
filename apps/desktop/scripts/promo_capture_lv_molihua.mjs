@@ -1,6 +1,6 @@
 /**
- * Capture opening-ready promo stills (+ optional short clips) from the
- * lv-molihua-trademark demo tape via real webapp + server replay.
+ * Capture opening-ready promo stills (+ optional short clips) from a demo tape
+ * via real webapp + server replay. Defaults keep the lv-molihua workflow unchanged.
  *
  * Prereq — backend with DEMO_TAPE_REPLAY_ENABLED (dedicated port recommended):
  *   cd apps/server
@@ -13,10 +13,15 @@
  *   $env:PROMO_API='http://localhost:8015'
  *   $env:VITE_API_URL='http://localhost:8015'
  *   node apps/desktop/scripts/promo_capture_lv_molihua.mjs
- *   # or: node scripts/promo_capture_lv_molihua.mjs  (thin launcher)
+ *   node apps/desktop/scripts/promo_capture_lv_molihua.mjs --tape <tape-id>
+ *   node apps/desktop/scripts/promo_capture_lv_molihua.mjs --tape <id> --out apps/promo/assets/<dir>
  *
- * Output → apps/promo/assets/lv-molihua/
+ * Env: PROMO_TAPE / PROMO_OUT (same meaning as --tape / --out).
+ * Default output → apps/promo/assets/lv-molihua/
  * Does NOT modify product source.
+ *
+ * Note: SHOT_MARKERS below are content-specific to the molihua debate; a similar
+ * single-turn tape can reuse the script, but marker regexes may need editing.
  */
 
 import { access, mkdir, rm, writeFile, copyFile, readFile } from "node:fs/promises";
@@ -29,18 +34,49 @@ import { spawnSync } from "node:child_process";
 const here = dirname(fileURLToPath(import.meta.url));
 const desktopDir = resolve(here, "..");
 const root = resolve(desktopDir, "../..");
-const outRoot = resolve(root, "apps/promo/assets/lv-molihua");
+const distWeb = resolve(desktopDir, "dist-web");
+
+const DEFAULT_TAPE = "lv-molihua-trademark";
+const DEFAULT_OUT_REL = "apps/promo/assets/lv-molihua";
+
+function parsePromoArgs(argv) {
+  const out = { help: false, tape: undefined, out: undefined };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--help" || a === "-h") out.help = true;
+    else if (a === "--tape") out.tape = argv[++i];
+    else if (a?.startsWith("--tape=")) out.tape = a.slice("--tape=".length);
+    else if (a === "--out") out.out = argv[++i];
+    else if (a?.startsWith("--out=")) out.out = a.slice("--out=".length);
+    else throw new Error(`Unknown arg: ${a} (use --tape / --out / --help)`);
+  }
+  return out;
+}
+
+const cli = parsePromoArgs(process.argv.slice(2));
+if (cli.help) {
+  console.log(`Usage: node promo_capture_lv_molihua.mjs [--tape <id>] [--out <rel-or-abs>]
+
+Defaults: --tape ${DEFAULT_TAPE}  --out ${DEFAULT_OUT_REL}
+Env aliases: PROMO_TAPE / PROMO_OUT / PROMO_API / PROMO_SPEED / …`);
+  process.exit(0);
+}
+
+const TAPE = cli.tape || process.env.PROMO_TAPE || DEFAULT_TAPE;
+const outRel =
+  cli.out ||
+  process.env.PROMO_OUT ||
+  (TAPE === DEFAULT_TAPE ? DEFAULT_OUT_REL : `apps/promo/assets/${TAPE}`);
+const outRoot = resolve(root, outRel);
 const stillsDir = resolve(outRoot, "stills");
 const clipsDir = resolve(outRoot, "clips");
 const sequencesDir = resolve(outRoot, "sequences");
 const videoTmpDir = resolve(outRoot, "_video_tmp");
-const distWeb = resolve(desktopDir, "dist-web");
 
 const USER = process.env.PROMO_USER ?? "promo_lv";
 const PASS = process.env.PROMO_PASS ?? "promopass";
 const API = (process.env.PROMO_API ?? "http://localhost:8015").replace(/\/$/, "");
 const PORT = Number(process.env.PROMO_PORT ?? 5174);
-const TAPE = process.env.PROMO_TAPE ?? "lv-molihua-trademark";
 const SPEED = Number(process.env.PROMO_SPEED ?? 12);
 const GAP = Number(process.env.PROMO_GAP ?? 800);
 const HEADED = process.env.PROMO_HEADED === "1";
@@ -53,7 +89,7 @@ const VIEWPORT = { width: 1920, height: 1080 };
 
 process.env.VITE_API_URL = API;
 
-const QUOTE = "对方在拿“菱形”论证“正方形”";
+const QUOTE = "不是四叶草不能用，而是用得太像";
 
 const OPENING_PROMPT =
   "搜索下最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论";
@@ -65,65 +101,68 @@ const SHOT_MARKERS = [
     label: "辩论开场：双方与辩题",
     match: (t, p) =>
       (!p.roundNo || Number(p.roundNo) === 1) &&
-      /正方/.test(t) &&
-      /反方/.test(t) &&
+      /正方|原告/.test(t) &&
+      /反方|被告/.test(t) &&
       /立论|辩题|四叶花卉|主持人/.test(t),
     preferDebateRoom: true,
-    tapeHint: "debate_round_started r1 @ t_ms≈52000 (post-authorize)",
+    tapeHint: "debate_round_started r1 @ t_ms≈37800 (post-authorize)",
   },
   {
     id: "04-r2-diamond-square",
-    label: "第2轮 LV「拿菱形论证正方形」",
+    label: "第2轮 LV「公共纹样 vs 具体设计」",
     match: (t, p) =>
-      Number(p.roundNo) >= 2 && /菱形/.test(t) && /正方形/.test(t),
+      Number(p.roundNo) >= 2 &&
+      (/偷换概念|具体设计|公共纹样|四叶草不能用|中心菱形/.test(t)),
     preferDebateRoom: true,
-    tapeHint: "r2_lv output @ t_ms≈432000",
+    tapeHint: "r2_lv / debate_round @ t_ms≈495918",
   },
   {
     id: "05-r3-logo-swap",
-    label: "第3轮 诉讼期换标攻防",
+    label: "第3轮 驳回后换更近似 Logo",
     match: (t, p) =>
       Number(p.roundNo) >= 3 &&
-      (/更换Logo/.test(t) || /换标/.test(t) || (/诉讼期间/.test(t) && /Logo|标识/.test(t))) &&
-      /混淆|恶意|门店/.test(t),
+      (/惩罚性赔偿|驳回后|更近似|故意|恶意/.test(t)) &&
+      (/Logo|换标|更换/.test(t) || /惩罚性/.test(t)),
     preferDebateRoom: true,
-    tapeHint: "r3_lv 论点二 @ t_ms≈657000",
+    tapeHint: "r3 focus 惩罚性赔偿 @ t_ms≈495918–714497",
   },
   {
     id: "05b-r4-logo-defense",
-    label: "第4轮 换标抗辩（小程序/客服头像）",
+    label: "第4轮 贡献率 / 举证责任",
     match: (t, p) =>
-      Number(p.roundNo) >= 4 && /小程序/.test(t) && /客服头像/.test(t),
+      Number(p.roundNo) >= 4 &&
+      (/贡献率|举证责任|量化证据|未提交任何量化/.test(t)),
     preferDebateRoom: true,
-    tapeHint: "r4_molij @ t_ms≈825000",
+    tapeHint: "r4 @ t_ms≈714497–878121",
   },
   {
     id: "06-r5-burden",
-    label: "第5轮 举证责任决胜",
+    label: "第4轮终局 · 贡献率举证决胜",
     match: (t, p) =>
-      Number(p.roundNo) >= 5 &&
-      (/举证责任|间接证据|实际混淆|定量调查/.test(t)),
+      Number(p.roundNo) >= 4 &&
+      (/贡献率|举证责任|量化|合理信赖/.test(t)),
     preferDebateRoom: true,
-    tapeHint: "r5 focus / molij @ t_ms≈1058000–1066000",
+    tapeHint: "r4 debate_round @ t_ms≈878121（本盘仅 4 轮）",
   },
   {
     id: "07-evidence-gap-admit",
-    label: "交叉质询：双方承认证据缺口",
-    match: (t) => /证据缺口/.test(t) || (/均承认/.test(t) && /缺口/.test(t)),
+    label: "交叉质询：承认证据/抗辩缺口",
+    match: (t) =>
+      /证据缺口/.test(t) ||
+      (/承认/.test(t) && /量化|贡献率|合理信赖/.test(t)),
     preferDebateRoom: true,
-    tapeHint: "debate_round r1 digest @ t_ms≈319000",
+    tapeHint: "r4 cross-exam admits @ t_ms≈878121",
   },
   {
     id: "08-final-verdict",
-    label: "最终裁决（倾向茉莉奶白 · 65%）",
+    label: "最终裁决（倾向支持一审 · 70%）",
     match: (t) =>
-      /倾向茉莉奶白/.test(t) &&
-      (/65\s*%|置信度\s*65|65%|置信度|置信\s*高|置信/.test(t)),
+      (/倾向支持一审|支持一审判决|倾向.*一审|LV 方胜出|倾向支持 LV/.test(t)) &&
+      (/70\s*%|置信度\s*70|70%|置信度|置信\s*高|置信/.test(t)),
     preferDebateRoom: true,
-    tapeHint: "debate_result @ t_ms≈1118000",
+    tapeHint: "debate_result @ t_ms≈907528",
   },
 ];
-
 const CLIP_MARKERS = [
   {
     id: "clip-streaming-debate",
@@ -216,15 +255,16 @@ async function probe(page) {
       reactFlowNodes: document.querySelectorAll(".react-flow__node").length,
       nodeText: nodeText.slice(0, 600),
       openDebate: /打开辩论室/.test(full),
-      verdict: /倾向茉莉奶白/.test(text) && /置信度|65\s*%|65%/.test(text),
+      verdict:
+        (/倾向支持一审|支持一审判决|LV 方胜出|倾向支持 LV/.test(text)) &&
+        /置信度|70\s*%|70%/.test(text),
       hasDevBadge: /\bDEV\b/.test(full.slice(0, 500)),
       hasQuote:
-        text.includes("对方在拿") &&
-        text.includes("菱形") &&
-        text.includes("正方形"),
+        text.includes("不是四叶草不能用") ||
+        (text.includes("四叶草") && text.includes("用得太像")),
       quoteContext:
-        text.match(/.{0,24}对方在拿.{0,40}/)?.[0] ??
-        text.match(/.{0,20}菱形.{0,30}正方形.{0,20}/)?.[0] ??
+        text.match(/.{0,24}不是四叶草不能用.{0,40}/)?.[0] ??
+        text.match(/.{0,20}四叶草.{0,30}用得太像.{0,20}/)?.[0] ??
         null,
       // UI often keeps「第1轮」chip visible; take the highest round mentioned.
       roundNo: (() => {
@@ -287,8 +327,9 @@ async function main() {
   const manifest = {
     generated_at: nowIso(),
     tape: TAPE,
-    tape_path: "demos/tapes/lv-molihua-trademark.json",
-    video_plan: "demos/video-plan-lv-molihua.md",
+    tape_path: `demos/tapes/${TAPE}.json`,
+    video_plan:
+      TAPE === DEFAULT_TAPE ? "demos/video-plan-lv-molihua.md" : null,
     method: USE_PROD
       ? "server demo-tape replay + Playwright production webapp (dist-web / vite preview) @ 1920×1080 — clean, no DEV badge"
       : "server demo-tape replay + Playwright vite.webapp DEV @ 1920×1080",
@@ -456,8 +497,22 @@ async function main() {
       waitUntil: "load",
       timeout: 30_000,
     });
+    // The grouped conversation list is fetched once at shell mount — before `prepare`
+    // created this cid — and a hash-only goto is a same-document nav that never
+    // re-fetches it, so this bound session is absent from the cache and ChatView
+    // falls back to the bottom composer. A full reload re-boots the app at this route,
+    // re-fetching the list (now carrying the 0-message tape conversation) so the opening
+    // shot renders the real product's centered welcome card (居中卡片), not the底栏.
+    await page.reload({ waitUntil: "load", timeout: 30_000 });
     await composer.waitFor({ state: "visible", timeout: 20_000 });
     await dismissOnboarding(page);
+    // Wait for the centered composer dock so 01-user-prompt is the welcome card, not
+    // the bottom bar (best-effort: falls back to whatever renders on timeout).
+    await page
+      .locator('[data-composer-dock="center"]')
+      .first()
+      .waitFor({ state: "visible", timeout: 8_000 })
+      .catch(() => {});
     await page.waitForTimeout(600);
 
     // 1) User typing opening prompt
@@ -602,7 +657,7 @@ async function main() {
           clean: true,
           matched_text:
             t.match(
-              /.{0,40}(?:菱形|正方形|换标|举证|证据缺口|倾向茉莉|辩题|置信度|小程序|客服头像).{0,40}/,
+              /.{0,40}(?:偷换概念|四叶草|换标|贡献率|举证|证据缺口|倾向支持一审|辩题|置信度|惩罚性).{0,40}/,
             )?.[0] ?? t.slice(0, 100),
           wall_ms: Date.now() - wall0,
         });
@@ -611,7 +666,9 @@ async function main() {
         if (
           m.id === "04-r2-diamond-square" &&
           !captured.has("04b-r2-quote-closeup") &&
-          (p.hasQuote || (/菱形/.test(t) && /正方形/.test(t) && /对方在拿/.test(t)))
+          (p.hasQuote ||
+            (/四叶草/.test(t) && /用得太像|不能用/.test(t)) ||
+            /偷换概念|具体设计/.test(t))
         ) {
           const qp = resolve(stillsDir, "04b-r2-quote-closeup.png");
           await shot(page, qp);
@@ -620,7 +677,7 @@ async function main() {
             file: "stills/04b-r2-quote-closeup.png",
             path: qp,
             label: "R2 金句定点特写",
-            usage: "交锋1 金句；须可见「对方在拿『菱形』论证『正方形』」",
+            usage: "交锋1 金句；须可见「不是四叶草不能用，而是用得太像」",
             clean: true,
             new: true,
             quote_required: QUOTE,
@@ -705,16 +762,16 @@ async function main() {
     // Final wrap still if verdict missed mid-stream but text present
     if (!captured.has("08-final-verdict")) {
       const p = await probe(page);
-      if (/倾向茉莉奶白/.test(p.text)) {
+      if (/倾向支持一审|支持一审判决|LV 方胜出|70\s*%/.test(p.text)) {
         const path = resolve(stillsDir, "08-final-verdict.png");
         await shot(page, path);
         markAsset({
           id: "08-final-verdict",
           file: "stills/08-final-verdict.png",
           path,
-          label: "最终裁决（倾向茉莉奶白）",
+          label: "最终裁决（倾向支持一审 · 70%）",
           shot: "第六幕 · 裁决出炉",
-          tape_hint: "debate_result @ t_ms≈1118000",
+          tape_hint: "debate_result @ t_ms≈907528",
           usage: "冷开场画面4 / 第六幕特写",
           matched_text: p.snippet.slice(0, 160),
         });
@@ -757,7 +814,7 @@ async function main() {
             id: "09b-collab-graph-final",
             file: "stills/09b-collab-graph-final.png",
             path,
-            label: "协作图终态全貌（五轮打完）",
+            label: "协作图终态全貌（四轮打完）",
             usage: "第七幕收尾",
             clean: true,
             new: true,
@@ -876,7 +933,7 @@ async function main() {
     "### 新增镜头",
     "",
     `- \`04b-r2-quote-closeup\` — R2 金句定点；目标文案：${QUOTE}`,
-    "- `09b-collab-graph-final` — 协作图终态全貌（五轮后），第七幕收尾",
+    "- `09b-collab-graph-final` — 协作图终态全貌（四轮后），第七幕收尾",
     "- `clip-streaming-debate-speed1` — 见导演台脚本另拍 / sequences（SPEED=1）",
     "",
     "## 短视频 / 序列",

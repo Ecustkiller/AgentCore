@@ -1,6 +1,8 @@
 /**
  * Fixup stills that need scroll-into-view: R2 quote close-up + final verdict.
  * Uses production webapp + live tape replay (same clean env as main capture).
+ *
+ * ``--tape`` / ``--out`` (or PROMO_TAPE / PROMO_OUT) mirror the main capture script.
  */
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -11,16 +13,39 @@ import { preview } from "vite";
 const here = dirname(fileURLToPath(import.meta.url));
 const desktopDir = resolve(here, "..");
 const root = resolve(desktopDir, "../..");
-const stillsDir = resolve(root, "apps/promo/assets/lv-molihua/stills");
-const outRoot = resolve(root, "apps/promo/assets/lv-molihua");
+const DEFAULT_TAPE = "lv-molihua-trademark";
+const DEFAULT_OUT_REL = "apps/promo/assets/lv-molihua";
+
+function parsePromoArgs(argv) {
+  const out = { tape: undefined, out: undefined };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--tape") out.tape = argv[++i];
+    else if (a?.startsWith("--tape=")) out.tape = a.slice("--tape=".length);
+    else if (a === "--out") out.out = argv[++i];
+    else if (a?.startsWith("--out=")) out.out = a.slice("--out=".length);
+    else if (a === "--help" || a === "-h") {
+      console.log("Usage: --tape <id> --out <rel-or-abs>");
+      process.exit(0);
+    } else throw new Error(`Unknown arg: ${a}`);
+  }
+  return out;
+}
+const cli = parsePromoArgs(process.argv.slice(2));
+const TAPE = cli.tape || process.env.PROMO_TAPE || DEFAULT_TAPE;
+const outRel =
+  cli.out ||
+  process.env.PROMO_OUT ||
+  (TAPE === DEFAULT_TAPE ? DEFAULT_OUT_REL : `apps/promo/assets/${TAPE}`);
+const outRoot = resolve(root, outRel);
+const stillsDir = resolve(outRoot, "stills");
 const API = (process.env.PROMO_API ?? "http://localhost:8015").replace(/\/$/, "");
 const PORT = Number(process.env.PROMO_PORT ?? 5174);
 const USER = process.env.PROMO_USER ?? "promo_lv";
 const PASS = process.env.PROMO_PASS ?? "promopass";
 const SPEED = Number(process.env.PROMO_SPEED ?? 16);
 const GAP = Number(process.env.PROMO_GAP ?? 500);
-const TAPE = "lv-molihua-trademark";
-const QUOTE = "对方在拿“菱形”论证“正方形”";
+const QUOTE = "不是四叶草不能用，而是用得太像";
 process.env.VITE_API_URL = API;
 
 async function dismissOnboarding(page) {
@@ -50,7 +75,11 @@ async function scrollQuoteIntoView(page) {
     const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walk.nextNode())) {
-      if (node.textContent && node.textContent.includes("对方在拿") && node.textContent.includes("菱形")) {
+      if (
+        node.textContent &&
+        (node.textContent.includes(quote) ||
+          (node.textContent.includes("四叶草") && node.textContent.includes("用得太像")))
+      ) {
         const el = node.parentElement;
         if (el) {
           el.scrollIntoView({ block: "center", inline: "nearest" });
@@ -58,11 +87,10 @@ async function scrollQuoteIntoView(page) {
         }
       }
     }
-    // fallback: any element containing both
     const all = [...document.querySelectorAll("p, li, div, span")];
     for (const el of all) {
       const t = el.innerText || "";
-      if (t.includes("对方在拿") && t.includes("菱形") && t.includes("正方形")) {
+      if (t.includes(quote) || (t.includes("四叶草") && t.includes("用得太像"))) {
         el.scrollIntoView({ block: "center" });
         return t.slice(0, 200);
       }
@@ -76,13 +104,16 @@ async function scrollVerdictIntoView(page) {
     const all = [...document.querySelectorAll("p, li, div, span, h1, h2, h3")];
     for (const el of all) {
       const t = el.innerText || "";
-      if (t.includes("倾向茉莉奶白") && (t.includes("置信") || t.includes("65"))) {
+      if (t.includes("倾向支持一审") || t.includes("支持一审判决") || (t.includes("70%") && t.includes("倾向"))) {
         el.scrollIntoView({ block: "center" });
         return t.slice(0, 200);
       }
     }
     for (const el of all) {
-      if ((el.innerText || "").includes("倾向茉莉奶白")) {
+      if (
+        (el.innerText || "").includes("倾向支持一审") ||
+        (el.innerText || "").includes("支持一审判决")
+      ) {
         el.scrollIntoView({ block: "center" });
         return el.innerText.slice(0, 200);
       }
@@ -174,7 +205,11 @@ async function main() {
       await ensureDebateRoom(page);
       const body = await page.evaluate(() => document.body.innerText.replace(/\s+/g, " "));
 
-      if (!quoteDone && body.includes("对方在拿") && body.includes("菱形") && body.includes("正方形")) {
+      if (
+        !quoteDone &&
+        (body.includes("不是四叶草不能用") ||
+          (body.includes("四叶草") && body.includes("用得太像")))
+      ) {
         const ctx = await scrollQuoteIntoView(page);
         await page.waitForTimeout(400);
         const path = resolve(stillsDir, "04b-r2-quote-closeup.png");
@@ -194,7 +229,7 @@ async function main() {
         console.log("SHOT 04b", ctx?.slice(0, 80));
       }
 
-      if (!verdictDone && /倾向茉莉奶白/.test(body) && /置信|65/.test(body)) {
+      if (!verdictDone && /倾向支持一审|支持一审判决|LV 方胜出/.test(body) && /置信|70/.test(body)) {
         // click 终审 chip if present
         const verdictChip = page.getByRole("button", { name: /终审|裁决/ });
         if (await verdictChip.first().isVisible().catch(() => false)) {

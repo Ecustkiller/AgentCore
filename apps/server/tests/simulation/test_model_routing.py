@@ -12,10 +12,10 @@ from agentcore.simulation.llm import (
 
 
 def test_router_upgrades_critical_for_known_base():
-    cfg = default_routing_config("deepseek-chat")
+    cfg = default_routing_config("deepseek-v4-flash")
     router = SimModelRouter(cfg)
-    assert router.resolve(SimModelTier.ROUTINE) == "deepseek-chat"
-    assert router.resolve(SimModelTier.CRITICAL) == "deepseek-reasoner"
+    assert router.resolve(SimModelTier.ROUTINE) == "deepseek-v4-flash"
+    assert router.resolve(SimModelTier.CRITICAL) == "deepseek-v4-pro"
 
 
 def test_router_aliases_critical_for_unknown_base():
@@ -44,14 +44,14 @@ def test_decision_kind_tiering_strategy():
 
 
 def test_model_for_decision_routes_via_strategy():
-    router = SimModelRouter(default_routing_config("deepseek-chat"))
-    assert router.model_for_decision(SimDecisionKind.ROUTINE_TICK) == "deepseek-chat"
-    assert router.model_for_decision(SimDecisionKind.INTERACTION) == "deepseek-reasoner"
-    assert router.model_for_decision(SimDecisionKind.REFLECTION) == "deepseek-reasoner"
+    router = SimModelRouter(default_routing_config("deepseek-v4-flash"))
+    assert router.model_for_decision(SimDecisionKind.ROUTINE_TICK) == "deepseek-v4-flash"
+    assert router.model_for_decision(SimDecisionKind.INTERACTION) == "deepseek-v4-pro"
+    assert router.model_for_decision(SimDecisionKind.REFLECTION) == "deepseek-v4-pro"
 
 
 def test_explain_decision_is_human_readable():
-    router = SimModelRouter(default_routing_config("deepseek-chat"))
+    router = SimModelRouter(default_routing_config("deepseek-v4-flash"))
     text = router.explain_decision(SimDecisionKind.INTERACTION)
     assert "critical" in text
-    assert "deepseek-reasoner" in text
+    assert "deepseek-v4-pro" in text

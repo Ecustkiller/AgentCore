@@ -24,13 +24,56 @@ class TapeInfo:
     user_prompt: str
     duration_ms: int | None
     event_count: int | None
+    turn_count: int = 1
 
 
 def tapes_dir() -> Path:
     return PROJECT_ROOT / "demos" / "tapes"
 
 
-def _read_meta(path: Path) -> dict[str, Any]:
+def _catalog_fields(data: dict[str, Any]) -> dict[str, Any]:
+    """Extract list-row fields from a raw tape document (no full normalize)."""
+    meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    turns = data.get("turns")
+    turn_count = 1
+    user_prompt = str(meta.get("user_prompt") or "").strip()
+    duration = meta.get("duration_ms")
+    event_count = meta.get("event_count")
+
+    if isinstance(turns, list) and turns:
+        turn_count = len(turns)
+        if not user_prompt:
+            first = turns[0] if isinstance(turns[0], dict) else {}
+            user_prompt = str(first.get("user_prompt") or "").strip()
+        if not isinstance(event_count, int):
+            total = 0
+            for t in turns:
+                if isinstance(t, dict) and isinstance(t.get("events"), list):
+                    total += len(t["events"])
+            event_count = total
+        if not isinstance(duration, int):
+            total_dur = 0
+            for t in turns:
+                if not isinstance(t, dict):
+                    continue
+                evs = t.get("events") or []
+                if isinstance(evs, list) and evs:
+                    last = evs[-1] if isinstance(evs[-1], dict) else {}
+                    total_dur += int(last.get("t_ms") or 0)
+            duration = total_dur
+    elif isinstance(meta.get("turn_count"), int) and meta["turn_count"] > 0:
+        turn_count = int(meta["turn_count"])
+
+    return {
+        "title": str(meta.get("title") or "").strip(),
+        "user_prompt": user_prompt,
+        "duration_ms": int(duration) if isinstance(duration, int) else None,
+        "event_count": int(event_count) if isinstance(event_count, int) else None,
+        "turn_count": turn_count,
+    }
+
+
+def _read_tape_summary(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
@@ -38,8 +81,7 @@ def _read_meta(path: Path) -> dict[str, Any]:
         return {}
     if not isinstance(data, dict):
         return {}
-    meta = data.get("meta")
-    return meta if isinstance(meta, dict) else {}
+    return _catalog_fields(data)
 
 
 def list_tapes() -> list[TapeInfo]:
@@ -51,12 +93,10 @@ def list_tapes() -> list[TapeInfo]:
     for path in sorted(root.glob("*.json")):
         if not path.is_file():
             continue
-        meta = _read_meta(path)
+        fields = _read_tape_summary(path)
         tape_id = path.stem
-        title = str(meta.get("title") or tape_id).strip() or tape_id
-        user_prompt = str(meta.get("user_prompt") or "").strip()
-        duration = meta.get("duration_ms")
-        event_count = meta.get("event_count")
+        title = fields.get("title") or tape_id
+        title = str(title).strip() or tape_id
         try:
             rel = path.resolve().relative_to(PROJECT_ROOT.resolve()).as_posix()
         except ValueError:
@@ -67,9 +107,10 @@ def list_tapes() -> list[TapeInfo]:
                 path=path,
                 repo_relative=rel,
                 title=title,
-                user_prompt=user_prompt,
-                duration_ms=int(duration) if isinstance(duration, int) else None,
-                event_count=int(event_count) if isinstance(event_count, int) else None,
+                user_prompt=str(fields.get("user_prompt") or ""),
+                duration_ms=fields.get("duration_ms"),
+                event_count=fields.get("event_count"),
+                turn_count=int(fields.get("turn_count") or 1),
             )
         )
     return out

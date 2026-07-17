@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   argumentTitle,
   parseSpeechArguments,
+  rehydrateArgumentTitles,
   summarizeText,
 } from "../parseSpeechArguments";
 
@@ -101,5 +102,93 @@ describe("parseSpeechArguments", () => {
     expect(args[0].body).not.toMatch(/^成本可控可回收/);
     expect(args[0].body).toContain("首年可降本");
     expect(args[1].body).toContain("熔断");
+  });
+
+  it("keeps full long ### titles (LV tape semantics; no data-layer ellipsis)", () => {
+    const t1 =
+      "论点一：四叶花卉是公共元素，但LV的Monogram是独创作品";
+    const t2 =
+      "论点二：LV四叶花图案经长期使用已获得“第二含义”";
+    const speech = [
+      `### ${t1}`,
+      "正文说明公共元素与独创作品的界限。",
+      "",
+      `### ${t2}`,
+      "正文说明第二含义的认定路径。",
+    ].join("\n");
+    const args = parseSpeechArguments(speech);
+    expect(args).toHaveLength(2);
+    expect(args[0].title).toBe(t1);
+    expect(args[1].title).toBe(t2);
+    expect(args[0].title.endsWith("…")).toBe(false);
+    expect(args[1].title.endsWith("…")).toBe(false);
+    expect(args[0].title.length).toBeGreaterThan(30);
+  });
+});
+
+describe("rehydrateArgumentTitles", () => {
+  const t1 = "论点一：四叶花卉是公共元素，但LV的Monogram是独创作品";
+  const t2 = "论点二：LV四叶花图案经长期使用已获得“第二含义”";
+  const output = [
+    `### ${t1}`,
+    "结构化 body 甲（应保留）。",
+    "",
+    `### ${t2}`,
+    "结构化 body 乙（应保留）。",
+  ].join("\n");
+
+  it("overlays full titles from output onto truncated structured args by index", () => {
+    const structured = [
+      {
+        id: "backend-a",
+        title: "论点一：四叶花卉是公共元素，但LV的Monogram是…",
+        body: "落盘 body 甲",
+      },
+      {
+        id: "backend-b",
+        title: "论点二：LV四叶花图案经长期使用已获得…",
+        body: "落盘 body 乙",
+      },
+    ];
+    const out = rehydrateArgumentTitles(structured, output);
+    expect(out).toHaveLength(2);
+    expect(out[0].id).toBe("backend-a");
+    expect(out[0].body).toBe("落盘 body 甲");
+    expect(out[0].title).toBe(t1);
+    expect(out[0].title).toContain("独创作品");
+    expect(out[1].id).toBe("backend-b");
+    expect(out[1].body).toBe("落盘 body 乙");
+    expect(out[1].title).toBe(t2);
+    expect(out[1].title).toContain("第二含义");
+  });
+
+  it("prefers stable id match when ids align with parseSpeechArguments", () => {
+    const structured = [
+      { id: "arg-1", title: "截断…", body: "body-1" },
+      { id: "arg-0", title: "另一截断…", body: "body-0" },
+    ];
+    const out = rehydrateArgumentTitles(structured, output);
+    // id 命中优先于 index：arg-0 → 第一段，arg-1 → 第二段
+    expect(out[0].title).toBe(t2);
+    expect(out[0].body).toBe("body-1");
+    expect(out[1].title).toBe(t1);
+    expect(out[1].body).toBe("body-0");
+  });
+
+  it("keeps structured titles when output is empty", () => {
+    const structured = [
+      { id: "a", title: "截断标题…", body: "body" },
+    ];
+    expect(rehydrateArgumentTitles(structured, "")).toEqual(structured);
+    expect(rehydrateArgumentTitles(structured, "   ")).toEqual(structured);
+  });
+
+  it("is a no-op when structured titles are already complete", () => {
+    const structured = [
+      { id: "a", title: t1, body: "body-a" },
+      { id: "b", title: t2, body: "body-b" },
+    ];
+    const out = rehydrateArgumentTitles(structured, output);
+    expect(out).toEqual(structured);
   });
 });

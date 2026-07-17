@@ -13,7 +13,9 @@ product surface is unchanged.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import time
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header
@@ -116,6 +118,7 @@ async def get_demo_tape_catalog(_user: AuthUser) -> DemoTapeCatalogResponse:
             user_prompt=t.user_prompt,
             duration_ms=t.duration_ms,
             event_count=t.event_count,
+            turn_count=t.turn_count,
         )
         for t in list_tapes()
     ]
@@ -219,6 +222,41 @@ async def start_demo_tape(
 
 # ── Director console (metronome control; same DEMO_TAPE_REPLAY_ENABLED gate) ─
 
+# Replay mode disables uvicorn WatchFiles; reload director_page from disk by mtime
+# so the second-screen tab can live-reload without a backend restart.
+_director_mtime_ns: int | None = None
+
+
+def _director_source_path() -> Path:
+    import agentcore.demo_tape.director_page as page
+
+    return Path(page.__file__).resolve()
+
+
+def _director_rev() -> str:
+    return str(_director_source_path().stat().st_mtime_ns)
+
+
+def _fresh_director_html() -> str:
+    """Serve latest DIRECTOR_HTML, reloading the module when the file mtime changes."""
+    global _director_mtime_ns
+    import agentcore.demo_tape.director_page as page
+
+    mtime_ns = _director_source_path().stat().st_mtime_ns
+    if _director_mtime_ns != mtime_ns:
+        page = importlib.reload(page)
+        _director_mtime_ns = mtime_ns
+    rev = str(mtime_ns)
+    html = page.DIRECTOR_HTML
+    needle = '<meta name="director-rev"'
+    if needle in html:
+        start = html.index(needle)
+        end = html.index(">", start) + 1
+        html = html[:start] + f'<meta name="director-rev" content="{rev}" />' + html[end:]
+    else:
+        html = html.replace("</head>", f'<meta name="director-rev" content="{rev}" />\n</head>', 1)
+    return html
+
 
 def _status_model(raw: dict) -> DemoTapeDirectorStatus:
     return DemoTapeDirectorStatus(**raw)
@@ -228,9 +266,14 @@ def _status_model(raw: dict) -> DemoTapeDirectorStatus:
 async def director_console_page() -> HTMLResponse:
     """Bare local control page for OBS second-screen directing (dev-only)."""
     require_replay_enabled()
-    from agentcore.demo_tape.director_page import DIRECTOR_HTML
+    return HTMLResponse(_fresh_director_html())
 
-    return HTMLResponse(DIRECTOR_HTML)
+
+@router.get("/director/rev", include_in_schema=False)
+async def director_console_rev() -> dict[str, str]:
+    """File mtime stamp for the director HTML live-reload poller."""
+    require_replay_enabled()
+    return {"rev": _director_rev()}
 
 
 @router.get("/director/sessions", response_model=DemoTapeDirectorSessionsResponse)

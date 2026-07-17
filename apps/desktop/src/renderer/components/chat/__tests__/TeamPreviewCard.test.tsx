@@ -386,18 +386,19 @@ describe("TeamPreviewCard", () => {
 });
 
 describe("GraphTeamPreview", () => {
-  it("debate：默认折叠，展开后显示辩题/轮次/双方/嘱咐", () => {
+  it("debate：ghost 触发器默认关闭，点开 Popover 显示辩题/轮次/双方/嘱咐", () => {
     renderCard(
       <GraphTeamPreview
         preview={makeDebatePreview({ note: "最关心成本谁买单" })}
       />,
     );
-    const toggle = screen.getByRole("button", { name: /辩题 · 2 方/ });
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    const trigger = screen.getByTestId("graph-team-preview");
+    expect(trigger.textContent).toMatch(/辩题 · 2 方/);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("该不该上四天工作制？")).toBeNull();
 
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("该不该上四天工作制？")).toBeTruthy();
     expect(screen.getByText(/认真辩透 · 上限 5 轮/)).toBeTruthy();
     expect(screen.getByText("正方")).toBeTruthy();
@@ -407,16 +408,17 @@ describe("GraphTeamPreview", () => {
     expect(screen.getByText("最关心成本谁买单")).toBeTruthy();
   });
 
-  it("delegate：默认折叠，展开后显示队员分工/嘱咐", () => {
+  it("delegate：ghost 触发器默认关闭，点开 Popover 显示队员分工/嘱咐", () => {
     renderCard(
       <GraphTeamPreview preview={makePreview({ note: "先出竞品对照表" })} />,
     );
-    const toggle = screen.getByRole("button", { name: /分工 · 2 名队员/ });
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    const trigger = screen.getByTestId("graph-team-preview");
+    expect(trigger.textContent).toMatch(/分工 · 2 名队员/);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("研究员")).toBeNull();
 
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("研究员")).toBeTruthy();
     expect(screen.getByText("调研竞品定价策略与公开资料")).toBeTruthy();
     expect(screen.getByText("撰写员")).toBeTruthy();

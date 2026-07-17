@@ -29,7 +29,7 @@ from agentcore.db.base import async_session_factory
 from agentcore.demo_tape.export import load_tape
 from agentcore.demo_tape.schema import event_type
 
-DEFAULT_ORACLE_MID = "714e38da-f5c8-4c75-b676-4a771e813462"
+DEFAULT_ORACLE_MID = "69262466-c868-4f53-a6a2-6d626c5c0c19"
 DEFAULT_TAPE = (
     Path(__file__).resolve().parents[3] / "demos" / "tapes" / "lv-molihua-trademark.json"
 )

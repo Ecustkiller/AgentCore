@@ -28,26 +28,27 @@
 | `01-user-prompt` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\01-user-prompt.png` | 第二幕「一句话发起」 | |
 | `02-team-preview` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\02-team-preview.png` | 第四幕组队+授权 | |
 | `03-debate-opening` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\03-debate-opening.png` | 冷开场 / 第五幕引入（双方正在立论） | |
-| `04-r2-diamond-square` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\04-r2-diamond-square.png` | 交锋1 · R2 | |
-| `04b-r2-quote-closeup` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\04b-r2-quote-closeup.png` | **R2 金句特写**（可见「对方在拿『菱形』论证『正方形』」） | **是** |
-| `05-r3-logo-swap` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\05-r3-logo-swap.png` | 交锋2 前半 · 换标 | |
-| `05b-r4-logo-defense` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\05b-r4-logo-defense.png` | 交锋2 · 小程序/客服头像 | |
-| `06-r5-burden` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\06-r5-burden.png` | 交锋3 · 举证责任 | |
-| `07-evidence-gap-admit` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\07-evidence-gap-admit.png` | 质询高光 · 证据缺口 | |
-| `08-final-verdict` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\08-final-verdict.png` | 第六幕裁决 · 「倾向茉莉奶白」+「置信 高」 | |
+| `04-r2-diamond-square` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\04-r2-diamond-square.png` | 交锋1 · R2 公共纹样 vs 具体设计 | |
+| `04b-r2-quote-closeup` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\04b-r2-quote-closeup.png` | **R2 金句特写**（可见「不是四叶草不能用，而是用得太像」） | **是** |
+| `05-r3-logo-swap` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\05-r3-logo-swap.png` | 交锋2 · 驳回后换更近似 Logo / 惩罚性赔偿 | |
+| `05b-r4-logo-defense` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\05b-r4-logo-defense.png` | 交锋3 · 贡献率 / 举证责任 | |
+| `06-r5-burden` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\06-r5-burden.png` | 交锋3 决胜 · 贡献率举证（本盘仅 4 轮，无第 5 轮） | |
+| `07-evidence-gap-admit` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\07-evidence-gap-admit.png` | 质询高光 · 承认量化/抗辩缺口 | |
+| `08-final-verdict` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\08-final-verdict.png` | 第六幕裁决 · 「倾向支持一审」· 约 70% | |
 | `09-collab-graph` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\09-collab-graph.png` | 冷开场画面1 · 授权后协作图 | |
-| `09b-collab-graph-final` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\09b-collab-graph-final.png` | **第七幕收尾** · 五轮+结局协作图全貌 | **是** |
+| `09b-collab-graph-final` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\09b-collab-graph-final.png` | **第七幕收尾** · 四轮+结局协作图全貌 | **是** |
+
+> **注意（2026-07-17）**：磁带已换成新跑（4 轮 · 倾向支持一审 70%）。上表为**目标文案**；现有 PNG 静帧仍是旧跑画面，须按新 SHOT_MARKERS 重拍后才与字幕一致。
 
 ### 金句原文（磁带 / UI 一致）
 
-> 对方在拿“菱形”论证“正方形”，以抽象类别否定具体保护。
+> 不是四叶草不能用，而是用得太像。
 
-（弯引号；出现在 R2 正方立论段落。）
+（出现在 R2 交锋点 / 主持人摘要；LV 方论点亦强调「偷换概念：保护的是具体设计，不是文化符号」。）
 
-### 关于「65%」
+### 关于「70%」
 
-磁带 brief 含 65%；UI 终审卡显示档位 **「置信 高」**（非百分数）。成片可用字幕叠 65%。
-
+磁带 brief / CEO 汇总含约 70% 倾向支持一审判决方向；UI 终审卡可能显示档位 **「置信 高」**（非百分数）。成片可用字幕叠 70%。
 ## 短视频 / 序列
 
 | id | 绝对路径 | 说明 | 新增 |

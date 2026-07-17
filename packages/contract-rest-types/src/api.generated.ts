@@ -5710,6 +5710,11 @@ export interface components {
             id: string;
             /** Title */
             title: string;
+            /**
+             * Turn Count
+             * @default 1
+             */
+            turn_count: number;
             /** User Prompt */
             user_prompt: string;
         };

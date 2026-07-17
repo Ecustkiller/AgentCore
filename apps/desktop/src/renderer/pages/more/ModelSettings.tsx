@@ -133,7 +133,7 @@ function StatusBadge({ status }: { status: LlmKeyStatus }) {
 
 /**
  * 模型来源切换（自带 Key / 平台模型）—— 暴露既有的 `billing-preference` 后端能力：
- * platform ⇒ 用运营方平台模型（如 gpt-4o）、byok ⇒ 用下方配置的自带 Key（如 deepseek-…）。
+ * platform ⇒ 用运营方平台模型（如 deepseek-v4-flash）、byok ⇒ 用下方配置的自带 Key（如 deepseek-v4-pro）。
  * 只在平台可用时出现（否则无「另一个」可切）。切换后 `onChanged` 刷新状态缓存，输入框徽标随之更新。
  */
 function ModelSourceToggle({

@@ -64,7 +64,7 @@ class UserLlmKey(Base):
     base_url: Mapped[str] = mapped_column(
         String(500), server_default=text("'https://api.deepseek.com'")
     )
-    # Default model name for all turns (e.g. gpt-4o, deepseek-v4-flash).
+    # Default model name for all turns (e.g. deepseek-v4-flash, deepseek-v4-pro).
     default_model: Mapped[str] = mapped_column(
         String(200), server_default=text("'deepseek-v4-flash'")
     )

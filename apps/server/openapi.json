@@ -3770,6 +3770,11 @@
             "title": "Title",
             "type": "string"
           },
+          "turn_count": {
+            "default": 1,
+            "title": "Turn Count",
+            "type": "integer"
+          },
           "user_prompt": {
             "title": "User Prompt",
             "type": "string"

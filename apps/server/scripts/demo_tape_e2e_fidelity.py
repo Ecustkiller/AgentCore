@@ -13,7 +13,7 @@ from sqlalchemy import text
 from agentcore.db.base import async_session_factory
 from agentcore.runtime.journal.fold import runs_from_entries
 
-ORACLE_MID = "714e38da-f5c8-4c75-b676-4a771e813462"
+ORACLE_MID = "69262466-c868-4f53-a6a2-6d626c5c0c19"
 API = "http://127.0.0.1:8015"
 OUT = Path(__file__).resolve().parents[3] / "apps" / "desktop" / "demo-tape-out"
 

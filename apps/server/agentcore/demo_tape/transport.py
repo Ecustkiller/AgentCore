@@ -19,7 +19,7 @@ class PlaybackState(StrEnum):
     IDLE = "idle"
     PLAYING = "playing"
     PAUSED = "paused"  # director soft-pause (metronome held)
-    AWAITING_INTERACTION = "awaiting_interaction"  # durable team_preview etc.
+    AWAITING_INTERACTION = "awaiting_interaction"  # cold durable card or hot approval
     SEEKING = "seeking"
     FINISHED = "finished"
     ERROR = "error"
@@ -92,6 +92,13 @@ class PlaybackTransport:
         self.event_index = event_index
         self.t_ms = t_ms
         self.state = PlaybackState.AWAITING_INTERACTION
+        self.touch()
+
+    def clear_awaiting_interaction(self) -> None:
+        """Leave hot-path wait and resume metronome state (soft-pause preserved)."""
+        if self.state != PlaybackState.AWAITING_INTERACTION:
+            return
+        self.state = PlaybackState.PAUSED if self._paused else PlaybackState.PLAYING
         self.touch()
 
     def mark_finished(self) -> None:

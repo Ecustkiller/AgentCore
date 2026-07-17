@@ -50,6 +50,7 @@ def test_list_and_resolve_tapes(tmp_path: Path, monkeypatch):
     assert found[0].id == "sample-case"
     assert found[0].title == "演示案"
     assert found[0].user_prompt == "请启动辩论"
+    assert found[0].turn_count == 1
     assert found[0].repo_relative == "demos/tapes/sample-case.json"
 
     assert resolve_tape("sample-case") is not None
@@ -121,6 +122,7 @@ async def test_prepare_demo_tape_launch_creates_cloud_and_binds(
     assert create_kwargs["folder_id"] is None
     data = json.loads(bindings_file.read_text(encoding="utf-8"))
     assert data["conv-demo-1"]["tape"] == "demos/tapes/demo.json"
+    assert data["conv-demo-1"]["turn_index"] == 0
 
 
 @pytest.mark.asyncio

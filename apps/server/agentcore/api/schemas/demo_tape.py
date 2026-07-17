@@ -11,6 +11,7 @@ class DemoTapeSummary(BaseModel):
     user_prompt: str
     duration_ms: int | None = None
     event_count: int | None = None
+    turn_count: int = 1
 
 
 class DemoTapeCatalogResponse(BaseModel):

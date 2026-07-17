@@ -1,4 +1,5 @@
 import { TeamSynthesisPreviewLine } from "@/components/chat/TeamSynthesisPreviewLine";
+import { GraphTeamPreview } from "@/components/chat/TeamPreviewCard";
 import { debatePreviewSubtitle } from "@/components/chat/debate/debateEntryCopy";
 import {
   isTeamSynthesizing,
@@ -16,6 +17,7 @@ import {
   runRetryFailed,
 } from "@/services/turns";
 import {
+  type TeamPreviewDisplay,
   activeRuntime,
   getActiveRuntime,
   useActiveGenerating,
@@ -57,6 +59,8 @@ export interface StatusStripProps {
   onOpenTeamNotes?: () => void;
   /** 协作质量轻信号（message_end.collab）；有非零才显。 */
   collabSummary?: string | null;
+  /** Resolved 辩题/分工 preview — secondary Popover in StripControls (inline graph only). */
+  teamPreview?: TeamPreviewDisplay | null;
 }
 
 /**
@@ -112,6 +116,7 @@ function StripControls({
   onReplay,
   onOpenRevisions,
   collabSummary,
+  teamPreview,
 }: StatusStripProps) {
   const isRunning = execution.status === "running";
   const canReplay =
@@ -164,6 +169,8 @@ function StripControls({
           </span>
         </SimpleTooltip>
       )}
+      {/* 辩题/分工：次要 ghost，主 CTA 左侧；内容走 Popover，不抢「打开辩论室 / 在画布打开」。 */}
+      {teamPreview && <GraphTeamPreview preview={teamPreview} />}
       {/* 入口：辩论回合给醒目「打开辩论室」CTA（更可发现、直达群聊主视图），其余给通用「在画布打开」；
           二者同去处（放大态 Route A），辩论默认落群聊、回放走同一去处 + 自动播放。 */}
       <Button
@@ -187,6 +194,7 @@ function RunningStrip({
   onOpenRevisions,
   onOpenTeamNotes,
   collabSummary,
+  teamPreview,
 }: StatusStripProps) {
   const { completed, total } = execution.progress;
   const workers = workerProgress(execution);
@@ -245,6 +253,7 @@ function RunningStrip({
           onReplay={onReplay}
           onOpenRevisions={onOpenRevisions}
           collabSummary={collabSummary}
+          teamPreview={teamPreview}
         />
       </div>
       {noteCount > 0 && onOpenTeamNotes && (
@@ -295,6 +304,7 @@ function PausedStrip({
   onOpenRevisions,
   onOpenTeamNotes,
   collabSummary,
+  teamPreview,
 }: StatusStripProps) {
   const { completed, total } = execution.progress;
   const noteCount = execution.teamNotes.length;
@@ -320,6 +330,7 @@ function PausedStrip({
           onReplay={onReplay}
           onOpenRevisions={onOpenRevisions}
           collabSummary={collabSummary}
+          teamPreview={teamPreview}
         />
       </div>
       {noteCount > 0 && onOpenTeamNotes && (
@@ -361,6 +372,7 @@ function CompletedStrip({
   onReplay,
   onOpenRevisions,
   collabSummary,
+  teamPreview,
 }: StatusStripProps & { stopped?: boolean }) {
   const frames = useActiveExecField((rt) => rt.frames);
   const { completed, total } = execution.progress;
@@ -428,6 +440,7 @@ function CompletedStrip({
           onReplay={onReplay}
           onOpenRevisions={onOpenRevisions}
           collabSummary={collabSummary}
+          teamPreview={teamPreview}
         />
       </div>
 
@@ -454,6 +467,7 @@ function FailureStrip({
   onReplay,
   onOpenRevisions,
   collabSummary,
+  teamPreview,
 }: StatusStripProps) {
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
 
@@ -491,6 +505,7 @@ function FailureStrip({
           onReplay={onReplay}
           onOpenRevisions={onOpenRevisions}
           collabSummary={collabSummary}
+          teamPreview={teamPreview}
         />
       </div>
 
