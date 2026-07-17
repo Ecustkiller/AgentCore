@@ -99,10 +99,16 @@ async function writeRecord(record: LogRecord): Promise<void> {
 export function logDesktop(entry: LogEntry): void {
   const record = toRecord(sanitize(entry));
   if (!app.isPackaged) {
-    const tag = `[${record.build}] ${record.event}`;
-    if (record.level === "error") console.error(tag, record.fields ?? {});
-    else if (record.level === "warn") console.warn(tag, record.fields ?? {});
-    else console.log(tag, record.fields ?? {});
+    // stdout/stderr 可能已断开（父进程关了终端、管道被掐）——console.* 写时会同步抛
+    // EPIPE；必须吞掉，否则会变成主进程 Uncaught Exception 弹窗，违背 best-effort。
+    try {
+      const tag = `[${record.build}] ${record.event}`;
+      if (record.level === "error") console.error(tag, record.fields ?? {});
+      else if (record.level === "warn") console.warn(tag, record.fields ?? {});
+      else console.log(tag, record.fields ?? {});
+    } catch {
+      /* EPIPE / 其它流错误——忽略 */
+    }
   }
   queue = queue.then(() => writeRecord(record)).catch(() => {});
 }

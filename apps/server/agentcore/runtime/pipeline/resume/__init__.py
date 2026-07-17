@@ -4,7 +4,9 @@ from agentcore.runtime.pipeline.resume.finish import finish_resume_turn, finish_
 from agentcore.runtime.pipeline.resume.pipeline import resume_chat_pipeline
 from agentcore.runtime.pipeline.resume.rehydrate import (
     RehydratedTurnState,
+    arm_content_reset_reinjection,
     batch_shape_for_settled_suspension,
+    bootstrap_resume_display,
     mark_controller_after_settle,
     rehydrate_from_turn_paused,
 )
@@ -20,7 +22,9 @@ __all__ = [
     "RehydratedTurnState",
     "SettledSuspension",
     "append_resumed_tool_results",
+    "arm_content_reset_reinjection",
     "batch_shape_for_settled_suspension",
+    "bootstrap_resume_display",
     "finish_resume_turn",
     "finish_terminal_resume",
     "mark_controller_after_settle",

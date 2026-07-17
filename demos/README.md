@@ -109,16 +109,67 @@ uv run python scripts/demo_tape_bind.py --latest \
 
 ---
 
-## 导出磁带（已有打样时可跳过）
+## 录制 + 导出磁带（已有打样时可跳过）
+
+磁带源 = **直播流录制**（不再从 journal 反推）。两步：
+
+1. **录制**：`apps/server/.env` 加 `DEMO_TAPE_RECORD_ENABLED=true` 并重启后端（sidecar 子进程读同一 `.env`，桌面需重启或重拉 sidecar 才生效）。之后每个真实回合的 SSE 流被原样录下（send / resume 各一段；真实节奏、含 EPHEMERAL 打字与心跳事件；可能含真实对话内容）——**云端**落 `demos/recordings/<assistant message_id>.json`（gitignored）；**sidecar 本地回合**落 `<userData>/sidecar/recordings/`（与 paused/outbox 邻居，打包用户不写仓库）。跑一次满意的真实回合即得素材。
+2. **导出**：
 
 ```bash
 cd apps/server
 uv run python scripts/demo_tape_export.py \
-  --message-id 714e38da-f5c8-4c75-b676-4a771e813462 \
-  --out ../../demos/tapes/lv-molihua-trademark.json
+  --message-id <assistant message id> \
+  --title "我的演示" \
+  --out ../../demos/tapes/my-demo.json
 ```
 
-磁带放在仓库根 `demos/tapes/*.json`；一键目录按文件名 stem 列出（如 `lv-molihua-trademark`）。
+导出即剪辑：按 `TAPE_EXCLUDED_KINDS` 剪掉回合生命周期（message_start/end）、录到的暂停结算（`*_resolved`，回放时现场重发）、回合元信息（turn_saved/标题/citations）与客户端工具请求（workspace/board/desktop notify——回放不得触发真实副作用），其余逐字节保留。**「下一步」followups 例外**：从录制的 `followups_generated` 提取进 `meta.followups`（事件本身仍剪），回放到回合结束由 `persist_turn_result` 用**当前回合 message_id** 重发并落库（survive reload）；录制源缺失时可用 `--followups` 手填。`--user-prompt` 可覆盖 DB 查询（异机导出用）。磁带放仓库根 `demos/tapes/*.json`；命令面板按文件名 stem 列出。
+
+## 导演控制台（第二屏 · OBS 录屏用）
+
+回放开关打开时，后端另提供一个**不上镜、零美化**的本地控件页，像播放器一样遥控正在注入的磁带（暂停 / 0.5–8× 倍速 / 章节跳 / 时间轴 seek）。控制通道长在服务端 player 的注入节拍器上，**产品前端一行不改**。
+
+### 启动
+
+1. `.env` 开 `DEMO_TAPE_REPLAY_ENABLED=true`，照常起后端 + 桌面端，用命令面板准备/开播磁带。
+2. 第二块屏浏览器打开：
+
+```
+http://localhost:8000/v1/demo-tape/director
+```
+
+3. 用开发账号登录（默认 `dev` / `devpassword`）→ 粘贴或从 sessions 下拉选中正在回放的 `conversation_id` → 即可遥控。
+
+倒带（向后 seek）会**重开同一会话的回放回合**（清空该会话消息、从头爆发注入到目标点）。若桌面画面未立刻对齐，在侧栏点一下该会话触发恢复即可。
+
+### REST（均需登录；开关关闭 → 404）
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| `GET` | `/v1/demo-tape/director` | 控件页 HTML |
+| `GET` | `/v1/demo-tape/director/sessions` | 当前进程内活跃回放 |
+| `GET` | `/v1/demo-tape/director/{cid}/status` | 时刻 / 章节 / 倍速 / 状态 |
+| `GET` | `/v1/demo-tape/director/{cid}/chapters` | 章节表 |
+| `POST` | `/v1/demo-tape/director/{cid}/pause` | 暂停节拍 |
+| `POST` | `/v1/demo-tape/director/{cid}/resume` | 继续（软暂停；不代点授权卡） |
+| `POST` | `/v1/demo-tape/director/{cid}/speed` | body `{ "speed": 0.5..8 }`，瞬时生效 |
+| `POST` | `/v1/demo-tape/director/{cid}/seek` | body `{ "t_ms" }` 或 `{ "event_index" }` 或 `{ "chapter_id" }` |
+
+Seek 语义：目标点之前的事件去延时爆发注入；向后 seek = 重启式倒带。跨过 `team_preview` 等真交互点时自动代确认；落点在交互点上则停在该卡（不代点）。进度条 `t_ms` 吸附最近事件边界。
+
+### 章节表生成规则
+
+从磁带结构化事件预生成（非人工标注）：
+
+| 章节 | 源事件 |
+|---|---|
+| 开场检索 | index 0 |
+| 组队授权 | `team_preview_required` |
+| 第 N 轮·立论 | `debate_round_started` |
+| 第 N 轮·质询 | 该轮内首个 `run_id` 含 `_cx_` 的 `run_started` |
+| 第 N 轮·打分 | `debate_round` |
+| 终审 | `debate_result` |
 
 ## 倍速 / 间隔
 
@@ -127,33 +178,35 @@ uv run python scripts/demo_tape_export.py \
 | `speed` | `>1` 加快；原始间隔 ÷ speed |
 | `max_gap_ms` | 单次等待上限（压住工具/思考长空窗） |
 
-一键启动可用请求体覆盖；否则用 `.env` 全局默认。绑定文件优先于 `.env`（脚本路径）。
+一键启动可用请求体覆盖；否则用 `.env` 全局默认。绑定文件优先于 `.env`（脚本路径）。导演台中途改倍速走 transport，不改 bindings 文件。
 
 ## 倍速实操备忘
 
 - 原速 = `SPEED=1` + `MAX_GAP_MS` 抬到碰不着（如 `600000`）。本盘磁带回放总时长约 19.7 分钟，**真实最大间隔约 45 秒**（辩手 LLM 深度思考）——原速下的长静默是真实节奏，不是卡死。判断卡死的标准：发消息后 **3 秒内**连首批搜索活动都不出现。
 - 录屏想压掉极端长等待：`MAX_GAP_MS=10000~15000`，其余节奏仍为真实。
+- `DEMO_TAPE_RECORD_ENABLED` / `DEMO_TAPE_REPLAY_ENABLED` 开启时 `__main__.py` **自动关 WatchFiles**：原速 SSE 可达十几分钟，热重载的 `timeout_graceful_shutdown=2` 会硬杀 worker（桌面表现为「无法连接后端」、无 Traceback）。改代码后需手动重启后端。
 
 ## 设计决策（为什么长这样）
 
 - **服务端磁带回放，而非前端注入**：重开会话/切页靠 REST 消息窗 + journal 水合，纯前端灌事件在用户切页时必穿帮；服务端回放落真实 DB 记录，一切页面行为天然成立。被否方案②：ScriptedProvider 重跑真实引擎——无 LLM 延迟导致节奏失真、prompt 漂移会对不上、工具副作用重复执行。
-- **磁带源 = `turn_journal`**（只存 DURABLE 事件；流式 delta 由导出时重切块合成打字观感）。CEO 的**思考(reasoning)/正文(content)按 process timeline 逐段定位**——检索/分析/组队思考锚到各自的工具与案情简介之前、汇总思考锚到辩论之后；案情简介按真实段边界完整落在开工卡前（不再被 `_split_captain_text` 启发式腰斩）。**保真度以原始会话为真值 oracle**：改导出/回放层后，跑 `apps/server/scripts/demo_tape_fidelity_check.py` 比对「回放 vs 原始」（正文与思考均须逐字节一致、辩论投影结构等价），不要目测。reasoning 真值 = captain `process_reasoning` 段拼接（与 `messages.reasoning_content` 仅差暂停边界的 `\n\n` 连接符）。
-- **暂停即真实检查点**：磁带遇 `team_preview` 真暂停、等用户在 UI 点继续——演示中人类拍板环节由录屏者掌控。
-- **节奏坑（已修勿回退）**：磁带 `t_ms` 必须单调；player 的 pacing 时钟不可回拨（曾因导出切块时间回跳 + 时钟回拨双计时，在原速下表现为「正在思考」长卡死，4 倍速+2s 限幅时被掩盖）。
-- **时间窗铺满 + 直播感重建（已修勿回退）**：journal 只存 DURABLE 事实，照搬时间戳会导致「文字一坨闪现 + 长死窗」。导出层负责重建直播观感，不变量（`demo-tape-out/_check_pacing.py` 一键验收）：
-  - **船长 reasoning/content 铺满真实锚点窗**：按 process timeline 定位归属窗口（如「上一锚点 → 编排工具」「最后编排 `tool_use_end` → `run_completed`」收尾窗），窗内按拍数比例均匀铺开（切片间隔 15ms~1.2s），顺序恒为 reasoning 先、content 后；末拍贴住窗尾。曾坏过两次：所有切片挤在同一毫秒；收尾总结插错窗（content 在 debate `tool_use_end` 之前 + 尾部 9.7s 空洞）。
-  - **worker 流式重建**：`run_output_delta`/`run_reasoning_delta` 是 EPHEMERAL（journal 不存），由 `message_final` + `run_process_*` 反推，按**间隙容量比例装箱**铺满该 run 的 `run_started→run_completed` 窗口（勿用「逐工具锚定+硬冲刷」——并发 run 交错时会把整段文本压进零宽窗，留下大段辩手静默）。
-  - **组队前的「委派中」心跳**：CEO 编排工具（`delegate`/`debate`）流式组装参数期间前端靠 `tool_progress`（EPHEMERAL）显示「Composing …」。导出时在（简介结束 → 开工卡）窗内合成递增 `chars` 的心跳序列，桌面 `TOOL_META` 已有 `debate` 条目。否则开工卡前是纯白屏。
-  - **player 跳过不可发射事件再计步**：`turn_paused` 等非 SSE 事实必须在 pacing 计算**之前**跳过，否则它们推进节奏时钟——曾表现为点「授权开赛」后 11 秒静默（resume 首拍应即时发出）。
-- **CEO 自持工具内联（已修勿回退）**：CEO 检索阶段的 `web_search`/`read_url` 在运行时带 captain 自己的 `run_id`；前端 `appendToolStep` 与后端 `_accumulate_process` 都把「带 run_id 的工具」当作 worker 工具从内联时间线剔除（本该落协作图节点），但检索阶段协作图尚未出现 → 前 ~15 秒只显示「正在思考」、检索活动全隐藏（正是上一条「3 秒内无首批搜索活动」判据的触发场景）。修法：player 回放时对 `run_id == captain run` 的 `tool_use_*` 事件剥离 `run_id`，使 CEO 自持工具按渲染契约（conformance `single_agent` 向量：CEO 工具无 run_id）走 turn-level 内联。磁带数据保持忠实录制（含 run_id），仅在渲染适配层归一。见 `player.py:_captain_run_id` + 单测 `test_player_inlines_captain_tools_by_stripping_run_id`。**真实产品同源已在 runtime 一并修掉**（旧磁带仍靠 player 层剥离兜底）：`execute_tools`（`runtime/engine/tool_exec.py`）对 `role=="captain"` 走 display/trace 拆分——`tool_use_*` 的 SSE 事件不发 `run_id`（内联渲染），`ToolCallFact`/熔断审计仍保留 captain `run_id`（§8.3 fold/溯源不变）；两处调用点 `tool_round.py`、`directive_apply.py`（coordination 收尾）均已传 `role`。
+- **磁带源 = 直播流录制（EventSink dev tap），journal 反推层已退役（2026-07）**：`DEMO_TAPE_RECORD_ENABLED` 下 `demo_tape/recorder.py` 在 `runtime/events/sink.py` 的 emit tap 上把每个回合**实际发出的 SSE 流**原样录下——真实节奏 + journal 从不存的 EPHEMERAL 直播感（打字 delta、`tool_progress` 委派心跳、工具相位）天然在录制里；导出（`export.py: build_tape_from_recording`）只按 `TAPE_EXCLUDED_KINDS` 剪辑、不做任何合成。曾经的 journal 反推启发式层（时间窗铺满、worker 流式重建、委派心跳合成、正文/思考锚定切分，约 1100 行）连同其全部「已修勿回退」条目一并退役——录制流天然满足那些不变量。**事件字段与线上 SSE 契约对齐**（`type`/`timestamp` + pacing 超集 `t_ms`；格式版本 2）；存量 v1 磁带（`kind`/`ts`，如 `lv-molihua-trademark`）读时别名兼容、不改写入库文件。被否方案：继续修 journal 反推——补丁史（同层 6+ 处已修勿回退、坏过两次的铺窗）证明该缝会持续出补丁。
+- **回放身份 ≠ 录制身份（已修勿回退）**：磁带忠实保留录制时的 id，但桌面 InteractionStore 以 interaction id 为**跨会话全局键**（resolved 墓碑不复活、pending 首见保留），`pausedTurns.removeByCheckpoint` 也按裸 id 匹配——复用录制 checkpoint_id 时，同一桌面进程内**第二次回放**的 `team_preview_required` 被静默吞掉（历史事故：简介说完永久卡住、开工卡/协作图不出现、只等来「记忆已更新」卡）。修法：player 回放前按 `(本回合 message_id, 录制 id)` 确定性重铸**全部交互 id**（`demo_tape/identity.py`；send/resume 两段一致）。`run_id`/`execution_id`/`tool_call_id` 有意保持录制原值——各端按 message 域隔离、且字符串携带辩论结构（`debate_<exec>_r1_<side>`），重铸零收益反破坏投影。验收：`test_replaying_same_tape_twice_remints_distinct_checkpoints` + `test_real_tape_double_replay_mints_distinct_checkpoints`。
+- **「下一步」followups 保真回放（走 meta，非事件流）**：followups 是 `message_end` 之后的 post-turn tail、落库在 `Message.followups`（**survive reload**，与 citations 不同）。若像普通事件那样留在磁带事件流回放，会带**录制时的旧 message_id** → 前端 `attachFollowups` 按 message_id 匹配落空、chips 不显示。故 followups 不进事件流：export 从录制的 `followups_generated` 提取进 `meta.followups`（`recorder.py` 为此在 terminal `message_end` flush+pop 后仍接住 post-turn tail 再 flush；录制源缺失时 `--followups` 手填），player 在 END_TURN 把 `meta.followups` 挂到 result，由 `persist_turn_result` 用**当前回合 message_id** 落库 + 重发 `followups_generated`。被否方案：磁带回放照走 `mint_followups`——需真实 LLM（破坏离线/零 token）、demo 环境无凭据则光秃秃、有凭据则每次生成随机几条而非录制那几条。验收：`demo_tape_fidelity_check.py` 的 `replay_followups_match_meta`。
+- **暂停即真实检查点**：磁带遇 `team_preview` 真暂停、等用户在 UI 点继续——演示中人类拍板环节由录屏者掌控。挂起等待期间记忆 sweeper 会跳过该会话（`memory/consolidation.py` open-turn deferral，产品级修复）——不再出现「等授权时先弹记忆已更新卡」。
+- **节奏坑（已修勿回退）**：磁带 `t_ms` 必须单调（`build_tape_from_recording` 对墙钟抖动做单调夹紧）；player 的 pacing 时钟不可回拨（曾在原速下表现为「正在思考」长卡死，4 倍速+2s 限幅时被掩盖）。
+- **player 跳过不可发射事件再计步（已修勿回退）**：`turn_paused` 等非 SSE 事实必须在 pacing 计算**之前**跳过，否则它们推进节奏时钟——曾表现为点「授权开赛」后 11 秒静默（resume 首拍应即时发出）。
+- **回放中断收口**：tape 分支与真实管线同样走 `CancelledError` salvage（`turn_runner.py`）——断流/停服不再留 `status=running` 僵尸行。
+- **CEO 自持工具内联（已修勿回退）**：CEO 检索阶段的 `web_search`/`read_url` 在运行时带 captain 自己的 `run_id`；前端 `appendToolStep` 与后端 `_accumulate_process` 都把「带 run_id 的工具」当作 worker 工具从内联时间线剔除（本该落协作图节点），但检索阶段协作图尚未出现 → 前 ~15 秒只显示「正在思考」、检索活动全隐藏（正是上一条「3 秒内无首批搜索活动」判据的触发场景）。修法：回放（SINK 准备路径）对 `run_id == captain run` 的 `tool_use_*` 事件剥离 `run_id`，使 CEO 自持工具按渲染契约（conformance `single_agent` 向量：CEO 工具无 run_id）走 turn-level 内联。磁带数据保持忠实录制（含 run_id），仅在源适配层归一——现集中在 `agentcore/replay/legacy.py`（**legacy 例外，仅存量 v1 磁带需要**；退役条件：v1 磁带退役时一并删）。**真实产品同源已在 runtime 一并修掉**（旧磁带仍靠 player 层剥离兜底）：`execute_tools`（`runtime/engine/tool_exec.py`）对 `role=="captain"` 走 display/trace 拆分——`tool_use_*` 的 SSE 事件不发 `run_id`（内联渲染），`ToolCallFact`/熔断审计仍保留 captain `run_id`（§8.3 fold/溯源不变）；两处调用点 `tool_round.py`、`directive_apply.py`（coordination 收尾）均已传 `role`。
+- **保真验收**：改录制/导出/回放层后跑 `apps/server/scripts/demo_tape_fidelity_check.py`（不要目测）——磁带 vs 原始会话 oracle 字节保真（正文 + `process_reasoning` 拼接思考）、结构/`t_ms` 单调不变量、以及**经真实 player 的离线回放校验**（暂停如期、回放身份已重铸、resume 后完成、live resolve 恰一次、回放正文/思考逐字节等于 oracle）。「tap 录制 → 出带 → 回放」闭环由 `test_recording_to_tape_to_replay_closed_loop` 常驻把守。
 
 ## 复用到新场景
 
-任何满意的真实运行（云端回合；sidecar 跑的回写云库后同样可用）→ `demo_tape_export.py --message-id <id>` 出新磁带放 `demos/tapes/` → 命令面板自动多出该磁带的准备/立即两条入口。查 message_id：`uv run python scripts/log_timeline.py <conversation_id>`。
+开 `DEMO_TAPE_RECORD_ENABLED=true` 跑任何满意的真实回合 → 云端落 `demos/recordings/`、sidecar 本地落 `<userData>/sidecar/recordings/` → `demo_tape_export.py --message-id <id> --title … --out ../../demos/tapes/<新名字>.json`（sidecar 录制加 `--recording <绝对路径>`）→ 命令面板自动多出该磁带的准备/立即两条入口。查 message_id：`uv run python scripts/log_timeline.py <conversation_id>`（或直接看 recordings 目录文件名）。
 
 ## 边界
 
-- **不改** SSE / 协议契约、**不动**产品默认 UI（仅命令面板在开关开启时多准备/立即两条入口）。
+- **不改** SSE / 协议契约、**不动**产品默认 UI（仅命令面板在开关开启时多准备/立即两条入口）。录制 tap 是纯观测缝（`sink.emit` 处理完后调用、异常只记警告不进回合），默认关闭。
+- `demos/recordings/` 已 gitignore（原样录制、可能含真实对话内容）；入库素材只放剪辑后的 `demos/tapes/`。
 - 回放 `cost_runs=[]`，尽量不写成本账本。
 - 仅支持磁带中的 `team_preview` 暂停；其它检查点种类未接线。
 - 一盘磁带 = 一个回合；多回合演示剧本需扩展（磁带分段、逐条消息续播）。

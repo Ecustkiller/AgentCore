@@ -58,6 +58,9 @@ class HandlerMixin:
             # Swap the process-wide ConversationStore so EventSink checkpoints +
             # TurnJournalWriter appends land in the local outbox (not CloudStore).
             set_conversation_store(self._outbox_store)
+        # Same DEMO_TAPE_RECORD_ENABLED gate as cloud lifespan; land under
+        # ``<dataDir>/recordings`` (sibling of paused/outbox) — never repo demos/.
+        self._install_recorder_if_enabled(data_dir)
         self._initialized = True
         logger.info(
             "sidecar.initialized",
@@ -85,6 +88,29 @@ class HandlerMixin:
                 },
             },
         )
+
+    @staticmethod
+    def _install_recorder_if_enabled(data_dir: str) -> None:
+        """Arm the process-wide EventSink emit tap when recording is enabled.
+
+        Switch reaches the sidecar via the same env / ``apps/server/.env`` channel
+        as the cloud (``DEMO_TAPE_RECORD_ENABLED`` → ``settings.demo_tape_record_enabled``);
+        no initialize-contract change. Requires ``dataDir`` so recordings land next
+        to paused/outbox under ``<userData>/sidecar/recordings/``.
+        """
+        from agentcore.config import settings
+
+        if not settings.demo_tape_record_enabled:
+            return
+        if not data_dir:
+            logger.warning(
+                "demo_tape.sidecar_record_skipped",
+                reason="no_data_dir",
+            )
+            return
+        from agentcore.demo_tape.recorder import install_recorder
+
+        install_recorder(path=Path(data_dir) / "recordings")
 
     @staticmethod
     def _build_paused_store(data_dir: str) -> LocalPausedTurnStore | None:

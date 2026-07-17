@@ -4,11 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
-# Reserved key inside TeamPreviewSuspension.debate_arguments so resume can divert
-# to the tape player without a new suspension kind / packages/ contract change.
+# Reserved key for demo-tape frame divert / cursor. Content/reasoning live on the
+# shared ``turn_paused`` fact (not under this key). Cursor meta rides
+# ``turn_paused.extras[DEMO_TAPE_FRAME_KEY]`` and is mirrored in
+# ``debate_arguments`` so ``is_demo_tape_frame`` can divert without scanning journal.
 DEMO_TAPE_FRAME_KEY = "__demo_tape__"
 
-TAPE_FORMAT_VERSION = 1
+# v2: event elements use SSE contract fields ``type`` + ``timestamp`` (plus pacing
+# supersets like ``t_ms``). v1 on disk used the dialect ``kind`` + ``ts``; readers
+# alias-compat at load/play time and never rewrite stock tape files.
+TAPE_FORMAT_VERSION = 2
+RECORDING_FORMAT_VERSION = 2
+LEGACY_TAPE_FORMAT_VERSION = 1
 
 # Live pause cards — player stops here and waits for a real frontend resolve.
 PAUSE_REQUIRED_KINDS = frozenset(
@@ -19,6 +26,12 @@ PAUSE_REQUIRED_KINDS = frozenset(
     }
 )
 
+# Only ``team_preview`` is wired for true tape-frame suspend today. Export refuses
+# the rest (and any ``approval_*``) unless ``--force`` — move "won't play well" from
+# play-time warning to export-time gate. True-pause expansion is postponed.
+TAPE_WIRED_PAUSE_KINDS = frozenset({"team_preview_required"})
+TAPE_UNWIRED_PAUSE_KINDS = PAUSE_REQUIRED_KINDS - TAPE_WIRED_PAUSE_KINDS
+
 # Recorded resolve events are skipped; the live resolve is emitted fresh.
 PAUSE_RESOLVED_KINDS = frozenset(
     {
@@ -28,83 +41,97 @@ PAUSE_RESOLVED_KINDS = frozenset(
     }
 )
 
-# Projection / execution-only rows — not live SSE.
-_SKIP_KIND_PREFIXES = ("process_", "run_process_")
-_SKIP_KINDS = frozenset(
+# Client-tool required events: hard-cut from tapes AND re-asserted at export time
+# (defense beyond the cut table — future edit of TAPE_EXCLUDED_KINDS must not silently
+# ship them). Full-chain tool stand-ins are a confirmed future direction at
+# ``execute_tools`` (short-circuit by tool_call_id from recorded I/O); not built yet.
+CLIENT_TOOL_REQUIRED_KINDS = frozenset(
     {
-        "turn_end",
-        "message_final",
-        "turn_started",
-        "round_boundary",
-        "llm_call",
-        "tool_call",
-        "note",
-        "plan_snapshot",
-        "run_final",
+        "workspace_op_required",
+        "board_op_required",
+        "board_read_required",
+        "desktop_notify_required",
     }
 )
 
-# Delta kinds that benefit from typing-feel re-chunking on export.
-CHUNKABLE_DELTA_KINDS = frozenset(
+# Recording → tape cut list. A recording captures the live stream verbatim; a tape
+# must not replay:
+# - message_start / message_end — source-turn lifecycle from the recording. The
+#   replay turn's lifecycle follows the same live capture/bootstrap/resume
+#   contract (player emits message_start on the send leg; resume uses shared
+#   bootstrap which already emitted message_start, so that leg sets
+#   emit_message_start=False — alignment, not a private lifecycle);
+# - recorded pause settlements — the player re-emits the LIVE resolve on resume;
+# - per-turn route/meta chrome (turn_saved / title / followups_generated / citations)
+#   — turn_saved / title stay live-minted; followups_generated is cut from the event
+#   stream because chips ride ``meta.followups`` (survive reload via Message.followups;
+#   replay re-emits followups_generated with the *current* turn message_id in
+#   persist_turn_result — unlike citations, which cannot survive reload);
+# - error — a transient banner from the source run must not replay as a real error;
+# - transport-only client-tool requests — replaying them would drive REAL side
+#   effects on the attached desktop (file ops / board mutations / OS notifications).
+TAPE_EXCLUDED_KINDS = PAUSE_RESOLVED_KINDS | CLIENT_TOOL_REQUIRED_KINDS | frozenset(
     {
-        "run_output_delta",
-        "run_reasoning_delta",
-        "content_delta",
-        "reasoning_delta",
+        "message_start",
+        "message_end",
+        "turn_saved",
+        "title_generated",
+        "followups_generated",
+        "citations",
+        "error",
     }
 )
 
 
-def should_export_kind(kind: str) -> bool:
-    if not kind or kind in _SKIP_KINDS:
-        return False
-    if kind.startswith(_SKIP_KIND_PREFIXES):
-        return False
-    return kind not in PAUSE_RESOLVED_KINDS
+def event_type(ev: dict[str, Any]) -> str:
+    """SSE event type from a tape/recording element.
 
-
-def parse_iso_ms(ts: str | None) -> int | None:
-    """Parse journal ``ts`` (ISO-8601 / ``…Z``) to epoch milliseconds, or None."""
-    if not ts:
-        return None
-    raw = ts.strip()
-    if raw.endswith("Z"):
-        raw = raw[:-1] + "+00:00"
-    try:
-        from datetime import datetime
-
-        dt = datetime.fromisoformat(raw)
-    except ValueError:
-        return None
-    return int(dt.timestamp() * 1000)
-
-
-def chunk_text(text: str, *, size: int = 28) -> list[str]:
-    """Split ``text`` into typing-sized pieces (CJK-friendly; prefer newline boundaries).
-
-    Joining the parts is always byte-identical to ``text``. When a window would cut
-    mid-line, prefer breaking at the last ``\\n`` inside the window so Markdown tables
-    stay row-aligned during streaming (fixed-width cuts alone look fine after join but
-    tear tables mid-row while typing).
+    Contract field ``type`` is authoritative; legacy ``kind`` is a read-time alias.
+    (Payload keys like ``payload.kind == "captain"`` are unrelated.)
     """
-    if not text:
-        return []
-    if size < 1:
-        return [text]
-    parts: list[str] = []
-    i = 0
-    n = len(text)
-    while i < n:
-        end = min(i + size, n)
-        if end < n:
-            window = text[i:end]
-            nl = window.rfind("\n")
-            # Only snap to newline when it yields a meaningful piece (avoid 1-char drips).
-            if nl >= max(1, size // 4):
-                end = i + nl + 1
-        parts.append(text[i:end])
-        i = end
-    return parts
+    return str(ev.get("type") or ev.get("kind") or "")
+
+
+def event_timestamp(ev: dict[str, Any]) -> str | None:
+    """Wall-clock ISO timestamp; prefer ``timestamp``, fall back to legacy ``ts``."""
+    raw = ev.get("timestamp")
+    if isinstance(raw, str):
+        return raw
+    raw = ev.get("ts")
+    if isinstance(raw, str):
+        return raw
+    return None
+
+
+def normalize_tape_event(ev: dict[str, Any]) -> dict[str, Any]:
+    """Copy an event element onto contract fields (``type`` / ``timestamp``).
+
+    Drops legacy aliases ``kind`` / ``ts``. Preserves pacing supersets (``t_ms``)
+    and any other keys. Does not mutate the input.
+    """
+    out = {
+        k: v for k, v in ev.items() if k not in ("kind", "ts", "type", "timestamp")
+    }
+    out["type"] = event_type(ev)
+    # Preserve explicit null timestamps from either dialect.
+    if "timestamp" in ev:
+        out["timestamp"] = ev.get("timestamp")
+    elif "ts" in ev:
+        out["timestamp"] = ev.get("ts")
+    else:
+        out["timestamp"] = None
+    return out
+
+
+def normalize_tape_events(events: list[Any]) -> list[dict[str, Any]]:
+    """Normalize a list of event dicts; non-dicts pass through unchanged shape-wise."""
+    out: list[dict[str, Any]] = []
+    for ev in events:
+        if isinstance(ev, dict):
+            out.append(normalize_tape_event(ev))
+        else:
+            raise ValueError(f"tape event must be an object, got {type(ev).__name__}")
+    return out
 
 
 def is_demo_tape_frame(frame_or_suspension: Any) -> bool:
@@ -121,4 +148,43 @@ def is_demo_tape_frame(frame_or_suspension: Any) -> bool:
         extras = frame_or_suspension.get(DEMO_TAPE_FRAME_KEY)
         if extras is not None:
             return True
+    # turn_paused.extras adjunct (authoritative cursor home).
+    entries = getattr(frame_or_suspension, "journal_entries", None)
+    if isinstance(entries, list):
+        from agentcore.runtime.facts import pre_pause_from_journal
+
+        fact = pre_pause_from_journal(entries)
+        if (
+            fact is not None
+            and isinstance(fact.extras, dict)
+            and DEMO_TAPE_FRAME_KEY in fact.extras
+        ):
+            return True
     return False
+
+
+def tape_frame_meta(suspension: Any) -> dict[str, Any]:
+    """Demo-tape cursor meta (frame index / path / pacing).
+
+    Prefers ``debate_arguments`` (divert marker; tests may retarget the path), then
+    ``turn_paused.extras`` (authoritative home written at capture).
+    """
+    args = getattr(suspension, "debate_arguments", None)
+    if isinstance(args, dict):
+        nested = args.get(DEMO_TAPE_FRAME_KEY)
+        if isinstance(nested, dict) and nested.get("tape"):
+            return dict(nested)
+    entries = getattr(suspension, "journal_entries", None)
+    if isinstance(entries, list):
+        from agentcore.runtime.facts import pre_pause_from_journal
+
+        fact = pre_pause_from_journal(entries)
+        if fact is not None and isinstance(fact.extras, dict):
+            nested = fact.extras.get(DEMO_TAPE_FRAME_KEY)
+            if isinstance(nested, dict):
+                return dict(nested)
+    if isinstance(args, dict):
+        nested = args.get(DEMO_TAPE_FRAME_KEY)
+        if isinstance(nested, dict):
+            return dict(nested)
+    return {}

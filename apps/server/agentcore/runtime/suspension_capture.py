@@ -58,6 +58,7 @@ async def persist_suspension_capture(
     saver: Callable[[TurnSuspension], Awaitable[None]],
     sink: Any | None = None,
     suspension_kind: str,
+    turn_paused_extras: dict[str, Any] | None = None,
 ) -> bool:
     """Capture transcript + the fact-log snapshot (+ ``turn_paused``), build, and save.
 
@@ -68,6 +69,8 @@ async def persist_suspension_capture(
     ``turn_paused`` assembly is best-effort: mirror / sink gaps yield empty fields;
     assembly exceptions are logged and the frame still saves without the trailing fact
     so the durable pause path is never blocked by capture-side gaps.
+    ``turn_paused_extras`` is optional adjunct data stored on the same fact (e.g. a
+    demo-tape frame cursor) — live faces leave it unset.
     """
     from agentcore.core.log_context import get_log_value
     from agentcore.runtime.facts import snapshot_fact_log
@@ -97,6 +100,7 @@ async def persist_suspension_capture(
             required_event=required_event,
             journal_entries_before_trailing=base_entries,
             sink=sink,
+            extras=turn_paused_extras,
         )
         trailing.append(paused_fact.to_fact().entry())
         paused_content = paused_fact.content

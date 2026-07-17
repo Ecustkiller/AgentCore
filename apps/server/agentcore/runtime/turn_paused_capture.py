@@ -26,18 +26,31 @@ def build_turn_paused_fact(
     required_event: Any,
     journal_entries_before_trailing: list[dict[str, Any]],
     sink: Any | None,
+    extras: dict[str, Any] | None = None,
 ) -> TurnPausedFact:
     """Assemble one ``TurnPausedFact`` from live capture inputs (G1–G5 / G7).
 
     ``journal_entries_before_trailing`` must be the fact-log snapshot **without**
     this pause's ``*_required`` / ``turn_paused`` trailing entries — multi-cycle
     inheritance reads the last prior ``turn_paused`` from it.
+    ``extras`` rides the same fact for adjuncts (e.g. demo-tape frame cursor).
     """
     prior = pre_pause_from_journal(journal_entries_before_trailing)
     prior_content = prior.content if prior is not None else ""
     prior_reasoning = prior.reasoning if prior is not None else ""
 
     segment_content = _segment_content(suspension_kind)
+    # Event-source replay (and any path without a captain-loop mirror) keeps the
+    # deliverable in the sink process lane — use it when the mirror is absent.
+    if not segment_content and sink is not None:
+        try:
+            segment_content = sink.streamed_content() or ""
+        except Exception:
+            logger.warning(
+                "turn_paused.streamed_content_failed",
+                checkpoint_id=checkpoint_id,
+                exc_info=True,
+            )
     content = join_segments(prior_content, segment_content)
 
     live_reasoning = ""
@@ -105,6 +118,7 @@ def build_turn_paused_fact(
         run_processes=run_processes,
         citations=citations,
         controller=controller,
+        extras=dict(extras) if extras else None,
     )
 
 

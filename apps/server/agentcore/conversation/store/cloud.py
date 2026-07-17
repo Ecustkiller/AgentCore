@@ -483,11 +483,34 @@ class CloudStore:
             with contextlib.suppress(Exception):
                 await self.clear_stream_segments(turn_id=message_id)
 
+        # Demo-tape fidelity: player puts recorded chips on result["followups"].
+        # Non-empty → persist + emit with *this* turn's message_id; skip LLM mint.
+        # Absent / empty → unchanged live mint path (mutually exclusive).
+        tape_followups = result.get("followups")
+        if isinstance(tape_followups, list):
+            tape_followups = [str(x) for x in tape_followups if str(x).strip()]
+        else:
+            tape_followups = []
+
         wants_followups = (
             finish_value == FinishReason.END_TURN.value and bool(assistant_reply.strip())
         )
 
-        if wants_followups:
+        if tape_followups and message_id:
+            async with async_session_factory() as session:
+                await MessageRepository(session).set_followups(
+                    message_id,
+                    conversation_id=conversation_id,
+                    followups=tape_followups,
+                )
+            sink.emit(
+                followups_generated(
+                    tape_followups,
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                )
+            )
+        elif wants_followups:
             async with async_session_factory() as session:
                 bg_credentials = await resolve_credentials(session, user_id, "platform_internal")
             model = resolve_user_model(bg_credentials)

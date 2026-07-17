@@ -174,7 +174,12 @@ function createWindow(): BrowserWindow {
       ({ level, message, lineNumber, sourceId }) => {
         if (level !== "warning" && level !== "error") return;
         const tag = level === "error" ? "renderer:error" : "renderer:warn";
-        console.log(`[${tag}] ${message} (${sourceId}:${lineNumber})`);
+        // 父终端/管道已断时 console.log 会同步抛 EPIPE——吞掉，别弹主进程错误框。
+        try {
+          console.log(`[${tag}] ${message} (${sourceId}:${lineNumber})`);
+        } catch {
+          /* ignore */
+        }
       },
     );
   }

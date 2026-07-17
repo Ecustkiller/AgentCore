@@ -159,9 +159,9 @@ def _patch_resume_terminal(monkeypatch, *, pre_pause: str) -> EventSink:
     monkeypatch.setattr(resume_mod, "wire_resume_turn", AsyncMock(return_value=wired))
     monkeypatch.setattr(
         resume_mod,
-        "rehydrate_from_turn_paused",
+        "bootstrap_resume_display",
         lambda **_k: RehydratedTurnState(
-            pre_pause_content=pre_pause or None,
+            pre_pause_content=pre_pause if pre_pause else None,
             pre_pause_reasoning="想" if pre_pause else "",
             citations=[],
             from_turn_paused=bool(pre_pause),

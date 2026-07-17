@@ -84,14 +84,15 @@ def test_absorb_clears_assistant_content_and_journal_on_suspend():
             tool_calls=[_ask_user_call(message="卡片")],
             attempts=[ToolAttempt("fp", "ask_user", True)],
             terminal_effect=ToolEffect.SUSPEND,
-            emit_reset=lambda: resets.append("reset"),
+            emit_reset=resets.append,
         )
     finally:
         current_fact_log.reset(token)
 
     assert absorbed is True
     assert messages[-1].content is None
-    assert resets == ["reset"]
+    # 吸收发一次 reset，reason=ask_user（不折「已按交付规范重写」chip）。
+    assert resets == ["ask_user"]
     llm_facts = [f for f in log.entries() if f["kind"] == FactKind.LLM_CALL.value]
     assert llm_facts[-1]["payload"]["content"] == ""
 
@@ -109,7 +110,7 @@ def test_absorb_noop_when_ask_user_failed():
         tool_calls=[_ask_user_call()],
         attempts=[ToolAttempt("fp", "ask_user", False)],
         terminal_effect=ToolEffect.SUSPEND,
-        emit_reset=lambda: None,
+        emit_reset=lambda _reason: None,
     )
     assert absorbed is False
     assert messages[-1].content == "正文"

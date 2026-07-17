@@ -84,6 +84,8 @@ async def continue_run(
     draft_brief: str | None = None,
     draft_system: str | None = None,
     allow_research: bool | None = None,
+    evidence_tag_whitelist: frozenset[str] | None = None,
+    check_source_grounding: bool = False,
 ) -> RunState:
     """续写 a saved worker session under the continuation's log scope.
 
@@ -97,6 +99,8 @@ async def continue_run(
 
     辩手两阶段：当 ``session.spec.research_then_draft`` 且提供 ``draft_brief`` 时走
     检索→成稿；``allow_research=False``（结辩）退化为单次成稿。
+    成稿【已核实】标签闸（见 speech_pipeline）：``evidence_tag_whitelist`` 仅结辩传入
+    （白名单闸）；``check_source_grounding`` 续辩 / 质询作答传入（出处软校验闸）。
     """
     with log_context(
         run_id=continuation_run_id,
@@ -128,6 +132,8 @@ async def continue_run(
             draft_brief=draft_brief,
             draft_system=draft_system,
             allow_research=allow_research,
+            evidence_tag_whitelist=evidence_tag_whitelist,
+            check_source_grounding=check_source_grounding,
         )
 
 
@@ -150,6 +156,8 @@ async def _continue_run_scoped(
     draft_brief: str | None = None,
     draft_system: str | None = None,
     allow_research: bool | None = None,
+    evidence_tag_whitelist: frozenset[str] | None = None,
+    check_source_grounding: bool = False,
 ) -> RunState:
     """续写 a saved worker session: same author, extended transcript, new run id."""
     profiles = profile_set or default_profile_set()
@@ -240,6 +248,8 @@ async def _continue_run_scoped(
                 allow_research=do_research,
                 usage_sink=inflight,
                 finish_override_sink=finish_override,
+                evidence_tag_whitelist=evidence_tag_whitelist,
+                check_source_grounding=check_source_grounding,
             )
         else:
             messages.append(_continuation_message(feedback))

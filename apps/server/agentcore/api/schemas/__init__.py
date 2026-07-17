@@ -89,6 +89,12 @@ from .conversations import (
 )
 from .demo_tape import (
     DemoTapeCatalogResponse,
+    DemoTapeDirectorChapter,
+    DemoTapeDirectorChaptersResponse,
+    DemoTapeDirectorSeekRequest,
+    DemoTapeDirectorSessionsResponse,
+    DemoTapeDirectorSpeedRequest,
+    DemoTapeDirectorStatus,
     DemoTapePrepareRequest,
     DemoTapePrepareResponse,
     DemoTapeStartRequest,
@@ -460,6 +466,12 @@ __all__ = [
     "DemoTapePrepareResponse",
     "DemoTapeStartRequest",
     "DemoTapeStartResponse",
+    "DemoTapeDirectorStatus",
+    "DemoTapeDirectorSessionsResponse",
+    "DemoTapeDirectorSpeedRequest",
+    "DemoTapeDirectorSeekRequest",
+    "DemoTapeDirectorChapter",
+    "DemoTapeDirectorChaptersResponse",
     # generic
     "StatusResponse",
 ]

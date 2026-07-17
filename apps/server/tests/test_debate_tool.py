@@ -70,7 +70,8 @@ class _DebateLLM:
 
     质询（opt-in）：``questions`` 非空时 ``cross_exam`` 步回定向质询；``stream`` 若看到质询
     feedback（含「质询环节」）则按 ``cx_answer_style`` 产 markdown 标题体作答（``headings`` =
-    ``### 质询一`` 切段；``prose`` = 无标题散文，驱动挂第一题降级）。
+    ``### 质询一`` 切段；``prose`` = 无标题散文，驱动段落/指针降级；``dangling`` = 冒号悬垂，
+    触发一次补全续写）。
     ``cx_fail_sides`` 内的方对质询回空内容，驱动 runner 失败兜底（exchanges answer 空）。
     """
 
@@ -92,6 +93,7 @@ class _DebateLLM:
         self.cross_exam_calls = 0
         self.stream_calls = 0
         self.stream_requests: list = []
+        self.cx_completion_calls = 0
 
     async def complete(self, request):  # noqa: ANN001
         step = (request.scenario or "").rsplit(".", 1)[-1]
@@ -120,7 +122,7 @@ class _DebateLLM:
             return LLMResponse(content=json.dumps(self.brief), usage=_USAGE)
         return LLMResponse(content="{}", usage=_USAGE)
 
-    def _cx_answer_content(self, joined: str) -> str:
+    def _cx_answer_content(self, joined: str, *, completing: bool = False) -> str:
         """按 feedback 里出现的质询题匹配 side，产出标题体作答（或空串触发失败兜底）。"""
         _ords = "一二三四五六七八九十"
         for key, qs in (self.questions or {}).items():
@@ -128,8 +130,14 @@ class _DebateLLM:
                 continue
             if key in self.cx_fail_sides:
                 return ""
+            if completing:
+                self.cx_completion_calls += 1
+                return f"补全收束·{key}：间接证据链已闭合【已核实·判决书】。"
             if self.cx_answer_style == "prose":
                 return f"散文答·{key}【待核实·推断】"
+            if self.cx_answer_style == "dangling":
+                label = _ords[0]
+                return f"### 质询{label}\n部分成立·{key}。但间接证据链完整："
             parts: list[str] = []
             for i in range(len(qs)):
                 label = _ords[i] if i < len(_ords) else str(i + 1)
@@ -141,6 +149,13 @@ class _DebateLLM:
         self.stream_calls += 1
         self.stream_requests.append(request)
         joined = "\n".join(getattr(m, "content", "") or "" for m in request.messages)
+        # 悬垂补全续写（装配端触发的第二次 continue_run）。
+        if "质询作答补全" in joined:
+            content = self._cx_answer_content(joined, completing=True)
+            if content:
+                yield LLMChunk(delta_content=content)
+            yield LLMChunk(usage=_USAGE)
+            return
         # 质询 continue_run：feedback 含「质询环节」——回 markdown 标题体，驱动真实 runner 解析落库。
         if "质询环节" in joined:
             content = self._cx_answer_content(joined)
@@ -334,8 +349,8 @@ async def test_cross_exam_real_runner_lands_exchanges():
     assert any("_r1_cx_con" in rid for rid in ledger_ids)
 
 
-async def test_cross_exam_real_runner_prose_hangs_on_first():
-    """无标题散文作答 → 优雅降级：整段挂第一题，其余空答。"""
+async def test_cross_exam_real_runner_prose_points_remaining_to_first():
+    """无标题散文作答 → 降级：整段挂第一题，其余挂「未按标题分段」指针。"""
     llm = _DebateLLM(converge_at=1, questions=_CX_QUESTIONS, cx_answer_style="prose")
     sink = EventSink()
     tool = _tool(llm, sink=sink)
@@ -349,9 +364,32 @@ async def test_cross_exam_real_runner_prose_hangs_on_first():
     pro = next(c for c in cx if c["target"] == "pro")
     assert len(pro["exchanges"]) == 2
     assert "散文答·pro" in pro["exchanges"][0]["answer"]
-    assert pro["exchanges"][1]["answer"] == ""
+    assert "未按条目标题分段" in pro["exchanges"][1]["answer"]
     con = next(c for c in cx if c["target"] == "con")
     assert "散文答·con" in con["exchanges"][0]["answer"]
+
+
+async def test_cross_exam_dangling_answer_triggers_one_repair():
+    """质询作答冒号悬垂 → runner 自动续写补全一次，合并后答案不再悬垂。"""
+    llm = _DebateLLM(converge_at=1, questions=_CX_QUESTIONS, cx_answer_style="dangling")
+    sink = EventSink()
+    tool = _tool(llm, sink=sink)
+    result = await tool.execute(
+        {"motion": "该不该做 X", "form": "debate", "sides": _sides()}, _ctx()
+    )
+    assert result.success is True
+    # 双方各触发一次补全成稿流。
+    assert llm.cx_completion_calls == 2
+    sink.close()
+    events = [e async for e in sink if e.type == EventType.DEBATE_RESULT]
+    cx = events[0].payload["rounds"][0]["cross_exam"]
+    pro = next(c for c in cx if c["target"] == "pro")
+    ans = pro["exchanges"][0]["answer"]
+    assert "间接证据链完整：" in ans or "部分成立·pro" in ans
+    assert "补全收束·pro" in ans
+    assert not ans.rstrip().endswith(("：", ":"))
+    ledger_ids = [r.run_id for r in tool.run_ledger]
+    assert any("_complete" in rid for rid in ledger_ids)
 
 
 async def test_cross_exam_real_runner_failed_answer_leaves_empty():

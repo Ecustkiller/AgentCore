@@ -1,0 +1,45 @@
+[
+  {
+    "feature": "pause",
+    "result": "pass",
+    "detail": "在离开 team_preview 后的 playing 态：playing→paused。若在 awaiting_interaction（授权卡）上点暂停，状态名不变（仍为 awaiting_interaction），易误判为无效——应在播放中段测暂停。",
+    "caveat": "awaiting_interaction 期间 soft-pause 不改变对外 state 字段"
+  },
+  {
+    "feature": "speed",
+    "result": "pass",
+    "detail": "动态 2× / 8× 瞬时生效（status.speed 正确）"
+  },
+  {
+    "feature": "resume",
+    "result": "pass",
+    "detail": "soft-pause 后 resume → playing"
+  },
+  {
+    "feature": "chapter_jump",
+    "result": "pass",
+    "detail": "章节跳 r1_argument：服务端 t_ms/chapter_label 正确；跨授权会 auto-resolve。前端需保持直播 SSE 或硬刷新会话才能看到辩论室画面（纯 seek 后 SPA 可能仍停在案情简介）。"
+  },
+  {
+    "feature": "forward_seek",
+    "result": "pass",
+    "detail": "向前 seek t_ms 65996→319000 服务端成功；前端画面需直播会话或硬刷新才对齐证据缺口文案"
+  },
+  {
+    "feature": "rewind",
+    "result": "pass",
+    "detail": "重启式倒带回 team_preview：本轮 immediate_aligned=true，无需手动点侧栏。已知疑点未复现（可能因硬刷新路径 / 干净账号）。",
+    "needed_sidebar_refresh": false,
+    "known_issue_confirmed": false
+  },
+  {
+    "feature": "cross_auth_seek",
+    "result": "pass",
+    "detail": "从授权卡 seek 越过 team_preview：服务端代确认成功，授权卡消失。前端辩论室内容依赖直播 fold，硬刷新后可见案情+进度但不一定自动打开辩论室双列。"
+  },
+  {
+    "feature": "frontend_sync_after_seek",
+    "result": "partial",
+    "detail": "导演 seek/倒带改的是服务端注入与 DB；产品前端未订阅导演通道。实拍静帧应走「直播回放 + 导演变速/暂停」，章节跳更适合掐点预览而非直接截图。硬刷新会话可部分对齐，辩论室需再点「打开辩论室」。"
+  }
+]

@@ -1,10 +1,16 @@
-"""Export a turn_journal row set into demos/tapes/*.json.
+"""Export a live-stream recording into demos/tapes/*.json.
 
-From apps/server::
+The journal-reconstruction exporter is retired — tapes are cut from recordings.
+Record the run first (``DEMO_TAPE_RECORD_ENABLED=true`` in apps/server/.env →
+``demos/recordings/<message_id>.json``), then, from apps/server::
 
     uv run python scripts/demo_tape_export.py \\
-        --message-id 3654bda5-e84b-4d41-a75c-092f454bf012 \\
-        --out ../../demos/tapes/lv-molihua-trademark.json
+        --message-id <assistant message id> \\
+        --title "我的演示" \\
+        --out ../../demos/tapes/my-demo.json
+
+``--user-prompt`` overrides the DB lookup of the triggering user message (needed
+when exporting on a box without the source conversation).
 """
 
 from __future__ import annotations
@@ -19,110 +25,110 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import text
 
 from agentcore.db.base import async_session_factory
-from agentcore.demo_tape.export import build_tape_document, write_tape
+from agentcore.demo_tape.export import (
+    TapeExportRefusedError,
+    build_tape_from_recording,
+    write_tape,
+)
+from agentcore.demo_tape.recorder import load_recording, recording_path
+from agentcore.demo_tape.sanitize import IngestScanError
 
 
-async def _load(message_id: str) -> tuple[list[dict], dict]:
-    async with async_session_factory() as s:
-        rows = (
-            await s.execute(
-                text(
-                    """
-                    SELECT seq, kind, payload, ts, conversation_id, trace_id
-                    FROM turn_journal
-                    WHERE turn_id = :mid
-                    ORDER BY seq
-                    """
-                ),
-                {"mid": message_id},
-            )
-        ).mappings().all()
-        if not rows:
-            raise SystemExit(f"no turn_journal rows for message_id={message_id}")
-
-        msg = (
-            await s.execute(
-                text(
-                    """
-                    SELECT id, conversation_id, content,
-                           coalesce(reasoning_content, '') AS reasoning
-                    FROM messages WHERE id = :mid
-                    """
-                ),
-                {"mid": message_id},
-            )
-        ).mappings().one()
-
-        user = (
-            await s.execute(
-                text(
-                    """
-                    SELECT content FROM messages
-                    WHERE conversation_id = :cid AND role = 'user'
-                      AND created_at <= (
-                        SELECT created_at FROM messages WHERE id = :mid
-                      )
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                    """
-                ),
-                {"cid": str(msg["conversation_id"]), "mid": message_id},
-            )
-        ).mappings().first()
-
-        journal = [
-            {
-                "seq": r["seq"],
-                "kind": r["kind"],
-                "payload": r["payload"] or {},
-                "ts": r["ts"],
-            }
-            for r in rows
-        ]
-        meta = {
-            "source_message_id": message_id,
-            "source_conversation_id": str(msg["conversation_id"]),
-            "source_trace_id": rows[0]["trace_id"],
-            "title": "LV诉茉莉奶白商标侵权案",
-        }
-        return journal, {
-            "meta": meta,
-            "captain_content": msg["content"] or "",
-            "captain_reasoning": msg["reasoning"] or "",
-            "user_prompt": (user["content"] if user else "") or "",
-        }
+async def _lookup_user_prompt(conversation_id: str, message_id: str) -> str:
+    """The user message that triggered the recorded turn (best-effort)."""
+    try:
+        async with async_session_factory() as s:
+            row = (
+                await s.execute(
+                    text(
+                        """
+                        SELECT content FROM messages
+                        WHERE conversation_id = :cid AND role = 'user'
+                          AND created_at <= coalesce(
+                            (SELECT created_at FROM messages WHERE id = :mid), now()
+                          )
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """
+                    ),
+                    {"cid": conversation_id, "mid": message_id},
+                )
+            ).mappings().first()
+        return str(row["content"]) if row and row["content"] else ""
+    except Exception as e:  # noqa: BLE001 — DB is optional here; --user-prompt covers it
+        print(f"warn: user-prompt DB lookup failed ({e}); pass --user-prompt")
+        return ""
 
 
 async def _main(args: argparse.Namespace) -> None:
-    rows, ctx = await _load(args.message_id)
-    doc = build_tape_document(
-        rows=rows,
-        meta=ctx["meta"],
-        captain_content=ctx["captain_content"],
-        captain_reasoning=ctx["captain_reasoning"],
-        user_prompt=ctx["user_prompt"],
-        chunk_size=args.chunk_size,
-        chunk_gap_ms=args.chunk_gap_ms,
-    )
+    rec_path = Path(args.recording) if args.recording else recording_path(args.message_id)
+    if not rec_path.exists():
+        raise SystemExit(
+            f"recording not found: {rec_path}\n"
+            "Record the run first: set DEMO_TAPE_RECORD_ENABLED=true, restart the "
+            "backend, run the turn, then re-export."
+        )
+    recording = load_recording(rec_path)
+    rec_meta = recording.get("meta") or {}
+    conversation_id = str(rec_meta.get("conversation_id") or "")
+    message_id = str(rec_meta.get("message_id") or args.message_id or "")
+
+    user_prompt = args.user_prompt or ""
+    if not user_prompt and conversation_id:
+        user_prompt = await _lookup_user_prompt(conversation_id, message_id)
+    if not user_prompt:
+        raise SystemExit("no user prompt (DB lookup empty) — pass --user-prompt")
+
+    tape_meta: dict = {"title": args.title or Path(args.out).stem}
+    if args.followups:
+        tape_meta["followups"] = list(args.followups)
+    try:
+        doc = build_tape_from_recording(
+            recording,
+            meta=tape_meta,
+            user_prompt=user_prompt,
+            force=bool(args.force),
+        )
+    except (TapeExportRefusedError, IngestScanError) as e:
+        raise SystemExit(str(e)) from e
     out = Path(args.out)
     write_tape(out, doc)
+    chips = doc["meta"].get("followups") or []
     print(
         f"wrote {out} events={doc['meta']['event_count']} "
-        f"duration_ms={doc['meta']['duration_ms']}"
+        f"duration_ms={doc['meta']['duration_ms']} "
+        f"followups={len(chips)}"
     )
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--message-id", required=True)
+    p.add_argument("--message-id", help="Assistant message id (locates the recording)")
     p.add_argument(
-        "--out",
-        default="../../demos/tapes/lv-molihua-trademark.json",
-        help="Output tape path (relative to cwd)",
+        "--recording",
+        help="Explicit recording file path (overrides --message-id lookup)",
     )
-    p.add_argument("--chunk-size", type=int, default=28)
-    p.add_argument("--chunk-gap-ms", type=int, default=35)
+    p.add_argument("--title", default="", help="Tape title (command palette entry)")
+    p.add_argument("--user-prompt", default="", help="Override the DB user-prompt lookup")
+    p.add_argument(
+        "--followups",
+        nargs="+",
+        default=None,
+        help="Override meta.followups (otherwise lifted from recorded followups_generated)",
+    )
+    p.add_argument("--out", required=True, help="Output tape path (relative to cwd)")
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Override export refusal for unwired pause kinds "
+            "(checkpoint_required / plan_review_required) and approval_* events. "
+            "Does not bypass client-tool assertion or ingest memory/PII scan."
+        ),
+    )
     args = p.parse_args()
+    if not args.message_id and not args.recording:
+        raise SystemExit("provide --message-id or --recording")
     asyncio.run(_main(args))
 
 

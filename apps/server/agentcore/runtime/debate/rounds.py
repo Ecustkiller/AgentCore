@@ -18,12 +18,17 @@ from agentcore.runtime.debate import (
 )
 from agentcore.runtime.debate.cross_exam_parse import (
     build_cross_exam_exchanges,
+    looks_incomplete_cross_exam_answer,
+    merge_cx_continuation,
     parse_cross_exam_response,
 )
 from agentcore.runtime.debate.prompt import (
     closing_context_blocks,
     closing_task,
+    closing_verified_whitelist,
     cx_answer_feedback,
+    cx_completion_brief,
+    cx_completion_feedback,
     cx_context_blocks,
     cx_draft_brief,
     debater_task,
@@ -317,6 +322,8 @@ async def next_round(
                 draft_brief=speech_brief,
                 draft_system=draft_system(config, side, beat="continue"),
                 allow_research=True,
+                # A2 出处软校验：续辩成稿的【已核实·X】须与本方检索语料宽松对应。
+                check_source_grounding=True,
             )
             return state, int((time.monotonic() - t0) * 1000)
 
@@ -388,7 +395,7 @@ def make_cross_exam_runner(
             session = tool._debater_sessions.get(side_key)
             side = sides_by_key.get(side_key)
             if session is None or side is None:
-                return None, 0
+                return None, None, 0
             cx_run_id = f"{moderator_run_id}_r{round_no}_cx_{side_key}"
             research_fb = cx_answer_feedback(config, side, round_no, focus, qs)
             speech_brief = cx_draft_brief(config, side, round_no, focus, qs)
@@ -414,19 +421,77 @@ def make_cross_exam_runner(
                     draft_brief=speech_brief,
                     draft_system=draft_system(config, side, beat="cross_exam"),
                     allow_research=True,
+                    # A2 出处软校验：质询作答成稿同受「凭空来源」闸约束。
+                    check_source_grounding=True,
                 )
-                return state, int((time.monotonic() - t0) * 1000)
+                repair_state = None
+                # 生成端停写悬垂（冒号 / 未闭合列表）：装配前自动续写补全一次（禁再检索）。
+                if (
+                    state is not None
+                    and state.phase is RunPhase.COMPLETED
+                    and looks_incomplete_cross_exam_answer(state.content)
+                ):
+                    session.transcript = state.transcript
+                    session.content = state.content
+                    complete_fb = cx_completion_feedback(qs, state.content)
+                    complete_brief = cx_completion_brief(qs, state.content)
+                    complete_run_id = f"{cx_run_id}_complete"
+                    cont_state = await continue_run(
+                        session=session,
+                        feedback=complete_fb,
+                        continuation_run_id=complete_run_id,
+                        llm=tool._llm,
+                        tools=tool._tools,
+                        sink=tool._sink,
+                        base_tool_context=tool._base_tool_context,
+                        execution_id=execution_id,
+                        profile_set=tool._profile_set,
+                        approval_gate=worker_gate,
+                        round_no=round_no,
+                        side_key=side_key,
+                        context_blocks=cx_context_blocks(round_no, qs, complete_brief),
+                        parent_run_id=moderator_run_id,
+                        draft_brief=complete_brief,
+                        draft_system=draft_system(config, side, beat="cross_exam"),
+                        allow_research=False,
+                    )
+                    if (
+                        cont_state is not None
+                        and cont_state.phase is RunPhase.COMPLETED
+                        and cont_state.content.strip()
+                    ):
+                        prior_len = len(state.content)
+                        merged = merge_cx_continuation(state.content, cont_state.content)
+                        state = replace(
+                            state, content=merged, transcript=cont_state.transcript
+                        )
+                        repair_state = (complete_run_id, cont_state)
+                        logger.info(
+                            "debate.cross_exam.completed_after_repair",
+                            side_key=side_key,
+                            round_no=round_no,
+                            prior_len=prior_len,
+                            merged_len=len(merged),
+                        )
+                    else:
+                        logger.info(
+                            "debate.cross_exam.repair_skipped",
+                            side_key=side_key,
+                            round_no=round_no,
+                        )
+                return state, repair_state, int((time.monotonic() - t0) * 1000)
 
         wall_start = time.monotonic()
-        pairs = await asyncio.gather(*(_answer(k, qs) for k, qs in targets))
+        triples = await asyncio.gather(*(_answer(k, qs) for k, qs in targets))
         wall_ms = int((time.monotonic() - wall_start) * 1000)
-        states = [state for state, _elapsed in pairs]
-        busy_ms = sum(elapsed for _state, elapsed in pairs)
+        busy_ms = sum(elapsed for _state, _repair, elapsed in triples)
 
         exchanges: list[CrossExamExchange] = []
         completed = 0
         failed = 0
-        for (side_key, qs), state in zip(targets, states, strict=False):
+        for (side_key, qs), (state, repair_state, _elapsed) in zip(
+            targets, triples, strict=False
+        ):
             cx_run_id = f"{moderator_run_id}_r{round_no}_cx_{side_key}"
             session = tool._debater_sessions.get(side_key)
             if session is None or state is None:
@@ -441,6 +506,14 @@ def make_cross_exam_runner(
                 continue
             rev_spec = replace(session.spec, run_id=cx_run_id, agent_id=cx_run_id)
             tool._acc.add_run(rev_spec, state, parent_run_id=moderator_run_id)
+            if repair_state is not None:
+                repair_run_id, repair_run_state = repair_state
+                repair_spec = replace(
+                    session.spec, run_id=repair_run_id, agent_id=repair_run_id
+                )
+                tool._acc.add_run(
+                    repair_spec, repair_run_state, parent_run_id=moderator_run_id
+                )
             if state.phase is RunPhase.COMPLETED and state.content.strip():
                 # 作答成功：延展后的 transcript 提交回 session，下一轮立论续写在其之上（带质询记忆）。
                 session.transcript = state.transcript
@@ -486,16 +559,17 @@ def make_closing_runner(
 ):
     """结辩收束（阶段化发言角色 P4）的 :class:`~agentcore.runtime.debate.ClosingRunner` 实现工厂。
 
-    辩论收场后主持人请各方做结辩：本 runner 让每个仍有 session 的方用 ``continue_run`` 在【自己的
-    transcript】上出一段收尾陈词（受 ``max_parallel`` 并发约束，带全程记忆，只需给「只讲胜负手、不引入
-    新论据」的 feedback，见 :func:`closing_task`），折算进账目，返回各方 :class:`ClosingStatement`（全文进
-    该方 run 事件）。对称于 :func:`make_cross_exam_runner`，与逐轮辩手共用同一批 session；未成功立论 /
-    无 session 的方不参与结辩（advocacy 收尾对失败方无意义）。仅在主持人判定开启结辩时被调。"""
+    辩论收场后主持人请各方做结辩：本 runner 让每个仍有 session 的方用 ``continue_run`` 走【干净
+    成稿】（``allow_research=False``），brief 携带本场材料（历轮论点 / 质询让步 / clash 命门，见
+    :func:`closing_task`），并启用【已核实】标签闸（白名单同源材料）。受 ``max_parallel`` 并发约束，
+    折算进账目，返回各方 :class:`ClosingStatement`（全文进该方 run 事件）。对称于
+    :func:`make_cross_exam_runner`；未成功立论 / 无 session 的方不参与结辩。仅在主持人判定开启结辩时被调。"""
 
-    async def run_closing(*, sides, rounds):  # noqa: ANN001, ARG001
+    async def run_closing(*, sides, rounds):  # noqa: ANN001
         from agentcore.runtime.runs import DEFAULT_MAX_PARALLEL, RunPhase, continue_run
 
         sides = list(sides)
+        rounds = list(rounds)
         worker_gate = (
             tool._approval_gate if tool._base_tool_context.backend.location == "local" else None
         )
@@ -513,9 +587,10 @@ def make_closing_runner(
             if session is None:
                 return None, 0
             closing_run_id = f"{moderator_run_id}_closing_{side.key}"
-            feedback = closing_task(config, side)
-            # 收到的上下文：task 块 body 逐字复用 feedback；closing 通道块保留为纯环节标记。
-            context_blocks = closing_context_blocks(config, side, feedback)
+            feedback = closing_task(config, side, rounds)
+            # 收到的上下文：task 块 body 逐字复用 feedback；材料孪生块与 brief 同源。
+            context_blocks = closing_context_blocks(config, side, feedback, rounds)
+            whitelist = closing_verified_whitelist(rounds, side)
             async with semaphore:
                 t0 = time.monotonic()
                 state = await continue_run(
@@ -536,6 +611,7 @@ def make_closing_runner(
                     draft_brief=feedback,
                     draft_system=draft_system(config, side, beat="closing"),
                     allow_research=False,
+                    evidence_tag_whitelist=whitelist,
                 )
                 return state, int((time.monotonic() - t0) * 1000)
 

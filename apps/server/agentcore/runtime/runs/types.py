@@ -169,6 +169,9 @@ class RunSpec:
     research_then_draft: bool = False
     draft_brief: str = ""
     draft_system: str = ""
+    # A2 出处软校验（仅辩手两阶段成稿消费）：成稿中每个【已核实·X】的出处须与本方检索
+    # 语料宽松对应，凭空来源回炉一次。普通 worker 默认 False，零行为变化。
+    source_grounding_check: bool = False
     # Allowed-tools restriction for this worker, or ``None`` = no restriction (the
     # worker is offered ALL team tools). ``None`` is the fail-safe default: a task
     # that omits ``tools`` must not be silently stranded tool-less. The engine reads

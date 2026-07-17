@@ -1,6 +1,6 @@
 /**
  * 内部自检截图：把 /preview/maps 的两版竖图截下来供 review。
- * 复用 apps/capture 里已安装的 playwright，连现有 :3000 dev server。
+ * 复用 apps/desktop 已安装的 playwright，连现有 :3000 dev server。
  *
  *   node scripts/shot-preview.mjs            # 默认连 http://localhost:3000
  *   PREVIEW_PORT=3100 node scripts/shot-preview.mjs
@@ -12,9 +12,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const require = createRequire(
-  "C:/Project/AgentCore/apps/capture/package.json",
-);
+const require = createRequire("C:/Project/AgentCore/apps/desktop/package.json");
 const { chromium } = require("playwright");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

@@ -7,6 +7,8 @@ import asyncio
 from agentcore.api import sse
 from agentcore.runtime.events import EventSink, content_delta, tool_use_start
 from agentcore.runtime.events.attach_replay import (
+    _turn_end_close_event,
+    build_cursor_replay,
     journal_rows_to_sse,
     synthesize_segment_deltas,
 )
@@ -240,3 +242,105 @@ async def test_attach_cursor_path_replays_full_journal_then_segments(monkeypatch
     assert "\nid: 1\n" in joined
     assert "\nid: 2\n" in joined
     assert "\nid: 5\n" in joined
+
+
+# --- 收口事实回放：finished detached turn closes with a synthetic message_end ---
+# message_end is DERIVED (never journaled) + a detached turn emits it while detached, so
+# a client attaching inside the post-completion persist window would otherwise get no
+# close frame and finalize only via the reconnect-banner error salvage. build_cursor_replay
+# replays a synthetic message_end whenever the journal carries turn_end (turn finished).
+
+
+def test_turn_end_close_event_finished_turn_emits_message_end():
+    rows = [
+        {"seq": 1, "kind": "process_content", "payload": {"kind": "content", "text": "CEO 总结"}},
+        {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
+    ]
+    ev = _turn_end_close_event(rows)
+    assert ev is not None
+    assert ev.type == EventType.MESSAGE_END
+    assert ev.payload == {"finish_reason": "end_turn"}
+
+
+def test_turn_end_close_event_paused_preserves_reason():
+    """paused must survive so the client routes to the durable resume card, not complete."""
+    ev = _turn_end_close_event([{"kind": "turn_end", "payload": {"finish_reason": "paused"}}])
+    assert ev is not None
+    assert ev.payload["finish_reason"] == "paused"
+
+
+def test_turn_end_close_event_running_turn_returns_none():
+    """No turn_end yet (turn still running) → None so the live tail delivers the real end."""
+    rows = [
+        {"seq": 1, "kind": "process_content", "payload": {"kind": "content", "text": "x"}},
+    ]
+    assert _turn_end_close_event(rows) is None
+
+
+def test_turn_end_close_event_unknown_reason_falls_back_to_end_turn():
+    ev = _turn_end_close_event([{"kind": "turn_end", "payload": {"finish_reason": "??"}}])
+    assert ev is not None
+    assert ev.payload["finish_reason"] == "end_turn"
+
+
+def _patch_journal_repo(monkeypatch, rows: list[dict]) -> None:
+    class Repo:
+        def __init__(self, session: object) -> None:
+            pass
+
+        async def load_after(self, turn_id: str, after_seq: int):
+            return rows
+
+    class _Sess:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class Store:
+        async def list_stream_segments(self, *, turn_id: str):
+            return []
+
+    monkeypatch.setattr("agentcore.db.base.telemetry_session_factory", lambda: _Sess())
+    monkeypatch.setattr("agentcore.db.repositories.runs.TurnJournalRepository", Repo)
+    monkeypatch.setattr(
+        "agentcore.conversation.store.get_conversation_store", lambda: Store()
+    )
+
+
+async def test_build_cursor_replay_appends_message_end_for_finished_turn(monkeypatch):
+    """Finished detached turn: the CEO summary content_delta is followed by a message_end
+    close so the attaching client finalizes the bubble instead of the reconnect salvage."""
+    rows = [
+        {"seq": 1, "kind": "process_content", "payload": {"kind": "content", "text": "CEO 总结"}, "ts": "t0"},
+        {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
+    ]
+    _patch_journal_repo(monkeypatch, rows)
+
+    events = await build_cursor_replay(
+        turn_id="m1", after_seq=-1, memory_channels={}, memory_agent_ids={}
+    )
+
+    assert events[-1].type == EventType.MESSAGE_END
+    assert events[-1].payload["finish_reason"] == "end_turn"
+    # The summary is still replayed as content before the close frame.
+    summary = [
+        e for e in events
+        if e.type == EventType.CONTENT_DELTA and "CEO 总结" in (e.payload.get("delta") or "")
+    ]
+    assert len(summary) == 1
+
+
+async def test_build_cursor_replay_no_close_for_running_turn(monkeypatch):
+    """Still-running turn (no turn_end): no synthetic close — the live tail owns the end."""
+    rows = [
+        {"seq": 1, "kind": "process_content", "payload": {"kind": "content", "text": "进行中"}, "ts": "t0"},
+    ]
+    _patch_journal_repo(monkeypatch, rows)
+
+    events = await build_cursor_replay(
+        turn_id="m1", after_seq=-1, memory_channels={}, memory_agent_ids={}
+    )
+
+    assert all(e.type != EventType.MESSAGE_END for e in events)

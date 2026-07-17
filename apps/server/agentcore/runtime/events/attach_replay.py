@@ -19,9 +19,9 @@ from agentcore.runtime.events.stream_checkpointer import (
     CHANNEL_CAPTAIN_REASONING,
     parse_run_channel,
 )
-from agentcore.runtime.events.types import EventType, SSEEvent
+from agentcore.runtime.events.types import EventType, FinishReason, SSEEvent
 from agentcore.runtime.facts import EXECUTION_ONLY_KINDS, FactKind
-from agentcore.runtime.journal.entries import _PROCESS_PREFIX, _RUN_PROCESS_PREFIX
+from agentcore.runtime.journal.entries import _PROCESS_PREFIX, _RUN_PROCESS_PREFIX, KIND_TURN_END
 from agentcore.runtime.runs.types import RunKind
 
 _DURABLE_KIND_VALUES = frozenset(t.value for t in DURABLE_EVENT_TYPES)
@@ -338,6 +338,38 @@ def synthesize_segment_deltas(
     return extra
 
 
+def _turn_end_close_event(rows: list[dict[str, Any]]) -> SSEEvent | None:
+    """Synthesize the stream-close ``message_end`` the attach replay otherwise lacks.
+
+    ``message_end`` is DERIVED (never journaled, so :func:`journal_rows_to_sse` drops it)
+    and a *detached* turn emits it while the sink is detached — it lands in neither
+    ``_history`` nor the re-armed live queue. A client that attaches inside the turn's
+    post-completion persist window (``task`` not yet done → the endpoint does not 204)
+    therefore replays the durable journal, then the live tail closes immediately
+    (sink already closed) with **no** close frame, and the client can only finalize via
+    the reconnect-banner error salvage (spurious「重连中」+ bubble stuck streaming).
+
+    When the journal carries ``turn_end`` (the turn is finished) replay a synthetic
+    ``message_end`` carrying only ``finish_reason`` so the client finalizes the bubble +
+    turn phase normally — ``paused`` still routes to the durable resume card, other
+    reasons complete the turn. Usage/cost are omitted (journal ``turn_end`` has neither;
+    they live on the Message columns a reload rehydrates) so the frontend's
+    undefined-guarded meta merge leaves any hydrated values intact. Returns ``None`` when
+    the turn is still running (no ``turn_end`` yet) so the live tail delivers the real
+    ``message_end`` unchanged.
+    """
+    for row in reversed(rows):
+        if str(row.get("kind") or "") != KIND_TURN_END:
+            continue
+        finish_raw = (row.get("payload") or {}).get("finish_reason")
+        try:
+            finish = FinishReason(finish_raw)
+        except ValueError:
+            finish = FinishReason.END_TURN
+        return SSEEvent(type=EventType.MESSAGE_END, payload={"finish_reason": finish.value})
+    return None
+
+
 async def build_cursor_replay(
     *,
     turn_id: str,
@@ -407,4 +439,9 @@ async def build_cursor_replay(
             skip_captain_reasoning=skip_cap_reasoning,
         )
     )
+    # Close a finished detached turn so a client attaching in the persist window
+    # finalizes normally instead of via the reconnect-banner salvage (收口事实回放).
+    close = _turn_end_close_event(rows)
+    if close is not None:
+        events.append(close)
     return events

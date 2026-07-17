@@ -9,6 +9,8 @@ alwaysApply: true
 
 子代理（Task tool）**必须**指定 `model: "cursor-grok-4.5-high-fast"`（Cursor Grok 4.5 high fast）。无例外。
 
+**续跑 / 再起同一子代理时同样强制指定**：无论是 `resume` 续跑，还是同一任务线后续再起新 Task，每次调用都显式传同一 `model`，禁止漏写、禁止换模型。
+
 ## 核心理念
 
 **主 Agent 做决策，子代理自主实施。**

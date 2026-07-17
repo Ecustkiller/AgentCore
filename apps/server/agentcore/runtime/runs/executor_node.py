@@ -386,6 +386,7 @@ async def execute_agent_node(
                     draft_system=spec.draft_system or (spec.system_prompt_supplement or ""),
                     draft_brief=spec.draft_brief,
                     allow_research=True,
+                    check_source_grounding=spec.source_grounding_check,
                     usage_sink=inflight,
                     on_round_begin=_pull_notes,
                     streamed_content=streamed_content,

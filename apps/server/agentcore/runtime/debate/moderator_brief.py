@@ -204,6 +204,20 @@ def _as_handoffs(data: dict[str, Any]) -> list[DebateHandoff]:
     return mapped
 
 
+def _background_block_for_brief(config: DebateConfig) -> str:
+    """把赛前底料原文喂进简报（空串 → 省略）。handoffs 事实项须与底料逐条对账。"""
+    bg = (config.background or "").strip()
+    if not bg:
+        return ""
+    clipped = _clip(bg, _TURN_CLIP * 2)
+    return (
+        "【赛前底料·双方共享原文】（handoffs 中事实类条目须与下列清单【逐条对账】——"
+        "底料已明确覆盖的事实【不得】声称「清单未涉及 / 未交代 / 未覆盖」；"
+        "只能指出底料未写明、或辩论后仍待核实的缺口；未决/推断状态不得改写成既定事实）：\n"
+        f"{clipped}\n\n"
+    )
+
+
 async def build_brief(
     complete_json: CompleteJson,
     config: DebateConfig,
@@ -221,6 +235,7 @@ async def build_brief(
     # 记分裁判（P2）：全场累计记分喂进简报。对抗形态让 decisive / leaning 与交锋对齐；
     # 圆桌仅作 momentum（见 _scores_block）。无记分则空块，简报零变化。
     scores_block = _scores_block(config, tally_scores(rounds))
+    background_block = _background_block_for_brief(config)
     last_turns = _turns_block(rounds[-1].ok_turns, clip=_TURN_CLIP)
     sides_keys = ", ".join(s.key for s in config.sides)
     is_red_team = config.form is DebateForm.RED_TEAM
@@ -285,9 +300,12 @@ async def build_brief(
         "open_questions = 两者都闭合不了——等外部事件 / 预测验证 / 后续观察（待解问题）。"
         "三键每条均【去水压成单句、只留命门】（与 strongest_points 同口径），禁复合长句堆叠。"
         "用户追问未答清的必须收编进上述三键之一，不得石沉大海。"
+        "【底料对账】若上方给了【赛前底料】，factual_disputes / open_questions 中凡声称"
+        "「底料未涉及 / 未交代 / 未覆盖」的条目，必须先对照底料原文——底料已写明的【禁止】再声称未涉及。"
     )
     user = (
         f"辩论命题：{config.motion}\n参与方：\n{_sides_block(config)}\n\n"
+        f"{background_block}"
         f"各轮推进：\n{timeline}\n\n{scores_block}{followups_block}最后一轮各方发言：\n{last_turns}\n\n"
         f"{_brief_form_hint(config.form)}\n"
         "请据此产出简报，为用户负责到底（不要只把各方观点并排甩给他）："

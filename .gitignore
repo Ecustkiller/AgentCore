@@ -30,6 +30,12 @@ release/
 apps/desktop/shoot-out*/
 # pnpm smoke:webapp 截图（同上：web 冒烟产物，不入仓 / 不打包）
 apps/desktop/smoke-out/
+# demo-tape 回放/保真自检产物（smoke-demo-tape / fidelity_check 写出）
+apps/desktop/demo-tape-out/
+demo-tape-out/
+# 服务端本地 eval / conformance 基线草稿（一次性产物，不入仓）
+apps/server/eval-tmp/
+apps/server/.conformance-baseline-refactor/
 # web 客户端构建产物（渲染层跑浏览器，形态 A）——由 deploy:web / deploy-web.yml 的
 # build:webapp 每次重新构建，不入仓。
 apps/desktop/dist-web/
@@ -38,9 +44,11 @@ apps/desktop/color-review/
 apps/desktop/shoot-fix/
 apps/desktop/shoot-room/
 apps/desktop/e2e-shots/
+apps/desktop/verdict-shots/
 apps/desktop/.lint-out.txt
-# UE AgentTown 截图自检产物（pnpm town:ue:shoot）
+# UE AgentTown 截图自检产物（pnpm town:ue:shoot）及对比基线目录
 apps/town/shoot-out/
+apps/town/shoot-out-before/
 # Unity AgentTown player builds（Windows / WebGL）
 apps/town/Builds/
 # AgentTown 3D 资产（CC0，vendored）：源 mesh/纹理 + Import 生成的 prefab/catalog 连 .meta 入库，
@@ -138,3 +146,6 @@ data/
 # Dev-only demo tape session bindings (local conversation_id → tape map)
 demos/bindings.json
 demos/tapes/_*.json
+# Dev-only live-stream recordings (DEMO_TAPE_RECORD_ENABLED tap output; may carry
+# real conversation content — export curated tapes into demos/tapes/ instead)
+demos/recordings/

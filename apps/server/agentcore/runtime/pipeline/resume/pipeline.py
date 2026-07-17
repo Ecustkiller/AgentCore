@@ -23,15 +23,15 @@ from agentcore.runtime.events import (
     content_delta,
     error_event,
     message_end,
-    message_start,
 )
 from agentcore.runtime.facts import TurnFactLog, current_fact_log
 from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
 from agentcore.runtime.pipeline.resume.finish import finish_resume_turn, finish_terminal_resume
 from agentcore.runtime.pipeline.resume.recover_path import recover_and_rebuild_window
 from agentcore.runtime.pipeline.resume.rehydrate import (
+    arm_content_reset_reinjection,
+    bootstrap_resume_display,
     mark_controller_after_settle,
-    rehydrate_from_turn_paused,
 )
 from agentcore.runtime.pipeline.resume.wire import restamp_workspace_facts, wire_resume_turn
 from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset  # noqa: F401 — wire seam
@@ -209,14 +209,12 @@ async def resume_chat_pipeline(
         bound_execution_id = wired.bound_execution_id
         execution_id_token = wired.execution_id_token
 
-        sink.emit(message_start(message_id, conversation_id=conversation_id))
-        # Continue the pre-pause exchange: seed the journal so the persisted turn
-        # journal (projected as the message's runs) replays the whole graph +
-        # checkpoint, then settle the pause.
-        sink.seed_journal(suspension.journal)
-
-        # G1–G5 single-point rehydration from the last ``turn_paused`` (legacy → no-op).
-        hydrated = rehydrate_from_turn_paused(sink=sink, suspension=suspension)
+        # Shared display open (live + tape): message_start + journal seed + turn_paused.
+        hydrated = bootstrap_resume_display(
+            sink=sink,
+            suspension=suspension,
+            conversation_id=conversation_id,
+        )
         pre_pause_reasoning = hydrated.pre_pause_reasoning
         citations: list[dict] = list(hydrated.citations)
         # G2 dual落点: citation_sink list + turn_citations contextvar (same list).
@@ -242,8 +240,7 @@ async def resume_chat_pipeline(
 
         # G6: resume-segment content_reset must reinject the authoritative pre_pause
         # into the client bubble (display-only). Engine CEO on_reset stays None.
-        if pre_pause:
-            sink.set_content_reset_reinjection(pre_pause + "\n\n")
+        arm_content_reset_reinjection(sink, pre_pause)
 
         # G5 settle 侧补标: team_preview / plan_review paused before tool return.
         if hydrated.from_turn_paused:

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from agentcore.conformance.projection import project_turn
+from agentcore.conformance.recording_cut import RECORDED_FIXTURE_PREFIX
 from agentcore.conformance.vectors import VECTORS
 from agentcore.runtime.events import SSEEvent
 
@@ -77,9 +78,14 @@ def main() -> None:
     fixtures = build_fixtures()
     region_positions = build_region_positions_fixture()
     _FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
-    # Drop stale vector goldens; preserve non-vector contract fixtures (region positions).
+    # Drop stale vector goldens this exporter OWNS (hand-authored VECTORS); preserve
+    # non-vector contract fixtures (region positions) AND recording-cut vectors
+    # (recording_cut.py's ``recorded_`` prefix — a separate source, swept only by its
+    # own pipeline). Two sources, one judge: neither may delete the other's files.
     for stale in _FIXTURES_DIR.glob("*.json"):
         if stale.name in _NON_VECTOR_FIXTURES:
+            continue
+        if stale.name.startswith(RECORDED_FIXTURE_PREFIX):
             continue
         stale.unlink()
     for fx in fixtures:

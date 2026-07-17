@@ -106,6 +106,9 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         elif method == "debateSteer":
             await self._on_debate_steer(request_id, params)
         elif method == "shutdown":
+            from agentcore.demo_tape.recorder import uninstall_recorder
+
+            uninstall_recorder()
             self.shutdown_requested.set()
             await self._reply(request_id, {"ok": True})
         else:

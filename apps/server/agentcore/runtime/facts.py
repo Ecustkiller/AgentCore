@@ -340,23 +340,29 @@ class TurnPausedFact:
     run_processes: dict[str, list[dict[str, Any]]] | None = None
     citations: list[dict[str, Any]] | None = None
     controller: dict[str, Any] | None = None
+    # Optional adjuncts that ride the same fact (e.g. demo-tape frame cursor).
+    # Unknown to live faces; readers tolerate absence.
+    extras: dict[str, Any] | None = None
     kind: ClassVar[FactKind] = FactKind.TURN_PAUSED
 
     def to_fact(self, ts: str | None = None) -> Fact:
+        payload: dict[str, Any] = {
+            "checkpoint_id": self.checkpoint_id,
+            "suspension_kind": self.suspension_kind,
+            "content": self.content,
+            "reasoning": self.reasoning,
+            "process": list(self.process) if self.process else [],
+            "run_processes": {
+                rid: list(steps) for rid, steps in (self.run_processes or {}).items()
+            },
+            "citations": list(self.citations) if self.citations else [],
+            "controller": dict(self.controller) if self.controller else {},
+        }
+        if self.extras:
+            payload["extras"] = dict(self.extras)
         return Fact(
             kind=self.kind.value,
-            payload={
-                "checkpoint_id": self.checkpoint_id,
-                "suspension_kind": self.suspension_kind,
-                "content": self.content,
-                "reasoning": self.reasoning,
-                "process": list(self.process) if self.process else [],
-                "run_processes": {
-                    rid: list(steps) for rid, steps in (self.run_processes or {}).items()
-                },
-                "citations": list(self.citations) if self.citations else [],
-                "controller": dict(self.controller) if self.controller else {},
-            },
+            payload=payload,
             ts=ts,
         )
 
@@ -367,6 +373,7 @@ class TurnPausedFact:
         run_processes = payload.get("run_processes")
         citations = payload.get("citations")
         controller = payload.get("controller")
+        extras = payload.get("extras")
         return cls(
             checkpoint_id=str(payload.get("checkpoint_id") or ""),
             suspension_kind=str(payload.get("suspension_kind") or ""),
@@ -380,6 +387,7 @@ class TurnPausedFact:
             ),
             citations=list(citations) if isinstance(citations, list) else [],
             controller=dict(controller) if isinstance(controller, dict) else {},
+            extras=dict(extras) if isinstance(extras, dict) else None,
         )
 
 
@@ -486,12 +494,13 @@ def snapshot_fact_log(
     is saved (in the registry's ``on_suspended``), so it is not yet in the log; the face
     passes it as ``trailing`` so the persisted stream still carries the card for the
     reload display (parity with the display ``journal`` the face also builds). Returns a
-    fresh list; ``[]`` when no log is bound (a degraded / un-wired pause → the face falls
-    back to its display ``journal``).
+    fresh list. When no log is bound, returns ``trailing`` alone (or ``[]``) so capture
+    callers that only need the pause-trailing facts (e.g. event-source replay) still
+    persist a resumable ``turn_paused``.
     """
     log = current_fact_log.get()
     if log is None:
-        return []
+        return list(trailing) if trailing else []
     entries = log.entries()
     if trailing:
         entries.extend(trailing)

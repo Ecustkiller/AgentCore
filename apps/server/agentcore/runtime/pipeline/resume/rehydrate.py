@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agentcore.core.logging import get_logger
-from agentcore.runtime.events import EventSink
+from agentcore.runtime.events import EventSink, message_start
 from agentcore.runtime.facts import TurnPausedFact, pre_pause_from_journal
 from agentcore.runtime.journal.entries import _PROCESS_PREFIX, _RUN_PROCESS_PREFIX
 from agentcore.runtime.loop_controller import LoopController
@@ -111,6 +111,31 @@ def rehydrate_from_turn_paused(
         from_turn_paused=True,
         fact=fact,
     )
+
+
+def bootstrap_resume_display(
+    *,
+    sink: EventSink,
+    suspension: TurnSuspension,
+    conversation_id: str | None = None,
+) -> RehydratedTurnState:
+    """Shared resume display open: ``message_start`` + journal seed + turn_paused rehydrate.
+
+    Live ``resume_chat_pipeline`` and demo-tape continue both call this so display
+    continuity (process lanes, citations, pre_pause) cannot drift between paths.
+    G6 reinjection is armed separately via :func:`arm_content_reset_reinjection`
+    once the authoritative pre_pause string is known.
+    """
+    cid = conversation_id if conversation_id is not None else suspension.conversation_id
+    sink.emit(message_start(suspension.message_id, conversation_id=cid))
+    sink.seed_journal(suspension.journal)
+    return rehydrate_from_turn_paused(sink=sink, suspension=suspension)
+
+
+def arm_content_reset_reinjection(sink: EventSink, pre_pause: str) -> None:
+    """G6: after each ``content_reset``, display-only reinject ``pre_pause`` (+ joiner)."""
+    if pre_pause:
+        sink.set_content_reset_reinjection(pre_pause + "\n\n")
 
 
 def batch_shape_for_settled_suspension(

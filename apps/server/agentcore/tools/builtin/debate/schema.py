@@ -7,6 +7,7 @@ from typing import Any
 from agentcore.runtime.debate import DebateForm, DebateSide
 from agentcore.runtime.debate.constants import (
     CLOSING_LENGTH_HINT,
+    CX_LENGTH_HINT,
     DEBATE_OUTPUT_LIMIT,
     DEBATER_TOOLS,
     FORM_LABELS,
@@ -20,6 +21,7 @@ __all__ = [
     "DEBATER_TOOLS",
     "LENGTH_HINT",
     "CLOSING_LENGTH_HINT",
+    "CX_LENGTH_HINT",
     "QUICK_DEBATER_HINT",
     "FORM_LABELS",
     "DEBATE_DESCRIPTION",
@@ -37,7 +39,8 @@ DEBATE_DESCRIPTION = (
     "三形态：debate=正反辩论（选 A 还是 B / 该不该做 X）；red_team=红队挑刺（压力测试某个方案，"
     "把被审方案那一方标 is_subject）；roundtable=多方圆桌（学懂一个有争议话题的观点光谱）。\n"
     "你只需定【参与方与立场】：传 motion（命题）+ form（形态）+ sides（各方，≥2；圆桌建议 ≥3）；"
-    "具体案件 / 真实事件类命题建议另传 background（已核实客观事实清单，见参数说明），避免各方重复检索底料。"
+    "具体案件 / 真实事件类命题建议另传 background（已核实客观事实清单：每条须附来源与日期，"
+    "未决/推断状态不得写成既定事实，见参数说明），避免各方重复检索底料。"
     "轮数与收敛由主持人自调，你和用户都不设轮数。简单事实问答 / 无对立面的任务不要用本工具。"
 )
 
@@ -112,11 +115,14 @@ DEBATE_PARAMETERS = {
         "background": {
             "type": "string",
             "description": (
-                "（可选）赛前底料：具体案件 / 真实事件 / 有客观事实基础的命题，建议开辩前先快速检索"
-                " 3–5 条已核实客观事实（时间线、金额、案号、程序节点等非观点信息，尽量带出处）传入——"
-                "首轮由主持人以「双方共享底料」名义喂全部辩手，避免各方重复检索同一批基础事实。"
-                "只放客观事实，不放观点 / 评价 / 立场分析。纯价值观或开放式命题不必传；"
-                "不传则辩手自行取证。"
+                "（可选）赛前底料：具体案件 / 真实事件 / 有客观事实基础的命题，开辩前先检索"
+                " 3–5 条【已核实客观事实】传入。每条须同时具备：(1) 客观事实陈述；"
+                "(2)【来源】（文书文号 / 官网 URL / 权威报道标题等）；(3)【日期】（事实发生或文书日期）。"
+                "格式示例：「2024-06-12 · 一审判决驳回诉讼请求【来源：某中院（2023）×民终××号判决书】」。"
+                "【硬化禁令】未决 / 推断 / 当事人单方陈述不得写成既定事实——"
+                "如仅有「被告表示将上诉」不得写成「案件处于二审阶段」；程序节点以已发生文书/公告为准。"
+                "只放客观事实，不放观点 / 评价 / 立场分析。首轮由主持人以「双方共享底料」名义喂全部辩手。"
+                "纯价值观或开放式命题不必传；不传则辩手自行取证。"
             ),
         },
     },

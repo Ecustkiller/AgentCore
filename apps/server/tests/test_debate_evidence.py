@@ -30,6 +30,7 @@ from agentcore.runtime.debate.moderator import (
     _CROSS_EXAM_SYSTEM,
 )
 from agentcore.runtime.debate.moderator_brief import _as_handoffs
+from agentcore.runtime.debate.constants import CX_LENGTH_HINT
 from agentcore.runtime.debate.prompt import (
     ARGUMENT_SKELETON_RULE,
     EVIDENCE_NOTES_SPEC,
@@ -46,6 +47,7 @@ from agentcore.runtime.debate.prompt import (
     round_feedback,
     side_system,
 )
+from agentcore.tools.builtin.debate.schema import DEBATE_DESCRIPTION, DEBATE_PARAMETERS
 
 # --- 共用夹具 ---------------------------------------------------------------
 
@@ -57,12 +59,13 @@ def _two_sides() -> list[DebateSide]:
     ]
 
 
-def _config(*, thorough: bool = True) -> DebateConfig:
+def _config(*, thorough: bool = True, background: str = "") -> DebateConfig:
     return DebateConfig(
         motion="该不该做 X",
         form=DebateForm.DEBATE,
         sides=_two_sides(),
         policy=RoundPolicy(thorough=thorough, max_rounds=5),
+        background=background,
     )
 
 
@@ -272,30 +275,36 @@ def test_judge_prompt_still_penalizes_unsupported_when_passed_off_as_fact():
 # 命中率本身留真模型/eval，这里只断言约束是否注入（可无 LLM）。
 
 
-def _brief_user_prompt() -> str:
+def _brief_user_prompt(*, background: str = "") -> str:
     """跑一次 _brief 并取回喂给 LLM 的 user prompt（假 provider 回 {} 触发降级、但请求已被捕获）。"""
     llm = _CaptureLLM()
     mod = Moderator(provider=llm, model="m")
-    asyncio.run(mod._brief(_config(), [_last_round()]))
+    asyncio.run(mod._brief(_config(background=background), [_last_round()]))
     return llm.requests[-1].messages[-1].content
 
 
 def test_judge_prompt_grades_evidence_by_source_tier():
-    """裁判 evidence 记分对【已核实】再分来源等级：一手/权威 = 强、决定性事实仅单一二手 = 封顶打低。"""
+    """裁判 evidence 记分按来源等级挂钩：司法文书/官方原文 > 权威媒体 > 自媒体/百科/转述。"""
     llm = _CaptureLLM()
     mod = Moderator(provider=llm, model="m")
     asyncio.run(mod._judge_and_summarize(_config(), "成本是否可控", _turns(), []))
     user = llm.requests[-1].messages[-1].content
     assert "来源等级" in user
-    assert "一手" in user and "二手来源" in user
-    assert "决定性事实" in user  # 决定性事实靠单一二手来源要封顶
-    assert "封顶打低" in user or "多源交叉印证" in user
+    assert "司法文书" in user and "官方原文" in user
+    assert "权威媒体" in user
+    assert "自媒体" in user and "百科" in user and "转述" in user
+    assert "封顶打低" in user
+    # 【已核实】挂弱源须在 note/penalties 点名。
+    assert "弱源" in user and ("note" in user or "penalties" in user)
 
 
 def test_assess_system_carries_source_tier():
-    """裁判系统提示带上来源等级维度（口径与 user 细则一致，别只在 user 单侧交代）。"""
+    """裁判系统提示锚定来源等级阶梯（口径与 user 细则一致，别只在 user 单侧交代）。"""
     assert "来源等级" in _ASSESS_SYSTEM
-    assert "二手来源" in _ASSESS_SYSTEM
+    assert "司法文书" in _ASSESS_SYSTEM and "官方原文" in _ASSESS_SYSTEM
+    assert "权威媒体" in _ASSESS_SYSTEM
+    assert "自媒体" in _ASSESS_SYSTEM and "百科" in _ASSESS_SYSTEM
+    assert "弱源" in _ASSESS_SYSTEM
 
 
 def test_brief_prompt_inherits_evidence_status_into_conclusion():
@@ -307,6 +316,19 @@ def test_brief_prompt_inherits_evidence_status_into_conclusion():
     # 要么显式降级、要么移进交接清单（factual_disputes / open_questions；别在收尾抹平）。
     assert "factual_disputes" in user and "open_questions" in user
     assert "交接清单" in user or "value_disputes" in user
+
+
+def test_brief_prompt_includes_background_and_handoff_reconcile():
+    """简报生成输入携带底料原文，并约束 handoffs 事实项与底料逐条对账。"""
+    bg = (
+        "9. 2024-03-01 · 被告表示将上诉【来源：庭后记者会纪要】"
+        "——不得据此写成「已进入二审」。"
+    )
+    user = _brief_user_prompt(background=bg)
+    assert "赛前底料" in user
+    assert bg in user
+    assert "逐条对账" in user
+    assert "未涉及" in user  # 禁止声称底料未涉及已覆盖项
 
 
 def test_brief_prompt_keeps_reversal_condition_after_grounding_insert():
@@ -398,3 +420,28 @@ def test_ceo_output_renders_handoffs_by_kind():
     assert "事实分歧" in out and "真实成本【待核实】" in out
     assert "待解问题" in out and "明年监管会不会收紧？" in out
     assert "仅剩需你拍板的点" not in out
+
+
+def test_cx_draft_brief_carries_output_budget():
+    """质询成稿 brief 注入明确输出预算（逐条写完、禁冒号悬垂截断）。"""
+    brief = cx_draft_brief(_config(), _two_sides()[0], 1, "成本", ["出处？", "口径？"])
+    assert CX_LENGTH_HINT in brief
+    assert "逐条写完" in brief
+    assert "冒号" in brief or "截断" in brief
+
+
+def test_background_schema_requires_source_date_and_bans_inference_as_fact():
+    """debate 工具 background：schema/描述硬化——每条须附来源与日期，未决不得写成既定事实。"""
+    bg_desc = DEBATE_PARAMETERS["properties"]["background"]["description"]
+    assert "来源" in bg_desc and "日期" in bg_desc
+    assert "二审" in bg_desc  # 反例：表示将上诉 ≠ 已进入二审
+    assert "未决" in bg_desc or "推断" in bg_desc
+    assert "来源与日期" in DEBATE_DESCRIPTION or "来源与日期" in bg_desc
+
+
+def test_background_block_prompt_bans_rewriting_pending_as_fact():
+    """辩手底料块：未决/推断状态不得改写成既定事实。"""
+    cfg = _config(background="- 2024-01-01 · 被告表示将上诉【来源：声明】")
+    task = debater_task(cfg, _two_sides()[0], 0, round_no=1, focus="风险")["task"]
+    assert "未决" in task or "推断" in task
+    assert "既定事实" in task

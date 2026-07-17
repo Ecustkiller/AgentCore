@@ -1,6 +1,6 @@
 /**
  * /preview/universe 无头截图自检：逐章节（?s=0..6&snap=1）各截一张。
- * 复用 apps/capture 已安装的 playwright；WebGL 走 SwiftShader 软渲染。
+ * 复用 apps/desktop 已安装的 playwright；WebGL 走 SwiftShader 软渲染。
  *
  *   node scripts/shot-universe.mjs                 # 默认连 http://localhost:3213
  *   PREVIEW_PORT=3000 node scripts/shot-universe.mjs

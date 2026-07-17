@@ -170,6 +170,14 @@ async def lifespan(app: FastAPI):
     if settings.memory_consolidation_enabled:
         consolidation_task = asyncio.create_task(consolidation_loop())
 
+    # Dev-only demo-tape recorder (录制层): tap every live turn's SSE stream into
+    # demos/recordings/ so a satisfying run can be exported as a tape verbatim.
+    # No-op unless DEMO_TAPE_RECORD_ENABLED; never enabled in production.
+    if settings.demo_tape_record_enabled:
+        from agentcore.demo_tape.recorder import install_recorder
+
+        install_recorder()
+
     # Dev-experience: log SearXNG ✓/✗ at boot so a not-started search dependency is
     # visible immediately instead of only surfacing mid-run as a breaker message. The
     # probe also runs a one-shot real-search canary when reachable, so a healthz-200-but-
@@ -254,6 +262,10 @@ async def lifespan(app: FastAPI):
         await shutdown_compaction()
         # Release the shared SearXNG keep-alive pool.
         await aclose_search_backend()
+        if settings.demo_tape_record_enabled:
+            from agentcore.demo_tape.recorder import uninstall_recorder
+
+            uninstall_recorder()
 
 
 app = FastAPI(

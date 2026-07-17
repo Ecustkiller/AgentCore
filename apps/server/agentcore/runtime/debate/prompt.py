@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import Any, Literal
 
@@ -14,11 +15,14 @@ from agentcore.runtime.debate import (
 )
 from agentcore.runtime.debate.constants import (
     CLOSING_LENGTH_HINT,
+    CX_LENGTH_HINT,
     DEBATER_TOOLS,
     FORM_LABELS,
     LENGTH_HINT,
     QUICK_DEBATER_HINT,
 )
+from agentcore.runtime.debate.evidence_guard import extract_verified_tags
+from agentcore.runtime.debate.speech_parse import parse_speech_arguments
 from agentcore.runtime.runs.types import ContextBlock
 
 # 后续轮把【对手上一轮发言】喂回本辩手时，每份的头尾截断上限。多方圆桌每轮要塞 N-1 份对手
@@ -28,6 +32,17 @@ _OPP_CLIP = 1500
 # 首轮案件底料（config.background）进 debater_task 前的封顶：CEO 可能塞入长调研笔记，
 # 不裁会撑爆首轮 prompt；头尾保留与对手发言裁剪同思路。
 _BG_CLIP = 2000
+# 结辩 brief 材料裁剪：单条论点要点 / 让步摘要封顶；历轮论点总预算另设硬顶（与 _OPP/_BG 同思路）。
+_CLOSING_POINT_CLIP = 400
+_CLOSING_ARGS_TOTAL = 2000
+_CLOSING_ARGS_MAX = 8
+_CLOSING_CONCESSION_CLIP = 280
+_CLOSING_CONCESSIONS_MAX = 6
+
+# 质询作答里识别「让步 / 承认」的轻量启发式（防结辩翻供；非裁判语义判定）。
+_CONCESSION_HINT_RE = re.compile(
+    r"(让步|承认|坦承|部分成立|确实|无法否认|同意|认输|证据不足|拿不出|无法核实|不成立)"
+)
 
 BeatKind = Literal["opening", "continue", "cross_exam", "closing"]
 
@@ -49,9 +64,11 @@ def _background_block(config: DebateConfig) -> str:
     clipped = _clip(bg, _BG_CLIP)
     return (
         "\n\n【主持人整理的案件底料·双方共享】\n"
-        "以下为开场前已核实的客观事实清单（非观点、非评价）。引用其中事实时，【沿用清单中的出处"
-        "标记】——不得把本底料本身包装成新的【已核实】来源。支持你立场的证据与论证仍需独立检索"
-        f"取证。\n{clipped}\n"
+        "以下为开场前已核实的客观事实清单（非观点、非评价；每条应带来源与日期）。"
+        "引用其中事实时，【沿用清单中的出处标记】——不得把本底料本身包装成新的【已核实】来源；"
+        "清单未写明为既定事实的未决 / 推断状态（如「表示将上诉」≠「已进入二审」）不得改写成既定事实。"
+        "支持你立场的证据与论证仍需独立检索取证。\n"
+        f"{clipped}\n"
     )
 
 
@@ -241,6 +258,8 @@ def debater_task(
         "group": f"debate:{config.form.value}",
         "round": round_no,
         "research_then_draft": True,
+        # A2 出处软校验：开场立论成稿的【已核实·X】须与检索语料（笔记/工具取证/底料）对应。
+        "source_grounding_check": True,
         "draft_brief": opening_draft_brief(
             config, side, focus=focus, interjections=interjections
         ),
@@ -420,9 +439,32 @@ def cx_draft_brief(
         "- 每条先用「是 / 否 / 部分成立」明确表态，再用具体证据或推理支撑；\n"
         "- 凡涉及具体事实的前提都按【证据状态铁律】标注【已核实·出处】/【待核实·推断】，"
         "拿不出出处就诚实标【待核实·推断】、别含糊带过或硬拗成已核实；\n"
-        "- 若该认输 / 让步就坦诚承认，别答非所问、打太极或复述已说过的立论来回避\n\n"
+        "- 若该认输 / 让步就坦诚承认，别答非所问、打太极或复述已说过的立论来回避；\n"
+        f"- {CX_LENGTH_HINT}\n\n"
         f"质询列表（共 {n} 条）：\n{numbered}"
     )
+
+
+def cx_completion_feedback(questions: Sequence[str], prior_answer: str) -> str:
+    """质询作答悬垂时的【一次补全】feedback（禁再检索，只续写收束）。"""
+    n = len(questions)
+    numbered = "\n".join(f"{i}. {q}" for i, q in enumerate(questions, start=1))
+    tail = (prior_answer or "").rstrip()
+    tail_preview = tail[-240:] if len(tail) > 240 else tail
+    return (
+        f"## 质询作答补全（共 {n} 条须全部写完）\n"
+        "你上一轮质询作答在句末【悬垂截断】（停在冒号 / 未闭合列表 /「理由是」等引导语后）。"
+        "请从截断处【续写补全】，把未写完的那一条（及若有尚未作答的后续条目）写到完整句子收束；"
+        "保留已有 ``### 质询…`` 标题体，不要寒暄、不要重复已写完的完整条目、不要新开检索。\n\n"
+        f"质询列表（共 {n} 条）：\n{numbered}\n\n"
+        f"截断处原文尾部：\n…{tail_preview}"
+    )
+
+
+def cx_completion_brief(questions: Sequence[str], prior_answer: str) -> str:
+    """质询作答悬垂时的成稿 brief（与 :func:`cx_completion_feedback` 同情境）。"""
+    return cx_completion_feedback(questions, prior_answer)
+
 
 
 def round_context_blocks(
@@ -504,32 +546,188 @@ def cx_context_blocks(
 _CLOSING_CONTEXT_BODY = "本场辩论已充分交锋，现请做结辩陈词。"
 
 
-def closing_task(config: DebateConfig, side: DebateSide) -> str:
-    """结辩成稿 brief（结辩禁新论据 → 退化为单次成稿，无检索阶段）。"""
+def closing_verified_whitelist(
+    rounds: Sequence[RoundResult], side: DebateSide
+) -> frozenset[str]:
+    """结辩【已核实】白名单：本方历轮发言 + 质询作答中出现过的标签集合。
+
+    与 brief 材料同源（不引入外部证据台账）：校验基准即本场已说过的标签。
+    """
+    tags: set[str] = set()
+    for rr in rounds:
+        for turn in rr.ok_turns:
+            if turn.side_key == side.key:
+                tags |= extract_verified_tags(turn.content)
+        for cx in rr.cross_exam:
+            if cx.target != side.key:
+                continue
+            for qa in cx.exchanges:
+                tags |= extract_verified_tags(qa.answer)
+    return frozenset(tags)
+
+
+def _closing_own_argument_lines(
+    rounds: Sequence[RoundResult], side: DebateSide
+) -> str:
+    """本方历轮论点（标题 + 要点），裁剪封顶；无有效论点时返回空串。"""
+    lines: list[str] = []
+    total = 0
+    for rr in rounds:
+        turn = next((t for t in rr.ok_turns if t.side_key == side.key), None)
+        if turn is None:
+            continue
+        args = list(turn.arguments or [])
+        if not args and turn.content.strip():
+            args = [a.to_payload() for a in parse_speech_arguments(turn.content)]
+        for arg in args:
+            if len(lines) >= _CLOSING_ARGS_MAX:
+                break
+            title = (arg.get("title") or "").strip() or "（无标题）"
+            body = _clip((arg.get("body") or "").strip(), _CLOSING_POINT_CLIP)
+            if not body:
+                continue
+            line = f"- 【第{rr.round_no}轮】{title}：{body}"
+            if total + len(line) > _CLOSING_ARGS_TOTAL and lines:
+                break
+            lines.append(line)
+            total += len(line)
+        if len(lines) >= _CLOSING_ARGS_MAX or total >= _CLOSING_ARGS_TOTAL:
+            break
+    return "\n".join(lines)
+
+
+def _closing_concession_lines(
+    rounds: Sequence[RoundResult], side: DebateSide
+) -> str:
+    """本方质询作答中带让步迹象的问答摘要；无则空串。"""
+    lines: list[str] = []
+    for rr in rounds:
+        for cx in rr.cross_exam:
+            if cx.target != side.key:
+                continue
+            for qa in cx.exchanges:
+                answer = (qa.answer or "").strip()
+                if not answer or not _CONCESSION_HINT_RE.search(answer):
+                    continue
+                q = _clip((qa.question or "").strip(), _CLOSING_CONCESSION_CLIP)
+                a = _clip(answer, _CLOSING_CONCESSION_CLIP)
+                lines.append(f"- 问：{q}\n  答（含让步）：{a}")
+                if len(lines) >= _CLOSING_CONCESSIONS_MAX:
+                    return "\n".join(lines)
+    return "\n".join(lines)
+
+
+def _closing_clash_lines(
+    config: DebateConfig, side: DebateSide, rounds: Sequence[RoundResult]
+) -> str:
+    """对方对本方的 clash 命门（跨轮汇总）；无则空串。与续轮 challenge 同源渲染。"""
+    names = {s.key: s.name for s in config.sides}
+    lines: list[str] = []
+    seen: set[str] = set()
+    for rr in rounds:
+        for c in rr.verdict.clashes:
+            if c.to_key != side.key:
+                continue
+            point = (c.point or "").strip()
+            if not point:
+                continue
+            key = f"{c.from_key}:{point}"
+            if key in seen:
+                continue
+            seen.add(key)
+            lines.append(f"- {names.get(c.from_key, c.from_key)}：{point}")
+    return "\n".join(lines)
+
+
+def _closing_materials(
+    config: DebateConfig, side: DebateSide, rounds: Sequence[RoundResult]
+) -> tuple[str, str, str]:
+    """结辩三类材料正文（论点 / 让步 / 命门），供 brief 与展示投影同源读取。"""
+    return (
+        _closing_own_argument_lines(rounds, side),
+        _closing_concession_lines(rounds, side),
+        _closing_clash_lines(config, side, rounds),
+    )
+
+
+def closing_task(
+    config: DebateConfig,
+    side: DebateSide,
+    rounds: Sequence[RoundResult] = (),
+) -> str:
+    """结辩成稿 brief（结辩禁新论据 → 退化为单次成稿，无检索阶段）。
+
+    与 :func:`round_draft_brief` 同构：指令 + 本场材料（本方历轮论点 / 质询让步 /
+    对方对本方 clash）。成稿走干净上下文，材料只经本 brief 携带，不读 session transcript。
+    """
+    own_args, concessions, clashes = _closing_materials(config, side, rounds)
+    material_parts: list[str] = []
+    if own_args:
+        material_parts.append(f"【本方历轮论点（标题+要点，结辩只准收束这些）】\n{own_args}")
+    if concessions:
+        material_parts.append(
+            f"【本方在交叉质询中做过的关键让步（结辩不得翻供）】\n{concessions}"
+        )
+    if clashes:
+        material_parts.append(f"【对方对本方的交锋命门（须正面收束）】\n{clashes}")
+    materials = ("\n\n".join(material_parts) + "\n\n") if material_parts else ""
     return (
         f"## 结辩环节（本场辩论已充分交锋，现在请你做【结辩陈词】）\n"
         f"{role_directive(config, side)}\n\n"
+        f"{materials}"
         "这是你的**最后陈词**，不是新一轮立论——请【只讲胜负手】：\n"
         "- 你这一方最强的 1–2 个论点，为何它们站得住；\n"
         "- 对方针对你最关键的那条反驳，为何【不成立 / 已被你回应】。\n"
         "【不得引入任何新论据 / 新事实 / 新案例】、不复述你之前的全文、不逐条罗列改动；"
-        "结辩里引用的既有事实沿用你此前的证据状态标记（不把待核实的东西临门包装成已核实当胜负手）。"
+        "结辩里引用的既有事实沿用你此前的证据状态标记（不把待核实的东西临门包装成已核实当胜负手）；"
+        "【已核实·出处】只能使用上方材料 / 本场已出现过的标签，禁止临门新造核实标签。"
         f"{CLOSING_LENGTH_HINT}\n\n"
         "直接输出你的结辩陈词。"
     )
 
 
 def closing_context_blocks(
-    config: DebateConfig, side: DebateSide, feedback: str
+    config: DebateConfig,
+    side: DebateSide,
+    feedback: str,
+    rounds: Sequence[RoundResult] = (),
 ) -> list[ContextBlock]:
     """结辩环节 continue_run 的【收到的上下文】展示投影（上下文传递可视化）。
 
-    首块 ``channel=task`` 的 ``body`` **逐字复用** :func:`closing_task` 返回值，``heading`` 为
-    「结辩环节」。其后保留 ``closing`` 通道块（前端靠通道 presence 判 beat / chip），body 仅为
-    纯环节标记短句（:data:`_CLOSING_CONTEXT_BODY`），不再复述指令内容。结辩不再喂对手全文
-    （辩手全程记忆已在 session 里）。"""
-    _ = (config, side)  # 角色差异已由 role_directive 进 feedback；通道标记各方一致。
-    return [
+    首块 ``channel=task`` 的 ``body`` **逐字复用** :func:`closing_task` 返回值（投喂==展示）。
+    其后保留 ``closing`` 通道块作 beat 标记；材料孪生块与 brief 同源（论点 / 让步 / 命门），
+    复用既有 ``history`` / ``cross_exam`` / ``challenge`` 通道（不新增 wire channel）。
+    """
+    own_args, concessions, clashes = _closing_materials(config, side, rounds)
+    blocks: list[ContextBlock] = [
         ContextBlock(channel="task", heading="结辩环节", body=feedback),
         ContextBlock(channel="closing", heading="结辩环节", body=_CLOSING_CONTEXT_BODY),
     ]
+    if own_args:
+        over = len(own_args) >= _CLOSING_ARGS_TOTAL
+        blocks.append(
+            ContextBlock(
+                channel="history",
+                heading="本方历轮论点",
+                body=own_args,
+                fidelity="summarize" if over else "",
+                truncated=over,
+            )
+        )
+    if concessions:
+        blocks.append(
+            ContextBlock(
+                channel="cross_exam",
+                heading="本方质询让步（结辩不得翻供）",
+                body=concessions,
+            )
+        )
+    if clashes:
+        blocks.append(
+            ContextBlock(
+                channel="challenge",
+                heading="对方对本方的交锋命门",
+                body=clashes,
+            )
+        )
+    return blocks

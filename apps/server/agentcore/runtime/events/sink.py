@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import copy
+from collections.abc import Callable
 from typing import Any
 
 from agentcore.core.logging import get_logger
@@ -33,6 +34,27 @@ from agentcore.runtime.facts import Fact, record_turn_fact
 ORCHESTRATION_TOOLS = frozenset({"delegate", "debate"})
 
 logger = get_logger(__name__)
+
+# Dev-only observation seam (demo-tape recorder): installed by
+# ``agentcore.demo_tape.recorder`` under DEMO_TAPE_RECORD_ENABLED, None otherwise.
+# Called for every emitted event AFTER normal processing — purely observational;
+# a tap failure is logged and never breaks the turn. Not a product contract.
+_emit_tap: Callable[[EventSink, SSEEvent], None] | None = None
+
+
+def set_emit_tap(tap: Callable[[EventSink, SSEEvent], None] | None) -> None:
+    """Install / clear the process-wide emit tap (dev-only, e.g. tape recording)."""
+    global _emit_tap
+    _emit_tap = tap
+
+
+def _run_emit_tap(sink: EventSink, event: SSEEvent) -> None:
+    if _emit_tap is None:
+        return
+    try:
+        _emit_tap(sink, event)
+    except Exception as e:  # noqa: BLE001 — observation must never break the turn
+        logger.warning("event_tap.failed", error=str(e))
 
 
 def _step_has_marker(steps: list[dict[str, Any]], kind: str, key: str, value: str) -> bool:
@@ -204,6 +226,16 @@ class EventSink:
         """
         self._content_reset_reinjection = text
 
+    @property
+    def conversation_id(self) -> str | None:
+        """The bound conversation id (None until bind_content_checkpoint / ctor set it)."""
+        return self._conversation_id
+
+    @property
+    def message_id(self) -> str | None:
+        """The bound turn/message id (None until bind_content_checkpoint / ctor set it)."""
+        return self._message_id
+
     def _emit_display_only(self, event: SSEEvent) -> None:
         """History + SSE only — skip process accumulation, journal, and checkpointer."""
         if self._closed:
@@ -212,6 +244,7 @@ class EventSink:
         if not self._detached:
             self._queue.put_nowait(event)
             self._persist_barriers.put_nowait(None)
+        _run_emit_tap(self, event)
 
     @staticmethod
     def _combine_persist_barriers(
@@ -279,6 +312,7 @@ class EventSink:
                 self._persist_barriers.put_nowait(
                     self._combine_persist_barriers([*process_futures, persist_future])
                 )
+            _run_emit_tap(self, event)
             # G6: reinject after content_reset is fully processed (history + SSE +
             # checkpointer already saw the reset). Display-only path skips process /
             # checkpointer so salvage and persist timelines stay unduplicated.

@@ -90,7 +90,8 @@
       "type": "run_output_reset",
       "payload": {
         "run_id": "r1",
-        "agent_id": "w1"
+        "agent_id": "w1",
+        "reason": "finish_guard"
       },
       "timestamp": "2026-01-01T00:00:00.007Z"
     },

@@ -369,6 +369,7 @@ def _inline_spec(
         objective=item.get("objective", "") or "",
         system_prompt_supplement=item.get("system_prompt_supplement") or None,
         research_then_draft=bool(item.get("research_then_draft")),
+        source_grounding_check=bool(item.get("source_grounding_check")),
         draft_brief=(
             item["draft_brief"].strip()
             if isinstance(item.get("draft_brief"), str)

@@ -4,6 +4,7 @@ import { enterTurnStreaming } from "@/stores/conversation/turnPhaseActions";
 import { useExecutionStore } from "@/stores/execution";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import type { SSEEvent } from "@/types/events";
+import { foldEventsFrom, type FoldReplaySource } from "./source";
 
 /**
  * Replay a recorded SSE event stream into a conversation slice so the real chat UI
@@ -11,7 +12,13 @@ import type { SSEEvent } from "@/types/events";
  * mirrors the production live path (`pumpSSE` → `dispatchSSEEvent`), so what shows
  * up is exactly what a real turn produces; the events are the same golden vectors
  * the conformance gate runs, so the preview can never drift from production.
+ *
+ * 消费端 A（FOLD）：经 `preview/source` 读超集文档；永不 remint；缺 pacing 忽略。
+ * 禁止与 B（服务端 sink）对同一会话双注入。
  */
+
+type FoldInput = FoldReplaySource | SSEEvent[];
+
 function seedSlice(conversationId: string, userPrompt?: string): void {
   const store = useConversationStore.getState();
   // Fresh slice each time so re-playing the same fixture starts clean.
@@ -48,9 +55,10 @@ function seedSlice(conversationId: string, userPrompt?: string): void {
 /** Replay the whole stream at once → the turn's terminal AI state. */
 export function replayFixtureNow(
   conversationId: string,
-  events: SSEEvent[],
+  input: FoldInput,
   userPrompt?: string,
 ): void {
+  const events = foldEventsFrom(input);
   seedSlice(conversationId, userPrompt);
   for (const event of events) {
     dispatchSSEEvent(event, { conversationId, source: "server" });
@@ -68,10 +76,11 @@ export function replayFixtureNow(
  */
 export function replayFixturePrefix(
   conversationId: string,
-  events: SSEEvent[],
+  input: FoldInput,
   count: number,
   userPrompt?: string,
 ): void {
+  const events = foldEventsFrom(input);
   seedSlice(conversationId, userPrompt);
   const n = Math.max(0, Math.min(count, events.length));
   for (let i = 0; i < n; i++) {
@@ -88,10 +97,11 @@ export function replayFixturePrefix(
  */
 export function replayFixtureStreamed(
   conversationId: string,
-  events: SSEEvent[],
+  input: FoldInput,
   userPrompt?: string,
   stepMs = 28,
 ): () => void {
+  const events = foldEventsFrom(input);
   seedSlice(conversationId, userPrompt);
   let cancelled = false;
   let timer: ReturnType<typeof setTimeout> | undefined;

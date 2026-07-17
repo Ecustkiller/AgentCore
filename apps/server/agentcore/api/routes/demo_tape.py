@@ -17,16 +17,24 @@ import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header
+from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.api.dependencies import AuthUser, get_db
 from agentcore.api.routes.conversations._helpers import (
+    _preflight_owned_chat_turn,
     _preflight_turn_llm,
     emit_preflight_warnings,
     release_request_db_before_sse,
 )
 from agentcore.api.schemas.demo_tape import (
     DemoTapeCatalogResponse,
+    DemoTapeDirectorChapter,
+    DemoTapeDirectorChaptersResponse,
+    DemoTapeDirectorSeekRequest,
+    DemoTapeDirectorSessionsResponse,
+    DemoTapeDirectorSpeedRequest,
+    DemoTapeDirectorStatus,
     DemoTapePrepareRequest,
     DemoTapePrepareResponse,
     DemoTapeStartRequest,
@@ -36,6 +44,7 @@ from agentcore.api.schemas.demo_tape import (
 from agentcore.conversation.service import stream_chat
 from agentcore.core.logging import get_logger
 from agentcore.db.repositories import CostEventRepository, MessageRepository
+from agentcore.demo_tape import director as director_ctl
 from agentcore.demo_tape.catalog import list_tapes
 from agentcore.demo_tape.launch import prepare_demo_tape_launch, require_replay_enabled
 from agentcore.runtime.events import EventSink
@@ -206,3 +215,116 @@ async def start_demo_tape(
         speed=prepared.speed,
         max_gap_ms=prepared.max_gap_ms,
     )
+
+
+# ── Director console (metronome control; same DEMO_TAPE_REPLAY_ENABLED gate) ─
+
+
+def _status_model(raw: dict) -> DemoTapeDirectorStatus:
+    return DemoTapeDirectorStatus(**raw)
+
+
+@router.get("/director", response_class=HTMLResponse, include_in_schema=False)
+async def director_console_page() -> HTMLResponse:
+    """Bare local control page for OBS second-screen directing (dev-only)."""
+    require_replay_enabled()
+    from agentcore.demo_tape.director_page import DIRECTOR_HTML
+
+    return HTMLResponse(DIRECTOR_HTML)
+
+
+@router.get("/director/sessions", response_model=DemoTapeDirectorSessionsResponse)
+async def director_list_sessions(_user: AuthUser) -> DemoTapeDirectorSessionsResponse:
+    require_replay_enabled()
+    sessions = [_status_model(s) for s in director_ctl.list_sessions()]
+    return DemoTapeDirectorSessionsResponse(sessions=sessions)
+
+
+@router.get(
+    "/director/{conversation_id}/status",
+    response_model=DemoTapeDirectorStatus,
+)
+async def director_status(
+    conversation_id: str, _user: AuthUser
+) -> DemoTapeDirectorStatus:
+    return _status_model(director_ctl.status_for_conversation(conversation_id))
+
+
+@router.get(
+    "/director/{conversation_id}/chapters",
+    response_model=DemoTapeDirectorChaptersResponse,
+)
+async def director_chapters(
+    conversation_id: str, _user: AuthUser
+) -> DemoTapeDirectorChaptersResponse:
+    chapters = [
+        DemoTapeDirectorChapter(
+            id=c.id, label=c.label, t_ms=c.t_ms, event_index=c.event_index
+        )
+        for c in director_ctl.chapters_for_conversation(conversation_id)
+    ]
+    return DemoTapeDirectorChaptersResponse(
+        conversation_id=conversation_id, chapters=chapters
+    )
+
+
+@router.post(
+    "/director/{conversation_id}/pause",
+    response_model=DemoTapeDirectorStatus,
+)
+async def director_pause(
+    conversation_id: str, _user: AuthUser
+) -> DemoTapeDirectorStatus:
+    return _status_model(director_ctl.pause(conversation_id))
+
+
+@router.post(
+    "/director/{conversation_id}/resume",
+    response_model=DemoTapeDirectorStatus,
+)
+async def director_resume(
+    conversation_id: str, _user: AuthUser
+) -> DemoTapeDirectorStatus:
+    return _status_model(director_ctl.resume_soft(conversation_id))
+
+
+@router.post(
+    "/director/{conversation_id}/speed",
+    response_model=DemoTapeDirectorStatus,
+)
+async def director_speed(
+    conversation_id: str,
+    body: DemoTapeDirectorSpeedRequest,
+    _user: AuthUser,
+) -> DemoTapeDirectorStatus:
+    return _status_model(director_ctl.set_speed(conversation_id, body.speed))
+
+
+@router.post(
+    "/director/{conversation_id}/seek",
+    response_model=DemoTapeDirectorStatus,
+)
+async def director_seek(
+    conversation_id: str,
+    body: DemoTapeDirectorSeekRequest,
+    user: AuthUser,
+    session: AsyncSession = Depends(get_db),
+) -> DemoTapeDirectorStatus:
+    # Seek may restart a turn or auto-resume team_preview — same LLM gate as send.
+    preflight = await _preflight_owned_chat_turn(conversation_id, user, session)
+    await release_request_db_before_sse(session)
+
+    def _setup(sink: EventSink) -> None:
+        emit_preflight_warnings(sink, preflight)
+
+    raw = await director_ctl.seek(
+        conversation_id=conversation_id,
+        user_id=user.user_id,
+        llm_credentials=preflight.credentials,
+        llm_supports_tools=preflight.supports_tools,
+        setup_sink=_setup,
+        t_ms=body.t_ms,
+        event_index=body.event_index,
+        chapter_id=body.chapter_id,
+    )
+    return _status_model(raw)

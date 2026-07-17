@@ -24,7 +24,7 @@ alwaysApply: false
 
 - 动任一端协议 fold → **必跑** `pnpm conformance`。
 - 后端改事件契约 / 投影 → 重导向量 + golden（单一源），两端对齐到红转绿。
-- 发现协议 bug → **先加一条复现向量**（棘轮），再修。
+- 发现协议 bug → **先加一条复现向量**（棘轮），再修。向量**两来源**：手写 builder（`agentcore/conformance/vectors/`）或从真实回合录制裁切（`agentcore/conformance/recording_cut.py`，产物 `recorded_*` 前缀）→ 见 [`前端技术 §12.2`](/docs/04-前端/前端技术与架构.md)。
 
 ## ProjectedTurn（规范化裁判态）
 

@@ -213,9 +213,10 @@ class CrossExamExchange:
 class ClosingStatement:
     """某方的【结辩陈词】（阶段化发言角色 P4 · 结辩收束，辩论编排设计.md §4-2.4 契约④）。
 
-    辩已辩尽（收敛 / 用户 conclude / 达上限）后、简报前，主持人请各方做一段收尾陈词：辩手在【自己的
-    transcript】上 ``continue_run`` 产出（带全程记忆），**只讲胜负手**（本方最强 1–2 点 + 为何对方最关键
-    的反驳不成立）、**不得引入新论据 / 新事实**、长度收紧（见 :data:`~agentcore.tools.builtin.debate.
+    辩已辩尽（收敛 / 用户 conclude / 达上限）后、简报前，主持人请各方做一段收尾陈词：辩手经
+    ``continue_run`` 走【干净成稿】（``allow_research=False``），brief 携带本场材料（历轮论点 /
+    质询让步 / clash 命门），**只讲胜负手**（本方最强 1–2 点 + 为何对方最关键的反驳不成立）、
+    **不得引入新论据 / 新事实**、长度收紧（见 :data:`~agentcore.tools.builtin.debate.
     schema.CLOSING_LENGTH_HINT`）。全文随 ``run_id`` 的 run 事件走（不塞 payload，与各方发言 / 质询作答
     同策），``ok`` 标记是否成功产出。收场后**一次性**发生（非逐轮），供前端「结辩」区渲染——这一层是
     辩手自己的 advocacy 收尾，与裁判中立的 ``brief.decisive`` 正交并存（真人辩论：结辩 + 裁决并存）。
@@ -653,12 +654,11 @@ class ClosingRunner(Protocol):
     """主持人「派一轮结辩陈词」的注入接口 —— 对称于 :class:`CrossExamRunner`（阶段化发言角色 P4）。
 
     辩论收场后（收敛 / 用户 conclude / 达上限）、简报前，主持人请各方做收尾陈词：真实实现（DebateTool）
-    让每个仍有 session 的方用 ``continue_run`` 在自己 transcript 上出一段结辩（带全程记忆，故只需给
-    「只讲胜负手、不引入新论据」的 feedback，见 :func:`closing_task`），返回各方 :class:`ClosingStatement`
-    （陈词全文进该方 run 事件）；单测注入 fake 零成本驱动。仅在【认真辩透 + 对抗形态】开启（快速对碰 /
-    圆桌跳过，见 :meth:`Moderator._closing_enabled`），故为**可选**注入——未注入 / 未开启时循环收场后
-    逐字回退到「直接出简报」，零行为变化。``rounds`` 是全部已完成轮（实现可据末轮焦点点题，当前实现
-    依赖辩手全程记忆、不额外注入）。
+    让每个仍有 session 的方用 ``continue_run`` 干净成稿一段结辩（brief = :func:`closing_task`，携带
+    ``rounds`` 材料 + 【已核实】标签闸），返回各方 :class:`ClosingStatement`（陈词全文进该方 run
+    事件）；单测注入 fake 零成本驱动。仅在【认真辩透 + 对抗形态】开启（快速对碰 / 圆桌跳过，见
+    :meth:`Moderator._closing_enabled`），故为**可选**注入——未注入 / 未开启时循环收场后逐字回退到
+    「直接出简报」，零行为变化。``rounds`` 是全部已完成轮（brief 材料与白名单的唯一来源）。
     """
 
     async def __call__(
